@@ -1,6 +1,8 @@
 #ifndef LIBRUSTZCASH_INCLUDE_H_
 #define LIBRUSTZCASH_INCLUDE_H_
 
+#include <stdint.h>
+
 extern "C" {
 	uint64_t librustzcash_xor(uint64_t a, uint64_t b);
 }
