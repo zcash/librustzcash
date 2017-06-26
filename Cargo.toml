@@ -2,7 +2,7 @@
 name = "ff"
 version = "0.1.0"
 authors = ["Sean Bowe <ewillbefull@gmail.com>"]
-description = "Procedural macro library used to build custom prime field implementations"
+description = "Library for building and interfacing with finite fields"
 documentation = "https://github.com/ebfull/ff"
 homepage = "https://github.com/ebfull/ff"
 license = "MIT/Apache-2.0"
