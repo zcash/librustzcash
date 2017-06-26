@@ -428,6 +428,89 @@ fn prime_field_impl(
         });
     }
 
+    fn sqr_impl(a: quote::Tokens, limbs: usize) -> quote::Tokens
+    {
+        let mut gen = quote::Tokens::new();
+
+        for i in 0..(limbs-1) {
+            gen.append(quote!{
+                let mut carry = 0;
+            });
+
+            for j in (i+1)..limbs {
+                let temp = get_temp(i + j);
+                if i == 0 {
+                    gen.append(quote!{
+                        let #temp = ::ff::mac_with_carry(0, (#a.0).0[#i], (#a.0).0[#j], &mut carry);
+                    });
+                } else {
+                    gen.append(quote!{
+                        let #temp = ::ff::mac_with_carry(#temp, (#a.0).0[#i], (#a.0).0[#j], &mut carry);
+                    });
+                }
+            }
+
+            let temp = get_temp(i + limbs);
+
+            gen.append(quote!{
+                let #temp = carry;
+            });
+        }
+
+        for i in 1..(limbs*2) {
+            let k = get_temp(i);
+
+            if i == 1 {
+                gen.append(quote!{
+                    let tmp0 = #k >> 63;
+                    let #k = #k << 1;
+                });
+            } else if i == (limbs*2 - 1) {
+                gen.append(quote!{
+                    let #k = tmp0;
+                });
+            } else {
+                gen.append(quote!{
+                    let tmp1 = #k >> 63;
+                    let #k = #k << 1;
+                    let #k = #k | tmp0;
+                    let tmp0 = tmp1;
+                });
+            }
+        }
+
+        gen.append(quote!{
+            let mut carry = 0;
+        });
+
+        for i in 0..limbs {
+            let temp0 = get_temp(i * 2);
+            let temp1 = get_temp(i * 2 + 1);
+            if i == 0 {
+                gen.append(quote!{
+                    let #temp0 = ::ff::mac_with_carry(0, (#a.0).0[#i], (#a.0).0[#i], &mut carry);
+                });
+            } else {
+                gen.append(quote!{
+                    let #temp0 = ::ff::mac_with_carry(#temp0, (#a.0).0[#i], (#a.0).0[#i], &mut carry);
+                });
+            }
+
+            gen.append(quote!{
+                let #temp1 = ::ff::adc(#temp1, 0, &mut carry);
+            });
+        }
+
+        let mut mont_calling = quote::Tokens::new();
+        mont_calling.append_separated((0..(limbs*2)).map(|i| get_temp(i)), ",");
+
+        gen.append(quote!{
+            self.mont_reduce(#mont_calling);
+        });
+
+        gen
+    }
+
     fn mul_impl(a: quote::Tokens, b: quote::Tokens, limbs: usize) -> quote::Tokens
     {
         let mut gen = quote::Tokens::new();
@@ -468,7 +551,7 @@ fn prime_field_impl(
         gen
     }
 
-    let squaring_impl = mul_impl(quote!{self}, quote!{self}, limbs);
+    let squaring_impl = sqr_impl(quote!{self}, limbs);
     let multiply_impl = mul_impl(quote!{self}, quote!{other}, limbs);
 
     let mut into_repr_params = quote::Tokens::new();
