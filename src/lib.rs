@@ -1,11 +1,12 @@
 #![feature(i128_type)]
+#![allow(unused_imports)]
 
 extern crate rand;
 
-//#[macro_use]
-//extern crate ff_derive;
+#[macro_use]
+extern crate ff_derive;
 
-//pub use ff_derive::*;
+pub use ff_derive::*;
 
 use std::fmt;
 
@@ -50,7 +51,8 @@ pub trait Field: Sized +
     /// Computes the multiplicative inverse of this element, if nonzero.
     fn inverse(&self) -> Option<Self>;
 
-    /// Exponentiates this element by a power of the modulus.
+    /// Exponentiates this element by a power of the base prime modulus via
+    /// the Frobenius automorphism.
     fn frobenius_map(&mut self, power: usize);
 
     /// Exponentiates this element by a number represented with `u64` limbs,
@@ -94,14 +96,14 @@ pub trait PrimeFieldRepr: Sized +
                           AsRef<[u64]> +
                           From<u64>
 {
-    /// Subtract another reprensetation from this one. Underflow is ignored.
-    fn sub_noborrow(&mut self, other: &Self);
+    /// Subtract another reprensetation from this one, returning the borrow bit.
+    fn sub_noborrow(&mut self, other: &Self) -> bool;
 
-    /// Add another representation to this one. Overflow is ignored.
-    fn add_nocarry(&mut self, other: &Self);
+    /// Add another representation to this one, returning the carry bit.
+    fn add_nocarry(&mut self, other: &Self) -> bool;
 
     /// Compute the number of bits needed to encode this number.
-    fn num_bits(&self) -> usize;
+    fn num_bits(&self) -> u32;
 
     /// Returns true iff this number is zero.
     fn is_zero(&self) -> bool;
@@ -122,7 +124,7 @@ pub trait PrimeFieldRepr: Sized +
 }
 
 /// This represents an element of a prime field.
-pub trait PrimeField: SqrtField
+pub trait PrimeField: Field
 {
     /// The prime field can be converted back and forth into this biginteger
     /// representation.
@@ -140,11 +142,11 @@ pub trait PrimeField: SqrtField
 
     /// Returns how many bits are needed to represent an element of this
     /// field.
-    fn num_bits() -> usize;
+    fn num_bits() -> u32;
 
     /// Returns how many bits of information can be reliably stored in the
     /// field element.
-    fn capacity() -> usize;
+    fn capacity() -> u32;
 }
 
 pub struct BitIterator<E> {
