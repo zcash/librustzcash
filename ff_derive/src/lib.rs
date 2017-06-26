@@ -503,9 +503,9 @@ fn prime_field_impl(
             }
         }
 
-        impl Rand for #name {
+        impl ::rand::Rand for #name {
             /// Computes a uniformly random element using rejection sampling.
-            fn rand<R: Rng>(rng: &mut R) -> Self {
+            fn rand<R: ::rand::Rng>(rng: &mut R) -> Self {
                 loop {
                     let mut tmp = #name(#repr::rand(rng));
                     for _ in 0..REPR_SHAVE_BITS {
