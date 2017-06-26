@@ -1,0 +1,8 @@
+[package]
+name = "ff"
+version = "0.1.0"
+authors = ["Sean Bowe <ewillbefull@gmail.com>"]
+
+[dependencies]
+rand = "0.3"
+ff_derive = { version = "0.1.0", path = "ff_derive" }
