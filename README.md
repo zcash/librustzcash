@@ -1,6 +1,6 @@
 # ff
 
-`ff` is a finite field library written in pure Rust, with no `unsafe{}` code. This library relies on Rust's `i128_type` feature, which is currently only available in the nightly compiler.
+`ff` is a finite field library written in pure Rust, with no `unsafe{}` code.
 
 ## Disclaimers
 
