@@ -49,7 +49,6 @@ pub fn prime_field(
     gen.append(prime_field_repr_impl(&repr_ident, limbs));
     gen.append(prime_field_constants_and_sqrt(&ast.ident, &repr_ident, modulus, limbs));
     gen.append(prime_field_impl(&ast.ident, &repr_ident, limbs));
-    //gen.append(prime_field_arith_impl(&ast.ident, &repr_ident, limbs));
     
     // Return the generated impl
     gen.parse().unwrap()
