@@ -20,7 +20,7 @@ The `ff` crate contains `Field`, `PrimeField`, `PrimeFieldRepr` and `SqrtField` 
 
 ### #![derive(PrimeField)]
 
-If you need an implementation of a prime field, this library also provides a procedural macro that will expand into an efficient implementation of a prime field when supplied with the modulus. It's very easy to use, after you've added it to your `Cargo.toml`.
+If you need an implementation of a prime field, this library also provides a procedural macro that will expand into an efficient implementation of a prime field when supplied with the modulus.
 
 ```rust
 extern crate rand;
