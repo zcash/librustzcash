@@ -20,7 +20,7 @@ The `ff` crate contains `Field`, `PrimeField`, `PrimeFieldRepr` and `SqrtField` 
 
 ### #![derive(PrimeField)]
 
-If you need an implementation of a prime field, this library also provides a procedural macro that will expand into an efficient implementation of a prime field when supplied with the modulus.
+If you need an implementation of a prime field, this library also provides a procedural macro that will expand into an efficient implementation of a prime field when supplied with the modulus. `PrimeFieldGenerator` must be an element of Fp of p-1 order, that is also quadratic nonresidue.
 
 ```rust
 extern crate rand;
@@ -28,7 +28,8 @@ extern crate rand;
 extern crate ff;
 
 #[derive(PrimeField)]
-#[PrimeFieldModulus = "57896044618658097711785492504343953926634992332820282019728792003956564819949"]
+#[PrimeFieldModulus = "52435875175126190479447740508185965837690552500527637822603658699938581184513"]
+#[PrimeFieldGenerator = "7"]
 struct Fp(FpRepr);
 ```
 
