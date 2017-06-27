@@ -1,6 +1,6 @@
 [package]
 name = "ff"
-version = "0.1.0"
+version = "0.2.0"
 authors = ["Sean Bowe <ewillbefull@gmail.com>"]
 description = "Library for building and interfacing with finite fields"
 documentation = "https://github.com/ebfull/ff"
@@ -10,4 +10,4 @@ repository = "https://github.com/ebfull/ff"
 
 [dependencies]
 rand = "0.3"
-ff_derive = { version = "0.1.0", path = "ff_derive" }
+ff_derive = { version = "0.2.0", path = "ff_derive" }

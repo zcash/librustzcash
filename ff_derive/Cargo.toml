@@ -1,6 +1,6 @@
 [package]
 name = "ff_derive"
-version = "0.1.0"
+version = "0.2.0"
 authors = ["Sean Bowe <ewillbefull@gmail.com>"]
 description = "Procedural macro library used to build custom prime field implementations"
 documentation = "https://github.com/ebfull/ff"
