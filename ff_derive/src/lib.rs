@@ -36,8 +36,9 @@ pub fn prime_field(
 
     // We may be provided with a generator of p - 1 order. It is required that this generator be quadratic
     // nonresidue.
-    let generator: Option<BigUint> = fetch_attr("PrimeFieldGenerator", &ast.attrs)
-                                     .map(|i| i.parse().expect("PrimeFieldGenerator must be a number."));
+    let generator: BigUint = fetch_attr("PrimeFieldGenerator", &ast.attrs)
+                             .expect("Please supply a PrimeFieldGenerator attribute")
+                             .parse().expect("PrimeFieldGenerator should be a number");
 
     // The arithmetic in this library only works if the modulus*2 is smaller than the backing
     // representation. Compute the number of limbs we need.
@@ -256,7 +257,8 @@ fn prime_field_repr_impl(
 }
 
 fn biguint_to_u64_vec(
-    mut v: BigUint
+    mut v: BigUint,
+    limbs: usize
 ) -> Vec<u64>
 {
     let m = BigUint::one() << 64;
@@ -265,6 +267,10 @@ fn biguint_to_u64_vec(
     while v > BigUint::zero() {
         ret.push((&v % &m).to_u64().unwrap());
         v = v >> 64;
+    }
+
+    while ret.len() < limbs {
+        ret.push(0);
     }
 
     ret
@@ -322,7 +328,7 @@ fn prime_field_constants_and_sqrt(
     repr: &syn::Ident,
     modulus: BigUint,
     limbs: usize,
-    generator: Option<BigUint>
+    generator: BigUint
 ) -> quote::Tokens
 {
     let modulus_num_bits = biguint_num_bits(modulus.clone());
@@ -332,19 +338,23 @@ fn prime_field_constants_and_sqrt(
     let r = (BigUint::one() << (limbs * 64)) % &modulus;
 
     // modulus - 1 = 2^s * t
-    let mut s = 0;
+    let mut s: usize = 0;
     let mut t = &modulus - BigUint::from_str("1").unwrap();
     while t.is_even() {
         t = t >> 1;
         s += 1;
     }
 
+    // Compute root of unity given the generator
+    let root_of_unity = biguint_to_u64_vec((exp(generator.clone(), &t, &modulus) * &r) % &modulus, limbs);
+    let generator = biguint_to_u64_vec((generator.clone() * &r) % &modulus, limbs);
+
     let sqrt_impl =
     if (&modulus % BigUint::from_str("4").unwrap()) == BigUint::from_str("3").unwrap() {
-        let mod_minus_3_over_4 = biguint_to_u64_vec((&modulus - BigUint::from_str("3").unwrap()) >> 2);
+        let mod_minus_3_over_4 = biguint_to_u64_vec((&modulus - BigUint::from_str("3").unwrap()) >> 2, limbs);
 
         // Compute -R as (m - r)
-        let rneg = biguint_to_u64_vec(&modulus - &r);
+        let rneg = biguint_to_u64_vec(&modulus - &r, limbs);
 
         quote!{
             impl ::ff::SqrtField for #name {
@@ -368,11 +378,9 @@ fn prime_field_constants_and_sqrt(
             }
         }
     } else if (&modulus % BigUint::from_str("16").unwrap()) == BigUint::from_str("1").unwrap() {
-        let mod_minus_1_over_2 = biguint_to_u64_vec((&modulus - BigUint::from_str("1").unwrap()) >> 1);
-        let generator = generator.expect("PrimeFieldGenerator attribute should be provided; should be a generator of order p - 1 and quadratic nonresidue.");
-        let root_of_unity = biguint_to_u64_vec((exp(generator.clone(), &t, &modulus) * &r) % &modulus);
-        let t_plus_1_over_2 = biguint_to_u64_vec((&t + BigUint::one()) >> 1);
-        let t = biguint_to_u64_vec(t.clone());
+        let mod_minus_1_over_2 = biguint_to_u64_vec((&modulus - BigUint::from_str("1").unwrap()) >> 1, limbs);
+        let t_plus_1_over_2 = biguint_to_u64_vec((&t + BigUint::one()) >> 1, limbs);
+        let t = biguint_to_u64_vec(t.clone(), limbs);
 
         quote!{
             impl ::ff::SqrtField for #name {
@@ -425,10 +433,10 @@ fn prime_field_constants_and_sqrt(
     };
 
     // Compute R^2 mod m
-    let r2 = biguint_to_u64_vec((&r * &r) % &modulus);
+    let r2 = biguint_to_u64_vec((&r * &r) % &modulus, limbs);
 
-    let r = biguint_to_u64_vec(r);
-    let modulus = biguint_to_u64_vec(modulus);
+    let r = biguint_to_u64_vec(r, limbs);
+    let modulus = biguint_to_u64_vec(modulus, limbs);
 
     // Compute -m^-1 mod 2**64 by exponentiating by totient(2**64) - 1
     let mut inv = 1u64;
@@ -457,6 +465,16 @@ fn prime_field_constants_and_sqrt(
 
         /// -(m^{-1} mod m) mod m
         const INV: u64 = #inv;
+
+        /// Multiplicative generator of `MODULUS` - 1 order, also quadratic
+        /// nonresidue.
+        const GENERATOR: #repr = #repr(#generator);
+
+        /// 2^s * t = MODULUS - 1 with t odd
+        const S: usize = #s;
+
+        /// 2^s root of unity computed by GENERATOR^t
+        const ROOT_OF_UNITY: #repr = #repr(#root_of_unity);
 
         #sqrt_impl
     }
@@ -735,6 +753,18 @@ fn prime_field_impl(
 
             fn capacity() -> u32 {
                 Self::num_bits() - 1
+            }
+
+            fn multiplicative_generator() -> Self {
+                #name(GENERATOR)
+            }
+
+            fn s() -> usize {
+                S
+            }
+
+            fn root_of_unity() -> Self {
+                #name(ROOT_OF_UNITY)
             }
         }
 

@@ -147,6 +147,17 @@ pub trait PrimeField: Field
     /// Returns how many bits of information can be reliably stored in the
     /// field element.
     fn capacity() -> u32;
+
+    /// Returns the multiplicative generator of `char()` - 1 order. This element
+    /// must also be quadratic nonresidue.
+    fn multiplicative_generator() -> Self;
+
+    /// Returns s such that 2^s * t = `char()` - 1 with t odd.
+    fn s() -> usize;
+
+    /// Returns the 2^s root of unity computed by exponentiating the `multiplicative_generator()`
+    /// by t.
+    fn root_of_unity() -> Self;
 }
 
 pub struct BitIterator<E> {
