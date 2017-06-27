@@ -16,7 +16,7 @@ Add the `ff` crate to your `Cargo.toml`:
 ff = "0.2"
 ```
 
-The `ff` crate contains `Field`, `PrimeField`, `PrimeFieldRepr` and `SqrtField` traits. See the **[documentation](http)** for more.
+The `ff` crate contains `Field`, `PrimeField`, `PrimeFieldRepr` and `SqrtField` traits. See the **[documentation](https://docs.rs/ff/0.2.0/ff/)** for more.
 
 ### #![derive(PrimeField)]
 
