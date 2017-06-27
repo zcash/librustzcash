@@ -45,7 +45,7 @@ pub fn prime_field(
     let mut limbs = 1;
     {
         let mod2 = (&modulus) << 1; // modulus * 2
-        let mut cur = BigUint::one() << 64;
+        let mut cur = BigUint::one() << 64; // always 64-bit limbs for now
         while cur < mod2 {
             limbs += 1;
             cur = cur << 64;
@@ -62,6 +62,7 @@ pub fn prime_field(
     gen.parse().unwrap()
 }
 
+/// Fetches the ident being wrapped by the type we're deriving.
 fn fetch_wrapped_ident(
     body: &syn::Body
 ) -> Option<syn::Ident>
@@ -115,6 +116,7 @@ fn fetch_attr(
     None
 }
 
+// Implement PrimeFieldRepr for the wrapped ident `repr` with `limbs` limbs.
 fn prime_field_repr_impl(
     repr: &syn::Ident,
     limbs: usize
@@ -125,6 +127,7 @@ fn prime_field_repr_impl(
         pub struct #repr(pub [u64; #limbs]);
 
         impl ::rand::Rand for #repr {
+            #[inline(always)]
             fn rand<R: ::rand::Rng>(rng: &mut R) -> Self {
                 #repr(rng.gen())
             }
@@ -143,6 +146,7 @@ fn prime_field_repr_impl(
         }
 
         impl AsRef<[u64]> for #repr {
+            #[inline(always)]
             fn as_ref(&self) -> &[u64] {
                 &self.0
             }
@@ -160,6 +164,7 @@ fn prime_field_repr_impl(
         }
 
         impl Ord for #repr {
+            #[inline(always)]
             fn cmp(&self, other: &#repr) -> ::std::cmp::Ordering {
                 for (a, b) in self.0.iter().rev().zip(other.0.iter().rev()) {
                     if a < b {
@@ -174,6 +179,7 @@ fn prime_field_repr_impl(
         }
 
         impl PartialOrd for #repr {
+            #[inline(always)]
             fn partial_cmp(&self, other: &#repr) -> Option<::std::cmp::Ordering> {
                 Some(self.cmp(other))
             }
@@ -256,6 +262,7 @@ fn prime_field_repr_impl(
     }
 }
 
+/// Convert BigUint into a vector of 64-bit limbs.
 fn biguint_to_u64_vec(
     mut v: BigUint,
     limbs: usize
@@ -272,6 +279,8 @@ fn biguint_to_u64_vec(
     while ret.len() < limbs {
         ret.push(0);
     }
+
+    assert!(ret.len() == limbs);
 
     ret
 }
@@ -290,6 +299,7 @@ fn biguint_num_bits(
     bits
 }
 
+/// BigUint modular exponentiation by square-and-multiply.
 fn exp(
     base: BigUint,
     exp: &BigUint,
@@ -332,6 +342,11 @@ fn prime_field_constants_and_sqrt(
 ) -> quote::Tokens
 {
     let modulus_num_bits = biguint_num_bits(modulus.clone());
+
+    // The number of bits we should "shave" from a randomly sampled reputation, i.e.,
+    // if our modulus is 381 bits and our representation is 384 bits, we should shave
+    // 3 bits from the beginning of a randomly sampled 384 bit representation to 
+    // reduce the cost of rejection sampling.
     let repr_shave_bits = (64 * limbs as u32) - biguint_num_bits(modulus.clone());
 
     // Compute R = 2**(64 * limbs) mod m
@@ -345,7 +360,7 @@ fn prime_field_constants_and_sqrt(
         s += 1;
     }
 
-    // Compute root of unity given the generator
+    // Compute 2^s root of unity given the generator
     let root_of_unity = biguint_to_u64_vec((exp(generator.clone(), &t, &modulus) * &r) % &modulus, limbs);
     let generator = biguint_to_u64_vec((generator.clone() * &r) % &modulus, limbs);
 
@@ -480,16 +495,20 @@ fn prime_field_constants_and_sqrt(
     }
 }
 
+/// Implement PrimeField for the derived type.
 fn prime_field_impl(
     name: &syn::Ident,
     repr: &syn::Ident,
     limbs: usize
 ) -> quote::Tokens
 {
+    // Returns r{n} as an ident.
     fn get_temp(n: usize) -> syn::Ident {
         syn::Ident::from(format!("r{}", n))
     }
 
+    // The parameter list for the mont_reduce() internal method.
+    // r0: u64, mut r1: u64, mut r2: u64, ...
     let mut mont_paramlist = quote::Tokens::new();
     mont_paramlist.append_separated(
         (0..(limbs*2)).map(|i| (i, get_temp(i)))
@@ -501,51 +520,58 @@ fn prime_field_impl(
                     }
                 }),
         ","
-    ); // r0: u64, mut r1: u64, mut r2: u64, ...
+    );
 
-    let mut mont_impl = quote::Tokens::new();
-    for i in 0..limbs {
-        {
-            let temp = get_temp(i);
-            mont_impl.append(quote!{
-                let k = #temp.wrapping_mul(INV);
-                let mut carry = 0;
-                ::ff::mac_with_carry(#temp, k, MODULUS.0[0], &mut carry);
+    // Implement montgomery reduction for some number of limbs
+    fn mont_impl(limbs: usize) -> quote::Tokens
+    {
+        let mut gen = quote::Tokens::new();
+
+        for i in 0..limbs {
+            {
+                let temp = get_temp(i);
+                gen.append(quote!{
+                    let k = #temp.wrapping_mul(INV);
+                    let mut carry = 0;
+                    ::ff::mac_with_carry(#temp, k, MODULUS.0[0], &mut carry);
+                });
+            }
+
+            for j in 1..limbs {
+                let temp = get_temp(i + j);
+                gen.append(quote!{
+                    #temp = ::ff::mac_with_carry(#temp, k, MODULUS.0[#j], &mut carry);
+                });
+            }
+
+            let temp = get_temp(i + limbs);
+
+            if i == 0 {
+                gen.append(quote!{
+                    #temp = ::ff::adc(#temp, 0, &mut carry);
+                });
+            } else {
+                gen.append(quote!{
+                    #temp = ::ff::adc(#temp, carry2, &mut carry);
+                });
+            }
+
+            if i != (limbs - 1) {
+                gen.append(quote!{
+                    let carry2 = carry;
+                });
+            }
+        }
+
+        for i in 0..limbs {
+            let temp = get_temp(limbs + i);
+
+            gen.append(quote!{
+                (self.0).0[#i] = #temp;
             });
         }
 
-        for j in 1..limbs {
-            let temp = get_temp(i + j);
-            mont_impl.append(quote!{
-                #temp = ::ff::mac_with_carry(#temp, k, MODULUS.0[#j], &mut carry);
-            });
-        }
-
-        let temp = get_temp(i + limbs);
-
-        if i == 0 {
-            mont_impl.append(quote!{
-                #temp = ::ff::adc(#temp, 0, &mut carry);
-            });
-        } else {
-            mont_impl.append(quote!{
-                #temp = ::ff::adc(#temp, carry2, &mut carry);
-            });
-        }
-
-        if i != (limbs - 1) {
-            mont_impl.append(quote!{
-                let carry2 = carry;
-            });
-        }
-    }
-
-    for i in 0..limbs {
-        let temp = get_temp(limbs + i);
-
-        mont_impl.append(quote!{
-            (self.0).0[#i] = #temp;
-        });
+        gen
     }
 
     fn sqr_impl(a: quote::Tokens, limbs: usize) -> quote::Tokens
@@ -673,7 +699,9 @@ fn prime_field_impl(
 
     let squaring_impl = sqr_impl(quote!{self}, limbs);
     let multiply_impl = mul_impl(quote!{self}, quote!{other}, limbs);
+    let montgomery_impl = mont_impl(limbs);
 
+    // (self.0).0[0], (self.0).0[1], ..., 0, 0, 0, 0, ...
     let mut into_repr_params = quote::Tokens::new();
     into_repr_params.append_separated(
         (0..limbs).map(|i| quote!{ (self.0).0[#i] })
@@ -921,7 +949,7 @@ fn prime_field_impl(
                 // Handbook of Applied Cryptography
                 // <http://cacr.uwaterloo.ca/hac/about/chap14.pdf>.
 
-                #mont_impl
+                #montgomery_impl
 
                 self.reduce();
             }
