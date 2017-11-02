@@ -1,5 +1,8 @@
 import os
 import sys
+from errno import ENOENT, EEXIST
+from sortedcontainers import SortedSet
+
 
 def readfile(fn):
   fd = open(fn,'r')
@@ -42,6 +45,82 @@ def requirement(fn,istrue):
   return istrue
 
 def verify():
+
+  try:
+    s = set(map(Integer, readfile('primes').split()))
+  except IOError, e:
+    if e.errno != ENOENT: raise
+    s = set()
+
+  needtofactor = SortedSet()
+  V = SortedSet() # distinct verified primes
+  verify_primes(V, s, needtofactor)
+  verify_pass(V, needtofactor)
+
+  old = V
+  needtofactor.update(V)
+  while len(needtofactor) > len(old):
+    k = len(needtofactor) - len(old)
+    sys.stdout.write('Factoring %d integer%s' % (k, '' if k == 1 else 's'))
+    sys.stdout.flush()
+    for x in needtofactor:
+      if x not in old:
+        for (y, z) in factor(x):
+          s.add(y)
+        sys.stdout.write('.')
+        sys.stdout.flush()
+
+    print('')
+
+    old = needtofactor.copy()
+    verify_primes(V, s, needtofactor)
+
+  writefile('primes', '\n'.join(map(str, s)) + '\n')
+  writefile('verify-primes', '<html><body>\n' +
+                             ''.join(('2\n' if v == 2 else
+                                      '<a href=proof/%s.html>%s</a>\n' % (v,v)) for v in V) +
+                             '</body></html>\n')
+
+  verify_pass(V, needtofactor)
+
+
+def verify_primes(V, s, needtofactor):
+  for n in sorted(s):
+    if not n.is_prime() or n in V: continue
+    needtofactor.add(n-1)
+    if n == 2:
+      V.add(n)
+      continue
+    for trybase in primes(2,10000):
+      base = Integers(n)(trybase)
+      if base^(n-1) != 1: continue
+      proof = 'Primality proof for n = %s:\n' % n
+      proof += '<p>Take b = %s.\n' % base
+      proof += '<p>b^(n-1) mod n = 1.\n'
+      f = factor(1)
+      for v in reversed(V):
+        if f.prod()^2 <= n:
+          if n % v == 1:
+            u = base^((n-1)/v)-1
+            if u.is_unit():
+              if v == 2:
+                proof += '<p>2 is prime.\n'
+              else:
+                proof += '<p><a href=%s.html>%s is prime.</a>\n' % (v,v)
+              proof += '<br>b^((n-1)/%s)-1 mod n = %s, which is a unit, inverse %s.\n' % (v,u,1/u)
+              f *= factor(v)^(n-1).valuation(v)
+      if f.prod()^2 <= n: continue
+      if n % f.prod() != 1: continue
+      proof += '<p>(%s) divides n-1.\n' % f
+      proof += '<p>(%s)^2 > n.\n' % f
+      proof += "<p>n is prime by Pocklington's theorem.\n"
+      proof += '\n'
+      writefile('../../../proof/%s.html' % n,proof)
+      V.add(n)
+      break
+
+
+def verify_pass(V, needtofactor):
   p = Integer(readfile('p'))
   k = GF(p)
   kz.<z> = k[]
@@ -51,7 +130,6 @@ def verify():
   x1 = Integer(readfile('x1'))
   y1 = Integer(readfile('y1'))
   shape = readfile('shape').strip()
-  s = readfile('primes')
   rigid = readfile('rigid').strip()
 
   safefield = True
@@ -66,48 +144,16 @@ def verify():
   safecomplete = True
   safeind = True
 
-  V = [] # distinct verified primes
-  for line in s.split():
-    n = Integer(line)
-    if not n.is_prime(): continue
-    if n == 2:
-      if not n in V: V += [n]
-      continue
-    for trybase in primes(2,10000):
-      base = Integers(n)(trybase)
-      if base^(n-1) != 1: continue
-      proof = 'Primality proof for n = %s:\n' % n
-      proof += '<p>Take b = %s.\n' % base
-      proof += '<p>b^(n-1) mod n = 1.\n'
-      f = factor(1)
-      for v in reversed(V):
-        if f.prod()^2 <= n:
-          if n % v == 1:
-            u = base^((n-1)/v)-1
-            if u.is_unit():
-              proof += '<p><a href=%s.html>%s is prime.</a>\n' % (v,v)
-              proof += '<br>b^((n-1)/%s)-1 mod n = %s, which is a unit, inverse %s.\n' % (v,u,1/u)
-              f *= factor(v)^(n-1).valuation(v)
-      if f.prod()^2 <= n: continue
-      if n % f.prod() != 1: continue
-      proof += '<p>(%s) divides n-1.\n' % f
-      proof += '<p>(%s)^2 > n.\n' % f
-      proof += "<p>n is prime by Pocklington's theorem.\n"
-      proof += '\n'
-      writefile('../../../proof/%s.html' % n,proof)
-      if not n in V: V += [n]
-      break
-
-  writefile('verify-primes',''.join('<a href=proof/%s.html>%s</a>\n' % (v,v) for v in V))
-
   pstatus = 'Unverified'
   if not p.is_prime(): pstatus = 'False'
+  needtofactor.add(p)
   if p in V: pstatus = 'True'
   if pstatus != 'True': safefield = False
   writefile('verify-pisprime',pstatus + '\n')
 
   pstatus = 'Unverified'
   if not l.is_prime(): pstatus = 'False'
+  needtofactor.add(l)
   if l in V: pstatus = 'True'
   if pstatus != 'True': safebase = False
   writefile('verify-lisprime',pstatus + '\n')
@@ -130,6 +176,7 @@ def verify():
   if gcdlpis1 and l.is_prime():
     u = Integers(l)(p)
     d = l-1
+    needtofactor.add(d)
     for v in V:
       while d % v == 0: d /= v
     if d == 1:
@@ -146,6 +193,7 @@ def verify():
     writefile('verify-trace','%s\n' % t)
     f = factor(1)
     d = (p+1-t)/l
+    needtofactor.add(d)
     for v in V:
       while d % v == 0:
         d //= v
@@ -156,6 +204,7 @@ def verify():
     writefile('verify-cofactor','Unverified\n')
 
   D = t^2-4*p
+  needtofactor.add(D)
   for v in V:
     while D % v^2 == 0: D /= v^2
   if prod([v for v in V if D % v == 0]) != -D:
@@ -178,6 +227,7 @@ def verify():
 
   twistl = 'Unverified'
   d = p+1+t
+  needtofactor.add(d)
   for v in V:
     while d % v == 0: d /= v
   if d == 1:
@@ -201,6 +251,7 @@ def verify():
     writefile('expand2-twistl','<br>= %s\n' % expand2(twistl))
     f = factor(1)
     d = (p+1+t)/twistl
+    needtofactor.add(d)
     for v in V:
       while d % v == 0:
         d //= v
@@ -214,6 +265,7 @@ def verify():
     if gcdtwistlpis1 and twistl.is_prime():
       u = Integers(twistl)(p)
       d = twistl-1
+      needtofactor.add(d)
       for v in V:
         while d % v == 0: d /= v
       if d == 1:
@@ -231,6 +283,8 @@ def verify():
 
     precomp = 0
     joint = l
+    needtofactor.add(p+1-t)
+    needtofactor.add(p+1+t)
     for v in V:
       d1 = p+1-t
       d2 = p+1+t
