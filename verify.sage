@@ -45,6 +45,10 @@ def requirement(fn,istrue):
   return istrue
 
 def verify():
+  try:
+    os.mkdir('proof')
+  except OSError as e:
+    if e.errno != EEXIST: raise
 
   try:
     s = set(map(Integer, readfile('primes').split()))
@@ -115,7 +119,7 @@ def verify_primes(V, s, needtofactor):
       proof += '<p>(%s)^2 > n.\n' % f
       proof += "<p>n is prime by Pocklington's theorem.\n"
       proof += '\n'
-      writefile('../../../proof/%s.html' % n,proof)
+      writefile('proof/%s.html' % n,proof)
       V.add(n)
       break
 
