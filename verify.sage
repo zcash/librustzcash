@@ -253,15 +253,23 @@ def verify():
   x1 = k(x1)
   y1 = k(y1)
 
-  if shape == 'edwards':
+  if shape in ('edwards', 'tedwards'):
     d = Integer(readfile('d'))
-    writefile('verify-shape','Edwards\n')
-    writefile('verify-equation','x^2+y^2 = 1%+dx^2y^2\n' % d)
+    a = 1
+    if shape == 'tedwards':
+      a = Integer(readfile('a'))
 
+    writefile('verify-shape','Twisted Edwards\n')
+    writefile('verify-equation','%sx^2+y^2 = 1%+dx^2y^2\n' % (a, d))
+    if a == 1:
+      writefile('verify-shape','Edwards\n')
+      writefile('verify-equation','x^2+y^2 = 1%+dx^2y^2\n' % d)
+
+    a = k(a)
     d = k(d)
-    elliptic = d*(1-d)
-    level0 = x0^2+y0^2-1-d*x0^2*y0^2
-    level1 = x1^2+y1^2-1-d*x1^2*y1^2
+    elliptic = a*d*(a-d)
+    level0 = a*x0^2+y0^2-1-d*x0^2*y0^2
+    level1 = a*x1^2+y1^2-1-d*x1^2*y1^2
 
   if shape == 'montgomery':
     writefile('verify-shape','Montgomery\n')
@@ -295,9 +303,9 @@ def verify():
   safebase &= requirement('verify-isoncurve0',level0 == 0)
   safebase &= requirement('verify-isoncurve1',level1 == 0)
 
-  if shape == 'edwards':
-    A = 2*(1+d)/(1-d)
-    B = 4/(1-d)
+  if shape in ('edwards', 'tedwards'):
+    A = 2*(a+d)/(a-d)
+    B = 4/(a-d)
     x0,y0 = (1+y0)/(1-y0),((1+y0)/(1-y0))/x0
     x1,y1 = (1+y1)/(1-y1),((1+y1)/(1-y1))/x1
     shape = 'montgomery'
