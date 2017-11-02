@@ -2,7 +2,7 @@ Jubjub supporting evidence
 --------------------------
 
 This repository contains supporting evidence that the twisted Edwards curve
--x^2 + y^2 = 1 - (10240/10241) of rational points over
+-x^2 + y^2 = 1 - (10240/10241).x^2.y^2 of rational points over
 GF(52435875175126190479447740508185965837690552500527637822603658699938581184513),
 [also called "Jubjub"](https://z.cash/technology/jubjub.html),
 satisfies the [SafeCurves criteria](https://safecurves.cr.yp.to/index.html).
