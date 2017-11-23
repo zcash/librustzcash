@@ -8,9 +8,16 @@ name = "sapling"
 repository = "https://github.com/zcash/sapling"
 version = "0.0.1"
 
-[dependencies]
-bellman = "0.0.5"
-
 [dependencies.pairing]
-version = "0.13"
-features = ["u128-support"]
+version = "~0.13.2"
+features = ["expose-arith"]
+
+[dependencies]
+rand = "0.3"
+blake2 = "0.7"
+digest = "0.7"
+bellman = "0.0.6"
+
+[features]
+default = ["u128-support"]
+u128-support = ["pairing/u128-support"]
