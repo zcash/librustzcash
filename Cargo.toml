@@ -1,11 +1,11 @@
 [package]
 authors = ["Sean Bowe <sean@z.cash>"]
 description = "Cryptographic library for Zcash Sapling"
-documentation = "https://github.com/zcash/sapling"
-homepage = "https://github.com/zcash/sapling"
+documentation = "https://github.com/zcash-hackworks/sapling"
+homepage = "https://github.com/zcash-hackworks/sapling"
 license = "MIT/Apache-2.0"
-name = "sapling"
-repository = "https://github.com/zcash/sapling"
+name = "sapling-crypto"
+repository = "https://github.com/zcash-hackworks/sapling"
 version = "0.0.1"
 
 [dependencies.pairing]
