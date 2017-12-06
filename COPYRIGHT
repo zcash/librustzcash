@@ -1,7 +1,7 @@
-Copyrights in the "sapling" library are retained by their contributors. No
-copyright assignment is required to contribute to the "sapling" library.
+Copyrights in the "sapling-crypto" library are retained by their contributors. No
+copyright assignment is required to contribute to the "sapling-crypto" library.
 
-The "sapling" library is licensed under either of
+The "sapling-crypto" library is licensed under either of
 
  * Apache License, Version 2.0, (see ./LICENSE-APACHE or http://www.apache.org/licenses/LICENSE-2.0)
  * MIT license (see ./LICENSE-MIT or http://opensource.org/licenses/MIT)
