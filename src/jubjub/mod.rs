@@ -78,23 +78,29 @@ mod test {
             assert!(a.legendre() == LegendreSymbol::QuadraticResidue);
         }
 
-        // Check that A^2 - 4 is nonsquare:
-        let mut tmp = params.montgomery_a;
-        tmp.square();
-        tmp.sub_assign(&Fr::from_str("4").unwrap());
-        assert!(tmp.legendre() == LegendreSymbol::QuadraticNonResidue);
+        {
+            // Check that A^2 - 4 is nonsquare:
+            let mut tmp = params.montgomery_a;
+            tmp.square();
+            tmp.sub_assign(&Fr::from_str("4").unwrap());
+            assert!(tmp.legendre() == LegendreSymbol::QuadraticNonResidue);
+        }
 
-        // Check that A - 2 is nonsquare:
-        let mut tmp = params.montgomery_a;
-        tmp.sub_assign(&Fr::from_str("2").unwrap());
-        assert!(tmp.legendre() == LegendreSymbol::QuadraticNonResidue);
+        {
+            // Check that A - 2 is nonsquare:
+            let mut tmp = params.montgomery_a;
+            tmp.sub_assign(&Fr::from_str("2").unwrap());
+            assert!(tmp.legendre() == LegendreSymbol::QuadraticNonResidue);
+        }
 
-        // Check the validity of the scaling factor
-        let mut tmp = a;
-        tmp.sub_assign(&params.edwards_d);
-        tmp = tmp.inverse().unwrap();
-        tmp.mul_assign(&Fr::from_str("4").unwrap());
-        tmp = tmp.sqrt().unwrap();
-        assert_eq!(tmp, params.scale);
+        {
+            // Check the validity of the scaling factor
+            let mut tmp = a;
+            tmp.sub_assign(&params.edwards_d);
+            tmp = tmp.inverse().unwrap();
+            tmp.mul_assign(&Fr::from_str("4").unwrap());
+            tmp = tmp.sqrt().unwrap();
+            assert_eq!(tmp, params.scale);
+        }
     }
 }

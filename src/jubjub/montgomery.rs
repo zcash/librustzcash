@@ -518,13 +518,12 @@ mod test {
     }
 
     #[test]
-    fn test_awkward_points() {
+    fn test_low_order_points() {
         use super::edwards;
 
-        //let rng = &mut XorShiftRng::from_seed([0x5dbe6259, 0x8d313d76, 0x3237db17, 0xe5bc0654]);
         let params = &JubjubParams::new();
 
-        let mut awkward_points: Vec<Point<Bls12, Unknown>> = vec![];
+        let mut low_order_points: Vec<Point<Bls12, Unknown>> = vec![];
 
         {
             let mut push_point = |x, y| {
@@ -533,7 +532,7 @@ mod test {
 
                 assert!(is_on_curve(x, y, params));
 
-                awkward_points.push(Point {
+                low_order_points.push(Point {
                     x: x,
                     y: y,
                     infinity: false,
@@ -587,9 +586,9 @@ mod test {
         }
 
         // push 8p (point at infinity)
-        awkward_points.push(Point::zero());
+        low_order_points.push(Point::zero());
 
-        for point in &awkward_points {
+        for point in &low_order_points {
             let ed = edwards::Point::from_montgomery(point, params);
             let mut ed_tmp = ed.clone();
             let mut mont_tmp = point.clone();
