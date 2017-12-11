@@ -193,29 +193,55 @@ impl<E: Engine, Subgroup> Point<E, Subgroup> {
                     //     y^2 = (-1) + A + (-1)
                     //     y^2 = A - 2
                     // Indeed, A - 2 is nonsquare.
+                    //
+                    // We need to map into (projective) extended twisted
+                    // Edwards coordinates (X, Y, T, Z) which represents
+                    // the point (X/Z, Y/Z) with Z nonzero and T = XY/Z.
+                    //
+                    // Thus, we compute...
+                    //
+                    // u = x(x + 1)
+                    // v = y(x - 1)
+                    // t = x(x - 1)
+                    // z = y(x + 1)  (Cannot be nonzero, as above.)
+                    //
+                    // ... which represents the point ( x / y , (x - 1) / (x + 1) )
+                    // as required by the mapping and preserves the property of
+                    // the auxillary coordinate t.
+                    //
+                    // We need to scale the coordinate, so u and t will have
+                    // an extra factor s.
 
+                    // u = xs
                     let mut u = x;
-                    u.mul_assign(&y.inverse().expect("y is nonzero"));
-
-                    let mut v = x;
-                    v.sub_assign(&E::Fr::one());
-                    {
-                        let mut tmp = x;
-                        tmp.add_assign(&E::Fr::one());
-                        v.mul_assign(&tmp.inverse().expect("A - 2 is nonsquare"));
-                    }
-
-                    // The resulting x-coordinate needs to be scaled.
                     u.mul_assign(&params.scale);
 
+                    // v = x - 1
+                    let mut v = x;
+                    v.sub_assign(&E::Fr::one());
+
+                    // t = xs(x - 1)
                     let mut t = u;
                     t.mul_assign(&v);
+
+                    // z = (x + 1)
+                    let mut z = x;
+                    z.add_assign(&E::Fr::one());
+
+                    // u = xs(x + 1)
+                    u.mul_assign(&z);
+
+                    // z = y(x + 1)
+                    z.mul_assign(&y);
+
+                    // v = y(x - 1)
+                    v.mul_assign(&y);
 
                     Point {
                         x: u,
                         y: v,
                         t: t,
-                        z: E::Fr::one(),
+                        z: z,
                         _marker: PhantomData
                     }
                 }
