@@ -16,7 +16,8 @@
 
 use pairing::{
     Engine,
-    PrimeField
+    PrimeField,
+    SqrtField
 };
 
 use pairing::bls12_381::{
@@ -24,28 +25,48 @@ use pairing::bls12_381::{
     Fr
 };
 
-mod fs;
-
-pub use self::fs::{Fs, FsRepr};
-
 pub mod edwards;
 pub mod montgomery;
 
-/// These are the pre-computed parameters of the Jubjub
-/// curve.
-pub struct JubjubParams<E: Engine> {
-    edwards_d: E::Fr,
-    montgomery_a: E::Fr,
+#[cfg(test)]
+pub mod tests;
 
-    scale: E::Fr
+pub trait JubjubEngine: Engine {
+    type Fs: PrimeField + SqrtField;
+    type Params: JubjubParams<Self>;
+}
+
+pub trait JubjubParams<E: JubjubEngine>: Sized {
+    fn edwards_d(&self) -> &E::Fr;
+    fn montgomery_a(&self) -> &E::Fr;
+    fn scale(&self) -> &E::Fr;
 }
 
 pub enum Unknown { }
 pub enum PrimeOrder { }
 
-impl JubjubParams<Bls12> {
+pub mod fs;
+
+impl JubjubEngine for Bls12 {
+    type Fs = self::fs::Fs;
+    type Params = JubjubBls12;
+}
+
+pub struct JubjubBls12 {
+    edwards_d: Fr,
+    montgomery_a: Fr,
+    scale: Fr
+}
+
+impl JubjubParams<Bls12> for JubjubBls12 {
+    fn edwards_d(&self) -> &Fr { &self.edwards_d }
+    fn montgomery_a(&self) -> &Fr { &self.montgomery_a }
+    fn scale(&self) -> &Fr { &self.scale }
+}
+
+impl JubjubBls12 {
     pub fn new() -> Self {
-        JubjubParams {
+        JubjubBls12 {
             // d = -(10240/10241)
             edwards_d: Fr::from_str("19257038036680949359750312669786877991949435402254120286184196891950884077233").unwrap(),
             // A = 40962
@@ -56,51 +77,9 @@ impl JubjubParams<Bls12> {
     }
 }
 
-#[cfg(test)]
-mod test {
-    use pairing::{Field, SqrtField, LegendreSymbol, PrimeField};
-    use pairing::bls12_381::{Fr};
-    use super::JubjubParams;
+#[test]
+fn test_jubjub_bls12() {
+    let params = JubjubBls12::new();
 
-    #[test]
-    fn test_params() {
-        let params = JubjubParams::new();
-
-        // a = -1
-        let mut a = Fr::one();
-        a.negate();
-
-        {
-            // The twisted Edwards addition law is complete when d is nonsquare
-            // and a is square.
-
-            assert!(params.edwards_d.legendre() == LegendreSymbol::QuadraticNonResidue);
-            assert!(a.legendre() == LegendreSymbol::QuadraticResidue);
-        }
-
-        {
-            // Check that A^2 - 4 is nonsquare:
-            let mut tmp = params.montgomery_a;
-            tmp.square();
-            tmp.sub_assign(&Fr::from_str("4").unwrap());
-            assert!(tmp.legendre() == LegendreSymbol::QuadraticNonResidue);
-        }
-
-        {
-            // Check that A - 2 is nonsquare:
-            let mut tmp = params.montgomery_a;
-            tmp.sub_assign(&Fr::from_str("2").unwrap());
-            assert!(tmp.legendre() == LegendreSymbol::QuadraticNonResidue);
-        }
-
-        {
-            // Check the validity of the scaling factor
-            let mut tmp = a;
-            tmp.sub_assign(&params.edwards_d);
-            tmp = tmp.inverse().unwrap();
-            tmp.mul_assign(&Fr::from_str("4").unwrap());
-            tmp = tmp.sqrt().unwrap();
-            assert_eq!(tmp, params.scale);
-        }
-    }
+    tests::test_suite::<Bls12>(&params);
 }
