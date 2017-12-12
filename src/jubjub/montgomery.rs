@@ -67,6 +67,36 @@ impl<E: JubjubEngine, Subgroup> PartialEq for Point<E, Subgroup> {
 }
 
 impl<E: JubjubEngine> Point<E, Unknown> {
+    pub fn get_for_x(x: E::Fr, sign: bool, params: &E::Params) -> Option<Self>
+    {
+        // given an x on the curve, y^2 = x^3 + A*x^2 + x
+
+        let mut x2 = x;
+        x2.square();
+
+        let mut rhs = x2;
+        rhs.mul_assign(params.montgomery_a());
+        rhs.add_assign(&x);
+        x2.mul_assign(&x);
+        rhs.add_assign(&x2);
+
+        match rhs.sqrt() {
+            Some(mut y) => {
+                if y.into_repr().is_odd() != sign {
+                    y.negate();
+                }
+
+                return Some(Point {
+                    x: x,
+                    y: y,
+                    infinity: false,
+                    _marker: PhantomData
+                })
+            },
+            None => None
+        }
+    }
+
     /// This guarantees the point is in the prime order subgroup
     pub fn mul_by_cofactor(&self, params: &E::Params) -> Point<E, PrimeOrder>
     {
@@ -80,30 +110,11 @@ impl<E: JubjubEngine> Point<E, Unknown> {
     pub fn rand<R: Rng>(rng: &mut R, params: &E::Params) -> Self
     {
         loop {
-            // given an x on the curve, y^2 = x^3 + A*x^2 + x
             let x: E::Fr = rng.gen();
 
-            let mut x2 = x;
-            x2.square();
-
-            let mut rhs = x2;
-            rhs.mul_assign(params.montgomery_a());
-            rhs.add_assign(&x);
-            x2.mul_assign(&x);
-            rhs.add_assign(&x2);
-
-            match rhs.sqrt() {
-                Some(mut y) => {
-                    if y.into_repr().is_odd() != rng.gen() {
-                        y.negate();
-                    }
-
-                    return Point {
-                        x: x,
-                        y: y,
-                        infinity: false,
-                        _marker: PhantomData
-                    }
+            match Self::get_for_x(x, rng.gen(), params) {
+                Some(p) => {
+                    return p
                 },
                 None => {}
             }
