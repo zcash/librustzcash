@@ -205,6 +205,8 @@ impl<Var: Copy> UInt32<Var> {
         // This is a linear combination that we will enforce to be "zero"
         let mut lc = LinearCombination::zero();
 
+        let mut all_constants = true;
+
         // Iterate over the operands
         for op in operands {
             // Accumulate the value
@@ -225,10 +227,14 @@ impl<Var: Copy> UInt32<Var> {
             for bit in &op.bits {
                 match bit {
                     &Boolean::Is(ref bit) => {
+                        all_constants = false;
+
                         // Add coeff * bit
                         lc = lc + (coeff, bit.get_variable());
                     },
                     &Boolean::Not(ref bit) => {
+                        all_constants = false;
+
                         // Add coeff * (1 - bit) = coeff * ONE - coeff * bit
                         lc = lc + (coeff, cs.one()) - (coeff, bit.get_variable());
                     },
@@ -245,6 +251,13 @@ impl<Var: Copy> UInt32<Var> {
 
         // The value of the actual result is modulo 2^32
         let modular_value = result_value.map(|v| v as u32);
+
+        if all_constants && modular_value.is_some() {
+            // We can just return a constant, rather than
+            // unpacking the result into allocated bits.
+
+            return Ok(UInt32::constant(modular_value.unwrap()));
+        }
 
         // Storage area for the resulting bits
         let mut result_bits = vec![];
@@ -368,6 +381,41 @@ mod test {
     }
 
     #[test]
+    fn test_uint32_addmany_constants() {
+        let mut rng = XorShiftRng::from_seed([0x5dbe6259, 0x8d313d76, 0x3237db17, 0xe5bc0654]);
+
+        for _ in 0..1000 {
+            let mut cs = TestConstraintSystem::<Bls12>::new();
+
+            let a: u32 = rng.gen();
+            let b: u32 = rng.gen();
+            let c: u32 = rng.gen();
+
+            let a_bit = UInt32::constant(a);
+            let b_bit = UInt32::constant(b);
+            let c_bit = UInt32::constant(c);
+
+            let mut expected = a.wrapping_add(b).wrapping_add(c);
+
+            let r = UInt32::addmany(cs.namespace(|| "addition"), &[a_bit, b_bit, c_bit]).unwrap();
+
+            assert!(r.value == Some(expected));
+
+            for b in r.bits.iter() {
+                match b {
+                    &Boolean::Is(_) => panic!(),
+                    &Boolean::Not(_) => panic!(),
+                    &Boolean::Constant(b) => {
+                        assert!(b == (expected & 1 == 1));
+                    }
+                }
+
+                expected >>= 1;
+            }
+        }
+    }
+
+    #[test]
     fn test_uint32_addmany() {
         let mut rng = XorShiftRng::from_seed([0x5dbe6259, 0x8d313d76, 0x3237db17, 0xe5bc0654]);
 
@@ -401,8 +449,8 @@ mod test {
                     &Boolean::Not(ref b) => {
                         assert!(!b.get_value().unwrap() == (expected & 1 == 1));
                     },
-                    &Boolean::Constant(b) => {
-                        assert!(b == (expected & 1 == 1));
+                    &Boolean::Constant(_) => {
+                        unreachable!()
                     }
                 }
 

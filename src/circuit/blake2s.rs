@@ -326,6 +326,32 @@ mod test {
     }
 
     #[test]
+    fn test_blake2s_precomp_constraints() {
+        // Test that 512 fixed leading bits (constants)
+        // doesn't result in more constraints.
+
+        let mut cs = TestConstraintSystem::<Bls12>::new();
+        let mut rng = XorShiftRng::from_seed([0x5dbe6259, 0x8d313d76, 0x3237db17, 0xe5bc0654]);
+        let input_bits: Vec<_> = (0..512)
+          .map(|_| Boolean::constant(rng.gen()))
+          .chain((0..512)
+                        .map(|i| AllocatedBit::alloc(cs.namespace(|| format!("input bit {}", i)), Some(true)).unwrap().into()))
+          .collect();
+        blake2s(&mut cs, &input_bits).unwrap();
+        assert!(cs.is_satisfied());
+        assert_eq!(cs.num_constraints(), 21792);
+    }
+
+    #[test]
+    fn test_blake2s_constant_constraints() {
+        let mut cs = TestConstraintSystem::<Bls12>::new();
+        let mut rng = XorShiftRng::from_seed([0x5dbe6259, 0x8d313d76, 0x3237db17, 0xe5bc0654]);
+        let input_bits: Vec<_> = (0..512).map(|_| Boolean::constant(rng.gen())).collect();
+        blake2s(&mut cs, &input_bits).unwrap();
+        assert_eq!(cs.num_constraints(), 0);
+    }
+
+    #[test]
     fn test_blake2s() {
         let mut rng = XorShiftRng::from_seed([0x5dbe6259, 0x8d313d76, 0x3237db17, 0xe5bc0654]);
 
@@ -366,7 +392,10 @@ mod test {
                     Boolean::Not(b) => {
                         assert!(s.next().unwrap() != b.get_value().unwrap());
                     },
-                    _ => panic!()
+                    Boolean::Constant(b) => {
+                        assert!(input_len == 0);
+                        assert!(s.next().unwrap() == b);
+                    }
                 }
             }
         }
