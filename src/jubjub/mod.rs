@@ -16,6 +16,7 @@
 
 use pairing::{
     Engine,
+    Field,
     PrimeField,
     SqrtField
 };
@@ -39,6 +40,7 @@ pub trait JubjubEngine: Engine {
 pub trait JubjubParams<E: JubjubEngine>: Sized {
     fn edwards_d(&self) -> &E::Fr;
     fn montgomery_a(&self) -> &E::Fr;
+    fn montgomery_2a(&self) -> &E::Fr;
     fn scale(&self) -> &E::Fr;
 }
 
@@ -55,22 +57,30 @@ impl JubjubEngine for Bls12 {
 pub struct JubjubBls12 {
     edwards_d: Fr,
     montgomery_a: Fr,
+    montgomery_2a: Fr,
     scale: Fr
 }
 
 impl JubjubParams<Bls12> for JubjubBls12 {
     fn edwards_d(&self) -> &Fr { &self.edwards_d }
     fn montgomery_a(&self) -> &Fr { &self.montgomery_a }
+    fn montgomery_2a(&self) -> &Fr { &self.montgomery_2a }
     fn scale(&self) -> &Fr { &self.scale }
 }
 
 impl JubjubBls12 {
     pub fn new() -> Self {
+        let montgomery_a = Fr::from_str("40962").unwrap();
+        let mut montgomery_2a = montgomery_a;
+        montgomery_2a.double();
+
         JubjubBls12 {
             // d = -(10240/10241)
             edwards_d: Fr::from_str("19257038036680949359750312669786877991949435402254120286184196891950884077233").unwrap(),
             // A = 40962
-            montgomery_a: Fr::from_str("40962").unwrap(),
+            montgomery_a: montgomery_a,
+            // 2A = 2.A
+            montgomery_2a: montgomery_2a,
             // scaling factor = sqrt(4 / (a - d))
             scale: Fr::from_str("17814886934372412843466061268024708274627479829237077604635722030778476050649").unwrap()
         }
