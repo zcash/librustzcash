@@ -1,6 +1,9 @@
 use pairing::{
     Engine,
-    Field
+    Field,
+    PrimeField,
+    PrimeFieldRepr,
+    BitIterator
 };
 
 use bellman::{
@@ -338,6 +341,121 @@ impl<Var: Copy> Boolean<Var> {
 
         Ok(cur)
     }
+
+    /// Asserts that at least one operand is false.
+    pub fn enforce_nand<E, CS>(
+        mut cs: CS,
+        bits: &[Self]
+    ) -> Result<(), SynthesisError>
+        where E: Engine,
+              CS: ConstraintSystem<E, Variable=Var>
+    {
+        let res = Self::kary_and(&mut cs, bits)?;
+
+        // TODO: optimize
+        match res {
+            Boolean::Constant(false) => {
+                Ok(())
+            },
+            Boolean::Constant(true) => {
+                // TODO: more descriptive error
+                Err(SynthesisError::AssignmentMissing)
+            },
+            Boolean::Is(ref res) => {
+                cs.enforce(
+                    || "enforce nand",
+                    LinearCombination::zero(),
+                    LinearCombination::zero(),
+                    LinearCombination::zero() + res.get_variable()
+                );
+
+                Ok(())
+            },
+            Boolean::Not(ref res) => {
+                let one = cs.one();
+                cs.enforce(
+                    || "enforce nand",
+                    LinearCombination::zero(),
+                    LinearCombination::zero(),
+                    LinearCombination::zero() + one - res.get_variable()
+                );
+
+                Ok(())
+            },
+        }
+    }
+
+    /// Asserts that this bit representation is "in
+    /// the field" when interpreted in big endian.
+    pub fn enforce_in_field<E, CS, F: PrimeField>(
+        mut cs: CS,
+        bits: &[Self]
+    ) -> Result<(), SynthesisError>
+        where E: Engine,
+              CS: ConstraintSystem<E, Variable=Var>
+    {
+        assert_eq!(bits.len(), F::NUM_BITS as usize);
+
+        let mut a = bits.iter();
+
+        // b = char() - 1
+        let mut b = F::char();
+        b.sub_noborrow(&1.into());
+
+        // Runs of ones in r
+        let mut last_run = Boolean::<Var>::constant(true);
+        let mut current_run = vec![];
+
+        let mut found_one = false;
+        let mut run_i = 0;
+        let mut nand_i = 0;
+        for b in BitIterator::new(b) {
+            // Skip over unset bits at the beginning
+            found_one |= b;
+            if !found_one {
+                continue;
+            }
+
+            let a = a.next().unwrap();
+
+            if b {
+                // This is part of a run of ones.
+                current_run.push(a.clone());
+            } else {
+                if current_run.len() > 0 {
+                    // This is the start of a run of zeros, but we need
+                    // to k-ary AND against `last_run` first.
+
+                    current_run.push(last_run.clone());
+                    last_run = Self::kary_and(
+                        cs.namespace(|| format!("run {}", run_i)),
+                        &current_run
+                    )?;
+                    run_i += 1;
+                    current_run.truncate(0);
+                }
+
+                // If `last_run` is true, `a` must be false, or it would
+                // not be in the field.
+                //
+                // If `last_run` is false, `a` can be true or false.
+                //
+                // Ergo, at least one of `last_run` and `a` must be false.
+                Self::enforce_nand(
+                    cs.namespace(|| format!("nand {}", nand_i)),
+                    &[last_run.clone(), a.clone()]
+                )?;
+                nand_i += 1;
+            }
+        }
+
+        // We should always end in a "run" of zeros, because
+        // the characteristic is an odd prime. So, this should
+        // be empty.
+        assert_eq!(current_run.len(), 0);
+
+        Ok(())
+    }
 }
 
 impl<Var> From<AllocatedBit<Var>> for Boolean<Var> {
@@ -348,9 +466,10 @@ impl<Var> From<AllocatedBit<Var>> for Boolean<Var> {
 
 #[cfg(test)]
 mod test {
+    use rand::{SeedableRng, Rand, XorShiftRng};
     use bellman::{ConstraintSystem};
     use pairing::bls12_381::{Bls12, Fr};
-    use pairing::{Field, PrimeField};
+    use pairing::{Field, PrimeField, PrimeFieldRepr, BitIterator};
     use ::circuit::test::*;
     use super::{AllocatedBit, Boolean};
 
@@ -783,6 +902,125 @@ mod test {
 
                     _ => {
                         panic!("unexpected behavior at {:?} AND {:?}", first_operand, second_operand);
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_enforce_in_field() {
+        {
+            let mut cs = TestConstraintSystem::<Bls12>::new();
+
+            let mut bits = vec![];
+            for (i, b) in BitIterator::new(Fr::char()).skip(1).enumerate() {
+                bits.push(Boolean::from(AllocatedBit::alloc(
+                    cs.namespace(|| format!("bit {}", i)),
+                    Some(b)
+                ).unwrap()));
+            }
+
+            Boolean::enforce_in_field::<_, _, Fr>(&mut cs, &bits).unwrap();
+
+            assert!(!cs.is_satisfied());
+        }
+
+        let mut rng = XorShiftRng::from_seed([0x3dbe6259, 0x8d313d76, 0x3237db17, 0xe5bc0654]);
+
+        for _ in 0..1000 {
+            let r = Fr::rand(&mut rng);
+            let mut cs = TestConstraintSystem::<Bls12>::new();
+
+            let mut bits = vec![];
+            for (i, b) in BitIterator::new(r.into_repr()).skip(1).enumerate() {
+                bits.push(Boolean::from(AllocatedBit::alloc(
+                    cs.namespace(|| format!("bit {}", i)),
+                    Some(b)
+                ).unwrap()));
+            }
+
+            Boolean::enforce_in_field::<_, _, Fr>(&mut cs, &bits).unwrap();
+
+            assert!(cs.is_satisfied());
+        }
+
+        for _ in 0..1000 {
+            // Sample a random element not in the field
+            let r = loop {
+                let mut a = Fr::rand(&mut rng).into_repr();
+                let b = Fr::rand(&mut rng).into_repr();
+
+                a.add_nocarry(&b);
+                // we're shaving off the high bit later
+                a.as_mut()[3] &= 0x7fffffffffffffff;
+                if Fr::from_repr(a).is_err() {
+                    break a;
+                }
+            };
+
+            let mut cs = TestConstraintSystem::<Bls12>::new();
+
+            let mut bits = vec![];
+            for (i, b) in BitIterator::new(r).skip(1).enumerate() {
+                bits.push(Boolean::from(AllocatedBit::alloc(
+                    cs.namespace(|| format!("bit {}", i)),
+                    Some(b)
+                ).unwrap()));
+            }
+
+            Boolean::enforce_in_field::<_, _, Fr>(&mut cs, &bits).unwrap();
+
+            assert!(!cs.is_satisfied());
+        }
+    }
+
+    #[test]
+    fn test_enforce_nand() {
+        {
+            let mut cs = TestConstraintSystem::<Bls12>::new();
+
+            Boolean::enforce_nand(&mut cs, &[Boolean::constant(false)]).is_ok();
+            Boolean::enforce_nand(&mut cs, &[Boolean::constant(true)]).is_err();
+        }
+
+        for i in 1..5 {
+            // with every possible assignment for them
+            for mut b in 0..(1 << i) {
+                // with every possible negation
+                for mut n in 0..(1 << i) {
+                    let mut cs = TestConstraintSystem::<Bls12>::new();
+
+                    let mut expected = true;
+
+                    let mut bits = vec![];
+                    for j in 0..i {
+                        expected &= b & 1 == 1;
+
+                        if n & 1 == 1 {
+                            bits.push(Boolean::from(AllocatedBit::alloc(
+                                cs.namespace(|| format!("bit {}", j)),
+                                Some(b & 1 == 1)
+                            ).unwrap()));
+                        } else {
+                            bits.push(Boolean::from(AllocatedBit::alloc(
+                                cs.namespace(|| format!("bit {}", j)),
+                                Some(b & 1 == 0)
+                            ).unwrap()).not());
+                        }
+                        
+                        b >>= 1;
+                        n >>= 1;
+                    }
+
+                    let expected = !expected;
+
+                    Boolean::enforce_nand(&mut cs, &bits).unwrap();
+
+                    if expected {
+                        assert!(cs.is_satisfied());
+                    } else {
+                        assert!(!cs.is_satisfied());
                     }
                 }
             }
