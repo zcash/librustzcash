@@ -28,6 +28,34 @@ pub struct MontgomeryPoint<E: Engine, Var> {
 }
 
 impl<E: JubjubEngine, Var: Copy> MontgomeryPoint<E, Var> {
+    pub fn interpret<CS>(
+        mut cs: CS,
+        x: &AllocatedNum<E, Var>,
+        y: &AllocatedNum<E, Var>,
+        params: &E::Params
+    ) -> Result<Self, SynthesisError>
+        where CS: ConstraintSystem<E, Variable=Var>
+    {
+        // y^2 = x^3 + A.x^2 + x
+
+        let x2 = x.square(cs.namespace(|| "x^2"))?;
+        let x3 = x2.mul(cs.namespace(|| "x^3"), x)?;
+
+        cs.enforce(
+            || "on curve check",
+            LinearCombination::zero() + y.get_variable(),
+            LinearCombination::zero() + y.get_variable(),
+            LinearCombination::zero() + x3.get_variable()
+                                      + (*params.montgomery_a(), x2.get_variable())
+                                      + x.get_variable()
+        );
+
+        Ok(MontgomeryPoint {
+            x: x.clone(),
+            y: y.clone()
+        })
+    }
+
     /// Performs an affine point doubling, not defined for
     /// the point of order two (0, 0).
     pub fn double<CS>(
@@ -145,6 +173,54 @@ mod test {
         JubjubBls12
     };
     use super::{MontgomeryPoint, AllocatedNum};
+
+    #[test]
+    fn test_interpret() {
+        let params = &JubjubBls12::new();
+        let rng = &mut XorShiftRng::from_seed([0x5dbe6259, 0x8d313d76, 0x3237db17, 0xe5bc0654]);
+
+        for _ in 0..100 {
+            let p = montgomery::Point::<Bls12, _>::rand(rng, &params);
+            let (mut x, mut y) = p.into_xy().unwrap();
+
+            {
+                let mut cs = TestConstraintSystem::<Bls12>::new();
+                let numx = AllocatedNum::alloc(cs.namespace(|| "x"), || {
+                    Ok(x)
+                }).unwrap();
+                let numy = AllocatedNum::alloc(cs.namespace(|| "y"), || {
+                    Ok(y)
+                }).unwrap();
+
+                let p = MontgomeryPoint::interpret(&mut cs, &numx, &numy, &params).unwrap();
+
+                assert!(cs.is_satisfied());
+                assert_eq!(p.x.get_value().unwrap(), x);
+                assert_eq!(p.y.get_value().unwrap(), y);
+
+                y.negate();
+                cs.set("y/num", y);
+                assert!(cs.is_satisfied());
+                x.negate();
+                cs.set("x/num", x);
+                assert!(!cs.is_satisfied());
+            }
+
+            {
+                let mut cs = TestConstraintSystem::<Bls12>::new();
+                let numx = AllocatedNum::alloc(cs.namespace(|| "x"), || {
+                    Ok(x)
+                }).unwrap();
+                let numy = AllocatedNum::alloc(cs.namespace(|| "y"), || {
+                    Ok(y)
+                }).unwrap();
+
+                MontgomeryPoint::interpret(&mut cs, &numx, &numy, &params).unwrap();
+
+                assert_eq!(cs.which_is_unsatisfied().unwrap(), "on curve check");
+            }
+        }
+    }
 
     #[test]
     fn test_doubling_order_2() {

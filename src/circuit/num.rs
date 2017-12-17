@@ -25,6 +25,15 @@ pub struct AllocatedNum<E: Engine, Var> {
     variable: Var
 }
 
+impl<Var: Copy, E: Engine> Clone for AllocatedNum<E, Var> {
+    fn clone(&self) -> Self {
+        AllocatedNum {
+            value: self.value,
+            variable: self.variable
+        }
+    }
+}
+
 impl<E: Engine, Var: Copy> AllocatedNum<E, Var> {
     pub fn alloc<CS, F>(
         mut cs: CS,
@@ -190,6 +199,38 @@ impl<E: Engine, Var: Copy> AllocatedNum<E, Var> {
         Ok(num)
     }
 
+    pub fn mul<CS>(
+        &self,
+        mut cs: CS,
+        other: &Self
+    ) -> Result<Self, SynthesisError>
+        where CS: ConstraintSystem<E, Variable=Var>
+    {
+        let mut value = None;
+
+        let var = cs.alloc(|| "product num", || {
+            let mut tmp = *self.value.get()?;
+            tmp.mul_assign(other.value.get()?);
+
+            value = Some(tmp);
+
+            Ok(tmp)
+        })?;
+
+        // Constrain: a * b = ab
+        cs.enforce(
+            || "multiplication constraint",
+            LinearCombination::zero() + self.variable,
+            LinearCombination::zero() + other.variable,
+            LinearCombination::zero() + var
+        );
+
+        Ok(AllocatedNum {
+            value: value,
+            variable: var
+        })
+    }
+
     pub fn square<CS>(
         &self,
         mut cs: CS
@@ -291,6 +332,21 @@ mod test {
         assert!(cs.get("squared num") == Fr::from_str("9").unwrap());
         assert!(n2.value.unwrap() == Fr::from_str("9").unwrap());
         cs.set("squared num", Fr::from_str("10").unwrap());
+        assert!(!cs.is_satisfied());
+    }
+
+    #[test]
+    fn test_num_multiplication() {
+        let mut cs = TestConstraintSystem::<Bls12>::new();
+
+        let n = AllocatedNum::alloc(cs.namespace(|| "a"), || Ok(Fr::from_str("12").unwrap())).unwrap();
+        let n2 = AllocatedNum::alloc(cs.namespace(|| "b"), || Ok(Fr::from_str("10").unwrap())).unwrap();
+        let n3 = n.mul(&mut cs, &n2).unwrap();
+
+        assert!(cs.is_satisfied());
+        assert!(cs.get("product num") == Fr::from_str("120").unwrap());
+        assert!(n3.value.unwrap() == Fr::from_str("120").unwrap());
+        cs.set("product num", Fr::from_str("121").unwrap());
         assert!(!cs.is_satisfied());
     }
 
