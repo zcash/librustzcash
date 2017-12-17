@@ -1,7 +1,8 @@
 use pairing::{
     Engine,
     Field,
-    PrimeField
+    PrimeField,
+    BitIterator
 };
 
 use bellman::{
@@ -15,7 +16,8 @@ use super::{
 };
 
 use super::boolean::{
-   Boolean
+   Boolean,
+   AllocatedBit
 };
 
 pub struct AllocatedNum<E: Engine, Var> {
@@ -44,6 +46,67 @@ impl<E: Engine, Var: Copy> AllocatedNum<E, Var> {
             value: new_value,
             variable: var
         })
+    }
+
+    pub fn into_bits<CS>(
+        &self,
+        mut cs: CS
+    ) -> Result<Vec<Boolean<Var>>, SynthesisError>
+        where CS: ConstraintSystem<E, Variable=Var>
+    {
+        let bit_values = match self.value {
+            Some(value) => {
+                let mut field_char = BitIterator::new(E::Fr::char());
+
+                let mut tmp = Vec::with_capacity(E::Fr::NUM_BITS as usize);
+
+                let mut found_one = false;
+                for b in BitIterator::new(value.into_repr()) {
+                    // Skip leading bits
+                    found_one |= field_char.next().unwrap();
+                    if !found_one {
+                        continue;
+                    }
+
+                    tmp.push(Some(b));
+                }
+
+                assert_eq!(tmp.len(), E::Fr::NUM_BITS as usize);
+
+                tmp
+            },
+            None => {
+                vec![None; E::Fr::NUM_BITS as usize]
+            }
+        };
+
+        let mut bits = vec![];
+        for (i, b) in bit_values.into_iter().enumerate() {
+            bits.push(AllocatedBit::alloc(
+                cs.namespace(|| format!("bit {}", i)),
+                b
+            )?);
+        }
+
+        let mut lc = LinearCombination::zero();
+        let mut coeff = E::Fr::one();
+
+        for bit in bits.iter().rev() {
+            lc = lc + (coeff, bit.get_variable());
+
+            coeff.double();
+        }
+
+        lc = lc - self.variable;
+
+        cs.enforce(
+            || "unpacking constraint",
+            LinearCombination::zero(),
+            LinearCombination::zero(),
+            lc
+        );
+
+        Ok(bits.into_iter().map(|b| Boolean::from(b)).collect())
     }
 
     pub fn from_bits_strict<CS>(
@@ -236,6 +299,46 @@ mod test {
 
             let n = AllocatedNum::alloc(&mut cs, || Ok(Fr::zero())).unwrap();
             assert!(n.assert_nonzero(&mut cs).is_err());
+        }
+    }
+
+    #[test]
+    fn test_into_bits() {
+        let mut rng = XorShiftRng::from_seed([0x3dbe6259, 0x8d313d76, 0x3237db17, 0xe5bc0654]);
+
+        for _ in 0..100 {
+            let r = Fr::rand(&mut rng);
+            let mut cs = TestConstraintSystem::<Bls12>::new();
+
+            let n = AllocatedNum::alloc(&mut cs, || Ok(r)).unwrap();
+
+            let bits = n.into_bits(&mut cs).unwrap();
+
+            assert!(cs.is_satisfied());
+
+            for (b, a) in BitIterator::new(r.into_repr()).skip(1).zip(bits.iter()) {
+                if let &Boolean::Is(ref a) = a {
+                    assert_eq!(b, a.get_value().unwrap());
+                } else {
+                    unreachable!()
+                }
+            }
+
+            cs.set("num", Fr::rand(&mut rng));
+            assert!(!cs.is_satisfied());
+            cs.set("num", r);
+            assert!(cs.is_satisfied());
+
+            for i in 0..Fr::NUM_BITS {
+                let name = format!("bit {}/boolean", i);
+                let cur = cs.get(&name);
+                let mut tmp = Fr::one();
+                tmp.sub_assign(&cur);
+                cs.set(&name, tmp);
+                assert!(!cs.is_satisfied());
+                cs.set(&name, cur);
+                assert!(cs.is_satisfied());
+            }
         }
     }
 

@@ -435,6 +435,9 @@ impl<Var: Copy> Boolean<Var> {
                     current_run.truncate(0);
                 }
 
+                // TODO: this could be optimized with a k-ary operation
+                // (all zeros are required in the run if last_run is zero)
+
                 // If `last_run` is true, `a` must be false, or it would
                 // not be in the field.
                 //
