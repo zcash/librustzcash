@@ -48,6 +48,18 @@ impl<E: Engine, Var: Copy> AllocatedNum<E, Var> {
         })
     }
 
+    pub fn into_bits_strict<CS>(
+        &self,
+        mut cs: CS
+    ) -> Result<Vec<Boolean<Var>>, SynthesisError>
+        where CS: ConstraintSystem<E, Variable=Var>
+    {
+        let bits = self.into_bits(&mut cs)?;
+        Boolean::enforce_in_field::<_, _, E::Fr>(&mut cs, &bits)?;
+
+        Ok(bits)
+    }
+
     pub fn into_bits<CS>(
         &self,
         mut cs: CS
@@ -300,6 +312,35 @@ mod test {
             let n = AllocatedNum::alloc(&mut cs, || Ok(Fr::zero())).unwrap();
             assert!(n.assert_nonzero(&mut cs).is_err());
         }
+    }
+
+    #[test]
+    fn test_into_bits_strict() {
+        let mut negone = Fr::one();
+        negone.negate();
+
+        let mut cs = TestConstraintSystem::<Bls12>::new();
+
+        let n = AllocatedNum::alloc(&mut cs, || Ok(negone)).unwrap();
+        n.into_bits_strict(&mut cs).unwrap();
+
+        assert!(cs.is_satisfied());
+
+        // make the bit representation the characteristic
+        cs.set("bit 254/boolean", Fr::one());
+
+        // this makes the unpacking constraint fail
+        assert_eq!(cs.which_is_unsatisfied().unwrap(), "unpacking constraint");
+
+        // fix it by making the number zero (congruent to the characteristic)
+        cs.set("num", Fr::zero());
+
+        // and constraint is disturbed during enforce in field check
+        assert_eq!(cs.which_is_unsatisfied().unwrap(), "nand 121/AND 0/and constraint");
+        cs.set("nand 121/AND 0/and result", Fr::one());
+
+        // now the nand should fail (enforce in field is working)
+        assert_eq!(cs.which_is_unsatisfied().unwrap(), "nand 121/enforce nand");
     }
 
     #[test]
