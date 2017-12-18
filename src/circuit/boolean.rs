@@ -249,6 +249,28 @@ pub enum Boolean<Var> {
 }
 
 impl<Var: Copy> Boolean<Var> {
+    pub fn enforce_equal<E, CS>(
+        mut cs: CS,
+        a: &Self,
+        b: &Self
+    ) -> Result<(), SynthesisError>
+        where E: Engine,
+              CS: ConstraintSystem<E, Variable=Var>
+    {
+        // TODO: this is just a cheap hack
+        let c = Self::xor(&mut cs, a, b)?;
+
+        Self::enforce_nand(&mut cs, &[c])
+    }
+
+    pub fn get_value(&self) -> Option<bool> {
+        match self {
+            &Boolean::Constant(c) => Some(c),
+            &Boolean::Is(ref v) => v.get_value(),
+            &Boolean::Not(ref v) => v.get_value().map(|b| !b)
+        }
+    }
+
     /// Construct a boolean from a known constant
     pub fn constant(b: bool) -> Self {
         Boolean::Constant(b)
@@ -574,6 +596,36 @@ mod test {
                 // Invert the result and check if the constraint system is still satisfied
                 cs.set("nor result", if !*a_val & !*b_val { Field::zero() } else { Field::one() });
                 assert!(!cs.is_satisfied());
+            }
+        }
+    }
+
+    #[test]
+    fn test_enforce_equal() {
+        for a_bool in [false, true].iter().cloned() {
+            for b_bool in [false, true].iter().cloned() {
+                for a_neg in [false, true].iter().cloned() {
+                    for b_neg in [false, true].iter().cloned() {
+                        let mut cs = TestConstraintSystem::<Bls12>::new();
+
+                        let mut a = Boolean::from(AllocatedBit::alloc(cs.namespace(|| "a"), Some(a_bool)).unwrap());
+                        let mut b = Boolean::from(AllocatedBit::alloc(cs.namespace(|| "b"), Some(b_bool)).unwrap());
+
+                        if a_neg {
+                            a = a.not();
+                        }
+                        if b_neg {
+                            b = b.not();
+                        }
+
+                        Boolean::enforce_equal(&mut cs, &a, &b).unwrap();
+
+                        assert_eq!(
+                            cs.is_satisfied(),
+                            (a_bool ^ a_neg) == (b_bool ^ b_neg)
+                        );
+                    }
+                }
             }
         }
     }
