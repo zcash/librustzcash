@@ -1222,19 +1222,3 @@ fn test_fs_root_of_unity() {
     );
     assert!(Fs::multiplicative_generator().sqrt().is_none());
 }
-
-// TODO
-/*
-#[test]
-fn fr_field_tests() {
-    ::tests::field::random_field_tests::<Fr>();
-    ::tests::field::random_sqrt_tests::<Fr>();
-    ::tests::field::random_frobenius_tests::<Fr, _>(Fr::char(), 13);
-    ::tests::field::from_str_tests::<Fr>();
-}
-
-#[test]
-fn fr_repr_tests() {
-    ::tests::repr::random_repr_tests::<FsRepr>();
-}
-*/

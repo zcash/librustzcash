@@ -180,7 +180,6 @@ impl<Var: Copy> UInt32<Var> {
         })
     }
 
-    // TODO: could optimize
     /// Perform modular addition of several `UInt32` objects.
     pub fn addmany<E, CS>(
         mut cs: CS,
