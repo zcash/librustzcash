@@ -15,7 +15,6 @@ pub fn group_hash<E: JubjubEngine>(
     // Check to see that scalar field is 255 bits
     assert!(E::Fr::NUM_BITS == 255);
 
-    // TODO: personalization/first block
     let mut h = Blake2s::new_keyed(&[], 32);
     h.process(tag);
     let mut h = h.fixed_result().to_vec();

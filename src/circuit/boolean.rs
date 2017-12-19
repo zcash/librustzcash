@@ -257,7 +257,6 @@ impl<Var: Copy> Boolean<Var> {
         where E: Engine,
               CS: ConstraintSystem<E, Variable=Var>
     {
-        // TODO: this is just a cheap hack
         let c = Self::xor(&mut cs, a, b)?;
 
         Self::enforce_nand(&mut cs, &[c])
@@ -351,7 +350,6 @@ impl<Var: Copy> Boolean<Var> {
         assert!(bits.len() > 0);
         let mut bits = bits.iter();
 
-        // TODO: optimize
         let mut cur: Self = bits.next().unwrap().clone();
 
         let mut i = 0;
@@ -374,13 +372,11 @@ impl<Var: Copy> Boolean<Var> {
     {
         let res = Self::kary_and(&mut cs, bits)?;
 
-        // TODO: optimize
         match res {
             Boolean::Constant(false) => {
                 Ok(())
             },
             Boolean::Constant(true) => {
-                // TODO: more descriptive error
                 Err(SynthesisError::AssignmentMissing)
             },
             Boolean::Is(ref res) => {
@@ -456,9 +452,6 @@ impl<Var: Copy> Boolean<Var> {
                     run_i += 1;
                     current_run.truncate(0);
                 }
-
-                // TODO: this could be optimized with a k-ary operation
-                // (all zeros are required in the run if last_run is zero)
 
                 // If `last_run` is true, `a` must be false, or it would
                 // not be in the field.

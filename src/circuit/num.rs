@@ -272,7 +272,6 @@ impl<E: Engine, Var: Copy> AllocatedNum<E, Var> {
             let tmp = *self.value.get()?;
             
             if tmp.is_zero() {
-                // TODO: add a more descriptive error to bellman
                 Err(SynthesisError::AssignmentMissing)
             } else {
                 Ok(tmp.inverse().unwrap())

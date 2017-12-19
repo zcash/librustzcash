@@ -1,8 +1,15 @@
-// TODO
-use super::*;
+use super::{
+    JubjubEngine,
+    JubjubParams,
+    PrimeOrder,
+    montgomery,
+    edwards
+};
 
 use pairing::{
     Field,
+    PrimeField,
+    SqrtField,
     LegendreSymbol
 };
 

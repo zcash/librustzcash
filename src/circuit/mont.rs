@@ -44,8 +44,6 @@ impl<E: JubjubEngine, Var: Copy> MontgomeryPoint<E, Var> {
 
         assert!(tag.len() % 8 == 0);
 
-        // TODO: first block, personalization
-        //
         // Perform BLAKE2s hash
         let h = blake2s(cs.namespace(|| "blake2s"), tag)?;
 
@@ -164,7 +162,6 @@ impl<E: JubjubEngine, Var: Copy> MontgomeryPoint<E, Var> {
                     Ok(t0)
                 },
                 None => {
-                    // TODO: add a more descriptive error to bellman
                     Err(SynthesisError::AssignmentMissing)
                 }
             }
