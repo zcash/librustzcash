@@ -4,6 +4,8 @@ pub mod test;
 pub mod boolean;
 pub mod uint32;
 pub mod blake2s;
+pub mod num;
+pub mod mont;
 
 use bellman::SynthesisError;
 

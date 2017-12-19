@@ -265,6 +265,14 @@ fn test_jubjub_params<E: JubjubEngine>(params: &E::Params) {
     a.negate();
 
     {
+        // Check that 2A is consistent with A
+        let mut tmp = *params.montgomery_a();
+        tmp.double();
+
+        assert_eq!(&tmp, params.montgomery_2a());
+    }
+
+    {
         // The twisted Edwards addition law is complete when d is nonsquare
         // and a is square.
 

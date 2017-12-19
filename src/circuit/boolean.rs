@@ -1,6 +1,9 @@
 use pairing::{
     Engine,
-    Field
+    Field,
+    PrimeField,
+    PrimeFieldRepr,
+    BitIterator
 };
 
 use bellman::{
@@ -153,6 +156,84 @@ impl<Var: Copy> AllocatedBit<Var> {
             value: result_value
         })
     }
+
+    /// Calculates `a AND (NOT b)`.
+    pub fn and_not<E, CS>(
+        mut cs: CS,
+        a: &Self,
+        b: &Self
+    ) -> Result<Self, SynthesisError>
+        where E: Engine,
+              CS: ConstraintSystem<E, Variable=Var>
+    {
+        let mut result_value = None;
+
+        let result_var = cs.alloc(|| "and not result", || {
+            if *a.value.get()? & !*b.value.get()? {
+                result_value = Some(true);
+
+                Ok(E::Fr::one())
+            } else {
+                result_value = Some(false);
+
+                Ok(E::Fr::zero())
+            }
+        })?;
+
+        // Constrain (a) * (1 - b) = (c), ensuring c is 1 iff
+        // a is true and b is false, and otherwise c is 0.
+        let one = cs.one();
+        cs.enforce(
+            || "and not constraint",
+            LinearCombination::zero() + a.variable,
+            LinearCombination::zero() + one - b.variable,
+            LinearCombination::zero() + result_var
+        );
+
+        Ok(AllocatedBit {
+            variable: result_var,
+            value: result_value
+        })
+    }
+
+    /// Calculates `(NOT a) AND (NOT b)`.
+    pub fn nor<E, CS>(
+        mut cs: CS,
+        a: &Self,
+        b: &Self
+    ) -> Result<Self, SynthesisError>
+        where E: Engine,
+              CS: ConstraintSystem<E, Variable=Var>
+    {
+        let mut result_value = None;
+
+        let result_var = cs.alloc(|| "nor result", || {
+            if !*a.value.get()? & !*b.value.get()? {
+                result_value = Some(true);
+
+                Ok(E::Fr::one())
+            } else {
+                result_value = Some(false);
+
+                Ok(E::Fr::zero())
+            }
+        })?;
+
+        // Constrain (1 - a) * (1 - b) = (c), ensuring c is 1 iff
+        // a and b are both false, and otherwise c is 0.
+        let one = cs.one();
+        cs.enforce(
+            || "nor constraint",
+            LinearCombination::zero() + one - a.variable,
+            LinearCombination::zero() + one - b.variable,
+            LinearCombination::zero() + result_var
+        );
+
+        Ok(AllocatedBit {
+            variable: result_var,
+            value: result_value
+        })
+    }
 }
 
 /// This is a boolean value which may be either a constant or
@@ -168,6 +249,28 @@ pub enum Boolean<Var> {
 }
 
 impl<Var: Copy> Boolean<Var> {
+    pub fn enforce_equal<E, CS>(
+        mut cs: CS,
+        a: &Self,
+        b: &Self
+    ) -> Result<(), SynthesisError>
+        where E: Engine,
+              CS: ConstraintSystem<E, Variable=Var>
+    {
+        // TODO: this is just a cheap hack
+        let c = Self::xor(&mut cs, a, b)?;
+
+        Self::enforce_nand(&mut cs, &[c])
+    }
+
+    pub fn get_value(&self) -> Option<bool> {
+        match self {
+            &Boolean::Constant(c) => Some(c),
+            &Boolean::Is(ref v) => v.get_value(),
+            &Boolean::Not(ref v) => v.get_value().map(|b| !b)
+        }
+    }
+
     /// Construct a boolean from a known constant
     pub fn constant(b: bool) -> Self {
         Boolean::Constant(b)
@@ -208,6 +311,176 @@ impl<Var: Copy> Boolean<Var> {
             }
         }
     }
+
+    /// Perform AND over two boolean operands
+    pub fn and<'a, E, CS>(
+        cs: CS,
+        a: &'a Self,
+        b: &'a Self
+    ) -> Result<Self, SynthesisError>
+        where E: Engine,
+              CS: ConstraintSystem<E, Variable=Var>
+    {
+        match (a, b) {
+            // false AND x is always false
+            (&Boolean::Constant(false), _) | (_, &Boolean::Constant(false)) => Ok(Boolean::Constant(false)),
+            // true AND x is always x
+            (&Boolean::Constant(true), x) | (x, &Boolean::Constant(true)) => Ok(x.clone()),
+            // a AND (NOT b)
+            (&Boolean::Is(ref is), &Boolean::Not(ref not)) | (&Boolean::Not(ref not), &Boolean::Is(ref is)) => {
+                Ok(Boolean::Is(AllocatedBit::and_not(cs, is, not)?))
+            },
+            // (NOT a) AND (NOT b) = a NOR b
+            (&Boolean::Not(ref a), &Boolean::Not(ref b)) => {
+                Ok(Boolean::Is(AllocatedBit::nor(cs, a, b)?))
+            },
+            // a AND b
+            (&Boolean::Is(ref a), &Boolean::Is(ref b)) => {
+                Ok(Boolean::Is(AllocatedBit::and(cs, a, b)?))
+            }
+        }
+    }
+
+    pub fn kary_and<E, CS>(
+        mut cs: CS,
+        bits: &[Self]
+    ) -> Result<Self, SynthesisError>
+        where E: Engine,
+              CS: ConstraintSystem<E, Variable=Var>
+    {
+        assert!(bits.len() > 0);
+        let mut bits = bits.iter();
+
+        // TODO: optimize
+        let mut cur: Self = bits.next().unwrap().clone();
+
+        let mut i = 0;
+        while let Some(next) = bits.next() {
+            cur = Boolean::and(cs.namespace(|| format!("AND {}", i)), &cur, next)?;
+
+            i += 1;
+        }
+
+        Ok(cur)
+    }
+
+    /// Asserts that at least one operand is false.
+    pub fn enforce_nand<E, CS>(
+        mut cs: CS,
+        bits: &[Self]
+    ) -> Result<(), SynthesisError>
+        where E: Engine,
+              CS: ConstraintSystem<E, Variable=Var>
+    {
+        let res = Self::kary_and(&mut cs, bits)?;
+
+        // TODO: optimize
+        match res {
+            Boolean::Constant(false) => {
+                Ok(())
+            },
+            Boolean::Constant(true) => {
+                // TODO: more descriptive error
+                Err(SynthesisError::AssignmentMissing)
+            },
+            Boolean::Is(ref res) => {
+                cs.enforce(
+                    || "enforce nand",
+                    LinearCombination::zero(),
+                    LinearCombination::zero(),
+                    LinearCombination::zero() + res.get_variable()
+                );
+
+                Ok(())
+            },
+            Boolean::Not(ref res) => {
+                let one = cs.one();
+                cs.enforce(
+                    || "enforce nand",
+                    LinearCombination::zero(),
+                    LinearCombination::zero(),
+                    LinearCombination::zero() + one - res.get_variable()
+                );
+
+                Ok(())
+            },
+        }
+    }
+
+    /// Asserts that this bit representation is "in
+    /// the field" when interpreted in big endian.
+    pub fn enforce_in_field<E, CS, F: PrimeField>(
+        mut cs: CS,
+        bits: &[Self]
+    ) -> Result<(), SynthesisError>
+        where E: Engine,
+              CS: ConstraintSystem<E, Variable=Var>
+    {
+        assert_eq!(bits.len(), F::NUM_BITS as usize);
+
+        let mut a = bits.iter();
+
+        // b = char() - 1
+        let mut b = F::char();
+        b.sub_noborrow(&1.into());
+
+        // Runs of ones in r
+        let mut last_run = Boolean::<Var>::constant(true);
+        let mut current_run = vec![];
+
+        let mut found_one = false;
+        let mut run_i = 0;
+        let mut nand_i = 0;
+        for b in BitIterator::new(b) {
+            // Skip over unset bits at the beginning
+            found_one |= b;
+            if !found_one {
+                continue;
+            }
+
+            let a = a.next().unwrap();
+
+            if b {
+                // This is part of a run of ones.
+                current_run.push(a.clone());
+            } else {
+                if current_run.len() > 0 {
+                    // This is the start of a run of zeros, but we need
+                    // to k-ary AND against `last_run` first.
+
+                    current_run.push(last_run.clone());
+                    last_run = Self::kary_and(
+                        cs.namespace(|| format!("run {}", run_i)),
+                        &current_run
+                    )?;
+                    run_i += 1;
+                    current_run.truncate(0);
+                }
+
+                // TODO: this could be optimized with a k-ary operation
+                // (all zeros are required in the run if last_run is zero)
+
+                // If `last_run` is true, `a` must be false, or it would
+                // not be in the field.
+                //
+                // If `last_run` is false, `a` can be true or false.
+                //
+                // Ergo, at least one of `last_run` and `a` must be false.
+                Self::enforce_nand(
+                    cs.namespace(|| format!("nand {}", nand_i)),
+                    &[last_run.clone(), a.clone()]
+                )?;
+                nand_i += 1;
+            }
+        }
+
+        // We should always end in a "run" of zeros, because
+        // the characteristic is an odd prime. So, this should
+        // be empty.
+        assert_eq!(current_run.len(), 0);
+
+        Ok(())
+    }
 }
 
 impl<Var> From<AllocatedBit<Var>> for Boolean<Var> {
@@ -218,9 +491,10 @@ impl<Var> From<AllocatedBit<Var>> for Boolean<Var> {
 
 #[cfg(test)]
 mod test {
+    use rand::{SeedableRng, Rand, XorShiftRng};
     use bellman::{ConstraintSystem};
     use pairing::bls12_381::{Bls12, Fr};
-    use pairing::{Field, PrimeField};
+    use pairing::{Field, PrimeField, PrimeFieldRepr, BitIterator};
     use ::circuit::test::*;
     use super::{AllocatedBit, Boolean};
 
@@ -245,7 +519,8 @@ mod test {
                 let mut cs = TestConstraintSystem::<Bls12>::new();
                 let a = AllocatedBit::alloc(cs.namespace(|| "a"), Some(*a_val)).unwrap();
                 let b = AllocatedBit::alloc(cs.namespace(|| "b"), Some(*b_val)).unwrap();
-                AllocatedBit::xor(&mut cs, &a, &b).unwrap();
+                let c = AllocatedBit::xor(&mut cs, &a, &b).unwrap();
+                assert_eq!(c.value.unwrap(), *a_val ^ *b_val);
 
                 assert!(cs.is_satisfied());
                 assert!(cs.get("a/boolean") == if *a_val { Field::one() } else { Field::zero() });
@@ -266,7 +541,8 @@ mod test {
                 let mut cs = TestConstraintSystem::<Bls12>::new();
                 let a = AllocatedBit::alloc(cs.namespace(|| "a"), Some(*a_val)).unwrap();
                 let b = AllocatedBit::alloc(cs.namespace(|| "b"), Some(*b_val)).unwrap();
-                AllocatedBit::and(&mut cs, &a, &b).unwrap();
+                let c = AllocatedBit::and(&mut cs, &a, &b).unwrap();
+                assert_eq!(c.value.unwrap(), *a_val & *b_val);
 
                 assert!(cs.is_satisfied());
                 assert!(cs.get("a/boolean") == if *a_val { Field::one() } else { Field::zero() });
@@ -276,6 +552,80 @@ mod test {
                 // Invert the result and check if the constraint system is still satisfied
                 cs.set("and result", if *a_val & *b_val { Field::zero() } else { Field::one() });
                 assert!(!cs.is_satisfied());
+            }
+        }
+    }
+
+    #[test]
+    fn test_and_not() {
+        for a_val in [false, true].iter() {
+            for b_val in [false, true].iter() {
+                let mut cs = TestConstraintSystem::<Bls12>::new();
+                let a = AllocatedBit::alloc(cs.namespace(|| "a"), Some(*a_val)).unwrap();
+                let b = AllocatedBit::alloc(cs.namespace(|| "b"), Some(*b_val)).unwrap();
+                let c = AllocatedBit::and_not(&mut cs, &a, &b).unwrap();
+                assert_eq!(c.value.unwrap(), *a_val & !*b_val);
+
+                assert!(cs.is_satisfied());
+                assert!(cs.get("a/boolean") == if *a_val { Field::one() } else { Field::zero() });
+                assert!(cs.get("b/boolean") == if *b_val { Field::one() } else { Field::zero() });
+                assert!(cs.get("and not result") == if *a_val & !*b_val { Field::one() } else { Field::zero() });
+
+                // Invert the result and check if the constraint system is still satisfied
+                cs.set("and not result", if *a_val & !*b_val { Field::zero() } else { Field::one() });
+                assert!(!cs.is_satisfied());
+            }
+        }
+    }
+
+    #[test]
+    fn test_nor() {
+        for a_val in [false, true].iter() {
+            for b_val in [false, true].iter() {
+                let mut cs = TestConstraintSystem::<Bls12>::new();
+                let a = AllocatedBit::alloc(cs.namespace(|| "a"), Some(*a_val)).unwrap();
+                let b = AllocatedBit::alloc(cs.namespace(|| "b"), Some(*b_val)).unwrap();
+                let c = AllocatedBit::nor(&mut cs, &a, &b).unwrap();
+                assert_eq!(c.value.unwrap(), !*a_val & !*b_val);
+
+                assert!(cs.is_satisfied());
+                assert!(cs.get("a/boolean") == if *a_val { Field::one() } else { Field::zero() });
+                assert!(cs.get("b/boolean") == if *b_val { Field::one() } else { Field::zero() });
+                assert!(cs.get("nor result") == if !*a_val & !*b_val { Field::one() } else { Field::zero() });
+
+                // Invert the result and check if the constraint system is still satisfied
+                cs.set("nor result", if !*a_val & !*b_val { Field::zero() } else { Field::one() });
+                assert!(!cs.is_satisfied());
+            }
+        }
+    }
+
+    #[test]
+    fn test_enforce_equal() {
+        for a_bool in [false, true].iter().cloned() {
+            for b_bool in [false, true].iter().cloned() {
+                for a_neg in [false, true].iter().cloned() {
+                    for b_neg in [false, true].iter().cloned() {
+                        let mut cs = TestConstraintSystem::<Bls12>::new();
+
+                        let mut a = Boolean::from(AllocatedBit::alloc(cs.namespace(|| "a"), Some(a_bool)).unwrap());
+                        let mut b = Boolean::from(AllocatedBit::alloc(cs.namespace(|| "b"), Some(b_bool)).unwrap());
+
+                        if a_neg {
+                            a = a.not();
+                        }
+                        if b_neg {
+                            b = b.not();
+                        }
+
+                        Boolean::enforce_equal(&mut cs, &a, &b).unwrap();
+
+                        assert_eq!(
+                            cs.is_satisfied(),
+                            (a_bool ^ a_neg) == (b_bool ^ b_neg)
+                        );
+                    }
+                }
             }
         }
     }
@@ -327,18 +677,18 @@ mod test {
         }
     }
 
+    #[derive(Copy, Clone, Debug)]
+    enum OperandType {
+        True,
+        False,
+        AllocatedTrue,
+        AllocatedFalse,
+        NegatedAllocatedTrue,
+        NegatedAllocatedFalse
+    }
+
     #[test]
     fn test_boolean_xor() {
-        #[derive(Copy, Clone)]
-        enum OperandType {
-            True,
-            False,
-            AllocatedTrue,
-            AllocatedFalse,
-            NegatedAllocatedTrue,
-            NegatedAllocatedFalse
-        }
-
         let variants = [
             OperandType::True,
             OperandType::False,
@@ -469,6 +819,299 @@ mod test {
                     },
 
                     _ => panic!("this should never be encountered")
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_boolean_and() {
+        let variants = [
+            OperandType::True,
+            OperandType::False,
+            OperandType::AllocatedTrue,
+            OperandType::AllocatedFalse,
+            OperandType::NegatedAllocatedTrue,
+            OperandType::NegatedAllocatedFalse
+        ];
+
+        for first_operand in variants.iter().cloned() {
+            for second_operand in variants.iter().cloned() {
+                let mut cs = TestConstraintSystem::<Bls12>::new();
+
+                let a;
+                let b;
+
+                {
+                    let mut dyn_construct = |operand, name| {
+                        let cs = cs.namespace(|| name);
+
+                        match operand {
+                            OperandType::True => Boolean::constant(true),
+                            OperandType::False => Boolean::constant(false),
+                            OperandType::AllocatedTrue => Boolean::from(AllocatedBit::alloc(cs, Some(true)).unwrap()),
+                            OperandType::AllocatedFalse => Boolean::from(AllocatedBit::alloc(cs, Some(false)).unwrap()),
+                            OperandType::NegatedAllocatedTrue => Boolean::from(AllocatedBit::alloc(cs, Some(true)).unwrap()).not(),
+                            OperandType::NegatedAllocatedFalse => Boolean::from(AllocatedBit::alloc(cs, Some(false)).unwrap()).not(),
+                        }
+                    };
+
+                    a = dyn_construct(first_operand, "a");
+                    b = dyn_construct(second_operand, "b");
+                }
+
+                let c = Boolean::and(&mut cs, &a, &b).unwrap();
+
+                assert!(cs.is_satisfied());
+
+                match (first_operand, second_operand, c) {
+                    (OperandType::True, OperandType::True, Boolean::Constant(true)) => {},
+                    (OperandType::True, OperandType::False, Boolean::Constant(false)) => {},
+                    (OperandType::True, OperandType::AllocatedTrue, Boolean::Is(_)) => {},
+                    (OperandType::True, OperandType::AllocatedFalse, Boolean::Is(_)) => {},
+                    (OperandType::True, OperandType::NegatedAllocatedTrue, Boolean::Not(_)) => {},
+                    (OperandType::True, OperandType::NegatedAllocatedFalse, Boolean::Not(_)) => {},
+
+                    (OperandType::False, OperandType::True, Boolean::Constant(false)) => {},
+                    (OperandType::False, OperandType::False, Boolean::Constant(false)) => {},
+                    (OperandType::False, OperandType::AllocatedTrue, Boolean::Constant(false)) => {},
+                    (OperandType::False, OperandType::AllocatedFalse, Boolean::Constant(false)) => {},
+                    (OperandType::False, OperandType::NegatedAllocatedTrue, Boolean::Constant(false)) => {},
+                    (OperandType::False, OperandType::NegatedAllocatedFalse, Boolean::Constant(false)) => {},
+
+                    (OperandType::AllocatedTrue, OperandType::True, Boolean::Is(_)) => {},
+                    (OperandType::AllocatedTrue, OperandType::False, Boolean::Constant(false)) => {},
+                    (OperandType::AllocatedTrue, OperandType::AllocatedTrue, Boolean::Is(ref v)) => {
+                        assert!(cs.get("and result") == Field::one());
+                        assert_eq!(v.value, Some(true));
+                    },
+                    (OperandType::AllocatedTrue, OperandType::AllocatedFalse, Boolean::Is(ref v)) => {
+                        assert!(cs.get("and result") == Field::zero());
+                        assert_eq!(v.value, Some(false));
+                    },
+                    (OperandType::AllocatedTrue, OperandType::NegatedAllocatedTrue, Boolean::Is(ref v)) => {
+                        assert!(cs.get("and not result") == Field::zero());
+                        assert_eq!(v.value, Some(false));
+                    },
+                    (OperandType::AllocatedTrue, OperandType::NegatedAllocatedFalse, Boolean::Is(ref v)) => {
+                        assert!(cs.get("and not result") == Field::one());
+                        assert_eq!(v.value, Some(true));
+                    },
+
+                    (OperandType::AllocatedFalse, OperandType::True, Boolean::Is(_)) => {},
+                    (OperandType::AllocatedFalse, OperandType::False, Boolean::Constant(false)) => {},
+                    (OperandType::AllocatedFalse, OperandType::AllocatedTrue, Boolean::Is(ref v)) => {
+                        assert!(cs.get("and result") == Field::zero());
+                        assert_eq!(v.value, Some(false));
+                    },
+                    (OperandType::AllocatedFalse, OperandType::AllocatedFalse, Boolean::Is(ref v)) => {
+                        assert!(cs.get("and result") == Field::zero());
+                        assert_eq!(v.value, Some(false));
+                    },
+                    (OperandType::AllocatedFalse, OperandType::NegatedAllocatedTrue, Boolean::Is(ref v)) => {
+                        assert!(cs.get("and not result") == Field::zero());
+                        assert_eq!(v.value, Some(false));
+                    },
+                    (OperandType::AllocatedFalse, OperandType::NegatedAllocatedFalse, Boolean::Is(ref v)) => {
+                        assert!(cs.get("and not result") == Field::zero());
+                        assert_eq!(v.value, Some(false));
+                    },
+
+                    (OperandType::NegatedAllocatedTrue, OperandType::True, Boolean::Not(_)) => {},
+                    (OperandType::NegatedAllocatedTrue, OperandType::False, Boolean::Constant(false)) => {},
+                    (OperandType::NegatedAllocatedTrue, OperandType::AllocatedTrue, Boolean::Is(ref v)) => {
+                        assert!(cs.get("and not result") == Field::zero());
+                        assert_eq!(v.value, Some(false));
+                    },
+                    (OperandType::NegatedAllocatedTrue, OperandType::AllocatedFalse, Boolean::Is(ref v)) => {
+                        assert!(cs.get("and not result") == Field::zero());
+                        assert_eq!(v.value, Some(false));
+                    },
+                    (OperandType::NegatedAllocatedTrue, OperandType::NegatedAllocatedTrue, Boolean::Is(ref v)) => {
+                        assert!(cs.get("nor result") == Field::zero());
+                        assert_eq!(v.value, Some(false));
+                    },
+                    (OperandType::NegatedAllocatedTrue, OperandType::NegatedAllocatedFalse, Boolean::Is(ref v)) => {
+                        assert!(cs.get("nor result") == Field::zero());
+                        assert_eq!(v.value, Some(false));
+                    },
+
+                    (OperandType::NegatedAllocatedFalse, OperandType::True, Boolean::Not(_)) => {},
+                    (OperandType::NegatedAllocatedFalse, OperandType::False, Boolean::Constant(false)) => {},
+                    (OperandType::NegatedAllocatedFalse, OperandType::AllocatedTrue, Boolean::Is(ref v)) => {
+                        assert!(cs.get("and not result") == Field::one());
+                        assert_eq!(v.value, Some(true));
+                    },
+                    (OperandType::NegatedAllocatedFalse, OperandType::AllocatedFalse, Boolean::Is(ref v)) => {
+                        assert!(cs.get("and not result") == Field::zero());
+                        assert_eq!(v.value, Some(false));
+                    },
+                    (OperandType::NegatedAllocatedFalse, OperandType::NegatedAllocatedTrue, Boolean::Is(ref v)) => {
+                        assert!(cs.get("nor result") == Field::zero());
+                        assert_eq!(v.value, Some(false));
+                    },
+                    (OperandType::NegatedAllocatedFalse, OperandType::NegatedAllocatedFalse, Boolean::Is(ref v)) => {
+                        assert!(cs.get("nor result") == Field::one());
+                        assert_eq!(v.value, Some(true));
+                    },
+
+                    _ => {
+                        panic!("unexpected behavior at {:?} AND {:?}", first_operand, second_operand);
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_enforce_in_field() {
+        {
+            let mut cs = TestConstraintSystem::<Bls12>::new();
+
+            let mut bits = vec![];
+            for (i, b) in BitIterator::new(Fr::char()).skip(1).enumerate() {
+                bits.push(Boolean::from(AllocatedBit::alloc(
+                    cs.namespace(|| format!("bit {}", i)),
+                    Some(b)
+                ).unwrap()));
+            }
+
+            Boolean::enforce_in_field::<_, _, Fr>(&mut cs, &bits).unwrap();
+
+            assert!(!cs.is_satisfied());
+        }
+
+        let mut rng = XorShiftRng::from_seed([0x3dbe6259, 0x8d313d76, 0x3237db17, 0xe5bc0654]);
+
+        for _ in 0..1000 {
+            let r = Fr::rand(&mut rng);
+            let mut cs = TestConstraintSystem::<Bls12>::new();
+
+            let mut bits = vec![];
+            for (i, b) in BitIterator::new(r.into_repr()).skip(1).enumerate() {
+                bits.push(Boolean::from(AllocatedBit::alloc(
+                    cs.namespace(|| format!("bit {}", i)),
+                    Some(b)
+                ).unwrap()));
+            }
+
+            Boolean::enforce_in_field::<_, _, Fr>(&mut cs, &bits).unwrap();
+
+            assert!(cs.is_satisfied());
+        }
+
+        for _ in 0..1000 {
+            // Sample a random element not in the field
+            let r = loop {
+                let mut a = Fr::rand(&mut rng).into_repr();
+                let b = Fr::rand(&mut rng).into_repr();
+
+                a.add_nocarry(&b);
+                // we're shaving off the high bit later
+                a.as_mut()[3] &= 0x7fffffffffffffff;
+                if Fr::from_repr(a).is_err() {
+                    break a;
+                }
+            };
+
+            let mut cs = TestConstraintSystem::<Bls12>::new();
+
+            let mut bits = vec![];
+            for (i, b) in BitIterator::new(r).skip(1).enumerate() {
+                bits.push(Boolean::from(AllocatedBit::alloc(
+                    cs.namespace(|| format!("bit {}", i)),
+                    Some(b)
+                ).unwrap()));
+            }
+
+            Boolean::enforce_in_field::<_, _, Fr>(&mut cs, &bits).unwrap();
+
+            assert!(!cs.is_satisfied());
+        }
+    }
+
+    #[test]
+    fn test_enforce_nand() {
+        {
+            let mut cs = TestConstraintSystem::<Bls12>::new();
+
+            Boolean::enforce_nand(&mut cs, &[Boolean::constant(false)]).is_ok();
+            Boolean::enforce_nand(&mut cs, &[Boolean::constant(true)]).is_err();
+        }
+
+        for i in 1..5 {
+            // with every possible assignment for them
+            for mut b in 0..(1 << i) {
+                // with every possible negation
+                for mut n in 0..(1 << i) {
+                    let mut cs = TestConstraintSystem::<Bls12>::new();
+
+                    let mut expected = true;
+
+                    let mut bits = vec![];
+                    for j in 0..i {
+                        expected &= b & 1 == 1;
+
+                        if n & 1 == 1 {
+                            bits.push(Boolean::from(AllocatedBit::alloc(
+                                cs.namespace(|| format!("bit {}", j)),
+                                Some(b & 1 == 1)
+                            ).unwrap()));
+                        } else {
+                            bits.push(Boolean::from(AllocatedBit::alloc(
+                                cs.namespace(|| format!("bit {}", j)),
+                                Some(b & 1 == 0)
+                            ).unwrap()).not());
+                        }
+                        
+                        b >>= 1;
+                        n >>= 1;
+                    }
+
+                    let expected = !expected;
+
+                    Boolean::enforce_nand(&mut cs, &bits).unwrap();
+
+                    if expected {
+                        assert!(cs.is_satisfied());
+                    } else {
+                        assert!(!cs.is_satisfied());
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_kary_and() {
+        // test different numbers of operands
+        for i in 1..15 {
+            // with every possible assignment for them
+            for mut b in 0..(1 << i) {
+                let mut cs = TestConstraintSystem::<Bls12>::new();
+
+                let mut expected = true;
+
+                let mut bits = vec![];
+                for j in 0..i {
+                    expected &= b & 1 == 1;
+
+                    bits.push(Boolean::from(AllocatedBit::alloc(
+                        cs.namespace(|| format!("bit {}", j)),
+                        Some(b & 1 == 1)
+                    ).unwrap()));
+                    b >>= 1;
+                }
+
+                let r = Boolean::kary_and(&mut cs, &bits).unwrap();
+
+                assert!(cs.is_satisfied());
+
+                match r {
+                    Boolean::Is(ref r) => {
+                        assert_eq!(r.value.unwrap(), expected);
+                    },
+                    _ => unreachable!()
                 }
             }
         }
