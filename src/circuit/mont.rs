@@ -103,6 +103,21 @@ impl<E: JubjubEngine, Var: Copy> MontgomeryPoint<E, Var> {
         Ok(p)
     }
 
+    /// Interprets an (x, y) pair as a point
+    /// in Montgomery, does not check that it's
+    /// on the curve. Useful for constants and
+    /// window table lookups.
+    pub fn interpret_unchecked(
+        x: AllocatedNum<E, Var>,
+        y: AllocatedNum<E, Var>
+    ) -> Self
+    {
+        MontgomeryPoint {
+            x: x,
+            y: y
+        }
+    }
+
     pub fn interpret<CS>(
         mut cs: CS,
         x: &AllocatedNum<E, Var>,
@@ -128,6 +143,99 @@ impl<E: JubjubEngine, Var: Copy> MontgomeryPoint<E, Var> {
         Ok(MontgomeryPoint {
             x: x.clone(),
             y: y.clone()
+        })
+    }
+
+    /// Performs an affine point addition, not defined for
+    /// coincident points.
+    pub fn add<CS>(
+        &self,
+        mut cs: CS,
+        other: &Self,
+        params: &E::Params
+    ) -> Result<Self, SynthesisError>
+        where CS: ConstraintSystem<E, Variable=Var>
+    {
+        // Compute lambda = (y' - y) / (x' - x)
+        let lambda = AllocatedNum::alloc(cs.namespace(|| "lambda"), || {
+            let mut n = *other.y.get_value().get()?;
+            n.sub_assign(self.y.get_value().get()?);
+
+            let mut d = *other.x.get_value().get()?;
+            d.sub_assign(self.x.get_value().get()?);
+
+            match d.inverse() {
+                Some(d) => {
+                    n.mul_assign(&d);
+                    Ok(n)
+                },
+                None => {
+                    // TODO: add more descriptive error
+                    Err(SynthesisError::AssignmentMissing)
+                }
+            }
+        })?;
+
+        cs.enforce(
+            || "evaluate lambda",
+            LinearCombination::<Var, E>::zero() + other.x.get_variable()
+                                                - self.x.get_variable(),
+
+            LinearCombination::zero()           + lambda.get_variable(),
+
+            LinearCombination::<Var, E>::zero() + other.y.get_variable()
+                                                - self.y.get_variable()
+        );
+
+        // Compute x'' = lambda^2 - A - x - x'
+        let xprime = AllocatedNum::alloc(cs.namespace(|| "xprime"), || {
+            let mut t0 = *lambda.get_value().get()?;
+            t0.square();
+            t0.sub_assign(params.montgomery_a());
+            t0.sub_assign(self.x.get_value().get()?);
+            t0.sub_assign(other.x.get_value().get()?);
+
+            Ok(t0)
+        })?;
+
+        // (lambda) * (lambda) = (A + x + x' + x'')
+        let one = cs.one();
+        cs.enforce(
+            || "evaluate xprime",
+            LinearCombination::zero()           + lambda.get_variable(),
+            LinearCombination::zero()           + lambda.get_variable(),
+            LinearCombination::<Var, E>::zero() + (*params.montgomery_a(), one)
+                                                + self.x.get_variable()
+                                                + other.x.get_variable()
+                                                + xprime.get_variable()
+        );
+
+        // Compute y' = -(y + lambda(x' - x))
+        let yprime = AllocatedNum::alloc(cs.namespace(|| "yprime"), || {
+            let mut t0 = *xprime.get_value().get()?;
+            t0.sub_assign(self.x.get_value().get()?);
+            t0.mul_assign(lambda.get_value().get()?);
+            t0.add_assign(self.y.get_value().get()?);
+            t0.negate();
+
+            Ok(t0)
+        })?;
+
+        // y' + y = lambda(x - x')
+        cs.enforce(
+            || "evaluate yprime",
+            LinearCombination::zero()           + self.x.get_variable()
+                                                - xprime.get_variable(),
+
+            LinearCombination::zero()           + lambda.get_variable(),
+
+            LinearCombination::<Var, E>::zero() + yprime.get_variable()
+                                                + self.y.get_variable()
+        );
+
+        Ok(MontgomeryPoint {
+            x: xprime,
+            y: yprime
         })
     }
 
@@ -299,7 +407,7 @@ mod test {
                     num_unsatisfied += 1;
                 } else {
                     let p = p.unwrap();
-                    let (x, y) = expected.unwrap();
+                    let (x, y) = expected.unwrap().into_xy().unwrap();
 
                     assert_eq!(p.x.get_value().unwrap(), x);
                     assert_eq!(p.y.get_value().unwrap(), y);
@@ -382,6 +490,84 @@ mod test {
         };
 
         assert!(p.double(&mut cs, params).is_err());
+    }
+
+    #[test]
+    fn test_addition() {
+        let params = &JubjubBls12::new();
+        let rng = &mut XorShiftRng::from_seed([0x5dbe6259, 0x8d313d76, 0x3237db17, 0xe5bc0654]);
+
+        for _ in 0..100 {
+            let p1 = loop {
+                let x: Fr = rng.gen();
+                let s: bool = rng.gen();
+
+                if let Some(p) = montgomery::Point::<Bls12, _>::get_for_x(x, s, params) {
+                    break p;
+                }
+            };
+
+            let p2 = loop {
+                let x: Fr = rng.gen();
+                let s: bool = rng.gen();
+
+                if let Some(p) = montgomery::Point::<Bls12, _>::get_for_x(x, s, params) {
+                    break p;
+                }
+            };
+
+            let p3 = p1.add(&p2, params);
+
+            let (x0, y0) = p1.into_xy().unwrap();
+            let (x1, y1) = p2.into_xy().unwrap();
+            let (x2, y2) = p3.into_xy().unwrap();
+
+            let mut cs = TestConstraintSystem::<Bls12>::new();
+
+            let num_x0 = AllocatedNum::alloc(cs.namespace(|| "x0"), || {
+                Ok(x0)
+            }).unwrap();
+            let num_y0 = AllocatedNum::alloc(cs.namespace(|| "y0"), || {
+                Ok(y0)
+            }).unwrap();
+
+            let num_x1 = AllocatedNum::alloc(cs.namespace(|| "x1"), || {
+                Ok(x1)
+            }).unwrap();
+            let num_y1 = AllocatedNum::alloc(cs.namespace(|| "y1"), || {
+                Ok(y1)
+            }).unwrap();
+
+            let p1 = MontgomeryPoint {
+                x: num_x0,
+                y: num_y0
+            };
+
+            let p2 = MontgomeryPoint {
+                x: num_x1,
+                y: num_y1
+            };
+
+            let p3 = p1.add(cs.namespace(|| "addition"), &p2, params).unwrap();
+
+            assert!(cs.is_satisfied());
+
+            assert!(p3.x.get_value().unwrap() == x2);
+            assert!(p3.y.get_value().unwrap() == y2);
+
+            cs.set("addition/yprime/num", rng.gen());
+            assert_eq!(cs.which_is_unsatisfied(), Some("addition/evaluate yprime"));
+            cs.set("addition/yprime/num", y2);
+            assert!(cs.is_satisfied());
+
+            cs.set("addition/xprime/num", rng.gen());
+            assert_eq!(cs.which_is_unsatisfied(), Some("addition/evaluate xprime"));
+            cs.set("addition/xprime/num", x2);
+            assert!(cs.is_satisfied());
+
+            cs.set("addition/lambda/num", rng.gen());
+            assert_eq!(cs.which_is_unsatisfied(), Some("addition/evaluate lambda"));
+        }
     }
 
     #[test]

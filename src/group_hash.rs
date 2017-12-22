@@ -10,7 +10,7 @@ use digest::{FixedOutput, Input};
 pub fn group_hash<E: JubjubEngine>(
     tag: &[u8],
     params: &E::Params
-) -> Option<(E::Fr, E::Fr)>
+) -> Option<montgomery::Point<E, PrimeOrder>>
 {
     // Check to see that scalar field is 255 bits
     assert!(E::Fr::NUM_BITS == 255);
@@ -33,7 +33,11 @@ pub fn group_hash<E: JubjubEngine>(
             // Enter into the prime order subgroup
             let p = p.mul_by_cofactor(params);
 
-            p.into_xy()
+            if p != montgomery::Point::zero() {
+                Some(p)
+            } else {
+                None
+            }
         } else {
             None
         }
