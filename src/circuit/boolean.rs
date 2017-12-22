@@ -270,6 +270,25 @@ impl<Var: Copy> Boolean<Var> {
         }
     }
 
+    pub fn lc<E: Engine>(&self, one: Var, coeff: E::Fr) -> LinearCombination<Var, E>
+    {
+        match self {
+            &Boolean::Constant(c) => {
+                if c {
+                    LinearCombination::<Var, E>::zero() + (coeff, one)
+                } else {
+                    LinearCombination::<Var, E>::zero()
+                }
+            },
+            &Boolean::Is(ref v) => {
+                LinearCombination::<Var, E>::zero() + (coeff, v.get_variable())
+            },
+            &Boolean::Not(ref v) => {
+                LinearCombination::<Var, E>::zero() + (coeff, one) - (coeff, v.get_variable())
+            }
+        }
+    }
+
     /// Construct a boolean from a known constant
     pub fn constant(b: bool) -> Self {
         Boolean::Constant(b)
