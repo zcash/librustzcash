@@ -131,6 +131,10 @@ fn lookup3_xy_with_conditional_negation<E: Engine, CS, Var: Copy>(
 ) -> Result<(AllocatedNum<E, Var>, AllocatedNum<E, Var>), SynthesisError>
     where CS: ConstraintSystem<E, Variable=Var>
 {
+    // TODO: This can be made into a 2-constraint lookup
+    // if it can return linear combinations rather than
+    // allocated numbers.
+
     assert_eq!(bits.len(), 3);
     assert_eq!(coords.len(), 4);
 
