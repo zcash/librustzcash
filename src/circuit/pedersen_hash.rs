@@ -206,6 +206,31 @@ mod test {
     use ::circuit::test::*;
     use ::circuit::boolean::{Boolean, AllocatedBit};
     use pairing::bls12_381::{Bls12, Fr};
+    use pairing::PrimeField;
+
+    #[test]
+    fn test_pedersen_hash_constraints() {
+        let mut rng = XorShiftRng::from_seed([0x3dbe6259, 0x8d313d76, 0x3237db17, 0xe5bc0654]);
+        let params = &JubjubBls12::new();
+        let mut cs = TestConstraintSystem::<Bls12>::new();
+
+        let input: Vec<bool> = (0..(Fr::NUM_BITS * 2)).map(|_| rng.gen()).collect();
+
+        let input_bools: Vec<Boolean<_>> = input.iter().enumerate().map(|(i, b)| {
+            Boolean::from(
+                AllocatedBit::alloc(cs.namespace(|| format!("input {}", i)), Some(*b)).unwrap()
+            )
+        }).collect();
+
+        pedersen_hash(
+            cs.namespace(|| "pedersen hash"),
+            &input_bools,
+            params
+        ).unwrap();
+
+        assert!(cs.is_satisfied());
+        assert_eq!(cs.num_constraints(), 1539);
+    }
 
     #[test]
     fn test_pedersen_hash() {
