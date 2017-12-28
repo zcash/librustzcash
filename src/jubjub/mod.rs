@@ -21,6 +21,8 @@ use pairing::{
     SqrtField
 };
 
+use super::group_hash::group_hash;
+
 use pairing::bls12_381::{
     Bls12,
     Fr
@@ -42,6 +44,9 @@ pub trait JubjubParams<E: JubjubEngine>: Sized {
     fn montgomery_a(&self) -> &E::Fr;
     fn montgomery_2a(&self) -> &E::Fr;
     fn scale(&self) -> &E::Fr;
+    fn pedersen_hash_generators(&self) -> &[edwards::Point<E, PrimeOrder>];
+    fn pedersen_hash_chunks_per_generator(&self) -> usize;
+    fn pedersen_circuit_generators(&self) -> &[Vec<Vec<(E::Fr, E::Fr)>>];
 }
 
 pub enum Unknown { }
@@ -58,7 +63,9 @@ pub struct JubjubBls12 {
     edwards_d: Fr,
     montgomery_a: Fr,
     montgomery_2a: Fr,
-    scale: Fr
+    scale: Fr,
+    pedersen_hash_generators: Vec<edwards::Point<Bls12, PrimeOrder>>,
+    pedersen_circuit_generators: Vec<Vec<Vec<(Fr, Fr)>>>
 }
 
 impl JubjubParams<Bls12> for JubjubBls12 {
@@ -66,6 +73,15 @@ impl JubjubParams<Bls12> for JubjubBls12 {
     fn montgomery_a(&self) -> &Fr { &self.montgomery_a }
     fn montgomery_2a(&self) -> &Fr { &self.montgomery_2a }
     fn scale(&self) -> &Fr { &self.scale }
+    fn pedersen_hash_generators(&self) -> &[edwards::Point<Bls12, PrimeOrder>] {
+        &self.pedersen_hash_generators
+    }
+    fn pedersen_hash_chunks_per_generator(&self) -> usize {
+        62
+    }
+    fn pedersen_circuit_generators(&self) -> &[Vec<Vec<(Fr, Fr)>>] {
+        &self.pedersen_circuit_generators
+    }
 }
 
 impl JubjubBls12 {
@@ -74,7 +90,7 @@ impl JubjubBls12 {
         let mut montgomery_2a = montgomery_a;
         montgomery_2a.double();
 
-        JubjubBls12 {
+        let mut tmp = JubjubBls12 {
             // d = -(10240/10241)
             edwards_d: Fr::from_str("19257038036680949359750312669786877991949435402254120286184196891950884077233").unwrap(),
             // A = 40962
@@ -82,8 +98,55 @@ impl JubjubBls12 {
             // 2A = 2.A
             montgomery_2a: montgomery_2a,
             // scaling factor = sqrt(4 / (a - d))
-            scale: Fr::from_str("17814886934372412843466061268024708274627479829237077604635722030778476050649").unwrap()
+            scale: Fr::from_str("17814886934372412843466061268024708274627479829237077604635722030778476050649").unwrap(),
+
+            pedersen_hash_generators: vec![],
+            pedersen_circuit_generators: vec![]
+        };
+
+        {
+            let mut cur = 0;
+            let mut pedersen_hash_generators = vec![];
+
+            // TODO: pre-generate the right amount
+            while pedersen_hash_generators.len() < 10 {
+                let gh = group_hash(&[cur], &tmp);
+                cur += 1;
+
+                if let Some(gh) = gh {
+                    pedersen_hash_generators.push(edwards::Point::from_montgomery(&gh, &tmp));
+                }
+            }
+
+            tmp.pedersen_hash_generators = pedersen_hash_generators;
         }
+
+        {
+            let mut pedersen_circuit_generators = vec![];
+
+            for mut gen in tmp.pedersen_hash_generators.iter().cloned() {
+                let mut gen = montgomery::Point::from_edwards(&gen, &tmp);
+                let mut windows = vec![];
+                for _ in 0..tmp.pedersen_hash_chunks_per_generator() {
+                    let mut coeffs = vec![];
+                    let mut g = gen.clone();
+                    for _ in 0..4 {
+                        coeffs.push(g.into_xy().expect("cannot produce O"));
+                        g = g.add(&gen, &tmp);
+                    }
+                    windows.push(coeffs);
+
+                    for _ in 0..4 {
+                        gen = gen.double(&tmp);
+                    }
+                }
+                pedersen_circuit_generators.push(windows);
+            }
+
+            tmp.pedersen_circuit_generators = pedersen_circuit_generators;
+        }
+
+        tmp
     }
 }
 

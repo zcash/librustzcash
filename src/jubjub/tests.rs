@@ -9,6 +9,7 @@ use super::{
 use pairing::{
     Field,
     PrimeField,
+    PrimeFieldRepr,
     SqrtField,
     LegendreSymbol
 };
@@ -310,5 +311,34 @@ fn test_jubjub_params<E: JubjubEngine>(params: &E::Params) {
         tmp.mul_assign(&E::Fr::from_str("4").unwrap());
         tmp = tmp.sqrt().unwrap();
         assert_eq!(&tmp, params.scale());
+    }
+
+    {
+        // Check that the number of windows per generator
+        // in the Pedersen hash does not allow for collisions
+
+        let mut cur = E::Fr::one().into_repr();
+
+        let mut pacc = E::Fr::zero().into_repr();
+        let mut nacc = E::Fr::char();
+
+        for _ in 0..params.pedersen_hash_chunks_per_generator()
+        {
+            // tmp = cur * 4
+            let mut tmp = cur;
+            tmp.mul2();
+            tmp.mul2();
+
+            assert_eq!(pacc.add_nocarry(&tmp), false);
+            assert_eq!(nacc.sub_noborrow(&tmp), false);
+
+            assert!(pacc < E::Fr::char());
+            assert!(pacc < nacc);
+
+            // cur = cur * 16
+            for _ in 0..4 {
+                cur.mul2();
+            }
+        }
     }
 }

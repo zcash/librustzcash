@@ -27,8 +27,9 @@ use ::jubjub::{
 };
 
 pub struct EdwardsPoint<E: Engine, Var> {
-    x: AllocatedNum<E, Var>,
-    y: AllocatedNum<E, Var>
+    // TODO: make these not pub
+    pub x: AllocatedNum<E, Var>,
+    pub y: AllocatedNum<E, Var>
 }
 
 impl<E: JubjubEngine, Var: Copy> EdwardsPoint<E, Var> {
