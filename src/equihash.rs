@@ -3,25 +3,50 @@ use byteorder::{BigEndian, LittleEndian, ReadBytesExt, WriteBytesExt};
 use std::io::Cursor;
 use std::mem::size_of;
 
+struct Params {
+    n: u32,
+    k: u32,
+}
+
 #[derive(Clone)]
 struct Node {
     hash: Vec<u8>,
     indices: Vec<u32>,
 }
 
+impl Params {
+    fn indices_per_hash_output(&self) -> u32 {
+        512 / self.n
+    }
+    fn hash_output(&self) -> u8 {
+        (self.indices_per_hash_output() * self.n / 8) as u8
+    }
+    fn collision_bit_length(&self) -> usize {
+        (self.n / (self.k + 1)) as usize
+    }
+    fn collision_byte_length(&self) -> usize {
+        (self.collision_bit_length() + 7) / 8
+    }
+    fn hash_length(&self) -> usize {
+        ((self.k as usize) + 1) * self.collision_byte_length()
+    }
+}
+
 impl Node {
-    fn new(a: &mut Node, b: &mut Node, trim: usize) -> Self {
-        let mut hash = vec![0u8; a.hash.len() - trim];
+    fn from_children_ref(a: &Node, b: &Node, trim: usize) -> Self {
+        let hash: Vec<_> = a.hash
+            .iter()
+            .zip(b.hash.iter())
+            .skip(trim)
+            .map(|(a, b)| a ^ b)
+            .collect();
         let mut indices = Vec::new();
-        for i in trim..a.hash.len() {
-            hash[i - trim] = a.hash[i] ^ b.hash[i];
-        }
         if a.indices_before(b) {
-            indices.append(a.indices.as_mut());
-            indices.append(b.indices.as_mut());
+            indices.extend(a.indices.iter());
+            indices.extend(b.indices.iter());
         } else {
-            indices.append(b.indices.as_mut());
-            indices.append(a.indices.as_mut());
+            indices.extend(b.indices.iter());
+            indices.extend(a.indices.iter());
         }
         Node {
             hash: hash,
@@ -36,12 +61,7 @@ impl Node {
     }
 
     fn is_zero(&self, len: usize) -> bool {
-        for i in 0..len {
-            if self.hash[i] != 0 {
-                return false;
-            }
-        }
-        return true;
+        self.hash.iter().take(len).all(|v| *v == 0)
     }
 }
 
@@ -68,8 +88,13 @@ fn expand_array(vin: &[u8], bit_len: usize, byte_pad: usize) -> Vec<u8> {
 
     let out_width = (bit_len + 7) / 8 + byte_pad;
     let out_len = 8 * out_width * vin.len() / bit_len;
-    let mut vout: Vec<u8> = vec![0; out_len];
 
+    // Shortcut for parameters where expansion is a no-op
+    if out_len == vin.len() {
+        return vin.to_vec();
+    }
+
+    let mut vout: Vec<u8> = vec![0; out_len];
     let bit_len_mask: u32 = (1 << bit_len) - 1;
 
     // The acc_bits least-significant bits of acc_value represent a bit sequence
@@ -78,17 +103,14 @@ fn expand_array(vin: &[u8], bit_len: usize, byte_pad: usize) -> Vec<u8> {
     let mut acc_value: u32 = 0;
 
     let mut j = 0;
-    for i in 0..vin.len() {
-        acc_value = (acc_value << 8) | vin[i] as u32;
+    for b in vin {
+        acc_value = (acc_value << 8) | *b as u32;
         acc_bits += 8;
 
         // When we have bit_len or more bits in the accumulator, write the next
         // output element.
         if acc_bits >= bit_len {
             acc_bits -= bit_len;
-            for x in 0..byte_pad {
-                vout[j + x] = 0;
-            }
             for x in byte_pad..out_width {
                 vout[j + x] = ((
                     // Big-endian
@@ -124,12 +146,11 @@ fn indices_from_minimal(minimal: &[u8], c_bit_len: usize) -> Vec<u32> {
 }
 
 fn has_collision(a: &Node, b: &Node, len: usize) -> bool {
-    for i in 0..len {
-        if a.hash[i] != b.hash[i] {
-            return false;
-        }
-    }
-    return true;
+    a.hash
+        .iter()
+        .zip(b.hash.iter())
+        .take(len)
+        .all(|(a, b)| a == b)
 }
 
 fn distinct_indices(a: &Node, b: &Node) -> bool {
@@ -150,58 +171,54 @@ fn is_valid_solution_iterative(
     nonce: &[u8],
     indices: &[u32],
 ) -> bool {
-    let IndicesPerHashOutput = 512 / n;
-    let HashOutput = (IndicesPerHashOutput * n / 8) as u8;
-    let CollisionBitLength = (n / (k + 1)) as usize;
-    let CollisionByteLength = (CollisionBitLength + 7) / 8;
-    let hash_length = ((k as usize) + 1) * CollisionByteLength;
+    let p = Params { n: n, k: k };
 
-    let mut state = initialise_state(n, k, HashOutput);
+    let mut state = initialise_state(p.n, p.k, p.hash_output());
     state.update(input);
     state.update(nonce);
 
-    let mut X = Vec::new();
+    let mut rows = Vec::new();
     for i in indices {
-        let hash = generate_hash(&state, i / IndicesPerHashOutput);
-        let start = ((i % IndicesPerHashOutput) * n / 8) as usize;
-        let end = start + (n as usize) / 8;
-        X.push(Node {
-            hash: expand_array(&hash.as_bytes()[start..end], CollisionBitLength, 0),
+        let hash = generate_hash(&state, i / p.indices_per_hash_output());
+        let start = ((i % p.indices_per_hash_output()) * p.n / 8) as usize;
+        let end = start + (p.n as usize) / 8;
+        rows.push(Node {
+            hash: expand_array(&hash.as_bytes()[start..end], p.collision_bit_length(), 0),
             indices: vec![*i],
         });
     }
 
-    let mut hash_len = hash_length;
-    while X.len() > 1 {
-        let mut Xc = Vec::new();
-        for pair in X.chunks(2) {
-            let mut a = pair[0].clone();
-            let mut b = pair[1].clone();
-            if !has_collision(&a, &b, CollisionByteLength) {
+    let mut hash_len = p.hash_length();
+    while rows.len() > 1 {
+        let mut cur_rows = Vec::new();
+        for pair in rows.chunks(2) {
+            let a = &pair[0];
+            let b = &pair[1];
+            if !has_collision(a, b, p.collision_byte_length()) {
                 // error!("Invalid solution: invalid collision length between StepRows");
                 return false;
             }
-            if b.indices_before(&a) {
+            if b.indices_before(a) {
                 // error!("Invalid solution: Index tree incorrectly ordered");
                 return false;
             }
-            if !distinct_indices(&a, &b) {
+            if !distinct_indices(a, b) {
                 // error!("Invalid solution: duplicate indices");
                 return false;
             }
-            Xc.push(Node::new(&mut a, &mut b, CollisionByteLength));
+            cur_rows.push(Node::from_children_ref(a, b, p.collision_byte_length()));
         }
-        X = Xc;
-        hash_len -= CollisionByteLength;
+        rows = cur_rows;
+        hash_len -= p.collision_byte_length();
     }
 
-    assert!(X.len() == 1);
-    return X[0].is_zero(hash_len);
+    assert!(rows.len() == 1);
+    return rows[0].is_zero(hash_len);
 }
 
 pub fn is_valid_solution(n: u32, k: u32, input: &[u8], nonce: &[u8], soln: &[u8]) -> bool {
-    let CollisionBitLength = (n / (k + 1)) as usize;
-    let indices = indices_from_minimal(soln, CollisionBitLength);
+    let p = Params { n: n, k: k };
+    let indices = indices_from_minimal(soln, p.collision_bit_length());
 
     is_valid_solution_iterative(n, k, input, nonce, &indices)
 }
