@@ -33,6 +33,28 @@ impl Params {
 }
 
 impl Node {
+    fn from_children(a: Node, b: Node, trim: usize) -> Self {
+        let hash: Vec<_> = a.hash
+            .iter()
+            .zip(b.hash.iter())
+            .skip(trim)
+            .map(|(a, b)| a ^ b)
+            .collect();
+        let indices = if a.indices_before(&b) {
+            let mut indices = a.indices;
+            indices.extend(b.indices.iter());
+            indices
+        } else {
+            let mut indices = b.indices;
+            indices.extend(a.indices.iter());
+            indices
+        };
+        Node {
+            hash: hash,
+            indices: indices,
+        }
+    }
+
     fn from_children_ref(a: &Node, b: &Node, trim: usize) -> Self {
         let hash: Vec<_> = a.hash
             .iter()
@@ -164,7 +186,7 @@ fn distinct_indices(a: &Node, b: &Node) -> bool {
     return true;
 }
 
-fn is_valid_solution_iterative(
+pub fn is_valid_solution_iterative(
     n: u32,
     k: u32,
     input: &[u8],
@@ -216,19 +238,83 @@ fn is_valid_solution_iterative(
     return rows[0].is_zero(hash_len);
 }
 
+fn tree_validator<'a>(p: &Params, state: &Blake2b, indices: &[u32]) -> Option<Node> {
+    if indices.len() > 1 {
+        let end = indices.len();
+        let mid = end / 2;
+        match tree_validator(p, state, &indices[0..mid]) {
+            Some(a) => match tree_validator(p, state, &indices[mid..end]) {
+                Some(b) => {
+                    if !has_collision(&a, &b, p.collision_byte_length()) {
+                        // error!("Invalid solution: invalid collision length between StepRows");
+                        return None;
+                    }
+                    if b.indices_before(&a) {
+                        // error!("Invalid solution: Index tree incorrectly ordered");
+                        return None;
+                    }
+                    if !distinct_indices(&a, &b) {
+                        // error!("Invalid solution: duplicate indices");
+                        return None;
+                    }
+                    Some(Node::from_children(a, b, p.collision_byte_length()))
+                }
+                None => None,
+            },
+            None => None,
+        }
+    } else {
+        let i = indices[0];
+        let hash = generate_hash(&state, i / p.indices_per_hash_output());
+        let start = ((i % p.indices_per_hash_output()) * p.n / 8) as usize;
+        let end = start + (p.n as usize) / 8;
+        Some(Node {
+            hash: expand_array(&hash.as_bytes()[start..end], p.collision_bit_length(), 0),
+            indices: vec![i],
+        })
+    }
+}
+
+pub fn is_valid_solution_recursive(
+    n: u32,
+    k: u32,
+    input: &[u8],
+    nonce: &[u8],
+    indices: &[u32],
+) -> bool {
+    let p = Params { n: n, k: k };
+
+    let mut state = initialise_state(p.n, p.k, p.hash_output());
+    state.update(input);
+    state.update(nonce);
+
+    match tree_validator(&p, &state, indices) {
+        Some(root) => {
+            // Hashes were trimmed, so only need to check remaining length
+            root.is_zero(p.collision_byte_length())
+        }
+        None => false,
+    }
+}
+
 pub fn is_valid_solution(n: u32, k: u32, input: &[u8], nonce: &[u8], soln: &[u8]) -> bool {
     let p = Params { n: n, k: k };
     let indices = indices_from_minimal(soln, p.collision_bit_length());
 
-    is_valid_solution_iterative(n, k, input, nonce, &indices)
+    // Recursive validation is faster
+    is_valid_solution_recursive(n, k, input, nonce, &indices)
 }
 
 #[cfg(test)]
 mod tests {
     use super::is_valid_solution_iterative;
+    use super::is_valid_solution_recursive;
 
     fn is_valid_solution(n: u32, k: u32, input: &[u8], nonce: &[u8], indices: &[u32]) -> bool {
-        is_valid_solution_iterative(n, k, input, nonce, indices)
+        let a = is_valid_solution_iterative(n, k, input, nonce, indices);
+        let b = is_valid_solution_recursive(n, k, input, nonce, indices);
+        assert!(a == b);
+        a
     }
 
     #[test]
