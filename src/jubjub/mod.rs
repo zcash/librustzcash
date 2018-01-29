@@ -110,10 +110,12 @@ impl JubjubBls12 {
 
             while pedersen_hash_generators.len() < 10 {
                 let gh = group_hash(&[cur], &tmp);
+                // We don't want to overflow and start reusing generators
+                assert!(cur != u8::max_value());
                 cur += 1;
 
                 if let Some(gh) = gh {
-                    pedersen_hash_generators.push(edwards::Point::from_montgomery(&gh, &tmp));
+                    pedersen_hash_generators.push(gh);
                 }
             }
 
