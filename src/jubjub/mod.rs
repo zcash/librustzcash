@@ -108,7 +108,6 @@ impl JubjubBls12 {
             let mut cur = 0;
             let mut pedersen_hash_generators = vec![];
 
-            // TODO: pre-generate the right amount
             while pedersen_hash_generators.len() < 10 {
                 let gh = group_hash(&[cur], &tmp);
                 cur += 1;

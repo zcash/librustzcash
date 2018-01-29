@@ -58,7 +58,6 @@ pub fn pedersen_hash<E, I>(
             break;
         }
 
-        // TODO: use wNAF or something
         let mut tmp = generators.next().expect("we don't have enough generators").clone();
         tmp = tmp.mul(acc, params);
         result = result.add(&tmp, params);

@@ -27,7 +27,6 @@ use ::jubjub::{
 };
 
 pub struct EdwardsPoint<E: Engine, Var> {
-    // TODO: make these not pub
     pub x: AllocatedNum<E, Var>,
     pub y: AllocatedNum<E, Var>
 }
@@ -107,7 +106,6 @@ impl<E: JubjubEngine, Var: Copy> EdwardsPoint<E, Var> {
                     Ok(t0)
                 },
                 None => {
-                    // TODO: add more descriptive error
                     Err(SynthesisError::AssignmentMissing)
                 }
             }
@@ -138,7 +136,6 @@ impl<E: JubjubEngine, Var: Copy> EdwardsPoint<E, Var> {
                     Ok(t0)
                 },
                 None => {
-                    // TODO: add more descriptive error
                     Err(SynthesisError::AssignmentMissing)
                 }
             }
@@ -188,7 +185,6 @@ impl<E: JubjubEngine, Var: Copy> MontgomeryPoint<E, Var> {
                     Ok(t0)
                 },
                 None => {
-                    // TODO: add more descriptive error
                     Err(SynthesisError::AssignmentMissing)
                 }
             }
@@ -215,7 +211,6 @@ impl<E: JubjubEngine, Var: Copy> MontgomeryPoint<E, Var> {
                     Ok(t0)
                 },
                 None => {
-                    // TODO: add more descriptive error
                     Err(SynthesisError::AssignmentMissing)
                 }
             }
@@ -375,7 +370,6 @@ impl<E: JubjubEngine, Var: Copy> MontgomeryPoint<E, Var> {
                     Ok(n)
                 },
                 None => {
-                    // TODO: add more descriptive error
                     Err(SynthesisError::AssignmentMissing)
                 }
             }

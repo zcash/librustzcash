@@ -42,6 +42,9 @@ pub fn pedersen_hash<E: JubjubEngine, CS, Var: Copy>(
 ) -> Result<EdwardsPoint<E, Var>, SynthesisError>
     where CS: ConstraintSystem<E, Variable=Var>
 {
+    // Unnecessary if forced personalization is introduced
+    assert!(bits.len() > 0);
+
     let mut edwards_result = None;
     let mut bits = bits.iter();
     let mut segment_generators = params.pedersen_circuit_generators().iter();
@@ -118,7 +121,6 @@ pub fn pedersen_hash<E: JubjubEngine, CS, Var: Copy>(
         segment_i += 1;
     }
 
-    // TODO: maybe assert bits.len() > 0
     Ok(edwards_result.unwrap())
 }
 
@@ -131,10 +133,6 @@ fn lookup3_xy_with_conditional_negation<E: Engine, CS, Var: Copy>(
 ) -> Result<(AllocatedNum<E, Var>, AllocatedNum<E, Var>), SynthesisError>
     where CS: ConstraintSystem<E, Variable=Var>
 {
-    // TODO: This can be made into a 2-constraint lookup
-    // if it can return linear combinations rather than
-    // allocated numbers.
-
     assert_eq!(bits.len(), 3);
     assert_eq!(coords.len(), 4);
 
