@@ -32,6 +32,40 @@ impl<E: JubjubEngine, Var: Copy> EdwardsPoint<E, Var> {
         self.x.clone()
     }
 
+    pub fn interpret<CS>(
+        mut cs: CS,
+        x: &AllocatedNum<E, Var>,
+        y: &AllocatedNum<E, Var>,
+        params: &E::Params
+    ) -> Result<Self, SynthesisError>
+        where CS: ConstraintSystem<E, Variable=Var>
+    {
+        // -x^2 + y^2 = 1 + dx^2y^2
+
+        // TODO: This code uses a naive method to determine if the
+        // point is on the curve, but it could be optimized to three
+        // constraints.
+
+        let x2 = x.square(cs.namespace(|| "x^2"))?;
+        let y2 = y.square(cs.namespace(|| "y^2"))?;
+        let x2y2 = x2.mul(cs.namespace(|| "x^2 y^2"), &y2)?;
+
+        let one = cs.one();
+        cs.enforce(
+            || "on curve check",
+            LinearCombination::zero() - x2.get_variable()
+                                      + y2.get_variable(),
+            LinearCombination::zero() + one,
+            LinearCombination::zero() + one
+                                      + (*params.edwards_d(), x2y2.get_variable())
+        );
+
+        Ok(EdwardsPoint {
+            x: x.clone(),
+            y: y.clone()
+        })
+    }
+
     /// Perform addition between any two points
     pub fn add<CS>(
         &self,
@@ -239,34 +273,6 @@ impl<E: JubjubEngine, Var: Copy> MontgomeryPoint<E, Var> {
             x: x,
             y: y
         }
-    }
-
-    pub fn interpret<CS>(
-        mut cs: CS,
-        x: &AllocatedNum<E, Var>,
-        y: &AllocatedNum<E, Var>,
-        params: &E::Params
-    ) -> Result<Self, SynthesisError>
-        where CS: ConstraintSystem<E, Variable=Var>
-    {
-        // y^2 = x^3 + A.x^2 + x
-
-        let x2 = x.square(cs.namespace(|| "x^2"))?;
-        let x3 = x2.mul(cs.namespace(|| "x^3"), x)?;
-
-        cs.enforce(
-            || "on curve check",
-            LinearCombination::zero() + y.get_variable(),
-            LinearCombination::zero() + y.get_variable(),
-            LinearCombination::zero() + x3.get_variable()
-                                      + (*params.montgomery_a(), x2.get_variable())
-                                      + x.get_variable()
-        );
-
-        Ok(MontgomeryPoint {
-            x: x.clone(),
-            y: y.clone()
-        })
     }
 
     /// Performs an affine point addition, not defined for
@@ -528,45 +534,40 @@ mod test {
         let rng = &mut XorShiftRng::from_seed([0x5dbe6259, 0x8d313d76, 0x3237db17, 0xe5bc0654]);
 
         for _ in 0..100 {
-            let p = montgomery::Point::<Bls12, _>::rand(rng, &params);
-            let (mut x, mut y) = p.into_xy().unwrap();
+            let p = edwards::Point::<Bls12, _>::rand(rng, &params);
+            let (x, y) = p.into_xy();
 
-            {
-                let mut cs = TestConstraintSystem::<Bls12>::new();
-                let numx = AllocatedNum::alloc(cs.namespace(|| "x"), || {
-                    Ok(x)
-                }).unwrap();
-                let numy = AllocatedNum::alloc(cs.namespace(|| "y"), || {
-                    Ok(y)
-                }).unwrap();
+            let mut cs = TestConstraintSystem::<Bls12>::new();
+            let numx = AllocatedNum::alloc(cs.namespace(|| "x"), || {
+                Ok(x)
+            }).unwrap();
+            let numy = AllocatedNum::alloc(cs.namespace(|| "y"), || {
+                Ok(y)
+            }).unwrap();
 
-                let p = MontgomeryPoint::interpret(&mut cs, &numx, &numy, &params).unwrap();
+            let p = EdwardsPoint::interpret(&mut cs, &numx, &numy, &params).unwrap();
 
-                assert!(cs.is_satisfied());
-                assert_eq!(p.x.get_value().unwrap(), x);
-                assert_eq!(p.y.get_value().unwrap(), y);
+            assert!(cs.is_satisfied());
+            assert_eq!(p.x.get_value().unwrap(), x);
+            assert_eq!(p.y.get_value().unwrap(), y);
+        }
 
-                y.negate();
-                cs.set("y/num", y);
-                assert!(cs.is_satisfied());
-                x.negate();
-                cs.set("x/num", x);
-                assert!(!cs.is_satisfied());
-            }
+        // Random (x, y) are unlikely to be on the curve.
+        for _ in 0..100 {
+            let x = rng.gen();
+            let y = rng.gen();
 
-            {
-                let mut cs = TestConstraintSystem::<Bls12>::new();
-                let numx = AllocatedNum::alloc(cs.namespace(|| "x"), || {
-                    Ok(x)
-                }).unwrap();
-                let numy = AllocatedNum::alloc(cs.namespace(|| "y"), || {
-                    Ok(y)
-                }).unwrap();
+            let mut cs = TestConstraintSystem::<Bls12>::new();
+            let numx = AllocatedNum::alloc(cs.namespace(|| "x"), || {
+                Ok(x)
+            }).unwrap();
+            let numy = AllocatedNum::alloc(cs.namespace(|| "y"), || {
+                Ok(y)
+            }).unwrap();
 
-                MontgomeryPoint::interpret(&mut cs, &numx, &numy, &params).unwrap();
+            EdwardsPoint::interpret(&mut cs, &numx, &numy, &params).unwrap();
 
-                assert_eq!(cs.which_is_unsatisfied().unwrap(), "on curve check");
-            }
+            assert_eq!(cs.which_is_unsatisfied().unwrap(), "on curve check");
         }
     }
 
