@@ -1,7 +1,6 @@
 use pairing::{
     Engine,
-    Field,
-    PrimeField
+    Field
 };
 
 use bellman::{
@@ -15,15 +14,10 @@ use super::{
 };
 
 use super::num::AllocatedNum;
-use super::boolean::{
-    Boolean
-};
-use super::blake2s::blake2s;
 
 use ::jubjub::{
     JubjubEngine,
-    JubjubParams,
-    montgomery
+    JubjubParams
 };
 
 pub struct EdwardsPoint<E: Engine, Var> {
@@ -230,77 +224,6 @@ impl<E: JubjubEngine, Var: Copy> MontgomeryPoint<E, Var> {
             x: u,
             y: v
         })
-    }
-
-    pub fn group_hash<CS>(
-        mut cs: CS,
-        tag: &[Boolean<Var>],
-        params: &E::Params
-    ) -> Result<Self, SynthesisError>
-        where CS: ConstraintSystem<E, Variable=Var>
-    {
-        // This code is specialized for a field of this size
-        assert_eq!(E::Fr::NUM_BITS, 255);
-
-        assert!(tag.len() % 8 == 0);
-
-        // Perform BLAKE2s hash
-        let h = blake2s(cs.namespace(|| "blake2s"), tag)?;
-
-        // Read the x-coordinate
-        let x = AllocatedNum::from_bits_strict(
-            cs.namespace(|| "read x coordinate"),
-            &h[1..]
-        )?;
-
-        // Allocate the y-coordinate given the first bit
-        // of the hash as its parity ("sign bit").
-        let y = AllocatedNum::alloc(
-            cs.namespace(|| "y-coordinate"),
-            || {
-                let s: bool = *h[0].get_value().get()?;
-                let x: E::Fr = *x.get_value().get()?;
-                let p = montgomery::Point::<E, _>::get_for_x(x, s, params);
-                let p = p.get()?;
-                let (_, y) = p.into_xy().expect("can't be the point at infinity");
-                Ok(y)
-            }
-        )?;
-
-        // Unpack the y-coordinate
-        let ybits = y.into_bits_strict(cs.namespace(|| "y-coordinate unpacking"))?;
-
-        // Enforce that the y-coordinate has the right sign
-        Boolean::enforce_equal(
-            cs.namespace(|| "correct sign constraint"),
-            &h[0],
-            &ybits[E::Fr::NUM_BITS as usize - 1]
-        )?;
-
-        // interpret the result as a point on the curve
-        let mut p = Self::interpret(
-            cs.namespace(|| "point interpretation"),
-            &x,
-            &y,
-            params
-        )?;
-
-        // Perform three doublings to move the point into the prime
-        // order subgroup.
-        for i in 0..3 {
-            // Assert the y-coordinate is nonzero (the doubling
-            // doesn't work for y=0).
-            p.y.assert_nonzero(
-                cs.namespace(|| format!("nonzero y-coordinate {}", i))
-            )?;
-
-            p = p.double(
-                cs.namespace(|| format!("doubling {}", i)),
-                params
-            )?;
-        }
-
-        Ok(p)
     }
 
     /// Interprets an (x, y) pair as a point
@@ -557,11 +480,8 @@ mod test {
     use super::{
         MontgomeryPoint,
         EdwardsPoint,
-        AllocatedNum, 
-        Boolean
+        AllocatedNum,
     };
-    use super::super::boolean::AllocatedBit;
-    use ::group_hash::group_hash;
 
     #[test]
     fn test_into_edwards() {
@@ -600,71 +520,6 @@ mod test {
             cs.set("v/num", v);
             assert!(cs.is_satisfied());
         }
-    }
-
-    #[test]
-    fn test_group_hash() {
-        let params = &JubjubBls12::new();
-        let rng = &mut XorShiftRng::from_seed([0x3dbe6259, 0x8d313d76, 0x3237db17, 0xe5bc0654]);
-
-        let mut num_errs = 0;
-        let mut num_unsatisfied = 0;
-        let mut num_satisfied = 0;
-
-        for _ in 0..100 {
-            let mut cs = TestConstraintSystem::<Bls12>::new();
-
-            let mut tag_bytes = vec![];
-            let mut tag = vec![];
-            for i in 0..10 {
-                let mut byte = 0;
-                for j in 0..8 {
-                    byte <<= 1;
-                    let b: bool = rng.gen();
-                    if b {
-                        byte |= 1;
-                    }
-                    tag.push(Boolean::from(
-                        AllocatedBit::alloc(
-                            cs.namespace(|| format!("bit {} {}", i, j)),
-                            Some(b)
-                        ).unwrap()
-                    ));
-                }
-                tag_bytes.push(byte);
-            }
-
-            let p = MontgomeryPoint::group_hash(
-                cs.namespace(|| "gh"),
-                &tag,
-                params
-            );
-
-            let expected = group_hash::<Bls12>(&tag_bytes, params);
-
-            if p.is_err() {
-                assert!(expected.is_none());
-                num_errs += 1;
-            } else {
-                if !cs.is_satisfied() {
-                    assert!(expected.is_none());
-                    num_unsatisfied += 1;
-                } else {
-                    let p = p.unwrap();
-                    let (x, y) = expected.unwrap().into_xy().unwrap();
-
-                    assert_eq!(p.x.get_value().unwrap(), x);
-                    assert_eq!(p.y.get_value().unwrap(), y);
-
-                    num_satisfied += 1;
-                }
-            }
-        }
-
-        assert_eq!(
-            (num_errs, num_unsatisfied, num_satisfied),
-            (47, 4, 49)
-        );
     }
 
     #[test]
