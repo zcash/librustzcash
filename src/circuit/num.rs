@@ -292,6 +292,39 @@ impl<E: Engine, Var: Copy> AllocatedNum<E, Var> {
         Ok(())
     }
 
+    pub fn conditionally_negate<CS>(
+        &self,
+        mut cs: CS,
+        condition: &Boolean<Var>
+    ) -> Result<Self, SynthesisError>
+        where CS: ConstraintSystem<E, Variable=Var>
+    {
+        let r = Self::alloc(
+            cs.namespace(|| "conditional negation result"),
+            || {
+                let mut tmp = *self.value.get()?;
+                if *condition.get_value().get()? {
+                    tmp.negate();
+                }
+                Ok(tmp)
+            }
+        )?;
+
+        // (1-c)(x) + (c)(-x) = r
+        // x - 2cx = r
+        // (2x) * (c) = x - r
+
+        let one = cs.one();
+        cs.enforce(
+            || "conditional negation",
+            LinearCombination::zero() + self.variable + self.variable,
+            condition.lc(one, E::Fr::one()),
+            LinearCombination::zero() + self.variable - r.variable
+        );
+
+        Ok(r)
+    }
+
     pub fn get_value(&self) -> Option<E::Fr> {
         self.value
     }
@@ -347,6 +380,107 @@ mod test {
         assert!(n3.value.unwrap() == Fr::from_str("120").unwrap());
         cs.set("product num", Fr::from_str("121").unwrap());
         assert!(!cs.is_satisfied());
+    }
+
+    #[test]
+    fn test_num_conditional_negation() {
+        {
+            let mut cs = TestConstraintSystem::<Bls12>::new();
+
+            let n = AllocatedNum::alloc(cs.namespace(|| "a"), || Ok(Fr::one())).unwrap();
+            let b = Boolean::constant(true);
+            let n2 = n.conditionally_negate(&mut cs, &b).unwrap();
+
+            let mut negone = Fr::one();
+            negone.negate();
+
+            assert!(cs.is_satisfied());
+            assert!(cs.get("conditional negation result/num") == negone);
+            assert!(n2.value.unwrap() == negone);
+            cs.set("conditional negation result/num", Fr::from_str("1").unwrap());
+            assert!(!cs.is_satisfied());
+        }
+        {
+            let mut cs = TestConstraintSystem::<Bls12>::new();
+
+            let n = AllocatedNum::alloc(cs.namespace(|| "a"), || Ok(Fr::one())).unwrap();
+            let b = Boolean::constant(false);
+            let n2 = n.conditionally_negate(&mut cs, &b).unwrap();
+
+            assert!(cs.is_satisfied());
+            assert!(cs.get("conditional negation result/num") == Fr::one());
+            assert!(n2.value.unwrap() == Fr::one());
+            cs.set("conditional negation result/num", Fr::from_str("2").unwrap());
+            assert!(!cs.is_satisfied());
+        }
+
+        {
+            let mut cs = TestConstraintSystem::<Bls12>::new();
+
+            let n = AllocatedNum::alloc(cs.namespace(|| "a"), || Ok(Fr::one())).unwrap();
+            let b = Boolean::from(
+                AllocatedBit::alloc(cs.namespace(|| "condition"), Some(true)).unwrap()
+            );
+            let n2 = n.conditionally_negate(&mut cs, &b).unwrap();
+
+            let mut negone = Fr::one();
+            negone.negate();
+
+            assert!(cs.is_satisfied());
+            assert!(cs.get("conditional negation result/num") == negone);
+            assert!(n2.value.unwrap() == negone);
+            cs.set("conditional negation result/num", Fr::from_str("1").unwrap());
+            assert!(!cs.is_satisfied());
+        }
+        {
+            let mut cs = TestConstraintSystem::<Bls12>::new();
+
+            let n = AllocatedNum::alloc(cs.namespace(|| "a"), || Ok(Fr::one())).unwrap();
+            let b = Boolean::from(
+                AllocatedBit::alloc(cs.namespace(|| "condition"), Some(false)).unwrap()
+            );
+            let n2 = n.conditionally_negate(&mut cs, &b).unwrap();
+
+            assert!(cs.is_satisfied());
+            assert!(cs.get("conditional negation result/num") == Fr::one());
+            assert!(n2.value.unwrap() == Fr::one());
+            cs.set("conditional negation result/num", Fr::from_str("2").unwrap());
+            assert!(!cs.is_satisfied());
+        }
+
+        {
+            let mut cs = TestConstraintSystem::<Bls12>::new();
+
+            let n = AllocatedNum::alloc(cs.namespace(|| "a"), || Ok(Fr::one())).unwrap();
+            let b = Boolean::from(
+                AllocatedBit::alloc(cs.namespace(|| "condition"), Some(false)).unwrap()
+            ).not();
+            let n2 = n.conditionally_negate(&mut cs, &b).unwrap();
+
+            let mut negone = Fr::one();
+            negone.negate();
+
+            assert!(cs.is_satisfied());
+            assert!(cs.get("conditional negation result/num") == negone);
+            assert!(n2.value.unwrap() == negone);
+            cs.set("conditional negation result/num", Fr::from_str("1").unwrap());
+            assert!(!cs.is_satisfied());
+        }
+        {
+            let mut cs = TestConstraintSystem::<Bls12>::new();
+
+            let n = AllocatedNum::alloc(cs.namespace(|| "a"), || Ok(Fr::one())).unwrap();
+            let b = Boolean::from(
+                AllocatedBit::alloc(cs.namespace(|| "condition"), Some(true)).unwrap()
+            ).not();
+            let n2 = n.conditionally_negate(&mut cs, &b).unwrap();
+
+            assert!(cs.is_satisfied());
+            assert!(cs.get("conditional negation result/num") == Fr::one());
+            assert!(n2.value.unwrap() == Fr::one());
+            cs.set("conditional negation result/num", Fr::from_str("2").unwrap());
+            assert!(!cs.is_satisfied());
+        }
     }
 
     #[test]

@@ -7,3 +7,4 @@ extern crate rand;
 pub mod jubjub;
 pub mod circuit;
 pub mod group_hash;
+pub mod pedersen_hash;
