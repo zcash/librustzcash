@@ -6,6 +6,7 @@ pub mod uint32;
 pub mod blake2s;
 pub mod num;
 pub mod mont;
+pub mod lookup;
 pub mod pedersen_hash;
 
 use bellman::SynthesisError;
