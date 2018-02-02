@@ -292,6 +292,61 @@ impl<E: Engine, Var: Copy> AllocatedNum<E, Var> {
         Ok(())
     }
 
+    /// Takes two allocated numbers (a, b) and returns
+    /// (b, a) if the condition is true, and (a, b)
+    /// otherwise.
+    pub fn conditionally_reverse<CS>(
+        mut cs: CS,
+        a: &Self,
+        b: &Self,
+        condition: &Boolean<Var>
+    ) -> Result<(Self, Self), SynthesisError>
+        where CS: ConstraintSystem<E, Variable=Var>
+    {
+        // TODO: Technically this need only be 1 constraint.
+        // However this interface does not currently support
+        // returning linear combinations.
+
+        let c = Self::alloc(
+            cs.namespace(|| "conditional reversal result 1"),
+            || {
+                if *condition.get_value().get()? {
+                    Ok(*b.value.get()?)
+                } else {
+                    Ok(*a.value.get()?)
+                }
+            }
+        )?;
+
+        let one = cs.one();
+        cs.enforce(
+            || "first conditional reversal",
+            LinearCombination::zero() + a.variable - b.variable,
+            condition.lc(one, E::Fr::one()),
+            LinearCombination::zero() + a.variable - c.variable
+        );
+
+        let d = Self::alloc(
+            cs.namespace(|| "conditional reversal result 2"),
+            || {
+                if *condition.get_value().get()? {
+                    Ok(*a.value.get()?)
+                } else {
+                    Ok(*b.value.get()?)
+                }
+            }
+        )?;
+
+        cs.enforce(
+            || "second conditional reversal",
+            LinearCombination::zero() + b.variable - a.variable,
+            condition.lc(one, E::Fr::one()),
+            LinearCombination::zero() + b.variable - d.variable
+        );
+
+        Ok((c, d))
+    }
+
     pub fn conditionally_negate<CS>(
         &self,
         mut cs: CS,
@@ -380,6 +435,38 @@ mod test {
         assert!(n3.value.unwrap() == Fr::from_str("120").unwrap());
         cs.set("product num", Fr::from_str("121").unwrap());
         assert!(!cs.is_satisfied());
+    }
+
+    #[test]
+    fn test_num_conditional_reversal() {
+        let mut rng = XorShiftRng::from_seed([0x3dbe6259, 0x8d313d76, 0x3237db17, 0xe5bc0654]);
+        {
+            let mut cs = TestConstraintSystem::<Bls12>::new();
+
+            let a = AllocatedNum::alloc(cs.namespace(|| "a"), || Ok(rng.gen())).unwrap();
+            let b = AllocatedNum::alloc(cs.namespace(|| "b"), || Ok(rng.gen())).unwrap();
+            let condition = Boolean::constant(false);
+            let (c, d) = AllocatedNum::conditionally_reverse(&mut cs, &a, &b, &condition).unwrap();
+
+            assert!(cs.is_satisfied());
+
+            assert_eq!(a.value.unwrap(), c.value.unwrap());
+            assert_eq!(b.value.unwrap(), d.value.unwrap());
+        }
+
+        {
+            let mut cs = TestConstraintSystem::<Bls12>::new();
+
+            let a = AllocatedNum::alloc(cs.namespace(|| "a"), || Ok(rng.gen())).unwrap();
+            let b = AllocatedNum::alloc(cs.namespace(|| "b"), || Ok(rng.gen())).unwrap();
+            let condition = Boolean::constant(true);
+            let (c, d) = AllocatedNum::conditionally_reverse(&mut cs, &a, &b, &condition).unwrap();
+
+            assert!(cs.is_satisfied());
+
+            assert_eq!(a.value.unwrap(), d.value.unwrap());
+            assert_eq!(b.value.unwrap(), c.value.unwrap());
+        }
     }
 
     #[test]
