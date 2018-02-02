@@ -66,6 +66,19 @@ impl<E: JubjubEngine, Var: Copy> EdwardsPoint<E, Var> {
         })
     }
 
+    pub fn double<CS>(
+        &self,
+        cs: CS,
+        params: &E::Params
+    ) -> Result<Self, SynthesisError>
+        where CS: ConstraintSystem<E, Variable=Var>
+    {
+        // TODO: doubling can be optimized to just 5
+        // constraints.
+
+        self.add(cs, self, params)
+    }
+
     /// Perform addition between any two points
     pub fn add<CS>(
         &self,
@@ -661,6 +674,41 @@ mod test {
     }
 
     #[test]
+    fn test_edwards_doubling() {
+        let params = &JubjubBls12::new();
+        let rng = &mut XorShiftRng::from_seed([0x5dbe6259, 0x8d313d76, 0x3237db17, 0xe5bc0654]);
+
+        for _ in 0..100 {
+            let p1 = edwards::Point::<Bls12, _>::rand(rng, params);
+            let p2 = p1.double(params);
+
+            let (x0, y0) = p1.into_xy();
+            let (x1, y1) = p2.into_xy();
+
+            let mut cs = TestConstraintSystem::<Bls12>::new();
+
+            let num_x0 = AllocatedNum::alloc(cs.namespace(|| "x0"), || {
+                Ok(x0)
+            }).unwrap();
+            let num_y0 = AllocatedNum::alloc(cs.namespace(|| "y0"), || {
+                Ok(y0)
+            }).unwrap();
+
+            let p1 = EdwardsPoint {
+                x: num_x0,
+                y: num_y0
+            };
+
+            let p2 = p1.double(cs.namespace(|| "doubling"), params).unwrap();
+
+            assert!(cs.is_satisfied());
+
+            assert!(p2.x.get_value().unwrap() == x1);
+            assert!(p2.y.get_value().unwrap() == y1);
+        }
+    }
+
+    #[test]
     fn test_montgomery_addition() {
         let params = &JubjubBls12::new();
         let rng = &mut XorShiftRng::from_seed([0x5dbe6259, 0x8d313d76, 0x3237db17, 0xe5bc0654]);
@@ -739,7 +787,7 @@ mod test {
     }
 
     #[test]
-    fn test_doubling() {
+    fn test_montgomery_doubling() {
         let params = &JubjubBls12::new();
         let rng = &mut XorShiftRng::from_seed([0x5dbe6259, 0x8d313d76, 0x3237db17, 0xe5bc0654]);
 
