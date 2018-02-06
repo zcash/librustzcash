@@ -380,4 +380,15 @@ fn test_jubjub_params<E: JubjubEngine>(params: &E::Params) {
             }
         }
     }
+
+    {
+        // Check that the number of windows for fixed-base
+        // scalar multiplication is sufficient for all scalars.
+
+        assert!(params.fixed_base_chunks_per_generator() * 3 >= E::Fs::NUM_BITS as usize);
+
+        // ... and that it's *just* efficient enough.
+
+        assert!((params.fixed_base_chunks_per_generator() - 1) * 3 < E::Fs::NUM_BITS as usize);
+    }
 }

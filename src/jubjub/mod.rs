@@ -47,6 +47,8 @@ pub trait JubjubParams<E: JubjubEngine>: Sized {
     fn pedersen_hash_generators(&self) -> &[edwards::Point<E, PrimeOrder>];
     fn pedersen_hash_chunks_per_generator(&self) -> usize;
     fn pedersen_circuit_generators(&self) -> &[Vec<Vec<(E::Fr, E::Fr)>>];
+
+    fn fixed_base_chunks_per_generator(&self) -> usize;
 }
 
 pub enum Unknown { }
@@ -59,13 +61,24 @@ impl JubjubEngine for Bls12 {
     type Params = JubjubBls12;
 }
 
+/// Fixed generators of the Jubjub curve of unknown
+/// exponent.
+pub enum FixedGenerators {
+    NoteCommitmentRandomization = 0,
+    Max = 1
+}
+
 pub struct JubjubBls12 {
     edwards_d: Fr,
     montgomery_a: Fr,
     montgomery_2a: Fr,
     scale: Fr,
+
     pedersen_hash_generators: Vec<edwards::Point<Bls12, PrimeOrder>>,
-    pedersen_circuit_generators: Vec<Vec<Vec<(Fr, Fr)>>>
+    pedersen_circuit_generators: Vec<Vec<Vec<(Fr, Fr)>>>,
+
+    fixed_base_generators: Vec<edwards::Point<Bls12, PrimeOrder>>,
+    fixed_base_circuit_generators: Vec<Vec<Vec<(Fr, Fr)>>>,
 }
 
 impl JubjubParams<Bls12> for JubjubBls12 {
@@ -78,6 +91,9 @@ impl JubjubParams<Bls12> for JubjubBls12 {
     }
     fn pedersen_hash_chunks_per_generator(&self) -> usize {
         62
+    }
+    fn fixed_base_chunks_per_generator(&self) -> usize {
+        84
     }
     fn pedersen_circuit_generators(&self) -> &[Vec<Vec<(Fr, Fr)>>] {
         &self.pedersen_circuit_generators
@@ -101,14 +117,19 @@ impl JubjubBls12 {
             scale: Fr::from_str("17814886934372412843466061268024708274627479829237077604635722030778476050649").unwrap(),
 
             pedersen_hash_generators: vec![],
-            pedersen_circuit_generators: vec![]
+            pedersen_circuit_generators: vec![],
+
+            fixed_base_generators: vec![],
+            fixed_base_circuit_generators: vec![],
         };
 
+        // Create the bases for the Pedersen hashes
         {
             let mut cur = 0;
             let mut pedersen_hash_generators = vec![];
 
             while pedersen_hash_generators.len() < 10 {
+                // TODO: personalize
                 let gh = group_hash(&[cur], &tmp);
                 // We don't want to overflow and start reusing generators
                 assert!(cur != u8::max_value());
@@ -122,6 +143,28 @@ impl JubjubBls12 {
             tmp.pedersen_hash_generators = pedersen_hash_generators;
         }
 
+        // Create the bases for other parts of the protocol
+        {
+            let mut cur = 0;
+            let mut fixed_base_generators = vec![];
+
+            while fixed_base_generators.len() < (FixedGenerators::Max as usize) {
+                // TODO: personalize
+                let gh = group_hash(&[cur], &tmp);
+                // We don't want to overflow and start reusing generators
+                assert!(cur != u8::max_value());
+                cur += 1;
+
+                if let Some(gh) = gh {
+                    fixed_base_generators.push(gh);
+                }
+            }
+
+            tmp.fixed_base_generators = fixed_base_generators;
+        }
+
+        // Create the 2-bit window table lookups for each 4-bit
+        // "chunk" in each segment of the Pedersen hash
         {
             let mut pedersen_circuit_generators = vec![];
 
@@ -145,6 +188,30 @@ impl JubjubBls12 {
             }
 
             tmp.pedersen_circuit_generators = pedersen_circuit_generators;
+        }
+
+        // Create the 3-bit window table lookups for fixed-base
+        // exp of each base in the protocol.
+        {
+            let mut fixed_base_circuit_generators = vec![];
+
+            for mut gen in tmp.fixed_base_generators.iter().cloned() {
+                let mut windows = vec![];
+                for _ in 0..tmp.fixed_base_chunks_per_generator() {
+                    let mut coeffs = vec![(Fr::zero(), Fr::one())];
+                    let mut g = gen.clone();
+                    for _ in 0..7 {
+                        coeffs.push(g.into_xy());
+                        g = g.add(&gen, &tmp);
+                    }
+                    windows.push(coeffs);
+
+                    gen = g;
+                }
+                fixed_base_circuit_generators.push(windows);
+            }
+
+            tmp.fixed_base_circuit_generators = fixed_base_circuit_generators;
         }
 
         tmp
