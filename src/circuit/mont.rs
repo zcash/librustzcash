@@ -17,7 +17,12 @@ use super::num::AllocatedNum;
 
 use ::jubjub::{
     JubjubEngine,
-    JubjubParams
+    JubjubParams,
+    FixedGenerators
+};
+
+use super::lookup::{
+    lookup3_xy
 };
 
 use super::boolean::Boolean;
@@ -34,6 +39,56 @@ impl<E: Engine, Var: Copy> Clone for EdwardsPoint<E, Var> {
             y: self.y.clone()
         }
     }
+}
+
+/// Perform a fixed-base scalar multiplication with
+/// `by` being in little-endian bit order. `by` must
+/// be a multiple of 3.
+pub fn fixed_base_multiplication<E, Var, CS>(
+    mut cs: CS,
+    base: FixedGenerators,
+    by: &[Boolean<Var>],
+    params: &E::Params
+) -> Result<EdwardsPoint<E, Var>, SynthesisError>
+    where CS: ConstraintSystem<E, Variable=Var>,
+          E: JubjubEngine,
+          Var: Copy
+{
+    // We're going to chunk the scalar into 3-bit windows,
+    // so let's force the caller to supply the right number
+    // of bits for our lookups.
+    assert!(by.len() % 3 == 0);
+
+    // Represents the result of the multiplication
+    let mut result = None;
+
+    for (i, (chunk, window)) in by.chunks(3)
+                                  .zip(params.circuit_generators(base).iter())
+                                  .enumerate()
+    {
+        let (x, y) = lookup3_xy(
+            cs.namespace(|| format!("window table lookup {}", i)),
+            chunk,
+            window
+        )?;
+
+        let p = EdwardsPoint {
+            x: x,
+            y: y
+        };
+
+        if result.is_none() {
+            result = Some(p);
+        } else {
+            result = Some(result.unwrap().add(
+                cs.namespace(|| format!("addition {}", i)),
+                &p,
+                params
+            )?);
+        }
+    }
+
+    Ok(result.get()?.clone())
 }
 
 impl<E: JubjubEngine, Var: Copy> EdwardsPoint<E, Var> {
@@ -615,13 +670,16 @@ mod test {
     use ::jubjub::{
         montgomery,
         edwards,
-        JubjubBls12
+        JubjubBls12,
+        JubjubParams,
+        FixedGenerators
     };
     use ::jubjub::fs::Fs;
     use super::{
         MontgomeryPoint,
         EdwardsPoint,
         AllocatedNum,
+        fixed_base_multiplication
     };
     use super::super::boolean::{
         Boolean,
@@ -729,6 +787,41 @@ mod test {
         };
 
         assert!(p.double(&mut cs, params).is_err());
+    }
+
+    #[test]
+    fn test_edwards_fixed_base_multiplication()  {
+        let params = &JubjubBls12::new();
+        let rng = &mut XorShiftRng::from_seed([0x5dbe6259, 0x8d313d76, 0x3237db17, 0xe5bc0654]);
+
+        for _ in 0..100 {
+            let mut cs = TestConstraintSystem::<Bls12>::new();
+
+            let p = params.generator(FixedGenerators::NoteCommitmentRandomization);
+            let s = Fs::rand(rng);
+            let q = p.mul(s, params);
+            let (x1, y1) = q.into_xy();
+
+            let mut s_bits = BitIterator::new(s.into_repr()).collect::<Vec<_>>();
+            s_bits.reverse();
+            s_bits.truncate(Fs::NUM_BITS as usize);
+
+            let s_bits = s_bits.into_iter()
+                               .enumerate()
+                               .map(|(i, b)| AllocatedBit::alloc(cs.namespace(|| format!("scalar bit {}", i)), Some(b)).unwrap())
+                               .map(|v| Boolean::from(v))
+                               .collect::<Vec<_>>();
+
+            let q = fixed_base_multiplication(
+                cs.namespace(|| "multiplication"),
+                FixedGenerators::NoteCommitmentRandomization,
+                &s_bits,
+                params
+            ).unwrap();
+
+            assert_eq!(q.x.get_value().unwrap(), x1);
+            assert_eq!(q.y.get_value().unwrap(), y1);
+        }
     }
 
     #[test]

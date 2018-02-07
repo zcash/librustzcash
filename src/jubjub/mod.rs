@@ -49,6 +49,8 @@ pub trait JubjubParams<E: JubjubEngine>: Sized {
     fn pedersen_circuit_generators(&self) -> &[Vec<Vec<(E::Fr, E::Fr)>>];
 
     fn fixed_base_chunks_per_generator(&self) -> usize;
+    fn generator(&self, base: FixedGenerators) -> &edwards::Point<E, PrimeOrder>;
+    fn circuit_generators(&self, FixedGenerators) -> &[Vec<(E::Fr, E::Fr)>];
 }
 
 pub enum Unknown { }
@@ -63,6 +65,7 @@ impl JubjubEngine for Bls12 {
 
 /// Fixed generators of the Jubjub curve of unknown
 /// exponent.
+#[derive(Copy, Clone)]
 pub enum FixedGenerators {
     NoteCommitmentRandomization = 0,
     Max = 1
@@ -97,6 +100,14 @@ impl JubjubParams<Bls12> for JubjubBls12 {
     }
     fn pedersen_circuit_generators(&self) -> &[Vec<Vec<(Fr, Fr)>>] {
         &self.pedersen_circuit_generators
+    }
+    fn generator(&self, base: FixedGenerators) -> &edwards::Point<Bls12, PrimeOrder>
+    {
+        &self.fixed_base_generators[base as usize]
+    }
+    fn circuit_generators(&self, base: FixedGenerators) -> &[Vec<(Fr, Fr)>]
+    {
+        &self.fixed_base_circuit_generators[base as usize][..]
     }
 }
 
