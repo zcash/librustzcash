@@ -5,8 +5,7 @@ use pairing::{
 
 use bellman::{
     SynthesisError,
-    ConstraintSystem,
-    LinearCombination
+    ConstraintSystem
 };
 
 use super::{
@@ -122,9 +121,9 @@ impl<E: JubjubEngine, Var: Copy> EdwardsPoint<E, Var> {
         let one = cs.one();
         cs.enforce(
             || "x' computation",
-            LinearCombination::<Var, E>::zero() + self.x.get_variable(),
-            condition.lc(one, E::Fr::one()),
-            LinearCombination::<Var, E>::zero() + x_prime.get_variable()
+            |lc| lc + self.x.get_variable(),
+            |_| condition.lc(one, E::Fr::one()),
+            |lc| lc + x_prime.get_variable()
         );
 
         // Compute y' = self.y if condition, and 1 otherwise
@@ -141,9 +140,9 @@ impl<E: JubjubEngine, Var: Copy> EdwardsPoint<E, Var> {
         // if condition is 1, y' must be y
         cs.enforce(
             || "y' computation",
-            LinearCombination::<Var, E>::zero() + self.y.get_variable(),
-            condition.lc(one, E::Fr::one()),
-            LinearCombination::<Var, E>::zero() + y_prime.get_variable()
+            |lc| lc + self.y.get_variable(),
+            |_| condition.lc(one, E::Fr::one()),
+            |lc| lc + y_prime.get_variable()
                                                 - &condition.not().lc(one, E::Fr::one())
         );
 
@@ -225,11 +224,11 @@ impl<E: JubjubEngine, Var: Copy> EdwardsPoint<E, Var> {
         let one = cs.one();
         cs.enforce(
             || "on curve check",
-            LinearCombination::zero() - x2.get_variable()
-                                      + y2.get_variable(),
-            LinearCombination::zero() + one,
-            LinearCombination::zero() + one
-                                      + (*params.edwards_d(), x2y2.get_variable())
+            |lc| lc - x2.get_variable()
+                    + y2.get_variable(),
+            |lc| lc + one,
+            |lc| lc + one
+                    + (*params.edwards_d(), x2y2.get_variable())
         );
 
         Ok(EdwardsPoint {
@@ -272,11 +271,11 @@ impl<E: JubjubEngine, Var: Copy> EdwardsPoint<E, Var> {
 
         cs.enforce(
             || "U computation",
-            LinearCombination::<Var, E>::zero() + self.x.get_variable()
-                                                + self.y.get_variable(),
-            LinearCombination::<Var, E>::zero() + other.x.get_variable()
-                                                + other.y.get_variable(),
-            LinearCombination::<Var, E>::zero() + u.get_variable()
+            |lc| lc + self.x.get_variable()
+                    + self.y.get_variable(),
+            |lc| lc + other.x.get_variable()
+                    + other.y.get_variable(),
+            |lc| lc + u.get_variable()
         );
 
         // Compute A = y2 * x1
@@ -296,9 +295,9 @@ impl<E: JubjubEngine, Var: Copy> EdwardsPoint<E, Var> {
 
         cs.enforce(
             || "C computation",
-            LinearCombination::<Var, E>::zero() + (*params.edwards_d(), a.get_variable()),
-            LinearCombination::<Var, E>::zero() + b.get_variable(),
-            LinearCombination::<Var, E>::zero() + c.get_variable()
+            |lc| lc + (*params.edwards_d(), a.get_variable()),
+            |lc| lc + b.get_variable(),
+            |lc| lc + c.get_variable()
         );
 
         // Compute x3 = (A + B) / (1 + C)
@@ -324,10 +323,10 @@ impl<E: JubjubEngine, Var: Copy> EdwardsPoint<E, Var> {
         let one = cs.one();
         cs.enforce(
             || "x3 computation",
-            LinearCombination::<Var, E>::zero() + one + c.get_variable(),
-            LinearCombination::<Var, E>::zero() + x3.get_variable(),
-            LinearCombination::<Var, E>::zero() + a.get_variable()
-                                                + b.get_variable()
+            |lc| lc + one + c.get_variable(),
+            |lc| lc + x3.get_variable(),
+            |lc| lc + a.get_variable()
+                    + b.get_variable()
         );
 
         // Compute y3 = (U - A - B) / (1 - C)
@@ -353,11 +352,11 @@ impl<E: JubjubEngine, Var: Copy> EdwardsPoint<E, Var> {
 
         cs.enforce(
             || "y3 computation",
-            LinearCombination::<Var, E>::zero() + one - c.get_variable(),
-            LinearCombination::<Var, E>::zero() + y3.get_variable(),
-            LinearCombination::<Var, E>::zero() + u.get_variable()
-                                                - a.get_variable()
-                                                - b.get_variable()
+            |lc| lc + one - c.get_variable(),
+            |lc| lc + y3.get_variable(),
+            |lc| lc + u.get_variable()
+                    - a.get_variable()
+                    - b.get_variable()
         );
 
         Ok(EdwardsPoint {
@@ -402,9 +401,9 @@ impl<E: JubjubEngine, Var: Copy> MontgomeryPoint<E, Var> {
 
         cs.enforce(
             || "u computation",
-            LinearCombination::<Var, E>::zero() + self.y.get_variable(),
-            LinearCombination::<Var, E>::zero() + u.get_variable(),
-            LinearCombination::<Var, E>::zero() + (*params.scale(), self.x.get_variable())
+            |lc| lc + self.y.get_variable(),
+            |lc| lc + u.get_variable(),
+            |lc| lc + (*params.scale(), self.x.get_variable())
         );
 
         // Compute v = (x - 1) / (x + 1)
@@ -429,11 +428,11 @@ impl<E: JubjubEngine, Var: Copy> MontgomeryPoint<E, Var> {
         let one = cs.one();
         cs.enforce(
             || "v computation",
-            LinearCombination::<Var, E>::zero() + self.x.get_variable()
-                                      + one,
-            LinearCombination::<Var, E>::zero() + v.get_variable(),
-            LinearCombination::<Var, E>::zero() + self.x.get_variable()
-                                      - one,
+            |lc| lc + self.x.get_variable()
+                    + one,
+            |lc| lc + v.get_variable(),
+            |lc| lc + self.x.get_variable()
+                    - one,
         );
 
         Ok(EdwardsPoint {
@@ -488,13 +487,13 @@ impl<E: JubjubEngine, Var: Copy> MontgomeryPoint<E, Var> {
 
         cs.enforce(
             || "evaluate lambda",
-            LinearCombination::<Var, E>::zero() + other.x.get_variable()
-                                                - self.x.get_variable(),
+            |lc| lc + other.x.get_variable()
+                    - self.x.get_variable(),
 
-            LinearCombination::zero()           + lambda.get_variable(),
+            |lc| lc + lambda.get_variable(),
 
-            LinearCombination::<Var, E>::zero() + other.y.get_variable()
-                                                - self.y.get_variable()
+            |lc| lc + other.y.get_variable()
+                    - self.y.get_variable()
         );
 
         // Compute x'' = lambda^2 - A - x - x'
@@ -512,12 +511,12 @@ impl<E: JubjubEngine, Var: Copy> MontgomeryPoint<E, Var> {
         let one = cs.one();
         cs.enforce(
             || "evaluate xprime",
-            LinearCombination::zero()           + lambda.get_variable(),
-            LinearCombination::zero()           + lambda.get_variable(),
-            LinearCombination::<Var, E>::zero() + (*params.montgomery_a(), one)
-                                                + self.x.get_variable()
-                                                + other.x.get_variable()
-                                                + xprime.get_variable()
+            |lc| lc + lambda.get_variable(),
+            |lc| lc + lambda.get_variable(),
+            |lc| lc + (*params.montgomery_a(), one)
+                    + self.x.get_variable()
+                    + other.x.get_variable()
+                    + xprime.get_variable()
         );
 
         // Compute y' = -(y + lambda(x' - x))
@@ -534,13 +533,13 @@ impl<E: JubjubEngine, Var: Copy> MontgomeryPoint<E, Var> {
         // y' + y = lambda(x - x')
         cs.enforce(
             || "evaluate yprime",
-            LinearCombination::zero()           + self.x.get_variable()
-                                                - xprime.get_variable(),
+            |lc| lc + self.x.get_variable()
+                    - xprime.get_variable(),
 
-            LinearCombination::zero()           + lambda.get_variable(),
+            |lc| lc + lambda.get_variable(),
 
-            LinearCombination::<Var, E>::zero() + yprime.get_variable()
-                                                + self.y.get_variable()
+            |lc| lc + yprime.get_variable()
+                    + self.y.get_variable()
         );
 
         Ok(MontgomeryPoint {
@@ -589,16 +588,16 @@ impl<E: JubjubEngine, Var: Copy> MontgomeryPoint<E, Var> {
         let one = cs.one();
         cs.enforce(
             || "evaluate lambda",
-            LinearCombination::<Var, E>::zero() + self.y.get_variable()
-                                                + self.y.get_variable(),
+            |lc| lc + self.y.get_variable()
+                    + self.y.get_variable(),
 
-            LinearCombination::zero()           + lambda.get_variable(),
+            |lc| lc + lambda.get_variable(),
 
-            LinearCombination::<Var, E>::zero() + xx.get_variable()
-                                                + xx.get_variable()
-                                                + xx.get_variable()
-                                                + (*params.montgomery_2a(), self.x.get_variable())
-                                                + one
+            |lc| lc + xx.get_variable()
+                    + xx.get_variable()
+                    + xx.get_variable()
+                    + (*params.montgomery_2a(), self.x.get_variable())
+                    + one
         );
 
         // Compute x' = (lambda^2) - A - 2.x
@@ -615,12 +614,12 @@ impl<E: JubjubEngine, Var: Copy> MontgomeryPoint<E, Var> {
         // (lambda) * (lambda) = (A + 2.x + x')
         cs.enforce(
             || "evaluate xprime",
-            LinearCombination::zero()           + lambda.get_variable(),
-            LinearCombination::zero()           + lambda.get_variable(),
-            LinearCombination::<Var, E>::zero() + (*params.montgomery_a(), one)
-                                                + self.x.get_variable()
-                                                + self.x.get_variable()
-                                                + xprime.get_variable()
+            |lc| lc + lambda.get_variable(),
+            |lc| lc + lambda.get_variable(),
+            |lc| lc + (*params.montgomery_a(), one)
+                    + self.x.get_variable()
+                    + self.x.get_variable()
+                    + xprime.get_variable()
         );
 
         // Compute y' = -(y + lambda(x' - x))
@@ -637,13 +636,13 @@ impl<E: JubjubEngine, Var: Copy> MontgomeryPoint<E, Var> {
         // y' + y = lambda(x - x')
         cs.enforce(
             || "evaluate yprime",
-            LinearCombination::zero()           + self.x.get_variable()
-                                                - xprime.get_variable(),
+            |lc| lc + self.x.get_variable()
+                    - xprime.get_variable(),
 
-            LinearCombination::zero()           + lambda.get_variable(),
+            |lc| lc + lambda.get_variable(),
 
-            LinearCombination::<Var, E>::zero() + yprime.get_variable()
-                                                + self.y.get_variable()
+            |lc| lc + yprime.get_variable()
+                    + self.y.get_variable()
         );
 
         Ok(MontgomeryPoint {

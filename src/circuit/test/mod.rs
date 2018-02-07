@@ -168,18 +168,25 @@ impl<E: Engine> ConstraintSystem<E> for TestConstraintSystem<E> {
         Ok(var)
     }
 
-    fn enforce<A, AR>(
+    fn enforce<A, AR, LA, LB, LC>(
         &mut self,
         annotation: A,
-        a: LinearCombination<Self::Variable, E>,
-        b: LinearCombination<Self::Variable, E>,
-        c: LinearCombination<Self::Variable, E>
+        a: LA,
+        b: LB,
+        c: LC
     )
-        where A: FnOnce() -> AR, AR: Into<String>
+        where A: FnOnce() -> AR, AR: Into<String>,
+              LA: FnOnce(LinearCombination<Self::Variable, E>) -> LinearCombination<Self::Variable, E>,
+              LB: FnOnce(LinearCombination<Self::Variable, E>) -> LinearCombination<Self::Variable, E>,
+              LC: FnOnce(LinearCombination<Self::Variable, E>) -> LinearCombination<Self::Variable, E>
     {
         let path = compute_path(&self.current_namespace, annotation().into());
         let index = self.constraints.len();
         self.set_named_obj(path.clone(), NamedObject::Constraint(index));
+
+        let a = a(LinearCombination::zero());
+        let b = b(LinearCombination::zero());
+        let c = c(LinearCombination::zero());
 
         self.constraints.push((a, b, c, path));
     }
@@ -218,9 +225,9 @@ fn test_cs() {
 
     cs.enforce(
         || "mult",
-        LinearCombination::zero() + a,
-        LinearCombination::zero() + b,
-        LinearCombination::zero() + c
+        |lc| lc + a,
+        |lc| lc + b,
+        |lc| lc + c
     );
     assert!(cs.is_satisfied());
     assert_eq!(cs.num_constraints(), 1);
@@ -230,9 +237,9 @@ fn test_cs() {
     let one = cs.one();
     cs.enforce(
         || "eq",
-        LinearCombination::zero() + a,
-        LinearCombination::zero() + one,
-        LinearCombination::zero() + b
+        |lc| lc + a,
+        |lc| lc + one,
+        |lc| lc + b
     );
 
     assert!(!cs.is_satisfied());

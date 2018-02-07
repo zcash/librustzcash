@@ -16,7 +16,7 @@ features = ["expose-arith"]
 rand = "0.3"
 blake2 = "0.7"
 digest = "0.7"
-bellman = "0.0.7"
+bellman = "0.0.8"
 
 [features]
 default = ["u128-support"]

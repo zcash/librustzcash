@@ -122,9 +122,9 @@ impl<E: Engine, Var: Copy> AllocatedNum<E, Var> {
 
         cs.enforce(
             || "unpacking constraint",
-            LinearCombination::zero(),
-            LinearCombination::zero(),
-            lc
+            |lc| lc,
+            |lc| lc,
+            |_| lc
         );
 
         Ok(bits.into_iter().map(|b| Boolean::from(b)).collect())
@@ -191,9 +191,9 @@ impl<E: Engine, Var: Copy> AllocatedNum<E, Var> {
 
         cs.enforce(
             || "packing constraint",
-            LinearCombination::zero(),
-            LinearCombination::zero(),
-            lc
+            |lc| lc,
+            |lc| lc,
+            |_| lc
         );
 
         Ok(num)
@@ -220,9 +220,9 @@ impl<E: Engine, Var: Copy> AllocatedNum<E, Var> {
         // Constrain: a * b = ab
         cs.enforce(
             || "multiplication constraint",
-            LinearCombination::zero() + self.variable,
-            LinearCombination::zero() + other.variable,
-            LinearCombination::zero() + var
+            |lc| lc + self.variable,
+            |lc| lc + other.variable,
+            |lc| lc + var
         );
 
         Ok(AllocatedNum {
@@ -251,9 +251,9 @@ impl<E: Engine, Var: Copy> AllocatedNum<E, Var> {
         // Constrain: a * a = aa
         cs.enforce(
             || "squaring constraint",
-            LinearCombination::zero() + self.variable,
-            LinearCombination::zero() + self.variable,
-            LinearCombination::zero() + var
+            |lc| lc + self.variable,
+            |lc| lc + self.variable,
+            |lc| lc + var
         );
 
         Ok(AllocatedNum {
@@ -284,9 +284,9 @@ impl<E: Engine, Var: Copy> AllocatedNum<E, Var> {
         let one = cs.one();
         cs.enforce(
             || "nonzero assertion constraint",
-            LinearCombination::zero() + self.variable,
-            LinearCombination::zero() + inv,
-            LinearCombination::zero() + one
+            |lc| lc + self.variable,
+            |lc| lc + inv,
+            |lc| lc + one
         );
 
         Ok(())
@@ -317,9 +317,9 @@ impl<E: Engine, Var: Copy> AllocatedNum<E, Var> {
         let one = cs.one();
         cs.enforce(
             || "first conditional reversal",
-            LinearCombination::zero() + a.variable - b.variable,
-            condition.lc(one, E::Fr::one()),
-            LinearCombination::zero() + a.variable - c.variable
+            |lc| lc + a.variable - b.variable,
+            |_| condition.lc(one, E::Fr::one()),
+            |lc| lc + a.variable - c.variable
         );
 
         let d = Self::alloc(
@@ -335,9 +335,9 @@ impl<E: Engine, Var: Copy> AllocatedNum<E, Var> {
 
         cs.enforce(
             || "second conditional reversal",
-            LinearCombination::zero() + b.variable - a.variable,
-            condition.lc(one, E::Fr::one()),
-            LinearCombination::zero() + b.variable - d.variable
+            |lc| lc + b.variable - a.variable,
+            |_| condition.lc(one, E::Fr::one()),
+            |lc| lc + b.variable - d.variable
         );
 
         Ok((c, d))
@@ -368,9 +368,9 @@ impl<E: Engine, Var: Copy> AllocatedNum<E, Var> {
         let one = cs.one();
         cs.enforce(
             || "conditional negation",
-            LinearCombination::zero() + self.variable + self.variable,
-            condition.lc(one, E::Fr::one()),
-            LinearCombination::zero() + self.variable - r.variable
+            |lc| lc + self.variable + self.variable,
+            |_| condition.lc(one, E::Fr::one()),
+            |lc| lc + self.variable - r.variable
         );
 
         Ok(r)

@@ -281,9 +281,9 @@ impl<Var: Copy> UInt32<Var> {
         // Enforce that the linear combination equals zero
         cs.enforce(
             || "modular addition",
-            LinearCombination::zero(),
-            LinearCombination::zero(),
-            lc
+            |lc| lc,
+            |lc| lc,
+            |_| lc
         );
 
         // Discard carry bits that we don't care about

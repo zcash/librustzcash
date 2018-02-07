@@ -55,9 +55,9 @@ impl<Var: Copy> AllocatedBit<Var> {
         let one = cs.one();
         cs.enforce(
             || "boolean constraint",
-            LinearCombination::zero() + one - var,
-            LinearCombination::zero() + var,
-            LinearCombination::zero()
+            |lc| lc + one - var,
+            |lc| lc + var,
+            |lc| lc
         );
 
         Ok(AllocatedBit {
@@ -107,9 +107,9 @@ impl<Var: Copy> AllocatedBit<Var> {
         // (a + a) * b = a + b - c
         cs.enforce(
             || "xor constraint",
-            LinearCombination::zero() + a.variable + a.variable,
-            LinearCombination::zero() + b.variable,
-            LinearCombination::zero() + a.variable + b.variable - result_var
+            |lc| lc + a.variable + a.variable,
+            |lc| lc + b.variable,
+            |lc| lc + a.variable + b.variable - result_var
         );
 
         Ok(AllocatedBit {
@@ -146,9 +146,9 @@ impl<Var: Copy> AllocatedBit<Var> {
         // a AND b are both 1.
         cs.enforce(
             || "and constraint",
-            LinearCombination::zero() + a.variable,
-            LinearCombination::zero() + b.variable,
-            LinearCombination::zero() + result_var
+            |lc| lc + a.variable,
+            |lc| lc + b.variable,
+            |lc| lc + result_var
         );
 
         Ok(AllocatedBit {
@@ -185,9 +185,9 @@ impl<Var: Copy> AllocatedBit<Var> {
         let one = cs.one();
         cs.enforce(
             || "and not constraint",
-            LinearCombination::zero() + a.variable,
-            LinearCombination::zero() + one - b.variable,
-            LinearCombination::zero() + result_var
+            |lc| lc + a.variable,
+            |lc| lc + one - b.variable,
+            |lc| lc + result_var
         );
 
         Ok(AllocatedBit {
@@ -224,9 +224,9 @@ impl<Var: Copy> AllocatedBit<Var> {
         let one = cs.one();
         cs.enforce(
             || "nor constraint",
-            LinearCombination::zero() + one - a.variable,
-            LinearCombination::zero() + one - b.variable,
-            LinearCombination::zero() + result_var
+            |lc| lc + one - a.variable,
+            |lc| lc + one - b.variable,
+            |lc| lc + result_var
         );
 
         Ok(AllocatedBit {
@@ -401,9 +401,9 @@ impl<Var: Copy> Boolean<Var> {
             Boolean::Is(ref res) => {
                 cs.enforce(
                     || "enforce nand",
-                    LinearCombination::zero(),
-                    LinearCombination::zero(),
-                    LinearCombination::zero() + res.get_variable()
+                    |lc| lc,
+                    |lc| lc,
+                    |lc| lc + res.get_variable()
                 );
 
                 Ok(())
@@ -412,9 +412,9 @@ impl<Var: Copy> Boolean<Var> {
                 let one = cs.one();
                 cs.enforce(
                     || "enforce nand",
-                    LinearCombination::zero(),
-                    LinearCombination::zero(),
-                    LinearCombination::zero() + one - res.get_variable()
+                    |lc| lc,
+                    |lc| lc,
+                    |lc| lc + one - res.get_variable()
                 );
 
                 Ok(())
