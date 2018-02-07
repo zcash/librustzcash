@@ -272,7 +272,7 @@ impl<E: Engine, Var: Copy> AllocatedNum<E, Var> {
             let tmp = *self.value.get()?;
             
             if tmp.is_zero() {
-                Err(SynthesisError::AssignmentMissing)
+                Err(SynthesisError::DivisionByZero)
             } else {
                 Ok(tmp.inverse().unwrap())
             }

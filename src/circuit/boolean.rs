@@ -396,7 +396,7 @@ impl<Var: Copy> Boolean<Var> {
                 Ok(())
             },
             Boolean::Constant(true) => {
-                Err(SynthesisError::AssignmentMissing)
+                Err(SynthesisError::Unsatisfiable)
             },
             Boolean::Is(ref res) => {
                 cs.enforce(

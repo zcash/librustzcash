@@ -315,7 +315,7 @@ impl<E: JubjubEngine, Var: Copy> EdwardsPoint<E, Var> {
                     Ok(t0)
                 },
                 None => {
-                    Err(SynthesisError::AssignmentMissing)
+                    Err(SynthesisError::DivisionByZero)
                 }
             }
         })?;
@@ -345,7 +345,7 @@ impl<E: JubjubEngine, Var: Copy> EdwardsPoint<E, Var> {
                     Ok(t0)
                 },
                 None => {
-                    Err(SynthesisError::AssignmentMissing)
+                    Err(SynthesisError::DivisionByZero)
                 }
             }
         })?;
@@ -394,7 +394,7 @@ impl<E: JubjubEngine, Var: Copy> MontgomeryPoint<E, Var> {
                     Ok(t0)
                 },
                 None => {
-                    Err(SynthesisError::AssignmentMissing)
+                    Err(SynthesisError::DivisionByZero)
                 }
             }
         })?;
@@ -420,7 +420,7 @@ impl<E: JubjubEngine, Var: Copy> MontgomeryPoint<E, Var> {
                     Ok(t0)
                 },
                 None => {
-                    Err(SynthesisError::AssignmentMissing)
+                    Err(SynthesisError::DivisionByZero)
                 }
             }
         })?;
@@ -480,7 +480,7 @@ impl<E: JubjubEngine, Var: Copy> MontgomeryPoint<E, Var> {
                     Ok(n)
                 },
                 None => {
-                    Err(SynthesisError::AssignmentMissing)
+                    Err(SynthesisError::DivisionByZero)
                 }
             }
         })?;
@@ -579,7 +579,7 @@ impl<E: JubjubEngine, Var: Copy> MontgomeryPoint<E, Var> {
                     Ok(t0)
                 },
                 None => {
-                    Err(SynthesisError::AssignmentMissing)
+                    Err(SynthesisError::DivisionByZero)
                 }
             }
         })?;
