@@ -218,10 +218,6 @@ impl<E: JubjubEngine, Var: Copy> EdwardsPoint<E, Var> {
     {
         // -x^2 + y^2 = 1 + dx^2y^2
 
-        // TODO: This code uses a naive method to determine if the
-        // point is on the curve, but it could be optimized to three
-        // constraints.
-
         let x2 = x.square(cs.namespace(|| "x^2"))?;
         let y2 = y.square(cs.namespace(|| "y^2"))?;
         let x2y2 = x2.mul(cs.namespace(|| "x^2 y^2"), &y2)?;
@@ -249,9 +245,6 @@ impl<E: JubjubEngine, Var: Copy> EdwardsPoint<E, Var> {
     ) -> Result<Self, SynthesisError>
         where CS: ConstraintSystem<E, Variable=Var>
     {
-        // TODO: doubling can be optimized to just 5
-        // constraints.
-
         self.add(cs, self, params)
     }
 

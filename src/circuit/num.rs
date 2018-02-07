@@ -303,10 +303,6 @@ impl<E: Engine, Var: Copy> AllocatedNum<E, Var> {
     ) -> Result<(Self, Self), SynthesisError>
         where CS: ConstraintSystem<E, Variable=Var>
     {
-        // TODO: Technically this need only be 1 constraint.
-        // However this interface does not currently support
-        // returning linear combinations.
-
         let c = Self::alloc(
             cs.namespace(|| "conditional reversal result 1"),
             || {
