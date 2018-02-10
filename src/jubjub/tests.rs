@@ -20,6 +20,7 @@ pub fn test_suite<E: JubjubEngine>(params: &E::Params) {
     test_back_and_forth::<E>(params);
     test_jubjub_params::<E>(params);
     test_rand::<E>(params);
+    test_get_for::<E>(params);
     test_identities::<E>(params);
     test_addition_associativity::<E>(params);
     test_order::<E>(params);
@@ -225,6 +226,25 @@ fn test_identities<E: JubjubEngine>(params: &E::Params) {
     }
 }
 
+fn test_get_for<E: JubjubEngine>(params: &E::Params) {
+    let rng = &mut XorShiftRng::from_seed([0x3dbe6259, 0x8d313d76, 0x3237db17, 0xe5bc0654]);
+
+    for _ in 0..1000 {
+        let y = E::Fr::rand(rng);
+        let sign = bool::rand(rng);
+
+        if let Some(mut p) = edwards::Point::<E, _>::get_for_y(y, sign, params) {
+            assert!(p.into_xy().0.into_repr().is_odd() == sign);
+            p = p.negate();
+            assert!(
+                edwards::Point::<E, _>::get_for_y(y, !sign, params).unwrap()
+                ==
+                p
+            );
+        }
+    }
+}
+
 fn test_rand<E: JubjubEngine>(params: &E::Params) {
     let rng = &mut XorShiftRng::from_seed([0x3dbe6259, 0x8d313d76, 0x3237db17, 0xe5bc0654]);
 
@@ -289,6 +309,25 @@ fn test_jubjub_params<E: JubjubEngine>(params: &E::Params) {
     }
 
     {
+        // Other convenient sanity checks regarding d
+
+        // tmp = d
+        let mut tmp = *params.edwards_d();
+
+        // 1 / d is nonsquare
+        assert!(tmp.inverse().unwrap().legendre() == LegendreSymbol::QuadraticNonResidue);
+
+        // tmp = -d
+        tmp.negate();
+
+        // -d is nonsquare
+        assert!(tmp.legendre() == LegendreSymbol::QuadraticNonResidue);
+
+        // 1 / -d is nonsquare
+        assert!(tmp.inverse().unwrap().legendre() == LegendreSymbol::QuadraticNonResidue);
+    }
+
+    {
         // Check that A^2 - 4 is nonsquare:
         let mut tmp = params.montgomery_a().clone();
         tmp.square();
@@ -340,5 +379,16 @@ fn test_jubjub_params<E: JubjubEngine>(params: &E::Params) {
                 cur.mul2();
             }
         }
+    }
+
+    {
+        // Check that the number of windows for fixed-base
+        // scalar multiplication is sufficient for all scalars.
+
+        assert!(params.fixed_base_chunks_per_generator() * 3 >= E::Fs::NUM_BITS as usize);
+
+        // ... and that it's *just* efficient enough.
+
+        assert!((params.fixed_base_chunks_per_generator() - 1) * 3 < E::Fs::NUM_BITS as usize);
     }
 }

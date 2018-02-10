@@ -81,6 +81,53 @@ impl<E: JubjubEngine, Subgroup> PartialEq for Point<E, Subgroup> {
 }
 
 impl<E: JubjubEngine> Point<E, Unknown> {
+    pub fn get_for_y(y: E::Fr, sign: bool, params: &E::Params) -> Option<Self>
+    {
+        // Given a y on the curve, x^2 = (y^2 - 1) / (dy^2 + 1)
+        // This is defined for all valid y-coordinates,
+        // as dy^2 + 1 = 0 has no solution in Fr.
+
+        // tmp1 = y^2
+        let mut tmp1 = y;
+        tmp1.square();
+
+        // tmp2 = (y^2 * d) + 1
+        let mut tmp2 = tmp1;
+        tmp2.mul_assign(params.edwards_d());
+        tmp2.add_assign(&E::Fr::one());
+
+        // tmp1 = y^2 - 1
+        tmp1.sub_assign(&E::Fr::one());
+
+        match tmp2.inverse() {
+            Some(tmp2) => {
+                // tmp1 = (y^2 - 1) / (dy^2 + 1)
+                tmp1.mul_assign(&tmp2);
+
+                match tmp1.sqrt() {
+                    Some(mut x) => {
+                        if x.into_repr().is_odd() != sign {
+                            x.negate();
+                        }
+
+                        let mut t = x;
+                        t.mul_assign(&y);
+
+                        Some(Point {
+                            x: x,
+                            y: y,
+                            t: t,
+                            z: E::Fr::one(),
+                            _marker: PhantomData
+                        })
+                    },
+                    None => None
+                }
+            },
+            None => None
+        }
+    }
+
     /// This guarantees the point is in the prime order subgroup
     pub fn mul_by_cofactor(&self, params: &E::Params) -> Point<E, PrimeOrder>
     {
@@ -94,44 +141,10 @@ impl<E: JubjubEngine> Point<E, Unknown> {
     pub fn rand<R: Rng>(rng: &mut R, params: &E::Params) -> Self
     {
         loop {
-            // given an x on the curve, y^2 = (1 + x^2) / (1 - dx^2)
-            let x: E::Fr = rng.gen();
-            let mut x2 = x;
-            x2.square();
+            let y: E::Fr = rng.gen();
 
-            let mut num = E::Fr::one();
-            num.add_assign(&x2);
-
-            x2.mul_assign(params.edwards_d());
-
-            let mut den = E::Fr::one();
-            den.sub_assign(&x2);
-
-            match den.inverse() {
-                Some(invden) => {
-                    num.mul_assign(&invden);
-
-                    match num.sqrt() {
-                        Some(mut y) => {
-                            if y.into_repr().is_odd() != rng.gen() {
-                                y.negate();
-                            }
-
-                            let mut t = x;
-                            t.mul_assign(&y);
-
-                            return Point {
-                                x: x,
-                                y: y,
-                                t: t,
-                                z: E::Fr::one(),
-                                _marker: PhantomData
-                            }
-                        },
-                        None => {}
-                    }
-                },
-                None => {}
+            if let Some(p) = Self::get_for_y(y, rng.gen(), params) {
+                return p;
             }
         }
     }

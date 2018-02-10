@@ -10,7 +10,7 @@ use digest::{FixedOutput, Input};
 pub fn group_hash<E: JubjubEngine>(
     tag: &[u8],
     params: &E::Params
-) -> Option<montgomery::Point<E, PrimeOrder>>
+) -> Option<edwards::Point<E, PrimeOrder>>
 {
     // Check to see that scalar field is 255 bits
     assert!(E::Fr::NUM_BITS == 255);
@@ -25,15 +25,15 @@ pub fn group_hash<E: JubjubEngine>(
     h[0] &= 0b0111_1111; // unset s from h
 
     // cast to prime field representation
-    let mut x0 = <E::Fr as PrimeField>::Repr::default();
-    x0.read_be(&h[..]).expect("hash is sufficiently large");
+    let mut y0 = <E::Fr as PrimeField>::Repr::default();
+    y0.read_be(&h[..]).expect("hash is sufficiently large");
 
-    if let Ok(x0) = E::Fr::from_repr(x0) {
-        if let Some(p) = montgomery::Point::<E, _>::get_for_x(x0, s, params) {
+    if let Ok(y0) = E::Fr::from_repr(y0) {
+        if let Some(p) = edwards::Point::<E, _>::get_for_y(y0, s, params) {
             // Enter into the prime order subgroup
             let p = p.mul_by_cofactor(params);
 
-            if p != montgomery::Point::zero() {
+            if p != edwards::Point::zero() {
                 Some(p)
             } else {
                 None
