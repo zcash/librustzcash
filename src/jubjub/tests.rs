@@ -356,10 +356,16 @@ fn test_jubjub_params<E: JubjubEngine>(params: &E::Params) {
         // Check that the number of windows per generator
         // in the Pedersen hash does not allow for collisions
 
-        let mut cur = E::Fr::one().into_repr();
+        let mut cur = E::Fs::one().into_repr();
 
-        let mut pacc = E::Fr::zero().into_repr();
-        let mut nacc = E::Fr::char();
+        let mut max = E::Fs::char();
+        {
+            max.sub_noborrow(&E::Fs::one().into_repr());
+            max.div2();
+        }
+
+        let mut pacc = E::Fs::zero().into_repr();
+        let mut nacc = E::Fs::char();
 
         for _ in 0..params.pedersen_hash_chunks_per_generator()
         {
@@ -371,7 +377,7 @@ fn test_jubjub_params<E: JubjubEngine>(params: &E::Params) {
             assert_eq!(pacc.add_nocarry(&tmp), false);
             assert_eq!(nacc.sub_noborrow(&tmp), false);
 
-            assert!(pacc < E::Fr::char());
+            assert!(pacc < max);
             assert!(pacc < nacc);
 
             // cur = cur * 16
