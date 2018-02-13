@@ -10,12 +10,12 @@ use bellman::{
 };
 use super::lookup::*;
 
-pub fn pedersen_hash<E: JubjubEngine, CS, Var: Copy>(
+pub fn pedersen_hash<E: JubjubEngine, CS>(
     mut cs: CS,
-    bits: &[Boolean<Var>],
+    bits: &[Boolean],
     params: &E::Params
-) -> Result<EdwardsPoint<E, Var>, SynthesisError>
-    where CS: ConstraintSystem<E, Variable=Var>
+) -> Result<EdwardsPoint<E>, SynthesisError>
+    where CS: ConstraintSystem<E>
 {
     // Unnecessary if forced personalization is introduced
     assert!(bits.len() > 0);
@@ -116,7 +116,7 @@ mod test {
 
         let input: Vec<bool> = (0..(Fr::NUM_BITS * 2)).map(|_| rng.gen()).collect();
 
-        let input_bools: Vec<Boolean<_>> = input.iter().enumerate().map(|(i, b)| {
+        let input_bools: Vec<Boolean> = input.iter().enumerate().map(|(i, b)| {
             Boolean::from(
                 AllocatedBit::alloc(cs.namespace(|| format!("input {}", i)), Some(*b)).unwrap()
             )
@@ -143,7 +143,7 @@ mod test {
 
                 let mut cs = TestConstraintSystem::<Bls12>::new();
 
-                let input_bools: Vec<Boolean<_>> = input.iter().enumerate().map(|(i, b)| {
+                let input_bools: Vec<Boolean> = input.iter().enumerate().map(|(i, b)| {
                     Boolean::from(
                         AllocatedBit::alloc(cs.namespace(|| format!("input {}", i)), Some(*b)).unwrap()
                     )

@@ -90,13 +90,13 @@ const SIGMA: [[usize; 16]; 10] = [
 
 fn mixing_g<E: Engine, CS: ConstraintSystem<E>>(
     mut cs: CS,
-    v: &mut [UInt32<CS::Variable>],
+    v: &mut [UInt32],
     a: usize,
     b: usize,
     c: usize,
     d: usize,
-    x: &UInt32<CS::Variable>,
-    y: &UInt32<CS::Variable>
+    x: &UInt32,
+    y: &UInt32
 ) -> Result<(), SynthesisError>
 {
     v[a] = UInt32::addmany(cs.namespace(|| "mixing step 1"), &[v[a].clone(), v[b].clone(), x.clone()])?;
@@ -162,8 +162,8 @@ fn mixing_g<E: Engine, CS: ConstraintSystem<E>>(
 
 fn blake2s_compression<E: Engine, CS: ConstraintSystem<E>>(
     mut cs: CS,
-    h: &mut [UInt32<CS::Variable>],
-    m: &[UInt32<CS::Variable>],
+    h: &mut [UInt32],
+    m: &[UInt32],
     t: u64,
     f: bool
 ) -> Result<(), SynthesisError>
@@ -254,8 +254,8 @@ fn blake2s_compression<E: Engine, CS: ConstraintSystem<E>>(
 
 pub fn blake2s<E: Engine, CS: ConstraintSystem<E>>(
     mut cs: CS,
-    input: &[Boolean<CS::Variable>]
-) -> Result<Vec<Boolean<CS::Variable>>, SynthesisError>
+    input: &[Boolean]
+) -> Result<Vec<Boolean>, SynthesisError>
 {
     assert!(input.len() % 8 == 0);
 
@@ -269,7 +269,7 @@ pub fn blake2s<E: Engine, CS: ConstraintSystem<E>>(
     h.push(UInt32::constant(0x1F83D9AB));
     h.push(UInt32::constant(0x5BE0CD19));
 
-    let mut blocks: Vec<Vec<UInt32<CS::Variable>>> = vec![];
+    let mut blocks: Vec<Vec<UInt32>> = vec![];
 
     for block in input.chunks(512) {
         let mut this_block = Vec::with_capacity(16);

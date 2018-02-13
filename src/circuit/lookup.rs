@@ -31,12 +31,12 @@ fn synth<'a, E: Engine, I>(
 
 /// Performs a 3-bit window table lookup. `bits` is in
 /// little-endian order.
-pub fn lookup3_xy<E: Engine, CS, Var: Copy>(
+pub fn lookup3_xy<E: Engine, CS>(
     mut cs: CS,
-    bits: &[Boolean<Var>],
+    bits: &[Boolean],
     coords: &[(E::Fr, E::Fr)]
-) -> Result<(AllocatedNum<E, Var>, AllocatedNum<E, Var>), SynthesisError>
-    where CS: ConstraintSystem<E, Variable=Var>
+) -> Result<(AllocatedNum<E>, AllocatedNum<E>), SynthesisError>
+    where CS: ConstraintSystem<E>
 {
     assert_eq!(bits.len(), 3);
     assert_eq!(coords.len(), 8);
@@ -84,7 +84,7 @@ pub fn lookup3_xy<E: Engine, CS, Var: Copy>(
 
     let precomp = Boolean::and(cs.namespace(|| "precomp"), &bits[1], &bits[2])?;
 
-    let one = cs.one();
+    let one = CS::one();
 
     cs.enforce(
         || "x-coordinate lookup",
@@ -119,12 +119,12 @@ pub fn lookup3_xy<E: Engine, CS, Var: Copy>(
 
 /// Performs a 3-bit window table lookup, where
 /// one of the bits is a sign bit.
-pub fn lookup3_xy_with_conditional_negation<E: Engine, CS, Var: Copy>(
+pub fn lookup3_xy_with_conditional_negation<E: Engine, CS>(
     mut cs: CS,
-    bits: &[Boolean<Var>],
+    bits: &[Boolean],
     coords: &[(E::Fr, E::Fr)]
-) -> Result<(AllocatedNum<E, Var>, AllocatedNum<E, Var>), SynthesisError>
-    where CS: ConstraintSystem<E, Variable=Var>
+) -> Result<(AllocatedNum<E>, AllocatedNum<E>), SynthesisError>
+    where CS: ConstraintSystem<E>
 {
     assert_eq!(bits.len(), 3);
     assert_eq!(coords.len(), 4);
@@ -161,7 +161,7 @@ pub fn lookup3_xy_with_conditional_negation<E: Engine, CS, Var: Copy>(
         }
     )?;
 
-    let one = cs.one();
+    let one = CS::one();
 
     // Compute the coefficients for the lookup constraints
     let mut x_coeffs = [E::Fr::zero(); 4];
@@ -289,7 +289,7 @@ mod test {
 
         let window_size = 4;
 
-        let mut assignment = vec![Fr::zero(); (1 << window_size)];
+        let mut assignment = vec![Fr::zero(); 1 << window_size];
         let constants: Vec<_> = (0..(1 << window_size)).map(|_| Fr::rand(&mut rng)).collect();
 
         synth::<Bls12, _>(window_size, &constants, &mut assignment);

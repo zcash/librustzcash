@@ -9,7 +9,8 @@ use pairing::{
 use bellman::{
     ConstraintSystem,
     SynthesisError,
-    LinearCombination
+    LinearCombination,
+    Variable
 };
 
 use super::{
@@ -19,17 +20,17 @@ use super::{
 /// Represents a variable in the constraint system which is guaranteed
 /// to be either zero or one.
 #[derive(Clone)]
-pub struct AllocatedBit<Var> {
-    variable: Var,
+pub struct AllocatedBit {
+    variable: Variable,
     value: Option<bool>
 }
 
-impl<Var: Copy> AllocatedBit<Var> {
+impl AllocatedBit {
     pub fn get_value(&self) -> Option<bool> {
         self.value
     }
 
-    pub fn get_variable(&self) -> Var {
+    pub fn get_variable(&self) -> Variable {
         self.variable
     }
 
@@ -40,7 +41,7 @@ impl<Var: Copy> AllocatedBit<Var> {
         value: Option<bool>,
     ) -> Result<Self, SynthesisError>
         where E: Engine,
-              CS: ConstraintSystem<E, Variable=Var>
+              CS: ConstraintSystem<E>
     {
         let var = cs.alloc(|| "boolean", || {
             if *value.get()? {
@@ -52,10 +53,9 @@ impl<Var: Copy> AllocatedBit<Var> {
 
         // Constrain: (1 - a) * a = 0
         // This constrains a to be either 0 or 1.
-        let one = cs.one();
         cs.enforce(
             || "boolean constraint",
-            |lc| lc + one - var,
+            |lc| lc + CS::one() - var,
             |lc| lc + var,
             |lc| lc
         );
@@ -74,7 +74,7 @@ impl<Var: Copy> AllocatedBit<Var> {
         b: &Self
     ) -> Result<Self, SynthesisError>
         where E: Engine,
-              CS: ConstraintSystem<E, Variable=Var>
+              CS: ConstraintSystem<E>
     {
         let mut result_value = None;
 
@@ -126,7 +126,7 @@ impl<Var: Copy> AllocatedBit<Var> {
         b: &Self
     ) -> Result<Self, SynthesisError>
         where E: Engine,
-              CS: ConstraintSystem<E, Variable=Var>
+              CS: ConstraintSystem<E>
     {
         let mut result_value = None;
 
@@ -164,7 +164,7 @@ impl<Var: Copy> AllocatedBit<Var> {
         b: &Self
     ) -> Result<Self, SynthesisError>
         where E: Engine,
-              CS: ConstraintSystem<E, Variable=Var>
+              CS: ConstraintSystem<E>
     {
         let mut result_value = None;
 
@@ -182,11 +182,10 @@ impl<Var: Copy> AllocatedBit<Var> {
 
         // Constrain (a) * (1 - b) = (c), ensuring c is 1 iff
         // a is true and b is false, and otherwise c is 0.
-        let one = cs.one();
         cs.enforce(
             || "and not constraint",
             |lc| lc + a.variable,
-            |lc| lc + one - b.variable,
+            |lc| lc + CS::one() - b.variable,
             |lc| lc + result_var
         );
 
@@ -203,7 +202,7 @@ impl<Var: Copy> AllocatedBit<Var> {
         b: &Self
     ) -> Result<Self, SynthesisError>
         where E: Engine,
-              CS: ConstraintSystem<E, Variable=Var>
+              CS: ConstraintSystem<E>
     {
         let mut result_value = None;
 
@@ -221,11 +220,10 @@ impl<Var: Copy> AllocatedBit<Var> {
 
         // Constrain (1 - a) * (1 - b) = (c), ensuring c is 1 iff
         // a and b are both false, and otherwise c is 0.
-        let one = cs.one();
         cs.enforce(
             || "nor constraint",
-            |lc| lc + one - a.variable,
-            |lc| lc + one - b.variable,
+            |lc| lc + CS::one() - a.variable,
+            |lc| lc + CS::one() - b.variable,
             |lc| lc + result_var
         );
 
@@ -239,23 +237,23 @@ impl<Var: Copy> AllocatedBit<Var> {
 /// This is a boolean value which may be either a constant or
 /// an interpretation of an `AllocatedBit`.
 #[derive(Clone)]
-pub enum Boolean<Var> {
+pub enum Boolean {
     /// Existential view of the boolean variable
-    Is(AllocatedBit<Var>),
+    Is(AllocatedBit),
     /// Negated view of the boolean variable
-    Not(AllocatedBit<Var>),
+    Not(AllocatedBit),
     /// Constant (not an allocated variable)
     Constant(bool)
 }
 
-impl<Var: Copy> Boolean<Var> {
+impl Boolean {
     pub fn enforce_equal<E, CS>(
         mut cs: CS,
         a: &Self,
         b: &Self
     ) -> Result<(), SynthesisError>
         where E: Engine,
-              CS: ConstraintSystem<E, Variable=Var>
+              CS: ConstraintSystem<E>
     {
         let c = Self::xor(&mut cs, a, b)?;
 
@@ -270,21 +268,25 @@ impl<Var: Copy> Boolean<Var> {
         }
     }
 
-    pub fn lc<E: Engine>(&self, one: Var, coeff: E::Fr) -> LinearCombination<Var, E>
+    pub fn lc<E: Engine>(
+        &self,
+        one: Variable,
+        coeff: E::Fr
+    ) -> LinearCombination<E>
     {
         match self {
             &Boolean::Constant(c) => {
                 if c {
-                    LinearCombination::<Var, E>::zero() + (coeff, one)
+                    LinearCombination::<E>::zero() + (coeff, one)
                 } else {
-                    LinearCombination::<Var, E>::zero()
+                    LinearCombination::<E>::zero()
                 }
             },
             &Boolean::Is(ref v) => {
-                LinearCombination::<Var, E>::zero() + (coeff, v.get_variable())
+                LinearCombination::<E>::zero() + (coeff, v.get_variable())
             },
             &Boolean::Not(ref v) => {
-                LinearCombination::<Var, E>::zero() + (coeff, one) - (coeff, v.get_variable())
+                LinearCombination::<E>::zero() + (coeff, one) - (coeff, v.get_variable())
             }
         }
     }
@@ -310,7 +312,7 @@ impl<Var: Copy> Boolean<Var> {
         b: &'a Self
     ) -> Result<Self, SynthesisError>
         where E: Engine,
-              CS: ConstraintSystem<E, Variable=Var>
+              CS: ConstraintSystem<E>
     {
         match (a, b) {
             (&Boolean::Constant(false), x) | (x, &Boolean::Constant(false)) => Ok(x.clone()),
@@ -337,7 +339,7 @@ impl<Var: Copy> Boolean<Var> {
         b: &'a Self
     ) -> Result<Self, SynthesisError>
         where E: Engine,
-              CS: ConstraintSystem<E, Variable=Var>
+              CS: ConstraintSystem<E>
     {
         match (a, b) {
             // false AND x is always false
@@ -364,7 +366,7 @@ impl<Var: Copy> Boolean<Var> {
         bits: &[Self]
     ) -> Result<Self, SynthesisError>
         where E: Engine,
-              CS: ConstraintSystem<E, Variable=Var>
+              CS: ConstraintSystem<E>
     {
         assert!(bits.len() > 0);
         let mut bits = bits.iter();
@@ -387,7 +389,7 @@ impl<Var: Copy> Boolean<Var> {
         bits: &[Self]
     ) -> Result<(), SynthesisError>
         where E: Engine,
-              CS: ConstraintSystem<E, Variable=Var>
+              CS: ConstraintSystem<E>
     {
         let res = Self::kary_and(&mut cs, bits)?;
 
@@ -409,12 +411,11 @@ impl<Var: Copy> Boolean<Var> {
                 Ok(())
             },
             Boolean::Not(ref res) => {
-                let one = cs.one();
                 cs.enforce(
                     || "enforce nand",
                     |lc| lc,
                     |lc| lc,
-                    |lc| lc + one - res.get_variable()
+                    |lc| lc + CS::one() - res.get_variable()
                 );
 
                 Ok(())
@@ -429,7 +430,7 @@ impl<Var: Copy> Boolean<Var> {
         bits: &[Self]
     ) -> Result<(), SynthesisError>
         where E: Engine,
-              CS: ConstraintSystem<E, Variable=Var>
+              CS: ConstraintSystem<E>
     {
         assert_eq!(bits.len(), F::NUM_BITS as usize);
 
@@ -440,7 +441,7 @@ impl<Var: Copy> Boolean<Var> {
         b.sub_noborrow(&1.into());
 
         // Runs of ones in r
-        let mut last_run = Boolean::<Var>::constant(true);
+        let mut last_run = Boolean::constant(true);
         let mut current_run = vec![];
 
         let mut found_one = false;
@@ -495,8 +496,8 @@ impl<Var: Copy> Boolean<Var> {
     }
 }
 
-impl<Var> From<AllocatedBit<Var>> for Boolean<Var> {
-    fn from(b: AllocatedBit<Var>) -> Boolean<Var> {
+impl From<AllocatedBit> for Boolean {
+    fn from(b: AllocatedBit) -> Boolean {
         Boolean::Is(b)
     }
 }
