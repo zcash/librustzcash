@@ -3,8 +3,7 @@ use super::*;
 use super::num::AllocatedNum;
 use super::boolean::Boolean;
 use bellman::{
-    ConstraintSystem,
-    LinearCombination
+    ConstraintSystem
 };
 
 // Synthesize the constants for each base pattern.
@@ -32,12 +31,12 @@ fn synth<'a, E: Engine, I>(
 
 /// Performs a 3-bit window table lookup. `bits` is in
 /// little-endian order.
-pub fn lookup3_xy<E: Engine, CS, Var: Copy>(
+pub fn lookup3_xy<E: Engine, CS>(
     mut cs: CS,
-    bits: &[Boolean<Var>],
+    bits: &[Boolean],
     coords: &[(E::Fr, E::Fr)]
-) -> Result<(AllocatedNum<E, Var>, AllocatedNum<E, Var>), SynthesisError>
-    where CS: ConstraintSystem<E, Variable=Var>
+) -> Result<(AllocatedNum<E>, AllocatedNum<E>), SynthesisError>
+    where CS: ConstraintSystem<E>
 {
     assert_eq!(bits.len(), 3);
     assert_eq!(coords.len(), 8);
@@ -85,34 +84,34 @@ pub fn lookup3_xy<E: Engine, CS, Var: Copy>(
 
     let precomp = Boolean::and(cs.namespace(|| "precomp"), &bits[1], &bits[2])?;
 
-    let one = cs.one();
+    let one = CS::one();
 
     cs.enforce(
         || "x-coordinate lookup",
-        LinearCombination::<Var, E>::zero() + (x_coeffs[0b001], one)
-                                            + &bits[1].lc::<E>(one, x_coeffs[0b011])
-                                            + &bits[2].lc::<E>(one, x_coeffs[0b101])
-                                            + &precomp.lc::<E>(one, x_coeffs[0b111]),
-        LinearCombination::<Var, E>::zero() + &bits[0].lc::<E>(one, E::Fr::one()),
-        LinearCombination::<Var, E>::zero() + res_x.get_variable()
-                                            - (x_coeffs[0b000], one)
-                                            - &bits[1].lc::<E>(one, x_coeffs[0b010])
-                                            - &bits[2].lc::<E>(one, x_coeffs[0b100])
-                                            - &precomp.lc::<E>(one, x_coeffs[0b110]),
+        |lc| lc + (x_coeffs[0b001], one)
+                + &bits[1].lc::<E>(one, x_coeffs[0b011])
+                + &bits[2].lc::<E>(one, x_coeffs[0b101])
+                + &precomp.lc::<E>(one, x_coeffs[0b111]),
+        |lc| lc + &bits[0].lc::<E>(one, E::Fr::one()),
+        |lc| lc + res_x.get_variable()
+                - (x_coeffs[0b000], one)
+                - &bits[1].lc::<E>(one, x_coeffs[0b010])
+                - &bits[2].lc::<E>(one, x_coeffs[0b100])
+                - &precomp.lc::<E>(one, x_coeffs[0b110]),
     );
 
     cs.enforce(
         || "y-coordinate lookup",
-        LinearCombination::<Var, E>::zero() + (y_coeffs[0b001], one)
-                                            + &bits[1].lc::<E>(one, y_coeffs[0b011])
-                                            + &bits[2].lc::<E>(one, y_coeffs[0b101])
-                                            + &precomp.lc::<E>(one, y_coeffs[0b111]),
-        LinearCombination::<Var, E>::zero() + &bits[0].lc::<E>(one, E::Fr::one()),
-        LinearCombination::<Var, E>::zero() + res_y.get_variable()
-                                            - (y_coeffs[0b000], one)
-                                            - &bits[1].lc::<E>(one, y_coeffs[0b010])
-                                            - &bits[2].lc::<E>(one, y_coeffs[0b100])
-                                            - &precomp.lc::<E>(one, y_coeffs[0b110]),
+        |lc| lc + (y_coeffs[0b001], one)
+                + &bits[1].lc::<E>(one, y_coeffs[0b011])
+                + &bits[2].lc::<E>(one, y_coeffs[0b101])
+                + &precomp.lc::<E>(one, y_coeffs[0b111]),
+        |lc| lc + &bits[0].lc::<E>(one, E::Fr::one()),
+        |lc| lc + res_y.get_variable()
+                - (y_coeffs[0b000], one)
+                - &bits[1].lc::<E>(one, y_coeffs[0b010])
+                - &bits[2].lc::<E>(one, y_coeffs[0b100])
+                - &precomp.lc::<E>(one, y_coeffs[0b110]),
     );
 
     Ok((res_x, res_y))
@@ -120,12 +119,12 @@ pub fn lookup3_xy<E: Engine, CS, Var: Copy>(
 
 /// Performs a 3-bit window table lookup, where
 /// one of the bits is a sign bit.
-pub fn lookup3_xy_with_conditional_negation<E: Engine, CS, Var: Copy>(
+pub fn lookup3_xy_with_conditional_negation<E: Engine, CS>(
     mut cs: CS,
-    bits: &[Boolean<Var>],
+    bits: &[Boolean],
     coords: &[(E::Fr, E::Fr)]
-) -> Result<(AllocatedNum<E, Var>, AllocatedNum<E, Var>), SynthesisError>
-    where CS: ConstraintSystem<E, Variable=Var>
+) -> Result<(AllocatedNum<E>, AllocatedNum<E>), SynthesisError>
+    where CS: ConstraintSystem<E>
 {
     assert_eq!(bits.len(), 3);
     assert_eq!(coords.len(), 4);
@@ -162,7 +161,7 @@ pub fn lookup3_xy_with_conditional_negation<E: Engine, CS, Var: Copy>(
         }
     )?;
 
-    let one = cs.one();
+    let one = CS::one();
 
     // Compute the coefficients for the lookup constraints
     let mut x_coeffs = [E::Fr::zero(); 4];
@@ -172,22 +171,22 @@ pub fn lookup3_xy_with_conditional_negation<E: Engine, CS, Var: Copy>(
 
     cs.enforce(
         || "x-coordinate lookup",
-        LinearCombination::<Var, E>::zero() + (x_coeffs[0b01], one)
-                                            + &bits[1].lc::<E>(one, x_coeffs[0b11]),
-        LinearCombination::<Var, E>::zero() + &bits[0].lc::<E>(one, E::Fr::one()),
-        LinearCombination::<Var, E>::zero() + res_x.get_variable()
-                                            - (x_coeffs[0b00], one)
-                                            - &bits[1].lc::<E>(one, x_coeffs[0b10])
+        |lc| lc + (x_coeffs[0b01], one)
+                + &bits[1].lc::<E>(one, x_coeffs[0b11]),
+        |lc| lc + &bits[0].lc::<E>(one, E::Fr::one()),
+        |lc| lc + res_x.get_variable()
+                - (x_coeffs[0b00], one)
+                - &bits[1].lc::<E>(one, x_coeffs[0b10])
     );
 
     cs.enforce(
         || "y-coordinate lookup",
-        LinearCombination::<Var, E>::zero() + (y_coeffs[0b01], one)
-                                            + &bits[1].lc::<E>(one, y_coeffs[0b11]),
-        LinearCombination::<Var, E>::zero() + &bits[0].lc::<E>(one, E::Fr::one()),
-        LinearCombination::<Var, E>::zero() + res_y.get_variable()
-                                            - (y_coeffs[0b00], one)
-                                            - &bits[1].lc::<E>(one, y_coeffs[0b10])
+        |lc| lc + (y_coeffs[0b01], one)
+                + &bits[1].lc::<E>(one, y_coeffs[0b11]),
+        |lc| lc + &bits[0].lc::<E>(one, E::Fr::one()),
+        |lc| lc + res_y.get_variable()
+                - (y_coeffs[0b00], one)
+                - &bits[1].lc::<E>(one, y_coeffs[0b10])
     );
 
     let final_y = res_y.conditionally_negate(&mut cs, &bits[2])?;
@@ -290,7 +289,7 @@ mod test {
 
         let window_size = 4;
 
-        let mut assignment = vec![Fr::zero(); (1 << window_size)];
+        let mut assignment = vec![Fr::zero(); 1 << window_size];
         let constants: Vec<_> = (0..(1 << window_size)).map(|_| Fr::rand(&mut rng)).collect();
 
         synth::<Bls12, _>(window_size, &constants, &mut assignment);

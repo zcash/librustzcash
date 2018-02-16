@@ -18,13 +18,13 @@ use super::boolean::{
 /// Represents an interpretation of 32 `Boolean` objects as an
 /// unsigned integer.
 #[derive(Clone)]
-pub struct UInt32<Var> {
+pub struct UInt32 {
     // Least significant bit first
-    bits: Vec<Boolean<Var>>,
+    bits: Vec<Boolean>,
     value: Option<u32>
 }
 
-impl<Var: Copy> UInt32<Var> {
+impl UInt32 {
     /// Construct a constant `UInt32` from a `u32`
     pub fn constant(value: u32) -> Self
     {
@@ -53,7 +53,7 @@ impl<Var: Copy> UInt32<Var> {
         value: Option<u32>
     ) -> Result<Self, SynthesisError>
         where E: Engine,
-              CS: ConstraintSystem<E, Variable=Var>
+              CS: ConstraintSystem<E>
     {
         let values = match value {
             Some(mut val) => {
@@ -72,7 +72,10 @@ impl<Var: Copy> UInt32<Var> {
         let bits = values.into_iter()
                          .enumerate()
                          .map(|(i, v)| {
-                            Ok(Boolean::from(AllocatedBit::alloc(cs.namespace(|| format!("allocated bit {}", i)), v)?))
+                            Ok(Boolean::from(AllocatedBit::alloc(
+                                cs.namespace(|| format!("allocated bit {}", i)),
+                                v
+                            )?))
                          })
                          .collect::<Result<Vec<_>, SynthesisError>>()?;
 
@@ -83,7 +86,7 @@ impl<Var: Copy> UInt32<Var> {
     }
 
     /// Turns this `UInt32` into its little-endian byte order representation.
-    pub fn into_bits(&self) -> Vec<Boolean<Var>> {
+    pub fn into_bits(&self) -> Vec<Boolean> {
         self.bits.chunks(8)
                  .flat_map(|v| v.iter().rev())
                  .cloned()
@@ -92,7 +95,7 @@ impl<Var: Copy> UInt32<Var> {
 
     /// Converts a little-endian byte order representation of bits into a
     /// `UInt32`.
-    pub fn from_bits(bits: &[Boolean<Var>]) -> Self
+    pub fn from_bits(bits: &[Boolean]) -> Self
     {
         assert_eq!(bits.len(), 32);
 
@@ -157,7 +160,7 @@ impl<Var: Copy> UInt32<Var> {
         other: &Self
     ) -> Result<Self, SynthesisError>
         where E: Engine,
-              CS: ConstraintSystem<E, Variable=Var>
+              CS: ConstraintSystem<E>
     {
         let new_value = match (self.value, other.value) {
             (Some(a), Some(b)) => {
@@ -170,7 +173,11 @@ impl<Var: Copy> UInt32<Var> {
                             .zip(other.bits.iter())
                             .enumerate()
                             .map(|(i, (a, b))| {
-                                Boolean::xor(cs.namespace(|| format!("xor of bit {}", i)), a, b)
+                                Boolean::xor(
+                                    cs.namespace(|| format!("xor of bit {}", i)),
+                                    a,
+                                    b
+                                )
                             })
                             .collect::<Result<_, _>>()?;
 
@@ -186,7 +193,7 @@ impl<Var: Copy> UInt32<Var> {
         operands: &[Self]
     ) -> Result<Self, SynthesisError>
         where E: Engine,
-              CS: ConstraintSystem<E, Variable=Var>
+              CS: ConstraintSystem<E>
     {
         // Make some arbitrary bounds for ourselves to avoid overflows
         // in the scalar field
@@ -235,11 +242,11 @@ impl<Var: Copy> UInt32<Var> {
                         all_constants = false;
 
                         // Add coeff * (1 - bit) = coeff * ONE - coeff * bit
-                        lc = lc + (coeff, cs.one()) - (coeff, bit.get_variable());
+                        lc = lc + (coeff, CS::one()) - (coeff, bit.get_variable());
                     },
                     &Boolean::Constant(bit) => {
                         if bit {
-                            lc = lc + (coeff, cs.one());
+                            lc = lc + (coeff, CS::one());
                         }
                     }
                 }
@@ -266,7 +273,10 @@ impl<Var: Copy> UInt32<Var> {
         let mut i = 0;
         while max_value != 0 {
             // Allocate the bit
-            let b = AllocatedBit::alloc(cs.namespace(|| format!("result bit {}", i)), result_value.map(|v| (v >> i) & 1 == 1))?;
+            let b = AllocatedBit::alloc(
+                cs.namespace(|| format!("result bit {}", i)),
+                result_value.map(|v| (v >> i) & 1 == 1)
+            )?;
 
             // Subtract this bit from the linear combination to ensure the sums balance out
             lc = lc - (coeff, b.get_variable());
@@ -281,9 +291,9 @@ impl<Var: Copy> UInt32<Var> {
         // Enforce that the linear combination equals zero
         cs.enforce(
             || "modular addition",
-            LinearCombination::zero(),
-            LinearCombination::zero(),
-            lc
+            |lc| lc,
+            |lc| lc,
+            |_| lc
         );
 
         // Discard carry bits that we don't care about
@@ -311,7 +321,7 @@ mod test {
         let mut rng = XorShiftRng::from_seed([0x5dbe6259, 0x8d313d76, 0x3237db17, 0xe5bc0653]);
 
         for _ in 0..1000 {
-            let mut v = (0..32).map(|_| Boolean::<()>::constant(rng.gen())).collect::<Vec<_>>();
+            let mut v = (0..32).map(|_| Boolean::constant(rng.gen())).collect::<Vec<_>>();
 
             let b = UInt32::from_bits(&v);
 
@@ -473,7 +483,7 @@ mod test {
 
         let mut num = rng.gen();
 
-        let a = UInt32::<()>::constant(num);
+        let a = UInt32::constant(num);
 
         for i in 0..32 {
             let b = a.rotr(i);

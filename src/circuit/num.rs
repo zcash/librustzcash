@@ -8,7 +8,8 @@ use pairing::{
 use bellman::{
     SynthesisError,
     ConstraintSystem,
-    LinearCombination
+    LinearCombination,
+    Variable
 };
 
 use super::{
@@ -20,12 +21,12 @@ use super::boolean::{
    AllocatedBit
 };
 
-pub struct AllocatedNum<E: Engine, Var> {
+pub struct AllocatedNum<E: Engine> {
     value: Option<E::Fr>,
-    variable: Var
+    variable: Variable
 }
 
-impl<Var: Copy, E: Engine> Clone for AllocatedNum<E, Var> {
+impl<E: Engine> Clone for AllocatedNum<E> {
     fn clone(&self) -> Self {
         AllocatedNum {
             value: self.value,
@@ -34,12 +35,12 @@ impl<Var: Copy, E: Engine> Clone for AllocatedNum<E, Var> {
     }
 }
 
-impl<E: Engine, Var: Copy> AllocatedNum<E, Var> {
+impl<E: Engine> AllocatedNum<E> {
     pub fn alloc<CS, F>(
         mut cs: CS,
         value: F,
     ) -> Result<Self, SynthesisError>
-        where CS: ConstraintSystem<E, Variable=Var>,
+        where CS: ConstraintSystem<E>,
               F: FnOnce() -> Result<E::Fr, SynthesisError>
     {
         let mut new_value = None;
@@ -60,8 +61,8 @@ impl<E: Engine, Var: Copy> AllocatedNum<E, Var> {
     pub fn into_bits_strict<CS>(
         &self,
         mut cs: CS
-    ) -> Result<Vec<Boolean<Var>>, SynthesisError>
-        where CS: ConstraintSystem<E, Variable=Var>
+    ) -> Result<Vec<Boolean>, SynthesisError>
+        where CS: ConstraintSystem<E>
     {
         let bits = self.into_bits(&mut cs)?;
         Boolean::enforce_in_field::<_, _, E::Fr>(&mut cs, &bits)?;
@@ -72,8 +73,8 @@ impl<E: Engine, Var: Copy> AllocatedNum<E, Var> {
     pub fn into_bits<CS>(
         &self,
         mut cs: CS
-    ) -> Result<Vec<Boolean<Var>>, SynthesisError>
-        where CS: ConstraintSystem<E, Variable=Var>
+    ) -> Result<Vec<Boolean>, SynthesisError>
+        where CS: ConstraintSystem<E>
     {
         let bit_values = match self.value {
             Some(value) => {
@@ -122,9 +123,9 @@ impl<E: Engine, Var: Copy> AllocatedNum<E, Var> {
 
         cs.enforce(
             || "unpacking constraint",
-            LinearCombination::zero(),
-            LinearCombination::zero(),
-            lc
+            |lc| lc,
+            |lc| lc,
+            |_| lc
         );
 
         Ok(bits.into_iter().map(|b| Boolean::from(b)).collect())
@@ -132,16 +133,16 @@ impl<E: Engine, Var: Copy> AllocatedNum<E, Var> {
 
     pub fn from_bits_strict<CS>(
         mut cs: CS,
-        bits: &[Boolean<Var>]
+        bits: &[Boolean]
     ) -> Result<Self, SynthesisError>
-        where CS: ConstraintSystem<E, Variable=Var>
+        where CS: ConstraintSystem<E>
     {
         assert_eq!(bits.len(), E::Fr::NUM_BITS as usize);
 
         Boolean::enforce_in_field::<_, _, E::Fr>(&mut cs, bits)?;
 
-        let one = cs.one();
-        let mut lc = LinearCombination::<Var, E>::zero();
+        let one = CS::one();
+        let mut lc = LinearCombination::<E>::zero();
         let mut coeff = E::Fr::one();
         let mut value = Some(E::Fr::zero());
         for bit in bits.iter().rev() {
@@ -191,9 +192,9 @@ impl<E: Engine, Var: Copy> AllocatedNum<E, Var> {
 
         cs.enforce(
             || "packing constraint",
-            LinearCombination::zero(),
-            LinearCombination::zero(),
-            lc
+            |lc| lc,
+            |lc| lc,
+            |_| lc
         );
 
         Ok(num)
@@ -204,7 +205,7 @@ impl<E: Engine, Var: Copy> AllocatedNum<E, Var> {
         mut cs: CS,
         other: &Self
     ) -> Result<Self, SynthesisError>
-        where CS: ConstraintSystem<E, Variable=Var>
+        where CS: ConstraintSystem<E>
     {
         let mut value = None;
 
@@ -220,9 +221,9 @@ impl<E: Engine, Var: Copy> AllocatedNum<E, Var> {
         // Constrain: a * b = ab
         cs.enforce(
             || "multiplication constraint",
-            LinearCombination::zero() + self.variable,
-            LinearCombination::zero() + other.variable,
-            LinearCombination::zero() + var
+            |lc| lc + self.variable,
+            |lc| lc + other.variable,
+            |lc| lc + var
         );
 
         Ok(AllocatedNum {
@@ -235,7 +236,7 @@ impl<E: Engine, Var: Copy> AllocatedNum<E, Var> {
         &self,
         mut cs: CS
     ) -> Result<Self, SynthesisError>
-        where CS: ConstraintSystem<E, Variable=Var>
+        where CS: ConstraintSystem<E>
     {
         let mut value = None;
 
@@ -251,9 +252,9 @@ impl<E: Engine, Var: Copy> AllocatedNum<E, Var> {
         // Constrain: a * a = aa
         cs.enforce(
             || "squaring constraint",
-            LinearCombination::zero() + self.variable,
-            LinearCombination::zero() + self.variable,
-            LinearCombination::zero() + var
+            |lc| lc + self.variable,
+            |lc| lc + self.variable,
+            |lc| lc + var
         );
 
         Ok(AllocatedNum {
@@ -266,13 +267,13 @@ impl<E: Engine, Var: Copy> AllocatedNum<E, Var> {
         &self,
         mut cs: CS
     ) -> Result<(), SynthesisError>
-        where CS: ConstraintSystem<E, Variable=Var>
+        where CS: ConstraintSystem<E>
     {
         let inv = cs.alloc(|| "ephemeral inverse", || {
             let tmp = *self.value.get()?;
             
             if tmp.is_zero() {
-                Err(SynthesisError::AssignmentMissing)
+                Err(SynthesisError::DivisionByZero)
             } else {
                 Ok(tmp.inverse().unwrap())
             }
@@ -281,12 +282,11 @@ impl<E: Engine, Var: Copy> AllocatedNum<E, Var> {
         // Constrain a * inv = 1, which is only valid
         // iff a has a multiplicative inverse, untrue
         // for zero.
-        let one = cs.one();
         cs.enforce(
             || "nonzero assertion constraint",
-            LinearCombination::zero() + self.variable,
-            LinearCombination::zero() + inv,
-            LinearCombination::zero() + one
+            |lc| lc + self.variable,
+            |lc| lc + inv,
+            |lc| lc + CS::one()
         );
 
         Ok(())
@@ -299,9 +299,9 @@ impl<E: Engine, Var: Copy> AllocatedNum<E, Var> {
         mut cs: CS,
         a: &Self,
         b: &Self,
-        condition: &Boolean<Var>
+        condition: &Boolean
     ) -> Result<(Self, Self), SynthesisError>
-        where CS: ConstraintSystem<E, Variable=Var>
+        where CS: ConstraintSystem<E>
     {
         let c = Self::alloc(
             cs.namespace(|| "conditional reversal result 1"),
@@ -314,12 +314,11 @@ impl<E: Engine, Var: Copy> AllocatedNum<E, Var> {
             }
         )?;
 
-        let one = cs.one();
         cs.enforce(
             || "first conditional reversal",
-            LinearCombination::zero() + a.variable - b.variable,
-            condition.lc(one, E::Fr::one()),
-            LinearCombination::zero() + a.variable - c.variable
+            |lc| lc + a.variable - b.variable,
+            |_| condition.lc(CS::one(), E::Fr::one()),
+            |lc| lc + a.variable - c.variable
         );
 
         let d = Self::alloc(
@@ -335,9 +334,9 @@ impl<E: Engine, Var: Copy> AllocatedNum<E, Var> {
 
         cs.enforce(
             || "second conditional reversal",
-            LinearCombination::zero() + b.variable - a.variable,
-            condition.lc(one, E::Fr::one()),
-            LinearCombination::zero() + b.variable - d.variable
+            |lc| lc + b.variable - a.variable,
+            |_| condition.lc(CS::one(), E::Fr::one()),
+            |lc| lc + b.variable - d.variable
         );
 
         Ok((c, d))
@@ -346,9 +345,9 @@ impl<E: Engine, Var: Copy> AllocatedNum<E, Var> {
     pub fn conditionally_negate<CS>(
         &self,
         mut cs: CS,
-        condition: &Boolean<Var>
+        condition: &Boolean
     ) -> Result<Self, SynthesisError>
-        where CS: ConstraintSystem<E, Variable=Var>
+        where CS: ConstraintSystem<E>
     {
         let r = Self::alloc(
             cs.namespace(|| "conditional negation result"),
@@ -365,12 +364,11 @@ impl<E: Engine, Var: Copy> AllocatedNum<E, Var> {
         // x - 2cx = r
         // (2x) * (c) = x - r
 
-        let one = cs.one();
         cs.enforce(
             || "conditional negation",
-            LinearCombination::zero() + self.variable + self.variable,
-            condition.lc(one, E::Fr::one()),
-            LinearCombination::zero() + self.variable - r.variable
+            |lc| lc + self.variable + self.variable,
+            |_| condition.lc(CS::one(), E::Fr::one()),
+            |lc| lc + self.variable - r.variable
         );
 
         Ok(r)
@@ -380,7 +378,7 @@ impl<E: Engine, Var: Copy> AllocatedNum<E, Var> {
         self.value
     }
 
-    pub fn get_variable(&self) -> Var {
+    pub fn get_variable(&self) -> Variable {
         self.variable
     }
 }
