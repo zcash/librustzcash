@@ -154,10 +154,15 @@ pub fn lookup3_xy_with_conditional_negation<E: Engine, CS>(
     )?;
 
     // Allocate the y-coordinate resulting from the lookup
+    // and conditional negation
     let res_y = AllocatedNum::alloc(
         cs.namespace(|| "y"),
         || {
-            Ok(coords[*i.get()?].1)
+            let mut tmp = coords[*i.get()?].1;
+            if *bits[2].get_value().get()? {
+                tmp.negate();
+            }
+            Ok(tmp)
         }
     )?;
 
@@ -181,19 +186,19 @@ pub fn lookup3_xy_with_conditional_negation<E: Engine, CS>(
         |lc| lc + res_x.get_variable()
     );
 
+    let y_lc = precomp.lc::<E>(one, y_coeffs[0b11]) +
+               &bits[1].lc::<E>(one, y_coeffs[0b10]) +
+               &bits[0].lc::<E>(one, y_coeffs[0b01]) +
+               (y_coeffs[0b00], one);
+
     cs.enforce(
         || "y-coordinate lookup",
-        |lc| lc + (y_coeffs[0b00], one)
-                + &bits[0].lc::<E>(one, y_coeffs[0b01])
-                + &bits[1].lc::<E>(one, y_coeffs[0b10])
-                + &precomp.lc::<E>(one, y_coeffs[0b11]),
-        |lc| lc + one,
-        |lc| lc + res_y.get_variable()
+        |lc| lc + &y_lc + &y_lc,
+        |lc| lc + &bits[2].lc::<E>(one, E::Fr::one()),
+        |lc| lc + &y_lc - res_y.get_variable()
     );
 
-    let final_y = res_y.conditionally_negate(&mut cs, &bits[2])?;
-
-    Ok((res_x, final_y))
+    Ok((res_x, res_y))
 }
 
 #[cfg(test)]
