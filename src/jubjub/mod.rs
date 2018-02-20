@@ -93,7 +93,7 @@ impl JubjubParams<Bls12> for JubjubBls12 {
         &self.pedersen_hash_generators
     }
     fn pedersen_hash_chunks_per_generator(&self) -> usize {
-        62
+        63
     }
     fn fixed_base_chunks_per_generator(&self) -> usize {
         84
