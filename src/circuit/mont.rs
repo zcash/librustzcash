@@ -238,12 +238,116 @@ impl<E: JubjubEngine> EdwardsPoint<E> {
 
     pub fn double<CS>(
         &self,
-        cs: CS,
+        mut cs: CS,
         params: &E::Params
     ) -> Result<Self, SynthesisError>
         where CS: ConstraintSystem<E>
     {
-        self.add(cs, self, params)
+        // Compute T = (x1 + y1) * (x1 + y1)
+        let t = AllocatedNum::alloc(cs.namespace(|| "T"), || {
+            let mut t0 = *self.x.get_value().get()?;
+            t0.add_assign(self.y.get_value().get()?);
+
+            let mut t1 = *self.x.get_value().get()?;
+            t1.add_assign(self.y.get_value().get()?);
+
+            t0.mul_assign(&t1);
+
+            Ok(t0)
+        })?;
+
+        cs.enforce(
+            || "T computation",
+            |lc| lc + self.x.get_variable()
+                    + self.y.get_variable(),
+            |lc| lc + self.x.get_variable()
+                    + self.y.get_variable(),
+            |lc| lc + t.get_variable()
+        );
+
+        // Compute A = x1 * y1
+        let a = self.x.mul(cs.namespace(|| "A computation"), &self.y)?;
+
+        // Compute C = d*A*A
+        let c = AllocatedNum::alloc(cs.namespace(|| "C"), || {
+            let mut t0 = *a.get_value().get()?;
+            t0.square();
+            t0.mul_assign(params.edwards_d());
+
+            Ok(t0)
+        })?;
+
+        cs.enforce(
+            || "C computation",
+            |lc| lc + (*params.edwards_d(), a.get_variable()),
+            |lc| lc + a.get_variable(),
+            |lc| lc + c.get_variable()
+        );
+
+        // Compute x3 = (2.A) / (1 + C)
+        let x3 = AllocatedNum::alloc(cs.namespace(|| "x3"), || {
+            let mut t0 = *a.get_value().get()?;
+            t0.double();
+
+            let mut t1 = E::Fr::one();
+            t1.add_assign(c.get_value().get()?);
+
+            match t1.inverse() {
+                Some(t1) => {
+                    t0.mul_assign(&t1);
+
+                    Ok(t0)
+                },
+                None => {
+                    Err(SynthesisError::DivisionByZero)
+                }
+            }
+        })?;
+
+        let one = CS::one();
+        cs.enforce(
+            || "x3 computation",
+            |lc| lc + one + c.get_variable(),
+            |lc| lc + x3.get_variable(),
+            |lc| lc + a.get_variable()
+                    + a.get_variable()
+        );
+
+        // Compute y3 = (U - 2.A) / (1 - C)
+        let y3 = AllocatedNum::alloc(cs.namespace(|| "y3"), || {
+            let mut t0 = *a.get_value().get()?;
+            t0.double();
+            t0.negate();
+            t0.add_assign(t.get_value().get()?);
+
+            let mut t1 = E::Fr::one();
+            t1.sub_assign(c.get_value().get()?);
+
+            match t1.inverse() {
+                Some(t1) => {
+                    t0.mul_assign(&t1);
+
+                    Ok(t0)
+                },
+                None => {
+                    Err(SynthesisError::DivisionByZero)
+                }
+            }
+        })?;
+
+        cs.enforce(
+            || "y3 computation",
+            |lc| lc + one - c.get_variable(),
+            |lc| lc + y3.get_variable(),
+            |lc| lc + t.get_variable()
+                    - a.get_variable()
+                    - a.get_variable()
+        );
+
+        Ok(EdwardsPoint {
+            x: x3,
+            y: y3
+        })
     }
 
     /// Perform addition between any two points
