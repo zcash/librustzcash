@@ -169,24 +169,26 @@ pub fn lookup3_xy_with_conditional_negation<E: Engine, CS>(
     synth::<E, _>(2, coords.iter().map(|c| &c.0), &mut x_coeffs);
     synth::<E, _>(2, coords.iter().map(|c| &c.1), &mut y_coeffs);
 
+    let precomp = Boolean::and(cs.namespace(|| "precomp"), &bits[0], &bits[1])?;
+
     cs.enforce(
         || "x-coordinate lookup",
-        |lc| lc + (x_coeffs[0b01], one)
-                + &bits[1].lc::<E>(one, x_coeffs[0b11]),
-        |lc| lc + &bits[0].lc::<E>(one, E::Fr::one()),
+        |lc| lc + (x_coeffs[0b00], one)
+                + &bits[0].lc::<E>(one, x_coeffs[0b01])
+                + &bits[1].lc::<E>(one, x_coeffs[0b10])
+                + &precomp.lc::<E>(one, x_coeffs[0b11]),
+        |lc| lc + one,
         |lc| lc + res_x.get_variable()
-                - (x_coeffs[0b00], one)
-                - &bits[1].lc::<E>(one, x_coeffs[0b10])
     );
 
     cs.enforce(
         || "y-coordinate lookup",
-        |lc| lc + (y_coeffs[0b01], one)
-                + &bits[1].lc::<E>(one, y_coeffs[0b11]),
-        |lc| lc + &bits[0].lc::<E>(one, E::Fr::one()),
+        |lc| lc + (y_coeffs[0b00], one)
+                + &bits[0].lc::<E>(one, y_coeffs[0b01])
+                + &bits[1].lc::<E>(one, y_coeffs[0b10])
+                + &precomp.lc::<E>(one, y_coeffs[0b11]),
+        |lc| lc + one,
         |lc| lc + res_y.get_variable()
-                - (y_coeffs[0b00], one)
-                - &bits[1].lc::<E>(one, y_coeffs[0b10])
     );
 
     let final_y = res_y.conditionally_negate(&mut cs, &bits[2])?;

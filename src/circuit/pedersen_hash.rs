@@ -155,7 +155,7 @@ mod test {
         ).unwrap();
 
         assert!(cs.is_satisfied());
-        assert_eq!(cs.num_constraints(), 1551);
+        assert_eq!(cs.num_constraints(), 1721);
     }
 
     #[test]
