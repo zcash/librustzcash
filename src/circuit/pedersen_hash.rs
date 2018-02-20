@@ -10,6 +10,7 @@ use bellman::{
 };
 use super::lookup::*;
 
+// TODO: ensure these match the spec
 pub enum Personalization {
     NoteCommitment,
     AnotherPersonalization
