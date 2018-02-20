@@ -788,7 +788,7 @@ mod test {
         for _ in 0..100 {
             let mut cs = TestConstraintSystem::<Bls12>::new();
 
-            let p = params.generator(FixedGenerators::NoteCommitmentRandomization);
+            let p = params.generator(FixedGenerators::NoteCommitmentRandomness);
             let s = Fs::rand(rng);
             let q = p.mul(s, params);
             let (x1, y1) = q.into_xy();
@@ -805,7 +805,7 @@ mod test {
 
             let q = fixed_base_multiplication(
                 cs.namespace(|| "multiplication"),
-                FixedGenerators::NoteCommitmentRandomization,
+                FixedGenerators::NoteCommitmentRandomness,
                 &s_bits,
                 params
             ).unwrap();
