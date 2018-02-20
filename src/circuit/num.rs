@@ -2,7 +2,6 @@ use pairing::{
     Engine,
     Field,
     PrimeField,
-    BitIterator
 };
 
 use bellman::{
@@ -19,7 +18,6 @@ use super::{
 use super::boolean::{
     self,
     Boolean,
-    AllocatedBit
 };
 
 pub struct AllocatedNum<E: Engine> {
