@@ -1,14 +1,17 @@
 use jubjub::*;
 use pairing::*;
 
+use circuit::pedersen_hash::Personalization;
+
 pub fn pedersen_hash<E, I>(
+    personalization: Personalization,
     bits: I,
     params: &E::Params
 ) -> edwards::Point<E, PrimeOrder>
     where I: IntoIterator<Item=bool>,
           E: JubjubEngine
 {
-    let mut bits = bits.into_iter();
+    let mut bits = personalization.get_bits().into_iter().chain(bits.into_iter());
 
     let mut result = edwards::Point::zero();
     let mut generators = params.pedersen_hash_generators().iter();
