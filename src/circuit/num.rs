@@ -17,8 +17,9 @@ use super::{
 };
 
 use super::boolean::{
-   Boolean,
-   AllocatedBit
+    self,
+    Boolean,
+    AllocatedBit
 };
 
 pub struct AllocatedNum<E: Engine> {
@@ -76,39 +77,10 @@ impl<E: Engine> AllocatedNum<E> {
     ) -> Result<Vec<Boolean>, SynthesisError>
         where CS: ConstraintSystem<E>
     {
-        let bit_values = match self.value {
-            Some(value) => {
-                let mut field_char = BitIterator::new(E::Fr::char());
-
-                let mut tmp = Vec::with_capacity(E::Fr::NUM_BITS as usize);
-
-                let mut found_one = false;
-                for b in BitIterator::new(value.into_repr()) {
-                    // Skip leading bits
-                    found_one |= field_char.next().unwrap();
-                    if !found_one {
-                        continue;
-                    }
-
-                    tmp.push(Some(b));
-                }
-
-                assert_eq!(tmp.len(), E::Fr::NUM_BITS as usize);
-
-                tmp
-            },
-            None => {
-                vec![None; E::Fr::NUM_BITS as usize]
-            }
-        };
-
-        let mut bits = vec![];
-        for (i, b) in bit_values.into_iter().enumerate() {
-            bits.push(AllocatedBit::alloc(
-                cs.namespace(|| format!("bit {}", i)),
-                b
-            )?);
-        }
+        let bits = boolean::field_into_allocated_bits_be(
+            &mut cs,
+            self.value
+        )?;
 
         let mut lc = LinearCombination::zero();
         let mut coeff = E::Fr::one();
