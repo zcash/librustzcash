@@ -321,6 +321,61 @@ impl<E: Engine> AllocatedNum<E> {
     }
 }
 
+pub struct Num<E: Engine> {
+    value: Option<E::Fr>,
+    lc: LinearCombination<E>
+}
+
+impl<E: Engine> From<AllocatedNum<E>> for Num<E> {
+    fn from(num: AllocatedNum<E>) -> Num<E> {
+        Num {
+            value: num.value,
+            lc: LinearCombination::<E>::zero() + num.variable
+        }
+    }
+}
+
+impl<E: Engine> Num<E> {
+    pub fn zero() -> Self {
+        Num {
+            value: Some(E::Fr::zero()),
+            lc: LinearCombination::zero()
+        }
+    }
+
+    pub fn get_value(&self) -> Option<E::Fr> {
+        self.value
+    }
+
+    pub fn lc(&self, coeff: E::Fr) -> LinearCombination<E> {
+        LinearCombination::zero() + (coeff, &self.lc)
+    }
+
+    pub fn add_bool_with_coeff(
+        self,
+        one: Variable,
+        bit: &Boolean,
+        coeff: E::Fr
+    ) -> Self
+    {
+        let newval = match (self.value, bit.get_value()) {
+            (Some(mut curval), Some(mut bval)) => {
+                if bval {
+                    curval.add_assign(&coeff);
+                }
+
+                Some(curval)
+            },
+            _ => None
+        };
+
+        Num {
+            value: newval,
+            lc: self.lc + &bit.lc(one, coeff)
+        }
+    }
+}
+
 #[cfg(test)]
 mod test {
     use rand::{SeedableRng, Rand, Rng, XorShiftRng};

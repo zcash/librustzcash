@@ -1,6 +1,9 @@
 use pairing::{Engine, Field};
 use super::*;
-use super::num::AllocatedNum;
+use super::num::{
+    AllocatedNum,
+    Num
+};
 use super::boolean::Boolean;
 use bellman::{
     ConstraintSystem
@@ -123,7 +126,7 @@ pub fn lookup3_xy_with_conditional_negation<E: Engine, CS>(
     mut cs: CS,
     bits: &[Boolean],
     coords: &[(E::Fr, E::Fr)]
-) -> Result<(AllocatedNum<E>, AllocatedNum<E>), SynthesisError>
+) -> Result<(Num<E>, Num<E>), SynthesisError>
     where CS: ConstraintSystem<E>
 {
     assert_eq!(bits.len(), 3);
@@ -145,17 +148,9 @@ pub fn lookup3_xy_with_conditional_negation<E: Engine, CS>(
         _ => None
     };
 
-    // Allocate the x-coordinate resulting from the lookup
-    let res_x = AllocatedNum::alloc(
-        cs.namespace(|| "x"),
-        || {
-            Ok(coords[*i.get()?].0)
-        }
-    )?;
-
     // Allocate the y-coordinate resulting from the lookup
     // and conditional negation
-    let res_y = AllocatedNum::alloc(
+    let y = AllocatedNum::alloc(
         cs.namespace(|| "y"),
         || {
             let mut tmp = coords[*i.get()?].1;
@@ -176,15 +171,11 @@ pub fn lookup3_xy_with_conditional_negation<E: Engine, CS>(
 
     let precomp = Boolean::and(cs.namespace(|| "precomp"), &bits[0], &bits[1])?;
 
-    cs.enforce(
-        || "x-coordinate lookup",
-        |lc| lc + (x_coeffs[0b00], one)
-                + &bits[0].lc::<E>(one, x_coeffs[0b01])
-                + &bits[1].lc::<E>(one, x_coeffs[0b10])
-                + &precomp.lc::<E>(one, x_coeffs[0b11]),
-        |lc| lc + one,
-        |lc| lc + res_x.get_variable()
-    );
+    let x = Num::zero()
+            .add_bool_with_coeff(one, &Boolean::constant(true), x_coeffs[0b00])
+            .add_bool_with_coeff(one, &bits[0], x_coeffs[0b01])
+            .add_bool_with_coeff(one, &bits[1], x_coeffs[0b10])
+            .add_bool_with_coeff(one, &precomp, x_coeffs[0b11]);
 
     let y_lc = precomp.lc::<E>(one, y_coeffs[0b11]) +
                &bits[1].lc::<E>(one, y_coeffs[0b10]) +
@@ -195,10 +186,10 @@ pub fn lookup3_xy_with_conditional_negation<E: Engine, CS>(
         || "y-coordinate lookup",
         |lc| lc + &y_lc + &y_lc,
         |lc| lc + &bits[2].lc::<E>(one, E::Fr::one()),
-        |lc| lc + &y_lc - res_y.get_variable()
+        |lc| lc + &y_lc - y.get_variable()
     );
 
-    Ok((res_x, res_y))
+    Ok((x, y.into()))
 }
 
 #[cfg(test)]

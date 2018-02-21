@@ -12,7 +12,10 @@ use super::{
     Assignment
 };
 
-use super::num::AllocatedNum;
+use super::num::{
+    AllocatedNum,
+    Num
+};
 
 use ::jubjub::{
     JubjubEngine,
@@ -470,8 +473,8 @@ impl<E: JubjubEngine> EdwardsPoint<E> {
 }
 
 pub struct MontgomeryPoint<E: Engine> {
-    x: AllocatedNum<E>,
-    y: AllocatedNum<E>
+    x: Num<E>,
+    y: Num<E>
 }
 
 impl<E: JubjubEngine> MontgomeryPoint<E> {
@@ -504,9 +507,9 @@ impl<E: JubjubEngine> MontgomeryPoint<E> {
 
         cs.enforce(
             || "u computation",
-            |lc| lc + self.y.get_variable(),
+            |lc| lc + &self.y.lc(E::Fr::one()),
             |lc| lc + u.get_variable(),
-            |lc| lc + (*params.scale(), self.x.get_variable())
+            |lc| lc + &self.x.lc(*params.scale())
         );
 
         // Compute v = (x - 1) / (x + 1)
@@ -531,10 +534,10 @@ impl<E: JubjubEngine> MontgomeryPoint<E> {
         let one = CS::one();
         cs.enforce(
             || "v computation",
-            |lc| lc + self.x.get_variable()
+            |lc| lc + &self.x.lc(E::Fr::one())
                     + one,
             |lc| lc + v.get_variable(),
-            |lc| lc + self.x.get_variable()
+            |lc| lc + &self.x.lc(E::Fr::one())
                     - one,
         );
 
@@ -549,8 +552,8 @@ impl<E: JubjubEngine> MontgomeryPoint<E> {
     /// on the curve. Useful for constants and
     /// window table lookups.
     pub fn interpret_unchecked(
-        x: AllocatedNum<E>,
-        y: AllocatedNum<E>
+        x: Num<E>,
+        y: Num<E>
     ) -> Self
     {
         MontgomeryPoint {
@@ -590,13 +593,13 @@ impl<E: JubjubEngine> MontgomeryPoint<E> {
 
         cs.enforce(
             || "evaluate lambda",
-            |lc| lc + other.x.get_variable()
-                    - self.x.get_variable(),
+            |lc| lc + &other.x.lc(E::Fr::one())
+                    - &self.x.lc(E::Fr::one()),
 
             |lc| lc + lambda.get_variable(),
 
-            |lc| lc + other.y.get_variable()
-                    - self.y.get_variable()
+            |lc| lc + &other.y.lc(E::Fr::one())
+                    - &self.y.lc(E::Fr::one())
         );
 
         // Compute x'' = lambda^2 - A - x - x'
@@ -617,8 +620,8 @@ impl<E: JubjubEngine> MontgomeryPoint<E> {
             |lc| lc + lambda.get_variable(),
             |lc| lc + lambda.get_variable(),
             |lc| lc + (*params.montgomery_a(), one)
-                    + self.x.get_variable()
-                    + other.x.get_variable()
+                    + &self.x.lc(E::Fr::one())
+                    + &other.x.lc(E::Fr::one())
                     + xprime.get_variable()
         );
 
@@ -636,18 +639,18 @@ impl<E: JubjubEngine> MontgomeryPoint<E> {
         // y' + y = lambda(x - x')
         cs.enforce(
             || "evaluate yprime",
-            |lc| lc + self.x.get_variable()
+            |lc| lc + &self.x.lc(E::Fr::one())
                     - xprime.get_variable(),
 
             |lc| lc + lambda.get_variable(),
 
             |lc| lc + yprime.get_variable()
-                    + self.y.get_variable()
+                    + &self.y.lc(E::Fr::one())
         );
 
         Ok(MontgomeryPoint {
-            x: xprime,
-            y: yprime
+            x: xprime.into(),
+            y: yprime.into()
         })
     }
 }
@@ -697,7 +700,7 @@ mod test {
                 Ok(y)
             }).unwrap();
 
-            let p = MontgomeryPoint::interpret_unchecked(numx, numy);
+            let p = MontgomeryPoint::interpret_unchecked(numx.into(), numy.into());
 
             let q = p.into_edwards(&mut cs, params).unwrap();
 
@@ -1068,13 +1071,13 @@ mod test {
             }).unwrap();
 
             let p1 = MontgomeryPoint {
-                x: num_x0,
-                y: num_y0
+                x: num_x0.into(),
+                y: num_y0.into()
             };
 
             let p2 = MontgomeryPoint {
-                x: num_x1,
-                y: num_y1
+                x: num_x1.into(),
+                y: num_y1.into()
             };
 
             let p3 = p1.add(cs.namespace(|| "addition"), &p2, params).unwrap();
