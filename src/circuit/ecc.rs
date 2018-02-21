@@ -18,6 +18,7 @@ use super::num::{
 };
 
 use ::jubjub::{
+    edwards,
     JubjubEngine,
     JubjubParams,
     FixedGenerators
@@ -91,6 +92,41 @@ pub fn fixed_base_multiplication<E, CS>(
 }
 
 impl<E: JubjubEngine> EdwardsPoint<E> {
+    /// This 'witnesses' a point inside the constraint system.
+    /// It guarantees the point is on the curve.
+    pub fn witness<Order, CS>(
+        mut cs: CS,
+        p: Option<edwards::Point<E, Order>>,
+        params: &E::Params
+    ) -> Result<Self, SynthesisError>
+        where CS: ConstraintSystem<E>
+    {
+        let p = p.map(|p| p.into_xy());
+
+        // Allocate x
+        let x = AllocatedNum::alloc(
+            cs.namespace(|| "x"),
+            || {
+                Ok(p.get()?.0)
+            }
+        )?;
+
+        // Allocate y
+        let y = AllocatedNum::alloc(
+            cs.namespace(|| "y"),
+            || {
+                Ok(p.get()?.1)
+            }
+        )?;
+
+        Self::interpret(
+            cs.namespace(|| "point interpretation"),
+            &x,
+            &y,
+            params
+        )
+    }
+
     /// This extracts the x-coordinate, which is an injective
     /// encoding for elements of the prime order subgroup.
     pub fn into_num(&self) -> AllocatedNum<E> {
@@ -722,6 +758,23 @@ mod test {
     fn test_interpret() {
         let params = &JubjubBls12::new();
         let rng = &mut XorShiftRng::from_seed([0x5dbe6259, 0x8d313d76, 0x3237db17, 0xe5bc0654]);
+
+        for _ in 0..100 {
+            let p = edwards::Point::<Bls12, _>::rand(rng, &params);
+
+            let mut cs = TestConstraintSystem::<Bls12>::new();
+            let q = EdwardsPoint::witness(
+                &mut cs,
+                Some(p.clone()),
+                &params
+            ).unwrap();
+
+            let p = p.into_xy();
+
+            assert!(cs.is_satisfied());
+            assert_eq!(q.x.get_value().unwrap(), p.0);
+            assert_eq!(q.y.get_value().unwrap(), p.1);
+        }
 
         for _ in 0..100 {
             let p = edwards::Point::<Bls12, _>::rand(rng, &params);
