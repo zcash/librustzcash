@@ -44,8 +44,7 @@ impl<E: Engine> Clone for EdwardsPoint<E> {
 }
 
 /// Perform a fixed-base scalar multiplication with
-/// `by` being in little-endian bit order. `by` must
-/// be a multiple of 3.
+/// `by` being in little-endian bit order.
 pub fn fixed_base_multiplication<E, CS>(
     mut cs: CS,
     base: FixedGenerators,
@@ -55,11 +54,6 @@ pub fn fixed_base_multiplication<E, CS>(
     where CS: ConstraintSystem<E>,
           E: JubjubEngine
 {
-    // We're going to chunk the scalar into 3-bit windows,
-    // so let's force the caller to supply the right number
-    // of bits for our lookups.
-    assert!(by.len() % 3 == 0);
-
     // Represents the result of the multiplication
     let mut result = None;
 
@@ -67,9 +61,13 @@ pub fn fixed_base_multiplication<E, CS>(
                                   .zip(params.circuit_generators(base).iter())
                                   .enumerate()
     {
+        let chunk_a = chunk.get(0).map(|e| e.clone()).unwrap_or(Boolean::constant(false));
+        let chunk_b = chunk.get(1).map(|e| e.clone()).unwrap_or(Boolean::constant(false));
+        let chunk_c = chunk.get(2).map(|e| e.clone()).unwrap_or(Boolean::constant(false));
+
         let (x, y) = lookup3_xy(
             cs.namespace(|| format!("window table lookup {}", i)),
-            chunk,
+            &[chunk_a, chunk_b, chunk_c],
             window
         )?;
 
