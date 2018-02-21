@@ -1,5 +1,5 @@
 use super::*;
-use super::mont::{
+use super::ecc::{
     MontgomeryPoint,
     EdwardsPoint
 };
@@ -10,18 +10,43 @@ use bellman::{
 };
 use super::lookup::*;
 
+// TODO: ensure these match the spec
+pub enum Personalization {
+    NoteCommitment,
+    AnotherPersonalization
+}
+
+impl Personalization {
+    fn get_constant_bools(&self) -> Vec<Boolean> {
+        self.get_bits()
+        .into_iter()
+        .map(|e| Boolean::constant(e))
+        .collect()
+    }
+
+    pub fn get_bits(&self) -> Vec<bool> {
+        match *self {
+            Personalization::NoteCommitment =>
+                vec![false, false, false, false, false, false],
+            Personalization::AnotherPersonalization =>
+                vec![false, false, false, false, false, true],
+        }
+    }
+}
+
 pub fn pedersen_hash<E: JubjubEngine, CS>(
     mut cs: CS,
+    personalization: Personalization,
     bits: &[Boolean],
     params: &E::Params
 ) -> Result<EdwardsPoint<E>, SynthesisError>
     where CS: ConstraintSystem<E>
 {
-    // Unnecessary if forced personalization is introduced
-    assert!(bits.len() > 0);
+    let personalization = personalization.get_constant_bools();
+    assert_eq!(personalization.len(), 6);
 
     let mut edwards_result = None;
-    let mut bits = bits.iter();
+    let mut bits = personalization.iter().chain(bits.iter());
     let mut segment_generators = params.pedersen_circuit_generators().iter();
     let boolean_false = Boolean::constant(false);
 
@@ -124,12 +149,13 @@ mod test {
 
         pedersen_hash(
             cs.namespace(|| "pedersen hash"),
+            Personalization::NoteCommitment,
             &input_bools,
             params
         ).unwrap();
 
         assert!(cs.is_satisfied());
-        assert_eq!(cs.num_constraints(), 1539);
+        assert_eq!(cs.num_constraints(), 1377);
     }
 
     #[test]
@@ -151,6 +177,7 @@ mod test {
 
                 let res = pedersen_hash(
                     cs.namespace(|| "pedersen hash"),
+                    Personalization::NoteCommitment,
                     &input_bools,
                     params
                 ).unwrap();
@@ -158,12 +185,23 @@ mod test {
                 assert!(cs.is_satisfied());
 
                 let expected = ::pedersen_hash::pedersen_hash::<Bls12, _>(
-                    input.into_iter(),
+                    Personalization::NoteCommitment,
+                    input.clone().into_iter(),
                     params
                 ).into_xy();
 
                 assert_eq!(res.x.get_value().unwrap(), expected.0);
                 assert_eq!(res.y.get_value().unwrap(), expected.1);
+
+                // Test against the output of a different personalization
+                let unexpected = ::pedersen_hash::pedersen_hash::<Bls12, _>(
+                    Personalization::AnotherPersonalization,
+                    input.into_iter(),
+                    params
+                ).into_xy();
+
+                assert!(res.x.get_value().unwrap() != unexpected.0);
+                assert!(res.y.get_value().unwrap() != unexpected.1);
             }
         }
     }

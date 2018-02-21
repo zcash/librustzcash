@@ -2,7 +2,6 @@ use pairing::{
     Engine,
     Field,
     PrimeField,
-    BitIterator
 };
 
 use bellman::{
@@ -17,8 +16,8 @@ use super::{
 };
 
 use super::boolean::{
-   Boolean,
-   AllocatedBit
+    self,
+    Boolean,
 };
 
 pub struct AllocatedNum<E: Engine> {
@@ -76,39 +75,10 @@ impl<E: Engine> AllocatedNum<E> {
     ) -> Result<Vec<Boolean>, SynthesisError>
         where CS: ConstraintSystem<E>
     {
-        let bit_values = match self.value {
-            Some(value) => {
-                let mut field_char = BitIterator::new(E::Fr::char());
-
-                let mut tmp = Vec::with_capacity(E::Fr::NUM_BITS as usize);
-
-                let mut found_one = false;
-                for b in BitIterator::new(value.into_repr()) {
-                    // Skip leading bits
-                    found_one |= field_char.next().unwrap();
-                    if !found_one {
-                        continue;
-                    }
-
-                    tmp.push(Some(b));
-                }
-
-                assert_eq!(tmp.len(), E::Fr::NUM_BITS as usize);
-
-                tmp
-            },
-            None => {
-                vec![None; E::Fr::NUM_BITS as usize]
-            }
-        };
-
-        let mut bits = vec![];
-        for (i, b) in bit_values.into_iter().enumerate() {
-            bits.push(AllocatedBit::alloc(
-                cs.namespace(|| format!("bit {}", i)),
-                b
-            )?);
-        }
+        let bits = boolean::field_into_allocated_bits_be(
+            &mut cs,
+            self.value
+        )?;
 
         let mut lc = LinearCombination::zero();
         let mut coeff = E::Fr::one();
@@ -342,44 +312,67 @@ impl<E: Engine> AllocatedNum<E> {
         Ok((c, d))
     }
 
-    pub fn conditionally_negate<CS>(
-        &self,
-        mut cs: CS,
-        condition: &Boolean
-    ) -> Result<Self, SynthesisError>
-        where CS: ConstraintSystem<E>
-    {
-        let r = Self::alloc(
-            cs.namespace(|| "conditional negation result"),
-            || {
-                let mut tmp = *self.value.get()?;
-                if *condition.get_value().get()? {
-                    tmp.negate();
-                }
-                Ok(tmp)
-            }
-        )?;
-
-        // (1-c)(x) + (c)(-x) = r
-        // x - 2cx = r
-        // (2x) * (c) = x - r
-
-        cs.enforce(
-            || "conditional negation",
-            |lc| lc + self.variable + self.variable,
-            |_| condition.lc(CS::one(), E::Fr::one()),
-            |lc| lc + self.variable - r.variable
-        );
-
-        Ok(r)
-    }
-
     pub fn get_value(&self) -> Option<E::Fr> {
         self.value
     }
 
     pub fn get_variable(&self) -> Variable {
         self.variable
+    }
+}
+
+pub struct Num<E: Engine> {
+    value: Option<E::Fr>,
+    lc: LinearCombination<E>
+}
+
+impl<E: Engine> From<AllocatedNum<E>> for Num<E> {
+    fn from(num: AllocatedNum<E>) -> Num<E> {
+        Num {
+            value: num.value,
+            lc: LinearCombination::<E>::zero() + num.variable
+        }
+    }
+}
+
+impl<E: Engine> Num<E> {
+    pub fn zero() -> Self {
+        Num {
+            value: Some(E::Fr::zero()),
+            lc: LinearCombination::zero()
+        }
+    }
+
+    pub fn get_value(&self) -> Option<E::Fr> {
+        self.value
+    }
+
+    pub fn lc(&self, coeff: E::Fr) -> LinearCombination<E> {
+        LinearCombination::zero() + (coeff, &self.lc)
+    }
+
+    pub fn add_bool_with_coeff(
+        self,
+        one: Variable,
+        bit: &Boolean,
+        coeff: E::Fr
+    ) -> Self
+    {
+        let newval = match (self.value, bit.get_value()) {
+            (Some(mut curval), Some(mut bval)) => {
+                if bval {
+                    curval.add_assign(&coeff);
+                }
+
+                Some(curval)
+            },
+            _ => None
+        };
+
+        Num {
+            value: newval,
+            lc: self.lc + &bit.lc(one, coeff)
+        }
     }
 }
 
@@ -460,107 +453,6 @@ mod test {
 
             assert_eq!(a.value.unwrap(), d.value.unwrap());
             assert_eq!(b.value.unwrap(), c.value.unwrap());
-        }
-    }
-
-    #[test]
-    fn test_num_conditional_negation() {
-        {
-            let mut cs = TestConstraintSystem::<Bls12>::new();
-
-            let n = AllocatedNum::alloc(cs.namespace(|| "a"), || Ok(Fr::one())).unwrap();
-            let b = Boolean::constant(true);
-            let n2 = n.conditionally_negate(&mut cs, &b).unwrap();
-
-            let mut negone = Fr::one();
-            negone.negate();
-
-            assert!(cs.is_satisfied());
-            assert!(cs.get("conditional negation result/num") == negone);
-            assert!(n2.value.unwrap() == negone);
-            cs.set("conditional negation result/num", Fr::from_str("1").unwrap());
-            assert!(!cs.is_satisfied());
-        }
-        {
-            let mut cs = TestConstraintSystem::<Bls12>::new();
-
-            let n = AllocatedNum::alloc(cs.namespace(|| "a"), || Ok(Fr::one())).unwrap();
-            let b = Boolean::constant(false);
-            let n2 = n.conditionally_negate(&mut cs, &b).unwrap();
-
-            assert!(cs.is_satisfied());
-            assert!(cs.get("conditional negation result/num") == Fr::one());
-            assert!(n2.value.unwrap() == Fr::one());
-            cs.set("conditional negation result/num", Fr::from_str("2").unwrap());
-            assert!(!cs.is_satisfied());
-        }
-
-        {
-            let mut cs = TestConstraintSystem::<Bls12>::new();
-
-            let n = AllocatedNum::alloc(cs.namespace(|| "a"), || Ok(Fr::one())).unwrap();
-            let b = Boolean::from(
-                AllocatedBit::alloc(cs.namespace(|| "condition"), Some(true)).unwrap()
-            );
-            let n2 = n.conditionally_negate(&mut cs, &b).unwrap();
-
-            let mut negone = Fr::one();
-            negone.negate();
-
-            assert!(cs.is_satisfied());
-            assert!(cs.get("conditional negation result/num") == negone);
-            assert!(n2.value.unwrap() == negone);
-            cs.set("conditional negation result/num", Fr::from_str("1").unwrap());
-            assert!(!cs.is_satisfied());
-        }
-        {
-            let mut cs = TestConstraintSystem::<Bls12>::new();
-
-            let n = AllocatedNum::alloc(cs.namespace(|| "a"), || Ok(Fr::one())).unwrap();
-            let b = Boolean::from(
-                AllocatedBit::alloc(cs.namespace(|| "condition"), Some(false)).unwrap()
-            );
-            let n2 = n.conditionally_negate(&mut cs, &b).unwrap();
-
-            assert!(cs.is_satisfied());
-            assert!(cs.get("conditional negation result/num") == Fr::one());
-            assert!(n2.value.unwrap() == Fr::one());
-            cs.set("conditional negation result/num", Fr::from_str("2").unwrap());
-            assert!(!cs.is_satisfied());
-        }
-
-        {
-            let mut cs = TestConstraintSystem::<Bls12>::new();
-
-            let n = AllocatedNum::alloc(cs.namespace(|| "a"), || Ok(Fr::one())).unwrap();
-            let b = Boolean::from(
-                AllocatedBit::alloc(cs.namespace(|| "condition"), Some(false)).unwrap()
-            ).not();
-            let n2 = n.conditionally_negate(&mut cs, &b).unwrap();
-
-            let mut negone = Fr::one();
-            negone.negate();
-
-            assert!(cs.is_satisfied());
-            assert!(cs.get("conditional negation result/num") == negone);
-            assert!(n2.value.unwrap() == negone);
-            cs.set("conditional negation result/num", Fr::from_str("1").unwrap());
-            assert!(!cs.is_satisfied());
-        }
-        {
-            let mut cs = TestConstraintSystem::<Bls12>::new();
-
-            let n = AllocatedNum::alloc(cs.namespace(|| "a"), || Ok(Fr::one())).unwrap();
-            let b = Boolean::from(
-                AllocatedBit::alloc(cs.namespace(|| "condition"), Some(true)).unwrap()
-            ).not();
-            let n2 = n.conditionally_negate(&mut cs, &b).unwrap();
-
-            assert!(cs.is_satisfied());
-            assert!(cs.get("conditional negation result/num") == Fr::one());
-            assert!(n2.value.unwrap() == Fr::one());
-            cs.set("conditional negation result/num", Fr::from_str("2").unwrap());
-            assert!(!cs.is_satisfied());
         }
     }
 

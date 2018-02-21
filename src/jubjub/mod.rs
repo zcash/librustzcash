@@ -67,8 +67,11 @@ impl JubjubEngine for Bls12 {
 /// exponent.
 #[derive(Copy, Clone)]
 pub enum FixedGenerators {
-    NoteCommitmentRandomization = 0,
-    Max = 1
+    NoteCommitmentRandomness = 0,
+    ProvingPublicKey = 1,
+    ValueCommitmentValue = 2,
+    ValueCommitmentRandomness = 3,
+    Max = 4
 }
 
 pub struct JubjubBls12 {

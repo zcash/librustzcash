@@ -1,6 +1,9 @@
 use pairing::{Engine, Field};
 use super::*;
-use super::num::AllocatedNum;
+use super::num::{
+    AllocatedNum,
+    Num
+};
 use super::boolean::Boolean;
 use bellman::{
     ConstraintSystem
@@ -123,7 +126,7 @@ pub fn lookup3_xy_with_conditional_negation<E: Engine, CS>(
     mut cs: CS,
     bits: &[Boolean],
     coords: &[(E::Fr, E::Fr)]
-) -> Result<(AllocatedNum<E>, AllocatedNum<E>), SynthesisError>
+) -> Result<(Num<E>, Num<E>), SynthesisError>
     where CS: ConstraintSystem<E>
 {
     assert_eq!(bits.len(), 3);
@@ -145,19 +148,16 @@ pub fn lookup3_xy_with_conditional_negation<E: Engine, CS>(
         _ => None
     };
 
-    // Allocate the x-coordinate resulting from the lookup
-    let res_x = AllocatedNum::alloc(
-        cs.namespace(|| "x"),
-        || {
-            Ok(coords[*i.get()?].0)
-        }
-    )?;
-
     // Allocate the y-coordinate resulting from the lookup
-    let res_y = AllocatedNum::alloc(
+    // and conditional negation
+    let y = AllocatedNum::alloc(
         cs.namespace(|| "y"),
         || {
-            Ok(coords[*i.get()?].1)
+            let mut tmp = coords[*i.get()?].1;
+            if *bits[2].get_value().get()? {
+                tmp.negate();
+            }
+            Ok(tmp)
         }
     )?;
 
@@ -169,29 +169,27 @@ pub fn lookup3_xy_with_conditional_negation<E: Engine, CS>(
     synth::<E, _>(2, coords.iter().map(|c| &c.0), &mut x_coeffs);
     synth::<E, _>(2, coords.iter().map(|c| &c.1), &mut y_coeffs);
 
-    cs.enforce(
-        || "x-coordinate lookup",
-        |lc| lc + (x_coeffs[0b01], one)
-                + &bits[1].lc::<E>(one, x_coeffs[0b11]),
-        |lc| lc + &bits[0].lc::<E>(one, E::Fr::one()),
-        |lc| lc + res_x.get_variable()
-                - (x_coeffs[0b00], one)
-                - &bits[1].lc::<E>(one, x_coeffs[0b10])
-    );
+    let precomp = Boolean::and(cs.namespace(|| "precomp"), &bits[0], &bits[1])?;
+
+    let x = Num::zero()
+            .add_bool_with_coeff(one, &Boolean::constant(true), x_coeffs[0b00])
+            .add_bool_with_coeff(one, &bits[0], x_coeffs[0b01])
+            .add_bool_with_coeff(one, &bits[1], x_coeffs[0b10])
+            .add_bool_with_coeff(one, &precomp, x_coeffs[0b11]);
+
+    let y_lc = precomp.lc::<E>(one, y_coeffs[0b11]) +
+               &bits[1].lc::<E>(one, y_coeffs[0b10]) +
+               &bits[0].lc::<E>(one, y_coeffs[0b01]) +
+               (y_coeffs[0b00], one);
 
     cs.enforce(
         || "y-coordinate lookup",
-        |lc| lc + (y_coeffs[0b01], one)
-                + &bits[1].lc::<E>(one, y_coeffs[0b11]),
-        |lc| lc + &bits[0].lc::<E>(one, E::Fr::one()),
-        |lc| lc + res_y.get_variable()
-                - (y_coeffs[0b00], one)
-                - &bits[1].lc::<E>(one, y_coeffs[0b10])
+        |lc| lc + &y_lc + &y_lc,
+        |lc| lc + &bits[2].lc::<E>(one, E::Fr::one()),
+        |lc| lc + &y_lc - y.get_variable()
     );
 
-    let final_y = res_y.conditionally_negate(&mut cs, &bits[2])?;
-
-    Ok((res_x, final_y))
+    Ok((x, y.into()))
 }
 
 #[cfg(test)]

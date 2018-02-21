@@ -234,6 +234,77 @@ impl AllocatedBit {
     }
 }
 
+pub fn u64_into_allocated_bits_be<E: Engine, CS: ConstraintSystem<E>>(
+    mut cs: CS,
+    value: Option<u64>
+) -> Result<Vec<AllocatedBit>, SynthesisError>
+{
+    let values = match value {
+        Some(ref value) => {
+            let mut tmp = Vec::with_capacity(64);
+
+            for i in (0..64).rev() {
+                tmp.push(Some(*value >> i & 1 == 1));
+            }
+
+            tmp
+        },
+        None => {
+            vec![None; 64]
+        }
+    };
+
+    let bits = values.into_iter().enumerate().map(|(i, b)| {
+        AllocatedBit::alloc(
+            cs.namespace(|| format!("bit {}", i)),
+            b
+        )
+    }).collect::<Result<Vec<_>, SynthesisError>>()?;
+
+    Ok(bits)
+}
+
+pub fn field_into_allocated_bits_be<E: Engine, CS: ConstraintSystem<E>, F: PrimeField>(
+    mut cs: CS,
+    value: Option<F>
+) -> Result<Vec<AllocatedBit>, SynthesisError>
+{
+    let values = match value {
+        Some(ref value) => {
+            let mut field_char = BitIterator::new(F::char());
+
+            let mut tmp = Vec::with_capacity(F::NUM_BITS as usize);
+
+            let mut found_one = false;
+            for b in BitIterator::new(value.into_repr()) {
+                // Skip leading bits
+                found_one |= field_char.next().unwrap();
+                if !found_one {
+                    continue;
+                }
+
+                tmp.push(Some(b));
+            }
+
+            assert_eq!(tmp.len(), F::NUM_BITS as usize);
+
+            tmp
+        },
+        None => {
+            vec![None; F::NUM_BITS as usize]
+        }
+    };
+
+    let bits = values.into_iter().enumerate().map(|(i, b)| {
+        AllocatedBit::alloc(
+            cs.namespace(|| format!("bit {}", i)),
+            b
+        )
+    }).collect::<Result<Vec<_>, SynthesisError>>()?;
+
+    Ok(bits)
+}
+
 /// This is a boolean value which may be either a constant or
 /// an interpretation of an `AllocatedBit`.
 #[derive(Clone)]
@@ -509,7 +580,12 @@ mod test {
     use pairing::bls12_381::{Bls12, Fr};
     use pairing::{Field, PrimeField, PrimeFieldRepr, BitIterator};
     use ::circuit::test::*;
-    use super::{AllocatedBit, Boolean};
+    use super::{
+        AllocatedBit,
+        Boolean,
+        field_into_allocated_bits_be,
+        u64_into_allocated_bits_be
+    };
 
     #[test]
     fn test_allocated_bit() {
@@ -1128,5 +1204,48 @@ mod test {
                 }
             }
         }
+    }
+
+    #[test]
+    fn test_u64_into_allocated_bits_be() {
+        let mut cs = TestConstraintSystem::<Bls12>::new();
+
+        let bits = u64_into_allocated_bits_be(&mut cs, Some(17234652694787248421)).unwrap();
+
+        assert!(cs.is_satisfied());
+
+        assert_eq!(bits.len(), 64);
+
+        assert_eq!(bits[0].value.unwrap(), true);
+        assert_eq!(bits[1].value.unwrap(), true);
+        assert_eq!(bits[2].value.unwrap(), true);
+        assert_eq!(bits[3].value.unwrap(), false);
+        assert_eq!(bits[4].value.unwrap(), true);
+        assert_eq!(bits[5].value.unwrap(), true);
+        assert_eq!(bits[20].value.unwrap(), true);
+        assert_eq!(bits[21].value.unwrap(), false);
+        assert_eq!(bits[22].value.unwrap(), false);
+    }
+
+    #[test]
+    fn test_field_into_allocated_bits_be() {
+        let mut cs = TestConstraintSystem::<Bls12>::new();
+
+        let r = Fr::from_str("9147677615426976802526883532204139322118074541891858454835346926874644257775").unwrap();
+
+        let bits = field_into_allocated_bits_be(&mut cs, Some(r)).unwrap();
+
+        assert!(cs.is_satisfied());
+
+        assert_eq!(bits.len(), 255);
+
+        assert_eq!(bits[0].value.unwrap(), false);
+        assert_eq!(bits[1].value.unwrap(), false);
+        assert_eq!(bits[2].value.unwrap(), true);
+        assert_eq!(bits[3].value.unwrap(), false);
+        assert_eq!(bits[4].value.unwrap(), true);
+        assert_eq!(bits[5].value.unwrap(), false);
+        assert_eq!(bits[20].value.unwrap(), true);
+        assert_eq!(bits[23].value.unwrap(), true);
     }
 }
