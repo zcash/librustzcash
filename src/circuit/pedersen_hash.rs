@@ -13,7 +13,8 @@ use super::lookup::*;
 // TODO: ensure these match the spec
 pub enum Personalization {
     NoteCommitment,
-    AnotherPersonalization
+    AnotherPersonalization,
+    MerkleTree(usize)
 }
 
 impl Personalization {
@@ -30,6 +31,8 @@ impl Personalization {
                 vec![false, false, false, false, false, false],
             Personalization::AnotherPersonalization =>
                 vec![false, false, false, false, false, true],
+            Personalization::MerkleTree(_) =>
+                vec![false, false, false, false, true, false],
         }
     }
 }

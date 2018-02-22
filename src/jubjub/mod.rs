@@ -71,7 +71,8 @@ pub enum FixedGenerators {
     ProvingPublicKey = 1,
     ValueCommitmentValue = 2,
     ValueCommitmentRandomness = 3,
-    Max = 4
+    NullifierPosition = 4,
+    Max = 5
 }
 
 pub struct JubjubBls12 {
