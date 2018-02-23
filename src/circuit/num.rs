@@ -101,75 +101,6 @@ impl<E: Engine> AllocatedNum<E> {
         Ok(bits.into_iter().map(|b| Boolean::from(b)).collect())
     }
 
-    pub fn from_bits_strict<CS>(
-        mut cs: CS,
-        bits: &[Boolean]
-    ) -> Result<Self, SynthesisError>
-        where CS: ConstraintSystem<E>
-    {
-        assert_eq!(bits.len(), E::Fr::NUM_BITS as usize);
-
-        Boolean::enforce_in_field::<_, _, E::Fr>(&mut cs, bits)?;
-
-        let one = CS::one();
-        let mut lc = LinearCombination::<E>::zero();
-        let mut coeff = E::Fr::one();
-        let mut value = Some(E::Fr::zero());
-        for bit in bits.iter().rev() {
-            match bit {
-                &Boolean::Constant(false) => {},
-                &Boolean::Constant(true) => {
-                    value.as_mut().map(|value| value.add_assign(&coeff));
-
-                    lc = lc + (coeff, one);
-                },
-                &Boolean::Is(ref bit) => {
-                    match bit.get_value() {
-                        Some(bit) => {
-                            if bit {
-                                value.as_mut().map(|value| value.add_assign(&coeff));
-                            }
-                        },
-                        None => {
-                            value = None;
-                        }
-                    }
-
-                    lc = lc + (coeff, bit.get_variable());
-                },
-                &Boolean::Not(ref bit) => {
-                    match bit.get_value() {
-                        Some(bit) => {
-                            if !bit {
-                                value.as_mut().map(|value| value.add_assign(&coeff));
-                            }
-                        },
-                        None => {
-                            value = None;
-                        }
-                    }
-
-                    lc = lc + (coeff, one) - (coeff, bit.get_variable());
-                }
-            }
-
-            coeff.double();
-        }
-
-        let num = Self::alloc(&mut cs, || value.get().map(|v| *v))?;
-
-        lc = lc - num.get_variable();
-
-        cs.enforce(
-            || "packing constraint",
-            |lc| lc,
-            |lc| lc,
-            |_| lc
-        );
-
-        Ok(num)
-    }
-
     pub fn mul<CS>(
         &self,
         mut cs: CS,
@@ -542,57 +473,6 @@ mod test {
                 cs.set(&name, cur);
                 assert!(cs.is_satisfied());
             }
-        }
-    }
-
-    #[test]
-    fn test_from_bits_strict() {
-        {
-            let mut cs = TestConstraintSystem::<Bls12>::new();
-
-            let mut bits = vec![];
-            for (i, b) in BitIterator::new(Fr::char()).skip(1).enumerate() {
-                bits.push(Boolean::from(AllocatedBit::alloc(
-                    cs.namespace(|| format!("bit {}", i)),
-                    Some(b)
-                ).unwrap()));
-            }
-
-            let num = AllocatedNum::from_bits_strict(&mut cs, &bits).unwrap();
-            assert!(num.value.unwrap().is_zero());
-            assert!(!cs.is_satisfied());
-        }
-
-        let mut rng = XorShiftRng::from_seed([0x3dbe6259, 0x8d313d76, 0x3237db17, 0xe5bc0654]);
-
-        for _ in 0..1000 {
-            let r = Fr::rand(&mut rng);
-            let mut cs = TestConstraintSystem::<Bls12>::new();
-
-            let mut bits = vec![];
-            for (i, b) in BitIterator::new(r.into_repr()).skip(1).enumerate() {
-                let parity: bool = rng.gen();
-
-                if parity {
-                    bits.push(Boolean::from(AllocatedBit::alloc(
-                        cs.namespace(|| format!("bit {}", i)),
-                        Some(b)
-                    ).unwrap()));
-                } else {
-                    bits.push(Boolean::from(AllocatedBit::alloc(
-                        cs.namespace(|| format!("bit {}", i)),
-                        Some(!b)
-                    ).unwrap()).not());
-                }
-            }
-
-            let num = AllocatedNum::from_bits_strict(&mut cs, &bits).unwrap();
-            assert!(cs.is_satisfied());
-            assert_eq!(num.value.unwrap(), r);
-            assert_eq!(cs.get("num"), r);
-
-            cs.set("num", Fr::rand(&mut rng));
-            assert_eq!(cs.which_is_unsatisfied().unwrap(), "packing constraint");
         }
     }
 }
