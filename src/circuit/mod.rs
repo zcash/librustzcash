@@ -173,39 +173,17 @@ impl<'a, E: JubjubEngine> Circuit<E> for Spend<'a, E> {
 
         // Unpack ak and rk for input to BLAKE2s
         let mut vk = vec![];
-        {
-            let mut ak_x = ak.x.into_bits_strict(
-                cs.namespace(|| "unpack ak.x")
-            )?;
-            let mut ak_y = ak.y.into_bits_strict(
-                cs.namespace(|| "unpack ak.y")
-            )?;
-
-            // We want the representation in little endian bit order
-            ak_x.reverse();
-            ak_y.reverse();
-
-            vk.extend(ak_y);
-            vk.push(ak_x[0].clone());
-        }
         let mut rho_preimage = vec![];
+        vk.extend(
+            ak.repr(cs.namespace(|| "representation of ak"))?
+        );
         {
-            let mut rk_x = rk.x.into_bits_strict(
-                cs.namespace(|| "unpack rk.x")
-            )?;
-            let mut rk_y = rk.y.into_bits_strict(
-                cs.namespace(|| "unpack rk.y")
+            let repr_rk = rk.repr(
+                cs.namespace(|| "representation of rk")
             )?;
 
-            // We want the representation in little endian bit order
-            rk_x.reverse();
-            rk_y.reverse();
-
-            vk.extend(rk_y.iter().cloned());
-            vk.push(rk_x[0].clone());
-
-            rho_preimage.extend(rk_y.iter().cloned());
-            rho_preimage.push(rk_x[0].clone());
+            vk.extend(repr_rk.iter().cloned());
+            rho_preimage.extend(repr_rk);
         }
 
         assert_eq!(vk.len(), 512);
@@ -218,7 +196,7 @@ impl<'a, E: JubjubEngine> Circuit<E> for Spend<'a, E> {
 
         // Little endian bit order
         ivk.reverse();
-        ivk.truncate(251); // drop_5
+        ivk.truncate(E::Fs::CAPACITY as usize); // drop_5
 
         // Witness g_d
         let g_d = ecc::EdwardsPoint::witness(
@@ -237,38 +215,12 @@ impl<'a, E: JubjubEngine> Circuit<E> for Spend<'a, E> {
         // Compute note contents
         let mut note_contents = vec![];
         note_contents.extend(value_bits);
-        {
-            // Unpack g_d for inclusion in the note.
-            let mut g_d_x = g_d.x.into_bits_strict(
-                cs.namespace(|| "unpack g_d.x")
-            )?;
-            let mut g_d_y = g_d.y.into_bits_strict(
-                cs.namespace(|| "unpack g_d.y")
-            )?;
-
-            // We want the representation in little endian bit order
-            g_d_x.reverse();
-            g_d_y.reverse();
-
-            note_contents.extend(g_d_y);
-            note_contents.push(g_d_x[0].clone());
-        }
-        {
-            // Unpack g_d for inclusion in the note.
-            let mut pk_d_x = pk_d.x.into_bits_strict(
-                cs.namespace(|| "unpack pk_d.x")
-            )?;
-            let mut pk_d_y = pk_d.y.into_bits_strict(
-                cs.namespace(|| "unpack pk_d.y")
-            )?;
-
-            // We want the representation in little endian bit order
-            pk_d_x.reverse();
-            pk_d_y.reverse();
-
-            note_contents.extend(pk_d_y);
-            note_contents.push(pk_d_x[0].clone());
-        }
+        note_contents.extend(
+            g_d.repr(cs.namespace(|| "representation of g_d"))?
+        );
+        note_contents.extend(
+            pk_d.repr(cs.namespace(|| "representation of pk_d"))?
+        );
 
         assert_eq!(
             note_contents.len(),
@@ -359,36 +311,26 @@ impl<'a, E: JubjubEngine> Circuit<E> for Spend<'a, E> {
 
         // TODO: cur is now the root of the tree, expose it as public input
 
-        let tmp = ecc::fixed_base_multiplication(
-            cs.namespace(|| "g^position"),
-            FixedGenerators::NullifierPosition,
-            &position_bits,
-            self.params
-        )?;
+        {
+            let position = ecc::fixed_base_multiplication(
+                cs.namespace(|| "g^position"),
+                FixedGenerators::NullifierPosition,
+                &position_bits,
+                self.params
+            )?;
 
-        cm = cm.add(
-            cs.namespace(|| "faerie gold prevention"),
-            &tmp,
-            self.params
-        )?;
+            cm = cm.add(
+                cs.namespace(|| "faerie gold prevention"),
+                &position,
+                self.params
+            )?;
+        }
+        
 
         // Let's compute rho = BLAKE2s(rk || cm + position)
-        {
-            // Unpack g_d for inclusion in the note.
-            let mut cm_x = cm.x.into_bits_strict(
-                cs.namespace(|| "unpack (cm + position).x")
-            )?;
-            let mut cm_y = cm.y.into_bits_strict(
-                cs.namespace(|| "unpack (cm + position).y")
-            )?;
-
-            // We want the representation in little endian bit order
-            cm_x.reverse();
-            cm_y.reverse();
-
-            rho_preimage.extend(cm_y);
-            rho_preimage.push(cm_x[0].clone());
-        }
+        rho_preimage.extend(
+            cm.repr(cs.namespace(|| "representation of cm"))?
+        );
         
         let mut rho = blake2s::blake2s(
             cs.namespace(|| "rho computation"),
@@ -625,20 +567,9 @@ impl<'a, E: JubjubEngine> Circuit<E> for Output<'a, E> {
                 g_d.x.assert_nonzero(cs.namespace(|| "check not inf"))?;
             }
 
-            // Unpack g_d for inclusion in the note.
-            let mut g_d_x = g_d.x.into_bits_strict(
-                cs.namespace(|| "unpack g_d.x")
-            )?;
-            let mut g_d_y = g_d.y.into_bits_strict(
-                cs.namespace(|| "unpack g_d.y")
-            )?;
-
-            // We want the representation in little endian bit order
-            g_d_x.reverse();
-            g_d_y.reverse();
-
-            note_contents.extend(g_d_y);
-            note_contents.push(g_d_x[0].clone());
+            note_contents.extend(
+                g_d.repr(cs.namespace(|| "representation of g_d"))?
+            );
 
             // Compute epk from esk
             let esk = boolean::field_into_allocated_bits_be(
