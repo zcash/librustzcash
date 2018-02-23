@@ -392,7 +392,7 @@ fn test_input_circuit_with_bls12_381() {
 
         assert!(cs.is_satisfied());
 
-        assert_eq!(cs.num_constraints(), 99816);
+        assert_eq!(cs.num_constraints(), 97376);
     }
 
     // use bellman::groth16::*;
@@ -737,7 +737,7 @@ fn test_output_circuit_with_bls12_381() {
 
         assert!(cs.is_satisfied());
 
-        assert_eq!(cs.num_constraints(), 8315);
+        assert_eq!(cs.num_constraints(), 7827);
     }
 
     // use bellman::groth16::*;

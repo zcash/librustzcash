@@ -2,6 +2,8 @@ use pairing::{
     Engine,
     Field,
     PrimeField,
+    PrimeFieldRepr,
+    BitIterator
 };
 
 use bellman::{
@@ -18,6 +20,7 @@ use super::{
 use super::boolean::{
     self,
     Boolean,
+    AllocatedBit
 };
 
 pub struct AllocatedNum<E: Engine> {
@@ -63,10 +66,126 @@ impl<E: Engine> AllocatedNum<E> {
     ) -> Result<Vec<Boolean>, SynthesisError>
         where CS: ConstraintSystem<E>
     {
-        let bits = self.into_bits(&mut cs)?;
-        Boolean::enforce_in_field::<_, _, E::Fr>(&mut cs, &bits)?;
+        pub fn kary_and<E, CS>(
+            mut cs: CS,
+            v: &[AllocatedBit]
+        ) -> Result<AllocatedBit, SynthesisError>
+            where E: Engine,
+                  CS: ConstraintSystem<E>
+        {
+            assert!(v.len() > 0);
 
-        Ok(bits)
+            // Let's keep this simple for now and just AND them all
+            // manually
+            let mut cur = None;
+
+            for (i, v) in v.iter().enumerate() {
+                if cur.is_none() {
+                    cur = Some(v.clone());
+                } else {
+                    cur = Some(AllocatedBit::and(
+                        cs.namespace(|| format!("and {}", i)),
+                        cur.as_ref().unwrap(),
+                        v
+                    )?);
+                }
+            }
+
+            Ok(cur.expect("v.len() > 0"))
+        }
+
+        // We want to ensure that the bit representation of a is
+        // less than or equal to r - 1.
+        let mut a = self.value.map(|e| BitIterator::new(e.into_repr()));
+        let mut b = E::Fr::char();
+        b.sub_noborrow(&1.into());
+
+        let mut result = vec![];
+
+        // Runs of ones in r
+        let mut last_run = None;
+        let mut current_run = vec![];
+
+        let mut found_one = false;
+        let mut i = 0;
+        for b in BitIterator::new(b) {
+            let a_bit = a.as_mut().map(|e| e.next().unwrap());
+
+            // Skip over unset bits at the beginning
+            found_one |= b;
+            if !found_one {
+                // a_bit should also be false
+                a_bit.map(|e| assert!(!e));
+                continue;
+            }
+
+            if b {
+                // This is part of a run of ones. Let's just
+                // allocate the boolean with the expected value.
+                let a_bit = AllocatedBit::alloc(
+                    cs.namespace(|| format!("bit {}", i)),
+                    a_bit
+                )?;
+                // ... and add it to the current run of ones.
+                current_run.push(a_bit.clone());
+                result.push(a_bit);
+            } else {
+                if current_run.len() > 0 {
+                    // This is the start of a run of zeros, but we need
+                    // to k-ary AND against `last_run` first.
+
+                    if last_run.is_some() {
+                        current_run.push(last_run.clone().unwrap());
+                    }
+                    last_run = Some(kary_and(
+                        cs.namespace(|| format!("run ending at {}", i)),
+                        &current_run
+                    )?);
+                    current_run.truncate(0);
+                }
+
+                // If `last_run` is true, `a` must be false, or it would
+                // not be in the field.
+                //
+                // If `last_run` is false, `a` can be true or false.
+
+                let a_bit = AllocatedBit::alloc_conditionally(
+                    cs.namespace(|| format!("bit {}", i)),
+                    a_bit,
+                    &last_run.as_ref().expect("char always starts with a one")
+                )?;
+                result.push(a_bit);
+            }
+
+            i += 1;
+        }
+
+        // char is prime, so we'll always end on
+        // a run of zeros.
+        assert_eq!(current_run.len(), 0);
+
+        // Now, we have `result` in big-endian order.
+        // However, now we have to unpack self!
+
+        let mut lc = LinearCombination::zero();
+        let mut coeff = E::Fr::one();
+
+        for bit in result.iter().rev() {
+            lc = lc + (coeff, bit.get_variable());
+
+            coeff.double();
+        }
+
+        lc = lc - self.variable;
+
+        cs.enforce(
+            || "unpacking constraint",
+            |lc| lc,
+            |lc| lc,
+            |_| lc
+        );
+
+        Ok(result.into_iter().map(|b| Boolean::from(b)).collect())
     }
 
     pub fn into_bits<CS>(
@@ -315,7 +434,6 @@ mod test {
     use pairing::{Field, PrimeField, BitIterator};
     use ::circuit::test::*;
     use super::{AllocatedNum, Boolean};
-    use super::super::boolean::AllocatedBit;
 
     #[test]
     fn test_allocated_num() {
@@ -422,31 +540,25 @@ mod test {
         // make the bit representation the characteristic
         cs.set("bit 254/boolean", Fr::one());
 
-        // this makes the unpacking constraint fail
-        assert_eq!(cs.which_is_unsatisfied().unwrap(), "unpacking constraint");
-
-        // fix it by making the number zero (congruent to the characteristic)
-        cs.set("num", Fr::zero());
-
-        // and constraint is disturbed during enforce in field check
-        assert_eq!(cs.which_is_unsatisfied().unwrap(), "nand 121/AND 0/and constraint");
-        cs.set("nand 121/AND 0/and result", Fr::one());
-
-        // now the nand should fail (enforce in field is working)
-        assert_eq!(cs.which_is_unsatisfied().unwrap(), "nand 121/enforce nand");
+        // this makes the conditional boolean constraint fail
+        assert_eq!(cs.which_is_unsatisfied().unwrap(), "bit 254/boolean constraint");
     }
 
     #[test]
     fn test_into_bits() {
         let mut rng = XorShiftRng::from_seed([0x3dbe6259, 0x8d313d76, 0x3237db17, 0xe5bc0654]);
 
-        for _ in 0..100 {
+        for i in 0..200 {
             let r = Fr::rand(&mut rng);
             let mut cs = TestConstraintSystem::<Bls12>::new();
 
             let n = AllocatedNum::alloc(&mut cs, || Ok(r)).unwrap();
 
-            let bits = n.into_bits(&mut cs).unwrap();
+            let bits = if i % 2 == 0 {
+                n.into_bits(&mut cs).unwrap()
+            } else {
+                n.into_bits_strict(&mut cs).unwrap()
+            };
 
             assert!(cs.is_satisfied());
 

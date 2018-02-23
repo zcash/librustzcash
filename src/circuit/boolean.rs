@@ -35,6 +35,44 @@ impl AllocatedBit {
     }
 
     /// Allocate a variable in the constraint system which can only be a
+    /// boolean value. Further, constrain that the boolean is false
+    /// unless the condition is false.
+    pub fn alloc_conditionally<E, CS>(
+        mut cs: CS,
+        value: Option<bool>,
+        must_be_false: &AllocatedBit
+    ) -> Result<Self, SynthesisError>
+        where E: Engine,
+              CS: ConstraintSystem<E>
+    {
+        let var = cs.alloc(|| "boolean", || {
+            if *value.get()? {
+                Ok(E::Fr::one())
+            } else {
+                Ok(E::Fr::zero())
+            }
+        })?;
+
+        // Constrain: (1 - must_be_false - a) * a = 0
+        // if must_be_false is true, the equation
+        // reduces to -a * a = 0, which implies a = 0.
+        // if must_be_false is false, the equation
+        // reduces to (1 - a) * a = 0, which is a
+        // traditional boolean constraint.
+        cs.enforce(
+            || "boolean constraint",
+            |lc| lc + CS::one() - must_be_false.variable - var,
+            |lc| lc + var,
+            |lc| lc
+        );
+
+        Ok(AllocatedBit {
+            variable: var,
+            value: value
+        })
+    }
+
+    /// Allocate a variable in the constraint system which can only be a
     /// boolean value.
     pub fn alloc<E, CS>(
         mut cs: CS,
