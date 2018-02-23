@@ -366,7 +366,34 @@ impl Boolean {
     {
         let c = Self::xor(&mut cs, a, b)?;
 
-        Self::enforce_nand(&mut cs, &[c])
+        match c {
+            Boolean::Constant(false) => {
+                Ok(())
+            },
+            Boolean::Constant(true) => {
+                Err(SynthesisError::Unsatisfiable)
+            },
+            Boolean::Is(ref res) => {
+                cs.enforce(
+                    || "enforce equals zero",
+                    |lc| lc,
+                    |lc| lc,
+                    |lc| lc + res.get_variable()
+                );
+
+                Ok(())
+            },
+            Boolean::Not(ref res) => {
+                cs.enforce(
+                    || "enforce equals one",
+                    |lc| lc,
+                    |lc| lc,
+                    |lc| lc + CS::one() - res.get_variable()
+                );
+
+                Ok(())
+            },
+        }
     }
 
     pub fn get_value(&self) -> Option<bool> {
@@ -490,46 +517,6 @@ impl Boolean {
         }
 
         Ok(cur)
-    }
-
-    /// Asserts that at least one operand is false.
-    pub fn enforce_nand<E, CS>(
-        mut cs: CS,
-        bits: &[Self]
-    ) -> Result<(), SynthesisError>
-        where E: Engine,
-              CS: ConstraintSystem<E>
-    {
-        let res = Self::kary_and(&mut cs, bits)?;
-
-        match res {
-            Boolean::Constant(false) => {
-                Ok(())
-            },
-            Boolean::Constant(true) => {
-                Err(SynthesisError::Unsatisfiable)
-            },
-            Boolean::Is(ref res) => {
-                cs.enforce(
-                    || "enforce nand",
-                    |lc| lc,
-                    |lc| lc,
-                    |lc| lc + res.get_variable()
-                );
-
-                Ok(())
-            },
-            Boolean::Not(ref res) => {
-                cs.enforce(
-                    || "enforce nand",
-                    |lc| lc,
-                    |lc| lc,
-                    |lc| lc + CS::one() - res.get_variable()
-                );
-
-                Ok(())
-            },
-        }
     }
 }
 
@@ -1012,58 +999,6 @@ mod test {
 
                     _ => {
                         panic!("unexpected behavior at {:?} AND {:?}", first_operand, second_operand);
-                    }
-                }
-            }
-        }
-    }
-
-    #[test]
-    fn test_enforce_nand() {
-        {
-            let mut cs = TestConstraintSystem::<Bls12>::new();
-
-            Boolean::enforce_nand(&mut cs, &[Boolean::constant(false)]).is_ok();
-            Boolean::enforce_nand(&mut cs, &[Boolean::constant(true)]).is_err();
-        }
-
-        for i in 1..5 {
-            // with every possible assignment for them
-            for mut b in 0..(1 << i) {
-                // with every possible negation
-                for mut n in 0..(1 << i) {
-                    let mut cs = TestConstraintSystem::<Bls12>::new();
-
-                    let mut expected = true;
-
-                    let mut bits = vec![];
-                    for j in 0..i {
-                        expected &= b & 1 == 1;
-
-                        if n & 1 == 1 {
-                            bits.push(Boolean::from(AllocatedBit::alloc(
-                                cs.namespace(|| format!("bit {}", j)),
-                                Some(b & 1 == 1)
-                            ).unwrap()));
-                        } else {
-                            bits.push(Boolean::from(AllocatedBit::alloc(
-                                cs.namespace(|| format!("bit {}", j)),
-                                Some(b & 1 == 0)
-                            ).unwrap()).not());
-                        }
-                        
-                        b >>= 1;
-                        n >>= 1;
-                    }
-
-                    let expected = !expected;
-
-                    Boolean::enforce_nand(&mut cs, &bits).unwrap();
-
-                    if expected {
-                        assert!(cs.is_satisfied());
-                    } else {
-                        assert!(!cs.is_satisfied());
                     }
                 }
             }
