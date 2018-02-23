@@ -496,28 +496,6 @@ impl Boolean {
             }
         }
     }
-
-    pub fn kary_and<E, CS>(
-        mut cs: CS,
-        bits: &[Self]
-    ) -> Result<Self, SynthesisError>
-        where E: Engine,
-              CS: ConstraintSystem<E>
-    {
-        assert!(bits.len() > 0);
-        let mut bits = bits.iter();
-
-        let mut cur: Self = bits.next().unwrap().clone();
-
-        let mut i = 0;
-        while let Some(next) = bits.next() {
-            cur = Boolean::and(cs.namespace(|| format!("AND {}", i)), &cur, next)?;
-
-            i += 1;
-        }
-
-        Ok(cur)
-    }
 }
 
 impl From<AllocatedBit> for Boolean {
@@ -1000,41 +978,6 @@ mod test {
                     _ => {
                         panic!("unexpected behavior at {:?} AND {:?}", first_operand, second_operand);
                     }
-                }
-            }
-        }
-    }
-
-    #[test]
-    fn test_kary_and() {
-        // test different numbers of operands
-        for i in 1..15 {
-            // with every possible assignment for them
-            for mut b in 0..(1 << i) {
-                let mut cs = TestConstraintSystem::<Bls12>::new();
-
-                let mut expected = true;
-
-                let mut bits = vec![];
-                for j in 0..i {
-                    expected &= b & 1 == 1;
-
-                    bits.push(Boolean::from(AllocatedBit::alloc(
-                        cs.namespace(|| format!("bit {}", j)),
-                        Some(b & 1 == 1)
-                    ).unwrap()));
-                    b >>= 1;
-                }
-
-                let r = Boolean::kary_and(&mut cs, &bits).unwrap();
-
-                assert!(cs.is_satisfied());
-
-                match r {
-                    Boolean::Is(ref r) => {
-                        assert_eq!(r.value.unwrap(), expected);
-                    },
-                    _ => unreachable!()
                 }
             }
         }
