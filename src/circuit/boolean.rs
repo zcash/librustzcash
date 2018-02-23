@@ -2,7 +2,6 @@ use pairing::{
     Engine,
     Field,
     PrimeField,
-    PrimeFieldRepr,
     BitIterator
 };
 
@@ -506,10 +505,9 @@ impl From<AllocatedBit> for Boolean {
 
 #[cfg(test)]
 mod test {
-    use rand::{SeedableRng, Rand, XorShiftRng};
     use bellman::{ConstraintSystem};
     use pairing::bls12_381::{Bls12, Fr};
-    use pairing::{Field, PrimeField, PrimeFieldRepr, BitIterator};
+    use pairing::{Field, PrimeField};
     use ::circuit::test::*;
     use super::{
         AllocatedBit,
