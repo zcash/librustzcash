@@ -1,6 +1,8 @@
 use pairing::{
     Engine,
-    Field
+    Field,
+    PrimeField,
+    PrimeFieldRepr
 };
 
 use bellman::{
@@ -12,6 +14,13 @@ use bellman::{
 };
 
 use std::collections::HashMap;
+use std::fmt::Write;
+
+use blake2::{Blake2s};
+use digest::{FixedOutput, Input};
+use byteorder::{BigEndian, ByteOrder};
+use std::cmp::Ordering;
+use std::collections::BTreeMap;
 
 #[derive(Debug)]
 enum NamedObject {
@@ -32,6 +41,90 @@ pub struct TestConstraintSystem<E: Engine> {
     )>,
     inputs: Vec<(E::Fr, String)>,
     aux: Vec<(E::Fr, String)>
+}
+
+#[derive(Clone, Copy)]
+struct OrderedVariable(Variable);
+
+impl Eq for OrderedVariable {}
+impl PartialEq for OrderedVariable {
+    fn eq(&self, other: &OrderedVariable) -> bool {
+        match (self.0.get_unchecked(), other.0.get_unchecked()) {
+            (Index::Input(ref a), Index::Input(ref b)) => a == b,
+            (Index::Aux(ref a), Index::Aux(ref b)) => a == b,
+            _ => false
+        }
+    }
+}
+impl PartialOrd for OrderedVariable {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+impl Ord for OrderedVariable {
+    fn cmp(&self, other: &Self) -> Ordering {
+        match (self.0.get_unchecked(), other.0.get_unchecked()) {
+            (Index::Input(ref a), Index::Input(ref b)) => a.cmp(b),
+            (Index::Aux(ref a), Index::Aux(ref b)) => a.cmp(b),
+            (Index::Input(_), Index::Aux(_)) => Ordering::Less,
+            (Index::Aux(_), Index::Input(_)) => Ordering::Greater
+        }
+    }
+}
+
+fn proc_lc<E: Engine>(
+    terms: &[(Variable, E::Fr)],
+) -> BTreeMap<OrderedVariable, E::Fr>
+{
+    let mut map = BTreeMap::new();
+    for &(var, coeff) in terms {
+        map.entry(OrderedVariable(var))
+           .or_insert(E::Fr::zero())
+           .add_assign(&coeff);
+    }
+
+    // Remove terms that have a zero coefficient to normalize
+    let mut to_remove = vec![];
+    for (var, coeff) in map.iter() {
+        if coeff.is_zero() {
+            to_remove.push(var.clone())
+        }
+    }
+
+    for var in to_remove {
+        map.remove(&var);
+    }
+
+    map
+}
+
+fn hash_lc<E: Engine>(
+    terms: &[(Variable, E::Fr)],
+    h: &mut Blake2s
+)
+{
+    let map = proc_lc::<E>(terms);
+
+    let mut buf = [0u8; 9 + 32];
+    BigEndian::write_u64(&mut buf[0..8], map.len() as u64);
+    h.process(&buf[0..8]);
+
+    for (var, coeff) in map {
+        match var.0.get_unchecked() {
+            Index::Input(i) => {
+                buf[0] = b'I';
+                BigEndian::write_u64(&mut buf[1..9], i as u64);
+            },
+            Index::Aux(i) => {
+                buf[0] = b'A';
+                BigEndian::write_u64(&mut buf[1..9], i as u64);
+            }
+        }
+        
+        coeff.into_repr().write_be(&mut buf[9..]).unwrap();
+
+        h.process(&buf);
+    }
 }
 
 fn eval_lc<E: Engine>(
@@ -67,6 +160,98 @@ impl<E: Engine> TestConstraintSystem<E> {
             inputs: vec![(E::Fr::one(), "ONE".into())],
             aux: vec![]
         }
+    }
+
+    pub fn pretty_print(&self) -> String {
+        let mut s = String::new();
+
+        let negone = {
+            let mut tmp = E::Fr::one();
+            tmp.negate();
+            tmp
+        };
+
+        let powers_of_two = (0..E::Fr::NUM_BITS).map(|i| {
+            E::Fr::from_str("2").unwrap().pow(&[i as u64])
+        }).collect::<Vec<_>>();
+
+        let pp = |s: &mut String, lc: &LinearCombination<E>| {
+            write!(s, "(").unwrap();
+            let mut is_first = true;
+            for (var, coeff) in proc_lc::<E>(lc.as_ref()) {
+                if coeff == negone {
+                    write!(s, " - ").unwrap();
+                } else if !is_first {
+                    write!(s, " + ").unwrap();
+                }
+                is_first = false;
+
+                if coeff != E::Fr::one() && coeff != negone {
+                    for (i, x) in powers_of_two.iter().enumerate() {
+                        if x == &coeff {
+                            write!(s, "2^{} . ", i).unwrap();
+                            break;
+                        }
+                    }
+
+                    write!(s, "{} . ", coeff).unwrap();
+                }
+
+                match var.0.get_unchecked() {
+                    Index::Input(i) => {
+                        write!(s, "`{}`", &self.inputs[i].1).unwrap();
+                    },
+                    Index::Aux(i) => {
+                        write!(s, "`{}`", &self.aux[i].1).unwrap();
+                    }
+                }
+            }
+            if is_first {
+                // Nothing was visited, print 0.
+                write!(s, "0").unwrap();
+            }
+            write!(s, ")").unwrap();
+        };
+
+        for &(ref a, ref b, ref c, ref name) in &self.constraints {
+            write!(&mut s, "\n").unwrap();
+
+            write!(&mut s, "{}: ", name).unwrap();
+            pp(&mut s, a);
+            write!(&mut s, " * ").unwrap();
+            pp(&mut s, b);
+            write!(&mut s, " = ").unwrap();
+            pp(&mut s, c);
+        }
+
+        write!(&mut s, "\n").unwrap();
+
+        s
+    }
+
+    pub fn hash(&self) -> String {
+        let mut h = Blake2s::new_keyed(&[], 32);
+        {
+            let mut buf = [0u8; 24];
+
+            BigEndian::write_u64(&mut buf[0..8], self.inputs.len() as u64);
+            BigEndian::write_u64(&mut buf[8..16], self.aux.len() as u64);
+            BigEndian::write_u64(&mut buf[16..24], self.constraints.len() as u64);
+            h.process(&buf);
+        }
+
+        for constraint in &self.constraints {
+            hash_lc::<E>(constraint.0.as_ref(), &mut h);
+            hash_lc::<E>(constraint.1.as_ref(), &mut h);
+            hash_lc::<E>(constraint.2.as_ref(), &mut h);
+        }
+
+        let mut s = String::new();
+        for b in h.fixed_result().as_ref() {
+            s += &format!("{:02x}", b);
+        }
+
+        s
     }
 
     pub fn which_is_unsatisfied(&self) -> Option<&str> {

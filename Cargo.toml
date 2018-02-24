@@ -18,6 +18,8 @@ blake2 = "0.7"
 digest = "0.7"
 bellman = "0.0.8"
 
+byteorder = "1"
+
 [features]
 default = ["u128-support"]
 u128-support = ["pairing/u128-support"]

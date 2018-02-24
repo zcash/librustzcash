@@ -4,6 +4,8 @@ extern crate blake2;
 extern crate digest;
 extern crate rand;
 
+extern crate byteorder;
+
 pub mod jubjub;
 pub mod circuit;
 pub mod group_hash;

@@ -397,94 +397,6 @@ impl<'a, E: JubjubEngine> Circuit<E> for Spend<'a, E> {
     }
 }
 
-#[test]
-fn test_input_circuit_with_bls12_381() {
-    use pairing::bls12_381::*;
-    use rand::{SeedableRng, Rng, XorShiftRng};
-    use ::circuit::test::*;
-    use jubjub::{JubjubBls12, fs};
-
-    let params = &JubjubBls12::new();
-    let rng = &mut XorShiftRng::from_seed([0x3dbe6259, 0x8d313d76, 0x3237db17, 0xe5bc0654]);
-
-    let tree_depth = 29;
-
-    let value: u64 = 1;
-    let value_randomness: fs::Fs = rng.gen();
-    let ak: edwards::Point<Bls12, Unknown> = edwards::Point::rand(rng, params);
-    let g_d: edwards::Point<Bls12, Unknown> = edwards::Point::rand(rng, params);
-    let commitment_randomness: fs::Fs = rng.gen();
-    let rsk: fs::Fs = rng.gen();
-    let auth_path = vec![Some((rng.gen(), rng.gen())); tree_depth];
-
-    {
-        let mut cs = TestConstraintSystem::<Bls12>::new();
-
-        let instance = Spend {
-            params: params,
-            value: Some(value),
-            value_randomness: Some(value_randomness),
-            rsk: Some(rsk),
-            ak: Some(ak),
-            g_d: Some(g_d),
-            commitment_randomness: Some(commitment_randomness),
-            auth_path: auth_path
-        };
-
-        instance.synthesize(&mut cs).unwrap();
-
-        assert!(cs.is_satisfied());
-
-        assert_eq!(cs.num_constraints(), 97379);
-    }
-
-    // use bellman::groth16::*;
-
-    // let groth_params = generate_random_parameters::<Bls12, _, _>(Spend {
-    //     params: params,
-    //     value: None,
-    //     value_randomness: None,
-    //     rsk: None,
-    //     ak: None,
-    //     g_d: None,
-    //     commitment_randomness: None,
-    //     auth_path: vec![None; 29]
-    // }, rng).unwrap();
-
-    // let pvk = prepare_verifying_key(&groth_params.vk);
-
-    // use std::time::{Duration, Instant};
-
-    // // Let's benchmark stuff!
-    // const SAMPLES: u32 = 50;
-    // let mut total_proving = Duration::new(0, 0);
-
-    // for _ in 0..SAMPLES {
-    //     let start = Instant::now();
-    //     {
-    //         let c = Spend {
-    //             params: params,
-    //             value: Some(1),
-    //             value_randomness: Some(value_randomness.clone()),
-    //             rsk: Some(rsk.clone()),
-    //             ak: Some(ak.clone()),
-    //             g_d: Some(g_d.clone()),
-    //             commitment_randomness: Some(commitment_randomness.clone()),
-    //             auth_path: auth_path.clone()
-    //         };
-
-    //         create_random_proof(c, &groth_params, rng).unwrap();
-    //     }
-    //     total_proving += start.elapsed();
-    // }
-
-    // let proving_avg = total_proving / SAMPLES;
-    // let proving_avg = proving_avg.subsec_nanos() as f64 / 1_000_000_000f64
-    //                   + (proving_avg.as_secs() as f64);
-
-    // panic!("Average proving time: {:?} seconds", proving_avg);
-}
-
 /// This is an output circuit instance.
 pub struct Output<'a, E: JubjubEngine> {
     pub params: &'a E::Params,
@@ -747,7 +659,7 @@ impl<'a, E: JubjubEngine> Circuit<E> for Output<'a, E> {
 }
 
 #[test]
-fn test_output_circuit_with_bls12_381() {
+fn test_input_circuit_with_bls12_381() {
     use pairing::bls12_381::*;
     use rand::{SeedableRng, Rng, XorShiftRng};
     use ::circuit::test::*;
@@ -755,6 +667,48 @@ fn test_output_circuit_with_bls12_381() {
 
     let params = &JubjubBls12::new();
     let rng = &mut XorShiftRng::from_seed([0x3dbe6259, 0x8d313d76, 0x3237db17, 0xe5bc0654]);
+
+    let tree_depth = 29;
+
+    let value: u64 = 1;
+    let value_randomness: fs::Fs = rng.gen();
+    let ak: edwards::Point<Bls12, Unknown> = edwards::Point::rand(rng, params);
+    let g_d: edwards::Point<Bls12, Unknown> = edwards::Point::rand(rng, params);
+    let commitment_randomness: fs::Fs = rng.gen();
+    let rsk: fs::Fs = rng.gen();
+    let auth_path = vec![Some((rng.gen(), rng.gen())); tree_depth];
+
+    {
+        let mut cs = TestConstraintSystem::<Bls12>::new();
+
+        let instance = Spend {
+            params: params,
+            value: Some(value),
+            value_randomness: Some(value_randomness),
+            rsk: Some(rsk),
+            ak: Some(ak),
+            g_d: Some(g_d),
+            commitment_randomness: Some(commitment_randomness),
+            auth_path: auth_path
+        };
+
+        instance.synthesize(&mut cs).unwrap();
+
+        assert!(cs.is_satisfied());
+        assert_eq!(cs.num_constraints(), 97379);
+        assert_eq!(cs.hash(), "4d8e71c91a621e41599ea488ee89f035c892a260a595d3c85a20a82daa2d1654");
+    }
+}
+
+#[test]
+fn test_output_circuit_with_bls12_381() {
+    use pairing::bls12_381::*;
+    use rand::{SeedableRng, Rng, XorShiftRng};
+    use ::circuit::test::*;
+    use jubjub::{JubjubBls12, fs};
+
+    let params = &JubjubBls12::new();
+    let rng = &mut XorShiftRng::from_seed([0x3dbe6258, 0x8d313d76, 0x3237db17, 0xe5bc0654]);
 
     let value: u64 = 1;
     let value_randomness: fs::Fs = rng.gen();
@@ -779,51 +733,7 @@ fn test_output_circuit_with_bls12_381() {
         instance.synthesize(&mut cs).unwrap();
 
         assert!(cs.is_satisfied());
-
         assert_eq!(cs.num_constraints(), 7827);
+        assert_eq!(cs.hash(), "225a2df7e21b9af8b436ffb9dadd645e4df843a5151c7481b0553422d5eaa793");
     }
-
-    // use bellman::groth16::*;
-
-    // let groth_params = generate_random_parameters::<Bls12, _, _>(Output {
-    //     params: params,
-    //     value: None,
-    //     value_randomness: None,
-    //     g_d: None,
-    //     p_d: None,
-    //     commitment_randomness: None,
-    //     esk: None
-    // }, rng).unwrap();
-
-    // let pvk = prepare_verifying_key(&groth_params.vk);
-
-    // use std::time::{Duration, Instant};
-
-    // // Let's benchmark stuff!
-    // const SAMPLES: u32 = 50;
-    // let mut total_proving = Duration::new(0, 0);
-
-    // for _ in 0..SAMPLES {
-    //     let start = Instant::now();
-    //     {
-    //         let c = Output {
-    //             params: params,
-    //             value: Some(1),
-    //             value_randomness: Some(value_randomness),
-    //             g_d: Some(g_d.clone()),
-    //             p_d: Some(p_d.clone()),
-    //             commitment_randomness: Some(commitment_randomness),
-    //             esk: Some(esk.clone())
-    //         };
-
-    //         create_random_proof(c, &groth_params, rng).unwrap();
-    //     }
-    //     total_proving += start.elapsed();
-    // }
-
-    // let proving_avg = total_proving / SAMPLES;
-    // let proving_avg = proving_avg.subsec_nanos() as f64 / 1_000_000_000f64
-    //                   + (proving_avg.as_secs() as f64);
-
-    // panic!("Average proving time: {:?} seconds", proving_avg);
 }
