@@ -40,8 +40,6 @@ impl<T> Assignment<T> for Option<T> {
     }
 }
 
-const MERKLE_TREE_DEPTH: usize = 29;
-
 pub struct Spend<'a, E: JubjubEngine> {
     pub params: &'a E::Params,
     /// Value of the note being spent
@@ -262,7 +260,7 @@ impl<'a, E: JubjubEngine> Circuit<E> for Spend<'a, E> {
             )?;
         }
 
-        assert_eq!(self.auth_path.len(), MERKLE_TREE_DEPTH);
+        let tree_depth = self.auth_path.len();
 
         let mut position_bits = vec![];
 
@@ -301,15 +299,30 @@ impl<'a, E: JubjubEngine> Circuit<E> for Spend<'a, E> {
 
             cur = pedersen_hash::pedersen_hash(
                 cs.namespace(|| "computation of pedersen hash"),
-                pedersen_hash::Personalization::MerkleTree(MERKLE_TREE_DEPTH - i),
+                pedersen_hash::Personalization::MerkleTree(tree_depth - i),
                 &preimage,
                 self.params
             )?.x; // Injective encoding
         }
 
-        assert_eq!(position_bits.len(), MERKLE_TREE_DEPTH);
+        assert_eq!(position_bits.len(), tree_depth);
 
-        // TODO: cur is now the root of the tree, expose it as public input
+        {
+            // Expose the anchor
+            let anchor = cs.alloc_input(
+                || "anchor x",
+                || {
+                    Ok(*cur.get_value().get()?)
+                }
+            )?;
+
+            cs.enforce(
+                || "anchor x equals anchor",
+                |lc| lc + anchor,
+                |lc| lc + CS::one(),
+                |lc| lc + cur.get_variable()
+            );
+        }
 
         {
             let position = ecc::fixed_base_multiplication(
@@ -326,11 +339,12 @@ impl<'a, E: JubjubEngine> Circuit<E> for Spend<'a, E> {
             )?;
         }
         
-
         // Let's compute rho = BLAKE2s(rk || cm + position)
         rho_preimage.extend(
             cm.repr(cs.namespace(|| "representation of cm"))?
         );
+
+        assert_eq!(rho_preimage.len(), 512);
         
         let mut rho = blake2s::blake2s(
             cs.namespace(|| "rho computation"),
@@ -348,7 +362,36 @@ impl<'a, E: JubjubEngine> Circuit<E> for Spend<'a, E> {
             self.params
         )?;
 
-        // TODO: expose nf as public input
+        {
+            // Expose the nullifier publicly
+            let nf_x = cs.alloc_input(
+                || "nf_x",
+                || {
+                    Ok(*nf.x.get_value().get()?)
+                }
+            )?;
+
+            cs.enforce(
+                || "nf_x equals input",
+                |lc| lc + nf_x,
+                |lc| lc + CS::one(),
+                |lc| lc + nf.x.get_variable()
+            );
+
+            let nf_y = cs.alloc_input(
+                || "nf_y",
+                || {
+                    Ok(*nf.y.get_value().get()?)
+                }
+            )?;
+
+            cs.enforce(
+                || "nf_y equals input",
+                |lc| lc + nf_y,
+                |lc| lc + CS::one(),
+                |lc| lc + nf.y.get_variable()
+            );
+        }
 
         Ok(())
     }
@@ -364,22 +407,22 @@ fn test_input_circuit_with_bls12_381() {
     let params = &JubjubBls12::new();
     let rng = &mut XorShiftRng::from_seed([0x3dbe6259, 0x8d313d76, 0x3237db17, 0xe5bc0654]);
 
+    let tree_depth = 29;
+
     let value: u64 = 1;
     let value_randomness: fs::Fs = rng.gen();
     let ak: edwards::Point<Bls12, Unknown> = edwards::Point::rand(rng, params);
     let g_d: edwards::Point<Bls12, Unknown> = edwards::Point::rand(rng, params);
-    let p_d: edwards::Point<Bls12, Unknown> = edwards::Point::rand(rng, params);
     let commitment_randomness: fs::Fs = rng.gen();
-    let esk: fs::Fs = rng.gen();
     let rsk: fs::Fs = rng.gen();
-    let auth_path = vec![Some((rng.gen(), false)); 29];
+    let auth_path = vec![Some((rng.gen(), rng.gen())); tree_depth];
 
     {
         let mut cs = TestConstraintSystem::<Bls12>::new();
 
         let instance = Spend {
             params: params,
-            value: Some(1),
+            value: Some(value),
             value_randomness: Some(value_randomness),
             rsk: Some(rsk),
             ak: Some(ak),
@@ -392,7 +435,7 @@ fn test_input_circuit_with_bls12_381() {
 
         assert!(cs.is_satisfied());
 
-        assert_eq!(cs.num_constraints(), 97376);
+        assert_eq!(cs.num_constraints(), 97379);
     }
 
     // use bellman::groth16::*;
@@ -725,7 +768,7 @@ fn test_output_circuit_with_bls12_381() {
 
         let instance = Output {
             params: params,
-            value: Some(1),
+            value: Some(value),
             value_randomness: Some(value_randomness),
             g_d: Some(g_d.clone()),
             p_d: Some(p_d.clone()),
