@@ -26,6 +26,7 @@ pub fn test_suite<E: JubjubEngine>(params: &E::Params) {
     test_order::<E>(params);
     test_mul_associativity::<E>(params);
     test_loworder::<E>(params);
+    test_read_write::<E>(params);
 }
 
 fn is_on_mont_curve<E: JubjubEngine, P: JubjubParams<E>>(
@@ -242,6 +243,21 @@ fn test_get_for<E: JubjubEngine>(params: &E::Params) {
                 p
             );
         }
+    }
+}
+
+fn test_read_write<E: JubjubEngine>(params: &E::Params) {
+    let rng = &mut XorShiftRng::from_seed([0x3dbe6259, 0x8d313d76, 0x3237db17, 0xe5bc0654]);
+
+    for _ in 0..1000 {
+        let e = edwards::Point::<E, _>::rand(rng, params);
+
+        let mut v = vec![];
+        e.write(&mut v).unwrap();
+
+        let e2 = edwards::Point::read(&v[..], params).unwrap();
+
+        assert!(e == e2);
     }
 }
 

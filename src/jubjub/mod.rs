@@ -72,7 +72,8 @@ pub enum FixedGenerators {
     ValueCommitmentValue = 2,
     ValueCommitmentRandomness = 3,
     NullifierPosition = 4,
-    Max = 5
+    SpendingKeyGenerator = 5,
+    Max = 6
 }
 
 pub struct JubjubBls12 {
@@ -236,4 +237,14 @@ fn test_jubjub_bls12() {
     let params = JubjubBls12::new();
 
     tests::test_suite::<Bls12>(&params);
+
+    let test_repr = hex!("b9481dd1103b7d1f8578078eb429d3c476472f53e88c0eaefdf51334c7c8b98c");
+    let p = edwards::Point::<Bls12, _>::read(&test_repr[..], &params).unwrap();
+    let q = edwards::Point::<Bls12, _>::get_for_y(
+        Fr::from_str("22440861827555040311190986994816762244378363690614952020532787748720529117853").unwrap(),
+        false,
+        &params
+    ).unwrap();
+
+    assert!(p == q);
 }

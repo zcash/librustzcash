@@ -20,6 +20,9 @@ bellman = "0.0.8"
 
 byteorder = "1"
 
+[dev-dependencies]
+hex-literal = "0.1"
+
 [features]
 default = ["u128-support"]
 u128-support = ["pairing/u128-support"]

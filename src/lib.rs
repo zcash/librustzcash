@@ -6,6 +6,10 @@ extern crate rand;
 
 extern crate byteorder;
 
+#[cfg(test)]
+#[macro_use]
+extern crate hex_literal;
+
 pub mod jubjub;
 pub mod circuit;
 pub mod group_hash;
