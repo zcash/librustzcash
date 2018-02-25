@@ -20,6 +20,12 @@ use rand::{
 
 use std::marker::PhantomData;
 
+use std::io::{
+    self,
+    Write,
+    Read
+};
+
 // Represents the affine point (X/Z, Y/Z) via the extended
 // twisted Edwards coordinates.
 pub struct Point<E: JubjubEngine, Subgroup> {
@@ -80,7 +86,67 @@ impl<E: JubjubEngine, Subgroup> PartialEq for Point<E, Subgroup> {
     }
 }
 
+fn swap_bits_u64(x: u64) -> u64
+{
+    let mut tmp = 0;
+    for i in 0..64 {
+        tmp |= ((x >> i) & 1) << (63 - i);
+    }
+    tmp
+}
+
+#[test]
+fn test_swap_bits_u64() {
+    assert_eq!(swap_bits_u64(17182120934178543809), 0b1000001100011011110000011000111000101111111001001100111001110111);
+    assert_eq!(swap_bits_u64(15135675916470734665), 0b1001001011110010001101010010001110110000100111010011000001001011);
+    assert_eq!(swap_bits_u64(6724233301461108393),  0b1001010101100000100011100001010111110001011000101000101010111010);
+    assert_eq!(swap_bits_u64(206708183275952289),   0b1000010100011010001010100011101011111111111110100111101101000000);
+    assert_eq!(swap_bits_u64(12712751566144824320), 0b0000000000100110010110111000001110001100001000110011011000001101);
+
+    let mut a = 15863238721320035327u64;
+    for _ in 0..1000 {
+        a = a.wrapping_mul(a);
+
+        let swapped = swap_bits_u64(a);
+        let unswapped = swap_bits_u64(swapped);
+
+        assert_eq!(a, unswapped);
+    }
+}
+
 impl<E: JubjubEngine> Point<E, Unknown> {
+    pub fn read<R: Read>(
+        reader: R,
+        params: &E::Params
+    ) -> io::Result<Self>
+    {
+        let mut y_repr = <E::Fr as PrimeField>::Repr::default();
+        y_repr.read_be(reader)?;
+
+        y_repr.as_mut().reverse();
+
+        for b in y_repr.as_mut() {
+            *b = swap_bits_u64(*b);
+        }
+
+        let x_sign = (y_repr.as_ref()[3] >> 63) == 1;
+        y_repr.as_mut()[3] &= 0x7fffffffffffffff;
+
+        match E::Fr::from_repr(y_repr) {
+            Ok(y) => {
+                match Self::get_for_y(y, x_sign, params) {
+                    Some(p) => Ok(p),
+                    None => {
+                        Err(io::Error::new(io::ErrorKind::InvalidInput, "not on curve"))
+                    }
+                }
+            },
+            Err(_) => {
+                Err(io::Error::new(io::ErrorKind::InvalidInput, "y is not in field"))
+            }
+        }
+    }
+
     pub fn get_for_y(y: E::Fr, sign: bool, params: &E::Params) -> Option<Self>
     {
         // Given a y on the curve, x^2 = (y^2 - 1) / (dy^2 + 1)
@@ -151,6 +217,30 @@ impl<E: JubjubEngine> Point<E, Unknown> {
 }
 
 impl<E: JubjubEngine, Subgroup> Point<E, Subgroup> {
+    pub fn write<W: Write>(
+        &self,
+        writer: W
+    ) -> io::Result<()>
+    {
+        let (x, y) = self.into_xy();
+
+        assert_eq!(E::Fr::NUM_BITS, 255);
+
+        let x_repr = x.into_repr();
+        let mut y_repr = y.into_repr();
+        if x_repr.is_odd() {
+            y_repr.as_mut()[3] |= 0x8000000000000000u64;
+        }
+
+        y_repr.as_mut().reverse();
+
+        for b in y_repr.as_mut() {
+            *b = swap_bits_u64(*b);
+        }
+
+        y_repr.write_be(writer)
+    }
+
     /// Convert from a Montgomery point
     pub fn from_montgomery(
         m: &montgomery::Point<E, Subgroup>,

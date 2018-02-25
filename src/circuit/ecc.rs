@@ -30,18 +30,10 @@ use super::lookup::{
 
 use super::boolean::Boolean;
 
+#[derive(Clone)]
 pub struct EdwardsPoint<E: Engine> {
     pub x: AllocatedNum<E>,
     pub y: AllocatedNum<E>
-}
-
-impl<E: Engine> Clone for EdwardsPoint<E> {
-    fn clone(&self) -> Self {
-        EdwardsPoint {
-            x: self.x.clone(),
-            y: self.y.clone()
-        }
-    }
 }
 
 /// Perform a fixed-base scalar multiplication with
@@ -92,6 +84,33 @@ pub fn fixed_base_multiplication<E, CS>(
 }
 
 impl<E: JubjubEngine> EdwardsPoint<E> {
+    /// This converts the point into a representation.
+    pub fn repr<CS>(
+        &self,
+        mut cs: CS
+    ) -> Result<Vec<Boolean>, SynthesisError>
+        where CS: ConstraintSystem<E>
+    {
+        let mut tmp = vec![];
+
+        let mut x = self.x.into_bits_strict(
+            cs.namespace(|| "unpack x")
+        )?;
+
+        let mut y = self.y.into_bits_strict(
+            cs.namespace(|| "unpack y")
+        )?;
+
+        // We want the representation in little endian bit order
+        x.reverse();
+        y.reverse();
+
+        tmp.extend(y);
+        tmp.push(x[0].clone());
+
+        Ok(tmp)
+    }
+
     /// This 'witnesses' a point inside the constraint system.
     /// It guarantees the point is on the curve.
     pub fn witness<Order, CS>(
