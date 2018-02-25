@@ -30,18 +30,10 @@ use super::lookup::{
 
 use super::boolean::Boolean;
 
+#[derive(Clone)]
 pub struct EdwardsPoint<E: Engine> {
     pub x: AllocatedNum<E>,
     pub y: AllocatedNum<E>
-}
-
-impl<E: Engine> Clone for EdwardsPoint<E> {
-    fn clone(&self) -> Self {
-        EdwardsPoint {
-            x: self.x.clone(),
-            y: self.y.clone()
-        }
-    }
 }
 
 /// Perform a fixed-base scalar multiplication with
