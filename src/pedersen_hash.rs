@@ -1,7 +1,7 @@
 use jubjub::*;
 use pairing::*;
 
-use circuit::pedersen_hash::Personalization;
+pub use circuit::pedersen_hash::Personalization;
 
 pub fn pedersen_hash<E, I>(
     personalization: Personalization,
