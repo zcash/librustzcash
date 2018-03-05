@@ -105,11 +105,11 @@ impl<E: JubjubEngine> EdwardsPoint<E> {
     {
         let mut tmp = vec![];
 
-        let x = self.x.into_bits_strict(
+        let x = self.x.into_bits_le_strict(
             cs.namespace(|| "unpack x")
         )?;
 
-        let y = self.y.into_bits_strict(
+        let y = self.y.into_bits_le_strict(
             cs.namespace(|| "unpack y")
         )?;
 

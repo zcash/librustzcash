@@ -88,7 +88,7 @@ impl<E: Engine> AllocatedNum<E> {
     /// order, requiring that the representation
     /// strictly exists "in the field" (i.e., a
     /// congruency is not allowed.)
-    pub fn into_bits_strict<CS>(
+    pub fn into_bits_le_strict<CS>(
         &self,
         mut cs: CS
     ) -> Result<Vec<Boolean>, SynthesisError>
@@ -220,7 +220,7 @@ impl<E: Engine> AllocatedNum<E> {
     /// Convert the allocated number into its little-endian representation.
     /// Note that this does not strongly enforce that the commitment is
     /// "in the field."
-    pub fn into_bits<CS>(
+    pub fn into_bits_le<CS>(
         &self,
         mut cs: CS
     ) -> Result<Vec<Boolean>, SynthesisError>
@@ -565,7 +565,7 @@ mod test {
         let mut cs = TestConstraintSystem::<Bls12>::new();
 
         let n = AllocatedNum::alloc(&mut cs, || Ok(negone)).unwrap();
-        n.into_bits_strict(&mut cs).unwrap();
+        n.into_bits_le_strict(&mut cs).unwrap();
 
         assert!(cs.is_satisfied());
 
@@ -587,9 +587,9 @@ mod test {
             let n = AllocatedNum::alloc(&mut cs, || Ok(r)).unwrap();
 
             let bits = if i % 2 == 0 {
-                n.into_bits(&mut cs).unwrap()
+                n.into_bits_le(&mut cs).unwrap()
             } else {
-                n.into_bits_strict(&mut cs).unwrap()
+                n.into_bits_le_strict(&mut cs).unwrap()
             };
 
             assert!(cs.is_satisfied());

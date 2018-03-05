@@ -250,10 +250,12 @@ impl<'a, E: JubjubEngine> Circuit<E> for Spend<'a, E> {
             )?;
 
             // We don't need to be strict, because the function is
-            // collision-resistant.
+            // collision-resistant. If the prover witnesses a congruency,
+            // they will be unable to find an authentication path in the
+            // tree with high probability.
             let mut preimage = vec![];
-            preimage.extend(xl.into_bits(cs.namespace(|| "xl into bits"))?);
-            preimage.extend(xr.into_bits(cs.namespace(|| "xr into bits"))?);
+            preimage.extend(xl.into_bits_le(cs.namespace(|| "xl into bits"))?);
+            preimage.extend(xr.into_bits_le(cs.namespace(|| "xr into bits"))?);
 
             cur = pedersen_hash::pedersen_hash(
                 cs.namespace(|| "computation of pedersen hash"),
