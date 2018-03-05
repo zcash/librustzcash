@@ -34,26 +34,80 @@ pub mod montgomery;
 #[cfg(test)]
 pub mod tests;
 
+/// Fixed generators of the Jubjub curve of unknown
+/// exponent.
+#[derive(Copy, Clone)]
+pub enum FixedGenerators {
+    /// The prover will demonstrate knowledge of discrete log
+    /// with respect to this base when they are constructing
+    /// a proof, in order to authorize proof construction.
+    ProvingPublicKey = 0,
+
+    /// The note commitment is randomized over this generator.
+    NoteCommitmentRandomness = 1,
+
+    /// The node commitment is randomized again by the position
+    /// in order to supply the nullifier computation with a
+    /// unique input w.r.t. the note being spent, to prevent
+    /// Faerie gold attacks.
+    NullifierPosition = 2,
+
+    /// The value commitment is used to check balance between
+    /// inputs and outputs. The value is placed over this
+    /// generator.
+    ValueCommitmentValue = 3,
+    /// The value commitment is randomized over this generator,
+    /// for privacy.
+    ValueCommitmentRandomness = 4,
+
+    /// The spender proves discrete log with respect to this
+    /// base at spend time.
+    SpendingKeyGenerator = 5,
+
+    Max = 6
+}
+
+/// This is an extension to the pairing Engine trait which
+/// offers a scalar field for the embedded curve (Jubjub)
+/// and some pre-computed parameters.
 pub trait JubjubEngine: Engine {
     type Fs: PrimeField + SqrtField;
     type Params: JubjubParams<Self>;
 }
 
+/// The pre-computed parameters for Jubjub, including curve
+/// constants and various limits and window tables.
 pub trait JubjubParams<E: JubjubEngine>: Sized {
+    /// The `d` constant of the twisted Edwards curve.
     fn edwards_d(&self) -> &E::Fr;
+    /// The `A` constant of the birationally equivalent Montgomery curve.
     fn montgomery_a(&self) -> &E::Fr;
+    /// The `A` constant, doubled.
     fn montgomery_2a(&self) -> &E::Fr;
+    /// The scaling factor used for conversion from the Montgomery form.
     fn scale(&self) -> &E::Fr;
+    /// Returns the generators (for each segment) used in all Pedersen commitments.
     fn pedersen_hash_generators(&self) -> &[edwards::Point<E, PrimeOrder>];
+    /// Returns the maximum number of chunks per segment of the Pedersen hash.
     fn pedersen_hash_chunks_per_generator(&self) -> usize;
+    /// Returns the pre-computed window tables [-4, 3, 2, 1, 1, 2, 3, 4] of different
+    /// magnitudes of the Pedersen hash segment generators.
     fn pedersen_circuit_generators(&self) -> &[Vec<Vec<(E::Fr, E::Fr)>>];
 
+    /// Returns the number of chunks needed to represent a full scalar during fixed-base
+    /// exponentiation.
     fn fixed_base_chunks_per_generator(&self) -> usize;
+    /// Returns a fixed generator.
     fn generator(&self, base: FixedGenerators) -> &edwards::Point<E, PrimeOrder>;
+    /// Returns a window table [0, 1, ..., 8] for different magntitudes of some
+    /// fixed generator.
     fn circuit_generators(&self, FixedGenerators) -> &[Vec<(E::Fr, E::Fr)>];
 }
 
+/// Point of unknown order.
 pub enum Unknown { }
+
+/// Point of prime order.
 pub enum PrimeOrder { }
 
 pub mod fs;
@@ -61,19 +115,6 @@ pub mod fs;
 impl JubjubEngine for Bls12 {
     type Fs = self::fs::Fs;
     type Params = JubjubBls12;
-}
-
-/// Fixed generators of the Jubjub curve of unknown
-/// exponent.
-#[derive(Copy, Clone)]
-pub enum FixedGenerators {
-    NoteCommitmentRandomness = 0,
-    ProvingPublicKey = 1,
-    ValueCommitmentValue = 2,
-    ValueCommitmentRandomness = 3,
-    NullifierPosition = 4,
-    SpendingKeyGenerator = 5,
-    Max = 6
 }
 
 pub struct JubjubBls12 {
