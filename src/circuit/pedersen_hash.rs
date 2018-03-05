@@ -9,13 +9,7 @@ use bellman::{
     ConstraintSystem
 };
 use super::lookup::*;
-
-// TODO: ensure these match the spec
-pub enum Personalization {
-    NoteCommitment,
-    AnotherPersonalization,
-    MerkleTree(usize)
-}
+pub use pedersen_hash::Personalization;
 
 impl Personalization {
     fn get_constant_bools(&self) -> Vec<Boolean> {
@@ -23,17 +17,6 @@ impl Personalization {
         .into_iter()
         .map(|e| Boolean::constant(e))
         .collect()
-    }
-
-    pub fn get_bits(&self) -> Vec<bool> {
-        match *self {
-            Personalization::NoteCommitment =>
-                vec![false, false, false, false, false, false],
-            Personalization::AnotherPersonalization =>
-                vec![false, false, false, false, false, true],
-            Personalization::MerkleTree(_) =>
-                vec![false, false, false, false, true, false],
-        }
     }
 }
 
