@@ -67,14 +67,10 @@ impl<'a, E: JubjubEngine> Circuit<E> for Spend<'a, E> {
     fn synthesize<CS: ConstraintSystem<E>>(self, cs: &mut CS) -> Result<(), SynthesisError>
     {
         // Booleanize the value into little-endian bit order
-        let value_bits = boolean::u64_into_allocated_bits_be(
+        let value_bits = boolean::u64_into_boolean_vec_le(
             cs.namespace(|| "value"),
             self.value
-        )?
-        .into_iter()
-        .rev() // Little endian bit order
-        .map(|e| boolean::Boolean::from(e))
-        .collect::<Vec<_>>();
+        )?;
 
         {
             let gv = ecc::fixed_base_multiplication(
@@ -348,14 +344,10 @@ impl<'a, E: JubjubEngine> Circuit<E> for Output<'a, E> {
     fn synthesize<CS: ConstraintSystem<E>>(self, cs: &mut CS) -> Result<(), SynthesisError>
     {
         // Booleanize the value into little-endian bit order
-        let value_bits = boolean::u64_into_allocated_bits_be(
+        let value_bits = boolean::u64_into_boolean_vec_le(
             cs.namespace(|| "value"),
             self.value
-        )?
-        .into_iter()
-        .rev() // Little endian bit order
-        .map(|e| boolean::Boolean::from(e))
-        .collect::<Vec<_>>();
+        )?;
 
         {
             let gv = ecc::fixed_base_multiplication(
@@ -560,7 +552,7 @@ fn test_input_circuit_with_bls12_381() {
 
         assert!(cs.is_satisfied());
         assert_eq!(cs.num_constraints(), 97379);
-        assert_eq!(cs.hash(), "4d8e71c91a621e41599ea488ee89f035c892a260a595d3c85a20a82daa2d1654");
+        assert_eq!(cs.hash(), "a3ac418bbbe38d08295995c8cdcaebd6902fcfa9e4f7212c9742ed033c1edec3");
     }
 }
 
@@ -598,6 +590,6 @@ fn test_output_circuit_with_bls12_381() {
 
         assert!(cs.is_satisfied());
         assert_eq!(cs.num_constraints(), 7827);
-        assert_eq!(cs.hash(), "225a2df7e21b9af8b436ffb9dadd645e4df843a5151c7481b0553422d5eaa793");
+        assert_eq!(cs.hash(), "b74e3ee749e1cbc405b5b4a1de3b11119084afda9b6f5e3a6865cbcc5c35e3d4");
     }
 }
