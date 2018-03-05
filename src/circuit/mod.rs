@@ -81,13 +81,10 @@ impl<'a, E: JubjubEngine> Circuit<E> for Spend<'a, E> {
             )?;
         
             // Booleanize the randomness
-            let hr = boolean::field_into_allocated_bits_le(
+            let hr = boolean::field_into_boolean_vec_le(
                 cs.namespace(|| "hr"),
                 self.value_randomness
-            )?
-            .into_iter()
-            .map(|e| boolean::Boolean::from(e))
-            .collect::<Vec<_>>();
+            )?;
 
             let hr = ecc::fixed_base_multiplication(
                 cs.namespace(|| "computation of randomization for value commitment"),
@@ -109,13 +106,10 @@ impl<'a, E: JubjubEngine> Circuit<E> for Spend<'a, E> {
         let rk;
         {
             // Witness rsk as bits
-            let rsk = boolean::field_into_allocated_bits_le(
+            let rsk = boolean::field_into_boolean_vec_le(
                 cs.namespace(|| "rsk"),
                 self.rsk
-            )?
-            .into_iter()
-            .map(|e| boolean::Boolean::from(e))
-            .collect::<Vec<_>>();
+            )?;
 
             // NB: We don't ensure that the bit representation of rsk
             // is "in the field" (Fs) because it's not used except to
@@ -205,13 +199,10 @@ impl<'a, E: JubjubEngine> Circuit<E> for Spend<'a, E> {
 
         {
             // Booleanize the randomness
-            let cmr = boolean::field_into_allocated_bits_le(
+            let cmr = boolean::field_into_boolean_vec_le(
                 cs.namespace(|| "cmr"),
                 self.commitment_randomness
-            )?
-            .into_iter()
-            .map(|e| boolean::Boolean::from(e))
-            .collect::<Vec<_>>();
+            )?;
 
             let cmr = ecc::fixed_base_multiplication(
                 cs.namespace(|| "computation of commitment randomness"),
@@ -356,13 +347,10 @@ impl<'a, E: JubjubEngine> Circuit<E> for Output<'a, E> {
             )?;
         
             // Booleanize the randomness
-            let hr = boolean::field_into_allocated_bits_le(
+            let hr = boolean::field_into_boolean_vec_le(
                 cs.namespace(|| "hr"),
                 self.value_randomness
-            )?
-            .into_iter()
-            .map(|e| boolean::Boolean::from(e))
-            .collect::<Vec<_>>();
+            )?;
 
             let hr = ecc::fixed_base_multiplication(
                 cs.namespace(|| "computation of randomization for value commitment"),
@@ -419,13 +407,10 @@ impl<'a, E: JubjubEngine> Circuit<E> for Output<'a, E> {
             );
 
             // Compute epk from esk
-            let esk = boolean::field_into_allocated_bits_le(
+            let esk = boolean::field_into_boolean_vec_le(
                 cs.namespace(|| "esk"),
                 self.esk
-            )?
-            .into_iter()
-            .map(|e| boolean::Boolean::from(e))
-            .collect::<Vec<_>>();
+            )?;
 
             let epk = g_d.mul(
                 cs.namespace(|| "epk computation"),
@@ -442,13 +427,10 @@ impl<'a, E: JubjubEngine> Circuit<E> for Output<'a, E> {
         {
             let p_d = self.p_d.map(|e| e.into_xy());
 
-            let y_contents = boolean::field_into_allocated_bits_le(
+            let y_contents = boolean::field_into_boolean_vec_le(
                 cs.namespace(|| "p_d bits of y"),
                 p_d.map(|e| e.1)
-            )?
-            .into_iter()
-            .map(|e| boolean::Boolean::from(e))
-            .collect::<Vec<_>>();
+            )?;
 
             let sign_bit = boolean::Boolean::from(boolean::AllocatedBit::alloc(
                 cs.namespace(|| "p_d bit of x"),
@@ -476,13 +458,10 @@ impl<'a, E: JubjubEngine> Circuit<E> for Output<'a, E> {
 
         {
             // Booleanize the randomness
-            let cmr = boolean::field_into_allocated_bits_le(
+            let cmr = boolean::field_into_boolean_vec_le(
                 cs.namespace(|| "cmr"),
                 self.commitment_randomness
-            )?
-            .into_iter()
-            .map(|e| boolean::Boolean::from(e))
-            .collect::<Vec<_>>();
+            )?;
 
             let cmr = ecc::fixed_base_multiplication(
                 cs.namespace(|| "computation of commitment randomness"),

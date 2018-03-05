@@ -301,6 +301,16 @@ pub fn u64_into_boolean_vec_le<E: Engine, CS: ConstraintSystem<E>>(
     Ok(bits)
 }
 
+pub fn field_into_boolean_vec_le<E: Engine, CS: ConstraintSystem<E>, F: PrimeField>(
+    cs: CS,
+    value: Option<F>
+) -> Result<Vec<Boolean>, SynthesisError>
+{
+    let v = field_into_allocated_bits_le::<E, CS, F>(cs, value)?;
+
+    Ok(v.into_iter().map(|e| Boolean::from(e)).collect())
+}
+
 pub fn field_into_allocated_bits_le<E: Engine, CS: ConstraintSystem<E>, F: PrimeField>(
     mut cs: CS,
     value: Option<F>
