@@ -174,7 +174,7 @@ impl<'a, E: JubjubEngine> Circuit<E> for Spend<'a, E> {
 
         // Compute note contents
         let mut note_contents = vec![];
-        note_contents.extend(value_bits);
+        note_contents.extend(value_bits.into_iter().rev());
         note_contents.extend(
             g_d.repr(cs.namespace(|| "representation of g_d"))?
         );
@@ -372,7 +372,7 @@ impl<'a, E: JubjubEngine> Circuit<E> for Output<'a, E> {
 
         // Let's start to construct our note
         let mut note_contents = vec![];
-        note_contents.extend(value_bits);
+        note_contents.extend(value_bits.into_iter().rev());
 
         // Let's deal with g_d
         {
@@ -527,7 +527,7 @@ fn test_input_circuit_with_bls12_381() {
 
         assert!(cs.is_satisfied());
         assert_eq!(cs.num_constraints(), 97379);
-        assert_eq!(cs.hash(), "cae701c7acd6fee80b8dfc547855f44dcb3eb6cf64e434afa8c77a93bafd9d0e");
+        assert_eq!(cs.hash(), "1c5298e7f9ec46f227d3622968b092bfbc1d15a9f45fcf4910b6edb60fe4f0f8");
     }
 }
 
@@ -565,6 +565,6 @@ fn test_output_circuit_with_bls12_381() {
 
         assert!(cs.is_satisfied());
         assert_eq!(cs.num_constraints(), 7827);
-        assert_eq!(cs.hash(), "f9c01583d089117e01ee5d0dcc8d8d0d1f6c4af0a420a9981a5af9a572df26f1");
+        assert_eq!(cs.hash(), "a76f4ae0b3e078b6d3d44bf6d9c1d121884b30f74c97f77f114978196f4949b3");
     }
 }
