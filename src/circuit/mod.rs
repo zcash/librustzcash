@@ -81,12 +81,11 @@ impl<'a, E: JubjubEngine> Circuit<E> for Spend<'a, E> {
             )?;
         
             // Booleanize the randomness
-            let hr = boolean::field_into_allocated_bits_be(
+            let hr = boolean::field_into_allocated_bits_le(
                 cs.namespace(|| "hr"),
                 self.value_randomness
             )?
             .into_iter()
-            .rev() // Little endian bit order
             .map(|e| boolean::Boolean::from(e))
             .collect::<Vec<_>>();
 
@@ -110,13 +109,13 @@ impl<'a, E: JubjubEngine> Circuit<E> for Spend<'a, E> {
         let rk;
         {
             // Witness rsk as bits
-            let rsk = boolean::field_into_allocated_bits_be(
+            let rsk = boolean::field_into_allocated_bits_le(
                 cs.namespace(|| "rsk"),
                 self.rsk
             )?
             .into_iter()
-            .rev() // We need it in little endian bit order
-            .map(|e| boolean::Boolean::from(e)).collect::<Vec<_>>();
+            .map(|e| boolean::Boolean::from(e))
+            .collect::<Vec<_>>();
 
             // NB: We don't ensure that the bit representation of rsk
             // is "in the field" (Fs) because it's not used except to
@@ -206,12 +205,11 @@ impl<'a, E: JubjubEngine> Circuit<E> for Spend<'a, E> {
 
         {
             // Booleanize the randomness
-            let cmr = boolean::field_into_allocated_bits_be(
+            let cmr = boolean::field_into_allocated_bits_le(
                 cs.namespace(|| "cmr"),
                 self.commitment_randomness
             )?
             .into_iter()
-            .rev() // We need it in little endian bit order
             .map(|e| boolean::Boolean::from(e))
             .collect::<Vec<_>>();
 
@@ -358,12 +356,11 @@ impl<'a, E: JubjubEngine> Circuit<E> for Output<'a, E> {
             )?;
         
             // Booleanize the randomness
-            let hr = boolean::field_into_allocated_bits_be(
+            let hr = boolean::field_into_allocated_bits_le(
                 cs.namespace(|| "hr"),
                 self.value_randomness
             )?
             .into_iter()
-            .rev() // Little endian bit order
             .map(|e| boolean::Boolean::from(e))
             .collect::<Vec<_>>();
 
@@ -422,12 +419,11 @@ impl<'a, E: JubjubEngine> Circuit<E> for Output<'a, E> {
             );
 
             // Compute epk from esk
-            let esk = boolean::field_into_allocated_bits_be(
+            let esk = boolean::field_into_allocated_bits_le(
                 cs.namespace(|| "esk"),
                 self.esk
             )?
             .into_iter()
-            .rev() // We need it in little endian bit order
             .map(|e| boolean::Boolean::from(e))
             .collect::<Vec<_>>();
 
@@ -446,12 +442,11 @@ impl<'a, E: JubjubEngine> Circuit<E> for Output<'a, E> {
         {
             let p_d = self.p_d.map(|e| e.into_xy());
 
-            let y_contents = boolean::field_into_allocated_bits_be(
+            let y_contents = boolean::field_into_allocated_bits_le(
                 cs.namespace(|| "p_d bits of y"),
                 p_d.map(|e| e.1)
             )?
             .into_iter()
-            .rev() // We need it in little endian bit order
             .map(|e| boolean::Boolean::from(e))
             .collect::<Vec<_>>();
 
@@ -481,12 +476,11 @@ impl<'a, E: JubjubEngine> Circuit<E> for Output<'a, E> {
 
         {
             // Booleanize the randomness
-            let cmr = boolean::field_into_allocated_bits_be(
+            let cmr = boolean::field_into_allocated_bits_le(
                 cs.namespace(|| "cmr"),
                 self.commitment_randomness
             )?
             .into_iter()
-            .rev() // We need it in little endian bit order
             .map(|e| boolean::Boolean::from(e))
             .collect::<Vec<_>>();
 
@@ -552,7 +546,7 @@ fn test_input_circuit_with_bls12_381() {
 
         assert!(cs.is_satisfied());
         assert_eq!(cs.num_constraints(), 97379);
-        assert_eq!(cs.hash(), "a3ac418bbbe38d08295995c8cdcaebd6902fcfa9e4f7212c9742ed033c1edec3");
+        assert_eq!(cs.hash(), "db283e10d01d6c3c4d23cd3c05a7ae8f1a7d8091a39f8d8b604e610ca6a3e496");
     }
 }
 
@@ -590,6 +584,6 @@ fn test_output_circuit_with_bls12_381() {
 
         assert!(cs.is_satisfied());
         assert_eq!(cs.num_constraints(), 7827);
-        assert_eq!(cs.hash(), "b74e3ee749e1cbc405b5b4a1de3b11119084afda9b6f5e3a6865cbcc5c35e3d4");
+        assert_eq!(cs.hash(), "ccb2ad9a6d492e708da155305064a3b8af5d29b4b766cf08ac415a478aae4cc6");
     }
 }

@@ -301,11 +301,12 @@ pub fn u64_into_boolean_vec_le<E: Engine, CS: ConstraintSystem<E>>(
     Ok(bits)
 }
 
-pub fn field_into_allocated_bits_be<E: Engine, CS: ConstraintSystem<E>, F: PrimeField>(
+pub fn field_into_allocated_bits_le<E: Engine, CS: ConstraintSystem<E>, F: PrimeField>(
     mut cs: CS,
     value: Option<F>
 ) -> Result<Vec<AllocatedBit>, SynthesisError>
 {
+    // Deconstruct in big-endian bit order
     let values = match value {
         Some(ref value) => {
             let mut field_char = BitIterator::new(F::char());
@@ -332,7 +333,8 @@ pub fn field_into_allocated_bits_be<E: Engine, CS: ConstraintSystem<E>, F: Prime
         }
     };
 
-    let bits = values.into_iter().enumerate().map(|(i, b)| {
+    // Allocate in little-endian order
+    let bits = values.into_iter().rev().enumerate().map(|(i, b)| {
         AllocatedBit::alloc(
             cs.namespace(|| format!("bit {}", i)),
             b
@@ -512,7 +514,7 @@ mod test {
     use super::{
         AllocatedBit,
         Boolean,
-        field_into_allocated_bits_be,
+        field_into_allocated_bits_le,
         u64_into_boolean_vec_le
     };
 
@@ -1003,24 +1005,24 @@ mod test {
     }
 
     #[test]
-    fn test_field_into_allocated_bits_be() {
+    fn test_field_into_allocated_bits_le() {
         let mut cs = TestConstraintSystem::<Bls12>::new();
 
         let r = Fr::from_str("9147677615426976802526883532204139322118074541891858454835346926874644257775").unwrap();
 
-        let bits = field_into_allocated_bits_be(&mut cs, Some(r)).unwrap();
+        let bits = field_into_allocated_bits_le(&mut cs, Some(r)).unwrap();
 
         assert!(cs.is_satisfied());
 
         assert_eq!(bits.len(), 255);
 
-        assert_eq!(bits[0].value.unwrap(), false);
-        assert_eq!(bits[1].value.unwrap(), false);
-        assert_eq!(bits[2].value.unwrap(), true);
-        assert_eq!(bits[3].value.unwrap(), false);
-        assert_eq!(bits[4].value.unwrap(), true);
-        assert_eq!(bits[5].value.unwrap(), false);
-        assert_eq!(bits[20].value.unwrap(), true);
-        assert_eq!(bits[23].value.unwrap(), true);
+        assert_eq!(bits[254 - 0].value.unwrap(), false);
+        assert_eq!(bits[254 - 1].value.unwrap(), false);
+        assert_eq!(bits[254 - 2].value.unwrap(), true);
+        assert_eq!(bits[254 - 3].value.unwrap(), false);
+        assert_eq!(bits[254 - 4].value.unwrap(), true);
+        assert_eq!(bits[254 - 5].value.unwrap(), false);
+        assert_eq!(bits[254 - 20].value.unwrap(), true);
+        assert_eq!(bits[254 - 23].value.unwrap(), true);
     }
 }

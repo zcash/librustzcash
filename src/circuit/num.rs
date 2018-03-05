@@ -83,6 +83,11 @@ impl<E: Engine> AllocatedNum<E> {
         Ok(())
     }
 
+    /// Deconstructs this allocated number into its
+    /// boolean representation in little-endian bit
+    /// order, requiring that the representation
+    /// strictly exists "in the field" (i.e., a
+    /// congruency is not allowed.)
     pub fn into_bits_strict<CS>(
         &self,
         mut cs: CS
@@ -208,16 +213,20 @@ impl<E: Engine> AllocatedNum<E> {
             |_| lc
         );
 
-        Ok(result.into_iter().map(|b| Boolean::from(b)).collect())
+        // Convert into booleans, and reverse for little-endian bit order
+        Ok(result.into_iter().map(|b| Boolean::from(b)).rev().collect())
     }
 
+    /// Convert the allocated number into its little-endian representation.
+    /// Note that this does not strongly enforce that the commitment is
+    /// "in the field."
     pub fn into_bits<CS>(
         &self,
         mut cs: CS
     ) -> Result<Vec<Boolean>, SynthesisError>
         where CS: ConstraintSystem<E>
     {
-        let bits = boolean::field_into_allocated_bits_be(
+        let bits = boolean::field_into_allocated_bits_le(
             &mut cs,
             self.value
         )?;
@@ -225,7 +234,7 @@ impl<E: Engine> AllocatedNum<E> {
         let mut lc = LinearCombination::zero();
         let mut coeff = E::Fr::one();
 
-        for bit in bits.iter().rev() {
+        for bit in bits.iter() {
             lc = lc + (coeff, bit.get_variable());
 
             coeff.double();
@@ -585,7 +594,7 @@ mod test {
 
             assert!(cs.is_satisfied());
 
-            for (b, a) in BitIterator::new(r.into_repr()).skip(1).zip(bits.iter()) {
+            for (b, a) in BitIterator::new(r.into_repr()).skip(1).zip(bits.iter().rev()) {
                 if let &Boolean::Is(ref a) = a {
                     assert_eq!(b, a.get_value().unwrap());
                 } else {

@@ -105,17 +105,13 @@ impl<E: JubjubEngine> EdwardsPoint<E> {
     {
         let mut tmp = vec![];
 
-        let mut x = self.x.into_bits_strict(
+        let x = self.x.into_bits_strict(
             cs.namespace(|| "unpack x")
         )?;
 
-        let mut y = self.y.into_bits_strict(
+        let y = self.y.into_bits_strict(
             cs.namespace(|| "unpack y")
         )?;
-
-        // We want the representation in little endian bit order
-        x.reverse();
-        y.reverse();
 
         tmp.extend(y);
         tmp.push(x[0].clone());
