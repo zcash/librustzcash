@@ -60,6 +60,29 @@ impl<E: Engine> AllocatedNum<E> {
         })
     }
 
+    pub fn inputize<CS>(
+        &self,
+        mut cs: CS
+    ) -> Result<(), SynthesisError>
+        where CS: ConstraintSystem<E>
+    {
+        let input = cs.alloc_input(
+            || "input variable",
+            || {
+                Ok(*self.value.get()?)
+            }
+        )?;
+
+        cs.enforce(
+            || "enforce input is correct",
+            |lc| lc + input,
+            |lc| lc + CS::one(),
+            |lc| lc + self.variable
+        );
+
+        Ok(())
+    }
+
     pub fn into_bits_strict<CS>(
         &self,
         mut cs: CS

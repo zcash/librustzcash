@@ -107,34 +107,7 @@ impl<'a, E: JubjubEngine> Circuit<E> for Spend<'a, E> {
                 self.params
             )?;
 
-            // Expose the value commitment publicly
-            let value_commitment_x = cs.alloc_input(
-                || "value commitment x",
-                || {
-                    Ok(*gvhr.x.get_value().get()?)
-                }
-            )?;
-
-            cs.enforce(
-                || "value commitment x equals input",
-                |lc| lc + value_commitment_x,
-                |lc| lc + CS::one(),
-                |lc| lc + gvhr.x.get_variable()
-            );
-
-            let value_commitment_y = cs.alloc_input(
-                || "value commitment y",
-                || {
-                    Ok(*gvhr.y.get_value().get()?)
-                }
-            )?;
-
-            cs.enforce(
-                || "value commitment y equals input",
-                |lc| lc + value_commitment_y,
-                |lc| lc + CS::one(),
-                |lc| lc + gvhr.y.get_variable()
-            );
+            gvhr.inputize(cs.namespace(|| "value commitment"))?;
         }
 
         // Compute rk = [rsk] ProvingPublicKey
@@ -307,22 +280,8 @@ impl<'a, E: JubjubEngine> Circuit<E> for Spend<'a, E> {
 
         assert_eq!(position_bits.len(), tree_depth);
 
-        {
-            // Expose the anchor
-            let anchor = cs.alloc_input(
-                || "anchor x",
-                || {
-                    Ok(*cur.get_value().get()?)
-                }
-            )?;
-
-            cs.enforce(
-                || "anchor x equals anchor",
-                |lc| lc + anchor,
-                |lc| lc + CS::one(),
-                |lc| lc + cur.get_variable()
-            );
-        }
+        // Expose the anchor
+        cur.inputize(cs.namespace(|| "anchor"))?;
 
         {
             let position = ecc::fixed_base_multiplication(
@@ -353,7 +312,7 @@ impl<'a, E: JubjubEngine> Circuit<E> for Spend<'a, E> {
 
         // Little endian bit order
         rho.reverse();
-        rho.truncate(251); // drop_5
+        rho.truncate(E::Fs::CAPACITY as usize); // drop_5
 
         // Compute nullifier
         let nf = ak.mul(
@@ -362,36 +321,7 @@ impl<'a, E: JubjubEngine> Circuit<E> for Spend<'a, E> {
             self.params
         )?;
 
-        {
-            // Expose the nullifier publicly
-            let nf_x = cs.alloc_input(
-                || "nf_x",
-                || {
-                    Ok(*nf.x.get_value().get()?)
-                }
-            )?;
-
-            cs.enforce(
-                || "nf_x equals input",
-                |lc| lc + nf_x,
-                |lc| lc + CS::one(),
-                |lc| lc + nf.x.get_variable()
-            );
-
-            let nf_y = cs.alloc_input(
-                || "nf_y",
-                || {
-                    Ok(*nf.y.get_value().get()?)
-                }
-            )?;
-
-            cs.enforce(
-                || "nf_y equals input",
-                |lc| lc + nf_y,
-                |lc| lc + CS::one(),
-                |lc| lc + nf.y.get_variable()
-            );
-        }
+        nf.inputize(cs.namespace(|| "nullifier"))?;
 
         Ok(())
     }
@@ -458,34 +388,7 @@ impl<'a, E: JubjubEngine> Circuit<E> for Output<'a, E> {
                 self.params
             )?;
 
-            // Expose the value commitment publicly
-            let value_commitment_x = cs.alloc_input(
-                || "value commitment x",
-                || {
-                    Ok(*gvhr.x.get_value().get()?)
-                }
-            )?;
-
-            cs.enforce(
-                || "value commitment x equals input",
-                |lc| lc + value_commitment_x,
-                |lc| lc + CS::one(),
-                |lc| lc + gvhr.x.get_variable()
-            );
-
-            let value_commitment_y = cs.alloc_input(
-                || "value commitment y",
-                || {
-                    Ok(*gvhr.y.get_value().get()?)
-                }
-            )?;
-
-            cs.enforce(
-                || "value commitment y equals input",
-                |lc| lc + value_commitment_y,
-                |lc| lc + CS::one(),
-                |lc| lc + gvhr.y.get_variable()
-            );
+            gvhr.inputize(cs.namespace(|| "value commitment"))?;
         }
 
         // Let's start to construct our note
@@ -542,34 +445,7 @@ impl<'a, E: JubjubEngine> Circuit<E> for Output<'a, E> {
                 self.params
             )?;
 
-            // Expose epk publicly
-            let epk_x = cs.alloc_input(
-                || "epk x",
-                || {
-                    Ok(*epk.x.get_value().get()?)
-                }
-            )?;
-
-            cs.enforce(
-                || "epk x equals input",
-                |lc| lc + epk_x,
-                |lc| lc + CS::one(),
-                |lc| lc + epk.x.get_variable()
-            );
-
-            let epk_y = cs.alloc_input(
-                || "epk y",
-                || {
-                    Ok(*epk.y.get_value().get()?)
-                }
-            )?;
-
-            cs.enforce(
-                || "epk y equals input",
-                |lc| lc + epk_y,
-                |lc| lc + CS::one(),
-                |lc| lc + epk.y.get_variable()
-            );
+            epk.inputize(cs.namespace(|| "epk"))?;
         }
 
         // Now let's deal with p_d. We don't do any checks and
@@ -640,19 +516,7 @@ impl<'a, E: JubjubEngine> Circuit<E> for Output<'a, E> {
         // since we know it is prime order, and we know that
         // the x-coordinate is an injective encoding for
         // prime-order elements.
-        let commitment_input = cs.alloc_input(
-            || "commitment input",
-            || {
-                Ok(*cm.x.get_value().get()?)
-            }
-        )?;
-
-        cs.enforce(
-            || "commitment input correct",
-            |lc| lc + commitment_input,
-            |lc| lc + CS::one(),
-            |lc| lc + cm.x.get_variable()
-        );
+        cm.x.inputize(cs.namespace(|| "commitment"))?;
 
         Ok(())
     }

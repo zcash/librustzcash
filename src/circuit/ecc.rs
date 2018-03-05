@@ -84,6 +84,18 @@ pub fn fixed_base_multiplication<E, CS>(
 }
 
 impl<E: JubjubEngine> EdwardsPoint<E> {
+    pub fn inputize<CS>(
+        &self,
+        mut cs: CS
+    ) -> Result<(), SynthesisError>
+        where CS: ConstraintSystem<E>
+    {
+        self.x.inputize(cs.namespace(|| "x"))?;
+        self.y.inputize(cs.namespace(|| "y"))?;
+
+        Ok(())
+    }
+
     /// This converts the point into a representation.
     pub fn repr<CS>(
         &self,
