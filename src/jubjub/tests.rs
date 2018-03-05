@@ -390,8 +390,8 @@ fn test_jubjub_params<E: JubjubEngine>(params: &E::Params) {
             tmp.mul2();
             tmp.mul2();
 
-            assert_eq!(pacc.add_nocarry(&tmp), false);
-            assert_eq!(nacc.sub_noborrow(&tmp), false);
+            pacc.add_nocarry(&tmp);
+            nacc.sub_noborrow(&tmp);
 
             assert!(pacc < max);
             assert!(pacc < nacc);
