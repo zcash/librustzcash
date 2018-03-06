@@ -185,7 +185,7 @@ impl JubjubBls12 {
             let mut cur = 0;
             let mut pedersen_hash_generators = vec![];
 
-            while pedersen_hash_generators.len() < 10 {
+            while pedersen_hash_generators.len() < 5 {
                 let gh = group_hash(&[cur], ::PEDERSEN_HASH_GENERATORS_PERSONALIZATION, &tmp);
                 // We don't want to overflow and start reusing generators
                 assert!(cur != u8::max_value());
