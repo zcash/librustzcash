@@ -1,7 +1,6 @@
 use jubjub::*;
 use pairing::*;
-use blake2::{Blake2s};
-use digest::{FixedOutput, Input};
+use blake2_rfc::blake2s::Blake2s;
 
 /// Produces an (x, y) pair (Montgomery) for a
 /// random point in the Jubjub curve. The point
@@ -15,9 +14,9 @@ pub fn group_hash<E: JubjubEngine>(
     // Check to see that scalar field is 255 bits
     assert!(E::Fr::NUM_BITS == 255);
 
-    let mut h = Blake2s::new_keyed(&[], 32);
-    h.process(tag);
-    let mut h = h.fixed_result().to_vec();
+    let mut h = Blake2s::new(32);
+    h.update(tag);
+    let mut h = h.finalize().as_ref().to_vec();
     assert!(h.len() == 32);
 
     // Take first/unset first bit of hash

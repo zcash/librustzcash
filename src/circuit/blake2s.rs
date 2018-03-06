@@ -313,8 +313,7 @@ mod test {
     use ::circuit::test::TestConstraintSystem;
     use super::blake2s;
     use bellman::{ConstraintSystem};
-    use blake2::{Blake2s};
-    use digest::{FixedOutput, Input};
+    use blake2_rfc::blake2s::Blake2s;
 
     #[test]
     fn test_blake2s_constraints() {
@@ -357,13 +356,13 @@ mod test {
 
         for input_len in (0..32).chain((32..256).filter(|a| a % 8 == 0))
         {
-            let mut h = Blake2s::new_keyed(&[], 32);
+            let mut h = Blake2s::new(32);
 
             let data: Vec<u8> = (0..input_len).map(|_| rng.gen()).collect();
 
-            h.process(&data);
+            h.update(&data);
 
-            let hash_result = h.fixed_result();
+            let hash_result = h.finalize();
 
             let mut cs = TestConstraintSystem::<Bls12>::new();
 
