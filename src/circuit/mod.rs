@@ -489,7 +489,7 @@ fn test_input_circuit_with_bls12_381() {
     let params = &JubjubBls12::new();
     let rng = &mut XorShiftRng::from_seed([0x3dbe6259, 0x8d313d76, 0x3237db17, 0xe5bc0654]);
 
-    let tree_depth = 29;
+    let tree_depth = 32;
 
     let value: u64 = 1;
     let value_randomness: fs::Fs = rng.gen();
@@ -516,8 +516,8 @@ fn test_input_circuit_with_bls12_381() {
         instance.synthesize(&mut cs).unwrap();
 
         assert!(cs.is_satisfied());
-        assert_eq!(cs.num_constraints(), 97395);
-        assert_eq!(cs.hash(), "9abc0559abf54a41da789313b1692dc744d940646bb7dd3e6c01ceb54d0cc261");
+        assert_eq!(cs.num_constraints(), 101550);
+        assert_eq!(cs.hash(), "3cc6d9383ca882ae3666267618e826e9d51a3177fc89ef6d42d9f63b84179f77");
     }
 }
 
