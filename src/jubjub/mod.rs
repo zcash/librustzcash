@@ -41,7 +41,7 @@ pub enum FixedGenerators {
     /// The prover will demonstrate knowledge of discrete log
     /// with respect to this base when they are constructing
     /// a proof, in order to authorize proof construction.
-    ProvingPublicKey = 0,
+    ProofGenerationKey = 0,
 
     /// The note commitment is randomized over this generator.
     NoteCommitmentRandomness = 1,
@@ -225,8 +225,8 @@ impl JubjubBls12 {
                 // way to iterate over the variants of an enum, so it's hideous.
                 for c in 0..(FixedGenerators::Max as usize) {
                     let p = match c {
-                        c if c == (FixedGenerators::ProvingPublicKey as usize) => {
-                            ::PROVING_KEY_BASE_GENERATOR_PERSONALIZATION
+                        c if c == (FixedGenerators::ProofGenerationKey as usize) => {
+                            ::PROOF_GENERATION_KEY_BASE_GENERATOR_PERSONALIZATION
                         },
                         c if c == (FixedGenerators::NoteCommitmentRandomness as usize) => {
                             ::NOTE_COMMITMENT_RANDOMNESS_GENERATOR_PERSONALIZATION

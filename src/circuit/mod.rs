@@ -118,7 +118,7 @@ impl<'a, E: JubjubEngine> Circuit<E> for Spend<'a, E> {
 
             rk = ecc::fixed_base_multiplication(
                 cs.namespace(|| "computation of rk"),
-                FixedGenerators::ProvingPublicKey,
+                FixedGenerators::ProofGenerationKey,
                 &rsk,
                 self.params
             )?;
