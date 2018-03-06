@@ -67,14 +67,10 @@ impl<'a, E: JubjubEngine> Circuit<E> for Spend<'a, E> {
     fn synthesize<CS: ConstraintSystem<E>>(self, cs: &mut CS) -> Result<(), SynthesisError>
     {
         // Booleanize the value into little-endian bit order
-        let value_bits = boolean::u64_into_allocated_bits_be(
+        let value_bits = boolean::u64_into_boolean_vec_le(
             cs.namespace(|| "value"),
             self.value
-        )?
-        .into_iter()
-        .rev() // Little endian bit order
-        .map(|e| boolean::Boolean::from(e))
-        .collect::<Vec<_>>();
+        )?;
 
         {
             let gv = ecc::fixed_base_multiplication(
@@ -85,14 +81,10 @@ impl<'a, E: JubjubEngine> Circuit<E> for Spend<'a, E> {
             )?;
         
             // Booleanize the randomness
-            let hr = boolean::field_into_allocated_bits_be(
+            let hr = boolean::field_into_boolean_vec_le(
                 cs.namespace(|| "hr"),
                 self.value_randomness
-            )?
-            .into_iter()
-            .rev() // Little endian bit order
-            .map(|e| boolean::Boolean::from(e))
-            .collect::<Vec<_>>();
+            )?;
 
             let hr = ecc::fixed_base_multiplication(
                 cs.namespace(|| "computation of randomization for value commitment"),
@@ -107,47 +99,17 @@ impl<'a, E: JubjubEngine> Circuit<E> for Spend<'a, E> {
                 self.params
             )?;
 
-            // Expose the value commitment publicly
-            let value_commitment_x = cs.alloc_input(
-                || "value commitment x",
-                || {
-                    Ok(*gvhr.x.get_value().get()?)
-                }
-            )?;
-
-            cs.enforce(
-                || "value commitment x equals input",
-                |lc| lc + value_commitment_x,
-                |lc| lc + CS::one(),
-                |lc| lc + gvhr.x.get_variable()
-            );
-
-            let value_commitment_y = cs.alloc_input(
-                || "value commitment y",
-                || {
-                    Ok(*gvhr.y.get_value().get()?)
-                }
-            )?;
-
-            cs.enforce(
-                || "value commitment y equals input",
-                |lc| lc + value_commitment_y,
-                |lc| lc + CS::one(),
-                |lc| lc + gvhr.y.get_variable()
-            );
+            gvhr.inputize(cs.namespace(|| "value commitment"))?;
         }
 
         // Compute rk = [rsk] ProvingPublicKey
         let rk;
         {
             // Witness rsk as bits
-            let rsk = boolean::field_into_allocated_bits_be(
+            let rsk = boolean::field_into_boolean_vec_le(
                 cs.namespace(|| "rsk"),
                 self.rsk
-            )?
-            .into_iter()
-            .rev() // We need it in little endian bit order
-            .map(|e| boolean::Boolean::from(e)).collect::<Vec<_>>();
+            )?;
 
             // NB: We don't ensure that the bit representation of rsk
             // is "in the field" (Fs) because it's not used except to
@@ -166,6 +128,11 @@ impl<'a, E: JubjubEngine> Circuit<E> for Spend<'a, E> {
         let ak = ecc::EdwardsPoint::witness(
             cs.namespace(|| "ak"),
             self.ak,
+            self.params
+        )?;
+
+        ak.assert_not_small_order(
+            cs.namespace(|| "ak not small order"),
             self.params
         )?;
 
@@ -189,7 +156,8 @@ impl<'a, E: JubjubEngine> Circuit<E> for Spend<'a, E> {
         // Compute the incoming viewing key
         let mut ivk = blake2s::blake2s(
             cs.namespace(|| "computation of ivk"),
-            &vk
+            &vk,
+            ::CRH_IVK_PERSONALIZATION
         )?;
 
         // Little endian bit order
@@ -212,7 +180,7 @@ impl<'a, E: JubjubEngine> Circuit<E> for Spend<'a, E> {
 
         // Compute note contents
         let mut note_contents = vec![];
-        note_contents.extend(value_bits);
+        note_contents.extend(value_bits.into_iter().rev());
         note_contents.extend(
             g_d.repr(cs.namespace(|| "representation of g_d"))?
         );
@@ -237,14 +205,10 @@ impl<'a, E: JubjubEngine> Circuit<E> for Spend<'a, E> {
 
         {
             // Booleanize the randomness
-            let cmr = boolean::field_into_allocated_bits_be(
+            let cmr = boolean::field_into_boolean_vec_le(
                 cs.namespace(|| "cmr"),
                 self.commitment_randomness
-            )?
-            .into_iter()
-            .rev() // We need it in little endian bit order
-            .map(|e| boolean::Boolean::from(e))
-            .collect::<Vec<_>>();
+            )?;
 
             let cmr = ecc::fixed_base_multiplication(
                 cs.namespace(|| "computation of commitment randomness"),
@@ -265,7 +229,7 @@ impl<'a, E: JubjubEngine> Circuit<E> for Spend<'a, E> {
         let mut position_bits = vec![];
 
         // Injective encoding.
-        let mut cur = cm.x.clone();
+        let mut cur = cm.get_x().clone();
 
         for (i, e) in self.auth_path.into_iter().enumerate() {
             let cs = &mut cs.namespace(|| format!("merkle tree hash {}", i));
@@ -292,37 +256,25 @@ impl<'a, E: JubjubEngine> Circuit<E> for Spend<'a, E> {
             )?;
 
             // We don't need to be strict, because the function is
-            // collision-resistant.
+            // collision-resistant. If the prover witnesses a congruency,
+            // they will be unable to find an authentication path in the
+            // tree with high probability.
             let mut preimage = vec![];
-            preimage.extend(xl.into_bits(cs.namespace(|| "xl into bits"))?);
-            preimage.extend(xr.into_bits(cs.namespace(|| "xr into bits"))?);
+            preimage.extend(xl.into_bits_le(cs.namespace(|| "xl into bits"))?);
+            preimage.extend(xr.into_bits_le(cs.namespace(|| "xr into bits"))?);
 
             cur = pedersen_hash::pedersen_hash(
                 cs.namespace(|| "computation of pedersen hash"),
-                pedersen_hash::Personalization::MerkleTree(tree_depth - i),
+                pedersen_hash::Personalization::MerkleTree(i),
                 &preimage,
                 self.params
-            )?.x; // Injective encoding
+            )?.get_x().clone(); // Injective encoding
         }
 
         assert_eq!(position_bits.len(), tree_depth);
 
-        {
-            // Expose the anchor
-            let anchor = cs.alloc_input(
-                || "anchor x",
-                || {
-                    Ok(*cur.get_value().get()?)
-                }
-            )?;
-
-            cs.enforce(
-                || "anchor x equals anchor",
-                |lc| lc + anchor,
-                |lc| lc + CS::one(),
-                |lc| lc + cur.get_variable()
-            );
-        }
+        // Expose the anchor
+        cur.inputize(cs.namespace(|| "anchor"))?;
 
         {
             let position = ecc::fixed_base_multiplication(
@@ -348,12 +300,13 @@ impl<'a, E: JubjubEngine> Circuit<E> for Spend<'a, E> {
         
         let mut rho = blake2s::blake2s(
             cs.namespace(|| "rho computation"),
-            &rho_preimage
+            &rho_preimage,
+            ::PRF_NR_PERSONALIZATION
         )?;
 
         // Little endian bit order
         rho.reverse();
-        rho.truncate(251); // drop_5
+        rho.truncate(E::Fs::CAPACITY as usize); // drop_5
 
         // Compute nullifier
         let nf = ak.mul(
@@ -362,36 +315,7 @@ impl<'a, E: JubjubEngine> Circuit<E> for Spend<'a, E> {
             self.params
         )?;
 
-        {
-            // Expose the nullifier publicly
-            let nf_x = cs.alloc_input(
-                || "nf_x",
-                || {
-                    Ok(*nf.x.get_value().get()?)
-                }
-            )?;
-
-            cs.enforce(
-                || "nf_x equals input",
-                |lc| lc + nf_x,
-                |lc| lc + CS::one(),
-                |lc| lc + nf.x.get_variable()
-            );
-
-            let nf_y = cs.alloc_input(
-                || "nf_y",
-                || {
-                    Ok(*nf.y.get_value().get()?)
-                }
-            )?;
-
-            cs.enforce(
-                || "nf_y equals input",
-                |lc| lc + nf_y,
-                |lc| lc + CS::one(),
-                |lc| lc + nf.y.get_variable()
-            );
-        }
+        nf.inputize(cs.namespace(|| "nullifier"))?;
 
         Ok(())
     }
@@ -418,14 +342,10 @@ impl<'a, E: JubjubEngine> Circuit<E> for Output<'a, E> {
     fn synthesize<CS: ConstraintSystem<E>>(self, cs: &mut CS) -> Result<(), SynthesisError>
     {
         // Booleanize the value into little-endian bit order
-        let value_bits = boolean::u64_into_allocated_bits_be(
+        let value_bits = boolean::u64_into_boolean_vec_le(
             cs.namespace(|| "value"),
             self.value
-        )?
-        .into_iter()
-        .rev() // Little endian bit order
-        .map(|e| boolean::Boolean::from(e))
-        .collect::<Vec<_>>();
+        )?;
 
         {
             let gv = ecc::fixed_base_multiplication(
@@ -436,14 +356,10 @@ impl<'a, E: JubjubEngine> Circuit<E> for Output<'a, E> {
             )?;
         
             // Booleanize the randomness
-            let hr = boolean::field_into_allocated_bits_be(
+            let hr = boolean::field_into_boolean_vec_le(
                 cs.namespace(|| "hr"),
                 self.value_randomness
-            )?
-            .into_iter()
-            .rev() // Little endian bit order
-            .map(|e| boolean::Boolean::from(e))
-            .collect::<Vec<_>>();
+            )?;
 
             let hr = ecc::fixed_base_multiplication(
                 cs.namespace(|| "computation of randomization for value commitment"),
@@ -458,39 +374,12 @@ impl<'a, E: JubjubEngine> Circuit<E> for Output<'a, E> {
                 self.params
             )?;
 
-            // Expose the value commitment publicly
-            let value_commitment_x = cs.alloc_input(
-                || "value commitment x",
-                || {
-                    Ok(*gvhr.x.get_value().get()?)
-                }
-            )?;
-
-            cs.enforce(
-                || "value commitment x equals input",
-                |lc| lc + value_commitment_x,
-                |lc| lc + CS::one(),
-                |lc| lc + gvhr.x.get_variable()
-            );
-
-            let value_commitment_y = cs.alloc_input(
-                || "value commitment y",
-                || {
-                    Ok(*gvhr.y.get_value().get()?)
-                }
-            )?;
-
-            cs.enforce(
-                || "value commitment y equals input",
-                |lc| lc + value_commitment_y,
-                |lc| lc + CS::one(),
-                |lc| lc + gvhr.y.get_variable()
-            );
+            gvhr.inputize(cs.namespace(|| "value commitment"))?;
         }
 
         // Let's start to construct our note
         let mut note_contents = vec![];
-        note_contents.extend(value_bits);
+        note_contents.extend(value_bits.into_iter().rev());
 
         // Let's deal with g_d
         {
@@ -500,41 +389,20 @@ impl<'a, E: JubjubEngine> Circuit<E> for Output<'a, E> {
                 self.params
             )?;
 
-            // Check that g_d is not of small order
-            {
-                let g_d = g_d.double(
-                    cs.namespace(|| "first doubling of g_d"),
-                    self.params
-                )?;
-                let g_d = g_d.double(
-                    cs.namespace(|| "second doubling of g_d"),
-                    self.params
-                )?;
-                let g_d = g_d.double(
-                    cs.namespace(|| "third doubling of g_d"),
-                    self.params
-                )?;
-
-                // (0, -1) is a small order point, but won't ever appear here
-                // because cofactor is 2^3, and we performed three doublings.
-                // (0, 1) is the neutral element, so checking if x is nonzero
-                // is sufficient to prevent small order points here.
-                g_d.x.assert_nonzero(cs.namespace(|| "check not inf"))?;
-            }
+            g_d.assert_not_small_order(
+                cs.namespace(|| "g_d not small order"),
+                self.params
+            )?;
 
             note_contents.extend(
                 g_d.repr(cs.namespace(|| "representation of g_d"))?
             );
 
             // Compute epk from esk
-            let esk = boolean::field_into_allocated_bits_be(
+            let esk = boolean::field_into_boolean_vec_le(
                 cs.namespace(|| "esk"),
                 self.esk
-            )?
-            .into_iter()
-            .rev() // We need it in little endian bit order
-            .map(|e| boolean::Boolean::from(e))
-            .collect::<Vec<_>>();
+            )?;
 
             let epk = g_d.mul(
                 cs.namespace(|| "epk computation"),
@@ -542,34 +410,7 @@ impl<'a, E: JubjubEngine> Circuit<E> for Output<'a, E> {
                 self.params
             )?;
 
-            // Expose epk publicly
-            let epk_x = cs.alloc_input(
-                || "epk x",
-                || {
-                    Ok(*epk.x.get_value().get()?)
-                }
-            )?;
-
-            cs.enforce(
-                || "epk x equals input",
-                |lc| lc + epk_x,
-                |lc| lc + CS::one(),
-                |lc| lc + epk.x.get_variable()
-            );
-
-            let epk_y = cs.alloc_input(
-                || "epk y",
-                || {
-                    Ok(*epk.y.get_value().get()?)
-                }
-            )?;
-
-            cs.enforce(
-                || "epk y equals input",
-                |lc| lc + epk_y,
-                |lc| lc + CS::one(),
-                |lc| lc + epk.y.get_variable()
-            );
+            epk.inputize(cs.namespace(|| "epk"))?;
         }
 
         // Now let's deal with p_d. We don't do any checks and
@@ -578,14 +419,10 @@ impl<'a, E: JubjubEngine> Circuit<E> for Output<'a, E> {
         {
             let p_d = self.p_d.map(|e| e.into_xy());
 
-            let y_contents = boolean::field_into_allocated_bits_be(
+            let y_contents = boolean::field_into_boolean_vec_le(
                 cs.namespace(|| "p_d bits of y"),
                 p_d.map(|e| e.1)
-            )?
-            .into_iter()
-            .rev() // We need it in little endian bit order
-            .map(|e| boolean::Boolean::from(e))
-            .collect::<Vec<_>>();
+            )?;
 
             let sign_bit = boolean::Boolean::from(boolean::AllocatedBit::alloc(
                 cs.namespace(|| "p_d bit of x"),
@@ -613,14 +450,10 @@ impl<'a, E: JubjubEngine> Circuit<E> for Output<'a, E> {
 
         {
             // Booleanize the randomness
-            let cmr = boolean::field_into_allocated_bits_be(
+            let cmr = boolean::field_into_boolean_vec_le(
                 cs.namespace(|| "cmr"),
                 self.commitment_randomness
-            )?
-            .into_iter()
-            .rev() // We need it in little endian bit order
-            .map(|e| boolean::Boolean::from(e))
-            .collect::<Vec<_>>();
+            )?;
 
             let cmr = ecc::fixed_base_multiplication(
                 cs.namespace(|| "computation of commitment randomness"),
@@ -640,19 +473,7 @@ impl<'a, E: JubjubEngine> Circuit<E> for Output<'a, E> {
         // since we know it is prime order, and we know that
         // the x-coordinate is an injective encoding for
         // prime-order elements.
-        let commitment_input = cs.alloc_input(
-            || "commitment input",
-            || {
-                Ok(*cm.x.get_value().get()?)
-            }
-        )?;
-
-        cs.enforce(
-            || "commitment input correct",
-            |lc| lc + commitment_input,
-            |lc| lc + CS::one(),
-            |lc| lc + cm.x.get_variable()
-        );
+        cm.get_x().inputize(cs.namespace(|| "commitment"))?;
 
         Ok(())
     }
@@ -695,8 +516,8 @@ fn test_input_circuit_with_bls12_381() {
         instance.synthesize(&mut cs).unwrap();
 
         assert!(cs.is_satisfied());
-        assert_eq!(cs.num_constraints(), 97379);
-        assert_eq!(cs.hash(), "4d8e71c91a621e41599ea488ee89f035c892a260a595d3c85a20a82daa2d1654");
+        assert_eq!(cs.num_constraints(), 97395);
+        assert_eq!(cs.hash(), "9abc0559abf54a41da789313b1692dc744d940646bb7dd3e6c01ceb54d0cc261");
     }
 }
 
@@ -734,6 +555,6 @@ fn test_output_circuit_with_bls12_381() {
 
         assert!(cs.is_satisfied());
         assert_eq!(cs.num_constraints(), 7827);
-        assert_eq!(cs.hash(), "225a2df7e21b9af8b436ffb9dadd645e4df843a5151c7481b0553422d5eaa793");
+        assert_eq!(cs.hash(), "2896f259ad7a50c83604976ee9362358396d547b70f2feaf91d82d287e4ffc1d");
     }
 }

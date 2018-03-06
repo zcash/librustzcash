@@ -32,8 +32,8 @@ use super::boolean::Boolean;
 
 #[derive(Clone)]
 pub struct EdwardsPoint<E: Engine> {
-    pub x: AllocatedNum<E>,
-    pub y: AllocatedNum<E>
+    x: AllocatedNum<E>,
+    y: AllocatedNum<E>
 }
 
 /// Perform a fixed-base scalar multiplication with
@@ -84,6 +84,55 @@ pub fn fixed_base_multiplication<E, CS>(
 }
 
 impl<E: JubjubEngine> EdwardsPoint<E> {
+    pub fn get_x(&self) -> &AllocatedNum<E> {
+        &self.x
+    }
+
+    pub fn get_y(&self) -> &AllocatedNum<E> {
+        &self.y
+    }
+
+    pub fn assert_not_small_order<CS>(
+        &self,
+        mut cs: CS,
+        params: &E::Params
+    ) -> Result<(), SynthesisError>
+        where CS: ConstraintSystem<E>
+    {
+        let tmp = self.double(
+            cs.namespace(|| "first doubling"),
+            params
+        )?;
+        let tmp = tmp.double(
+            cs.namespace(|| "second doubling"),
+            params
+        )?;
+        let tmp = tmp.double(
+            cs.namespace(|| "third doubling"),
+            params
+        )?;
+
+        // (0, -1) is a small order point, but won't ever appear here
+        // because cofactor is 2^3, and we performed three doublings.
+        // (0, 1) is the neutral element, so checking if x is nonzero
+        // is sufficient to prevent small order points here.
+        tmp.x.assert_nonzero(cs.namespace(|| "check x != 0"))?;
+
+        Ok(())
+    }
+
+    pub fn inputize<CS>(
+        &self,
+        mut cs: CS
+    ) -> Result<(), SynthesisError>
+        where CS: ConstraintSystem<E>
+    {
+        self.x.inputize(cs.namespace(|| "x"))?;
+        self.y.inputize(cs.namespace(|| "y"))?;
+
+        Ok(())
+    }
+
     /// This converts the point into a representation.
     pub fn repr<CS>(
         &self,
@@ -93,17 +142,13 @@ impl<E: JubjubEngine> EdwardsPoint<E> {
     {
         let mut tmp = vec![];
 
-        let mut x = self.x.into_bits_strict(
+        let x = self.x.into_bits_le_strict(
             cs.namespace(|| "unpack x")
         )?;
 
-        let mut y = self.y.into_bits_strict(
+        let y = self.y.into_bits_le_strict(
             cs.namespace(|| "unpack y")
         )?;
-
-        // We want the representation in little endian bit order
-        x.reverse();
-        y.reverse();
 
         tmp.extend(y);
         tmp.push(x[0].clone());
@@ -144,12 +189,6 @@ impl<E: JubjubEngine> EdwardsPoint<E> {
             &y,
             params
         )
-    }
-
-    /// This extracts the x-coordinate, which is an injective
-    /// encoding for elements of the prime order subgroup.
-    pub fn into_num(&self) -> AllocatedNum<E> {
-        self.x.clone()
     }
 
     /// Returns `self` if condition is true, and the neutral

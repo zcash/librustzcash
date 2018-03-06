@@ -60,7 +60,35 @@ impl<E: Engine> AllocatedNum<E> {
         })
     }
 
-    pub fn into_bits_strict<CS>(
+    pub fn inputize<CS>(
+        &self,
+        mut cs: CS
+    ) -> Result<(), SynthesisError>
+        where CS: ConstraintSystem<E>
+    {
+        let input = cs.alloc_input(
+            || "input variable",
+            || {
+                Ok(*self.value.get()?)
+            }
+        )?;
+
+        cs.enforce(
+            || "enforce input is correct",
+            |lc| lc + input,
+            |lc| lc + CS::one(),
+            |lc| lc + self.variable
+        );
+
+        Ok(())
+    }
+
+    /// Deconstructs this allocated number into its
+    /// boolean representation in little-endian bit
+    /// order, requiring that the representation
+    /// strictly exists "in the field" (i.e., a
+    /// congruency is not allowed.)
+    pub fn into_bits_le_strict<CS>(
         &self,
         mut cs: CS
     ) -> Result<Vec<Boolean>, SynthesisError>
@@ -185,16 +213,20 @@ impl<E: Engine> AllocatedNum<E> {
             |_| lc
         );
 
-        Ok(result.into_iter().map(|b| Boolean::from(b)).collect())
+        // Convert into booleans, and reverse for little-endian bit order
+        Ok(result.into_iter().map(|b| Boolean::from(b)).rev().collect())
     }
 
-    pub fn into_bits<CS>(
+    /// Convert the allocated number into its little-endian representation.
+    /// Note that this does not strongly enforce that the commitment is
+    /// "in the field."
+    pub fn into_bits_le<CS>(
         &self,
         mut cs: CS
     ) -> Result<Vec<Boolean>, SynthesisError>
         where CS: ConstraintSystem<E>
     {
-        let bits = boolean::field_into_allocated_bits_be(
+        let bits = boolean::field_into_allocated_bits_le(
             &mut cs,
             self.value
         )?;
@@ -202,7 +234,7 @@ impl<E: Engine> AllocatedNum<E> {
         let mut lc = LinearCombination::zero();
         let mut coeff = E::Fr::one();
 
-        for bit in bits.iter().rev() {
+        for bit in bits.iter() {
             lc = lc + (coeff, bit.get_variable());
 
             coeff.double();
@@ -533,7 +565,7 @@ mod test {
         let mut cs = TestConstraintSystem::<Bls12>::new();
 
         let n = AllocatedNum::alloc(&mut cs, || Ok(negone)).unwrap();
-        n.into_bits_strict(&mut cs).unwrap();
+        n.into_bits_le_strict(&mut cs).unwrap();
 
         assert!(cs.is_satisfied());
 
@@ -555,14 +587,14 @@ mod test {
             let n = AllocatedNum::alloc(&mut cs, || Ok(r)).unwrap();
 
             let bits = if i % 2 == 0 {
-                n.into_bits(&mut cs).unwrap()
+                n.into_bits_le(&mut cs).unwrap()
             } else {
-                n.into_bits_strict(&mut cs).unwrap()
+                n.into_bits_le_strict(&mut cs).unwrap()
             };
 
             assert!(cs.is_satisfied());
 
-            for (b, a) in BitIterator::new(r.into_repr()).skip(1).zip(bits.iter()) {
+            for (b, a) in BitIterator::new(r.into_repr()).skip(1).zip(bits.iter().rev()) {
                 if let &Boolean::Is(ref a) = a {
                     assert_eq!(b, a.get_value().unwrap());
                 } else {

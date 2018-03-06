@@ -1,7 +1,10 @@
 use jubjub::*;
 use pairing::*;
-use blake2::{Blake2s};
-use digest::{FixedOutput, Input};
+use blake2_rfc::blake2s::Blake2s;
+
+/// This is chosen to be some random string that we couldn't have anticipated when we designed
+/// the algorithm, for rigidity purposes.
+pub const FIRST_BLOCK: &'static [u8; 64] = b"0000000000000000002ffe76b973aabaff1d1557d79acf2c3795809c83caf580";
 
 /// Produces an (x, y) pair (Montgomery) for a
 /// random point in the Jubjub curve. The point
@@ -9,15 +12,19 @@ use digest::{FixedOutput, Input};
 /// identity.
 pub fn group_hash<E: JubjubEngine>(
     tag: &[u8],
+    personalization: &[u8],
     params: &E::Params
 ) -> Option<edwards::Point<E, PrimeOrder>>
 {
+    assert_eq!(personalization.len(), 8);
+
     // Check to see that scalar field is 255 bits
     assert!(E::Fr::NUM_BITS == 255);
 
-    let mut h = Blake2s::new_keyed(&[], 32);
-    h.process(tag);
-    let mut h = h.fixed_result().to_vec();
+    let mut h = Blake2s::with_params(32, &[], &[], personalization);
+    h.update(FIRST_BLOCK);
+    h.update(tag);
+    let mut h = h.finalize().as_ref().to_vec();
     assert!(h.len() == 32);
 
     // Take first/unset first bit of hash

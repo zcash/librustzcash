@@ -254,9 +254,13 @@ fn blake2s_compression<E: Engine, CS: ConstraintSystem<E>>(
 
 pub fn blake2s<E: Engine, CS: ConstraintSystem<E>>(
     mut cs: CS,
-    input: &[Boolean]
+    input: &[Boolean],
+    personalization: &[u8]
 ) -> Result<Vec<Boolean>, SynthesisError>
 {
+    use byteorder::{ByteOrder, LittleEndian};
+
+    assert_eq!(personalization.len(), 8);
     assert!(input.len() % 8 == 0);
 
     let mut h = Vec::with_capacity(8);
@@ -266,8 +270,10 @@ pub fn blake2s<E: Engine, CS: ConstraintSystem<E>>(
     h.push(UInt32::constant(0xA54FF53A));
     h.push(UInt32::constant(0x510E527F));
     h.push(UInt32::constant(0x9B05688C));
-    h.push(UInt32::constant(0x1F83D9AB));
-    h.push(UInt32::constant(0x5BE0CD19));
+
+    // Personalization is stored here
+    h.push(UInt32::constant(0x1F83D9AB ^ LittleEndian::read_u32(&personalization[0..4])));
+    h.push(UInt32::constant(0x5BE0CD19 ^ LittleEndian::read_u32(&personalization[4..8])));
 
     let mut blocks: Vec<Vec<UInt32>> = vec![];
 
@@ -313,14 +319,36 @@ mod test {
     use ::circuit::test::TestConstraintSystem;
     use super::blake2s;
     use bellman::{ConstraintSystem};
-    use blake2::{Blake2s};
-    use digest::{FixedOutput, Input};
+    use blake2_rfc::blake2s::Blake2s;
+
+    #[test]
+    fn test_blank_hash() {
+        let mut cs = TestConstraintSystem::<Bls12>::new();
+        let input_bits = vec![];
+        let out = blake2s(&mut cs, &input_bits, b"12345678").unwrap();
+        assert!(cs.is_satisfied());
+        assert_eq!(cs.num_constraints(), 0);
+
+        // >>> import blake2s from hashlib
+        // >>> h = blake2s(digest_size=32, person=b'12345678')
+        // >>> h.hexdigest()
+        let expected = hex!("c59f682376d137f3f255e671e207d1f2374ebe504e9314208a52d9f88d69e8c8");
+
+        let mut out = out.into_iter();
+        for b in expected.into_iter() {
+            for i in (0..8).rev() {
+                let c = out.next().unwrap().get_value().unwrap();
+
+                assert_eq!(c, (b >> i) & 1u8 == 1u8);
+            }
+        }
+    }
 
     #[test]
     fn test_blake2s_constraints() {
         let mut cs = TestConstraintSystem::<Bls12>::new();
         let input_bits: Vec<_> = (0..512).map(|i| AllocatedBit::alloc(cs.namespace(|| format!("input bit {}", i)), Some(true)).unwrap().into()).collect();
-        blake2s(&mut cs, &input_bits).unwrap();
+        blake2s(&mut cs, &input_bits, b"12345678").unwrap();
         assert!(cs.is_satisfied());
         assert_eq!(cs.num_constraints(), 21792);
     }
@@ -337,7 +365,7 @@ mod test {
           .chain((0..512)
                         .map(|i| AllocatedBit::alloc(cs.namespace(|| format!("input bit {}", i)), Some(true)).unwrap().into()))
           .collect();
-        blake2s(&mut cs, &input_bits).unwrap();
+        blake2s(&mut cs, &input_bits, b"12345678").unwrap();
         assert!(cs.is_satisfied());
         assert_eq!(cs.num_constraints(), 21792);
     }
@@ -347,7 +375,7 @@ mod test {
         let mut cs = TestConstraintSystem::<Bls12>::new();
         let mut rng = XorShiftRng::from_seed([0x5dbe6259, 0x8d313d76, 0x3237db17, 0xe5bc0654]);
         let input_bits: Vec<_> = (0..512).map(|_| Boolean::constant(rng.gen())).collect();
-        blake2s(&mut cs, &input_bits).unwrap();
+        blake2s(&mut cs, &input_bits, b"12345678").unwrap();
         assert_eq!(cs.num_constraints(), 0);
     }
 
@@ -357,13 +385,13 @@ mod test {
 
         for input_len in (0..32).chain((32..256).filter(|a| a % 8 == 0))
         {
-            let mut h = Blake2s::new_keyed(&[], 32);
+            let mut h = Blake2s::with_params(32, &[], &[], b"12345678");
 
             let data: Vec<u8> = (0..input_len).map(|_| rng.gen()).collect();
 
-            h.process(&data);
+            h.update(&data);
 
-            let hash_result = h.fixed_result();
+            let hash_result = h.finalize();
 
             let mut cs = TestConstraintSystem::<Bls12>::new();
 
@@ -377,7 +405,7 @@ mod test {
                 }
             }
 
-            let r = blake2s(&mut cs, &input_bits).unwrap();
+            let r = blake2s(&mut cs, &input_bits, b"12345678").unwrap();
 
             assert!(cs.is_satisfied());
 

@@ -9,13 +9,7 @@ use bellman::{
     ConstraintSystem
 };
 use super::lookup::*;
-
-// TODO: ensure these match the spec
-pub enum Personalization {
-    NoteCommitment,
-    AnotherPersonalization,
-    MerkleTree(usize)
-}
+pub use pedersen_hash::Personalization;
 
 impl Personalization {
     fn get_constant_bools(&self) -> Vec<Boolean> {
@@ -23,17 +17,6 @@ impl Personalization {
         .into_iter()
         .map(|e| Boolean::constant(e))
         .collect()
-    }
-
-    pub fn get_bits(&self) -> Vec<bool> {
-        match *self {
-            Personalization::NoteCommitment =>
-                vec![false, false, false, false, false, false],
-            Personalization::AnotherPersonalization =>
-                vec![false, false, false, false, false, true],
-            Personalization::MerkleTree(_) =>
-                vec![false, false, false, false, true, false],
-        }
     }
 }
 
@@ -166,7 +149,7 @@ mod test {
         let mut rng = XorShiftRng::from_seed([0x3dbe6259, 0x8d313d76, 0x3237db17, 0xe5bc0654]);
         let params = &JubjubBls12::new();
 
-        for length in 1..1000 {
+        for length in 0..751 {
             for _ in 0..5 {
                 let mut input: Vec<bool> = (0..length).map(|_| rng.gen()).collect();
 
@@ -180,7 +163,7 @@ mod test {
 
                 let res = pedersen_hash(
                     cs.namespace(|| "pedersen hash"),
-                    Personalization::NoteCommitment,
+                    Personalization::MerkleTree(1),
                     &input_bools,
                     params
                 ).unwrap();
@@ -188,23 +171,23 @@ mod test {
                 assert!(cs.is_satisfied());
 
                 let expected = ::pedersen_hash::pedersen_hash::<Bls12, _>(
-                    Personalization::NoteCommitment,
+                    Personalization::MerkleTree(1),
                     input.clone().into_iter(),
                     params
                 ).into_xy();
 
-                assert_eq!(res.x.get_value().unwrap(), expected.0);
-                assert_eq!(res.y.get_value().unwrap(), expected.1);
+                assert_eq!(res.get_x().get_value().unwrap(), expected.0);
+                assert_eq!(res.get_y().get_value().unwrap(), expected.1);
 
                 // Test against the output of a different personalization
                 let unexpected = ::pedersen_hash::pedersen_hash::<Bls12, _>(
-                    Personalization::AnotherPersonalization,
+                    Personalization::MerkleTree(0),
                     input.into_iter(),
                     params
                 ).into_xy();
 
-                assert!(res.x.get_value().unwrap() != unexpected.0);
-                assert!(res.y.get_value().unwrap() != unexpected.1);
+                assert!(res.get_x().get_value().unwrap() != unexpected.0);
+                assert!(res.get_y().get_value().unwrap() != unexpected.1);
             }
         }
     }

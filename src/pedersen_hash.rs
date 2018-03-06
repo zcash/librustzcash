@@ -1,7 +1,24 @@
 use jubjub::*;
 use pairing::*;
 
-use circuit::pedersen_hash::Personalization;
+pub enum Personalization {
+    NoteCommitment,
+    MerkleTree(usize)
+}
+
+impl Personalization {
+    pub fn get_bits(&self) -> Vec<bool> {
+        match *self {
+            Personalization::NoteCommitment =>
+                vec![true, true, true, true, true, true],
+            Personalization::MerkleTree(num) => {
+                assert!(num < 63);
+
+                (0..6).map(|i| (num >> i) & 1 == 1).collect()
+            }
+        }
+    }
+}
 
 pub fn pedersen_hash<E, I>(
     personalization: Personalization,
