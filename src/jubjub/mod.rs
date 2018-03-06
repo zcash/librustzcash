@@ -201,17 +201,65 @@ impl JubjubBls12 {
 
         // Create the bases for other parts of the protocol
         {
-            let mut cur = 0;
-            let mut fixed_base_generators = vec![];
+            let mut fixed_base_generators = vec![edwards::Point::zero(); FixedGenerators::Max as usize];
 
-            while fixed_base_generators.len() < (FixedGenerators::Max as usize) {
-                let gh = group_hash(&[cur], ::OTHER_PERSONALIZATION, &tmp);
-                // We don't want to overflow and start reusing generators
-                assert!(cur != u8::max_value());
-                cur += 1;
+            {
+                // Each generator is found by invoking the group hash
+                // on tag 0x00, 0x01, ... until we find a valid result.
+                let find_first_gh = |personalization| {
+                    let mut cur = 0;
 
-                if let Some(gh) = gh {
-                    fixed_base_generators.push(gh);
+                    loop {
+                        let gh = group_hash::<Bls12>(&[cur], personalization, &tmp);
+                        // We don't want to overflow.
+                        assert!(cur != u8::max_value());
+                        cur += 1;
+
+                        if let Some(gh) = gh {
+                            break gh;
+                        }
+                    }
+                };
+
+                // Written this way for exhaustion (double entendre). There's no
+                // way to iterate over the variants of an enum, so it's hideous.
+                for c in 0..(FixedGenerators::Max as usize) {
+                    let p = match c {
+                        c if c == (FixedGenerators::ProvingPublicKey as usize) => {
+                            ::PROVING_KEY_BASE_GENERATOR_PERSONALIZATION
+                        },
+                        c if c == (FixedGenerators::NoteCommitmentRandomness as usize) => {
+                            ::NOTE_COMMITMENT_RANDOMNESS_GENERATOR_PERSONALIZATION
+                        },
+                        c if c == (FixedGenerators::NullifierPosition as usize) => {
+                            ::NULLIFIER_POSITION_IN_TREE_GENERATOR_PERSONALIZATION
+                        },
+                        c if c == (FixedGenerators::ValueCommitmentValue as usize) => {
+                            ::VALUE_COMMITMENT_VALUE_GENERATOR_PERSONALIZATION
+                        },
+                        c if c == (FixedGenerators::ValueCommitmentRandomness as usize) => {
+                            ::VALUE_COMMITMENT_RANDOMNESS_GENERATOR_PERSONALIZATION
+                        },
+                        c if c == (FixedGenerators::SpendingKeyGenerator as usize) => {
+                            ::SPENDING_KEY_GENERATOR_PERSONALIZATION
+                        },
+                        _ => unreachable!()
+                    };
+
+                    fixed_base_generators[c] = find_first_gh(p);
+                }
+            }
+
+            // Check for duplicates, far worse than spec inconsistencies!
+            for (i, p1) in fixed_base_generators.iter().enumerate() {
+                if p1 == &edwards::Point::zero() {
+                    panic!("Neutral element!");
+                }
+
+                for p2 in fixed_base_generators.iter().skip(i+1) {
+                    if p1 == p2 {
+                        panic!("Duplicate generator!");
+                    }
                 }
             }
 
@@ -223,18 +271,23 @@ impl JubjubBls12 {
         {
             let mut pedersen_circuit_generators = vec![];
 
+            // Process each segment
             for mut gen in tmp.pedersen_hash_generators.iter().cloned() {
                 let mut gen = montgomery::Point::from_edwards(&gen, &tmp);
                 let mut windows = vec![];
                 for _ in 0..tmp.pedersen_hash_chunks_per_generator() {
+                    // Create (x, y) coeffs for this chunk
                     let mut coeffs = vec![];
                     let mut g = gen.clone();
+
+                    // coeffs = g, g*2, g*3, g*4
                     for _ in 0..4 {
                         coeffs.push(g.into_xy().expect("cannot produce O"));
                         g = g.add(&gen, &tmp);
                     }
                     windows.push(coeffs);
 
+                    // Our chunks are separated by 2 bits to prevent overlap.
                     for _ in 0..4 {
                         gen = gen.double(&tmp);
                     }
@@ -261,6 +314,7 @@ impl JubjubBls12 {
                     }
                     windows.push(coeffs);
 
+                    // gen = gen * 8
                     gen = g;
                 }
                 fixed_base_circuit_generators.push(windows);

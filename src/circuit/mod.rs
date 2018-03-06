@@ -517,7 +517,7 @@ fn test_input_circuit_with_bls12_381() {
 
         assert!(cs.is_satisfied());
         assert_eq!(cs.num_constraints(), 97395);
-        assert_eq!(cs.hash(), "9f730803965612392772c3c1fbb110c1539656e1bab40d5a9a124b06e927ef40");
+        assert_eq!(cs.hash(), "9abc0559abf54a41da789313b1692dc744d940646bb7dd3e6c01ceb54d0cc261");
     }
 }
 
@@ -555,6 +555,6 @@ fn test_output_circuit_with_bls12_381() {
 
         assert!(cs.is_satisfied());
         assert_eq!(cs.num_constraints(), 7827);
-        assert_eq!(cs.hash(), "f4219872738a81ef3ea66199ea5019d87f53ec369ee7f64d0b7c63ade6014114");
+        assert_eq!(cs.hash(), "2896f259ad7a50c83604976ee9362358396d547b70f2feaf91d82d287e4ffc1d");
     }
 }
