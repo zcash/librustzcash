@@ -441,7 +441,7 @@ impl<E: Engine> Num<E> {
     ) -> Self
     {
         let newval = match (self.value, bit.get_value()) {
-            (Some(mut curval), Some(mut bval)) => {
+            (Some(mut curval), Some(bval)) => {
                 if bval {
                     curval.add_assign(&coeff);
                 }
