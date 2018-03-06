@@ -12,13 +12,16 @@ pub const FIRST_BLOCK: &'static [u8; 64] = b"0000000000000000002ffe76b973aabaff1
 /// identity.
 pub fn group_hash<E: JubjubEngine>(
     tag: &[u8],
+    personalization: &[u8],
     params: &E::Params
 ) -> Option<edwards::Point<E, PrimeOrder>>
 {
+    assert_eq!(personalization.len(), 8);
+
     // Check to see that scalar field is 255 bits
     assert!(E::Fr::NUM_BITS == 255);
 
-    let mut h = Blake2s::new(32);
+    let mut h = Blake2s::with_params(32, &[], &[], personalization);
     h.update(FIRST_BLOCK);
     h.update(tag);
     let mut h = h.finalize().as_ref().to_vec();

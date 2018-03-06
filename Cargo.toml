@@ -14,11 +14,13 @@ features = ["expose-arith"]
 
 [dependencies]
 rand = "0.4"
-blake2-rfc = "0.2.18"
 digest = "0.7"
 bellman = "0.0.9"
-
 byteorder = "1"
+
+[dependencies.blake2-rfc]
+git = "https://github.com/gtank/blake2-rfc"
+rev = "7a5b5fc99ae483a0043db7547fb79a6fa44b88a9"
 
 [dev-dependencies]
 hex-literal = "0.1"

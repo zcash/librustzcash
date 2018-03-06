@@ -156,7 +156,8 @@ impl<'a, E: JubjubEngine> Circuit<E> for Spend<'a, E> {
         // Compute the incoming viewing key
         let mut ivk = blake2s::blake2s(
             cs.namespace(|| "computation of ivk"),
-            &vk
+            &vk,
+            ::CRH_IVK_PERSONALIZATION
         )?;
 
         // Little endian bit order
@@ -299,7 +300,8 @@ impl<'a, E: JubjubEngine> Circuit<E> for Spend<'a, E> {
         
         let mut rho = blake2s::blake2s(
             cs.namespace(|| "rho computation"),
-            &rho_preimage
+            &rho_preimage,
+            ::PRF_NR_PERSONALIZATION
         )?;
 
         // Little endian bit order
@@ -515,7 +517,7 @@ fn test_input_circuit_with_bls12_381() {
 
         assert!(cs.is_satisfied());
         assert_eq!(cs.num_constraints(), 97395);
-        assert_eq!(cs.hash(), "cdd3cde0a4e076b46a59ef85fb70369eb14e3ee921a06d88bad6be4f78b5f261");
+        assert_eq!(cs.hash(), "9f730803965612392772c3c1fbb110c1539656e1bab40d5a9a124b06e927ef40");
     }
 }
 
@@ -553,6 +555,6 @@ fn test_output_circuit_with_bls12_381() {
 
         assert!(cs.is_satisfied());
         assert_eq!(cs.num_constraints(), 7827);
-        assert_eq!(cs.hash(), "67518baade37a3cf76453fa474cb8c9b2ee4223ed5502151e3b83dd1ec98a261");
+        assert_eq!(cs.hash(), "f4219872738a81ef3ea66199ea5019d87f53ec369ee7f64d0b7c63ade6014114");
     }
 }

@@ -11,8 +11,11 @@ impl Personalization {
         match *self {
             Personalization::NoteCommitment =>
                 vec![true, true, true, true, true, true],
-            Personalization::MerkleTree(num) =>
+            Personalization::MerkleTree(num) => {
+                assert!(num < 63);
+
                 (0..6).map(|i| (num >> i) & 1 == 1).collect()
+            }
         }
     }
 }
