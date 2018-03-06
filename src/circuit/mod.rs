@@ -131,6 +131,11 @@ impl<'a, E: JubjubEngine> Circuit<E> for Spend<'a, E> {
             self.params
         )?;
 
+        ak.assert_not_small_order(
+            cs.namespace(|| "ak not small order"),
+            self.params
+        )?;
+
         // Unpack ak and rk for input to BLAKE2s
         let mut vk = vec![];
         let mut rho_preimage = vec![];
@@ -382,27 +387,10 @@ impl<'a, E: JubjubEngine> Circuit<E> for Output<'a, E> {
                 self.params
             )?;
 
-            // Check that g_d is not of small order
-            {
-                let g_d = g_d.double(
-                    cs.namespace(|| "first doubling of g_d"),
-                    self.params
-                )?;
-                let g_d = g_d.double(
-                    cs.namespace(|| "second doubling of g_d"),
-                    self.params
-                )?;
-                let g_d = g_d.double(
-                    cs.namespace(|| "third doubling of g_d"),
-                    self.params
-                )?;
-
-                // (0, -1) is a small order point, but won't ever appear here
-                // because cofactor is 2^3, and we performed three doublings.
-                // (0, 1) is the neutral element, so checking if x is nonzero
-                // is sufficient to prevent small order points here.
-                g_d.x.assert_nonzero(cs.namespace(|| "check not inf"))?;
-            }
+            g_d.assert_not_small_order(
+                cs.namespace(|| "g_d not small order"),
+                self.params
+            )?;
 
             note_contents.extend(
                 g_d.repr(cs.namespace(|| "representation of g_d"))?
@@ -526,8 +514,8 @@ fn test_input_circuit_with_bls12_381() {
         instance.synthesize(&mut cs).unwrap();
 
         assert!(cs.is_satisfied());
-        assert_eq!(cs.num_constraints(), 97379);
-        assert_eq!(cs.hash(), "3920570cfb4c9cec807d09f996d6d0745176d50e8adea0e66709628b1dd31267");
+        assert_eq!(cs.num_constraints(), 97395);
+        assert_eq!(cs.hash(), "29aee738a11546a94c3dde68cede66eebcf2b447104a199aab22bf571735092a");
     }
 }
 

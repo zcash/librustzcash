@@ -84,6 +84,35 @@ pub fn fixed_base_multiplication<E, CS>(
 }
 
 impl<E: JubjubEngine> EdwardsPoint<E> {
+    pub fn assert_not_small_order<CS>(
+        &self,
+        mut cs: CS,
+        params: &E::Params
+    ) -> Result<(), SynthesisError>
+        where CS: ConstraintSystem<E>
+    {
+        let tmp = self.double(
+            cs.namespace(|| "first doubling"),
+            params
+        )?;
+        let tmp = tmp.double(
+            cs.namespace(|| "second doubling"),
+            params
+        )?;
+        let tmp = tmp.double(
+            cs.namespace(|| "third doubling"),
+            params
+        )?;
+
+        // (0, -1) is a small order point, but won't ever appear here
+        // because cofactor is 2^3, and we performed three doublings.
+        // (0, 1) is the neutral element, so checking if x is nonzero
+        // is sufficient to prevent small order points here.
+        tmp.x.assert_nonzero(cs.namespace(|| "check x != 0"))?;
+
+        Ok(())
+    }
+
     pub fn inputize<CS>(
         &self,
         mut cs: CS
