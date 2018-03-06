@@ -229,7 +229,7 @@ impl<'a, E: JubjubEngine> Circuit<E> for Spend<'a, E> {
         let mut position_bits = vec![];
 
         // Injective encoding.
-        let mut cur = cm.x.clone();
+        let mut cur = cm.get_x().clone();
 
         for (i, e) in self.auth_path.into_iter().enumerate() {
             let cs = &mut cs.namespace(|| format!("merkle tree hash {}", i));
@@ -268,7 +268,7 @@ impl<'a, E: JubjubEngine> Circuit<E> for Spend<'a, E> {
                 pedersen_hash::Personalization::MerkleTree(i),
                 &preimage,
                 self.params
-            )?.x; // Injective encoding
+            )?.get_x().clone(); // Injective encoding
         }
 
         assert_eq!(position_bits.len(), tree_depth);
@@ -473,7 +473,7 @@ impl<'a, E: JubjubEngine> Circuit<E> for Output<'a, E> {
         // since we know it is prime order, and we know that
         // the x-coordinate is an injective encoding for
         // prime-order elements.
-        cm.x.inputize(cs.namespace(|| "commitment"))?;
+        cm.get_x().inputize(cs.namespace(|| "commitment"))?;
 
         Ok(())
     }

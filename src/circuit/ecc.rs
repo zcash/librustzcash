@@ -32,8 +32,8 @@ use super::boolean::Boolean;
 
 #[derive(Clone)]
 pub struct EdwardsPoint<E: Engine> {
-    pub x: AllocatedNum<E>,
-    pub y: AllocatedNum<E>
+    x: AllocatedNum<E>,
+    y: AllocatedNum<E>
 }
 
 /// Perform a fixed-base scalar multiplication with
@@ -84,6 +84,14 @@ pub fn fixed_base_multiplication<E, CS>(
 }
 
 impl<E: JubjubEngine> EdwardsPoint<E> {
+    pub fn get_x(&self) -> &AllocatedNum<E> {
+        &self.x
+    }
+
+    pub fn get_y(&self) -> &AllocatedNum<E> {
+        &self.y
+    }
+
     pub fn assert_not_small_order<CS>(
         &self,
         mut cs: CS,
@@ -181,12 +189,6 @@ impl<E: JubjubEngine> EdwardsPoint<E> {
             &y,
             params
         )
-    }
-
-    /// This extracts the x-coordinate, which is an injective
-    /// encoding for elements of the prime order subgroup.
-    pub fn into_num(&self) -> AllocatedNum<E> {
-        self.x.clone()
     }
 
     /// Returns `self` if condition is true, and the neutral

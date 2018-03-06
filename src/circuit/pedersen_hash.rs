@@ -176,8 +176,8 @@ mod test {
                     params
                 ).into_xy();
 
-                assert_eq!(res.x.get_value().unwrap(), expected.0);
-                assert_eq!(res.y.get_value().unwrap(), expected.1);
+                assert_eq!(res.get_x().get_value().unwrap(), expected.0);
+                assert_eq!(res.get_y().get_value().unwrap(), expected.1);
 
                 // Test against the output of a different personalization
                 let unexpected = ::pedersen_hash::pedersen_hash::<Bls12, _>(
@@ -186,8 +186,8 @@ mod test {
                     params
                 ).into_xy();
 
-                assert!(res.x.get_value().unwrap() != unexpected.0);
-                assert!(res.y.get_value().unwrap() != unexpected.1);
+                assert!(res.get_x().get_value().unwrap() != unexpected.0);
+                assert!(res.get_y().get_value().unwrap() != unexpected.1);
             }
         }
     }
