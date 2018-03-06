@@ -163,7 +163,7 @@ mod test {
 
                 let res = pedersen_hash(
                     cs.namespace(|| "pedersen hash"),
-                    Personalization::NoteCommitment,
+                    Personalization::MerkleTree(1),
                     &input_bools,
                     params
                 ).unwrap();
@@ -171,7 +171,7 @@ mod test {
                 assert!(cs.is_satisfied());
 
                 let expected = ::pedersen_hash::pedersen_hash::<Bls12, _>(
-                    Personalization::NoteCommitment,
+                    Personalization::MerkleTree(1),
                     input.clone().into_iter(),
                     params
                 ).into_xy();
@@ -181,7 +181,7 @@ mod test {
 
                 // Test against the output of a different personalization
                 let unexpected = ::pedersen_hash::pedersen_hash::<Bls12, _>(
-                    Personalization::AnotherPersonalization,
+                    Personalization::MerkleTree(0),
                     input.into_iter(),
                     params
                 ).into_xy();

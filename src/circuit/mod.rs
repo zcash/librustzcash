@@ -259,7 +259,7 @@ impl<'a, E: JubjubEngine> Circuit<E> for Spend<'a, E> {
 
             cur = pedersen_hash::pedersen_hash(
                 cs.namespace(|| "computation of pedersen hash"),
-                pedersen_hash::Personalization::MerkleTree(tree_depth - i),
+                pedersen_hash::Personalization::MerkleTree(i),
                 &preimage,
                 self.params
             )?.x; // Injective encoding
@@ -527,7 +527,7 @@ fn test_input_circuit_with_bls12_381() {
 
         assert!(cs.is_satisfied());
         assert_eq!(cs.num_constraints(), 97379);
-        assert_eq!(cs.hash(), "1c5298e7f9ec46f227d3622968b092bfbc1d15a9f45fcf4910b6edb60fe4f0f8");
+        assert_eq!(cs.hash(), "3920570cfb4c9cec807d09f996d6d0745176d50e8adea0e66709628b1dd31267");
     }
 }
 
@@ -565,6 +565,6 @@ fn test_output_circuit_with_bls12_381() {
 
         assert!(cs.is_satisfied());
         assert_eq!(cs.num_constraints(), 7827);
-        assert_eq!(cs.hash(), "a76f4ae0b3e078b6d3d44bf6d9c1d121884b30f74c97f77f114978196f4949b3");
+        assert_eq!(cs.hash(), "155b1aaf4ed4abb1af67481c7e099adafd6a7edd097926b1f9f6b68b1cbe2742");
     }
 }

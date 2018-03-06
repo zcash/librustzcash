@@ -3,7 +3,6 @@ use pairing::*;
 
 pub enum Personalization {
     NoteCommitment,
-    AnotherPersonalization,
     MerkleTree(usize)
 }
 
@@ -11,11 +10,9 @@ impl Personalization {
     pub fn get_bits(&self) -> Vec<bool> {
         match *self {
             Personalization::NoteCommitment =>
-                vec![false, false, false, false, false, false],
-            Personalization::AnotherPersonalization =>
-                vec![false, false, false, false, false, true],
-            Personalization::MerkleTree(_) =>
-                vec![false, false, false, false, true, false],
+                vec![true, true, true, true, true, true],
+            Personalization::MerkleTree(num) =>
+                (0..6).map(|i| (num >> i) & 1 == 1).collect()
         }
     }
 }
