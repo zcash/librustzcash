@@ -1,18 +1,21 @@
-//! Jubjub is an elliptic curve defined over the BLS12-381 scalar field, Fr.
-//! It is a Montgomery curve that takes the form `y^2 = x^3 + Ax^2 + x` where
-//! `A = 40962`. This is the smallest integer choice of A such that:
+//! Jubjub is a twisted Edwards curve defined over the BLS12-381 scalar
+//! field, Fr. It takes the form `-x^2 + y^2 = 1 + dx^2y^2` with
+//! `d = -(10240/10241)`. It is birationally equivalent to a Montgomery
+//! curve of the form `y^2 = x^3 + Ax^2 + x` with `A = 40962`. This
+//! value `A` is the smallest integer choice such that:
 //!
 //! * `(A - 2) / 4` is a small integer (`10240`).
 //! * `A^2 - 4` is quadratic residue.
-//! * The group order of the curve and its quadratic twist has a large prime factor.
+//! * The group order of the curve and its quadratic twist has a large
+//!   prime factor.
 //!
 //! Jubjub has `s = 0x0e7db4ea6533afa906673b0101343b00a6682093ccc81082d0970e5ed6f72cb7`
-//! as the prime subgroup order, with cofactor 8. (The twist has cofactor 4.)
+//! as the prime subgroup order, with cofactor 8. (The twist has
+//! cofactor 4.)
 //!
-//! This curve is birationally equivalent to a twisted Edwards curve of the
-//! form `-x^2 + y^2 = 1 + dx^2y^2` with `d = -(10240/10241)`. In fact, this equivalence
-//! forms a group isomorphism, so points can be freely converted between the Montgomery
-//! and twisted Edwards forms.
+//! It is a complete twisted Edwards curve, so the equivalence with
+//! the Montgomery curve forms a group isomorphism, allowing points
+//! to be freely converted between the two forms.
 
 use pairing::{
     Engine,
@@ -30,9 +33,16 @@ use pairing::bls12_381::{
 
 pub mod edwards;
 pub mod montgomery;
+pub mod fs;
 
 #[cfg(test)]
 pub mod tests;
+
+/// Point of unknown order.
+pub enum Unknown { }
+
+/// Point of prime order.
+pub enum PrimeOrder { }
 
 /// Fixed generators of the Jubjub curve of unknown
 /// exponent.
@@ -103,14 +113,6 @@ pub trait JubjubParams<E: JubjubEngine>: Sized {
     /// fixed generator.
     fn circuit_generators(&self, FixedGenerators) -> &[Vec<(E::Fr, E::Fr)>];
 }
-
-/// Point of unknown order.
-pub enum Unknown { }
-
-/// Point of prime order.
-pub enum PrimeOrder { }
-
-pub mod fs;
 
 impl JubjubEngine for Bls12 {
     type Fs = self::fs::Fs;

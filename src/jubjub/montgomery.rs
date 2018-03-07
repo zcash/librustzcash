@@ -20,8 +20,7 @@ use rand::{
 
 use std::marker::PhantomData;
 
-// Represents the affine point (X/Z, Y/Z) via the extended
-// twisted Edwards coordinates.
+// Represents the affine point (X, Y)
 pub struct Point<E: JubjubEngine, Subgroup> {
     x: E::Fr,
     y: E::Fr,
@@ -69,7 +68,7 @@ impl<E: JubjubEngine, Subgroup> PartialEq for Point<E, Subgroup> {
 impl<E: JubjubEngine> Point<E, Unknown> {
     pub fn get_for_x(x: E::Fr, sign: bool, params: &E::Params) -> Option<Self>
     {
-        // given an x on the curve, y^2 = x^3 + A*x^2 + x
+        // Given an x on the curve, y = sqrt(x^3 + A*x^2 + x)
 
         let mut x2 = x;
         x2.square();
@@ -230,9 +229,16 @@ impl<E: JubjubEngine, Subgroup> Point<E, Subgroup> {
             return Point::zero();
         }
 
+        // (0, 0) is the point of order 2. Doubling
+        // produces the point at infinity.
         if self.y == E::Fr::zero() {
             return Point::zero();
         }
+
+        // This is a standard affine point doubling formula
+        // See 4.3.2 The group law for Weierstrass curves
+        //     Montgomery curves and the Montgomery Ladder
+        //     Daniel J. Bernstein and Tanja Lange
 
         let mut delta = E::Fr::one();
         {
@@ -276,6 +282,11 @@ impl<E: JubjubEngine, Subgroup> Point<E, Subgroup> {
 
     pub fn add(&self, other: &Self, params: &E::Params) -> Self
     {
+        // This is a standard affine point addition formula
+        // See 4.3.2 The group law for Weierstrass curves
+        //     Montgomery curves and the Montgomery Ladder
+        //     Daniel J. Bernstein and Tanja Lange
+
         match (self.infinity, other.infinity) {
             (true, true) => Point::zero(),
             (true, false) => other.clone(),
@@ -325,6 +336,8 @@ impl<E: JubjubEngine, Subgroup> Point<E, Subgroup> {
         params: &E::Params
     ) -> Self
     {
+        // Standard double-and-add scalar multiplication
+
         let mut res = Self::zero();
 
         for b in BitIterator::new(scalar.into()) {
