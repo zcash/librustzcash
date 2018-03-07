@@ -6,10 +6,9 @@ use blake2_rfc::blake2s::Blake2s;
 /// the algorithm, for rigidity purposes.
 pub const FIRST_BLOCK: &'static [u8; 64] = b"0000000000000000002ffe76b973aabaff1d1557d79acf2c3795809c83caf580";
 
-/// Produces an (x, y) pair (Montgomery) for a
-/// random point in the Jubjub curve. The point
-/// is guaranteed to be prime order and not the
-/// identity.
+/// Produces a random point in the Jubjub curve.
+/// The point is guaranteed to be prime order
+/// and not the identity.
 pub fn group_hash<E: JubjubEngine>(
     tag: &[u8],
     personalization: &[u8],
