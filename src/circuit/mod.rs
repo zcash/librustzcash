@@ -23,6 +23,7 @@ use bellman::{
 use jubjub::{
     JubjubEngine,
     Unknown,
+    PrimeOrder,
     FixedGenerators,
     edwards
 };
@@ -329,9 +330,9 @@ pub struct Output<'a, E: JubjubEngine> {
     /// Randomness that will hide the value
     pub value_randomness: Option<E::Fs>,
     /// The diversified base, computed by GH(d)
-    pub g_d: Option<edwards::Point<E, Unknown>>,
+    pub g_d: Option<edwards::Point<E, PrimeOrder>>,
     /// The diversified address point, computed by GH(d)^ivk
-    pub p_d: Option<edwards::Point<E, Unknown>>,
+    pub pk_d: Option<edwards::Point<E, PrimeOrder>>,
     /// The randomness used to hide the note commitment data
     pub commitment_randomness: Option<E::Fs>,
     /// The ephemeral secret key for DH with recipient
@@ -413,20 +414,20 @@ impl<'a, E: JubjubEngine> Circuit<E> for Output<'a, E> {
             epk.inputize(cs.namespace(|| "epk"))?;
         }
 
-        // Now let's deal with p_d. We don't do any checks and
+        // Now let's deal with pk_d. We don't do any checks and
         // essentially allow the prover to witness any 256 bits
         // they would like.
         {
-            let p_d = self.p_d.map(|e| e.into_xy());
+            let pk_d = self.pk_d.map(|e| e.into_xy());
 
             let y_contents = boolean::field_into_boolean_vec_le(
-                cs.namespace(|| "p_d bits of y"),
-                p_d.map(|e| e.1)
+                cs.namespace(|| "pk_d bits of y"),
+                pk_d.map(|e| e.1)
             )?;
 
             let sign_bit = boolean::Boolean::from(boolean::AllocatedBit::alloc(
-                cs.namespace(|| "p_d bit of x"),
-                p_d.map(|e| e.0.into_repr().is_odd())
+                cs.namespace(|| "pk_d bit of x"),
+                pk_d.map(|e| e.0.into_repr().is_odd())
             )?);
 
             note_contents.extend(y_contents);
@@ -481,10 +482,11 @@ impl<'a, E: JubjubEngine> Circuit<E> for Output<'a, E> {
 
 #[test]
 fn test_input_circuit_with_bls12_381() {
+    use pairing::{Field};
     use pairing::bls12_381::*;
     use rand::{SeedableRng, Rng, XorShiftRng};
     use ::circuit::test::*;
-    use jubjub::{JubjubBls12, fs};
+    use jubjub::{JubjubParams, JubjubBls12, fs};
 
     let params = &JubjubBls12::new();
     let rng = &mut XorShiftRng::from_seed([0x3dbe6259, 0x8d313d76, 0x3237db17, 0xe5bc0654]);
@@ -510,7 +512,7 @@ fn test_input_circuit_with_bls12_381() {
             ak: Some(ak),
             g_d: Some(g_d),
             commitment_randomness: Some(commitment_randomness),
-            auth_path: auth_path
+            auth_path: auth_path.clone()
         };
 
         instance.synthesize(&mut cs).unwrap();
@@ -518,23 +520,42 @@ fn test_input_circuit_with_bls12_381() {
         assert!(cs.is_satisfied());
         assert_eq!(cs.num_constraints(), 101550);
         assert_eq!(cs.hash(), "3cc6d9383ca882ae3666267618e826e9d51a3177fc89ef6d42d9f63b84179f77");
+
+        let expected_value_cm = params.generator(FixedGenerators::ValueCommitmentValue)
+                                      .mul(fs::FsRepr::from(value), params)
+                                      .add(
+                                          &params.generator(FixedGenerators::ValueCommitmentRandomness)
+                                          .mul(value_randomness, params),
+                                          params
+                                      );
+        let expected_value_cm_xy = expected_value_cm.into_xy();
+
+        assert_eq!(cs.num_inputs(), 6);
+        assert_eq!(cs.get_input(0, "ONE"), Fr::one());
+        assert_eq!(cs.get_input(1, "value commitment/x/input variable"), expected_value_cm_xy.0);
+        assert_eq!(cs.get_input(2, "value commitment/y/input variable"), expected_value_cm_xy.1);
+
+        cs.get_input(3, "anchor/input variable");
+        cs.get_input(4, "nullifier/x/input variable");
+        cs.get_input(5, "nullifier/y/input variable");
     }
 }
 
 #[test]
 fn test_output_circuit_with_bls12_381() {
+    use pairing::{Field};
     use pairing::bls12_381::*;
     use rand::{SeedableRng, Rng, XorShiftRng};
     use ::circuit::test::*;
-    use jubjub::{JubjubBls12, fs};
+    use jubjub::{JubjubParams, JubjubBls12, fs};
 
     let params = &JubjubBls12::new();
     let rng = &mut XorShiftRng::from_seed([0x3dbe6258, 0x8d313d76, 0x3237db17, 0xe5bc0654]);
 
     let value: u64 = 1;
     let value_randomness: fs::Fs = rng.gen();
-    let g_d: edwards::Point<Bls12, Unknown> = edwards::Point::rand(rng, params);
-    let p_d: edwards::Point<Bls12, Unknown> = edwards::Point::rand(rng, params);
+    let g_d: edwards::Point<Bls12, PrimeOrder> = edwards::Point::rand(rng, params).mul_by_cofactor(params);
+    let pk_d: edwards::Point<Bls12, PrimeOrder> = edwards::Point::rand(rng, params).mul_by_cofactor(params);
     let commitment_randomness: fs::Fs = rng.gen();
     let esk: fs::Fs = rng.gen();
 
@@ -546,7 +567,7 @@ fn test_output_circuit_with_bls12_381() {
             value: Some(value),
             value_randomness: Some(value_randomness),
             g_d: Some(g_d.clone()),
-            p_d: Some(p_d.clone()),
+            pk_d: Some(pk_d.clone()),
             commitment_randomness: Some(commitment_randomness),
             esk: Some(esk.clone())
         };
@@ -556,5 +577,32 @@ fn test_output_circuit_with_bls12_381() {
         assert!(cs.is_satisfied());
         assert_eq!(cs.num_constraints(), 7827);
         assert_eq!(cs.hash(), "2896f259ad7a50c83604976ee9362358396d547b70f2feaf91d82d287e4ffc1d");
+
+        let expected_cm = ::primitives::Note {
+            value: value,
+            g_d: g_d.clone(),
+            pk_d: pk_d.clone(),
+            r: commitment_randomness.clone()
+        }.cm(params);
+
+        let expected_value_cm = params.generator(FixedGenerators::ValueCommitmentValue)
+                                      .mul(fs::FsRepr::from(value), params)
+                                      .add(
+                                          &params.generator(FixedGenerators::ValueCommitmentRandomness)
+                                          .mul(value_randomness, params),
+                                          params
+                                      );
+        let expected_value_cm_xy = expected_value_cm.into_xy();
+
+        let expected_epk = g_d.mul(esk, params);
+        let expected_epk_xy = expected_epk.into_xy();
+
+        assert_eq!(cs.num_inputs(), 6);
+        assert_eq!(cs.get_input(0, "ONE"), Fr::one());
+        assert_eq!(cs.get_input(1, "value commitment/x/input variable"), expected_value_cm_xy.0);
+        assert_eq!(cs.get_input(2, "value commitment/y/input variable"), expected_value_cm_xy.1);
+        assert_eq!(cs.get_input(3, "epk/x/input variable"), expected_epk_xy.0);
+        assert_eq!(cs.get_input(4, "epk/y/input variable"), expected_epk_xy.1);
+        assert_eq!(cs.get_input(5, "commitment/input variable"), expected_cm);
     }
 }

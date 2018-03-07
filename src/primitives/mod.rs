@@ -5,7 +5,7 @@ use pedersen_hash::{
 
 use byteorder::{
     BigEndian,
-    ByteOrder
+    WriteBytesExt
 };
 
 use jubjub::{
@@ -35,13 +35,15 @@ impl<E: JubjubEngine> Note<E> {
         let mut note_contents = vec![];
 
         // Write the value in big endian
-        BigEndian::write_u64(&mut note_contents, self.value);
+        (&mut note_contents).write_u64::<BigEndian>(self.value).unwrap();
 
         // Write g_d
         self.g_d.write(&mut note_contents).unwrap();
 
         // Write pk_d
         self.pk_d.write(&mut note_contents).unwrap();
+
+        assert_eq!(note_contents.len(), 32 + 32 + 8);
 
         // Compute the Pedersen hash of the note contents
         let hash_of_contents = pedersen_hash(
