@@ -1,5 +1,14 @@
-use jubjub::*;
-use pairing::*;
+use jubjub::{
+    JubjubEngine,
+    PrimeOrder,
+    edwards
+};
+
+use pairing::{
+    PrimeField,
+    PrimeFieldRepr
+};
+
 use blake2_rfc::blake2s::Blake2s;
 use constants;
 

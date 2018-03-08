@@ -33,8 +33,14 @@ use pairing::bls12_381::{
     Fr
 };
 
+/// This is an implementation of the twisted Edwards Jubjub curve.
 pub mod edwards;
+
+/// This is an implementation of the birationally equivalent
+/// Montgomery curve.
 pub mod montgomery;
+
+/// This is an implementation of the scalar field for Jubjub.
 pub mod fs;
 
 #[cfg(test)]
@@ -83,7 +89,9 @@ pub enum FixedGenerators {
 /// offers a scalar field for the embedded curve (Jubjub)
 /// and some pre-computed parameters.
 pub trait JubjubEngine: Engine {
+    /// The scalar field of the Jubjub curve
     type Fs: PrimeField + SqrtField;
+    /// The parameters of Jubjub and the Sapling protocol
     type Params: JubjubParams<Self>;
 }
 
@@ -167,7 +175,7 @@ impl JubjubBls12 {
         let mut montgomery_2a = montgomery_a;
         montgomery_2a.double();
 
-        let mut tmp = JubjubBls12 {
+        let mut tmp_params = JubjubBls12 {
             // d = -(10240/10241)
             edwards_d: Fr::from_str("19257038036680949359750312669786877991949435402254120286184196891950884077233").unwrap(),
             // A = 40962
@@ -177,20 +185,24 @@ impl JubjubBls12 {
             // scaling factor = sqrt(4 / (a - d))
             scale: Fr::from_str("17814886934372412843466061268024708274627479829237077604635722030778476050649").unwrap(),
 
+            // We'll initialize these below
             pedersen_hash_generators: vec![],
             pedersen_circuit_generators: vec![],
-
             fixed_base_generators: vec![],
             fixed_base_circuit_generators: vec![],
         };
 
         // Create the bases for the Pedersen hashes
         {
+            // TODO: This currently does not match the specification
             let mut cur = 0;
             let mut pedersen_hash_generators = vec![];
 
+            // TODO: This generates more bases for the Pedersen hashes
+            // than necessary, which is just a performance issue in
+            // practice.
             while pedersen_hash_generators.len() < 5 {
-                let gh = group_hash(&[cur], constants::PEDERSEN_HASH_GENERATORS_PERSONALIZATION, &tmp);
+                let gh = group_hash(&[cur], constants::PEDERSEN_HASH_GENERATORS_PERSONALIZATION, &tmp_params);
                 // We don't want to overflow and start reusing generators
                 assert!(cur != u8::max_value());
                 cur += 1;
@@ -200,7 +212,20 @@ impl JubjubBls12 {
                 }
             }
 
-            tmp.pedersen_hash_generators = pedersen_hash_generators;
+            // Check for duplicates, far worse than spec inconsistencies!
+            for (i, p1) in pedersen_hash_generators.iter().enumerate() {
+                if p1 == &edwards::Point::zero() {
+                    panic!("Neutral element!");
+                }
+
+                for p2 in pedersen_hash_generators.iter().skip(i+1) {
+                    if p1 == p2 {
+                        panic!("Duplicate generator!");
+                    }
+                }
+            }
+
+            tmp_params.pedersen_hash_generators = pedersen_hash_generators;
         }
 
         // Create the bases for other parts of the protocol
@@ -211,10 +236,10 @@ impl JubjubBls12 {
                 // Each generator is found by invoking the group hash
                 // on tag 0x00, 0x01, ... until we find a valid result.
                 let find_first_gh = |personalization| {
-                    let mut cur = 0;
+                    let mut cur = 0u8;
 
                     loop {
-                        let gh = group_hash::<Bls12>(&[cur], personalization, &tmp);
+                        let gh = group_hash::<Bls12>(&[cur], personalization, &tmp_params);
                         // We don't want to overflow.
                         assert!(cur != u8::max_value());
                         cur += 1;
@@ -267,7 +292,7 @@ impl JubjubBls12 {
                 }
             }
 
-            tmp.fixed_base_generators = fixed_base_generators;
+            tmp_params.fixed_base_generators = fixed_base_generators;
         }
 
         // Create the 2-bit window table lookups for each 4-bit
@@ -276,10 +301,10 @@ impl JubjubBls12 {
             let mut pedersen_circuit_generators = vec![];
 
             // Process each segment
-            for mut gen in tmp.pedersen_hash_generators.iter().cloned() {
-                let mut gen = montgomery::Point::from_edwards(&gen, &tmp);
+            for mut gen in tmp_params.pedersen_hash_generators.iter().cloned() {
+                let mut gen = montgomery::Point::from_edwards(&gen, &tmp_params);
                 let mut windows = vec![];
-                for _ in 0..tmp.pedersen_hash_chunks_per_generator() {
+                for _ in 0..tmp_params.pedersen_hash_chunks_per_generator() {
                     // Create (x, y) coeffs for this chunk
                     let mut coeffs = vec![];
                     let mut g = gen.clone();
@@ -287,19 +312,19 @@ impl JubjubBls12 {
                     // coeffs = g, g*2, g*3, g*4
                     for _ in 0..4 {
                         coeffs.push(g.into_xy().expect("cannot produce O"));
-                        g = g.add(&gen, &tmp);
+                        g = g.add(&gen, &tmp_params);
                     }
                     windows.push(coeffs);
 
                     // Our chunks are separated by 2 bits to prevent overlap.
                     for _ in 0..4 {
-                        gen = gen.double(&tmp);
+                        gen = gen.double(&tmp_params);
                     }
                 }
                 pedersen_circuit_generators.push(windows);
             }
 
-            tmp.pedersen_circuit_generators = pedersen_circuit_generators;
+            tmp_params.pedersen_circuit_generators = pedersen_circuit_generators;
         }
 
         // Create the 3-bit window table lookups for fixed-base
@@ -307,14 +332,14 @@ impl JubjubBls12 {
         {
             let mut fixed_base_circuit_generators = vec![];
 
-            for mut gen in tmp.fixed_base_generators.iter().cloned() {
+            for mut gen in tmp_params.fixed_base_generators.iter().cloned() {
                 let mut windows = vec![];
-                for _ in 0..tmp.fixed_base_chunks_per_generator() {
+                for _ in 0..tmp_params.fixed_base_chunks_per_generator() {
                     let mut coeffs = vec![(Fr::zero(), Fr::one())];
                     let mut g = gen.clone();
                     for _ in 0..7 {
                         coeffs.push(g.into_xy());
-                        g = g.add(&gen, &tmp);
+                        g = g.add(&gen, &tmp_params);
                     }
                     windows.push(coeffs);
 
@@ -324,10 +349,10 @@ impl JubjubBls12 {
                 fixed_base_circuit_generators.push(windows);
             }
 
-            tmp.fixed_base_circuit_generators = fixed_base_circuit_generators;
+            tmp_params.fixed_base_circuit_generators = fixed_base_circuit_generators;
         }
 
-        tmp
+        tmp_params
     }
 }
 

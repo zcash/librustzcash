@@ -10,8 +10,8 @@ extern crate byteorder;
 extern crate hex_literal;
 
 pub mod jubjub;
-pub mod circuit;
 pub mod group_hash;
+pub mod circuit;
 pub mod pedersen_hash;
 pub mod primitives;
-mod constants;
+pub mod constants;

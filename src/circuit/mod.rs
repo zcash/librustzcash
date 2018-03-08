@@ -29,6 +29,13 @@ use jubjub::{
 
 use constants;
 
+
+// TODO: This should probably be removed and we
+// should use existing helper methods on `Option`
+// for mapping with an error.
+/// This basically is just an extension to `Option`
+/// which allows for a convenient mapping to an
+/// error on `None`.
 trait Assignment<T> {
     fn get(&self) -> Result<&T, SynthesisError>;
 }
@@ -42,6 +49,7 @@ impl<T> Assignment<T> for Option<T> {
     }
 }
 
+/// This is an instance of the `Spend` circuit.
 pub struct Spend<'a, E: JubjubEngine> {
     pub params: &'a E::Params,
     /// Value of the note being spent
@@ -75,6 +83,7 @@ impl<'a, E: JubjubEngine> Circuit<E> for Spend<'a, E> {
         )?;
 
         {
+            // Compute the note value in the exponent
             let gv = ecc::fixed_base_multiplication(
                 cs.namespace(|| "compute the value in the exponent"),
                 FixedGenerators::ValueCommitmentValue,
@@ -82,12 +91,15 @@ impl<'a, E: JubjubEngine> Circuit<E> for Spend<'a, E> {
                 self.params
             )?;
         
-            // Booleanize the randomness
+            // Booleanize the randomness. This does not ensure
+            // the bit representation is "in the field" because
+            // it doesn't matter for security.
             let hr = boolean::field_into_boolean_vec_le(
                 cs.namespace(|| "hr"),
                 self.value_randomness
             )?;
 
+            // Compute the randomness in the exponent
             let hr = ecc::fixed_base_multiplication(
                 cs.namespace(|| "computation of randomization for value commitment"),
                 FixedGenerators::ValueCommitmentRandomness,
@@ -95,12 +107,14 @@ impl<'a, E: JubjubEngine> Circuit<E> for Spend<'a, E> {
                 self.params
             )?;
 
+            // Compute the Pedersen commitment to the value
             let gvhr = gv.add(
                 cs.namespace(|| "computation of value commitment"),
                 &hr,
                 self.params
             )?;
 
+            // Expose the commitment as an input to the circuit
             gvhr.inputize(cs.namespace(|| "value commitment"))?;
         }
 
@@ -118,6 +132,7 @@ impl<'a, E: JubjubEngine> Circuit<E> for Spend<'a, E> {
             // demonstrate the prover knows it. If they know a
             // congruency then that's equivalent.
 
+            // Compute rk = [rsk] ProvingPublicKey
             rk = ecc::fixed_base_multiplication(
                 cs.namespace(|| "computation of rk"),
                 FixedGenerators::ProofGenerationKey,
@@ -133,29 +148,40 @@ impl<'a, E: JubjubEngine> Circuit<E> for Spend<'a, E> {
             self.params
         )?;
 
+        // There are no sensible attacks on small order points
+        // of ak (that we're aware of!) but it's a cheap check,
+        // so we do it.
         ak.assert_not_small_order(
             cs.namespace(|| "ak not small order"),
             self.params
         )?;
 
         // Unpack ak and rk for input to BLAKE2s
+
+        // This is the "viewing key" preimage for CRH^ivk
         let mut vk = vec![];
-        let mut rho_preimage = vec![];
         vk.extend(
             ak.repr(cs.namespace(|| "representation of ak"))?
         );
+
+        // This is the nullifier randomness preimage for PRF^nr
+        let mut nr_preimage = vec![];
+
+        // Extend vk and nr preimages with the representation of
+        // rk.
         {
             let repr_rk = rk.repr(
                 cs.namespace(|| "representation of rk")
             )?;
 
             vk.extend(repr_rk.iter().cloned());
-            rho_preimage.extend(repr_rk);
+            nr_preimage.extend(repr_rk);
         }
 
         assert_eq!(vk.len(), 512);
+        assert_eq!(nr_preimage.len(), 256);
 
-        // Compute the incoming viewing key
+        // Compute the incoming viewing key ivk
         let mut ivk = blake2s::blake2s(
             cs.namespace(|| "computation of ivk"),
             &vk,
@@ -164,16 +190,24 @@ impl<'a, E: JubjubEngine> Circuit<E> for Spend<'a, E> {
 
         // Little endian bit order
         ivk.reverse();
-        ivk.truncate(E::Fs::CAPACITY as usize); // drop_5
 
-        // Witness g_d
+        // drop_5 to ensure it's in the field
+        ivk.truncate(E::Fs::CAPACITY as usize);
+
+        // Witness g_d. Ensures the point is on the
+        // curve, but not its order. If the prover
+        // manages to witness a commitment in the
+        // tree, then the Output circuit would have
+        // already guaranteed this.
+        // TODO: We might as well just perform the
+        // check again here, since it's not expensive.
         let g_d = ecc::EdwardsPoint::witness(
             cs.namespace(|| "witness g_d"),
             self.g_d,
             self.params
         )?;
 
-        // Compute pk_d
+        // Compute pk_d = g_d^ivk
         let pk_d = g_d.mul(
             cs.namespace(|| "compute pk_d"),
             &ivk,
@@ -181,6 +215,7 @@ impl<'a, E: JubjubEngine> Circuit<E> for Spend<'a, E> {
         )?;
 
         // Compute note contents
+        // value (in big endian) followed by g_d and pk_d
         let mut note_contents = vec![];
         note_contents.extend(value_bits.into_iter().rev());
         note_contents.extend(
@@ -206,12 +241,13 @@ impl<'a, E: JubjubEngine> Circuit<E> for Spend<'a, E> {
         )?;
 
         {
-            // Booleanize the randomness
+            // Booleanize the randomness for the note commitment
             let cmr = boolean::field_into_boolean_vec_le(
                 cs.namespace(|| "cmr"),
                 self.commitment_randomness
             )?;
 
+            // Compute the note commitment randomness in the exponent
             let cmr = ecc::fixed_base_multiplication(
                 cs.namespace(|| "computation of commitment randomness"),
                 FixedGenerators::NoteCommitmentRandomness,
@@ -219,6 +255,8 @@ impl<'a, E: JubjubEngine> Circuit<E> for Spend<'a, E> {
                 self.params
             )?;
 
+            // Randomize the note commitment. Pedersen hashes are not
+            // themselves hiding commitments.
             cm = cm.add(
                 cs.namespace(|| "randomization of note commitment"),
                 &cmr,
@@ -228,21 +266,30 @@ impl<'a, E: JubjubEngine> Circuit<E> for Spend<'a, E> {
 
         let tree_depth = self.auth_path.len();
 
+        // This will store (least significant bit first)
+        // the position of the note in the tree, for use
+        // in nullifier computation.
         let mut position_bits = vec![];
 
-        // Injective encoding.
+        // This is an injective encoding, as cur is a
+        // point in the prime order subgroup.
         let mut cur = cm.get_x().clone();
 
         for (i, e) in self.auth_path.into_iter().enumerate() {
             let cs = &mut cs.namespace(|| format!("merkle tree hash {}", i));
 
+            // Determines if the current subtree is the "right" leaf at this
+            // depth of the tree.
             let cur_is_right = boolean::Boolean::from(boolean::AllocatedBit::alloc(
                 cs.namespace(|| "position bit"),
                 e.map(|e| e.1)
             )?);
 
+            // Push this boolean for nullifier computation later
             position_bits.push(cur_is_right.clone());
 
+            // Witness the authentication path element adjacent
+            // at this depth.
             let path_element = num::AllocatedNum::alloc(
                 cs.namespace(|| "path element"),
                 || {
@@ -250,6 +297,7 @@ impl<'a, E: JubjubEngine> Circuit<E> for Spend<'a, E> {
                 }
             )?;
 
+            // Swap the two if the current subtree is on the right
             let (xl, xr) = num::AllocatedNum::conditionally_reverse(
                 cs.namespace(|| "conditional reversal of preimage"),
                 &cur,
@@ -265,6 +313,7 @@ impl<'a, E: JubjubEngine> Circuit<E> for Spend<'a, E> {
             preimage.extend(xl.into_bits_le(cs.namespace(|| "xl into bits"))?);
             preimage.extend(xr.into_bits_le(cs.namespace(|| "xr into bits"))?);
 
+            // Compute the new subtree value
             cur = pedersen_hash::pedersen_hash(
                 cs.namespace(|| "computation of pedersen hash"),
                 pedersen_hash::Personalization::MerkleTree(i),
@@ -278,7 +327,10 @@ impl<'a, E: JubjubEngine> Circuit<E> for Spend<'a, E> {
         // Expose the anchor
         cur.inputize(cs.namespace(|| "anchor"))?;
 
+        // Compute the cm + g^position for preventing
+        // faerie gold attacks
         {
+            // Compute the position in the exponent
             let position = ecc::fixed_base_multiplication(
                 cs.namespace(|| "g^position"),
                 FixedGenerators::NullifierPosition,
@@ -286,6 +338,7 @@ impl<'a, E: JubjubEngine> Circuit<E> for Spend<'a, E> {
                 self.params
             )?;
 
+            // Add the position to the commitment
             cm = cm.add(
                 cs.namespace(|| "faerie gold prevention"),
                 &position,
@@ -293,30 +346,36 @@ impl<'a, E: JubjubEngine> Circuit<E> for Spend<'a, E> {
             )?;
         }
         
-        // Let's compute rho = BLAKE2s(rk || cm + position)
-        rho_preimage.extend(
+        // Let's compute nr = BLAKE2s(rk || cm + position)
+        nr_preimage.extend(
             cm.repr(cs.namespace(|| "representation of cm"))?
         );
 
-        assert_eq!(rho_preimage.len(), 512);
+        assert_eq!(nr_preimage.len(), 512);
         
-        let mut rho = blake2s::blake2s(
-            cs.namespace(|| "rho computation"),
-            &rho_preimage,
+        // Compute nr
+        let mut nr = blake2s::blake2s(
+            cs.namespace(|| "nr computation"),
+            &nr_preimage,
             constants::PRF_NR_PERSONALIZATION
         )?;
 
         // Little endian bit order
-        rho.reverse();
-        rho.truncate(E::Fs::CAPACITY as usize); // drop_5
+        nr.reverse();
+
+        // We want the randomization in the field to
+        // simplify outside code.
+        // TODO: This isn't uniformly random.
+        nr.truncate(E::Fs::CAPACITY as usize);
 
         // Compute nullifier
         let nf = ak.mul(
             cs.namespace(|| "computation of nf"),
-            &rho,
+            &nr,
             self.params
         )?;
 
+        // Expose the nullifier publicly
         nf.inputize(cs.namespace(|| "nullifier"))?;
 
         Ok(())
