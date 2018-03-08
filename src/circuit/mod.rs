@@ -35,7 +35,6 @@ use primitives::{
     PaymentAddress
 };
 
-
 // TODO: This should probably be removed and we
 // should use existing helper methods on `Option`
 // for mapping with an error.
@@ -53,6 +52,47 @@ impl<T> Assignment<T> for Option<T> {
             None => Err(SynthesisError::AssignmentMissing)
         }
     }
+}
+
+/// This is an instance of the `Spend` circuit.
+pub struct Spend<'a, E: JubjubEngine> {
+    pub params: &'a E::Params,
+
+    /// Pedersen commitment to the value being spent
+    pub value_commitment: Option<ValueCommitment<E>>,
+
+    /// Key required to construct proofs for spending notes
+    /// for a particular spending key
+    pub proof_generation_key: Option<ProofGenerationKey<E>>,
+
+    /// The payment address associated with the note
+    pub payment_address: Option<PaymentAddress<E>>,
+
+    /// The randomness of the note commitment
+    pub commitment_randomness: Option<E::Fs>,
+
+    /// The authentication path of the commitment in the tree
+    pub auth_path: Vec<Option<(E::Fr, bool)>>
+}
+
+/// This is an output circuit instance.
+pub struct Output<'a, E: JubjubEngine> {
+    pub params: &'a E::Params,
+
+    /// Pedersen commitment to the value being spent
+    pub value_commitment: Option<ValueCommitment<E>>,
+
+    /// The diversified base, computed by GH(d)
+    pub g_d: Option<edwards::Point<E, PrimeOrder>>,
+
+    /// The diversified address point, computed by GH(d)^ivk
+    pub pk_d: Option<edwards::Point<E, PrimeOrder>>,
+
+    /// The randomness used to hide the note commitment data
+    pub commitment_randomness: Option<E::Fs>,
+
+    /// The ephemeral secret key for DH with recipient
+    pub esk: Option<E::Fs>
 }
 
 /// Exposes a Pedersen commitment to the value as an
@@ -106,27 +146,6 @@ fn expose_value_commitment<E, CS>(
     gvhr.inputize(cs.namespace(|| "commitment point"))?;
 
     Ok(value_bits)
-}
-
-/// This is an instance of the `Spend` circuit.
-pub struct Spend<'a, E: JubjubEngine> {
-    pub params: &'a E::Params,
-
-    /// Pedersen commitment to the value being spent
-    pub value_commitment: Option<ValueCommitment<E>>,
-
-    /// Key required to construct proofs for spending notes
-    /// for a particular spending key
-    pub proof_generation_key: Option<ProofGenerationKey<E>>,
-
-    /// The payment address associated with the note
-    pub payment_address: Option<PaymentAddress<E>>,
-
-    /// The randomness of the note commitment
-    pub commitment_randomness: Option<E::Fs>,
-
-    /// The authentication path of the commitment in the tree
-    pub auth_path: Vec<Option<(E::Fr, bool)>>
 }
 
 impl<'a, E: JubjubEngine> Circuit<E> for Spend<'a, E> {
@@ -409,26 +428,6 @@ impl<'a, E: JubjubEngine> Circuit<E> for Spend<'a, E> {
 
         Ok(())
     }
-}
-
-/// This is an output circuit instance.
-pub struct Output<'a, E: JubjubEngine> {
-    pub params: &'a E::Params,
-
-    /// Pedersen commitment to the value being spent
-    pub value_commitment: Option<ValueCommitment<E>>,
-
-    /// The diversified base, computed by GH(d)
-    pub g_d: Option<edwards::Point<E, PrimeOrder>>,
-
-    /// The diversified address point, computed by GH(d)^ivk
-    pub pk_d: Option<edwards::Point<E, PrimeOrder>>,
-
-    /// The randomness used to hide the note commitment data
-    pub commitment_randomness: Option<E::Fs>,
-
-    /// The ephemeral secret key for DH with recipient
-    pub esk: Option<E::Fs>
 }
 
 impl<'a, E: JubjubEngine> Circuit<E> for Output<'a, E> {
