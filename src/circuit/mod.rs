@@ -409,6 +409,7 @@ impl<'a, E: JubjubEngine> Circuit<E> for Output<'a, E> {
         )?;
 
         {
+            // Compute the note value in the exponent
             let gv = ecc::fixed_base_multiplication(
                 cs.namespace(|| "compute the value in the exponent"),
                 FixedGenerators::ValueCommitmentValue,
@@ -416,12 +417,15 @@ impl<'a, E: JubjubEngine> Circuit<E> for Output<'a, E> {
                 self.params
             )?;
         
-            // Booleanize the randomness
+            // Booleanize the randomness. This does not ensure
+            // the bit representation is "in the field" because
+            // it doesn't matter for security.
             let hr = boolean::field_into_boolean_vec_le(
                 cs.namespace(|| "hr"),
                 self.value_randomness
             )?;
 
+            // Compute the randomness in the exponent
             let hr = ecc::fixed_base_multiplication(
                 cs.namespace(|| "computation of randomization for value commitment"),
                 FixedGenerators::ValueCommitmentRandomness,
@@ -429,48 +433,66 @@ impl<'a, E: JubjubEngine> Circuit<E> for Output<'a, E> {
                 self.params
             )?;
 
+            // Compute the Pedersen commitment to the value
             let gvhr = gv.add(
                 cs.namespace(|| "computation of value commitment"),
                 &hr,
                 self.params
             )?;
 
+            // Expose the commitment as an input to the circuit
             gvhr.inputize(cs.namespace(|| "value commitment"))?;
         }
 
-        // Let's start to construct our note
+        // Let's start to construct our note, which contains
+        // value (big endian)
         let mut note_contents = vec![];
         note_contents.extend(value_bits.into_iter().rev());
 
         // Let's deal with g_d
         {
+            // Prover witnesses g_d, ensuring it's on the
+            // curve.
             let g_d = ecc::EdwardsPoint::witness(
                 cs.namespace(|| "witness g_d"),
                 self.g_d,
                 self.params
             )?;
 
+            // g_d is ensured to be large order. The relationship
+            // between g_d and pk_d ultimately binds ivk to the
+            // note. If this were a small order point, it would
+            // not do this correctly, and the prover could
+            // double-spend by finding random ivk's that satisfy
+            // the relationship.
+            //
+            // Further, if it were small order, epk would be
+            // small order too!
             g_d.assert_not_small_order(
                 cs.namespace(|| "g_d not small order"),
                 self.params
             )?;
 
+            // Extend our note contents with the representation of
+            // g_d.
             note_contents.extend(
                 g_d.repr(cs.namespace(|| "representation of g_d"))?
             );
 
-            // Compute epk from esk
+            // Booleanize our ephemeral secret key
             let esk = boolean::field_into_boolean_vec_le(
                 cs.namespace(|| "esk"),
                 self.esk
             )?;
 
+            // Create the ephemeral public key from g_d.
             let epk = g_d.mul(
                 cs.namespace(|| "epk computation"),
                 &esk,
                 self.params
             )?;
 
+            // Expose epk publicly.
             epk.inputize(cs.namespace(|| "epk"))?;
         }
 
@@ -478,18 +500,23 @@ impl<'a, E: JubjubEngine> Circuit<E> for Output<'a, E> {
         // essentially allow the prover to witness any 256 bits
         // they would like.
         {
+            // Just grab pk_d from the witness
             let pk_d = self.pk_d.map(|e| e.into_xy());
 
+            // Witness the y-coordinate, encoded as little
+            // endian bits (to match the representation)
             let y_contents = boolean::field_into_boolean_vec_le(
                 cs.namespace(|| "pk_d bits of y"),
                 pk_d.map(|e| e.1)
             )?;
 
+            // Witness the sign bit
             let sign_bit = boolean::Boolean::from(boolean::AllocatedBit::alloc(
                 cs.namespace(|| "pk_d bit of x"),
                 pk_d.map(|e| e.0.into_repr().is_odd())
             )?);
 
+            // Extend the note with pk_d representation
             note_contents.extend(y_contents);
             note_contents.push(sign_bit);
         }
@@ -516,6 +543,7 @@ impl<'a, E: JubjubEngine> Circuit<E> for Output<'a, E> {
                 self.commitment_randomness
             )?;
 
+            // Compute the note commitment randomness in the exponent
             let cmr = ecc::fixed_base_multiplication(
                 cs.namespace(|| "computation of commitment randomness"),
                 FixedGenerators::NoteCommitmentRandomness,
@@ -523,6 +551,7 @@ impl<'a, E: JubjubEngine> Circuit<E> for Output<'a, E> {
                 self.params
             )?;
 
+            // Randomize our note commitment
             cm = cm.add(
                 cs.namespace(|| "randomization of note commitment"),
                 &cmr,
