@@ -29,6 +29,10 @@ use jubjub::{
 
 use constants;
 
+use primitives::{
+    ValueCommitment
+};
+
 
 // TODO: This should probably be removed and we
 // should use existing helper methods on `Option`
@@ -53,8 +57,7 @@ impl<T> Assignment<T> for Option<T> {
 /// input to the circuit
 fn expose_value_commitment<E, CS>(
     mut cs: CS,
-    value: Option<u64>,
-    randomness: Option<E::Fs>,
+    value_commitment: Option<ValueCommitment<E>>,
     params: &E::Params
 ) -> Result<Vec<boolean::Boolean>, SynthesisError>
     where E: JubjubEngine,
@@ -63,7 +66,7 @@ fn expose_value_commitment<E, CS>(
     // Booleanize the value into little-endian bit order
     let value_bits = boolean::u64_into_boolean_vec_le(
         cs.namespace(|| "value"),
-        value
+        value_commitment.as_ref().map(|c| c.value)
     )?;
 
     // Compute the note value in the exponent
@@ -79,7 +82,7 @@ fn expose_value_commitment<E, CS>(
     // it doesn't matter for security.
     let hr = boolean::field_into_boolean_vec_le(
         cs.namespace(|| "hr"),
-        randomness
+        value_commitment.as_ref().map(|c| c.randomness)
     )?;
 
     // Compute the randomness in the exponent
@@ -106,23 +109,27 @@ fn expose_value_commitment<E, CS>(
 /// This is an instance of the `Spend` circuit.
 pub struct Spend<'a, E: JubjubEngine> {
     pub params: &'a E::Params,
-    /// Value of the note being spent
-    pub value: Option<u64>,
-    /// Randomness that will hide the value
-    pub value_randomness: Option<E::Fs>,
+
+    /// Pedersen commitment to the value being spent
+    pub value_commitment: Option<ValueCommitment<E>>,
+
     /// Key which allows the proof to be constructed
     /// as defense-in-depth against a flaw in the
     /// protocol that would otherwise be exploitable
     /// by a holder of a viewing key.
     pub rsk: Option<E::Fs>,
+
     /// The public key that will be re-randomized for
     /// use as a nullifier and signing key for the
     /// transaction.
     pub ak: Option<edwards::Point<E, PrimeOrder>>,
+
     /// The diversified base used to compute pk_d.
     pub g_d: Option<edwards::Point<E, PrimeOrder>>,
+
     /// The randomness used to hide the note commitment data
     pub commitment_randomness: Option<E::Fs>,
+
     /// The authentication path of the commitment in the tree
     pub auth_path: Vec<Option<(E::Fr, bool)>>
 }
@@ -132,8 +139,7 @@ impl<'a, E: JubjubEngine> Circuit<E> for Spend<'a, E> {
     {
         let value_bits = expose_value_commitment(
             cs.namespace(|| "value commitment"),
-            self.value,
-            self.value_randomness,
+            self.value_commitment,
             self.params
         )?;
 
@@ -404,16 +410,19 @@ impl<'a, E: JubjubEngine> Circuit<E> for Spend<'a, E> {
 /// This is an output circuit instance.
 pub struct Output<'a, E: JubjubEngine> {
     pub params: &'a E::Params,
-    /// Value of the note being created
-    pub value: Option<u64>,
-    /// Randomness that will hide the value
-    pub value_randomness: Option<E::Fs>,
+
+    /// Pedersen commitment to the value being spent
+    pub value_commitment: Option<ValueCommitment<E>>,
+
     /// The diversified base, computed by GH(d)
     pub g_d: Option<edwards::Point<E, PrimeOrder>>,
+
     /// The diversified address point, computed by GH(d)^ivk
     pub pk_d: Option<edwards::Point<E, PrimeOrder>>,
+
     /// The randomness used to hide the note commitment data
     pub commitment_randomness: Option<E::Fs>,
+
     /// The ephemeral secret key for DH with recipient
     pub esk: Option<E::Fs>
 }
@@ -423,8 +432,7 @@ impl<'a, E: JubjubEngine> Circuit<E> for Output<'a, E> {
     {
         let value_bits = expose_value_commitment(
             cs.namespace(|| "value commitment"),
-            self.value,
-            self.value_randomness,
+            self.value_commitment,
             self.params
         )?;
 
@@ -559,15 +567,17 @@ fn test_input_circuit_with_bls12_381() {
     use pairing::bls12_381::*;
     use rand::{SeedableRng, Rng, XorShiftRng};
     use ::circuit::test::*;
-    use jubjub::{JubjubParams, JubjubBls12, fs};
+    use jubjub::{JubjubBls12, fs};
 
     let params = &JubjubBls12::new();
     let rng = &mut XorShiftRng::from_seed([0x3dbe6259, 0x8d313d76, 0x3237db17, 0xe5bc0654]);
 
     let tree_depth = 32;
 
-    let value: u64 = 1;
-    let value_randomness: fs::Fs = rng.gen();
+    let value_commitment = ValueCommitment {
+        value: rng.gen(),
+        randomness: rng.gen()
+    };
 
     let rsk: fs::Fs = rng.gen();
     let ak: edwards::Point<Bls12, PrimeOrder> = edwards::Point::rand(rng, params).mul_by_cofactor(params);
@@ -603,8 +613,7 @@ fn test_input_circuit_with_bls12_381() {
 
         let instance = Spend {
             params: params,
-            value: Some(value),
-            value_randomness: Some(value_randomness),
+            value_commitment: Some(value_commitment.clone()),
             rsk: Some(rsk),
             ak: Some(ak),
             g_d: Some(g_d.clone()),
@@ -618,22 +627,15 @@ fn test_input_circuit_with_bls12_381() {
         assert_eq!(cs.num_constraints(), 101550);
         assert_eq!(cs.hash(), "3cc6d9383ca882ae3666267618e826e9d51a3177fc89ef6d42d9f63b84179f77");
 
-        let expected_value_cm = params.generator(FixedGenerators::ValueCommitmentValue)
-                                      .mul(fs::FsRepr::from(value), params)
-                                      .add(
-                                          &params.generator(FixedGenerators::ValueCommitmentRandomness)
-                                          .mul(value_randomness, params),
-                                          params
-                                      );
-        let expected_value_cm_xy = expected_value_cm.into_xy();
+        let expected_value_cm = value_commitment.cm(params).into_xy();
 
         assert_eq!(cs.num_inputs(), 6);
         assert_eq!(cs.get_input(0, "ONE"), Fr::one());
-        assert_eq!(cs.get_input(1, "value commitment/commitment point/x/input variable"), expected_value_cm_xy.0);
-        assert_eq!(cs.get_input(2, "value commitment/commitment point/y/input variable"), expected_value_cm_xy.1);
+        assert_eq!(cs.get_input(1, "value commitment/commitment point/x/input variable"), expected_value_cm.0);
+        assert_eq!(cs.get_input(2, "value commitment/commitment point/y/input variable"), expected_value_cm.1);
 
         let note = ::primitives::Note {
-            value: value,
+            value: value_commitment.value,
             g_d: g_d.clone(),
             pk_d: payment_address.pk_d.clone(),
             r: commitment_randomness.clone()
@@ -689,13 +691,16 @@ fn test_output_circuit_with_bls12_381() {
     use pairing::bls12_381::*;
     use rand::{SeedableRng, Rng, XorShiftRng};
     use ::circuit::test::*;
-    use jubjub::{JubjubParams, JubjubBls12, fs};
+    use jubjub::{JubjubBls12, fs};
 
     let params = &JubjubBls12::new();
     let rng = &mut XorShiftRng::from_seed([0x3dbe6258, 0x8d313d76, 0x3237db17, 0xe5bc0654]);
 
-    let value: u64 = 1;
-    let value_randomness: fs::Fs = rng.gen();
+    let value_commitment = ValueCommitment {
+        value: rng.gen(),
+        randomness: rng.gen()
+    };
+
     let g_d: edwards::Point<Bls12, PrimeOrder> = edwards::Point::rand(rng, params).mul_by_cofactor(params);
     let pk_d: edwards::Point<Bls12, PrimeOrder> = edwards::Point::rand(rng, params).mul_by_cofactor(params);
     let commitment_randomness: fs::Fs = rng.gen();
@@ -706,8 +711,7 @@ fn test_output_circuit_with_bls12_381() {
 
         let instance = Output {
             params: params,
-            value: Some(value),
-            value_randomness: Some(value_randomness),
+            value_commitment: Some(value_commitment.clone()),
             g_d: Some(g_d.clone()),
             pk_d: Some(pk_d.clone()),
             commitment_randomness: Some(commitment_randomness),
@@ -721,28 +725,21 @@ fn test_output_circuit_with_bls12_381() {
         assert_eq!(cs.hash(), "2896f259ad7a50c83604976ee9362358396d547b70f2feaf91d82d287e4ffc1d");
 
         let expected_cm = ::primitives::Note {
-            value: value,
+            value: value_commitment.value,
             g_d: g_d.clone(),
             pk_d: pk_d.clone(),
             r: commitment_randomness.clone()
         }.cm(params);
 
-        let expected_value_cm = params.generator(FixedGenerators::ValueCommitmentValue)
-                                      .mul(fs::FsRepr::from(value), params)
-                                      .add(
-                                          &params.generator(FixedGenerators::ValueCommitmentRandomness)
-                                          .mul(value_randomness, params),
-                                          params
-                                      );
-        let expected_value_cm_xy = expected_value_cm.into_xy();
+        let expected_value_cm = value_commitment.cm(params).into_xy();
 
         let expected_epk = g_d.mul(esk, params);
         let expected_epk_xy = expected_epk.into_xy();
 
         assert_eq!(cs.num_inputs(), 6);
         assert_eq!(cs.get_input(0, "ONE"), Fr::one());
-        assert_eq!(cs.get_input(1, "value commitment/commitment point/x/input variable"), expected_value_cm_xy.0);
-        assert_eq!(cs.get_input(2, "value commitment/commitment point/y/input variable"), expected_value_cm_xy.1);
+        assert_eq!(cs.get_input(1, "value commitment/commitment point/x/input variable"), expected_value_cm.0);
+        assert_eq!(cs.get_input(2, "value commitment/commitment point/y/input variable"), expected_value_cm.1);
         assert_eq!(cs.get_input(3, "epk/x/input variable"), expected_epk_xy.0);
         assert_eq!(cs.get_input(4, "epk/y/input variable"), expected_epk_xy.1);
         assert_eq!(cs.get_input(5, "commitment/input variable"), expected_cm);

@@ -27,6 +27,28 @@ use jubjub::{
 
 use blake2_rfc::blake2s::Blake2s;
 
+#[derive(Clone)]
+pub struct ValueCommitment<E: JubjubEngine> {
+    pub value: u64,
+    pub randomness: E::Fs
+}
+
+impl<E: JubjubEngine> ValueCommitment<E> {
+    pub fn cm(
+        &self,
+        params: &E::Params
+    ) -> edwards::Point<E, PrimeOrder>
+    {
+        params.generator(FixedGenerators::ValueCommitmentValue)
+              .mul(self.value, params)
+              .add(
+                  &params.generator(FixedGenerators::ValueCommitmentRandomness)
+                  .mul(self.randomness, params),
+                  params
+              )
+    }
+}
+
 pub struct ProofGenerationKey<E: JubjubEngine> {
     pub ak: edwards::Point<E, PrimeOrder>,
     pub rsk: E::Fs
