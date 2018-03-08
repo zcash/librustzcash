@@ -49,6 +49,7 @@ impl<E: JubjubEngine> ValueCommitment<E> {
     }
 }
 
+#[derive(Clone)]
 pub struct ProofGenerationKey<E: JubjubEngine> {
     pub ak: edwards::Point<E, PrimeOrder>,
     pub rsk: E::Fs
@@ -119,9 +120,20 @@ impl Diversifier {
     }
 }
 
+#[derive(Clone)]
 pub struct PaymentAddress<E: JubjubEngine> {
     pub pk_d: edwards::Point<E, PrimeOrder>,
     pub diversifier: Diversifier
+}
+
+impl<E: JubjubEngine> PaymentAddress<E> {
+    pub fn g_d(
+        &self,
+        params: &E::Params
+    ) -> Option<edwards::Point<E, PrimeOrder>>
+    {
+        self.diversifier.g_d(params)
+    }
 }
 
 pub struct Note<E: JubjubEngine> {

@@ -30,7 +30,9 @@ use jubjub::{
 use constants;
 
 use primitives::{
-    ValueCommitment
+    ValueCommitment,
+    ProofGenerationKey,
+    PaymentAddress
 };
 
 
@@ -113,21 +115,14 @@ pub struct Spend<'a, E: JubjubEngine> {
     /// Pedersen commitment to the value being spent
     pub value_commitment: Option<ValueCommitment<E>>,
 
-    /// Key which allows the proof to be constructed
-    /// as defense-in-depth against a flaw in the
-    /// protocol that would otherwise be exploitable
-    /// by a holder of a viewing key.
-    pub rsk: Option<E::Fs>,
+    /// Key required to construct proofs for spending notes
+    /// for a particular spending key
+    pub proof_generation_key: Option<ProofGenerationKey<E>>,
 
-    /// The public key that will be re-randomized for
-    /// use as a nullifier and signing key for the
-    /// transaction.
-    pub ak: Option<edwards::Point<E, PrimeOrder>>,
+    /// The payment address associated with the note
+    pub payment_address: Option<PaymentAddress<E>>,
 
-    /// The diversified base used to compute pk_d.
-    pub g_d: Option<edwards::Point<E, PrimeOrder>>,
-
-    /// The randomness used to hide the note commitment data
+    /// The randomness of the note commitment
     pub commitment_randomness: Option<E::Fs>,
 
     /// The authentication path of the commitment in the tree
@@ -149,7 +144,7 @@ impl<'a, E: JubjubEngine> Circuit<E> for Spend<'a, E> {
             // Witness rsk as bits
             let rsk = boolean::field_into_boolean_vec_le(
                 cs.namespace(|| "rsk"),
-                self.rsk
+                self.proof_generation_key.as_ref().map(|k| k.rsk.clone())
             )?;
 
             // NB: We don't ensure that the bit representation of rsk
@@ -169,7 +164,7 @@ impl<'a, E: JubjubEngine> Circuit<E> for Spend<'a, E> {
         // Prover witnesses ak (ensures that it's on the curve)
         let ak = ecc::EdwardsPoint::witness(
             cs.namespace(|| "ak"),
-            self.ak,
+            self.proof_generation_key.as_ref().map(|k| k.ak.clone()),
             self.params
         )?;
 
@@ -226,11 +221,20 @@ impl<'a, E: JubjubEngine> Circuit<E> for Spend<'a, E> {
         // already guaranteed this.
         // TODO: We might as well just perform the
         // check again here, since it's not expensive.
-        let g_d = ecc::EdwardsPoint::witness(
-            cs.namespace(|| "witness g_d"),
-            self.g_d,
-            self.params
-        )?;
+        let g_d = {
+            // This binding is to avoid a weird edge case in Rust's
+            // ownership/borrowing rules. self is partially moved
+            // above, but the closure for and_then will have to
+            // move self (or a reference to self) to reference
+            // self.params, so we have to copy self.params here.
+            let params = self.params;
+
+            ecc::EdwardsPoint::witness(
+                cs.namespace(|| "witness g_d"),
+                self.payment_address.as_ref().and_then(|a| a.g_d(params)),
+                self.params
+            )?
+        };
 
         // Compute pk_d = g_d^ivk
         let pk_d = g_d.mul(
@@ -614,9 +618,8 @@ fn test_input_circuit_with_bls12_381() {
         let instance = Spend {
             params: params,
             value_commitment: Some(value_commitment.clone()),
-            rsk: Some(rsk),
-            ak: Some(ak),
-            g_d: Some(g_d.clone()),
+            proof_generation_key: Some(proof_generation_key.clone()),
+            payment_address: Some(payment_address.clone()),
             commitment_randomness: Some(commitment_randomness),
             auth_path: auth_path.clone()
         };
