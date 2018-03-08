@@ -1,3 +1,9 @@
+/// First 64 bytes of the BLAKE2s input during group hash.
+/// This is chosen to be some random string that we couldn't have anticipated when we designed
+/// the algorithm, for rigidity purposes.
+/// We deliberately use an ASCII hex string of 32 bytes here.
+pub const GH_FIRST_BLOCK: &'static [u8; 64] = b"0000000000000000002ffe76b973aabaff1d1557d79acf2c3795809c83caf580";
+
 // BLAKE2s invocation personalizations
 /// BLAKE2s Personalization for CRH^ivk = BLAKE2s(ak | rk)
 pub const CRH_IVK_PERSONALIZATION: &'static [u8; 8] = b"Zcashivk";
