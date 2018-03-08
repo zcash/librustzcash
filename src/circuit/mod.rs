@@ -49,6 +49,60 @@ impl<T> Assignment<T> for Option<T> {
     }
 }
 
+/// Exposes a Pedersen commitment to the value as an
+/// input to the circuit
+fn expose_value_commitment<E, CS>(
+    mut cs: CS,
+    value: Option<u64>,
+    randomness: Option<E::Fs>,
+    params: &E::Params
+) -> Result<Vec<boolean::Boolean>, SynthesisError>
+    where E: JubjubEngine,
+          CS: ConstraintSystem<E>
+{
+    // Booleanize the value into little-endian bit order
+    let value_bits = boolean::u64_into_boolean_vec_le(
+        cs.namespace(|| "value"),
+        value
+    )?;
+
+    // Compute the note value in the exponent
+    let gv = ecc::fixed_base_multiplication(
+        cs.namespace(|| "compute the value in the exponent"),
+        FixedGenerators::ValueCommitmentValue,
+        &value_bits,
+        params
+    )?;
+
+    // Booleanize the randomness. This does not ensure
+    // the bit representation is "in the field" because
+    // it doesn't matter for security.
+    let hr = boolean::field_into_boolean_vec_le(
+        cs.namespace(|| "hr"),
+        randomness
+    )?;
+
+    // Compute the randomness in the exponent
+    let hr = ecc::fixed_base_multiplication(
+        cs.namespace(|| "computation of randomization for value commitment"),
+        FixedGenerators::ValueCommitmentRandomness,
+        &hr,
+        params
+    )?;
+
+    // Compute the Pedersen commitment to the value
+    let gvhr = gv.add(
+        cs.namespace(|| "computation of value commitment"),
+        &hr,
+        params
+    )?;
+
+    // Expose the commitment as an input to the circuit
+    gvhr.inputize(cs.namespace(|| "commitment point"))?;
+
+    Ok(value_bits)
+}
+
 /// This is an instance of the `Spend` circuit.
 pub struct Spend<'a, E: JubjubEngine> {
     pub params: &'a E::Params,
@@ -76,47 +130,12 @@ pub struct Spend<'a, E: JubjubEngine> {
 impl<'a, E: JubjubEngine> Circuit<E> for Spend<'a, E> {
     fn synthesize<CS: ConstraintSystem<E>>(self, cs: &mut CS) -> Result<(), SynthesisError>
     {
-        // Booleanize the value into little-endian bit order
-        let value_bits = boolean::u64_into_boolean_vec_le(
-            cs.namespace(|| "value"),
-            self.value
+        let value_bits = expose_value_commitment(
+            cs.namespace(|| "value commitment"),
+            self.value,
+            self.value_randomness,
+            self.params
         )?;
-
-        {
-            // Compute the note value in the exponent
-            let gv = ecc::fixed_base_multiplication(
-                cs.namespace(|| "compute the value in the exponent"),
-                FixedGenerators::ValueCommitmentValue,
-                &value_bits,
-                self.params
-            )?;
-        
-            // Booleanize the randomness. This does not ensure
-            // the bit representation is "in the field" because
-            // it doesn't matter for security.
-            let hr = boolean::field_into_boolean_vec_le(
-                cs.namespace(|| "hr"),
-                self.value_randomness
-            )?;
-
-            // Compute the randomness in the exponent
-            let hr = ecc::fixed_base_multiplication(
-                cs.namespace(|| "computation of randomization for value commitment"),
-                FixedGenerators::ValueCommitmentRandomness,
-                &hr,
-                self.params
-            )?;
-
-            // Compute the Pedersen commitment to the value
-            let gvhr = gv.add(
-                cs.namespace(|| "computation of value commitment"),
-                &hr,
-                self.params
-            )?;
-
-            // Expose the commitment as an input to the circuit
-            gvhr.inputize(cs.namespace(|| "value commitment"))?;
-        }
 
         // Compute rk = [rsk] ProvingPublicKey
         let rk;
@@ -402,47 +421,12 @@ pub struct Output<'a, E: JubjubEngine> {
 impl<'a, E: JubjubEngine> Circuit<E> for Output<'a, E> {
     fn synthesize<CS: ConstraintSystem<E>>(self, cs: &mut CS) -> Result<(), SynthesisError>
     {
-        // Booleanize the value into little-endian bit order
-        let value_bits = boolean::u64_into_boolean_vec_le(
-            cs.namespace(|| "value"),
-            self.value
+        let value_bits = expose_value_commitment(
+            cs.namespace(|| "value commitment"),
+            self.value,
+            self.value_randomness,
+            self.params
         )?;
-
-        {
-            // Compute the note value in the exponent
-            let gv = ecc::fixed_base_multiplication(
-                cs.namespace(|| "compute the value in the exponent"),
-                FixedGenerators::ValueCommitmentValue,
-                &value_bits,
-                self.params
-            )?;
-        
-            // Booleanize the randomness. This does not ensure
-            // the bit representation is "in the field" because
-            // it doesn't matter for security.
-            let hr = boolean::field_into_boolean_vec_le(
-                cs.namespace(|| "hr"),
-                self.value_randomness
-            )?;
-
-            // Compute the randomness in the exponent
-            let hr = ecc::fixed_base_multiplication(
-                cs.namespace(|| "computation of randomization for value commitment"),
-                FixedGenerators::ValueCommitmentRandomness,
-                &hr,
-                self.params
-            )?;
-
-            // Compute the Pedersen commitment to the value
-            let gvhr = gv.add(
-                cs.namespace(|| "computation of value commitment"),
-                &hr,
-                self.params
-            )?;
-
-            // Expose the commitment as an input to the circuit
-            gvhr.inputize(cs.namespace(|| "value commitment"))?;
-        }
 
         // Let's start to construct our note, which contains
         // value (big endian)
@@ -645,8 +629,8 @@ fn test_input_circuit_with_bls12_381() {
 
         assert_eq!(cs.num_inputs(), 6);
         assert_eq!(cs.get_input(0, "ONE"), Fr::one());
-        assert_eq!(cs.get_input(1, "value commitment/x/input variable"), expected_value_cm_xy.0);
-        assert_eq!(cs.get_input(2, "value commitment/y/input variable"), expected_value_cm_xy.1);
+        assert_eq!(cs.get_input(1, "value commitment/commitment point/x/input variable"), expected_value_cm_xy.0);
+        assert_eq!(cs.get_input(2, "value commitment/commitment point/y/input variable"), expected_value_cm_xy.1);
 
         let note = ::primitives::Note {
             value: value,
@@ -757,8 +741,8 @@ fn test_output_circuit_with_bls12_381() {
 
         assert_eq!(cs.num_inputs(), 6);
         assert_eq!(cs.get_input(0, "ONE"), Fr::one());
-        assert_eq!(cs.get_input(1, "value commitment/x/input variable"), expected_value_cm_xy.0);
-        assert_eq!(cs.get_input(2, "value commitment/y/input variable"), expected_value_cm_xy.1);
+        assert_eq!(cs.get_input(1, "value commitment/commitment point/x/input variable"), expected_value_cm_xy.0);
+        assert_eq!(cs.get_input(2, "value commitment/commitment point/y/input variable"), expected_value_cm_xy.1);
         assert_eq!(cs.get_input(3, "epk/x/input variable"), expected_epk_xy.0);
         assert_eq!(cs.get_input(4, "epk/y/input variable"), expected_epk_xy.1);
         assert_eq!(cs.get_input(5, "commitment/input variable"), expected_cm);
