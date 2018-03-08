@@ -22,7 +22,6 @@ use bellman::{
 
 use jubjub::{
     JubjubEngine,
-    Unknown,
     PrimeOrder,
     FixedGenerators,
     edwards
@@ -55,9 +54,9 @@ pub struct Spend<'a, E: JubjubEngine> {
     /// The public key that will be re-randomized for
     /// use as a nullifier and signing key for the
     /// transaction.
-    pub ak: Option<edwards::Point<E, Unknown>>,
+    pub ak: Option<edwards::Point<E, PrimeOrder>>,
     /// The diversified base used to compute pk_d.
-    pub g_d: Option<edwards::Point<E, Unknown>>,
+    pub g_d: Option<edwards::Point<E, PrimeOrder>>,
     /// The randomness used to hide the note commitment data
     pub commitment_randomness: Option<E::Fs>,
     /// The authentication path of the commitment in the tree
@@ -482,7 +481,7 @@ impl<'a, E: JubjubEngine> Circuit<E> for Output<'a, E> {
 
 #[test]
 fn test_input_circuit_with_bls12_381() {
-    use pairing::{Field};
+    use pairing::{Field, BitIterator};
     use pairing::bls12_381::*;
     use rand::{SeedableRng, Rng, XorShiftRng};
     use ::circuit::test::*;
@@ -495,10 +494,34 @@ fn test_input_circuit_with_bls12_381() {
 
     let value: u64 = 1;
     let value_randomness: fs::Fs = rng.gen();
-    let ak: edwards::Point<Bls12, Unknown> = edwards::Point::rand(rng, params);
-    let g_d: edwards::Point<Bls12, Unknown> = edwards::Point::rand(rng, params);
-    let commitment_randomness: fs::Fs = rng.gen();
+
     let rsk: fs::Fs = rng.gen();
+    let ak: edwards::Point<Bls12, PrimeOrder> = edwards::Point::rand(rng, params).mul_by_cofactor(params);
+
+    let proof_generation_key = ::primitives::ProofGenerationKey {
+        ak: ak.clone(),
+        rsk: rsk.clone()
+    };
+
+    let viewing_key = proof_generation_key.into_viewing_key(params);
+
+    let payment_address;
+
+    loop {
+        let diversifier = ::primitives::Diversifier(rng.gen());
+
+        if let Some(p) = viewing_key.into_payment_address(
+            diversifier,
+            params
+        )
+        {
+            payment_address = p;
+            break;
+        }
+    }
+
+    let g_d = payment_address.diversifier.g_d(params).unwrap();
+    let commitment_randomness: fs::Fs = rng.gen();
     let auth_path = vec![Some((rng.gen(), rng.gen())); tree_depth];
 
     {
@@ -510,7 +533,7 @@ fn test_input_circuit_with_bls12_381() {
             value_randomness: Some(value_randomness),
             rsk: Some(rsk),
             ak: Some(ak),
-            g_d: Some(g_d),
+            g_d: Some(g_d.clone()),
             commitment_randomness: Some(commitment_randomness),
             auth_path: auth_path.clone()
         };
@@ -535,9 +558,54 @@ fn test_input_circuit_with_bls12_381() {
         assert_eq!(cs.get_input(1, "value commitment/x/input variable"), expected_value_cm_xy.0);
         assert_eq!(cs.get_input(2, "value commitment/y/input variable"), expected_value_cm_xy.1);
 
-        cs.get_input(3, "anchor/input variable");
-        cs.get_input(4, "nullifier/x/input variable");
-        cs.get_input(5, "nullifier/y/input variable");
+        let note = ::primitives::Note {
+            value: value,
+            g_d: g_d.clone(),
+            pk_d: payment_address.pk_d.clone(),
+            r: commitment_randomness.clone()
+        };
+
+        let mut position = 0u64;
+        let mut cur = note.cm(params);
+
+        assert_eq!(cs.get("randomization of note commitment/x3/num"), cur);
+
+        for (i, val) in auth_path.into_iter().enumerate()
+        {
+            let (uncle, b) = val.unwrap();
+
+            let mut lhs = cur;
+            let mut rhs = uncle;
+
+            if b {
+                ::std::mem::swap(&mut lhs, &mut rhs);
+            }
+
+            let mut lhs: Vec<bool> = BitIterator::new(lhs.into_repr()).collect();
+            let mut rhs: Vec<bool> = BitIterator::new(rhs.into_repr()).collect();
+
+            lhs.reverse();
+            rhs.reverse();
+
+            cur = ::pedersen_hash::pedersen_hash::<Bls12, _>(
+                ::pedersen_hash::Personalization::MerkleTree(i),
+                lhs.into_iter()
+                   .take(Fr::NUM_BITS as usize)
+                   .chain(rhs.into_iter().take(Fr::NUM_BITS as usize)),
+                params
+            ).into_xy().0;
+
+            if b {
+                position |= 1 << i;
+            }
+        }
+
+        let expected_nf = note.nf(&viewing_key, position, params);
+        let expected_nf_xy = expected_nf.into_xy();
+
+        assert_eq!(cs.get_input(3, "anchor/input variable"), cur);
+        assert_eq!(cs.get_input(4, "nullifier/x/input variable"), expected_nf_xy.0);
+        assert_eq!(cs.get_input(5, "nullifier/y/input variable"), expected_nf_xy.1);
     }
 }
 

@@ -25,6 +25,8 @@ const PRF_NR_PERSONALIZATION: &'static [u8; 8]  = b"WhatTheH";
 // Group hash personalizations
 /// BLAKE2s Personalization for Pedersen hash generators.
 const PEDERSEN_HASH_GENERATORS_PERSONALIZATION: &'static [u8; 8] = b"PEDERSEN";
+/// BLAKE2s Personalization for the group hash for key diversification
+const KEY_DIVERSIFICATION_PERSONALIZATION: &'static [u8; 8] = b"Zcash_gh";
 /// BLAKE2s Personalization for the proof generation key base point
 const PROOF_GENERATION_KEY_BASE_GENERATOR_PERSONALIZATION: &'static [u8; 8] = b"12345678";
 /// BLAKE2s Personalization for the note commitment randomness generator
