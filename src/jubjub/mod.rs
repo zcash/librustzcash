@@ -24,7 +24,9 @@ use pairing::{
     SqrtField
 };
 
-use super::group_hash::group_hash;
+use group_hash::group_hash;
+
+use constants;
 
 use pairing::bls12_381::{
     Bls12,
@@ -188,7 +190,7 @@ impl JubjubBls12 {
             let mut pedersen_hash_generators = vec![];
 
             while pedersen_hash_generators.len() < 5 {
-                let gh = group_hash(&[cur], ::PEDERSEN_HASH_GENERATORS_PERSONALIZATION, &tmp);
+                let gh = group_hash(&[cur], constants::PEDERSEN_HASH_GENERATORS_PERSONALIZATION, &tmp);
                 // We don't want to overflow and start reusing generators
                 assert!(cur != u8::max_value());
                 cur += 1;
@@ -228,22 +230,22 @@ impl JubjubBls12 {
                 for c in 0..(FixedGenerators::Max as usize) {
                     let p = match c {
                         c if c == (FixedGenerators::ProofGenerationKey as usize) => {
-                            ::PROOF_GENERATION_KEY_BASE_GENERATOR_PERSONALIZATION
+                            constants::PROOF_GENERATION_KEY_BASE_GENERATOR_PERSONALIZATION
                         },
                         c if c == (FixedGenerators::NoteCommitmentRandomness as usize) => {
-                            ::NOTE_COMMITMENT_RANDOMNESS_GENERATOR_PERSONALIZATION
+                            constants::NOTE_COMMITMENT_RANDOMNESS_GENERATOR_PERSONALIZATION
                         },
                         c if c == (FixedGenerators::NullifierPosition as usize) => {
-                            ::NULLIFIER_POSITION_IN_TREE_GENERATOR_PERSONALIZATION
+                            constants::NULLIFIER_POSITION_IN_TREE_GENERATOR_PERSONALIZATION
                         },
                         c if c == (FixedGenerators::ValueCommitmentValue as usize) => {
-                            ::VALUE_COMMITMENT_VALUE_GENERATOR_PERSONALIZATION
+                            constants::VALUE_COMMITMENT_VALUE_GENERATOR_PERSONALIZATION
                         },
                         c if c == (FixedGenerators::ValueCommitmentRandomness as usize) => {
-                            ::VALUE_COMMITMENT_RANDOMNESS_GENERATOR_PERSONALIZATION
+                            constants::VALUE_COMMITMENT_RANDOMNESS_GENERATOR_PERSONALIZATION
                         },
                         c if c == (FixedGenerators::SpendingKeyGenerator as usize) => {
-                            ::SPENDING_KEY_GENERATOR_PERSONALIZATION
+                            constants::SPENDING_KEY_GENERATOR_PERSONALIZATION
                         },
                         _ => unreachable!()
                     };

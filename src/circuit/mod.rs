@@ -27,6 +27,8 @@ use jubjub::{
     edwards
 };
 
+use constants;
+
 trait Assignment<T> {
     fn get(&self) -> Result<&T, SynthesisError>;
 }
@@ -157,7 +159,7 @@ impl<'a, E: JubjubEngine> Circuit<E> for Spend<'a, E> {
         let mut ivk = blake2s::blake2s(
             cs.namespace(|| "computation of ivk"),
             &vk,
-            ::CRH_IVK_PERSONALIZATION
+            constants::CRH_IVK_PERSONALIZATION
         )?;
 
         // Little endian bit order
@@ -301,7 +303,7 @@ impl<'a, E: JubjubEngine> Circuit<E> for Spend<'a, E> {
         let mut rho = blake2s::blake2s(
             cs.namespace(|| "rho computation"),
             &rho_preimage,
-            ::PRF_NR_PERSONALIZATION
+            constants::PRF_NR_PERSONALIZATION
         )?;
 
         // Little endian bit order

@@ -3,6 +3,8 @@ use pairing::{
     PrimeFieldRepr
 };
 
+use constants;
+
 use group_hash::group_hash;
 
 use pedersen_hash::{
@@ -52,7 +54,7 @@ impl<E: JubjubEngine> ViewingKey<E> {
         self.ak.write(&mut preimage[0..32]).unwrap();
         self.rk.write(&mut preimage[32..64]).unwrap();
 
-        let mut h = Blake2s::with_params(32, &[], &[], ::CRH_IVK_PERSONALIZATION);
+        let mut h = Blake2s::with_params(32, &[], &[], constants::CRH_IVK_PERSONALIZATION);
         h.update(&preimage);
         let mut h = h.finalize().as_ref().to_vec();
 
@@ -91,7 +93,7 @@ impl Diversifier {
         params: &E::Params
     ) -> Option<edwards::Point<E, PrimeOrder>>
     {
-        group_hash::<E>(&self.0, ::KEY_DIVERSIFICATION_PERSONALIZATION, params)
+        group_hash::<E>(&self.0, constants::KEY_DIVERSIFICATION_PERSONALIZATION, params)
     }
 }
 
@@ -167,7 +169,7 @@ impl<E: JubjubEngine> Note<E> {
         let mut nr_preimage = [0u8; 64];
         viewing_key.rk.write(&mut nr_preimage[0..32]).unwrap();
         cm_plus_position.write(&mut nr_preimage[32..64]).unwrap();
-        let mut h = Blake2s::with_params(32, &[], &[], ::PRF_NR_PERSONALIZATION);
+        let mut h = Blake2s::with_params(32, &[], &[], constants::PRF_NR_PERSONALIZATION);
         h.update(&nr_preimage);
         let mut h = h.finalize().as_ref().to_vec();
 
