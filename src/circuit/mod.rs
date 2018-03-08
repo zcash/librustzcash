@@ -22,9 +22,7 @@ use bellman::{
 
 use jubjub::{
     JubjubEngine,
-    PrimeOrder,
-    FixedGenerators,
-    edwards
+    FixedGenerators
 };
 
 use constants;
@@ -82,11 +80,8 @@ pub struct Output<'a, E: JubjubEngine> {
     /// Pedersen commitment to the value being spent
     pub value_commitment: Option<ValueCommitment<E>>,
 
-    /// The diversified base, computed by GH(d)
-    pub g_d: Option<edwards::Point<E, PrimeOrder>>,
-
-    /// The diversified address point, computed by GH(d)^ivk
-    pub pk_d: Option<edwards::Point<E, PrimeOrder>>,
+    /// The payment address of the recipient
+    pub payment_address: Option<PaymentAddress<E>>,
 
     /// The randomness used to hide the note commitment data
     pub commitment_randomness: Option<E::Fs>,
@@ -446,11 +441,13 @@ impl<'a, E: JubjubEngine> Circuit<E> for Output<'a, E> {
 
         // Let's deal with g_d
         {
+            let params = self.params;
+
             // Prover witnesses g_d, ensuring it's on the
             // curve.
             let g_d = ecc::EdwardsPoint::witness(
                 cs.namespace(|| "witness g_d"),
-                self.g_d,
+                self.payment_address.as_ref().and_then(|a| a.g_d(params)),
                 self.params
             )?;
 
@@ -496,7 +493,7 @@ impl<'a, E: JubjubEngine> Circuit<E> for Output<'a, E> {
         // they would like.
         {
             // Just grab pk_d from the witness
-            let pk_d = self.pk_d.map(|e| e.into_xy());
+            let pk_d = self.payment_address.as_ref().map(|e| e.pk_d.into_xy());
 
             // Witness the y-coordinate, encoded as little
             // endian bits (to match the representation)
@@ -570,7 +567,7 @@ fn test_input_circuit_with_bls12_381() {
     use pairing::bls12_381::*;
     use rand::{SeedableRng, Rng, XorShiftRng};
     use ::circuit::test::*;
-    use jubjub::{JubjubBls12, fs};
+    use jubjub::{JubjubBls12, fs, edwards};
 
     let params = &JubjubBls12::new();
     let rng = &mut XorShiftRng::from_seed([0x3dbe6259, 0x8d313d76, 0x3237db17, 0xe5bc0654]);
@@ -583,7 +580,7 @@ fn test_input_circuit_with_bls12_381() {
     };
 
     let rsk: fs::Fs = rng.gen();
-    let ak: edwards::Point<Bls12, PrimeOrder> = edwards::Point::rand(rng, params).mul_by_cofactor(params);
+    let ak = edwards::Point::rand(rng, params).mul_by_cofactor(params);
 
     let proof_generation_key = ::primitives::ProofGenerationKey {
         ak: ak.clone(),
@@ -693,7 +690,7 @@ fn test_output_circuit_with_bls12_381() {
     use pairing::bls12_381::*;
     use rand::{SeedableRng, Rng, XorShiftRng};
     use ::circuit::test::*;
-    use jubjub::{JubjubBls12, fs};
+    use jubjub::{JubjubBls12, fs, edwards};
 
     let params = &JubjubBls12::new();
     let rng = &mut XorShiftRng::from_seed([0x3dbe6258, 0x8d313d76, 0x3237db17, 0xe5bc0654]);
@@ -703,8 +700,31 @@ fn test_output_circuit_with_bls12_381() {
         randomness: rng.gen()
     };
 
-    let g_d: edwards::Point<Bls12, PrimeOrder> = edwards::Point::rand(rng, params).mul_by_cofactor(params);
-    let pk_d: edwards::Point<Bls12, PrimeOrder> = edwards::Point::rand(rng, params).mul_by_cofactor(params);
+    let rsk: fs::Fs = rng.gen();
+    let ak = edwards::Point::rand(rng, params).mul_by_cofactor(params);
+
+    let proof_generation_key = ::primitives::ProofGenerationKey {
+        ak: ak.clone(),
+        rsk: rsk.clone()
+    };
+
+    let viewing_key = proof_generation_key.into_viewing_key(params);
+
+    let payment_address;
+
+    loop {
+        let diversifier = ::primitives::Diversifier(rng.gen());
+
+        if let Some(p) = viewing_key.into_payment_address(
+            diversifier,
+            params
+        )
+        {
+            payment_address = p;
+            break;
+        }
+    }
+
     let commitment_randomness: fs::Fs = rng.gen();
     let esk: fs::Fs = rng.gen();
 
@@ -714,8 +734,7 @@ fn test_output_circuit_with_bls12_381() {
         let instance = Output {
             params: params,
             value_commitment: Some(value_commitment.clone()),
-            g_d: Some(g_d.clone()),
-            pk_d: Some(pk_d.clone()),
+            payment_address: Some(payment_address.clone()),
             commitment_randomness: Some(commitment_randomness),
             esk: Some(esk.clone())
         };
@@ -726,16 +745,15 @@ fn test_output_circuit_with_bls12_381() {
         assert_eq!(cs.num_constraints(), 7827);
         assert_eq!(cs.hash(), "2896f259ad7a50c83604976ee9362358396d547b70f2feaf91d82d287e4ffc1d");
 
-        let expected_cm = ::primitives::Note {
-            value: value_commitment.value,
-            g_d: g_d.clone(),
-            pk_d: pk_d.clone(),
-            r: commitment_randomness.clone()
-        }.cm(params);
+        let expected_cm = payment_address.create_note(
+            value_commitment.value,
+            commitment_randomness,
+            params
+        ).expect("should be valid").cm(params);
 
         let expected_value_cm = value_commitment.cm(params).into_xy();
 
-        let expected_epk = g_d.mul(esk, params);
+        let expected_epk = payment_address.g_d(params).expect("should be valid").mul(esk, params);
         let expected_epk_xy = expected_epk.into_xy();
 
         assert_eq!(cs.num_inputs(), 6);

@@ -134,6 +134,23 @@ impl<E: JubjubEngine> PaymentAddress<E> {
     {
         self.diversifier.g_d(params)
     }
+
+    pub fn create_note(
+        &self,
+        value: u64,
+        randomness: E::Fs,
+        params: &E::Params
+    ) -> Option<Note<E>>
+    {
+        self.g_d(params).map(|g_d| {
+            Note {
+                value: value,
+                r: randomness,
+                g_d: g_d,
+                pk_d: self.pk_d.clone()
+            }
+        })
+    }
 }
 
 pub struct Note<E: JubjubEngine> {
