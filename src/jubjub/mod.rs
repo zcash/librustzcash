@@ -5,7 +5,7 @@
 //! value `A` is the smallest integer choice such that:
 //!
 //! * `(A - 2) / 4` is a small integer (`10240`).
-//! * `A^2 - 4` is quadratic residue.
+//! * `A^2 - 4` is quadratic nonresidue.
 //! * The group order of the curve and its quadratic twist has a large
 //!   prime factor.
 //!
