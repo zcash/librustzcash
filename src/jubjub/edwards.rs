@@ -28,6 +28,9 @@ use std::io::{
 
 // Represents the affine point (X/Z, Y/Z) via the extended
 // twisted Edwards coordinates.
+//
+// See "Twisted Edwards Curves Revisited"
+//     Huseyin Hisil, Kenneth Koon-Ho Wong, Gary Carter, and Ed Dawson
 pub struct Point<E: JubjubEngine, Subgroup> {
     x: E::Fr,
     y: E::Fr,
@@ -120,7 +123,14 @@ impl<E: JubjubEngine> Point<E, Unknown> {
         params: &E::Params
     ) -> io::Result<Self>
     {
+        // Jubjub points are encoded least significant bit first.
+        // The most significant bit (bit 254) encodes the parity
+        // of the x-coordinate.
+
         let mut y_repr = <E::Fr as PrimeField>::Repr::default();
+
+        // This reads in big-endian, so we perform a swap of the
+        // limbs in the representation and swap the bit order.
         y_repr.read_be(reader)?;
 
         y_repr.as_mut().reverse();
@@ -393,11 +403,19 @@ impl<E: JubjubEngine, Subgroup> Point<E, Subgroup> {
     }
 
     pub fn double(&self, params: &E::Params) -> Self {
+        // Point addition is unified and complete.
+        // There are dedicated formulae, but we do
+        // not implement these now.
+        
         self.add(self, params)
     }
 
     pub fn add(&self, other: &Self, params: &E::Params) -> Self
     {
+        // See "Twisted Edwards Curves Revisited"
+        //     Huseyin Hisil, Kenneth Koon-Ho Wong, Gary Carter, and Ed Dawson
+        //     3.1 Unified Addition in E^e
+
         // A = x1 * x2
         let mut a = self.x;
         a.mul_assign(&other.x);
@@ -470,6 +488,8 @@ impl<E: JubjubEngine, Subgroup> Point<E, Subgroup> {
         params: &E::Params
     ) -> Self
     {
+        // Standard double-and-add scalar multiplication
+
         let mut res = Self::zero();
 
         for b in BitIterator::new(scalar.into()) {

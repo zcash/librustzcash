@@ -294,6 +294,19 @@ impl<E: Engine> TestConstraintSystem<E> {
         }
     }
 
+    pub fn num_inputs(&self) -> usize {
+        self.inputs.len()
+    }
+
+    pub fn get_input(&mut self, index: usize, path: &str) -> E::Fr
+    {
+        let (assignment, name) = self.inputs[index].clone();
+
+        assert_eq!(path, name);
+
+        assignment
+    }
+
     pub fn get(&mut self, path: &str) -> E::Fr
     {
         match self.named_objects.get(path) {

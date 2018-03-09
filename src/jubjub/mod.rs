@@ -1,18 +1,21 @@
-//! Jubjub is an elliptic curve defined over the BLS12-381 scalar field, Fr.
-//! It is a Montgomery curve that takes the form `y^2 = x^3 + Ax^2 + x` where
-//! `A = 40962`. This is the smallest integer choice of A such that:
+//! Jubjub is a twisted Edwards curve defined over the BLS12-381 scalar
+//! field, Fr. It takes the form `-x^2 + y^2 = 1 + dx^2y^2` with
+//! `d = -(10240/10241)`. It is birationally equivalent to a Montgomery
+//! curve of the form `y^2 = x^3 + Ax^2 + x` with `A = 40962`. This
+//! value `A` is the smallest integer choice such that:
 //!
 //! * `(A - 2) / 4` is a small integer (`10240`).
-//! * `A^2 - 4` is quadratic residue.
-//! * The group order of the curve and its quadratic twist has a large prime factor.
+//! * `A^2 - 4` is quadratic nonresidue.
+//! * The group order of the curve and its quadratic twist has a large
+//!   prime factor.
 //!
 //! Jubjub has `s = 0x0e7db4ea6533afa906673b0101343b00a6682093ccc81082d0970e5ed6f72cb7`
-//! as the prime subgroup order, with cofactor 8. (The twist has cofactor 4.)
+//! as the prime subgroup order, with cofactor 8. (The twist has
+//! cofactor 4.)
 //!
-//! This curve is birationally equivalent to a twisted Edwards curve of the
-//! form `-x^2 + y^2 = 1 + dx^2y^2` with `d = -(10240/10241)`. In fact, this equivalence
-//! forms a group isomorphism, so points can be freely converted between the Montgomery
-//! and twisted Edwards forms.
+//! It is a complete twisted Edwards curve, so the equivalence with
+//! the Montgomery curve forms a group isomorphism, allowing points
+//! to be freely converted between the two forms.
 
 use pairing::{
     Engine,
@@ -21,18 +24,33 @@ use pairing::{
     SqrtField
 };
 
-use super::group_hash::group_hash;
+use group_hash::group_hash;
+
+use constants;
 
 use pairing::bls12_381::{
     Bls12,
     Fr
 };
 
+/// This is an implementation of the twisted Edwards Jubjub curve.
 pub mod edwards;
+
+/// This is an implementation of the birationally equivalent
+/// Montgomery curve.
 pub mod montgomery;
+
+/// This is an implementation of the scalar field for Jubjub.
+pub mod fs;
 
 #[cfg(test)]
 pub mod tests;
+
+/// Point of unknown order.
+pub enum Unknown { }
+
+/// Point of prime order.
+pub enum PrimeOrder { }
 
 /// Fixed generators of the Jubjub curve of unknown
 /// exponent.
@@ -71,7 +89,9 @@ pub enum FixedGenerators {
 /// offers a scalar field for the embedded curve (Jubjub)
 /// and some pre-computed parameters.
 pub trait JubjubEngine: Engine {
+    /// The scalar field of the Jubjub curve
     type Fs: PrimeField + SqrtField;
+    /// The parameters of Jubjub and the Sapling protocol
     type Params: JubjubParams<Self>;
 }
 
@@ -103,14 +123,6 @@ pub trait JubjubParams<E: JubjubEngine>: Sized {
     /// fixed generator.
     fn circuit_generators(&self, FixedGenerators) -> &[Vec<(E::Fr, E::Fr)>];
 }
-
-/// Point of unknown order.
-pub enum Unknown { }
-
-/// Point of prime order.
-pub enum PrimeOrder { }
-
-pub mod fs;
 
 impl JubjubEngine for Bls12 {
     type Fs = self::fs::Fs;
@@ -163,7 +175,7 @@ impl JubjubBls12 {
         let mut montgomery_2a = montgomery_a;
         montgomery_2a.double();
 
-        let mut tmp = JubjubBls12 {
+        let mut tmp_params = JubjubBls12 {
             // d = -(10240/10241)
             edwards_d: Fr::from_str("19257038036680949359750312669786877991949435402254120286184196891950884077233").unwrap(),
             // A = 40962
@@ -173,20 +185,24 @@ impl JubjubBls12 {
             // scaling factor = sqrt(4 / (a - d))
             scale: Fr::from_str("17814886934372412843466061268024708274627479829237077604635722030778476050649").unwrap(),
 
+            // We'll initialize these below
             pedersen_hash_generators: vec![],
             pedersen_circuit_generators: vec![],
-
             fixed_base_generators: vec![],
             fixed_base_circuit_generators: vec![],
         };
 
         // Create the bases for the Pedersen hashes
         {
+            // TODO: This currently does not match the specification
             let mut cur = 0;
             let mut pedersen_hash_generators = vec![];
 
+            // TODO: This generates more bases for the Pedersen hashes
+            // than necessary, which is just a performance issue in
+            // practice.
             while pedersen_hash_generators.len() < 5 {
-                let gh = group_hash(&[cur], ::PEDERSEN_HASH_GENERATORS_PERSONALIZATION, &tmp);
+                let gh = group_hash(&[cur], constants::PEDERSEN_HASH_GENERATORS_PERSONALIZATION, &tmp_params);
                 // We don't want to overflow and start reusing generators
                 assert!(cur != u8::max_value());
                 cur += 1;
@@ -196,7 +212,20 @@ impl JubjubBls12 {
                 }
             }
 
-            tmp.pedersen_hash_generators = pedersen_hash_generators;
+            // Check for duplicates, far worse than spec inconsistencies!
+            for (i, p1) in pedersen_hash_generators.iter().enumerate() {
+                if p1 == &edwards::Point::zero() {
+                    panic!("Neutral element!");
+                }
+
+                for p2 in pedersen_hash_generators.iter().skip(i+1) {
+                    if p1 == p2 {
+                        panic!("Duplicate generator!");
+                    }
+                }
+            }
+
+            tmp_params.pedersen_hash_generators = pedersen_hash_generators;
         }
 
         // Create the bases for other parts of the protocol
@@ -207,10 +236,10 @@ impl JubjubBls12 {
                 // Each generator is found by invoking the group hash
                 // on tag 0x00, 0x01, ... until we find a valid result.
                 let find_first_gh = |personalization| {
-                    let mut cur = 0;
+                    let mut cur = 0u8;
 
                     loop {
-                        let gh = group_hash::<Bls12>(&[cur], personalization, &tmp);
+                        let gh = group_hash::<Bls12>(&[cur], personalization, &tmp_params);
                         // We don't want to overflow.
                         assert!(cur != u8::max_value());
                         cur += 1;
@@ -226,22 +255,22 @@ impl JubjubBls12 {
                 for c in 0..(FixedGenerators::Max as usize) {
                     let p = match c {
                         c if c == (FixedGenerators::ProofGenerationKey as usize) => {
-                            ::PROOF_GENERATION_KEY_BASE_GENERATOR_PERSONALIZATION
+                            constants::PROOF_GENERATION_KEY_BASE_GENERATOR_PERSONALIZATION
                         },
                         c if c == (FixedGenerators::NoteCommitmentRandomness as usize) => {
-                            ::NOTE_COMMITMENT_RANDOMNESS_GENERATOR_PERSONALIZATION
+                            constants::NOTE_COMMITMENT_RANDOMNESS_GENERATOR_PERSONALIZATION
                         },
                         c if c == (FixedGenerators::NullifierPosition as usize) => {
-                            ::NULLIFIER_POSITION_IN_TREE_GENERATOR_PERSONALIZATION
+                            constants::NULLIFIER_POSITION_IN_TREE_GENERATOR_PERSONALIZATION
                         },
                         c if c == (FixedGenerators::ValueCommitmentValue as usize) => {
-                            ::VALUE_COMMITMENT_VALUE_GENERATOR_PERSONALIZATION
+                            constants::VALUE_COMMITMENT_VALUE_GENERATOR_PERSONALIZATION
                         },
                         c if c == (FixedGenerators::ValueCommitmentRandomness as usize) => {
-                            ::VALUE_COMMITMENT_RANDOMNESS_GENERATOR_PERSONALIZATION
+                            constants::VALUE_COMMITMENT_RANDOMNESS_GENERATOR_PERSONALIZATION
                         },
                         c if c == (FixedGenerators::SpendingKeyGenerator as usize) => {
-                            ::SPENDING_KEY_GENERATOR_PERSONALIZATION
+                            constants::SPENDING_KEY_GENERATOR_PERSONALIZATION
                         },
                         _ => unreachable!()
                     };
@@ -263,7 +292,7 @@ impl JubjubBls12 {
                 }
             }
 
-            tmp.fixed_base_generators = fixed_base_generators;
+            tmp_params.fixed_base_generators = fixed_base_generators;
         }
 
         // Create the 2-bit window table lookups for each 4-bit
@@ -272,10 +301,10 @@ impl JubjubBls12 {
             let mut pedersen_circuit_generators = vec![];
 
             // Process each segment
-            for mut gen in tmp.pedersen_hash_generators.iter().cloned() {
-                let mut gen = montgomery::Point::from_edwards(&gen, &tmp);
+            for mut gen in tmp_params.pedersen_hash_generators.iter().cloned() {
+                let mut gen = montgomery::Point::from_edwards(&gen, &tmp_params);
                 let mut windows = vec![];
-                for _ in 0..tmp.pedersen_hash_chunks_per_generator() {
+                for _ in 0..tmp_params.pedersen_hash_chunks_per_generator() {
                     // Create (x, y) coeffs for this chunk
                     let mut coeffs = vec![];
                     let mut g = gen.clone();
@@ -283,19 +312,19 @@ impl JubjubBls12 {
                     // coeffs = g, g*2, g*3, g*4
                     for _ in 0..4 {
                         coeffs.push(g.into_xy().expect("cannot produce O"));
-                        g = g.add(&gen, &tmp);
+                        g = g.add(&gen, &tmp_params);
                     }
                     windows.push(coeffs);
 
                     // Our chunks are separated by 2 bits to prevent overlap.
                     for _ in 0..4 {
-                        gen = gen.double(&tmp);
+                        gen = gen.double(&tmp_params);
                     }
                 }
                 pedersen_circuit_generators.push(windows);
             }
 
-            tmp.pedersen_circuit_generators = pedersen_circuit_generators;
+            tmp_params.pedersen_circuit_generators = pedersen_circuit_generators;
         }
 
         // Create the 3-bit window table lookups for fixed-base
@@ -303,14 +332,14 @@ impl JubjubBls12 {
         {
             let mut fixed_base_circuit_generators = vec![];
 
-            for mut gen in tmp.fixed_base_generators.iter().cloned() {
+            for mut gen in tmp_params.fixed_base_generators.iter().cloned() {
                 let mut windows = vec![];
-                for _ in 0..tmp.fixed_base_chunks_per_generator() {
+                for _ in 0..tmp_params.fixed_base_chunks_per_generator() {
                     let mut coeffs = vec![(Fr::zero(), Fr::one())];
                     let mut g = gen.clone();
                     for _ in 0..7 {
                         coeffs.push(g.into_xy());
-                        g = g.add(&gen, &tmp);
+                        g = g.add(&gen, &tmp_params);
                     }
                     windows.push(coeffs);
 
@@ -320,10 +349,10 @@ impl JubjubBls12 {
                 fixed_base_circuit_generators.push(windows);
             }
 
-            tmp.fixed_base_circuit_generators = fixed_base_circuit_generators;
+            tmp_params.fixed_base_circuit_generators = fixed_base_circuit_generators;
         }
 
-        tmp
+        tmp_params
     }
 }
 
