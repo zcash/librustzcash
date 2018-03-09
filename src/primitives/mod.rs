@@ -1,4 +1,5 @@
 use pairing::{
+    Field,
     PrimeField,
     PrimeFieldRepr
 };
@@ -165,6 +166,15 @@ pub struct Note<E: JubjubEngine> {
 }
 
 impl<E: JubjubEngine> Note<E> {
+    pub fn uncommitted() -> E::Fr {
+        // The smallest u-coordinate that is not on the curve
+        // is one.
+        // TODO: This should be relocated to JubjubEngine as
+        // it's specific to the curve we're using, not all
+        // twisted edwards curves.
+        E::Fr::one()
+    }
+
     /// Computes the note commitment, returning the full point.
     fn cm_full_point(&self, params: &E::Params) -> edwards::Point<E, PrimeOrder>
     {
