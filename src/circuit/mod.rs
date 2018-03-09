@@ -233,8 +233,6 @@ impl<'a, E: JubjubEngine> Circuit<E> for Spend<'a, E> {
         // manages to witness a commitment in the
         // tree, then the Output circuit would have
         // already guaranteed this.
-        // TODO: We might as well just perform the
-        // check again here, since it's not expensive.
         let g_d = {
             // This binding is to avoid a weird edge case in Rust's
             // ownership/borrowing rules. self is partially moved
@@ -249,6 +247,12 @@ impl<'a, E: JubjubEngine> Circuit<E> for Spend<'a, E> {
                 self.params
             )?
         };
+
+        // Check that g_d is not small order. Technically, this check
+        // is already done in the Output circuit, and this proof ensures
+        // g_d is bound to a product of that check, but for defense in
+        // depth let's check it anyway. It's cheap.
+        g_d.assert_not_small_order(cs.namespace(|| "g_d not small order"), self.params)?;
 
         // Compute pk_d = g_d^ivk
         let pk_d = g_d.mul(
@@ -623,8 +627,8 @@ fn test_input_circuit_with_bls12_381() {
         instance.synthesize(&mut cs).unwrap();
 
         assert!(cs.is_satisfied());
-        assert_eq!(cs.num_constraints(), 101550);
-        assert_eq!(cs.hash(), "3cc6d9383ca882ae3666267618e826e9d51a3177fc89ef6d42d9f63b84179f77");
+        assert_eq!(cs.num_constraints(), 101566);
+        assert_eq!(cs.hash(), "e3d226975c99e17ef30f5a4b7e87d355ef3dbd80eed0c8de43780f3028946d82");
 
         let expected_value_cm = value_commitment.cm(params).into_xy();
 
