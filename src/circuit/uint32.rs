@@ -87,6 +87,31 @@ impl UInt32 {
         })
     }
 
+    pub fn into_bits_be(&self) -> Vec<Boolean> {
+        self.bits.iter().rev().cloned().collect()
+    }
+
+    pub fn from_bits_be(bits: &[Boolean]) -> Self {
+        assert_eq!(bits.len(), 32);
+
+        let mut value = Some(0u32);
+        for b in bits {
+            value.as_mut().map(|v| *v <<= 1);
+
+            match b.get_value() {
+                Some(true) => { value.as_mut().map(|v| *v |= 1); },
+                Some(false) => {},
+                None => { value = None; }
+            }
+        }
+
+        UInt32 {
+            value: value,
+            bits: bits.iter().rev().cloned().collect()
+        }
+    }
+
+
     /// Turns this `UInt32` into its little-endian byte order representation.
     pub fn into_bits(&self) -> Vec<Boolean> {
         self.bits.chunks(8)
@@ -322,6 +347,37 @@ mod test {
     use ::circuit::test::*;
     use bellman::{ConstraintSystem};
     use circuit::multieq::MultiEq;
+
+    #[test]
+    fn test_uint32_from_bits_be() {
+        let mut rng = XorShiftRng::from_seed([0x5dbe6259, 0x8d313d76, 0x3237db17, 0xe5bc0653]);
+
+        for _ in 0..1000 {
+            let mut v = (0..32).map(|_| Boolean::constant(rng.gen())).collect::<Vec<_>>();
+
+            let b = UInt32::from_bits_be(&v);
+
+            for (i, bit) in b.bits.iter().enumerate() {
+                match bit {
+                    &Boolean::Constant(bit) => {
+                        assert!(bit == ((b.value.unwrap() >> i) & 1 == 1));
+                    },
+                    _ => unreachable!()
+                }
+            }
+
+            let expected_to_be_same = b.into_bits_be();
+
+            for x in v.iter().zip(expected_to_be_same.iter())
+            {
+                match x {
+                    (&Boolean::Constant(true), &Boolean::Constant(true)) => {},
+                    (&Boolean::Constant(false), &Boolean::Constant(false)) => {},
+                    _ => unreachable!()
+                }
+            }
+        }
+    }
 
     #[test]
     fn test_uint32_from_bits() {
