@@ -294,6 +294,20 @@ impl<E: Engine> TestConstraintSystem<E> {
         }
     }
 
+    pub fn verify(&self, expected: &[E::Fr]) -> bool
+    {
+        assert_eq!(expected.len() + 1, self.inputs.len());
+
+        for (a, b) in self.inputs.iter().skip(1).zip(expected.iter())
+        {
+            if &a.0 != b {
+                return false
+            }
+        }
+
+        return true;
+    }
+
     pub fn num_inputs(&self) -> usize {
         self.inputs.len()
     }
