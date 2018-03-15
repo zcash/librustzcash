@@ -2,6 +2,7 @@
 pub mod test;
 
 pub mod boolean;
+pub mod multieq;
 pub mod uint32;
 pub mod blake2s;
 pub mod num;
@@ -627,8 +628,8 @@ fn test_input_circuit_with_bls12_381() {
         instance.synthesize(&mut cs).unwrap();
 
         assert!(cs.is_satisfied());
-        assert_eq!(cs.num_constraints(), 101566);
-        assert_eq!(cs.hash(), "e3d226975c99e17ef30f5a4b7e87d355ef3dbd80eed0c8de43780f3028946d82");
+        assert_eq!(cs.num_constraints(), 101018);
+        assert_eq!(cs.hash(), "eedcef5fd638e0168ae4d53ac58df66f0acdabea46749cc5f4b39459c8377804");
 
         let expected_value_cm = value_commitment.cm(params).into_xy();
 

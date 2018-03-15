@@ -15,6 +15,8 @@ use super::boolean::{
     AllocatedBit
 };
 
+use super::multieq::MultiEq;
+
 /// Represents an interpretation of 32 `Boolean` objects as an
 /// unsigned integer.
 #[derive(Clone)]
@@ -188,12 +190,13 @@ impl UInt32 {
     }
 
     /// Perform modular addition of several `UInt32` objects.
-    pub fn addmany<E, CS>(
-        mut cs: CS,
+    pub fn addmany<E, CS, M>(
+        mut cs: M,
         operands: &[Self]
     ) -> Result<Self, SynthesisError>
         where E: Engine,
-              CS: ConstraintSystem<E>
+              CS: ConstraintSystem<E>,
+              M: ConstraintSystem<E, Root=MultiEq<E, CS>>
     {
         // Make some arbitrary bounds for ourselves to avoid overflows
         // in the scalar field
@@ -208,7 +211,8 @@ impl UInt32 {
         // Keep track of the resulting value
         let mut result_value = Some(0u64);
 
-        // This is a linear combination that we will enforce to be "zero"
+        // This is a linear combination that we will enforce to equal the
+        // output
         let mut lc = LinearCombination::zero();
 
         let mut all_constants = true;
@@ -231,25 +235,9 @@ impl UInt32 {
             // the linear combination
             let mut coeff = E::Fr::one();
             for bit in &op.bits {
-                match bit {
-                    &Boolean::Is(ref bit) => {
-                        all_constants = false;
+                lc = lc + &bit.lc(CS::one(), coeff);
 
-                        // Add coeff * bit
-                        lc = lc + (coeff, bit.get_variable());
-                    },
-                    &Boolean::Not(ref bit) => {
-                        all_constants = false;
-
-                        // Add coeff * (1 - bit) = coeff * ONE - coeff * bit
-                        lc = lc + (coeff, CS::one()) - (coeff, bit.get_variable());
-                    },
-                    &Boolean::Constant(bit) => {
-                        if bit {
-                            lc = lc + (coeff, CS::one());
-                        }
-                    }
-                }
+                all_constants &= bit.is_constant();
 
                 coeff.double();
             }
@@ -268,6 +256,10 @@ impl UInt32 {
         // Storage area for the resulting bits
         let mut result_bits = vec![];
 
+        // Linear combination representing the output,
+        // for comparison with the sum of the operands
+        let mut result_lc = LinearCombination::zero();
+
         // Allocate each bit of the result
         let mut coeff = E::Fr::one();
         let mut i = 0;
@@ -278,8 +270,8 @@ impl UInt32 {
                 result_value.map(|v| (v >> i) & 1 == 1)
             )?;
 
-            // Subtract this bit from the linear combination to ensure the sums balance out
-            lc = lc - (coeff, b.get_variable());
+            // Add this bit to the result combination
+            result_lc = result_lc + (coeff, b.get_variable());
 
             result_bits.push(b.into());
 
@@ -288,13 +280,8 @@ impl UInt32 {
             coeff.double();
         }
 
-        // Enforce that the linear combination equals zero
-        cs.enforce(
-            || "modular addition",
-            |lc| lc,
-            |lc| lc,
-            |_| lc
-        );
+        // Enforce equality between the sum and result
+        cs.get_root().enforce_equal(i, &lc, &result_lc);
 
         // Discard carry bits that we don't care about
         result_bits.truncate(32);
@@ -315,6 +302,7 @@ mod test {
     use pairing::{Field};
     use ::circuit::test::*;
     use bellman::{ConstraintSystem};
+    use circuit::multieq::MultiEq;
 
     #[test]
     fn test_uint32_from_bits() {
@@ -406,7 +394,11 @@ mod test {
 
             let mut expected = a.wrapping_add(b).wrapping_add(c);
 
-            let r = UInt32::addmany(cs.namespace(|| "addition"), &[a_bit, b_bit, c_bit]).unwrap();
+            let r = {
+                let mut cs = MultiEq::new(&mut cs);
+                let r = UInt32::addmany(cs.namespace(|| "addition"), &[a_bit, b_bit, c_bit]).unwrap();
+                r
+            };
 
             assert!(r.value == Some(expected));
 
@@ -444,7 +436,11 @@ mod test {
             let d_bit = UInt32::alloc(cs.namespace(|| "d_bit"), Some(d)).unwrap();
 
             let r = a_bit.xor(cs.namespace(|| "xor"), &b_bit).unwrap();
-            let r = UInt32::addmany(cs.namespace(|| "addition"), &[r, c_bit, d_bit]).unwrap();
+            let r = {
+                let mut cs = MultiEq::new(&mut cs);
+                let r = UInt32::addmany(cs.namespace(|| "addition"), &[r, c_bit, d_bit]).unwrap();
+                r
+            };
 
             assert!(cs.is_satisfied());
 

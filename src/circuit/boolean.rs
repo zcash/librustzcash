@@ -367,6 +367,13 @@ pub enum Boolean {
 }
 
 impl Boolean {
+    pub fn is_constant(&self) -> bool {
+        match *self {
+            Boolean::Constant(_) => true,
+            _ => false
+        }
+    }
+
     pub fn enforce_equal<E, CS>(
         mut cs: CS,
         a: &Self,
