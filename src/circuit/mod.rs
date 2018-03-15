@@ -9,6 +9,7 @@ pub mod num;
 pub mod lookup;
 pub mod ecc;
 pub mod pedersen_hash;
+pub mod multipack;
 
 use pairing::{
     PrimeField,
