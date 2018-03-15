@@ -13,6 +13,7 @@ pub mod multipack;
 pub mod sha256;
 
 pub mod sapling;
+pub mod sprout;
 
 use bellman::{
     SynthesisError
