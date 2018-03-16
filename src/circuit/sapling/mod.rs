@@ -410,7 +410,7 @@ impl<'a, E: JubjubEngine> Circuit<E> for Spend<'a, E> {
         let nf = blake2s::blake2s(
             cs.namespace(|| "nf computation"),
             &nf_preimage,
-            constants::PRF_NR_PERSONALIZATION
+            constants::PRF_NF_PERSONALIZATION
         )?;
 
         multipack::pack_into_inputs(cs.namespace(|| "pack nullifier"), &nf)
@@ -618,7 +618,7 @@ fn test_input_circuit_with_bls12_381() {
 
         assert!(cs.is_satisfied());
         assert_eq!(cs.num_constraints(), 98776);
-        assert_eq!(cs.hash(), "c5c377cad6310a5caa74305b2fe72b53e27a9c1db110edd9c4af164e99c0db71");
+        assert_eq!(cs.hash(), "e6d326669533baf3f771267e86bd752b246184d34b1f2a68f9a6b9283f42e325");
 
         let expected_value_cm = value_commitment.cm(params).into_xy();
 
@@ -744,7 +744,7 @@ fn test_output_circuit_with_bls12_381() {
 
         assert!(cs.is_satisfied());
         assert_eq!(cs.num_constraints(), 7827);
-        assert_eq!(cs.hash(), "2896f259ad7a50c83604976ee9362358396d547b70f2feaf91d82d287e4ffc1d");
+        assert_eq!(cs.hash(), "0c3d4ee7b0ac346836f177a471b2453c3558ea5760c526faad72feb65caf275b");
 
         let expected_cm = payment_address.create_note(
             value_commitment.value,

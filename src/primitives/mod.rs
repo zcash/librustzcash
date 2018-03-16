@@ -242,7 +242,7 @@ impl<E: JubjubEngine> Note<E> {
         let mut nf_preimage = [0u8; 64];
         viewing_key.nk.write(&mut nf_preimage[0..32]).unwrap();
         rho.write(&mut nf_preimage[32..64]).unwrap();
-        let mut h = Blake2s::with_params(32, &[], &[], constants::PRF_NR_PERSONALIZATION);
+        let mut h = Blake2s::with_params(32, &[], &[], constants::PRF_NF_PERSONALIZATION);
         h.update(&nf_preimage);
         
         h.finalize().as_ref().to_vec()
