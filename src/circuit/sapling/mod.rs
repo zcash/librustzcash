@@ -88,7 +88,7 @@ fn expose_value_commitment<E, CS>(
     )?;
 
     // Compute the note value in the exponent
-    let gv = ecc::fixed_base_multiplication(
+    let value = ecc::fixed_base_multiplication(
         cs.namespace(|| "compute the value in the exponent"),
         FixedGenerators::ValueCommitmentValue,
         &value_bits,
@@ -98,28 +98,28 @@ fn expose_value_commitment<E, CS>(
     // Booleanize the randomness. This does not ensure
     // the bit representation is "in the field" because
     // it doesn't matter for security.
-    let hr = boolean::field_into_boolean_vec_le(
-        cs.namespace(|| "hr"),
+    let rcv = boolean::field_into_boolean_vec_le(
+        cs.namespace(|| "rcv"),
         value_commitment.as_ref().map(|c| c.randomness)
     )?;
 
     // Compute the randomness in the exponent
-    let hr = ecc::fixed_base_multiplication(
-        cs.namespace(|| "computation of randomization for value commitment"),
+    let rcv = ecc::fixed_base_multiplication(
+        cs.namespace(|| "computation of rcv"),
         FixedGenerators::ValueCommitmentRandomness,
-        &hr,
+        &rcv,
         params
     )?;
 
     // Compute the Pedersen commitment to the value
-    let gvhr = gv.add(
-        cs.namespace(|| "computation of value commitment"),
-        &hr,
+    let cv = value.add(
+        cs.namespace(|| "computation of cv"),
+        &rcv,
         params
     )?;
 
     // Expose the commitment as an input to the circuit
-    gvhr.inputize(cs.namespace(|| "commitment point"))?;
+    cv.inputize(cs.namespace(|| "commitment point"))?;
 
     Ok(value_bits)
 }
@@ -133,7 +133,7 @@ impl<'a, E: JubjubEngine> Circuit<E> for Spend<'a, E> {
             self.params
         )?;
 
-        // Compute nk = [nsk] ProvingPublicKey
+        // Compute nk = [nsk] ProofGenerationKey
         let nk;
         {
             // Witness nsk as bits
@@ -174,8 +174,8 @@ impl<'a, E: JubjubEngine> Circuit<E> for Spend<'a, E> {
         // Unpack ak and rk for input to BLAKE2s
 
         // This is the "viewing key" preimage for CRH^ivk
-        let mut vk = vec![];
-        vk.extend(
+        let mut ivk_preimage = vec![];
+        ivk_preimage.extend(
             ak.repr(cs.namespace(|| "representation of ak"))?
         );
 
@@ -206,24 +206,24 @@ impl<'a, E: JubjubEngine> Circuit<E> for Spend<'a, E> {
         // This is the nullifier preimage for PRF^nf
         let mut nf_preimage = vec![];
 
-        // Extend vk and nr preimages with the representation of
+        // Extend ivk and nf preimages with the representation of
         // nk.
         {
             let repr_nk = nk.repr(
                 cs.namespace(|| "representation of nk")
             )?;
 
-            vk.extend(repr_nk.iter().cloned());
+            ivk_preimage.extend(repr_nk.iter().cloned());
             nf_preimage.extend(repr_nk);
         }
 
-        assert_eq!(vk.len(), 512);
+        assert_eq!(ivk_preimage.len(), 512);
         assert_eq!(nf_preimage.len(), 256);
 
         // Compute the incoming viewing key ivk
         let mut ivk = blake2s::blake2s(
             cs.namespace(|| "computation of ivk"),
-            &vk,
+            &ivk_preimage,
             constants::CRH_IVK_PERSONALIZATION
         )?;
 
@@ -233,11 +233,7 @@ impl<'a, E: JubjubEngine> Circuit<E> for Spend<'a, E> {
         // drop_5 to ensure it's in the field
         ivk.truncate(E::Fs::CAPACITY as usize);
 
-        // Witness g_d. Ensures the point is on the
-        // curve, but not its order. If the prover
-        // manages to witness a commitment in the
-        // tree, then the Output circuit would have
-        // already guaranteed this.
+        // Witness g_d, checking that it's on the curve.
         let g_d = {
             // This binding is to avoid a weird edge case in Rust's
             // ownership/borrowing rules. self is partially moved
@@ -257,7 +253,10 @@ impl<'a, E: JubjubEngine> Circuit<E> for Spend<'a, E> {
         // is already done in the Output circuit, and this proof ensures
         // g_d is bound to a product of that check, but for defense in
         // depth let's check it anyway. It's cheap.
-        g_d.assert_not_small_order(cs.namespace(|| "g_d not small order"), self.params)?;
+        g_d.assert_not_small_order(
+            cs.namespace(|| "g_d not small order"),
+            self.params
+        )?;
 
         // Compute pk_d = g_d^ivk
         let pk_d = g_d.mul(
@@ -294,16 +293,16 @@ impl<'a, E: JubjubEngine> Circuit<E> for Spend<'a, E> {
 
         {
             // Booleanize the randomness for the note commitment
-            let cmr = boolean::field_into_boolean_vec_le(
-                cs.namespace(|| "cmr"),
+            let rcm = boolean::field_into_boolean_vec_le(
+                cs.namespace(|| "rcm"),
                 self.commitment_randomness
             )?;
 
             // Compute the note commitment randomness in the exponent
-            let cmr = ecc::fixed_base_multiplication(
+            let rcm = ecc::fixed_base_multiplication(
                 cs.namespace(|| "computation of commitment randomness"),
                 FixedGenerators::NoteCommitmentRandomness,
-                &cmr,
+                &rcm,
                 self.params
             )?;
 
@@ -311,7 +310,7 @@ impl<'a, E: JubjubEngine> Circuit<E> for Spend<'a, E> {
             // themselves hiding commitments.
             cm = cm.add(
                 cs.namespace(|| "randomization of note commitment"),
-                &cmr,
+                &rcm,
                 self.params
             )?;
         }
