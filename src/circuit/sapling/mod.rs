@@ -28,6 +28,7 @@ use super::ecc;
 use super::pedersen_hash;
 use super::blake2s;
 use super::num;
+use super::multipack;
 
 /// This is an instance of the `Spend` circuit.
 pub struct Spend<'a, E: JubjubEngine> {
@@ -45,6 +46,9 @@ pub struct Spend<'a, E: JubjubEngine> {
 
     /// The randomness of the note commitment
     pub commitment_randomness: Option<E::Fs>,
+
+    /// Re-randomization of the public key
+    pub ar: Option<E::Fs>,
 
     /// The authentication path of the commitment in the tree
     pub auth_path: Vec<Option<(E::Fr, bool)>>
@@ -129,25 +133,25 @@ impl<'a, E: JubjubEngine> Circuit<E> for Spend<'a, E> {
             self.params
         )?;
 
-        // Compute rk = [rsk] ProvingPublicKey
-        let rk;
+        // Compute nk = [nsk] ProvingPublicKey
+        let nk;
         {
-            // Witness rsk as bits
-            let rsk = boolean::field_into_boolean_vec_le(
-                cs.namespace(|| "rsk"),
-                self.proof_generation_key.as_ref().map(|k| k.rsk.clone())
+            // Witness nsk as bits
+            let nsk = boolean::field_into_boolean_vec_le(
+                cs.namespace(|| "nsk"),
+                self.proof_generation_key.as_ref().map(|k| k.nsk.clone())
             )?;
 
-            // NB: We don't ensure that the bit representation of rsk
+            // NB: We don't ensure that the bit representation of nsk
             // is "in the field" (Fs) because it's not used except to
             // demonstrate the prover knows it. If they know a
             // congruency then that's equivalent.
 
-            // Compute rk = [rsk] ProvingPublicKey
-            rk = ecc::fixed_base_multiplication(
-                cs.namespace(|| "computation of rk"),
+            // Compute nk = [nsk] ProvingPublicKey
+            nk = ecc::fixed_base_multiplication(
+                cs.namespace(|| "computation of nk"),
                 FixedGenerators::ProofGenerationKey,
-                &rsk,
+                &nsk,
                 self.params
             )?;
         }
@@ -175,22 +179,46 @@ impl<'a, E: JubjubEngine> Circuit<E> for Spend<'a, E> {
             ak.repr(cs.namespace(|| "representation of ak"))?
         );
 
-        // This is the nullifier randomness preimage for PRF^nr
-        let mut nr_preimage = vec![];
-
-        // Extend vk and nr preimages with the representation of
-        // rk.
+        // Rerandomize ak and expose it as an input to the circuit
         {
-            let repr_rk = rk.repr(
-                cs.namespace(|| "representation of rk")
+            let ar = boolean::field_into_boolean_vec_le(
+                cs.namespace(|| "ar"),
+                self.ar
             )?;
 
-            vk.extend(repr_rk.iter().cloned());
-            nr_preimage.extend(repr_rk);
+            // Compute the randomness in the exponent
+            let ar = ecc::fixed_base_multiplication(
+                cs.namespace(|| "computation of randomization for the signing key"),
+                FixedGenerators::SpendingKeyGenerator,
+                &ar,
+                self.params
+            )?;
+
+            let rk = ak.add(
+                cs.namespace(|| "computation of rk"),
+                &ar,
+                self.params
+            )?;
+
+            rk.inputize(cs.namespace(|| "rk"))?;
+        }
+
+        // This is the nullifier preimage for PRF^nf
+        let mut nf_preimage = vec![];
+
+        // Extend vk and nr preimages with the representation of
+        // nk.
+        {
+            let repr_nk = nk.repr(
+                cs.namespace(|| "representation of nk")
+            )?;
+
+            vk.extend(repr_nk.iter().cloned());
+            nf_preimage.extend(repr_nk);
         }
 
         assert_eq!(vk.len(), 512);
-        assert_eq!(nr_preimage.len(), 256);
+        assert_eq!(nf_preimage.len(), 256);
 
         // Compute the incoming viewing key ivk
         let mut ivk = blake2s::blake2s(
@@ -353,6 +381,7 @@ impl<'a, E: JubjubEngine> Circuit<E> for Spend<'a, E> {
 
         // Compute the cm + g^position for preventing
         // faerie gold attacks
+        let mut rho = cm;
         {
             // Compute the position in the exponent
             let position = ecc::fixed_base_multiplication(
@@ -363,46 +392,28 @@ impl<'a, E: JubjubEngine> Circuit<E> for Spend<'a, E> {
             )?;
 
             // Add the position to the commitment
-            cm = cm.add(
+            rho = rho.add(
                 cs.namespace(|| "faerie gold prevention"),
                 &position,
                 self.params
             )?;
         }
         
-        // Let's compute nr = BLAKE2s(rk || cm + position)
-        nr_preimage.extend(
-            cm.repr(cs.namespace(|| "representation of cm"))?
+        // Let's compute nf = BLAKE2s(rk || rho)
+        nf_preimage.extend(
+            rho.repr(cs.namespace(|| "representation of rho"))?
         );
 
-        assert_eq!(nr_preimage.len(), 512);
+        assert_eq!(nf_preimage.len(), 512);
         
-        // Compute nr
-        let mut nr = blake2s::blake2s(
-            cs.namespace(|| "nr computation"),
-            &nr_preimage,
+        // Compute nf
+        let nf = blake2s::blake2s(
+            cs.namespace(|| "nf computation"),
+            &nf_preimage,
             constants::PRF_NR_PERSONALIZATION
         )?;
 
-        // Little endian bit order
-        nr.reverse();
-
-        // We want the randomization in the field to
-        // simplify outside code.
-        // TODO: This isn't uniformly random.
-        nr.truncate(E::Fs::CAPACITY as usize);
-
-        // Compute nullifier
-        let nf = ak.mul(
-            cs.namespace(|| "computation of nf"),
-            &nr,
-            self.params
-        )?;
-
-        // Expose the nullifier publicly
-        nf.inputize(cs.namespace(|| "nullifier"))?;
-
-        Ok(())
+        multipack::pack_into_inputs(cs.namespace(|| "pack nullifier"), &nf)
     }
 }
 
@@ -560,12 +571,12 @@ fn test_input_circuit_with_bls12_381() {
         randomness: rng.gen()
     };
 
-    let rsk: fs::Fs = rng.gen();
+    let nsk: fs::Fs = rng.gen();
     let ak = edwards::Point::rand(rng, params).mul_by_cofactor(params);
 
     let proof_generation_key = ::primitives::ProofGenerationKey {
         ak: ak.clone(),
-        rsk: rsk.clone()
+        nsk: nsk.clone()
     };
 
     let viewing_key = proof_generation_key.into_viewing_key(params);
@@ -588,6 +599,7 @@ fn test_input_circuit_with_bls12_381() {
     let g_d = payment_address.diversifier.g_d(params).unwrap();
     let commitment_randomness: fs::Fs = rng.gen();
     let auth_path = vec![Some((rng.gen(), rng.gen())); tree_depth];
+    let ar: fs::Fs = rng.gen();
 
     {
         let mut cs = TestConstraintSystem::<Bls12>::new();
@@ -598,21 +610,26 @@ fn test_input_circuit_with_bls12_381() {
             proof_generation_key: Some(proof_generation_key.clone()),
             payment_address: Some(payment_address.clone()),
             commitment_randomness: Some(commitment_randomness),
+            ar: Some(ar),
             auth_path: auth_path.clone()
         };
 
         instance.synthesize(&mut cs).unwrap();
 
         assert!(cs.is_satisfied());
-        assert_eq!(cs.num_constraints(), 101018);
-        assert_eq!(cs.hash(), "eedcef5fd638e0168ae4d53ac58df66f0acdabea46749cc5f4b39459c8377804");
+        assert_eq!(cs.num_constraints(), 98776);
+        assert_eq!(cs.hash(), "c5c377cad6310a5caa74305b2fe72b53e27a9c1db110edd9c4af164e99c0db71");
 
         let expected_value_cm = value_commitment.cm(params).into_xy();
 
-        assert_eq!(cs.num_inputs(), 6);
+        assert_eq!(cs.num_inputs(), 8);
         assert_eq!(cs.get_input(0, "ONE"), Fr::one());
         assert_eq!(cs.get_input(1, "value commitment/commitment point/x/input variable"), expected_value_cm.0);
         assert_eq!(cs.get_input(2, "value commitment/commitment point/y/input variable"), expected_value_cm.1);
+
+        let rk = viewing_key.rk(ar, params).into_xy();
+        assert_eq!(cs.get_input(3, "rk/x/input variable"), rk.0);
+        assert_eq!(cs.get_input(4, "rk/y/input variable"), rk.1);
 
         let note = ::primitives::Note {
             value: value_commitment.value,
@@ -656,12 +673,15 @@ fn test_input_circuit_with_bls12_381() {
             }
         }
 
-        let expected_nf = note.nf(&viewing_key, position, params);
-        let expected_nf_xy = expected_nf.into_xy();
+        assert_eq!(cs.get_input(5, "anchor/input variable"), cur);
 
-        assert_eq!(cs.get_input(3, "anchor/input variable"), cur);
-        assert_eq!(cs.get_input(4, "nullifier/x/input variable"), expected_nf_xy.0);
-        assert_eq!(cs.get_input(5, "nullifier/y/input variable"), expected_nf_xy.1);
+        let expected_nf = note.nf(&viewing_key, position, params);
+        let expected_nf = multipack::bytes_to_bits(&expected_nf);
+        let expected_nf = multipack::compute_multipacking::<Bls12>(&expected_nf);
+        assert_eq!(expected_nf.len(), 2);
+
+        assert_eq!(cs.get_input(6, "pack nullifier/input 0"), expected_nf[0]);
+        assert_eq!(cs.get_input(7, "pack nullifier/input 1"), expected_nf[1]);
     }
 }
 
@@ -681,12 +701,12 @@ fn test_output_circuit_with_bls12_381() {
         randomness: rng.gen()
     };
 
-    let rsk: fs::Fs = rng.gen();
+    let nsk: fs::Fs = rng.gen();
     let ak = edwards::Point::rand(rng, params).mul_by_cofactor(params);
 
     let proof_generation_key = ::primitives::ProofGenerationKey {
         ak: ak.clone(),
-        rsk: rsk.clone()
+        nsk: nsk.clone()
     };
 
     let viewing_key = proof_generation_key.into_viewing_key(params);
