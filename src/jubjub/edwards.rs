@@ -318,7 +318,7 @@ impl<E: JubjubEngine, Subgroup> Point<E, Subgroup> {
                     //
                     // ... which represents the point ( x / y , (x - 1) / (x + 1) )
                     // as required by the mapping and preserves the property of
-                    // the auxillary coordinate t.
+                    // the auxiliary coordinate t.
                     //
                     // We need to scale the coordinate, so u and t will have
                     // an extra factor s.

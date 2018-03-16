@@ -119,7 +119,7 @@ pub trait JubjubParams<E: JubjubEngine>: Sized {
     fn fixed_base_chunks_per_generator(&self) -> usize;
     /// Returns a fixed generator.
     fn generator(&self, base: FixedGenerators) -> &edwards::Point<E, PrimeOrder>;
-    /// Returns a window table [0, 1, ..., 8] for different magntitudes of some
+    /// Returns a window table [0, 1, ..., 8] for different magnitudes of some
     /// fixed generator.
     fn circuit_generators(&self, FixedGenerators) -> &[Vec<(E::Fr, E::Fr)>];
 }
