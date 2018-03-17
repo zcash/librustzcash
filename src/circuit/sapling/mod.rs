@@ -127,35 +127,6 @@ fn expose_value_commitment<E, CS>(
 impl<'a, E: JubjubEngine> Circuit<E> for Spend<'a, E> {
     fn synthesize<CS: ConstraintSystem<E>>(self, cs: &mut CS) -> Result<(), SynthesisError>
     {
-        let value_bits = expose_value_commitment(
-            cs.namespace(|| "value commitment"),
-            self.value_commitment,
-            self.params
-        )?;
-
-        // Compute nk = [nsk] ProofGenerationKey
-        let nk;
-        {
-            // Witness nsk as bits
-            let nsk = boolean::field_into_boolean_vec_le(
-                cs.namespace(|| "nsk"),
-                self.proof_generation_key.as_ref().map(|k| k.nsk.clone())
-            )?;
-
-            // NB: We don't ensure that the bit representation of nsk
-            // is "in the field" (Fs) because it's not used except to
-            // demonstrate the prover knows it. If they know a
-            // congruency then that's equivalent.
-
-            // Compute nk = [nsk] ProvingPublicKey
-            nk = ecc::fixed_base_multiplication(
-                cs.namespace(|| "computation of nk"),
-                FixedGenerators::ProofGenerationKey,
-                &nsk,
-                self.params
-            )?;
-        }
-
         // Prover witnesses ak (ensures that it's on the curve)
         let ak = ecc::EdwardsPoint::witness(
             cs.namespace(|| "ak"),
@@ -170,14 +141,6 @@ impl<'a, E: JubjubEngine> Circuit<E> for Spend<'a, E> {
             cs.namespace(|| "ak not small order"),
             self.params
         )?;
-
-        // Unpack ak and rk for input to BLAKE2s
-
-        // This is the "viewing key" preimage for CRH^ivk
-        let mut ivk_preimage = vec![];
-        ivk_preimage.extend(
-            ak.repr(cs.namespace(|| "representation of ak"))?
-        );
 
         // Rerandomize ak and expose it as an input to the circuit
         {
@@ -202,6 +165,37 @@ impl<'a, E: JubjubEngine> Circuit<E> for Spend<'a, E> {
 
             rk.inputize(cs.namespace(|| "rk"))?;
         }
+
+        // Compute nk = [nsk] ProofGenerationKey
+        let nk;
+        {
+            // Witness nsk as bits
+            let nsk = boolean::field_into_boolean_vec_le(
+                cs.namespace(|| "nsk"),
+                self.proof_generation_key.as_ref().map(|k| k.nsk.clone())
+            )?;
+
+            // NB: We don't ensure that the bit representation of nsk
+            // is "in the field" (Fs) because it's not used except to
+            // demonstrate the prover knows it. If they know a
+            // congruency then that's equivalent.
+
+            // Compute nk = [nsk] ProvingPublicKey
+            nk = ecc::fixed_base_multiplication(
+                cs.namespace(|| "computation of nk"),
+                FixedGenerators::ProofGenerationKey,
+                &nsk,
+                self.params
+            )?;
+        }
+
+        // This is the "viewing key" preimage for CRH^ivk
+        let mut ivk_preimage = vec![];
+
+        // Place ak in the preimage for CRH^ivk
+        ivk_preimage.extend(
+            ak.repr(cs.namespace(|| "representation of ak"))?
+        );
 
         // This is the nullifier preimage for PRF^nf
         let mut nf_preimage = vec![];
@@ -265,6 +259,14 @@ impl<'a, E: JubjubEngine> Circuit<E> for Spend<'a, E> {
             self.params
         )?;
 
+        // Expose the value commitment and get the
+        // bits of the value (in little endian order)
+        let value_bits = expose_value_commitment(
+            cs.namespace(|| "value commitment"),
+            self.value_commitment,
+            self.params
+        )?;
+
         // Compute note contents
         // value (in big endian) followed by g_d and pk_d
         let mut note_contents = vec![];
@@ -315,8 +317,6 @@ impl<'a, E: JubjubEngine> Circuit<E> for Spend<'a, E> {
             )?;
         }
 
-        let tree_depth = self.auth_path.len();
-
         // This will store (least significant bit first)
         // the position of the note in the tree, for use
         // in nullifier computation.
@@ -326,6 +326,7 @@ impl<'a, E: JubjubEngine> Circuit<E> for Spend<'a, E> {
         // point in the prime order subgroup.
         let mut cur = cm.get_x().clone();
 
+        // Ascend the merkle tree authentication path
         for (i, e) in self.auth_path.into_iter().enumerate() {
             let cs = &mut cs.namespace(|| format!("merkle tree hash {}", i));
 
@@ -372,8 +373,6 @@ impl<'a, E: JubjubEngine> Circuit<E> for Spend<'a, E> {
                 self.params
             )?.get_x().clone(); // Injective encoding
         }
-
-        assert_eq!(position_bits.len(), tree_depth);
 
         // Expose the anchor
         cur.inputize(cs.namespace(|| "anchor"))?;
@@ -617,18 +616,18 @@ fn test_input_circuit_with_bls12_381() {
 
         assert!(cs.is_satisfied());
         assert_eq!(cs.num_constraints(), 98776);
-        assert_eq!(cs.hash(), "e6d326669533baf3f771267e86bd752b246184d34b1f2a68f9a6b9283f42e325");
-
-        let expected_value_cm = value_commitment.cm(params).into_xy();
+        assert_eq!(cs.hash(), "729850617d4e6d95cbf348f07cbe0c63b01d35718f24cbcf7df79e2c3e1a7648");
 
         assert_eq!(cs.num_inputs(), 8);
         assert_eq!(cs.get_input(0, "ONE"), Fr::one());
-        assert_eq!(cs.get_input(1, "value commitment/commitment point/x/input variable"), expected_value_cm.0);
-        assert_eq!(cs.get_input(2, "value commitment/commitment point/y/input variable"), expected_value_cm.1);
 
         let rk = viewing_key.rk(ar, params).into_xy();
-        assert_eq!(cs.get_input(3, "rk/x/input variable"), rk.0);
-        assert_eq!(cs.get_input(4, "rk/y/input variable"), rk.1);
+        assert_eq!(cs.get_input(1, "rk/x/input variable"), rk.0);
+        assert_eq!(cs.get_input(2, "rk/y/input variable"), rk.1);
+
+        let expected_value_cm = value_commitment.cm(params).into_xy();
+        assert_eq!(cs.get_input(3, "value commitment/commitment point/x/input variable"), expected_value_cm.0);
+        assert_eq!(cs.get_input(4, "value commitment/commitment point/y/input variable"), expected_value_cm.1);
 
         let note = ::primitives::Note {
             value: value_commitment.value,
