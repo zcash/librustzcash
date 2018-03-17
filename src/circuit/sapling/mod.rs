@@ -507,7 +507,7 @@ impl<'a, E: JubjubEngine> Circuit<E> for Output<'a, E> {
             note_contents.len(),
             64 + // value
             256 + // g_d
-            256 // p_d
+            256 // pk_d
         );
 
         // Compute the hash of the note contents
@@ -520,23 +520,23 @@ impl<'a, E: JubjubEngine> Circuit<E> for Output<'a, E> {
 
         {
             // Booleanize the randomness
-            let cmr = boolean::field_into_boolean_vec_le(
-                cs.namespace(|| "cmr"),
+            let rcm = boolean::field_into_boolean_vec_le(
+                cs.namespace(|| "rcm"),
                 self.commitment_randomness
             )?;
 
             // Compute the note commitment randomness in the exponent
-            let cmr = ecc::fixed_base_multiplication(
+            let rcm = ecc::fixed_base_multiplication(
                 cs.namespace(|| "computation of commitment randomness"),
                 FixedGenerators::NoteCommitmentRandomness,
-                &cmr,
+                &rcm,
                 self.params
             )?;
 
             // Randomize our note commitment
             cm = cm.add(
                 cs.namespace(|| "randomization of note commitment"),
-                &cmr,
+                &rcm,
                 self.params
             )?;
         }
