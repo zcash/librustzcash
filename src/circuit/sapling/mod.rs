@@ -623,7 +623,7 @@ fn test_input_circuit_with_bls12_381() {
 
         assert!(cs.is_satisfied());
         assert_eq!(cs.num_constraints(), 98776);
-        assert_eq!(cs.hash(), "729850617d4e6d95cbf348f07cbe0c63b01d35718f24cbcf7df79e2c3e1a7648");
+        assert_eq!(cs.hash(), "d810fa887178359f3fc5723781a0750b750dd0c02aeb0b14ff19a343db9868f1");
 
         assert_eq!(cs.num_inputs(), 8);
         assert_eq!(cs.get_input(0, "ONE"), Fr::one());
@@ -749,7 +749,7 @@ fn test_output_circuit_with_bls12_381() {
 
         assert!(cs.is_satisfied());
         assert_eq!(cs.num_constraints(), 7827);
-        assert_eq!(cs.hash(), "0c3d4ee7b0ac346836f177a471b2453c3558ea5760c526faad72feb65caf275b");
+        assert_eq!(cs.hash(), "e49724488227ae83b2360a5ddbda7e44c83e6f526a369cefeb747c5dd6aab7c7");
 
         let expected_cm = payment_address.create_note(
             value_commitment.value,

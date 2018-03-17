@@ -192,24 +192,50 @@ impl JubjubBls12 {
             fixed_base_circuit_generators: vec![],
         };
 
-        // Create the bases for the Pedersen hashes
+        fn find_group_hash<E: JubjubEngine>(
+            m: &[u8],
+            personalization: &[u8; 8],
+            params: &E::Params
+        ) -> edwards::Point<E, PrimeOrder>
         {
-            // TODO: This currently does not match the specification
-            let mut cur = 0;
-            let mut pedersen_hash_generators = vec![];
+            let mut tag = m.to_vec();
+            let i = tag.len();
+            tag.push(0u8);
 
-            // TODO: This generates more bases for the Pedersen hashes
-            // than necessary, which is just a performance issue in
-            // practice.
-            while pedersen_hash_generators.len() < 5 {
-                let gh = group_hash(&[cur], constants::PEDERSEN_HASH_GENERATORS_PERSONALIZATION, &tmp_params);
+            loop {
+                let gh = group_hash(
+                    &tag,
+                    personalization,
+                    params
+                );
+
                 // We don't want to overflow and start reusing generators
-                assert!(cur != u8::max_value());
-                cur += 1;
+                assert!(tag[i] != u8::max_value());
+                tag[i] += 1;
 
                 if let Some(gh) = gh {
-                    pedersen_hash_generators.push(gh);
+                    break gh;
                 }
+            }
+        }
+
+        // Create the bases for the Pedersen hashes
+        {
+            let mut pedersen_hash_generators = vec![];
+
+            for m in 0..5 {
+                use byteorder::{WriteBytesExt, BigEndian};
+
+                let mut segment_number = [0u8; 4];
+                (&mut segment_number[0..4]).write_u32::<BigEndian>(m).unwrap();
+
+                pedersen_hash_generators.push(
+                    find_group_hash(
+                        &segment_number,
+                        constants::PEDERSEN_HASH_GENERATORS_PERSONALIZATION,
+                        &tmp_params
+                    )
+                );
             }
 
             // Check for duplicates, far worse than spec inconsistencies!
@@ -232,52 +258,23 @@ impl JubjubBls12 {
         {
             let mut fixed_base_generators = vec![edwards::Point::zero(); FixedGenerators::Max as usize];
 
-            {
-                // Each generator is found by invoking the group hash
-                // on tag 0x00, 0x01, ... until we find a valid result.
-                let find_first_gh = |personalization| {
-                    let mut cur = 0u8;
+            fixed_base_generators[FixedGenerators::ProofGenerationKey as usize] =
+                find_group_hash(b"0", constants::PROOF_GENERATION_KEY_BASE_GENERATOR_PERSONALIZATION, &tmp_params);
 
-                    loop {
-                        let gh = group_hash::<Bls12>(&[cur], personalization, &tmp_params);
-                        // We don't want to overflow.
-                        assert!(cur != u8::max_value());
-                        cur += 1;
+            fixed_base_generators[FixedGenerators::NoteCommitmentRandomness as usize] =
+                find_group_hash(b"0", constants::NOTE_COMMITMENT_RANDOMNESS_GENERATOR_PERSONALIZATION, &tmp_params);
 
-                        if let Some(gh) = gh {
-                            break gh;
-                        }
-                    }
-                };
+            fixed_base_generators[FixedGenerators::NullifierPosition as usize] =
+                find_group_hash(b"0", constants::NULLIFIER_POSITION_IN_TREE_GENERATOR_PERSONALIZATION, &tmp_params);
 
-                // Written this way for exhaustion (double entendre). There's no
-                // way to iterate over the variants of an enum, so it's hideous.
-                for c in 0..(FixedGenerators::Max as usize) {
-                    let p = match c {
-                        c if c == (FixedGenerators::ProofGenerationKey as usize) => {
-                            constants::PROOF_GENERATION_KEY_BASE_GENERATOR_PERSONALIZATION
-                        },
-                        c if c == (FixedGenerators::NoteCommitmentRandomness as usize) => {
-                            constants::NOTE_COMMITMENT_RANDOMNESS_GENERATOR_PERSONALIZATION
-                        },
-                        c if c == (FixedGenerators::NullifierPosition as usize) => {
-                            constants::NULLIFIER_POSITION_IN_TREE_GENERATOR_PERSONALIZATION
-                        },
-                        c if c == (FixedGenerators::ValueCommitmentValue as usize) => {
-                            constants::VALUE_COMMITMENT_VALUE_GENERATOR_PERSONALIZATION
-                        },
-                        c if c == (FixedGenerators::ValueCommitmentRandomness as usize) => {
-                            constants::VALUE_COMMITMENT_RANDOMNESS_GENERATOR_PERSONALIZATION
-                        },
-                        c if c == (FixedGenerators::SpendingKeyGenerator as usize) => {
-                            constants::SPENDING_KEY_GENERATOR_PERSONALIZATION
-                        },
-                        _ => unreachable!()
-                    };
+            fixed_base_generators[FixedGenerators::ValueCommitmentValue as usize] =
+                find_group_hash(b"0", constants::VALUE_COMMITMENT_VALUE_GENERATOR_PERSONALIZATION, &tmp_params);
 
-                    fixed_base_generators[c] = find_first_gh(p);
-                }
-            }
+            fixed_base_generators[FixedGenerators::ValueCommitmentRandomness as usize] =
+                find_group_hash(b"0", constants::VALUE_COMMITMENT_RANDOMNESS_GENERATOR_PERSONALIZATION, &tmp_params);
+
+            fixed_base_generators[FixedGenerators::SpendingKeyGenerator as usize] =
+                find_group_hash(b"0", constants::SPENDING_KEY_GENERATOR_PERSONALIZATION, &tmp_params);
 
             // Check for duplicates, far worse than spec inconsistencies!
             for (i, p1) in fixed_base_generators.iter().enumerate() {
