@@ -82,7 +82,7 @@ fn expose_value_commitment<E, CS>(
           CS: ConstraintSystem<E>
 {
     // Booleanize the value into little-endian bit order
-    let value_bits = boolean::u64_into_boolean_vec_le(
+    let mut value_bits = boolean::u64_into_boolean_vec_le(
         cs.namespace(|| "value"),
         value_commitment.as_ref().map(|c| c.value)
     )?;
@@ -120,6 +120,9 @@ fn expose_value_commitment<E, CS>(
 
     // Expose the commitment as an input to the circuit
     cv.inputize(cs.namespace(|| "commitment point"))?;
+
+    // Reorder value_bits so that it's big-endian
+    value_bits.reverse();
 
     Ok(value_bits)
 }
@@ -259,21 +262,24 @@ impl<'a, E: JubjubEngine> Circuit<E> for Spend<'a, E> {
             self.params
         )?;
 
-        // Expose the value commitment and get the
-        // bits of the value (in little endian order)
-        let value_bits = expose_value_commitment(
+        // Compute note contents:
+        // value (in big endian) followed by g_d and pk_d
+        let mut note_contents = vec![];
+
+        // Expose the value commitment and place the value
+        // in the note.
+        note_contents.extend(expose_value_commitment(
             cs.namespace(|| "value commitment"),
             self.value_commitment,
             self.params
-        )?;
+        )?);
 
-        // Compute note contents
-        // value (in big endian) followed by g_d and pk_d
-        let mut note_contents = vec![];
-        note_contents.extend(value_bits.into_iter().rev());
+        // Place g_d in the note
         note_contents.extend(
             g_d.repr(cs.namespace(|| "representation of g_d"))?
         );
+
+        // Place pk_d in the note
         note_contents.extend(
             pk_d.repr(cs.namespace(|| "representation of pk_d"))?
         );
@@ -418,16 +424,17 @@ impl<'a, E: JubjubEngine> Circuit<E> for Spend<'a, E> {
 impl<'a, E: JubjubEngine> Circuit<E> for Output<'a, E> {
     fn synthesize<CS: ConstraintSystem<E>>(self, cs: &mut CS) -> Result<(), SynthesisError>
     {
-        let value_bits = expose_value_commitment(
-            cs.namespace(|| "value commitment"),
-            self.value_commitment,
-            self.params
-        )?;
-
         // Let's start to construct our note, which contains
         // value (big endian)
         let mut note_contents = vec![];
-        note_contents.extend(value_bits.into_iter().rev());
+
+        // Expose the value commitment and place the value
+        // in the note.
+        note_contents.extend(expose_value_commitment(
+            cs.namespace(|| "value commitment"),
+            self.value_commitment,
+            self.params
+        )?);
 
         // Let's deal with g_d
         {
