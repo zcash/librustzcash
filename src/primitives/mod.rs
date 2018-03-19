@@ -28,6 +28,8 @@ use jubjub::{
 
 use blake2_rfc::blake2s::Blake2s;
 
+use util::swap_bits_u64;
+
 #[derive(Clone)]
 pub struct ValueCommitment<E: JubjubEngine> {
     pub value: u64,
@@ -193,8 +195,13 @@ impl<E: JubjubEngine> Note<E> {
         // Calculate the note contents, as bytes
         let mut note_contents = vec![];
 
-        // Write the value in big endian
-        (&mut note_contents).write_u64::<BigEndian>(self.value).unwrap();
+        // Write the value in little-endian bit order
+        // swapping the bits to ensure the order is
+        // correct (LittleEndian byte order would
+        // be incorrect here.)
+        (&mut note_contents).write_u64::<BigEndian>(
+            swap_bits_u64(self.value)
+        ).unwrap();
 
         // Write g_d
         self.g_d.write(&mut note_contents).unwrap();

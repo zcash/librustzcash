@@ -82,7 +82,7 @@ fn expose_value_commitment<E, CS>(
           CS: ConstraintSystem<E>
 {
     // Booleanize the value into little-endian bit order
-    let mut value_bits = boolean::u64_into_boolean_vec_le(
+    let value_bits = boolean::u64_into_boolean_vec_le(
         cs.namespace(|| "value"),
         value_commitment.as_ref().map(|c| c.value)
     )?;
@@ -120,9 +120,6 @@ fn expose_value_commitment<E, CS>(
 
     // Expose the commitment as an input to the circuit
     cv.inputize(cs.namespace(|| "commitment point"))?;
-
-    // Reorder value_bits so that it's big-endian
-    value_bits.reverse();
 
     Ok(value_bits)
 }
@@ -624,7 +621,7 @@ fn test_input_circuit_with_bls12_381() {
 
             assert!(cs.is_satisfied());
             assert_eq!(cs.num_constraints(), 98776);
-            assert_eq!(cs.hash(), "2080d5f350cd7eff7742ab05dff18f82c0a2f29a5d2a758d805236067b2ed31f");
+            assert_eq!(cs.hash(), "ba8b2232a910b00399e90030c87c16a770e6e692fe3b4316675bdd7795df6e50");
 
             assert_eq!(cs.num_inputs(), 8);
             assert_eq!(cs.get_input(0, "ONE"), Fr::one());
@@ -752,7 +749,7 @@ fn test_output_circuit_with_bls12_381() {
 
             assert!(cs.is_satisfied());
             assert_eq!(cs.num_constraints(), 7827);
-            assert_eq!(cs.hash(), "a7810a444f7ef6d0caa8ba026ce06e64654863cd0557241282ca337858039a53");
+            assert_eq!(cs.hash(), "8db50ff0e14fae19a7d83ef47f6da3a7e3e2644d251e37b387c6408d85df3ae7");
 
             let expected_cm = payment_address.create_note(
                 value_commitment.value,
