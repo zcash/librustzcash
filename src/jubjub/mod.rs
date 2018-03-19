@@ -224,10 +224,10 @@ impl JubjubBls12 {
             let mut pedersen_hash_generators = vec![];
 
             for m in 0..5 {
-                use byteorder::{WriteBytesExt, BigEndian};
+                use byteorder::{WriteBytesExt, LittleEndian};
 
                 let mut segment_number = [0u8; 4];
-                (&mut segment_number[0..4]).write_u32::<BigEndian>(m).unwrap();
+                (&mut segment_number[0..4]).write_u32::<LittleEndian>(m).unwrap();
 
                 pedersen_hash_generators.push(
                     find_group_hash(
@@ -259,22 +259,22 @@ impl JubjubBls12 {
             let mut fixed_base_generators = vec![edwards::Point::zero(); FixedGenerators::Max as usize];
 
             fixed_base_generators[FixedGenerators::ProofGenerationKey as usize] =
-                find_group_hash(b"0", constants::PROOF_GENERATION_KEY_BASE_GENERATOR_PERSONALIZATION, &tmp_params);
+                find_group_hash(&[], constants::PROOF_GENERATION_KEY_BASE_GENERATOR_PERSONALIZATION, &tmp_params);
 
             fixed_base_generators[FixedGenerators::NoteCommitmentRandomness as usize] =
-                find_group_hash(b"0", constants::NOTE_COMMITMENT_RANDOMNESS_GENERATOR_PERSONALIZATION, &tmp_params);
+                find_group_hash(b"r", constants::PEDERSEN_HASH_GENERATORS_PERSONALIZATION, &tmp_params);
 
             fixed_base_generators[FixedGenerators::NullifierPosition as usize] =
-                find_group_hash(b"0", constants::NULLIFIER_POSITION_IN_TREE_GENERATOR_PERSONALIZATION, &tmp_params);
+                find_group_hash(&[], constants::NULLIFIER_POSITION_IN_TREE_GENERATOR_PERSONALIZATION, &tmp_params);
 
             fixed_base_generators[FixedGenerators::ValueCommitmentValue as usize] =
-                find_group_hash(b"0", constants::VALUE_COMMITMENT_VALUE_GENERATOR_PERSONALIZATION, &tmp_params);
+                find_group_hash(b"v", constants::VALUE_COMMITMENT_GENERATOR_PERSONALIZATION, &tmp_params);
 
             fixed_base_generators[FixedGenerators::ValueCommitmentRandomness as usize] =
-                find_group_hash(b"0", constants::VALUE_COMMITMENT_RANDOMNESS_GENERATOR_PERSONALIZATION, &tmp_params);
+                find_group_hash(b"r", constants::VALUE_COMMITMENT_GENERATOR_PERSONALIZATION, &tmp_params);
 
             fixed_base_generators[FixedGenerators::SpendingKeyGenerator as usize] =
-                find_group_hash(b"0", constants::SPENDING_KEY_GENERATOR_PERSONALIZATION, &tmp_params);
+                find_group_hash(&[], constants::SPENDING_KEY_GENERATOR_PERSONALIZATION, &tmp_params);
 
             // Check for duplicates, far worse than spec inconsistencies!
             for (i, p1) in fixed_base_generators.iter().enumerate() {

@@ -31,18 +31,10 @@ pub const SPENDING_KEY_GENERATOR_PERSONALIZATION: &'static [u8; 8]
 pub const PROOF_GENERATION_KEY_BASE_GENERATOR_PERSONALIZATION: &'static [u8; 8]
           = b"Zcash_H_";
 
-/// BLAKE2s Personalization for the note commitment randomness generator
-pub const NOTE_COMMITMENT_RANDOMNESS_GENERATOR_PERSONALIZATION: &'static [u8; 8]
-          = b"Zcashrcm";
-
-/// BLAKE2s Personalization for the value commitment randomness generator
-pub const VALUE_COMMITMENT_RANDOMNESS_GENERATOR_PERSONALIZATION: &'static [u8; 8]
-          = b"Zcashrcv";
-
 /// BLAKE2s Personalization for the value commitment generator for the value
-pub const VALUE_COMMITMENT_VALUE_GENERATOR_PERSONALIZATION: &'static [u8; 8]
+pub const VALUE_COMMITMENT_GENERATOR_PERSONALIZATION: &'static [u8; 8]
           = b"Zcash_cv";
 
 /// BLAKE2s Personalization for the nullifier position generator (for computing rho)
 pub const NULLIFIER_POSITION_IN_TREE_GENERATOR_PERSONALIZATION: &'static [u8; 8]
-          = b"Zcashrho";
+          = b"Zcash_J_";
