@@ -31,7 +31,6 @@ pub fn note_comm<E, CS>(
     image.push(Boolean::constant(false));
     image.push(Boolean::constant(false));
     image.extend(a_pk.iter().cloned());
-    image.extend(rho.iter().cloned());
     image.extend(value.iter().cloned());
     image.extend(rho.iter().cloned());
     image.extend(r.iter().cloned());
