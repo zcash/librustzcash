@@ -221,8 +221,10 @@ impl<'a, E: JubjubEngine> Circuit<E> for Spend<'a, E> {
             constants::CRH_IVK_PERSONALIZATION
         )?;
 
-        // Little endian bit order
-        ivk.reverse();
+        // Swap bit-endianness in each byte
+        for ivk_byte in ivk.chunks_mut(8) {
+            ivk_byte.reverse();
+        }
 
         // drop_5 to ensure it's in the field
         ivk.truncate(E::Fs::CAPACITY as usize);
@@ -621,7 +623,7 @@ fn test_input_circuit_with_bls12_381() {
 
             assert!(cs.is_satisfied());
             assert_eq!(cs.num_constraints(), 98776);
-            assert_eq!(cs.hash(), "ba8b2232a910b00399e90030c87c16a770e6e692fe3b4316675bdd7795df6e50");
+            assert_eq!(cs.hash(), "8211d52b5ad2618b2f8106c7c3f9ab213f6206e3ddbbb39e786167de5ea85dc3");
 
             assert_eq!(cs.num_inputs(), 8);
             assert_eq!(cs.get_input(0, "ONE"), Fr::one());

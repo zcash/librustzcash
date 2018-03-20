@@ -96,6 +96,9 @@ impl<E: JubjubEngine> ViewingKey<E> {
         h.update(&preimage);
         let mut h = h.finalize().as_ref().to_vec();
 
+        // Reverse the bytes to interpret it in little-endian byte order
+        h.reverse();
+
         // Drop the first five bits, so it can be interpreted as a scalar.
         h[0] &= 0b0000_0111;
 
