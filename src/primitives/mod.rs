@@ -28,6 +28,8 @@ use jubjub::{
 
 use blake2_rfc::blake2s::Blake2s;
 
+use util::swap_bits_u64;
+
 #[derive(Clone)]
 pub struct ValueCommitment<E: JubjubEngine> {
     pub value: u64,
@@ -53,34 +55,49 @@ impl<E: JubjubEngine> ValueCommitment<E> {
 #[derive(Clone)]
 pub struct ProofGenerationKey<E: JubjubEngine> {
     pub ak: edwards::Point<E, PrimeOrder>,
-    pub rsk: E::Fs
+    pub nsk: E::Fs
 }
 
 impl<E: JubjubEngine> ProofGenerationKey<E> {
     pub fn into_viewing_key(&self, params: &E::Params) -> ViewingKey<E> {
         ViewingKey {
             ak: self.ak.clone(),
-            rk: params.generator(FixedGenerators::ProofGenerationKey)
-                      .mul(self.rsk, params)
+            nk: params.generator(FixedGenerators::ProofGenerationKey)
+                      .mul(self.nsk, params)
         }
     }
 }
 
 pub struct ViewingKey<E: JubjubEngine> {
     pub ak: edwards::Point<E, PrimeOrder>,
-    pub rk: edwards::Point<E, PrimeOrder>
+    pub nk: edwards::Point<E, PrimeOrder>
 }
 
 impl<E: JubjubEngine> ViewingKey<E> {
+    pub fn rk(
+        &self,
+        ar: E::Fs,
+        params: &E::Params
+    ) -> edwards::Point<E, PrimeOrder> {
+        self.ak.add(
+            &params.generator(FixedGenerators::SpendingKeyGenerator)
+                   .mul(ar, params),
+            params
+        )
+    }
+
     fn ivk(&self) -> E::Fs {
         let mut preimage = [0; 64];
 
         self.ak.write(&mut preimage[0..32]).unwrap();
-        self.rk.write(&mut preimage[32..64]).unwrap();
+        self.nk.write(&mut preimage[32..64]).unwrap();
 
         let mut h = Blake2s::with_params(32, &[], &[], constants::CRH_IVK_PERSONALIZATION);
         h.update(&preimage);
         let mut h = h.finalize().as_ref().to_vec();
+
+        // Reverse the bytes to interpret it in little-endian byte order
+        h.reverse();
 
         // Drop the first five bits, so it can be interpreted as a scalar.
         h[0] &= 0b0000_0111;
@@ -181,8 +198,13 @@ impl<E: JubjubEngine> Note<E> {
         // Calculate the note contents, as bytes
         let mut note_contents = vec![];
 
-        // Write the value in big endian
-        (&mut note_contents).write_u64::<BigEndian>(self.value).unwrap();
+        // Write the value in little-endian bit order
+        // swapping the bits to ensure the order is
+        // correct (LittleEndian byte order would
+        // be incorrect here.)
+        (&mut note_contents).write_u64::<BigEndian>(
+            swap_bits_u64(self.value)
+        ).unwrap();
 
         // Write g_d
         self.g_d.write(&mut note_contents).unwrap();
@@ -215,10 +237,10 @@ impl<E: JubjubEngine> Note<E> {
         viewing_key: &ViewingKey<E>,
         position: u64,
         params: &E::Params
-    ) -> edwards::Point<E, PrimeOrder>
+    ) -> Vec<u8>
     {
-        // Compute cm + position
-        let cm_plus_position = self
+        // Compute rho = cm + position.G
+        let rho = self
             .cm_full_point(params)
             .add(
                 &params.generator(FixedGenerators::NullifierPosition)
@@ -226,23 +248,14 @@ impl<E: JubjubEngine> Note<E> {
                 params
             );
 
-        // Compute nr = drop_5(BLAKE2s(rk | cm_plus_position))
-        let mut nr_preimage = [0u8; 64];
-        viewing_key.rk.write(&mut nr_preimage[0..32]).unwrap();
-        cm_plus_position.write(&mut nr_preimage[32..64]).unwrap();
-        let mut h = Blake2s::with_params(32, &[], &[], constants::PRF_NR_PERSONALIZATION);
-        h.update(&nr_preimage);
-        let mut h = h.finalize().as_ref().to_vec();
-
-        // Drop the first five bits, so it can be interpreted as a scalar.
-        h[0] &= 0b0000_0111;
-
-        let mut e = <E::Fs as PrimeField>::Repr::default();
-        e.read_be(&h[..]).unwrap();
-
-        let nr = E::Fs::from_repr(e).expect("should be a valid scalar");
-
-        viewing_key.ak.mul(nr, params)
+        // Compute nf = BLAKE2s(nk | rho)
+        let mut nf_preimage = [0u8; 64];
+        viewing_key.nk.write(&mut nf_preimage[0..32]).unwrap();
+        rho.write(&mut nf_preimage[32..64]).unwrap();
+        let mut h = Blake2s::with_params(32, &[], &[], constants::PRF_NF_PERSONALIZATION);
+        h.update(&nf_preimage);
+        
+        h.finalize().as_ref().to_vec()
     }
 
     /// Computes the note commitment
