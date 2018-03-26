@@ -1,6 +1,7 @@
 use pairing::{
     PrimeField,
     PrimeFieldRepr,
+    Field,
 };
 
 use bellman::{
@@ -51,7 +52,11 @@ pub struct Spend<'a, E: JubjubEngine> {
     pub ar: Option<E::Fs>,
 
     /// The authentication path of the commitment in the tree
-    pub auth_path: Vec<Option<(E::Fr, bool)>>
+    pub auth_path: Vec<Option<(E::Fr, bool)>>,
+
+    /// The anchor; the root of the tree. If the note being
+    /// spent is zero-value, this can be anything.
+    pub anchor: Option<E::Fr>
 }
 
 /// This is an output circuit instance.
@@ -265,13 +270,32 @@ impl<'a, E: JubjubEngine> Circuit<E> for Spend<'a, E> {
         // value (in big endian) followed by g_d and pk_d
         let mut note_contents = vec![];
 
-        // Expose the value commitment and place the value
-        // in the note.
-        note_contents.extend(expose_value_commitment(
-            cs.namespace(|| "value commitment"),
-            self.value_commitment,
-            self.params
-        )?);
+        // Handle the value; we'll need it later for the
+        // dummy input check.
+        let mut value_num = num::Num::zero();
+        {
+            // Get the value in little-endian bit order
+            let value_bits = expose_value_commitment(
+                cs.namespace(|| "value commitment"),
+                self.value_commitment,
+                self.params
+            )?;
+
+            // Compute the note's value as a linear combination
+            // of the bits.
+            let mut coeff = E::Fr::one();
+            for bit in &value_bits {
+                value_num = value_num.add_bool_with_coeff(
+                    CS::one(),
+                    bit,
+                    coeff
+                );
+                coeff.double();
+            }
+
+            // Place the value in the note
+            note_contents.extend(value_bits);
+        }
 
         // Place g_d in the note
         note_contents.extend(
@@ -379,8 +403,30 @@ impl<'a, E: JubjubEngine> Circuit<E> for Spend<'a, E> {
             )?.get_x().clone(); // Injective encoding
         }
 
-        // Expose the anchor
-        cur.inputize(cs.namespace(|| "anchor"))?;
+        {
+            let real_anchor_value = self.anchor;
+
+            // Allocate the "real" anchor that will be exposed.
+            let rt = num::AllocatedNum::alloc(
+                cs.namespace(|| "conditional anchor"),
+                || {
+                    Ok(*real_anchor_value.get()?)
+                }
+            )?;
+
+            // (cur - rt) * value = 0
+            // if value is zero, cur and rt can be different
+            // if value is nonzero, they must be equal
+            cs.enforce(
+                || "conditionally enforce correct root",
+                |lc| lc + cur.get_variable() - rt.get_variable(),
+                |lc| lc + &value_num.lc(E::Fr::one()),
+                |lc| lc
+            );
+
+            // Expose the anchor
+            rt.inputize(cs.namespace(|| "anchor"))?;
+        }
 
         // Compute the cm + g^position for preventing
         // faerie gold attacks
@@ -607,35 +653,8 @@ fn test_input_circuit_with_bls12_381() {
         let ar: fs::Fs = rng.gen();
 
         {
-            let mut cs = TestConstraintSystem::<Bls12>::new();
-
-            let instance = Spend {
-                params: params,
-                value_commitment: Some(value_commitment.clone()),
-                proof_generation_key: Some(proof_generation_key.clone()),
-                payment_address: Some(payment_address.clone()),
-                commitment_randomness: Some(commitment_randomness),
-                ar: Some(ar),
-                auth_path: auth_path.clone()
-            };
-
-            instance.synthesize(&mut cs).unwrap();
-
-            assert!(cs.is_satisfied());
-            assert_eq!(cs.num_constraints(), 98776);
-            assert_eq!(cs.hash(), "8211d52b5ad2618b2f8106c7c3f9ab213f6206e3ddbbb39e786167de5ea85dc3");
-
-            assert_eq!(cs.num_inputs(), 8);
-            assert_eq!(cs.get_input(0, "ONE"), Fr::one());
-
             let rk = viewing_key.rk(ar, params).into_xy();
-            assert_eq!(cs.get_input(1, "rk/x/input variable"), rk.0);
-            assert_eq!(cs.get_input(2, "rk/y/input variable"), rk.1);
-
             let expected_value_cm = value_commitment.cm(params).into_xy();
-            assert_eq!(cs.get_input(3, "value commitment/commitment point/x/input variable"), expected_value_cm.0);
-            assert_eq!(cs.get_input(4, "value commitment/commitment point/y/input variable"), expected_value_cm.1);
-
             let note = ::primitives::Note {
                 value: value_commitment.value,
                 g_d: g_d.clone(),
@@ -644,11 +663,10 @@ fn test_input_circuit_with_bls12_381() {
             };
 
             let mut position = 0u64;
-            let mut cur = note.cm(params);
+            let cm: Fr = note.cm(params);
+            let mut cur = cm.clone();
 
-            assert_eq!(cs.get("randomization of note commitment/x3/num"), cur);
-
-            for (i, val) in auth_path.into_iter().enumerate()
+            for (i, val) in auth_path.clone().into_iter().enumerate()
             {
                 let (uncle, b) = val.unwrap();
 
@@ -678,13 +696,39 @@ fn test_input_circuit_with_bls12_381() {
                 }
             }
 
-            assert_eq!(cs.get_input(5, "anchor/input variable"), cur);
-
             let expected_nf = note.nf(&viewing_key, position, params);
             let expected_nf = multipack::bytes_to_bits(&expected_nf);
             let expected_nf = multipack::compute_multipacking::<Bls12>(&expected_nf);
             assert_eq!(expected_nf.len(), 2);
 
+            let mut cs = TestConstraintSystem::<Bls12>::new();
+
+            let instance = Spend {
+                params: params,
+                value_commitment: Some(value_commitment.clone()),
+                proof_generation_key: Some(proof_generation_key.clone()),
+                payment_address: Some(payment_address.clone()),
+                commitment_randomness: Some(commitment_randomness),
+                ar: Some(ar),
+                auth_path: auth_path.clone(),
+                anchor: Some(cur)
+            };
+
+            instance.synthesize(&mut cs).unwrap();
+
+            assert!(cs.is_satisfied());
+            assert_eq!(cs.num_constraints(), 98777);
+            assert_eq!(cs.hash(), "aedc6d7646e8e019db327bf256c322e54bc72aa9ac4e86943899557eb96507f3");
+
+            assert_eq!(cs.get("randomization of note commitment/x3/num"), cm);
+
+            assert_eq!(cs.num_inputs(), 8);
+            assert_eq!(cs.get_input(0, "ONE"), Fr::one());
+            assert_eq!(cs.get_input(1, "rk/x/input variable"), rk.0);
+            assert_eq!(cs.get_input(2, "rk/y/input variable"), rk.1);
+            assert_eq!(cs.get_input(3, "value commitment/commitment point/x/input variable"), expected_value_cm.0);
+            assert_eq!(cs.get_input(4, "value commitment/commitment point/y/input variable"), expected_value_cm.1);
+            assert_eq!(cs.get_input(5, "anchor/input variable"), cur);
             assert_eq!(cs.get_input(6, "pack nullifier/input 0"), expected_nf[0]);
             assert_eq!(cs.get_input(7, "pack nullifier/input 1"), expected_nf[1]);
         }
