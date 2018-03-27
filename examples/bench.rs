@@ -8,10 +8,14 @@ use sapling_crypto::jubjub::{
     JubjubBls12,
     edwards,
     fs,
-    Unknown
 };
-use sapling_crypto::circuit::{
+use sapling_crypto::circuit::sapling::{
     Spend
+};
+use sapling_crypto::primitives::{
+    Diversifier,
+    ProofGenerationKey,
+    ValueCommitment
 };
 use bellman::groth16::*;
 use rand::{XorShiftRng, SeedableRng, Rng};
@@ -27,24 +31,11 @@ fn main() {
     let groth_params = generate_random_parameters::<Bls12, _, _>(
         Spend {
             params: jubjub_params,
-            /// Value of the note being spent
-            value: None,
-            /// Randomness that will hide the value
-            value_randomness: None,
-            /// Key which allows the proof to be constructed
-            /// as defense-in-depth against a flaw in the
-            /// protocol that would otherwise be exploitable
-            /// by a holder of a viewing key.
-            rsk: None,
-            /// The public key that will be re-randomized for
-            /// use as a nullifier and signing key for the
-            /// transaction.
-            ak: None,
-            /// The diversified base used to compute pk_d.
-            g_d: None,
-            /// The randomness used to hide the note commitment data
+            value_commitment: None,
+            proof_generation_key: None,
+            payment_address: None,
             commitment_randomness: None,
-            /// The authentication path of the commitment in the tree
+            ar: None,
             auth_path: vec![None; TREE_DEPTH]
         },
         rng
@@ -54,23 +45,48 @@ fn main() {
 
     let mut total_time = Duration::new(0, 0);
     for _ in 0..SAMPLES {
-        let value: u64 = 1;
-        let value_randomness: fs::Fs = rng.gen();
-        let ak: edwards::Point<Bls12, Unknown> = edwards::Point::rand(rng, jubjub_params);
-        let g_d: edwards::Point<Bls12, Unknown> = edwards::Point::rand(rng, jubjub_params);
+        let value_commitment = ValueCommitment {
+            value: 1,
+            randomness: rng.gen()
+        };
+
+        let nsk: fs::Fs = rng.gen();
+        let ak = edwards::Point::rand(rng, jubjub_params).mul_by_cofactor(jubjub_params);
+
+        let proof_generation_key = ProofGenerationKey {
+            ak: ak.clone(),
+            nsk: nsk.clone()
+        };
+
+        let viewing_key = proof_generation_key.into_viewing_key(jubjub_params);
+
+        let payment_address;
+
+        loop {
+            let diversifier = Diversifier(rng.gen());
+
+            if let Some(p) = viewing_key.into_payment_address(
+                diversifier,
+                jubjub_params
+            )
+            {
+                payment_address = p;
+                break;
+            }
+        }
+
         let commitment_randomness: fs::Fs = rng.gen();
-        let rsk: fs::Fs = rng.gen();
-        let auth_path = (0..TREE_DEPTH).map(|_| Some((rng.gen(), rng.gen()))).collect();
+        let auth_path = vec![Some((rng.gen(), rng.gen())); TREE_DEPTH];
+        let ar: fs::Fs = rng.gen();
 
         let start = Instant::now();
         let _ = create_random_proof(Spend {
             params: jubjub_params,
-            value: Some(value),
-            value_randomness: Some(value_randomness),
-            ak: Some(ak),
-            g_d: Some(g_d),
+            value_commitment: Some(value_commitment),
+            proof_generation_key: Some(proof_generation_key),
+            payment_address: Some(payment_address),
             commitment_randomness: Some(commitment_randomness),
-            rsk: Some(rsk),
+            ar: Some(ar),
             auth_path: auth_path
         }, &groth_params, rng).unwrap();
         total_time += start.elapsed();
