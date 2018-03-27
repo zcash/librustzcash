@@ -3,7 +3,7 @@
 /// the algorithm, for rigidity purposes.
 /// We deliberately use an ASCII hex string of 32 bytes here.
 pub const GH_FIRST_BLOCK: &'static [u8; 64]
-          = b"0000000000000000002ffe76b973aabaff1d1557d79acf2c3795809c83caf580";
+          = b"096b36a5804bfacef1691e173c366a47ff5ba84a44f26ddd7e8d9f79d5b42df0";
 
 // BLAKE2s invocation personalizations
 /// BLAKE2s Personalization for CRH^ivk = BLAKE2s(ak | nk)
