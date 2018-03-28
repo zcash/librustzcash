@@ -19,7 +19,7 @@ use sapling_crypto::primitives::{
 };
 use bellman::groth16::*;
 use rand::{XorShiftRng, SeedableRng, Rng};
-use pairing::bls12_381::Bls12;
+use pairing::bls12_381::{Bls12, Fr};
 
 const TREE_DEPTH: usize = 32;
 
@@ -36,7 +36,8 @@ fn main() {
             payment_address: None,
             commitment_randomness: None,
             ar: None,
-            auth_path: vec![None; TREE_DEPTH]
+            auth_path: vec![None; TREE_DEPTH],
+            anchor: None
         },
         rng
     ).unwrap();
@@ -78,6 +79,7 @@ fn main() {
         let commitment_randomness: fs::Fs = rng.gen();
         let auth_path = vec![Some((rng.gen(), rng.gen())); TREE_DEPTH];
         let ar: fs::Fs = rng.gen();
+        let anchor: Fr = rng.gen();
 
         let start = Instant::now();
         let _ = create_random_proof(Spend {
@@ -87,7 +89,8 @@ fn main() {
             payment_address: Some(payment_address),
             commitment_randomness: Some(commitment_randomness),
             ar: Some(ar),
-            auth_path: auth_path
+            auth_path: auth_path,
+            anchor: Some(anchor)
         }, &groth_params, rng).unwrap();
         total_time += start.elapsed();
     }
