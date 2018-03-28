@@ -718,7 +718,7 @@ fn test_input_circuit_with_bls12_381() {
 
             assert!(cs.is_satisfied());
             assert_eq!(cs.num_constraints(), 98777);
-            assert_eq!(cs.hash(), "aedc6d7646e8e019db327bf256c322e54bc72aa9ac4e86943899557eb96507f3");
+            assert_eq!(cs.hash(), "499305e409599a3e4fe0a885f6adf674e9f49ba4a21e47362356d2a89f15dc1f");
 
             assert_eq!(cs.get("randomization of note commitment/x3/num"), cm);
 
@@ -795,7 +795,7 @@ fn test_output_circuit_with_bls12_381() {
 
             assert!(cs.is_satisfied());
             assert_eq!(cs.num_constraints(), 7827);
-            assert_eq!(cs.hash(), "8db50ff0e14fae19a7d83ef47f6da3a7e3e2644d251e37b387c6408d85df3ae7");
+            assert_eq!(cs.hash(), "d18e83255220328a688134038ba4f82d5ce67ffe9f97b2ae2678042da0efad43");
 
             let expected_cm = payment_address.create_note(
                 value_commitment.value,
