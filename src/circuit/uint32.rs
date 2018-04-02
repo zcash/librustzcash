@@ -87,6 +87,31 @@ impl UInt32 {
         })
     }
 
+    pub fn into_bits_be(&self) -> Vec<Boolean> {
+        self.bits.iter().rev().cloned().collect()
+    }
+
+    pub fn from_bits_be(bits: &[Boolean]) -> Self {
+        assert_eq!(bits.len(), 32);
+
+        let mut value = Some(0u32);
+        for b in bits {
+            value.as_mut().map(|v| *v <<= 1);
+
+            match b.get_value() {
+                Some(true) => { value.as_mut().map(|v| *v |= 1); },
+                Some(false) => {},
+                None => { value = None; }
+            }
+        }
+
+        UInt32 {
+            value: value,
+            bits: bits.iter().rev().cloned().collect()
+        }
+    }
+
+
     /// Turns this `UInt32` into its little-endian byte order representation.
     pub fn into_bits(&self) -> Vec<Boolean> {
         self.bits.chunks(8)
@@ -153,6 +178,104 @@ impl UInt32 {
             bits: new_bits,
             value: self.value.map(|v| v.rotate_right(by as u32))
         }
+    }
+
+    pub fn shr(&self, by: usize) -> Self {
+        let by = by % 32;
+
+        let fill = Boolean::constant(false);
+
+        let new_bits = self.bits
+                           .iter() // The bits are least significant first
+                           .skip(by) // Skip the bits that will be lost during the shift
+                           .chain(Some(&fill).into_iter().cycle()) // Rest will be zeros
+                           .take(32) // Only 32 bits needed!
+                           .cloned()
+                           .collect();
+
+        UInt32 {
+            bits: new_bits,
+            value: self.value.map(|v| v >> by as u32)
+        }
+    }
+
+    fn triop<E, CS, F, U>(
+        mut cs: CS,
+        a: &Self,
+        b: &Self,
+        c: &Self,
+        tri_fn: F,
+        circuit_fn: U
+    ) -> Result<Self, SynthesisError>
+        where E: Engine,
+              CS: ConstraintSystem<E>,
+              F: Fn(u32, u32, u32) -> u32,
+              U: Fn(&mut CS, usize, &Boolean, &Boolean, &Boolean) -> Result<Boolean, SynthesisError>
+    {
+        let new_value = match (a.value, b.value, c.value) {
+            (Some(a), Some(b), Some(c)) => {
+                Some(tri_fn(a, b, c))
+            },
+            _ => None
+        };
+
+        let bits = a.bits.iter()
+                            .zip(b.bits.iter())
+                            .zip(c.bits.iter())
+                            .enumerate()
+                            .map(|(i, ((a, b), c))| circuit_fn(&mut cs, i, a, b, c))
+                            .collect::<Result<_, _>>()?;
+
+        Ok(UInt32 {
+            bits: bits,
+            value: new_value
+        })
+    }
+
+    /// Compute the `maj` value (a and b) xor (a and c) xor (b and c)
+    /// during SHA256.
+    pub fn sha256_maj<E, CS>(
+        cs: CS,
+        a: &Self,
+        b: &Self,
+        c: &Self
+    ) -> Result<Self, SynthesisError>
+        where E: Engine,
+              CS: ConstraintSystem<E>
+    {
+        Self::triop(cs, a, b, c, |a, b, c| (a & b) ^ (a & c) ^ (b & c),
+            |cs, i, a, b, c| {
+                Boolean::sha256_maj(
+                    cs.namespace(|| format!("maj {}", i)),
+                    a,
+                    b,
+                    c
+                )
+            }
+        )
+    }
+
+    /// Compute the `ch` value `(a and b) xor ((not a) and c)`
+    /// during SHA256.
+    pub fn sha256_ch<E, CS>(
+        cs: CS,
+        a: &Self,
+        b: &Self,
+        c: &Self
+    ) -> Result<Self, SynthesisError>
+        where E: Engine,
+              CS: ConstraintSystem<E>
+    {
+        Self::triop(cs, a, b, c, |a, b, c| (a & b) ^ ((!a) & c),
+            |cs, i, a, b, c| {
+                Boolean::sha256_ch(
+                    cs.namespace(|| format!("ch {}", i)),
+                    a,
+                    b,
+                    c
+                )
+            }
+        )
     }
 
     /// XOR this `UInt32` with another `UInt32`
@@ -303,6 +426,37 @@ mod test {
     use ::circuit::test::*;
     use bellman::{ConstraintSystem};
     use circuit::multieq::MultiEq;
+
+    #[test]
+    fn test_uint32_from_bits_be() {
+        let mut rng = XorShiftRng::from_seed([0x5dbe6259, 0x8d313d76, 0x3237db17, 0xe5bc0653]);
+
+        for _ in 0..1000 {
+            let mut v = (0..32).map(|_| Boolean::constant(rng.gen())).collect::<Vec<_>>();
+
+            let b = UInt32::from_bits_be(&v);
+
+            for (i, bit) in b.bits.iter().enumerate() {
+                match bit {
+                    &Boolean::Constant(bit) => {
+                        assert!(bit == ((b.value.unwrap() >> i) & 1 == 1));
+                    },
+                    _ => unreachable!()
+                }
+            }
+
+            let expected_to_be_same = b.into_bits_be();
+
+            for x in v.iter().zip(expected_to_be_same.iter())
+            {
+                match x {
+                    (&Boolean::Constant(true), &Boolean::Constant(true)) => {},
+                    (&Boolean::Constant(false), &Boolean::Constant(false)) => {},
+                    _ => unreachable!()
+                }
+            }
+        }
+    }
 
     #[test]
     fn test_uint32_from_bits() {
@@ -483,6 +637,7 @@ mod test {
 
         for i in 0..32 {
             let b = a.rotr(i);
+            assert_eq!(a.bits.len(), b.bits.len());
 
             assert!(b.value.unwrap() == num);
 
@@ -499,6 +654,108 @@ mod test {
             }
 
             num = num.rotate_right(1);
+        }
+    }
+
+    #[test]
+    fn test_uint32_shr() {
+        let mut rng = XorShiftRng::from_seed([0x5dbe6259, 0x8d313d76, 0x3237db17, 0xe5bc0654]);
+
+        for _ in 0..50 {
+            for i in 0..60 {
+                let num = rng.gen();
+                let a = UInt32::constant(num).shr(i);
+                let b = UInt32::constant(num >> i);
+
+                assert_eq!(a.value.unwrap(), num >> i);
+
+                assert_eq!(a.bits.len(), b.bits.len());
+                for (a, b) in a.bits.iter().zip(b.bits.iter()) {
+                    assert_eq!(a.get_value().unwrap(), b.get_value().unwrap());
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_uint32_sha256_maj() {
+        let mut rng = XorShiftRng::from_seed([0x5dbe6259, 0x8d313d76, 0x3237db17, 0xe5bc0653]);
+
+        for _ in 0..1000 {
+            let mut cs = TestConstraintSystem::<Bls12>::new();
+
+            let a: u32 = rng.gen();
+            let b: u32 = rng.gen();
+            let c: u32 = rng.gen();
+
+            let mut expected = (a & b) ^ (a & c) ^ (b & c);
+
+            let a_bit = UInt32::alloc(cs.namespace(|| "a_bit"), Some(a)).unwrap();
+            let b_bit = UInt32::constant(b);
+            let c_bit = UInt32::alloc(cs.namespace(|| "c_bit"), Some(c)).unwrap();
+
+            let r = UInt32::sha256_maj(&mut cs, &a_bit, &b_bit, &c_bit).unwrap();
+
+            assert!(cs.is_satisfied());
+
+            assert!(r.value == Some(expected));
+
+            for b in r.bits.iter() {
+                match b {
+                    &Boolean::Is(ref b) => {
+                        assert!(b.get_value().unwrap() == (expected & 1 == 1));
+                    },
+                    &Boolean::Not(ref b) => {
+                        assert!(!b.get_value().unwrap() == (expected & 1 == 1));
+                    },
+                    &Boolean::Constant(b) => {
+                        assert!(b == (expected & 1 == 1));
+                    }
+                }
+
+                expected >>= 1;
+            }
+        }
+    }
+
+    #[test]
+    fn test_uint32_sha256_ch() {
+        let mut rng = XorShiftRng::from_seed([0x5dbe6259, 0x8d313d76, 0x3237db17, 0xe5bc0653]);
+
+        for _ in 0..1000 {
+            let mut cs = TestConstraintSystem::<Bls12>::new();
+
+            let a: u32 = rng.gen();
+            let b: u32 = rng.gen();
+            let c: u32 = rng.gen();
+
+            let mut expected = (a & b) ^ ((!a) & c);
+
+            let a_bit = UInt32::alloc(cs.namespace(|| "a_bit"), Some(a)).unwrap();
+            let b_bit = UInt32::constant(b);
+            let c_bit = UInt32::alloc(cs.namespace(|| "c_bit"), Some(c)).unwrap();
+
+            let r = UInt32::sha256_ch(&mut cs, &a_bit, &b_bit, &c_bit).unwrap();
+
+            assert!(cs.is_satisfied());
+
+            assert!(r.value == Some(expected));
+
+            for b in r.bits.iter() {
+                match b {
+                    &Boolean::Is(ref b) => {
+                        assert!(b.get_value().unwrap() == (expected & 1 == 1));
+                    },
+                    &Boolean::Not(ref b) => {
+                        assert!(!b.get_value().unwrap() == (expected & 1 == 1));
+                    },
+                    &Boolean::Constant(b) => {
+                        assert!(b == (expected & 1 == 1));
+                    }
+                }
+
+                expected >>= 1;
+            }
         }
     }
 }

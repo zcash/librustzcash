@@ -9,6 +9,9 @@ extern crate byteorder;
 #[macro_use]
 extern crate hex_literal;
 
+#[cfg(test)]
+extern crate crypto;
+
 pub mod jubjub;
 pub mod group_hash;
 pub mod circuit;
