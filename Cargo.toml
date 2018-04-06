@@ -15,7 +15,7 @@ features = ["expose-arith"]
 [dependencies]
 rand = "0.4"
 digest = "0.7"
-bellman = "0.0.9"
+bellman = "0.1"
 byteorder = "1"
 
 [dependencies.blake2-rfc]
