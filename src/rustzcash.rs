@@ -1,4 +1,6 @@
 extern crate libc;
+extern crate sapling_crypto;
+
 use libc::uint64_t;
 
 /// XOR two uint64_t values and return the result, used
