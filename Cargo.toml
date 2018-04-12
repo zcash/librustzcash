@@ -15,3 +15,7 @@ pairing = "0.14.1"
 [dependencies.sapling-crypto]
 git = "https://github.com/zcash-hackworks/sapling-crypto"
 rev = "e554b473dd10885d232f42237c13282f5b6fee43"
+
+[profile.release]
+lto = true
+panic = 'abort'
