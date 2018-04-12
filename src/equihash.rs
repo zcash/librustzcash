@@ -62,7 +62,7 @@ impl Node {
             .skip(trim)
             .map(|(a, b)| a ^ b)
             .collect();
-        let mut indices = Vec::new();
+        let mut indices = Vec::with_capacity(a.indices.len() + b.indices.len());
         if a.indices_before(b) {
             indices.extend(a.indices.iter());
             indices.extend(b.indices.iter());
