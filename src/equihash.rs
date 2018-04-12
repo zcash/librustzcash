@@ -238,7 +238,7 @@ pub fn is_valid_solution_iterative(
     return rows[0].is_zero(hash_len);
 }
 
-fn tree_validator<'a>(p: &Params, state: &Blake2b, indices: &[u32]) -> Option<Node> {
+fn tree_validator(p: &Params, state: &Blake2b, indices: &[u32]) -> Option<Node> {
     if indices.len() > 1 {
         let end = indices.len();
         let mid = end / 2;
