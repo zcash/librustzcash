@@ -110,6 +110,7 @@ name = "librustzcash"
 version = "0.1.0"
 dependencies = [
  "libc 0.2.40 (registry+https://github.com/rust-lang/crates.io-index)",
+ "pairing 0.14.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "sapling-crypto 0.0.1 (git+https://github.com/zcash-hackworks/sapling-crypto?rev=e554b473dd10885d232f42237c13282f5b6fee43)",
 ]
 
