@@ -90,7 +90,7 @@ pub extern "system" fn librustzcash_merkle_hash(
     ).into_xy().0.into_repr();
 
     // Should be okay, caller is responsible for ensuring the pointer
-    // is valid.
+    // is a valid pointer to 32 bytes that can be mutated.
     let result = unsafe { &mut *result };
 
     tmp.write_be(&mut result[..]).unwrap();

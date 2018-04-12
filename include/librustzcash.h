@@ -12,7 +12,7 @@ extern "C" {
     /// Initializes some parameters for sapling-crypto,
     /// returning a pointer to the parameters. You should
     /// free this when you're done with 
-    /// `librustzcash_init_params()`.
+    /// `librustzcash_free_params()`.
     librustzcash_params* librustzcash_init_params();
 
     /// Frees some parameters that were previously returned
