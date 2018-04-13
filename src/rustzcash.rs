@@ -2,6 +2,9 @@ extern crate libc;
 extern crate sapling_crypto;
 extern crate pairing;
 
+#[macro_use]
+extern crate lazy_static;
+
 use pairing::{
     BitIterator,
     PrimeFieldRepr,
@@ -23,40 +26,34 @@ use sapling_crypto::{
 
 use libc::{uint64_t, size_t, c_uchar};
 
-pub struct SaplingParams {
-    pub jubjub_params: JubjubBls12
+lazy_static! {
+    static ref JUBJUB: JubjubBls12 = {
+        JubjubBls12::new()
+    };
 }
 
 #[no_mangle]
-pub extern "system" fn librustzcash_init_params() -> *mut SaplingParams {
-    Box::into_raw(Box::new(SaplingParams{
-        jubjub_params: JubjubBls12::new()
-    }))
-}
-
-#[no_mangle]
-pub extern "system" fn librustzcash_free_params(
-    params: *mut SaplingParams
+pub extern "system" fn librustzcash_tree_uncommitted(
+    result: *mut [c_uchar; 32]
 )
 {
-    let tmp = unsafe { Box::from_raw(params) };
+    let tmp = sapling_crypto::primitives::Note::<Bls12>::uncommitted().into_repr();
 
-    drop(tmp);
+    // Should be okay, caller is responsible for ensuring the pointer
+    // is a valid pointer to 32 bytes that can be mutated.
+    let result = unsafe { &mut *result };
+
+    tmp.write_be(&mut result[..]).unwrap();
 }
 
 #[no_mangle]
 pub extern "system" fn librustzcash_merkle_hash(
-    params: *const SaplingParams,
     depth: size_t,
     a: *const [c_uchar; 32],
     b: *const [c_uchar; 32],
     result: *mut [c_uchar; 32],
 )
 {
-    // Should be okay, because caller is responsible for ensuring
-    // params points to valid parameters.
-    let params = unsafe { &*params };
-
     let mut a_repr = FrRepr::default();
     let mut b_repr = FrRepr::default();
 
@@ -86,7 +83,7 @@ pub extern "system" fn librustzcash_merkle_hash(
         lhs.iter().map(|&x| x)
             .take(Fr::NUM_BITS as usize)
             .chain(rhs.iter().map(|&x| x).take(Fr::NUM_BITS as usize)),
-        &params.jubjub_params
+        &JUBJUB
     ).into_xy().0.into_repr();
 
     // Should be okay, caller is responsible for ensuring the pointer
