@@ -85,12 +85,16 @@ pub enum FixedGenerators {
     Max = 6
 }
 
+pub trait ToUniform {
+    fn to_uniform(digest: &[u8]) -> Self;
+}
+
 /// This is an extension to the pairing Engine trait which
 /// offers a scalar field for the embedded curve (Jubjub)
 /// and some pre-computed parameters.
 pub trait JubjubEngine: Engine {
     /// The scalar field of the Jubjub curve
-    type Fs: PrimeField + SqrtField;
+    type Fs: PrimeField + SqrtField + ToUniform;
     /// The parameters of Jubjub and the Sapling protocol
     type Params: JubjubParams<Self>;
 }
