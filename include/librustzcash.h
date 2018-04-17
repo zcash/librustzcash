@@ -6,6 +6,14 @@
 extern "C" {
     uint64_t librustzcash_xor(uint64_t a, uint64_t b);
 
+    /// Loads the zk-SNARK parameters into memory and saves
+    /// paths as necessary. Only called once.
+    void librustzcash_init_zksnark_params(
+        const char* spend_path,
+        const char* output_path,
+        const char* sprout_path
+    );
+
     /// Writes the "uncommitted" note value for empty leaves
     /// of the merkle tree. `result` must be a valid pointer
     /// to 32 bytes which will be written.

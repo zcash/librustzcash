@@ -114,6 +114,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 name = "librustzcash"
 version = "0.1.0"
 dependencies = [
+ "bellman 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "lazy_static 1.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "libc 0.2.40 (registry+https://github.com/rust-lang/crates.io-index)",
  "pairing 0.14.1 (registry+https://github.com/rust-lang/crates.io-index)",

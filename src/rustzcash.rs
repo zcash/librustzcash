@@ -1,6 +1,7 @@
 extern crate libc;
 extern crate sapling_crypto;
 extern crate pairing;
+extern crate bellman;
 
 #[macro_use]
 extern crate lazy_static;
@@ -24,12 +25,72 @@ use sapling_crypto::{
     }
 };
 
-use libc::{uint64_t, size_t, c_uchar};
+use bellman::{
+    groth16::{
+        Parameters,
+        PreparedVerifyingKey,
+        VerifyingKey,
+        prepare_verifying_key
+    }
+};
+
+use libc::{uint64_t, size_t, c_uchar, c_char};
+use std::ffi::CStr;
+use std::fs::File;
 
 lazy_static! {
     static ref JUBJUB: JubjubBls12 = {
         JubjubBls12::new()
     };
+}
+
+static mut SAPLING_SPEND_VK: Option<PreparedVerifyingKey<Bls12>> = None;
+static mut SAPLING_OUTPUT_VK: Option<PreparedVerifyingKey<Bls12>> = None;
+static mut SPROUT_GROTH16_VK: Option<PreparedVerifyingKey<Bls12>> = None;
+
+static mut SAPLING_SPEND_PARAMS: Option<Parameters<Bls12>> = None;
+static mut SAPLING_OUTPUT_PARAMS: Option<Parameters<Bls12>> = None;
+static mut SPROUT_GROTH16_PARAMS_PATH: Option<String> = None;
+
+#[no_mangle]
+pub extern "system" fn librustzcash_init_zksnark_params(
+    spend_path: *const c_char,
+    output_path: *const c_char,
+    sprout_path: *const c_char
+)
+{
+    // These should be valid CStr's, but the decoding may fail on Windows
+    // so we may need to use OSStr or something.
+    let spend_path = unsafe { CStr::from_ptr(spend_path) }.to_str().expect("parameter path encoding error").to_string();
+    let output_path = unsafe { CStr::from_ptr(output_path) }.to_str().expect("parameter path encoding error").to_string();
+    let sprout_path = unsafe { CStr::from_ptr(sprout_path) }.to_str().expect("parameter path encoding error").to_string();
+
+    // Load from each of the paths
+    let mut spend_fs = File::open(spend_path).expect("couldn't load Sapling spend parameters file");
+    let mut output_fs = File::open(output_path).expect("couldn't load Sapling output parameters file");
+    let mut sprout_fs = File::open(&sprout_path).expect("couldn't load Sprout groth16 parameters file");
+
+    // Deserialize params
+    let spend_params = Parameters::<Bls12>::read(&mut spend_fs, false).expect("couldn't deserialize Sapling spend parameters file");
+    let output_params = Parameters::<Bls12>::read(&mut output_fs, false).expect("couldn't deserialize Sapling spend parameters file");
+    let sprout_vk = VerifyingKey::<Bls12>::read(&mut sprout_fs).expect("couldn't deserialize Sprout Groth16 verifying key");
+
+    // Prepare verifying keys
+    let spend_vk = prepare_verifying_key(&spend_params.vk);
+    let output_vk = prepare_verifying_key(&output_params.vk);
+    let sprout_vk = prepare_verifying_key(&sprout_vk);
+
+    // Caller is responsible for calling this function once, so
+    // these global mutations are safe.
+    unsafe {
+        SAPLING_SPEND_PARAMS = Some(spend_params);
+        SAPLING_OUTPUT_PARAMS = Some(output_params);
+        SPROUT_GROTH16_PARAMS_PATH = Some(sprout_path);
+
+        SAPLING_SPEND_VK = Some(spend_vk);
+        SAPLING_OUTPUT_VK = Some(output_vk);
+        SPROUT_GROTH16_VK = Some(sprout_vk);
+    }
 }
 
 #[no_mangle]
