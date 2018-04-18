@@ -37,11 +37,11 @@ impl<E: JubjubEngine> PrivateKey<E> {
         let r = h_star::<E>(&t[..], msg);
 
         // R = r . G
-        let g_r = params
+        let r_g = params
             .generator(FixedGenerators::SpendingKeyGenerator)
             .mul(r, params);
         let mut rbar = [0u8; 32];
-        g_r.write(&mut rbar[..])
+        r_g.write(&mut rbar[..])
             .expect("Jubjub points should serialize to 32 bytes");
 
         // S = r + H*(Rbar || M) . sk
@@ -49,7 +49,7 @@ impl<E: JubjubEngine> PrivateKey<E> {
         s.mul_assign(&self.0);
         s.add_assign(&r);
 
-        Signature { r: g_r.into(), s }
+        Signature { r: r_g.into(), s }
     }
 }
 
