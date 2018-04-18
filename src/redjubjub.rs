@@ -71,6 +71,10 @@ impl<E: JubjubEngine> PublicKey<E> {
         PublicKey(res)
     }
 
+    // Pre-conditions:
+    // - rbar was the canonical representation of a point on the curve.
+    // - sig.s < order(G)
+    // TODO(str4d): Enforce these during deserialization of Signature
     pub fn verify(&self, msg: &[u8], sig: &Signature<E>, params: &E::Params) -> bool {
         // c = H*(Rbar || M)
         let mut rbar = [0u8; 32];
