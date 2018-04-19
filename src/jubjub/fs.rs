@@ -1,6 +1,9 @@
-use pairing::{Field, PrimeField, SqrtField, PrimeFieldRepr, PrimeFieldDecodingError, LegendreSymbol};
+use byteorder::{ByteOrder, LittleEndian};
+use pairing::{BitIterator, Field, PrimeField, SqrtField, PrimeFieldRepr, PrimeFieldDecodingError, LegendreSymbol};
 use pairing::LegendreSymbol::*;
 use pairing::{adc, sbb, mac_with_carry};
+
+use super::ToUniform;
 
 // s = 6554484396890773809930967563523245729705921265872317281365359162392183254199
 const MODULUS: FsRepr = FsRepr([0xd0970e5ed6f72cb7, 0xa6682093ccc81082, 0x6673b0101343b00, 0xe7db4ea6533afa9]);
@@ -547,6 +550,31 @@ impl Fs {
         (self.0).0[2] = r6;
         (self.0).0[3] = r7;
         self.reduce();
+    }
+
+    fn mul_bits<S: AsRef<[u64]>>(&self, bits: BitIterator<S>) -> Self {
+        let mut res = Self::zero();
+        for bit in bits {
+            res.double();
+
+            if bit {
+                res.add_assign(self)
+            }
+        }
+        res
+    }
+}
+
+impl ToUniform for Fs {
+    /// Convert a little endian byte string into a uniform
+    /// field element. The number is reduced mod s. The caller
+    /// is responsible for ensuring the input is 64 bytes of
+    /// Random Oracle output.
+    fn to_uniform(digest: &[u8]) -> Self {
+        assert_eq!(digest.len(), 64);
+        let mut repr: [u64; 8] = [0; 8];
+        LittleEndian::read_u64_into(digest, &mut repr);
+        Self::one().mul_bits(BitIterator::new(repr))
     }
 }
 

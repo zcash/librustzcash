@@ -1,3 +1,7 @@
+use blake2_rfc::blake2b::Blake2b;
+
+use jubjub::{JubjubEngine, ToUniform};
+
 pub fn swap_bits_u64(x: u64) -> u64
 {
     let mut tmp = 0;
@@ -5,6 +9,14 @@ pub fn swap_bits_u64(x: u64) -> u64
         tmp |= ((x >> i) & 1) << (63 - i);
     }
     tmp
+}
+
+pub fn hash_to_scalar<E: JubjubEngine>(persona: &[u8], a: &[u8], b: &[u8]) -> E::Fs {
+    let mut hasher = Blake2b::with_params(64, &[], &[], persona);
+    hasher.update(a);
+    hasher.update(b);
+    let ret = hasher.finalize();
+    E::Fs::to_uniform(ret.as_ref())
 }
 
 #[test]

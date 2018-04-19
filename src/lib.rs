@@ -18,4 +18,5 @@ pub mod circuit;
 pub mod pedersen_hash;
 pub mod primitives;
 pub mod constants;
+pub mod redjubjub;
 mod util;
