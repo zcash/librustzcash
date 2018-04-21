@@ -34,6 +34,9 @@ pub extern "system" fn librustzcash_init_zksnark_params(
     output_path: *const c_char,
     sprout_path: *const c_char,
 ) {
+    // Initialize jubjub parameters here
+    lazy_static::initialize(&JUBJUB);
+
     // These should be valid CStr's, but the decoding may fail on Windows
     // so we may need to use OSStr or something.
     let spend_path = unsafe { CStr::from_ptr(spend_path) }
