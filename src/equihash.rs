@@ -96,8 +96,8 @@ fn initialise_state(n: u32, k: u32, digest_len: u8) -> Blake2b {
 }
 
 fn generate_hash(base_state: &Blake2b, i: u32) -> Blake2bResult {
-    let mut lei = vec![];
-    lei.write_u32::<LittleEndian>(i).unwrap();
+    let mut lei = [0u8; 4];
+    (&mut lei[..]).write_u32::<LittleEndian>(i).unwrap();
 
     let mut state = base_state.clone();
     state.update(&lei);
