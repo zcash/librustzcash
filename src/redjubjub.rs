@@ -84,7 +84,13 @@ impl<E: JubjubEngine> PrivateKey<E> {
         write_scalar::<E, W>(&self.0, writer)
     }
 
-    pub fn sign<R: Rng>(&self, msg: &[u8], rng: &mut R, params: &E::Params) -> Signature {
+    pub fn sign<R: Rng>(
+        &self,
+        msg: &[u8],
+        rng: &mut R,
+        p_g: FixedGenerators,
+        params: &E::Params,
+    ) -> Signature {
         // T = (l_H + 128) bits of randomness
         // For H*, l_H = 512 bits
         let mut t = [0u8; 80];
@@ -93,10 +99,8 @@ impl<E: JubjubEngine> PrivateKey<E> {
         // r = H*(T || M)
         let r = h_star::<E>(&t[..], msg);
 
-        // R = r . G
-        let r_g = params
-            .generator(FixedGenerators::SpendingKeyGenerator)
-            .mul(r, params);
+        // R = r . P_G
+        let r_g = params.generator(p_g).mul(r, params);
         let mut rbar = [0u8; 32];
         r_g.write(&mut rbar[..])
             .expect("Jubjub points should serialize to 32 bytes");
@@ -114,19 +118,13 @@ impl<E: JubjubEngine> PrivateKey<E> {
 }
 
 impl<E: JubjubEngine> PublicKey<E> {
-    pub fn from_private(privkey: &PrivateKey<E>, params: &E::Params) -> Self {
-        let res = params
-            .generator(FixedGenerators::SpendingKeyGenerator)
-            .mul(privkey.0, params)
-            .into();
+    pub fn from_private(privkey: &PrivateKey<E>, p_g: FixedGenerators, params: &E::Params) -> Self {
+        let res = params.generator(p_g).mul(privkey.0, params).into();
         PublicKey(res)
     }
 
-    pub fn randomize(&self, alpha: E::Fs, params: &E::Params) -> Self {
-        let res: Point<E, Unknown> = params
-            .generator(FixedGenerators::SpendingKeyGenerator)
-            .mul(alpha, params)
-            .into();
+    pub fn randomize(&self, alpha: E::Fs, p_g: FixedGenerators, params: &E::Params) -> Self {
+        let res: Point<E, Unknown> = params.generator(p_g).mul(alpha, params).into();
         let res = res.add(&self.0, params);
         PublicKey(res)
     }
@@ -140,7 +138,13 @@ impl<E: JubjubEngine> PublicKey<E> {
         self.0.write(writer)
     }
 
-    pub fn verify(&self, msg: &[u8], sig: &Signature, params: &E::Params) -> bool {
+    pub fn verify(
+        &self,
+        msg: &[u8],
+        sig: &Signature,
+        p_g: FixedGenerators,
+        params: &E::Params,
+    ) -> bool {
         // c = H*(Rbar || M)
         let c = h_star::<E>(&sig.rbar[..], msg);
 
@@ -154,12 +158,8 @@ impl<E: JubjubEngine> PublicKey<E> {
         };
         // S < order(G)
         s.into_repr() < E::Fs::char() &&
-        // S . G = R + c . vk
-        self.0.mul(c, params).add(&r, params)
-            == params
-                .generator(FixedGenerators::SpendingKeyGenerator)
-                .mul(s, params)
-                .into()
+        // S . P_G = R + c . vk
+        self.0.mul(c, params).add(&r, params) == params.generator(p_g).mul(s, params).into()
     }
 }
 
@@ -175,13 +175,14 @@ mod tests {
     #[test]
     fn round_trip_serialization() {
         let rng = &mut thread_rng();
+        let p_g = FixedGenerators::SpendingKeyGenerator;
         let params = &JubjubBls12::new();
 
         for _ in 0..1000 {
             let sk = PrivateKey::<Bls12>(rng.gen());
-            let vk = PublicKey::from_private(&sk, params);
+            let vk = PublicKey::from_private(&sk, p_g, params);
             let msg = b"Foo bar";
-            let sig = sk.sign(msg, rng, params);
+            let sig = sk.sign(msg, rng, p_g, params);
 
             let mut sk_bytes = [0u8; 32];
             let mut vk_bytes = [0u8; 32];
@@ -191,50 +192,51 @@ mod tests {
             sig.write(&mut sig_bytes[..]).unwrap();
 
             let sk_2 = PrivateKey::<Bls12>::read(&sk_bytes[..]).unwrap();
-            let vk_2 = PublicKey::from_private(&sk_2, params);
+            let vk_2 = PublicKey::from_private(&sk_2, p_g, params);
             let mut vk_2_bytes = [0u8; 32];
             vk_2.write(&mut vk_2_bytes[..]).unwrap();
             assert!(vk_bytes == vk_2_bytes);
 
             let vk_2 = PublicKey::<Bls12>::read(&vk_bytes[..], params).unwrap();
             let sig_2 = Signature::read(&sig_bytes[..]).unwrap();
-            assert!(vk.verify(msg, &sig_2, params));
-            assert!(vk_2.verify(msg, &sig, params));
-            assert!(vk_2.verify(msg, &sig_2, params));
+            assert!(vk.verify(msg, &sig_2, p_g, params));
+            assert!(vk_2.verify(msg, &sig, p_g, params));
+            assert!(vk_2.verify(msg, &sig_2, p_g, params));
         }
     }
 
     #[test]
     fn random_signatures() {
         let rng = &mut thread_rng();
+        let p_g = FixedGenerators::SpendingKeyGenerator;
         let params = &JubjubBls12::new();
 
         for _ in 0..1000 {
             let sk = PrivateKey::<Bls12>(rng.gen());
-            let vk = PublicKey::from_private(&sk, params);
+            let vk = PublicKey::from_private(&sk, p_g, params);
 
             let msg1 = b"Foo bar";
             let msg2 = b"Spam eggs";
 
-            let sig1 = sk.sign(msg1, rng, params);
-            let sig2 = sk.sign(msg2, rng, params);
+            let sig1 = sk.sign(msg1, rng, p_g, params);
+            let sig2 = sk.sign(msg2, rng, p_g, params);
 
-            assert!(vk.verify(msg1, &sig1, params));
-            assert!(vk.verify(msg2, &sig2, params));
-            assert!(!vk.verify(msg1, &sig2, params));
-            assert!(!vk.verify(msg2, &sig1, params));
+            assert!(vk.verify(msg1, &sig1, p_g, params));
+            assert!(vk.verify(msg2, &sig2, p_g, params));
+            assert!(!vk.verify(msg1, &sig2, p_g, params));
+            assert!(!vk.verify(msg2, &sig1, p_g, params));
 
             let alpha = rng.gen();
             let rsk = sk.randomize(alpha);
-            let rvk = vk.randomize(alpha, params);
+            let rvk = vk.randomize(alpha, p_g, params);
 
-            let sig1 = rsk.sign(msg1, rng, params);
-            let sig2 = rsk.sign(msg2, rng, params);
+            let sig1 = rsk.sign(msg1, rng, p_g, params);
+            let sig2 = rsk.sign(msg2, rng, p_g, params);
 
-            assert!(rvk.verify(msg1, &sig1, params));
-            assert!(rvk.verify(msg2, &sig2, params));
-            assert!(!rvk.verify(msg1, &sig2, params));
-            assert!(!rvk.verify(msg2, &sig1, params));
+            assert!(rvk.verify(msg1, &sig1, p_g, params));
+            assert!(rvk.verify(msg2, &sig2, p_g, params));
+            assert!(!rvk.verify(msg1, &sig2, p_g, params));
+            assert!(!rvk.verify(msg2, &sig1, p_g, params));
         }
     }
 }
