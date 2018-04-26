@@ -448,7 +448,7 @@ impl<'a, E: JubjubEngine> Circuit<E> for Spend<'a, E> {
             )?;
         }
         
-        // Let's compute nf = BLAKE2s(rk || rho)
+        // Let's compute nf = BLAKE2s(nk || rho)
         nf_preimage.extend(
             rho.repr(cs.namespace(|| "representation of rho"))?
         );
