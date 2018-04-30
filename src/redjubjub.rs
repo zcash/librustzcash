@@ -148,16 +148,18 @@ impl<E: JubjubEngine> PublicKey<E> {
         // c = H*(Rbar || M)
         let c = h_star::<E>(&sig.rbar[..], msg);
 
+        // Signature checks:
+        // R != invalid
         let r = match Point::read(&sig.rbar[..], params) {
             Ok(r) => r,
             Err(_) => return false,
         };
+        // S < order(G)
+        // (E::Fs guarantees its representation is in the field)
         let s = match read_scalar::<E, &[u8]>(&sig.sbar[..]) {
             Ok(s) => s,
             Err(_) => return false,
         };
-        // S < order(G)
-        s.into_repr() < E::Fs::char() &&
         // S . P_G = R + c . vk
         self.0.mul(c, params).add(&r, params) == params.generator(p_g).mul(s, params).into()
     }
