@@ -51,7 +51,7 @@ pub struct Signature {
 
 pub struct PrivateKey<E: JubjubEngine>(E::Fs);
 
-pub struct PublicKey<E: JubjubEngine>(Point<E, Unknown>);
+pub struct PublicKey<E: JubjubEngine>(pub Point<E, Unknown>);
 
 impl Signature {
     pub fn read<R: Read>(mut reader: R) -> io::Result<Self> {
