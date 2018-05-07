@@ -16,7 +16,7 @@ bellman = "0.1"
 
 [dependencies.sapling-crypto]
 git = "https://github.com/zcash-hackworks/sapling-crypto"
-rev = "e554b473dd10885d232f42237c13282f5b6fee43"
+rev = "7beeb52730e24724ee10ea2458ecf7776cb59c58"
 
 [profile.release]
 lto = true
