@@ -8,7 +8,7 @@ extern crate lazy_static;
 
 use pairing::{BitIterator, PrimeField, PrimeFieldRepr, bls12_381::{Bls12, Fr, FrRepr}};
 
-use sapling_crypto::{jubjub::JubjubBls12, pedersen_hash::{pedersen_hash, Personalization}};
+use sapling_crypto::{jubjub::JubjubBls12, pedersen_hash::{pedersen_hash, Personalization}, util::swap_bits_u64};
 
 use bellman::groth16::{prepare_verifying_key, Parameters, PreparedVerifyingKey, VerifyingKey};
 
@@ -27,6 +27,36 @@ static mut SPROUT_GROTH16_VK: Option<PreparedVerifyingKey<Bls12>> = None;
 static mut SAPLING_SPEND_PARAMS: Option<Parameters<Bls12>> = None;
 static mut SAPLING_OUTPUT_PARAMS: Option<Parameters<Bls12>> = None;
 static mut SPROUT_GROTH16_PARAMS_PATH: Option<String> = None;
+
+/// Writes an FrRepr to [u8] of length 32
+fn write_le(mut f: FrRepr, to: &mut [u8]) {
+    assert_eq!(to.len(), 32);
+
+    f.as_mut().reverse();
+    for b in f.as_mut() {
+        *b = swap_bits_u64(*b);
+    }
+
+    f.write_be(to).expect("length is 32 bytes");
+}
+
+/// Reads an FrRepr from a [u8] of length 32.
+/// This will panic (abort) if length provided is
+/// not correct.
+fn read_le(from: &[u8]) -> FrRepr
+{
+    assert_eq!(from.len(), 32);
+
+    let mut f = FrRepr::default();
+    f.read_be(from).expect("length is 32 bytes");
+
+    f.as_mut().reverse();
+    for b in f.as_mut() {
+        *b = swap_bits_u64(*b);
+    }
+
+    f
+}
 
 #[no_mangle]
 pub extern "system" fn librustzcash_init_zksnark_params(
@@ -93,7 +123,7 @@ pub extern "system" fn librustzcash_tree_uncommitted(result: *mut [c_uchar; 32])
     // is a valid pointer to 32 bytes that can be mutated.
     let result = unsafe { &mut *result };
 
-    tmp.write_be(&mut result[..]).unwrap();
+    write_le(tmp, &mut result[..]);
 }
 
 #[no_mangle]
@@ -103,18 +133,15 @@ pub extern "system" fn librustzcash_merkle_hash(
     b: *const [c_uchar; 32],
     result: *mut [c_uchar; 32],
 ) {
-    let mut a_repr = FrRepr::default();
-    let mut b_repr = FrRepr::default();
+    // Should be okay, because caller is responsible for ensuring
+    // the pointer is a valid pointer to 32 bytes, and that is the
+    // size of the representation
+    let a_repr = read_le(unsafe { &(&*a)[..] });
 
     // Should be okay, because caller is responsible for ensuring
     // the pointer is a valid pointer to 32 bytes, and that is the
     // size of the representation
-    a_repr.read_be(unsafe { &(&*a)[..] }).unwrap();
-
-    // Should be okay, because caller is responsible for ensuring
-    // the pointer is a valid pointer to 32 bytes, and that is the
-    // size of the representation
-    b_repr.read_be(unsafe { &(&*b)[..] }).unwrap();
+    let b_repr = read_le(unsafe { &(&*b)[..] });
 
     let mut lhs = [false; 256];
     let mut rhs = [false; 256];
@@ -142,7 +169,7 @@ pub extern "system" fn librustzcash_merkle_hash(
     // is a valid pointer to 32 bytes that can be mutated.
     let result = unsafe { &mut *result };
 
-    tmp.write_be(&mut result[..]).unwrap();
+    write_le(tmp, &mut result[..]);
 }
 
 /// XOR two uint64_t values and return the result, used
