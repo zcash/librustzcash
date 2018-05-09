@@ -6,6 +6,8 @@
 extern "C" {
     uint64_t librustzcash_xor(uint64_t a, uint64_t b);
 
+    void librustzcash_to_scalar(const unsigned char *input, unsigned char *result);
+
     /// Loads the zk-SNARK parameters into memory and saves
     /// paths as necessary. Only called once.
     void librustzcash_init_zksnark_params(

@@ -12,8 +12,8 @@ extern crate lazy_static;
 use pairing::{BitIterator, Field, PrimeField, PrimeFieldRepr, bls12_381::{Bls12, Fr, FrRepr}};
 
 use sapling_crypto::{circuit::multipack,
-                     jubjub::{edwards, FixedGenerators, JubjubBls12, JubjubParams, Unknown,
-                              fs::FsRepr},
+                     jubjub::{edwards, FixedGenerators, JubjubBls12, JubjubEngine, JubjubParams,
+                              ToUniform, Unknown, fs::FsRepr},
                      pedersen_hash::{pedersen_hash, Personalization}, redjubjub::{self, Signature}};
 
 use sapling_crypto::circuit::sprout::{self, TREE_DEPTH as SPROUT_TREE_DEPTH};
@@ -183,6 +183,23 @@ pub extern "system" fn librustzcash_merkle_hash(
     let result = unsafe { &mut *result };
 
     write_le(tmp, &mut result[..]);
+}
+
+#[no_mangle] // ToScalar
+pub extern "system" fn librustzcash_to_scalar(
+    input: *const [c_uchar; 64],
+    result: *mut [c_uchar; 32],
+) {
+    // Should be okay, because caller is responsible for ensuring
+    // the pointer is a valid pointer to 32 bytes, and that is the
+    // size of the representation
+    let scalar = <Bls12 as JubjubEngine>::Fs::to_uniform(unsafe { &(&*input)[..] }).into_repr();
+
+    let result = unsafe { &mut *result };
+
+    scalar
+        .write_le(&mut result[..])
+        .expect("length is 32 bytes");
 }
 
 /// XOR two uint64_t values and return the result, used
