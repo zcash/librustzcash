@@ -13,6 +13,8 @@ libc = "0.2"
 pairing = "0.14.1"
 lazy_static = "1"
 bellman = "0.1"
+byteorder = "1"
+rand = "0.4"
 
 [dependencies.sapling-crypto]
 git = "https://github.com/zcash-hackworks/sapling-crypto"

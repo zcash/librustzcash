@@ -1,6 +1,8 @@
 extern crate bellman;
+extern crate byteorder;
 extern crate libc;
 extern crate pairing;
+extern crate rand;
 extern crate sapling_crypto;
 
 #[macro_use]
@@ -14,8 +16,15 @@ use sapling_crypto::{circuit::multipack,
                      pedersen_hash::{pedersen_hash, Personalization},
                      redjubjub::{self, Signature}, util::swap_bits_u64};
 
-use bellman::groth16::{prepare_verifying_key, verify_proof, Parameters, PreparedVerifyingKey,
-                       Proof, VerifyingKey};
+use sapling_crypto::circuit::sprout::{self, TREE_DEPTH as SPROUT_TREE_DEPTH};
+
+use bellman::groth16::{create_random_proof, prepare_verifying_key, verify_proof, Parameters,
+                       PreparedVerifyingKey, Proof, VerifyingKey};
+
+use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+
+use std::io::BufReader;
+use rand::OsRng;
 
 use libc::{c_char, c_uchar, size_t, int64_t, uint64_t};
 use std::ffi::CStr;
@@ -466,4 +475,200 @@ pub extern "system" fn librustzcash_sapling_final_check(
     }
 
     true
+}
+
+#[no_mangle]
+pub extern "system" fn librustzcash_sprout_prove(
+    proof_out: *mut [c_uchar; GROTH_PROOF_SIZE],
+
+    phi: *const [c_uchar; 32],
+    rt: *const [c_uchar; 32],
+    h_sig: *const [c_uchar; 32],
+
+    // First input
+    in_sk1: *const [c_uchar; 32],
+    in_value1: uint64_t,
+    in_rho1: *const [c_uchar; 32],
+    in_r1: *const [c_uchar; 32],
+    in_auth1: *const [c_uchar; 1 + 33 * SPROUT_TREE_DEPTH + 8],
+
+    // Second input
+    in_sk2: *const [c_uchar; 32],
+    in_value2: uint64_t,
+    in_rho2: *const [c_uchar; 32],
+    in_r2: *const [c_uchar; 32],
+    in_auth2: *const [c_uchar; 1 + 33 * SPROUT_TREE_DEPTH + 8],
+
+    // First output
+    out_pk1: *const [c_uchar; 32],
+    out_value1: uint64_t,
+    out_r1: *const [c_uchar; 32],
+
+    // Second output
+    out_pk2: *const [c_uchar; 32],
+    out_value2: uint64_t,
+    out_r2: *const [c_uchar; 32],
+
+    // Public value
+    vpub_old: uint64_t,
+    vpub_new: uint64_t,
+) {
+    let phi = unsafe { *phi };
+    let rt = unsafe { *rt };
+    let h_sig = unsafe { *h_sig };
+    let in_sk1 = unsafe { *in_sk1 };
+    let in_rho1 = unsafe { *in_rho1 };
+    let in_r1 = unsafe { *in_r1 };
+    let in_auth1 = unsafe { *in_auth1 };
+    let in_sk2 = unsafe { *in_sk2 };
+    let in_rho2 = unsafe { *in_rho2 };
+    let in_r2 = unsafe { *in_r2 };
+    let in_auth2 = unsafe { *in_auth2 };
+    let out_pk1 = unsafe { *out_pk1 };
+    let out_r1 = unsafe { *out_r1 };
+    let out_pk2 = unsafe { *out_pk2 };
+    let out_r2 = unsafe { *out_r2 };
+
+    let mut inputs = Vec::with_capacity(2);
+    {
+        let mut handle_input = |sk, value, rho, r, mut auth: &[u8]| {
+            let value = Some(value);
+            let rho = Some(sprout::UniqueRandomness(rho));
+            let r = Some(sprout::CommitmentRandomness(r));
+            let a_sk = Some(sprout::SpendingKey(sk));
+
+            // skip the first byte
+            assert_eq!(auth[0], SPROUT_TREE_DEPTH as u8);
+            auth = &auth[1..];
+
+            let mut auth_path = [None; SPROUT_TREE_DEPTH];
+            for i in (0..SPROUT_TREE_DEPTH).rev() {
+                // skip length of inner vector
+                assert_eq!(auth[0], 32);
+                auth = &auth[1..];
+
+                let mut sibling = [0u8; 32];
+                sibling.copy_from_slice(&auth[0..32]);
+                auth = &auth[32..];
+
+                auth_path[i] = Some((sibling, false));
+            }
+
+            let mut position = auth.read_u64::<LittleEndian>()
+                .expect("should have had index at the end");
+
+            for i in 0..SPROUT_TREE_DEPTH {
+                auth_path[i].as_mut().map(|p| p.1 = (position & 1) == 1);
+
+                position >>= 1;
+            }
+
+            inputs.push(sprout::JSInput {
+                value: value,
+                a_sk: a_sk,
+                rho: rho,
+                r: r,
+                auth_path: auth_path,
+            });
+        };
+
+        handle_input(in_sk1, in_value1, in_rho1, in_r1, &in_auth1[..]);
+        handle_input(in_sk2, in_value2, in_rho2, in_r2, &in_auth2[..]);
+    }
+
+    let mut outputs = Vec::with_capacity(2);
+    {
+        let mut handle_output = |a_pk, value, r| {
+            outputs.push(sprout::JSOutput {
+                value: Some(value),
+                a_pk: Some(sprout::PayingKey(a_pk)),
+                r: Some(sprout::CommitmentRandomness(r)),
+            });
+        };
+
+        handle_output(out_pk1, out_value1, out_r1);
+        handle_output(out_pk2, out_value2, out_r2);
+    }
+
+    let js = sprout::JoinSplit {
+        vpub_old: Some(vpub_old),
+        vpub_new: Some(vpub_new),
+        h_sig: Some(h_sig),
+        phi: Some(phi),
+        inputs: inputs,
+        outputs: outputs,
+        rt: Some(rt),
+    };
+
+    // Load parameters from disk
+    let sprout_fs = File::open(
+        unsafe { &SPROUT_GROTH16_PARAMS_PATH }
+            .as_ref()
+            .expect("parameters should have been initialized"),
+    ).expect("couldn't load Sprout groth16 parameters file");
+
+    let mut sprout_fs = BufReader::with_capacity(1024 * 1024, sprout_fs);
+
+    let params = Parameters::<Bls12>::read(&mut sprout_fs, false)
+        .expect("couldn't deserialize Sprout JoinSplit parameters file");
+
+    drop(sprout_fs);
+
+    // Initialize secure RNG
+    let mut rng = OsRng::new().expect("should be able to construct RNG");
+
+    let proof = create_random_proof(js, &params, &mut rng).expect("proving should not fail");
+
+    proof
+        .write(&mut (unsafe { &mut *proof_out })[..])
+        .expect("should be able to serialize a proof");
+}
+
+#[no_mangle]
+pub extern "system" fn librustzcash_sprout_verify(
+    proof: *const [c_uchar; GROTH_PROOF_SIZE],
+    rt: *const [c_uchar; 32],
+    h_sig: *const [c_uchar; 32],
+    mac1: *const [c_uchar; 32],
+    mac2: *const [c_uchar; 32],
+    nf1: *const [c_uchar; 32],
+    nf2: *const [c_uchar; 32],
+    cm1: *const [c_uchar; 32],
+    cm2: *const [c_uchar; 32],
+    vpub_old: uint64_t,
+    vpub_new: uint64_t,
+) -> bool {
+    // Prepare the public input for the verifier
+    let mut public_input = Vec::with_capacity((32 * 8) + (8 * 2));
+    public_input.extend(unsafe { &(&*rt)[..] });
+    public_input.extend(unsafe { &(&*h_sig)[..] });
+    public_input.extend(unsafe { &(&*nf1)[..] });
+    public_input.extend(unsafe { &(&*mac1)[..] });
+    public_input.extend(unsafe { &(&*nf2)[..] });
+    public_input.extend(unsafe { &(&*mac2)[..] });
+    public_input.extend(unsafe { &(&*cm1)[..] });
+    public_input.extend(unsafe { &(&*cm2)[..] });
+    public_input.write_u64::<LittleEndian>(vpub_old).unwrap();
+    public_input.write_u64::<LittleEndian>(vpub_new).unwrap();
+
+    let public_input = multipack::bytes_to_bits(&public_input);
+    let public_input = multipack::compute_multipacking::<Bls12>(&public_input);
+
+    let proof = match Proof::read(unsafe { &(&*proof)[..] }) {
+        Ok(p) => p,
+        Err(_) => return false,
+    };
+
+    // Verify the proof
+    match verify_proof(
+        unsafe { SPROUT_GROTH16_VK.as_ref() }.expect("parameters should have been initialized"),
+        &proof,
+        &public_input[..],
+    ) {
+        // No error, and proof verification successful
+        Ok(true) => true,
+
+        // Any other case
+        _ => false,
+    }
 }

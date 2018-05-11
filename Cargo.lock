@@ -115,9 +115,11 @@ name = "librustzcash"
 version = "0.1.0"
 dependencies = [
  "bellman 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "byteorder 1.2.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "lazy_static 1.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "libc 0.2.40 (registry+https://github.com/rust-lang/crates.io-index)",
  "pairing 0.14.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "rand 0.4.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "sapling-crypto 0.0.1 (git+https://github.com/zcash-hackworks/sapling-crypto?rev=7beeb52730e24724ee10ea2458ecf7776cb59c58)",
 ]
 
