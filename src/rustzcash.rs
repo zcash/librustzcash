@@ -42,6 +42,12 @@ static mut SAPLING_SPEND_PARAMS: Option<Parameters<Bls12>> = None;
 static mut SAPLING_OUTPUT_PARAMS: Option<Parameters<Bls12>> = None;
 static mut SPROUT_GROTH16_PARAMS_PATH: Option<String> = None;
 
+fn is_small_order<Order>(
+    p: &edwards::Point<Bls12, Order>
+) -> bool {
+    p.double(&JUBJUB).double(&JUBJUB).double(&JUBJUB) == edwards::Point::zero()
+}
+
 /// Writes an FrRepr to [u8] of length 32
 fn write_le(mut f: FrRepr, to: &mut [u8]) {
     assert_eq!(to.len(), 32);
@@ -243,6 +249,10 @@ pub extern "system" fn librustzcash_sapling_check_spend(
         Err(_) => return false,
     };
 
+    if is_small_order(&cv) {
+        return false;
+    }
+
     // Accumulate the value commitment in the context
     {
         let mut tmp = cv.clone();
@@ -272,6 +282,10 @@ pub extern "system" fn librustzcash_sapling_check_spend(
         Ok(p) => p,
         Err(_) => return false,
     };
+
+    if is_small_order(&rk.0) {
+        return false;
+    }
 
     // Deserialize the signature
     let spend_auth_sig = match Signature::read(&(unsafe { &*spend_auth_sig })[..]) {
@@ -348,6 +362,10 @@ pub extern "system" fn librustzcash_sapling_check_output(
         Err(_) => return false,
     };
 
+    if is_small_order(&cv) {
+        return false;
+    }
+
     // Accumulate the value commitment in the context
     {
         let mut tmp = cv.clone();
@@ -370,6 +388,10 @@ pub extern "system" fn librustzcash_sapling_check_output(
         Ok(p) => p,
         Err(_) => return false,
     };
+
+    if is_small_order(&epk) {
+        return false;
+    }
 
     // Construct public input for circuit
     let mut public_input = [Fr::zero(); 5];
