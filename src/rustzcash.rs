@@ -11,7 +11,7 @@ extern crate lazy_static;
 
 use pairing::{BitIterator, Field, PrimeField, PrimeFieldRepr, bls12_381::{Bls12, Fr, FrRepr}};
 
-use sapling_crypto::{circuit::multipack,
+use sapling_crypto::{circuit::multipack, constants::CRH_IVK_PERSONALIZATION,
                      jubjub::{edwards, FixedGenerators, JubjubBls12, JubjubEngine, JubjubParams,
                               PrimeOrder, ToUniform, Unknown, fs::FsRepr},
                      pedersen_hash::{pedersen_hash, Personalization}, redjubjub::{self, Signature}};
@@ -20,6 +20,8 @@ use sapling_crypto::circuit::sprout::{self, TREE_DEPTH as SPROUT_TREE_DEPTH};
 
 use bellman::groth16::{create_random_proof, prepare_verifying_key, verify_proof, Parameters,
                        PreparedVerifyingKey, Proof, VerifyingKey};
+
+use blake2_rfc::blake2s::Blake2s;
 
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 
@@ -239,6 +241,28 @@ pub extern "system" fn librustzcash_nsk_to_nk(
     let result = unsafe { &mut *result };
 
     nk.write(&mut result[..]).expect("length is 32 bytes");
+}
+
+#[no_mangle]
+pub extern "system" fn librustzcash_crh_ivk(
+    ak: *const [c_uchar; 32],
+    nk: *const [c_uchar; 32],
+    result: *mut [c_uchar; 32],
+) {
+    let ak = unsafe { &*ak };
+    let nk = unsafe { &*nk };
+
+    let mut h = Blake2s::with_params(32, &[], &[], CRH_IVK_PERSONALIZATION);
+    h.update(ak);
+    h.update(nk);
+    let mut h = h.finalize().as_ref().to_vec();
+
+    // Drop the last five bits, so it can be interpreted as a scalar.
+    h[31] &= 0b0000_0111;
+
+    let result = unsafe { &mut *result };
+
+    result.copy_from_slice(&h);
 }
 
 /// XOR two uint64_t values and return the result, used
