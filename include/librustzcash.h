@@ -8,6 +8,10 @@ extern "C" {
 
     void librustzcash_to_scalar(const unsigned char *input, unsigned char *result);
 
+    void librustzcash_ask_to_ak(const unsigned char *ask, unsigned char *result);
+
+    void librustzcash_nsk_to_nk(const unsigned char *nsk, unsigned char *result);
+
     /// Loads the zk-SNARK parameters into memory and saves
     /// paths as necessary. Only called once.
     void librustzcash_init_zksnark_params(

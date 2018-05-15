@@ -13,7 +13,7 @@ use pairing::{BitIterator, Field, PrimeField, PrimeFieldRepr, bls12_381::{Bls12,
 
 use sapling_crypto::{circuit::multipack,
                      jubjub::{edwards, FixedGenerators, JubjubBls12, JubjubEngine, JubjubParams,
-                              ToUniform, Unknown, fs::FsRepr},
+                              PrimeOrder, ToUniform, Unknown, fs::FsRepr},
                      pedersen_hash::{pedersen_hash, Personalization}, redjubjub::{self, Signature}};
 
 use sapling_crypto::circuit::sprout::{self, TREE_DEPTH as SPROUT_TREE_DEPTH};
@@ -69,6 +69,19 @@ fn read_le(from: &[u8]) -> FrRepr {
     f.read_le(from).expect("length is 32 bytes");
 
     f
+}
+
+/// Reads an FsRepr from [u8] of length 32
+/// and multiplies it by the given base.
+/// This will panic (abort) if length provided is
+/// not correct
+fn fixed_scalar_mult(from: &[u8], p_g: FixedGenerators) -> edwards::Point<Bls12, PrimeOrder> {
+    assert_eq!(from.len(), 32);
+
+    let mut f = <<Bls12 as JubjubEngine>::Fs as PrimeField>::Repr::default();
+    f.read_le(from).expect("length is 32 bytes");
+
+    JUBJUB.generator(p_g).mul(f, &JUBJUB)
 }
 
 #[no_mangle]
@@ -200,6 +213,32 @@ pub extern "system" fn librustzcash_to_scalar(
     scalar
         .write_le(&mut result[..])
         .expect("length is 32 bytes");
+}
+
+#[no_mangle]
+pub extern "system" fn librustzcash_ask_to_ak(
+    ask: *const [c_uchar; 32],
+    result: *mut [c_uchar; 32],
+) {
+    let ask = unsafe { &*ask };
+    let ak = fixed_scalar_mult(ask, FixedGenerators::SpendingKeyGenerator);
+
+    let result = unsafe { &mut *result };
+
+    ak.write(&mut result[..]).expect("length is 32 bytes");
+}
+
+#[no_mangle]
+pub extern "system" fn librustzcash_nsk_to_nk(
+    nsk: *const [c_uchar; 32],
+    result: *mut [c_uchar; 32],
+) {
+    let nsk = unsafe { &*nsk };
+    let nk = fixed_scalar_mult(nsk, FixedGenerators::ProofGenerationKey);
+
+    let result = unsafe { &mut *result };
+
+    nk.write(&mut result[..]).expect("length is 32 bytes");
 }
 
 /// XOR two uint64_t values and return the result, used
