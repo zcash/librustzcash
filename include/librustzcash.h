@@ -14,6 +14,10 @@ extern "C" {
 
     void librustzcash_crh_ivk(const unsigned char *ak, const unsigned char *nk, unsigned char *result);
 
+    bool librustzcash_check_diversifier(const unsigned char *diversifier);
+
+    bool librustzcash_ivk_to_pkd(const unsigned char *ivk, const unsigned char *diversifier, unsigned char *result);
+
     /// Loads the zk-SNARK parameters into memory and saves
     /// paths as necessary. Only called once.
     void librustzcash_init_zksnark_params(
