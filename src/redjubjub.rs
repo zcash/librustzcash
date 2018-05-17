@@ -6,18 +6,11 @@ use rand::Rng;
 use std::io::{self, Read, Write};
 
 use jubjub::{FixedGenerators, JubjubEngine, JubjubParams, Unknown, edwards::Point};
-use util::{hash_to_scalar, swap_bits_u64};
+use util::{hash_to_scalar};
 
 fn read_scalar<E: JubjubEngine, R: Read>(reader: R) -> io::Result<E::Fs> {
     let mut s_repr = <E::Fs as PrimeField>::Repr::default();
-
-    // This reads in big-endian, so we perform a swap of the
-    // limbs in the representation and swap the bit order.
-    s_repr.read_be(reader)?;
-    s_repr.as_mut().reverse();
-    for b in s_repr.as_mut() {
-        *b = swap_bits_u64(*b);
-    }
+    s_repr.read_le(reader)?;
 
     match E::Fs::from_repr(s_repr) {
         Ok(s) => Ok(s),
@@ -29,15 +22,7 @@ fn read_scalar<E: JubjubEngine, R: Read>(reader: R) -> io::Result<E::Fs> {
 }
 
 fn write_scalar<E: JubjubEngine, W: Write>(s: &E::Fs, writer: W) -> io::Result<()> {
-    let mut s_repr = s.into_repr();
-
-    // This writes in big-endian, so we perform a swap of the
-    // limbs in the representation and swap the bit order.
-    s_repr.as_mut().reverse();
-    for b in s_repr.as_mut() {
-        *b = swap_bits_u64(*b);
-    }
-    s_repr.write_be(writer)
+    s.into_repr().write_le(writer)
 }
 
 fn h_star<E: JubjubEngine>(a: &[u8], b: &[u8]) -> E::Fs {

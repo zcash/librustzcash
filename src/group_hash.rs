@@ -5,8 +5,7 @@ use jubjub::{
 };
 
 use pairing::{
-    PrimeField,
-    PrimeFieldRepr
+    PrimeField
 };
 
 use blake2_rfc::blake2s::Blake2s;
@@ -29,20 +28,11 @@ pub fn group_hash<E: JubjubEngine>(
     let mut h = Blake2s::with_params(32, &[], &[], personalization);
     h.update(constants::GH_FIRST_BLOCK);
     h.update(tag);
-    let mut h = h.finalize().as_ref().to_vec();
+    let h = h.finalize().as_ref().to_vec();
     assert!(h.len() == 32);
 
-    // Take first/unset first bit of hash
-    let s = h[0] >> 7 == 1; // get s
-    h[0] &= 0b0111_1111; // unset s from h
-
-    // cast to prime field representation
-    let mut y0 = <E::Fr as PrimeField>::Repr::default();
-    y0.read_be(&h[..]).expect("hash is sufficiently large");
-
-    if let Ok(y0) = E::Fr::from_repr(y0) {
-        if let Some(p) = edwards::Point::<E, _>::get_for_y(y0, s, params) {
-            // Enter into the prime order subgroup
+    match edwards::Point::<E, _>::read(&h[..], params) {
+        Ok(p) => {
             let p = p.mul_by_cofactor(params);
 
             if p != edwards::Point::zero() {
@@ -50,10 +40,7 @@ pub fn group_hash<E: JubjubEngine>(
             } else {
                 None
             }
-        } else {
-            None
-        }
-    } else {
-        None
+        },
+        Err(_) => None
     }
 }

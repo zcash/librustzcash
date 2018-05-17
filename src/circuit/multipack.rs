@@ -45,6 +45,13 @@ pub fn bytes_to_bits(bytes: &[u8]) -> Vec<bool>
          .collect()
 }
 
+pub fn bytes_to_bits_le(bytes: &[u8]) -> Vec<bool>
+{
+    bytes.iter()
+         .flat_map(|&v| (0..8).map(move |i| (v >> i) & 1 == 1))
+         .collect()
+}
+
 pub fn compute_multipacking<E: Engine>(
     bits: &[bool]
 ) -> Vec<E::Fr>

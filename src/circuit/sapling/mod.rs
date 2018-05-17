@@ -226,11 +226,6 @@ impl<'a, E: JubjubEngine> Circuit<E> for Spend<'a, E> {
             constants::CRH_IVK_PERSONALIZATION
         )?;
 
-        // Swap bit-endianness in each byte
-        for ivk_byte in ivk.chunks_mut(8) {
-            ivk_byte.reverse();
-        }
-
         // drop_5 to ensure it's in the field
         ivk.truncate(E::Fs::CAPACITY as usize);
 
@@ -697,7 +692,7 @@ fn test_input_circuit_with_bls12_381() {
             }
 
             let expected_nf = note.nf(&viewing_key, position, params);
-            let expected_nf = multipack::bytes_to_bits(&expected_nf);
+            let expected_nf = multipack::bytes_to_bits_le(&expected_nf);
             let expected_nf = multipack::compute_multipacking::<Bls12>(&expected_nf);
             assert_eq!(expected_nf.len(), 2);
 
@@ -718,7 +713,7 @@ fn test_input_circuit_with_bls12_381() {
 
             assert!(cs.is_satisfied());
             assert_eq!(cs.num_constraints(), 98777);
-            assert_eq!(cs.hash(), "499305e409599a3e4fe0a885f6adf674e9f49ba4a21e47362356d2a89f15dc1f");
+            assert_eq!(cs.hash(), "d37c738e83df5d9b0bb6495ac96abf21bcb2697477e2c15c2c7916ff7a3b6a89");
 
             assert_eq!(cs.get("randomization of note commitment/x3/num"), cm);
 
@@ -795,7 +790,7 @@ fn test_output_circuit_with_bls12_381() {
 
             assert!(cs.is_satisfied());
             assert_eq!(cs.num_constraints(), 7827);
-            assert_eq!(cs.hash(), "d18e83255220328a688134038ba4f82d5ce67ffe9f97b2ae2678042da0efad43");
+            assert_eq!(cs.hash(), "c26d5cdfe6ccd65c03390902c02e11393ea6bb96aae32a7f2ecb12eb9103faee");
 
             let expected_cm = payment_address.create_note(
                 value_commitment.value,
