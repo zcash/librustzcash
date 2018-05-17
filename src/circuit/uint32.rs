@@ -114,10 +114,7 @@ impl UInt32 {
 
     /// Turns this `UInt32` into its little-endian byte order representation.
     pub fn into_bits(&self) -> Vec<Boolean> {
-        self.bits.chunks(8)
-                 .flat_map(|v| v.iter().rev())
-                 .cloned()
-                 .collect()
+        self.bits.clone()
     }
 
     /// Converts a little-endian byte order representation of bits into a
@@ -126,10 +123,7 @@ impl UInt32 {
     {
         assert_eq!(bits.len(), 32);
 
-        let new_bits = bits.chunks(8)
-                           .flat_map(|v| v.iter().rev())
-                           .cloned()
-                           .collect::<Vec<_>>();
+        let new_bits = bits.to_vec();
 
         let mut value = Some(0u32);
         for b in new_bits.iter().rev() {

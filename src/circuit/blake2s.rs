@@ -343,7 +343,7 @@ mod test {
 
         let mut out = out.into_iter();
         for b in expected.into_iter() {
-            for i in (0..8).rev() {
+            for i in 0..8 {
                 let c = out.next().unwrap().get_value().unwrap();
 
                 assert_eq!(c, (b >> i) & 1u8 == 1u8);
@@ -405,7 +405,7 @@ mod test {
             let mut input_bits = vec![];
 
             for (byte_i, input_byte) in data.into_iter().enumerate() {
-                for bit_i in (0..8).rev() {
+                for bit_i in 0..8 {
                     let cs = cs.namespace(|| format!("input bit {} {}", byte_i, bit_i));
 
                     input_bits.push(AllocatedBit::alloc(cs, Some((input_byte >> bit_i) & 1u8 == 1u8)).unwrap().into());
@@ -417,7 +417,7 @@ mod test {
             assert!(cs.is_satisfied());
 
             let mut s = hash_result.as_ref().iter()
-                                            .flat_map(|&byte| (0..8).rev().map(move |i| (byte >> i) & 1u8 == 1u8));
+                                            .flat_map(|&byte| (0..8).map(move |i| (byte >> i) & 1u8 == 1u8));
 
             for b in r {
                 match b {
