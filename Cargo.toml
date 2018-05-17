@@ -10,7 +10,7 @@ crate-type = ["staticlib"]
 
 [dependencies]
 libc = "0.2"
-pairing = "0.14.1"
+pairing = "0.14.2"
 lazy_static = "1"
 bellman = "0.1"
 byteorder = "1"
@@ -18,8 +18,9 @@ rand = "0.4"
 
 [dependencies.sapling-crypto]
 git = "https://github.com/zcash-hackworks/sapling-crypto"
-rev = "7beeb52730e24724ee10ea2458ecf7776cb59c58"
+rev = "eb409fa3cf8df215ae8d35f5e385751a0c5ffb85"
 
 [profile.release]
 lto = true
 panic = 'abort'
+codegen-units = 1
