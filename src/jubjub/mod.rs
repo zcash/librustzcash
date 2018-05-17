@@ -363,11 +363,22 @@ fn test_jubjub_bls12() {
 
     tests::test_suite::<Bls12>(&params);
 
-    let test_repr = hex!("b9481dd1103b7d1f8578078eb429d3c476472f53e88c0eaefdf51334c7c8b98c");
+    let test_repr = hex!("9d12b88b08dcbef8a11ee0712d94cb236ee2f4ca17317075bfafc82ce3139d31");
     let p = edwards::Point::<Bls12, _>::read(&test_repr[..], &params).unwrap();
     let q = edwards::Point::<Bls12, _>::get_for_y(
         Fr::from_str("22440861827555040311190986994816762244378363690614952020532787748720529117853").unwrap(),
         false,
+        &params
+    ).unwrap();
+
+    assert!(p == q);
+
+    // Same thing, but sign bit set
+    let test_repr = hex!("9d12b88b08dcbef8a11ee0712d94cb236ee2f4ca17317075bfafc82ce3139db1");
+    let p = edwards::Point::<Bls12, _>::read(&test_repr[..], &params).unwrap();
+    let q = edwards::Point::<Bls12, _>::get_for_y(
+        Fr::from_str("22440861827555040311190986994816762244378363690614952020532787748720529117853").unwrap(),
+        true,
         &params
     ).unwrap();
 

@@ -26,8 +26,6 @@ use std::io::{
     Read
 };
 
-use util::swap_bits_u64;
-
 // Represents the affine point (X/Z, Y/Z) via the extended
 // twisted Edwards coordinates.
 //
@@ -97,21 +95,8 @@ impl<E: JubjubEngine> Point<E, Unknown> {
         params: &E::Params
     ) -> io::Result<Self>
     {
-        // Jubjub points are encoded least significant bit first.
-        // The most significant bit (bit 254) encodes the parity
-        // of the x-coordinate.
-
         let mut y_repr = <E::Fr as PrimeField>::Repr::default();
-
-        // This reads in big-endian, so we perform a swap of the
-        // limbs in the representation and swap the bit order.
-        y_repr.read_be(reader)?;
-
-        y_repr.as_mut().reverse();
-
-        for b in y_repr.as_mut() {
-            *b = swap_bits_u64(*b);
-        }
+        y_repr.read_le(reader)?;
 
         let x_sign = (y_repr.as_ref()[3] >> 63) == 1;
         y_repr.as_mut()[3] &= 0x7fffffffffffffff;
@@ -216,13 +201,7 @@ impl<E: JubjubEngine, Subgroup> Point<E, Subgroup> {
             y_repr.as_mut()[3] |= 0x8000000000000000u64;
         }
 
-        y_repr.as_mut().reverse();
-
-        for b in y_repr.as_mut() {
-            *b = swap_bits_u64(*b);
-        }
-
-        y_repr.write_be(writer)
+        y_repr.write_le(writer)
     }
 
     /// Convert from a Montgomery point

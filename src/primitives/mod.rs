@@ -14,7 +14,7 @@ use pedersen_hash::{
 };
 
 use byteorder::{
-    BigEndian,
+    LittleEndian,
     WriteBytesExt
 };
 
@@ -27,8 +27,6 @@ use jubjub::{
 };
 
 use blake2_rfc::blake2s::Blake2s;
-
-use util::swap_bits_u64;
 
 #[derive(Clone)]
 pub struct ValueCommitment<E: JubjubEngine> {
@@ -96,14 +94,11 @@ impl<E: JubjubEngine> ViewingKey<E> {
         h.update(&preimage);
         let mut h = h.finalize().as_ref().to_vec();
 
-        // Reverse the bytes to interpret it in little-endian byte order
-        h.reverse();
-
-        // Drop the first five bits, so it can be interpreted as a scalar.
-        h[0] &= 0b0000_0111;
+        // Drop the most significant five bits, so it can be interpreted as a scalar.
+        h[31] &= 0b0000_0111;
 
         let mut e = <E::Fs as PrimeField>::Repr::default();
-        e.read_be(&h[..]).unwrap();
+        e.read_le(&h[..]).unwrap();
 
         E::Fs::from_repr(e).expect("should be a valid scalar")
     }
@@ -198,13 +193,8 @@ impl<E: JubjubEngine> Note<E> {
         // Calculate the note contents, as bytes
         let mut note_contents = vec![];
 
-        // Write the value in little-endian bit order
-        // swapping the bits to ensure the order is
-        // correct (LittleEndian byte order would
-        // be incorrect here.)
-        (&mut note_contents).write_u64::<BigEndian>(
-            swap_bits_u64(self.value)
-        ).unwrap();
+        // Writing the value in little endian
+        (&mut note_contents).write_u64::<LittleEndian>(self.value).unwrap();
 
         // Write g_d
         self.g_d.write(&mut note_contents).unwrap();
@@ -219,7 +209,7 @@ impl<E: JubjubEngine> Note<E> {
             Personalization::NoteCommitment,
             note_contents.into_iter()
                          .flat_map(|byte| {
-                            (0..8).rev().map(move |i| ((byte >> i) & 1) == 1)
+                            (0..8).map(move |i| ((byte >> i) & 1) == 1)
                          }),
             params
         );

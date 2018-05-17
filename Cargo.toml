@@ -9,7 +9,7 @@ repository = "https://github.com/zcash-hackworks/sapling"
 version = "0.0.1"
 
 [dependencies.pairing]
-version = "0.14"
+version = "0.14.2"
 features = ["expose-arith"]
 
 [dependencies]
