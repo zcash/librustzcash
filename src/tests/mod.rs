@@ -2,6 +2,8 @@ use sapling_crypto::jubjub::{FixedGenerators, JubjubParams};
 
 use super::JUBJUB;
 
+mod signatures;
+
 #[test]
 fn sapling_generators() {
     struct SaplingGenerators {
