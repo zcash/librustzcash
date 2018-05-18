@@ -18,7 +18,7 @@ rand = "0.4"
 
 [dependencies.sapling-crypto]
 git = "https://github.com/zcash-hackworks/sapling-crypto"
-rev = "eb409fa3cf8df215ae8d35f5e385751a0c5ffb85"
+rev = "6abfcca25ae233922ecc18a4d2d0b5cb7aab7c8c"
 
 [profile.release]
 lto = true
