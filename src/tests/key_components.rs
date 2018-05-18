@@ -497,7 +497,11 @@ fn key_components() {
             assert_eq!(&vec, &tv.nk);
         }
 
-        // TODO: Test fvk.ivk()
+        {
+            let mut vec = Vec::new();
+            fvk.ivk().into_repr().write_le(&mut vec).unwrap();
+            assert_eq!(&vec, &tv.ivk);
+        }
 
         let diversifier = Diversifier(tv.default_d);
         let addr = fvk.into_payment_address(diversifier, &JUBJUB).unwrap();
