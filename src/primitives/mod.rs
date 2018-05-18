@@ -84,7 +84,7 @@ impl<E: JubjubEngine> ViewingKey<E> {
         )
     }
 
-    fn ivk(&self) -> E::Fs {
+    pub fn ivk(&self) -> E::Fs {
         let mut preimage = [0; 64];
 
         self.ak.write(&mut preimage[0..32]).unwrap();
