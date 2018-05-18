@@ -2,6 +2,7 @@ use sapling_crypto::jubjub::{FixedGenerators, JubjubParams};
 
 use super::JUBJUB;
 
+mod key_components;
 mod signatures;
 
 #[test]
