@@ -22,12 +22,15 @@ use bellman::groth16::{create_random_proof, prepare_verifying_key, verify_proof,
 
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 
-use std::io::BufReader;
 use rand::OsRng;
+use std::io::BufReader;
 
 use libc::{c_char, c_uchar, size_t, int64_t, uint64_t};
 use std::ffi::CStr;
 use std::fs::File;
+
+#[cfg(test)]
+mod tests;
 
 lazy_static! {
     static ref JUBJUB: JubjubBls12 = { JubjubBls12::new() };
