@@ -13,8 +13,7 @@ use pairing::{BitIterator, Field, PrimeField, PrimeFieldRepr, bls12_381::{Bls12,
 use sapling_crypto::{circuit::multipack,
                      jubjub::{edwards, FixedGenerators, JubjubBls12, JubjubParams, Unknown,
                               fs::FsRepr},
-                     pedersen_hash::{pedersen_hash, Personalization},
-                     redjubjub::{self, Signature}, util::swap_bits_u64};
+                     pedersen_hash::{pedersen_hash, Personalization}, redjubjub::{self, Signature}};
 
 use sapling_crypto::circuit::sprout::{self, TREE_DEPTH as SPROUT_TREE_DEPTH};
 
@@ -23,12 +22,15 @@ use bellman::groth16::{create_random_proof, prepare_verifying_key, verify_proof,
 
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 
-use std::io::BufReader;
 use rand::OsRng;
+use std::io::BufReader;
 
 use libc::{c_char, c_uchar, size_t, int64_t, uint64_t};
 use std::ffi::CStr;
 use std::fs::File;
+
+#[cfg(test)]
+mod tests;
 
 lazy_static! {
     static ref JUBJUB: JubjubBls12 = { JubjubBls12::new() };
@@ -42,22 +44,15 @@ static mut SAPLING_SPEND_PARAMS: Option<Parameters<Bls12>> = None;
 static mut SAPLING_OUTPUT_PARAMS: Option<Parameters<Bls12>> = None;
 static mut SPROUT_GROTH16_PARAMS_PATH: Option<String> = None;
 
-fn is_small_order<Order>(
-    p: &edwards::Point<Bls12, Order>
-) -> bool {
+fn is_small_order<Order>(p: &edwards::Point<Bls12, Order>) -> bool {
     p.double(&JUBJUB).double(&JUBJUB).double(&JUBJUB) == edwards::Point::zero()
 }
 
 /// Writes an FrRepr to [u8] of length 32
-fn write_le(mut f: FrRepr, to: &mut [u8]) {
+fn write_le(f: FrRepr, to: &mut [u8]) {
     assert_eq!(to.len(), 32);
 
-    f.as_mut().reverse();
-    for b in f.as_mut() {
-        *b = swap_bits_u64(*b);
-    }
-
-    f.write_be(to).expect("length is 32 bytes");
+    f.write_le(to).expect("length is 32 bytes");
 }
 
 /// Reads an FrRepr from a [u8] of length 32.
@@ -67,12 +62,7 @@ fn read_le(from: &[u8]) -> FrRepr {
     assert_eq!(from.len(), 32);
 
     let mut f = FrRepr::default();
-    f.read_be(from).expect("length is 32 bytes");
-
-    f.as_mut().reverse();
-    for b in f.as_mut() {
-        *b = swap_bits_u64(*b);
-    }
+    f.read_le(from).expect("length is 32 bytes");
 
     f
 }
@@ -319,7 +309,7 @@ pub extern "system" fn librustzcash_sapling_check_spend(
 
     // Add the nullifier through multiscalar packing
     {
-        let nullifier = multipack::bytes_to_bits(nullifier);
+        let nullifier = multipack::bytes_to_bits_le(nullifier);
         let nullifier = multipack::compute_multipacking::<Bls12>(&nullifier);
 
         assert_eq!(nullifier.len(), 2);
