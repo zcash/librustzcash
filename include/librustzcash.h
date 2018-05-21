@@ -102,6 +102,27 @@ extern "C" {
     /// `librustzcash_sapling_verification_ctx_init`.
     void librustzcash_sapling_verification_ctx_free(void *);
 
+    /// Compute a Sapling commitment.
+    ///
+    /// The `diversifier` parameter must be 11 bytes in length.
+    /// The `pk_d` and `r` parameters must be of length 32.
+    /// The result is also of length 32 and placed in `result`.
+    /// Returns false if the diversifier or pk_d is not valid
+    bool librustzcash_sapling_compute_cm(
+        const unsigned char *diversifier,
+        const unsigned char *pk_d,
+        const uint64_t value,
+        const unsigned char *r,
+        unsigned char *result
+    );
+
+    /// Generate uniform Sapling commitment randomness `r`.
+    /// The result is of length 32.
+    /// Returns false if there was an error.
+    bool librustzcash_sapling_generate_commitment_randomness(
+        unsigned char *result
+    );
+
     /// Sprout JoinSplit proof generation.
     void librustzcash_sprout_prove(
         unsigned char *proof_out,
