@@ -33,6 +33,16 @@ impl Params {
 }
 
 impl Node {
+    fn new(p: &Params, state: &Blake2b, i: u32) -> Self {
+        let hash = generate_hash(state, i / p.indices_per_hash_output());
+        let start = ((i % p.indices_per_hash_output()) * p.n / 8) as usize;
+        let end = start + (p.n as usize) / 8;
+        Node {
+            hash: expand_array(&hash.as_bytes()[start..end], p.collision_bit_length(), 0),
+            indices: vec![i],
+        }
+    }
+
     fn from_children(a: Node, b: Node, trim: usize) -> Self {
         let hash: Vec<_> = a.hash
             .iter()
@@ -186,6 +196,21 @@ fn distinct_indices(a: &Node, b: &Node) -> bool {
     return true;
 }
 
+fn validate_subtrees(p: &Params, a: &Node, b: &Node) -> bool {
+    if !has_collision(a, b, p.collision_byte_length()) {
+        // error!("Invalid solution: invalid collision length between StepRows");
+        false
+    } else if b.indices_before(a) {
+        // error!("Invalid solution: Index tree incorrectly ordered");
+        false
+    } else if !distinct_indices(a, b) {
+        // error!("Invalid solution: duplicate indices");
+        false
+    } else {
+        true
+    }
+}
+
 pub fn is_valid_solution_iterative(
     n: u32,
     k: u32,
@@ -201,13 +226,7 @@ pub fn is_valid_solution_iterative(
 
     let mut rows = Vec::new();
     for i in indices {
-        let hash = generate_hash(&state, i / p.indices_per_hash_output());
-        let start = ((i % p.indices_per_hash_output()) * p.n / 8) as usize;
-        let end = start + (p.n as usize) / 8;
-        rows.push(Node {
-            hash: expand_array(&hash.as_bytes()[start..end], p.collision_bit_length(), 0),
-            indices: vec![*i],
-        });
+        rows.push(Node::new(&p, &state, *i));
     }
 
     let mut hash_len = p.hash_length();
@@ -216,16 +235,7 @@ pub fn is_valid_solution_iterative(
         for pair in rows.chunks(2) {
             let a = &pair[0];
             let b = &pair[1];
-            if !has_collision(a, b, p.collision_byte_length()) {
-                // error!("Invalid solution: invalid collision length between StepRows");
-                return false;
-            }
-            if b.indices_before(a) {
-                // error!("Invalid solution: Index tree incorrectly ordered");
-                return false;
-            }
-            if !distinct_indices(a, b) {
-                // error!("Invalid solution: duplicate indices");
+            if !validate_subtrees(&p, a, b) {
                 return false;
             }
             cur_rows.push(Node::from_children_ref(a, b, p.collision_byte_length()));
@@ -245,33 +255,18 @@ fn tree_validator(p: &Params, state: &Blake2b, indices: &[u32]) -> Option<Node> 
         match tree_validator(p, state, &indices[0..mid]) {
             Some(a) => match tree_validator(p, state, &indices[mid..end]) {
                 Some(b) => {
-                    if !has_collision(&a, &b, p.collision_byte_length()) {
-                        // error!("Invalid solution: invalid collision length between StepRows");
-                        return None;
+                    if validate_subtrees(p, &a, &b) {
+                        Some(Node::from_children(a, b, p.collision_byte_length()))
+                    } else {
+                        None
                     }
-                    if b.indices_before(&a) {
-                        // error!("Invalid solution: Index tree incorrectly ordered");
-                        return None;
-                    }
-                    if !distinct_indices(&a, &b) {
-                        // error!("Invalid solution: duplicate indices");
-                        return None;
-                    }
-                    Some(Node::from_children(a, b, p.collision_byte_length()))
                 }
                 None => None,
             },
             None => None,
         }
     } else {
-        let i = indices[0];
-        let hash = generate_hash(&state, i / p.indices_per_hash_output());
-        let start = ((i % p.indices_per_hash_output()) * p.n / 8) as usize;
-        let end = start + (p.n as usize) / 8;
-        Some(Node {
-            hash: expand_array(&hash.as_bytes()[start..end], p.collision_bit_length(), 0),
-            indices: vec![i],
-        })
+        Some(Node::new(&p, &state, indices[0]))
     }
 }
 
