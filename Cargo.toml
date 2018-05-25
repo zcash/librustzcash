@@ -1,7 +1,10 @@
 [package]
 name = "librustzcash"
 version = "0.1.0"
-authors = ["Sean Bowe <ewillbefull@gmail.com>"]
+authors = [
+    "Sean Bowe <ewillbefull@gmail.com>",
+    "Jack Grigg <jack@z.cash>",
+    ]
 
 [lib]
 name = "rustzcash"
@@ -15,6 +18,10 @@ lazy_static = "1"
 bellman = "0.1"
 byteorder = "1"
 rand = "0.4"
+
+[dependencies.blake2-rfc]
+git = "https://github.com/gtank/blake2-rfc"
+rev = "7a5b5fc99ae483a0043db7547fb79a6fa44b88a9"
 
 [dependencies.sapling-crypto]
 git = "https://github.com/zcash-hackworks/sapling-crypto"

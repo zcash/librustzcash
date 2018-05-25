@@ -14,6 +14,19 @@ extern "C" {
         const char* sprout_path
     );
 
+    /// Validates the provided Equihash solution against
+    /// the given parameters, input and nonce.
+    bool librustzcash_eh_isvalid(
+        uint32_t n,
+        uint32_t k,
+        const unsigned char* input,
+        size_t input_len,
+        const unsigned char* nonce,
+        size_t nonce_len,
+        const unsigned char* soln,
+        size_t soln_len
+    );
+
     /// Writes the "uncommitted" note value for empty leaves
     /// of the merkle tree. `result` must be a valid pointer
     /// to 32 bytes which will be written.
