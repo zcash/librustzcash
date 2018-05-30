@@ -4,6 +4,9 @@ use sapling_crypto::{jubjub::{FixedGenerators, JubjubEngine, JubjubParams, fs::F
 
 use super::JUBJUB;
 
+use {librustzcash_ask_to_ak, librustzcash_check_diversifier, librustzcash_crh_ivk,
+     librustzcash_ivk_to_pkd, librustzcash_nsk_to_nk};
+
 #[test]
 fn key_components() {
     #![allow(dead_code)]
@@ -601,6 +604,11 @@ fn key_components() {
             ak.write(&mut vec).unwrap();
             assert_eq!(&vec, &tv.ak);
         }
+        {
+            let mut ak = [0u8; 32];
+            librustzcash_ask_to_ak(&tv.ask, &mut ak);
+            assert_eq!(&ak, &tv.ak);
+        }
 
         let pgk = ProofGenerationKey { ak, nsk };
         let fvk = pgk.into_viewing_key(&JUBJUB);
@@ -609,19 +617,36 @@ fn key_components() {
             fvk.nk.write(&mut vec).unwrap();
             assert_eq!(&vec, &tv.nk);
         }
+        {
+            let mut nk = [0u8; 32];
+            librustzcash_nsk_to_nk(&tv.nsk, &mut nk);
+            assert_eq!(&nk, &tv.nk);
+        }
 
         {
             let mut vec = Vec::new();
             fvk.ivk().into_repr().write_le(&mut vec).unwrap();
             assert_eq!(&vec, &tv.ivk);
         }
+        {
+            let mut ivk = [0u8; 32];
+            librustzcash_crh_ivk(&tv.ak, &tv.nk, &mut ivk);
+            assert_eq!(&ivk, &tv.ivk);
+        }
 
         let diversifier = Diversifier(tv.default_d);
+        assert!(librustzcash_check_diversifier(&tv.default_d));
+
         let addr = fvk.into_payment_address(diversifier, &JUBJUB).unwrap();
         {
             let mut vec = Vec::new();
             addr.pk_d.write(&mut vec).unwrap();
             assert_eq!(&vec, &tv.default_pk_d);
+        }
+        {
+            let mut default_pk_d = [0u8; 32];
+            librustzcash_ivk_to_pkd(&tv.ivk, &tv.default_d, &mut default_pk_d);
+            assert_eq!(&default_pk_d, &tv.default_pk_d);
         }
 
         let mut note_r_repr = FsRepr::default();
