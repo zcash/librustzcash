@@ -11,15 +11,17 @@ extern crate lazy_static;
 
 use pairing::{BitIterator, Field, PrimeField, PrimeFieldRepr, bls12_381::{Bls12, Fr, FrRepr}};
 
-use sapling_crypto::{circuit::multipack,
-                     jubjub::{edwards, FixedGenerators, JubjubBls12, JubjubParams, Unknown,
-                              fs::FsRepr},
+use sapling_crypto::{circuit::multipack, constants::CRH_IVK_PERSONALIZATION,
+                     jubjub::{edwards, FixedGenerators, JubjubBls12, JubjubEngine, JubjubParams,
+                              PrimeOrder, ToUniform, Unknown, fs::FsRepr},
                      pedersen_hash::{pedersen_hash, Personalization}, redjubjub::{self, Signature}};
 
 use sapling_crypto::circuit::sprout::{self, TREE_DEPTH as SPROUT_TREE_DEPTH};
 
 use bellman::groth16::{create_random_proof, prepare_verifying_key, verify_proof, Parameters,
                        PreparedVerifyingKey, Proof, VerifyingKey};
+
+use blake2_rfc::blake2s::Blake2s;
 
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 
@@ -69,6 +71,28 @@ fn read_le(from: &[u8]) -> FrRepr {
     f.read_le(from).expect("length is 32 bytes");
 
     f
+}
+
+/// Reads an FsRepr from [u8] of length 32
+/// This will panic (abort) if length provided is
+/// not correct
+fn read_fs(from: &[u8]) -> FsRepr {
+    assert_eq!(from.len(), 32);
+
+    let mut f = <<Bls12 as JubjubEngine>::Fs as PrimeField>::Repr::default();
+    f.read_le(from).expect("length is 32 bytes");
+
+    f
+}
+
+/// Reads an FsRepr from [u8] of length 32
+/// and multiplies it by the given base.
+/// This will panic (abort) if length provided is
+/// not correct
+fn fixed_scalar_mult(from: &[u8], p_g: FixedGenerators) -> edwards::Point<Bls12, PrimeOrder> {
+    let f = read_fs(from);
+
+    JUBJUB.generator(p_g).mul(f, &JUBJUB)
 }
 
 #[no_mangle]
@@ -183,6 +207,98 @@ pub extern "system" fn librustzcash_merkle_hash(
     let result = unsafe { &mut *result };
 
     write_le(tmp, &mut result[..]);
+}
+
+#[no_mangle] // ToScalar
+pub extern "system" fn librustzcash_to_scalar(
+    input: *const [c_uchar; 64],
+    result: *mut [c_uchar; 32],
+) {
+    // Should be okay, because caller is responsible for ensuring
+    // the pointer is a valid pointer to 32 bytes, and that is the
+    // size of the representation
+    let scalar = <Bls12 as JubjubEngine>::Fs::to_uniform(unsafe { &(&*input)[..] }).into_repr();
+
+    let result = unsafe { &mut *result };
+
+    scalar
+        .write_le(&mut result[..])
+        .expect("length is 32 bytes");
+}
+
+#[no_mangle]
+pub extern "system" fn librustzcash_ask_to_ak(
+    ask: *const [c_uchar; 32],
+    result: *mut [c_uchar; 32],
+) {
+    let ask = unsafe { &*ask };
+    let ak = fixed_scalar_mult(ask, FixedGenerators::SpendingKeyGenerator);
+
+    let result = unsafe { &mut *result };
+
+    ak.write(&mut result[..]).expect("length is 32 bytes");
+}
+
+#[no_mangle]
+pub extern "system" fn librustzcash_nsk_to_nk(
+    nsk: *const [c_uchar; 32],
+    result: *mut [c_uchar; 32],
+) {
+    let nsk = unsafe { &*nsk };
+    let nk = fixed_scalar_mult(nsk, FixedGenerators::ProofGenerationKey);
+
+    let result = unsafe { &mut *result };
+
+    nk.write(&mut result[..]).expect("length is 32 bytes");
+}
+
+#[no_mangle]
+pub extern "system" fn librustzcash_crh_ivk(
+    ak: *const [c_uchar; 32],
+    nk: *const [c_uchar; 32],
+    result: *mut [c_uchar; 32],
+) {
+    let ak = unsafe { &*ak };
+    let nk = unsafe { &*nk };
+
+    let mut h = Blake2s::with_params(32, &[], &[], CRH_IVK_PERSONALIZATION);
+    h.update(ak);
+    h.update(nk);
+    let mut h = h.finalize().as_ref().to_vec();
+
+    // Drop the last five bits, so it can be interpreted as a scalar.
+    h[31] &= 0b0000_0111;
+
+    let result = unsafe { &mut *result };
+
+    result.copy_from_slice(&h);
+}
+
+#[no_mangle]
+pub extern "system" fn librustzcash_check_diversifier(diversifier: *const [c_uchar; 11]) -> bool {
+    let diversifier = sapling_crypto::primitives::Diversifier(unsafe { *diversifier });
+    diversifier.g_d::<Bls12>(&JUBJUB).is_some()
+}
+
+#[no_mangle]
+pub extern "system" fn librustzcash_ivk_to_pkd(
+    ivk: *const [c_uchar; 32],
+    diversifier: *const [c_uchar; 11],
+    result: *mut [c_uchar; 32],
+) -> bool {
+    let ivk = read_fs(unsafe { &*ivk });
+    let diversifier = sapling_crypto::primitives::Diversifier(unsafe { *diversifier });
+    if let Some(g_d) = diversifier.g_d::<Bls12>(&JUBJUB) {
+        let pk_d = g_d.mul(ivk, &JUBJUB);
+
+        let result = unsafe { &mut *result };
+
+        pk_d.write(&mut result[..]).expect("length is 32 bytes");
+
+        true
+    } else {
+        false
+    }
 }
 
 /// XOR two uint64_t values and return the result, used
