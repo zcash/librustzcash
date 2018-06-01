@@ -118,8 +118,7 @@ extern "C" {
 
     /// Generate uniform Sapling commitment randomness `r`.
     /// The result is of length 32.
-    /// Returns false if there was an error.
-    bool librustzcash_sapling_generate_commitment_randomness(
+    void librustzcash_sapling_generate_r(
         unsigned char *result
     );
 

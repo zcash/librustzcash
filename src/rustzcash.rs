@@ -301,11 +301,28 @@ pub extern "system" fn librustzcash_ivk_to_pkd(
     }
 }
 
+/// Test generation of commitment randomness
+#[test]
+fn test_gen_r() {
+    let mut r1 = [0u8; 32];
+    let mut r2 = [0u8; 32];
+
+    // Verify different r values are generated
+    librustzcash_sapling_generate_r(&mut r1);
+    librustzcash_sapling_generate_r(&mut r2);
+    assert_ne!(r1, r2);
+
+    // Verify r values are valid in the field
+    let mut repr = FsRepr::default();
+    repr.read_le(&r1[..]).expect("length is not 32 bytes");
+    let _ = Fs::from_repr(repr).unwrap();
+    repr.read_le(&r2[..]).expect("length is not 32 bytes");
+    let _ = Fs::from_repr(repr).unwrap();
+}
+
 /// Return 32 byte randomness, uniform, to be used for a Sapling commitment.
 #[no_mangle]
-pub extern "system" fn librustzcash_sapling_generate_commitment_randomness(
-    result: *mut [c_uchar; 32],
-) -> bool {
+pub extern "system" fn librustzcash_sapling_generate_r(result: *mut [c_uchar; 32]) {
     // create random 64 byte buffer
     let mut rng = OsRng::new().expect("should be able to construct RNG");
     let mut buffer = [0u8; 64];
@@ -313,17 +330,12 @@ pub extern "system" fn librustzcash_sapling_generate_commitment_randomness(
         buffer[i] = rng.gen();
     }
 
-    // TODO: Remove this debug statement
-    println!("buffer of random bytes: {:?}", &buffer[..]);
-
     // reduce to uniform value
     let r = <Bls12 as JubjubEngine>::Fs::to_uniform(&buffer[..]);
     let result = unsafe { &mut *result };
     r.into_repr()
         .write_le(&mut result[..])
         .expect("result must be 32 bytes");
-
-    true
 }
 
 /// Compute Sapling note commitment.
