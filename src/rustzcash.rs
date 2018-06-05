@@ -13,7 +13,7 @@ use pairing::{BitIterator, Field, PrimeField, PrimeFieldRepr, bls12_381::{Bls12,
 
 use sapling_crypto::{circuit::multipack, constants::CRH_IVK_PERSONALIZATION,
                      jubjub::{edwards, FixedGenerators, JubjubBls12, JubjubEngine, JubjubParams,
-                              PrimeOrder, ToUniform, Unknown, fs::FsRepr},
+                              PrimeOrder, ToUniform, Unknown, fs::{Fs, FsRepr}},
                      pedersen_hash::{pedersen_hash, Personalization}, redjubjub::{self, Signature}};
 
 use sapling_crypto::circuit::sprout::{self, TREE_DEPTH as SPROUT_TREE_DEPTH};
@@ -25,7 +25,7 @@ use blake2_rfc::blake2s::Blake2s;
 
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 
-use rand::OsRng;
+use rand::{OsRng, Rng};
 use std::io::BufReader;
 
 use libc::{c_char, c_uchar, size_t, int64_t, uint32_t, uint64_t};
@@ -299,6 +299,90 @@ pub extern "system" fn librustzcash_ivk_to_pkd(
     } else {
         false
     }
+}
+
+/// Test generation of commitment randomness
+#[test]
+fn test_gen_r() {
+    let mut r1 = [0u8; 32];
+    let mut r2 = [0u8; 32];
+
+    // Verify different r values are generated
+    librustzcash_sapling_generate_r(&mut r1);
+    librustzcash_sapling_generate_r(&mut r2);
+    assert_ne!(r1, r2);
+
+    // Verify r values are valid in the field
+    let mut repr = FsRepr::default();
+    repr.read_le(&r1[..]).expect("length is not 32 bytes");
+    let _ = Fs::from_repr(repr).unwrap();
+    repr.read_le(&r2[..]).expect("length is not 32 bytes");
+    let _ = Fs::from_repr(repr).unwrap();
+}
+
+/// Return 32 byte randomness, uniform, to be used for a Sapling commitment.
+#[no_mangle]
+pub extern "system" fn librustzcash_sapling_generate_r(result: *mut [c_uchar; 32]) {
+    // create random 64 byte buffer
+    let mut rng = OsRng::new().expect("should be able to construct RNG");
+    let mut buffer = [0u8; 64];
+    for i in 0..buffer.len() {
+        buffer[i] = rng.gen();
+    }
+
+    // reduce to uniform value
+    let r = <Bls12 as JubjubEngine>::Fs::to_uniform(&buffer[..]);
+    let result = unsafe { &mut *result };
+    r.into_repr()
+        .write_le(&mut result[..])
+        .expect("result must be 32 bytes");
+}
+
+/// Compute Sapling note commitment.
+#[no_mangle]
+pub extern "system" fn librustzcash_sapling_compute_cm(
+    diversifier: *const [c_uchar; 11],
+    pk_d: *const [c_uchar; 32],
+    value: uint64_t,
+    r: *const [c_uchar; 32],
+    result: *mut [c_uchar; 32],
+) -> bool {
+    let diversifier = sapling_crypto::primitives::Diversifier(unsafe { *diversifier });
+    let g_d = match diversifier.g_d::<Bls12>(&JUBJUB) {
+        Some(g_d) => g_d,
+        None => return false,
+    };
+
+    let pk_d = match edwards::Point::<Bls12, Unknown>::read(&(unsafe { &*pk_d })[..], &JUBJUB) {
+        Ok(p) => p,
+        Err(_) => return false,
+    };
+
+    let pk_d = match pk_d.as_prime_order(&JUBJUB) {
+        Some(pk_d) => pk_d,
+        None => return false,
+    };
+
+    // Deserialize randomness
+    let r = unsafe { *r };
+    let mut repr = FsRepr::default();
+    repr.read_le(&r[..]).expect("length is not 32 bytes");
+    let r = match Fs::from_repr(repr) {
+        Ok(p) => p,
+        Err(_) => return false,
+    };
+
+    let note = sapling_crypto::primitives::Note {
+        value,
+        g_d,
+        pk_d,
+        r,
+    };
+
+    let result = unsafe { &mut *result };
+    write_le(note.cm(&JUBJUB).into_repr(), &mut result[..]);
+
+    true
 }
 
 /// XOR two uint64_t values and return the result, used
