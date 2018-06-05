@@ -4,8 +4,6 @@
 #include <stdint.h>
 
 extern "C" {
-    uint64_t librustzcash_xor(uint64_t a, uint64_t b);
-
     void librustzcash_to_scalar(const unsigned char *input, unsigned char *result);
 
     void librustzcash_ask_to_ak(const unsigned char *ask, unsigned char *result);

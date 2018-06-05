@@ -385,14 +385,6 @@ pub extern "system" fn librustzcash_sapling_compute_cm(
     true
 }
 
-/// XOR two uint64_t values and return the result, used
-/// as a temporary mechanism for introducing Rust into
-/// Zcash.
-#[no_mangle]
-pub extern "system" fn librustzcash_xor(a: uint64_t, b: uint64_t) -> uint64_t {
-    a ^ b
-}
-
 #[no_mangle]
 pub extern "system" fn librustzcash_eh_isvalid(
     n: uint32_t,
@@ -411,14 +403,6 @@ pub extern "system" fn librustzcash_eh_isvalid(
     let rs_nonce = unsafe { slice::from_raw_parts(nonce, nonce_len) };
     let rs_soln = unsafe { slice::from_raw_parts(soln, soln_len) };
     equihash::is_valid_solution(n, k, rs_input, rs_nonce, rs_soln)
-}
-
-#[test]
-fn test_xor() {
-    assert_eq!(
-        librustzcash_xor(0x0f0f0f0f0f0f0f0f, 0x1111111111111111),
-        0x1e1e1e1e1e1e1e1e
-    );
 }
 
 pub struct SaplingVerificationContext {
