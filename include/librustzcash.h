@@ -102,6 +102,23 @@ extern "C" {
     /// `librustzcash_sapling_verification_ctx_init`.
     void librustzcash_sapling_verification_ctx_free(void *);
 
+    /// Compute a Sapling nullifier.
+    ///
+    /// The `diversifier` parameter must be 11 bytes in length.
+    /// The `pk_d`, `r`, `ak` and `nk` parameters must be of length 32.
+    /// The result is also of length 32 and placed in `result`.
+    /// Returns false if the diversifier or pk_d is not valid
+    bool librustzcash_sapling_compute_nf(
+        const unsigned char *diversifier,
+        const unsigned char *pk_d,
+        const uint64_t value,
+        const unsigned char *r,
+        const unsigned char *ak,
+        const unsigned char *nk,
+        const uint64_t position,
+        unsigned char *result
+    );
+
     /// Compute a Sapling commitment.
     ///
     /// The `diversifier` parameter must be 11 bytes in length.
