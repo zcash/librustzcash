@@ -1,7 +1,8 @@
 use librustzcash_sapling_compute_cm;
+use librustzcash_sapling_compute_nf;
 
 #[test]
-fn commitments() {
+fn notes() {
     #![allow(dead_code)]
     struct TestVector {
         sk: [u8; 32],
@@ -655,5 +656,18 @@ fn commitments() {
             &mut result
         ));
         assert_eq!(&result, &tv.note_cm);
+
+        // Compute nullifier and compare with test vector
+        assert!(librustzcash_sapling_compute_nf(
+            &tv.default_d,
+            &tv.default_pk_d,
+            tv.note_v,
+            &tv.note_r,
+            &tv.ak,
+            &tv.nk,
+            tv.note_pos,
+            &mut result
+        ));
+        assert_eq!(&result, &tv.note_nf);
     }
 }

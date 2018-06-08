@@ -33,6 +33,8 @@ use std::ffi::CStr;
 use std::fs::File;
 use std::slice;
 
+use sapling_crypto::primitives::ViewingKey;
+
 pub mod equihash;
 
 #[cfg(test)]
@@ -338,6 +340,93 @@ pub extern "system" fn librustzcash_sapling_generate_r(result: *mut [c_uchar; 32
         .expect("result must be 32 bytes");
 }
 
+// Private utility function to get Note from C parameters
+fn priv_get_note(
+    diversifier: *const [c_uchar; 11],
+    pk_d: *const [c_uchar; 32],
+    value: uint64_t,
+    r: *const [c_uchar; 32],
+) -> Result<sapling_crypto::primitives::Note<Bls12>, ()> {
+    let diversifier = sapling_crypto::primitives::Diversifier(unsafe { *diversifier });
+    let g_d = match diversifier.g_d::<Bls12>(&JUBJUB) {
+        Some(g_d) => g_d,
+        None => return Err(()),
+    };
+
+    let pk_d = match edwards::Point::<Bls12, Unknown>::read(&(unsafe { &*pk_d })[..], &JUBJUB) {
+        Ok(p) => p,
+        Err(_) => return Err(()),
+    };
+
+    let pk_d = match pk_d.as_prime_order(&JUBJUB) {
+        Some(pk_d) => pk_d,
+        None => return Err(()),
+    };
+
+    // Deserialize randomness
+    let r = unsafe { *r };
+    let mut repr = FsRepr::default();
+    repr.read_le(&r[..]).expect("length is not 32 bytes");
+    let r = match Fs::from_repr(repr) {
+        Ok(p) => p,
+        Err(_) => return Err(()),
+    };
+
+    let note = sapling_crypto::primitives::Note {
+        value,
+        g_d,
+        pk_d,
+        r,
+    };
+
+    Ok(note)
+}
+
+/// Compute Sapling note nullifier.
+#[no_mangle]
+pub extern "system" fn librustzcash_sapling_compute_nf(
+    diversifier: *const [c_uchar; 11],
+    pk_d: *const [c_uchar; 32],
+    value: uint64_t,
+    r: *const [c_uchar; 32],
+    ak: *const [c_uchar; 32],
+    nk: *const [c_uchar; 32],
+    position: uint64_t,
+    result: *mut [c_uchar; 32],
+) -> bool {
+    let note = match priv_get_note(diversifier, pk_d, value, r) {
+        Ok(p) => p,
+        Err(_) => return false,
+    };
+
+    let ak = match edwards::Point::<Bls12, Unknown>::read(&(unsafe { &*ak })[..], &JUBJUB) {
+        Ok(p) => p,
+        Err(_) => return false,
+    };
+
+    let ak = match ak.as_prime_order(&JUBJUB) {
+        Some(ak) => ak,
+        None => return false,
+    };
+
+    let nk = match edwards::Point::<Bls12, Unknown>::read(&(unsafe { &*nk })[..], &JUBJUB) {
+        Ok(p) => p,
+        Err(_) => return false,
+    };
+
+    let nk = match nk.as_prime_order(&JUBJUB) {
+        Some(nk) => nk,
+        None => return false,
+    };
+
+    let vk = ViewingKey { ak, nk };
+    let nf = note.nf(&vk, position, &JUBJUB);
+    let result = unsafe { &mut *result };
+    result.copy_from_slice(&nf);
+
+    true
+}
+
 /// Compute Sapling note commitment.
 #[no_mangle]
 pub extern "system" fn librustzcash_sapling_compute_cm(
@@ -347,36 +436,9 @@ pub extern "system" fn librustzcash_sapling_compute_cm(
     r: *const [c_uchar; 32],
     result: *mut [c_uchar; 32],
 ) -> bool {
-    let diversifier = sapling_crypto::primitives::Diversifier(unsafe { *diversifier });
-    let g_d = match diversifier.g_d::<Bls12>(&JUBJUB) {
-        Some(g_d) => g_d,
-        None => return false,
-    };
-
-    let pk_d = match edwards::Point::<Bls12, Unknown>::read(&(unsafe { &*pk_d })[..], &JUBJUB) {
+    let note = match priv_get_note(diversifier, pk_d, value, r) {
         Ok(p) => p,
         Err(_) => return false,
-    };
-
-    let pk_d = match pk_d.as_prime_order(&JUBJUB) {
-        Some(pk_d) => pk_d,
-        None => return false,
-    };
-
-    // Deserialize randomness
-    let r = unsafe { *r };
-    let mut repr = FsRepr::default();
-    repr.read_le(&r[..]).expect("length is not 32 bytes");
-    let r = match Fs::from_repr(repr) {
-        Ok(p) => p,
-        Err(_) => return false,
-    };
-
-    let note = sapling_crypto::primitives::Note {
-        value,
-        g_d,
-        pk_d,
-        r,
     };
 
     let result = unsafe { &mut *result };
