@@ -131,7 +131,29 @@ extern "C" {
         unsigned char *result
     );
 
-    /// Generate uniform Sapling commitment randomness `r`.
+    /// Compute [sk] [8] P for some 32-byte
+    /// point P, and 32-byte Fs. If P or sk
+    /// are invalid, returns false. Otherwise,
+    /// the result is written to the 32-byte
+    /// `result` buffer.
+    bool librustzcash_sapling_ka_agree(
+        const unsigned char *p,
+        const unsigned char *sk,
+        unsigned char *result
+    );
+
+    /// Compute g_d = GH(diversifier) and returns
+    /// false if the diversifier is invalid.
+    /// Computes [esk] g_d and writes the result
+    /// to the 32-byte `result` buffer. Returns
+    /// false if `esk` is not a valid scalar.
+    bool librustzcash_sapling_ka_derivepublic(
+        const unsigned char *diversifier,
+        const unsigned char *esk,
+        unsigned char *result
+    );
+
+    /// Generate uniformly random scalar in Jubjub.
     /// The result is of length 32.
     void librustzcash_sapling_generate_r(
         unsigned char *result

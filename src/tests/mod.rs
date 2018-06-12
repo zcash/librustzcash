@@ -5,6 +5,7 @@ use super::JUBJUB;
 mod notes;
 mod key_components;
 mod signatures;
+mod key_agreement;
 
 #[test]
 fn sapling_generators() {

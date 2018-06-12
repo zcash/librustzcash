@@ -322,7 +322,7 @@ fn test_gen_r() {
     let _ = Fs::from_repr(repr).unwrap();
 }
 
-/// Return 32 byte randomness, uniform, to be used for a Sapling commitment.
+/// Return 32 byte random scalar, uniformly.
 #[no_mangle]
 pub extern "system" fn librustzcash_sapling_generate_r(result: *mut [c_uchar; 32]) {
     // create random 64 byte buffer
@@ -364,11 +364,8 @@ fn priv_get_note(
     };
 
     // Deserialize randomness
-    let r = unsafe { *r };
-    let mut repr = FsRepr::default();
-    repr.read_le(&r[..]).expect("length is not 32 bytes");
-    let r = match Fs::from_repr(repr) {
-        Ok(p) => p,
+    let r = match Fs::from_repr(read_fs(&(unsafe { &*r })[..])) {
+        Ok(r) => r,
         Err(_) => return Err(()),
     };
 
@@ -443,6 +440,66 @@ pub extern "system" fn librustzcash_sapling_compute_cm(
 
     let result = unsafe { &mut *result };
     write_le(note.cm(&JUBJUB).into_repr(), &mut result[..]);
+
+    true
+}
+
+
+#[no_mangle]
+pub extern "system" fn librustzcash_sapling_ka_agree(
+    p: *const [c_uchar; 32],
+    sk: *const [c_uchar; 32],
+    result: *mut [c_uchar; 32],
+) -> bool {
+    // Deserialize p
+    let p = match edwards::Point::<Bls12, Unknown>::read(&(unsafe { &*p })[..], &JUBJUB) {
+        Ok(p) => p,
+        Err(_) => return false,
+    };
+
+    // Deserialize sk
+    let sk = match Fs::from_repr(read_fs(&(unsafe { &*sk })[..])) {
+        Ok(p) => p,
+        Err(_) => return false
+    };
+
+    // Multiply by 8
+    let p = p.mul_by_cofactor(&JUBJUB);
+
+    // Multiply by sk
+    let p = p.mul(sk, &JUBJUB);
+
+    // Produce result
+    let result = unsafe { &mut *result };
+    p.write(&mut result[..]).expect("length is not 32 bytes");
+
+    true
+}
+
+#[no_mangle]
+pub extern "system" fn librustzcash_sapling_ka_derivepublic(
+    diversifier: *const [c_uchar; 11],
+    esk: *const [c_uchar; 32],
+    result: *mut [c_uchar; 32],
+) -> bool {
+    let diversifier = sapling_crypto::primitives::Diversifier(unsafe { *diversifier });
+
+    // Compute g_d from the diversifier
+    let g_d = match diversifier.g_d::<Bls12>(&JUBJUB) {
+        Some(g) => g,
+        None => return false
+    };
+
+    // Deserialize esk
+    let esk = match Fs::from_repr(read_fs(&(unsafe { &*esk })[..])) {
+        Ok(p) => p,
+        Err(_) => return false,
+    };
+
+    let p = g_d.mul(esk, &JUBJUB);
+
+    let result = unsafe { &mut *result };
+    p.write(&mut result[..]).expect("length is not 32 bytes");
 
     true
 }
