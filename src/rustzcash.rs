@@ -9,17 +9,25 @@ extern crate sapling_crypto;
 #[macro_use]
 extern crate lazy_static;
 
-use pairing::{BitIterator, Field, PrimeField, PrimeFieldRepr, bls12_381::{Bls12, Fr, FrRepr}};
+use pairing::{
+    bls12_381::{Bls12, Fr, FrRepr}, BitIterator, Field, PrimeField, PrimeFieldRepr,
+};
 
-use sapling_crypto::{circuit::multipack, constants::CRH_IVK_PERSONALIZATION,
-                     jubjub::{edwards, FixedGenerators, JubjubBls12, JubjubEngine, JubjubParams,
-                              PrimeOrder, ToUniform, Unknown, fs::{Fs, FsRepr}},
-                     pedersen_hash::{pedersen_hash, Personalization}, redjubjub::{self, Signature}};
+use sapling_crypto::{
+    circuit::multipack, constants::CRH_IVK_PERSONALIZATION,
+    jubjub::{
+        edwards, fs::{Fs, FsRepr}, FixedGenerators, JubjubBls12, JubjubEngine, JubjubParams,
+        PrimeOrder, ToUniform, Unknown,
+    },
+    pedersen_hash::{pedersen_hash, Personalization}, redjubjub::{self, Signature},
+};
 
 use sapling_crypto::circuit::sprout::{self, TREE_DEPTH as SPROUT_TREE_DEPTH};
 
-use bellman::groth16::{create_random_proof, prepare_verifying_key, verify_proof, Parameters,
-                       PreparedVerifyingKey, Proof, VerifyingKey};
+use bellman::groth16::{
+    create_random_proof, prepare_verifying_key, verify_proof, Parameters, PreparedVerifyingKey,
+    Proof, VerifyingKey,
+};
 
 use blake2_rfc::blake2s::Blake2s;
 
@@ -28,7 +36,7 @@ use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use rand::{OsRng, Rng};
 use std::io::BufReader;
 
-use libc::{c_char, c_uchar, size_t, int64_t, uint32_t, uint64_t};
+use libc::{c_char, c_uchar, int64_t, size_t, uint32_t, uint64_t};
 use std::ffi::CStr;
 use std::fs::File;
 use std::slice;
@@ -444,7 +452,6 @@ pub extern "system" fn librustzcash_sapling_compute_cm(
     true
 }
 
-
 #[no_mangle]
 pub extern "system" fn librustzcash_sapling_ka_agree(
     p: *const [c_uchar; 32],
@@ -460,7 +467,7 @@ pub extern "system" fn librustzcash_sapling_ka_agree(
     // Deserialize sk
     let sk = match Fs::from_repr(read_fs(&(unsafe { &*sk })[..])) {
         Ok(p) => p,
-        Err(_) => return false
+        Err(_) => return false,
     };
 
     // Multiply by 8
@@ -487,7 +494,7 @@ pub extern "system" fn librustzcash_sapling_ka_derivepublic(
     // Compute g_d from the diversifier
     let g_d = match diversifier.g_d::<Bls12>(&JUBJUB) {
         Some(g) => g,
-        None => return false
+        None => return false,
     };
 
     // Deserialize esk
@@ -893,7 +900,8 @@ pub extern "system" fn librustzcash_sprout_prove(
                 auth_path[i] = Some((sibling, false));
             }
 
-            let mut position = auth.read_u64::<LittleEndian>()
+            let mut position = auth
+                .read_u64::<LittleEndian>()
                 .expect("should have had index at the end");
 
             for i in 0..SPROUT_TREE_DEPTH {
