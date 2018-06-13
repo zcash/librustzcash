@@ -44,7 +44,8 @@ impl Node {
     }
 
     fn from_children(a: Node, b: Node, trim: usize) -> Self {
-        let hash: Vec<_> = a.hash
+        let hash: Vec<_> = a
+            .hash
             .iter()
             .zip(b.hash.iter())
             .skip(trim)
@@ -66,7 +67,8 @@ impl Node {
     }
 
     fn from_children_ref(a: &Node, b: &Node, trim: usize) -> Self {
-        let hash: Vec<_> = a.hash
+        let hash: Vec<_> = a
+            .hash
             .iter()
             .zip(b.hash.iter())
             .skip(trim)

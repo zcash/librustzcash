@@ -9,17 +9,25 @@ extern crate sapling_crypto;
 #[macro_use]
 extern crate lazy_static;
 
-use pairing::{BitIterator, Field, PrimeField, PrimeFieldRepr, bls12_381::{Bls12, Fr, FrRepr}};
+use pairing::{
+    bls12_381::{Bls12, Fr, FrRepr}, BitIterator, Field, PrimeField, PrimeFieldRepr,
+};
 
-use sapling_crypto::{circuit::multipack, constants::CRH_IVK_PERSONALIZATION,
-                     jubjub::{edwards, FixedGenerators, JubjubBls12, JubjubEngine, JubjubParams,
-                              PrimeOrder, ToUniform, Unknown, fs::{Fs, FsRepr}},
-                     pedersen_hash::{pedersen_hash, Personalization}, redjubjub::{self, Signature}};
+use sapling_crypto::{
+    circuit::multipack, constants::CRH_IVK_PERSONALIZATION,
+    jubjub::{
+        edwards, fs::{Fs, FsRepr}, FixedGenerators, JubjubBls12, JubjubEngine, JubjubParams,
+        PrimeOrder, ToUniform, Unknown,
+    },
+    pedersen_hash::{pedersen_hash, Personalization}, redjubjub::{self, Signature},
+};
 
 use sapling_crypto::circuit::sprout::{self, TREE_DEPTH as SPROUT_TREE_DEPTH};
 
-use bellman::groth16::{create_random_proof, prepare_verifying_key, verify_proof, Parameters,
-                       PreparedVerifyingKey, Proof, VerifyingKey};
+use bellman::groth16::{
+    create_random_proof, prepare_verifying_key, verify_proof, Parameters, PreparedVerifyingKey,
+    Proof, VerifyingKey,
+};
 
 use blake2_rfc::blake2s::Blake2s;
 
@@ -28,7 +36,7 @@ use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use rand::{OsRng, Rng};
 use std::io::BufReader;
 
-use libc::{c_char, c_uchar, size_t, int64_t, uint32_t, uint64_t};
+use libc::{c_char, c_uchar, int64_t, size_t, uint32_t, uint64_t};
 use std::ffi::CStr;
 use std::fs::File;
 use std::slice;
@@ -322,7 +330,7 @@ fn test_gen_r() {
     let _ = Fs::from_repr(repr).unwrap();
 }
 
-/// Return 32 byte randomness, uniform, to be used for a Sapling commitment.
+/// Return 32 byte random scalar, uniformly.
 #[no_mangle]
 pub extern "system" fn librustzcash_sapling_generate_r(result: *mut [c_uchar; 32]) {
     // create random 64 byte buffer
@@ -364,11 +372,8 @@ fn priv_get_note(
     };
 
     // Deserialize randomness
-    let r = unsafe { *r };
-    let mut repr = FsRepr::default();
-    repr.read_le(&r[..]).expect("length is not 32 bytes");
-    let r = match Fs::from_repr(repr) {
-        Ok(p) => p,
+    let r = match Fs::from_repr(read_fs(&(unsafe { &*r })[..])) {
+        Ok(r) => r,
         Err(_) => return Err(()),
     };
 
@@ -443,6 +448,65 @@ pub extern "system" fn librustzcash_sapling_compute_cm(
 
     let result = unsafe { &mut *result };
     write_le(note.cm(&JUBJUB).into_repr(), &mut result[..]);
+
+    true
+}
+
+#[no_mangle]
+pub extern "system" fn librustzcash_sapling_ka_agree(
+    p: *const [c_uchar; 32],
+    sk: *const [c_uchar; 32],
+    result: *mut [c_uchar; 32],
+) -> bool {
+    // Deserialize p
+    let p = match edwards::Point::<Bls12, Unknown>::read(&(unsafe { &*p })[..], &JUBJUB) {
+        Ok(p) => p,
+        Err(_) => return false,
+    };
+
+    // Deserialize sk
+    let sk = match Fs::from_repr(read_fs(&(unsafe { &*sk })[..])) {
+        Ok(p) => p,
+        Err(_) => return false,
+    };
+
+    // Multiply by 8
+    let p = p.mul_by_cofactor(&JUBJUB);
+
+    // Multiply by sk
+    let p = p.mul(sk, &JUBJUB);
+
+    // Produce result
+    let result = unsafe { &mut *result };
+    p.write(&mut result[..]).expect("length is not 32 bytes");
+
+    true
+}
+
+#[no_mangle]
+pub extern "system" fn librustzcash_sapling_ka_derivepublic(
+    diversifier: *const [c_uchar; 11],
+    esk: *const [c_uchar; 32],
+    result: *mut [c_uchar; 32],
+) -> bool {
+    let diversifier = sapling_crypto::primitives::Diversifier(unsafe { *diversifier });
+
+    // Compute g_d from the diversifier
+    let g_d = match diversifier.g_d::<Bls12>(&JUBJUB) {
+        Some(g) => g,
+        None => return false,
+    };
+
+    // Deserialize esk
+    let esk = match Fs::from_repr(read_fs(&(unsafe { &*esk })[..])) {
+        Ok(p) => p,
+        Err(_) => return false,
+    };
+
+    let p = g_d.mul(esk, &JUBJUB);
+
+    let result = unsafe { &mut *result };
+    p.write(&mut result[..]).expect("length is not 32 bytes");
 
     true
 }
@@ -836,7 +900,8 @@ pub extern "system" fn librustzcash_sprout_prove(
                 auth_path[i] = Some((sibling, false));
             }
 
-            let mut position = auth.read_u64::<LittleEndian>()
+            let mut position = auth
+                .read_u64::<LittleEndian>()
                 .expect("should have had index at the end");
 
             for i in 0..SPROUT_TREE_DEPTH {
