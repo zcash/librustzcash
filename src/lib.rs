@@ -11,15 +11,8 @@ pub use ff_derive::*;
 use std::fmt;
 
 /// This trait represents an element of a field.
-pub trait Field: Sized +
-                 Eq +
-                 Copy +
-                 Clone +
-                 Send +
-                 Sync +
-                 fmt::Debug +
-                 'static +
-                 rand::Rand
+pub trait Field:
+    Sized + Eq + Copy + Clone + Send + Sync + fmt::Debug + 'static + rand::Rand
 {
     /// Returns the zero element of the field, the additive identity.
     fn zero() -> Self;
@@ -57,8 +50,7 @@ pub trait Field: Sized +
 
     /// Exponentiates this element by a number represented with `u64` limbs,
     /// least significant digit first.
-    fn pow<S: AsRef<[u64]>>(&self, exp: S) -> Self
-    {
+    fn pow<S: AsRef<[u64]>>(&self, exp: S) -> Self {
         let mut res = Self::one();
 
         for i in BitIterator::new(exp) {
@@ -73,8 +65,7 @@ pub trait Field: Sized +
 }
 
 /// This trait represents an element of a field that has a square root operation described for it.
-pub trait SqrtField: Field
-{
+pub trait SqrtField: Field {
     /// Returns the square root of the field element, if it is
     /// quadratic residue.
     fn sqrt(&self) -> Option<Self>;
@@ -83,18 +74,19 @@ pub trait SqrtField: Field
 /// This trait represents a wrapper around a biginteger which can encode any element of a particular
 /// prime field. It is a smart wrapper around a sequence of `u64` limbs, least-significant digit
 /// first.
-pub trait PrimeFieldRepr: Sized +
-                          Copy +
-                          Clone +
-                          Eq +
-                          Ord +
-                          Send +
-                          Sync +
-                          fmt::Debug +
-                          'static +
-                          rand::Rand +
-                          AsRef<[u64]> +
-                          From<u64>
+pub trait PrimeFieldRepr:
+    Sized
+    + Copy
+    + Clone
+    + Eq
+    + Ord
+    + Send
+    + Sync
+    + fmt::Debug
+    + 'static
+    + rand::Rand
+    + AsRef<[u64]>
+    + From<u64>
 {
     /// Subtract another reprensetation from this one, returning the borrow bit.
     fn sub_noborrow(&mut self, other: &Self) -> bool;
@@ -124,8 +116,7 @@ pub trait PrimeFieldRepr: Sized +
 }
 
 /// This represents an element of a prime field.
-pub trait PrimeField: Field
-{
+pub trait PrimeField: Field {
     /// The prime field can be converted back and forth into this biginteger
     /// representation.
     type Repr: PrimeFieldRepr;
@@ -162,17 +153,14 @@ pub trait PrimeField: Field
 
 pub struct BitIterator<E> {
     t: E,
-    n: usize
+    n: usize,
 }
 
 impl<E: AsRef<[u64]>> BitIterator<E> {
     fn new(t: E) -> Self {
         let n = t.as_ref().len() * 64;
 
-        BitIterator {
-            t: t,
-            n: n
-        }
+        BitIterator { t: t, n: n }
     }
 }
 
@@ -205,7 +193,12 @@ fn test_bit_iterator() {
 
     let expected = "1010010101111110101010000101101011101000011101110101001000011001100100100011011010001011011011010001011011101100110100111011010010110001000011110100110001100110011101101000101100011100100100100100001010011101010111110011101011000011101000111011011101011001";
 
-    let mut a = BitIterator::new([0x429d5f3ac3a3b759, 0xb10f4c66768b1c92, 0x92368b6d16ecd3b4, 0xa57ea85ae8775219]);
+    let mut a = BitIterator::new([
+        0x429d5f3ac3a3b759,
+        0xb10f4c66768b1c92,
+        0x92368b6d16ecd3b4,
+        0xa57ea85ae8775219,
+    ]);
 
     for e in expected.chars() {
         assert!(a.next().unwrap() == (e == '1'));
