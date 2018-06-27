@@ -1,6 +1,7 @@
 #![recursion_limit = "1024"]
 
 extern crate proc_macro;
+extern crate proc_macro2;
 extern crate syn;
 #[macro_use]
 extern crate quote;
@@ -12,18 +13,16 @@ extern crate num_traits;
 use num_bigint::BigUint;
 use num_integer::Integer;
 use num_traits::{One, ToPrimitive, Zero};
+use quote::TokenStreamExt;
 use std::str::FromStr;
 
 #[proc_macro_derive(PrimeField, attributes(PrimeFieldModulus, PrimeFieldGenerator))]
 pub fn prime_field(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
-    // Construct a string representation of the type definition
-    let s = input.to_string();
-
-    // Parse the string representation
-    let ast = syn::parse_derive_input(&s).unwrap();
+    // Parse the type definition
+    let ast: syn::DeriveInput = syn::parse(input).unwrap();
 
     // The struct we're deriving for is a wrapper around a "Repr" type we must construct.
-    let repr_ident = fetch_wrapped_ident(&ast.body)
+    let repr_ident = fetch_wrapped_ident(&ast.data)
         .expect("PrimeField derive only operates over tuple structs of a single item");
 
     // We're given the modulus p of the prime field
@@ -51,38 +50,40 @@ pub fn prime_field(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
         }
     }
 
-    let mut gen = quote::Tokens::new();
+    let mut gen = proc_macro2::TokenStream::new();
 
-    gen.append(prime_field_repr_impl(&repr_ident, limbs));
-    gen.append(prime_field_constants_and_sqrt(
+    gen.extend(prime_field_repr_impl(&repr_ident, limbs));
+    gen.extend(prime_field_constants_and_sqrt(
         &ast.ident,
         &repr_ident,
         modulus,
         limbs,
         generator,
     ));
-    gen.append(prime_field_impl(&ast.ident, &repr_ident, limbs));
+    gen.extend(prime_field_impl(&ast.ident, &repr_ident, limbs));
 
     // Return the generated impl
-    gen.parse().unwrap()
+    gen.into()
 }
 
 /// Fetches the ident being wrapped by the type we're deriving.
-fn fetch_wrapped_ident(body: &syn::Body) -> Option<syn::Ident> {
+fn fetch_wrapped_ident(body: &syn::Data) -> Option<syn::Ident> {
     match body {
-        &syn::Body::Struct(ref variant_data) => {
-            let fields = variant_data.fields();
-            if fields.len() == 1 {
-                match fields[0].ty {
-                    syn::Ty::Path(_, ref path) => {
-                        if path.segments.len() == 1 {
-                            return Some(path.segments[0].ident.clone());
+        &syn::Data::Struct(ref variant_data) => match variant_data.fields {
+            syn::Fields::Unnamed(ref fields) => {
+                if fields.unnamed.len() == 1 {
+                    match fields.unnamed[0].ty {
+                        syn::Type::Path(ref path) => {
+                            if path.path.segments.len() == 1 {
+                                return Some(path.path.segments[0].ident.clone());
+                            }
                         }
+                        _ => {}
                     }
-                    _ => {}
                 }
             }
-        }
+            _ => {}
+        },
         _ => {}
     };
 
@@ -92,14 +93,18 @@ fn fetch_wrapped_ident(body: &syn::Body) -> Option<syn::Ident> {
 /// Fetch an attribute string from the derived struct.
 fn fetch_attr(name: &str, attrs: &[syn::Attribute]) -> Option<String> {
     for attr in attrs {
-        if attr.name() == name {
-            match attr.value {
-                syn::MetaItem::NameValue(_, ref val) => match val {
-                    &syn::Lit::Str(ref s, _) => return Some(s.clone()),
-                    _ => {
-                        panic!("attribute {} should be a string", name);
+        if let Some(meta) = attr.interpret_meta() {
+            match meta {
+                syn::Meta::NameValue(nv) => {
+                    if nv.ident.to_string() == name {
+                        match nv.lit {
+                            syn::Lit::Str(ref s) => return Some(s.value()),
+                            _ => {
+                                panic!("attribute {} should be a string", name);
+                            }
+                        }
                     }
-                },
+                }
                 _ => {
                     panic!("attribute {} should be a string", name);
                 }
@@ -111,7 +116,7 @@ fn fetch_attr(name: &str, attrs: &[syn::Attribute]) -> Option<String> {
 }
 
 // Implement PrimeFieldRepr for the wrapped ident `repr` with `limbs` limbs.
-fn prime_field_repr_impl(repr: &syn::Ident, limbs: usize) -> quote::Tokens {
+fn prime_field_repr_impl(repr: &syn::Ident, limbs: usize) -> proc_macro2::TokenStream {
     quote! {
         #[derive(Copy, Clone, PartialEq, Eq, Default)]
         pub struct #repr(pub [u64; #limbs]);
@@ -253,7 +258,7 @@ fn prime_field_repr_impl(repr: &syn::Ident, limbs: usize) -> quote::Tokens {
 }
 
 /// Convert BigUint into a vector of 64-bit limbs.
-fn biguint_to_u64_vec(mut v: BigUint, limbs: usize) -> Vec<u64> {
+fn biguint_to_real_u64_vec(mut v: BigUint, limbs: usize) -> Vec<u64> {
     let m = BigUint::one() << 64;
     let mut ret = vec![];
 
@@ -269,6 +274,12 @@ fn biguint_to_u64_vec(mut v: BigUint, limbs: usize) -> Vec<u64> {
     assert!(ret.len() == limbs);
 
     ret
+}
+
+/// Convert BigUint into a tokenized vector of 64-bit limbs.
+fn biguint_to_u64_vec(v: BigUint, limbs: usize) -> proc_macro2::TokenStream {
+    let ret = biguint_to_real_u64_vec(v, limbs);
+    quote!([#(#ret,)*])
 }
 
 fn biguint_num_bits(mut v: BigUint) -> u32 {
@@ -321,7 +332,7 @@ fn prime_field_constants_and_sqrt(
     modulus: BigUint,
     limbs: usize,
     generator: BigUint,
-) -> quote::Tokens {
+) -> proc_macro2::TokenStream {
     let modulus_num_bits = biguint_num_bits(modulus.clone());
 
     // The number of bits we should "shave" from a randomly sampled reputation, i.e.,
@@ -437,7 +448,7 @@ fn prime_field_constants_and_sqrt(
     let r2 = biguint_to_u64_vec((&r * &r) % &modulus, limbs);
 
     let r = biguint_to_u64_vec(r, limbs);
-    let modulus = biguint_to_u64_vec(modulus, limbs);
+    let modulus = biguint_to_real_u64_vec(modulus, limbs);
 
     // Compute -m^-1 mod 2**64 by exponentiating by totient(2**64) - 1
     let mut inv = 1u64;
@@ -449,7 +460,7 @@ fn prime_field_constants_and_sqrt(
 
     quote! {
         /// This is the modulus m of the prime field
-        const MODULUS: #repr = #repr(#modulus);
+        const MODULUS: #repr = #repr([#(#modulus,)*]);
 
         /// The number of bits needed to represent the modulus.
         const MODULUS_BITS: u32 = #modulus_num_bits;
@@ -482,15 +493,19 @@ fn prime_field_constants_and_sqrt(
 }
 
 /// Implement PrimeField for the derived type.
-fn prime_field_impl(name: &syn::Ident, repr: &syn::Ident, limbs: usize) -> quote::Tokens {
+fn prime_field_impl(
+    name: &syn::Ident,
+    repr: &syn::Ident,
+    limbs: usize,
+) -> proc_macro2::TokenStream {
     // Returns r{n} as an ident.
     fn get_temp(n: usize) -> syn::Ident {
-        syn::Ident::from(format!("r{}", n))
+        syn::Ident::new(&format!("r{}", n), proc_macro2::Span::call_site())
     }
 
     // The parameter list for the mont_reduce() internal method.
     // r0: u64, mut r1: u64, mut r2: u64, ...
-    let mut mont_paramlist = quote::Tokens::new();
+    let mut mont_paramlist = proc_macro2::TokenStream::new();
     mont_paramlist.append_separated(
         (0..(limbs * 2)).map(|i| (i, get_temp(i))).map(|(i, x)| {
             if i != 0 {
@@ -499,17 +514,17 @@ fn prime_field_impl(name: &syn::Ident, repr: &syn::Ident, limbs: usize) -> quote
                 quote!{#x: u64}
             }
         }),
-        ",",
+        proc_macro2::Punct::new(',', proc_macro2::Spacing::Alone),
     );
 
     // Implement montgomery reduction for some number of limbs
-    fn mont_impl(limbs: usize) -> quote::Tokens {
-        let mut gen = quote::Tokens::new();
+    fn mont_impl(limbs: usize) -> proc_macro2::TokenStream {
+        let mut gen = proc_macro2::TokenStream::new();
 
         for i in 0..limbs {
             {
                 let temp = get_temp(i);
-                gen.append(quote!{
+                gen.extend(quote!{
                     let k = #temp.wrapping_mul(INV);
                     let mut carry = 0;
                     ::ff::mac_with_carry(#temp, k, MODULUS.0[0], &mut carry);
@@ -518,7 +533,7 @@ fn prime_field_impl(name: &syn::Ident, repr: &syn::Ident, limbs: usize) -> quote
 
             for j in 1..limbs {
                 let temp = get_temp(i + j);
-                gen.append(quote!{
+                gen.extend(quote!{
                     #temp = ::ff::mac_with_carry(#temp, k, MODULUS.0[#j], &mut carry);
                 });
             }
@@ -526,17 +541,17 @@ fn prime_field_impl(name: &syn::Ident, repr: &syn::Ident, limbs: usize) -> quote
             let temp = get_temp(i + limbs);
 
             if i == 0 {
-                gen.append(quote!{
+                gen.extend(quote!{
                     #temp = ::ff::adc(#temp, 0, &mut carry);
                 });
             } else {
-                gen.append(quote!{
+                gen.extend(quote!{
                     #temp = ::ff::adc(#temp, carry2, &mut carry);
                 });
             }
 
             if i != (limbs - 1) {
-                gen.append(quote!{
+                gen.extend(quote!{
                     let carry2 = carry;
                 });
             }
@@ -545,7 +560,7 @@ fn prime_field_impl(name: &syn::Ident, repr: &syn::Ident, limbs: usize) -> quote
         for i in 0..limbs {
             let temp = get_temp(limbs + i);
 
-            gen.append(quote!{
+            gen.extend(quote!{
                 (self.0).0[#i] = #temp;
             });
         }
@@ -553,22 +568,22 @@ fn prime_field_impl(name: &syn::Ident, repr: &syn::Ident, limbs: usize) -> quote
         gen
     }
 
-    fn sqr_impl(a: quote::Tokens, limbs: usize) -> quote::Tokens {
-        let mut gen = quote::Tokens::new();
+    fn sqr_impl(a: proc_macro2::TokenStream, limbs: usize) -> proc_macro2::TokenStream {
+        let mut gen = proc_macro2::TokenStream::new();
 
         for i in 0..(limbs - 1) {
-            gen.append(quote!{
+            gen.extend(quote!{
                 let mut carry = 0;
             });
 
             for j in (i + 1)..limbs {
                 let temp = get_temp(i + j);
                 if i == 0 {
-                    gen.append(quote!{
+                    gen.extend(quote!{
                         let #temp = ::ff::mac_with_carry(0, (#a.0).0[#i], (#a.0).0[#j], &mut carry);
                     });
                 } else {
-                    gen.append(quote!{
+                    gen.extend(quote!{
                         let #temp = ::ff::mac_with_carry(#temp, (#a.0).0[#i], (#a.0).0[#j], &mut carry);
                     });
                 }
@@ -576,7 +591,7 @@ fn prime_field_impl(name: &syn::Ident, repr: &syn::Ident, limbs: usize) -> quote
 
             let temp = get_temp(i + limbs);
 
-            gen.append(quote!{
+            gen.extend(quote!{
                 let #temp = carry;
             });
         }
@@ -585,16 +600,16 @@ fn prime_field_impl(name: &syn::Ident, repr: &syn::Ident, limbs: usize) -> quote
             let k = get_temp(i);
 
             if i == 1 {
-                gen.append(quote!{
+                gen.extend(quote!{
                     let tmp0 = #k >> 63;
                     let #k = #k << 1;
                 });
             } else if i == (limbs * 2 - 1) {
-                gen.append(quote!{
+                gen.extend(quote!{
                     let #k = tmp0;
                 });
             } else {
-                gen.append(quote!{
+                gen.extend(quote!{
                     let tmp1 = #k >> 63;
                     let #k = #k << 1;
                     let #k = #k | tmp0;
@@ -603,7 +618,7 @@ fn prime_field_impl(name: &syn::Ident, repr: &syn::Ident, limbs: usize) -> quote
             }
         }
 
-        gen.append(quote!{
+        gen.extend(quote!{
             let mut carry = 0;
         });
 
@@ -611,35 +626,42 @@ fn prime_field_impl(name: &syn::Ident, repr: &syn::Ident, limbs: usize) -> quote
             let temp0 = get_temp(i * 2);
             let temp1 = get_temp(i * 2 + 1);
             if i == 0 {
-                gen.append(quote!{
+                gen.extend(quote!{
                     let #temp0 = ::ff::mac_with_carry(0, (#a.0).0[#i], (#a.0).0[#i], &mut carry);
                 });
             } else {
-                gen.append(quote!{
+                gen.extend(quote!{
                     let #temp0 = ::ff::mac_with_carry(#temp0, (#a.0).0[#i], (#a.0).0[#i], &mut carry);
                 });
             }
 
-            gen.append(quote!{
+            gen.extend(quote!{
                 let #temp1 = ::ff::adc(#temp1, 0, &mut carry);
             });
         }
 
-        let mut mont_calling = quote::Tokens::new();
-        mont_calling.append_separated((0..(limbs * 2)).map(|i| get_temp(i)), ",");
+        let mut mont_calling = proc_macro2::TokenStream::new();
+        mont_calling.append_separated(
+            (0..(limbs * 2)).map(|i| get_temp(i)),
+            proc_macro2::Punct::new(',', proc_macro2::Spacing::Alone),
+        );
 
-        gen.append(quote!{
+        gen.extend(quote!{
             self.mont_reduce(#mont_calling);
         });
 
         gen
     }
 
-    fn mul_impl(a: quote::Tokens, b: quote::Tokens, limbs: usize) -> quote::Tokens {
-        let mut gen = quote::Tokens::new();
+    fn mul_impl(
+        a: proc_macro2::TokenStream,
+        b: proc_macro2::TokenStream,
+        limbs: usize,
+    ) -> proc_macro2::TokenStream {
+        let mut gen = proc_macro2::TokenStream::new();
 
         for i in 0..limbs {
-            gen.append(quote!{
+            gen.extend(quote!{
                 let mut carry = 0;
             });
 
@@ -647,11 +669,11 @@ fn prime_field_impl(name: &syn::Ident, repr: &syn::Ident, limbs: usize) -> quote
                 let temp = get_temp(i + j);
 
                 if i == 0 {
-                    gen.append(quote!{
+                    gen.extend(quote!{
                         let #temp = ::ff::mac_with_carry(0, (#a.0).0[#i], (#b.0).0[#j], &mut carry);
                     });
                 } else {
-                    gen.append(quote!{
+                    gen.extend(quote!{
                         let #temp = ::ff::mac_with_carry(#temp, (#a.0).0[#i], (#b.0).0[#j], &mut carry);
                     });
                 }
@@ -659,15 +681,18 @@ fn prime_field_impl(name: &syn::Ident, repr: &syn::Ident, limbs: usize) -> quote
 
             let temp = get_temp(i + limbs);
 
-            gen.append(quote!{
+            gen.extend(quote!{
                 let #temp = carry;
             });
         }
 
-        let mut mont_calling = quote::Tokens::new();
-        mont_calling.append_separated((0..(limbs * 2)).map(|i| get_temp(i)), ",");
+        let mut mont_calling = proc_macro2::TokenStream::new();
+        mont_calling.append_separated(
+            (0..(limbs * 2)).map(|i| get_temp(i)),
+            proc_macro2::Punct::new(',', proc_macro2::Spacing::Alone),
+        );
 
-        gen.append(quote!{
+        gen.extend(quote!{
             self.mont_reduce(#mont_calling);
         });
 
@@ -679,12 +704,12 @@ fn prime_field_impl(name: &syn::Ident, repr: &syn::Ident, limbs: usize) -> quote
     let montgomery_impl = mont_impl(limbs);
 
     // (self.0).0[0], (self.0).0[1], ..., 0, 0, 0, 0, ...
-    let mut into_repr_params = quote::Tokens::new();
+    let mut into_repr_params = proc_macro2::TokenStream::new();
     into_repr_params.append_separated(
         (0..limbs)
             .map(|i| quote!{ (self.0).0[#i] })
             .chain((0..limbs).map(|_| quote!{0})),
-        ",",
+        proc_macro2::Punct::new(',', proc_macro2::Spacing::Alone),
     );
 
     quote!{
