@@ -12,8 +12,8 @@ repository = "https://github.com/ebfull/ff"
 proc-macro = true
 
 [dependencies]
-num-bigint = "0.1"
-num-traits = "0.1"
+num-bigint = "0.2"
+num-traits = "0.2"
 num-integer = "0.1"
 proc-macro2 = "0.4"
 quote = "0.6"
