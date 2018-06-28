@@ -140,10 +140,28 @@ fn prime_field_repr_impl(repr: &syn::Ident, limbs: usize) -> proc_macro2::TokenS
             }
         }
 
+        impl ::std::fmt::Display for #repr {
+            fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+                try!(write!(f, "0x"));
+                for i in self.0.iter().rev() {
+                    try!(write!(f, "{:016x}", *i));
+                }
+
+                Ok(())
+            }
+        }
+
         impl AsRef<[u64]> for #repr {
             #[inline(always)]
             fn as_ref(&self) -> &[u64] {
                 &self.0
+            }
+        }
+
+        impl AsMut<[u64]> for #repr {
+            #[inline(always)]
+            fn as_mut(&mut self) -> &mut [u64] {
+                &mut self.0
             }
         }
 
@@ -208,6 +226,32 @@ fn prime_field_repr_impl(repr: &syn::Ident, limbs: usize) -> proc_macro2::TokenS
             }
 
             #[inline(always)]
+            fn shr(&mut self, mut n: u32) {
+                if n as usize >= 64 * #limbs {
+                    *self = Self::from(0);
+                    return;
+                }
+
+                while n >= 64 {
+                    let mut t = 0;
+                    for i in self.0.iter_mut().rev() {
+                        ::std::mem::swap(&mut t, i);
+                    }
+                    n -= 64;
+                }
+
+                if n > 0 {
+                    let mut t = 0;
+                    for i in self.0.iter_mut().rev() {
+                        let t2 = *i << (64 - n);
+                        *i >>= n;
+                        *i |= t;
+                        t = t2;
+                    }
+                }
+            }
+
+            #[inline(always)]
             fn mul2(&mut self) {
                 let mut last = 0;
                 for i in self.0.iter_mut() {
@@ -215,6 +259,32 @@ fn prime_field_repr_impl(repr: &syn::Ident, limbs: usize) -> proc_macro2::TokenS
                     *i <<= 1;
                     *i |= last;
                     last = tmp;
+                }
+            }
+
+            #[inline(always)]
+            fn shl(&mut self, mut n: u32) {
+                if n as usize >= 64 * #limbs {
+                    *self = Self::from(0);
+                    return;
+                }
+
+                while n >= 64 {
+                    let mut t = 0;
+                    for i in &mut self.0 {
+                        ::std::mem::swap(&mut t, i);
+                    }
+                    n -= 64;
+                }
+
+                if n > 0 {
+                    let mut t = 0;
+                    for i in &mut self.0 {
+                        let t2 = *i >> (64 - n);
+                        *i <<= n;
+                        *i |= t;
+                        t = t2;
+                    }
                 }
             }
 
@@ -233,25 +303,21 @@ fn prime_field_repr_impl(repr: &syn::Ident, limbs: usize) -> proc_macro2::TokenS
             }
 
             #[inline(always)]
-            fn add_nocarry(&mut self, other: &#repr) -> bool {
+            fn add_nocarry(&mut self, other: &#repr) {
                 let mut carry = 0;
 
                 for (a, b) in self.0.iter_mut().zip(other.0.iter()) {
                     *a = ::ff::adc(*a, *b, &mut carry);
                 }
-
-                carry != 0
             }
 
             #[inline(always)]
-            fn sub_noborrow(&mut self, other: &#repr) -> bool {
+            fn sub_noborrow(&mut self, other: &#repr) {
                 let mut borrow = 0;
 
                 for (a, b) in self.0.iter_mut().zip(other.0.iter()) {
                     *a = ::ff::sbb(*a, *b, &mut borrow);
                 }
-
-                borrow != 0
             }
         }
     }
@@ -345,7 +411,7 @@ fn prime_field_constants_and_sqrt(
     let r = (BigUint::one() << (limbs * 64)) % &modulus;
 
     // modulus - 1 = 2^s * t
-    let mut s: usize = 0;
+    let mut s: u32 = 0;
     let mut t = &modulus - BigUint::from_str("1").unwrap();
     while t.is_even() {
         t = t >> 1;
@@ -359,6 +425,22 @@ fn prime_field_constants_and_sqrt(
     );
     let generator = biguint_to_u64_vec((generator.clone() * &r) % &modulus, limbs);
 
+    let mod_minus_1_over_2 =
+        biguint_to_u64_vec((&modulus - BigUint::from_str("1").unwrap()) >> 1, limbs);
+    let legendre_impl = quote!{
+        fn legendre(&self) -> ::ff::LegendreSymbol {
+            // s = self^((modulus - 1) // 2)
+            let s = self.pow(#mod_minus_1_over_2);
+            if s == Self::zero() {
+                ::ff::LegendreSymbol::Zero
+            } else if s == Self::one() {
+                ::ff::LegendreSymbol::QuadraticResidue
+            } else {
+                ::ff::LegendreSymbol::QuadraticNonResidue
+            }
+        }
+    };
+
     let sqrt_impl =
         if (&modulus % BigUint::from_str("4").unwrap()) == BigUint::from_str("3").unwrap() {
             let mod_minus_3_over_4 =
@@ -369,6 +451,8 @@ fn prime_field_constants_and_sqrt(
 
             quote!{
                 impl ::ff::SqrtField for #name {
+                    #legendre_impl
+
                     fn sqrt(&self) -> Option<Self> {
                         // Shank's algorithm for q mod 4 = 3
                         // https://eprint.iacr.org/2012/685.pdf (page 9, algorithm 2)
@@ -389,13 +473,13 @@ fn prime_field_constants_and_sqrt(
                 }
             }
         } else if (&modulus % BigUint::from_str("16").unwrap()) == BigUint::from_str("1").unwrap() {
-            let mod_minus_1_over_2 =
-                biguint_to_u64_vec((&modulus - BigUint::from_str("1").unwrap()) >> 1, limbs);
             let t_plus_1_over_2 = biguint_to_u64_vec((&t + BigUint::one()) >> 1, limbs);
             let t = biguint_to_u64_vec(t.clone(), limbs);
 
             quote!{
                 impl ::ff::SqrtField for #name {
+                    #legendre_impl
+
                     fn sqrt(&self) -> Option<Self> {
                         // Tonelli-Shank's algorithm for q mod 16 = 1
                         // https://eprint.iacr.org/2012/685.pdf (page 12, algorithm 5)
@@ -483,7 +567,7 @@ fn prime_field_constants_and_sqrt(
         const GENERATOR: #repr = #repr(#generator);
 
         /// 2^s * t = MODULUS - 1 with t odd
-        const S: usize = #s;
+        const S: u32 = #s;
 
         /// 2^s root of unity computed by GENERATOR^t
         const ROOT_OF_UNITY: #repr = #repr(#root_of_unity);
@@ -736,6 +820,27 @@ fn prime_field_impl(
             }
         }
 
+        /// Elements are ordered lexicographically.
+        impl Ord for #name {
+            #[inline(always)]
+            fn cmp(&self, other: &#name) -> ::std::cmp::Ordering {
+                self.into_repr().cmp(&other.into_repr())
+            }
+        }
+
+        impl PartialOrd for #name {
+            #[inline(always)]
+            fn partial_cmp(&self, other: &#name) -> Option<::std::cmp::Ordering> {
+                Some(self.cmp(other))
+            }
+        }
+
+        impl ::std::fmt::Display for #name {
+            fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+                write!(f, "{}({})", stringify!(#name), self.into_repr())
+            }
+        }
+
         impl ::rand::Rand for #name {
             /// Computes a uniformly random element using rejection sampling.
             fn rand<R: ::rand::Rng>(rng: &mut R) -> Self {
@@ -751,17 +856,23 @@ fn prime_field_impl(
             }
         }
 
+        impl From<#name> for #repr {
+            fn from(e: #name) -> #repr {
+                e.into_repr()
+            }
+        }
+
         impl ::ff::PrimeField for #name {
             type Repr = #repr;
 
-            fn from_repr(r: #repr) -> Result<#name, ()> {
+            fn from_repr(r: #repr) -> Result<#name, PrimeFieldDecodingError> {
                 let mut r = #name(r);
                 if r.is_valid() {
                     r.mul_assign(&#name(R2));
 
                     Ok(r)
                 } else {
-                    Err(())
+                    Err(PrimeFieldDecodingError::NotInField(format!("{}", r.0)))
                 }
             }
 
@@ -778,21 +889,15 @@ fn prime_field_impl(
                 MODULUS
             }
 
-            fn num_bits() -> u32 {
-                MODULUS_BITS
-            }
+            const NUM_BITS: u32 = MODULUS_BITS;
 
-            fn capacity() -> u32 {
-                Self::num_bits() - 1
-            }
+            const CAPACITY: u32 = Self::NUM_BITS - 1;
 
             fn multiplicative_generator() -> Self {
                 #name(GENERATOR)
             }
 
-            fn s() -> usize {
-                S
-            }
+            const S: u32 = S;
 
             fn root_of_unity() -> Self {
                 #name(ROOT_OF_UNITY)
