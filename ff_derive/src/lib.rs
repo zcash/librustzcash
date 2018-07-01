@@ -254,7 +254,7 @@ fn prime_field_repr_impl(repr: &syn::Ident, limbs: usize) -> proc_macro2::TokenS
             #[inline(always)]
             fn mul2(&mut self) {
                 let mut last = 0;
-                for i in self.0.iter_mut() {
+                for i in &mut self.0 {
                     let tmp = *i >> 63;
                     *i <<= 1;
                     *i |= last;
@@ -484,42 +484,40 @@ fn prime_field_constants_and_sqrt(
                         // Tonelli-Shank's algorithm for q mod 16 = 1
                         // https://eprint.iacr.org/2012/685.pdf (page 12, algorithm 5)
 
-                        if self.is_zero() {
-                            return Some(*self);
-                        }
+                        match self.legendre() {
+                            ::ff::LegendreSymbol::Zero => Some(*self),
+                            ::ff::LegendreSymbol::QuadraticNonResidue => None,
+                            ::ff::LegendreSymbol::QuadraticResidue => {
+                                let mut c = #name(ROOT_OF_UNITY);
+                                let mut r = self.pow(#t_plus_1_over_2);
+                                let mut t = self.pow(#t);
+                                let mut m = S;
 
-                        if self.pow(#mod_minus_1_over_2) != Self::one() {
-                            None
-                        } else {
-                            let mut c = #name(#repr(#root_of_unity));
-                            let mut r = self.pow(#t_plus_1_over_2);
-                            let mut t = self.pow(#t);
-                            let mut m = #s;
-
-                            while t != Self::one() {
-                                let mut i = 1;
-                                {
-                                    let mut t2i = t;
-                                    t2i.square();
-                                    loop {
-                                        if t2i == Self::one() {
-                                            break;
-                                        }
+                                while t != Self::one() {
+                                    let mut i = 1;
+                                    {
+                                        let mut t2i = t;
                                         t2i.square();
-                                        i += 1;
+                                        loop {
+                                            if t2i == Self::one() {
+                                                break;
+                                            }
+                                            t2i.square();
+                                            i += 1;
+                                        }
                                     }
-                                }
 
-                                for _ in 0..(m - i - 1) {
+                                    for _ in 0..(m - i - 1) {
+                                        c.square();
+                                    }
+                                    r.mul_assign(&c);
                                     c.square();
+                                    t.mul_assign(&c);
+                                    m = i;
                                 }
-                                r.mul_assign(&c);
-                                c.square();
-                                t.mul_assign(&c);
-                                m = i;
-                            }
 
-                            Some(r)
+                                Some(r)
+                            }
                         }
                     }
                 }
@@ -681,23 +679,20 @@ fn prime_field_impl(
         }
 
         for i in 1..(limbs * 2) {
-            let k = get_temp(i);
+            let temp0 = get_temp(limbs * 2 - i);
+            let temp1 = get_temp(limbs * 2 - i - 1);
 
             if i == 1 {
                 gen.extend(quote!{
-                    let tmp0 = #k >> 63;
-                    let #k = #k << 1;
+                    let #temp0 = #temp1 >> 63;
                 });
             } else if i == (limbs * 2 - 1) {
                 gen.extend(quote!{
-                    let #k = tmp0;
+                    let #temp0 = #temp0 << 1;
                 });
             } else {
                 gen.extend(quote!{
-                    let tmp1 = #k >> 63;
-                    let #k = #k << 1;
-                    let #k = #k | tmp0;
-                    let tmp0 = tmp1;
+                    let #temp0 = (#temp0 << 1) | (#temp1 >> 63);
                 });
             }
         }
@@ -796,6 +791,8 @@ fn prime_field_impl(
         proc_macro2::Punct::new(',', proc_macro2::Spacing::Alone),
     );
 
+    let top_limb_index = limbs - 1;
+
     quote!{
         impl Copy for #name { }
 
@@ -846,9 +843,10 @@ fn prime_field_impl(
             fn rand<R: ::rand::Rng>(rng: &mut R) -> Self {
                 loop {
                     let mut tmp = #name(#repr::rand(rng));
-                    for _ in 0..REPR_SHAVE_BITS {
-                        tmp.0.div2();
-                    }
+
+                    // Mask away the unused bits at the beginning.
+                    tmp.0.as_mut()[#top_limb_index] &= 0xffffffffffffffff >> REPR_SHAVE_BITS;
+
                     if tmp.is_valid() {
                         return tmp
                     }
