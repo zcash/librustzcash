@@ -60,10 +60,10 @@ pub fn prime_field(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
         generator,
     );
 
-    gen.extend(prime_field_repr_impl(&repr_ident, limbs));
     gen.extend(constants_impl);
-    gen.extend(sqrt_impl);
+    gen.extend(prime_field_repr_impl(&repr_ident, limbs));
     gen.extend(prime_field_impl(&ast.ident, &repr_ident, limbs));
+    gen.extend(sqrt_impl);
 
     // Return the generated impl
     gen.into()
@@ -124,13 +124,6 @@ fn prime_field_repr_impl(repr: &syn::Ident, limbs: usize) -> proc_macro2::TokenS
         #[derive(Copy, Clone, PartialEq, Eq, Default)]
         pub struct #repr(pub [u64; #limbs]);
 
-        impl ::rand::Rand for #repr {
-            #[inline(always)]
-            fn rand<R: ::rand::Rng>(rng: &mut R) -> Self {
-                #repr(rng.gen())
-            }
-        }
-
         impl ::std::fmt::Debug for #repr
         {
             fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
@@ -140,6 +133,13 @@ fn prime_field_repr_impl(repr: &syn::Ident, limbs: usize) -> proc_macro2::TokenS
                 }
 
                 Ok(())
+            }
+        }
+
+        impl ::rand::Rand for #repr {
+            #[inline(always)]
+            fn rand<R: ::rand::Rng>(rng: &mut R) -> Self {
+                #repr(rng.gen())
             }
         }
 
@@ -218,17 +218,6 @@ fn prime_field_repr_impl(repr: &syn::Ident, limbs: usize) -> proc_macro2::TokenS
             }
 
             #[inline(always)]
-            fn div2(&mut self) {
-                let mut t = 0;
-                for i in self.0.iter_mut().rev() {
-                    let t2 = *i << 63;
-                    *i >>= 1;
-                    *i |= t;
-                    t = t2;
-                }
-            }
-
-            #[inline(always)]
             fn shr(&mut self, mut n: u32) {
                 if n as usize >= 64 * #limbs {
                     *self = Self::from(0);
@@ -251,6 +240,17 @@ fn prime_field_repr_impl(repr: &syn::Ident, limbs: usize) -> proc_macro2::TokenS
                         *i |= t;
                         t = t2;
                     }
+                }
+            }
+
+            #[inline(always)]
+            fn div2(&mut self) {
+                let mut t = 0;
+                for i in self.0.iter_mut().rev() {
+                    let t2 = *i << 63;
+                    *i >>= 1;
+                    *i |= t;
+                    t = t2;
                 }
             }
 
