@@ -52,14 +52,17 @@ pub fn prime_field(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
 
     let mut gen = proc_macro2::TokenStream::new();
 
-    gen.extend(prime_field_repr_impl(&repr_ident, limbs));
-    gen.extend(prime_field_constants_and_sqrt(
+    let (constants_impl, sqrt_impl) = prime_field_constants_and_sqrt(
         &ast.ident,
         &repr_ident,
         modulus,
         limbs,
         generator,
-    ));
+    );
+
+    gen.extend(prime_field_repr_impl(&repr_ident, limbs));
+    gen.extend(constants_impl);
+    gen.extend(sqrt_impl);
     gen.extend(prime_field_impl(&ast.ident, &repr_ident, limbs));
 
     // Return the generated impl
@@ -398,7 +401,7 @@ fn prime_field_constants_and_sqrt(
     modulus: BigUint,
     limbs: usize,
     generator: BigUint,
-) -> proc_macro2::TokenStream {
+) -> (proc_macro2::TokenStream, proc_macro2::TokenStream) {
     let modulus_num_bits = biguint_num_bits(modulus.clone());
 
     // The number of bits we should "shave" from a randomly sampled reputation, i.e.,
@@ -540,7 +543,7 @@ fn prime_field_constants_and_sqrt(
     }
     inv = inv.wrapping_neg();
 
-    quote! {
+    (quote! {
         /// This is the modulus m of the prime field
         const MODULUS: #repr = #repr([#(#modulus,)*]);
 
@@ -569,9 +572,7 @@ fn prime_field_constants_and_sqrt(
 
         /// 2^s root of unity computed by GENERATOR^t
         const ROOT_OF_UNITY: #repr = #repr(#root_of_unity);
-
-        #sqrt_impl
-    }
+    }, sqrt_impl)
 }
 
 /// Implement PrimeField for the derived type.
