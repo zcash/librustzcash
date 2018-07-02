@@ -1,9 +1,9 @@
 [package]
 name = "ff"
-version = "0.2.0"
+version = "0.3.0"
 authors = ["Sean Bowe <ewillbefull@gmail.com>"]
 description = "Library for building and interfacing with finite fields"
-documentation = "https://docs.rs/ff/0.2.0/ff/"
+documentation = "https://docs.rs/ff/"
 homepage = "https://github.com/ebfull/ff"
 license = "MIT/Apache-2.0"
 repository = "https://github.com/ebfull/ff"
@@ -11,8 +11,9 @@ repository = "https://github.com/ebfull/ff"
 [dependencies]
 byteorder = "1"
 rand = "0.4"
-ff_derive = { version = "0.2.0", path = "ff_derive" }
+ff_derive = { version = "0.3.0", path = "ff_derive", optional = true }
 
 [features]
+default = ["derive"]
 u128-support = []
-default = []
+derive = ["ff_derive"]
