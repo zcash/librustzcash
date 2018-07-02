@@ -3,9 +3,11 @@
 extern crate byteorder;
 extern crate rand;
 
+#[cfg(feature = "derive")]
 #[macro_use]
 extern crate ff_derive;
 
+#[cfg(feature = "derive")]
 pub use ff_derive::*;
 
 use std::error::Error;
