@@ -5,7 +5,6 @@
 ## Disclaimers
 
 * This library does not provide constant-time guarantees.
-* This library relies on Rust's `i128_type` feature, which is currently only  available in the nightly compiler.
 
 ## Usage
 
@@ -13,10 +12,10 @@ Add the `ff` crate to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-ff = "0.2"
+ff = "0.3"
 ```
 
-The `ff` crate contains `Field`, `PrimeField`, `PrimeFieldRepr` and `SqrtField` traits. See the **[documentation](https://docs.rs/ff/0.2.0/ff/)** for more.
+The `ff` crate contains `Field`, `PrimeField`, `PrimeFieldRepr` and `SqrtField` traits. See the **[documentation](https://docs.rs/ff/0.3.0/ff/)** for more.
 
 ### #![derive(PrimeField)]
 
