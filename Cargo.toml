@@ -9,5 +9,10 @@ license = "MIT/Apache-2.0"
 repository = "https://github.com/ebfull/ff"
 
 [dependencies]
-rand = "0.3"
+byteorder = "1"
+rand = "0.4"
 ff_derive = { version = "0.2.0", path = "ff_derive" }
+
+[features]
+u128-support = []
+default = []
