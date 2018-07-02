@@ -1,0 +1,12 @@
+[package]
+name = "group"
+version = "0.0.0"
+authors = ["Sean Bowe <ewillbefull@gmail.com>"]
+license = "MIT/Apache-2.0"
+
+description = "Elliptic curve group traits and utilities"
+documentation = "https://docs.rs/group/"
+homepage = "https://github.com/ebfull/group"
+repository = "https://github.com/ebfull/group"
+
+[dependencies]
