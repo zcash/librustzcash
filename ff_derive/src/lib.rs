@@ -795,21 +795,21 @@ fn prime_field_impl(
     let top_limb_index = limbs - 1;
 
     quote!{
-        impl Copy for #name { }
+        impl ::std::marker::Copy for #name { }
 
-        impl Clone for #name {
+        impl ::std::clone::Clone for #name {
             fn clone(&self) -> #name {
                 *self
             }
         }
 
-        impl PartialEq for #name {
+        impl ::std::cmp::PartialEq for #name {
             fn eq(&self, other: &#name) -> bool {
                 self.0 == other.0
             }
         }
 
-        impl Eq for #name { }
+        impl ::std::cmp::Eq for #name { }
 
         impl ::std::fmt::Debug for #name
         {
