@@ -12,10 +12,10 @@ Add the `ff` crate to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-ff = "0.3"
+ff = "0.4"
 ```
 
-The `ff` crate contains `Field`, `PrimeField`, `PrimeFieldRepr` and `SqrtField` traits. See the **[documentation](https://docs.rs/ff/0.3.0/ff/)** for more.
+The `ff` crate contains `Field`, `PrimeField`, `PrimeFieldRepr` and `SqrtField` traits. See the **[documentation](https://docs.rs/ff/0.4.0/ff/)** for more.
 
 ### #![derive(PrimeField)]
 
@@ -25,7 +25,7 @@ First, enable the `derive` crate feature:
 
 ```toml
 [dependencies]
-ff = { version = "0.3", features = ["derive"] }
+ff = { version = "0.4", features = ["derive"] }
 ```
 
 And then use the macro like so:
