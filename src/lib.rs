@@ -349,7 +349,6 @@ fn test_bit_iterator() {
 
 pub use self::arith_impl::*;
 
-#[cfg(feature = "u128-support")]
 mod arith_impl {
     /// Calculate a - b - borrow, returning the result and modifying
     /// the borrow value.
@@ -382,84 +381,5 @@ mod arith_impl {
         *carry = (tmp >> 64) as u64;
 
         tmp as u64
-    }
-}
-
-#[cfg(not(feature = "u128-support"))]
-mod arith_impl {
-    #[inline(always)]
-    fn split_u64(i: u64) -> (u64, u64) {
-        (i >> 32, i & 0xFFFFFFFF)
-    }
-
-    #[inline(always)]
-    fn combine_u64(hi: u64, lo: u64) -> u64 {
-        (hi << 32) | lo
-    }
-
-    /// Calculate a - b - borrow, returning the result and modifying
-    /// the borrow value.
-    #[inline(always)]
-    pub fn sbb(a: u64, b: u64, borrow: &mut u64) -> u64 {
-        let (a_hi, a_lo) = split_u64(a);
-        let (b_hi, b_lo) = split_u64(b);
-        let (b, r0) = split_u64((1 << 32) + a_lo - b_lo - *borrow);
-        let (b, r1) = split_u64((1 << 32) + a_hi - b_hi - ((b == 0) as u64));
-
-        *borrow = (b == 0) as u64;
-
-        combine_u64(r1, r0)
-    }
-
-    /// Calculate a + b + carry, returning the sum and modifying the
-    /// carry value.
-    #[inline(always)]
-    pub fn adc(a: u64, b: u64, carry: &mut u64) -> u64 {
-        let (a_hi, a_lo) = split_u64(a);
-        let (b_hi, b_lo) = split_u64(b);
-        let (carry_hi, carry_lo) = split_u64(*carry);
-
-        let (t, r0) = split_u64(a_lo + b_lo + carry_lo);
-        let (t, r1) = split_u64(t + a_hi + b_hi + carry_hi);
-
-        *carry = t;
-
-        combine_u64(r1, r0)
-    }
-
-    /// Calculate a + (b * c) + carry, returning the least significant digit
-    /// and setting carry to the most significant digit.
-    #[inline(always)]
-    pub fn mac_with_carry(a: u64, b: u64, c: u64, carry: &mut u64) -> u64 {
-        /*
-                                [  b_hi  |  b_lo  ]
-                                [  c_hi  |  c_lo  ] *
-        -------------------------------------------
-                                [  b_lo  *  c_lo  ] <-- w
-                       [  b_hi  *  c_lo  ]          <-- x
-                       [  b_lo  *  c_hi  ]          <-- y
-             [   b_hi  *  c_lo  ]                   <-- z
-                                [  a_hi  |  a_lo  ]
-                                [  C_hi  |  C_lo  ]
-        */
-
-        let (a_hi, a_lo) = split_u64(a);
-        let (b_hi, b_lo) = split_u64(b);
-        let (c_hi, c_lo) = split_u64(c);
-        let (carry_hi, carry_lo) = split_u64(*carry);
-
-        let (w_hi, w_lo) = split_u64(b_lo * c_lo);
-        let (x_hi, x_lo) = split_u64(b_hi * c_lo);
-        let (y_hi, y_lo) = split_u64(b_lo * c_hi);
-        let (z_hi, z_lo) = split_u64(b_hi * c_hi);
-
-        let (t, r0) = split_u64(w_lo + a_lo + carry_lo);
-        let (t, r1) = split_u64(t + w_hi + x_lo + y_lo + a_hi + carry_hi);
-        let (t, r2) = split_u64(t + x_hi + y_hi + z_lo);
-        let (_, r3) = split_u64(t + z_hi);
-
-        *carry = combine_u64(r3, r2);
-
-        combine_u64(r1, r0)
     }
 }
