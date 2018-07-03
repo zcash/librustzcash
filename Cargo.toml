@@ -1,6 +1,6 @@
 [package]
 name = "ff"
-version = "0.3.0"
+version = "0.4.0"
 authors = ["Sean Bowe <ewillbefull@gmail.com>"]
 description = "Library for building and interfacing with finite fields"
 documentation = "https://docs.rs/ff/"
@@ -14,6 +14,5 @@ rand = "0.4"
 ff_derive = { version = "0.3.0", path = "ff_derive", optional = true }
 
 [features]
-default = ["derive"]
-u128-support = []
+default = []
 derive = ["ff_derive"]
