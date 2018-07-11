@@ -50,6 +50,7 @@ impl OutgoingViewingKey {
 }
 
 /// A Sapling expanded spending key
+#[derive(Clone)]
 struct ExpandedSpendingKey<E: JubjubEngine> {
     ask: E::Fs,
     nsk: E::Fs,
@@ -226,6 +227,7 @@ impl DiversifierKey {
 }
 
 /// A Sapling extended spending key
+#[derive(Clone)]
 pub struct ExtendedSpendingKey {
     depth: u8,
     parent_fvk_tag: FVKTag,
@@ -243,6 +245,29 @@ pub struct ExtendedFullViewingKey {
     chain_code: ChainCode,
     fvk: FullViewingKey<Bls12>,
     dk: DiversifierKey,
+}
+
+impl std::cmp::PartialEq for ExtendedSpendingKey {
+    fn eq(&self, rhs: &ExtendedSpendingKey) -> bool {
+        self.depth == rhs.depth
+            && self.parent_fvk_tag == rhs.parent_fvk_tag
+            && self.child_index == rhs.child_index
+            && self.chain_code == rhs.chain_code
+            && self.xsk.ask == rhs.xsk.ask
+            && self.xsk.nsk == rhs.xsk.nsk
+            && self.xsk.ovk == rhs.xsk.ovk
+            && self.dk == rhs.dk
+    }
+}
+
+impl std::fmt::Debug for ExtendedSpendingKey {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> Result<(), std::fmt::Error> {
+        write!(
+            f,
+            "ExtendedSpendingKey(d = {}, tag_p = {:?}, i = {:?})",
+            self.depth, self.parent_fvk_tag, self.child_index
+        )
+    }
 }
 
 impl std::cmp::PartialEq for ExtendedFullViewingKey {
@@ -286,6 +311,15 @@ impl ExtendedSpendingKey {
             xsk: ExpandedSpendingKey::from_spending_key(sk_m),
             dk: DiversifierKey::master(sk_m),
         }
+    }
+
+    /// Returns the child key corresponding to the path derived from the master key
+    pub fn from_path(master: &ExtendedSpendingKey, path: &[ChildIndex]) -> Self {
+        let mut xsk = master.clone();
+        for &i in path.iter() {
+            xsk = xsk.derive_child(i);
+        }
+        xsk
     }
 
     pub fn derive_child(&self, i: ChildIndex) -> Self {
@@ -403,5 +437,26 @@ mod tests {
         // But we *can* derive a non-hardened child from a hardened parent
         assert!(xfvk_5h_7.is_ok());
         assert_eq!(ExtendedFullViewingKey::from(&xsk_5h_7), xfvk_5h_7.unwrap());
+    }
+
+    #[test]
+    fn path() {
+        let seed = [0; 32];
+        let xsk_m = ExtendedSpendingKey::master(&seed);
+
+        let xsk_5h = xsk_m.derive_child(ChildIndex::Hardened(5));
+        assert_eq!(
+            ExtendedSpendingKey::from_path(&xsk_m, &[ChildIndex::Hardened(5)]),
+            xsk_5h
+        );
+
+        let xsk_5h_7 = xsk_5h.derive_child(ChildIndex::NonHardened(7));
+        assert_eq!(
+            ExtendedSpendingKey::from_path(
+                &xsk_m,
+                &[ChildIndex::Hardened(5), ChildIndex::NonHardened(7)]
+            ),
+            xsk_5h_7
+        );
     }
 }
