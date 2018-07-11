@@ -5,7 +5,7 @@ extern crate pairing;
 extern crate sapling_crypto;
 
 use blake2_rfc::blake2b::{Blake2b, Blake2bResult};
-use pairing::bls12_381::Bls12;
+use pairing::{bls12_381::Bls12, PrimeField, PrimeFieldRepr};
 use sapling_crypto::{
     jubjub::{FixedGenerators, JubjubBls12, JubjubEngine, JubjubParams, ToUniform},
     primitives::ViewingKey,
@@ -17,6 +17,7 @@ lazy_static! {
 
 pub const PRF_EXPAND_PERSONALIZATION: &'static [u8; 16] = b"Zcash_ExpandSeed";
 pub const ZIP32_SAPLING_MASTER_PERSONALIZATION: &'static [u8; 16] = b"ZcashIP32Sapling";
+pub const ZIP32_SAPLING_FVFP_PERSONALIZATION: &'static [u8; 16] = b"ZcashSaplingFVFP";
 
 // Sapling key components
 
@@ -54,6 +55,20 @@ impl<E: JubjubEngine> ExpandedSpendingKey<E> {
             .copy_from_slice(&prf_expand(sk, &[0x02]).as_bytes()[..32]);
         ExpandedSpendingKey { ask, nsk, ovk }
     }
+
+    fn to_bytes(&self) -> [u8; 96] {
+        let mut result = [0u8; 96];
+        self.ask
+            .into_repr()
+            .write_le(&mut result[..32])
+            .expect("length is 32 bytes");
+        self.nsk
+            .into_repr()
+            .write_le(&mut result[32..64])
+            .expect("length is 32 bytes");
+        (&mut result[64..]).copy_from_slice(&self.ovk.0);
+        result
+    }
 }
 
 impl<E: JubjubEngine> FullViewingKey<E> {
@@ -70,12 +85,36 @@ impl<E: JubjubEngine> FullViewingKey<E> {
             ovk: xsk.ovk,
         }
     }
+
+    fn to_bytes(&self) -> [u8; 96] {
+        let mut result = [0u8; 96];
+        self.vk
+            .ak
+            .write(&mut result[..32])
+            .expect("length is 32 bytes");
+        self.vk
+            .nk
+            .write(&mut result[32..64])
+            .expect("length is 32 bytes");
+        (&mut result[64..]).copy_from_slice(&self.ovk.0);
+        result
+    }
 }
 
 // ZIP 32 structures
 
 /// A Sapling full viewing key fingerprint
 struct FVKFingerprint([u8; 32]);
+
+impl<'a, E: JubjubEngine> From<&'a FullViewingKey<E>> for FVKFingerprint {
+    fn from(fvk: &FullViewingKey<E>) -> Self {
+        let mut h = Blake2b::with_params(32, &[], &[], ZIP32_SAPLING_FVFP_PERSONALIZATION);
+        h.update(&fvk.to_bytes());
+        let mut fvfp = [0u8; 32];
+        fvfp.copy_from_slice(h.finalize().as_bytes());
+        FVKFingerprint(fvfp)
+    }
+}
 
 /// A Sapling full viewing key tag
 #[derive(Clone, Copy)]
