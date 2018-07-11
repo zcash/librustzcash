@@ -12,6 +12,7 @@ homepage = "https://github.com/zcash-hackworks/zip32"
 repository = "https://github.com/zcash-hackworks/zip32"
 
 [dependencies]
+byteorder = "1"
 lazy_static = "1.0"
 pairing = "0.14.2"
 

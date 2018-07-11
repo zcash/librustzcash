@@ -1,11 +1,13 @@
 extern crate blake2_rfc;
+extern crate byteorder;
 #[macro_use]
 extern crate lazy_static;
 extern crate pairing;
 extern crate sapling_crypto;
 
 use blake2_rfc::blake2b::{Blake2b, Blake2bResult};
-use pairing::{bls12_381::Bls12, PrimeField, PrimeFieldRepr};
+use byteorder::{ByteOrder, LittleEndian};
+use pairing::{bls12_381::Bls12, Field, PrimeField, PrimeFieldRepr};
 use sapling_crypto::{
     jubjub::{FixedGenerators, JubjubBls12, JubjubEngine, JubjubParams, ToUniform},
     primitives::ViewingKey,
@@ -23,15 +25,29 @@ pub const ZIP32_SAPLING_FVFP_PERSONALIZATION: &'static [u8; 16] = b"ZcashSapling
 
 /// PRF^expand(sk, t) := BLAKE2b-512("Zcash_ExpandSeed", sk || t)
 fn prf_expand(sk: &[u8], t: &[u8]) -> Blake2bResult {
+    prf_expand_vec(sk, &vec![t])
+}
+
+fn prf_expand_vec(sk: &[u8], ts: &[&[u8]]) -> Blake2bResult {
     let mut h = Blake2b::with_params(64, &[], &[], PRF_EXPAND_PERSONALIZATION);
     h.update(sk);
-    h.update(t);
+    for t in ts {
+        h.update(t);
+    }
     h.finalize()
 }
 
 /// An outgoing viewing key
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq)]
 struct OutgoingViewingKey([u8; 32]);
+
+impl OutgoingViewingKey {
+    fn derive_child(&self, i_l: &[u8]) -> Self {
+        let mut ovk = [0u8; 32];
+        ovk.copy_from_slice(&prf_expand_vec(i_l, &[&[0x15], &self.0]).as_bytes()[..32]);
+        OutgoingViewingKey(ovk)
+    }
+}
 
 /// A Sapling expanded spending key
 struct ExpandedSpendingKey<E: JubjubEngine> {
@@ -53,6 +69,15 @@ impl<E: JubjubEngine> ExpandedSpendingKey<E> {
         let mut ovk = OutgoingViewingKey([0u8; 32]);
         ovk.0
             .copy_from_slice(&prf_expand(sk, &[0x02]).as_bytes()[..32]);
+        ExpandedSpendingKey { ask, nsk, ovk }
+    }
+
+    fn derive_child(&self, i_l: &[u8]) -> Self {
+        let mut ask = E::Fs::to_uniform(prf_expand(i_l, &[0x13]).as_bytes());
+        let mut nsk = E::Fs::to_uniform(prf_expand(i_l, &[0x14]).as_bytes());
+        ask.add_assign(&self.ask);
+        nsk.add_assign(&self.nsk);
+        let ovk = self.ovk.derive_child(i_l);
         ExpandedSpendingKey { ask, nsk, ovk }
     }
 
@@ -83,6 +108,24 @@ impl<E: JubjubEngine> FullViewingKey<E> {
                     .mul(xsk.nsk, params),
             },
             ovk: xsk.ovk,
+        }
+    }
+
+    fn derive_child(&self, i_l: &[u8], params: &E::Params) -> Self {
+        let i_ask = E::Fs::to_uniform(prf_expand(i_l, &[0x13]).as_bytes());
+        let i_nsk = E::Fs::to_uniform(prf_expand(i_l, &[0x14]).as_bytes());
+        let ak = params
+            .generator(FixedGenerators::SpendingKeyGenerator)
+            .mul(i_ask, params)
+            .add(&self.vk.ak, params);
+        let nk = params
+            .generator(FixedGenerators::ProofGenerationKey)
+            .mul(i_nsk, params)
+            .add(&self.vk.nk, params);
+
+        FullViewingKey {
+            vk: ViewingKey { ak, nk },
+            ovk: self.ovk.derive_child(i_l),
         }
     }
 
@@ -117,7 +160,7 @@ impl<'a, E: JubjubEngine> From<&'a FullViewingKey<E>> for FVKFingerprint {
 }
 
 /// A Sapling full viewing key tag
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 struct FVKTag([u8; 4]);
 
 impl<'a> From<&'a FVKFingerprint> for FVKTag {
@@ -141,7 +184,7 @@ impl FVKTag {
 }
 
 /// A child index for a derived key
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum ChildIndex {
     NonHardened(u32),
     Hardened(u32), // Hardened(n) == n + (1 << 31) == n' in path notation
@@ -161,11 +204,11 @@ impl ChildIndex {
 }
 
 /// A chain code
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 struct ChainCode([u8; 32]);
 
 /// A key used to derive diversifiers for a particular child key
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 struct DiversifierKey([u8; 32]);
 
 impl DiversifierKey {
@@ -173,6 +216,12 @@ impl DiversifierKey {
         let mut dk_m = [0u8; 32];
         dk_m.copy_from_slice(&prf_expand(sk_m, &[0x10]).as_bytes()[..32]);
         DiversifierKey(dk_m)
+    }
+
+    fn derive_child(&self, i_l: &[u8]) -> Self {
+        let mut dk = [0u8; 32];
+        dk.copy_from_slice(&prf_expand_vec(i_l, &[&[0x16], &self.0]).as_bytes()[..32]);
+        DiversifierKey(dk)
     }
 }
 
@@ -196,6 +245,29 @@ pub struct ExtendedFullViewingKey {
     dk: DiversifierKey,
 }
 
+impl std::cmp::PartialEq for ExtendedFullViewingKey {
+    fn eq(&self, rhs: &ExtendedFullViewingKey) -> bool {
+        self.depth == rhs.depth
+            && self.parent_fvk_tag == rhs.parent_fvk_tag
+            && self.child_index == rhs.child_index
+            && self.chain_code == rhs.chain_code
+            && self.fvk.vk.ak == rhs.fvk.vk.ak
+            && self.fvk.vk.nk == rhs.fvk.vk.nk
+            && self.fvk.ovk == rhs.fvk.ovk
+            && self.dk == rhs.dk
+    }
+}
+
+impl std::fmt::Debug for ExtendedFullViewingKey {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> Result<(), std::fmt::Error> {
+        write!(
+            f,
+            "ExtendedFullViewingKey(d = {}, tag_p = {:?}, i = {:?})",
+            self.depth, self.parent_fvk_tag, self.child_index
+        )
+    }
+}
+
 impl ExtendedSpendingKey {
     pub fn master(seed: &[u8]) -> Self {
         let mut h = Blake2b::with_params(64, &[], &[], ZIP32_SAPLING_MASTER_PERSONALIZATION);
@@ -215,6 +287,40 @@ impl ExtendedSpendingKey {
             dk: DiversifierKey::master(sk_m),
         }
     }
+
+    pub fn derive_child(&self, i: ChildIndex) -> Self {
+        let fvk = FullViewingKey::from_expanded_spending_key(&self.xsk, &JUBJUB);
+        let tmp = match i {
+            ChildIndex::Hardened(i) => {
+                let mut le_i = [0; 4];
+                LittleEndian::write_u32(&mut le_i, i + (1 << 31));
+                prf_expand_vec(
+                    &self.chain_code.0,
+                    &[&[0x11], &self.xsk.to_bytes(), &self.dk.0, &le_i],
+                )
+            }
+            ChildIndex::NonHardened(i) => {
+                let mut le_i = [0; 4];
+                LittleEndian::write_u32(&mut le_i, i);
+                prf_expand_vec(
+                    &self.chain_code.0,
+                    &[&[0x12], &fvk.to_bytes(), &self.dk.0, &le_i],
+                )
+            }
+        };
+        let i_l = &tmp.as_bytes()[..32];
+        let mut c_i = [0u8; 32];
+        c_i.copy_from_slice(&tmp.as_bytes()[32..]);
+
+        ExtendedSpendingKey {
+            depth: self.depth + 1,
+            parent_fvk_tag: FVKFingerprint::from(&fvk).into(),
+            child_index: i,
+            chain_code: ChainCode(c_i),
+            xsk: self.xsk.derive_child(i_l),
+            dk: self.dk.derive_child(i_l),
+        }
+    }
 }
 
 impl<'a> From<&'a ExtendedSpendingKey> for ExtendedFullViewingKey {
@@ -230,10 +336,72 @@ impl<'a> From<&'a ExtendedSpendingKey> for ExtendedFullViewingKey {
     }
 }
 
+impl ExtendedFullViewingKey {
+    pub fn derive_child(&self, i: ChildIndex) -> Result<Self, ()> {
+        let tmp = match i {
+            ChildIndex::Hardened(_) => return Err(()),
+            ChildIndex::NonHardened(i) => {
+                let mut le_i = [0; 4];
+                LittleEndian::write_u32(&mut le_i, i);
+                prf_expand_vec(
+                    &self.chain_code.0,
+                    &[&[0x12], &self.fvk.to_bytes(), &self.dk.0, &le_i],
+                )
+            }
+        };
+        let i_l = &tmp.as_bytes()[..32];
+        let mut c_i = [0u8; 32];
+        c_i.copy_from_slice(&tmp.as_bytes()[32..]);
+
+        Ok(ExtendedFullViewingKey {
+            depth: self.depth + 1,
+            parent_fvk_tag: FVKFingerprint::from(&self.fvk).into(),
+            child_index: i,
+            chain_code: ChainCode(c_i),
+            fvk: self.fvk.derive_child(i_l, &JUBJUB),
+            dk: self.dk.derive_child(i_l),
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use super::*;
+
     #[test]
-    fn it_works() {
-        assert_eq!(2 + 2, 4);
+    fn derive_nonhardened_child() {
+        let seed = [0; 32];
+        let xsk_m = ExtendedSpendingKey::master(&seed);
+        let xfvk_m = ExtendedFullViewingKey::from(&xsk_m);
+
+        let i_5 = ChildIndex::NonHardened(5);
+        let xsk_5 = xsk_m.derive_child(i_5);
+        let xfvk_5 = xfvk_m.derive_child(i_5);
+
+        assert!(xfvk_5.is_ok());
+        assert_eq!(ExtendedFullViewingKey::from(&xsk_5), xfvk_5.unwrap());
+    }
+
+    #[test]
+    fn derive_hardened_child() {
+        let seed = [0; 32];
+        let xsk_m = ExtendedSpendingKey::master(&seed);
+        let xfvk_m = ExtendedFullViewingKey::from(&xsk_m);
+
+        let i_5h = ChildIndex::Hardened(5);
+        let xsk_5h = xsk_m.derive_child(i_5h);
+        let xfvk_5h = xfvk_m.derive_child(i_5h);
+
+        // Cannot derive a hardened child from an ExtendedFullViewingKey
+        assert!(xfvk_5h.is_err());
+        let xfvk_5h = ExtendedFullViewingKey::from(&xsk_5h);
+
+        let i_7 = ChildIndex::NonHardened(7);
+        let xsk_5h_7 = xsk_5h.derive_child(i_7);
+        let xfvk_5h_7 = xfvk_5h.derive_child(i_7);
+
+        // But we *can* derive a non-hardened child from a hardened parent
+        assert!(xfvk_5h_7.is_ok());
+        assert_eq!(ExtendedFullViewingKey::from(&xsk_5h_7), xfvk_5h_7.unwrap());
     }
 }
