@@ -34,7 +34,7 @@ pub struct Signature {
     sbar: [u8; 32],
 }
 
-pub struct PrivateKey<E: JubjubEngine>(E::Fs);
+pub struct PrivateKey<E: JubjubEngine>(pub E::Fs);
 
 pub struct PublicKey<E: JubjubEngine>(pub Point<E, Unknown>);
 
