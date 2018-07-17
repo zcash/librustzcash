@@ -27,7 +27,7 @@ rev = "7a5b5fc99ae483a0043db7547fb79a6fa44b88a9"
 
 [dependencies.sapling-crypto]
 git = "https://github.com/zcash-hackworks/sapling-crypto"
-rev = "6abfcca25ae233922ecc18a4d2d0b5cb7aab7c8c"
+rev = "c2862a43829632d64f0654e8a9cde9680ba48076"
 
 [profile.release]
 lto = true
