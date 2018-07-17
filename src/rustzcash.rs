@@ -695,7 +695,7 @@ pub extern "system" fn librustzcash_sapling_check_output(
     // Accumulate the value commitment in the context
     {
         let mut tmp = cv.clone();
-        tmp.negate(); // Outputs subtract from the total.
+        tmp = tmp.negate(); // Outputs subtract from the total.
         tmp = tmp.add(&unsafe { &*ctx }.bvk, &JUBJUB);
 
         // Update the context
