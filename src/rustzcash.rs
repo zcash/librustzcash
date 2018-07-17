@@ -35,7 +35,7 @@ use blake2_rfc::blake2s::Blake2s;
 
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 
-use rand::{OsRng, Rng, Rand};
+use rand::{OsRng, Rand, Rng};
 use std::io::BufReader;
 
 use libc::{c_char, c_uchar, int64_t, size_t, uint32_t, uint64_t};
@@ -43,7 +43,7 @@ use std::ffi::CStr;
 use std::fs::File;
 use std::slice;
 
-use sapling_crypto::primitives::{ValueCommitment, ViewingKey, ProofGenerationKey};
+use sapling_crypto::primitives::{ProofGenerationKey, ValueCommitment, ViewingKey};
 
 pub mod equihash;
 
@@ -1024,7 +1024,7 @@ pub extern "system" fn librustzcash_sprout_verify(
 
 pub struct SaplingProvingContext {
     bsk: Fs,
-    bvk: edwards::Point<Bls12, Unknown>
+    bvk: edwards::Point<Bls12, Unknown>,
 }
 
 #[no_mangle]
@@ -1036,9 +1036,8 @@ pub extern "system" fn librustzcash_sapling_output_proof(
     rcm: *const [c_uchar; 32],
     value: uint64_t,
     cv: *mut [c_uchar; 32],
-    zkproof: *mut [c_uchar; GROTH_PROOF_SIZE]
-) -> bool
-{
+    zkproof: *mut [c_uchar; GROTH_PROOF_SIZE],
+) -> bool {
     // Grab `esk`, which the caller should have constructed for the DH key exchange.
     let esk = match Fs::from_repr(read_fs(&(unsafe { &*esk })[..])) {
         Ok(p) => p,
@@ -1057,13 +1056,13 @@ pub extern "system" fn librustzcash_sapling_output_proof(
     // pk_d should be prime order.
     let pk_d = match pk_d.as_prime_order(&JUBJUB) {
         Some(p) => p,
-        None => return false
+        None => return false,
     };
 
     // Construct a payment address
     let payment_address = sapling_crypto::primitives::PaymentAddress {
         pk_d: pk_d,
-        diversifier: diversifier
+        diversifier: diversifier,
     };
 
     // Initialize secure RNG
@@ -1093,7 +1092,7 @@ pub extern "system" fn librustzcash_sapling_output_proof(
     // Construct the value commitment for the proof instance
     let value_commitment = sapling_crypto::primitives::ValueCommitment::<Bls12> {
         value: value,
-        randomness: rcv
+        randomness: rcv,
     };
 
     // We now have a full witness for the output proof.
@@ -1102,11 +1101,15 @@ pub extern "system" fn librustzcash_sapling_output_proof(
         value_commitment: Some(value_commitment.clone()),
         payment_address: Some(payment_address.clone()),
         commitment_randomness: Some(rcm),
-        esk: Some(esk.clone())
+        esk: Some(esk.clone()),
     };
 
     // Create proof
-    let proof = create_random_proof(instance, unsafe {SAPLING_OUTPUT_PARAMS.as_ref()}.unwrap(), &mut rng).expect("proving should not fail");
+    let proof = create_random_proof(
+        instance,
+        unsafe { SAPLING_OUTPUT_PARAMS.as_ref() }.unwrap(),
+        &mut rng,
+    ).expect("proving should not fail");
 
     // Write the proof out to the caller
     proof
@@ -1141,7 +1144,6 @@ pub extern "system" fn librustzcash_sapling_spend_sig(
     sighash: *const [c_uchar; 32],
     result: *mut [c_uchar; 64],
 ) -> bool {
-
     // The caller provides the re-randomization of `ak`.
     let ar = match Fs::from_repr(read_fs(&(unsafe { &*ar })[..])) {
         Ok(p) => p,
@@ -1158,19 +1160,28 @@ pub extern "system" fn librustzcash_sapling_spend_sig(
     let rsk = ask.randomize(ar);
 
     // We compute `rk` from there (needed for key prefixing)
-    let rk = redjubjub::PublicKey::from_private(&rsk, FixedGenerators::SpendingKeyGenerator, &JUBJUB);
+    let rk =
+        redjubjub::PublicKey::from_private(&rsk, FixedGenerators::SpendingKeyGenerator, &JUBJUB);
 
     // Compute the signature's message for rk/spend_auth_sig
     let mut data_to_be_signed = [0u8; 64];
-    rk.0.write(&mut data_to_be_signed[0..32]).expect("message buffer should be 32 bytes");
+    rk.0
+        .write(&mut data_to_be_signed[0..32])
+        .expect("message buffer should be 32 bytes");
     (&mut data_to_be_signed[32..64]).copy_from_slice(&(unsafe { &*sighash })[..]);
 
     // Do the signing
     let mut rng = OsRng::new().expect("should be able to construct RNG");
-    let sig = rsk.sign(&data_to_be_signed, &mut rng, FixedGenerators::SpendingKeyGenerator, &JUBJUB);
+    let sig = rsk.sign(
+        &data_to_be_signed,
+        &mut rng,
+        FixedGenerators::SpendingKeyGenerator,
+        &JUBJUB,
+    );
 
     // Write out the signature
-    sig.write(&mut(unsafe { &mut *result })[..]).expect("result should be 64 bytes");
+    sig.write(&mut (unsafe { &mut *result })[..])
+        .expect("result should be 64 bytes");
 
     true
 }
@@ -1181,13 +1192,16 @@ pub extern "system" fn librustzcash_sapling_binding_sig(
     value_balance: int64_t,
     sighash: *const [c_uchar; 32],
     result: *mut [c_uchar; 64],
-) -> bool
-{
+) -> bool {
     // Grab the current `bsk` from the context
     let bsk = redjubjub::PrivateKey::<Bls12>(unsafe { &*ctx }.bsk);
 
     // Grab the `bvk` using DerivePublic.
-    let bvk = redjubjub::PublicKey::from_private(&bsk, FixedGenerators::ValueCommitmentRandomness, &JUBJUB);
+    let bvk = redjubjub::PublicKey::from_private(
+        &bsk,
+        FixedGenerators::ValueCommitmentRandomness,
+        &JUBJUB,
+    );
 
     // In order to check internal consistency, let's use the accumulated value
     // commitments (as the verifier would) and apply valuebalance to compare
@@ -1212,15 +1226,23 @@ pub extern "system" fn librustzcash_sapling_binding_sig(
 
     // Construct signature message
     let mut data_to_be_signed = [0u8; 64];
-    bvk.0.write(&mut data_to_be_signed[0..32]).expect("message buffer should be 32 bytes");
+    bvk.0
+        .write(&mut data_to_be_signed[0..32])
+        .expect("message buffer should be 32 bytes");
     (&mut data_to_be_signed[32..64]).copy_from_slice(&(unsafe { &*sighash })[..]);
 
     // Sign
     let mut rng = OsRng::new().expect("should be able to construct RNG");
-    let sig = bsk.sign(&data_to_be_signed, &mut rng, FixedGenerators::ValueCommitmentRandomness, &JUBJUB);
+    let sig = bsk.sign(
+        &data_to_be_signed,
+        &mut rng,
+        FixedGenerators::ValueCommitmentRandomness,
+        &JUBJUB,
+    );
 
     // Write out signature
-    sig.write(&mut(unsafe { &mut *result })[..]).expect("result should be 64 bytes");
+    sig.write(&mut (unsafe { &mut *result })[..])
+        .expect("result should be 64 bytes");
 
     true
 }
@@ -1309,10 +1331,15 @@ pub extern "system" fn librustzcash_sapling_spend_proof(
     };
 
     // This is the result of the re-randomization, we compute it for the caller
-    let rk = redjubjub::PublicKey::<Bls12>(ak.into()).randomize(ar, FixedGenerators::SpendingKeyGenerator, &JUBJUB);
+    let rk = redjubjub::PublicKey::<Bls12>(ak.into()).randomize(
+        ar,
+        FixedGenerators::SpendingKeyGenerator,
+        &JUBJUB,
+    );
 
     // Write out `rk` to the caller
-    rk.write(&mut unsafe { &mut *rk_out }[..]).expect("should be able to write to rk_out");
+    rk.write(&mut unsafe { &mut *rk_out }[..])
+        .expect("should be able to write to rk_out");
 
     // We need to compute the anchor of the Spend.
     let anchor = match Fr::from_repr(read_le(unsafe { &(&*anchor)[..] })) {
@@ -1363,9 +1390,11 @@ pub extern "system" fn librustzcash_sapling_spend_proof(
     // Let's compute the nullifier while we have the position
     let note = sapling_crypto::primitives::Note {
         value: value,
-        g_d: diversifier.g_d::<Bls12>(&JUBJUB).expect("was a valid diversifier before"),
+        g_d: diversifier
+            .g_d::<Bls12>(&JUBJUB)
+            .expect("was a valid diversifier before"),
         pk_d: payment_address.pk_d.clone(),
-        r: rcm
+        r: rcm,
     };
 
     let nullifier = note.nf(&viewing_key, position, &JUBJUB);
@@ -1396,7 +1425,11 @@ pub extern "system" fn librustzcash_sapling_spend_proof(
     };
 
     // Create proof
-    let proof = create_random_proof(instance, unsafe {SAPLING_SPEND_PARAMS.as_ref()}.unwrap(), &mut rng).expect("proving should not fail");
+    let proof = create_random_proof(
+        instance,
+        unsafe { SAPLING_SPEND_PARAMS.as_ref() }.unwrap(),
+        &mut rng,
+    ).expect("proving should not fail");
 
     // Try to verify the proof:
     // Construct public input for circuit
@@ -1431,10 +1464,12 @@ pub extern "system" fn librustzcash_sapling_spend_proof(
         &public_input[..],
     ) {
         // No error, and proof verification successful
-        Ok(true) => {},
+        Ok(true) => {}
 
         // Any other case
-        _ => {return false;},
+        _ => {
+            return false;
+        }
     }
 
     // Compute value commitment
@@ -1462,21 +1497,17 @@ pub extern "system" fn librustzcash_sapling_spend_proof(
     true
 }
 
-
 #[no_mangle]
-pub extern "system" fn librustzcash_sapling_proving_ctx_init(
-) -> *mut SaplingProvingContext {
+pub extern "system" fn librustzcash_sapling_proving_ctx_init() -> *mut SaplingProvingContext {
     let ctx = Box::new(SaplingProvingContext {
         bsk: Fs::zero(),
-        bvk: edwards::Point::zero()
+        bvk: edwards::Point::zero(),
     });
 
     Box::into_raw(ctx)
 }
 
 #[no_mangle]
-pub extern "system" fn librustzcash_sapling_proving_ctx_free(
-    ctx: *mut SaplingProvingContext,
-) {
+pub extern "system" fn librustzcash_sapling_proving_ctx_free(ctx: *mut SaplingProvingContext) {
     drop(unsafe { Box::from_raw(ctx) });
 }
