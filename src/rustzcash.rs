@@ -1188,7 +1188,7 @@ pub extern "system" fn librustzcash_sapling_spend_sig(
 
 #[no_mangle]
 pub extern "system" fn librustzcash_sapling_binding_sig(
-    ctx: *mut SaplingProvingContext,
+    ctx: *const SaplingProvingContext,
     value_balance: int64_t,
     sighash: *const [c_uchar; 32],
     result: *mut [c_uchar; 64],

@@ -112,7 +112,7 @@ extern "C" {
     /// signature. You must provide the intended valueBalance so that
     /// we can internally check consistency.
     bool librustzcash_sapling_binding_sig(
-        void *ctx,
+        const void *ctx,
         int64_t valueBalance,
         const unsigned char *sighash,
         unsigned char *result
