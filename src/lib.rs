@@ -1,16 +1,20 @@
+extern crate aes;
 extern crate blake2_rfc;
 extern crate byteorder;
+extern crate fpe;
 #[macro_use]
 extern crate lazy_static;
 extern crate pairing;
 extern crate sapling_crypto;
 
+use aes::Aes256;
 use blake2_rfc::blake2b::{Blake2b, Blake2bResult};
 use byteorder::{ByteOrder, LittleEndian};
+use fpe::ff1::{BinaryNumeralString, FF1};
 use pairing::{bls12_381::Bls12, Field, PrimeField, PrimeFieldRepr};
 use sapling_crypto::{
     jubjub::{FixedGenerators, JubjubBls12, JubjubEngine, JubjubParams, ToUniform},
-    primitives::ViewingKey,
+    primitives::{Diversifier, ViewingKey},
 };
 
 lazy_static! {
@@ -208,6 +212,31 @@ impl ChildIndex {
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct ChainCode([u8; 32]);
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct DiversifierIndex([u8; 11]);
+
+impl DiversifierIndex {
+    fn new() -> Self {
+        DiversifierIndex([0; 11])
+    }
+
+    pub fn increment(&mut self) -> Result<(), ()> {
+        let mut k = 0;
+        loop {
+            self.0[k] += 1;
+            if self.0[k] != 0 {
+                // No overflow
+                return Ok(());
+            }
+            // Overflow
+            k += 1;
+            if k == 11 {
+                return Err(());
+            }
+        }
+    }
+}
+
 /// A key used to derive diversifiers for a particular child key
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct DiversifierKey([u8; 32]);
@@ -223,6 +252,29 @@ impl DiversifierKey {
         let mut dk = [0u8; 32];
         dk.copy_from_slice(&prf_expand_vec(i_l, &[&[0x16], &self.0]).as_bytes()[..32]);
         DiversifierKey(dk)
+    }
+
+    /// Returns the first index starting from j that generates a valid
+    /// diversifier, along with the corresponding diversifier. Returns
+    /// an error if the diversifier space is exhausted.
+    fn diversifier(&self, mut j: DiversifierIndex) -> Result<(DiversifierIndex, Diversifier), ()> {
+        let ff = FF1::<Aes256>::new(&self.0, 2).unwrap();
+        loop {
+            // Generate d_j
+            let enc = ff.encrypt(&[], &BinaryNumeralString::from_bytes_le(&j.0[..]))
+                .unwrap();
+            let mut d_j = [0; 11];
+            d_j.copy_from_slice(&enc.to_bytes_le());
+            let d_j = Diversifier(d_j);
+
+            // Return (j, d_j) if valid, else increment j and try again
+            match d_j.g_d::<Bls12>(&JUBJUB) {
+                Some(_) => return Ok((j, d_j)),
+                None => if j.increment().is_err() {
+                    return Err(());
+                },
+            }
+        }
     }
 }
 
@@ -458,5 +510,37 @@ mod tests {
             ),
             xsk_5h_7
         );
+    }
+
+    #[test]
+    fn diversifier() {
+        let dk = DiversifierKey([0; 32]);
+        let j_0 = DiversifierIndex::new();
+        let j_1 = DiversifierIndex([1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+        let j_2 = DiversifierIndex([2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+        let j_3 = DiversifierIndex([3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+        // Computed using this Rust implementation
+        let d_0 = [220, 231, 126, 188, 236, 10, 38, 175, 214, 153, 140];
+        let d_3 = [60, 253, 170, 8, 171, 147, 220, 31, 3, 144, 34];
+
+        // j = 0
+        let (j, d_j) = dk.diversifier(j_0).unwrap();
+        assert_eq!(j, j_0);
+        assert_eq!(d_j.0, d_0);
+
+        // j = 1
+        let (j, d_j) = dk.diversifier(j_1).unwrap();
+        assert_eq!(j, j_3);
+        assert_eq!(d_j.0, d_3);
+
+        // j = 2
+        let (j, d_j) = dk.diversifier(j_2).unwrap();
+        assert_eq!(j, j_3);
+        assert_eq!(d_j.0, d_3);
+
+        // j = 3
+        let (j, d_j) = dk.diversifier(j_3).unwrap();
+        assert_eq!(j, j_3);
+        assert_eq!(d_j.0, d_3);
     }
 }
