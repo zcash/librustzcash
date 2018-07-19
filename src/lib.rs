@@ -14,7 +14,7 @@ use fpe::ff1::{BinaryNumeralString, FF1};
 use pairing::{bls12_381::Bls12, Field, PrimeField, PrimeFieldRepr};
 use sapling_crypto::{
     jubjub::{FixedGenerators, JubjubBls12, JubjubEngine, JubjubParams, ToUniform},
-    primitives::{Diversifier, ViewingKey},
+    primitives::{Diversifier, PaymentAddress, ViewingKey},
 };
 
 lazy_static! {
@@ -407,6 +407,10 @@ impl ExtendedSpendingKey {
             dk: self.dk.derive_child(i_l),
         }
     }
+
+    pub fn default_address(&self) -> Result<(DiversifierIndex, PaymentAddress<Bls12>), ()> {
+        ExtendedFullViewingKey::from(self).default_address()
+    }
 }
 
 impl<'a> From<&'a ExtendedSpendingKey> for ExtendedFullViewingKey {
@@ -447,6 +451,24 @@ impl ExtendedFullViewingKey {
             fvk: self.fvk.derive_child(i_l, &JUBJUB),
             dk: self.dk.derive_child(i_l),
         })
+    }
+
+    pub fn address(
+        &self,
+        j: DiversifierIndex,
+    ) -> Result<(DiversifierIndex, PaymentAddress<Bls12>), ()> {
+        let (j, d_j) = match self.dk.diversifier(j) {
+            Ok(ret) => ret,
+            Err(()) => return Err(()),
+        };
+        match self.fvk.vk.into_payment_address(d_j, &JUBJUB) {
+            Some(addr) => Ok((j, addr)),
+            None => Err(()),
+        }
+    }
+
+    pub fn default_address(&self) -> Result<(DiversifierIndex, PaymentAddress<Bls12>), ()> {
+        self.address(DiversifierIndex::new())
     }
 }
 
@@ -542,5 +564,18 @@ mod tests {
         let (j, d_j) = dk.diversifier(j_3).unwrap();
         assert_eq!(j, j_3);
         assert_eq!(d_j.0, d_3);
+    }
+
+    #[test]
+    fn default_address() {
+        let seed = [0; 32];
+        let xsk_m = ExtendedSpendingKey::master(&seed);
+        let (j_m, addr_m) = xsk_m.default_address().unwrap();
+        assert_eq!(j_m.0, [0; 11]);
+        assert_eq!(
+            addr_m.diversifier.0,
+            // Computed using this Rust implementation
+            [59, 246, 250, 31, 131, 191, 69, 99, 200, 167, 19]
+        );
     }
 }
