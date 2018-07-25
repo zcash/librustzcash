@@ -112,6 +112,8 @@ pub trait JubjubParams<E: JubjubEngine>: Sized {
     fn scale(&self) -> &E::Fr;
     /// Returns the generators (for each segment) used in all Pedersen commitments.
     fn pedersen_hash_generators(&self) -> &[edwards::Point<E, PrimeOrder>];
+    /// Returns the exp table for Pedersen hashes.
+    fn pedersen_hash_exp_table(&self) -> &[Vec<Vec<edwards::Point<E, PrimeOrder>>>];
     /// Returns the maximum number of chunks per segment of the Pedersen hash.
     fn pedersen_hash_chunks_per_generator(&self) -> usize;
     /// Returns the pre-computed window tables [-4, 3, 2, 1, 1, 2, 3, 4] of different
@@ -126,6 +128,9 @@ pub trait JubjubParams<E: JubjubEngine>: Sized {
     /// Returns a window table [0, 1, ..., 8] for different magnitudes of some
     /// fixed generator.
     fn circuit_generators(&self, FixedGenerators) -> &[Vec<(E::Fr, E::Fr)>];
+    /// Returns the window size for exponentiation of Pedersen hash generators
+    /// outside the circuit
+    fn pedersen_hash_exp_window_size() -> u32;
 }
 
 impl JubjubEngine for Bls12 {
@@ -140,6 +145,7 @@ pub struct JubjubBls12 {
     scale: Fr,
 
     pedersen_hash_generators: Vec<edwards::Point<Bls12, PrimeOrder>>,
+    pedersen_hash_exp: Vec<Vec<Vec<edwards::Point<Bls12, PrimeOrder>>>>,
     pedersen_circuit_generators: Vec<Vec<Vec<(Fr, Fr)>>>,
 
     fixed_base_generators: Vec<edwards::Point<Bls12, PrimeOrder>>,
@@ -153,6 +159,9 @@ impl JubjubParams<Bls12> for JubjubBls12 {
     fn scale(&self) -> &Fr { &self.scale }
     fn pedersen_hash_generators(&self) -> &[edwards::Point<Bls12, PrimeOrder>] {
         &self.pedersen_hash_generators
+    }
+    fn pedersen_hash_exp_table(&self) -> &[Vec<Vec<edwards::Point<Bls12, PrimeOrder>>>] {
+        &self.pedersen_hash_exp
     }
     fn pedersen_hash_chunks_per_generator(&self) -> usize {
         63
@@ -170,6 +179,9 @@ impl JubjubParams<Bls12> for JubjubBls12 {
     fn circuit_generators(&self, base: FixedGenerators) -> &[Vec<(Fr, Fr)>]
     {
         &self.fixed_base_circuit_generators[base as usize][..]
+    }
+    fn pedersen_hash_exp_window_size() -> u32 {
+        8
     }
 }
 
@@ -191,6 +203,7 @@ impl JubjubBls12 {
 
             // We'll initialize these below
             pedersen_hash_generators: vec![],
+            pedersen_hash_exp: vec![],
             pedersen_circuit_generators: vec![],
             fixed_base_generators: vec![],
             fixed_base_circuit_generators: vec![],
@@ -256,6 +269,42 @@ impl JubjubBls12 {
             }
 
             tmp_params.pedersen_hash_generators = pedersen_hash_generators;
+        }
+
+        // Create the exp table for the Pedersen hash generators
+        {
+            let mut pedersen_hash_exp = vec![];
+
+            for g in &tmp_params.pedersen_hash_generators {
+                let mut g = g.clone();
+
+                let window = JubjubBls12::pedersen_hash_exp_window_size();
+
+                let mut tables = vec![];
+
+                let mut num_bits = 0;
+                while num_bits <= fs::Fs::NUM_BITS {
+                    let mut table = Vec::with_capacity(1 << window);
+
+                    let mut base = edwards::Point::zero();
+
+                    for _ in 0..(1 << window) {
+                        table.push(base.clone());
+                        base = base.add(&g, &tmp_params);
+                    }
+
+                    tables.push(table);
+                    num_bits += window;
+
+                    for _ in 0..window {
+                        g = g.double(&tmp_params);
+                    }
+                }
+
+                pedersen_hash_exp.push(tables);
+            }
+
+            tmp_params.pedersen_hash_exp = pedersen_hash_exp;
         }
 
         // Create the bases for other parts of the protocol

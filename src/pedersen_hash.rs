@@ -1,6 +1,7 @@
 use jubjub::*;
 use pairing::*;
 
+#[derive(Copy, Clone)]
 pub enum Personalization {
     NoteCommitment,
     MerkleTree(usize)
@@ -31,7 +32,7 @@ pub fn pedersen_hash<E, I>(
     let mut bits = personalization.get_bits().into_iter().chain(bits.into_iter());
 
     let mut result = edwards::Point::zero();
-    let mut generators = params.pedersen_hash_generators().iter();
+    let mut generators = params.pedersen_hash_exp_table().iter();
 
     loop {
         let mut acc = E::Fs::zero();
@@ -78,8 +79,23 @@ pub fn pedersen_hash<E, I>(
             break;
         }
 
-        let mut tmp = generators.next().expect("we don't have enough generators").clone();
-        tmp = tmp.mul(acc, params);
+        let mut table: &[Vec<edwards::Point<E, _>>] = &generators.next().expect("we don't have enough generators");
+        let window = JubjubBls12::pedersen_hash_exp_window_size();
+        let window_mask = (1 << window) - 1;
+
+        let mut acc = acc.into_repr();
+        
+        let mut tmp = edwards::Point::zero();
+
+        while !acc.is_zero() {
+            let i = (acc.as_ref()[0] & window_mask) as usize;
+
+            tmp = tmp.add(&table[0][i], params);
+
+            acc.shr(window);
+            table = &table[1..];
+        }
+
         result = result.add(&tmp, params);
     }
 
