@@ -355,12 +355,72 @@ impl<E: JubjubEngine, Subgroup> Point<E, Subgroup> {
         p
     }
 
-    pub fn double(&self, params: &E::Params) -> Self {
-        // Point addition is unified and complete.
-        // There are dedicated formulae, but we do
-        // not implement these now.
-        
-        self.add(self, params)
+    pub fn double(&self, _: &E::Params) -> Self {
+        // See "Twisted Edwards Curves Revisited"
+        //     Huseyin Hisil, Kenneth Koon-Ho Wong, Gary Carter, and Ed Dawson
+        //     Section 3.3
+        //     http://hyperelliptic.org/EFD/g1p/auto-twisted-extended.html#doubling-dbl-2008-hwcd
+
+        // A = X1^2
+        let mut a = self.x;
+        a.square();
+
+        // B = Y1^2
+        let mut b = self.y;
+        b.square();
+
+        // C = 2*Z1^2
+        let mut c = self.z;
+        c.square();
+        c.double();
+
+        // D = a*A
+        //   = -A
+        let mut d = a;
+        d.negate();
+
+        // E = (X1+Y1)^2 - A - B
+        let mut e = self.x;
+        e.add_assign(&self.y);
+        e.square();
+        e.add_assign(&d); // -A = D
+        e.sub_assign(&b);
+
+        // G = D+B
+        let mut g = d;
+        g.add_assign(&b);
+
+        // F = G-C
+        let mut f = g;
+        f.sub_assign(&c);
+
+        // H = D-B
+        let mut h = d;
+        h.sub_assign(&b);
+
+        // X3 = E*F
+        let mut x3 = e;
+        x3.mul_assign(&f);
+
+        // Y3 = G*H
+        let mut y3 = g;
+        y3.mul_assign(&h);
+
+        // T3 = E*H
+        let mut t3 = e;
+        t3.mul_assign(&h);
+
+        // Z3 = F*G
+        let mut z3 = f;
+        z3.mul_assign(&g);
+
+        Point {
+            x: x3,
+            y: y3,
+            t: t3,
+            z: z3,
+            _marker: PhantomData
+        }
     }
 
     pub fn add(&self, other: &Self, params: &E::Params) -> Self
