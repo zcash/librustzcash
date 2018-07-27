@@ -155,9 +155,38 @@ mod tests {
     use pairing::bls12_381::Bls12;
     use rand::thread_rng;
 
-    use jubjub::JubjubBls12;
+    use jubjub::{JubjubBls12, fs::Fs, edwards};
 
     use super::*;
+
+    #[test]
+    fn cofactor_check() {
+        let rng = &mut thread_rng();
+        let params = &JubjubBls12::new();
+        let inf = edwards::Point::zero();
+        let p_g = FixedGenerators::SpendingKeyGenerator;
+
+        let p8 = loop {
+            let r = edwards::Point::<Bls12, _>::rand(rng, params).mul(Fs::char(), params);
+
+            let r2 = r.double(params);
+            let r4 = r2.double(params);
+            let r8 = r4.double(params);
+
+            if r2 != inf && r4 != inf && r8 == inf {
+                break r;
+            }
+        };
+
+        let sk = PrivateKey::<Bls12>(rng.gen());
+        let vk = PublicKey::from_private(&sk, p_g, params);
+        let msg = b"Foo bar";
+        let sig = sk.sign(msg, rng, p_g, params);
+        assert!(vk.verify(msg, &sig, p_g, params));
+
+        let vktorsion = PublicKey(vk.0.add(&p8, params));
+        assert!(vktorsion.verify(msg, &sig, p_g, params));
+    }
 
     #[test]
     fn round_trip_serialization() {
