@@ -97,6 +97,7 @@ impl<E: JubjubEngine> Point<E, Unknown> {
     }
 
     /// This guarantees the point is in the prime order subgroup
+    #[must_use]
     pub fn mul_by_cofactor(&self, params: &E::Params) -> Point<E, PrimeOrder>
     {
         let tmp = self.double(params)
@@ -216,6 +217,7 @@ impl<E: JubjubEngine, Subgroup> Point<E, Subgroup> {
         }
     }
 
+    #[must_use]
     pub fn negate(&self) -> Self {
         let mut p = self.clone();
 
@@ -224,6 +226,7 @@ impl<E: JubjubEngine, Subgroup> Point<E, Subgroup> {
         p
     }
 
+    #[must_use]
     pub fn double(&self, params: &E::Params) -> Self {
         if self.infinity {
             return Point::zero();
@@ -280,6 +283,7 @@ impl<E: JubjubEngine, Subgroup> Point<E, Subgroup> {
         }
     }
 
+    #[must_use]
     pub fn add(&self, other: &Self, params: &E::Params) -> Self
     {
         // This is a standard affine point addition formula
@@ -330,6 +334,7 @@ impl<E: JubjubEngine, Subgroup> Point<E, Subgroup> {
         }
     }
 
+    #[must_use]
     pub fn mul<S: Into<<E::Fs as PrimeField>::Repr>>(
         &self,
         scalar: S,
