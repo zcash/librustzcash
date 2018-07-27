@@ -145,8 +145,11 @@ impl<E: JubjubEngine> PublicKey<E> {
             Ok(s) => s,
             Err(_) => return false,
         };
-        // S . P_G = R + c . vk
-        self.0.mul(c, params).add(&r, params) == params.generator(p_g).mul(s, params).into()
+        // 0 = 8(-S . P_G + R + c . vk)
+        self.0.mul(c, params).add(&r, params).add(
+            &params.generator(p_g).mul(s, params).negate().into(),
+            params
+        ).mul_by_cofactor(params).eq(&Point::zero())
     }
 }
 
