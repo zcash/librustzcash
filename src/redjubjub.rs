@@ -2,7 +2,7 @@
 //! See section 5.4.6 of the Sapling protocol specification.
 
 use pairing::{Field, PrimeField, PrimeFieldRepr};
-use rand::Rng;
+use rand::{Rng, Rand};
 use std::io::{self, Read, Write};
 
 use jubjub::{FixedGenerators, JubjubEngine, JubjubParams, Unknown, edwards::Point};
@@ -29,6 +29,7 @@ fn h_star<E: JubjubEngine>(a: &[u8], b: &[u8]) -> E::Fs {
     hash_to_scalar::<E>(b"Zcash_RedJubjubH", a, b)
 }
 
+#[derive(Copy, Clone)]
 pub struct Signature {
     rbar: [u8; 32],
     sbar: [u8; 32],
@@ -153,6 +154,52 @@ impl<E: JubjubEngine> PublicKey<E> {
     }
 }
 
+pub struct BatchEntry<'a, E: JubjubEngine> {
+    vk: PublicKey<E>,
+    msg: &'a [u8],
+    sig: Signature,
+}
+
+pub fn batch_verify<'a, E: JubjubEngine, R: Rng>(
+    rng: &mut R,
+    batch: &[BatchEntry<'a, E>],
+    params: &E::Params,
+    p_g: FixedGenerators
+) -> bool
+{
+    let mut acc = Point::<E, Unknown>::zero();
+
+    for entry in batch {
+        let mut r = match Point::<E, Unknown>::read(&entry.sig.rbar[..], params) {
+            Ok(r) => r,
+            Err(_) => return false,
+        };
+        let mut s = match read_scalar::<E, &[u8]>(&entry.sig.sbar[..]) {
+            Ok(s) => s,
+            Err(_) => return false,
+        };
+
+        let mut c = h_star::<E>(&entry.sig.rbar[..], entry.msg);
+
+        let z = E::Fs::rand(rng);
+
+        s.mul_assign(&z);
+        s.negate();
+
+        r = r.mul(z, params);
+
+        c.mul_assign(&z);
+
+        acc = acc.add(&r, params);
+        acc = acc.add(&entry.vk.0.mul(c, params), params);
+        acc = acc.add(&params.generator(p_g).mul(s, params).into(), params);
+    }
+
+    acc = acc.mul_by_cofactor(params).into();
+
+    acc.eq(&Point::zero())
+}
+
 #[cfg(test)]
 mod tests {
     use pairing::bls12_381::Bls12;
@@ -161,6 +208,36 @@ mod tests {
     use jubjub::{JubjubBls12, fs::Fs, edwards};
 
     use super::*;
+
+    #[test]
+    fn test_batch_verify() {
+        let rng = &mut thread_rng();
+        let params = &JubjubBls12::new();
+        let p_g = FixedGenerators::SpendingKeyGenerator;
+
+        let sk1 = PrivateKey::<Bls12>(rng.gen());
+        let vk1 = PublicKey::from_private(&sk1, p_g, params);
+        let msg1 = b"Foo bar";
+        let sig1 = sk1.sign(msg1, rng, p_g, params);
+        assert!(vk1.verify(msg1, &sig1, p_g, params));
+
+        let sk2 = PrivateKey::<Bls12>(rng.gen());
+        let vk2 = PublicKey::from_private(&sk2, p_g, params);
+        let msg2 = b"Foo bar";
+        let sig2 = sk2.sign(msg2, rng, p_g, params);
+        assert!(vk2.verify(msg2, &sig2, p_g, params));
+
+        let mut batch = vec![
+            BatchEntry { vk: vk1, msg: msg1, sig: sig1 },
+            BatchEntry { vk: vk2, msg: msg2, sig: sig2 }
+        ];
+
+        assert!(batch_verify(rng, &batch, params, p_g));
+
+        batch[0].sig = sig2;
+
+        assert!(!batch_verify(rng, &batch, params, p_g));
+    }
 
     #[test]
     fn cofactor_check() {
