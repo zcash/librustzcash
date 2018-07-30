@@ -146,7 +146,7 @@ impl<E: JubjubEngine> PublicKey<E> {
             Ok(s) => s,
             Err(_) => return false,
         };
-        // 0 = 8(-S . P_G + R + c . vk)
+        // 0 = h_G(-S . P_G + R + c . vk)
         self.0.mul(c, params).add(&r, params).add(
             &params.generator(p_g).mul(s, params).negate().into(),
             params
@@ -160,11 +160,13 @@ pub struct BatchEntry<'a, E: JubjubEngine> {
     sig: Signature,
 }
 
+// TODO: #82: This is a naive implementation currently,
+// and doesn't use multiexp.
 pub fn batch_verify<'a, E: JubjubEngine, R: Rng>(
     rng: &mut R,
     batch: &[BatchEntry<'a, E>],
+    p_g: FixedGenerators,
     params: &E::Params,
-    p_g: FixedGenerators
 ) -> bool
 {
     let mut acc = Point::<E, Unknown>::zero();
@@ -232,20 +234,21 @@ mod tests {
             BatchEntry { vk: vk2, msg: msg2, sig: sig2 }
         ];
 
-        assert!(batch_verify(rng, &batch, params, p_g));
+        assert!(batch_verify(rng, &batch, p_g, params));
 
         batch[0].sig = sig2;
 
-        assert!(!batch_verify(rng, &batch, params, p_g));
+        assert!(!batch_verify(rng, &batch, p_g, params));
     }
 
     #[test]
     fn cofactor_check() {
         let rng = &mut thread_rng();
         let params = &JubjubBls12::new();
-        let inf = edwards::Point::zero();
+        let zero = edwards::Point::zero();
         let p_g = FixedGenerators::SpendingKeyGenerator;
 
+        // Get a point of order 8
         let p8 = loop {
             let r = edwards::Point::<Bls12, _>::rand(rng, params).mul(Fs::char(), params);
 
@@ -253,13 +256,15 @@ mod tests {
             let r4 = r2.double(params);
             let r8 = r4.double(params);
 
-            if r2 != inf && r4 != inf && r8 == inf {
+            if r2 != zero && r4 != zero && r8 == zero {
                 break r;
             }
         };
 
         let sk = PrivateKey::<Bls12>(rng.gen());
         let vk = PublicKey::from_private(&sk, p_g, params);
+
+        // TODO: This test will need to change when #77 is fixed
         let msg = b"Foo bar";
         let sig = sk.sign(msg, rng, p_g, params);
         assert!(vk.verify(msg, &sig, p_g, params));
