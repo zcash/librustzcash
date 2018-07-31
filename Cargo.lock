@@ -121,7 +121,7 @@ dependencies = [
  "libc 0.2.40 (registry+https://github.com/rust-lang/crates.io-index)",
  "pairing 0.14.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "rand 0.4.2 (registry+https://github.com/rust-lang/crates.io-index)",
- "sapling-crypto 0.0.1 (git+https://github.com/zcash-hackworks/sapling-crypto?rev=c2862a43829632d64f0654e8a9cde9680ba48076)",
+ "sapling-crypto 0.0.1 (git+https://github.com/zcash-hackworks/sapling-crypto?rev=21084bde2019c04bd34208e63c3560fe2c02fb0e)",
 ]
 
 [[package]]
@@ -159,7 +159,7 @@ dependencies = [
 [[package]]
 name = "sapling-crypto"
 version = "0.0.1"
-source = "git+https://github.com/zcash-hackworks/sapling-crypto?rev=c2862a43829632d64f0654e8a9cde9680ba48076#c2862a43829632d64f0654e8a9cde9680ba48076"
+source = "git+https://github.com/zcash-hackworks/sapling-crypto?rev=21084bde2019c04bd34208e63c3560fe2c02fb0e#21084bde2019c04bd34208e63c3560fe2c02fb0e"
 dependencies = [
  "bellman 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "blake2-rfc 0.2.18 (git+https://github.com/gtank/blake2-rfc?rev=7a5b5fc99ae483a0043db7547fb79a6fa44b88a9)",
@@ -214,7 +214,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 "checksum num_cpus 1.8.0 (registry+https://github.com/rust-lang/crates.io-index)" = "c51a3322e4bca9d212ad9a158a02abc6934d005490c054a2778df73a70aa0a30"
 "checksum pairing 0.14.2 (registry+https://github.com/rust-lang/crates.io-index)" = "ceda21136251c6d5a422d3d798d8ac22515a6e8d3521bb60c59a8349d36d0d57"
 "checksum rand 0.4.2 (registry+https://github.com/rust-lang/crates.io-index)" = "eba5f8cb59cc50ed56be8880a5c7b496bfd9bd26394e176bc67884094145c2c5"
-"checksum sapling-crypto 0.0.1 (git+https://github.com/zcash-hackworks/sapling-crypto?rev=c2862a43829632d64f0654e8a9cde9680ba48076)" = "<none>"
+"checksum sapling-crypto 0.0.1 (git+https://github.com/zcash-hackworks/sapling-crypto?rev=21084bde2019c04bd34208e63c3560fe2c02fb0e)" = "<none>"
 "checksum typenum 1.10.0 (registry+https://github.com/rust-lang/crates.io-index)" = "612d636f949607bdf9b123b4a6f6d966dedf3ff669f7f045890d3a4a73948169"
 "checksum winapi 0.3.4 (registry+https://github.com/rust-lang/crates.io-index)" = "04e3bd221fcbe8a271359c04f21a76db7d0c6028862d1bb5512d85e1e2eb5bb3"
 "checksum winapi-i686-pc-windows-gnu 0.4.0 (registry+https://github.com/rust-lang/crates.io-index)" = "ac3b87c63620426dd9b991e5ce0329eff545bccbbb34f3be09ff6fb6ab51b7b6"
