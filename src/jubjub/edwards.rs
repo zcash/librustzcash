@@ -164,6 +164,7 @@ impl<E: JubjubEngine> Point<E, Unknown> {
     }
 
     /// This guarantees the point is in the prime order subgroup
+    #[must_use]
     pub fn mul_by_cofactor(&self, params: &E::Params) -> Point<E, PrimeOrder>
     {
         let tmp = self.double(params)
@@ -346,6 +347,7 @@ impl<E: JubjubEngine, Subgroup> Point<E, Subgroup> {
         (x, y)
     }
 
+    #[must_use]
     pub fn negate(&self) -> Self {
         let mut p = self.clone();
 
@@ -355,6 +357,7 @@ impl<E: JubjubEngine, Subgroup> Point<E, Subgroup> {
         p
     }
 
+    #[must_use]
     pub fn double(&self, _: &E::Params) -> Self {
         // See "Twisted Edwards Curves Revisited"
         //     Huseyin Hisil, Kenneth Koon-Ho Wong, Gary Carter, and Ed Dawson
@@ -423,6 +426,7 @@ impl<E: JubjubEngine, Subgroup> Point<E, Subgroup> {
         }
     }
 
+    #[must_use]
     pub fn add(&self, other: &Self, params: &E::Params) -> Self
     {
         // See "Twisted Edwards Curves Revisited"
@@ -495,6 +499,7 @@ impl<E: JubjubEngine, Subgroup> Point<E, Subgroup> {
         }
     }
 
+    #[must_use]
     pub fn mul<S: Into<<E::Fs as PrimeField>::Repr>>(
         &self,
         scalar: S,
