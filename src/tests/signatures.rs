@@ -1,6 +1,7 @@
 use pairing::{bls12_381::Bls12, PrimeField, PrimeFieldRepr};
 use sapling_crypto::{
-    jubjub::{FixedGenerators, JubjubEngine}, redjubjub::{PrivateKey, PublicKey, Signature},
+    jubjub::{FixedGenerators, JubjubEngine},
+    redjubjub::{PrivateKey, PublicKey, Signature},
 };
 
 use super::JUBJUB;

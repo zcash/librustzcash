@@ -12,16 +12,20 @@ mod hashreader;
 extern crate lazy_static;
 
 use pairing::{
-    bls12_381::{Bls12, Fr, FrRepr}, BitIterator, Field, PrimeField, PrimeFieldRepr,
+    bls12_381::{Bls12, Fr, FrRepr},
+    BitIterator, Field, PrimeField, PrimeFieldRepr,
 };
 
 use sapling_crypto::{
-    circuit::multipack, constants::CRH_IVK_PERSONALIZATION,
+    circuit::multipack,
+    constants::CRH_IVK_PERSONALIZATION,
     jubjub::{
-        edwards, fs::{Fs, FsRepr}, FixedGenerators, JubjubBls12, JubjubEngine, JubjubParams,
-        PrimeOrder, ToUniform, Unknown,
+        edwards,
+        fs::{Fs, FsRepr},
+        FixedGenerators, JubjubBls12, JubjubEngine, JubjubParams, PrimeOrder, ToUniform, Unknown,
     },
-    pedersen_hash::{pedersen_hash, Personalization}, redjubjub::{self, Signature},
+    pedersen_hash::{pedersen_hash, Personalization},
+    redjubjub::{self, Signature},
 };
 
 use sapling_crypto::circuit::sprout::{self, TREE_DEPTH as SPROUT_TREE_DEPTH};
