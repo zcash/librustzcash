@@ -105,3 +105,46 @@ where
 
     result
 }
+
+#[cfg(test)]
+mod test {
+
+    use pairing::bls12_381::{Bls12, Fr};
+    use super::*;
+
+    #[test]
+    fn test_pedersen_hash_points() {
+
+        let params = &JubjubBls12::new();
+        let bytes = b"Salut monde!";
+        let num_bits = bytes.len() * 8;
+        let bits: Vec<bool> = (0..num_bits).map(
+            |i| ((bytes[i / 8] >> (7 - (i % 8))) & 1) == 1
+        ).collect();
+
+        let xy = pedersen_hash::<Bls12, _>(
+            Personalization::NoteCommitment,
+            bits.clone().into_iter(),
+            params,
+        ).to_xy();
+
+        println!("bytes = {:?}", bytes);
+        let bits_int: Vec<u8> = bits.iter().map(|&i| i as u8).collect();
+        println!("bits = {:?}", bits_int);
+        println!("x = {}", xy.0);
+        println!("y = {}", xy.1);
+
+        // For bits=[]
+        //assert_eq!(xy.0.to_string(), "Fr(0x06b1187c11ca4fb4383b2e0d0dbbde3ad3617338b5029187ec65a5eaed5e4d0b)");
+        //assert_eq!(xy.1.to_string(), "Fr(0x3ce70f536652f0dea496393a1e55c4e08b9d55508e16d11e5db40d4810cbc982)");
+
+        // For bits=[0]
+        // assert_eq!(xy.0.to_string(), "Fr(0x2fc3bc454c337f71d4f04f86304262fcbfc9ecd808716b92fc42cbe6827f7f1a)");
+        // assert_eq!(xy.1.to_string(), "Fr(0x46d0d25bf1a654eedc6a9b1e5af398925113959feac31b7a2c036ff9b9ec0638)");
+
+        // For bits = "Salut monde!" in ASCII
+        assert_eq!(xy.0.to_string(), "Fr(0x676f78fa89da7c64502f790a99dfe177756867006809a6f174dcb427b345cd7c)");
+        assert_eq!(xy.1.to_string(), "Fr(0x1a6994a999a0abf83afc6ec5fe0ee8c8336a171653218cbfdf269689d5cfd3aa)");
+
+    }
+}

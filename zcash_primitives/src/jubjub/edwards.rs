@@ -306,6 +306,7 @@ impl<E: JubjubEngine, Subgroup> Point<E, Subgroup> {
         }
     }
 
+    /// Convert to affine coordinates
     pub fn to_xy(&self) -> (E::Fr, E::Fr) {
         let zinv = self.z.inverse().unwrap();
 
