@@ -58,14 +58,14 @@ impl OutgoingViewingKey {
 
 /// A Sapling expanded spending key
 #[derive(Clone)]
-struct ExpandedSpendingKey<E: JubjubEngine> {
+pub struct ExpandedSpendingKey<E: JubjubEngine> {
     ask: E::Fs,
     nsk: E::Fs,
     ovk: OutgoingViewingKey,
 }
 
 /// A Sapling full viewing key
-struct FullViewingKey<E: JubjubEngine> {
+pub struct FullViewingKey<E: JubjubEngine> {
     vk: ViewingKey<E>,
     ovk: OutgoingViewingKey,
 }
@@ -110,17 +110,18 @@ impl<E: JubjubEngine> ExpandedSpendingKey<E> {
         })
     }
 
+    pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
+        self.ask.into_repr().write_le(&mut writer)?;
+        self.nsk.into_repr().write_le(&mut writer)?;
+        writer.write_all(&self.ovk.0)?;
+
+        Ok(())
+    }
+
     fn to_bytes(&self) -> [u8; 96] {
         let mut result = [0u8; 96];
-        self.ask
-            .into_repr()
-            .write_le(&mut result[..32])
-            .expect("length is 32 bytes");
-        self.nsk
-            .into_repr()
-            .write_le(&mut result[32..64])
-            .expect("length is 32 bytes");
-        (&mut result[64..]).copy_from_slice(&self.ovk.0);
+        self.write(&mut result[..])
+            .expect("should be able to serialize an ExpandedSpendingKey");
         result
     }
 }
@@ -190,17 +191,18 @@ impl<E: JubjubEngine> FullViewingKey<E> {
         })
     }
 
+    pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
+        self.vk.ak.write(&mut writer)?;
+        self.vk.nk.write(&mut writer)?;
+        writer.write_all(&self.ovk.0)?;
+
+        Ok(())
+    }
+
     fn to_bytes(&self) -> [u8; 96] {
         let mut result = [0u8; 96];
-        self.vk
-            .ak
-            .write(&mut result[..32])
-            .expect("length is 32 bytes");
-        self.vk
-            .nk
-            .write(&mut result[32..64])
-            .expect("length is 32 bytes");
-        (&mut result[64..]).copy_from_slice(&self.ovk.0);
+        self.write(&mut result[..])
+            .expect("should be able to serialize a FullViewingKey");
         result
     }
 }
@@ -348,7 +350,7 @@ pub struct ExtendedSpendingKey {
     parent_fvk_tag: FVKTag,
     child_index: ChildIndex,
     chain_code: ChainCode,
-    expsk: ExpandedSpendingKey<Bls12>,
+    pub expsk: ExpandedSpendingKey<Bls12>,
     dk: DiversifierKey,
 }
 
@@ -358,7 +360,7 @@ pub struct ExtendedFullViewingKey {
     parent_fvk_tag: FVKTag,
     child_index: ChildIndex,
     chain_code: ChainCode,
-    fvk: FullViewingKey<Bls12>,
+    pub fvk: FullViewingKey<Bls12>,
     dk: DiversifierKey,
 }
 
