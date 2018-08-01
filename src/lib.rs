@@ -9,14 +9,16 @@ extern crate sapling_crypto;
 
 use aes::Aes256;
 use blake2_rfc::blake2b::{Blake2b, Blake2bResult};
-use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
+use byteorder::{ByteOrder, LittleEndian, ReadBytesExt, WriteBytesExt};
 use fpe::ff1::{BinaryNumeralString, FF1};
 use pairing::{bls12_381::Bls12, Field, PrimeField, PrimeFieldRepr};
 use sapling_crypto::{
-    jubjub::{FixedGenerators, JubjubBls12, JubjubEngine, JubjubParams, ToUniform},
+    jubjub::{
+        edwards, FixedGenerators, JubjubBls12, JubjubEngine, JubjubParams, ToUniform, Unknown,
+    },
     primitives::{Diversifier, PaymentAddress, ViewingKey},
 };
-use std::io::{self, Write};
+use std::io::{self, Read, Write};
 
 lazy_static! {
     static ref JUBJUB: JubjubBls12 = { JubjubBls12::new() };
@@ -87,6 +89,27 @@ impl<E: JubjubEngine> ExpandedSpendingKey<E> {
         ExpandedSpendingKey { ask, nsk, ovk }
     }
 
+    pub fn read<R: Read>(mut reader: R) -> io::Result<Self> {
+        let mut ask_repr = <E::Fs as PrimeField>::Repr::default();
+        ask_repr.read_le(&mut reader)?;
+        let ask =
+            E::Fs::from_repr(ask_repr).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+
+        let mut nsk_repr = <E::Fs as PrimeField>::Repr::default();
+        nsk_repr.read_le(&mut reader)?;
+        let nsk =
+            E::Fs::from_repr(nsk_repr).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+
+        let mut ovk = [0; 32];
+        reader.read_exact(&mut ovk)?;
+
+        Ok(ExpandedSpendingKey {
+            ask,
+            nsk,
+            ovk: OutgoingViewingKey(ovk),
+        })
+    }
+
     fn to_bytes(&self) -> [u8; 96] {
         let mut result = [0u8; 96];
         self.ask
@@ -133,6 +156,38 @@ impl<E: JubjubEngine> FullViewingKey<E> {
             vk: ViewingKey { ak, nk },
             ovk: self.ovk.derive_child(i_l),
         }
+    }
+
+    pub fn read<R: Read>(mut reader: R, params: &E::Params) -> io::Result<Self> {
+        let ak = edwards::Point::<E, Unknown>::read(&mut reader, params)?;
+        let ak = match ak.as_prime_order(params) {
+            Some(p) => p,
+            None => {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "ak not of prime order",
+                ))
+            }
+        };
+
+        let nk = edwards::Point::<E, Unknown>::read(&mut reader, params)?;
+        let nk = match nk.as_prime_order(params) {
+            Some(p) => p,
+            None => {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "nk not of prime order",
+                ))
+            }
+        };
+
+        let mut ovk = [0; 32];
+        reader.read_exact(&mut ovk)?;
+
+        Ok(FullViewingKey {
+            vk: ViewingKey { ak, nk },
+            ovk: OutgoingViewingKey(ovk),
+        })
     }
 
     fn to_bytes(&self) -> [u8; 96] {
@@ -373,6 +428,27 @@ impl ExtendedSpendingKey {
         }
     }
 
+    pub fn read<R: Read>(mut reader: R) -> io::Result<Self> {
+        let depth = reader.read_u8()?;
+        let mut tag = [0; 4];
+        reader.read_exact(&mut tag)?;
+        let i = reader.read_u32::<LittleEndian>()?;
+        let mut c = [0; 32];
+        reader.read_exact(&mut c)?;
+        let xsk = ExpandedSpendingKey::read(&mut reader)?;
+        let mut dk = [0; 32];
+        reader.read_exact(&mut dk)?;
+
+        Ok(ExtendedSpendingKey {
+            depth,
+            parent_fvk_tag: FVKTag(tag),
+            child_index: ChildIndex::from_index(i),
+            chain_code: ChainCode(c),
+            xsk,
+            dk: DiversifierKey(dk),
+        })
+    }
+
     pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
         writer.write_u8(self.depth)?;
         writer.write_all(&self.parent_fvk_tag.0)?;
@@ -446,6 +522,27 @@ impl<'a> From<&'a ExtendedSpendingKey> for ExtendedFullViewingKey {
 }
 
 impl ExtendedFullViewingKey {
+    pub fn read<R: Read>(mut reader: R) -> io::Result<Self> {
+        let depth = reader.read_u8()?;
+        let mut tag = [0; 4];
+        reader.read_exact(&mut tag)?;
+        let i = reader.read_u32::<LittleEndian>()?;
+        let mut c = [0; 32];
+        reader.read_exact(&mut c)?;
+        let fvk = FullViewingKey::read(&mut reader, &*JUBJUB)?;
+        let mut dk = [0; 32];
+        reader.read_exact(&mut dk)?;
+
+        Ok(ExtendedFullViewingKey {
+            depth,
+            parent_fvk_tag: FVKTag(tag),
+            child_index: ChildIndex::from_index(i),
+            chain_code: ChainCode(c),
+            fvk,
+            dk: DiversifierKey(dk),
+        })
+    }
+
     pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
         writer.write_u8(self.depth)?;
         writer.write_all(&self.parent_fvk_tag.0)?;
@@ -607,6 +704,23 @@ mod tests {
             // Computed using this Rust implementation
             [59, 246, 250, 31, 131, 191, 69, 99, 200, 167, 19]
         );
+    }
+
+    #[test]
+    fn read_write() {
+        let seed = [0; 32];
+        let xsk = ExtendedSpendingKey::master(&seed);
+        let fvk = ExtendedFullViewingKey::from(&xsk);
+
+        let mut ser = vec![];
+        xsk.write(&mut ser).unwrap();
+        let xsk2 = ExtendedSpendingKey::read(&ser[..]).unwrap();
+        assert_eq!(xsk2, xsk);
+
+        let mut ser = vec![];
+        fvk.write(&mut ser).unwrap();
+        let fvk2 = ExtendedFullViewingKey::read(&ser[..]).unwrap();
+        assert_eq!(fvk2, fvk);
     }
 
     #[test]
