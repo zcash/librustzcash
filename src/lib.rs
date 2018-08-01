@@ -126,17 +126,17 @@ impl<E: JubjubEngine> ExpandedSpendingKey<E> {
 }
 
 impl<E: JubjubEngine> FullViewingKey<E> {
-    fn from_expanded_spending_key(xsk: &ExpandedSpendingKey<E>, params: &E::Params) -> Self {
+    fn from_expanded_spending_key(expsk: &ExpandedSpendingKey<E>, params: &E::Params) -> Self {
         FullViewingKey {
             vk: ViewingKey {
                 ak: params
                     .generator(FixedGenerators::SpendingKeyGenerator)
-                    .mul(xsk.ask, params),
+                    .mul(expsk.ask, params),
                 nk: params
                     .generator(FixedGenerators::ProofGenerationKey)
-                    .mul(xsk.nsk, params),
+                    .mul(expsk.nsk, params),
             },
-            ovk: xsk.ovk,
+            ovk: expsk.ovk,
         }
     }
 
@@ -348,7 +348,7 @@ pub struct ExtendedSpendingKey {
     parent_fvk_tag: FVKTag,
     child_index: ChildIndex,
     chain_code: ChainCode,
-    xsk: ExpandedSpendingKey<Bls12>,
+    expsk: ExpandedSpendingKey<Bls12>,
     dk: DiversifierKey,
 }
 
@@ -368,9 +368,9 @@ impl std::cmp::PartialEq for ExtendedSpendingKey {
             && self.parent_fvk_tag == rhs.parent_fvk_tag
             && self.child_index == rhs.child_index
             && self.chain_code == rhs.chain_code
-            && self.xsk.ask == rhs.xsk.ask
-            && self.xsk.nsk == rhs.xsk.nsk
-            && self.xsk.ovk == rhs.xsk.ovk
+            && self.expsk.ask == rhs.expsk.ask
+            && self.expsk.nsk == rhs.expsk.nsk
+            && self.expsk.ovk == rhs.expsk.ovk
             && self.dk == rhs.dk
     }
 }
@@ -423,7 +423,7 @@ impl ExtendedSpendingKey {
             parent_fvk_tag: FVKTag::master(),
             child_index: ChildIndex::master(),
             chain_code: ChainCode(c_m),
-            xsk: ExpandedSpendingKey::from_spending_key(sk_m),
+            expsk: ExpandedSpendingKey::from_spending_key(sk_m),
             dk: DiversifierKey::master(sk_m),
         }
     }
@@ -435,7 +435,7 @@ impl ExtendedSpendingKey {
         let i = reader.read_u32::<LittleEndian>()?;
         let mut c = [0; 32];
         reader.read_exact(&mut c)?;
-        let xsk = ExpandedSpendingKey::read(&mut reader)?;
+        let expsk = ExpandedSpendingKey::read(&mut reader)?;
         let mut dk = [0; 32];
         reader.read_exact(&mut dk)?;
 
@@ -444,7 +444,7 @@ impl ExtendedSpendingKey {
             parent_fvk_tag: FVKTag(tag),
             child_index: ChildIndex::from_index(i),
             chain_code: ChainCode(c),
-            xsk,
+            expsk,
             dk: DiversifierKey(dk),
         })
     }
@@ -454,7 +454,7 @@ impl ExtendedSpendingKey {
         writer.write_all(&self.parent_fvk_tag.0)?;
         writer.write_u32::<LittleEndian>(self.child_index.to_index())?;
         writer.write_all(&self.chain_code.0)?;
-        writer.write_all(&self.xsk.to_bytes())?;
+        writer.write_all(&self.expsk.to_bytes())?;
         writer.write_all(&self.dk.0)?;
 
         Ok(())
@@ -470,14 +470,14 @@ impl ExtendedSpendingKey {
     }
 
     pub fn derive_child(&self, i: ChildIndex) -> Self {
-        let fvk = FullViewingKey::from_expanded_spending_key(&self.xsk, &JUBJUB);
+        let fvk = FullViewingKey::from_expanded_spending_key(&self.expsk, &JUBJUB);
         let tmp = match i {
             ChildIndex::Hardened(i) => {
                 let mut le_i = [0; 4];
                 LittleEndian::write_u32(&mut le_i, i + (1 << 31));
                 prf_expand_vec(
                     &self.chain_code.0,
-                    &[&[0x11], &self.xsk.to_bytes(), &self.dk.0, &le_i],
+                    &[&[0x11], &self.expsk.to_bytes(), &self.dk.0, &le_i],
                 )
             }
             ChildIndex::NonHardened(i) => {
@@ -498,7 +498,7 @@ impl ExtendedSpendingKey {
             parent_fvk_tag: FVKFingerprint::from(&fvk).into(),
             child_index: i,
             chain_code: ChainCode(c_i),
-            xsk: self.xsk.derive_child(i_l),
+            expsk: self.expsk.derive_child(i_l),
             dk: self.dk.derive_child(i_l),
         }
     }
@@ -515,7 +515,7 @@ impl<'a> From<&'a ExtendedSpendingKey> for ExtendedFullViewingKey {
             parent_fvk_tag: xsk.parent_fvk_tag,
             child_index: xsk.child_index,
             chain_code: xsk.chain_code,
-            fvk: FullViewingKey::from_expanded_spending_key(&xsk.xsk, &JUBJUB),
+            fvk: FullViewingKey::from_expanded_spending_key(&xsk.expsk, &JUBJUB),
             dk: xsk.dk,
         }
     }
@@ -1163,12 +1163,12 @@ mod tests {
             let tv = &test_vectors[j];
 
             let mut buf = [0; 32];
-            xsk.xsk.ask.into_repr().write_le(&mut buf[..]).unwrap();
+            xsk.expsk.ask.into_repr().write_le(&mut buf[..]).unwrap();
             assert_eq!(buf, tv.ask.unwrap());
-            xsk.xsk.nsk.into_repr().write_le(&mut buf[..]).unwrap();
+            xsk.expsk.nsk.into_repr().write_le(&mut buf[..]).unwrap();
             assert_eq!(buf, tv.nsk.unwrap());
 
-            assert_eq!(xsk.xsk.ovk.0, tv.ovk);
+            assert_eq!(xsk.expsk.ovk.0, tv.ovk);
             assert_eq!(xsk.dk.0, tv.dk);
             assert_eq!(xsk.chain_code.0, tv.c);
 
