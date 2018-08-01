@@ -231,7 +231,7 @@ impl DiversifierIndex {
     pub fn increment(&mut self) -> Result<(), ()> {
         let mut k = 0;
         loop {
-            self.0[k] += 1;
+            self.0[k] = self.0[k].wrapping_add(1);
             if self.0[k] != 0 {
                 // No overflow
                 return Ok(());
