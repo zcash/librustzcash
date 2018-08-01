@@ -9,13 +9,14 @@ extern crate sapling_crypto;
 
 use aes::Aes256;
 use blake2_rfc::blake2b::{Blake2b, Blake2bResult};
-use byteorder::{ByteOrder, LittleEndian};
+use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
 use fpe::ff1::{BinaryNumeralString, FF1};
 use pairing::{bls12_381::Bls12, Field, PrimeField, PrimeFieldRepr};
 use sapling_crypto::{
     jubjub::{FixedGenerators, JubjubBls12, JubjubEngine, JubjubParams, ToUniform},
     primitives::{Diversifier, PaymentAddress, ViewingKey},
 };
+use std::io::{self, Write};
 
 lazy_static! {
     static ref JUBJUB: JubjubBls12 = { JubjubBls12::new() };
@@ -206,6 +207,13 @@ impl ChildIndex {
     fn master() -> Self {
         ChildIndex::from_index(0)
     }
+
+    fn to_index(&self) -> u32 {
+        match self {
+            &ChildIndex::Hardened(i) => i + (1 << 31),
+            &ChildIndex::NonHardened(i) => i,
+        }
+    }
 }
 
 /// A chain code
@@ -365,6 +373,17 @@ impl ExtendedSpendingKey {
         }
     }
 
+    pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
+        writer.write_u8(self.depth)?;
+        writer.write_all(&self.parent_fvk_tag.0)?;
+        writer.write_u32::<LittleEndian>(self.child_index.to_index())?;
+        writer.write_all(&self.chain_code.0)?;
+        writer.write_all(&self.xsk.to_bytes())?;
+        writer.write_all(&self.dk.0)?;
+
+        Ok(())
+    }
+
     /// Returns the child key corresponding to the path derived from the master key
     pub fn from_path(master: &ExtendedSpendingKey, path: &[ChildIndex]) -> Self {
         let mut xsk = master.clone();
@@ -427,6 +446,17 @@ impl<'a> From<&'a ExtendedSpendingKey> for ExtendedFullViewingKey {
 }
 
 impl ExtendedFullViewingKey {
+    pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
+        writer.write_u8(self.depth)?;
+        writer.write_all(&self.parent_fvk_tag.0)?;
+        writer.write_u32::<LittleEndian>(self.child_index.to_index())?;
+        writer.write_all(&self.chain_code.0)?;
+        writer.write_all(&self.fvk.to_bytes())?;
+        writer.write_all(&self.dk.0)?;
+
+        Ok(())
+    }
+
     pub fn derive_child(&self, i: ChildIndex) -> Result<Self, ()> {
         let tmp = match i {
             ChildIndex::Hardened(_) => return Err(()),
