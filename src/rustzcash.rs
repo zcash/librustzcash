@@ -685,10 +685,14 @@ pub extern "system" fn librustzcash_sapling_check_output(
     // Deserialize the value commitment
     let cv = match edwards::Point::<Bls12, Unknown>::read(&(unsafe { &*cv })[..], &JUBJUB) {
         Ok(p) => p,
-        Err(_) => return false,
+        Err(_) => {
+            println!("couldn't deserialize cv");
+            return false
+        },
     };
 
     if is_small_order(&cv) {
+        println!("cv was small order");
         return false;
     }
 
@@ -706,16 +710,25 @@ pub extern "system" fn librustzcash_sapling_check_output(
     // of Fr.
     let cm = match Fr::from_repr(read_le(&(unsafe { &*cm })[..])) {
         Ok(a) => a,
-        Err(_) => return false,
+        Err(_) => {
+            println!("cm could not be deserialized");
+
+            return false
+        },
     };
 
     // Deserialize the ephemeral key
     let epk = match edwards::Point::<Bls12, Unknown>::read(&(unsafe { &*epk })[..], &JUBJUB) {
         Ok(p) => p,
-        Err(_) => return false,
+        Err(_) => {
+            println!("epk could not be deserialized");
+
+            return false
+        },
     };
 
     if is_small_order(&epk) {
+        println!("epk was small order");
         return false;
     }
 
@@ -736,7 +749,10 @@ pub extern "system" fn librustzcash_sapling_check_output(
     // Deserialize the proof
     let zkproof = match Proof::<Bls12>::read(&(unsafe { &*zkproof })[..]) {
         Ok(p) => p,
-        Err(_) => return false,
+        Err(_) => {
+            println!("proof could not be deserialized");
+            return false
+        },
     };
 
     // Verify the proof
@@ -749,7 +765,10 @@ pub extern "system" fn librustzcash_sapling_check_output(
         Ok(true) => true,
 
         // Any other case
-        _ => false,
+        _ => {
+            println!("proof could not be verified");
+            false
+        },
     }
 }
 
