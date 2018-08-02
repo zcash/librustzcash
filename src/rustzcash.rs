@@ -6,6 +6,12 @@ extern crate pairing;
 extern crate rand;
 extern crate sapling_crypto;
 
+const SPROUT_GROTH16_PARAMS_HASH: &'static str = "7a6723311162cb0c664c742d2fa42278195ade98ba3f21ef4fa02b82c83aed696e107e389ac7b3b0f33f417aeefe5be775d117910a473a422b4a1b97489fbdd6";
+const SAPLING_SPEND_PARAMS_HASH: &'static str = "35f6afd7d7514531aaa9fa529bdcddf116865f02abdd42164322bb1949227d82bdae295cad9c7b98d4bbbb00e045fa17aca79c90f53433a66bce4e82b6a1936d";
+const SAPLING_OUTPUT_PARAMS_HASH: &'static str = "f9d0b98ea51830c4974878f1b32bb68b2bf530e2e0ae09cd2a9b609d6fda37f1a1928e2d1ca91c31835c75dcc16057db53a807cc5cb37ebcfb753aa843a8ac21";
+
+mod hashreader;
+
 #[macro_use]
 extern crate lazy_static;
 
@@ -36,7 +42,7 @@ use blake2_rfc::blake2s::Blake2s;
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 
 use rand::{OsRng, Rand, Rng};
-use std::io::BufReader;
+use std::io::{self, BufReader};
 
 use libc::{c_char, c_uchar, int64_t, size_t, uint32_t, uint64_t};
 use std::ffi::CStr;
@@ -132,19 +138,48 @@ pub extern "system" fn librustzcash_init_zksnark_params(
         .to_string();
 
     // Load from each of the paths
-    let mut spend_fs = File::open(spend_path).expect("couldn't load Sapling spend parameters file");
-    let mut output_fs =
+    let spend_fs = File::open(spend_path).expect("couldn't load Sapling spend parameters file");
+    let output_fs =
         File::open(output_path).expect("couldn't load Sapling output parameters file");
-    let mut sprout_fs =
+    let sprout_fs =
         File::open(&sprout_path).expect("couldn't load Sprout groth16 parameters file");
+
+    let mut spend_fs = hashreader::HashReader::new(BufReader::with_capacity(1024 * 1024, spend_fs));
+    let mut output_fs = hashreader::HashReader::new(BufReader::with_capacity(1024 * 1024, output_fs));
+    let mut sprout_fs = hashreader::HashReader::new(BufReader::with_capacity(1024 * 1024, sprout_fs));
 
     // Deserialize params
     let spend_params = Parameters::<Bls12>::read(&mut spend_fs, false)
         .expect("couldn't deserialize Sapling spend parameters file");
     let output_params = Parameters::<Bls12>::read(&mut output_fs, false)
         .expect("couldn't deserialize Sapling spend parameters file");
+
+    // We only deserialize the verifying key for the Sprout parameters, which
+    // appears at the beginning of the parameter file. The rest is loaded
+    // during proving time.
     let sprout_vk = VerifyingKey::<Bls12>::read(&mut sprout_fs)
         .expect("couldn't deserialize Sprout Groth16 verifying key");
+
+    // There is extra stuff (the transcript) at the end of the parameter file which is
+    // used to verify the parameter validity, but we're not interested in that. We do
+    // want to read it, though, so that the BLAKE2b computed afterward is consistent
+    // with `b2sum` on the files.
+    let mut sink = io::sink();
+    io::copy(&mut spend_fs, &mut sink).expect("couldn't finish reading Sapling spend parameter file");
+    io::copy(&mut output_fs, &mut sink).expect("couldn't finish reading Sapling output parameter file");
+    io::copy(&mut sprout_fs, &mut sink).expect("couldn't finish reading Sprout groth16 parameter file");
+
+    if &*spend_fs.into_hash() != SAPLING_SPEND_PARAMS_HASH {
+        panic!("Sapling spend parameter file is not correct, please clean your `~/.zcash-params/` and re-run `fetch-params`.");
+    }
+
+    if &*output_fs.into_hash() != SAPLING_OUTPUT_PARAMS_HASH {
+        panic!("Sapling output parameter file is not correct, please clean your `~/.zcash-params/` and re-run `fetch-params`.");
+    }
+
+    if &*sprout_fs.into_hash() != SPROUT_GROTH16_PARAMS_HASH {
+        panic!("Sprout groth16 parameter file is not correct, please clean your `~/.zcash-params/` and re-run `fetch-params`.");
+    }
 
     // Prepare verifying keys
     let spend_vk = prepare_verifying_key(&spend_params.vk);
