@@ -6,10 +6,6 @@ extern crate pairing;
 extern crate rand;
 extern crate sapling_crypto;
 
-const SPROUT_GROTH16_PARAMS_HASH: &'static str = "7a6723311162cb0c664c742d2fa42278195ade98ba3f21ef4fa02b82c83aed696e107e389ac7b3b0f33f417aeefe5be775d117910a473a422b4a1b97489fbdd6";
-const SAPLING_SPEND_PARAMS_HASH: &'static str = "35f6afd7d7514531aaa9fa529bdcddf116865f02abdd42164322bb1949227d82bdae295cad9c7b98d4bbbb00e045fa17aca79c90f53433a66bce4e82b6a1936d";
-const SAPLING_OUTPUT_PARAMS_HASH: &'static str = "f9d0b98ea51830c4974878f1b32bb68b2bf530e2e0ae09cd2a9b609d6fda37f1a1928e2d1ca91c31835c75dcc16057db53a807cc5cb37ebcfb753aa843a8ac21";
-
 mod hashreader;
 
 #[macro_use]
@@ -116,11 +112,29 @@ fn fixed_scalar_mult(from: &[u8], p_g: FixedGenerators) -> edwards::Point<Bls12,
 #[no_mangle]
 pub extern "system" fn librustzcash_init_zksnark_params(
     spend_path: *const c_char,
+    spend_hash: *const c_char,
     output_path: *const c_char,
+    output_hash: *const c_char,
     sprout_path: *const c_char,
+    sprout_hash: *const c_char,
 ) {
     // Initialize jubjub parameters here
     lazy_static::initialize(&JUBJUB);
+
+    let spend_hash = unsafe { CStr::from_ptr(spend_hash) }
+        .to_str()
+        .expect("hash should be a valid string")
+        .to_string();
+
+    let output_hash = unsafe { CStr::from_ptr(output_hash) }
+        .to_str()
+        .expect("hash should be a valid string")
+        .to_string();
+
+    let sprout_hash = unsafe { CStr::from_ptr(sprout_hash) }
+        .to_str()
+        .expect("hash should be a valid string")
+        .to_string();
 
     // These should be valid CStr's, but the decoding may fail on Windows
     // so we may need to use OSStr or something.
@@ -172,15 +186,15 @@ pub extern "system" fn librustzcash_init_zksnark_params(
     io::copy(&mut sprout_fs, &mut sink)
         .expect("couldn't finish reading Sprout groth16 parameter file");
 
-    if &*spend_fs.into_hash() != SAPLING_SPEND_PARAMS_HASH {
+    if spend_fs.into_hash() != spend_hash {
         panic!("Sapling spend parameter file is not correct, please clean your `~/.zcash-params/` and re-run `fetch-params`.");
     }
 
-    if &*output_fs.into_hash() != SAPLING_OUTPUT_PARAMS_HASH {
+    if output_fs.into_hash() != output_hash {
         panic!("Sapling output parameter file is not correct, please clean your `~/.zcash-params/` and re-run `fetch-params`.");
     }
 
-    if &*sprout_fs.into_hash() != SPROUT_GROTH16_PARAMS_HASH {
+    if sprout_fs.into_hash() != sprout_hash {
         panic!("Sprout groth16 parameter file is not correct, please clean your `~/.zcash-params/` and re-run `fetch-params`.");
     }
 
