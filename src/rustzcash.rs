@@ -139,14 +139,14 @@ pub extern "system" fn librustzcash_init_zksnark_params(
 
     // Load from each of the paths
     let spend_fs = File::open(spend_path).expect("couldn't load Sapling spend parameters file");
-    let output_fs =
-        File::open(output_path).expect("couldn't load Sapling output parameters file");
-    let sprout_fs =
-        File::open(&sprout_path).expect("couldn't load Sprout groth16 parameters file");
+    let output_fs = File::open(output_path).expect("couldn't load Sapling output parameters file");
+    let sprout_fs = File::open(&sprout_path).expect("couldn't load Sprout groth16 parameters file");
 
     let mut spend_fs = hashreader::HashReader::new(BufReader::with_capacity(1024 * 1024, spend_fs));
-    let mut output_fs = hashreader::HashReader::new(BufReader::with_capacity(1024 * 1024, output_fs));
-    let mut sprout_fs = hashreader::HashReader::new(BufReader::with_capacity(1024 * 1024, sprout_fs));
+    let mut output_fs =
+        hashreader::HashReader::new(BufReader::with_capacity(1024 * 1024, output_fs));
+    let mut sprout_fs =
+        hashreader::HashReader::new(BufReader::with_capacity(1024 * 1024, sprout_fs));
 
     // Deserialize params
     let spend_params = Parameters::<Bls12>::read(&mut spend_fs, false)
@@ -165,9 +165,12 @@ pub extern "system" fn librustzcash_init_zksnark_params(
     // want to read it, though, so that the BLAKE2b computed afterward is consistent
     // with `b2sum` on the files.
     let mut sink = io::sink();
-    io::copy(&mut spend_fs, &mut sink).expect("couldn't finish reading Sapling spend parameter file");
-    io::copy(&mut output_fs, &mut sink).expect("couldn't finish reading Sapling output parameter file");
-    io::copy(&mut sprout_fs, &mut sink).expect("couldn't finish reading Sprout groth16 parameter file");
+    io::copy(&mut spend_fs, &mut sink)
+        .expect("couldn't finish reading Sapling spend parameter file");
+    io::copy(&mut output_fs, &mut sink)
+        .expect("couldn't finish reading Sapling output parameter file");
+    io::copy(&mut sprout_fs, &mut sink)
+        .expect("couldn't finish reading Sprout groth16 parameter file");
 
     if &*spend_fs.into_hash() != SAPLING_SPEND_PARAMS_HASH {
         panic!("Sapling spend parameter file is not correct, please clean your `~/.zcash-params/` and re-run `fetch-params`.");
