@@ -20,8 +20,11 @@ extern "C" {
     /// paths as necessary. Only called once.
     void librustzcash_init_zksnark_params(
         const char* spend_path,
+        const char* spend_hash,
         const char* output_path,
-        const char* sprout_path
+        const char* output_hash,
+        const char* sprout_path,
+        const char* sprout_hash
     );
 
     /// Validates the provided Equihash solution against
