@@ -1193,6 +1193,14 @@ mod tests {
             assert_eq!(xfvk.dk.0, tv.dk);
             assert_eq!(xfvk.chain_code.0, tv.c);
 
+            xfvk.fvk
+                .vk
+                .ivk()
+                .into_repr()
+                .write_le(&mut buf[..])
+                .unwrap();
+            assert_eq!(buf, tv.ivk);
+
             let mut ser = vec![];
             xfvk.write(&mut ser).unwrap();
             assert_eq!(&ser[..], &tv.xfvk[..]);
