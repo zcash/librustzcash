@@ -278,7 +278,7 @@ impl ChildIndex {
 struct ChainCode([u8; 32]);
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct DiversifierIndex([u8; 11]);
+pub struct DiversifierIndex(pub [u8; 11]);
 
 impl DiversifierIndex {
     fn new() -> Self {
