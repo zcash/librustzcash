@@ -270,6 +270,35 @@ extern "C" {
         uint64_t vpub_old,
         uint64_t vpub_new
     );
+
+    /// Derive the master ExtendedSpendingKey from a seed.
+    void librustzcash_zip32_xsk_master(
+        const unsigned char *seed,
+        size_t seedlen,
+        unsigned char *xsk_master
+    );
+
+    /// Derive a child ExtendedSpendingKey from a parent.
+    void librustzcash_zip32_xsk_derive(
+        const unsigned char *xsk_parent,
+        uint32_t i,
+        unsigned char *xsk_i
+    );
+
+    /// Derive a child ExtendedFullViewingKey from a parent.
+    bool librustzcash_zip32_xfvk_derive(
+        const unsigned char *xfvk_parent,
+        uint32_t i,
+        unsigned char *xfvk_i
+    );
+
+    /// Derive a PaymentAddress from an ExtendedFullViewingKey.
+    bool librustzcash_zip32_xfvk_address(
+        const unsigned char *xfvk,
+        const unsigned char *j,
+        unsigned char *j_ret,
+        unsigned char *addr_ret
+    );
 }
 
 #endif // LIBRUSTZCASH_INCLUDE_H_
