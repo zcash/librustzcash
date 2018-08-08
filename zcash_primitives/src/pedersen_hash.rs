@@ -38,12 +38,14 @@ where
     let mut generators = params.pedersen_hash_exp_table().iter();
 
     loop {
+        // acc is <M_i>
         let mut acc = E::Fs::zero();
         let mut cur = E::Fs::one();
         let mut chunks_remaining = params.pedersen_hash_chunks_per_generator();
         let mut encountered_bits = false;
 
         // Grab three bits from the input
+        // spec: iterate over chunks (a,b,c)
         while let Some(a) = bits.next() {
             encountered_bits = true;
 
@@ -51,6 +53,7 @@ where
             let c = bits.next().unwrap_or(false);
 
             // Start computing this portion of the scalar
+            // tmp is enc(m_j)
             let mut tmp = cur;
             if a {
                 tmp.add_assign(&cur);
@@ -104,4 +107,17 @@ where
     }
 
     result
+}
+
+#[cfg(test)]
+mod test {
+    use ::jubjub::*;
+
+    #[test]
+    fn test_pedersen_hash_generators() {
+        let params = &JubjubBls12::new();
+        for (i, generator) in params.pedersen_hash_generators().iter().enumerate() {
+            println!("generator {}, x={}, y={}", i, generator.into_xy().0, generator.into_xy().1)
+        }
+    }
 }
