@@ -1096,4 +1096,30 @@ mod test {
             assert_eq!(cs.which_is_unsatisfied(), Some("addition/evaluate lambda"));
         }
     }
+
+    #[test]
+    fn test_assert_not_small_order() {
+        let params = &JubjubBls12::new();
+
+        let check_small_order_from_strs = |x, y| {
+            let mut cs = TestConstraintSystem::<Bls12>::new();
+
+            //let (x,y) = (Fr::from_str("14080418777298869350588389379361252092475090129841789940098060767181937064268").unwrap(), Fr::from_str("4408371274642418797323679050836535851651768103477128764103246588657558662748").unwrap());
+            let (x, y) = (Fr::from_str(x).unwrap(), Fr::from_str(y).unwrap());
+            let p = edwards::Point::<Bls12, _>::get_for_y(y, false, params).unwrap();
+            assert_eq!(x, p.to_xy().0);
+
+            let p = EdwardsPoint::witness(&mut cs, Some(p), params).unwrap();
+            assert!(cs.is_satisfied());
+            assert!(p.assert_not_small_order(&mut cs, params).is_err());
+        };
+
+        // zero has low order
+        check_small_order_from_strs("0", "1");
+        // generator for the small order subgroup
+        check_small_order_from_strs(
+            "948411088638444611740115537621561973758360269817276634325562542866802143934",
+            "19260245455242183936012133194672327304390353749328020389743628630787497879844",
+        );
+    }
 }
