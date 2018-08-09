@@ -208,4 +208,30 @@ mod test {
             }
         }
     }
+
+    #[test]
+    fn test_pedersen_hash_alternative() {
+        let params = &JubjubBls12::new();
+
+        let mut input: Vec<bool> = vec![true, true, true, false, false, false, true, true, true, false, false, false, true, true, true, false, false, false, true, true, true, false, false, false, true, true, true, false, false, false, true, true, true, false, false, false, true, true, true, false, true, false, true, true, true, true, true, false, true, false, false, false, true, true, false, false, false, false, false, false, false, false, false, false, true, false, false, false, true, false, true, true, true, false, false, true, true, false, true, true, true, true, true, false, true, true, false, true, true, false, true, false, true, false, true, true, false, true, false, true, true, false, false, false, false, false, true, true, false, true, false, true, true, true, true, false, true, false, true, false, false, false, false, true, true, true, false, true, true, true, false, true, false, false, true, false, true, true, true, false, false, false, true, true];
+
+        let mut cs = TestConstraintSystem::<Bls12>::new();
+
+        let input_bools: Vec<Boolean> = input.iter().enumerate().map(|(i, b)| {
+            Boolean::from(
+                AllocatedBit::alloc(cs.namespace(|| format!("input {}", i)), Some(*b)).unwrap()
+            )
+        }).collect();
+
+        let res = pedersen_hash(
+            cs.namespace(|| "pedersen hash"),
+            Personalization::Empty,
+            &input_bools,
+            params
+        ).unwrap();
+
+        assert!(cs.is_satisfied());
+        println!("x={},y={}", res.get_x().get_value().unwrap(), res.get_y().get_value().unwrap());
+
+    }
 }

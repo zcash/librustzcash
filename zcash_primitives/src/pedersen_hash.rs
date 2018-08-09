@@ -5,6 +5,7 @@ use ff::{Field, PrimeField, PrimeFieldRepr};
 pub enum Personalization {
     NoteCommitment,
     MerkleTree(usize),
+    Empty,
 }
 
 impl Personalization {
@@ -15,6 +16,9 @@ impl Personalization {
                 assert!(num < 63);
 
                 (0..6).map(|i| (num >> i) & 1 == 1).collect()
+            }
+            Personalization::Empty => {
+                vec![true, true, true, false, false, false]
             }
         }
     }
