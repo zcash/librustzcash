@@ -1101,25 +1101,49 @@ mod test {
     fn test_assert_not_small_order() {
         let params = &JubjubBls12::new();
 
-        let check_small_order_from_strs = |x, y| {
+        let check_small_order_from_p = |p: edwards::Point<Bls12, _>, is_small_order| {
             let mut cs = TestConstraintSystem::<Bls12>::new();
 
+            let p = EdwardsPoint::witness(&mut cs, Some(p), params).unwrap();
+            assert!(cs.is_satisfied());
+            assert!(p.assert_not_small_order(&mut cs, params).is_err() == is_small_order);
+        };
+
+        let check_small_order_from_strs = |x, y| {
             //let (x,y) = (Fr::from_str("14080418777298869350588389379361252092475090129841789940098060767181937064268").unwrap(), Fr::from_str("4408371274642418797323679050836535851651768103477128764103246588657558662748").unwrap());
             let (x, y) = (Fr::from_str(x).unwrap(), Fr::from_str(y).unwrap());
             let p = edwards::Point::<Bls12, _>::get_for_y(y, false, params).unwrap();
             assert_eq!(x, p.into_xy().0);
 
-            let p = EdwardsPoint::witness(&mut cs, Some(p), params).unwrap();
-            assert!(cs.is_satisfied());
-            assert!(p.assert_not_small_order(&mut cs, params).is_err());
+            check_small_order_from_p(p, true);
         };
 
         // zero has low order
         check_small_order_from_strs("0", "1");
-        // generator for the small order subgroup
-        check_small_order_from_strs(
-            "948411088638444611740115537621561973758360269817276634325562542866802143934",
-            "19260245455242183936012133194672327304390353749328020389743628630787497879844",
+        // generator for jubjub
+        let (x, y) = (
+            Fr::from_str(
+                "11076627216317271660298050606127911965867021807910416450833192264015104452986",
+            )
+            .unwrap(),
+            Fr::from_str(
+                "44412834903739585386157632289020980010620626017712148233229312325549216099227",
+            )
+            .unwrap(),
         );
+        let g = edwards::Point::<Bls12, _>::get_for_y(y, false, params).unwrap();
+        assert_eq!(x, g.into_xy().0);
+        // generator for the jubjub group
+        check_small_order_from_p(g.clone(), false);
+        // generator for the small order subgroup
+        let g2 = g.mul(
+            Fs::from_str(
+                "6554484396890773809930967563523245729705921265872317281365359162392183254199",
+            )
+            .unwrap()
+            .into_repr(),
+            params,
+        );
+        check_small_order_from_p(g2, true);
     }
 }
