@@ -1120,6 +1120,16 @@ mod test {
 
         // zero has low order
         check_small_order_from_strs("0", "1");
+
+        // prime subgroup order
+        let prime_subgroup_order = Fs::from_str(
+            "6554484396890773809930967563523245729705921265872317281365359162392183254199",
+        )
+        .unwrap();
+        let largest_small_subgroup_order = Fs::from_str("8").unwrap();
+
+        let (zero_x, zero_y) = (Fr::from_str("0").unwrap(), Fr::from_str("1").unwrap());
+
         // generator for jubjub
         let (x, y) = (
             Fr::from_str(
@@ -1133,17 +1143,40 @@ mod test {
         );
         let g = edwards::Point::<Bls12, _>::get_for_y(y, false, params).unwrap();
         assert_eq!(x, g.into_xy().0);
-        // generator for the jubjub group
         check_small_order_from_p(g.clone(), false);
+
+        // generator for the prime subgroup
+        let g_prime = g.mul(largest_small_subgroup_order, params);
+        check_small_order_from_p(g_prime.clone(), false);
+        let mut prime_subgroup_order_minus_1 = prime_subgroup_order.clone();
+        prime_subgroup_order_minus_1.sub_assign(&Fs::from_str("1").unwrap());
+
+        let should_not_be_zero = g_prime.mul(prime_subgroup_order_minus_1, params);
+        assert_ne!(zero_x, should_not_be_zero.into_xy().0);
+        assert_ne!(zero_y, should_not_be_zero.into_xy().1);
+        let should_be_zero = should_not_be_zero.add(&g_prime, params);
+        assert_eq!(zero_x, should_be_zero.into_xy().0);
+        assert_eq!(zero_y, should_be_zero.into_xy().1);
+
         // generator for the small order subgroup
-        let g2 = g.mul(
-            Fs::from_str(
-                "6554484396890773809930967563523245729705921265872317281365359162392183254199",
-            )
-            .unwrap()
-            .into_repr(),
-            params,
-        );
-        check_small_order_from_p(g2, true);
+        let g_small = g.mul(prime_subgroup_order_minus_1, params);
+        let g_small = g_small.add(&g, params);
+        check_small_order_from_p(g_small.clone(), true);
+
+        // g_small does have order 8
+        let mut largest_small_subgroup_order_minus_1 = largest_small_subgroup_order.clone();
+        largest_small_subgroup_order_minus_1.sub_assign(&Fs::from_str("1").unwrap());
+
+        let should_not_be_zero = g_small.mul(largest_small_subgroup_order_minus_1, params);
+        assert_ne!(zero_x, should_not_be_zero.into_xy().0);
+        assert_ne!(zero_y, should_not_be_zero.into_xy().1);
+
+        let should_be_zero = should_not_be_zero.add(&g_small, params);
+        assert_eq!(zero_x, should_be_zero.into_xy().0);
+        assert_eq!(zero_y, should_be_zero.into_xy().1);
+
+        // take all the points from the script
+        // assert should be different than multiplying by cofactor, which is the solution
+        // is user input verified? https://github.com/zcash/librustzcash/blob/f5d2afb4eabac29b1b1cc860d66e45a5b48b4f88/src/rustzcash.rs#L299
     }
 }
