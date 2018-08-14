@@ -344,6 +344,7 @@ dependencies = [
  "pairing 0.14.2",
  "rand 0.4.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "sapling-crypto 0.0.1",
+ "zcash_proofs 0.0.0",
  "zip32 0.0.0",
 ]
 
@@ -716,6 +717,11 @@ dependencies = [
 [[package]]
 name = "zcash_proofs"
 version = "0.0.0"
+dependencies = [
+ "bellman 0.1.0",
+ "pairing 0.14.2",
+ "sapling-crypto 0.0.1",
+]
 
 [[package]]
 name = "zcash_wallet"

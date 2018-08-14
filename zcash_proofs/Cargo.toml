@@ -6,3 +6,6 @@ authors = [
 ]
 
 [dependencies]
+bellman = { path = "../bellman" }
+pairing = { path = "../pairing" }
+sapling-crypto = { path = "../sapling-crypto" }

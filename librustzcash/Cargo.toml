@@ -21,6 +21,7 @@ lazy_static = "1"
 byteorder = "1"
 rand = "0.4"
 sapling-crypto = { path = "../sapling-crypto" }
+zcash_proofs = { path = "../zcash_proofs" }
 zip32 = { path = "../zip32" }
 
 [dependencies.blake2-rfc]
