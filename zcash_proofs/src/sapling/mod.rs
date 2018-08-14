@@ -3,12 +3,14 @@ use sapling_crypto::jubjub::{
     edwards, fs::FsRepr, FixedGenerators, JubjubBls12, JubjubParams, Unknown,
 };
 
+mod prover;
 mod verifier;
 
+pub use self::prover::{CommitmentTreeWitness, SaplingProvingContext};
 pub use self::verifier::SaplingVerificationContext;
 
 // This function computes `value` in the exponent of the value commitment base
-pub fn compute_value_balance(
+fn compute_value_balance(
     value: i64,
     params: &JubjubBls12,
 ) -> Option<edwards::Point<Bls12, Unknown>> {
