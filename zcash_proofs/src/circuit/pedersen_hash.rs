@@ -41,6 +41,7 @@ where
             let b = bits.next().unwrap_or(&boolean_false);
             let c = bits.next().unwrap_or(&boolean_false);
 
+
             let tmp = lookup3_xy_with_conditional_negation(
                 cs.namespace(|| format!("segment {}, window {}", segment_i, window_i)),
                 &[a.clone(), b.clone(), c.clone()],
@@ -213,16 +214,19 @@ mod test {
     fn test_pedersen_hash_alternative() {
         let params = &JubjubBls12::new();
 
-        let mut input: Vec<bool> = vec![true, true, true, false, false, false, true, true, true, false, false, false, true, true, true, false, false, false, true, true, true, false, false, false, true, true, true, false, false, false, true, true, true, false, false, false, true, true, true, false, true, false, true, true, true, true, true, false, true, false, false, false, true, true, false, false, false, false, false, false, false, false, false, false, true, false, false, false, true, false, true, true, true, false, false, true, true, false, true, true, true, true, true, false, true, true, false, true, true, false, true, false, true, false, true, true, false, true, false, true, true, false, false, false, false, false, true, true, false, true, false, true, true, true, true, false, true, false, true, false, false, false, false, true, true, true, false, true, true, true, false, true, false, false, true, false, true, true, true, false, false, false, true, true];
+        let mut input: Vec<bool> = vec![];
+        for i in 0..(63*3*4+1) {
+            input.push(true);
+        }
 
         let mut cs = TestConstraintSystem::<Bls12>::new();
+
 
         let input_bools: Vec<Boolean> = input.iter().enumerate().map(|(i, b)| {
             Boolean::from(
                 AllocatedBit::alloc(cs.namespace(|| format!("input {}", i)), Some(*b)).unwrap()
             )
         }).collect();
-
         let res = pedersen_hash(
             cs.namespace(|| "pedersen hash"),
             Personalization::Empty,
