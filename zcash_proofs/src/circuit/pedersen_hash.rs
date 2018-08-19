@@ -215,7 +215,7 @@ mod test {
         let params = &JubjubBls12::new();
 
         let mut input: Vec<bool> = vec![];
-        for i in 0..(63*3*4+1) {
+        for i in 0..(63*3*4-6+1) {
             input.push(true);
         }
 
