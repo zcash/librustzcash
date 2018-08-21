@@ -285,12 +285,10 @@ pub extern "system" fn librustzcash_merkle_hash(
     b: *const [c_uchar; 32],
     result: *mut [c_uchar; 32],
 ) {
-    let tmp = unsafe {
-        // Should be okay, because caller is responsible for ensuring
-        // the pointer is a valid pointer to 32 bytes, and that is the
-        // size of the representation
-        librustzcash_merkle_hash_safe(depth, *a, *b)
-    };
+    // Should be okay, because caller is responsible for ensuring
+    // the pointer is a valid pointer to 32 bytes, and that is the
+    // size of the representation
+    let tmp = librustzcash_merkle_hash_safe(depth, unsafe { *a }, unsafe { *b });
 
     // Should be okay, caller is responsible for ensuring the pointer
     // is a valid pointer to 32 bytes that can be mutated.
