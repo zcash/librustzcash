@@ -340,15 +340,7 @@ pub extern "system" fn librustzcash_nsk_to_nk(
     nk.write(&mut result[..]).expect("length is 32 bytes");
 }
 
-#[no_mangle]
-pub extern "system" fn librustzcash_crh_ivk(
-    ak: *const [c_uchar; 32],
-    nk: *const [c_uchar; 32],
-    result: *mut [c_uchar; 32],
-) {
-    let ak = unsafe { &*ak };
-    let nk = unsafe { &*nk };
-
+fn librustzcash_crh_ivk_safe(ak: &[u8; 32], nk: &[u8; 32]) -> Vec<u8> {
     let mut h = Blake2s::with_params(32, &[], &[], CRH_IVK_PERSONALIZATION);
     h.update(ak);
     h.update(nk);
@@ -356,6 +348,17 @@ pub extern "system" fn librustzcash_crh_ivk(
 
     // Drop the last five bits, so it can be interpreted as a scalar.
     h[31] &= 0b0000_0111;
+
+    h
+}
+
+#[no_mangle]
+pub extern "system" fn librustzcash_crh_ivk(
+    ak: *const [c_uchar; 32],
+    nk: *const [c_uchar; 32],
+    result: *mut [c_uchar; 32],
+) {
+    let h = librustzcash_crh_ivk_safe(unsafe { &*ak }, unsafe { &*nk });
 
     let result = unsafe { &mut *result };
 
