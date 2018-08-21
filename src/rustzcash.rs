@@ -251,22 +251,9 @@ pub extern "system" fn librustzcash_tree_uncommitted(result: *mut [c_uchar; 32])
     write_le(tmp, &mut result[..]);
 }
 
-#[no_mangle]
-pub extern "system" fn librustzcash_merkle_hash(
-    depth: size_t,
-    a: *const [c_uchar; 32],
-    b: *const [c_uchar; 32],
-    result: *mut [c_uchar; 32],
-) {
-    // Should be okay, because caller is responsible for ensuring
-    // the pointer is a valid pointer to 32 bytes, and that is the
-    // size of the representation
-    let a_repr = read_le(unsafe { &(&*a)[..] });
-
-    // Should be okay, because caller is responsible for ensuring
-    // the pointer is a valid pointer to 32 bytes, and that is the
-    // size of the representation
-    let b_repr = read_le(unsafe { &(&*b)[..] });
+fn librustzcash_merkle_hash_safe(depth: usize, a: [u8; 32], b: [u8; 32]) -> FrRepr {
+    let a_repr = read_le(&a[..]);
+    let b_repr = read_le(&b[..]);
 
     let mut lhs = [false; 256];
     let mut rhs = [false; 256];
@@ -279,7 +266,7 @@ pub extern "system" fn librustzcash_merkle_hash(
         *a = b;
     }
 
-    let tmp = pedersen_hash::<Bls12, _>(
+    pedersen_hash::<Bls12, _>(
         Personalization::MerkleTree(depth),
         lhs.iter()
             .map(|&x| x)
@@ -288,7 +275,22 @@ pub extern "system" fn librustzcash_merkle_hash(
         &JUBJUB,
     ).into_xy()
     .0
-    .into_repr();
+    .into_repr()
+}
+
+#[no_mangle]
+pub extern "system" fn librustzcash_merkle_hash(
+    depth: size_t,
+    a: *const [c_uchar; 32],
+    b: *const [c_uchar; 32],
+    result: *mut [c_uchar; 32],
+) {
+    let tmp = unsafe {
+        // Should be okay, because caller is responsible for ensuring
+        // the pointer is a valid pointer to 32 bytes, and that is the
+        // size of the representation
+        librustzcash_merkle_hash_safe(depth, *a, *b)
+    };
 
     // Should be okay, caller is responsible for ensuring the pointer
     // is a valid pointer to 32 bytes that can be mutated.
