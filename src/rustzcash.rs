@@ -12,16 +12,20 @@ mod hashreader;
 extern crate lazy_static;
 
 use pairing::{
-    bls12_381::{Bls12, Fr, FrRepr}, BitIterator, Field, PrimeField, PrimeFieldRepr,
+    bls12_381::{Bls12, Fr, FrRepr},
+    BitIterator, Field, PrimeField, PrimeFieldRepr,
 };
 
 use sapling_crypto::{
-    circuit::multipack, constants::CRH_IVK_PERSONALIZATION,
+    circuit::multipack,
+    constants::CRH_IVK_PERSONALIZATION,
     jubjub::{
-        edwards, fs::{Fs, FsRepr}, FixedGenerators, JubjubBls12, JubjubEngine, JubjubParams,
-        PrimeOrder, ToUniform, Unknown,
+        edwards,
+        fs::{Fs, FsRepr},
+        FixedGenerators, JubjubBls12, JubjubEngine, JubjubParams, PrimeOrder, ToUniform, Unknown,
     },
-    pedersen_hash::{pedersen_hash, Personalization}, redjubjub::{self, Signature},
+    pedersen_hash::{pedersen_hash, Personalization},
+    redjubjub::{self, Signature},
 };
 
 use sapling_crypto::circuit::sprout::{self, TREE_DEPTH as SPROUT_TREE_DEPTH};
@@ -109,47 +113,39 @@ fn fixed_scalar_mult(from: &[u8], p_g: FixedGenerators) -> edwards::Point<Bls12,
     JUBJUB.generator(p_g).mul(f, &JUBJUB)
 }
 
-#[no_mangle]
-pub extern "system" fn librustzcash_init_zksnark_params(
-    spend_path: *const c_char,
-    spend_hash: *const c_char,
-    output_path: *const c_char,
-    output_hash: *const c_char,
-    sprout_path: *const c_char,
-    sprout_hash: *const c_char,
-) {
+struct ZkSnarkParams {
+    spend_params: Parameters<Bls12>,
+    output_params: Parameters<Bls12>,
+    sprout_path: String,
+    spend_vk: PreparedVerifyingKey<Bls12>,
+    output_vk: PreparedVerifyingKey<Bls12>,
+    sprout_vk: PreparedVerifyingKey<Bls12>,
+}
+
+fn cstr_to_string(cstr: &CStr, error_msg: &str) -> String {
+    cstr.to_str().expect(error_msg).to_string()
+}
+
+fn librustzcash_init_zksnark_params_safe(
+    spend_path: &CStr,
+    spend_hash: &CStr,
+    output_path: &CStr,
+    output_hash: &CStr,
+    sprout_path: &CStr,
+    sprout_hash: &CStr,
+) -> ZkSnarkParams {
     // Initialize jubjub parameters here
     lazy_static::initialize(&JUBJUB);
 
-    let spend_hash = unsafe { CStr::from_ptr(spend_hash) }
-        .to_str()
-        .expect("hash should be a valid string")
-        .to_string();
-
-    let output_hash = unsafe { CStr::from_ptr(output_hash) }
-        .to_str()
-        .expect("hash should be a valid string")
-        .to_string();
-
-    let sprout_hash = unsafe { CStr::from_ptr(sprout_hash) }
-        .to_str()
-        .expect("hash should be a valid string")
-        .to_string();
+    let spend_hash = cstr_to_string(spend_hash, "hash should be a valid string");
+    let output_hash = cstr_to_string(output_hash, "hash should be a valid string");
+    let sprout_hash = cstr_to_string(sprout_hash, "hash should be a valid string");
 
     // These should be valid CStr's, but the decoding may fail on Windows
     // so we may need to use OSStr or something.
-    let spend_path = unsafe { CStr::from_ptr(spend_path) }
-        .to_str()
-        .expect("parameter path encoding error")
-        .to_string();
-    let output_path = unsafe { CStr::from_ptr(output_path) }
-        .to_str()
-        .expect("parameter path encoding error")
-        .to_string();
-    let sprout_path = unsafe { CStr::from_ptr(sprout_path) }
-        .to_str()
-        .expect("parameter path encoding error")
-        .to_string();
+    let spend_path = cstr_to_string(spend_path, "parameter path encoding error");
+    let output_path = cstr_to_string(output_path, "parameter path encoding error");
+    let sprout_path = cstr_to_string(sprout_path, "parameter path encoding error");
 
     // Load from each of the paths
     let spend_fs = File::open(spend_path).expect("couldn't load Sapling spend parameters file");
@@ -203,16 +199,44 @@ pub extern "system" fn librustzcash_init_zksnark_params(
     let output_vk = prepare_verifying_key(&output_params.vk);
     let sprout_vk = prepare_verifying_key(&sprout_vk);
 
-    // Caller is responsible for calling this function once, so
-    // these global mutations are safe.
-    unsafe {
-        SAPLING_SPEND_PARAMS = Some(spend_params);
-        SAPLING_OUTPUT_PARAMS = Some(output_params);
-        SPROUT_GROTH16_PARAMS_PATH = Some(sprout_path);
+    ZkSnarkParams {
+        spend_params,
+        output_params,
+        sprout_path,
+        spend_vk,
+        output_vk,
+        sprout_vk,
+    }
+}
 
-        SAPLING_SPEND_VK = Some(spend_vk);
-        SAPLING_OUTPUT_VK = Some(output_vk);
-        SPROUT_GROTH16_VK = Some(sprout_vk);
+#[no_mangle]
+pub extern "system" fn librustzcash_init_zksnark_params(
+    spend_path: *const c_char,
+    spend_hash: *const c_char,
+    output_path: *const c_char,
+    output_hash: *const c_char,
+    sprout_path: *const c_char,
+    sprout_hash: *const c_char,
+) {
+    unsafe {
+        let zksnark_params = librustzcash_init_zksnark_params_safe(
+            CStr::from_ptr(spend_path),
+            CStr::from_ptr(spend_hash),
+            CStr::from_ptr(output_path),
+            CStr::from_ptr(output_hash),
+            CStr::from_ptr(sprout_path),
+            CStr::from_ptr(sprout_hash),
+        );
+
+        // Caller is responsible for calling this function once, so
+        // these global mutations are safe.
+        SAPLING_SPEND_PARAMS = Some(zksnark_params.spend_params);
+        SAPLING_OUTPUT_PARAMS = Some(zksnark_params.output_params);
+        SPROUT_GROTH16_PARAMS_PATH = Some(zksnark_params.sprout_path);
+
+        SAPLING_SPEND_VK = Some(zksnark_params.spend_vk);
+        SAPLING_OUTPUT_VK = Some(zksnark_params.output_vk);
+        SPROUT_GROTH16_VK = Some(zksnark_params.sprout_vk);
     }
 }
 
@@ -263,8 +287,8 @@ pub extern "system" fn librustzcash_merkle_hash(
             .chain(rhs.iter().map(|&x| x).take(Fr::NUM_BITS as usize)),
         &JUBJUB,
     ).into_xy()
-        .0
-        .into_repr();
+    .0
+    .into_repr();
 
     // Should be okay, caller is responsible for ensuring the pointer
     // is a valid pointer to 32 bytes that can be mutated.
@@ -1217,8 +1241,7 @@ pub extern "system" fn librustzcash_sapling_spend_sig(
 
     // Compute the signature's message for rk/spend_auth_sig
     let mut data_to_be_signed = [0u8; 64];
-    rk.0
-        .write(&mut data_to_be_signed[0..32])
+    rk.0.write(&mut data_to_be_signed[0..32])
         .expect("message buffer should be 32 bytes");
     (&mut data_to_be_signed[32..64]).copy_from_slice(&(unsafe { &*sighash })[..]);
 
