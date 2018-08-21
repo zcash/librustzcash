@@ -53,9 +53,6 @@ use sapling_crypto::primitives::{ProofGenerationKey, ValueCommitment, ViewingKey
 
 pub mod equihash;
 
-#[cfg(test)]
-mod tests;
-
 lazy_static! {
     static ref JUBJUB: JubjubBls12 = { JubjubBls12::new() };
 }
@@ -390,25 +387,6 @@ pub extern "system" fn librustzcash_ivk_to_pkd(
     } else {
         false
     }
-}
-
-/// Test generation of commitment randomness
-#[test]
-fn test_gen_r() {
-    let mut r1 = [0u8; 32];
-    let mut r2 = [0u8; 32];
-
-    // Verify different r values are generated
-    librustzcash_sapling_generate_r(&mut r1);
-    librustzcash_sapling_generate_r(&mut r2);
-    assert_ne!(r1, r2);
-
-    // Verify r values are valid in the field
-    let mut repr = FsRepr::default();
-    repr.read_le(&r1[..]).expect("length is not 32 bytes");
-    let _ = Fs::from_repr(repr).unwrap();
-    repr.read_le(&r2[..]).expect("length is not 32 bytes");
-    let _ = Fs::from_repr(repr).unwrap();
 }
 
 /// Return 32 byte random scalar, uniformly.
@@ -1588,4 +1566,31 @@ pub extern "system" fn librustzcash_sapling_proving_ctx_init() -> *mut SaplingPr
 #[no_mangle]
 pub extern "system" fn librustzcash_sapling_proving_ctx_free(ctx: *mut SaplingProvingContext) {
     drop(unsafe { Box::from_raw(ctx) });
+}
+
+#[cfg(test)]
+mod tests;
+
+#[cfg(test)]
+mod rustzcash_tests {
+    use super::*;
+
+    /// Test generation of commitment randomness
+    #[test]
+    fn test_gen_r() {
+        let mut r1 = [0u8; 32];
+        let mut r2 = [0u8; 32];
+
+        // Verify different r values are generated
+        librustzcash_sapling_generate_r(&mut r1);
+        librustzcash_sapling_generate_r(&mut r2);
+        assert_ne!(r1, r2);
+
+        // Verify r values are valid in the field
+        let mut repr = FsRepr::default();
+        repr.read_le(&r1[..]).expect("length is not 32 bytes");
+        let _ = Fs::from_repr(repr).unwrap();
+        repr.read_le(&r2[..]).expect("length is not 32 bytes");
+        let _ = Fs::from_repr(repr).unwrap();
+    }
 }
