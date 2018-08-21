@@ -114,6 +114,31 @@ mod test {
     use rand_xorshift::XorShiftRng;
     use zcash_primitives::pedersen_hash;
 
+    /// Predict the number of constraints of a Pedersen hash
+    fn ph_num_constraints(input_bits: usize) -> usize {
+        // Account for the 6 personalization bits.
+        let personalized_bits = 6 + input_bits;
+        // Constant booleans in the personalization and padding don't need lookup "precomp" constraints.
+        let precomputed_booleans = 2 + (personalized_bits % 3 == 1) as usize;
+
+        // Count chunks and segments with ceiling division
+        let chunks = (personalized_bits + 3 - 1) / 3;
+        let segments = (chunks + 63 - 1) / 63;
+        let all_but_last_segments = segments - 1;
+        let last_chunks = chunks - all_but_last_segments * 63;
+
+        // Constraints per operation
+        let lookup_chunk = 2;
+        let add_chunks = 3; // Montgomery addition
+        let convert_segment = 2; // Conversion to Edwards
+        let add_segments = 6; // Edwards addition
+
+        return (chunks) * lookup_chunk - precomputed_booleans
+            + segments * convert_segment
+            + all_but_last_segments * ((63 - 1) * add_chunks + add_segments)
+            + (last_chunks - 1) * add_chunks;
+    }
+
     #[test]
     fn test_pedersen_hash_constraints() {
         let mut rng = XorShiftRng::from_seed([
@@ -121,32 +146,41 @@ mod test {
             0xbc, 0xe5,
         ]);
         let params = &JubjubBls12::new();
-        let mut cs = TestConstraintSystem::<Bls12>::new();
 
-        let input: Vec<bool> = (0..(Fr::NUM_BITS * 2))
-            .map(|_| rng.next_u32() % 2 != 0)
-            .collect();
+        for &n_bits in [0, 3 * 63 - 6, 3 * 63 - 6 + 1, 3 * 63 - 6 + 2, 255, 510].iter() {
+            let mut cs = TestConstraintSystem::<Bls12>::new();
 
-        let input_bools: Vec<Boolean> = input
-            .iter()
-            .enumerate()
-            .map(|(i, b)| {
-                Boolean::from(
-                    AllocatedBit::alloc(cs.namespace(|| format!("input {}", i)), Some(*b)).unwrap(),
-                )
-            })
-            .collect();
+            let input: Vec<bool> = (0..n_bits).map(|_| rng.next_u32() % 2 != 0).collect();
 
-        pedersen_hash(
-            cs.namespace(|| "pedersen hash"),
-            Personalization::NoteCommitment,
-            &input_bools,
-            params,
-        )
-        .unwrap();
+            let input_bools: Vec<Boolean> = input
+                .iter()
+                .enumerate()
+                .map(|(i, b)| {
+                    Boolean::from(
+                        AllocatedBit::alloc(cs.namespace(|| format!("input {}", i)), Some(*b))
+                            .unwrap(),
+                    )
+                })
+                .collect();
 
-        assert!(cs.is_satisfied());
-        assert_eq!(cs.num_constraints(), 1377);
+            pedersen_hash(
+                cs.namespace(|| "pedersen hash"),
+                Personalization::NoteCommitment,
+                &input_bools,
+                params,
+            )
+            .unwrap();
+
+            assert!(cs.is_satisfied());
+
+            let bitness_constraints = n_bits;
+            let ph_constraints = ph_num_constraints(n_bits);
+            assert_eq!(cs.num_constraints(), bitness_constraints + ph_constraints);
+            // The main use case
+            if n_bits == 510 {
+                assert_eq!(cs.num_constraints(), 510 + 867)
+            };
+        }
     }
 
     #[test]
