@@ -458,6 +458,45 @@ fn priv_get_note(
     Ok(note)
 }
 
+fn librustzcash_sapling_compute_nf_safe(
+    diversifier: [u8; 11],
+    pk_d: &[u8; 32],
+    value: u64,
+    r: &[u8; 32],
+    ak: &[u8; 32],
+    nk: &[u8; 32],
+    position: u64,
+) -> Result<Vec<u8>, ()> {
+    let note = match priv_get_note(diversifier, pk_d, value, r) {
+        Ok(p) => p,
+        Err(_) => return Err(()),
+    };
+
+    let ak = match edwards::Point::<Bls12, Unknown>::read(&ak[..], &JUBJUB) {
+        Ok(p) => p,
+        Err(_) => return Err(()),
+    };
+
+    let ak = match ak.as_prime_order(&JUBJUB) {
+        Some(ak) => ak,
+        None => return Err(()),
+    };
+
+    let nk = match edwards::Point::<Bls12, Unknown>::read(&nk[..], &JUBJUB) {
+        Ok(p) => p,
+        Err(_) => return Err(()),
+    };
+
+    let nk = match nk.as_prime_order(&JUBJUB) {
+        Some(nk) => nk,
+        None => return Err(()),
+    };
+
+    let vk = ViewingKey { ak, nk };
+
+    Ok(note.nf(&vk, position, &JUBJUB))
+}
+
 /// Compute Sapling note nullifier.
 #[no_mangle]
 pub extern "system" fn librustzcash_sapling_compute_nf(
@@ -473,38 +512,18 @@ pub extern "system" fn librustzcash_sapling_compute_nf(
     let diversifier = unsafe { *diversifier };
     let pk_d = unsafe { &*pk_d };
     let r = unsafe { &*r };
+    let ak = unsafe { &*ak };
+    let nk = unsafe { &*nk };
 
-    let note = match priv_get_note(diversifier, pk_d, value, r) {
-        Ok(p) => p,
-        Err(_) => return false,
-    };
-
-    let ak = match edwards::Point::<Bls12, Unknown>::read(&(unsafe { &*ak })[..], &JUBJUB) {
-        Ok(p) => p,
-        Err(_) => return false,
-    };
-
-    let ak = match ak.as_prime_order(&JUBJUB) {
-        Some(ak) => ak,
-        None => return false,
-    };
-
-    let nk = match edwards::Point::<Bls12, Unknown>::read(&(unsafe { &*nk })[..], &JUBJUB) {
-        Ok(p) => p,
-        Err(_) => return false,
-    };
-
-    let nk = match nk.as_prime_order(&JUBJUB) {
-        Some(nk) => nk,
-        None => return false,
-    };
-
-    let vk = ViewingKey { ak, nk };
-    let nf = note.nf(&vk, position, &JUBJUB);
-    let result = unsafe { &mut *result };
-    result.copy_from_slice(&nf);
-
-    true
+    if let Ok(nf) =
+        librustzcash_sapling_compute_nf_safe(diversifier, pk_d, value, r, ak, nk, position)
+    {
+        let result = unsafe { &mut *result };
+        result.copy_from_slice(&nf);
+        true
+    } else {
+        false
+    }
 }
 
 /// Compute Sapling note commitment.
