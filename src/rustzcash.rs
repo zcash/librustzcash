@@ -826,49 +826,49 @@ pub extern "system" fn librustzcash_sapling_check_spend(
     }
 }
 
-#[no_mangle]
-pub extern "system" fn librustzcash_sapling_check_output(
-    ctx: *mut SaplingVerificationContext,
-    cv: *const [c_uchar; 32],
-    cm: *const [c_uchar; 32],
-    epk: *const [c_uchar; 32],
-    zkproof: *const [c_uchar; GROTH_PROOF_SIZE],
-) -> bool {
+fn librustzcash_sapling_check_output_safe(
+    ctx: &mut SaplingVerificationContext,
+    cv: &[u8; 32],
+    cm: &[u8; 32],
+    epk: &[u8; 32],
+    zkproof: &[u8; GROTH_PROOF_SIZE],
+    sapling_output_vk: &PreparedVerifyingKey<Bls12>,
+) -> Result<(), ()> {
     // Deserialize the value commitment
-    let cv = match edwards::Point::<Bls12, Unknown>::read(&(unsafe { &*cv })[..], &JUBJUB) {
+    let cv = match edwards::Point::<Bls12, Unknown>::read(&cv[..], &JUBJUB) {
         Ok(p) => p,
-        Err(_) => return false,
+        Err(_) => return Err(()),
     };
 
     if is_small_order(&cv) {
-        return false;
+        return Err(());
     }
 
     // Accumulate the value commitment in the context
     {
         let mut tmp = cv.clone();
         tmp = tmp.negate(); // Outputs subtract from the total.
-        tmp = tmp.add(&unsafe { &*ctx }.bvk, &JUBJUB);
+        tmp = tmp.add(&ctx.bvk, &JUBJUB);
 
         // Update the context
-        unsafe { &mut *ctx }.bvk = tmp;
+        ctx.bvk = tmp;
     }
 
     // Deserialize the commitment, which should be an element
     // of Fr.
-    let cm = match Fr::from_repr(read_le(&(unsafe { &*cm })[..])) {
+    let cm = match Fr::from_repr(read_le(&cm[..])) {
         Ok(a) => a,
-        Err(_) => return false,
+        Err(_) => return Err(()),
     };
 
     // Deserialize the ephemeral key
-    let epk = match edwards::Point::<Bls12, Unknown>::read(&(unsafe { &*epk })[..], &JUBJUB) {
+    let epk = match edwards::Point::<Bls12, Unknown>::read(&epk[..], &JUBJUB) {
         Ok(p) => p,
-        Err(_) => return false,
+        Err(_) => return Err(()),
     };
 
     if is_small_order(&epk) {
-        return false;
+        return Err(());
     }
 
     // Construct public input for circuit
@@ -886,22 +886,39 @@ pub extern "system" fn librustzcash_sapling_check_output(
     public_input[4] = cm;
 
     // Deserialize the proof
-    let zkproof = match Proof::<Bls12>::read(&(unsafe { &*zkproof })[..]) {
+    let zkproof = match Proof::<Bls12>::read(&zkproof[..]) {
         Ok(p) => p,
-        Err(_) => return false,
+        Err(_) => return Err(()),
     };
 
     // Verify the proof
-    match verify_proof(
-        unsafe { SAPLING_OUTPUT_VK.as_ref() }.unwrap(),
-        &zkproof,
-        &public_input[..],
-    ) {
+    match verify_proof(sapling_output_vk, &zkproof, &public_input[..]) {
         // No error, and proof verification successful
-        Ok(true) => true,
+        Ok(true) => Ok(()),
 
         // Any other case
-        _ => false,
+        _ => Err(()),
+    }
+}
+
+#[no_mangle]
+pub extern "system" fn librustzcash_sapling_check_output(
+    ctx: *mut SaplingVerificationContext,
+    cv: *const [c_uchar; 32],
+    cm: *const [c_uchar; 32],
+    epk: *const [c_uchar; 32],
+    zkproof: *const [c_uchar; GROTH_PROOF_SIZE],
+) -> bool {
+    match librustzcash_sapling_check_output_safe(
+        unsafe { &mut *ctx },
+        unsafe { &*cv },
+        unsafe { &*cm },
+        unsafe { &*epk },
+        unsafe { &*zkproof },
+        unsafe { SAPLING_OUTPUT_VK.as_ref() }.unwrap(),
+    ) {
+        Ok(_) => true,
+        Err(_) => false,
     }
 }
 
