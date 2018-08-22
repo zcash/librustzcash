@@ -286,19 +286,15 @@ impl DiversifierIndex {
     }
 
     pub fn increment(&mut self) -> Result<(), ()> {
-        let mut k = 0;
-        loop {
+        for k in 0..11 {
             self.0[k] = self.0[k].wrapping_add(1);
             if self.0[k] != 0 {
                 // No overflow
                 return Ok(());
             }
-            // Overflow
-            k += 1;
-            if k == 11 {
-                return Err(());
-            }
         }
+        // Overflow
+        Err(())
     }
 }
 
