@@ -314,7 +314,8 @@ impl DiversifierKey {
         let ff = FF1::<Aes256>::new(&self.0, 2).unwrap();
         loop {
             // Generate d_j
-            let enc = ff.encrypt(&[], &BinaryNumeralString::from_bytes_le(&j.0[..]))
+            let enc = ff
+                .encrypt(&[], &BinaryNumeralString::from_bytes_le(&j.0[..]))
                 .unwrap();
             let mut d_j = [0; 11];
             d_j.copy_from_slice(&enc.to_bytes_le());
