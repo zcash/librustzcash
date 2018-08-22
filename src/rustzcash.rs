@@ -368,17 +368,25 @@ pub extern "system" fn librustzcash_check_diversifier(diversifier: *const [c_uch
     diversifier.g_d::<Bls12>(&JUBJUB).is_some()
 }
 
+fn librustzcash_ivk_to_pkd_safe(
+    ivk: &[u8; 32],
+    diversifier: [u8; 11],
+) -> Option<edwards::Point<Bls12, PrimeOrder>> {
+    let ivk = read_fs(&ivk[..]);
+    let diversifier = sapling_crypto::primitives::Diversifier(diversifier);
+    match diversifier.g_d::<Bls12>(&JUBJUB) {
+        Some(g_d) => Some(g_d.mul(ivk, &JUBJUB)),
+        None => None,
+    }
+}
+
 #[no_mangle]
 pub extern "system" fn librustzcash_ivk_to_pkd(
     ivk: *const [c_uchar; 32],
     diversifier: *const [c_uchar; 11],
     result: *mut [c_uchar; 32],
 ) -> bool {
-    let ivk = read_fs(unsafe { &*ivk });
-    let diversifier = sapling_crypto::primitives::Diversifier(unsafe { *diversifier });
-    if let Some(g_d) = diversifier.g_d::<Bls12>(&JUBJUB) {
-        let pk_d = g_d.mul(ivk, &JUBJUB);
-
+    if let Some(pk_d) = librustzcash_ivk_to_pkd_safe(unsafe { &*ivk }, unsafe { *diversifier }) {
         let result = unsafe { &mut *result };
 
         pk_d.write(&mut result[..]).expect("length is 32 bytes");
