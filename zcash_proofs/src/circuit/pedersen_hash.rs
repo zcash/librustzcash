@@ -147,7 +147,19 @@ mod test {
         ]);
         let params = &JubjubBls12::new();
 
-        for &n_bits in [0, 3 * 63 - 6, 3 * 63 - 6 + 1, 3 * 63 - 6 + 2, 255, 510].iter() {
+        let leaves_len = 2 * 255;
+        let note_len = 64 + 256 + 256;
+
+        for &n_bits in [
+            0,
+            3 * 63 - 6,
+            3 * 63 - 6 + 1,
+            3 * 63 - 6 + 2,
+            leaves_len,
+            note_len,
+        ]
+        .iter()
+        {
             let mut cs = TestConstraintSystem::<Bls12>::new();
 
             let input: Vec<bool> = (0..n_bits).map(|_| rng.next_u32() % 2 != 0).collect();
@@ -176,9 +188,12 @@ mod test {
             let bitness_constraints = n_bits;
             let ph_constraints = ph_num_constraints(n_bits);
             assert_eq!(cs.num_constraints(), bitness_constraints + ph_constraints);
-            // The main use case
-            if n_bits == 510 {
-                assert_eq!(cs.num_constraints(), 510 + 867)
+            // The actual usages
+            if n_bits == leaves_len {
+                assert_eq!(cs.num_constraints(), leaves_len + 867)
+            };
+            if n_bits == note_len {
+                assert_eq!(cs.num_constraints(), note_len + 982)
             };
         }
     }
