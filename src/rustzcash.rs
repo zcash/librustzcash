@@ -526,6 +526,16 @@ pub extern "system" fn librustzcash_sapling_compute_nf(
     }
 }
 
+fn librustzcash_sapling_compute_cm_safe(
+    diversifier: [u8; 11],
+    pk_d: &[u8; 32],
+    value: u64,
+    r: &[u8; 32],
+) -> Result<FrRepr, ()> {
+    let note = priv_get_note(diversifier, pk_d, value, r)?;
+    Ok(note.cm(&JUBJUB).into_repr())
+}
+
 /// Compute Sapling note commitment.
 #[no_mangle]
 pub extern "system" fn librustzcash_sapling_compute_cm(
@@ -539,13 +549,13 @@ pub extern "system" fn librustzcash_sapling_compute_cm(
     let pk_d = unsafe { &*pk_d };
     let r = unsafe { &*r };
 
-    let note = match priv_get_note(diversifier, pk_d, value, r) {
-        Ok(p) => p,
+    let cm = match librustzcash_sapling_compute_cm_safe(diversifier, pk_d, value, r) {
+        Ok(cm) => cm,
         Err(_) => return false,
     };
 
     let result = unsafe { &mut *result };
-    write_le(note.cm(&JUBJUB).into_repr(), &mut result[..]);
+    write_le(cm, &mut result[..]);
 
     true
 }
