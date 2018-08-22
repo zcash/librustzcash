@@ -604,27 +604,40 @@ pub extern "system" fn librustzcash_sapling_ka_agree(
     true
 }
 
+fn librustzcash_sapling_ka_derivepublic_safe(
+    diversifier: [u8; 11],
+    esk: &[u8; 32],
+) -> Result<edwards::Point<Bls12, PrimeOrder>, ()> {
+    let diversifier = sapling_crypto::primitives::Diversifier(diversifier);
+
+    // Compute g_d from the diversifier
+    let g_d = match diversifier.g_d::<Bls12>(&JUBJUB) {
+        Some(g) => g,
+        None => return Err(()),
+    };
+
+    // Deserialize esk
+    let esk = match Fs::from_repr(read_fs(&esk[..])) {
+        Ok(p) => p,
+        Err(_) => return Err(()),
+    };
+
+    Ok(g_d.mul(esk, &JUBJUB))
+}
+
 #[no_mangle]
 pub extern "system" fn librustzcash_sapling_ka_derivepublic(
     diversifier: *const [c_uchar; 11],
     esk: *const [c_uchar; 32],
     result: *mut [c_uchar; 32],
 ) -> bool {
-    let diversifier = sapling_crypto::primitives::Diversifier(unsafe { *diversifier });
+    let diversifier = unsafe { *diversifier };
+    let esk = unsafe { &*esk };
 
-    // Compute g_d from the diversifier
-    let g_d = match diversifier.g_d::<Bls12>(&JUBJUB) {
-        Some(g) => g,
-        None => return false,
-    };
-
-    // Deserialize esk
-    let esk = match Fs::from_repr(read_fs(&(unsafe { &*esk })[..])) {
+    let p = match librustzcash_sapling_ka_derivepublic_safe(diversifier, esk) {
         Ok(p) => p,
         Err(_) => return false,
     };
-
-    let p = g_d.mul(esk, &JUBJUB);
 
     let result = unsafe { &mut *result };
     p.write(&mut result[..]).expect("length is not 32 bytes");
