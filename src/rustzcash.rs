@@ -712,13 +712,7 @@ fn librustzcash_sapling_check_spend_safe(
     }
 
     // Accumulate the value commitment in the context
-    {
-        let mut tmp = cv.clone();
-        tmp = tmp.add(&ctx.bvk, &JUBJUB);
-
-        // Update the context
-        ctx.bvk = tmp;
-    }
+    ctx.bvk = cv.clone().add(&ctx.bvk, &JUBJUB);
 
     // Deserialize the anchor, which should be an element
     // of Fr.
@@ -845,14 +839,8 @@ fn librustzcash_sapling_check_output_safe(
     }
 
     // Accumulate the value commitment in the context
-    {
-        let mut tmp = cv.clone();
-        tmp = tmp.negate(); // Outputs subtract from the total.
-        tmp = tmp.add(&ctx.bvk, &JUBJUB);
-
-        // Update the context
-        ctx.bvk = tmp;
-    }
+    // Outputs subtract from the total.
+    ctx.bvk = cv.clone().negate().add(&ctx.bvk, &JUBJUB);
 
     // Deserialize the commitment, which should be an element
     // of Fr.
