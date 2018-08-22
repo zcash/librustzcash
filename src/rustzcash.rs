@@ -397,9 +397,7 @@ pub extern "system" fn librustzcash_ivk_to_pkd(
     }
 }
 
-/// Return 32 byte random scalar, uniformly.
-#[no_mangle]
-pub extern "system" fn librustzcash_sapling_generate_r(result: *mut [c_uchar; 32]) {
+fn librustzcash_sapling_generate_r_safe() -> Fs {
     // create random 64 byte buffer
     let mut rng = OsRng::new().expect("should be able to construct RNG");
     let mut buffer = [0u8; 64];
@@ -408,7 +406,13 @@ pub extern "system" fn librustzcash_sapling_generate_r(result: *mut [c_uchar; 32
     }
 
     // reduce to uniform value
-    let r = <Bls12 as JubjubEngine>::Fs::to_uniform(&buffer[..]);
+    <Bls12 as JubjubEngine>::Fs::to_uniform(&buffer[..])
+}
+
+/// Return 32 byte random scalar, uniformly.
+#[no_mangle]
+pub extern "system" fn librustzcash_sapling_generate_r(result: *mut [c_uchar; 32]) {
+    let r = librustzcash_sapling_generate_r_safe();
     let result = unsafe { &mut *result };
     r.into_repr()
         .write_le(&mut result[..])
