@@ -948,20 +948,19 @@ fn compute_value_balance(value: int64_t) -> Option<edwards::Point<Bls12, Unknown
     Some(value_balance.into())
 }
 
-#[no_mangle]
-pub extern "system" fn librustzcash_sapling_final_check(
-    ctx: *mut SaplingVerificationContext,
-    value_balance: int64_t,
-    binding_sig: *const [c_uchar; 64],
-    sighash_value: *const [c_uchar; 32],
-) -> bool {
+fn librustzcash_sapling_final_check_safe(
+    ctx: &mut SaplingVerificationContext,
+    value_balance: i64,
+    binding_sig: &[u8; 64],
+    sighash_value: &[u8; 32],
+) -> Result<(), ()> {
     // Obtain current bvk from the context
-    let mut bvk = redjubjub::PublicKey(unsafe { &*ctx }.bvk.clone());
+    let mut bvk = redjubjub::PublicKey(ctx.bvk.clone());
 
     // Compute value balance
     let mut value_balance = match compute_value_balance(value_balance) {
         Some(a) => a,
-        None => return false,
+        None => return Err(()),
     };
 
     // Subtract value_balance from current bvk to get final bvk
@@ -973,25 +972,43 @@ pub extern "system" fn librustzcash_sapling_final_check(
     bvk.0
         .write(&mut data_to_be_signed[0..32])
         .expect("bvk is 32 bytes");
-    (&mut data_to_be_signed[32..64]).copy_from_slice(&(unsafe { &*sighash_value })[..]);
+    (&mut data_to_be_signed[32..64]).copy_from_slice(&sighash_value[..]);
 
     // Deserialize the signature
-    let binding_sig = match Signature::read(&(unsafe { &*binding_sig })[..]) {
+    let binding_sig = match Signature::read(&binding_sig[..]) {
         Ok(sig) => sig,
-        Err(_) => return false,
+        Err(_) => return Err(()),
     };
 
     // Verify the binding_sig
-    if !bvk.verify(
+    if bvk.verify(
         &data_to_be_signed,
         &binding_sig,
         FixedGenerators::ValueCommitmentRandomness,
         &JUBJUB,
     ) {
-        return false;
+        Ok(())
+    } else {
+        Err(())
     }
+}
 
-    true
+#[no_mangle]
+pub extern "system" fn librustzcash_sapling_final_check(
+    ctx: *mut SaplingVerificationContext,
+    value_balance: int64_t,
+    binding_sig: *const [c_uchar; 64],
+    sighash_value: *const [c_uchar; 32],
+) -> bool {
+    match librustzcash_sapling_final_check_safe(
+        unsafe { &mut *ctx },
+        value_balance,
+        unsafe { &*binding_sig },
+        unsafe { &*sighash_value },
+    ) {
+        Ok(_) => true,
+        Err(_) => false,
+    }
 }
 
 #[no_mangle]
