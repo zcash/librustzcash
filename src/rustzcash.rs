@@ -386,15 +386,13 @@ pub extern "system" fn librustzcash_ivk_to_pkd(
     diversifier: *const [c_uchar; 11],
     result: *mut [c_uchar; 32],
 ) -> bool {
-    if let Some(pk_d) = librustzcash_ivk_to_pkd_safe(unsafe { &*ivk }, unsafe { *diversifier }) {
-        let result = unsafe { &mut *result };
-
-        pk_d.write(&mut result[..]).expect("length is 32 bytes");
-
-        true
-    } else {
-        false
-    }
+    let pk_d = match librustzcash_ivk_to_pkd_safe(unsafe { &*ivk }, unsafe { *diversifier }) {
+        Some(pk_d) => pk_d,
+        None => return false,
+    };
+    let result = unsafe { &mut *result };
+    pk_d.write(&mut result[..]).expect("length is 32 bytes");
+    true
 }
 
 fn librustzcash_sapling_generate_r_safe() -> Fs {
@@ -509,21 +507,21 @@ pub extern "system" fn librustzcash_sapling_compute_nf(
     position: uint64_t,
     result: *mut [c_uchar; 32],
 ) -> bool {
-    let diversifier = unsafe { *diversifier };
-    let pk_d = unsafe { &*pk_d };
-    let r = unsafe { &*r };
-    let ak = unsafe { &*ak };
-    let nk = unsafe { &*nk };
-
-    if let Ok(nf) =
-        librustzcash_sapling_compute_nf_safe(diversifier, pk_d, value, r, ak, nk, position)
-    {
-        let result = unsafe { &mut *result };
-        result.copy_from_slice(&nf);
-        true
-    } else {
-        false
-    }
+    let nf = match librustzcash_sapling_compute_nf_safe(
+        unsafe { *diversifier },
+        unsafe { &*pk_d },
+        value,
+        unsafe { &*r },
+        unsafe { &*ak },
+        unsafe { &*nk },
+        position,
+    ) {
+        Ok(nf) => nf,
+        Err(_) => return false,
+    };
+    let result = unsafe { &mut *result };
+    result.copy_from_slice(&nf);
+    true
 }
 
 fn librustzcash_sapling_compute_cm_safe(
@@ -545,18 +543,17 @@ pub extern "system" fn librustzcash_sapling_compute_cm(
     r: *const [c_uchar; 32],
     result: *mut [c_uchar; 32],
 ) -> bool {
-    let diversifier = unsafe { *diversifier };
-    let pk_d = unsafe { &*pk_d };
-    let r = unsafe { &*r };
-
-    let cm = match librustzcash_sapling_compute_cm_safe(diversifier, pk_d, value, r) {
+    let cm = match librustzcash_sapling_compute_cm_safe(
+        unsafe { *diversifier },
+        unsafe { &*pk_d },
+        value,
+        unsafe { &*r },
+    ) {
         Ok(cm) => cm,
         Err(_) => return false,
     };
-
     let result = unsafe { &mut *result };
     write_le(cm, &mut result[..]);
-
     true
 }
 
@@ -589,18 +586,13 @@ pub extern "system" fn librustzcash_sapling_ka_agree(
     sk: *const [c_uchar; 32],
     result: *mut [c_uchar; 32],
 ) -> bool {
-    let p = unsafe { &*p };
-    let sk = unsafe { &*sk };
-
-    let p = match librustzcash_sapling_ka_agree_safe(p, sk) {
+    let p = match librustzcash_sapling_ka_agree_safe(unsafe { &*p }, unsafe { &*sk }) {
         Ok(p) => p,
         Err(_) => return false,
     };
-
     // Produce result
     let result = unsafe { &mut *result };
     p.write(&mut result[..]).expect("length is not 32 bytes");
-
     true
 }
 
