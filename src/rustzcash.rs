@@ -690,65 +690,62 @@ const GROTH_PROOF_SIZE: usize = 48 // π_A
     + 96 // π_B
     + 48; // π_C
 
-#[no_mangle]
-pub extern "system" fn librustzcash_sapling_check_spend(
-    ctx: *mut SaplingVerificationContext,
-    cv: *const [c_uchar; 32],
-    anchor: *const [c_uchar; 32],
-    nullifier: *const [c_uchar; 32],
-    rk: *const [c_uchar; 32],
-    zkproof: *const [c_uchar; GROTH_PROOF_SIZE],
-    spend_auth_sig: *const [c_uchar; 64],
-    sighash_value: *const [c_uchar; 32],
-) -> bool {
+fn librustzcash_sapling_check_spend_safe(
+    ctx: &mut SaplingVerificationContext,
+    cv: &[u8; 32],
+    anchor: &[u8; 32],
+    nullifier: &[u8; 32],
+    rk: &[u8; 32],
+    zkproof: &[u8; GROTH_PROOF_SIZE],
+    spend_auth_sig: &[u8; 64],
+    sighash_value: &[u8; 32],
+    sapling_spend_vk: &PreparedVerifyingKey<Bls12>,
+) -> Result<(), ()> {
     // Deserialize the value commitment
-    let cv = match edwards::Point::<Bls12, Unknown>::read(&(unsafe { &*cv })[..], &JUBJUB) {
-        Ok(p) => p,
-        Err(_) => return false,
+    let cv = match edwards::Point::<Bls12, Unknown>::read(&cv[..], &JUBJUB) {
+        Ok(cv) => cv,
+        Err(_) => return Err(()),
     };
 
     if is_small_order(&cv) {
-        return false;
+        return Err(());
     }
 
     // Accumulate the value commitment in the context
     {
         let mut tmp = cv.clone();
-        tmp = tmp.add(&unsafe { &*ctx }.bvk, &JUBJUB);
+        tmp = tmp.add(&ctx.bvk, &JUBJUB);
 
         // Update the context
-        unsafe { &mut *ctx }.bvk = tmp;
+        ctx.bvk = tmp;
     }
 
     // Deserialize the anchor, which should be an element
     // of Fr.
-    let anchor = match Fr::from_repr(read_le(&(unsafe { &*anchor })[..])) {
+    let anchor = match Fr::from_repr(read_le(&anchor[..])) {
         Ok(a) => a,
-        Err(_) => return false,
+        Err(_) => return Err(()),
     };
-
-    // Grab the nullifier as a sequence of bytes
-    let nullifier = &unsafe { &*nullifier }[..];
 
     // Compute the signature's message for rk/spend_auth_sig
     let mut data_to_be_signed = [0u8; 64];
-    (&mut data_to_be_signed[0..32]).copy_from_slice(&(unsafe { &*rk })[..]);
-    (&mut data_to_be_signed[32..64]).copy_from_slice(&(unsafe { &*sighash_value })[..]);
+    (&mut data_to_be_signed[0..32]).copy_from_slice(&rk[..]);
+    (&mut data_to_be_signed[32..64]).copy_from_slice(&sighash_value[..]);
 
     // Deserialize rk
-    let rk = match redjubjub::PublicKey::<Bls12>::read(&(unsafe { &*rk })[..], &JUBJUB) {
+    let rk = match redjubjub::PublicKey::<Bls12>::read(&rk[..], &JUBJUB) {
         Ok(p) => p,
-        Err(_) => return false,
+        Err(_) => return Err(()),
     };
 
     if is_small_order(&rk.0) {
-        return false;
+        return Err(());
     }
 
     // Deserialize the signature
-    let spend_auth_sig = match Signature::read(&(unsafe { &*spend_auth_sig })[..]) {
+    let spend_auth_sig = match Signature::read(&spend_auth_sig[..]) {
         Ok(sig) => sig,
-        Err(_) => return false,
+        Err(_) => return Err(()),
     };
 
     // Verify the spend_auth_sig
@@ -758,7 +755,7 @@ pub extern "system" fn librustzcash_sapling_check_spend(
         FixedGenerators::SpendingKeyGenerator,
         &JUBJUB,
     ) {
-        return false;
+        return Err(());
     }
 
     // Construct public input for circuit
@@ -787,22 +784,45 @@ pub extern "system" fn librustzcash_sapling_check_spend(
     }
 
     // Deserialize the proof
-    let zkproof = match Proof::<Bls12>::read(&(unsafe { &*zkproof })[..]) {
+    let zkproof = match Proof::<Bls12>::read(&zkproof[..]) {
         Ok(p) => p,
-        Err(_) => return false,
+        Err(_) => return Err(()),
     };
 
     // Verify the proof
-    match verify_proof(
-        unsafe { SAPLING_SPEND_VK.as_ref() }.unwrap(),
-        &zkproof,
-        &public_input[..],
-    ) {
+    match verify_proof(sapling_spend_vk, &zkproof, &public_input[..]) {
         // No error, and proof verification successful
-        Ok(true) => true,
+        Ok(true) => Ok(()),
 
         // Any other case
-        _ => false,
+        _ => Err(()),
+    }
+}
+
+#[no_mangle]
+pub extern "system" fn librustzcash_sapling_check_spend(
+    ctx: *mut SaplingVerificationContext,
+    cv: *const [c_uchar; 32],
+    anchor: *const [c_uchar; 32],
+    nullifier: *const [c_uchar; 32],
+    rk: *const [c_uchar; 32],
+    zkproof: *const [c_uchar; GROTH_PROOF_SIZE],
+    spend_auth_sig: *const [c_uchar; 64],
+    sighash_value: *const [c_uchar; 32],
+) -> bool {
+    match librustzcash_sapling_check_spend_safe(
+        unsafe { &mut *ctx },
+        unsafe { &*cv },
+        unsafe { &*anchor },
+        unsafe { &*nullifier },
+        unsafe { &*rk },
+        unsafe { &*zkproof },
+        unsafe { &*spend_auth_sig },
+        unsafe { &*sighash_value },
+        unsafe { SAPLING_SPEND_VK.as_ref() }.unwrap(),
+    ) {
+        Ok(_) => true,
+        Err(_) => false,
     }
 }
 
