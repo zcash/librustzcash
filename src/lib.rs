@@ -205,6 +205,14 @@ impl<E: JubjubEngine> FullViewingKey<E> {
             .expect("should be able to serialize a FullViewingKey");
         result
     }
+
+    fn fingerprint(&self) -> FVKFingerprint {
+        let mut h = Blake2b::with_params(32, &[], &[], ZIP32_SAPLING_FVFP_PERSONALIZATION);
+        h.update(&self.to_bytes());
+        let mut fvfp = [0u8; 32];
+        fvfp.copy_from_slice(h.finalize().as_bytes());
+        FVKFingerprint(fvfp)
+    }
 }
 
 // ZIP 32 structures
@@ -212,31 +220,15 @@ impl<E: JubjubEngine> FullViewingKey<E> {
 /// A Sapling full viewing key fingerprint
 struct FVKFingerprint([u8; 32]);
 
-impl<'a, E: JubjubEngine> From<&'a FullViewingKey<E>> for FVKFingerprint {
-    fn from(fvk: &FullViewingKey<E>) -> Self {
-        let mut h = Blake2b::with_params(32, &[], &[], ZIP32_SAPLING_FVFP_PERSONALIZATION);
-        h.update(&fvk.to_bytes());
-        let mut fvfp = [0u8; 32];
-        fvfp.copy_from_slice(h.finalize().as_bytes());
-        FVKFingerprint(fvfp)
-    }
-}
-
 /// A Sapling full viewing key tag
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct FVKTag([u8; 4]);
 
-impl<'a> From<&'a FVKFingerprint> for FVKTag {
-    fn from(fingerprint: &FVKFingerprint) -> Self {
+impl FVKFingerprint {
+    fn tag(&self) -> FVKTag {
         let mut tag = [0u8; 4];
-        tag.copy_from_slice(&fingerprint.0[..4]);
+        tag.copy_from_slice(&self.0[..4]);
         FVKTag(tag)
-    }
-}
-
-impl From<FVKFingerprint> for FVKTag {
-    fn from(fingerprint: FVKFingerprint) -> Self {
-        (&fingerprint).into()
     }
 }
 
@@ -493,7 +485,7 @@ impl ExtendedSpendingKey {
 
         ExtendedSpendingKey {
             depth: self.depth + 1,
-            parent_fvk_tag: FVKFingerprint::from(&fvk).into(),
+            parent_fvk_tag: fvk.fingerprint().tag(),
             child_index: i,
             chain_code: ChainCode(c_i),
             expsk: self.expsk.derive_child(i_l),
@@ -570,7 +562,7 @@ impl ExtendedFullViewingKey {
 
         Ok(ExtendedFullViewingKey {
             depth: self.depth + 1,
-            parent_fvk_tag: FVKFingerprint::from(&self.fvk).into(),
+            parent_fvk_tag: self.fvk.fingerprint().tag(),
             child_index: i,
             chain_code: ChainCode(c_i),
             fvk: self.fvk.derive_child(i_l, &JUBJUB),
@@ -1200,7 +1192,7 @@ mod tests {
             let mut ser = vec![];
             xfvk.write(&mut ser).unwrap();
             assert_eq!(&ser[..], &tv.xfvk[..]);
-            assert_eq!(FVKFingerprint::from(&xfvk.fvk).0, tv.fp);
+            assert_eq!(xfvk.fvk.fingerprint().0, tv.fp);
 
             // d0
             let mut di = DiversifierIndex::new();
