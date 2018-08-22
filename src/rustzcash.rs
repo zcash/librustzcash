@@ -560,29 +560,42 @@ pub extern "system" fn librustzcash_sapling_compute_cm(
     true
 }
 
-#[no_mangle]
-pub extern "system" fn librustzcash_sapling_ka_agree(
-    p: *const [c_uchar; 32],
-    sk: *const [c_uchar; 32],
-    result: *mut [c_uchar; 32],
-) -> bool {
+fn librustzcash_sapling_ka_agree_safe(
+    p: &[u8; 32],
+    sk: &[u8; 32],
+) -> Result<edwards::Point<Bls12, PrimeOrder>, ()> {
     // Deserialize p
-    let p = match edwards::Point::<Bls12, Unknown>::read(&(unsafe { &*p })[..], &JUBJUB) {
+    let p = match edwards::Point::<Bls12, Unknown>::read(&p[..], &JUBJUB) {
         Ok(p) => p,
-        Err(_) => return false,
+        Err(_) => return Err(()),
     };
 
     // Deserialize sk
-    let sk = match Fs::from_repr(read_fs(&(unsafe { &*sk })[..])) {
-        Ok(p) => p,
-        Err(_) => return false,
+    let sk = match Fs::from_repr(read_fs(&sk[..])) {
+        Ok(sk) => sk,
+        Err(_) => return Err(()),
     };
 
     // Multiply by 8
     let p = p.mul_by_cofactor(&JUBJUB);
 
     // Multiply by sk
-    let p = p.mul(sk, &JUBJUB);
+    Ok(p.mul(sk, &JUBJUB))
+}
+
+#[no_mangle]
+pub extern "system" fn librustzcash_sapling_ka_agree(
+    p: *const [c_uchar; 32],
+    sk: *const [c_uchar; 32],
+    result: *mut [c_uchar; 32],
+) -> bool {
+    let p = unsafe { &*p };
+    let sk = unsafe { &*sk };
+
+    let p = match librustzcash_sapling_ka_agree_safe(p, sk) {
+        Ok(p) => p,
+        Err(_) => return false,
+    };
 
     // Produce result
     let result = unsafe { &mut *result };
