@@ -421,18 +421,18 @@ pub extern "system" fn librustzcash_sapling_generate_r(result: *mut [c_uchar; 32
 
 // Private utility function to get Note from C parameters
 fn priv_get_note(
-    diversifier: *const [c_uchar; 11],
-    pk_d: *const [c_uchar; 32],
-    value: uint64_t,
-    r: *const [c_uchar; 32],
+    diversifier: [u8; 11],
+    pk_d: &[u8; 32],
+    value: u64,
+    r: &[u8; 32],
 ) -> Result<sapling_crypto::primitives::Note<Bls12>, ()> {
-    let diversifier = sapling_crypto::primitives::Diversifier(unsafe { *diversifier });
+    let diversifier = sapling_crypto::primitives::Diversifier(diversifier);
     let g_d = match diversifier.g_d::<Bls12>(&JUBJUB) {
         Some(g_d) => g_d,
         None => return Err(()),
     };
 
-    let pk_d = match edwards::Point::<Bls12, Unknown>::read(&(unsafe { &*pk_d })[..], &JUBJUB) {
+    let pk_d = match edwards::Point::<Bls12, Unknown>::read(&pk_d[..], &JUBJUB) {
         Ok(p) => p,
         Err(_) => return Err(()),
     };
@@ -443,7 +443,7 @@ fn priv_get_note(
     };
 
     // Deserialize randomness
-    let r = match Fs::from_repr(read_fs(&(unsafe { &*r })[..])) {
+    let r = match Fs::from_repr(read_fs(&r[..])) {
         Ok(r) => r,
         Err(_) => return Err(()),
     };
@@ -470,6 +470,10 @@ pub extern "system" fn librustzcash_sapling_compute_nf(
     position: uint64_t,
     result: *mut [c_uchar; 32],
 ) -> bool {
+    let diversifier = unsafe { *diversifier };
+    let pk_d = unsafe { &*pk_d };
+    let r = unsafe { &*r };
+
     let note = match priv_get_note(diversifier, pk_d, value, r) {
         Ok(p) => p,
         Err(_) => return false,
@@ -512,6 +516,10 @@ pub extern "system" fn librustzcash_sapling_compute_cm(
     r: *const [c_uchar; 32],
     result: *mut [c_uchar; 32],
 ) -> bool {
+    let diversifier = unsafe { *diversifier };
+    let pk_d = unsafe { &*pk_d };
+    let r = unsafe { &*r };
+
     let note = match priv_get_note(diversifier, pk_d, value, r) {
         Ok(p) => p,
         Err(_) => return false,
