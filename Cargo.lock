@@ -705,6 +705,9 @@ name = "zcash_primitives"
 version = "0.0.0"
 dependencies = [
  "byteorder 1.2.2 (registry+https://github.com/rust-lang/crates.io-index)",
+ "lazy_static 1.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "pairing 0.14.2",
+ "sapling-crypto 0.0.1",
 ]
 
 [[package]]
