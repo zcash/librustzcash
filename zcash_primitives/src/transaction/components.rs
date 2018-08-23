@@ -22,7 +22,7 @@ const ZC_NUM_JS_OUTPUTS: usize = 2;
 
 pub struct Amount(pub u64);
 
-struct Script(Vec<u8>);
+pub struct Script(pub Vec<u8>);
 
 impl Script {
     pub fn read<R: Read>(mut reader: R) -> io::Result<Self> {
@@ -35,7 +35,7 @@ impl Script {
     }
 }
 
-struct OutPoint {
+pub struct OutPoint {
     hash: [u8; 32],
     n: u32,
 }
@@ -55,9 +55,9 @@ impl OutPoint {
 }
 
 pub struct TxIn {
-    prevout: OutPoint,
+    pub prevout: OutPoint,
     script_sig: Script,
-    sequence: u32,
+    pub sequence: u32,
 }
 
 impl TxIn {
@@ -103,11 +103,11 @@ impl TxOut {
 }
 
 pub struct SpendDescription {
-    cv: edwards::Point<Bls12, Unknown>,
-    anchor: Fr,
-    nullifier: [u8; 32],
-    rk: [u8; 32],
-    zkproof: [u8; GROTH_PROOF_SIZE],
+    pub cv: edwards::Point<Bls12, Unknown>,
+    pub anchor: Fr,
+    pub nullifier: [u8; 32],
+    pub rk: [u8; 32],
+    pub zkproof: [u8; GROTH_PROOF_SIZE],
     spend_auth_sig: Signature,
 }
 

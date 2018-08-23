@@ -5,6 +5,7 @@ use std::io::{self, Read, Write};
 use serialize::Vector;
 
 mod components;
+mod sighash;
 
 #[cfg(test)]
 mod tests;
