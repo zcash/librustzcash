@@ -23,7 +23,7 @@ const ZC_NUM_JS_OUTPUTS: usize = 2;
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Amount(pub i64);
 
-struct Script(Vec<u8>);
+pub struct Script(pub Vec<u8>);
 
 impl Script {
     pub fn read<R: Read>(mut reader: R) -> io::Result<Self> {
@@ -36,7 +36,7 @@ impl Script {
     }
 }
 
-struct OutPoint {
+pub struct OutPoint {
     hash: [u8; 32],
     n: u32,
 }
@@ -56,9 +56,9 @@ impl OutPoint {
 }
 
 pub struct TxIn {
-    prevout: OutPoint,
+    pub prevout: OutPoint,
     script_sig: Script,
-    sequence: u32,
+    pub sequence: u32,
 }
 
 impl TxIn {

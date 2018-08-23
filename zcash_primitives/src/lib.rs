@@ -1,6 +1,7 @@
 #[macro_use]
 extern crate lazy_static;
 
+extern crate blake2_rfc;
 extern crate byteorder;
 extern crate pairing;
 extern crate sapling_crypto;
