@@ -1,9 +1,10 @@
 use blake2_rfc::blake2b::Blake2b;
 use byteorder::{LittleEndian, WriteBytesExt};
+use pairing::{PrimeField, PrimeFieldRepr};
 
 use super::{
     components::{Amount, Script},
-    Transaction, OVERWINTER_VERSION_GROUP_ID, SAPLING_TX_VERSION,
+    Transaction, OVERWINTER_VERSION_GROUP_ID, SAPLING_TX_VERSION, SAPLING_VERSION_GROUP_ID,
 };
 
 const ZCASH_SIGHASH_PERSONALIZATION_PREFIX: &'static [u8; 12] = b"ZcashSigHash";
@@ -11,6 +12,8 @@ const ZCASH_PREVOUTS_HASH_PERSONALIZATION: &'static [u8; 16] = b"ZcashPrevoutHas
 const ZCASH_SEQUENCE_HASH_PERSONALIZATION: &'static [u8; 16] = b"ZcashSequencHash";
 const ZCASH_OUTPUTS_HASH_PERSONALIZATION: &'static [u8; 16] = b"ZcashOutputsHash";
 const ZCASH_JOINSPLITS_HASH_PERSONALIZATION: &'static [u8; 16] = b"ZcashJSplitsHash";
+const ZCASH_SHIELDED_SPENDS_HASH_PERSONALIZATION: &'static [u8; 16] = b"ZcashSSpendsHash";
+const ZCASH_SHIELDED_OUTPUTS_HASH_PERSONALIZATION: &'static [u8; 16] = b"ZcashSOutputHash";
 
 const SIGHASH_NONE: u32 = 2;
 const SIGHASH_SINGLE: u32 = 3;
@@ -21,6 +24,13 @@ macro_rules! update_u32 {
     ($h:expr, $value:expr, $tmp:expr) => {
         (&mut $tmp[..4]).write_u32::<LittleEndian>($value).unwrap();
         $h.update(&$tmp[..4]);
+    };
+}
+
+macro_rules! update_u64 {
+    ($h:expr, $value:expr, $tmp:expr) => {
+        (&mut $tmp[..8]).write_u64::<LittleEndian>($value).unwrap();
+        $h.update(&$tmp[..8]);
     };
 }
 
@@ -38,6 +48,7 @@ macro_rules! update_hash {
 enum SigHashVersion {
     Sprout,
     Overwinter,
+    Sapling,
 }
 
 impl SigHashVersion {
@@ -45,6 +56,7 @@ impl SigHashVersion {
         if tx.overwintered {
             match tx.version_group_id {
                 OVERWINTER_VERSION_GROUP_ID => SigHashVersion::Overwinter,
+                SAPLING_VERSION_GROUP_ID => SigHashVersion::Sapling,
                 _ => unimplemented!(),
             }
         } else {
@@ -102,6 +114,30 @@ fn joinsplits_hash(tx: &Transaction) -> Vec<u8> {
     h.finalize().as_ref().to_vec()
 }
 
+fn shielded_spends_hash(tx: &Transaction) -> Vec<u8> {
+    let mut data = Vec::with_capacity(tx.shielded_spends.len() * 384);
+    for s_spend in &tx.shielded_spends {
+        s_spend.cv.write(&mut data).unwrap();
+        s_spend.anchor.into_repr().write_le(&mut data).unwrap();
+        data.extend_from_slice(&s_spend.nullifier);
+        data.extend_from_slice(&s_spend.rk);
+        data.extend_from_slice(&s_spend.zkproof);
+    }
+    let mut h = Blake2b::with_params(32, &[], &[], ZCASH_SHIELDED_SPENDS_HASH_PERSONALIZATION);
+    h.update(&data);
+    h.finalize().as_ref().to_vec()
+}
+
+fn shielded_outputs_hash(tx: &Transaction) -> Vec<u8> {
+    let mut data = Vec::with_capacity(tx.shielded_outputs.len() * 948);
+    for s_out in &tx.shielded_outputs {
+        s_out.write(&mut data).unwrap();
+    }
+    let mut h = Blake2b::with_params(32, &[], &[], ZCASH_SHIELDED_OUTPUTS_HASH_PERSONALIZATION);
+    h.update(&data);
+    h.finalize().as_ref().to_vec()
+}
+
 pub fn signature_hash(
     tx: &Transaction,
     consensus_branch_id: u32,
@@ -110,7 +146,7 @@ pub fn signature_hash(
 ) -> Vec<u8> {
     let sigversion = SigHashVersion::from_tx(tx);
     match sigversion {
-        SigHashVersion::Overwinter => {
+        SigHashVersion::Overwinter | SigHashVersion::Sapling => {
             let hash_outputs = if (hash_type & SIGHASH_MASK) != SIGHASH_SINGLE
                 && (hash_type & SIGHASH_MASK) != SIGHASH_NONE
             {
@@ -151,8 +187,19 @@ pub fn signature_hash(
             );
             h.update(&hash_outputs);
             update_hash!(h, !tx.joinsplits.is_empty(), joinsplits_hash(tx));
+            if sigversion == SigHashVersion::Sapling {
+                update_hash!(h, !tx.shielded_spends.is_empty(), shielded_spends_hash(tx));
+                update_hash!(
+                    h,
+                    !tx.shielded_outputs.is_empty(),
+                    shielded_outputs_hash(tx)
+                );
+            }
             update_u32!(h, tx.lock_time, tmp);
             update_u32!(h, tx.expiry_height, tmp);
+            if sigversion == SigHashVersion::Sapling {
+                update_u64!(h, tx.value_balance.0, tmp);
+            }
             update_u32!(h, hash_type, tmp);
 
             if let Some((n, script_code, amount)) = transparent_input {
