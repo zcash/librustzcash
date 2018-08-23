@@ -1,0 +1,8 @@
+[package]
+name = "zcash_wallet"
+version = "0.0.0"
+authors = [
+    "Jack Grigg <jack@z.cash>",
+]
+
+[dependencies]

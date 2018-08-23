@@ -193,6 +193,18 @@ name = "winapi-x86_64-pc-windows-gnu"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 
+[[package]]
+name = "zcash_primitives"
+version = "0.0.0"
+
+[[package]]
+name = "zcash_proofs"
+version = "0.0.0"
+
+[[package]]
+name = "zcash_wallet"
+version = "0.0.0"
+
 [metadata]
 "checksum arrayvec 0.4.7 (registry+https://github.com/rust-lang/crates.io-index)" = "a1e964f9e24d588183fcb43503abda40d288c8657dfc27311516ce2f05675aef"
 "checksum bellman 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)" = "eae372472c7ea8f7c8fc6a62f7d5535db8302de7f1aafda2e13a97c4830d3bcf"

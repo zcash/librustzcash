@@ -1,6 +1,9 @@
 [workspace]
 members = [
     "librustzcash",
+    "zcash_primitives",
+    "zcash_proofs",
+    "zcash_wallet",
 ]
 
 [profile.release]
