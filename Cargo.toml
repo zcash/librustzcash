@@ -1,6 +1,9 @@
 [workspace]
 members = [
+    "bellman",
     "librustzcash",
+    "pairing",
+    "sapling-crypto",
     "zcash_primitives",
     "zcash_proofs",
     "zcash_wallet",

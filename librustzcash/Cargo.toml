@@ -14,17 +14,14 @@ path = "src/rustzcash.rs"
 crate-type = ["staticlib"]
 
 [dependencies]
+bellman = { path = "../bellman" }
 libc = "0.2"
-pairing = "0.14.2"
+pairing = { path = "../pairing" }
 lazy_static = "1"
-bellman = "0.1"
 byteorder = "1"
 rand = "0.4"
+sapling-crypto = { path = "../sapling-crypto" }
 
 [dependencies.blake2-rfc]
 git = "https://github.com/gtank/blake2-rfc"
 rev = "7a5b5fc99ae483a0043db7547fb79a6fa44b88a9"
-
-[dependencies.sapling-crypto]
-git = "https://github.com/zcash-hackworks/sapling-crypto"
-rev = "21084bde2019c04bd34208e63c3560fe2c02fb0e"
