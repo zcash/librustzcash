@@ -1,0 +1,27 @@
+[package]
+name = "librustzcash"
+version = "0.1.0"
+authors = [
+    "Sean Bowe <ewillbefull@gmail.com>",
+    "Jack Grigg <jack@z.cash>",
+    "Jay Graber <jay@z.cash>",
+    "Simon Liu <simon@z.cash>"
+    ]
+
+[lib]
+name = "rustzcash"
+path = "src/rustzcash.rs"
+crate-type = ["staticlib"]
+
+[dependencies]
+bellman = { path = "../bellman" }
+libc = "0.2"
+pairing = { path = "../pairing" }
+lazy_static = "1"
+byteorder = "1"
+rand = "0.4"
+sapling-crypto = { path = "../sapling-crypto" }
+
+[dependencies.blake2-rfc]
+git = "https://github.com/gtank/blake2-rfc"
+rev = "7a5b5fc99ae483a0043db7547fb79a6fa44b88a9"
