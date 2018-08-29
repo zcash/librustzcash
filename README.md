@@ -1,7 +1,5 @@
 # jubjub [![Crates.io](https://img.shields.io/crates/v/jubjub.svg)](https://crates.io/crates/jubjub) #
 
-This is a research project being built for [Zcash](https://z.cash/).
-
 ## License
 
 Licensed under either of
