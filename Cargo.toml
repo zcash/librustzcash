@@ -7,6 +7,7 @@ members = [
     "zcash_primitives",
     "zcash_proofs",
     "zcash_wallet",
+    "zip32",
 ]
 
 [profile.release]
