@@ -29,6 +29,10 @@ rev = "7a5b5fc99ae483a0043db7547fb79a6fa44b88a9"
 git = "https://github.com/zcash-hackworks/sapling-crypto"
 rev = "21084bde2019c04bd34208e63c3560fe2c02fb0e"
 
+[dependencies.zip32]
+git = "https://github.com/zcash-hackworks/zip32"
+rev = "176470ef41583b5bd0bd749bd1b61d417aa8ec79"
+
 [profile.release]
 lto = true
 panic = 'abort'
