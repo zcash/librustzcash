@@ -1,7 +1,7 @@
 # jubjub [![Crates.io](https://img.shields.io/crates/v/jubjub.svg)](https://crates.io/crates/jubjub) #
 
 <img
- width="33%"
+ width="15%"
  align="right"
  src="https://raw.githubusercontent.com/zcash/zips/master/protocol/jubjub.png"/>
 
