@@ -1,5 +1,10 @@
 # jubjub [![Crates.io](https://img.shields.io/crates/v/jubjub.svg)](https://crates.io/crates/jubjub) #
 
+<img
+ width="33%"
+ align="right"
+ src="https://raw.githubusercontent.com/zcash/zips/master/protocol/jubjub.png"/>
+
 This is a pure Rust implementation of the Jubjub elliptic curve group and its associated fields.
 
 * **This implementation has not been reviewed or audited. Use at your own risk.**
