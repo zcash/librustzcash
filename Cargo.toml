@@ -8,4 +8,6 @@ name = "jubjub"
 repository = "https://github.com/zkcrypto/jubjub"
 version = "0.0.0"
 
-[dependencies]
+[dependencies.byteorder]
+version = "1"
+default-features = false
