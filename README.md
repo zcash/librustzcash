@@ -9,8 +9,12 @@ This is a pure Rust implementation of the Jubjub elliptic curve group and its as
 
 * **This implementation has not been reviewed or audited. Use at your own risk.**
 * This implementation targets Rust `1.28` or later.
-* This crate is `#![no_std]` and so does not require the standard library.
-* All operations are constant-time unless explicitly noted.
+* All operations are constant time unless explicitly noted.
+
+## Features
+
+* **std** (on by default): Enables APIs that leverage the Rust standard library.
+* **nightly**: Enables `subtle/nightly` which prevents compiler optimizations that could jeopardize constant time operations.
 
 ## [Documentation](https://docs.rs/jubjub)
 

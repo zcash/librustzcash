@@ -16,3 +16,8 @@ default-features = false
 version = "0.7"
 default-features = false
 features = ["generic-impls"]
+
+[features]
+default = ["std"]
+nightly = ["subtle/nightly"]
+std = ["byteorder/std", "subtle/std"]
