@@ -8,6 +8,7 @@
 extern crate core;
 
 extern crate byteorder;
+extern crate subtle;
 
 mod fq;
 pub use fq::*;

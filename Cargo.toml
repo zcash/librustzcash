@@ -11,3 +11,8 @@ version = "0.0.0"
 [dependencies.byteorder]
 version = "1"
 default-features = false
+
+[dependencies.subtle]
+version = "0.7"
+default-features = false
+features = ["generic-impls"]

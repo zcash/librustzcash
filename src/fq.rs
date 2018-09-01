@@ -1,6 +1,7 @@
 use core::ops::{AddAssign, SubAssign, MulAssign, Neg};
 
 use byteorder::{ByteOrder, LittleEndian};
+use subtle::{Choice, ConditionallySelectable, ConditionallyAssignable};
 
 /// Represents an element of `GF(q)`.
 // The internal representation of this type is four 64-bit unsigned
@@ -8,6 +9,17 @@ use byteorder::{ByteOrder, LittleEndian};
 // Montgomery form; i.e., Fq(a) = aR mod q, with R = 2^256.
 #[derive(Clone, Copy)]
 pub struct Fq([u64; 4]);
+
+impl ConditionallySelectable for Fq {
+    fn conditional_select(a: &Self, b: &Self, choice: Choice) -> Self {
+        Fq([
+            u64::conditional_select(&a.0[0], &b.0[0], choice),
+            u64::conditional_select(&a.0[1], &b.0[1], choice),
+            u64::conditional_select(&a.0[2], &b.0[2], choice),
+            u64::conditional_select(&a.0[3], &b.0[3], choice)
+        ])
+    }
+}
 
 // Constant representing the modulus
 // q = 0x73eda753299d7d483339d80809a1d80553bda402fffe5bfeffffffff00000001
@@ -196,6 +208,35 @@ impl Fq {
         LittleEndian::write_u64(&mut res[24..32], tmp.0[3]);
 
         res
+    }
+
+    /// Squares this element.
+    pub fn square_assign(&mut self) {
+        let tmp = *self;
+        self.mul_assign(&tmp);
+    }
+
+    /// Exponentiates `self` by `by`, where `by` is a
+    /// little-endian order integer exponent.
+    pub fn pow(&self, by: &[u64; 4]) -> Self {
+        let mut res = Self::one();
+        for e in by.iter().rev() {
+            res.square_assign();
+            let mut e = *e;
+            for i in (0..64).rev() {
+                let mut tmp = res;
+                tmp.mul_assign(self);
+                res.conditional_assign(&tmp, (((e >> i) & 0x1) as u8).into());
+            }
+        }
+        res
+    }
+
+    /// Exponentiates `self` by q - 2, which has the
+    /// effect of inverting the element if it is
+    /// nonzero.
+    pub fn pow_q_minus_2(&self) -> Self {
+        self.pow(&[0xfffffffeffffffff, 0x53bda402fffe5bfe, 0x3339d80809a1d805, 0x73eda753299d7d48])
     }
 
     #[inline(always)]
