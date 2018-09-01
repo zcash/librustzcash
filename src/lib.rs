@@ -1,11 +1,8 @@
-// This crate is `no_std` unless test mode is enabled.
-#![cfg_attr(not(test), no_std)]
+#![no_std]
 
-// Import `core` explicitly (it is imported implicitly
-// when `no_std` is enabled, but this does not occur
-// during testing)
-#[cfg(test)]
-extern crate core;
+#[cfg(feature = "std")]
+#[macro_use]
+extern crate std;
 
 extern crate byteorder;
 extern crate subtle;
