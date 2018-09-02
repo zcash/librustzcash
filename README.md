@@ -13,8 +13,8 @@ This is a pure Rust implementation of the Jubjub elliptic curve group and its as
 
 ## Features
 
-* **std** (on by default): Enables APIs that leverage the Rust standard library.
-* **nightly**: Enables `subtle/nightly` which prevents compiler optimizations that could jeopardize constant time operations.
+* `std` (on by default): Enables APIs that leverage the Rust standard library.
+* `nightly`: Enables `subtle/nightly` which prevents compiler optimizations that could jeopardize constant time operations.
 
 ## [Documentation](https://docs.rs/jubjub)
 
