@@ -199,7 +199,7 @@ impl Fq {
     /// is not canonical (is not smaller than q).
     ///
     /// **This operation is variable time.**
-    pub fn from_bytes_var(bytes: [u8; 32]) -> Option<Fq> {
+    pub fn from_bytes_vartime(bytes: [u8; 32]) -> Option<Fq> {
         let mut tmp = Fq([0, 0, 0, 0]);
 
         tmp.0[0] = LittleEndian::read_u64(&bytes[0..8]);
@@ -426,9 +426,9 @@ fn test_into_bytes() {
 }
 
 #[test]
-fn test_from_bytes_var() {
+fn test_from_bytes_vartime() {
     assert_eq!(
-        Fq::from_bytes_var([
+        Fq::from_bytes_vartime([
             0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
             0, 0, 0
         ]).unwrap(),
@@ -436,7 +436,7 @@ fn test_from_bytes_var() {
     );
 
     assert_eq!(
-        Fq::from_bytes_var([
+        Fq::from_bytes_vartime([
             1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
             0, 0, 0
         ]).unwrap(),
@@ -444,7 +444,7 @@ fn test_from_bytes_var() {
     );
 
     assert_eq!(
-        Fq::from_bytes_var([
+        Fq::from_bytes_vartime([
             254, 255, 255, 255, 1, 0, 0, 0, 2, 72, 3, 0, 250, 183, 132, 88, 245, 79, 188, 236, 239,
             79, 140, 153, 111, 5, 197, 172, 89, 177, 36, 24
         ]).unwrap(),
@@ -453,7 +453,7 @@ fn test_from_bytes_var() {
 
     // -1 should work
     assert!(
-        Fq::from_bytes_var([
+        Fq::from_bytes_vartime([
             0, 0, 0, 0, 255, 255, 255, 255, 254, 91, 254, 255, 2, 164, 189, 83, 5, 216, 161, 9, 8,
             216, 57, 51, 72, 125, 157, 41, 83, 167, 237, 115
         ]).is_some()
@@ -461,7 +461,7 @@ fn test_from_bytes_var() {
 
     // modulus is invalid
     assert!(
-        Fq::from_bytes_var([
+        Fq::from_bytes_vartime([
             1, 0, 0, 0, 255, 255, 255, 255, 254, 91, 254, 255, 2, 164, 189, 83, 5, 216, 161, 9, 8,
             216, 57, 51, 72, 125, 157, 41, 83, 167, 237, 115
         ]).is_none()
@@ -469,19 +469,19 @@ fn test_from_bytes_var() {
 
     // Anything larger than the modulus is invalid
     assert!(
-        Fq::from_bytes_var([
+        Fq::from_bytes_vartime([
             2, 0, 0, 0, 255, 255, 255, 255, 254, 91, 254, 255, 2, 164, 189, 83, 5, 216, 161, 9, 8,
             216, 57, 51, 72, 125, 157, 41, 83, 167, 237, 115
         ]).is_none()
     );
     assert!(
-        Fq::from_bytes_var([
+        Fq::from_bytes_vartime([
             1, 0, 0, 0, 255, 255, 255, 255, 254, 91, 254, 255, 2, 164, 189, 83, 5, 216, 161, 9, 8,
             216, 58, 51, 72, 125, 157, 41, 83, 167, 237, 115
         ]).is_none()
     );
     assert!(
-        Fq::from_bytes_var([
+        Fq::from_bytes_vartime([
             1, 0, 0, 0, 255, 255, 255, 255, 254, 91, 254, 255, 2, 164, 189, 83, 5, 216, 161, 9, 8,
             216, 57, 51, 72, 125, 157, 41, 83, 167, 237, 116
         ]).is_none()
