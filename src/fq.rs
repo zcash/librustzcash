@@ -9,7 +9,7 @@ use subtle::{Choice, ConditionallyAssignable, ConditionallySelectable, ConstantT
 // integers in little-endian order. Elements of Fq are always in
 // Montgomery form; i.e., Fq(a) = aR mod q, with R = 2^256.
 #[derive(Clone, Copy)]
-pub struct Fq([u64; 4]);
+pub struct Fq(pub(crate) [u64; 4]);
 
 impl fmt::Debug for Fq {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {

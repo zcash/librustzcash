@@ -7,7 +7,7 @@ extern crate std;
 extern crate byteorder;
 extern crate subtle;
 
-use core::ops::Neg;
+use core::ops::{AddAssign, Neg};
 
 mod fq;
 pub use fq::*;
@@ -39,9 +39,15 @@ struct Point {
     z: Fq,
 }
 
+// `d = -(10240/10241)`
+const EDWARDS_D: Fq = Fq([
+    0x2a522455b974f6b0, 0xfc6cc9ef0d9acab3, 0x7a08fb94c27628d1, 0x57f8f6a8fe0e262e
+]);
+
 impl Point {
-    pub fn zero() -> Point {
-        // (0, 1) is the neutral element of the group.
+    pub fn identity() -> Point {
+        // `(0, 1)` is the neutral element of the group;
+        // the additive identity.
 
         Point {
             u: Fq::zero(),
@@ -62,5 +68,15 @@ impl<'a> Neg for &'a Point {
             t: -&self.t,
             z: self.z,
         }
+    }
+}
+
+impl<'b> AddAssign<&'b Point> for Point {
+    fn add_assign(&mut self, rhs: &'b Point) {
+        // See "Twisted Edwards Curves Revisited"
+        //     Hisil, Wong, Carter, and Dawson
+        //     3.1 Unified Addition in E^e
+
+        unimplemented!()
     }
 }
