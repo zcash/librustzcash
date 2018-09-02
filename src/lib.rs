@@ -7,7 +7,7 @@ extern crate std;
 extern crate byteorder;
 extern crate subtle;
 
-use core::ops::{Neg};
+use core::ops::Neg;
 
 mod fq;
 pub use fq::*;
@@ -47,7 +47,7 @@ impl Point {
             u: Fq::zero(),
             v: Fq::one(),
             t: Fq::zero(),
-            z: Fq::one()
+            z: Fq::one(),
         }
     }
 }
@@ -60,7 +60,7 @@ impl<'a> Neg for &'a Point {
             u: -&self.u,
             v: self.v,
             t: -&self.t,
-            z: self.z
+            z: self.z,
         }
     }
 }

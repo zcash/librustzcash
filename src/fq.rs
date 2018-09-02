@@ -1,8 +1,8 @@
 use core::fmt;
-use core::ops::{AddAssign, SubAssign, MulAssign, Neg};
+use core::ops::{AddAssign, MulAssign, Neg, SubAssign};
 
 use byteorder::{ByteOrder, LittleEndian};
-use subtle::{Choice, ConditionallySelectable, ConditionallyAssignable, ConstantTimeEq};
+use subtle::{Choice, ConditionallyAssignable, ConditionallySelectable, ConstantTimeEq};
 
 /// Represents an element of `GF(q)`.
 // The internal representation of this type is four 64-bit unsigned
@@ -24,10 +24,10 @@ impl fmt::Debug for Fq {
 
 impl ConstantTimeEq for Fq {
     fn ct_eq(&self, other: &Self) -> Choice {
-        self.0[0].ct_eq(&other.0[0]) &
-        self.0[1].ct_eq(&other.0[1]) &
-        self.0[2].ct_eq(&other.0[2]) &
-        self.0[3].ct_eq(&other.0[3])
+        self.0[0].ct_eq(&other.0[0])
+            & self.0[1].ct_eq(&other.0[1])
+            & self.0[2].ct_eq(&other.0[2])
+            & self.0[3].ct_eq(&other.0[3])
     }
 }
 
@@ -43,7 +43,7 @@ impl ConditionallySelectable for Fq {
             u64::conditional_select(&a.0[0], &b.0[0], choice),
             u64::conditional_select(&a.0[1], &b.0[1], choice),
             u64::conditional_select(&a.0[2], &b.0[2], choice),
-            u64::conditional_select(&a.0[3], &b.0[3], choice)
+            u64::conditional_select(&a.0[3], &b.0[3], choice),
         ])
     }
 }
@@ -51,7 +51,10 @@ impl ConditionallySelectable for Fq {
 // Constant representing the modulus
 // q = 0x73eda753299d7d483339d80809a1d80553bda402fffe5bfeffffffff00000001
 const MODULUS: Fq = Fq([
-    0xffffffff00000001, 0x53bda402fffe5bfe, 0x3339d80809a1d805, 0x73eda753299d7d48
+    0xffffffff00000001,
+    0x53bda402fffe5bfe,
+    0x3339d80809a1d805,
+    0x73eda753299d7d48,
 ]);
 
 /// Compute a + b + carry, returning the result and setting carry to the
@@ -168,12 +171,18 @@ const INV: u64 = 0xfffffffeffffffff;
 
 /// R = 2^256 mod q
 const R: Fq = Fq([
-    0x00000001fffffffe, 0x5884b7fa00034802, 0x998c4fefecbc4ff5, 0x1824b159acc5056f
+    0x00000001fffffffe,
+    0x5884b7fa00034802,
+    0x998c4fefecbc4ff5,
+    0x1824b159acc5056f,
 ]);
 
 /// R^2 = 2^512 mod q
 const R2: Fq = Fq([
-    0xc999e990f3f29c6d, 0x2b6cedcb87925c23, 0x05d314967254398f, 0x0748d9d99f59ff11
+    0xc999e990f3f29c6d,
+    0x2b6cedcb87925c23,
+    0x05d314967254398f,
+    0x0748d9d99f59ff11,
 ]);
 
 impl Fq {
@@ -205,11 +214,11 @@ impl Fq {
                 // (a.R^{-1} * R^2) / R = a.R
                 tmp.mul_assign(&R2);
 
-                return Some(tmp)
+                return Some(tmp);
             }
 
             if tmp.0[i] > MODULUS.0[i] {
-                return None
+                return None;
             }
         }
 
@@ -223,10 +232,7 @@ impl Fq {
         // Turn into canonical form by computing
         // (a.R * R) / R = a
         let mut tmp = *self;
-        tmp.montgomery_reduce(
-            self.0[0], self.0[1], self.0[2], self.0[3],
-            0, 0, 0, 0
-        );
+        tmp.montgomery_reduce(self.0[0], self.0[1], self.0[2], self.0[3], 0, 0, 0, 0);
 
         let mut res = [0; 32];
         LittleEndian::write_u64(&mut res[0..8], tmp.0[0]);
@@ -263,7 +269,12 @@ impl Fq {
     /// effect of inverting the element if it is
     /// nonzero.
     pub fn pow_q_minus_2(&self) -> Self {
-        self.pow(&[0xfffffffeffffffff, 0x53bda402fffe5bfe, 0x3339d80809a1d805, 0x73eda753299d7d48])
+        self.pow(&[
+            0xfffffffeffffffff,
+            0x53bda402fffe5bfe,
+            0x3339d80809a1d805,
+            0x73eda753299d7d48,
+        ])
     }
 
     #[inline(always)]
@@ -276,9 +287,8 @@ impl Fq {
         r4: u64,
         r5: u64,
         r6: u64,
-        r7: u64
-    )
-    {
+        r7: u64,
+    ) {
         // The Montgomery reduction here is based on Algorithm 14.32 in
         // Handbook of Applied Cryptography
         // <http://cacr.uwaterloo.ca/hac/about/chap14.pdf>.
@@ -348,9 +358,18 @@ fn test_inv() {
 
 #[test]
 fn test_debug() {
-    assert_eq!(format!("{:?}", Fq::zero()), "0x0000000000000000000000000000000000000000000000000000000000000000");
-    assert_eq!(format!("{:?}", Fq::one()), "0x0000000000000000000000000000000000000000000000000000000000000001");
-    assert_eq!(format!("{:?}", R2), "0x1824b159acc5056f998c4fefecbc4ff55884b7fa0003480200000001fffffffe");
+    assert_eq!(
+        format!("{:?}", Fq::zero()),
+        "0x0000000000000000000000000000000000000000000000000000000000000000"
+    );
+    assert_eq!(
+        format!("{:?}", Fq::one()),
+        "0x0000000000000000000000000000000000000000000000000000000000000001"
+    );
+    assert_eq!(
+        format!("{:?}", R2),
+        "0x1824b159acc5056f998c4fefecbc4ff55884b7fa0003480200000001fffffffe"
+    );
 }
 
 #[test]
@@ -367,72 +386,114 @@ fn test_equality() {
 fn test_into_bytes() {
     assert_eq!(
         Fq::zero().into_bytes(),
-        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+        [
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0
+        ]
     );
 
     assert_eq!(
         Fq::one().into_bytes(),
-        [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+        [
+            1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0
+        ]
     );
 
     assert_eq!(
         R2.into_bytes(),
-        [254, 255, 255, 255, 1, 0, 0, 0, 2, 72, 3, 0, 250, 183, 132, 88, 245, 79, 188, 236, 239, 79, 140, 153, 111, 5, 197, 172, 89, 177, 36, 24]
+        [
+            254, 255, 255, 255, 1, 0, 0, 0, 2, 72, 3, 0, 250, 183, 132, 88, 245, 79, 188, 236, 239,
+            79, 140, 153, 111, 5, 197, 172, 89, 177, 36, 24
+        ]
     );
 
     assert_eq!(
         (-&Fq::one()).into_bytes(),
-        [0, 0, 0, 0, 255, 255, 255, 255, 254, 91, 254, 255, 2, 164, 189, 83, 5, 216, 161, 9, 8, 216, 57, 51, 72, 125, 157, 41, 83, 167, 237, 115]
+        [
+            0, 0, 0, 0, 255, 255, 255, 255, 254, 91, 254, 255, 2, 164, 189, 83, 5, 216, 161, 9, 8,
+            216, 57, 51, 72, 125, 157, 41, 83, 167, 237, 115
+        ]
     );
 
     assert_eq!(
         (-&Fq::one()).into_bytes(),
-        [0, 0, 0, 0, 255, 255, 255, 255, 254, 91, 254, 255, 2, 164, 189, 83, 5, 216, 161, 9, 8, 216, 57, 51, 72, 125, 157, 41, 83, 167, 237, 115]
+        [
+            0, 0, 0, 0, 255, 255, 255, 255, 254, 91, 254, 255, 2, 164, 189, 83, 5, 216, 161, 9, 8,
+            216, 57, 51, 72, 125, 157, 41, 83, 167, 237, 115
+        ]
     );
 }
 
 #[test]
 fn test_from_bytes_var() {
     assert_eq!(
-        Fq::from_bytes_var([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]).unwrap(),
+        Fq::from_bytes_var([
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0
+        ]).unwrap(),
         Fq::zero()
     );
 
     assert_eq!(
-        Fq::from_bytes_var([1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]).unwrap(),
+        Fq::from_bytes_var([
+            1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0
+        ]).unwrap(),
         Fq::one()
     );
 
     assert_eq!(
-        Fq::from_bytes_var([254, 255, 255, 255, 1, 0, 0, 0, 2, 72, 3, 0, 250, 183, 132, 88, 245, 79, 188, 236, 239, 79, 140, 153, 111, 5, 197, 172, 89, 177, 36, 24]).unwrap(),
+        Fq::from_bytes_var([
+            254, 255, 255, 255, 1, 0, 0, 0, 2, 72, 3, 0, 250, 183, 132, 88, 245, 79, 188, 236, 239,
+            79, 140, 153, 111, 5, 197, 172, 89, 177, 36, 24
+        ]).unwrap(),
         R2
     );
 
     // -1 should work
-    assert!(Fq::from_bytes_var(
-        [0, 0, 0, 0, 255, 255, 255, 255, 254, 91, 254, 255, 2, 164, 189, 83, 5, 216, 161, 9, 8, 216, 57, 51, 72, 125, 157, 41, 83, 167, 237, 115]
-    ).is_some());
+    assert!(
+        Fq::from_bytes_var([
+            0, 0, 0, 0, 255, 255, 255, 255, 254, 91, 254, 255, 2, 164, 189, 83, 5, 216, 161, 9, 8,
+            216, 57, 51, 72, 125, 157, 41, 83, 167, 237, 115
+        ]).is_some()
+    );
 
     // modulus is invalid
-    assert!(Fq::from_bytes_var(
-        [1, 0, 0, 0, 255, 255, 255, 255, 254, 91, 254, 255, 2, 164, 189, 83, 5, 216, 161, 9, 8, 216, 57, 51, 72, 125, 157, 41, 83, 167, 237, 115]
-    ).is_none());
+    assert!(
+        Fq::from_bytes_var([
+            1, 0, 0, 0, 255, 255, 255, 255, 254, 91, 254, 255, 2, 164, 189, 83, 5, 216, 161, 9, 8,
+            216, 57, 51, 72, 125, 157, 41, 83, 167, 237, 115
+        ]).is_none()
+    );
 
     // Anything larger than the modulus is invalid
-    assert!(Fq::from_bytes_var(
-        [2, 0, 0, 0, 255, 255, 255, 255, 254, 91, 254, 255, 2, 164, 189, 83, 5, 216, 161, 9, 8, 216, 57, 51, 72, 125, 157, 41, 83, 167, 237, 115]
-    ).is_none());
-    assert!(Fq::from_bytes_var(
-        [1, 0, 0, 0, 255, 255, 255, 255, 254, 91, 254, 255, 2, 164, 189, 83, 5, 216, 161, 9, 8, 216, 58, 51, 72, 125, 157, 41, 83, 167, 237, 115]
-    ).is_none());
-    assert!(Fq::from_bytes_var(
-        [1, 0, 0, 0, 255, 255, 255, 255, 254, 91, 254, 255, 2, 164, 189, 83, 5, 216, 161, 9, 8, 216, 57, 51, 72, 125, 157, 41, 83, 167, 237, 116]
-    ).is_none());
+    assert!(
+        Fq::from_bytes_var([
+            2, 0, 0, 0, 255, 255, 255, 255, 254, 91, 254, 255, 2, 164, 189, 83, 5, 216, 161, 9, 8,
+            216, 57, 51, 72, 125, 157, 41, 83, 167, 237, 115
+        ]).is_none()
+    );
+    assert!(
+        Fq::from_bytes_var([
+            1, 0, 0, 0, 255, 255, 255, 255, 254, 91, 254, 255, 2, 164, 189, 83, 5, 216, 161, 9, 8,
+            216, 58, 51, 72, 125, 157, 41, 83, 167, 237, 115
+        ]).is_none()
+    );
+    assert!(
+        Fq::from_bytes_var([
+            1, 0, 0, 0, 255, 255, 255, 255, 254, 91, 254, 255, 2, 164, 189, 83, 5, 216, 161, 9, 8,
+            216, 57, 51, 72, 125, 157, 41, 83, 167, 237, 116
+        ]).is_none()
+    );
 }
 
 #[cfg(test)]
 const LARGEST: Fq = Fq([
-    0xffffffff00000000, 0x53bda402fffe5bfe, 0x3339d80809a1d805, 0x73eda753299d7d48
+    0xffffffff00000000,
+    0x53bda402fffe5bfe,
+    0x3339d80809a1d805,
+    0x73eda753299d7d48,
 ]);
 
 #[test]
@@ -443,14 +504,15 @@ fn test_addition() {
     assert_eq!(
         tmp,
         Fq([
-            0xfffffffeffffffff, 0x53bda402fffe5bfe, 0x3339d80809a1d805, 0x73eda753299d7d48
+            0xfffffffeffffffff,
+            0x53bda402fffe5bfe,
+            0x3339d80809a1d805,
+            0x73eda753299d7d48
         ])
     );
 
     let mut tmp = LARGEST;
-    tmp += &Fq([
-        1, 0, 0, 0
-    ]);
+    tmp += &Fq([1, 0, 0, 0]);
 
     assert_eq!(tmp, Fq::zero());
 }
@@ -459,12 +521,7 @@ fn test_addition() {
 fn test_negation() {
     let tmp = -&LARGEST;
 
-    assert_eq!(
-        tmp,
-        Fq([
-            1, 0, 0, 0
-        ])
-    );
+    assert_eq!(tmp, Fq([1, 0, 0, 0]));
 
     let tmp = -&Fq::zero();
     assert_eq!(tmp, Fq::zero());
@@ -477,10 +534,7 @@ fn test_subtraction() {
     let mut tmp = LARGEST;
     tmp -= &LARGEST;
 
-    assert_eq!(
-        tmp,
-        Fq::zero()
-    );
+    assert_eq!(tmp, Fq::zero());
 
     let mut tmp = Fq::zero();
     tmp -= &LARGEST;
@@ -500,7 +554,12 @@ fn test_multiplication() {
         tmp *= &cur;
 
         let mut tmp2 = Fq::zero();
-        for b in cur.into_bytes().iter().rev().flat_map(|byte| (0..8).rev().map(move |i| ((byte >> i) & 1u8) == 1u8)) {
+        for b in cur
+            .into_bytes()
+            .iter()
+            .rev()
+            .flat_map(|byte| (0..8).rev().map(move |i| ((byte >> i) & 1u8) == 1u8))
+        {
             let tmp3 = tmp2;
             tmp2.add_assign(&tmp3);
 
@@ -524,7 +583,12 @@ fn test_squaring() {
         tmp.square_assign();
 
         let mut tmp2 = Fq::zero();
-        for b in cur.into_bytes().iter().rev().flat_map(|byte| (0..8).rev().map(move |i| ((byte >> i) & 1u8) == 1u8)) {
+        for b in cur
+            .into_bytes()
+            .iter()
+            .rev()
+            .flat_map(|byte| (0..8).rev().map(move |i| ((byte >> i) & 1u8) == 1u8))
+        {
             let tmp3 = tmp2;
             tmp2.add_assign(&tmp3);
 
