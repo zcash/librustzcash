@@ -20,7 +20,7 @@ This is a pure Rust implementation of the Jubjub elliptic curve group and its as
 
 ## Curve Description
 
-Jubjub is the [twisted Edwards curve](https://en.wikipedia.org/wiki/Twisted_Edwards_curve) `-x^2 + y^2 = 1 + d.x^2.y^2` of rational points over `GF(q)` with a subgroup of prime order `r` and cofactor `8`.
+Jubjub is the [twisted Edwards curve](https://en.wikipedia.org/wiki/Twisted_Edwards_curve) `-u^2 + v^2 = 1 + d.u^2.v^2` of rational points over `GF(q)` with a subgroup of prime order `r` and cofactor `8`.
 
 ```
 q = 0x73eda753299d7d483339d80809a1d80553bda402fffe5bfeffffffff00000001

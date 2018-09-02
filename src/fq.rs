@@ -78,7 +78,7 @@ fn mac_with_carry(a: u64, b: u64, c: u64, carry: &mut u128) -> u64 {
     *carry as u64
 }
 
-impl Neg for Fq {
+impl<'a> Neg for &'a Fq {
     type Output = Fq;
 
     fn neg(self) -> Fq {
@@ -325,6 +325,12 @@ impl Fq {
     }
 }
 
+impl<'a> From<&'a Fq> for [u8; 32] {
+    fn from(value: &'a Fq) -> [u8; 32] {
+        value.into_bytes()
+    }
+}
+
 #[test]
 fn test_inv() {
     // Compute -(q^{-1} mod 2^64) mod 2^64 by exponentiating
@@ -375,12 +381,12 @@ fn test_into_bytes() {
     );
 
     assert_eq!(
-        (-Fq::one()).into_bytes(),
+        (-&Fq::one()).into_bytes(),
         [0, 0, 0, 0, 255, 255, 255, 255, 254, 91, 254, 255, 2, 164, 189, 83, 5, 216, 161, 9, 8, 216, 57, 51, 72, 125, 157, 41, 83, 167, 237, 115]
     );
 
     assert_eq!(
-        (-Fq::one()).into_bytes(),
+        (-&Fq::one()).into_bytes(),
         [0, 0, 0, 0, 255, 255, 255, 255, 254, 91, 254, 255, 2, 164, 189, 83, 5, 216, 161, 9, 8, 216, 57, 51, 72, 125, 157, 41, 83, 167, 237, 115]
     );
 }
@@ -451,7 +457,7 @@ fn test_addition() {
 
 #[test]
 fn test_negation() {
-    let tmp = -LARGEST;
+    let tmp = -&LARGEST;
 
     assert_eq!(
         tmp,
@@ -460,9 +466,9 @@ fn test_negation() {
         ])
     );
 
-    let tmp = -Fq::zero();
+    let tmp = -&Fq::zero();
     assert_eq!(tmp, Fq::zero());
-    let tmp = -Fq([1, 0, 0, 0]);
+    let tmp = -&Fq([1, 0, 0, 0]);
     assert_eq!(tmp, LARGEST);
 }
 
@@ -536,7 +542,7 @@ fn test_squaring() {
 #[test]
 fn test_inversion() {
     assert_eq!(Fq::one().pow_q_minus_2(), Fq::one());
-    assert_eq!((-Fq::one()).pow_q_minus_2(), -Fq::one());
+    assert_eq!((-&Fq::one()).pow_q_minus_2(), -&Fq::one());
 
     let mut tmp = R2;
 
