@@ -5,7 +5,6 @@ use ff::{Field, PrimeField, PrimeFieldRepr};
 pub enum Personalization {
     NoteCommitment,
     MerkleTree(usize),
-    Empty,
 }
 
 impl Personalization {
@@ -16,9 +15,6 @@ impl Personalization {
                 assert!(num < 63);
 
                 (0..6).map(|i| (num >> i) & 1 == 1).collect()
-            }
-            Personalization::Empty => {
-                vec![true, true, true, true, true, true]
             }
         }
     }
@@ -42,14 +38,12 @@ where
     let mut generators = params.pedersen_hash_exp_table().iter();
 
     loop {
-        // acc is <M_i>
         let mut acc = E::Fs::zero();
         let mut cur = E::Fs::one();
         let mut chunks_remaining = params.pedersen_hash_chunks_per_generator();
         let mut encountered_bits = false;
 
         // Grab three bits from the input
-        // spec: iterate over chunks (a,b,c)
         while let Some(a) = bits.next() {
             encountered_bits = true;
 
@@ -57,7 +51,6 @@ where
             let c = bits.next().unwrap_or(false);
 
             // Start computing this portion of the scalar
-            // tmp is enc(m_j)
             let mut tmp = cur;
             if a {
                 tmp.add_assign(&cur);
@@ -111,28 +104,4 @@ where
     }
 
     result
-}
-
-#[cfg(test)]
-mod test {
-    use ::jubjub::*;
-    use pairing::bls12_381::{Bls12, Fr};
-    use pedersen_hash::{pedersen_hash, Personalization};
-
-    #[test]
-    fn test_pedersen_hash_noncircuit() {
-        let params  = &JubjubBls12::new();
-        /*
-        for (i, generator) in params.pedersen_hash_generators().iter().enumerate() {
-            println!("generator {}, x={}, y={}", i, generator.into_xy().0, generator.into_xy().1)
-        }
-        */
-
-        let mut input: Vec<bool> = vec![];
-        for i in 0..(63*3*4+1) {
-            input.push(true);
-        }
-        let p = pedersen_hash::<Bls12, _>(Personalization::Empty, input, &params).into_xy();
-        println!("hash = {}, {}", p.0, p.1);
-    }
 }
