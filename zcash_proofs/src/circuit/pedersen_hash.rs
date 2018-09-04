@@ -207,4 +207,57 @@ mod test {
             }
         }
     }
+
+    #[test]
+    fn test_pedersen_hash_external_test_vectors() {
+        let mut rng = XorShiftRng::from_seed([
+            0x59, 0x62, 0xbe, 0x3d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06,
+            0xbc, 0xe5,
+        ]);
+        let params = &JubjubBls12::new();
+
+        let expected_xs = [
+            "28161926966428986673895580777285905189725480206811328272001879986576840909576",
+            "39669831794597628158501766225645040955899576179071014703006420393381978263045",
+        ];
+        let expected_ys = [
+            "26869991781071974894722407757894142583682396277979904369818887810555917099932",
+            "2112827187110048608327330788910224944044097981650120385961435904443901436107",
+        ];
+        for length in 300..302 {
+            let mut input: Vec<bool> = (0..length).map(|_| rng.next_u32() % 2 != 0).collect();
+
+            let mut cs = TestConstraintSystem::<Bls12>::new();
+
+            let input_bools: Vec<Boolean> = input
+                .iter()
+                .enumerate()
+                .map(|(i, b)| {
+                    Boolean::from(
+                        AllocatedBit::alloc(cs.namespace(|| format!("input {}", i)), Some(*b))
+                            .unwrap(),
+                    )
+                })
+                .collect();
+
+            let res = pedersen_hash(
+                cs.namespace(|| "pedersen hash"),
+                Personalization::MerkleTree(1),
+                &input_bools,
+                params,
+            )
+            .unwrap();
+
+            assert!(cs.is_satisfied());
+
+            assert_eq!(
+                res.get_x().get_value().unwrap(),
+                Fr::from_str(expected_xs[length - 300]).unwrap()
+            );
+            assert_eq!(
+                res.get_y().get_value().unwrap(),
+                Fr::from_str(expected_ys[length - 300]).unwrap()
+            );
+        }
+    }
 }
