@@ -87,7 +87,6 @@ where
         &value_bits,
         params,
     )?;
-    println!("value: {}, {}", value.get_x().get_value().unwrap(), value.get_y().get_value().unwrap());
 
     // Booleanize the randomness. This does not ensure
     // the bit representation is "in the field" because
@@ -96,8 +95,6 @@ where
         cs.namespace(|| "rcv"),
         value_commitment.as_ref().map(|c| c.randomness),
     )?;
-    println!("rcv: {}", value_commitment.as_ref().unwrap().randomness);
-    println!("value: {}", value_commitment.as_ref().unwrap().value);
 
     // Compute the randomness in the exponent
     let rcv = ecc::fixed_base_multiplication(
@@ -109,7 +106,6 @@ where
 
     // Compute the Pedersen commitment to the value
     let cv = value.add(cs.namespace(|| "computation of cv"), &rcv, params)?;
-    println!("cv: {}, {}", cv.get_x().get_value().unwrap(), cv.get_y().get_value().unwrap());
 
     // Expose the commitment as an input to the circuit
     cv.inputize(cs.namespace(|| "commitment point"))?;
@@ -274,17 +270,7 @@ impl<'a, E: JubjubEngine> Circuit<E> for Spend<'a, E> {
             &note_contents,
             self.params,
         )?;
-        println!("cm: {}, {}", cm.get_x().get_value().unwrap(), cm.get_y().get_value().unwrap());
 
-        let mut note_contents_print: Vec<&str> = vec![];
-        for b in &note_contents {
-            if b.get_value().unwrap() {
-                note_contents_print.push("true");
-            } else {
-                note_contents_print.push("false");
-            }
-        }
-        println!("note_contents: {}", note_contents_print.join(", "));
         {
             // Booleanize the randomness for the note commitment
             let rcm = boolean::field_into_boolean_vec_le(
@@ -292,7 +278,6 @@ impl<'a, E: JubjubEngine> Circuit<E> for Spend<'a, E> {
                 self.commitment_randomness,
             )?;
 
-            println!("commitment_randomness: {}", &self.commitment_randomness.unwrap());
             // Compute the note commitment randomness in the exponent
             let rcm = ecc::fixed_base_multiplication(
                 cs.namespace(|| "computation of commitment randomness"),
@@ -300,7 +285,6 @@ impl<'a, E: JubjubEngine> Circuit<E> for Spend<'a, E> {
                 &rcm,
                 self.params,
             )?;
-            println!("rcm: {}, {}", rcm.get_x().get_value().unwrap(), rcm.get_y().get_value().unwrap());
 
             // Randomize the note commitment. Pedersen hashes are not
             // themselves hiding commitments.
@@ -309,8 +293,6 @@ impl<'a, E: JubjubEngine> Circuit<E> for Spend<'a, E> {
                 &rcm,
                 self.params,
             )?;
-
-            println!("cm: {}, {}", cm.get_x().get_value().unwrap(), cm.get_y().get_value().unwrap());
         }
 
         // This will store (least significant bit first)
