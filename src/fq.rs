@@ -186,6 +186,10 @@ const R2: Fq = Fq([
 ]);
 
 impl Fq {
+    pub fn new(limbs: [u64; 4]) -> Fq {
+        Fq(limbs)
+    }
+
     pub fn zero() -> Fq {
         Fq([0, 0, 0, 0])
     }
