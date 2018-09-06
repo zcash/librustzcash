@@ -1,5 +1,5 @@
 [package]
-authors = ["Sean Bowe <ewillbefull@gmail.com>"]
+authors = ["Sean Bowe <ewillbefull@gmail.com>", "Eirik Ogilvie-Wigley <eowigley@gmail.com>"]
 description = "Implementation of the Jubjub elliptic curve group"
 documentation = "https://docs.rs/jubjub/"
 homepage = "https://github.com/zkcrypto/jubjub"

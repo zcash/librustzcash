@@ -168,17 +168,17 @@ impl<'b> MulAssign<&'b Fq> for Fq {
         let (r1, carry) = mac(carry, self.0[0], rhs.0[1]);
         let (r2, carry) = mac(carry, self.0[0], rhs.0[2]);
         let (r3, r4) = mac(carry, self.0[0], rhs.0[3]);
-       
+
         let (r1, carry) = mac(r1, self.0[1], rhs.0[0]);
         let (r2, carry) = mac_with_carry(r2, self.0[1], rhs.0[1], carry);
         let (r3, carry) = mac_with_carry(r3, self.0[1], rhs.0[2], carry);
         let (r4, r5) = mac_with_carry(r4, self.0[1], rhs.0[3], carry);
-        
+
         let (r2, carry) = mac(r2, self.0[2], rhs.0[0]);
         let (r3, carry) = mac_with_carry(r3, self.0[2], rhs.0[1], carry);
         let (r4, carry) = mac_with_carry(r4, self.0[2], rhs.0[2], carry);
         let (r5, r6) = mac_with_carry(r5, self.0[2], rhs.0[3], carry);
-        
+
         let (r3, carry) = mac(r3, self.0[3], rhs.0[0]);
         let (r4, carry) = mac_with_carry(r4, self.0[3], rhs.0[1], carry);
         let (r5, carry) = mac_with_carry(r5, self.0[3], rhs.0[2], carry);
@@ -268,7 +268,7 @@ impl Fq {
 
         res
     }
-    
+
     /// Squares this element.
     pub fn square_assign(&mut self) {
         let (r1, carry) = overflowing_mul(self.0[0], self.0[1]);
@@ -357,14 +357,14 @@ impl Fq {
         let (r3, carry) = mac_with_carry(r3, k, MODULUS.0[2], carry);
         let (r4, carry) = mac_with_carry(r4, k, MODULUS.0[3], carry);
         let (r5, carry2) = adc2(r5, carry2, carry);
-        
+
         let k = r2.wrapping_mul(INV);
         let (_, carry) = mac(r2, k, MODULUS.0[0]);
         let (r3, carry) = mac_with_carry(r3, k, MODULUS.0[1], carry);
         let (r4, carry) = mac_with_carry(r4, k, MODULUS.0[2], carry);
         let (r5, carry) = mac_with_carry(r5, k, MODULUS.0[3], carry);
         let (r6, carry2) = adc2(r6, carry2, carry);
-        
+
         let k = r3.wrapping_mul(INV);
         let (_, carry) = mac(r3, k, MODULUS.0[0]);
         let (r4, carry) = mac_with_carry(r4, k, MODULUS.0[1], carry);
@@ -669,8 +669,8 @@ fn test_inversion() {
 
 #[test]
 fn test_square_assign_equals_mul_assign() {
-    let mut n1 = Fq([2, 2, 2 ,2]);
-    let mut n2 = Fq([2, 2, 2 ,2]);
+    let mut n1 = Fq([2, 2, 2, 2]);
+    let mut n2 = Fq([2, 2, 2, 2]);
     for _ in 1..100 {
         let tmp = n1;
         n1.mul_assign(&tmp);

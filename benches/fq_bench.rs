@@ -1,11 +1,11 @@
 #![feature(test)]
 
-extern crate test;
 extern crate jubjub;
+extern crate test;
 
+use jubjub::Fq;
 use std::ops::MulAssign;
 use test::Bencher;
-use jubjub::Fq;
 
 #[bench]
 fn bench_mul_assign(bencher: &mut Bencher) {
