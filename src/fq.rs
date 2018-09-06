@@ -370,7 +370,7 @@ impl Fq {
         let (r4, carry) = mac_with_carry(r4, k, MODULUS.0[1], carry);
         let (r5, carry) = mac_with_carry(r5, k, MODULUS.0[2], carry);
         let (r6, carry) = mac_with_carry(r6, k, MODULUS.0[3], carry);
-        let (r7, _) = adc2(r7, carry2, carry);
+        let r7 = r7 + carry2 + carry;
 
         self.0[0] = r4;
         self.0[1] = r5;
