@@ -10,8 +10,16 @@ use jubjub::Fq;
 #[bench]
 fn bench_mul_assign(bencher: &mut Bencher) {
     let mut n = Fq::new([2, 2, 2, 2]);
-    let m = Fq::new([2, 2, 2, 2]);
     bencher.iter(move || {
-        n.mul_assign(&m);
+        let tmp = n;
+        n.mul_assign(&tmp);
+    });
+}
+
+#[bench]
+fn bench_square_assign(bencher: &mut Bencher) {
+    let mut n = Fq::new([2, 2, 2, 2]);
+    bencher.iter(move || {
+        n.square_assign();
     });
 }
