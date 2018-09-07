@@ -57,17 +57,9 @@ const MODULUS: Fq = Fq([
     0x73eda753299d7d48,
 ]);
 
-/// Compute a + b + carry, returning the result and setting carry to the
-/// carry value.
-#[inline(always)]
-fn adc(a: u64, b: u64, carry: &mut u128) -> u64 {
-    *carry = u128::from(a) + u128::from(b) + (*carry >> 64);
-    *carry as u64
-}
-
 /// Compute a + b + carry, returning the result the new carry over.
 #[inline(always)]
-fn adc2(a: u64, b: u64, carry: u64) -> (u64, u64) {
+fn adc(a: u64, b: u64, carry: u64) -> (u64, u64) {
     let adc = u128::from(a) + u128::from(b) + u128::from(carry);
     (adc as u64, (adc >> 64) as u64)
 }
@@ -140,19 +132,23 @@ impl<'b> SubAssign<&'b Fq> for Fq {
         // borrow = 0x000...000. Thus, we use it as a mask to conditionally add the modulus.
         let borrow_mask = (borrow >> 64) as u64;
 
-        let mut carry = 0;
-        for i in 0..4 {
-            self.0[i] = adc(self.0[i], MODULUS.0[i] & borrow_mask, &mut carry);
-        }
+        let (d0, carry) = overflowing_add(self.0[0], MODULUS.0[0] & borrow_mask);
+        let (d1, carry) = adc(self.0[1], MODULUS.0[1] & borrow_mask, carry);
+        let (d2, carry) = adc(self.0[2], MODULUS.0[2] & borrow_mask, carry);
+        let (d3, _) = adc(self.0[3], MODULUS.0[3] & borrow_mask, carry);
+        
+        self.0 = [d0, d1, d2, d3];
     }
 }
 
 impl<'b> AddAssign<&'b Fq> for Fq {
     fn add_assign(&mut self, rhs: &'b Fq) {
-        let mut carry = 0;
-        for i in 0..4 {
-            self.0[i] = adc(self.0[i], rhs.0[i], &mut carry);
-        }
+        let (d0, carry) = overflowing_add(self.0[0], rhs.0[0]);
+        let (d1, carry) = adc(self.0[1], rhs.0[1], carry);
+        let (d2, carry) = adc(self.0[2], rhs.0[2], carry);
+        let (d3, _) = adc(self.0[3], rhs.0[3], carry);
+
+        self.0 = [d0, d1, d2, d3];
 
         // Attempt to subtract the modulus, to ensure the value
         // is smaller than the modulus.
@@ -345,21 +341,21 @@ impl Fq {
         let (r1, carry) = mac_with_carry(r1, k, MODULUS.0[1], carry);
         let (r2, carry) = mac_with_carry(r2, k, MODULUS.0[2], carry);
         let (r3, carry) = mac_with_carry(r3, k, MODULUS.0[3], carry);
-        let (r4, carry2) = adc2(r4, 0, carry);
+        let (r4, carry2) = adc(r4, 0, carry);
 
         let k = r1.wrapping_mul(INV);
         let (_, carry) = mac(r1, k, MODULUS.0[0]);
         let (r2, carry) = mac_with_carry(r2, k, MODULUS.0[1], carry);
         let (r3, carry) = mac_with_carry(r3, k, MODULUS.0[2], carry);
         let (r4, carry) = mac_with_carry(r4, k, MODULUS.0[3], carry);
-        let (r5, carry2) = adc2(r5, carry2, carry);
+        let (r5, carry2) = adc(r5, carry2, carry);
 
         let k = r2.wrapping_mul(INV);
         let (_, carry) = mac(r2, k, MODULUS.0[0]);
         let (r3, carry) = mac_with_carry(r3, k, MODULUS.0[1], carry);
         let (r4, carry) = mac_with_carry(r4, k, MODULUS.0[2], carry);
         let (r5, carry) = mac_with_carry(r5, k, MODULUS.0[3], carry);
-        let (r6, carry2) = adc2(r6, carry2, carry);
+        let (r6, carry2) = adc(r6, carry2, carry);
 
         let k = r3.wrapping_mul(INV);
         let (_, carry) = mac(r3, k, MODULUS.0[0]);
