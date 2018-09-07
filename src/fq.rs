@@ -662,15 +662,3 @@ fn test_inversion() {
         tmp.add_assign(&R2);
     }
 }
-
-#[test]
-fn test_square_assign_equals_mul_assign() {
-    let mut n1 = Fq([2, 2, 2, 2]);
-    let mut n2 = Fq([2, 2, 2, 2]);
-    for _ in 1..100 {
-        let tmp = n1;
-        n1.mul_assign(&tmp);
-        n2.square_assign();
-        assert_eq!(n1, n2);
-    }
-}
