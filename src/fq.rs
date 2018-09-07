@@ -75,8 +75,8 @@ fn adc2(a: u64, b: u64, carry: u64) -> (u64, u64) {
 /// Compute a + b, returning the result and the carry over.
 #[inline(always)]
 fn overflowing_add(a: u64, b: u64) -> (u64, u64) {
-    let (sum, overflow) = a.overflowing_add(b);
-    (sum, overflow as u64)
+    let sum = u128::from(a) + u128::from(b);
+    (sum as u64, (sum >> 64) as u64)
 }
 
 /// Compute a - (b + borrow), returning the result and setting borrow to
