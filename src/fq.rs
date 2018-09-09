@@ -64,12 +64,11 @@ fn adc(a: u64, b: u64, carry: u64) -> (u64, u64) {
     (adc as u64, (adc >> 64) as u64)
 }
 
-/// Compute a - (b + borrow), returning the result and setting borrow to
-/// the borrow value.
+/// Compute a - (b + carry), returning the result and the carry over
 #[inline(always)]
-fn sbb(a: u64, b: u64, borrow: &mut u128) -> u64 {
-    *borrow = u128::from(a).wrapping_sub(u128::from(b) + (*borrow >> 127));
-    *borrow as u64
+fn sbb(a: u64, b: u64, carry: u64) -> (u64, u64) {
+    let sbb = u128::from(a).wrapping_sub(u128::from(b) + u128::from(carry >> 63));
+    (sbb as u64, (sbb >> 64) as u64)
 }
 
 /// Compute a + (b * c) + carry, returning the result and the new carry over.
@@ -102,19 +101,19 @@ impl<'a> Neg for &'a Fq {
 
 impl<'b> SubAssign<&'b Fq> for Fq {
     fn sub_assign(&mut self, rhs: &'b Fq) {
-        let mut borrow = 0;
-        for i in 0..4 {
-            self.0[i] = sbb(self.0[i], rhs.0[i], &mut borrow);
-        }
+        let (d0, carry) = sbb(self.0[0], rhs.0[0], 0);
+        let (d1, carry) = sbb(self.0[1], rhs.0[1], carry);
+        let (d2, carry) = sbb(self.0[2], rhs.0[2], carry);
+        let (d3, carry) = sbb(self.0[3], rhs.0[3], carry);
 
-        // If underflow occurred on the final limb, (borrow >> 64) = 0x111...111, otherwise
-        // borrow = 0x000...000. Thus, we use it as a mask to conditionally add the modulus.
-        let borrow_mask = (borrow >> 64) as u64;
+        // If underflow occurred on the final limb, carry = 0x111...111, otherwise
+        // carry = 0x000...000. Thus, we use it as a mask to conditionally add the modulus.
+        let borrow_mask = carry;
 
-        let (d0, carry) = adc(self.0[0], MODULUS.0[0] & borrow_mask, 0);
-        let (d1, carry) = adc(self.0[1], MODULUS.0[1] & borrow_mask, carry);
-        let (d2, carry) = adc(self.0[2], MODULUS.0[2] & borrow_mask, carry);
-        let (d3, _) = adc(self.0[3], MODULUS.0[3] & borrow_mask, carry);
+        let (d0, carry) = adc(d0, MODULUS.0[0] & borrow_mask, 0);
+        let (d1, carry) = adc(d1, MODULUS.0[1] & borrow_mask, carry);
+        let (d2, carry) = adc(d2, MODULUS.0[2] & borrow_mask, carry);
+        let (d3, _) = adc(d3, MODULUS.0[3] & borrow_mask, carry);
 
         self.0 = [d0, d1, d2, d3];
     }
