@@ -60,22 +60,22 @@ const MODULUS: Fq = Fq([
 /// Compute a + b + carry, returning the result the new carry over.
 #[inline(always)]
 fn adc(a: u64, b: u64, carry: u64) -> (u64, u64) {
-    let adc = u128::from(a) + u128::from(b) + u128::from(carry);
-    (adc as u64, (adc >> 64) as u64)
+    let ret = u128::from(a) + u128::from(b) + u128::from(carry);
+    (ret as u64, (ret >> 64) as u64)
 }
 
-/// Compute a - (b + carry), returning the result and the carry over
+/// Compute a - (b + borrow), returning the result and the new borrow.
 #[inline(always)]
-fn sbb(a: u64, b: u64, carry: u64) -> (u64, u64) {
-    let sbb = u128::from(a).wrapping_sub(u128::from(b) + u128::from(carry >> 63));
-    (sbb as u64, (sbb >> 64) as u64)
+fn sbb(a: u64, b: u64, borrow: u64) -> (u64, u64) {
+    let ret = u128::from(a).wrapping_sub(u128::from(b) + u128::from(borrow >> 63));
+    (ret as u64, (ret >> 64) as u64)
 }
 
 /// Compute a + (b * c) + carry, returning the result and the new carry over.
 #[inline(always)]
 fn mac(a: u64, b: u64, c: u64, carry: u64) -> (u64, u64) {
-    let mac = u128::from(a) + (u128::from(b) * u128::from(c)) + u128::from(carry);
-    (mac as u64, (mac >> 64) as u64)
+    let ret = u128::from(a) + (u128::from(b) * u128::from(c)) + u128::from(carry);
+    (ret as u64, (ret >> 64) as u64)
 }
 
 impl<'a> Neg for &'a Fq {
@@ -101,14 +101,14 @@ impl<'a> Neg for &'a Fq {
 
 impl<'b> SubAssign<&'b Fq> for Fq {
     fn sub_assign(&mut self, rhs: &'b Fq) {
-        let (d0, carry) = sbb(self.0[0], rhs.0[0], 0);
-        let (d1, carry) = sbb(self.0[1], rhs.0[1], carry);
-        let (d2, carry) = sbb(self.0[2], rhs.0[2], carry);
-        let (d3, carry) = sbb(self.0[3], rhs.0[3], carry);
+        let (d0, borrow) = sbb(self.0[0], rhs.0[0], 0);
+        let (d1, borrow) = sbb(self.0[1], rhs.0[1], borrow);
+        let (d2, borrow) = sbb(self.0[2], rhs.0[2], borrow);
+        let (d3, borrow) = sbb(self.0[3], rhs.0[3], borrow);
 
-        // If underflow occurred on the final limb, carry = 0x111...111, otherwise
-        // carry = 0x000...000. Thus, we use it as a mask to conditionally add the modulus.
-        let borrow_mask = carry;
+        // If underflow occurred on the final limb, borrow = 0x111...111, otherwise
+        // borrow = 0x000...000. Thus, we use it as a mask to conditionally add the modulus.
+        let borrow_mask = borrow;
 
         let (d0, carry) = adc(d0, MODULUS.0[0] & borrow_mask, 0);
         let (d1, carry) = adc(d1, MODULUS.0[1] & borrow_mask, carry);
