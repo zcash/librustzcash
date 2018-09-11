@@ -104,7 +104,7 @@ fn zip_0143() {
         script_code: Vec<u8>,
         transparent_input: Option<u32>,
         hash_type: u32,
-        amount: u64,
+        amount: i64,
         consensus_branch_id: u32,
         sighash: [u8; 32],
     };
@@ -1809,7 +1809,7 @@ fn zip_0243() {
         script_code: Vec<u8>,
         transparent_input: Option<u32>,
         hash_type: u32,
-        amount: u64,
+        amount: i64,
         consensus_branch_id: u32,
         sighash: [u8; 32],
     };

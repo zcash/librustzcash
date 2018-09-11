@@ -68,7 +68,7 @@ impl Transaction {
         };
 
         let (value_balance, shielded_spends, shielded_outputs) = if is_sapling_v4 {
-            let vb = Amount(reader.read_u64::<LittleEndian>()?);
+            let vb = Amount(reader.read_i64::<LittleEndian>()?);
             let ss = Vector::read(&mut reader, SpendDescription::read)?;
             let so = Vector::read(&mut reader, OutputDescription::read)?;
             (vb, ss, so)
@@ -142,7 +142,7 @@ impl Transaction {
         }
 
         if is_sapling_v4 {
-            writer.write_u64::<LittleEndian>(self.value_balance.0)?;
+            writer.write_i64::<LittleEndian>(self.value_balance.0)?;
             Vector::write(&mut writer, &self.shielded_spends, |w, e| e.write(w))?;
             Vector::write(&mut writer, &self.shielded_outputs, |w, e| e.write(w))?;
         }

@@ -20,7 +20,7 @@ const PHGR_PROOF_SIZE: usize = (33 + 33 + 65 + 33 + 33 + 33 + 33 + 33);
 const ZC_NUM_JS_INPUTS: usize = 2;
 const ZC_NUM_JS_OUTPUTS: usize = 2;
 
-pub struct Amount(pub u64);
+pub struct Amount(pub i64);
 
 pub struct Script(pub Vec<u8>);
 
@@ -87,7 +87,7 @@ pub struct TxOut {
 
 impl TxOut {
     pub fn read<R: Read>(mut reader: &mut R) -> io::Result<Self> {
-        let value = Amount(reader.read_u64::<LittleEndian>()?);
+        let value = Amount(reader.read_i64::<LittleEndian>()?);
         let script_pubkey = Script::read(&mut reader)?;
 
         Ok(TxOut {
@@ -97,7 +97,7 @@ impl TxOut {
     }
 
     pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
-        writer.write_u64::<LittleEndian>(self.value.0)?;
+        writer.write_i64::<LittleEndian>(self.value.0)?;
         self.script_pubkey.write(&mut writer)
     }
 }
@@ -216,8 +216,8 @@ pub struct JSDescription {
 
 impl JSDescription {
     pub fn read<R: Read>(mut reader: R, use_groth: bool) -> io::Result<Self> {
-        let vpub_old = Amount(reader.read_u64::<LittleEndian>()?);
-        let vpub_new = Amount(reader.read_u64::<LittleEndian>()?);
+        let vpub_old = Amount(reader.read_i64::<LittleEndian>()?);
+        let vpub_new = Amount(reader.read_i64::<LittleEndian>()?);
 
         let mut anchor = [0; 32];
         reader.read_exact(&mut anchor)?;
@@ -278,8 +278,8 @@ impl JSDescription {
     }
 
     pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
-        writer.write_u64::<LittleEndian>(self.vpub_old.0)?;
-        writer.write_u64::<LittleEndian>(self.vpub_new.0)?;
+        writer.write_i64::<LittleEndian>(self.vpub_old.0)?;
+        writer.write_i64::<LittleEndian>(self.vpub_new.0)?;
         writer.write_all(&self.anchor)?;
         writer.write_all(&self.nullifiers[0])?;
         writer.write_all(&self.nullifiers[1])?;
