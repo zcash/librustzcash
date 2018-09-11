@@ -16,6 +16,7 @@ const ZCASH_JOINSPLITS_HASH_PERSONALIZATION: &'static [u8; 16] = b"ZcashJSplitsH
 const ZCASH_SHIELDED_SPENDS_HASH_PERSONALIZATION: &'static [u8; 16] = b"ZcashSSpendsHash";
 const ZCASH_SHIELDED_OUTPUTS_HASH_PERSONALIZATION: &'static [u8; 16] = b"ZcashSOutputHash";
 
+pub const SIGHASH_ALL: u32 = 1;
 const SIGHASH_NONE: u32 = 2;
 const SIGHASH_SINGLE: u32 = 3;
 const SIGHASH_MASK: u32 = 0x1f;

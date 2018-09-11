@@ -5,11 +5,13 @@ use std::ops::Deref;
 
 use serialize::Vector;
 
-mod components;
+pub mod components;
 mod sighash;
 
 #[cfg(test)]
 mod tests;
+
+pub use self::sighash::{signature_hash, signature_hash_data, SIGHASH_ALL};
 
 use self::components::{Amount, JSDescription, OutputDescription, SpendDescription, TxIn, TxOut};
 

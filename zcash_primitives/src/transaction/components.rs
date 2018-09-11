@@ -108,7 +108,7 @@ pub struct SpendDescription {
     pub nullifier: [u8; 32],
     pub rk: [u8; 32],
     pub zkproof: [u8; GROTH_PROOF_SIZE],
-    spend_auth_sig: Signature,
+    pub spend_auth_sig: Signature,
 }
 
 impl SpendDescription {
@@ -150,12 +150,12 @@ impl SpendDescription {
 }
 
 pub struct OutputDescription {
-    cv: edwards::Point<Bls12, Unknown>,
-    cmu: Fr,
-    ephemeral_key: edwards::Point<Bls12, Unknown>,
-    enc_ciphertext: [u8; 580],
-    out_ciphertext: [u8; 80],
-    zkproof: [u8; GROTH_PROOF_SIZE],
+    pub cv: edwards::Point<Bls12, Unknown>,
+    pub cmu: Fr,
+    pub ephemeral_key: edwards::Point<Bls12, Unknown>,
+    pub enc_ciphertext: [u8; 580],
+    pub out_ciphertext: [u8; 80],
+    pub zkproof: [u8; GROTH_PROOF_SIZE],
 }
 
 impl OutputDescription {
