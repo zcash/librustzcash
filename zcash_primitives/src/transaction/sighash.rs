@@ -4,7 +4,8 @@ use pairing::{PrimeField, PrimeFieldRepr};
 
 use super::{
     components::{Amount, Script},
-    Transaction, OVERWINTER_VERSION_GROUP_ID, SAPLING_TX_VERSION, SAPLING_VERSION_GROUP_ID,
+    Transaction, TransactionData, OVERWINTER_VERSION_GROUP_ID, SAPLING_TX_VERSION,
+    SAPLING_VERSION_GROUP_ID,
 };
 
 const ZCASH_SIGHASH_PERSONALIZATION_PREFIX: &'static [u8; 12] = b"ZcashSigHash";
@@ -53,7 +54,7 @@ enum SigHashVersion {
 }
 
 impl SigHashVersion {
-    fn from_tx(tx: &Transaction) -> Self {
+    fn from_tx(tx: &TransactionData) -> Self {
         if tx.overwintered {
             match tx.version_group_id {
                 OVERWINTER_VERSION_GROUP_ID => SigHashVersion::Overwinter,
@@ -66,7 +67,7 @@ impl SigHashVersion {
     }
 }
 
-fn prevout_hash(tx: &Transaction) -> Vec<u8> {
+fn prevout_hash(tx: &TransactionData) -> Vec<u8> {
     let mut data = Vec::with_capacity(tx.vin.len() * 36);
     for t_in in &tx.vin {
         t_in.prevout.write(&mut data).unwrap();
@@ -76,7 +77,7 @@ fn prevout_hash(tx: &Transaction) -> Vec<u8> {
     h.finalize().as_ref().to_vec()
 }
 
-fn sequence_hash(tx: &Transaction) -> Vec<u8> {
+fn sequence_hash(tx: &TransactionData) -> Vec<u8> {
     let mut data = Vec::with_capacity(tx.vin.len() * 4);
     for t_in in &tx.vin {
         (&mut data)
@@ -88,7 +89,7 @@ fn sequence_hash(tx: &Transaction) -> Vec<u8> {
     h.finalize().as_ref().to_vec()
 }
 
-fn outputs_hash(tx: &Transaction) -> Vec<u8> {
+fn outputs_hash(tx: &TransactionData) -> Vec<u8> {
     let mut data = Vec::with_capacity(tx.vout.len() * (4 + 1));
     for t_out in &tx.vout {
         t_out.write(&mut data).unwrap();
@@ -98,7 +99,7 @@ fn outputs_hash(tx: &Transaction) -> Vec<u8> {
     h.finalize().as_ref().to_vec()
 }
 
-fn joinsplits_hash(tx: &Transaction) -> Vec<u8> {
+fn joinsplits_hash(tx: &TransactionData) -> Vec<u8> {
     let mut data = Vec::with_capacity(
         tx.joinsplits.len() * if tx.version < SAPLING_TX_VERSION {
             1802 // JSDescription with PHGR13 proof
@@ -115,7 +116,7 @@ fn joinsplits_hash(tx: &Transaction) -> Vec<u8> {
     h.finalize().as_ref().to_vec()
 }
 
-fn shielded_spends_hash(tx: &Transaction) -> Vec<u8> {
+fn shielded_spends_hash(tx: &TransactionData) -> Vec<u8> {
     let mut data = Vec::with_capacity(tx.shielded_spends.len() * 384);
     for s_spend in &tx.shielded_spends {
         s_spend.cv.write(&mut data).unwrap();
@@ -129,7 +130,7 @@ fn shielded_spends_hash(tx: &Transaction) -> Vec<u8> {
     h.finalize().as_ref().to_vec()
 }
 
-fn shielded_outputs_hash(tx: &Transaction) -> Vec<u8> {
+fn shielded_outputs_hash(tx: &TransactionData) -> Vec<u8> {
     let mut data = Vec::with_capacity(tx.shielded_outputs.len() * 948);
     for s_out in &tx.shielded_outputs {
         s_out.write(&mut data).unwrap();
@@ -139,8 +140,8 @@ fn shielded_outputs_hash(tx: &Transaction) -> Vec<u8> {
     h.finalize().as_ref().to_vec()
 }
 
-pub fn signature_hash(
-    tx: &Transaction,
+pub fn signature_hash_data(
+    tx: &TransactionData,
     consensus_branch_id: u32,
     hash_type: u32,
     transparent_input: Option<(usize, Script, Amount)>,
@@ -218,4 +219,13 @@ pub fn signature_hash(
         }
         SigHashVersion::Sprout => unimplemented!(),
     }
+}
+
+pub fn signature_hash(
+    tx: &Transaction,
+    consensus_branch_id: u32,
+    hash_type: u32,
+    transparent_input: Option<(usize, Script, Amount)>,
+) -> Vec<u8> {
+    signature_hash_data(tx, consensus_branch_id, hash_type, transparent_input)
 }

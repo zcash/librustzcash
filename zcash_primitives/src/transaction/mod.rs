@@ -1,6 +1,7 @@
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use sapling_crypto::redjubjub::Signature;
 use std::io::{self, Read, Write};
+use std::ops::Deref;
 
 use serialize::Vector;
 
@@ -10,6 +11,8 @@ mod sighash;
 #[cfg(test)]
 mod tests;
 
+pub use self::sighash::{signature_hash, signature_hash_data, SIGHASH_ALL};
+
 use self::components::{Amount, JSDescription, OutputDescription, SpendDescription, TxIn, TxOut};
 
 const OVERWINTER_VERSION_GROUP_ID: u32 = 0x03C48270;
@@ -18,21 +21,64 @@ const SAPLING_VERSION_GROUP_ID: u32 = 0x892F2085;
 const SAPLING_TX_VERSION: u32 = 4;
 
 /// A Zcash transaction.
-pub struct Transaction {
-    overwintered: bool,
-    version: u32,
-    version_group_id: u32,
-    vin: Vec<TxIn>,
-    vout: Vec<TxOut>,
-    lock_time: u32,
-    expiry_height: u32,
-    value_balance: Amount,
-    shielded_spends: Vec<SpendDescription>,
-    shielded_outputs: Vec<OutputDescription>,
-    joinsplits: Vec<JSDescription>,
-    joinsplit_pubkey: [u8; 32],
-    joinsplit_sig: [u8; 64],
-    binding_sig: Option<Signature>,
+pub struct Transaction(TransactionData);
+
+impl Deref for Transaction {
+    type Target = TransactionData;
+
+    fn deref(&self) -> &TransactionData {
+        &self.0
+    }
+}
+
+pub struct TransactionData {
+    pub overwintered: bool,
+    pub version: u32,
+    pub version_group_id: u32,
+    pub vin: Vec<TxIn>,
+    pub vout: Vec<TxOut>,
+    pub lock_time: u32,
+    pub expiry_height: u32,
+    pub value_balance: Amount,
+    pub shielded_spends: Vec<SpendDescription>,
+    pub shielded_outputs: Vec<OutputDescription>,
+    pub joinsplits: Vec<JSDescription>,
+    pub joinsplit_pubkey: [u8; 32],
+    pub joinsplit_sig: [u8; 64],
+    pub binding_sig: Option<Signature>,
+}
+
+impl TransactionData {
+    pub fn new() -> Self {
+        TransactionData {
+            overwintered: true,
+            version: SAPLING_TX_VERSION,
+            version_group_id: SAPLING_VERSION_GROUP_ID,
+            vin: vec![],
+            vout: vec![],
+            lock_time: 0,
+            expiry_height: 0,
+            value_balance: Amount(0),
+            shielded_spends: vec![],
+            shielded_outputs: vec![],
+            joinsplits: vec![],
+            joinsplit_pubkey: [0u8; 32],
+            joinsplit_sig: [0u8; 64],
+            binding_sig: None,
+        }
+    }
+
+    fn header(&self) -> u32 {
+        let mut header = self.version;
+        if self.overwintered {
+            header |= 1 << 31;
+        }
+        header
+    }
+
+    pub fn freeze(self) -> Transaction {
+        Transaction(self)
+    }
 }
 
 impl Transaction {
@@ -97,7 +143,7 @@ impl Transaction {
                 false => None,
             };
 
-        Ok(Transaction {
+        Ok(Transaction(TransactionData {
             overwintered,
             version,
             version_group_id,
@@ -112,7 +158,7 @@ impl Transaction {
             joinsplit_pubkey,
             joinsplit_sig,
             binding_sig,
-        })
+        }))
     }
 
     pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
@@ -168,13 +214,5 @@ impl Transaction {
         }
 
         Ok(())
-    }
-
-    fn header(&self) -> u32 {
-        let mut header = self.version;
-        if self.overwintered {
-            header |= 1 << 31;
-        }
-        header
     }
 }
