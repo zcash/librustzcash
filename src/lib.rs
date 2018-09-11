@@ -40,8 +40,12 @@ struct Point {
 }
 
 // `d = -(10240/10241)`
+#[allow(dead_code)]
 const EDWARDS_D: Fq = Fq([
-    0x2a522455b974f6b0, 0xfc6cc9ef0d9acab3, 0x7a08fb94c27628d1, 0x57f8f6a8fe0e262e
+    0x2a522455b974f6b0,
+    0xfc6cc9ef0d9acab3,
+    0x7a08fb94c27628d1,
+    0x57f8f6a8fe0e262e,
 ]);
 
 impl Point {
@@ -72,7 +76,7 @@ impl<'a> Neg for &'a Point {
 }
 
 impl<'b> AddAssign<&'b Point> for Point {
-    fn add_assign(&mut self, rhs: &'b Point) {
+    fn add_assign(&mut self, _rhs: &'b Point) {
         // See "Twisted Edwards Curves Revisited"
         //     Hisil, Wong, Carter, and Dawson
         //     3.1 Unified Addition in E^e
