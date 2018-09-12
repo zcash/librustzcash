@@ -5,7 +5,7 @@ use pairing::{
 };
 use sapling_crypto::{
     jubjub::{edwards, Unknown},
-    redjubjub::Signature,
+    redjubjub::{PublicKey, Signature},
 };
 use std::io::{self, Read, Write};
 
@@ -106,7 +106,7 @@ pub struct SpendDescription {
     pub cv: edwards::Point<Bls12, Unknown>,
     pub anchor: Fr,
     pub nullifier: [u8; 32],
-    pub rk: [u8; 32],
+    pub rk: PublicKey<Bls12>,
     pub zkproof: [u8; GROTH_PROOF_SIZE],
     pub spend_auth_sig: Signature,
 }
@@ -121,9 +121,9 @@ impl SpendDescription {
         };
 
         let mut nullifier = [0; 32];
-        let mut rk = [0; 32];
         reader.read_exact(&mut nullifier)?;
-        reader.read_exact(&mut rk)?;
+
+        let rk = PublicKey::<Bls12>::read(&mut reader, &JUBJUB)?;
 
         let mut zkproof = [0; GROTH_PROOF_SIZE];
         reader.read_exact(&mut zkproof)?;
@@ -143,7 +143,7 @@ impl SpendDescription {
         self.cv.write(&mut writer)?;
         self.anchor.into_repr().write_le(&mut writer)?;
         writer.write_all(&self.nullifier)?;
-        writer.write_all(&self.rk)?;
+        self.rk.write(&mut writer)?;
         writer.write_all(&self.zkproof)?;
         self.spend_auth_sig.write(&mut writer)
     }

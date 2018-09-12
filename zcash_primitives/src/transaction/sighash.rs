@@ -122,7 +122,7 @@ fn shielded_spends_hash(tx: &TransactionData) -> Vec<u8> {
         s_spend.cv.write(&mut data).unwrap();
         s_spend.anchor.into_repr().write_le(&mut data).unwrap();
         data.extend_from_slice(&s_spend.nullifier);
-        data.extend_from_slice(&s_spend.rk);
+        s_spend.rk.write(&mut data).unwrap();
         data.extend_from_slice(&s_spend.zkproof);
     }
     let mut h = Blake2b::with_params(32, &[], &[], ZCASH_SHIELDED_SPENDS_HASH_PERSONALIZATION);
