@@ -15,5 +15,5 @@ mod serialize;
 pub mod transaction;
 
 lazy_static! {
-    static ref JUBJUB: JubjubBls12 = { JubjubBls12::new() };
+    pub static ref JUBJUB: JubjubBls12 = { JubjubBls12::new() };
 }
