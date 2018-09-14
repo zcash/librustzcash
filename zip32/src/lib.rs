@@ -15,7 +15,7 @@ use fpe::ff1::{BinaryNumeralString, FF1};
 use pairing::bls12_381::Bls12;
 use sapling_crypto::{
     jubjub::{edwards, FixedGenerators, JubjubEngine, JubjubParams, ToUniform, Unknown},
-    primitives::{Diversifier, PaymentAddress, ViewingKey},
+    primitives::{Diversifier, PaymentAddress, ProofGenerationKey, ViewingKey},
 };
 use std::io::{self, Read, Write};
 use zcash_primitives::JUBJUB;
@@ -42,7 +42,7 @@ fn prf_expand_vec(sk: &[u8], ts: &[&[u8]]) -> Blake2bResult {
 
 /// An outgoing viewing key
 #[derive(Clone, Copy, PartialEq)]
-struct OutgoingViewingKey([u8; 32]);
+pub struct OutgoingViewingKey([u8; 32]);
 
 impl OutgoingViewingKey {
     fn derive_child(&self, i_l: &[u8]) -> Self {
@@ -55,15 +55,15 @@ impl OutgoingViewingKey {
 /// A Sapling expanded spending key
 #[derive(Clone)]
 pub struct ExpandedSpendingKey<E: JubjubEngine> {
-    ask: E::Fs,
+    pub ask: E::Fs,
     nsk: E::Fs,
     ovk: OutgoingViewingKey,
 }
 
 /// A Sapling full viewing key
 pub struct FullViewingKey<E: JubjubEngine> {
-    vk: ViewingKey<E>,
-    ovk: OutgoingViewingKey,
+    pub vk: ViewingKey<E>,
+    pub ovk: OutgoingViewingKey,
 }
 
 impl<E: JubjubEngine> ExpandedSpendingKey<E> {
@@ -74,6 +74,15 @@ impl<E: JubjubEngine> ExpandedSpendingKey<E> {
         ovk.0
             .copy_from_slice(&prf_expand(sk, &[0x02]).as_bytes()[..32]);
         ExpandedSpendingKey { ask, nsk, ovk }
+    }
+
+    pub fn proof_generation_key(&self, params: &E::Params) -> ProofGenerationKey<E> {
+        ProofGenerationKey {
+            ak: params
+                .generator(FixedGenerators::SpendingKeyGenerator)
+                .mul(self.ask, params),
+            nsk: self.nsk,
+        }
     }
 
     fn derive_child(&self, i_l: &[u8]) -> Self {
