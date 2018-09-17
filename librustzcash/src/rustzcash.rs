@@ -10,8 +10,6 @@ extern crate zcash_primitives;
 extern crate zcash_proofs;
 extern crate zip32;
 
-mod hashreader;
-
 extern crate lazy_static;
 
 use ff::{BitIterator, PrimeField, PrimeFieldRepr};
@@ -33,8 +31,7 @@ use sapling_crypto::circuit::sapling::TREE_DEPTH as SAPLING_TREE_DEPTH;
 use sapling_crypto::circuit::sprout::{self, TREE_DEPTH as SPROUT_TREE_DEPTH};
 
 use bellman::groth16::{
-    create_random_proof, prepare_verifying_key, verify_proof, Parameters, PreparedVerifyingKey,
-    Proof, VerifyingKey,
+    create_random_proof, verify_proof, Parameters, PreparedVerifyingKey, Proof,
 };
 
 use blake2_rfc::blake2s::Blake2s;
@@ -42,7 +39,7 @@ use blake2_rfc::blake2s::Blake2s;
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 
 use rand::{OsRng, Rng};
-use std::io::{self, BufReader};
+use std::io::BufReader;
 
 use libc::{c_char, c_uchar, int64_t, size_t, uint32_t, uint64_t};
 use std::ffi::CStr;
@@ -62,8 +59,9 @@ use std::os::windows::ffi::OsStringExt;
 
 use sapling_crypto::primitives::{ProofGenerationKey, ViewingKey};
 use zcash_primitives::{sapling::spend_sig, JUBJUB};
-use zcash_proofs::sapling::{
-    CommitmentTreeWitness, SaplingProvingContext, SaplingVerificationContext,
+use zcash_proofs::{
+    load_parameters,
+    sapling::{CommitmentTreeWitness, SaplingProvingContext, SaplingVerificationContext},
 };
 
 pub mod equihash;
@@ -196,70 +194,25 @@ fn init_zksnark_params(
 
     let spend_hash = unsafe { CStr::from_ptr(spend_hash) }
         .to_str()
-        .expect("hash should be a valid string")
-        .to_string();
+        .expect("hash should be a valid string");
 
     let output_hash = unsafe { CStr::from_ptr(output_hash) }
         .to_str()
-        .expect("hash should be a valid string")
-        .to_string();
+        .expect("hash should be a valid string");
 
     let sprout_hash = unsafe { CStr::from_ptr(sprout_hash) }
         .to_str()
-        .expect("hash should be a valid string")
-        .to_string();
+        .expect("hash should be a valid string");
 
-    // Load from each of the paths
-    let spend_fs = File::open(spend_path).expect("couldn't load Sapling spend parameters file");
-    let output_fs = File::open(output_path).expect("couldn't load Sapling output parameters file");
-    let sprout_fs = File::open(sprout_path).expect("couldn't load Sprout groth16 parameters file");
-
-    let mut spend_fs = hashreader::HashReader::new(BufReader::with_capacity(1024 * 1024, spend_fs));
-    let mut output_fs =
-        hashreader::HashReader::new(BufReader::with_capacity(1024 * 1024, output_fs));
-    let mut sprout_fs =
-        hashreader::HashReader::new(BufReader::with_capacity(1024 * 1024, sprout_fs));
-
-    // Deserialize params
-    let spend_params = Parameters::<Bls12>::read(&mut spend_fs, false)
-        .expect("couldn't deserialize Sapling spend parameters file");
-    let output_params = Parameters::<Bls12>::read(&mut output_fs, false)
-        .expect("couldn't deserialize Sapling spend parameters file");
-
-    // We only deserialize the verifying key for the Sprout parameters, which
-    // appears at the beginning of the parameter file. The rest is loaded
-    // during proving time.
-    let sprout_vk = VerifyingKey::<Bls12>::read(&mut sprout_fs)
-        .expect("couldn't deserialize Sprout Groth16 verifying key");
-
-    // There is extra stuff (the transcript) at the end of the parameter file which is
-    // used to verify the parameter validity, but we're not interested in that. We do
-    // want to read it, though, so that the BLAKE2b computed afterward is consistent
-    // with `b2sum` on the files.
-    let mut sink = io::sink();
-    io::copy(&mut spend_fs, &mut sink)
-        .expect("couldn't finish reading Sapling spend parameter file");
-    io::copy(&mut output_fs, &mut sink)
-        .expect("couldn't finish reading Sapling output parameter file");
-    io::copy(&mut sprout_fs, &mut sink)
-        .expect("couldn't finish reading Sprout groth16 parameter file");
-
-    if spend_fs.into_hash() != spend_hash {
-        panic!("Sapling spend parameter file is not correct, please clean your `~/.zcash-params/` and re-run `fetch-params`.");
-    }
-
-    if output_fs.into_hash() != output_hash {
-        panic!("Sapling output parameter file is not correct, please clean your `~/.zcash-params/` and re-run `fetch-params`.");
-    }
-
-    if sprout_fs.into_hash() != sprout_hash {
-        panic!("Sprout groth16 parameter file is not correct, please clean your `~/.zcash-params/` and re-run `fetch-params`.");
-    }
-
-    // Prepare verifying keys
-    let spend_vk = prepare_verifying_key(&spend_params.vk);
-    let output_vk = prepare_verifying_key(&output_params.vk);
-    let sprout_vk = prepare_verifying_key(&sprout_vk);
+    // Load params
+    let (spend_params, spend_vk, output_params, output_vk, sprout_vk) = load_parameters(
+        spend_path,
+        spend_hash,
+        output_path,
+        output_hash,
+        sprout_path,
+        sprout_hash,
+    );
 
     // Caller is responsible for calling this function once, so
     // these global mutations are safe.
