@@ -23,3 +23,11 @@ fn bench_square_assign(bencher: &mut Bencher) {
         n.square_assign();
     });
 }
+
+#[bench]
+fn bench_pow_q_minus_2(bencher: &mut Bencher) {
+    let n = Fq::one();
+    bencher.iter(move || {
+        n.pow_q_minus_2()
+    });
+}
