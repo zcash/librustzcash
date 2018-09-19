@@ -290,312 +290,335 @@ impl Fq {
     /// effect of inverting the element if it is
     /// nonzero.
     pub fn pow_q_minus_2(&self) -> Self {
-        # found using https://github.com/kwantam/addchain
-        t10 = input
-        t0 = sqr(t10)
-        t1 = t0 * t10
-        t16 = sqr(t0)
-        t6 = sqr(t16)
-        t5 = t6 * t0
-        t0 = t6 * t16
-        t12 = t5 * t16
-        t2 = sqr(t6)
-        t7 = t5 * t6
-        t15 = t0 * t5
-        t17 = sqr(t12)
-        t1 = t17 * t1
-        t3 = t7 * t2
-        t8 = t1 * t17
-        t4 = t8 * t2
-        t9 = t8 * t7
-        t7 = t4 * t5
-        t11 = t4 * t17
-        t5 = t9 * t17
-        t14 = t7 * t15
-        t13 = t11 * t12
-        t12 = t11 * t17
-        t15 = t12 * t15
-        t16 = t15 * t16
-        t3 = t16 * t3
-        t17 = t3 * t17
-        t0 = t17 * t0
-        t6 = t0 * t6
-        t2 = t6 * t2
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = t0 * t17
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = t0 * t16
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = t0 * t15
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = t0 * t15
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = t0 * t14
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = t0 * t13
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = t0 * t12
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = t0 * t11
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = t0 * t8
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = t0 * t10
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = t0 * t9
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = t0 * t8
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = t0 * t7
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = t0 * t6
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = t0 * t5
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = t0 * t3
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = t0 * t2
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = t0 * t4
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = t0 * t2
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = t0 * t3
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = t0 * t2
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = t0 * t2
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = t0 * t2
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = t0 * t3
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = t0 * t2
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = t0 * t2
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = t0 * t1
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = sqr(t0)
-        t0 = t0 * t1
+        // found using https://github.com/kwantam/addchain
+        let t10 = *self;
+        let mut t0 = t10;
+        t0.square_assign();
+        let mut t1 = t0;
+        t1.mul_assign(&t10);
+        let mut t16 = t0;
+        t16.square_assign();
+        let mut t6 = t16;
+        t6.square_assign();
+        let mut t5 = t6;
+        t5.mul_assign(&t0);
+        let mut t0 = t6;
+        t0.mul_assign(&t16);
+        let mut t12 = t5;
+        t12.mul_assign(&t16);
+        let mut t2 = t6;
+        t2.square_assign();
+        let mut t7 = t5;
+        t7.mul_assign(&t6);
+        let mut t15 = t0;
+        t15.mul_assign(&t5);
+        let mut t17 = t12;
+        t17.square_assign();
+        t1.mul_assign(&t17);
+        let mut t3 = t7;
+        t3.mul_assign(&t2);
+        let mut t8 = t1;
+        t8.mul_assign(&t17);
+        let mut t4 = t8;
+        t4.mul_assign(&t2);
+        let mut t9 = t8;
+        t9.mul_assign(&t7);
+        let mut t7 = t4;
+        t7.mul_assign(&t5);
+        let mut t11 = t4;
+        t11.mul_assign(&t17);
+        let mut t5 = t9;
+        t5.mul_assign(&t17);
+        let mut t14 = t7;
+        t14.mul_assign(&t15);
+        let mut t13 = t11;
+        t13.mul_assign(&t12);
+        let mut t12 = t11;
+        t12.mul_assign(&t17);
+        t15.mul_assign(&t12);
+        t16.mul_assign(&t15);
+        t3.mul_assign(&t16);
+        t17.mul_assign(&t3);
+        t0.mul_assign(&t17);
+        t6.mul_assign(&t0);
+        t2.mul_assign(&t6);
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.mul_assign(&t17);
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.mul_assign(&t16);
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.mul_assign(&t15);
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.mul_assign(&t15);
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.mul_assign(&t14);
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.mul_assign(&t13);
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.mul_assign(&t12);
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.mul_assign(&t11);
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.mul_assign(&t8);
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.mul_assign(&t10);
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.mul_assign(&t9);
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.mul_assign(&t8);
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.mul_assign(&t7);
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.mul_assign(&t6);
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.mul_assign(&t5);
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.mul_assign(&t3);
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.mul_assign(&t2);
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.mul_assign(&t4);
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.mul_assign(&t2);
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.mul_assign(&t3);
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.mul_assign(&t2);
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.mul_assign(&t2);
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.mul_assign(&t2);
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.mul_assign(&t3);
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.mul_assign(&t2);
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.mul_assign(&t2);
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.mul_assign(&t1);
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.square_assign();
+        t0.mul_assign(&t1);
+
+        t0
     }
 
     #[inline(always)]
