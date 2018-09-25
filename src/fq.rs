@@ -746,3 +746,26 @@ fn test_inversion() {
         tmp.add_assign(&R2);
     }
 }
+
+#[test]
+fn test_pow_q_minus_2_is_pow() {
+    let q_minus_2 = [	       
+        0xfffffffeffffffff,	
+        0x53bda402fffe5bfe,	
+        0x3339d80809a1d805,
+        0x73eda753299d7d48,
+    ];
+
+    let mut r1 = R;
+    let mut r2 = R;
+
+    for _ in 0..100 {
+        r1 = r1.pow_q_minus_2();
+        r2 = r2.pow(&q_minus_2);
+        
+        assert_eq!(r1, r2);
+        // Double the numbers so we check something different next tine around
+        r1.add_assign(&r2);
+        r2 = r1;
+    } 
+}
