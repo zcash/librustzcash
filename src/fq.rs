@@ -290,12 +290,122 @@ impl Fq {
     /// effect of inverting the element if it is
     /// nonzero.
     pub fn pow_q_minus_2(&self) -> Self {
-        self.pow(&[
-            0xfffffffeffffffff,
-            0x53bda402fffe5bfe,
-            0x3339d80809a1d805,
-            0x73eda753299d7d48,
-        ])
+        #[inline(always)]
+        fn square_assign_multi(n: &mut Fq, num_times: usize) {
+            for _ in 0..num_times {
+                n.square_assign();
+            }
+        }
+        // found using https://github.com/kwantam/addchain
+        let t10 = *self;
+        let mut t0 = t10;
+        t0.square_assign();
+        let mut t1 = t0;
+        t1.mul_assign(&t10);
+        let mut t16 = t0;
+        t16.square_assign();
+        let mut t6 = t16;
+        t6.square_assign();
+        let mut t5 = t6;
+        t5.mul_assign(&t0);
+        let mut t0 = t6;
+        t0.mul_assign(&t16);
+        let mut t12 = t5;
+        t12.mul_assign(&t16);
+        let mut t2 = t6;
+        t2.square_assign();
+        let mut t7 = t5;
+        t7.mul_assign(&t6);
+        let mut t15 = t0;
+        t15.mul_assign(&t5);
+        let mut t17 = t12;
+        t17.square_assign();
+        t1.mul_assign(&t17);
+        let mut t3 = t7;
+        t3.mul_assign(&t2);
+        let mut t8 = t1;
+        t8.mul_assign(&t17);
+        let mut t4 = t8;
+        t4.mul_assign(&t2);
+        let mut t9 = t8;
+        t9.mul_assign(&t7);
+        let mut t7 = t4;
+        t7.mul_assign(&t5);
+        let mut t11 = t4;
+        t11.mul_assign(&t17);
+        let mut t5 = t9;
+        t5.mul_assign(&t17);
+        let mut t14 = t7;
+        t14.mul_assign(&t15);
+        let mut t13 = t11;
+        t13.mul_assign(&t12);
+        let mut t12 = t11;
+        t12.mul_assign(&t17);
+        t15.mul_assign(&t12);
+        t16.mul_assign(&t15);
+        t3.mul_assign(&t16);
+        t17.mul_assign(&t3);
+        t0.mul_assign(&t17);
+        t6.mul_assign(&t0);
+        t2.mul_assign(&t6);
+        square_assign_multi(&mut t0, 8);
+        t0.mul_assign(&t17);
+        square_assign_multi(&mut t0, 9);
+        t0.mul_assign(&t16);
+        square_assign_multi(&mut t0, 9);
+        t0.mul_assign(&t15);
+        square_assign_multi(&mut t0, 9);
+        t0.mul_assign(&t15);
+        square_assign_multi(&mut t0, 7);
+        t0.mul_assign(&t14);
+        square_assign_multi(&mut t0, 7);
+        t0.mul_assign(&t13);
+        square_assign_multi(&mut t0, 10);
+        t0.mul_assign(&t12);
+        square_assign_multi(&mut t0, 9);
+        t0.mul_assign(&t11);
+        square_assign_multi(&mut t0, 8);
+        t0.mul_assign(&t8);
+        square_assign_multi(&mut t0, 8);
+        t0.mul_assign(&t10);
+        square_assign_multi(&mut t0, 14);
+        t0.mul_assign(&t9);
+        square_assign_multi(&mut t0, 10);
+        t0.mul_assign(&t8);
+        square_assign_multi(&mut t0, 15);
+        t0.mul_assign(&t7);
+        square_assign_multi(&mut t0, 10);
+        t0.mul_assign(&t6);
+        square_assign_multi(&mut t0, 8);
+        t0.mul_assign(&t5);
+        square_assign_multi(&mut t0, 16);
+        t0.mul_assign(&t3);
+        square_assign_multi(&mut t0, 8);
+        t0.mul_assign(&t2);
+        square_assign_multi(&mut t0, 7);
+        t0.mul_assign(&t4);
+        square_assign_multi(&mut t0, 9);
+        t0.mul_assign(&t2);
+        square_assign_multi(&mut t0, 8);
+        t0.mul_assign(&t3);
+        square_assign_multi(&mut t0, 8);
+        t0.mul_assign(&t2);
+        square_assign_multi(&mut t0, 8);
+        t0.mul_assign(&t2);
+        square_assign_multi(&mut t0, 8);
+        t0.mul_assign(&t2);
+        square_assign_multi(&mut t0, 8);
+        t0.mul_assign(&t3);
+        square_assign_multi(&mut t0, 8);
+        t0.mul_assign(&t2);
+        square_assign_multi(&mut t0, 8);
+        t0.mul_assign(&t2);
+        square_assign_multi(&mut t0, 5);
+        t0.mul_assign(&t1);
+        square_assign_multi(&mut t0, 5);
+        t0.mul_assign(&t1);
+
+        t0
     }
 
     #[inline(always)]
@@ -635,4 +745,27 @@ fn test_inversion() {
 
         tmp.add_assign(&R2);
     }
+}
+
+#[test]
+fn test_pow_q_minus_2_is_pow() {
+    let q_minus_2 = [	       
+        0xfffffffeffffffff,	
+        0x53bda402fffe5bfe,	
+        0x3339d80809a1d805,
+        0x73eda753299d7d48,
+    ];
+
+    let mut r1 = R;
+    let mut r2 = R;
+
+    for _ in 0..100 {
+        r1 = r1.pow_q_minus_2();
+        r2 = r2.pow(&q_minus_2);
+        
+        assert_eq!(r1, r2);
+        // Double the numbers so we check something different next tine around
+        r1.add_assign(&r2);
+        r2 = r1;
+    } 
 }
