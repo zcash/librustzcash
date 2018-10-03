@@ -1,9 +1,44 @@
-use pairing::bls12_381::Bls12;
+use ff::{BitIterator, PrimeField};
+use pairing::bls12_381::{Bls12, Fr, FrRepr};
 use rand::OsRng;
 use sapling_crypto::{
     jubjub::{fs::Fs, FixedGenerators, JubjubBls12},
+    pedersen_hash::{pedersen_hash, Personalization},
     redjubjub::{PrivateKey, PublicKey, Signature},
 };
+
+use JUBJUB;
+
+/// Compute a parent node in the Sapling commitment tree given its two children.
+pub fn merkle_hash(depth: usize, lhs: &FrRepr, rhs: &FrRepr) -> FrRepr {
+    let lhs = {
+        let mut tmp = [false; 256];
+        for (a, b) in tmp.iter_mut().rev().zip(BitIterator::new(lhs)) {
+            *a = b;
+        }
+        tmp
+    };
+
+    let rhs = {
+        let mut tmp = [false; 256];
+        for (a, b) in tmp.iter_mut().rev().zip(BitIterator::new(rhs)) {
+            *a = b;
+        }
+        tmp
+    };
+
+    pedersen_hash::<Bls12, _>(
+        Personalization::MerkleTree(depth),
+        lhs.iter()
+            .map(|&x| x)
+            .take(Fr::NUM_BITS as usize)
+            .chain(rhs.iter().map(|&x| x).take(Fr::NUM_BITS as usize)),
+        &JUBJUB,
+    )
+    .into_xy()
+    .0
+    .into_repr()
+}
 
 /// Create the spendAuthSig for a Sapling SpendDescription.
 pub fn spend_sig(
