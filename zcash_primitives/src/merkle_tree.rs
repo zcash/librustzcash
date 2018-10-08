@@ -1,6 +1,7 @@
 use ff::PrimeField;
 use pairing::bls12_381::{Bls12, Fr, FrRepr};
 use sapling_crypto::primitives::Note;
+use std::collections::VecDeque;
 
 use sapling::merkle_hash;
 
@@ -56,12 +57,147 @@ lazy_static! {
     };
 }
 
+struct PathFiller {
+    queue: VecDeque<Node>,
+}
+
+impl PathFiller {
+    fn empty() -> Self {
+        PathFiller {
+            queue: VecDeque::new(),
+        }
+    }
+
+    fn next(&mut self, depth: usize) -> Node {
+        self.queue.pop_front().unwrap_or_else(|| EMPTY_ROOTS[depth])
+    }
+}
+
+/// A Merkle tree of Sapling note commitments.
+pub struct CommitmentTree {
+    left: Option<Node>,
+    right: Option<Node>,
+    parents: Vec<Option<Node>>,
+}
+
+impl CommitmentTree {
+    /// Creates an empty tree.
+    pub fn new() -> Self {
+        CommitmentTree {
+            left: None,
+            right: None,
+            parents: vec![],
+        }
+    }
+
+    /// Returns the number of notes in the tree.
+    pub fn size(&self) -> usize {
+        self.parents.iter().enumerate().fold(
+            match (self.left.is_some(), self.right.is_some()) {
+                (false, false) => 0,
+                (true, false) | (false, true) => 1,
+                (true, true) => 2,
+            },
+            |acc, (i, p)| {
+                // Treat occupation of parents array as a binary number
+                // (right-shifted by 1)
+                acc + if p.is_some() { 1 << (i + 1) } else { 0 }
+            },
+        )
+    }
+
+    fn is_complete(&self, depth: usize) -> bool {
+        self.left.is_some()
+            && self.right.is_some()
+            && self.parents.len() == depth - 1
+            && self.parents.iter().fold(true, |acc, p| acc && p.is_some())
+    }
+
+    /// Adds a note to the tree. Returns an error if the tree is full.
+    pub fn append(&mut self, node: Node) -> Result<(), ()> {
+        self.append_inner(node, SAPLING_COMMITMENT_TREE_DEPTH)
+    }
+
+    fn append_inner(&mut self, node: Node, depth: usize) -> Result<(), ()> {
+        if self.is_complete(depth) {
+            // Tree is full
+            return Err(());
+        }
+
+        match (self.left, self.right) {
+            (None, _) => self.left = Some(node),
+            (_, None) => self.right = Some(node),
+            (Some(l), Some(r)) => {
+                let mut combined = Node::combine(0, &l, &r);
+                self.left = Some(node);
+                self.right = None;
+
+                for i in 0..depth {
+                    if i < self.parents.len() {
+                        if let Some(p) = self.parents[i] {
+                            combined = Node::combine(i + 1, &p, &combined);
+                            self.parents[i] = None;
+                        } else {
+                            self.parents[i] = Some(combined);
+                            break;
+                        }
+                    } else {
+                        self.parents.push(Some(combined));
+                        break;
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Returns the current root of the tree.
+    pub fn root(&self) -> Node {
+        self.root_inner(SAPLING_COMMITMENT_TREE_DEPTH, PathFiller::empty())
+    }
+
+    fn root_inner(&self, depth: usize, mut filler: PathFiller) -> Node {
+        assert!(depth > 0);
+
+        // 1) Hash left and right leaves together.
+        //    - Empty leaves are used as needed.
+        let leaf_root = Node::combine(
+            0,
+            &match self.left {
+                Some(node) => node,
+                None => filler.next(0),
+            },
+            &match self.right {
+                Some(node) => node,
+                None => filler.next(0),
+            },
+        );
+
+        // 2) Hash in parents up to the currently-filled depth.
+        //    - Roots of the empty subtrees are used as needed.
+        let mid_root = self
+            .parents
+            .iter()
+            .enumerate()
+            .fold(leaf_root, |root, (i, p)| match p {
+                Some(node) => Node::combine(i + 1, node, &root),
+                None => Node::combine(i + 1, &root, &filler.next(i + 1)),
+            });
+
+        // 3) Hash in roots of the empty subtrees up to the final depth.
+        ((self.parents.len() + 1)..depth)
+            .fold(mid_root, |root, d| Node::combine(d, &root, &filler.next(d)))
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::EMPTY_ROOTS;
+    use super::{CommitmentTree, Hashable, Node, PathFiller, EMPTY_ROOTS};
 
     use ff::PrimeFieldRepr;
     use hex;
+    use pairing::bls12_381::FrRepr;
 
     const HEX_EMPTY_ROOTS: [&str; 33] = [
         "0100000000000000000000000000000000000000000000000000000000000000",
@@ -99,6 +235,28 @@ mod tests {
         "fbc2f4300c01f0b7820d00e3347c8da4ee614674376cbc45359daa54f9b5493e",
     ];
 
+    const TESTING_DEPTH: usize = 4;
+
+    struct TestCommitmentTree(CommitmentTree);
+
+    impl TestCommitmentTree {
+        fn new() -> Self {
+            TestCommitmentTree(CommitmentTree::new())
+        }
+
+        fn size(&self) -> usize {
+            self.0.size()
+        }
+
+        fn append(&mut self, node: Node) -> Result<(), ()> {
+            self.0.append_inner(node, TESTING_DEPTH)
+        }
+
+        fn root(&self) -> Node {
+            self.0.root_inner(TESTING_DEPTH, PathFiller::empty())
+        }
+    }
+
     #[test]
     fn empty_root_test_vectors() {
         let mut tmp = [0u8; 32];
@@ -109,5 +267,108 @@ mod tests {
                 .expect("length is 32 bytes");
             assert_eq!(hex::encode(tmp), HEX_EMPTY_ROOTS[i]);
         }
+    }
+
+    #[test]
+    fn sapling_empty_root() {
+        let mut tmp = [0u8; 32];
+        CommitmentTree::new()
+            .root()
+            .repr
+            .write_le(&mut tmp[..])
+            .expect("length is 32 bytes");
+        assert_eq!(
+            hex::encode(tmp),
+            "fbc2f4300c01f0b7820d00e3347c8da4ee614674376cbc45359daa54f9b5493e"
+        );
+    }
+
+    #[test]
+    fn empty_commitment_tree_roots() {
+        let tree = CommitmentTree::new();
+        let mut tmp = [0u8; 32];
+        for i in 1..HEX_EMPTY_ROOTS.len() {
+            tree.root_inner(i, PathFiller::empty())
+                .repr
+                .write_le(&mut tmp[..])
+                .expect("length is 32 bytes");
+            assert_eq!(hex::encode(tmp), HEX_EMPTY_ROOTS[i]);
+        }
+    }
+
+    #[test]
+    fn test_sapling_tree() {
+        // From https://github.com/zcash/zcash/blob/master/src/test/data/merkle_commitments_sapling.json
+        // Byte-reversed because the original test vectors are loaded using uint256S()
+        let commitments = [
+            "b02310f2e087e55bfd07ef5e242e3b87ee5d00c9ab52f61e6bd42542f93a6f55",
+            "225747f3b5d5dab4e5a424f81f85c904ff43286e0f3fd07ef0b8c6a627b11458",
+            "7c3ea01a6e3a3d90cf59cd789e467044b5cd78eb2c84cc6816f960746d0e036c",
+            "50421d6c2c94571dfaaa135a4ff15bf916681ebd62c0e43e69e3b90684d0a030",
+            "aaec63863aaa0b2e3b8009429bdddd455e59be6f40ccab887a32eb98723efc12",
+            "f76748d40d5ee5f9a608512e7954dd515f86e8f6d009141c89163de1cf351a02",
+            "bc8a5ec71647415c380203b681f7717366f3501661512225b6dc3e121efc0b2e",
+            "da1adda2ccde9381e11151686c121e7f52d19a990439161c7eb5a9f94be5a511",
+            "3a27fed5dbbc475d3880360e38638c882fd9b273b618fc433106896083f77446",
+            "c7ca8f7df8fd997931d33985d935ee2d696856cc09cc516d419ea6365f163008",
+            "f0fa37e8063b139d342246142fc48e7c0c50d0a62c97768589e06466742c3702",
+            "e6d4d7685894d01b32f7e081ab188930be6c2b9f76d6847b7f382e3dddd7c608",
+            "8cebb73be883466d18d3b0c06990520e80b936440a2c9fd184d92a1f06c4e826",
+            "22fab8bcdb88154dbf5877ad1e2d7f1b541bc8a5ec1b52266095381339c27c03",
+            "f43e3aac61e5a753062d4d0508c26ceaf5e4c0c58ba3c956e104b5d2cf67c41c",
+            "3a3661bc12b72646c94bc6c92796e81953985ee62d80a9ec3645a9a95740ac15",
+        ];
+
+        // From https://github.com/zcash/zcash/blob/master/src/test/data/merkle_roots_sapling.json
+        let roots = [
+            "8c3daa300c9710bf24d2595536e7c80ff8d147faca726636d28e8683a0c27703",
+            "8611f17378eb55e8c3c3f0a5f002e2b0a7ca39442fc928322b8072d1079c213d",
+            "3db73b998d536be0e1c2ec124df8e0f383ae7b602968ff6a5276ca0695023c46",
+            "7ac2e6442fec5970e116dfa4f2ee606f395366cafb1fa7dfd6c3de3ce18c4363",
+            "6a8f11ab2a11c262e39ed4ea3825ae6c94739ccf94479cb69402c5722b034532",
+            "149595eed0b54a7e694cc8a68372525b9ae2c7b102514f527460db91eb690565",
+            "8c0432f1994a2381a7a4b5fda770336011f9e0b30784f9a5597901619c797045",
+            "e780c48d70420601f3313ff8488d7766b70c059c53aa3cda2ff1ef57ff62383c",
+            "f919f03caaed8a2c60f58c0d43838f83e670dc7e8ccd25daa04a13f3e8f45541",
+            "74f32b36629724038e71cbd6823b5a666440205a7d1a9242e95870b53d81f34a",
+            "a4af205a4e1ee02102866b23a68930ac33efda9235832f49b17fcc4939be4525",
+            "a946a42f1636045a16e65b2308e036d9da70089686c87c692e45912bd1cab772",
+            "a1db2dbac055364c1cb43cbeb49c7e2815bff855122602a2ad0fb981a91e0e39",
+            "16329b3ba4f0640f4d306532d9ea6ba0fbf0e70e44ed57d27b4277ed9cda6849",
+            "7b6523b2d9b23f72fec6234aa6a1f8fae3dba1c6a266023ea8b1826feba7a25c",
+            "5c0bea7e17bde5bee4eb795c2eec3d389a68da587b36dd687b134826ecc09308",
+        ];
+
+        fn assert_root_eq(root: Node, expected: &str) {
+            let mut tmp = [0u8; 32];
+            root.repr
+                .write_le(&mut tmp[..])
+                .expect("length is 32 bytes");
+            assert_eq!(hex::encode(tmp), expected);
+        }
+
+        let mut tree = TestCommitmentTree::new();
+        assert_eq!(tree.size(), 0);
+
+        for i in 0..16 {
+            let mut cm = FrRepr::default();
+            cm.read_le(&hex::decode(commitments[i]).unwrap()[..])
+                .expect("length is 32 bytes");
+
+            let cm = Node::new(cm);
+
+            // Append a commitment to the tree
+            assert!(tree.append(cm).is_ok());
+
+            // Size incremented by one.
+            assert_eq!(tree.size(), i + 1);
+
+            // Check tree root consistency
+            assert_root_eq(tree.root(), roots[i]);
+        }
+
+        // Tree should be full now
+        let node = Node::blank();
+        assert!(tree.append(node).is_err());
     }
 }
