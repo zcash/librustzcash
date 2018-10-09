@@ -38,13 +38,6 @@ librustzcash-test-latest:
     - cargo --verbose --version
     - time cargo test --release --verbose
 
-librustzcash-test-latest:
-  stage: test
-  image: rust:latest
-  script:
-    - cargo --verbose --version
-    - time cargo test --release --verbose
-
 librustzcash-test-rust-nightly:
   stage: test
   image: rustlang/rust:nightly
