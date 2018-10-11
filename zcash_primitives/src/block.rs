@@ -1,7 +1,17 @@
+use hex;
+use std::fmt;
 use std::ops::Deref;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct BlockHash(pub [u8; 32]);
+
+impl fmt::Display for BlockHash {
+    fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        let mut data = self.0.to_vec();
+        data.reverse();
+        formatter.write_str(&hex::encode(data))
+    }
+}
 
 /// A Zcash block header.
 pub struct BlockHeader(BlockHeaderData);
