@@ -5,6 +5,7 @@ extern crate libc;
 extern crate pairing;
 extern crate rand;
 extern crate sapling_crypto;
+extern crate zip32;
 
 mod hashreader;
 
@@ -12,16 +13,20 @@ mod hashreader;
 extern crate lazy_static;
 
 use pairing::{
-    bls12_381::{Bls12, Fr, FrRepr}, BitIterator, Field, PrimeField, PrimeFieldRepr,
+    bls12_381::{Bls12, Fr, FrRepr},
+    BitIterator, Field, PrimeField, PrimeFieldRepr,
 };
 
 use sapling_crypto::{
-    circuit::multipack, constants::CRH_IVK_PERSONALIZATION,
+    circuit::multipack,
+    constants::CRH_IVK_PERSONALIZATION,
     jubjub::{
-        edwards, fs::{Fs, FsRepr}, FixedGenerators, JubjubBls12, JubjubEngine, JubjubParams,
-        PrimeOrder, ToUniform, Unknown,
+        edwards,
+        fs::{Fs, FsRepr},
+        FixedGenerators, JubjubBls12, JubjubEngine, JubjubParams, PrimeOrder, ToUniform, Unknown,
     },
-    pedersen_hash::{pedersen_hash, Personalization}, redjubjub::{self, Signature},
+    pedersen_hash::{pedersen_hash, Personalization},
+    redjubjub::{self, Signature},
 };
 
 use sapling_crypto::circuit::sprout::{self, TREE_DEPTH as SPROUT_TREE_DEPTH};
@@ -1562,4 +1567,87 @@ pub extern "system" fn librustzcash_sapling_proving_ctx_init() -> *mut SaplingPr
 #[no_mangle]
 pub extern "system" fn librustzcash_sapling_proving_ctx_free(ctx: *mut SaplingProvingContext) {
     drop(unsafe { Box::from_raw(ctx) });
+}
+
+#[no_mangle]
+pub extern "system" fn librustzcash_zip32_xsk_master(
+    seed: *const c_uchar,
+    seedlen: size_t,
+    xsk_master: *mut [c_uchar; 169],
+) {
+    let seed = unsafe { std::slice::from_raw_parts(seed, seedlen) };
+
+    let xsk = zip32::ExtendedSpendingKey::master(seed);
+
+    xsk.write(&mut (unsafe { &mut *xsk_master })[..])
+        .expect("should be able to serialize an ExtendedSpendingKey");
+}
+
+#[no_mangle]
+pub extern "system" fn librustzcash_zip32_xsk_derive(
+    xsk_parent: *const [c_uchar; 169],
+    i: uint32_t,
+    xsk_i: *mut [c_uchar; 169],
+) {
+    let xsk_parent = zip32::ExtendedSpendingKey::read(&unsafe { *xsk_parent }[..])
+        .expect("valid ExtendedSpendingKey");
+    let i = zip32::ChildIndex::from_index(i);
+
+    let xsk = xsk_parent.derive_child(i);
+
+    xsk.write(&mut (unsafe { &mut *xsk_i })[..])
+        .expect("should be able to serialize an ExtendedSpendingKey");
+}
+
+#[no_mangle]
+pub extern "system" fn librustzcash_zip32_xfvk_derive(
+    xfvk_parent: *const [c_uchar; 169],
+    i: uint32_t,
+    xfvk_i: *mut [c_uchar; 169],
+) -> bool {
+    let xfvk_parent = zip32::ExtendedFullViewingKey::read(&unsafe { *xfvk_parent }[..])
+        .expect("valid ExtendedFullViewingKey");
+    let i = zip32::ChildIndex::from_index(i);
+
+    let xfvk = match xfvk_parent.derive_child(i) {
+        Ok(xfvk) => xfvk,
+        Err(_) => return false,
+    };
+
+    xfvk.write(&mut (unsafe { &mut *xfvk_i })[..])
+        .expect("should be able to serialize an ExtendedFullViewingKey");
+
+    true
+}
+
+#[no_mangle]
+pub extern "system" fn librustzcash_zip32_xfvk_address(
+    xfvk: *const [c_uchar; 169],
+    j: *const [c_uchar; 11],
+    j_ret: *mut [c_uchar; 11],
+    addr_ret: *mut [c_uchar; 43],
+) -> bool {
+    let xfvk = zip32::ExtendedFullViewingKey::read(&unsafe { *xfvk }[..])
+        .expect("valid ExtendedFullViewingKey");
+    let j = zip32::DiversifierIndex(unsafe { *j });
+
+    let addr = match xfvk.address(j) {
+        Ok(addr) => addr,
+        Err(_) => return false,
+    };
+
+    let j_ret = unsafe { &mut *j_ret };
+    let addr_ret = unsafe { &mut *addr_ret };
+
+    j_ret.copy_from_slice(&(addr.0).0);
+    addr_ret
+        .get_mut(..11)
+        .unwrap()
+        .copy_from_slice(&addr.1.diversifier.0);
+    addr.1
+        .pk_d
+        .write(addr_ret.get_mut(11..).unwrap())
+        .expect("should be able to serialize a PaymentAddress");
+
+    true
 }
