@@ -20,6 +20,9 @@ const OVERWINTER_TX_VERSION: u32 = 3;
 const SAPLING_VERSION_GROUP_ID: u32 = 0x892F2085;
 const SAPLING_TX_VERSION: u32 = 4;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct TxId(pub [u8; 32]);
+
 /// A Zcash transaction.
 #[derive(Debug)]
 pub struct Transaction(TransactionData);
