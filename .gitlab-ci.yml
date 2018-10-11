@@ -7,7 +7,6 @@
  #  Usage: Commit source and the pipeline will trigger the according jobs.
  #
  #  Known bugs/missing features:
- #
  # ************************************************************************/
   
 stages:
