@@ -14,7 +14,11 @@ edition = "2018"
 [dependencies]
 bech32 = "0.7"
 pairing = { version = "0.15.0", path = "../pairing" }
+protobuf = "2"
 zcash_primitives = { version = "0.1.0", path = "../zcash_primitives" }
+
+[build-dependencies]
+protobuf-codegen-pure = "2"
 
 [dev-dependencies]
 rand_core = "0.5"
