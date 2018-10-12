@@ -13,6 +13,8 @@ edition = "2018"
 
 [dependencies]
 bech32 = "0.7"
+ff = { version = "0.5.0", path = "../ff" }
+hex = "0.3"
 pairing = { version = "0.15.0", path = "../pairing" }
 protobuf = "2"
 zcash_primitives = { version = "0.1.0", path = "../zcash_primitives" }
@@ -22,6 +24,7 @@ protobuf-codegen-pure = "2"
 
 [dev-dependencies]
 rand_core = "0.5"
+rand_os = "0.2"
 rand_xorshift = "0.2"
 
 [badges]
