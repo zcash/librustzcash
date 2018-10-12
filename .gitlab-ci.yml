@@ -20,7 +20,6 @@ rust-latest:
   script:
     - cargo --verbose --version
     - time cargo build --verbose
-  when: always
 
 rust-nightly:
   stage: build
@@ -29,7 +28,6 @@ rust-nightly:
     - cargo --verbose --version
     - cargo build --verbose
   allow_failure: true
-  when: always
 
 librustzcash-test-latest:
   stage: test
@@ -37,7 +35,6 @@ librustzcash-test-latest:
   script:
     - cargo --verbose --version
     - time cargo test --release --verbose
-  when: always
 
 librustzcash-test-rust-nightly:
   stage: test
@@ -46,7 +43,6 @@ librustzcash-test-rust-nightly:
     - cargo --verbose --version
     - cargo test --release --verbose
   allow_failure: true
-  when: always
 
 #used to manually deploy a given release
 librustzcash-rust-rc:
