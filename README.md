@@ -28,11 +28,17 @@ r = 0x0e7db4ea6533afa906673b0101343b00a6682093ccc81082d0970e5ed6f72cb7
 d = -(10240/10241)
 ```
 
-The choice of `GF(q)` is made to be the scalar field of the BLS12-381 elliptic curve group.
+The choice of `GF(q)` is made to be the scalar field of the BLS12-381 elliptic curve construction.
 
 Jubjub is birationally equivalent to a [Montgomery curve](https://en.wikipedia.org/wiki/Montgomery_curve) `y^2 = x^3 + Ax^2 + x` over the same field with `A = 40962`. This value of `A` is the smallest integer such that `(A - 2) / 4` is a small integer, `A^2 - 4` is nonsquare in `GF(q)`, and the Montgomery curve and its quadratic twist have small cofactors `8` and `4`, respectively. This is identical to the relationship between Curve25519 and ed25519.
 
 Please see [./doc/evidence/](./doc/evidence/) for supporting evidence that Jubjub meets the [SafeCurves](https://safecurves.cr.yp.to/index.html) criteria. The tool in [./doc/derive/](./doc/derive/) will derive the curve parameters via the above criteria to demonstrate rigidity.
+
+## Acknowledgements
+
+Jubjub was designed by Sean Bowe. Daira Hopwood is responsible for its name and specification. The security evidence in [./doc/evidence/](./doc/evidence/) is the product of Daira Hopwood and based on SafeCurves by Daniel J. Bernstein and Tanja Lange. Peter Newell and Daira Hopwood are responsible for the Jubjub bird image.
+
+Please see `Cargo.toml` for a list of primary authors of this codebase.
 
 ## License
 
