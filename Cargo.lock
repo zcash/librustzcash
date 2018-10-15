@@ -511,6 +511,9 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 [[package]]
 name = "zcash_client_backend"
 version = "0.0.0"
+dependencies = [
+ "zcash_primitives 0.0.0",
+]
 
 [[package]]
 name = "zcash_primitives"
