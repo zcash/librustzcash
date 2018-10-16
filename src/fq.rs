@@ -900,8 +900,8 @@ fn test_pow_q_minus_2_is_pow() {
 
         assert_eq!(r1, r2);
         assert_eq!(r2, r3);
-        // Double the numbers so we check something different next time around
-        r1.add_assign(&r2);
+        // Add R so we check something different next time around
+        r1.add_assign(&R);
         r2 = r1;
         r3 = r1;
     }
