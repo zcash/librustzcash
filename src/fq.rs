@@ -118,7 +118,7 @@ impl<'b> SubAssign<&'b Fq> for Fq {
         let (d2, borrow) = sbb(self.0[2], rhs.0[2], borrow);
         let (d3, borrow) = sbb(self.0[3], rhs.0[3], borrow);
 
-        // If underflow occurred on the final limb, borrow = 0x111...111, otherwise
+        // If underflow occurred on the final limb, borrow = 0xfff...fff, otherwise
         // borrow = 0x000...000. Thus, we use it as a mask to conditionally add the modulus.
         let (d0, carry) = adc(d0, MODULUS.0[0] & borrow, 0);
         let (d1, carry) = adc(d1, MODULUS.0[1] & borrow, carry);
@@ -204,7 +204,8 @@ const R2: Fq = Fq([
 const S: u32 = 32;
 
 /// GENERATOR^t where t * 2^s + 1 = q
-/// with t odd.
+/// with t odd. In other words, this
+/// is a 2^s root of unity.
 const ROOT_OF_UNITY: Fq = Fq([
     0xb9b58d8c5f0e466a,
     0x5b1b4c801819d7ec,
