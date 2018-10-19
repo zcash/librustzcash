@@ -162,6 +162,7 @@ impl<E: JubjubEngine> PaymentAddress<E> {
     }
 }
 
+#[derive(Clone)]
 pub struct Note<E: JubjubEngine> {
     /// The value of the note
     pub value: u64,
