@@ -131,6 +131,18 @@ impl<E: JubjubEngine> ExpandedSpendingKey<E> {
     }
 }
 
+impl<E: JubjubEngine> Clone for FullViewingKey<E> {
+    fn clone(&self) -> Self {
+        FullViewingKey {
+            vk: ViewingKey {
+                ak: self.vk.ak.clone(),
+                nk: self.vk.nk.clone(),
+            },
+            ovk: self.ovk.clone(),
+        }
+    }
+}
+
 impl<E: JubjubEngine> FullViewingKey<E> {
     fn from_expanded_spending_key(expsk: &ExpandedSpendingKey<E>, params: &E::Params) -> Self {
         FullViewingKey {
@@ -351,6 +363,7 @@ pub struct ExtendedSpendingKey {
 }
 
 // A Sapling extended full viewing key
+#[derive(Clone)]
 pub struct ExtendedFullViewingKey {
     depth: u8,
     parent_fvk_tag: FVKTag,
