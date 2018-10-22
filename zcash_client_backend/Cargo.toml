@@ -1,8 +1,9 @@
 [package]
-name = "zcash_wallet"
+name = "zcash_client_backend"
 version = "0.0.0"
 authors = [
     "Jack Grigg <jack@z.cash>",
 ]
+edition = "2018"
 
 [dependencies]
