@@ -48,7 +48,18 @@ use std::io::{self, BufReader};
 use libc::{c_char, c_uchar, int64_t, size_t, uint32_t, uint64_t};
 use std::ffi::CStr;
 use std::fs::File;
+use std::path::{Path, PathBuf};
 use std::slice;
+
+#[cfg(not(target_os = "windows"))]
+use std::ffi::OsStr;
+#[cfg(not(target_os = "windows"))]
+use std::os::unix::ffi::OsStrExt;
+
+#[cfg(target_os = "windows")]
+use std::ffi::OsString;
+#[cfg(target_os = "windows")]
+use std::os::windows::ffi::OsStringExt;
 
 use sapling_crypto::primitives::{ProofGenerationKey, ValueCommitment, ViewingKey};
 
@@ -67,7 +78,7 @@ static mut SPROUT_GROTH16_VK: Option<PreparedVerifyingKey<Bls12>> = None;
 
 static mut SAPLING_SPEND_PARAMS: Option<Parameters<Bls12>> = None;
 static mut SAPLING_OUTPUT_PARAMS: Option<Parameters<Bls12>> = None;
-static mut SPROUT_GROTH16_PARAMS_PATH: Option<String> = None;
+static mut SPROUT_GROTH16_PARAMS_PATH: Option<PathBuf> = None;
 
 fn is_small_order<Order>(p: &edwards::Point<Bls12, Order>) -> bool {
     p.double(&JUBJUB).double(&JUBJUB).double(&JUBJUB) == edwards::Point::zero()
@@ -114,13 +125,75 @@ fn fixed_scalar_mult(from: &[u8], p_g: FixedGenerators) -> edwards::Point<Bls12,
     JUBJUB.generator(p_g).mul(f, &JUBJUB)
 }
 
+#[cfg(not(target_os = "windows"))]
 #[no_mangle]
 pub extern "system" fn librustzcash_init_zksnark_params(
-    spend_path: *const c_char,
+    spend_path: *const u8,
+    spend_path_len: usize,
     spend_hash: *const c_char,
-    output_path: *const c_char,
+    output_path: *const u8,
+    output_path_len: usize,
     output_hash: *const c_char,
-    sprout_path: *const c_char,
+    sprout_path: *const u8,
+    sprout_path_len: usize,
+    sprout_hash: *const c_char,
+) {
+    let spend_path = Path::new(OsStr::from_bytes(unsafe {
+        slice::from_raw_parts(spend_path, spend_path_len)
+    }));
+    let output_path = Path::new(OsStr::from_bytes(unsafe {
+        slice::from_raw_parts(output_path, output_path_len)
+    }));
+    let sprout_path = Path::new(OsStr::from_bytes(unsafe {
+        slice::from_raw_parts(sprout_path, sprout_path_len)
+    }));
+
+    init_zksnark_params(
+        spend_path,
+        spend_hash,
+        output_path,
+        output_hash,
+        sprout_path,
+        sprout_hash,
+    )
+}
+
+#[cfg(target_os = "windows")]
+#[no_mangle]
+pub extern "system" fn librustzcash_init_zksnark_params(
+    spend_path: *const u16,
+    spend_path_len: usize,
+    spend_hash: *const c_char,
+    output_path: *const u16,
+    output_path_len: usize,
+    output_hash: *const c_char,
+    sprout_path: *const u16,
+    sprout_path_len: usize,
+    sprout_hash: *const c_char,
+) {
+    let spend_path =
+        OsString::from_wide(unsafe { slice::from_raw_parts(spend_path, spend_path_len) });
+    let output_path =
+        OsString::from_wide(unsafe { slice::from_raw_parts(output_path, output_path_len) });
+    let sprout_path =
+        OsString::from_wide(unsafe { slice::from_raw_parts(sprout_path, sprout_path_len) });
+
+    init_zksnark_params(
+        Path::new(&spend_path),
+        spend_hash,
+        Path::new(&output_path),
+        output_hash,
+        Path::new(&sprout_path),
+        sprout_hash,
+    )
+}
+
+fn init_zksnark_params(
+    spend_path: &Path,
+    spend_hash: *const c_char,
+    output_path: &Path,
+    output_hash: *const c_char,
+    sprout_path: &Path,
     sprout_hash: *const c_char,
 ) {
     // Initialize jubjub parameters here
@@ -141,25 +214,10 @@ pub extern "system" fn librustzcash_init_zksnark_params(
         .expect("hash should be a valid string")
         .to_string();
 
-    // These should be valid CStr's, but the decoding may fail on Windows
-    // so we may need to use OSStr or something.
-    let spend_path = unsafe { CStr::from_ptr(spend_path) }
-        .to_str()
-        .expect("parameter path encoding error")
-        .to_string();
-    let output_path = unsafe { CStr::from_ptr(output_path) }
-        .to_str()
-        .expect("parameter path encoding error")
-        .to_string();
-    let sprout_path = unsafe { CStr::from_ptr(sprout_path) }
-        .to_str()
-        .expect("parameter path encoding error")
-        .to_string();
-
     // Load from each of the paths
     let spend_fs = File::open(spend_path).expect("couldn't load Sapling spend parameters file");
     let output_fs = File::open(output_path).expect("couldn't load Sapling output parameters file");
-    let sprout_fs = File::open(&sprout_path).expect("couldn't load Sprout groth16 parameters file");
+    let sprout_fs = File::open(sprout_path).expect("couldn't load Sprout groth16 parameters file");
 
     let mut spend_fs = hashreader::HashReader::new(BufReader::with_capacity(1024 * 1024, spend_fs));
     let mut output_fs =
@@ -213,7 +271,7 @@ pub extern "system" fn librustzcash_init_zksnark_params(
     unsafe {
         SAPLING_SPEND_PARAMS = Some(spend_params);
         SAPLING_OUTPUT_PARAMS = Some(output_params);
-        SPROUT_GROTH16_PARAMS_PATH = Some(sprout_path);
+        SPROUT_GROTH16_PARAMS_PATH = Some(sprout_path.to_owned());
 
         SAPLING_SPEND_VK = Some(spend_vk);
         SAPLING_OUTPUT_VK = Some(output_vk);
