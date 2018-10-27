@@ -4,6 +4,12 @@
 #include <stdint.h>
 
 extern "C" {
+#ifdef WIN32
+    typedef uint16_t codeunit;
+#else
+    typedef uint8_t codeunit;
+#endif
+
     void librustzcash_to_scalar(const unsigned char *input, unsigned char *result);
 
     void librustzcash_ask_to_ak(const unsigned char *ask, unsigned char *result);
@@ -19,11 +25,14 @@ extern "C" {
     /// Loads the zk-SNARK parameters into memory and saves
     /// paths as necessary. Only called once.
     void librustzcash_init_zksnark_params(
-        const char* spend_path,
+        const codeunit* spend_path,
+        size_t spend_path_len,
         const char* spend_hash,
-        const char* output_path,
+        const codeunit* output_path,
+        size_t output_path_len,
         const char* output_hash,
-        const char* sprout_path,
+        const codeunit* sprout_path,
+        size_t sprout_path_len,
         const char* sprout_hash
     );
 
