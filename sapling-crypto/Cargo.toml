@@ -25,7 +25,3 @@ rev = "7a5b5fc99ae483a0043db7547fb79a6fa44b88a9"
 [dev-dependencies]
 hex-literal = "0.1"
 rust-crypto = "0.2"
-
-[features]
-default = ["u128-support"]
-u128-support = ["pairing/u128-support"]
