@@ -1,5 +1,5 @@
+use ff::{Field, PrimeField, PrimeFieldRepr};
 use jubjub::*;
-use pairing::*;
 
 #[derive(Copy, Clone)]
 pub enum Personalization {

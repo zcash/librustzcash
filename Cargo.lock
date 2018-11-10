@@ -365,6 +365,7 @@ dependencies = [
  "blake2-rfc 0.2.18 (git+https://github.com/gtank/blake2-rfc?rev=7a5b5fc99ae483a0043db7547fb79a6fa44b88a9)",
  "byteorder 1.2.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "digest 0.7.2 (registry+https://github.com/rust-lang/crates.io-index)",
+ "ff 0.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "hex-literal 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "pairing 0.14.2",
  "rand 0.4.2 (registry+https://github.com/rust-lang/crates.io-index)",

@@ -1,7 +1,7 @@
 //! Implementation of RedJubjub, a specialization of RedDSA to the Jubjub curve.
 //! See section 5.4.6 of the Sapling protocol specification.
 
-use pairing::{Field, PrimeField, PrimeFieldRepr};
+use ff::{Field, PrimeField, PrimeFieldRepr};
 use rand::{Rng, Rand};
 use std::io::{self, Read, Write};
 

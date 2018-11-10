@@ -1,10 +1,4 @@
-use pairing::{
-    Field,
-    SqrtField,
-    PrimeField,
-    PrimeFieldRepr,
-    BitIterator
-};
+use ff::{BitIterator, Field, PrimeField, PrimeFieldRepr, SqrtField};
 
 use super::{
     JubjubEngine,

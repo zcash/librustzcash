@@ -1,8 +1,5 @@
-use pairing::{
-    Engine,
-    Field,
-    PrimeField
-};
+use ff::{Field, PrimeField};
+use pairing::Engine;
 
 use bellman::{
     SynthesisError,

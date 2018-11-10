@@ -2,6 +2,7 @@ extern crate pairing;
 extern crate bellman;
 extern crate blake2_rfc;
 extern crate digest;
+extern crate ff;
 extern crate rand;
 extern crate byteorder;
 
