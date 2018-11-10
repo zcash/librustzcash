@@ -14,6 +14,7 @@ repository = "https://github.com/zcash-hackworks/zip32"
 [dependencies]
 aes = "0.2"
 byteorder = "1"
+ff = "0.4"
 fpe = "0.1"
 lazy_static = "1.0"
 pairing = { path = "../pairing" }
