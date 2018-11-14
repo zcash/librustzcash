@@ -20,6 +20,9 @@ pub mod sapling;
 mod serialize;
 pub mod transaction;
 
+#[cfg(test)]
+mod test_vectors;
+
 lazy_static! {
     pub static ref JUBJUB: JubjubBls12 = { JubjubBls12::new() };
 }

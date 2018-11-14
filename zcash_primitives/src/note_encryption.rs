@@ -152,3 +152,91 @@ impl SaplingNoteEncryption {
         output
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use ff::{PrimeField, PrimeFieldRepr};
+    use pairing::bls12_381::{Bls12, Fr, FrRepr};
+    use sapling_crypto::{
+        jubjub::{
+            edwards,
+            fs::{Fs, FsRepr},
+        },
+        primitives::{Diversifier, PaymentAddress},
+    };
+
+    use super::{kdf_sapling, sapling_ka_agree, Memo, SaplingNoteEncryption};
+    use crate::{keys::OutgoingViewingKey, JUBJUB};
+
+    #[test]
+    fn test_vectors() {
+        let test_vectors = crate::test_vectors::note_encryption::make_test_vectors();
+
+        macro_rules! read_fr {
+            ($field:expr) => {{
+                let mut repr = FrRepr::default();
+                repr.read_le(&$field[..]).unwrap();
+                Fr::from_repr(repr).unwrap()
+            }};
+        }
+
+        macro_rules! read_fs {
+            ($field:expr) => {{
+                let mut repr = FsRepr::default();
+                repr.read_le(&$field[..]).unwrap();
+                Fs::from_repr(repr).unwrap()
+            }};
+        }
+
+        macro_rules! read_point {
+            ($field:expr) => {
+                edwards::Point::<Bls12, _>::read(&$field[..], &JUBJUB).unwrap()
+            };
+        }
+
+        for tv in test_vectors {
+            //
+            // Load the test vector components
+            //
+
+            let pk_d = read_point!(tv.default_pk_d)
+                .as_prime_order(&JUBJUB)
+                .unwrap();
+            let rcm = read_fs!(tv.rcm);
+            let cv = read_point!(tv.cv);
+            let cmu = read_fr!(tv.cmu);
+            let esk = read_fs!(tv.esk);
+            let epk = read_point!(tv.epk).as_prime_order(&JUBJUB).unwrap();
+
+            //
+            // Test the individual components
+            //
+
+            let shared_secret = sapling_ka_agree(&esk, &pk_d);
+            assert_eq!(shared_secret, tv.shared_secret);
+
+            let k_enc = kdf_sapling(&shared_secret, &epk);
+            assert_eq!(k_enc.as_bytes(), tv.k_enc);
+
+            let to = PaymentAddress {
+                pk_d,
+                diversifier: Diversifier(tv.default_d),
+            };
+            let note = to.create_note(tv.v, rcm, &JUBJUB).unwrap();
+            assert_eq!(note.cm(&JUBJUB), cmu);
+
+            //
+            // Test encryption
+            //
+
+            let mut ne =
+                SaplingNoteEncryption::new(OutgoingViewingKey(tv.ovk), note, to, Memo(tv.memo));
+            // Swap in the ephemeral keypair from the test vectors
+            ne.esk = esk;
+            ne.epk = epk;
+
+            assert_eq!(&ne.encrypt_note_plaintext()[..], &tv.c_enc[..]);
+            assert_eq!(&ne.encrypt_outgoing_plaintext(&cv, &cmu)[..], &tv.c_out[..]);
+        }
+    }
+}
