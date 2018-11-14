@@ -58,6 +58,23 @@ fn kdf_sapling(dhsecret: &[u8], epk: &edwards::Point<Bls12, PrimeOrder>) -> Blak
     h.finalize()
 }
 
+fn prf_ock(
+    ovk: &OutgoingViewingKey,
+    cv: &edwards::Point<Bls12, Unknown>,
+    cmu: &Fr,
+    epk: &edwards::Point<Bls12, PrimeOrder>,
+) -> Blake2bResult {
+    let mut ock_input = [0u8; 128];
+    ock_input[0..32].copy_from_slice(&ovk.0);
+    cv.write(&mut ock_input[32..64]).unwrap();
+    cmu.into_repr().write_le(&mut ock_input[64..96]).unwrap();
+    epk.write(&mut ock_input[96..128]).unwrap();
+
+    let mut h = Blake2b::with_params(32, &[], &[], PRF_OCK_PERSONALIZATION);
+    h.update(&ock_input);
+    h.finalize()
+}
+
 pub struct SaplingNoteEncryption {
     epk: edwards::Point<Bls12, PrimeOrder>,
     esk: Fs,
@@ -126,15 +143,7 @@ impl SaplingNoteEncryption {
         cv: &edwards::Point<Bls12, Unknown>,
         cmu: &Fr,
     ) -> [u8; 80] {
-        let mut ock_input = [0u8; 128];
-        ock_input[0..32].copy_from_slice(&self.ovk.0);
-        cv.write(&mut ock_input[32..64]).unwrap();
-        cmu.into_repr().write_le(&mut ock_input[64..96]).unwrap();
-        self.epk.write(&mut ock_input[96..128]).unwrap();
-
-        let mut h = Blake2b::with_params(32, &[], &[], PRF_OCK_PERSONALIZATION);
-        h.update(&ock_input);
-        let key = h.finalize();
+        let key = prf_ock(&self.ovk, &cv, &cmu, &self.epk);
 
         let mut input = [0u8; 64];
         self.note.pk_d.write(&mut input[0..32]).unwrap();
@@ -165,7 +174,7 @@ mod tests {
         primitives::{Diversifier, PaymentAddress},
     };
 
-    use super::{kdf_sapling, sapling_ka_agree, Memo, SaplingNoteEncryption};
+    use super::{kdf_sapling, prf_ock, sapling_ka_agree, Memo, SaplingNoteEncryption};
     use crate::{keys::OutgoingViewingKey, JUBJUB};
 
     #[test]
@@ -218,6 +227,10 @@ mod tests {
             let k_enc = kdf_sapling(&shared_secret, &epk);
             assert_eq!(k_enc.as_bytes(), tv.k_enc);
 
+            let ovk = OutgoingViewingKey(tv.ovk);
+            let ock = prf_ock(&ovk, &cv, &cmu, &epk);
+            assert_eq!(ock.as_bytes(), tv.ock);
+
             let to = PaymentAddress {
                 pk_d,
                 diversifier: Diversifier(tv.default_d),
@@ -229,8 +242,7 @@ mod tests {
             // Test encryption
             //
 
-            let mut ne =
-                SaplingNoteEncryption::new(OutgoingViewingKey(tv.ovk), note, to, Memo(tv.memo));
+            let mut ne = SaplingNoteEncryption::new(ovk, note, to, Memo(tv.memo));
             // Swap in the ephemeral keypair from the test vectors
             ne.esk = esk;
             ne.epk = epk;
