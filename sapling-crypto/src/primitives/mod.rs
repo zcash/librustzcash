@@ -116,7 +116,7 @@ impl<E: JubjubEngine> ViewingKey<E> {
     }
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug, PartialEq)]
 pub struct Diversifier(pub [u8; 11]);
 
 impl Diversifier {
@@ -129,10 +129,16 @@ impl Diversifier {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct PaymentAddress<E: JubjubEngine> {
     pub pk_d: edwards::Point<E, PrimeOrder>,
     pub diversifier: Diversifier
+}
+
+impl<E: JubjubEngine> PartialEq for PaymentAddress<E> {
+    fn eq(&self, other: &Self) -> bool {
+        self.pk_d == other.pk_d && self.diversifier == other.diversifier
+    }
 }
 
 impl<E: JubjubEngine> PaymentAddress<E> {
@@ -162,7 +168,7 @@ impl<E: JubjubEngine> PaymentAddress<E> {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Note<E: JubjubEngine> {
     /// The value of the note
     pub value: u64,
@@ -172,6 +178,15 @@ pub struct Note<E: JubjubEngine> {
     pub pk_d: edwards::Point<E, PrimeOrder>,
     /// The commitment randomness
     pub r: E::Fs
+}
+
+impl<E: JubjubEngine> PartialEq for Note<E> {
+    fn eq(&self, other: &Self) -> bool {
+        self.value == other.value
+            && self.g_d == other.g_d
+            && self.pk_d == other.pk_d
+            && self.r == other.r
+    }
 }
 
 impl<E: JubjubEngine> Note<E> {

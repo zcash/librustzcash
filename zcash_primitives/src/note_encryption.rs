@@ -1,12 +1,16 @@
 use blake2_rfc::blake2b::{Blake2b, Blake2bResult};
-use byteorder::{LittleEndian, WriteBytesExt};
+use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use chacha20_poly1305_aead;
 use ff::{PrimeField, PrimeFieldRepr};
 use pairing::bls12_381::{Bls12, Fr};
 use rand::{OsRng, Rng};
 use sapling_crypto::{
-    jubjub::{edwards, fs::Fs, PrimeOrder, ToUniform, Unknown},
-    primitives::{Note, PaymentAddress},
+    jubjub::{
+        edwards,
+        fs::{Fs, FsRepr},
+        PrimeOrder, ToUniform, Unknown,
+    },
+    primitives::{Diversifier, Note, PaymentAddress},
 };
 
 use crate::{keys::OutgoingViewingKey, JUBJUB};
@@ -162,6 +166,64 @@ impl SaplingNoteEncryption {
     }
 }
 
+/// Attempts to decrypt and validate the given `enc_ciphertext` using the given `ivk`.
+/// If successful, the corresponding Sapling note and memo are returned, along with the
+/// `PaymentAddress` to which the note was sent.
+///
+/// Implements section 4.17.2 of the Zcash Protocol Specification.
+pub fn try_sapling_note_decryption(
+    ivk: &Fs,
+    epk: &edwards::Point<Bls12, PrimeOrder>,
+    cmu: &Fr,
+    enc_ciphertext: &[u8],
+) -> Option<(Note<Bls12>, PaymentAddress<Bls12>, Memo)> {
+    let shared_secret = sapling_ka_agree(&ivk, &epk);
+    let key = kdf_sapling(&shared_secret, &epk);
+
+    let mut plaintext = Vec::with_capacity(564);
+    let nonce = [0u8; 12];
+    chacha20_poly1305_aead::decrypt(
+        key.as_bytes(),
+        &nonce,
+        &[],
+        &enc_ciphertext[..564],
+        &enc_ciphertext[564..],
+        &mut plaintext,
+    )
+    .ok()?;
+
+    let mut d = [0u8; 11];
+    d.copy_from_slice(&plaintext[1..12]);
+
+    let v = (&plaintext[12..20]).read_u64::<LittleEndian>().ok()?;
+
+    let mut rcm = FsRepr::default();
+    rcm.read_le(&plaintext[20..52]).ok()?;
+    let rcm = Fs::from_repr(rcm).ok()?;
+
+    let mut memo = [0u8; 512];
+    memo.copy_from_slice(&plaintext[52..564]);
+
+    let diversifier = Diversifier(d);
+    let pk_d = match diversifier.g_d::<Bls12>(&JUBJUB) {
+        Some(g_d) => g_d.mul(ivk.into_repr(), &JUBJUB),
+        None => {
+            // Invalid diversifier in note plaintext
+            return None;
+        }
+    };
+
+    let to = PaymentAddress { pk_d, diversifier };
+    let note = to.create_note(v, rcm, &JUBJUB).unwrap();
+
+    if note.cm(&JUBJUB) != *cmu {
+        // Published commitment doesn't match calculated commitment
+        return None;
+    }
+
+    Some((note, to, Memo(memo)))
+}
+
 #[cfg(test)]
 mod tests {
     use ff::{PrimeField, PrimeFieldRepr};
@@ -174,7 +236,10 @@ mod tests {
         primitives::{Diversifier, PaymentAddress},
     };
 
-    use super::{kdf_sapling, prf_ock, sapling_ka_agree, Memo, SaplingNoteEncryption};
+    use super::{
+        kdf_sapling, prf_ock, sapling_ka_agree, try_sapling_note_decryption, Memo,
+        SaplingNoteEncryption,
+    };
     use crate::{keys::OutgoingViewingKey, JUBJUB};
 
     #[test]
@@ -208,6 +273,7 @@ mod tests {
             // Load the test vector components
             //
 
+            let ivk = read_fs!(tv.ivk);
             let pk_d = read_point!(tv.default_pk_d)
                 .as_prime_order(&JUBJUB)
                 .unwrap();
@@ -237,6 +303,20 @@ mod tests {
             };
             let note = to.create_note(tv.v, rcm, &JUBJUB).unwrap();
             assert_eq!(note.cm(&JUBJUB), cmu);
+
+            //
+            // Test decryption
+            // (Tested first because it only requires immutable references.)
+            //
+
+            match try_sapling_note_decryption(&ivk, &epk, &cmu, &tv.c_enc) {
+                Some((decrypted_note, decrypted_to, decrypted_memo)) => {
+                    assert_eq!(decrypted_note, note);
+                    assert_eq!(decrypted_to, to);
+                    assert_eq!(&decrypted_memo.0[..], &tv.memo[..]);
+                }
+                None => panic!("Note decryption failed"),
+            }
 
             //
             // Test encryption
