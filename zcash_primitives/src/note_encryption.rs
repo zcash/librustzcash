@@ -1,6 +1,6 @@
 use blake2_rfc::blake2b::{Blake2b, Blake2bResult};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
-use chacha20_poly1305_aead;
+use chacha20_poly1305_aead::{self, as_bytes::AsBytes, chacha20::ChaCha20};
 use ff::{PrimeField, PrimeFieldRepr};
 use pairing::bls12_381::{Bls12, Fr};
 use rand::{OsRng, Rng};
@@ -166,6 +166,36 @@ impl SaplingNoteEncryption {
     }
 }
 
+fn parse_note_plaintext_minus_memo(
+    ivk: &Fs,
+    cmu: &Fr,
+    plaintext: &[u8],
+) -> Option<(Note<Bls12>, PaymentAddress<Bls12>)> {
+    let mut d = [0u8; 11];
+    d.copy_from_slice(&plaintext[1..12]);
+
+    let v = (&plaintext[12..20]).read_u64::<LittleEndian>().ok()?;
+
+    let mut rcm = FsRepr::default();
+    rcm.read_le(&plaintext[20..52]).ok()?;
+    let rcm = Fs::from_repr(rcm).ok()?;
+
+    let diversifier = Diversifier(d);
+    let pk_d = diversifier
+        .g_d::<Bls12>(&JUBJUB)?
+        .mul(ivk.into_repr(), &JUBJUB);
+
+    let to = PaymentAddress { pk_d, diversifier };
+    let note = to.create_note(v, rcm, &JUBJUB).unwrap();
+
+    if note.cm(&JUBJUB) != *cmu {
+        // Published commitment doesn't match calculated commitment
+        return None;
+    }
+
+    Some((note, to))
+}
+
 /// Attempts to decrypt and validate the given `enc_ciphertext` using the given `ivk`.
 /// If successful, the corresponding Sapling note and memo are returned, along with the
 /// `PaymentAddress` to which the note was sent.
@@ -192,36 +222,41 @@ pub fn try_sapling_note_decryption(
     )
     .ok()?;
 
-    let mut d = [0u8; 11];
-    d.copy_from_slice(&plaintext[1..12]);
-
-    let v = (&plaintext[12..20]).read_u64::<LittleEndian>().ok()?;
-
-    let mut rcm = FsRepr::default();
-    rcm.read_le(&plaintext[20..52]).ok()?;
-    let rcm = Fs::from_repr(rcm).ok()?;
+    let (note, to) = parse_note_plaintext_minus_memo(ivk, cmu, &plaintext)?;
 
     let mut memo = [0u8; 512];
     memo.copy_from_slice(&plaintext[52..564]);
 
-    let diversifier = Diversifier(d);
-    let pk_d = match diversifier.g_d::<Bls12>(&JUBJUB) {
-        Some(g_d) => g_d.mul(ivk.into_repr(), &JUBJUB),
-        None => {
-            // Invalid diversifier in note plaintext
-            return None;
-        }
-    };
+    Some((note, to, Memo(memo)))
+}
 
-    let to = PaymentAddress { pk_d, diversifier };
-    let note = to.create_note(v, rcm, &JUBJUB).unwrap();
+/// Attempts to decrypt and validate the first 52 bytes of `enc_ciphertext` using the
+/// given `ivk`. If successful, the corresponding Sapling note is returned, along with the
+/// `PaymentAddress` to which the note was sent.
+///
+/// Implements the procedure specified in ZIP 307.
+pub fn try_sapling_compact_note_decryption(
+    ivk: &Fs,
+    epk: &edwards::Point<Bls12, PrimeOrder>,
+    cmu: &Fr,
+    enc_ciphertext: &[u8],
+) -> Option<(Note<Bls12>, PaymentAddress<Bls12>)> {
+    let shared_secret = sapling_ka_agree(&ivk, &epk);
+    let key = kdf_sapling(&shared_secret, &epk);
 
-    if note.cm(&JUBJUB) != *cmu {
-        // Published commitment doesn't match calculated commitment
-        return None;
+    let nonce = [0u8; 12];
+    let mut chacha20 = ChaCha20::new(key.as_bytes(), &nonce);
+    // Skip over Poly1305 keying output
+    chacha20.next();
+
+    let mut plaintext = Vec::with_capacity(52);
+    plaintext.extend_from_slice(&enc_ciphertext[0..52]);
+    let keystream = chacha20.next();
+    for i in 0..52 {
+        plaintext[i] ^= keystream.as_bytes()[i];
     }
 
-    Some((note, to, Memo(memo)))
+    parse_note_plaintext_minus_memo(ivk, cmu, &plaintext)
 }
 
 /// Attempts to decrypt and validate the given `enc_ciphertext` using the given `ovk`.
@@ -319,8 +354,8 @@ mod tests {
     };
 
     use super::{
-        kdf_sapling, prf_ock, sapling_ka_agree, try_sapling_note_decryption,
-        try_sapling_output_recovery, Memo, SaplingNoteEncryption,
+        kdf_sapling, prf_ock, sapling_ka_agree, try_sapling_compact_note_decryption,
+        try_sapling_note_decryption, try_sapling_output_recovery, Memo, SaplingNoteEncryption,
     };
     use crate::{keys::OutgoingViewingKey, JUBJUB};
 
@@ -398,6 +433,14 @@ mod tests {
                     assert_eq!(&decrypted_memo.0[..], &tv.memo[..]);
                 }
                 None => panic!("Note decryption failed"),
+            }
+
+            match try_sapling_compact_note_decryption(&ivk, &epk, &cmu, &tv.c_enc[..52]) {
+                Some((decrypted_note, decrypted_to)) => {
+                    assert_eq!(decrypted_note, note);
+                    assert_eq!(decrypted_to, to);
+                }
+                None => panic!("Compact note decryption failed"),
             }
 
             match try_sapling_output_recovery(&ovk, &cv, &cmu, &epk, &tv.c_enc, &tv.c_out) {
