@@ -1,6 +1,8 @@
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use std::io::{self, Read, Write};
 
+const MAX_SIZE: usize = 0x02000000;
+
 struct CompactSize;
 
 impl CompactSize {
@@ -33,7 +35,7 @@ impl CompactSize {
                 n => Ok(n as usize),
             }
         }? {
-            s if s > 0x02000000 => Err(io::Error::new(
+            s if s > MAX_SIZE => Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 "CompactSize too large",
             )),
