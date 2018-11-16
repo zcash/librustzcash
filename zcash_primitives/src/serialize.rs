@@ -73,7 +73,7 @@ impl Vector {
         (0..count).into_iter().map(|_| func(&mut reader)).collect()
     }
 
-    pub fn write<W: Write, E, F>(mut writer: W, vec: &Vec<E>, func: F) -> io::Result<()>
+    pub fn write<W: Write, E, F>(mut writer: W, vec: &[E], func: F) -> io::Result<()>
     where
         F: Fn(&mut W, &E) -> io::Result<()>,
     {
