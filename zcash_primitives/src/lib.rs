@@ -20,6 +20,7 @@ pub mod block;
 pub mod keys;
 pub mod merkle_tree;
 pub mod note_encryption;
+pub mod prover;
 pub mod sapling;
 mod serialize;
 pub mod transaction;

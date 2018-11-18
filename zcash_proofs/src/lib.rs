@@ -1,6 +1,7 @@
 extern crate bellman;
 extern crate blake2b_simd;
 extern crate byteorder;
+extern crate directories;
 extern crate ff;
 extern crate pairing;
 extern crate rand_os;
@@ -14,6 +15,7 @@ use std::io::{self, BufReader};
 use std::path::Path;
 
 mod hashreader;
+pub mod prover;
 pub mod sapling;
 
 pub fn load_parameters(

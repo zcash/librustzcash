@@ -9,6 +9,7 @@ authors = [
 bellman = { path = "../bellman" }
 blake2b_simd = "0.5"
 byteorder = "1"
+directories = "1"
 ff = { path = "../ff" }
 pairing = { path = "../pairing" }
 rand_os = "0.2"

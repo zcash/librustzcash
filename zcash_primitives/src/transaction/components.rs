@@ -11,7 +11,7 @@ use serialize::Vector;
 use JUBJUB;
 
 // π_A + π_B + π_C
-const GROTH_PROOF_SIZE: usize = (48 + 96 + 48);
+pub const GROTH_PROOF_SIZE: usize = (48 + 96 + 48);
 // π_A + π_A' + π_B + π_B' + π_C + π_C' + π_K + π_H
 const PHGR_PROOF_SIZE: usize = (33 + 33 + 65 + 33 + 33 + 33 + 33 + 33);
 
