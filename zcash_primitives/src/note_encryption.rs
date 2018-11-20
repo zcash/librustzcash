@@ -135,7 +135,7 @@ impl Memo {
     }
 }
 
-fn generate_esk() -> Fs {
+pub fn generate_esk() -> Fs {
     // create random 64 byte buffer
     let mut rng = OsRng;
     let mut buffer = [0u8; 64];

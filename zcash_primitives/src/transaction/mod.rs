@@ -8,6 +8,7 @@ use std::ops::Deref;
 
 use serialize::Vector;
 
+pub mod builder;
 pub mod components;
 mod sighash;
 
