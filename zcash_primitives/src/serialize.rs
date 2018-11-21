@@ -1,12 +1,12 @@
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
-use std::io::{self, Read, Write};
+use std::io;
 
 const MAX_SIZE: usize = 0x02000000;
 
 struct CompactSize;
 
 impl CompactSize {
-    fn read<R: Read>(mut reader: R) -> io::Result<usize> {
+    fn read<R: ReadBytesExt>(mut reader: R) -> io::Result<usize> {
         let flag = reader.read_u8()?;
         match if flag < 253 {
             Ok(flag as usize)
@@ -43,7 +43,7 @@ impl CompactSize {
         }
     }
 
-    fn write<W: Write>(mut writer: W, size: usize) -> io::Result<()> {
+    fn write<W: WriteBytesExt>(mut writer: W, size: usize) -> io::Result<()> {
         match size {
             s if s < 253 => writer.write_u8(s as u8),
             s if s <= 0xFFFF => {
@@ -65,7 +65,7 @@ impl CompactSize {
 pub struct Vector;
 
 impl Vector {
-    pub fn read<R: Read, E, F>(mut reader: R, func: F) -> io::Result<Vec<E>>
+    pub fn read<R: ReadBytesExt, E, F>(mut reader: R, func: F) -> io::Result<Vec<E>>
     where
         F: Fn(&mut R) -> io::Result<E>,
     {
@@ -73,7 +73,7 @@ impl Vector {
         (0..count).map(|_| func(&mut reader)).collect()
     }
 
-    pub fn write<W: Write, E, F>(mut writer: W, vec: &[E], func: F) -> io::Result<()>
+    pub fn write<W: WriteBytesExt, E, F>(mut writer: W, vec: &[E], func: F) -> io::Result<()>
     where
         F: Fn(&mut W, &E) -> io::Result<()>,
     {
