@@ -3,7 +3,7 @@ use byteorder::{LittleEndian, WriteBytesExt};
 use pairing::{PrimeField, PrimeFieldRepr};
 
 use super::{
-    components::{Amount, Script},
+    components::{Amount, Script, TxOut},
     Transaction, TransactionData, OVERWINTER_VERSION_GROUP_ID, SAPLING_TX_VERSION,
     SAPLING_VERSION_GROUP_ID,
 };
@@ -99,6 +99,14 @@ fn outputs_hash(tx: &TransactionData) -> Vec<u8> {
     h.finalize().as_ref().to_vec()
 }
 
+fn single_output_hash(tx_out: &TxOut) -> Vec<u8> {
+    let mut data = vec![];
+    tx_out.write(&mut data).unwrap();
+    let mut h = Blake2b::with_params(32, &[], &[], ZCASH_OUTPUTS_HASH_PERSONALIZATION);
+    h.update(&data);
+    h.finalize().as_ref().to_vec()
+}
+
 fn joinsplits_hash(tx: &TransactionData) -> Vec<u8> {
     let mut data = Vec::with_capacity(
         tx.joinsplits.len() * if tx.version < SAPLING_TX_VERSION {
@@ -157,13 +165,7 @@ pub fn signature_hash_data(
                 && transparent_input.is_some()
                 && transparent_input.as_ref().unwrap().0 < tx.vout.len()
             {
-                let mut data = vec![];
-                tx.vout[transparent_input.as_ref().unwrap().0]
-                    .write(&mut data)
-                    .unwrap();
-                let mut h = Blake2b::with_params(32, &[], &[], ZCASH_OUTPUTS_HASH_PERSONALIZATION);
-                h.update(&data);
-                h.finalize().as_ref().to_vec()
+                single_output_hash(&tx.vout[transparent_input.as_ref().unwrap().0])
             } else {
                 vec![0; 32]
             };
