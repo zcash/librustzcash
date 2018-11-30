@@ -114,7 +114,7 @@ impl Transaction {
         };
 
         let (value_balance, shielded_spends, shielded_outputs) = if is_sapling_v4 {
-            let vb = Amount(reader.read_i64::<LittleEndian>()?);
+            let vb = Amount::read_i64(&mut reader, true)?;
             let ss = Vector::read(&mut reader, SpendDescription::read)?;
             let so = Vector::read(&mut reader, OutputDescription::read)?;
             (vb, ss, so)
