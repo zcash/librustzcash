@@ -690,7 +690,36 @@ pub extern "system" fn librustzcash_sapling_check_spend(
         Err(_) => return false,
     };
 
+    // Deserialize the anchor, which should be an element
+    // of Fr.
+    let anchor = match Fr::from_repr(read_le(&(unsafe { &*anchor })[..])) {
+        Ok(a) => a,
+        Err(_) => return false,
+    };
+
+    // Deserialize rk
+    let rk = match redjubjub::PublicKey::<Bls12>::read(&(unsafe { &*rk })[..], &JUBJUB) {
+        Ok(p) => p,
+        Err(_) => return false,
+    };
+
+    // Deserialize the signature
+    let spend_auth_sig = match Signature::read(&(unsafe { &*spend_auth_sig })[..]) {
+        Ok(sig) => sig,
+        Err(_) => return false,
+    };
+
+    // Deserialize the proof
+    let zkproof = match Proof::<Bls12>::read(&(unsafe { &*zkproof })[..]) {
+        Ok(p) => p,
+        Err(_) => return false,
+    };
+
     if is_small_order(&cv) {
+        return false;
+    }
+
+    if is_small_order(&rk.0) {
         return false;
     }
 
@@ -703,36 +732,14 @@ pub extern "system" fn librustzcash_sapling_check_spend(
         unsafe { &mut *ctx }.bvk = tmp;
     }
 
-    // Deserialize the anchor, which should be an element
-    // of Fr.
-    let anchor = match Fr::from_repr(read_le(&(unsafe { &*anchor })[..])) {
-        Ok(a) => a,
-        Err(_) => return false,
-    };
-
     // Grab the nullifier as a sequence of bytes
     let nullifier = &unsafe { &*nullifier }[..];
 
     // Compute the signature's message for rk/spend_auth_sig
     let mut data_to_be_signed = [0u8; 64];
-    (&mut data_to_be_signed[0..32]).copy_from_slice(&(unsafe { &*rk })[..]);
+    rk.0.write(&mut data_to_be_signed[0..32])
+        .expect("message buffer should be 32 bytes");
     (&mut data_to_be_signed[32..64]).copy_from_slice(&(unsafe { &*sighash_value })[..]);
-
-    // Deserialize rk
-    let rk = match redjubjub::PublicKey::<Bls12>::read(&(unsafe { &*rk })[..], &JUBJUB) {
-        Ok(p) => p,
-        Err(_) => return false,
-    };
-
-    if is_small_order(&rk.0) {
-        return false;
-    }
-
-    // Deserialize the signature
-    let spend_auth_sig = match Signature::read(&(unsafe { &*spend_auth_sig })[..]) {
-        Ok(sig) => sig,
-        Err(_) => return false,
-    };
 
     // Verify the spend_auth_sig
     if !rk.verify(
@@ -769,12 +776,6 @@ pub extern "system" fn librustzcash_sapling_check_spend(
         public_input[6] = nullifier[1];
     }
 
-    // Deserialize the proof
-    let zkproof = match Proof::<Bls12>::read(&(unsafe { &*zkproof })[..]) {
-        Ok(p) => p,
-        Err(_) => return false,
-    };
-
     // Verify the proof
     match verify_proof(
         unsafe { SAPLING_SPEND_VK.as_ref() }.unwrap(),
@@ -803,20 +804,6 @@ pub extern "system" fn librustzcash_sapling_check_output(
         Err(_) => return false,
     };
 
-    if is_small_order(&cv) {
-        return false;
-    }
-
-    // Accumulate the value commitment in the context
-    {
-        let mut tmp = cv.clone();
-        tmp = tmp.negate(); // Outputs subtract from the total.
-        tmp = tmp.add(&unsafe { &*ctx }.bvk, &JUBJUB);
-
-        // Update the context
-        unsafe { &mut *ctx }.bvk = tmp;
-    }
-
     // Deserialize the commitment, which should be an element
     // of Fr.
     let cm = match Fr::from_repr(read_le(&(unsafe { &*cm })[..])) {
@@ -830,8 +817,28 @@ pub extern "system" fn librustzcash_sapling_check_output(
         Err(_) => return false,
     };
 
+    // Deserialize the proof
+    let zkproof = match Proof::<Bls12>::read(&(unsafe { &*zkproof })[..]) {
+        Ok(p) => p,
+        Err(_) => return false,
+    };
+
+    if is_small_order(&cv) {
+        return false;
+    }
+
     if is_small_order(&epk) {
         return false;
+    }
+
+    // Accumulate the value commitment in the context
+    {
+        let mut tmp = cv.clone();
+        tmp = tmp.negate(); // Outputs subtract from the total.
+        tmp = tmp.add(&unsafe { &*ctx }.bvk, &JUBJUB);
+
+        // Update the context
+        unsafe { &mut *ctx }.bvk = tmp;
     }
 
     // Construct public input for circuit
@@ -847,12 +854,6 @@ pub extern "system" fn librustzcash_sapling_check_output(
         public_input[3] = y;
     }
     public_input[4] = cm;
-
-    // Deserialize the proof
-    let zkproof = match Proof::<Bls12>::read(&(unsafe { &*zkproof })[..]) {
-        Ok(p) => p,
-        Err(_) => return false,
-    };
 
     // Verify the proof
     match verify_proof(
@@ -901,6 +902,12 @@ pub extern "system" fn librustzcash_sapling_final_check(
     binding_sig: *const [c_uchar; 64],
     sighash_value: *const [c_uchar; 32],
 ) -> bool {
+    // Deserialize the signature
+    let binding_sig = match Signature::read(&(unsafe { &*binding_sig })[..]) {
+        Ok(sig) => sig,
+        Err(_) => return false,
+    };
+
     // Obtain current bvk from the context
     let mut bvk = redjubjub::PublicKey(unsafe { &*ctx }.bvk.clone());
 
@@ -920,12 +927,6 @@ pub extern "system" fn librustzcash_sapling_final_check(
         .write(&mut data_to_be_signed[0..32])
         .expect("bvk is 32 bytes");
     (&mut data_to_be_signed[32..64]).copy_from_slice(&(unsafe { &*sighash_value })[..]);
-
-    // Deserialize the signature
-    let binding_sig = match Signature::read(&(unsafe { &*binding_sig })[..]) {
-        Ok(sig) => sig,
-        Err(_) => return false,
-    };
 
     // Verify the binding_sig
     if !bvk.verify(
