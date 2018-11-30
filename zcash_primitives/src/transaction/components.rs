@@ -147,7 +147,13 @@ pub struct SpendDescription {
 
 impl SpendDescription {
     pub fn read<R: Read>(mut reader: &mut R) -> io::Result<Self> {
+        // Consensus rules (§4.4):
+        // - Canonical encoding is enforced here.
+        // - "Not small order" is enforced in SaplingVerificationContext::check_spend()
+        //   (located in zcash_proofs::sapling::verifier).
         let cv = edwards::Point::<Bls12, Unknown>::read(&mut reader, &JUBJUB)?;
+
+        // Consensus rule (§7.3): Canonical encoding is enforced here
         let anchor = {
             let mut f = FrRepr::default();
             f.read_le(&mut reader)?;
@@ -157,10 +163,21 @@ impl SpendDescription {
         let mut nullifier = [0; 32];
         reader.read_exact(&mut nullifier)?;
 
+        // Consensus rules (§4.4):
+        // - Canonical encoding is enforced here.
+        // - "Not small order" is enforced in SaplingVerificationContext::check_spend()
         let rk = PublicKey::<Bls12>::read(&mut reader, &JUBJUB)?;
 
+        // Consensus rules (§4.4):
+        // - Canonical encoding is enforced by the API of SaplingVerificationContext::check_spend()
+        //   due to the need to parse this into a bellman::groth16::Proof.
+        // - Proof validity is enforced in SaplingVerificationContext::check_spend()
         let mut zkproof = [0; GROTH_PROOF_SIZE];
         reader.read_exact(&mut zkproof)?;
+
+        // Consensus rules (§4.4):
+        // - Canonical encoding is enforced here.
+        // - Signature validity is enforced in SaplingVerificationContext::check_spend()
         let spend_auth_sig = Signature::read(&mut reader)?;
 
         Ok(SpendDescription {
@@ -194,12 +211,22 @@ pub struct OutputDescription {
 
 impl OutputDescription {
     pub fn read<R: Read>(mut reader: &mut R) -> io::Result<Self> {
+        // Consensus rules (§4.5):
+        // - Canonical encoding is enforced here.
+        // - "Not small order" is enforced in SaplingVerificationContext::check_output()
+        //   (located in zcash_proofs::sapling::verifier).
         let cv = edwards::Point::<Bls12, Unknown>::read(&mut reader, &JUBJUB)?;
+
+        // Consensus rule (§7.4): Canonical encoding is enforced here
         let cmu = {
             let mut f = FrRepr::default();
             f.read_le(&mut reader)?;
             Fr::from_repr(f).map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?
         };
+
+        // Consensus rules (§4.5):
+        // - Canonical encoding is enforced here.
+        // - "Not small order" is enforced in SaplingVerificationContext::check_output()
         let ephemeral_key = edwards::Point::<Bls12, Unknown>::read(&mut reader, &JUBJUB)?;
 
         let mut enc_ciphertext = [0; 580];
@@ -207,6 +234,10 @@ impl OutputDescription {
         reader.read_exact(&mut enc_ciphertext)?;
         reader.read_exact(&mut out_ciphertext)?;
 
+        // Consensus rules (§4.5):
+        // - Canonical encoding is enforced by the API of SaplingVerificationContext::check_output()
+        //   due to the need to parse this into a bellman::groth16::Proof.
+        // - Proof validity is enforced in SaplingVerificationContext::check_output()
         let mut zkproof = [0; GROTH_PROOF_SIZE];
         reader.read_exact(&mut zkproof)?;
 
@@ -250,8 +281,14 @@ pub struct JSDescription {
 
 impl JSDescription {
     pub fn read<R: Read>(mut reader: R, use_groth: bool) -> io::Result<Self> {
+        // Consensus rule (§4.3): Canonical encoding is enforced here
         let vpub_old = Amount::read_u64(&mut reader)?;
+
+        // Consensus rule (§4.3): Canonical encoding is enforced here
         let vpub_new = Amount::read_u64(&mut reader)?;
+
+        // Consensus rule (§4.3): One of vpub_old and vpub_new being zero is
+        // enforced by CheckTransactionWithoutProofVerification() in zcashd.
 
         let mut anchor = [0; 32];
         reader.read_exact(&mut anchor)?;
@@ -268,9 +305,12 @@ impl JSDescription {
             .map(|cm| reader.read_exact(cm))
             .collect::<io::Result<()>>()?;
 
+        // Consensus rule (§4.3): Canonical encoding is enforced by
+        // ZCNoteDecryption::decrypt() in zcashd
         let mut ephemeral_key = [0; 32];
-        let mut random_seed = [0; 32];
         reader.read_exact(&mut ephemeral_key)?;
+
+        let mut random_seed = [0; 32];
         reader.read_exact(&mut random_seed)?;
 
         let mut macs = [[0; 32]; ZC_NUM_JS_INPUTS];
@@ -280,11 +320,17 @@ impl JSDescription {
 
         let proof = match use_groth {
             true => {
+                // Consensus rules (§4.3):
+                // - Canonical encoding is enforced in librustzcash_sprout_verify()
+                // - Proof validity is enforced in librustzcash_sprout_verify()
                 let mut proof = [0; GROTH_PROOF_SIZE];
                 reader.read_exact(&mut proof)?;
                 SproutProof::Groth(proof)
             }
             false => {
+                // Consensus rules (§4.3):
+                // - Canonical encoding is enforced by PHGRProof in zcashd
+                // - Proof validity is enforced by JSDescription::Verify() in zcashd
                 let mut proof = [0; PHGR_PROOF_SIZE];
                 reader.read_exact(&mut proof)?;
                 SproutProof::PHGR(proof)
