@@ -110,7 +110,7 @@ fn joinsplits_hash(tx: &TransactionData) -> Vec<u8> {
     for js in &tx.joinsplits {
         js.write(&mut data).unwrap();
     }
-    data.extend_from_slice(&tx.joinsplit_pubkey);
+    data.extend_from_slice(&tx.joinsplit_pubkey.unwrap());
     let mut h = Blake2b::with_params(32, &[], &[], ZCASH_JOINSPLITS_HASH_PERSONALIZATION);
     h.update(&data);
     h.finalize().as_ref().to_vec()

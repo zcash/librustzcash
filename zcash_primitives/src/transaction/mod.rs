@@ -43,8 +43,8 @@ pub struct TransactionData {
     pub shielded_spends: Vec<SpendDescription>,
     pub shielded_outputs: Vec<OutputDescription>,
     pub joinsplits: Vec<JSDescription>,
-    pub joinsplit_pubkey: [u8; 32],
-    pub joinsplit_sig: [u8; 64],
+    pub joinsplit_pubkey: Option<[u8; 32]>,
+    pub joinsplit_sig: Option<[u8; 64]>,
     pub binding_sig: Option<Signature>,
 }
 
@@ -62,8 +62,8 @@ impl TransactionData {
             shielded_spends: vec![],
             shielded_outputs: vec![],
             joinsplits: vec![],
-            joinsplit_pubkey: [0u8; 32],
-            joinsplit_sig: [0u8; 64],
+            joinsplit_pubkey: None,
+            joinsplit_sig: None,
             binding_sig: None,
         }
     }
@@ -122,19 +122,22 @@ impl Transaction {
             (Amount(0), vec![], vec![])
         };
 
-        let mut joinsplit_pubkey = [0; 32];
-        let mut joinsplit_sig = [0; 64];
-        let joinsplits = if version >= 2 {
+        let (joinsplits, joinsplit_pubkey, joinsplit_sig) = if version >= 2 {
             let jss = Vector::read(&mut reader, |r| {
                 JSDescription::read(r, overwintered && version >= SAPLING_TX_VERSION)
             })?;
-            if !jss.is_empty() {
+            let (pubkey, sig) = if !jss.is_empty() {
+                let mut joinsplit_pubkey = [0; 32];
+                let mut joinsplit_sig = [0; 64];
                 reader.read_exact(&mut joinsplit_pubkey)?;
                 reader.read_exact(&mut joinsplit_sig)?;
-            }
-            jss
+                (Some(joinsplit_pubkey), Some(joinsplit_sig))
+            } else {
+                (None, None)
+            };
+            (jss, pubkey, sig)
         } else {
-            vec![]
+            (vec![], None, None)
         };
 
         let binding_sig =
@@ -196,8 +199,39 @@ impl Transaction {
         if self.version >= 2 {
             Vector::write(&mut writer, &self.joinsplits, |w, e| e.write(w))?;
             if !self.joinsplits.is_empty() {
-                writer.write_all(&self.joinsplit_pubkey)?;
-                writer.write_all(&self.joinsplit_sig)?;
+                match self.joinsplit_pubkey {
+                    Some(pubkey) => writer.write_all(&pubkey)?,
+                    None => {
+                        return Err(io::Error::new(
+                            io::ErrorKind::InvalidInput,
+                            "Missing JoinSplit pubkey",
+                        ))
+                    }
+                }
+                match self.joinsplit_sig {
+                    Some(sig) => writer.write_all(&sig)?,
+                    None => {
+                        return Err(io::Error::new(
+                            io::ErrorKind::InvalidInput,
+                            "Missing JoinSplit signature",
+                        ))
+                    }
+                }
+            }
+        }
+
+        if self.version < 2 || self.joinsplits.is_empty() {
+            if self.joinsplit_pubkey.is_some() {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "JoinSplit pubkey should not be present",
+                ));
+            }
+            if self.joinsplit_sig.is_some() {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "JoinSplit signature should not be present",
+                ));
             }
         }
 
