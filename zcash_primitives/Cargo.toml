@@ -9,6 +9,7 @@ authors = [
 byteorder = "1"
 lazy_static = "1"
 pairing = { path = "../pairing" }
+rand = "0.4"
 sapling-crypto = { path = "../sapling-crypto" }
 
 [dependencies.blake2-rfc]

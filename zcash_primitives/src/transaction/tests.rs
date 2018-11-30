@@ -1,8 +1,13 @@
+use pairing::bls12_381::Bls12;
+use rand::{thread_rng, Rng};
+use sapling_crypto::{jubjub::FixedGenerators, redjubjub::PrivateKey};
+
 use super::{
     components::{Amount, Script},
     sighash::signature_hash,
-    Transaction,
+    Transaction, TransactionData,
 };
+use JUBJUB;
 
 #[test]
 fn tx_read_write() {
@@ -149,6 +154,35 @@ fn tx_read_write() {
     let mut encoded = Vec::with_capacity(data.len());
     tx.write(&mut encoded).unwrap();
     assert_eq!(&data[..], &encoded[..]);
+}
+
+#[test]
+fn tx_write_rejects_unexpected_binding_sig() {
+    // Succeeds without a binding signature
+    {
+        let tx = TransactionData::new().freeze();
+        let mut encoded = Vec::new();
+        assert!(tx.write(&mut encoded).is_ok());
+    }
+
+    // Fails with an unexpected binding signature
+    {
+        let rng = &mut thread_rng();
+        let sk = PrivateKey::<Bls12>(rng.gen());
+        let sig = sk.sign(
+            b"Foo bar",
+            rng,
+            FixedGenerators::SpendingKeyGenerator,
+            &JUBJUB,
+        );
+
+        let mut tx = TransactionData::new();
+        tx.binding_sig = Some(sig);
+        let tx = tx.freeze();
+
+        let mut encoded = Vec::new();
+        assert!(tx.write(&mut encoded).is_err());
+    }
 }
 
 #[test]

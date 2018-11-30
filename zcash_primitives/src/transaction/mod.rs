@@ -211,6 +211,11 @@ impl Transaction {
                     ))
                 }
             }
+        } else if self.binding_sig.is_some() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "Binding signature should not be present",
+            ));
         }
 
         Ok(())
