@@ -37,7 +37,11 @@ impl Amount {
         } else {
             Err(io::Error::new(
                 io::ErrorKind::InvalidData,
-                "Amount not in {0..MAX_MONEY}",
+                if allow_negative {
+                    "Amount not in {-MAX_MONEY..MAX_MONEY}"
+                } else {
+                    "Amount not in {0..MAX_MONEY}"
+                },
             ))
         }
     }
