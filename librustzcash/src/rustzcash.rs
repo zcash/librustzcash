@@ -1024,14 +1024,14 @@ pub extern "system" fn librustzcash_sapling_output_proof(
         diversifier: diversifier,
     };
 
-    // Initialize secure RNG
-    let mut rng = OsRng::new().expect("should be able to construct RNG");
-
     // The caller provides the commitment randomness for the output note
     let rcm = match Fs::from_repr(read_fs(&(unsafe { &*rcm })[..])) {
         Ok(p) => p,
         Err(_) => return false,
     };
+
+    // Initialize secure RNG
+    let mut rng = OsRng::new().expect("should be able to construct RNG");
 
     // We construct ephemeral randomness for the value commitment. This
     // randomness is not given back to the caller, but the synthetic
@@ -1070,11 +1070,6 @@ pub extern "system" fn librustzcash_sapling_output_proof(
         &mut rng,
     ).expect("proving should not fail");
 
-    // Write the proof out to the caller
-    proof
-        .write(&mut (unsafe { &mut *zkproof })[..])
-        .expect("should be able to serialize a proof");
-
     // Compute the value commitment
     let value_commitment: edwards::Point<Bls12, Unknown> = value_commitment.cm(&JUBJUB).into();
 
@@ -1087,6 +1082,11 @@ pub extern "system" fn librustzcash_sapling_output_proof(
         // Update the context
         unsafe { &mut *ctx }.bvk = tmp;
     }
+
+    // Write the proof out to the caller
+    proof
+        .write(&mut (unsafe { &mut *zkproof })[..])
+        .expect("should be able to serialize a proof");
 
     // Write the value commitment to the caller
     value_commitment
@@ -1152,6 +1152,9 @@ pub extern "system" fn librustzcash_sapling_binding_sig(
     sighash: *const [c_uchar; 32],
     result: *mut [c_uchar; 64],
 ) -> bool {
+    // Initialize secure RNG
+    let mut rng = OsRng::new().expect("should be able to construct RNG");
+
     // Grab the current `bsk` from the context
     let bsk = redjubjub::PrivateKey::<Bls12>(unsafe { &*ctx }.bsk);
 
@@ -1191,7 +1194,6 @@ pub extern "system" fn librustzcash_sapling_binding_sig(
     (&mut data_to_be_signed[32..64]).copy_from_slice(&(unsafe { &*sighash })[..]);
 
     // Sign
-    let mut rng = OsRng::new().expect("should be able to construct RNG");
     let sig = bsk.sign(
         &data_to_be_signed,
         &mut rng,
@@ -1221,26 +1223,6 @@ pub extern "system" fn librustzcash_sapling_spend_proof(
     rk_out: *mut [c_uchar; 32],
     zkproof: *mut [c_uchar; GROTH_PROOF_SIZE],
 ) -> bool {
-    let mut rng = OsRng::new().expect("should be able to construct RNG");
-
-    // We create the randomness of the value commitment
-    let rcv = Fs::rand(&mut rng);
-
-    // Accumulate the value commitment randomness in the context
-    {
-        let mut tmp = rcv.clone();
-        tmp.add_assign(&unsafe { &*ctx }.bsk);
-
-        // Update the context
-        unsafe { &mut *ctx }.bsk = tmp;
-    }
-
-    // Construct the value commitment
-    let value_commitment = ValueCommitment::<Bls12> {
-        value: value,
-        randomness: rcv,
-    };
-
     // Grab `ak` from the caller, which should be a point.
     let ak = match edwards::Point::<Bls12, Unknown>::read(&(unsafe { &*ak })[..], &JUBJUB) {
         Ok(p) => p,
@@ -1265,17 +1247,8 @@ pub extern "system" fn librustzcash_sapling_spend_proof(
         nsk,
     };
 
-    // Construct the viewing key
-    let viewing_key = proof_generation_key.into_viewing_key(&JUBJUB);
-
     // Grab the diversifier from the caller
     let diversifier = sapling_crypto::primitives::Diversifier(unsafe { *diversifier });
-
-    // Construct the payment address with the viewing key / diversifier
-    let payment_address = match viewing_key.into_payment_address(diversifier, &JUBJUB) {
-        Some(p) => p,
-        None => return false,
-    };
 
     // The caller chooses the note randomness
     let rcm = match Fs::from_repr(read_fs(&(unsafe { &*rcm })[..])) {
@@ -1289,16 +1262,42 @@ pub extern "system" fn librustzcash_sapling_spend_proof(
         Err(_) => return false,
     };
 
+    // Initialize secure RNG
+    let mut rng = OsRng::new().expect("should be able to construct RNG");
+
+    // We create the randomness of the value commitment
+    let rcv = Fs::rand(&mut rng);
+
+    // Accumulate the value commitment randomness in the context
+    {
+        let mut tmp = rcv.clone();
+        tmp.add_assign(&unsafe { &*ctx }.bsk);
+
+        // Update the context
+        unsafe { &mut *ctx }.bsk = tmp;
+    }
+
+    // Construct the value commitment
+    let value_commitment = ValueCommitment::<Bls12> {
+        value: value,
+        randomness: rcv,
+    };
+
+    // Construct the viewing key
+    let viewing_key = proof_generation_key.into_viewing_key(&JUBJUB);
+
+    // Construct the payment address with the viewing key / diversifier
+    let payment_address = match viewing_key.into_payment_address(diversifier, &JUBJUB) {
+        Some(p) => p,
+        None => return false,
+    };
+
     // This is the result of the re-randomization, we compute it for the caller
     let rk = redjubjub::PublicKey::<Bls12>(ak.into()).randomize(
         ar,
         FixedGenerators::SpendingKeyGenerator,
         &JUBJUB,
     );
-
-    // Write out `rk` to the caller
-    rk.write(&mut unsafe { &mut *rk_out }[..])
-        .expect("should be able to write to rk_out");
 
     // We need to compute the anchor of the Spend.
     let anchor = match Fr::from_repr(read_le(unsafe { &(&*anchor)[..] })) {
@@ -1452,6 +1451,10 @@ pub extern "system" fn librustzcash_sapling_spend_proof(
     proof
         .write(&mut (unsafe { &mut *zkproof })[..])
         .expect("should be able to serialize a proof");
+
+    // Write out `rk` to the caller
+    rk.write(&mut unsafe { &mut *rk_out }[..])
+        .expect("should be able to write to rk_out");
 
     true
 }
