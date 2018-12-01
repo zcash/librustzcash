@@ -148,7 +148,7 @@ pub struct SpendDescription {
     pub nullifier: [u8; 32],
     pub rk: PublicKey<Bls12>,
     pub zkproof: [u8; GROTH_PROOF_SIZE],
-    pub spend_auth_sig: Signature,
+    pub spend_auth_sig: Option<Signature>,
 }
 
 impl std::fmt::Debug for SpendDescription {
@@ -194,7 +194,7 @@ impl SpendDescription {
         // Consensus rules (§4.4):
         // - Canonical encoding is enforced here.
         // - Signature validity is enforced in SaplingVerificationContext::check_spend()
-        let spend_auth_sig = Signature::read(&mut reader)?;
+        let spend_auth_sig = Some(Signature::read(&mut reader)?);
 
         Ok(SpendDescription {
             cv,
@@ -212,7 +212,15 @@ impl SpendDescription {
         writer.write_all(&self.nullifier)?;
         self.rk.write(&mut writer)?;
         writer.write_all(&self.zkproof)?;
-        self.spend_auth_sig.write(&mut writer)
+        match self.spend_auth_sig {
+            Some(sig) => sig.write(&mut writer),
+            None => {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "Missing spend auth signature",
+                ))
+            }
+        }
     }
 }
 
