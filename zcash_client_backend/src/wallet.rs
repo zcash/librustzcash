@@ -4,10 +4,9 @@
 use pairing::bls12_381::{Bls12, Fr};
 use zcash_primitives::{
     jubjub::{edwards, PrimeOrder},
+    primitives::{Note, PaymentAddress},
     transaction::TxId,
 };
-
-pub struct EncCiphertextFrag(pub [u8; 52]);
 
 /// A subset of a [`Transaction`] relevant to wallets and light clients.
 ///
@@ -26,7 +25,7 @@ pub struct WalletShieldedOutput {
     pub index: usize,
     pub cmu: Fr,
     pub epk: edwards::Point<Bls12, PrimeOrder>,
-    pub enc_ct: EncCiphertextFrag,
     pub account: usize,
-    pub value: u64,
+    pub note: Note<Bls12>,
+    pub to: PaymentAddress<Bls12>,
 }
