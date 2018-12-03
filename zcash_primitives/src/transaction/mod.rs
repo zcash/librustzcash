@@ -1,6 +1,7 @@
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use hex;
 use sapling_crypto::redjubjub::Signature;
+use sha2::{Digest, Sha256};
 use std::fmt;
 use std::io::{self, Read, Write};
 use std::ops::Deref;
@@ -35,7 +36,7 @@ impl fmt::Display for TxId {
 
 /// A Zcash transaction.
 #[derive(Debug)]
-pub struct Transaction(TransactionData);
+pub struct Transaction(TransactionData, TxId);
 
 impl Deref for Transaction {
     type Target = TransactionData;
@@ -125,12 +126,26 @@ impl TransactionData {
         header
     }
 
-    pub fn freeze(self) -> Transaction {
-        Transaction(self)
+    pub fn freeze(self) -> io::Result<Transaction> {
+        Transaction::from_data(self)
     }
 }
 
 impl Transaction {
+    fn from_data(data: TransactionData) -> io::Result<Self> {
+        let mut tx = Transaction(data, TxId([0; 32]));
+        let mut raw = vec![];
+        tx.write(&mut raw)?;
+        (tx.1)
+            .0
+            .copy_from_slice(&Sha256::digest(&Sha256::digest(&raw)));
+        Ok(tx)
+    }
+
+    pub fn txid(&self) -> TxId {
+        self.1
+    }
+
     pub fn read<R: Read>(mut reader: R) -> io::Result<Self> {
         let header = reader.read_u32::<LittleEndian>()?;
         let overwintered = (header >> 31) == 1;
@@ -195,7 +210,7 @@ impl Transaction {
                 false => None,
             };
 
-        Ok(Transaction(TransactionData {
+        Transaction::from_data(TransactionData {
             overwintered,
             version,
             version_group_id,
@@ -210,7 +225,7 @@ impl Transaction {
             joinsplit_pubkey,
             joinsplit_sig,
             binding_sig,
-        }))
+        })
     }
 
     pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {

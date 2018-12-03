@@ -8,6 +8,7 @@ extern crate hex;
 extern crate pairing;
 extern crate rand;
 extern crate sapling_crypto;
+extern crate sha2;
 
 use sapling_crypto::jubjub::JubjubBls12;
 

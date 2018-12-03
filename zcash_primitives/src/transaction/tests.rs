@@ -159,51 +159,33 @@ fn tx_read_write() {
 #[test]
 fn tx_write_rejects_unexpected_joinsplit_pubkey() {
     // Succeeds without a JoinSplit pubkey
-    {
-        let tx = TransactionData::new().freeze();
-        let mut encoded = Vec::new();
-        assert!(tx.write(&mut encoded).is_ok());
-    }
+    assert!(TransactionData::new().freeze().is_ok());
 
     // Fails with an unexpected JoinSplit pubkey
     {
         let mut tx = TransactionData::new();
         tx.joinsplit_pubkey = Some([0; 32]);
-        let tx = tx.freeze();
-
-        let mut encoded = Vec::new();
-        assert!(tx.write(&mut encoded).is_err());
+        assert!(tx.freeze().is_err());
     }
 }
 
 #[test]
 fn tx_write_rejects_unexpected_joinsplit_sig() {
     // Succeeds without a JoinSplit signature
-    {
-        let tx = TransactionData::new().freeze();
-        let mut encoded = Vec::new();
-        assert!(tx.write(&mut encoded).is_ok());
-    }
+    assert!(TransactionData::new().freeze().is_ok());
 
     // Fails with an unexpected JoinSplit signature
     {
         let mut tx = TransactionData::new();
         tx.joinsplit_sig = Some([0; 64]);
-        let tx = tx.freeze();
-
-        let mut encoded = Vec::new();
-        assert!(tx.write(&mut encoded).is_err());
+        assert!(tx.freeze().is_err());
     }
 }
 
 #[test]
 fn tx_write_rejects_unexpected_binding_sig() {
     // Succeeds without a binding signature
-    {
-        let tx = TransactionData::new().freeze();
-        let mut encoded = Vec::new();
-        assert!(tx.write(&mut encoded).is_ok());
-    }
+    assert!(TransactionData::new().freeze().is_ok());
 
     // Fails with an unexpected binding signature
     {
@@ -218,10 +200,7 @@ fn tx_write_rejects_unexpected_binding_sig() {
 
         let mut tx = TransactionData::new();
         tx.binding_sig = Some(sig);
-        let tx = tx.freeze();
-
-        let mut encoded = Vec::new();
-        assert!(tx.write(&mut encoded).is_err());
+        assert!(tx.freeze().is_err());
     }
 }
 
