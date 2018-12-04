@@ -15,7 +15,16 @@ pub struct WalletTx {
     pub txid: TxId,
     pub num_spends: usize,
     pub num_outputs: usize,
+    pub shielded_spends: Vec<WalletShieldedSpend>,
     pub shielded_outputs: Vec<WalletShieldedOutput>,
+}
+
+/// A subset of a [`SpendDescription`] relevant to wallets and light clients.
+///
+/// [`SpendDescription`]: zcash_primitives::transaction::components::SpendDescription
+pub struct WalletShieldedSpend {
+    pub index: usize,
+    pub nf: Vec<u8>,
 }
 
 /// A subset of an [`OutputDescription`] relevant to wallets and light clients.

@@ -13,7 +13,7 @@ use zcash_primitives::{
 };
 
 use crate::proto::compact_formats::{CompactBlock, CompactOutput};
-use crate::wallet::{WalletShieldedOutput, WalletTx};
+use crate::wallet::{WalletShieldedOutput, WalletShieldedSpend, WalletTx};
 
 /// Scans a [`CompactOutput`] with a set of [`ExtendedFullViewingKey`]s.
 ///
@@ -89,6 +89,7 @@ fn scan_output(
 pub fn scan_block(
     block: CompactBlock,
     extfvks: &[ExtendedFullViewingKey],
+    nullifiers: &[&[u8]],
     tree: &mut CommitmentTree<Node>,
     existing_witnesses: &mut [&mut IncrementalWitness<Node>],
 ) -> Vec<(WalletTx, Vec<IncrementalWitness<Node>>)> {
@@ -98,6 +99,23 @@ pub fn scan_block(
     for tx in block.vtx.into_iter() {
         let num_spends = tx.spends.len();
         let num_outputs = tx.outputs.len();
+
+        // Check for spent notes
+        let shielded_spends: Vec<_> = tx
+            .spends
+            .into_iter()
+            .enumerate()
+            .filter_map(|(index, spend)| {
+                if nullifiers.contains(&&spend.nf[..]) {
+                    Some(WalletShieldedSpend {
+                        index,
+                        nf: spend.nf,
+                    })
+                } else {
+                    None
+                }
+            })
+            .collect();
 
         // Check for incoming notes while incrementing tree and witnesses
         let mut shielded_outputs = vec![];
@@ -111,7 +129,7 @@ pub fn scan_block(
             }
         }
 
-        if !shielded_outputs.is_empty() {
+        if !(shielded_spends.is_empty() && shielded_outputs.is_empty()) {
             let mut txid = TxId([0u8; 32]);
             txid.0.copy_from_slice(&tx.hash);
             wtxs.push((
@@ -119,6 +137,7 @@ pub fn scan_block(
                     txid,
                     num_spends,
                     num_outputs,
+                    shielded_spends,
                     shielded_outputs,
                 },
                 new_witnesses,
@@ -146,9 +165,14 @@ mod tests {
     };
 
     use super::scan_block;
-    use crate::proto::compact_formats::{CompactBlock, CompactOutput, CompactTx};
+    use crate::proto::compact_formats::{CompactBlock, CompactOutput, CompactSpend, CompactTx};
 
     fn random_compact_tx<R: RngCore>(rng: &mut R) -> CompactTx {
+        let fake_nf = {
+            let mut nf = vec![0; 32];
+            rng.fill_bytes(&mut nf);
+            nf
+        };
         let fake_cmu = {
             let fake_cmu = Fr::random(rng);
             let mut bytes = vec![];
@@ -166,6 +190,8 @@ mod tests {
             fake_epk.write(&mut bytes).unwrap();
             bytes
         };
+        let mut cspend = CompactSpend::new();
+        cspend.set_nf(fake_nf);
         let mut cout = CompactOutput::new();
         cout.set_cmu(fake_cmu);
         cout.set_epk(fake_epk);
@@ -174,14 +200,17 @@ mod tests {
         let mut txid = vec![0; 32];
         rng.fill_bytes(&mut txid);
         ctx.set_hash(txid);
+        ctx.spends.push(cspend);
         ctx.outputs.push(cout);
         ctx
     }
 
-    /// Create a fake CompactBlock at the given height, containing a single output paying
-    /// the given address. Returns the CompactBlock and the nullifier for the new note.
+    /// Create a fake CompactBlock at the given height, with a transaction containing a
+    /// single spend of the given nullifier and a single output paying the given address.
+    /// Returns the CompactBlock.
     fn fake_compact_block(
         height: i32,
+        nf: [u8; 32],
         extfvk: ExtendedFullViewingKey,
         value: Amount,
     ) -> CompactBlock {
@@ -215,6 +244,8 @@ mod tests {
         // Add a random Sapling tx before ours
         cb.vtx.push(random_compact_tx(&mut rng));
 
+        let mut cspend = CompactSpend::new();
+        cspend.set_nf(nf.to_vec());
         let mut cout = CompactOutput::new();
         cout.set_cmu(cmu);
         cout.set_epk(epk);
@@ -223,6 +254,7 @@ mod tests {
         let mut txid = vec![0; 32];
         rng.fill_bytes(&mut txid);
         ctx.set_hash(txid);
+        ctx.spends.push(cspend);
         ctx.outputs.push(cout);
         cb.vtx.push(ctx);
 
@@ -234,16 +266,17 @@ mod tests {
         let extsk = ExtendedSpendingKey::master(&[]);
         let extfvk = ExtendedFullViewingKey::from(&extsk);
 
-        let cb = fake_compact_block(1, extfvk.clone(), Amount::from_u64(5).unwrap());
+        let cb = fake_compact_block(1, [0; 32], extfvk.clone(), Amount::from_u64(5).unwrap());
         assert_eq!(cb.vtx.len(), 2);
 
         let mut tree = CommitmentTree::new();
-        let txs = scan_block(cb, &[extfvk], &mut tree, &mut []);
+        let txs = scan_block(cb, &[extfvk], &[], &mut tree, &mut []);
         assert_eq!(txs.len(), 1);
 
         let (tx, new_witnesses) = &txs[0];
-        assert_eq!(tx.num_spends, 0);
+        assert_eq!(tx.num_spends, 1);
         assert_eq!(tx.num_outputs, 1);
+        assert_eq!(tx.shielded_spends.len(), 0);
         assert_eq!(tx.shielded_outputs.len(), 1);
         assert_eq!(tx.shielded_outputs[0].index, 0);
         assert_eq!(tx.shielded_outputs[0].account, 0);
@@ -252,5 +285,28 @@ mod tests {
         // Check that the witness root matches
         assert_eq!(new_witnesses.len(), 1);
         assert_eq!(new_witnesses[0].root(), tree.root());
+    }
+
+    #[test]
+    fn scan_block_with_my_spend() {
+        let extsk = ExtendedSpendingKey::master(&[]);
+        let extfvk = ExtendedFullViewingKey::from(&extsk);
+        let nf = [7; 32];
+
+        let cb = fake_compact_block(1, nf, extfvk, Amount::from_u64(5).unwrap());
+        assert_eq!(cb.vtx.len(), 2);
+
+        let mut tree = CommitmentTree::new();
+        let txs = scan_block(cb, &[], &[&nf], &mut tree, &mut []);
+        assert_eq!(txs.len(), 1);
+
+        let (tx, new_witnesses) = &txs[0];
+        assert_eq!(tx.num_spends, 1);
+        assert_eq!(tx.num_outputs, 1);
+        assert_eq!(tx.shielded_spends.len(), 1);
+        assert_eq!(tx.shielded_outputs.len(), 0);
+        assert_eq!(tx.shielded_spends[0].index, 0);
+        assert_eq!(tx.shielded_spends[0].nf, nf);
+        assert_eq!(new_witnesses.len(), 0);
     }
 }
