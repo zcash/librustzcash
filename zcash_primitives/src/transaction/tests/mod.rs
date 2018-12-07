@@ -11,8 +11,6 @@ use crate::JUBJUB;
 
 #[test]
 fn tx_read_write() {
-    // TxID: 64f0bd7fe30ce23753358fe3a2dc835b8fba9c0274c4e2c54a6f73114cb55639
-    // From testnet block 280003.
     let data = &self::data::tx_read_write::TX_READ_WRITE;
     let tx = Transaction::read(&data[..]).unwrap();
     assert_eq!(
