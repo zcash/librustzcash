@@ -324,9 +324,10 @@ pub extern "system" fn librustzcash_merkle_hash(
             .take(Fr::NUM_BITS as usize)
             .chain(rhs.iter().map(|&x| x).take(Fr::NUM_BITS as usize)),
         &JUBJUB,
-    ).into_xy()
-        .0
-        .into_repr();
+    )
+    .into_xy()
+    .0
+    .into_repr();
 
     // Should be okay, caller is responsible for ensuring the pointer
     // is a valid pointer to 32 bytes that can be mutated.
@@ -914,7 +915,8 @@ pub extern "system" fn librustzcash_sprout_prove(
         unsafe { &SPROUT_GROTH16_PARAMS_PATH }
             .as_ref()
             .expect("parameters should have been initialized"),
-    ).expect("couldn't load Sprout groth16 parameters file");
+    )
+    .expect("couldn't load Sprout groth16 parameters file");
 
     let mut sprout_fs = BufReader::with_capacity(1024 * 1024, sprout_fs);
 
@@ -1077,8 +1079,7 @@ pub extern "system" fn librustzcash_sapling_spend_sig(
 
     // Compute the signature's message for rk/spend_auth_sig
     let mut data_to_be_signed = [0u8; 64];
-    rk.0
-        .write(&mut data_to_be_signed[0..32])
+    rk.0.write(&mut data_to_be_signed[0..32])
         .expect("message buffer should be 32 bytes");
     (&mut data_to_be_signed[32..64]).copy_from_slice(&(unsafe { &*sighash })[..]);
 
@@ -1198,7 +1199,8 @@ pub extern "system" fn librustzcash_sapling_spend_proof(
             unsafe { SAPLING_SPEND_PARAMS.as_ref() }.unwrap(),
             unsafe { SAPLING_SPEND_VK.as_ref() }.unwrap(),
             &JUBJUB,
-        ).expect("proving should not fail");
+        )
+        .expect("proving should not fail");
 
     // Write value commitment to caller
     value_commitment
