@@ -1,5 +1,5 @@
+use ff::{PrimeField, PrimeFieldRepr};
 use pairing::bls12_381::Bls12;
-use pairing::{PrimeField, PrimeFieldRepr};
 use rand::{OsRng, Rng};
 use sapling_crypto::jubjub::{edwards, JubjubBls12};
 use sapling_crypto::primitives::{Diversifier, ViewingKey};
