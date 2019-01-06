@@ -1,6 +1,6 @@
 use blake2_rfc::blake2b::Blake2b;
 use byteorder::{LittleEndian, WriteBytesExt};
-use pairing::{PrimeField, PrimeFieldRepr};
+use ff::{PrimeField, PrimeFieldRepr};
 
 use super::{
     components::{Amount, Script, TxOut},

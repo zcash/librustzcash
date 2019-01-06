@@ -1,8 +1,6 @@
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
-use pairing::{
-    bls12_381::{Bls12, Fr, FrRepr},
-    PrimeField, PrimeFieldRepr,
-};
+use ff::{PrimeField, PrimeFieldRepr};
+use pairing::bls12_381::{Bls12, Fr, FrRepr};
 use sapling_crypto::{
     jubjub::{edwards, Unknown},
     redjubjub::{PublicKey, Signature},
