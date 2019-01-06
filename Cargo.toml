@@ -1,6 +1,8 @@
 [workspace]
 members = [
     "bellman",
+    "ff",
+    "group",
     "librustzcash",
     "pairing",
     "sapling-crypto",

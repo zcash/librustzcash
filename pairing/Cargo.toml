@@ -17,8 +17,8 @@ repository = "https://github.com/ebfull/pairing"
 [dependencies]
 rand = "0.4"
 byteorder = "1"
-ff = { version = "0.4", features = ["derive"] }
-group = "0.1"
+ff = { path = "../ff", features = ["derive"] }
+group = { path = "../group" }
 
 [features]
 unstable-features = ["expose-arith"]

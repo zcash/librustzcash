@@ -7,7 +7,7 @@ authors = [
 
 [dependencies]
 byteorder = "1"
-ff = "0.4"
+ff = { path = "../ff" }
 lazy_static = "1"
 pairing = { path = "../pairing" }
 rand = "0.4"

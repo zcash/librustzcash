@@ -15,7 +15,7 @@ crate-type = ["staticlib"]
 
 [dependencies]
 bellman = { path = "../bellman" }
-ff = "0.4"
+ff = { path = "../ff" }
 libc = "0.2"
 pairing = { path = "../pairing" }
 lazy_static = "1"

@@ -12,7 +12,6 @@
 #![deny(missing_debug_implementations)]
 
 extern crate byteorder;
-#[macro_use]
 extern crate ff;
 extern crate group;
 extern crate rand;
