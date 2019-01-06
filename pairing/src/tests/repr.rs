@@ -1,5 +1,5 @@
+use ff::PrimeFieldRepr;
 use rand::{SeedableRng, XorShiftRng};
-use PrimeFieldRepr;
 
 pub fn random_repr_tests<R: PrimeFieldRepr>() {
     random_encoding_tests::<R>();
