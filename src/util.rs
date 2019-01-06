@@ -1,122 +1,129 @@
-macro_rules! impl_binops {
-    ($name:ident) => {
-        impl<'a, 'b> Sub<&'b $name> for &'a $name {
-            type Output = $name;
+macro_rules! impl_binops_additive {
+    ($lhs:ident, $rhs:ident) => {
+        impl<'b> Sub<&'b $rhs> for $lhs {
+            type Output = $lhs;
 
-            fn sub(self, other: &'b $name) -> $name {
-                let mut tmp = *self;
-                tmp -= other;
-                tmp
+            #[inline]
+            fn sub(self, rhs: &'b $rhs) -> $lhs {
+                &self - rhs
             }
         }
 
-        impl<'a, 'b> Mul<&'b $name> for &'a $name {
-            type Output = $name;
+        impl<'b> Add<&'b $rhs> for $lhs {
+            type Output = $lhs;
 
-            fn mul(self, other: &'b $name) -> $name {
-                let mut tmp = *self;
-                tmp *= other;
-                tmp
+            #[inline]
+            fn add(self, rhs: &'b $rhs) -> $lhs {
+                &self + rhs
             }
         }
 
-        impl<'a, 'b> Add<&'b $name> for &'a $name {
-            type Output = $name;
+        impl<'a> Sub<$rhs> for &'a $lhs {
+            type Output = $lhs;
 
-            fn add(self, other: &'b $name) -> $name {
-                let mut tmp = *self;
-                tmp += other;
-                tmp
+            #[inline]
+            fn sub(self, rhs: $rhs) -> $lhs {
+                self - &rhs
             }
         }
 
-        impl<'b> Sub<&'b $name> for $name {
-            type Output = $name;
+        impl<'a> Add<$rhs> for &'a $lhs {
+            type Output = $lhs;
 
-            fn sub(self, other: &'b $name) -> $name {
-                let mut tmp = self;
-                tmp -= other;
-                tmp
+            #[inline]
+            fn add(self, rhs: $rhs) -> $lhs {
+                self + &rhs
             }
         }
 
-        impl<'b> Mul<&'b $name> for $name {
-            type Output = $name;
+        impl Sub<$rhs> for $lhs {
+            type Output = $lhs;
 
-            fn mul(self, other: &'b $name) -> $name {
-                let mut tmp = self;
-                tmp *= other;
-                tmp
+            #[inline]
+            fn sub(self, rhs: $rhs) -> $lhs {
+                &self - &rhs
             }
         }
 
-        impl<'b> Add<&'b $name> for $name {
-            type Output = $name;
+        impl Add<$rhs> for $lhs {
+            type Output = $lhs;
 
-            fn add(self, other: &'b $name) -> $name {
-                let mut tmp = self;
-                tmp += other;
-                tmp
+            #[inline]
+            fn add(self, rhs: $rhs) -> $lhs {
+                &self + &rhs
             }
         }
 
-        impl<'a> Sub<$name> for &'a $name {
-            type Output = $name;
-
-            fn sub(self, other: $name) -> $name {
-                let mut tmp = *self;
-                tmp -= &other;
-                tmp
+        impl SubAssign<$rhs> for $lhs {
+            #[inline]
+            fn sub_assign(&mut self, rhs: $rhs) {
+                *self = &*self - &rhs;
             }
         }
 
-        impl<'a> Mul<$name> for &'a $name {
-            type Output = $name;
-
-            fn mul(self, other: $name) -> $name {
-                let mut tmp = *self;
-                tmp *= &other;
-                tmp
+        impl AddAssign<$rhs> for $lhs {
+            #[inline]
+            fn add_assign(&mut self, rhs: $rhs) {
+                *self = &*self + &rhs;
             }
         }
 
-        impl<'a> Add<$name> for &'a $name {
-            type Output = $name;
-
-            fn add(self, other: $name) -> $name {
-                let mut tmp = *self;
-                tmp += &other;
-                tmp
+        impl<'b> SubAssign<&'b $rhs> for $lhs {
+            #[inline]
+            fn sub_assign(&mut self, rhs: &'b $rhs) {
+                *self = &*self - rhs;
             }
         }
 
-        impl Sub<$name> for $name {
-            type Output = $name;
+        impl<'b> AddAssign<&'b $rhs> for $lhs {
+            #[inline]
+            fn add_assign(&mut self, rhs: &'b $rhs) {
+                *self = &*self + rhs;
+            }
+        }
+    };
+}
 
-            fn sub(self, other: $name) -> $name {
-                let mut tmp = self;
-                tmp -= &other;
-                tmp
+macro_rules! impl_binops_multiplicative {
+    ($lhs:ident, $rhs:ident) => {
+        impl<'b> Mul<&'b $rhs> for $lhs {
+            type Output = $lhs;
+
+            #[inline]
+            fn mul(self, rhs: &'b $rhs) -> $lhs {
+                &self * rhs
             }
         }
 
-        impl Mul<$name> for $name {
-            type Output = $name;
+        impl<'a> Mul<$rhs> for &'a $lhs {
+            type Output = $lhs;
 
-            fn mul(self, other: $name) -> $name {
-                let mut tmp = self;
-                tmp *= &other;
-                tmp
+            #[inline]
+            fn mul(self, rhs: $rhs) -> $lhs {
+                self * &rhs
             }
         }
 
-        impl Add<$name> for $name {
-            type Output = $name;
+        impl Mul<$rhs> for $lhs {
+            type Output = $lhs;
 
-            fn add(self, other: $name) -> $name {
-                let mut tmp = self;
-                tmp += &other;
-                tmp
+            #[inline]
+            fn mul(self, rhs: $rhs) -> $lhs {
+                &self * &rhs
+            }
+        }
+
+        impl MulAssign<$rhs> for $lhs {
+            #[inline]
+            fn mul_assign(&mut self, rhs: $rhs) {
+                *self = &*self * &rhs;
+            }
+        }
+
+        impl<'b> MulAssign<&'b $rhs> for $lhs {
+            #[inline]
+            fn mul_assign(&mut self, rhs: &'b $rhs) {
+                *self = &*self * rhs;
             }
         }
     };

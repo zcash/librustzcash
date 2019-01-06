@@ -8,7 +8,7 @@ use subtle::{Choice, ConditionallyAssignable, ConditionallySelectable, ConstantT
 // The internal representation of this type is four 64-bit unsigned
 // integers in little-endian order. Elements of Fq are always in
 // Montgomery form; i.e., Fq(a) = aR mod q, with R = 2^256.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Eq)]
 pub struct Fq(pub(crate) [u64; 4]);
 
 impl fmt::Debug for Fq {
@@ -81,6 +81,7 @@ fn mac(a: u64, b: u64, c: u64, carry: u64) -> (u64, u64) {
 impl<'a> Neg for &'a Fq {
     type Output = Fq;
 
+    #[inline]
     fn neg(self) -> Fq {
         // Subtract `self` from `MODULUS` to negate. Ignore the final
         // borrow because it cannot underflow; self is guaranteed to
@@ -106,13 +107,17 @@ impl<'a> Neg for &'a Fq {
 impl Neg for Fq {
     type Output = Fq;
 
+    #[inline]
     fn neg(self) -> Fq {
         -&self
     }
 }
 
-impl<'b> SubAssign<&'b Fq> for Fq {
-    fn sub_assign(&mut self, rhs: &'b Fq) {
+impl<'a, 'b> Sub<&'b Fq> for &'a Fq {
+    type Output = Fq;
+
+    #[inline]
+    fn sub(self, rhs: &'b Fq) -> Fq {
         let (d0, borrow) = sbb(self.0[0], rhs.0[0], 0);
         let (d1, borrow) = sbb(self.0[1], rhs.0[1], borrow);
         let (d2, borrow) = sbb(self.0[2], rhs.0[2], borrow);
@@ -125,27 +130,35 @@ impl<'b> SubAssign<&'b Fq> for Fq {
         let (d2, carry) = adc(d2, MODULUS.0[2] & borrow, carry);
         let (d3, _) = adc(d3, MODULUS.0[3] & borrow, carry);
 
-        self.0 = [d0, d1, d2, d3];
+        Fq([d0, d1, d2, d3])
     }
 }
 
-impl<'b> AddAssign<&'b Fq> for Fq {
-    fn add_assign(&mut self, rhs: &'b Fq) {
+impl<'a, 'b> Add<&'b Fq> for &'a Fq {
+    type Output = Fq;
+
+    #[inline]
+    fn add(self, rhs: &'b Fq) -> Fq {
         let (d0, carry) = adc(self.0[0], rhs.0[0], 0);
         let (d1, carry) = adc(self.0[1], rhs.0[1], carry);
         let (d2, carry) = adc(self.0[2], rhs.0[2], carry);
         let (d3, _) = adc(self.0[3], rhs.0[3], carry);
 
-        self.0 = [d0, d1, d2, d3];
+        let mut tmp = Fq([d0, d1, d2, d3]);
 
         // Attempt to subtract the modulus, to ensure the value
         // is smaller than the modulus.
-        self.sub_assign(&MODULUS);
+        tmp.sub_assign(&MODULUS);
+
+        tmp
     }
 }
 
-impl<'b> MulAssign<&'b Fq> for Fq {
-    fn mul_assign(&mut self, rhs: &'b Fq) {
+impl<'a, 'b> Mul<&'b Fq> for &'a Fq {
+    type Output = Fq;
+
+    #[inline]
+    fn mul(self, rhs: &'b Fq) -> Fq {
         // Schoolbook multiplication
 
         let (r0, carry) = mac(0, self.0[0], rhs.0[0], 0);
@@ -168,11 +181,12 @@ impl<'b> MulAssign<&'b Fq> for Fq {
         let (r5, carry) = mac(r5, self.0[3], rhs.0[2], carry);
         let (r6, r7) = mac(r6, self.0[3], rhs.0[3], carry);
 
-        self.montgomery_reduce(r0, r1, r2, r3, r4, r5, r6, r7);
+        Fq::montgomery_reduce(r0, r1, r2, r3, r4, r5, r6, r7)
     }
 }
 
-impl_binops!(Fq);
+impl_binops_additive!(Fq, Fq);
+impl_binops_multiplicative!(Fq, Fq);
 
 /// INV = -(q^{-1} mod 2^64) mod 2^64
 const INV: u64 = 0xfffffffeffffffff;
@@ -228,6 +242,11 @@ impl Fq {
         R
     }
 
+    #[inline]
+    pub fn double(&self) -> Fq {
+        self + self
+    }
+
     /// Attempts to convert a little-endian byte representation of
     /// a field element into an element of `Fq`, failing if the input
     /// is not canonical (is not smaller than q).
@@ -265,8 +284,7 @@ impl Fq {
     pub fn into_bytes(&self) -> [u8; 32] {
         // Turn into canonical form by computing
         // (a.R) / R = a
-        let mut tmp = *self;
-        tmp.montgomery_reduce(self.0[0], self.0[1], self.0[2], self.0[3], 0, 0, 0, 0);
+        let tmp = Fq::montgomery_reduce(self.0[0], self.0[1], self.0[2], self.0[3], 0, 0, 0, 0);
 
         let mut res = [0; 32];
         LittleEndian::write_u64(&mut res[0..8], tmp.0[0]);
@@ -278,7 +296,7 @@ impl Fq {
     }
 
     /// Squares this element.
-    pub fn square_assign(&mut self) {
+    pub fn square(&self) -> Fq {
         let (r1, carry) = mac(0, self.0[0], self.0[1], 0);
         let (r2, carry) = mac(0, self.0[0], self.0[2], carry);
         let (r3, r4) = mac(0, self.0[0], self.0[3], carry);
@@ -305,16 +323,10 @@ impl Fq {
         let (r6, carry) = mac(r6, self.0[3], self.0[3], carry);
         let (r7, _) = adc(0, r7, carry);
 
-        self.montgomery_reduce(r0, r1, r2, r3, r4, r5, r6, r7);
+        Fq::montgomery_reduce(r0, r1, r2, r3, r4, r5, r6, r7)
     }
 
-    pub fn square(&self) -> Self {
-        let mut tmp = *self;
-        tmp.square_assign();
-        tmp
-    }
-
-    fn legendre_symbol(&self) -> Self {
+    fn legendre_symbol_vartime(&self) -> Self {
         // Legendre symbol computed via Euler's criterion:
         // self^((q - 1) // 2)
         self.pow_vartime(&[
@@ -329,7 +341,7 @@ impl Fq {
     ///
     /// **This operation is variable time.**
     pub fn sqrt_vartime(&self) -> Option<Self> {
-        let legendre_symbol = self.legendre_symbol();
+        let legendre_symbol = self.legendre_symbol_vartime();
 
         if legendre_symbol == Self::zero() {
             Some(*self)
@@ -365,17 +377,17 @@ impl Fq {
                 {
                     let mut t2i = t.square();
                     while t2i != Self::one() {
-                        t2i.square_assign();
+                        t2i = t2i.square();
                         i += 1;
                     }
                 }
 
                 for _ in 0..(m - i - 1) {
-                    c.square_assign();
+                    c = c.square();
                 }
 
                 r *= &c;
-                c.square_assign();
+                c = c.square();
                 t *= &c;
                 m = i;
             }
@@ -389,12 +401,11 @@ impl Fq {
     pub fn pow(&self, by: &[u64; 4]) -> Self {
         let mut res = Self::one();
         for e in by.iter().rev() {
-            let mut e = *e;
             for i in (0..64).rev() {
-                res.square_assign();
+                res = res.square();
                 let mut tmp = res;
                 tmp.mul_assign(self);
-                res.conditional_assign(&tmp, (((e >> i) & 0x1) as u8).into());
+                res.conditional_assign(&tmp, (((*e >> i) & 0x1) as u8).into());
             }
         }
         res
@@ -409,11 +420,10 @@ impl Fq {
     pub fn pow_vartime(&self, by: &[u64; 4]) -> Self {
         let mut res = Self::one();
         for e in by.iter().rev() {
-            let mut e = *e;
             for i in (0..64).rev() {
-                res.square_assign();
+                res = res.square();
 
-                if ((e >> i) & 1) == 1 {
+                if ((*e >> i) & 1) == 1 {
                     res.mul_assign(self);
                 }
             }
@@ -428,19 +438,19 @@ impl Fq {
         #[inline(always)]
         fn square_assign_multi(n: &mut Fq, num_times: usize) {
             for _ in 0..num_times {
-                n.square_assign();
+                *n = n.square();
             }
         }
         // found using https://github.com/kwantam/addchain
         let t10 = *self;
         let mut t0 = t10;
-        t0.square_assign();
+        t0 = t0.square();
         let mut t1 = t0;
         t1.mul_assign(&t10);
         let mut t16 = t0;
-        t16.square_assign();
+        t16 = t16.square();
         let mut t6 = t16;
-        t6.square_assign();
+        t6 = t6.square();
         let mut t5 = t6;
         t5.mul_assign(&t0);
         let mut t0 = t6;
@@ -448,13 +458,13 @@ impl Fq {
         let mut t12 = t5;
         t12.mul_assign(&t16);
         let mut t2 = t6;
-        t2.square_assign();
+        t2 = t2.square();
         let mut t7 = t5;
         t7.mul_assign(&t6);
         let mut t15 = t0;
         t15.mul_assign(&t5);
         let mut t17 = t12;
-        t17.square_assign();
+        t17 = t17.square();
         t1.mul_assign(&t17);
         let mut t3 = t7;
         t3.mul_assign(&t2);
@@ -543,8 +553,8 @@ impl Fq {
         t0
     }
 
+    #[inline]
     fn montgomery_reduce(
-        &mut self,
         r0: u64,
         r1: u64,
         r2: u64,
@@ -553,7 +563,7 @@ impl Fq {
         r5: u64,
         r6: u64,
         r7: u64,
-    ) {
+    ) -> Self {
         // The Montgomery reduction here is based on Algorithm 14.32 in
         // Handbook of Applied Cryptography
         // <http://cacr.uwaterloo.ca/hac/about/chap14.pdf>.
@@ -586,13 +596,12 @@ impl Fq {
         let (r6, carry) = mac(r6, k, MODULUS.0[3], carry);
         let (r7, _) = adc(r7, carry2, carry);
 
-        self.0[0] = r4;
-        self.0[1] = r5;
-        self.0[2] = r6;
-        self.0[3] = r7;
+        let mut tmp = Fq([r4, r5, r6, r7]);
 
         // Result may be within MODULUS of the correct value
-        self.sub_assign(&MODULUS);
+        tmp.sub_assign(&MODULUS);
+
+        tmp
     }
 }
 
@@ -617,6 +626,7 @@ fn test_inv() {
     assert_eq!(inv, INV);
 }
 
+#[cfg(feature = "std")]
 #[test]
 fn test_debug() {
     assert_eq!(
@@ -841,7 +851,7 @@ fn test_squaring() {
 
     for _ in 0..100 {
         let mut tmp = cur;
-        tmp.square_assign();
+        tmp = tmp.square();
 
         let mut tmp2 = Fq::zero();
         for b in cur
