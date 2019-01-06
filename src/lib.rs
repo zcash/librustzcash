@@ -4,16 +4,131 @@
 #[macro_use]
 extern crate std;
 
-extern crate byteorder;
-extern crate subtle;
+use core::ops::{Add, AddAssign, Neg, Sub, SubAssign};
 
-use core::ops::{AddAssign, Neg};
+use subtle::{Choice, ConditionallyAssignable, ConditionallySelectable, ConstantTimeEq};
 
 #[macro_use]
 mod util;
 
 mod fq;
-pub use fq::*;
+pub use self::fq::*;
+
+/// This represents an affine point `(u, v)` on the
+/// curve `-u^2 + v^2 = 1 + d.u^2.v^2` over `Fq` with
+/// `d = -(10240/10241)`.
+#[derive(Clone, Copy)]
+pub struct AffinePoint {
+    u: Fq,
+    v: Fq,
+}
+
+impl Neg for AffinePoint {
+    type Output = AffinePoint;
+
+    #[inline]
+    fn neg(self) -> AffinePoint {
+        AffinePoint {
+            u: -self.u,
+            v: self.v,
+        }
+    }
+}
+
+impl ConstantTimeEq for AffinePoint {
+    fn ct_eq(&self, other: &Self) -> Choice {
+        self.u.ct_eq(&other.u) & self.v.ct_eq(&other.v)
+    }
+}
+
+impl PartialEq for AffinePoint {
+    fn eq(&self, other: &Self) -> bool {
+        self.ct_eq(other).unwrap_u8() == 1
+    }
+}
+
+/// Represents the affine point `(u/z, v/z)` with
+/// `z` nonzero and `t1 * t2 = uv/z`.
+#[derive(Clone, Copy)]
+pub struct ExtendedPoint {
+    u: Fq,
+    v: Fq,
+    z: Fq,
+    t1: Fq,
+    t2: Fq,
+}
+
+impl ConstantTimeEq for ExtendedPoint {
+    fn ct_eq(&self, other: &Self) -> Choice {
+        // (u/z, v/z) = (u'/z', v'/z') implies
+        //      (uz'z = u'z'z)
+        //      (vz'z = v'z'z)
+
+        (&self.u * &other.z).ct_eq(&(&other.u * &self.z))
+            & (&self.v * &other.z).ct_eq(&(&other.v * &self.z))
+    }
+}
+
+impl PartialEq for ExtendedPoint {
+    fn eq(&self, other: &Self) -> bool {
+        self.ct_eq(other).unwrap_u8() == 1
+    }
+}
+
+impl Neg for ExtendedPoint {
+    type Output = ExtendedPoint;
+
+    #[inline]
+    fn neg(self) -> ExtendedPoint {
+        ExtendedPoint {
+            u: -self.u,
+            v: self.v,
+            z: self.z,
+            t1: -self.t1,
+            t2: self.t2,
+        }
+    }
+}
+
+impl From<AffinePoint> for ExtendedPoint {
+    fn from(affine: AffinePoint) -> ExtendedPoint {
+        ExtendedPoint {
+            u: affine.u,
+            v: affine.v,
+            z: Fq::one(),
+            t1: affine.u,
+            t2: affine.v,
+        }
+    }
+}
+
+impl From<ExtendedPoint> for AffinePoint {
+    fn from(extended: ExtendedPoint) -> AffinePoint {
+        // Z coordinate is always nonzero, so this is
+        // its inverse.
+        let zinv = extended.z.pow_q_minus_2();
+
+        AffinePoint {
+            u: extended.u * &zinv,
+            v: extended.v * &zinv,
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+pub struct AffineNielsPoint {
+    v_plus_u: Fq,
+    v_minus_u: Fq,
+    t2d: Fq,
+}
+
+#[derive(Clone, Copy)]
+pub struct ExtendedNielsPoint {
+    v_plus_u: Fq,
+    v_minus_u: Fq,
+    z: Fq,
+    t2d: Fq,
+}
 
 // `d = -(10240/10241)`
 #[allow(dead_code)]
@@ -24,14 +139,14 @@ const EDWARDS_D: Fq = Fq([
     0x57f8f6a8fe0e262e,
 ]);
 
-/// This represents an affine point `(u, v)` on the
-/// curve `-u^2 + v^2 = 1 + d.u^2.v^2` over `Fq` with
-/// `d = -(10240/10241)`.
-#[derive(Clone, Copy)]
-pub struct AffinePoint {
-    u: Fq,
-    v: Fq,
-}
+// `2*d`
+#[allow(dead_code)]
+const EDWARDS_D2: Fq = Fq([
+    0x54a448ac72e9ed5f,
+    0xa51befdb1b373967,
+    0xc0d81f217b4a799e,
+    0x3c0445fed27ecf14,
+]);
 
 impl AffinePoint {
     /// Returns the neutral element `(0, 1)`.
@@ -56,7 +171,7 @@ impl AffinePoint {
 
     /// Attempts to interpret a byte representation of an
     /// affine point, failing if the element is not on
-    /// the curve or canonical.
+    /// the curve or non-canonical.
     ///
     /// **This operation is variable time.**
     pub fn from_bytes_vartime(mut b: [u8; 32]) -> Option<Self> {
@@ -100,6 +215,14 @@ impl AffinePoint {
         }
     }
 
+    pub fn cache(&self) -> AffineNielsPoint {
+        AffineNielsPoint {
+            v_plus_u: &self.v + &self.u,
+            v_minus_u: &self.v - &self.u,
+            t2d: &self.u * &self.v * EDWARDS_D2,
+        }
+    }
+
     /// This is only for debugging purposes and not
     /// exposed in the public API. Checks that this
     /// point is on the curve.
@@ -112,10 +235,309 @@ impl AffinePoint {
     }
 }
 
+impl ExtendedPoint {
+    pub fn identity() -> Self {
+        ExtendedPoint {
+            u: Fq::zero(),
+            v: Fq::one(),
+            z: Fq::one(),
+            t1: Fq::zero(),
+            t2: Fq::zero(),
+        }
+    }
+
+    pub fn cache(&self) -> ExtendedNielsPoint {
+        ExtendedNielsPoint {
+            v_plus_u: &self.v + &self.u,
+            v_minus_u: &self.v - &self.u,
+            z: self.z,
+            t2d: &self.t1 * &self.t2 * EDWARDS_D2,
+        }
+    }
+
+    pub fn double(&self) -> ExtendedPoint {
+        // Doubling is more efficient (three multiplications, four squarings)
+        // when we work within the projective coordinate space (U:Z, V:Z). We
+        // rely on the most efficient formula, "dbl-2008-bbjlp", as described
+        // in Section 6 of "Twisted Edwards Curves" by Bernstein et al.
+        //
+        // See <https://hyperelliptic.org/EFD/g1p/auto-twisted-projective.html#doubling-dbl-2008-bbjlp>
+        // for more information.
+        //
+        // We differ from the literature in that we use (u, v) rather than
+        // (x, y) coordinates. We also have the constant `a = -1` implied. Let
+        // us rewrite the procedure of doubling (u, v, z) to produce (U, V, Z)
+        // as follows:
+        //
+        // B = (u + v)^2
+        // C = u^2
+        // D = v^2
+        // F = D - C
+        // H = 2 * z^2
+        // J = F - H
+        // U = (B - C - D) * J
+        // V = F * (- C - D)
+        // Z = F * J
+        //
+        // If we compute K = D + C, we can rewrite this:
+        //
+        // B = (u + v)^2
+        // C = u^2
+        // D = v^2
+        // F = D - C
+        // K = D + C
+        // H = 2 * z^2
+        // J = F - H
+        // U = (B - K) * J
+        // V = F * (-K)
+        // Z = F * J
+        //
+        // In order to avoid the unnecessary negation of K,
+        // we will negate J, transforming the result into
+        // an equivalent point with a negated z-coordinate.
+        //
+        // B = (u + v)^2
+        // C = u^2
+        // D = v^2
+        // F = D - C
+        // K = D + C
+        // H = 2 * z^2
+        // J = H - F
+        // U = (B - K) * J
+        // V = F * K
+        // Z = F * J
+        //
+        // Let us rename some variables to simplify:
+        //
+        // UV2 = (u + v)^2
+        // UU = u^2
+        // VV = v^2
+        // VVmUU = VV - UU
+        // VVpUU = VV + UU
+        // ZZ2 = 2 * z^2
+        // J = ZZ2 - VVmUU
+        // U = (UV2 - VVpUU) * J
+        // V = VVmUU * VVpUU
+        // Z = VVmUU * J
+        //
+        // We wish to obtain two factors of T = UV/Z.
+        //
+        // UV/Z = (UV2 - VVpUU) * (ZZ2 - VVmUU) * VVmUU * VVpUU / VVmUU / (ZZ2 - VVmUU)
+        //      = (UV2 - VVpUU) * VVmUU * VVpUU / VVmUU
+        //      = (UV2 - VVpUU) * VVpUU
+        //
+        // and so we have that T1 = (UV2 - VVpUU) and T2 = VVpUU.
+
+        let uu = self.u.square();
+        let vv = self.v.square();
+        let zz2 = self.z.square().double();
+        let uv2 = (&self.u + &self.v).square();
+        let vv_plus_uu = &vv + &uu;
+        let vv_minus_uu = &vv - &uu;
+
+        // The remaining arithmetic is exactly the process of converting
+        // from a completed point to an extended point.
+        CompletedPoint {
+            u: &uv2 - &vv_plus_uu,
+            v: vv_plus_uu,
+            z: vv_minus_uu,
+            t: &zz2 - &vv_minus_uu,
+        }.into_extended()
+    }
+}
+
+impl<'a, 'b> Add<&'b ExtendedNielsPoint> for &'a ExtendedPoint {
+    type Output = ExtendedPoint;
+
+    fn add(self, other: &'b ExtendedNielsPoint) -> ExtendedPoint {
+        // We perform addition in the extended coordinates. Here we use
+        // a formula presented by Hisil, Wong, Carter and Dawson in
+        // "Twisted Edward Curves Revisited" which only requires 8M.
+        //
+        // A = (V1 - U1) * (V2 - U2)
+        // B = (V1 + U1) * (V2 + U2)
+        // C = 2d * T1 * T2
+        // D = 2 * Z1 * Z2
+        // E = B - A
+        // F = D - C
+        // G = D + C
+        // H = B + A
+        // U3 = E * F
+        // Y3 = G * H
+        // Z3 = F * G
+        // T3 = E * H
+
+        let a = (&self.v - &self.u) * &other.v_minus_u;
+        let b = (&self.v + &self.u) * &other.v_plus_u;
+        let c = &self.t1 * &self.t2 * &other.t2d;
+        let d = (&self.z * &other.z).double();
+
+        // The remaining arithmetic is exactly the process of converting
+        // from a completed point to an extended point.
+        CompletedPoint {
+            u: &b - &a,
+            v: &b + &a,
+            z: &d + &c,
+            t: &d - &c,
+        }.into_extended()
+    }
+}
+
+impl<'a, 'b> Sub<&'b ExtendedNielsPoint> for &'a ExtendedPoint {
+    type Output = ExtendedPoint;
+
+    fn sub(self, other: &'b ExtendedNielsPoint) -> ExtendedPoint {
+        let a = (&self.v - &self.u) * &other.v_plus_u;
+        let b = (&self.v + &self.u) * &other.v_minus_u;
+        let c = &self.t1 * &self.t2 * &other.t2d;
+        let d = (&self.z * &other.z).double();
+
+        CompletedPoint {
+            u: &b - &a,
+            v: &b + &a,
+            z: &d - &c,
+            t: &d + &c,
+        }.into_extended()
+    }
+}
+
+impl_binops_additive!(ExtendedPoint, ExtendedNielsPoint);
+
+impl<'a, 'b> Add<&'b AffineNielsPoint> for &'a ExtendedPoint {
+    type Output = ExtendedPoint;
+
+    fn add(self, other: &'b AffineNielsPoint) -> ExtendedPoint {
+        // This is identical to the addition formula for `ExtendedNielsPoint`,
+        // except we can assume that `other.z` is one, so that we perform
+        // 7 multiplications.
+
+        let a = (&self.v - &self.u) * &other.v_minus_u;
+        let b = (&self.v + &self.u) * &other.v_plus_u;
+        let c = &self.t1 * &self.t2 * &other.t2d;
+        let d = self.z.double();
+
+        // The remaining arithmetic is exactly the process of converting
+        // from a completed point to an extended point.
+        CompletedPoint {
+            u: &b - &a,
+            v: &b + &a,
+            z: &d + &c,
+            t: &d - &c,
+        }.into_extended()
+    }
+}
+
+impl<'a, 'b> Sub<&'b AffineNielsPoint> for &'a ExtendedPoint {
+    type Output = ExtendedPoint;
+
+    fn sub(self, other: &'b AffineNielsPoint) -> ExtendedPoint {
+        let a = (&self.v - &self.u) * &other.v_plus_u;
+        let b = (&self.v + &self.u) * &other.v_minus_u;
+        let c = &self.t1 * &self.t2 * &other.t2d;
+        let d = self.z.double();
+
+        CompletedPoint {
+            u: &b - &a,
+            v: &b + &a,
+            z: &d - &c,
+            t: &d + &c,
+        }.into_extended()
+    }
+}
+
+impl_binops_additive!(ExtendedPoint, AffineNielsPoint);
+
+impl<'a, 'b> Add<&'b ExtendedPoint> for &'a ExtendedPoint {
+    type Output = ExtendedPoint;
+
+    #[inline]
+    fn add(self, other: &'b ExtendedPoint) -> ExtendedPoint {
+        self + other.cache()
+    }
+}
+
+impl<'a, 'b> Sub<&'b ExtendedPoint> for &'a ExtendedPoint {
+    type Output = ExtendedPoint;
+
+    #[inline]
+    fn sub(self, other: &'b ExtendedPoint) -> ExtendedPoint {
+        self - other.cache()
+    }
+}
+
+impl_binops_additive!(ExtendedPoint, ExtendedPoint);
+
+/// This is a "completed" point produced during a point doubling or
+/// addition routine. These points exist in the `(U:Z, V:T)` model
+/// of the curve.
+struct CompletedPoint {
+    u: Fq,
+    v: Fq,
+    z: Fq,
+    t: Fq,
+}
+
+impl CompletedPoint {
+    /// This converts a completed point into an extended point by
+    /// homogenizing:
+    ///
+    /// (u/z, v/t) = (u/z * t/t, v/t * z/z) = (ut/zt, vz/zt)
+    ///
+    /// The resulting T coordinate is utvz/zt = uv, and so
+    /// T1 = u, T2 = v, without loss of generality.
+    fn into_extended(&self) -> ExtendedPoint {
+        ExtendedPoint {
+            u: &self.u * &self.t,
+            v: &self.v * &self.z,
+            z: &self.z * &self.t,
+            t1: self.u,
+            t2: self.v,
+        }
+    }
+}
+
 impl Default for AffinePoint {
     fn default() -> AffinePoint {
         AffinePoint::identity()
     }
+}
+
+pub fn batch_normalize<'a>(v: &'a mut [ExtendedPoint]) -> impl Iterator<Item = AffinePoint> + 'a {
+    let mut acc = Fq::one();
+    for p in v.iter_mut() {
+        // We use the `t1` field of `ExtendedPoint` to store the product
+        // of previous z-coordinates seen.
+        p.t1 = acc;
+        acc *= &p.z;
+    }
+
+    // This is the inverse, as all z-coordinates are nonzero.
+    acc = acc.pow_q_minus_2();
+
+    for p in v.iter_mut().rev() {
+        let mut q = *p;
+
+        // Compute tmp = 1/z
+        let tmp = q.t1 * acc;
+
+        // Cancel out z-coordinate in denominator of `acc`
+        acc *= &q.z;
+
+        // Set the coordinates to the correct value
+        q.u *= &tmp; // Multiply by 1/z
+        q.v *= &tmp; // Multiply by 1/z
+        q.z = Fq::one(); // z-coordinate is now one
+        q.t1 = q.u;
+        q.t2 = q.v;
+
+        *p = q;
+    }
+
+    // All extended points are now normalized, but the type
+    // doesn't encode this fact. Let us offer affine points
+    // to the caller.
+
+    v.iter().map(|p| AffinePoint { u: p.u, v: p.v })
 }
 
 #[test]
@@ -129,77 +551,3 @@ fn test_d_is_non_quadratic_residue() {
     assert!((-EDWARDS_D).sqrt_vartime().is_none());
     assert!((-EDWARDS_D).pow_q_minus_2().sqrt_vartime().is_none());
 }
-
-/*
-
-
-
-// We're going to use the "extended twisted Edwards
-// coordinates" from "Twisted Edwards Curves
-// Revisited" by Hisil, Wong, Carter and Dawson.
-//
-// See https://iacr.org/archive/asiacrypt2008/53500329/53500329.pdf
-//
-// We're going to use `u` and `v` to refer to what
-// the paper calls `x` and `y`.
-//
-// In these coordinates, the affine point `(u, v)` is
-// represented by `(U, V, T, Z)` where `U = u/Z`,
-// `V = v/Z`, `T = uv/Z` for any nonzero `Z`.
-#[derive(Clone, Copy)]
-struct Point {
-    // U = u/Z
-    u: Fq,
-    // V = v/Z
-    v: Fq,
-    // T = uv/Z
-    t: Fq,
-    z: Fq,
-}
-
-// `d = -(10240/10241)`
-#[allow(dead_code)]
-const EDWARDS_D: Fq = Fq([
-    0x2a522455b974f6b0,
-    0xfc6cc9ef0d9acab3,
-    0x7a08fb94c27628d1,
-    0x57f8f6a8fe0e262e,
-]);
-
-impl Point {
-    pub fn identity() -> Point {
-        // `(0, 1)` is the neutral element of the group;
-        // the additive identity.
-
-        Point {
-            u: Fq::zero(),
-            v: Fq::one(),
-            t: Fq::zero(),
-            z: Fq::one(),
-        }
-    }
-}
-
-impl<'a> Neg for &'a Point {
-    type Output = Point;
-
-    fn neg(self) -> Point {
-        Point {
-            u: -&self.u,
-            v: self.v,
-            t: -&self.t,
-            z: self.z,
-        }
-    }
-}
-
-impl<'b> AddAssign<&'b Point> for Point {
-    fn add_assign(&mut self, _rhs: &'b Point) {
-        // See "Twisted Edwards Curves Revisited"
-        //     Hisil, Wong, Carter, and Dawson
-        //     3.1 Unified Addition in E^e
-
-        unimplemented!()
-    }
-}
-*/
