@@ -2,10 +2,8 @@ use bellman::groth16::{
     create_random_proof, verify_proof, Parameters, PreparedVerifyingKey, Proof,
 };
 use byteorder::{LittleEndian, ReadBytesExt};
-use pairing::{
-    bls12_381::{Bls12, Fr, FrRepr},
-    Field, PrimeField, PrimeFieldRepr,
-};
+use ff::{Field, PrimeField, PrimeFieldRepr};
+use pairing::bls12_381::{Bls12, Fr, FrRepr};
 use rand::{OsRng, Rand};
 use sapling_crypto::{
     circuit::{
