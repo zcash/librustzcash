@@ -7,7 +7,7 @@ mod fr;
 use rand::{Rand, SeedableRng, XorShiftRng};
 
 use pairing::bls12_381::*;
-use pairing::{CurveAffine, Engine};
+use pairing::{Engine, PairingCurveAffine};
 
 #[bench]
 fn bench_pairing_g1_preparation(b: &mut ::test::Bencher) {
