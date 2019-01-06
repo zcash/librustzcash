@@ -92,13 +92,13 @@ impl<E: JubjubEngine> ExpandedSpendingKey<E> {
     pub fn read<R: Read>(mut reader: R) -> io::Result<Self> {
         let mut ask_repr = <E::Fs as PrimeField>::Repr::default();
         ask_repr.read_le(&mut reader)?;
-        let ask =
-            E::Fs::from_repr(ask_repr).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+        let ask = E::Fs::from_repr(ask_repr)
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
 
         let mut nsk_repr = <E::Fs as PrimeField>::Repr::default();
         nsk_repr.read_le(&mut reader)?;
-        let nsk =
-            E::Fs::from_repr(nsk_repr).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+        let nsk = E::Fs::from_repr(nsk_repr)
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
 
         let mut ovk = [0; 32];
         reader.read_exact(&mut ovk)?;
@@ -324,9 +324,11 @@ impl DiversifierKey {
             // Return (j, d_j) if valid, else increment j and try again
             match d_j.g_d::<Bls12>(&JUBJUB) {
                 Some(_) => return Ok((j, d_j)),
-                None => if j.increment().is_err() {
-                    return Err(());
-                },
+                None => {
+                    if j.increment().is_err() {
+                        return Err(());
+                    }
+                }
             }
         }
     }

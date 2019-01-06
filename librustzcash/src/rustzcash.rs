@@ -5,6 +5,7 @@ extern crate libc;
 extern crate pairing;
 extern crate rand;
 extern crate sapling_crypto;
+extern crate zcash_proofs;
 extern crate zip32;
 
 mod hashreader;
@@ -14,7 +15,7 @@ extern crate lazy_static;
 
 use pairing::{
     bls12_381::{Bls12, Fr, FrRepr},
-    BitIterator, Field, PrimeField, PrimeFieldRepr,
+    BitIterator, PrimeField, PrimeFieldRepr,
 };
 
 use sapling_crypto::{
@@ -29,9 +30,8 @@ use sapling_crypto::{
     redjubjub::{self, Signature},
 };
 
+use sapling_crypto::circuit::sapling::TREE_DEPTH as SAPLING_TREE_DEPTH;
 use sapling_crypto::circuit::sprout::{self, TREE_DEPTH as SPROUT_TREE_DEPTH};
-// TODO: make these consistent
-const SAPLING_TREE_DEPTH: usize = 32;
 
 use bellman::groth16::{
     create_random_proof, prepare_verifying_key, verify_proof, Parameters, PreparedVerifyingKey,
@@ -42,7 +42,7 @@ use blake2_rfc::blake2s::Blake2s;
 
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 
-use rand::{OsRng, Rand, Rng};
+use rand::{OsRng, Rng};
 use std::io::{self, BufReader};
 
 use libc::{c_char, c_uchar, int64_t, size_t, uint32_t, uint64_t};
@@ -61,7 +61,10 @@ use std::ffi::OsString;
 #[cfg(target_os = "windows")]
 use std::os::windows::ffi::OsStringExt;
 
-use sapling_crypto::primitives::{ProofGenerationKey, ValueCommitment, ViewingKey};
+use sapling_crypto::primitives::{ProofGenerationKey, ViewingKey};
+use zcash_proofs::sapling::{
+    CommitmentTreeWitness, SaplingProvingContext, SaplingVerificationContext,
+};
 
 pub mod equihash;
 
@@ -79,10 +82,6 @@ static mut SPROUT_GROTH16_VK: Option<PreparedVerifyingKey<Bls12>> = None;
 static mut SAPLING_SPEND_PARAMS: Option<Parameters<Bls12>> = None;
 static mut SAPLING_OUTPUT_PARAMS: Option<Parameters<Bls12>> = None;
 static mut SPROUT_GROTH16_PARAMS_PATH: Option<PathBuf> = None;
-
-fn is_small_order<Order>(p: &edwards::Point<Bls12, Order>) -> bool {
-    p.double(&JUBJUB).double(&JUBJUB).double(&JUBJUB) == edwards::Point::zero()
-}
 
 /// Writes an FrRepr to [u8] of length 32
 fn write_le(f: FrRepr, to: &mut [u8]) {
@@ -325,9 +324,10 @@ pub extern "system" fn librustzcash_merkle_hash(
             .take(Fr::NUM_BITS as usize)
             .chain(rhs.iter().map(|&x| x).take(Fr::NUM_BITS as usize)),
         &JUBJUB,
-    ).into_xy()
-        .0
-        .into_repr();
+    )
+    .into_xy()
+    .0
+    .into_repr();
 
     // Should be okay, caller is responsible for ensuring the pointer
     // is a valid pointer to 32 bytes that can be mutated.
@@ -648,16 +648,10 @@ pub extern "system" fn librustzcash_eh_isvalid(
     equihash::is_valid_solution(n, k, rs_input, rs_nonce, rs_soln)
 }
 
-pub struct SaplingVerificationContext {
-    bvk: edwards::Point<Bls12, Unknown>,
-}
-
 #[no_mangle]
 pub extern "system" fn librustzcash_sapling_verification_ctx_init(
 ) -> *mut SaplingVerificationContext {
-    let ctx = Box::new(SaplingVerificationContext {
-        bvk: edwards::Point::zero(),
-    });
+    let ctx = Box::new(SaplingVerificationContext::new());
 
     Box::into_raw(ctx)
 }
@@ -690,19 +684,6 @@ pub extern "system" fn librustzcash_sapling_check_spend(
         Err(_) => return false,
     };
 
-    if is_small_order(&cv) {
-        return false;
-    }
-
-    // Accumulate the value commitment in the context
-    {
-        let mut tmp = cv.clone();
-        tmp = tmp.add(&unsafe { &*ctx }.bvk, &JUBJUB);
-
-        // Update the context
-        unsafe { &mut *ctx }.bvk = tmp;
-    }
-
     // Deserialize the anchor, which should be an element
     // of Fr.
     let anchor = match Fr::from_repr(read_le(&(unsafe { &*anchor })[..])) {
@@ -710,23 +691,11 @@ pub extern "system" fn librustzcash_sapling_check_spend(
         Err(_) => return false,
     };
 
-    // Grab the nullifier as a sequence of bytes
-    let nullifier = &unsafe { &*nullifier }[..];
-
-    // Compute the signature's message for rk/spend_auth_sig
-    let mut data_to_be_signed = [0u8; 64];
-    (&mut data_to_be_signed[0..32]).copy_from_slice(&(unsafe { &*rk })[..]);
-    (&mut data_to_be_signed[32..64]).copy_from_slice(&(unsafe { &*sighash_value })[..]);
-
     // Deserialize rk
     let rk = match redjubjub::PublicKey::<Bls12>::read(&(unsafe { &*rk })[..], &JUBJUB) {
         Ok(p) => p,
         Err(_) => return false,
     };
-
-    if is_small_order(&rk.0) {
-        return false;
-    }
 
     // Deserialize the signature
     let spend_auth_sig = match Signature::read(&(unsafe { &*spend_auth_sig })[..]) {
@@ -734,59 +703,23 @@ pub extern "system" fn librustzcash_sapling_check_spend(
         Err(_) => return false,
     };
 
-    // Verify the spend_auth_sig
-    if !rk.verify(
-        &data_to_be_signed,
-        &spend_auth_sig,
-        FixedGenerators::SpendingKeyGenerator,
-        &JUBJUB,
-    ) {
-        return false;
-    }
-
-    // Construct public input for circuit
-    let mut public_input = [Fr::zero(); 7];
-    {
-        let (x, y) = rk.0.into_xy();
-        public_input[0] = x;
-        public_input[1] = y;
-    }
-    {
-        let (x, y) = cv.into_xy();
-        public_input[2] = x;
-        public_input[3] = y;
-    }
-    public_input[4] = anchor;
-
-    // Add the nullifier through multiscalar packing
-    {
-        let nullifier = multipack::bytes_to_bits_le(nullifier);
-        let nullifier = multipack::compute_multipacking::<Bls12>(&nullifier);
-
-        assert_eq!(nullifier.len(), 2);
-
-        public_input[5] = nullifier[0];
-        public_input[6] = nullifier[1];
-    }
-
     // Deserialize the proof
     let zkproof = match Proof::<Bls12>::read(&(unsafe { &*zkproof })[..]) {
         Ok(p) => p,
         Err(_) => return false,
     };
 
-    // Verify the proof
-    match verify_proof(
+    unsafe { &mut *ctx }.check_spend(
+        cv,
+        anchor,
+        unsafe { &*nullifier },
+        rk,
+        unsafe { &*sighash_value },
+        spend_auth_sig,
+        zkproof,
         unsafe { SAPLING_SPEND_VK.as_ref() }.unwrap(),
-        &zkproof,
-        &public_input[..],
-    ) {
-        // No error, and proof verification successful
-        Ok(true) => true,
-
-        // Any other case
-        _ => false,
-    }
+        &JUBJUB,
+    )
 }
 
 #[no_mangle]
@@ -803,20 +736,6 @@ pub extern "system" fn librustzcash_sapling_check_output(
         Err(_) => return false,
     };
 
-    if is_small_order(&cv) {
-        return false;
-    }
-
-    // Accumulate the value commitment in the context
-    {
-        let mut tmp = cv.clone();
-        tmp = tmp.negate(); // Outputs subtract from the total.
-        tmp = tmp.add(&unsafe { &*ctx }.bvk, &JUBJUB);
-
-        // Update the context
-        unsafe { &mut *ctx }.bvk = tmp;
-    }
-
     // Deserialize the commitment, which should be an element
     // of Fr.
     let cm = match Fr::from_repr(read_le(&(unsafe { &*cm })[..])) {
@@ -830,68 +749,20 @@ pub extern "system" fn librustzcash_sapling_check_output(
         Err(_) => return false,
     };
 
-    if is_small_order(&epk) {
-        return false;
-    }
-
-    // Construct public input for circuit
-    let mut public_input = [Fr::zero(); 5];
-    {
-        let (x, y) = cv.into_xy();
-        public_input[0] = x;
-        public_input[1] = y;
-    }
-    {
-        let (x, y) = epk.into_xy();
-        public_input[2] = x;
-        public_input[3] = y;
-    }
-    public_input[4] = cm;
-
     // Deserialize the proof
     let zkproof = match Proof::<Bls12>::read(&(unsafe { &*zkproof })[..]) {
         Ok(p) => p,
         Err(_) => return false,
     };
 
-    // Verify the proof
-    match verify_proof(
+    unsafe { &mut *ctx }.check_output(
+        cv,
+        cm,
+        epk,
+        zkproof,
         unsafe { SAPLING_OUTPUT_VK.as_ref() }.unwrap(),
-        &zkproof,
-        &public_input[..],
-    ) {
-        // No error, and proof verification successful
-        Ok(true) => true,
-
-        // Any other case
-        _ => false,
-    }
-}
-
-// This function computes `value` in the exponent of the value commitment base
-fn compute_value_balance(value: int64_t) -> Option<edwards::Point<Bls12, Unknown>> {
-    // Compute the absolute value (failing if -i64::MAX is
-    // the value)
-    let abs = match value.checked_abs() {
-        Some(a) => a as u64,
-        None => return None,
-    };
-
-    // Is it negative? We'll have to negate later if so.
-    let is_negative = value.is_negative();
-
-    // Compute it in the exponent
-    let mut value_balance = JUBJUB
-        .generator(FixedGenerators::ValueCommitmentValue)
-        .mul(FsRepr::from(abs), &JUBJUB);
-
-    // Negate if necessary
-    if is_negative {
-        value_balance = value_balance.negate();
-    }
-
-    // Convert to unknown order point
-    Some(value_balance.into())
+        &JUBJUB,
+    )
 }
 
 #[no_mangle]
@@ -901,43 +772,18 @@ pub extern "system" fn librustzcash_sapling_final_check(
     binding_sig: *const [c_uchar; 64],
     sighash_value: *const [c_uchar; 32],
 ) -> bool {
-    // Obtain current bvk from the context
-    let mut bvk = redjubjub::PublicKey(unsafe { &*ctx }.bvk.clone());
-
-    // Compute value balance
-    let mut value_balance = match compute_value_balance(value_balance) {
-        Some(a) => a,
-        None => return false,
-    };
-
-    // Subtract value_balance from current bvk to get final bvk
-    value_balance = value_balance.negate();
-    bvk.0 = bvk.0.add(&value_balance, &JUBJUB);
-
-    // Compute the signature's message for bvk/binding_sig
-    let mut data_to_be_signed = [0u8; 64];
-    bvk.0
-        .write(&mut data_to_be_signed[0..32])
-        .expect("bvk is 32 bytes");
-    (&mut data_to_be_signed[32..64]).copy_from_slice(&(unsafe { &*sighash_value })[..]);
-
     // Deserialize the signature
     let binding_sig = match Signature::read(&(unsafe { &*binding_sig })[..]) {
         Ok(sig) => sig,
         Err(_) => return false,
     };
 
-    // Verify the binding_sig
-    if !bvk.verify(
-        &data_to_be_signed,
-        &binding_sig,
-        FixedGenerators::ValueCommitmentRandomness,
+    unsafe { &*ctx }.final_check(
+        value_balance,
+        unsafe { &*sighash_value },
+        binding_sig,
         &JUBJUB,
-    ) {
-        return false;
-    }
-
-    true
+    )
 }
 
 #[no_mangle]
@@ -1069,7 +915,8 @@ pub extern "system" fn librustzcash_sprout_prove(
         unsafe { &SPROUT_GROTH16_PARAMS_PATH }
             .as_ref()
             .expect("parameters should have been initialized"),
-    ).expect("couldn't load Sprout groth16 parameters file");
+    )
+    .expect("couldn't load Sprout groth16 parameters file");
 
     let mut sprout_fs = BufReader::with_capacity(1024 * 1024, sprout_fs);
 
@@ -1137,11 +984,6 @@ pub extern "system" fn librustzcash_sprout_verify(
     }
 }
 
-pub struct SaplingProvingContext {
-    bsk: Fs,
-    bvk: edwards::Point<Bls12, Unknown>,
-}
-
 #[no_mangle]
 pub extern "system" fn librustzcash_sapling_output_proof(
     ctx: *mut SaplingProvingContext,
@@ -1180,69 +1022,26 @@ pub extern "system" fn librustzcash_sapling_output_proof(
         diversifier: diversifier,
     };
 
-    // Initialize secure RNG
-    let mut rng = OsRng::new().expect("should be able to construct RNG");
-
     // The caller provides the commitment randomness for the output note
     let rcm = match Fs::from_repr(read_fs(&(unsafe { &*rcm })[..])) {
         Ok(p) => p,
         Err(_) => return false,
     };
 
-    // We construct ephemeral randomness for the value commitment. This
-    // randomness is not given back to the caller, but the synthetic
-    // blinding factor `bsk` is accumulated in the context.
-    let rcv = Fs::rand(&mut rng);
-
-    // Accumulate the value commitment randomness in the context
-    {
-        let mut tmp = rcv.clone();
-        tmp.negate(); // Outputs subtract from the total.
-        tmp.add_assign(&unsafe { &*ctx }.bsk);
-
-        // Update the context
-        unsafe { &mut *ctx }.bsk = tmp;
-    }
-
-    // Construct the value commitment for the proof instance
-    let value_commitment = sapling_crypto::primitives::ValueCommitment::<Bls12> {
-        value: value,
-        randomness: rcv,
-    };
-
-    // We now have a full witness for the output proof.
-    let instance = sapling_crypto::circuit::sapling::Output {
-        params: &*JUBJUB,
-        value_commitment: Some(value_commitment.clone()),
-        payment_address: Some(payment_address.clone()),
-        commitment_randomness: Some(rcm),
-        esk: Some(esk.clone()),
-    };
-
     // Create proof
-    let proof = create_random_proof(
-        instance,
+    let (proof, value_commitment) = unsafe { &mut *ctx }.output_proof(
+        esk,
+        payment_address,
+        rcm,
+        value,
         unsafe { SAPLING_OUTPUT_PARAMS.as_ref() }.unwrap(),
-        &mut rng,
-    ).expect("proving should not fail");
+        &JUBJUB,
+    );
 
     // Write the proof out to the caller
     proof
         .write(&mut (unsafe { &mut *zkproof })[..])
         .expect("should be able to serialize a proof");
-
-    // Compute the value commitment
-    let value_commitment: edwards::Point<Bls12, Unknown> = value_commitment.cm(&JUBJUB).into();
-
-    // Accumulate the value commitment in the context. We do this to check internal consistency.
-    {
-        let mut tmp = value_commitment.clone();
-        tmp = tmp.negate(); // Outputs subtract from the total.
-        tmp = tmp.add(&unsafe { &*ctx }.bvk, &JUBJUB);
-
-        // Update the context
-        unsafe { &mut *ctx }.bvk = tmp;
-    }
 
     // Write the value commitment to the caller
     value_commitment
@@ -1280,8 +1079,7 @@ pub extern "system" fn librustzcash_sapling_spend_sig(
 
     // Compute the signature's message for rk/spend_auth_sig
     let mut data_to_be_signed = [0u8; 64];
-    rk.0
-        .write(&mut data_to_be_signed[0..32])
+    rk.0.write(&mut data_to_be_signed[0..32])
         .expect("message buffer should be 32 bytes");
     (&mut data_to_be_signed[32..64]).copy_from_slice(&(unsafe { &*sighash })[..]);
 
@@ -1308,52 +1106,11 @@ pub extern "system" fn librustzcash_sapling_binding_sig(
     sighash: *const [c_uchar; 32],
     result: *mut [c_uchar; 64],
 ) -> bool {
-    // Grab the current `bsk` from the context
-    let bsk = redjubjub::PrivateKey::<Bls12>(unsafe { &*ctx }.bsk);
-
-    // Grab the `bvk` using DerivePublic.
-    let bvk = redjubjub::PublicKey::from_private(
-        &bsk,
-        FixedGenerators::ValueCommitmentRandomness,
-        &JUBJUB,
-    );
-
-    // In order to check internal consistency, let's use the accumulated value
-    // commitments (as the verifier would) and apply valuebalance to compare
-    // against our derived bvk.
-    {
-        // Compute value balance
-        let mut value_balance = match compute_value_balance(value_balance) {
-            Some(a) => a,
-            None => return false,
-        };
-
-        // Subtract value_balance from current bvk to get final bvk
-        value_balance = value_balance.negate();
-        let mut tmp = unsafe { &*ctx }.bvk.clone();
-        tmp = tmp.add(&value_balance, &JUBJUB);
-
-        // The result should be the same, unless the provided valueBalance is wrong.
-        if bvk.0 != tmp {
-            return false;
-        }
-    }
-
-    // Construct signature message
-    let mut data_to_be_signed = [0u8; 64];
-    bvk.0
-        .write(&mut data_to_be_signed[0..32])
-        .expect("message buffer should be 32 bytes");
-    (&mut data_to_be_signed[32..64]).copy_from_slice(&(unsafe { &*sighash })[..]);
-
     // Sign
-    let mut rng = OsRng::new().expect("should be able to construct RNG");
-    let sig = bsk.sign(
-        &data_to_be_signed,
-        &mut rng,
-        FixedGenerators::ValueCommitmentRandomness,
-        &JUBJUB,
-    );
+    let sig = match unsafe { &*ctx }.binding_sig(value_balance, unsafe { &*sighash }, &JUBJUB) {
+        Ok(s) => s,
+        Err(_) => return false,
+    };
 
     // Write out signature
     sig.write(&mut (unsafe { &mut *result })[..])
@@ -1377,26 +1134,6 @@ pub extern "system" fn librustzcash_sapling_spend_proof(
     rk_out: *mut [c_uchar; 32],
     zkproof: *mut [c_uchar; GROTH_PROOF_SIZE],
 ) -> bool {
-    let mut rng = OsRng::new().expect("should be able to construct RNG");
-
-    // We create the randomness of the value commitment
-    let rcv = Fs::rand(&mut rng);
-
-    // Accumulate the value commitment randomness in the context
-    {
-        let mut tmp = rcv.clone();
-        tmp.add_assign(&unsafe { &*ctx }.bsk);
-
-        // Update the context
-        unsafe { &mut *ctx }.bsk = tmp;
-    }
-
-    // Construct the value commitment
-    let value_commitment = ValueCommitment::<Bls12> {
-        value: value,
-        randomness: rcv,
-    };
-
     // Grab `ak` from the caller, which should be a point.
     let ak = match edwards::Point::<Bls12, Unknown>::read(&(unsafe { &*ak })[..], &JUBJUB) {
         Ok(p) => p,
@@ -1421,17 +1158,8 @@ pub extern "system" fn librustzcash_sapling_spend_proof(
         nsk,
     };
 
-    // Construct the viewing key
-    let viewing_key = proof_generation_key.into_viewing_key(&JUBJUB);
-
     // Grab the diversifier from the caller
     let diversifier = sapling_crypto::primitives::Diversifier(unsafe { *diversifier });
-
-    // Construct the payment address with the viewing key / diversifier
-    let payment_address = match viewing_key.into_payment_address(diversifier, &JUBJUB) {
-        Some(p) => p,
-        None => return false,
-    };
 
     // The caller chooses the note randomness
     let rcm = match Fs::from_repr(read_fs(&(unsafe { &*rcm })[..])) {
@@ -1445,17 +1173,6 @@ pub extern "system" fn librustzcash_sapling_spend_proof(
         Err(_) => return false,
     };
 
-    // This is the result of the re-randomization, we compute it for the caller
-    let rk = redjubjub::PublicKey::<Bls12>(ak.into()).randomize(
-        ar,
-        FixedGenerators::SpendingKeyGenerator,
-        &JUBJUB,
-    );
-
-    // Write out `rk` to the caller
-    rk.write(&mut unsafe { &mut *rk_out }[..])
-        .expect("should be able to write to rk_out");
-
     // We need to compute the anchor of the Spend.
     let anchor = match Fr::from_repr(read_le(unsafe { &(&*anchor)[..] })) {
         Ok(p) => p,
@@ -1464,140 +1181,26 @@ pub extern "system" fn librustzcash_sapling_spend_proof(
 
     // The witness contains the incremental tree witness information, in a
     // weird serialized format.
-    let mut witness = unsafe { &(&*witness)[..] };
-
-    // Skip the first byte, which should be "32" to signify the length of
-    // the following vector of Pedersen hashes.
-    assert_eq!(witness[0], SAPLING_TREE_DEPTH as u8);
-    witness = &witness[1..];
-
-    // Begin to construct the authentication path
-    let mut auth_path = vec![None; SAPLING_TREE_DEPTH];
-
-    // The vector works in reverse
-    for i in (0..SAPLING_TREE_DEPTH).rev() {
-        // skip length of inner vector
-        assert_eq!(witness[0], 32); // the length of a pedersen hash
-        witness = &witness[1..];
-
-        // Grab the sibling node at this depth in the tree
-        let mut sibling = [0u8; 32];
-        sibling.copy_from_slice(&witness[0..32]);
-        witness = &witness[32..];
-
-        // Sibling node should be an element of Fr
-        let sibling = match Fr::from_repr(read_le(&sibling)) {
-            Ok(p) => p,
-            Err(_) => return false,
-        };
-
-        // Set the value in the auth path; we put false here
-        // for now (signifying the position bit) which we'll
-        // fill in later.
-        auth_path[i] = Some((sibling, false));
-    }
-
-    // Read the position from the witness
-    let mut position = witness
-        .read_u64::<LittleEndian>()
-        .expect("should have had index at the end");
-
-    // Let's compute the nullifier while we have the position
-    let note = sapling_crypto::primitives::Note {
-        value: value,
-        g_d: diversifier
-            .g_d::<Bls12>(&JUBJUB)
-            .expect("was a valid diversifier before"),
-        pk_d: payment_address.pk_d.clone(),
-        r: rcm,
-    };
-
-    let nullifier = note.nf(&viewing_key, position, &JUBJUB);
-
-    // Given the position, let's finish constructing the authentication
-    // path
-    for i in 0..SAPLING_TREE_DEPTH {
-        auth_path[i].as_mut().map(|p| p.1 = (position & 1) == 1);
-
-        position >>= 1;
-    }
-
-    // The witness should be empty now; if it wasn't, the caller would
-    // have provided more information than they should have, indicating
-    // a bug downstream
-    assert_eq!(witness.len(), 0);
-
-    // We now have the full witness for our circuit
-    let instance = sapling_crypto::circuit::sapling::Spend {
-        params: &*JUBJUB,
-        value_commitment: Some(value_commitment.clone()),
-        proof_generation_key: Some(proof_generation_key),
-        payment_address: Some(payment_address),
-        commitment_randomness: Some(rcm),
-        ar: Some(ar),
-        auth_path: auth_path,
-        anchor: Some(anchor),
+    let witness = match CommitmentTreeWitness::from_slice(unsafe { &(&*witness)[..] }) {
+        Ok(w) => w,
+        Err(_) => return false,
     };
 
     // Create proof
-    let proof = create_random_proof(
-        instance,
-        unsafe { SAPLING_SPEND_PARAMS.as_ref() }.unwrap(),
-        &mut rng,
-    ).expect("proving should not fail");
-
-    // Try to verify the proof:
-    // Construct public input for circuit
-    let mut public_input = [Fr::zero(); 7];
-    {
-        let (x, y) = rk.0.into_xy();
-        public_input[0] = x;
-        public_input[1] = y;
-    }
-    {
-        let (x, y) = value_commitment.cm(&JUBJUB).into_xy();
-        public_input[2] = x;
-        public_input[3] = y;
-    }
-    public_input[4] = anchor;
-
-    // Add the nullifier through multiscalar packing
-    {
-        let nullifier = multipack::bytes_to_bits_le(&nullifier);
-        let nullifier = multipack::compute_multipacking::<Bls12>(&nullifier);
-
-        assert_eq!(nullifier.len(), 2);
-
-        public_input[5] = nullifier[0];
-        public_input[6] = nullifier[1];
-    }
-
-    // Verify the proof
-    match verify_proof(
-        unsafe { SAPLING_SPEND_VK.as_ref() }.unwrap(),
-        &proof,
-        &public_input[..],
-    ) {
-        // No error, and proof verification successful
-        Ok(true) => {}
-
-        // Any other case
-        _ => {
-            return false;
-        }
-    }
-
-    // Compute value commitment
-    let value_commitment: edwards::Point<Bls12, Unknown> = value_commitment.cm(&JUBJUB).into();
-
-    // Accumulate the value commitment in the context
-    {
-        let mut tmp = value_commitment.clone();
-        tmp = tmp.add(&unsafe { &*ctx }.bvk, &JUBJUB);
-
-        // Update the context
-        unsafe { &mut *ctx }.bvk = tmp;
-    }
+    let (proof, value_commitment, rk) = unsafe { &mut *ctx }
+        .spend_proof(
+            proof_generation_key,
+            diversifier,
+            rcm,
+            ar,
+            value,
+            anchor,
+            witness,
+            unsafe { SAPLING_SPEND_PARAMS.as_ref() }.unwrap(),
+            unsafe { SAPLING_SPEND_VK.as_ref() }.unwrap(),
+            &JUBJUB,
+        )
+        .expect("proving should not fail");
 
     // Write value commitment to caller
     value_commitment
@@ -1609,15 +1212,16 @@ pub extern "system" fn librustzcash_sapling_spend_proof(
         .write(&mut (unsafe { &mut *zkproof })[..])
         .expect("should be able to serialize a proof");
 
+    // Write out `rk` to the caller
+    rk.write(&mut unsafe { &mut *rk_out }[..])
+        .expect("should be able to write to rk_out");
+
     true
 }
 
 #[no_mangle]
 pub extern "system" fn librustzcash_sapling_proving_ctx_init() -> *mut SaplingProvingContext {
-    let ctx = Box::new(SaplingProvingContext {
-        bsk: Fs::zero(),
-        bvk: edwards::Point::zero(),
-    });
+    let ctx = Box::new(SaplingProvingContext::new());
 
     Box::into_raw(ctx)
 }

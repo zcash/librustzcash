@@ -149,8 +149,7 @@ fn expand_array(vin: &[u8], bit_len: usize, byte_pad: usize) -> Vec<u8> {
                 vout[j + x] = ((
                     // Big-endian
                     acc_value >> (acc_bits + (8 * (out_width - x - 1)))
-                )
-                    & (
+                ) & (
                     // Apply bit_len_mask across byte boundaries
                     (bit_len_mask >> (8 * (out_width - x - 1))) & 0xFF
                 )) as u8;

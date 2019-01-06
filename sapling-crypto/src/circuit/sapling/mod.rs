@@ -31,6 +31,8 @@ use super::blake2s;
 use super::num;
 use super::multipack;
 
+pub const TREE_DEPTH: usize = 32;
+
 /// This is an instance of the `Spend` circuit.
 pub struct Spend<'a, E: JubjubEngine> {
     pub params: &'a E::Params,
