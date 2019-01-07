@@ -236,6 +236,14 @@ impl AffinePoint {
         }
     }
 
+    pub fn get_u(&self) -> Fq {
+        self.u
+    }
+
+    pub fn get_v(&self) -> Fq {
+        self.v
+    }
+
     pub fn cache(&self) -> AffineNielsPoint {
         AffineNielsPoint {
             v_plus_u: &self.v + &self.u,
