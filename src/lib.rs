@@ -6,7 +6,7 @@ extern crate std;
 
 use core::ops::{Add, AddAssign, Neg, Sub, SubAssign};
 
-use subtle::{Choice, ConditionallyAssignable, ConditionallySelectable, ConstantTimeEq};
+use subtle::{Choice, ConditionallySelectable, ConstantTimeEq};
 
 #[macro_use]
 mod util;
@@ -47,6 +47,15 @@ impl PartialEq for AffinePoint {
     }
 }
 
+impl ConditionallySelectable for AffinePoint {
+    fn conditional_select(a: &Self, b: &Self, choice: Choice) -> Self {
+        AffinePoint {
+            u: Fq::conditional_select(&a.u, &b.u, choice),
+            v: Fq::conditional_select(&a.v, &b.v, choice),
+        }
+    }
+}
+
 /// Represents the affine point `(u/z, v/z)` with
 /// `z` nonzero and `t1 * t2 = uv/z`.
 #[derive(Clone, Copy)]
@@ -66,6 +75,18 @@ impl ConstantTimeEq for ExtendedPoint {
 
         (&self.u * &other.z).ct_eq(&(&other.u * &self.z))
             & (&self.v * &other.z).ct_eq(&(&other.v * &self.z))
+    }
+}
+
+impl ConditionallySelectable for ExtendedPoint {
+    fn conditional_select(a: &Self, b: &Self, choice: Choice) -> Self {
+        ExtendedPoint {
+            u: Fq::conditional_select(&a.u, &b.u, choice),
+            v: Fq::conditional_select(&a.v, &b.v, choice),
+            z: Fq::conditional_select(&a.z, &b.z, choice),
+            t1: Fq::conditional_select(&a.t1, &b.t1, choice),
+            t2: Fq::conditional_select(&a.t2, &b.t2, choice),
+        }
     }
 }
 

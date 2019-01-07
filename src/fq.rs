@@ -2,7 +2,7 @@ use core::fmt;
 use core::ops::{Add, AddAssign, Mul, MulAssign, Neg, Sub, SubAssign};
 
 use byteorder::{ByteOrder, LittleEndian};
-use subtle::{Choice, ConditionallyAssignable, ConditionallySelectable, ConstantTimeEq};
+use subtle::{Choice, ConditionallySelectable, ConstantTimeEq};
 
 /// Represents an element of `GF(q)`.
 // The internal representation of this type is four 64-bit unsigned
