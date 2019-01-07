@@ -86,21 +86,16 @@ impl<'a> Neg for &'a Fq {
         // Subtract `self` from `MODULUS` to negate. Ignore the final
         // borrow because it cannot underflow; self is guaranteed to
         // be in the field.
-        let (mut d0, borrow) = sbb(MODULUS.0[0], self.0[0], 0);
-        let (mut d1, borrow) = sbb(MODULUS.0[1], self.0[1], borrow);
-        let (mut d2, borrow) = sbb(MODULUS.0[2], self.0[2], borrow);
-        let (mut d3, _) = sbb(MODULUS.0[3], self.0[3], borrow);
+        let (d0, borrow) = sbb(MODULUS.0[0], self.0[0], 0);
+        let (d1, borrow) = sbb(MODULUS.0[1], self.0[1], borrow);
+        let (d2, borrow) = sbb(MODULUS.0[2], self.0[2], borrow);
+        let (d3, _) = sbb(MODULUS.0[3], self.0[3], borrow);
 
         // `tmp` could be `MODULUS` if `self` was zero. Create a mask that is
         // zero if `self` was zero, and `u64::max_value()` if self was nonzero.
         let mask = u64::from((self.0[0] | self.0[1] | self.0[2] | self.0[3]) == 0).wrapping_sub(1);
 
-        d0 &= mask;
-        d1 &= mask;
-        d2 &= mask;
-        d3 &= mask;
-
-        Fq([d0, d1, d2, d3])
+        Fq([d0 & mask, d1 & mask, d2 & mask, d3 & mask])
     }
 }
 
@@ -144,13 +139,9 @@ impl<'a, 'b> Add<&'b Fq> for &'a Fq {
         let (d2, carry) = adc(self.0[2], rhs.0[2], carry);
         let (d3, _) = adc(self.0[3], rhs.0[3], carry);
 
-        let mut tmp = Fq([d0, d1, d2, d3]);
-
         // Attempt to subtract the modulus, to ensure the value
         // is smaller than the modulus.
-        tmp.sub_assign(&MODULUS);
-
-        tmp
+        Fq([d0, d1, d2, d3]) - &MODULUS
     }
 }
 
@@ -434,7 +425,7 @@ impl Fq {
     /// Exponentiates `self` by q - 2, which has the
     /// effect of inverting the element if it is
     /// nonzero.
-    pub fn pow_q_minus_2(&self) -> Self {
+    pub fn invert_nonzero(&self) -> Self {
         #[inline(always)]
         fn square_assign_multi(n: &mut Fq, num_times: usize) {
             for _ in 0..num_times {
@@ -443,49 +434,28 @@ impl Fq {
         }
         // found using https://github.com/kwantam/addchain
         let t10 = *self;
-        let mut t0 = t10;
-        t0 = t0.square();
-        let mut t1 = t0;
-        t1.mul_assign(&t10);
-        let mut t16 = t0;
-        t16 = t16.square();
-        let mut t6 = t16;
-        t6 = t6.square();
-        let mut t5 = t6;
-        t5.mul_assign(&t0);
-        let mut t0 = t6;
-        t0.mul_assign(&t16);
-        let mut t12 = t5;
-        t12.mul_assign(&t16);
-        let mut t2 = t6;
-        t2 = t2.square();
-        let mut t7 = t5;
-        t7.mul_assign(&t6);
-        let mut t15 = t0;
-        t15.mul_assign(&t5);
-        let mut t17 = t12;
-        t17 = t17.square();
+        let t0 = t10.square();
+        let mut t1 = t0 * &t10;
+        let mut t16 = t0.square();
+        let mut t6 = t16.square();
+        let t5 = t6 * &t0;
+        let mut t0 = t6 * &t16;
+        let t12 = t5 * &t16;
+        let mut t2 = t6.square();
+        let t7 = t5 * &t6;
+        let mut t15 = t0 * &t5;
+        let mut t17 = t12.square();
         t1.mul_assign(&t17);
-        let mut t3 = t7;
-        t3.mul_assign(&t2);
-        let mut t8 = t1;
-        t8.mul_assign(&t17);
-        let mut t4 = t8;
-        t4.mul_assign(&t2);
-        let mut t9 = t8;
-        t9.mul_assign(&t7);
-        let mut t7 = t4;
-        t7.mul_assign(&t5);
-        let mut t11 = t4;
-        t11.mul_assign(&t17);
-        let mut t5 = t9;
-        t5.mul_assign(&t17);
-        let mut t14 = t7;
-        t14.mul_assign(&t15);
-        let mut t13 = t11;
-        t13.mul_assign(&t12);
-        let mut t12 = t11;
-        t12.mul_assign(&t17);
+        let mut t3 = t7 * &t2;
+        let t8 = t1 * &t17;
+        let t4 = t8 * &t2;
+        let t9 = t8 * &t7;
+        let t7 = t4 * &t5;
+        let t11 = t4 * &t17;
+        let t5 = t9 * &t17;
+        let t14 = t7 * &t15;
+        let t13 = t11 * &t12;
+        let t12 = t11 * &t17;
         t15.mul_assign(&t12);
         t16.mul_assign(&t15);
         t3.mul_assign(&t16);
@@ -596,12 +566,8 @@ impl Fq {
         let (r6, carry) = mac(r6, k, MODULUS.0[3], carry);
         let (r7, _) = adc(r7, carry2, carry);
 
-        let mut tmp = Fq([r4, r5, r6, r7]);
-
         // Result may be within MODULUS of the correct value
-        tmp.sub_assign(&MODULUS);
-
-        tmp
+        Fq([r4, r5, r6, r7]) - &MODULUS
     }
 }
 
@@ -876,13 +842,13 @@ fn test_squaring() {
 
 #[test]
 fn test_inversion() {
-    assert_eq!(Fq::one().pow_q_minus_2(), Fq::one());
-    assert_eq!((-&Fq::one()).pow_q_minus_2(), -&Fq::one());
+    assert_eq!(Fq::one().invert_nonzero(), Fq::one());
+    assert_eq!((-&Fq::one()).invert_nonzero(), -&Fq::one());
 
     let mut tmp = R2;
 
     for _ in 0..100 {
-        let mut tmp2 = tmp.pow_q_minus_2();
+        let mut tmp2 = tmp.invert_nonzero();
         tmp2.mul_assign(&tmp);
 
         assert_eq!(tmp2, Fq::one());
@@ -892,7 +858,7 @@ fn test_inversion() {
 }
 
 #[test]
-fn test_pow_q_minus_2_is_pow() {
+fn test_invert_nonzero_is_pow() {
     let q_minus_2 = [
         0xfffffffeffffffff,
         0x53bda402fffe5bfe,
@@ -905,7 +871,7 @@ fn test_pow_q_minus_2_is_pow() {
     let mut r3 = R;
 
     for _ in 0..100 {
-        r1 = r1.pow_q_minus_2();
+        r1 = r1.invert_nonzero();
         r2 = r2.pow_vartime(&q_minus_2);
         r3 = r3.pow(&q_minus_2);
 
