@@ -7,15 +7,15 @@ license = "MIT/Apache-2.0"
 name = "jubjub"
 repository = "https://github.com/zkcrypto/jubjub"
 version = "0.0.0"
+edition = "2018"
 
 [dependencies.byteorder]
 version = "1"
 default-features = false
 
 [dependencies.subtle]
-version = "0.7"
+version = "2"
 default-features = false
-features = ["generic-impls"]
 
 [features]
 default = ["std"]
