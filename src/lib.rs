@@ -244,7 +244,7 @@ impl AffinePoint {
         self.v
     }
 
-    pub fn cache(&self) -> AffineNielsPoint {
+    pub fn to_niels(&self) -> AffineNielsPoint {
         AffineNielsPoint {
             v_plus_u: &self.v + &self.u,
             v_minus_u: &self.v - &self.u,
@@ -275,7 +275,7 @@ impl ExtendedPoint {
         }
     }
 
-    pub fn cache(&self) -> ExtendedNielsPoint {
+    pub fn to_niels(&self) -> ExtendedNielsPoint {
         ExtendedNielsPoint {
             v_plus_u: &self.v + &self.u,
             v_minus_u: &self.v - &self.u,
@@ -481,7 +481,7 @@ impl<'a, 'b> Add<&'b ExtendedPoint> for &'a ExtendedPoint {
 
     #[inline]
     fn add(self, other: &'b ExtendedPoint) -> ExtendedPoint {
-        self + other.cache()
+        self + other.to_niels()
     }
 }
 
@@ -490,7 +490,7 @@ impl<'a, 'b> Sub<&'b ExtendedPoint> for &'a ExtendedPoint {
 
     #[inline]
     fn sub(self, other: &'b ExtendedPoint) -> ExtendedPoint {
-        self - other.cache()
+        self - other.to_niels()
     }
 }
 
