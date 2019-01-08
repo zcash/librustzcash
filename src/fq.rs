@@ -22,6 +22,12 @@ impl fmt::Debug for Fq {
     }
 }
 
+impl From<u64> for Fq {
+    fn from(val: u64) -> Fq {
+        Fq([val, 0, 0, 0]) * R2
+    }
+}
+
 impl ConstantTimeEq for Fq {
     fn ct_eq(&self, other: &Self) -> Choice {
         self.0[0].ct_eq(&other.0[0])

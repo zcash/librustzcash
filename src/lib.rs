@@ -6,7 +6,7 @@ extern crate std;
 extern crate byteorder;
 extern crate subtle;
 
-use core::ops::{Add, AddAssign, Mul, Neg, Sub, SubAssign};
+use core::ops::{Add, AddAssign, Mul, Neg, Sub, SubAssign, MulAssign};
 
 use subtle::{Choice, ConditionallySelectable, ConstantTimeEq};
 
@@ -19,7 +19,7 @@ pub use self::fq::*;
 /// This represents an affine point `(u, v)` on the
 /// curve `-u^2 + v^2 = 1 + d.u^2.v^2` over `Fq` with
 /// `d = -(10240/10241)`.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct AffinePoint {
     u: Fq,
     v: Fq,
@@ -60,7 +60,7 @@ impl ConditionallySelectable for AffinePoint {
 
 /// Represents the affine point `(u/z, v/z)` with
 /// `z` nonzero and `t1 * t2 = uv/z`.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct ExtendedPoint {
     u: Fq,
     v: Fq,
@@ -319,6 +319,10 @@ impl ExtendedPoint {
         }
     }
 
+    pub fn mul_by_cofactor(&self) -> ExtendedPoint {
+        self.double().double().double()
+    }
+
     pub fn to_niels(&self) -> ExtendedNielsPoint {
         ExtendedNielsPoint {
             v_plus_u: &self.v + &self.u,
@@ -417,6 +421,16 @@ impl ExtendedPoint {
             t: &zz2 - &vv_minus_uu,
         }.into_extended()
     }
+
+    /// This is only for debugging purposes and not
+    /// exposed in the public API. Checks that this
+    /// point is on the curve.
+    #[cfg(test)]
+    fn is_on_curve_vartime(&self) -> bool {
+        assert!(self.z != Fq::zero());
+
+        AffinePoint::from(*self).is_on_curve_vartime()
+    }
 }
 
 // TODO: switch to Fr
@@ -434,7 +448,7 @@ impl<'a, 'b> Mul<&'b Fq> for &'a ExtendedPoint {
             .iter()
             .rev()
             .flat_map(|byte| (0..8).rev().map(move |i| Choice::from((byte >> i) & 1u8)))
-            .take(252)
+            .skip(4)
         {
             acc = acc.double();
             acc = acc + ExtendedNielsPoint::conditional_select(&zero, &base, bit);
@@ -443,6 +457,9 @@ impl<'a, 'b> Mul<&'b Fq> for &'a ExtendedPoint {
         acc
     }
 }
+
+// TODO: change to Fr
+impl_binops_multiplicative!(ExtendedPoint, Fq);
 
 impl<'a, 'b> Add<&'b ExtendedNielsPoint> for &'a ExtendedPoint {
     type Output = ExtendedPoint;
@@ -683,5 +700,19 @@ fn test_extended_niels_point_identity() {
     assert_eq!(
         ExtendedNielsPoint::identity().t2d,
         ExtendedPoint::identity().to_niels().t2d
+    );
+}
+
+#[test]
+fn test_assoc() {
+    let p = ExtendedPoint::from(AffinePoint {
+        u: Fq([0xc0115cb656ae4839, 0x623dc3ff81d64c26, 0x5868e739b5794f2c, 0x23bd4fbb18d39c9c]),
+        v: Fq([0x7588ee6d6dd40deb, 0x9d6d7a23ebdb7c4c, 0x46462e26d4edb8c7, 0x10b4c1517ca82e9b])
+    }).mul_by_cofactor();
+    assert!(p.is_on_curve_vartime());
+
+    assert_eq!(
+        (p * Fq::from(1000u64)) * Fq::from(3938u64),
+        p * (Fq::from(1000u64) * Fq::from(3938u64)),
     );
 }
