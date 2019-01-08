@@ -1,3 +1,24 @@
+/// Compute a + b + carry, returning the result and the new carry over.
+#[inline(always)]
+pub fn adc(a: u64, b: u64, carry: u64) -> (u64, u64) {
+    let ret = u128::from(a) + u128::from(b) + u128::from(carry);
+    (ret as u64, (ret >> 64) as u64)
+}
+
+/// Compute a - (b + borrow), returning the result and the new borrow.
+#[inline(always)]
+pub fn sbb(a: u64, b: u64, borrow: u64) -> (u64, u64) {
+    let ret = u128::from(a).wrapping_sub(u128::from(b) + u128::from(borrow >> 63));
+    (ret as u64, (ret >> 64) as u64)
+}
+
+/// Compute a + (b * c) + carry, returning the result and the new carry over.
+#[inline(always)]
+pub fn mac(a: u64, b: u64, c: u64, carry: u64) -> (u64, u64) {
+    let ret = u128::from(a) + (u128::from(b) * u128::from(c)) + u128::from(carry);
+    (ret as u64, (ret >> 64) as u64)
+}
+
 macro_rules! impl_binops_additive {
     ($lhs:ident, $rhs:ident) => {
         impl<'b> Sub<&'b $rhs> for $lhs {

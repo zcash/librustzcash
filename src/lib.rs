@@ -14,7 +14,9 @@ use subtle::{Choice, ConditionallySelectable, ConstantTimeEq};
 mod util;
 
 mod fq;
+mod fr;
 pub use self::fq::*;
+pub use self::fr::*;
 
 /// This represents an affine point `(u, v)` on the
 /// curve `-u^2 + v^2 = 1 + d.u^2.v^2` over `Fq` with
