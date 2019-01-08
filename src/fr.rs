@@ -178,18 +178,6 @@ const R2: Fr = Fr([
     0x04f6547b8d127688,
 ]);
 
-const S: u32 = 1;
-
-/// GENERATOR^t where t * 2^s + 1 = r
-/// with t odd. In other words, this
-/// is a 2^s root of unity.
-const ROOT_OF_UNITY: Fr = Fr([
-    0xd0970e5ed6f72cb6,
-    0xa6682093ccc81082,
-    0x06673b0101343b00,
-    0x0e7db4ea6533afa9,
-]);
-
 impl Default for Fr {
     fn default() -> Self {
         Self::zero()
@@ -289,73 +277,25 @@ impl Fr {
         Fr::montgomery_reduce(r0, r1, r2, r3, r4, r5, r6, r7)
     }
 
-    fn legendre_symbol_vartime(&self) -> Self {
-        // Legendre symbol computed via Euler's criterion:
-        // self^((r - 1) // 2)
-        self.pow_vartime(&[
-            0x684b872f6b7b965b,
-            0x53341049e6640841,
-            0x83339d80809a1d80,
-            0x073eda753299d7d4,
-        ])
-    }
-
     /// Computes the square root of this element, if it exists.
     ///
     /// **This operation is variable time.**
     pub fn sqrt_vartime(&self) -> Option<Self> {
-        let legendre_symbol = self.legendre_symbol_vartime();
-
-        if legendre_symbol == Self::zero() {
-            Some(*self)
-        } else if legendre_symbol != Self::one() {
+        // Because r = 3 (mod 4)
+        // sqrt can be done with only one exponentiation,
+        // via the computation of  self^((r + 1) // 4) (mod r)
+        // a1 = self^((r - 3) // 4)
+        let a1 = self.pow_vartime(&[
+            0xb425c397b5bdcb2d,
+            0x299a0824f3320420,
+            0x4199cec0404d0ec0,
+            0x039f6d3a994cebea,
+        ]);
+        let a0 = a1 * (a1 * self);
+        if a0 == -Self::one() {
             None
         } else {
-            // Tonelli-Shank's algorithm for r mod 16 = 1
-            // https://eprint.iacr.org/2012/685.pdf (page 12, algorithm 5)
-
-            // Initialize c to the 2^s root of unity
-            let mut c = ROOT_OF_UNITY;
-
-            // r = self^((t + 1) // 2)
-            let mut r = self.pow_vartime(&[
-                0xb425c397b5bdcb2e,
-                0x299a0824f3320420,
-                0x4199cec0404d0ec0,
-                0x039f6d3a994cebea,
-            ]);
-
-            // t = self^t
-            let mut t = self.pow_vartime(&[
-                0x684b872f6b7b965b,
-                0x53341049e6640841,
-                0x83339d80809a1d80,
-                0x073eda753299d7d4,
-            ]);
-
-            let mut m = S;
-
-            while t != Self::one() {
-                let mut i = 1;
-                {
-                    let mut t2i = t.square();
-                    while t2i != Self::one() {
-                        t2i = t2i.square();
-                        i += 1;
-                    }
-                }
-
-                for _ in 0..(m - i - 1) {
-                    c = c.square();
-                }
-
-                r *= &c;
-                c = c.square();
-                t *= &c;
-                m = i;
-            }
-
-            Some(r)
+            Some(a1 * self)
         }
     }
 
@@ -859,4 +799,29 @@ fn test_invert_nonzero_is_pow() {
         r2 = r1;
         r3 = r1;
     }
+}
+
+#[test]
+fn test_sqrt() {
+    let mut square = Fr([
+        // r - 2
+        0xd0970e5ed6f72cb5,
+        0xa6682093ccc81082,
+        0x06673b0101343b00,
+        0x0e7db4ea6533afa9,
+    ]);
+
+    let mut none_count = 0;
+
+    for _ in 0..100 {
+        let square_root = square.sqrt_vartime();
+        if square_root.is_none() {
+            none_count += 1;
+        } else {
+            assert_eq!(square_root.unwrap() * square_root.unwrap(), square);
+        }
+        square -= Fr::one();
+    }
+
+    assert_eq!(47, none_count);
 }
