@@ -3,6 +3,8 @@
 #[cfg(feature = "std")]
 #[macro_use]
 extern crate std;
+extern crate byteorder;
+extern crate subtle;
 
 use core::ops::{Add, AddAssign, Mul, Neg, Sub, SubAssign};
 
@@ -127,7 +129,7 @@ impl From<ExtendedPoint> for AffinePoint {
     fn from(extended: ExtendedPoint) -> AffinePoint {
         // Z coordinate is always nonzero, so this is
         // its inverse.
-        let zinv = extended.z.pow_q_minus_2();
+        let zinv = extended.z.invert_nonzero();
 
         AffinePoint {
             u: extended.u * &zinv,
@@ -260,7 +262,7 @@ impl AffinePoint {
 
                 let v2 = v.square();
 
-                match ((v2 - Fq::one()) * (Fq::one() + EDWARDS_D * &v2).pow_q_minus_2())
+                match ((v2 - Fq::one()) * (Fq::one() + EDWARDS_D * &v2).invert_nonzero())
                     .sqrt_vartime()
                 {
                     Some(mut u) => {
@@ -608,7 +610,7 @@ pub fn batch_normalize<'a>(v: &'a mut [ExtendedPoint]) -> impl Iterator<Item = A
     }
 
     // This is the inverse, as all z-coordinates are nonzero.
-    acc = acc.pow_q_minus_2();
+    acc = acc.invert_nonzero();
 
     for p in v.iter_mut().rev() {
         let mut q = *p;
@@ -645,7 +647,7 @@ fn test_is_on_curve_var() {
 fn test_d_is_non_quadratic_residue() {
     assert!(EDWARDS_D.sqrt_vartime().is_none());
     assert!((-EDWARDS_D).sqrt_vartime().is_none());
-    assert!((-EDWARDS_D).pow_q_minus_2().sqrt_vartime().is_none());
+    assert!((-EDWARDS_D).invert_nonzero().sqrt_vartime().is_none());
 }
 
 #[test]

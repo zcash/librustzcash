@@ -40,7 +40,7 @@ fn bench_square_assign(bencher: &mut Bencher) {
 }
 
 #[bench]
-fn bench_pow_q_minus_2(bencher: &mut Bencher) {
+fn bench_invert_nonzero(bencher: &mut Bencher) {
     let n = Fq::one();
-    bencher.iter(move || n.pow_q_minus_2());
+    bencher.iter(move || n.invert_nonzero());
 }
