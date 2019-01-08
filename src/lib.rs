@@ -4,7 +4,7 @@
 #[macro_use]
 extern crate std;
 
-use core::ops::{Add, AddAssign, Neg, Sub, SubAssign};
+use core::ops::{Add, AddAssign, Mul, Neg, Sub, SubAssign};
 
 use subtle::{Choice, ConditionallySelectable, ConstantTimeEq};
 
@@ -143,12 +143,54 @@ pub struct AffineNielsPoint {
     t2d: Fq,
 }
 
+impl AffineNielsPoint {
+    pub fn identity() -> Self {
+        AffineNielsPoint {
+            v_plus_u: Fq::one(),
+            v_minus_u: Fq::one(),
+            t2d: Fq::zero(),
+        }
+    }
+}
+
+impl ConditionallySelectable for AffineNielsPoint {
+    fn conditional_select(a: &Self, b: &Self, choice: Choice) -> Self {
+        AffineNielsPoint {
+            v_plus_u: Fq::conditional_select(&a.v_plus_u, &b.v_plus_u, choice),
+            v_minus_u: Fq::conditional_select(&a.v_minus_u, &b.v_minus_u, choice),
+            t2d: Fq::conditional_select(&a.t2d, &b.t2d, choice),
+        }
+    }
+}
+
 #[derive(Clone, Copy)]
 pub struct ExtendedNielsPoint {
     v_plus_u: Fq,
     v_minus_u: Fq,
     z: Fq,
     t2d: Fq,
+}
+
+impl ConditionallySelectable for ExtendedNielsPoint {
+    fn conditional_select(a: &Self, b: &Self, choice: Choice) -> Self {
+        ExtendedNielsPoint {
+            v_plus_u: Fq::conditional_select(&a.v_plus_u, &b.v_plus_u, choice),
+            v_minus_u: Fq::conditional_select(&a.v_minus_u, &b.v_minus_u, choice),
+            z: Fq::conditional_select(&a.z, &b.z, choice),
+            t2d: Fq::conditional_select(&a.t2d, &b.t2d, choice),
+        }
+    }
+}
+
+impl ExtendedNielsPoint {
+    pub fn identity() -> Self {
+        ExtendedNielsPoint {
+            v_plus_u: Fq::one(),
+            v_minus_u: Fq::one(),
+            z: Fq::one(),
+            t2d: Fq::zero(),
+        }
+    }
 }
 
 // `d = -(10240/10241)`
@@ -375,6 +417,31 @@ impl ExtendedPoint {
     }
 }
 
+// TODO: switch to Fr
+impl<'a, 'b> Mul<&'b Fq> for &'a ExtendedPoint {
+    type Output = ExtendedPoint;
+
+    fn mul(self, other: &'b Fq) -> ExtendedPoint {
+        let zero = ExtendedPoint::identity().to_niels();
+        let base = self.to_niels();
+
+        let mut acc = ExtendedPoint::identity();
+
+        for bit in other
+            .into_bytes()
+            .iter()
+            .rev()
+            .flat_map(|byte| (0..8).rev().map(move |i| Choice::from((byte >> i) & 1u8)))
+            .take(252)
+        {
+            acc = acc.double();
+            acc = acc + ExtendedNielsPoint::conditional_select(&zero, &base, bit);
+        }
+
+        acc
+    }
+}
+
 impl<'a, 'b> Add<&'b ExtendedNielsPoint> for &'a ExtendedPoint {
     type Output = ExtendedPoint;
 
@@ -579,4 +646,40 @@ fn test_d_is_non_quadratic_residue() {
     assert!(EDWARDS_D.sqrt_vartime().is_none());
     assert!((-EDWARDS_D).sqrt_vartime().is_none());
     assert!((-EDWARDS_D).pow_q_minus_2().sqrt_vartime().is_none());
+}
+
+#[test]
+fn test_affine_niels_point_identity() {
+    assert_eq!(
+        AffineNielsPoint::identity().v_plus_u,
+        AffinePoint::identity().to_niels().v_plus_u
+    );
+    assert_eq!(
+        AffineNielsPoint::identity().v_minus_u,
+        AffinePoint::identity().to_niels().v_minus_u
+    );
+    assert_eq!(
+        AffineNielsPoint::identity().t2d,
+        AffinePoint::identity().to_niels().t2d
+    );
+}
+
+#[test]
+fn test_extended_niels_point_identity() {
+    assert_eq!(
+        ExtendedNielsPoint::identity().v_plus_u,
+        ExtendedPoint::identity().to_niels().v_plus_u
+    );
+    assert_eq!(
+        ExtendedNielsPoint::identity().v_minus_u,
+        ExtendedPoint::identity().to_niels().v_minus_u
+    );
+    assert_eq!(
+        ExtendedNielsPoint::identity().z,
+        ExtendedPoint::identity().to_niels().z
+    );
+    assert_eq!(
+        ExtendedNielsPoint::identity().t2d,
+        ExtendedPoint::identity().to_niels().t2d
+    );
 }
