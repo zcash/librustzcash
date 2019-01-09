@@ -427,9 +427,11 @@ impl ExtendedPoint {
     /// point is on the curve.
     #[cfg(test)]
     fn is_on_curve_vartime(&self) -> bool {
-        assert!(self.z != Fq::zero());
+        let affine = AffinePoint::from(*self);
 
-        AffinePoint::from(*self).is_on_curve_vartime()
+        self.z != Fq::zero() &&
+            affine.is_on_curve_vartime() &&
+            (affine.u * affine.v * self.z == self.t1 * self.t2)
     }
 }
 
@@ -715,4 +717,37 @@ fn test_assoc() {
         (p * Fq::from(1000u64)) * Fq::from(3938u64),
         p * (Fq::from(1000u64) * Fq::from(3938u64)),
     );
+}
+
+#[cfg(feature = "std")]
+#[test]
+fn test_batch_normalize() {
+    let mut p = ExtendedPoint::from(AffinePoint {
+        u: Fq([0xc0115cb656ae4839, 0x623dc3ff81d64c26, 0x5868e739b5794f2c, 0x23bd4fbb18d39c9c]),
+        v: Fq([0x7588ee6d6dd40deb, 0x9d6d7a23ebdb7c4c, 0x46462e26d4edb8c7, 0x10b4c1517ca82e9b])
+    }).mul_by_cofactor();
+
+    let mut v = vec![];
+    for _ in 0..10 {
+        v.push(p);
+        p = p.double();
+    }
+
+    for p in &v {
+        assert!(p.is_on_curve_vartime());
+    }
+
+    let expected: std::vec::Vec<_> = v.iter().map(|p| AffinePoint::from(*p)).collect();
+    let result1: std::vec::Vec<_> = batch_normalize(&mut v).collect();
+    for i in 0..10 {
+        assert!(expected[i] == result1[i]);
+        assert!(v[i].is_on_curve_vartime());
+        assert!(AffinePoint::from(v[i]) == expected[i]);
+    }
+    let result2: std::vec::Vec<_> = batch_normalize(&mut v).collect();
+    for i in 0..10 {
+        assert!(expected[i] == result2[i]);
+        assert!(v[i].is_on_curve_vartime());
+        assert!(AffinePoint::from(v[i]) == expected[i]);
+    }
 }
