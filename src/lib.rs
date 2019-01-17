@@ -6,7 +6,7 @@ extern crate std;
 extern crate byteorder;
 extern crate subtle;
 
-use core::ops::{Add, AddAssign, Mul, Neg, Sub, SubAssign, MulAssign};
+use core::ops::{Add, AddAssign, Mul, MulAssign, Neg, Sub, SubAssign};
 
 use subtle::{Choice, ConditionallySelectable, ConstantTimeEq};
 
@@ -14,7 +14,9 @@ use subtle::{Choice, ConditionallySelectable, ConstantTimeEq};
 mod util;
 
 mod fq;
+mod fr;
 pub use self::fq::*;
+pub use self::fr::*;
 
 /// This represents an affine point `(u, v)` on the
 /// curve `-u^2 + v^2 = 1 + d.u^2.v^2` over `Fq` with
@@ -419,7 +421,8 @@ impl ExtendedPoint {
             v: vv_plus_uu,
             z: vv_minus_uu,
             t: &zz2 - &vv_minus_uu,
-        }.into_extended()
+        }
+        .into_extended()
     }
 
     /// This is only for debugging purposes and not
@@ -429,17 +432,16 @@ impl ExtendedPoint {
     fn is_on_curve_vartime(&self) -> bool {
         let affine = AffinePoint::from(*self);
 
-        self.z != Fq::zero() &&
-            affine.is_on_curve_vartime() &&
-            (affine.u * affine.v * self.z == self.t1 * self.t2)
+        self.z != Fq::zero()
+            && affine.is_on_curve_vartime()
+            && (affine.u * affine.v * self.z == self.t1 * self.t2)
     }
 }
 
-// TODO: switch to Fr
-impl<'a, 'b> Mul<&'b Fq> for &'a ExtendedPoint {
+impl<'a, 'b> Mul<&'b Fr> for &'a ExtendedPoint {
     type Output = ExtendedPoint;
 
-    fn mul(self, other: &'b Fq) -> ExtendedPoint {
+    fn mul(self, other: &'b Fr) -> ExtendedPoint {
         let zero = ExtendedPoint::identity().to_niels();
         let base = self.to_niels();
 
@@ -460,8 +462,7 @@ impl<'a, 'b> Mul<&'b Fq> for &'a ExtendedPoint {
     }
 }
 
-// TODO: change to Fr
-impl_binops_multiplicative!(ExtendedPoint, Fq);
+impl_binops_multiplicative!(ExtendedPoint, Fr);
 
 impl<'a, 'b> Add<&'b ExtendedNielsPoint> for &'a ExtendedPoint {
     type Output = ExtendedPoint;
@@ -496,7 +497,8 @@ impl<'a, 'b> Add<&'b ExtendedNielsPoint> for &'a ExtendedPoint {
             v: &b + &a,
             z: &d + &c,
             t: &d - &c,
-        }.into_extended()
+        }
+        .into_extended()
     }
 }
 
@@ -514,7 +516,8 @@ impl<'a, 'b> Sub<&'b ExtendedNielsPoint> for &'a ExtendedPoint {
             v: &b + &a,
             z: &d - &c,
             t: &d + &c,
-        }.into_extended()
+        }
+        .into_extended()
     }
 }
 
@@ -540,7 +543,8 @@ impl<'a, 'b> Add<&'b AffineNielsPoint> for &'a ExtendedPoint {
             v: &b + &a,
             z: &d + &c,
             t: &d - &c,
-        }.into_extended()
+        }
+        .into_extended()
     }
 }
 
@@ -558,7 +562,8 @@ impl<'a, 'b> Sub<&'b AffineNielsPoint> for &'a ExtendedPoint {
             v: &b + &a,
             z: &d - &c,
             t: &d + &c,
-        }.into_extended()
+        }
+        .into_extended()
     }
 }
 
@@ -708,14 +713,25 @@ fn test_extended_niels_point_identity() {
 #[test]
 fn test_assoc() {
     let p = ExtendedPoint::from(AffinePoint {
-        u: Fq([0xc0115cb656ae4839, 0x623dc3ff81d64c26, 0x5868e739b5794f2c, 0x23bd4fbb18d39c9c]),
-        v: Fq([0x7588ee6d6dd40deb, 0x9d6d7a23ebdb7c4c, 0x46462e26d4edb8c7, 0x10b4c1517ca82e9b])
-    }).mul_by_cofactor();
+        u: Fq([
+            0xc0115cb656ae4839,
+            0x623dc3ff81d64c26,
+            0x5868e739b5794f2c,
+            0x23bd4fbb18d39c9c,
+        ]),
+        v: Fq([
+            0x7588ee6d6dd40deb,
+            0x9d6d7a23ebdb7c4c,
+            0x46462e26d4edb8c7,
+            0x10b4c1517ca82e9b,
+        ]),
+    })
+    .mul_by_cofactor();
     assert!(p.is_on_curve_vartime());
 
     assert_eq!(
-        (p * Fq::from(1000u64)) * Fq::from(3938u64),
-        p * (Fq::from(1000u64) * Fq::from(3938u64)),
+        (p * Fr::from(1000u64)) * Fr::from(3938u64),
+        p * (Fr::from(1000u64) * Fr::from(3938u64)),
     );
 }
 
@@ -723,9 +739,20 @@ fn test_assoc() {
 #[test]
 fn test_batch_normalize() {
     let mut p = ExtendedPoint::from(AffinePoint {
-        u: Fq([0xc0115cb656ae4839, 0x623dc3ff81d64c26, 0x5868e739b5794f2c, 0x23bd4fbb18d39c9c]),
-        v: Fq([0x7588ee6d6dd40deb, 0x9d6d7a23ebdb7c4c, 0x46462e26d4edb8c7, 0x10b4c1517ca82e9b])
-    }).mul_by_cofactor();
+        u: Fq([
+            0xc0115cb656ae4839,
+            0x623dc3ff81d64c26,
+            0x5868e739b5794f2c,
+            0x23bd4fbb18d39c9c,
+        ]),
+        v: Fq([
+            0x7588ee6d6dd40deb,
+            0x9d6d7a23ebdb7c4c,
+            0x46462e26d4edb8c7,
+            0x10b4c1517ca82e9b,
+        ]),
+    })
+    .mul_by_cofactor();
 
     let mut v = vec![];
     for _ in 0..10 {
@@ -750,4 +777,43 @@ fn test_batch_normalize() {
         assert!(v[i].is_on_curve_vartime());
         assert!(AffinePoint::from(v[i]) == expected[i]);
     }
+}
+
+#[test]
+fn test_mul_consistency() {
+    let a = Fr([
+        0x21e61211d9934f2e,
+        0xa52c058a693c3e07,
+        0x9ccb77bfb12d6360,
+        0x07df2470ec94398e,
+    ]);
+    let b = Fr([
+        0x03336d1cbe19dbe0,
+        0x0153618f6156a536,
+        0x2604c9e1fc3c6b15,
+        0x04ae581ceb028720,
+    ]);
+    let c = Fr([
+        0xd7abf5bb24683f4c,
+        0x9d7712cc274b7c03,
+        0x973293db9683789f,
+        0x0b677e29380a97a7,
+    ]);
+    assert_eq!(a * b, c);
+    let p = ExtendedPoint::from(AffinePoint {
+        u: Fq([
+            0xc0115cb656ae4839,
+            0x623dc3ff81d64c26,
+            0x5868e739b5794f2c,
+            0x23bd4fbb18d39c9c,
+        ]),
+        v: Fq([
+            0x7588ee6d6dd40deb,
+            0x9d6d7a23ebdb7c4c,
+            0x46462e26d4edb8c7,
+            0x10b4c1517ca82e9b,
+        ]),
+    })
+    .mul_by_cofactor();
+    assert_eq!(p * c, (p * a) * b);
 }
