@@ -162,6 +162,7 @@ pub fn scan_block(
             wtxs.push((
                 WalletTx {
                     txid,
+                    index: tx.index as usize,
                     num_spends,
                     num_outputs,
                     shielded_spends,
@@ -269,7 +270,11 @@ mod tests {
         cb.set_height(height as u64);
 
         // Add a random Sapling tx before ours
-        cb.vtx.push(random_compact_tx(&mut rng));
+        {
+            let mut tx = random_compact_tx(&mut rng);
+            tx.index = cb.vtx.len() as u64;
+            cb.vtx.push(tx);
+        }
 
         let mut cspend = CompactSpend::new();
         cspend.set_nf(nf.to_vec());
@@ -283,6 +288,7 @@ mod tests {
         ctx.set_hash(txid);
         ctx.spends.push(cspend);
         ctx.outputs.push(cout);
+        ctx.index = cb.vtx.len() as u64;
         cb.vtx.push(ctx);
 
         cb
@@ -301,6 +307,7 @@ mod tests {
         assert_eq!(txs.len(), 1);
 
         let (tx, new_witnesses) = &txs[0];
+        assert_eq!(tx.index, 1);
         assert_eq!(tx.num_spends, 1);
         assert_eq!(tx.num_outputs, 1);
         assert_eq!(tx.shielded_spends.len(), 0);
@@ -329,6 +336,7 @@ mod tests {
         assert_eq!(txs.len(), 1);
 
         let (tx, new_witnesses) = &txs[0];
+        assert_eq!(tx.index, 1);
         assert_eq!(tx.num_spends, 1);
         assert_eq!(tx.num_outputs, 1);
         assert_eq!(tx.shielded_spends.len(), 1);

@@ -13,6 +13,7 @@ use zcash_primitives::{
 /// [`Transaction`]: zcash_primitives::transaction::Transaction
 pub struct WalletTx {
     pub txid: TxId,
+    pub index: usize,
     pub num_spends: usize,
     pub num_outputs: usize,
     pub shielded_spends: Vec<WalletShieldedSpend>,
