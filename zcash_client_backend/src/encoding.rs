@@ -10,7 +10,10 @@ use sapling_crypto::{
     primitives::{Diversifier, PaymentAddress},
 };
 use std::io::{self, Write};
-use zcash_primitives::JUBJUB;
+use zcash_primitives::{
+    zip32::{ExtendedFullViewingKey, ExtendedSpendingKey},
+    JUBJUB,
+};
 
 fn bech32_encode<F>(hrp: &str, write: F) -> String
 where
@@ -36,6 +39,60 @@ where
     } else {
         Ok(None)
     }
+}
+
+/// Writes an [`ExtendedSpendingKey`] as a Bech32-encoded string.
+///
+/// # Examples
+///
+/// ```
+/// use zcash_client_backend::{
+///     constants::testnet::{COIN_TYPE, HRP_SAPLING_EXTENDED_SPENDING_KEY},
+///     encoding::encode_extended_spending_key,
+///     keys::spending_key,
+/// };
+///
+/// let extsk = spending_key(&[0; 32][..], COIN_TYPE, 0);
+/// let encoded = encode_extended_spending_key(HRP_SAPLING_EXTENDED_SPENDING_KEY, &extsk);
+/// ```
+pub fn encode_extended_spending_key(hrp: &str, extsk: &ExtendedSpendingKey) -> String {
+    bech32_encode(hrp, |w| extsk.write(w))
+}
+
+/// Decodes an [`ExtendedSpendingKey`] from a Bech32-encoded string.
+pub fn decode_extended_spending_key(
+    hrp: &str,
+    s: &str,
+) -> Result<Option<ExtendedSpendingKey>, Error> {
+    bech32_decode(hrp, s, |data| ExtendedSpendingKey::read(&data[..]).ok())
+}
+
+/// Writes an [`ExtendedFullViewingKey`] as a Bech32-encoded string.
+///
+/// # Examples
+///
+/// ```
+/// use zcash_client_backend::{
+///     constants::testnet::{COIN_TYPE, HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY},
+///     encoding::encode_extended_full_viewing_key,
+///     keys::spending_key,
+/// };
+/// use zcash_primitives::zip32::ExtendedFullViewingKey;
+///
+/// let extsk = spending_key(&[0; 32][..], COIN_TYPE, 0);
+/// let extfvk = ExtendedFullViewingKey::from(&extsk);
+/// let encoded = encode_extended_full_viewing_key(HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY, &extfvk);
+/// ```
+pub fn encode_extended_full_viewing_key(hrp: &str, extfvk: &ExtendedFullViewingKey) -> String {
+    bech32_encode(hrp, |w| extfvk.write(w))
+}
+
+/// Decodes an [`ExtendedFullViewingKey`] from a Bech32-encoded string.
+pub fn decode_extended_full_viewing_key(
+    hrp: &str,
+    s: &str,
+) -> Result<Option<ExtendedFullViewingKey>, Error> {
+    bech32_decode(hrp, s, |data| ExtendedFullViewingKey::read(&data[..]).ok())
 }
 
 /// Writes a [`PaymentAddress`] as a Bech32-encoded string.
