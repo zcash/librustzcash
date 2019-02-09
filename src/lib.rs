@@ -3,11 +3,8 @@
 #[cfg(feature = "std")]
 #[macro_use]
 extern crate std;
-extern crate byteorder;
-extern crate subtle;
 
 use core::ops::{Add, AddAssign, Mul, MulAssign, Neg, Sub, SubAssign};
-
 use subtle::{Choice, ConditionallySelectable, ConstantTimeEq};
 
 #[macro_use]
