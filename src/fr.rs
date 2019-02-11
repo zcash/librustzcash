@@ -184,6 +184,14 @@ const R2: Fr = Fr([
     0x04f6547b8d127688,
 ]);
 
+/// R^2 = 2^768 mod r
+const R3: Fr = Fr([
+    0xe0d6c6563d830544,
+    0x323e3883598d0f85,
+    0xf0fea3004c2e2ba8,
+    0x05874f84946737ec
+]);
+
 impl Default for Fr {
     fn default() -> Self {
         Self::zero()
@@ -250,6 +258,39 @@ impl Fr {
         LittleEndian::write_u64(&mut res[24..32], tmp.0[3]);
 
         res
+    }
+
+    pub fn from_bytes_wide(bytes: [u8; 64]) -> Fr {
+        Fr::from_u512([
+            LittleEndian::read_u64(&bytes[0..8]),
+            LittleEndian::read_u64(&bytes[8..16]),
+            LittleEndian::read_u64(&bytes[16..24]),
+            LittleEndian::read_u64(&bytes[24..32]),
+            LittleEndian::read_u64(&bytes[32..40]),
+            LittleEndian::read_u64(&bytes[40..48]),
+            LittleEndian::read_u64(&bytes[48..56]),
+            LittleEndian::read_u64(&bytes[56..64]),
+        ])
+    }
+
+    fn from_u512(limbs: [u64; 8]) -> Fr {
+        // We reduce an arbitrary 512-bit number by decomposing it into two 256-bit digits
+        // with the higher bits multiplied by 2^256. Thus, we perform two reductions
+        //
+        // 1. the lower bits are multiplied by R^2, as normal
+        // 2. the upper bits are multiplied by R^2 * 2^256 = R^3
+        //
+        // and computing their sum in the field. It remains to see that arbitrary 256-bit
+        // numbers can be placed into Montgomery form safely using the reduction. The
+        // reduction works so long as the product is less than R=2^256 multipled by
+        // the modulus. This holds because for any `c` smaller than the modulus, we have
+        // that (2^256 - 1)*c is an acceptable product for the reduction. Therefore, the
+        // reduction always works so long as `c` is in the field; in this case it is either the
+        // constant `R2` or `R3`.
+        let d1 = Fr([limbs[4], limbs[5], limbs[6], limbs[7]]) - &MODULUS;
+        let d0 = Fr([limbs[0], limbs[1], limbs[2], limbs[3]]) - &MODULUS;
+        // Convert to Montgomery form
+        d1 * R3 + d0 * R2
     }
 
     /// Squares this element.
@@ -645,6 +686,66 @@ fn test_from_bytes_vartime() {
             183, 44, 247, 214, 94, 14, 151, 208, 130, 16, 200, 204, 147, 32, 104, 166, 0, 59, 52,
             1, 1, 59, 103, 6, 169, 175, 51, 101, 234, 180, 125, 15
         ]).is_none()
+    );
+}
+
+#[test]
+fn test_from_u512_zero() {
+    assert_eq!(
+        Fr::zero(),
+        Fr::from_u512([
+            MODULUS.0[0],
+            MODULUS.0[1],
+            MODULUS.0[2],
+            MODULUS.0[3],
+            0,
+            0,
+            0,
+            0
+        ])
+    );
+}
+
+#[test]
+fn test_from_u512_r() {
+    assert_eq!(R, Fr::from_u512([1, 0, 0, 0, 0, 0, 0, 0]));
+}
+
+#[test]
+fn test_from_u512_r2() {
+    assert_eq!(R2, Fr::from_u512([0, 0, 0, 0, 1, 0, 0, 0]));
+}
+
+#[test]
+fn test_from_u512_max() {
+    let max_u64 = 0xffffffffffffffff;
+    assert_eq!(
+        R3 - R,
+        Fr::from_u512([max_u64, max_u64, max_u64, max_u64, max_u64, max_u64, max_u64, max_u64])
+    );
+}
+
+#[test]
+fn test_from_bytes_wide_r2() {
+    assert_eq!(
+        R2,
+        Fr::from_bytes_wide([
+            217, 7, 150, 185, 179, 11, 248, 37, 80, 231, 182, 102, 47, 214, 21, 243, 244, 20, 136,
+            235, 238, 20, 37, 147, 198, 85, 145, 71, 111, 252, 166, 9, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        ])
+    );
+}
+
+#[test]
+fn test_from_bytes_wide_negative_one() {
+    assert_eq!(
+        -&Fr::one(),
+        Fr::from_bytes_wide([
+            182, 44, 247, 214, 94, 14, 151, 208, 130, 16, 200, 204, 147, 32, 104, 166, 0, 59, 52,
+            1, 1, 59, 103, 6, 169, 175, 51, 101, 234, 180, 125, 14, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        ])
     );
 }
 
