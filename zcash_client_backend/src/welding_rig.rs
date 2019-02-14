@@ -29,6 +29,7 @@ fn scan_output(
     spent_from_accounts: &HashSet<usize>,
     tree: &mut CommitmentTree<Node>,
     existing_witnesses: &mut [&mut IncrementalWitness<Node>],
+    block_witnesses: &mut [&mut IncrementalWitness<Node>],
     new_witnesses: &mut [IncrementalWitness<Node>],
 ) -> Option<(WalletShieldedOutput, IncrementalWitness<Node>)> {
     let mut repr = FrRepr::default();
@@ -53,6 +54,9 @@ fn scan_output(
     // Increment tree and witnesses
     let node = Node::new(cmu.into_repr());
     for witness in existing_witnesses {
+        witness.append(node).unwrap();
+    }
+    for witness in block_witnesses {
         witness.append(node).unwrap();
     }
     for witness in new_witnesses {
@@ -104,7 +108,7 @@ pub fn scan_block(
     tree: &mut CommitmentTree<Node>,
     existing_witnesses: &mut [&mut IncrementalWitness<Node>],
 ) -> Vec<(WalletTx, Vec<IncrementalWitness<Node>>)> {
-    let mut wtxs = vec![];
+    let mut wtxs: Vec<(WalletTx, Vec<IncrementalWitness<Node>>)> = vec![];
     let ivks: Vec<_> = extfvks.iter().map(|extfvk| extfvk.fvk.vk.ivk()).collect();
 
     for tx in block.vtx.into_iter() {
@@ -142,17 +146,29 @@ pub fn scan_block(
         // Check for incoming notes while incrementing tree and witnesses
         let mut shielded_outputs = vec![];
         let mut new_witnesses = vec![];
-        for to_scan in tx.outputs.into_iter().enumerate() {
-            if let Some((output, new_witness)) = scan_output(
-                to_scan,
-                &ivks,
-                &spent_from_accounts,
-                tree,
-                existing_witnesses,
-                &mut new_witnesses,
-            ) {
-                shielded_outputs.push(output);
-                new_witnesses.push(new_witness);
+        {
+            // Grab mutable references to new witnesses from previous transactions
+            // in this block so that we can update them. Scoped so we don't hold
+            // mutable references to wtxs for too long.
+            let mut block_witnesses: Vec<_> = wtxs
+                .iter_mut()
+                .map(|(_, w)| w.iter_mut().collect::<Vec<_>>())
+                .flatten()
+                .collect();
+
+            for to_scan in tx.outputs.into_iter().enumerate() {
+                if let Some((output, new_witness)) = scan_output(
+                    to_scan,
+                    &ivks,
+                    &spent_from_accounts,
+                    tree,
+                    existing_witnesses,
+                    &mut block_witnesses,
+                    &mut new_witnesses,
+                ) {
+                    shielded_outputs.push(output);
+                    new_witnesses.push(new_witness);
+                }
             }
         }
 
@@ -241,6 +257,7 @@ mod tests {
         nf: [u8; 32],
         extfvk: ExtendedFullViewingKey,
         value: Amount,
+        tx_after: bool,
     ) -> CompactBlock {
         let to = extfvk.default_address().unwrap().1;
 
@@ -291,6 +308,13 @@ mod tests {
         ctx.index = cb.vtx.len() as u64;
         cb.vtx.push(ctx);
 
+        // Optionally add another random Sapling tx after ours
+        if tx_after {
+            let mut tx = random_compact_tx(&mut rng);
+            tx.index = cb.vtx.len() as u64;
+            cb.vtx.push(tx);
+        }
+
         cb
     }
 
@@ -299,8 +323,47 @@ mod tests {
         let extsk = ExtendedSpendingKey::master(&[]);
         let extfvk = ExtendedFullViewingKey::from(&extsk);
 
-        let cb = fake_compact_block(1, [0; 32], extfvk.clone(), Amount::from_u64(5).unwrap());
+        let cb = fake_compact_block(
+            1,
+            [0; 32],
+            extfvk.clone(),
+            Amount::from_u64(5).unwrap(),
+            false,
+        );
         assert_eq!(cb.vtx.len(), 2);
+
+        let mut tree = CommitmentTree::new();
+        let txs = scan_block(cb, &[extfvk], &[], &mut tree, &mut []);
+        assert_eq!(txs.len(), 1);
+
+        let (tx, new_witnesses) = &txs[0];
+        assert_eq!(tx.index, 1);
+        assert_eq!(tx.num_spends, 1);
+        assert_eq!(tx.num_outputs, 1);
+        assert_eq!(tx.shielded_spends.len(), 0);
+        assert_eq!(tx.shielded_outputs.len(), 1);
+        assert_eq!(tx.shielded_outputs[0].index, 0);
+        assert_eq!(tx.shielded_outputs[0].account, 0);
+        assert_eq!(tx.shielded_outputs[0].note.value, 5);
+
+        // Check that the witness root matches
+        assert_eq!(new_witnesses.len(), 1);
+        assert_eq!(new_witnesses[0].root(), tree.root());
+    }
+
+    #[test]
+    fn scan_block_with_txs_after_my_tx() {
+        let extsk = ExtendedSpendingKey::master(&[]);
+        let extfvk = ExtendedFullViewingKey::from(&extsk);
+
+        let cb = fake_compact_block(
+            1,
+            [0; 32],
+            extfvk.clone(),
+            Amount::from_u64(5).unwrap(),
+            true,
+        );
+        assert_eq!(cb.vtx.len(), 3);
 
         let mut tree = CommitmentTree::new();
         let txs = scan_block(cb, &[extfvk], &[], &mut tree, &mut []);
@@ -328,7 +391,7 @@ mod tests {
         let nf = [7; 32];
         let account = 12;
 
-        let cb = fake_compact_block(1, nf, extfvk, Amount::from_u64(5).unwrap());
+        let cb = fake_compact_block(1, nf, extfvk, Amount::from_u64(5).unwrap(), false);
         assert_eq!(cb.vtx.len(), 2);
 
         let mut tree = CommitmentTree::new();
