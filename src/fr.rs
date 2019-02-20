@@ -747,6 +747,14 @@ fn test_from_bytes_wide_negative_one() {
     );
 }
 
+#[test]
+fn test_zero() {
+    assert_eq!(Fr::zero(), -&Fr::zero());
+    assert_eq!(Fr::zero(), Fr::zero() + Fr::zero());
+    assert_eq!(Fr::zero(), Fr::zero() - Fr::zero());
+    assert_eq!(Fr::zero(), Fr::zero() * Fr::zero());
+}
+
 #[cfg(test)]
 const LARGEST: Fr = Fr([
     0xd0970e5ed6f72cb6,

@@ -802,6 +802,14 @@ fn test_from_bytes_wide_negative_one() {
     );
 }
 
+#[test]
+fn test_zero() {
+    assert_eq!(Fq::zero(), -&Fq::zero());
+    assert_eq!(Fq::zero(), Fq::zero() + Fq::zero());
+    assert_eq!(Fq::zero(), Fq::zero() - Fq::zero());
+    assert_eq!(Fq::zero(), Fq::zero() * Fq::zero());
+}
+
 #[cfg(test)]
 const LARGEST: Fq = Fq([
     0xffffffff00000000,
