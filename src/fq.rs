@@ -184,6 +184,14 @@ const R2: Fq = Fq([
     0x0748d9d99f59ff11,
 ]);
 
+/// R^3 = 2^768 mod q
+const R3: Fq = Fq([
+    0xc62c1807439b73af,
+    0x1b3e0d188cf06990,
+    0x73d13c71c7b5f418,
+    0x6e2a5bb9c8db33e9,
+]);
+
 // /// 7*R mod q
 // const GENERATOR: Fq = Fq([
 //     0x0000000efffffff1,
@@ -270,6 +278,39 @@ impl Fq {
         LittleEndian::write_u64(&mut res[24..32], tmp.0[3]);
 
         res
+    }
+
+    pub fn from_bytes_wide(bytes: [u8; 64]) -> Fq {
+        Fq::from_u512([
+            LittleEndian::read_u64(&bytes[0..8]),
+            LittleEndian::read_u64(&bytes[8..16]),
+            LittleEndian::read_u64(&bytes[16..24]),
+            LittleEndian::read_u64(&bytes[24..32]),
+            LittleEndian::read_u64(&bytes[32..40]),
+            LittleEndian::read_u64(&bytes[40..48]),
+            LittleEndian::read_u64(&bytes[48..56]),
+            LittleEndian::read_u64(&bytes[56..64]),
+        ])
+    }
+
+    fn from_u512(limbs: [u64; 8]) -> Fq {
+        // We reduce an arbitrary 512-bit number by decomposing it into two 256-bit digits
+        // with the higher bits multiplied by 2^256. Thus, we perform two reductions
+        //
+        // 1. the lower bits are multiplied by R^2, as normal
+        // 2. the upper bits are multiplied by R^2 * 2^256 = R^3
+        //
+        // and computing their sum in the field. It remains to see that arbitrary 256-bit
+        // numbers can be placed into Montgomery form safely using the reduction. The
+        // reduction works so long as the product is less than R=2^256 multipled by
+        // the modulus. This holds because for any `c` smaller than the modulus, we have
+        // that (2^256 - 1)*c is an acceptable product for the reduction. Therefore, the
+        // reduction always works so long as `c` is in the field; in this case it is either the
+        // constant `R2` or `R3`.
+        let d1 = Fq([limbs[4], limbs[5], limbs[6], limbs[7]]) - &MODULUS;
+        let d0 = Fq([limbs[0], limbs[1], limbs[2], limbs[3]]) - &MODULUS;
+        // Convert to Montgomery form
+        d1 * R3 + d0 * R2
     }
 
     /// Squares this element.
@@ -699,6 +740,66 @@ fn test_from_bytes_vartime() {
         57, 51, 72, 125, 157, 41, 83, 167, 237, 116
     ])
     .is_none());
+}
+
+#[test]
+fn test_from_u512_zero() {
+    assert_eq!(
+        Fq::zero(),
+        Fq::from_u512([
+            MODULUS.0[0],
+            MODULUS.0[1],
+            MODULUS.0[2],
+            MODULUS.0[3],
+            0,
+            0,
+            0,
+            0
+        ])
+    );
+}
+
+#[test]
+fn test_from_u512_r() {
+    assert_eq!(R, Fq::from_u512([1, 0, 0, 0, 0, 0, 0, 0]));
+}
+
+#[test]
+fn test_from_u512_r2() {
+    assert_eq!(R2, Fq::from_u512([0, 0, 0, 0, 1, 0, 0, 0]));
+}
+
+#[test]
+fn test_from_u512_max() {
+    let max_u64 = 0xffffffffffffffff;
+    assert_eq!(
+        R3 - R,
+        Fq::from_u512([max_u64, max_u64, max_u64, max_u64, max_u64, max_u64, max_u64, max_u64])
+    );
+}
+
+#[test]
+fn test_from_bytes_wide_r2() {
+    assert_eq!(
+        R2,
+        Fq::from_bytes_wide([
+            254, 255, 255, 255, 1, 0, 0, 0, 2, 72, 3, 0, 250, 183, 132, 88, 245, 79, 188, 236, 239,
+            79, 140, 153, 111, 5, 197, 172, 89, 177, 36, 24, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        ])
+    );
+}
+
+#[test]
+fn test_from_bytes_wide_negative_one() {
+    assert_eq!(
+        -&Fq::one(),
+        Fq::from_bytes_wide([
+            0, 0, 0, 0, 255, 255, 255, 255, 254, 91, 254, 255, 2, 164, 189, 83, 5, 216, 161, 9, 8,
+            216, 57, 51, 72, 125, 157, 41, 83, 167, 237, 115, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        ])
+    );
 }
 
 #[cfg(test)]
