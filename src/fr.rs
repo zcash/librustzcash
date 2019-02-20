@@ -1,9 +1,9 @@
 use core::fmt;
 use core::ops::{Add, AddAssign, Mul, MulAssign, Neg, Sub, SubAssign};
 
+use crate::util::{adc, mac, sbb};
 use byteorder::{ByteOrder, LittleEndian};
 use subtle::{Choice, ConditionallySelectable, ConstantTimeEq};
-use crate::util::{adc, mac, sbb};
 
 /// Represents an element of `GF(r)`.
 // The internal representation of this type is four 64-bit unsigned
@@ -189,7 +189,7 @@ const R3: Fr = Fr([
     0xe0d6c6563d830544,
     0x323e3883598d0f85,
     0xf0fea3004c2e2ba8,
-    0x05874f84946737ec
+    0x05874f84946737ec,
 ]);
 
 impl Default for Fr {
@@ -729,8 +729,8 @@ fn test_from_bytes_wide_r2() {
         R2,
         Fr::from_bytes_wide([
             217, 7, 150, 185, 179, 11, 248, 37, 80, 231, 182, 102, 47, 214, 21, 243, 244, 20, 136,
-            235, 238, 20, 37, 147, 198, 85, 145, 71, 111, 252, 166, 9, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            235, 238, 20, 37, 147, 198, 85, 145, 71, 111, 252, 166, 9, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
         ])
     );
 }
@@ -741,10 +741,18 @@ fn test_from_bytes_wide_negative_one() {
         -&Fr::one(),
         Fr::from_bytes_wide([
             182, 44, 247, 214, 94, 14, 151, 208, 130, 16, 200, 204, 147, 32, 104, 166, 0, 59, 52,
-            1, 1, 59, 103, 6, 169, 175, 51, 101, 234, 180, 125, 14, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            1, 1, 59, 103, 6, 169, 175, 51, 101, 234, 180, 125, 14, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
         ])
     );
+}
+
+#[test]
+fn test_zero() {
+    assert_eq!(Fr::zero(), -&Fr::zero());
+    assert_eq!(Fr::zero(), Fr::zero() + Fr::zero());
+    assert_eq!(Fr::zero(), Fr::zero() - Fr::zero());
+    assert_eq!(Fr::zero(), Fr::zero() * Fr::zero());
 }
 
 #[cfg(test)]
