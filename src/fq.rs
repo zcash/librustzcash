@@ -1,9 +1,9 @@
 use core::fmt;
 use core::ops::{Add, AddAssign, Mul, MulAssign, Neg, Sub, SubAssign};
 
+use crate::util::{adc, mac, sbb};
 use byteorder::{ByteOrder, LittleEndian};
 use subtle::{Choice, ConditionallySelectable, ConstantTimeEq};
-use crate::util::{adc, mac, sbb};
 
 /// Represents an element of `GF(q)`.
 // The internal representation of this type is four 64-bit unsigned
