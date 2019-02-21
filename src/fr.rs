@@ -1,8 +1,8 @@
 use core::fmt;
 use core::ops::{Add, AddAssign, Mul, MulAssign, Neg, Sub, SubAssign};
 
-use crate::util::{adc, mac, sbb};
 use byteorder::{ByteOrder, LittleEndian};
+use crate::util::{adc, mac, sbb};
 use subtle::{Choice, ConditionallySelectable, ConstantTimeEq};
 
 /// Represents an element of `GF(r)`.
@@ -532,12 +532,8 @@ impl Fr {
         let (r6, carry) = mac(r6, k, MODULUS.0[3], carry);
         let (r7, _) = adc(r7, carry2, carry);
 
-        let mut tmp = Fr([r4, r5, r6, r7]);
-
         // Result may be within MODULUS of the correct value
-        tmp.sub_assign(&MODULUS);
-
-        tmp
+        Fr([r4, r5, r6, r7]) - &MODULUS
     }
 }
 
@@ -630,8 +626,7 @@ fn test_from_bytes_vartime() {
         Fr::from_bytes_vartime([
             0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
             0, 0, 0
-        ])
-        .unwrap(),
+        ]).unwrap(),
         Fr::zero()
     );
 
@@ -639,8 +634,7 @@ fn test_from_bytes_vartime() {
         Fr::from_bytes_vartime([
             1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
             0, 0, 0
-        ])
-        .unwrap(),
+        ]).unwrap(),
         Fr::one()
     );
 
@@ -648,43 +642,47 @@ fn test_from_bytes_vartime() {
         Fr::from_bytes_vartime([
             217, 7, 150, 185, 179, 11, 248, 37, 80, 231, 182, 102, 47, 214, 21, 243, 244, 20, 136,
             235, 238, 20, 37, 147, 198, 85, 145, 71, 111, 252, 166, 9
-        ])
-        .unwrap(),
+        ]).unwrap(),
         R2
     );
 
     // -1 should work
-    assert!(Fr::from_bytes_vartime([
-        182, 44, 247, 214, 94, 14, 151, 208, 130, 16, 200, 204, 147, 32, 104, 166, 0, 59, 52, 1, 1,
-        59, 103, 6, 169, 175, 51, 101, 234, 180, 125, 14
-    ])
-    .is_some());
+    assert!(
+        Fr::from_bytes_vartime([
+            182, 44, 247, 214, 94, 14, 151, 208, 130, 16, 200, 204, 147, 32, 104, 166, 0, 59, 52,
+            1, 1, 59, 103, 6, 169, 175, 51, 101, 234, 180, 125, 14
+        ]).is_some()
+    );
 
     // modulus is invalid
-    assert!(Fr::from_bytes_vartime([
-        183, 44, 247, 214, 94, 14, 151, 208, 130, 16, 200, 204, 147, 32, 104, 166, 0, 59, 52, 1, 1,
-        59, 103, 6, 169, 175, 51, 101, 234, 180, 125, 14
-    ])
-    .is_none());
+    assert!(
+        Fr::from_bytes_vartime([
+            183, 44, 247, 214, 94, 14, 151, 208, 130, 16, 200, 204, 147, 32, 104, 166, 0, 59, 52,
+            1, 1, 59, 103, 6, 169, 175, 51, 101, 234, 180, 125, 14
+        ]).is_none()
+    );
 
     // Anything larger than the modulus is invalid
-    assert!(Fr::from_bytes_vartime([
-        184, 44, 247, 214, 94, 14, 151, 208, 130, 16, 200, 204, 147, 32, 104, 166, 0, 59, 52, 1, 1,
-        59, 103, 6, 169, 175, 51, 101, 234, 180, 125, 14
-    ])
-    .is_none());
+    assert!(
+        Fr::from_bytes_vartime([
+            184, 44, 247, 214, 94, 14, 151, 208, 130, 16, 200, 204, 147, 32, 104, 166, 0, 59, 52,
+            1, 1, 59, 103, 6, 169, 175, 51, 101, 234, 180, 125, 14
+        ]).is_none()
+    );
 
-    assert!(Fr::from_bytes_vartime([
-        183, 44, 247, 214, 94, 14, 151, 208, 130, 16, 200, 204, 147, 32, 104, 166, 0, 59, 52, 1, 1,
-        59, 104, 6, 169, 175, 51, 101, 234, 180, 125, 14
-    ])
-    .is_none());
+    assert!(
+        Fr::from_bytes_vartime([
+            183, 44, 247, 214, 94, 14, 151, 208, 130, 16, 200, 204, 147, 32, 104, 166, 0, 59, 52,
+            1, 1, 59, 104, 6, 169, 175, 51, 101, 234, 180, 125, 14
+        ]).is_none()
+    );
 
-    assert!(Fr::from_bytes_vartime([
-        183, 44, 247, 214, 94, 14, 151, 208, 130, 16, 200, 204, 147, 32, 104, 166, 0, 59, 52, 1, 1,
-        59, 103, 6, 169, 175, 51, 101, 234, 180, 125, 15
-    ])
-    .is_none());
+    assert!(
+        Fr::from_bytes_vartime([
+            183, 44, 247, 214, 94, 14, 151, 208, 130, 16, 200, 204, 147, 32, 104, 166, 0, 59, 52,
+            1, 1, 59, 103, 6, 169, 175, 51, 101, 234, 180, 125, 15
+        ]).is_none()
+    );
 }
 
 #[test]

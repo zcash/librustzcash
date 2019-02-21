@@ -12,8 +12,8 @@ mod util;
 
 mod fq;
 mod fr;
-pub use self::fq::*;
-pub use self::fr::*;
+pub use fq::*;
+pub use fr::*;
 
 /// This represents an affine point `(u, v)` on the
 /// curve `-u^2 + v^2 = 1 + d.u^2.v^2` over `Fq` with
@@ -418,8 +418,7 @@ impl ExtendedPoint {
             v: vv_plus_uu,
             z: vv_minus_uu,
             t: &zz2 - &vv_minus_uu,
-        }
-        .into_extended()
+        }.into_extended()
     }
 
     /// This is only for debugging purposes and not
@@ -494,8 +493,7 @@ impl<'a, 'b> Add<&'b ExtendedNielsPoint> for &'a ExtendedPoint {
             v: &b + &a,
             z: &d + &c,
             t: &d - &c,
-        }
-        .into_extended()
+        }.into_extended()
     }
 }
 
@@ -513,8 +511,7 @@ impl<'a, 'b> Sub<&'b ExtendedNielsPoint> for &'a ExtendedPoint {
             v: &b + &a,
             z: &d - &c,
             t: &d + &c,
-        }
-        .into_extended()
+        }.into_extended()
     }
 }
 
@@ -540,8 +537,7 @@ impl<'a, 'b> Add<&'b AffineNielsPoint> for &'a ExtendedPoint {
             v: &b + &a,
             z: &d + &c,
             t: &d - &c,
-        }
-        .into_extended()
+        }.into_extended()
     }
 }
 
@@ -559,8 +555,7 @@ impl<'a, 'b> Sub<&'b AffineNielsPoint> for &'a ExtendedPoint {
             v: &b + &a,
             z: &d - &c,
             t: &d + &c,
-        }
-        .into_extended()
+        }.into_extended()
     }
 }
 
@@ -722,8 +717,7 @@ fn test_assoc() {
             0x46462e26d4edb8c7,
             0x10b4c1517ca82e9b,
         ]),
-    })
-    .mul_by_cofactor();
+    }).mul_by_cofactor();
     assert!(p.is_on_curve_vartime());
 
     assert_eq!(
@@ -748,8 +742,7 @@ fn test_batch_normalize() {
             0x46462e26d4edb8c7,
             0x10b4c1517ca82e9b,
         ]),
-    })
-    .mul_by_cofactor();
+    }).mul_by_cofactor();
 
     let mut v = vec![];
     for _ in 0..10 {
@@ -810,7 +803,6 @@ fn test_mul_consistency() {
             0x46462e26d4edb8c7,
             0x10b4c1517ca82e9b,
         ]),
-    })
-    .mul_by_cofactor();
+    }).mul_by_cofactor();
     assert_eq!(p * c, (p * a) * b);
 }

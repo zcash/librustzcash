@@ -1,8 +1,8 @@
 use core::fmt;
 use core::ops::{Add, AddAssign, Mul, MulAssign, Neg, Sub, SubAssign};
 
-use crate::util::{adc, mac, sbb};
 use byteorder::{ByteOrder, LittleEndian};
+use crate::util::{adc, mac, sbb};
 use subtle::{Choice, ConditionallySelectable, ConstantTimeEq};
 
 /// Represents an element of `GF(q)`.
@@ -687,8 +687,7 @@ fn test_from_bytes_vartime() {
         Fq::from_bytes_vartime([
             0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
             0, 0, 0
-        ])
-        .unwrap(),
+        ]).unwrap(),
         Fq::zero()
     );
 
@@ -696,8 +695,7 @@ fn test_from_bytes_vartime() {
         Fq::from_bytes_vartime([
             1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
             0, 0, 0
-        ])
-        .unwrap(),
+        ]).unwrap(),
         Fq::one()
     );
 
@@ -705,41 +703,45 @@ fn test_from_bytes_vartime() {
         Fq::from_bytes_vartime([
             254, 255, 255, 255, 1, 0, 0, 0, 2, 72, 3, 0, 250, 183, 132, 88, 245, 79, 188, 236, 239,
             79, 140, 153, 111, 5, 197, 172, 89, 177, 36, 24
-        ])
-        .unwrap(),
+        ]).unwrap(),
         R2
     );
 
     // -1 should work
-    assert!(Fq::from_bytes_vartime([
-        0, 0, 0, 0, 255, 255, 255, 255, 254, 91, 254, 255, 2, 164, 189, 83, 5, 216, 161, 9, 8, 216,
-        57, 51, 72, 125, 157, 41, 83, 167, 237, 115
-    ])
-    .is_some());
+    assert!(
+        Fq::from_bytes_vartime([
+            0, 0, 0, 0, 255, 255, 255, 255, 254, 91, 254, 255, 2, 164, 189, 83, 5, 216, 161, 9, 8,
+            216, 57, 51, 72, 125, 157, 41, 83, 167, 237, 115
+        ]).is_some()
+    );
 
     // modulus is invalid
-    assert!(Fq::from_bytes_vartime([
-        1, 0, 0, 0, 255, 255, 255, 255, 254, 91, 254, 255, 2, 164, 189, 83, 5, 216, 161, 9, 8, 216,
-        57, 51, 72, 125, 157, 41, 83, 167, 237, 115
-    ])
-    .is_none());
+    assert!(
+        Fq::from_bytes_vartime([
+            1, 0, 0, 0, 255, 255, 255, 255, 254, 91, 254, 255, 2, 164, 189, 83, 5, 216, 161, 9, 8,
+            216, 57, 51, 72, 125, 157, 41, 83, 167, 237, 115
+        ]).is_none()
+    );
 
     // Anything larger than the modulus is invalid
-    assert!(Fq::from_bytes_vartime([
-        2, 0, 0, 0, 255, 255, 255, 255, 254, 91, 254, 255, 2, 164, 189, 83, 5, 216, 161, 9, 8, 216,
-        57, 51, 72, 125, 157, 41, 83, 167, 237, 115
-    ])
-    .is_none());
-    assert!(Fq::from_bytes_vartime([
-        1, 0, 0, 0, 255, 255, 255, 255, 254, 91, 254, 255, 2, 164, 189, 83, 5, 216, 161, 9, 8, 216,
-        58, 51, 72, 125, 157, 41, 83, 167, 237, 115
-    ])
-    .is_none());
-    assert!(Fq::from_bytes_vartime([
-        1, 0, 0, 0, 255, 255, 255, 255, 254, 91, 254, 255, 2, 164, 189, 83, 5, 216, 161, 9, 8, 216,
-        57, 51, 72, 125, 157, 41, 83, 167, 237, 116
-    ])
-    .is_none());
+    assert!(
+        Fq::from_bytes_vartime([
+            2, 0, 0, 0, 255, 255, 255, 255, 254, 91, 254, 255, 2, 164, 189, 83, 5, 216, 161, 9, 8,
+            216, 57, 51, 72, 125, 157, 41, 83, 167, 237, 115
+        ]).is_none()
+    );
+    assert!(
+        Fq::from_bytes_vartime([
+            1, 0, 0, 0, 255, 255, 255, 255, 254, 91, 254, 255, 2, 164, 189, 83, 5, 216, 161, 9, 8,
+            216, 58, 51, 72, 125, 157, 41, 83, 167, 237, 115
+        ]).is_none()
+    );
+    assert!(
+        Fq::from_bytes_vartime([
+            1, 0, 0, 0, 255, 255, 255, 255, 254, 91, 254, 255, 2, 164, 189, 83, 5, 216, 161, 9, 8,
+            216, 57, 51, 72, 125, 157, 41, 83, 167, 237, 116
+        ]).is_none()
+    );
 }
 
 #[test]
@@ -967,4 +969,28 @@ fn test_invert_nonzero_is_pow() {
         r2 = r1;
         r3 = r1;
     }
+}
+
+#[test]
+fn test_sqrt() {
+    let mut square = Fq([
+        0x46cd85a5f273077e,
+        0x1d30c47dd68fc735,
+        0x77f656f60beca0eb,
+        0x494aa01bdf32468d,
+    ]);
+
+    let mut none_count = 0;
+
+    for _ in 0..100 {
+        let square_root = square.sqrt_vartime();
+        if square_root.is_none() {
+            none_count += 1;
+        } else {
+            assert_eq!(square_root.unwrap() * square_root.unwrap(), square);
+        }
+        square -= Fq::one();
+    }
+
+    assert_eq!(49, none_count);
 }
