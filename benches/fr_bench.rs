@@ -1,6 +1,5 @@
 #![feature(test)]
 
-extern crate jubjub;
 extern crate test;
 
 use jubjub::*;
