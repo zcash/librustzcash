@@ -11,7 +11,7 @@
 //!
 //! # Constant Time
 //!
-//! All operations are constant time unless explicitly noted; these function will contain
+//! All operations are constant time unless explicitly noted; these functions will contain
 //! "vartime" in their name and they will be documented as variable time.
 //!
 //! This crate relies on the `subtle` crate for achieving constant time arithmetic. It is
