@@ -28,4 +28,4 @@ default-features = false
 [features]
 default = ["std"]
 nightly = ["subtle/nightly"]
-std = ["byteorder/std", "subtle/std"]
+std = ["subtle/std"]
