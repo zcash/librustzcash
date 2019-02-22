@@ -1,3 +1,31 @@
+//! This crate provides an implementation of the **Jubjub** elliptic curve and its associated
+//! field arithmetic. See [`README.md`](https://github.com/zkcrypto/jubjub/blob/master/README.md) for more details about Jubjub.
+//!
+//! # API
+//!
+//! * `AffinePoint` / `ExtendedPoint` which are implementations of Jubjub group arithmetic
+//! * `AffineNielsPoint` / `ExtendedNielsPoint` which are pre-processed Jubjub points
+//! * `Fq`, which is the base field of Jubjub
+//! * `Fr`, which is the scalar field of Jubjub
+//! * `batch_normalize` for converting many `ExtendedPoint`s into `AffinePoint`s efficiently.
+//!
+//! # Constant Time
+//!
+//! All operations are constant time unless explicitly noted; these function will contain
+//! "vartime" in their name and they will be documented as variable time.
+//!
+//! This crate relies on the `subtle` crate for achieving constant time arithmetic. It is
+//! recommended to enable the `nightly` feature on this crate (which enables the `nightly`
+//! feature in the `subtle` crate) to defend against compiler optimizations that may
+//! compromise constant time arithmetic. However, this requires use of the nightly version
+//! of the Rust compiler.
+//!
+//! # Features
+//!
+//! * `nightly`: This enables `subtle/nightly` which attempts to prevent the compiler from
+//! performing optimizations that could compromise constant time arithmetic. It is
+//! recommended to enable this if you are able to use a nightly version of the Rust compiler.
+
 #![no_std]
 
 #[cfg(feature = "std")]
@@ -15,9 +43,8 @@ mod fr;
 pub use fq::*;
 pub use fr::*;
 
-/// This represents an affine point `(u, v)` on the
-/// curve `-u^2 + v^2 = 1 + d.u^2.v^2` over `Fq` with
-/// `d = -(10240/10241)`.
+/// This represents a Jubjub point in the affine `(u, v)`
+/// coordinates.
 #[derive(Clone, Copy, Debug)]
 pub struct AffinePoint {
     u: Fq,
@@ -27,6 +54,8 @@ pub struct AffinePoint {
 impl Neg for AffinePoint {
     type Output = AffinePoint;
 
+    /// This computes the negation of a point `P = (u, v)`
+    /// as `-P = (-u, v)`.
     #[inline]
     fn neg(self) -> AffinePoint {
         AffinePoint {
@@ -57,8 +86,17 @@ impl ConditionallySelectable for AffinePoint {
     }
 }
 
-/// Represents the affine point `(u/z, v/z)` with
-/// `z` nonzero and `t1 * t2 = uv/z`.
+/// This represents an extended point `(U, V, Z, T1, T2)`
+/// with `Z` nonzero, corresponding to the affine point
+/// `(U/Z, V/Z)`. We always have `T1 * T2 = UV/Z`.
+///
+/// You can do the following things with a point in this
+/// form:
+///
+/// * Convert it into a point in the affine form.
+/// * Add it to an `ExtendedPoint`, `AffineNielsPoint` or `ExtendedNielsPoint`.
+/// * Double it using `double()`.
+/// * Compare it with another extended point using `PartialEq` or `ct_eq()`.
 #[derive(Clone, Copy, Debug)]
 pub struct ExtendedPoint {
     u: Fq,
@@ -70,9 +108,10 @@ pub struct ExtendedPoint {
 
 impl ConstantTimeEq for ExtendedPoint {
     fn ct_eq(&self, other: &Self) -> Choice {
-        // (u/z, v/z) = (u'/z', v'/z') implies
-        //      (uz'z = u'z'z)
+        // (u/z, v/z) = (u'/z', v'/z') is implied by
+        //      (uz'z = u'z'z) and
         //      (vz'z = v'z'z)
+        // as z and z' are always nonzero.
 
         (&self.u * &other.z).ct_eq(&(&other.u * &self.z))
             & (&self.v * &other.z).ct_eq(&(&other.v * &self.z))
@@ -100,6 +139,9 @@ impl PartialEq for ExtendedPoint {
 impl Neg for ExtendedPoint {
     type Output = ExtendedPoint;
 
+    /// Computes the negation of a point `P = (U, V, Z, T)`
+    /// as `-P = (-U, V, Z, -T1, T2)`. The choice of `T1`
+    /// is made without loss of generality.
     #[inline]
     fn neg(self) -> ExtendedPoint {
         ExtendedPoint {
@@ -113,6 +155,8 @@ impl Neg for ExtendedPoint {
 }
 
 impl From<AffinePoint> for ExtendedPoint {
+    /// Constructs an extended point (with `Z = 1`) from
+    /// an affine point using the map `(u, v) => (u, v, 1, u, v)`.
     fn from(affine: AffinePoint) -> ExtendedPoint {
         ExtendedPoint {
             u: affine.u,
@@ -125,6 +169,11 @@ impl From<AffinePoint> for ExtendedPoint {
 }
 
 impl From<ExtendedPoint> for AffinePoint {
+    /// Constructs an affine point from an extended point
+    /// using the map `(U, V, Z, T1, T2) => (U/Z, V/Z)`
+    /// as Z is always nonzero. **This requires a field inversion
+    /// and so it is recommended to perform these in a batch
+    /// using [`batch_normalize`](crate::batch_normalize) instead.**
     fn from(extended: ExtendedPoint) -> AffinePoint {
         // Z coordinate is always nonzero, so this is
         // its inverse.
@@ -137,6 +186,9 @@ impl From<ExtendedPoint> for AffinePoint {
     }
 }
 
+/// This is a pre-processed version of an affine point `(u, v)`
+/// in the form `(v + u, v - u, u * v * 2d)`. This can be added to an
+/// [`ExtendedPoint`](crate::ExtendedPoint).
 #[derive(Clone, Copy)]
 pub struct AffineNielsPoint {
     v_plus_u: Fq,
@@ -145,6 +197,7 @@ pub struct AffineNielsPoint {
 }
 
 impl AffineNielsPoint {
+    /// Constructs this point from the neutral element `(0, 1)`.
     pub fn identity() -> Self {
         AffineNielsPoint {
             v_plus_u: Fq::one(),
@@ -164,6 +217,8 @@ impl ConditionallySelectable for AffineNielsPoint {
     }
 }
 
+/// This is a pre-processed version of an extended point `(U, V, Z, T1, T2)`
+/// in the form `(V + U, V - U, Z, T1 * T2 * 2d)`.
 #[derive(Clone, Copy)]
 pub struct ExtendedNielsPoint {
     v_plus_u: Fq,
@@ -184,6 +239,7 @@ impl ConditionallySelectable for ExtendedNielsPoint {
 }
 
 impl ExtendedNielsPoint {
+    /// Constructs this point from the neutral element `(0, 1)`.
     pub fn identity() -> Self {
         ExtendedNielsPoint {
             v_plus_u: Fq::one(),
@@ -213,7 +269,7 @@ const EDWARDS_D2: Fq = Fq([
 ]);
 
 impl AffinePoint {
-    /// Returns the neutral element `(0, 1)`.
+    /// Constructs the neutral element `(0, 1)`.
     pub fn identity() -> Self {
         AffinePoint {
             u: Fq::zero(),
@@ -279,14 +335,18 @@ impl AffinePoint {
         }
     }
 
+    /// Returns the `u`-coordinate of this point.
     pub fn get_u(&self) -> Fq {
         self.u
     }
 
+    /// Returns the `v`-coordinate of this point.
     pub fn get_v(&self) -> Fq {
         self.v
     }
 
+    /// Performs a pre-processing step that produces an `AffineNielsPoint`
+    /// for use in multiple additions.
     pub fn to_niels(&self) -> AffineNielsPoint {
         AffineNielsPoint {
             v_plus_u: &self.v + &self.u,
@@ -308,6 +368,7 @@ impl AffinePoint {
 }
 
 impl ExtendedPoint {
+    /// Constructs an extended point from the neutral element `(0, 1)`.
     pub fn identity() -> Self {
         ExtendedPoint {
             u: Fq::zero(),
@@ -318,10 +379,13 @@ impl ExtendedPoint {
         }
     }
 
+    /// Multiplies this element by the cofactor `8`.
     pub fn mul_by_cofactor(&self) -> ExtendedPoint {
         self.double().double().double()
     }
 
+    /// Performs a pre-processing step that produces an `ExtendedNielsPoint`
+    /// for use in multiple additions.
     pub fn to_niels(&self) -> ExtendedNielsPoint {
         ExtendedNielsPoint {
             v_plus_u: &self.v + &self.u,
@@ -331,6 +395,8 @@ impl ExtendedPoint {
         }
     }
 
+    /// Computes the doubling of a point more efficiently than a point can
+    /// be added to itself.
     pub fn double(&self) -> ExtendedPoint {
         // Doubling is more efficient (three multiplications, four squarings)
         // when we work within the projective coordinate space (U:Z, V:Z). We
@@ -443,12 +509,15 @@ impl<'a, 'b> Mul<&'b Fr> for &'a ExtendedPoint {
 
         let mut acc = ExtendedPoint::identity();
 
+        // This is a simple double-and-add implementation of point
+        // multiplication, moving from most significant to least
+        // significant bit of the scalar.
         for bit in other
             .into_bytes()
             .iter()
             .rev()
             .flat_map(|byte| (0..8).rev().map(move |i| Choice::from((byte >> i) & 1u8)))
-            .skip(4)
+            .skip(4) // The leading four bits are always unset for Fr.
         {
             acc = acc.double();
             acc = acc + ExtendedNielsPoint::conditional_select(&zero, &base, bit);
@@ -583,7 +652,8 @@ impl_binops_additive!(ExtendedPoint, ExtendedPoint);
 
 /// This is a "completed" point produced during a point doubling or
 /// addition routine. These points exist in the `(U:Z, V:T)` model
-/// of the curve.
+/// of the curve. This is not exposed in the API because it is
+/// an implementation detail.
 struct CompletedPoint {
     u: Fq,
     v: Fq,
@@ -611,11 +681,26 @@ impl CompletedPoint {
 }
 
 impl Default for AffinePoint {
+    /// Returns the identity.
     fn default() -> AffinePoint {
         AffinePoint::identity()
     }
 }
 
+impl Default for ExtendedPoint {
+    /// Returns the identity.
+    fn default() -> ExtendedPoint {
+        ExtendedPoint::identity()
+    }
+}
+
+/// This takes a mutable slice of `ExtendedPoint`s and "normalizes" them using
+/// only a single inversion for the entire batch. This normalization results in
+/// all of the points having a Z-coordinate of one. Further, an iterator is
+/// returned which can be used to obtain `AffinePoint`s for each element in the
+/// slice.
+///
+/// This costs 5 multiplications per element, and a field inversion.
 pub fn batch_normalize<'a>(v: &'a mut [ExtendedPoint]) -> impl Iterator<Item = AffinePoint> + 'a {
     let mut acc = Fq::one();
     for p in v.iter_mut() {
