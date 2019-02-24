@@ -24,7 +24,7 @@ use super::{BitIterator, CurveAffine, Engine, Field};
 const BLS_X: u64 = 0xd201000000010000;
 const BLS_X_IS_NEGATIVE: bool = true;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Copy)]
 pub struct Bls12;
 
 impl Engine for Bls12 {

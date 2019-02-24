@@ -47,9 +47,11 @@ pub mod fs;
 pub mod tests;
 
 /// Point of unknown order.
+#[derive(Copy, Clone)]
 pub enum Unknown { }
 
 /// Point of prime order.
+#[derive(Copy, Clone)]
 pub enum PrimeOrder { }
 
 /// Fixed generators of the Jubjub curve of unknown

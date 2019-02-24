@@ -31,6 +31,7 @@ use std::io::{
 //
 // See "Twisted Edwards Curves Revisited"
 //     Huseyin Hisil, Kenneth Koon-Ho Wong, Gary Carter, and Ed Dawson
+#[derive(Copy)]
 pub struct Point<E: JubjubEngine, Subgroup> {
     x: E::Fr,
     y: E::Fr,
