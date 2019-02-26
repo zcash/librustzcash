@@ -1,4 +1,5 @@
-use pairing::{Engine, Field, PrimeField};
+use ff::{Field, PrimeField};
+use pairing::Engine;
 use bellman::{ConstraintSystem, SynthesisError};
 use super::boolean::{Boolean};
 use super::num::Num;

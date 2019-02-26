@@ -1,6 +1,7 @@
 extern crate bellman;
 extern crate blake2_rfc;
 extern crate byteorder;
+extern crate ff;
 extern crate libc;
 extern crate pairing;
 extern crate rand;
@@ -13,10 +14,8 @@ mod hashreader;
 #[macro_use]
 extern crate lazy_static;
 
-use pairing::{
-    bls12_381::{Bls12, Fr, FrRepr},
-    BitIterator, PrimeField, PrimeFieldRepr,
-};
+use ff::{BitIterator, PrimeField, PrimeFieldRepr};
+use pairing::bls12_381::{Bls12, Fr, FrRepr};
 
 use sapling_crypto::{
     circuit::multipack,

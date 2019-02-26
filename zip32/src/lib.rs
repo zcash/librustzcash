@@ -1,6 +1,7 @@
 extern crate aes;
 extern crate blake2_rfc;
 extern crate byteorder;
+extern crate ff;
 extern crate fpe;
 #[macro_use]
 extern crate lazy_static;
@@ -10,8 +11,9 @@ extern crate sapling_crypto;
 use aes::Aes256;
 use blake2_rfc::blake2b::{Blake2b, Blake2bResult};
 use byteorder::{ByteOrder, LittleEndian, ReadBytesExt, WriteBytesExt};
+use ff::{Field, PrimeField, PrimeFieldRepr};
 use fpe::ff1::{BinaryNumeralString, FF1};
-use pairing::{bls12_381::Bls12, Field, PrimeField, PrimeFieldRepr};
+use pairing::bls12_381::Bls12;
 use sapling_crypto::{
     jubjub::{
         edwards, FixedGenerators, JubjubBls12, JubjubEngine, JubjubParams, ToUniform, Unknown,

@@ -1,4 +1,5 @@
-use pairing::{Engine, Field};
+use ff::Field;
+use pairing::Engine;
 use bellman::{ConstraintSystem, SynthesisError, Circuit, LinearCombination};
 use circuit::boolean::{
     AllocatedBit,

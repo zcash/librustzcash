@@ -148,12 +148,9 @@ macro_rules! curve_impl {
             type Engine = Bls12;
             type Scalar = $scalarfield;
             type Base = $basefield;
-            type Prepared = $prepared;
             type Projective = $projective;
             type Uncompressed = $uncompressed;
             type Compressed = $compressed;
-            type Pair = $pairing;
-            type PairingResult = Fq12;
 
             fn zero() -> Self {
                 $affine {
@@ -182,16 +179,23 @@ macro_rules! curve_impl {
                 }
             }
 
+            fn into_projective(&self) -> $projective {
+                (*self).into()
+            }
+
+        }
+
+        impl PairingCurveAffine for $affine {
+            type Prepared = $prepared;
+            type Pair = $pairing;
+            type PairingResult = Fq12;
+
             fn prepare(&self) -> Self::Prepared {
                 $prepared::from_affine(*self)
             }
 
             fn pairing_with(&self, other: &Self::Pair) -> Self::PairingResult {
                 self.perform_pairing(other)
-            }
-
-            fn into_projective(&self) -> $projective {
-                (*self).into()
             }
 
         }
@@ -623,12 +627,11 @@ macro_rules! curve_impl {
 pub mod g1 {
     use super::super::{Bls12, Fq, Fq12, FqRepr, Fr, FrRepr};
     use super::g2::G2Affine;
+    use ff::{BitIterator, Field, PrimeField, PrimeFieldRepr, SqrtField};
+    use group::{CurveAffine, CurveProjective, EncodedPoint, GroupDecodingError};
     use rand::{Rand, Rng};
     use std::fmt;
-    use {
-        BitIterator, CurveAffine, CurveProjective, EncodedPoint, Engine, Field, GroupDecodingError,
-        PrimeField, PrimeFieldRepr, SqrtField,
-    };
+    use {Engine, PairingCurveAffine};
 
     curve_impl!(
         "G1",
@@ -1263,19 +1266,19 @@ pub mod g1 {
 
     #[test]
     fn g1_curve_tests() {
-        ::tests::curve::curve_tests::<G1>();
+        use group::tests::curve_tests;
+        curve_tests::<G1>();
     }
 }
 
 pub mod g2 {
     use super::super::{Bls12, Fq, Fq12, Fq2, FqRepr, Fr, FrRepr};
     use super::g1::G1Affine;
+    use ff::{BitIterator, Field, PrimeField, PrimeFieldRepr, SqrtField};
+    use group::{CurveAffine, CurveProjective, EncodedPoint, GroupDecodingError};
     use rand::{Rand, Rng};
     use std::fmt;
-    use {
-        BitIterator, CurveAffine, CurveProjective, EncodedPoint, Engine, Field, GroupDecodingError,
-        PrimeField, PrimeFieldRepr, SqrtField,
-    };
+    use {Engine, PairingCurveAffine};
 
     curve_impl!(
         "G2",
@@ -2018,7 +2021,8 @@ pub mod g2 {
 
     #[test]
     fn g2_curve_tests() {
-        ::tests::curve::curve_tests::<G2>();
+        use group::tests::curve_tests;
+        curve_tests::<G2>();
     }
 }
 

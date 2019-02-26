@@ -1,8 +1,5 @@
-use pairing::{
-    Engine,
-    Field,
-    PrimeField
-};
+use ff::{Field, PrimeField};
+use pairing::Engine;
 
 use bellman::{
     SynthesisError,
@@ -415,8 +412,8 @@ mod test {
     use rand::{XorShiftRng, SeedableRng, Rng};
     use ::circuit::boolean::{Boolean};
     use super::{UInt32};
+    use ff::Field;
     use pairing::bls12_381::{Bls12};
-    use pairing::{Field};
     use ::circuit::test::*;
     use bellman::{ConstraintSystem};
     use circuit::multieq::MultiEq;

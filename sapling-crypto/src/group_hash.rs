@@ -4,7 +4,7 @@ use jubjub::{
     edwards
 };
 
-use pairing::{
+use ff::{
     PrimeField
 };
 

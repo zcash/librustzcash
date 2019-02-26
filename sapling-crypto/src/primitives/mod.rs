@@ -1,8 +1,4 @@
-use pairing::{
-    Field,
-    PrimeField,
-    PrimeFieldRepr
-};
+use ff::{Field, PrimeField, PrimeFieldRepr};
 
 use constants;
 

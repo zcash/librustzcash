@@ -1,6 +1,6 @@
 use rand::{Rand, Rng, SeedableRng, XorShiftRng};
 
-use {CurveAffine, CurveProjective, EncodedPoint, Field};
+use {CurveAffine, CurveProjective, EncodedPoint};
 
 pub fn curve_tests<G: CurveProjective>() {
     let mut rng = XorShiftRng::from_seed([0x5dbe6259, 0x8d313d76, 0x3237db17, 0xe5bc0654]);
@@ -47,8 +47,7 @@ pub fn curve_tests<G: CurveProjective>() {
     {
         let a = G::rand(&mut rng);
         let b = a.into_affine().into_projective();
-        let c = a
-            .into_affine()
+        let c = a.into_affine()
             .into_projective()
             .into_affine()
             .into_projective();
@@ -66,8 +65,9 @@ pub fn curve_tests<G: CurveProjective>() {
 }
 
 fn random_wnaf_tests<G: CurveProjective>() {
+    use ff::PrimeField;
+
     use wnaf::*;
-    use PrimeField;
 
     let mut rng = XorShiftRng::from_seed([0x5dbe6259, 0x8d313d76, 0x3237db17, 0xe5bc0654]);
 
@@ -179,6 +179,8 @@ fn random_wnaf_tests<G: CurveProjective>() {
 }
 
 fn random_negation_tests<G: CurveProjective>() {
+    use ff::Field;
+
     let mut rng = XorShiftRng::from_seed([0x5dbe6259, 0x8d313d76, 0x3237db17, 0xe5bc0654]);
 
     for _ in 0..1000 {
@@ -373,8 +375,7 @@ fn random_transformation_tests<G: CurveProjective>() {
             v[s] = v[s].into_affine().into_projective();
         }
 
-        let expected_v = v
-            .iter()
+        let expected_v = v.iter()
             .map(|v| v.into_affine().into_projective())
             .collect::<Vec<_>>();
         G::batch_normalization(&mut v);

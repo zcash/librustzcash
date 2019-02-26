@@ -1,10 +1,5 @@
-use pairing::{
-    Engine,
-    Field,
-    PrimeField,
-    PrimeFieldRepr,
-    BitIterator
-};
+use ff::{BitIterator, Field, PrimeField, PrimeFieldRepr};
+use pairing::Engine;
 
 use bellman::{
     SynthesisError,
@@ -462,8 +457,8 @@ impl<E: Engine> Num<E> {
 mod test {
     use rand::{SeedableRng, Rand, Rng, XorShiftRng};
     use bellman::{ConstraintSystem};
+    use ff::{BitIterator, Field, PrimeField};
     use pairing::bls12_381::{Bls12, Fr};
-    use pairing::{Field, PrimeField, BitIterator};
     use ::circuit::test::*;
     use super::{AllocatedNum, Boolean};
 

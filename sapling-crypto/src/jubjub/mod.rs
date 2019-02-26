@@ -17,12 +17,8 @@
 //! the Montgomery curve forms a group isomorphism, allowing points
 //! to be freely converted between the two forms.
 
-use pairing::{
-    Engine,
-    Field,
-    PrimeField,
-    SqrtField
-};
+use ff::{Field, PrimeField, SqrtField};
+use pairing::Engine;
 
 use group_hash::group_hash;
 

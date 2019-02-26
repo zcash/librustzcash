@@ -1,8 +1,4 @@
-use pairing::{
-    PrimeField,
-    PrimeFieldRepr,
-    Field,
-};
+use ff::{Field, PrimeField, PrimeFieldRepr};
 
 use bellman::{
     SynthesisError,
@@ -602,7 +598,7 @@ impl<'a, E: JubjubEngine> Circuit<E> for Output<'a, E> {
 
 #[test]
 fn test_input_circuit_with_bls12_381() {
-    use pairing::{Field, BitIterator};
+    use ff::{BitIterator, Field};
     use pairing::bls12_381::*;
     use rand::{SeedableRng, Rng, XorShiftRng};
     use ::circuit::test::*;
@@ -734,7 +730,7 @@ fn test_input_circuit_with_bls12_381() {
 
 #[test]
 fn test_output_circuit_with_bls12_381() {
-    use pairing::{Field};
+    use ff::Field;
     use pairing::bls12_381::*;
     use rand::{SeedableRng, Rng, XorShiftRng};
     use ::circuit::test::*;

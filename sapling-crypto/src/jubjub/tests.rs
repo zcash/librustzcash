@@ -6,7 +6,7 @@ use super::{
     edwards
 };
 
-use pairing::{
+use ff::{
     Field,
     PrimeField,
     PrimeFieldRepr,

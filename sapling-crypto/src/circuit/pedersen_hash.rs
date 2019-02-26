@@ -116,8 +116,8 @@ mod test {
     use super::*;
     use ::circuit::test::*;
     use ::circuit::boolean::{Boolean, AllocatedBit};
+    use ff::PrimeField;
     use pairing::bls12_381::{Bls12, Fr};
-    use pairing::PrimeField;
 
     #[test]
     fn test_pedersen_hash_constraints() {

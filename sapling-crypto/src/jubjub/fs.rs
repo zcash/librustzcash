@@ -1,7 +1,9 @@
 use byteorder::{ByteOrder, LittleEndian};
-use pairing::{BitIterator, Field, PrimeField, SqrtField, PrimeFieldRepr, PrimeFieldDecodingError, LegendreSymbol};
-use pairing::LegendreSymbol::*;
-use pairing::{adc, sbb, mac_with_carry};
+use ff::{
+    adc, mac_with_carry, sbb, BitIterator, Field,
+    LegendreSymbol::{self, *},
+    PrimeField, PrimeFieldDecodingError, PrimeFieldRepr, SqrtField,
+};
 
 use super::ToUniform;
 
