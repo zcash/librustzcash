@@ -359,59 +359,73 @@ impl Fq {
     ///
     /// **This operation is variable time.**
     pub fn sqrt_vartime(&self) -> Option<Self> {
-        let legendre_symbol = self.legendre_symbol_vartime();
+        // Tonelli-Shank's algorithm for q mod 16 = 1
+        // https://eprint.iacr.org/2012/685.pdf (page 12, algorithm 5)
 
-        if legendre_symbol == Self::zero() {
-            Some(*self)
-        } else if legendre_symbol != Self::one() {
-            None
-        } else {
-            // Tonelli-Shank's algorithm for q mod 16 = 1
-            // https://eprint.iacr.org/2012/685.pdf (page 12, algorithm 5)
+        // The algorithm is only defined for nonzero points.
+        if self == &Fq::zero() {
+            return Some(*self);
+        }
 
-            // Initialize c to the 2^s root of unity
-            let mut c = ROOT_OF_UNITY;
+        // w = self^((t - 1) // 2)
+        //   = self^6104339283789297388802252303364915521546564123189034618274734669823
+        let w = self.pow_vartime(&[
+            0x7fff2dff7fffffff,
+            0x4d0ec02a9ded201,
+            0x94cebea4199cec04,
+            0x39f6d3a9,
+        ]);
 
-            // r = self^((t + 1) // 2)
-            let mut r = self.pow_vartime(&[
-                0x7fff2dff80000000,
-                0x04d0ec02a9ded201,
-                0x94cebea4199cec04,
-                0x0000000039f6d3a9,
-            ]);
+        {
+            // This bails early if it's nonsquare by computing Euler's
+            // criterion using the previous result `w`.
 
-            // t = self^t
-            let mut t = self.pow_vartime(&[
-                0xfffe5bfeffffffff,
-                0x09a1d80553bda402,
-                0x299d7d483339d808,
-                0x0000000073eda753,
-            ]);
+            // a0 = self^t
+            let mut a0 = w.square() * self;
 
-            let mut m = S;
-
-            while t != Self::one() {
-                let mut i = 1;
-                {
-                    let mut t2i = t.square();
-                    while t2i != Self::one() {
-                        t2i = t2i.square();
-                        i += 1;
-                    }
-                }
-
-                for _ in 0..(m - i - 1) {
-                    c = c.square();
-                }
-
-                r *= &c;
-                c = c.square();
-                t *= &c;
-                m = i;
+            // a0 = self^(t*(s/2)) = self^((q - 1) // 2)
+            for _ in 0..(S - 1) {
+                a0 = a0.square();
             }
 
-            Some(r)
+            // If it's a nonsquare, bail.
+            if a0 == -Self::one() {
+                return None;
+            }
         }
+
+        let mut v = S;
+        let mut x = self * &w;
+        let mut b = &x * &w;
+
+        // Initialize z as the 2^S root of unity.
+        let mut z = ROOT_OF_UNITY;
+
+        while b != Self::one() {
+            // Find least integer k >= 0 such that b^(2^k) = 1
+            let mut k = 0;
+            {
+                let mut tmp = b;
+                while tmp != Self::one() {
+                    tmp = tmp.square();
+                    k += 1;
+                }
+            }
+
+            let mut w = z;
+
+            // w = z^(2^(v - k - 1))
+            for _ in 0..(v - k - 1) {
+                w = w.square();
+            }
+
+            z = w.square();
+            b = &b * &z;
+            x = &x * &w;
+            v = k;
+        }
+
+        Some(x)
     }
 
     /// Exponentiates `self` by `by`, where `by` is a
@@ -973,6 +987,10 @@ fn test_invert_nonzero_is_pow() {
 
 #[test]
 fn test_sqrt() {
+    {
+        assert_eq!(Fq::zero().sqrt_vartime().unwrap(), Fq::zero());
+    }
+
     let mut square = Fq([
         0x46cd85a5f273077e,
         0x1d30c47dd68fc735,

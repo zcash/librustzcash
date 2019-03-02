@@ -512,12 +512,15 @@ impl<'a, 'b> Mul<&'b Fr> for &'a ExtendedPoint {
         // This is a simple double-and-add implementation of point
         // multiplication, moving from most significant to least
         // significant bit of the scalar.
+        //
+        // We skip the leading four bits because they're always
+        // unset for Fr.
         for bit in other
             .into_bytes()
             .iter()
             .rev()
             .flat_map(|byte| (0..8).rev().map(move |i| Choice::from((byte >> i) & 1u8)))
-            .skip(4) // The leading four bits are always unset for Fr.
+            .skip(4)
         {
             acc = acc.double();
             acc = acc + ExtendedNielsPoint::conditional_select(&zero, &base, bit);
