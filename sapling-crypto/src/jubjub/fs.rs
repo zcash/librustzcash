@@ -926,6 +926,12 @@ fn test_fs_add_assign() {
 #[test]
 fn test_fs_sub_assign() {
     {
+        let mut tmp2 = Fs(FsRepr([0xb384d9f6877afd99, 0x4442513958e1a1c1, 0x352c4b8a95eccc3f, 0x2db62dee4b0f2]));
+        let mut tmp1 = Fs(FsRepr([0xec5bd2d13ed6b05a, 0x2adc0ab3a39b5fa, 0x82d3360a493e637e, 0x53ccff4a64d6679]));
+        let res1 = tmp1.sub_assign(&tmp2);
+        tmp2.negate();
+        let res2 = tmp1.add_assign(&tmp2);
+        assert_eq!(res1, res2);
         // Test arbitrary subtraction that tests reduction.
         let mut tmp = Fs(FsRepr([0xb384d9f6877afd99, 0x4442513958e1a1c1, 0x352c4b8a95eccc3f, 0x2db62dee4b0f2]));
         tmp.sub_assign(&Fs(FsRepr([0xec5bd2d13ed6b05a, 0x2adc0ab3a39b5fa, 0x82d3360a493e637e, 0x53ccff4a64d6679])));

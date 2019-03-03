@@ -47,11 +47,11 @@ pub mod fs;
 pub mod tests;
 
 /// Point of unknown order.
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug)]
 pub enum Unknown { }
 
 /// Point of prime order.
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone ,Debug)]
 pub enum PrimeOrder { }
 
 /// Fixed generators of the Jubjub curve of unknown
@@ -150,7 +150,7 @@ pub struct JubjubBls12 {
     pedersen_hash_exp: Vec<Vec<Vec<edwards::Point<Bls12, PrimeOrder>>>>,
     pedersen_circuit_generators: Vec<Vec<Vec<(Fr, Fr)>>>,
 
-    fixed_base_generators: Vec<edwards::Point<Bls12, PrimeOrder>>,
+    pub fixed_base_generators: Vec<edwards::Point<Bls12, PrimeOrder>>,
     fixed_base_circuit_generators: Vec<Vec<Vec<(Fr, Fr)>>>,
 }
 
@@ -237,7 +237,7 @@ impl JubjubBls12 {
                 }
             }
         }
-
+/*
         // Create the bases for the Pedersen hashes
         {
             let mut pedersen_hash_generators = vec![];
@@ -308,7 +308,7 @@ impl JubjubBls12 {
 
             tmp_params.pedersen_hash_exp = pedersen_hash_exp;
         }
-
+*/
         // Create the bases for other parts of the protocol
         {
             let mut fixed_base_generators = vec![edwards::Point::zero(); FixedGenerators::Max as usize];
@@ -346,7 +346,7 @@ impl JubjubBls12 {
 
             tmp_params.fixed_base_generators = fixed_base_generators;
         }
-
+/*
         // Create the 2-bit window table lookups for each 4-bit
         // "chunk" in each segment of the Pedersen hash
         {
@@ -403,7 +403,7 @@ impl JubjubBls12 {
 
             tmp_params.fixed_base_circuit_generators = fixed_base_circuit_generators;
         }
-
+*/
         tmp_params
     }
 }
