@@ -43,6 +43,7 @@ pub mod fs;
 pub mod tests;
 
 /// Point of unknown order.
+#[derive(Debug)]
 pub enum Unknown { }
 
 /// Point of prime order.

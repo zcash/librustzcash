@@ -16,9 +16,9 @@ aes = "0.2"
 byteorder = "1"
 ff = { path = "../ff" }
 fpe = "0.1"
-lazy_static = "1.0"
 pairing = { path = "../pairing" }
 sapling-crypto = { path = "../sapling-crypto" }
+zcash_primitives = { path = "../zcash_primitives" }
 
 [dependencies.blake2-rfc]
 git = "https://github.com/gtank/blake2-rfc"

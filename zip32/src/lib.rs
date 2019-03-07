@@ -3,10 +3,9 @@ extern crate blake2_rfc;
 extern crate byteorder;
 extern crate ff;
 extern crate fpe;
-#[macro_use]
-extern crate lazy_static;
 extern crate pairing;
 extern crate sapling_crypto;
+extern crate zcash_primitives;
 
 use aes::Aes256;
 use blake2_rfc::blake2b::{Blake2b, Blake2bResult};
@@ -15,16 +14,11 @@ use ff::{Field, PrimeField, PrimeFieldRepr};
 use fpe::ff1::{BinaryNumeralString, FF1};
 use pairing::bls12_381::Bls12;
 use sapling_crypto::{
-    jubjub::{
-        edwards, FixedGenerators, JubjubBls12, JubjubEngine, JubjubParams, ToUniform, Unknown,
-    },
-    primitives::{Diversifier, PaymentAddress, ViewingKey},
+    jubjub::{edwards, FixedGenerators, JubjubEngine, JubjubParams, ToUniform, Unknown},
+    primitives::{Diversifier, PaymentAddress, ProofGenerationKey, ViewingKey},
 };
 use std::io::{self, Read, Write};
-
-lazy_static! {
-    static ref JUBJUB: JubjubBls12 = { JubjubBls12::new() };
-}
+use zcash_primitives::JUBJUB;
 
 pub const PRF_EXPAND_PERSONALIZATION: &'static [u8; 16] = b"Zcash_ExpandSeed";
 pub const ZIP32_SAPLING_MASTER_PERSONALIZATION: &'static [u8; 16] = b"ZcashIP32Sapling";
@@ -48,7 +42,7 @@ fn prf_expand_vec(sk: &[u8], ts: &[&[u8]]) -> Blake2bResult {
 
 /// An outgoing viewing key
 #[derive(Clone, Copy, PartialEq)]
-struct OutgoingViewingKey([u8; 32]);
+pub struct OutgoingViewingKey([u8; 32]);
 
 impl OutgoingViewingKey {
     fn derive_child(&self, i_l: &[u8]) -> Self {
@@ -61,15 +55,15 @@ impl OutgoingViewingKey {
 /// A Sapling expanded spending key
 #[derive(Clone)]
 pub struct ExpandedSpendingKey<E: JubjubEngine> {
-    ask: E::Fs,
+    pub ask: E::Fs,
     nsk: E::Fs,
     ovk: OutgoingViewingKey,
 }
 
 /// A Sapling full viewing key
 pub struct FullViewingKey<E: JubjubEngine> {
-    vk: ViewingKey<E>,
-    ovk: OutgoingViewingKey,
+    pub vk: ViewingKey<E>,
+    pub ovk: OutgoingViewingKey,
 }
 
 impl<E: JubjubEngine> ExpandedSpendingKey<E> {
@@ -80,6 +74,15 @@ impl<E: JubjubEngine> ExpandedSpendingKey<E> {
         ovk.0
             .copy_from_slice(&prf_expand(sk, &[0x02]).as_bytes()[..32]);
         ExpandedSpendingKey { ask, nsk, ovk }
+    }
+
+    pub fn proof_generation_key(&self, params: &E::Params) -> ProofGenerationKey<E> {
+        ProofGenerationKey {
+            ak: params
+                .generator(FixedGenerators::SpendingKeyGenerator)
+                .mul(self.ask, params),
+            nsk: self.nsk,
+        }
     }
 
     fn derive_child(&self, i_l: &[u8]) -> Self {
@@ -125,6 +128,18 @@ impl<E: JubjubEngine> ExpandedSpendingKey<E> {
         self.write(&mut result[..])
             .expect("should be able to serialize an ExpandedSpendingKey");
         result
+    }
+}
+
+impl<E: JubjubEngine> Clone for FullViewingKey<E> {
+    fn clone(&self) -> Self {
+        FullViewingKey {
+            vk: ViewingKey {
+                ak: self.vk.ak.clone(),
+                nk: self.vk.nk.clone(),
+            },
+            ovk: self.ovk.clone(),
+        }
     }
 }
 
@@ -348,6 +363,7 @@ pub struct ExtendedSpendingKey {
 }
 
 // A Sapling extended full viewing key
+#[derive(Clone)]
 pub struct ExtendedFullViewingKey {
     depth: u8,
     parent_fvk_tag: FVKTag,
