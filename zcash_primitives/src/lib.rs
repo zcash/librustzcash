@@ -13,6 +13,7 @@ extern crate sha2;
 use sapling_crypto::jubjub::JubjubBls12;
 
 pub mod block;
+pub mod keys;
 pub mod sapling;
 mod serialize;
 pub mod transaction;
