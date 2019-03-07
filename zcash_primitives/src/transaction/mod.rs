@@ -28,7 +28,7 @@ pub struct TxId(pub [u8; 32]);
 
 impl fmt::Display for TxId {
     fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-        let mut data = self.0.to_vec();
+        let mut data = self.0.clone();
         data.reverse();
         formatter.write_str(&hex::encode(data))
     }
