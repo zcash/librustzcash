@@ -1,12 +1,20 @@
 use std::error;
 use std::fmt;
+use zcash_primitives::{sapling::Node, transaction::TxId};
 
 #[derive(Debug)]
 pub enum ErrorKind {
     CorruptedData(&'static str),
+    IncorrectHRPExtFVK,
+    InvalidHeight(i32, i32),
+    InvalidNewWitnessAnchor(usize, TxId, i32, Node),
+    InvalidWitnessAnchor(i64, i32),
     ScanRequired,
     TableNotEmpty,
+    Bech32(bech32::Error),
     Database(rusqlite::Error),
+    Io(std::io::Error),
+    Protobuf(protobuf::ProtobufError),
 }
 
 #[derive(Debug)]
@@ -16,9 +24,28 @@ impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match &self.0 {
             ErrorKind::CorruptedData(reason) => write!(f, "Data DB is corrupted: {}", reason),
+            ErrorKind::IncorrectHRPExtFVK => write!(f, "Incorrect HRP for extfvk"),
+            ErrorKind::InvalidHeight(expected, actual) => write!(
+                f,
+                "Expected height of next CompactBlock to be {}, but was {}",
+                expected, actual
+            ),
+            ErrorKind::InvalidNewWitnessAnchor(output, txid, last_height, anchor) => write!(
+                f,
+                "New witness for output {} in tx {} has incorrect anchor after scanning block {}: {:?}",
+                output, txid, last_height, anchor,
+            ),
+            ErrorKind::InvalidWitnessAnchor(id_note, last_height) => write!(
+                f,
+                "Witness for note {} has incorrect anchor after scanning block {}",
+                id_note, last_height
+            ),
             ErrorKind::ScanRequired => write!(f, "Must scan blocks first"),
             ErrorKind::TableNotEmpty => write!(f, "Table is not empty"),
+            ErrorKind::Bech32(e) => write!(f, "{}", e),
             ErrorKind::Database(e) => write!(f, "{}", e),
+            ErrorKind::Io(e) => write!(f, "{}", e),
+            ErrorKind::Protobuf(e) => write!(f, "{}", e),
         }
     }
 }
@@ -26,15 +53,36 @@ impl fmt::Display for Error {
 impl error::Error for Error {
     fn source(&self) -> Option<&(dyn error::Error + 'static)> {
         match &self.0 {
+            ErrorKind::Bech32(e) => Some(e),
             ErrorKind::Database(e) => Some(e),
+            ErrorKind::Io(e) => Some(e),
+            ErrorKind::Protobuf(e) => Some(e),
             _ => None,
         }
+    }
+}
+
+impl From<bech32::Error> for Error {
+    fn from(e: bech32::Error) -> Self {
+        Error(ErrorKind::Bech32(e))
     }
 }
 
 impl From<rusqlite::Error> for Error {
     fn from(e: rusqlite::Error) -> Self {
         Error(ErrorKind::Database(e))
+    }
+}
+
+impl From<std::io::Error> for Error {
+    fn from(e: std::io::Error) -> Self {
+        Error(ErrorKind::Io(e))
+    }
+}
+
+impl From<protobuf::ProtobufError> for Error {
+    fn from(e: protobuf::ProtobufError) -> Self {
+        Error(ErrorKind::Protobuf(e))
     }
 }
 
