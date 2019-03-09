@@ -1,17 +1,25 @@
 use std::error;
 use std::fmt;
-use zcash_primitives::{sapling::Node, transaction::TxId};
+use zcash_primitives::{
+    sapling::Node,
+    transaction::{builder, TxId},
+};
 
 #[derive(Debug)]
 pub enum ErrorKind {
     CorruptedData(&'static str),
     IncorrectHRPExtFVK,
+    InsufficientBalance(u64, u64),
+    InvalidExtSK(u32),
     InvalidHeight(i32, i32),
+    InvalidMemo(std::str::Utf8Error),
     InvalidNewWitnessAnchor(usize, TxId, i32, Node),
+    InvalidNote,
     InvalidWitnessAnchor(i64, i32),
     ScanRequired,
     TableNotEmpty,
     Bech32(bech32::Error),
+    Builder(builder::Error),
     Database(rusqlite::Error),
     Io(std::io::Error),
     Protobuf(protobuf::ProtobufError),
@@ -25,16 +33,26 @@ impl fmt::Display for Error {
         match &self.0 {
             ErrorKind::CorruptedData(reason) => write!(f, "Data DB is corrupted: {}", reason),
             ErrorKind::IncorrectHRPExtFVK => write!(f, "Incorrect HRP for extfvk"),
+            ErrorKind::InsufficientBalance(have, need) => write!(
+                f,
+                "Insufficient balance (have {}, need {} including fee)",
+                have, need
+            ),
+            ErrorKind::InvalidExtSK(account) => {
+                write!(f, "Incorrect ExtendedSpendingKey for account {}", account)
+            }
             ErrorKind::InvalidHeight(expected, actual) => write!(
                 f,
                 "Expected height of next CompactBlock to be {}, but was {}",
                 expected, actual
             ),
+            ErrorKind::InvalidMemo(e) => write!(f, "{}", e),
             ErrorKind::InvalidNewWitnessAnchor(output, txid, last_height, anchor) => write!(
                 f,
                 "New witness for output {} in tx {} has incorrect anchor after scanning block {}: {:?}",
                 output, txid, last_height, anchor,
             ),
+            ErrorKind::InvalidNote => write!(f, "Invalid note"),
             ErrorKind::InvalidWitnessAnchor(id_note, last_height) => write!(
                 f,
                 "Witness for note {} has incorrect anchor after scanning block {}",
@@ -43,6 +61,7 @@ impl fmt::Display for Error {
             ErrorKind::ScanRequired => write!(f, "Must scan blocks first"),
             ErrorKind::TableNotEmpty => write!(f, "Table is not empty"),
             ErrorKind::Bech32(e) => write!(f, "{}", e),
+            ErrorKind::Builder(e) => write!(f, "{:?}", e),
             ErrorKind::Database(e) => write!(f, "{}", e),
             ErrorKind::Io(e) => write!(f, "{}", e),
             ErrorKind::Protobuf(e) => write!(f, "{}", e),
@@ -53,7 +72,9 @@ impl fmt::Display for Error {
 impl error::Error for Error {
     fn source(&self) -> Option<&(dyn error::Error + 'static)> {
         match &self.0 {
+            ErrorKind::InvalidMemo(e) => Some(e),
             ErrorKind::Bech32(e) => Some(e),
+            ErrorKind::Builder(e) => Some(e),
             ErrorKind::Database(e) => Some(e),
             ErrorKind::Io(e) => Some(e),
             ErrorKind::Protobuf(e) => Some(e),
@@ -65,6 +86,12 @@ impl error::Error for Error {
 impl From<bech32::Error> for Error {
     fn from(e: bech32::Error) -> Self {
         Error(ErrorKind::Bech32(e))
+    }
+}
+
+impl From<builder::Error> for Error {
+    fn from(e: builder::Error) -> Self {
+        Error(ErrorKind::Builder(e))
     }
 }
 

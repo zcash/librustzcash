@@ -30,6 +30,7 @@ pub mod error;
 pub mod init;
 pub mod query;
 pub mod scan;
+pub mod transact;
 
 const ANCHOR_OFFSET: u32 = 10;
 const SAPLING_ACTIVATION_HEIGHT: i32 = 280_000;
