@@ -3,6 +3,8 @@ use std::fmt;
 
 #[derive(Debug)]
 pub enum ErrorKind {
+    CorruptedData(&'static str),
+    ScanRequired,
     TableNotEmpty,
     Database(rusqlite::Error),
 }
@@ -13,6 +15,8 @@ pub struct Error(pub(crate) ErrorKind);
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match &self.0 {
+            ErrorKind::CorruptedData(reason) => write!(f, "Data DB is corrupted: {}", reason),
+            ErrorKind::ScanRequired => write!(f, "Must scan blocks first"),
             ErrorKind::TableNotEmpty => write!(f, "Table is not empty"),
             ErrorKind::Database(e) => write!(f, "{}", e),
         }
