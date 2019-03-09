@@ -26,6 +26,7 @@ use zcash_primitives::zip32::ExtendedFullViewingKey;
 
 pub mod error;
 pub mod init;
+pub mod query;
 
 fn address_from_extfvk(extfvk: &ExtendedFullViewingKey) -> String {
     let addr = extfvk.default_address().unwrap().1;
