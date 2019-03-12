@@ -429,13 +429,10 @@ impl JubjubBls12 {
         tmp_params: &E::Params,
         pedersen_hash_generators: &[edwards::Point<E, PrimeOrder>],
     ) {
-        let sum = &edwards::Point::zero();
         for (i, p1) in pedersen_hash_generators.iter().enumerate() {
             if p1 == &edwards::Point::zero() {
                 panic!("Neutral element!");
             }
-            // Used for checking no generator is a sum of previous ones.
-            let sum = &sum.add(&p1, &tmp_params);
             for p2 in pedersen_hash_generators.iter().skip(i + 1) {
                 if p1 == p2 {
                     panic!("Duplicate generator!");
@@ -443,8 +440,21 @@ impl JubjubBls12 {
                 if p1 == &p2.negate() {
                     panic!("Inverse generator!");
                 }
-                if sum == p2 {
-                    panic!("Linear relation between generators!");
+            }
+
+            // check for a generator being the sum of any other two
+            for (j, p2) in pedersen_hash_generators.iter().enumerate() {
+                if j == i {
+                    continue;
+                }
+                for (k, p3) in pedersen_hash_generators.iter().enumerate() {
+                    if k == j || k == i {
+                        continue;
+                    }
+                    let sum = &p2.add(&p3, &tmp_params);
+                    if sum == p1 {
+                        panic!("Linear relation between generators!");
+                    }
                 }
             }
         }
