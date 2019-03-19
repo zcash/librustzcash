@@ -145,7 +145,7 @@ impl CommitmentTree {
         self.left.is_some()
             && self.right.is_some()
             && self.parents.len() == depth - 1
-            && self.parents.iter().fold(true, |acc, p| acc && p.is_some())
+            && self.parents.iter().all(|p| p.is_some())
     }
 
     /// Adds a note to the tree. Returns an error if the tree is full.
