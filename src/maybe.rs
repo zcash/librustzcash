@@ -76,6 +76,41 @@ impl<T> Maybe<T> {
     pub fn is_none(&self) -> Choice {
         !self.is_some
     }
+
+    /// Maps over this value, using `Default` to pass through
+    /// a dummy value in the event `self` is Some.
+    #[inline]
+    pub fn map<U, F>(self, f: F) -> Maybe<U>
+        where T: Default + ConditionallySelectable,
+              F: FnOnce(T) -> U
+    {
+        Maybe::new(
+            f(T::conditional_select(&T::default(), &self.value, self.is_some)),
+            self.is_some
+        )
+    }
+
+    #[inline]
+    pub fn and_then<U, F>(self, f: F) -> Maybe<U>
+        where T: Default + ConditionallySelectable,
+              F: FnOnce(T) -> Maybe<U>
+    {
+        let mut tmp = f(T::conditional_select(&T::default(), &self.value, self.is_some));
+        tmp.is_some &= self.is_some;
+
+        tmp
+    }
+}
+
+impl<T: ConditionallySelectable> ConditionallySelectable for Maybe<T> {
+    fn conditional_select(a: &Self, b: &Self, choice: Choice) -> Self {
+        Maybe::new(
+            T::conditional_select(&a.value, &b.value, choice),
+            // TODO: subtle crate currently doesn't implement ConditionallySelectable
+            // for Choice so we must unwrap these manually.
+            Choice::from(u8::conditional_select(&a.is_some.unwrap_u8(), &b.is_some.unwrap_u8(), choice))
+        )
+    }
 }
 
 impl<T: ConstantTimeEq> ConstantTimeEq for Maybe<T> {

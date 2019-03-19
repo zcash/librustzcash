@@ -39,6 +39,7 @@ use subtle::{Choice, ConditionallySelectable, ConstantTimeEq};
 mod util;
 
 pub mod maybe;
+use maybe::Maybe;
 
 mod fq;
 mod fr;
@@ -296,7 +297,7 @@ impl AffinePoint {
     /// the curve or non-canonical.
     ///
     /// **This operation is variable time.**
-    pub fn from_bytes_vartime(mut b: [u8; 32]) -> Option<Self> {
+    pub fn from_bytes_vartime(mut b: [u8; 32]) -> Maybe<Self> {
         // Grab the sign bit from the representation
         let sign = b[31] >> 7;
 
@@ -304,37 +305,34 @@ impl AffinePoint {
         b[31] &= 0b01111_1111;
 
         // Interpret what remains as the v-coordinate
-        match Fq::from_bytes_vartime(b) {
-            Some(v) => {
-                // -u^2 + v^2 = 1 + d.u^2.v^2
-                // -u^2 = 1 + d.u^2.v^2 - v^2    (rearrange)
-                // -u^2 - d.u^2.v^2 = 1 - v^2    (rearrange)
-                // u^2 + d.u^2.v^2 = v^2 - 1     (flip signs)
-                // u^2 (1 + d.v^2) = v^2 - 1     (factor)
-                // u^2 = (v^2 - 1) / (1 + d.v^2) (isolate u^2)
-                // We know that (1 + d.v^2) is nonzero for all v:
-                //   (1 + d.v^2) = 0
-                //   d.v^2 = -1
-                //   v^2 = -(1 / d)   No solutions, as -(1 / d) is not a square
+        Fq::from_bytes(b).and_then(|v| {
+            // -u^2 + v^2 = 1 + d.u^2.v^2
+            // -u^2 = 1 + d.u^2.v^2 - v^2    (rearrange)
+            // -u^2 - d.u^2.v^2 = 1 - v^2    (rearrange)
+            // u^2 + d.u^2.v^2 = v^2 - 1     (flip signs)
+            // u^2 (1 + d.v^2) = v^2 - 1     (factor)
+            // u^2 = (v^2 - 1) / (1 + d.v^2) (isolate u^2)
+            // We know that (1 + d.v^2) is nonzero for all v:
+            //   (1 + d.v^2) = 0
+            //   d.v^2 = -1
+            //   v^2 = -(1 / d)   No solutions, as -(1 / d) is not a square
 
-                let v2 = v.square();
+            let v2 = v.square();
 
-                match ((v2 - Fq::one()) * (Fq::one() + EDWARDS_D * &v2).invert_nonzero())
-                    .sqrt_vartime()
-                {
-                    Some(mut u) => {
-                        // Fix the sign of `u` if necessary
-                        if (u.into_bytes()[0] & 1) != sign {
-                            u = -u;
-                        }
+            match ((v2 - Fq::one()) * (Fq::one() + EDWARDS_D * &v2).invert_nonzero())
+                .sqrt_vartime()
+            {
+                Some(u) => {
+                    // Fix the sign of `u` if necessary
+                    let flip_sign = Choice::from((u.into_bytes()[0] ^ sign) & 1);
+                    let u_negated = -u;
+                    let final_u = Fq::conditional_select(&u, &u_negated, flip_sign);
 
-                        Some(AffinePoint { u, v })
-                    }
-                    None => None,
+                    Maybe::new(AffinePoint { u: final_u, v }, Choice::from(1u8))
                 }
+                None => Maybe::new(Self::identity(), Choice::from(0u8)),
             }
-            None => None,
-        }
+        })
     }
 
     /// Returns the `u`-coordinate of this point.

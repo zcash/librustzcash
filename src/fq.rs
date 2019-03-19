@@ -2,8 +2,10 @@ use core::fmt;
 use core::ops::{Add, AddAssign, Mul, MulAssign, Neg, Sub, SubAssign};
 
 use byteorder::{ByteOrder, LittleEndian};
-use crate::util::{adc, mac, sbb};
 use subtle::{Choice, ConditionallySelectable, ConstantTimeEq};
+
+use crate::util::{adc, mac, sbb};
+use crate::maybe::Maybe;
 
 /// Represents an element of `GF(q)`.
 // The internal representation of this type is four 64-bit unsigned
@@ -235,9 +237,7 @@ impl Fq {
     /// Attempts to convert a little-endian byte representation of
     /// a field element into an element of `Fq`, failing if the input
     /// is not canonical (is not smaller than q).
-    ///
-    /// **This operation is variable time.**
-    pub fn from_bytes_vartime(bytes: [u8; 32]) -> Option<Fq> {
+    pub fn from_bytes(bytes: [u8; 32]) -> Maybe<Fq> {
         let mut tmp = Fq([0, 0, 0, 0]);
 
         tmp.0[0] = LittleEndian::read_u64(&bytes[0..8]);
@@ -245,23 +245,22 @@ impl Fq {
         tmp.0[2] = LittleEndian::read_u64(&bytes[16..24]);
         tmp.0[3] = LittleEndian::read_u64(&bytes[24..32]);
 
-        // Check if the value is in the field
-        for i in (0..4).rev() {
-            if tmp.0[i] < MODULUS.0[i] {
-                // Convert to Montgomery form by computing
-                // (a.R^{-1} * R^2) / R = a.R
-                tmp.mul_assign(&R2);
+        // Try to subtract the modulus
+        let (_, borrow) = sbb(tmp.0[0], MODULUS.0[0], 0);
+        let (_, borrow) = sbb(tmp.0[1], MODULUS.0[1], borrow);
+        let (_, borrow) = sbb(tmp.0[2], MODULUS.0[2], borrow);
+        let (_, borrow) = sbb(tmp.0[3], MODULUS.0[3], borrow);
 
-                return Some(tmp);
-            }
+        // If the element is smaller than MODULUS then the
+        // subtraction will underflow, producing a borrow value
+        // of 0xffff...ffff. Otherwise, it'll be zero.
+        let is_some = (borrow as u8) & 1;
 
-            if tmp.0[i] > MODULUS.0[i] {
-                return None;
-            }
-        }
+        // Convert to Montgomery form by computing
+        // (a.R^{-1} * R^2) / R = a.R
+        tmp *= &R2;
 
-        // Value is equal to the modulus
-        None
+        Maybe::new(tmp, Choice::from(is_some))
     }
 
     /// Converts an element of `Fq` into a byte representation in
@@ -696,9 +695,9 @@ fn test_into_bytes() {
 }
 
 #[test]
-fn test_from_bytes_vartime() {
+fn test_from_bytes() {
     assert_eq!(
-        Fq::from_bytes_vartime([
+        Fq::from_bytes([
             0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
             0, 0, 0
         ]).unwrap(),
@@ -706,7 +705,7 @@ fn test_from_bytes_vartime() {
     );
 
     assert_eq!(
-        Fq::from_bytes_vartime([
+        Fq::from_bytes([
             1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
             0, 0, 0
         ]).unwrap(),
@@ -714,7 +713,7 @@ fn test_from_bytes_vartime() {
     );
 
     assert_eq!(
-        Fq::from_bytes_vartime([
+        Fq::from_bytes([
             254, 255, 255, 255, 1, 0, 0, 0, 2, 72, 3, 0, 250, 183, 132, 88, 245, 79, 188, 236, 239,
             79, 140, 153, 111, 5, 197, 172, 89, 177, 36, 24
         ]).unwrap(),
@@ -723,38 +722,38 @@ fn test_from_bytes_vartime() {
 
     // -1 should work
     assert!(
-        Fq::from_bytes_vartime([
+        Fq::from_bytes([
             0, 0, 0, 0, 255, 255, 255, 255, 254, 91, 254, 255, 2, 164, 189, 83, 5, 216, 161, 9, 8,
             216, 57, 51, 72, 125, 157, 41, 83, 167, 237, 115
-        ]).is_some()
+        ]).is_some().unwrap_u8() == 1
     );
 
     // modulus is invalid
     assert!(
-        Fq::from_bytes_vartime([
+        Fq::from_bytes([
             1, 0, 0, 0, 255, 255, 255, 255, 254, 91, 254, 255, 2, 164, 189, 83, 5, 216, 161, 9, 8,
             216, 57, 51, 72, 125, 157, 41, 83, 167, 237, 115
-        ]).is_none()
+        ]).is_none().unwrap_u8() == 1
     );
 
     // Anything larger than the modulus is invalid
     assert!(
-        Fq::from_bytes_vartime([
+        Fq::from_bytes([
             2, 0, 0, 0, 255, 255, 255, 255, 254, 91, 254, 255, 2, 164, 189, 83, 5, 216, 161, 9, 8,
             216, 57, 51, 72, 125, 157, 41, 83, 167, 237, 115
-        ]).is_none()
+        ]).is_none().unwrap_u8() == 1
     );
     assert!(
-        Fq::from_bytes_vartime([
+        Fq::from_bytes([
             1, 0, 0, 0, 255, 255, 255, 255, 254, 91, 254, 255, 2, 164, 189, 83, 5, 216, 161, 9, 8,
             216, 58, 51, 72, 125, 157, 41, 83, 167, 237, 115
-        ]).is_none()
+        ]).is_none().unwrap_u8() == 1
     );
     assert!(
-        Fq::from_bytes_vartime([
+        Fq::from_bytes([
             1, 0, 0, 0, 255, 255, 255, 255, 254, 91, 254, 255, 2, 164, 189, 83, 5, 216, 161, 9, 8,
             216, 57, 51, 72, 125, 157, 41, 83, 167, 237, 116
-        ]).is_none()
+        ]).is_none().unwrap_u8() == 1
     );
 }
 
