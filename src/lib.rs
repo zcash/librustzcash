@@ -38,6 +38,8 @@ use subtle::{Choice, ConditionallySelectable, ConstantTimeEq};
 #[macro_use]
 mod util;
 
+pub mod maybe;
+
 mod fq;
 mod fr;
 pub use fq::*;
