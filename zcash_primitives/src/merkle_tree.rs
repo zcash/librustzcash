@@ -436,9 +436,11 @@ impl CommitmentTreeWitness {
     }
 
     pub fn from_slice_with_depth(mut witness: &[u8], depth: usize) -> Result<Self, ()> {
-        // Skip the first byte, which should be "32" to signify the length of
+        // Skip the first byte, which should be "depth" to signify the length of
         // the following vector of Pedersen hashes.
-        assert_eq!(witness[0], depth as u8);
+        if witness[0] != depth as u8 {
+            return Err(());
+        }
         witness = &witness[1..];
 
         // Begin to construct the authentication path
@@ -447,7 +449,9 @@ impl CommitmentTreeWitness {
         // The vector works in reverse
         for i in (0..depth).rev() {
             // skip length of inner vector
-            assert_eq!(witness[0], 32); // the length of a pedersen hash
+            if witness[0] != 32 { // the length of a pedersen hash
+                return Err(());
+            }
             witness = &witness[1..];
 
             // Grab the sibling node at this depth in the tree
@@ -472,9 +476,10 @@ impl CommitmentTreeWitness {
         }
 
         // Read the position from the witness
-        let position = witness
-            .read_u64::<LittleEndian>()
-            .expect("should have had index at the end");
+        let position = match witness.read_u64::<LittleEndian>() {
+            Ok(pos) => pos,
+            Err(_) => return Err(()),
+        };
 
         // Given the position, let's finish constructing the authentication
         // path
@@ -488,12 +493,14 @@ impl CommitmentTreeWitness {
         // The witness should be empty now; if it wasn't, the caller would
         // have provided more information than they should have, indicating
         // a bug downstream
-        assert_eq!(witness.len(), 0);
-
-        Ok(CommitmentTreeWitness {
-            auth_path,
-            position,
-        })
+        if witness.is_empty() {
+            Ok(CommitmentTreeWitness {
+                auth_path,
+                position,
+            })
+        } else {
+            Err(())
+        }
     }
 }
 
