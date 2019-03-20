@@ -324,25 +324,21 @@ impl Fr {
     }
 
     /// Computes the square root of this element, if it exists.
-    ///
-    /// **This operation is variable time.**
-    pub fn sqrt_vartime(&self) -> Option<Self> {
+    pub fn sqrt(&self) -> Maybe<Self> {
         // Because r = 3 (mod 4)
         // sqrt can be done with only one exponentiation,
         // via the computation of  self^((r + 1) // 4) (mod r)
-        // a1 = self^((r - 3) // 4)
-        let a1 = self.pow_vartime(&[
-            0xb425c397b5bdcb2d,
+        let sqrt = self.pow_vartime(&[
+            0xb425c397b5bdcb2e,
             0x299a0824f3320420,
             0x4199cec0404d0ec0,
-            0x039f6d3a994cebea,
+            0x039f6d3a994cebea
         ]);
-        let a0 = a1 * (a1 * self);
-        if a0 == -Self::one() {
-            None
-        } else {
-            Some(a1 * self)
-        }
+
+        Maybe::new(
+            sqrt,
+            (&sqrt * &sqrt).ct_eq(self) // Only return Some if it's the square root.
+        )
     }
 
     /// Exponentiates `self` by `by`, where `by` is a
@@ -924,8 +920,8 @@ fn test_sqrt() {
     let mut none_count = 0;
 
     for _ in 0..100 {
-        let square_root = square.sqrt_vartime();
-        if square_root.is_none() {
+        let square_root = square.sqrt();
+        if square_root.is_none().unwrap_u8() == 1 {
             none_count += 1;
         } else {
             assert_eq!(square_root.unwrap() * square_root.unwrap(), square);
