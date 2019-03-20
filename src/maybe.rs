@@ -77,8 +77,14 @@ impl<T> Maybe<T> {
         !self.is_some
     }
 
-    /// Maps over this value, using `Default` to pass through
-    /// a dummy value in the event `self` is Some.
+    /// Returns a `None` value if the option is `None`, otherwise
+    /// returns a `Maybe` enclosing the value of the provided closure.
+    /// The closure is given the enclosed value or, if the option is
+    /// `None`, it is provided a dummy value computed using
+    /// `Default::default()`.
+    ///
+    /// This operates in constant time, because the provided closure
+    /// is always called.
     #[inline]
     pub fn map<U, F>(self, f: F) -> Maybe<U>
         where T: Default + ConditionallySelectable,
@@ -90,6 +96,13 @@ impl<T> Maybe<T> {
         )
     }
 
+    /// Returns a `None` value if the option is `None`, otherwise
+    /// returns the result of the provided closure. The closure is
+    /// given the enclosed value or, if the option is `None`, it
+    /// is provided a dummy value computed using `Default::default()`.
+    ///
+    /// This operates in constant time, because the provided closure
+    /// is always called.
     #[inline]
     pub fn and_then<U, F>(self, f: F) -> Maybe<U>
         where T: Default + ConditionallySelectable,
@@ -164,6 +177,32 @@ fn test_maybe() {
     // Test unwrap_or_else
     assert_eq!(Maybe::new(1, Choice::from(1)).unwrap_or_else(|| 2), 1);
     assert_eq!(Maybe::new(1, Choice::from(0)).unwrap_or_else(|| 2), 2);
+
+    // Test map
+    assert_eq!(Maybe::new(1, Choice::from(1)).map(|v| {
+        assert_eq!(v, 1);
+        2
+    }).unwrap(), 2);
+    assert_eq!(Maybe::new(1, Choice::from(0)).map(|_| {
+        2
+    }).is_none().unwrap_u8(), 1);
+
+    // Test and_then
+    assert_eq!(Maybe::new(1, Choice::from(1)).and_then(|v| {
+        assert_eq!(v, 1);
+        Maybe::new(2, Choice::from(0))
+    }).is_none().unwrap_u8(), 1);
+    assert_eq!(Maybe::new(1, Choice::from(1)).and_then(|v| {
+        assert_eq!(v, 1);
+        Maybe::new(2, Choice::from(1))
+    }).unwrap(), 2);
+
+    assert_eq!(Maybe::new(1, Choice::from(0)).and_then(|_| {
+        Maybe::new(2, Choice::from(0))
+    }).is_none().unwrap_u8(), 1);
+    assert_eq!(Maybe::new(1, Choice::from(0)).and_then(|_| {
+        Maybe::new(2, Choice::from(1))
+    }).is_none().unwrap_u8(), 1);
 }
 
 #[test]
