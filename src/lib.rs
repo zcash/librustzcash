@@ -295,9 +295,7 @@ impl AffinePoint {
     /// Attempts to interpret a byte representation of an
     /// affine point, failing if the element is not on
     /// the curve or non-canonical.
-    ///
-    /// **This operation is variable time.**
-    pub fn from_bytes_vartime(mut b: [u8; 32]) -> Maybe<Self> {
+    pub fn from_bytes(mut b: [u8; 32]) -> Maybe<Self> {
         // Grab the sign bit from the representation
         let sign = b[31] >> 7;
 
@@ -319,19 +317,15 @@ impl AffinePoint {
 
             let v2 = v.square();
 
-            match ((v2 - Fq::one()) * (Fq::one() + EDWARDS_D * &v2).invert_nonzero())
-                .sqrt_vartime()
-            {
-                Some(u) => {
-                    // Fix the sign of `u` if necessary
-                    let flip_sign = Choice::from((u.into_bytes()[0] ^ sign) & 1);
-                    let u_negated = -u;
-                    let final_u = Fq::conditional_select(&u, &u_negated, flip_sign);
+            ((v2 - Fq::one()) * (Fq::one() + EDWARDS_D * &v2).invert_nonzero())
+            .sqrt().and_then(|u| {
+                // Fix the sign of `u` if necessary
+                let flip_sign = Choice::from((u.into_bytes()[0] ^ sign) & 1);
+                let u_negated = -u;
+                let final_u = Fq::conditional_select(&u, &u_negated, flip_sign);
 
-                    Maybe::new(AffinePoint { u: final_u, v }, Choice::from(1u8))
-                }
-                None => Maybe::new(Self::identity(), Choice::from(0u8)),
-            }
+                Maybe::new(AffinePoint { u: final_u, v }, Choice::from(1u8))
+            })
         })
     }
 
@@ -749,9 +743,9 @@ fn test_is_on_curve_var() {
 
 #[test]
 fn test_d_is_non_quadratic_residue() {
-    assert!(EDWARDS_D.sqrt_vartime().is_none());
-    assert!((-EDWARDS_D).sqrt_vartime().is_none());
-    assert!((-EDWARDS_D).invert_nonzero().sqrt_vartime().is_none());
+    assert!(EDWARDS_D.sqrt().is_none().unwrap_u8() == 1);
+    assert!((-EDWARDS_D).sqrt().is_none().unwrap_u8() == 1);
+    assert!((-EDWARDS_D).invert_nonzero().sqrt().is_none().unwrap_u8() == 1);
 }
 
 #[test]

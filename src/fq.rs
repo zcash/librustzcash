@@ -343,55 +343,19 @@ impl Fq {
         Fq::montgomery_reduce(r0, r1, r2, r3, r4, r5, r6, r7)
     }
 
-    fn legendre_symbol_vartime(&self) -> Self {
-        // Legendre symbol computed via Euler's criterion:
-        // self^((q - 1) // 2)
-        self.pow_vartime(&[
-            0x7fffffff80000000,
-            0xa9ded2017fff2dff,
-            0x199cec0404d0ec02,
-            0x39f6d3a994cebea4,
-        ])
-    }
-
     /// Computes the square root of this element, if it exists.
-    ///
-    /// **This operation is variable time.**
-    pub fn sqrt_vartime(&self) -> Option<Self> {
+    pub fn sqrt(&self) -> Maybe<Self> {
         // Tonelli-Shank's algorithm for q mod 16 = 1
         // https://eprint.iacr.org/2012/685.pdf (page 12, algorithm 5)
-
-        // The algorithm is only defined for nonzero points.
-        if self == &Fq::zero() {
-            return Some(*self);
-        }
 
         // w = self^((t - 1) // 2)
         //   = self^6104339283789297388802252303364915521546564123189034618274734669823
         let w = self.pow_vartime(&[
             0x7fff2dff7fffffff,
-            0x4d0ec02a9ded201,
+            0x04d0ec02a9ded201,
             0x94cebea4199cec04,
-            0x39f6d3a9,
+            0x0000000039f6d3a9,
         ]);
-
-        {
-            // This bails early if it's nonsquare by computing Euler's
-            // criterion using the previous result `w`.
-
-            // a0 = self^t
-            let mut a0 = w.square() * self;
-
-            // a0 = self^(t*(s/2)) = self^((q - 1) // 2)
-            for _ in 0..(S - 1) {
-                a0 = a0.square();
-            }
-
-            // If it's a nonsquare, bail.
-            if a0 == -Self::one() {
-                return None;
-            }
-        }
 
         let mut v = S;
         let mut x = self * &w;
@@ -400,31 +364,32 @@ impl Fq {
         // Initialize z as the 2^S root of unity.
         let mut z = ROOT_OF_UNITY;
 
-        while b != Self::one() {
-            // Find least integer k >= 0 such that b^(2^k) = 1
-            let mut k = 0;
-            {
-                let mut tmp = b;
-                while tmp != Self::one() {
-                    tmp = tmp.square();
-                    k += 1;
-                }
+        for max_v in (1..=S).rev() {
+            let mut k = 1;
+            let mut tmp = b.square();
+            let mut j_less_than_v: Choice = 1.into();
+
+            for j in 2..max_v {
+                let tmp_is_one = tmp.ct_eq(&Fq::one());
+                let squared = Fq::conditional_select(&tmp, &z, tmp_is_one).square();
+                tmp = Fq::conditional_select(&squared, &tmp, tmp_is_one);
+                let new_z = Fq::conditional_select(&z, &squared, tmp_is_one);
+                j_less_than_v &= !j.ct_eq(&v);
+                k = u32::conditional_select(&j, &k, tmp_is_one);
+                z = Fq::conditional_select(&z, &new_z, j_less_than_v);
             }
 
-            let mut w = z;
-
-            // w = z^(2^(v - k - 1))
-            for _ in 0..(v - k - 1) {
-                w = w.square();
-            }
-
-            z = w.square();
+            let result = &x * &z;
+            x = Fq::conditional_select(&result, &x, b.ct_eq(&Fq::one()));
+            z = z.square();
             b = &b * &z;
-            x = &x * &w;
             v = k;
         }
 
-        Some(x)
+        Maybe::new(
+            x,
+            (&x * &x).ct_eq(self) // Only return Some if it's the square root.
+        )
     }
 
     /// Exponentiates `self` by `by`, where `by` is a
@@ -987,7 +952,7 @@ fn test_invert_nonzero_is_pow() {
 #[test]
 fn test_sqrt() {
     {
-        assert_eq!(Fq::zero().sqrt_vartime().unwrap(), Fq::zero());
+        assert_eq!(Fq::zero().sqrt().unwrap(), Fq::zero());
     }
 
     let mut square = Fq([
@@ -1000,8 +965,8 @@ fn test_sqrt() {
     let mut none_count = 0;
 
     for _ in 0..100 {
-        let square_root = square.sqrt_vartime();
-        if square_root.is_none() {
+        let square_root = square.sqrt();
+        if square_root.is_none().unwrap_u8() == 1 {
             none_count += 1;
         } else {
             assert_eq!(square_root.unwrap() * square_root.unwrap(), square);
