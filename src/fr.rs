@@ -201,14 +201,19 @@ impl Default for Fr {
 }
 
 impl Fr {
+    /// Returns zero, the additive identity.
+    #[inline]
     pub fn zero() -> Fr {
         Fr([0, 0, 0, 0])
     }
 
+    /// Returns one, the multiplicative identity.
+    #[inline]
     pub fn one() -> Fr {
         R
     }
 
+    /// Doubles this field element.
     #[inline]
     pub fn double(&self) -> Fr {
         self + self
@@ -259,6 +264,8 @@ impl Fr {
         res
     }
 
+    /// Converts a 512-bit little endian integer into
+    /// an element of Fr by reducing modulo r.
     pub fn from_bytes_wide(bytes: [u8; 64]) -> Fr {
         Fr::from_u512([
             LittleEndian::read_u64(&bytes[0..8]),

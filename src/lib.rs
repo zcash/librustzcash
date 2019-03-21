@@ -27,6 +27,8 @@
 //! recommended to enable this if you are able to use a nightly version of the Rust compiler.
 
 #![no_std]
+#![deny(missing_debug_implementations)]
+#![deny(missing_docs)]
 
 #[cfg(feature = "std")]
 #[macro_use]
@@ -192,7 +194,7 @@ impl From<ExtendedPoint> for AffinePoint {
 /// This is a pre-processed version of an affine point `(u, v)`
 /// in the form `(v + u, v - u, u * v * 2d)`. This can be added to an
 /// [`ExtendedPoint`](crate::ExtendedPoint).
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct AffineNielsPoint {
     v_plus_u: Fq,
     v_minus_u: Fq,
@@ -222,7 +224,7 @@ impl ConditionallySelectable for AffineNielsPoint {
 
 /// This is a pre-processed version of an extended point `(U, V, Z, T1, T2)`
 /// in the form `(V + U, V - U, Z, T1 * T2 * 2d)`.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct ExtendedNielsPoint {
     v_plus_u: Fq,
     v_minus_u: Fq,

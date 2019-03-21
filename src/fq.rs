@@ -221,14 +221,19 @@ impl Default for Fq {
 }
 
 impl Fq {
+    /// Returns zero, the additive identity.
+    #[inline]
     pub fn zero() -> Fq {
         Fq([0, 0, 0, 0])
     }
 
+    /// Returns one, the multiplicative identity.
+    #[inline]
     pub fn one() -> Fq {
         R
     }
 
+    /// Doubles this field element.
     #[inline]
     pub fn double(&self) -> Fq {
         self + self
@@ -279,6 +284,8 @@ impl Fq {
         res
     }
 
+    /// Converts a 512-bit little endian integer into
+    /// an element of Fq by reducing modulo q.
     pub fn from_bytes_wide(bytes: [u8; 64]) -> Fq {
         Fq::from_u512([
             LittleEndian::read_u64(&bytes[0..8]),
