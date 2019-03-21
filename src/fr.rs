@@ -376,10 +376,9 @@ impl Fr {
         res
     }
 
-    /// Exponentiates `self` by r - 2, which has the
-    /// effect of inverting the element if it is
-    /// nonzero.
-    pub fn invert_nonzero(&self) -> Self {
+    /// Computes the multiplicative inverse of this element,
+    /// failing if the element is zero.
+    pub fn invert(&self) -> Maybe<Self> {
         #[inline(always)]
         fn square_assign_multi(n: &mut Fr, num_times: usize) {
             for _ in 0..num_times {
@@ -481,7 +480,7 @@ impl Fr {
         square_assign_multi(&mut t0, 7);
         t0.mul_assign(&t1);
 
-        t0
+        Maybe::new(t0, !self.ct_eq(&Self::zero()))
     }
 
     #[inline]
@@ -865,13 +864,14 @@ fn test_squaring() {
 
 #[test]
 fn test_inversion() {
-    assert_eq!(Fr::one().invert_nonzero(), Fr::one());
-    assert_eq!((-&Fr::one()).invert_nonzero(), -&Fr::one());
+    assert_eq!(Fr::zero().invert().is_none().unwrap_u8(), 1);
+    assert_eq!(Fr::one().invert().unwrap(), Fr::one());
+    assert_eq!((-&Fr::one()).invert().unwrap(), -&Fr::one());
 
     let mut tmp = R2;
 
     for _ in 0..100 {
-        let mut tmp2 = tmp.invert_nonzero();
+        let mut tmp2 = tmp.invert().unwrap();
         tmp2.mul_assign(&tmp);
 
         assert_eq!(tmp2, Fr::one());
@@ -881,7 +881,7 @@ fn test_inversion() {
 }
 
 #[test]
-fn test_invert_nonzero_is_pow() {
+fn test_invert_is_pow() {
     let r_minus_2 = [
         0xd0970e5ed6f72cb5,
         0xa6682093ccc81082,
@@ -894,7 +894,7 @@ fn test_invert_nonzero_is_pow() {
     let mut r3 = R;
 
     for _ in 0..100 {
-        r1 = r1.invert_nonzero();
+        r1 = r1.invert().unwrap();
         r2 = r2.pow_vartime(&r_minus_2);
         r3 = r3.pow(&r_minus_2);
 

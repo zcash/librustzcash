@@ -93,7 +93,7 @@ fn test_multiplicative_inverse() {
         if a == Fr::zero() {
             continue;
         }
-        let a_inv = a.invert_nonzero();
+        let a_inv = a.invert().unwrap();
         assert_eq!(Fr::one(), a * a_inv);
         assert_eq!(Fr::one(), a_inv * a);
     }

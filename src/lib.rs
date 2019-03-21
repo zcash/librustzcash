@@ -180,7 +180,7 @@ impl From<ExtendedPoint> for AffinePoint {
     fn from(extended: ExtendedPoint) -> AffinePoint {
         // Z coordinate is always nonzero, so this is
         // its inverse.
-        let zinv = extended.z.invert_nonzero();
+        let zinv = extended.z.invert().unwrap();
 
         AffinePoint {
             u: extended.u * &zinv,
@@ -317,7 +317,7 @@ impl AffinePoint {
 
             let v2 = v.square();
 
-            ((v2 - Fq::one()) * (Fq::one() + EDWARDS_D * &v2).invert_nonzero())
+            ((v2 - Fq::one()) * (Fq::one() + EDWARDS_D * &v2).invert().unwrap())
             .sqrt().and_then(|u| {
                 // Fix the sign of `u` if necessary
                 let flip_sign = Choice::from((u.into_bytes()[0] ^ sign) & 1);
@@ -708,7 +708,7 @@ pub fn batch_normalize<'a>(v: &'a mut [ExtendedPoint]) -> impl Iterator<Item = A
     }
 
     // This is the inverse, as all z-coordinates are nonzero.
-    acc = acc.invert_nonzero();
+    acc = acc.invert().unwrap();
 
     for p in v.iter_mut().rev() {
         let mut q = *p;
@@ -745,7 +745,7 @@ fn test_is_on_curve_var() {
 fn test_d_is_non_quadratic_residue() {
     assert!(EDWARDS_D.sqrt().is_none().unwrap_u8() == 1);
     assert!((-EDWARDS_D).sqrt().is_none().unwrap_u8() == 1);
-    assert!((-EDWARDS_D).invert_nonzero().sqrt().is_none().unwrap_u8() == 1);
+    assert!((-EDWARDS_D).invert().unwrap().sqrt().is_none().unwrap_u8() == 1);
 }
 
 #[test]
