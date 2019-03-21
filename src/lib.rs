@@ -46,8 +46,8 @@ use maybe::Maybe;
 
 mod fq;
 mod fr;
-pub use fq::*;
-pub use fr::*;
+pub use fq::Fq;
+pub use fr::Fr;
 
 const FR_MODULUS_BYTES: [u8; 32] = [
     183, 44, 247, 214, 94, 14, 151, 208, 130, 16, 200, 204, 147, 32, 104, 166, 0, 59, 52, 1, 1, 59,
