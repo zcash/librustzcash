@@ -29,6 +29,7 @@
 #![no_std]
 #![deny(missing_debug_implementations)]
 #![deny(missing_docs)]
+#![deny(unsafe_code)]
 
 #[cfg(feature = "std")]
 #[macro_use]
