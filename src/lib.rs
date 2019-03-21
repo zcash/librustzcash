@@ -48,6 +48,11 @@ mod fr;
 pub use fq::*;
 pub use fr::*;
 
+const FR_MODULUS_BYTES: [u8; 32] = [
+    183, 44, 247, 214, 94, 14, 151, 208, 130, 16, 200, 204, 147, 32, 104, 166, 0, 59, 52, 1, 1, 59,
+    103, 6, 169, 175, 51, 101, 234, 180, 125, 14,
+];
+
 /// This represents a Jubjub point in the affine `(u, v)`
 /// coordinates.
 #[derive(Clone, Copy, Debug)]
@@ -203,7 +208,7 @@ pub struct AffineNielsPoint {
 
 impl AffineNielsPoint {
     /// Constructs this point from the neutral element `(0, 1)`.
-    pub fn identity() -> Self {
+    pub const fn identity() -> Self {
         AffineNielsPoint {
             v_plus_u: Fq::one(),
             v_minus_u: Fq::one(),
@@ -245,7 +250,7 @@ impl ConditionallySelectable for ExtendedNielsPoint {
 
 impl ExtendedNielsPoint {
     /// Constructs this point from the neutral element `(0, 1)`.
-    pub fn identity() -> Self {
+    pub const fn identity() -> Self {
         ExtendedNielsPoint {
             v_plus_u: Fq::one(),
             v_minus_u: Fq::one(),
@@ -257,29 +262,46 @@ impl ExtendedNielsPoint {
 
 // `d = -(10240/10241)`
 #[allow(dead_code)]
-const EDWARDS_D: Fq = Fq([
-    0x2a522455b974f6b0,
-    0xfc6cc9ef0d9acab3,
-    0x7a08fb94c27628d1,
-    0x57f8f6a8fe0e262e,
+const EDWARDS_D: Fq = Fq::from_raw([
+    0x01065fd6d6343eb1,
+    0x292d7f6d37579d26,
+    0xf5fd9207e6bd7fd4,
+    0x2a9318e74bfa2b48,
 ]);
 
 // `2*d`
 #[allow(dead_code)]
-const EDWARDS_D2: Fq = Fq([
-    0x54a448ac72e9ed5f,
-    0xa51befdb1b373967,
-    0xc0d81f217b4a799e,
-    0x3c0445fed27ecf14,
+const EDWARDS_D2: Fq = Fq::from_raw([
+    0x020cbfadac687d62,
+    0x525afeda6eaf3a4c,
+    0xebfb240fcd7affa8,
+    0x552631ce97f45691,
 ]);
 
 impl AffinePoint {
     /// Constructs the neutral element `(0, 1)`.
-    pub fn identity() -> Self {
+    pub const fn identity() -> Self {
         AffinePoint {
             u: Fq::zero(),
             v: Fq::one(),
         }
+    }
+
+    /// Multiplies this point by the cofactor, producing an
+    /// `ExtendedPoint`
+    pub fn mul_by_cofactor(&self) -> ExtendedPoint {
+        ExtendedPoint::from(*self).mul_by_cofactor()
+    }
+
+    /// Determines if this point is of small order.
+    pub fn is_small_order(&self) -> Choice {
+        ExtendedPoint::from(*self).is_small_order()
+    }
+
+    /// Determines if this point is torsion free and so is
+    /// in the prime order subgroup.
+    pub fn is_torsion_free(&self) -> Choice {
+        ExtendedPoint::from(*self).is_torsion_free()
     }
 
     /// Converts this element into its byte representation.
@@ -319,9 +341,7 @@ impl AffinePoint {
 
             let v2 = v.square();
 
-            ((v2 - Fq::one()) * (Fq::one() + EDWARDS_D * &v2))
-                .invert()
-                .unwrap()
+            ((v2 - Fq::one()) * ((Fq::one() + EDWARDS_D * &v2).invert().unwrap_or(Fq::zero())))
                 .sqrt()
                 .and_then(|u| {
                     // Fix the sign of `u` if necessary
@@ -354,6 +374,12 @@ impl AffinePoint {
         }
     }
 
+    /// Constructs an AffinePoint given `u` and `v` without checking
+    /// that the point is on the curve.
+    pub const fn from_raw_unchecked(u: Fq, v: Fq) -> AffinePoint {
+        AffinePoint { u, v }
+    }
+
     /// This is only for debugging purposes and not
     /// exposed in the public API. Checks that this
     /// point is on the curve.
@@ -368,7 +394,7 @@ impl AffinePoint {
 
 impl ExtendedPoint {
     /// Constructs an extended point from the neutral element `(0, 1)`.
-    pub fn identity() -> Self {
+    pub const fn identity() -> Self {
         ExtendedPoint {
             u: Fq::zero(),
             v: Fq::one(),
@@ -376,6 +402,29 @@ impl ExtendedPoint {
             t1: Fq::zero(),
             t2: Fq::zero(),
         }
+    }
+
+    /// Determines if this point is the identity.
+    pub fn is_identity(&self) -> Choice {
+        // If this point is the identity, then
+        //     u = 0 * z = 0
+        // and v = 1 * z = z
+        self.u.ct_eq(&Fq::zero()) & self.v.ct_eq(&self.z)
+    }
+
+    /// Determines if this point is of small order.
+    pub fn is_small_order(&self) -> Choice {
+        // We only need to perform two doublings, since the 2-torsion
+        // points are (0, 1) and (0, -1), and so we only need to check
+        // that the u-coordinate of the result is zero to see if the
+        // point is small order.
+        self.double().double().u.ct_eq(&Fq::zero())
+    }
+
+    /// Determines if this point is torsion free and so is contained
+    /// in the prime order subgroup.
+    pub fn is_torsion_free(&self) -> Choice {
+        self.multiply(&FR_MODULUS_BYTES).is_identity()
     }
 
     /// Multiplies this element by the cofactor `8`.
@@ -486,6 +535,32 @@ impl ExtendedPoint {
         }.into_extended()
     }
 
+    #[inline]
+    fn multiply(self, by: &[u8; 32]) -> Self {
+        let zero = ExtendedPoint::identity().to_niels();
+        let base = self.to_niels();
+
+        let mut acc = ExtendedPoint::identity();
+
+        // This is a simple double-and-add implementation of point
+        // multiplication, moving from most significant to least
+        // significant bit of the scalar.
+        //
+        // We skip the leading four bits because they're always
+        // unset for Fr.
+        for bit in by
+            .iter()
+            .rev()
+            .flat_map(|byte| (0..8).rev().map(move |i| Choice::from((byte >> i) & 1u8)))
+            .skip(4)
+        {
+            acc = acc.double();
+            acc = acc + ExtendedNielsPoint::conditional_select(&zero, &base, bit);
+        }
+
+        acc
+    }
+
     /// This is only for debugging purposes and not
     /// exposed in the public API. Checks that this
     /// point is on the curve.
@@ -503,29 +578,7 @@ impl<'a, 'b> Mul<&'b Fr> for &'a ExtendedPoint {
     type Output = ExtendedPoint;
 
     fn mul(self, other: &'b Fr) -> ExtendedPoint {
-        let zero = ExtendedPoint::identity().to_niels();
-        let base = self.to_niels();
-
-        let mut acc = ExtendedPoint::identity();
-
-        // This is a simple double-and-add implementation of point
-        // multiplication, moving from most significant to least
-        // significant bit of the scalar.
-        //
-        // We skip the leading four bits because they're always
-        // unset for Fr.
-        for bit in other
-            .into_bytes()
-            .iter()
-            .rev()
-            .flat_map(|byte| (0..8).rev().map(move |i| Choice::from((byte >> i) & 1u8)))
-            .skip(4)
-        {
-            acc = acc.double();
-            acc = acc + ExtendedNielsPoint::conditional_select(&zero, &base, bit);
-        }
-
-        acc
+        self.multiply(&other.into_bytes())
     }
 }
 
@@ -853,6 +906,179 @@ fn test_batch_normalize() {
         assert!(expected[i] == result2[i]);
         assert!(v[i].is_on_curve_vartime());
         assert!(AffinePoint::from(v[i]) == expected[i]);
+    }
+}
+
+#[cfg(test)]
+const FULL_GENERATOR: AffinePoint = AffinePoint::from_raw_unchecked(
+    Fq::from_raw([
+        0xe4b3d35df1a7adfe,
+        0xcaf55d1b29bf81af,
+        0x8b0f03ddd60a8187,
+        0x62edcbb8bf3787c8,
+    ]),
+    Fq::from_raw([0xb, 0x0, 0x0, 0x0]),
+);
+
+#[cfg(test)]
+const EIGHT_TORSION: [AffinePoint; 8] = [
+    AffinePoint::from_raw_unchecked(
+        Fq::from_raw([
+            0xd92e6a7927200d43,
+            0x7aa41ac43dae8582,
+            0xeaaae086a16618d1,
+            0x71d4df38ba9e7973,
+        ]),
+        Fq::from_raw([
+            0xff0d2068eff496dd,
+            0x9106ee90f384a4a1,
+            0x16a13035ad4d7266,
+            0x4958bdb21966982e,
+        ]),
+    ),
+    AffinePoint::from_raw_unchecked(
+        Fq::from_raw([
+            0xfffeffff00000001,
+            0x67baa40089fb5bfe,
+            0xa5e80b39939ed334,
+            0x73eda753299d7d47,
+        ]),
+        Fq::from_raw([0x0, 0x0, 0x0, 0x0]),
+    ),
+    AffinePoint::from_raw_unchecked(
+        Fq::from_raw([
+            0xd92e6a7927200d43,
+            0x7aa41ac43dae8582,
+            0xeaaae086a16618d1,
+            0x71d4df38ba9e7973,
+        ]),
+        Fq::from_raw([
+            0xf2df96100b6924,
+            0xc2b6b5720c79b75d,
+            0x1c98a7d25c54659e,
+            0x2a94e9a11036e51a,
+        ]),
+    ),
+    AffinePoint::from_raw_unchecked(
+        Fq::from_raw([0x0, 0x0, 0x0, 0x0]),
+        Fq::from_raw([
+            0xffffffff00000000,
+            0x53bda402fffe5bfe,
+            0x3339d80809a1d805,
+            0x73eda753299d7d48,
+        ]),
+    ),
+    AffinePoint::from_raw_unchecked(
+        Fq::from_raw([
+            0x26d19585d8dff2be,
+            0xd919893ec24fd67c,
+            0x488ef781683bbf33,
+            0x218c81a6eff03d4,
+        ]),
+        Fq::from_raw([
+            0xf2df96100b6924,
+            0xc2b6b5720c79b75d,
+            0x1c98a7d25c54659e,
+            0x2a94e9a11036e51a,
+        ]),
+    ),
+    AffinePoint::from_raw_unchecked(
+        Fq::from_raw([0x1000000000000, 0xec03000276030000, 0x8d51ccce760304d0, 0x0]),
+        Fq::from_raw([0x0, 0x0, 0x0, 0x0]),
+    ),
+    AffinePoint::from_raw_unchecked(
+        Fq::from_raw([
+            0x26d19585d8dff2be,
+            0xd919893ec24fd67c,
+            0x488ef781683bbf33,
+            0x218c81a6eff03d4,
+        ]),
+        Fq::from_raw([
+            0xff0d2068eff496dd,
+            0x9106ee90f384a4a1,
+            0x16a13035ad4d7266,
+            0x4958bdb21966982e,
+        ]),
+    ),
+    AffinePoint::from_raw_unchecked(
+        Fq::from_raw([0x0, 0x0, 0x0, 0x0]),
+        Fq::from_raw([0x1, 0x0, 0x0, 0x0]),
+    ),
+];
+
+#[test]
+fn find_eight_torsion() {
+    let g = ExtendedPoint::from(FULL_GENERATOR);
+    assert!(g.is_small_order().unwrap_u8() == 0);
+    let g = g.multiply(&FR_MODULUS_BYTES);
+    assert!(g.is_small_order().unwrap_u8() == 1);
+
+    let mut cur = g;
+
+    for (i, point) in EIGHT_TORSION.iter().enumerate() {
+        let tmp = AffinePoint::from(cur);
+        if &tmp != point {
+            panic!("{}th torsion point should be {:?}", i, tmp);
+        }
+
+        cur += &g;
+    }
+}
+
+#[test]
+fn find_curve_generator() {
+    let mut trial_bytes = [0; 32];
+    for _ in 0..255 {
+        let a = AffinePoint::from_bytes(trial_bytes);
+        if a.is_some().unwrap_u8() == 1 {
+            let a = a.unwrap();
+            assert!(a.is_on_curve_vartime());
+            let b = ExtendedPoint::from(a);
+            let b = b.multiply(&FR_MODULUS_BYTES);
+            assert!(b.is_small_order().unwrap_u8() == 1);
+            let b = b.double();
+            assert!(b.is_small_order().unwrap_u8() == 1);
+            let b = b.double();
+            assert!(b.is_small_order().unwrap_u8() == 1);
+            if b.is_identity().unwrap_u8() == 0 {
+                let b = b.double();
+                assert!(b.is_small_order().unwrap_u8() == 1);
+                assert!(b.is_identity().unwrap_u8() == 1);
+                assert_eq!(FULL_GENERATOR, a);
+                assert!(a.mul_by_cofactor().is_torsion_free().unwrap_u8() == 1);
+                return;
+            }
+        }
+
+        trial_bytes[0] += 1;
+    }
+
+    panic!("should have found a generator of the curve");
+}
+
+#[test]
+fn test_small_order() {
+    for point in EIGHT_TORSION.iter() {
+        assert!(point.is_small_order().unwrap_u8() == 1);
+    }
+}
+
+#[test]
+fn test_is_identity() {
+    let a = EIGHT_TORSION[0].mul_by_cofactor();
+    let b = EIGHT_TORSION[1].mul_by_cofactor();
+
+    assert_eq!(a.u, b.u);
+    assert_eq!(a.v, a.z);
+    assert_eq!(b.v, b.z);
+    assert!(a.v != b.v);
+    assert!(a.z != b.z);
+
+    assert!(a.is_identity().unwrap_u8() == 1);
+    assert!(b.is_identity().unwrap_u8() == 1);
+
+    for point in EIGHT_TORSION.iter() {
+        assert!(point.mul_by_cofactor().is_identity().unwrap_u8() == 1);
     }
 }
 

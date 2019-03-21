@@ -57,9 +57,9 @@ impl ConditionallySelectable for Fr {
     }
 }
 
-// Constant representing the modulus
-// r = 0x0e7db4ea6533afa906673b0101343b00a6682093ccc81082d0970e5ed6f72cb7
-const MODULUS: Fr = Fr([
+/// Constant representing the modulus
+/// r = 0x0e7db4ea6533afa906673b0101343b00a6682093ccc81082d0970e5ed6f72cb7
+pub const MODULUS: Fr = Fr([
     0xd0970e5ed6f72cb7,
     0xa6682093ccc81082,
     0x06673b0101343b00,
@@ -274,7 +274,8 @@ impl Fr {
     }
 
     /// Squares this element.
-    pub fn square(&self) -> Fr {
+    #[inline]
+    pub const fn square(&self) -> Fr {
         let (r1, carry) = mac(0, self.0[0], self.0[1], 0);
         let (r2, carry) = mac(0, self.0[0], self.0[2], carry);
         let (r3, r4) = mac(0, self.0[0], self.0[3], carry);

@@ -57,8 +57,8 @@ impl ConditionallySelectable for Fq {
     }
 }
 
-// Constant representing the modulus
-// q = 0x73eda753299d7d483339d80809a1d80553bda402fffe5bfeffffffff00000001
+/// Constant representing the modulus
+/// q = 0x73eda753299d7d483339d80809a1d80553bda402fffe5bfeffffffff00000001
 const MODULUS: Fq = Fq([
     0xffffffff00000001,
     0x53bda402fffe5bfe,
@@ -292,7 +292,8 @@ impl Fq {
     }
 
     /// Squares this element.
-    pub fn square(&self) -> Fq {
+    #[inline]
+    pub const fn square(&self) -> Fq {
         let (r1, carry) = mac(0, self.0[0], self.0[1], 0);
         let (r2, carry) = mac(0, self.0[0], self.0[2], carry);
         let (r3, r4) = mac(0, self.0[0], self.0[3], carry);
