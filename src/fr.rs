@@ -101,19 +101,7 @@ impl<'a, 'b> Sub<&'b Fr> for &'a Fr {
 
     #[inline]
     fn sub(self, rhs: &'b Fr) -> Fr {
-        let (d0, borrow) = sbb(self.0[0], rhs.0[0], 0);
-        let (d1, borrow) = sbb(self.0[1], rhs.0[1], borrow);
-        let (d2, borrow) = sbb(self.0[2], rhs.0[2], borrow);
-        let (d3, borrow) = sbb(self.0[3], rhs.0[3], borrow);
-
-        // If underflow occurred on the final limb, borrow = 0xfff...fff, otherwise
-        // borrow = 0x000...000. Thus, we use it as a mask to conditionally add the modulus.
-        let (d0, carry) = adc(d0, MODULUS.0[0] & borrow, 0);
-        let (d1, carry) = adc(d1, MODULUS.0[1] & borrow, carry);
-        let (d2, carry) = adc(d2, MODULUS.0[2] & borrow, carry);
-        let (d3, _) = adc(d3, MODULUS.0[3] & borrow, carry);
-
-        Fr([d0, d1, d2, d3])
+        self.subtract(rhs)
     }
 }
 
@@ -140,27 +128,7 @@ impl<'a, 'b> Mul<&'b Fr> for &'a Fr {
     fn mul(self, rhs: &'b Fr) -> Fr {
         // Schoolbook multiplication
 
-        let (r0, carry) = mac(0, self.0[0], rhs.0[0], 0);
-        let (r1, carry) = mac(0, self.0[0], rhs.0[1], carry);
-        let (r2, carry) = mac(0, self.0[0], rhs.0[2], carry);
-        let (r3, r4) = mac(0, self.0[0], rhs.0[3], carry);
-
-        let (r1, carry) = mac(r1, self.0[1], rhs.0[0], 0);
-        let (r2, carry) = mac(r2, self.0[1], rhs.0[1], carry);
-        let (r3, carry) = mac(r3, self.0[1], rhs.0[2], carry);
-        let (r4, r5) = mac(r4, self.0[1], rhs.0[3], carry);
-
-        let (r2, carry) = mac(r2, self.0[2], rhs.0[0], 0);
-        let (r3, carry) = mac(r3, self.0[2], rhs.0[1], carry);
-        let (r4, carry) = mac(r4, self.0[2], rhs.0[2], carry);
-        let (r5, r6) = mac(r5, self.0[2], rhs.0[3], carry);
-
-        let (r3, carry) = mac(r3, self.0[3], rhs.0[0], 0);
-        let (r4, carry) = mac(r4, self.0[3], rhs.0[1], carry);
-        let (r5, carry) = mac(r5, self.0[3], rhs.0[2], carry);
-        let (r6, r7) = mac(r6, self.0[3], rhs.0[3], carry);
-
-        Fr::montgomery_reduce(r0, r1, r2, r3, r4, r5, r6, r7)
+        self.multiply(rhs)
     }
 }
 
@@ -297,6 +265,12 @@ impl Fr {
         let d1 = Fr([limbs[4], limbs[5], limbs[6], limbs[7]]);
         // Convert to Montgomery form
         d0 * R2 + d1 * R3
+    }
+
+    /// Converts from an integer represented in little endian
+    /// into its (congruent) representation in Fr.
+    pub const fn from_raw(val: [u64; 4]) -> Self {
+        Fr(val).multiply(&R2)
     }
 
     /// Squares this element.
@@ -491,7 +465,7 @@ impl Fr {
     }
 
     #[inline]
-    fn montgomery_reduce(
+    const fn montgomery_reduce(
         r0: u64,
         r1: u64,
         r2: u64,
@@ -534,7 +508,51 @@ impl Fr {
         let (r7, _) = adc(r7, carry2, carry);
 
         // Result may be within MODULUS of the correct value
-        Fr([r4, r5, r6, r7]) - &MODULUS
+        Fr([r4, r5, r6, r7]).subtract(&MODULUS)
+    }
+
+    #[inline]
+    const fn multiply(&self, rhs: &Self) -> Self {
+        // Schoolbook multiplication
+
+        let (r0, carry) = mac(0, self.0[0], rhs.0[0], 0);
+        let (r1, carry) = mac(0, self.0[0], rhs.0[1], carry);
+        let (r2, carry) = mac(0, self.0[0], rhs.0[2], carry);
+        let (r3, r4) = mac(0, self.0[0], rhs.0[3], carry);
+
+        let (r1, carry) = mac(r1, self.0[1], rhs.0[0], 0);
+        let (r2, carry) = mac(r2, self.0[1], rhs.0[1], carry);
+        let (r3, carry) = mac(r3, self.0[1], rhs.0[2], carry);
+        let (r4, r5) = mac(r4, self.0[1], rhs.0[3], carry);
+
+        let (r2, carry) = mac(r2, self.0[2], rhs.0[0], 0);
+        let (r3, carry) = mac(r3, self.0[2], rhs.0[1], carry);
+        let (r4, carry) = mac(r4, self.0[2], rhs.0[2], carry);
+        let (r5, r6) = mac(r5, self.0[2], rhs.0[3], carry);
+
+        let (r3, carry) = mac(r3, self.0[3], rhs.0[0], 0);
+        let (r4, carry) = mac(r4, self.0[3], rhs.0[1], carry);
+        let (r5, carry) = mac(r5, self.0[3], rhs.0[2], carry);
+        let (r6, r7) = mac(r6, self.0[3], rhs.0[3], carry);
+
+        Fr::montgomery_reduce(r0, r1, r2, r3, r4, r5, r6, r7)
+    }
+
+    #[inline]
+    const fn subtract(&self, rhs: &Self) -> Self {
+        let (d0, borrow) = sbb(self.0[0], rhs.0[0], 0);
+        let (d1, borrow) = sbb(self.0[1], rhs.0[1], borrow);
+        let (d2, borrow) = sbb(self.0[2], rhs.0[2], borrow);
+        let (d3, borrow) = sbb(self.0[3], rhs.0[3], borrow);
+
+        // If underflow occurred on the final limb, borrow = 0xfff...fff, otherwise
+        // borrow = 0x000...000. Thus, we use it as a mask to conditionally add the modulus.
+        let (d0, carry) = adc(d0, MODULUS.0[0] & borrow, 0);
+        let (d1, carry) = adc(d1, MODULUS.0[1] & borrow, carry);
+        let (d2, carry) = adc(d2, MODULUS.0[2] & borrow, carry);
+        let (d3, _) = adc(d3, MODULUS.0[3] & borrow, carry);
+
+        Fr([d0, d1, d2, d3])
     }
 }
 
@@ -955,4 +973,21 @@ fn test_sqrt() {
     }
 
     assert_eq!(47, none_count);
+}
+
+#[test]
+fn test_from_raw() {
+    assert_eq!(
+        Fr::from_raw([
+            0x25f80bb3b99607d8,
+            0xf315d62f66b6e750,
+            0x932514eeeb8814f4,
+            0x9a6fc6f479155c6
+        ]),
+        Fr::from_raw([0xffffffffffffffff; 4])
+    );
+
+    assert_eq!(Fr::from_raw(MODULUS.0), Fr::zero());
+
+    assert_eq!(Fr::from_raw([1, 0, 0, 0]), R);
 }
