@@ -50,7 +50,8 @@ impl<T> Maybe<T> {
     /// or the provided value otherwise.
     #[inline]
     pub fn unwrap_or(self, def: T) -> T
-        where T: ConditionallySelectable
+    where
+        T: ConditionallySelectable,
     {
         T::conditional_select(&def, &self.value, self.is_some)
     }
@@ -59,8 +60,9 @@ impl<T> Maybe<T> {
     /// or the value produced by the provided closure otherwise.
     #[inline]
     pub fn unwrap_or_else<F>(self, f: F) -> T
-        where T: ConditionallySelectable,
-              F: FnOnce() -> T
+    where
+        T: ConditionallySelectable,
+        F: FnOnce() -> T,
     {
         T::conditional_select(&f(), &self.value, self.is_some)
     }
@@ -87,12 +89,17 @@ impl<T> Maybe<T> {
     /// is always called.
     #[inline]
     pub fn map<U, F>(self, f: F) -> Maybe<U>
-        where T: Default + ConditionallySelectable,
-              F: FnOnce(T) -> U
+    where
+        T: Default + ConditionallySelectable,
+        F: FnOnce(T) -> U,
     {
         Maybe::new(
-            f(T::conditional_select(&T::default(), &self.value, self.is_some)),
-            self.is_some
+            f(T::conditional_select(
+                &T::default(),
+                &self.value,
+                self.is_some,
+            )),
+            self.is_some,
         )
     }
 
@@ -105,10 +112,15 @@ impl<T> Maybe<T> {
     /// is always called.
     #[inline]
     pub fn and_then<U, F>(self, f: F) -> Maybe<U>
-        where T: Default + ConditionallySelectable,
-              F: FnOnce(T) -> Maybe<U>
+    where
+        T: Default + ConditionallySelectable,
+        F: FnOnce(T) -> Maybe<U>,
     {
-        let mut tmp = f(T::conditional_select(&T::default(), &self.value, self.is_some));
+        let mut tmp = f(T::conditional_select(
+            &T::default(),
+            &self.value,
+            self.is_some,
+        ));
         tmp.is_some &= self.is_some;
 
         tmp
@@ -121,7 +133,11 @@ impl<T: ConditionallySelectable> ConditionallySelectable for Maybe<T> {
             T::conditional_select(&a.value, &b.value, choice),
             // TODO: subtle crate currently doesn't implement ConditionallySelectable
             // for Choice so we must unwrap these manually.
-            Choice::from(u8::conditional_select(&a.is_some.unwrap_u8(), &b.is_some.unwrap_u8(), choice))
+            Choice::from(u8::conditional_select(
+                &a.is_some.unwrap_u8(),
+                &b.is_some.unwrap_u8(),
+                choice,
+            )),
         )
     }
 }
@@ -137,7 +153,6 @@ impl<T: ConstantTimeEq> ConstantTimeEq for Maybe<T> {
         (a & b & self.value.ct_eq(&rhs.value)) | (!a & !b)
     }
 }
-
 
 #[test]
 fn test_maybe() {
@@ -179,30 +194,58 @@ fn test_maybe() {
     assert_eq!(Maybe::new(1, Choice::from(0)).unwrap_or_else(|| 2), 2);
 
     // Test map
-    assert_eq!(Maybe::new(1, Choice::from(1)).map(|v| {
-        assert_eq!(v, 1);
+    assert_eq!(
+        Maybe::new(1, Choice::from(1))
+            .map(|v| {
+                assert_eq!(v, 1);
+                2
+            })
+            .unwrap(),
         2
-    }).unwrap(), 2);
-    assert_eq!(Maybe::new(1, Choice::from(0)).map(|_| {
-        2
-    }).is_none().unwrap_u8(), 1);
+    );
+    assert_eq!(
+        Maybe::new(1, Choice::from(0))
+            .map(|_| 2)
+            .is_none()
+            .unwrap_u8(),
+        1
+    );
 
     // Test and_then
-    assert_eq!(Maybe::new(1, Choice::from(1)).and_then(|v| {
-        assert_eq!(v, 1);
-        Maybe::new(2, Choice::from(0))
-    }).is_none().unwrap_u8(), 1);
-    assert_eq!(Maybe::new(1, Choice::from(1)).and_then(|v| {
-        assert_eq!(v, 1);
-        Maybe::new(2, Choice::from(1))
-    }).unwrap(), 2);
+    assert_eq!(
+        Maybe::new(1, Choice::from(1))
+            .and_then(|v| {
+                assert_eq!(v, 1);
+                Maybe::new(2, Choice::from(0))
+            })
+            .is_none()
+            .unwrap_u8(),
+        1
+    );
+    assert_eq!(
+        Maybe::new(1, Choice::from(1))
+            .and_then(|v| {
+                assert_eq!(v, 1);
+                Maybe::new(2, Choice::from(1))
+            })
+            .unwrap(),
+        2
+    );
 
-    assert_eq!(Maybe::new(1, Choice::from(0)).and_then(|_| {
-        Maybe::new(2, Choice::from(0))
-    }).is_none().unwrap_u8(), 1);
-    assert_eq!(Maybe::new(1, Choice::from(0)).and_then(|_| {
-        Maybe::new(2, Choice::from(1))
-    }).is_none().unwrap_u8(), 1);
+    assert_eq!(
+        Maybe::new(1, Choice::from(0))
+            .and_then(|_| Maybe::new(2, Choice::from(0)))
+            .is_none()
+            .unwrap_u8(),
+        1
+    );
+    assert_eq!(
+        Maybe::new(1, Choice::from(0))
+            .and_then(|_| Maybe::new(2, Choice::from(1)))
+            .is_none()
+            .unwrap_u8(),
+        1
+    );
 }
 
 #[test]

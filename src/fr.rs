@@ -4,8 +4,8 @@ use core::ops::{Add, AddAssign, Mul, MulAssign, Neg, Sub, SubAssign};
 use byteorder::{ByteOrder, LittleEndian};
 use subtle::{Choice, ConditionallySelectable, ConstantTimeEq};
 
-use crate::util::{adc, mac, sbb};
 use crate::maybe::Maybe;
+use crate::util::{adc, mac, sbb};
 
 /// Represents an element of `GF(r)`.
 // The internal representation of this type is four 64-bit unsigned
@@ -339,12 +339,12 @@ impl Fr {
             0xb425c397b5bdcb2e,
             0x299a0824f3320420,
             0x4199cec0404d0ec0,
-            0x039f6d3a994cebea
+            0x039f6d3a994cebea,
         ]);
 
         Maybe::new(
             sqrt,
-            (&sqrt * &sqrt).ct_eq(self) // Only return Some if it's the square root.
+            (&sqrt * &sqrt).ct_eq(self), // Only return Some if it's the square root.
         )
     }
 
@@ -652,7 +652,8 @@ fn test_from_bytes() {
         Fr::from_bytes([
             182, 44, 247, 214, 94, 14, 151, 208, 130, 16, 200, 204, 147, 32, 104, 166, 0, 59, 52,
             1, 1, 59, 103, 6, 169, 175, 51, 101, 234, 180, 125, 14
-        ]).is_some().unwrap_u8() == 1
+        ]).is_some()
+            .unwrap_u8() == 1
     );
 
     // modulus is invalid
@@ -660,7 +661,8 @@ fn test_from_bytes() {
         Fr::from_bytes([
             183, 44, 247, 214, 94, 14, 151, 208, 130, 16, 200, 204, 147, 32, 104, 166, 0, 59, 52,
             1, 1, 59, 103, 6, 169, 175, 51, 101, 234, 180, 125, 14
-        ]).is_none().unwrap_u8() == 1
+        ]).is_none()
+            .unwrap_u8() == 1
     );
 
     // Anything larger than the modulus is invalid
@@ -668,21 +670,24 @@ fn test_from_bytes() {
         Fr::from_bytes([
             184, 44, 247, 214, 94, 14, 151, 208, 130, 16, 200, 204, 147, 32, 104, 166, 0, 59, 52,
             1, 1, 59, 103, 6, 169, 175, 51, 101, 234, 180, 125, 14
-        ]).is_none().unwrap_u8() == 1
+        ]).is_none()
+            .unwrap_u8() == 1
     );
 
     assert!(
         Fr::from_bytes([
             183, 44, 247, 214, 94, 14, 151, 208, 130, 16, 200, 204, 147, 32, 104, 166, 0, 59, 52,
             1, 1, 59, 104, 6, 169, 175, 51, 101, 234, 180, 125, 14
-        ]).is_none().unwrap_u8() == 1
+        ]).is_none()
+            .unwrap_u8() == 1
     );
 
     assert!(
         Fr::from_bytes([
             183, 44, 247, 214, 94, 14, 151, 208, 130, 16, 200, 204, 147, 32, 104, 166, 0, 59, 52,
             1, 1, 59, 103, 6, 169, 175, 51, 101, 234, 180, 125, 15
-        ]).is_none().unwrap_u8() == 1
+        ]).is_none()
+            .unwrap_u8() == 1
     );
 }
 
@@ -749,7 +754,12 @@ fn test_from_bytes_wide_negative_one() {
 #[test]
 fn test_from_bytes_wide_maximum() {
     assert_eq!(
-        Fr([0x8b75c9015ae42a22, 0xe59082e7bf9e38b8, 0x6440c91261da51b3, 0xa5e07ffb20991cf]),
+        Fr([
+            0x8b75c9015ae42a22,
+            0xe59082e7bf9e38b8,
+            0x6440c91261da51b3,
+            0xa5e07ffb20991cf
+        ]),
         Fr::from_bytes_wide([0xff; 64])
     );
 }

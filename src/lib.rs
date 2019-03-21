@@ -319,15 +319,18 @@ impl AffinePoint {
 
             let v2 = v.square();
 
-            ((v2 - Fq::one()) * (Fq::one() + EDWARDS_D * &v2).invert().unwrap())
-            .sqrt().and_then(|u| {
-                // Fix the sign of `u` if necessary
-                let flip_sign = Choice::from((u.into_bytes()[0] ^ sign) & 1);
-                let u_negated = -u;
-                let final_u = Fq::conditional_select(&u, &u_negated, flip_sign);
+            ((v2 - Fq::one()) * (Fq::one() + EDWARDS_D * &v2))
+                .invert()
+                .unwrap()
+                .sqrt()
+                .and_then(|u| {
+                    // Fix the sign of `u` if necessary
+                    let flip_sign = Choice::from((u.into_bytes()[0] ^ sign) & 1);
+                    let u_negated = -u;
+                    let final_u = Fq::conditional_select(&u, &u_negated, flip_sign);
 
-                Maybe::new(AffinePoint { u: final_u, v }, Choice::from(1u8))
-            })
+                    Maybe::new(AffinePoint { u: final_u, v }, Choice::from(1u8))
+                })
         })
     }
 

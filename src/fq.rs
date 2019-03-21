@@ -4,8 +4,8 @@ use core::ops::{Add, AddAssign, Mul, MulAssign, Neg, Sub, SubAssign};
 use byteorder::{ByteOrder, LittleEndian};
 use subtle::{Choice, ConditionallySelectable, ConstantTimeEq};
 
-use crate::util::{adc, mac, sbb};
 use crate::maybe::Maybe;
+use crate::util::{adc, mac, sbb};
 
 /// Represents an element of `GF(q)`.
 // The internal representation of this type is four 64-bit unsigned
@@ -395,7 +395,7 @@ impl Fq {
 
         Maybe::new(
             x,
-            (&x * &x).ct_eq(self) // Only return Some if it's the square root.
+            (&x * &x).ct_eq(self), // Only return Some if it's the square root.
         )
     }
 
@@ -696,7 +696,8 @@ fn test_from_bytes() {
         Fq::from_bytes([
             0, 0, 0, 0, 255, 255, 255, 255, 254, 91, 254, 255, 2, 164, 189, 83, 5, 216, 161, 9, 8,
             216, 57, 51, 72, 125, 157, 41, 83, 167, 237, 115
-        ]).is_some().unwrap_u8() == 1
+        ]).is_some()
+            .unwrap_u8() == 1
     );
 
     // modulus is invalid
@@ -704,7 +705,8 @@ fn test_from_bytes() {
         Fq::from_bytes([
             1, 0, 0, 0, 255, 255, 255, 255, 254, 91, 254, 255, 2, 164, 189, 83, 5, 216, 161, 9, 8,
             216, 57, 51, 72, 125, 157, 41, 83, 167, 237, 115
-        ]).is_none().unwrap_u8() == 1
+        ]).is_none()
+            .unwrap_u8() == 1
     );
 
     // Anything larger than the modulus is invalid
@@ -712,19 +714,22 @@ fn test_from_bytes() {
         Fq::from_bytes([
             2, 0, 0, 0, 255, 255, 255, 255, 254, 91, 254, 255, 2, 164, 189, 83, 5, 216, 161, 9, 8,
             216, 57, 51, 72, 125, 157, 41, 83, 167, 237, 115
-        ]).is_none().unwrap_u8() == 1
+        ]).is_none()
+            .unwrap_u8() == 1
     );
     assert!(
         Fq::from_bytes([
             1, 0, 0, 0, 255, 255, 255, 255, 254, 91, 254, 255, 2, 164, 189, 83, 5, 216, 161, 9, 8,
             216, 58, 51, 72, 125, 157, 41, 83, 167, 237, 115
-        ]).is_none().unwrap_u8() == 1
+        ]).is_none()
+            .unwrap_u8() == 1
     );
     assert!(
         Fq::from_bytes([
             1, 0, 0, 0, 255, 255, 255, 255, 254, 91, 254, 255, 2, 164, 189, 83, 5, 216, 161, 9, 8,
             216, 57, 51, 72, 125, 157, 41, 83, 167, 237, 116
-        ]).is_none().unwrap_u8() == 1
+        ]).is_none()
+            .unwrap_u8() == 1
     );
 }
 
@@ -791,7 +796,12 @@ fn test_from_bytes_wide_negative_one() {
 #[test]
 fn test_from_bytes_wide_maximum() {
     assert_eq!(
-        Fq([0xc62c1805439b73b1, 0xc2b9551e8ced218e, 0xda44ec81daf9a422, 0x5605aa601c162e79]),
+        Fq([
+            0xc62c1805439b73b1,
+            0xc2b9551e8ced218e,
+            0xda44ec81daf9a422,
+            0x5605aa601c162e79
+        ]),
         Fq::from_bytes_wide([0xff; 64])
     );
 }
