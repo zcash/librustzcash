@@ -306,10 +306,10 @@ impl Fq {
         // that (2^256 - 1)*c is an acceptable product for the reduction. Therefore, the
         // reduction always works so long as `c` is in the field; in this case it is either the
         // constant `R2` or `R3`.
-        let d1 = Fq([limbs[4], limbs[5], limbs[6], limbs[7]]) - &MODULUS;
-        let d0 = Fq([limbs[0], limbs[1], limbs[2], limbs[3]]) - &MODULUS;
+        let d0 = Fq([limbs[0], limbs[1], limbs[2], limbs[3]]);
+        let d1 = Fq([limbs[4], limbs[5], limbs[6], limbs[7]]);
         // Convert to Montgomery form
-        d1 * R3 + d0 * R2
+        d0 * R2 + d1 * R3
     }
 
     /// Squares this element.
@@ -778,6 +778,14 @@ fn test_from_bytes_wide_negative_one() {
             216, 57, 51, 72, 125, 157, 41, 83, 167, 237, 115, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
             0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
         ])
+    );
+}
+
+#[test]
+fn test_from_bytes_wide_maximum() {
+    assert_eq!(
+        Fq([0xc62c1805439b73b1, 0xc2b9551e8ced218e, 0xda44ec81daf9a422, 0x5605aa601c162e79]),
+        Fq::from_bytes_wide([0xff; 64])
     );
 }
 

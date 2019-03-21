@@ -286,10 +286,10 @@ impl Fr {
         // that (2^256 - 1)*c is an acceptable product for the reduction. Therefore, the
         // reduction always works so long as `c` is in the field; in this case it is either the
         // constant `R2` or `R3`.
-        let d1 = Fr([limbs[4], limbs[5], limbs[6], limbs[7]]) - &MODULUS;
-        let d0 = Fr([limbs[0], limbs[1], limbs[2], limbs[3]]) - &MODULUS;
+        let d0 = Fr([limbs[0], limbs[1], limbs[2], limbs[3]]);
+        let d1 = Fr([limbs[4], limbs[5], limbs[6], limbs[7]]);
         // Convert to Montgomery form
-        d1 * R3 + d0 * R2
+        d0 * R2 + d1 * R3
     }
 
     /// Squares this element.
@@ -736,6 +736,14 @@ fn test_from_bytes_wide_negative_one() {
             1, 1, 59, 103, 6, 169, 175, 51, 101, 234, 180, 125, 14, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
             0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
         ])
+    );
+}
+
+#[test]
+fn test_from_bytes_wide_maximum() {
+    assert_eq!(
+        Fr([0x8b75c9015ae42a22, 0xe59082e7bf9e38b8, 0x6440c91261da51b3, 0xa5e07ffb20991cf]),
+        Fr::from_bytes_wide([0xff; 64])
     );
 }
 
