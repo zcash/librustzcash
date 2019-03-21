@@ -2,8 +2,10 @@ use core::fmt;
 use core::ops::{Add, AddAssign, Mul, MulAssign, Neg, Sub, SubAssign};
 
 use byteorder::{ByteOrder, LittleEndian};
-use crate::util::{adc, mac, sbb};
 use subtle::{Choice, ConditionallySelectable, ConstantTimeEq};
+
+use crate::util::{adc, mac, sbb};
+use crate::maybe::Maybe;
 
 /// Represents an element of `GF(r)`.
 // The internal representation of this type is four 64-bit unsigned
@@ -215,9 +217,7 @@ impl Fr {
     /// Attempts to convert a little-endian byte representation of
     /// a field element into an element of `Fr`, failing if the input
     /// is not canonical (is not smaller than r).
-    ///
-    /// **This operation is variable time.**
-    pub fn from_bytes_vartime(bytes: [u8; 32]) -> Option<Fr> {
+    pub fn from_bytes(bytes: [u8; 32]) -> Maybe<Fr> {
         let mut tmp = Fr([0, 0, 0, 0]);
 
         tmp.0[0] = LittleEndian::read_u64(&bytes[0..8]);
@@ -225,23 +225,22 @@ impl Fr {
         tmp.0[2] = LittleEndian::read_u64(&bytes[16..24]);
         tmp.0[3] = LittleEndian::read_u64(&bytes[24..32]);
 
-        // Check if the value is in the field
-        for i in (0..4).rev() {
-            if tmp.0[i] < MODULUS.0[i] {
-                // Convert to Montgomery form by computing
-                // (a.R^{-1} * R^2) / R = a.R
-                tmp.mul_assign(&R2);
+        // Try to subtract the modulus
+        let (_, borrow) = sbb(tmp.0[0], MODULUS.0[0], 0);
+        let (_, borrow) = sbb(tmp.0[1], MODULUS.0[1], borrow);
+        let (_, borrow) = sbb(tmp.0[2], MODULUS.0[2], borrow);
+        let (_, borrow) = sbb(tmp.0[3], MODULUS.0[3], borrow);
 
-                return Some(tmp);
-            }
+        // If the element is smaller than MODULUS then the
+        // subtraction will underflow, producing a borrow value
+        // of 0xffff...ffff. Otherwise, it'll be zero.
+        let is_some = (borrow as u8) & 1;
 
-            if tmp.0[i] > MODULUS.0[i] {
-                return None;
-            }
-        }
+        // Convert to Montgomery form by computing
+        // (a.R^{-1} * R^2) / R = a.R
+        tmp *= &R2;
 
-        // Value is equal to the modulus
-        None
+        Maybe::new(tmp, Choice::from(is_some))
     }
 
     /// Converts an element of `Fr` into a byte representation in
@@ -325,25 +324,21 @@ impl Fr {
     }
 
     /// Computes the square root of this element, if it exists.
-    ///
-    /// **This operation is variable time.**
-    pub fn sqrt_vartime(&self) -> Option<Self> {
+    pub fn sqrt(&self) -> Maybe<Self> {
         // Because r = 3 (mod 4)
         // sqrt can be done with only one exponentiation,
         // via the computation of  self^((r + 1) // 4) (mod r)
-        // a1 = self^((r - 3) // 4)
-        let a1 = self.pow_vartime(&[
-            0xb425c397b5bdcb2d,
+        let sqrt = self.pow_vartime(&[
+            0xb425c397b5bdcb2e,
             0x299a0824f3320420,
             0x4199cec0404d0ec0,
-            0x039f6d3a994cebea,
+            0x039f6d3a994cebea
         ]);
-        let a0 = a1 * (a1 * self);
-        if a0 == -Self::one() {
-            None
-        } else {
-            Some(a1 * self)
-        }
+
+        Maybe::new(
+            sqrt,
+            (&sqrt * &sqrt).ct_eq(self) // Only return Some if it's the square root.
+        )
     }
 
     /// Exponentiates `self` by `by`, where `by` is a
@@ -381,10 +376,9 @@ impl Fr {
         res
     }
 
-    /// Exponentiates `self` by r - 2, which has the
-    /// effect of inverting the element if it is
-    /// nonzero.
-    pub fn invert_nonzero(&self) -> Self {
+    /// Computes the multiplicative inverse of this element,
+    /// failing if the element is zero.
+    pub fn invert(&self) -> Maybe<Self> {
         #[inline(always)]
         fn square_assign_multi(n: &mut Fr, num_times: usize) {
             for _ in 0..num_times {
@@ -486,7 +480,7 @@ impl Fr {
         square_assign_multi(&mut t0, 7);
         t0.mul_assign(&t1);
 
-        t0
+        Maybe::new(t0, !self.ct_eq(&Self::zero()))
     }
 
     #[inline]
@@ -621,9 +615,9 @@ fn test_into_bytes() {
 }
 
 #[test]
-fn test_from_bytes_vartime() {
+fn test_from_bytes() {
     assert_eq!(
-        Fr::from_bytes_vartime([
+        Fr::from_bytes([
             0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
             0, 0, 0
         ]).unwrap(),
@@ -631,7 +625,7 @@ fn test_from_bytes_vartime() {
     );
 
     assert_eq!(
-        Fr::from_bytes_vartime([
+        Fr::from_bytes([
             1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
             0, 0, 0
         ]).unwrap(),
@@ -639,7 +633,7 @@ fn test_from_bytes_vartime() {
     );
 
     assert_eq!(
-        Fr::from_bytes_vartime([
+        Fr::from_bytes([
             217, 7, 150, 185, 179, 11, 248, 37, 80, 231, 182, 102, 47, 214, 21, 243, 244, 20, 136,
             235, 238, 20, 37, 147, 198, 85, 145, 71, 111, 252, 166, 9
         ]).unwrap(),
@@ -648,40 +642,40 @@ fn test_from_bytes_vartime() {
 
     // -1 should work
     assert!(
-        Fr::from_bytes_vartime([
+        Fr::from_bytes([
             182, 44, 247, 214, 94, 14, 151, 208, 130, 16, 200, 204, 147, 32, 104, 166, 0, 59, 52,
             1, 1, 59, 103, 6, 169, 175, 51, 101, 234, 180, 125, 14
-        ]).is_some()
+        ]).is_some().unwrap_u8() == 1
     );
 
     // modulus is invalid
     assert!(
-        Fr::from_bytes_vartime([
+        Fr::from_bytes([
             183, 44, 247, 214, 94, 14, 151, 208, 130, 16, 200, 204, 147, 32, 104, 166, 0, 59, 52,
             1, 1, 59, 103, 6, 169, 175, 51, 101, 234, 180, 125, 14
-        ]).is_none()
+        ]).is_none().unwrap_u8() == 1
     );
 
     // Anything larger than the modulus is invalid
     assert!(
-        Fr::from_bytes_vartime([
+        Fr::from_bytes([
             184, 44, 247, 214, 94, 14, 151, 208, 130, 16, 200, 204, 147, 32, 104, 166, 0, 59, 52,
             1, 1, 59, 103, 6, 169, 175, 51, 101, 234, 180, 125, 14
-        ]).is_none()
+        ]).is_none().unwrap_u8() == 1
     );
 
     assert!(
-        Fr::from_bytes_vartime([
+        Fr::from_bytes([
             183, 44, 247, 214, 94, 14, 151, 208, 130, 16, 200, 204, 147, 32, 104, 166, 0, 59, 52,
             1, 1, 59, 104, 6, 169, 175, 51, 101, 234, 180, 125, 14
-        ]).is_none()
+        ]).is_none().unwrap_u8() == 1
     );
 
     assert!(
-        Fr::from_bytes_vartime([
+        Fr::from_bytes([
             183, 44, 247, 214, 94, 14, 151, 208, 130, 16, 200, 204, 147, 32, 104, 166, 0, 59, 52,
             1, 1, 59, 103, 6, 169, 175, 51, 101, 234, 180, 125, 15
-        ]).is_none()
+        ]).is_none().unwrap_u8() == 1
     );
 }
 
@@ -870,13 +864,14 @@ fn test_squaring() {
 
 #[test]
 fn test_inversion() {
-    assert_eq!(Fr::one().invert_nonzero(), Fr::one());
-    assert_eq!((-&Fr::one()).invert_nonzero(), -&Fr::one());
+    assert_eq!(Fr::zero().invert().is_none().unwrap_u8(), 1);
+    assert_eq!(Fr::one().invert().unwrap(), Fr::one());
+    assert_eq!((-&Fr::one()).invert().unwrap(), -&Fr::one());
 
     let mut tmp = R2;
 
     for _ in 0..100 {
-        let mut tmp2 = tmp.invert_nonzero();
+        let mut tmp2 = tmp.invert().unwrap();
         tmp2.mul_assign(&tmp);
 
         assert_eq!(tmp2, Fr::one());
@@ -886,7 +881,7 @@ fn test_inversion() {
 }
 
 #[test]
-fn test_invert_nonzero_is_pow() {
+fn test_invert_is_pow() {
     let r_minus_2 = [
         0xd0970e5ed6f72cb5,
         0xa6682093ccc81082,
@@ -899,7 +894,7 @@ fn test_invert_nonzero_is_pow() {
     let mut r3 = R;
 
     for _ in 0..100 {
-        r1 = r1.invert_nonzero();
+        r1 = r1.invert().unwrap();
         r2 = r2.pow_vartime(&r_minus_2);
         r3 = r3.pow(&r_minus_2);
 
@@ -925,8 +920,8 @@ fn test_sqrt() {
     let mut none_count = 0;
 
     for _ in 0..100 {
-        let square_root = square.sqrt_vartime();
-        if square_root.is_none() {
+        let square_root = square.sqrt();
+        if square_root.is_none().unwrap_u8() == 1 {
             none_count += 1;
         } else {
             assert_eq!(square_root.unwrap() * square_root.unwrap(), square);

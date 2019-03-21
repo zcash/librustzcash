@@ -8,7 +8,7 @@ fn test_to_and_from_bytes() {
     let mut rng = new_rng();
     for _ in 0..NUM_BLACK_BOX_CHECKS {
         let a = Fq::new_random(&mut rng);
-        assert_eq!(a, Fq::from_bytes_vartime(Fq::into_bytes(&a)).unwrap());
+        assert_eq!(a, Fq::from_bytes(Fq::into_bytes(&a)).unwrap());
     }
 }
 
@@ -93,7 +93,7 @@ fn test_multiplicative_inverse() {
         if a == Fq::zero() {
             continue;
         }
-        let a_inv = a.invert_nonzero();
+        let a_inv = a.invert().unwrap();
         assert_eq!(Fq::one(), a * a_inv);
         assert_eq!(Fq::one(), a_inv * a);
     }

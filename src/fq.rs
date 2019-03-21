@@ -2,8 +2,10 @@ use core::fmt;
 use core::ops::{Add, AddAssign, Mul, MulAssign, Neg, Sub, SubAssign};
 
 use byteorder::{ByteOrder, LittleEndian};
-use crate::util::{adc, mac, sbb};
 use subtle::{Choice, ConditionallySelectable, ConstantTimeEq};
+
+use crate::util::{adc, mac, sbb};
+use crate::maybe::Maybe;
 
 /// Represents an element of `GF(q)`.
 // The internal representation of this type is four 64-bit unsigned
@@ -235,9 +237,7 @@ impl Fq {
     /// Attempts to convert a little-endian byte representation of
     /// a field element into an element of `Fq`, failing if the input
     /// is not canonical (is not smaller than q).
-    ///
-    /// **This operation is variable time.**
-    pub fn from_bytes_vartime(bytes: [u8; 32]) -> Option<Fq> {
+    pub fn from_bytes(bytes: [u8; 32]) -> Maybe<Fq> {
         let mut tmp = Fq([0, 0, 0, 0]);
 
         tmp.0[0] = LittleEndian::read_u64(&bytes[0..8]);
@@ -245,23 +245,22 @@ impl Fq {
         tmp.0[2] = LittleEndian::read_u64(&bytes[16..24]);
         tmp.0[3] = LittleEndian::read_u64(&bytes[24..32]);
 
-        // Check if the value is in the field
-        for i in (0..4).rev() {
-            if tmp.0[i] < MODULUS.0[i] {
-                // Convert to Montgomery form by computing
-                // (a.R^{-1} * R^2) / R = a.R
-                tmp.mul_assign(&R2);
+        // Try to subtract the modulus
+        let (_, borrow) = sbb(tmp.0[0], MODULUS.0[0], 0);
+        let (_, borrow) = sbb(tmp.0[1], MODULUS.0[1], borrow);
+        let (_, borrow) = sbb(tmp.0[2], MODULUS.0[2], borrow);
+        let (_, borrow) = sbb(tmp.0[3], MODULUS.0[3], borrow);
 
-                return Some(tmp);
-            }
+        // If the element is smaller than MODULUS then the
+        // subtraction will underflow, producing a borrow value
+        // of 0xffff...ffff. Otherwise, it'll be zero.
+        let is_some = (borrow as u8) & 1;
 
-            if tmp.0[i] > MODULUS.0[i] {
-                return None;
-            }
-        }
+        // Convert to Montgomery form by computing
+        // (a.R^{-1} * R^2) / R = a.R
+        tmp *= &R2;
 
-        // Value is equal to the modulus
-        None
+        Maybe::new(tmp, Choice::from(is_some))
     }
 
     /// Converts an element of `Fq` into a byte representation in
@@ -344,55 +343,19 @@ impl Fq {
         Fq::montgomery_reduce(r0, r1, r2, r3, r4, r5, r6, r7)
     }
 
-    fn legendre_symbol_vartime(&self) -> Self {
-        // Legendre symbol computed via Euler's criterion:
-        // self^((q - 1) // 2)
-        self.pow_vartime(&[
-            0x7fffffff80000000,
-            0xa9ded2017fff2dff,
-            0x199cec0404d0ec02,
-            0x39f6d3a994cebea4,
-        ])
-    }
-
     /// Computes the square root of this element, if it exists.
-    ///
-    /// **This operation is variable time.**
-    pub fn sqrt_vartime(&self) -> Option<Self> {
+    pub fn sqrt(&self) -> Maybe<Self> {
         // Tonelli-Shank's algorithm for q mod 16 = 1
         // https://eprint.iacr.org/2012/685.pdf (page 12, algorithm 5)
-
-        // The algorithm is only defined for nonzero points.
-        if self == &Fq::zero() {
-            return Some(*self);
-        }
 
         // w = self^((t - 1) // 2)
         //   = self^6104339283789297388802252303364915521546564123189034618274734669823
         let w = self.pow_vartime(&[
             0x7fff2dff7fffffff,
-            0x4d0ec02a9ded201,
+            0x04d0ec02a9ded201,
             0x94cebea4199cec04,
-            0x39f6d3a9,
+            0x0000000039f6d3a9,
         ]);
-
-        {
-            // This bails early if it's nonsquare by computing Euler's
-            // criterion using the previous result `w`.
-
-            // a0 = self^t
-            let mut a0 = w.square() * self;
-
-            // a0 = self^(t*(s/2)) = self^((q - 1) // 2)
-            for _ in 0..(S - 1) {
-                a0 = a0.square();
-            }
-
-            // If it's a nonsquare, bail.
-            if a0 == -Self::one() {
-                return None;
-            }
-        }
 
         let mut v = S;
         let mut x = self * &w;
@@ -401,31 +364,32 @@ impl Fq {
         // Initialize z as the 2^S root of unity.
         let mut z = ROOT_OF_UNITY;
 
-        while b != Self::one() {
-            // Find least integer k >= 0 such that b^(2^k) = 1
-            let mut k = 0;
-            {
-                let mut tmp = b;
-                while tmp != Self::one() {
-                    tmp = tmp.square();
-                    k += 1;
-                }
+        for max_v in (1..=S).rev() {
+            let mut k = 1;
+            let mut tmp = b.square();
+            let mut j_less_than_v: Choice = 1.into();
+
+            for j in 2..max_v {
+                let tmp_is_one = tmp.ct_eq(&Fq::one());
+                let squared = Fq::conditional_select(&tmp, &z, tmp_is_one).square();
+                tmp = Fq::conditional_select(&squared, &tmp, tmp_is_one);
+                let new_z = Fq::conditional_select(&z, &squared, tmp_is_one);
+                j_less_than_v &= !j.ct_eq(&v);
+                k = u32::conditional_select(&j, &k, tmp_is_one);
+                z = Fq::conditional_select(&z, &new_z, j_less_than_v);
             }
 
-            let mut w = z;
-
-            // w = z^(2^(v - k - 1))
-            for _ in 0..(v - k - 1) {
-                w = w.square();
-            }
-
-            z = w.square();
+            let result = &x * &z;
+            x = Fq::conditional_select(&result, &x, b.ct_eq(&Fq::one()));
+            z = z.square();
             b = &b * &z;
-            x = &x * &w;
             v = k;
         }
 
-        Some(x)
+        Maybe::new(
+            x,
+            (&x * &x).ct_eq(self) // Only return Some if it's the square root.
+        )
     }
 
     /// Exponentiates `self` by `by`, where `by` is a
@@ -463,10 +427,9 @@ impl Fq {
         res
     }
 
-    /// Exponentiates `self` by q - 2, which has the
-    /// effect of inverting the element if it is
-    /// nonzero.
-    pub fn invert_nonzero(&self) -> Self {
+    /// Computes the multiplicative inverse of this element,
+    /// failing if the element is zero.
+    pub fn invert(&self) -> Maybe<Self> {
         #[inline(always)]
         fn square_assign_multi(n: &mut Fq, num_times: usize) {
             for _ in 0..num_times {
@@ -561,7 +524,7 @@ impl Fq {
         square_assign_multi(&mut t0, 5);
         t0.mul_assign(&t1);
 
-        t0
+        Maybe::new(t0, !self.ct_eq(&Self::zero()))
     }
 
     #[inline]
@@ -696,9 +659,9 @@ fn test_into_bytes() {
 }
 
 #[test]
-fn test_from_bytes_vartime() {
+fn test_from_bytes() {
     assert_eq!(
-        Fq::from_bytes_vartime([
+        Fq::from_bytes([
             0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
             0, 0, 0
         ]).unwrap(),
@@ -706,7 +669,7 @@ fn test_from_bytes_vartime() {
     );
 
     assert_eq!(
-        Fq::from_bytes_vartime([
+        Fq::from_bytes([
             1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
             0, 0, 0
         ]).unwrap(),
@@ -714,7 +677,7 @@ fn test_from_bytes_vartime() {
     );
 
     assert_eq!(
-        Fq::from_bytes_vartime([
+        Fq::from_bytes([
             254, 255, 255, 255, 1, 0, 0, 0, 2, 72, 3, 0, 250, 183, 132, 88, 245, 79, 188, 236, 239,
             79, 140, 153, 111, 5, 197, 172, 89, 177, 36, 24
         ]).unwrap(),
@@ -723,38 +686,38 @@ fn test_from_bytes_vartime() {
 
     // -1 should work
     assert!(
-        Fq::from_bytes_vartime([
+        Fq::from_bytes([
             0, 0, 0, 0, 255, 255, 255, 255, 254, 91, 254, 255, 2, 164, 189, 83, 5, 216, 161, 9, 8,
             216, 57, 51, 72, 125, 157, 41, 83, 167, 237, 115
-        ]).is_some()
+        ]).is_some().unwrap_u8() == 1
     );
 
     // modulus is invalid
     assert!(
-        Fq::from_bytes_vartime([
+        Fq::from_bytes([
             1, 0, 0, 0, 255, 255, 255, 255, 254, 91, 254, 255, 2, 164, 189, 83, 5, 216, 161, 9, 8,
             216, 57, 51, 72, 125, 157, 41, 83, 167, 237, 115
-        ]).is_none()
+        ]).is_none().unwrap_u8() == 1
     );
 
     // Anything larger than the modulus is invalid
     assert!(
-        Fq::from_bytes_vartime([
+        Fq::from_bytes([
             2, 0, 0, 0, 255, 255, 255, 255, 254, 91, 254, 255, 2, 164, 189, 83, 5, 216, 161, 9, 8,
             216, 57, 51, 72, 125, 157, 41, 83, 167, 237, 115
-        ]).is_none()
+        ]).is_none().unwrap_u8() == 1
     );
     assert!(
-        Fq::from_bytes_vartime([
+        Fq::from_bytes([
             1, 0, 0, 0, 255, 255, 255, 255, 254, 91, 254, 255, 2, 164, 189, 83, 5, 216, 161, 9, 8,
             216, 58, 51, 72, 125, 157, 41, 83, 167, 237, 115
-        ]).is_none()
+        ]).is_none().unwrap_u8() == 1
     );
     assert!(
-        Fq::from_bytes_vartime([
+        Fq::from_bytes([
             1, 0, 0, 0, 255, 255, 255, 255, 254, 91, 254, 255, 2, 164, 189, 83, 5, 216, 161, 9, 8,
             216, 57, 51, 72, 125, 157, 41, 83, 167, 237, 116
-        ]).is_none()
+        ]).is_none().unwrap_u8() == 1
     );
 }
 
@@ -943,13 +906,14 @@ fn test_squaring() {
 
 #[test]
 fn test_inversion() {
-    assert_eq!(Fq::one().invert_nonzero(), Fq::one());
-    assert_eq!((-&Fq::one()).invert_nonzero(), -&Fq::one());
+    assert_eq!(Fq::zero().invert().is_none().unwrap_u8(), 1);
+    assert_eq!(Fq::one().invert().unwrap(), Fq::one());
+    assert_eq!((-&Fq::one()).invert().unwrap(), -&Fq::one());
 
     let mut tmp = R2;
 
     for _ in 0..100 {
-        let mut tmp2 = tmp.invert_nonzero();
+        let mut tmp2 = tmp.invert().unwrap();
         tmp2.mul_assign(&tmp);
 
         assert_eq!(tmp2, Fq::one());
@@ -959,7 +923,7 @@ fn test_inversion() {
 }
 
 #[test]
-fn test_invert_nonzero_is_pow() {
+fn test_invert_is_pow() {
     let q_minus_2 = [
         0xfffffffeffffffff,
         0x53bda402fffe5bfe,
@@ -972,7 +936,7 @@ fn test_invert_nonzero_is_pow() {
     let mut r3 = R;
 
     for _ in 0..100 {
-        r1 = r1.invert_nonzero();
+        r1 = r1.invert().unwrap();
         r2 = r2.pow_vartime(&q_minus_2);
         r3 = r3.pow(&q_minus_2);
 
@@ -988,7 +952,7 @@ fn test_invert_nonzero_is_pow() {
 #[test]
 fn test_sqrt() {
     {
-        assert_eq!(Fq::zero().sqrt_vartime().unwrap(), Fq::zero());
+        assert_eq!(Fq::zero().sqrt().unwrap(), Fq::zero());
     }
 
     let mut square = Fq([
@@ -1001,8 +965,8 @@ fn test_sqrt() {
     let mut none_count = 0;
 
     for _ in 0..100 {
-        let square_root = square.sqrt_vartime();
-        if square_root.is_none() {
+        let square_root = square.sqrt();
+        if square_root.is_none().unwrap_u8() == 1 {
             none_count += 1;
         } else {
             assert_eq!(square_root.unwrap() * square_root.unwrap(), square);

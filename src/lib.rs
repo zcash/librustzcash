@@ -38,6 +38,9 @@ use subtle::{Choice, ConditionallySelectable, ConstantTimeEq};
 #[macro_use]
 mod util;
 
+pub mod maybe;
+use maybe::Maybe;
+
 mod fq;
 mod fr;
 pub use fq::*;
@@ -177,7 +180,7 @@ impl From<ExtendedPoint> for AffinePoint {
     fn from(extended: ExtendedPoint) -> AffinePoint {
         // Z coordinate is always nonzero, so this is
         // its inverse.
-        let zinv = extended.z.invert_nonzero();
+        let zinv = extended.z.invert().unwrap();
 
         AffinePoint {
             u: extended.u * &zinv,
@@ -292,9 +295,7 @@ impl AffinePoint {
     /// Attempts to interpret a byte representation of an
     /// affine point, failing if the element is not on
     /// the curve or non-canonical.
-    ///
-    /// **This operation is variable time.**
-    pub fn from_bytes_vartime(mut b: [u8; 32]) -> Option<Self> {
+    pub fn from_bytes(mut b: [u8; 32]) -> Maybe<Self> {
         // Grab the sign bit from the representation
         let sign = b[31] >> 7;
 
@@ -302,37 +303,30 @@ impl AffinePoint {
         b[31] &= 0b01111_1111;
 
         // Interpret what remains as the v-coordinate
-        match Fq::from_bytes_vartime(b) {
-            Some(v) => {
-                // -u^2 + v^2 = 1 + d.u^2.v^2
-                // -u^2 = 1 + d.u^2.v^2 - v^2    (rearrange)
-                // -u^2 - d.u^2.v^2 = 1 - v^2    (rearrange)
-                // u^2 + d.u^2.v^2 = v^2 - 1     (flip signs)
-                // u^2 (1 + d.v^2) = v^2 - 1     (factor)
-                // u^2 = (v^2 - 1) / (1 + d.v^2) (isolate u^2)
-                // We know that (1 + d.v^2) is nonzero for all v:
-                //   (1 + d.v^2) = 0
-                //   d.v^2 = -1
-                //   v^2 = -(1 / d)   No solutions, as -(1 / d) is not a square
+        Fq::from_bytes(b).and_then(|v| {
+            // -u^2 + v^2 = 1 + d.u^2.v^2
+            // -u^2 = 1 + d.u^2.v^2 - v^2    (rearrange)
+            // -u^2 - d.u^2.v^2 = 1 - v^2    (rearrange)
+            // u^2 + d.u^2.v^2 = v^2 - 1     (flip signs)
+            // u^2 (1 + d.v^2) = v^2 - 1     (factor)
+            // u^2 = (v^2 - 1) / (1 + d.v^2) (isolate u^2)
+            // We know that (1 + d.v^2) is nonzero for all v:
+            //   (1 + d.v^2) = 0
+            //   d.v^2 = -1
+            //   v^2 = -(1 / d)   No solutions, as -(1 / d) is not a square
 
-                let v2 = v.square();
+            let v2 = v.square();
 
-                match ((v2 - Fq::one()) * (Fq::one() + EDWARDS_D * &v2).invert_nonzero())
-                    .sqrt_vartime()
-                {
-                    Some(mut u) => {
-                        // Fix the sign of `u` if necessary
-                        if (u.into_bytes()[0] & 1) != sign {
-                            u = -u;
-                        }
+            ((v2 - Fq::one()) * (Fq::one() + EDWARDS_D * &v2).invert().unwrap())
+            .sqrt().and_then(|u| {
+                // Fix the sign of `u` if necessary
+                let flip_sign = Choice::from((u.into_bytes()[0] ^ sign) & 1);
+                let u_negated = -u;
+                let final_u = Fq::conditional_select(&u, &u_negated, flip_sign);
 
-                        Some(AffinePoint { u, v })
-                    }
-                    None => None,
-                }
-            }
-            None => None,
-        }
+                Maybe::new(AffinePoint { u: final_u, v }, Choice::from(1u8))
+            })
+        })
     }
 
     /// Returns the `u`-coordinate of this point.
@@ -714,7 +708,7 @@ pub fn batch_normalize<'a>(v: &'a mut [ExtendedPoint]) -> impl Iterator<Item = A
     }
 
     // This is the inverse, as all z-coordinates are nonzero.
-    acc = acc.invert_nonzero();
+    acc = acc.invert().unwrap();
 
     for p in v.iter_mut().rev() {
         let mut q = *p;
@@ -749,9 +743,9 @@ fn test_is_on_curve_var() {
 
 #[test]
 fn test_d_is_non_quadratic_residue() {
-    assert!(EDWARDS_D.sqrt_vartime().is_none());
-    assert!((-EDWARDS_D).sqrt_vartime().is_none());
-    assert!((-EDWARDS_D).invert_nonzero().sqrt_vartime().is_none());
+    assert!(EDWARDS_D.sqrt().is_none().unwrap_u8() == 1);
+    assert!((-EDWARDS_D).sqrt().is_none().unwrap_u8() == 1);
+    assert!((-EDWARDS_D).invert().unwrap().sqrt().is_none().unwrap_u8() == 1);
 }
 
 #[test]
