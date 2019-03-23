@@ -20,6 +20,22 @@ use crate::{keys::OutgoingViewingKey, JUBJUB};
 pub const KDF_SAPLING_PERSONALIZATION: &'static [u8; 16] = b"Zcash_SaplingKDF";
 pub const PRF_OCK_PERSONALIZATION: &'static [u8; 16] = b"Zcash_Derive_ock";
 
+const COMPACT_NOTE_SIZE: usize = (
+    1  + // version
+    11 + // diversifier
+    8  + // value
+    32
+    // rcv
+);
+const NOTE_PLAINTEXT_SIZE: usize = COMPACT_NOTE_SIZE + 512;
+const OUT_PLAINTEXT_SIZE: usize = (
+    32 + // pk_d
+    32
+    // esk
+);
+const ENC_CIPHERTEXT_SIZE: usize = NOTE_PLAINTEXT_SIZE + 16;
+const OUT_CIPHERTEXT_SIZE: usize = OUT_PLAINTEXT_SIZE + 16;
+
 /// Format a byte array as a colon-delimited hex string.
 ///
 /// Source: https://github.com/tendermint/signatory
@@ -210,11 +226,11 @@ impl SaplingNoteEncryption {
         &self.epk
     }
 
-    pub fn encrypt_note_plaintext(&self) -> [u8; 580] {
+    pub fn encrypt_note_plaintext(&self) -> [u8; ENC_CIPHERTEXT_SIZE] {
         let shared_secret = sapling_ka_agree(&self.esk, &self.to.pk_d);
         let key = kdf_sapling(&shared_secret, &self.epk);
 
-        let mut input = Vec::with_capacity(564);
+        let mut input = Vec::with_capacity(NOTE_PLAINTEXT_SIZE);
         input.push(1);
         input.extend_from_slice(&self.to.diversifier.0);
         (&mut input)
@@ -222,8 +238,9 @@ impl SaplingNoteEncryption {
             .unwrap();
         self.note.r.into_repr().write_le(&mut input).unwrap();
         input.extend_from_slice(&self.memo.0);
+        assert_eq!(input.len(), NOTE_PLAINTEXT_SIZE);
 
-        let mut ciphertext = Vec::with_capacity(564);
+        let mut ciphertext = Vec::with_capacity(NOTE_PLAINTEXT_SIZE);
         let tag = chacha20_poly1305_aead::encrypt(
             &key.as_bytes(),
             &[0u8; 12],
@@ -233,9 +250,9 @@ impl SaplingNoteEncryption {
         )
         .unwrap();
 
-        let mut output = [0u8; 580];
-        output[0..564].copy_from_slice(&ciphertext);
-        output[564..580].copy_from_slice(&tag);
+        let mut output = [0u8; ENC_CIPHERTEXT_SIZE];
+        output[0..NOTE_PLAINTEXT_SIZE].copy_from_slice(&ciphertext);
+        output[NOTE_PLAINTEXT_SIZE..ENC_CIPHERTEXT_SIZE].copy_from_slice(&tag);
         output
     }
 
@@ -243,21 +260,24 @@ impl SaplingNoteEncryption {
         &self,
         cv: &edwards::Point<Bls12, Unknown>,
         cmu: &Fr,
-    ) -> [u8; 80] {
+    ) -> [u8; OUT_CIPHERTEXT_SIZE] {
         let key = prf_ock(&self.ovk, &cv, &cmu, &self.epk);
 
-        let mut input = [0u8; 64];
+        let mut input = [0u8; OUT_PLAINTEXT_SIZE];
         self.note.pk_d.write(&mut input[0..32]).unwrap();
-        self.esk.into_repr().write_le(&mut input[32..64]).unwrap();
+        self.esk
+            .into_repr()
+            .write_le(&mut input[32..OUT_PLAINTEXT_SIZE])
+            .unwrap();
 
-        let mut buffer = Vec::with_capacity(64);
+        let mut buffer = Vec::with_capacity(OUT_PLAINTEXT_SIZE);
         let tag =
             chacha20_poly1305_aead::encrypt(key.as_bytes(), &[0u8; 12], &[], &input, &mut buffer)
                 .unwrap();
 
-        let mut output = [0u8; 80];
-        output[0..64].copy_from_slice(&buffer);
-        output[64..80].copy_from_slice(&tag[..]);
+        let mut output = [0u8; OUT_CIPHERTEXT_SIZE];
+        output[0..OUT_PLAINTEXT_SIZE].copy_from_slice(&buffer);
+        output[OUT_PLAINTEXT_SIZE..OUT_CIPHERTEXT_SIZE].copy_from_slice(&tag[..]);
 
         output
     }
@@ -274,7 +294,7 @@ fn parse_note_plaintext_minus_memo(
     let v = (&plaintext[12..20]).read_u64::<LittleEndian>().ok()?;
 
     let mut rcm = FsRepr::default();
-    rcm.read_le(&plaintext[20..52]).ok()?;
+    rcm.read_le(&plaintext[20..COMPACT_NOTE_SIZE]).ok()?;
     let rcm = Fs::from_repr(rcm).ok()?;
 
     let diversifier = Diversifier(d);
@@ -304,16 +324,18 @@ pub fn try_sapling_note_decryption(
     cmu: &Fr,
     enc_ciphertext: &[u8],
 ) -> Option<(Note<Bls12>, PaymentAddress<Bls12>, Memo)> {
+    assert_eq!(enc_ciphertext.len(), ENC_CIPHERTEXT_SIZE);
+
     let shared_secret = sapling_ka_agree(ivk, epk);
     let key = kdf_sapling(&shared_secret, &epk);
 
-    let mut plaintext = Vec::with_capacity(564);
+    let mut plaintext = Vec::with_capacity(NOTE_PLAINTEXT_SIZE);
     chacha20_poly1305_aead::decrypt(
         key.as_bytes(),
         &[0u8; 12],
         &[],
-        &enc_ciphertext[..564],
-        &enc_ciphertext[564..],
+        &enc_ciphertext[..NOTE_PLAINTEXT_SIZE],
+        &enc_ciphertext[NOTE_PLAINTEXT_SIZE..],
         &mut plaintext,
     )
     .ok()?;
@@ -321,7 +343,7 @@ pub fn try_sapling_note_decryption(
     let (note, to) = parse_note_plaintext_minus_memo(ivk, cmu, &plaintext)?;
 
     let mut memo = [0u8; 512];
-    memo.copy_from_slice(&plaintext[52..564]);
+    memo.copy_from_slice(&plaintext[COMPACT_NOTE_SIZE..NOTE_PLAINTEXT_SIZE]);
 
     Some((note, to, Memo(memo)))
 }
@@ -337,6 +359,8 @@ pub fn try_sapling_compact_note_decryption(
     cmu: &Fr,
     enc_ciphertext: &[u8],
 ) -> Option<(Note<Bls12>, PaymentAddress<Bls12>)> {
+    assert_eq!(enc_ciphertext.len(), COMPACT_NOTE_SIZE);
+
     let shared_secret = sapling_ka_agree(ivk, epk);
     let key = kdf_sapling(&shared_secret, &epk);
 
@@ -344,10 +368,10 @@ pub fn try_sapling_compact_note_decryption(
     // Skip over Poly1305 keying output
     chacha20.next();
 
-    let mut plaintext = Vec::with_capacity(52);
-    plaintext.extend_from_slice(&enc_ciphertext[0..52]);
+    let mut plaintext = Vec::with_capacity(COMPACT_NOTE_SIZE);
+    plaintext.extend_from_slice(&enc_ciphertext[0..COMPACT_NOTE_SIZE]);
     let keystream = chacha20.next();
-    for i in 0..52 {
+    for i in 0..COMPACT_NOTE_SIZE {
         plaintext[i] ^= keystream.as_bytes()[i];
     }
 
@@ -367,15 +391,18 @@ pub fn try_sapling_output_recovery(
     enc_ciphertext: &[u8],
     out_ciphertext: &[u8],
 ) -> Option<(Note<Bls12>, PaymentAddress<Bls12>, Memo)> {
+    assert_eq!(enc_ciphertext.len(), ENC_CIPHERTEXT_SIZE);
+    assert_eq!(out_ciphertext.len(), OUT_CIPHERTEXT_SIZE);
+
     let ock = prf_ock(&ovk, &cv, &cmu, &epk);
 
-    let mut op = Vec::with_capacity(64);
+    let mut op = Vec::with_capacity(OUT_PLAINTEXT_SIZE);
     chacha20_poly1305_aead::decrypt(
         ock.as_bytes(),
         &[0u8; 12],
         &[],
-        &out_ciphertext[..64],
-        &out_ciphertext[64..],
+        &out_ciphertext[..OUT_PLAINTEXT_SIZE],
+        &out_ciphertext[OUT_PLAINTEXT_SIZE..],
         &mut op,
     )
     .ok()?;
@@ -385,19 +412,19 @@ pub fn try_sapling_output_recovery(
         .as_prime_order(&JUBJUB)?;
 
     let mut esk = FsRepr::default();
-    esk.read_le(&op[32..64]).ok()?;
+    esk.read_le(&op[32..OUT_PLAINTEXT_SIZE]).ok()?;
     let esk = Fs::from_repr(esk).ok()?;
 
     let shared_secret = sapling_ka_agree(&esk, &pk_d);
     let key = kdf_sapling(&shared_secret, &epk);
 
-    let mut plaintext = Vec::with_capacity(564);
+    let mut plaintext = Vec::with_capacity(NOTE_PLAINTEXT_SIZE);
     chacha20_poly1305_aead::decrypt(
         key.as_bytes(),
         &[0u8; 12],
         &[],
-        &enc_ciphertext[..564],
-        &enc_ciphertext[564..],
+        &enc_ciphertext[..NOTE_PLAINTEXT_SIZE],
+        &enc_ciphertext[NOTE_PLAINTEXT_SIZE..],
         &mut plaintext,
     )
     .ok()?;
@@ -408,11 +435,11 @@ pub fn try_sapling_output_recovery(
     let v = (&plaintext[12..20]).read_u64::<LittleEndian>().ok()?;
 
     let mut rcm = FsRepr::default();
-    rcm.read_le(&plaintext[20..52]).ok()?;
+    rcm.read_le(&plaintext[20..COMPACT_NOTE_SIZE]).ok()?;
     let rcm = Fs::from_repr(rcm).ok()?;
 
     let mut memo = [0u8; 512];
-    memo.copy_from_slice(&plaintext[52..564]);
+    memo.copy_from_slice(&plaintext[COMPACT_NOTE_SIZE..NOTE_PLAINTEXT_SIZE]);
 
     let diversifier = Diversifier(d);
     if diversifier
@@ -643,7 +670,12 @@ mod tests {
                 None => panic!("Note decryption failed"),
             }
 
-            match try_sapling_compact_note_decryption(&ivk, &epk, &cmu, &tv.c_enc[..52]) {
+            match try_sapling_compact_note_decryption(
+                &ivk,
+                &epk,
+                &cmu,
+                &tv.c_enc[..COMPACT_NOTE_SIZE],
+            ) {
                 Some((decrypted_note, decrypted_to)) => {
                     assert_eq!(decrypted_note, note);
                     assert_eq!(decrypted_to, to);
