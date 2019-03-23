@@ -214,8 +214,6 @@ impl SaplingNoteEncryption {
         let shared_secret = sapling_ka_agree(&self.esk, &self.to.pk_d);
         let key = kdf_sapling(&shared_secret, &self.epk);
 
-        let nonce = [0u8; 12];
-
         let mut input = Vec::with_capacity(564);
         input.push(1);
         input.extend_from_slice(&self.to.diversifier.0);
@@ -226,9 +224,14 @@ impl SaplingNoteEncryption {
         input.extend_from_slice(&self.memo.0);
 
         let mut ciphertext = Vec::with_capacity(564);
-        let tag =
-            chacha20_poly1305_aead::encrypt(&key.as_bytes(), &nonce, &[], &input, &mut ciphertext)
-                .unwrap();
+        let tag = chacha20_poly1305_aead::encrypt(
+            &key.as_bytes(),
+            &[0u8; 12],
+            &[],
+            &input,
+            &mut ciphertext,
+        )
+        .unwrap();
 
         let mut output = [0u8; 580];
         output[0..564].copy_from_slice(&ciphertext);
@@ -248,9 +251,9 @@ impl SaplingNoteEncryption {
         self.esk.into_repr().write_le(&mut input[32..64]).unwrap();
 
         let mut buffer = Vec::with_capacity(64);
-        let nonce = [0u8; 12];
-        let tag = chacha20_poly1305_aead::encrypt(key.as_bytes(), &nonce, &[], &input, &mut buffer)
-            .unwrap();
+        let tag =
+            chacha20_poly1305_aead::encrypt(key.as_bytes(), &[0u8; 12], &[], &input, &mut buffer)
+                .unwrap();
 
         let mut output = [0u8; 80];
         output[0..64].copy_from_slice(&buffer);
@@ -305,10 +308,9 @@ pub fn try_sapling_note_decryption(
     let key = kdf_sapling(&shared_secret, &epk);
 
     let mut plaintext = Vec::with_capacity(564);
-    let nonce = [0u8; 12];
     chacha20_poly1305_aead::decrypt(
         key.as_bytes(),
-        &nonce,
+        &[0u8; 12],
         &[],
         &enc_ciphertext[..564],
         &enc_ciphertext[564..],
@@ -338,8 +340,7 @@ pub fn try_sapling_compact_note_decryption(
     let shared_secret = sapling_ka_agree(ivk, epk);
     let key = kdf_sapling(&shared_secret, &epk);
 
-    let nonce = [0u8; 12];
-    let mut chacha20 = ChaCha20::new(key.as_bytes(), &nonce);
+    let mut chacha20 = ChaCha20::new(key.as_bytes(), &[0u8; 12]);
     // Skip over Poly1305 keying output
     chacha20.next();
 
@@ -366,13 +367,12 @@ pub fn try_sapling_output_recovery(
     enc_ciphertext: &[u8],
     out_ciphertext: &[u8],
 ) -> Option<(Note<Bls12>, PaymentAddress<Bls12>, Memo)> {
-    let nonce = [0u8; 12];
     let ock = prf_ock(&ovk, &cv, &cmu, &epk);
 
     let mut op = Vec::with_capacity(64);
     chacha20_poly1305_aead::decrypt(
         ock.as_bytes(),
-        &nonce,
+        &[0u8; 12],
         &[],
         &out_ciphertext[..64],
         &out_ciphertext[64..],
@@ -394,7 +394,7 @@ pub fn try_sapling_output_recovery(
     let mut plaintext = Vec::with_capacity(564);
     chacha20_poly1305_aead::decrypt(
         key.as_bytes(),
-        &nonce,
+        &[0u8; 12],
         &[],
         &enc_ciphertext[..564],
         &enc_ciphertext[564..],
