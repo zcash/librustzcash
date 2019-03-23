@@ -45,11 +45,27 @@ fn convert_subgroup<E: JubjubEngine, S1, S2>(from: &Point<E, S1>) -> Point<E, S2
     }
 }
 
+impl<E: JubjubEngine> From<&Point<E, Unknown>> for Point<E, Unknown>
+{
+    fn from(p: &Point<E, Unknown>) -> Point<E, Unknown>
+    {
+        p.clone()
+    }
+}
+
 impl<E: JubjubEngine> From<Point<E, PrimeOrder>> for Point<E, Unknown>
 {
     fn from(p: Point<E, PrimeOrder>) -> Point<E, Unknown>
     {
         convert_subgroup(&p)
+    }
+}
+
+impl<E: JubjubEngine> From<&Point<E, PrimeOrder>> for Point<E, Unknown>
+{
+    fn from(p: &Point<E, PrimeOrder>) -> Point<E, Unknown>
+    {
+        convert_subgroup(p)
     }
 }
 
