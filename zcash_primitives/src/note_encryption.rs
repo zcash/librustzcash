@@ -466,17 +466,20 @@ pub fn try_sapling_output_recovery(
 mod tests {
     use ff::{PrimeField, PrimeFieldRepr};
     use pairing::bls12_381::{Bls12, Fr, FrRepr};
+    use rand::{thread_rng, Rand, Rng};
     use sapling_crypto::{
         jubjub::{
             edwards,
             fs::{Fs, FsRepr},
+            PrimeOrder, Unknown,
         },
-        primitives::{Diversifier, PaymentAddress},
+        primitives::{Diversifier, PaymentAddress, ValueCommitment},
     };
 
     use super::{
         kdf_sapling, prf_ock, sapling_ka_agree, try_sapling_compact_note_decryption,
         try_sapling_note_decryption, try_sapling_output_recovery, Memo, SaplingNoteEncryption,
+        COMPACT_NOTE_SIZE, ENC_CIPHERTEXT_SIZE, OUT_CIPHERTEXT_SIZE,
     };
     use crate::{keys::OutgoingViewingKey, JUBJUB};
 
@@ -592,6 +595,284 @@ mod tests {
         let memo = Memo::from_str("Test memo").unwrap();
         assert_eq!(memo.to_utf8(), Some(Ok("Test memo".to_owned())));
         assert_eq!(Memo::default().to_utf8(), None);
+    }
+
+    fn random_enc_ciphertext(
+        mut rng: &mut Rng,
+    ) -> (
+        OutgoingViewingKey,
+        Fs,
+        edwards::Point<Bls12, Unknown>,
+        Fr,
+        edwards::Point<Bls12, PrimeOrder>,
+        [u8; ENC_CIPHERTEXT_SIZE],
+        [u8; OUT_CIPHERTEXT_SIZE],
+    ) {
+        let diversifier = Diversifier([0; 11]);
+        let ivk = Fs::rand(&mut rng);
+        let pk_d = diversifier.g_d::<Bls12>(&JUBJUB).unwrap().mul(ivk, &JUBJUB);
+        let pa = PaymentAddress { diversifier, pk_d };
+
+        // Construct the value commitment for the proof instance
+        let value = 100;
+        let value_commitment = ValueCommitment::<Bls12> {
+            value,
+            randomness: Fs::rand(&mut rng),
+        };
+        let cv = value_commitment.cm(&JUBJUB).into();
+
+        let note = pa.create_note(value, Fs::rand(&mut rng), &JUBJUB).unwrap();
+        let cmu = note.cm(&JUBJUB);
+
+        let ovk = OutgoingViewingKey([0; 32]);
+        let ne = SaplingNoteEncryption::new(ovk, note, pa, Memo([0; 512]));
+        let epk = ne.epk();
+        let enc_ciphertext = ne.encrypt_note_plaintext();
+        let out_ciphertext = ne.encrypt_outgoing_plaintext(&cv, &cmu);
+
+        assert!(try_sapling_note_decryption(&ivk, epk, &cmu, &enc_ciphertext).is_some());
+        assert!(try_sapling_output_recovery(
+            &ovk,
+            &cv,
+            &cmu,
+            &epk,
+            &enc_ciphertext,
+            &out_ciphertext
+        )
+        .is_some());
+
+        (
+            ovk,
+            ivk,
+            cv,
+            cmu,
+            epk.clone(),
+            enc_ciphertext,
+            out_ciphertext,
+        )
+    }
+
+    #[test]
+    fn decryption_with_invalid_ivk() {
+        let mut rng = thread_rng();
+
+        let (_, _, _, cmu, epk, enc_ciphertext, _) = random_enc_ciphertext(&mut rng);
+
+        assert_eq!(
+            try_sapling_note_decryption(&Fs::rand(&mut rng), &epk, &cmu, &enc_ciphertext),
+            None
+        );
+    }
+
+    #[test]
+    fn decryption_with_invalid_epk() {
+        let mut rng = thread_rng();
+
+        let (_, ivk, _, cmu, _, enc_ciphertext, _) = random_enc_ciphertext(&mut rng);
+
+        assert_eq!(
+            try_sapling_note_decryption(
+                &ivk,
+                &edwards::Point::<Bls12, _>::rand(&mut rng, &JUBJUB).mul_by_cofactor(&JUBJUB),
+                &cmu,
+                &enc_ciphertext
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn decryption_with_invalid_cmu() {
+        let mut rng = thread_rng();
+
+        let (_, ivk, _, _, epk, enc_ciphertext, _) = random_enc_ciphertext(&mut rng);
+
+        assert_eq!(
+            try_sapling_note_decryption(&ivk, &epk, &Fr::rand(&mut rng), &enc_ciphertext),
+            None
+        );
+    }
+
+    #[test]
+    fn decryption_with_invalid_tag() {
+        let mut rng = thread_rng();
+
+        let (_, ivk, _, cmu, epk, mut enc_ciphertext, _) = random_enc_ciphertext(&mut rng);
+
+        enc_ciphertext[ENC_CIPHERTEXT_SIZE - 1] ^= 0xff;
+        assert_eq!(
+            try_sapling_note_decryption(&ivk, &epk, &cmu, &enc_ciphertext),
+            None
+        );
+    }
+
+    #[test]
+    fn compact_decryption_with_invalid_ivk() {
+        let mut rng = thread_rng();
+
+        let (_, _, _, cmu, epk, enc_ciphertext, _) = random_enc_ciphertext(&mut rng);
+
+        assert_eq!(
+            try_sapling_compact_note_decryption(
+                &Fs::rand(&mut rng),
+                &epk,
+                &cmu,
+                &enc_ciphertext[..COMPACT_NOTE_SIZE]
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn compact_decryption_with_invalid_epk() {
+        let mut rng = thread_rng();
+
+        let (_, ivk, _, cmu, _, enc_ciphertext, _) = random_enc_ciphertext(&mut rng);
+
+        assert_eq!(
+            try_sapling_compact_note_decryption(
+                &ivk,
+                &edwards::Point::<Bls12, _>::rand(&mut rng, &JUBJUB).mul_by_cofactor(&JUBJUB),
+                &cmu,
+                &enc_ciphertext[..COMPACT_NOTE_SIZE]
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn compact_decryption_with_invalid_cmu() {
+        let mut rng = thread_rng();
+
+        let (_, ivk, _, _, epk, enc_ciphertext, _) = random_enc_ciphertext(&mut rng);
+
+        assert_eq!(
+            try_sapling_compact_note_decryption(
+                &ivk,
+                &epk,
+                &Fr::rand(&mut rng),
+                &enc_ciphertext[..COMPACT_NOTE_SIZE]
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn compact_decryption_with_invalid_diversifier() {
+        let mut rng = thread_rng();
+
+        let (_, ivk, _, cmu, epk, mut enc_ciphertext, _) = random_enc_ciphertext(&mut rng);
+
+        // In compact decryption, this will result in an altered diversifier
+        enc_ciphertext[1] ^= 0xff;
+        assert_eq!(
+            try_sapling_compact_note_decryption(
+                &ivk,
+                &epk,
+                &cmu,
+                &enc_ciphertext[..COMPACT_NOTE_SIZE]
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn recovery_with_invalid_ovk() {
+        let mut rng = thread_rng();
+
+        let (mut ovk, _, cv, cmu, epk, enc_ciphertext, out_ciphertext) =
+            random_enc_ciphertext(&mut rng);
+
+        ovk.0[0] ^= 0xff;
+        assert_eq!(
+            try_sapling_output_recovery(&ovk, &cv, &cmu, &epk, &enc_ciphertext, &out_ciphertext),
+            None
+        );
+    }
+
+    #[test]
+    fn recovery_with_invalid_cv() {
+        let mut rng = thread_rng();
+
+        let (ovk, _, _, cmu, epk, enc_ciphertext, out_ciphertext) = random_enc_ciphertext(&mut rng);
+
+        assert_eq!(
+            try_sapling_output_recovery(
+                &ovk,
+                &edwards::Point::<Bls12, _>::rand(&mut rng, &JUBJUB),
+                &cmu,
+                &epk,
+                &enc_ciphertext,
+                &out_ciphertext
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn recovery_with_invalid_cmu() {
+        let mut rng = thread_rng();
+
+        let (ovk, _, cv, _, epk, enc_ciphertext, out_ciphertext) = random_enc_ciphertext(&mut rng);
+
+        assert_eq!(
+            try_sapling_output_recovery(
+                &ovk,
+                &cv,
+                &Fr::rand(&mut rng),
+                &epk,
+                &enc_ciphertext,
+                &out_ciphertext
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn recovery_with_invalid_epk() {
+        let mut rng = thread_rng();
+
+        let (ovk, _, cv, cmu, _, enc_ciphertext, out_ciphertext) = random_enc_ciphertext(&mut rng);
+
+        assert_eq!(
+            try_sapling_output_recovery(
+                &ovk,
+                &cv,
+                &cmu,
+                &edwards::Point::<Bls12, _>::rand(&mut rng, &JUBJUB).mul_by_cofactor(&JUBJUB),
+                &enc_ciphertext,
+                &out_ciphertext
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn recovery_with_invalid_enc_tag() {
+        let mut rng = thread_rng();
+
+        let (ovk, _, cv, cmu, epk, mut enc_ciphertext, out_ciphertext) =
+            random_enc_ciphertext(&mut rng);
+
+        enc_ciphertext[ENC_CIPHERTEXT_SIZE - 1] ^= 0xff;
+        assert_eq!(
+            try_sapling_output_recovery(&ovk, &cv, &cmu, &epk, &enc_ciphertext, &out_ciphertext),
+            None
+        );
+    }
+
+    #[test]
+    fn recovery_with_invalid_out_tag() {
+        let mut rng = thread_rng();
+
+        let (ovk, _, cv, cmu, epk, enc_ciphertext, mut out_ciphertext) =
+            random_enc_ciphertext(&mut rng);
+
+        out_ciphertext[OUT_CIPHERTEXT_SIZE - 1] ^= 0xff;
+        assert_eq!(
+            try_sapling_output_recovery(&ovk, &cv, &cmu, &epk, &enc_ciphertext, &out_ciphertext),
+            None
+        );
     }
 
     #[test]
