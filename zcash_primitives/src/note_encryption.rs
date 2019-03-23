@@ -128,14 +128,21 @@ fn generate_esk() -> Fs {
     Fs::to_uniform(&buffer[..])
 }
 
-fn sapling_ka_agree(esk: &Fs, pk_d: &edwards::Point<Bls12, PrimeOrder>) -> Vec<u8> {
-    let ka = pk_d
-        .mul(esk.into_repr(), &JUBJUB)
-        .double(&JUBJUB)
-        .double(&JUBJUB)
-        .double(&JUBJUB);
-    let mut result = Vec::with_capacity(32);
-    ka.write(&mut result).expect("length is not 32 bytes");
+pub fn sapling_ka_agree<'a, P>(esk: &Fs, pk_d: &'a P) -> [u8; 32]
+where
+    edwards::Point<Bls12, Unknown>: From<&'a P>,
+{
+    let p: edwards::Point<Bls12, Unknown> = pk_d.into();
+
+    // Multiply by 8
+    let p = p.mul_by_cofactor(&JUBJUB);
+
+    // Multiply by esk
+    let p = p.mul(*esk, &JUBJUB);
+
+    // Produce result
+    let mut result = [0; 32];
+    p.write(&mut result[..]).expect("length is not 32 bytes");
     result
 }
 
@@ -294,7 +301,7 @@ pub fn try_sapling_note_decryption(
     cmu: &Fr,
     enc_ciphertext: &[u8],
 ) -> Option<(Note<Bls12>, PaymentAddress<Bls12>, Memo)> {
-    let shared_secret = sapling_ka_agree(&ivk, &epk);
+    let shared_secret = sapling_ka_agree(ivk, epk);
     let key = kdf_sapling(&shared_secret, &epk);
 
     let mut plaintext = Vec::with_capacity(564);
@@ -328,7 +335,7 @@ pub fn try_sapling_compact_note_decryption(
     cmu: &Fr,
     enc_ciphertext: &[u8],
 ) -> Option<(Note<Bls12>, PaymentAddress<Bls12>)> {
-    let shared_secret = sapling_ka_agree(&ivk, &epk);
+    let shared_secret = sapling_ka_agree(ivk, epk);
     let key = kdf_sapling(&shared_secret, &epk);
 
     let nonce = [0u8; 12];
