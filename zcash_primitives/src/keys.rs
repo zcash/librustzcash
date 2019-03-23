@@ -12,7 +12,7 @@ pub const PRF_EXPAND_PERSONALIZATION: &'static [u8; 16] = b"Zcash_ExpandSeed";
 
 /// PRF^expand(sk, t) := BLAKE2b-512("Zcash_ExpandSeed", sk || t)
 pub fn prf_expand(sk: &[u8], t: &[u8]) -> Blake2bResult {
-    prf_expand_vec(sk, &vec![t])
+    prf_expand_vec(sk, &[t])
 }
 
 pub fn prf_expand_vec(sk: &[u8], ts: &[&[u8]]) -> Blake2bResult {
