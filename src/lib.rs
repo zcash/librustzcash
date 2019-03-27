@@ -704,6 +704,26 @@ impl<'a, 'b> Sub<&'b ExtendedPoint> for &'a ExtendedPoint {
 
 impl_binops_additive!(ExtendedPoint, ExtendedPoint);
 
+impl<'a, 'b> Add<&'b AffinePoint> for &'a ExtendedPoint {
+    type Output = ExtendedPoint;
+
+    #[inline]
+    fn add(self, other: &'b AffinePoint) -> ExtendedPoint {
+        self + other.to_niels()
+    }
+}
+
+impl<'a, 'b> Sub<&'b AffinePoint> for &'a ExtendedPoint {
+    type Output = ExtendedPoint;
+
+    #[inline]
+    fn sub(self, other: &'b AffinePoint) -> ExtendedPoint {
+        self - other.to_niels()
+    }
+}
+
+impl_binops_additive!(ExtendedPoint, AffinePoint);
+
 /// This is a "completed" point produced during a point doubling or
 /// addition routine. These points exist in the `(U:Z, V:T)` model
 /// of the curve. This is not exposed in the API because it is
