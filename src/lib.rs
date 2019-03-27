@@ -41,8 +41,8 @@ use subtle::{Choice, ConditionallySelectable, ConstantTimeEq};
 #[macro_use]
 mod util;
 
-pub mod maybe;
-use maybe::Maybe;
+mod ctoption;
+pub use ctoption::CtOption;
 
 mod fq;
 mod fr;
@@ -318,7 +318,7 @@ impl AffinePoint {
     /// Attempts to interpret a byte representation of an
     /// affine point, failing if the element is not on
     /// the curve or non-canonical.
-    pub fn from_bytes(mut b: [u8; 32]) -> Maybe<Self> {
+    pub fn from_bytes(mut b: [u8; 32]) -> CtOption<Self> {
         // Grab the sign bit from the representation
         let sign = b[31] >> 7;
 
@@ -348,7 +348,7 @@ impl AffinePoint {
                     let u_negated = -u;
                     let final_u = Fq::conditional_select(&u, &u_negated, flip_sign);
 
-                    Maybe::new(AffinePoint { u: final_u, v }, Choice::from(1u8))
+                    CtOption::new(AffinePoint { u: final_u, v }, Choice::from(1u8))
                 })
         })
     }

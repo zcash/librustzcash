@@ -4,8 +4,8 @@ use core::ops::{Add, AddAssign, Mul, MulAssign, Neg, Sub, SubAssign};
 use byteorder::{ByteOrder, LittleEndian};
 use subtle::{Choice, ConditionallySelectable, ConstantTimeEq};
 
-use crate::maybe::Maybe;
 use crate::util::{adc, mac, sbb};
+use crate::CtOption;
 
 /// Represents an element of `GF(r)`.
 // The internal representation of this type is four 64-bit unsigned
@@ -190,7 +190,7 @@ impl Fr {
     /// Attempts to convert a little-endian byte representation of
     /// a field element into an element of `Fr`, failing if the input
     /// is not canonical (is not smaller than r).
-    pub fn from_bytes(bytes: [u8; 32]) -> Maybe<Fr> {
+    pub fn from_bytes(bytes: [u8; 32]) -> CtOption<Fr> {
         let mut tmp = Fr([0, 0, 0, 0]);
 
         tmp.0[0] = LittleEndian::read_u64(&bytes[0..8]);
@@ -213,7 +213,7 @@ impl Fr {
         // (a.R^{-1} * R^2) / R = a.R
         tmp *= &R2;
 
-        Maybe::new(tmp, Choice::from(is_some))
+        CtOption::new(tmp, Choice::from(is_some))
     }
 
     /// Converts an element of `Fr` into a byte representation in
@@ -306,7 +306,7 @@ impl Fr {
     }
 
     /// Computes the square root of this element, if it exists.
-    pub fn sqrt(&self) -> Maybe<Self> {
+    pub fn sqrt(&self) -> CtOption<Self> {
         // Because r = 3 (mod 4)
         // sqrt can be done with only one exponentiation,
         // via the computation of  self^((r + 1) // 4) (mod r)
@@ -317,7 +317,7 @@ impl Fr {
             0x039f6d3a994cebea,
         ]);
 
-        Maybe::new(
+        CtOption::new(
             sqrt,
             (&sqrt * &sqrt).ct_eq(self), // Only return Some if it's the square root.
         )
@@ -360,7 +360,7 @@ impl Fr {
 
     /// Computes the multiplicative inverse of this element,
     /// failing if the element is zero.
-    pub fn invert(&self) -> Maybe<Self> {
+    pub fn invert(&self) -> CtOption<Self> {
         #[inline(always)]
         fn square_assign_multi(n: &mut Fr, num_times: usize) {
             for _ in 0..num_times {
@@ -462,7 +462,7 @@ impl Fr {
         square_assign_multi(&mut t0, 7);
         t0.mul_assign(&t1);
 
-        Maybe::new(t0, !self.ct_eq(&Self::zero()))
+        CtOption::new(t0, !self.ct_eq(&Self::zero()))
     }
 
     #[inline]

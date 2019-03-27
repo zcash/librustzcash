@@ -4,8 +4,8 @@ use core::ops::{Add, AddAssign, Mul, MulAssign, Neg, Sub, SubAssign};
 use byteorder::{ByteOrder, LittleEndian};
 use subtle::{Choice, ConditionallySelectable, ConstantTimeEq};
 
-use crate::maybe::Maybe;
 use crate::util::{adc, mac, sbb};
+use crate::CtOption;
 
 /// Represents an element of `GF(q)`.
 // The internal representation of this type is four 64-bit unsigned
@@ -208,7 +208,7 @@ impl Fq {
     /// Attempts to convert a little-endian byte representation of
     /// a field element into an element of `Fq`, failing if the input
     /// is not canonical (is not smaller than q).
-    pub fn from_bytes(bytes: [u8; 32]) -> Maybe<Fq> {
+    pub fn from_bytes(bytes: [u8; 32]) -> CtOption<Fq> {
         let mut tmp = Fq([0, 0, 0, 0]);
 
         tmp.0[0] = LittleEndian::read_u64(&bytes[0..8]);
@@ -231,7 +231,7 @@ impl Fq {
         // (a.R^{-1} * R^2) / R = a.R
         tmp *= &R2;
 
-        Maybe::new(tmp, Choice::from(is_some))
+        CtOption::new(tmp, Choice::from(is_some))
     }
 
     /// Converts an element of `Fq` into a byte representation in
@@ -324,7 +324,7 @@ impl Fq {
     }
 
     /// Computes the square root of this element, if it exists.
-    pub fn sqrt(&self) -> Maybe<Self> {
+    pub fn sqrt(&self) -> CtOption<Self> {
         // Tonelli-Shank's algorithm for q mod 16 = 1
         // https://eprint.iacr.org/2012/685.pdf (page 12, algorithm 5)
 
@@ -366,7 +366,7 @@ impl Fq {
             v = k;
         }
 
-        Maybe::new(
+        CtOption::new(
             x,
             (&x * &x).ct_eq(self), // Only return Some if it's the square root.
         )
@@ -409,7 +409,7 @@ impl Fq {
 
     /// Computes the multiplicative inverse of this element,
     /// failing if the element is zero.
-    pub fn invert(&self) -> Maybe<Self> {
+    pub fn invert(&self) -> CtOption<Self> {
         #[inline(always)]
         fn square_assign_multi(n: &mut Fq, num_times: usize) {
             for _ in 0..num_times {
@@ -504,7 +504,7 @@ impl Fq {
         square_assign_multi(&mut t0, 5);
         t0.mul_assign(&t1);
 
-        Maybe::new(t0, !self.ct_eq(&Self::zero()))
+        CtOption::new(t0, !self.ct_eq(&Self::zero()))
     }
 
     #[inline]
