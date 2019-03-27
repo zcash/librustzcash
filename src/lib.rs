@@ -303,6 +303,15 @@ impl AffinePoint {
         ExtendedPoint::from(*self).is_torsion_free()
     }
 
+    /// Determines if this point is prime order, or in other words that
+    /// the smallest scalar multiplied by this point that produces the
+    /// identity is `r`. This is equivalent to checking that the point
+    /// is both torsion free and not the identity.
+    pub fn is_prime_order(&self) -> Choice {
+        let extended = ExtendedPoint::from(*self);
+        extended.is_torsion_free() & (!extended.is_identity())
+    }
+
     /// Converts this element into its byte representation.
     pub fn into_bytes(&self) -> [u8; 32] {
         let mut tmp = self.v.into_bytes();
@@ -424,6 +433,14 @@ impl ExtendedPoint {
     /// in the prime order subgroup.
     pub fn is_torsion_free(&self) -> Choice {
         self.multiply(&FR_MODULUS_BYTES).is_identity()
+    }
+
+    /// Determines if this point is prime order, or in other words that
+    /// the smallest scalar multiplied by this point that produces the
+    /// identity is `r`. This is equivalent to checking that the point
+    /// is both torsion free and not the identity.
+    pub fn is_prime_order(&self) -> Choice {
+        self.is_torsion_free() & (!self.is_identity())
     }
 
     /// Multiplies this element by the cofactor `8`.
