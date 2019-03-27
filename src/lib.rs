@@ -262,7 +262,6 @@ impl ExtendedNielsPoint {
 }
 
 // `d = -(10240/10241)`
-#[allow(dead_code)]
 const EDWARDS_D: Fq = Fq::from_raw([
     0x01065fd6d6343eb1,
     0x292d7f6d37579d26,
@@ -271,7 +270,6 @@ const EDWARDS_D: Fq = Fq::from_raw([
 ]);
 
 // `2*d`
-#[allow(dead_code)]
 const EDWARDS_D2: Fq = Fq::from_raw([
     0x020cbfadac687d62,
     0x525afeda6eaf3a4c,
