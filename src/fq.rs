@@ -228,7 +228,7 @@ impl Fq {
         let is_some = (borrow as u8) & 1;
 
         // Convert to Montgomery form by computing
-        // (a.R^{-1} * R^2) / R = a.R
+        // (a.R^0 * R^2) / R = a.R
         tmp *= &R2;
 
         CtOption::new(tmp, Choice::from(is_some))
