@@ -6,7 +6,7 @@ homepage = "https://github.com/zkcrypto/jubjub"
 license = "MIT/Apache-2.0"
 name = "jubjub"
 repository = "https://github.com/zkcrypto/jubjub"
-version = "0.0.0"
+version = "0.1.0"
 edition = "2018"
 
 [dependencies.byteorder]
