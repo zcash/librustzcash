@@ -39,13 +39,13 @@ fn bench_square_assign(bencher: &mut Bencher) {
 }
 
 #[bench]
-fn bench_invert_nonzero(bencher: &mut Bencher) {
+fn bench_invert(bencher: &mut Bencher) {
     let n = Fr::one();
-    bencher.iter(move || n.invert_nonzero());
+    bencher.iter(move || n.invert());
 }
 
 #[bench]
-fn bench_sqrt_vartime(bencher: &mut Bencher) {
+fn bench_sqrt(bencher: &mut Bencher) {
     let n = Fr::one().double().double();
-    bencher.iter(move || n.sqrt_vartime());
+    bencher.iter(move || n.sqrt());
 }
