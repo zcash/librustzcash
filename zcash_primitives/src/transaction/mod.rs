@@ -36,13 +36,16 @@ impl fmt::Display for TxId {
 
 /// A Zcash transaction.
 #[derive(Debug)]
-pub struct Transaction(TransactionData, TxId);
+pub struct Transaction {
+    txid: TxId,
+    data: TransactionData,
+}
 
 impl Deref for Transaction {
     type Target = TransactionData;
 
     fn deref(&self) -> &TransactionData {
-        &self.0
+        &self.data
     }
 }
 
@@ -133,17 +136,20 @@ impl TransactionData {
 
 impl Transaction {
     fn from_data(data: TransactionData) -> io::Result<Self> {
-        let mut tx = Transaction(data, TxId([0; 32]));
+        let mut tx = Transaction {
+            txid: TxId([0; 32]),
+            data,
+        };
         let mut raw = vec![];
         tx.write(&mut raw)?;
-        (tx.1)
+        tx.txid
             .0
             .copy_from_slice(&Sha256::digest(&Sha256::digest(&raw)));
         Ok(tx)
     }
 
     pub fn txid(&self) -> TxId {
-        self.1
+        self.txid
     }
 
     pub fn read<R: Read>(mut reader: R) -> io::Result<Self> {
