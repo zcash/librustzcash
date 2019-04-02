@@ -150,6 +150,10 @@ fn tx_read_write() {
         0x9b, 0x27, 0xdb, 0x5f, 0x95, 0xfd, 0x09, 0xa3, 0x6b, 0x05,
     ];
     let tx = Transaction::read(&data[..]).unwrap();
+    assert_eq!(
+        format!("{}", tx.txid()),
+        "64f0bd7fe30ce23753358fe3a2dc835b8fba9c0274c4e2c54a6f73114cb55639"
+    );
 
     let mut encoded = Vec::with_capacity(data.len());
     tx.write(&mut encoded).unwrap();
