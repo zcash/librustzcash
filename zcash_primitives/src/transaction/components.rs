@@ -218,7 +218,7 @@ impl SpendDescription {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidInput,
                     "Missing spend auth signature",
-                ))
+                ));
             }
         }
     }

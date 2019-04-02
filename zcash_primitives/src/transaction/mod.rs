@@ -275,7 +275,7 @@ impl Transaction {
                         return Err(io::Error::new(
                             io::ErrorKind::InvalidInput,
                             "Missing JoinSplit pubkey",
-                        ))
+                        ));
                     }
                 }
                 match self.joinsplit_sig {
@@ -284,7 +284,7 @@ impl Transaction {
                         return Err(io::Error::new(
                             io::ErrorKind::InvalidInput,
                             "Missing JoinSplit signature",
-                        ))
+                        ));
                     }
                 }
             }
@@ -312,7 +312,7 @@ impl Transaction {
                     return Err(io::Error::new(
                         io::ErrorKind::InvalidInput,
                         "Missing binding signature",
-                    ))
+                    ));
                 }
             }
         } else if self.binding_sig.is_some() {
