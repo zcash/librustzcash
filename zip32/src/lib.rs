@@ -184,7 +184,7 @@ impl<E: JubjubEngine> FullViewingKey<E> {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidData,
                     "ak not of prime order",
-                ))
+                ));
             }
         };
 
@@ -195,7 +195,7 @@ impl<E: JubjubEngine> FullViewingKey<E> {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidData,
                     "nk not of prime order",
-                ))
+                ));
             }
         };
 

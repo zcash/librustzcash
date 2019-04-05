@@ -8,10 +8,12 @@ authors = [
 [dependencies]
 byteorder = "1"
 ff = { path = "../ff" }
+hex = "0.3"
 lazy_static = "1"
 pairing = { path = "../pairing" }
 rand = "0.4"
 sapling-crypto = { path = "../sapling-crypto" }
+sha2 = "0.8"
 
 [dependencies.blake2-rfc]
 git = "https://github.com/gtank/blake2-rfc"
