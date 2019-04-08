@@ -5,7 +5,6 @@ use protobuf::parse_from_bytes;
 use rusqlite::{types::ToSql, Connection, NO_PARAMS};
 use std::path::Path;
 use zcash_client_backend::{
-    constants::testnet::HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY,
     encoding::decode_extended_full_viewing_key, proto::compact_formats::CompactBlock,
     welding_rig::scan_block,
 };
@@ -17,7 +16,7 @@ use zcash_primitives::{
 
 use crate::{
     error::{Error, ErrorKind},
-    SAPLING_ACTIVATION_HEIGHT,
+    HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY, SAPLING_ACTIVATION_HEIGHT,
 };
 
 struct CompactBlockRow {

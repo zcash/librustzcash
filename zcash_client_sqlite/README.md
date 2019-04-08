@@ -16,8 +16,7 @@ of the following:
 * ❌ The code **has not been subjected to thorough review** by engineers at the Electric Coin Company.
 * :warning: This library **is** compatible with the latest version of zcashd, but there **is no** automated testing of this.
 * :heavy_check_mark: The library **is not** majorly broken in some way.
-* ❌ The library **only runs** on testnet.
-* ❌ The library **does not run** on mainnet or regtest.
+* :heavy_check_mark: The library **does run** on mainnet and testnet.
 * ❌ We **are actively rebasing** this branch and adding features where/when needed.
 * ❌ We **do not** undertake appropriate security coverage (threat models, review, response, etc.).
 * :heavy_check_mark: There is a product manager for this library.

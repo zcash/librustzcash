@@ -26,3 +26,6 @@ rand_core = "0.5.1"
 remove_dir_all = "=0.5.2" # tempfile dependency; 0.5.3 bumped the MSRV
 tempfile = "3"
 zcash_proofs = { version = "0.2", path = "../zcash_proofs" }
+
+[features]
+mainnet = []

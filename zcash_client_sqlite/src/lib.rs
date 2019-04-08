@@ -16,15 +16,28 @@
 //!   **MUST NOT** write to the database without using these APIs. Callers **MAY** read
 //!   the database directly in order to extract information for display to users.
 //!
+//! # Features
+//!
+//! The `mainnet` feature configures the light client for use with the Zcash mainnet. By
+//! default, the light client is configured for use with the Zcash testnet.
+//!
 //! [`CompactBlock`]: zcash_client_backend::proto::compact_formats::CompactBlock
 //! [`init_cache_database`]: crate::init::init_cache_database
 
 use rusqlite::{Connection, NO_PARAMS};
 use std::cmp;
-use zcash_client_backend::{
-    constants::testnet::HRP_SAPLING_PAYMENT_ADDRESS, encoding::encode_payment_address,
-};
+use zcash_client_backend::encoding::encode_payment_address;
 use zcash_primitives::zip32::ExtendedFullViewingKey;
+
+#[cfg(feature = "mainnet")]
+use zcash_client_backend::constants::mainnet::{
+    HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY, HRP_SAPLING_PAYMENT_ADDRESS,
+};
+
+#[cfg(not(feature = "mainnet"))]
+use zcash_client_backend::constants::testnet::{
+    HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY, HRP_SAPLING_PAYMENT_ADDRESS,
+};
 
 pub mod error;
 pub mod init;
@@ -33,6 +46,11 @@ pub mod scan;
 pub mod transact;
 
 const ANCHOR_OFFSET: u32 = 10;
+
+#[cfg(feature = "mainnet")]
+const SAPLING_ACTIVATION_HEIGHT: i32 = 419_200;
+
+#[cfg(not(feature = "mainnet"))]
 const SAPLING_ACTIVATION_HEIGHT: i32 = 280_000;
 
 fn address_from_extfvk(extfvk: &ExtendedFullViewingKey) -> String {
