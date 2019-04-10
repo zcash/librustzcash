@@ -1,12 +1,3 @@
-extern crate aes;
-extern crate blake2_rfc;
-extern crate byteorder;
-extern crate ff;
-extern crate fpe;
-extern crate pairing;
-extern crate sapling_crypto;
-extern crate zcash_primitives;
-
 use aes::Aes256;
 use blake2_rfc::blake2b::Blake2b;
 use byteorder::{ByteOrder, LittleEndian, ReadBytesExt, WriteBytesExt};
@@ -18,7 +9,8 @@ use sapling_crypto::{
     primitives::{Diversifier, PaymentAddress, ViewingKey},
 };
 use std::io::{self, Read, Write};
-use zcash_primitives::{
+
+use crate::{
     keys::{prf_expand, prf_expand_vec, ExpandedSpendingKey, FullViewingKey, OutgoingViewingKey},
     JUBJUB,
 };
