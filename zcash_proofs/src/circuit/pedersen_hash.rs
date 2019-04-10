@@ -274,7 +274,7 @@ mod test {
             "2112827187110048608327330788910224944044097981650120385961435904443901436107",
         ];
         for length in 300..302 {
-            let mut input: Vec<bool> = (0..length).map(|_| rng.next_u32() % 2 != 0).collect();
+            let input: Vec<bool> = (0..length).map(|_| rng.next_u32() % 2 != 0).collect();
 
             let mut cs = TestConstraintSystem::<Bls12>::new();
 
