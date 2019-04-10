@@ -1,10 +1,12 @@
 #[macro_use]
 extern crate lazy_static;
 
+extern crate aes;
 extern crate blake2_rfc;
 extern crate byteorder;
 extern crate crypto_api_chachapoly;
 extern crate ff;
+extern crate fpe;
 extern crate hex;
 extern crate pairing;
 extern crate rand;
@@ -19,6 +21,7 @@ pub mod note_encryption;
 pub mod sapling;
 mod serialize;
 pub mod transaction;
+pub mod zip32;
 
 #[cfg(test)]
 mod test_vectors;

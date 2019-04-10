@@ -24,7 +24,6 @@ rand = "0.4"
 sapling-crypto = { path = "../sapling-crypto" }
 zcash_primitives = { path = "../zcash_primitives" }
 zcash_proofs = { path = "../zcash_proofs" }
-zip32 = { path = "../zip32" }
 
 [dependencies.blake2-rfc]
 git = "https://github.com/gtank/blake2-rfc"

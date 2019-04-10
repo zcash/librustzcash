@@ -8,7 +8,6 @@ extern crate rand;
 extern crate sapling_crypto;
 extern crate zcash_primitives;
 extern crate zcash_proofs;
-extern crate zip32;
 
 extern crate lazy_static;
 
@@ -58,7 +57,7 @@ use std::ffi::OsString;
 use std::os::windows::ffi::OsStringExt;
 
 use sapling_crypto::primitives::{ProofGenerationKey, ViewingKey};
-use zcash_primitives::{note_encryption::sapling_ka_agree, sapling::spend_sig, JUBJUB};
+use zcash_primitives::{note_encryption::sapling_ka_agree, sapling::spend_sig, zip32, JUBJUB};
 use zcash_proofs::{
     load_parameters,
     sapling::{CommitmentTreeWitness, SaplingProvingContext, SaplingVerificationContext},
