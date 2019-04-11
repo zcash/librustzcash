@@ -3,7 +3,7 @@ extern crate lazy_static;
 
 extern crate blake2_rfc;
 extern crate byteorder;
-extern crate chacha20_poly1305_aead;
+extern crate crypto_api_chachapoly;
 extern crate ff;
 extern crate hex;
 extern crate pairing;

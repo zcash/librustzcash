@@ -1,6 +1,6 @@
 use blake2_rfc::blake2b::{Blake2b, Blake2bResult};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
-use chacha20_poly1305_aead::{self, as_bytes::AsBytes, chacha20::ChaCha20};
+use crypto_api_chachapoly::{ChaCha20Ietf, ChachaPolyIetf};
 use ff::{PrimeField, PrimeFieldRepr};
 use pairing::bls12_381::{Bls12, Fr};
 use rand::{OsRng, Rng};
@@ -240,19 +240,14 @@ impl SaplingNoteEncryption {
         input.extend_from_slice(&self.memo.0);
         assert_eq!(input.len(), NOTE_PLAINTEXT_SIZE);
 
-        let mut ciphertext = Vec::with_capacity(NOTE_PLAINTEXT_SIZE);
-        let tag = chacha20_poly1305_aead::encrypt(
-            &key.as_bytes(),
-            &[0u8; 12],
-            &[],
-            &input,
-            &mut ciphertext,
-        )
-        .unwrap();
-
         let mut output = [0u8; ENC_CIPHERTEXT_SIZE];
-        output[0..NOTE_PLAINTEXT_SIZE].copy_from_slice(&ciphertext);
-        output[NOTE_PLAINTEXT_SIZE..ENC_CIPHERTEXT_SIZE].copy_from_slice(&tag);
+        assert_eq!(
+            ChachaPolyIetf::aead_cipher()
+                .seal_to(&mut output, &input, &[], &key.as_bytes(), &[0u8; 12])
+                .unwrap(),
+            ENC_CIPHERTEXT_SIZE
+        );
+
         output
     }
 
@@ -263,23 +258,26 @@ impl SaplingNoteEncryption {
     ) -> [u8; OUT_CIPHERTEXT_SIZE] {
         let key = prf_ock(&self.ovk, &cv, &cmu, &self.epk);
 
-        let mut input = [0u8; OUT_PLAINTEXT_SIZE];
-        self.note.pk_d.write(&mut input[0..32]).unwrap();
+        let mut buf = [0u8; OUT_CIPHERTEXT_SIZE];
+        self.note.pk_d.write(&mut buf[0..32]).unwrap();
         self.esk
             .into_repr()
-            .write_le(&mut input[32..OUT_PLAINTEXT_SIZE])
+            .write_le(&mut buf[32..OUT_PLAINTEXT_SIZE])
             .unwrap();
 
-        let mut buffer = Vec::with_capacity(OUT_PLAINTEXT_SIZE);
-        let tag =
-            chacha20_poly1305_aead::encrypt(key.as_bytes(), &[0u8; 12], &[], &input, &mut buffer)
-                .unwrap();
-
-        let mut output = [0u8; OUT_CIPHERTEXT_SIZE];
-        output[0..OUT_PLAINTEXT_SIZE].copy_from_slice(&buffer);
-        output[OUT_PLAINTEXT_SIZE..OUT_CIPHERTEXT_SIZE].copy_from_slice(&tag[..]);
-
-        output
+        assert_eq!(
+            ChachaPolyIetf::aead_cipher()
+                .seal(
+                    &mut buf,
+                    OUT_PLAINTEXT_SIZE,
+                    &[],
+                    key.as_bytes(),
+                    &[0u8; 12]
+                )
+                .unwrap(),
+            OUT_CIPHERTEXT_SIZE
+        );
+        buf
     }
 }
 
@@ -329,16 +327,19 @@ pub fn try_sapling_note_decryption(
     let shared_secret = sapling_ka_agree(ivk, epk);
     let key = kdf_sapling(&shared_secret, &epk);
 
-    let mut plaintext = Vec::with_capacity(NOTE_PLAINTEXT_SIZE);
-    chacha20_poly1305_aead::decrypt(
-        key.as_bytes(),
-        &[0u8; 12],
-        &[],
-        &enc_ciphertext[..NOTE_PLAINTEXT_SIZE],
-        &enc_ciphertext[NOTE_PLAINTEXT_SIZE..],
-        &mut plaintext,
-    )
-    .ok()?;
+    let mut plaintext = vec![0; ENC_CIPHERTEXT_SIZE];
+    assert_eq!(
+        ChachaPolyIetf::aead_cipher()
+            .open_to(
+                &mut plaintext,
+                &enc_ciphertext,
+                &[],
+                key.as_bytes(),
+                &[0u8; 12]
+            )
+            .ok()?,
+        NOTE_PLAINTEXT_SIZE
+    );
 
     let (note, to) = parse_note_plaintext_minus_memo(ivk, cmu, &plaintext)?;
 
@@ -364,18 +365,24 @@ pub fn try_sapling_compact_note_decryption(
     let shared_secret = sapling_ka_agree(ivk, epk);
     let key = kdf_sapling(&shared_secret, &epk);
 
-    let mut chacha20 = ChaCha20::new(key.as_bytes(), &[0u8; 12]);
-    // Skip over Poly1305 keying output
-    chacha20.next();
-
-    let mut plaintext = Vec::with_capacity(COMPACT_NOTE_SIZE);
+    // Prefix plaintext with 64 zero-bytes to skip over Poly1305 keying output
+    const CHACHA20_BLOCK_SIZE: usize = 64;
+    let mut plaintext = Vec::with_capacity(CHACHA20_BLOCK_SIZE + COMPACT_NOTE_SIZE);
+    plaintext.extend_from_slice(&[0; CHACHA20_BLOCK_SIZE]);
     plaintext.extend_from_slice(&enc_ciphertext[0..COMPACT_NOTE_SIZE]);
-    let keystream = chacha20.next();
-    for i in 0..COMPACT_NOTE_SIZE {
-        plaintext[i] ^= keystream.as_bytes()[i];
-    }
+    assert_eq!(
+        ChaCha20Ietf::cipher()
+            .decrypt(
+                &mut plaintext,
+                CHACHA20_BLOCK_SIZE + COMPACT_NOTE_SIZE,
+                key.as_bytes(),
+                &[0u8; 12],
+            )
+            .ok()?,
+        CHACHA20_BLOCK_SIZE + COMPACT_NOTE_SIZE
+    );
 
-    parse_note_plaintext_minus_memo(ivk, cmu, &plaintext)
+    parse_note_plaintext_minus_memo(ivk, cmu, &plaintext[CHACHA20_BLOCK_SIZE..])
 }
 
 /// Attempts to decrypt and validate the given `enc_ciphertext` using the given `ovk`.
@@ -396,16 +403,13 @@ pub fn try_sapling_output_recovery(
 
     let ock = prf_ock(&ovk, &cv, &cmu, &epk);
 
-    let mut op = Vec::with_capacity(OUT_PLAINTEXT_SIZE);
-    chacha20_poly1305_aead::decrypt(
-        ock.as_bytes(),
-        &[0u8; 12],
-        &[],
-        &out_ciphertext[..OUT_PLAINTEXT_SIZE],
-        &out_ciphertext[OUT_PLAINTEXT_SIZE..],
-        &mut op,
-    )
-    .ok()?;
+    let mut op = vec![0; OUT_CIPHERTEXT_SIZE];
+    assert_eq!(
+        ChachaPolyIetf::aead_cipher()
+            .open_to(&mut op, &out_ciphertext, &[], ock.as_bytes(), &[0u8; 12])
+            .ok()?,
+        OUT_PLAINTEXT_SIZE
+    );
 
     let pk_d = edwards::Point::<Bls12, _>::read(&op[0..32], &JUBJUB)
         .ok()?
@@ -418,16 +422,19 @@ pub fn try_sapling_output_recovery(
     let shared_secret = sapling_ka_agree(&esk, &pk_d);
     let key = kdf_sapling(&shared_secret, &epk);
 
-    let mut plaintext = Vec::with_capacity(NOTE_PLAINTEXT_SIZE);
-    chacha20_poly1305_aead::decrypt(
-        key.as_bytes(),
-        &[0u8; 12],
-        &[],
-        &enc_ciphertext[..NOTE_PLAINTEXT_SIZE],
-        &enc_ciphertext[NOTE_PLAINTEXT_SIZE..],
-        &mut plaintext,
-    )
-    .ok()?;
+    let mut plaintext = vec![0; ENC_CIPHERTEXT_SIZE];
+    assert_eq!(
+        ChachaPolyIetf::aead_cipher()
+            .open_to(
+                &mut plaintext,
+                &enc_ciphertext,
+                &[],
+                key.as_bytes(),
+                &[0u8; 12]
+            )
+            .ok()?,
+        NOTE_PLAINTEXT_SIZE
+    );
 
     let mut d = [0u8; 11];
     d.copy_from_slice(&plaintext[1..12]);
@@ -631,6 +638,13 @@ mod tests {
         let out_ciphertext = ne.encrypt_outgoing_plaintext(&cv, &cmu);
 
         assert!(try_sapling_note_decryption(&ivk, epk, &cmu, &enc_ciphertext).is_some());
+        assert!(try_sapling_compact_note_decryption(
+            &ivk,
+            epk,
+            &cmu,
+            &enc_ciphertext[..COMPACT_NOTE_SIZE]
+        )
+        .is_some());
         assert!(try_sapling_output_recovery(
             &ovk,
             &cv,
