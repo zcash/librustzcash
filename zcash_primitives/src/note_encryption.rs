@@ -1,3 +1,5 @@
+//! Implementation of in-band secret distribution for Zcash transactions.
+
 use blake2_rfc::blake2b::{Blake2b, Blake2bResult};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use crypto_api_chachapoly::{ChaCha20Ietf, ChachaPolyIetf};
@@ -57,6 +59,7 @@ where
     Ok(())
 }
 
+/// An unencrypted memo received alongside a shielded note in a Zcash transaction.
 #[derive(Clone)]
 pub struct Memo([u8; 512]);
 
@@ -87,9 +90,9 @@ impl PartialEq for Memo {
 }
 
 impl Memo {
-    /// Returns a Memo containing the given slice, appending with zero bytes if necessary,
-    /// or None if the slice is too long. If the slice is empty, Memo::default() is
-    /// returned.
+    /// Returns a `Memo` containing the given slice, appending with zero bytes if
+    /// necessary, or `None` if the slice is too long. If the slice is empty,
+    /// `Memo::default` is returned.
     pub fn from_bytes(memo: &[u8]) -> Option<Memo> {
         if memo.is_empty() {
             Some(Memo::default())
@@ -103,19 +106,20 @@ impl Memo {
         }
     }
 
-    /// Returns a Memo containing the given string, or None if the string is too long.
+    /// Returns a `Memo` containing the given string, or `None` if the string is too long.
     pub fn from_str(memo: &str) -> Option<Memo> {
         Memo::from_bytes(memo.as_bytes())
     }
 
+    /// Returns the underlying bytes of the `Memo`.
     pub fn as_bytes(&self) -> &[u8] {
         &self.0[..]
     }
 
     /// Returns:
-    /// - None if the memo is not text
-    /// - Some(Ok(memo)) if the memo contains a valid UTF8 string
-    /// - Some(Err(e)) if the memo contains invalid UTF8
+    /// - `None` if the memo is not text
+    /// - `Some(Ok(memo))` if the memo contains a valid UTF-8 string
+    /// - `Some(Err(e))` if the memo contains invalid UTF-8
     pub fn to_utf8(&self) -> Option<Result<String, str::Utf8Error>> {
         // Check if it is a text or binary memo
         if self.0[0] < 0xF5 {
@@ -144,6 +148,9 @@ fn generate_esk() -> Fs {
     Fs::to_uniform(&buffer[..])
 }
 
+/// Sapling key agreement for note encryption.
+///
+/// Implements section 5.4.4.3 of the Zcash Protocol Specification.
 pub fn sapling_ka_agree<'a, P>(esk: &Fs, pk_d: &'a P) -> [u8; 32]
 where
     edwards::Point<Bls12, Unknown>: From<&'a P>,
@@ -162,6 +169,9 @@ where
     result
 }
 
+/// Sapling KDF for note encryption.
+///
+/// Implements section 5.4.4.4 of the Zcash Protocol Specification.
 fn kdf_sapling(dhsecret: &[u8], epk: &edwards::Point<Bls12, PrimeOrder>) -> Blake2bResult {
     let mut input = [0u8; 64];
     input[0..32].copy_from_slice(&dhsecret);
@@ -172,6 +182,9 @@ fn kdf_sapling(dhsecret: &[u8], epk: &edwards::Point<Bls12, PrimeOrder>) -> Blak
     h.finalize()
 }
 
+/// Sapling PRF^ock.
+///
+/// Implemented per section 5.4.2 of the Zcash Protocol Specification.
 fn prf_ock(
     ovk: &OutgoingViewingKey,
     cv: &edwards::Point<Bls12, Unknown>,
@@ -189,6 +202,56 @@ fn prf_ock(
     h.finalize()
 }
 
+/// An API for encrypting Sapling notes.
+///
+/// This struct provides a safe API for encrypting Sapling notes. In particular, it
+/// enforces that fresh ephemeral keys are used for every note, and that the ciphertexts
+/// are consistent with each other.
+///
+/// Implements section 4.17.1 of the Zcash Protocol Specification.
+///
+/// # Examples
+///
+/// ```
+/// extern crate pairing;
+/// extern crate rand;
+/// extern crate sapling_crypto;
+///
+/// use pairing::bls12_381::Bls12;
+/// use rand::{OsRng, Rand};
+/// use sapling_crypto::{
+///     jubjub::fs::Fs,
+///     primitives::{Diversifier, PaymentAddress, ValueCommitment},
+/// };
+/// use zcash_primitives::{
+///     keys::OutgoingViewingKey,
+///     note_encryption::{Memo, SaplingNoteEncryption},
+///     JUBJUB,
+/// };
+///
+/// let mut rng = OsRng::new().unwrap();
+///
+/// let diversifier = Diversifier([0; 11]);
+/// let pk_d = diversifier.g_d::<Bls12>(&JUBJUB).unwrap();
+/// let to = PaymentAddress {
+///     pk_d,
+///     diversifier,
+/// };
+/// let ovk = OutgoingViewingKey([0; 32]);
+///
+/// let value = 1000;
+/// let rcv = Fs::rand(&mut rng);
+/// let cv = ValueCommitment::<Bls12> {
+///     value,
+///     randomness: rcv.clone(),
+/// };
+/// let note = to.create_note(value, rcv, &JUBJUB).unwrap();
+/// let cmu = note.cm(&JUBJUB);
+///
+/// let enc = SaplingNoteEncryption::new(ovk, note, to, Memo::default());
+/// let encCiphertext = enc.encrypt_note_plaintext();
+/// let outCiphertext = enc.encrypt_outgoing_plaintext(&cv.cm(&JUBJUB).into(), &cmu);
+/// ```
 pub struct SaplingNoteEncryption {
     epk: edwards::Point<Bls12, PrimeOrder>,
     esk: Fs,
@@ -199,6 +262,7 @@ pub struct SaplingNoteEncryption {
 }
 
 impl SaplingNoteEncryption {
+    /// Creates a new encryption context for the given note.
     pub fn new(
         ovk: OutgoingViewingKey,
         note: Note<Bls12>,
@@ -218,14 +282,17 @@ impl SaplingNoteEncryption {
         }
     }
 
+    /// Exposes the ephemeral secret key being used to encrypt this note.
     pub fn esk(&self) -> &Fs {
         &self.esk
     }
 
+    /// Exposes the ephemeral public key being used to encrypt this note.
     pub fn epk(&self) -> &edwards::Point<Bls12, PrimeOrder> {
         &self.epk
     }
 
+    /// Generates `encCiphertext` for this note.
     pub fn encrypt_note_plaintext(&self) -> [u8; ENC_CIPHERTEXT_SIZE] {
         let shared_secret = sapling_ka_agree(&self.esk, &self.to.pk_d);
         let key = kdf_sapling(&shared_secret, &self.epk);
@@ -251,6 +318,7 @@ impl SaplingNoteEncryption {
         output
     }
 
+    /// Generates `outCiphertext` for this note.
     pub fn encrypt_outgoing_plaintext(
         &self,
         cv: &edwards::Point<Bls12, Unknown>,
@@ -311,6 +379,8 @@ fn parse_note_plaintext_minus_memo(
     Some((note, to))
 }
 
+/// Trial decryption of the full note plaintext by the recipient.
+///
 /// Attempts to decrypt and validate the given `enc_ciphertext` using the given `ivk`.
 /// If successful, the corresponding Sapling note and memo are returned, along with the
 /// `PaymentAddress` to which the note was sent.
@@ -349,11 +419,15 @@ pub fn try_sapling_note_decryption(
     Some((note, to, Memo(memo)))
 }
 
+/// Trial decryption of the compact note plaintext by the recipient for light clients.
+///
 /// Attempts to decrypt and validate the first 52 bytes of `enc_ciphertext` using the
 /// given `ivk`. If successful, the corresponding Sapling note is returned, along with the
 /// `PaymentAddress` to which the note was sent.
 ///
-/// Implements the procedure specified in ZIP 307.
+/// Implements the procedure specified in [`ZIP 307`].
+///
+/// [`ZIP 307`]: https://github.com/zcash/zips/pull/226
 pub fn try_sapling_compact_note_decryption(
     ivk: &Fs,
     epk: &edwards::Point<Bls12, PrimeOrder>,
@@ -385,6 +459,8 @@ pub fn try_sapling_compact_note_decryption(
     parse_note_plaintext_minus_memo(ivk, cmu, &plaintext[CHACHA20_BLOCK_SIZE..])
 }
 
+/// Recovery of the full note plaintext by the sender.
+///
 /// Attempts to decrypt and validate the given `enc_ciphertext` using the given `ovk`.
 /// If successful, the corresponding Sapling note and memo are returned, along with the
 /// `PaymentAddress` to which the note was sent.
