@@ -1,81 +1,35 @@
 use byteorder::{LittleEndian, ReadBytesExt};
-use ff::{PrimeField, PrimeFieldRepr};
-use pairing::bls12_381::{Bls12, Fr, FrRepr};
-use sapling_crypto::{circuit::sapling::TREE_DEPTH, primitives::Note};
+use sapling_crypto::circuit::sapling::TREE_DEPTH;
 use std::collections::VecDeque;
 use std::io::{self, Read, Write};
 use std::iter;
 
-use sapling::merkle_hash;
+use sapling::SAPLING_COMMITMENT_TREE_DEPTH;
 use serialize::{Optional, Vector};
 
-const SAPLING_COMMITMENT_TREE_DEPTH: usize = 32;
+/// A hashable node within a Merkle tree.
+pub trait Hashable: Clone + Copy {
+    /// Parses a node from the given byte source.
+    fn read<R: Read>(reader: R) -> io::Result<Self>;
 
-trait Hashable: Clone + Copy {
+    /// Serializes this node.
+    fn write<W: Write>(&self, writer: W) -> io::Result<()>;
+
     /// Returns the parent node within the tree of the two given nodes.
     fn combine(usize, &Self, &Self) -> Self;
 
     /// Returns a blank leaf node.
     fn blank() -> Self;
+
+    /// Returns the empty root for the given depth.
+    fn empty_root(usize) -> Self;
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Node {
-    repr: FrRepr,
-}
-
-impl Node {
-    pub fn new(repr: FrRepr) -> Self {
-        Node { repr }
-    }
-
-    pub fn read<R: Read>(mut reader: R) -> io::Result<Self> {
-        let mut repr = FrRepr::default();
-        repr.read_le(&mut reader)?;
-        Ok(Node::new(repr))
-    }
-
-    pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
-        self.repr.write_le(&mut writer)
-    }
-}
-
-impl Hashable for Node {
-    fn combine(depth: usize, lhs: &Self, rhs: &Self) -> Self {
-        Node {
-            repr: merkle_hash(depth, &lhs.repr, &rhs.repr),
-        }
-    }
-
-    fn blank() -> Self {
-        Node {
-            repr: Note::<Bls12>::uncommitted().into_repr(),
-        }
-    }
-}
-
-impl From<Node> for Fr {
-    fn from(node: Node) -> Self {
-        Fr::from_repr(node.repr).expect("Tree nodes should be in the prime field")
-    }
-}
-
-lazy_static! {
-    static ref EMPTY_ROOTS: Vec<Node> = {
-        let mut v = vec![Node::blank()];
-        for d in 0..SAPLING_COMMITMENT_TREE_DEPTH {
-            let next = Node::combine(d, &v[d], &v[d]);
-            v.push(next);
-        }
-        v
-    };
-}
-
-struct PathFiller {
+struct PathFiller<Node: Hashable> {
     queue: VecDeque<Node>,
 }
 
-impl PathFiller {
+impl<Node: Hashable> PathFiller<Node> {
     fn empty() -> Self {
         PathFiller {
             queue: VecDeque::new(),
@@ -83,19 +37,21 @@ impl PathFiller {
     }
 
     fn next(&mut self, depth: usize) -> Node {
-        self.queue.pop_front().unwrap_or_else(|| EMPTY_ROOTS[depth])
+        self.queue
+            .pop_front()
+            .unwrap_or_else(|| Node::empty_root(depth))
     }
 }
 
 /// A Merkle tree of Sapling note commitments.
 #[derive(Clone)]
-pub struct CommitmentTree {
+pub struct CommitmentTree<Node: Hashable> {
     left: Option<Node>,
     right: Option<Node>,
     parents: Vec<Option<Node>>,
 }
 
-impl CommitmentTree {
+impl<Node: Hashable> CommitmentTree<Node> {
     /// Creates an empty tree.
     pub fn new() -> Self {
         CommitmentTree {
@@ -192,7 +148,7 @@ impl CommitmentTree {
         self.root_inner(SAPLING_COMMITMENT_TREE_DEPTH, PathFiller::empty())
     }
 
-    fn root_inner(&self, depth: usize, mut filler: PathFiller) -> Node {
+    fn root_inner(&self, depth: usize, mut filler: PathFiller<Node>) -> Node {
         assert!(depth > 0);
 
         // 1) Hash left and right leaves together.
@@ -227,15 +183,15 @@ impl CommitmentTree {
 }
 
 #[derive(Clone)]
-pub struct IncrementalWitness {
-    tree: CommitmentTree,
+pub struct IncrementalWitness<Node: Hashable> {
+    tree: CommitmentTree<Node>,
     filled: Vec<Node>,
     cursor_depth: usize,
-    cursor: Option<CommitmentTree>,
+    cursor: Option<CommitmentTree<Node>>,
 }
 
-impl IncrementalWitness {
-    pub fn from_tree(tree: &CommitmentTree) -> IncrementalWitness {
+impl<Node: Hashable> IncrementalWitness<Node> {
+    pub fn from_tree(tree: &CommitmentTree<Node>) -> IncrementalWitness<Node> {
         IncrementalWitness {
             tree: tree.clone(),
             filled: vec![],
@@ -272,7 +228,7 @@ impl IncrementalWitness {
         self.tree.size() - 1
     }
 
-    fn filler(&self) -> PathFiller {
+    fn filler(&self) -> PathFiller<Node> {
         let cursor_root = self
             .cursor
             .as_ref()
@@ -374,11 +330,11 @@ impl IncrementalWitness {
     }
 
     /// Returns the current witness, or None if the tree is empty.
-    pub fn path(&self) -> Option<CommitmentTreeWitness> {
+    pub fn path(&self) -> Option<CommitmentTreeWitness<Node>> {
         self.path_inner(SAPLING_COMMITMENT_TREE_DEPTH)
     }
 
-    fn path_inner(&self, depth: usize) -> Option<CommitmentTreeWitness> {
+    fn path_inner(&self, depth: usize) -> Option<CommitmentTreeWitness<Node>> {
         let mut filler = self.filler();
         let mut auth_path = Vec::new();
 
@@ -406,10 +362,7 @@ impl IncrementalWitness {
         assert_eq!(auth_path.len(), depth);
 
         Some(CommitmentTreeWitness::from_path(
-            auth_path
-                .iter()
-                .map(|n| n.map(|(node, b)| (node.into(), b)))
-                .collect(),
+            auth_path,
             self.position() as u64,
         ))
     }
@@ -418,13 +371,13 @@ impl IncrementalWitness {
 /// A witness to a path from a position in a particular Sapling commitment tree
 /// to the root of that tree.
 #[derive(Debug, PartialEq)]
-pub struct CommitmentTreeWitness {
-    pub auth_path: Vec<Option<(Fr, bool)>>,
+pub struct CommitmentTreeWitness<Node: Hashable> {
+    pub auth_path: Vec<Option<(Node, bool)>>,
     pub position: u64,
 }
 
-impl CommitmentTreeWitness {
-    pub fn from_path(auth_path: Vec<Option<(Fr, bool)>>, position: u64) -> Self {
+impl<Node: Hashable> CommitmentTreeWitness<Node> {
+    pub fn from_path(auth_path: Vec<Option<(Node, bool)>>, position: u64) -> Self {
         CommitmentTreeWitness {
             auth_path,
             position,
@@ -449,7 +402,8 @@ impl CommitmentTreeWitness {
         // The vector works in reverse
         for i in (0..depth).rev() {
             // skip length of inner vector
-            if witness[0] != 32 { // the length of a pedersen hash
+            if witness[0] != 32 {
+                // the length of a pedersen hash
                 return Err(());
             }
             witness = &witness[1..];
@@ -460,11 +414,7 @@ impl CommitmentTreeWitness {
             witness = &witness[32..];
 
             // Sibling node should be an element of Fr
-            let sibling = match {
-                let mut repr = FrRepr::default();
-                repr.read_le(&sibling[..]).expect("length is 32 bytes");
-                Fr::from_repr(repr)
-            } {
+            let sibling = match Node::read(&sibling[..]) {
                 Ok(p) => p,
                 Err(_) => return Err(()),
             };
@@ -506,10 +456,8 @@ impl CommitmentTreeWitness {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        CommitmentTree, CommitmentTreeWitness, Hashable, IncrementalWitness, Node, PathFiller,
-        EMPTY_ROOTS,
-    };
+    use super::{CommitmentTree, CommitmentTreeWitness, Hashable, IncrementalWitness, PathFiller};
+    use sapling::Node;
 
     use ff::PrimeFieldRepr;
     use hex;
@@ -554,7 +502,7 @@ mod tests {
 
     const TESTING_DEPTH: usize = 4;
 
-    struct TestCommitmentTree(CommitmentTree);
+    struct TestCommitmentTree(CommitmentTree<Node>);
 
     impl TestCommitmentTree {
         fn new() -> Self {
@@ -583,7 +531,7 @@ mod tests {
         }
     }
 
-    struct TestIncrementalWitness(IncrementalWitness);
+    struct TestIncrementalWitness(IncrementalWitness<Node>);
 
     impl TestIncrementalWitness {
         fn from_tree(tree: &TestCommitmentTree) -> Self {
@@ -607,7 +555,7 @@ mod tests {
             self.0.root_inner(TESTING_DEPTH)
         }
 
-        fn path(&self) -> Option<CommitmentTreeWitness> {
+        fn path(&self) -> Option<CommitmentTreeWitness<Node>> {
             self.0.path_inner(TESTING_DEPTH)
         }
     }
@@ -616,9 +564,8 @@ mod tests {
     fn empty_root_test_vectors() {
         let mut tmp = [0u8; 32];
         for i in 0..HEX_EMPTY_ROOTS.len() {
-            EMPTY_ROOTS[i]
-                .repr
-                .write_le(&mut tmp[..])
+            Node::empty_root(i)
+                .write(&mut tmp[..])
                 .expect("length is 32 bytes");
             assert_eq!(hex::encode(tmp), HEX_EMPTY_ROOTS[i]);
         }
@@ -627,10 +574,9 @@ mod tests {
     #[test]
     fn sapling_empty_root() {
         let mut tmp = [0u8; 32];
-        CommitmentTree::new()
+        CommitmentTree::<Node>::new()
             .root()
-            .repr
-            .write_le(&mut tmp[..])
+            .write(&mut tmp[..])
             .expect("length is 32 bytes");
         assert_eq!(
             hex::encode(tmp),
@@ -640,12 +586,11 @@ mod tests {
 
     #[test]
     fn empty_commitment_tree_roots() {
-        let tree = CommitmentTree::new();
+        let tree = CommitmentTree::<Node>::new();
         let mut tmp = [0u8; 32];
         for i in 1..HEX_EMPTY_ROOTS.len() {
             tree.root_inner(i, PathFiller::empty())
-                .repr
-                .write_le(&mut tmp[..])
+                .write(&mut tmp[..])
                 .expect("length is 32 bytes");
             assert_eq!(hex::encode(tmp), HEX_EMPTY_ROOTS[i]);
         }
@@ -980,9 +925,7 @@ mod tests {
 
         fn assert_root_eq(root: Node, expected: &str) {
             let mut tmp = [0u8; 32];
-            root.repr
-                .write_le(&mut tmp[..])
-                .expect("length is 32 bytes");
+            root.write(&mut tmp[..]).expect("length is 32 bytes");
             assert_eq!(hex::encode(tmp), expected);
         }
 

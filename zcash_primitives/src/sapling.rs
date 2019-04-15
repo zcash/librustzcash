@@ -1,13 +1,18 @@
-use ff::{BitIterator, PrimeField};
+use ff::{BitIterator, PrimeField, PrimeFieldRepr};
 use pairing::bls12_381::{Bls12, Fr, FrRepr};
 use rand::OsRng;
 use sapling_crypto::{
     jubjub::{fs::Fs, FixedGenerators, JubjubBls12},
     pedersen_hash::{pedersen_hash, Personalization},
+    primitives::Note,
     redjubjub::{PrivateKey, PublicKey, Signature},
 };
+use std::io::{self, Read, Write};
 
+use crate::merkle_tree::Hashable;
 use JUBJUB;
+
+pub(crate) const SAPLING_COMMITMENT_TREE_DEPTH: usize = 32;
 
 /// Compute a parent node in the Sapling commitment tree given its two children.
 pub fn merkle_hash(depth: usize, lhs: &FrRepr, rhs: &FrRepr) -> FrRepr {
@@ -38,6 +43,63 @@ pub fn merkle_hash(depth: usize, lhs: &FrRepr, rhs: &FrRepr) -> FrRepr {
     .into_xy()
     .0
     .into_repr()
+}
+
+/// A node within a Merkle tree.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Node {
+    repr: FrRepr,
+}
+
+impl Node {
+    pub fn new(repr: FrRepr) -> Self {
+        Node { repr }
+    }
+}
+
+impl Hashable for Node {
+    fn read<R: Read>(mut reader: R) -> io::Result<Self> {
+        let mut repr = FrRepr::default();
+        repr.read_le(&mut reader)?;
+        Ok(Node::new(repr))
+    }
+
+    fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
+        self.repr.write_le(&mut writer)
+    }
+
+    fn combine(depth: usize, lhs: &Self, rhs: &Self) -> Self {
+        Node {
+            repr: merkle_hash(depth, &lhs.repr, &rhs.repr),
+        }
+    }
+
+    fn blank() -> Self {
+        Node {
+            repr: Note::<Bls12>::uncommitted().into_repr(),
+        }
+    }
+
+    fn empty_root(depth: usize) -> Self {
+        EMPTY_ROOTS[depth]
+    }
+}
+
+impl From<Node> for Fr {
+    fn from(node: Node) -> Self {
+        Fr::from_repr(node.repr).expect("Tree nodes should be in the prime field")
+    }
+}
+
+lazy_static! {
+    static ref EMPTY_ROOTS: Vec<Node> = {
+        let mut v = vec![Node::blank()];
+        for d in 0..SAPLING_COMMITMENT_TREE_DEPTH {
+            let next = Node::combine(d, &v[d], &v[d]);
+            v.push(next);
+        }
+        v
+    };
 }
 
 /// Create the spendAuthSig for a Sapling SpendDescription.

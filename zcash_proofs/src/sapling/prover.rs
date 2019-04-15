@@ -13,7 +13,7 @@ use sapling_crypto::{
     primitives::{Diversifier, Note, PaymentAddress, ProofGenerationKey, ValueCommitment},
     redjubjub::{PrivateKey, PublicKey, Signature},
 };
-use zcash_primitives::merkle_tree::CommitmentTreeWitness;
+use zcash_primitives::{merkle_tree::CommitmentTreeWitness, sapling::Node};
 
 use super::compute_value_balance;
 
@@ -43,7 +43,7 @@ impl SaplingProvingContext {
         ar: Fs,
         value: u64,
         anchor: Fr,
-        witness: CommitmentTreeWitness,
+        witness: CommitmentTreeWitness<Node>,
         proving_key: &Parameters<Bls12>,
         verifying_key: &PreparedVerifyingKey<Bls12>,
         params: &JubjubBls12,
@@ -112,7 +112,11 @@ impl SaplingProvingContext {
             payment_address: Some(payment_address),
             commitment_randomness: Some(rcm),
             ar: Some(ar),
-            auth_path: witness.auth_path,
+            auth_path: witness
+                .auth_path
+                .iter()
+                .map(|n| n.map(|(node, b)| (node.into(), b)))
+                .collect(),
             anchor: Some(anchor),
         };
 
