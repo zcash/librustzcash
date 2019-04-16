@@ -1,7 +1,6 @@
 //! Implementation of a Merkle tree of commitments used to prove the existence of notes.
 
 use byteorder::{LittleEndian, ReadBytesExt};
-use sapling_crypto::circuit::sapling::TREE_DEPTH;
 use std::collections::VecDeque;
 use std::io::{self, Read, Write};
 use std::iter;
@@ -435,10 +434,10 @@ impl<Node: Hashable> CommitmentTreeWitness<Node> {
 
     /// Reads a witness from its serialized form.
     pub fn from_slice(witness: &[u8]) -> Result<Self, ()> {
-        Self::from_slice_with_depth(witness, TREE_DEPTH)
+        Self::from_slice_with_depth(witness, SAPLING_COMMITMENT_TREE_DEPTH)
     }
 
-    pub fn from_slice_with_depth(mut witness: &[u8], depth: usize) -> Result<Self, ()> {
+    fn from_slice_with_depth(mut witness: &[u8], depth: usize) -> Result<Self, ()> {
         // Skip the first byte, which should be "depth" to signify the length of
         // the following vector of Pedersen hashes.
         if witness[0] != depth as u8 {

@@ -14,7 +14,8 @@ use std::io::{self, Read, Write};
 use crate::merkle_tree::Hashable;
 use JUBJUB;
 
-pub(crate) const SAPLING_COMMITMENT_TREE_DEPTH: usize = 32;
+pub(crate) const SAPLING_COMMITMENT_TREE_DEPTH: usize =
+    sapling_crypto::circuit::sapling::TREE_DEPTH;
 
 /// Compute a parent node in the Sapling commitment tree given its two children.
 pub fn merkle_hash(depth: usize, lhs: &FrRepr, rhs: &FrRepr) -> FrRepr {
