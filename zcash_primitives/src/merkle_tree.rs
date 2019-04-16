@@ -1,3 +1,5 @@
+//! Implementation of a Merkle tree of commitments used to prove the existence of notes.
+
 use byteorder::{LittleEndian, ReadBytesExt};
 use sapling_crypto::circuit::sapling::TREE_DEPTH;
 use std::collections::VecDeque;
@@ -43,7 +45,10 @@ impl<Node: Hashable> PathFiller<Node> {
     }
 }
 
-/// A Merkle tree of Sapling note commitments.
+/// A Merkle tree of note commitments.
+///
+/// The depth of the Merkle tree is fixed at 32, equal to the depth of the Sapling
+/// commitment tree.
 #[derive(Clone)]
 pub struct CommitmentTree<Node: Hashable> {
     left: Option<Node>,
@@ -61,6 +66,7 @@ impl<Node: Hashable> CommitmentTree<Node> {
         }
     }
 
+    /// Reads a `CommitmentTree` from its serialized form.
     pub fn read<R: Read>(mut reader: R) -> io::Result<Self> {
         let left = Optional::read(&mut reader, |r| Node::read(r))?;
         let right = Optional::read(&mut reader, |r| Node::read(r))?;
@@ -73,6 +79,7 @@ impl<Node: Hashable> CommitmentTree<Node> {
         })
     }
 
+    /// Serializes this tree as an array of bytes.
     pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
         Optional::write(&mut writer, &self.left, |w, n| n.write(w))?;
         Optional::write(&mut writer, &self.right, |w, n| n.write(w))?;
@@ -104,7 +111,9 @@ impl<Node: Hashable> CommitmentTree<Node> {
             && self.parents.iter().all(|p| p.is_some())
     }
 
-    /// Adds a note to the tree. Returns an error if the tree is full.
+    /// Adds a note to the tree.
+    ///
+    /// Returns an error if the tree is full.
     pub fn append(&mut self, node: Node) -> Result<(), ()> {
         self.append_inner(node, SAPLING_COMMITMENT_TREE_DEPTH)
     }
@@ -182,6 +191,40 @@ impl<Node: Hashable> CommitmentTree<Node> {
     }
 }
 
+/// An updatable witness to a path from a position in a particular [`CommitmentTree`].
+///
+/// Appending the same commitments in the same order to both the original
+/// [`CommitmentTree`] and this `IncrementalWitness` will result in a witness to the path
+/// from the target position to the root of the updated tree.
+///
+/// # Examples
+///
+/// ```
+/// extern crate pairing;
+/// extern crate rand;
+/// extern crate zcash_primitives;
+///
+/// use pairing::bls12_381::FrRepr;
+/// use rand::{OsRng, Rand};
+/// use zcash_primitives::{
+///     merkle_tree::{CommitmentTree, IncrementalWitness},
+///     sapling::Node,
+/// };
+///
+/// let mut rng = OsRng::new().unwrap();
+/// let mut tree = CommitmentTree::<Node>::new();
+///
+/// tree.append(Node::new(FrRepr::rand(&mut rng)));
+/// tree.append(Node::new(FrRepr::rand(&mut rng)));
+/// let mut witness = IncrementalWitness::from_tree(&tree);
+/// assert_eq!(witness.position(), 1);
+/// assert_eq!(tree.root(), witness.root());
+///
+/// let cmu = Node::new(FrRepr::rand(&mut rng));
+/// tree.append(cmu);
+/// witness.append(cmu);
+/// assert_eq!(tree.root(), witness.root());
+/// ```
 #[derive(Clone)]
 pub struct IncrementalWitness<Node: Hashable> {
     tree: CommitmentTree<Node>,
@@ -191,6 +234,8 @@ pub struct IncrementalWitness<Node: Hashable> {
 }
 
 impl<Node: Hashable> IncrementalWitness<Node> {
+    /// Creates an `IncrementalWitness` for the most recent commitment added to the given
+    /// [`CommitmentTree`].
     pub fn from_tree(tree: &CommitmentTree<Node>) -> IncrementalWitness<Node> {
         IncrementalWitness {
             tree: tree.clone(),
@@ -200,6 +245,7 @@ impl<Node: Hashable> IncrementalWitness<Node> {
         }
     }
 
+    /// Reads an `IncrementalWitness` from its serialized form.
     pub fn read<R: Read>(mut reader: R) -> io::Result<Self> {
         let tree = CommitmentTree::read(&mut reader)?;
         let filled = Vector::read(&mut reader, |r| Node::read(r))?;
@@ -217,6 +263,7 @@ impl<Node: Hashable> IncrementalWitness<Node> {
         Ok(witness)
     }
 
+    /// Serializes this `IncrementalWitness` as an array of bytes.
     pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
         self.tree.write(&mut writer)?;
         Vector::write(&mut writer, &self.filled, |w, n| n.write(w))?;
@@ -282,8 +329,9 @@ impl<Node: Hashable> IncrementalWitness<Node> {
         d + skip
     }
 
-    /// Tracks a note that has been added to the underlying tree. Returns an
-    /// error if the tree is full.
+    /// Tracks a note that has been added to the underlying tree.
+    ///
+    /// Returns an error if the tree is full.
     pub fn append(&mut self, node: Node) -> Result<(), ()> {
         self.append_inner(node, SAPLING_COMMITMENT_TREE_DEPTH)
     }
@@ -368,8 +416,8 @@ impl<Node: Hashable> IncrementalWitness<Node> {
     }
 }
 
-/// A witness to a path from a position in a particular Sapling commitment tree
-/// to the root of that tree.
+/// A witness to a path from a position in a particular commitment tree to the root of
+/// that tree.
 #[derive(Debug, PartialEq)]
 pub struct CommitmentTreeWitness<Node: Hashable> {
     pub auth_path: Vec<Option<(Node, bool)>>,
@@ -377,6 +425,7 @@ pub struct CommitmentTreeWitness<Node: Hashable> {
 }
 
 impl<Node: Hashable> CommitmentTreeWitness<Node> {
+    /// Constructs a witness directly from its path and position.
     pub fn from_path(auth_path: Vec<Option<(Node, bool)>>, position: u64) -> Self {
         CommitmentTreeWitness {
             auth_path,
@@ -384,6 +433,7 @@ impl<Node: Hashable> CommitmentTreeWitness<Node> {
         }
     }
 
+    /// Reads a witness from its serialized form.
     pub fn from_slice(witness: &[u8]) -> Result<Self, ()> {
         Self::from_slice_with_depth(witness, TREE_DEPTH)
     }

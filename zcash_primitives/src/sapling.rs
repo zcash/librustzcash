@@ -1,3 +1,5 @@
+//! Structs and constants specific to the Sapling shielded pool.
+
 use ff::{BitIterator, PrimeField, PrimeFieldRepr};
 use pairing::bls12_381::{Bls12, Fr, FrRepr};
 use rand::OsRng;
@@ -45,7 +47,7 @@ pub fn merkle_hash(depth: usize, lhs: &FrRepr, rhs: &FrRepr) -> FrRepr {
     .into_repr()
 }
 
-/// A node within a Merkle tree.
+/// A node within the Sapling commitment tree.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Node {
     repr: FrRepr,
