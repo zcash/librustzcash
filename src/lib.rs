@@ -556,7 +556,7 @@ impl ExtendedPoint {
 
     #[inline]
     fn multiply(self, by: &[u8; 32]) -> Self {
-        let zero = ExtendedPoint::identity().to_niels();
+        let zero = ExtendedNielsPoint::identity();
         let base = self.to_niels();
 
         let mut acc = ExtendedPoint::identity();
