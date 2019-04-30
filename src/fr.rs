@@ -367,11 +367,10 @@ impl Fr {
             }
         }
         // found using https://github.com/kwantam/addchain
-        let t10 = *self;
-        let t1 = t10.square();
-        let t0 = t1.square();
-        let t3 = t0 * &t1;
-        let t6 = t3 * &t10;
+        let mut t1 = self.square();
+        let mut t0 = t1.square();
+        let mut t3 = t0 * &t1;
+        let t6 = t3 * self;
         let t7 = t6 * &t1;
         let t12 = t7 * &t3;
         let t13 = t12 * &t0;
@@ -386,10 +385,10 @@ impl Fr {
         let t8 = t18 * &t3;
         let t17 = t14 * &t3;
         let t11 = t8 * &t3;
-        let t1 = t17 * &t3;
+        t1 = t17 * &t3;
         let t5 = t11 * &t3;
-        let t3 = t5 * &t0;
-        let mut t0 = t5.square();
+        t3 = t5 * &t0;
+        t0 = t5.square();
         square_assign_multi(&mut t0, 5);
         t0.mul_assign(&t3);
         square_assign_multi(&mut t0, 6);
@@ -407,7 +406,7 @@ impl Fr {
         square_assign_multi(&mut t0, 5);
         t0.mul_assign(&t16);
         square_assign_multi(&mut t0, 3);
-        t0.mul_assign(&t10);
+        t0.mul_assign(self);
         square_assign_multi(&mut t0, 11);
         t0.mul_assign(&t11);
         square_assign_multi(&mut t0, 8);
@@ -415,7 +414,7 @@ impl Fr {
         square_assign_multi(&mut t0, 5);
         t0.mul_assign(&t15);
         square_assign_multi(&mut t0, 8);
-        t0.mul_assign(&t10);
+        t0.mul_assign(self);
         square_assign_multi(&mut t0, 12);
         t0.mul_assign(&t13);
         square_assign_multi(&mut t0, 7);
@@ -427,9 +426,9 @@ impl Fr {
         square_assign_multi(&mut t0, 5);
         t0.mul_assign(&t13);
         square_assign_multi(&mut t0, 2);
-        t0.mul_assign(&t10);
+        t0.mul_assign(self);
         square_assign_multi(&mut t0, 6);
-        t0.mul_assign(&t10);
+        t0.mul_assign(self);
         square_assign_multi(&mut t0, 9);
         t0.mul_assign(&t7);
         square_assign_multi(&mut t0, 6);
@@ -437,7 +436,7 @@ impl Fr {
         square_assign_multi(&mut t0, 8);
         t0.mul_assign(&t11);
         square_assign_multi(&mut t0, 3);
-        t0.mul_assign(&t10);
+        t0.mul_assign(self);
         square_assign_multi(&mut t0, 12);
         t0.mul_assign(&t9);
         square_assign_multi(&mut t0, 11);

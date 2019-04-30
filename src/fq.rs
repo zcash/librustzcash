@@ -416,16 +416,15 @@ impl Fq {
             }
         }
         // found using https://github.com/kwantam/addchain
-        let t10 = *self;
-        let t0 = t10.square();
-        let mut t1 = t0 * &t10;
+        let mut t0 = self.square();
+        let mut t1 = t0 * self;
         let mut t16 = t0.square();
         let mut t6 = t16.square();
-        let t5 = t6 * &t0;
-        let mut t0 = t6 * &t16;
-        let t12 = t5 * &t16;
+        let mut t5 = t6 * &t0;
+        t0 = t6 * &t16;
+        let mut t12 = t5 * &t16;
         let mut t2 = t6.square();
-        let t7 = t5 * &t6;
+        let mut t7 = t5 * &t6;
         let mut t15 = t0 * &t5;
         let mut t17 = t12.square();
         t1.mul_assign(&t17);
@@ -433,12 +432,12 @@ impl Fq {
         let t8 = t1 * &t17;
         let t4 = t8 * &t2;
         let t9 = t8 * &t7;
-        let t7 = t4 * &t5;
+        t7 = t4 * &t5;
         let t11 = t4 * &t17;
-        let t5 = t9 * &t17;
+        t5 = t9 * &t17;
         let t14 = t7 * &t15;
         let t13 = t11 * &t12;
-        let t12 = t11 * &t17;
+        t12 = t11 * &t17;
         t15.mul_assign(&t12);
         t16.mul_assign(&t15);
         t3.mul_assign(&t16);
@@ -465,7 +464,7 @@ impl Fq {
         square_assign_multi(&mut t0, 8);
         t0.mul_assign(&t8);
         square_assign_multi(&mut t0, 8);
-        t0.mul_assign(&t10);
+        t0.mul_assign(self);
         square_assign_multi(&mut t0, 14);
         t0.mul_assign(&t9);
         square_assign_multi(&mut t0, 10);
