@@ -189,7 +189,7 @@ impl Fr {
     /// Attempts to convert a little-endian byte representation of
     /// a field element into an element of `Fr`, failing if the input
     /// is not canonical (is not smaller than r).
-    pub fn from_bytes(bytes: [u8; 32]) -> CtOption<Fr> {
+    pub fn from_bytes(bytes: &[u8; 32]) -> CtOption<Fr> {
         let mut tmp = Fr([0, 0, 0, 0]);
 
         tmp.0[0] = LittleEndian::read_u64(&bytes[0..8]);
@@ -233,7 +233,7 @@ impl Fr {
 
     /// Converts a 512-bit little endian integer into
     /// an element of Fr by reducing modulo r.
-    pub fn from_bytes_wide(bytes: [u8; 64]) -> Fr {
+    pub fn from_bytes_wide(bytes: &[u8; 64]) -> Fr {
         Fr::from_u512([
             LittleEndian::read_u64(&bytes[0..8]),
             LittleEndian::read_u64(&bytes[8..16]),
@@ -642,7 +642,7 @@ fn test_into_bytes() {
 #[test]
 fn test_from_bytes() {
     assert_eq!(
-        Fr::from_bytes([
+        Fr::from_bytes(&[
             0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
             0, 0, 0
         ]).unwrap(),
@@ -650,7 +650,7 @@ fn test_from_bytes() {
     );
 
     assert_eq!(
-        Fr::from_bytes([
+        Fr::from_bytes(&[
             1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
             0, 0, 0
         ]).unwrap(),
@@ -658,7 +658,7 @@ fn test_from_bytes() {
     );
 
     assert_eq!(
-        Fr::from_bytes([
+        Fr::from_bytes(&[
             217, 7, 150, 185, 179, 11, 248, 37, 80, 231, 182, 102, 47, 214, 21, 243, 244, 20, 136,
             235, 238, 20, 37, 147, 198, 85, 145, 71, 111, 252, 166, 9
         ]).unwrap(),
@@ -667,7 +667,7 @@ fn test_from_bytes() {
 
     // -1 should work
     assert!(
-        Fr::from_bytes([
+        Fr::from_bytes(&[
             182, 44, 247, 214, 94, 14, 151, 208, 130, 16, 200, 204, 147, 32, 104, 166, 0, 59, 52,
             1, 1, 59, 103, 6, 169, 175, 51, 101, 234, 180, 125, 14
         ]).is_some()
@@ -676,7 +676,7 @@ fn test_from_bytes() {
 
     // modulus is invalid
     assert!(
-        Fr::from_bytes([
+        Fr::from_bytes(&[
             183, 44, 247, 214, 94, 14, 151, 208, 130, 16, 200, 204, 147, 32, 104, 166, 0, 59, 52,
             1, 1, 59, 103, 6, 169, 175, 51, 101, 234, 180, 125, 14
         ]).is_none()
@@ -685,7 +685,7 @@ fn test_from_bytes() {
 
     // Anything larger than the modulus is invalid
     assert!(
-        Fr::from_bytes([
+        Fr::from_bytes(&[
             184, 44, 247, 214, 94, 14, 151, 208, 130, 16, 200, 204, 147, 32, 104, 166, 0, 59, 52,
             1, 1, 59, 103, 6, 169, 175, 51, 101, 234, 180, 125, 14
         ]).is_none()
@@ -693,7 +693,7 @@ fn test_from_bytes() {
     );
 
     assert!(
-        Fr::from_bytes([
+        Fr::from_bytes(&[
             183, 44, 247, 214, 94, 14, 151, 208, 130, 16, 200, 204, 147, 32, 104, 166, 0, 59, 52,
             1, 1, 59, 104, 6, 169, 175, 51, 101, 234, 180, 125, 14
         ]).is_none()
@@ -701,7 +701,7 @@ fn test_from_bytes() {
     );
 
     assert!(
-        Fr::from_bytes([
+        Fr::from_bytes(&[
             183, 44, 247, 214, 94, 14, 151, 208, 130, 16, 200, 204, 147, 32, 104, 166, 0, 59, 52,
             1, 1, 59, 103, 6, 169, 175, 51, 101, 234, 180, 125, 15
         ]).is_none()
@@ -749,7 +749,7 @@ fn test_from_u512_max() {
 fn test_from_bytes_wide_r2() {
     assert_eq!(
         R2,
-        Fr::from_bytes_wide([
+        Fr::from_bytes_wide(&[
             217, 7, 150, 185, 179, 11, 248, 37, 80, 231, 182, 102, 47, 214, 21, 243, 244, 20, 136,
             235, 238, 20, 37, 147, 198, 85, 145, 71, 111, 252, 166, 9, 0, 0, 0, 0, 0, 0, 0, 0, 0,
             0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
@@ -761,7 +761,7 @@ fn test_from_bytes_wide_r2() {
 fn test_from_bytes_wide_negative_one() {
     assert_eq!(
         -&Fr::one(),
-        Fr::from_bytes_wide([
+        Fr::from_bytes_wide(&[
             182, 44, 247, 214, 94, 14, 151, 208, 130, 16, 200, 204, 147, 32, 104, 166, 0, 59, 52,
             1, 1, 59, 103, 6, 169, 175, 51, 101, 234, 180, 125, 14, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
             0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
@@ -778,7 +778,7 @@ fn test_from_bytes_wide_maximum() {
             0x6440c91261da51b3,
             0xa5e07ffb20991cf
         ]),
-        Fr::from_bytes_wide([0xff; 64])
+        Fr::from_bytes_wide(&[0xff; 64])
     );
 }
 

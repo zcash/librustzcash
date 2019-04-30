@@ -176,13 +176,13 @@ impl From<AffinePoint> for ExtendedPoint {
     }
 }
 
-impl From<ExtendedPoint> for AffinePoint {
+impl<'a> From<&'a ExtendedPoint> for AffinePoint {
     /// Constructs an affine point from an extended point
     /// using the map `(U, V, Z, T1, T2) => (U/Z, V/Z)`
     /// as Z is always nonzero. **This requires a field inversion
     /// and so it is recommended to perform these in a batch
     /// using [`batch_normalize`](crate::batch_normalize) instead.**
-    fn from(extended: ExtendedPoint) -> AffinePoint {
+    fn from(extended: &'a ExtendedPoint) -> AffinePoint {
         // Z coordinate is always nonzero, so this is
         // its inverse.
         let zinv = extended.z.invert().unwrap();
@@ -191,6 +191,12 @@ impl From<ExtendedPoint> for AffinePoint {
             u: extended.u * &zinv,
             v: extended.v * &zinv,
         }
+    }
+}
+
+impl From<ExtendedPoint> for AffinePoint {
+    fn from(extended: ExtendedPoint) -> AffinePoint {
+        AffinePoint::from(&extended)
     }
 }
 
@@ -332,7 +338,7 @@ impl AffinePoint {
         b[31] &= 0b0111_1111;
 
         // Interpret what remains as the v-coordinate
-        Fq::from_bytes(b).and_then(|v| {
+        Fq::from_bytes(&b).and_then(|v| {
             // -u^2 + v^2 = 1 + d.u^2.v^2
             // -u^2 = 1 + d.u^2.v^2 - v^2    (rearrange)
             // -u^2 - d.u^2.v^2 = 1 - v^2    (rearrange)
