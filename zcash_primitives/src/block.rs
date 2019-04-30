@@ -2,6 +2,7 @@
 
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use hex;
+use sha2::{Digest, Sha256};
 use std::fmt;
 use std::io::{self, Read, Write};
 use std::ops::Deref;
@@ -22,13 +23,16 @@ impl fmt::Display for BlockHash {
 }
 
 /// A Zcash block header.
-pub struct BlockHeader(BlockHeaderData);
+pub struct BlockHeader {
+    hash: BlockHash,
+    data: BlockHeaderData,
+}
 
 impl Deref for BlockHeader {
     type Target = BlockHeaderData;
 
     fn deref(&self) -> &BlockHeaderData {
-        &self.0
+        &self.data
     }
 }
 
@@ -44,12 +48,31 @@ pub struct BlockHeaderData {
 }
 
 impl BlockHeaderData {
-    pub fn freeze(self) -> BlockHeader {
-        BlockHeader(self)
+    pub fn freeze(self) -> io::Result<BlockHeader> {
+        BlockHeader::from_data(self)
     }
 }
 
 impl BlockHeader {
+    fn from_data(data: BlockHeaderData) -> io::Result<Self> {
+        let mut header = BlockHeader {
+            hash: BlockHash([0; 32]),
+            data,
+        };
+        let mut raw = vec![];
+        header.write(&mut raw)?;
+        header
+            .hash
+            .0
+            .copy_from_slice(&Sha256::digest(&Sha256::digest(&raw)));
+        Ok(header)
+    }
+
+    /// Returns the hash of this header.
+    pub fn hash(&self) -> BlockHash {
+        self.hash
+    }
+
     pub fn read<R: Read>(mut reader: R) -> io::Result<Self> {
         let version = reader.read_i32::<LittleEndian>()?;
 
@@ -70,7 +93,7 @@ impl BlockHeader {
 
         let solution = Vector::read(&mut reader, |r| r.read_u8())?;
 
-        Ok(BlockHeader(BlockHeaderData {
+        BlockHeader::from_data(BlockHeaderData {
             version,
             prev_block,
             merkle_root,
@@ -79,7 +102,7 @@ impl BlockHeader {
             bits,
             nonce,
             solution,
-        }))
+        })
     }
 
     pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
@@ -206,6 +229,10 @@ mod tests {
     #[test]
     fn header_read_write() {
         let header = BlockHeader::read(&HEADER_MAINNET_415000[..]).unwrap();
+        assert_eq!(
+            format!("{}", header.hash()),
+            "0000000001ab37793ce771262b2ffa082519aa3fe891250a1adb43baaf856168"
+        );
         let mut encoded = Vec::with_capacity(HEADER_MAINNET_415000.len());
         header.write(&mut encoded).unwrap();
         assert_eq!(&HEADER_MAINNET_415000[..], &encoded[..]);
