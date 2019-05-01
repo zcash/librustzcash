@@ -13,9 +13,10 @@ message CompactBlock {
     uint32 protoVersion = 1; // the version of this wire format, for storage
     uint64 height = 2; // the height of this block
     bytes hash = 3;
-    uint32 time = 4;
-    bytes header = 5; // (hash and time) OR (full header)
-    repeated CompactTx vtx = 6; // compact transactions from this block
+    bytes prevHash = 4;
+    uint32 time = 5;
+    bytes header = 6; // (hash, prevHash, and time) OR (full header)
+    repeated CompactTx vtx = 7; // compact transactions from this block
 }
 
 message CompactTx {
