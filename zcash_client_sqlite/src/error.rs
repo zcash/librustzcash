@@ -10,6 +10,7 @@ pub enum ErrorKind {
     CorruptedData(&'static str),
     IncorrectHRPExtFVK,
     InsufficientBalance(u64, u64),
+    InvalidChain(i32, crate::chain::ChainInvalidCause),
     InvalidExtSK(u32),
     InvalidHeight(i32, i32),
     InvalidMemo(std::str::Utf8Error),
@@ -38,6 +39,9 @@ impl fmt::Display for Error {
                 "Insufficient balance (have {}, need {} including fee)",
                 have, need
             ),
+            ErrorKind::InvalidChain(upper_bound, cause) => {
+                write!(f, "Invalid chain (upper bound: {}): {:?}", upper_bound, cause)
+            }
             ErrorKind::InvalidExtSK(account) => {
                 write!(f, "Incorrect ExtendedSpendingKey for account {}", account)
             }
