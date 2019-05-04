@@ -14,7 +14,7 @@ version = "1"
 default-features = false
 
 [dependencies.subtle]
-version = "2"
+version = "2.1"
 default-features = false
 
 [dev-dependencies.rand_core]
