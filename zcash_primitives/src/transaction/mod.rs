@@ -1,11 +1,11 @@
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use hex;
-use sapling_crypto::redjubjub::Signature;
 use sha2::{Digest, Sha256};
 use std::fmt;
 use std::io::{self, Read, Write};
 use std::ops::Deref;
 
+use redjubjub::Signature;
 use serialize::Vector;
 
 pub mod builder;

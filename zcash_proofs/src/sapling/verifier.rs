@@ -4,9 +4,11 @@ use pairing::bls12_381::{Bls12, Fr};
 use sapling_crypto::{
     circuit::multipack,
     jubjub::{edwards, FixedGenerators, JubjubBls12, Unknown},
-    redjubjub::{PublicKey, Signature},
 };
-use zcash_primitives::transaction::components::Amount;
+use zcash_primitives::{
+    redjubjub::{PublicKey, Signature},
+    transaction::components::Amount,
+};
 
 use super::compute_value_balance;
 

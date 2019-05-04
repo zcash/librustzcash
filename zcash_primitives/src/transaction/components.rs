@@ -1,13 +1,11 @@
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use ff::{PrimeField, PrimeFieldRepr};
 use pairing::bls12_381::{Bls12, Fr, FrRepr};
-use sapling_crypto::{
-    jubjub::{edwards, Unknown},
-    redjubjub::{PublicKey, Signature},
-};
+use sapling_crypto::jubjub::{edwards, Unknown};
 use std::io::{self, Read, Write};
 
 use legacy::Script;
+use redjubjub::{PublicKey, Signature};
 use JUBJUB;
 
 pub mod amount;

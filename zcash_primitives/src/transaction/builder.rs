@@ -6,7 +6,6 @@ use rand::{rngs::OsRng, seq::SliceRandom, CryptoRng, RngCore};
 use sapling_crypto::{
     jubjub::fs::Fs,
     primitives::{Diversifier, Note, PaymentAddress},
-    redjubjub::PrivateKey,
 };
 use zip32::ExtendedSpendingKey;
 
@@ -16,6 +15,7 @@ use crate::{
     merkle_tree::{CommitmentTreeWitness, IncrementalWitness},
     note_encryption::{generate_esk, Memo, SaplingNoteEncryption},
     prover::TxProver,
+    redjubjub::PrivateKey,
     sapling::{spend_sig, Node},
     transaction::{
         components::{amount::DEFAULT_FEE, Amount, OutputDescription, SpendDescription, TxOut},

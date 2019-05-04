@@ -24,7 +24,6 @@ use sapling_crypto::{
         fs::{Fs, FsRepr},
         FixedGenerators, JubjubEngine, JubjubParams, PrimeOrder, ToUniform, Unknown,
     },
-    redjubjub::{self, Signature},
 };
 
 use sapling_crypto::circuit::sapling::TREE_DEPTH as SAPLING_TREE_DEPTH;
@@ -62,6 +61,7 @@ use sapling_crypto::primitives::{ProofGenerationKey, ViewingKey};
 use zcash_primitives::{
     merkle_tree::CommitmentTreeWitness,
     note_encryption::sapling_ka_agree,
+    redjubjub::{self, Signature},
     sapling::{merkle_hash, spend_sig},
     transaction::components::Amount,
     zip32, JUBJUB,

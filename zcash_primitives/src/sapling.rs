@@ -7,11 +7,11 @@ use sapling_crypto::{
     jubjub::{fs::Fs, FixedGenerators, JubjubBls12},
     pedersen_hash::{pedersen_hash, Personalization},
     primitives::Note,
-    redjubjub::{PrivateKey, PublicKey, Signature},
 };
 use std::io::{self, Read, Write};
 
 use crate::merkle_tree::Hashable;
+use crate::redjubjub::{PrivateKey, PublicKey, Signature};
 use JUBJUB;
 
 pub(crate) const SAPLING_COMMITMENT_TREE_DEPTH: usize =

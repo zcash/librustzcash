@@ -11,10 +11,12 @@ use sapling_crypto::{
     },
     jubjub::{edwards, fs::Fs, FixedGenerators, JubjubBls12, Unknown},
     primitives::{Diversifier, Note, PaymentAddress, ProofGenerationKey, ValueCommitment},
-    redjubjub::{PrivateKey, PublicKey, Signature},
 };
 use zcash_primitives::{
-    merkle_tree::CommitmentTreeWitness, sapling::Node, transaction::components::Amount,
+    merkle_tree::CommitmentTreeWitness,
+    redjubjub::{PrivateKey, PublicKey, Signature},
+    sapling::Node,
+    transaction::components::Amount,
 };
 
 use super::compute_value_balance;

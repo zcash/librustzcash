@@ -4,11 +4,11 @@ use pairing::bls12_381::{Bls12, Fr};
 use sapling_crypto::{
     jubjub::{edwards, fs::Fs, Unknown},
     primitives::{Diversifier, PaymentAddress, ProofGenerationKey},
-    redjubjub::{PublicKey, Signature},
 };
 
 use crate::{
     merkle_tree::CommitmentTreeWitness,
+    redjubjub::{PublicKey, Signature},
     sapling::Node,
     transaction::components::{Amount, GROTH_PROOF_SIZE},
 };
@@ -78,11 +78,11 @@ pub(crate) mod mock {
     use sapling_crypto::{
         jubjub::{edwards, fs::Fs, FixedGenerators, Unknown},
         primitives::{Diversifier, PaymentAddress, ProofGenerationKey, ValueCommitment},
-        redjubjub::{PublicKey, Signature},
     };
 
     use crate::{
         merkle_tree::CommitmentTreeWitness,
+        redjubjub::{PublicKey, Signature},
         sapling::Node,
         transaction::components::{Amount, GROTH_PROOF_SIZE},
         JUBJUB,

@@ -3,10 +3,12 @@
 
 use ff::{Field, PrimeField, PrimeFieldRepr};
 use rand_core::RngCore;
+use sapling_crypto::jubjub::{
+    edwards::Point, FixedGenerators, JubjubEngine, JubjubParams, Unknown,
+};
 use std::io::{self, Read, Write};
 
-use jubjub::{FixedGenerators, JubjubEngine, JubjubParams, Unknown, edwards::Point};
-use util::{hash_to_scalar};
+use util::hash_to_scalar;
 
 fn read_scalar<E: JubjubEngine, R: Read>(reader: R) -> io::Result<E::Fs> {
     let mut s_repr = <E::Fs as PrimeField>::Repr::default();
@@ -208,8 +210,7 @@ mod tests {
     use pairing::bls12_381::Bls12;
     use rand_core::SeedableRng;
     use rand_xorshift::XorShiftRng;
-
-    use jubjub::{JubjubBls12, fs::Fs, edwards};
+    use sapling_crypto::jubjub::{edwards, fs::Fs, JubjubBls12};
 
     use super::*;
 

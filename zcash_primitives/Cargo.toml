@@ -20,3 +20,6 @@ rand_core = "0.5"
 rand_os = "0.2"
 sapling-crypto = { path = "../sapling-crypto" }
 sha2 = "0.8"
+
+[dev-dependencies]
+rand_xorshift = "0.2"

@@ -15,6 +15,9 @@ extern crate rand_os;
 extern crate sapling_crypto;
 extern crate sha2;
 
+#[cfg(test)]
+extern crate rand_xorshift;
+
 use sapling_crypto::jubjub::JubjubBls12;
 
 pub mod block;
@@ -23,9 +26,11 @@ pub mod legacy;
 pub mod merkle_tree;
 pub mod note_encryption;
 pub mod prover;
+pub mod redjubjub;
 pub mod sapling;
 mod serialize;
 pub mod transaction;
+mod util;
 pub mod zip32;
 
 #[cfg(test)]
