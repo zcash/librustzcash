@@ -3,10 +3,10 @@ use super::fq2::Fq2;
 use ff::Field;
 use rand_core::RngCore;
 use std::ops::{Add, AddAssign, Mul, MulAssign, Neg, Sub, SubAssign};
-use subtle::{Choice, ConditionallySelectable};
+use subtle::{Choice, ConditionallySelectable, CtOption};
 
 /// An element of Fq6, represented by c0 + c1 * v + c2 * v^(2).
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
 pub struct Fq6 {
     pub c0: Fq2,
     pub c1: Fq2,
@@ -345,7 +345,7 @@ impl Field for Fq6 {
         Fq6 { c0, c1, c2 }
     }
 
-    fn inverse(&self) -> Option<Self> {
+    fn invert(&self) -> CtOption<Self> {
         let mut c0 = self.c2;
         c0.mul_by_nonresidue();
         c0.mul_assign(&self.c1);
@@ -378,21 +378,18 @@ impl Field for Fq6 {
         tmp2.mul_assign(&c0);
         tmp1.add_assign(&tmp2);
 
-        match tmp1.inverse() {
-            Some(t) => {
-                let mut tmp = Fq6 {
-                    c0: t,
-                    c1: t,
-                    c2: t,
-                };
-                tmp.c0.mul_assign(&c0);
-                tmp.c1.mul_assign(&c1);
-                tmp.c2.mul_assign(&c2);
+        tmp1.invert().map(|t| {
+            let mut tmp = Fq6 {
+                c0: t,
+                c1: t,
+                c2: t,
+            };
+            tmp.c0.mul_assign(&c0);
+            tmp.c1.mul_assign(&c1);
+            tmp.c2.mul_assign(&c2);
 
-                Some(tmp)
-            }
-            None => None,
-        }
+            tmp
+        })
     }
 }
 

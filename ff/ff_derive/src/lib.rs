@@ -791,6 +791,12 @@ fn prime_field_impl(
             }
         }
 
+        impl ::std::default::Default for #name {
+            fn default() -> #name {
+                #name::zero()
+            }
+        }
+
         impl ::std::cmp::PartialEq for #name {
             fn eq(&self, other: &#name) -> bool {
                 self.0 == other.0
@@ -1062,9 +1068,11 @@ fn prime_field_impl(
                 ret
             }
 
-            fn inverse(&self) -> Option<Self> {
+            /// WARNING: THIS IS NOT ACTUALLY CONSTANT TIME YET!
+            /// TODO: Make this constant-time.
+            fn invert(&self) -> ::subtle::CtOption<Self> {
                 if self.is_zero() {
-                    None
+                    ::subtle::CtOption::new(#name::zero(), ::subtle::Choice::from(0))
                 } else {
                     // Guajardo Kumar Paar Pelzl
                     // Efficient Software-Implementation of Finite Fields with Applications to Cryptography
@@ -1110,9 +1118,9 @@ fn prime_field_impl(
                     }
 
                     if u == one {
-                        Some(b)
+                        ::subtle::CtOption::new(b, ::subtle::Choice::from(1))
                     } else {
-                        Some(c)
+                        ::subtle::CtOption::new(c, ::subtle::Choice::from(1))
                     }
                 }
             }

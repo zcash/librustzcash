@@ -6,7 +6,7 @@ use ff::{
 };
 use rand_core::RngCore;
 use std::ops::{Add, AddAssign, Mul, MulAssign, Neg, Sub, SubAssign};
-use subtle::{Choice, ConditionallySelectable};
+use subtle::{Choice, ConditionallySelectable, CtOption};
 
 use super::ToUniform;
 
@@ -257,6 +257,12 @@ impl PrimeFieldRepr for FsRepr {
 /// This is an element of the scalar field of the Jubjub curve.
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub struct Fs(FsRepr);
+
+impl Default for Fs {
+    fn default() -> Self {
+        Fs::zero()
+    }
+}
 
 impl ::std::fmt::Display for Fs {
     fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
@@ -526,9 +532,11 @@ impl Field for Fs {
         ret
     }
 
-    fn inverse(&self) -> Option<Self> {
+    /// WARNING: THIS IS NOT ACTUALLY CONSTANT TIME YET!
+    /// THIS WILL BE REPLACED BY THE jubjub CRATE, WHICH IS CONSTANT TIME!
+    fn invert(&self) -> CtOption<Self> {
         if self.is_zero() {
-            None
+            CtOption::new(Self::zero(), Choice::from(0))
         } else {
             // Guajardo Kumar Paar Pelzl
             // Efficient Software-Implementation of Finite Fields with Applications to Cryptography
@@ -574,9 +582,9 @@ impl Field for Fs {
             }
 
             if u == one {
-                Some(b)
+                CtOption::new(b, Choice::from(1))
             } else {
-                Some(c)
+                CtOption::new(c, Choice::from(1))
             }
         }
     }
@@ -1454,8 +1462,8 @@ fn test_fr_squaring() {
 }
 
 #[test]
-fn test_fs_inverse() {
-    assert!(Fs::zero().inverse().is_none());
+fn test_fs_invert() {
+    assert!(bool::from(Fs::zero().invert().is_none()));
 
     let mut rng = XorShiftRng::from_seed([
         0x59, 0x62, 0xbe, 0x5d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06, 0xbc,
@@ -1467,7 +1475,7 @@ fn test_fs_inverse() {
     for _ in 0..1000 {
         // Ensure that a * a^-1 = 1
         let mut a = Fs::random(&mut rng);
-        let ainv = a.inverse().unwrap();
+        let ainv = a.invert().unwrap();
         a.mul_assign(&ainv);
         assert_eq!(a, one);
     }

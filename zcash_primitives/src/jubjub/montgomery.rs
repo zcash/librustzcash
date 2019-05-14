@@ -139,11 +139,11 @@ impl<E: JubjubEngine, Subgroup> Point<E, Subgroup> {
                 {
                     let mut tmp = E::Fr::one();
                     tmp.sub_assign(&y);
-                    u.mul_assign(&tmp.inverse().unwrap())
+                    u.mul_assign(&tmp.invert().unwrap())
                 }
 
                 let mut v = u;
-                v.mul_assign(&x.inverse().unwrap());
+                v.mul_assign(&x.invert().unwrap());
 
                 // Scale it into the correct curve constants
                 v.mul_assign(params.scale());
@@ -226,7 +226,8 @@ impl<E: JubjubEngine, Subgroup> Point<E, Subgroup> {
         }
         {
             let tmp = self.y.double();
-            delta.mul_assign(&tmp.inverse().expect("y is nonzero so this must be nonzero"));
+            // y is nonzero so this must be nonzero
+            delta.mul_assign(&tmp.invert().unwrap());
         }
 
         let mut x3 = delta.square();
@@ -272,10 +273,8 @@ impl<E: JubjubEngine, Subgroup> Point<E, Subgroup> {
                     {
                         let mut tmp = other.x;
                         tmp.sub_assign(&self.x);
-                        delta.mul_assign(
-                            &tmp.inverse()
-                                .expect("self.x != other.x, so this must be nonzero"),
-                        );
+                        // self.x != other.x, so this must be nonzero
+                        delta.mul_assign(&tmp.invert().unwrap());
                     }
 
                     let mut x3 = delta.square();

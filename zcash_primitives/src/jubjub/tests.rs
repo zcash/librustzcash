@@ -234,7 +234,9 @@ fn test_get_for<E: JubjubEngine>(params: &E::Params) {
         let y = E::Fr::random(rng);
         let sign = rng.next_u32() % 2 == 1;
 
-        if let Some(mut p) = edwards::Point::<E, _>::get_for_y(y, sign, params) {
+        let p = edwards::Point::<E, _>::get_for_y(y, sign, params);
+        if bool::from(p.is_some()) {
+            let mut p = p.unwrap();
             assert!(p.to_xy().0.into_repr().is_odd() == sign);
             p = p.negate();
             assert!(edwards::Point::<E, _>::get_for_y(y, !sign, params).unwrap() == p);
@@ -328,7 +330,7 @@ fn test_jubjub_params<E: JubjubEngine>(params: &E::Params) {
         let mut tmp = *params.edwards_d();
 
         // 1 / d is nonsquare
-        assert!(tmp.inverse().unwrap().legendre() == LegendreSymbol::QuadraticNonResidue);
+        assert!(tmp.invert().unwrap().legendre() == LegendreSymbol::QuadraticNonResidue);
 
         // tmp = -d
         tmp = tmp.neg();
@@ -337,7 +339,7 @@ fn test_jubjub_params<E: JubjubEngine>(params: &E::Params) {
         assert!(tmp.legendre() == LegendreSymbol::QuadraticNonResidue);
 
         // 1 / -d is nonsquare
-        assert!(tmp.inverse().unwrap().legendre() == LegendreSymbol::QuadraticNonResidue);
+        assert!(tmp.invert().unwrap().legendre() == LegendreSymbol::QuadraticNonResidue);
     }
 
     {
@@ -358,7 +360,7 @@ fn test_jubjub_params<E: JubjubEngine>(params: &E::Params) {
         // Check the validity of the scaling factor
         let mut tmp = a;
         tmp.sub_assign(&params.edwards_d());
-        tmp = tmp.inverse().unwrap();
+        tmp = tmp.invert().unwrap();
         tmp.mul_assign(&E::Fr::from_str("4").unwrap());
         tmp = tmp.sqrt().unwrap();
         assert_eq!(&tmp, params.scale());

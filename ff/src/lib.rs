@@ -12,7 +12,7 @@ use std::error::Error;
 use std::fmt;
 use std::io::{self, Read, Write};
 use std::ops::{Add, AddAssign, Mul, MulAssign, Neg, Sub, SubAssign};
-use subtle::ConditionallySelectable;
+use subtle::{ConditionallySelectable, CtOption};
 
 /// This trait represents an element of a field.
 pub trait Field:
@@ -20,6 +20,7 @@ pub trait Field:
     + Eq
     + Copy
     + Clone
+    + Default
     + Send
     + Sync
     + fmt::Debug
@@ -60,8 +61,9 @@ pub trait Field:
     #[must_use]
     fn double(&self) -> Self;
 
-    /// Computes the multiplicative inverse of this element, if nonzero.
-    fn inverse(&self) -> Option<Self>;
+    /// Computes the multiplicative inverse of this element,
+    /// failing if the element is zero.
+    fn invert(&self) -> CtOption<Self>;
 
     /// Exponentiates this element by a power of the base prime modulus via
     /// the Frobenius automorphism.

@@ -724,8 +724,8 @@ fn test_fr_squaring() {
 }
 
 #[test]
-fn test_fr_inverse() {
-    assert!(Fr::zero().inverse().is_none());
+fn test_fr_invert() {
+    assert!(bool::from(Fr::zero().invert().is_none()));
 
     let mut rng = XorShiftRng::from_seed([
         0x59, 0x62, 0xbe, 0x5d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06, 0xbc,
@@ -737,7 +737,7 @@ fn test_fr_inverse() {
     for _ in 0..1000 {
         // Ensure that a * a^-1 = 1
         let mut a = Fr::random(&mut rng);
-        let ainv = a.inverse().unwrap();
+        let ainv = a.invert().unwrap();
         a.mul_assign(&ainv);
         assert_eq!(a, one);
     }
