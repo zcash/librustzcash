@@ -113,9 +113,9 @@ fn prime_field_repr_impl(repr: &syn::Ident, limbs: usize) -> proc_macro2::TokenS
         #[derive(Copy, Clone, PartialEq, Eq, Default)]
         pub struct #repr(pub [u64; #limbs]);
 
-        impl ::std::fmt::Debug for #repr
+        impl ::core::fmt::Debug for #repr
         {
-            fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+            fn fmt(&self, f: &mut ::core::fmt::Formatter) -> ::core::fmt::Result {
                 write!(f, "0x")?;
                 for i in self.0.iter().rev() {
                     write!(f, "{:016x}", *i)?;
@@ -125,8 +125,8 @@ fn prime_field_repr_impl(repr: &syn::Ident, limbs: usize) -> proc_macro2::TokenS
             }
         }
 
-        impl ::std::fmt::Display for #repr {
-            fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+        impl ::core::fmt::Display for #repr {
+            fn fmt(&self, f: &mut ::core::fmt::Formatter) -> ::core::fmt::Result {
                 write!(f, "0x")?;
                 for i in self.0.iter().rev() {
                     write!(f, "{:016x}", *i)?;
@@ -153,7 +153,7 @@ fn prime_field_repr_impl(repr: &syn::Ident, limbs: usize) -> proc_macro2::TokenS
         impl From<u64> for #repr {
             #[inline(always)]
             fn from(val: u64) -> #repr {
-                use std::default::Default;
+                use core::default::Default;
 
                 let mut repr = Self::default();
                 repr.0[0] = val;
@@ -163,22 +163,22 @@ fn prime_field_repr_impl(repr: &syn::Ident, limbs: usize) -> proc_macro2::TokenS
 
         impl Ord for #repr {
             #[inline(always)]
-            fn cmp(&self, other: &#repr) -> ::std::cmp::Ordering {
+            fn cmp(&self, other: &#repr) -> ::core::cmp::Ordering {
                 for (a, b) in self.0.iter().rev().zip(other.0.iter().rev()) {
                     if a < b {
-                        return ::std::cmp::Ordering::Less
+                        return ::core::cmp::Ordering::Less
                     } else if a > b {
-                        return ::std::cmp::Ordering::Greater
+                        return ::core::cmp::Ordering::Greater
                     }
                 }
 
-                ::std::cmp::Ordering::Equal
+                ::core::cmp::Ordering::Equal
             }
         }
 
         impl PartialOrd for #repr {
             #[inline(always)]
-            fn partial_cmp(&self, other: &#repr) -> Option<::std::cmp::Ordering> {
+            fn partial_cmp(&self, other: &#repr) -> Option<::core::cmp::Ordering> {
                 Some(self.cmp(other))
             }
         }
@@ -209,7 +209,7 @@ fn prime_field_repr_impl(repr: &syn::Ident, limbs: usize) -> proc_macro2::TokenS
                 while n >= 64 {
                     let mut t = 0;
                     for i in self.0.iter_mut().rev() {
-                        ::std::mem::swap(&mut t, i);
+                        ::core::mem::swap(&mut t, i);
                     }
                     n -= 64;
                 }
@@ -257,7 +257,7 @@ fn prime_field_repr_impl(repr: &syn::Ident, limbs: usize) -> proc_macro2::TokenS
                 while n >= 64 {
                     let mut t = 0;
                     for i in &mut self.0 {
-                        ::std::mem::swap(&mut t, i);
+                        ::core::mem::swap(&mut t, i);
                     }
                     n -= 64;
                 }
@@ -767,15 +767,15 @@ fn prime_field_impl(
     let top_limb_index = limbs - 1;
 
     quote! {
-        impl ::std::marker::Copy for #name { }
+        impl ::core::marker::Copy for #name { }
 
-        impl ::std::clone::Clone for #name {
+        impl ::core::clone::Clone for #name {
             fn clone(&self) -> #name {
                 *self
             }
         }
 
-        impl ::std::default::Default for #name {
+        impl ::core::default::Default for #name {
             fn default() -> #name {
                 #name::zero()
             }
@@ -787,17 +787,17 @@ fn prime_field_impl(
             }
         }
 
-        impl ::std::cmp::PartialEq for #name {
+        impl ::core::cmp::PartialEq for #name {
             fn eq(&self, other: &#name) -> bool {
                 self.0 == other.0
             }
         }
 
-        impl ::std::cmp::Eq for #name { }
+        impl ::core::cmp::Eq for #name { }
 
-        impl ::std::fmt::Debug for #name
+        impl ::core::fmt::Debug for #name
         {
-            fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+            fn fmt(&self, f: &mut ::core::fmt::Formatter) -> ::core::fmt::Result {
                 write!(f, "{}({:?})", stringify!(#name), self.into_repr())
             }
         }
@@ -805,20 +805,20 @@ fn prime_field_impl(
         /// Elements are ordered lexicographically.
         impl Ord for #name {
             #[inline(always)]
-            fn cmp(&self, other: &#name) -> ::std::cmp::Ordering {
+            fn cmp(&self, other: &#name) -> ::core::cmp::Ordering {
                 self.into_repr().cmp(&other.into_repr())
             }
         }
 
         impl PartialOrd for #name {
             #[inline(always)]
-            fn partial_cmp(&self, other: &#name) -> Option<::std::cmp::Ordering> {
+            fn partial_cmp(&self, other: &#name) -> Option<::core::cmp::Ordering> {
                 Some(self.cmp(other))
             }
         }
 
-        impl ::std::fmt::Display for #name {
-            fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+        impl ::core::fmt::Display for #name {
+            fn fmt(&self, f: &mut ::core::fmt::Formatter) -> ::core::fmt::Result {
                 write!(f, "{}({})", stringify!(#name), self.into_repr())
             }
         }
@@ -839,7 +839,7 @@ fn prime_field_impl(
             }
         }
 
-        impl ::std::ops::Neg for #name {
+        impl ::core::ops::Neg for #name {
             type Output = #name;
 
             #[inline]
@@ -854,7 +854,7 @@ fn prime_field_impl(
             }
         }
 
-        impl<'r> ::std::ops::Add<&'r #name> for #name {
+        impl<'r> ::core::ops::Add<&'r #name> for #name {
             type Output = #name;
 
             #[inline]
@@ -865,7 +865,7 @@ fn prime_field_impl(
             }
         }
 
-        impl ::std::ops::Add for #name {
+        impl ::core::ops::Add for #name {
             type Output = #name;
 
             #[inline]
@@ -874,7 +874,7 @@ fn prime_field_impl(
             }
         }
 
-        impl<'r> ::std::ops::AddAssign<&'r #name> for #name {
+        impl<'r> ::core::ops::AddAssign<&'r #name> for #name {
             #[inline]
             fn add_assign(&mut self, other: &#name) {
                 // This cannot exceed the backing capacity.
@@ -885,14 +885,14 @@ fn prime_field_impl(
             }
         }
 
-        impl ::std::ops::AddAssign for #name {
+        impl ::core::ops::AddAssign for #name {
             #[inline]
             fn add_assign(&mut self, other: #name) {
                 self.add_assign(&other);
             }
         }
 
-        impl<'r> ::std::ops::Sub<&'r #name> for #name {
+        impl<'r> ::core::ops::Sub<&'r #name> for #name {
             type Output = #name;
 
             #[inline]
@@ -903,7 +903,7 @@ fn prime_field_impl(
             }
         }
 
-        impl ::std::ops::Sub for #name {
+        impl ::core::ops::Sub for #name {
             type Output = #name;
 
             #[inline]
@@ -912,7 +912,7 @@ fn prime_field_impl(
             }
         }
 
-        impl<'r> ::std::ops::SubAssign<&'r #name> for #name {
+        impl<'r> ::core::ops::SubAssign<&'r #name> for #name {
             #[inline]
             fn sub_assign(&mut self, other: &#name) {
                 // If `other` is larger than `self`, we'll need to add the modulus to self first.
@@ -924,14 +924,14 @@ fn prime_field_impl(
             }
         }
 
-        impl ::std::ops::SubAssign for #name {
+        impl ::core::ops::SubAssign for #name {
             #[inline]
             fn sub_assign(&mut self, other: #name) {
                 self.sub_assign(&other);
             }
         }
 
-        impl<'r> ::std::ops::Mul<&'r #name> for #name {
+        impl<'r> ::core::ops::Mul<&'r #name> for #name {
             type Output = #name;
 
             #[inline]
@@ -942,7 +942,7 @@ fn prime_field_impl(
             }
         }
 
-        impl ::std::ops::Mul for #name {
+        impl ::core::ops::Mul for #name {
             type Output = #name;
 
             #[inline]
@@ -951,7 +951,7 @@ fn prime_field_impl(
             }
         }
 
-        impl<'r> ::std::ops::MulAssign<&'r #name> for #name {
+        impl<'r> ::core::ops::MulAssign<&'r #name> for #name {
             #[inline]
             fn mul_assign(&mut self, other: &#name)
             {
@@ -959,7 +959,7 @@ fn prime_field_impl(
             }
         }
 
-        impl ::std::ops::MulAssign for #name {
+        impl ::core::ops::MulAssign for #name {
             #[inline]
             fn mul_assign(&mut self, other: #name)
             {
@@ -977,7 +977,7 @@ fn prime_field_impl(
 
                     Ok(r)
                 } else {
-                    Err(PrimeFieldDecodingError::NotInField(format!("{}", r.0)))
+                    Err(PrimeFieldDecodingError::NotInField)
                 }
             }
 

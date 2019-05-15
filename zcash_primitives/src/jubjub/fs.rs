@@ -454,7 +454,7 @@ impl PrimeField for Fs {
 
             Ok(r)
         } else {
-            Err(PrimeFieldDecodingError::NotInField(format!("{}", r.0)))
+            Err(PrimeFieldDecodingError::NotInField)
         }
     }
 
