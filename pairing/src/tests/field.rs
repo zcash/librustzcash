@@ -14,7 +14,7 @@ pub fn random_frobenius_tests<F: Field, C: AsRef<[u64]>>(characteristic: C, maxp
             let mut b = a;
 
             for _ in 0..i {
-                a = a.pow(&characteristic);
+                a = a.pow_vartime(&characteristic);
             }
             b.frobenius_map(i);
 

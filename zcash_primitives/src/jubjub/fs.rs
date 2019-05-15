@@ -744,7 +744,7 @@ impl SqrtField for Fs {
         // https://eprint.iacr.org/2012/685.pdf (page 9, algorithm 2)
 
         // a1 = self^((s - 3) // 4)
-        let mut a1 = self.pow([
+        let mut a1 = self.pow_vartime([
             0xb425c397b5bdcb2d,
             0x299a0824f3320420,
             0x4199cec0404d0ec0,
@@ -1495,7 +1495,7 @@ fn test_fs_pow() {
         // Exponentiate by various small numbers and ensure it consists with repeated
         // multiplication.
         let a = Fs::random(&mut rng);
-        let target = a.pow(&[i]);
+        let target = a.pow_vartime(&[i]);
         let mut c = Fs::one();
         for _ in 0..i {
             c.mul_assign(&a);
@@ -1507,7 +1507,7 @@ fn test_fs_pow() {
         // Exponentiating by the modulus should have no effect in a prime field.
         let a = Fs::random(&mut rng);
 
-        assert_eq!(a, a.pow(Fs::char()));
+        assert_eq!(a, a.pow_vartime(Fs::char()));
     }
 }
 
@@ -1688,7 +1688,7 @@ fn test_fs_root_of_unity() {
         Fs::from_repr(FsRepr::from(6)).unwrap()
     );
     assert_eq!(
-        Fs::multiplicative_generator().pow([
+        Fs::multiplicative_generator().pow_vartime([
             0x684b872f6b7b965b,
             0x53341049e6640841,
             0x83339d80809a1d80,
@@ -1696,6 +1696,6 @@ fn test_fs_root_of_unity() {
         ]),
         Fs::root_of_unity()
     );
-    assert_eq!(Fs::root_of_unity().pow([1 << Fs::S]), Fs::one());
+    assert_eq!(Fs::root_of_unity().pow_vartime([1 << Fs::S]), Fs::one());
     assert!(bool::from(Fs::multiplicative_generator().sqrt().is_none()));
 }

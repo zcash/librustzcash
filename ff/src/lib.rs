@@ -69,22 +69,20 @@ pub trait Field:
     /// the Frobenius automorphism.
     fn frobenius_map(&mut self, power: usize);
 
-    /// Exponentiates this element by a number represented with `u64` limbs,
-    /// least significant digit first.
-    fn pow<S: AsRef<[u64]>>(&self, exp: S) -> Self {
+    /// Exponentiates `self` by `exp`, where `exp` is a little-endian order
+    /// integer exponent.
+    ///
+    /// **This operation is variable time with respect to the exponent.** If the
+    /// exponent is fixed, this operation is effectively constant time.
+    fn pow_vartime<S: AsRef<[u64]>>(&self, exp: S) -> Self {
         let mut res = Self::one();
-
-        let mut found_one = false;
-
-        for i in BitIterator::new(exp) {
-            if found_one {
+        for e in exp.as_ref().iter().rev() {
+            for i in (0..64).rev() {
                 res = res.square();
-            } else {
-                found_one = i;
-            }
 
-            if i {
-                res.mul_assign(self);
+                if ((*e >> i) & 1) == 1 {
+                    res.mul_assign(self);
+                }
             }
         }
 

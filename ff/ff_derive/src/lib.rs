@@ -427,7 +427,7 @@ fn prime_field_constants_and_sqrt(
                     // Because r = 3 (mod 4)
                     // sqrt can be done with only one exponentiation,
                     // via the computation of  self^((r + 1) // 4) (mod r)
-                    let sqrt = self.pow(#mod_plus_1_over_4);
+                    let sqrt = self.pow_vartime(#mod_plus_1_over_4);
 
                     ::subtle::CtOption::new(
                         sqrt,
@@ -447,7 +447,7 @@ fn prime_field_constants_and_sqrt(
                     use ::subtle::{ConditionallySelectable, ConstantTimeEq};
 
                     // w = self^((t - 1) // 2)
-                    let w = self.pow(#t_minus_1_over_2);
+                    let w = self.pow_vartime(#t_minus_1_over_2);
 
                     let mut v = S;
                     let mut x = *self * &w;
