@@ -1,5 +1,6 @@
 use ff::{BitIterator, Field, PrimeField, PrimeFieldRepr, SqrtField};
 use std::ops::{AddAssign, MulAssign, Neg, SubAssign};
+use subtle::CtOption;
 
 use super::{edwards, JubjubEngine, JubjubParams, PrimeOrder, Unknown};
 
@@ -47,7 +48,7 @@ impl<E: JubjubEngine, Subgroup> PartialEq for Point<E, Subgroup> {
 }
 
 impl<E: JubjubEngine> Point<E, Unknown> {
-    pub fn get_for_x(x: E::Fr, sign: bool, params: &E::Params) -> Option<Self> {
+    pub fn get_for_x(x: E::Fr, sign: bool, params: &E::Params) -> CtOption<Self> {
         // Given an x on the curve, y = sqrt(x^3 + A*x^2 + x)
 
         let mut x2 = x.square();
@@ -58,21 +59,18 @@ impl<E: JubjubEngine> Point<E, Unknown> {
         x2.mul_assign(&x);
         rhs.add_assign(&x2);
 
-        match rhs.sqrt() {
-            Some(mut y) => {
-                if y.into_repr().is_odd() != sign {
-                    y = y.neg();
-                }
-
-                Some(Point {
-                    x,
-                    y,
-                    infinity: false,
-                    _marker: PhantomData,
-                })
+        rhs.sqrt().map(|mut y| {
+            if y.into_repr().is_odd() != sign {
+                y = y.neg();
             }
-            None => None,
-        }
+
+            Point {
+                x,
+                y,
+                infinity: false,
+                _marker: PhantomData,
+            }
+        })
     }
 
     /// This guarantees the point is in the prime order subgroup
@@ -88,8 +86,9 @@ impl<E: JubjubEngine> Point<E, Unknown> {
             let x = E::Fr::random(rng);
             let sign = rng.next_u32() % 2 != 0;
 
-            if let Some(p) = Self::get_for_x(x, sign, params) {
-                return p;
+            let p = Self::get_for_x(x, sign, params);
+            if p.is_some().into() {
+                return p.unwrap();
             }
         }
     }

@@ -1,6 +1,6 @@
 use super::{edwards, montgomery, JubjubEngine, JubjubParams, PrimeOrder};
 
-use ff::{Field, LegendreSymbol, PrimeField, PrimeFieldRepr, SqrtField};
+use ff::{Field, PrimeField, PrimeFieldRepr, SqrtField};
 use std::ops::{AddAssign, MulAssign, Neg, SubAssign};
 
 use rand_core::{RngCore, SeedableRng};
@@ -319,8 +319,8 @@ fn test_jubjub_params<E: JubjubEngine>(params: &E::Params) {
         // The twisted Edwards addition law is complete when d is nonsquare
         // and a is square.
 
-        assert!(params.edwards_d().legendre() == LegendreSymbol::QuadraticNonResidue);
-        assert!(a.legendre() == LegendreSymbol::QuadraticResidue);
+        assert!(bool::from(params.edwards_d().sqrt().is_none()));
+        assert!(bool::from(a.sqrt().is_some()));
     }
 
     {
@@ -330,30 +330,30 @@ fn test_jubjub_params<E: JubjubEngine>(params: &E::Params) {
         let mut tmp = *params.edwards_d();
 
         // 1 / d is nonsquare
-        assert!(tmp.invert().unwrap().legendre() == LegendreSymbol::QuadraticNonResidue);
+        assert!(bool::from(tmp.invert().unwrap().sqrt().is_none()));
 
         // tmp = -d
         tmp = tmp.neg();
 
         // -d is nonsquare
-        assert!(tmp.legendre() == LegendreSymbol::QuadraticNonResidue);
+        assert!(bool::from(tmp.sqrt().is_none()));
 
         // 1 / -d is nonsquare
-        assert!(tmp.invert().unwrap().legendre() == LegendreSymbol::QuadraticNonResidue);
+        assert!(bool::from(tmp.invert().unwrap().sqrt().is_none()));
     }
 
     {
         // Check that A^2 - 4 is nonsquare:
         let mut tmp = params.montgomery_a().square();
         tmp.sub_assign(&E::Fr::from_str("4").unwrap());
-        assert!(tmp.legendre() == LegendreSymbol::QuadraticNonResidue);
+        assert!(bool::from(tmp.sqrt().is_none()));
     }
 
     {
         // Check that A - 2 is nonsquare:
         let mut tmp = params.montgomery_a().clone();
         tmp.sub_assign(&E::Fr::from_str("2").unwrap());
-        assert!(tmp.legendre() == LegendreSymbol::QuadraticNonResidue);
+        assert!(bool::from(tmp.sqrt().is_none()));
     }
 
     {

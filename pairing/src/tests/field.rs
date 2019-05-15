@@ -1,4 +1,4 @@
-use ff::{Field, LegendreSymbol, PrimeField, SqrtField};
+use ff::{Field, PrimeField, SqrtField};
 use rand_core::{RngCore, SeedableRng};
 use rand_xorshift::XorShiftRng;
 
@@ -32,7 +32,6 @@ pub fn random_sqrt_tests<F: SqrtField>() {
     for _ in 0..10000 {
         let a = F::random(&mut rng);
         let b = a.square();
-        assert_eq!(b.legendre(), LegendreSymbol::QuadraticResidue);
 
         let b = b.sqrt().unwrap();
         let negb = b.neg();
@@ -43,7 +42,6 @@ pub fn random_sqrt_tests<F: SqrtField>() {
     let mut c = F::one();
     for _ in 0..10000 {
         let mut b = c.square();
-        assert_eq!(b.legendre(), LegendreSymbol::QuadraticResidue);
 
         b = b.sqrt().unwrap();
 

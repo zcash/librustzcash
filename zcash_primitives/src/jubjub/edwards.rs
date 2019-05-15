@@ -1,6 +1,6 @@
 use ff::{BitIterator, Field, PrimeField, PrimeFieldRepr, SqrtField};
 use std::ops::{AddAssign, MulAssign, Neg, SubAssign};
-use subtle::{Choice, CtOption};
+use subtle::CtOption;
 
 use super::{montgomery, JubjubEngine, JubjubParams, PrimeOrder, Unknown};
 
@@ -126,7 +126,7 @@ impl<E: JubjubEngine> Point<E, Unknown> {
             // tmp1 = (y^2 - 1) / (dy^2 + 1)
             tmp1.mul_assign(&tmp2);
 
-            match tmp1.sqrt().map(|mut x| {
+            tmp1.sqrt().map(|mut x| {
                 if x.into_repr().is_odd() != sign {
                     x = x.neg();
                 }
@@ -141,10 +141,7 @@ impl<E: JubjubEngine> Point<E, Unknown> {
                     z: E::Fr::one(),
                     _marker: PhantomData,
                 }
-            }) {
-                Some(p) => CtOption::new(p, Choice::from(1)),
-                None => CtOption::new(Point::zero(), Choice::from(0)),
-            }
+            })
         })
     }
 
