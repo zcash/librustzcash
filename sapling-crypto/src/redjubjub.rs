@@ -29,6 +29,15 @@ fn h_star<E: JubjubEngine>(a: &[u8], b: &[u8]) -> E::Fs {
     hash_to_scalar::<E>(b"Zcash_RedJubjubH", a, b)
 }
 
+/// RedDSA.GenRandom returns an uniformly distributed byte sequence, of length 80.
+/// T = (l_H + 128) bits of randomness
+/// For H*, l_H = 512 bits
+pub fn gen_random<R: Rng>(rng: &mut R) -> [u8; 80] {
+    let mut t = [0u8; 80];
+    rng.fill_bytes(&mut t[..]);
+    t
+}
+
 #[derive(Copy, Clone, Debug)]
 pub struct Signature {
     rbar: [u8; 32],
@@ -339,6 +348,23 @@ mod tests {
             assert!(rvk.verify(msg2, &sig2, p_g, params));
             assert!(!rvk.verify(msg1, &sig2, p_g, params));
             assert!(!rvk.verify(msg2, &sig1, p_g, params));
+        }
+    }
+
+    #[test]
+    fn test_gen_random() {
+        let rng = &mut thread_rng();
+        for _ in 0..1000 {
+            let mut buf1 = gen_random(rng);
+            let mut buf2 = gen_random(rng);
+            let mut diff = false;
+            for i in 0..buf1.len() {
+                if buf1[i] != buf2[i] {
+                    diff = true;
+                    break;
+                }
+            }
+            assert!(diff);
         }
     }
 }

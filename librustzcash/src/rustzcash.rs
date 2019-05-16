@@ -24,7 +24,7 @@ use sapling_crypto::{
         FixedGenerators, JubjubEngine, JubjubParams, PrimeOrder, ToUniform, Unknown,
     },
     pedersen_hash::{pedersen_hash, Personalization},
-    redjubjub::{self, Signature},
+    redjubjub::{gen_random, self, Signature},
 };
 
 use sapling_crypto::circuit::sapling::TREE_DEPTH as SAPLING_TREE_DEPTH;
@@ -38,7 +38,7 @@ use blake2_rfc::blake2s::Blake2s;
 
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 
-use rand::{OsRng, Rng};
+use rand::{OsRng};
 use std::io::BufReader;
 
 use libc::{c_char, c_uchar, int64_t, size_t, uint32_t, uint64_t};
@@ -399,15 +399,11 @@ fn test_gen_r() {
 /// Return 32 byte random scalar, uniformly.
 #[no_mangle]
 pub extern "system" fn librustzcash_sapling_generate_r(result: *mut [c_uchar; 32]) {
-    // create random 64 byte buffer
     let mut rng = OsRng::new().expect("should be able to construct RNG");
-    let mut buffer = [0u8; 64];
-    for i in 0..buffer.len() {
-        buffer[i] = rng.gen();
-    }
+    let buffer = gen_random(&mut rng);
 
     // reduce to uniform value
-    let r = <Bls12 as JubjubEngine>::Fs::to_uniform(&buffer[..]);
+    let r = <Bls12 as JubjubEngine>::Fs::to_uniform(&buffer[0..64]);
     let result = unsafe { &mut *result };
     r.into_repr()
         .write_le(&mut result[..])
