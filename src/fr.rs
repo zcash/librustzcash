@@ -2,10 +2,9 @@ use core::fmt;
 use core::ops::{Add, AddAssign, Mul, MulAssign, Neg, Sub, SubAssign};
 
 use byteorder::{ByteOrder, LittleEndian};
-use subtle::{Choice, ConditionallySelectable, ConstantTimeEq};
+use subtle::{Choice, ConditionallySelectable, ConstantTimeEq, CtOption};
 
 use crate::util::{adc, mac, sbb};
-use crate::CtOption;
 
 /// Represents an element of `GF(r)`.
 // The internal representation of this type is four 64-bit unsigned

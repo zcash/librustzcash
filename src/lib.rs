@@ -36,13 +36,10 @@
 extern crate std;
 
 use core::ops::{Add, AddAssign, Mul, MulAssign, Neg, Sub, SubAssign};
-use subtle::{Choice, ConditionallySelectable, ConstantTimeEq};
+use subtle::{Choice, ConditionallySelectable, ConstantTimeEq, CtOption};
 
 #[macro_use]
 mod util;
-
-mod ctoption;
-pub use ctoption::CtOption;
 
 mod fq;
 mod fr;
