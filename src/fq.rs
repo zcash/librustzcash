@@ -109,14 +109,7 @@ impl<'a, 'b> Add<&'b Fq> for &'a Fq {
 
     #[inline]
     fn add(self, rhs: &'b Fq) -> Fq {
-        let (d0, carry) = adc(self.0[0], rhs.0[0], 0);
-        let (d1, carry) = adc(self.0[1], rhs.0[1], carry);
-        let (d2, carry) = adc(self.0[2], rhs.0[2], carry);
-        let (d3, _) = adc(self.0[3], rhs.0[3], carry);
-
-        // Attempt to subtract the modulus, to ensure the value
-        // is smaller than the modulus.
-        Fq([d0, d1, d2, d3]) - &MODULUS
+        self.field_add(rhs)
     }
 }
 
@@ -554,7 +547,7 @@ impl Fq {
     }
 
     #[inline]
-    const fn multiply(&self, rhs: &Self) -> Self {
+    pub(crate) const fn multiply(&self, rhs: &Self) -> Self {
         // Schoolbook multiplication
 
         let (r0, carry) = mac(0, self.0[0], rhs.0[0], 0);
@@ -581,7 +574,7 @@ impl Fq {
     }
 
     #[inline]
-    const fn subtract(&self, rhs: &Self) -> Self {
+    pub(crate) const fn subtract(&self, rhs: &Self) -> Self {
         let (d0, borrow) = sbb(self.0[0], rhs.0[0], 0);
         let (d1, borrow) = sbb(self.0[1], rhs.0[1], borrow);
         let (d2, borrow) = sbb(self.0[2], rhs.0[2], borrow);
@@ -595,6 +588,18 @@ impl Fq {
         let (d3, _) = adc(d3, MODULUS.0[3] & borrow, carry);
 
         Fq([d0, d1, d2, d3])
+    }
+
+    #[inline]
+    pub(crate) const fn field_add(&self, rhs: &Self) -> Self {
+        let (d0, carry) = adc(self.0[0], rhs.0[0], 0);
+        let (d1, carry) = adc(self.0[1], rhs.0[1], carry);
+        let (d2, carry) = adc(self.0[2], rhs.0[2], carry);
+        let (d3, _) = adc(self.0[3], rhs.0[3], carry);
+
+        // Attempt to subtract the modulus, to ensure the value
+        // is smaller than the modulus.
+        Fq([d0, d1, d2, d3]).subtract(&MODULUS)
     }
 }
 

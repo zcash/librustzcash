@@ -371,11 +371,11 @@ impl AffinePoint {
 
     /// Performs a pre-processing step that produces an `AffineNielsPoint`
     /// for use in multiple additions.
-    pub fn to_niels(&self) -> AffineNielsPoint {
+    pub const fn to_niels(&self) -> AffineNielsPoint {
         AffineNielsPoint {
-            v_plus_u: &self.v + &self.u,
-            v_minus_u: &self.v - &self.u,
-            t2d: &self.u * &self.v * EDWARDS_D2,
+            v_plus_u: self.v.field_add(&self.u),
+            v_minus_u: self.v.subtract(&self.u),
+            t2d: self.u.multiply(&self.v).multiply(&EDWARDS_D2)
         }
     }
 
