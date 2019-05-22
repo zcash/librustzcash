@@ -219,6 +219,37 @@ impl AffineNielsPoint {
             t2d: Fq::zero(),
         }
     }
+
+    #[inline]
+    fn multiply(&self, by: &[u8; 32]) -> ExtendedPoint {
+        let zero = AffineNielsPoint::identity();
+
+        let mut acc = ExtendedPoint::identity();
+
+        // This is a simple double-and-add implementation of point
+        // multiplication, moving from most significant to least
+        // significant bit of the scalar.
+        //
+        // We skip the leading four bits because they're always
+        // unset for Fr.
+        for bit in by
+            .iter()
+            .rev()
+            .flat_map(|byte| (0..8).rev().map(move |i| Choice::from((byte >> i) & 1u8)))
+            .skip(4)
+        {
+            acc = acc.double();
+            acc += AffineNielsPoint::conditional_select(&zero, &self, bit);
+        }
+
+        acc
+    }
+
+    /// Multiplies this point by the specific little-endian bit pattern in the
+    /// given byte array, ignoring the highest four bits.
+    pub fn multiply_bits(&self, by: &[u8; 32]) -> ExtendedPoint {
+        self.multiply(by)
+    }
 }
 
 impl ConditionallySelectable for AffineNielsPoint {
