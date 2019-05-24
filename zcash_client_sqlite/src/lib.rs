@@ -39,6 +39,7 @@ use zcash_client_backend::constants::testnet::{
     HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY, HRP_SAPLING_PAYMENT_ADDRESS,
 };
 
+pub mod address;
 pub mod chain;
 pub mod error;
 pub mod init;

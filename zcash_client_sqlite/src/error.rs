@@ -20,6 +20,7 @@ pub enum ErrorKind {
     ScanRequired,
     TableNotEmpty,
     Bech32(bech32::Error),
+    Base58(bs58::decode::Error),
     Builder(builder::Error),
     Database(rusqlite::Error),
     Io(std::io::Error),
@@ -65,6 +66,7 @@ impl fmt::Display for Error {
             ErrorKind::ScanRequired => write!(f, "Must scan blocks first"),
             ErrorKind::TableNotEmpty => write!(f, "Table is not empty"),
             ErrorKind::Bech32(e) => write!(f, "{}", e),
+            ErrorKind::Base58(e) => write!(f, "{}", e),
             ErrorKind::Builder(e) => write!(f, "{:?}", e),
             ErrorKind::Database(e) => write!(f, "{}", e),
             ErrorKind::Io(e) => write!(f, "{}", e),
@@ -90,6 +92,12 @@ impl error::Error for Error {
 impl From<bech32::Error> for Error {
     fn from(e: bech32::Error) -> Self {
         Error(ErrorKind::Bech32(e))
+    }
+}
+
+impl From<bs58::decode::Error> for Error {
+    fn from(e: bs58::decode::Error) -> Self {
+        Error(ErrorKind::Base58(e))
     }
 }
 
