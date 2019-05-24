@@ -12,6 +12,17 @@ enum OpCode {
     PushData1 = 0x4c,
     PushData2 = 0x4d,
     PushData4 = 0x4e,
+
+    // stack ops
+    Dup = 0x76,
+
+    // bit logic
+    Equal = 0x87,
+    EqualVerify = 0x88,
+
+    // crypto
+    Hash160 = 0xa9,
+    CheckSig = 0xac,
 }
 
 /// A serialized script, used inside transparent inputs and outputs of a transaction.
@@ -59,9 +70,37 @@ impl Shl<&[u8]> for Script {
     }
 }
 
+/// A transparent address corresponding to either a public key or a `Script`.
+#[derive(Debug, PartialEq)]
+pub enum TransparentAddress {
+    PublicKey([u8; 20]),
+    Script([u8; 20]),
+}
+
+impl TransparentAddress {
+    /// Generate the `scriptPubKey` corresponding to this address.
+    pub fn script(&self) -> Script {
+        match self {
+            TransparentAddress::PublicKey(key_id) => {
+                // P2PKH script
+                Script::default()
+                    << OpCode::Dup
+                    << OpCode::Hash160
+                    << &key_id[..]
+                    << OpCode::EqualVerify
+                    << OpCode::CheckSig
+            }
+            TransparentAddress::Script(script_id) => {
+                // P2SH script
+                Script::default() << OpCode::Hash160 << &script_id[..] << OpCode::Equal
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{OpCode, Script};
+    use super::{OpCode, Script, TransparentAddress};
 
     #[test]
     fn script_opcode() {
@@ -101,5 +140,29 @@ mod tests {
             assert_eq!(&script.0[1..5], &[0x40, 0x42, 0x0f, 0x00][..]);
             assert_eq!(&script.0[5..], &long_data[..]);
         }
+    }
+
+    #[test]
+    fn p2pkh() {
+        let addr = TransparentAddress::PublicKey([4; 20]);
+        assert_eq!(
+            &addr.script().0,
+            &[
+                0x76, 0xa9, 0x14, 0x04, 0x04, 0x04, 0x04, 0x04, 0x04, 0x04, 0x04, 0x04, 0x04, 0x04,
+                0x04, 0x04, 0x04, 0x04, 0x04, 0x04, 0x04, 0x04, 0x04, 0x88, 0xac,
+            ]
+        )
+    }
+
+    #[test]
+    fn p2sh() {
+        let addr = TransparentAddress::Script([7; 20]);
+        assert_eq!(
+            &addr.script().0,
+            &[
+                0xa9, 0x14, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07,
+                0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x87,
+            ]
+        )
     }
 }
