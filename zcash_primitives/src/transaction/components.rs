@@ -107,8 +107,8 @@ impl TxIn {
 
 #[derive(Debug)]
 pub struct TxOut {
-    value: Amount,
-    script_pubkey: Script,
+    pub value: Amount,
+    pub script_pubkey: Script,
 }
 
 impl TxOut {

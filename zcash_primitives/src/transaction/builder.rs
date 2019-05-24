@@ -12,12 +12,13 @@ use zip32::ExtendedSpendingKey;
 
 use crate::{
     keys::OutgoingViewingKey,
+    legacy::TransparentAddress,
     merkle_tree::{CommitmentTreeWitness, IncrementalWitness},
     note_encryption::{generate_esk, Memo, SaplingNoteEncryption},
     prover::TxProver,
     sapling::{spend_sig, Node},
     transaction::{
-        components::{Amount, OutputDescription, SpendDescription},
+        components::{Amount, OutputDescription, SpendDescription, TxOut},
         signature_hash_data, Transaction, TransactionData, SIGHASH_ALL,
     },
     JUBJUB,
@@ -260,6 +261,24 @@ impl Builder {
         Ok(())
     }
 
+    /// Adds a transparent address to send funds to.
+    pub fn add_transparent_output(
+        &mut self,
+        to: &TransparentAddress,
+        value: Amount,
+    ) -> Result<(), Error> {
+        if value.0 < 0 {
+            return Err(Error(ErrorKind::InvalidAmount));
+        }
+
+        self.mtx.vout.push(TxOut {
+            value,
+            script_pubkey: to.script(),
+        });
+
+        Ok(())
+    }
+
     /// Sets the Sapling address to which any change will be sent.
     ///
     /// By default, change is sent to the Sapling address corresponding to the first note
@@ -289,7 +308,14 @@ impl Builder {
         //
 
         // Valid change
-        let change = self.mtx.value_balance.0 - self.fee.0;
+        let change = self.mtx.value_balance.0
+            - self.fee.0
+            - self
+                .mtx
+                .vout
+                .iter()
+                .map(|output| output.value.0)
+                .sum::<i64>();
         if change.is_negative() {
             return Err(Error(ErrorKind::ChangeIsNegative(change)));
         }
@@ -499,6 +525,7 @@ mod tests {
 
     use super::{Builder, ErrorKind};
     use crate::{
+        legacy::TransparentAddress,
         merkle_tree::{CommitmentTree, IncrementalWitness},
         prover::mock::MockTxProver,
         sapling::Node,
@@ -516,6 +543,15 @@ mod tests {
 
         let mut builder = Builder::new(0);
         match builder.add_sapling_output(ovk, to, Amount(-1), None) {
+            Err(e) => assert_eq!(e.kind(), &ErrorKind::InvalidAmount),
+            Ok(_) => panic!("Should have failed"),
+        }
+    }
+
+    #[test]
+    fn fails_on_negative_transparent_output() {
+        let mut builder = Builder::new(0);
+        match builder.add_transparent_output(&TransparentAddress::PublicKey([0; 20]), Amount(-1)) {
             Err(e) => assert_eq!(e.kind(), &ErrorKind::InvalidAmount),
             Ok(_) => panic!("Should have failed"),
         }
@@ -555,6 +591,19 @@ mod tests {
             }
         }
 
+        // Fail if there is only a transparent output
+        // 0.0005 t-ZEC out, 0.0001 t-ZEC fee
+        {
+            let mut builder = Builder::new(0);
+            builder
+                .add_transparent_output(&TransparentAddress::PublicKey([0; 20]), Amount(50000))
+                .unwrap();
+            match builder.build(1, MockTxProver) {
+                Err(e) => assert_eq!(e.kind(), &ErrorKind::ChangeIsNegative(-60000)),
+                Ok(_) => panic!("Should have failed"),
+            }
+        }
+
         let note1 = to
             .create_note(59999, Fs::random(&mut rng), &JUBJUB)
             .unwrap();
@@ -563,8 +612,8 @@ mod tests {
         tree.append(cm1).unwrap();
         let mut witness1 = IncrementalWitness::from_tree(&tree);
 
-        // Fail if there is only a Sapling output
-        // 0.0005 z-ZEC out, 0.0001 t-ZEC fee, 0.00059999 z-ZEC in
+        // Fail if there is insufficient input
+        // 0.0003 z-ZEC out, 0.0002 t-ZEC out, 0.0001 t-ZEC fee, 0.00059999 z-ZEC in
         {
             let mut builder = Builder::new(0);
             builder
@@ -576,7 +625,10 @@ mod tests {
                 )
                 .unwrap();
             builder
-                .add_sapling_output(ovk.clone(), to.clone(), Amount(50000), None)
+                .add_sapling_output(ovk.clone(), to.clone(), Amount(30000), None)
+                .unwrap();
+            builder
+                .add_transparent_output(&TransparentAddress::PublicKey([0; 20]), Amount(20000))
                 .unwrap();
             match builder.build(1, MockTxProver) {
                 Err(e) => assert_eq!(e.kind(), &ErrorKind::ChangeIsNegative(-1)),
@@ -591,7 +643,7 @@ mod tests {
         let witness2 = IncrementalWitness::from_tree(&tree);
 
         // Succeeds if there is sufficient input
-        // 0.0005 z-ZEC out, 0.0001 t-ZEC fee, 0.0006 z-ZEC in
+        // 0.0003 z-ZEC out, 0.0002 t-ZEC out, 0.0001 t-ZEC fee, 0.0006 z-ZEC in
         //
         // (Still fails because we are using a MockTxProver which doesn't correctly
         // compute bindingSig.)
@@ -604,7 +656,10 @@ mod tests {
                 .add_sapling_spend(extsk, to.diversifier, note2, witness2)
                 .unwrap();
             builder
-                .add_sapling_output(ovk, to, Amount(50000), None)
+                .add_sapling_output(ovk, to, Amount(30000), None)
+                .unwrap();
+            builder
+                .add_transparent_output(&TransparentAddress::PublicKey([0; 20]), Amount(20000))
                 .unwrap();
             match builder.build(1, MockTxProver) {
                 Err(e) => assert_eq!(e.kind(), &ErrorKind::BindingSig),
