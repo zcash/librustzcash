@@ -19,6 +19,7 @@ use sapling_crypto::jubjub::JubjubBls12;
 
 pub mod block;
 pub mod keys;
+pub mod legacy;
 pub mod merkle_tree;
 pub mod note_encryption;
 pub mod prover;

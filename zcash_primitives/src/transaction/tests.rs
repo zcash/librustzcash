@@ -6,11 +6,8 @@ use sapling_crypto::{
     redjubjub::PrivateKey,
 };
 
-use super::{
-    components::{Amount, Script},
-    sighash::signature_hash,
-    Transaction, TransactionData,
-};
+use super::{components::Amount, sighash::signature_hash, Transaction, TransactionData};
+use legacy::Script;
 use JUBJUB;
 
 #[test]

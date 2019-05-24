@@ -7,7 +7,7 @@ use sapling_crypto::{
 };
 use std::io::{self, Read, Write};
 
-use serialize::Vector;
+use legacy::Script;
 use JUBJUB;
 
 // π_A + π_B + π_C
@@ -55,20 +55,6 @@ impl Amount {
                 "Amount not in {0..MAX_MONEY}",
             ))
         }
-    }
-}
-
-#[derive(Debug)]
-pub struct Script(pub Vec<u8>);
-
-impl Script {
-    pub fn read<R: Read>(mut reader: R) -> io::Result<Self> {
-        let script = Vector::read(&mut reader, |r| r.read_u8())?;
-        Ok(Script(script))
-    }
-
-    pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
-        Vector::write(&mut writer, &self.0, |w, e| w.write_u8(*e))
     }
 }
 
