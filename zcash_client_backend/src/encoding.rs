@@ -6,9 +6,12 @@
 //! [`constants`]: crate::constants
 
 use bech32::{self, Error, FromBase32, ToBase32};
+use bs58::{self, decode::Error as Bs58Error};
 use pairing::bls12_381::Bls12;
+use std::convert::TryInto;
 use std::io::{self, Write};
 use zcash_primitives::{
+    legacy::TransparentAddress,
     primitives::PaymentAddress,
     zip32::{ExtendedFullViewingKey, ExtendedSpendingKey},
     JUBJUB,
@@ -173,6 +176,108 @@ pub fn decode_payment_address(hrp: &str, s: &str) -> Result<Option<PaymentAddres
         let mut bytes = [0; 43];
         bytes.copy_from_slice(&data);
         PaymentAddress::<Bls12>::from_bytes(&bytes, &JUBJUB)
+    })
+}
+
+/// Writes a [`TransparentAddress`] as a Base58Check-encoded string.
+///
+/// # Examples
+///
+/// ```
+/// use zcash_client_backend::{
+///     constants::testnet::{B58_PUBKEY_ADDRESS_PREFIX, B58_SCRIPT_ADDRESS_PREFIX},
+///     encoding::encode_transparent_address,
+/// };
+/// use zcash_primitives::legacy::TransparentAddress;
+///
+/// assert_eq!(
+///     encode_transparent_address(
+///         &B58_PUBKEY_ADDRESS_PREFIX,
+///         &B58_SCRIPT_ADDRESS_PREFIX,
+///         &TransparentAddress::PublicKey([0; 20]),
+///     ),
+///     "tm9iMLAuYMzJ6jtFLcA7rzUmfreGuKvr7Ma",
+/// );
+///
+/// assert_eq!(
+///     encode_transparent_address(
+///         &B58_PUBKEY_ADDRESS_PREFIX,
+///         &B58_SCRIPT_ADDRESS_PREFIX,
+///         &TransparentAddress::Script([0; 20]),
+///     ),
+///     "t26YoyZ1iPgiMEWL4zGUm74eVWfhyDMXzY2",
+/// );
+/// ```
+pub fn encode_transparent_address(
+    pubkey_version: &[u8],
+    script_version: &[u8],
+    addr: &TransparentAddress,
+) -> String {
+    let decoded = match addr {
+        TransparentAddress::PublicKey(key_id) => {
+            let mut decoded = vec![0; pubkey_version.len() + 20];
+            decoded[..pubkey_version.len()].copy_from_slice(pubkey_version);
+            decoded[pubkey_version.len()..].copy_from_slice(key_id);
+            decoded
+        }
+        TransparentAddress::Script(script_id) => {
+            let mut decoded = vec![0; script_version.len() + 20];
+            decoded[..script_version.len()].copy_from_slice(script_version);
+            decoded[script_version.len()..].copy_from_slice(script_id);
+            decoded
+        }
+    };
+    bs58::encode(decoded).with_check().into_string()
+}
+
+/// Decodes a [`TransparentAddress`] from a Base58Check-encoded string.
+///
+/// # Examples
+///
+/// ```
+/// use zcash_client_backend::{
+///     constants::testnet::{B58_PUBKEY_ADDRESS_PREFIX, B58_SCRIPT_ADDRESS_PREFIX},
+///     encoding::decode_transparent_address,
+/// };
+/// use zcash_primitives::legacy::TransparentAddress;
+///
+/// assert_eq!(
+///     decode_transparent_address(
+///         &B58_PUBKEY_ADDRESS_PREFIX,
+///         &B58_SCRIPT_ADDRESS_PREFIX,
+///         "tm9iMLAuYMzJ6jtFLcA7rzUmfreGuKvr7Ma",
+///     ),
+///     Ok(Some(TransparentAddress::PublicKey([0; 20]))),
+/// );
+///
+/// assert_eq!(
+///     decode_transparent_address(
+///         &B58_PUBKEY_ADDRESS_PREFIX,
+///         &B58_SCRIPT_ADDRESS_PREFIX,
+///         "t26YoyZ1iPgiMEWL4zGUm74eVWfhyDMXzY2",
+///     ),
+///     Ok(Some(TransparentAddress::Script([0; 20]))),
+/// );
+/// ```
+pub fn decode_transparent_address(
+    pubkey_version: &[u8],
+    script_version: &[u8],
+    s: &str,
+) -> Result<Option<TransparentAddress>, Bs58Error> {
+    bs58::decode(s).with_check(None).into_vec().map(|decoded| {
+        if decoded.starts_with(pubkey_version) {
+            decoded[pubkey_version.len()..]
+                .try_into()
+                .ok()
+                .map(TransparentAddress::PublicKey)
+        } else if decoded.starts_with(script_version) {
+            decoded[script_version.len()..]
+                .try_into()
+                .ok()
+                .map(TransparentAddress::Script)
+        } else {
+            None
+        }
     })
 }
 
