@@ -5,7 +5,7 @@ use ff::{PrimeField, PrimeFieldDecodingError, ScalarEngine, SqrtField};
 use rand::RngCore;
 use std::error::Error;
 use std::fmt;
-use std::ops::{Add, AddAssign, Sub, SubAssign};
+use std::ops::{Add, AddAssign, Neg, Sub, SubAssign};
 
 pub mod tests;
 
@@ -27,6 +27,7 @@ pub trait CurveProjective:
     + 'static
     + Add<Output = Self>
     + Sub<Output = Self>
+    + Neg<Output = Self>
     + for<'a> Add<&'a Self, Output = Self>
     + for<'a> Sub<&'a Self, Output = Self>
     + AddAssign
@@ -65,9 +66,6 @@ pub trait CurveProjective:
     /// Adds an affine element to this element.
     fn add_assign_mixed(&mut self, other: &Self::Affine);
 
-    /// Negates this element.
-    fn negate(&mut self);
-
     /// Performs scalar multiplication of this element.
     fn mul_assign<S: Into<<Self::Scalar as PrimeField>::Repr>>(&mut self, other: S);
 
@@ -86,7 +84,17 @@ pub trait CurveProjective:
 /// Affine representation of an elliptic curve point guaranteed to be
 /// in the correct prime order subgroup.
 pub trait CurveAffine:
-    Copy + Clone + Sized + Send + Sync + fmt::Debug + fmt::Display + PartialEq + Eq + 'static
+    Copy
+    + Clone
+    + Sized
+    + Send
+    + Sync
+    + fmt::Debug
+    + fmt::Display
+    + PartialEq
+    + Eq
+    + 'static
+    + Neg<Output = Self>
 {
     type Engine: ScalarEngine<Fr = Self::Scalar>;
     type Scalar: PrimeField + SqrtField;
@@ -104,9 +112,6 @@ pub trait CurveAffine:
     /// Determines if this point represents the point at infinity; the
     /// additive identity.
     fn is_zero(&self) -> bool;
-
-    /// Negates this element.
-    fn negate(&mut self);
 
     /// Performs scalar multiplication of this element with mixed addition.
     fn mul<S: Into<<Self::Scalar as PrimeField>::Repr>>(&self, other: S) -> Self::Projective;

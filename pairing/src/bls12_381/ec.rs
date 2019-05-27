@@ -134,6 +134,19 @@ macro_rules! curve_impl {
             }
         }
 
+        impl ::std::ops::Neg for $affine {
+            type Output = Self;
+
+            #[inline]
+            fn neg(self) -> Self {
+                let mut ret = self;
+                if !ret.is_zero() {
+                    ret.y = ret.y.neg();
+                }
+                ret
+            }
+        }
+
         impl CurveAffine for $affine {
             type Engine = Bls12;
             type Scalar = $scalarfield;
@@ -163,12 +176,6 @@ macro_rules! curve_impl {
                 self.mul_bits(bits)
             }
 
-            fn negate(&mut self) {
-                if !self.is_zero() {
-                    self.y = self.y.neg();
-                }
-            }
-
             fn into_projective(&self) -> $projective {
                 (*self).into()
             }
@@ -185,6 +192,19 @@ macro_rules! curve_impl {
 
             fn pairing_with(&self, other: &Self::Pair) -> Self::PairingResult {
                 self.perform_pairing(other)
+            }
+        }
+
+        impl ::std::ops::Neg for $projective {
+            type Output = Self;
+
+            #[inline]
+            fn neg(self) -> Self {
+                let mut ret = self;
+                if !ret.is_zero() {
+                    ret.y = ret.y.neg();
+                }
+                ret
             }
         }
 
@@ -324,9 +344,7 @@ macro_rules! curve_impl {
 
         impl<'r> ::std::ops::SubAssign<&'r $projective> for $projective {
             fn sub_assign(&mut self, other: &Self) {
-                let mut tmp = *other;
-                tmp.negate();
-                self.add_assign(&tmp);
+                self.add_assign(&other.neg());
             }
         }
 
@@ -563,12 +581,6 @@ macro_rules! curve_impl {
                     self.z = self.z.square();
                     self.z.sub_assign(&z1z1);
                     self.z.sub_assign(&hh);
-                }
-            }
-
-            fn negate(&mut self) {
-                if !self.is_zero() {
-                    self.y = self.y.neg();
                 }
             }
 

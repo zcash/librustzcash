@@ -13,8 +13,7 @@ pub fn curve_tests<G: CurveProjective>() {
 
     // Negation edge case with zero.
     {
-        let mut z = G::zero();
-        z.negate();
+        let z = G::zero().neg();
         assert!(z.is_zero());
     }
 
@@ -216,8 +215,7 @@ fn random_negation_tests<G: CurveProjective>() {
         t4.add_assign_mixed(&t2.into_affine());
         assert!(t4.is_zero());
 
-        t1.negate();
-        assert_eq!(t1, t2);
+        assert_eq!(t1.neg(), t2);
     }
 }
 
@@ -440,7 +438,7 @@ fn random_encoding_tests<G: CurveAffine>() {
         let de_compressed = compressed.into_affine().unwrap();
         assert_eq!(de_compressed, r);
 
-        r.negate();
+        r = r.neg();
 
         let compressed = r.into_compressed();
         let de_compressed = compressed.into_affine().unwrap();
