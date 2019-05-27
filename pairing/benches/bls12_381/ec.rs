@@ -2,6 +2,7 @@ pub(crate) mod g1 {
     use criterion::{criterion_group, Criterion};
     use rand_core::SeedableRng;
     use rand_xorshift::XorShiftRng;
+    use std::ops::AddAssign;
 
     use ff::Field;
     use group::CurveProjective;
@@ -88,6 +89,7 @@ pub(crate) mod g2 {
     use criterion::{criterion_group, Criterion};
     use rand_core::SeedableRng;
     use rand_xorshift::XorShiftRng;
+    use std::ops::AddAssign;
 
     use ff::Field;
     use group::CurveProjective;

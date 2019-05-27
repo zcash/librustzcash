@@ -5,6 +5,7 @@ use ff::{PrimeField, PrimeFieldDecodingError, ScalarEngine, SqrtField};
 use rand::RngCore;
 use std::error::Error;
 use std::fmt;
+use std::ops::{Add, AddAssign, Sub, SubAssign};
 
 pub mod tests;
 
@@ -14,7 +15,24 @@ pub use self::wnaf::Wnaf;
 /// Projective representation of an elliptic curve point guaranteed to be
 /// in the correct prime order subgroup.
 pub trait CurveProjective:
-    PartialEq + Eq + Sized + Copy + Clone + Send + Sync + fmt::Debug + fmt::Display + 'static
+    PartialEq
+    + Eq
+    + Sized
+    + Copy
+    + Clone
+    + Send
+    + Sync
+    + fmt::Debug
+    + fmt::Display
+    + 'static
+    + Add<Output = Self>
+    + Sub<Output = Self>
+    + for<'a> Add<&'a Self, Output = Self>
+    + for<'a> Sub<&'a Self, Output = Self>
+    + AddAssign
+    + SubAssign
+    + for<'a> AddAssign<&'a Self>
+    + for<'a> SubAssign<&'a Self>
 {
     type Engine: ScalarEngine<Fr = Self::Scalar>;
     type Scalar: PrimeField + SqrtField;
@@ -43,16 +61,6 @@ pub trait CurveProjective:
 
     /// Doubles this element.
     fn double(&mut self);
-
-    /// Adds another element to this element.
-    fn add_assign(&mut self, other: &Self);
-
-    /// Subtracts another element from this element.
-    fn sub_assign(&mut self, other: &Self) {
-        let mut tmp = *other;
-        tmp.negate();
-        self.add_assign(&tmp);
-    }
 
     /// Adds an affine element to this element.
     fn add_assign_mixed(&mut self, other: &Self::Affine);

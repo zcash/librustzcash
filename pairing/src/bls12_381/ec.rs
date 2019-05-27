@@ -188,6 +188,155 @@ macro_rules! curve_impl {
             }
         }
 
+        impl<'r> ::std::ops::Add<&'r $projective> for $projective {
+            type Output = Self;
+
+            #[inline]
+            fn add(self, other: &Self) -> Self {
+                let mut ret = self;
+                ret.add_assign(other);
+                ret
+            }
+        }
+
+        impl ::std::ops::Add for $projective {
+            type Output = Self;
+
+            #[inline]
+            fn add(self, other: Self) -> Self {
+                self + &other
+            }
+        }
+
+        impl<'r> ::std::ops::AddAssign<&'r $projective> for $projective {
+            fn add_assign(&mut self, other: &Self) {
+                if self.is_zero() {
+                    *self = *other;
+                    return;
+                }
+
+                if other.is_zero() {
+                    return;
+                }
+
+                // http://www.hyperelliptic.org/EFD/g1p/auto-shortw-jacobian-0.html#addition-add-2007-bl
+
+                // Z1Z1 = Z1^2
+                let z1z1 = self.z.square();
+
+                // Z2Z2 = Z2^2
+                let z2z2 = other.z.square();
+
+                // U1 = X1*Z2Z2
+                let mut u1 = self.x;
+                u1.mul_assign(&z2z2);
+
+                // U2 = X2*Z1Z1
+                let mut u2 = other.x;
+                u2.mul_assign(&z1z1);
+
+                // S1 = Y1*Z2*Z2Z2
+                let mut s1 = self.y;
+                s1.mul_assign(&other.z);
+                s1.mul_assign(&z2z2);
+
+                // S2 = Y2*Z1*Z1Z1
+                let mut s2 = other.y;
+                s2.mul_assign(&self.z);
+                s2.mul_assign(&z1z1);
+
+                if u1 == u2 && s1 == s2 {
+                    // The two points are equal, so we double.
+                    self.double();
+                } else {
+                    // If we're adding -a and a together, self.z becomes zero as H becomes zero.
+
+                    // H = U2-U1
+                    let mut h = u2;
+                    h.sub_assign(&u1);
+
+                    // I = (2*H)^2
+                    let i = h.double().square();
+
+                    // J = H*I
+                    let mut j = h;
+                    j.mul_assign(&i);
+
+                    // r = 2*(S2-S1)
+                    let mut r = s2;
+                    r.sub_assign(&s1);
+                    r = r.double();
+
+                    // V = U1*I
+                    let mut v = u1;
+                    v.mul_assign(&i);
+
+                    // X3 = r^2 - J - 2*V
+                    self.x = r.square();
+                    self.x.sub_assign(&j);
+                    self.x.sub_assign(&v);
+                    self.x.sub_assign(&v);
+
+                    // Y3 = r*(V - X3) - 2*S1*J
+                    self.y = v;
+                    self.y.sub_assign(&self.x);
+                    self.y.mul_assign(&r);
+                    s1.mul_assign(&j); // S1 = S1 * J * 2
+                    s1 = s1.double();
+                    self.y.sub_assign(&s1);
+
+                    // Z3 = ((Z1+Z2)^2 - Z1Z1 - Z2Z2)*H
+                    self.z.add_assign(&other.z);
+                    self.z = self.z.square();
+                    self.z.sub_assign(&z1z1);
+                    self.z.sub_assign(&z2z2);
+                    self.z.mul_assign(&h);
+                }
+            }
+        }
+
+        impl ::std::ops::AddAssign for $projective {
+            #[inline]
+            fn add_assign(&mut self, other: Self) {
+                self.add_assign(&other);
+            }
+        }
+
+        impl<'r> ::std::ops::Sub<&'r $projective> for $projective {
+            type Output = Self;
+
+            #[inline]
+            fn sub(self, other: &Self) -> Self {
+                let mut ret = self;
+                ret.sub_assign(other);
+                ret
+            }
+        }
+
+        impl ::std::ops::Sub for $projective {
+            type Output = Self;
+
+            #[inline]
+            fn sub(self, other: Self) -> Self {
+                self - &other
+            }
+        }
+
+        impl<'r> ::std::ops::SubAssign<&'r $projective> for $projective {
+            fn sub_assign(&mut self, other: &Self) {
+                let mut tmp = *other;
+                tmp.negate();
+                self.add_assign(&tmp);
+            }
+        }
+
+        impl ::std::ops::SubAssign for $projective {
+            #[inline]
+            fn sub_assign(&mut self, other: Self) {
+                self.sub_assign(&other);
+            }
+        }
+
         impl CurveProjective for $projective {
             type Engine = Bls12;
             type Scalar = $scalarfield;
@@ -340,91 +489,6 @@ macro_rules! curve_impl {
                 self.y.sub_assign(&c);
             }
 
-            fn add_assign(&mut self, other: &Self) {
-                if self.is_zero() {
-                    *self = *other;
-                    return;
-                }
-
-                if other.is_zero() {
-                    return;
-                }
-
-                // http://www.hyperelliptic.org/EFD/g1p/auto-shortw-jacobian-0.html#addition-add-2007-bl
-
-                // Z1Z1 = Z1^2
-                let z1z1 = self.z.square();
-
-                // Z2Z2 = Z2^2
-                let z2z2 = other.z.square();
-
-                // U1 = X1*Z2Z2
-                let mut u1 = self.x;
-                u1.mul_assign(&z2z2);
-
-                // U2 = X2*Z1Z1
-                let mut u2 = other.x;
-                u2.mul_assign(&z1z1);
-
-                // S1 = Y1*Z2*Z2Z2
-                let mut s1 = self.y;
-                s1.mul_assign(&other.z);
-                s1.mul_assign(&z2z2);
-
-                // S2 = Y2*Z1*Z1Z1
-                let mut s2 = other.y;
-                s2.mul_assign(&self.z);
-                s2.mul_assign(&z1z1);
-
-                if u1 == u2 && s1 == s2 {
-                    // The two points are equal, so we double.
-                    self.double();
-                } else {
-                    // If we're adding -a and a together, self.z becomes zero as H becomes zero.
-
-                    // H = U2-U1
-                    let mut h = u2;
-                    h.sub_assign(&u1);
-
-                    // I = (2*H)^2
-                    let i = h.double().square();
-
-                    // J = H*I
-                    let mut j = h;
-                    j.mul_assign(&i);
-
-                    // r = 2*(S2-S1)
-                    let mut r = s2;
-                    r.sub_assign(&s1);
-                    r = r.double();
-
-                    // V = U1*I
-                    let mut v = u1;
-                    v.mul_assign(&i);
-
-                    // X3 = r^2 - J - 2*V
-                    self.x = r.square();
-                    self.x.sub_assign(&j);
-                    self.x.sub_assign(&v);
-                    self.x.sub_assign(&v);
-
-                    // Y3 = r*(V - X3) - 2*S1*J
-                    self.y = v;
-                    self.y.sub_assign(&self.x);
-                    self.y.mul_assign(&r);
-                    s1.mul_assign(&j); // S1 = S1 * J * 2
-                    s1 = s1.double();
-                    self.y.sub_assign(&s1);
-
-                    // Z3 = ((Z1+Z2)^2 - Z1Z1 - Z2Z2)*H
-                    self.z.add_assign(&other.z);
-                    self.z = self.z.square();
-                    self.z.sub_assign(&z1z1);
-                    self.z.sub_assign(&z2z2);
-                    self.z.mul_assign(&h);
-                }
-            }
-
             fn add_assign_mixed(&mut self, other: &Self::Affine) {
                 if other.is_zero() {
                     return;
@@ -521,7 +585,7 @@ macro_rules! curve_impl {
                     }
 
                     if i {
-                        res.add_assign(self);
+                        res.add_assign(&*self);
                     }
                 }
 
