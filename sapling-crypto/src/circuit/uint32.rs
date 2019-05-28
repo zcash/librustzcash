@@ -656,9 +656,9 @@ mod test {
             for i in 0..60 {
                 let num = rng.gen();
                 let a = UInt32::constant(num).shr(i);
-                let b = UInt32::constant(num >> i);
+                let b = UInt32::constant(num.wrapping_shr(i as u32));
 
-                assert_eq!(a.value.unwrap(), num >> i);
+                assert_eq!(a.value.unwrap(), num.wrapping_shr(i as u32));
 
                 assert_eq!(a.bits.len(), b.bits.len());
                 for (a, b) in a.bits.iter().zip(b.bits.iter()) {
