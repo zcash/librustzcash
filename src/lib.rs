@@ -252,6 +252,16 @@ impl AffineNielsPoint {
     }
 }
 
+impl<'a, 'b> Mul<&'b Fr> for &'a AffineNielsPoint {
+    type Output = ExtendedPoint;
+
+    fn mul(self, other: &'b Fr) -> ExtendedPoint {
+        self.multiply(&other.into_bytes())
+    }
+}
+
+impl_binops_multiplicative_mixed!(AffineNielsPoint, Fr, ExtendedPoint);
+
 impl ConditionallySelectable for AffineNielsPoint {
     fn conditional_select(a: &Self, b: &Self, choice: Choice) -> Self {
         AffineNielsPoint {
@@ -325,6 +335,16 @@ impl ExtendedNielsPoint {
         self.multiply(by)
     }
 }
+
+impl<'a, 'b> Mul<&'b Fr> for &'a ExtendedNielsPoint {
+    type Output = ExtendedPoint;
+
+    fn mul(self, other: &'b Fr) -> ExtendedPoint {
+        self.multiply(&other.into_bytes())
+    }
+}
+
+impl_binops_multiplicative_mixed!(ExtendedNielsPoint, Fr, ExtendedPoint);
 
 // `d = -(10240/10241)`
 const EDWARDS_D: Fq = Fq::from_raw([
@@ -1198,6 +1218,17 @@ fn test_mul_consistency() {
         ]),
     }).mul_by_cofactor();
     assert_eq!(p * c, (p * a) * b);
+
+    // Test Mul implemented on ExtendedNielsPoint
+    assert_eq!(p * c, (p.to_niels() * a) * b);
+    assert_eq!(p.to_niels() * c, (p * a) * b);
+    assert_eq!(p.to_niels() * c, (p.to_niels() * a) * b);
+
+    // Test Mul implemented on AffineNielsPoint
+    let p_affine_niels = AffinePoint::from(p).to_niels();
+    assert_eq!(p * c, (p_affine_niels * a) * b);
+    assert_eq!(p_affine_niels * c, (p * a) * b);
+    assert_eq!(p_affine_niels * c, (p_affine_niels * a) * b);
 }
 
 #[test]
