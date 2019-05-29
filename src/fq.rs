@@ -109,14 +109,7 @@ impl<'a, 'b> Add<&'b Fq> for &'a Fq {
 
     #[inline]
     fn add(self, rhs: &'b Fq) -> Fq {
-        let (d0, carry) = adc(self.0[0], rhs.0[0], 0);
-        let (d1, carry) = adc(self.0[1], rhs.0[1], carry);
-        let (d2, carry) = adc(self.0[2], rhs.0[2], carry);
-        let (d3, _) = adc(self.0[3], rhs.0[3], carry);
-
-        // Attempt to subtract the modulus, to ensure the value
-        // is smaller than the modulus.
-        Fq([d0, d1, d2, d3]) - &MODULUS
+        self.field_add(rhs)
     }
 }
 
@@ -554,7 +547,7 @@ impl Fq {
     }
 
     #[inline]
-    const fn multiply(&self, rhs: &Self) -> Self {
+    pub(crate) const fn multiply(&self, rhs: &Self) -> Self {
         // Schoolbook multiplication
 
         let (r0, carry) = mac(0, self.0[0], rhs.0[0], 0);
@@ -581,7 +574,7 @@ impl Fq {
     }
 
     #[inline]
-    const fn subtract(&self, rhs: &Self) -> Self {
+    pub(crate) const fn subtract(&self, rhs: &Self) -> Self {
         let (d0, borrow) = sbb(self.0[0], rhs.0[0], 0);
         let (d1, borrow) = sbb(self.0[1], rhs.0[1], borrow);
         let (d2, borrow) = sbb(self.0[2], rhs.0[2], borrow);
@@ -595,6 +588,18 @@ impl Fq {
         let (d3, _) = adc(d3, MODULUS.0[3] & borrow, carry);
 
         Fq([d0, d1, d2, d3])
+    }
+
+    #[inline]
+    pub(crate) const fn field_add(&self, rhs: &Self) -> Self {
+        let (d0, carry) = adc(self.0[0], rhs.0[0], 0);
+        let (d1, carry) = adc(self.0[1], rhs.0[1], carry);
+        let (d2, carry) = adc(self.0[2], rhs.0[2], carry);
+        let (d3, _) = adc(self.0[3], rhs.0[3], carry);
+
+        // Attempt to subtract the modulus, to ensure the value
+        // is smaller than the modulus.
+        Fq([d0, d1, d2, d3]).subtract(&MODULUS)
     }
 }
 
@@ -687,7 +692,8 @@ fn test_from_bytes() {
         Fq::from_bytes([
             0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
             0, 0, 0
-        ]).unwrap(),
+        ])
+        .unwrap(),
         Fq::zero()
     );
 
@@ -695,7 +701,8 @@ fn test_from_bytes() {
         Fq::from_bytes([
             1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
             0, 0, 0
-        ]).unwrap(),
+        ])
+        .unwrap(),
         Fq::one()
     );
 
@@ -703,7 +710,8 @@ fn test_from_bytes() {
         Fq::from_bytes([
             254, 255, 255, 255, 1, 0, 0, 0, 2, 72, 3, 0, 250, 183, 132, 88, 245, 79, 188, 236, 239,
             79, 140, 153, 111, 5, 197, 172, 89, 177, 36, 24
-        ]).unwrap(),
+        ])
+        .unwrap(),
         R2
     );
 
@@ -712,8 +720,10 @@ fn test_from_bytes() {
         Fq::from_bytes([
             0, 0, 0, 0, 255, 255, 255, 255, 254, 91, 254, 255, 2, 164, 189, 83, 5, 216, 161, 9, 8,
             216, 57, 51, 72, 125, 157, 41, 83, 167, 237, 115
-        ]).is_some()
-            .unwrap_u8() == 1
+        ])
+        .is_some()
+        .unwrap_u8()
+            == 1
     );
 
     // modulus is invalid
@@ -721,8 +731,10 @@ fn test_from_bytes() {
         Fq::from_bytes([
             1, 0, 0, 0, 255, 255, 255, 255, 254, 91, 254, 255, 2, 164, 189, 83, 5, 216, 161, 9, 8,
             216, 57, 51, 72, 125, 157, 41, 83, 167, 237, 115
-        ]).is_none()
-            .unwrap_u8() == 1
+        ])
+        .is_none()
+        .unwrap_u8()
+            == 1
     );
 
     // Anything larger than the modulus is invalid
@@ -730,22 +742,28 @@ fn test_from_bytes() {
         Fq::from_bytes([
             2, 0, 0, 0, 255, 255, 255, 255, 254, 91, 254, 255, 2, 164, 189, 83, 5, 216, 161, 9, 8,
             216, 57, 51, 72, 125, 157, 41, 83, 167, 237, 115
-        ]).is_none()
-            .unwrap_u8() == 1
+        ])
+        .is_none()
+        .unwrap_u8()
+            == 1
     );
     assert!(
         Fq::from_bytes([
             1, 0, 0, 0, 255, 255, 255, 255, 254, 91, 254, 255, 2, 164, 189, 83, 5, 216, 161, 9, 8,
             216, 58, 51, 72, 125, 157, 41, 83, 167, 237, 115
-        ]).is_none()
-            .unwrap_u8() == 1
+        ])
+        .is_none()
+        .unwrap_u8()
+            == 1
     );
     assert!(
         Fq::from_bytes([
             1, 0, 0, 0, 255, 255, 255, 255, 254, 91, 254, 255, 2, 164, 189, 83, 5, 216, 161, 9, 8,
             216, 57, 51, 72, 125, 157, 41, 83, 167, 237, 116
-        ]).is_none()
-            .unwrap_u8() == 1
+        ])
+        .is_none()
+        .unwrap_u8()
+            == 1
     );
 }
 
