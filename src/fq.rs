@@ -200,7 +200,7 @@ impl Fq {
     /// Attempts to convert a little-endian byte representation of
     /// a field element into an element of `Fq`, failing if the input
     /// is not canonical (is not smaller than q).
-    pub fn from_bytes(bytes: [u8; 32]) -> CtOption<Fq> {
+    pub fn from_bytes(bytes: &[u8; 32]) -> CtOption<Fq> {
         let mut tmp = Fq([0, 0, 0, 0]);
 
         tmp.0[0] = LittleEndian::read_u64(&bytes[0..8]);
@@ -244,7 +244,7 @@ impl Fq {
 
     /// Converts a 512-bit little endian integer into
     /// an element of Fq by reducing modulo q.
-    pub fn from_bytes_wide(bytes: [u8; 64]) -> Fq {
+    pub fn from_bytes_wide(bytes: &[u8; 64]) -> Fq {
         Fq::from_u512([
             LittleEndian::read_u64(&bytes[0..8]),
             LittleEndian::read_u64(&bytes[8..16]),
@@ -409,16 +409,15 @@ impl Fq {
             }
         }
         // found using https://github.com/kwantam/addchain
-        let t10 = *self;
-        let t0 = t10.square();
-        let mut t1 = t0 * &t10;
+        let mut t0 = self.square();
+        let mut t1 = t0 * self;
         let mut t16 = t0.square();
         let mut t6 = t16.square();
-        let t5 = t6 * &t0;
-        let mut t0 = t6 * &t16;
-        let t12 = t5 * &t16;
+        let mut t5 = t6 * &t0;
+        t0 = t6 * &t16;
+        let mut t12 = t5 * &t16;
         let mut t2 = t6.square();
-        let t7 = t5 * &t6;
+        let mut t7 = t5 * &t6;
         let mut t15 = t0 * &t5;
         let mut t17 = t12.square();
         t1.mul_assign(&t17);
@@ -426,12 +425,12 @@ impl Fq {
         let t8 = t1 * &t17;
         let t4 = t8 * &t2;
         let t9 = t8 * &t7;
-        let t7 = t4 * &t5;
+        t7 = t4 * &t5;
         let t11 = t4 * &t17;
-        let t5 = t9 * &t17;
+        t5 = t9 * &t17;
         let t14 = t7 * &t15;
         let t13 = t11 * &t12;
-        let t12 = t11 * &t17;
+        t12 = t11 * &t17;
         t15.mul_assign(&t12);
         t16.mul_assign(&t15);
         t3.mul_assign(&t16);
@@ -458,7 +457,7 @@ impl Fq {
         square_assign_multi(&mut t0, 8);
         t0.mul_assign(&t8);
         square_assign_multi(&mut t0, 8);
-        t0.mul_assign(&t10);
+        t0.mul_assign(self);
         square_assign_multi(&mut t0, 14);
         t0.mul_assign(&t9);
         square_assign_multi(&mut t0, 10);
@@ -689,7 +688,7 @@ fn test_into_bytes() {
 #[test]
 fn test_from_bytes() {
     assert_eq!(
-        Fq::from_bytes([
+        Fq::from_bytes(&[
             0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
             0, 0, 0
         ])
@@ -698,7 +697,7 @@ fn test_from_bytes() {
     );
 
     assert_eq!(
-        Fq::from_bytes([
+        Fq::from_bytes(&[
             1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
             0, 0, 0
         ])
@@ -707,7 +706,7 @@ fn test_from_bytes() {
     );
 
     assert_eq!(
-        Fq::from_bytes([
+        Fq::from_bytes(&[
             254, 255, 255, 255, 1, 0, 0, 0, 2, 72, 3, 0, 250, 183, 132, 88, 245, 79, 188, 236, 239,
             79, 140, 153, 111, 5, 197, 172, 89, 177, 36, 24
         ])
@@ -717,7 +716,7 @@ fn test_from_bytes() {
 
     // -1 should work
     assert!(
-        Fq::from_bytes([
+        Fq::from_bytes(&[
             0, 0, 0, 0, 255, 255, 255, 255, 254, 91, 254, 255, 2, 164, 189, 83, 5, 216, 161, 9, 8,
             216, 57, 51, 72, 125, 157, 41, 83, 167, 237, 115
         ])
@@ -728,7 +727,7 @@ fn test_from_bytes() {
 
     // modulus is invalid
     assert!(
-        Fq::from_bytes([
+        Fq::from_bytes(&[
             1, 0, 0, 0, 255, 255, 255, 255, 254, 91, 254, 255, 2, 164, 189, 83, 5, 216, 161, 9, 8,
             216, 57, 51, 72, 125, 157, 41, 83, 167, 237, 115
         ])
@@ -739,7 +738,7 @@ fn test_from_bytes() {
 
     // Anything larger than the modulus is invalid
     assert!(
-        Fq::from_bytes([
+        Fq::from_bytes(&[
             2, 0, 0, 0, 255, 255, 255, 255, 254, 91, 254, 255, 2, 164, 189, 83, 5, 216, 161, 9, 8,
             216, 57, 51, 72, 125, 157, 41, 83, 167, 237, 115
         ])
@@ -748,7 +747,7 @@ fn test_from_bytes() {
             == 1
     );
     assert!(
-        Fq::from_bytes([
+        Fq::from_bytes(&[
             1, 0, 0, 0, 255, 255, 255, 255, 254, 91, 254, 255, 2, 164, 189, 83, 5, 216, 161, 9, 8,
             216, 58, 51, 72, 125, 157, 41, 83, 167, 237, 115
         ])
@@ -757,7 +756,7 @@ fn test_from_bytes() {
             == 1
     );
     assert!(
-        Fq::from_bytes([
+        Fq::from_bytes(&[
             1, 0, 0, 0, 255, 255, 255, 255, 254, 91, 254, 255, 2, 164, 189, 83, 5, 216, 161, 9, 8,
             216, 57, 51, 72, 125, 157, 41, 83, 167, 237, 116
         ])
@@ -807,7 +806,7 @@ fn test_from_u512_max() {
 fn test_from_bytes_wide_r2() {
     assert_eq!(
         R2,
-        Fq::from_bytes_wide([
+        Fq::from_bytes_wide(&[
             254, 255, 255, 255, 1, 0, 0, 0, 2, 72, 3, 0, 250, 183, 132, 88, 245, 79, 188, 236, 239,
             79, 140, 153, 111, 5, 197, 172, 89, 177, 36, 24, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
             0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
@@ -819,7 +818,7 @@ fn test_from_bytes_wide_r2() {
 fn test_from_bytes_wide_negative_one() {
     assert_eq!(
         -&Fq::one(),
-        Fq::from_bytes_wide([
+        Fq::from_bytes_wide(&[
             0, 0, 0, 0, 255, 255, 255, 255, 254, 91, 254, 255, 2, 164, 189, 83, 5, 216, 161, 9, 8,
             216, 57, 51, 72, 125, 157, 41, 83, 167, 237, 115, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
             0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
@@ -836,7 +835,7 @@ fn test_from_bytes_wide_maximum() {
             0xda44ec81daf9a422,
             0x5605aa601c162e79
         ]),
-        Fq::from_bytes_wide([0xff; 64])
+        Fq::from_bytes_wide(&[0xff; 64])
     );
 }
 

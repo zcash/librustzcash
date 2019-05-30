@@ -105,34 +105,40 @@ macro_rules! impl_binops_additive {
     };
 }
 
-macro_rules! impl_binops_multiplicative {
-    ($lhs:ident, $rhs:ident) => {
+macro_rules! impl_binops_multiplicative_mixed {
+    ($lhs:ident, $rhs:ident, $output:ident) => {
         impl<'b> Mul<&'b $rhs> for $lhs {
-            type Output = $lhs;
+            type Output = $output;
 
             #[inline]
-            fn mul(self, rhs: &'b $rhs) -> $lhs {
+            fn mul(self, rhs: &'b $rhs) -> $output {
                 &self * rhs
             }
         }
 
         impl<'a> Mul<$rhs> for &'a $lhs {
-            type Output = $lhs;
+            type Output = $output;
 
             #[inline]
-            fn mul(self, rhs: $rhs) -> $lhs {
+            fn mul(self, rhs: $rhs) -> $output {
                 self * &rhs
             }
         }
 
         impl Mul<$rhs> for $lhs {
-            type Output = $lhs;
+            type Output = $output;
 
             #[inline]
-            fn mul(self, rhs: $rhs) -> $lhs {
+            fn mul(self, rhs: $rhs) -> $output {
                 &self * &rhs
             }
         }
+    };
+}
+
+macro_rules! impl_binops_multiplicative {
+    ($lhs:ident, $rhs:ident) => {
+        impl_binops_multiplicative_mixed!($lhs, $rhs, $lhs);
 
         impl MulAssign<$rhs> for $lhs {
             #[inline]

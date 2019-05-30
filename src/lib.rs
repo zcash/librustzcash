@@ -176,13 +176,13 @@ impl From<AffinePoint> for ExtendedPoint {
     }
 }
 
-impl From<ExtendedPoint> for AffinePoint {
+impl<'a> From<&'a ExtendedPoint> for AffinePoint {
     /// Constructs an affine point from an extended point
     /// using the map `(U, V, Z, T1, T2) => (U/Z, V/Z)`
     /// as Z is always nonzero. **This requires a field inversion
     /// and so it is recommended to perform these in a batch
     /// using [`batch_normalize`](crate::batch_normalize) instead.**
-    fn from(extended: ExtendedPoint) -> AffinePoint {
+    fn from(extended: &'a ExtendedPoint) -> AffinePoint {
         // Z coordinate is always nonzero, so this is
         // its inverse.
         let zinv = extended.z.invert().unwrap();
@@ -191,6 +191,12 @@ impl From<ExtendedPoint> for AffinePoint {
             u: extended.u * &zinv,
             v: extended.v * &zinv,
         }
+    }
+}
+
+impl From<ExtendedPoint> for AffinePoint {
+    fn from(extended: ExtendedPoint) -> AffinePoint {
+        AffinePoint::from(&extended)
     }
 }
 
@@ -213,7 +219,48 @@ impl AffineNielsPoint {
             t2d: Fq::zero(),
         }
     }
+
+    #[inline]
+    fn multiply(&self, by: &[u8; 32]) -> ExtendedPoint {
+        let zero = AffineNielsPoint::identity();
+
+        let mut acc = ExtendedPoint::identity();
+
+        // This is a simple double-and-add implementation of point
+        // multiplication, moving from most significant to least
+        // significant bit of the scalar.
+        //
+        // We skip the leading four bits because they're always
+        // unset for Fr.
+        for bit in by
+            .iter()
+            .rev()
+            .flat_map(|byte| (0..8).rev().map(move |i| Choice::from((byte >> i) & 1u8)))
+            .skip(4)
+        {
+            acc = acc.double();
+            acc += AffineNielsPoint::conditional_select(&zero, &self, bit);
+        }
+
+        acc
+    }
+
+    /// Multiplies this point by the specific little-endian bit pattern in the
+    /// given byte array, ignoring the highest four bits.
+    pub fn multiply_bits(&self, by: &[u8; 32]) -> ExtendedPoint {
+        self.multiply(by)
+    }
 }
+
+impl<'a, 'b> Mul<&'b Fr> for &'a AffineNielsPoint {
+    type Output = ExtendedPoint;
+
+    fn mul(self, other: &'b Fr) -> ExtendedPoint {
+        self.multiply(&other.into_bytes())
+    }
+}
+
+impl_binops_multiplicative_mixed!(AffineNielsPoint, Fr, ExtendedPoint);
 
 impl ConditionallySelectable for AffineNielsPoint {
     fn conditional_select(a: &Self, b: &Self, choice: Choice) -> Self {
@@ -256,7 +303,48 @@ impl ExtendedNielsPoint {
             t2d: Fq::zero(),
         }
     }
+
+    #[inline]
+    fn multiply(&self, by: &[u8; 32]) -> ExtendedPoint {
+        let zero = ExtendedNielsPoint::identity();
+
+        let mut acc = ExtendedPoint::identity();
+
+        // This is a simple double-and-add implementation of point
+        // multiplication, moving from most significant to least
+        // significant bit of the scalar.
+        //
+        // We skip the leading four bits because they're always
+        // unset for Fr.
+        for bit in by
+            .iter()
+            .rev()
+            .flat_map(|byte| (0..8).rev().map(move |i| Choice::from((byte >> i) & 1u8)))
+            .skip(4)
+        {
+            acc = acc.double();
+            acc += ExtendedNielsPoint::conditional_select(&zero, &self, bit);
+        }
+
+        acc
+    }
+
+    /// Multiplies this point by the specific little-endian bit pattern in the
+    /// given byte array, ignoring the highest four bits.
+    pub fn multiply_bits(&self, by: &[u8; 32]) -> ExtendedPoint {
+        self.multiply(by)
+    }
 }
+
+impl<'a, 'b> Mul<&'b Fr> for &'a ExtendedNielsPoint {
+    type Output = ExtendedPoint;
+
+    fn mul(self, other: &'b Fr) -> ExtendedPoint {
+        self.multiply(&other.into_bytes())
+    }
+}
+
+impl_binops_multiplicative_mixed!(ExtendedNielsPoint, Fr, ExtendedPoint);
 
 // `d = -(10240/10241)`
 const EDWARDS_D: Fq = Fq::from_raw([
@@ -332,7 +420,7 @@ impl AffinePoint {
         b[31] &= 0b0111_1111;
 
         // Interpret what remains as the v-coordinate
-        Fq::from_bytes(b).and_then(|v| {
+        Fq::from_bytes(&b).and_then(|v| {
             // -u^2 + v^2 = 1 + d.u^2.v^2
             // -u^2 = 1 + d.u^2.v^2 - v^2    (rearrange)
             // -u^2 - d.u^2.v^2 = 1 - v^2    (rearrange)
@@ -551,28 +639,7 @@ impl ExtendedPoint {
 
     #[inline]
     fn multiply(self, by: &[u8; 32]) -> Self {
-        let zero = ExtendedPoint::identity().to_niels();
-        let base = self.to_niels();
-
-        let mut acc = ExtendedPoint::identity();
-
-        // This is a simple double-and-add implementation of point
-        // multiplication, moving from most significant to least
-        // significant bit of the scalar.
-        //
-        // We skip the leading four bits because they're always
-        // unset for Fr.
-        for bit in by
-            .iter()
-            .rev()
-            .flat_map(|byte| (0..8).rev().map(move |i| Choice::from((byte >> i) & 1u8)))
-            .skip(4)
-        {
-            acc = acc.double();
-            acc = acc + ExtendedNielsPoint::conditional_select(&zero, &base, bit);
-        }
-
-        acc
+        self.to_niels().multiply(by)
     }
 
     /// This is only for debugging purposes and not
@@ -1159,6 +1226,17 @@ fn test_mul_consistency() {
     })
     .mul_by_cofactor();
     assert_eq!(p * c, (p * a) * b);
+
+    // Test Mul implemented on ExtendedNielsPoint
+    assert_eq!(p * c, (p.to_niels() * a) * b);
+    assert_eq!(p.to_niels() * c, (p * a) * b);
+    assert_eq!(p.to_niels() * c, (p.to_niels() * a) * b);
+
+    // Test Mul implemented on AffineNielsPoint
+    let p_affine_niels = AffinePoint::from(p).to_niels();
+    assert_eq!(p * c, (p_affine_niels * a) * b);
+    assert_eq!(p_affine_niels * c, (p * a) * b);
+    assert_eq!(p_affine_niels * c, (p_affine_niels * a) * b);
 }
 
 #[test]
