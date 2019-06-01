@@ -829,7 +829,8 @@ impl CompletedPoint {
     ///
     /// The resulting T coordinate is utvz/zt = uv, and so
     /// T1 = u, T2 = v, without loss of generality.
-    fn into_extended(&self) -> ExtendedPoint {
+    #[inline]
+    fn into_extended(self) -> ExtendedPoint {
         ExtendedPoint {
             u: &self.u * &self.t,
             v: &self.v * &self.z,
