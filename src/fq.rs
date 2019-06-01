@@ -15,7 +15,7 @@ pub struct Fq(pub(crate) [u64; 4]);
 
 impl fmt::Debug for Fq {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let tmp = self.into_bytes();
+        let tmp = self.to_bytes();
         write!(f, "0x")?;
         for &b in tmp.iter().rev() {
             write!(f, "{:02x}", b)?;
@@ -228,7 +228,7 @@ impl Fq {
 
     /// Converts an element of `Fq` into a byte representation in
     /// little-endian byte order.
-    pub fn into_bytes(&self) -> [u8; 32] {
+    pub fn to_bytes(&self) -> [u8; 32] {
         // Turn into canonical form by computing
         // (a.R) / R = a
         let tmp = Fq::montgomery_reduce(self.0[0], self.0[1], self.0[2], self.0[3], 0, 0, 0, 0);
@@ -604,7 +604,7 @@ impl Fq {
 
 impl<'a> From<&'a Fq> for [u8; 32] {
     fn from(value: &'a Fq) -> [u8; 32] {
-        value.into_bytes()
+        value.to_bytes()
     }
 }
 
@@ -651,9 +651,9 @@ fn test_equality() {
 }
 
 #[test]
-fn test_into_bytes() {
+fn test_to_bytes() {
     assert_eq!(
-        Fq::zero().into_bytes(),
+        Fq::zero().to_bytes(),
         [
             0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
             0, 0, 0
@@ -661,7 +661,7 @@ fn test_into_bytes() {
     );
 
     assert_eq!(
-        Fq::one().into_bytes(),
+        Fq::one().to_bytes(),
         [
             1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
             0, 0, 0
@@ -669,7 +669,7 @@ fn test_into_bytes() {
     );
 
     assert_eq!(
-        R2.into_bytes(),
+        R2.to_bytes(),
         [
             254, 255, 255, 255, 1, 0, 0, 0, 2, 72, 3, 0, 250, 183, 132, 88, 245, 79, 188, 236, 239,
             79, 140, 153, 111, 5, 197, 172, 89, 177, 36, 24
@@ -677,7 +677,7 @@ fn test_into_bytes() {
     );
 
     assert_eq!(
-        (-&Fq::one()).into_bytes(),
+        (-&Fq::one()).to_bytes(),
         [
             0, 0, 0, 0, 255, 255, 255, 255, 254, 91, 254, 255, 2, 164, 189, 83, 5, 216, 161, 9, 8,
             216, 57, 51, 72, 125, 157, 41, 83, 167, 237, 115
@@ -914,7 +914,7 @@ fn test_multiplication() {
 
         let mut tmp2 = Fq::zero();
         for b in cur
-            .into_bytes()
+            .to_bytes()
             .iter()
             .rev()
             .flat_map(|byte| (0..8).rev().map(move |i| ((byte >> i) & 1u8) == 1u8))
@@ -943,7 +943,7 @@ fn test_squaring() {
 
         let mut tmp2 = Fq::zero();
         for b in cur
-            .into_bytes()
+            .to_bytes()
             .iter()
             .rev()
             .flat_map(|byte| (0..8).rev().map(move |i| ((byte >> i) & 1u8) == 1u8))
