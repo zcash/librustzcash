@@ -256,7 +256,7 @@ impl<'a, 'b> Mul<&'b Fr> for &'a AffineNielsPoint {
     type Output = ExtendedPoint;
 
     fn mul(self, other: &'b Fr) -> ExtendedPoint {
-        self.multiply(&other.into_bytes())
+        self.multiply(&other.to_bytes())
     }
 }
 
@@ -340,7 +340,7 @@ impl<'a, 'b> Mul<&'b Fr> for &'a ExtendedNielsPoint {
     type Output = ExtendedPoint;
 
     fn mul(self, other: &'b Fr) -> ExtendedPoint {
-        self.multiply(&other.into_bytes())
+        self.multiply(&other.to_bytes())
     }
 }
 
@@ -398,9 +398,9 @@ impl AffinePoint {
     }
 
     /// Converts this element into its byte representation.
-    pub fn into_bytes(&self) -> [u8; 32] {
-        let mut tmp = self.v.into_bytes();
-        let u = self.u.into_bytes();
+    pub fn to_bytes(&self) -> [u8; 32] {
+        let mut tmp = self.v.to_bytes();
+        let u = self.u.to_bytes();
 
         // Encode the sign of the u-coordinate in the most
         // significant bit.
@@ -438,7 +438,7 @@ impl AffinePoint {
                 .sqrt()
                 .and_then(|u| {
                     // Fix the sign of `u` if necessary
-                    let flip_sign = Choice::from((u.into_bytes()[0] ^ sign) & 1);
+                    let flip_sign = Choice::from((u.to_bytes()[0] ^ sign) & 1);
                     let u_negated = -u;
                     let final_u = Fq::conditional_select(&u, &u_negated, flip_sign);
 
@@ -659,7 +659,7 @@ impl<'a, 'b> Mul<&'b Fr> for &'a ExtendedPoint {
     type Output = ExtendedPoint;
 
     fn mul(self, other: &'b Fr) -> ExtendedPoint {
-        self.multiply(&other.into_bytes())
+        self.multiply(&other.to_bytes())
     }
 }
 
@@ -829,7 +829,8 @@ impl CompletedPoint {
     ///
     /// The resulting T coordinate is utvz/zt = uv, and so
     /// T1 = u, T2 = v, without loss of generality.
-    fn into_extended(&self) -> ExtendedPoint {
+    #[inline]
+    fn into_extended(self) -> ExtendedPoint {
         ExtendedPoint {
             u: &self.u * &self.t,
             v: &self.v * &self.z,
@@ -1314,7 +1315,7 @@ fn test_serialization_consistency() {
     for expected_serialized in v {
         assert!(p.is_on_curve_vartime());
         let affine = AffinePoint::from(p);
-        let serialized = affine.into_bytes();
+        let serialized = affine.to_bytes();
         let deserialized = AffinePoint::from_bytes(serialized).unwrap();
         assert_eq!(affine, deserialized);
         assert_eq!(expected_serialized, serialized);
