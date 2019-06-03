@@ -221,6 +221,7 @@ mod tests {
         eval_u8!(Some(1), [1, 1]);
         eval_u8!(Some(5), [1, 5]);
 
+        eval_vec!(None as Option<Vec<_>>, [0]);
         eval_vec!(Some(vec![]), [1, 0]);
         eval_vec!(Some(vec![0]), [1, 1, 0]);
         eval_vec!(Some(vec![1]), [1, 1, 1]);

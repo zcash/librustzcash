@@ -90,10 +90,10 @@ impl<Node: Hashable> CommitmentTree<Node> {
     /// Returns the number of notes in the tree.
     pub fn size(&self) -> usize {
         self.parents.iter().enumerate().fold(
-            match (self.left.is_some(), self.right.is_some()) {
-                (false, false) => 0,
-                (true, false) | (false, true) => 1,
-                (true, true) => 2,
+            match (self.left, self.right) {
+                (None, None) => 0,
+                (Some(_), None) | (None, Some(_)) => 1,
+                (Some(_), Some(_)) => 2,
             },
             |acc, (i, p)| {
                 // Treat occupation of parents array as a binary number
