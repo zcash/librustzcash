@@ -1,0 +1,35 @@
+[package]
+authors = [
+    "Sean Bowe <ewillbefull@gmail.com>",
+    "Eirik Ogilvie-Wigley <eowigley@gmail.com>",
+    "Jack Grigg <thestr4d@gmail.com>",
+]
+description = "Implementation of the Jubjub elliptic curve group"
+documentation = "https://docs.rs/jubjub/"
+homepage = "https://github.com/zkcrypto/jubjub"
+license = "MIT/Apache-2.0"
+name = "jubjub"
+repository = "https://github.com/zkcrypto/jubjub"
+version = "0.2.0"
+edition = "2018"
+
+[dependencies.byteorder]
+version = "1"
+default-features = false
+
+[dependencies.subtle]
+version = "2.1"
+default-features = false
+
+[dev-dependencies.rand_core]
+version = "0.4"
+default-features = false
+
+[dev-dependencies.rand_xorshift]
+version = "0.1"
+default-features = false
+
+[features]
+default = ["std"]
+nightly = ["subtle/nightly"]
+std = []
