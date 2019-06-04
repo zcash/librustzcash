@@ -2,7 +2,7 @@
 extern crate lazy_static;
 
 extern crate aes;
-extern crate blake2_rfc;
+extern crate blake2b_simd;
 extern crate byteorder;
 extern crate crypto_api_chachapoly;
 extern crate ff;

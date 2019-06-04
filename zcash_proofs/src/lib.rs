@@ -1,5 +1,5 @@
 extern crate bellman;
-extern crate blake2_rfc;
+extern crate blake2b_simd;
 extern crate byteorder;
 extern crate ff;
 extern crate pairing;

@@ -1,6 +1,6 @@
 //! Implementation of in-band secret distribution for Zcash transactions.
 
-use blake2_rfc::blake2b::{Blake2b, Blake2bResult};
+use blake2b_simd::{Hash as Blake2bHash, Params as Blake2bParams};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use crypto_api_chachapoly::{ChaCha20Ietf, ChachaPolyIetf};
 use ff::{PrimeField, PrimeFieldRepr};
@@ -168,14 +168,15 @@ where
 fn kdf_sapling(
     dhsecret: edwards::Point<Bls12, PrimeOrder>,
     epk: &edwards::Point<Bls12, PrimeOrder>,
-) -> Blake2bResult {
+) -> Blake2bHash {
     let mut input = [0u8; 64];
     dhsecret.write(&mut input[0..32]).unwrap();
     epk.write(&mut input[32..64]).unwrap();
 
-    let mut h = Blake2b::with_params(32, &[], &[], KDF_SAPLING_PERSONALIZATION);
-    h.update(&input);
-    h.finalize()
+    Blake2bParams::new()
+        .hash_length(32)
+        .personal(KDF_SAPLING_PERSONALIZATION)
+        .hash(&input)
 }
 
 /// Sapling PRF^ock.
@@ -186,16 +187,17 @@ fn prf_ock(
     cv: &edwards::Point<Bls12, Unknown>,
     cmu: &Fr,
     epk: &edwards::Point<Bls12, PrimeOrder>,
-) -> Blake2bResult {
+) -> Blake2bHash {
     let mut ock_input = [0u8; 128];
     ock_input[0..32].copy_from_slice(&ovk.0);
     cv.write(&mut ock_input[32..64]).unwrap();
     cmu.into_repr().write_le(&mut ock_input[64..96]).unwrap();
     epk.write(&mut ock_input[96..128]).unwrap();
 
-    let mut h = Blake2b::with_params(32, &[], &[], PRF_OCK_PERSONALIZATION);
-    h.update(&ock_input);
-    h.finalize()
+    Blake2bParams::new()
+        .hash_length(32)
+        .personal(PRF_OCK_PERSONALIZATION)
+        .hash(&ock_input)
 }
 
 /// An API for encrypting Sapling notes.

@@ -320,13 +320,13 @@ pub fn blake2s<E: Engine, CS: ConstraintSystem<E>>(
 
 #[cfg(test)]
 mod test {
+    use blake2s_simd::Params as Blake2sParams;
     use rand::{XorShiftRng, SeedableRng, Rng};
     use pairing::bls12_381::{Bls12};
     use ::circuit::boolean::{Boolean, AllocatedBit};
     use ::circuit::test::TestConstraintSystem;
     use super::blake2s;
     use bellman::{ConstraintSystem};
-    use blake2_rfc::blake2s::Blake2s;
 
     #[test]
     fn test_blank_hash() {
@@ -392,7 +392,7 @@ mod test {
 
         for input_len in (0..32).chain((32..256).filter(|a| a % 8 == 0))
         {
-            let mut h = Blake2s::with_params(32, &[], &[], b"12345678");
+            let mut h = Blake2sParams::new().hash_length(32).personal(b"12345678").to_state();
 
             let data: Vec<u8> = (0..input_len).map(|_| rng.gen()).collect();
 
