@@ -326,26 +326,22 @@ impl SaplingNoteEncryption {
     ) -> [u8; OUT_CIPHERTEXT_SIZE] {
         let key = prf_ock(&self.ovk, &cv, &cmu, &self.epk);
 
-        let mut buf = [0u8; OUT_CIPHERTEXT_SIZE];
-        self.note.pk_d.write(&mut buf[0..32]).unwrap();
+        let mut input = [0u8; OUT_PLAINTEXT_SIZE];
+        self.note.pk_d.write(&mut input[0..32]).unwrap();
         self.esk
             .into_repr()
-            .write_le(&mut buf[32..OUT_PLAINTEXT_SIZE])
+            .write_le(&mut input[32..OUT_PLAINTEXT_SIZE])
             .unwrap();
 
+        let mut output = [0u8; OUT_CIPHERTEXT_SIZE];
         assert_eq!(
             ChachaPolyIetf::aead_cipher()
-                .seal(
-                    &mut buf,
-                    OUT_PLAINTEXT_SIZE,
-                    &[],
-                    key.as_bytes(),
-                    &[0u8; 12]
-                )
+                .seal_to(&mut output, &input, &[], key.as_bytes(), &[0u8; 12])
                 .unwrap(),
             OUT_CIPHERTEXT_SIZE
         );
-        buf
+
+        output
     }
 }
 
