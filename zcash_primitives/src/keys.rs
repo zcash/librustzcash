@@ -1,4 +1,6 @@
-//! Sapling key components
+//! Sapling key components.
+//!
+//! Implements section 4.2.2 of the Zcash Protocol Specification.
 
 use blake2_rfc::blake2b::{Blake2b, Blake2bResult};
 use ff::{PrimeField, PrimeFieldRepr};

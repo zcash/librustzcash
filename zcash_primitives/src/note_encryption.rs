@@ -297,6 +297,8 @@ impl SaplingNoteEncryption {
         let shared_secret = sapling_ka_agree(&self.esk, &self.to.pk_d);
         let key = kdf_sapling(&shared_secret, &self.epk);
 
+        // Note plaintext encoding is defined in section 5.5 of the Zcash Protocol
+        // Specification.
         let mut input = Vec::with_capacity(NOTE_PLAINTEXT_SIZE);
         input.push(1);
         input.extend_from_slice(&self.to.diversifier.0);
