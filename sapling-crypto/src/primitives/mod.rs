@@ -62,6 +62,7 @@ impl<E: JubjubEngine> ProofGenerationKey<E> {
     }
 }
 
+#[derive(Debug)]
 pub struct ViewingKey<E: JubjubEngine> {
     pub ak: edwards::Point<E, PrimeOrder>,
     pub nk: edwards::Point<E, PrimeOrder>
