@@ -27,7 +27,7 @@ pub fn prf_expand_vec(sk: &[u8], ts: &[&[u8]]) -> Blake2bResult {
 }
 
 /// An outgoing viewing key
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct OutgoingViewingKey(pub [u8; 32]);
 
 /// A Sapling expanded spending key
@@ -39,6 +39,7 @@ pub struct ExpandedSpendingKey<E: JubjubEngine> {
 }
 
 /// A Sapling full viewing key
+#[derive(Debug)]
 pub struct FullViewingKey<E: JubjubEngine> {
     pub vk: ViewingKey<E>,
     pub ovk: OutgoingViewingKey,
@@ -134,10 +135,16 @@ impl<E: JubjubEngine> FullViewingKey<E> {
             None => {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidData,
-                    "ak not of prime order",
+                    "ak not in prime-order subgroup",
                 ));
             }
         };
+        if ak == edwards::Point::zero() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "ak not of prime order",
+            ));
+        }
 
         let nk = edwards::Point::<E, Unknown>::read(&mut reader, params)?;
         let nk = match nk.as_prime_order(params) {
@@ -145,7 +152,7 @@ impl<E: JubjubEngine> FullViewingKey<E> {
             None => {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidData,
-                    "nk not of prime order",
+                    "nk not in prime-order subgroup",
                 ));
             }
         };
@@ -172,5 +179,40 @@ impl<E: JubjubEngine> FullViewingKey<E> {
         self.write(&mut result[..])
             .expect("should be able to serialize a FullViewingKey");
         result
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use pairing::bls12_381::Bls12;
+    use sapling_crypto::jubjub::{edwards, FixedGenerators, JubjubParams, PrimeOrder};
+    use std::error::Error;
+
+    use super::FullViewingKey;
+    use crate::JUBJUB;
+
+    #[test]
+    fn ak_must_be_prime_order() {
+        let mut buf = [0; 96];
+        let identity = edwards::Point::<Bls12, PrimeOrder>::zero();
+
+        // Set both ak and nk to the identity.
+        identity.write(&mut buf[0..32]).unwrap();
+        identity.write(&mut buf[32..64]).unwrap();
+
+        // ak is not allowed to be the identity.
+        assert_eq!(
+            FullViewingKey::<Bls12>::read(&buf[..], &JUBJUB)
+                .unwrap_err()
+                .description(),
+            "ak not of prime order"
+        );
+
+        // Set ak to a basepoint.
+        let basepoint = JUBJUB.generator(FixedGenerators::SpendingKeyGenerator);
+        basepoint.write(&mut buf[0..32]).unwrap();
+
+        // nk is allowed to be the identity.
+        assert!(FullViewingKey::<Bls12>::read(&buf[..], &JUBJUB).is_ok());
     }
 }
