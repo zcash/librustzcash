@@ -299,15 +299,18 @@ impl SaplingNoteEncryption {
 
         // Note plaintext encoding is defined in section 5.5 of the Zcash Protocol
         // Specification.
-        let mut input = Vec::with_capacity(NOTE_PLAINTEXT_SIZE);
-        input.push(1);
-        input.extend_from_slice(&self.to.diversifier.0);
-        (&mut input)
+        let mut input = [0; NOTE_PLAINTEXT_SIZE];
+        input[0] = 1;
+        input[1..12].copy_from_slice(&self.to.diversifier.0);
+        (&mut input[12..20])
             .write_u64::<LittleEndian>(self.note.value)
             .unwrap();
-        self.note.r.into_repr().write_le(&mut input).unwrap();
-        input.extend_from_slice(&self.memo.0);
-        assert_eq!(input.len(), NOTE_PLAINTEXT_SIZE);
+        self.note
+            .r
+            .into_repr()
+            .write_le(&mut input[20..COMPACT_NOTE_SIZE])
+            .unwrap();
+        input[COMPACT_NOTE_SIZE..NOTE_PLAINTEXT_SIZE].copy_from_slice(&self.memo.0);
 
         let mut output = [0u8; ENC_CIPHERTEXT_SIZE];
         assert_eq!(
@@ -395,7 +398,7 @@ pub fn try_sapling_note_decryption(
     let shared_secret = sapling_ka_agree(ivk, epk);
     let key = kdf_sapling(&shared_secret, &epk);
 
-    let mut plaintext = vec![0; ENC_CIPHERTEXT_SIZE];
+    let mut plaintext = [0; ENC_CIPHERTEXT_SIZE];
     assert_eq!(
         ChachaPolyIetf::aead_cipher()
             .open_to(
@@ -439,9 +442,8 @@ pub fn try_sapling_compact_note_decryption(
 
     // Prefix plaintext with 64 zero-bytes to skip over Poly1305 keying output
     const CHACHA20_BLOCK_SIZE: usize = 64;
-    let mut plaintext = Vec::with_capacity(CHACHA20_BLOCK_SIZE + COMPACT_NOTE_SIZE);
-    plaintext.extend_from_slice(&[0; CHACHA20_BLOCK_SIZE]);
-    plaintext.extend_from_slice(&enc_ciphertext[0..COMPACT_NOTE_SIZE]);
+    let mut plaintext = [0; CHACHA20_BLOCK_SIZE + COMPACT_NOTE_SIZE];
+    plaintext[CHACHA20_BLOCK_SIZE..].copy_from_slice(&enc_ciphertext[0..COMPACT_NOTE_SIZE]);
     assert_eq!(
         ChaCha20Ietf::cipher()
             .decrypt(
@@ -477,7 +479,7 @@ pub fn try_sapling_output_recovery(
 
     let ock = prf_ock(&ovk, &cv, &cmu, &epk);
 
-    let mut op = vec![0; OUT_CIPHERTEXT_SIZE];
+    let mut op = [0; OUT_CIPHERTEXT_SIZE];
     assert_eq!(
         ChachaPolyIetf::aead_cipher()
             .open_to(&mut op, &out_ciphertext, &[], ock.as_bytes(), &[0u8; 12])
@@ -496,7 +498,7 @@ pub fn try_sapling_output_recovery(
     let shared_secret = sapling_ka_agree(&esk, &pk_d);
     let key = kdf_sapling(&shared_secret, &epk);
 
-    let mut plaintext = vec![0; ENC_CIPHERTEXT_SIZE];
+    let mut plaintext = [0; ENC_CIPHERTEXT_SIZE];
     assert_eq!(
         ChachaPolyIetf::aead_cipher()
             .open_to(
