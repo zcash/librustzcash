@@ -67,7 +67,7 @@ impl fmt::Debug for Memo {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "Memo(")?;
         match self.to_utf8() {
-            Some(Ok(memo)) => write!(f, "{}", memo)?,
+            Some(Ok(memo)) => write!(f, "\"{}\"", memo)?,
             _ => fmt_colon_delimited_hex(f, &self.0[..])?,
         }
         write!(f, ")")
@@ -347,7 +347,7 @@ impl SaplingNoteEncryption {
     }
 }
 
-fn parse_note_plaintext_minus_memo(
+fn parse_note_plaintext_without_memo(
     ivk: &Fs,
     cmu: &Fr,
     plaintext: &[u8],
@@ -409,7 +409,7 @@ pub fn try_sapling_note_decryption(
         NOTE_PLAINTEXT_SIZE
     );
 
-    let (note, to) = parse_note_plaintext_minus_memo(ivk, cmu, &plaintext)?;
+    let (note, to) = parse_note_plaintext_without_memo(ivk, cmu, &plaintext)?;
 
     let mut memo = [0u8; 512];
     memo.copy_from_slice(&plaintext[COMPACT_NOTE_SIZE..NOTE_PLAINTEXT_SIZE]);
@@ -454,7 +454,7 @@ pub fn try_sapling_compact_note_decryption(
         CHACHA20_BLOCK_SIZE + COMPACT_NOTE_SIZE
     );
 
-    parse_note_plaintext_minus_memo(ivk, cmu, &plaintext[CHACHA20_BLOCK_SIZE..])
+    parse_note_plaintext_without_memo(ivk, cmu, &plaintext[CHACHA20_BLOCK_SIZE..])
 }
 
 /// Recovery of the full note plaintext by the sender.
