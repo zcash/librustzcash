@@ -149,7 +149,7 @@ fn generate_esk() -> Fs {
 /// Sapling key agreement for note encryption.
 ///
 /// Implements section 5.4.4.3 of the Zcash Protocol Specification.
-pub fn sapling_ka_agree<'a, P>(esk: &Fs, pk_d: &'a P) -> [u8; 32]
+pub fn sapling_ka_agree<'a, P>(esk: &Fs, pk_d: &'a P) -> edwards::Point<Bls12, PrimeOrder>
 where
     edwards::Point<Bls12, Unknown>: From<&'a P>,
 {
@@ -159,20 +159,18 @@ where
     let p = p.mul_by_cofactor(&JUBJUB);
 
     // Multiply by esk
-    let p = p.mul(*esk, &JUBJUB);
-
-    // Produce result
-    let mut result = [0; 32];
-    p.write(&mut result[..]).expect("length is not 32 bytes");
-    result
+    p.mul(*esk, &JUBJUB)
 }
 
 /// Sapling KDF for note encryption.
 ///
 /// Implements section 5.4.4.4 of the Zcash Protocol Specification.
-fn kdf_sapling(dhsecret: &[u8], epk: &edwards::Point<Bls12, PrimeOrder>) -> Blake2bResult {
+fn kdf_sapling(
+    dhsecret: edwards::Point<Bls12, PrimeOrder>,
+    epk: &edwards::Point<Bls12, PrimeOrder>,
+) -> Blake2bResult {
     let mut input = [0u8; 64];
-    input[0..32].copy_from_slice(&dhsecret);
+    dhsecret.write(&mut input[0..32]).unwrap();
     epk.write(&mut input[32..64]).unwrap();
 
     let mut h = Blake2b::with_params(32, &[], &[], KDF_SAPLING_PERSONALIZATION);
@@ -293,7 +291,7 @@ impl SaplingNoteEncryption {
     /// Generates `encCiphertext` for this note.
     pub fn encrypt_note_plaintext(&self) -> [u8; ENC_CIPHERTEXT_SIZE] {
         let shared_secret = sapling_ka_agree(&self.esk, &self.to.pk_d);
-        let key = kdf_sapling(&shared_secret, &self.epk);
+        let key = kdf_sapling(shared_secret, &self.epk);
 
         // Note plaintext encoding is defined in section 5.5 of the Zcash Protocol
         // Specification.
@@ -394,7 +392,7 @@ pub fn try_sapling_note_decryption(
     assert_eq!(enc_ciphertext.len(), ENC_CIPHERTEXT_SIZE);
 
     let shared_secret = sapling_ka_agree(ivk, epk);
-    let key = kdf_sapling(&shared_secret, &epk);
+    let key = kdf_sapling(shared_secret, &epk);
 
     let mut plaintext = [0; ENC_CIPHERTEXT_SIZE];
     assert_eq!(
@@ -436,7 +434,7 @@ pub fn try_sapling_compact_note_decryption(
     assert_eq!(enc_ciphertext.len(), COMPACT_NOTE_SIZE);
 
     let shared_secret = sapling_ka_agree(ivk, epk);
-    let key = kdf_sapling(&shared_secret, &epk);
+    let key = kdf_sapling(shared_secret, &epk);
 
     // Prefix plaintext with 64 zero-bytes to skip over Poly1305 keying output
     const CHACHA20_BLOCK_SIZE: usize = 64;
@@ -494,7 +492,7 @@ pub fn try_sapling_output_recovery(
     let esk = Fs::from_repr(esk).ok()?;
 
     let shared_secret = sapling_ka_agree(&esk, &pk_d);
-    let key = kdf_sapling(&shared_secret, &epk);
+    let key = kdf_sapling(shared_secret, &epk);
 
     let mut plaintext = [0; ENC_CIPHERTEXT_SIZE];
     assert_eq!(
@@ -1009,9 +1007,15 @@ mod tests {
             //
 
             let shared_secret = sapling_ka_agree(&esk, &pk_d);
-            assert_eq!(shared_secret, tv.shared_secret);
+            {
+                let mut encoded = [0; 32];
+                shared_secret
+                    .write(&mut encoded[..])
+                    .expect("length is not 32 bytes");
+                assert_eq!(encoded, tv.shared_secret);
+            }
 
-            let k_enc = kdf_sapling(&shared_secret, &epk);
+            let k_enc = kdf_sapling(shared_secret, &epk);
             assert_eq!(k_enc.as_bytes(), tv.k_enc);
 
             let ovk = OutgoingViewingKey(tv.ovk);

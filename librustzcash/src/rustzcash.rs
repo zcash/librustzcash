@@ -541,7 +541,7 @@ pub extern "system" fn librustzcash_sapling_ka_agree(
 
     // Produce result
     let result = unsafe { &mut *result };
-    result.copy_from_slice(&ka);
+    ka.write(&mut result[..]).expect("length is not 32 bytes");
 
     true
 }
