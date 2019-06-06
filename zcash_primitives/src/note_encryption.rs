@@ -123,13 +123,11 @@ impl Memo {
     pub fn to_utf8(&self) -> Option<Result<String, str::Utf8Error>> {
         // Check if it is a text or binary memo
         if self.0[0] < 0xF5 {
-            // Drop trailing zeroes
-            let mut data = &self.0[..];
-            while let Some((0, next)) = data.split_last() {
-                data = next;
-            }
             // Check if it is valid UTF8
-            Some(str::from_utf8(data).map(|memo| memo.to_owned()))
+            Some(str::from_utf8(&self.0).map(|memo| {
+                // Drop trailing zeroes
+                memo.trim_end_matches(char::from(0)).to_owned()
+            }))
         } else {
             None
         }
