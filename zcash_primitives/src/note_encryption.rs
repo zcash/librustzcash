@@ -806,6 +806,40 @@ mod tests {
         );
     }
 
+    fn find_invalid_diversifier() -> Diversifier {
+        // Find an invalid diversifier
+        let mut d = Diversifier([0; 11]);
+        loop {
+            for k in 0..11 {
+                d.0[k] = d.0[k].wrapping_add(1);
+                if d.0[k] != 0 {
+                    break;
+                }
+            }
+            if d.g_d::<Bls12>(&JUBJUB).is_none() {
+                break;
+            }
+        }
+        d
+    }
+
+    fn find_valid_diversifier() -> Diversifier {
+        // Find a different valid diversifier
+        let mut d = Diversifier([0; 11]);
+        loop {
+            for k in 0..11 {
+                d.0[k] = d.0[k].wrapping_add(1);
+                if d.0[k] != 0 {
+                    break;
+                }
+            }
+            if d.g_d::<Bls12>(&JUBJUB).is_some() {
+                break;
+            }
+        }
+        d
+    }
+
     #[test]
     fn decryption_with_invalid_ivk() {
         let mut rng = thread_rng();
@@ -875,6 +909,50 @@ mod tests {
             &mut enc_ciphertext,
             &out_ciphertext,
             |pt| pt[0] = 0x02,
+        );
+        assert_eq!(
+            try_sapling_note_decryption(&ivk, &epk, &cmu, &enc_ciphertext),
+            None
+        );
+    }
+
+    #[test]
+    fn decryption_with_invalid_diversifier() {
+        let mut rng = thread_rng();
+
+        let (ovk, ivk, cv, cmu, epk, mut enc_ciphertext, out_ciphertext) =
+            random_enc_ciphertext(&mut rng);
+
+        reencrypt_enc_ciphertext(
+            &ovk,
+            &cv,
+            &cmu,
+            &epk,
+            &mut enc_ciphertext,
+            &out_ciphertext,
+            |pt| pt[1..12].copy_from_slice(&find_invalid_diversifier().0),
+        );
+        assert_eq!(
+            try_sapling_note_decryption(&ivk, &epk, &cmu, &enc_ciphertext),
+            None
+        );
+    }
+
+    #[test]
+    fn decryption_with_incorrect_diversifier() {
+        let mut rng = thread_rng();
+
+        let (ovk, ivk, cv, cmu, epk, mut enc_ciphertext, out_ciphertext) =
+            random_enc_ciphertext(&mut rng);
+
+        reencrypt_enc_ciphertext(
+            &ovk,
+            &cv,
+            &cmu,
+            &epk,
+            &mut enc_ciphertext,
+            &out_ciphertext,
+            |pt| pt[1..12].copy_from_slice(&find_valid_diversifier().0),
         );
         assert_eq!(
             try_sapling_note_decryption(&ivk, &epk, &cmu, &enc_ciphertext),
@@ -964,10 +1042,45 @@ mod tests {
     fn compact_decryption_with_invalid_diversifier() {
         let mut rng = thread_rng();
 
-        let (_, ivk, _, cmu, epk, mut enc_ciphertext, _) = random_enc_ciphertext(&mut rng);
+        let (ovk, ivk, cv, cmu, epk, mut enc_ciphertext, out_ciphertext) =
+            random_enc_ciphertext(&mut rng);
 
-        // In compact decryption, this will result in an altered diversifier
-        enc_ciphertext[1] ^= 0xff;
+        reencrypt_enc_ciphertext(
+            &ovk,
+            &cv,
+            &cmu,
+            &epk,
+            &mut enc_ciphertext,
+            &out_ciphertext,
+            |pt| pt[1..12].copy_from_slice(&find_invalid_diversifier().0),
+        );
+        assert_eq!(
+            try_sapling_compact_note_decryption(
+                &ivk,
+                &epk,
+                &cmu,
+                &enc_ciphertext[..COMPACT_NOTE_SIZE]
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn compact_decryption_with_incorrect_diversifier() {
+        let mut rng = thread_rng();
+
+        let (ovk, ivk, cv, cmu, epk, mut enc_ciphertext, out_ciphertext) =
+            random_enc_ciphertext(&mut rng);
+
+        reencrypt_enc_ciphertext(
+            &ovk,
+            &cv,
+            &cmu,
+            &epk,
+            &mut enc_ciphertext,
+            &out_ciphertext,
+            |pt| pt[1..12].copy_from_slice(&find_valid_diversifier().0),
+        );
         assert_eq!(
             try_sapling_compact_note_decryption(
                 &ivk,
@@ -1093,6 +1206,50 @@ mod tests {
             &mut enc_ciphertext,
             &out_ciphertext,
             |pt| pt[0] = 0x02,
+        );
+        assert_eq!(
+            try_sapling_output_recovery(&ovk, &cv, &cmu, &epk, &enc_ciphertext, &out_ciphertext),
+            None
+        );
+    }
+
+    #[test]
+    fn recovery_with_invalid_diversifier() {
+        let mut rng = thread_rng();
+
+        let (ovk, _, cv, cmu, epk, mut enc_ciphertext, out_ciphertext) =
+            random_enc_ciphertext(&mut rng);
+
+        reencrypt_enc_ciphertext(
+            &ovk,
+            &cv,
+            &cmu,
+            &epk,
+            &mut enc_ciphertext,
+            &out_ciphertext,
+            |pt| pt[1..12].copy_from_slice(&find_invalid_diversifier().0),
+        );
+        assert_eq!(
+            try_sapling_output_recovery(&ovk, &cv, &cmu, &epk, &enc_ciphertext, &out_ciphertext),
+            None
+        );
+    }
+
+    #[test]
+    fn recovery_with_incorrect_diversifier() {
+        let mut rng = thread_rng();
+
+        let (ovk, _, cv, cmu, epk, mut enc_ciphertext, out_ciphertext) =
+            random_enc_ciphertext(&mut rng);
+
+        reencrypt_enc_ciphertext(
+            &ovk,
+            &cv,
+            &cmu,
+            &epk,
+            &mut enc_ciphertext,
+            &out_ciphertext,
+            |pt| pt[1..12].copy_from_slice(&find_valid_diversifier().0),
         );
         assert_eq!(
             try_sapling_output_recovery(&ovk, &cv, &cmu, &epk, &enc_ciphertext, &out_ciphertext),
