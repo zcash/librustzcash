@@ -8,234 +8,46 @@ extern crate sapling_crypto;
 extern crate zcash_primitives;
 
 use aes::Aes256;
-use blake2_rfc::blake2b::{Blake2b, Blake2bResult};
+use blake2_rfc::blake2b::Blake2b;
 use byteorder::{ByteOrder, LittleEndian, ReadBytesExt, WriteBytesExt};
-use ff::{Field, PrimeField, PrimeFieldRepr};
+use ff::Field;
 use fpe::ff1::{BinaryNumeralString, FF1};
 use pairing::bls12_381::Bls12;
 use sapling_crypto::{
-    jubjub::{edwards, FixedGenerators, JubjubEngine, JubjubParams, ToUniform, Unknown},
-    primitives::{Diversifier, PaymentAddress, ProofGenerationKey, ViewingKey},
+    jubjub::{fs::Fs, FixedGenerators, JubjubEngine, JubjubParams, ToUniform},
+    primitives::{Diversifier, PaymentAddress, ViewingKey},
 };
 use std::io::{self, Read, Write};
-use zcash_primitives::JUBJUB;
+use zcash_primitives::{
+    keys::{prf_expand, prf_expand_vec, ExpandedSpendingKey, FullViewingKey, OutgoingViewingKey},
+    JUBJUB,
+};
 
-pub const PRF_EXPAND_PERSONALIZATION: &'static [u8; 16] = b"Zcash_ExpandSeed";
 pub const ZIP32_SAPLING_MASTER_PERSONALIZATION: &'static [u8; 16] = b"ZcashIP32Sapling";
 pub const ZIP32_SAPLING_FVFP_PERSONALIZATION: &'static [u8; 16] = b"ZcashSaplingFVFP";
 
-// Sapling key components
+// Common helper functions
 
-/// PRF^expand(sk, t) := BLAKE2b-512("Zcash_ExpandSeed", sk || t)
-fn prf_expand(sk: &[u8], t: &[u8]) -> Blake2bResult {
-    prf_expand_vec(sk, &vec![t])
-}
-
-fn prf_expand_vec(sk: &[u8], ts: &[&[u8]]) -> Blake2bResult {
-    let mut h = Blake2b::with_params(64, &[], &[], PRF_EXPAND_PERSONALIZATION);
-    h.update(sk);
-    for t in ts {
-        h.update(t);
-    }
-    h.finalize()
-}
-
-/// An outgoing viewing key
-#[derive(Clone, Copy, PartialEq)]
-pub struct OutgoingViewingKey([u8; 32]);
-
-impl OutgoingViewingKey {
-    fn derive_child(&self, i_l: &[u8]) -> Self {
-        let mut ovk = [0u8; 32];
-        ovk.copy_from_slice(&prf_expand_vec(i_l, &[&[0x15], &self.0]).as_bytes()[..32]);
-        OutgoingViewingKey(ovk)
-    }
-}
-
-/// A Sapling expanded spending key
-#[derive(Clone)]
-pub struct ExpandedSpendingKey<E: JubjubEngine> {
-    pub ask: E::Fs,
-    nsk: E::Fs,
-    ovk: OutgoingViewingKey,
-}
-
-/// A Sapling full viewing key
-pub struct FullViewingKey<E: JubjubEngine> {
-    pub vk: ViewingKey<E>,
-    pub ovk: OutgoingViewingKey,
-}
-
-impl<E: JubjubEngine> ExpandedSpendingKey<E> {
-    fn from_spending_key(sk: &[u8]) -> Self {
-        let ask = E::Fs::to_uniform(prf_expand(sk, &[0x00]).as_bytes());
-        let nsk = E::Fs::to_uniform(prf_expand(sk, &[0x01]).as_bytes());
-        let mut ovk = OutgoingViewingKey([0u8; 32]);
-        ovk.0
-            .copy_from_slice(&prf_expand(sk, &[0x02]).as_bytes()[..32]);
-        ExpandedSpendingKey { ask, nsk, ovk }
-    }
-
-    pub fn proof_generation_key(&self, params: &E::Params) -> ProofGenerationKey<E> {
-        ProofGenerationKey {
-            ak: params
-                .generator(FixedGenerators::SpendingKeyGenerator)
-                .mul(self.ask, params),
-            nsk: self.nsk,
-        }
-    }
-
-    fn derive_child(&self, i_l: &[u8]) -> Self {
-        let mut ask = E::Fs::to_uniform(prf_expand(i_l, &[0x13]).as_bytes());
-        let mut nsk = E::Fs::to_uniform(prf_expand(i_l, &[0x14]).as_bytes());
-        ask.add_assign(&self.ask);
-        nsk.add_assign(&self.nsk);
-        let ovk = self.ovk.derive_child(i_l);
-        ExpandedSpendingKey { ask, nsk, ovk }
-    }
-
-    pub fn read<R: Read>(mut reader: R) -> io::Result<Self> {
-        let mut ask_repr = <E::Fs as PrimeField>::Repr::default();
-        ask_repr.read_le(&mut reader)?;
-        let ask = E::Fs::from_repr(ask_repr)
-            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-
-        let mut nsk_repr = <E::Fs as PrimeField>::Repr::default();
-        nsk_repr.read_le(&mut reader)?;
-        let nsk = E::Fs::from_repr(nsk_repr)
-            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-
-        let mut ovk = [0; 32];
-        reader.read_exact(&mut ovk)?;
-
-        Ok(ExpandedSpendingKey {
-            ask,
-            nsk,
-            ovk: OutgoingViewingKey(ovk),
-        })
-    }
-
-    pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
-        self.ask.into_repr().write_le(&mut writer)?;
-        self.nsk.into_repr().write_le(&mut writer)?;
-        writer.write_all(&self.ovk.0)?;
-
-        Ok(())
-    }
-
-    fn to_bytes(&self) -> [u8; 96] {
-        let mut result = [0u8; 96];
-        self.write(&mut result[..])
-            .expect("should be able to serialize an ExpandedSpendingKey");
-        result
-    }
-}
-
-impl<E: JubjubEngine> Clone for FullViewingKey<E> {
-    fn clone(&self) -> Self {
-        FullViewingKey {
-            vk: ViewingKey {
-                ak: self.vk.ak.clone(),
-                nk: self.vk.nk.clone(),
-            },
-            ovk: self.ovk.clone(),
-        }
-    }
-}
-
-impl<E: JubjubEngine> FullViewingKey<E> {
-    fn from_expanded_spending_key(expsk: &ExpandedSpendingKey<E>, params: &E::Params) -> Self {
-        FullViewingKey {
-            vk: ViewingKey {
-                ak: params
-                    .generator(FixedGenerators::SpendingKeyGenerator)
-                    .mul(expsk.ask, params),
-                nk: params
-                    .generator(FixedGenerators::ProofGenerationKey)
-                    .mul(expsk.nsk, params),
-            },
-            ovk: expsk.ovk,
-        }
-    }
-
-    fn derive_child(&self, i_l: &[u8], params: &E::Params) -> Self {
-        let i_ask = E::Fs::to_uniform(prf_expand(i_l, &[0x13]).as_bytes());
-        let i_nsk = E::Fs::to_uniform(prf_expand(i_l, &[0x14]).as_bytes());
-        let ak = params
-            .generator(FixedGenerators::SpendingKeyGenerator)
-            .mul(i_ask, params)
-            .add(&self.vk.ak, params);
-        let nk = params
-            .generator(FixedGenerators::ProofGenerationKey)
-            .mul(i_nsk, params)
-            .add(&self.vk.nk, params);
-
-        FullViewingKey {
-            vk: ViewingKey { ak, nk },
-            ovk: self.ovk.derive_child(i_l),
-        }
-    }
-
-    pub fn read<R: Read>(mut reader: R, params: &E::Params) -> io::Result<Self> {
-        let ak = edwards::Point::<E, Unknown>::read(&mut reader, params)?;
-        let ak = match ak.as_prime_order(params) {
-            Some(p) => p,
-            None => {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    "ak not of prime order",
-                ));
-            }
-        };
-
-        let nk = edwards::Point::<E, Unknown>::read(&mut reader, params)?;
-        let nk = match nk.as_prime_order(params) {
-            Some(p) => p,
-            None => {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    "nk not of prime order",
-                ));
-            }
-        };
-
-        let mut ovk = [0; 32];
-        reader.read_exact(&mut ovk)?;
-
-        Ok(FullViewingKey {
-            vk: ViewingKey { ak, nk },
-            ovk: OutgoingViewingKey(ovk),
-        })
-    }
-
-    pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
-        self.vk.ak.write(&mut writer)?;
-        self.vk.nk.write(&mut writer)?;
-        writer.write_all(&self.ovk.0)?;
-
-        Ok(())
-    }
-
-    fn to_bytes(&self) -> [u8; 96] {
-        let mut result = [0u8; 96];
-        self.write(&mut result[..])
-            .expect("should be able to serialize a FullViewingKey");
-        result
-    }
-
-    fn fingerprint(&self) -> FVKFingerprint {
-        let mut h = Blake2b::with_params(32, &[], &[], ZIP32_SAPLING_FVFP_PERSONALIZATION);
-        h.update(&self.to_bytes());
-        let mut fvfp = [0u8; 32];
-        fvfp.copy_from_slice(h.finalize().as_bytes());
-        FVKFingerprint(fvfp)
-    }
+fn derive_child_ovk(parent: &OutgoingViewingKey, i_l: &[u8]) -> OutgoingViewingKey {
+    let mut ovk = [0u8; 32];
+    ovk.copy_from_slice(&prf_expand_vec(i_l, &[&[0x15], &parent.0]).as_bytes()[..32]);
+    OutgoingViewingKey(ovk)
 }
 
 // ZIP 32 structures
 
 /// A Sapling full viewing key fingerprint
 struct FVKFingerprint([u8; 32]);
+
+impl<E: JubjubEngine> From<&FullViewingKey<E>> for FVKFingerprint {
+    fn from(fvk: &FullViewingKey<E>) -> Self {
+        let mut h = Blake2b::with_params(32, &[], &[], ZIP32_SAPLING_FVFP_PERSONALIZATION);
+        h.update(&fvk.to_bytes());
+        let mut fvfp = [0u8; 32];
+        fvfp.copy_from_slice(h.finalize().as_bytes());
+        FVKFingerprint(fvfp)
+    }
+}
 
 /// A Sapling full viewing key tag
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -506,10 +318,17 @@ impl ExtendedSpendingKey {
 
         ExtendedSpendingKey {
             depth: self.depth + 1,
-            parent_fvk_tag: fvk.fingerprint().tag(),
+            parent_fvk_tag: FVKFingerprint::from(&fvk).tag(),
             child_index: i,
             chain_code: ChainCode(c_i),
-            expsk: self.expsk.derive_child(i_l),
+            expsk: {
+                let mut ask = Fs::to_uniform(prf_expand(i_l, &[0x13]).as_bytes());
+                let mut nsk = Fs::to_uniform(prf_expand(i_l, &[0x14]).as_bytes());
+                ask.add_assign(&self.expsk.ask);
+                nsk.add_assign(&self.expsk.nsk);
+                let ovk = derive_child_ovk(&self.expsk.ovk, i_l);
+                ExpandedSpendingKey { ask, nsk, ovk }
+            },
             dk: self.dk.derive_child(i_l),
         }
     }
@@ -583,10 +402,26 @@ impl ExtendedFullViewingKey {
 
         Ok(ExtendedFullViewingKey {
             depth: self.depth + 1,
-            parent_fvk_tag: self.fvk.fingerprint().tag(),
+            parent_fvk_tag: FVKFingerprint::from(&self.fvk).tag(),
             child_index: i,
             chain_code: ChainCode(c_i),
-            fvk: self.fvk.derive_child(i_l, &JUBJUB),
+            fvk: {
+                let i_ask = Fs::to_uniform(prf_expand(i_l, &[0x13]).as_bytes());
+                let i_nsk = Fs::to_uniform(prf_expand(i_l, &[0x14]).as_bytes());
+                let ak = JUBJUB
+                    .generator(FixedGenerators::SpendingKeyGenerator)
+                    .mul(i_ask, &JUBJUB)
+                    .add(&self.fvk.vk.ak, &JUBJUB);
+                let nk = JUBJUB
+                    .generator(FixedGenerators::ProofGenerationKey)
+                    .mul(i_nsk, &JUBJUB)
+                    .add(&self.fvk.vk.nk, &JUBJUB);
+
+                FullViewingKey {
+                    vk: ViewingKey { ak, nk },
+                    ovk: derive_child_ovk(&self.fvk.ovk, i_l),
+                }
+            },
             dk: self.dk.derive_child(i_l),
         })
     }
@@ -613,6 +448,8 @@ impl ExtendedFullViewingKey {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use ff::{PrimeField, PrimeFieldRepr};
 
     #[test]
     fn derive_nonhardened_child() {
@@ -1213,7 +1050,7 @@ mod tests {
             let mut ser = vec![];
             xfvk.write(&mut ser).unwrap();
             assert_eq!(&ser[..], &tv.xfvk[..]);
-            assert_eq!(xfvk.fvk.fingerprint().0, tv.fp);
+            assert_eq!(FVKFingerprint::from(&xfvk.fvk).0, tv.fp);
 
             // d0
             let mut di = DiversifierIndex::new();

@@ -58,7 +58,7 @@ use std::ffi::OsString;
 use std::os::windows::ffi::OsStringExt;
 
 use sapling_crypto::primitives::{ProofGenerationKey, ViewingKey};
-use zcash_primitives::{sapling::spend_sig, JUBJUB};
+use zcash_primitives::{note_encryption::sapling_ka_agree, sapling::spend_sig, JUBJUB};
 use zcash_proofs::{
     load_parameters,
     sapling::{CommitmentTreeWitness, SaplingProvingContext, SaplingVerificationContext},
@@ -536,15 +536,12 @@ pub extern "system" fn librustzcash_sapling_ka_agree(
         Err(_) => return false,
     };
 
-    // Multiply by 8
-    let p = p.mul_by_cofactor(&JUBJUB);
-
-    // Multiply by sk
-    let p = p.mul(sk, &JUBJUB);
+    // Compute key agreement
+    let ka = sapling_ka_agree(&sk, &p);
 
     // Produce result
     let result = unsafe { &mut *result };
-    p.write(&mut result[..]).expect("length is not 32 bytes");
+    ka.write(&mut result[..]).expect("length is not 32 bytes");
 
     true
 }
