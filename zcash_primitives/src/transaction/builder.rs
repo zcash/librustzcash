@@ -178,8 +178,8 @@ impl TransactionMetadata {
 }
 
 /// Generates a [`Transaction`] from its inputs and outputs.
-pub struct Builder {
-    rng: OsRng,
+pub struct Builder<R: RngCore + CryptoRng> {
+    rng: R,
     mtx: TransactionData,
     fee: Amount,
     anchor: Option<Fr>,
@@ -188,9 +188,9 @@ pub struct Builder {
     change_address: Option<(OutgoingViewingKey, PaymentAddress<Bls12>)>,
 }
 
-impl Builder {
+impl Builder<OsRng> {
     /// Creates a new `Builder` targeted for inclusion in the block with the given height,
-    /// using default values for general transaction fields.
+    /// using default values for general transaction fields and the default OS random.
     ///
     /// # Default values
     ///
@@ -198,12 +198,27 @@ impl Builder {
     /// expiry delta (20 blocks).
     ///
     /// The fee will be set to the default fee (0.0001 ZEC).
-    pub fn new(height: u32) -> Builder {
+    pub fn new(height: u32) -> Self {
+        Builder::new_with_rng(height, OsRng)
+    }
+}
+
+impl<R: RngCore + CryptoRng> Builder<R> {
+    /// Creates a new `Builder` targeted for inclusion in the block with the given height
+    /// and randomness source, using default values for general transaction fields.
+    ///
+    /// # Default values
+    ///
+    /// The expiry height will be set to the given height plus the default transaction
+    /// expiry delta (20 blocks).
+    ///
+    /// The fee will be set to the default fee (0.0001 ZEC).
+    pub fn new_with_rng(height: u32, rng: R) -> Builder<R> {
         let mut mtx = TransactionData::new();
         mtx.expiry_height = height + DEFAULT_TX_EXPIRY_DELTA;
 
         Builder {
-            rng: OsRng,
+            rng,
             mtx,
             fee: DEFAULT_FEE,
             anchor: None,
