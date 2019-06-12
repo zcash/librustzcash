@@ -2,7 +2,7 @@
 
 use ff::{BitIterator, PrimeField, PrimeFieldRepr};
 use pairing::bls12_381::{Bls12, Fr, FrRepr};
-use rand_os::OsRng;
+use rand_core::{CryptoRng, RngCore};
 use sapling_crypto::{
     jubjub::{fs::Fs, FixedGenerators, JubjubBls12},
     pedersen_hash::{pedersen_hash, Personalization},
@@ -106,15 +106,13 @@ lazy_static! {
 }
 
 /// Create the spendAuthSig for a Sapling SpendDescription.
-pub fn spend_sig(
+pub fn spend_sig<R: RngCore + CryptoRng>(
     ask: PrivateKey<Bls12>,
     ar: Fs,
     sighash: &[u8; 32],
+    rng: &mut R,
     params: &JubjubBls12,
 ) -> Signature {
-    // Initialize secure RNG
-    let mut rng = OsRng;
-
     // We compute `rsk`...
     let rsk = ask.randomize(ar);
 
@@ -130,7 +128,7 @@ pub fn spend_sig(
     // Do the signing
     rsk.sign(
         &data_to_be_signed,
-        &mut rng,
+        rng,
         FixedGenerators::SpendingKeyGenerator,
         params,
     )

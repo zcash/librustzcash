@@ -522,6 +522,7 @@ impl<R: RngCore + CryptoRng> Builder<R> {
                 PrivateKey(spend.extsk.expsk.ask),
                 spend.alpha,
                 &sighash,
+                &mut self.rng,
                 &JUBJUB,
             ));
         }
