@@ -9,9 +9,13 @@ authors = [
 bellman = { path = "../bellman" }
 blake2b_simd = "0.5"
 byteorder = "1"
-directories = "1"
+directories = { version = "1", optional = true }
 ff = { path = "../ff" }
 pairing = { path = "../pairing" }
 rand_os = "0.2"
 sapling-crypto = { path = "../sapling-crypto" }
 zcash_primitives = { path = "../zcash_primitives" }
+
+[features]
+default = ["local-prover"]
+local-prover = ["directories"]
