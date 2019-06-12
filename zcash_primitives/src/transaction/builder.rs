@@ -100,13 +100,19 @@ impl SaplingOutput {
         })
     }
 
-    pub fn build<P: TxProver>(
+    pub fn build<P: TxProver, R: RngCore + CryptoRng>(
         self,
         prover: &P,
         ctx: &mut P::SaplingProvingContext,
+        rng: &mut R,
     ) -> OutputDescription {
-        let encryptor =
-            SaplingNoteEncryption::new(self.ovk, self.note.clone(), self.to.clone(), self.memo);
+        let encryptor = SaplingNoteEncryption::new(
+            self.ovk,
+            self.note.clone(),
+            self.to.clone(),
+            self.memo,
+            rng,
+        );
 
         let (zkproof, cv) = prover.output_proof(
             ctx,
@@ -419,7 +425,7 @@ impl Builder {
                 // Record the post-randomized output location
                 tx_metadata.output_indices[pos] = i;
 
-                output.build(&prover, &mut ctx)
+                output.build(&prover, &mut ctx, &mut self.rng)
             } else {
                 // This is a dummy output
                 let (dummy_to, dummy_note) = {
@@ -457,7 +463,7 @@ impl Builder {
                     )
                 };
 
-                let esk = generate_esk();
+                let esk = generate_esk(&mut self.rng);
                 let epk = dummy_note.g_d.mul(esk, &JUBJUB);
 
                 let (zkproof, cv) =
