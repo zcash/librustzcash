@@ -52,6 +52,12 @@ macro_rules! curve_impl {
                     return false;
                 }
 
+                if self.is_normalized() {
+                    if other.is_normalized() {
+                        return self.into_affine() == other.into_affine()
+                    }
+                }
+
                 // The points (X, Y, Z) and (X', Y', Z')
                 // are equal when (X * Z^2) = (X' * Z'^2)
                 // and (Y * Z^3) = (Y' * Z'^3).
