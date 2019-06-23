@@ -41,7 +41,7 @@ pub trait CurveProjective:
 
     /// Normalizes a slice of projective elements so that
     /// conversion to affine is cheap.
-    fn batch_normalization(v: &mut [Self]);
+    fn batch_normalization<S: ::std::borrow::BorrowMut<Self>>(v: &mut [S]);
 
     /// Checks if the point is already "normalized" so that
     /// cheap affine conversion is possible.

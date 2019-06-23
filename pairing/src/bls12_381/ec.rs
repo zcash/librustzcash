@@ -247,7 +247,7 @@ macro_rules! curve_impl {
                 self.is_zero() || self.z == $basefield::one()
             }
 
-            fn batch_normalization(v: &mut [Self])
+            fn batch_normalization<S: ::std::borrow::BorrowMut<Self>>(v: &mut [S])
             {
                 // Montgomery’s Trick and Fast Implementation of Masked AES
                 // Genelle, Prouff and Quisquater
@@ -256,7 +256,7 @@ macro_rules! curve_impl {
                 // First pass: compute [a, ab, abc, ...]
                 let mut prod = Vec::with_capacity(v.len());
                 let mut tmp = $basefield::one();
-                for g in v.iter_mut()
+                for g in v.iter_mut().map(|g| g.borrow_mut())
                           // Ignore normalized elements
                           .filter(|g| !g.is_normalized())
                 {
@@ -268,7 +268,7 @@ macro_rules! curve_impl {
                 tmp = tmp.inverse().unwrap(); // Guaranteed to be nonzero.
 
                 // Second pass: iterate backwards to compute inverses
-                for (g, s) in v.iter_mut()
+                for (g, s) in v.iter_mut().map(|g| g.borrow_mut())
                                // Backwards
                                .rev()
                                // Ignore normalized elements
@@ -285,7 +285,7 @@ macro_rules! curve_impl {
                 }
 
                 // Perform affine transformations
-                for g in v.iter_mut()
+                for g in v.iter_mut().map(|g| g.borrow_mut())
                           .filter(|g| !g.is_normalized())
                 {
                     let mut z = g.z; // 1/z
