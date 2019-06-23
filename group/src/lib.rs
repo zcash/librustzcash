@@ -127,7 +127,8 @@ pub trait CurveAffine:
 
 /// An encoded elliptic curve point, which should essentially wrap a `[u8; N]`.
 pub trait EncodedPoint:
-    Sized + Send + Sync + AsRef<[u8]> + AsMut<[u8]> + Clone + Copy + 'static
+    Sized + Send + Sync + AsRef<[u8]> + AsMut<[u8]> + Clone + Copy
+      + PartialOrd + Ord + PartialEq + Eq + ::std::hash::Hash + 'static
 {
     type Affine: CurveAffine;
 
