@@ -312,7 +312,7 @@ impl CurveProjective for Fr {
         <Fr as Field>::is_zero(self)
     }
 
-    fn batch_normalization(_: &mut [Self]) {
+    fn batch_normalization<S: ::std::borrow::BorrowMut<Self>>(_: &mut [S]) {
         
     }
 
@@ -367,6 +367,29 @@ impl AsMut<[u8]> for FakePoint {
 
 impl AsRef<[u8]> for FakePoint {
     fn as_ref(&self) -> &[u8] {
+        unimplemented!()
+    }
+}
+
+impl PartialEq for FakePoint {
+    fn eq(&self, other: &FakePoint) -> bool {
+        unimplemented!()
+    }
+}
+impl Eq for FakePoint { }
+impl PartialOrd for FakePoint {
+    fn partial_cmp(&self, other: &FakePoint) -> Option<::std::cmp::Ordering> {
+        unimplemented!()
+    }
+}
+impl Ord for FakePoint {
+    fn cmp(&self, other: &Self) -> ::std::cmp::Ordering {
+        unimplemented!()
+    }
+}
+
+impl ::std::hash::Hash for FakePoint {
+    fn hash<H: ::std::hash::Hasher>(&self, state: &mut H) {
         unimplemented!()
     }
 }
