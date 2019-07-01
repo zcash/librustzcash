@@ -167,6 +167,11 @@ pub fn decode_payment_address(hrp: &str, s: &str) -> Result<Option<PaymentAddres
     bech32_decode(hrp, s, |data| {
         let mut diversifier = Diversifier([0; 11]);
         diversifier.0.copy_from_slice(&data[0..11]);
+        // Check that the diversifier is valid
+        if diversifier.g_d::<Bls12>(&JUBJUB).is_none() {
+            return None;
+        }
+
         edwards::Point::<Bls12, _>::read(&data[11..], &JUBJUB)
             .ok()?
             .as_prime_order(&JUBJUB)
@@ -225,6 +230,28 @@ mod tests {
             )
             .unwrap(),
             Some(addr)
+        );
+    }
+
+    #[test]
+    fn invalid_diversifier() {
+        let rng = &mut XorShiftRng::from_seed([0x3dbe6259, 0x8d313d76, 0x3237db17, 0xe5bc0654]);
+
+        let addr = PaymentAddress {
+            diversifier: Diversifier([1u8; 11]),
+            pk_d: edwards::Point::<Bls12, _>::rand(rng, &JUBJUB).mul_by_cofactor(&JUBJUB),
+        };
+
+        let encoded_main =
+            encode_payment_address(constants::mainnet::HRP_SAPLING_PAYMENT_ADDRESS, &addr);
+
+        assert_eq!(
+            decode_payment_address(
+                constants::mainnet::HRP_SAPLING_PAYMENT_ADDRESS,
+                &encoded_main
+            )
+            .unwrap(),
+            None
         );
     }
 }
