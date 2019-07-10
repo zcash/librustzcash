@@ -10,7 +10,7 @@ repository = "https://github.com/ebfull/ff"
 
 [dependencies]
 byteorder = "1"
-rand = "0.4"
+rand_core = "0.3"
 ff_derive = { version = "0.3.0", path = "ff_derive", optional = true }
 
 [features]
