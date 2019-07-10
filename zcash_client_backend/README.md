@@ -1,6 +1,6 @@
-# zcash_wallet
+# zcash_client_backend
 
-This library contains Rust structs and traits for creating shielded Zcash wallets.
+This library contains Rust structs and traits for creating shielded Zcash light clients.
 
 ## License
 
