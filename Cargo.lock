@@ -61,7 +61,8 @@ dependencies = [
  "group 0.1.0",
  "num_cpus 1.8.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "pairing 0.14.2",
- "rand 0.4.2 (registry+https://github.com/rust-lang/crates.io-index)",
+ "rand 0.5.6 (registry+https://github.com/rust-lang/crates.io-index)",
+ "rand_core 0.3.1 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
