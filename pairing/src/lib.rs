@@ -14,6 +14,9 @@
 extern crate byteorder;
 extern crate ff;
 extern crate group;
+extern crate rand_core;
+
+#[cfg(test)]
 extern crate rand;
 
 #[cfg(test)]
