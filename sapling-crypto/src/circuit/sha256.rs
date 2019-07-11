@@ -370,8 +370,7 @@ mod test {
 
     #[test]
     fn test_against_vectors() {
-        use crypto::sha2::Sha256;
-        use crypto::digest::Digest;
+        use sha2::{Digest, Sha256};
 
         let mut rng = XorShiftRng::from_seed([
             0x59, 0x62, 0xbe, 0x3d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06, 0xbc,
@@ -383,8 +382,7 @@ mod test {
             let mut h = Sha256::new();
             let data: Vec<u8> = (0..input_len).map(|_| rng.gen()).collect();
             h.input(&data);
-            let mut hash_result = [0u8; 32];
-            h.result(&mut hash_result[..]);
+            let hash_result = h.result();
 
             let mut cs = TestConstraintSystem::<Bls12>::new();
             let mut input_bits = vec![];

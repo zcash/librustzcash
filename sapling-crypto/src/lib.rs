@@ -12,7 +12,7 @@ extern crate byteorder;
 extern crate hex_literal;
 
 #[cfg(test)]
-extern crate crypto;
+extern crate sha2;
 
 pub mod jubjub;
 pub mod group_hash;
