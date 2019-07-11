@@ -15,6 +15,6 @@ fpe = "0.1"
 hex = "0.3"
 lazy_static = "1"
 pairing = { path = "../pairing" }
-rand = "0.4"
+rand = "0.5"
 sapling-crypto = { path = "../sapling-crypto" }
 sha2 = "0.8"

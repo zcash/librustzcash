@@ -211,12 +211,14 @@ fn prf_ock(
 /// # Examples
 ///
 /// ```
+/// extern crate ff;
 /// extern crate pairing;
 /// extern crate rand;
 /// extern crate sapling_crypto;
 ///
+/// use ff::Field;
 /// use pairing::bls12_381::Bls12;
-/// use rand::{OsRng, Rand};
+/// use rand::OsRng;
 /// use sapling_crypto::{
 ///     jubjub::fs::Fs,
 ///     primitives::{Diversifier, PaymentAddress, ValueCommitment},
@@ -238,7 +240,7 @@ fn prf_ock(
 /// let ovk = OutgoingViewingKey([0; 32]);
 ///
 /// let value = 1000;
-/// let rcv = Fs::rand(&mut rng);
+/// let rcv = Fs::random(&mut rng);
 /// let cv = ValueCommitment::<Bls12> {
 ///     value,
 ///     randomness: rcv.clone(),
@@ -558,9 +560,9 @@ pub fn try_sapling_output_recovery(
 #[cfg(test)]
 mod tests {
     use crypto_api_chachapoly::ChachaPolyIetf;
-    use ff::{PrimeField, PrimeFieldRepr};
+    use ff::{Field, PrimeField, PrimeFieldRepr};
     use pairing::bls12_381::{Bls12, Fr, FrRepr};
-    use rand::{thread_rng, Rand, Rng};
+    use rand::{thread_rng, RngCore};
     use sapling_crypto::{
         jubjub::{
             edwards,
@@ -692,8 +694,8 @@ mod tests {
         assert_eq!(Memo::default().to_utf8(), None);
     }
 
-    fn random_enc_ciphertext(
-        mut rng: &mut Rng,
+    fn random_enc_ciphertext<R: RngCore>(
+        mut rng: &mut R,
     ) -> (
         OutgoingViewingKey,
         Fs,
@@ -704,7 +706,7 @@ mod tests {
         [u8; OUT_CIPHERTEXT_SIZE],
     ) {
         let diversifier = Diversifier([0; 11]);
-        let ivk = Fs::rand(&mut rng);
+        let ivk = Fs::random(&mut rng);
         let pk_d = diversifier.g_d::<Bls12>(&JUBJUB).unwrap().mul(ivk, &JUBJUB);
         let pa = PaymentAddress { diversifier, pk_d };
 
@@ -712,11 +714,13 @@ mod tests {
         let value = 100;
         let value_commitment = ValueCommitment::<Bls12> {
             value,
-            randomness: Fs::rand(&mut rng),
+            randomness: Fs::random(&mut rng),
         };
         let cv = value_commitment.cm(&JUBJUB).into();
 
-        let note = pa.create_note(value, Fs::rand(&mut rng), &JUBJUB).unwrap();
+        let note = pa
+            .create_note(value, Fs::random(&mut rng), &JUBJUB)
+            .unwrap();
         let cmu = note.cm(&JUBJUB);
 
         let ovk = OutgoingViewingKey([0; 32]);
@@ -849,7 +853,7 @@ mod tests {
         let (_, _, _, cmu, epk, enc_ciphertext, _) = random_enc_ciphertext(&mut rng);
 
         assert_eq!(
-            try_sapling_note_decryption(&Fs::rand(&mut rng), &epk, &cmu, &enc_ciphertext),
+            try_sapling_note_decryption(&Fs::random(&mut rng), &epk, &cmu, &enc_ciphertext),
             None
         );
     }
@@ -878,7 +882,7 @@ mod tests {
         let (_, ivk, _, _, epk, enc_ciphertext, _) = random_enc_ciphertext(&mut rng);
 
         assert_eq!(
-            try_sapling_note_decryption(&ivk, &epk, &Fr::rand(&mut rng), &enc_ciphertext),
+            try_sapling_note_decryption(&ivk, &epk, &Fr::random(&mut rng), &enc_ciphertext),
             None
         );
     }
@@ -970,7 +974,7 @@ mod tests {
 
         assert_eq!(
             try_sapling_compact_note_decryption(
-                &Fs::rand(&mut rng),
+                &Fs::random(&mut rng),
                 &epk,
                 &cmu,
                 &enc_ciphertext[..COMPACT_NOTE_SIZE]
@@ -1006,7 +1010,7 @@ mod tests {
             try_sapling_compact_note_decryption(
                 &ivk,
                 &epk,
-                &Fr::rand(&mut rng),
+                &Fr::random(&mut rng),
                 &enc_ciphertext[..COMPACT_NOTE_SIZE]
             ),
             None
@@ -1137,7 +1141,7 @@ mod tests {
             try_sapling_output_recovery(
                 &ovk,
                 &cv,
-                &Fr::rand(&mut rng),
+                &Fr::random(&mut rng),
                 &epk,
                 &enc_ciphertext,
                 &out_ciphertext

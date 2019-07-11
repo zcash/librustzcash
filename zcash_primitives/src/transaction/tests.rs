@@ -1,6 +1,10 @@
+use ff::Field;
 use pairing::bls12_381::Bls12;
-use rand::{thread_rng, Rng};
-use sapling_crypto::{jubjub::FixedGenerators, redjubjub::PrivateKey};
+use rand::thread_rng;
+use sapling_crypto::{
+    jubjub::{fs::Fs, FixedGenerators},
+    redjubjub::PrivateKey,
+};
 
 use super::{
     components::{Amount, Script},
@@ -194,7 +198,7 @@ fn tx_write_rejects_unexpected_binding_sig() {
     // Fails with an unexpected binding signature
     {
         let rng = &mut thread_rng();
-        let sk = PrivateKey::<Bls12>(rng.gen());
+        let sk = PrivateKey::<Bls12>(Fs::random(rng));
         let sig = sk.sign(
             b"Foo bar",
             rng,
