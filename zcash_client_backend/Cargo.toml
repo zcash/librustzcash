@@ -13,4 +13,4 @@ sapling-crypto = { path = "../sapling-crypto" }
 zcash_primitives = { path = "../zcash_primitives" }
 
 [dev-dependencies]
-rand = "0.4"
+rand = "0.5"

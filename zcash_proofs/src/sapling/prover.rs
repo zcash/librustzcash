@@ -3,7 +3,7 @@ use bellman::groth16::{
 };
 use ff::Field;
 use pairing::bls12_381::{Bls12, Fr};
-use rand::{OsRng, Rand};
+use rand::OsRng;
 use sapling_crypto::{
     circuit::{
         multipack,
@@ -59,7 +59,7 @@ impl SaplingProvingContext {
         let mut rng = OsRng::new().expect("should be able to construct RNG");
 
         // We create the randomness of the value commitment
-        let rcv = Fs::rand(&mut rng);
+        let rcv = Fs::random(&mut rng);
 
         // Accumulate the value commitment randomness in the context
         {
@@ -194,7 +194,7 @@ impl SaplingProvingContext {
         // We construct ephemeral randomness for the value commitment. This
         // randomness is not given back to the caller, but the synthetic
         // blinding factor `bsk` is accumulated in the context.
-        let rcv = Fs::rand(&mut rng);
+        let rcv = Fs::random(&mut rng);
 
         // Accumulate the value commitment randomness in the context
         {

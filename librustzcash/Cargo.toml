@@ -22,7 +22,7 @@ libc = "0.2"
 pairing = { path = "../pairing" }
 lazy_static = "1"
 byteorder = "1"
-rand = "0.4"
+rand = "0.5"
 sapling-crypto = { path = "../sapling-crypto" }
 zcash_primitives = { path = "../zcash_primitives" }
 zcash_proofs = { path = "../zcash_proofs" }

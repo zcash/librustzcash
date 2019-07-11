@@ -11,6 +11,6 @@ blake2b_simd = "0.5"
 byteorder = "1"
 ff = { path = "../ff" }
 pairing = { path = "../pairing" }
-rand = "0.4"
+rand = "0.5"
 sapling-crypto = { path = "../sapling-crypto" }
 zcash_primitives = { path = "../zcash_primitives" }
