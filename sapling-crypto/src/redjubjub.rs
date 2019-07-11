@@ -2,7 +2,7 @@
 //! See section 5.4.6 of the Sapling protocol specification.
 
 use ff::{Field, PrimeField, PrimeFieldRepr};
-use rand::{Rng, Rand};
+use rand::{Rng};
 use std::io::{self, Read, Write};
 
 use jubjub::{FixedGenerators, JubjubEngine, JubjubParams, Unknown, edwards::Point};
@@ -184,7 +184,7 @@ pub fn batch_verify<'a, E: JubjubEngine, R: Rng>(
 
         let mut c = h_star::<E>(&entry.sig.rbar[..], entry.msg);
 
-        let z = E::Fs::rand(rng);
+        let z = E::Fs::random(rng);
 
         s.mul_assign(&z);
         s.negate();
@@ -218,13 +218,13 @@ mod tests {
         let params = &JubjubBls12::new();
         let p_g = FixedGenerators::SpendingKeyGenerator;
 
-        let sk1 = PrivateKey::<Bls12>(rng.gen());
+        let sk1 = PrivateKey::<Bls12>(Fs::random(rng));
         let vk1 = PublicKey::from_private(&sk1, p_g, params);
         let msg1 = b"Foo bar";
         let sig1 = sk1.sign(msg1, rng, p_g, params);
         assert!(vk1.verify(msg1, &sig1, p_g, params));
 
-        let sk2 = PrivateKey::<Bls12>(rng.gen());
+        let sk2 = PrivateKey::<Bls12>(Fs::random(rng));
         let vk2 = PublicKey::from_private(&sk2, p_g, params);
         let msg2 = b"Foo bar";
         let sig2 = sk2.sign(msg2, rng, p_g, params);
@@ -262,7 +262,7 @@ mod tests {
             }
         };
 
-        let sk = PrivateKey::<Bls12>(rng.gen());
+        let sk = PrivateKey::<Bls12>(Fs::random(rng));
         let vk = PublicKey::from_private(&sk, p_g, params);
 
         // TODO: This test will need to change when #77 is fixed
@@ -281,7 +281,7 @@ mod tests {
         let params = &JubjubBls12::new();
 
         for _ in 0..1000 {
-            let sk = PrivateKey::<Bls12>(rng.gen());
+            let sk = PrivateKey::<Bls12>(Fs::random(rng));
             let vk = PublicKey::from_private(&sk, p_g, params);
             let msg = b"Foo bar";
             let sig = sk.sign(msg, rng, p_g, params);
@@ -314,7 +314,7 @@ mod tests {
         let params = &JubjubBls12::new();
 
         for _ in 0..1000 {
-            let sk = PrivateKey::<Bls12>(rng.gen());
+            let sk = PrivateKey::<Bls12>(Fs::random(rng));
             let vk = PublicKey::from_private(&sk, p_g, params);
 
             let msg1 = b"Foo bar";
@@ -328,7 +328,7 @@ mod tests {
             assert!(!vk.verify(msg1, &sig2, p_g, params));
             assert!(!vk.verify(msg2, &sig1, p_g, params));
 
-            let alpha = rng.gen();
+            let alpha = Fs::random(rng);
             let rsk = sk.randomize(alpha);
             let rvk = vk.randomize(alpha, p_g, params);
 

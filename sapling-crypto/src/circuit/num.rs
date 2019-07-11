@@ -455,7 +455,7 @@ impl<E: Engine> Num<E> {
 
 #[cfg(test)]
 mod test {
-    use rand::{SeedableRng, Rand, Rng, XorShiftRng};
+    use rand::{SeedableRng, XorShiftRng};
     use bellman::{ConstraintSystem};
     use ff::{BitIterator, Field, PrimeField};
     use pairing::bls12_381::{Bls12, Fr};
@@ -502,12 +502,15 @@ mod test {
 
     #[test]
     fn test_num_conditional_reversal() {
-        let mut rng = XorShiftRng::from_seed([0x3dbe6259, 0x8d313d76, 0x3237db17, 0xe5bc0654]);
+        let mut rng = XorShiftRng::from_seed([
+            0x59, 0x62, 0xbe, 0x3d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06, 0xbc,
+            0xe5,
+        ]);
         {
             let mut cs = TestConstraintSystem::<Bls12>::new();
 
-            let a = AllocatedNum::alloc(cs.namespace(|| "a"), || Ok(rng.gen())).unwrap();
-            let b = AllocatedNum::alloc(cs.namespace(|| "b"), || Ok(rng.gen())).unwrap();
+            let a = AllocatedNum::alloc(cs.namespace(|| "a"), || Ok(Fr::random(&mut rng))).unwrap();
+            let b = AllocatedNum::alloc(cs.namespace(|| "b"), || Ok(Fr::random(&mut rng))).unwrap();
             let condition = Boolean::constant(false);
             let (c, d) = AllocatedNum::conditionally_reverse(&mut cs, &a, &b, &condition).unwrap();
 
@@ -520,8 +523,8 @@ mod test {
         {
             let mut cs = TestConstraintSystem::<Bls12>::new();
 
-            let a = AllocatedNum::alloc(cs.namespace(|| "a"), || Ok(rng.gen())).unwrap();
-            let b = AllocatedNum::alloc(cs.namespace(|| "b"), || Ok(rng.gen())).unwrap();
+            let a = AllocatedNum::alloc(cs.namespace(|| "a"), || Ok(Fr::random(&mut rng))).unwrap();
+            let b = AllocatedNum::alloc(cs.namespace(|| "b"), || Ok(Fr::random(&mut rng))).unwrap();
             let condition = Boolean::constant(true);
             let (c, d) = AllocatedNum::conditionally_reverse(&mut cs, &a, &b, &condition).unwrap();
 
@@ -573,10 +576,13 @@ mod test {
 
     #[test]
     fn test_into_bits() {
-        let mut rng = XorShiftRng::from_seed([0x3dbe6259, 0x8d313d76, 0x3237db17, 0xe5bc0654]);
+        let mut rng = XorShiftRng::from_seed([
+            0x59, 0x62, 0xbe, 0x3d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06, 0xbc,
+            0xe5,
+        ]);
 
         for i in 0..200 {
-            let r = Fr::rand(&mut rng);
+            let r = Fr::random(&mut rng);
             let mut cs = TestConstraintSystem::<Bls12>::new();
 
             let n = AllocatedNum::alloc(&mut cs, || Ok(r)).unwrap();
@@ -597,7 +603,7 @@ mod test {
                 }
             }
 
-            cs.set("num", Fr::rand(&mut rng));
+            cs.set("num", Fr::random(&mut rng));
             assert!(!cs.is_satisfied());
             cs.set("num", r);
             assert!(cs.is_satisfied());

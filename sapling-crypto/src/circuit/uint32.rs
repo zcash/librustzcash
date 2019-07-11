@@ -420,7 +420,10 @@ mod test {
 
     #[test]
     fn test_uint32_from_bits_be() {
-        let mut rng = XorShiftRng::from_seed([0x5dbe6259, 0x8d313d76, 0x3237db17, 0xe5bc0653]);
+        let mut rng = XorShiftRng::from_seed([
+            0x59, 0x62, 0xbe, 0x5d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06, 0xbc,
+            0xe5,
+        ]);
 
         for _ in 0..1000 {
             let mut v = (0..32).map(|_| Boolean::constant(rng.gen())).collect::<Vec<_>>();
@@ -451,7 +454,10 @@ mod test {
 
     #[test]
     fn test_uint32_from_bits() {
-        let mut rng = XorShiftRng::from_seed([0x5dbe6259, 0x8d313d76, 0x3237db17, 0xe5bc0653]);
+        let mut rng = XorShiftRng::from_seed([
+            0x59, 0x62, 0xbe, 0x5d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06, 0xbc,
+            0xe5,
+        ]);
 
         for _ in 0..1000 {
             let mut v = (0..32).map(|_| Boolean::constant(rng.gen())).collect::<Vec<_>>();
@@ -482,7 +488,10 @@ mod test {
 
     #[test]
     fn test_uint32_xor() {
-        let mut rng = XorShiftRng::from_seed([0x5dbe6259, 0x8d313d76, 0x3237db17, 0xe5bc0653]);
+        let mut rng = XorShiftRng::from_seed([
+            0x59, 0x62, 0xbe, 0x5d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06, 0xbc,
+            0xe5,
+        ]);
 
         for _ in 0..1000 {
             let mut cs = TestConstraintSystem::<Bls12>::new();
@@ -524,7 +533,10 @@ mod test {
 
     #[test]
     fn test_uint32_addmany_constants() {
-        let mut rng = XorShiftRng::from_seed([0x5dbe6259, 0x8d313d76, 0x3237db17, 0xe5bc0654]);
+        let mut rng = XorShiftRng::from_seed([
+            0x59, 0x62, 0xbe, 0x5d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06, 0xbc,
+            0xe5,
+        ]);
 
         for _ in 0..1000 {
             let mut cs = TestConstraintSystem::<Bls12>::new();
@@ -563,7 +575,10 @@ mod test {
 
     #[test]
     fn test_uint32_addmany() {
-        let mut rng = XorShiftRng::from_seed([0x5dbe6259, 0x8d313d76, 0x3237db17, 0xe5bc0654]);
+        let mut rng = XorShiftRng::from_seed([
+            0x59, 0x62, 0xbe, 0x5d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06, 0xbc,
+            0xe5,
+        ]);
 
         for _ in 0..1000 {
             let mut cs = TestConstraintSystem::<Bls12>::new();
@@ -620,7 +635,10 @@ mod test {
 
     #[test]
     fn test_uint32_rotr() {
-        let mut rng = XorShiftRng::from_seed([0x5dbe6259, 0x8d313d76, 0x3237db17, 0xe5bc0654]);
+        let mut rng = XorShiftRng::from_seed([
+            0x59, 0x62, 0xbe, 0x5d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06, 0xbc,
+            0xe5,
+        ]);
 
         let mut num = rng.gen();
 
@@ -650,7 +668,10 @@ mod test {
 
     #[test]
     fn test_uint32_shr() {
-        let mut rng = XorShiftRng::from_seed([0x5dbe6259, 0x8d313d76, 0x3237db17, 0xe5bc0654]);
+        let mut rng = XorShiftRng::from_seed([
+            0x59, 0x62, 0xbe, 0x5d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06, 0xbc,
+            0xe5,
+        ]);
 
         for _ in 0..50 {
             for i in 0..60 {
@@ -670,7 +691,10 @@ mod test {
 
     #[test]
     fn test_uint32_sha256_maj() {
-        let mut rng = XorShiftRng::from_seed([0x5dbe6259, 0x8d313d76, 0x3237db17, 0xe5bc0653]);
+        let mut rng = XorShiftRng::from_seed([
+            0x59, 0x62, 0xbe, 0x5d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06, 0xbc,
+            0xe5,
+        ]);
 
         for _ in 0..1000 {
             let mut cs = TestConstraintSystem::<Bls12>::new();
@@ -711,7 +735,10 @@ mod test {
 
     #[test]
     fn test_uint32_sha256_ch() {
-        let mut rng = XorShiftRng::from_seed([0x5dbe6259, 0x8d313d76, 0x3237db17, 0xe5bc0653]);
+        let mut rng = XorShiftRng::from_seed([
+            0x59, 0x62, 0xbe, 0x5d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06, 0xbc,
+            0xe5,
+        ]);
 
         for _ in 0..1000 {
             let mut cs = TestConstraintSystem::<Bls12>::new();

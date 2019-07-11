@@ -86,7 +86,10 @@ fn test_multipacking() {
     use ::circuit::test::*;
     use super::boolean::{AllocatedBit, Boolean};
 
-    let mut rng = XorShiftRng::from_seed([0x3dbe6259, 0x8d313d76, 0x3237db17, 0xe5bc0654]);
+    let mut rng = XorShiftRng::from_seed([
+        0x59, 0x62, 0xbe, 0x3d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06, 0xbc,
+        0xe5,
+    ]);
 
     for num_bits in 0..1500 {
         let mut cs = TestConstraintSystem::<Bls12>::new();

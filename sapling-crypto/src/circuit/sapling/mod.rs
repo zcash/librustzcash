@@ -600,22 +600,25 @@ impl<'a, E: JubjubEngine> Circuit<E> for Output<'a, E> {
 fn test_input_circuit_with_bls12_381() {
     use ff::{BitIterator, Field};
     use pairing::bls12_381::*;
-    use rand::{SeedableRng, Rng, XorShiftRng};
+    use rand::{SeedableRng, Rng, RngCore, XorShiftRng};
     use ::circuit::test::*;
     use jubjub::{JubjubBls12, fs, edwards};
 
     let params = &JubjubBls12::new();
-    let rng = &mut XorShiftRng::from_seed([0x3dbe6259, 0x8d313d76, 0x3237db17, 0xe5bc0654]);
+    let rng = &mut XorShiftRng::from_seed([
+        0x58, 0x62, 0xbe, 0x3d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06, 0xbc,
+        0xe5,
+    ]);
 
     let tree_depth = 32;
 
     for _ in 0..10 {
         let value_commitment = ValueCommitment {
             value: rng.gen(),
-            randomness: rng.gen()
+            randomness: fs::Fs::random(rng),
         };
 
-        let nsk: fs::Fs = rng.gen();
+        let nsk = fs::Fs::random(rng);
         let ak = edwards::Point::rand(rng, params).mul_by_cofactor(params);
 
         let proof_generation_key = ::primitives::ProofGenerationKey {
@@ -628,7 +631,11 @@ fn test_input_circuit_with_bls12_381() {
         let payment_address;
 
         loop {
-            let diversifier = ::primitives::Diversifier(rng.gen());
+            let diversifier = {
+                let mut d = [0; 11];
+                rng.fill_bytes(&mut d);
+                ::primitives::Diversifier(d)
+            };
 
             if let Some(p) = viewing_key.into_payment_address(
                 diversifier,
@@ -641,9 +648,9 @@ fn test_input_circuit_with_bls12_381() {
         }
 
         let g_d = payment_address.diversifier.g_d(params).unwrap();
-        let commitment_randomness: fs::Fs = rng.gen();
-        let auth_path = vec![Some((rng.gen(), rng.gen())); tree_depth];
-        let ar: fs::Fs = rng.gen();
+        let commitment_randomness = fs::Fs::random(rng);
+        let auth_path = vec![Some((Fr::random(rng), rng.gen())); tree_depth];
+        let ar = fs::Fs::random(rng);
 
         {
             let rk = viewing_key.rk(ar, params).into_xy();
@@ -732,20 +739,23 @@ fn test_input_circuit_with_bls12_381() {
 fn test_output_circuit_with_bls12_381() {
     use ff::Field;
     use pairing::bls12_381::*;
-    use rand::{SeedableRng, Rng, XorShiftRng};
+    use rand::{SeedableRng, Rng, RngCore, XorShiftRng};
     use ::circuit::test::*;
     use jubjub::{JubjubBls12, fs, edwards};
 
     let params = &JubjubBls12::new();
-    let rng = &mut XorShiftRng::from_seed([0x3dbe6258, 0x8d313d76, 0x3237db17, 0xe5bc0654]);
+    let rng = &mut XorShiftRng::from_seed([
+        0x58, 0x62, 0xbe, 0x3d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06, 0xbc,
+        0xe5,
+    ]);
 
     for _ in 0..100 {
         let value_commitment = ValueCommitment {
             value: rng.gen(),
-            randomness: rng.gen()
+            randomness: fs::Fs::random(rng),
         };
 
-        let nsk: fs::Fs = rng.gen();
+        let nsk = fs::Fs::random(rng);
         let ak = edwards::Point::rand(rng, params).mul_by_cofactor(params);
 
         let proof_generation_key = ::primitives::ProofGenerationKey {
@@ -758,7 +768,11 @@ fn test_output_circuit_with_bls12_381() {
         let payment_address;
 
         loop {
-            let diversifier = ::primitives::Diversifier(rng.gen());
+            let diversifier = {
+                let mut d = [0; 11];
+                rng.fill_bytes(&mut d);
+                ::primitives::Diversifier(d)
+            };
 
             if let Some(p) = viewing_key.into_payment_address(
                 diversifier,
@@ -770,8 +784,8 @@ fn test_output_circuit_with_bls12_381() {
             }
         }
 
-        let commitment_randomness: fs::Fs = rng.gen();
-        let esk: fs::Fs = rng.gen();
+        let commitment_randomness = fs::Fs::random(rng);
+        let esk = fs::Fs::random(rng);
 
         {
             let mut cs = TestConstraintSystem::<Bls12>::new();

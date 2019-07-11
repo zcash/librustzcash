@@ -366,7 +366,10 @@ mod test {
         // doesn't result in more constraints.
 
         let mut cs = TestConstraintSystem::<Bls12>::new();
-        let mut rng = XorShiftRng::from_seed([0x5dbe6259, 0x8d313d76, 0x3237db17, 0xe5bc0654]);
+        let mut rng = XorShiftRng::from_seed([
+            0x59, 0x62, 0xbe, 0x5d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06, 0xbc,
+            0xe5,
+        ]);
         let input_bits: Vec<_> = (0..512)
           .map(|_| Boolean::constant(rng.gen()))
           .chain((0..512)
@@ -380,7 +383,10 @@ mod test {
     #[test]
     fn test_blake2s_constant_constraints() {
         let mut cs = TestConstraintSystem::<Bls12>::new();
-        let mut rng = XorShiftRng::from_seed([0x5dbe6259, 0x8d313d76, 0x3237db17, 0xe5bc0654]);
+        let mut rng = XorShiftRng::from_seed([
+            0x59, 0x62, 0xbe, 0x5d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06, 0xbc,
+            0xe5,
+        ]);
         let input_bits: Vec<_> = (0..512).map(|_| Boolean::constant(rng.gen())).collect();
         blake2s(&mut cs, &input_bits, b"12345678").unwrap();
         assert_eq!(cs.num_constraints(), 0);
@@ -388,7 +394,10 @@ mod test {
 
     #[test]
     fn test_blake2s() {
-        let mut rng = XorShiftRng::from_seed([0x5dbe6259, 0x8d313d76, 0x3237db17, 0xe5bc0654]);
+        let mut rng = XorShiftRng::from_seed([
+            0x59, 0x62, 0xbe, 0x5d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06, 0xbc,
+            0xe5,
+        ]);
 
         for input_len in (0..32).chain((32..256).filter(|a| a % 8 == 0))
         {

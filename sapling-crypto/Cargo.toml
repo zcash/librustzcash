@@ -17,7 +17,7 @@ bellman = { path = "../bellman" }
 blake2b_simd = "0.5"
 blake2s_simd = "0.5"
 ff = { path = "../ff" }
-rand = "0.4"
+rand = "0.5"
 digest = "0.7"
 byteorder = "1"
 

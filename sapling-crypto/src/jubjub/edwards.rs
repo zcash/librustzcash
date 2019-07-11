@@ -188,7 +188,7 @@ impl<E: JubjubEngine> Point<E, Unknown> {
     pub fn rand<R: Rng>(rng: &mut R, params: &E::Params) -> Self
     {
         loop {
-            let y: E::Fr = rng.gen();
+            let y = E::Fr::random(rng);
 
             if let Some(p) = Self::get_for_y(y, rng.gen(), params) {
                 return p;
