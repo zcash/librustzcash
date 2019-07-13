@@ -877,7 +877,9 @@ fn test_fq2_legendre() {
 }
 
 #[cfg(test)]
-use rand::{SeedableRng, XorShiftRng};
+use rand_core::SeedableRng;
+#[cfg(test)]
+use rand_xorshift::XorShiftRng;
 
 #[test]
 fn test_fq2_mul_nonresidue() {

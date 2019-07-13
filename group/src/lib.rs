@@ -1,5 +1,6 @@
 extern crate ff;
 extern crate rand;
+extern crate rand_xorshift;
 
 use ff::{PrimeField, PrimeFieldDecodingError, ScalarEngine, SqrtField};
 use rand::RngCore;

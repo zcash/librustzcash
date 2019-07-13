@@ -1,5 +1,6 @@
 use ff::{Field, PrimeField};
-use rand::{SeedableRng, XorShiftRng};
+use rand::SeedableRng;
+use rand_xorshift::XorShiftRng;
 
 use {CurveAffine, CurveProjective, EncodedPoint};
 

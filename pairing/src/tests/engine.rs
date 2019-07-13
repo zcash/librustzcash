@@ -1,5 +1,6 @@
 use group::{CurveAffine, CurveProjective};
-use rand::{SeedableRng, XorShiftRng};
+use rand_core::SeedableRng;
+use rand_xorshift::XorShiftRng;
 
 use {Engine, Field, PairingCurveAffine, PrimeField};
 
