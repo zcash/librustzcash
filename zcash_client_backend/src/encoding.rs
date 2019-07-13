@@ -101,7 +101,8 @@ pub fn decode_extended_full_viewing_key(
 ///
 /// ```
 /// use pairing::bls12_381::Bls12;
-/// use rand::{SeedableRng, XorShiftRng};
+/// use rand_core::SeedableRng;
+/// use rand_xorshift::XorShiftRng;
 /// use sapling_crypto::{
 ///     jubjub::edwards,
 ///     primitives::{Diversifier, PaymentAddress},
@@ -140,7 +141,8 @@ pub fn encode_payment_address(hrp: &str, addr: &PaymentAddress<Bls12>) -> String
 ///
 /// ```
 /// use pairing::bls12_381::Bls12;
-/// use rand::{SeedableRng, XorShiftRng};
+/// use rand_core::SeedableRng;
+/// use rand_xorshift::XorShiftRng;
 /// use sapling_crypto::{
 ///     jubjub::edwards,
 ///     primitives::{Diversifier, PaymentAddress},
@@ -188,7 +190,8 @@ pub fn decode_payment_address(hrp: &str, s: &str) -> Result<Option<PaymentAddres
 #[cfg(test)]
 mod tests {
     use pairing::bls12_381::Bls12;
-    use rand::{SeedableRng, XorShiftRng};
+    use rand_core::SeedableRng;
+    use rand_xorshift::XorShiftRng;
     use sapling_crypto::{
         jubjub::edwards,
         primitives::{Diversifier, PaymentAddress},

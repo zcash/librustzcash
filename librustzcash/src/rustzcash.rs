@@ -5,7 +5,8 @@ extern crate byteorder;
 extern crate ff;
 extern crate libc;
 extern crate pairing;
-extern crate rand;
+extern crate rand_core;
+extern crate rand_os;
 extern crate sapling_crypto;
 extern crate zcash_primitives;
 extern crate zcash_proofs;
@@ -37,7 +38,8 @@ use blake2s_simd::Params as Blake2sParams;
 
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 
-use rand::{OsRng, Rng};
+use rand_core::RngCore;
+use rand_os::OsRng;
 use std::io::BufReader;
 
 use libc::{c_char, c_uchar, int64_t, size_t, uint32_t, uint64_t};
@@ -388,9 +390,7 @@ pub extern "system" fn librustzcash_sapling_generate_r(result: *mut [c_uchar; 32
     // create random 64 byte buffer
     let mut rng = OsRng::new().expect("should be able to construct RNG");
     let mut buffer = [0u8; 64];
-    for i in 0..buffer.len() {
-        buffer[i] = rng.gen();
-    }
+    rng.fill_bytes(&mut buffer);
 
     // reduce to uniform value
     let r = <Bls12 as JubjubEngine>::Fs::to_uniform(&buffer[..]);

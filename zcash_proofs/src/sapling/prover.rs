@@ -3,7 +3,7 @@ use bellman::groth16::{
 };
 use ff::Field;
 use pairing::bls12_381::{Bls12, Fr};
-use rand::OsRng;
+use rand_os::OsRng;
 use sapling_crypto::{
     circuit::{
         multipack,

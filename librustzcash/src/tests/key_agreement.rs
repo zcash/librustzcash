@@ -1,6 +1,7 @@
 use ff::{PrimeField, PrimeFieldRepr};
 use pairing::bls12_381::Bls12;
-use rand::{OsRng, Rng};
+use rand_core::RngCore;
+use rand_os::OsRng;
 use sapling_crypto::jubjub::{edwards, JubjubBls12};
 use sapling_crypto::primitives::{Diversifier, ViewingKey};
 
@@ -22,7 +23,9 @@ fn test_key_agreement() {
 
     // Create a random address with the viewing key
     let addr = loop {
-        match vk.into_payment_address(Diversifier(rng.gen()), &params) {
+        let mut d = [0; 11];
+        rng.fill_bytes(&mut d);
+        match vk.into_payment_address(Diversifier(d), &params) {
             Some(a) => break a,
             None => {}
         }
