@@ -2,7 +2,7 @@
 
 use ff::{BitIterator, PrimeField, PrimeFieldRepr};
 use pairing::bls12_381::{Bls12, Fr, FrRepr};
-use rand::OsRng;
+use rand_os::OsRng;
 use sapling_crypto::{
     jubjub::{fs::Fs, FixedGenerators, JubjubBls12},
     pedersen_hash::{pedersen_hash, Personalization},

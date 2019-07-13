@@ -9,7 +9,8 @@ extern crate ff;
 extern crate fpe;
 extern crate hex;
 extern crate pairing;
-extern crate rand;
+extern crate rand_core;
+extern crate rand_os;
 extern crate sapling_crypto;
 extern crate sha2;
 

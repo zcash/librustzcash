@@ -1,6 +1,6 @@
 use ff::Field;
 use pairing::bls12_381::Bls12;
-use rand::thread_rng;
+use rand_os::OsRng;
 use sapling_crypto::{
     jubjub::{fs::Fs, FixedGenerators},
     redjubjub::PrivateKey,
@@ -197,7 +197,7 @@ fn tx_write_rejects_unexpected_binding_sig() {
 
     // Fails with an unexpected binding signature
     {
-        let rng = &mut thread_rng();
+        let rng = &mut OsRng::new().expect("should be able to construct RNG");
         let sk = PrivateKey::<Bls12>(Fs::random(rng));
         let sig = sk.sign(
             b"Foo bar",
