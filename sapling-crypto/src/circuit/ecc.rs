@@ -748,9 +748,11 @@ impl<E: JubjubEngine> MontgomeryPoint<E> {
 #[cfg(test)]
 mod test {
     use bellman::{ConstraintSystem};
-    use rand::{XorShiftRng, SeedableRng, Rng};
     use ff::{BitIterator, Field, PrimeField};
     use pairing::bls12_381::{Bls12, Fr};
+    use rand_core::{RngCore, SeedableRng};
+    use rand_xorshift::XorShiftRng;
+
     use ::circuit::test::*;
     use ::jubjub::{
         montgomery,
@@ -1001,10 +1003,10 @@ mod test {
                 y: num_y0
             };
 
-            let mut should_we_select = rng.gen();
+            let mut should_we_select = rng.next_u32() % 2 != 0;
 
             // Conditionally allocate
-            let mut b = if rng.gen() {
+            let mut b = if rng.next_u32() % 2 != 0 {
                 Boolean::from(AllocatedBit::alloc(
                     cs.namespace(|| "condition"),
                     Some(should_we_select)
@@ -1014,7 +1016,7 @@ mod test {
             };
 
             // Conditionally negate
-            if rng.gen() {
+            if rng.next_u32() % 2 != 0 {
                 b = b.not();
                 should_we_select = !should_we_select;
             }
@@ -1163,7 +1165,7 @@ mod test {
         for _ in 0..100 {
             let p1 = loop {
                 let x = Fr::random(rng);
-                let s: bool = rng.gen();
+                let s: bool = rng.next_u32() % 2 != 0;
 
                 if let Some(p) = montgomery::Point::<Bls12, _>::get_for_x(x, s, params) {
                     break p;
@@ -1172,7 +1174,7 @@ mod test {
 
             let p2 = loop {
                 let x = Fr::random(rng);
-                let s: bool = rng.gen();
+                let s: bool = rng.next_u32() % 2 != 0;
 
                 if let Some(p) = montgomery::Point::<Bls12, _>::get_for_x(x, s, params) {
                     break p;

@@ -308,7 +308,8 @@ mod test {
     use circuit::boolean::AllocatedBit;
     use pairing::bls12_381::Bls12;
     use circuit::test::TestConstraintSystem;
-    use rand::{XorShiftRng, SeedableRng, Rng};
+    use rand_core::{RngCore, SeedableRng};
+    use rand_xorshift::XorShiftRng;
 
     #[test]
     fn test_blank_hash() {
@@ -353,7 +354,7 @@ mod test {
             Boolean::from(
                 AllocatedBit::alloc(
                     cs.namespace(|| format!("input bit {}", i)),
-                    Some(rng.gen())
+                    Some(rng.next_u32() % 2 != 0)
                 ).unwrap()
             )
         }).collect();
@@ -380,7 +381,7 @@ mod test {
         for input_len in (0..32).chain((32..256).filter(|a| a % 8 == 0))
         {
             let mut h = Sha256::new();
-            let data: Vec<u8> = (0..input_len).map(|_| rng.gen()).collect();
+            let data: Vec<u8> = (0..input_len).map(|_| rng.next_u32() as u8).collect();
             h.input(&data);
             let hash_result = h.result();
 

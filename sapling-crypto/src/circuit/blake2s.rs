@@ -321,8 +321,10 @@ pub fn blake2s<E: Engine, CS: ConstraintSystem<E>>(
 #[cfg(test)]
 mod test {
     use blake2s_simd::Params as Blake2sParams;
-    use rand::{XorShiftRng, SeedableRng, Rng};
     use pairing::bls12_381::{Bls12};
+    use rand_core::{RngCore, SeedableRng};
+    use rand_xorshift::XorShiftRng;
+
     use ::circuit::boolean::{Boolean, AllocatedBit};
     use ::circuit::test::TestConstraintSystem;
     use super::blake2s;
@@ -371,7 +373,7 @@ mod test {
             0xe5,
         ]);
         let input_bits: Vec<_> = (0..512)
-          .map(|_| Boolean::constant(rng.gen()))
+          .map(|_| Boolean::constant(rng.next_u32() % 2 != 0))
           .chain((0..512)
                         .map(|i| AllocatedBit::alloc(cs.namespace(|| format!("input bit {}", i)), Some(true)).unwrap().into()))
           .collect();
@@ -387,7 +389,7 @@ mod test {
             0x59, 0x62, 0xbe, 0x5d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06, 0xbc,
             0xe5,
         ]);
-        let input_bits: Vec<_> = (0..512).map(|_| Boolean::constant(rng.gen())).collect();
+        let input_bits: Vec<_> = (0..512).map(|_| Boolean::constant(rng.next_u32() % 2 != 0)).collect();
         blake2s(&mut cs, &input_bits, b"12345678").unwrap();
         assert_eq!(cs.num_constraints(), 0);
     }
@@ -403,7 +405,7 @@ mod test {
         {
             let mut h = Blake2sParams::new().hash_length(32).personal(b"12345678").to_state();
 
-            let data: Vec<u8> = (0..input_len).map(|_| rng.gen()).collect();
+            let data: Vec<u8> = (0..input_len).map(|_| rng.next_u32() as u8).collect();
 
             h.update(&data);
 

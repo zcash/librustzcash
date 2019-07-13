@@ -455,10 +455,12 @@ impl<E: Engine> Num<E> {
 
 #[cfg(test)]
 mod test {
-    use rand::{SeedableRng, XorShiftRng};
     use bellman::{ConstraintSystem};
     use ff::{BitIterator, Field, PrimeField};
     use pairing::bls12_381::{Bls12, Fr};
+    use rand_core::SeedableRng;
+    use rand_xorshift::XorShiftRng;
+
     use ::circuit::test::*;
     use super::{AllocatedNum, Boolean};
 

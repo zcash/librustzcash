@@ -2,7 +2,7 @@
 //! See section 5.4.6 of the Sapling protocol specification.
 
 use ff::{Field, PrimeField, PrimeFieldRepr};
-use rand::{Rng};
+use rand_core::RngCore;
 use std::io::{self, Read, Write};
 
 use jubjub::{FixedGenerators, JubjubEngine, JubjubParams, Unknown, edwards::Point};
@@ -71,7 +71,7 @@ impl<E: JubjubEngine> PrivateKey<E> {
         write_scalar::<E, W>(&self.0, writer)
     }
 
-    pub fn sign<R: Rng>(
+    pub fn sign<R: RngCore>(
         &self,
         msg: &[u8],
         rng: &mut R,
@@ -163,7 +163,7 @@ pub struct BatchEntry<'a, E: JubjubEngine> {
 
 // TODO: #82: This is a naive implementation currently,
 // and doesn't use multiexp.
-pub fn batch_verify<'a, E: JubjubEngine, R: Rng>(
+pub fn batch_verify<'a, E: JubjubEngine, R: RngCore>(
     rng: &mut R,
     batch: &[BatchEntry<'a, E>],
     p_g: FixedGenerators,
@@ -206,7 +206,8 @@ pub fn batch_verify<'a, E: JubjubEngine, R: Rng>(
 #[cfg(test)]
 mod tests {
     use pairing::bls12_381::Bls12;
-    use rand::thread_rng;
+    use rand_core::SeedableRng;
+    use rand_xorshift::XorShiftRng;
 
     use jubjub::{JubjubBls12, fs::Fs, edwards};
 
@@ -214,7 +215,10 @@ mod tests {
 
     #[test]
     fn test_batch_verify() {
-        let rng = &mut thread_rng();
+        let rng = &mut XorShiftRng::from_seed([
+            0x59, 0x62, 0xbe, 0x5d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06, 0xbc,
+            0xe5,
+        ]);
         let params = &JubjubBls12::new();
         let p_g = FixedGenerators::SpendingKeyGenerator;
 
@@ -244,7 +248,10 @@ mod tests {
 
     #[test]
     fn cofactor_check() {
-        let rng = &mut thread_rng();
+        let rng = &mut XorShiftRng::from_seed([
+            0x59, 0x62, 0xbe, 0x5d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06, 0xbc,
+            0xe5,
+        ]);
         let params = &JubjubBls12::new();
         let zero = edwards::Point::zero();
         let p_g = FixedGenerators::SpendingKeyGenerator;
@@ -276,7 +283,10 @@ mod tests {
 
     #[test]
     fn round_trip_serialization() {
-        let rng = &mut thread_rng();
+        let rng = &mut XorShiftRng::from_seed([
+            0x59, 0x62, 0xbe, 0x5d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06, 0xbc,
+            0xe5,
+        ]);
         let p_g = FixedGenerators::SpendingKeyGenerator;
         let params = &JubjubBls12::new();
 
@@ -309,7 +319,10 @@ mod tests {
 
     #[test]
     fn random_signatures() {
-        let rng = &mut thread_rng();
+        let rng = &mut XorShiftRng::from_seed([
+            0x59, 0x62, 0xbe, 0x5d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06, 0xbc,
+            0xe5,
+        ]);
         let p_g = FixedGenerators::SpendingKeyGenerator;
         let params = &JubjubBls12::new();
 

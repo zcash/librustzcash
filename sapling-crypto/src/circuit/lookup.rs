@@ -196,11 +196,12 @@ pub fn lookup3_xy_with_conditional_negation<E: Engine, CS>(
 
 #[cfg(test)]
 mod test {
-    use rand::{SeedableRng, Rng, XorShiftRng};
     use super::*;
     use ::circuit::test::*;
     use ::circuit::boolean::{Boolean, AllocatedBit};
     use pairing::bls12_381::{Bls12, Fr};
+    use rand_core::{RngCore, SeedableRng};
+    use rand_xorshift::XorShiftRng;
 
     #[test]
     fn test_lookup3_xy() {
@@ -212,17 +213,17 @@ mod test {
         for _ in 0..100 {
             let mut cs = TestConstraintSystem::<Bls12>::new();
 
-            let a_val = rng.gen();
+            let a_val = rng.next_u32() % 2 != 0;
             let a = Boolean::from(
                 AllocatedBit::alloc(cs.namespace(|| "a"), Some(a_val)).unwrap()
             );
 
-            let b_val = rng.gen();
+            let b_val = rng.next_u32() % 2 != 0;
             let b = Boolean::from(
                 AllocatedBit::alloc(cs.namespace(|| "b"), Some(b_val)).unwrap()
             );
 
-            let c_val = rng.gen();
+            let c_val = rng.next_u32() % 2 != 0;
             let c = Boolean::from(
                 AllocatedBit::alloc(cs.namespace(|| "c"), Some(c_val)).unwrap()
             );
@@ -255,17 +256,17 @@ mod test {
         for _ in 0..100 {
             let mut cs = TestConstraintSystem::<Bls12>::new();
 
-            let a_val = rng.gen();
+            let a_val = rng.next_u32() % 2 != 0;
             let a = Boolean::from(
                 AllocatedBit::alloc(cs.namespace(|| "a"), Some(a_val)).unwrap()
             );
 
-            let b_val = rng.gen();
+            let b_val = rng.next_u32() % 2 != 0;
             let b = Boolean::from(
                 AllocatedBit::alloc(cs.namespace(|| "b"), Some(b_val)).unwrap()
             );
 
-            let c_val = rng.gen();
+            let c_val = rng.next_u32() % 2 != 0;
             let c = Boolean::from(
                 AllocatedBit::alloc(cs.namespace(|| "c"), Some(c_val)).unwrap()
             );

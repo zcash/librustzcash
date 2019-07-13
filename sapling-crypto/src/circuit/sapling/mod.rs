@@ -600,7 +600,9 @@ impl<'a, E: JubjubEngine> Circuit<E> for Output<'a, E> {
 fn test_input_circuit_with_bls12_381() {
     use ff::{BitIterator, Field};
     use pairing::bls12_381::*;
-    use rand::{SeedableRng, Rng, RngCore, XorShiftRng};
+    use rand_core::{RngCore, SeedableRng};
+    use rand_xorshift::XorShiftRng;
+
     use ::circuit::test::*;
     use jubjub::{JubjubBls12, fs, edwards};
 
@@ -614,7 +616,7 @@ fn test_input_circuit_with_bls12_381() {
 
     for _ in 0..10 {
         let value_commitment = ValueCommitment {
-            value: rng.gen(),
+            value: rng.next_u64(),
             randomness: fs::Fs::random(rng),
         };
 
@@ -649,7 +651,7 @@ fn test_input_circuit_with_bls12_381() {
 
         let g_d = payment_address.diversifier.g_d(params).unwrap();
         let commitment_randomness = fs::Fs::random(rng);
-        let auth_path = vec![Some((Fr::random(rng), rng.gen())); tree_depth];
+        let auth_path = vec![Some((Fr::random(rng), rng.next_u32() % 2 != 0)); tree_depth];
         let ar = fs::Fs::random(rng);
 
         {
@@ -739,7 +741,8 @@ fn test_input_circuit_with_bls12_381() {
 fn test_output_circuit_with_bls12_381() {
     use ff::Field;
     use pairing::bls12_381::*;
-    use rand::{SeedableRng, Rng, RngCore, XorShiftRng};
+    use rand_core::{RngCore, SeedableRng};
+    use rand_xorshift::XorShiftRng;
     use ::circuit::test::*;
     use jubjub::{JubjubBls12, fs, edwards};
 
@@ -751,7 +754,7 @@ fn test_output_circuit_with_bls12_381() {
 
     for _ in 0..100 {
         let value_commitment = ValueCommitment {
-            value: rng.gen(),
+            value: rng.next_u64(),
             randomness: fs::Fs::random(rng),
         };
 

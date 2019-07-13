@@ -14,7 +14,8 @@ use ff::{
     LegendreSymbol
 };
 
-use rand::{RngCore, XorShiftRng, SeedableRng};
+use rand_core::{RngCore, SeedableRng};
+use rand_xorshift::XorShiftRng;
 
 pub fn test_suite<E: JubjubEngine>(params: &E::Params) {
     test_back_and_forth::<E>(params);

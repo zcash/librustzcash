@@ -1,8 +1,9 @@
 extern crate ff;
 extern crate sapling_crypto;
 extern crate bellman;
-extern crate rand;
 extern crate pairing;
+extern crate rand_core;
+extern crate rand_xorshift;
 
 use ff::Field;
 use std::time::{Duration, Instant};
@@ -20,7 +21,8 @@ use sapling_crypto::primitives::{
     ValueCommitment
 };
 use bellman::groth16::*;
-use rand::{XorShiftRng, SeedableRng, Rng, RngCore};
+use rand_core::{RngCore, SeedableRng};
+use rand_xorshift::XorShiftRng;
 use pairing::bls12_381::{Bls12, Fr};
 
 const TREE_DEPTH: usize = 32;
@@ -86,7 +88,7 @@ fn main() {
         }
 
         let commitment_randomness = fs::Fs::random(rng);
-        let auth_path = vec![Some((Fr::random(rng), rng.gen())); TREE_DEPTH];
+        let auth_path = vec![Some((Fr::random(rng), rng.next_u32() % 2 != 0)); TREE_DEPTH];
         let ar = fs::Fs::random(rng);
         let anchor = Fr::random(rng);
 

@@ -8,9 +8,7 @@ use super::{
     edwards
 };
 
-use rand::{
-    Rng
-};
+use rand_core::RngCore;
 
 use std::marker::PhantomData;
 
@@ -101,12 +99,13 @@ impl<E: JubjubEngine> Point<E, Unknown> {
         convert_subgroup(&tmp)
     }
 
-    pub fn rand<R: Rng>(rng: &mut R, params: &E::Params) -> Self
+    pub fn rand<R: RngCore>(rng: &mut R, params: &E::Params) -> Self
     {
         loop {
             let x = E::Fr::random(rng);
+            let sign = rng.next_u32() % 2 != 0;
 
-            match Self::get_for_x(x, rng.gen(), params) {
+            match Self::get_for_x(x, sign, params) {
                 Some(p) => {
                     return p
                 },
