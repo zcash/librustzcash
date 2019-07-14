@@ -388,7 +388,7 @@ fn test_gen_r() {
 #[no_mangle]
 pub extern "system" fn librustzcash_sapling_generate_r(result: *mut [c_uchar; 32]) {
     // create random 64 byte buffer
-    let mut rng = OsRng::new().expect("should be able to construct RNG");
+    let mut rng = OsRng;
     let mut buffer = [0u8; 64];
     rng.fill_bytes(&mut buffer);
 
@@ -858,7 +858,7 @@ pub extern "system" fn librustzcash_sprout_prove(
     drop(sprout_fs);
 
     // Initialize secure RNG
-    let mut rng = OsRng::new().expect("should be able to construct RNG");
+    let mut rng = OsRng;
 
     let proof = create_random_proof(js, &params, &mut rng).expect("proving should not fail");
 

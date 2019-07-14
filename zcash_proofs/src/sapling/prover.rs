@@ -56,7 +56,7 @@ impl SaplingProvingContext {
         (),
     > {
         // Initialize secure RNG
-        let mut rng = OsRng::new().expect("should be able to construct RNG");
+        let mut rng = OsRng;
 
         // We create the randomness of the value commitment
         let rcv = Fs::random(&mut rng);
@@ -189,7 +189,7 @@ impl SaplingProvingContext {
         params: &JubjubBls12,
     ) -> (Proof<Bls12>, edwards::Point<Bls12, Unknown>) {
         // Initialize secure RNG
-        let mut rng = OsRng::new().expect("should be able to construct RNG");
+        let mut rng = OsRng;
 
         // We construct ephemeral randomness for the value commitment. This
         // randomness is not given back to the caller, but the synthetic
@@ -250,7 +250,7 @@ impl SaplingProvingContext {
         params: &JubjubBls12,
     ) -> Result<Signature, ()> {
         // Initialize secure RNG
-        let mut rng = OsRng::new().expect("should be able to construct RNG");
+        let mut rng = OsRng;
 
         // Grab the current `bsk` from the context
         let bsk = PrivateKey::<Bls12>(self.bsk);

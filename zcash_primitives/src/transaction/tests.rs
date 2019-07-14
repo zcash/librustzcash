@@ -197,7 +197,7 @@ fn tx_write_rejects_unexpected_binding_sig() {
 
     // Fails with an unexpected binding signature
     {
-        let rng = &mut OsRng::new().expect("should be able to construct RNG");
+        let rng = &mut OsRng;
         let sk = PrivateKey::<Bls12>(Fs::random(rng));
         let sig = sk.sign(
             b"Foo bar",

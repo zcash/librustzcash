@@ -137,7 +137,7 @@ impl Memo {
 
 fn generate_esk() -> Fs {
     // create random 64 byte buffer
-    let mut rng = OsRng::new().expect("should be able to construct RNG");
+    let mut rng = OsRng;
     let mut buffer = [0u8; 64];
     rng.fill_bytes(&mut buffer);
 
@@ -228,7 +228,7 @@ fn prf_ock(
 ///     JUBJUB,
 /// };
 ///
-/// let mut rng = OsRng::new().unwrap();
+/// let mut rng = OsRng;
 ///
 /// let diversifier = Diversifier([0; 11]);
 /// let pk_d = diversifier.g_d::<Bls12>(&JUBJUB).unwrap();
@@ -848,7 +848,7 @@ mod tests {
 
     #[test]
     fn decryption_with_invalid_ivk() {
-        let mut rng = OsRng::new().expect("should be able to construct RNG");
+        let mut rng = OsRng;
 
         let (_, _, _, cmu, epk, enc_ciphertext, _) = random_enc_ciphertext(&mut rng);
 
@@ -860,7 +860,7 @@ mod tests {
 
     #[test]
     fn decryption_with_invalid_epk() {
-        let mut rng = OsRng::new().expect("should be able to construct RNG");
+        let mut rng = OsRng;
 
         let (_, ivk, _, cmu, _, enc_ciphertext, _) = random_enc_ciphertext(&mut rng);
 
@@ -877,7 +877,7 @@ mod tests {
 
     #[test]
     fn decryption_with_invalid_cmu() {
-        let mut rng = OsRng::new().expect("should be able to construct RNG");
+        let mut rng = OsRng;
 
         let (_, ivk, _, _, epk, enc_ciphertext, _) = random_enc_ciphertext(&mut rng);
 
@@ -889,7 +889,7 @@ mod tests {
 
     #[test]
     fn decryption_with_invalid_tag() {
-        let mut rng = OsRng::new().expect("should be able to construct RNG");
+        let mut rng = OsRng;
 
         let (_, ivk, _, cmu, epk, mut enc_ciphertext, _) = random_enc_ciphertext(&mut rng);
 
@@ -902,7 +902,7 @@ mod tests {
 
     #[test]
     fn decryption_with_invalid_version_byte() {
-        let mut rng = OsRng::new().expect("should be able to construct RNG");
+        let mut rng = OsRng;
 
         let (ovk, ivk, cv, cmu, epk, mut enc_ciphertext, out_ciphertext) =
             random_enc_ciphertext(&mut rng);
@@ -924,7 +924,7 @@ mod tests {
 
     #[test]
     fn decryption_with_invalid_diversifier() {
-        let mut rng = OsRng::new().expect("should be able to construct RNG");
+        let mut rng = OsRng;
 
         let (ovk, ivk, cv, cmu, epk, mut enc_ciphertext, out_ciphertext) =
             random_enc_ciphertext(&mut rng);
@@ -946,7 +946,7 @@ mod tests {
 
     #[test]
     fn decryption_with_incorrect_diversifier() {
-        let mut rng = OsRng::new().expect("should be able to construct RNG");
+        let mut rng = OsRng;
 
         let (ovk, ivk, cv, cmu, epk, mut enc_ciphertext, out_ciphertext) =
             random_enc_ciphertext(&mut rng);
@@ -968,7 +968,7 @@ mod tests {
 
     #[test]
     fn compact_decryption_with_invalid_ivk() {
-        let mut rng = OsRng::new().expect("should be able to construct RNG");
+        let mut rng = OsRng;
 
         let (_, _, _, cmu, epk, enc_ciphertext, _) = random_enc_ciphertext(&mut rng);
 
@@ -985,7 +985,7 @@ mod tests {
 
     #[test]
     fn compact_decryption_with_invalid_epk() {
-        let mut rng = OsRng::new().expect("should be able to construct RNG");
+        let mut rng = OsRng;
 
         let (_, ivk, _, cmu, _, enc_ciphertext, _) = random_enc_ciphertext(&mut rng);
 
@@ -1002,7 +1002,7 @@ mod tests {
 
     #[test]
     fn compact_decryption_with_invalid_cmu() {
-        let mut rng = OsRng::new().expect("should be able to construct RNG");
+        let mut rng = OsRng;
 
         let (_, ivk, _, _, epk, enc_ciphertext, _) = random_enc_ciphertext(&mut rng);
 
@@ -1019,7 +1019,7 @@ mod tests {
 
     #[test]
     fn compact_decryption_with_invalid_version_byte() {
-        let mut rng = OsRng::new().expect("should be able to construct RNG");
+        let mut rng = OsRng;
 
         let (ovk, ivk, cv, cmu, epk, mut enc_ciphertext, out_ciphertext) =
             random_enc_ciphertext(&mut rng);
@@ -1046,7 +1046,7 @@ mod tests {
 
     #[test]
     fn compact_decryption_with_invalid_diversifier() {
-        let mut rng = OsRng::new().expect("should be able to construct RNG");
+        let mut rng = OsRng;
 
         let (ovk, ivk, cv, cmu, epk, mut enc_ciphertext, out_ciphertext) =
             random_enc_ciphertext(&mut rng);
@@ -1073,7 +1073,7 @@ mod tests {
 
     #[test]
     fn compact_decryption_with_incorrect_diversifier() {
-        let mut rng = OsRng::new().expect("should be able to construct RNG");
+        let mut rng = OsRng;
 
         let (ovk, ivk, cv, cmu, epk, mut enc_ciphertext, out_ciphertext) =
             random_enc_ciphertext(&mut rng);
@@ -1100,7 +1100,7 @@ mod tests {
 
     #[test]
     fn recovery_with_invalid_ovk() {
-        let mut rng = OsRng::new().expect("should be able to construct RNG");
+        let mut rng = OsRng;
 
         let (mut ovk, _, cv, cmu, epk, enc_ciphertext, out_ciphertext) =
             random_enc_ciphertext(&mut rng);
@@ -1114,7 +1114,7 @@ mod tests {
 
     #[test]
     fn recovery_with_invalid_cv() {
-        let mut rng = OsRng::new().expect("should be able to construct RNG");
+        let mut rng = OsRng;
 
         let (ovk, _, _, cmu, epk, enc_ciphertext, out_ciphertext) = random_enc_ciphertext(&mut rng);
 
@@ -1133,7 +1133,7 @@ mod tests {
 
     #[test]
     fn recovery_with_invalid_cmu() {
-        let mut rng = OsRng::new().expect("should be able to construct RNG");
+        let mut rng = OsRng;
 
         let (ovk, _, cv, _, epk, enc_ciphertext, out_ciphertext) = random_enc_ciphertext(&mut rng);
 
@@ -1152,7 +1152,7 @@ mod tests {
 
     #[test]
     fn recovery_with_invalid_epk() {
-        let mut rng = OsRng::new().expect("should be able to construct RNG");
+        let mut rng = OsRng;
 
         let (ovk, _, cv, cmu, _, enc_ciphertext, out_ciphertext) = random_enc_ciphertext(&mut rng);
 
@@ -1171,7 +1171,7 @@ mod tests {
 
     #[test]
     fn recovery_with_invalid_enc_tag() {
-        let mut rng = OsRng::new().expect("should be able to construct RNG");
+        let mut rng = OsRng;
 
         let (ovk, _, cv, cmu, epk, mut enc_ciphertext, out_ciphertext) =
             random_enc_ciphertext(&mut rng);
@@ -1185,7 +1185,7 @@ mod tests {
 
     #[test]
     fn recovery_with_invalid_out_tag() {
-        let mut rng = OsRng::new().expect("should be able to construct RNG");
+        let mut rng = OsRng;
 
         let (ovk, _, cv, cmu, epk, enc_ciphertext, mut out_ciphertext) =
             random_enc_ciphertext(&mut rng);
@@ -1199,7 +1199,7 @@ mod tests {
 
     #[test]
     fn recovery_with_invalid_version_byte() {
-        let mut rng = OsRng::new().expect("should be able to construct RNG");
+        let mut rng = OsRng;
 
         let (ovk, _, cv, cmu, epk, mut enc_ciphertext, out_ciphertext) =
             random_enc_ciphertext(&mut rng);
@@ -1221,7 +1221,7 @@ mod tests {
 
     #[test]
     fn recovery_with_invalid_diversifier() {
-        let mut rng = OsRng::new().expect("should be able to construct RNG");
+        let mut rng = OsRng;
 
         let (ovk, _, cv, cmu, epk, mut enc_ciphertext, out_ciphertext) =
             random_enc_ciphertext(&mut rng);
@@ -1243,7 +1243,7 @@ mod tests {
 
     #[test]
     fn recovery_with_incorrect_diversifier() {
-        let mut rng = OsRng::new().expect("should be able to construct RNG");
+        let mut rng = OsRng;
 
         let (ovk, _, cv, cmu, epk, mut enc_ciphertext, out_ciphertext) =
             random_enc_ciphertext(&mut rng);

@@ -113,7 +113,7 @@ pub fn spend_sig(
     params: &JubjubBls12,
 ) -> Signature {
     // Initialize secure RNG
-    let mut rng = OsRng::new().expect("should be able to construct RNG");
+    let mut rng = OsRng;
 
     // We compute `rsk`...
     let rsk = ask.randomize(ar);

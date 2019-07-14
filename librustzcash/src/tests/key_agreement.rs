@@ -13,7 +13,7 @@ use {
 #[test]
 fn test_key_agreement() {
     let params = JubjubBls12::new();
-    let mut rng = OsRng::new().unwrap();
+    let mut rng = OsRng;
 
     // Create random viewing key
     let vk = ViewingKey::<Bls12> {
