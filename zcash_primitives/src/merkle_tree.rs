@@ -87,13 +87,14 @@ impl<Node: Hashable> CommitmentTree<Node> {
         })
     }
 
-    /// Returns the number of notes in the tree.
+    /// Returns the number of leaf nodes in the tree.
     pub fn size(&self) -> usize {
         self.parents.iter().enumerate().fold(
             match (self.left, self.right) {
                 (None, None) => 0,
-                (Some(_), None) | (None, Some(_)) => 1,
+                (Some(_), None) => 1,
                 (Some(_), Some(_)) => 2,
+                (None, Some(_)) => unreachable!(),
             },
             |acc, (i, p)| {
                 // Treat occupation of parents array as a binary number
@@ -110,7 +111,7 @@ impl<Node: Hashable> CommitmentTree<Node> {
             && self.parents.iter().all(|p| p.is_some())
     }
 
-    /// Adds a note to the tree.
+    /// Adds a leaf node to the tree.
     ///
     /// Returns an error if the tree is full.
     pub fn append(&mut self, node: Node) -> Result<(), ()> {
@@ -269,7 +270,7 @@ impl<Node: Hashable> IncrementalWitness<Node> {
         Optional::write(&mut writer, &self.cursor, |w, t| t.write(w))
     }
 
-    /// Returns the position of the witnessed note in the commitment tree.
+    /// Returns the position of the witnessed leaf node in the commitment tree.
     pub fn position(&self) -> usize {
         self.tree.size() - 1
     }
@@ -328,7 +329,7 @@ impl<Node: Hashable> IncrementalWitness<Node> {
         d + skip
     }
 
-    /// Tracks a note that has been added to the underlying tree.
+    /// Tracks a leaf node that has been added to the underlying tree.
     ///
     /// Returns an error if the tree is full.
     pub fn append(&mut self, node: Node) -> Result<(), ()> {
