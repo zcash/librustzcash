@@ -1,5 +1,6 @@
 extern crate bellman;
-extern crate blake2_rfc;
+extern crate blake2b_simd;
+extern crate blake2s_simd;
 extern crate byteorder;
 extern crate ff;
 extern crate libc;
@@ -32,7 +33,7 @@ use bellman::groth16::{
     create_random_proof, verify_proof, Parameters, PreparedVerifyingKey, Proof,
 };
 
-use blake2_rfc::blake2s::Blake2s;
+use blake2s_simd::Params as Blake2sParams;
 
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 
@@ -319,7 +320,10 @@ pub extern "system" fn librustzcash_crh_ivk(
     let ak = unsafe { &*ak };
     let nk = unsafe { &*nk };
 
-    let mut h = Blake2s::with_params(32, &[], &[], CRH_IVK_PERSONALIZATION);
+    let mut h = Blake2sParams::new()
+        .hash_length(32)
+        .personal(CRH_IVK_PERSONALIZATION)
+        .to_state();
     h.update(ak);
     h.update(nk);
     let mut h = h.finalize().as_ref().to_vec();

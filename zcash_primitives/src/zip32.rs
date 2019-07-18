@@ -1,5 +1,5 @@
 use aes::Aes256;
-use blake2_rfc::blake2b::Blake2b;
+use blake2b_simd::Params as Blake2bParams;
 use byteorder::{ByteOrder, LittleEndian, ReadBytesExt, WriteBytesExt};
 use ff::Field;
 use fpe::ff1::{BinaryNumeralString, FF1};
@@ -33,7 +33,10 @@ struct FVKFingerprint([u8; 32]);
 
 impl<E: JubjubEngine> From<&FullViewingKey<E>> for FVKFingerprint {
     fn from(fvk: &FullViewingKey<E>) -> Self {
-        let mut h = Blake2b::with_params(32, &[], &[], ZIP32_SAPLING_FVFP_PERSONALIZATION);
+        let mut h = Blake2bParams::new()
+            .hash_length(32)
+            .personal(ZIP32_SAPLING_FVFP_PERSONALIZATION)
+            .to_state();
         h.update(&fvk.to_bytes());
         let mut fvfp = [0u8; 32];
         fvfp.copy_from_slice(h.finalize().as_bytes());
@@ -225,9 +228,10 @@ impl std::fmt::Debug for ExtendedFullViewingKey {
 
 impl ExtendedSpendingKey {
     pub fn master(seed: &[u8]) -> Self {
-        let mut h = Blake2b::with_params(64, &[], &[], ZIP32_SAPLING_MASTER_PERSONALIZATION);
-        h.update(seed);
-        let i = h.finalize();
+        let i = Blake2bParams::new()
+            .hash_length(64)
+            .personal(ZIP32_SAPLING_MASTER_PERSONALIZATION)
+            .hash(seed);
 
         let sk_m = &i.as_bytes()[..32];
         let mut c_m = [0u8; 32];
