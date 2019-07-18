@@ -1,91 +1,21 @@
 use bellman::groth16::{
     create_random_proof, verify_proof, Parameters, PreparedVerifyingKey, Proof,
 };
-use byteorder::{LittleEndian, ReadBytesExt};
-use ff::{Field, PrimeField, PrimeFieldRepr};
-use pairing::bls12_381::{Bls12, Fr, FrRepr};
+use ff::Field;
+use pairing::bls12_381::{Bls12, Fr};
 use rand::{OsRng, Rand};
 use sapling_crypto::{
     circuit::{
         multipack,
-        sapling::{Output, Spend, TREE_DEPTH},
+        sapling::{Output, Spend},
     },
     jubjub::{edwards, fs::Fs, FixedGenerators, JubjubBls12, Unknown},
     primitives::{Diversifier, Note, PaymentAddress, ProofGenerationKey, ValueCommitment},
     redjubjub::{PrivateKey, PublicKey, Signature},
 };
+use zcash_primitives::{merkle_tree::CommitmentTreeWitness, sapling::Node};
 
 use super::compute_value_balance;
-
-/// A witness to a path from a postion in a particular Sapling commitment tree
-/// to the root of that tree.
-pub struct CommitmentTreeWitness {
-    auth_path: Vec<Option<(Fr, bool)>>,
-    position: u64,
-}
-
-impl CommitmentTreeWitness {
-    pub fn from_slice(mut witness: &[u8]) -> Result<Self, ()> {
-        // Skip the first byte, which should be "32" to signify the length of
-        // the following vector of Pedersen hashes.
-        assert_eq!(witness[0], TREE_DEPTH as u8);
-        witness = &witness[1..];
-
-        // Begin to construct the authentication path
-        let mut auth_path = vec![None; TREE_DEPTH];
-
-        // The vector works in reverse
-        for i in (0..TREE_DEPTH).rev() {
-            // skip length of inner vector
-            assert_eq!(witness[0], 32); // the length of a pedersen hash
-            witness = &witness[1..];
-
-            // Grab the sibling node at this depth in the tree
-            let mut sibling = [0u8; 32];
-            sibling.copy_from_slice(&witness[0..32]);
-            witness = &witness[32..];
-
-            // Sibling node should be an element of Fr
-            let sibling = match {
-                let mut repr = FrRepr::default();
-                repr.read_le(&sibling[..]).expect("length is 32 bytes");
-                Fr::from_repr(repr)
-            } {
-                Ok(p) => p,
-                Err(_) => return Err(()),
-            };
-
-            // Set the value in the auth path; we put false here
-            // for now (signifying the position bit) which we'll
-            // fill in later.
-            auth_path[i] = Some((sibling, false));
-        }
-
-        // Read the position from the witness
-        let position = witness
-            .read_u64::<LittleEndian>()
-            .expect("should have had index at the end");
-
-        // Given the position, let's finish constructing the authentication
-        // path
-        let mut tmp = position;
-        for i in 0..TREE_DEPTH {
-            auth_path[i].as_mut().map(|p| p.1 = (tmp & 1) == 1);
-
-            tmp >>= 1;
-        }
-
-        // The witness should be empty now; if it wasn't, the caller would
-        // have provided more information than they should have, indicating
-        // a bug downstream
-        assert_eq!(witness.len(), 0);
-
-        Ok(CommitmentTreeWitness {
-            auth_path,
-            position,
-        })
-    }
-}
 
 /// A context object for creating the Sapling components of a Zcash transaction.
 pub struct SaplingProvingContext {
@@ -113,7 +43,7 @@ impl SaplingProvingContext {
         ar: Fs,
         value: u64,
         anchor: Fr,
-        witness: CommitmentTreeWitness,
+        witness: CommitmentTreeWitness<Node>,
         proving_key: &Parameters<Bls12>,
         verifying_key: &PreparedVerifyingKey<Bls12>,
         params: &JubjubBls12,
@@ -182,7 +112,11 @@ impl SaplingProvingContext {
             payment_address: Some(payment_address),
             commitment_randomness: Some(rcm),
             ar: Some(ar),
-            auth_path: witness.auth_path,
+            auth_path: witness
+                .auth_path
+                .iter()
+                .map(|n| n.map(|(node, b)| (node.into(), b)))
+                .collect(),
             anchor: Some(anchor),
         };
 

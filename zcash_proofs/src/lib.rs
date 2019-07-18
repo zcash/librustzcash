@@ -5,6 +5,7 @@ extern crate ff;
 extern crate pairing;
 extern crate rand;
 extern crate sapling_crypto;
+extern crate zcash_primitives;
 
 use bellman::groth16::{prepare_verifying_key, Parameters, PreparedVerifyingKey, VerifyingKey};
 use pairing::bls12_381::Bls12;
