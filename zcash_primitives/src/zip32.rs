@@ -97,7 +97,7 @@ struct ChainCode([u8; 32]);
 pub struct DiversifierIndex(pub [u8; 11]);
 
 impl DiversifierIndex {
-    fn new() -> Self {
+    pub fn new() -> Self {
         DiversifierIndex([0; 11])
     }
 
@@ -116,10 +116,10 @@ impl DiversifierIndex {
 
 /// A key used to derive diversifiers for a particular child key
 #[derive(Clone, Copy, Debug, PartialEq)]
-struct DiversifierKey([u8; 32]);
+pub struct DiversifierKey(pub [u8; 32]);
 
 impl DiversifierKey {
-    fn master(sk_m: &[u8]) -> Self {
+    pub fn master(sk_m: &[u8]) -> Self {
         let mut dk_m = [0u8; 32];
         dk_m.copy_from_slice(&prf_expand(sk_m, &[0x10]).as_bytes()[..32]);
         DiversifierKey(dk_m)
@@ -134,7 +134,7 @@ impl DiversifierKey {
     /// Returns the first index starting from j that generates a valid
     /// diversifier, along with the corresponding diversifier. Returns
     /// an error if the diversifier space is exhausted.
-    fn diversifier(&self, mut j: DiversifierIndex) -> Result<(DiversifierIndex, Diversifier), ()> {
+    pub fn diversifier(&self, mut j: DiversifierIndex) -> Result<(DiversifierIndex, Diversifier), ()> {
         let ff = FF1::<Aes256>::new(&self.0, 2).unwrap();
         loop {
             // Generate d_j
