@@ -49,7 +49,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 
 [[package]]
 name = "bech32"
-version = "0.6.0"
+version = "0.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 
 [[package]]
@@ -528,7 +528,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 name = "zcash_client_backend"
 version = "0.0.0"
 dependencies = [
- "bech32 0.6.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "bech32 0.7.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "pairing 0.14.2",
  "rand_core 0.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "rand_xorshift 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -578,7 +578,7 @@ dependencies = [
 "checksum arrayref 0.3.5 (registry+https://github.com/rust-lang/crates.io-index)" = "0d382e583f07208808f6b1249e60848879ba3543f57c32277bf52d69c2f0f0ee"
 "checksum arrayvec 0.4.10 (registry+https://github.com/rust-lang/crates.io-index)" = "92c7fb76bc8826a8b33b4ee5bb07a247a81e76764ab4d55e8f73e3a4d8808c71"
 "checksum autocfg 0.1.4 (registry+https://github.com/rust-lang/crates.io-index)" = "0e49efa51329a5fd37e7c79db4621af617cd4e3e5bc224939808d076077077bf"
-"checksum bech32 0.6.0 (registry+https://github.com/rust-lang/crates.io-index)" = "58946044516aa9dc922182e0d6e9d124a31aafe6b421614654eb27cf90cec09c"
+"checksum bech32 0.7.1 (registry+https://github.com/rust-lang/crates.io-index)" = "9e0089c35ab7c6f2bc55ab23f769913f0ac65b1023e7e74638a1f43128dd5df2"
 "checksum bit-vec 0.4.4 (registry+https://github.com/rust-lang/crates.io-index)" = "02b4ff8b16e6076c3e14220b39fbc1fabb6737522281a388998046859400895f"
 "checksum blake2b_simd 0.5.1 (registry+https://github.com/rust-lang/crates.io-index)" = "d909f9ef55928e57e7de9638828bc9407233b5cb0904066a7edebbaa9946db2f"
 "checksum blake2s_simd 0.5.1 (registry+https://github.com/rust-lang/crates.io-index)" = "fa20660ff9f1e6d0a05444b5ebbbae13e4c018d4c66cc78c7e421e3396358a52"

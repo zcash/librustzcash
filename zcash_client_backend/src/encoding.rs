@@ -3,7 +3,7 @@
 //! Human-Readable Prefixes (HRPs) for Bech32 encodings are located in the [`constants`]
 //! module.
 
-use bech32::{convert_bits, Bech32, Error};
+use bech32::{self, Error, FromBase32, ToBase32};
 use pairing::bls12_381::Bls12;
 use sapling_crypto::{
     jubjub::edwards,
@@ -21,21 +21,16 @@ where
 {
     let mut data: Vec<u8> = vec![];
     write(&mut data).expect("Should be able to write to a Vec");
-
-    let converted =
-        convert_bits(&data, 8, 5, true).expect("Should be able to convert Vec<u8> to Vec<u5>");
-    let encoded = Bech32::new_check_data(hrp.into(), converted).expect("hrp is not empty");
-
-    encoded.to_string()
+    bech32::encode(hrp, data.to_base32()).expect("hrp is invalid")
 }
 
 fn bech32_decode<T, F>(hrp: &str, s: &str, read: F) -> Result<Option<T>, Error>
 where
     F: Fn(Vec<u8>) -> Option<T>,
 {
-    let decoded = s.parse::<Bech32>()?;
-    if decoded.hrp() == hrp {
-        convert_bits(decoded.data(), 5, 8, false).map(|data| read(data))
+    let (decoded_hrp, data) = bech32::decode(s)?;
+    if decoded_hrp == hrp {
+        Vec::<u8>::from_base32(&data).map(|data| read(data))
     } else {
         Ok(None)
     }
