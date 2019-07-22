@@ -6,12 +6,12 @@ authors = [
 ]
 
 [dependencies]
-aes = "0.2"
+aes = "0.3"
 blake2b_simd = "0.5"
 byteorder = "1"
 crypto_api_chachapoly = "0.1"
 ff = { path = "../ff" }
-fpe = "0.1"
+fpe = "0.2"
 hex = "0.3"
 lazy_static = "1"
 pairing = { path = "../pairing" }
