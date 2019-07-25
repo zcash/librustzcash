@@ -44,7 +44,7 @@ impl Error {
 pub enum ErrorKind {
     AnchorMismatch,
     BindingSig,
-    ChangeIsNegative(i64),
+    ChangeIsNegative(Amount),
     InvalidAddress,
     InvalidAmount,
     InvalidWitness,
@@ -252,7 +252,7 @@ impl<R: RngCore + CryptoRng> Builder<R> {
 
         let alpha = Fs::random(&mut self.rng);
 
-        self.mtx.value_balance.0 += note.value as i64;
+        self.mtx.value_balance += Amount(note.value as i64);
 
         self.spends.push(SpendDescriptionInfo {
             extsk,
@@ -275,7 +275,7 @@ impl<R: RngCore + CryptoRng> Builder<R> {
     ) -> Result<(), Error> {
         let output = SaplingOutput::new(&mut self.rng, ovk, to, value, memo)?;
 
-        self.mtx.value_balance.0 -= value.0;
+        self.mtx.value_balance -= value;
 
         self.outputs.push(output);
 
@@ -329,14 +329,14 @@ impl<R: RngCore + CryptoRng> Builder<R> {
         //
 
         // Valid change
-        let change = self.mtx.value_balance.0
-            - self.fee.0
+        let change = self.mtx.value_balance
+            - self.fee
             - self
                 .mtx
                 .vout
                 .iter()
-                .map(|output| output.value.0)
-                .sum::<i64>();
+                .map(|output| output.value)
+                .sum::<Amount>();
         if change.is_negative() {
             return Err(Error(ErrorKind::ChangeIsNegative(change)));
         }
@@ -362,7 +362,7 @@ impl<R: RngCore + CryptoRng> Builder<R> {
                 return Err(Error(ErrorKind::NoChangeAddress));
             };
 
-            self.add_sapling_output(change_address.0, change_address.1, Amount(change), None)?;
+            self.add_sapling_output(change_address.0, change_address.1, change, None)?;
         }
 
         //
@@ -591,7 +591,7 @@ mod tests {
         {
             let builder = Builder::new(0);
             match builder.build(1, MockTxProver) {
-                Err(e) => assert_eq!(e.kind(), &ErrorKind::ChangeIsNegative(-10000)),
+                Err(e) => assert_eq!(e.kind(), &ErrorKind::ChangeIsNegative(Amount(-10000))),
                 Ok(_) => panic!("Should have failed"),
             }
         }
@@ -608,7 +608,7 @@ mod tests {
                 .add_sapling_output(ovk.clone(), to.clone(), Amount(50000), None)
                 .unwrap();
             match builder.build(1, MockTxProver) {
-                Err(e) => assert_eq!(e.kind(), &ErrorKind::ChangeIsNegative(-60000)),
+                Err(e) => assert_eq!(e.kind(), &ErrorKind::ChangeIsNegative(Amount(-60000))),
                 Ok(_) => panic!("Should have failed"),
             }
         }
@@ -621,7 +621,7 @@ mod tests {
                 .add_transparent_output(&TransparentAddress::PublicKey([0; 20]), Amount(50000))
                 .unwrap();
             match builder.build(1, MockTxProver) {
-                Err(e) => assert_eq!(e.kind(), &ErrorKind::ChangeIsNegative(-60000)),
+                Err(e) => assert_eq!(e.kind(), &ErrorKind::ChangeIsNegative(Amount(-60000))),
                 Ok(_) => panic!("Should have failed"),
             }
         }
@@ -653,7 +653,7 @@ mod tests {
                 .add_transparent_output(&TransparentAddress::PublicKey([0; 20]), Amount(20000))
                 .unwrap();
             match builder.build(1, MockTxProver) {
-                Err(e) => assert_eq!(e.kind(), &ErrorKind::ChangeIsNegative(-1)),
+                Err(e) => assert_eq!(e.kind(), &ErrorKind::ChangeIsNegative(Amount(-1))),
                 Ok(_) => panic!("Should have failed"),
             }
         }

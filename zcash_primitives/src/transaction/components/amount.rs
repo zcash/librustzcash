@@ -1,5 +1,7 @@
 use byteorder::{LittleEndian, ReadBytesExt};
 use std::io::{self, Read};
+use std::iter::Sum;
+use std::ops::{Add, AddAssign, Sub, SubAssign};
 
 const COIN: i64 = 1_0000_0000;
 const MAX_MONEY: i64 = 21_000_000 * COIN;
@@ -55,6 +57,40 @@ impl Amount {
     /// positive.
     pub const fn is_negative(self) -> bool {
         self.0.is_negative()
+    }
+}
+
+impl Add<Amount> for Amount {
+    type Output = Amount;
+
+    fn add(self, rhs: Amount) -> Amount {
+        Amount(self.0 + rhs.0)
+    }
+}
+
+impl AddAssign<Amount> for Amount {
+    fn add_assign(&mut self, rhs: Amount) {
+        *self = *self + rhs
+    }
+}
+
+impl Sub<Amount> for Amount {
+    type Output = Amount;
+
+    fn sub(self, rhs: Amount) -> Amount {
+        Amount(self.0 - rhs.0)
+    }
+}
+
+impl SubAssign<Amount> for Amount {
+    fn sub_assign(&mut self, rhs: Amount) {
+        *self = *self - rhs
+    }
+}
+
+impl Sum for Amount {
+    fn sum<I: Iterator<Item = Amount>>(iter: I) -> Amount {
+        iter.fold(Amount::zero(), Add::add)
     }
 }
 
