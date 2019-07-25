@@ -8,6 +8,11 @@ const MAX_MONEY: i64 = 21_000_000 * COIN;
 pub struct Amount(pub i64);
 
 impl Amount {
+    /// Returns a zero-valued Amount.
+    pub const fn zero() -> Self {
+        Amount(0)
+    }
+
     // Read an Amount from a signed 64-bit little-endian integer.
     pub fn read_i64<R: Read>(mut reader: R, allow_negative: bool) -> io::Result<Self> {
         let amount = reader.read_i64::<LittleEndian>()?;
@@ -38,6 +43,18 @@ impl Amount {
                 "Amount not in {0..MAX_MONEY}",
             ))
         }
+    }
+
+    /// Returns `true` if `self` is positive and `false` if the number is zero or
+    /// negative.
+    pub const fn is_positive(self) -> bool {
+        self.0.is_positive()
+    }
+
+    /// Returns `true` if `self` is negative and `false` if the number is zero or
+    /// positive.
+    pub const fn is_negative(self) -> bool {
+        self.0.is_negative()
     }
 }
 

@@ -79,7 +79,7 @@ impl SaplingOutput {
             Some(g_d) => g_d,
             None => return Err(Error(ErrorKind::InvalidAddress)),
         };
-        if value.0 < 0 {
+        if value.is_negative() {
             return Err(Error(ErrorKind::InvalidAmount));
         }
 
@@ -288,7 +288,7 @@ impl<R: RngCore + CryptoRng> Builder<R> {
         to: &TransparentAddress,
         value: Amount,
     ) -> Result<(), Error> {
-        if value.0 < 0 {
+        if value.is_negative() {
             return Err(Error(ErrorKind::InvalidAmount));
         }
 

@@ -112,7 +112,7 @@ impl TransactionData {
             vout: vec![],
             lock_time: 0,
             expiry_height: 0,
-            value_balance: Amount(0),
+            value_balance: Amount::zero(),
             shielded_spends: vec![],
             shielded_outputs: vec![],
             joinsplits: vec![],
@@ -190,7 +190,7 @@ impl Transaction {
             let so = Vector::read(&mut reader, OutputDescription::read)?;
             (vb, ss, so)
         } else {
-            (Amount(0), vec![], vec![])
+            (Amount::zero(), vec![], vec![])
         };
 
         let (joinsplits, joinsplit_pubkey, joinsplit_sig) = if version >= 2 {
