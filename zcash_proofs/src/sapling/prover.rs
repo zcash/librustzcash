@@ -13,7 +13,9 @@ use sapling_crypto::{
     primitives::{Diversifier, Note, PaymentAddress, ProofGenerationKey, ValueCommitment},
     redjubjub::{PrivateKey, PublicKey, Signature},
 };
-use zcash_primitives::{merkle_tree::CommitmentTreeWitness, sapling::Node};
+use zcash_primitives::{
+    merkle_tree::CommitmentTreeWitness, sapling::Node, transaction::components::Amount,
+};
 
 use super::compute_value_balance;
 
@@ -245,7 +247,7 @@ impl SaplingProvingContext {
     /// and output_proof() must be completed before calling this function.
     pub fn binding_sig(
         &self,
-        value_balance: i64,
+        value_balance: Amount,
         sighash: &[u8; 32],
         params: &JubjubBls12,
     ) -> Result<Signature, ()> {

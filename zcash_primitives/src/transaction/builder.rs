@@ -18,13 +18,12 @@ use crate::{
     prover::TxProver,
     sapling::{spend_sig, Node},
     transaction::{
-        components::{Amount, OutputDescription, SpendDescription, TxOut},
+        components::{amount::DEFAULT_FEE, Amount, OutputDescription, SpendDescription, TxOut},
         signature_hash_data, Transaction, TransactionData, SIGHASH_ALL,
     },
     JUBJUB,
 };
 
-const DEFAULT_FEE: Amount = Amount(10000);
 const DEFAULT_TX_EXPIRY_DELTA: u32 = 20;
 
 /// If there are any shielded inputs, always have at least two shielded outputs, padding
@@ -88,7 +87,7 @@ impl SaplingOutput {
         let note = Note {
             g_d,
             pk_d: to.pk_d.clone(),
-            value: value.0 as u64,
+            value: value.into(),
             r: rcm,
         };
 
@@ -252,7 +251,8 @@ impl<R: RngCore + CryptoRng> Builder<R> {
 
         let alpha = Fs::random(&mut self.rng);
 
-        self.mtx.value_balance += Amount(note.value as i64);
+        self.mtx.value_balance +=
+            Amount::from_u64(note.value).map_err(|_| Error(ErrorKind::InvalidAmount))?;
 
         self.spends.push(SpendDescriptionInfo {
             extsk,
@@ -528,7 +528,7 @@ impl<R: RngCore + CryptoRng> Builder<R> {
         }
         self.mtx.binding_sig = Some(
             prover
-                .binding_sig(&mut ctx, self.mtx.value_balance.0, &sighash)
+                .binding_sig(&mut ctx, self.mtx.value_balance, &sighash)
                 .map_err(|()| Error(ErrorKind::BindingSig))?,
         );
 
@@ -564,7 +564,7 @@ mod tests {
         let to = extfvk.default_address().unwrap().1;
 
         let mut builder = Builder::new(0);
-        match builder.add_sapling_output(ovk, to, Amount(-1), None) {
+        match builder.add_sapling_output(ovk, to, Amount::from_i64(-1, true).unwrap(), None) {
             Err(e) => assert_eq!(e.kind(), &ErrorKind::InvalidAmount),
             Ok(_) => panic!("Should have failed"),
         }
@@ -573,7 +573,10 @@ mod tests {
     #[test]
     fn fails_on_negative_transparent_output() {
         let mut builder = Builder::new(0);
-        match builder.add_transparent_output(&TransparentAddress::PublicKey([0; 20]), Amount(-1)) {
+        match builder.add_transparent_output(
+            &TransparentAddress::PublicKey([0; 20]),
+            Amount::from_i64(-1, true).unwrap(),
+        ) {
             Err(e) => assert_eq!(e.kind(), &ErrorKind::InvalidAmount),
             Ok(_) => panic!("Should have failed"),
         }
@@ -591,7 +594,10 @@ mod tests {
         {
             let builder = Builder::new(0);
             match builder.build(1, MockTxProver) {
-                Err(e) => assert_eq!(e.kind(), &ErrorKind::ChangeIsNegative(Amount(-10000))),
+                Err(e) => assert_eq!(
+                    e.kind(),
+                    &ErrorKind::ChangeIsNegative(Amount::from_i64(-10000, true).unwrap())
+                ),
                 Ok(_) => panic!("Should have failed"),
             }
         }
@@ -605,10 +611,18 @@ mod tests {
         {
             let mut builder = Builder::new(0);
             builder
-                .add_sapling_output(ovk.clone(), to.clone(), Amount(50000), None)
+                .add_sapling_output(
+                    ovk.clone(),
+                    to.clone(),
+                    Amount::from_u64(50000).unwrap(),
+                    None,
+                )
                 .unwrap();
             match builder.build(1, MockTxProver) {
-                Err(e) => assert_eq!(e.kind(), &ErrorKind::ChangeIsNegative(Amount(-60000))),
+                Err(e) => assert_eq!(
+                    e.kind(),
+                    &ErrorKind::ChangeIsNegative(Amount::from_i64(-60000, true).unwrap())
+                ),
                 Ok(_) => panic!("Should have failed"),
             }
         }
@@ -618,10 +632,16 @@ mod tests {
         {
             let mut builder = Builder::new(0);
             builder
-                .add_transparent_output(&TransparentAddress::PublicKey([0; 20]), Amount(50000))
+                .add_transparent_output(
+                    &TransparentAddress::PublicKey([0; 20]),
+                    Amount::from_u64(50000).unwrap(),
+                )
                 .unwrap();
             match builder.build(1, MockTxProver) {
-                Err(e) => assert_eq!(e.kind(), &ErrorKind::ChangeIsNegative(Amount(-60000))),
+                Err(e) => assert_eq!(
+                    e.kind(),
+                    &ErrorKind::ChangeIsNegative(Amount::from_i64(-60000, true).unwrap())
+                ),
                 Ok(_) => panic!("Should have failed"),
             }
         }
@@ -647,13 +667,24 @@ mod tests {
                 )
                 .unwrap();
             builder
-                .add_sapling_output(ovk.clone(), to.clone(), Amount(30000), None)
+                .add_sapling_output(
+                    ovk.clone(),
+                    to.clone(),
+                    Amount::from_u64(30000).unwrap(),
+                    None,
+                )
                 .unwrap();
             builder
-                .add_transparent_output(&TransparentAddress::PublicKey([0; 20]), Amount(20000))
+                .add_transparent_output(
+                    &TransparentAddress::PublicKey([0; 20]),
+                    Amount::from_u64(20000).unwrap(),
+                )
                 .unwrap();
             match builder.build(1, MockTxProver) {
-                Err(e) => assert_eq!(e.kind(), &ErrorKind::ChangeIsNegative(Amount(-1))),
+                Err(e) => assert_eq!(
+                    e.kind(),
+                    &ErrorKind::ChangeIsNegative(Amount::from_i64(-1, true).unwrap())
+                ),
                 Ok(_) => panic!("Should have failed"),
             }
         }
@@ -678,10 +709,13 @@ mod tests {
                 .add_sapling_spend(extsk, to.diversifier, note2, witness2)
                 .unwrap();
             builder
-                .add_sapling_output(ovk, to, Amount(30000), None)
+                .add_sapling_output(ovk, to, Amount::from_u64(30000).unwrap(), None)
                 .unwrap();
             builder
-                .add_transparent_output(&TransparentAddress::PublicKey([0; 20]), Amount(20000))
+                .add_transparent_output(
+                    &TransparentAddress::PublicKey([0; 20]),
+                    Amount::from_u64(20000).unwrap(),
+                )
                 .unwrap();
             match builder.build(1, MockTxProver) {
                 Err(e) => assert_eq!(e.kind(), &ErrorKind::BindingSig),

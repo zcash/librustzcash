@@ -30,13 +30,6 @@ macro_rules! update_u32 {
     };
 }
 
-macro_rules! update_i64 {
-    ($h:expr, $value:expr, $tmp:expr) => {
-        (&mut $tmp[..8]).write_i64::<LittleEndian>($value).unwrap();
-        $h.update(&$tmp[..8]);
-    };
-}
-
 macro_rules! update_hash {
     ($h:expr, $cond:expr, $value:expr) => {
         if $cond {
@@ -214,7 +207,7 @@ pub fn signature_hash_data(
             update_u32!(h, tx.lock_time, tmp);
             update_u32!(h, tx.expiry_height, tmp);
             if sigversion == SigHashVersion::Sapling {
-                update_i64!(h, tx.value_balance.0, tmp);
+                h.update(&tx.value_balance.to_i64_le_bytes());
             }
             update_u32!(h, hash_type, tmp);
 
@@ -222,7 +215,7 @@ pub fn signature_hash_data(
                 let mut data = vec![];
                 tx.vin[n].prevout.write(&mut data).unwrap();
                 script_code.write(&mut data).unwrap();
-                (&mut data).write_i64::<LittleEndian>(amount.0).unwrap();
+                data.extend_from_slice(&amount.to_i64_le_bytes());
                 (&mut data)
                     .write_u32::<LittleEndian>(tx.vin[n].sequence)
                     .unwrap();

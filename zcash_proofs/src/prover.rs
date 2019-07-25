@@ -10,8 +10,11 @@ use sapling_crypto::{
 };
 use std::path::Path;
 use zcash_primitives::{
-    merkle_tree::CommitmentTreeWitness, prover::TxProver, sapling::Node,
-    transaction::components::GROTH_PROOF_SIZE, JUBJUB,
+    merkle_tree::CommitmentTreeWitness,
+    prover::TxProver,
+    sapling::Node,
+    transaction::components::{Amount, GROTH_PROOF_SIZE},
+    JUBJUB,
 };
 
 use crate::{load_parameters, sapling::SaplingProvingContext};
@@ -182,7 +185,7 @@ impl TxProver for LocalTxProver {
     fn binding_sig(
         &self,
         ctx: &mut Self::SaplingProvingContext,
-        value_balance: i64,
+        value_balance: Amount,
         sighash: &[u8; 32],
     ) -> Result<Signature, ()> {
         ctx.binding_sig(value_balance, sighash, &JUBJUB)

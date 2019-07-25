@@ -185,7 +185,12 @@ impl Transaction {
         };
 
         let (value_balance, shielded_spends, shielded_outputs) = if is_sapling_v4 {
-            let vb = Amount::read_i64(&mut reader, true)?;
+            let vb = {
+                let mut tmp = [0; 8];
+                reader.read_exact(&mut tmp)?;
+                Amount::from_i64_le_bytes(tmp, true)
+            }
+            .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "valueBalance out of range"))?;
             let ss = Vector::read(&mut reader, SpendDescription::read)?;
             let so = Vector::read(&mut reader, OutputDescription::read)?;
             (vb, ss, so)
@@ -262,7 +267,7 @@ impl Transaction {
         }
 
         if is_sapling_v4 {
-            writer.write_i64::<LittleEndian>(self.value_balance.0)?;
+            writer.write_all(&self.value_balance.to_i64_le_bytes())?;
             Vector::write(&mut writer, &self.shielded_spends, |w, e| e.write(w))?;
             Vector::write(&mut writer, &self.shielded_outputs, |w, e| e.write(w))?;
         }

@@ -63,6 +63,7 @@ use zcash_primitives::{
     merkle_tree::CommitmentTreeWitness,
     note_encryption::sapling_ka_agree,
     sapling::{merkle_hash, spend_sig},
+    transaction::components::Amount,
     zip32, JUBJUB,
 };
 use zcash_proofs::{
@@ -704,6 +705,11 @@ pub extern "system" fn librustzcash_sapling_final_check(
     binding_sig: *const [c_uchar; 64],
     sighash_value: *const [c_uchar; 32],
 ) -> bool {
+    let value_balance = match Amount::from_i64(value_balance, true) {
+        Ok(vb) => vb,
+        Err(()) => return false,
+    };
+
     // Deserialize the signature
     let binding_sig = match Signature::read(&(unsafe { &*binding_sig })[..]) {
         Ok(sig) => sig,
@@ -1022,6 +1028,11 @@ pub extern "system" fn librustzcash_sapling_binding_sig(
     sighash: *const [c_uchar; 32],
     result: *mut [c_uchar; 64],
 ) -> bool {
+    let value_balance = match Amount::from_i64(value_balance, true) {
+        Ok(vb) => vb,
+        Err(()) => return false,
+    };
+
     // Sign
     let sig = match unsafe { &*ctx }.binding_sig(value_balance, unsafe { &*sighash }, &JUBJUB) {
         Ok(s) => s,

@@ -8,7 +8,9 @@ use sapling_crypto::{
 };
 
 use crate::{
-    merkle_tree::CommitmentTreeWitness, sapling::Node, transaction::components::GROTH_PROOF_SIZE,
+    merkle_tree::CommitmentTreeWitness,
+    sapling::Node,
+    transaction::components::{Amount, GROTH_PROOF_SIZE},
 };
 
 /// Interface for creating zero-knowledge proofs for shielded transactions.
@@ -63,7 +65,7 @@ pub trait TxProver {
     fn binding_sig(
         &self,
         ctx: &mut Self::SaplingProvingContext,
-        value_balance: i64,
+        value_balance: Amount,
         sighash: &[u8; 32],
     ) -> Result<Signature, ()>;
 }
@@ -80,8 +82,10 @@ pub(crate) mod mock {
     };
 
     use crate::{
-        merkle_tree::CommitmentTreeWitness, sapling::Node,
-        transaction::components::GROTH_PROOF_SIZE, JUBJUB,
+        merkle_tree::CommitmentTreeWitness,
+        sapling::Node,
+        transaction::components::{Amount, GROTH_PROOF_SIZE},
+        JUBJUB,
     };
 
     use super::TxProver;
@@ -153,7 +157,7 @@ pub(crate) mod mock {
         fn binding_sig(
             &self,
             _ctx: &mut Self::SaplingProvingContext,
-            _value_balance: i64,
+            _value_balance: Amount,
             _sighash: &[u8; 32],
         ) -> Result<Signature, ()> {
             Err(())

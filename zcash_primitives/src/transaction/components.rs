@@ -10,7 +10,7 @@ use std::io::{self, Read, Write};
 use legacy::Script;
 use JUBJUB;
 
-mod amount;
+pub mod amount;
 pub use self::amount::Amount;
 
 // π_A + π_B + π_C
@@ -76,7 +76,12 @@ pub struct TxOut {
 
 impl TxOut {
     pub fn read<R: Read>(mut reader: &mut R) -> io::Result<Self> {
-        let value = Amount::read_i64(&mut reader, false)?;
+        let value = {
+            let mut tmp = [0; 8];
+            reader.read_exact(&mut tmp)?;
+            Amount::from_i64_le_bytes(tmp, false)
+        }
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "value out of range"))?;
         let script_pubkey = Script::read(&mut reader)?;
 
         Ok(TxOut {
@@ -86,7 +91,7 @@ impl TxOut {
     }
 
     pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
-        writer.write_i64::<LittleEndian>(self.value.0)?;
+        writer.write_all(&self.value.to_i64_le_bytes())?;
         self.script_pubkey.write(&mut writer)
     }
 }
@@ -298,10 +303,20 @@ impl std::fmt::Debug for JSDescription {
 impl JSDescription {
     pub fn read<R: Read>(mut reader: R, use_groth: bool) -> io::Result<Self> {
         // Consensus rule (§4.3): Canonical encoding is enforced here
-        let vpub_old = Amount::read_u64(&mut reader)?;
+        let vpub_old = {
+            let mut tmp = [0; 8];
+            reader.read_exact(&mut tmp)?;
+            Amount::from_u64_le_bytes(tmp)
+        }
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "vpub_old out of range"))?;
 
         // Consensus rule (§4.3): Canonical encoding is enforced here
-        let vpub_new = Amount::read_u64(&mut reader)?;
+        let vpub_new = {
+            let mut tmp = [0; 8];
+            reader.read_exact(&mut tmp)?;
+            Amount::from_u64_le_bytes(tmp)
+        }
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "vpub_new out of range"))?;
 
         // Consensus rule (§4.3): One of vpub_old and vpub_new being zero is
         // enforced by CheckTransactionWithoutProofVerification() in zcashd.
@@ -374,8 +389,8 @@ impl JSDescription {
     }
 
     pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
-        writer.write_i64::<LittleEndian>(self.vpub_old.0)?;
-        writer.write_i64::<LittleEndian>(self.vpub_new.0)?;
+        writer.write_all(&self.vpub_old.to_i64_le_bytes())?;
+        writer.write_all(&self.vpub_new.to_i64_le_bytes())?;
         writer.write_all(&self.anchor)?;
         writer.write_all(&self.nullifiers[0])?;
         writer.write_all(&self.nullifiers[1])?;
