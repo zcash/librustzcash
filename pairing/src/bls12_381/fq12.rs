@@ -2,7 +2,7 @@ use super::fq::FROBENIUS_COEFF_FQ12_C1;
 use super::fq2::Fq2;
 use super::fq6::Fq6;
 use ff::Field;
-use rand::{Rand, Rng};
+use rand_core::{RngCore};
 
 /// An element of Fq12, represented by c0 + c1 * w.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -14,15 +14,6 @@ pub struct Fq12 {
 impl ::std::fmt::Display for Fq12 {
     fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
         write!(f, "Fq12({} + {} * w)", self.c0, self.c1)
-    }
-}
-
-impl Rand for Fq12 {
-    fn rand<R: Rng>(rng: &mut R) -> Self {
-        Fq12 {
-            c0: rng.gen(),
-            c1: rng.gen(),
-        }
     }
 }
 
@@ -49,6 +40,13 @@ impl Fq12 {
 }
 
 impl Field for Fq12 {
+    fn random<R: RngCore>(rng: &mut R) -> Self {
+        Fq12 {
+            c0: Fq6::random(rng),
+            c1: Fq6::random(rng),
+        }
+    }
+
     fn zero() -> Self {
         Fq12 {
             c0: Fq6::zero(),
@@ -149,17 +147,22 @@ impl Field for Fq12 {
 }
 
 #[cfg(test)]
-use rand::{SeedableRng, XorShiftRng};
+use rand_core::SeedableRng;
+#[cfg(test)]
+use rand_xorshift::XorShiftRng;
 
 #[test]
 fn test_fq12_mul_by_014() {
-    let mut rng = XorShiftRng::from_seed([0x5dbe6259, 0x8d313d76, 0x3237db17, 0xe5bc0654]);
+    let mut rng = XorShiftRng::from_seed([
+        0x59, 0x62, 0xbe, 0x5d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06, 0xbc,
+        0xe5,
+    ]);
 
     for _ in 0..1000 {
-        let c0 = Fq2::rand(&mut rng);
-        let c1 = Fq2::rand(&mut rng);
-        let c5 = Fq2::rand(&mut rng);
-        let mut a = Fq12::rand(&mut rng);
+        let c0 = Fq2::random(&mut rng);
+        let c1 = Fq2::random(&mut rng);
+        let c5 = Fq2::random(&mut rng);
+        let mut a = Fq12::random(&mut rng);
         let mut b = a;
 
         a.mul_by_014(&c0, &c1, &c5);

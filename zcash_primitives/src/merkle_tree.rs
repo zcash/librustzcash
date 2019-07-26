@@ -200,12 +200,14 @@ impl<Node: Hashable> CommitmentTree<Node> {
 /// # Examples
 ///
 /// ```
+/// extern crate ff;
 /// extern crate pairing;
-/// extern crate rand;
+/// extern crate rand_os;
 /// extern crate zcash_primitives;
 ///
-/// use pairing::bls12_381::FrRepr;
-/// use rand::{OsRng, Rand};
+/// use ff::{Field, PrimeField};
+/// use pairing::bls12_381::Fr;
+/// use rand_os::OsRng;
 /// use zcash_primitives::{
 ///     merkle_tree::{CommitmentTree, IncrementalWitness},
 ///     sapling::Node,
@@ -214,13 +216,13 @@ impl<Node: Hashable> CommitmentTree<Node> {
 /// let mut rng = OsRng::new().unwrap();
 /// let mut tree = CommitmentTree::<Node>::new();
 ///
-/// tree.append(Node::new(FrRepr::rand(&mut rng)));
-/// tree.append(Node::new(FrRepr::rand(&mut rng)));
+/// tree.append(Node::new(Fr::random(&mut rng).into_repr()));
+/// tree.append(Node::new(Fr::random(&mut rng).into_repr()));
 /// let mut witness = IncrementalWitness::from_tree(&tree);
 /// assert_eq!(witness.position(), 1);
 /// assert_eq!(tree.root(), witness.root());
 ///
-/// let cmu = Node::new(FrRepr::rand(&mut rng));
+/// let cmu = Node::new(Fr::random(&mut rng).into_repr());
 /// tree.append(cmu);
 /// witness.append(cmu);
 /// assert_eq!(tree.root(), witness.root());

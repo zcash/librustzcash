@@ -1,8 +1,11 @@
+extern crate ff;
 extern crate sapling_crypto;
 extern crate bellman;
-extern crate rand;
 extern crate pairing;
+extern crate rand_core;
+extern crate rand_xorshift;
 
+use ff::Field;
 use std::time::{Duration, Instant};
 use sapling_crypto::jubjub::{
     JubjubBls12,
@@ -18,14 +21,18 @@ use sapling_crypto::primitives::{
     ValueCommitment
 };
 use bellman::groth16::*;
-use rand::{XorShiftRng, SeedableRng, Rng};
+use rand_core::{RngCore, SeedableRng};
+use rand_xorshift::XorShiftRng;
 use pairing::bls12_381::{Bls12, Fr};
 
 const TREE_DEPTH: usize = 32;
 
 fn main() {
     let jubjub_params = &JubjubBls12::new();
-    let rng = &mut XorShiftRng::from_seed([0x3dbe6259, 0x8d313d76, 0x3237db17, 0xe5bc0654]);
+    let rng = &mut XorShiftRng::from_seed([
+        0x59, 0x62, 0xbe, 0x3d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06, 0xbc,
+        0xe5,
+    ]);
 
     println!("Creating sample parameters...");
     let groth_params = generate_random_parameters::<Bls12, _, _>(
@@ -48,10 +55,10 @@ fn main() {
     for _ in 0..SAMPLES {
         let value_commitment = ValueCommitment {
             value: 1,
-            randomness: rng.gen()
+            randomness: fs::Fs::random(rng)
         };
 
-        let nsk: fs::Fs = rng.gen();
+        let nsk = fs::Fs::random(rng);
         let ak = edwards::Point::rand(rng, jubjub_params).mul_by_cofactor(jubjub_params);
 
         let proof_generation_key = ProofGenerationKey {
@@ -64,7 +71,11 @@ fn main() {
         let payment_address;
 
         loop {
-            let diversifier = Diversifier(rng.gen());
+            let diversifier = {
+                let mut d = [0; 11];
+                rng.fill_bytes(&mut d);
+                Diversifier(d)
+            };
 
             if let Some(p) = viewing_key.into_payment_address(
                 diversifier,
@@ -76,10 +87,10 @@ fn main() {
             }
         }
 
-        let commitment_randomness: fs::Fs = rng.gen();
-        let auth_path = vec![Some((rng.gen(), rng.gen())); TREE_DEPTH];
-        let ar: fs::Fs = rng.gen();
-        let anchor: Fr = rng.gen();
+        let commitment_randomness = fs::Fs::random(rng);
+        let auth_path = vec![Some((Fr::random(rng), rng.next_u32() % 2 != 0)); TREE_DEPTH];
+        let ar = fs::Fs::random(rng);
+        let anchor = Fr::random(rng);
 
         let start = Instant::now();
         let _ = create_random_proof(Spend {

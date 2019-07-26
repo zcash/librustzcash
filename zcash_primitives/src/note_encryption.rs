@@ -5,7 +5,8 @@ use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use crypto_api_chachapoly::{ChaCha20Ietf, ChachaPolyIetf};
 use ff::{PrimeField, PrimeFieldRepr};
 use pairing::bls12_381::{Bls12, Fr};
-use rand::{OsRng, Rng};
+use rand_core::RngCore;
+use rand_os::OsRng;
 use sapling_crypto::{
     jubjub::{
         edwards,
@@ -136,11 +137,9 @@ impl Memo {
 
 fn generate_esk() -> Fs {
     // create random 64 byte buffer
-    let mut rng = OsRng::new().expect("should be able to construct RNG");
+    let mut rng = OsRng;
     let mut buffer = [0u8; 64];
-    for i in 0..buffer.len() {
-        buffer[i] = rng.gen();
-    }
+    rng.fill_bytes(&mut buffer);
 
     // reduce to uniform value
     Fs::to_uniform(&buffer[..])
@@ -211,12 +210,14 @@ fn prf_ock(
 /// # Examples
 ///
 /// ```
+/// extern crate ff;
 /// extern crate pairing;
-/// extern crate rand;
+/// extern crate rand_os;
 /// extern crate sapling_crypto;
 ///
+/// use ff::Field;
 /// use pairing::bls12_381::Bls12;
-/// use rand::{OsRng, Rand};
+/// use rand_os::OsRng;
 /// use sapling_crypto::{
 ///     jubjub::fs::Fs,
 ///     primitives::{Diversifier, PaymentAddress, ValueCommitment},
@@ -227,7 +228,7 @@ fn prf_ock(
 ///     JUBJUB,
 /// };
 ///
-/// let mut rng = OsRng::new().unwrap();
+/// let mut rng = OsRng;
 ///
 /// let diversifier = Diversifier([0; 11]);
 /// let pk_d = diversifier.g_d::<Bls12>(&JUBJUB).unwrap();
@@ -238,7 +239,7 @@ fn prf_ock(
 /// let ovk = OutgoingViewingKey([0; 32]);
 ///
 /// let value = 1000;
-/// let rcv = Fs::rand(&mut rng);
+/// let rcv = Fs::random(&mut rng);
 /// let cv = ValueCommitment::<Bls12> {
 ///     value,
 ///     randomness: rcv.clone(),
@@ -558,9 +559,10 @@ pub fn try_sapling_output_recovery(
 #[cfg(test)]
 mod tests {
     use crypto_api_chachapoly::ChachaPolyIetf;
-    use ff::{PrimeField, PrimeFieldRepr};
+    use ff::{Field, PrimeField, PrimeFieldRepr};
     use pairing::bls12_381::{Bls12, Fr, FrRepr};
-    use rand::{thread_rng, Rand, Rng};
+    use rand_core::RngCore;
+    use rand_os::OsRng;
     use sapling_crypto::{
         jubjub::{
             edwards,
@@ -692,8 +694,8 @@ mod tests {
         assert_eq!(Memo::default().to_utf8(), None);
     }
 
-    fn random_enc_ciphertext(
-        mut rng: &mut Rng,
+    fn random_enc_ciphertext<R: RngCore>(
+        mut rng: &mut R,
     ) -> (
         OutgoingViewingKey,
         Fs,
@@ -704,7 +706,7 @@ mod tests {
         [u8; OUT_CIPHERTEXT_SIZE],
     ) {
         let diversifier = Diversifier([0; 11]);
-        let ivk = Fs::rand(&mut rng);
+        let ivk = Fs::random(&mut rng);
         let pk_d = diversifier.g_d::<Bls12>(&JUBJUB).unwrap().mul(ivk, &JUBJUB);
         let pa = PaymentAddress { diversifier, pk_d };
 
@@ -712,11 +714,13 @@ mod tests {
         let value = 100;
         let value_commitment = ValueCommitment::<Bls12> {
             value,
-            randomness: Fs::rand(&mut rng),
+            randomness: Fs::random(&mut rng),
         };
         let cv = value_commitment.cm(&JUBJUB).into();
 
-        let note = pa.create_note(value, Fs::rand(&mut rng), &JUBJUB).unwrap();
+        let note = pa
+            .create_note(value, Fs::random(&mut rng), &JUBJUB)
+            .unwrap();
         let cmu = note.cm(&JUBJUB);
 
         let ovk = OutgoingViewingKey([0; 32]);
@@ -844,19 +848,19 @@ mod tests {
 
     #[test]
     fn decryption_with_invalid_ivk() {
-        let mut rng = thread_rng();
+        let mut rng = OsRng;
 
         let (_, _, _, cmu, epk, enc_ciphertext, _) = random_enc_ciphertext(&mut rng);
 
         assert_eq!(
-            try_sapling_note_decryption(&Fs::rand(&mut rng), &epk, &cmu, &enc_ciphertext),
+            try_sapling_note_decryption(&Fs::random(&mut rng), &epk, &cmu, &enc_ciphertext),
             None
         );
     }
 
     #[test]
     fn decryption_with_invalid_epk() {
-        let mut rng = thread_rng();
+        let mut rng = OsRng;
 
         let (_, ivk, _, cmu, _, enc_ciphertext, _) = random_enc_ciphertext(&mut rng);
 
@@ -873,19 +877,19 @@ mod tests {
 
     #[test]
     fn decryption_with_invalid_cmu() {
-        let mut rng = thread_rng();
+        let mut rng = OsRng;
 
         let (_, ivk, _, _, epk, enc_ciphertext, _) = random_enc_ciphertext(&mut rng);
 
         assert_eq!(
-            try_sapling_note_decryption(&ivk, &epk, &Fr::rand(&mut rng), &enc_ciphertext),
+            try_sapling_note_decryption(&ivk, &epk, &Fr::random(&mut rng), &enc_ciphertext),
             None
         );
     }
 
     #[test]
     fn decryption_with_invalid_tag() {
-        let mut rng = thread_rng();
+        let mut rng = OsRng;
 
         let (_, ivk, _, cmu, epk, mut enc_ciphertext, _) = random_enc_ciphertext(&mut rng);
 
@@ -898,7 +902,7 @@ mod tests {
 
     #[test]
     fn decryption_with_invalid_version_byte() {
-        let mut rng = thread_rng();
+        let mut rng = OsRng;
 
         let (ovk, ivk, cv, cmu, epk, mut enc_ciphertext, out_ciphertext) =
             random_enc_ciphertext(&mut rng);
@@ -920,7 +924,7 @@ mod tests {
 
     #[test]
     fn decryption_with_invalid_diversifier() {
-        let mut rng = thread_rng();
+        let mut rng = OsRng;
 
         let (ovk, ivk, cv, cmu, epk, mut enc_ciphertext, out_ciphertext) =
             random_enc_ciphertext(&mut rng);
@@ -942,7 +946,7 @@ mod tests {
 
     #[test]
     fn decryption_with_incorrect_diversifier() {
-        let mut rng = thread_rng();
+        let mut rng = OsRng;
 
         let (ovk, ivk, cv, cmu, epk, mut enc_ciphertext, out_ciphertext) =
             random_enc_ciphertext(&mut rng);
@@ -964,13 +968,13 @@ mod tests {
 
     #[test]
     fn compact_decryption_with_invalid_ivk() {
-        let mut rng = thread_rng();
+        let mut rng = OsRng;
 
         let (_, _, _, cmu, epk, enc_ciphertext, _) = random_enc_ciphertext(&mut rng);
 
         assert_eq!(
             try_sapling_compact_note_decryption(
-                &Fs::rand(&mut rng),
+                &Fs::random(&mut rng),
                 &epk,
                 &cmu,
                 &enc_ciphertext[..COMPACT_NOTE_SIZE]
@@ -981,7 +985,7 @@ mod tests {
 
     #[test]
     fn compact_decryption_with_invalid_epk() {
-        let mut rng = thread_rng();
+        let mut rng = OsRng;
 
         let (_, ivk, _, cmu, _, enc_ciphertext, _) = random_enc_ciphertext(&mut rng);
 
@@ -998,7 +1002,7 @@ mod tests {
 
     #[test]
     fn compact_decryption_with_invalid_cmu() {
-        let mut rng = thread_rng();
+        let mut rng = OsRng;
 
         let (_, ivk, _, _, epk, enc_ciphertext, _) = random_enc_ciphertext(&mut rng);
 
@@ -1006,7 +1010,7 @@ mod tests {
             try_sapling_compact_note_decryption(
                 &ivk,
                 &epk,
-                &Fr::rand(&mut rng),
+                &Fr::random(&mut rng),
                 &enc_ciphertext[..COMPACT_NOTE_SIZE]
             ),
             None
@@ -1015,7 +1019,7 @@ mod tests {
 
     #[test]
     fn compact_decryption_with_invalid_version_byte() {
-        let mut rng = thread_rng();
+        let mut rng = OsRng;
 
         let (ovk, ivk, cv, cmu, epk, mut enc_ciphertext, out_ciphertext) =
             random_enc_ciphertext(&mut rng);
@@ -1042,7 +1046,7 @@ mod tests {
 
     #[test]
     fn compact_decryption_with_invalid_diversifier() {
-        let mut rng = thread_rng();
+        let mut rng = OsRng;
 
         let (ovk, ivk, cv, cmu, epk, mut enc_ciphertext, out_ciphertext) =
             random_enc_ciphertext(&mut rng);
@@ -1069,7 +1073,7 @@ mod tests {
 
     #[test]
     fn compact_decryption_with_incorrect_diversifier() {
-        let mut rng = thread_rng();
+        let mut rng = OsRng;
 
         let (ovk, ivk, cv, cmu, epk, mut enc_ciphertext, out_ciphertext) =
             random_enc_ciphertext(&mut rng);
@@ -1096,7 +1100,7 @@ mod tests {
 
     #[test]
     fn recovery_with_invalid_ovk() {
-        let mut rng = thread_rng();
+        let mut rng = OsRng;
 
         let (mut ovk, _, cv, cmu, epk, enc_ciphertext, out_ciphertext) =
             random_enc_ciphertext(&mut rng);
@@ -1110,7 +1114,7 @@ mod tests {
 
     #[test]
     fn recovery_with_invalid_cv() {
-        let mut rng = thread_rng();
+        let mut rng = OsRng;
 
         let (ovk, _, _, cmu, epk, enc_ciphertext, out_ciphertext) = random_enc_ciphertext(&mut rng);
 
@@ -1129,7 +1133,7 @@ mod tests {
 
     #[test]
     fn recovery_with_invalid_cmu() {
-        let mut rng = thread_rng();
+        let mut rng = OsRng;
 
         let (ovk, _, cv, _, epk, enc_ciphertext, out_ciphertext) = random_enc_ciphertext(&mut rng);
 
@@ -1137,7 +1141,7 @@ mod tests {
             try_sapling_output_recovery(
                 &ovk,
                 &cv,
-                &Fr::rand(&mut rng),
+                &Fr::random(&mut rng),
                 &epk,
                 &enc_ciphertext,
                 &out_ciphertext
@@ -1148,7 +1152,7 @@ mod tests {
 
     #[test]
     fn recovery_with_invalid_epk() {
-        let mut rng = thread_rng();
+        let mut rng = OsRng;
 
         let (ovk, _, cv, cmu, _, enc_ciphertext, out_ciphertext) = random_enc_ciphertext(&mut rng);
 
@@ -1167,7 +1171,7 @@ mod tests {
 
     #[test]
     fn recovery_with_invalid_enc_tag() {
-        let mut rng = thread_rng();
+        let mut rng = OsRng;
 
         let (ovk, _, cv, cmu, epk, mut enc_ciphertext, out_ciphertext) =
             random_enc_ciphertext(&mut rng);
@@ -1181,7 +1185,7 @@ mod tests {
 
     #[test]
     fn recovery_with_invalid_out_tag() {
-        let mut rng = thread_rng();
+        let mut rng = OsRng;
 
         let (ovk, _, cv, cmu, epk, enc_ciphertext, mut out_ciphertext) =
             random_enc_ciphertext(&mut rng);
@@ -1195,7 +1199,7 @@ mod tests {
 
     #[test]
     fn recovery_with_invalid_version_byte() {
-        let mut rng = thread_rng();
+        let mut rng = OsRng;
 
         let (ovk, _, cv, cmu, epk, mut enc_ciphertext, out_ciphertext) =
             random_enc_ciphertext(&mut rng);
@@ -1217,7 +1221,7 @@ mod tests {
 
     #[test]
     fn recovery_with_invalid_diversifier() {
-        let mut rng = thread_rng();
+        let mut rng = OsRng;
 
         let (ovk, _, cv, cmu, epk, mut enc_ciphertext, out_ciphertext) =
             random_enc_ciphertext(&mut rng);
@@ -1239,7 +1243,7 @@ mod tests {
 
     #[test]
     fn recovery_with_incorrect_diversifier() {
-        let mut rng = thread_rng();
+        let mut rng = OsRng;
 
         let (ovk, _, cv, cmu, epk, mut enc_ciphertext, out_ciphertext) =
             random_enc_ciphertext(&mut rng);

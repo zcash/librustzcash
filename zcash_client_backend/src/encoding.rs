@@ -101,7 +101,8 @@ pub fn decode_extended_full_viewing_key(
 ///
 /// ```
 /// use pairing::bls12_381::Bls12;
-/// use rand::{SeedableRng, XorShiftRng};
+/// use rand_core::SeedableRng;
+/// use rand_xorshift::XorShiftRng;
 /// use sapling_crypto::{
 ///     jubjub::edwards,
 ///     primitives::{Diversifier, PaymentAddress},
@@ -112,7 +113,10 @@ pub fn decode_extended_full_viewing_key(
 /// };
 /// use zcash_primitives::JUBJUB;
 ///
-/// let rng = &mut XorShiftRng::from_seed([0x3dbe6259, 0x8d313d76, 0x3237db17, 0xe5bc0654]);
+/// let rng = &mut XorShiftRng::from_seed([
+///     0x59, 0x62, 0xbe, 0x3d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06,
+///     0xbc, 0xe5,
+/// ]);
 ///
 /// let pa = PaymentAddress {
 ///     diversifier: Diversifier([0u8; 11]),
@@ -121,7 +125,7 @@ pub fn decode_extended_full_viewing_key(
 ///
 /// assert_eq!(
 ///     encode_payment_address(HRP_SAPLING_PAYMENT_ADDRESS, &pa),
-///     "ztestsapling1qqqqqqqqqqqqqqqqqqxrrfaccydp867g6zg7ne5ht37z38jtfyw0ygmp0ja6hhf07twjq6awtaj",
+///     "ztestsapling1qqqqqqqqqqqqqqqqqrjq05nyfku05msvu49mawhg6kr0wwljahypwyk2h88z6975u563j0ym7pe",
 /// );
 /// ```
 pub fn encode_payment_address(hrp: &str, addr: &PaymentAddress<Bls12>) -> String {
@@ -137,7 +141,8 @@ pub fn encode_payment_address(hrp: &str, addr: &PaymentAddress<Bls12>) -> String
 ///
 /// ```
 /// use pairing::bls12_381::Bls12;
-/// use rand::{SeedableRng, XorShiftRng};
+/// use rand_core::SeedableRng;
+/// use rand_xorshift::XorShiftRng;
 /// use sapling_crypto::{
 ///     jubjub::edwards,
 ///     primitives::{Diversifier, PaymentAddress},
@@ -148,7 +153,10 @@ pub fn encode_payment_address(hrp: &str, addr: &PaymentAddress<Bls12>) -> String
 /// };
 /// use zcash_primitives::JUBJUB;
 ///
-/// let rng = &mut XorShiftRng::from_seed([0x3dbe6259, 0x8d313d76, 0x3237db17, 0xe5bc0654]);
+/// let rng = &mut XorShiftRng::from_seed([
+///     0x59, 0x62, 0xbe, 0x3d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06,
+///     0xbc, 0xe5,
+/// ]);
 ///
 /// let pa = PaymentAddress {
 ///     diversifier: Diversifier([0u8; 11]),
@@ -158,7 +166,7 @@ pub fn encode_payment_address(hrp: &str, addr: &PaymentAddress<Bls12>) -> String
 /// assert_eq!(
 ///     decode_payment_address(
 ///         HRP_SAPLING_PAYMENT_ADDRESS,
-///         "ztestsapling1qqqqqqqqqqqqqqqqqqxrrfaccydp867g6zg7ne5ht37z38jtfyw0ygmp0ja6hhf07twjq6awtaj",
+///         "ztestsapling1qqqqqqqqqqqqqqqqqrjq05nyfku05msvu49mawhg6kr0wwljahypwyk2h88z6975u563j0ym7pe",
 ///     ),
 ///     Ok(Some(pa)),
 /// );
@@ -182,7 +190,8 @@ pub fn decode_payment_address(hrp: &str, s: &str) -> Result<Option<PaymentAddres
 #[cfg(test)]
 mod tests {
     use pairing::bls12_381::Bls12;
-    use rand::{SeedableRng, XorShiftRng};
+    use rand_core::SeedableRng;
+    use rand_xorshift::XorShiftRng;
     use sapling_crypto::{
         jubjub::edwards,
         primitives::{Diversifier, PaymentAddress},
@@ -194,7 +203,10 @@ mod tests {
 
     #[test]
     fn payment_address() {
-        let rng = &mut XorShiftRng::from_seed([0x3dbe6259, 0x8d313d76, 0x3237db17, 0xe5bc0654]);
+        let rng = &mut XorShiftRng::from_seed([
+            0x59, 0x62, 0xbe, 0x3d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06,
+            0xbc, 0xe5,
+        ]);
 
         let addr = PaymentAddress {
             diversifier: Diversifier([0u8; 11]),
@@ -202,9 +214,9 @@ mod tests {
         };
 
         let encoded_main =
-            "zs1qqqqqqqqqqqqqqqqqqxrrfaccydp867g6zg7ne5ht37z38jtfyw0ygmp0ja6hhf07twjqj2ug6x";
+            "zs1qqqqqqqqqqqqqqqqqrjq05nyfku05msvu49mawhg6kr0wwljahypwyk2h88z6975u563j8nfaxd";
         let encoded_test =
-            "ztestsapling1qqqqqqqqqqqqqqqqqqxrrfaccydp867g6zg7ne5ht37z38jtfyw0ygmp0ja6hhf07twjq6awtaj";
+            "ztestsapling1qqqqqqqqqqqqqqqqqrjq05nyfku05msvu49mawhg6kr0wwljahypwyk2h88z6975u563j0ym7pe";
 
         assert_eq!(
             encode_payment_address(constants::mainnet::HRP_SAPLING_PAYMENT_ADDRESS, &addr),
@@ -235,7 +247,10 @@ mod tests {
 
     #[test]
     fn invalid_diversifier() {
-        let rng = &mut XorShiftRng::from_seed([0x3dbe6259, 0x8d313d76, 0x3237db17, 0xe5bc0654]);
+        let rng = &mut XorShiftRng::from_seed([
+            0x59, 0x62, 0xbe, 0x3d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06,
+            0xbc, 0xe5,
+        ]);
 
         let addr = PaymentAddress {
             diversifier: Diversifier([1u8; 11]),

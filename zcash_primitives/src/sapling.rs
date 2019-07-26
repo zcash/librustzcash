@@ -2,7 +2,7 @@
 
 use ff::{BitIterator, PrimeField, PrimeFieldRepr};
 use pairing::bls12_381::{Bls12, Fr, FrRepr};
-use rand::OsRng;
+use rand_os::OsRng;
 use sapling_crypto::{
     jubjub::{fs::Fs, FixedGenerators, JubjubBls12},
     pedersen_hash::{pedersen_hash, Personalization},
@@ -113,7 +113,7 @@ pub fn spend_sig(
     params: &JubjubBls12,
 ) -> Signature {
     // Initialize secure RNG
-    let mut rng = OsRng::new().expect("should be able to construct RNG");
+    let mut rng = OsRng;
 
     // We compute `rsk`...
     let rsk = ask.randomize(ar);

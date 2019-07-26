@@ -3,7 +3,7 @@ use bellman::groth16::{
 };
 use ff::Field;
 use pairing::bls12_381::{Bls12, Fr};
-use rand::{OsRng, Rand};
+use rand_os::OsRng;
 use sapling_crypto::{
     circuit::{
         multipack,
@@ -56,10 +56,10 @@ impl SaplingProvingContext {
         (),
     > {
         // Initialize secure RNG
-        let mut rng = OsRng::new().expect("should be able to construct RNG");
+        let mut rng = OsRng;
 
         // We create the randomness of the value commitment
-        let rcv = Fs::rand(&mut rng);
+        let rcv = Fs::random(&mut rng);
 
         // Accumulate the value commitment randomness in the context
         {
@@ -189,12 +189,12 @@ impl SaplingProvingContext {
         params: &JubjubBls12,
     ) -> (Proof<Bls12>, edwards::Point<Bls12, Unknown>) {
         // Initialize secure RNG
-        let mut rng = OsRng::new().expect("should be able to construct RNG");
+        let mut rng = OsRng;
 
         // We construct ephemeral randomness for the value commitment. This
         // randomness is not given back to the caller, but the synthetic
         // blinding factor `bsk` is accumulated in the context.
-        let rcv = Fs::rand(&mut rng);
+        let rcv = Fs::random(&mut rng);
 
         // Accumulate the value commitment randomness in the context
         {
@@ -250,7 +250,7 @@ impl SaplingProvingContext {
         params: &JubjubBls12,
     ) -> Result<Signature, ()> {
         // Initialize secure RNG
-        let mut rng = OsRng::new().expect("should be able to construct RNG");
+        let mut rng = OsRng;
 
         // Grab the current `bsk` from the context
         let bsk = PrivateKey::<Bls12>(self.bsk);

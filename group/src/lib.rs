@@ -1,7 +1,9 @@
 extern crate ff;
 extern crate rand;
+extern crate rand_xorshift;
 
 use ff::{PrimeField, PrimeFieldDecodingError, ScalarEngine, SqrtField};
+use rand::RngCore;
 use std::error::Error;
 use std::fmt;
 
@@ -13,22 +15,15 @@ pub use self::wnaf::Wnaf;
 /// Projective representation of an elliptic curve point guaranteed to be
 /// in the correct prime order subgroup.
 pub trait CurveProjective:
-    PartialEq
-    + Eq
-    + Sized
-    + Copy
-    + Clone
-    + Send
-    + Sync
-    + fmt::Debug
-    + fmt::Display
-    + rand::Rand
-    + 'static
+    PartialEq + Eq + Sized + Copy + Clone + Send + Sync + fmt::Debug + fmt::Display + 'static
 {
     type Engine: ScalarEngine<Fr = Self::Scalar>;
     type Scalar: PrimeField + SqrtField;
     type Base: SqrtField;
     type Affine: CurveAffine<Projective = Self, Scalar = Self::Scalar>;
+
+    /// Returns an element chosen uniformly at random using a user-provided RNG.
+    fn random<R: RngCore>(rng: &mut R) -> Self;
 
     /// Returns the additive identity.
     fn zero() -> Self;

@@ -14,7 +14,10 @@
 extern crate byteorder;
 extern crate ff;
 extern crate group;
-extern crate rand;
+extern crate rand_core;
+
+#[cfg(test)]
+extern crate rand_xorshift;
 
 #[cfg(test)]
 pub mod tests;

@@ -308,7 +308,8 @@ mod test {
     use circuit::boolean::AllocatedBit;
     use pairing::bls12_381::Bls12;
     use circuit::test::TestConstraintSystem;
-    use rand::{XorShiftRng, SeedableRng, Rng};
+    use rand_core::{RngCore, SeedableRng};
+    use rand_xorshift::XorShiftRng;
 
     #[test]
     fn test_blank_hash() {
@@ -341,7 +342,10 @@ mod test {
 
     #[test]
     fn test_full_block() {
-        let mut rng = XorShiftRng::from_seed([0x5dbe6259, 0x8d313d76, 0x3237db17, 0xe5bc0654]);
+        let mut rng = XorShiftRng::from_seed([
+            0x59, 0x62, 0xbe, 0x3d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06, 0xbc,
+            0xe5,
+        ]);
 
         let iv = get_sha256_iv();
 
@@ -350,7 +354,7 @@ mod test {
             Boolean::from(
                 AllocatedBit::alloc(
                     cs.namespace(|| format!("input bit {}", i)),
-                    Some(rng.gen())
+                    Some(rng.next_u32() % 2 != 0)
                 ).unwrap()
             )
         }).collect();
@@ -367,18 +371,19 @@ mod test {
 
     #[test]
     fn test_against_vectors() {
-        use crypto::sha2::Sha256;
-        use crypto::digest::Digest;
+        use sha2::{Digest, Sha256};
 
-        let mut rng = XorShiftRng::from_seed([0x5dbe6259, 0x8d313d76, 0x3237db17, 0xe5bc0654]);
+        let mut rng = XorShiftRng::from_seed([
+            0x59, 0x62, 0xbe, 0x3d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06, 0xbc,
+            0xe5,
+        ]);
 
         for input_len in (0..32).chain((32..256).filter(|a| a % 8 == 0))
         {
             let mut h = Sha256::new();
-            let data: Vec<u8> = (0..input_len).map(|_| rng.gen()).collect();
+            let data: Vec<u8> = (0..input_len).map(|_| rng.next_u32() as u8).collect();
             h.input(&data);
-            let mut hash_result = [0u8; 32];
-            h.result(&mut hash_result[..]);
+            let hash_result = h.result();
 
             let mut cs = TestConstraintSystem::<Bls12>::new();
             let mut input_bits = vec![];

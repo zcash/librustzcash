@@ -1,6 +1,6 @@
 use super::fq::{FROBENIUS_COEFF_FQ2_C1, Fq, NEGATIVE_ONE};
 use ff::{Field, SqrtField};
-use rand::{Rand, Rng};
+use rand_core::RngCore;
 
 use std::cmp::Ordering;
 
@@ -56,16 +56,14 @@ impl Fq2 {
     }
 }
 
-impl Rand for Fq2 {
-    fn rand<R: Rng>(rng: &mut R) -> Self {
+impl Field for Fq2 {
+    fn random<R: RngCore>(rng: &mut R) -> Self {
         Fq2 {
-            c0: rng.gen(),
-            c1: rng.gen(),
+            c0: Fq::random(rng),
+            c1: Fq::random(rng),
         }
     }
-}
 
-impl Field for Fq2 {
     fn zero() -> Self {
         Fq2 {
             c0: Fq::zero(),
@@ -879,11 +877,16 @@ fn test_fq2_legendre() {
 }
 
 #[cfg(test)]
-use rand::{SeedableRng, XorShiftRng};
+use rand_core::SeedableRng;
+#[cfg(test)]
+use rand_xorshift::XorShiftRng;
 
 #[test]
 fn test_fq2_mul_nonresidue() {
-    let mut rng = XorShiftRng::from_seed([0x5dbe6259, 0x8d313d76, 0x3237db17, 0xe5bc0654]);
+    let mut rng = XorShiftRng::from_seed([
+        0x59, 0x62, 0xbe, 0x5d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06, 0xbc,
+        0xe5,
+    ]);
 
     let nqr = Fq2 {
         c0: Fq::one(),
@@ -891,7 +894,7 @@ fn test_fq2_mul_nonresidue() {
     };
 
     for _ in 0..1000 {
-        let mut a = Fq2::rand(&mut rng);
+        let mut a = Fq2::random(&mut rng);
         let mut b = a;
         a.mul_by_nonresidue();
         b.mul_assign(&nqr);
