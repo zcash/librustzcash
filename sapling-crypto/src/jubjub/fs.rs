@@ -292,7 +292,7 @@ impl Field for Fs {
                 Fs(FsRepr(repr))
             };
 
-            // Mask away the unused bits at the beginning.
+            // Mask away the unused most-significant bits.
             tmp.0.as_mut()[3] &= 0xffffffffffffffff >> REPR_SHAVE_BITS;
 
             if tmp.is_valid() {

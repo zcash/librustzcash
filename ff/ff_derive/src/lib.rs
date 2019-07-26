@@ -892,7 +892,7 @@ fn prime_field_impl(
                         #name(#repr(repr))
                     };
 
-                    // Mask away the unused bits at the beginning.
+                    // Mask away the unused most-significant bits.
                     tmp.0.as_mut()[#top_limb_index] &= 0xffffffffffffffff >> REPR_SHAVE_BITS;
 
                     if tmp.is_valid() {
