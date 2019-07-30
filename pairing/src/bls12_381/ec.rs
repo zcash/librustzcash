@@ -955,7 +955,7 @@ pub mod g1 {
                 let negyrepr = negy.into_repr();
 
                 let p = G1Affine {
-                    x: x,
+                    x,
                     y: if yrepr < negyrepr { y } else { negy },
                     infinity: false,
                 };
@@ -1637,7 +1637,7 @@ pub mod g2 {
                 negy.negate();
 
                 let p = G2Affine {
-                    x: x,
+                    x,
                     y: if y < negy { y } else { negy },
                     infinity: false,
                 };

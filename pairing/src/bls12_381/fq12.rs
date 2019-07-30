@@ -168,8 +168,8 @@ fn test_fq12_mul_by_014() {
         a.mul_by_014(&c0, &c1, &c5);
         b.mul_assign(&Fq12 {
             c0: Fq6 {
-                c0: c0,
-                c1: c1,
+                c0,
+                c1,
                 c2: Fq2::zero(),
             },
             c1: Fq6 {
