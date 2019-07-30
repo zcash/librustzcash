@@ -1,8 +1,19 @@
+dist: xenial
 language: rust
 rust:
   - 1.36.0
+
+addons:
+  apt:
+    sources:
+     - sourceline: 'deb http://apt.llvm.org/xenial/ llvm-toolchain-xenial main'
+       key_url: 'https://apt.llvm.org/llvm-snapshot.gpg.key'
+    packages:
+     - llvm-9
+     - llvm-9-tools
 
 cache: cargo
 
 script:
   - cargo test --verbose --release --all
+  - CARGO_INCREMENTAL=0 ./ci/siderophile.sh bellman ff group librustzcash pairing sapling-crypto zcash_client_backend zcash_primitives zcash_proofs
