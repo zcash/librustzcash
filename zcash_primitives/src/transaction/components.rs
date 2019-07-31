@@ -44,11 +44,20 @@ impl OutPoint {
 #[derive(Debug)]
 pub struct TxIn {
     pub prevout: OutPoint,
-    script_sig: Script,
+    pub script_sig: Script,
     pub sequence: u32,
 }
 
 impl TxIn {
+    #[cfg(feature = "transparent-inputs")]
+    pub fn new(prevout: OutPoint) -> Self {
+        TxIn {
+            prevout,
+            script_sig: Script::default(),
+            sequence: std::u32::MAX,
+        }
+    }
+
     pub fn read<R: Read>(mut reader: &mut R) -> io::Result<Self> {
         let prevout = OutPoint::read(&mut reader)?;
         let script_sig = Script::read(&mut reader)?;

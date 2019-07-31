@@ -24,6 +24,12 @@ use crate::{
     JUBJUB,
 };
 
+#[cfg(feature = "transparent-inputs")]
+use crate::{
+    legacy::Script,
+    transaction::components::{OutPoint, TxIn},
+};
+
 const DEFAULT_TX_EXPIRY_DELTA: u32 = 20;
 
 /// If there are any shielded inputs, always have at least two shielded outputs, padding
@@ -130,6 +136,50 @@ impl SaplingOutput {
     }
 }
 
+#[cfg(feature = "transparent-inputs")]
+struct TransparentInputInfo {
+    sk: secp256k1::SecretKey,
+    pubkey: [u8; secp256k1::constants::PUBLIC_KEY_SIZE],
+    coin: TxOut,
+}
+
+#[cfg(feature = "transparent-inputs")]
+struct TransparentInputs {
+    secp: secp256k1::Secp256k1<secp256k1::SignOnly>,
+    inputs: Vec<TransparentInputInfo>,
+}
+
+#[cfg(feature = "transparent-inputs")]
+impl Default for TransparentInputs {
+    fn default() -> Self {
+        TransparentInputs {
+            secp: secp256k1::Secp256k1::gen_new(),
+            inputs: Default::default(),
+        }
+    }
+}
+
+#[cfg(not(feature = "transparent-inputs"))]
+#[derive(Default)]
+struct TransparentInputs;
+
+impl TransparentInputs {
+    fn input_sum(&self) -> Amount {
+        #[cfg(feature = "transparent-inputs")]
+        {
+            self.inputs
+                .iter()
+                .map(|input| input.coin.value)
+                .sum::<Amount>()
+        }
+
+        #[cfg(not(feature = "transparent-inputs"))]
+        {
+            Amount::zero()
+        }
+    }
+}
+
 /// Metadata about a transaction created by a [`Builder`].
 #[derive(Debug, PartialEq)]
 pub struct TransactionMetadata {
@@ -176,6 +226,7 @@ pub struct Builder<R: RngCore + CryptoRng> {
     anchor: Option<Fr>,
     spends: Vec<SpendDescriptionInfo>,
     outputs: Vec<SaplingOutput>,
+    legacy: TransparentInputs,
     change_address: Option<(OutgoingViewingKey, PaymentAddress<Bls12>)>,
 }
 
@@ -215,6 +266,7 @@ impl<R: RngCore + CryptoRng> Builder<R> {
             anchor: None,
             spends: vec![],
             outputs: vec![],
+            legacy: TransparentInputs::default(),
             change_address: None,
         }
     }
@@ -273,6 +325,39 @@ impl<R: RngCore + CryptoRng> Builder<R> {
         Ok(())
     }
 
+    /// Adds a transparent coin to be spent in this transaction.
+    #[cfg(feature = "transparent-inputs")]
+    pub fn add_transparent_input(
+        &mut self,
+        sk: secp256k1::SecretKey,
+        utxo: OutPoint,
+        coin: TxOut,
+    ) -> Result<(), Error> {
+        if coin.value.is_negative() {
+            return Err(Error::InvalidAmount);
+        }
+
+        let pubkey = secp256k1::PublicKey::from_secret_key(&self.legacy.secp, &sk).serialize();
+        match coin.script_pubkey.address() {
+            Some(TransparentAddress::PublicKey(hash)) => {
+                use ripemd160::Ripemd160;
+                use sha2::{Digest, Sha256};
+
+                if &hash[..] != &Ripemd160::digest(&Sha256::digest(&pubkey))[..] {
+                    return Err(Error::InvalidAddress);
+                }
+            }
+            _ => return Err(Error::InvalidAddress),
+        }
+
+        self.mtx.vin.push(TxIn::new(utxo));
+        self.legacy
+            .inputs
+            .push(TransparentInputInfo { sk, pubkey, coin });
+
+        Ok(())
+    }
+
     /// Adds a transparent address to send funds to.
     pub fn add_transparent_output(
         &mut self,
@@ -320,8 +405,7 @@ impl<R: RngCore + CryptoRng> Builder<R> {
         //
 
         // Valid change
-        let change = self.mtx.value_balance
-            - self.fee
+        let change = self.mtx.value_balance - self.fee + self.legacy.input_sum()
             - self
                 .mtx
                 .vout
@@ -523,6 +607,26 @@ impl<R: RngCore + CryptoRng> Builder<R> {
                 .binding_sig(&mut ctx, self.mtx.value_balance, &sighash)
                 .map_err(|()| Error::BindingSig)?,
         );
+
+        // Transparent signatures
+        #[cfg(feature = "transparent-inputs")]
+        {
+            for (i, info) in self.legacy.inputs.iter().enumerate() {
+                sighash.copy_from_slice(&signature_hash_data(
+                    &self.mtx,
+                    consensus_branch_id,
+                    SIGHASH_ALL,
+                    Some((i, &info.coin.script_pubkey, info.coin.value)),
+                ));
+
+                let msg = secp256k1::Message::from_slice(&sighash).expect("32 bytes");
+                let sig = self.legacy.secp.sign(&msg, &info.sk);
+
+                // P2PKH scriptSig
+                self.mtx.vin[i].script_sig =
+                    Script::default() << &sig.serialize_compact()[..] << &info.pubkey[..];
+            }
+        }
 
         Ok((
             self.mtx.freeze().expect("Transaction should be complete"),
