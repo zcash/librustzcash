@@ -38,6 +38,31 @@ impl Script {
     pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
         Vector::write(&mut writer, &self.0, |w, e| w.write_u8(*e))
     }
+
+    /// Returns the address that this Script contains, if any.
+    pub fn address(&self) -> Option<TransparentAddress> {
+        if self.0.len() == 25
+            && self.0[0] == OpCode::Dup as u8
+            && self.0[1] == OpCode::Hash160 as u8
+            && self.0[2] == 0x14
+            && self.0[23] == OpCode::EqualVerify as u8
+            && self.0[24] == OpCode::CheckSig as u8
+        {
+            let mut hash = [0; 20];
+            hash.copy_from_slice(&self.0[3..23]);
+            Some(TransparentAddress::PublicKey(hash))
+        } else if self.0.len() == 23
+            && self.0[0] == OpCode::Hash160 as u8
+            && self.0[1] == 0x14
+            && self.0[22] == OpCode::Equal as u8
+        {
+            let mut hash = [0; 20];
+            hash.copy_from_slice(&self.0[2..22]);
+            Some(TransparentAddress::Script(hash))
+        } else {
+            None
+        }
+    }
 }
 
 impl Shl<OpCode> for Script {
@@ -151,7 +176,8 @@ mod tests {
                 0x76, 0xa9, 0x14, 0x04, 0x04, 0x04, 0x04, 0x04, 0x04, 0x04, 0x04, 0x04, 0x04, 0x04,
                 0x04, 0x04, 0x04, 0x04, 0x04, 0x04, 0x04, 0x04, 0x04, 0x88, 0xac,
             ]
-        )
+        );
+        assert_eq!(addr.script().address(), Some(addr));
     }
 
     #[test]
@@ -163,6 +189,7 @@ mod tests {
                 0xa9, 0x14, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07,
                 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x87,
             ]
-        )
+        );
+        assert_eq!(addr.script().address(), Some(addr));
     }
 }
