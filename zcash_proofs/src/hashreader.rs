@@ -11,7 +11,7 @@ impl<R: Read> HashReader<R> {
     /// Construct a new `HashReader` given an existing `reader` by value.
     pub fn new(reader: R) -> Self {
         HashReader {
-            reader: reader,
+            reader,
             hasher: State::new(),
         }
     }

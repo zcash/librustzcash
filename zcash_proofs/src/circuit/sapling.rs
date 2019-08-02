@@ -150,7 +150,7 @@ impl<'a, E: JubjubEngine> Circuit<E> for Spend<'a, E> {
             // Witness nsk as bits
             let nsk = boolean::field_into_boolean_vec_le(
                 cs.namespace(|| "nsk"),
-                self.proof_generation_key.as_ref().map(|k| k.nsk.clone()),
+                self.proof_generation_key.as_ref().map(|k| k.nsk),
             )?;
 
             // NB: We don't ensure that the bit representation of nsk
@@ -642,7 +642,7 @@ fn test_input_circuit_with_bls12_381() {
             let mut cs = TestConstraintSystem::<Bls12>::new();
 
             let instance = Spend {
-                params: params,
+                params,
                 value_commitment: Some(value_commitment.clone()),
                 proof_generation_key: Some(proof_generation_key.clone()),
                 payment_address: Some(payment_address.clone()),
@@ -738,7 +738,7 @@ fn test_output_circuit_with_bls12_381() {
             let mut cs = TestConstraintSystem::<Bls12>::new();
 
             let instance = Output {
-                params: params,
+                params,
                 value_commitment: Some(value_commitment.clone()),
                 payment_address: Some(payment_address.clone()),
                 commitment_randomness: Some(commitment_randomness),

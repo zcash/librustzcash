@@ -41,16 +41,16 @@ where
     {
         let chunk_a = chunk
             .get(0)
-            .map(|e| e.clone())
-            .unwrap_or(Boolean::constant(false));
+            .cloned()
+            .unwrap_or_else(|| Boolean::constant(false));
         let chunk_b = chunk
             .get(1)
-            .map(|e| e.clone())
-            .unwrap_or(Boolean::constant(false));
+            .cloned()
+            .unwrap_or_else(|| Boolean::constant(false));
         let chunk_c = chunk
             .get(2)
-            .map(|e| e.clone())
-            .unwrap_or(Boolean::constant(false));
+            .cloned()
+            .unwrap_or_else(|| Boolean::constant(false));
 
         let (x, y) = lookup3_xy(
             cs.namespace(|| format!("window table lookup {}", i)),
@@ -58,7 +58,7 @@ where
             window,
         )?;
 
-        let p = EdwardsPoint { x: x, y: y };
+        let p = EdwardsPoint { x, y };
 
         if result.is_none() {
             result = Some(p);
@@ -570,7 +570,7 @@ impl<E: JubjubEngine> MontgomeryPoint<E> {
     /// on the curve. Useful for constants and
     /// window table lookups.
     pub fn interpret_unchecked(x: Num<E>, y: Num<E>) -> Self {
-        MontgomeryPoint { x: x, y: y }
+        MontgomeryPoint { x, y }
     }
 
     /// Performs an affine point addition, not defined for

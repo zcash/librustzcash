@@ -9,7 +9,7 @@ fn get_constant_bools(person: &Personalization) -> Vec<Boolean> {
     person
         .get_bits()
         .into_iter()
-        .map(|e| Boolean::constant(e))
+        .map(Boolean::constant)
         .collect()
 }
 
@@ -65,7 +65,7 @@ where
 
             segment_windows = &segment_windows[1..];
 
-            if segment_windows.len() == 0 {
+            if segment_windows.is_empty() {
                 break;
             }
 

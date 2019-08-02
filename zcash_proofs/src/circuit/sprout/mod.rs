@@ -234,10 +234,7 @@ impl NoteValue {
             )?);
         }
 
-        Ok(NoteValue {
-            value: value,
-            bits: bits,
-        })
+        Ok(NoteValue { value, bits })
     }
 
     /// Encodes the bits of the value into little-endian
@@ -247,7 +244,7 @@ impl NoteValue {
             .chunks(8)
             .flat_map(|v| v.iter().rev())
             .cloned()
-            .map(|e| Boolean::from(e))
+            .map(Boolean::from)
             .collect()
     }
 
@@ -379,11 +376,11 @@ fn test_sprout_constraints() {
             let a_sk = Some(SpendingKey(get_u256(&mut test_vector)));
 
             inputs.push(JSInput {
-                value: value,
-                a_sk: a_sk,
-                rho: rho,
-                r: r,
-                auth_path: auth_path,
+                value,
+                a_sk,
+                rho,
+                r,
+                auth_path,
             });
         }
 
@@ -395,11 +392,7 @@ fn test_sprout_constraints() {
             get_u256(&mut test_vector);
             let r = Some(CommitmentRandomness(get_u256(&mut test_vector)));
 
-            outputs.push(JSOutput {
-                value: value,
-                a_pk: a_pk,
-                r: r,
-            });
+            outputs.push(JSOutput { value, a_pk, r });
         }
 
         let vpub_old = Some(test_vector.read_u64::<LittleEndian>().unwrap());
@@ -415,13 +408,13 @@ fn test_sprout_constraints() {
         let mac2 = get_u256(&mut test_vector);
 
         let js = JoinSplit {
-            vpub_old: vpub_old,
-            vpub_new: vpub_new,
-            h_sig: h_sig,
-            phi: phi,
-            inputs: inputs,
-            outputs: outputs,
-            rt: rt,
+            vpub_old,
+            vpub_new,
+            h_sig,
+            phi,
+            inputs,
+            outputs,
+            rt,
         };
 
         js.synthesize(&mut cs).unwrap();
