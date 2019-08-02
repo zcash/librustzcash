@@ -10,11 +10,11 @@ use blake2b_simd::{Hash as Blake2bHash, Params as Blake2bParams};
 use ff::{PrimeField, PrimeFieldRepr};
 use std::io::{self, Read, Write};
 
-pub const PRF_EXPAND_PERSONALIZATION: &'static [u8; 16] = b"Zcash_ExpandSeed";
+pub const PRF_EXPAND_PERSONALIZATION: &[u8; 16] = b"Zcash_ExpandSeed";
 
 /// PRF^expand(sk, t) := BLAKE2b-512("Zcash_ExpandSeed", sk || t)
 pub fn prf_expand(sk: &[u8], t: &[u8]) -> Blake2bHash {
-    prf_expand_vec(sk, &vec![t])
+    prf_expand_vec(sk, &[t])
 }
 
 pub fn prf_expand_vec(sk: &[u8], ts: &[&[u8]]) -> Blake2bHash {
@@ -111,7 +111,7 @@ impl<E: JubjubEngine> Clone for FullViewingKey<E> {
                 ak: self.vk.ak.clone(),
                 nk: self.vk.nk.clone(),
             },
-            ovk: self.ovk.clone(),
+            ovk: self.ovk,
         }
     }
 }

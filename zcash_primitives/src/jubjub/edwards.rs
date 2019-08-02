@@ -132,9 +132,9 @@ impl<E: JubjubEngine> Point<E, Unknown> {
                         t.mul_assign(&y);
 
                         Some(Point {
-                            x: x,
-                            y: y,
-                            t: t,
+                            x,
+                            y,
+                            t,
                             z: E::Fr::one(),
                             _marker: PhantomData,
                         })
@@ -277,8 +277,8 @@ impl<E: JubjubEngine, Subgroup> Point<E, Subgroup> {
                     Point {
                         x: u,
                         y: v,
-                        t: t,
-                        z: z,
+                        t,
+                        z,
                         _marker: PhantomData,
                     }
                 }
@@ -412,7 +412,7 @@ impl<E: JubjubEngine, Subgroup> Point<E, Subgroup> {
         b.mul_assign(&other.y);
 
         // C = d * t1 * t2
-        let mut c = params.edwards_d().clone();
+        let mut c = *params.edwards_d();
         c.mul_assign(&self.t);
         c.mul_assign(&other.t);
 

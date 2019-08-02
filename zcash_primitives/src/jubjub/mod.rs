@@ -199,9 +199,9 @@ impl JubjubBls12 {
             )
             .unwrap(),
             // A = 40962
-            montgomery_a: montgomery_a,
+            montgomery_a,
             // 2A = 2.A
-            montgomery_2a: montgomery_2a,
+            montgomery_2a,
             // scaling factor = sqrt(4 / (a - d))
             scale: Fr::from_str(
                 "17814886934372412843466061268024708274627479829237077604635722030778476050649",

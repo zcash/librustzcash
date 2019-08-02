@@ -64,12 +64,12 @@ impl<E: JubjubEngine> Point<E, Unknown> {
                     y.negate();
                 }
 
-                return Some(Point {
-                    x: x,
-                    y: y,
+                Some(Point {
+                    x,
+                    y,
                     infinity: false,
                     _marker: PhantomData,
-                });
+                })
             }
             None => None,
         }
@@ -88,9 +88,8 @@ impl<E: JubjubEngine> Point<E, Unknown> {
             let x = E::Fr::random(rng);
             let sign = rng.next_u32() % 2 != 0;
 
-            match Self::get_for_x(x, sign, params) {
-                Some(p) => return p,
-                None => {}
+            if let Some(p) = Self::get_for_x(x, sign, params) {
+                return p;
             }
         }
     }
@@ -214,7 +213,7 @@ impl<E: JubjubEngine, Subgroup> Point<E, Subgroup> {
 
         let mut delta = E::Fr::one();
         {
-            let mut tmp = params.montgomery_a().clone();
+            let mut tmp = *params.montgomery_a();
             tmp.mul_assign(&self.x);
             tmp.double();
             delta.add_assign(&tmp);

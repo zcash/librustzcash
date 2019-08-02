@@ -60,10 +60,7 @@ impl Node {
             indices.extend(a.indices.iter());
             indices
         };
-        Node {
-            hash: hash,
-            indices: indices,
-        }
+        Node { hash, indices }
     }
 
     fn from_children_ref(a: &Node, b: &Node, trim: usize) -> Self {
@@ -82,10 +79,7 @@ impl Node {
             indices.extend(b.indices.iter());
             indices.extend(a.indices.iter());
         }
-        Node {
-            hash: hash,
-            indices: indices,
-        }
+        Node { hash, indices }
     }
 
     fn indices_before(&self, other: &Node) -> bool {
@@ -141,7 +135,7 @@ fn expand_array(vin: &[u8], bit_len: usize, byte_pad: usize) -> Vec<u8> {
 
     let mut j = 0;
     for b in vin {
-        acc_value = (acc_value << 8) | *b as u32;
+        acc_value = (acc_value << 8) | u32::from(*b);
         acc_bits += 8;
 
         // When we have bit_len or more bits in the accumulator, write the next
@@ -197,7 +191,7 @@ fn distinct_indices(a: &Node, b: &Node) -> bool {
             }
         }
     }
-    return true;
+    true
 }
 
 fn validate_subtrees(p: &Params, a: &Node, b: &Node) -> bool {
@@ -222,7 +216,7 @@ pub fn is_valid_solution_iterative(
     nonce: &[u8],
     indices: &[u32],
 ) -> bool {
-    let p = Params { n: n, k: k };
+    let p = Params { n, k };
 
     let mut state = initialise_state(p.n, p.k, p.hash_output());
     state.update(input);
@@ -249,7 +243,7 @@ pub fn is_valid_solution_iterative(
     }
 
     assert!(rows.len() == 1);
-    return rows[0].is_zero(hash_len);
+    rows[0].is_zero(hash_len)
 }
 
 fn tree_validator(p: &Params, state: &Blake2bState, indices: &[u32]) -> Option<Node> {
@@ -281,7 +275,7 @@ pub fn is_valid_solution_recursive(
     nonce: &[u8],
     indices: &[u32],
 ) -> bool {
-    let p = Params { n: n, k: k };
+    let p = Params { n, k };
 
     let mut state = initialise_state(p.n, p.k, p.hash_output());
     state.update(input);
@@ -297,7 +291,7 @@ pub fn is_valid_solution_recursive(
 }
 
 pub fn is_valid_solution(n: u32, k: u32, input: &[u8], nonce: &[u8], soln: &[u8]) -> bool {
-    let p = Params { n: n, k: k };
+    let p = Params { n, k };
     let indices = indices_from_minimal(soln, p.collision_bit_length());
 
     // Recursive validation is faster

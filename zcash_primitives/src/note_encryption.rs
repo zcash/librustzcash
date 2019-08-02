@@ -19,8 +19,8 @@ use std::str;
 
 use crate::{keys::OutgoingViewingKey, JUBJUB};
 
-pub const KDF_SAPLING_PERSONALIZATION: &'static [u8; 16] = b"Zcash_SaplingKDF";
-pub const PRF_OCK_PERSONALIZATION: &'static [u8; 16] = b"Zcash_Derive_ock";
+pub const KDF_SAPLING_PERSONALIZATION: &[u8; 16] = b"Zcash_SaplingKDF";
+pub const PRF_OCK_PERSONALIZATION: &[u8; 16] = b"Zcash_Derive_ock";
 
 const COMPACT_NOTE_SIZE: usize = (
     1  + // version
@@ -85,7 +85,7 @@ impl Default for Memo {
 
 impl PartialEq for Memo {
     fn eq(&self, rhs: &Memo) -> bool {
-        &self.0[..] == &rhs.0[..]
+        self.0[..] == rhs.0[..]
     }
 }
 

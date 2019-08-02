@@ -153,7 +153,7 @@ impl TransactionMetadata {
     /// they added (via the first call to [`Builder::add_sapling_spend`]) is the first
     /// [`SpendDescription`] in the transaction.
     pub fn spend_index(&self, n: usize) -> Option<usize> {
-        self.spend_indices.get(n).map(|i| *i)
+        self.spend_indices.get(n).copied()
     }
 
     /// Returns the index within the transaction of the [`OutputDescription`] corresponding
@@ -164,7 +164,7 @@ impl TransactionMetadata {
     /// they added (via the first call to [`Builder::add_sapling_output`]) is the first
     /// [`OutputDescription`] in the transaction.
     pub fn output_index(&self, n: usize) -> Option<usize> {
-        self.output_indices.get(n).map(|i| *i)
+        self.output_indices.get(n).copied()
     }
 }
 
@@ -414,7 +414,7 @@ impl<R: RngCore + CryptoRng> Builder<R> {
 
             self.mtx.shielded_spends.push(SpendDescription {
                 cv,
-                anchor: anchor,
+                anchor,
                 nullifier,
                 rk,
                 zkproof,

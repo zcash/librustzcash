@@ -13,7 +13,7 @@ pub struct BlockHash(pub [u8; 32]);
 
 impl fmt::Display for BlockHash {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut data = self.0.clone();
+        let mut data = self.0;
         data.reverse();
         formatter.write_str(&hex::encode(data))
     }

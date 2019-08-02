@@ -486,8 +486,10 @@ impl<Node: Hashable> CommitmentTreeWitness<Node> {
         // Given the position, let's finish constructing the authentication
         // path
         let mut tmp = position;
-        for i in 0..depth {
-            auth_path[i].as_mut().map(|p| p.1 = (tmp & 1) == 1);
+        for entry in auth_path.iter_mut() {
+            if let Some(p) = entry {
+                p.1 = (tmp & 1) == 1;
+            }
 
             tmp >>= 1;
         }
