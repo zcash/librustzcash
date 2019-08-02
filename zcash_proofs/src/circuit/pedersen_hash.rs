@@ -189,7 +189,7 @@ mod test {
                     input.clone().into_iter(),
                     params,
                 )
-                .into_xy();
+                .to_xy();
 
                 assert_eq!(res.get_x().get_value().unwrap(), expected.0);
                 assert_eq!(res.get_y().get_value().unwrap(), expected.1);
@@ -200,7 +200,7 @@ mod test {
                     input.into_iter(),
                     params,
                 )
-                .into_xy();
+                .to_xy();
 
                 assert!(res.get_x().get_value().unwrap() != unexpected.0);
                 assert!(res.get_y().get_value().unwrap() != unexpected.1);

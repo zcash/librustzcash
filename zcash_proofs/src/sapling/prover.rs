@@ -79,10 +79,10 @@ impl SaplingProvingContext {
         };
 
         // Construct the viewing key
-        let viewing_key = proof_generation_key.into_viewing_key(params);
+        let viewing_key = proof_generation_key.to_viewing_key(params);
 
         // Construct the payment address with the viewing key / diversifier
-        let payment_address = match viewing_key.into_payment_address(diversifier, params) {
+        let payment_address = match viewing_key.to_payment_address(diversifier, params) {
             Some(p) => p,
             None => return Err(()),
         };
@@ -130,12 +130,12 @@ impl SaplingProvingContext {
         // Construct public input for circuit
         let mut public_input = [Fr::zero(); 7];
         {
-            let (x, y) = rk.0.into_xy();
+            let (x, y) = rk.0.to_xy();
             public_input[0] = x;
             public_input[1] = y;
         }
         {
-            let (x, y) = value_commitment.cm(params).into_xy();
+            let (x, y) = value_commitment.cm(params).to_xy();
             public_input[2] = x;
             public_input[3] = y;
         }

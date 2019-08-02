@@ -394,7 +394,7 @@ impl<R: RngCore + CryptoRng> Builder<R> {
 
             let mut nullifier = [0u8; 32];
             nullifier.copy_from_slice(&spend.note.nf(
-                &proof_generation_key.into_viewing_key(&JUBJUB),
+                &proof_generation_key.to_viewing_key(&JUBJUB),
                 spend.witness.position,
                 &JUBJUB,
             ));

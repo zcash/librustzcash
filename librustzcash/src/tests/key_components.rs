@@ -678,7 +678,7 @@ fn key_components() {
         }
 
         let pgk = ProofGenerationKey { ak, nsk };
-        let fvk = pgk.into_viewing_key(&JUBJUB);
+        let fvk = pgk.to_viewing_key(&JUBJUB);
         {
             let mut vec = Vec::new();
             fvk.nk.write(&mut vec).unwrap();
@@ -704,7 +704,7 @@ fn key_components() {
         let diversifier = Diversifier(tv.default_d);
         assert!(librustzcash_check_diversifier(&tv.default_d));
 
-        let addr = fvk.into_payment_address(diversifier, &JUBJUB).unwrap();
+        let addr = fvk.to_payment_address(diversifier, &JUBJUB).unwrap();
         {
             let mut vec = Vec::new();
             addr.pk_d.write(&mut vec).unwrap();

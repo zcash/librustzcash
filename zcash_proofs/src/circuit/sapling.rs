@@ -336,8 +336,8 @@ impl<'a, E: JubjubEngine> Circuit<E> for Spend<'a, E> {
             // they will be unable to find an authentication path in the
             // tree with high probability.
             let mut preimage = vec![];
-            preimage.extend(xl.into_bits_le(cs.namespace(|| "xl into bits"))?);
-            preimage.extend(xr.into_bits_le(cs.namespace(|| "xr into bits"))?);
+            preimage.extend(xl.to_bits_le(cs.namespace(|| "xl into bits"))?);
+            preimage.extend(xr.to_bits_le(cs.namespace(|| "xr into bits"))?);
 
             // Compute the new subtree value
             cur = pedersen_hash::pedersen_hash(
@@ -464,7 +464,7 @@ impl<'a, E: JubjubEngine> Circuit<E> for Output<'a, E> {
         // they would like.
         {
             // Just grab pk_d from the witness
-            let pk_d = self.payment_address.as_ref().map(|e| e.pk_d.into_xy());
+            let pk_d = self.payment_address.as_ref().map(|e| e.pk_d.to_xy());
 
             // Witness the y-coordinate, encoded as little
             // endian bits (to match the representation)
@@ -567,7 +567,7 @@ fn test_input_circuit_with_bls12_381() {
             nsk: nsk.clone(),
         };
 
-        let viewing_key = proof_generation_key.into_viewing_key(params);
+        let viewing_key = proof_generation_key.to_viewing_key(params);
 
         let payment_address;
 
@@ -578,7 +578,7 @@ fn test_input_circuit_with_bls12_381() {
                 Diversifier(d)
             };
 
-            if let Some(p) = viewing_key.into_payment_address(diversifier, params) {
+            if let Some(p) = viewing_key.to_payment_address(diversifier, params) {
                 payment_address = p;
                 break;
             }
@@ -590,8 +590,8 @@ fn test_input_circuit_with_bls12_381() {
         let ar = fs::Fs::random(rng);
 
         {
-            let rk = viewing_key.rk(ar, params).into_xy();
-            let expected_value_cm = value_commitment.cm(params).into_xy();
+            let rk = viewing_key.rk(ar, params).to_xy();
+            let expected_value_cm = value_commitment.cm(params).to_xy();
             let note = Note {
                 value: value_commitment.value,
                 g_d: g_d.clone(),
@@ -626,7 +626,7 @@ fn test_input_circuit_with_bls12_381() {
                         .chain(rhs.into_iter().take(Fr::NUM_BITS as usize)),
                     params,
                 )
-                .into_xy()
+                .to_xy()
                 .0;
 
                 if b {
@@ -714,7 +714,7 @@ fn test_output_circuit_with_bls12_381() {
             nsk: nsk.clone(),
         };
 
-        let viewing_key = proof_generation_key.into_viewing_key(params);
+        let viewing_key = proof_generation_key.to_viewing_key(params);
 
         let payment_address;
 
@@ -725,7 +725,7 @@ fn test_output_circuit_with_bls12_381() {
                 Diversifier(d)
             };
 
-            if let Some(p) = viewing_key.into_payment_address(diversifier, params) {
+            if let Some(p) = viewing_key.to_payment_address(diversifier, params) {
                 payment_address = p;
                 break;
             }
@@ -759,13 +759,13 @@ fn test_output_circuit_with_bls12_381() {
                 .expect("should be valid")
                 .cm(params);
 
-            let expected_value_cm = value_commitment.cm(params).into_xy();
+            let expected_value_cm = value_commitment.cm(params).to_xy();
 
             let expected_epk = payment_address
                 .g_d(params)
                 .expect("should be valid")
                 .mul(esk, params);
-            let expected_epk_xy = expected_epk.into_xy();
+            let expected_epk_xy = expected_epk.to_xy();
 
             assert_eq!(cs.num_inputs(), 6);
             assert_eq!(cs.get_input(0, "ONE"), Fr::one());

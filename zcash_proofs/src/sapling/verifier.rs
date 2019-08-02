@@ -82,12 +82,12 @@ impl SaplingVerificationContext {
         // Construct public input for circuit
         let mut public_input = [Fr::zero(); 7];
         {
-            let (x, y) = rk.0.into_xy();
+            let (x, y) = rk.0.to_xy();
             public_input[0] = x;
             public_input[1] = y;
         }
         {
-            let (x, y) = cv.into_xy();
+            let (x, y) = cv.to_xy();
             public_input[2] = x;
             public_input[3] = y;
         }
@@ -146,12 +146,12 @@ impl SaplingVerificationContext {
         // Construct public input for circuit
         let mut public_input = [Fr::zero(); 5];
         {
-            let (x, y) = cv.into_xy();
+            let (x, y) = cv.to_xy();
             public_input[0] = x;
             public_input[1] = y;
         }
         {
-            let (x, y) = epk.into_xy();
+            let (x, y) = epk.to_xy();
             public_input[2] = x;
             public_input[3] = y;
         }

@@ -384,7 +384,7 @@ impl JubjubBls12 {
 
                     // coeffs = g, g*2, g*3, g*4
                     for _ in 0..4 {
-                        coeffs.push(g.into_xy().expect("cannot produce O"));
+                        coeffs.push(g.to_xy().expect("cannot produce O"));
                         g = g.add(&gen, &tmp_params);
                     }
                     windows.push(coeffs);
@@ -411,7 +411,7 @@ impl JubjubBls12 {
                     let mut coeffs = vec![(Fr::zero(), Fr::one())];
                     let mut g = gen.clone();
                     for _ in 0..7 {
-                        coeffs.push(g.into_xy());
+                        coeffs.push(g.to_xy());
                         g = g.add(&gen, &tmp_params);
                     }
                     windows.push(coeffs);

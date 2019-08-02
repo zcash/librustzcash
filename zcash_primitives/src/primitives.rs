@@ -39,7 +39,7 @@ pub struct ProofGenerationKey<E: JubjubEngine> {
 }
 
 impl<E: JubjubEngine> ProofGenerationKey<E> {
-    pub fn into_viewing_key(&self, params: &E::Params) -> ViewingKey<E> {
+    pub fn to_viewing_key(&self, params: &E::Params) -> ViewingKey<E> {
         ViewingKey {
             ak: self.ak.clone(),
             nk: params
@@ -89,7 +89,7 @@ impl<E: JubjubEngine> ViewingKey<E> {
         E::Fs::from_repr(e).expect("should be a valid scalar")
     }
 
-    pub fn into_payment_address(
+    pub fn to_payment_address(
         &self,
         diversifier: Diversifier,
         params: &E::Params,
@@ -242,6 +242,6 @@ impl<E: JubjubEngine> Note<E> {
     pub fn cm(&self, params: &E::Params) -> E::Fr {
         // The commitment is in the prime order subgroup, so mapping the
         // commitment to the x-coordinate is an injective encoding.
-        self.cm_full_point(params).into_xy().0
+        self.cm_full_point(params).to_xy().0
     }
 }

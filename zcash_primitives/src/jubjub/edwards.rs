@@ -168,7 +168,7 @@ impl<E: JubjubEngine> Point<E, Unknown> {
 
 impl<E: JubjubEngine, Subgroup> Point<E, Subgroup> {
     pub fn write<W: Write>(&self, writer: W) -> io::Result<()> {
-        let (x, y) = self.into_xy();
+        let (x, y) = self.to_xy();
 
         assert_eq!(E::Fr::NUM_BITS, 255);
 
@@ -183,7 +183,7 @@ impl<E: JubjubEngine, Subgroup> Point<E, Subgroup> {
 
     /// Convert from a Montgomery point
     pub fn from_montgomery(m: &montgomery::Point<E, Subgroup>, params: &E::Params) -> Self {
-        match m.into_xy() {
+        match m.to_xy() {
             None => {
                 // Map the point at infinity to the neutral element.
                 Point::zero()
@@ -306,7 +306,7 @@ impl<E: JubjubEngine, Subgroup> Point<E, Subgroup> {
         }
     }
 
-    pub fn into_xy(&self) -> (E::Fr, E::Fr) {
+    pub fn to_xy(&self) -> (E::Fr, E::Fr) {
         let zinv = self.z.inverse().unwrap();
 
         let mut x = self.x;

@@ -121,9 +121,9 @@ impl<E: JubjubEngine> EdwardsPoint<E> {
     {
         let mut tmp = vec![];
 
-        let x = self.x.into_bits_le_strict(cs.namespace(|| "unpack x"))?;
+        let x = self.x.to_bits_le_strict(cs.namespace(|| "unpack x"))?;
 
-        let y = self.y.into_bits_le_strict(cs.namespace(|| "unpack y"))?;
+        let y = self.y.to_bits_le_strict(cs.namespace(|| "unpack y"))?;
 
         tmp.extend(y);
         tmp.push(x[0].clone());
@@ -141,7 +141,7 @@ impl<E: JubjubEngine> EdwardsPoint<E> {
     where
         CS: ConstraintSystem<E>,
     {
-        let p = p.map(|p| p.into_xy());
+        let p = p.map(|p| p.to_xy());
 
         // Allocate x
         let x = AllocatedNum::alloc(cs.namespace(|| "x"), || Ok(p.get()?.0))?;
@@ -688,8 +688,8 @@ mod test {
             let mut cs = TestConstraintSystem::<Bls12>::new();
 
             let p = montgomery::Point::<Bls12, _>::rand(rng, params);
-            let (u, v) = edwards::Point::from_montgomery(&p, params).into_xy();
-            let (x, y) = p.into_xy().unwrap();
+            let (u, v) = edwards::Point::from_montgomery(&p, params).to_xy();
+            let (x, y) = p.to_xy().unwrap();
 
             let numx = AllocatedNum::alloc(cs.namespace(|| "mont x"), || Ok(x)).unwrap();
             let numy = AllocatedNum::alloc(cs.namespace(|| "mont y"), || Ok(y)).unwrap();
@@ -728,7 +728,7 @@ mod test {
             let mut cs = TestConstraintSystem::<Bls12>::new();
             let q = EdwardsPoint::witness(&mut cs, Some(p.clone()), &params).unwrap();
 
-            let p = p.into_xy();
+            let p = p.to_xy();
 
             assert!(cs.is_satisfied());
             assert_eq!(q.x.get_value().unwrap(), p.0);
@@ -737,7 +737,7 @@ mod test {
 
         for _ in 0..100 {
             let p = edwards::Point::<Bls12, _>::rand(rng, &params);
-            let (x, y) = p.into_xy();
+            let (x, y) = p.to_xy();
 
             let mut cs = TestConstraintSystem::<Bls12>::new();
             let numx = AllocatedNum::alloc(cs.namespace(|| "x"), || Ok(x)).unwrap();
@@ -779,7 +779,7 @@ mod test {
             let p = params.generator(FixedGenerators::NoteCommitmentRandomness);
             let s = Fs::random(rng);
             let q = p.mul(s, params);
-            let (x1, y1) = q.into_xy();
+            let (x1, y1) = q.to_xy();
 
             let mut s_bits = BitIterator::new(s.into_repr()).collect::<Vec<_>>();
             s_bits.reverse();
@@ -823,8 +823,8 @@ mod test {
             let s = Fs::random(rng);
             let q = p.mul(s, params);
 
-            let (x0, y0) = p.into_xy();
-            let (x1, y1) = q.into_xy();
+            let (x0, y0) = p.to_xy();
+            let (x1, y1) = q.to_xy();
 
             let num_x0 = AllocatedNum::alloc(cs.namespace(|| "x0"), || Ok(x0)).unwrap();
             let num_y0 = AllocatedNum::alloc(cs.namespace(|| "y0"), || Ok(y0)).unwrap();
@@ -873,7 +873,7 @@ mod test {
 
             let p = edwards::Point::<Bls12, _>::rand(rng, params);
 
-            let (x0, y0) = p.into_xy();
+            let (x0, y0) = p.to_xy();
 
             let num_x0 = AllocatedNum::alloc(cs.namespace(|| "x0"), || Ok(x0)).unwrap();
             let num_y0 = AllocatedNum::alloc(cs.namespace(|| "y0"), || Ok(y0)).unwrap();
@@ -941,9 +941,9 @@ mod test {
 
             let p3 = p1.add(&p2, params);
 
-            let (x0, y0) = p1.into_xy();
-            let (x1, y1) = p2.into_xy();
-            let (x2, y2) = p3.into_xy();
+            let (x0, y0) = p1.to_xy();
+            let (x1, y1) = p2.to_xy();
+            let (x2, y2) = p3.to_xy();
 
             let mut cs = TestConstraintSystem::<Bls12>::new();
 
@@ -1002,8 +1002,8 @@ mod test {
             let p1 = edwards::Point::<Bls12, _>::rand(rng, params);
             let p2 = p1.double(params);
 
-            let (x0, y0) = p1.into_xy();
-            let (x1, y1) = p2.into_xy();
+            let (x0, y0) = p1.to_xy();
+            let (x1, y1) = p2.to_xy();
 
             let mut cs = TestConstraintSystem::<Bls12>::new();
 
@@ -1053,9 +1053,9 @@ mod test {
 
             let p3 = p1.add(&p2, params);
 
-            let (x0, y0) = p1.into_xy().unwrap();
-            let (x1, y1) = p2.into_xy().unwrap();
-            let (x2, y2) = p3.into_xy().unwrap();
+            let (x0, y0) = p1.to_xy().unwrap();
+            let (x1, y1) = p2.to_xy().unwrap();
+            let (x2, y2) = p3.to_xy().unwrap();
 
             let mut cs = TestConstraintSystem::<Bls12>::new();
 

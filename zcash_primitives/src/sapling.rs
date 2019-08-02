@@ -42,7 +42,7 @@ pub fn merkle_hash(depth: usize, lhs: &FrRepr, rhs: &FrRepr) -> FrRepr {
             .chain(rhs.iter().copied().take(Fr::NUM_BITS as usize)),
         &JUBJUB,
     )
-    .into_xy()
+    .to_xy()
     .0
     .into_repr()
 }
