@@ -6,10 +6,9 @@ members = [
     "librustzcash",
     "pairing",
     "sapling-crypto",
+    "zcash_client_backend",
     "zcash_primitives",
     "zcash_proofs",
-    "zcash_wallet",
-    "zip32",
 ]
 
 [profile.release]

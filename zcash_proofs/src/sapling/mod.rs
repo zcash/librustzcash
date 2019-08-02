@@ -6,7 +6,7 @@ use sapling_crypto::jubjub::{
 mod prover;
 mod verifier;
 
-pub use self::prover::{CommitmentTreeWitness, SaplingProvingContext};
+pub use self::prover::SaplingProvingContext;
 pub use self::verifier::SaplingVerificationContext;
 
 // This function computes `value` in the exponent of the value commitment base

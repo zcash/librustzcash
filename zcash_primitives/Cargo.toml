@@ -6,15 +6,16 @@ authors = [
 ]
 
 [dependencies]
+aes = "0.2"
+blake2b_simd = "0.5"
 byteorder = "1"
+crypto_api_chachapoly = "0.1"
 ff = { path = "../ff" }
+fpe = "0.1"
 hex = "0.3"
 lazy_static = "1"
 pairing = { path = "../pairing" }
-rand = "0.4"
+rand_core = "0.5"
+rand_os = "0.2"
 sapling-crypto = { path = "../sapling-crypto" }
 sha2 = "0.8"
-
-[dependencies.blake2-rfc]
-git = "https://github.com/gtank/blake2-rfc"
-rev = "7a5b5fc99ae483a0043db7547fb79a6fa44b88a9"

@@ -112,20 +112,24 @@ pub fn pedersen_hash<E: JubjubEngine, CS>(
 
 #[cfg(test)]
 mod test {
-    use rand::{SeedableRng, Rng, XorShiftRng};
     use super::*;
     use ::circuit::test::*;
     use ::circuit::boolean::{Boolean, AllocatedBit};
     use ff::PrimeField;
     use pairing::bls12_381::{Bls12, Fr};
+    use rand_core::{RngCore, SeedableRng};
+    use rand_xorshift::XorShiftRng;
 
     #[test]
     fn test_pedersen_hash_constraints() {
-        let mut rng = XorShiftRng::from_seed([0x3dbe6259, 0x8d313d76, 0x3237db17, 0xe5bc0654]);
+        let mut rng = XorShiftRng::from_seed([
+            0x59, 0x62, 0xbe, 0x3d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06, 0xbc,
+            0xe5,
+        ]);
         let params = &JubjubBls12::new();
         let mut cs = TestConstraintSystem::<Bls12>::new();
 
-        let input: Vec<bool> = (0..(Fr::NUM_BITS * 2)).map(|_| rng.gen()).collect();
+        let input: Vec<bool> = (0..(Fr::NUM_BITS * 2)).map(|_| rng.next_u32() % 2 != 0).collect();
 
         let input_bools: Vec<Boolean> = input.iter().enumerate().map(|(i, b)| {
             Boolean::from(
@@ -146,12 +150,15 @@ mod test {
 
     #[test]
     fn test_pedersen_hash() {
-        let mut rng = XorShiftRng::from_seed([0x3dbe6259, 0x8d313d76, 0x3237db17, 0xe5bc0654]);
+        let mut rng = XorShiftRng::from_seed([
+            0x59, 0x62, 0xbe, 0x3d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06, 0xbc,
+            0xe5,
+        ]);
         let params = &JubjubBls12::new();
 
         for length in 0..751 {
             for _ in 0..5 {
-                let mut input: Vec<bool> = (0..length).map(|_| rng.gen()).collect();
+                let mut input: Vec<bool> = (0..length).map(|_| rng.next_u32() % 2 != 0).collect();
 
                 let mut cs = TestConstraintSystem::<Bls12>::new();
 

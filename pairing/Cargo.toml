@@ -15,10 +15,13 @@ homepage = "https://github.com/ebfull/pairing"
 repository = "https://github.com/ebfull/pairing"
 
 [dependencies]
-rand = "0.4"
 byteorder = "1"
 ff = { path = "../ff", features = ["derive"] }
 group = { path = "../group" }
+rand_core = "0.5"
+
+[dev-dependencies]
+rand_xorshift = "0.2"
 
 [features]
 unstable-features = ["expose-arith"]

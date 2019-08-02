@@ -221,7 +221,7 @@ pub struct Parameters<E: Engine> {
     pub h: Arc<Vec<E::G1Affine>>,
 
     // Elements of the form (beta * u_i(tau) + alpha v_i(tau) + w_i(tau)) / delta
-    // for all auxillary inputs. Variables can never be unconstrained, so this
+    // for all auxiliary inputs. Variables can never be unconstrained, so this
     // never contains points at infinity.
     pub l: Arc<Vec<E::G1Affine>>,
 
@@ -487,7 +487,7 @@ mod test_with_bls12_381 {
     use {Circuit, SynthesisError, ConstraintSystem};
 
     use ff::Field;
-    use rand::{Rand, thread_rng};
+    use rand::{thread_rng};
     use pairing::bls12_381::{Bls12, Fr};
 
     #[test]
@@ -547,8 +547,8 @@ mod test_with_bls12_381 {
         let pvk = prepare_verifying_key::<Bls12>(&params.vk);
 
         for _ in 0..100 {
-            let a = Fr::rand(rng);
-            let b = Fr::rand(rng);
+            let a = Fr::random(rng);
+            let b = Fr::random(rng);
             let mut c = a;
             c.mul_assign(&b);
 

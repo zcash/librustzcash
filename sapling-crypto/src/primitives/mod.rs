@@ -22,7 +22,7 @@ use jubjub::{
     FixedGenerators
 };
 
-use blake2_rfc::blake2s::Blake2s;
+use blake2s_simd::Params as Blake2sParams;
 
 #[derive(Clone)]
 pub struct ValueCommitment<E: JubjubEngine> {
@@ -62,6 +62,7 @@ impl<E: JubjubEngine> ProofGenerationKey<E> {
     }
 }
 
+#[derive(Debug)]
 pub struct ViewingKey<E: JubjubEngine> {
     pub ak: edwards::Point<E, PrimeOrder>,
     pub nk: edwards::Point<E, PrimeOrder>
@@ -86,9 +87,12 @@ impl<E: JubjubEngine> ViewingKey<E> {
         self.ak.write(&mut preimage[0..32]).unwrap();
         self.nk.write(&mut preimage[32..64]).unwrap();
 
-        let mut h = Blake2s::with_params(32, &[], &[], constants::CRH_IVK_PERSONALIZATION);
-        h.update(&preimage);
-        let mut h = h.finalize().as_ref().to_vec();
+        let mut h = [0; 32];
+        h.copy_from_slice(Blake2sParams::new()
+            .hash_length(32)
+            .personal(constants::CRH_IVK_PERSONALIZATION)
+            .hash(&preimage)
+            .as_bytes());
 
         // Drop the most significant five bits, so it can be interpreted as a scalar.
         h[31] &= 0b0000_0111;
@@ -116,7 +120,7 @@ impl<E: JubjubEngine> ViewingKey<E> {
     }
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug, PartialEq)]
 pub struct Diversifier(pub [u8; 11]);
 
 impl Diversifier {
@@ -129,10 +133,16 @@ impl Diversifier {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct PaymentAddress<E: JubjubEngine> {
     pub pk_d: edwards::Point<E, PrimeOrder>,
     pub diversifier: Diversifier
+}
+
+impl<E: JubjubEngine> PartialEq for PaymentAddress<E> {
+    fn eq(&self, other: &Self) -> bool {
+        self.pk_d == other.pk_d && self.diversifier == other.diversifier
+    }
 }
 
 impl<E: JubjubEngine> PaymentAddress<E> {
@@ -162,6 +172,7 @@ impl<E: JubjubEngine> PaymentAddress<E> {
     }
 }
 
+#[derive(Clone, Debug)]
 pub struct Note<E: JubjubEngine> {
     /// The value of the note
     pub value: u64,
@@ -171,6 +182,15 @@ pub struct Note<E: JubjubEngine> {
     pub pk_d: edwards::Point<E, PrimeOrder>,
     /// The commitment randomness
     pub r: E::Fs
+}
+
+impl<E: JubjubEngine> PartialEq for Note<E> {
+    fn eq(&self, other: &Self) -> bool {
+        self.value == other.value
+            && self.g_d == other.g_d
+            && self.pk_d == other.pk_d
+            && self.r == other.r
+    }
 }
 
 impl<E: JubjubEngine> Note<E> {
@@ -238,10 +258,12 @@ impl<E: JubjubEngine> Note<E> {
         let mut nf_preimage = [0u8; 64];
         viewing_key.nk.write(&mut nf_preimage[0..32]).unwrap();
         rho.write(&mut nf_preimage[32..64]).unwrap();
-        let mut h = Blake2s::with_params(32, &[], &[], constants::PRF_NF_PERSONALIZATION);
-        h.update(&nf_preimage);
-        
-        h.finalize().as_ref().to_vec()
+        Blake2sParams::new()
+            .hash_length(32)
+            .personal(constants::PRF_NF_PERSONALIZATION)
+            .hash(&nf_preimage)
+            .as_bytes()
+            .to_vec()
     }
 
     /// Computes the note commitment

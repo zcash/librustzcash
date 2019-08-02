@@ -14,4 +14,5 @@ repository = "https://github.com/ebfull/group"
 
 [dependencies]
 ff = { path = "../ff" }
-rand = "0.4"
+rand = "0.7"
+rand_xorshift = "0.2"

@@ -1,10 +1,10 @@
-use blake2_rfc::blake2b::Blake2b;
+use blake2b_simd::State;
 use std::io::{self, Read};
 
 /// Abstraction over a reader which hashes the data being read.
 pub struct HashReader<R: Read> {
     reader: R,
-    hasher: Blake2b,
+    hasher: State,
 }
 
 impl<R: Read> HashReader<R> {
@@ -12,7 +12,7 @@ impl<R: Read> HashReader<R> {
     pub fn new(reader: R) -> Self {
         HashReader {
             reader: reader,
-            hasher: Blake2b::new(64),
+            hasher: State::new(),
         }
     }
 

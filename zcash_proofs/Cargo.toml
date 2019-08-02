@@ -7,12 +7,10 @@ authors = [
 
 [dependencies]
 bellman = { path = "../bellman" }
+blake2b_simd = "0.5"
 byteorder = "1"
 ff = { path = "../ff" }
 pairing = { path = "../pairing" }
-rand = "0.4"
+rand_os = "0.2"
 sapling-crypto = { path = "../sapling-crypto" }
-
-[dependencies.blake2-rfc]
-git = "https://github.com/gtank/blake2-rfc"
-rev = "7a5b5fc99ae483a0043db7547fb79a6fa44b88a9"
+zcash_primitives = { path = "../zcash_primitives" }

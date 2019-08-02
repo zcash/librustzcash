@@ -1,18 +1,19 @@
 extern crate bellman;
-extern crate blake2_rfc;
+extern crate blake2b_simd;
+extern crate blake2s_simd;
 extern crate byteorder;
 extern crate ff;
 extern crate libc;
 extern crate pairing;
-extern crate rand;
+extern crate rand_core;
+extern crate rand_os;
 extern crate sapling_crypto;
 extern crate zcash_primitives;
 extern crate zcash_proofs;
-extern crate zip32;
 
 extern crate lazy_static;
 
-use ff::{BitIterator, PrimeField, PrimeFieldRepr};
+use ff::{PrimeField, PrimeFieldRepr};
 use pairing::bls12_381::{Bls12, Fr, FrRepr};
 
 use sapling_crypto::{
@@ -23,7 +24,6 @@ use sapling_crypto::{
         fs::{Fs, FsRepr},
         FixedGenerators, JubjubEngine, JubjubParams, PrimeOrder, ToUniform, Unknown,
     },
-    pedersen_hash::{pedersen_hash, Personalization},
     redjubjub::{self, Signature},
 };
 
@@ -34,14 +34,15 @@ use bellman::groth16::{
     create_random_proof, verify_proof, Parameters, PreparedVerifyingKey, Proof,
 };
 
-use blake2_rfc::blake2s::Blake2s;
+use blake2s_simd::Params as Blake2sParams;
 
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 
-use rand::{OsRng, Rng};
+use rand_core::RngCore;
+use rand_os::OsRng;
 use std::io::BufReader;
 
-use libc::{c_char, c_uchar, int64_t, size_t, uint32_t, uint64_t};
+use libc::{c_char, c_uchar, size_t};
 use std::ffi::CStr;
 use std::fs::File;
 use std::path::{Path, PathBuf};
@@ -58,10 +59,15 @@ use std::ffi::OsString;
 use std::os::windows::ffi::OsStringExt;
 
 use sapling_crypto::primitives::{ProofGenerationKey, ViewingKey};
-use zcash_primitives::{sapling::spend_sig, JUBJUB};
+use zcash_primitives::{
+    merkle_tree::CommitmentTreeWitness,
+    note_encryption::sapling_ka_agree,
+    sapling::{merkle_hash, spend_sig},
+    zip32, JUBJUB,
+};
 use zcash_proofs::{
     load_parameters,
-    sapling::{CommitmentTreeWitness, SaplingProvingContext, SaplingVerificationContext},
+    sapling::{SaplingProvingContext, SaplingVerificationContext},
 };
 
 pub mod equihash;
@@ -255,28 +261,7 @@ pub extern "system" fn librustzcash_merkle_hash(
     // size of the representation
     let b_repr = read_le(unsafe { &(&*b)[..] });
 
-    let mut lhs = [false; 256];
-    let mut rhs = [false; 256];
-
-    for (a, b) in lhs.iter_mut().rev().zip(BitIterator::new(a_repr)) {
-        *a = b;
-    }
-
-    for (a, b) in rhs.iter_mut().rev().zip(BitIterator::new(b_repr)) {
-        *a = b;
-    }
-
-    let tmp = pedersen_hash::<Bls12, _>(
-        Personalization::MerkleTree(depth),
-        lhs.iter()
-            .map(|&x| x)
-            .take(Fr::NUM_BITS as usize)
-            .chain(rhs.iter().map(|&x| x).take(Fr::NUM_BITS as usize)),
-        &JUBJUB,
-    )
-    .into_xy()
-    .0
-    .into_repr();
+    let tmp = merkle_hash(depth, &a_repr, &b_repr);
 
     // Should be okay, caller is responsible for ensuring the pointer
     // is a valid pointer to 32 bytes that can be mutated.
@@ -337,7 +322,10 @@ pub extern "system" fn librustzcash_crh_ivk(
     let ak = unsafe { &*ak };
     let nk = unsafe { &*nk };
 
-    let mut h = Blake2s::with_params(32, &[], &[], CRH_IVK_PERSONALIZATION);
+    let mut h = Blake2sParams::new()
+        .hash_length(32)
+        .personal(CRH_IVK_PERSONALIZATION)
+        .to_state();
     h.update(ak);
     h.update(nk);
     let mut h = h.finalize().as_ref().to_vec();
@@ -400,11 +388,9 @@ fn test_gen_r() {
 #[no_mangle]
 pub extern "system" fn librustzcash_sapling_generate_r(result: *mut [c_uchar; 32]) {
     // create random 64 byte buffer
-    let mut rng = OsRng::new().expect("should be able to construct RNG");
+    let mut rng = OsRng;
     let mut buffer = [0u8; 64];
-    for i in 0..buffer.len() {
-        buffer[i] = rng.gen();
-    }
+    rng.fill_bytes(&mut buffer);
 
     // reduce to uniform value
     let r = <Bls12 as JubjubEngine>::Fs::to_uniform(&buffer[..]);
@@ -418,7 +404,7 @@ pub extern "system" fn librustzcash_sapling_generate_r(result: *mut [c_uchar; 32
 fn priv_get_note(
     diversifier: *const [c_uchar; 11],
     pk_d: *const [c_uchar; 32],
-    value: uint64_t,
+    value: u64,
     r: *const [c_uchar; 32],
 ) -> Result<sapling_crypto::primitives::Note<Bls12>, ()> {
     let diversifier = sapling_crypto::primitives::Diversifier(unsafe { *diversifier });
@@ -458,11 +444,11 @@ fn priv_get_note(
 pub extern "system" fn librustzcash_sapling_compute_nf(
     diversifier: *const [c_uchar; 11],
     pk_d: *const [c_uchar; 32],
-    value: uint64_t,
+    value: u64,
     r: *const [c_uchar; 32],
     ak: *const [c_uchar; 32],
     nk: *const [c_uchar; 32],
-    position: uint64_t,
+    position: u64,
     result: *mut [c_uchar; 32],
 ) -> bool {
     let note = match priv_get_note(diversifier, pk_d, value, r) {
@@ -503,7 +489,7 @@ pub extern "system" fn librustzcash_sapling_compute_nf(
 pub extern "system" fn librustzcash_sapling_compute_cm(
     diversifier: *const [c_uchar; 11],
     pk_d: *const [c_uchar; 32],
-    value: uint64_t,
+    value: u64,
     r: *const [c_uchar; 32],
     result: *mut [c_uchar; 32],
 ) -> bool {
@@ -536,15 +522,12 @@ pub extern "system" fn librustzcash_sapling_ka_agree(
         Err(_) => return false,
     };
 
-    // Multiply by 8
-    let p = p.mul_by_cofactor(&JUBJUB);
-
-    // Multiply by sk
-    let p = p.mul(sk, &JUBJUB);
+    // Compute key agreement
+    let ka = sapling_ka_agree(&sk, &p);
 
     // Produce result
     let result = unsafe { &mut *result };
-    p.write(&mut result[..]).expect("length is not 32 bytes");
+    ka.write(&mut result[..]).expect("length is not 32 bytes");
 
     true
 }
@@ -579,8 +562,8 @@ pub extern "system" fn librustzcash_sapling_ka_derivepublic(
 
 #[no_mangle]
 pub extern "system" fn librustzcash_eh_isvalid(
-    n: uint32_t,
-    k: uint32_t,
+    n: u32,
+    k: u32,
     input: *const c_uchar,
     input_len: size_t,
     nonce: *const c_uchar,
@@ -717,7 +700,7 @@ pub extern "system" fn librustzcash_sapling_check_output(
 #[no_mangle]
 pub extern "system" fn librustzcash_sapling_final_check(
     ctx: *mut SaplingVerificationContext,
-    value_balance: int64_t,
+    value_balance: i64,
     binding_sig: *const [c_uchar; 64],
     sighash_value: *const [c_uchar; 32],
 ) -> bool {
@@ -745,31 +728,31 @@ pub extern "system" fn librustzcash_sprout_prove(
 
     // First input
     in_sk1: *const [c_uchar; 32],
-    in_value1: uint64_t,
+    in_value1: u64,
     in_rho1: *const [c_uchar; 32],
     in_r1: *const [c_uchar; 32],
     in_auth1: *const [c_uchar; 1 + 33 * SPROUT_TREE_DEPTH + 8],
 
     // Second input
     in_sk2: *const [c_uchar; 32],
-    in_value2: uint64_t,
+    in_value2: u64,
     in_rho2: *const [c_uchar; 32],
     in_r2: *const [c_uchar; 32],
     in_auth2: *const [c_uchar; 1 + 33 * SPROUT_TREE_DEPTH + 8],
 
     // First output
     out_pk1: *const [c_uchar; 32],
-    out_value1: uint64_t,
+    out_value1: u64,
     out_r1: *const [c_uchar; 32],
 
     // Second output
     out_pk2: *const [c_uchar; 32],
-    out_value2: uint64_t,
+    out_value2: u64,
     out_r2: *const [c_uchar; 32],
 
     // Public value
-    vpub_old: uint64_t,
-    vpub_new: uint64_t,
+    vpub_old: u64,
+    vpub_new: u64,
 ) {
     let phi = unsafe { *phi };
     let rt = unsafe { *rt };
@@ -875,7 +858,7 @@ pub extern "system" fn librustzcash_sprout_prove(
     drop(sprout_fs);
 
     // Initialize secure RNG
-    let mut rng = OsRng::new().expect("should be able to construct RNG");
+    let mut rng = OsRng;
 
     let proof = create_random_proof(js, &params, &mut rng).expect("proving should not fail");
 
@@ -895,8 +878,8 @@ pub extern "system" fn librustzcash_sprout_verify(
     nf2: *const [c_uchar; 32],
     cm1: *const [c_uchar; 32],
     cm2: *const [c_uchar; 32],
-    vpub_old: uint64_t,
-    vpub_new: uint64_t,
+    vpub_old: u64,
+    vpub_new: u64,
 ) -> bool {
     // Prepare the public input for the verifier
     let mut public_input = Vec::with_capacity((32 * 8) + (8 * 2));
@@ -940,7 +923,7 @@ pub extern "system" fn librustzcash_sapling_output_proof(
     diversifier: *const [c_uchar; 11],
     pk_d: *const [c_uchar; 32],
     rcm: *const [c_uchar; 32],
-    value: uint64_t,
+    value: u64,
     cv: *mut [c_uchar; 32],
     zkproof: *mut [c_uchar; GROTH_PROOF_SIZE],
 ) -> bool {
@@ -1032,7 +1015,7 @@ pub extern "system" fn librustzcash_sapling_spend_sig(
 #[no_mangle]
 pub extern "system" fn librustzcash_sapling_binding_sig(
     ctx: *const SaplingProvingContext,
-    value_balance: int64_t,
+    value_balance: i64,
     sighash: *const [c_uchar; 32],
     result: *mut [c_uchar; 64],
 ) -> bool {
@@ -1057,7 +1040,7 @@ pub extern "system" fn librustzcash_sapling_spend_proof(
     diversifier: *const [c_uchar; 11],
     rcm: *const [c_uchar; 32],
     ar: *const [c_uchar; 32],
-    value: uint64_t,
+    value: u64,
     anchor: *const [c_uchar; 32],
     witness: *const [c_uchar; 1 + 33 * SAPLING_TREE_DEPTH + 8],
     cv: *mut [c_uchar; 32],
@@ -1178,7 +1161,7 @@ pub extern "system" fn librustzcash_zip32_xsk_master(
 #[no_mangle]
 pub extern "system" fn librustzcash_zip32_xsk_derive(
     xsk_parent: *const [c_uchar; 169],
-    i: uint32_t,
+    i: u32,
     xsk_i: *mut [c_uchar; 169],
 ) {
     let xsk_parent = zip32::ExtendedSpendingKey::read(&unsafe { *xsk_parent }[..])
@@ -1194,7 +1177,7 @@ pub extern "system" fn librustzcash_zip32_xsk_derive(
 #[no_mangle]
 pub extern "system" fn librustzcash_zip32_xfvk_derive(
     xfvk_parent: *const [c_uchar; 169],
-    i: uint32_t,
+    i: u32,
     xfvk_i: *mut [c_uchar; 169],
 ) -> bool {
     let xfvk_parent = zip32::ExtendedFullViewingKey::read(&unsafe { *xfvk_parent }[..])

@@ -8,9 +8,7 @@ use super::{
     montgomery
 };
 
-use rand::{
-    Rng
-};
+use rand_core::RngCore;
 
 use std::marker::PhantomData;
 
@@ -45,11 +43,27 @@ fn convert_subgroup<E: JubjubEngine, S1, S2>(from: &Point<E, S1>) -> Point<E, S2
     }
 }
 
+impl<E: JubjubEngine> From<&Point<E, Unknown>> for Point<E, Unknown>
+{
+    fn from(p: &Point<E, Unknown>) -> Point<E, Unknown>
+    {
+        p.clone()
+    }
+}
+
 impl<E: JubjubEngine> From<Point<E, PrimeOrder>> for Point<E, Unknown>
 {
     fn from(p: Point<E, PrimeOrder>) -> Point<E, Unknown>
     {
         convert_subgroup(&p)
+    }
+}
+
+impl<E: JubjubEngine> From<&Point<E, PrimeOrder>> for Point<E, Unknown>
+{
+    fn from(p: &Point<E, PrimeOrder>) -> Point<E, Unknown>
+    {
+        convert_subgroup(p)
     }
 }
 
@@ -169,12 +183,13 @@ impl<E: JubjubEngine> Point<E, Unknown> {
         convert_subgroup(&tmp)
     }
 
-    pub fn rand<R: Rng>(rng: &mut R, params: &E::Params) -> Self
+    pub fn rand<R: RngCore>(rng: &mut R, params: &E::Params) -> Self
     {
         loop {
-            let y: E::Fr = rng.gen();
+            let y = E::Fr::random(rng);
+            let sign = rng.next_u32() % 2 != 0;
 
-            if let Some(p) = Self::get_for_y(y, rng.gen(), params) {
+            if let Some(p) = Self::get_for_y(y, sign, params) {
                 return p;
             }
         }

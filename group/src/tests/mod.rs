@@ -1,9 +1,14 @@
-use rand::{Rand, Rng, SeedableRng, XorShiftRng};
+use ff::{Field, PrimeField};
+use rand::SeedableRng;
+use rand_xorshift::XorShiftRng;
 
 use {CurveAffine, CurveProjective, EncodedPoint};
 
 pub fn curve_tests<G: CurveProjective>() {
-    let mut rng = XorShiftRng::from_seed([0x5dbe6259, 0x8d313d76, 0x3237db17, 0xe5bc0654]);
+    let mut rng = XorShiftRng::from_seed([
+        0x59, 0x62, 0xbe, 0x5d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06, 0xbc,
+        0xe5,
+    ]);
 
     // Negation edge case with zero.
     {
@@ -21,7 +26,7 @@ pub fn curve_tests<G: CurveProjective>() {
 
     // Addition edge cases with zero
     {
-        let mut r = G::rand(&mut rng);
+        let mut r = G::random(&mut rng);
         let rcopy = r;
         r.add_assign(&G::zero());
         assert_eq!(r, rcopy);
@@ -45,9 +50,10 @@ pub fn curve_tests<G: CurveProjective>() {
 
     // Transformations
     {
-        let a = G::rand(&mut rng);
+        let a = G::random(&mut rng);
         let b = a.into_affine().into_projective();
-        let c = a.into_affine()
+        let c = a
+            .into_affine()
             .into_projective()
             .into_affine()
             .into_projective();
@@ -65,11 +71,12 @@ pub fn curve_tests<G: CurveProjective>() {
 }
 
 fn random_wnaf_tests<G: CurveProjective>() {
-    use ff::PrimeField;
-
     use wnaf::*;
 
-    let mut rng = XorShiftRng::from_seed([0x5dbe6259, 0x8d313d76, 0x3237db17, 0xe5bc0654]);
+    let mut rng = XorShiftRng::from_seed([
+        0x59, 0x62, 0xbe, 0x5d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06, 0xbc,
+        0xe5,
+    ]);
 
     {
         let mut table = vec![];
@@ -77,8 +84,8 @@ fn random_wnaf_tests<G: CurveProjective>() {
 
         for w in 2..14 {
             for _ in 0..100 {
-                let g = G::rand(&mut rng);
-                let s = G::Scalar::rand(&mut rng).into_repr();
+                let g = G::random(&mut rng);
+                let s = G::Scalar::random(&mut rng).into_repr();
                 let mut g1 = g;
                 g1.mul_assign(s);
 
@@ -95,8 +102,8 @@ fn random_wnaf_tests<G: CurveProjective>() {
         fn only_compiles_if_send<S: Send>(_: &S) {}
 
         for _ in 0..100 {
-            let g = G::rand(&mut rng);
-            let s = G::Scalar::rand(&mut rng).into_repr();
+            let g = G::random(&mut rng);
+            let s = G::Scalar::random(&mut rng).into_repr();
             let mut g1 = g;
             g1.mul_assign(s);
 
@@ -129,7 +136,8 @@ fn random_wnaf_tests<G: CurveProjective>() {
                 let mut wnaf = Wnaf::new();
                 {
                     // Populate the vectors.
-                    wnaf.base(rng.gen(), 1).scalar(rng.gen());
+                    wnaf.base(G::random(&mut rng), 1)
+                        .scalar(G::Scalar::random(&mut rng).into_repr());
                 }
                 wnaf.base(g, 1).scalar(s)
             };
@@ -137,7 +145,8 @@ fn random_wnaf_tests<G: CurveProjective>() {
                 let mut wnaf = Wnaf::new();
                 {
                     // Populate the vectors.
-                    wnaf.base(rng.gen(), 1).scalar(rng.gen());
+                    wnaf.base(G::random(&mut rng), 1)
+                        .scalar(G::Scalar::random(&mut rng).into_repr());
                 }
                 wnaf.scalar(s).base(g)
             };
@@ -145,7 +154,8 @@ fn random_wnaf_tests<G: CurveProjective>() {
                 let mut wnaf = Wnaf::new();
                 {
                     // Populate the vectors.
-                    wnaf.base(rng.gen(), 1).scalar(rng.gen());
+                    wnaf.base(G::random(&mut rng), 1)
+                        .scalar(G::Scalar::random(&mut rng).into_repr());
                 }
                 let mut shared = wnaf.base(g, 1).shared();
 
@@ -157,7 +167,8 @@ fn random_wnaf_tests<G: CurveProjective>() {
                 let mut wnaf = Wnaf::new();
                 {
                     // Populate the vectors.
-                    wnaf.base(rng.gen(), 1).scalar(rng.gen());
+                    wnaf.base(G::random(&mut rng), 1)
+                        .scalar(G::Scalar::random(&mut rng).into_repr());
                 }
                 let mut shared = wnaf.scalar(s).shared();
 
@@ -179,14 +190,15 @@ fn random_wnaf_tests<G: CurveProjective>() {
 }
 
 fn random_negation_tests<G: CurveProjective>() {
-    use ff::Field;
-
-    let mut rng = XorShiftRng::from_seed([0x5dbe6259, 0x8d313d76, 0x3237db17, 0xe5bc0654]);
+    let mut rng = XorShiftRng::from_seed([
+        0x59, 0x62, 0xbe, 0x5d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06, 0xbc,
+        0xe5,
+    ]);
 
     for _ in 0..1000 {
-        let r = G::rand(&mut rng);
+        let r = G::random(&mut rng);
 
-        let s = G::Scalar::rand(&mut rng);
+        let s = G::Scalar::random(&mut rng);
         let mut sneg = s;
         sneg.negate();
 
@@ -210,11 +222,14 @@ fn random_negation_tests<G: CurveProjective>() {
 }
 
 fn random_doubling_tests<G: CurveProjective>() {
-    let mut rng = XorShiftRng::from_seed([0x5dbe6259, 0x8d313d76, 0x3237db17, 0xe5bc0654]);
+    let mut rng = XorShiftRng::from_seed([
+        0x59, 0x62, 0xbe, 0x5d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06, 0xbc,
+        0xe5,
+    ]);
 
     for _ in 0..1000 {
-        let mut a = G::rand(&mut rng);
-        let mut b = G::rand(&mut rng);
+        let mut a = G::random(&mut rng);
+        let mut b = G::random(&mut rng);
 
         // 2(a + b)
         let mut tmp1 = a;
@@ -237,15 +252,18 @@ fn random_doubling_tests<G: CurveProjective>() {
 }
 
 fn random_multiplication_tests<G: CurveProjective>() {
-    let mut rng = XorShiftRng::from_seed([0x5dbe6259, 0x8d313d76, 0x3237db17, 0xe5bc0654]);
+    let mut rng = XorShiftRng::from_seed([
+        0x59, 0x62, 0xbe, 0x5d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06, 0xbc,
+        0xe5,
+    ]);
 
     for _ in 0..1000 {
-        let mut a = G::rand(&mut rng);
-        let mut b = G::rand(&mut rng);
+        let mut a = G::random(&mut rng);
+        let mut b = G::random(&mut rng);
         let a_affine = a.into_affine();
         let b_affine = b.into_affine();
 
-        let s = G::Scalar::rand(&mut rng);
+        let s = G::Scalar::random(&mut rng);
 
         // s ( a + b )
         let mut tmp1 = a;
@@ -269,12 +287,15 @@ fn random_multiplication_tests<G: CurveProjective>() {
 }
 
 fn random_addition_tests<G: CurveProjective>() {
-    let mut rng = XorShiftRng::from_seed([0x5dbe6259, 0x8d313d76, 0x3237db17, 0xe5bc0654]);
+    let mut rng = XorShiftRng::from_seed([
+        0x59, 0x62, 0xbe, 0x5d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06, 0xbc,
+        0xe5,
+    ]);
 
     for _ in 0..1000 {
-        let a = G::rand(&mut rng);
-        let b = G::rand(&mut rng);
-        let c = G::rand(&mut rng);
+        let a = G::random(&mut rng);
+        let b = G::random(&mut rng);
+        let c = G::random(&mut rng);
         let a_affine = a.into_affine();
         let b_affine = b.into_affine();
         let c_affine = c.into_affine();
@@ -347,10 +368,13 @@ fn random_addition_tests<G: CurveProjective>() {
 }
 
 fn random_transformation_tests<G: CurveProjective>() {
-    let mut rng = XorShiftRng::from_seed([0x5dbe6259, 0x8d313d76, 0x3237db17, 0xe5bc0654]);
+    let mut rng = XorShiftRng::from_seed([
+        0x59, 0x62, 0xbe, 0x5d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06, 0xbc,
+        0xe5,
+    ]);
 
     for _ in 0..1000 {
-        let g = G::rand(&mut rng);
+        let g = G::random(&mut rng);
         let g_affine = g.into_affine();
         let g_projective = g_affine.into_projective();
         assert_eq!(g, g_projective);
@@ -358,24 +382,25 @@ fn random_transformation_tests<G: CurveProjective>() {
 
     // Batch normalization
     for _ in 0..10 {
-        let mut v = (0..1000).map(|_| G::rand(&mut rng)).collect::<Vec<_>>();
+        let mut v = (0..1000).map(|_| G::random(&mut rng)).collect::<Vec<_>>();
 
         for i in &v {
             assert!(!i.is_normalized());
         }
 
-        use rand::distributions::{IndependentSample, Range};
-        let between = Range::new(0, 1000);
+        use rand::distributions::{Distribution, Uniform};
+        let between = Uniform::new(0, 1000);
         // Sprinkle in some normalized points
         for _ in 0..5 {
-            v[between.ind_sample(&mut rng)] = G::zero();
+            v[between.sample(&mut rng)] = G::zero();
         }
         for _ in 0..5 {
-            let s = between.ind_sample(&mut rng);
+            let s = between.sample(&mut rng);
             v[s] = v[s].into_affine().into_projective();
         }
 
-        let expected_v = v.iter()
+        let expected_v = v
+            .iter()
             .map(|v| v.into_affine().into_projective())
             .collect::<Vec<_>>();
         G::batch_normalization(&mut v);
@@ -389,7 +414,10 @@ fn random_transformation_tests<G: CurveProjective>() {
 }
 
 fn random_encoding_tests<G: CurveAffine>() {
-    let mut rng = XorShiftRng::from_seed([0x5dbe6259, 0x8d313d76, 0x3237db17, 0xe5bc0654]);
+    let mut rng = XorShiftRng::from_seed([
+        0x59, 0x62, 0xbe, 0x5d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06, 0xbc,
+        0xe5,
+    ]);
 
     assert_eq!(
         G::zero().into_uncompressed().into_affine().unwrap(),
@@ -402,7 +430,7 @@ fn random_encoding_tests<G: CurveAffine>() {
     );
 
     for _ in 0..1000 {
-        let mut r = G::Projective::rand(&mut rng).into_affine();
+        let mut r = G::Projective::random(&mut rng).into_affine();
 
         let uncompressed = r.into_uncompressed();
         let de_uncompressed = uncompressed.into_affine().unwrap();

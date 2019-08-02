@@ -15,17 +15,15 @@ crate-type = ["staticlib"]
 
 [dependencies]
 bellman = { path = "../bellman" }
+blake2b_simd = "0.5"
+blake2s_simd = "0.5"
 ff = { path = "../ff" }
 libc = "0.2"
 pairing = { path = "../pairing" }
 lazy_static = "1"
 byteorder = "1"
-rand = "0.4"
+rand_core = "0.5"
+rand_os = "0.2"
 sapling-crypto = { path = "../sapling-crypto" }
 zcash_primitives = { path = "../zcash_primitives" }
 zcash_proofs = { path = "../zcash_proofs" }
-zip32 = { path = "../zip32" }
-
-[dependencies.blake2-rfc]
-git = "https://github.com/gtank/blake2-rfc"
-rev = "7a5b5fc99ae483a0043db7547fb79a6fa44b88a9"

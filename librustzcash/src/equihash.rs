@@ -1,4 +1,4 @@
-use blake2_rfc::blake2b::{Blake2b, Blake2bResult};
+use blake2b_simd::{Hash as Blake2bHash, Params as Blake2bParams, State as Blake2bState};
 use byteorder::{BigEndian, LittleEndian, ReadBytesExt, WriteBytesExt};
 use std::io::Cursor;
 use std::mem::size_of;
@@ -33,7 +33,7 @@ impl Params {
 }
 
 impl Node {
-    fn new(p: &Params, state: &Blake2b, i: u32) -> Self {
+    fn new(p: &Params, state: &Blake2bState, i: u32) -> Self {
         let hash = generate_hash(state, i / p.indices_per_hash_output());
         let start = ((i % p.indices_per_hash_output()) * p.n / 8) as usize;
         let end = start + (p.n as usize) / 8;
@@ -99,15 +99,18 @@ impl Node {
     }
 }
 
-fn initialise_state(n: u32, k: u32, digest_len: u8) -> Blake2b {
+fn initialise_state(n: u32, k: u32, digest_len: u8) -> Blake2bState {
     let mut personalization: Vec<u8> = Vec::from("ZcashPoW");
     personalization.write_u32::<LittleEndian>(n).unwrap();
     personalization.write_u32::<LittleEndian>(k).unwrap();
 
-    Blake2b::with_params(digest_len as usize, &[], &[], &personalization)
+    Blake2bParams::new()
+        .hash_length(digest_len as usize)
+        .personal(&personalization)
+        .to_state()
 }
 
-fn generate_hash(base_state: &Blake2b, i: u32) -> Blake2bResult {
+fn generate_hash(base_state: &Blake2bState, i: u32) -> Blake2bHash {
     let mut lei = [0u8; 4];
     (&mut lei[..]).write_u32::<LittleEndian>(i).unwrap();
 
@@ -249,7 +252,7 @@ pub fn is_valid_solution_iterative(
     return rows[0].is_zero(hash_len);
 }
 
-fn tree_validator(p: &Params, state: &Blake2b, indices: &[u32]) -> Option<Node> {
+fn tree_validator(p: &Params, state: &Blake2bState, indices: &[u32]) -> Option<Node> {
     if indices.len() > 1 {
         let end = indices.len();
         let mid = end / 2;

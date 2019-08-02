@@ -320,13 +320,15 @@ pub fn blake2s<E: Engine, CS: ConstraintSystem<E>>(
 
 #[cfg(test)]
 mod test {
-    use rand::{XorShiftRng, SeedableRng, Rng};
+    use blake2s_simd::Params as Blake2sParams;
     use pairing::bls12_381::{Bls12};
+    use rand_core::{RngCore, SeedableRng};
+    use rand_xorshift::XorShiftRng;
+
     use ::circuit::boolean::{Boolean, AllocatedBit};
     use ::circuit::test::TestConstraintSystem;
     use super::blake2s;
     use bellman::{ConstraintSystem};
-    use blake2_rfc::blake2s::Blake2s;
 
     #[test]
     fn test_blank_hash() {
@@ -366,9 +368,12 @@ mod test {
         // doesn't result in more constraints.
 
         let mut cs = TestConstraintSystem::<Bls12>::new();
-        let mut rng = XorShiftRng::from_seed([0x5dbe6259, 0x8d313d76, 0x3237db17, 0xe5bc0654]);
+        let mut rng = XorShiftRng::from_seed([
+            0x59, 0x62, 0xbe, 0x5d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06, 0xbc,
+            0xe5,
+        ]);
         let input_bits: Vec<_> = (0..512)
-          .map(|_| Boolean::constant(rng.gen()))
+          .map(|_| Boolean::constant(rng.next_u32() % 2 != 0))
           .chain((0..512)
                         .map(|i| AllocatedBit::alloc(cs.namespace(|| format!("input bit {}", i)), Some(true)).unwrap().into()))
           .collect();
@@ -380,21 +385,27 @@ mod test {
     #[test]
     fn test_blake2s_constant_constraints() {
         let mut cs = TestConstraintSystem::<Bls12>::new();
-        let mut rng = XorShiftRng::from_seed([0x5dbe6259, 0x8d313d76, 0x3237db17, 0xe5bc0654]);
-        let input_bits: Vec<_> = (0..512).map(|_| Boolean::constant(rng.gen())).collect();
+        let mut rng = XorShiftRng::from_seed([
+            0x59, 0x62, 0xbe, 0x5d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06, 0xbc,
+            0xe5,
+        ]);
+        let input_bits: Vec<_> = (0..512).map(|_| Boolean::constant(rng.next_u32() % 2 != 0)).collect();
         blake2s(&mut cs, &input_bits, b"12345678").unwrap();
         assert_eq!(cs.num_constraints(), 0);
     }
 
     #[test]
     fn test_blake2s() {
-        let mut rng = XorShiftRng::from_seed([0x5dbe6259, 0x8d313d76, 0x3237db17, 0xe5bc0654]);
+        let mut rng = XorShiftRng::from_seed([
+            0x59, 0x62, 0xbe, 0x5d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06, 0xbc,
+            0xe5,
+        ]);
 
         for input_len in (0..32).chain((32..256).filter(|a| a % 8 == 0))
         {
-            let mut h = Blake2s::with_params(32, &[], &[], b"12345678");
+            let mut h = Blake2sParams::new().hash_length(32).personal(b"12345678").to_state();
 
-            let data: Vec<u8> = (0..input_len).map(|_| rng.gen()).collect();
+            let data: Vec<u8> = (0..input_len).map(|_| rng.next_u32() as u8).collect();
 
             h.update(&data);
 
