@@ -508,7 +508,7 @@ impl<E: JubjubEngine> MontgomeryPoint<E> {
     /// a point in the birationally equivalent twisted
     /// Edwards curve.
     pub fn into_edwards<CS>(
-        &self,
+        self,
         mut cs: CS,
         params: &E::Params,
     ) -> Result<EdwardsPoint<E>, SynthesisError>
