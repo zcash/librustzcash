@@ -6,6 +6,8 @@ use std::ops::Deref;
 
 use crate::serialize::Vector;
 
+pub mod equihash;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct BlockHash(pub [u8; 32]);
 
