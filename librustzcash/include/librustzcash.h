@@ -112,8 +112,7 @@ extern "C" {
     bool librustzcash_sapling_output_proof(
         void *ctx,
         const unsigned char *esk,
-        const unsigned char *diversifier,
-        const unsigned char *pk_d,
+        const unsigned char *payment_address,
         const unsigned char *rcm,
         const uint64_t value,
         unsigned char *cv,

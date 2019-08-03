@@ -7,10 +7,7 @@ use bech32::{self, Error, FromBase32, ToBase32};
 use pairing::bls12_381::Bls12;
 use std::io::{self, Write};
 use zcash_primitives::{
-    jubjub::edwards,
-    primitives::{Diversifier, PaymentAddress},
-};
-use zcash_primitives::{
+    primitives::PaymentAddress,
     zip32::{ExtendedFullViewingKey, ExtendedSpendingKey},
     JUBJUB,
 };
@@ -168,17 +165,13 @@ pub fn encode_payment_address(hrp: &str, addr: &PaymentAddress<Bls12>) -> String
 /// ```
 pub fn decode_payment_address(hrp: &str, s: &str) -> Result<Option<PaymentAddress<Bls12>>, Error> {
     bech32_decode(hrp, s, |data| {
-        let mut diversifier = Diversifier([0; 11]);
-        diversifier.0.copy_from_slice(&data[0..11]);
-        // Check that the diversifier is valid
-        if diversifier.g_d::<Bls12>(&JUBJUB).is_none() {
+        if data.len() != 43 {
             return None;
         }
 
-        edwards::Point::<Bls12, _>::read(&data[11..], &JUBJUB)
-            .ok()?
-            .as_prime_order(&JUBJUB)
-            .map(|pk_d| PaymentAddress { pk_d, diversifier })
+        let mut bytes = [0; 43];
+        bytes.copy_from_slice(&data);
+        PaymentAddress::<Bls12>::from_bytes(&bytes, &JUBJUB)
     })
 }
 

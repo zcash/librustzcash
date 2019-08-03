@@ -131,6 +131,30 @@ impl<E: JubjubEngine> PartialEq for PaymentAddress<E> {
 }
 
 impl<E: JubjubEngine> PaymentAddress<E> {
+    /// Parses a PaymentAddress from bytes.
+    pub fn from_bytes(bytes: &[u8; 43], params: &E::Params) -> Option<Self> {
+        let diversifier = {
+            let mut tmp = [0; 11];
+            tmp.copy_from_slice(&bytes[0..11]);
+            Diversifier(tmp)
+        };
+        // Check that the diversifier is valid
+        if diversifier.g_d::<E>(params).is_none() {
+            return None;
+        }
+
+        edwards::Point::<E, _>::read(&bytes[11..43], params)
+            .ok()?
+            .as_prime_order(params)
+            .and_then(|pk_d| {
+                if pk_d == edwards::Point::zero() {
+                    None
+                } else {
+                    Some(PaymentAddress { pk_d, diversifier })
+                }
+            })
+    }
+
     pub fn g_d(&self, params: &E::Params) -> Option<edwards::Point<E, PrimeOrder>> {
         self.diversifier.g_d(params)
     }
