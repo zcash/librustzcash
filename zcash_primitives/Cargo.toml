@@ -96,6 +96,7 @@ proptest.workspace = true
 assert_matches.workspace = true
 rand_xorshift.workspace = true
 orchard = { workspace = true, features = ["test-dependencies"] }
+wagyu-zcash-parameters = { version = "0.2" }
 
 [target.'cfg(unix)'.dev-dependencies]
 pprof = { version = "0.11", features = ["criterion", "flamegraph"] } # MSRV 1.56

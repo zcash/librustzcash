@@ -3122,6 +3122,7 @@ dependencies = [
  "sha2",
  "subtle",
  "tracing",
+ "wagyu-zcash-parameters",
  "zcash_address",
  "zcash_encoding",
  "zcash_note_encryption 0.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
