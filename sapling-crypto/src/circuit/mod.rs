@@ -6,8 +6,6 @@ pub mod uint32;
 pub mod blake2s;
 pub mod num;
 pub mod lookup;
-pub mod ecc;
-pub mod pedersen_hash;
 pub mod multipack;
 pub mod sha256;
 

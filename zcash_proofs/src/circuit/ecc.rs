@@ -6,27 +6,27 @@ use bellman::{
     ConstraintSystem
 };
 
-use super::{
+use sapling_crypto::circuit::{
     Assignment
 };
 
-use super::num::{
+use sapling_crypto::circuit::num::{
     AllocatedNum,
     Num
 };
 
-use ::jubjub::{
+use sapling_crypto::jubjub::{
     edwards,
     JubjubEngine,
     JubjubParams,
     FixedGenerators
 };
 
-use super::lookup::{
+use sapling_crypto::circuit::lookup::{
     lookup3_xy
 };
 
-use super::boolean::Boolean;
+use sapling_crypto::circuit::boolean::Boolean;
 
 #[derive(Clone)]
 pub struct EdwardsPoint<E: Engine> {
@@ -753,22 +753,23 @@ mod test {
     use rand_core::{RngCore, SeedableRng};
     use rand_xorshift::XorShiftRng;
 
-    use ::circuit::test::*;
-    use ::jubjub::{
+    use sapling_crypto::circuit::test::*;
+    use sapling_crypto::jubjub::{
         montgomery,
         edwards,
         JubjubBls12,
         JubjubParams,
         FixedGenerators
     };
-    use ::jubjub::fs::Fs;
+    use sapling_crypto::jubjub::fs::Fs;
+
     use super::{
         MontgomeryPoint,
         EdwardsPoint,
         AllocatedNum,
         fixed_base_multiplication
     };
-    use super::super::boolean::{
+    use sapling_crypto::circuit::boolean::{
         Boolean,
         AllocatedBit
     };

@@ -21,8 +21,8 @@ use sapling_crypto::primitives::{
 
 use sapling_crypto::circuit::Assignment;
 use sapling_crypto::circuit::boolean;
-use sapling_crypto::circuit::ecc;
-use sapling_crypto::circuit::pedersen_hash;
+use super::ecc;
+use super::pedersen_hash;
 use sapling_crypto::circuit::blake2s;
 use sapling_crypto::circuit::num;
 use sapling_crypto::circuit::multipack;

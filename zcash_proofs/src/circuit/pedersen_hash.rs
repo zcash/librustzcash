@@ -1,23 +1,20 @@
-use super::*;
 use super::ecc::{
     MontgomeryPoint,
     EdwardsPoint
 };
-use super::boolean::Boolean;
-use ::jubjub::*;
+use sapling_crypto::circuit::boolean::Boolean;
+use sapling_crypto::jubjub::*;
 use bellman::{
-    ConstraintSystem
+    ConstraintSystem, SynthesisError
 };
-use super::lookup::*;
-pub use pedersen_hash::Personalization;
+use sapling_crypto::circuit::lookup::*;
+pub use sapling_crypto::pedersen_hash::Personalization;
 
-impl Personalization {
-    fn get_constant_bools(&self) -> Vec<Boolean> {
-        self.get_bits()
+fn get_constant_bools(person: &Personalization) -> Vec<Boolean> {
+    person.get_bits()
         .into_iter()
         .map(|e| Boolean::constant(e))
         .collect()
-    }
 }
 
 pub fn pedersen_hash<E: JubjubEngine, CS>(
@@ -28,7 +25,7 @@ pub fn pedersen_hash<E: JubjubEngine, CS>(
 ) -> Result<EdwardsPoint<E>, SynthesisError>
     where CS: ConstraintSystem<E>
 {
-    let personalization = personalization.get_constant_bools();
+    let personalization = get_constant_bools(&personalization);
     assert_eq!(personalization.len(), 6);
 
     let mut edwards_result = None;
@@ -113,8 +110,9 @@ pub fn pedersen_hash<E: JubjubEngine, CS>(
 #[cfg(test)]
 mod test {
     use super::*;
-    use ::circuit::test::*;
-    use ::circuit::boolean::{Boolean, AllocatedBit};
+    use sapling_crypto::circuit::test::*;
+    use sapling_crypto::circuit::boolean::{Boolean, AllocatedBit};
+    use sapling_crypto::pedersen_hash;
     use ff::PrimeField;
     use pairing::bls12_381::{Bls12, Fr};
     use rand_core::{RngCore, SeedableRng};
@@ -177,7 +175,7 @@ mod test {
 
                 assert!(cs.is_satisfied());
 
-                let expected = ::pedersen_hash::pedersen_hash::<Bls12, _>(
+                let expected = pedersen_hash::pedersen_hash::<Bls12, _>(
                     Personalization::MerkleTree(1),
                     input.clone().into_iter(),
                     params
@@ -187,7 +185,7 @@ mod test {
                 assert_eq!(res.get_y().get_value().unwrap(), expected.1);
 
                 // Test against the output of a different personalization
-                let unexpected = ::pedersen_hash::pedersen_hash::<Bls12, _>(
+                let unexpected = pedersen_hash::pedersen_hash::<Bls12, _>(
                     Personalization::MerkleTree(0),
                     input.into_iter(),
                     params
