@@ -1,4 +1,3 @@
-#[cfg(test)]
 pub mod test;
 
 pub mod boolean;
@@ -12,9 +11,6 @@ pub mod pedersen_hash;
 pub mod multipack;
 pub mod sha256;
 
-pub mod sapling;
-pub mod sprout;
-
 use bellman::{
     SynthesisError
 };
@@ -25,7 +21,7 @@ use bellman::{
 /// This basically is just an extension to `Option`
 /// which allows for a convenient mapping to an
 /// error on `None`.
-trait Assignment<T> {
+pub trait Assignment<T> {
     fn get(&self) -> Result<&T, SynthesisError>;
 }
 

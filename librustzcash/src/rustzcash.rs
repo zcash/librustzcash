@@ -26,8 +26,8 @@ use sapling_crypto::{
     },
 };
 
-use sapling_crypto::circuit::sapling::TREE_DEPTH as SAPLING_TREE_DEPTH;
-use sapling_crypto::circuit::sprout::{self, TREE_DEPTH as SPROUT_TREE_DEPTH};
+use zcash_proofs::circuit::sapling::TREE_DEPTH as SAPLING_TREE_DEPTH;
+use zcash_proofs::circuit::sprout::{self, TREE_DEPTH as SPROUT_TREE_DEPTH};
 
 use bellman::groth16::{
     create_random_proof, verify_proof, Parameters, PreparedVerifyingKey, Proof,

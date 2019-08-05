@@ -1,9 +1,9 @@
 use pairing::{Engine};
 use bellman::{ConstraintSystem, SynthesisError};
-use circuit::sha256::{
+use sapling_crypto::circuit::sha256::{
     sha256_block_no_padding
 };
-use circuit::boolean::{
+use sapling_crypto::circuit::boolean::{
     AllocatedBit,
     Boolean
 };

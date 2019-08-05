@@ -1,6 +1,6 @@
 use pairing::{Engine};
 use bellman::{ConstraintSystem, SynthesisError};
-use circuit::boolean::{Boolean};
+use sapling_crypto::circuit::boolean::{Boolean};
 
 use super::*;
 use super::prfs::*;

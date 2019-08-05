@@ -4,6 +4,7 @@ extern crate bellman;
 extern crate pairing;
 extern crate rand_core;
 extern crate rand_xorshift;
+extern crate zcash_proofs;
 
 use ff::Field;
 use std::time::{Duration, Instant};
@@ -12,7 +13,7 @@ use sapling_crypto::jubjub::{
     edwards,
     fs,
 };
-use sapling_crypto::circuit::sapling::{
+use zcash_proofs::circuit::sapling::{
     Spend
 };
 use sapling_crypto::primitives::{

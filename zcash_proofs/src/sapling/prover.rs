@@ -5,10 +5,7 @@ use ff::Field;
 use pairing::bls12_381::{Bls12, Fr};
 use rand_os::OsRng;
 use sapling_crypto::{
-    circuit::{
-        multipack,
-        sapling::{Output, Spend},
-    },
+    circuit::multipack,
     jubjub::{edwards, fs::Fs, FixedGenerators, JubjubBls12, Unknown},
     primitives::{Diversifier, Note, PaymentAddress, ProofGenerationKey, ValueCommitment},
 };
@@ -20,6 +17,7 @@ use zcash_primitives::{
 };
 
 use super::compute_value_balance;
+use crate::circuit::sapling::{Output, Spend};
 
 /// A context object for creating the Sapling components of a Zcash transaction.
 pub struct SaplingProvingContext {
