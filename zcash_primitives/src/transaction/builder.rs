@@ -3,7 +3,7 @@
 use ff::Field;
 use pairing::bls12_381::{Bls12, Fr};
 use rand::{rngs::OsRng, seq::SliceRandom, CryptoRng, RngCore};
-use sapling_crypto::{
+use crate::{
     jubjub::fs::Fs,
     primitives::{Diversifier, Note, PaymentAddress},
 };
@@ -534,7 +534,8 @@ impl<R: RngCore + CryptoRng> Builder<R> {
 mod tests {
     use ff::{Field, PrimeField};
     use rand::rngs::OsRng;
-    use sapling_crypto::jubjub::fs::Fs;
+
+    use crate::jubjub::fs::Fs;
 
     use super::{Builder, Error};
     use crate::{

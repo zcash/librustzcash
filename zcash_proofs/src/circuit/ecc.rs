@@ -15,7 +15,7 @@ use bellman::gadgets::num::{
     Num
 };
 
-use sapling_crypto::jubjub::{
+use zcash_primitives::jubjub::{
     edwards,
     JubjubEngine,
     JubjubParams,
@@ -754,14 +754,14 @@ mod test {
     use rand_xorshift::XorShiftRng;
 
     use bellman::gadgets::test::*;
-    use sapling_crypto::jubjub::{
+    use zcash_primitives::jubjub::{
         montgomery,
         edwards,
         JubjubBls12,
         JubjubParams,
         FixedGenerators
     };
-    use sapling_crypto::jubjub::fs::Fs;
+    use zcash_primitives::jubjub::fs::Fs;
 
     use super::{
         MontgomeryPoint,

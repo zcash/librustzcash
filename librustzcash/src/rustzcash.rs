@@ -7,7 +7,6 @@ extern crate libc;
 extern crate pairing;
 extern crate rand_core;
 extern crate rand_os;
-extern crate sapling_crypto;
 extern crate zcash_primitives;
 extern crate zcash_proofs;
 
@@ -16,7 +15,7 @@ extern crate lazy_static;
 use ff::{PrimeField, PrimeFieldRepr};
 use pairing::bls12_381::{Bls12, Fr, FrRepr};
 
-use sapling_crypto::{
+use zcash_primitives::{
     constants::CRH_IVK_PERSONALIZATION,
     jubjub::{
         edwards,
@@ -57,10 +56,12 @@ use std::ffi::OsString;
 #[cfg(target_os = "windows")]
 use std::os::windows::ffi::OsStringExt;
 
-use sapling_crypto::primitives::{ProofGenerationKey, ViewingKey};
 use zcash_primitives::{
     merkle_tree::CommitmentTreeWitness,
     note_encryption::sapling_ka_agree,
+    primitives::{
+        Diversifier, Note, PaymentAddress, ProofGenerationKey, ViewingKey,
+    },
     redjubjub::{self, Signature},
     sapling::{merkle_hash, spend_sig},
     transaction::components::Amount,
@@ -236,7 +237,7 @@ fn init_zksnark_params(
 
 #[no_mangle]
 pub extern "system" fn librustzcash_tree_uncommitted(result: *mut [c_uchar; 32]) {
-    let tmp = sapling_crypto::primitives::Note::<Bls12>::uncommitted().into_repr();
+    let tmp = Note::<Bls12>::uncommitted().into_repr();
 
     // Should be okay, caller is responsible for ensuring the pointer
     // is a valid pointer to 32 bytes that can be mutated.
@@ -341,7 +342,7 @@ pub extern "system" fn librustzcash_crh_ivk(
 
 #[no_mangle]
 pub extern "system" fn librustzcash_check_diversifier(diversifier: *const [c_uchar; 11]) -> bool {
-    let diversifier = sapling_crypto::primitives::Diversifier(unsafe { *diversifier });
+    let diversifier = Diversifier(unsafe { *diversifier });
     diversifier.g_d::<Bls12>(&JUBJUB).is_some()
 }
 
@@ -352,7 +353,7 @@ pub extern "system" fn librustzcash_ivk_to_pkd(
     result: *mut [c_uchar; 32],
 ) -> bool {
     let ivk = read_fs(unsafe { &*ivk });
-    let diversifier = sapling_crypto::primitives::Diversifier(unsafe { *diversifier });
+    let diversifier = Diversifier(unsafe { *diversifier });
     if let Some(g_d) = diversifier.g_d::<Bls12>(&JUBJUB) {
         let pk_d = g_d.mul(ivk, &JUBJUB);
 
@@ -407,8 +408,8 @@ fn priv_get_note(
     pk_d: *const [c_uchar; 32],
     value: u64,
     r: *const [c_uchar; 32],
-) -> Result<sapling_crypto::primitives::Note<Bls12>, ()> {
-    let diversifier = sapling_crypto::primitives::Diversifier(unsafe { *diversifier });
+) -> Result<Note<Bls12>, ()> {
+    let diversifier = Diversifier(unsafe { *diversifier });
     let g_d = match diversifier.g_d::<Bls12>(&JUBJUB) {
         Some(g_d) => g_d,
         None => return Err(()),
@@ -430,7 +431,7 @@ fn priv_get_note(
         Err(_) => return Err(()),
     };
 
-    let note = sapling_crypto::primitives::Note {
+    let note = Note {
         value,
         g_d,
         pk_d,
@@ -539,7 +540,7 @@ pub extern "system" fn librustzcash_sapling_ka_derivepublic(
     esk: *const [c_uchar; 32],
     result: *mut [c_uchar; 32],
 ) -> bool {
-    let diversifier = sapling_crypto::primitives::Diversifier(unsafe { *diversifier });
+    let diversifier = Diversifier(unsafe { *diversifier });
 
     // Compute g_d from the diversifier
     let g_d = match diversifier.g_d::<Bls12>(&JUBJUB) {
@@ -940,7 +941,7 @@ pub extern "system" fn librustzcash_sapling_output_proof(
     };
 
     // Grab the diversifier from the caller.
-    let diversifier = sapling_crypto::primitives::Diversifier(unsafe { *diversifier });
+    let diversifier = Diversifier(unsafe { *diversifier });
 
     // Grab pk_d from the caller.
     let pk_d = match edwards::Point::<Bls12, Unknown>::read(&(unsafe { &*pk_d })[..], &JUBJUB) {
@@ -955,7 +956,7 @@ pub extern "system" fn librustzcash_sapling_output_proof(
     };
 
     // Construct a payment address
-    let payment_address = sapling_crypto::primitives::PaymentAddress {
+    let payment_address = PaymentAddress {
         pk_d: pk_d,
         diversifier: diversifier,
     };
@@ -1086,7 +1087,7 @@ pub extern "system" fn librustzcash_sapling_spend_proof(
     };
 
     // Grab the diversifier from the caller
-    let diversifier = sapling_crypto::primitives::Diversifier(unsafe { *diversifier });
+    let diversifier = Diversifier(unsafe { *diversifier });
 
     // The caller chooses the note randomness
     let rcm = match Fs::from_repr(read_fs(&(unsafe { &*rcm })[..])) {

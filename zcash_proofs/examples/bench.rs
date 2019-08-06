@@ -1,14 +1,14 @@
 extern crate ff;
-extern crate sapling_crypto;
 extern crate bellman;
 extern crate pairing;
 extern crate rand_core;
 extern crate rand_xorshift;
+extern crate zcash_primitives;
 extern crate zcash_proofs;
 
 use ff::Field;
 use std::time::{Duration, Instant};
-use sapling_crypto::jubjub::{
+use zcash_primitives::jubjub::{
     JubjubBls12,
     edwards,
     fs,
@@ -16,7 +16,7 @@ use sapling_crypto::jubjub::{
 use zcash_proofs::circuit::sapling::{
     Spend
 };
-use sapling_crypto::primitives::{
+use zcash_primitives::primitives::{
     Diversifier,
     ProofGenerationKey,
     ValueCommitment

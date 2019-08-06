@@ -3,7 +3,7 @@
 use ff::{BitIterator, PrimeField, PrimeFieldRepr};
 use pairing::bls12_381::{Bls12, Fr, FrRepr};
 use rand_core::{CryptoRng, RngCore};
-use sapling_crypto::{
+use crate::{
     jubjub::{fs::Fs, FixedGenerators, JubjubBls12},
     pedersen_hash::{pedersen_hash, Personalization},
     primitives::Note,

@@ -3,12 +3,12 @@ use super::ecc::{
     EdwardsPoint
 };
 use bellman::gadgets::boolean::Boolean;
-use sapling_crypto::jubjub::*;
+use zcash_primitives::jubjub::*;
 use bellman::{
     ConstraintSystem, SynthesisError
 };
 use bellman::gadgets::lookup::*;
-pub use sapling_crypto::pedersen_hash::Personalization;
+pub use zcash_primitives::pedersen_hash::Personalization;
 
 fn get_constant_bools(person: &Personalization) -> Vec<Boolean> {
     person.get_bits()
@@ -112,7 +112,7 @@ mod test {
     use super::*;
     use bellman::gadgets::test::*;
     use bellman::gadgets::boolean::{Boolean, AllocatedBit};
-    use sapling_crypto::pedersen_hash;
+    use zcash_primitives::pedersen_hash;
     use ff::PrimeField;
     use pairing::bls12_381::{Bls12, Fr};
     use rand_core::{RngCore, SeedableRng};

@@ -3,7 +3,7 @@
 
 use ff::{Field, PrimeField, PrimeFieldRepr};
 use rand_core::RngCore;
-use sapling_crypto::jubjub::{
+use crate::jubjub::{
     edwards::Point, FixedGenerators, JubjubEngine, JubjubParams, Unknown,
 };
 use std::io::{self, Read, Write};
@@ -210,7 +210,8 @@ mod tests {
     use pairing::bls12_381::Bls12;
     use rand_core::SeedableRng;
     use rand_xorshift::XorShiftRng;
-    use sapling_crypto::jubjub::{edwards, fs::Fs, JubjubBls12};
+
+    use crate::jubjub::{edwards, fs::Fs, JubjubBls12};
 
     use super::*;
 

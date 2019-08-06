@@ -1,7 +1,7 @@
 //! Abstractions over the proving system and parameters.
 
 use pairing::bls12_381::{Bls12, Fr};
-use sapling_crypto::{
+use crate::{
     jubjub::{edwards, fs::Fs, Unknown},
     primitives::{Diversifier, PaymentAddress, ProofGenerationKey},
 };
@@ -75,7 +75,8 @@ pub(crate) mod mock {
     use ff::Field;
     use pairing::bls12_381::{Bls12, Fr};
     use rand_os::OsRng;
-    use sapling_crypto::{
+
+    use crate::{
         jubjub::{edwards, fs::Fs, FixedGenerators, Unknown},
         primitives::{Diversifier, PaymentAddress, ProofGenerationKey, ValueCommitment},
     };

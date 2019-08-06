@@ -4,7 +4,7 @@
 
 use blake2b_simd::{Hash as Blake2bHash, Params as Blake2bParams};
 use ff::{PrimeField, PrimeFieldRepr};
-use sapling_crypto::{
+use crate::{
     jubjub::{edwards, FixedGenerators, JubjubEngine, JubjubParams, ToUniform, Unknown},
     primitives::{ProofGenerationKey, ViewingKey},
 };
@@ -188,7 +188,7 @@ impl<E: JubjubEngine> FullViewingKey<E> {
 #[cfg(test)]
 mod tests {
     use pairing::bls12_381::Bls12;
-    use sapling_crypto::jubjub::{edwards, FixedGenerators, JubjubParams, PrimeOrder};
+    use crate::jubjub::{edwards, FixedGenerators, JubjubParams, PrimeOrder};
     use std::error::Error;
 
     use super::FullViewingKey;

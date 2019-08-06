@@ -6,14 +6,14 @@ use bellman::{
     Circuit
 };
 
-use sapling_crypto::jubjub::{
+use zcash_primitives::jubjub::{
     JubjubEngine,
     FixedGenerators
 };
 
-use sapling_crypto::constants;
+use zcash_primitives::constants;
 
-use sapling_crypto::primitives::{
+use zcash_primitives::primitives::{
     ValueCommitment,
     ProofGenerationKey,
     PaymentAddress
@@ -603,7 +603,7 @@ fn test_input_circuit_with_bls12_381() {
     use pairing::bls12_381::*;
     use rand_core::{RngCore, SeedableRng};
     use rand_xorshift::XorShiftRng;
-    use sapling_crypto::{
+    use zcash_primitives::{
         jubjub::{JubjubBls12, fs, edwards},
         pedersen_hash,
         primitives::{Diversifier, Note, ProofGenerationKey},
@@ -747,7 +747,7 @@ fn test_output_circuit_with_bls12_381() {
     use pairing::bls12_381::*;
     use rand_core::{RngCore, SeedableRng};
     use rand_xorshift::XorShiftRng;
-    use sapling_crypto::{
+    use zcash_primitives::{
         jubjub::{JubjubBls12, fs, edwards},
         primitives::{Diversifier, ProofGenerationKey},
     };

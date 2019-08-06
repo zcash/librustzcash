@@ -16,9 +16,3 @@ extern crate rand_xorshift;
 
 #[cfg(test)]
 extern crate sha2;
-
-pub mod jubjub;
-pub mod group_hash;
-pub mod pedersen_hash;
-pub mod primitives;
-pub mod constants;

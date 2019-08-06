@@ -4,7 +4,6 @@ extern crate byteorder;
 extern crate ff;
 extern crate pairing;
 extern crate rand_os;
-extern crate sapling_crypto;
 extern crate zcash_primitives;
 
 #[cfg(feature = "local-prover")]

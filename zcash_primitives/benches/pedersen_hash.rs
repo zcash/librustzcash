@@ -1,20 +1,22 @@
 #![feature(test)]
 
-extern crate rand;
+extern crate rand_core;
+extern crate rand_os;
 extern crate test;
 extern crate pairing;
-extern crate sapling_crypto;
+extern crate zcash_primitives;
 
-use rand::{Rand, thread_rng};
+use rand_core::RngCore;
+use rand_os::OsRng;
 use pairing::bls12_381::Bls12;
-use sapling_crypto::jubjub::JubjubBls12;
-use sapling_crypto::pedersen_hash::{pedersen_hash, Personalization};
+use zcash_primitives::jubjub::JubjubBls12;
+use zcash_primitives::pedersen_hash::{pedersen_hash, Personalization};
 
 #[bench]
 fn bench_pedersen_hash(b: &mut test::Bencher) {
     let params = JubjubBls12::new();
-    let rng = &mut thread_rng();
-    let bits = (0..510).map(|_| bool::rand(rng)).collect::<Vec<_>>();
+    let rng = &mut OsRng;
+    let bits = (0..510).map(|_| (rng.next_u32() % 2) != 0).collect::<Vec<_>>();
     let personalization = Personalization::MerkleTree(31);
 
     b.iter(|| {

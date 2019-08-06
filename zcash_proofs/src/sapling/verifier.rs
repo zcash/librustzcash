@@ -4,7 +4,7 @@ use bellman::{
 };
 use ff::Field;
 use pairing::bls12_381::{Bls12, Fr};
-use sapling_crypto::jubjub::{edwards, FixedGenerators, JubjubBls12, Unknown};
+use zcash_primitives::jubjub::{edwards, FixedGenerators, JubjubBls12, Unknown};
 use zcash_primitives::{
     redjubjub::{PublicKey, Signature},
     transaction::components::Amount,

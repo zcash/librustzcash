@@ -1,6 +1,6 @@
 use ff::{PrimeField, PrimeFieldRepr};
 use pairing::bls12_381::Bls12;
-use sapling_crypto::jubjub::{FixedGenerators, JubjubEngine};
+use zcash_primitives::jubjub::{FixedGenerators, JubjubEngine};
 use zcash_primitives::redjubjub::{PrivateKey, PublicKey, Signature};
 
 use super::JUBJUB;

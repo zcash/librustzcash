@@ -6,7 +6,7 @@ use crypto_api_chachapoly::{ChaCha20Ietf, ChachaPolyIetf};
 use ff::{PrimeField, PrimeFieldRepr};
 use pairing::bls12_381::{Bls12, Fr};
 use rand_core::{CryptoRng, RngCore};
-use sapling_crypto::{
+use crate::{
     jubjub::{
         edwards,
         fs::{Fs, FsRepr},
@@ -211,18 +211,16 @@ fn prf_ock(
 /// extern crate ff;
 /// extern crate pairing;
 /// extern crate rand_os;
-/// extern crate sapling_crypto;
+/// extern crate zcash_primitives;
 ///
 /// use ff::Field;
 /// use pairing::bls12_381::Bls12;
 /// use rand_os::OsRng;
-/// use sapling_crypto::{
-///     jubjub::fs::Fs,
-///     primitives::{Diversifier, PaymentAddress, ValueCommitment},
-/// };
 /// use zcash_primitives::{
+///     jubjub::fs::Fs,
 ///     keys::OutgoingViewingKey,
 ///     note_encryption::{Memo, SaplingNoteEncryption},
+///     primitives::{Diversifier, PaymentAddress, ValueCommitment},
 ///     JUBJUB,
 /// };
 ///
@@ -551,7 +549,7 @@ mod tests {
     use pairing::bls12_381::{Bls12, Fr, FrRepr};
     use rand_core::{CryptoRng, RngCore};
     use rand_os::OsRng;
-    use sapling_crypto::{
+    use crate::{
         jubjub::{
             edwards,
             fs::{Fs, FsRepr},
