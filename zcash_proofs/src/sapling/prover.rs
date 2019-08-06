@@ -1,11 +1,13 @@
-use bellman::groth16::{
-    create_random_proof, verify_proof, Parameters, PreparedVerifyingKey, Proof,
+use bellman::{
+    gadgets::multipack,
+    groth16::{
+        create_random_proof, verify_proof, Parameters, PreparedVerifyingKey, Proof,
+    },
 };
 use ff::Field;
 use pairing::bls12_381::{Bls12, Fr};
 use rand_os::OsRng;
 use sapling_crypto::{
-    circuit::multipack,
     jubjub::{edwards, fs::Fs, FixedGenerators, JubjubBls12, Unknown},
     primitives::{Diversifier, Note, PaymentAddress, ProofGenerationKey, ValueCommitment},
 };

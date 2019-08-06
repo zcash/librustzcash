@@ -2,7 +2,7 @@ use pairing::{
     Engine,
 };
 
-use bellman::{
+use crate::{
     SynthesisError,
     ConstraintSystem
 };
@@ -325,10 +325,10 @@ mod test {
     use rand_core::{RngCore, SeedableRng};
     use rand_xorshift::XorShiftRng;
 
-    use ::circuit::boolean::{Boolean, AllocatedBit};
-    use ::circuit::test::TestConstraintSystem;
+    use crate::gadgets::boolean::{Boolean, AllocatedBit};
+    use crate::gadgets::test::TestConstraintSystem;
     use super::blake2s;
-    use bellman::{ConstraintSystem};
+    use crate::{ConstraintSystem};
 
     #[test]
     fn test_blank_hash() {

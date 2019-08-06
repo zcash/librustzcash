@@ -1,11 +1,11 @@
 use ff::Field;
 use pairing::Engine;
 use bellman::{ConstraintSystem, SynthesisError, Circuit, LinearCombination};
-use sapling_crypto::circuit::boolean::{
+use bellman::gadgets::boolean::{
     AllocatedBit,
     Boolean
 };
-use sapling_crypto::circuit::multipack::pack_into_inputs;
+use bellman::gadgets::multipack::pack_into_inputs;
 
 mod prfs;
 mod commitment;
@@ -355,7 +355,7 @@ fn witness_u252<E, CS>(
 #[test]
 fn test_sprout_constraints() {
     use pairing::bls12_381::{Bls12};
-    use sapling_crypto::circuit::test::*;
+    use bellman::gadgets::test::*;
 
     use byteorder::{WriteBytesExt, ReadBytesExt, LittleEndian};
 
@@ -479,7 +479,7 @@ fn test_sprout_constraints() {
         expected_inputs.write_u64::<LittleEndian>(vpub_old.unwrap()).unwrap();
         expected_inputs.write_u64::<LittleEndian>(vpub_new.unwrap()).unwrap();
 
-        use sapling_crypto::circuit::multipack;
+        use bellman::gadgets::multipack;
 
         let expected_inputs = multipack::bytes_to_bits(&expected_inputs);
         let expected_inputs = multipack::compute_multipacking::<Bls12>(&expected_inputs);

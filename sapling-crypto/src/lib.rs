@@ -19,7 +19,6 @@ extern crate sha2;
 
 pub mod jubjub;
 pub mod group_hash;
-pub mod circuit;
 pub mod pedersen_hash;
 pub mod primitives;
 pub mod constants;

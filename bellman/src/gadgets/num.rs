@@ -1,7 +1,7 @@
 use ff::{BitIterator, Field, PrimeField, PrimeFieldRepr};
 use pairing::Engine;
 
-use bellman::{
+use crate::{
     SynthesisError,
     ConstraintSystem,
     LinearCombination,
@@ -455,13 +455,13 @@ impl<E: Engine> Num<E> {
 
 #[cfg(test)]
 mod test {
-    use bellman::{ConstraintSystem};
+    use crate::{ConstraintSystem};
     use ff::{BitIterator, Field, PrimeField};
     use pairing::bls12_381::{Bls12, Fr};
     use rand_core::SeedableRng;
     use rand_xorshift::XorShiftRng;
 
-    use ::circuit::test::*;
+    use crate::gadgets::test::*;
     use super::{AllocatedNum, Boolean};
 
     #[test]

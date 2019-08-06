@@ -7,7 +7,7 @@ use super::num::{
     Num
 };
 use super::boolean::Boolean;
-use bellman::{
+use crate::{
     ConstraintSystem
 };
 
@@ -197,8 +197,8 @@ pub fn lookup3_xy_with_conditional_negation<E: Engine, CS>(
 #[cfg(test)]
 mod test {
     use super::*;
-    use ::circuit::test::*;
-    use ::circuit::boolean::{Boolean, AllocatedBit};
+    use crate::gadgets::test::*;
+    use crate::gadgets::boolean::{Boolean, AllocatedBit};
     use pairing::bls12_381::{Bls12, Fr};
     use rand_core::{RngCore, SeedableRng};
     use rand_xorshift::XorShiftRng;

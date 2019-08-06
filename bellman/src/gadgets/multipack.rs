@@ -1,6 +1,6 @@
 use ff::{Field, PrimeField};
 use pairing::Engine;
-use bellman::{ConstraintSystem, SynthesisError};
+use crate::{ConstraintSystem, SynthesisError};
 use super::boolean::{Boolean};
 use super::num::Num;
 use super::Assignment;
@@ -80,12 +80,12 @@ pub fn compute_multipacking<E: Engine>(
 
 #[test]
 fn test_multipacking() {
-    use bellman::{ConstraintSystem};
+    use crate::{ConstraintSystem};
     use pairing::bls12_381::{Bls12};
     use rand_core::{RngCore, SeedableRng};
     use rand_xorshift::XorShiftRng;
 
-    use ::circuit::test::*;
+    use crate::gadgets::test::*;
     use super::boolean::{AllocatedBit, Boolean};
 
     let mut rng = XorShiftRng::from_seed([

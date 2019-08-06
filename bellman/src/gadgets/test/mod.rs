@@ -1,7 +1,7 @@
 use ff::{Field, PrimeField, PrimeFieldRepr};
 use pairing::Engine;
 
-use bellman::{
+use crate::{
     LinearCombination,
     SynthesisError,
     ConstraintSystem,

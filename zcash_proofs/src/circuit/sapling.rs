@@ -19,13 +19,13 @@ use sapling_crypto::primitives::{
     PaymentAddress
 };
 
-use sapling_crypto::circuit::Assignment;
-use sapling_crypto::circuit::boolean;
+use bellman::gadgets::Assignment;
+use bellman::gadgets::boolean;
 use super::ecc;
 use super::pedersen_hash;
-use sapling_crypto::circuit::blake2s;
-use sapling_crypto::circuit::num;
-use sapling_crypto::circuit::multipack;
+use bellman::gadgets::blake2s;
+use bellman::gadgets::num;
+use bellman::gadgets::multipack;
 
 pub const TREE_DEPTH: usize = zcash_primitives::sapling::SAPLING_COMMITMENT_TREE_DEPTH;
 
@@ -598,12 +598,12 @@ impl<'a, E: JubjubEngine> Circuit<E> for Output<'a, E> {
 
 #[test]
 fn test_input_circuit_with_bls12_381() {
+    use bellman::gadgets::test::*;
     use ff::{BitIterator, Field};
     use pairing::bls12_381::*;
     use rand_core::{RngCore, SeedableRng};
     use rand_xorshift::XorShiftRng;
     use sapling_crypto::{
-        circuit::test::*,
         jubjub::{JubjubBls12, fs, edwards},
         pedersen_hash,
         primitives::{Diversifier, Note, ProofGenerationKey},
@@ -742,12 +742,12 @@ fn test_input_circuit_with_bls12_381() {
 
 #[test]
 fn test_output_circuit_with_bls12_381() {
+    use bellman::gadgets::test::*;
     use ff::Field;
     use pairing::bls12_381::*;
     use rand_core::{RngCore, SeedableRng};
     use rand_xorshift::XorShiftRng;
     use sapling_crypto::{
-        circuit::test::*,
         jubjub::{JubjubBls12, fs, edwards},
         primitives::{Diversifier, ProofGenerationKey},
     };

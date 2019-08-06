@@ -1,7 +1,7 @@
 use ff::{BitIterator, Field, PrimeField};
 use pairing::Engine;
 
-use bellman::{
+use crate::{
     ConstraintSystem,
     SynthesisError,
     LinearCombination,
@@ -801,10 +801,10 @@ impl From<AllocatedBit> for Boolean {
 
 #[cfg(test)]
 mod test {
-    use bellman::{ConstraintSystem};
+    use crate::{ConstraintSystem};
     use ff::{Field, PrimeField};
     use pairing::bls12_381::{Bls12, Fr};
-    use ::circuit::test::*;
+    use crate::gadgets::test::*;
     use super::{
         AllocatedBit,
         Boolean,

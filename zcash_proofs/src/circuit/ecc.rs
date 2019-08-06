@@ -6,11 +6,11 @@ use bellman::{
     ConstraintSystem
 };
 
-use sapling_crypto::circuit::{
+use bellman::gadgets::{
     Assignment
 };
 
-use sapling_crypto::circuit::num::{
+use bellman::gadgets::num::{
     AllocatedNum,
     Num
 };
@@ -22,11 +22,11 @@ use sapling_crypto::jubjub::{
     FixedGenerators
 };
 
-use sapling_crypto::circuit::lookup::{
+use bellman::gadgets::lookup::{
     lookup3_xy
 };
 
-use sapling_crypto::circuit::boolean::Boolean;
+use bellman::gadgets::boolean::Boolean;
 
 #[derive(Clone)]
 pub struct EdwardsPoint<E: Engine> {
@@ -753,7 +753,7 @@ mod test {
     use rand_core::{RngCore, SeedableRng};
     use rand_xorshift::XorShiftRng;
 
-    use sapling_crypto::circuit::test::*;
+    use bellman::gadgets::test::*;
     use sapling_crypto::jubjub::{
         montgomery,
         edwards,
@@ -769,7 +769,7 @@ mod test {
         AllocatedNum,
         fixed_base_multiplication
     };
-    use sapling_crypto::circuit::boolean::{
+    use bellman::gadgets::boolean::{
         Boolean,
         AllocatedBit
     };

@@ -1,7 +1,7 @@
 use ff::{Field, PrimeField};
 use pairing::Engine;
 
-use bellman::{
+use crate::{
     SynthesisError,
     ConstraintSystem,
     LinearCombination
@@ -409,13 +409,13 @@ impl UInt32 {
 
 #[cfg(test)]
 mod test {
-    use ::circuit::boolean::{Boolean};
+    use crate::gadgets::boolean::{Boolean};
     use super::{UInt32};
     use ff::Field;
     use pairing::bls12_381::{Bls12};
-    use ::circuit::test::*;
-    use bellman::{ConstraintSystem};
-    use circuit::multieq::MultiEq;
+    use crate::gadgets::test::*;
+    use crate::{ConstraintSystem};
+    use crate::gadgets::multieq::MultiEq;
     use rand_core::{RngCore, SeedableRng};
     use rand_xorshift::XorShiftRng;
 

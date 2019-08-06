@@ -9,7 +9,7 @@ pub mod lookup;
 pub mod multipack;
 pub mod sha256;
 
-use bellman::{
+use crate::{
     SynthesisError
 };
 

@@ -17,7 +17,6 @@ use ff::{PrimeField, PrimeFieldRepr};
 use pairing::bls12_381::{Bls12, Fr, FrRepr};
 
 use sapling_crypto::{
-    circuit::multipack,
     constants::CRH_IVK_PERSONALIZATION,
     jubjub::{
         edwards,
@@ -29,6 +28,7 @@ use sapling_crypto::{
 use zcash_proofs::circuit::sapling::TREE_DEPTH as SAPLING_TREE_DEPTH;
 use zcash_proofs::circuit::sprout::{self, TREE_DEPTH as SPROUT_TREE_DEPTH};
 
+use bellman::gadgets::multipack;
 use bellman::groth16::{
     create_random_proof, verify_proof, Parameters, PreparedVerifyingKey, Proof,
 };

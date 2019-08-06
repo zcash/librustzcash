@@ -1,7 +1,7 @@
 use super::uint32::UInt32;
 use super::multieq::MultiEq;
 use super::boolean::Boolean;
-use bellman::{ConstraintSystem, SynthesisError};
+use crate::{ConstraintSystem, SynthesisError};
 use pairing::Engine;
 
 const ROUND_CONSTANTS: [u32; 64] = [
@@ -305,9 +305,9 @@ fn sha256_compression_function<E, CS>(
 #[cfg(test)]
 mod test {
     use super::*;
-    use circuit::boolean::AllocatedBit;
+    use crate::gadgets::boolean::AllocatedBit;
     use pairing::bls12_381::Bls12;
-    use circuit::test::TestConstraintSystem;
+    use crate::gadgets::test::TestConstraintSystem;
     use rand_core::{RngCore, SeedableRng};
     use rand_xorshift::XorShiftRng;
 

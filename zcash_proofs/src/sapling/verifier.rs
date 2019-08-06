@@ -1,10 +1,10 @@
-use bellman::groth16::{verify_proof, PreparedVerifyingKey, Proof};
+use bellman::{
+    gadgets::multipack,
+    groth16::{verify_proof, PreparedVerifyingKey, Proof},
+};
 use ff::Field;
 use pairing::bls12_381::{Bls12, Fr};
-use sapling_crypto::{
-    circuit::multipack,
-    jubjub::{edwards, FixedGenerators, JubjubBls12, Unknown},
-};
+use sapling_crypto::jubjub::{edwards, FixedGenerators, JubjubBls12, Unknown};
 use zcash_primitives::{
     redjubjub::{PublicKey, Signature},
     transaction::components::Amount,

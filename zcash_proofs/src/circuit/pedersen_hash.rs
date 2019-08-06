@@ -2,12 +2,12 @@ use super::ecc::{
     MontgomeryPoint,
     EdwardsPoint
 };
-use sapling_crypto::circuit::boolean::Boolean;
+use bellman::gadgets::boolean::Boolean;
 use sapling_crypto::jubjub::*;
 use bellman::{
     ConstraintSystem, SynthesisError
 };
-use sapling_crypto::circuit::lookup::*;
+use bellman::gadgets::lookup::*;
 pub use sapling_crypto::pedersen_hash::Personalization;
 
 fn get_constant_bools(person: &Personalization) -> Vec<Boolean> {
@@ -110,8 +110,8 @@ pub fn pedersen_hash<E: JubjubEngine, CS>(
 #[cfg(test)]
 mod test {
     use super::*;
-    use sapling_crypto::circuit::test::*;
-    use sapling_crypto::circuit::boolean::{Boolean, AllocatedBit};
+    use bellman::gadgets::test::*;
+    use bellman::gadgets::boolean::{Boolean, AllocatedBit};
     use sapling_crypto::pedersen_hash;
     use ff::PrimeField;
     use pairing::bls12_381::{Bls12, Fr};
