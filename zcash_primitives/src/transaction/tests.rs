@@ -1905,7 +1905,7 @@ fn zip_0143() {
             Some((
                 n as usize,
                 Script(tv.script_code),
-                Amount::from_i64(tv.amount, false).unwrap(),
+                Amount::from_nonnegative_i64(tv.amount).unwrap(),
             ))
         } else {
             None
@@ -5400,7 +5400,7 @@ fn zip_0243() {
             Some((
                 n as usize,
                 Script(tv.script_code),
-                Amount::from_i64(tv.amount, false).unwrap(),
+                Amount::from_nonnegative_i64(tv.amount).unwrap(),
             ))
         } else {
             None

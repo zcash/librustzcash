@@ -705,7 +705,7 @@ pub extern "system" fn librustzcash_sapling_final_check(
     binding_sig: *const [c_uchar; 64],
     sighash_value: *const [c_uchar; 32],
 ) -> bool {
-    let value_balance = match Amount::from_i64(value_balance, true) {
+    let value_balance = match Amount::from_i64(value_balance) {
         Ok(vb) => vb,
         Err(()) => return false,
     };
@@ -1028,7 +1028,7 @@ pub extern "system" fn librustzcash_sapling_binding_sig(
     sighash: *const [c_uchar; 32],
     result: *mut [c_uchar; 64],
 ) -> bool {
-    let value_balance = match Amount::from_i64(value_balance, true) {
+    let value_balance = match Amount::from_i64(value_balance) {
         Ok(vb) => vb,
         Err(()) => return false,
     };

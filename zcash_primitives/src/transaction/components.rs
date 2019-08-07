@@ -79,7 +79,7 @@ impl TxOut {
         let value = {
             let mut tmp = [0; 8];
             reader.read_exact(&mut tmp)?;
-            Amount::from_i64_le_bytes(tmp, false)
+            Amount::from_nonnegative_i64_le_bytes(tmp)
         }
         .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "value out of range"))?;
         let script_pubkey = Script::read(&mut reader)?;

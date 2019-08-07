@@ -188,7 +188,7 @@ impl Transaction {
             let vb = {
                 let mut tmp = [0; 8];
                 reader.read_exact(&mut tmp)?;
-                Amount::from_i64_le_bytes(tmp, true)
+                Amount::from_i64_le_bytes(tmp)
             }
             .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "valueBalance out of range"))?;
             let ss = Vector::read(&mut reader, SpendDescription::read)?;

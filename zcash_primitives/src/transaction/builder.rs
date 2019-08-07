@@ -564,7 +564,7 @@ mod tests {
         let to = extfvk.default_address().unwrap().1;
 
         let mut builder = Builder::new(0);
-        match builder.add_sapling_output(ovk, to, Amount::from_i64(-1, true).unwrap(), None) {
+        match builder.add_sapling_output(ovk, to, Amount::from_i64(-1).unwrap(), None) {
             Err(e) => assert_eq!(e.kind(), &ErrorKind::InvalidAmount),
             Ok(_) => panic!("Should have failed"),
         }
@@ -575,7 +575,7 @@ mod tests {
         let mut builder = Builder::new(0);
         match builder.add_transparent_output(
             &TransparentAddress::PublicKey([0; 20]),
-            Amount::from_i64(-1, true).unwrap(),
+            Amount::from_i64(-1).unwrap(),
         ) {
             Err(e) => assert_eq!(e.kind(), &ErrorKind::InvalidAmount),
             Ok(_) => panic!("Should have failed"),
@@ -596,7 +596,7 @@ mod tests {
             match builder.build(1, MockTxProver) {
                 Err(e) => assert_eq!(
                     e.kind(),
-                    &ErrorKind::ChangeIsNegative(Amount::from_i64(-10000, true).unwrap())
+                    &ErrorKind::ChangeIsNegative(Amount::from_i64(-10000).unwrap())
                 ),
                 Ok(_) => panic!("Should have failed"),
             }
@@ -621,7 +621,7 @@ mod tests {
             match builder.build(1, MockTxProver) {
                 Err(e) => assert_eq!(
                     e.kind(),
-                    &ErrorKind::ChangeIsNegative(Amount::from_i64(-60000, true).unwrap())
+                    &ErrorKind::ChangeIsNegative(Amount::from_i64(-60000).unwrap())
                 ),
                 Ok(_) => panic!("Should have failed"),
             }
@@ -640,7 +640,7 @@ mod tests {
             match builder.build(1, MockTxProver) {
                 Err(e) => assert_eq!(
                     e.kind(),
-                    &ErrorKind::ChangeIsNegative(Amount::from_i64(-60000, true).unwrap())
+                    &ErrorKind::ChangeIsNegative(Amount::from_i64(-60000).unwrap())
                 ),
                 Ok(_) => panic!("Should have failed"),
             }
@@ -683,7 +683,7 @@ mod tests {
             match builder.build(1, MockTxProver) {
                 Err(e) => assert_eq!(
                     e.kind(),
-                    &ErrorKind::ChangeIsNegative(Amount::from_i64(-1, true).unwrap())
+                    &ErrorKind::ChangeIsNegative(Amount::from_i64(-1).unwrap())
                 ),
                 Ok(_) => panic!("Should have failed"),
             }
