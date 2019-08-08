@@ -6,6 +6,17 @@ const MAX_MONEY: i64 = 21_000_000 * COIN;
 
 pub const DEFAULT_FEE: Amount = Amount(10000);
 
+/// A type-safe representation of some quantity of Zcash.
+///
+/// An Amount can only be constructed from an integer that is within the valid monetary
+/// range of `{-MAX_MONEY..MAX_MONEY}` (where `MAX_MONEY` = 21,000,000 × 10⁸ zatoshis).
+/// However, this range is not preserved as an invariant internally; it is possible to
+/// add two valid Amounts together to obtain an invalid Amount. It is the user's
+/// responsibility to handle the result of serializing potentially-invalid Amounts. In
+/// particular, a [`Transaction`] containing serialized invalid Amounts will be rejected
+/// by the network consensus rules.
+///
+/// [`Transaction`]: crate::transaction::Transaction
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Amount(i64);
 
@@ -17,7 +28,7 @@ impl Amount {
 
     /// Creates an Amount from an i64.
     ///
-    /// Returns an error if the amount is out of range.
+    /// Returns an error if the amount is outside the range `{-MAX_MONEY..MAX_MONEY}`.
     pub fn from_i64(amount: i64) -> Result<Self, ()> {
         if -MAX_MONEY <= amount && amount <= MAX_MONEY {
             Ok(Amount(amount))
@@ -28,7 +39,7 @@ impl Amount {
 
     /// Creates a non-negative Amount from an i64.
     ///
-    /// Returns an error if the amount is out of range.
+    /// Returns an error if the amount is outside the range `{0..MAX_MONEY}`.
     pub fn from_nonnegative_i64(amount: i64) -> Result<Self, ()> {
         if 0 <= amount && amount <= MAX_MONEY {
             Ok(Amount(amount))
@@ -39,7 +50,7 @@ impl Amount {
 
     /// Creates an Amount from a u64.
     ///
-    /// Returns an error if the amount is out of range.
+    /// Returns an error if the amount is outside the range `{0..MAX_MONEY}`.
     pub fn from_u64(amount: u64) -> Result<Self, ()> {
         if amount <= MAX_MONEY as u64 {
             Ok(Amount(amount as i64))
@@ -50,7 +61,7 @@ impl Amount {
 
     /// Reads an Amount from a signed 64-bit little-endian integer.
     ///
-    /// Returns an error if the amount is out of range.
+    /// Returns an error if the amount is outside the range `{-MAX_MONEY..MAX_MONEY}`.
     pub fn from_i64_le_bytes(bytes: [u8; 8]) -> Result<Self, ()> {
         let amount = i64::from_le_bytes(bytes);
         Amount::from_i64(amount)
@@ -58,7 +69,7 @@ impl Amount {
 
     /// Reads a non-negative Amount from a signed 64-bit little-endian integer.
     ///
-    /// Returns an error if the amount is out of range.
+    /// Returns an error if the amount is outside the range `{0..MAX_MONEY}`.
     pub fn from_nonnegative_i64_le_bytes(bytes: [u8; 8]) -> Result<Self, ()> {
         let amount = i64::from_le_bytes(bytes);
         Amount::from_nonnegative_i64(amount)
@@ -66,7 +77,7 @@ impl Amount {
 
     /// Reads an Amount from an unsigned 64-bit little-endian integer.
     ///
-    /// Returns an error if the amount is out of range.
+    /// Returns an error if the amount is outside the range `{0..MAX_MONEY}`.
     pub fn from_u64_le_bytes(bytes: [u8; 8]) -> Result<Self, ()> {
         let amount = u64::from_le_bytes(bytes);
         Amount::from_u64(amount)
@@ -77,13 +88,13 @@ impl Amount {
         self.0.to_le_bytes()
     }
 
-    /// Returns `true` if `self` is positive and `false` if the number is zero or
+    /// Returns `true` if `self` is positive and `false` if the Amount is zero or
     /// negative.
     pub const fn is_positive(self) -> bool {
         self.0.is_positive()
     }
 
-    /// Returns `true` if `self` is negative and `false` if the number is zero or
+    /// Returns `true` if `self` is negative and `false` if the Amount is zero or
     /// positive.
     pub const fn is_negative(self) -> bool {
         self.0.is_negative()
