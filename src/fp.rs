@@ -257,6 +257,24 @@ impl Fp {
     }
 
     #[inline]
+    /// Computes the multiplicative inverse of this field
+    /// element, returning None in the case that this element
+    /// is zero.
+    pub fn invert(&self) -> CtOption<Self> {
+        // Exponentiate by p - 2
+        let t = self.pow_vartime(&[
+            0xb9feffffffffaaa9,
+            0x1eabfffeb153ffff,
+            0x6730d2a0f6b0f624,
+            0x64774b84f38512bf,
+            0x4b1ba7b6434bacd7,
+            0x1a0111ea397fe69a,
+        ]);
+
+        CtOption::new(t, !self.is_zero())
+    }
+
+    #[inline]
     const fn subtract_p(&self) -> Fp {
         let (r0, borrow) = sbb(self.0[0], MODULUS[0], 0);
         let (r1, borrow) = sbb(self.0[1], MODULUS[1], borrow);
@@ -747,4 +765,27 @@ fn test_sqrt() {
             0x11ebab9dbb81e28c
         ])
     );
+}
+
+#[test]
+fn test_inversion() {
+    let a = Fp([
+        0x43b43a5078ac2076,
+        0x1ce0763046f8962b,
+        0x724a5276486d735c,
+        0x6f05c2a6282d48fd,
+        0x2095bd5bb4ca9331,
+        0x3b35b3894b0f7da,
+    ]);
+    let b = Fp([
+        0x69ecd7040952148f,
+        0x985ccc2022190f55,
+        0xe19bba36a9ad2f41,
+        0x19bb16c95219dbd8,
+        0x14dcacfdfb478693,
+        0x115ff58afff9a8e1,
+    ]);
+
+    assert_eq!(a.invert().unwrap(), b);
+    assert!(Fp::zero().invert().is_none().unwrap_u8() == 1);
 }

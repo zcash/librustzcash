@@ -242,6 +242,30 @@ impl Fp2 {
         })
     }
 
+    /// Computes the multiplicative inverse of this field
+    /// element, returning None in the case that this element
+    /// is zero.
+    pub fn invert(&self) -> CtOption<Self> {
+        // We wish to find the multiplicative inverse of a nonzero
+        // element a + bu in Fp2. We leverage an identity
+        //
+        // (a + bu)(a - bu) = a^2 + b^2
+        //
+        // which holds because u^2 = -1. This can be rewritten as
+        //
+        // (a + bu)(a - bu)/(a^2 + b^2) = 1
+        //
+        // because a^2 + b^2 = 0 has no nonzero solutions for (a, b).
+        // This gives that (a - bu)/(a^2 + b^2) is the inverse
+        // of (a + bu). Importantly, this can be computing using
+        // only a single inversion in Fp.
+
+        (self.c0.square() + self.c1.square()).invert().map(|t| Fp2 {
+            c0: self.c0 * t,
+            c1: self.c1 * -t,
+        })
+    }
+
     /// Although this is labeled "vartime", it is only
     /// variable time with respect to the exponent. It
     /// is also not exposed in the public API.
@@ -670,4 +694,49 @@ fn test_sqrt() {
         .sqrt()
         .is_none()
     ));
+}
+
+#[test]
+fn test_inversion() {
+    let a = Fp2 {
+        c0: Fp::from_raw_unchecked([
+            0x1128ecad67549455,
+            0x9e7a1cff3a4ea1a8,
+            0xeb208d51e08bcf27,
+            0xe98ad40811f5fc2b,
+            0x736c3a59232d511d,
+            0x10acd42d29cfcbb6,
+        ]),
+        c1: Fp::from_raw_unchecked([
+            0xd328e37cc2f58d41,
+            0x948df0858a605869,
+            0x6032f9d56f93a573,
+            0x2be483ef3fffdc87,
+            0x30ef61f88f483c2a,
+            0x1333f55a35725be0,
+        ]),
+    };
+
+    let b = Fp2 {
+        c0: Fp::from_raw_unchecked([
+            0x581a1333d4f48a6,
+            0x58242f6ef0748500,
+            0x292c955349e6da5,
+            0xba37721ddd95fcd0,
+            0x70d167903aa5dfc5,
+            0x11895e118b58a9d5,
+        ]),
+        c1: Fp::from_raw_unchecked([
+            0xeda09d2d7a85d17,
+            0x8808e137a7d1a2cf,
+            0x43ae2625c1ff21db,
+            0xf85ac9fdf7a74c64,
+            0x8fccdda5b8da9738,
+            0x8e84f0cb32cd17d,
+        ]),
+    };
+
+    assert_eq!(a.invert().unwrap(), b);
+
+    assert!(Fp2::zero().invert().is_none().unwrap_u8() == 1);
 }
