@@ -12,9 +12,20 @@
 #![deny(missing_debug_implementations)]
 #![deny(missing_docs)]
 #![deny(unsafe_code)]
+#![allow(clippy::too_many_arguments)]
+#![allow(clippy::unreadable_literal)]
+#![allow(clippy::many_single_char_names)]
 
 #[cfg(feature = "pairings")]
 extern crate alloc;
 
 #[cfg(test)]
+#[macro_use]
 extern crate std;
+
+#[macro_use]
+mod util;
+
+mod scalar;
+
+pub use scalar::Scalar;
