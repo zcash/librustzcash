@@ -29,3 +29,17 @@ mod util;
 mod scalar;
 
 pub use scalar::Scalar;
+
+#[cfg(feature = "groups")]
+mod fp;
+#[cfg(feature = "groups")]
+mod fp2;
+#[cfg(feature = "groups")]
+mod g1;
+#[cfg(feature = "groups")]
+mod g2;
+
+#[cfg(feature = "groups")]
+pub use g1::{G1Affine, G1Projective};
+#[cfg(feature = "groups")]
+pub use g2::{G2Affine, G2Projective};
