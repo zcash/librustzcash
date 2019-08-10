@@ -214,6 +214,35 @@ impl Fp {
         res
     }
 
+    /// Returns whether or not this element is strictly lexicographically
+    /// larger than its negation.
+    pub fn lexicographically_largest(&self) -> Choice {
+        // This can be determined by checking to see if the element is
+        // larger than (p - 1) // 2. If we subtract by ((p - 1) // 2) + 1
+        // and there is no underflow, then the element must be larger than
+        // (p - 1) // 2.
+
+        // First, because self is in Montgomery form we need to reduce it
+        let tmp = Fp::montgomery_reduce(
+            self.0[0], self.0[1], self.0[2], self.0[3], self.0[4], self.0[5], 0, 0, 0, 0, 0, 0,
+        );
+
+        let (_, borrow) = sbb(tmp.0[0], 0xdcff7fffffffd556, 0);
+        let (_, borrow) = sbb(tmp.0[1], 0x0f55ffff58a9ffff, borrow);
+        let (_, borrow) = sbb(tmp.0[2], 0xb39869507b587b12, borrow);
+        let (_, borrow) = sbb(tmp.0[3], 0xb23ba5c279c2895f, borrow);
+        let (_, borrow) = sbb(tmp.0[4], 0x258dd3db21a5d66b, borrow);
+        let (_, borrow) = sbb(tmp.0[5], 0x0d0088f51cbff34d, borrow);
+
+        // If the element was smaller, the subtraction will underflow
+        // producing a borrow value of 0xffff...ffff, otherwise it will
+        // be zero. We create a Choice representing true if there was
+        // overflow (and so this element is not lexicographically larger
+        // than its negation) and then negate it.
+
+        !Choice::from((borrow as u8) & 1)
+    }
+
     /// Constructs an element of `Fp` without checking that it is
     /// canonical.
     pub const fn from_raw_unchecked(v: [u64; 6]) -> Fp {
@@ -788,4 +817,43 @@ fn test_inversion() {
 
     assert_eq!(a.invert().unwrap(), b);
     assert!(Fp::zero().invert().is_none().unwrap_u8() == 1);
+}
+
+#[test]
+fn test_lexicographic_largest() {
+    assert!(!bool::from(Fp::zero().lexicographically_largest()));
+    assert!(!bool::from(Fp::one().lexicographically_largest()));
+    assert!(!bool::from(
+        Fp::from_raw_unchecked([
+            0xa1fafffffffe5557,
+            0x995bfff976a3fffe,
+            0x3f41d24d174ceb4,
+            0xf6547998c1995dbd,
+            0x778a468f507a6034,
+            0x20559931f7f8103
+        ])
+        .lexicographically_largest()
+    ));
+    assert!(bool::from(
+        Fp::from_raw_unchecked([
+            0x1804000000015554,
+            0x855000053ab00001,
+            0x633cb57c253c276f,
+            0x6e22d1ec31ebb502,
+            0xd3916126f2d14ca2,
+            0x17fbb8571a006596
+        ])
+        .lexicographically_largest()
+    ));
+    assert!(bool::from(
+        Fp::from_raw_unchecked([
+            0x43f5fffffffcaaae,
+            0x32b7fff2ed47fffd,
+            0x7e83a49a2e99d69,
+            0xeca8f3318332bb7a,
+            0xef148d1ea0f4c069,
+            0x40ab3263eff0206
+        ])
+        .lexicographically_largest()
+    ));
 }

@@ -117,6 +117,20 @@ impl Fp2 {
         self.c0.is_zero() & self.c1.is_zero()
     }
 
+    /// Returns whether or not this element is strictly lexicographically
+    /// larger than its negation.
+    #[inline]
+    pub fn lexicographically_largest(&self) -> Choice {
+        // If this element's c1 coefficient is lexicographically largest
+        // then it is lexicographically largest. Otherwise, in the event
+        // the c1 coefficient is zero and the c0 coefficient is
+        // lexicographically largest, then this element is lexicographically
+        // largest.
+
+        self.c1.lexicographically_largest()
+            | (self.c1.is_zero() & self.c0.lexicographically_largest())
+    }
+
     pub const fn square(&self) -> Fp2 {
         // Complex squaring:
         //
@@ -739,4 +753,80 @@ fn test_inversion() {
     assert_eq!(a.invert().unwrap(), b);
 
     assert!(Fp2::zero().invert().is_none().unwrap_u8() == 1);
+}
+
+#[test]
+fn test_lexicographic_largest() {
+    assert!(!bool::from(Fp2::zero().lexicographically_largest()));
+    assert!(!bool::from(Fp2::one().lexicographically_largest()));
+    assert!(bool::from(
+        Fp2 {
+            c0: Fp::from_raw_unchecked([
+                0x1128ecad67549455,
+                0x9e7a1cff3a4ea1a8,
+                0xeb208d51e08bcf27,
+                0xe98ad40811f5fc2b,
+                0x736c3a59232d511d,
+                0x10acd42d29cfcbb6,
+            ]),
+            c1: Fp::from_raw_unchecked([
+                0xd328e37cc2f58d41,
+                0x948df0858a605869,
+                0x6032f9d56f93a573,
+                0x2be483ef3fffdc87,
+                0x30ef61f88f483c2a,
+                0x1333f55a35725be0,
+            ]),
+        }
+        .lexicographically_largest()
+    ));
+    assert!(!bool::from(
+        Fp2 {
+            c0: -Fp::from_raw_unchecked([
+                0x1128ecad67549455,
+                0x9e7a1cff3a4ea1a8,
+                0xeb208d51e08bcf27,
+                0xe98ad40811f5fc2b,
+                0x736c3a59232d511d,
+                0x10acd42d29cfcbb6,
+            ]),
+            c1: -Fp::from_raw_unchecked([
+                0xd328e37cc2f58d41,
+                0x948df0858a605869,
+                0x6032f9d56f93a573,
+                0x2be483ef3fffdc87,
+                0x30ef61f88f483c2a,
+                0x1333f55a35725be0,
+            ]),
+        }
+        .lexicographically_largest()
+    ));
+    assert!(!bool::from(
+        Fp2 {
+            c0: Fp::from_raw_unchecked([
+                0x1128ecad67549455,
+                0x9e7a1cff3a4ea1a8,
+                0xeb208d51e08bcf27,
+                0xe98ad40811f5fc2b,
+                0x736c3a59232d511d,
+                0x10acd42d29cfcbb6,
+            ]),
+            c1: Fp::zero(),
+        }
+        .lexicographically_largest()
+    ));
+    assert!(bool::from(
+        Fp2 {
+            c0: -Fp::from_raw_unchecked([
+                0x1128ecad67549455,
+                0x9e7a1cff3a4ea1a8,
+                0xeb208d51e08bcf27,
+                0xe98ad40811f5fc2b,
+                0x736c3a59232d511d,
+                0x10acd42d29cfcbb6,
+            ]),
+            c1: Fp::zero(),
+        }
+        .lexicographically_largest()
+    ));
 }
