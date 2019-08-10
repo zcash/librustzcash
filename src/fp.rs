@@ -26,6 +26,12 @@ impl fmt::Debug for Fp {
     }
 }
 
+impl Default for Fp {
+    fn default() -> Self {
+        Fp::zero()
+    }
+}
+
 impl ConstantTimeEq for Fp {
     fn ct_eq(&self, other: &Self) -> Choice {
         self.0[0].ct_eq(&other.0[0])
@@ -152,6 +158,10 @@ impl Fp {
         R
     }
 
+    pub fn is_zero(&self) -> Choice {
+        self.ct_eq(&Fp::zero())
+    }
+
     /// Attempts to convert a little-endian byte representation of
     /// a scalar into an `Fp`, failing if the input is not canonical.
     pub fn from_bytes(bytes: &[u8; 48]) -> CtOption<Fp> {
@@ -208,6 +218,42 @@ impl Fp {
     /// canonical.
     pub const fn from_raw_unchecked(v: [u64; 6]) -> Fp {
         Fp(v)
+    }
+
+    /// Although this is labeled "vartime", it is only
+    /// variable time with respect to the exponent. It
+    /// is also not exposed in the public API.
+    pub fn pow_vartime(&self, by: &[u64; 6]) -> Self {
+        let mut res = Self::one();
+        for e in by.iter().rev() {
+            for i in (0..64).rev() {
+                res = res.square();
+
+                if ((*e >> i) & 1) == 1 {
+                    res *= self;
+                }
+            }
+        }
+        res
+    }
+
+    #[inline]
+    pub fn sqrt(&self) -> CtOption<Self> {
+        // We use Shank's method, as p = 3 (mod 4). This means
+        // we only need to exponentiate by (p+1)/4. This only
+        // works for elements that are actually quadratic residue,
+        // so we check that we got the correct result at the end.
+
+        let sqrt = self.pow_vartime(&[
+            0xee7fbfffffffeaab,
+            0x7aaffffac54ffff,
+            0xd9cc34a83dac3d89,
+            0xd91dd2e13ce144af,
+            0x92c6e9ed90d2eb35,
+            0x680447a8e5ff9a6,
+        ]);
+
+        CtOption::new(sqrt, sqrt.square().ct_eq(self))
     }
 
     #[inline]
@@ -674,4 +720,31 @@ fn test_from_bytes() {
     );
 
     assert!(Fp::from_bytes(&[0xff; 48]).is_none().unwrap_u8() == 1);
+}
+
+#[test]
+fn test_sqrt() {
+    // a = 4
+    let a = Fp::from_raw_unchecked([
+        0xaa270000000cfff3,
+        0x53cc0032fc34000a,
+        0x478fe97a6b0a807f,
+        0xb1d37ebee6ba24d7,
+        0x8ec9733bbf78ab2f,
+        0x9d645513d83de7e,
+    ]);
+
+    assert_eq!(
+        // sqrt(4) = -2
+        -a.sqrt().unwrap(),
+        // 2
+        Fp::from_raw_unchecked([
+            0x321300000006554f,
+            0xb93c0018d6c40005,
+            0x57605e0db0ddbb51,
+            0x8b256521ed1f9bcb,
+            0x6cf28d7901622c03,
+            0x11ebab9dbb81e28c
+        ])
+    );
 }

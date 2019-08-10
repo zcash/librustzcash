@@ -3,7 +3,7 @@
 use core::fmt;
 use core::ops::{Add, AddAssign, Mul, MulAssign, Neg, Sub, SubAssign};
 
-use subtle::{Choice, ConditionallySelectable, ConstantTimeEq};
+use subtle::{Choice, ConditionallySelectable, ConstantTimeEq, CtOption};
 
 use crate::fp::Fp;
 
@@ -16,6 +16,12 @@ pub struct Fp2 {
 impl fmt::Debug for Fp2 {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{:?} + {:?}*u", self.c0, self.c1)
+    }
+}
+
+impl Default for Fp2 {
+    fn default() -> Self {
+        Fp2::zero()
     }
 }
 
@@ -91,6 +97,26 @@ impl_binops_additive!(Fp2, Fp2);
 impl_binops_multiplicative!(Fp2, Fp2);
 
 impl Fp2 {
+    #[inline]
+    pub const fn zero() -> Fp2 {
+        Fp2 {
+            c0: Fp::zero(),
+            c1: Fp::zero(),
+        }
+    }
+
+    #[inline]
+    pub const fn one() -> Fp2 {
+        Fp2 {
+            c0: Fp::one(),
+            c1: Fp::zero(),
+        }
+    }
+
+    pub fn is_zero(&self) -> Choice {
+        self.c0.is_zero() & self.c1.is_zero()
+    }
+
     pub const fn square(&self) -> Fp2 {
         // Complex squaring:
         //
@@ -160,6 +186,77 @@ impl Fp2 {
             c0: (&self.c0).neg(),
             c1: (&self.c1).neg(),
         }
+    }
+
+    pub fn sqrt(&self) -> CtOption<Self> {
+        use crate::CtOptionExt;
+
+        // Algorithm 9, https://eprint.iacr.org/2012/685.pdf
+        // with constant time modifications.
+
+        CtOption::new(Fp2::zero(), self.is_zero()).or_else(|| {
+            // a1 = self^((p - 3) / 4)
+            let a1 = self.pow_vartime(&[
+                0xee7fbfffffffeaaa,
+                0x7aaffffac54ffff,
+                0xd9cc34a83dac3d89,
+                0xd91dd2e13ce144af,
+                0x92c6e9ed90d2eb35,
+                0x680447a8e5ff9a6,
+            ]);
+
+            // alpha = a1^2 * self = self^((p - 3) / 2 + 1) = self^((p - 1) / 2)
+            let alpha = a1.square() * self;
+
+            // x0 = self^((p + 1) / 4)
+            let x0 = a1 * self;
+
+            // In the event that alpha = -1, the element is order p - 1 and so
+            // we're just trying to get the square of an element of the subfield
+            // Fp. This is given by x0 * u, since u = sqrt(-1). Since the element
+            // x0 = a + bu has b = 0, the solution is therefore au.
+            CtOption::new(
+                Fp2 {
+                    c0: -x0.c1,
+                    c1: x0.c0,
+                },
+                alpha.ct_eq(&(&Fp2::one()).neg()),
+            )
+            // Otherwise, the correct solution is (1 + alpha)^((q - 1) // 2) * x0
+            .or_else(|| {
+                CtOption::new(
+                    (alpha + Fp2::one()).pow_vartime(&[
+                        0xdcff7fffffffd555,
+                        0xf55ffff58a9ffff,
+                        0xb39869507b587b12,
+                        0xb23ba5c279c2895f,
+                        0x258dd3db21a5d66b,
+                        0xd0088f51cbff34d,
+                    ]) * x0,
+                    Choice::from(1),
+                )
+            })
+            // Only return the result if it's really the square root (and so
+            // self is actually quadratic nonresidue)
+            .and_then(|sqrt| CtOption::new(sqrt, sqrt.square().ct_eq(self)))
+        })
+    }
+
+    /// Although this is labeled "vartime", it is only
+    /// variable time with respect to the exponent. It
+    /// is also not exposed in the public API.
+    pub fn pow_vartime(&self, by: &[u64; 6]) -> Self {
+        let mut res = Self::one();
+        for e in by.iter().rev() {
+            for i in (0..64).rev() {
+                res = res.square();
+
+                if ((*e >> i) & 1) == 1 {
+                    res *= self;
+                }
+            }
+        }
+        res
     }
 }
 
@@ -491,4 +588,86 @@ fn test_negation() {
     };
 
     assert_eq!(-a, b);
+}
+
+#[test]
+fn test_sqrt() {
+    // a = 1488924004771393321054797166853618474668089414631333405711627789629391903630694737978065425271543178763948256226639*u + 784063022264861764559335808165825052288770346101304131934508881646553551234697082295473567906267937225174620141295
+    let a = Fp2 {
+        c0: Fp::from_raw_unchecked([
+            0x2beed14627d7f9e9,
+            0xb6614e06660e5dce,
+            0x6c4cc7c2f91d42c,
+            0x996d78474b7a63cc,
+            0xebaebc4c820d574e,
+            0x18865e12d93fd845,
+        ]),
+        c1: Fp::from_raw_unchecked([
+            0x7d828664baf4f566,
+            0xd17e663996ec7339,
+            0x679ead55cb4078d0,
+            0xfe3b2260e001ec28,
+            0x305993d043d91b68,
+            0x626f03c0489b72d,
+        ]),
+    };
+
+    assert_eq!(a.sqrt().unwrap().square(), a);
+
+    // b = 5, which is a generator of the p - 1 order
+    // multiplicative subgroup
+    let b = Fp2 {
+        c0: Fp::from_raw_unchecked([
+            0x6631000000105545,
+            0x211400400eec000d,
+            0x3fa7af30c820e316,
+            0xc52a8b8d6387695d,
+            0x9fb4e61d1e83eac5,
+            0x5cb922afe84dc7,
+        ]),
+        c1: Fp::zero(),
+    };
+
+    assert_eq!(b.sqrt().unwrap().square(), b);
+
+    // c = 25, which is a generator of the (p - 1) / 2 order
+    // multiplicative subgroup
+    let c = Fp2 {
+        c0: Fp::from_raw_unchecked([
+            0x44f600000051ffae,
+            0x86b8014199480043,
+            0xd7159952f1f3794a,
+            0x755d6e3dfe1ffc12,
+            0xd36cd6db5547e905,
+            0x2f8c8ecbf1867bb,
+        ]),
+        c1: Fp::zero(),
+    };
+
+    assert_eq!(c.sqrt().unwrap().square(), c);
+
+    // 2155129644831861015726826462986972654175647013268275306775721078997042729172900466542651176384766902407257452753362*u + 2796889544896299244102912275102369318775038861758288697415827248356648685135290329705805931514906495247464901062529
+    // is nonsquare.
+    assert!(bool::from(
+        Fp2 {
+            c0: Fp::from_raw_unchecked([
+                0xc5fa1bc8fd00d7f6,
+                0x3830ca454606003b,
+                0x2b287f1104b102da,
+                0xa7fb30f28230f23e,
+                0x339cdb9ee953dbf0,
+                0xd78ec51d989fc57
+            ]),
+            c1: Fp::from_raw_unchecked([
+                0x27ec4898cf87f613,
+                0x9de1394e1abb05a5,
+                0x947f85dc170fc14,
+                0x586fbc696b6114b7,
+                0x2b3475a4077d7169,
+                0x13e1c895cc4b6c22
+            ])
+        }
+        .sqrt()
+        .is_none()
+    ));
 }
