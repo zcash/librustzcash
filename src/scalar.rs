@@ -1,4 +1,4 @@
-//! This module provides an implementation of the BLS12-381 scalar field `GF(q)`
+//! This module provides an implementation of the BLS12-381 scalar field $\mathbb{F}_q$
 //! where `q = 0x73eda753299d7d483339d80809a1d80553bda402fffe5bfeffffffff00000001`
 
 use core::fmt;
@@ -9,7 +9,8 @@ use subtle::{Choice, ConditionallySelectable, ConstantTimeEq, CtOption};
 
 use crate::util::{adc, mac, sbb};
 
-/// Represents a scalar of the BLS12-381 elliptic curve construction.
+/// Represents an element of the scalar field $\mathbb{F}_q$ of the BLS12-381 elliptic
+/// curve construction.
 // The internal representation of this type is four 64-bit unsigned
 // integers in little-endian order. `Scalar` values are always in
 // Montgomery form; i.e., Scalar(a) = aR mod q, with R = 2^256.

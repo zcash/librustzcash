@@ -9,6 +9,9 @@ repository = "https://github.com/zkcrypto/bls12_381"
 version = "0.0.0"
 edition = "2018"
 
+[package.metadata.docs.rs]
+rustdoc-args = [ "--html-in-header", "katex-header.html" ]
+
 [dependencies.subtle]
 version = "2.1"
 default-features = false
