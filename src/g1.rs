@@ -226,6 +226,38 @@ impl G1Projective {
         }
     }
 
+    /// Computes the doubling of this point.
+    pub fn double(&self) -> G1Projective {
+        // http://www.hyperelliptic.org/EFD/g1p/auto-shortw-jacobian-0.html#doubling-dbl-2009-l
+        //
+        // There are no points of order 2.
+
+        let a = self.x.square();
+        let b = self.y.square();
+        let c = b.square();
+        let d = self.x + b;
+        let d = d.square();
+        let d = d - a - c;
+        let d = d + d;
+        let e = a + a + a;
+        let f = e.square();
+        let z3 = self.z * self.y;
+        let z3 = z3 + z3;
+        let x3 = f - (d + d);
+        let c = c + c;
+        let c = c + c;
+        let c = c + c;
+        let y3 = e * (d - x3) - c;
+
+        let tmp = G1Projective {
+            x: x3,
+            y: y3,
+            z: z3,
+        };
+
+        G1Projective::conditional_select(&tmp, &G1Projective::identity(), self.is_identity())
+    }
+
     /// Returns true if this element is the identity (the point at infinity).
     #[inline]
     pub fn is_identity(&self) -> Choice {
@@ -391,4 +423,41 @@ fn test_affine_to_projective() {
     assert!(!bool::from(G1Projective::from(a).is_identity()));
     assert!(bool::from(G1Projective::from(b).is_on_curve()));
     assert!(bool::from(G1Projective::from(b).is_identity()));
+}
+
+#[test]
+fn test_doubling() {
+    {
+        let tmp = G1Projective::identity().double();
+        assert!(bool::from(tmp.is_identity()));
+        assert!(bool::from(tmp.is_on_curve()));
+    }
+    {
+        let tmp = G1Projective::generator().double();
+        assert!(!bool::from(tmp.is_identity()));
+        assert!(bool::from(tmp.is_on_curve()));
+
+        assert_eq!(
+            G1Affine::from(tmp),
+            G1Affine {
+                x: Fp::from_raw_unchecked([
+                    0x53e978ce58a9ba3c,
+                    0x3ea0583c4f3d65f9,
+                    0x4d20bb47f0012960,
+                    0xa54c664ae5b2b5d9,
+                    0x26b552a39d7eb21f,
+                    0x8895d26e68785
+                ]),
+                y: Fp::from_raw_unchecked([
+                    0x70110b3298293940,
+                    0xda33c5393f1f6afc,
+                    0xb86edfd16a5aa785,
+                    0xaec6d1c9e7b1c895,
+                    0x25cfc2b522d11720,
+                    0x6361c83f8d09b15
+                ]),
+                infinity: Choice::from(0u8)
+            }
+        );
+    }
 }
