@@ -2,7 +2,7 @@
 
 use crate::fp::Fp;
 use crate::fp2::Fp2;
-use subtle::{Choice, ConstantTimeEq};
+use subtle::{Choice, ConditionallySelectable, ConstantTimeEq};
 
 /// This is an element of $\mathbb{G}_2$ represented in the affine coordinate space.
 /// It is ideal to keep elements in this representation to reduce memory usage and
@@ -28,6 +28,16 @@ impl ConstantTimeEq for G2Affine {
                 & (!other.infinity)
                 & self.x.ct_eq(&other.x)
                 & self.y.ct_eq(&other.y))
+    }
+}
+
+impl ConditionallySelectable for G2Affine {
+    fn conditional_select(a: &Self, b: &Self, choice: Choice) -> Self {
+        G2Affine {
+            x: Fp2::conditional_select(&a.x, &b.x, choice),
+            y: Fp2::conditional_select(&a.y, &b.y, choice),
+            infinity: Choice::conditional_select(&a.infinity, &b.infinity, choice),
+        }
     }
 }
 
@@ -146,6 +156,16 @@ impl ConstantTimeEq for G2Projective {
 
         (self_is_zero & other_is_zero) // Both point at infinity
             | ((!self_is_zero) & (!other_is_zero) & x1.ct_eq(&x2) & y1.ct_eq(&y2)) // Neither point at infinity, coordinates are the same
+    }
+}
+
+impl ConditionallySelectable for G2Projective {
+    fn conditional_select(a: &Self, b: &Self, choice: Choice) -> Self {
+        G2Projective {
+            x: Fp2::conditional_select(&a.x, &b.x, choice),
+            y: Fp2::conditional_select(&a.y, &b.y, choice),
+            z: Fp2::conditional_select(&a.z, &b.z, choice),
+        }
     }
 }
 
@@ -327,4 +347,28 @@ fn test_projective_point_equality() {
     assert!(a != b);
     assert!(a != c);
     assert!(b != c);
+}
+
+#[test]
+fn test_conditionally_select_affine() {
+    let a = G2Affine::generator();
+    let b = G2Affine::identity();
+
+    assert_eq!(G2Affine::conditional_select(&a, &b, Choice::from(0u8)), a);
+    assert_eq!(G2Affine::conditional_select(&a, &b, Choice::from(1u8)), b);
+}
+
+#[test]
+fn test_conditionally_select_projective() {
+    let a = G2Projective::generator();
+    let b = G2Projective::identity();
+
+    assert_eq!(
+        G2Projective::conditional_select(&a, &b, Choice::from(0u8)),
+        a
+    );
+    assert_eq!(
+        G2Projective::conditional_select(&a, &b, Choice::from(1u8)),
+        b
+    );
 }

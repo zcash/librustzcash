@@ -1,7 +1,7 @@
 //! This module provides an implementation of the $\mathbb{G}_1$ group of BLS12-381.
 
 use crate::fp::Fp;
-use subtle::{Choice, ConstantTimeEq};
+use subtle::{Choice, ConditionallySelectable, ConstantTimeEq};
 
 /// This is an element of $\mathbb{G}_1$ represented in the affine coordinate space.
 /// It is ideal to keep elements in this representation to reduce memory usage and
@@ -27,6 +27,16 @@ impl ConstantTimeEq for G1Affine {
                 & (!other.infinity)
                 & self.x.ct_eq(&other.x)
                 & self.y.ct_eq(&other.y))
+    }
+}
+
+impl ConditionallySelectable for G1Affine {
+    fn conditional_select(a: &Self, b: &Self, choice: Choice) -> Self {
+        G1Affine {
+            x: Fp::conditional_select(&a.x, &b.x, choice),
+            y: Fp::conditional_select(&a.y, &b.y, choice),
+            infinity: Choice::conditional_select(&a.infinity, &b.infinity, choice),
+        }
     }
 }
 
@@ -115,6 +125,16 @@ impl ConstantTimeEq for G1Projective {
 
         (self_is_zero & other_is_zero) // Both point at infinity
             | ((!self_is_zero) & (!other_is_zero) & x1.ct_eq(&x2) & y1.ct_eq(&y2)) // Neither point at infinity, coordinates are the same
+    }
+}
+
+impl ConditionallySelectable for G1Projective {
+    fn conditional_select(a: &Self, b: &Self, choice: Choice) -> Self {
+        G1Projective {
+            x: Fp::conditional_select(&a.x, &b.x, choice),
+            y: Fp::conditional_select(&a.y, &b.y, choice),
+            z: Fp::conditional_select(&a.z, &b.z, choice),
+        }
     }
 }
 
@@ -256,4 +276,28 @@ fn test_projective_point_equality() {
     assert!(a != b);
     assert!(a != c);
     assert!(b != c);
+}
+
+#[test]
+fn test_conditionally_select_affine() {
+    let a = G1Affine::generator();
+    let b = G1Affine::identity();
+
+    assert_eq!(G1Affine::conditional_select(&a, &b, Choice::from(0u8)), a);
+    assert_eq!(G1Affine::conditional_select(&a, &b, Choice::from(1u8)), b);
+}
+
+#[test]
+fn test_conditionally_select_projective() {
+    let a = G1Projective::generator();
+    let b = G1Projective::identity();
+
+    assert_eq!(
+        G1Projective::conditional_select(&a, &b, Choice::from(0u8)),
+        a
+    );
+    assert_eq!(
+        G1Projective::conditional_select(&a, &b, Choice::from(1u8)),
+        b
+    );
 }
