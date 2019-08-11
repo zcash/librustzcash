@@ -26,6 +26,12 @@ extern crate std;
 #[macro_use]
 mod util;
 
+/// Notes about how the BLS12-381 elliptic curve is designed, specified
+/// and implemented by this library.
+pub mod notes {
+    pub mod design;
+}
+
 mod scalar;
 
 pub use scalar::Scalar;
