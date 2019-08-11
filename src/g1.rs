@@ -16,6 +16,30 @@ pub struct G1Affine {
     infinity: Choice,
 }
 
+impl<'a> From<&'a G1Projective> for G1Affine {
+    fn from(p: &'a G1Projective) -> G1Affine {
+        let zinv = p.z.invert().unwrap_or(Fp::zero());
+        let zinv2 = zinv.square();
+        let x = p.x * zinv2;
+        let zinv3 = zinv2 * zinv;
+        let y = p.y * zinv3;
+
+        let tmp = G1Affine {
+            x,
+            y,
+            infinity: Choice::from(0u8),
+        };
+
+        G1Affine::conditional_select(&tmp, &G1Affine::identity(), zinv.is_zero())
+    }
+}
+
+impl From<G1Projective> for G1Affine {
+    fn from(p: G1Projective) -> G1Affine {
+        G1Affine::from(&p)
+    }
+}
+
 impl ConstantTimeEq for G1Affine {
     fn ct_eq(&self, other: &Self) -> Choice {
         // The only cases in which two points are equal are
@@ -91,6 +115,12 @@ impl G1Affine {
         }
     }
 
+    /// Returns true if this element is the identity (the point at infinity).
+    #[inline]
+    pub fn is_identity(&self) -> Choice {
+        self.infinity
+    }
+
     /// Returns true if this point is on the curve. This should always return
     /// true unless an "unchecked" API was used.
     pub fn is_on_curve(&self) -> Choice {
@@ -105,6 +135,22 @@ pub struct G1Projective {
     x: Fp,
     y: Fp,
     z: Fp,
+}
+
+impl<'a> From<&'a G1Affine> for G1Projective {
+    fn from(p: &'a G1Affine) -> G1Projective {
+        G1Projective {
+            x: p.x,
+            y: p.y,
+            z: Fp::conditional_select(&Fp::one(), &Fp::zero(), p.infinity),
+        }
+    }
+}
+
+impl From<G1Affine> for G1Projective {
+    fn from(p: G1Affine) -> G1Projective {
+        G1Projective::from(&p)
+    }
 }
 
 impl ConstantTimeEq for G1Projective {
@@ -178,6 +224,12 @@ impl G1Projective {
             ]),
             z: Fp::one(),
         }
+    }
+
+    /// Returns true if this element is the identity (the point at infinity).
+    #[inline]
+    pub fn is_identity(&self) -> Choice {
+        self.z.is_zero()
     }
 
     /// Returns true if this point is on the curve. This should always return
@@ -300,4 +352,43 @@ fn test_conditionally_select_projective() {
         G1Projective::conditional_select(&a, &b, Choice::from(1u8)),
         b
     );
+}
+
+#[test]
+fn test_projective_to_affine() {
+    let a = G1Projective::generator();
+    let b = G1Projective::identity();
+
+    assert!(bool::from(G1Affine::from(a).is_on_curve()));
+    assert!(!bool::from(G1Affine::from(a).is_identity()));
+    assert!(bool::from(G1Affine::from(b).is_on_curve()));
+    assert!(bool::from(G1Affine::from(b).is_identity()));
+
+    let z = Fp::from_raw_unchecked([
+        0xba7afa1f9a6fe250,
+        0xfa0f5b595eafe731,
+        0x3bdc477694c306e7,
+        0x2149be4b3949fa24,
+        0x64aa6e0649b2078c,
+        0x12b108ac33643c3e,
+    ]);
+
+    let c = G1Projective {
+        x: a.x * (z.square()),
+        y: a.y * (z.square() * z),
+        z,
+    };
+
+    assert_eq!(G1Affine::from(c), G1Affine::generator());
+}
+
+#[test]
+fn test_affine_to_projective() {
+    let a = G1Affine::generator();
+    let b = G1Affine::identity();
+
+    assert!(bool::from(G1Projective::from(a).is_on_curve()));
+    assert!(!bool::from(G1Projective::from(a).is_identity()));
+    assert!(bool::from(G1Projective::from(b).is_on_curve()));
+    assert!(bool::from(G1Projective::from(b).is_identity()));
 }

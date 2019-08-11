@@ -29,6 +29,9 @@ fn criterion_benchmark(c: &mut Criterion) {
         c.bench_function(&format!("{} check equality", name), move |b| {
             b.iter(|| black_box(a) == black_box(a))
         });
+        c.bench_function(&format!("{} to affine", name), move |b| {
+            b.iter(|| G1Affine::from(black_box(a)))
+        });
     }
 
     // G2Affine
@@ -52,6 +55,9 @@ fn criterion_benchmark(c: &mut Criterion) {
         });
         c.bench_function(&format!("{} check equality", name), move |b| {
             b.iter(|| black_box(a) == black_box(a))
+        });
+        c.bench_function(&format!("{} to affine", name), move |b| {
+            b.iter(|| G2Affine::from(black_box(a)))
         });
     }
 }

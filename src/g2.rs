@@ -17,6 +17,30 @@ pub struct G2Affine {
     infinity: Choice,
 }
 
+impl<'a> From<&'a G2Projective> for G2Affine {
+    fn from(p: &'a G2Projective) -> G2Affine {
+        let zinv = p.z.invert().unwrap_or(Fp2::zero());
+        let zinv2 = zinv.square();
+        let x = p.x * zinv2;
+        let zinv3 = zinv2 * zinv;
+        let y = p.y * zinv3;
+
+        let tmp = G2Affine {
+            x,
+            y,
+            infinity: Choice::from(0u8),
+        };
+
+        G2Affine::conditional_select(&tmp, &G2Affine::identity(), zinv.is_zero())
+    }
+}
+
+impl From<G2Projective> for G2Affine {
+    fn from(p: G2Projective) -> G2Affine {
+        G2Affine::from(&p)
+    }
+}
+
 impl ConstantTimeEq for G2Affine {
     fn ct_eq(&self, other: &Self) -> Choice {
         // The only cases in which two points are equal are
@@ -122,6 +146,12 @@ impl G2Affine {
         }
     }
 
+    /// Returns true if this element is the identity (the point at infinity).
+    #[inline]
+    pub fn is_identity(&self) -> Choice {
+        self.infinity
+    }
+
     /// Returns true if this point is on the curve. This should always return
     /// true unless an "unchecked" API was used.
     pub fn is_on_curve(&self) -> Choice {
@@ -136,6 +166,22 @@ pub struct G2Projective {
     x: Fp2,
     y: Fp2,
     z: Fp2,
+}
+
+impl<'a> From<&'a G2Affine> for G2Projective {
+    fn from(p: &'a G2Affine) -> G2Projective {
+        G2Projective {
+            x: p.x,
+            y: p.y,
+            z: Fp2::conditional_select(&Fp2::one(), &Fp2::zero(), p.infinity),
+        }
+    }
+}
+
+impl From<G2Affine> for G2Projective {
+    fn from(p: G2Affine) -> G2Projective {
+        G2Projective::from(&p)
+    }
 }
 
 impl ConstantTimeEq for G2Projective {
@@ -229,6 +275,12 @@ impl G2Projective {
             },
             z: Fp2::one(),
         }
+    }
+
+    /// Returns true if this element is the identity (the point at infinity).
+    #[inline]
+    pub fn is_identity(&self) -> Choice {
+        self.z.is_zero()
     }
 
     /// Returns true if this point is on the curve. This should always return
@@ -371,4 +423,53 @@ fn test_conditionally_select_projective() {
         G2Projective::conditional_select(&a, &b, Choice::from(1u8)),
         b
     );
+}
+
+#[test]
+fn test_projective_to_affine() {
+    let a = G2Projective::generator();
+    let b = G2Projective::identity();
+
+    assert!(bool::from(G2Affine::from(a).is_on_curve()));
+    assert!(!bool::from(G2Affine::from(a).is_identity()));
+    assert!(bool::from(G2Affine::from(b).is_on_curve()));
+    assert!(bool::from(G2Affine::from(b).is_identity()));
+
+    let z = Fp2 {
+        c0: Fp::from_raw_unchecked([
+            0xba7afa1f9a6fe250,
+            0xfa0f5b595eafe731,
+            0x3bdc477694c306e7,
+            0x2149be4b3949fa24,
+            0x64aa6e0649b2078c,
+            0x12b108ac33643c3e,
+        ]),
+        c1: Fp::from_raw_unchecked([
+            0x125325df3d35b5a8,
+            0xdc469ef5555d7fe3,
+            0x2d716d2443106a9,
+            0x5a1db59a6ff37d0,
+            0x7cf7784e5300bb8f,
+            0x16a88922c7a5e844,
+        ]),
+    };
+
+    let c = G2Projective {
+        x: a.x * (z.square()),
+        y: a.y * (z.square() * z),
+        z,
+    };
+
+    assert_eq!(G2Affine::from(c), G2Affine::generator());
+}
+
+#[test]
+fn test_affine_to_projective() {
+    let a = G2Affine::generator();
+    let b = G2Affine::identity();
+
+    assert!(bool::from(G2Projective::from(a).is_on_curve()));
+    assert!(!bool::from(G2Projective::from(a).is_identity()));
+    assert!(bool::from(G2Projective::from(b).is_on_curve()));
+    assert!(bool::from(G2Projective::from(b).is_identity()));
 }
