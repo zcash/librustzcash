@@ -12,6 +12,14 @@ edition = "2018"
 [package.metadata.docs.rs]
 rustdoc-args = [ "--html-in-header", "katex-header.html" ]
 
+[dev-dependencies]
+criterion = "0.2.11"
+
+[[bench]]
+name = "groups"
+harness = false
+required-features = ["groups"]
+
 [dependencies.subtle]
 version = "2.1"
 default-features = false
