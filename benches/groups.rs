@@ -23,6 +23,7 @@ fn criterion_benchmark(c: &mut Criterion) {
     {
         let name = "G1Projective";
         let a = G1Projective::generator();
+        let a_affine = G1Affine::generator();
         c.bench_function(&format!("{} check on curve", name), move |b| {
             b.iter(|| black_box(a).is_on_curve())
         });
@@ -37,6 +38,9 @@ fn criterion_benchmark(c: &mut Criterion) {
         });
         c.bench_function(&format!("{} addition", name), move |b| {
             b.iter(|| black_box(a).add(&a))
+        });
+        c.bench_function(&format!("{} mixed addition", name), move |b| {
+            b.iter(|| black_box(a).add_mixed(&a_affine))
         });
     }
 
@@ -56,6 +60,7 @@ fn criterion_benchmark(c: &mut Criterion) {
     {
         let name = "G2Projective";
         let a = G2Projective::generator();
+        let a_affine = G2Affine::generator();
         c.bench_function(&format!("{} check on curve", name), move |b| {
             b.iter(|| black_box(a).is_on_curve())
         });
@@ -70,6 +75,9 @@ fn criterion_benchmark(c: &mut Criterion) {
         });
         c.bench_function(&format!("{} addition", name), move |b| {
             b.iter(|| black_box(a).add(&a))
+        });
+        c.bench_function(&format!("{} mixed addition", name), move |b| {
+            b.iter(|| black_box(a).add_mixed(&a_affine))
         });
     }
 }

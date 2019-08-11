@@ -76,6 +76,67 @@ impl PartialEq for G2Affine {
     }
 }
 
+impl<'a> Neg for &'a G2Affine {
+    type Output = G2Affine;
+
+    #[inline]
+    fn neg(self) -> G2Affine {
+        G2Affine {
+            x: self.x,
+            y: Fp2::conditional_select(&-self.y, &Fp2::one(), self.infinity),
+            infinity: self.infinity,
+        }
+    }
+}
+
+impl Neg for G2Affine {
+    type Output = G2Affine;
+
+    #[inline]
+    fn neg(self) -> G2Affine {
+        -&self
+    }
+}
+
+impl<'a, 'b> Add<&'b G2Projective> for &'a G2Affine {
+    type Output = G2Projective;
+
+    #[inline]
+    fn add(self, rhs: &'b G2Projective) -> G2Projective {
+        rhs.add_mixed(self)
+    }
+}
+
+impl<'a, 'b> Add<&'b G2Affine> for &'a G2Projective {
+    type Output = G2Projective;
+
+    #[inline]
+    fn add(self, rhs: &'b G2Affine) -> G2Projective {
+        self.add_mixed(rhs)
+    }
+}
+
+impl<'a, 'b> Sub<&'b G2Projective> for &'a G2Affine {
+    type Output = G2Projective;
+
+    #[inline]
+    fn sub(self, rhs: &'b G2Projective) -> G2Projective {
+        self + (-rhs)
+    }
+}
+
+impl<'a, 'b> Sub<&'b G2Affine> for &'a G2Projective {
+    type Output = G2Projective;
+
+    #[inline]
+    fn sub(self, rhs: &'b G2Affine) -> G2Projective {
+        self + (-rhs)
+    }
+}
+
+impl_binops_additive!(G2Projective, G2Affine);
+impl_binops_additive_specify_output!(G2Affine, G2Projective, G2Projective);
+
 const B: Fp2 = Fp2 {
     c0: Fp::from_raw_unchecked([
         0xaa270000000cfff3,
@@ -324,7 +385,7 @@ impl G2Projective {
 
     /// Computes the doubling of this point.
     pub fn double(&self) -> G2Projective {
-        // http://www.hyperelliptic.org/EFD/g1p/auto-shortw-jacobian-0.html#doubling-dbl-2009-l
+        // http://www.hyperelliptic.org/EFD/g2p/auto-shortw-jacobian-0.html#doubling-dbl-2009-l
         //
         // There are no points of order 2.
 
@@ -400,6 +461,73 @@ impl G2Projective {
         let n = Fp2::conditional_select(&n, &m, degenerate);
         let t = rr_alt.square();
         let z3 = m_alt * self.z * rhs.z; // We allow rhs.z != 1, so we must account for this.
+        let z3 = z3 + z3;
+        let q = -q;
+        let t = t + q;
+        let x3 = t;
+        let t = t + t;
+        let t = t + q;
+        let t = t * rr_alt;
+        let t = t + n;
+        let y3 = -t;
+        let x3 = x3 + x3;
+        let x3 = x3 + x3;
+        let y3 = y3 + y3;
+        let y3 = y3 + y3;
+
+        let tmp = G2Projective {
+            x: x3,
+            y: y3,
+            z: z3,
+        };
+
+        G2Projective::conditional_select(&res, &tmp, (!f1) & (!f2) & (!f3))
+    }
+
+    /// Adds this point to another point in the affine model.
+    pub fn add_mixed(&self, rhs: &G2Affine) -> G2Projective {
+        // This Jacobian point addition technique is based on the implementation in libsecp256k1,
+        // which assumes that rhs has z=1. Let's address the case of zero z-coordinates generally.
+
+        // If self is the identity, return rhs. Otherwise, return self. The other cases will be
+        // predicated on neither self nor rhs being the identity.
+        let f1 = self.is_identity();
+        let res = G2Projective::conditional_select(self, &G2Projective::from(rhs), f1);
+        let f2 = rhs.is_identity();
+
+        // If neither are the identity but x1 = x2 and y1 != y2, then return the identity
+        let u1 = self.x;
+        let s1 = self.y;
+        let z = self.z.square();
+        let u2 = rhs.x * z;
+        let z = z * self.z;
+        let s2 = rhs.y * z;
+        let f3 = u1.ct_eq(&u2) & (!s1.ct_eq(&s2));
+        let res =
+            G2Projective::conditional_select(&res, &G2Projective::identity(), (!f1) & (!f2) & f3);
+
+        let t = u1 + u2;
+        let m = s1 + s2;
+        let rr = t.square();
+        let m_alt = -u2;
+        let tt = u1 * m_alt;
+        let rr = rr + tt;
+
+        // Correct for x1 != x2 but y1 = -y2, which can occur because p - 1 is divisible by 3.
+        // libsecp256k1 does this by substituting in an alternative (defined) expression for lambda.
+        let degenerate = m.is_zero() & rr.is_zero();
+        let rr_alt = s1 + s1;
+        let m_alt = m_alt + u1;
+        let rr_alt = Fp2::conditional_select(&rr_alt, &rr, !degenerate);
+        let m_alt = Fp2::conditional_select(&m_alt, &m, !degenerate);
+
+        let n = m_alt.square();
+        let q = n * t;
+
+        let n = n.square();
+        let n = Fp2::conditional_select(&n, &m, degenerate);
+        let t = rr_alt.square();
+        let z3 = m_alt * self.z;
         let z3 = z3 + z3;
         let q = -q;
         let t = t + q;
@@ -842,8 +970,180 @@ fn test_projective_addition() {
 }
 
 #[test]
+fn test_mixed_addition() {
+    {
+        let a = G2Affine::identity();
+        let b = G2Projective::identity();
+        let c = a + b;
+        assert!(bool::from(c.is_identity()));
+        assert!(bool::from(c.is_on_curve()));
+    }
+    {
+        let a = G2Affine::identity();
+        let mut b = G2Projective::generator();
+        {
+            let z = Fp2 {
+                c0: Fp::from_raw_unchecked([
+                    0xba7afa1f9a6fe250,
+                    0xfa0f5b595eafe731,
+                    0x3bdc477694c306e7,
+                    0x2149be4b3949fa24,
+                    0x64aa6e0649b2078c,
+                    0x12b108ac33643c3e,
+                ]),
+                c1: Fp::from_raw_unchecked([
+                    0x125325df3d35b5a8,
+                    0xdc469ef5555d7fe3,
+                    0x2d716d2443106a9,
+                    0x5a1db59a6ff37d0,
+                    0x7cf7784e5300bb8f,
+                    0x16a88922c7a5e844,
+                ]),
+            };
+
+            b = G2Projective {
+                x: b.x * (z.square()),
+                y: b.y * (z.square() * z),
+                z,
+            };
+        }
+        let c = a + b;
+        assert!(!bool::from(c.is_identity()));
+        assert!(bool::from(c.is_on_curve()));
+        assert!(c == G2Projective::generator());
+    }
+    {
+        let a = G2Affine::identity();
+        let mut b = G2Projective::generator();
+        {
+            let z = Fp2 {
+                c0: Fp::from_raw_unchecked([
+                    0xba7afa1f9a6fe250,
+                    0xfa0f5b595eafe731,
+                    0x3bdc477694c306e7,
+                    0x2149be4b3949fa24,
+                    0x64aa6e0649b2078c,
+                    0x12b108ac33643c3e,
+                ]),
+                c1: Fp::from_raw_unchecked([
+                    0x125325df3d35b5a8,
+                    0xdc469ef5555d7fe3,
+                    0x2d716d2443106a9,
+                    0x5a1db59a6ff37d0,
+                    0x7cf7784e5300bb8f,
+                    0x16a88922c7a5e844,
+                ]),
+            };
+
+            b = G2Projective {
+                x: b.x * (z.square()),
+                y: b.y * (z.square() * z),
+                z,
+            };
+        }
+        let c = b + a;
+        assert!(!bool::from(c.is_identity()));
+        assert!(bool::from(c.is_on_curve()));
+        assert!(c == G2Projective::generator());
+    }
+    {
+        let a = G2Projective::generator().double().double(); // 4P
+        let b = G2Projective::generator().double(); // 2P
+        let c = a + b;
+
+        let mut d = G2Projective::generator();
+        for _ in 0..5 {
+            d = d + G2Affine::generator();
+        }
+        assert!(!bool::from(c.is_identity()));
+        assert!(bool::from(c.is_on_curve()));
+        assert!(!bool::from(d.is_identity()));
+        assert!(bool::from(d.is_on_curve()));
+        assert_eq!(c, d);
+    }
+
+    // Degenerate case
+    {
+        let beta = Fp2 {
+            c0: Fp::from_raw_unchecked([
+                0xcd03c9e48671f071,
+                0x5dab22461fcda5d2,
+                0x587042afd3851b95,
+                0x8eb60ebe01bacb9e,
+                0x3f97d6e83d050d2,
+                0x18f0206554638741,
+            ]),
+            c1: Fp::zero(),
+        };
+        let beta = beta.square();
+        let a = G2Projective::generator().double().double();
+        let b = G2Projective {
+            x: a.x * beta,
+            y: -a.y,
+            z: a.z,
+        };
+        let a = G2Affine::from(a);
+        assert!(bool::from(a.is_on_curve()));
+        assert!(bool::from(b.is_on_curve()));
+
+        let c = a + b;
+        assert_eq!(
+            G2Affine::from(c),
+            G2Affine::from(G2Projective {
+                x: Fp2 {
+                    c0: Fp::from_raw_unchecked([
+                        0x705abc799ca773d3,
+                        0xfe132292c1d4bf08,
+                        0xf37ece3e07b2b466,
+                        0x887e1c43f447e301,
+                        0x1e0970d033bc77e8,
+                        0x1985c81e20a693f2
+                    ]),
+                    c1: Fp::from_raw_unchecked([
+                        0x1d79b25db36ab924,
+                        0x23948e4d529639d3,
+                        0x471ba7fb0d006297,
+                        0x2c36d4b4465dc4c0,
+                        0x82bbc3cfec67f538,
+                        0x51d2728b67bf952
+                    ])
+                },
+                y: Fp2 {
+                    c0: Fp::from_raw_unchecked([
+                        0x41b1bbf6576c0abf,
+                        0xb6cc93713f7a0f9a,
+                        0x6b65b43e48f3f01f,
+                        0xfb7a4cfcaf81be4f,
+                        0x3e32dadc6ec22cb6,
+                        0xbb0fc49d79807e3
+                    ]),
+                    c1: Fp::from_raw_unchecked([
+                        0x7d1397788f5f2ddf,
+                        0xab2907144ff0d8e8,
+                        0x5b7573e0cdb91f92,
+                        0x4cb8932dd31daf28,
+                        0x62bbfac6db052a54,
+                        0x11f95c16d14c3bbe
+                    ])
+                },
+                z: Fp2::one()
+            })
+        );
+        assert!(!bool::from(c.is_identity()));
+        assert!(bool::from(c.is_on_curve()));
+    }
+}
+
+#[test]
 fn test_projective_negation_and_subtraction() {
     let a = G2Projective::generator().double();
     assert_eq!(a + (-a), G2Projective::identity());
     assert_eq!(a + (-a), a - a);
+}
+
+#[test]
+fn test_affine_negation_and_subtraction() {
+    let a = G2Affine::generator();
+    assert_eq!(G2Projective::from(a) + (-a), G2Projective::identity());
+    assert_eq!(G2Projective::from(a) + (-a), G2Projective::from(a) - a);
 }
