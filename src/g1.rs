@@ -16,6 +16,28 @@ pub struct G1Affine {
     infinity: Choice,
 }
 
+impl ConstantTimeEq for G1Affine {
+    fn ct_eq(&self, other: &Self) -> Choice {
+        // The only cases in which two points are equal are
+        // 1. infinity is set on both
+        // 2. infinity is not set on both, and their coordinates are equal
+
+        (self.infinity & other.infinity)
+            | ((!self.infinity)
+                & (!other.infinity)
+                & self.x.ct_eq(&other.x)
+                & self.y.ct_eq(&other.y))
+    }
+}
+
+impl Eq for G1Affine {}
+impl PartialEq for G1Affine {
+    #[inline]
+    fn eq(&self, other: &Self) -> bool {
+        bool::from(self.ct_eq(other))
+    }
+}
+
 const B: Fp = Fp::from_raw_unchecked([
     0xaa270000000cfff3,
     0x53cc0032fc34000a,
@@ -73,6 +95,35 @@ pub struct G1Projective {
     x: Fp,
     y: Fp,
     z: Fp,
+}
+
+impl ConstantTimeEq for G1Projective {
+    fn ct_eq(&self, other: &Self) -> Choice {
+        // Is (xz^2, yz^3, z) equal to (x'z'^2, yz'^3, z') when converted to affine?
+
+        let z = other.z.square();
+        let x1 = self.x * z;
+        let z = z * other.z;
+        let y1 = self.y * z;
+        let z = self.z.square();
+        let x2 = other.x * z;
+        let z = z * self.z;
+        let y2 = other.y * z;
+
+        let self_is_zero = self.z.is_zero();
+        let other_is_zero = other.z.is_zero();
+
+        (self_is_zero & other_is_zero) // Both point at infinity
+            | ((!self_is_zero) & (!other_is_zero) & x1.ct_eq(&x2) & y1.ct_eq(&y2)) // Neither point at infinity, coordinates are the same
+    }
+}
+
+impl Eq for G1Projective {}
+impl PartialEq for G1Projective {
+    #[inline]
+    fn eq(&self, other: &Self) -> bool {
+        bool::from(self.ct_eq(other))
+    }
 }
 
 impl G1Projective {
@@ -147,4 +198,62 @@ fn test_is_on_curve() {
 
     test.x = z;
     assert!(!bool::from(test.is_on_curve()));
+}
+
+#[test]
+fn test_affine_point_equality() {
+    let a = G1Affine::generator();
+    let b = G1Affine::identity();
+
+    assert!(a == a);
+    assert!(b == b);
+    assert!(a != b);
+    assert!(b != a);
+}
+
+#[test]
+fn test_projective_point_equality() {
+    let a = G1Projective::generator();
+    let b = G1Projective::identity();
+
+    assert!(a == a);
+    assert!(b == b);
+    assert!(a != b);
+    assert!(b != a);
+
+    let z = Fp::from_raw_unchecked([
+        0xba7afa1f9a6fe250,
+        0xfa0f5b595eafe731,
+        0x3bdc477694c306e7,
+        0x2149be4b3949fa24,
+        0x64aa6e0649b2078c,
+        0x12b108ac33643c3e,
+    ]);
+
+    let mut c = G1Projective {
+        x: a.x * (z.square()),
+        y: a.y * (z.square() * z),
+        z,
+    };
+    assert!(bool::from(c.is_on_curve()));
+
+    assert!(a == c);
+    assert!(b != c);
+    assert!(c == a);
+    assert!(c != b);
+
+    c.y = -c.y;
+    assert!(bool::from(c.is_on_curve()));
+
+    assert!(a != c);
+    assert!(b != c);
+    assert!(c != a);
+    assert!(c != b);
+
+    c.y = -c.y;
+    c.x = z;
+    assert!(!bool::from(c.is_on_curve()));
+    assert!(a != b);
+    assert!(a != c);
+    assert!(b != c);
 }

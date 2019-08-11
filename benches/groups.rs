@@ -14,6 +14,9 @@ fn criterion_benchmark(c: &mut Criterion) {
         c.bench_function(&format!("{} check on curve", name), move |b| {
             b.iter(|| black_box(a).is_on_curve())
         });
+        c.bench_function(&format!("{} check equality", name), move |b| {
+            b.iter(|| black_box(a) == black_box(a))
+        });
     }
 
     // G1Projective
@@ -22,6 +25,9 @@ fn criterion_benchmark(c: &mut Criterion) {
         let a = G1Projective::generator();
         c.bench_function(&format!("{} check on curve", name), move |b| {
             b.iter(|| black_box(a).is_on_curve())
+        });
+        c.bench_function(&format!("{} check equality", name), move |b| {
+            b.iter(|| black_box(a) == black_box(a))
         });
     }
 
@@ -32,6 +38,9 @@ fn criterion_benchmark(c: &mut Criterion) {
         c.bench_function(&format!("{} check on curve", name), move |b| {
             b.iter(|| black_box(a).is_on_curve())
         });
+        c.bench_function(&format!("{} check equality", name), move |b| {
+            b.iter(|| black_box(a) == black_box(a))
+        });
     }
 
     // G2Projective
@@ -40,6 +49,9 @@ fn criterion_benchmark(c: &mut Criterion) {
         let a = G2Projective::generator();
         c.bench_function(&format!("{} check on curve", name), move |b| {
             b.iter(|| black_box(a).is_on_curve())
+        });
+        c.bench_function(&format!("{} check equality", name), move |b| {
+            b.iter(|| black_box(a) == black_box(a))
         });
     }
 }
