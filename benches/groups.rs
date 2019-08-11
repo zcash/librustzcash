@@ -35,6 +35,9 @@ fn criterion_benchmark(c: &mut Criterion) {
         c.bench_function(&format!("{} doubling", name), move |b| {
             b.iter(|| black_box(a).double())
         });
+        c.bench_function(&format!("{} addition", name), move |b| {
+            b.iter(|| black_box(a).add(&a))
+        });
     }
 
     // G2Affine
@@ -64,6 +67,9 @@ fn criterion_benchmark(c: &mut Criterion) {
         });
         c.bench_function(&format!("{} doubling", name), move |b| {
             b.iter(|| black_box(a).double())
+        });
+        c.bench_function(&format!("{} addition", name), move |b| {
+            b.iter(|| black_box(a).add(&a))
         });
     }
 }
