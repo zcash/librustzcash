@@ -737,6 +737,46 @@ impl G1Projective {
         acc
     }
 
+    /// Converts a batch of `G1Projective` elements into `G1Affine` elements. This
+    /// function will panic if `p.len() != q.len()`.
+    pub fn batch_normalize(p: &[Self], q: &mut [G1Affine]) {
+        assert_eq!(p.len(), q.len());
+
+        let mut acc = Fp::one();
+        for (p, q) in p.iter().zip(q.iter_mut()) {
+            // We use the `x` field of `G1Affine` to store the product
+            // of previous z-coordinates seen.
+            q.x = acc;
+
+            // We will end up skipping all identities in p
+            acc = Fp::conditional_select(&(acc * p.z), &acc, p.is_identity());
+        }
+
+        // This is the inverse, as all z-coordinates are nonzero and the ones
+        // that are not are skipped.
+        acc = acc.invert().unwrap();
+
+        for (p, q) in p.iter().rev().zip(q.iter_mut().rev()) {
+            let skip = p.is_identity();
+
+            // Compute tmp = 1/z
+            let tmp = q.x * acc;
+
+            // Cancel out z-coordinate in denominator of `acc`
+            acc = Fp::conditional_select(&(acc * p.z), &acc, skip);
+
+            // Set the coordinates to the correct value
+            let tmp2 = tmp.square();
+            let tmp3 = tmp2 * tmp;
+
+            q.x = p.x * tmp2;
+            q.y = p.y * tmp3;
+            q.infinity = Choice::from(0u8);
+
+            *q = G1Affine::conditional_select(&q, &G1Affine::identity(), skip);
+        }
+    }
+
     /// Returns true if this element is the identity (the point at infinity).
     #[inline]
     pub fn is_identity(&self) -> Choice {
@@ -1263,4 +1303,43 @@ fn test_is_torsion_free() {
 
     assert!(bool::from(G1Affine::identity().is_torsion_free()));
     assert!(bool::from(G1Affine::generator().is_torsion_free()));
+}
+
+#[test]
+fn test_batch_normalize() {
+    let a = G1Projective::generator().double();
+    let b = a.double();
+    let c = b.double();
+
+    for a_identity in (0..1).map(|n| n == 1) {
+        for b_identity in (0..1).map(|n| n == 1) {
+            for c_identity in (0..1).map(|n| n == 1) {
+                let mut v = [a, b, c];
+                if a_identity {
+                    v[0] = G1Projective::identity()
+                }
+                if b_identity {
+                    v[1] = G1Projective::identity()
+                }
+                if c_identity {
+                    v[2] = G1Projective::identity()
+                }
+
+                let mut t = [
+                    G1Affine::identity(),
+                    G1Affine::identity(),
+                    G1Affine::identity(),
+                ];
+                let expected = [
+                    G1Affine::from(v[0]),
+                    G1Affine::from(v[1]),
+                    G1Affine::from(v[2]),
+                ];
+
+                G1Projective::batch_normalize(&v[..], &mut t[..]);
+
+                assert_eq!(&t[..], &expected[..]);
+            }
+        }
+    }
 }
