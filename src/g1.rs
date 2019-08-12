@@ -1,10 +1,11 @@
 //! This module provides an implementation of the $\mathbb{G}_1$ group of BLS12-381.
 
-use core::ops::{Add, AddAssign, Neg, Sub, SubAssign};
+use core::ops::{Add, AddAssign, Mul, MulAssign, Neg, Sub, SubAssign};
 
 use subtle::{Choice, ConditionallySelectable, ConstantTimeEq};
 
 use crate::fp::Fp;
+use crate::Scalar;
 
 /// This is an element of $\mathbb{G}_1$ represented in the affine coordinate space.
 /// It is ideal to keep elements in this representation to reduce memory usage and
@@ -296,7 +297,25 @@ impl<'a, 'b> Sub<&'b G1Projective> for &'a G1Projective {
     }
 }
 
+impl<'a, 'b> Mul<&'b Scalar> for &'a G1Projective {
+    type Output = G1Projective;
+
+    fn mul(self, other: &'b Scalar) -> Self::Output {
+        self.multiply(&other.to_bytes())
+    }
+}
+
+impl<'a, 'b> Mul<&'b Scalar> for &'a G1Affine {
+    type Output = G1Projective;
+
+    fn mul(self, other: &'b Scalar) -> Self::Output {
+        G1Projective::from(self).multiply(&other.to_bytes())
+    }
+}
+
 impl_binops_additive!(G1Projective, G1Projective);
+impl_binops_multiplicative!(G1Projective, Scalar);
+impl_binops_multiplicative_mixed!(G1Affine, Scalar, G1Projective);
 
 impl G1Projective {
     /// Returns the identity of the group: the point at infinity.
@@ -498,6 +517,28 @@ impl G1Projective {
         };
 
         G1Projective::conditional_select(&res, &tmp, (!f1) & (!f2) & (!f3))
+    }
+
+    fn multiply(&self, by: &[u8; 32]) -> G1Projective {
+        let mut acc = G1Projective::identity();
+
+        // This is a simple double-and-add implementation of point
+        // multiplication, moving from most significant to least
+        // significant bit of the scalar.
+        //
+        // We skip the leading bit because it's always unset for Fq
+        // elements.
+        for bit in by
+            .iter()
+            .rev()
+            .flat_map(|byte| (0..8).rev().map(move |i| Choice::from((byte >> i) & 1u8)))
+            .skip(1)
+        {
+            acc = acc.double();
+            acc = G1Projective::conditional_select(&acc, &(acc + self), bit);
+        }
+
+        acc
     }
 
     /// Returns true if this element is the identity (the point at infinity).
@@ -959,4 +1000,44 @@ fn test_affine_negation_and_subtraction() {
     let a = G1Affine::generator();
     assert_eq!(G1Projective::from(a) + (-a), G1Projective::identity());
     assert_eq!(G1Projective::from(a) + (-a), G1Projective::from(a) - a);
+}
+
+#[test]
+fn test_projective_scalar_multiplication() {
+    let g = G1Projective::generator();
+    let a = Scalar::from_raw([
+        0x2b568297a56da71c,
+        0xd8c39ecb0ef375d1,
+        0x435c38da67bfbf96,
+        0x8088a05026b659b2,
+    ]);
+    let b = Scalar::from_raw([
+        0x785fdd9b26ef8b85,
+        0xc997f25837695c18,
+        0x4c8dbc39e7b756c1,
+        0x70d9b6cc6d87df20,
+    ]);
+    let c = a * b;
+
+    assert_eq!((g * a) * b, g * c);
+}
+
+#[test]
+fn test_affine_scalar_multiplication() {
+    let g = G1Affine::generator();
+    let a = Scalar::from_raw([
+        0x2b568297a56da71c,
+        0xd8c39ecb0ef375d1,
+        0x435c38da67bfbf96,
+        0x8088a05026b659b2,
+    ]);
+    let b = Scalar::from_raw([
+        0x785fdd9b26ef8b85,
+        0xc997f25837695c18,
+        0x4c8dbc39e7b756c1,
+        0x70d9b6cc6d87df20,
+    ]);
+    let c = a * b;
+
+    assert_eq!(G1Affine::from(g * a) * b, g * c);
 }
