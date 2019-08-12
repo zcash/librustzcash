@@ -12,6 +12,8 @@ fn criterion_benchmark(c: &mut Criterion) {
         let name = "G1Affine";
         let a = G1Affine::generator();
         let s = Scalar::from_raw([1, 2, 3, 4]);
+        let compressed = [0u8; 48];
+        let uncompressed = [0u8; 96];
         c.bench_function(&format!("{} check on curve", name), move |b| {
             b.iter(|| black_box(a).is_on_curve())
         });
@@ -24,6 +26,14 @@ fn criterion_benchmark(c: &mut Criterion) {
         c.bench_function(&format!("{} subgroup check", name), move |b| {
             b.iter(|| black_box(a).is_torsion_free())
         });
+        c.bench_function(
+            &format!("{} deserialize compressed point", name),
+            move |b| b.iter(|| G1Affine::from_compressed(black_box(&compressed))),
+        );
+        c.bench_function(
+            &format!("{} deserialize uncompressed point", name),
+            move |b| b.iter(|| G1Affine::from_uncompressed(black_box(&uncompressed))),
+        );
     }
 
     // G1Projective
@@ -60,6 +70,8 @@ fn criterion_benchmark(c: &mut Criterion) {
         let name = "G2Affine";
         let a = G2Affine::generator();
         let s = Scalar::from_raw([1, 2, 3, 4]);
+        let compressed = [0u8; 96];
+        let uncompressed = [0u8; 192];
         c.bench_function(&format!("{} check on curve", name), move |b| {
             b.iter(|| black_box(a).is_on_curve())
         });
@@ -72,6 +84,14 @@ fn criterion_benchmark(c: &mut Criterion) {
         c.bench_function(&format!("{} subgroup check", name), move |b| {
             b.iter(|| black_box(a).is_torsion_free())
         });
+        c.bench_function(
+            &format!("{} deserialize compressed point", name),
+            move |b| b.iter(|| G2Affine::from_compressed(black_box(&compressed))),
+        );
+        c.bench_function(
+            &format!("{} deserialize uncompressed point", name),
+            move |b| b.iter(|| G2Affine::from_uncompressed(black_box(&uncompressed))),
+        );
     }
 
     // G2Projective

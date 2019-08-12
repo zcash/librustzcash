@@ -23,6 +23,10 @@ extern crate alloc;
 #[macro_use]
 extern crate std;
 
+#[cfg(test)]
+#[cfg(feature = "groups")]
+mod tests;
+
 #[macro_use]
 mod util;
 
