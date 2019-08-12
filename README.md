@@ -20,12 +20,12 @@ This crate provides an implementation of the BLS12-381 pairing-friendly elliptic
 BLS12-381 is a pairing-friendly elliptic curve construction from the [BLS family](https://eprint.iacr.org/2002/088), with embedding degree 12. It is built over a 381-bit prime field `GF(p)` with...
 
 * z = `-0xd201000000010000`
-* p = (z - 1)<sup>2</sup> ((z<sup>4</sup> - z<sup>2</sup> + 1) / 3) + z
+* p = (z - 1)<sup>2</sup>(z<sup>4</sup> - z<sup>2</sup> + 1) / 3 + z
 	* = `0x1a0111ea397fe69a4b1ba7b6434bacd764774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab`
 * q = z<sup>4</sup> - z<sup>2</sup> + 1
 	* = `0x73eda753299d7d483339d80809a1d80553bda402fffe5bfeffffffff00000001`
 
-... yielding two **source groups** G<sub>1</sub> and G<sub>2</sub>, each of 255-bit prime order `q`, such that an efficiently computable non-degenerate bilinear pairing function `e` exists into a third **target group** G<sub>T</sub>. Specifically, G<sub>1</sub> is the `q`-order subgroup of E(F<sub>p</sub>) : y^2 = x^3 + 4 and G<sub>2</sub> is the `q`-order subgroup of E'(F<sub>p<sup>2</sup></sub>) : y<sup>2</sup> = x<sup>3</sup> + 4(u + 1) where the extention field F<sub>p<sup>2</sup></sub> is defined as F<sub>p</sub>(u) / (u<sup>2</sup> + 1).
+... yielding two **source groups** G<sub>1</sub> and G<sub>2</sub>, each of 255-bit prime order `q`, such that an efficiently computable non-degenerate bilinear pairing function `e` exists into a third **target group** G<sub>T</sub>. Specifically, G<sub>1</sub> is the `q`-order subgroup of E(F<sub>p</sub>) : y<sup>2</sup> = x<sup>3</sup> + 4 and G<sub>2</sub> is the `q`-order subgroup of E'(F<sub>p<sup>2</sup></sub>) : y<sup>2</sup> = x<sup>3</sup> + 4(u + 1) where the extention field F<sub>p<sup>2</sup></sub> is defined as F<sub>p</sub>(u) / (u<sup>2</sup> + 1).
 
 BLS12-381 is chosen so that `z` has small Hamming weight (to improve pairing performance) and also so that `GF(q)` has a large 2<sup>32</sup> primitive root of unity for performing radix-2 fast Fourier transforms for efficient multi-point evaluation and interpolation. It is also chosen so that it exists in a particularly efficient and rigid subfamily of BLS12 curves.
 
@@ -39,7 +39,7 @@ There are [known optimizations](https://ellipticnews.wordpress.com/2016/05/02/ki
 
 ### Alternative Curves
 
-Applications may wish to exchange pairing performance and/or G<sub>2</sub> performance by using BLS24 or KSS16 curves which conservatively target 128-bit security. In applications that need cycles of elliptic curves for e.g. arbitrary proof composition, MNT6/MNT4 curve cycles are known that target the 128-bit security level. In applications that only need fixed-depth proof composition, curves of this form have been constructed as part of ZEXE.
+Applications may wish to exchange pairing performance and/or G<sub>2</sub> performance by using BLS24 or KSS16 curves which conservatively target 128-bit security. In applications that need cycles of elliptic curves for e.g. arbitrary proof composition, MNT6/MNT4 curve cycles are known that target the 128-bit security level. In applications that only need fixed-depth proof composition, curves of this form have been constructed as part of Zexe.
 
 ## Acknowledgements
 
