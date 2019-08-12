@@ -186,6 +186,21 @@ impl G1Affine {
         self.infinity
     }
 
+    /// Returns true if this point is free of an $h$-torsion component, and so it
+    /// exists within the $q$-order subgroup $\mathbb{G}_1$. This should always return true
+    /// unless an "unchecked" API was used.
+    pub fn is_torsion_free(&self) -> Choice {
+        const FQ_MODULUS_BYTES: [u8; 32] = [
+            1, 0, 0, 0, 255, 255, 255, 255, 254, 91, 254, 255, 2, 164, 189, 83, 5, 216, 161, 9, 8,
+            216, 57, 51, 72, 125, 157, 41, 83, 167, 237, 115,
+        ];
+
+        // Clear the r-torsion from the point and check if it is the identity
+        G1Projective::from(*self)
+            .multiply(&FQ_MODULUS_BYTES)
+            .is_identity()
+    }
+
     /// Returns true if this point is on the curve. This should always return
     /// true unless an "unchecked" API was used.
     pub fn is_on_curve(&self) -> Choice {
@@ -1040,4 +1055,31 @@ fn test_affine_scalar_multiplication() {
     let c = a * b;
 
     assert_eq!(G1Affine::from(g * a) * b, g * c);
+}
+
+#[test]
+fn test_is_torsion_free() {
+    let a = G1Affine {
+        x: Fp::from_raw_unchecked([
+            0xabaf895b97e43c8,
+            0xba4c6432eb9b61b0,
+            0x12506f52adfe307f,
+            0x75028c3439336b72,
+            0x84744f05b8e9bd71,
+            0x113d554fb09554f7,
+        ]),
+        y: Fp::from_raw_unchecked([
+            0x73e90e88f5cf01c0,
+            0x37007b65dd3197e2,
+            0x5cf9a1992f0d7c78,
+            0x4f83c10b9eb3330d,
+            0xf6a63f6f07f60961,
+            0xc53b5b97e634df3,
+        ]),
+        infinity: Choice::from(0u8),
+    };
+    assert!(!bool::from(a.is_torsion_free()));
+
+    assert!(bool::from(G1Affine::identity().is_torsion_free()));
+    assert!(bool::from(G1Affine::generator().is_torsion_free()));
 }

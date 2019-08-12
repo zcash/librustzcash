@@ -21,6 +21,9 @@ fn criterion_benchmark(c: &mut Criterion) {
         c.bench_function(&format!("{} scalar multiplication", name), move |b| {
             b.iter(|| black_box(a) * black_box(s))
         });
+        c.bench_function(&format!("{} subgroup check", name), move |b| {
+            b.iter(|| black_box(a).is_torsion_free())
+        });
     }
 
     // G1Projective
@@ -65,6 +68,9 @@ fn criterion_benchmark(c: &mut Criterion) {
         });
         c.bench_function(&format!("{} scalar multiplication", name), move |b| {
             b.iter(|| black_box(a) * black_box(s))
+        });
+        c.bench_function(&format!("{} subgroup check", name), move |b| {
+            b.iter(|| black_box(a).is_torsion_free())
         });
     }
 

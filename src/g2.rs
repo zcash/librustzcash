@@ -217,6 +217,21 @@ impl G2Affine {
         self.infinity
     }
 
+    /// Returns true if this point is free of an $h$-torsion component, and so it
+    /// exists within the $q$-order subgroup $\mathbb{G}_2$. This should always return true
+    /// unless an "unchecked" API was used.
+    pub fn is_torsion_free(&self) -> Choice {
+        const FQ_MODULUS_BYTES: [u8; 32] = [
+            1, 0, 0, 0, 255, 255, 255, 255, 254, 91, 254, 255, 2, 164, 189, 83, 5, 216, 161, 9, 8,
+            216, 57, 51, 72, 125, 157, 41, 83, 167, 237, 115,
+        ];
+
+        // Clear the r-torsion from the point and check if it is the identity
+        G2Projective::from(*self)
+            .multiply(&FQ_MODULUS_BYTES)
+            .is_identity()
+    }
+
     /// Returns true if this point is on the curve. This should always return
     /// true unless an "unchecked" API was used.
     pub fn is_on_curve(&self) -> Choice {
@@ -1227,4 +1242,51 @@ fn test_affine_scalar_multiplication() {
     let c = a * b;
 
     assert_eq!(G2Affine::from(g * a) * b, g * c);
+}
+
+#[test]
+fn test_is_torsion_free() {
+    let a = G2Affine {
+        x: Fp2 {
+            c0: Fp::from_raw_unchecked([
+                0x89f550c813db6431,
+                0xa50be8c456cd8a1a,
+                0xa45b374114cae851,
+                0xbb6190f5bf7fff63,
+                0x970ca02c3ba80bc7,
+                0x2b85d24e840fbac,
+            ]),
+            c1: Fp::from_raw_unchecked([
+                0x6888bc53d70716dc,
+                0x3dea6b4117682d70,
+                0xd8f5f930500ca354,
+                0x6b5ecb6556f5c155,
+                0xc96bef0434778ab0,
+                0x5081505515006ad,
+            ]),
+        },
+        y: Fp2 {
+            c0: Fp::from_raw_unchecked([
+                0x3cf1ea0d434b0f40,
+                0x1a0dc610e603e333,
+                0x7f89956160c72fa0,
+                0x25ee03decf6431c5,
+                0xeee8e206ec0fe137,
+                0x97592b226dfef28,
+            ]),
+            c1: Fp::from_raw_unchecked([
+                0x71e8bb5f29247367,
+                0xa5fe049e211831ce,
+                0xce6b354502a3896,
+                0x93b012000997314e,
+                0x6759f3b6aa5b42ac,
+                0x156944c4dfe92bbb,
+            ]),
+        },
+        infinity: Choice::from(0u8),
+    };
+    assert!(!bool::from(a.is_torsion_free()));
+
+    assert!(bool::from(G2Affine::identity().is_torsion_free()));
+    assert!(bool::from(G2Affine::generator().is_torsion_free()));
 }
