@@ -19,32 +19,14 @@ pub const fn mac(a: u64, b: u64, c: u64, carry: u64) -> (u64, u64) {
     (ret as u64, (ret >> 64) as u64)
 }
 
-macro_rules! impl_binops_additive_specify_output {
+macro_rules! impl_add_binop_specify_output {
     ($lhs:ident, $rhs:ident, $output:ident) => {
-        impl<'b> Sub<&'b $rhs> for $lhs {
-            type Output = $output;
-
-            #[inline]
-            fn sub(self, rhs: &'b $rhs) -> $output {
-                &self - rhs
-            }
-        }
-
         impl<'b> Add<&'b $rhs> for $lhs {
             type Output = $output;
 
             #[inline]
             fn add(self, rhs: &'b $rhs) -> $output {
                 &self + rhs
-            }
-        }
-
-        impl<'a> Sub<$rhs> for &'a $lhs {
-            type Output = $output;
-
-            #[inline]
-            fn sub(self, rhs: $rhs) -> $output {
-                self - &rhs
             }
         }
 
@@ -57,15 +39,6 @@ macro_rules! impl_binops_additive_specify_output {
             }
         }
 
-        impl Sub<$rhs> for $lhs {
-            type Output = $output;
-
-            #[inline]
-            fn sub(self, rhs: $rhs) -> $output {
-                &self - &rhs
-            }
-        }
-
         impl Add<$rhs> for $lhs {
             type Output = $output;
 
@@ -74,6 +47,44 @@ macro_rules! impl_binops_additive_specify_output {
                 &self + &rhs
             }
         }
+    };
+}
+
+macro_rules! impl_sub_binop_specify_output {
+    ($lhs:ident, $rhs:ident, $output:ident) => {
+        impl<'b> Sub<&'b $rhs> for $lhs {
+            type Output = $output;
+
+            #[inline]
+            fn sub(self, rhs: &'b $rhs) -> $output {
+                &self - rhs
+            }
+        }
+
+        impl<'a> Sub<$rhs> for &'a $lhs {
+            type Output = $output;
+
+            #[inline]
+            fn sub(self, rhs: $rhs) -> $output {
+                self - &rhs
+            }
+        }
+
+        impl Sub<$rhs> for $lhs {
+            type Output = $output;
+
+            #[inline]
+            fn sub(self, rhs: $rhs) -> $output {
+                &self - &rhs
+            }
+        }
+    };
+}
+
+macro_rules! impl_binops_additive_specify_output {
+    ($lhs:ident, $rhs:ident, $output:ident) => {
+        impl_add_binop_specify_output!($lhs, $rhs, $output);
+        impl_sub_binop_specify_output!($lhs, $rhs, $output);
     };
 }
 

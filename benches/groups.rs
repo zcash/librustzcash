@@ -7,6 +7,14 @@ use bls12_381::*;
 use criterion::{black_box, Criterion};
 
 fn criterion_benchmark(c: &mut Criterion) {
+    // Pairings
+    {
+        let g = G1Affine::generator();
+        let h = G2Affine::generator();
+        c.bench_function("full pairing", move |b| {
+            b.iter(|| pairing(black_box(&g), black_box(&h)))
+        });
+    }
     // G1Affine
     {
         let name = "G1Affine";

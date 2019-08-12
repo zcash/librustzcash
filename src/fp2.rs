@@ -25,6 +25,15 @@ impl Default for Fp2 {
     }
 }
 
+impl From<Fp> for Fp2 {
+    fn from(f: Fp) -> Fp2 {
+        Fp2 {
+            c0: f,
+            c1: Fp::zero(),
+        }
+    }
+}
+
 impl ConstantTimeEq for Fp2 {
     fn ct_eq(&self, other: &Self) -> Choice {
         self.c0.ct_eq(&other.c0) & self.c1.ct_eq(&other.c1)
@@ -115,6 +124,35 @@ impl Fp2 {
 
     pub fn is_zero(&self) -> Choice {
         self.c0.is_zero() & self.c1.is_zero()
+    }
+
+    /// Raises this element to p.
+    #[inline(always)]
+    pub fn frobenius_map(&self) -> Self {
+        // This is always just a conjugation. If you're curious why, here's
+        // an article about it: https://alicebob.cryptoland.net/the-frobenius-endomorphism-with-finite-fields/
+        self.conjugate()
+    }
+
+    #[inline(always)]
+    pub fn conjugate(&self) -> Self {
+        Fp2 {
+            c0: self.c0,
+            c1: -self.c1,
+        }
+    }
+
+    #[inline(always)]
+    pub fn mul_by_nonresidue(&self) -> Fp2 {
+        // Multiply a + bu by u + 1, getting
+        // au + a + bu^2 + bu
+        // and because u^2 = -1, we get
+        // (a - b) + (a + b)u
+
+        Fp2 {
+            c0: self.c0 - self.c1,
+            c1: self.c0 + self.c1,
+        }
     }
 
     /// Returns whether or not this element is strictly lexicographically

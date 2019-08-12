@@ -31,5 +31,5 @@ default-features = false
 [features]
 default = ["groups", "pairings"]
 groups = []
-pairings = []
+pairings = ["groups"]
 nightly = ["subtle/nightly"]

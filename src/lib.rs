@@ -15,6 +15,11 @@
 #![allow(clippy::too_many_arguments)]
 #![allow(clippy::unreadable_literal)]
 #![allow(clippy::many_single_char_names)]
+// This lint is described at
+// https://rust-lang.github.io/rust-clippy/master/index.html#suspicious_arithmetic_impl
+// In our library, some of the arithmetic involving extension fields will necessarily
+// involve various binary operators, and so this lint is triggered unnecessarily.
+#![allow(clippy::suspicious_arithmetic_impl)]
 
 #[cfg(feature = "pairings")]
 extern crate alloc;
@@ -53,6 +58,20 @@ mod g2;
 pub use g1::{G1Affine, G1Projective};
 #[cfg(feature = "groups")]
 pub use g2::{G2Affine, G2Projective};
+
+#[cfg(feature = "groups")]
+mod fp12;
+#[cfg(feature = "groups")]
+mod fp6;
+
+// The BLS parameter x for BLS12-381 is -0xd201000000010000
+const BLS_X: u64 = 0xd201000000010000;
+const BLS_X_IS_NEGATIVE: bool = true;
+
+#[cfg(feature = "groups")]
+mod pairings;
+
+pub use pairings::{pairing, Gt, MillerLoopResult};
 
 // TODO: This should be upstreamed to subtle.
 // See https://github.com/dalek-cryptography/subtle/pull/48

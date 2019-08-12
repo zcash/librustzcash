@@ -16,8 +16,8 @@ use crate::Scalar;
 /// "unchecked" API was misused.
 #[derive(Copy, Clone, Debug)]
 pub struct G2Affine {
-    x: Fp2,
-    y: Fp2,
+    pub(crate) x: Fp2,
+    pub(crate) y: Fp2,
     infinity: Choice,
 }
 
@@ -465,9 +465,9 @@ impl G2Affine {
 /// This is an element of $\mathbb{G}_2$ represented in the projective coordinate space.
 #[derive(Copy, Clone, Debug)]
 pub struct G2Projective {
-    x: Fp2,
-    y: Fp2,
-    z: Fp2,
+    pub(crate) x: Fp2,
+    pub(crate) y: Fp2,
+    pub(crate) z: Fp2,
 }
 
 impl<'a> From<&'a G2Affine> for G2Projective {
