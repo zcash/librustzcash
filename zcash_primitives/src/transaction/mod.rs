@@ -50,6 +50,12 @@ impl Deref for Transaction {
     }
 }
 
+impl PartialEq for Transaction {
+    fn eq(&self, other: &Transaction) -> bool {
+        self.txid == other.txid
+    }
+}
+
 pub struct TransactionData {
     pub overwintered: bool,
     pub version: u32,

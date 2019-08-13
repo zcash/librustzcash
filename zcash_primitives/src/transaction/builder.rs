@@ -131,6 +131,7 @@ impl SaplingOutput {
 }
 
 /// Metadata about a transaction created by a [`Builder`].
+#[derive(Debug, PartialEq)]
 pub struct TransactionMetadata {
     spend_indices: Vec<usize>,
     output_indices: Vec<usize>,
@@ -554,22 +555,22 @@ mod tests {
         let to = extfvk.default_address().unwrap().1;
 
         let mut builder = Builder::new(0);
-        match builder.add_sapling_output(ovk, to, Amount::from_i64(-1).unwrap(), None) {
-            Err(e) => assert_eq!(e, Error::InvalidAmount),
-            Ok(_) => panic!("Should have failed"),
-        }
+        assert_eq!(
+            builder.add_sapling_output(ovk, to, Amount::from_i64(-1).unwrap(), None),
+            Err(Error::InvalidAmount)
+        );
     }
 
     #[test]
     fn fails_on_negative_transparent_output() {
         let mut builder = Builder::new(0);
-        match builder.add_transparent_output(
-            &TransparentAddress::PublicKey([0; 20]),
-            Amount::from_i64(-1).unwrap(),
-        ) {
-            Err(e) => assert_eq!(e, Error::InvalidAmount),
-            Ok(_) => panic!("Should have failed"),
-        }
+        assert_eq!(
+            builder.add_transparent_output(
+                &TransparentAddress::PublicKey([0; 20]),
+                Amount::from_i64(-1).unwrap(),
+            ),
+            Err(Error::InvalidAmount)
+        );
     }
 
     #[test]
@@ -583,13 +584,10 @@ mod tests {
         // 0.0001 t-ZEC fee
         {
             let builder = Builder::new(0);
-            match builder.build(1, MockTxProver) {
-                Err(e) => assert_eq!(
-                    e,
-                    Error::ChangeIsNegative(Amount::from_i64(-10000).unwrap())
-                ),
-                Ok(_) => panic!("Should have failed"),
-            }
+            assert_eq!(
+                builder.build(1, MockTxProver),
+                Err(Error::ChangeIsNegative(Amount::from_i64(-10000).unwrap()))
+            );
         }
 
         let extfvk = ExtendedFullViewingKey::from(&extsk);
@@ -608,13 +606,10 @@ mod tests {
                     None,
                 )
                 .unwrap();
-            match builder.build(1, MockTxProver) {
-                Err(e) => assert_eq!(
-                    e,
-                    Error::ChangeIsNegative(Amount::from_i64(-60000).unwrap())
-                ),
-                Ok(_) => panic!("Should have failed"),
-            }
+            assert_eq!(
+                builder.build(1, MockTxProver),
+                Err(Error::ChangeIsNegative(Amount::from_i64(-60000).unwrap()))
+            );
         }
 
         // Fail if there is only a transparent output
@@ -627,13 +622,10 @@ mod tests {
                     Amount::from_u64(50000).unwrap(),
                 )
                 .unwrap();
-            match builder.build(1, MockTxProver) {
-                Err(e) => assert_eq!(
-                    e,
-                    Error::ChangeIsNegative(Amount::from_i64(-60000).unwrap())
-                ),
-                Ok(_) => panic!("Should have failed"),
-            }
+            assert_eq!(
+                builder.build(1, MockTxProver),
+                Err(Error::ChangeIsNegative(Amount::from_i64(-60000).unwrap()))
+            );
         }
 
         let note1 = to
@@ -670,10 +662,10 @@ mod tests {
                     Amount::from_u64(20000).unwrap(),
                 )
                 .unwrap();
-            match builder.build(1, MockTxProver) {
-                Err(e) => assert_eq!(e, Error::ChangeIsNegative(Amount::from_i64(-1).unwrap())),
-                Ok(_) => panic!("Should have failed"),
-            }
+            assert_eq!(
+                builder.build(1, MockTxProver),
+                Err(Error::ChangeIsNegative(Amount::from_i64(-1).unwrap()))
+            );
         }
 
         let note2 = to.create_note(1, Fs::random(&mut rng), &JUBJUB).unwrap();
@@ -704,10 +696,7 @@ mod tests {
                     Amount::from_u64(20000).unwrap(),
                 )
                 .unwrap();
-            match builder.build(1, MockTxProver) {
-                Err(e) => assert_eq!(e, Error::BindingSig),
-                Ok(_) => panic!("Should have failed"),
-            }
+            assert_eq!(builder.build(1, MockTxProver), Err(Error::BindingSig))
         }
     }
 }
