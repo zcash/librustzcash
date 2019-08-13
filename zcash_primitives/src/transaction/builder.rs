@@ -30,17 +30,8 @@ const DEFAULT_TX_EXPIRY_DELTA: u32 = 20;
 /// with dummy outputs if necessary. See https://github.com/zcash/zcash/issues/3615
 const MIN_SHIELDED_OUTPUTS: usize = 2;
 
-#[derive(Debug)]
-pub struct Error(ErrorKind);
-
-impl Error {
-    pub fn kind(&self) -> &ErrorKind {
-        &self.0
-    }
-}
-
 #[derive(Debug, PartialEq)]
-pub enum ErrorKind {
+pub enum Error {
     AnchorMismatch,
     BindingSig,
     ChangeIsNegative(Amount),
@@ -76,10 +67,10 @@ impl SaplingOutput {
     ) -> Result<Self, Error> {
         let g_d = match to.g_d(&JUBJUB) {
             Some(g_d) => g_d,
-            None => return Err(Error(ErrorKind::InvalidAddress)),
+            None => return Err(Error::InvalidAddress),
         };
         if value.is_negative() {
-            return Err(Error(ErrorKind::InvalidAmount));
+            return Err(Error::InvalidAmount);
         }
 
         let rcm = Fs::random(rng);
@@ -242,17 +233,16 @@ impl<R: RngCore + CryptoRng> Builder<R> {
         if let Some(anchor) = self.anchor {
             let witness_root: Fr = witness.root().into();
             if witness_root != anchor {
-                return Err(Error(ErrorKind::AnchorMismatch));
+                return Err(Error::AnchorMismatch);
             }
         } else {
             self.anchor = Some(witness.root().into())
         }
-        let witness = witness.path().ok_or(Error(ErrorKind::InvalidWitness))?;
+        let witness = witness.path().ok_or(Error::InvalidWitness)?;
 
         let alpha = Fs::random(&mut self.rng);
 
-        self.mtx.value_balance +=
-            Amount::from_u64(note.value).map_err(|_| Error(ErrorKind::InvalidAmount))?;
+        self.mtx.value_balance += Amount::from_u64(note.value).map_err(|_| Error::InvalidAmount)?;
 
         self.spends.push(SpendDescriptionInfo {
             extsk,
@@ -289,7 +279,7 @@ impl<R: RngCore + CryptoRng> Builder<R> {
         value: Amount,
     ) -> Result<(), Error> {
         if value.is_negative() {
-            return Err(Error(ErrorKind::InvalidAmount));
+            return Err(Error::InvalidAmount);
         }
 
         self.mtx.vout.push(TxOut {
@@ -338,7 +328,7 @@ impl<R: RngCore + CryptoRng> Builder<R> {
                 .map(|output| output.value)
                 .sum::<Amount>();
         if change.is_negative() {
-            return Err(Error(ErrorKind::ChangeIsNegative(change)));
+            return Err(Error::ChangeIsNegative(change));
         }
 
         //
@@ -359,7 +349,7 @@ impl<R: RngCore + CryptoRng> Builder<R> {
                     },
                 )
             } else {
-                return Err(Error(ErrorKind::NoChangeAddress));
+                return Err(Error::NoChangeAddress);
             };
 
             self.add_sapling_output(change_address.0, change_address.1, change, None)?;
@@ -419,7 +409,7 @@ impl<R: RngCore + CryptoRng> Builder<R> {
                     anchor,
                     spend.witness.clone(),
                 )
-                .map_err(|()| Error(ErrorKind::SpendProof))?;
+                .map_err(|()| Error::SpendProof)?;
 
             self.mtx.shielded_spends.push(SpendDescription {
                 cv,
@@ -529,7 +519,7 @@ impl<R: RngCore + CryptoRng> Builder<R> {
         self.mtx.binding_sig = Some(
             prover
                 .binding_sig(&mut ctx, self.mtx.value_balance, &sighash)
-                .map_err(|()| Error(ErrorKind::BindingSig))?,
+                .map_err(|()| Error::BindingSig)?,
         );
 
         Ok((
@@ -545,7 +535,7 @@ mod tests {
     use rand::rngs::OsRng;
     use sapling_crypto::jubjub::fs::Fs;
 
-    use super::{Builder, ErrorKind};
+    use super::{Builder, Error};
     use crate::{
         legacy::TransparentAddress,
         merkle_tree::{CommitmentTree, IncrementalWitness},
@@ -565,7 +555,7 @@ mod tests {
 
         let mut builder = Builder::new(0);
         match builder.add_sapling_output(ovk, to, Amount::from_i64(-1).unwrap(), None) {
-            Err(e) => assert_eq!(e.kind(), &ErrorKind::InvalidAmount),
+            Err(e) => assert_eq!(e, Error::InvalidAmount),
             Ok(_) => panic!("Should have failed"),
         }
     }
@@ -577,7 +567,7 @@ mod tests {
             &TransparentAddress::PublicKey([0; 20]),
             Amount::from_i64(-1).unwrap(),
         ) {
-            Err(e) => assert_eq!(e.kind(), &ErrorKind::InvalidAmount),
+            Err(e) => assert_eq!(e, Error::InvalidAmount),
             Ok(_) => panic!("Should have failed"),
         }
     }
@@ -595,8 +585,8 @@ mod tests {
             let builder = Builder::new(0);
             match builder.build(1, MockTxProver) {
                 Err(e) => assert_eq!(
-                    e.kind(),
-                    &ErrorKind::ChangeIsNegative(Amount::from_i64(-10000).unwrap())
+                    e,
+                    Error::ChangeIsNegative(Amount::from_i64(-10000).unwrap())
                 ),
                 Ok(_) => panic!("Should have failed"),
             }
@@ -620,8 +610,8 @@ mod tests {
                 .unwrap();
             match builder.build(1, MockTxProver) {
                 Err(e) => assert_eq!(
-                    e.kind(),
-                    &ErrorKind::ChangeIsNegative(Amount::from_i64(-60000).unwrap())
+                    e,
+                    Error::ChangeIsNegative(Amount::from_i64(-60000).unwrap())
                 ),
                 Ok(_) => panic!("Should have failed"),
             }
@@ -639,8 +629,8 @@ mod tests {
                 .unwrap();
             match builder.build(1, MockTxProver) {
                 Err(e) => assert_eq!(
-                    e.kind(),
-                    &ErrorKind::ChangeIsNegative(Amount::from_i64(-60000).unwrap())
+                    e,
+                    Error::ChangeIsNegative(Amount::from_i64(-60000).unwrap())
                 ),
                 Ok(_) => panic!("Should have failed"),
             }
@@ -681,10 +671,7 @@ mod tests {
                 )
                 .unwrap();
             match builder.build(1, MockTxProver) {
-                Err(e) => assert_eq!(
-                    e.kind(),
-                    &ErrorKind::ChangeIsNegative(Amount::from_i64(-1).unwrap())
-                ),
+                Err(e) => assert_eq!(e, Error::ChangeIsNegative(Amount::from_i64(-1).unwrap())),
                 Ok(_) => panic!("Should have failed"),
             }
         }
@@ -718,7 +705,7 @@ mod tests {
                 )
                 .unwrap();
             match builder.build(1, MockTxProver) {
-                Err(e) => assert_eq!(e.kind(), &ErrorKind::BindingSig),
+                Err(e) => assert_eq!(e, Error::BindingSig),
                 Ok(_) => panic!("Should have failed"),
             }
         }
