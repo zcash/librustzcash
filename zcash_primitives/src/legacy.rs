@@ -6,7 +6,7 @@ use std::ops::Shl;
 
 use crate::serialize::Vector;
 
-/// Script opcodes.
+/// Minimal subset of script opcodes.
 enum OpCode {
     // push value
     PushData1 = 0x4c,
