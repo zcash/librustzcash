@@ -117,7 +117,7 @@ impl Add<Amount> for Amount {
     type Output = Amount;
 
     fn add(self, rhs: Amount) -> Amount {
-        Amount(self.0 + rhs.0)
+        Amount::from_i64(self.0 + rhs.0).expect("addition should remain in range")
     }
 }
 
@@ -131,7 +131,7 @@ impl Sub<Amount> for Amount {
     type Output = Amount;
 
     fn sub(self, rhs: Amount) -> Amount {
-        Amount(self.0 - rhs.0)
+        Amount::from_i64(self.0 - rhs.0).expect("subtraction should remain in range")
     }
 }
 
@@ -200,5 +200,33 @@ mod tests {
         assert!(Amount::from_u64_le_bytes(neg_max_money_m1.clone()).is_err());
         assert!(Amount::from_nonnegative_i64_le_bytes(neg_max_money_m1.clone()).is_err());
         assert!(Amount::from_i64_le_bytes(neg_max_money_m1.clone()).is_err());
+    }
+
+    #[test]
+    #[should_panic]
+    fn add_panics_on_overflow() {
+        let v = Amount(MAX_MONEY);
+        let sum = v + Amount(1);
+    }
+
+    #[test]
+    #[should_panic]
+    fn add_assign_panics_on_overflow() {
+        let mut a = Amount(MAX_MONEY);
+        a += Amount(1);
+    }
+
+    #[test]
+    #[should_panic]
+    fn sub_panics_on_underflow() {
+        let v = Amount(-MAX_MONEY);
+        let diff = v - Amount(1);
+    }
+
+    #[test]
+    #[should_panic]
+    fn sub_assign_panics_on_underflow() {
+        let mut a = Amount(-MAX_MONEY);
+        a -= Amount(1);
     }
 }
