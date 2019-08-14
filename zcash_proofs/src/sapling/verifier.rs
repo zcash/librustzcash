@@ -6,6 +6,7 @@ use sapling_crypto::{
     jubjub::{edwards, FixedGenerators, JubjubBls12, Unknown},
     redjubjub::{PublicKey, Signature},
 };
+use zcash_primitives::transaction::components::Amount;
 
 use super::compute_value_balance;
 
@@ -169,7 +170,7 @@ impl SaplingVerificationContext {
     /// have been checked before calling this function.
     pub fn final_check(
         &self,
-        value_balance: i64,
+        value_balance: Amount,
         sighash_value: &[u8; 32],
         binding_sig: Signature,
         params: &JubjubBls12,

@@ -3,10 +3,11 @@ use byteorder::{LittleEndian, WriteBytesExt};
 use ff::{PrimeField, PrimeFieldRepr};
 
 use super::{
-    components::{Amount, Script, TxOut},
+    components::{Amount, TxOut},
     Transaction, TransactionData, OVERWINTER_VERSION_GROUP_ID, SAPLING_TX_VERSION,
     SAPLING_VERSION_GROUP_ID,
 };
+use legacy::Script;
 
 const ZCASH_SIGHASH_PERSONALIZATION_PREFIX: &'static [u8; 12] = b"ZcashSigHash";
 const ZCASH_PREVOUTS_HASH_PERSONALIZATION: &'static [u8; 16] = b"ZcashPrevoutHash";
@@ -26,13 +27,6 @@ macro_rules! update_u32 {
     ($h:expr, $value:expr, $tmp:expr) => {
         (&mut $tmp[..4]).write_u32::<LittleEndian>($value).unwrap();
         $h.update(&$tmp[..4]);
-    };
-}
-
-macro_rules! update_i64 {
-    ($h:expr, $value:expr, $tmp:expr) => {
-        (&mut $tmp[..8]).write_i64::<LittleEndian>($value).unwrap();
-        $h.update(&$tmp[..8]);
     };
 }
 
@@ -213,7 +207,7 @@ pub fn signature_hash_data(
             update_u32!(h, tx.lock_time, tmp);
             update_u32!(h, tx.expiry_height, tmp);
             if sigversion == SigHashVersion::Sapling {
-                update_i64!(h, tx.value_balance.0, tmp);
+                h.update(&tx.value_balance.to_i64_le_bytes());
             }
             update_u32!(h, hash_type, tmp);
 
@@ -221,7 +215,7 @@ pub fn signature_hash_data(
                 let mut data = vec![];
                 tx.vin[n].prevout.write(&mut data).unwrap();
                 script_code.write(&mut data).unwrap();
-                (&mut data).write_i64::<LittleEndian>(amount.0).unwrap();
+                data.extend_from_slice(&amount.to_i64_le_bytes());
                 (&mut data)
                     .write_u32::<LittleEndian>(tx.vin[n].sequence)
                     .unwrap();

@@ -9,6 +9,7 @@ extern crate ff;
 extern crate fpe;
 extern crate hex;
 extern crate pairing;
+extern crate rand;
 extern crate rand_core;
 extern crate rand_os;
 extern crate sapling_crypto;
@@ -18,8 +19,10 @@ use sapling_crypto::jubjub::JubjubBls12;
 
 pub mod block;
 pub mod keys;
+pub mod legacy;
 pub mod merkle_tree;
 pub mod note_encryption;
+pub mod prover;
 pub mod sapling;
 mod serialize;
 pub mod transaction;

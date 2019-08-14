@@ -2,6 +2,7 @@ use pairing::bls12_381::Bls12;
 use sapling_crypto::jubjub::{
     edwards, fs::FsRepr, FixedGenerators, JubjubBls12, JubjubParams, Unknown,
 };
+use zcash_primitives::transaction::components::Amount;
 
 mod prover;
 mod verifier;
@@ -11,12 +12,12 @@ pub use self::verifier::SaplingVerificationContext;
 
 // This function computes `value` in the exponent of the value commitment base
 fn compute_value_balance(
-    value: i64,
+    value: Amount,
     params: &JubjubBls12,
 ) -> Option<edwards::Point<Bls12, Unknown>> {
     // Compute the absolute value (failing if -i64::MAX is
     // the value)
-    let abs = match value.checked_abs() {
+    let abs = match i64::from(value).checked_abs() {
         Some(a) => a as u64,
         None => return None,
     };

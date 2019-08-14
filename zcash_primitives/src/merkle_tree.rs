@@ -420,7 +420,7 @@ impl<Node: Hashable> IncrementalWitness<Node> {
 
 /// A witness to a path from a position in a particular commitment tree to the root of
 /// that tree.
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct CommitmentTreeWitness<Node: Hashable> {
     pub auth_path: Vec<Option<(Node, bool)>>,
     pub position: u64,

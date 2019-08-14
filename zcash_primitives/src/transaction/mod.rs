@@ -8,6 +8,7 @@ use std::ops::Deref;
 
 use serialize::Vector;
 
+pub mod builder;
 pub mod components;
 mod sighash;
 
@@ -46,6 +47,12 @@ impl Deref for Transaction {
 
     fn deref(&self) -> &TransactionData {
         &self.data
+    }
+}
+
+impl PartialEq for Transaction {
+    fn eq(&self, other: &Transaction) -> bool {
+        self.txid == other.txid
     }
 }
 
@@ -111,7 +118,7 @@ impl TransactionData {
             vout: vec![],
             lock_time: 0,
             expiry_height: 0,
-            value_balance: Amount(0),
+            value_balance: Amount::zero(),
             shielded_spends: vec![],
             shielded_outputs: vec![],
             joinsplits: vec![],
@@ -184,12 +191,17 @@ impl Transaction {
         };
 
         let (value_balance, shielded_spends, shielded_outputs) = if is_sapling_v4 {
-            let vb = Amount::read_i64(&mut reader, true)?;
+            let vb = {
+                let mut tmp = [0; 8];
+                reader.read_exact(&mut tmp)?;
+                Amount::from_i64_le_bytes(tmp)
+            }
+            .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "valueBalance out of range"))?;
             let ss = Vector::read(&mut reader, SpendDescription::read)?;
             let so = Vector::read(&mut reader, OutputDescription::read)?;
             (vb, ss, so)
         } else {
-            (Amount(0), vec![], vec![])
+            (Amount::zero(), vec![], vec![])
         };
 
         let (joinsplits, joinsplit_pubkey, joinsplit_sig) = if version >= 2 {
@@ -261,7 +273,7 @@ impl Transaction {
         }
 
         if is_sapling_v4 {
-            writer.write_i64::<LittleEndian>(self.value_balance.0)?;
+            writer.write_all(&self.value_balance.to_i64_le_bytes())?;
             Vector::write(&mut writer, &self.shielded_spends, |w, e| e.write(w))?;
             Vector::write(&mut writer, &self.shielded_outputs, |w, e| e.write(w))?;
         }

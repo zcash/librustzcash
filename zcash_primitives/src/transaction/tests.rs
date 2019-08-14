@@ -6,11 +6,8 @@ use sapling_crypto::{
     redjubjub::PrivateKey,
 };
 
-use super::{
-    components::{Amount, Script},
-    sighash::signature_hash,
-    Transaction, TransactionData,
-};
+use super::{components::Amount, sighash::signature_hash, Transaction, TransactionData};
+use legacy::Script;
 use JUBJUB;
 
 #[test]
@@ -1905,7 +1902,11 @@ fn zip_0143() {
     for tv in test_vectors {
         let tx = Transaction::read(&tv.tx[..]).unwrap();
         let transparent_input = if let Some(n) = tv.transparent_input {
-            Some((n as usize, Script(tv.script_code), Amount(tv.amount)))
+            Some((
+                n as usize,
+                Script(tv.script_code),
+                Amount::from_nonnegative_i64(tv.amount).unwrap(),
+            ))
         } else {
             None
         };
@@ -5396,7 +5397,11 @@ fn zip_0243() {
     for tv in test_vectors {
         let tx = Transaction::read(&tv.tx[..]).unwrap();
         let transparent_input = if let Some(n) = tv.transparent_input {
-            Some((n as usize, Script(tv.script_code), Amount(tv.amount)))
+            Some((
+                n as usize,
+                Script(tv.script_code),
+                Amount::from_nonnegative_i64(tv.amount).unwrap(),
+            ))
         } else {
             None
         };
