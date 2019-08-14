@@ -444,23 +444,12 @@ pub fn try_sapling_compact_note_decryption(
     let shared_secret = sapling_ka_agree(ivk, epk);
     let key = kdf_sapling(shared_secret, &epk);
 
-    // Prefix plaintext with 64 zero-bytes to skip over Poly1305 keying output
-    const CHACHA20_BLOCK_SIZE: usize = 64;
-    let mut plaintext = [0; CHACHA20_BLOCK_SIZE + COMPACT_NOTE_SIZE];
-    plaintext[CHACHA20_BLOCK_SIZE..].copy_from_slice(&enc_ciphertext[0..COMPACT_NOTE_SIZE]);
-    assert_eq!(
-        ChaCha20Ietf::cipher()
-            .decrypt(
-                &mut plaintext,
-                CHACHA20_BLOCK_SIZE + COMPACT_NOTE_SIZE,
-                key.as_bytes(),
-                &[0u8; 12],
-            )
-            .ok()?,
-        CHACHA20_BLOCK_SIZE + COMPACT_NOTE_SIZE
-    );
+    // Start from block 1 to skip over Poly1305 keying output
+    let mut plaintext = [0; COMPACT_NOTE_SIZE];
+    plaintext.copy_from_slice(&enc_ciphertext);
+    ChaCha20Ietf::xor(key.as_bytes(), &[0u8; 12], 1, &mut plaintext);
 
-    parse_note_plaintext_without_memo(ivk, cmu, &plaintext[CHACHA20_BLOCK_SIZE..])
+    parse_note_plaintext_without_memo(ivk, cmu, &plaintext)
 }
 
 /// Recovery of the full note plaintext by the sender.
