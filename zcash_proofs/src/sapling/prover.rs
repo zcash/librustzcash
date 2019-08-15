@@ -1,8 +1,6 @@
 use bellman::{
     gadgets::multipack,
-    groth16::{
-        create_random_proof, verify_proof, Parameters, PreparedVerifyingKey, Proof,
-    },
+    groth16::{create_random_proof, verify_proof, Parameters, PreparedVerifyingKey, Proof},
 };
 use ff::Field;
 use pairing::bls12_381::{Bls12, Fr};

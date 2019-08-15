@@ -1,30 +1,20 @@
-extern crate ff;
 extern crate bellman;
+extern crate ff;
 extern crate pairing;
 extern crate rand_core;
 extern crate rand_xorshift;
 extern crate zcash_primitives;
 extern crate zcash_proofs;
 
-use ff::Field;
-use std::time::{Duration, Instant};
-use zcash_primitives::jubjub::{
-    JubjubBls12,
-    edwards,
-    fs,
-};
-use zcash_proofs::circuit::sapling::{
-    Spend
-};
-use zcash_primitives::primitives::{
-    Diversifier,
-    ProofGenerationKey,
-    ValueCommitment
-};
 use bellman::groth16::*;
+use ff::Field;
+use pairing::bls12_381::{Bls12, Fr};
 use rand_core::{RngCore, SeedableRng};
 use rand_xorshift::XorShiftRng;
-use pairing::bls12_381::{Bls12, Fr};
+use std::time::{Duration, Instant};
+use zcash_primitives::jubjub::{edwards, fs, JubjubBls12};
+use zcash_primitives::primitives::{Diversifier, ProofGenerationKey, ValueCommitment};
+use zcash_proofs::circuit::sapling::Spend;
 
 const TREE_DEPTH: usize = 32;
 
@@ -45,10 +35,11 @@ fn main() {
             commitment_randomness: None,
             ar: None,
             auth_path: vec![None; TREE_DEPTH],
-            anchor: None
+            anchor: None,
         },
-        rng
-    ).unwrap();
+        rng,
+    )
+    .unwrap();
 
     const SAMPLES: u32 = 50;
 
@@ -56,7 +47,7 @@ fn main() {
     for _ in 0..SAMPLES {
         let value_commitment = ValueCommitment {
             value: 1,
-            randomness: fs::Fs::random(rng)
+            randomness: fs::Fs::random(rng),
         };
 
         let nsk = fs::Fs::random(rng);
@@ -64,7 +55,7 @@ fn main() {
 
         let proof_generation_key = ProofGenerationKey {
             ak: ak.clone(),
-            nsk: nsk.clone()
+            nsk: nsk.clone(),
         };
 
         let viewing_key = proof_generation_key.into_viewing_key(jubjub_params);
@@ -78,11 +69,7 @@ fn main() {
                 Diversifier(d)
             };
 
-            if let Some(p) = viewing_key.into_payment_address(
-                diversifier,
-                jubjub_params
-            )
-            {
+            if let Some(p) = viewing_key.into_payment_address(diversifier, jubjub_params) {
                 payment_address = p;
                 break;
             }
@@ -94,21 +81,25 @@ fn main() {
         let anchor = Fr::random(rng);
 
         let start = Instant::now();
-        let _ = create_random_proof(Spend {
-            params: jubjub_params,
-            value_commitment: Some(value_commitment),
-            proof_generation_key: Some(proof_generation_key),
-            payment_address: Some(payment_address),
-            commitment_randomness: Some(commitment_randomness),
-            ar: Some(ar),
-            auth_path: auth_path,
-            anchor: Some(anchor)
-        }, &groth_params, rng).unwrap();
+        let _ = create_random_proof(
+            Spend {
+                params: jubjub_params,
+                value_commitment: Some(value_commitment),
+                proof_generation_key: Some(proof_generation_key),
+                payment_address: Some(payment_address),
+                commitment_randomness: Some(commitment_randomness),
+                ar: Some(ar),
+                auth_path: auth_path,
+                anchor: Some(anchor),
+            },
+            &groth_params,
+            rng,
+        )
+        .unwrap();
         total_time += start.elapsed();
     }
     let avg = total_time / SAMPLES;
-    let avg = avg.subsec_nanos() as f64 / 1_000_000_000f64
-              + (avg.as_secs() as f64);
+    let avg = avg.subsec_nanos() as f64 / 1_000_000_000f64 + (avg.as_secs() as f64);
 
     println!("Average proving time (in seconds): {}", avg);
 }

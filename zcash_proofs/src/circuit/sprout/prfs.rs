@@ -1,11 +1,7 @@
-use pairing::{Engine};
+use bellman::gadgets::boolean::Boolean;
+use bellman::gadgets::sha256::sha256_block_no_padding;
 use bellman::{ConstraintSystem, SynthesisError};
-use bellman::gadgets::sha256::{
-    sha256_block_no_padding
-};
-use bellman::gadgets::boolean::{
-    Boolean
-};
+use pairing::Engine;
 
 fn prf<E, CS>(
     cs: CS,
@@ -14,9 +10,11 @@ fn prf<E, CS>(
     c: bool,
     d: bool,
     x: &[Boolean],
-    y: &[Boolean]
+    y: &[Boolean],
 ) -> Result<Vec<Boolean>, SynthesisError>
-    where E: Engine, CS: ConstraintSystem<E>
+where
+    E: Engine,
+    CS: ConstraintSystem<E>,
 {
     assert_eq!(x.len(), 252);
     assert_eq!(y.len(), 256);
@@ -31,27 +29,35 @@ fn prf<E, CS>(
 
     assert_eq!(image.len(), 512);
 
-    sha256_block_no_padding(
-        cs,
-        &image
-    )
+    sha256_block_no_padding(cs, &image)
 }
 
-pub fn prf_a_pk<E, CS>(
-    cs: CS,
-    a_sk: &[Boolean]
-) -> Result<Vec<Boolean>, SynthesisError>
-    where E: Engine, CS: ConstraintSystem<E>
+pub fn prf_a_pk<E, CS>(cs: CS, a_sk: &[Boolean]) -> Result<Vec<Boolean>, SynthesisError>
+where
+    E: Engine,
+    CS: ConstraintSystem<E>,
 {
-    prf(cs, true, true, false, false, a_sk, &(0..256).map(|_| Boolean::constant(false)).collect::<Vec<_>>())
+    prf(
+        cs,
+        true,
+        true,
+        false,
+        false,
+        a_sk,
+        &(0..256)
+            .map(|_| Boolean::constant(false))
+            .collect::<Vec<_>>(),
+    )
 }
 
 pub fn prf_nf<E, CS>(
     cs: CS,
     a_sk: &[Boolean],
-    rho: &[Boolean]
+    rho: &[Boolean],
 ) -> Result<Vec<Boolean>, SynthesisError>
-    where E: Engine, CS: ConstraintSystem<E>
+where
+    E: Engine,
+    CS: ConstraintSystem<E>,
 {
     prf(cs, true, true, true, false, a_sk, rho)
 }
@@ -60,9 +66,11 @@ pub fn prf_pk<E, CS>(
     cs: CS,
     a_sk: &[Boolean],
     h_sig: &[Boolean],
-    nonce: bool
+    nonce: bool,
 ) -> Result<Vec<Boolean>, SynthesisError>
-    where E: Engine, CS: ConstraintSystem<E>
+where
+    E: Engine,
+    CS: ConstraintSystem<E>,
 {
     prf(cs, false, nonce, false, false, a_sk, h_sig)
 }
@@ -71,9 +79,11 @@ pub fn prf_rho<E, CS>(
     cs: CS,
     phi: &[Boolean],
     h_sig: &[Boolean],
-    nonce: bool
+    nonce: bool,
 ) -> Result<Vec<Boolean>, SynthesisError>
-    where E: Engine, CS: ConstraintSystem<E>
+where
+    E: Engine,
+    CS: ConstraintSystem<E>,
 {
     prf(cs, false, nonce, true, false, phi, h_sig)
 }

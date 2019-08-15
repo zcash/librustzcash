@@ -3,11 +3,11 @@
 use bellman::groth16::{Parameters, PreparedVerifyingKey};
 use directories::BaseDirs;
 use pairing::bls12_381::{Bls12, Fr};
+use std::path::Path;
 use zcash_primitives::{
     jubjub::{edwards, fs::Fs, Unknown},
     primitives::{Diversifier, PaymentAddress, ProofGenerationKey},
 };
-use std::path::Path;
 use zcash_primitives::{
     merkle_tree::CommitmentTreeWitness,
     prover::TxProver,
