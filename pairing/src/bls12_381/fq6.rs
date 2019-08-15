@@ -17,7 +17,6 @@ impl ::std::fmt::Display for Fq6 {
     }
 }
 
-
 impl Fq6 {
     /// Multiply by quadratic nonresidue v.
     pub fn mul_by_nonresidue(&mut self) {
