@@ -59,9 +59,7 @@ use std::os::windows::ffi::OsStringExt;
 use zcash_primitives::{
     merkle_tree::CommitmentTreeWitness,
     note_encryption::sapling_ka_agree,
-    primitives::{
-        Diversifier, Note, PaymentAddress, ProofGenerationKey, ViewingKey,
-    },
+    primitives::{Diversifier, Note, PaymentAddress, ProofGenerationKey, ViewingKey},
     redjubjub::{self, Signature},
     sapling::{merkle_hash, spend_sig},
     transaction::components::Amount,
