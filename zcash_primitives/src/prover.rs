@@ -1,10 +1,10 @@
 //! Abstractions over the proving system and parameters.
 
-use pairing::bls12_381::{Bls12, Fr};
 use crate::{
     jubjub::{edwards, fs::Fs, Unknown},
     primitives::{Diversifier, PaymentAddress, ProofGenerationKey},
 };
+use pairing::bls12_381::{Bls12, Fr};
 
 use crate::{
     merkle_tree::CommitmentTreeWitness,

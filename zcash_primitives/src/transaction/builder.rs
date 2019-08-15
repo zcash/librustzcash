@@ -1,12 +1,12 @@
 //! Structs for building transactions.
 
-use ff::Field;
-use pairing::bls12_381::{Bls12, Fr};
-use rand::{rngs::OsRng, seq::SliceRandom, CryptoRng, RngCore};
 use crate::{
     jubjub::fs::Fs,
     primitives::{Diversifier, Note, PaymentAddress},
 };
+use ff::Field;
+use pairing::bls12_381::{Bls12, Fr};
+use rand::{rngs::OsRng, seq::SliceRandom, CryptoRng, RngCore};
 use zip32::ExtendedSpendingKey;
 
 use crate::{

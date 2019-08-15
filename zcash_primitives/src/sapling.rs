@@ -1,13 +1,13 @@
 //! Structs and constants specific to the Sapling shielded pool.
 
-use ff::{BitIterator, PrimeField, PrimeFieldRepr};
-use pairing::bls12_381::{Bls12, Fr, FrRepr};
-use rand_core::{CryptoRng, RngCore};
 use crate::{
     jubjub::{fs::Fs, FixedGenerators, JubjubBls12},
     pedersen_hash::{pedersen_hash, Personalization},
     primitives::Note,
 };
+use ff::{BitIterator, PrimeField, PrimeFieldRepr};
+use pairing::bls12_381::{Bls12, Fr, FrRepr};
+use rand_core::{CryptoRng, RngCore};
 use std::io::{self, Read, Write};
 
 use crate::merkle_tree::Hashable;

@@ -1,11 +1,5 @@
 //! Implementation of in-band secret distribution for Zcash transactions.
 
-use blake2b_simd::{Hash as Blake2bHash, Params as Blake2bParams};
-use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
-use crypto_api_chachapoly::{ChaCha20Ietf, ChachaPolyIetf};
-use ff::{PrimeField, PrimeFieldRepr};
-use pairing::bls12_381::{Bls12, Fr};
-use rand_core::{CryptoRng, RngCore};
 use crate::{
     jubjub::{
         edwards,
@@ -14,6 +8,12 @@ use crate::{
     },
     primitives::{Diversifier, Note, PaymentAddress},
 };
+use blake2b_simd::{Hash as Blake2bHash, Params as Blake2bParams};
+use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+use crypto_api_chachapoly::{ChaCha20Ietf, ChachaPolyIetf};
+use ff::{PrimeField, PrimeFieldRepr};
+use pairing::bls12_381::{Bls12, Fr};
+use rand_core::{CryptoRng, RngCore};
 use std::fmt;
 use std::str;
 
@@ -544,11 +544,6 @@ pub fn try_sapling_output_recovery(
 
 #[cfg(test)]
 mod tests {
-    use crypto_api_chachapoly::ChachaPolyIetf;
-    use ff::{Field, PrimeField, PrimeFieldRepr};
-    use pairing::bls12_381::{Bls12, Fr, FrRepr};
-    use rand_core::{CryptoRng, RngCore};
-    use rand_os::OsRng;
     use crate::{
         jubjub::{
             edwards,
@@ -557,6 +552,11 @@ mod tests {
         },
         primitives::{Diversifier, PaymentAddress, ValueCommitment},
     };
+    use crypto_api_chachapoly::ChachaPolyIetf;
+    use ff::{Field, PrimeField, PrimeFieldRepr};
+    use pairing::bls12_381::{Bls12, Fr, FrRepr};
+    use rand_core::{CryptoRng, RngCore};
+    use rand_os::OsRng;
 
     use super::{
         kdf_sapling, prf_ock, sapling_ka_agree, try_sapling_compact_note_decryption,

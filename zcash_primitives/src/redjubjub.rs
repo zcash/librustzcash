@@ -1,11 +1,9 @@
 //! Implementation of RedJubjub, a specialization of RedDSA to the Jubjub curve.
 //! See section 5.4.6 of the Sapling protocol specification.
 
+use crate::jubjub::{edwards::Point, FixedGenerators, JubjubEngine, JubjubParams, Unknown};
 use ff::{Field, PrimeField, PrimeFieldRepr};
 use rand_core::RngCore;
-use crate::jubjub::{
-    edwards::Point, FixedGenerators, JubjubEngine, JubjubParams, Unknown,
-};
 use std::io::{self, Read, Write};
 
 use util::hash_to_scalar;
@@ -150,10 +148,15 @@ impl<E: JubjubEngine> PublicKey<E> {
             Err(_) => return false,
         };
         // 0 = h_G(-S . P_G + R + c . vk)
-        self.0.mul(c, params).add(&r, params).add(
-            &params.generator(p_g).mul(s, params).negate().into(),
-            params
-        ).mul_by_cofactor(params).eq(&Point::zero())
+        self.0
+            .mul(c, params)
+            .add(&r, params)
+            .add(
+                &params.generator(p_g).mul(s, params).negate().into(),
+                params,
+            )
+            .mul_by_cofactor(params)
+            .eq(&Point::zero())
     }
 }
 
@@ -170,8 +173,7 @@ pub fn batch_verify<'a, E: JubjubEngine, R: RngCore>(
     batch: &[BatchEntry<'a, E>],
     p_g: FixedGenerators,
     params: &E::Params,
-) -> bool
-{
+) -> bool {
     let mut acc = Point::<E, Unknown>::zero();
 
     for entry in batch {
@@ -218,8 +220,8 @@ mod tests {
     #[test]
     fn test_batch_verify() {
         let rng = &mut XorShiftRng::from_seed([
-            0x59, 0x62, 0xbe, 0x5d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06, 0xbc,
-            0xe5,
+            0x59, 0x62, 0xbe, 0x5d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06,
+            0xbc, 0xe5,
         ]);
         let params = &JubjubBls12::new();
         let p_g = FixedGenerators::SpendingKeyGenerator;
@@ -237,8 +239,16 @@ mod tests {
         assert!(vk2.verify(msg2, &sig2, p_g, params));
 
         let mut batch = vec![
-            BatchEntry { vk: vk1, msg: msg1, sig: sig1 },
-            BatchEntry { vk: vk2, msg: msg2, sig: sig2 }
+            BatchEntry {
+                vk: vk1,
+                msg: msg1,
+                sig: sig1,
+            },
+            BatchEntry {
+                vk: vk2,
+                msg: msg2,
+                sig: sig2,
+            },
         ];
 
         assert!(batch_verify(rng, &batch, p_g, params));
@@ -251,8 +261,8 @@ mod tests {
     #[test]
     fn cofactor_check() {
         let rng = &mut XorShiftRng::from_seed([
-            0x59, 0x62, 0xbe, 0x5d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06, 0xbc,
-            0xe5,
+            0x59, 0x62, 0xbe, 0x5d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06,
+            0xbc, 0xe5,
         ]);
         let params = &JubjubBls12::new();
         let zero = edwards::Point::zero();
@@ -286,8 +296,8 @@ mod tests {
     #[test]
     fn round_trip_serialization() {
         let rng = &mut XorShiftRng::from_seed([
-            0x59, 0x62, 0xbe, 0x5d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06, 0xbc,
-            0xe5,
+            0x59, 0x62, 0xbe, 0x5d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06,
+            0xbc, 0xe5,
         ]);
         let p_g = FixedGenerators::SpendingKeyGenerator;
         let params = &JubjubBls12::new();
@@ -322,8 +332,8 @@ mod tests {
     #[test]
     fn random_signatures() {
         let rng = &mut XorShiftRng::from_seed([
-            0x59, 0x62, 0xbe, 0x5d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06, 0xbc,
-            0xe5,
+            0x59, 0x62, 0xbe, 0x5d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06,
+            0xbc, 0xe5,
         ]);
         let p_g = FixedGenerators::SpendingKeyGenerator;
         let params = &JubjubBls12::new();
