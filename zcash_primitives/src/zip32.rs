@@ -4,7 +4,8 @@ use byteorder::{ByteOrder, LittleEndian, ReadBytesExt, WriteBytesExt};
 use ff::Field;
 use fpe::ff1::{BinaryNumeralString, FF1};
 use pairing::bls12_381::Bls12;
-use sapling_crypto::{
+
+use crate::{
     jubjub::{fs::Fs, FixedGenerators, JubjubEngine, JubjubParams, ToUniform},
     primitives::{Diversifier, PaymentAddress, ViewingKey},
 };

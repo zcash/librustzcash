@@ -1,23 +1,25 @@
-use bellman::groth16::{
-    create_random_proof, verify_proof, Parameters, PreparedVerifyingKey, Proof,
+use bellman::{
+    gadgets::multipack,
+    groth16::{
+        create_random_proof, verify_proof, Parameters, PreparedVerifyingKey, Proof,
+    },
 };
 use ff::Field;
 use pairing::bls12_381::{Bls12, Fr};
 use rand_os::OsRng;
-use sapling_crypto::{
-    circuit::{
-        multipack,
-        sapling::{Output, Spend},
-    },
+use zcash_primitives::{
     jubjub::{edwards, fs::Fs, FixedGenerators, JubjubBls12, Unknown},
     primitives::{Diversifier, Note, PaymentAddress, ProofGenerationKey, ValueCommitment},
-    redjubjub::{PrivateKey, PublicKey, Signature},
 };
 use zcash_primitives::{
-    merkle_tree::CommitmentTreeWitness, sapling::Node, transaction::components::Amount,
+    merkle_tree::CommitmentTreeWitness,
+    redjubjub::{PrivateKey, PublicKey, Signature},
+    sapling::Node,
+    transaction::components::Amount,
 };
 
 use super::compute_value_balance;
+use crate::circuit::sapling::{Output, Spend};
 
 /// A context object for creating the Sapling components of a Zcash transaction.
 pub struct SaplingProvingContext {

@@ -1,4 +1,4 @@
-use sapling_crypto::jubjub::{FixedGenerators, JubjubParams};
+use zcash_primitives::jubjub::{FixedGenerators, JubjubParams};
 
 use super::JUBJUB;
 

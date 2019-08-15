@@ -1,13 +1,12 @@
 use ff::Field;
 use pairing::bls12_381::Bls12;
 use rand_os::OsRng;
-use sapling_crypto::{
-    jubjub::{fs::Fs, FixedGenerators},
-    redjubjub::PrivateKey,
-};
+
+use crate::jubjub::{fs::Fs, FixedGenerators};
 
 use super::{components::Amount, sighash::signature_hash, Transaction, TransactionData};
 use legacy::Script;
+use redjubjub::PrivateKey;
 use JUBJUB;
 
 #[test]

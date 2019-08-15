@@ -3,10 +3,9 @@
 use ff::Field;
 use pairing::bls12_381::{Bls12, Fr};
 use rand::{rngs::OsRng, seq::SliceRandom, CryptoRng, RngCore};
-use sapling_crypto::{
+use crate::{
     jubjub::fs::Fs,
     primitives::{Diversifier, Note, PaymentAddress},
-    redjubjub::PrivateKey,
 };
 use zip32::ExtendedSpendingKey;
 
@@ -16,6 +15,7 @@ use crate::{
     merkle_tree::{CommitmentTreeWitness, IncrementalWitness},
     note_encryption::{generate_esk, Memo, SaplingNoteEncryption},
     prover::TxProver,
+    redjubjub::PrivateKey,
     sapling::{spend_sig, Node},
     transaction::{
         components::{amount::DEFAULT_FEE, Amount, OutputDescription, SpendDescription, TxOut},
@@ -534,7 +534,8 @@ impl<R: RngCore + CryptoRng> Builder<R> {
 mod tests {
     use ff::{Field, PrimeField};
     use rand::rngs::OsRng;
-    use sapling_crypto::jubjub::fs::Fs;
+
+    use crate::jubjub::fs::Fs;
 
     use super::{Builder, Error};
     use crate::{

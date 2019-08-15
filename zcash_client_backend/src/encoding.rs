@@ -5,7 +5,7 @@
 
 use bech32::{self, Error, FromBase32, ToBase32};
 use pairing::bls12_381::Bls12;
-use sapling_crypto::{
+use zcash_primitives::{
     jubjub::edwards,
     primitives::{Diversifier, PaymentAddress},
 };
@@ -98,15 +98,15 @@ pub fn decode_extended_full_viewing_key(
 /// use pairing::bls12_381::Bls12;
 /// use rand_core::SeedableRng;
 /// use rand_xorshift::XorShiftRng;
-/// use sapling_crypto::{
-///     jubjub::edwards,
-///     primitives::{Diversifier, PaymentAddress},
-/// };
 /// use zcash_client_backend::{
 ///     constants::testnet::HRP_SAPLING_PAYMENT_ADDRESS,
 ///     encoding::encode_payment_address,
 /// };
-/// use zcash_primitives::JUBJUB;
+/// use zcash_primitives::{
+///     jubjub::edwards,
+///     primitives::{Diversifier, PaymentAddress},
+///     JUBJUB,
+/// };
 ///
 /// let rng = &mut XorShiftRng::from_seed([
 ///     0x59, 0x62, 0xbe, 0x3d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06,
@@ -138,15 +138,15 @@ pub fn encode_payment_address(hrp: &str, addr: &PaymentAddress<Bls12>) -> String
 /// use pairing::bls12_381::Bls12;
 /// use rand_core::SeedableRng;
 /// use rand_xorshift::XorShiftRng;
-/// use sapling_crypto::{
-///     jubjub::edwards,
-///     primitives::{Diversifier, PaymentAddress},
-/// };
 /// use zcash_client_backend::{
 ///     constants::testnet::HRP_SAPLING_PAYMENT_ADDRESS,
 ///     encoding::decode_payment_address,
 /// };
-/// use zcash_primitives::JUBJUB;
+/// use zcash_primitives::{
+///     jubjub::edwards,
+///     primitives::{Diversifier, PaymentAddress},
+///     JUBJUB,
+/// };
 ///
 /// let rng = &mut XorShiftRng::from_seed([
 ///     0x59, 0x62, 0xbe, 0x3d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06,
@@ -187,7 +187,7 @@ mod tests {
     use pairing::bls12_381::Bls12;
     use rand_core::SeedableRng;
     use rand_xorshift::XorShiftRng;
-    use sapling_crypto::{
+    use zcash_primitives::{
         jubjub::edwards,
         primitives::{Diversifier, PaymentAddress},
     };

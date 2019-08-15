@@ -2,8 +2,8 @@ use ff::{PrimeField, PrimeFieldRepr};
 use pairing::bls12_381::Bls12;
 use rand_core::RngCore;
 use rand_os::OsRng;
-use sapling_crypto::jubjub::{edwards, JubjubBls12};
-use sapling_crypto::primitives::{Diversifier, ViewingKey};
+use zcash_primitives::jubjub::{edwards, JubjubBls12};
+use zcash_primitives::primitives::{Diversifier, ViewingKey};
 
 use {
     librustzcash_sapling_generate_r, librustzcash_sapling_ka_agree,

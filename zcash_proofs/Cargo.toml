@@ -13,8 +13,11 @@ directories = { version = "1", optional = true }
 ff = { path = "../ff" }
 pairing = { path = "../pairing" }
 rand_os = "0.2"
-sapling-crypto = { path = "../sapling-crypto" }
 zcash_primitives = { path = "../zcash_primitives" }
+
+[dev-dependencies]
+rand_core = "0.5"
+rand_xorshift = "0.2"
 
 [features]
 default = ["local-prover"]

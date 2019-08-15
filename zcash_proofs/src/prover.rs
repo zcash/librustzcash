@@ -3,15 +3,15 @@
 use bellman::groth16::{Parameters, PreparedVerifyingKey};
 use directories::BaseDirs;
 use pairing::bls12_381::{Bls12, Fr};
-use sapling_crypto::{
+use zcash_primitives::{
     jubjub::{edwards, fs::Fs, Unknown},
     primitives::{Diversifier, PaymentAddress, ProofGenerationKey},
-    redjubjub::{PublicKey, Signature},
 };
 use std::path::Path;
 use zcash_primitives::{
     merkle_tree::CommitmentTreeWitness,
     prover::TxProver,
+    redjubjub::{PublicKey, Signature},
     sapling::Node,
     transaction::components::{Amount, GROTH_PROOF_SIZE},
     JUBJUB,
