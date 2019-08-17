@@ -26,12 +26,12 @@ where
     assert_eq!(personalization.len(), 6);
 
     let mut edwards_result = None;
-    let mut bits = personalization.iter().chain(bits.iter());
+    let mut bits = personalization.iter().chain(bits.iter()).peekable();
     let mut segment_generators = params.pedersen_circuit_generators().iter();
     let boolean_false = Boolean::constant(false);
 
     let mut segment_i = 0;
-    loop {
+    while bits.peek().is_some() {
         let mut segment_result = None;
         let mut segment_windows = &segment_generators.next().expect("enough segments")[..];
 
