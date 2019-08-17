@@ -135,7 +135,10 @@ impl DiversifierKey {
     /// Returns the first index starting from j that generates a valid
     /// diversifier, along with the corresponding diversifier. Returns
     /// an error if the diversifier space is exhausted.
-    pub fn diversifier(&self, mut j: DiversifierIndex) -> Result<(DiversifierIndex, Diversifier), ()> {
+    pub fn diversifier(
+        &self,
+        mut j: DiversifierIndex,
+    ) -> Result<(DiversifierIndex, Diversifier), ()> {
         let ff = FF1::<Aes256>::new(&self.0, 2).unwrap();
         loop {
             // Generate d_j

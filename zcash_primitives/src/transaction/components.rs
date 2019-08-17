@@ -1,7 +1,7 @@
+use crate::jubjub::{edwards, Unknown};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use ff::{PrimeField, PrimeFieldRepr};
 use pairing::bls12_381::{Bls12, Fr, FrRepr};
-use crate::jubjub::{edwards, Unknown};
 use std::io::{self, Read, Write};
 
 use legacy::Script;

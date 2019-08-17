@@ -1,16 +1,13 @@
+use bellman::gadgets::boolean::{AllocatedBit, Boolean};
+use bellman::gadgets::multipack::pack_into_inputs;
+use bellman::{Circuit, ConstraintSystem, LinearCombination, SynthesisError};
 use ff::Field;
 use pairing::Engine;
-use bellman::{ConstraintSystem, SynthesisError, Circuit, LinearCombination};
-use bellman::gadgets::boolean::{
-    AllocatedBit,
-    Boolean
-};
-use bellman::gadgets::multipack::pack_into_inputs;
 
-mod prfs;
 mod commitment;
 mod input;
 mod output;
+mod prfs;
 
 use self::input::*;
 use self::output::*;
@@ -37,39 +34,29 @@ pub struct JSInput {
     pub a_sk: Option<SpendingKey>,
     pub rho: Option<UniqueRandomness>,
     pub r: Option<CommitmentRandomness>,
-    pub auth_path: [Option<([u8; 32], bool)>; TREE_DEPTH]
+    pub auth_path: [Option<([u8; 32], bool)>; TREE_DEPTH],
 }
 
 pub struct JSOutput {
     pub value: Option<u64>,
     pub a_pk: Option<PayingKey>,
-    pub r: Option<CommitmentRandomness>
+    pub r: Option<CommitmentRandomness>,
 }
 
 impl<E: Engine> Circuit<E> for JoinSplit {
-    fn synthesize<CS: ConstraintSystem<E>>(
-        self,
-        cs: &mut CS
-    ) -> Result<(), SynthesisError>
-    {
+    fn synthesize<CS: ConstraintSystem<E>>(self, cs: &mut CS) -> Result<(), SynthesisError> {
         assert_eq!(self.inputs.len(), 2);
         assert_eq!(self.outputs.len(), 2);
 
         // vpub_old is the value entering the
         // JoinSplit from the "outside" value
         // pool
-        let vpub_old = NoteValue::new(
-            cs.namespace(|| "vpub_old"),
-            self.vpub_old
-        )?;
+        let vpub_old = NoteValue::new(cs.namespace(|| "vpub_old"), self.vpub_old)?;
 
         // vpub_new is the value leaving the
         // JoinSplit into the "outside" value
         // pool
-        let vpub_new = NoteValue::new(
-            cs.namespace(|| "vpub_new"),
-            self.vpub_new
-        )?;
+        let vpub_new = NoteValue::new(cs.namespace(|| "vpub_new"), self.vpub_new)?;
 
         // The left hand side of the balance equation
         // vpub_old + inputs[0].value + inputs[1].value
@@ -80,22 +67,17 @@ impl<E: Engine> Circuit<E> for JoinSplit {
         let mut rhs = vpub_new.lc();
 
         // Witness rt (merkle tree root)
-        let rt = witness_u256(
-            cs.namespace(|| "rt"),
-            self.rt.as_ref().map(|v| &v[..])
-        ).unwrap();
+        let rt = witness_u256(cs.namespace(|| "rt"), self.rt.as_ref().map(|v| &v[..])).unwrap();
 
         // Witness h_sig
         let h_sig = witness_u256(
             cs.namespace(|| "h_sig"),
-            self.h_sig.as_ref().map(|v| &v[..])
-        ).unwrap();
+            self.h_sig.as_ref().map(|v| &v[..]),
+        )
+        .unwrap();
 
         // Witness phi
-        let phi = witness_u252(
-            cs.namespace(|| "phi"),
-            self.phi.as_ref().map(|v| &v[..])
-        ).unwrap();
+        let phi = witness_u252(cs.namespace(|| "phi"), self.phi.as_ref().map(|v| &v[..])).unwrap();
 
         let mut input_notes = vec![];
         let mut lhs_total = self.vpub_old;
@@ -110,17 +92,14 @@ impl<E: Engine> Circuit<E> for JoinSplit {
             }
 
             // Allocate the value of the note
-            let value = NoteValue::new(
-                cs.namespace(|| "value"),
-                input.value
-            )?;
+            let value = NoteValue::new(cs.namespace(|| "value"), input.value)?;
 
             // Compute the nonce (for PRF inputs) which is false
             // for the first input, and true for the second input.
             let nonce = match i {
                 0 => false,
                 1 => true,
-                _ => unreachable!()
+                _ => unreachable!(),
             };
 
             // Perform input note computations
@@ -133,7 +112,7 @@ impl<E: Engine> Circuit<E> for JoinSplit {
                 &h_sig,
                 nonce,
                 input.auth_path,
-                &rt
+                &rt,
             )?);
 
             // Add the note value to the left hand side of
@@ -148,10 +127,8 @@ impl<E: Engine> Circuit<E> for JoinSplit {
         {
             // Expected sum of the left hand side of the balance
             // equation, expressed as a 64-bit unsigned integer
-            let lhs_total = NoteValue::new(
-                cs.namespace(|| "total value of left hand side"),
-                lhs_total
-            )?;
+            let lhs_total =
+                NoteValue::new(cs.namespace(|| "total value of left hand side"), lhs_total)?;
 
             // Enforce that the left hand side can be expressed as a 64-bit
             // integer
@@ -159,7 +136,7 @@ impl<E: Engine> Circuit<E> for JoinSplit {
                 || "left hand side can be expressed as a 64-bit unsigned integer",
                 |_| lhs.clone(),
                 |lc| lc + CS::one(),
-                |_| lhs_total.lc()
+                |_| lhs_total.lc(),
             );
         }
 
@@ -169,17 +146,14 @@ impl<E: Engine> Circuit<E> for JoinSplit {
         for (i, output) in self.outputs.into_iter().enumerate() {
             let cs = &mut cs.namespace(|| format!("output {}", i));
 
-            let value = NoteValue::new(
-                cs.namespace(|| "value"),
-                output.value
-            )?;
+            let value = NoteValue::new(cs.namespace(|| "value"), output.value)?;
 
             // Compute the nonce (for PRF inputs) which is false
             // for the first output, and true for the second output.
             let nonce = match i {
                 0 => false,
                 1 => true,
-                _ => unreachable!()
+                _ => unreachable!(),
             };
 
             // Perform output note computations
@@ -190,7 +164,7 @@ impl<E: Engine> Circuit<E> for JoinSplit {
                 output.r,
                 &phi,
                 &h_sig,
-                nonce
+                nonce,
             )?);
 
             // Add the note value to the right hand side of
@@ -203,7 +177,7 @@ impl<E: Engine> Circuit<E> for JoinSplit {
             || "balance equation",
             |_| lhs.clone(),
             |lc| lc + CS::one(),
-            |_| rhs
+            |_| rhs,
         );
 
         let mut public_inputs = vec![];
@@ -229,15 +203,14 @@ impl<E: Engine> Circuit<E> for JoinSplit {
 pub struct NoteValue {
     value: Option<u64>,
     // Least significant digit first
-    bits: Vec<AllocatedBit>
+    bits: Vec<AllocatedBit>,
 }
 
 impl NoteValue {
-    fn new<E, CS>(
-        mut cs: CS,
-        value: Option<u64>
-    ) -> Result<NoteValue, SynthesisError>
-        where E: Engine, CS: ConstraintSystem<E>,
+    fn new<E, CS>(mut cs: CS, value: Option<u64>) -> Result<NoteValue, SynthesisError>
+    where
+        E: Engine,
+        CS: ConstraintSystem<E>,
     {
         let mut values;
         match value {
@@ -247,7 +220,7 @@ impl NoteValue {
                     values.push(Some(val & 1 == 1));
                     val >>= 1;
                 }
-            },
+            }
             None => {
                 values = vec![None; 64];
             }
@@ -255,28 +228,27 @@ impl NoteValue {
 
         let mut bits = vec![];
         for (i, value) in values.into_iter().enumerate() {
-            bits.push(
-                AllocatedBit::alloc(
-                    cs.namespace(|| format!("bit {}", i)),
-                    value
-                )?
-            );
+            bits.push(AllocatedBit::alloc(
+                cs.namespace(|| format!("bit {}", i)),
+                value,
+            )?);
         }
 
         Ok(NoteValue {
             value: value,
-            bits: bits
+            bits: bits,
         })
     }
 
     /// Encodes the bits of the value into little-endian
     /// byte order.
     fn bits_le(&self) -> Vec<Boolean> {
-        self.bits.chunks(8)
-                 .flat_map(|v| v.iter().rev())
-                 .cloned()
-                 .map(|e| Boolean::from(e))
-                 .collect()
+        self.bits
+            .chunks(8)
+            .flat_map(|v| v.iter().rev())
+            .cloned()
+            .map(|e| Boolean::from(e))
+            .collect()
     }
 
     /// Computes this value as a linear combination of
@@ -304,15 +276,18 @@ fn witness_bits<E, CS>(
     mut cs: CS,
     value: Option<&[u8]>,
     num_bits: usize,
-    skip_bits: usize
+    skip_bits: usize,
 ) -> Result<Vec<Boolean>, SynthesisError>
-    where E: Engine, CS: ConstraintSystem<E>,
+where
+    E: Engine,
+    CS: ConstraintSystem<E>,
 {
     let bit_values = if let Some(value) = value {
         let mut tmp = vec![];
-        for b in value.iter()
-                      .flat_map(|&m| (0..8).rev().map(move |i| m >> i & 1 == 1))
-                      .skip(skip_bits)
+        for b in value
+            .iter()
+            .flat_map(|&m| (0..8).rev().map(move |i| m >> i & 1 == 1))
+            .skip(skip_bits)
         {
             tmp.push(Some(b));
         }
@@ -327,37 +302,35 @@ fn witness_bits<E, CS>(
     for (i, value) in bit_values.into_iter().enumerate() {
         bits.push(Boolean::from(AllocatedBit::alloc(
             cs.namespace(|| format!("bit {}", i)),
-            value
+            value,
         )?));
     }
 
     Ok(bits)
 }
 
-fn witness_u256<E, CS>(
-    cs: CS,
-    value: Option<&[u8]>,
-) -> Result<Vec<Boolean>, SynthesisError>
-    where E: Engine, CS: ConstraintSystem<E>,
+fn witness_u256<E, CS>(cs: CS, value: Option<&[u8]>) -> Result<Vec<Boolean>, SynthesisError>
+where
+    E: Engine,
+    CS: ConstraintSystem<E>,
 {
     witness_bits(cs, value, 256, 0)
 }
 
-fn witness_u252<E, CS>(
-    cs: CS,
-    value: Option<&[u8]>,
-) -> Result<Vec<Boolean>, SynthesisError>
-    where E: Engine, CS: ConstraintSystem<E>,
+fn witness_u252<E, CS>(cs: CS, value: Option<&[u8]>) -> Result<Vec<Boolean>, SynthesisError>
+where
+    E: Engine,
+    CS: ConstraintSystem<E>,
 {
     witness_bits(cs, value, 252, 4)
 }
 
 #[test]
 fn test_sprout_constraints() {
-    use pairing::bls12_381::{Bls12};
     use bellman::gadgets::test::*;
+    use pairing::bls12_381::Bls12;
 
-    use byteorder::{WriteBytesExt, ReadBytesExt, LittleEndian};
+    use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 
     let test_vector = include_bytes!("test_vectors.dat");
     let mut test_vector = &test_vector[..];
@@ -393,9 +366,7 @@ fn test_sprout_constraints() {
             }
             let mut position = test_vector.read_u64::<LittleEndian>().unwrap();
             for i in 0..TREE_DEPTH {
-                auth_path[i].as_mut().map(|p| {
-                    p.1 = (position & 1) == 1
-                });
+                auth_path[i].as_mut().map(|p| p.1 = (position & 1) == 1);
 
                 position >>= 1;
             }
@@ -407,15 +378,13 @@ fn test_sprout_constraints() {
             let r = Some(CommitmentRandomness(get_u256(&mut test_vector)));
             let a_sk = Some(SpendingKey(get_u256(&mut test_vector)));
 
-            inputs.push(
-                JSInput {
-                    value: value,
-                    a_sk: a_sk,
-                    rho: rho,
-                    r: r,
-                    auth_path: auth_path
-                }
-            );
+            inputs.push(JSInput {
+                value: value,
+                a_sk: a_sk,
+                rho: rho,
+                r: r,
+                auth_path: auth_path,
+            });
         }
 
         let mut outputs = vec![];
@@ -426,13 +395,11 @@ fn test_sprout_constraints() {
             get_u256(&mut test_vector);
             let r = Some(CommitmentRandomness(get_u256(&mut test_vector)));
 
-            outputs.push(
-                JSOutput {
-                    value: value,
-                    a_pk: a_pk,
-                    r: r
-                }
-            );
+            outputs.push(JSOutput {
+                value: value,
+                a_pk: a_pk,
+                r: r,
+            });
         }
 
         let vpub_old = Some(test_vector.read_u64::<LittleEndian>().unwrap());
@@ -454,7 +421,7 @@ fn test_sprout_constraints() {
             phi: phi,
             inputs: inputs,
             outputs: outputs,
-            rt: rt
+            rt: rt,
         };
 
         js.synthesize(&mut cs).unwrap();
@@ -465,7 +432,10 @@ fn test_sprout_constraints() {
         assert!(cs.is_satisfied());
         assert_eq!(cs.num_constraints(), 1989085);
         assert_eq!(cs.num_inputs(), 10);
-        assert_eq!(cs.hash(), "1a228d3c6377130d1778c7885811dc8b8864049cb5af8aff7e6cd46c5bc4b84c");
+        assert_eq!(
+            cs.hash(),
+            "1a228d3c6377130d1778c7885811dc8b8864049cb5af8aff7e6cd46c5bc4b84c"
+        );
 
         let mut expected_inputs = vec![];
         expected_inputs.extend(rt.unwrap().to_vec());
@@ -476,8 +446,12 @@ fn test_sprout_constraints() {
         expected_inputs.extend(mac2.to_vec());
         expected_inputs.extend(cm1.to_vec());
         expected_inputs.extend(cm2.to_vec());
-        expected_inputs.write_u64::<LittleEndian>(vpub_old.unwrap()).unwrap();
-        expected_inputs.write_u64::<LittleEndian>(vpub_new.unwrap()).unwrap();
+        expected_inputs
+            .write_u64::<LittleEndian>(vpub_old.unwrap())
+            .unwrap();
+        expected_inputs
+            .write_u64::<LittleEndian>(vpub_new.unwrap())
+            .unwrap();
 
         use bellman::gadgets::multipack;
 

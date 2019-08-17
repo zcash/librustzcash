@@ -1,20 +1,18 @@
-use pairing::{Engine};
+use bellman::gadgets::boolean::Boolean;
+use bellman::gadgets::sha256::sha256;
 use bellman::{ConstraintSystem, SynthesisError};
-use bellman::gadgets::sha256::{
-    sha256
-};
-use bellman::gadgets::boolean::{
-    Boolean
-};
+use pairing::Engine;
 
 pub fn note_comm<E, CS>(
     cs: CS,
     a_pk: &[Boolean],
     value: &[Boolean],
     rho: &[Boolean],
-    r: &[Boolean]
+    r: &[Boolean],
 ) -> Result<Vec<Boolean>, SynthesisError>
-    where E: Engine, CS: ConstraintSystem<E>
+where
+    E: Engine,
+    CS: ConstraintSystem<E>,
 {
     assert_eq!(a_pk.len(), 256);
     assert_eq!(value.len(), 64);
@@ -35,8 +33,5 @@ pub fn note_comm<E, CS>(
     image.extend(rho.iter().cloned());
     image.extend(r.iter().cloned());
 
-    sha256(
-        cs,
-        &image
-    )
+    sha256(cs, &image)
 }

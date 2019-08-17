@@ -1582,26 +1582,24 @@ fn test_fq_is_valid() {
     a.0.sub_noborrow(&FqRepr::from(1));
     assert!(a.is_valid());
     assert!(Fq(FqRepr::from(0)).is_valid());
-    assert!(
-        Fq(FqRepr([
-            0xdf4671abd14dab3e,
-            0xe2dc0c9f534fbd33,
-            0x31ca6c880cc444a6,
-            0x257a67e70ef33359,
-            0xf9b29e493f899b36,
-            0x17c8be1800b9f059
-        ])).is_valid()
-    );
-    assert!(
-        !Fq(FqRepr([
-            0xffffffffffffffff,
-            0xffffffffffffffff,
-            0xffffffffffffffff,
-            0xffffffffffffffff,
-            0xffffffffffffffff,
-            0xffffffffffffffff
-        ])).is_valid()
-    );
+    assert!(Fq(FqRepr([
+        0xdf4671abd14dab3e,
+        0xe2dc0c9f534fbd33,
+        0x31ca6c880cc444a6,
+        0x257a67e70ef33359,
+        0xf9b29e493f899b36,
+        0x17c8be1800b9f059
+    ]))
+    .is_valid());
+    assert!(!Fq(FqRepr([
+        0xffffffffffffffff,
+        0xffffffffffffffff,
+        0xffffffffffffffff,
+        0xffffffffffffffff,
+        0xffffffffffffffff,
+        0xffffffffffffffff
+    ]))
+    .is_valid());
 
     let mut rng = XorShiftRng::from_seed([
         0x59, 0x62, 0xbe, 0x5d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06, 0xbc,
@@ -1949,7 +1947,8 @@ fn test_fq_squaring() {
             0xdc05c659b4e15b27,
             0x79361e5a802c6a23,
             0x24bcbe5d51b9a6f
-        ])).unwrap()
+        ]))
+        .unwrap()
     );
 
     let mut rng = XorShiftRng::from_seed([
@@ -2099,16 +2098,15 @@ fn test_fq_sqrt() {
 #[test]
 fn test_fq_from_into_repr() {
     // q + 1 should not be in the field
-    assert!(
-        Fq::from_repr(FqRepr([
-            0xb9feffffffffaaac,
-            0x1eabfffeb153ffff,
-            0x6730d2a0f6b0f624,
-            0x64774b84f38512bf,
-            0x4b1ba7b6434bacd7,
-            0x1a0111ea397fe69a
-        ])).is_err()
-    );
+    assert!(Fq::from_repr(FqRepr([
+        0xb9feffffffffaaac,
+        0x1eabfffeb153ffff,
+        0x6730d2a0f6b0f624,
+        0x64774b84f38512bf,
+        0x4b1ba7b6434bacd7,
+        0x1a0111ea397fe69a
+    ]))
+    .is_err());
 
     // q should not be in the field
     assert!(Fq::from_repr(Fq::char()).is_err());

@@ -5,11 +5,11 @@
 
 use bech32::{self, Error, FromBase32, ToBase32};
 use pairing::bls12_381::Bls12;
+use std::io::{self, Write};
 use zcash_primitives::{
     jubjub::edwards,
     primitives::{Diversifier, PaymentAddress},
 };
-use std::io::{self, Write};
 use zcash_primitives::{
     zip32::{ExtendedFullViewingKey, ExtendedSpendingKey},
     JUBJUB,
@@ -187,11 +187,11 @@ mod tests {
     use pairing::bls12_381::Bls12;
     use rand_core::SeedableRng;
     use rand_xorshift::XorShiftRng;
+    use zcash_primitives::JUBJUB;
     use zcash_primitives::{
         jubjub::edwards,
         primitives::{Diversifier, PaymentAddress},
     };
-    use zcash_primitives::JUBJUB;
 
     use super::{decode_payment_address, encode_payment_address};
     use crate::constants;

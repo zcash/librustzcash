@@ -388,22 +388,20 @@ fn test_fr_is_valid() {
     a.0.sub_noborrow(&FrRepr::from(1));
     assert!(a.is_valid());
     assert!(Fr(FrRepr::from(0)).is_valid());
-    assert!(
-        Fr(FrRepr([
-            0xffffffff00000000,
-            0x53bda402fffe5bfe,
-            0x3339d80809a1d805,
-            0x73eda753299d7d48
-        ])).is_valid()
-    );
-    assert!(
-        !Fr(FrRepr([
-            0xffffffffffffffff,
-            0xffffffffffffffff,
-            0xffffffffffffffff,
-            0xffffffffffffffff
-        ])).is_valid()
-    );
+    assert!(Fr(FrRepr([
+        0xffffffff00000000,
+        0x53bda402fffe5bfe,
+        0x3339d80809a1d805,
+        0x73eda753299d7d48
+    ]))
+    .is_valid());
+    assert!(!Fr(FrRepr([
+        0xffffffffffffffff,
+        0xffffffffffffffff,
+        0xffffffffffffffff,
+        0xffffffffffffffff
+    ]))
+    .is_valid());
 
     let mut rng = XorShiftRng::from_seed([
         0x59, 0x62, 0xbe, 0x5d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06, 0xbc,
@@ -707,7 +705,8 @@ fn test_fr_squaring() {
             0xb79a310579e76ec2,
             0xac1da8d0a9af4e5f,
             0x13f629c49bf23e97
-        ])).unwrap()
+        ]))
+        .unwrap()
     );
 
     let mut rng = XorShiftRng::from_seed([
@@ -857,14 +856,13 @@ fn test_fr_sqrt() {
 #[test]
 fn test_fr_from_into_repr() {
     // r + 1 should not be in the field
-    assert!(
-        Fr::from_repr(FrRepr([
-            0xffffffff00000002,
-            0x53bda402fffe5bfe,
-            0x3339d80809a1d805,
-            0x73eda753299d7d48
-        ])).is_err()
-    );
+    assert!(Fr::from_repr(FrRepr([
+        0xffffffff00000002,
+        0x53bda402fffe5bfe,
+        0x3339d80809a1d805,
+        0x73eda753299d7d48
+    ]))
+    .is_err());
 
     // r should not be in the field
     assert!(Fr::from_repr(Fr::char()).is_err());
@@ -967,7 +965,8 @@ fn test_fr_display() {
                 0x185ec8eb3f5b5aee,
                 0x684499ffe4b9dd99,
                 0x7c9bba7afb68faa
-            ])).unwrap()
+            ]))
+            .unwrap()
         ),
         "Fr(0x07c9bba7afb68faa684499ffe4b9dd99185ec8eb3f5b5aeec3cae746a3b5ecc7)".to_string()
     );
@@ -979,7 +978,8 @@ fn test_fr_display() {
                 0xb0ad10817df79b6a,
                 0xd034a80a2b74132b,
                 0x41cf9a1336f50719
-            ])).unwrap()
+            ]))
+            .unwrap()
         ),
         "Fr(0x41cf9a1336f50719d034a80a2b74132bb0ad10817df79b6a44c71298ff198106)".to_string()
     );

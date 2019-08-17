@@ -2,12 +2,12 @@
 //!
 //! Implements section 4.2.2 of the Zcash Protocol Specification.
 
-use blake2b_simd::{Hash as Blake2bHash, Params as Blake2bParams};
-use ff::{PrimeField, PrimeFieldRepr};
 use crate::{
     jubjub::{edwards, FixedGenerators, JubjubEngine, JubjubParams, ToUniform, Unknown},
     primitives::{ProofGenerationKey, ViewingKey},
 };
+use blake2b_simd::{Hash as Blake2bHash, Params as Blake2bParams};
+use ff::{PrimeField, PrimeFieldRepr};
 use std::io::{self, Read, Write};
 
 pub const PRF_EXPAND_PERSONALIZATION: &'static [u8; 16] = b"Zcash_ExpandSeed";
@@ -187,8 +187,8 @@ impl<E: JubjubEngine> FullViewingKey<E> {
 
 #[cfg(test)]
 mod tests {
-    use pairing::bls12_381::Bls12;
     use crate::jubjub::{edwards, FixedGenerators, JubjubParams, PrimeOrder};
+    use pairing::bls12_381::Bls12;
     use std::error::Error;
 
     use super::FullViewingKey;
