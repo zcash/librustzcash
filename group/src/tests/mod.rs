@@ -2,7 +2,7 @@ use ff::{Field, PrimeField};
 use rand::SeedableRng;
 use rand_xorshift::XorShiftRng;
 
-use {CurveAffine, CurveProjective, EncodedPoint};
+use crate::{CurveAffine, CurveProjective, EncodedPoint};
 
 pub fn curve_tests<G: CurveProjective>() {
     let mut rng = XorShiftRng::from_seed([
@@ -71,7 +71,7 @@ pub fn curve_tests<G: CurveProjective>() {
 }
 
 fn random_wnaf_tests<G: CurveProjective>() {
-    use wnaf::*;
+    use crate::wnaf::*;
 
     let mut rng = XorShiftRng::from_seed([
         0x59, 0x62, 0xbe, 0x5d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06, 0xbc,
