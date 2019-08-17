@@ -206,7 +206,7 @@ mod tests {
     #[should_panic]
     fn add_panics_on_overflow() {
         let v = Amount(MAX_MONEY);
-        let sum = v + Amount(1);
+        let _sum = v + Amount(1);
     }
 
     #[test]
@@ -220,7 +220,7 @@ mod tests {
     #[should_panic]
     fn sub_panics_on_underflow() {
         let v = Amount(-MAX_MONEY);
-        let diff = v - Amount(1);
+        let _diff = v - Amount(1);
     }
 
     #[test]
