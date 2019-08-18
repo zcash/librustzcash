@@ -1,5 +1,6 @@
 use blake2b_simd::{Hash as Blake2bHash, Params as Blake2bParams, State as Blake2bState};
 use byteorder::{BigEndian, LittleEndian, ReadBytesExt, WriteBytesExt};
+use log::error;
 use std::io::Cursor;
 use std::mem::size_of;
 
@@ -196,13 +197,13 @@ fn distinct_indices(a: &Node, b: &Node) -> bool {
 
 fn validate_subtrees(p: &Params, a: &Node, b: &Node) -> bool {
     if !has_collision(a, b, p.collision_byte_length()) {
-        // error!("Invalid solution: invalid collision length between StepRows");
+        error!("Invalid solution: invalid collision length between StepRows");
         false
     } else if b.indices_before(a) {
-        // error!("Invalid solution: Index tree incorrectly ordered");
+        error!("Invalid solution: Index tree incorrectly ordered");
         false
     } else if !distinct_indices(a, b) {
-        // error!("Invalid solution: duplicate indices");
+        error!("Invalid solution: duplicate indices");
         false
     } else {
         true
