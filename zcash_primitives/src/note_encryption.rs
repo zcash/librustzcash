@@ -106,11 +106,6 @@ impl Memo {
         }
     }
 
-    /// Returns a `Memo` containing the given string, or `None` if the string is too long.
-    pub fn from_str(memo: &str) -> Option<Memo> {
-        Memo::from_bytes(memo.as_bytes())
-    }
-
     /// Returns the underlying bytes of the `Memo`.
     pub fn as_bytes(&self) -> &[u8] {
         &self.0[..]
@@ -131,6 +126,15 @@ impl Memo {
         } else {
             None
         }
+    }
+}
+
+impl str::FromStr for Memo {
+    type Err = ();
+
+    /// Returns a `Memo` containing the given string, or an error if the string is too long.
+    fn from_str(memo: &str) -> Result<Self, Self::Err> {
+        Memo::from_bytes(memo.as_bytes()).ok_or(())
     }
 }
 
@@ -557,6 +561,7 @@ mod tests {
     use pairing::bls12_381::{Bls12, Fr, FrRepr};
     use rand_core::{CryptoRng, RngCore};
     use rand_os::OsRng;
+    use std::str::FromStr;
 
     use super::{
         kdf_sapling, prf_ock, sapling_ka_agree, try_sapling_compact_note_decryption,
@@ -661,16 +666,18 @@ mod tests {
                 0x74, 0x20, 0x65, 0x6e, 0x6f, 0x75, 0x67, 0x68
             ])
         );
-        assert!(Memo::from_str(
-            "thiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiis \
-             iiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiis \
-             aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
-             veeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeryyyyyyyyyyyyyyyyyyyyyyyyyy \
-             looooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooong \
-             meeeeeeeeeeeeeeeeeeemooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo \
-             but it's now a bit too long"
-        )
-        .is_none());
+        assert_eq!(
+            Memo::from_str(
+                "thiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiis \
+                 iiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiis \
+                 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
+                 veeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeryyyyyyyyyyyyyyyyyyyyyyyyyy \
+                 looooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooong \
+                 meeeeeeeeeeeeeeeeeeemooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo \
+                 but it's now a bit too long"
+            ),
+            Err(())
+        );
     }
 
     #[test]
