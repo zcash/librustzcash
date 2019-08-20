@@ -2,7 +2,7 @@ use group::{CurveAffine, CurveProjective};
 use rand_core::SeedableRng;
 use rand_xorshift::XorShiftRng;
 
-use {Engine, Field, PairingCurveAffine, PrimeField};
+use crate::{Engine, Field, PairingCurveAffine, PrimeField};
 
 pub fn engine_tests<E: Engine>() {
     let mut rng = XorShiftRng::from_seed([

@@ -626,7 +626,7 @@ pub mod g1 {
     use group::{CurveAffine, CurveProjective, EncodedPoint, GroupDecodingError};
     use rand_core::RngCore;
     use std::fmt;
-    use {Engine, PairingCurveAffine};
+    use crate::{Engine, PairingCurveAffine};
 
     curve_impl!(
         "G1",
@@ -934,7 +934,7 @@ pub mod g1 {
 
     #[test]
     fn g1_generator() {
-        use SqrtField;
+        use crate::SqrtField;
 
         let mut x = Fq::zero();
         let mut i = 0;
@@ -1295,7 +1295,7 @@ pub mod g2 {
     use group::{CurveAffine, CurveProjective, EncodedPoint, GroupDecodingError};
     use rand_core::RngCore;
     use std::fmt;
-    use {Engine, PairingCurveAffine};
+    use crate::{Engine, PairingCurveAffine};
 
     curve_impl!(
         "G2",
@@ -1640,7 +1640,7 @@ pub mod g2 {
 
     #[test]
     fn g2_generator() {
-        use SqrtField;
+        use crate::SqrtField;
 
         let mut x = Fq2::zero();
         let mut i = 0;

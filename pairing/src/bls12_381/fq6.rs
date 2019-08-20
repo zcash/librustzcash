@@ -378,6 +378,6 @@ fn test_fq6_mul_by_01() {
 fn fq6_field_tests() {
     use ff::PrimeField;
 
-    ::tests::field::random_field_tests::<Fq6>();
-    ::tests::field::random_frobenius_tests::<Fq6, _>(super::fq::Fq::char(), 13);
+    crate::tests::field::random_field_tests::<Fq6>();
+    crate::tests::field::random_frobenius_tests::<Fq6, _>(super::fq::Fq::char(), 13);
 }

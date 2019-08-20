@@ -187,6 +187,6 @@ fn test_fq12_mul_by_014() {
 fn fq12_field_tests() {
     use ff::PrimeField;
 
-    ::tests::field::random_field_tests::<Fq12>();
-    ::tests::field::random_frobenius_tests::<Fq12, _>(super::fq::Fq::char(), 13);
+    crate::tests::field::random_field_tests::<Fq12>();
+    crate::tests::field::random_frobenius_tests::<Fq12, _>(super::fq::Fq::char(), 13);
 }
