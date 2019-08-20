@@ -58,7 +58,7 @@ pub extern fn append(
     generated_count: u32,
     append_count: *mut u32,
     append_buffer: *mut MMRNode,
-) -> MMRNode {
+) {
 
     // TODO: construct tree and write to (append_count, append_buffer)
     // TODO: also return generated??
