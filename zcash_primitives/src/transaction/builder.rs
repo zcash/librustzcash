@@ -7,7 +7,7 @@ use crate::{
 use ff::Field;
 use pairing::bls12_381::{Bls12, Fr};
 use rand::{rngs::OsRng, seq::SliceRandom, CryptoRng, RngCore};
-use zip32::ExtendedSpendingKey;
+use crate::zip32::ExtendedSpendingKey;
 
 use crate::{
     keys::OutgoingViewingKey,

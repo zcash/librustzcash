@@ -75,9 +75,9 @@ pub struct FsRepr(pub [u64; 4]);
 
 impl ::std::fmt::Display for FsRepr {
     fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
-        try!(write!(f, "0x"));
+        r#try!(write!(f, "0x"));
         for i in self.0.iter().rev() {
-            try!(write!(f, "{:016x}", *i));
+            r#try!(write!(f, "{:016x}", *i));
         }
 
         Ok(())

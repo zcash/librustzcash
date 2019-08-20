@@ -12,7 +12,7 @@ use std::io::{self, Read, Write};
 
 use crate::merkle_tree::Hashable;
 use crate::redjubjub::{PrivateKey, PublicKey, Signature};
-use JUBJUB;
+use crate::JUBJUB;
 
 pub const SAPLING_COMMITMENT_TREE_DEPTH: usize = 32;
 

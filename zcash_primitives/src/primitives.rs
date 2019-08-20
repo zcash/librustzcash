@@ -1,14 +1,14 @@
 use ff::{Field, PrimeField, PrimeFieldRepr};
 
-use constants;
+use crate::constants;
 
-use group_hash::group_hash;
+use crate::group_hash::group_hash;
 
-use pedersen_hash::{pedersen_hash, Personalization};
+use crate::pedersen_hash::{pedersen_hash, Personalization};
 
 use byteorder::{LittleEndian, WriteBytesExt};
 
-use jubjub::{edwards, FixedGenerators, JubjubEngine, JubjubParams, PrimeOrder};
+use crate::jubjub::{edwards, FixedGenerators, JubjubEngine, JubjubParams, PrimeOrder};
 
 use blake2s_simd::Params as Blake2sParams;
 

@@ -1,9 +1,9 @@
-use jubjub::{edwards, JubjubEngine, PrimeOrder};
+use crate::jubjub::{edwards, JubjubEngine, PrimeOrder};
 
 use ff::PrimeField;
 
 use blake2s_simd::Params;
-use constants;
+use crate::constants;
 
 /// Produces a random point in the Jubjub curve.
 /// The point is guaranteed to be prime order

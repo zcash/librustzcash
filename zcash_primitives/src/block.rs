@@ -4,7 +4,7 @@ use std::fmt;
 use std::io::{self, Read, Write};
 use std::ops::Deref;
 
-use serialize::Vector;
+use crate::serialize::Vector;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct BlockHash(pub [u8; 32]);

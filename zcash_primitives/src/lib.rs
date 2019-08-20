@@ -43,7 +43,7 @@ pub mod zip32;
 #[cfg(test)]
 mod test_vectors;
 
-use jubjub::JubjubBls12;
+use crate::jubjub::JubjubBls12;
 
 lazy_static! {
     pub static ref JUBJUB: JubjubBls12 = { JubjubBls12::new() };

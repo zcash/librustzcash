@@ -5,8 +5,8 @@ use std::fmt;
 use std::io::{self, Read, Write};
 use std::ops::Deref;
 
-use redjubjub::Signature;
-use serialize::Vector;
+use crate::redjubjub::Signature;
+use crate::serialize::Vector;
 
 pub mod builder;
 pub mod components;

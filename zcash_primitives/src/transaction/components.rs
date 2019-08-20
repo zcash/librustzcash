@@ -4,9 +4,9 @@ use ff::{PrimeField, PrimeFieldRepr};
 use pairing::bls12_381::{Bls12, Fr, FrRepr};
 use std::io::{self, Read, Write};
 
-use legacy::Script;
-use redjubjub::{PublicKey, Signature};
-use JUBJUB;
+use crate::legacy::Script;
+use crate::redjubjub::{PublicKey, Signature};
+use crate::JUBJUB;
 
 pub mod amount;
 pub use self::amount::Amount;
