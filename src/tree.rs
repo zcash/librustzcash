@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use crate::{MMRNode, NodeLink, NodeData};
 
 #[derive(Default)]
-struct Tree {
+pub struct Tree {
     stored: HashMap<u32, MMRNode>,
 
     generated: HashMap<u32, MMRNode>,
@@ -13,6 +13,13 @@ struct Tree {
 
     // number of virtual nodes generated
     generated_count: u32,
+}
+
+/// plain list of nodes that has to be appended to the end of the tree as the result of append operation
+/// along with new root
+pub struct AppendTransaction {
+    pub appended: Vec<NodeLink>,
+    pub new_root: NodeLink,
 }
 
 impl Tree {
@@ -60,14 +67,64 @@ impl Tree {
 
         result
     }
+
+
+    pub fn append(&mut self, root: NodeLink, new_leaf: NodeData) -> AppendTransaction {
+
+        let is_complete= self.resolve_link(root).node.complete();
+
+        let (new_root_node, mut appended) = if is_complete {
+            let new_leaf_link = self.push(new_leaf.into());
+
+            let mut appended = Vec::new();
+            appended.push(new_leaf_link);
+
+            // since we dethrone stored root, new one is always generated
+            let new_root_node = combine_nodes(
+                self.resolve_link(root),
+                self.resolve_link(new_leaf_link),
+            );
+
+            (new_root_node, appended)
+
+
+        } else {
+            let (root_left_child, root_right_child) = {
+                let root = self.resolve_link(root).node;
+                (
+                    root.left.expect("Root should always have left child"),
+                    root.right.expect("Root should always have right child"),
+                )
+            };
+
+            let nested_append = self.append(root_right_child, new_leaf);
+            let appended = nested_append.appended;
+            let subtree_root = nested_append.new_root;
+
+            let new_root_node = combine_nodes(
+                self.resolve_link(root_left_child),
+                self.resolve_link(subtree_root),
+            );
+
+            (new_root_node, appended)
+        };
+
+        let new_root = if new_root_node.complete() {
+            let new_root= self.push(new_root_node);
+            appended.push(new_root);
+            new_root
+        } else {
+            self.push_generated(new_root_node)
+        };
+
+        AppendTransaction {
+            new_root,
+            appended,
+        }
+    }
+
 }
 
-/// plain list of nodes that has to be appended to the end of the tree as the result of append operation
-/// along with new root
-pub struct AppendTransaction {
-    pub appended: Vec<NodeLink>,
-    pub new_root: NodeLink,
-}
 
 struct IndexedNode<'a> {
     node: &'a MMRNode,
@@ -101,64 +158,10 @@ fn combine_nodes<'a>(left: IndexedNode<'a>, right: IndexedNode<'a>) -> MMRNode {
     }
 }
 
-fn append(tree: &mut Tree, root: NodeLink, new_leaf: NodeData) -> AppendTransaction {
-
-    let is_complete= tree.resolve_link(root).node.complete();
-
-    let (new_root_node, mut appended) = if is_complete {
-        let new_leaf_link = tree.push(new_leaf.into());
-
-        let mut appended = Vec::new();
-        appended.push(new_leaf_link);
-
-        // since we dethrone stored root, new one is always generated
-        let new_root_node = combine_nodes(
-            tree.resolve_link(root),
-            tree.resolve_link(new_leaf_link),
-        );
-
-        (new_root_node, appended)
-
-
-    } else {
-        let (root_left_child, root_right_child) = {
-            let root = tree.resolve_link(root).node;
-            (
-                root.left.expect("Root should always have left child"),
-                root.right.expect("Root should always have right child"),
-            )
-        };
-
-        let nested_append = append(tree, root_right_child, new_leaf);
-        let mut appended = nested_append.appended;
-        let subtree_root = nested_append.new_root;
-
-        let new_root_node = combine_nodes(
-            tree.resolve_link(root_left_child),
-            tree.resolve_link(subtree_root),
-        );
-
-        (new_root_node, appended)
-    };
-
-    let new_root = if new_root_node.complete() {
-        let new_root= tree.push(new_root_node);
-        appended.push(new_root);
-        new_root
-    } else {
-        tree.push_generated(new_root_node)
-    };
-
-    AppendTransaction {
-        new_root,
-        appended,
-    }
-}
-
 #[cfg(test)]
 mod tests {
 
-    use super::{MMRNode, NodeData, Tree, append, NodeLink};
+    use super::{MMRNode, NodeData, Tree, NodeLink};
 
     fn leaf(height: u32) -> NodeData {
         NodeData {
@@ -198,7 +201,6 @@ mod tests {
         }
     }
 
-    // size should be power of 2-1
     fn initial() -> Tree {
         let node1: MMRNode = leaf(1).into();
         let node2: MMRNode = leaf(2).into();
@@ -215,10 +217,7 @@ mod tests {
     #[test]
     fn discrete_append() {
         let mut tree = initial();
-        let append_tx = append(
-            &mut tree, NodeLink::Stored(2),
-            leaf(3)
-        );
+        let append_tx = tree.append(NodeLink::Stored(2), leaf(3));
         let new_root_link = append_tx.new_root;
         let new_root = tree.resolve_link(new_root_link).node;
 
@@ -238,7 +237,7 @@ mod tests {
         assert_eq!(new_root.data.end_height, 3);
         assert_eq!(append_tx.appended.len(), 1);
 
-        let append_tx = append(&mut tree, new_root_link, leaf(4));
+        let append_tx = tree.append(new_root_link, leaf(4));
         let new_root_link = append_tx.new_root;
         let new_root = tree.resolve_link(new_root_link).node;
 
@@ -261,7 +260,7 @@ mod tests {
         assert_eq!(new_root.data.end_height, 4);
         assert_eq!(append_tx.appended.len(), 3);
 
-        let append_tx = append(&mut tree, new_root_link, leaf(5));
+        let append_tx = tree.append(new_root_link, leaf(5));
         let new_root_link = append_tx.new_root;
         let new_root = tree.resolve_link(new_root_link).node;
 

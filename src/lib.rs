@@ -4,6 +4,8 @@
 
 mod tree;
 
+pub use tree::Tree;
+
 #[repr(C)]
 #[derive(Debug)]
 pub struct NodeData {
@@ -50,12 +52,12 @@ impl From<NodeData> for MMRNode {
 
 #[no_mangle]
 pub extern fn append(
-    stored: *const MMRNode,
-    stored_count: u32,
-    generated: *const MMRNode,
-    generated_count: u32,
-    append_count: *mut u32,
-    append_buffer: *mut MMRNode,
+    _stored: *const MMRNode,
+    _stored_count: u32,
+    _generated: *const MMRNode,
+    _generated_count: u32,
+    _append_count: *mut u32,
+    _append_buffer: *mut MMRNode,
 ) {
 
     // TODO: construct tree and write to (append_count, append_buffer)
