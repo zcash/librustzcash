@@ -26,12 +26,12 @@ where
     assert_eq!(personalization.len(), 6);
 
     let mut edwards_result = None;
-    let mut bits = personalization.iter().chain(bits.iter());
+    let mut bits = personalization.iter().chain(bits.iter()).peekable();
     let mut segment_generators = params.pedersen_circuit_generators().iter();
     let boolean_false = Boolean::constant(false);
 
     let mut segment_i = 0;
-    loop {
+    while bits.peek().is_some() {
         let mut segment_result = None;
         let mut segment_windows = &segment_generators.next().expect("enough segments")[..];
 
@@ -72,32 +72,28 @@ where
             window_i += 1;
         }
 
-        match segment_result {
-            Some(segment_result) => {
-                // Convert this segment into twisted Edwards form.
-                let segment_result = segment_result.into_edwards(
-                    cs.namespace(|| format!("conversion of segment {} into edwards", segment_i)),
+        let segment_result = segment_result.expect(
+            "bits is not exhausted due to while condition;
+                    thus there must be a segment window;
+                    thus there must be a segment result",
+        );
+
+        // Convert this segment into twisted Edwards form.
+        let segment_result = segment_result.into_edwards(
+            cs.namespace(|| format!("conversion of segment {} into edwards", segment_i)),
+            params,
+        )?;
+
+        match edwards_result {
+            Some(ref mut edwards_result) => {
+                *edwards_result = segment_result.add(
+                    cs.namespace(|| format!("addition of segment {} to accumulator", segment_i)),
+                    edwards_result,
                     params,
                 )?;
-
-                match edwards_result {
-                    Some(ref mut edwards_result) => {
-                        *edwards_result = segment_result.add(
-                            cs.namespace(|| {
-                                format!("addition of segment {} to accumulator", segment_i)
-                            }),
-                            edwards_result,
-                            params,
-                        )?;
-                    }
-                    None => {
-                        edwards_result = Some(segment_result);
-                    }
-                }
             }
             None => {
-                // We didn't process any new bits.
-                break;
+                edwards_result = Some(segment_result);
             }
         }
 
