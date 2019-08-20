@@ -2,8 +2,6 @@
 //!
 //! To be used in zebra and via FFI bindings in zcashd
 
-extern crate owning_ref;
-
 mod tree;
 
 #[repr(C)]
