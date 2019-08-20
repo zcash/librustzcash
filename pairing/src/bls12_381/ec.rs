@@ -622,11 +622,11 @@ macro_rules! curve_impl {
 pub mod g1 {
     use super::super::{Bls12, Fq, Fq12, FqRepr, Fr, FrRepr};
     use super::g2::G2Affine;
+    use crate::{Engine, PairingCurveAffine};
     use ff::{BitIterator, Field, PrimeField, PrimeFieldRepr, SqrtField};
     use group::{CurveAffine, CurveProjective, EncodedPoint, GroupDecodingError};
     use rand_core::RngCore;
     use std::fmt;
-    use crate::{Engine, PairingCurveAffine};
 
     curve_impl!(
         "G1",
@@ -1291,11 +1291,11 @@ pub mod g1 {
 pub mod g2 {
     use super::super::{Bls12, Fq, Fq12, Fq2, FqRepr, Fr, FrRepr};
     use super::g1::G1Affine;
+    use crate::{Engine, PairingCurveAffine};
     use ff::{BitIterator, Field, PrimeField, PrimeFieldRepr, SqrtField};
     use group::{CurveAffine, CurveProjective, EncodedPoint, GroupDecodingError};
     use rand_core::RngCore;
     use std::fmt;
-    use crate::{Engine, PairingCurveAffine};
 
     curve_impl!(
         "G2",

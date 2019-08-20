@@ -1,5 +1,6 @@
 //! Structs for building transactions.
 
+use crate::zip32::ExtendedSpendingKey;
 use crate::{
     jubjub::fs::Fs,
     primitives::{Diversifier, Note, PaymentAddress},
@@ -7,7 +8,6 @@ use crate::{
 use ff::Field;
 use pairing::bls12_381::{Bls12, Fr};
 use rand::{rngs::OsRng, seq::SliceRandom, CryptoRng, RngCore};
-use crate::zip32::ExtendedSpendingKey;
 
 use crate::{
     keys::OutgoingViewingKey,
