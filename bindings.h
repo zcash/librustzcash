@@ -49,11 +49,11 @@ struct MMRNode {
 
 extern "C" {
 
-void append(const MMRNode *stored,
-            uint32_t stored_count,
-            const MMRNode *generated,
-            uint32_t generated_count,
-            uint32_t *append_count,
-            MMRNode *append_buffer);
+void append(const MMRNode *_stored,
+            uint32_t _stored_count,
+            const MMRNode *_generated,
+            uint32_t _generated_count,
+            uint32_t *_append_count,
+            MMRNode *_append_buffer);
 
 } // extern "C"
