@@ -13,6 +13,7 @@ description = "Pairing-friendly elliptic curve library"
 documentation = "https://docs.rs/pairing/"
 homepage = "https://github.com/ebfull/pairing"
 repository = "https://github.com/ebfull/pairing"
+edition ="2018"
 
 [dependencies]
 byteorder = "1"

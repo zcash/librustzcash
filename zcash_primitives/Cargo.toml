@@ -4,6 +4,7 @@ version = "0.0.0"
 authors = [
     "Jack Grigg <jack@z.cash>",
 ]
+edition = "2018"
 
 [dependencies]
 aes = "0.3"
