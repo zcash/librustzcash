@@ -1,25 +1,9 @@
 #[macro_use]
 extern crate lazy_static;
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 #[cfg(test)]
 #[macro_use]
 extern crate hex_literal;
-
-
 
 pub mod block;
 pub mod constants;

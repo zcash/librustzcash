@@ -11,13 +11,6 @@
 // Force public structures to implement Debug
 #![deny(missing_debug_implementations)]
 
-
-
-
-
-
-
-
 #[cfg(test)]
 pub mod tests;
 

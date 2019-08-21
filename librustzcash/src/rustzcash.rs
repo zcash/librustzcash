@@ -1,15 +1,3 @@
-
-
-
-
-
-
-
-
-
-
-
-
 use lazy_static;
 
 use ff::{PrimeField, PrimeFieldRepr};

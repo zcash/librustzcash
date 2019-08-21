@@ -1,7 +1,3 @@
-
-
-
-
 use ff::{PrimeField, PrimeFieldDecodingError, ScalarEngine, SqrtField};
 use rand::RngCore;
 use std::error::Error;
