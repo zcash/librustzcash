@@ -3,6 +3,7 @@
 use ff::{PrimeField, PrimeFieldRepr};
 use pairing::bls12_381::{Bls12, Fr, FrRepr};
 use std::collections::HashSet;
+use subtle::{ConditionallySelectable, ConstantTimeEq, CtOption};
 use zcash_primitives::{
     jubjub::{edwards, fs::Fs},
     merkle_tree::{CommitmentTree, IncrementalWitness},
@@ -116,28 +117,29 @@ pub fn scan_block(
         let num_outputs = tx.outputs.len();
 
         // Check for spent notes
-        let shielded_spends: Vec<_> =
-            tx.spends
-                .into_iter()
-                .enumerate()
-                .filter_map(|(index, spend)| {
-                    if let Some(account) = nullifiers.iter().find_map(|&(nf, acc)| {
-                        if nf == &spend.nf[..] {
-                            Some(acc)
-                        } else {
-                            None
-                        }
-                    }) {
-                        Some(WalletShieldedSpend {
-                            index,
-                            nf: spend.nf,
-                            account,
-                        })
-                    } else {
-                        None
-                    }
-                })
-                .collect();
+        // The only step that is not constant-time is the filter() at the end.
+        let shielded_spends: Vec<_> = tx
+            .spends
+            .into_iter()
+            .enumerate()
+            .map(|(index, spend)| {
+                // Find the first tracked nullifier that matches this spend, and produce
+                // a WalletShieldedSpend if there is a match, in constant time.
+                nullifiers
+                    .iter()
+                    .map(|&(nf, account)| CtOption::new(account as u64, nf.ct_eq(&spend.nf[..])))
+                    .fold(CtOption::new(0, 0.into()), |first, next| {
+                        CtOption::conditional_select(&next, &first, first.is_some())
+                    })
+                    .map(|account| WalletShieldedSpend {
+                        index,
+                        nf: spend.nf,
+                        account: account as usize,
+                    })
+            })
+            .filter(|spend| spend.is_some().into())
+            .map(|spend| spend.unwrap())
+            .collect();
 
         // Collect the set of accounts that were spent from in this transaction
         let spent_from_accounts: HashSet<_> =
