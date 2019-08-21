@@ -7,7 +7,7 @@ use zcash_primitives::{
 
 use super::JUBJUB;
 
-use {
+use crate::{
     librustzcash_ask_to_ak, librustzcash_check_diversifier, librustzcash_crh_ivk,
     librustzcash_ivk_to_pkd, librustzcash_nsk_to_nk,
 };
