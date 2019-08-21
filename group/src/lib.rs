@@ -1,6 +1,6 @@
-extern crate ff;
-extern crate rand;
-extern crate rand_xorshift;
+
+
+
 
 use ff::{PrimeField, PrimeFieldDecodingError, ScalarEngine, SqrtField};
 use rand::RngCore;
@@ -180,7 +180,7 @@ impl Error for GroupDecodingError {
 }
 
 impl fmt::Display for GroupDecodingError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
         match *self {
             GroupDecodingError::CoordinateDecodingError(description, ref err) => {
                 write!(f, "{} decoding error: {}", description, err)
