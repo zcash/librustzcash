@@ -74,7 +74,7 @@ const NEGATIVE_ONE: Fs = Fs(FsRepr([
 pub struct FsRepr(pub [u64; 4]);
 
 impl ::std::fmt::Display for FsRepr {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
         r#write!(f, "0x")?;
         for i in self.0.iter().rev() {
             r#write!(f, "{:016x}", *i)?;
@@ -257,7 +257,7 @@ impl PrimeFieldRepr for FsRepr {
 pub struct Fs(FsRepr);
 
 impl ::std::fmt::Display for Fs {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
         write!(f, "Fs({})", self.into_repr())
     }
 }
