@@ -1,11 +1,3 @@
-extern crate bellman;
-extern crate ff;
-extern crate pairing;
-extern crate rand_core;
-extern crate rand_xorshift;
-extern crate zcash_primitives;
-extern crate zcash_proofs;
-
 use bellman::groth16::*;
 use ff::Field;
 use pairing::bls12_381::{Bls12, Fr};
