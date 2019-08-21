@@ -143,7 +143,7 @@ pub extern "system" fn librustzcash_init_zksnark_params(
     let output_path = Path::new(OsStr::from_bytes(unsafe {
         slice::from_raw_parts(output_path, output_path_len)
     }));
-    let sprout_path = if sprout_path.is_null() && sprout_path_len == 0 {
+    let sprout_path = if sprout_path.is_null() {
         None
     } else {
         Some(Path::new(OsStr::from_bytes(unsafe {
@@ -178,7 +178,7 @@ pub extern "system" fn librustzcash_init_zksnark_params(
         OsString::from_wide(unsafe { slice::from_raw_parts(spend_path, spend_path_len) });
     let output_path =
         OsString::from_wide(unsafe { slice::from_raw_parts(output_path, output_path_len) });
-    let sprout_path = if sprout_path.is_null() && sprout_path_len == 0 {
+    let sprout_path = if sprout_path.is_null() {
         None
     } else {
         Some(OsStr::from_wide(unsafe {
@@ -215,7 +215,7 @@ fn init_zksnark_params(
         .to_str()
         .expect("hash should be a valid string");
 
-    let sprout_hash_option = if sprout_path.is_none() {
+    let sprout_hash = if sprout_path.is_none() {
         None
     } else {
         Some(
@@ -232,7 +232,7 @@ fn init_zksnark_params(
         output_path,
         output_hash,
         sprout_path,
-        sprout_hash_option,
+        sprout_hash,
     );
 
     // Caller is responsible for calling this function once, so
