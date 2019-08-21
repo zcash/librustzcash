@@ -12,7 +12,7 @@ pub struct Fq2 {
 }
 
 impl ::std::fmt::Display for Fq2 {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
         write!(f, "Fq2({} + {} * u)", self.c0, self.c1)
     }
 }

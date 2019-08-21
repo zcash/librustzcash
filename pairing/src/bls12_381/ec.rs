@@ -18,7 +18,7 @@ macro_rules! curve_impl {
         }
 
         impl ::std::fmt::Display for $affine {
-            fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+            fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
                 if self.infinity {
                     write!(f, "{}(Infinity)", $name)
                 } else {
@@ -35,7 +35,7 @@ macro_rules! curve_impl {
         }
 
         impl ::std::fmt::Display for $projective {
-            fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+            fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
                 write!(f, "{}", self.into_affine())
             }
         }
@@ -656,7 +656,7 @@ pub mod g1 {
     }
 
     impl fmt::Debug for G1Uncompressed {
-        fn fmt(&self, formatter: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+        fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
             self.0[..].fmt(formatter)
         }
     }
@@ -766,7 +766,7 @@ pub mod g1 {
     }
 
     impl fmt::Debug for G1Compressed {
-        fn fmt(&self, formatter: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+        fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
             self.0[..].fmt(formatter)
         }
     }
@@ -1325,7 +1325,7 @@ pub mod g2 {
     }
 
     impl fmt::Debug for G2Uncompressed {
-        fn fmt(&self, formatter: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+        fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
             self.0[..].fmt(formatter)
         }
     }
@@ -1451,7 +1451,7 @@ pub mod g2 {
     }
 
     impl fmt::Debug for G2Compressed {
-        fn fmt(&self, formatter: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+        fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
             self.0[..].fmt(formatter)
         }
     }

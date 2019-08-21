@@ -11,13 +11,12 @@
 // Force public structures to implement Debug
 #![deny(missing_debug_implementations)]
 
-extern crate byteorder;
-extern crate ff;
-extern crate group;
-extern crate rand_core;
 
-#[cfg(test)]
-extern crate rand_xorshift;
+
+
+
+
+
 
 #[cfg(test)]
 pub mod tests;
