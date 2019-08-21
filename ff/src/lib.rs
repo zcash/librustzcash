@@ -1,7 +1,7 @@
 #![allow(unused_imports)]
 
-extern crate byteorder;
-extern crate rand_core;
+
+
 
 #[cfg(feature = "derive")]
 #[macro_use]
@@ -210,7 +210,7 @@ impl Error for PrimeFieldDecodingError {
 }
 
 impl fmt::Display for PrimeFieldDecodingError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
         match *self {
             PrimeFieldDecodingError::NotInField(ref repr) => {
                 write!(f, "{} is not an element of the field", repr)
