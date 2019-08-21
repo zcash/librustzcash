@@ -1,8 +1,5 @@
 #![allow(unused_imports)]
 
-
-
-
 #[cfg(feature = "derive")]
 #[macro_use]
 extern crate ff_derive;
