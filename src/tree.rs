@@ -22,6 +22,11 @@ pub struct AppendTransaction {
     pub new_root: NodeLink,
 }
 
+pub struct DeleteTransaction {
+    pub truncated: u32,
+    pub new_root: NodeLink,
+}
+
 impl Tree {
     fn resolve_link(&self, link: NodeLink) -> IndexedNode {
         match link {
@@ -58,6 +63,7 @@ impl Tree {
         NodeLink::Generated(idx)
     }
 
+    // TODO: populate both stored and generated nodes?
     pub fn populate(loaded: Vec<MMRNode>) -> Self {
         let mut result = Tree::default();
         result.stored_count = loaded.len() as u32;
@@ -69,7 +75,7 @@ impl Tree {
     }
 
 
-    pub fn append(&mut self, root: NodeLink, new_leaf: NodeData) -> AppendTransaction {
+    pub fn append_leaf(&mut self, root: NodeLink, new_leaf: NodeData) -> AppendTransaction {
 
         let is_complete= self.resolve_link(root).node.complete();
 
@@ -86,8 +92,6 @@ impl Tree {
             );
 
             (new_root_node, appended)
-
-
         } else {
             let (root_left_child, root_right_child) = {
                 let root = self.resolve_link(root).node;
@@ -97,7 +101,7 @@ impl Tree {
                 )
             };
 
-            let nested_append = self.append(root_right_child, new_leaf);
+            let nested_append = self.append_leaf(root_right_child, new_leaf);
             let appended = nested_append.appended;
             let subtree_root = nested_append.new_root;
 
@@ -123,6 +127,61 @@ impl Tree {
         }
     }
 
+    fn pop(&mut self) {
+        self.stored.remove(&(self.stored_count-1));
+        self.stored_count = self.stored_count - 1;
+    }
+
+    pub fn truncate_leaf(&mut self, root: NodeLink) -> DeleteTransaction {
+        let root = {
+            let n = self.resolve_link(root);
+            let leaves = n.node.data.end_height - n.node.data.start_height + 1;
+            if leaves & 1 != 0 {
+                return DeleteTransaction {
+                    truncated: 1,
+                    new_root: n.node.left.expect("Root should have left child while deleting"),
+                }
+            } else {
+                n
+            }
+        };
+
+        let mut peaks = vec![root.node.left.expect("Root should have left child")];
+        let mut subtree_root_link = root.node.right.expect("Root should have right child");
+        let mut truncated = 1;
+
+        loop {
+            let left_link = self.resolve_link(subtree_root_link).node.left;
+            if let Some(left_link) = left_link {
+                peaks.push(left_link);
+                subtree_root_link = self
+                    .resolve_link(subtree_root_link).node.right
+                    .expect("If left exists, right should exist as well");
+                truncated += 1;
+            } else {
+                break;
+            }
+        }
+
+        let root = peaks.drain(0..1).nth(0).expect("At lest 2 elements in peaks");
+        let new_root = peaks.into_iter().fold(
+            root,
+            |root, next_peak|
+                self.push_generated(
+                    combine_nodes(
+                        self.resolve_link(root),
+                        self.resolve_link(next_peak)
+                    )
+                )
+        );
+
+        for _ in 0..truncated { self.pop(); }
+
+        DeleteTransaction {
+            new_root,
+            truncated,
+        }
+    }
 }
 
 
@@ -165,7 +224,6 @@ mod tests {
 
     fn leaf(height: u32) -> NodeData {
         NodeData {
-            // TODO: hash children
             subtree_commitment: [0u8; 32],
             start_time: 0,
             end_time: 0,
@@ -173,8 +231,6 @@ mod tests {
             end_target: 0,
             start_sapling_root: [0u8; 32],
             end_sapling_root: [0u8; 32],
-
-            // TODO: sum work?
             subtree_total_work: 0,
             start_height: height,
             end_height: height,
@@ -184,7 +240,6 @@ mod tests {
 
     fn node(start_height: u32, end_height: u32) -> NodeData {
         NodeData {
-            // TODO: hash children
             subtree_commitment: [0u8; 32],
             start_time: 0,
             end_time: 0,
@@ -192,8 +247,6 @@ mod tests {
             end_target: 0,
             start_sapling_root: [0u8; 32],
             end_sapling_root: [0u8; 32],
-
-            // TODO: sum work?
             subtree_total_work: 0,
             start_height: start_height,
             end_height: end_height,
@@ -214,10 +267,23 @@ mod tests {
         Tree::populate(vec![node1, node2, node3])
     }
 
+    // returns tree with specified number of leafs and it's root
+    fn generated(length: u32) -> (Tree, NodeLink) {
+        assert!(length > 3);
+        let mut tree = initial();
+        let mut root = NodeLink::Stored(2);
+
+        for i in 2..length {
+            root = tree.append_leaf(root, leaf(i+1).into()).new_root;
+        }
+
+        (tree, root)
+    }
+
     #[test]
     fn discrete_append() {
         let mut tree = initial();
-        let append_tx = tree.append(NodeLink::Stored(2), leaf(3));
+        let append_tx = tree.append_leaf(NodeLink::Stored(2), leaf(3));
         let new_root_link = append_tx.new_root;
         let new_root = tree.resolve_link(new_root_link).node;
 
@@ -237,7 +303,7 @@ mod tests {
         assert_eq!(new_root.data.end_height, 3);
         assert_eq!(append_tx.appended.len(), 1);
 
-        let append_tx = tree.append(new_root_link, leaf(4));
+        let append_tx = tree.append_leaf(new_root_link, leaf(4));
         let new_root_link = append_tx.new_root;
         let new_root = tree.resolve_link(new_root_link).node;
 
@@ -260,7 +326,7 @@ mod tests {
         assert_eq!(new_root.data.end_height, 4);
         assert_eq!(append_tx.appended.len(), 3);
 
-        let append_tx = tree.append(new_root_link, leaf(5));
+        let append_tx = tree.append_leaf(new_root_link, leaf(5));
         let new_root_link = append_tx.new_root;
         let new_root = tree.resolve_link(new_root_link).node;
 
@@ -284,6 +350,18 @@ mod tests {
         // and new root, (8g) is generated one
         assert_eq!(new_root.data.end_height, 5);
         assert_eq!(append_tx.appended.len(), 1);
+    }
+
+    #[test]
+    fn truncate_simple() {
+        let (mut tree, root) = generated(9);
+        let delete_tx = tree.truncate_leaf(root);
+
+        match delete_tx.new_root {
+            NodeLink::Stored(14) => { /* ok */ },
+            _ => panic!("Root should be stored(14)")
+        }
+
     }
 
 }
