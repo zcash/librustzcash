@@ -378,8 +378,6 @@ mod tests {
         assert_eq!(append_tx.appended.len(), 1);
     }
 
-    // TODO: use assert_matches below
-
     #[test]
     fn truncate_simple() {
         let (mut tree, root) = generated(9);
@@ -409,10 +407,7 @@ mod tests {
         // so (15) is truncated
         // and new root, (14) is a stored one now
 
-        match delete_tx.new_root {
-            NodeLink::Stored(14) => { /* ok */ },
-            _ => panic!("Root should be stored(14)")
-        }
+        assert_matches!(delete_tx.new_root, NodeLink::Stored(14));
         assert_eq!(tree.len(), 15);
     }
 
@@ -445,10 +440,8 @@ mod tests {
         //           (0)  (1) (3)   (4) (7)   (8)  (10)  (11)    (15)
 
         // new root is generated
-        match delete_tx.new_root {
-            NodeLink::Generated(_) => { /* ok */ },
-            _ => panic!("Root now should be generated")
-        }
+
+        assert_matches!(delete_tx.new_root, NodeLink::Generated(_));
 
         // left is 14 and right is 15
         let (left_root_child, right_root_child) = {
@@ -459,10 +452,12 @@ mod tests {
                 root.node.right.expect("there should be right child for root"),
             )
         };
-        match (left_root_child, right_root_child) {
-            (NodeLink::Stored(14), NodeLink::Stored(15)) => { /* ok */ },
-            _ => panic!("Root should have s(14) and s(15) children")
-        };
+
+        assert_matches!(
+            (left_root_child, right_root_child),
+            (NodeLink::Stored(14), NodeLink::Stored(15))
+        );
+
         // two stored nodes should leave us (leaf 16 and no longer needed node 17)
         assert_eq!(delete_tx.truncated, 2);
         assert_eq!(tree.len(), 16);

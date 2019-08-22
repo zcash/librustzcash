@@ -3,3 +3,6 @@ name = "zcash-mmr"
 version = "0.1.0"
 authors = ["NikVolf <nikvolf@gmail.com>"]
 edition = "2018"
+
+[dev-dependencies]
+assert_matches = "1.3.0"
