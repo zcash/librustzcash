@@ -76,13 +76,34 @@ impl Tree {
         NodeLink::Generated(idx)
     }
 
-    /// Populate tree with plain list of the leaves/nodes. Mostly for test,
+    /// Populate tree with plain list of the leaves/nodes. Mostly for tests,
     /// since this `Tree` structure is for partially loaded tree.
     pub fn populate(loaded: Vec<MMRNode>) -> Self {
         let mut result = Tree::default();
         result.stored_count = loaded.len() as u32;
         for (idx, item) in loaded.into_iter().enumerate() {
             result.stored.insert(idx as u32, item);
+        }
+
+        result
+    }
+
+    pub fn new(
+        length: u32,
+        stored: Vec<(u32, MMRNode)>,
+        generated: Vec<MMRNode>,
+    ) -> Self {
+        let mut result = Tree::default();
+        result.stored_count = length;
+
+        for (idx, node) in stored.into_iter() {
+            result.stored.insert(idx, node);
+        }
+
+        result.generated_count = generated.len() as u32;
+
+        for (idx, node) in generated.into_iter().enumerate() {
+            result.generated.insert(idx as u32, node);
         }
 
         result
