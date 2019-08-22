@@ -181,6 +181,10 @@ impl Tree {
             truncated,
         }
     }
+
+    pub fn len(&self) -> u32 {
+        self.stored_count
+    }
 }
 
 
@@ -387,5 +391,8 @@ mod tests {
             (NodeLink::Stored(14), NodeLink::Stored(15)) => { /* ok */ },
             _ => panic!("Root should have s(14) and s(15) children")
         };
+
+        assert_eq!(delete_tx.truncated, 2);
+        assert_eq!(tree.len(), 16);
     }
 }
