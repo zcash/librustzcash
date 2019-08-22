@@ -361,7 +361,5 @@ mod tests {
             NodeLink::Stored(14) => { /* ok */ },
             _ => panic!("Root should be stored(14)")
         }
-
     }
-
 }
