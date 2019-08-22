@@ -6,6 +6,7 @@ mod tree;
 
 pub use tree::Tree;
 
+/// Node metadata.
 #[repr(C)]
 #[derive(Debug)]
 pub struct NodeData {
@@ -22,15 +23,20 @@ pub struct NodeData {
     shielded_tx: u64,
 }
 
+/// Reference to to the tree node.
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
 pub enum NodeLink {
+    /// Reference to the stored (in the array representation) leaf/node.
     Stored(u32),
+    /// Reference to the generated leaf/node.
     Generated(u32),
 }
 
+/// MMR Node. It is leaf when `left`, `right` are `None` and node when they are not.
 #[repr(C)]
 #[derive(Debug)]
+// TODO: Better layout would be enum (node, leaf), with left, right set only for nodes?
 pub struct MMRNode {
     left: Option<NodeLink>,
     right: Option<NodeLink>,

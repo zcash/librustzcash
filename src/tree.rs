@@ -2,6 +2,13 @@ use std::collections::HashMap;
 
 use crate::{MMRNode, NodeLink, NodeData};
 
+/// Represents partially loaded tree.
+///
+/// Some kind of "view" into the array representation of the MMR tree.
+/// With only some of the leaves/nodes pre-loaded / pre-generated.
+/// Exact amount of the loaded data can be calculated by the constructing party,
+/// depending on the length of the tree and maximum amount of operations that are going
+/// to happen after construction.
 #[derive(Default)]
 pub struct Tree {
     stored: HashMap<u32, MMRNode>,
@@ -15,15 +22,21 @@ pub struct Tree {
     generated_count: u32,
 }
 
-/// plain list of nodes that has to be appended to the end of the tree as the result of append operation
-/// along with new root
+/// Result of appending one or several leaves.
 pub struct AppendTransaction {
+    /// Plain list of nodes that has to be appended to the end of the array representation
+    /// of the tree as the result of append operation.
     pub appended: Vec<NodeLink>,
+
+    /// New root as a result of the operation (can be generated one).
     pub new_root: NodeLink,
 }
 
+/// Result of truncating one or severl leaves.
 pub struct DeleteTransaction {
+    /// Number of leaves that should be dropped from the end of the list.
     pub truncated: u32,
+    /// New root as the result of the operation (can be generated one).
     pub new_root: NodeLink,
 }
 
@@ -63,7 +76,8 @@ impl Tree {
         NodeLink::Generated(idx)
     }
 
-    // TODO: populate both stored and generated nodes?
+    /// Populate tree with plain list of the leaves/nodes. Mostly for test,
+    /// since this `Tree` structure is for partially loaded tree.
     pub fn populate(loaded: Vec<MMRNode>) -> Self {
         let mut result = Tree::default();
         result.stored_count = loaded.len() as u32;
@@ -74,6 +88,7 @@ impl Tree {
         result
     }
 
+    /// Append one leaf to the tree.
     pub fn append_leaf(&mut self, root: NodeLink, new_leaf: NodeData) -> AppendTransaction {
 
         let is_complete= self.resolve_link(root).node.complete();
@@ -131,17 +146,24 @@ impl Tree {
         self.stored_count = self.stored_count - 1;
     }
 
+    /// Truncate one leaf from the end of the tree.
     pub fn truncate_leaf(&mut self, root: NodeLink) -> DeleteTransaction {
         let root = {
-            let n = self.resolve_link(root);
-            let leaves = n.node.data.end_height - n.node.data.start_height + 1;
+            let (leaves, root_left_child) = {
+                let n = self.resolve_link(root);
+                (
+                    n.node.data.end_height - n.node.data.start_height + 1,
+                    n.node.left.expect("Root should have left child while deleting")
+                )
+            };
             if leaves & 1 != 0 {
+                self.pop();
                 return DeleteTransaction {
                     truncated: 1,
-                    new_root: n.node.left.expect("Root should have left child while deleting"),
+                    new_root: root_left_child,
                 }
             } else {
-                n
+                self.resolve_link(root)
             }
         };
 
@@ -182,6 +204,7 @@ impl Tree {
         }
     }
 
+    /// Length of array representation of the tree.
     pub fn len(&self) -> u32 {
         self.stored_count
     }
@@ -440,6 +463,7 @@ mod tests {
             (NodeLink::Stored(14), NodeLink::Stored(15)) => { /* ok */ },
             _ => panic!("Root should have s(14) and s(15) children")
         };
+        // two stored nodes should leave us (leaf 16 and no longer needed node 17)
         assert_eq!(delete_tx.truncated, 2);
         assert_eq!(tree.len(), 16);
     }
