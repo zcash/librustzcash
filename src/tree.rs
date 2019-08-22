@@ -362,10 +362,35 @@ mod tests {
         let (mut tree, root) = generated(9);
         let delete_tx = tree.truncate_leaf(root);
 
+        // initial tree:
+        //
+        //                               (-------16g------)
+        //                              /                  \
+        //                    (--------14-------)           \
+        //                   /                   \           \
+        //                 ( 6 )              (  13  )        \
+        //                /     \            /        \        \
+        //             (2)       (5)       (9)        (12)      \
+        //             /  \     /   \     /   \      /    \      \
+        //           (0)  (1) (3)   (4) (7)   (8)  (10)  (11)    (15)
+        //
+        // new tree:
+        //                    (--------14-------)
+        //                   /                   \
+        //                 ( 6 )              (  13  )
+        //                /     \            /        \
+        //             (2)       (5)       (9)        (12)
+        //             /  \     /   \     /   \      /    \
+        //           (0)  (1) (3)   (4) (7)   (8)  (10)  (11)
+        //
+        // so (15) is truncated
+        // and new root, (14) is a stored one now
+
         match delete_tx.new_root {
             NodeLink::Stored(14) => { /* ok */ },
             _ => panic!("Root should be stored(14)")
         }
+        assert_eq!(tree.len(), 15);
     }
 
     #[test]
@@ -373,11 +398,36 @@ mod tests {
         let (mut tree, root) = generated(10);
         let delete_tx = tree.truncate_leaf(root);
 
+        // initial tree:
+        //
+        //                               (--------18g--------)
+        //                              /                     \
+        //                    (--------14-------)              \
+        //                   /                   \              \
+        //                 ( 6 )              (  13  )           \
+        //                /     \            /        \           \
+        //             (2)       (5)       (9)        (12)        (17)
+        //             /  \     /   \     /   \      /    \      /    \
+        //           (0)  (1) (3)   (4) (7)   (8)  (10)  (11)  (15)  (16)
+        //
+        // new tree:
+        //                               (-------16g------)
+        //                              /                  \
+        //                    (--------14-------)           \
+        //                   /                   \           \
+        //                 ( 6 )              (  13  )        \
+        //                /     \            /        \        \
+        //             (2)       (5)       (9)        (12)      \
+        //             /  \     /   \     /   \      /    \      \
+        //           (0)  (1) (3)   (4) (7)   (8)  (10)  (11)    (15)
+
+        // new root is generated
         match delete_tx.new_root {
             NodeLink::Generated(_) => { /* ok */ },
             _ => panic!("Root now should be generated")
         }
 
+        // left is 14 and right is 15
         let (left_root_child, right_root_child) = {
             let root = tree.resolve_link(delete_tx.new_root);
 
@@ -386,12 +436,10 @@ mod tests {
                 root.node.right.expect("there should be right child for root"),
             )
         };
-
         match (left_root_child, right_root_child) {
             (NodeLink::Stored(14), NodeLink::Stored(15)) => { /* ok */ },
             _ => panic!("Root should have s(14) and s(15) children")
         };
-
         assert_eq!(delete_tx.truncated, 2);
         assert_eq!(tree.len(), 16);
     }
