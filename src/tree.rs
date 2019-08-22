@@ -74,7 +74,6 @@ impl Tree {
         result
     }
 
-
     pub fn append_leaf(&mut self, root: NodeLink, new_leaf: NodeData) -> AppendTransaction {
 
         let is_complete= self.resolve_link(root).node.complete();
@@ -352,6 +351,8 @@ mod tests {
         assert_eq!(append_tx.appended.len(), 1);
     }
 
+    // TODO: use assert_matches below
+
     #[test]
     fn truncate_simple() {
         let (mut tree, root) = generated(9);
@@ -361,5 +362,30 @@ mod tests {
             NodeLink::Stored(14) => { /* ok */ },
             _ => panic!("Root should be stored(14)")
         }
+    }
+
+    #[test]
+    fn truncate_generated() {
+        let (mut tree, root) = generated(10);
+        let delete_tx = tree.truncate_leaf(root);
+
+        match delete_tx.new_root {
+            NodeLink::Generated(_) => { /* ok */ },
+            _ => panic!("Root now should be generated")
+        }
+
+        let (left_root_child, right_root_child) = {
+            let root = tree.resolve_link(delete_tx.new_root);
+
+            (
+                root.node.left.expect("there should be left child for root"),
+                root.node.right.expect("there should be right child for root"),
+            )
+        };
+
+        match (left_root_child, right_root_child) {
+            (NodeLink::Stored(14), NodeLink::Stored(15)) => { /* ok */ },
+            _ => panic!("Root should have s(14) and s(15) children")
+        };
     }
 }
