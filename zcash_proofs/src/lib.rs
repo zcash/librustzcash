@@ -1,20 +1,3 @@
-extern crate bellman;
-extern crate blake2b_simd;
-extern crate byteorder;
-extern crate ff;
-extern crate pairing;
-extern crate rand_os;
-extern crate zcash_primitives;
-
-#[cfg(feature = "local-prover")]
-extern crate directories;
-
-#[cfg(test)]
-extern crate rand_core;
-
-#[cfg(test)]
-extern crate rand_xorshift;
-
 use bellman::groth16::{prepare_verifying_key, Parameters, PreparedVerifyingKey, VerifyingKey};
 use pairing::bls12_381::Bls12;
 use std::fs::File;

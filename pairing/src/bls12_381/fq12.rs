@@ -12,7 +12,7 @@ pub struct Fq12 {
 }
 
 impl ::std::fmt::Display for Fq12 {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
         write!(f, "Fq12({} + {} * w)", self.c0, self.c1)
     }
 }
@@ -187,6 +187,6 @@ fn test_fq12_mul_by_014() {
 fn fq12_field_tests() {
     use ff::PrimeField;
 
-    ::tests::field::random_field_tests::<Fq12>();
-    ::tests::field::random_frobenius_tests::<Fq12, _>(super::fq::Fq::char(), 13);
+    crate::tests::field::random_field_tests::<Fq12>();
+    crate::tests::field::random_frobenius_tests::<Fq12, _>(super::fq::Fq::char(), 13);
 }

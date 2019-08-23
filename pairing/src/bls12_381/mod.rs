@@ -366,5 +366,5 @@ impl G2Prepared {
 
 #[test]
 fn bls12_engine_tests() {
-    ::tests::engine::engine_tests::<Bls12>();
+    crate::tests::engine::engine_tests::<Bls12>();
 }

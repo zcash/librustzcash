@@ -2225,10 +2225,10 @@ fn test_fq_root_of_unity() {
 
 #[test]
 fn fq_field_tests() {
-    ::tests::field::random_field_tests::<Fq>();
-    ::tests::field::random_sqrt_tests::<Fq>();
-    ::tests::field::random_frobenius_tests::<Fq, _>(Fq::char(), 13);
-    ::tests::field::from_str_tests::<Fq>();
+    crate::tests::field::random_field_tests::<Fq>();
+    crate::tests::field::random_sqrt_tests::<Fq>();
+    crate::tests::field::random_frobenius_tests::<Fq, _>(Fq::char(), 13);
+    crate::tests::field::from_str_tests::<Fq>();
 }
 
 #[test]
@@ -2244,7 +2244,7 @@ fn test_fq_ordering() {
 
 #[test]
 fn fq_repr_tests() {
-    ::tests::repr::random_repr_tests::<Fq>();
+    crate::tests::repr::random_repr_tests::<Fq>();
 }
 
 #[test]

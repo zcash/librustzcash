@@ -5,8 +5,8 @@ use std::collections::VecDeque;
 use std::io::{self, Read, Write};
 use std::iter;
 
-use sapling::SAPLING_COMMITMENT_TREE_DEPTH;
-use serialize::{Optional, Vector};
+use crate::sapling::SAPLING_COMMITMENT_TREE_DEPTH;
+use crate::serialize::{Optional, Vector};
 
 /// A hashable node within a Merkle tree.
 pub trait Hashable: Clone + Copy {
@@ -17,13 +17,13 @@ pub trait Hashable: Clone + Copy {
     fn write<W: Write>(&self, writer: W) -> io::Result<()>;
 
     /// Returns the parent node within the tree of the two given nodes.
-    fn combine(usize, &Self, &Self) -> Self;
+    fn combine(_: usize, _: &Self, _: &Self) -> Self;
 
     /// Returns a blank leaf node.
     fn blank() -> Self;
 
     /// Returns the empty root for the given depth.
-    fn empty_root(usize) -> Self;
+    fn empty_root(_: usize) -> Self;
 }
 
 struct PathFiller<Node: Hashable> {
@@ -509,7 +509,7 @@ impl<Node: Hashable> CommitmentTreeWitness<Node> {
 #[cfg(test)]
 mod tests {
     use super::{CommitmentTree, CommitmentTreeWitness, Hashable, IncrementalWitness, PathFiller};
-    use sapling::Node;
+    use crate::sapling::Node;
 
     use ff::PrimeFieldRepr;
     use hex;

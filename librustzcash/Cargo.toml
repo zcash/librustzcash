@@ -6,7 +6,8 @@ authors = [
     "Jack Grigg <jack@z.cash>",
     "Jay Graber <jay@z.cash>",
     "Simon Liu <simon@z.cash>"
-    ]
+]
+edition = "2018"
 
 [lib]
 name = "rustzcash"

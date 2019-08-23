@@ -12,7 +12,7 @@ pub struct Fq2 {
 }
 
 impl ::std::fmt::Display for Fq2 {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
         write!(f, "Fq2({} + {} * u)", self.c0, self.c1)
     }
 }
@@ -958,7 +958,7 @@ fn test_fq2_mul_nonresidue() {
 fn fq2_field_tests() {
     use ff::PrimeField;
 
-    ::tests::field::random_field_tests::<Fq2>();
-    ::tests::field::random_sqrt_tests::<Fq2>();
-    ::tests::field::random_frobenius_tests::<Fq2, _>(super::fq::Fq::char(), 13);
+    crate::tests::field::random_field_tests::<Fq2>();
+    crate::tests::field::random_sqrt_tests::<Fq2>();
+    crate::tests::field::random_frobenius_tests::<Fq2, _>(super::fq::Fq::char(), 13);
 }

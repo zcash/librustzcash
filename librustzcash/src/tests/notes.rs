@@ -1,5 +1,5 @@
-use librustzcash_sapling_compute_cm;
-use librustzcash_sapling_compute_nf;
+use crate::librustzcash_sapling_compute_cm;
+use crate::librustzcash_sapling_compute_nf;
 
 #[test]
 fn notes() {

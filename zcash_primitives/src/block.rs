@@ -4,13 +4,13 @@ use std::fmt;
 use std::io::{self, Read, Write};
 use std::ops::Deref;
 
-use serialize::Vector;
+use crate::serialize::Vector;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct BlockHash(pub [u8; 32]);
 
 impl fmt::Display for BlockHash {
-    fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut data = self.0.clone();
         data.reverse();
         formatter.write_str(&hex::encode(data))

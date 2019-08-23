@@ -5,9 +5,9 @@ use rand_os::OsRng;
 use crate::jubjub::{fs::Fs, FixedGenerators};
 
 use super::{components::Amount, sighash::signature_hash, Transaction, TransactionData};
-use legacy::Script;
-use redjubjub::PrivateKey;
-use JUBJUB;
+use crate::legacy::Script;
+use crate::redjubjub::PrivateKey;
+use crate::JUBJUB;
 
 #[test]
 fn tx_read_write() {

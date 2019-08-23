@@ -198,7 +198,7 @@ impl std::cmp::PartialEq for ExtendedSpendingKey {
 }
 
 impl std::fmt::Debug for ExtendedSpendingKey {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> Result<(), std::fmt::Error> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
         write!(
             f,
             "ExtendedSpendingKey(d = {}, tag_p = {:?}, i = {:?})",
@@ -221,7 +221,7 @@ impl std::cmp::PartialEq for ExtendedFullViewingKey {
 }
 
 impl std::fmt::Debug for ExtendedFullViewingKey {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> Result<(), std::fmt::Error> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
         write!(
             f,
             "ExtendedFullViewingKey(d = {}, tag_p = {:?}, i = {:?})",

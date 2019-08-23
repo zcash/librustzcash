@@ -6,7 +6,7 @@ use ff::{Field, PrimeField, PrimeFieldRepr};
 use rand_core::RngCore;
 use std::io::{self, Read, Write};
 
-use util::hash_to_scalar;
+use crate::util::hash_to_scalar;
 
 fn read_scalar<E: JubjubEngine, R: Read>(reader: R) -> io::Result<E::Fs> {
     let mut s_repr = <E::Fs as PrimeField>::Repr::default();

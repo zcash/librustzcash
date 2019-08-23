@@ -5,8 +5,8 @@ use std::fmt;
 use std::io::{self, Read, Write};
 use std::ops::Deref;
 
-use redjubjub::Signature;
-use serialize::Vector;
+use crate::redjubjub::Signature;
+use crate::serialize::Vector;
 
 pub mod builder;
 pub mod components;
@@ -28,7 +28,7 @@ const SAPLING_TX_VERSION: u32 = 4;
 pub struct TxId(pub [u8; 32]);
 
 impl fmt::Display for TxId {
-    fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut data = self.0.clone();
         data.reverse();
         formatter.write_str(&hex::encode(data))
@@ -74,7 +74,7 @@ pub struct TransactionData {
 }
 
 impl std::fmt::Debug for TransactionData {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> Result<(), std::fmt::Error> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
         write!(
             f,
             "TransactionData(

@@ -5,7 +5,7 @@ use rand_os::OsRng;
 use zcash_primitives::jubjub::{edwards, JubjubBls12};
 use zcash_primitives::primitives::{Diversifier, ViewingKey};
 
-use {
+use crate::{
     librustzcash_sapling_generate_r, librustzcash_sapling_ka_agree,
     librustzcash_sapling_ka_derivepublic,
 };

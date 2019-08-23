@@ -18,7 +18,7 @@ macro_rules! curve_impl {
         }
 
         impl ::std::fmt::Display for $affine {
-            fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+            fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
                 if self.infinity {
                     write!(f, "{}(Infinity)", $name)
                 } else {
@@ -35,7 +35,7 @@ macro_rules! curve_impl {
         }
 
         impl ::std::fmt::Display for $projective {
-            fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+            fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
                 write!(f, "{}", self.into_affine())
             }
         }
@@ -622,11 +622,11 @@ macro_rules! curve_impl {
 pub mod g1 {
     use super::super::{Bls12, Fq, Fq12, FqRepr, Fr, FrRepr};
     use super::g2::G2Affine;
+    use crate::{Engine, PairingCurveAffine};
     use ff::{BitIterator, Field, PrimeField, PrimeFieldRepr, SqrtField};
     use group::{CurveAffine, CurveProjective, EncodedPoint, GroupDecodingError};
     use rand_core::RngCore;
     use std::fmt;
-    use {Engine, PairingCurveAffine};
 
     curve_impl!(
         "G1",
@@ -656,7 +656,7 @@ pub mod g1 {
     }
 
     impl fmt::Debug for G1Uncompressed {
-        fn fmt(&self, formatter: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+        fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
             self.0[..].fmt(formatter)
         }
     }
@@ -766,7 +766,7 @@ pub mod g1 {
     }
 
     impl fmt::Debug for G1Compressed {
-        fn fmt(&self, formatter: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+        fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
             self.0[..].fmt(formatter)
         }
     }
@@ -934,7 +934,7 @@ pub mod g1 {
 
     #[test]
     fn g1_generator() {
-        use SqrtField;
+        use crate::SqrtField;
 
         let mut x = Fq::zero();
         let mut i = 0;
@@ -1291,11 +1291,11 @@ pub mod g1 {
 pub mod g2 {
     use super::super::{Bls12, Fq, Fq12, Fq2, FqRepr, Fr, FrRepr};
     use super::g1::G1Affine;
+    use crate::{Engine, PairingCurveAffine};
     use ff::{BitIterator, Field, PrimeField, PrimeFieldRepr, SqrtField};
     use group::{CurveAffine, CurveProjective, EncodedPoint, GroupDecodingError};
     use rand_core::RngCore;
     use std::fmt;
-    use {Engine, PairingCurveAffine};
 
     curve_impl!(
         "G2",
@@ -1325,7 +1325,7 @@ pub mod g2 {
     }
 
     impl fmt::Debug for G2Uncompressed {
-        fn fmt(&self, formatter: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+        fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
             self.0[..].fmt(formatter)
         }
     }
@@ -1451,7 +1451,7 @@ pub mod g2 {
     }
 
     impl fmt::Debug for G2Compressed {
-        fn fmt(&self, formatter: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+        fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
             self.0[..].fmt(formatter)
         }
     }
@@ -1640,7 +1640,7 @@ pub mod g2 {
 
     #[test]
     fn g2_generator() {
-        use SqrtField;
+        use crate::SqrtField;
 
         let mut x = Fq2::zero();
         let mut i = 0;

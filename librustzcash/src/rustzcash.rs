@@ -1,16 +1,4 @@
-extern crate bellman;
-extern crate blake2b_simd;
-extern crate blake2s_simd;
-extern crate byteorder;
-extern crate ff;
-extern crate libc;
-extern crate pairing;
-extern crate rand_core;
-extern crate rand_os;
-extern crate zcash_primitives;
-extern crate zcash_proofs;
-
-extern crate lazy_static;
+use lazy_static;
 
 use ff::{PrimeField, PrimeFieldRepr};
 use pairing::bls12_381::{Bls12, Fr, FrRepr};

@@ -1,8 +1,5 @@
 #![allow(unused_imports)]
 
-extern crate byteorder;
-extern crate rand_core;
-
 #[cfg(feature = "derive")]
 #[macro_use]
 extern crate ff_derive;
@@ -210,7 +207,7 @@ impl Error for PrimeFieldDecodingError {
 }
 
 impl fmt::Display for PrimeFieldDecodingError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
         match *self {
             PrimeFieldDecodingError::NotInField(ref repr) => {
                 write!(f, "{} is not an element of the field", repr)
@@ -266,7 +263,7 @@ pub trait PrimeField: Field {
     }
 
     /// Convert this prime field element into a biginteger representation.
-    fn from_repr(Self::Repr) -> Result<Self, PrimeFieldDecodingError>;
+    fn from_repr(_: Self::Repr) -> Result<Self, PrimeFieldDecodingError>;
 
     /// Convert a biginteger representation into a prime field element, if
     /// the number is an element of the field.

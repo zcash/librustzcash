@@ -4,9 +4,9 @@ use ff::{PrimeField, PrimeFieldRepr};
 use pairing::bls12_381::{Bls12, Fr, FrRepr};
 use std::io::{self, Read, Write};
 
-use legacy::Script;
-use redjubjub::{PublicKey, Signature};
-use JUBJUB;
+use crate::legacy::Script;
+use crate::redjubjub::{PublicKey, Signature};
+use crate::JUBJUB;
 
 pub mod amount;
 pub use self::amount::Amount;
@@ -104,7 +104,7 @@ pub struct SpendDescription {
 }
 
 impl std::fmt::Debug for SpendDescription {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> Result<(), std::fmt::Error> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
         write!(
             f,
             "SpendDescription(cv = {:?}, anchor = {:?}, nullifier = {:?}, rk = {:?}, spend_auth_sig = {:?})",
@@ -186,7 +186,7 @@ pub struct OutputDescription {
 }
 
 impl std::fmt::Debug for OutputDescription {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> Result<(), std::fmt::Error> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
         write!(
             f,
             "OutputDescription(cv = {:?}, cmu = {:?}, ephemeral_key = {:?})",
@@ -253,7 +253,7 @@ enum SproutProof {
 }
 
 impl std::fmt::Debug for SproutProof {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> Result<(), std::fmt::Error> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
         match self {
             SproutProof::Groth(_) => write!(f, "SproutProof::Groth"),
             SproutProof::PHGR(_) => write!(f, "SproutProof::PHGR"),
@@ -275,7 +275,7 @@ pub struct JSDescription {
 }
 
 impl std::fmt::Debug for JSDescription {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> Result<(), std::fmt::Error> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
         write!(
             f,
             "JSDescription(

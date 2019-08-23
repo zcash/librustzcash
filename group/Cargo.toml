@@ -11,6 +11,7 @@ description = "Elliptic curve group traits and utilities"
 documentation = "https://docs.rs/group/"
 homepage = "https://github.com/ebfull/group"
 repository = "https://github.com/ebfull/group"
+edition = "2018"
 
 [dependencies]
 ff = { path = "../ff" }
