@@ -181,7 +181,7 @@ pub extern "system" fn librustzcash_init_zksnark_params(
     let sprout_path = if sprout_path.is_null() {
         None
     } else {
-        Some(OsStr::from_wide(unsafe {
+        Some(OsString::from_wide(unsafe {
             slice::from_raw_parts(sprout_path, sprout_path_len)
         }))
     };
