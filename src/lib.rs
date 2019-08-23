@@ -3,6 +3,7 @@
 //! To be used in zebra and via FFI bindings in zcashd
 
 #[cfg(test)] #[macro_use] extern crate assert_matches;
+#[cfg(test)] #[macro_use] extern crate quickcheck;
 
 mod tree;
 

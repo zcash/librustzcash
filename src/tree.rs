@@ -111,7 +111,6 @@ impl Tree {
 
     /// Append one leaf to the tree.
     pub fn append_leaf(&mut self, root: NodeLink, new_leaf: NodeData) -> AppendTransaction {
-
         let is_complete= self.resolve_link(root).node.complete();
 
         let (new_root_node, mut appended) = if is_complete {
@@ -160,6 +159,18 @@ impl Tree {
             new_root,
             appended,
         }
+    }
+
+    #[cfg(test)]
+    fn for_children<F: FnMut(NodeLink, NodeLink)>(&mut self, node: NodeLink, mut f: F) {
+        let (left, right) = {
+            let link = self.resolve_link(node);
+            (
+                link.node.left.expect("test use only (l)"),
+                link.node.right.expect("test use only (r)"),
+            )
+        };
+        f(left, right)
     }
 
     fn pop(&mut self) {
@@ -268,6 +279,7 @@ fn combine_nodes<'a>(left: IndexedNode<'a>, right: IndexedNode<'a>) -> MMRNode {
 mod tests {
 
     use super::{MMRNode, NodeData, Tree, NodeLink};
+    use quickcheck::TestResult;
 
     fn leaf(height: u32) -> NodeData {
         NodeData {
@@ -301,7 +313,7 @@ mod tests {
         }
     }
 
-    fn initial() -> Tree {
+    fn initial() -> (NodeLink, Tree) {
         let node1: MMRNode = leaf(1).into();
         let node2: MMRNode = leaf(2).into();
 
@@ -311,15 +323,13 @@ mod tests {
             right: Some(NodeLink::Stored(1)),
         };
 
-        Tree::populate(vec![node1, node2, node3])
+        (NodeLink::Stored(2), Tree::populate(vec![node1, node2, node3]))
     }
 
     // returns tree with specified number of leafs and it's root
     fn generated(length: u32) -> (Tree, NodeLink) {
-        assert!(length > 3);
-        let mut tree = initial();
-        let mut root = NodeLink::Stored(2);
-
+        assert!(length >= 3);
+        let (mut root, mut tree) = initial();
         for i in 2..length {
             root = tree.append_leaf(root, leaf(i+1).into()).new_root;
         }
@@ -329,8 +339,10 @@ mod tests {
 
     #[test]
     fn discrete_append() {
-        let mut tree = initial();
-        let append_tx = tree.append_leaf(NodeLink::Stored(2), leaf(3));
+        let (root, mut tree) = initial();
+
+        // ** APPEND 3 **
+        let append_tx = tree.append_leaf(root, leaf(3));
         let new_root_link = append_tx.new_root;
         let new_root = tree.resolve_link(new_root_link).node;
 
@@ -350,6 +362,7 @@ mod tests {
         assert_eq!(new_root.data.end_height, 3);
         assert_eq!(append_tx.appended.len(), 1);
 
+        // ** APPEND 4 **
         let append_tx = tree.append_leaf(new_root_link, leaf(4));
         let new_root_link = append_tx.new_root;
         let new_root = tree.resolve_link(new_root_link).node;
@@ -372,6 +385,9 @@ mod tests {
         // and new root, (6) is stored one
         assert_eq!(new_root.data.end_height, 4);
         assert_eq!(append_tx.appended.len(), 3);
+        assert_matches!(new_root_link, NodeLink::Stored(6));
+
+        // ** APPEND 5 **
 
         let append_tx = tree.append_leaf(new_root_link, leaf(5));
         let new_root_link = append_tx.new_root;
@@ -397,6 +413,81 @@ mod tests {
         // and new root, (8g) is generated one
         assert_eq!(new_root.data.end_height, 5);
         assert_eq!(append_tx.appended.len(), 1);
+        assert_matches!(new_root_link, NodeLink::Generated(_));
+        tree.for_children(new_root_link, |l, r| {
+            assert_matches!(l, NodeLink::Stored(6));
+            assert_matches!(r, NodeLink::Stored(7));
+        });
+
+        // *** APPEND #6 ***
+
+        let append_tx = tree.append_leaf(new_root_link, leaf(6));
+        let new_root_link = append_tx.new_root;
+        let new_root = tree.resolve_link(new_root_link).node;
+
+        // intermediate tree:
+        //                     ( 8g )
+        //                    /      \
+        //                 ( 6 )      \
+        //                /     \      \
+        //             (2)       (5)    \
+        //             /  \     /   \    \
+        //           (0)  (1) (3)   (4)  (7)
+        //
+        // new tree:
+        //                     (---8g---)
+        //                    /          \
+        //                 ( 6 )          \
+        //                /     \          \
+        //             (2)       (5)       (9)
+        //             /  \     /   \     /   \
+        //           (0)  (1) (3)   (4)  (7)  (8)
+        //
+        // so (7) is added as real leaf
+        // and new root, (8g) is generated one
+        assert_eq!(new_root.data.end_height, 6);
+        assert_eq!(append_tx.appended.len(), 2);
+        assert_matches!(new_root_link, NodeLink::Generated(_));
+        tree.for_children(new_root_link, |l, r| {
+            assert_matches!(l, NodeLink::Stored(6));
+            assert_matches!(r, NodeLink::Stored(9));
+        });
+
+        // *** APPEND #7 ***
+
+        let append_tx = tree.append_leaf(new_root_link, leaf(7));
+        let new_root_link = append_tx.new_root;
+        let new_root = tree.resolve_link(new_root_link).node;
+
+        // intermediate tree:
+        //                     (---8g---)
+        //                    /          \
+        //                 ( 6 )          \
+        //                /     \          \
+        //             (2)       (5)       (9)
+        //             /  \     /   \     /   \
+        //           (0)  (1) (3)   (4)  (7)  (8)
+        //
+        // new tree:
+        //                          (---12g--)
+        //                         /          \
+        //                    (---11g---)      \
+        //                   /           \      \
+        //                 ( 6 )          \      \
+        //                /     \          \      \
+        //             (2)       (5)       (9)     \
+        //             /  \     /   \     /   \     \
+        //           (0)  (1) (3)   (4) (7)   (8)  (10)
+        //
+        // so (7) is added as real leaf
+        // and new root, (8g) is generated one
+        assert_eq!(new_root.data.end_height, 7);
+        assert_eq!(append_tx.appended.len(), 1);
+        assert_matches!(new_root_link, NodeLink::Generated(_));
+        tree.for_children(new_root_link, |l, r| {
+            assert_matches!(l, NodeLink::Generated(_));
+            assert_matches!(r, NodeLink::Stored(10));
+        });
     }
 
     #[test]
@@ -482,5 +573,24 @@ mod tests {
         // two stored nodes should leave us (leaf 16 and no longer needed node 17)
         assert_eq!(delete_tx.truncated, 2);
         assert_eq!(tree.len(), 16);
+    }
+
+
+    quickcheck! {
+        fn there_and_back(number: u32) -> TestResult {
+            if (number > 1024*1024) {
+                TestResult::discard()
+            } else {
+                let (mut root, mut tree) = initial();
+                for i in 0..number {
+                    root = tree.append_leaf(root, leaf(i+3)).new_root;
+                }
+                for i in 0..number {
+                    root = tree.truncate_leaf(root).new_root;
+                }
+
+                TestResult::from_bool(if let NodeLink::Stored(2) = root { true } else { false })
+            }
+        }
     }
 }
