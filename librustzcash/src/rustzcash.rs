@@ -191,7 +191,7 @@ pub extern "system" fn librustzcash_init_zksnark_params(
         spend_hash,
         Path::new(&output_path),
         output_hash,
-        Path::new(&sprout_path),
+        sprout_path.as_ref().map(|p| Path::new(p)),
         sprout_hash,
     )
 }
