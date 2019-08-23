@@ -1215,14 +1215,7 @@ pub extern "system" fn librustzcash_zip32_xfvk_address(
     let addr_ret = unsafe { &mut *addr_ret };
 
     j_ret.copy_from_slice(&(addr.0).0);
-    addr_ret
-        .get_mut(..11)
-        .unwrap()
-        .copy_from_slice(&addr.1.diversifier.0);
-    addr.1
-        .pk_d
-        .write(addr_ret.get_mut(11..).unwrap())
-        .expect("should be able to serialize a PaymentAddress");
+    addr_ret.copy_from_slice(&addr.1.to_bytes());
 
     true
 }

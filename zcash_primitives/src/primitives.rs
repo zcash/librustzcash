@@ -155,6 +155,14 @@ impl<E: JubjubEngine> PaymentAddress<E> {
             })
     }
 
+    /// Returns the byte encoding of this `PaymentAddress`.
+    pub fn to_bytes(&self) -> [u8; 43] {
+        let mut bytes = [0; 43];
+        bytes[0..11].copy_from_slice(&self.diversifier.0);
+        self.pk_d.write(&mut bytes[11..]).unwrap();
+        bytes
+    }
+
     pub fn g_d(&self, params: &E::Params) -> Option<edwards::Point<E, PrimeOrder>> {
         self.diversifier.g_d(params)
     }

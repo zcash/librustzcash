@@ -121,10 +121,7 @@ pub fn decode_extended_full_viewing_key(
 /// );
 /// ```
 pub fn encode_payment_address(hrp: &str, addr: &PaymentAddress<Bls12>) -> String {
-    bech32_encode(hrp, |w| {
-        w.write_all(&addr.diversifier.0)?;
-        addr.pk_d.write(w)
-    })
+    bech32_encode(hrp, |w| w.write_all(&addr.to_bytes()))
 }
 
 /// Decodes a [`PaymentAddress`] from a Bech32-encoded string.
