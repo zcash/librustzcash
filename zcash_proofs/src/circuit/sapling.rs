@@ -464,7 +464,7 @@ impl<'a, E: JubjubEngine> Circuit<E> for Output<'a, E> {
         // they would like.
         {
             // Just grab pk_d from the witness
-            let pk_d = self.payment_address.as_ref().map(|e| e.pk_d.to_xy());
+            let pk_d = self.payment_address.as_ref().map(|e| e.pk_d().to_xy());
 
             // Witness the y-coordinate, encoded as little
             // endian bits (to match the representation)
@@ -584,7 +584,7 @@ fn test_input_circuit_with_bls12_381() {
             }
         }
 
-        let g_d = payment_address.diversifier.g_d(params).unwrap();
+        let g_d = payment_address.diversifier().g_d(params).unwrap();
         let commitment_randomness = fs::Fs::random(rng);
         let auth_path = vec![Some((Fr::random(rng), rng.next_u32() % 2 != 0)); tree_depth];
         let ar = fs::Fs::random(rng);
@@ -595,7 +595,7 @@ fn test_input_circuit_with_bls12_381() {
             let note = Note {
                 value: value_commitment.value,
                 g_d: g_d.clone(),
-                pk_d: payment_address.pk_d.clone(),
+                pk_d: payment_address.pk_d().clone(),
                 r: commitment_randomness.clone(),
             };
 

@@ -47,7 +47,7 @@ fn test_key_agreement() {
 
     // Serialize pk_d for the call to librustzcash_sapling_ka_agree
     let mut addr_pk_d = [0u8; 32];
-    addr.pk_d.write(&mut addr_pk_d[..]).unwrap();
+    addr.pk_d().write(&mut addr_pk_d[..]).unwrap();
 
     assert!(librustzcash_sapling_ka_agree(
         &addr_pk_d,
@@ -59,7 +59,7 @@ fn test_key_agreement() {
     // using the diversifier and esk.
     let mut epk = [0u8; 32];
     assert!(librustzcash_sapling_ka_derivepublic(
-        &addr.diversifier.0,
+        &addr.diversifier().0,
         &esk,
         &mut epk
     ));

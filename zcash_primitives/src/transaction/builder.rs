@@ -77,7 +77,7 @@ impl SaplingOutput {
 
         let note = Note {
             g_d,
-            pk_d: to.pk_d.clone(),
+            pk_d: to.pk_d().clone(),
             value: value.into(),
             r: rcm,
         };
@@ -344,10 +344,11 @@ impl<R: RngCore + CryptoRng> Builder<R> {
             } else if !self.spends.is_empty() {
                 (
                     self.spends[0].extsk.expsk.ovk,
-                    PaymentAddress {
-                        diversifier: self.spends[0].diversifier,
-                        pk_d: self.spends[0].note.pk_d.clone(),
-                    },
+                    PaymentAddress::from_parts(
+                        self.spends[0].diversifier,
+                        self.spends[0].note.pk_d.clone(),
+                    )
+                    .ok_or(Error::InvalidAddress)?,
                 )
             } else {
                 return Err(Error::NoChangeAddress);
@@ -450,16 +451,16 @@ impl<R: RngCore + CryptoRng> Builder<R> {
                         (diversifier, g_d)
                     };
 
-                    let pk_d = {
+                    let (pk_d, payment_address) = loop {
                         let dummy_ivk = Fs::random(&mut self.rng);
-                        g_d.mul(dummy_ivk, &JUBJUB)
+                        let pk_d = g_d.mul(dummy_ivk, &JUBJUB);
+                        if let Some(addr) = PaymentAddress::from_parts(diversifier, pk_d.clone()) {
+                            break (pk_d, addr);
+                        }
                     };
 
                     (
-                        PaymentAddress {
-                            diversifier,
-                            pk_d: pk_d.clone(),
-                        },
+                        payment_address,
                         Note {
                             g_d,
                             pk_d,
@@ -644,7 +645,7 @@ mod tests {
             builder
                 .add_sapling_spend(
                     extsk.clone(),
-                    to.diversifier,
+                    *to.diversifier(),
                     note1.clone(),
                     witness1.clone(),
                 )
@@ -683,10 +684,10 @@ mod tests {
         {
             let mut builder = Builder::new(0);
             builder
-                .add_sapling_spend(extsk.clone(), to.diversifier, note1, witness1)
+                .add_sapling_spend(extsk.clone(), *to.diversifier(), note1, witness1)
                 .unwrap();
             builder
-                .add_sapling_spend(extsk, to.diversifier, note2, witness2)
+                .add_sapling_spend(extsk, *to.diversifier(), note2, witness2)
                 .unwrap();
             builder
                 .add_sapling_output(ovk, to, Amount::from_u64(30000).unwrap(), None)

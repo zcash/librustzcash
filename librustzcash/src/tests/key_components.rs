@@ -707,7 +707,7 @@ fn key_components() {
         let addr = fvk.to_payment_address(diversifier, &JUBJUB).unwrap();
         {
             let mut vec = Vec::new();
-            addr.pk_d.write(&mut vec).unwrap();
+            addr.pk_d().write(&mut vec).unwrap();
             assert_eq!(&vec, &tv.default_pk_d);
         }
         {
