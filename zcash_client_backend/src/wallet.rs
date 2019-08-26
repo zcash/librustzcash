@@ -4,7 +4,9 @@
 use pairing::bls12_381::{Bls12, Fr};
 use zcash_primitives::{
     jubjub::{edwards, PrimeOrder},
+    merkle_tree::IncrementalWitness,
     primitives::{Note, PaymentAddress},
+    sapling::Node,
     transaction::TxId,
 };
 
@@ -40,4 +42,5 @@ pub struct WalletShieldedOutput {
     pub note: Note<Bls12>,
     pub to: PaymentAddress<Bls12>,
     pub is_change: bool,
+    pub witness: IncrementalWitness<Node>,
 }

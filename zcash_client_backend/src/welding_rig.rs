@@ -29,8 +29,8 @@ fn scan_output(
     tree: &mut CommitmentTree<Node>,
     existing_witnesses: &mut [&mut IncrementalWitness<Node>],
     block_witnesses: &mut [&mut IncrementalWitness<Node>],
-    new_witnesses: &mut [IncrementalWitness<Node>],
-) -> Option<(WalletShieldedOutput, IncrementalWitness<Node>)> {
+    new_witnesses: &mut [&mut IncrementalWitness<Node>],
+) -> Option<WalletShieldedOutput> {
     let cmu = output.cmu().ok()?;
     let epk = output.epk().ok()?;
     let ct = output.ciphertext;
@@ -62,18 +62,16 @@ fn scan_output(
         // - Notes sent from one account to itself.
         let is_change = spent_from_accounts.contains(&account);
 
-        return Some((
-            WalletShieldedOutput {
-                index,
-                cmu,
-                epk,
-                account,
-                note,
-                to,
-                is_change,
-            },
-            IncrementalWitness::from_tree(tree),
-        ));
+        return Some(WalletShieldedOutput {
+            index,
+            cmu,
+            epk,
+            account,
+            note,
+            to,
+            is_change,
+            witness: IncrementalWitness::from_tree(tree),
+        });
     }
     None
 }
@@ -91,8 +89,8 @@ pub fn scan_block(
     nullifiers: &[(&[u8], usize)],
     tree: &mut CommitmentTree<Node>,
     existing_witnesses: &mut [&mut IncrementalWitness<Node>],
-) -> Vec<(WalletTx, Vec<IncrementalWitness<Node>>)> {
-    let mut wtxs: Vec<(WalletTx, Vec<IncrementalWitness<Node>>)> = vec![];
+) -> Vec<WalletTx> {
+    let mut wtxs: Vec<WalletTx> = vec![];
     let ivks: Vec<_> = extfvks.iter().map(|extfvk| extfvk.fvk.vk.ivk()).collect();
 
     for tx in block.vtx.into_iter() {
@@ -129,20 +127,31 @@ pub fn scan_block(
             shielded_spends.iter().map(|spend| spend.account).collect();
 
         // Check for incoming notes while incrementing tree and witnesses
-        let mut shielded_outputs = vec![];
-        let mut new_witnesses = vec![];
+        let mut shielded_outputs: Vec<WalletShieldedOutput> = vec![];
         {
             // Grab mutable references to new witnesses from previous transactions
             // in this block so that we can update them. Scoped so we don't hold
             // mutable references to wtxs for too long.
             let mut block_witnesses: Vec<_> = wtxs
                 .iter_mut()
-                .map(|(_, w)| w.iter_mut().collect::<Vec<_>>())
+                .map(|tx| {
+                    tx.shielded_outputs
+                        .iter_mut()
+                        .map(|output| &mut output.witness)
+                })
                 .flatten()
                 .collect();
 
             for to_scan in tx.outputs.into_iter().enumerate() {
-                if let Some((output, new_witness)) = scan_output(
+                // Grab mutable references to new witnesses from previous outputs
+                // in this transaction so that we can update them. Scoped so we
+                // don't hold mutable references to shielded_outputs for too long.
+                let mut new_witnesses: Vec<_> = shielded_outputs
+                    .iter_mut()
+                    .map(|output| &mut output.witness)
+                    .collect();
+
+                if let Some(output) = scan_output(
                     to_scan,
                     &ivks,
                     &spent_from_accounts,
@@ -152,7 +161,6 @@ pub fn scan_block(
                     &mut new_witnesses,
                 ) {
                     shielded_outputs.push(output);
-                    new_witnesses.push(new_witness);
                 }
             }
         }
@@ -160,17 +168,14 @@ pub fn scan_block(
         if !(shielded_spends.is_empty() && shielded_outputs.is_empty()) {
             let mut txid = TxId([0u8; 32]);
             txid.0.copy_from_slice(&tx.hash);
-            wtxs.push((
-                WalletTx {
-                    txid,
-                    index: tx.index as usize,
-                    num_spends,
-                    num_outputs,
-                    shielded_spends,
-                    shielded_outputs,
-                },
-                new_witnesses,
-            ));
+            wtxs.push(WalletTx {
+                txid,
+                index: tx.index as usize,
+                num_spends,
+                num_outputs,
+                shielded_spends,
+                shielded_outputs,
+            });
         }
     }
 
@@ -321,7 +326,7 @@ mod tests {
         let txs = scan_block(cb, &[extfvk], &[], &mut tree, &mut []);
         assert_eq!(txs.len(), 1);
 
-        let (tx, new_witnesses) = &txs[0];
+        let tx = &txs[0];
         assert_eq!(tx.index, 1);
         assert_eq!(tx.num_spends, 1);
         assert_eq!(tx.num_outputs, 1);
@@ -332,8 +337,7 @@ mod tests {
         assert_eq!(tx.shielded_outputs[0].note.value, 5);
 
         // Check that the witness root matches
-        assert_eq!(new_witnesses.len(), 1);
-        assert_eq!(new_witnesses[0].root(), tree.root());
+        assert_eq!(tx.shielded_outputs[0].witness.root(), tree.root());
     }
 
     #[test]
@@ -354,7 +358,7 @@ mod tests {
         let txs = scan_block(cb, &[extfvk], &[], &mut tree, &mut []);
         assert_eq!(txs.len(), 1);
 
-        let (tx, new_witnesses) = &txs[0];
+        let tx = &txs[0];
         assert_eq!(tx.index, 1);
         assert_eq!(tx.num_spends, 1);
         assert_eq!(tx.num_outputs, 1);
@@ -365,8 +369,7 @@ mod tests {
         assert_eq!(tx.shielded_outputs[0].note.value, 5);
 
         // Check that the witness root matches
-        assert_eq!(new_witnesses.len(), 1);
-        assert_eq!(new_witnesses[0].root(), tree.root());
+        assert_eq!(tx.shielded_outputs[0].witness.root(), tree.root());
     }
 
     #[test]
@@ -383,7 +386,7 @@ mod tests {
         let txs = scan_block(cb, &[], &[(&nf, account)], &mut tree, &mut []);
         assert_eq!(txs.len(), 1);
 
-        let (tx, new_witnesses) = &txs[0];
+        let tx = &txs[0];
         assert_eq!(tx.index, 1);
         assert_eq!(tx.num_spends, 1);
         assert_eq!(tx.num_outputs, 1);
@@ -392,6 +395,5 @@ mod tests {
         assert_eq!(tx.shielded_spends[0].index, 0);
         assert_eq!(tx.shielded_spends[0].nf, nf);
         assert_eq!(tx.shielded_spends[0].account, account);
-        assert_eq!(new_witnesses.len(), 0);
     }
 }
