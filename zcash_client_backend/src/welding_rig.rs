@@ -1,17 +1,15 @@
 //! Tools for scanning a compact representation of the Zcash block chain.
 
-use ff::{PrimeField, PrimeFieldRepr};
-use pairing::bls12_381::{Bls12, Fr, FrRepr};
+use ff::PrimeField;
 use std::collections::HashSet;
 use subtle::{ConditionallySelectable, ConstantTimeEq, CtOption};
 use zcash_primitives::{
-    jubjub::{edwards, fs::Fs},
+    jubjub::fs::Fs,
     merkle_tree::{CommitmentTree, IncrementalWitness},
     note_encryption::try_sapling_compact_note_decryption,
     sapling::Node,
     transaction::TxId,
     zip32::ExtendedFullViewingKey,
-    JUBJUB,
 };
 
 use crate::proto::compact_formats::{CompactBlock, CompactOutput};
@@ -33,23 +31,8 @@ fn scan_output(
     block_witnesses: &mut [&mut IncrementalWitness<Node>],
     new_witnesses: &mut [IncrementalWitness<Node>],
 ) -> Option<(WalletShieldedOutput, IncrementalWitness<Node>)> {
-    let mut repr = FrRepr::default();
-    if repr.read_le(&output.cmu[..]).is_err() {
-        return None;
-    }
-    let cmu = match Fr::from_repr(repr) {
-        Ok(cmu) => cmu,
-        Err(_) => return None,
-    };
-
-    let epk = match edwards::Point::<Bls12, _>::read(&output.epk[..], &JUBJUB) {
-        Ok(p) => match p.as_prime_order(&JUBJUB) {
-            Some(epk) => epk,
-            None => return None,
-        },
-        Err(_) => return None,
-    };
-
+    let cmu = output.cmu().ok()?;
+    let epk = output.epk().ok()?;
     let ct = output.ciphertext;
 
     // Increment tree and witnesses
