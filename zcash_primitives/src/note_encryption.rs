@@ -695,10 +695,47 @@ mod tests {
         [u8; ENC_CIPHERTEXT_SIZE],
         [u8; OUT_CIPHERTEXT_SIZE],
     ) {
-        let diversifier = Diversifier([0; 11]);
         let ivk = Fs::random(&mut rng);
+
+        let (ovk, ivk, cv, cmu, epk, enc_ciphertext, out_ciphertext) =
+            random_enc_ciphertext_with(ivk, rng);
+
+        assert!(try_sapling_note_decryption(&ivk, &epk, &cmu, &enc_ciphertext).is_some());
+        assert!(try_sapling_compact_note_decryption(
+            &ivk,
+            &epk,
+            &cmu,
+            &enc_ciphertext[..COMPACT_NOTE_SIZE]
+        )
+        .is_some());
+        assert!(try_sapling_output_recovery(
+            &ovk,
+            &cv,
+            &cmu,
+            &epk,
+            &enc_ciphertext,
+            &out_ciphertext
+        )
+        .is_some());
+
+        (ovk, ivk, cv, cmu, epk, enc_ciphertext, out_ciphertext)
+    }
+
+    fn random_enc_ciphertext_with<R: RngCore + CryptoRng>(
+        ivk: Fs,
+        mut rng: &mut R,
+    ) -> (
+        OutgoingViewingKey,
+        Fs,
+        edwards::Point<Bls12, Unknown>,
+        Fr,
+        edwards::Point<Bls12, PrimeOrder>,
+        [u8; ENC_CIPHERTEXT_SIZE],
+        [u8; OUT_CIPHERTEXT_SIZE],
+    ) {
+        let diversifier = Diversifier([0; 11]);
         let pk_d = diversifier.g_d::<Bls12>(&JUBJUB).unwrap().mul(ivk, &JUBJUB);
-        let pa = PaymentAddress::from_parts(diversifier, pk_d).unwrap();
+        let pa = PaymentAddress::from_parts_unchecked(diversifier, pk_d);
 
         // Construct the value commitment for the proof instance
         let value = 100;
@@ -718,24 +755,6 @@ mod tests {
         let epk = ne.epk();
         let enc_ciphertext = ne.encrypt_note_plaintext();
         let out_ciphertext = ne.encrypt_outgoing_plaintext(&cv, &cmu);
-
-        assert!(try_sapling_note_decryption(&ivk, epk, &cmu, &enc_ciphertext).is_some());
-        assert!(try_sapling_compact_note_decryption(
-            &ivk,
-            epk,
-            &cmu,
-            &enc_ciphertext[..COMPACT_NOTE_SIZE]
-        )
-        .is_some());
-        assert!(try_sapling_output_recovery(
-            &ovk,
-            &cv,
-            &cmu,
-            &epk,
-            &enc_ciphertext,
-            &out_ciphertext
-        )
-        .is_some());
 
         (
             ovk,
@@ -1247,6 +1266,20 @@ mod tests {
             &out_ciphertext,
             |pt| pt[1..12].copy_from_slice(&find_valid_diversifier().0),
         );
+        assert_eq!(
+            try_sapling_output_recovery(&ovk, &cv, &cmu, &epk, &enc_ciphertext, &out_ciphertext),
+            None
+        );
+    }
+
+    #[test]
+    fn recovery_with_invalid_pk_d() {
+        let mut rng = OsRng;
+
+        let ivk = Fs::zero();
+        let (ovk, _, cv, cmu, epk, enc_ciphertext, out_ciphertext) =
+            random_enc_ciphertext_with(ivk, &mut rng);
+
         assert_eq!(
             try_sapling_output_recovery(&ovk, &cv, &cmu, &epk, &enc_ciphertext, &out_ciphertext),
             None

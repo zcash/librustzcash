@@ -151,6 +151,17 @@ impl<E: JubjubEngine> PaymentAddress<E> {
         }
     }
 
+    /// Constructs a PaymentAddress from a diversifier and a Jubjub point.
+    ///
+    /// Only for test code, as this explicitly bypasses the invariant.
+    #[cfg(test)]
+    pub(crate) fn from_parts_unchecked(
+        diversifier: Diversifier,
+        pk_d: edwards::Point<E, PrimeOrder>,
+    ) -> Self {
+        PaymentAddress { pk_d, diversifier }
+    }
+
     /// Parses a PaymentAddress from bytes.
     pub fn from_bytes(bytes: &[u8; 43], params: &E::Params) -> Option<Self> {
         let diversifier = {
