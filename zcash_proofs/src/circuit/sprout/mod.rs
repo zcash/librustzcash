@@ -326,6 +326,7 @@ where
 }
 
 #[test]
+#[ignore]
 fn test_sprout_constraints() {
     use bellman::gadgets::test::*;
     use pairing::bls12_381::Bls12;

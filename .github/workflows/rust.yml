@@ -18,6 +18,8 @@ jobs:
       run: cargo build --verbose --release --all
     - name: Run tests
       run: cargo test --verbose --release --all
+    - name: Run slow tests
+      run: cargo test --verbose --release --all -- --ignored
 
   macOS:
     name: Test on macOS-latest
@@ -35,3 +37,5 @@ jobs:
       run: $HOME/.cargo/bin/cargo build --verbose --release --all
     - name: Run tests
       run: $HOME/.cargo/bin/cargo test --verbose --release --all
+    - name: Run slow tests
+      run: $HOME/.cargo/bin/cargo test --verbose --release --all -- --ignored

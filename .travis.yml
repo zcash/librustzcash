@@ -17,6 +17,7 @@ script:
   - cargo fmt --all -- --check
   - cargo build --verbose --release --all
   - cargo test --verbose --release --all
+  - cargo test --verbose --release --all -- --ignored
 
 before_cache:
   - rm -rf "$TRAVIS_HOME/.cargo/registry/src"
