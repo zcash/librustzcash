@@ -27,5 +27,5 @@ before_cache:
 
 after_success:
   # Manually exclude packages that are going to be removed from the workspace
-  - travis_wait cargo tarpaulin --release --timeout 600 --out Xml --packages "librustzcash,zcash_client_backend,zcash_primitives,zcash_proofs"
+  - travis_wait 35 cargo tarpaulin --release --timeout 600 --out Xml --packages "librustzcash,zcash_client_backend,zcash_primitives,zcash_proofs"
   - bash <(curl -s https://codecov.io/bash)
