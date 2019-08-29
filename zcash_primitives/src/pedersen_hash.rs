@@ -124,19 +124,25 @@ pub mod test {
     fn test_pedersen_hash_points() {
         let test_vectors = pedersen_hash_vectors::get_vectors();
 
-        let params = &JubjubBls12::new();
+        assert!(test_vectors.len() > 0);
 
-        let v = &test_vectors[0];
-        let input_bools: Vec<bool> = v.input_bits.iter().map(|&i| i == 1).collect();
+        for v in test_vectors.iter() {
+            let params = &JubjubBls12::new();
 
-        // The 6 bits prefix is handled separately
-        assert_eq!(v.personalization.get_bits(), &input_bools[..6]);
+            let input_bools: Vec<bool> = v.input_bits.iter().map(|&i| i == 1).collect();
 
-        let (x, y) =
-            pedersen_hash::<Bls12, _>(v.personalization, input_bools.into_iter().skip(6), params)
-                .to_xy();
+            // The 6 bits prefix is handled separately
+            assert_eq!(v.personalization.get_bits(), &input_bools[..6]);
 
-        assert_eq!(x.to_string(), v.hash_x);
-        assert_eq!(y.to_string(), v.hash_y);
+            let (x, y) = pedersen_hash::<Bls12, _>(
+                v.personalization,
+                input_bools.into_iter().skip(6),
+                params,
+            )
+            .to_xy();
+
+            assert_eq!(x.to_string(), v.hash_x);
+            assert_eq!(y.to_string(), v.hash_y);
+        }
     }
 }
