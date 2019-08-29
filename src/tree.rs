@@ -109,6 +109,34 @@ impl Tree {
         result
     }
 
+    fn get_peaks(&self, root: NodeLink) -> Vec<NodeLink> {
+        let (left_child_link, right_child_link) = {
+            let root = self.resolve_link(root);
+            (
+                root.node.left.expect("It would stop before when root is leaf"),
+                root.node.right.expect("It would stop before when root is leaf"),
+            )
+        };
+
+        let mut result = Vec::new();
+
+        let left_child = self.resolve_link(left_child_link);
+        if left_child.node.complete() {
+            result.push(left_child_link);
+        } else {
+            result.extend(self.get_peaks(left_child_link));
+        }
+
+        let right_child = self.resolve_link(right_child_link);
+        if right_child.node.complete() {
+            result.push(right_child_link);
+        } else {
+            result.extend(self.get_peaks(right_child_link));
+        }
+
+        result
+    }
+
     /// Append one leaf to the tree.
     pub fn append_leaf(&mut self, root: NodeLink, new_leaf: NodeData) -> AppendTransaction {
         let is_complete= self.resolve_link(root).node.complete();
