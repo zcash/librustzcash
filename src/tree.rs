@@ -110,8 +110,12 @@ impl Tree {
     }
 
     fn get_peaks(&self, root: NodeLink) -> Vec<NodeLink> {
+
         let (left_child_link, right_child_link) = {
             let root = self.resolve_link(root);
+            if root.node.complete() {
+                return vec![root.link];
+            }
             (
                 root.node.left.expect("It would stop before when root is leaf"),
                 root.node.right.expect("It would stop before when root is leaf"),
@@ -139,91 +143,44 @@ impl Tree {
 
     /// Append one leaf to the tree.
     pub fn append_leaf(&mut self, root: NodeLink, new_leaf: NodeData) -> AppendTransaction {
-        let is_complete= self.resolve_link(root).node.complete();
+        let new_leaf_link = self.push(new_leaf.into());
+        let mut appended = Vec::new();
+        appended.push(new_leaf_link);
 
-        let (new_root, mut appended) = if is_complete {
-            let new_leaf_link = self.push(new_leaf.into());
+        let mut peaks = self.get_peaks(root);
 
-            let mut appended = Vec::new();
-            appended.push(new_leaf_link);
+        let mut merge_stack = Vec::new();
+        merge_stack.push(new_leaf_link);
 
-            // since we dethrone stored root, new one is always generated
-            let new_root_node = combine_nodes(
-                self.resolve_link(root),
-                self.resolve_link(new_leaf_link),
-            );
+        while let Some(next_peak) = peaks.pop() {
+            let next_merge = merge_stack.pop().expect("there should be at least one, checked below");
 
-            (self.push_generated(new_root_node), appended)
-        } else {
-//            let (root_left_child, root_right_child) = {
-//                let root = self.resolve_link(root).node;
-//                (
-//                    root.left.expect("Root should always have left child"),
-//                    root.right.expect("Root should always have right child"),
-//                )
-//            };
-//
-//            let nested_append = self.append_leaf(root_right_child, new_leaf);
-//            let appended = nested_append.appended;
-//            let subtree_root = nested_append.new_root;
-//
-//            let new_root_node = combine_nodes(
-//                self.resolve_link(root_left_child),
-//                self.resolve_link(subtree_root),
-//            );
-//
-//            (new_root_node, appended)
-
-            let new_leaf_link = self.push(new_leaf.into());
-            let mut appended = Vec::new();
-            appended.push(new_leaf_link);
-
-            let mut peaks = self.get_peaks(root);
-
-            let mut merge_stack = Vec::new();
-            merge_stack.push(new_leaf_link);
-
-            while let Some(next_peak) = peaks.pop() {
-                dbg!(next_peak);
-                let next_merge = merge_stack.pop().expect("there should be at least one, checked below");
-
-                if let Some(stored) = {
-                    let peak = self.resolve_link(next_peak);
-                    let m = self.resolve_link(next_merge);
-                    if peak.node.leaf_count() == m.node.leaf_count() {
-                        Some(combine_nodes(peak, m))
-                    } else { None }
-                } {
-                    let link = self.push(stored);
-                    merge_stack.push(link);
-                    appended.push(link);
-                    dbg!(link);
-                    continue;
-                }
-                merge_stack.push(next_merge);
-                merge_stack.push(next_peak);
+            if let Some(stored) = {
+                let peak = self.resolve_link(next_peak);
+                let m = self.resolve_link(next_merge);
+                if peak.node.leaf_count() == m.node.leaf_count() {
+                    Some(combine_nodes(peak, m))
+                } else { None }
+            } {
+                let link = self.push(stored);
+                merge_stack.push(link);
+                appended.push(link);
+                continue;
             }
+            merge_stack.push(next_merge);
+            merge_stack.push(next_peak);
+        }
 
-            let mut root = merge_stack.pop().expect("There should be at least one node in stack");
-            while let Some(next_child) = merge_stack.pop() {
-                root = self.push_generated(
-                    combine_nodes(
-                        self.resolve_link(root),
-                        self.resolve_link(next_child),
-                    )
+        let mut new_root = merge_stack.pop().expect("There should be at least one node in stack");
+        while let Some(next_child) = merge_stack.pop() {
+            new_root = self.push_generated(
+                combine_nodes(
+                    self.resolve_link(new_root),
+                    self.resolve_link(next_child),
                 )
-            }
+            )
+        }
 
-            (root, appended)
-        };
-
-//        let new_root = if new_root_node.complete() {
-//            let new_root= self.push(new_root_node);
-//            appended.push(new_root);
-//            new_root
-//        } else {
-//            self.push_generated(new_root_node)
-//        };
 
         AppendTransaction {
             new_root,
@@ -490,7 +447,6 @@ mod tests {
         });
 
         // *** APPEND #6 ***
-        dbg!("go");
         let append_tx = tree.append_leaf(new_root_link, leaf(6));
         let new_root_link = append_tx.new_root;
         let new_root = tree.resolve_link(new_root_link).node;
@@ -648,14 +604,14 @@ mod tests {
 
     quickcheck! {
         fn there_and_back(number: u32) -> TestResult {
-            if (number > 1024*1024) {
+            if number > 1024*1024 {
                 TestResult::discard()
             } else {
                 let (mut root, mut tree) = initial();
                 for i in 0..number {
                     root = tree.append_leaf(root, leaf(i+3)).new_root;
                 }
-                for i in 0..number {
+                for _ in 0..number {
                     root = tree.truncate_leaf(root).new_root;
                 }
 
@@ -664,12 +620,12 @@ mod tests {
         }
 
         fn leaf_count(number: u32) -> TestResult {
-            if (number > 1024 * 1024 || number < 3) {
+            if number > 1024 * 1024 || number < 3 {
                 TestResult::discard()
             } else {
                 let (mut root, mut tree) = initial();
-                for i in 0..(number-2) {
-                    root = tree.append_leaf(root, leaf(i+3)).new_root;
+                for i in 1..(number-1) {
+                    root = tree.append_leaf(root, leaf(i+2)).new_root;
                 }
 
                 TestResult::from_bool(tree.resolve_link(root).node.leaf_count() == number)
