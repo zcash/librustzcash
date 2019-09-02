@@ -48,8 +48,12 @@ pub struct MMRNode {
 
 impl MMRNode {
     fn complete(&self) -> bool {
-        let leaves = self.data.end_height - self.data.start_height + 1;
+        let leaves = self.leaf_count();
         leaves & (leaves - 1) == 0
+    }
+
+    fn leaf_count(&self) -> u32 {
+        self.data.end_height - self.data.start_height + 1
     }
 }
 
