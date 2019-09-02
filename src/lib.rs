@@ -26,10 +26,16 @@ pub struct NodeData {
     shielded_tx: u64,
 }
 
+#[derive(Debug)]
+pub enum Error {
+    ExpectedInMemory(EntryLink),
+    ExpectedNode(Option<EntryLink>),
+}
+
 /// Reference to to the tree node.
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
-pub enum NodeLink {
+pub enum EntryLink {
     /// Reference to the stored (in the array representation) leaf/node.
     Stored(u32),
     /// Reference to the generated leaf/node.
@@ -39,41 +45,57 @@ pub enum NodeLink {
 /// MMR Node. It is leaf when `left`, `right` are `None` and node when they are not.
 #[repr(C)]
 #[derive(Debug)]
-// TODO: Better layout would be enum (node, leaf), with left, right set only for nodes?
-pub struct MMRNode {
-    left: Option<NodeLink>,
-    right: Option<NodeLink>,
+pub enum EntryKind {
+    Leaf,
+    Node(EntryLink, EntryLink),
+}
+
+pub struct Entry {
+    kind: EntryKind,
     data: NodeData,
 }
 
-impl MMRNode {
-    fn complete(&self) -> bool {
+impl Entry {
+    pub fn complete(&self) -> bool {
         let leaves = self.leaf_count();
         leaves & (leaves - 1) == 0
     }
 
-    fn leaf_count(&self) -> u32 {
+    pub fn leaf_count(&self) -> u32 {
         self.data.end_height - self.data.start_height + 1
     }
-}
 
-impl From<NodeData> for MMRNode {
-    fn from(s: NodeData) -> Self {
-        MMRNode { left: None, right: None, data: s }
+    pub fn is_leaf(&self) -> bool {
+        if let EntryKind::Leaf = self.kind { true } else { false }
+    }
+
+    pub fn left(&self) -> Result<EntryLink, Error> {
+        match self.kind {
+            EntryKind::Leaf => { Err(Error::ExpectedNode(None)) }
+            EntryKind::Node(left, _) => Ok(left)
+        }
+    }
+
+    pub fn right(&self) -> Result<EntryLink, Error> {
+        match self.kind {
+            EntryKind::Leaf => { Err(Error::ExpectedNode(None)) }
+            EntryKind::Node(_, right) => Ok(right)
+        }
     }
 }
 
-#[no_mangle]
-pub extern fn append(
-    _stored: *const MMRNode,
-    _stored_count: u32,
-    _generated: *const MMRNode,
-    _generated_count: u32,
-    _append_count: *mut u32,
-    _append_buffer: *mut MMRNode,
-) {
-
-    // TODO: construct tree and write to (append_count, append_buffer)
-    // TODO: also return generated??
-    unimplemented!()
+impl From<NodeData> for Entry {
+    fn from(s: NodeData) -> Self {
+        Entry { kind: EntryKind::Leaf, data: s }
+    }
 }
+
+impl Error {
+    pub (crate) fn augment(self, link: EntryLink) -> Self {
+        match self {
+            Error::ExpectedNode(None) => Error::ExpectedNode(Some(link)),
+            val => val
+        }
+    }
+}
+
