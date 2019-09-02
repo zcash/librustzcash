@@ -153,7 +153,7 @@ impl Tree {
         merge_stack.push(new_leaf_link);
 
         while let Some(next_peak) = peaks.pop() {
-            let next_merge = merge_stack.pop().expect("there should be at least one, checked below");
+            let next_merge = merge_stack.pop().expect("there should be at least one, initial or re-pushed");
 
             if let Some(stored) = {
                 let peak = self.resolve_link(next_peak);
@@ -171,7 +171,7 @@ impl Tree {
             merge_stack.push(next_peak);
         }
 
-        let mut new_root = merge_stack.pop().expect("There should be at least one node in stack");
+        let mut new_root = merge_stack.pop().expect("Loop above cannot reduce the merge_stack");
         while let Some(next_child) = merge_stack.pop() {
             new_root = self.push_generated(
                 combine_nodes(
@@ -211,7 +211,7 @@ impl Tree {
             let (leaves, root_left_child) = {
                 let n = self.resolve_link(root);
                 (
-                    n.node.data.end_height - n.node.data.start_height + 1,
+                    n.node.leaf_count(),
                     n.node.left.expect("Root should have left child while deleting")
                 )
             };
@@ -239,21 +239,21 @@ impl Tree {
                     .expect("If left exists, right should exist as well");
                 truncated += 1;
             } else {
+                if root.node.complete() { truncated += 1; }
                 break;
             }
         }
 
-        let root = peaks.drain(0..1).nth(0).expect("At lest 2 elements in peaks");
-        let new_root = peaks.into_iter().fold(
-            root,
-            |root, next_peak|
-                self.push_generated(
+        let mut new_root = peaks.drain(0..1).nth(0).expect("At lest 2 elements in peaks");
+
+        for next_peak in peaks.into_iter() {
+            new_root = self.push_generated(
                     combine_nodes(
-                        self.resolve_link(root),
+                        self.resolve_link(new_root),
                         self.resolve_link(next_peak)
                     )
-                )
-        );
+                );
+        }
 
         for _ in 0..truncated { self.pop(); }
 
@@ -601,6 +601,22 @@ mod tests {
         assert_eq!(tree.len(), 16);
     }
 
+    #[test]
+    fn tree_len() {
+        let (mut root, mut tree) = initial();
+
+        assert_eq!(tree.len(), 3);
+
+        for i in 0..2 {
+            root = tree.append_leaf(root, leaf(i+3)).new_root;
+        }
+        assert_eq!(tree.len(), 7);
+
+        root = tree.truncate_leaf(root).new_root;
+
+        assert_eq!(tree.len(), 4);
+    }
+
 
     quickcheck! {
         fn there_and_back(number: u32) -> TestResult {
@@ -629,6 +645,73 @@ mod tests {
                 }
 
                 TestResult::from_bool(tree.resolve_link(root).node.leaf_count() == number)
+            }
+        }
+
+        fn parity(number: u32) -> TestResult {
+            if number > 2048 * 2048 || number < 3 {
+                TestResult::discard()
+            } else {
+                let (mut root, mut tree) = initial();
+                for i in 1..(number-1) {
+                    root = tree.append_leaf(root, leaf(i+2)).new_root;
+                }
+
+                TestResult::from_bool(
+                    if number & number - 1 == 0 {
+                        if let NodeLink::Stored(_) = root { true }
+                        else { false }
+                    } else {
+                        if let NodeLink::Generated(_) = root { true }
+                        else { false }
+                    }
+                )
+            }
+        }
+
+        fn parity_with_truncate(add: u32, delete: u32) -> TestResult {
+            // First we add `add` number of leaves, then delete `delete` number of leaves
+            // What is left should be consistent with generated-stored structure
+            if add > 2048 * 2048 || add < delete {
+                TestResult::discard()
+            } else {
+                let (mut root, mut tree) = initial();
+                for i in 0..add {
+                    root = tree.append_leaf(root, leaf(i+3)).new_root;
+                }
+                for _ in 0..delete {
+                    root = tree.truncate_leaf(root).new_root;
+                }
+
+                let total = add - delete + 2;
+
+                TestResult::from_bool(
+                    if total & total - 1 == 0 {
+                        if let NodeLink::Stored(_) = root { true }
+                        else { false }
+                    } else {
+                        if let NodeLink::Generated(_) = root { true }
+                        else { false }
+                    }
+                )
+            }
+        }
+
+        fn stored_length(add: u32, delete: u32) -> TestResult {
+            if add > 2048 * 2048 || add < delete {
+                TestResult::discard()
+            } else {
+                let (mut root, mut tree) = initial();
+                for i in 0..add {
+                    root = tree.append_leaf(root, leaf(i+3)).new_root;
+                }
+                for _ in 0..delete {
+                    root = tree.truncate_leaf(root).new_root;
+                }
+
+                let total = add - delete + 2;
+
+                TestResult::from_bool(total * total > tree.len())
             }
         }
     }
