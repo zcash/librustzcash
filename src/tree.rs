@@ -109,12 +109,13 @@ impl Tree {
         result
     }
 
-    fn get_peaks(&self, root: NodeLink) -> Vec<NodeLink> {
+    fn get_peaks(&self, root: NodeLink, target: &mut Vec<NodeLink>) {
 
         let (left_child_link, right_child_link) = {
             let root = self.resolve_link(root);
             if root.node.complete() {
-                return vec![root.link];
+                target.push(root.link);
+                return;
             }
             (
                 root.node.left.expect("It would stop before when root is leaf"),
@@ -122,23 +123,8 @@ impl Tree {
             )
         };
 
-        let mut result = Vec::new();
-
-        let left_child = self.resolve_link(left_child_link);
-        if left_child.node.complete() {
-            result.push(left_child_link);
-        } else {
-            result.extend(self.get_peaks(left_child_link));
-        }
-
-        let right_child = self.resolve_link(right_child_link);
-        if right_child.node.complete() {
-            result.push(right_child_link);
-        } else {
-            result.extend(self.get_peaks(right_child_link));
-        }
-
-        result
+        self.get_peaks(left_child_link, target);
+        self.get_peaks(right_child_link, target);
     }
 
     /// Append one leaf to the tree.
@@ -147,7 +133,8 @@ impl Tree {
         let mut appended = Vec::new();
         appended.push(new_leaf_link);
 
-        let mut peaks = self.get_peaks(root);
+        let mut peaks = Vec::new();
+        self.get_peaks(root, &mut peaks);
 
         let mut merge_stack = Vec::new();
         merge_stack.push(new_leaf_link);
@@ -180,7 +167,6 @@ impl Tree {
                 )
             )
         }
-
 
         AppendTransaction {
             new_root,
@@ -612,7 +598,7 @@ mod tests {
         }
         assert_eq!(tree.len(), 7);
 
-        root = tree.truncate_leaf(root).new_root;
+        tree.truncate_leaf(root);
 
         assert_eq!(tree.len(), 4);
     }
