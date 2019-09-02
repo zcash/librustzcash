@@ -603,6 +603,24 @@ mod tests {
         assert_eq!(tree.len(), 4);
     }
 
+    #[test]
+    fn tree_len_long() {
+        let (mut root, mut tree) = initial();
+
+        assert_eq!(tree.len(), 3);
+
+        for i in 0..4094 {
+            root = tree.append_leaf(root, leaf(i+3)).new_root;
+        }
+        assert_eq!(tree.len(), 8191); // 4096*2-1 (full tree)
+
+        for _ in 0..2049 {
+            root = tree.truncate_leaf(root).new_root;
+        }
+
+        assert_eq!(tree.len(), 4083); // 4095 - log2(4096)
+    }
+
 
     quickcheck! {
         fn there_and_back(number: u32) -> TestResult {
