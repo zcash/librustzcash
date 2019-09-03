@@ -272,29 +272,10 @@ impl<'a> IndexedNode<'a> {
 
 }
 
-fn combine_data(left: &NodeData, right: &NodeData) -> NodeData {
-    NodeData {
-        // TODO: hash children
-        subtree_commitment: [0u8; 32],
-        start_time: left.start_time,
-        end_time: right.end_time,
-        start_target: left.start_target,
-        end_target: right.end_target,
-        start_sapling_root: left.start_sapling_root,
-        end_sapling_root: right.end_sapling_root,
-
-        // TODO: sum work?
-        subtree_total_work: 0,
-        start_height: left.start_height,
-        end_height: right.end_height,
-        shielded_tx: left.shielded_tx + right.shielded_tx,
-    }
-}
-
 fn combine_nodes<'a>(left: IndexedNode<'a>, right: IndexedNode<'a>) -> Entry {
     Entry {
         kind: EntryKind::Node(left.link, right.link),
-        data: combine_data(&left.node.data, &right.node.data),
+        data: NodeData::combine(&left.node.data, &right.node.data),
     }
 }
 

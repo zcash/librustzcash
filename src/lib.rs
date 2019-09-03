@@ -6,27 +6,11 @@
 #[cfg(test)] #[macro_use] extern crate quickcheck;
 extern crate derive_more;
 
-
 mod tree;
+mod node_data;
 
 pub use tree::Tree;
-
-/// Node metadata.
-#[repr(C)]
-#[derive(Debug)]
-pub struct NodeData {
-    subtree_commitment: [u8; 32],
-    start_time: u32,
-    end_time: u32,
-    start_target: u32,
-    end_target: u32,
-    start_sapling_root: [u8; 32],
-    end_sapling_root: [u8; 32],
-    subtree_total_work: u64,
-    start_height: u32,
-    end_height: u32,
-    shielded_tx: u64,
-}
+pub use node_data::NodeData;
 
 #[derive(Debug, derive_more::Display)]
 pub enum Error {
