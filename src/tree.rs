@@ -227,9 +227,9 @@ impl Tree {
             }
         }
 
-        let mut new_root = peaks.drain(0..1).nth(0).expect("At lest 2 elements in peaks");
+        let mut new_root = *peaks.iter().nth(0).expect("At lest 2 elements in peaks");
 
-        for next_peak in peaks.into_iter() {
+        for next_peak in peaks.into_iter().skip(1) {
             new_root = self.push_generated(
                 combine_nodes(
                 self.resolve_link(new_root)?,
