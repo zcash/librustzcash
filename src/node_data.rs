@@ -1,11 +1,12 @@
-use byteorder::{LittleEndian, WriteBytesExt};
-
+use byteorder::{LittleEndian, WriteBytesExt, ByteOrder};
 use bigint::U256;
+use blake2::blake2b::Blake2b;
 
 /// Node metadata.
 #[repr(C)]
 #[derive(Debug)]
 pub struct NodeData {
+    pub consensus_branch_id: u32,
     pub subtree_commitment: [u8; 32],
     pub start_time: u32,
     pub end_time: u32,
@@ -19,13 +20,44 @@ pub struct NodeData {
     pub shielded_tx: u64,
 }
 
+pub fn blake2b_personal(personalization: &[u8], input: &[u8]) -> [u8; 32] {
+    let mut hasher = Blake2b::with_params(32, &[], &[], personalization);
+    hasher.update(input);
+    let mut result = [0u8; 32];
+    result.copy_from_slice(hasher.finalize().as_bytes());
+    result
+}
+
+pub fn personalization(branch_id: u32) -> [u8; 16] {
+    let mut result = [0u8; 16];
+    result[..12].copy_from_slice(b"ZcashHistory");
+    LittleEndian::write_u32(&mut result[12..], branch_id);
+    result
+}
+
 impl NodeData {
     pub const MAX_SERIALIZED_SIZE: usize = 32 + 4 + 4 + 4 + 4 + 32 + 32 + 32 + 9 + 9 + 9; // =171;
 
     pub fn combine(left: &NodeData, right: &NodeData) -> NodeData {
+        assert_eq!(left.consensus_branch_id, right.consensus_branch_id);
+
+        let mut hash_buf = [0u8; Self::MAX_SERIALIZED_SIZE * 2];
+        let size = {
+            let mut cursor = ::std::io::Cursor::new(&mut hash_buf[..]);
+            left.write(&mut cursor).expect("Writing to memory buf with enough length cannot fail; qed");
+            right.write(&mut cursor).expect("Writing to memory buf with enough length cannot fail; qed");
+            cursor.position() as usize
+        };
+
+        let hash = blake2b_personal(
+            &personalization(left.consensus_branch_id),
+            &hash_buf[..size]
+        );
+
         NodeData {
             // TODO: hash children
-            subtree_commitment: [0u8; 32],
+            consensus_branch_id: left.consensus_branch_id,
+            subtree_commitment: hash,
             start_time: left.start_time,
             end_time: right.end_time,
             start_target: left.start_target,
@@ -33,7 +65,6 @@ impl NodeData {
             start_sapling_root: left.start_sapling_root,
             end_sapling_root: right.end_sapling_root,
 
-            // TODO: sum work?
             subtree_total_work: left.subtree_total_work + right.subtree_total_work,
             start_height: left.start_height,
             end_height: right.end_height,

@@ -7,6 +7,7 @@
 extern crate derive_more;
 extern crate bigint;
 extern crate byteorder;
+extern crate blake2_rfc as blake2;
 
 mod tree;
 mod node_data;

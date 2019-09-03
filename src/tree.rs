@@ -285,6 +285,7 @@ mod tests {
 
     fn leaf(height: u32) -> NodeData {
         NodeData {
+            consensus_branch_id: 1,
             subtree_commitment: [0u8; 32],
             start_time: 0,
             end_time: 0,
@@ -301,6 +302,7 @@ mod tests {
 
     fn node(start_height: u64, end_height: u64) -> NodeData {
         NodeData {
+            consensus_branch_id: 1,
             subtree_commitment: [0u8; 32],
             start_time: 0,
             end_time: 0,
