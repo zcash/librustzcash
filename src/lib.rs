@@ -4,6 +4,8 @@
 
 #[cfg(test)] #[macro_use] extern crate assert_matches;
 #[cfg(test)] #[macro_use] extern crate quickcheck;
+extern crate derive_more;
+
 
 mod tree;
 
@@ -26,19 +28,25 @@ pub struct NodeData {
     shielded_tx: u64,
 }
 
-#[derive(Debug)]
+#[derive(Debug, derive_more::Display)]
 pub enum Error {
+    #[display(fmt="Node/leaf expected to be in memory: {}", _0)]
     ExpectedInMemory(EntryLink),
-    ExpectedNode(Option<EntryLink>),
+    #[display(fmt="Node expected")]
+    ExpectedNode,
+    #[display(fmt="Node expected, not leaf: {}", _0)]
+    ExpectedNodeForLink(EntryLink),
 }
 
 /// Reference to to the tree node.
 #[repr(C)]
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, derive_more::Display)]
 pub enum EntryLink {
     /// Reference to the stored (in the array representation) leaf/node.
+    #[display(fmt="stored(@{})", _0)]
     Stored(u32),
     /// Reference to the generated leaf/node.
+    #[display(fmt="generated(@{})", _0)]
     Generated(u32),
 }
 
@@ -71,14 +79,14 @@ impl Entry {
 
     pub fn left(&self) -> Result<EntryLink, Error> {
         match self.kind {
-            EntryKind::Leaf => { Err(Error::ExpectedNode(None)) }
+            EntryKind::Leaf => { Err(Error::ExpectedNode) }
             EntryKind::Node(left, _) => Ok(left)
         }
     }
 
     pub fn right(&self) -> Result<EntryLink, Error> {
         match self.kind {
-            EntryKind::Leaf => { Err(Error::ExpectedNode(None)) }
+            EntryKind::Leaf => { Err(Error::ExpectedNode) }
             EntryKind::Node(_, right) => Ok(right)
         }
     }
@@ -93,7 +101,7 @@ impl From<NodeData> for Entry {
 impl Error {
     pub (crate) fn augment(self, link: EntryLink) -> Self {
         match self {
-            Error::ExpectedNode(None) => Error::ExpectedNode(Some(link)),
+            Error::ExpectedNode => Error::ExpectedNodeForLink(link),
             val => val
         }
     }
