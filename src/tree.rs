@@ -44,7 +44,6 @@ impl Tree {
     fn resolve_link(&self, link: EntryLink) -> Result<IndexedNode, Error> {
         match link {
             EntryLink::Generated(index) => {
-                // TODO: maybe graceful error?
                 let node = self.generated.get(&index).ok_or(Error::ExpectedInMemory(link))?;
                 Ok(IndexedNode {
                     node,
@@ -52,7 +51,6 @@ impl Tree {
                 })
             },
             EntryLink::Stored(index) => {
-                // TODO: maybe graceful error?
                 let node = self.stored.get(&index).ok_or(Error::ExpectedInMemory(link))?;
                 Ok(IndexedNode {
                     node,
@@ -735,6 +733,7 @@ mod tests {
             }
         }
 
+        // Length of tree is always less than number of leaves squared
         fn stored_length(add: u32, delete: u32) -> TestResult {
             if add > 2048 * 2048 || add < delete {
                 TestResult::discard()
