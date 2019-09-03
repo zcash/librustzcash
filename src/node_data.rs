@@ -20,7 +20,7 @@ pub struct NodeData {
     pub shielded_tx: u64,
 }
 
-pub fn blake2b_personal(personalization: &[u8], input: &[u8]) -> [u8; 32] {
+fn blake2b_personal(personalization: &[u8], input: &[u8]) -> [u8; 32] {
     let mut hasher = Blake2b::with_params(32, &[], &[], personalization);
     hasher.update(input);
     let mut result = [0u8; 32];
@@ -28,7 +28,7 @@ pub fn blake2b_personal(personalization: &[u8], input: &[u8]) -> [u8; 32] {
     result
 }
 
-pub fn personalization(branch_id: u32) -> [u8; 16] {
+fn personalization(branch_id: u32) -> [u8; 16] {
     let mut result = [0u8; 16];
     result[..12].copy_from_slice(b"ZcashHistory");
     LittleEndian::write_u32(&mut result[12..], branch_id);
@@ -55,7 +55,6 @@ impl NodeData {
         );
 
         NodeData {
-            // TODO: hash children
             consensus_branch_id: left.consensus_branch_id,
             subtree_commitment: hash,
             start_time: left.start_time,
@@ -64,7 +63,6 @@ impl NodeData {
             end_target: right.end_target,
             start_sapling_root: left.start_sapling_root,
             end_sapling_root: right.end_sapling_root,
-
             subtree_total_work: left.subtree_total_work + right.subtree_total_work,
             start_height: left.start_height,
             end_height: right.end_height,
