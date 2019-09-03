@@ -292,14 +292,14 @@ mod tests {
             end_target: 0,
             start_sapling_root: [0u8; 32],
             end_sapling_root: [0u8; 32],
-            subtree_total_work: 0,
-            start_height: height,
-            end_height: height,
+            subtree_total_work: 0.into(),
+            start_height: height as u64,
+            end_height: height as u64,
             shielded_tx: 7,
         }
     }
 
-    fn node(start_height: u32, end_height: u32) -> NodeData {
+    fn node(start_height: u64, end_height: u64) -> NodeData {
         NodeData {
             subtree_commitment: [0u8; 32],
             start_time: 0,
@@ -308,7 +308,7 @@ mod tests {
             end_target: 0,
             start_sapling_root: [0u8; 32],
             end_sapling_root: [0u8; 32],
-            subtree_total_work: 0,
+            subtree_total_work: 0.into(),
             start_height: start_height,
             end_height: end_height,
             shielded_tx: 7,
@@ -679,7 +679,7 @@ mod tests {
                         .node
                         .leaf_count()
                         ==
-                        number
+                        number as u64
                 )
             }
         }

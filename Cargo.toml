@@ -10,3 +10,5 @@ quickcheck = "0.8"
 
 [dependencies]
 derive_more = "0.15"
+bigint = "4"
+byteorder = "1"

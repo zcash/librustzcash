@@ -5,6 +5,8 @@
 #[cfg(test)] #[macro_use] extern crate assert_matches;
 #[cfg(test)] #[macro_use] extern crate quickcheck;
 extern crate derive_more;
+extern crate bigint;
+extern crate byteorder;
 
 mod tree;
 mod node_data;
@@ -53,7 +55,7 @@ impl Entry {
         leaves & (leaves - 1) == 0
     }
 
-    pub fn leaf_count(&self) -> u32 {
+    pub fn leaf_count(&self) -> u64 {
         self.data.end_height - self.data.start_height + 1
     }
 
