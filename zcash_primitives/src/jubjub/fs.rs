@@ -321,8 +321,8 @@ impl Field for Fs {
         loop {
             let mut tmp = {
                 let mut repr = [0u64; 4];
-                for i in 0..4 {
-                    repr[i] = rng.next_u64();
+                for limb in &mut repr {
+                    *limb = rng.next_u64();
                 }
                 Fs(FsRepr(repr))
             };

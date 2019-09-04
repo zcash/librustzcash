@@ -11,7 +11,7 @@ pub struct OutputNote {
 }
 
 impl OutputNote {
-    pub fn compute<'a, E, CS>(
+    pub fn compute<E, CS>(
         mut cs: CS,
         a_pk: Option<PayingKey>,
         value: &NoteValue,
@@ -41,6 +41,6 @@ impl OutputNote {
             &r,
         )?;
 
-        Ok(OutputNote { cm: cm })
+        Ok(OutputNote { cm })
     }
 }

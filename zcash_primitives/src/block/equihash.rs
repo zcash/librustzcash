@@ -1,5 +1,6 @@
 use blake2b_simd::{Hash as Blake2bHash, Params as Blake2bParams, State as Blake2bState};
 use byteorder::{BigEndian, LittleEndian, ReadBytesExt, WriteBytesExt};
+use log::error;
 use std::io::Cursor;
 use std::mem::size_of;
 
@@ -60,10 +61,7 @@ impl Node {
             indices.extend(a.indices.iter());
             indices
         };
-        Node {
-            hash: hash,
-            indices: indices,
-        }
+        Node { hash, indices }
     }
 
     fn from_children_ref(a: &Node, b: &Node, trim: usize) -> Self {
@@ -82,10 +80,7 @@ impl Node {
             indices.extend(b.indices.iter());
             indices.extend(a.indices.iter());
         }
-        Node {
-            hash: hash,
-            indices: indices,
-        }
+        Node { hash, indices }
     }
 
     fn indices_before(&self, other: &Node) -> bool {
@@ -141,7 +136,7 @@ fn expand_array(vin: &[u8], bit_len: usize, byte_pad: usize) -> Vec<u8> {
 
     let mut j = 0;
     for b in vin {
-        acc_value = (acc_value << 8) | *b as u32;
+        acc_value = (acc_value << 8) | u32::from(*b);
         acc_bits += 8;
 
         // When we have bit_len or more bits in the accumulator, write the next
@@ -197,18 +192,18 @@ fn distinct_indices(a: &Node, b: &Node) -> bool {
             }
         }
     }
-    return true;
+    true
 }
 
 fn validate_subtrees(p: &Params, a: &Node, b: &Node) -> bool {
     if !has_collision(a, b, p.collision_byte_length()) {
-        // error!("Invalid solution: invalid collision length between StepRows");
+        error!("Invalid solution: invalid collision length between StepRows");
         false
     } else if b.indices_before(a) {
-        // error!("Invalid solution: Index tree incorrectly ordered");
+        error!("Invalid solution: Index tree incorrectly ordered");
         false
     } else if !distinct_indices(a, b) {
-        // error!("Invalid solution: duplicate indices");
+        error!("Invalid solution: duplicate indices");
         false
     } else {
         true
@@ -222,7 +217,7 @@ pub fn is_valid_solution_iterative(
     nonce: &[u8],
     indices: &[u32],
 ) -> bool {
-    let p = Params { n: n, k: k };
+    let p = Params { n, k };
 
     let mut state = initialise_state(p.n, p.k, p.hash_output());
     state.update(input);
@@ -249,7 +244,7 @@ pub fn is_valid_solution_iterative(
     }
 
     assert!(rows.len() == 1);
-    return rows[0].is_zero(hash_len);
+    rows[0].is_zero(hash_len)
 }
 
 fn tree_validator(p: &Params, state: &Blake2bState, indices: &[u32]) -> Option<Node> {
@@ -281,7 +276,7 @@ pub fn is_valid_solution_recursive(
     nonce: &[u8],
     indices: &[u32],
 ) -> bool {
-    let p = Params { n: n, k: k };
+    let p = Params { n, k };
 
     let mut state = initialise_state(p.n, p.k, p.hash_output());
     state.update(input);
@@ -297,7 +292,7 @@ pub fn is_valid_solution_recursive(
 }
 
 pub fn is_valid_solution(n: u32, k: u32, input: &[u8], nonce: &[u8], soln: &[u8]) -> bool {
-    let p = Params { n: n, k: k };
+    let p = Params { n, k };
     let indices = indices_from_minimal(soln, p.collision_bit_length());
 
     // Recursive validation is faster

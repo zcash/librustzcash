@@ -119,13 +119,13 @@ fn test_mul_associativity<E: JubjubEngine>(params: &E::Params) {
         assert!(res2 == res3);
         assert!(res3 == res4);
 
-        let (x, y) = res1.into_xy();
+        let (x, y) = res1.to_xy();
         assert!(is_on_twisted_edwards_curve(x, y, params));
 
-        let (x, y) = res2.into_xy();
+        let (x, y) = res2.to_xy();
         assert!(is_on_twisted_edwards_curve(x, y, params));
 
-        let (x, y) = res3.into_xy();
+        let (x, y) = res3.to_xy();
         assert!(is_on_twisted_edwards_curve(x, y, params));
     }
 }
@@ -238,7 +238,7 @@ fn test_get_for<E: JubjubEngine>(params: &E::Params) {
         let sign = rng.next_u32() % 2 == 1;
 
         if let Some(mut p) = edwards::Point::<E, _>::get_for_y(y, sign, params) {
-            assert!(p.into_xy().0.into_repr().is_odd() == sign);
+            assert!(p.to_xy().0.into_repr().is_odd() == sign);
             p = p.negate();
             assert!(edwards::Point::<E, _>::get_for_y(y, !sign, params).unwrap() == p);
         }
@@ -274,12 +274,12 @@ fn test_rand<E: JubjubEngine>(params: &E::Params) {
         let e = edwards::Point::<E, _>::rand(rng, params);
 
         {
-            let (x, y) = p.into_xy().unwrap();
+            let (x, y) = p.to_xy().unwrap();
             assert!(is_on_mont_curve(x, y, params));
         }
 
         {
-            let (x, y) = e.into_xy();
+            let (x, y) = e.to_xy();
             assert!(is_on_twisted_edwards_curve(x, y, params));
         }
     }

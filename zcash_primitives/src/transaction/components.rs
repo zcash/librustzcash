@@ -166,12 +166,10 @@ impl SpendDescription {
         writer.write_all(&self.zkproof)?;
         match self.spend_auth_sig {
             Some(sig) => sig.write(&mut writer),
-            None => {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidInput,
-                    "Missing spend auth signature",
-                ));
-            }
+            None => Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "Missing spend auth signature",
+            )),
         }
     }
 }
@@ -347,23 +345,20 @@ impl JSDescription {
             .map(|mac| reader.read_exact(mac))
             .collect::<io::Result<()>>()?;
 
-        let proof = match use_groth {
-            true => {
-                // Consensus rules (§4.3):
-                // - Canonical encoding is enforced in librustzcash_sprout_verify()
-                // - Proof validity is enforced in librustzcash_sprout_verify()
-                let mut proof = [0; GROTH_PROOF_SIZE];
-                reader.read_exact(&mut proof)?;
-                SproutProof::Groth(proof)
-            }
-            false => {
-                // Consensus rules (§4.3):
-                // - Canonical encoding is enforced by PHGRProof in zcashd
-                // - Proof validity is enforced by JSDescription::Verify() in zcashd
-                let mut proof = [0; PHGR_PROOF_SIZE];
-                reader.read_exact(&mut proof)?;
-                SproutProof::PHGR(proof)
-            }
+        let proof = if use_groth {
+            // Consensus rules (§4.3):
+            // - Canonical encoding is enforced in librustzcash_sprout_verify()
+            // - Proof validity is enforced in librustzcash_sprout_verify()
+            let mut proof = [0; GROTH_PROOF_SIZE];
+            reader.read_exact(&mut proof)?;
+            SproutProof::Groth(proof)
+        } else {
+            // Consensus rules (§4.3):
+            // - Canonical encoding is enforced by PHGRProof in zcashd
+            // - Proof validity is enforced by JSDescription::Verify() in zcashd
+            let mut proof = [0; PHGR_PROOF_SIZE];
+            reader.read_exact(&mut proof)?;
+            SproutProof::PHGR(proof)
         };
 
         let mut ciphertexts = [[0; 601]; ZC_NUM_JS_OUTPUTS];

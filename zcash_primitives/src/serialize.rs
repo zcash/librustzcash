@@ -70,7 +70,7 @@ impl Vector {
         F: Fn(&mut R) -> io::Result<E>,
     {
         let count = CompactSize::read(&mut reader)?;
-        (0..count).into_iter().map(|_| func(&mut reader)).collect()
+        (0..count).map(|_| func(&mut reader)).collect()
     }
 
     pub fn write<W: Write, E, F>(mut writer: W, vec: &[E], func: F) -> io::Result<()>

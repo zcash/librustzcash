@@ -45,6 +45,7 @@ use std::ffi::OsString;
 use std::os::windows::ffi::OsStringExt;
 
 use zcash_primitives::{
+    block::equihash,
     merkle_tree::CommitmentTreeWitness,
     note_encryption::sapling_ka_agree,
     primitives::{Diversifier, Note, PaymentAddress, ProofGenerationKey, ViewingKey},
@@ -57,8 +58,6 @@ use zcash_proofs::{
     load_parameters,
     sapling::{SaplingProvingContext, SaplingVerificationContext},
 };
-
-pub mod equihash;
 
 #[cfg(test)]
 mod tests;

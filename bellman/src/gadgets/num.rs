@@ -66,7 +66,7 @@ impl<E: Engine> AllocatedNum<E> {
     /// order, requiring that the representation
     /// strictly exists "in the field" (i.e., a
     /// congruency is not allowed.)
-    pub fn into_bits_le_strict<CS>(&self, mut cs: CS) -> Result<Vec<Boolean>, SynthesisError>
+    pub fn to_bits_le_strict<CS>(&self, mut cs: CS) -> Result<Vec<Boolean>, SynthesisError>
     where
         CS: ConstraintSystem<E>,
     {
@@ -78,7 +78,7 @@ impl<E: Engine> AllocatedNum<E> {
             E: Engine,
             CS: ConstraintSystem<E>,
         {
-            assert!(v.len() > 0);
+            assert!(!v.is_empty());
 
             // Let's keep this simple for now and just AND them all
             // manually
@@ -132,7 +132,7 @@ impl<E: Engine> AllocatedNum<E> {
                 current_run.push(a_bit.clone());
                 result.push(a_bit);
             } else {
-                if current_run.len() > 0 {
+                if !current_run.is_empty() {
                     // This is the start of a run of zeros, but we need
                     // to k-ary AND against `last_run` first.
 
@@ -183,13 +183,13 @@ impl<E: Engine> AllocatedNum<E> {
         cs.enforce(|| "unpacking constraint", |lc| lc, |lc| lc, |_| lc);
 
         // Convert into booleans, and reverse for little-endian bit order
-        Ok(result.into_iter().map(|b| Boolean::from(b)).rev().collect())
+        Ok(result.into_iter().map(Boolean::from).rev().collect())
     }
 
     /// Convert the allocated number into its little-endian representation.
     /// Note that this does not strongly enforce that the commitment is
     /// "in the field."
-    pub fn into_bits_le<CS>(&self, mut cs: CS) -> Result<Vec<Boolean>, SynthesisError>
+    pub fn to_bits_le<CS>(&self, mut cs: CS) -> Result<Vec<Boolean>, SynthesisError>
     where
         CS: ConstraintSystem<E>,
     {
@@ -208,7 +208,7 @@ impl<E: Engine> AllocatedNum<E> {
 
         cs.enforce(|| "unpacking constraint", |lc| lc, |lc| lc, |_| lc);
 
-        Ok(bits.into_iter().map(|b| Boolean::from(b)).collect())
+        Ok(bits.into_iter().map(Boolean::from).collect())
     }
 
     pub fn mul<CS>(&self, mut cs: CS, other: &Self) -> Result<Self, SynthesisError>
@@ -238,7 +238,7 @@ impl<E: Engine> AllocatedNum<E> {
         );
 
         Ok(AllocatedNum {
-            value: value,
+            value,
             variable: var,
         })
     }
@@ -270,7 +270,7 @@ impl<E: Engine> AllocatedNum<E> {
         );
 
         Ok(AllocatedNum {
-            value: value,
+            value,
             variable: var,
         })
     }
@@ -522,7 +522,7 @@ mod test {
         let mut cs = TestConstraintSystem::<Bls12>::new();
 
         let n = AllocatedNum::alloc(&mut cs, || Ok(negone)).unwrap();
-        n.into_bits_le_strict(&mut cs).unwrap();
+        n.to_bits_le_strict(&mut cs).unwrap();
 
         assert!(cs.is_satisfied());
 
@@ -550,9 +550,9 @@ mod test {
             let n = AllocatedNum::alloc(&mut cs, || Ok(r)).unwrap();
 
             let bits = if i % 2 == 0 {
-                n.into_bits_le(&mut cs).unwrap()
+                n.to_bits_le(&mut cs).unwrap()
             } else {
-                n.into_bits_le_strict(&mut cs).unwrap()
+                n.to_bits_le_strict(&mut cs).unwrap()
             };
 
             assert!(cs.is_satisfied());

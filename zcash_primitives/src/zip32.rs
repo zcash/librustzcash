@@ -16,8 +16,8 @@ use crate::{
     JUBJUB,
 };
 
-pub const ZIP32_SAPLING_MASTER_PERSONALIZATION: &'static [u8; 16] = b"ZcashIP32Sapling";
-pub const ZIP32_SAPLING_FVFP_PERSONALIZATION: &'static [u8; 16] = b"ZcashSaplingFVFP";
+pub const ZIP32_SAPLING_MASTER_PERSONALIZATION: &[u8; 16] = b"ZcashIP32Sapling";
+pub const ZIP32_SAPLING_FVFP_PERSONALIZATION: &[u8; 16] = b"ZcashSaplingFVFP";
 
 // Common helper functions
 
@@ -83,9 +83,9 @@ impl ChildIndex {
     }
 
     fn to_index(&self) -> u32 {
-        match self {
-            &ChildIndex::Hardened(i) => i + (1 << 31),
-            &ChildIndex::NonHardened(i) => i,
+        match *self {
+            ChildIndex::Hardened(i) => i + (1 << 31),
+            ChildIndex::NonHardened(i) => i,
         }
     }
 }
@@ -434,7 +434,7 @@ impl ExtendedFullViewingKey {
             Ok(ret) => ret,
             Err(()) => return Err(()),
         };
-        match self.fvk.vk.into_payment_address(d_j, &JUBJUB) {
+        match self.fvk.vk.to_payment_address(d_j, &JUBJUB) {
             Some(addr) => Ok((j, addr)),
             None => Err(()),
         }

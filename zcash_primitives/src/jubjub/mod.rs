@@ -199,9 +199,9 @@ impl JubjubBls12 {
             )
             .unwrap(),
             // A = 40962
-            montgomery_a: montgomery_a,
+            montgomery_a,
             // 2A = 2.A
-            montgomery_2a: montgomery_2a,
+            montgomery_2a,
             // scaling factor = sqrt(4 / (a - d))
             scale: Fr::from_str(
                 "17814886934372412843466061268024708274627479829237077604635722030778476050649",
@@ -384,7 +384,7 @@ impl JubjubBls12 {
 
                     // coeffs = g, g*2, g*3, g*4
                     for _ in 0..4 {
-                        coeffs.push(g.into_xy().expect("cannot produce O"));
+                        coeffs.push(g.to_xy().expect("cannot produce O"));
                         g = g.add(&gen, &tmp_params);
                     }
                     windows.push(coeffs);
@@ -411,7 +411,7 @@ impl JubjubBls12 {
                     let mut coeffs = vec![(Fr::zero(), Fr::one())];
                     let mut g = gen.clone();
                     for _ in 0..7 {
-                        coeffs.push(g.into_xy());
+                        coeffs.push(g.to_xy());
                         g = g.add(&gen, &tmp_params);
                     }
                     windows.push(coeffs);

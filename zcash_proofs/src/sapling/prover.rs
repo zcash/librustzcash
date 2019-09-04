@@ -65,7 +65,7 @@ impl SaplingProvingContext {
 
         // Accumulate the value commitment randomness in the context
         {
-            let mut tmp = rcv.clone();
+            let mut tmp = rcv;
             tmp.add_assign(&self.bsk);
 
             // Update the context
@@ -74,15 +74,15 @@ impl SaplingProvingContext {
 
         // Construct the value commitment
         let value_commitment = ValueCommitment::<Bls12> {
-            value: value,
+            value,
             randomness: rcv,
         };
 
         // Construct the viewing key
-        let viewing_key = proof_generation_key.into_viewing_key(params);
+        let viewing_key = proof_generation_key.to_viewing_key(params);
 
         // Construct the payment address with the viewing key / diversifier
-        let payment_address = match viewing_key.into_payment_address(diversifier, params) {
+        let payment_address = match viewing_key.to_payment_address(diversifier, params) {
             Some(p) => p,
             None => return Err(()),
         };
@@ -96,7 +96,7 @@ impl SaplingProvingContext {
 
         // Let's compute the nullifier while we have the position
         let note = Note {
-            value: value,
+            value,
             g_d: diversifier
                 .g_d::<Bls12>(params)
                 .expect("was a valid diversifier before"),
@@ -130,12 +130,12 @@ impl SaplingProvingContext {
         // Construct public input for circuit
         let mut public_input = [Fr::zero(); 7];
         {
-            let (x, y) = rk.0.into_xy();
+            let (x, y) = rk.0.to_xy();
             public_input[0] = x;
             public_input[1] = y;
         }
         {
-            let (x, y) = value_commitment.cm(params).into_xy();
+            let (x, y) = value_commitment.cm(params).to_xy();
             public_input[2] = x;
             public_input[3] = y;
         }
@@ -200,7 +200,7 @@ impl SaplingProvingContext {
 
         // Accumulate the value commitment randomness in the context
         {
-            let mut tmp = rcv.clone();
+            let mut tmp = rcv;
             tmp.negate(); // Outputs subtract from the total.
             tmp.add_assign(&self.bsk);
 
@@ -210,7 +210,7 @@ impl SaplingProvingContext {
 
         // Construct the value commitment for the proof instance
         let value_commitment = ValueCommitment::<Bls12> {
-            value: value,
+            value,
             randomness: rcv,
         };
 
@@ -220,7 +220,7 @@ impl SaplingProvingContext {
             value_commitment: Some(value_commitment.clone()),
             payment_address: Some(payment_address.clone()),
             commitment_randomness: Some(rcm),
-            esk: Some(esk.clone()),
+            esk: Some(esk),
         };
 
         // Create proof

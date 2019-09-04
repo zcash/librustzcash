@@ -37,12 +37,12 @@ pub fn merkle_hash(depth: usize, lhs: &FrRepr, rhs: &FrRepr) -> FrRepr {
     pedersen_hash::<Bls12, _>(
         Personalization::MerkleTree(depth),
         lhs.iter()
-            .map(|&x| x)
+            .copied()
             .take(Fr::NUM_BITS as usize)
-            .chain(rhs.iter().map(|&x| x).take(Fr::NUM_BITS as usize)),
+            .chain(rhs.iter().copied().take(Fr::NUM_BITS as usize)),
         &JUBJUB,
     )
-    .into_xy()
+    .to_xy()
     .0
     .into_repr()
 }

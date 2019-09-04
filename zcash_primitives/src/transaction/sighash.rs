@@ -9,13 +9,13 @@ use super::{
 };
 use crate::legacy::Script;
 
-const ZCASH_SIGHASH_PERSONALIZATION_PREFIX: &'static [u8; 12] = b"ZcashSigHash";
-const ZCASH_PREVOUTS_HASH_PERSONALIZATION: &'static [u8; 16] = b"ZcashPrevoutHash";
-const ZCASH_SEQUENCE_HASH_PERSONALIZATION: &'static [u8; 16] = b"ZcashSequencHash";
-const ZCASH_OUTPUTS_HASH_PERSONALIZATION: &'static [u8; 16] = b"ZcashOutputsHash";
-const ZCASH_JOINSPLITS_HASH_PERSONALIZATION: &'static [u8; 16] = b"ZcashJSplitsHash";
-const ZCASH_SHIELDED_SPENDS_HASH_PERSONALIZATION: &'static [u8; 16] = b"ZcashSSpendsHash";
-const ZCASH_SHIELDED_OUTPUTS_HASH_PERSONALIZATION: &'static [u8; 16] = b"ZcashSOutputHash";
+const ZCASH_SIGHASH_PERSONALIZATION_PREFIX: &[u8; 12] = b"ZcashSigHash";
+const ZCASH_PREVOUTS_HASH_PERSONALIZATION: &[u8; 16] = b"ZcashPrevoutHash";
+const ZCASH_SEQUENCE_HASH_PERSONALIZATION: &[u8; 16] = b"ZcashSequencHash";
+const ZCASH_OUTPUTS_HASH_PERSONALIZATION: &[u8; 16] = b"ZcashOutputsHash";
+const ZCASH_JOINSPLITS_HASH_PERSONALIZATION: &[u8; 16] = b"ZcashJSplitsHash";
+const ZCASH_SHIELDED_SPENDS_HASH_PERSONALIZATION: &[u8; 16] = b"ZcashSSpendsHash";
+const ZCASH_SHIELDED_OUTPUTS_HASH_PERSONALIZATION: &[u8; 16] = b"ZcashSOutputHash";
 
 pub const SIGHASH_ALL: u32 = 1;
 const SIGHASH_NONE: u32 = 2;

@@ -9,7 +9,7 @@ fn get_constant_bools(person: &Personalization) -> Vec<Boolean> {
     person
         .get_bits()
         .into_iter()
-        .map(|e| Boolean::constant(e))
+        .map(Boolean::constant)
         .collect()
 }
 
@@ -65,7 +65,7 @@ where
 
             segment_windows = &segment_windows[1..];
 
-            if segment_windows.len() == 0 {
+            if segment_windows.is_empty() {
                 break;
             }
 
@@ -189,7 +189,7 @@ mod test {
                     input.clone().into_iter(),
                     params,
                 )
-                .into_xy();
+                .to_xy();
 
                 assert_eq!(res.get_x().get_value().unwrap(), expected.0);
                 assert_eq!(res.get_y().get_value().unwrap(), expected.1);
@@ -200,7 +200,7 @@ mod test {
                     input.into_iter(),
                     params,
                 )
-                .into_xy();
+                .to_xy();
 
                 assert!(res.get_x().get_value().unwrap() != unexpected.0);
                 assert!(res.get_y().get_value().unwrap() != unexpected.1);
