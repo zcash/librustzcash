@@ -26,7 +26,7 @@ pub mod primitives;
 pub mod prover;
 pub mod redjubjub;
 pub mod sapling;
-mod serialize;
+pub mod serialize;
 pub mod transaction;
 mod util;
 pub mod zip32;
