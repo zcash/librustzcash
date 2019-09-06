@@ -100,7 +100,7 @@ impl SaplingProvingContext {
             g_d: diversifier
                 .g_d::<Bls12>(params)
                 .expect("was a valid diversifier before"),
-            pk_d: payment_address.pk_d.clone(),
+            pk_d: payment_address.pk_d().clone(),
             r: rcm,
         };
 

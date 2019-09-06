@@ -232,10 +232,7 @@ fn prf_ock(
 ///
 /// let diversifier = Diversifier([0; 11]);
 /// let pk_d = diversifier.g_d::<Bls12>(&JUBJUB).unwrap();
-/// let to = PaymentAddress {
-///     pk_d,
-///     diversifier,
-/// };
+/// let to = PaymentAddress::from_parts(diversifier, pk_d).unwrap();
 /// let ovk = OutgoingViewingKey([0; 32]);
 ///
 /// let value = 1000;
@@ -294,14 +291,14 @@ impl SaplingNoteEncryption {
 
     /// Generates `encCiphertext` for this note.
     pub fn encrypt_note_plaintext(&self) -> [u8; ENC_CIPHERTEXT_SIZE] {
-        let shared_secret = sapling_ka_agree(&self.esk, &self.to.pk_d);
+        let shared_secret = sapling_ka_agree(&self.esk, self.to.pk_d());
         let key = kdf_sapling(shared_secret, &self.epk);
 
         // Note plaintext encoding is defined in section 5.5 of the Zcash Protocol
         // Specification.
         let mut input = [0; NOTE_PLAINTEXT_SIZE];
         input[0] = 1;
-        input[1..12].copy_from_slice(&self.to.diversifier.0);
+        input[1..12].copy_from_slice(&self.to.diversifier().0);
         (&mut input[12..20])
             .write_u64::<LittleEndian>(self.note.value)
             .unwrap();
@@ -375,7 +372,7 @@ fn parse_note_plaintext_without_memo(
         .g_d::<Bls12>(&JUBJUB)?
         .mul(ivk.into_repr(), &JUBJUB);
 
-    let to = PaymentAddress { pk_d, diversifier };
+    let to = PaymentAddress::from_parts(diversifier, pk_d)?;
     let note = to.create_note(v, rcm, &JUBJUB).unwrap();
 
     if note.cm(&JUBJUB) != *cmu {
@@ -535,7 +532,7 @@ pub fn try_sapling_output_recovery(
         return None;
     }
 
-    let to = PaymentAddress { pk_d, diversifier };
+    let to = PaymentAddress::from_parts(diversifier, pk_d)?;
     let note = to.create_note(v, rcm, &JUBJUB).unwrap();
 
     if note.cm(&JUBJUB) != *cmu {
@@ -698,10 +695,47 @@ mod tests {
         [u8; ENC_CIPHERTEXT_SIZE],
         [u8; OUT_CIPHERTEXT_SIZE],
     ) {
-        let diversifier = Diversifier([0; 11]);
         let ivk = Fs::random(&mut rng);
+
+        let (ovk, ivk, cv, cmu, epk, enc_ciphertext, out_ciphertext) =
+            random_enc_ciphertext_with(ivk, rng);
+
+        assert!(try_sapling_note_decryption(&ivk, &epk, &cmu, &enc_ciphertext).is_some());
+        assert!(try_sapling_compact_note_decryption(
+            &ivk,
+            &epk,
+            &cmu,
+            &enc_ciphertext[..COMPACT_NOTE_SIZE]
+        )
+        .is_some());
+        assert!(try_sapling_output_recovery(
+            &ovk,
+            &cv,
+            &cmu,
+            &epk,
+            &enc_ciphertext,
+            &out_ciphertext
+        )
+        .is_some());
+
+        (ovk, ivk, cv, cmu, epk, enc_ciphertext, out_ciphertext)
+    }
+
+    fn random_enc_ciphertext_with<R: RngCore + CryptoRng>(
+        ivk: Fs,
+        mut rng: &mut R,
+    ) -> (
+        OutgoingViewingKey,
+        Fs,
+        edwards::Point<Bls12, Unknown>,
+        Fr,
+        edwards::Point<Bls12, PrimeOrder>,
+        [u8; ENC_CIPHERTEXT_SIZE],
+        [u8; OUT_CIPHERTEXT_SIZE],
+    ) {
+        let diversifier = Diversifier([0; 11]);
         let pk_d = diversifier.g_d::<Bls12>(&JUBJUB).unwrap().mul(ivk, &JUBJUB);
-        let pa = PaymentAddress { diversifier, pk_d };
+        let pa = PaymentAddress::from_parts_unchecked(diversifier, pk_d);
 
         // Construct the value commitment for the proof instance
         let value = 100;
@@ -721,24 +755,6 @@ mod tests {
         let epk = ne.epk();
         let enc_ciphertext = ne.encrypt_note_plaintext();
         let out_ciphertext = ne.encrypt_outgoing_plaintext(&cv, &cmu);
-
-        assert!(try_sapling_note_decryption(&ivk, epk, &cmu, &enc_ciphertext).is_some());
-        assert!(try_sapling_compact_note_decryption(
-            &ivk,
-            epk,
-            &cmu,
-            &enc_ciphertext[..COMPACT_NOTE_SIZE]
-        )
-        .is_some());
-        assert!(try_sapling_output_recovery(
-            &ovk,
-            &cv,
-            &cmu,
-            &epk,
-            &enc_ciphertext,
-            &out_ciphertext
-        )
-        .is_some());
 
         (
             ovk,
@@ -1257,6 +1273,20 @@ mod tests {
     }
 
     #[test]
+    fn recovery_with_invalid_pk_d() {
+        let mut rng = OsRng;
+
+        let ivk = Fs::zero();
+        let (ovk, _, cv, cmu, epk, enc_ciphertext, out_ciphertext) =
+            random_enc_ciphertext_with(ivk, &mut rng);
+
+        assert_eq!(
+            try_sapling_output_recovery(&ovk, &cv, &cmu, &epk, &enc_ciphertext, &out_ciphertext),
+            None
+        );
+    }
+
+    #[test]
     fn test_vectors() {
         let test_vectors = crate::test_vectors::note_encryption::make_test_vectors();
 
@@ -1317,10 +1347,7 @@ mod tests {
             let ock = prf_ock(&ovk, &cv, &cmu, &epk);
             assert_eq!(ock.as_bytes(), tv.ock);
 
-            let to = PaymentAddress {
-                pk_d,
-                diversifier: Diversifier(tv.default_d),
-            };
+            let to = PaymentAddress::from_parts(Diversifier(tv.default_d), pk_d).unwrap();
             let note = to.create_note(tv.v, rcm, &JUBJUB).unwrap();
             assert_eq!(note.cm(&JUBJUB), cmu);
 

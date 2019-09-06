@@ -94,10 +94,10 @@ impl<E: JubjubEngine> ViewingKey<E> {
         diversifier: Diversifier,
         params: &E::Params,
     ) -> Option<PaymentAddress<E>> {
-        diversifier.g_d(params).map(|g_d| {
+        diversifier.g_d(params).and_then(|g_d| {
             let pk_d = g_d.mul(self.ivk(), params);
 
-            PaymentAddress { pk_d, diversifier }
+            PaymentAddress::from_parts(diversifier, pk_d)
         })
     }
 }
@@ -118,10 +118,16 @@ impl Diversifier {
     }
 }
 
+/// A Sapling payment address.
+///
+/// # Invariants
+///
+/// `pk_d` is guaranteed to be prime-order (i.e. in the prime-order subgroup of Jubjub,
+/// and not the identity).
 #[derive(Clone, Debug)]
 pub struct PaymentAddress<E: JubjubEngine> {
-    pub pk_d: edwards::Point<E, PrimeOrder>,
-    pub diversifier: Diversifier,
+    pk_d: edwards::Point<E, PrimeOrder>,
+    diversifier: Diversifier,
 }
 
 impl<E: JubjubEngine> PartialEq for PaymentAddress<E> {
@@ -131,6 +137,67 @@ impl<E: JubjubEngine> PartialEq for PaymentAddress<E> {
 }
 
 impl<E: JubjubEngine> PaymentAddress<E> {
+    /// Constructs a PaymentAddress from a diversifier and a Jubjub point.
+    ///
+    /// Returns None if `pk_d` is the identity.
+    pub fn from_parts(
+        diversifier: Diversifier,
+        pk_d: edwards::Point<E, PrimeOrder>,
+    ) -> Option<Self> {
+        if pk_d == edwards::Point::zero() {
+            None
+        } else {
+            Some(PaymentAddress { pk_d, diversifier })
+        }
+    }
+
+    /// Constructs a PaymentAddress from a diversifier and a Jubjub point.
+    ///
+    /// Only for test code, as this explicitly bypasses the invariant.
+    #[cfg(test)]
+    pub(crate) fn from_parts_unchecked(
+        diversifier: Diversifier,
+        pk_d: edwards::Point<E, PrimeOrder>,
+    ) -> Self {
+        PaymentAddress { pk_d, diversifier }
+    }
+
+    /// Parses a PaymentAddress from bytes.
+    pub fn from_bytes(bytes: &[u8; 43], params: &E::Params) -> Option<Self> {
+        let diversifier = {
+            let mut tmp = [0; 11];
+            tmp.copy_from_slice(&bytes[0..11]);
+            Diversifier(tmp)
+        };
+        // Check that the diversifier is valid
+        if diversifier.g_d::<E>(params).is_none() {
+            return None;
+        }
+
+        edwards::Point::<E, _>::read(&bytes[11..43], params)
+            .ok()?
+            .as_prime_order(params)
+            .and_then(|pk_d| PaymentAddress::from_parts(diversifier, pk_d))
+    }
+
+    /// Returns the byte encoding of this `PaymentAddress`.
+    pub fn to_bytes(&self) -> [u8; 43] {
+        let mut bytes = [0; 43];
+        bytes[0..11].copy_from_slice(&self.diversifier.0);
+        self.pk_d.write(&mut bytes[11..]).unwrap();
+        bytes
+    }
+
+    /// Returns the [`Diversifier`] for this `PaymentAddress`.
+    pub fn diversifier(&self) -> &Diversifier {
+        &self.diversifier
+    }
+
+    /// Returns `pk_d` for this `PaymentAddress`.
+    pub fn pk_d(&self) -> &edwards::Point<E, PrimeOrder> {
+        &self.pk_d
+    }
+
     pub fn g_d(&self, params: &E::Params) -> Option<edwards::Point<E, PrimeOrder>> {
         self.diversifier.g_d(params)
     }

@@ -7,10 +7,7 @@ use bech32::{self, Error, FromBase32, ToBase32};
 use pairing::bls12_381::Bls12;
 use std::io::{self, Write};
 use zcash_primitives::{
-    jubjub::edwards,
-    primitives::{Diversifier, PaymentAddress},
-};
-use zcash_primitives::{
+    primitives::PaymentAddress,
     zip32::{ExtendedFullViewingKey, ExtendedSpendingKey},
     JUBJUB,
 };
@@ -113,10 +110,11 @@ pub fn decode_extended_full_viewing_key(
 ///     0xbc, 0xe5,
 /// ]);
 ///
-/// let pa = PaymentAddress {
-///     diversifier: Diversifier([0u8; 11]),
-///     pk_d: edwards::Point::<Bls12, _>::rand(rng, &JUBJUB).mul_by_cofactor(&JUBJUB),
-/// };
+/// let pa = PaymentAddress::from_parts(
+///     Diversifier([0u8; 11]),
+///     edwards::Point::<Bls12, _>::rand(rng, &JUBJUB).mul_by_cofactor(&JUBJUB),
+/// )
+/// .unwrap();
 ///
 /// assert_eq!(
 ///     encode_payment_address(HRP_SAPLING_PAYMENT_ADDRESS, &pa),
@@ -124,10 +122,7 @@ pub fn decode_extended_full_viewing_key(
 /// );
 /// ```
 pub fn encode_payment_address(hrp: &str, addr: &PaymentAddress<Bls12>) -> String {
-    bech32_encode(hrp, |w| {
-        w.write_all(&addr.diversifier.0)?;
-        addr.pk_d.write(w)
-    })
+    bech32_encode(hrp, |w| w.write_all(&addr.to_bytes()))
 }
 
 /// Decodes a [`PaymentAddress`] from a Bech32-encoded string.
@@ -153,10 +148,11 @@ pub fn encode_payment_address(hrp: &str, addr: &PaymentAddress<Bls12>) -> String
 ///     0xbc, 0xe5,
 /// ]);
 ///
-/// let pa = PaymentAddress {
-///     diversifier: Diversifier([0u8; 11]),
-///     pk_d: edwards::Point::<Bls12, _>::rand(rng, &JUBJUB).mul_by_cofactor(&JUBJUB),
-/// };
+/// let pa = PaymentAddress::from_parts(
+///     Diversifier([0u8; 11]),
+///     edwards::Point::<Bls12, _>::rand(rng, &JUBJUB).mul_by_cofactor(&JUBJUB),
+/// )
+/// .unwrap();
 ///
 /// assert_eq!(
 ///     decode_payment_address(
@@ -168,17 +164,13 @@ pub fn encode_payment_address(hrp: &str, addr: &PaymentAddress<Bls12>) -> String
 /// ```
 pub fn decode_payment_address(hrp: &str, s: &str) -> Result<Option<PaymentAddress<Bls12>>, Error> {
     bech32_decode(hrp, s, |data| {
-        let mut diversifier = Diversifier([0; 11]);
-        diversifier.0.copy_from_slice(&data[0..11]);
-        // Check that the diversifier is valid
-        if diversifier.g_d::<Bls12>(&JUBJUB).is_none() {
+        if data.len() != 43 {
             return None;
         }
 
-        edwards::Point::<Bls12, _>::read(&data[11..], &JUBJUB)
-            .ok()?
-            .as_prime_order(&JUBJUB)
-            .map(|pk_d| PaymentAddress { pk_d, diversifier })
+        let mut bytes = [0; 43];
+        bytes.copy_from_slice(&data);
+        PaymentAddress::<Bls12>::from_bytes(&bytes, &JUBJUB)
     })
 }
 
@@ -203,10 +195,11 @@ mod tests {
             0xbc, 0xe5,
         ]);
 
-        let addr = PaymentAddress {
-            diversifier: Diversifier([0u8; 11]),
-            pk_d: edwards::Point::<Bls12, _>::rand(rng, &JUBJUB).mul_by_cofactor(&JUBJUB),
-        };
+        let addr = PaymentAddress::from_parts(
+            Diversifier([0u8; 11]),
+            edwards::Point::<Bls12, _>::rand(rng, &JUBJUB).mul_by_cofactor(&JUBJUB),
+        )
+        .unwrap();
 
         let encoded_main =
             "zs1qqqqqqqqqqqqqqqqqrjq05nyfku05msvu49mawhg6kr0wwljahypwyk2h88z6975u563j8nfaxd";
@@ -247,10 +240,11 @@ mod tests {
             0xbc, 0xe5,
         ]);
 
-        let addr = PaymentAddress {
-            diversifier: Diversifier([1u8; 11]),
-            pk_d: edwards::Point::<Bls12, _>::rand(rng, &JUBJUB).mul_by_cofactor(&JUBJUB),
-        };
+        let addr = PaymentAddress::from_parts(
+            Diversifier([1u8; 11]),
+            edwards::Point::<Bls12, _>::rand(rng, &JUBJUB).mul_by_cofactor(&JUBJUB),
+        )
+        .unwrap();
 
         let encoded_main =
             encode_payment_address(constants::mainnet::HRP_SAPLING_PAYMENT_ADDRESS, &addr);

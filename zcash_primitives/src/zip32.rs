@@ -548,7 +548,7 @@ mod tests {
         let (j_m, addr_m) = xsk_m.default_address().unwrap();
         assert_eq!(j_m.0, [0; 11]);
         assert_eq!(
-            addr_m.diversifier.0,
+            addr_m.diversifier().0,
             // Computed using this Rust implementation
             [59, 246, 250, 31, 131, 191, 69, 99, 200, 167, 19]
         );

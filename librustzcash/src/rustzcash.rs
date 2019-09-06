@@ -927,8 +927,7 @@ pub extern "system" fn librustzcash_sprout_verify(
 pub extern "system" fn librustzcash_sapling_output_proof(
     ctx: *mut SaplingProvingContext,
     esk: *const [c_uchar; 32],
-    diversifier: *const [c_uchar; 11],
-    pk_d: *const [c_uchar; 32],
+    payment_address: *const [c_uchar; 43],
     rcm: *const [c_uchar; 32],
     value: u64,
     cv: *mut [c_uchar; 32],
@@ -940,26 +939,12 @@ pub extern "system" fn librustzcash_sapling_output_proof(
         Err(_) => return false,
     };
 
-    // Grab the diversifier from the caller.
-    let diversifier = Diversifier(unsafe { *diversifier });
-
-    // Grab pk_d from the caller.
-    let pk_d = match edwards::Point::<Bls12, Unknown>::read(&(unsafe { &*pk_d })[..], &JUBJUB) {
-        Ok(p) => p,
-        Err(_) => return false,
-    };
-
-    // pk_d should be prime order.
-    let pk_d = match pk_d.as_prime_order(&JUBJUB) {
-        Some(p) => p,
-        None => return false,
-    };
-
-    // Construct a payment address
-    let payment_address = PaymentAddress {
-        pk_d: pk_d,
-        diversifier: diversifier,
-    };
+    // Grab the payment address from the caller
+    let payment_address =
+        match PaymentAddress::<Bls12>::from_bytes(unsafe { &*payment_address }, &JUBJUB) {
+            Some(pa) => pa,
+            None => return false,
+        };
 
     // The caller provides the commitment randomness for the output note
     let rcm = match Fs::from_repr(read_fs(&(unsafe { &*rcm })[..])) {
@@ -1230,14 +1215,7 @@ pub extern "system" fn librustzcash_zip32_xfvk_address(
     let addr_ret = unsafe { &mut *addr_ret };
 
     j_ret.copy_from_slice(&(addr.0).0);
-    addr_ret
-        .get_mut(..11)
-        .unwrap()
-        .copy_from_slice(&addr.1.diversifier.0);
-    addr.1
-        .pk_d
-        .write(addr_ret.get_mut(11..).unwrap())
-        .expect("should be able to serialize a PaymentAddress");
+    addr_ret.copy_from_slice(&addr.1.to_bytes());
 
     true
 }
