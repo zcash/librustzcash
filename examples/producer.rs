@@ -9,18 +9,7 @@ fn prepare_tree(vec: Vec<NodeData>) -> Tree {
     // integer log2 of (vec.len()+1), -1
     let mut h = (32 - ((vec.len()+1) as u32).leading_zeros() - 1)-1;
     let mut peak_pos = (1 << (h+1)) - 1;
-
     let mut nodes = Vec::new();
-    let mut root_peak: Entry = vec[peak_pos-1].clone().into();
-
-    root_peak.update_siblings(
-        EntryLink::Stored((peak_pos - (1<<h) - 1) as u32),
-        EntryLink::Stored((peak_pos - 2) as u32),
-    );
-    nodes.push(((peak_pos-1) as u32, root_peak));
-
-    // + 2^(h+1)-1
-    peak_pos = peak_pos + (1 << (h+1)) - 1;
 
     loop {
 
