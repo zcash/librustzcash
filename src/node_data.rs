@@ -4,7 +4,7 @@ use blake2::blake2b::Blake2b;
 
 /// Node metadata.
 #[repr(C)]
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct NodeData {
     pub consensus_branch_id: u32,
     pub subtree_commitment: [u8; 32],

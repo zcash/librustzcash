@@ -88,23 +88,28 @@ impl Tree {
 
     pub fn new(
         length: u32,
-        stored: Vec<(u32, Entry)>,
-        generated: Vec<Entry>,
-    ) -> Self {
+        peaks: Vec<(u32, Entry)>,
+        extra: Vec<(u32, Entry)>,
+    ) -> (Self, EntryLink) {
         let mut result = Tree::default();
         result.stored_count = length;
 
-        for (idx, node) in stored.into_iter() {
+        let mut gen = 0;
+        let mut root = EntryLink::Stored(peaks[0].0);
+        for (idx, node) in peaks.into_iter() {
             result.stored.insert(idx, node);
+            if gen != 0 {
+                let next_generated =
+                    combine_nodes(result.
+                        resolve_link(root).expect("Inserted before, cannot fail; qed"),
+                      result.resolve_link(EntryLink::Stored(idx)).expect("Inserted before, cannot fail; qed")
+                    );
+                root = result.push_generated(next_generated);
+            }
+            gen += 1;
         }
 
-        result.generated_count = generated.len() as u32;
-
-        for (idx, node) in generated.into_iter().enumerate() {
-            result.generated.insert(idx as u32, node);
-        }
-
-        result
+        (result, root)
     }
 
     fn get_peaks(&self, root: EntryLink, target: &mut Vec<EntryLink>) -> Result<(), Error> {

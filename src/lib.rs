@@ -45,12 +45,17 @@ pub enum EntryKind {
     Node(EntryLink, EntryLink),
 }
 
+#[derive(Debug)]
 pub struct Entry {
     kind: EntryKind,
     data: NodeData,
 }
 
 impl Entry {
+    pub fn update_siblings(&mut self, left: EntryLink, right: EntryLink) {
+        self.kind = EntryKind::Node(left, right);
+    }
+
     pub fn complete(&self) -> bool {
         let leaves = self.leaf_count();
         leaves & (leaves - 1) == 0
