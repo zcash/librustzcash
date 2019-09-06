@@ -9,7 +9,6 @@ use crate::{Entry, EntryLink, NodeData, Error, EntryKind};
 /// Exact amount of the loaded data can be calculated by the constructing party,
 /// depending on the length of the tree and maximum amount of operations that are going
 /// to happen after construction.
-#[derive(Default)]
 pub struct Tree {
     stored: HashMap<u32, Entry>,
 
@@ -20,6 +19,8 @@ pub struct Tree {
 
     // number of virtual nodes generated
     generated_count: u32,
+
+    root: EntryLink,
 }
 
 /// Result of appending one or several leaves.
@@ -76,22 +77,34 @@ impl Tree {
 
     /// Populate tree with plain list of the leaves/nodes. Mostly for tests,
     /// since this `Tree` structure is for partially loaded tree.
-    pub fn populate(loaded: Vec<Entry>) -> Self {
-        let mut result = Tree::default();
+    pub fn populate(loaded: Vec<Entry>, root: EntryLink) -> Self {
+        let mut result = Tree::invalid();
         result.stored_count = loaded.len() as u32;
         for (idx, item) in loaded.into_iter().enumerate() {
             result.stored.insert(idx as u32, item);
         }
+        result.root = root;
 
         result
+    }
+
+    fn invalid() -> Self {
+        Tree {
+            root: EntryLink::Generated(0),
+            generated: Default::default(),
+            stored: Default::default(),
+            generated_count: 0,
+            stored_count: 0,
+        }
     }
 
     pub fn new(
         length: u32,
         peaks: Vec<(u32, Entry)>,
         extra: Vec<(u32, Entry)>,
-    ) -> (Self, EntryLink) {
-        let mut result = Tree::default();
+    ) -> Self {
+        let mut result = Tree::invalid();
+
         result.stored_count = length;
 
         let mut gen = 0;
@@ -109,7 +122,9 @@ impl Tree {
             gen += 1;
         }
 
-        (result, root)
+        result.root = root;
+
+        result
     }
 
     fn get_peaks(&self, root: EntryLink, target: &mut Vec<EntryLink>) -> Result<(), Error> {
@@ -132,7 +147,8 @@ impl Tree {
     }
 
     /// Append one leaf to the tree.
-    pub fn append_leaf(&mut self, root: EntryLink, new_leaf: NodeData) -> Result<AppendTransaction, Error> {
+    pub fn append_leaf(&mut self, new_leaf: NodeData) -> Result<AppendTransaction, Error> {
+        let root = self.root;
         let new_leaf_link = self.push(new_leaf.into());
         let mut appended = Vec::new();
         appended.push(new_leaf_link);
@@ -172,6 +188,8 @@ impl Tree {
             )
         }
 
+        self.root = new_root;
+
         Ok(AppendTransaction {
             new_root,
             appended,
@@ -196,10 +214,10 @@ impl Tree {
     }
 
     /// Truncate one leaf from the end of the tree.
-    pub fn truncate_leaf(&mut self, root: EntryLink) -> Result<DeleteTransaction, Error> {
+    pub fn truncate_leaf(&mut self) -> Result<DeleteTransaction, Error> {
         let root = {
             let (leaves, root_left_child) = {
-                let n = self.resolve_link(root)?;
+                let n = self.resolve_link(self.root)?;
                 (
                     n.node.leaf_count(),
                     n.node.left()?,
@@ -207,12 +225,13 @@ impl Tree {
             };
             if leaves & 1 != 0 {
                 self.pop();
+                self.root = root_left_child;
                 return Ok(DeleteTransaction {
                     truncated: 1,
                     new_root: root_left_child,
                 })
             } else {
-                self.resolve_link(root)?
+                self.resolve_link(self.root)?
             }
         };
 
@@ -245,6 +264,8 @@ impl Tree {
 
         for _ in 0..truncated { self.pop(); }
 
+        self.root = new_root;
+
         Ok(DeleteTransaction {
             new_root,
             truncated,
@@ -255,6 +276,8 @@ impl Tree {
     pub fn len(&self) -> u32 {
         self.stored_count
     }
+
+    pub fn root(&self) -> EntryLink { self.root }
 }
 
 
@@ -331,7 +354,7 @@ mod tests {
             kind: EntryKind::Leaf,
         };
 
-        (EntryLink::Stored(2), Tree::populate(vec![node1, node2, node3]))
+        (EntryLink::Stored(2), Tree::populate(vec![node1, node2, node3], EntryLink::Stored(2)))
     }
 
     // returns tree with specified number of leafs and it's root
@@ -340,7 +363,7 @@ mod tests {
         let (mut root, mut tree) = initial();
         for i in 2..length {
             root = tree
-                .append_leaf(root, leaf(i+1).into())
+                .append_leaf(leaf(i+1).into())
                 .expect("Failed to append")
                 .new_root;
         }
@@ -354,7 +377,7 @@ mod tests {
 
         // ** APPEND 3 **
         let append_tx = tree
-            .append_leaf(root, leaf(3))
+            .append_leaf(leaf(3))
             .expect("Failed to append");
         let new_root_link = append_tx.new_root;
         let new_root = tree.resolve_link(new_root_link).expect("Failed to resolve root").node;
@@ -377,7 +400,7 @@ mod tests {
 
         // ** APPEND 4 **
         let append_tx = tree
-            .append_leaf(new_root_link, leaf(4))
+            .append_leaf(leaf(4))
             .expect("Failed to append");
 
         let new_root_link = append_tx.new_root;
@@ -406,7 +429,7 @@ mod tests {
         // ** APPEND 5 **
 
         let append_tx = tree
-            .append_leaf(new_root_link, leaf(5))
+            .append_leaf(leaf(5))
             .expect("Failed to append");
         let new_root_link = append_tx.new_root;
         let new_root = tree.resolve_link(new_root_link).expect("Failed to resolve root").node;
@@ -439,7 +462,7 @@ mod tests {
 
         // *** APPEND #6 ***
         let append_tx = tree
-            .append_leaf(new_root_link, leaf(6))
+            .append_leaf(leaf(6))
             .expect("Failed to append");
         let new_root_link = append_tx.new_root;
         let new_root = tree.resolve_link(new_root_link).expect("Failed to resolve root").node;
@@ -475,7 +498,7 @@ mod tests {
         // *** APPEND #7 ***
 
         let append_tx = tree
-            .append_leaf(new_root_link, leaf(7))
+            .append_leaf(leaf(7))
             .expect("Failed to append");
         let new_root_link = append_tx.new_root;
         let new_root = tree
@@ -518,7 +541,7 @@ mod tests {
     fn truncate_simple() {
         let (mut tree, root) = generated(9);
         let delete_tx = tree
-            .truncate_leaf(root)
+            .truncate_leaf()
             .expect("Failed to truncate");
 
         // initial tree:
@@ -553,7 +576,7 @@ mod tests {
     fn truncate_generated() {
         let (mut tree, root) = generated(10);
         let delete_tx = tree
-            .truncate_leaf(root)
+            .truncate_leaf()
             .expect("Failed to truncate");
 
         // initial tree:
@@ -611,13 +634,13 @@ mod tests {
 
         for i in 0..2 {
             root = tree
-                .append_leaf(root, leaf(i+3))
+                .append_leaf(leaf(i+3))
                 .expect("Failed to append")
                 .new_root;
         }
         assert_eq!(tree.len(), 7);
 
-        tree.truncate_leaf(root).expect("Failed to truncate");
+        tree.truncate_leaf().expect("Failed to truncate");
 
         assert_eq!(tree.len(), 4);
     }
@@ -630,7 +653,7 @@ mod tests {
 
         for i in 0..4094 {
             root = tree
-                .append_leaf(root, leaf(i+3))
+                .append_leaf(leaf(i+3))
                 .expect("Failed to append")
                 .new_root;
         }
@@ -638,7 +661,7 @@ mod tests {
 
         for _ in 0..2049 {
             root = tree
-                .truncate_leaf(root)
+                .truncate_leaf()
                 .expect("Failed to truncate")
                 .new_root;
         }
@@ -655,12 +678,12 @@ mod tests {
                 let (mut root, mut tree) = initial();
                 for i in 0..number {
                     root = tree
-                        .append_leaf(root, leaf(i+3))
+                        .append_leaf(leaf(i+3))
                         .expect("Failed to append")
                         .new_root;
                 }
                 for _ in 0..number {
-                    root = tree.truncate_leaf(root).expect("Failed to truncate").new_root;
+                    root = tree.truncate_leaf().expect("Failed to truncate").new_root;
                 }
 
                 TestResult::from_bool(if let EntryLink::Stored(2) = root { true } else { false })
@@ -674,7 +697,7 @@ mod tests {
                 let (mut root, mut tree) = initial();
                 for i in 1..(number-1) {
                     root = tree
-                        .append_leaf(root, leaf(i+2))
+                        .append_leaf(leaf(i+2))
                         .expect("Failed to append")
                         .new_root;
                 }
@@ -697,7 +720,7 @@ mod tests {
             } else {
                 let (mut root, mut tree) = initial();
                 for i in 1..(number-1) {
-                    root = tree.append_leaf(root, leaf(i+2)).expect("Failed to append").new_root;
+                    root = tree.append_leaf(leaf(i+2)).expect("Failed to append").new_root;
                 }
 
                 TestResult::from_bool(
@@ -720,10 +743,10 @@ mod tests {
             } else {
                 let (mut root, mut tree) = initial();
                 for i in 0..add {
-                    root = tree.append_leaf(root, leaf(i+3)).expect("Failed to append").new_root;
+                    root = tree.append_leaf(leaf(i+3)).expect("Failed to append").new_root;
                 }
                 for _ in 0..delete {
-                    root = tree.truncate_leaf(root).expect("Failed to truncate").new_root;
+                    root = tree.truncate_leaf().expect("Failed to truncate").new_root;
                 }
 
                 let total = add - delete + 2;
@@ -747,10 +770,10 @@ mod tests {
             } else {
                 let (mut root, mut tree) = initial();
                 for i in 0..add {
-                    root = tree.append_leaf(root, leaf(i+3)).expect("Failed to append").new_root;
+                    root = tree.append_leaf(leaf(i+3)).expect("Failed to append").new_root;
                 }
                 for _ in 0..delete {
-                    root = tree.truncate_leaf(root).expect("Failed to truncate").new_root;
+                    root = tree.truncate_leaf().expect("Failed to truncate").new_root;
                 }
 
                 let total = add - delete + 2;

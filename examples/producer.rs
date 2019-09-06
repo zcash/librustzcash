@@ -2,7 +2,7 @@ extern crate zcash_mmr as mmr;
 
 use mmr::{NodeData, Tree, EntryLink, Entry};
 
-fn prepare_tree(vec: Vec<NodeData>) -> (Tree, EntryLink) {
+fn prepare_tree(vec: Vec<NodeData>) -> Tree {
 
     assert!(vec.len() > 0);
 
@@ -213,7 +213,7 @@ fn main() {
         },
     );
 
-    let (_tree, root) = prepare_tree(initial_tree_vec);
-    println!("root: {}", root);
+    let tree = prepare_tree(initial_tree_vec);
+    println!("root: {}", tree.root());
 
 }
