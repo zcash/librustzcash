@@ -1,4 +1,4 @@
-use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt, ByteOrder};
+use byteorder::{LittleEndian, ReadBytesExt};
 
 use crate::{EntryKind, NodeData, Error, EntryLink};
 
@@ -38,6 +38,31 @@ impl Entry {
             EntryKind::Leaf => { Err(Error::ExpectedNode) }
             EntryKind::Node(_, right) => Ok(right)
         }
+    }
+
+    pub fn read<R: std::io::Read>(&self, consensus_branch_id: u32, r: &mut R) -> std::io::Result<Self> {
+        let kind = {
+            match r.read_u8()? {
+                0 => {
+                    let left = r.read_u32::<LittleEndian>()?;
+                    let right = r.read_u32::<LittleEndian>()?;
+                    EntryKind::Node(EntryLink::Stored(left), EntryLink::Stored(right))
+                },
+                1 => {
+                    EntryKind::Leaf
+                },
+                _ => {
+                    return Err(std::io::Error::from(std::io::ErrorKind::InvalidData))
+                },
+            }
+        };
+
+        let data = NodeData::read(consensus_branch_id, r)?;
+
+        Ok(Entry {
+            kind,
+            data,
+        })
     }
 }
 

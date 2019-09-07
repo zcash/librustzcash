@@ -121,7 +121,7 @@ impl NodeData {
         Ok(())
     }
 
-    pub fn read<R: std::io::Read>(&self, consensus_branch_id: u32, r: &mut R) -> std::io::Result<Self> {
+    pub fn read<R: std::io::Read>(consensus_branch_id: u32, r: &mut R) -> std::io::Result<Self> {
         let mut data = Self::default();
         data.consensus_branch_id = consensus_branch_id;
         r.read_exact(&mut data.subtree_commitment)?;
