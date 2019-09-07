@@ -1,10 +1,10 @@
-use byteorder::{LittleEndian, WriteBytesExt, ByteOrder};
+use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt, ByteOrder};
 use bigint::U256;
 use blake2::blake2b::Blake2b;
 
 /// Node metadata.
 #[repr(C)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct NodeData {
     pub consensus_branch_id: u32,
     pub subtree_commitment: [u8; 32],
@@ -91,6 +91,17 @@ impl NodeData {
         Ok(())
     }
 
+    fn read_compact<R: std::io::Read>(reader: &mut R) -> std::io::Result<u64> {
+        let result = match reader.read_u8()? {
+            i @ 0..=0xfc => i.into(),
+            0xfd => reader.read_u16::<LittleEndian>()?.into(),
+            0xfe => reader.read_u32::<LittleEndian>()?.into(),
+            _ => reader.read_u64::<LittleEndian>()?.into(),
+        };
+
+        Ok(result)
+    }
+
     pub fn write<W: std::io::Write>(&self, w: &mut W) -> std::io::Result<()> {
         w.write_all(&self.subtree_commitment)?;
         w.write_u32::<LittleEndian>(self.start_time)?;
@@ -108,6 +119,28 @@ impl NodeData {
         Self::write_compact(w, self.end_height)?;
         Self::write_compact(w, self.shielded_tx)?;
         Ok(())
+    }
+
+    pub fn read<R: std::io::Read>(&self, consensus_branch_id: u32, r: &mut R) -> std::io::Result<Self> {
+        let mut data = Self::default();
+        data.consensus_branch_id = consensus_branch_id;
+        r.read_exact(&mut data.subtree_commitment)?;
+        data.start_time = r.read_u32::<LittleEndian>()?;
+        data.end_time = r.read_u32::<LittleEndian>()?;
+        data.start_target= r.read_u32::<LittleEndian>()?;
+        data.end_target= r.read_u32::<LittleEndian>()?;
+        r.read_exact(&mut data.start_sapling_root)?;
+        r.read_exact(&mut data.end_sapling_root)?;
+
+        let mut work_buf = [0u8; 32];
+        r.read_exact(&mut work_buf)?;
+        data.subtree_total_work = U256::from_little_endian(&work_buf);
+
+        data.start_height = Self::read_compact(r)?;
+        data.end_height = Self::read_compact(r)?;
+        data.shielded_tx = Self::read_compact(r)?;
+
+        Ok(data)
     }
 
     pub fn to_bytes(&self) -> Vec<u8> {
