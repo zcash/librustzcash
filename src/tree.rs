@@ -24,7 +24,7 @@ pub struct Tree {
 }
 
 impl Tree {
-    fn resolve_link(&self, link: EntryLink) -> Result<IndexedNode, Error> {
+    pub fn resolve_link(&self, link: EntryLink) -> Result<IndexedNode, Error> {
         match link {
             EntryLink::Generated(index) => {
                 let node = self.generated.get(&index).ok_or(Error::ExpectedInMemory(link))?;
