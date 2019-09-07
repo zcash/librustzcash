@@ -7,8 +7,8 @@ mod node_data;
 mod entry;
 
 pub use tree::Tree;
-pub use node_data::NodeData;
-pub use entry::Entry;
+pub use node_data::{NodeData, MAX_NODE_DATA_SIZE};
+pub use entry::{Entry, MAX_ENTRY_SIZE};
 
 #[derive(Debug, derive_more::Display)]
 pub enum Error {

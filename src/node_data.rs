@@ -2,6 +2,8 @@ use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt, ByteOrder};
 use bigint::U256;
 use blake2::blake2b::Blake2b;
 
+pub const MAX_NODE_DATA_SIZE: usize = 32 + 4 + 4 + 4 + 4 + 32 + 32 + 32 + 9 + 9 + 9; // 171
+
 /// Node metadata.
 #[repr(C)]
 #[derive(Debug, Clone, Default)]
@@ -36,12 +38,10 @@ fn personalization(branch_id: u32) -> [u8; 16] {
 }
 
 impl NodeData {
-    pub const MAX_SERIALIZED_SIZE: usize = 32 + 4 + 4 + 4 + 4 + 32 + 32 + 32 + 9 + 9 + 9; // =171;
-
     pub fn combine(left: &NodeData, right: &NodeData) -> NodeData {
         assert_eq!(left.consensus_branch_id, right.consensus_branch_id);
 
-        let mut hash_buf = [0u8; Self::MAX_SERIALIZED_SIZE * 2];
+        let mut hash_buf = [0u8; MAX_NODE_DATA_SIZE * 2];
         let size = {
             let mut cursor = ::std::io::Cursor::new(&mut hash_buf[..]);
             left.write(&mut cursor).expect("Writing to memory buf with enough length cannot fail; qed");
@@ -144,7 +144,7 @@ impl NodeData {
     }
 
     pub fn to_bytes(&self) -> Vec<u8> {
-        let mut buf = [0u8; Self::MAX_SERIALIZED_SIZE];
+        let mut buf = [0u8; MAX_NODE_DATA_SIZE];
         let pos = {
             let mut cursor = std::io::Cursor::new(&mut buf[..]);
             self.write(&mut cursor).expect("Cursor cannot fail");

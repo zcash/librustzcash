@@ -204,5 +204,4 @@ fn main() {
 
     let tree = prepare_tree(initial_tree_vec);
     println!("root: {}", tree.root());
-
 }

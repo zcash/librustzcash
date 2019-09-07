@@ -1,6 +1,8 @@
 use byteorder::{LittleEndian, ReadBytesExt};
 
-use crate::{EntryKind, NodeData, Error, EntryLink};
+use crate::{EntryKind, NodeData, Error, EntryLink, MAX_NODE_DATA_SIZE};
+
+pub const MAX_ENTRY_SIZE: usize = MAX_NODE_DATA_SIZE + 9;
 
 #[derive(Debug)]
 pub struct Entry {
