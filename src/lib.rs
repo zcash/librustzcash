@@ -2,13 +2,6 @@
 //!
 //! To be used in zebra and via FFI bindings in zcashd
 
-#[cfg(test)] #[macro_use] extern crate assert_matches;
-#[cfg(test)] #[macro_use] extern crate quickcheck;
-extern crate derive_more;
-extern crate bigint;
-extern crate byteorder;
-extern crate blake2_rfc as blake2;
-
 mod tree;
 mod node_data;
 
