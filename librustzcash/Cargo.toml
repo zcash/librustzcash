@@ -27,3 +27,4 @@ rand_core = "0.5"
 rand_os = "0.2"
 zcash_primitives = { path = "../zcash_primitives" }
 zcash_proofs = { path = "../zcash_proofs" }
+mmr = { package = "zcash-mmr", git = "https://github.com/nikvolf/zcash-mmr" }
