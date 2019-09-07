@@ -300,7 +300,8 @@ fn combine_nodes<'a>(left: IndexedNode<'a>, right: IndexedNode<'a>) -> Entry {
 mod tests {
 
     use super::{Entry, NodeData, Tree, EntryLink, EntryKind};
-    use quickcheck::TestResult;
+    use quickcheck::{quickcheck, TestResult};
+    use assert_matches::assert_matches;
 
     fn leaf(height: u32) -> NodeData {
         NodeData {
