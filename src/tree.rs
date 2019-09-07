@@ -287,6 +287,9 @@ impl<'a> IndexedNode<'a> {
         self.node
     }
 
+    pub fn data(&self) -> &NodeData {
+        &self.node.data
+    }
 }
 
 fn combine_nodes<'a>(left: IndexedNode<'a>, right: IndexedNode<'a>) -> Entry {
