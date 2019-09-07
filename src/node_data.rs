@@ -153,4 +153,9 @@ impl NodeData {
 
         buf[0..pos].to_vec()
     }
+
+    pub fn from_bytes(consensus_branch_id: u32, buf: &[u8]) -> std::io::Result<Self> {
+        let mut cursor = std::io::Cursor::new(buf);
+        Self::read(consensus_branch_id, &mut cursor)
+    }
 }
