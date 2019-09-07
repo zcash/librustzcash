@@ -42,7 +42,7 @@ impl Entry {
         }
     }
 
-    pub fn read<R: std::io::Read>(&self, consensus_branch_id: u32, r: &mut R) -> std::io::Result<Self> {
+    pub fn read<R: std::io::Read>(consensus_branch_id: u32, r: &mut R) -> std::io::Result<Self> {
         let kind = {
             match r.read_u8()? {
                 0 => {
@@ -65,6 +65,11 @@ impl Entry {
             kind,
             data,
         })
+    }
+
+    pub fn from_bytes(consensus_branch_id: u32, buf: &[u8]) -> std::io::Result<Self> {
+        let mut cursor = std::io::Cursor::new(buf);
+        Self::read(consensus_branch_id, &mut cursor)
     }
 }
 
