@@ -1344,10 +1344,10 @@ pub extern "system" fn librustzcash_mmr_delete(
     n_ptr: *const [c_uchar; mmr::MAX_ENTRY_SIZE],
     // Peaks count
     p_len: size_t,
-    // Return of root commitment (32 byte hash)
-    rt_ret: *mut u8,
     // Extra nodes loaded (for deletion) count
     e_len: size_t,
+    // Return of root commitment (32 byte hash)
+    rt_ret: *mut u8,
 ) -> u32 {
     let mut tree = match construct_mmr_tree(cbranch, t_len, ni_ptr, n_ptr, p_len, e_len) {
         Ok(t) => t,
@@ -1362,7 +1362,7 @@ pub extern "system" fn librustzcash_mmr_delete(
     unsafe {
         slice::from_raw_parts_mut(rt_ret, 32)
             .copy_from_slice(
-            &tree.root_node()
+                &tree.root_node()
                     .expect("Just generated without errors, root should be resolving")
                     .data()
                     .subtree_commitment
