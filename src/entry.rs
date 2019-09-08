@@ -67,7 +67,7 @@ impl Entry {
         })
     }
 
-    pub fn from_bytes(consensus_branch_id: u32, buf: &[u8]) -> std::io::Result<Self> {
+    pub fn from_bytes<T: AsRef<[u8]>>(consensus_branch_id: u32, buf: T) -> std::io::Result<Self> {
         let mut cursor = std::io::Cursor::new(buf);
         Self::read(consensus_branch_id, &mut cursor)
     }

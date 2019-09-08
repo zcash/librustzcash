@@ -267,7 +267,7 @@ impl Tree {
     }
 }
 
-
+#[derive(Debug)]
 pub struct IndexedNode<'a> {
     node: &'a Entry,
     link: EntryLink,
@@ -289,6 +289,10 @@ impl<'a> IndexedNode<'a> {
 
     pub fn data(&self) -> &NodeData {
         &self.node.data
+    }
+
+    pub fn link(&self) -> EntryLink {
+        self.link
     }
 }
 
