@@ -1277,9 +1277,9 @@ pub extern "system" fn librustzcash_mmr_append(
     cbranch: u32,
     // Length of tree in array representation
     t_len: u32,
-    // Indices of provided tree nodes, length of p_len+e_len
+    // Indices of provided tree nodes, length of p_len
     ni_ptr: *const u32,
-    // Provided tree nodes data, length of p_len+e_len
+    // Provided tree nodes data, length of p_len
     n_ptr: *const [c_uchar; mmr::MAX_ENTRY_SIZE],
     // Peaks count
     p_len: size_t,
