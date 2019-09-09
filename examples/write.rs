@@ -1,4 +1,4 @@
-#[path= "producer/share.rs"]
+#[path= "lib/shared.rs"]
 mod share;
 
 // Test data generator
