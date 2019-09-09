@@ -1,8 +1,7 @@
-extern crate zcash_mmr as mmr;
+use zcash_mmr::{NodeData, Tree, EntryLink, Entry};
+use std::io::Write;
 
-use mmr::{NodeData, Tree, EntryLink, Entry};
-
-fn prepare_tree(vec: Vec<NodeData>) -> Tree {
+fn prepare_tree(vec: &Vec<NodeData>) -> Tree {
 
     assert!(vec.len() > 0);
 
@@ -202,6 +201,22 @@ fn main() {
         },
     );
 
-    let tree = prepare_tree(initial_tree_vec);
+    let tree = prepare_tree(&initial_tree_vec);
+
+    let mut buf = Vec::new();
+    if let Some(out_file_path) = ::std::env::args().nth(1) {
+        for node in initial_tree_vec.into_iter() {
+            node.write(&mut buf);
+        }
+
+        let mut file = std::fs::File::create(&out_file_path)
+            .expect("Failed to create output file");
+
+        file.write_all(&buf[..])
+            .expect("Failed to write data to file");
+    }
+
     println!("root: {}", tree.root());
+
+
 }
