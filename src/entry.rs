@@ -1,4 +1,4 @@
-use byteorder::{LittleEndian, ReadBytesExt};
+use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 
 use crate::{EntryKind, NodeData, Error, EntryLink, MAX_NODE_DATA_SIZE};
 
@@ -65,6 +65,24 @@ impl Entry {
             kind,
             data,
         })
+    }
+
+    pub fn write<W: std::io::Write>(&self, w: &mut W) -> std::io::Result<()> {
+        match self.kind {
+            EntryKind::Node(EntryLink::Stored(left), EntryLink::Stored(right)) => {
+                w.write_u8(0)?;
+                w.write_u32::<LittleEndian>(left)?;
+                w.write_u32::<LittleEndian>(right)?;
+            },
+            EntryKind::Leaf => {
+                w.write_u8(1)?;
+            },
+            _ => { return Err(std::io::Error::from(std::io::ErrorKind::InvalidData)); }
+        }
+
+        self.data.write(w)?;
+
+        Ok(())
     }
 
     pub fn from_bytes<T: AsRef<[u8]>>(consensus_branch_id: u32, buf: T) -> std::io::Result<Self> {

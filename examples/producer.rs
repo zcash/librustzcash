@@ -206,7 +206,7 @@ fn main() {
     let mut buf = Vec::new();
     if let Some(out_file_path) = ::std::env::args().nth(1) {
         for node in initial_tree_vec.into_iter() {
-            node.write(&mut buf);
+            node.write(&mut buf).expect("Failed to write data");
         }
 
         let mut file = std::fs::File::create(&out_file_path)
