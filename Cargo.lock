@@ -353,6 +353,7 @@ dependencies = [
  "blake2s_simd 0.5.6 (registry+https://github.com/rust-lang/crates.io-index)",
  "byteorder 1.3.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "ff 0.4.0",
+ "hex 0.3.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "lazy_static 1.3.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "libc 0.2.61 (registry+https://github.com/rust-lang/crates.io-index)",
  "pairing 0.14.2",
@@ -627,7 +628,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 [[package]]
 name = "zcash-mmr"
 version = "0.1.0"
-source = "git+https://github.com/nikvolf/zcash-mmr#0bfd1d6b0d1aaaad4c5f4c3e97243cd9f5495bdc"
+source = "git+https://github.com/nikvolf/zcash-mmr#a0c33945ab3b534eb47ab0f000bbf15972b24b06"
 dependencies = [
  "bigint 4.4.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "blake2-rfc 0.2.18 (git+https://github.com/gtank/blake2-rfc.git?rev=7a5b5fc99ae483a0043db7547fb79a6fa44b88a9)",
