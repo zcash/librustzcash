@@ -24,5 +24,5 @@ rand_os = "0.2"
 sha2 = "0.8"
 
 [dev-dependencies]
-hex-literal = "0.1"
+hex-literal = "0.2"
 rand_xorshift = "0.2"
