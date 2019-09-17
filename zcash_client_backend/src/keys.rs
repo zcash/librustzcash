@@ -30,3 +30,14 @@ pub fn spending_key(seed: &[u8], coin_type: u32, account: u32) -> ExtendedSpendi
         ],
     )
 }
+
+#[cfg(test)]
+mod tests {
+    use super::spending_key;
+
+    #[test]
+    #[should_panic]
+    fn spending_key_panics_on_short_seed() {
+        let _ = spending_key(&[0; 31][..], 0, 0);
+    }
+}
