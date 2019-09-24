@@ -96,7 +96,7 @@ fn append() {
         indices.as_ptr(),
         peaks.as_ptr(),
         peaks.len(),
-        new_node_data.as_ptr(),
+        &new_node_data,
         rt_ret.as_mut_ptr(),
         buf_ret.as_mut_ptr(),
     );

@@ -1287,13 +1287,16 @@ pub extern "system" fn librustzcash_mmr_append(
     // Peaks count
     p_len: size_t,
     // New node pointer
-    nn_ptr: *const u8,
+    nn_ptr: *const [u8; zcash_mmr::MAX_NODE_DATA_SIZE],
     // Return of root commitment (32 byte hash)
     rt_ret: *mut u8,
     // Return buffer for appended leaves, should be pre-allocated of log2(t_len)+1 length
     buf_ret: *mut [c_uchar; zcash_mmr::MAX_NODE_DATA_SIZE],
 ) -> u32 {
-    let new_node_bytes = unsafe { slice::from_raw_parts(nn_ptr, zcash_mmr::MAX_NODE_DATA_SIZE) };
+    let new_node_bytes: &[u8; zcash_mmr::MAX_NODE_DATA_SIZE] = unsafe { match nn_ptr.as_ref()  {
+        Some(r) => r,
+        None => { return 0; } // Null pointer passed, error
+    } };
 
     let mut tree = match construct_mmr_tree(cbranch, t_len, ni_ptr, n_ptr, p_len, 0) {
         Ok(t) => t,
@@ -1302,7 +1305,7 @@ pub extern "system" fn librustzcash_mmr_append(
         } // error
     };
 
-    let node = match MMRNodeData::from_bytes(cbranch, new_node_bytes) {
+    let node = match MMRNodeData::from_bytes(cbranch, &new_node_bytes[..]) {
         Ok(node) => node,
         _ => {
             return 0;
