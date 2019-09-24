@@ -10,26 +10,40 @@ pub use tree::Tree;
 pub use node_data::{NodeData, MAX_NODE_DATA_SIZE};
 pub use entry::{Entry, MAX_ENTRY_SIZE};
 
-#[derive(Debug, derive_more::Display)]
+#[derive(Debug)]
 pub enum Error {
-    #[display(fmt="Node/leaf expected to be in memory: {}", _0)]
     ExpectedInMemory(EntryLink),
-    #[display(fmt="Node expected")]
     ExpectedNode,
-    #[display(fmt="Node expected, not leaf: {}", _0)]
     ExpectedNodeForLink(EntryLink),
+}
+
+impl std::fmt::Display for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match *self {
+            Self::ExpectedInMemory(l) => write!(f, "Node/leaf expected to be in memory: {}", l),
+            Self::ExpectedNode => write!(f, "Node expected"),
+            Self::ExpectedNodeForLink(l) => write!(f, "Node expected, not leaf: {}", l),
+        }
+    }
 }
 
 /// Reference to to the tree node.
 #[repr(C)]
-#[derive(Clone, Copy, Debug, derive_more::Display)]
+#[derive(Clone, Copy, Debug)]
 pub enum EntryLink {
     /// Reference to the stored (in the array representation) leaf/node.
-    #[display(fmt="stored(@{})", _0)]
     Stored(u32),
     /// Reference to the generated leaf/node.
-    #[display(fmt="generated(@{})", _0)]
     Generated(u32),
+}
+
+impl std::fmt::Display for EntryLink {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match *self {
+            Self::Stored(v) => write!(f, "stored({})", v),
+            Self::Generated(v) => write!(f, "generated({})", v),
+        }
+    }
 }
 
 /// MMR Node. It is leaf when `left`, `right` are `None` and node when they are not.
