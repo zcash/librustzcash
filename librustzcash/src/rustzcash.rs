@@ -59,7 +59,7 @@ use zcash_proofs::{
     sapling::{SaplingProvingContext, SaplingVerificationContext},
 };
 
-use mmr::{Entry as MMREntry, NodeData as MMRNodeData, Tree as MMRTree};
+use zcash_mmr::{Entry as MMREntry, NodeData as MMRNodeData, Tree as MMRTree};
 
 #[cfg(test)]
 mod tests;
@@ -1231,7 +1231,7 @@ fn construct_mmr_tree(
     // Indices of provided tree nodes, length of p_len+e_len
     ni_ptr: *const u32,
     // Provided tree nodes data, length of p_len+e_len
-    n_ptr: *const [c_uchar; mmr::MAX_ENTRY_SIZE],
+    n_ptr: *const [c_uchar; zcash_mmr::MAX_ENTRY_SIZE],
 
     // Peaks count
     p_len: size_t,
@@ -1283,7 +1283,7 @@ pub extern "system" fn librustzcash_mmr_append(
     // Indices of provided tree nodes, length of p_len
     ni_ptr: *const u32,
     // Provided tree nodes data, length of p_len
-    n_ptr: *const [c_uchar; mmr::MAX_ENTRY_SIZE],
+    n_ptr: *const [c_uchar; zcash_mmr::MAX_ENTRY_SIZE],
     // Peaks count
     p_len: size_t,
     // New node pointer
@@ -1291,9 +1291,9 @@ pub extern "system" fn librustzcash_mmr_append(
     // Return of root commitment (32 byte hash)
     rt_ret: *mut u8,
     // Return buffer for appended leaves, should be pre-allocated of log2(t_len)+1 length
-    buf_ret: *mut [c_uchar; mmr::MAX_NODE_DATA_SIZE],
+    buf_ret: *mut [c_uchar; zcash_mmr::MAX_NODE_DATA_SIZE],
 ) -> u32 {
-    let new_node_bytes = unsafe { slice::from_raw_parts(nn_ptr, mmr::MAX_NODE_DATA_SIZE) };
+    let new_node_bytes = unsafe { slice::from_raw_parts(nn_ptr, zcash_mmr::MAX_NODE_DATA_SIZE) };
 
     let mut tree = match construct_mmr_tree(cbranch, t_len, ni_ptr, n_ptr, p_len, 0) {
         Ok(t) => t,
@@ -1348,7 +1348,7 @@ pub extern "system" fn librustzcash_mmr_delete(
     // Indices of provided tree nodes, length of p_len+e_len
     ni_ptr: *const u32,
     // Provided tree nodes data, length of p_len+e_len
-    n_ptr: *const [c_uchar; mmr::MAX_ENTRY_SIZE],
+    n_ptr: *const [c_uchar; zcash_mmr::MAX_ENTRY_SIZE],
     // Peaks count
     p_len: size_t,
     // Extra nodes loaded (for deletion) count
