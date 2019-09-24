@@ -24,6 +24,7 @@ pub struct Tree {
 }
 
 impl Tree {
+    /// Resolve link originated from this tree
     pub fn resolve_link(&self, link: EntryLink) -> Result<IndexedNode, Error> {
         match link {
             EntryLink::Generated(index) => {
@@ -80,6 +81,12 @@ impl Tree {
         }
     }
 
+    /// New view into the the tree array representation
+    ///
+    /// `length` is total length of the array representation
+    /// `peaks` is peaks of the mmr tree
+    /// `extra` is some extra nodes that calculated to be required during next one or more
+    /// operations on the tree.
     pub fn new(
         length: u32,
         peaks: Vec<(u32, Entry)>,
@@ -267,6 +274,7 @@ impl Tree {
     }
 }
 
+/// Reference to the node with link attached.
 #[derive(Debug)]
 pub struct IndexedNode<'a> {
     node: &'a Entry,
@@ -283,14 +291,17 @@ impl<'a> IndexedNode<'a> {
         self.node.right().map_err(|e| e.augment(self.link))
     }
 
+    /// Reference to the entry struct.
     pub fn node(&self) -> &Entry {
         self.node
     }
 
+    /// Reference to the entry metadata.
     pub fn data(&self) -> &NodeData {
         &self.node.data
     }
 
+    /// Actual link by what this node was resolved.
     pub fn link(&self) -> EntryLink {
         self.link
     }

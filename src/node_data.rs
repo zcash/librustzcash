@@ -2,23 +2,36 @@ use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt, ByteOrder};
 use bigint::U256;
 use blake2::Params as Blake2Params;
 
+/// Maximum serialized size of the node metadata.
 pub const MAX_NODE_DATA_SIZE: usize = 32 + 4 + 4 + 4 + 4 + 32 + 32 + 32 + 9 + 9 + 9; // 171
 
 /// Node metadata.
 #[repr(C)]
 #[derive(Debug, Clone, Default)]
 pub struct NodeData {
+    /// Consensus branch id, should be provided by deserializing node.
     pub consensus_branch_id: u32,
+    /// Subtree commitment - either block hash for leaves or hashsum of children for nodes.
     pub subtree_commitment: [u8; 32],
+    /// Start time.
     pub start_time: u32,
+    /// End time.
     pub end_time: u32,
+    /// Start target.
     pub start_target: u32,
+    /// End target.
     pub end_target: u32,
+    /// Start sapling tree root.
     pub start_sapling_root: [u8; 32],
+    /// End sapling tree root.
     pub end_sapling_root: [u8; 32],
+    /// Part of tree total work.
     pub subtree_total_work: U256,
+    /// Start height.
     pub start_height: u64,
+    /// End height
     pub end_height: u64,
+    /// Number of shielded transactions.
     pub shielded_tx: u64,
 }
 
@@ -42,6 +55,7 @@ fn personalization(branch_id: u32) -> [u8; 16] {
 }
 
 impl NodeData {
+    /// Combine two nodes metadata.
     pub fn combine(left: &NodeData, right: &NodeData) -> NodeData {
         assert_eq!(left.consensus_branch_id, right.consensus_branch_id);
 
@@ -106,6 +120,7 @@ impl NodeData {
         Ok(result)
     }
 
+    /// Write to the byte representation.
     pub fn write<W: std::io::Write>(&self, w: &mut W) -> std::io::Result<()> {
         w.write_all(&self.subtree_commitment)?;
         w.write_u32::<LittleEndian>(self.start_time)?;
@@ -125,6 +140,7 @@ impl NodeData {
         Ok(())
     }
 
+    /// Read from the byte representation.
     pub fn read<R: std::io::Read>(consensus_branch_id: u32, r: &mut R) -> std::io::Result<Self> {
         let mut data = Self::default();
         data.consensus_branch_id = consensus_branch_id;
@@ -147,6 +163,7 @@ impl NodeData {
         Ok(data)
     }
 
+    /// Convert to byte representation.
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut buf = [0u8; MAX_NODE_DATA_SIZE];
         let pos = {
@@ -158,6 +175,7 @@ impl NodeData {
         buf[0..pos].to_vec()
     }
 
+    /// Convert from byte representation.
     pub fn from_bytes<T: AsRef<[u8]>>(consensus_branch_id: u32, buf: T) -> std::io::Result<Self> {
         let mut cursor = std::io::Cursor::new(buf);
         Self::read(consensus_branch_id, &mut cursor)

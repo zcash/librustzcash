@@ -1,19 +1,25 @@
 //! MMR library for Zcash
 //!
 //! To be used in zebra and via FFI bindings in zcashd
+#![warn(missing_docs)]
 
 mod tree;
 mod node_data;
 mod entry;
 
+
 pub use tree::Tree;
 pub use node_data::{NodeData, MAX_NODE_DATA_SIZE};
 pub use entry::{Entry, MAX_ENTRY_SIZE};
 
+/// Crate-level error type
 #[derive(Debug)]
 pub enum Error {
+    /// Entry expected to be presented in the tree view while it was not.
     ExpectedInMemory(EntryLink),
+    /// Entry expected to be a node.
     ExpectedNode,
+    /// Entry expected to be a node (specifying for which link this is not true).
     ExpectedNodeForLink(EntryLink),
 }
 
@@ -50,7 +56,9 @@ impl std::fmt::Display for EntryLink {
 #[repr(C)]
 #[derive(Debug)]
 pub enum EntryKind {
+    /// Leaf entry.
     Leaf,
+    /// Node entry with children links.
     Node(EntryLink, EntryLink),
 }
 

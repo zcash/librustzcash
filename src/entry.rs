@@ -2,8 +2,10 @@ use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 
 use crate::{EntryKind, NodeData, Error, EntryLink, MAX_NODE_DATA_SIZE};
 
+/// Max serialized length of entry data.
 pub const MAX_ENTRY_SIZE: usize = MAX_NODE_DATA_SIZE + 9;
 
+/// MMR Entry.
 #[derive(Debug)]
 pub struct Entry {
     pub(crate) kind: EntryKind,
@@ -11,23 +13,28 @@ pub struct Entry {
 }
 
 impl Entry {
+    /// Update siblings of the entry (to promote it from leaf to node)
     pub fn update_siblings(&mut self, left: EntryLink, right: EntryLink) {
         self.kind = EntryKind::Node(left, right);
     }
 
+    /// Returns if is this node complete (has total of 2^N leaves)
     pub fn complete(&self) -> bool {
         let leaves = self.leaf_count();
         leaves & (leaves - 1) == 0
     }
 
+    /// Number of leaves under this node.
     pub fn leaf_count(&self) -> u64 {
         self.data.end_height - self.data.start_height + 1
     }
 
+    /// Is this node a leaf.
     pub fn is_leaf(&self) -> bool {
         if let EntryKind::Leaf = self.kind { true } else { false }
     }
 
+    /// Left child
     pub fn left(&self) -> Result<EntryLink, Error> {
         match self.kind {
             EntryKind::Leaf => { Err(Error::ExpectedNode) }
@@ -35,6 +42,7 @@ impl Entry {
         }
     }
 
+    /// Right child.
     pub fn right(&self) -> Result<EntryLink, Error> {
         match self.kind {
             EntryKind::Leaf => { Err(Error::ExpectedNode) }
@@ -42,6 +50,7 @@ impl Entry {
         }
     }
 
+    /// Read from byte representation.
     pub fn read<R: std::io::Read>(consensus_branch_id: u32, r: &mut R) -> std::io::Result<Self> {
         let kind = {
             match r.read_u8()? {
@@ -67,6 +76,7 @@ impl Entry {
         })
     }
 
+    /// Write to byte representation.
     pub fn write<W: std::io::Write>(&self, w: &mut W) -> std::io::Result<()> {
         match self.kind {
             EntryKind::Node(EntryLink::Stored(left), EntryLink::Stored(right)) => {
@@ -85,6 +95,7 @@ impl Entry {
         Ok(())
     }
 
+    /// Convert from byte representation.
     pub fn from_bytes<T: AsRef<[u8]>>(consensus_branch_id: u32, buf: T) -> std::io::Result<Self> {
         let mut cursor = std::io::Cursor::new(buf);
         Self::read(consensus_branch_id, &mut cursor)
