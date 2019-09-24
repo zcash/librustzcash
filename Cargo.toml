@@ -12,4 +12,4 @@ quickcheck = "0.8"
 derive_more = "0.15"
 bigint = "4"
 byteorder = "1"
-blake2 = { package = "blake2-rfc", git = "https://github.com/gtank/blake2-rfc.git", rev = "7a5b5fc99ae483a0043db7547fb79a6fa44b88a9" }
+blake2 = { package = "blake2b_simd", version = "0.5" }

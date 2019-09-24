@@ -1,6 +1,6 @@
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt, ByteOrder};
 use bigint::U256;
-use blake2::blake2b::Blake2b;
+use blake2::Params as Blake2Params;
 
 pub const MAX_NODE_DATA_SIZE: usize = 32 + 4 + 4 + 4 + 4 + 32 + 32 + 32 + 9 + 9 + 9; // 171
 
@@ -23,10 +23,14 @@ pub struct NodeData {
 }
 
 fn blake2b_personal(personalization: &[u8], input: &[u8]) -> [u8; 32] {
-    let mut hasher = Blake2b::with_params(32, &[], &[], personalization);
-    hasher.update(input);
+    let hash_result = Blake2Params::new()
+        .hash_length(32)
+        .personal(personalization)
+        .to_state()
+        .update(input)
+        .finalize();
     let mut result = [0u8; 32];
-    result.copy_from_slice(hasher.finalize().as_bytes());
+    result.copy_from_slice(hash_result.as_bytes());
     result
 }
 
