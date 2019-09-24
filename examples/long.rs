@@ -12,6 +12,10 @@ fn prepare_tree(vec: &Vec<NodeData>) -> Tree {
     let mut peak_pos = (1 << (h+1)) - 1;
     let mut nodes = Vec::new();
 
+    // used later
+    let mut last_peak_pos = 0;
+    let mut last_peak_h = 0;
+
     loop {
 
         if peak_pos > vec.len() {
@@ -22,17 +26,22 @@ fn prepare_tree(vec: &Vec<NodeData>) -> Tree {
 
         if peak_pos <= vec.len() {
             let mut peak: Entry = vec[peak_pos-1].clone().into();
-            let left_idx = (peak_pos - (1<<h) - 1) as u32;
-            let right_idx = (peak_pos - 2) as u32;
             if h != 0 {
+                let left_idx = (peak_pos - (1<<h) - 1) as u32;
+                let right_idx = (peak_pos - 2) as u32;
+
                 peak.update_siblings(
                     EntryLink::Stored(left_idx),
                     EntryLink::Stored(right_idx),
                 );
+
+                println!("Peak #{}: ({}, {})", nodes.len(), left_idx, right_idx);
             }
             nodes.push(((peak_pos-1) as u32, peak));
 
-            println!("Peak #{}: ({}, {})", nodes.len(), left_idx, right_idx);
+            // save to be used in next loop
+            last_peak_pos = peak_pos;
+            last_peak_h = h;
 
             // right sibling
             peak_pos = peak_pos + (1 << (h+1)) - 1;
@@ -43,7 +52,50 @@ fn prepare_tree(vec: &Vec<NodeData>) -> Tree {
         }
     }
 
-    Tree::new(vec.len() as u32, nodes, vec![])
+    // for deletion, everything on the right slope of the last peak should be pre-loaded
+    let mut extra = Vec::new();
+    let mut h = last_peak_h;
+    let mut peak_pos = last_peak_pos;
+
+    while h > 0 {
+        let left_pos = peak_pos - (1<<h);
+        let right_pos = peak_pos - 1;
+        h = h - 1;
+
+        // drafting left child
+        let mut peak: Entry = vec[left_pos-1].clone().into();
+        if h != 0 {
+            let left_idx = (left_pos - (1<<h) - 1) as u32;
+            let right_idx = (left_pos - 2) as u32;
+
+            peak.update_siblings(
+                EntryLink::Stored(left_idx),
+                EntryLink::Stored(right_idx),
+            );
+        }
+        extra.push(((left_pos-1) as u32, peak));
+
+        // drafting right child
+        let mut peak: Entry = vec[right_pos-1].clone().into();
+        if h != 0 {
+            let left_idx = (right_pos - (1<<h) - 1) as u32;
+            let right_idx = (right_pos - 2) as u32;
+
+            peak.update_siblings(
+                EntryLink::Stored(left_idx),
+                EntryLink::Stored(right_idx),
+            );
+        }
+        extra.push(((right_pos-1) as u32, peak));
+
+        // continuing on right slope
+        peak_pos = right_pos;
+    }
+
+    println!("Total extra of {} required for deletion!", extra.len());
+
+
+    Tree::new(vec.len() as u32, nodes, extra)
 }
 
 fn main() {
