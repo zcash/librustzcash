@@ -1,3 +1,5 @@
+//! Implementation of the Pedersen hash function used in Sapling.
+
 use crate::jubjub::*;
 use ff::{Field, PrimeField, PrimeFieldRepr};
 

@@ -1,3 +1,5 @@
+//! Constants for the Zcash test network.
+
 /// The testnet coin type for ZEC, as defined by [SLIP 44].
 ///
 /// [SLIP 44]: https://github.com/satoshilabs/slips/blob/master/slip-0044.md

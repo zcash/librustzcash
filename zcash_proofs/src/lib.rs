@@ -1,3 +1,8 @@
+//! *Zcash circuits and proofs.*
+//!
+//! `zcash_proofs` contains the zk-SNARK circuits used by Zcash, and the APIs for creating
+//! and verifying proofs.
+
 // Catch documentation errors caused by code changes.
 #![deny(intra_doc_link_resolution_failure)]
 

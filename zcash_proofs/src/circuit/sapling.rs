@@ -1,3 +1,5 @@
+//! The Sapling circuits.
+
 use ff::{Field, PrimeField, PrimeFieldRepr};
 
 use bellman::{Circuit, ConstraintSystem, SynthesisError};

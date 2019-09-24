@@ -1,3 +1,7 @@
+//! Implementation of [ZIP 32] for hierarchical deterministic key management.
+//!
+//! [ZIP 32]: https://zips.z.cash/zip-0032
+
 use aes::Aes256;
 use blake2b_simd::Params as Blake2bParams;
 use byteorder::{ByteOrder, LittleEndian, ReadBytesExt, WriteBytesExt};

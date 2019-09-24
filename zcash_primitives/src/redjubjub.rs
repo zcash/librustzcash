@@ -1,5 +1,7 @@
-//! Implementation of RedJubjub, a specialization of RedDSA to the Jubjub curve.
-//! See section 5.4.6 of the Sapling protocol specification.
+//! Implementation of [RedJubjub], a specialization of RedDSA to the Jubjub
+//! curve.
+//!
+//! [RedJubjub]: https://zips.z.cash/protocol/protocol.pdf#concretereddsa
 
 use crate::jubjub::{edwards::Point, FixedGenerators, JubjubEngine, JubjubParams, Unknown};
 use ff::{Field, PrimeField, PrimeFieldRepr};

@@ -1,3 +1,6 @@
+//! The [Jubjub] curve for efficient elliptic curve operations in circuits built
+//! over [BLS12-381].
+//!
 //! Jubjub is a twisted Edwards curve defined over the BLS12-381 scalar
 //! field, Fr. It takes the form `-x^2 + y^2 = 1 + dx^2y^2` with
 //! `d = -(10240/10241)`. It is birationally equivalent to a Montgomery
@@ -16,6 +19,9 @@
 //! It is a complete twisted Edwards curve, so the equivalence with
 //! the Montgomery curve forms a group isomorphism, allowing points
 //! to be freely converted between the two forms.
+//!
+//! [Jubjub]: https://zips.z.cash/protocol/protocol.pdf#jubjub
+//! [BLS12-381]: pairing::bls12_381
 
 use ff::{Field, PrimeField, SqrtField};
 use pairing::Engine;

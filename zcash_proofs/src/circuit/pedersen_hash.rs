@@ -1,3 +1,5 @@
+//! Gadget for Zcash's Pedersen hash.
+
 use super::ecc::{EdwardsPoint, MontgomeryPoint};
 use bellman::gadgets::boolean::Boolean;
 use bellman::gadgets::lookup::*;
