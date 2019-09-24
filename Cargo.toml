@@ -1,5 +1,5 @@
 [package]
-name = "zcash-mmr"
+name = "zcash_mmr"
 version = "0.1.0"
 authors = ["NikVolf <nikvolf@gmail.com>"]
 edition = "2018"
