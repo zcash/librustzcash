@@ -60,6 +60,7 @@ fn main() {
     let now = std::time::Instant::now();
 
     let tree = prepare_tree(&long_vec);
+    let elapsed = now.elapsed();
 
     println!("Tree final root: {}-{}",
         tree.root_node().expect("root").data().start_height,
@@ -68,6 +69,6 @@ fn main() {
 
     println!("Prepare tree of {} length: {} ns / {} mcs / {} ms",
         number,
-        now.elapsed().as_nanos(), now.elapsed().as_micros(), now.elapsed().as_millis()
+        elapsed.as_nanos(), elapsed.as_micros(), elapsed.as_millis()
     );
 }
