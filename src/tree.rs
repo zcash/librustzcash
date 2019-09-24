@@ -142,6 +142,8 @@ impl Tree {
     /// Append one leaf to the tree.
     ///
     /// Returns links to actual nodes that has to be persisted as the result of the append.
+    /// If completed without error, at least one link to the appended
+    /// node (with metadata provided in `new_leaf`) will be returned.
     pub fn append_leaf(&mut self, new_leaf: NodeData) -> Result<Vec<EntryLink>, Error> {
         let root = self.root;
         let new_leaf_link = self.push(new_leaf.into());
