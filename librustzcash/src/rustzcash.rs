@@ -1293,10 +1293,14 @@ pub extern "system" fn librustzcash_mmr_append(
     // Return buffer for appended leaves, should be pre-allocated of log2(t_len)+1 length
     buf_ret: *mut [c_uchar; zcash_mmr::MAX_NODE_DATA_SIZE],
 ) -> u32 {
-    let new_node_bytes: &[u8; zcash_mmr::MAX_NODE_DATA_SIZE] = unsafe { match nn_ptr.as_ref()  {
-        Some(r) => r,
-        None => { return 0; } // Null pointer passed, error
-    } };
+    let new_node_bytes: &[u8; zcash_mmr::MAX_NODE_DATA_SIZE] = unsafe {
+        match nn_ptr.as_ref() {
+            Some(r) => r,
+            None => {
+                return 0;
+            } // Null pointer passed, error
+        }
+    };
 
     let mut tree = match construct_mmr_tree(cbranch, t_len, ni_ptr, n_ptr, p_len, 0) {
         Ok(t) => t,
