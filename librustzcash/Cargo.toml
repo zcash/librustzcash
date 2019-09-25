@@ -28,6 +28,3 @@ rand_os = "0.2"
 zcash_primitives = { path = "../zcash_primitives" }
 zcash_proofs = { path = "../zcash_proofs" }
 zcash_mmr = { git = "https://github.com/nikvolf/zcash-mmr" }
-
-[dev-dependencies]
-hex = "0.3"
