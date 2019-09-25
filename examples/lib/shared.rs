@@ -39,8 +39,11 @@ impl Iterator for NodeDataIterator {
 
 impl NodeDataIterator {
     pub fn new() -> Self {
-        let mut root: Entry = NodeData::combine(&leaf(1), &leaf(2)).into();
-        root.update_siblings(EntryLink::Stored(0), EntryLink::Stored(1));
+        let root = Entry::new(
+            NodeData::combine(&leaf(1), &leaf(2)),
+            EntryLink::Stored(0),
+            EntryLink::Stored(1)
+        );
         let tree =
             Tree::new(
                 3,
