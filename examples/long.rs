@@ -3,6 +3,22 @@ use zcash_mmr::{Entry, EntryLink, NodeData, Tree};
 #[path= "lib/shared.rs"]
 mod share;
 
+fn draft(into: &mut Vec<(u32, Entry)>, vec: &Vec<NodeData>, peak_pos: usize, h: u32) {
+    let node_data = vec[peak_pos-1].clone();
+    let peak: Entry = match h {
+        0 => node_data.into(),
+        _ => Entry::new(
+            node_data,
+            EntryLink::Stored((peak_pos - (1 << h) - 1) as u32),
+            EntryLink::Stored((peak_pos - 2) as u32),
+        ),
+    };
+
+    println!("Entry #{}: {}", into.len(), peak);
+
+    into.push(((peak_pos-1) as u32, peak));
+}
+
 fn prepare_tree(vec: &Vec<NodeData>) -> Tree {
 
     assert!(vec.len() > 0);
@@ -25,19 +41,7 @@ fn prepare_tree(vec: &Vec<NodeData>) -> Tree {
         }
 
         if peak_pos <= vec.len() {
-            let mut peak: Entry = vec[peak_pos-1].clone().into();
-            if h != 0 {
-                let left_idx = (peak_pos - (1<<h) - 1) as u32;
-                let right_idx = (peak_pos - 2) as u32;
-
-                peak.update_siblings(
-                    EntryLink::Stored(left_idx),
-                    EntryLink::Stored(right_idx),
-                );
-
-                println!("Peak #{}: ({}, {})", nodes.len(), left_idx, right_idx);
-            }
-            nodes.push(((peak_pos-1) as u32, peak));
+            draft(&mut nodes, vec, peak_pos, h);
 
             // save to be used in next loop
             last_peak_pos = peak_pos;
@@ -63,37 +67,16 @@ fn prepare_tree(vec: &Vec<NodeData>) -> Tree {
         h = h - 1;
 
         // drafting left child
-        let mut peak: Entry = vec[left_pos-1].clone().into();
-        if h != 0 {
-            let left_idx = (left_pos - (1<<h) - 1) as u32;
-            let right_idx = (left_pos - 2) as u32;
-
-            peak.update_siblings(
-                EntryLink::Stored(left_idx),
-                EntryLink::Stored(right_idx),
-            );
-        }
-        extra.push(((left_pos-1) as u32, peak));
+        draft(&mut extra, vec, left_pos, h);
 
         // drafting right child
-        let mut peak: Entry = vec[right_pos-1].clone().into();
-        if h != 0 {
-            let left_idx = (right_pos - (1<<h) - 1) as u32;
-            let right_idx = (right_pos - 2) as u32;
-
-            peak.update_siblings(
-                EntryLink::Stored(left_idx),
-                EntryLink::Stored(right_idx),
-            );
-        }
-        extra.push(((right_pos-1) as u32, peak));
+        draft(&mut extra, vec, right_pos, h);
 
         // continuing on right slope
         peak_pos = right_pos;
     }
 
     println!("Total extra of {} required for deletion!", extra.len());
-
 
     Tree::new(vec.len() as u32, nodes, extra)
 }

@@ -13,9 +13,12 @@ pub struct Entry {
 }
 
 impl Entry {
-    /// Update siblings of the entry (to promote it from leaf to node)
-    pub fn update_siblings(&mut self, left: EntryLink, right: EntryLink) {
-        self.kind = EntryKind::Node(left, right);
+    /// New entry of type node.
+    pub fn new(data: NodeData, left: EntryLink, right: EntryLink) -> Self {
+        Entry {
+            kind: EntryKind::Node(left, right),
+            data,
+        }
     }
 
     /// Returns if is this node complete (has total of 2^N leaves)
@@ -105,5 +108,14 @@ impl Entry {
 impl From<NodeData> for Entry {
     fn from(s: NodeData) -> Self {
         Entry { kind: EntryKind::Leaf, data: s }
+    }
+}
+
+impl std::fmt::Display for Entry {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.kind {
+            EntryKind::Node(l, r) => write!(f, "node({}, {}, ..)", l, r),
+            EntryKind::Leaf => write!(f, "leaf(..)"),
+        }
     }
 }
