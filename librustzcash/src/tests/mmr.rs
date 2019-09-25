@@ -1,42 +1,59 @@
 use zcash_mmr::{Entry, EntryLink, NodeData};
 
-use crate::librustzcash_mmr_append;
+use crate::{librustzcash_mmr_append, librustzcash_mmr_delete};
 
-const NODE_DATA: &str = r#"00000000000000000000000000000000000000000000000000000000000000000B000000140000006E000000780000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000101060000000000000000000000000000000000000000000000000000000000000000150000001E0000007800000082000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000020207B2A5F285056BA19610B085B5DCBB277703E363E638E44FA6BEC3E5D3873AAF1B0B0000001E0000006E0000008200000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001020D00000000000000000000000000000000000000000000000000000000000000001F00000028000000820000008C000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000030308000000000000000000000000000000000000000000000000000000000000000029000000320000008C000000960000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000404096EA091D894B8BCC341AB5453EB7AB827B6127F99D76323CCEE65886DF847E1B21F0000003200000082000000960000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000304118F23A7C5311184CDAA70748155CBBE6E31CAFBABDDDDC668885C9DC991472F6C0B000000320000006E0000009600000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001041E0000000000000000000000000000000000000000000000000000000000000000330000003C00000096000000A000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000005050A00000000000000000000000000000000000000000000000000000000000000003D00000046000000A0000000AA00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000006060BADC518E8DAC8319BAA616CB5985ACE30042777163C31171B3E6685ECEBCB36F8330000004600000096000000AA00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000005061500000000000000000000000000000000000000000000000000000000000000004700000050000000AA000000B400000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000007070C0000000000000000000000000000000000000000000000000000000000000000510000005A000000B4000000BE00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008080DC30447751A6E41E15321190BD31B91E5AB71C8E8192CD7D36C78446CDD3ACAE3470000005A000000AA000000BE000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000070819C595CB47E90DE10ED5660E41CFD481F0B4567E79C8202E9AF35AF3CFD2B97781330000005A00000096000000BE00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000005082ED6145F949CDAD2D9C275631624ECD633B1553EDB9A92D555C7D6FB076319B4150B0000005A0000006E000000BE00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001084C00000000000000000000000000000000000000000000000000000000000000005B00000064000000BE000000C800000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000009090E"#;
+const NODE_DATA_16L: &[u8] = include_bytes!("./res/tree16.dat");
+const NODE_DATA_1023L: &[u8] = include_bytes!("./res/tree1023.dat");
 
-fn preload_tree_append(vec: &Vec<NodeData>) -> (Vec<u32>, Vec<[u8; zcash_mmr::MAX_ENTRY_SIZE]>) {
+struct TreeView {
+    peaks: Vec<(u32, Entry)>,
+    extra: Vec<(u32, Entry)>,
+}
+
+fn draft(into: &mut Vec<(u32, Entry)>, vec: &Vec<NodeData>, peak_pos: usize, h: u32) {
+    let node_data = vec[peak_pos-1].clone();
+    let peak: Entry = match h {
+        0 => node_data.into(),
+        _ => Entry::new(
+            node_data,
+            EntryLink::Stored((peak_pos - (1 << h) - 1) as u32),
+            EntryLink::Stored((peak_pos - 2) as u32),
+        ),
+    };
+
+    into.push(((peak_pos-1) as u32, peak));
+}
+
+fn prepare_tree(vec: &Vec<NodeData>) -> TreeView {
+
     assert!(vec.len() > 0);
 
     // integer log2 of (vec.len()+1), -1
-    let mut h = (32 - ((vec.len() + 1) as u32).leading_zeros() - 1) - 1;
-    let mut peak_pos = (1 << (h + 1)) - 1;
+    let mut h = (32 - ((vec.len()+1) as u32).leading_zeros() - 1)-1;
+    let mut peak_pos = (1 << (h+1)) - 1;
+    let mut nodes = Vec::new();
 
-    let mut peak_indices = Vec::new();
-    let mut peaks = Vec::new();
+    // used later
+    let mut last_peak_pos = 0;
+    let mut last_peak_h = 0;
 
     loop {
+
         if peak_pos > vec.len() {
             // left child, -2^h
-            peak_pos = peak_pos - (1 << h);
+            peak_pos = peak_pos - (1<<h);
             h = h - 1;
         }
 
         if peak_pos <= vec.len() {
-            let mut peak: Entry = vec[peak_pos - 1].clone().into();
-            if h != 0 {
-                peak.update_siblings(
-                    EntryLink::Stored((peak_pos - (1 << h) - 1) as u32),
-                    EntryLink::Stored((peak_pos - 2) as u32),
-                );
-            }
-            peak_indices.push((peak_pos - 1) as u32);
-            let mut entry_buf = [0u8; zcash_mmr::MAX_ENTRY_SIZE];
-            peak.write(&mut &mut entry_buf[..])
-                .expect("Entry write failed");
-            peaks.push(entry_buf);
+            draft(&mut nodes, vec, peak_pos, h);
+
+            // save to be used in next loop
+            last_peak_pos = peak_pos;
+            last_peak_h = h;
 
             // right sibling
-            peak_pos = peak_pos + (1 << (h + 1)) - 1;
+            peak_pos = peak_pos + (1 << (h+1)) - 1;
         }
 
         if h == 0 {
@@ -44,16 +61,72 @@ fn preload_tree_append(vec: &Vec<NodeData>) -> (Vec<u32>, Vec<[u8; zcash_mmr::MA
         }
     }
 
-    (peak_indices, peaks)
+    // for deletion, everything on the right slope of the last peak should be pre-loaded
+    let mut extra = Vec::new();
+    let mut h = last_peak_h;
+    let mut peak_pos = last_peak_pos;
+
+    while h > 0 {
+        let left_pos = peak_pos - (1<<h);
+        let right_pos = peak_pos - 1;
+        h = h - 1;
+
+        // drafting left child
+        draft(&mut extra, vec, left_pos, h);
+
+        // drafting right child
+        draft(&mut extra, vec, right_pos, h);
+
+        // continuing on right slope
+        peak_pos = right_pos;
+    }
+
+    TreeView { peaks: nodes, extra }
 }
 
-fn load_nodes() -> Vec<NodeData> {
+fn preload_tree_append(vec: &Vec<NodeData>) -> (Vec<u32>, Vec<[u8; zcash_mmr::MAX_ENTRY_SIZE]>) {
+    assert!(vec.len() > 0);
+
+    let tree_view = prepare_tree(vec);
+
+    let mut indices = Vec::new();
+    let mut bytes = Vec::new();
+
+    for (idx, entry) in tree_view.peaks.into_iter() {
+        let mut buf = [0u8; zcash_mmr::MAX_ENTRY_SIZE];
+        entry.write(&mut &mut buf[..]).expect("Cannot fail if enough buffer length");
+        indices.push(idx);
+        bytes.push(buf);
+    }
+
+    (indices, bytes)
+}
+
+// also returns number of peaks
+fn preload_tree_delete(vec: &Vec<NodeData>) -> (Vec<u32>, Vec<[u8; zcash_mmr::MAX_ENTRY_SIZE]>, usize) {
+    assert!(vec.len() > 0);
+
+    let tree_view = prepare_tree(vec);
+
+    let mut indices = Vec::new();
+    let mut bytes = Vec::new();
+
+    let peak_count = tree_view.peaks.len();
+
+    for (idx, entry) in tree_view.peaks.into_iter().chain(tree_view.extra.into_iter()) {
+        let mut buf = [0u8; zcash_mmr::MAX_ENTRY_SIZE];
+        entry.write(&mut &mut buf[..]).expect("Cannot fail if enough buffer length");
+        indices.push(idx);
+        bytes.push(buf);
+    }
+
+    (indices, bytes, peak_count)
+}
+
+fn load_nodes(bytes: &'static [u8]) -> Vec<NodeData> {
     let mut res = Vec::new();
-
-    let node_data: Vec<u8> = hex::decode(NODE_DATA).expect("Valid by declaration");
-
-    let mut cursor = std::io::Cursor::new(&node_data[..]);
-    while (cursor.position() as usize) < node_data.len() {
+    let mut cursor = std::io::Cursor::new(bytes);
+    while (cursor.position() as usize) < bytes.len() {
         let node_data =
             zcash_mmr::NodeData::read(0, &mut cursor).expect("Statically checked to be correct");
         res.push(node_data);
@@ -64,7 +137,7 @@ fn load_nodes() -> Vec<NodeData> {
 
 #[test]
 fn append() {
-    let nodes = load_nodes();
+    let nodes = load_nodes(NODE_DATA_16L);
     let (indices, peaks) = preload_tree_append(&nodes);
 
     let mut rt_ret = [0u8; 32];
@@ -120,4 +193,25 @@ fn append() {
     assert_eq!(new_node_2.start_height, 9);
     assert_eq!(new_node_2.end_height, 10);
     assert_eq!(new_node_2.shielded_tx, 27);
+}
+
+#[test]
+fn delete() {
+    let nodes = load_nodes(NODE_DATA_1023L);
+    let (indices, nodes, peak_count) = preload_tree_delete(&nodes);
+
+    let mut rt_ret = [0u8; 32];
+
+    let result = librustzcash_mmr_delete(
+        0,
+        nodes.len() as u32,
+        indices.as_ptr(),
+        nodes.as_ptr(),
+        peak_count,
+        indices.len() - peak_count,
+        rt_ret.as_mut_ptr(),
+    );
+
+    // Deleting from full tree of 9 height would result in cascade deleting of 10 nodes
+    assert_eq!(result, 10);
 }

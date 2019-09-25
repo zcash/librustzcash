@@ -548,7 +548,7 @@ dependencies = [
 [[package]]
 name = "zcash_mmr"
 version = "0.1.0"
-source = "git+https://github.com/nikvolf/zcash-mmr#ce2416623fd95f1307fb5f1058431b3a51d45e30"
+source = "git+https://github.com/nikvolf/zcash-mmr#da0d0a669a049109ee96354072ebc86a116bce25"
 dependencies = [
  "bigint 4.4.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "blake2b_simd 0.5.6 (registry+https://github.com/rust-lang/crates.io-index)",
