@@ -1,3 +1,5 @@
+//! Structs representing the components within Zcash transactions.
+
 use crate::jubjub::{edwards, Unknown};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use ff::{PrimeField, PrimeFieldRepr};

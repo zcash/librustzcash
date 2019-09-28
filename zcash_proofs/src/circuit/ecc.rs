@@ -1,3 +1,5 @@
+//! Gadgets implementing Jubjub elliptic curve operations.
+
 use ff::Field;
 use pairing::Engine;
 

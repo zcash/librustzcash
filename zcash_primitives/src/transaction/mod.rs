@@ -1,3 +1,5 @@
+//! Structs and methods for handling Zcash transactions.
+
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use hex;
 use sha2::{Digest, Sha256};

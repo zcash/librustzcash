@@ -39,3 +39,18 @@ jobs:
       run: $HOME/.cargo/bin/cargo test --verbose --release --all
     - name: Run slow tests
       run: $HOME/.cargo/bin/cargo test --verbose --release --all -- --ignored
+
+  doc-links:
+    name: Check intra-doc links
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v1
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: nightly
+          override: true
+      - uses: actions-rs/cargo@v1
+        with:
+          command: doc
+          args: --document-private-items

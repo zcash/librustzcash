@@ -1,6 +1,8 @@
 //! Sapling key components.
 //!
-//! Implements section 4.2.2 of the Zcash Protocol Specification.
+//! Implements [section 4.2.2] of the Zcash Protocol Specification.
+//!
+//! [section 4.2.2]: https://zips.z.cash/protocol/protocol.pdf#saplingkeycomponents
 
 use crate::{
     jubjub::{edwards, FixedGenerators, JubjubEngine, JubjubParams, ToUniform, Unknown},

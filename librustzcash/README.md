@@ -1,12 +1,17 @@
 # librustzcash
 
-This repository contains librustzcash, a static library for Zcash code assets written in Rust.
+`librustzcash` is an FFI library crate that exposes the Zcash Rust components to
+the `zcashd` full node.
+
+The FFI API does not have any stability guarantees, and will change as required
+by `zcashd`.
 
 ## License
 
 Licensed under either of
 
- * Apache License, Version 2.0, ([LICENSE-APACHE](../LICENSE-APACHE) or http://www.apache.org/licenses/LICENSE-2.0)
+ * Apache License, Version 2.0, ([LICENSE-APACHE](../LICENSE-APACHE) or
+   http://www.apache.org/licenses/LICENSE-2.0)
  * MIT license ([LICENSE-MIT](../LICENSE-MIT) or http://opensource.org/licenses/MIT)
 
 at your option.

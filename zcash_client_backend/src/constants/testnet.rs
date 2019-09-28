@@ -1,3 +1,5 @@
+//! Constants for the Zcash test network.
+
 /// The testnet coin type for ZEC, as defined by [SLIP 44].
 ///
 /// [SLIP 44]: https://github.com/satoshilabs/slips/blob/master/slip-0044.md
@@ -23,6 +25,6 @@ pub const HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY: &str = "zxviewtestsapling";
 ///
 /// Defined in section 5.6.4 of the [Zcash Protocol Specification].
 ///
-/// [`PaymentAddress`]: sapling_crypto::primitives::PaymentAddress
+/// [`PaymentAddress`]: zcash_primitives::primitives::PaymentAddress
 /// [Zcash Protocol Specification]: https://github.com/zcash/zips/blob/master/protocol/protocol.pdf
 pub const HRP_SAPLING_PAYMENT_ADDRESS: &str = "ztestsapling";

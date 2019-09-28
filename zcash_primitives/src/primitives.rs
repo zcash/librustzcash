@@ -1,3 +1,5 @@
+//! Structs for core Zcash primitives.
+
 use ff::{Field, PrimeField, PrimeFieldRepr};
 
 use crate::constants;
