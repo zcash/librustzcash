@@ -13,8 +13,8 @@ byteorder = "1"
 directories = { version = "1", optional = true }
 ff = { path = "../ff" }
 pairing = { path = "../pairing" }
-zcash_primitives = { path = "../zcash_primitives" }
 rand_core = "0.5"
+zcash_primitives = { path = "../zcash_primitives" }
 
 [dev-dependencies]
 rand_xorshift = "0.2"
