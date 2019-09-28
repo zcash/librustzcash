@@ -202,12 +202,12 @@ impl<Node: Hashable> CommitmentTree<Node> {
 /// ```
 /// extern crate ff;
 /// extern crate pairing;
-/// extern crate rand_os;
+/// extern crate rand_core;
 /// extern crate zcash_primitives;
 ///
 /// use ff::{Field, PrimeField};
 /// use pairing::bls12_381::Fr;
-/// use rand_os::OsRng;
+/// use rand_core::OsRng;
 /// use zcash_primitives::{
 ///     merkle_tree::{CommitmentTree, IncrementalWitness},
 ///     sapling::Node,

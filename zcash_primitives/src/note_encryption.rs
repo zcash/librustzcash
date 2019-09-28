@@ -214,12 +214,12 @@ fn prf_ock(
 /// ```
 /// extern crate ff;
 /// extern crate pairing;
-/// extern crate rand_os;
+/// extern crate rand_core;
 /// extern crate zcash_primitives;
 ///
 /// use ff::Field;
 /// use pairing::bls12_381::Bls12;
-/// use rand_os::OsRng;
+/// use rand_core::OsRng;
 /// use zcash_primitives::{
 ///     jubjub::fs::Fs,
 ///     keys::OutgoingViewingKey,
@@ -556,8 +556,8 @@ mod tests {
     use crypto_api_chachapoly::ChachaPolyIetf;
     use ff::{Field, PrimeField, PrimeFieldRepr};
     use pairing::bls12_381::{Bls12, Fr, FrRepr};
+    use rand_core::OsRng;
     use rand_core::{CryptoRng, RngCore};
-    use rand_os::OsRng;
     use std::str::FromStr;
 
     use super::{
