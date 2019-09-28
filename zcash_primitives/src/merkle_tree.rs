@@ -213,7 +213,8 @@ impl<Node: Hashable> CommitmentTree<Node> {
 ///     sapling::Node,
 /// };
 ///
-/// let mut rng = OsRng::new().unwrap();
+/// let mut rng = OsRng;
+///
 /// let mut tree = CommitmentTree::<Node>::new();
 ///
 /// tree.append(Node::new(Fr::random(&mut rng).into_repr()));
