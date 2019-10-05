@@ -24,6 +24,6 @@ libc = "0.2"
 pairing = { path = "../pairing" }
 lazy_static = "1"
 byteorder = "1"
-rand_core = "0.5"
+rand_core = "0.5.1"
 zcash_primitives = { path = "../zcash_primitives" }
 zcash_proofs = { path = "../zcash_proofs" }

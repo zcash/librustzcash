@@ -20,7 +20,7 @@ lazy_static = "1"
 log = "0.4"
 pairing = { path = "../pairing" }
 rand = "0.7"
-rand_core = "0.5"
+rand_core = "0.5.1"
 sha2 = "0.8"
 
 [dev-dependencies]
