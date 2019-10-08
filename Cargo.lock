@@ -368,7 +368,7 @@ dependencies = [
  "libc 0.2.62 (registry+https://github.com/rust-lang/crates.io-index)",
  "pairing 0.15.0",
  "rand_core 0.5.1 (registry+https://github.com/rust-lang/crates.io-index)",
- "zcash_primitives 0.0.0",
+ "zcash_primitives 0.1.0",
  "zcash_proofs 0.0.0",
 ]
 
@@ -609,12 +609,12 @@ dependencies = [
  "pairing 0.15.0",
  "rand_core 0.5.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "rand_xorshift 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "zcash_primitives 0.0.0",
+ "zcash_primitives 0.1.0",
 ]
 
 [[package]]
 name = "zcash_primitives"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "aes 0.3.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "blake2b_simd 0.5.8 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -646,7 +646,7 @@ dependencies = [
  "pairing 0.15.0",
  "rand_core 0.5.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "rand_xorshift 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "zcash_primitives 0.0.0",
+ "zcash_primitives 0.1.0",
 ]
 
 [metadata]
