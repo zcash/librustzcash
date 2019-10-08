@@ -1,6 +1,6 @@
 [package]
 name = "group"
-version = "0.1.0"
+version = "0.2.0"
 authors = [
     "Sean Bowe <ewillbefull@gmail.com>",
     "Jack Grigg <jack@z.cash>",
@@ -15,6 +15,9 @@ repository = "https://github.com/ebfull/group"
 edition = "2018"
 
 [dependencies]
-ff = { path = "../ff" }
+ff = { version = "0.5.0", path = "../ff" }
 rand = "0.7"
 rand_xorshift = "0.2"
+
+[badges]
+maintenance = { status = "actively-developed" }

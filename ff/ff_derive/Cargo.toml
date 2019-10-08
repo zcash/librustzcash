@@ -1,6 +1,6 @@
 [package]
 name = "ff_derive"
-version = "0.3.0"
+version = "0.4.0"
 authors = ["Sean Bowe <ewillbefull@gmail.com>"]
 description = "Procedural macro library used to build custom prime field implementations"
 documentation = "https://docs.rs/ff/"
@@ -19,3 +19,6 @@ num-integer = "0.1"
 proc-macro2 = "1"
 quote = "1"
 syn = "1"
+
+[badges]
+maintenance = { status = "passively-maintained" }
