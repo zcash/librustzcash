@@ -603,7 +603,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 
 [[package]]
 name = "zcash_client_backend"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "bech32 0.7.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "pairing 0.15.0",
