@@ -685,6 +685,190 @@ fn test_input_circuit_with_bls12_381() {
 }
 
 #[test]
+fn test_input_circuit_with_bls12_381_external_test_vectors() {
+    use bellman::gadgets::test::*;
+    use ff::{BitIterator, Field};
+    use pairing::bls12_381::*;
+    use rand_core::{RngCore, SeedableRng};
+    use rand_xorshift::XorShiftRng;
+    use zcash_primitives::{
+        jubjub::{edwards, fs, JubjubBls12},
+        pedersen_hash,
+        primitives::{Diversifier, Note, ProofGenerationKey},
+    };
+
+    let params = &JubjubBls12::new();
+    let rng = &mut XorShiftRng::from_seed([
+        0x59, 0x62, 0xbe, 0x3d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06, 0xbc,
+        0xe5,
+    ]);
+
+    let tree_depth = 32;
+
+    let expected_cm_xs = vec![
+        "43821661663052659750276289184181083197337192946256245809816728673021647664276",
+        "7220807656052227578299730541645543434083158611414003423211850718229633594616",
+        "13239753550660714843257636471668037031928211668773449453628093339627668081697",
+        "10900524635678389360790699587556574797582192824300145558807405770494079767974",
+        "1411013767457690636461779630023011774660680126764323588543800715293173598850",
+        "32334206652383066267661379202183359608706535021387905923603014648832344657662",
+        "20206750741605167608500278423400565295188703622528437817438897624149653579380",
+        "46716485782200334735478719487356079850582051575003452698983255860512578229998",
+        "31221372899739042781372142393132358519434268512685538373976981051223051220367",
+        "18269767207277008186871145355531741929166733260352590789136389380124992250945",
+    ];
+
+    let expected_cm_ys = vec![
+        "27630722367128086497290371604583225252915685718989450292520883698391703910",
+        "23310648738313092772044712773481584369462075017189681529702825235349449805260",
+        "25709635353183537915646348052945798827495141780341329896098121888376871589480",
+        "10516315852014492141081718791576479298042117442649432716255936672048164184691",
+        "23970713991179488695004801139667700217127937225554773561645815034212389459772",
+        "3256052161046564597126736968199320852691566092694819239485673781545479548450",
+        "18887250722195819674378865377623103071236046274361890247643850134985809137409",
+        "36501156873031641173054592888886902104303750771545647842488588827138867116570",
+        "21927526310070011864833939629345235038589128172309792087590183778192091594775",
+        "32959334601512756708397683646222389414681003290313255304927423560477040775488",
+    ];
+
+    for i in 0..10 {
+        let value_commitment = ValueCommitment {
+            value: i,
+            randomness: fs::Fs::from_str(&(1000 * (i + 1)).to_string()).unwrap(),
+        };
+
+        let nsk = fs::Fs::random(rng);
+        let ak = edwards::Point::rand(rng, params).mul_by_cofactor(params);
+
+        let proof_generation_key = ProofGenerationKey {
+            ak: ak.clone(),
+            nsk: nsk.clone(),
+        };
+
+        let viewing_key = proof_generation_key.to_viewing_key(params);
+
+        let payment_address;
+
+        loop {
+            let diversifier = {
+                let mut d = [0; 11];
+                rng.fill_bytes(&mut d);
+                Diversifier(d)
+            };
+
+            if let Some(p) = viewing_key.to_payment_address(diversifier, params) {
+                payment_address = p;
+                break;
+            }
+        }
+
+        let g_d = payment_address.diversifier().g_d(params).unwrap();
+        let commitment_randomness = fs::Fs::random(rng);
+        let auth_path = vec![Some((Fr::random(rng), rng.next_u32() % 2 != 0)); tree_depth];
+        let ar = fs::Fs::random(rng);
+
+        {
+            let rk = viewing_key.rk(ar, params).to_xy();
+            let expected_value_cm = value_commitment.cm(params).to_xy();
+            assert_eq!(
+                expected_value_cm.0,
+                Fr::from_str(&expected_cm_xs[i as usize]).unwrap()
+            );
+            assert_eq!(
+                expected_value_cm.1,
+                Fr::from_str(&expected_cm_ys[i as usize]).unwrap()
+            );
+            let note = Note {
+                value: value_commitment.value,
+                g_d: g_d.clone(),
+                pk_d: payment_address.pk_d().clone(),
+                r: commitment_randomness.clone(),
+            };
+
+            let mut position = 0u64;
+            let cm: Fr = note.cm(params);
+            let mut cur = cm.clone();
+
+            for (i, val) in auth_path.clone().into_iter().enumerate() {
+                let (uncle, b) = val.unwrap();
+
+                let mut lhs = cur;
+                let mut rhs = uncle;
+
+                if b {
+                    ::std::mem::swap(&mut lhs, &mut rhs);
+                }
+
+                let mut lhs: Vec<bool> = BitIterator::new(lhs.into_repr()).collect();
+                let mut rhs: Vec<bool> = BitIterator::new(rhs.into_repr()).collect();
+
+                lhs.reverse();
+                rhs.reverse();
+
+                cur = pedersen_hash::pedersen_hash::<Bls12, _>(
+                    pedersen_hash::Personalization::MerkleTree(i),
+                    lhs.into_iter()
+                        .take(Fr::NUM_BITS as usize)
+                        .chain(rhs.into_iter().take(Fr::NUM_BITS as usize)),
+                    params,
+                )
+                .to_xy()
+                .0;
+
+                if b {
+                    position |= 1 << i;
+                }
+            }
+
+            let expected_nf = note.nf(&viewing_key, position, params);
+            let expected_nf = multipack::bytes_to_bits_le(&expected_nf);
+            let expected_nf = multipack::compute_multipacking::<Bls12>(&expected_nf);
+            assert_eq!(expected_nf.len(), 2);
+
+            let mut cs = TestConstraintSystem::<Bls12>::new();
+
+            let instance = Spend {
+                params: params,
+                value_commitment: Some(value_commitment.clone()),
+                proof_generation_key: Some(proof_generation_key.clone()),
+                payment_address: Some(payment_address.clone()),
+                commitment_randomness: Some(commitment_randomness),
+                ar: Some(ar),
+                auth_path: auth_path.clone(),
+                anchor: Some(cur),
+            };
+
+            instance.synthesize(&mut cs).unwrap();
+
+            assert!(cs.is_satisfied());
+            assert_eq!(cs.num_constraints(), 98777);
+            assert_eq!(
+                cs.hash(),
+                "d37c738e83df5d9b0bb6495ac96abf21bcb2697477e2c15c2c7916ff7a3b6a89"
+            );
+
+            assert_eq!(cs.get("randomization of note commitment/x3/num"), cm);
+
+            assert_eq!(cs.num_inputs(), 8);
+            assert_eq!(cs.get_input(0, "ONE"), Fr::one());
+            assert_eq!(cs.get_input(1, "rk/x/input variable"), rk.0);
+            assert_eq!(cs.get_input(2, "rk/y/input variable"), rk.1);
+            assert_eq!(
+                cs.get_input(3, "value commitment/commitment point/x/input variable"),
+                expected_value_cm.0
+            );
+            assert_eq!(
+                cs.get_input(4, "value commitment/commitment point/y/input variable"),
+                expected_value_cm.1
+            );
+            assert_eq!(cs.get_input(5, "anchor/input variable"), cur);
+            assert_eq!(cs.get_input(6, "pack nullifier/input 0"), expected_nf[0]);
+            assert_eq!(cs.get_input(7, "pack nullifier/input 1"), expected_nf[1]);
+        }
+    }
+}
+
+#[test]
 fn test_output_circuit_with_bls12_381() {
     use bellman::gadgets::test::*;
     use ff::Field;

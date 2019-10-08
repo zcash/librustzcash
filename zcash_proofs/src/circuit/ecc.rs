@@ -1098,4 +1098,87 @@ mod test {
             assert_eq!(cs.which_is_unsatisfied(), Some("addition/evaluate lambda"));
         }
     }
+
+    #[test]
+    fn test_assert_not_small_order() {
+        let params = &JubjubBls12::new();
+
+        let check_small_order_from_p = |p: edwards::Point<Bls12, _>, is_small_order| {
+            let mut cs = TestConstraintSystem::<Bls12>::new();
+
+            let p = EdwardsPoint::witness(&mut cs, Some(p), params).unwrap();
+            assert!(cs.is_satisfied());
+            assert!(p.assert_not_small_order(&mut cs, params).is_err() == is_small_order);
+        };
+
+        let check_small_order_from_strs = |x, y| {
+            //let (x,y) = (Fr::from_str("14080418777298869350588389379361252092475090129841789940098060767181937064268").unwrap(), Fr::from_str("4408371274642418797323679050836535851651768103477128764103246588657558662748").unwrap());
+            let (x, y) = (Fr::from_str(x).unwrap(), Fr::from_str(y).unwrap());
+            let p = edwards::Point::<Bls12, _>::get_for_y(y, false, params).unwrap();
+            assert_eq!(x, p.to_xy().0);
+
+            check_small_order_from_p(p, true);
+        };
+
+        // zero has low order
+        check_small_order_from_strs("0", "1");
+
+        // prime subgroup order
+        let prime_subgroup_order = Fs::from_str(
+            "6554484396890773809930967563523245729705921265872317281365359162392183254199",
+        )
+        .unwrap();
+        let largest_small_subgroup_order = Fs::from_str("8").unwrap();
+
+        let (zero_x, zero_y) = (Fr::from_str("0").unwrap(), Fr::from_str("1").unwrap());
+
+        // generator for jubjub
+        let (x, y) = (
+            Fr::from_str(
+                "11076627216317271660298050606127911965867021807910416450833192264015104452986",
+            )
+            .unwrap(),
+            Fr::from_str(
+                "44412834903739585386157632289020980010620626017712148233229312325549216099227",
+            )
+            .unwrap(),
+        );
+        let g = edwards::Point::<Bls12, _>::get_for_y(y, false, params).unwrap();
+        assert_eq!(x, g.to_xy().0);
+        check_small_order_from_p(g.clone(), false);
+
+        // generator for the prime subgroup
+        let g_prime = g.mul(largest_small_subgroup_order, params);
+        check_small_order_from_p(g_prime.clone(), false);
+        let mut prime_subgroup_order_minus_1 = prime_subgroup_order.clone();
+        prime_subgroup_order_minus_1.sub_assign(&Fs::from_str("1").unwrap());
+
+        let should_not_be_zero = g_prime.mul(prime_subgroup_order_minus_1, params);
+        assert_ne!(zero_x, should_not_be_zero.to_xy().0);
+        assert_ne!(zero_y, should_not_be_zero.to_xy().1);
+        let should_be_zero = should_not_be_zero.add(&g_prime, params);
+        assert_eq!(zero_x, should_be_zero.to_xy().0);
+        assert_eq!(zero_y, should_be_zero.to_xy().1);
+
+        // generator for the small order subgroup
+        let g_small = g.mul(prime_subgroup_order_minus_1, params);
+        let g_small = g_small.add(&g, params);
+        check_small_order_from_p(g_small.clone(), true);
+
+        // g_small does have order 8
+        let mut largest_small_subgroup_order_minus_1 = largest_small_subgroup_order.clone();
+        largest_small_subgroup_order_minus_1.sub_assign(&Fs::from_str("1").unwrap());
+
+        let should_not_be_zero = g_small.mul(largest_small_subgroup_order_minus_1, params);
+        assert_ne!(zero_x, should_not_be_zero.to_xy().0);
+        assert_ne!(zero_y, should_not_be_zero.to_xy().1);
+
+        let should_be_zero = should_not_be_zero.add(&g_small, params);
+        assert_eq!(zero_x, should_be_zero.to_xy().0);
+        assert_eq!(zero_y, should_be_zero.to_xy().1);
+
+        // take all the points from the script
+        // assert should be different than multiplying by cofactor, which is the solution
+        // is user input verified? https://github.com/zcash/librustzcash/blob/f5d2afb4eabac29b1b1cc860d66e45a5b48b4f88/src/rustzcash.rs#L299
+    }
 }

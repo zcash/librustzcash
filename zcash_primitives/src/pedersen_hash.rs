@@ -107,3 +107,44 @@ where
 
     result
 }
+
+#[cfg(test)]
+pub mod test {
+
+    use super::*;
+    use crate::test_vectors::pedersen_hash_vectors;
+    use pairing::bls12_381::Bls12;
+
+    pub struct TestVector<'a> {
+        pub personalization: Personalization,
+        pub input_bits: Vec<u8>,
+        pub hash_x: &'a str,
+        pub hash_y: &'a str,
+    }
+
+    #[test]
+    fn test_pedersen_hash_points() {
+        let test_vectors = pedersen_hash_vectors::get_vectors();
+
+        assert!(test_vectors.len() > 0);
+
+        for v in test_vectors.iter() {
+            let params = &JubjubBls12::new();
+
+            let input_bools: Vec<bool> = v.input_bits.iter().map(|&i| i == 1).collect();
+
+            // The 6 bits prefix is handled separately
+            assert_eq!(v.personalization.get_bits(), &input_bools[..6]);
+
+            let (x, y) = pedersen_hash::<Bls12, _>(
+                v.personalization,
+                input_bools.into_iter().skip(6),
+                params,
+            )
+            .to_xy();
+
+            assert_eq!(x.to_string(), v.hash_x);
+            assert_eq!(y.to_string(), v.hash_y);
+        }
+    }
+}
