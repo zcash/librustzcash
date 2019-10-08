@@ -357,7 +357,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 
 [[package]]
 name = "librustzcash"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "bellman 0.2.0",
  "blake2b_simd 0.5.8 (registry+https://github.com/rust-lang/crates.io-index)",
