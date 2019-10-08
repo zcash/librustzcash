@@ -1,3 +1,5 @@
+//! Structs and methods for handling Zcash block headers.
+
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use hex;
 use std::fmt;

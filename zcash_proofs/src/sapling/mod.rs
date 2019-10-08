@@ -1,3 +1,5 @@
+//! Helpers for creating Sapling proofs.
+
 use pairing::bls12_381::Bls12;
 use zcash_primitives::jubjub::{
     edwards, fs::FsRepr, FixedGenerators, JubjubBls12, JubjubParams, Unknown,

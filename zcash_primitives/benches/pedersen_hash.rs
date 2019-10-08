@@ -2,13 +2,11 @@
 
 extern crate pairing;
 extern crate rand_core;
-extern crate rand_os;
 extern crate test;
 extern crate zcash_primitives;
 
 use pairing::bls12_381::Bls12;
-use rand_core::RngCore;
-use rand_os::OsRng;
+use rand_core::{OsRng, RngCore};
 use zcash_primitives::jubjub::JubjubBls12;
 use zcash_primitives::pedersen_hash::{pedersen_hash, Personalization};
 

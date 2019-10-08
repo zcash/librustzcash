@@ -1,3 +1,6 @@
+//! An implementation of the BLS12-381 pairing-friendly elliptic curve
+//! construction.
+
 mod ec;
 mod fq;
 mod fq12;

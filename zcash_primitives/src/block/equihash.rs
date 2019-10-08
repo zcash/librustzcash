@@ -1,3 +1,7 @@
+//! Verification functions for the [Equihash] proof-of-work algorithm.
+//!
+//! [Equihash]: https://zips.z.cash/protocol/protocol.pdf#equihash
+
 use blake2b_simd::{Hash as Blake2bHash, Params as Blake2bParams, State as Blake2bState};
 use byteorder::{BigEndian, LittleEndian, ReadBytesExt, WriteBytesExt};
 use log::error;

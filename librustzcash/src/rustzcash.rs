@@ -1,3 +1,6 @@
+// Catch documentation errors caused by code changes.
+#![deny(intra_doc_link_resolution_failure)]
+
 use lazy_static;
 
 use ff::{PrimeField, PrimeFieldRepr};
@@ -24,8 +27,7 @@ use blake2s_simd::Params as Blake2sParams;
 
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 
-use rand_core::RngCore;
-use rand_os::OsRng;
+use rand_core::{OsRng, RngCore};
 use std::io::BufReader;
 
 use libc::{c_char, c_uchar, size_t};

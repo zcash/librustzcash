@@ -534,7 +534,7 @@ impl<R: RngCore + CryptoRng> Builder<R> {
 #[cfg(test)]
 mod tests {
     use ff::{Field, PrimeField};
-    use rand::rngs::OsRng;
+    use rand_core::OsRng;
 
     use crate::jubjub::fs::Fs;
 
