@@ -369,7 +369,7 @@ dependencies = [
  "pairing 0.15.0",
  "rand_core 0.5.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "zcash_primitives 0.1.0",
- "zcash_proofs 0.0.0",
+ "zcash_proofs 0.1.0",
 ]
 
 [[package]]
@@ -636,7 +636,7 @@ dependencies = [
 
 [[package]]
 name = "zcash_proofs"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "bellman 0.2.0",
  "blake2b_simd 0.5.8 (registry+https://github.com/rust-lang/crates.io-index)",
