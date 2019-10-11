@@ -289,6 +289,10 @@ impl Tree {
     pub fn root_node(&self) -> Result<IndexedNode, Error> {
         self.resolve_link(self.root)
     }
+
+    pub fn is_empty(&self) -> bool {
+        self.stored_count == 0
+    }
 }
 
 /// Reference to the node with link attached.
