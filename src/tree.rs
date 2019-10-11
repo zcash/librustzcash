@@ -285,11 +285,12 @@ impl Tree {
     /// Link to the root node
     pub fn root(&self) -> EntryLink { self.root }
 
-    /// Reference to the root ndoe
+    /// Reference to the root node.
     pub fn root_node(&self) -> Result<IndexedNode, Error> {
         self.resolve_link(self.root)
     }
 
+    /// If this tree is empty.
     pub fn is_empty(&self) -> bool {
         self.stored_count == 0
     }
@@ -359,29 +360,12 @@ mod tests {
         }
     }
 
-    fn node(start_height: u64, end_height: u64) -> NodeData {
-        NodeData {
-            consensus_branch_id: 1,
-            subtree_commitment: [0u8; 32],
-            start_time: 0,
-            end_time: 0,
-            start_target: 0,
-            end_target: 0,
-            start_sapling_root: [0u8; 32],
-            end_sapling_root: [0u8; 32],
-            subtree_total_work: 0.into(),
-            start_height: start_height,
-            end_height: end_height,
-            shielded_tx: 7,
-        }
-    }
-
     fn initial() -> Tree {
         let node1: Entry = leaf(1).into();
         let node2: Entry = leaf(2).into();
 
         let node3 = Entry {
-            data: node(1, 2),
+            data: NodeData::combine(&node1.data, &node2.data),
             kind: EntryKind::Leaf,
         };
 
