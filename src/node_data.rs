@@ -3,7 +3,19 @@ use bigint::U256;
 use blake2::Params as Blake2Params;
 
 /// Maximum serialized size of the node metadata.
-pub const MAX_NODE_DATA_SIZE: usize = 32 + 4 + 4 + 4 + 4 + 32 + 32 + 32 + 9 + 9 + 9; // 171
+pub const MAX_NODE_DATA_SIZE: usize =
+    32 + // subtree commitment
+    4 +  // start time
+    4 +  // end time
+    4 +  // start target
+    4 +  // end target
+    32 + // start sapling tree root
+    32 + // end sapling tree root
+    32 + // subtree total work
+    9 +  // start height (compact uint)
+    9 +  // end height (compact uint)
+    9;   // shielded tx count (compact uint)
+    // = total of 171
 
 /// Node metadata.
 #[repr(C)]
