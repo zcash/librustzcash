@@ -1,10 +1,10 @@
 # zcash_mmr
 
-Special implementation of merkle mountain ranges (MMR) for ZCash!
+Special implementation of Merkle mountain ranges (MMR) for Zcash!
 
 [![Build Status](https://travis-ci.org/NikVolf/zcash-mmr.svg?branch=master)](https://travis-ci.org/NikVolf/zcash-mmr)
 
-The main design goals of this mmr implementation are
+The main design goals of this MMR implementation are
 
 - Allow zero-cache and avoid db callbacks. As it is implemented, calling side must just smartly pre-load MMR nodes from the database (about log2(tree length) for append, twice as much for deletion).
 

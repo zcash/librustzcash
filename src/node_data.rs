@@ -127,7 +127,7 @@ impl NodeData {
             i @ 0..=0xfc => i.into(),
             0xfd => reader.read_u16::<LittleEndian>()?.into(),
             0xfe => reader.read_u32::<LittleEndian>()?.into(),
-            _ => reader.read_u64::<LittleEndian>()?.into(),
+            _ => reader.read_u64::<LittleEndian>()?,
         };
 
         Ok(result)
