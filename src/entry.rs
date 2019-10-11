@@ -29,7 +29,7 @@ impl Entry {
 
     /// Number of leaves under this node.
     pub fn leaf_count(&self) -> u64 {
-        self.data.end_height - self.data.start_height + 1
+        self.data.end_height - (self.data.start_height - 1)
     }
 
     /// Is this node a leaf.
