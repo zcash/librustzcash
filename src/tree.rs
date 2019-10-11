@@ -48,7 +48,7 @@ impl Tree {
 
     fn push(&mut self, data: Entry) -> EntryLink {
         let idx = self.stored_count;
-        self.stored_count = self.stored_count + 1;
+        self.stored_count += 1;
         self.stored.insert(idx, data);
         EntryLink::Stored(idx)
     }
@@ -84,15 +84,22 @@ impl Tree {
 
     /// New view into the the tree array representation
     ///
-    /// `length` is total length of the array representation
+    /// `length` is total length of the array representation (is generally not a sum of
+    ///     peaks.len + extra.len)
     /// `peaks` is peaks of the mmr tree
     /// `extra` is some extra nodes that calculated to be required during next one or more
     /// operations on the tree.
+    ///
+    /// # Panics
+    ///
+    /// Will panic if `peaks` is empty.
     pub fn new(
         length: u32,
         peaks: Vec<(u32, Entry)>,
         extra: Vec<(u32, Entry)>,
     ) -> Self {
+        assert!(peaks.len() > 0);
+
         let mut result = Tree::invalid();
 
         result.stored_count = length;
@@ -157,6 +164,9 @@ impl Tree {
         let mut merge_stack = Vec::new();
         merge_stack.push(new_leaf_link);
 
+        // Scan the peaks right-to-left, merging together equal-sized adjacent
+        // complete subtrees. After this, merge_stack only contains peaks of
+        // unequal-sized subtrees.
         while let Some(next_peak) = peaks.pop() {
             let next_merge = merge_stack.pop().expect("there should be at least one, initial or re-pushed");
 
@@ -171,12 +181,15 @@ impl Tree {
                 merge_stack.push(link);
                 appended.push(link);
                 continue;
+            } else {
+                merge_stack.push(next_merge);
+                merge_stack.push(next_peak);
             }
-            merge_stack.push(next_merge);
-            merge_stack.push(next_peak);
         }
 
         let mut new_root = merge_stack.pop().expect("Loop above cannot reduce the merge_stack");
+        // Scan the peaks left-to-right, producing new generated nodes that
+        // connect the subtrees
         while let Some(next_child) = merge_stack.pop() {
             new_root = self.push_generated(
                 combine_nodes(
@@ -210,7 +223,8 @@ impl Tree {
 
     /// Truncate one leaf from the end of the tree.
     ///
-    /// Returns actual number of nodes that has to be removed from the array representation.
+    /// Returns actual number of nodes that should be removed by the caller
+    /// from the end of the array representation.
     pub fn truncate_leaf(&mut self) -> Result<u32, Error> {
         let root = {
             let (leaves, root_left_child) = {
@@ -245,7 +259,7 @@ impl Tree {
             }
         }
 
-        let mut new_root = *peaks.iter().nth(0).expect("At lest 2 elements in peaks");
+        let mut new_root = *peaks.get(0).expect("At lest 1 elements in peaks");
 
         for next_peak in peaks.into_iter().skip(1) {
             new_root = self.push_generated(
