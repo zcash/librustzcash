@@ -14,7 +14,7 @@ The main design goals of this mmr implementation are
 
 # License
 
-`zcash_mmr` is primarily distributed under the terms of both the MIT
+`zcash_mmr` is distributed under the terms of both the MIT
 license and the Apache License (Version 2.0), at your choice.
 
 See LICENSE-APACHE, and LICENSE-MIT for details.
