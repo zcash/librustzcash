@@ -12,13 +12,10 @@ use crate::{Entry, EntryLink, NodeData, Error, EntryKind};
 pub struct Tree {
     stored: HashMap<u32, Entry>,
 
-    generated: HashMap<u32, Entry>,
+    generated: Vec<Entry>,
 
     // number of persistent(!) tree entries
     stored_count: u32,
-
-    // number of virtual nodes generated
-    generated_count: u32,
 
     root: EntryLink,
 }
@@ -28,7 +25,7 @@ impl Tree {
     pub fn resolve_link(&self, link: EntryLink) -> Result<IndexedNode, Error> {
         match link {
             EntryLink::Generated(index) => {
-                let node = self.generated.get(&index).ok_or(Error::ExpectedInMemory(link))?;
+                let node = self.generated.get(index as usize).ok_or(Error::ExpectedInMemory(link))?;
                 Ok(IndexedNode {
                     node,
                     link,
@@ -52,14 +49,13 @@ impl Tree {
     }
 
     fn push_generated(&mut self, data: Entry) -> EntryLink {
-        let idx = self.generated_count;
-        self.generated_count = self.generated_count + 1;
-        self.generated.insert(idx, data);
-        EntryLink::Generated(idx)
+        self.generated.push(data);
+        EntryLink::Generated(self.generated.len() as u32 - 1)
     }
 
-    /// Populate tree with plain list of the leaves/nodes. Mostly for tests,
-    /// since this `Tree` structure is for partially loaded tree.
+    /// Populate tree with plain list of the leaves/nodes. For now, only for tests,
+    /// since this `Tree` structure is for partially loaded tree (but it might change)
+    #[cfg(test)]
     pub fn populate(loaded: Vec<Entry>, root: EntryLink) -> Self {
         let mut result = Tree::invalid();
         result.stored_count = loaded.len() as u32;
@@ -71,12 +67,12 @@ impl Tree {
         result
     }
 
+    // Empty tree with invalid root
     fn invalid() -> Self {
         Tree {
             root: EntryLink::Generated(0),
             generated: Default::default(),
             stored: Default::default(),
-            generated_count: 0,
             stored_count: 0,
         }
     }
