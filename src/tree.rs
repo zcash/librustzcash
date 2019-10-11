@@ -8,10 +8,15 @@ use crate::{Entry, EntryLink, NodeData, Error, EntryKind};
 /// With only some of the leaves/nodes pre-loaded / pre-generated.
 /// Exact amount of the loaded data can be calculated by the constructing party,
 /// depending on the length of the tree and maximum amount of operations that are going
-/// to happen after construction.
+/// to happen after construction. `Tree` should not be used as self-contained data structure,
+/// since it's internal state can grow indefinitely after serial operations.
+/// Intended use of this `Tree` is to instantiate it based on partially loaded data (see example
+/// how to pick right nodes from the array representation of MMR Tree), perform several operations
+/// (append-s/delete-s) and then drop it.
 pub struct Tree {
     stored: HashMap<u32, Entry>,
 
+    // This can grow indefinitely if `Tree` is misused as a self-contained data structure
     generated: Vec<Entry>,
 
     // number of persistent(!) tree entries
