@@ -205,7 +205,7 @@ impl Tree {
     }
 
     #[cfg(test)]
-    fn for_children<F: FnMut(EntryLink, EntryLink)>(&mut self, node: EntryLink, mut f: F) {
+    fn for_children<F: Fn(EntryLink, EntryLink)>(&self, node: EntryLink, f: F) {
         let (left, right) = {
             let link = self.resolve_link(node).expect("Failed to resolve link in test");
             (
@@ -485,7 +485,7 @@ mod tests {
         //           (0)  (1) (3)   (4)  (7)
         //
         // new tree:
-        //                     (---8g---)
+        //                     (---10g--)
         //                    /          \
         //                 ( 6 )          \
         //                /     \          \
@@ -494,7 +494,7 @@ mod tests {
         //           (0)  (1) (3)   (4)  (7)  (8)
         //
         // so (7) is added as real leaf
-        // and new root, (8g) is generated one
+        // and new root, (10g) is generated one
         assert_eq!(new_root.data.end_height, 6);
         assert_eq!(appended.len(), 2);
         assert_matches!(tree.root(), EntryLink::Generated(_));
@@ -533,13 +533,16 @@ mod tests {
         //             /  \     /   \     /   \     \
         //           (0)  (1) (3)   (4) (7)   (8)  (10)
         //
-        // so (7) is added as real leaf
-        // and new root, (8g) is generated one
+        // so (10) is added as real leaf
+        // and new root, (12g) is generated one
         assert_eq!(new_root.data.end_height, 7);
         assert_eq!(appended.len(), 1);
         assert_matches!(tree.root(), EntryLink::Generated(_));
         tree.for_children(tree.root(), |l, r| {
             assert_matches!(l, EntryLink::Generated(_));
+            tree.for_children(l, |l, r|
+                assert_matches!((l, r), (EntryLink::Stored(6), EntryLink::Stored(9)))
+            );
             assert_matches!(r, EntryLink::Stored(10));
         });
     }
@@ -547,7 +550,7 @@ mod tests {
     #[test]
     fn truncate_simple() {
         let mut tree = generated(9);
-        tree.truncate_leaf().expect("Failed to truncate");
+        let total_truncated = tree.truncate_leaf().expect("Failed to truncate");
 
         // initial tree:
         //
@@ -574,6 +577,7 @@ mod tests {
         // and new root, (14) is a stored one now
 
         assert_matches!(tree.root(), EntryLink::Stored(14));
+        assert_eq!(total_truncated, 1);
         assert_eq!(tree.len(), 15);
     }
 
@@ -609,19 +613,11 @@ mod tests {
 
         assert_matches!(tree.root(), EntryLink::Generated(_));
 
-        // left is 14 and right is 15
-        let (left_root_child, right_root_child) = {
-            let root = tree.root_node().expect("Failed to resolve");
-
-            (
-                root.left().expect("Expected node"),
-                root.right().expect("Expected node"),
+        tree.for_children(tree.root(),|left, right|
+            assert_matches!(
+                (left, right),
+                (EntryLink::Stored(14), EntryLink::Stored(15))
             )
-        };
-
-        assert_matches!(
-            (left_root_child, right_root_child),
-            (EntryLink::Stored(14), EntryLink::Stored(15))
         );
 
         // two stored nodes should leave us (leaf 16 and no longer needed node 17)
@@ -706,7 +702,7 @@ mod tests {
                 }
 
                 TestResult::from_bool(
-                    if number & number - 1 == 0 {
+                    if number & (number - 1) == 0 {
                         if let EntryLink::Stored(_) = tree.root() { true }
                         else { false }
                     } else {
