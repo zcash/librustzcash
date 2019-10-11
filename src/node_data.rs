@@ -20,6 +20,7 @@ pub const MAX_NODE_DATA_SIZE: usize =
 /// Node metadata.
 #[repr(C)]
 #[derive(Debug, Clone, Default)]
+#[cfg_attr(test, derive(PartialEq))]
 pub struct NodeData {
     /// Consensus branch id, should be provided by deserializing node.
     pub consensus_branch_id: u32,
@@ -191,5 +192,41 @@ impl NodeData {
     pub fn from_bytes<T: AsRef<[u8]>>(consensus_branch_id: u32, buf: T) -> std::io::Result<Self> {
         let mut cursor = std::io::Cursor::new(buf);
         Self::read(consensus_branch_id, &mut cursor)
+    }
+}
+
+#[cfg(test)]
+impl quickcheck::Arbitrary for NodeData {
+    fn arbitrary<G: quickcheck::Gen>(gen: &mut G) -> Self {
+        let mut node_data = NodeData::default();
+        node_data.consensus_branch_id = 0;
+        gen.fill_bytes(&mut node_data.subtree_commitment[..]);
+        node_data.start_time = gen.next_u32();
+        node_data.end_time = gen.next_u32();
+        node_data.start_target = gen.next_u32();
+        node_data.end_target = gen.next_u32();
+        gen.fill_bytes(&mut node_data.start_sapling_root[..]);
+        gen.fill_bytes(&mut node_data.end_sapling_root[..]);
+        let mut number = [0u8; 32];
+        gen.fill_bytes(&mut number[..]);
+        node_data.subtree_total_work = U256::from_little_endian(&number[..]);
+        node_data.start_height = gen.next_u64();
+        node_data.end_height = gen.next_u64();
+        node_data.shielded_tx = gen.next_u64();
+
+        node_data
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::NodeData;
+    use quickcheck::{quickcheck, TestResult};
+
+
+    quickcheck! {
+        fn serialization_round_trip(node_data: NodeData) -> TestResult {
+            TestResult::from_bool(NodeData::from_bytes(0, &node_data.to_bytes()).unwrap() == node_data)
+        }
     }
 }
