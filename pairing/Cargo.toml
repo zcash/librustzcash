@@ -2,7 +2,7 @@
 name = "pairing"
 
 # Remember to change version string in README.md.
-version = "0.14.2"
+version = "0.15.0"
 authors = [
     "Sean Bowe <ewillbefull@gmail.com>",
     "Jack Grigg <jack@z.cash>",
@@ -18,8 +18,8 @@ edition ="2018"
 
 [dependencies]
 byteorder = "1"
-ff = { path = "../ff", features = ["derive"] }
-group = { path = "../group" }
+ff = { version = "0.5.0", path = "../ff", features = ["derive"] }
+group = { version = "0.2.0", path = "../group" }
 rand_core = "0.5"
 
 [dev-dependencies]
@@ -29,3 +29,6 @@ rand_xorshift = "0.2"
 unstable-features = ["expose-arith"]
 expose-arith = []
 default = []
+
+[badges]
+maintenance = { status = "actively-developed" }

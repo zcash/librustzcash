@@ -14,8 +14,8 @@ before_script:
   - rustup component add rustfmt
 
 script:
-  - cargo fmt --all -- --check
   - cargo build --verbose --release --all
+  - cargo fmt --all -- --check
   - cargo test --verbose --release --all
   - cargo test --verbose --release --all -- --ignored
 
