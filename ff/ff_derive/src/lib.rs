@@ -2,17 +2,11 @@
 
 extern crate proc_macro;
 extern crate proc_macro2;
-extern crate syn;
-#[macro_use]
-extern crate quote;
-
-extern crate num_bigint;
-extern crate num_integer;
-extern crate num_traits;
 
 use num_bigint::BigUint;
 use num_integer::Integer;
 use num_traits::{One, ToPrimitive, Zero};
+use quote::quote;
 use quote::TokenStreamExt;
 use std::str::FromStr;
 

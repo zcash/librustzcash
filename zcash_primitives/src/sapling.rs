@@ -6,6 +6,7 @@ use crate::{
     primitives::Note,
 };
 use ff::{BitIterator, PrimeField, PrimeFieldRepr};
+use lazy_static::lazy_static;
 use pairing::bls12_381::{Bls12, Fr, FrRepr};
 use rand_core::{CryptoRng, RngCore};
 use std::io::{self, Read, Write};
