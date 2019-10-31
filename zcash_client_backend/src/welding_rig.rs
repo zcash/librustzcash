@@ -186,8 +186,7 @@ pub fn scan_block(
 mod tests {
     use ff::{Field, PrimeField, PrimeFieldRepr};
     use pairing::bls12_381::{Bls12, Fr};
-    use rand_core::RngCore;
-    use rand_os::OsRng;
+    use rand_core::{OsRng, RngCore};
     use zcash_primitives::{
         jubjub::{fs::Fs, FixedGenerators, JubjubParams, ToUniform},
         merkle_tree::CommitmentTree,
