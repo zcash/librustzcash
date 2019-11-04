@@ -75,7 +75,7 @@ static mut SPROUT_GROTH16_PARAMS_PATH: Option<PathBuf> = None;
 /// Reads an FrRepr from a [u8] of length 32.
 /// This will panic (abort) if length provided is
 /// not correct.
-fn read_le(from: &[u8]) -> FrRepr {
+fn read_fr(from: &[u8]) -> FrRepr {
     assert_eq!(from.len(), 32);
 
     let mut f = FrRepr::default();
@@ -250,12 +250,12 @@ pub extern "C" fn librustzcash_merkle_hash(
     // Should be okay, because caller is responsible for ensuring
     // the pointer is a valid pointer to 32 bytes, and that is the
     // size of the representation
-    let a_repr = read_le(unsafe { &(&*a)[..] });
+    let a_repr = read_fr(unsafe { &(&*a)[..] });
 
     // Should be okay, because caller is responsible for ensuring
     // the pointer is a valid pointer to 32 bytes, and that is the
     // size of the representation
-    let b_repr = read_le(unsafe { &(&*b)[..] });
+    let b_repr = read_fr(unsafe { &(&*b)[..] });
 
     let tmp = merkle_hash(depth, &a_repr, &b_repr);
 
@@ -604,7 +604,7 @@ pub extern "C" fn librustzcash_sapling_check_spend(
 
     // Deserialize the anchor, which should be an element
     // of Fr.
-    let anchor = match Fr::from_repr(read_le(&(unsafe { &*anchor })[..])) {
+    let anchor = match Fr::from_repr(read_fr(&(unsafe { &*anchor })[..])) {
         Ok(a) => a,
         Err(_) => return false,
     };
@@ -656,7 +656,7 @@ pub extern "C" fn librustzcash_sapling_check_output(
 
     // Deserialize the commitment, which should be an element
     // of Fr.
-    let cm = match Fr::from_repr(read_le(&(unsafe { &*cm })[..])) {
+    let cm = match Fr::from_repr(read_fr(&(unsafe { &*cm })[..])) {
         Ok(a) => a,
         Err(_) => return false,
     };
@@ -1071,7 +1071,7 @@ pub extern "C" fn librustzcash_sapling_spend_proof(
     };
 
     // We need to compute the anchor of the Spend.
-    let anchor = match Fr::from_repr(read_le(unsafe { &(&*anchor)[..] })) {
+    let anchor = match Fr::from_repr(read_fr(unsafe { &(&*anchor)[..] })) {
         Ok(p) => p,
         Err(_) => return false,
     };
