@@ -72,35 +72,23 @@ static mut SAPLING_SPEND_PARAMS: Option<Parameters<Bls12>> = None;
 static mut SAPLING_OUTPUT_PARAMS: Option<Parameters<Bls12>> = None;
 static mut SPROUT_GROTH16_PARAMS_PATH: Option<PathBuf> = None;
 
-/// Reads an FrRepr from a [u8] of length 32.
-/// This will panic (abort) if length provided is
-/// not correct.
-fn read_fr(from: &[u8]) -> FrRepr {
-    assert_eq!(from.len(), 32);
-
+/// Reads an FrRepr from a [u8; 32].
+fn read_fr(from: &[u8; 32]) -> FrRepr {
     let mut f = FrRepr::default();
-    f.read_le(from).expect("length is 32 bytes");
-
+    f.read_le(&from[..]).expect("length is 32 bytes");
     f
 }
 
-/// Reads an FsRepr from [u8] of length 32
-/// This will panic (abort) if length provided is
-/// not correct
-fn read_fs(from: &[u8]) -> FsRepr {
-    assert_eq!(from.len(), 32);
-
+/// Reads an FsRepr from a [u8; 32].
+fn read_fs(from: &[u8; 32]) -> FsRepr {
     let mut f = <<Bls12 as JubjubEngine>::Fs as PrimeField>::Repr::default();
-    f.read_le(from).expect("length is 32 bytes");
-
+    f.read_le(&from[..]).expect("length is 32 bytes");
     f
 }
 
-/// Reads an FsRepr from [u8] of length 32
+/// Reads an FsRepr from a [u8; 32]
 /// and multiplies it by the given base.
-/// This will panic (abort) if length provided is
-/// not correct
-fn fixed_scalar_mult(from: &[u8], p_g: FixedGenerators) -> edwards::Point<Bls12, PrimeOrder> {
+fn fixed_scalar_mult(from: &[u8; 32], p_g: FixedGenerators) -> edwards::Point<Bls12, PrimeOrder> {
     let f = read_fs(from);
 
     JUBJUB.generator(p_g).mul(f, &JUBJUB)
@@ -250,12 +238,12 @@ pub extern "C" fn librustzcash_merkle_hash(
     // Should be okay, because caller is responsible for ensuring
     // the pointer is a valid pointer to 32 bytes, and that is the
     // size of the representation
-    let a_repr = read_fr(unsafe { &(&*a)[..] });
+    let a_repr = read_fr(unsafe { &*a });
 
     // Should be okay, because caller is responsible for ensuring
     // the pointer is a valid pointer to 32 bytes, and that is the
     // size of the representation
-    let b_repr = read_fr(unsafe { &(&*b)[..] });
+    let b_repr = read_fr(unsafe { &*b });
 
     let tmp = merkle_hash(depth, &a_repr, &b_repr);
 
@@ -410,7 +398,7 @@ fn priv_get_note(
     };
 
     // Deserialize randomness
-    let r = match Fs::from_repr(read_fs(&(unsafe { &*r })[..])) {
+    let r = match Fs::from_repr(read_fs(unsafe { &*r })) {
         Ok(r) => r,
         Err(_) => return Err(()),
     };
@@ -506,7 +494,7 @@ pub extern "C" fn librustzcash_sapling_ka_agree(
     };
 
     // Deserialize sk
-    let sk = match Fs::from_repr(read_fs(&(unsafe { &*sk })[..])) {
+    let sk = match Fs::from_repr(read_fs(unsafe { &*sk })) {
         Ok(p) => p,
         Err(_) => return false,
     };
@@ -536,7 +524,7 @@ pub extern "C" fn librustzcash_sapling_ka_derivepublic(
     };
 
     // Deserialize esk
-    let esk = match Fs::from_repr(read_fs(&(unsafe { &*esk })[..])) {
+    let esk = match Fs::from_repr(read_fs(unsafe { &*esk })) {
         Ok(p) => p,
         Err(_) => return false,
     };
@@ -604,7 +592,7 @@ pub extern "C" fn librustzcash_sapling_check_spend(
 
     // Deserialize the anchor, which should be an element
     // of Fr.
-    let anchor = match Fr::from_repr(read_fr(&(unsafe { &*anchor })[..])) {
+    let anchor = match Fr::from_repr(read_fr(unsafe { &*anchor })) {
         Ok(a) => a,
         Err(_) => return false,
     };
@@ -656,7 +644,7 @@ pub extern "C" fn librustzcash_sapling_check_output(
 
     // Deserialize the commitment, which should be an element
     // of Fr.
-    let cm = match Fr::from_repr(read_fr(&(unsafe { &*cm })[..])) {
+    let cm = match Fr::from_repr(read_fr(unsafe { &*cm })) {
         Ok(a) => a,
         Err(_) => return false,
     };
@@ -918,7 +906,7 @@ pub extern "C" fn librustzcash_sapling_output_proof(
     zkproof: *mut [c_uchar; GROTH_PROOF_SIZE],
 ) -> bool {
     // Grab `esk`, which the caller should have constructed for the DH key exchange.
-    let esk = match Fs::from_repr(read_fs(&(unsafe { &*esk })[..])) {
+    let esk = match Fs::from_repr(read_fs(unsafe { &*esk })) {
         Ok(p) => p,
         Err(_) => return false,
     };
@@ -931,7 +919,7 @@ pub extern "C" fn librustzcash_sapling_output_proof(
         };
 
     // The caller provides the commitment randomness for the output note
-    let rcm = match Fs::from_repr(read_fs(&(unsafe { &*rcm })[..])) {
+    let rcm = match Fs::from_repr(read_fs(unsafe { &*rcm })) {
         Ok(p) => p,
         Err(_) => return false,
     };
@@ -967,7 +955,7 @@ pub extern "C" fn librustzcash_sapling_spend_sig(
     result: *mut [c_uchar; 64],
 ) -> bool {
     // The caller provides the re-randomization of `ak`.
-    let ar = match Fs::from_repr(read_fs(&(unsafe { &*ar })[..])) {
+    let ar = match Fs::from_repr(read_fs(unsafe { &*ar })) {
         Ok(p) => p,
         Err(_) => return false,
     };
@@ -1044,7 +1032,7 @@ pub extern "C" fn librustzcash_sapling_spend_proof(
     };
 
     // Grab `nsk` from the caller
-    let nsk = match Fs::from_repr(read_fs(&(unsafe { &*nsk })[..])) {
+    let nsk = match Fs::from_repr(read_fs(unsafe { &*nsk })) {
         Ok(p) => p,
         Err(_) => return false,
     };
@@ -1059,19 +1047,19 @@ pub extern "C" fn librustzcash_sapling_spend_proof(
     let diversifier = Diversifier(unsafe { *diversifier });
 
     // The caller chooses the note randomness
-    let rcm = match Fs::from_repr(read_fs(&(unsafe { &*rcm })[..])) {
+    let rcm = match Fs::from_repr(read_fs(unsafe { &*rcm })) {
         Ok(p) => p,
         Err(_) => return false,
     };
 
     // The caller also chooses the re-randomization of ak
-    let ar = match Fs::from_repr(read_fs(&(unsafe { &*ar })[..])) {
+    let ar = match Fs::from_repr(read_fs(unsafe { &*ar })) {
         Ok(p) => p,
         Err(_) => return false,
     };
 
     // We need to compute the anchor of the Spend.
-    let anchor = match Fr::from_repr(read_fr(unsafe { &(&*anchor)[..] })) {
+    let anchor = match Fr::from_repr(read_fr(unsafe { &*anchor })) {
         Ok(p) => p,
         Err(_) => return false,
     };
