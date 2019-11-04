@@ -115,7 +115,7 @@ fn fixed_scalar_mult(from: &[u8], p_g: FixedGenerators) -> edwards::Point<Bls12,
 
 #[cfg(not(target_os = "windows"))]
 #[no_mangle]
-pub extern "system" fn librustzcash_init_zksnark_params(
+pub extern "C" fn librustzcash_init_zksnark_params(
     spend_path: *const u8,
     spend_path_len: usize,
     spend_hash: *const c_char,
@@ -152,7 +152,7 @@ pub extern "system" fn librustzcash_init_zksnark_params(
 
 #[cfg(target_os = "windows")]
 #[no_mangle]
-pub extern "system" fn librustzcash_init_zksnark_params(
+pub extern "C" fn librustzcash_init_zksnark_params(
     spend_path: *const u16,
     spend_path_len: usize,
     spend_hash: *const c_char,
@@ -238,7 +238,7 @@ fn init_zksnark_params(
 }
 
 #[no_mangle]
-pub extern "system" fn librustzcash_tree_uncommitted(result: *mut [c_uchar; 32]) {
+pub extern "C" fn librustzcash_tree_uncommitted(result: *mut [c_uchar; 32]) {
     let tmp = Note::<Bls12>::uncommitted().into_repr();
 
     // Should be okay, caller is responsible for ensuring the pointer
@@ -249,7 +249,7 @@ pub extern "system" fn librustzcash_tree_uncommitted(result: *mut [c_uchar; 32])
 }
 
 #[no_mangle]
-pub extern "system" fn librustzcash_merkle_hash(
+pub extern "C" fn librustzcash_merkle_hash(
     depth: size_t,
     a: *const [c_uchar; 32],
     b: *const [c_uchar; 32],
@@ -275,10 +275,7 @@ pub extern "system" fn librustzcash_merkle_hash(
 }
 
 #[no_mangle] // ToScalar
-pub extern "system" fn librustzcash_to_scalar(
-    input: *const [c_uchar; 64],
-    result: *mut [c_uchar; 32],
-) {
+pub extern "C" fn librustzcash_to_scalar(input: *const [c_uchar; 64], result: *mut [c_uchar; 32]) {
     // Should be okay, because caller is responsible for ensuring
     // the pointer is a valid pointer to 32 bytes, and that is the
     // size of the representation
@@ -292,10 +289,7 @@ pub extern "system" fn librustzcash_to_scalar(
 }
 
 #[no_mangle]
-pub extern "system" fn librustzcash_ask_to_ak(
-    ask: *const [c_uchar; 32],
-    result: *mut [c_uchar; 32],
-) {
+pub extern "C" fn librustzcash_ask_to_ak(ask: *const [c_uchar; 32], result: *mut [c_uchar; 32]) {
     let ask = unsafe { &*ask };
     let ak = fixed_scalar_mult(ask, FixedGenerators::SpendingKeyGenerator);
 
@@ -305,10 +299,7 @@ pub extern "system" fn librustzcash_ask_to_ak(
 }
 
 #[no_mangle]
-pub extern "system" fn librustzcash_nsk_to_nk(
-    nsk: *const [c_uchar; 32],
-    result: *mut [c_uchar; 32],
-) {
+pub extern "C" fn librustzcash_nsk_to_nk(nsk: *const [c_uchar; 32], result: *mut [c_uchar; 32]) {
     let nsk = unsafe { &*nsk };
     let nk = fixed_scalar_mult(nsk, FixedGenerators::ProofGenerationKey);
 
@@ -318,7 +309,7 @@ pub extern "system" fn librustzcash_nsk_to_nk(
 }
 
 #[no_mangle]
-pub extern "system" fn librustzcash_crh_ivk(
+pub extern "C" fn librustzcash_crh_ivk(
     ak: *const [c_uchar; 32],
     nk: *const [c_uchar; 32],
     result: *mut [c_uchar; 32],
@@ -343,13 +334,13 @@ pub extern "system" fn librustzcash_crh_ivk(
 }
 
 #[no_mangle]
-pub extern "system" fn librustzcash_check_diversifier(diversifier: *const [c_uchar; 11]) -> bool {
+pub extern "C" fn librustzcash_check_diversifier(diversifier: *const [c_uchar; 11]) -> bool {
     let diversifier = Diversifier(unsafe { *diversifier });
     diversifier.g_d::<Bls12>(&JUBJUB).is_some()
 }
 
 #[no_mangle]
-pub extern "system" fn librustzcash_ivk_to_pkd(
+pub extern "C" fn librustzcash_ivk_to_pkd(
     ivk: *const [c_uchar; 32],
     diversifier: *const [c_uchar; 11],
     result: *mut [c_uchar; 32],
@@ -390,7 +381,7 @@ fn test_gen_r() {
 
 /// Return 32 byte random scalar, uniformly.
 #[no_mangle]
-pub extern "system" fn librustzcash_sapling_generate_r(result: *mut [c_uchar; 32]) {
+pub extern "C" fn librustzcash_sapling_generate_r(result: *mut [c_uchar; 32]) {
     // create random 64 byte buffer
     let mut rng = OsRng;
     let mut buffer = [0u8; 64];
@@ -445,7 +436,7 @@ fn priv_get_note(
 
 /// Compute Sapling note nullifier.
 #[no_mangle]
-pub extern "system" fn librustzcash_sapling_compute_nf(
+pub extern "C" fn librustzcash_sapling_compute_nf(
     diversifier: *const [c_uchar; 11],
     pk_d: *const [c_uchar; 32],
     value: u64,
@@ -490,7 +481,7 @@ pub extern "system" fn librustzcash_sapling_compute_nf(
 
 /// Compute Sapling note commitment.
 #[no_mangle]
-pub extern "system" fn librustzcash_sapling_compute_cm(
+pub extern "C" fn librustzcash_sapling_compute_cm(
     diversifier: *const [c_uchar; 11],
     pk_d: *const [c_uchar; 32],
     value: u64,
@@ -509,7 +500,7 @@ pub extern "system" fn librustzcash_sapling_compute_cm(
 }
 
 #[no_mangle]
-pub extern "system" fn librustzcash_sapling_ka_agree(
+pub extern "C" fn librustzcash_sapling_ka_agree(
     p: *const [c_uchar; 32],
     sk: *const [c_uchar; 32],
     result: *mut [c_uchar; 32],
@@ -537,7 +528,7 @@ pub extern "system" fn librustzcash_sapling_ka_agree(
 }
 
 #[no_mangle]
-pub extern "system" fn librustzcash_sapling_ka_derivepublic(
+pub extern "C" fn librustzcash_sapling_ka_derivepublic(
     diversifier: *const [c_uchar; 11],
     esk: *const [c_uchar; 32],
     result: *mut [c_uchar; 32],
@@ -565,7 +556,7 @@ pub extern "system" fn librustzcash_sapling_ka_derivepublic(
 }
 
 #[no_mangle]
-pub extern "system" fn librustzcash_eh_isvalid(
+pub extern "C" fn librustzcash_eh_isvalid(
     n: u32,
     k: u32,
     input: *const c_uchar,
@@ -585,17 +576,14 @@ pub extern "system" fn librustzcash_eh_isvalid(
 }
 
 #[no_mangle]
-pub extern "system" fn librustzcash_sapling_verification_ctx_init(
-) -> *mut SaplingVerificationContext {
+pub extern "C" fn librustzcash_sapling_verification_ctx_init() -> *mut SaplingVerificationContext {
     let ctx = Box::new(SaplingVerificationContext::new());
 
     Box::into_raw(ctx)
 }
 
 #[no_mangle]
-pub extern "system" fn librustzcash_sapling_verification_ctx_free(
-    ctx: *mut SaplingVerificationContext,
-) {
+pub extern "C" fn librustzcash_sapling_verification_ctx_free(ctx: *mut SaplingVerificationContext) {
     drop(unsafe { Box::from_raw(ctx) });
 }
 
@@ -604,7 +592,7 @@ const GROTH_PROOF_SIZE: usize = 48 // π_A
     + 48; // π_C
 
 #[no_mangle]
-pub extern "system" fn librustzcash_sapling_check_spend(
+pub extern "C" fn librustzcash_sapling_check_spend(
     ctx: *mut SaplingVerificationContext,
     cv: *const [c_uchar; 32],
     anchor: *const [c_uchar; 32],
@@ -659,7 +647,7 @@ pub extern "system" fn librustzcash_sapling_check_spend(
 }
 
 #[no_mangle]
-pub extern "system" fn librustzcash_sapling_check_output(
+pub extern "C" fn librustzcash_sapling_check_output(
     ctx: *mut SaplingVerificationContext,
     cv: *const [c_uchar; 32],
     cm: *const [c_uchar; 32],
@@ -702,7 +690,7 @@ pub extern "system" fn librustzcash_sapling_check_output(
 }
 
 #[no_mangle]
-pub extern "system" fn librustzcash_sapling_final_check(
+pub extern "C" fn librustzcash_sapling_final_check(
     ctx: *mut SaplingVerificationContext,
     value_balance: i64,
     binding_sig: *const [c_uchar; 64],
@@ -728,7 +716,7 @@ pub extern "system" fn librustzcash_sapling_final_check(
 }
 
 #[no_mangle]
-pub extern "system" fn librustzcash_sprout_prove(
+pub extern "C" fn librustzcash_sprout_prove(
     proof_out: *mut [c_uchar; GROTH_PROOF_SIZE],
 
     phi: *const [c_uchar; 32],
@@ -877,7 +865,7 @@ pub extern "system" fn librustzcash_sprout_prove(
 }
 
 #[no_mangle]
-pub extern "system" fn librustzcash_sprout_verify(
+pub extern "C" fn librustzcash_sprout_verify(
     proof: *const [c_uchar; GROTH_PROOF_SIZE],
     rt: *const [c_uchar; 32],
     h_sig: *const [c_uchar; 32],
@@ -926,7 +914,7 @@ pub extern "system" fn librustzcash_sprout_verify(
 }
 
 #[no_mangle]
-pub extern "system" fn librustzcash_sapling_output_proof(
+pub extern "C" fn librustzcash_sapling_output_proof(
     ctx: *mut SaplingProvingContext,
     esk: *const [c_uchar; 32],
     payment_address: *const [c_uchar; 43],
@@ -978,7 +966,7 @@ pub extern "system" fn librustzcash_sapling_output_proof(
 }
 
 #[no_mangle]
-pub extern "system" fn librustzcash_sapling_spend_sig(
+pub extern "C" fn librustzcash_sapling_spend_sig(
     ask: *const [c_uchar; 32],
     ar: *const [c_uchar; 32],
     sighash: *const [c_uchar; 32],
@@ -1010,7 +998,7 @@ pub extern "system" fn librustzcash_sapling_spend_sig(
 }
 
 #[no_mangle]
-pub extern "system" fn librustzcash_sapling_binding_sig(
+pub extern "C" fn librustzcash_sapling_binding_sig(
     ctx: *const SaplingProvingContext,
     value_balance: i64,
     sighash: *const [c_uchar; 32],
@@ -1035,7 +1023,7 @@ pub extern "system" fn librustzcash_sapling_binding_sig(
 }
 
 #[no_mangle]
-pub extern "system" fn librustzcash_sapling_spend_proof(
+pub extern "C" fn librustzcash_sapling_spend_proof(
     ctx: *mut SaplingProvingContext,
     ak: *const [c_uchar; 32],
     nsk: *const [c_uchar; 32],
@@ -1135,19 +1123,19 @@ pub extern "system" fn librustzcash_sapling_spend_proof(
 }
 
 #[no_mangle]
-pub extern "system" fn librustzcash_sapling_proving_ctx_init() -> *mut SaplingProvingContext {
+pub extern "C" fn librustzcash_sapling_proving_ctx_init() -> *mut SaplingProvingContext {
     let ctx = Box::new(SaplingProvingContext::new());
 
     Box::into_raw(ctx)
 }
 
 #[no_mangle]
-pub extern "system" fn librustzcash_sapling_proving_ctx_free(ctx: *mut SaplingProvingContext) {
+pub extern "C" fn librustzcash_sapling_proving_ctx_free(ctx: *mut SaplingProvingContext) {
     drop(unsafe { Box::from_raw(ctx) });
 }
 
 #[no_mangle]
-pub extern "system" fn librustzcash_zip32_xsk_master(
+pub extern "C" fn librustzcash_zip32_xsk_master(
     seed: *const c_uchar,
     seedlen: size_t,
     xsk_master: *mut [c_uchar; 169],
@@ -1161,7 +1149,7 @@ pub extern "system" fn librustzcash_zip32_xsk_master(
 }
 
 #[no_mangle]
-pub extern "system" fn librustzcash_zip32_xsk_derive(
+pub extern "C" fn librustzcash_zip32_xsk_derive(
     xsk_parent: *const [c_uchar; 169],
     i: u32,
     xsk_i: *mut [c_uchar; 169],
@@ -1177,7 +1165,7 @@ pub extern "system" fn librustzcash_zip32_xsk_derive(
 }
 
 #[no_mangle]
-pub extern "system" fn librustzcash_zip32_xfvk_derive(
+pub extern "C" fn librustzcash_zip32_xfvk_derive(
     xfvk_parent: *const [c_uchar; 169],
     i: u32,
     xfvk_i: *mut [c_uchar; 169],
@@ -1198,7 +1186,7 @@ pub extern "system" fn librustzcash_zip32_xfvk_derive(
 }
 
 #[no_mangle]
-pub extern "system" fn librustzcash_zip32_xfvk_address(
+pub extern "C" fn librustzcash_zip32_xfvk_address(
     xfvk: *const [c_uchar; 169],
     j: *const [c_uchar; 11],
     j_ret: *mut [c_uchar; 11],
