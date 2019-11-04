@@ -72,13 +72,6 @@ static mut SAPLING_SPEND_PARAMS: Option<Parameters<Bls12>> = None;
 static mut SAPLING_OUTPUT_PARAMS: Option<Parameters<Bls12>> = None;
 static mut SPROUT_GROTH16_PARAMS_PATH: Option<PathBuf> = None;
 
-/// Writes an FrRepr to [u8] of length 32
-fn write_le(f: FrRepr, to: &mut [u8]) {
-    assert_eq!(to.len(), 32);
-
-    f.write_le(to).expect("length is 32 bytes");
-}
-
 /// Reads an FrRepr from a [u8] of length 32.
 /// This will panic (abort) if length provided is
 /// not correct.
@@ -244,8 +237,7 @@ pub extern "C" fn librustzcash_tree_uncommitted(result: *mut [c_uchar; 32]) {
     // Should be okay, caller is responsible for ensuring the pointer
     // is a valid pointer to 32 bytes that can be mutated.
     let result = unsafe { &mut *result };
-
-    write_le(tmp, &mut result[..]);
+    tmp.write_le(&mut result[..]).expect("length is 32 bytes");
 }
 
 #[no_mangle]
@@ -270,8 +262,7 @@ pub extern "C" fn librustzcash_merkle_hash(
     // Should be okay, caller is responsible for ensuring the pointer
     // is a valid pointer to 32 bytes that can be mutated.
     let result = unsafe { &mut *result };
-
-    write_le(tmp, &mut result[..]);
+    tmp.write_le(&mut result[..]).expect("length is 32 bytes");
 }
 
 #[no_mangle] // ToScalar
@@ -494,7 +485,10 @@ pub extern "C" fn librustzcash_sapling_compute_cm(
     };
 
     let result = unsafe { &mut *result };
-    write_le(note.cm(&JUBJUB).into_repr(), &mut result[..]);
+    note.cm(&JUBJUB)
+        .into_repr()
+        .write_le(&mut result[..])
+        .expect("length is 32 bytes");
 
     true
 }
