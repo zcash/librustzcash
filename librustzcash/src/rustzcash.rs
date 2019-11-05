@@ -1,38 +1,20 @@
 // Catch documentation errors caused by code changes.
 #![deny(intra_doc_link_resolution_failure)]
 
-use lazy_static;
-
-use ff::{PrimeField, PrimeFieldRepr};
-use pairing::bls12_381::{Bls12, Fr, FrRepr};
-
-use zcash_primitives::{
-    constants::CRH_IVK_PERSONALIZATION,
-    jubjub::{
-        edwards,
-        fs::{Fs, FsRepr},
-        FixedGenerators, JubjubEngine, JubjubParams, PrimeOrder, ToUniform, Unknown,
-    },
+use bellman::{
+    gadgets::multipack,
+    groth16::{create_random_proof, verify_proof, Parameters, PreparedVerifyingKey, Proof},
 };
-
-use zcash_proofs::circuit::sapling::TREE_DEPTH as SAPLING_TREE_DEPTH;
-use zcash_proofs::circuit::sprout::{self, TREE_DEPTH as SPROUT_TREE_DEPTH};
-
-use bellman::gadgets::multipack;
-use bellman::groth16::{
-    create_random_proof, verify_proof, Parameters, PreparedVerifyingKey, Proof,
-};
-
 use blake2s_simd::Params as Blake2sParams;
-
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
-
-use rand_core::{OsRng, RngCore};
-use std::io::BufReader;
-
+use ff::{PrimeField, PrimeFieldRepr};
+use lazy_static;
 use libc::{c_char, c_uchar, size_t};
+use pairing::bls12_381::{Bls12, Fr, FrRepr};
+use rand_core::{OsRng, RngCore};
 use std::ffi::CStr;
 use std::fs::File;
+use std::io::BufReader;
 use std::path::{Path, PathBuf};
 use std::slice;
 
@@ -48,6 +30,12 @@ use std::os::windows::ffi::OsStringExt;
 
 use zcash_primitives::{
     block::equihash,
+    constants::CRH_IVK_PERSONALIZATION,
+    jubjub::{
+        edwards,
+        fs::{Fs, FsRepr},
+        FixedGenerators, JubjubEngine, JubjubParams, PrimeOrder, ToUniform, Unknown,
+    },
     merkle_tree::CommitmentTreeWitness,
     note_encryption::sapling_ka_agree,
     primitives::{Diversifier, Note, PaymentAddress, ProofGenerationKey, ViewingKey},
@@ -57,6 +45,10 @@ use zcash_primitives::{
     zip32, JUBJUB,
 };
 use zcash_proofs::{
+    circuit::{
+        sapling::TREE_DEPTH as SAPLING_TREE_DEPTH,
+        sprout::{self, TREE_DEPTH as SPROUT_TREE_DEPTH},
+    },
     load_parameters,
     sapling::{SaplingProvingContext, SaplingVerificationContext},
 };
