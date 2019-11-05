@@ -94,6 +94,8 @@ fn fixed_scalar_mult(from: &[u8; 32], p_g: FixedGenerators) -> edwards::Point<Bl
     JUBJUB.generator(p_g).mul(f, &JUBJUB)
 }
 
+/// Loads the zk-SNARK parameters into memory and saves paths as necessary.
+/// Only called once.
 #[cfg(not(target_os = "windows"))]
 #[no_mangle]
 pub extern "C" fn librustzcash_init_zksnark_params(
@@ -131,6 +133,8 @@ pub extern "C" fn librustzcash_init_zksnark_params(
     )
 }
 
+/// Loads the zk-SNARK parameters into memory and saves paths as necessary.
+/// Only called once.
 #[cfg(target_os = "windows")]
 #[no_mangle]
 pub extern "C" fn librustzcash_init_zksnark_params(
@@ -218,6 +222,9 @@ fn init_zksnark_params(
     }
 }
 
+/// Writes the "uncommitted" note value for empty leaves of the Merkle tree.
+///
+/// `result` must be a valid pointer to 32 bytes which will be written.
 #[no_mangle]
 pub extern "C" fn librustzcash_tree_uncommitted(result: *mut [c_uchar; 32]) {
     let tmp = Note::<Bls12>::uncommitted().into_repr();
@@ -228,6 +235,13 @@ pub extern "C" fn librustzcash_tree_uncommitted(result: *mut [c_uchar; 32]) {
     tmp.write_le(&mut result[..]).expect("length is 32 bytes");
 }
 
+/// Computes a merkle tree hash for a given depth. The `depth` parameter should
+/// not be larger than 62.
+///
+/// `a` and `b` each must be of length 32, and must each be scalars of BLS12-381.
+///
+/// The result of the merkle tree hash is placed in `result`, which must also be
+/// of length 32.
 #[no_mangle]
 pub extern "C" fn librustzcash_merkle_hash(
     depth: size_t,
@@ -358,7 +372,7 @@ fn test_gen_r() {
     let _ = Fs::from_repr(repr).unwrap();
 }
 
-/// Return 32 byte random scalar, uniformly.
+/// Generate uniformly random scalar in Jubjub. The result is of length 32.
 #[no_mangle]
 pub extern "C" fn librustzcash_sapling_generate_r(result: *mut [c_uchar; 32]) {
     // create random 64 byte buffer
@@ -413,7 +427,12 @@ fn priv_get_note(
     Ok(note)
 }
 
-/// Compute Sapling note nullifier.
+/// Compute a Sapling nullifier.
+///
+/// The `diversifier` parameter must be 11 bytes in length.
+/// The `pk_d`, `r`, `ak` and `nk` parameters must be of length 32.
+/// The result is also of length 32 and placed in `result`.
+/// Returns false if `diversifier` or `pk_d` is not valid.
 #[no_mangle]
 pub extern "C" fn librustzcash_sapling_compute_nf(
     diversifier: *const [c_uchar; 11],
@@ -458,7 +477,12 @@ pub extern "C" fn librustzcash_sapling_compute_nf(
     true
 }
 
-/// Compute Sapling note commitment.
+/// Compute a Sapling commitment.
+///
+/// The `diversifier` parameter must be 11 bytes in length.
+/// The `pk_d` and `r` parameters must be of length 32.
+/// The result is also of length 32 and placed in `result`.
+/// Returns false if `diversifier` or `pk_d` is not valid.
 #[no_mangle]
 pub extern "C" fn librustzcash_sapling_compute_cm(
     diversifier: *const [c_uchar; 11],
@@ -481,6 +505,10 @@ pub extern "C" fn librustzcash_sapling_compute_cm(
     true
 }
 
+/// Compute [sk] [8] P for some 32-byte point P, and 32-byte Fs.
+///
+/// If P or sk are invalid, returns false. Otherwise, the result is written to
+/// the 32-byte `result` buffer.
 #[no_mangle]
 pub extern "C" fn librustzcash_sapling_ka_agree(
     p: *const [c_uchar; 32],
@@ -509,6 +537,9 @@ pub extern "C" fn librustzcash_sapling_ka_agree(
     true
 }
 
+/// Compute g_d = GH(diversifier) and returns false if the diversifier is
+/// invalid. Computes [esk] g_d and writes the result to the 32-byte `result`
+/// buffer. Returns false if `esk` is not a valid scalar.
 #[no_mangle]
 pub extern "C" fn librustzcash_sapling_ka_derivepublic(
     diversifier: *const [c_uchar; 11],
@@ -537,6 +568,8 @@ pub extern "C" fn librustzcash_sapling_ka_derivepublic(
     true
 }
 
+/// Validates the provided Equihash solution against the given parameters, input
+/// and nonce.
 #[no_mangle]
 pub extern "C" fn librustzcash_eh_isvalid(
     n: u32,
@@ -557,6 +590,7 @@ pub extern "C" fn librustzcash_eh_isvalid(
     equihash::is_valid_solution(n, k, rs_input, rs_nonce, rs_soln)
 }
 
+/// Creates a Sapling verification context. Please free this when you're done.
 #[no_mangle]
 pub extern "C" fn librustzcash_sapling_verification_ctx_init() -> *mut SaplingVerificationContext {
     let ctx = Box::new(SaplingVerificationContext::new());
@@ -564,6 +598,8 @@ pub extern "C" fn librustzcash_sapling_verification_ctx_init() -> *mut SaplingVe
     Box::into_raw(ctx)
 }
 
+/// Frees a Sapling verification context returned from
+/// [`librustzcash_sapling_verification_ctx_init`].
 #[no_mangle]
 pub extern "C" fn librustzcash_sapling_verification_ctx_free(ctx: *mut SaplingVerificationContext) {
     drop(unsafe { Box::from_raw(ctx) });
@@ -573,6 +609,8 @@ const GROTH_PROOF_SIZE: usize = 48 // π_A
     + 96 // π_B
     + 48; // π_C
 
+/// Check the validity of a Sapling Spend description, accumulating the value
+/// commitment into the context.
 #[no_mangle]
 pub extern "C" fn librustzcash_sapling_check_spend(
     ctx: *mut SaplingVerificationContext,
@@ -628,6 +666,8 @@ pub extern "C" fn librustzcash_sapling_check_spend(
     )
 }
 
+/// Check the validity of a Sapling Output description, accumulating the value
+/// commitment into the context.
 #[no_mangle]
 pub extern "C" fn librustzcash_sapling_check_output(
     ctx: *mut SaplingVerificationContext,
@@ -671,6 +711,8 @@ pub extern "C" fn librustzcash_sapling_check_output(
     )
 }
 
+/// Finally checks the validity of the entire Sapling transaction given
+/// valueBalance and the binding signature.
 #[no_mangle]
 pub extern "C" fn librustzcash_sapling_final_check(
     ctx: *mut SaplingVerificationContext,
@@ -697,6 +739,7 @@ pub extern "C" fn librustzcash_sapling_final_check(
     )
 }
 
+/// Sprout JoinSplit proof generation.
 #[no_mangle]
 pub extern "C" fn librustzcash_sprout_prove(
     proof_out: *mut [c_uchar; GROTH_PROOF_SIZE],
@@ -846,6 +889,7 @@ pub extern "C" fn librustzcash_sprout_prove(
         .expect("should be able to serialize a proof");
 }
 
+/// Sprout JoinSplit proof verification.
 #[no_mangle]
 pub extern "C" fn librustzcash_sprout_verify(
     proof: *const [c_uchar; GROTH_PROOF_SIZE],
@@ -895,6 +939,8 @@ pub extern "C" fn librustzcash_sprout_verify(
     }
 }
 
+/// This function (using the proving context) constructs an Output proof given
+/// the necessary witness information. It outputs `cv` and the `zkproof`.
 #[no_mangle]
 pub extern "C" fn librustzcash_sapling_output_proof(
     ctx: *mut SaplingProvingContext,
@@ -947,6 +993,11 @@ pub extern "C" fn librustzcash_sapling_output_proof(
     true
 }
 
+/// Computes the signature for each Spend description, given the key `ask`, the
+/// re-randomization `ar`, the 32-byte sighash `sighash`, and an output `result`
+/// buffer of 64-bytes for the signature.
+///
+/// This function will fail if the provided `ask` or `ar` are invalid.
 #[no_mangle]
 pub extern "C" fn librustzcash_sapling_spend_sig(
     ask: *const [c_uchar; 32],
@@ -979,6 +1030,10 @@ pub extern "C" fn librustzcash_sapling_spend_sig(
     true
 }
 
+/// This function (using the proving context) constructs a binding signature.
+///
+/// You must provide the intended valueBalance so that we can internally check
+/// consistency.
 #[no_mangle]
 pub extern "C" fn librustzcash_sapling_binding_sig(
     ctx: *const SaplingProvingContext,
@@ -1004,6 +1059,9 @@ pub extern "C" fn librustzcash_sapling_binding_sig(
     true
 }
 
+/// This function (using the proving context) constructs a Spend proof given the
+/// necessary witness information. It outputs `cv` (the value commitment) and
+/// `rk` (so that you don't have to compute it) along with the proof.
 #[no_mangle]
 pub extern "C" fn librustzcash_sapling_spend_proof(
     ctx: *mut SaplingProvingContext,
@@ -1104,6 +1162,7 @@ pub extern "C" fn librustzcash_sapling_spend_proof(
     true
 }
 
+/// Creates a Sapling proving context. Please free this when you're done.
 #[no_mangle]
 pub extern "C" fn librustzcash_sapling_proving_ctx_init() -> *mut SaplingProvingContext {
     let ctx = Box::new(SaplingProvingContext::new());
@@ -1111,11 +1170,14 @@ pub extern "C" fn librustzcash_sapling_proving_ctx_init() -> *mut SaplingProving
     Box::into_raw(ctx)
 }
 
+/// Frees a Sapling proving context returned from
+/// [`librustzcash_sapling_proving_ctx_init`].
 #[no_mangle]
 pub extern "C" fn librustzcash_sapling_proving_ctx_free(ctx: *mut SaplingProvingContext) {
     drop(unsafe { Box::from_raw(ctx) });
 }
 
+/// Derive the master ExtendedSpendingKey from a seed.
 #[no_mangle]
 pub extern "C" fn librustzcash_zip32_xsk_master(
     seed: *const c_uchar,
@@ -1130,6 +1192,7 @@ pub extern "C" fn librustzcash_zip32_xsk_master(
         .expect("should be able to serialize an ExtendedSpendingKey");
 }
 
+/// Derive a child ExtendedSpendingKey from a parent.
 #[no_mangle]
 pub extern "C" fn librustzcash_zip32_xsk_derive(
     xsk_parent: *const [c_uchar; 169],
@@ -1146,6 +1209,7 @@ pub extern "C" fn librustzcash_zip32_xsk_derive(
         .expect("should be able to serialize an ExtendedSpendingKey");
 }
 
+/// Derive a child ExtendedFullViewingKey from a parent.
 #[no_mangle]
 pub extern "C" fn librustzcash_zip32_xfvk_derive(
     xfvk_parent: *const [c_uchar; 169],
@@ -1167,6 +1231,7 @@ pub extern "C" fn librustzcash_zip32_xfvk_derive(
     true
 }
 
+/// Derive a PaymentAddress from an ExtendedFullViewingKey.
 #[no_mangle]
 pub extern "C" fn librustzcash_zip32_xfvk_address(
     xfvk: *const [c_uchar; 169],
