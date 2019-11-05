@@ -1,5 +1,19 @@
 // Catch documentation errors caused by code changes.
 #![deny(intra_doc_link_resolution_failure)]
+// Clippy has a default-deny lint to prevent dereferencing raw pointer arguments
+// in a non-unsafe function. However, declaring a function as unsafe has the
+// side-effect that the entire function body is treated as an unsafe {} block,
+// and rustc will not enforce full safety checks on the parts of the function
+// that would otherwise be safe.
+//
+// The functions in this crate are all for FFI usage, so it's obvious to the
+// caller (which is only ever zcashd) that the arguments must satisfy the
+// necessary assumptions. We therefore ignore this lint to retain the benefit of
+// explicitly annotating the parts of each function that must themselves satisfy
+// assumptions of underlying code.
+//
+// See https://github.com/rust-lang/rfcs/pull/2585 for more background.
+#![allow(clippy::not_unsafe_ptr_arg_deref)]
 
 use bellman::{
     gadgets::multipack,
