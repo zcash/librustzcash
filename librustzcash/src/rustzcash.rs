@@ -15,12 +15,8 @@
 // See https://github.com/rust-lang/rfcs/pull/2585 for more background.
 #![allow(clippy::not_unsafe_ptr_arg_deref)]
 
-use bellman::{
-    gadgets::multipack,
-    groth16::{create_random_proof, verify_proof, Parameters, PreparedVerifyingKey, Proof},
-};
+use bellman::groth16::{Parameters, PreparedVerifyingKey, Proof};
 use blake2s_simd::Params as Blake2sParams;
-use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use ff::{PrimeField, PrimeFieldRepr};
 use lazy_static;
 use libc::{c_char, c_uchar, size_t};
@@ -59,12 +55,10 @@ use zcash_primitives::{
     zip32, JUBJUB,
 };
 use zcash_proofs::{
-    circuit::{
-        sapling::TREE_DEPTH as SAPLING_TREE_DEPTH,
-        sprout::{self, TREE_DEPTH as SPROUT_TREE_DEPTH},
-    },
+    circuit::sapling::TREE_DEPTH as SAPLING_TREE_DEPTH,
     load_parameters,
     sapling::{SaplingProvingContext, SaplingVerificationContext},
+    sprout,
 };
 
 #[cfg(test)]
@@ -759,14 +753,14 @@ pub extern "C" fn librustzcash_sprout_prove(
     in_value1: u64,
     in_rho1: *const [c_uchar; 32],
     in_r1: *const [c_uchar; 32],
-    in_auth1: *const [c_uchar; 1 + 33 * SPROUT_TREE_DEPTH + 8],
+    in_auth1: *const [c_uchar; sprout::WITNESS_PATH_SIZE],
 
     // Second input
     in_sk2: *const [c_uchar; 32],
     in_value2: u64,
     in_rho2: *const [c_uchar; 32],
     in_r2: *const [c_uchar; 32],
-    in_auth2: *const [c_uchar; 1 + 33 * SPROUT_TREE_DEPTH + 8],
+    in_auth2: *const [c_uchar; sprout::WITNESS_PATH_SIZE],
 
     // First output
     out_pk1: *const [c_uchar; 32],
@@ -782,94 +776,6 @@ pub extern "C" fn librustzcash_sprout_prove(
     vpub_old: u64,
     vpub_new: u64,
 ) {
-    let phi = unsafe { *phi };
-    let rt = unsafe { *rt };
-    let h_sig = unsafe { *h_sig };
-    let in_sk1 = unsafe { *in_sk1 };
-    let in_rho1 = unsafe { *in_rho1 };
-    let in_r1 = unsafe { *in_r1 };
-    let in_auth1 = unsafe { *in_auth1 };
-    let in_sk2 = unsafe { *in_sk2 };
-    let in_rho2 = unsafe { *in_rho2 };
-    let in_r2 = unsafe { *in_r2 };
-    let in_auth2 = unsafe { *in_auth2 };
-    let out_pk1 = unsafe { *out_pk1 };
-    let out_r1 = unsafe { *out_r1 };
-    let out_pk2 = unsafe { *out_pk2 };
-    let out_r2 = unsafe { *out_r2 };
-
-    let mut inputs = Vec::with_capacity(2);
-    {
-        let mut handle_input = |sk, value, rho, r, mut auth: &[u8]| {
-            let value = Some(value);
-            let rho = Some(sprout::UniqueRandomness(rho));
-            let r = Some(sprout::CommitmentRandomness(r));
-            let a_sk = Some(sprout::SpendingKey(sk));
-
-            // skip the first byte
-            assert_eq!(auth[0], SPROUT_TREE_DEPTH as u8);
-            auth = &auth[1..];
-
-            let mut auth_path = [None; SPROUT_TREE_DEPTH];
-            for i in (0..SPROUT_TREE_DEPTH).rev() {
-                // skip length of inner vector
-                assert_eq!(auth[0], 32);
-                auth = &auth[1..];
-
-                let mut sibling = [0u8; 32];
-                sibling.copy_from_slice(&auth[0..32]);
-                auth = &auth[32..];
-
-                auth_path[i] = Some((sibling, false));
-            }
-
-            let mut position = auth
-                .read_u64::<LittleEndian>()
-                .expect("should have had index at the end");
-
-            for i in 0..SPROUT_TREE_DEPTH {
-                auth_path[i].as_mut().map(|p| p.1 = (position & 1) == 1);
-
-                position >>= 1;
-            }
-
-            inputs.push(sprout::JSInput {
-                value: value,
-                a_sk: a_sk,
-                rho: rho,
-                r: r,
-                auth_path: auth_path,
-            });
-        };
-
-        handle_input(in_sk1, in_value1, in_rho1, in_r1, &in_auth1[..]);
-        handle_input(in_sk2, in_value2, in_rho2, in_r2, &in_auth2[..]);
-    }
-
-    let mut outputs = Vec::with_capacity(2);
-    {
-        let mut handle_output = |a_pk, value, r| {
-            outputs.push(sprout::JSOutput {
-                value: Some(value),
-                a_pk: Some(sprout::PayingKey(a_pk)),
-                r: Some(sprout::CommitmentRandomness(r)),
-            });
-        };
-
-        handle_output(out_pk1, out_value1, out_r1);
-        handle_output(out_pk2, out_value2, out_r2);
-    }
-
-    let js = sprout::JoinSplit {
-        vpub_old: Some(vpub_old),
-        vpub_new: Some(vpub_new),
-        h_sig: Some(h_sig),
-        phi: Some(phi),
-        inputs: inputs,
-        outputs: outputs,
-        rt: Some(rt),
-    };
-
     // Load parameters from disk
     let sprout_fs = File::open(
         unsafe { &SPROUT_GROTH16_PARAMS_PATH }
@@ -885,10 +791,30 @@ pub extern "C" fn librustzcash_sprout_prove(
 
     drop(sprout_fs);
 
-    // Initialize secure RNG
-    let mut rng = OsRng;
-
-    let proof = create_random_proof(js, &params, &mut rng).expect("proving should not fail");
+    let proof = sprout::create_proof(
+        unsafe { *phi },
+        unsafe { *rt },
+        unsafe { *h_sig },
+        unsafe { *in_sk1 },
+        in_value1,
+        unsafe { *in_rho1 },
+        unsafe { *in_r1 },
+        unsafe { &*in_auth1 },
+        unsafe { *in_sk2 },
+        in_value2,
+        unsafe { *in_rho2 },
+        unsafe { *in_r2 },
+        unsafe { &*in_auth2 },
+        unsafe { *out_pk1 },
+        out_value1,
+        unsafe { *out_r1 },
+        unsafe { *out_pk2 },
+        out_value2,
+        unsafe { *out_r2 },
+        vpub_old,
+        vpub_new,
+        &params,
+    );
 
     proof
         .write(&mut (unsafe { &mut *proof_out })[..])
@@ -910,39 +836,20 @@ pub extern "C" fn librustzcash_sprout_verify(
     vpub_old: u64,
     vpub_new: u64,
 ) -> bool {
-    // Prepare the public input for the verifier
-    let mut public_input = Vec::with_capacity((32 * 8) + (8 * 2));
-    public_input.extend(unsafe { &(&*rt)[..] });
-    public_input.extend(unsafe { &(&*h_sig)[..] });
-    public_input.extend(unsafe { &(&*nf1)[..] });
-    public_input.extend(unsafe { &(&*mac1)[..] });
-    public_input.extend(unsafe { &(&*nf2)[..] });
-    public_input.extend(unsafe { &(&*mac2)[..] });
-    public_input.extend(unsafe { &(&*cm1)[..] });
-    public_input.extend(unsafe { &(&*cm2)[..] });
-    public_input.write_u64::<LittleEndian>(vpub_old).unwrap();
-    public_input.write_u64::<LittleEndian>(vpub_new).unwrap();
-
-    let public_input = multipack::bytes_to_bits(&public_input);
-    let public_input = multipack::compute_multipacking::<Bls12>(&public_input);
-
-    let proof = match Proof::read(unsafe { &(&*proof)[..] }) {
-        Ok(p) => p,
-        Err(_) => return false,
-    };
-
-    // Verify the proof
-    match verify_proof(
+    sprout::verify_proof(
+        unsafe { &*proof },
+        unsafe { &*rt },
+        unsafe { &*h_sig },
+        unsafe { &*mac1 },
+        unsafe { &*mac2 },
+        unsafe { &*nf1 },
+        unsafe { &*nf2 },
+        unsafe { &*cm1 },
+        unsafe { &*cm2 },
+        vpub_old,
+        vpub_new,
         unsafe { SPROUT_GROTH16_VK.as_ref() }.expect("parameters should have been initialized"),
-        &proof,
-        &public_input[..],
-    ) {
-        // No error, and proof verification successful
-        Ok(true) => true,
-
-        // Any other case
-        _ => false,
-    }
+    )
 }
 
 /// This function (using the proving context) constructs an Output proof given
