@@ -24,6 +24,7 @@ pub mod sapling;
 mod serialize;
 pub mod transaction;
 mod util;
+pub mod wtp;
 pub mod zip32;
 
 #[cfg(test)]
