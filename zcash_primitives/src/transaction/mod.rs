@@ -19,12 +19,16 @@ mod tests;
 
 pub use self::sighash::{signature_hash, signature_hash_data, SIGHASH_ALL};
 
-use self::components::{Amount, JSDescription, OutputDescription, SpendDescription, TxIn, TxOut};
+use self::components::{
+    Amount, JSDescription, OutputDescription, SpendDescription, TxIn, TxOut, WtpIn, WtpOut,
+};
 
 const OVERWINTER_VERSION_GROUP_ID: u32 = 0x03C48270;
 const OVERWINTER_TX_VERSION: u32 = 3;
 const SAPLING_VERSION_GROUP_ID: u32 = 0x892F2085;
 const SAPLING_TX_VERSION: u32 = 4;
+const NU4_VERSION_GROUP_ID: u32 = 0x77777777;
+const NU4_TX_VERSION: u32 = 5;
 
 #[derive(Clone, Copy, Debug, PartialOrd, Ord, PartialEq, Eq, Hash)]
 pub struct TxId(pub [u8; 32]);
@@ -64,6 +68,8 @@ pub struct TransactionData {
     pub version_group_id: u32,
     pub vin: Vec<TxIn>,
     pub vout: Vec<TxOut>,
+    pub wtp_inputs: Vec<WtpIn>,
+    pub wtp_outputs: Vec<WtpOut>,
     pub lock_time: u32,
     pub expiry_height: u32,
     pub value_balance: Amount,
@@ -85,6 +91,8 @@ impl std::fmt::Debug for TransactionData {
                 version_group_id = {:?},
                 vin = {:?},
                 vout = {:?},
+                wtp_inputs = {:?},
+                wtp_outputs = {:?},
                 lock_time = {:?},
                 expiry_height = {:?},
                 value_balance = {:?},
@@ -98,6 +106,8 @@ impl std::fmt::Debug for TransactionData {
             self.version_group_id,
             self.vin,
             self.vout,
+            self.wtp_inputs,
+            self.wtp_outputs,
             self.lock_time,
             self.expiry_height,
             self.value_balance,
@@ -118,6 +128,29 @@ impl TransactionData {
             version_group_id: SAPLING_VERSION_GROUP_ID,
             vin: vec![],
             vout: vec![],
+            wtp_inputs: vec![],
+            wtp_outputs: vec![],
+            lock_time: 0,
+            expiry_height: 0,
+            value_balance: Amount::zero(),
+            shielded_spends: vec![],
+            shielded_outputs: vec![],
+            joinsplits: vec![],
+            joinsplit_pubkey: None,
+            joinsplit_sig: None,
+            binding_sig: None,
+        }
+    }
+
+    pub fn nu4() -> Self {
+        TransactionData {
+            overwintered: true,
+            version: NU4_TX_VERSION,
+            version_group_id: NU4_VERSION_GROUP_ID,
+            vin: vec![],
+            vout: vec![],
+            wtp_inputs: vec![],
+            wtp_outputs: vec![],
             lock_time: 0,
             expiry_height: 0,
             value_balance: Amount::zero(),
@@ -178,7 +211,9 @@ impl Transaction {
         let is_sapling_v4 = overwintered
             && version_group_id == SAPLING_VERSION_GROUP_ID
             && version == SAPLING_TX_VERSION;
-        if overwintered && !(is_overwinter_v3 || is_sapling_v4) {
+        let is_nu4_v5 =
+            overwintered && version_group_id == NU4_VERSION_GROUP_ID && version == NU4_TX_VERSION;
+        if overwintered && !(is_overwinter_v3 || is_sapling_v4 || is_nu4_v5) {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 "Unknown transaction format",
@@ -187,14 +222,21 @@ impl Transaction {
 
         let vin = Vector::read(&mut reader, TxIn::read)?;
         let vout = Vector::read(&mut reader, TxOut::read)?;
+        let (wtp_inputs, wtp_outputs) = if is_nu4_v5 {
+            let wi = Vector::read(&mut reader, WtpIn::read)?;
+            let wo = Vector::read(&mut reader, WtpOut::read)?;
+            (wi, wo)
+        } else {
+            (vec![], vec![])
+        };
         let lock_time = reader.read_u32::<LittleEndian>()?;
-        let expiry_height = if is_overwinter_v3 || is_sapling_v4 {
+        let expiry_height = if is_overwinter_v3 || is_sapling_v4 || is_nu4_v5 {
             reader.read_u32::<LittleEndian>()?
         } else {
             0
         };
 
-        let (value_balance, shielded_spends, shielded_outputs) = if is_sapling_v4 {
+        let (value_balance, shielded_spends, shielded_outputs) = if is_sapling_v4 || is_nu4_v5 {
             let vb = {
                 let mut tmp = [0; 8];
                 reader.read_exact(&mut tmp)?;
@@ -226,12 +268,13 @@ impl Transaction {
             (vec![], None, None)
         };
 
-        let binding_sig =
-            if is_sapling_v4 && !(shielded_spends.is_empty() && shielded_outputs.is_empty()) {
-                Some(Signature::read(&mut reader)?)
-            } else {
-                None
-            };
+        let binding_sig = if (is_sapling_v4 || is_nu4_v5)
+            && !(shielded_spends.is_empty() && shielded_outputs.is_empty())
+        {
+            Some(Signature::read(&mut reader)?)
+        } else {
+            None
+        };
 
         Transaction::from_data(TransactionData {
             overwintered,
@@ -239,6 +282,8 @@ impl Transaction {
             version_group_id,
             vin,
             vout,
+            wtp_inputs,
+            wtp_outputs,
             lock_time,
             expiry_height,
             value_balance,
@@ -263,7 +308,10 @@ impl Transaction {
         let is_sapling_v4 = self.overwintered
             && self.version_group_id == SAPLING_VERSION_GROUP_ID
             && self.version == SAPLING_TX_VERSION;
-        if self.overwintered && !(is_overwinter_v3 || is_sapling_v4) {
+        let is_nu4_v5 = self.overwintered
+            && self.version_group_id == NU4_VERSION_GROUP_ID
+            && self.version == NU4_TX_VERSION;
+        if self.overwintered && !(is_overwinter_v3 || is_sapling_v4 || is_nu4_v5) {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 "Unknown transaction format",
@@ -272,12 +320,16 @@ impl Transaction {
 
         Vector::write(&mut writer, &self.vin, |w, e| e.write(w))?;
         Vector::write(&mut writer, &self.vout, |w, e| e.write(w))?;
+        if is_nu4_v5 {
+            Vector::write(&mut writer, &self.wtp_inputs, |w, e| e.write(w))?;
+            Vector::write(&mut writer, &self.wtp_outputs, |w, e| e.write(w))?;
+        }
         writer.write_u32::<LittleEndian>(self.lock_time)?;
-        if is_overwinter_v3 || is_sapling_v4 {
+        if is_overwinter_v3 || is_sapling_v4 || is_nu4_v5 {
             writer.write_u32::<LittleEndian>(self.expiry_height)?;
         }
 
-        if is_sapling_v4 {
+        if is_sapling_v4 || is_nu4_v5 {
             writer.write_all(&self.value_balance.to_i64_le_bytes())?;
             Vector::write(&mut writer, &self.shielded_spends, |w, e| e.write(w))?;
             Vector::write(&mut writer, &self.shielded_outputs, |w, e| e.write(w))?;
@@ -322,7 +374,9 @@ impl Transaction {
             }
         }
 
-        if is_sapling_v4 && !(self.shielded_spends.is_empty() && self.shielded_outputs.is_empty()) {
+        if (is_sapling_v4 || is_nu4_v5)
+            && !(self.shielded_spends.is_empty() && self.shielded_outputs.is_empty())
+        {
             match self.binding_sig {
                 Some(sig) => sig.write(&mut writer)?,
                 None => {

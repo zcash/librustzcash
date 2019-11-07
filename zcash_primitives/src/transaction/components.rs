@@ -8,6 +8,7 @@ use std::io::{self, Read, Write};
 
 use crate::legacy::Script;
 use crate::redjubjub::{PublicKey, Signature};
+use crate::wtp;
 use crate::JUBJUB;
 
 pub mod amount;
@@ -93,6 +94,51 @@ impl TxOut {
     pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
         writer.write_all(&self.value.to_i64_le_bytes())?;
         self.script_pubkey.write(&mut writer)
+    }
+}
+
+#[derive(Debug)]
+pub struct WtpIn {
+    pub prevout: OutPoint,
+    pub witness: wtp::Witness,
+}
+
+impl WtpIn {
+    pub fn read<R: Read>(mut reader: &mut R) -> io::Result<Self> {
+        let prevout = OutPoint::read(&mut reader)?;
+        let witness = wtp::Witness::read(&mut reader)?;
+
+        Ok(WtpIn { prevout, witness })
+    }
+
+    pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
+        self.prevout.write(&mut writer)?;
+        self.witness.write(&mut writer)
+    }
+}
+
+#[derive(Debug)]
+pub struct WtpOut {
+    pub value: Amount,
+    pub predicate: wtp::Predicate,
+}
+
+impl WtpOut {
+    pub fn read<R: Read>(mut reader: &mut R) -> io::Result<Self> {
+        let value = {
+            let mut tmp = [0; 8];
+            reader.read_exact(&mut tmp)?;
+            Amount::from_nonnegative_i64_le_bytes(tmp)
+        }
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "value out of range"))?;
+        let predicate = wtp::Predicate::read(&mut reader)?;
+
+        Ok(WtpOut { value, predicate })
+    }
+
+    pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
+        writer.write_all(&self.value.to_i64_le_bytes())?;
+        self.predicate.write(&mut writer)
     }
 }
 
