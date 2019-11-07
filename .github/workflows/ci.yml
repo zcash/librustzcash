@@ -1,4 +1,4 @@
-name: Rust
+name: CI checks
 
 on: [push, pull_request]
 
