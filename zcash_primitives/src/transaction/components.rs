@@ -5,9 +5,11 @@ use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use ff::{PrimeField, PrimeFieldRepr};
 use pairing::bls12_381::{Bls12, Fr, FrRepr};
 use std::io::{self, Read, Write};
+use zcash_extensions_api::transparent as tze;
 
 use crate::legacy::Script;
 use crate::redjubjub::{PublicKey, Signature};
+use crate::serialize::{CompactSize, Vector};
 use crate::JUBJUB;
 
 pub mod amount;
@@ -106,6 +108,77 @@ impl TxOut {
     pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
         writer.write_all(&self.value.to_i64_le_bytes())?;
         self.script_pubkey.write(&mut writer)
+    }
+}
+
+#[derive(Debug)]
+pub struct TzeIn {
+    pub prevout: OutPoint,
+    pub witness: tze::Witness,
+}
+
+impl TzeIn {
+    pub fn read<R: Read>(mut reader: &mut R) -> io::Result<Self> {
+        let prevout = OutPoint::read(&mut reader)?;
+
+        let extension_id = CompactSize::read(&mut reader)?;
+        let mode = CompactSize::read(&mut reader)?;
+        let payload = Vector::read(&mut reader, |r| r.read_u8())?;
+
+        Ok(TzeIn {
+            prevout,
+            witness: tze::Witness {
+                extension_id,
+                mode,
+                payload,
+            },
+        })
+    }
+
+    pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
+        self.prevout.write(&mut writer)?;
+
+        CompactSize::write(&mut writer, self.witness.extension_id)?;
+        CompactSize::write(&mut writer, self.witness.mode)?;
+        Vector::write(&mut writer, &self.witness.payload, |w, b| w.write_u8(*b))
+    }
+}
+
+#[derive(Debug)]
+pub struct TzeOut {
+    pub value: Amount,
+    pub precondition: tze::Precondition,
+}
+
+impl TzeOut {
+    pub fn read<R: Read>(mut reader: &mut R) -> io::Result<Self> {
+        let value = {
+            let mut tmp = [0; 8];
+            reader.read_exact(&mut tmp)?;
+            Amount::from_nonnegative_i64_le_bytes(tmp)
+        }
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "value out of range"))?;
+
+        let extension_id = CompactSize::read(&mut reader)?;
+        let mode = CompactSize::read(&mut reader)?;
+        let payload = Vector::read(&mut reader, |r| r.read_u8())?;
+
+        Ok(TzeOut {
+            value,
+            precondition: tze::Precondition {
+                extension_id,
+                mode,
+                payload,
+            },
+        })
+    }
+
+    pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
+        writer.write_all(&self.value.to_i64_le_bytes())?;
+
+        CompactSize::write(&mut writer, self.precondition.extension_id)?;
+        CompactSize::write(&mut writer, self.precondition.mode)?;
+        Vector::write(&mut writer, &self.precondition.payload, |w, b| w.write_u8(*b))
     }
 }
 
