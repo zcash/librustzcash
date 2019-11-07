@@ -3,10 +3,10 @@ use std::io::{self, Read, Write};
 
 const MAX_SIZE: usize = 0x02000000;
 
-struct CompactSize;
+pub(crate) struct CompactSize;
 
 impl CompactSize {
-    fn read<R: Read>(mut reader: R) -> io::Result<usize> {
+    pub(crate) fn read<R: Read>(mut reader: R) -> io::Result<usize> {
         let flag = reader.read_u8()?;
         match if flag < 253 {
             Ok(flag as usize)
@@ -43,7 +43,7 @@ impl CompactSize {
         }
     }
 
-    fn write<W: Write>(mut writer: W, size: usize) -> io::Result<()> {
+    pub(crate) fn write<W: Write>(mut writer: W, size: usize) -> io::Result<()> {
         match size {
             s if s < 253 => writer.write_u8(s as u8),
             s if s <= 0xFFFF => {
