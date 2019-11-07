@@ -7,6 +7,8 @@ use crate::{
     wtp::{Predicate, Witness},
 };
 
+mod demo;
+
 #[derive(Debug, PartialEq)]
 pub enum Error {
     InvalidEpoch,
@@ -85,6 +87,11 @@ impl TestDummyPrograms {
     fn verify(predicate: &Predicate, witness: &Witness, ctx: &context::V1) -> Result<(), Error> {
         // This epoch contains the following set of programs:
         match (predicate, witness) {
+            // The demo program!
+            (Predicate::Demo(p), Witness::Demo(w)) => {
+                demo::Program::verify(p, w, ctx).map_err(Error::Program)
+            }
+            (Predicate::Demo(_), _) | (_, Witness::Demo(_)) => Err(Error::TypeMismatch),
             // All other program types are invalid in this epoch.
             _ => Err(Error::InvalidEpoch),
         }

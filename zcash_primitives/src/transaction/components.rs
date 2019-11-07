@@ -29,6 +29,10 @@ pub struct OutPoint {
 }
 
 impl OutPoint {
+    pub fn new(hash: [u8; 32], n: u32) -> Self {
+        OutPoint { hash, n }
+    }
+
     pub fn read<R: Read>(mut reader: R) -> io::Result<Self> {
         let mut hash = [0; 32];
         reader.read_exact(&mut hash)?;
