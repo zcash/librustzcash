@@ -1,3 +1,7 @@
+//! FFI between the C++ zcashd codebase and the Rust Zcash crates.
+//!
+//! This is internal to zcashd and is not an officially-supported API.
+
 // Catch documentation errors caused by code changes.
 #![deny(intra_doc_link_resolution_failure)]
 // Clippy has a default-deny lint to prevent dereferencing raw pointer arguments
