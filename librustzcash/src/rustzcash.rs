@@ -509,7 +509,7 @@ pub extern "C" fn librustzcash_sapling_compute_cm(
     true
 }
 
-/// Compute [sk] [8] P for some 32-byte point P, and 32-byte Fs.
+/// Computes \[sk\] \[8\] P for some 32-byte point P, and 32-byte Fs.
 ///
 /// If P or sk are invalid, returns false. Otherwise, the result is written to
 /// the 32-byte `result` buffer.
@@ -542,7 +542,7 @@ pub extern "C" fn librustzcash_sapling_ka_agree(
 }
 
 /// Compute g_d = GH(diversifier) and returns false if the diversifier is
-/// invalid. Computes [esk] g_d and writes the result to the 32-byte `result`
+/// invalid. Computes \[esk\] g_d and writes the result to the 32-byte `result`
 /// buffer. Returns false if `esk` is not a valid scalar.
 #[no_mangle]
 pub extern "C" fn librustzcash_sapling_ka_derivepublic(
