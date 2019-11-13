@@ -195,7 +195,7 @@ impl TransparentInputs {
         Ok(())
     }
 
-    fn input_sum(&self) -> Amount {
+    fn value_sum(&self) -> Amount {
         #[cfg(feature = "transparent-inputs")]
         {
             self.inputs
@@ -282,7 +282,7 @@ pub struct Builder<R: RngCore + CryptoRng> {
     anchor: Option<Fr>,
     spends: Vec<SpendDescriptionInfo>,
     outputs: Vec<SaplingOutput>,
-    legacy: TransparentInputs,
+    transparent_inputs: TransparentInputs,
     change_address: Option<(OutgoingViewingKey, PaymentAddress<Bls12>)>,
 }
 
@@ -322,7 +322,7 @@ impl<R: RngCore + CryptoRng> Builder<R> {
             anchor: None,
             spends: vec![],
             outputs: vec![],
-            legacy: TransparentInputs::default(),
+            transparent_inputs: TransparentInputs::default(),
             change_address: None,
         }
     }
@@ -389,7 +389,7 @@ impl<R: RngCore + CryptoRng> Builder<R> {
         utxo: OutPoint,
         coin: TxOut,
     ) -> Result<(), Error> {
-        self.legacy.push(&mut self.mtx, sk, utxo, coin)
+        self.transparent_inputs.push(&mut self.mtx, sk, utxo, coin)
     }
 
     /// Adds a transparent address to send funds to.
@@ -439,7 +439,7 @@ impl<R: RngCore + CryptoRng> Builder<R> {
         //
 
         // Valid change
-        let change = self.mtx.value_balance - self.fee + self.legacy.input_sum()
+        let change = self.mtx.value_balance - self.fee + self.transparent_inputs.value_sum()
             - self
                 .mtx
                 .vout
@@ -646,7 +646,7 @@ impl<R: RngCore + CryptoRng> Builder<R> {
         );
 
         // Transparent signatures
-        self.legacy
+        self.transparent_inputs
             .apply_signatures(&mut self.mtx, consensus_branch_id);
 
         Ok((
