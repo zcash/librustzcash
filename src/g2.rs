@@ -393,8 +393,6 @@ impl G2Affine {
             xc0.and_then(|xc0| {
                 let x = Fp2 { c0: xc0, c1: xc1 };
 
-                use crate::CtOptionExt;
-
                 // If the infinity flag is set, return the value assuming
                 // the x-coordinate is zero and the sort bit is not set.
                 //

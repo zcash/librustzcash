@@ -241,8 +241,6 @@ impl Fp2 {
     }
 
     pub fn sqrt(&self) -> CtOption<Self> {
-        use crate::CtOptionExt;
-
         // Algorithm 9, https://eprint.iacr.org/2012/685.pdf
         // with constant time modifications.
 

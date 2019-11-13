@@ -322,8 +322,6 @@ impl G1Affine {
         };
 
         x.and_then(|x| {
-            use crate::CtOptionExt;
-
             // If the infinity flag is set, return the value assuming
             // the x-coordinate is zero and the sort bit is not set.
             //
