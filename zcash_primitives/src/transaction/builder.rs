@@ -178,6 +178,31 @@ impl TransparentInputs {
             Amount::zero()
         }
     }
+
+    #[cfg(feature = "transparent-inputs")]
+    fn apply_signatures(&self, mtx: &mut TransactionData, consensus_branch_id: u32) {
+        for (i, info) in self.inputs.iter().enumerate() {
+            sighash.copy_from_slice(&signature_hash_data(
+                mtx,
+                consensus_branch_id,
+                SIGHASH_ALL,
+                Some((i, &info.coin.script_pubkey, info.coin.value)),
+            ));
+
+            let msg = secp256k1::Message::from_slice(&sighash).expect("32 bytes");
+            let sig = self.secp.sign(&msg, &info.sk);
+
+            // Signature has to have "SIGHASH_ALL" appended to it
+            let mut sig_bytes: Vec<u8> = sig.serialize_der()[..].to_vec();
+            sig_bytes.extend(&[SIGHASH_ALL as u8]);
+
+            // P2PKH scriptSig
+            mtx.vin[i].script_sig = Script::default() << &sig_bytes[..] << &info.pubkey[..];
+        }
+    }
+
+    #[cfg(not(feature = "transparent-inputs"))]
+    fn apply_signatures(&self, _: &mut TransactionData, _: u32) {}
 }
 
 /// Metadata about a transaction created by a [`Builder`].
@@ -612,28 +637,8 @@ impl<R: RngCore + CryptoRng> Builder<R> {
         );
 
         // Transparent signatures
-        #[cfg(feature = "transparent-inputs")]
-        {
-            for (i, info) in self.legacy.inputs.iter().enumerate() {
-                sighash.copy_from_slice(&signature_hash_data(
-                    &self.mtx,
-                    consensus_branch_id,
-                    SIGHASH_ALL,
-                    Some((i, &info.coin.script_pubkey, info.coin.value)),
-                ));
-
-                let msg = secp256k1::Message::from_slice(&sighash).expect("32 bytes");
-                let sig = self.legacy.secp.sign(&msg, &info.sk);
-
-                // Signature has to have "SIGHASH_ALL" appended to it
-                let mut sig_bytes: Vec<u8> = sig.serialize_der()[..].to_vec();
-                sig_bytes.extend(&[SIGHASH_ALL as u8]);
-
-                // P2PKH scriptSig
-                self.mtx.vin[i].script_sig =
-                    Script::default() << &sig_bytes[..] << &info.pubkey[..];
-            }
-        }
+        self.legacy
+            .apply_signatures(&mut self.mtx, consensus_branch_id);
 
         Ok((
             self.mtx.freeze().expect("Transaction should be complete"),
