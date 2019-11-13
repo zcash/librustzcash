@@ -76,3 +76,6 @@ mod pairings;
 
 #[cfg(feature = "groups")]
 pub use pairings::{pairing, Gt, MillerLoopResult};
+
+#[cfg(feature = "pairings")]
+pub use pairings::{multi_miller_loop, G2Prepared};
