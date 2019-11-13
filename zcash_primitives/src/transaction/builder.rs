@@ -164,6 +164,37 @@ impl Default for TransparentInputs {
 struct TransparentInputs;
 
 impl TransparentInputs {
+    #[cfg(feature = "transparent-inputs")]
+    fn push(
+        &mut self,
+        mtx: &mut TransactionData,
+        sk: secp256k1::SecretKey,
+        utxo: OutPoint,
+        coin: TxOut,
+    ) -> Result<(), Error> {
+        if coin.value.is_negative() {
+            return Err(Error::InvalidAmount);
+        }
+
+        let pubkey = secp256k1::PublicKey::from_secret_key(&self.secp, &sk).serialize();
+        match coin.script_pubkey.address() {
+            Some(TransparentAddress::PublicKey(hash)) => {
+                use ripemd160::Ripemd160;
+                use sha2::{Digest, Sha256};
+
+                if &hash[..] != &Ripemd160::digest(&Sha256::digest(&pubkey))[..] {
+                    return Err(Error::InvalidAddress);
+                }
+            }
+            _ => return Err(Error::InvalidAddress),
+        }
+
+        mtx.vin.push(TxIn::new(utxo));
+        self.inputs.push(TransparentInputInfo { sk, pubkey, coin });
+
+        Ok(())
+    }
+
     fn input_sum(&self) -> Amount {
         #[cfg(feature = "transparent-inputs")]
         {
@@ -358,29 +389,7 @@ impl<R: RngCore + CryptoRng> Builder<R> {
         utxo: OutPoint,
         coin: TxOut,
     ) -> Result<(), Error> {
-        if coin.value.is_negative() {
-            return Err(Error::InvalidAmount);
-        }
-
-        let pubkey = secp256k1::PublicKey::from_secret_key(&self.legacy.secp, &sk).serialize();
-        match coin.script_pubkey.address() {
-            Some(TransparentAddress::PublicKey(hash)) => {
-                use ripemd160::Ripemd160;
-                use sha2::{Digest, Sha256};
-
-                if &hash[..] != &Ripemd160::digest(&Sha256::digest(&pubkey))[..] {
-                    return Err(Error::InvalidAddress);
-                }
-            }
-            _ => return Err(Error::InvalidAddress),
-        }
-
-        self.mtx.vin.push(TxIn::new(utxo));
-        self.legacy
-            .inputs
-            .push(TransparentInputInfo { sk, pubkey, coin });
-
-        Ok(())
+        self.legacy.push(&mut self.mtx, sk, utxo, coin)
     }
 
     /// Adds a transparent address to send funds to.
