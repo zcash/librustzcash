@@ -1,10 +1,10 @@
 //! This module provides an implementation of the BLS12-381 scalar field $\mathbb{F}_q$
 //! where `q = 0x73eda753299d7d483339d80809a1d80553bda402fffe5bfeffffffff00000001`
 
+use core::convert::TryFrom;
 use core::fmt;
 use core::ops::{Add, AddAssign, Mul, MulAssign, Neg, Sub, SubAssign};
 
-use byteorder::{ByteOrder, LittleEndian};
 use subtle::{Choice, ConditionallySelectable, ConstantTimeEq, CtOption};
 
 use crate::util::{adc, mac, sbb};
@@ -193,10 +193,10 @@ impl Scalar {
     pub fn from_bytes(bytes: &[u8; 32]) -> CtOption<Scalar> {
         let mut tmp = Scalar([0, 0, 0, 0]);
 
-        tmp.0[0] = LittleEndian::read_u64(&bytes[0..8]);
-        tmp.0[1] = LittleEndian::read_u64(&bytes[8..16]);
-        tmp.0[2] = LittleEndian::read_u64(&bytes[16..24]);
-        tmp.0[3] = LittleEndian::read_u64(&bytes[24..32]);
+        tmp.0[0] = u64::from_le_bytes(<[u8; 8]>::try_from(&bytes[0..8]).unwrap());
+        tmp.0[1] = u64::from_le_bytes(<[u8; 8]>::try_from(&bytes[8..16]).unwrap());
+        tmp.0[2] = u64::from_le_bytes(<[u8; 8]>::try_from(&bytes[16..24]).unwrap());
+        tmp.0[3] = u64::from_le_bytes(<[u8; 8]>::try_from(&bytes[24..32]).unwrap());
 
         // Try to subtract the modulus
         let (_, borrow) = sbb(tmp.0[0], MODULUS.0[0], 0);
@@ -224,10 +224,10 @@ impl Scalar {
         let tmp = Scalar::montgomery_reduce(self.0[0], self.0[1], self.0[2], self.0[3], 0, 0, 0, 0);
 
         let mut res = [0; 32];
-        LittleEndian::write_u64(&mut res[0..8], tmp.0[0]);
-        LittleEndian::write_u64(&mut res[8..16], tmp.0[1]);
-        LittleEndian::write_u64(&mut res[16..24], tmp.0[2]);
-        LittleEndian::write_u64(&mut res[24..32], tmp.0[3]);
+        res[0..8].copy_from_slice(&tmp.0[0].to_le_bytes());
+        res[8..16].copy_from_slice(&tmp.0[1].to_le_bytes());
+        res[16..24].copy_from_slice(&tmp.0[2].to_le_bytes());
+        res[24..32].copy_from_slice(&tmp.0[3].to_le_bytes());
 
         res
     }
@@ -236,14 +236,14 @@ impl Scalar {
     /// a `Scalar` by reducing by the modulus.
     pub fn from_bytes_wide(bytes: &[u8; 64]) -> Scalar {
         Scalar::from_u512([
-            LittleEndian::read_u64(&bytes[0..8]),
-            LittleEndian::read_u64(&bytes[8..16]),
-            LittleEndian::read_u64(&bytes[16..24]),
-            LittleEndian::read_u64(&bytes[24..32]),
-            LittleEndian::read_u64(&bytes[32..40]),
-            LittleEndian::read_u64(&bytes[40..48]),
-            LittleEndian::read_u64(&bytes[48..56]),
-            LittleEndian::read_u64(&bytes[56..64]),
+            u64::from_le_bytes(<[u8; 8]>::try_from(&bytes[0..8]).unwrap()),
+            u64::from_le_bytes(<[u8; 8]>::try_from(&bytes[8..16]).unwrap()),
+            u64::from_le_bytes(<[u8; 8]>::try_from(&bytes[16..24]).unwrap()),
+            u64::from_le_bytes(<[u8; 8]>::try_from(&bytes[24..32]).unwrap()),
+            u64::from_le_bytes(<[u8; 8]>::try_from(&bytes[32..40]).unwrap()),
+            u64::from_le_bytes(<[u8; 8]>::try_from(&bytes[40..48]).unwrap()),
+            u64::from_le_bytes(<[u8; 8]>::try_from(&bytes[48..56]).unwrap()),
+            u64::from_le_bytes(<[u8; 8]>::try_from(&bytes[56..64]).unwrap()),
         ])
     }
 

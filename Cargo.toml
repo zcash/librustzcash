@@ -24,10 +24,6 @@ required-features = ["groups"]
 version = "2.2.1"
 default-features = false
 
-[dependencies.byteorder]
-version = "1"
-default-features = false
-
 [features]
 default = ["groups", "pairings"]
 groups = []

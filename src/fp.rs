@@ -1,10 +1,10 @@
 //! This module provides an implementation of the BLS12-381 base field `GF(p)`
 //! where `p = 0x1a0111ea397fe69a4b1ba7b6434bacd764774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab`
 
+use core::convert::TryFrom;
 use core::fmt;
 use core::ops::{Add, AddAssign, Mul, MulAssign, Neg, Sub, SubAssign};
 
-use byteorder::{BigEndian, ByteOrder};
 use subtle::{Choice, ConditionallySelectable, ConstantTimeEq, CtOption};
 
 use crate::util::{adc, mac, sbb};
@@ -167,12 +167,12 @@ impl Fp {
     pub fn from_bytes(bytes: &[u8; 48]) -> CtOption<Fp> {
         let mut tmp = Fp([0, 0, 0, 0, 0, 0]);
 
-        tmp.0[5] = BigEndian::read_u64(&bytes[0..8]);
-        tmp.0[4] = BigEndian::read_u64(&bytes[8..16]);
-        tmp.0[3] = BigEndian::read_u64(&bytes[16..24]);
-        tmp.0[2] = BigEndian::read_u64(&bytes[24..32]);
-        tmp.0[1] = BigEndian::read_u64(&bytes[32..40]);
-        tmp.0[0] = BigEndian::read_u64(&bytes[40..48]);
+        tmp.0[5] = u64::from_be_bytes(<[u8; 8]>::try_from(&bytes[0..8]).unwrap());
+        tmp.0[4] = u64::from_be_bytes(<[u8; 8]>::try_from(&bytes[8..16]).unwrap());
+        tmp.0[3] = u64::from_be_bytes(<[u8; 8]>::try_from(&bytes[16..24]).unwrap());
+        tmp.0[2] = u64::from_be_bytes(<[u8; 8]>::try_from(&bytes[24..32]).unwrap());
+        tmp.0[1] = u64::from_be_bytes(<[u8; 8]>::try_from(&bytes[32..40]).unwrap());
+        tmp.0[0] = u64::from_be_bytes(<[u8; 8]>::try_from(&bytes[40..48]).unwrap());
 
         // Try to subtract the modulus
         let (_, borrow) = sbb(tmp.0[0], MODULUS[0], 0);
@@ -204,12 +204,12 @@ impl Fp {
         );
 
         let mut res = [0; 48];
-        BigEndian::write_u64(&mut res[0..8], tmp.0[5]);
-        BigEndian::write_u64(&mut res[8..16], tmp.0[4]);
-        BigEndian::write_u64(&mut res[16..24], tmp.0[3]);
-        BigEndian::write_u64(&mut res[24..32], tmp.0[2]);
-        BigEndian::write_u64(&mut res[32..40], tmp.0[1]);
-        BigEndian::write_u64(&mut res[40..48], tmp.0[0]);
+        res[0..8].copy_from_slice(&tmp.0[5].to_be_bytes());
+        res[8..16].copy_from_slice(&tmp.0[4].to_be_bytes());
+        res[16..24].copy_from_slice(&tmp.0[3].to_be_bytes());
+        res[24..32].copy_from_slice(&tmp.0[2].to_be_bytes());
+        res[32..40].copy_from_slice(&tmp.0[1].to_be_bytes());
+        res[40..48].copy_from_slice(&tmp.0[0].to_be_bytes());
 
         res
     }
