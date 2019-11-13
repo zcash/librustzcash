@@ -15,6 +15,7 @@ use std::path::Path;
 pub mod circuit;
 mod hashreader;
 pub mod sapling;
+pub mod sprout;
 
 #[cfg(feature = "local-prover")]
 pub mod prover;
