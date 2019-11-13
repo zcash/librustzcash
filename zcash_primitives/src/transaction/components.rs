@@ -21,13 +21,17 @@ const PHGR_PROOF_SIZE: usize = (33 + 33 + 65 + 33 + 33 + 33 + 33 + 33);
 const ZC_NUM_JS_INPUTS: usize = 2;
 const ZC_NUM_JS_OUTPUTS: usize = 2;
 
-#[derive(Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct OutPoint {
     hash: [u8; 32],
     n: u32,
 }
 
 impl OutPoint {
+    pub fn new(hash: [u8; 32], n: u32) -> Self {
+        OutPoint { hash, n }
+    }
+
     pub fn read<R: Read>(mut reader: R) -> io::Result<Self> {
         let mut hash = [0; 32];
         reader.read_exact(&mut hash)?;
@@ -44,11 +48,20 @@ impl OutPoint {
 #[derive(Debug)]
 pub struct TxIn {
     pub prevout: OutPoint,
-    script_sig: Script,
+    pub script_sig: Script,
     pub sequence: u32,
 }
 
 impl TxIn {
+    #[cfg(feature = "transparent-inputs")]
+    pub fn new(prevout: OutPoint) -> Self {
+        TxIn {
+            prevout,
+            script_sig: Script::default(),
+            sequence: std::u32::MAX,
+        }
+    }
+
     pub fn read<R: Read>(mut reader: &mut R) -> io::Result<Self> {
         let prevout = OutPoint::read(&mut reader)?;
         let script_sig = Script::read(&mut reader)?;
@@ -68,7 +81,7 @@ impl TxIn {
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct TxOut {
     pub value: Amount,
     pub script_pubkey: Script,

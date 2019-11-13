@@ -154,7 +154,7 @@ pub fn signature_hash_data(
     tx: &TransactionData,
     consensus_branch_id: u32,
     hash_type: u32,
-    transparent_input: Option<(usize, Script, Amount)>,
+    transparent_input: Option<(usize, &Script, Amount)>,
 ) -> Vec<u8> {
     let sigversion = SigHashVersion::from_tx(tx);
     match sigversion {
@@ -232,7 +232,7 @@ pub fn signature_hash(
     tx: &Transaction,
     consensus_branch_id: u32,
     hash_type: u32,
-    transparent_input: Option<(usize, Script, Amount)>,
+    transparent_input: Option<(usize, &Script, Amount)>,
 ) -> Vec<u8> {
     signature_hash_data(tx, consensus_branch_id, hash_type, transparent_input)
 }

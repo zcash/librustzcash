@@ -24,6 +24,12 @@ use crate::{
     JUBJUB,
 };
 
+#[cfg(feature = "transparent-inputs")]
+use crate::{
+    legacy::Script,
+    transaction::components::{OutPoint, TxIn},
+};
+
 const DEFAULT_TX_EXPIRY_DELTA: u32 = 20;
 
 /// If there are any shielded inputs, always have at least two shielded outputs, padding
@@ -130,6 +136,106 @@ impl SaplingOutput {
     }
 }
 
+#[cfg(feature = "transparent-inputs")]
+struct TransparentInputInfo {
+    sk: secp256k1::SecretKey,
+    pubkey: [u8; secp256k1::constants::PUBLIC_KEY_SIZE],
+    coin: TxOut,
+}
+
+#[cfg(feature = "transparent-inputs")]
+struct TransparentInputs {
+    secp: secp256k1::Secp256k1<secp256k1::SignOnly>,
+    inputs: Vec<TransparentInputInfo>,
+}
+
+#[cfg(feature = "transparent-inputs")]
+impl Default for TransparentInputs {
+    fn default() -> Self {
+        TransparentInputs {
+            secp: secp256k1::Secp256k1::gen_new(),
+            inputs: Default::default(),
+        }
+    }
+}
+
+#[cfg(not(feature = "transparent-inputs"))]
+#[derive(Default)]
+struct TransparentInputs;
+
+impl TransparentInputs {
+    #[cfg(feature = "transparent-inputs")]
+    fn push(
+        &mut self,
+        mtx: &mut TransactionData,
+        sk: secp256k1::SecretKey,
+        utxo: OutPoint,
+        coin: TxOut,
+    ) -> Result<(), Error> {
+        if coin.value.is_negative() {
+            return Err(Error::InvalidAmount);
+        }
+
+        let pubkey = secp256k1::PublicKey::from_secret_key(&self.secp, &sk).serialize();
+        match coin.script_pubkey.address() {
+            Some(TransparentAddress::PublicKey(hash)) => {
+                use ripemd160::Ripemd160;
+                use sha2::{Digest, Sha256};
+
+                if &hash[..] != &Ripemd160::digest(&Sha256::digest(&pubkey))[..] {
+                    return Err(Error::InvalidAddress);
+                }
+            }
+            _ => return Err(Error::InvalidAddress),
+        }
+
+        mtx.vin.push(TxIn::new(utxo));
+        self.inputs.push(TransparentInputInfo { sk, pubkey, coin });
+
+        Ok(())
+    }
+
+    fn value_sum(&self) -> Amount {
+        #[cfg(feature = "transparent-inputs")]
+        {
+            self.inputs
+                .iter()
+                .map(|input| input.coin.value)
+                .sum::<Amount>()
+        }
+
+        #[cfg(not(feature = "transparent-inputs"))]
+        {
+            Amount::zero()
+        }
+    }
+
+    #[cfg(feature = "transparent-inputs")]
+    fn apply_signatures(&self, mtx: &mut TransactionData, consensus_branch_id: u32) {
+        for (i, info) in self.inputs.iter().enumerate() {
+            sighash.copy_from_slice(&signature_hash_data(
+                mtx,
+                consensus_branch_id,
+                SIGHASH_ALL,
+                Some((i, &info.coin.script_pubkey, info.coin.value)),
+            ));
+
+            let msg = secp256k1::Message::from_slice(&sighash).expect("32 bytes");
+            let sig = self.secp.sign(&msg, &info.sk);
+
+            // Signature has to have "SIGHASH_ALL" appended to it
+            let mut sig_bytes: Vec<u8> = sig.serialize_der()[..].to_vec();
+            sig_bytes.extend(&[SIGHASH_ALL as u8]);
+
+            // P2PKH scriptSig
+            mtx.vin[i].script_sig = Script::default() << &sig_bytes[..] << &info.pubkey[..];
+        }
+    }
+
+    #[cfg(not(feature = "transparent-inputs"))]
+    fn apply_signatures(&self, _: &mut TransactionData, _: u32) {}
+}
+
 /// Metadata about a transaction created by a [`Builder`].
 #[derive(Debug, PartialEq)]
 pub struct TransactionMetadata {
@@ -176,6 +282,7 @@ pub struct Builder<R: RngCore + CryptoRng> {
     anchor: Option<Fr>,
     spends: Vec<SpendDescriptionInfo>,
     outputs: Vec<SaplingOutput>,
+    transparent_inputs: TransparentInputs,
     change_address: Option<(OutgoingViewingKey, PaymentAddress<Bls12>)>,
 }
 
@@ -215,6 +322,7 @@ impl<R: RngCore + CryptoRng> Builder<R> {
             anchor: None,
             spends: vec![],
             outputs: vec![],
+            transparent_inputs: TransparentInputs::default(),
             change_address: None,
         }
     }
@@ -273,6 +381,17 @@ impl<R: RngCore + CryptoRng> Builder<R> {
         Ok(())
     }
 
+    /// Adds a transparent coin to be spent in this transaction.
+    #[cfg(feature = "transparent-inputs")]
+    pub fn add_transparent_input(
+        &mut self,
+        sk: secp256k1::SecretKey,
+        utxo: OutPoint,
+        coin: TxOut,
+    ) -> Result<(), Error> {
+        self.transparent_inputs.push(&mut self.mtx, sk, utxo, coin)
+    }
+
     /// Adds a transparent address to send funds to.
     pub fn add_transparent_output(
         &mut self,
@@ -320,8 +439,7 @@ impl<R: RngCore + CryptoRng> Builder<R> {
         //
 
         // Valid change
-        let change = self.mtx.value_balance
-            - self.fee
+        let change = self.mtx.value_balance - self.fee + self.transparent_inputs.value_sum()
             - self
                 .mtx
                 .vout
@@ -373,7 +491,6 @@ impl<R: RngCore + CryptoRng> Builder<R> {
         //
 
         let mut ctx = prover.new_sapling_proving_context();
-        let anchor = self.anchor.expect("anchor was set if spends were added");
 
         // Pad Sapling outputs
         let orig_outputs_len = outputs.len();
@@ -390,40 +507,44 @@ impl<R: RngCore + CryptoRng> Builder<R> {
         tx_metadata.output_indices.resize(orig_outputs_len, 0);
 
         // Create Sapling SpendDescriptions
-        for (i, (pos, spend)) in spends.iter().enumerate() {
-            let proof_generation_key = spend.extsk.expsk.proof_generation_key(&JUBJUB);
+        if !spends.is_empty() {
+            let anchor = self.anchor.expect("anchor was set if spends were added");
 
-            let mut nullifier = [0u8; 32];
-            nullifier.copy_from_slice(&spend.note.nf(
-                &proof_generation_key.to_viewing_key(&JUBJUB),
-                spend.witness.position,
-                &JUBJUB,
-            ));
+            for (i, (pos, spend)) in spends.iter().enumerate() {
+                let proof_generation_key = spend.extsk.expsk.proof_generation_key(&JUBJUB);
 
-            let (zkproof, cv, rk) = prover
-                .spend_proof(
-                    &mut ctx,
-                    proof_generation_key,
-                    spend.diversifier,
-                    spend.note.r,
-                    spend.alpha,
-                    spend.note.value,
+                let mut nullifier = [0u8; 32];
+                nullifier.copy_from_slice(&spend.note.nf(
+                    &proof_generation_key.to_viewing_key(&JUBJUB),
+                    spend.witness.position,
+                    &JUBJUB,
+                ));
+
+                let (zkproof, cv, rk) = prover
+                    .spend_proof(
+                        &mut ctx,
+                        proof_generation_key,
+                        spend.diversifier,
+                        spend.note.r,
+                        spend.alpha,
+                        spend.note.value,
+                        anchor,
+                        spend.witness.clone(),
+                    )
+                    .map_err(|()| Error::SpendProof)?;
+
+                self.mtx.shielded_spends.push(SpendDescription {
+                    cv,
                     anchor,
-                    spend.witness.clone(),
-                )
-                .map_err(|()| Error::SpendProof)?;
+                    nullifier,
+                    rk,
+                    zkproof,
+                    spend_auth_sig: None,
+                });
 
-            self.mtx.shielded_spends.push(SpendDescription {
-                cv,
-                anchor,
-                nullifier,
-                rk,
-                zkproof,
-                spend_auth_sig: None,
-            });
-
-            // Record the post-randomized spend location
-            tx_metadata.spend_indices[*pos] = i;
+                // Record the post-randomized spend location
+                tx_metadata.spend_indices[*pos] = i;
+            }
         }
 
         // Create Sapling OutputDescriptions
@@ -523,6 +644,10 @@ impl<R: RngCore + CryptoRng> Builder<R> {
                 .binding_sig(&mut ctx, self.mtx.value_balance, &sighash)
                 .map_err(|()| Error::BindingSig)?,
         );
+
+        // Transparent signatures
+        self.transparent_inputs
+            .apply_signatures(&mut self.mtx, consensus_branch_id);
 
         Ok((
             self.mtx.freeze().expect("Transaction should be complete"),
