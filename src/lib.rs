@@ -71,4 +71,5 @@ const BLS_X_IS_NEGATIVE: bool = true;
 #[cfg(feature = "groups")]
 mod pairings;
 
+#[cfg(feature = "groups")]
 pub use pairings::{pairing, Gt, MillerLoopResult};
