@@ -228,8 +228,7 @@ impl_binops_multiplicative!(Gt, Scalar);
 /// conjunction with the [`multi_miller_loop`](crate::multi_miller_loop)
 /// function provided by this crate.
 ///
-/// Requires the `pairings` crate feature to be enabled, which requires the
-/// `alloc` crate.
+/// Requires the `alloc` and `pairing` crate features to be enabled.
 pub struct G2Prepared {
     infinity: Choice,
     coeffs: Vec<(Fp2, Fp2, Fp2)>,
@@ -290,8 +289,7 @@ impl From<G2Affine> for G2Prepared {
 /// Computes $$\sum_{i=1}^n \textbf{ML}(a_i, b_i)$$ given a series of terms
 /// $$(a_1, b_1), (a_2, b_2), ..., (a_n, b_n).$$
 ///
-/// Requires the `pairings` crate feature to be enabled, which requires the
-/// `alloc` crate.
+/// Requires the `alloc` and `pairing` crate features to be enabled.
 pub fn multi_miller_loop(terms: &[(&G1Affine, &G2Prepared)]) -> MillerLoopResult {
     struct Adder<'a, 'b, 'c> {
         terms: &'c [(&'a G1Affine, &'b G2Prepared)],
