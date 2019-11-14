@@ -9,6 +9,8 @@
 //! * All operations are constant time unless explicitly noted.
 
 #![no_std]
+// Catch documentation errors caused by code changes.
+#![deny(intra_doc_link_resolution_failure)]
 #![deny(missing_debug_implementations)]
 #![deny(missing_docs)]
 #![deny(unsafe_code)]
@@ -39,6 +41,7 @@ mod util;
 /// and implemented by this library.
 pub mod notes {
     pub mod design;
+    pub mod serialization;
 }
 
 mod scalar;
