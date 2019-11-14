@@ -6,6 +6,9 @@ use core::ops::{Add, AddAssign, Mul, MulAssign, Neg, Sub, SubAssign};
 
 use subtle::{Choice, ConditionallySelectable, ConstantTimeEq};
 
+#[cfg(feature = "pairings")]
+use alloc::vec::Vec;
+
 /// Represents results of a Miller loop, one of the most expensive portions
 /// of the pairing function. `MillerLoopResult`s cannot be compared with each
 /// other until `.final_exponentiation()` is called, which is also expensive.
@@ -216,23 +219,148 @@ impl<'a, 'b> Mul<&'b Scalar> for &'a Gt {
 impl_binops_additive!(Gt, Gt);
 impl_binops_multiplicative!(Gt, Scalar);
 
+#[cfg(feature = "pairings")]
+#[derive(Clone, Debug)]
+/// This structure contains cached computations pertaining to a $\mathbb{G}_2$
+/// element as part of the pairing function (specifically, the Miller loop) and
+/// so should be computed whenever a $\mathbb{G}_2$ element is being used in
+/// multiple pairings or is otherwise known in advance. This should be used in
+/// conjunction with the [`multi_miller_loop`](crate::multi_miller_loop)
+/// function provided by this crate.
+///
+/// Requires the `pairings` crate feature to be enabled, which requires the
+/// `alloc` crate.
+pub struct G2Prepared {
+    infinity: Choice,
+    coeffs: Vec<(Fp2, Fp2, Fp2)>,
+}
+
+#[cfg(feature = "pairings")]
+impl From<G2Affine> for G2Prepared {
+    fn from(q: G2Affine) -> G2Prepared {
+        struct Adder {
+            cur: G2Projective,
+            base: G2Affine,
+            coeffs: Vec<(Fp2, Fp2, Fp2)>,
+        }
+
+        impl MillerLoopDriver for Adder {
+            type Output = ();
+
+            fn doubling_step(&mut self, _: Self::Output) -> Self::Output {
+                let coeffs = doubling_step(&mut self.cur);
+                self.coeffs.push(coeffs);
+            }
+            fn addition_step(&mut self, _: Self::Output) -> Self::Output {
+                let coeffs = addition_step(&mut self.cur, &self.base);
+                self.coeffs.push(coeffs);
+            }
+            fn square_output(_: Self::Output) -> Self::Output {
+                ()
+            }
+            fn conjugate(_: Self::Output) -> Self::Output {
+                ()
+            }
+            fn one() -> Self::Output {
+                ()
+            }
+        }
+
+        let is_identity = q.is_identity();
+        let q = G2Affine::conditional_select(&q, &G2Affine::generator(), is_identity);
+
+        let mut adder = Adder {
+            cur: G2Projective::from(q),
+            base: q,
+            coeffs: Vec::with_capacity(68),
+        };
+
+        miller_loop(&mut adder);
+
+        assert_eq!(adder.coeffs.len(), 68);
+
+        G2Prepared {
+            infinity: is_identity,
+            coeffs: adder.coeffs,
+        }
+    }
+}
+
+#[cfg(feature = "pairings")]
+/// Computes $$\sum_{i=1}^n \textbf{ML}(a_i, b_i)$$ given a series of terms
+/// $$(a_1, b_1), (a_2, b_2), ..., (a_n, b_n).$$
+///
+/// Requires the `pairings` crate feature to be enabled, which requires the
+/// `alloc` crate.
+pub fn multi_miller_loop(terms: &[(&G1Affine, &G2Prepared)]) -> MillerLoopResult {
+    struct Adder<'a, 'b, 'c> {
+        terms: &'c [(&'a G1Affine, &'b G2Prepared)],
+        index: usize,
+    }
+
+    impl<'a, 'b, 'c> MillerLoopDriver for Adder<'a, 'b, 'c> {
+        type Output = Fp12;
+
+        fn doubling_step(&mut self, mut f: Self::Output) -> Self::Output {
+            let index = self.index;
+            for term in self.terms {
+                let either_identity = term.0.is_identity() | term.1.infinity;
+
+                let new_f = ell(f, &term.1.coeffs[index], term.0);
+                f = Fp12::conditional_select(&new_f, &f, either_identity);
+            }
+            self.index += 1;
+
+            f
+        }
+        fn addition_step(&mut self, mut f: Self::Output) -> Self::Output {
+            let index = self.index;
+            for term in self.terms {
+                let either_identity = term.0.is_identity() | term.1.infinity;
+
+                let new_f = ell(f, &term.1.coeffs[index], term.0);
+                f = Fp12::conditional_select(&new_f, &f, either_identity);
+            }
+            self.index += 1;
+
+            f
+        }
+        fn square_output(f: Self::Output) -> Self::Output {
+            f.square()
+        }
+        fn conjugate(f: Self::Output) -> Self::Output {
+            f.conjugate()
+        }
+        fn one() -> Self::Output {
+            Fp12::one()
+        }
+    }
+
+    let mut adder = Adder { terms, index: 0 };
+
+    let tmp = miller_loop(&mut adder);
+
+    MillerLoopResult(tmp)
+}
+
 /// Invoke the pairing function without the use of precomputation and other optimizations.
 pub fn pairing(p: &G1Affine, q: &G2Affine) -> Gt {
     struct Adder {
         cur: G2Projective,
         base: G2Affine,
+        p: G1Affine,
     }
 
     impl MillerLoopDriver for Adder {
         type Output = Fp12;
 
-        fn doubling_step(&mut self, f: Self::Output, p: &G1Affine) -> Self::Output {
+        fn doubling_step(&mut self, f: Self::Output) -> Self::Output {
             let coeffs = doubling_step(&mut self.cur);
-            ell(f, &coeffs, p)
+            ell(f, &coeffs, &self.p)
         }
-        fn addition_step(&mut self, f: Self::Output, p: &G1Affine) -> Self::Output {
+        fn addition_step(&mut self, f: Self::Output) -> Self::Output {
             let coeffs = addition_step(&mut self.cur, &self.base);
-            ell(f, &coeffs, p)
+            ell(f, &coeffs, &self.p)
         }
         fn square_output(f: Self::Output) -> Self::Output {
             f.square()
@@ -252,9 +380,10 @@ pub fn pairing(p: &G1Affine, q: &G2Affine) -> Gt {
     let mut adder = Adder {
         cur: G2Projective::from(q),
         base: q,
+        p,
     };
 
-    let tmp = miller_loop(&mut adder, &p);
+    let tmp = miller_loop(&mut adder);
     let tmp = MillerLoopResult(Fp12::conditional_select(
         &tmp,
         &Fp12::one(),
@@ -266,8 +395,8 @@ pub fn pairing(p: &G1Affine, q: &G2Affine) -> Gt {
 trait MillerLoopDriver {
     type Output;
 
-    fn doubling_step(&mut self, f: Self::Output, p: &G1Affine) -> Self::Output;
-    fn addition_step(&mut self, f: Self::Output, p: &G1Affine) -> Self::Output;
+    fn doubling_step(&mut self, f: Self::Output) -> Self::Output;
+    fn addition_step(&mut self, f: Self::Output) -> Self::Output;
     fn square_output(f: Self::Output) -> Self::Output;
     fn conjugate(f: Self::Output) -> Self::Output;
     fn one() -> Self::Output;
@@ -276,7 +405,7 @@ trait MillerLoopDriver {
 /// This is a "generic" implementation of the Miller loop to avoid duplicating code
 /// structure elsewhere; instead, we'll write concrete instantiations of
 /// `MillerLoopDriver` for whatever purposes we need (such as caching modes).
-fn miller_loop<D: MillerLoopDriver>(driver: &mut D, p: &G1Affine) -> D::Output {
+fn miller_loop<D: MillerLoopDriver>(driver: &mut D) -> D::Output {
     let mut f = D::one();
 
     let mut found_one = false;
@@ -286,16 +415,16 @@ fn miller_loop<D: MillerLoopDriver>(driver: &mut D, p: &G1Affine) -> D::Output {
             continue;
         }
 
-        f = driver.doubling_step(f, p);
+        f = driver.doubling_step(f);
 
         if i {
-            f = driver.addition_step(f, p);
+            f = driver.addition_step(f);
         }
 
         f = D::square_output(f);
     }
 
-    f = driver.doubling_step(f, p);
+    f = driver.doubling_step(f);
 
     if BLS_X_IS_NEGATIVE {
         f = D::conjugate(f);
@@ -413,4 +542,58 @@ fn test_unitary() {
 
     assert_eq!(p, q);
     assert_eq!(q, r);
+}
+
+#[cfg(feature = "pairings")]
+#[test]
+fn test_multi_miller_loop() {
+    let a1 = G1Affine::generator();
+    let b1 = G2Affine::generator();
+
+    let a2 = G1Affine::from(
+        G1Affine::generator() * Scalar::from_raw([1, 2, 3, 4]).invert().unwrap().square(),
+    );
+    let b2 = G2Affine::from(
+        G2Affine::generator() * Scalar::from_raw([4, 2, 2, 4]).invert().unwrap().square(),
+    );
+
+    let a3 = G1Affine::identity();
+    let b3 = G2Affine::from(
+        G2Affine::generator() * Scalar::from_raw([9, 2, 2, 4]).invert().unwrap().square(),
+    );
+
+    let a4 = G1Affine::from(
+        G1Affine::generator() * Scalar::from_raw([5, 5, 5, 5]).invert().unwrap().square(),
+    );
+    let b4 = G2Affine::identity();
+
+    let a5 = G1Affine::from(
+        G1Affine::generator() * Scalar::from_raw([323, 32, 3, 1]).invert().unwrap().square(),
+    );
+    let b5 = G2Affine::from(
+        G2Affine::generator() * Scalar::from_raw([4, 2, 2, 9099]).invert().unwrap().square(),
+    );
+
+    let b1_prepared = G2Prepared::from(b1);
+    let b2_prepared = G2Prepared::from(b2);
+    let b3_prepared = G2Prepared::from(b3);
+    let b4_prepared = G2Prepared::from(b4);
+    let b5_prepared = G2Prepared::from(b5);
+
+    let expected = pairing(&a1, &b1)
+        + pairing(&a2, &b2)
+        + pairing(&a3, &b3)
+        + pairing(&a4, &b4)
+        + pairing(&a5, &b5);
+
+    let test = multi_miller_loop(&[
+        (&a1, &b1_prepared),
+        (&a2, &b2_prepared),
+        (&a3, &b3_prepared),
+        (&a4, &b4_prepared),
+        (&a5, &b5_prepared),
+    ])
+    .final_exponentiation();
+
+    assert_eq!(expected, test);
 }
