@@ -212,6 +212,7 @@ impl TransparentInputs {
 
     #[cfg(feature = "transparent-inputs")]
     fn apply_signatures(&self, mtx: &mut TransactionData, consensus_branch_id: u32) {
+        let mut sighash = [0u8; 32];
         for (i, info) in self.inputs.iter().enumerate() {
             sighash.copy_from_slice(&signature_hash_data(
                 mtx,
