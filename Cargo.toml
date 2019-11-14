@@ -25,7 +25,8 @@ version = "2.2.1"
 default-features = false
 
 [features]
-default = ["groups", "pairings"]
+default = ["groups", "pairings", "alloc"]
 groups = []
 pairings = ["groups"]
+alloc = []
 nightly = ["subtle/nightly"]

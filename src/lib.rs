@@ -23,7 +23,7 @@
 // involve various binary operators, and so this lint is triggered unnecessarily.
 #![allow(clippy::suspicious_arithmetic_impl)]
 
-#[cfg(feature = "pairings")]
+#[cfg(feature = "alloc")]
 extern crate alloc;
 
 #[cfg(test)]
@@ -71,11 +71,11 @@ mod fp6;
 const BLS_X: u64 = 0xd201000000010000;
 const BLS_X_IS_NEGATIVE: bool = true;
 
-#[cfg(feature = "groups")]
+#[cfg(feature = "pairings")]
 mod pairings;
 
-#[cfg(feature = "groups")]
+#[cfg(feature = "pairings")]
 pub use pairings::{pairing, Gt, MillerLoopResult};
 
-#[cfg(feature = "pairings")]
+#[cfg(all(feature = "pairings", feature = "alloc"))]
 pub use pairings::{multi_miller_loop, G2Prepared};

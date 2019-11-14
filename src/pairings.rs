@@ -6,7 +6,7 @@ use core::ops::{Add, AddAssign, Mul, MulAssign, Neg, Sub, SubAssign};
 
 use subtle::{Choice, ConditionallySelectable, ConstantTimeEq};
 
-#[cfg(feature = "pairings")]
+#[cfg(all(feature = "pairings", feature = "alloc"))]
 use alloc::vec::Vec;
 
 /// Represents results of a Miller loop, one of the most expensive portions
@@ -219,7 +219,7 @@ impl<'a, 'b> Mul<&'b Scalar> for &'a Gt {
 impl_binops_additive!(Gt, Gt);
 impl_binops_multiplicative!(Gt, Scalar);
 
-#[cfg(feature = "pairings")]
+#[cfg(all(feature = "pairings", feature = "alloc"))]
 #[derive(Clone, Debug)]
 /// This structure contains cached computations pertaining to a $\mathbb{G}_2$
 /// element as part of the pairing function (specifically, the Miller loop) and
@@ -235,7 +235,7 @@ pub struct G2Prepared {
     coeffs: Vec<(Fp2, Fp2, Fp2)>,
 }
 
-#[cfg(feature = "pairings")]
+#[cfg(all(feature = "pairings", feature = "alloc"))]
 impl From<G2Affine> for G2Prepared {
     fn from(q: G2Affine) -> G2Prepared {
         struct Adder {
@@ -286,7 +286,7 @@ impl From<G2Affine> for G2Prepared {
     }
 }
 
-#[cfg(feature = "pairings")]
+#[cfg(all(feature = "pairings", feature = "alloc"))]
 /// Computes $$\sum_{i=1}^n \textbf{ML}(a_i, b_i)$$ given a series of terms
 /// $$(a_1, b_1), (a_2, b_2), ..., (a_n, b_n).$$
 ///
@@ -544,7 +544,7 @@ fn test_unitary() {
     assert_eq!(q, r);
 }
 
-#[cfg(feature = "pairings")]
+#[cfg(all(feature = "pairings", feature = "alloc"))]
 #[test]
 fn test_multi_miller_loop() {
     let a1 = G1Affine::generator();
