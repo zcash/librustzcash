@@ -10,8 +10,9 @@ This crate provides an implementation of the BLS12-381 pairing-friendly elliptic
 ## Features
 
 * `groups` (on by default): Enables APIs for performing group arithmetic with G1, G2, and GT.
-* `pairings` (on by default): Enables APIs for performing pairings. This depends on the `alloc` crate.
-* `nightly`: Enables `subtle/nightly` which prevents compiler optimizations that could jeopardize constant time operations.
+* `pairings` (on by default): Enables some APIs for performing pairings.
+* `alloc` (on by default): Enables APIs that require an allocator; these include pairing optimizations.
+* `nightly`: Enables `subtle/nightly` which tries to prevent compiler optimizations that could jeopardize constant time operations. Requires the nightly Rust compiler.
 
 ## [Documentation](https://docs.rs/bls12_381)
 

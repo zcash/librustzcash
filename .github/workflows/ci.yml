@@ -69,7 +69,7 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: build
-          args: --verbose --target thumbv6m-none-eabi --no-default-features --features groups
+          args: --verbose --target thumbv6m-none-eabi --no-default-features --features groups,pairings
 
   doc-links:
     name: Nightly lint
