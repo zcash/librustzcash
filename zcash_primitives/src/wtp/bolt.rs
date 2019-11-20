@@ -4,7 +4,7 @@
 //! protocol. All the parser cares about is the lengths and types of the predicates and
 //! witnesses, which in this demo protocol are all 32-byte arrays.
 //!
-//! [demo-rules]: crate::consensus::wtp::demo
+//! [bolt-rules]: crate::consensus::wtp::bolt
 
 use std::convert::{TryFrom, TryInto};
 
@@ -14,17 +14,21 @@ mod open {
     pub const MODE: usize = 0;
 
     #[derive(Debug, PartialEq)]
-    pub struct Predicate(pub [u8; 32]);
+    pub struct Predicate { // 820 (pkc, pkm, pkM, mpk, merch-close-address)
+        pub hash: [u8; 32]
+    }
 
     #[derive(Debug, PartialEq)]
-    pub struct Witness(pub [u8; 32]);
+    pub struct Witness(pub [u8; 32]); // 210
 }
 
 mod close {
     pub const MODE: usize = 1;
 
     #[derive(Debug, PartialEq)]
-    pub struct Predicate(pub [u8; 32]);
+    pub struct Predicate {
+        pub hash: [u8; 32]
+    }
 
     #[derive(Debug, PartialEq)]
     pub struct Witness(pub [u8; 32]);
@@ -38,11 +42,11 @@ pub enum Predicate {
 
 impl Predicate {
     pub fn open(hash: [u8; 32]) -> Self {
-        Predicate::Open(open::Predicate(hash))
+        Predicate::Open(open::Predicate { hash })
     }
 
     pub fn close(hash: [u8; 32]) -> Self {
-        Predicate::Close(close::Predicate(hash))
+        Predicate::Close(close::Predicate { hash })
     }
 }
 
@@ -55,7 +59,8 @@ impl TryFrom<(usize, &[u8])> for Predicate {
                 if payload.len() == 32 {
                     let mut hash = [0; 32];
                     hash.copy_from_slice(&payload);
-                    Ok(Predicate::Open(open::Predicate(hash)))
+                    let op = open::Predicate { hash };
+                    Ok(Predicate::Open(op))
                 } else {
                     Err("Payload is not 32 bytes")
                 }
@@ -64,7 +69,8 @@ impl TryFrom<(usize, &[u8])> for Predicate {
                 if payload.len() == 32 {
                     let mut hash = [0; 32];
                     hash.copy_from_slice(&payload);
-                    Ok(Predicate::Close(close::Predicate(hash)))
+                    let cl = close::Predicate { hash };
+                    Ok(Predicate::Close(cl))
                 } else {
                     Err("Payload is not 32 bytes")
                 }
@@ -97,8 +103,8 @@ impl TryFrom<(usize, Predicate)> for Predicate {
 impl ToPayload for Predicate {
     fn to_payload(&self) -> (usize, Vec<u8>) {
         match self {
-            Predicate::Open(p) => (open::MODE, p.0.to_vec()),
-            Predicate::Close(p) => (close::MODE, p.0.to_vec()),
+            Predicate::Open(p) => (open::MODE, p.hash.to_vec()),
+            Predicate::Close(p) => (close::MODE, p.hash.to_vec()),
         }
     }
 }
@@ -187,7 +193,8 @@ mod tests {
     fn predicate_open_round_trip() {
         let data = vec![7; 32];
         let p: Predicate = (open::MODE, &data[..]).try_into().unwrap();
-        assert_eq!(p, Predicate::Open(open::Predicate([7; 32])));
+        let hash = [7; 32];
+        assert_eq!(p, Predicate::Open(open::Predicate { hash }));
         assert_eq!(p.to_payload(), (open::MODE, data));
     }
 
@@ -195,7 +202,8 @@ mod tests {
     fn predicate_close_round_trip() {
         let data = vec![7; 32];
         let p: Predicate = (close::MODE, &data[..]).try_into().unwrap();
-        assert_eq!(p, Predicate::Close(close::Predicate([7; 32])));
+        let hash = [7; 32];
+        assert_eq!(p, Predicate::Close(close::Predicate { hash }));
         assert_eq!(p.to_payload(), (close::MODE, data));
     }
 

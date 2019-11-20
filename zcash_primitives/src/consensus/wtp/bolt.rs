@@ -1,13 +1,13 @@
 //! Bolt implementation of WTP consensus rules.
 //!
-//! The demo program implements a dual-hash-lock encumbrance with the following form:
+//! The bolt program implements a dual-hash-lock encumbrance with the following form:
 //!
 //! > `hash = BLAKE2b_256(preimage_1 || BLAKE2b_256(preimage_2))`
 //!
-//! The two preimages are revealed in sequential transactions, demonstrating how WTPs can
+//! The two preimages are revealed in sequential transactions, boltnstrating how WTPs can
 //! impose constraints on how program modes are chained together.
 //!
-//! The demo program has two modes:
+//! The bolt program has two modes:
 //!
 //! - Mode 0: `hash_1 = BLAKE2b_256(preimage_1 || hash_2)`
 //! - Mode 1: `hash_2 = BLAKE2b_256(preimage_2)`
@@ -32,14 +32,14 @@ impl Program {
     /// non-contextually, and are guaranteed to both be for this program. All subsequent
     /// validation is this function's responsibility.
     pub(super) fn verify<'a>(
-        predicate: &demo::Predicate,
-        witness: &demo::Witness,
+        predicate: &bolt::Predicate,
+        witness: &bolt::Witness,
         ctx: &context::V1<'a>,
     ) -> Result<(), &'static str> {
         // This match statement is selecting the mode that the program is operating in,
         // based on the enums defined in the parser.
         match (predicate, witness) {
-            (demo::Predicate::Open(p_open), demo::Witness::Open(w_open)) => {
+            (bolt::Predicate::Open(p_open), bolt::Witness::Open(w_open)) => {
                 // In OPEN mode, we enforce that the transaction must only contain inputs
                 // and outputs from this program. The consensus rules enforce that if a
                 // transaction contains both WTP inputs and WTP outputs, they must all be
@@ -47,14 +47,14 @@ impl Program {
                 // transaction does not contain any other type of input or output.
                 if !ctx.is_wtp_only() {
                     return Err(
-                        "Demo WTP cannot be closed in a transaction with non-WTP inputs or outputs",
+                        "Bolt WTP cannot be closed in a transaction with non-WTP inputs or outputs",
                     );
                 }
 
                 // Next, check that there is only a single WTP output of the correct type.
                 match &ctx.tx_wtp_outputs() {
                     [wtp_out] => match &wtp_out.predicate {
-                        Predicate::Demo(demo::Predicate::Close(p_close)) => {
+                        Predicate::Bolt(bolt::Predicate::Close(p_close)) => {
                             // Finally, check the predicate:
                             // predicate_open = BLAKE2b_256(witness_open || predicate_close)
                             let mut h = Params::new().hash_length(32).to_state();
@@ -67,13 +67,13 @@ impl Program {
                                 Err("hash mismatch")
                             }
                         }
-                        Predicate::Demo(_) => Err("Invalid WTP output mode"),
+                        Predicate::Bolt(_) => Err("Invalid WTP output mode"),
                         _ => Err("Invalid WTP output type"),
                     },
                     _ => Err("Invalid number of WTP outputs"),
                 }
             }
-            (demo::Predicate::Close(p), demo::Witness::Close(w)) => {
+            (bolt::Predicate::Close(p), bolt::Witness::Close(w)) => {
                 // In CLOSE mode, we only require that the predicate is satisfied:
                 // predicate_close = BLAKE2b_256(witness_close)
                 let hash = Params::new().hash_length(32).hash(&w.0);
@@ -96,12 +96,13 @@ mod tests {
             components::{Amount, OutPoint, WtpIn, WtpOut},
             TransactionData,
         },
-        wtp::{self, demo},
+        wtp::{self, bolt},
     };
     use blake2b_simd::Params;
 
     #[test]
-    fn demo_program() {
+    fn bolt_program() {
+        println!("Running bolt program...");
         let preimage_1 = [1; 32];
         let preimage_2 = [2; 32];
 
@@ -127,25 +128,25 @@ mod tests {
         let mut mtx_a = TransactionData::nu4();
         mtx_a.wtp_outputs.push(WtpOut {
             value: Amount::from_u64(1).unwrap(),
-            predicate: wtp::Predicate::Demo(demo::Predicate::open(hash_1)),
+            predicate: wtp::Predicate::Bolt(bolt::Predicate::open(hash_1)),
         });
         let tx_a = mtx_a.freeze().unwrap();
 
         let mut mtx_b = TransactionData::nu4();
         mtx_b.wtp_inputs.push(WtpIn {
             prevout: OutPoint::new(tx_a.txid().0, 0),
-            witness: wtp::Witness::Demo(demo::Witness::open(preimage_1)),
+            witness: wtp::Witness::Bolt(bolt::Witness::open(preimage_1)),
         });
         mtx_b.wtp_outputs.push(WtpOut {
             value: Amount::from_u64(1).unwrap(),
-            predicate: wtp::Predicate::Demo(demo::Predicate::close(hash_2)),
+            predicate: wtp::Predicate::Bolt(bolt::Predicate::close(hash_2)),
         });
         let tx_b = mtx_b.freeze().unwrap();
 
         let mut mtx_c = TransactionData::nu4();
         mtx_c.wtp_inputs.push(WtpIn {
             prevout: OutPoint::new(tx_b.txid().0, 0),
-            witness: wtp::Witness::Demo(demo::Witness::close(preimage_2)),
+            witness: wtp::Witness::Bolt(bolt::Witness::close(preimage_2)),
         });
         let tx_c = mtx_c.freeze().unwrap();
 

@@ -7,6 +7,7 @@ use std::io::{self, Read, Write};
 use crate::serialize::{CompactSize, Vector};
 
 pub(crate) mod demo;
+pub(crate) mod bolt;
 
 pub trait ToPayload {
     /// Returns a serialized payload and its corresponding mode.
@@ -16,6 +17,7 @@ pub trait ToPayload {
 /// The set of programs that have assigned type IDs within the Zcash ecosystem.
 pub enum ProgramType {
     Demo,
+    Bolt,
     Unknown(usize),
 }
 
@@ -23,6 +25,7 @@ impl From<usize> for ProgramType {
     fn from(t: usize) -> Self {
         match t {
             0 => ProgramType::Demo,
+            1 => ProgramType::Bolt,
             n => ProgramType::Unknown(n),
         }
     }
@@ -32,6 +35,7 @@ impl From<ProgramType> for usize {
     fn from(type_id: ProgramType) -> usize {
         match type_id {
             ProgramType::Demo => 0,
+            ProgramType::Bolt => 1,
             ProgramType::Unknown(n) => n,
         }
     }
@@ -41,6 +45,7 @@ impl From<ProgramType> for usize {
 #[derive(Debug)]
 pub enum Predicate {
     Demo(demo::Predicate),
+    Bolt(bolt::Predicate),
     /// A predicate for an unknown program type. This allows the current parser to parse
     /// future transactions containing new program types, while ensuring that they cannot
     /// be considered valid.
@@ -64,6 +69,12 @@ impl Predicate {
                     .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
                 Ok(Predicate::Demo(predicate))
             }
+            ProgramType::Bolt => {
+                let predicate = (mode, &payload)
+                    .try_into()
+                    .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+                Ok(Predicate::Bolt(predicate))
+            }
             ProgramType::Unknown(type_id) => Ok(Predicate::Unknown {
                 type_id,
                 mode,
@@ -84,6 +95,10 @@ impl Predicate {
                 let (mode, payload) = w.to_payload();
                 inner(writer, ProgramType::Demo, mode, &payload)
             }
+            Predicate::Bolt(w) => {
+                let (mode, payload) = w.to_payload();
+                inner(writer, ProgramType::Bolt, mode, &payload)
+            }
             Predicate::Unknown {
                 type_id,
                 mode,
@@ -97,6 +112,7 @@ impl Predicate {
 #[derive(Debug)]
 pub enum Witness {
     Demo(demo::Witness),
+    Bolt(bolt::Witness),
     /// A witness for an unknown program type. This allows the current parser to parse
     /// future transactions containing new program types, while ensuring that they cannot
     /// be considered valid.
@@ -120,6 +136,12 @@ impl Witness {
                     .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
                 Ok(Witness::Demo(witness))
             }
+            ProgramType::Bolt => {
+                let witness = (mode, &payload)
+                    .try_into()
+                    .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+                Ok(Witness::Bolt(witness))
+            }
             ProgramType::Unknown(type_id) => Ok(Witness::Unknown {
                 type_id,
                 mode,
@@ -139,6 +161,10 @@ impl Witness {
             Witness::Demo(w) => {
                 let (mode, payload) = w.to_payload();
                 inner(writer, ProgramType::Demo, mode, &payload)
+            }
+            Witness::Bolt(w) => {
+                let (mode, payload) = w.to_payload();
+                inner(writer, ProgramType::Bolt, mode, &payload)
             }
             Witness::Unknown {
                 type_id,
