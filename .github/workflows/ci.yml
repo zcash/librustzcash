@@ -105,7 +105,7 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: tarpaulin
-          args: --release --timeout 600 --out Xml --packages "zcash_client_backend,zcash_primitives,zcash_proofs"
+          args: --release --timeout 600 --out Xml
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v1.0.3
         with:
