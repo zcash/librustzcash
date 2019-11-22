@@ -25,7 +25,6 @@ protobuf-codegen-pure = "2"
 
 [dev-dependencies]
 rand_core = "0.5"
-rand_os = "0.2"
 rand_xorshift = "0.2"
 
 [badges]

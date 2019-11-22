@@ -273,6 +273,7 @@ mod test {
     use super::*;
     use crate::gadgets::boolean::AllocatedBit;
     use crate::gadgets::test::TestConstraintSystem;
+    use hex_literal::hex;
     use pairing::bls12_381::Bls12;
     use rand_core::{RngCore, SeedableRng};
     use rand_xorshift::XorShiftRng;
