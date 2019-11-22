@@ -118,7 +118,7 @@ impl_add_binop_specify_output!(MillerLoopResult, MillerLoopResult, MillerLoopRes
 /// Typically, $\mathbb{G}_T$ is written multiplicatively but we will write it additively to
 /// keep code and abstractions consistent.
 #[derive(Copy, Clone, Debug)]
-pub struct Gt(Fp12);
+pub struct Gt(pub(crate) Fp12);
 
 impl ConstantTimeEq for Gt {
     fn ct_eq(&self, other: &Self) -> Choice {
