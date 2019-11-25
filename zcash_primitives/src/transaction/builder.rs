@@ -10,6 +10,7 @@ use pairing::bls12_381::{Bls12, Fr};
 use rand::{rngs::OsRng, seq::SliceRandom, CryptoRng, RngCore};
 
 use crate::{
+    consensus,
     keys::OutgoingViewingKey,
     legacy::TransparentAddress,
     merkle_tree::{CommitmentTreeWitness, IncrementalWitness},
@@ -211,7 +212,11 @@ impl TransparentInputs {
     }
 
     #[cfg(feature = "transparent-inputs")]
-    fn apply_signatures(&self, mtx: &mut TransactionData, consensus_branch_id: u32) {
+    fn apply_signatures(
+        &self,
+        mtx: &mut TransactionData,
+        consensus_branch_id: consensus::BranchId,
+    ) {
         let mut sighash = [0u8; 32];
         for (i, info) in self.inputs.iter().enumerate() {
             sighash.copy_from_slice(&signature_hash_data(
@@ -234,7 +239,7 @@ impl TransparentInputs {
     }
 
     #[cfg(not(feature = "transparent-inputs"))]
-    fn apply_signatures(&self, _: &mut TransactionData, _: u32) {}
+    fn apply_signatures(&self, _: &mut TransactionData, _: consensus::BranchId) {}
 }
 
 /// Metadata about a transaction created by a [`Builder`].
@@ -430,7 +435,7 @@ impl<R: RngCore + CryptoRng> Builder<R> {
     /// the network.
     pub fn build(
         mut self,
-        consensus_branch_id: u32,
+        consensus_branch_id: consensus::BranchId,
         prover: impl TxProver,
     ) -> Result<(Transaction, TransactionMetadata), Error> {
         let mut tx_metadata = TransactionMetadata::new();
@@ -666,6 +671,7 @@ mod tests {
 
     use super::{Builder, Error};
     use crate::{
+        consensus,
         legacy::TransparentAddress,
         merkle_tree::{CommitmentTree, IncrementalWitness},
         prover::mock::MockTxProver,
@@ -713,7 +719,7 @@ mod tests {
         {
             let builder = Builder::new(0);
             assert_eq!(
-                builder.build(1, MockTxProver),
+                builder.build(consensus::BranchId::Sapling, MockTxProver),
                 Err(Error::ChangeIsNegative(Amount::from_i64(-10000).unwrap()))
             );
         }
@@ -735,7 +741,7 @@ mod tests {
                 )
                 .unwrap();
             assert_eq!(
-                builder.build(1, MockTxProver),
+                builder.build(consensus::BranchId::Sapling, MockTxProver),
                 Err(Error::ChangeIsNegative(Amount::from_i64(-60000).unwrap()))
             );
         }
@@ -751,7 +757,7 @@ mod tests {
                 )
                 .unwrap();
             assert_eq!(
-                builder.build(1, MockTxProver),
+                builder.build(consensus::BranchId::Sapling, MockTxProver),
                 Err(Error::ChangeIsNegative(Amount::from_i64(-60000).unwrap()))
             );
         }
@@ -791,7 +797,7 @@ mod tests {
                 )
                 .unwrap();
             assert_eq!(
-                builder.build(1, MockTxProver),
+                builder.build(consensus::BranchId::Sapling, MockTxProver),
                 Err(Error::ChangeIsNegative(Amount::from_i64(-1).unwrap()))
             );
         }
@@ -824,7 +830,10 @@ mod tests {
                     Amount::from_u64(20000).unwrap(),
                 )
                 .unwrap();
-            assert_eq!(builder.build(1, MockTxProver), Err(Error::BindingSig))
+            assert_eq!(
+                builder.build(consensus::BranchId::Sapling, MockTxProver),
+                Err(Error::BindingSig)
+            )
         }
     }
 }
