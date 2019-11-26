@@ -89,7 +89,7 @@ pub fn init_data_database<P: AsRef<Path>>(db_data: P) -> Result<(), Error> {
             value INTEGER NOT NULL,
             rcm BLOB NOT NULL,
             nf BLOB NOT NULL UNIQUE,
-            is_change BOOLEAN NOT NULL,
+            is_change INTEGER NOT NULL,
             memo BLOB,
             spent INTEGER,
             FOREIGN KEY (tx) REFERENCES transactions(id_tx),
