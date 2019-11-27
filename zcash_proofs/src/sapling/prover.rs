@@ -22,7 +22,8 @@ use crate::circuit::sapling::{Output, Spend};
 /// A context object for creating the Sapling components of a Zcash transaction.
 pub struct SaplingProvingContext {
     bsk: Fs,
-    bvk: edwards::Point<Bls12, Unknown>,
+    // (sum of the Spend value commitments) - (sum of the Output value commitments)
+    cv_sum: edwards::Point<Bls12, Unknown>,
 }
 
 impl SaplingProvingContext {
@@ -30,7 +31,7 @@ impl SaplingProvingContext {
     pub fn new() -> Self {
         SaplingProvingContext {
             bsk: Fs::zero(),
-            bvk: edwards::Point::zero(),
+            cv_sum: edwards::Point::zero(),
         }
     }
 
@@ -169,10 +170,10 @@ impl SaplingProvingContext {
         // Accumulate the value commitment in the context
         {
             let mut tmp = value_commitment.clone();
-            tmp = tmp.add(&self.bvk, params);
+            tmp = tmp.add(&self.cv_sum, params);
 
             // Update the context
-            self.bvk = tmp;
+            self.cv_sum = tmp;
         }
 
         Ok((proof, value_commitment, rk))
@@ -234,10 +235,10 @@ impl SaplingProvingContext {
         {
             let mut tmp = value_commitment.clone();
             tmp = tmp.negate(); // Outputs subtract from the total.
-            tmp = tmp.add(&self.bvk, params);
+            tmp = tmp.add(&self.cv_sum, params);
 
             // Update the context
-            self.bvk = tmp;
+            self.cv_sum = tmp;
         }
 
         (proof, value_commitment)
@@ -261,7 +262,7 @@ impl SaplingProvingContext {
         let bvk = PublicKey::from_private(&bsk, FixedGenerators::ValueCommitmentRandomness, params);
 
         // In order to check internal consistency, let's use the accumulated value
-        // commitments (as the verifier would) and apply valuebalance to compare
+        // commitments (as the verifier would) and apply value_balance to compare
         // against our derived bvk.
         {
             // Compute value balance
@@ -270,9 +271,9 @@ impl SaplingProvingContext {
                 None => return Err(()),
             };
 
-            // Subtract value_balance from current bvk to get final bvk
+            // Subtract value_balance from cv_sum to get final bvk
             value_balance = value_balance.negate();
-            let mut tmp = self.bvk.clone();
+            let mut tmp = self.cv_sum.clone();
             tmp = tmp.add(&value_balance, params);
 
             // The result should be the same, unless the provided valueBalance is wrong.
