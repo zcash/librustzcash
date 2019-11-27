@@ -1,5 +1,6 @@
 //! Consensus parameters.
 
+use std::convert::TryFrom;
 use std::fmt;
 
 /// Zcash consensus parameters.
@@ -128,6 +129,21 @@ pub enum BranchId {
     Heartwood,
 }
 
+impl TryFrom<u32> for BranchId {
+    type Error = &'static str;
+
+    fn try_from(value: u32) -> Result<Self, Self::Error> {
+        match value {
+            0 => Ok(BranchId::Sprout),
+            0x5ba8_1b19 => Ok(BranchId::Overwinter),
+            0x76b8_09bb => Ok(BranchId::Sapling),
+            0x2bb4_0e60 => Ok(BranchId::Blossom),
+            0xf5b9_230b => Ok(BranchId::Heartwood),
+            _ => Err("Unknown consensus branch ID"),
+        }
+    }
+}
+
 impl From<BranchId> for u32 {
     fn from(consensus_branch_id: BranchId) -> u32 {
         match consensus_branch_id {
@@ -159,7 +175,9 @@ impl BranchId {
 
 #[cfg(test)]
 mod tests {
-    use super::{BranchId, Parameters, MainNetwork, NetworkUpgrade, UPGRADES_IN_ORDER};
+    use std::convert::TryFrom;
+
+    use super::{BranchId, MainNetwork, NetworkUpgrade, Parameters, UPGRADES_IN_ORDER};
 
     #[test]
     fn nu_ordering() {
@@ -192,6 +210,12 @@ mod tests {
             NetworkUpgrade::Overwinter,
             347_500
         ));
+    }
+
+    #[test]
+    fn branch_id_from_u32() {
+        assert_eq!(BranchId::try_from(0), Ok(BranchId::Sprout));
+        assert!(BranchId::try_from(1).is_err());
     }
 
     #[test]
