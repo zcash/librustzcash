@@ -12,6 +12,8 @@ use super::ToPayload;
 use crate::transaction::builder::Error::InvalidWitness;
 use crate::wtp::bolt::open::get_witness_payload;
 
+use bolt::bidirectional::{reconstruct_wallet, wrapped_wtp_verify_cust_close_message, wrapped_wtp_verify_revoke_message};
+
 mod open {
     use std::convert::TryInto;
     use super::convert_u32_to_bytes;
@@ -21,7 +23,7 @@ mod open {
     #[derive(Debug, PartialEq)]
     pub struct Predicate {
         pub address: [u8; 32], // merch-close-address
-        pub channel_token: Vec<u8> // (pkc, pkm, pkM, mpk)
+        pub channel_token: Vec<u8> // (pkc, pkm, pkM, mpk, comparams) => 1074 bytes
     }
 
     #[derive(Debug, PartialEq)]
@@ -64,10 +66,9 @@ mod close {
 
     #[derive(Debug, PartialEq)]
     pub struct Predicate {
-        pub wpk: [u8; 32],
-        pub cust_bal: u32,
-        pub merch_bal: u32,
-        pub channel_token: Vec<u8> // (pkc, pkm, pkM, mpk) - approx 786
+        pub pubkey: [u8; 32],
+        pub balance: u32, // merch-bal or cust-bal
+        pub channel_token: Vec<u8> // (pkc, pkm, pkM, mpk, comparams) => 1074 bytes
     }
 
     #[derive(Debug, PartialEq)]
@@ -80,9 +81,8 @@ mod close {
 
     pub fn get_predicate_payload(p: &Predicate) -> Vec<u8> {
         let mut output = Vec::new();
-        output.extend(p.wpk.iter());
-        output.extend(convert_u32_to_bytes(p.cust_bal).iter());
-        output.extend(convert_u32_to_bytes(p.merch_bal).iter());
+        output.extend(p.pubkey.iter());
+        output.extend(convert_u32_to_bytes(p.balance).iter());
         output.extend(p.channel_token.iter());
         return output;
     }
@@ -117,15 +117,14 @@ impl Predicate {
 
     pub fn close(input: [u8; 1024]) -> Self {
         let mut channel_token = Vec::new();
-        let mut wpk = [0; 32];
-        wpk.copy_from_slice(&input[0..32]);
+        let mut pubkey = [0; 32];
+        pubkey.copy_from_slice(&input[0..32]);
 
-        let cust_bal = convert_bytes_to_u32(input[32..36].to_vec());
-        let merch_bal = convert_bytes_to_u32(input[36..40].to_vec());
+        let balance = convert_bytes_to_u32(input[32..36].to_vec());
 
-        channel_token.extend(input[40..].iter());
+        channel_token.extend(input[36..].iter());
 
-        Predicate::Close(close::Predicate { wpk, cust_bal, merch_bal, channel_token })
+        Predicate::Close(close::Predicate { pubkey, balance, channel_token })
     }
 }
 
@@ -149,14 +148,13 @@ impl TryFrom<(usize, &[u8])> for Predicate {
             }
             close::MODE => {
                 if payload.len() == 1024 {
-                    let mut wpk = [0; 32];
-                    wpk.copy_from_slice(&payload[0..32]);
-                    let cust_bal = convert_bytes_to_u32(payload[32..36].to_vec());
-                    let merch_bal = convert_bytes_to_u32(payload[36..40].to_vec());
+                    let mut pubkey = [0; 32];
+                    pubkey.copy_from_slice(&payload[0..32]);
+                    let balance = convert_bytes_to_u32(payload[32..36].to_vec());
                     let mut channel_token = Vec::new();
-                    channel_token.extend(payload[40..].iter());
+                    channel_token.extend(payload[36..].iter());
 
-                    let cl = close::Predicate { wpk, cust_bal, merch_bal, channel_token };
+                    let cl = close::Predicate { pubkey, balance, channel_token };
                     Ok(Predicate::Close(cl))
                 } else {
                     Err("Payload is not 1024 bytes")
@@ -344,6 +342,74 @@ impl ToPayload for Witness {
     }
 }
 
+//#[derive(Debug, PartialEq)]
+//pub struct Predicate {
+//    pub address: [u8; 32], // merch-close-address
+//    pub channel_token: Vec<u8> // (pkc, pkm, pkM, mpk)
+//}
+//
+//#[derive(Debug, PartialEq)]
+//pub struct Witness {     // 210 bytes
+//    pub witness_type: u8,
+//    pub cust_bal: u32,
+//    pub merch_bal: u32,
+//    pub cust_sig: Vec<u8>,
+//    pub merch_sig: Vec<u8>,
+//    pub wpk: [u8; 32]
+//}
+//    #[derive(Debug, PartialEq)]
+//    pub struct Predicate {
+//        pub pubkey: [u8; 32],
+//        pub balance: u32,
+//        pub channel_token: Vec<u8> // (pkc, pkm, pkM, mpk) - approx 786
+//    }
+
+
+
+
+// open-channel program description
+// If witness is of type 0x0, check that 2 new outputs are created, with the specified balances (unless one of the balances is zero), and that the signatures verify.
+
+// If witness is of type 0x1, check that 2 new outputs are created (unless one of the balances is zero), with the specified balances:
+
+// -- one paying <balance-merch> to <merch-close-address>
+// -- one paying a cust-close WTP containing <channel-token> and <wallet> = <<wpk> || <balance-cust> || <balance-merch>>
+//
+// Also check that <cust-sig> is a valid signature and that <closing-token> contains a valid signature under <MERCH-PK> on <<cust-pk> || <wpk> || <balance-cust> || <balance-merch> || CLOSE>.
+
+use pairing::bls12_381::Bls12;
+
+pub fn verify_channel_opening(escrow_pred: &open::Predicate, close_tx_witness: &open::Witness) -> bool {
+    println!("Checking the predicate + witness!");
+    println!("Predicate: {:?}", open::get_predicate_payload(escrow_pred));
+    println!("Witness: {:?}", open::get_witness_payload(close_tx_witness));
+
+    // check that signatures are valid with respect to wallets
+
+    if close_tx_witness.witness_type == 0x0 {
+        // merchant-initiated
+    } else if close_tx_witness.witness_type == 0x1 {
+        // customer-initiated
+        // let wallet = Wallet { channelId: channelId, wpk: wpk_h, bc: cust_bal, bm: merch_bal, close: None };
+
+        let _channel_token = escrow_pred.channel_token;
+        let wpk = close_tx_witness.wpk;
+        let cust_bal = close_tx_witness.cust_bal as i64;
+        let merch_bal = close_tx_witness.merch_bal as i64;
+
+        // reconstruct the close wallet
+        let channel_token = reconstruct_channel_token::<Bls12>(_channel_token);
+        let close_wallet = reconstruct_wallet::<Bls12>(&channel_token, &wpk, cust_bal, merch_bal);
+
+        // check whether close token is valid
+        let is_close_token_valid = wrapped_wtp_verify_cust_close_message(&channel_token, &wpk, &close_wallet, &close_tx_witness.merch_sig);
+        return is_close_token_valid;
+    }
+
+    return false;
+}
+
+
 #[cfg(test)]
 mod tests {
     use std::convert::TryInto;
@@ -370,15 +436,14 @@ mod tests {
     fn predicate_close_round_trip() {
         let data = vec![7; 1024];
         let p: Predicate = (close::MODE, &data[..]).try_into().unwrap();
-        let mut wpk = [0; 32];
-        wpk.copy_from_slice(&data[0..32]);
-        let cust_bal = convert_bytes_to_u32(data[32..36].to_vec());
-        let merch_bal = convert_bytes_to_u32(data[36..40].to_vec());
+        let mut pubkey = [0; 32];
+        pubkey.copy_from_slice(&data[0..32]);
+        let balance = convert_bytes_to_u32(data[32..36].to_vec());
 
         let mut channel_token = Vec::new();
-        channel_token.extend(data[40..].iter());
+        channel_token.extend(data[36..].iter());
 
-        assert_eq!(p, Predicate::Close(close::Predicate { wpk, cust_bal, merch_bal, channel_token }));
+        assert_eq!(p, Predicate::Close(close::Predicate { pubkey, balance, channel_token }));
         assert_eq!(p.to_payload(), (close::MODE, data));
     }
 

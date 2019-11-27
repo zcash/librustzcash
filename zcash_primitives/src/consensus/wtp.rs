@@ -8,6 +8,7 @@ use crate::{
 };
 
 mod demo;
+mod bolt;
 
 #[derive(Debug, PartialEq)]
 pub enum Error {
@@ -54,6 +55,7 @@ mod context {
         pub(super) fn tx_wtp_outputs(&self) -> &[WtpOut] {
             &self.tx.wtp_outputs
         }
+
     }
 }
 
@@ -92,6 +94,11 @@ impl TestDummyPrograms {
                 demo::Program::verify(p, w, ctx).map_err(Error::Program)
             }
             (Predicate::Demo(_), _) | (_, Witness::Demo(_)) => Err(Error::TypeMismatch),
+            // The Bolt program
+            (Predicate::Bolt(p), Witness::Bolt(w)) => {
+                bolt::Program::verify(p, w, ctx).map_err(Error::Program)
+            }
+            (Predicate::Bolt(_), _) | (_, Witness::Bolt(_)) => Err(Error::TypeMismatch),
             // All other program types are invalid in this epoch.
             _ => Err(Error::InvalidEpoch),
         }
@@ -100,7 +107,7 @@ impl TestDummyPrograms {
 
 /// Enumeration of all whitelisted transparent programs within the Zcash consensus rules.
 pub enum Programs {
-    TestDummy,
+    TestDummy
 }
 
 impl Programs {
