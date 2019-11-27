@@ -545,7 +545,8 @@ mod tests {
     use zcash_primitives::{
         block::BlockHash,
         consensus::{BlockHeight, Network, NetworkUpgrade, Parameters},
-        note_encryption::{Memo, SaplingNoteEncryption},
+        memo::Memo,
+        note_encryption::SaplingNoteEncryption,
         primitives::{Note, Nullifier, PaymentAddress},
         transaction::components::Amount,
         util::generate_random_rseed,

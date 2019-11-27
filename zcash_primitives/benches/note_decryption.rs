@@ -3,7 +3,8 @@ use ff::Field;
 use rand_core::OsRng;
 use zcash_primitives::{
     consensus::{NetworkUpgrade::Canopy, Parameters, TEST_NETWORK},
-    note_encryption::{try_sapling_note_decryption, Memo, SaplingNoteEncryption},
+    memo::Memo,
+    note_encryption::{try_sapling_note_decryption, SaplingNoteEncryption},
     primitives::{Diversifier, PaymentAddress, SaplingIvk, ValueCommitment},
     transaction::components::{OutputDescription, GROTH_PROOF_SIZE},
     util::generate_random_rseed,

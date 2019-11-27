@@ -7,8 +7,8 @@ use std::fmt::Debug;
 use zcash_primitives::{
     block::BlockHash,
     consensus::BlockHeight,
+    memo::Memo,
     merkle_tree::{CommitmentTree, IncrementalWitness},
-    note_encryption::Memo,
     primitives::{Nullifier, PaymentAddress},
     sapling::Node,
     transaction::{components::Amount, Transaction, TxId},

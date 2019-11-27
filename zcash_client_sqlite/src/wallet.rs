@@ -7,8 +7,8 @@ use std::collections::HashMap;
 use zcash_primitives::{
     block::BlockHash,
     consensus::{self, BlockHeight, NetworkUpgrade},
+    memo::Memo,
     merkle_tree::{CommitmentTree, IncrementalWitness},
-    note_encryption::Memo,
     primitives::{Note, Nullifier, PaymentAddress},
     sapling::Node,
     transaction::{components::Amount, Transaction, TxId},

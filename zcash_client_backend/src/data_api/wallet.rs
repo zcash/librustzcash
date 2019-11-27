@@ -3,7 +3,7 @@ use std::fmt::Debug;
 
 use zcash_primitives::{
     consensus::{self, BranchId, NetworkUpgrade},
-    note_encryption::Memo,
+    memo::Memo,
     prover::TxProver,
     transaction::{
         builder::Builder,
