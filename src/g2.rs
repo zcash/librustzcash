@@ -915,9 +915,9 @@ impl G2Projective {
     }
 
     /// Clears the cofactor, using [Budroni-Pintore](https://ia.cr/2017/419).
-    /// This is equivalent to multiplying by:
-    /// $h_\textrm{eff} = 3(x^2 - 1) \cdot h$, where
-    /// $h$ is the cofactor of $\mathbb{G}_2$.
+    /// This is equivalent to multiplying by $h\_\textrm{eff} = 3(z^2 - 1) \cdot
+    /// h_2$, where $h_2$ is the cofactor of $\mathbb{G}\_2$ and $z$ is the
+    /// parameter of BLS12-381.
     pub fn clear_cofactor(&self) -> G2Projective {
         let t1 = self.mul_by_x(); // [x] P
         let t2 = self.psi(); // psi(P)

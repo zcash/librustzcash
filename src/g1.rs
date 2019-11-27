@@ -756,8 +756,9 @@ impl G1Projective {
         xself
     }
 
-    /// Multiplies by $(1 - x)$, which [suffices to clear](https://ia.cr/2019/403)
-    /// the cofactor and map elliptic curve points to elements of $\mathbb{G}\_1$.
+    /// Multiplies by $(1 - z)$, where $z$ is the parameter of BLS12-381, which
+    /// [suffices to clear](https://ia.cr/2019/403) the cofactor and map
+    /// elliptic curve points to elements of $\mathbb{G}\_1$.
     pub fn clear_cofactor(&self) -> G1Projective {
         self - self.mul_by_x()
     }
