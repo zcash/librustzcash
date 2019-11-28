@@ -40,7 +40,7 @@ impl Entry {
     /// Left child
     pub fn left(&self) -> Result<EntryLink, Error> {
         match self.kind {
-            EntryKind::Leaf => { Err(Error::ExpectedNode) }
+            EntryKind::Leaf => { Err(Error::node_expected()) }
             EntryKind::Node(left, _) => Ok(left)
         }
     }
@@ -48,7 +48,7 @@ impl Entry {
     /// Right child.
     pub fn right(&self) -> Result<EntryLink, Error> {
         match self.kind {
-            EntryKind::Leaf => { Err(Error::ExpectedNode) }
+            EntryKind::Leaf => { Err(Error::node_expected()) }
             EntryKind::Node(_, right) => Ok(right)
         }
     }

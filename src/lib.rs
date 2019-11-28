@@ -17,18 +17,16 @@ pub use entry::{Entry, MAX_ENTRY_SIZE};
 pub enum Error {
     /// Entry expected to be presented in the tree view while it was not.
     ExpectedInMemory(EntryLink),
-    /// Entry expected to be a node.
-    ExpectedNode,
     /// Entry expected to be a node (specifying for which link this is not true).
-    ExpectedNodeForLink(EntryLink),
+    ExpectedNode(Option<EntryLink>),
 }
 
 impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match *self {
             Self::ExpectedInMemory(l) => write!(f, "Node/leaf expected to be in memory: {}", l),
-            Self::ExpectedNode => write!(f, "Node expected"),
-            Self::ExpectedNodeForLink(l) => write!(f, "Node expected, not leaf: {}", l),
+            Self::ExpectedNode(None) => write!(f, "Node expected"),
+            Self::ExpectedNode(Some(l)) => write!(f, "Node expected, not leaf: {}", l),
         }
     }
 }
@@ -63,9 +61,15 @@ pub enum EntryKind {
 }
 
 impl Error {
+    /// Entry expected to be a node (specifying for which link this is not true).
+    pub fn link_node_expected(link: EntryLink) -> Self { Self::ExpectedNode(Some(link)) }
+
+    /// Some entry is expected to be node
+    pub fn node_expected() -> Self { Self::ExpectedNode(None) }
+
     pub (crate) fn augment(self, link: EntryLink) -> Self {
         match self {
-            Error::ExpectedNode => Error::ExpectedNodeForLink(link),
+            Error::ExpectedNode(_) => Error::ExpectedNode(Some(link)),
             val => val
         }
     }

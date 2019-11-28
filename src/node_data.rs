@@ -194,9 +194,8 @@ impl NodeData {
         Self::read(consensus_branch_id, &mut cursor)
     }
 
+    /// Hash node metadata
     pub fn hash(&self) -> [u8; 32] {
-        let mut buf = [0u8; 32];
-
         let bytes = self.to_bytes();
 
         blake2b_personal(&personalization(self.consensus_branch_id), &bytes)
