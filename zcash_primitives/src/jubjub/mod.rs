@@ -469,6 +469,8 @@ impl JubjubBls12 {
 
 #[test]
 fn test_jubjub_bls12() {
+    use hex_literal::hex;
+
     let params = JubjubBls12::new();
 
     tests::test_suite::<Bls12>(&params);

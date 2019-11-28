@@ -6,12 +6,7 @@
 // Catch documentation errors caused by code changes.
 #![deny(intra_doc_link_resolution_failure)]
 
-#[macro_use]
-extern crate lazy_static;
-
-#[cfg(test)]
-#[macro_use]
-extern crate hex_literal;
+use lazy_static::lazy_static;
 
 pub mod block;
 pub mod constants;
@@ -26,7 +21,7 @@ pub mod primitives;
 pub mod prover;
 pub mod redjubjub;
 pub mod sapling;
-mod serialize;
+pub mod serialize;
 pub mod transaction;
 mod util;
 pub mod zip32;

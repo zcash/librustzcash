@@ -325,8 +325,8 @@ extern "C" {
         const uint32_t *ni_ptr,
         const unsigned char *n_ptr,
         size_t p_len,
-        size_t e_len
-        unsigned char *rt_ret,
+        size_t e_len,
+        unsigned char *rt_ret
     );
 }
 

@@ -5,10 +5,6 @@
 #![allow(unused_imports)]
 
 #[cfg(feature = "derive")]
-#[macro_use]
-extern crate ff_derive;
-
-#[cfg(feature = "derive")]
 pub use ff_derive::*;
 
 use rand_core::RngCore;

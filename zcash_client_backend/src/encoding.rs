@@ -2,6 +2,8 @@
 //!
 //! Human-Readable Prefixes (HRPs) for Bech32 encodings are located in the [`constants`]
 //! module.
+//!
+//! [`constants`]: crate::constants
 
 use bech32::{self, Error, FromBase32, ToBase32};
 use pairing::bls12_381::Bls12;
