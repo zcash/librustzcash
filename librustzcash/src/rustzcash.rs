@@ -1349,8 +1349,7 @@ pub extern "system" fn librustzcash_mmr_hash_node(
     cbranch: u32,
     n_ptr: *const [u8; zcash_mmr::MAX_NODE_DATA_SIZE],
     h_ret: *mut u8,
-) -> u32
-{
+) -> u32 {
     let node_bytes: &[u8; zcash_mmr::MAX_NODE_DATA_SIZE] = unsafe {
         match n_ptr.as_ref() {
             Some(r) => r,
@@ -1364,11 +1363,8 @@ pub extern "system" fn librustzcash_mmr_hash_node(
     };
 
     unsafe {
-        slice::from_raw_parts_mut(h_ret, 32).copy_from_slice(
-            &node.hash()[..]
-        );
+        slice::from_raw_parts_mut(h_ret, 32).copy_from_slice(&node.hash()[..]);
     }
-
 
     return 0;
 }

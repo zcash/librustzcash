@@ -332,7 +332,7 @@ extern "C" {
     uint32_t librustzcash_mmr_hash_node(
         uint32_t cbranch,
         const unsigned char *n_ptr,
-        unsigned char *h_ret,
+        unsigned char *h_ret
     );
 }
 
