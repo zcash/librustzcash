@@ -328,6 +328,12 @@ extern "C" {
         size_t e_len,
         unsigned char *rt_ret
     );
+
+    uint32_t librustzcash_mmr_hash_node(
+        uint32_t cbranch,
+        const unsigned char *n_ptr,
+        unsigned char *h_ret,
+    );
 }
 
 #endif // LIBRUSTZCASH_INCLUDE_H_
