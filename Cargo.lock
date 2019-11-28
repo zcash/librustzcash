@@ -5966,6 +5966,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "wasabi_leb128"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1ef95b2fc26dab4b706f4763b297aa7277a1660e83450fa39e6832e64aeeb637"
+dependencies = [
+ "num-traits",
+]
+
+[[package]]
 name = "wasi"
 version = "0.11.0+wasi-snapshot-preview1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6714,6 +6723,7 @@ dependencies = [
  "incrementalmerkletree-testing",
  "memuse",
  "proptest",
+ "wasabi_leb128",
 ]
 
 [[package]]
