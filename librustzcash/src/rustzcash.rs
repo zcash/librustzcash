@@ -1391,3 +1391,32 @@ pub extern "system" fn librustzcash_mmr_delete(
 
     truncate_len
 }
+
+#[no_mangle]
+pub extern "system" fn librustzcash_mmr_hash_node(
+    cbranch: u32,
+    n_ptr: *const [u8; zcash_mmr::MAX_NODE_DATA_SIZE],
+    h_ret: *mut u8,
+) -> u32
+{
+    let node_bytes: &[u8; zcash_mmr::MAX_NODE_DATA_SIZE] = unsafe {
+        match n_ptr.as_ref() {
+            Some(r) => r,
+            None => return 1,
+        }
+    };
+
+    let node = match MMRNodeData::from_bytes(cbranch, &node_bytes[..]) {
+        Ok(n) => n,
+        _ => return 1, // error
+    };
+
+    unsafe {
+        slice::from_raw_parts_mut(h_ret, 32).copy_from_slice(
+            &node.hash()[..]
+        );
+    }
+
+
+    return 0;
+}
