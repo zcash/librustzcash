@@ -67,18 +67,16 @@ impl Program {
                     Err("could not validate channel opening")
                 }
             }
-            (bolt::Predicate::Close(p), bolt::Witness::Close(w)) => {
+            (bolt::Predicate::Close(p_close), bolt::Witness::Close(w_close)) => {
                 // NOTE: call the close-channel-verify program here
                 // In CLOSE mode, we only require that the predicate is satisfied:
-                // predicate_close = BLAKE2b_256(witness_close)
-                println!("BOLT: close valid for now!");
-                Ok(())
-//                let hash = Params::new().hash_length(32).hash(&w.0);
-//                if hash.as_bytes() == p.0 {
-//                    Ok(())
-//                } else {
-//                    Err("hash mismatch")
-//                }
+                // TODO: validate timelock
+                let is_valid = bolt::verify_channel_closing(p_close, w_close);
+                if is_valid {
+                    Ok(())
+                } else {
+                    Err("could not validate channel closing")
+                }
             }
             _ => Err("Mode mismatch"),
         }

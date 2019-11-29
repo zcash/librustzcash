@@ -12,8 +12,8 @@ use super::ToPayload;
 use crate::transaction::builder::Error::InvalidWitness;
 use crate::wtp::bolt::open::get_witness_payload;
 
-use bolt::wtp_utils::{reconstruct_channel_token_bls12, reconstruct_close_wallet_bls12, reconstruct_secp_public_key,
-                      reconstruct_signature_bls12, wtp_verify_cust_close_message};
+use bolt::wtp_utils::{reconstruct_channel_token_bls12, reconstruct_close_wallet_bls12, reconstruct_secp_public_key, reconstruct_signature_bls12, wtp_verify_cust_close_message, reconstruct_secp_channel_close_m, reconstruct_secp_signature};
+use bolt::bidirectional::{wtp_verify_revoke_message, wtp_verify_merch_close_message};
 
 mod open {
     use std::convert::TryInto;
@@ -75,8 +75,8 @@ mod close {
     pub struct Witness {  // (pub [u8; 32]);
         pub witness_type: u8, // 1 byte
         pub address: [u8; 32], // 32 bytes
-        pub signature: Vec<u8>, // 72 bytes (cust-sig or merch-sig)
-        pub revoke_token: Vec<u8>, // 104 (wpk + rev-sig)
+        pub signature: Vec<u8>, // x bytes (cust-sig or merch-sig)
+        pub revoke_token: Vec<u8>, // 33 + x (wpk + rev-sig)
     }
 
     pub fn get_predicate_payload(p: &Predicate) -> Vec<u8> {
@@ -91,8 +91,10 @@ mod close {
         let mut output = Vec::new();
         output.push(w.witness_type);
         output.extend(w.address.iter());
+        output.push(w.signature.len() as u8);
         output.extend(w.signature.iter());
         if w.witness_type == 0x1 {
+            output.push(w.revoke_token.len() as u8);
             output.extend(w.revoke_token.iter());
         }
         // output.push(0x0); // add null as last byte
@@ -244,7 +246,7 @@ fn parse_open_witness_input(input: [u8; 210]) -> open::Witness {
     };
 }
 
-fn parse_close_witness_input(input: [u8; 210]) -> close::Witness {
+fn parse_close_witness_input(input: [u8; 179]) -> close::Witness {
     let witness_type = input[0];
     let mut address= [0u8; 32];
     let mut signature = Vec::new();
@@ -252,10 +254,13 @@ fn parse_close_witness_input(input: [u8; 210]) -> close::Witness {
 
     address.copy_from_slice(&input[1..33]);
     // cust-sig or merch-sig (depending on witness type)
-    signature.extend_from_slice(&input[33..72].to_vec());
+    let end_first_sig = (34 + input[33]) as usize;
+    signature.extend_from_slice(&input[34..end_first_sig].to_vec());
 
     if witness_type == 0x1 {
-        revoke_token.extend_from_slice(&input[72..210].to_vec());
+        let start_second_sig = (end_first_sig + 1) as usize;
+        let end_second_sig = start_second_sig + input[end_first_sig] as usize;
+        revoke_token.extend_from_slice(&input[start_second_sig..end_second_sig].to_vec());
     }
     return close::Witness {
         witness_type,
@@ -270,7 +275,7 @@ impl Witness {
         Witness::Open(parse_open_witness_input(input))
     }
 
-    pub fn close(input: [u8; 210]) -> Self {
+    pub fn close(input: [u8; 179]) -> Self {
         Witness::Close(parse_close_witness_input(input))
     }
 }
@@ -295,17 +300,17 @@ impl TryFrom<(usize, &[u8])> for Witness {
                 }
             }
             close::MODE => {
-                if payload.len() == 210 {
+                if payload.len() == 179 {
                     let witness_type = payload[0];
                     if witness_type != 0x0 && witness_type != 0x1 {
                         return Err("Invalid witness for close channel mode");
                     }
-                    let mut witness_input = [0; 210];
+                    let mut witness_input = [0; 179];
                     witness_input.copy_from_slice(payload);
                     let witness = parse_close_witness_input(witness_input);
                     Ok(Witness::Close(witness))
                 } else {
-                    Err("Payload is not 210 bytes")
+                    Err("Payload is not 179 bytes")
                 }
             }
             _ => Err("Invalid mode"),
@@ -394,6 +399,44 @@ pub fn verify_channel_opening(escrow_pred: &open::Predicate, close_tx_witness: &
     return false;
 }
 
+// close-channel program description
+// If witness is of type 0x0, verify customer signature and relative timeout met
+
+// If witness is of type 0x1, check that 1 output is created paying <balance-merch + balance-cust> to <address>.
+// Also check that <merch-sig> is a valid signature on <<address> || <revocation-token>>
+// and that <revocation-token> contains a valid signature under <wpk> on <<wpk> || REVOKED>
+
+// use pairing::bls12_381::Bls12;
+
+pub fn verify_channel_closing(close_tx_pred: &close::Predicate, spend_tx_witness: &close::Witness) -> bool {
+    println!("Checking the predicate + witness!");
+    println!("Predicate: {:?}", close::get_predicate_payload(close_tx_pred));
+    println!("Witness: {:?}", close::get_witness_payload(spend_tx_witness));
+
+    // check that signatures are valid with respect to wallets
+
+    if spend_tx_witness.witness_type == 0x0 {
+        // customer-initiated
+        let cust_sig = reconstruct_secp_signature(spend_tx_witness.signature.as_slice());
+        return true; //TODO: verify cust-sig
+    } else if spend_tx_witness.witness_type == 0x1 {
+        // merchant-initiated
+        let option_channel_token = reconstruct_channel_token_bls12(&close_tx_pred.channel_token);
+        let channel_token = match option_channel_token {
+            Ok(n) => n.unwrap(),
+            Err(e) => return false
+        };
+        let channel_close = reconstruct_secp_channel_close_m(&spend_tx_witness.address, &spend_tx_witness.revoke_token, &spend_tx_witness.signature);
+        let mut wpk_bytes = [0u8; 33];
+        wpk_bytes.copy_from_slice(close_tx_pred.pubkey.as_slice());
+        let wpk = reconstruct_secp_public_key(&wpk_bytes);
+        let revoke_token = reconstruct_secp_signature(spend_tx_witness.revoke_token.as_slice());
+        return wtp_verify_revoke_message(&wpk, &revoke_token) &&  wtp_verify_merch_close_message(&channel_token, &channel_close);
+    }
+
+    return false;
+}
+
 
 #[cfg(test)]
 mod tests {
@@ -458,12 +501,29 @@ mod tests {
     }
 
     #[test]
-    fn witness_close_round_trip() {
-        let mut data = vec![7; 209];
-        data.insert(0, 0x1);
+    fn witness_close_round_trip_mode0() {
+        let mut data = vec![7; 178];
+        data.insert(0, 0x0);
+        data[33] = 0x48;
 
         let w: Witness = (close::MODE, &data[..]).try_into().unwrap();
-        let mut witness_input = [0; 210];
+        let mut witness_input = [0; 179];
+        witness_input.copy_from_slice(&data);
+        let witness = parse_close_witness_input(witness_input);
+
+        assert_eq!(w, Witness::Close(witness));
+        assert_eq!(w.to_payload(), (close::MODE, data[0..106].to_vec()));
+    }
+
+    #[test]
+    fn witness_close_round_trip_mode1() {
+        let mut data = vec![7; 178];
+        data.insert(0, 0x1);
+        data[33] = 0x48;
+        data[106] = 0x48;
+
+        let w: Witness = (close::MODE, &data[..]).try_into().unwrap();
+        let mut witness_input = [0; 179];
         witness_input.copy_from_slice(&data);
         let witness = parse_close_witness_input(witness_input);
 
