@@ -28,22 +28,15 @@ pub struct Tree {
 impl Tree {
     /// Resolve link originated from this tree
     pub fn resolve_link(&self, link: EntryLink) -> Result<IndexedNode, Error> {
-        match link {
-            EntryLink::Generated(index) => {
-                let node = self.generated.get(index as usize).ok_or(Error::ExpectedInMemory(link))?;
-                Ok(IndexedNode {
-                    node,
-                    link,
-                })
-            },
-            EntryLink::Stored(index) => {
-                let node = self.stored.get(&index).ok_or(Error::ExpectedInMemory(link))?;
-                Ok(IndexedNode {
-                    node,
-                    link,
-                })
-            },
-        }
+         match link {
+             EntryLink::Generated(index) => self.generated.get(index as usize),
+             EntryLink::Stored(index) => self.stored.get(&index),
+         }
+         .map(|node| IndexedNode {
+             node,
+             link,
+         })
+         .ok_or(Error::ExpectedInMemory(link))
     }
 
     fn push(&mut self, data: Entry) -> EntryLink {
