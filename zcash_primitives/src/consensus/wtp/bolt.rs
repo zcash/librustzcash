@@ -59,7 +59,6 @@ impl Program {
                 }
 
                 // retrieve the two outputs here
-                println!("Now we can process the two outputs!");
                 let is_valid = bolt::verify_channel_opening(p_open, w_open);
 
                 if is_valid {

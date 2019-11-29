@@ -12,8 +12,8 @@ use super::ToPayload;
 use crate::transaction::builder::Error::InvalidWitness;
 use crate::wtp::bolt::open::get_witness_payload;
 
-use bolt::wtp_utils::{reconstruct_channel_token_bls12, reconstruct_wallet_bls12, reconstruct_secp_public_key};
-use rand::AsByteSliceMut;
+use bolt::wtp_utils::{reconstruct_channel_token_bls12, reconstruct_close_wallet_bls12, reconstruct_secp_public_key,
+                      reconstruct_signature_bls12, wtp_verify_cust_close_message};
 
 mod open {
     use std::convert::TryInto;
@@ -54,7 +54,6 @@ mod open {
         if w.witness_type == 0x1 {
             output.extend(w.wpk.iter())
         }
-        // output.push(0x0); // add null as last byte
         return output;
     }
 
@@ -353,23 +352,15 @@ impl ToPayload for Witness {
 //
 // Also check that <cust-sig> is a valid signature and that <closing-token> contains a valid signature under <MERCH-PK> on <<cust-pk> || <wpk> || <balance-cust> || <balance-merch> || CLOSE>.
 
-// use pairing::bls12_381::Bls12;
-
 pub fn verify_channel_opening(escrow_pred: &open::Predicate, close_tx_witness: &open::Witness) -> bool {
-    println!("Checking the predicate + witness!");
     println!("Predicate: {:?}", open::get_predicate_payload(escrow_pred));
     println!("Witness: {:?}", open::get_witness_payload(close_tx_witness));
-
-    // check that signatures are valid with respect to wallets
 
     if close_tx_witness.witness_type == 0x0 {
         // merchant-initiated
     } else if close_tx_witness.witness_type == 0x1 {
         // customer-initiated
-        // let wallet = Wallet { channelId: channelId, wpk: wpk_h, bc: cust_bal, bm: merch_bal, close: None };
-
         let _channel_token = &escrow_pred.channel_token;
-        let wpk = &close_tx_witness.wpk;
         let cust_bal = close_tx_witness.cust_bal;
         let merch_bal = close_tx_witness.merch_bal;
 
@@ -381,13 +372,23 @@ pub fn verify_channel_opening(escrow_pred: &open::Predicate, close_tx_witness: &
         };
 
         let mut wpk_bytes = [0u8; 33];
-        wpk_bytes.copy_from_slice(wpk.as_slice());
+        wpk_bytes.copy_from_slice(close_tx_witness.wpk.as_slice());
         let wpk = reconstruct_secp_public_key(&wpk_bytes);
-        let close_wallet = reconstruct_wallet_bls12(&channel_token, &wpk, cust_bal, merch_bal);
+
+        let close_wallet = reconstruct_close_wallet_bls12(&channel_token, &wpk, cust_bal, merch_bal);
+
+        // TODO:
+        let is_cust_sig_valid = true; // wtp_verify_secp_signature(close_tx_witness.cust_sig);
+
+        let option_close_token = reconstruct_signature_bls12(&close_tx_witness.merch_sig);
+        let close_token = match option_close_token {
+            Ok(n) => n.unwrap(),
+            Err(e) => return false
+        };
 
         // check whether close token is valid
-        // let is_close_token_valid = wrapped_wtp_verify_cust_close_message(&channel_token, &wpk, &close_wallet, &close_tx_witness.merch_sig);
-        return true;
+        let is_close_token_valid = wtp_verify_cust_close_message(&channel_token, &wpk, &close_wallet, &close_token);
+        return is_cust_sig_valid && is_close_token_valid;
     }
 
     return false;
