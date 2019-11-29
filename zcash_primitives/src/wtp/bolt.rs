@@ -49,7 +49,9 @@ mod open {
         output.push(w.witness_type);
         output.extend(convert_u32_to_bytes(w.cust_bal).iter());
         output.extend(convert_u32_to_bytes(w.merch_bal).iter());
+        output.push(w.cust_sig.len() as u8);
         output.extend(w.cust_sig.iter());
+        output.push(w.merch_sig.len() as u8);
         output.extend(w.merch_sig.iter());
         if w.witness_type == 0x1 {
             output.extend(w.wpk.iter())
@@ -109,7 +111,7 @@ pub enum Predicate {
 }
 
 impl Predicate {
-    pub fn open(input: [u8; 1024]) -> Self {
+    pub fn open(input: [u8; 1106]) -> Self {
         let mut channel_token = Vec::new();
         let mut address = [0; 32];
         address.copy_from_slice(&input[0..32]);
@@ -136,7 +138,7 @@ impl TryFrom<(usize, &[u8])> for Predicate {
     fn try_from((mode, payload): (usize, &[u8])) -> Result<Self, Self::Error> {
         match mode {
             open::MODE => {
-                if payload.len() == 1024 {
+                if payload.len() == 1106 {
                     let mut address = [0; 32];
                     let mut channel_token = Vec::new();
                     address.copy_from_slice(&payload[0..32]);
@@ -145,7 +147,7 @@ impl TryFrom<(usize, &[u8])> for Predicate {
                     let op = open::Predicate { address, channel_token };
                     Ok(Predicate::Open(op))
                 } else {
-                    Err("Payload is not 1024 bytes")
+                    Err("Payload is not 1106 bytes")
                 }
             }
             close::MODE => {
@@ -220,20 +222,22 @@ pub enum Witness {
     Close(close::Witness),
 }
 
-fn parse_open_witness_input(input: [u8; 210]) -> open::Witness {
+fn parse_open_witness_input(input: [u8; 212]) -> open::Witness {
     let witness_type = input[0];
     let cust_bal = convert_bytes_to_u32(input[1..5].to_vec());
     let merch_bal = convert_bytes_to_u32(input[5..9].to_vec());
     let mut cust_sig = Vec::new();
     let mut merch_sig = Vec::new();
-    cust_sig.extend_from_slice(&input[9..81].to_vec()); // customer signature
+    let end_first_sig = (10 + input[9]) as usize;
+    cust_sig.extend_from_slice(&input[10..end_first_sig].to_vec()); // customer signature
 
     let mut wpk = Vec::new(); // [0u8; 33];
-    if witness_type == 0x0 { // merchant initiated (merch_sig : 72 bytes)
-        merch_sig.extend_from_slice(&input[81..153].to_vec());
-    } else if witness_type == 0x1 { // customer initiated (merch_sig : close-token = 96 bytes)
-        merch_sig.extend_from_slice(&input[81..177].to_vec());
-        wpk.extend(input[177..210].iter());
+    let start_second_sig = end_first_sig + 1;
+    let end_second_sig = start_second_sig + input[end_first_sig] as usize;
+    merch_sig.extend_from_slice(&input[start_second_sig..end_second_sig].to_vec());
+    if witness_type == 0x1 { // customer initiated (merch_sig : close-token = 96 bytes)
+        let end_wpk = end_second_sig + 33;
+        wpk.extend(input[end_second_sig..end_wpk].iter());
     }
 
     return open::Witness {
@@ -271,7 +275,7 @@ fn parse_close_witness_input(input: [u8; 179]) -> close::Witness {
 }
 
 impl Witness {
-    pub fn open(input: [u8; 210]) -> Self {
+    pub fn open(input: [u8; 212]) -> Self {
         Witness::Open(parse_open_witness_input(input))
     }
 
@@ -286,12 +290,12 @@ impl TryFrom<(usize, &[u8])> for Witness {
     fn try_from((mode, payload): (usize, &[u8])) -> Result<Self, Self::Error> {
         match mode {
             open::MODE => {
-                if payload.len() == 210 {
+                if payload.len() == 212 {
                     let witness_type = payload[0];
                     if witness_type != 0x0 && witness_type != 0x1 {
                         return Err("Invalid witness for open channel mode");
                     }
-                    let mut witness_input = [0; 210];
+                    let mut witness_input = [0; 212];
                     witness_input.copy_from_slice(payload);
                     let witness = parse_open_witness_input(witness_input);
                     Ok(Witness::Open(witness))
@@ -373,7 +377,10 @@ pub fn verify_channel_opening(escrow_pred: &open::Predicate, close_tx_witness: &
         let option_channel_token = reconstruct_channel_token_bls12(&_channel_token);
         let channel_token = match option_channel_token {
             Ok(n) => n.unwrap(),
-            Err(e) => return false
+            Err(e) => {
+                println!("{}", e);
+                return false
+            }
         };
 
         let mut wpk_bytes = [0u8; 33];
@@ -448,7 +455,7 @@ mod tests {
 
     #[test]
     fn predicate_open_round_trip() {
-        let data = vec![7; 1024];
+        let data = vec![7; 1106];
         let p: Predicate = (open::MODE, &data[..]).try_into().unwrap();
         let mut channel_token = Vec::new();
 
@@ -488,11 +495,13 @@ mod tests {
 
     #[test]
     fn witness_open_round_trip() {
-        let mut data = vec![7; 209];
+        let mut data = vec![7; 211];
         data.insert(0, 0x1);
+        data[9] = 72;
+        data[82] = 96;
 
         let w: Witness = (open::MODE, &data[..]).try_into().unwrap();
-        let mut witness_input = [0; 210];
+        let mut witness_input = [0; 212];
         witness_input.copy_from_slice(&data);
         let witness = parse_open_witness_input(witness_input);
 

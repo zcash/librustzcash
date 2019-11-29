@@ -129,31 +129,27 @@ mod tests {
 
     #[test]
     fn bolt_program() {
-//        let preimage_1 = [1; 32];
-//        let preimage_2 = [2; 32];
-//
-//        let hash_2 = {
-//            let mut hash = [0; 32];
-//            hash.copy_from_slice(Params::new().hash_length(32).hash(&preimage_2).as_bytes());
-//            hash
-//        };
-//        let hash_1 = {
-//            let mut hash = [0; 32];
-//            hash.copy_from_slice(
-//                Params::new()
-//                    .hash_length(32)
-//                    .to_state()
-//                    .update(&preimage_1)
-//                    .update(&hash_2)
-//                    .finalize()
-//                    .as_bytes(),
-//            );
-//            hash
-//        };
-
         // TODO: generate sample inputs
-        let escrow_tx_predicate = [0u8; 1024]; // channel token + merch-close-address
-        let close_witness_input = [1u8; 210];
+        let mut _ser_channel_token = hex::decode("03ad405f05ba0bd2b88db730c7e267293728d2da3183351c4070a56f46c052d09302754e51904e5ddc5485946988d9eb4fc9b4ab7d13df86f40c4f69339ab2252e0ea35efc25c6dd699a5f6aed7fd25e6257f31051d1ab8d1c224fcc1c6b7e2aff4a25f4cbee450f00e7336e2dcb4388e237120ac0250beaf91d458bc9602fa001ee090bca5220dc6b586bf75516e0554b817208aa62be1f7b2d4f7e4d77f50cce18ae8beb15797ff8e4035a6b5cfc8f6714da199d2b62398c2c8a8560a6ac73001fa8b5c37c30804cdb7480d0c5ef7325fd07b72d3883d614f1cd0d272bbe360ea22022abfa5a145d09224d7baac1d9b056289c4537b32e029e179bc3071abe4e74ae6debc7472c223b9a66cf85b6b4bbee9061da4429337fb79b08a9c5c187c47b183b707e2232a69af9da98fd18cbdb48164a4d51bb49149eab7538539e7a561ed83e14703d2babb5f51913c43c22084ba925b16b938051f365ca546e9ee365d7b865cdecb5708a6ed693f212f46ec71bd8fc90390e12716e04a071b5f91d4ac1210eb37c162b06205574655293f4f2961024d604bb3f4025b4cb7eec6f35375006c052a51fcb0a81f1ff9b084f90b3d33b5170f5c0457eba4aef22d4bedab8098fe7464a9f9545efb349ee228651fb9e0f88b43e3953f75719ad7afba5eed73de480eea175ee64db0417d2c4c08ff2a30d6789cbfaa4feedd46c5cdf49ddc465face9734371ea321519e81ecdcfcec2b0f94215ff40839554394b36b1252bccb84fcff839cd1e416adc45aae33e135042af65d68d626382f5ef863598963aa34a7bc7a9dc8b06dd80e2605e5177ebfb10c813eb18296b81937eb0a54c6cf4cd4a9a05951d3dc98597c968a1af1b601a0488b12be6eaabb9f1e544bfa03c0d9c3a29371b0f4ab2ce108e4a6d08c508e75f2ec262339ecc20aba4faf2494191ff1257224d59b15413c162c6c80a4ca2d0684b2e6ecb66f10e82923fc26d65f721708640604558ff60911eb77495871ceae8c6ce4e22eaf29f209a6416efde17f711105b8d4b062811c01e0e51bc3834692d3a9f98be972bea710980fcbd63e4133e51defbb678d3d394762b74ddac12431a29371b0f4ab2ce108e4a6d08c508e75f2ec262339ecc20aba4faf2494191ff1257224d59b15413c162c6c80a4ca2d06b33e2d93f0209fc3645bb82aad0dab4fd8ac3800e340e33243c4bd8f6db73fb1e7902cabc628d0658512647e30776413a835285578439b1b52c1909cfaa2991dca145dc92d3e0ba6513cf51a3060f67fa51233d0e8a3217cd264fa82494d054d82324881008ae8287bdc1c290f3148a82963d5bb890e684b3dccd4bd477752a6f2d8838a9d120f1d348945f7e8e905ed90096a824aed32d05465188e2bb230a90c51d0ad2b1a69977b6855b516fc99b9aab1cef9eda7e05cf8305bb24b1eda66b18757ce92622fc8f5140aa87375881f3f6e395e89dcb889d9ed262ce53ff14f8fd1fd9059aeeedb0cf77cd4b1fd989b").unwrap();
+        let mut _merch_close_addr = hex::decode("1111111111111111111111111111111111111111111111111111111111111111").unwrap();
+        _merch_close_addr.append(&mut _ser_channel_token);
+        let mut escrow_tx_predicate = [0u8; 1106]; // channel token + merch-close-address
+        escrow_tx_predicate.copy_from_slice(_merch_close_addr.as_slice());
+
+        // 1 byte mode + 4 bytes cust_bal + 4 bytes merch_bal + 72 bytes cust_sig + 96 bytes close token
+        let mut close_witness_input = [0u8; 212];
+        let mut close_witness_vec = Vec::new();
+        close_witness_vec.push(0x1);
+        close_witness_vec.extend([0,0,0,85].iter());
+        close_witness_vec.extend([0,0,0,25].iter());
+        close_witness_vec.push(70);
+        close_witness_vec.extend(hex::decode("3044022064650285b55624f1f64b2c75e76589fa4b1033dabaa7ff50ff026e1dc038279202204ca696e0a829687c87171e8e5dab17069be248ff2595fd9607f3346dadcb579f").unwrap());
+        close_witness_vec.push(96);
+        close_witness_vec.extend(hex::decode("83909c8d21ac0cf4e859e7f665ecf867892933537372bdf7125b3feb4b568dbf65f8a1c338d84aba91c9ffd6cce34752899a3fc0f78103f85e7fd673fd8a6739136a1c2e9aced6563599c51172fa4fdb58011a1a5cfa2530b7e8387bd58fbec3").unwrap());
+        close_witness_vec.extend(hex::decode("031f63dcb88fe29d05dae0a0169186cd953b9db2921856e521a2b167eb83ee5347").unwrap());
+        close_witness_vec.extend([0,0].iter());
+        close_witness_input.copy_from_slice(close_witness_vec.as_slice());
+
         let cust_close_tx_predicate = [0u8; 1024];
         let merch_close_tx_predicate = [0u8; 1024];
 
