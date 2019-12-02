@@ -28,7 +28,7 @@ impl fmt::Display for Error {
 }
 
 mod context {
-    use crate::transaction::{components::WtpOut, Transaction};
+    use crate::transaction::{components::WtpOut, Transaction, signature_hash, SIGHASH_ALL};
 
     pub(super) struct V1<'a> {
         height: i32,
@@ -54,6 +54,10 @@ mod context {
 
         pub(super) fn tx_wtp_outputs(&self) -> &[WtpOut] {
             &self.tx.wtp_outputs
+        }
+
+        pub(super) fn get_tx_hash(&self) -> Vec<u8> {
+            signature_hash(&self.tx, 0x7473_6554, SIGHASH_ALL, None)
         }
 
     }

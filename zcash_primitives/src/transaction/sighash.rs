@@ -5,7 +5,7 @@ use ff::{PrimeField, PrimeFieldRepr};
 use super::{
     components::{Amount, TxOut},
     Transaction, TransactionData, OVERWINTER_VERSION_GROUP_ID, SAPLING_TX_VERSION,
-    SAPLING_VERSION_GROUP_ID,
+    SAPLING_VERSION_GROUP_ID, NU4_VERSION_GROUP_ID
 };
 use crate::legacy::Script;
 
@@ -45,6 +45,7 @@ enum SigHashVersion {
     Sprout,
     Overwinter,
     Sapling,
+    NU4
 }
 
 impl SigHashVersion {
@@ -53,6 +54,7 @@ impl SigHashVersion {
             match tx.version_group_id {
                 OVERWINTER_VERSION_GROUP_ID => SigHashVersion::Overwinter,
                 SAPLING_VERSION_GROUP_ID => SigHashVersion::Sapling,
+                NU4_VERSION_GROUP_ID => SigHashVersion::NU4,
                 _ => unimplemented!(),
             }
         } else {
@@ -158,7 +160,7 @@ pub fn signature_hash_data(
 ) -> Vec<u8> {
     let sigversion = SigHashVersion::from_tx(tx);
     match sigversion {
-        SigHashVersion::Overwinter | SigHashVersion::Sapling => {
+        SigHashVersion::Overwinter | SigHashVersion::Sapling | SigHashVersion::NU4 => {
             let mut personal = [0; 16];
             (&mut personal[..12]).copy_from_slice(ZCASH_SIGHASH_PERSONALIZATION_PREFIX);
             (&mut personal[12..])

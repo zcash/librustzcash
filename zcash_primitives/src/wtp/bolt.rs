@@ -12,7 +12,11 @@ use super::ToPayload;
 use crate::transaction::builder::Error::InvalidWitness;
 use crate::wtp::bolt::open::get_witness_payload;
 
-use bolt::wtp_utils::{reconstruct_channel_token_bls12, reconstruct_close_wallet_bls12, reconstruct_secp_public_key, reconstruct_signature_bls12, wtp_verify_cust_close_message, reconstruct_secp_channel_close_m, reconstruct_secp_signature};
+use bolt::wtp_utils::{reconstruct_channel_token_bls12, reconstruct_close_wallet_bls12,
+                      reconstruct_secp_public_key, reconstruct_signature_bls12,
+                      wtp_verify_secp_signature, wtp_verify_cust_close_message,
+                      reconstruct_secp_channel_close_m, reconstruct_secp_signature,
+                      wtp_generate_secp_signature};
 use bolt::bidirectional::{wtp_verify_revoke_message, wtp_verify_merch_close_message};
 
 mod open {
@@ -351,6 +355,16 @@ impl ToPayload for Witness {
     }
 }
 
+pub fn compute_tx_signature(sk: &Vec<u8>, txhash: &Vec<u8>) -> Vec<u8> {
+    let mut hash = [0u8; 32];
+    hash.copy_from_slice(&txhash.as_slice());
+
+    let mut seckey = [0u8; 32];
+    seckey.copy_from_slice(sk.as_slice());
+
+    return wtp_generate_secp_signature(&seckey, &hash);
+}
+
 // open-channel program description
 // If witness is of type 0x0, check that 2 new outputs are created, with the specified balances (unless one of the balances is zero), and that the signatures verify.
 
@@ -361,9 +375,10 @@ impl ToPayload for Witness {
 //
 // Also check that <cust-sig> is a valid signature and that <closing-token> contains a valid signature under <MERCH-PK> on <<cust-pk> || <wpk> || <balance-cust> || <balance-merch> || CLOSE>.
 
-pub fn verify_channel_opening(escrow_pred: &open::Predicate, close_tx_witness: &open::Witness) -> bool {
+pub fn verify_channel_opening(escrow_pred: &open::Predicate, close_tx_witness: &open::Witness, tx_hash: &Vec<u8>) -> bool {
     println!("Predicate: {:?}", open::get_predicate_payload(escrow_pred));
     println!("Witness: {:?}", open::get_witness_payload(close_tx_witness));
+    println!("Tx hash: {:?}", tx_hash);
 
     if close_tx_witness.witness_type == 0x0 {
         // merchant-initiated
@@ -389,8 +404,10 @@ pub fn verify_channel_opening(escrow_pred: &open::Predicate, close_tx_witness: &
 
         let close_wallet = reconstruct_close_wallet_bls12(&channel_token, &wpk, cust_bal, merch_bal);
 
-        // TODO:
-        let is_cust_sig_valid = true; // wtp_verify_secp_signature(close_tx_witness.cust_sig);
+        let cust_sig = reconstruct_secp_signature(close_tx_witness.cust_sig.as_slice());
+        let pkc = channel_token.pk_c.unwrap();
+
+        let is_cust_sig_valid = wtp_verify_secp_signature(&pkc, tx_hash, &cust_sig);
 
         let option_close_token = reconstruct_signature_bls12(&close_tx_witness.merch_sig);
         let close_token = match option_close_token {
@@ -413,15 +430,12 @@ pub fn verify_channel_opening(escrow_pred: &open::Predicate, close_tx_witness: &
 // Also check that <merch-sig> is a valid signature on <<address> || <revocation-token>>
 // and that <revocation-token> contains a valid signature under <wpk> on <<wpk> || REVOKED>
 
-// use pairing::bls12_381::Bls12;
-
 pub fn verify_channel_closing(close_tx_pred: &close::Predicate, spend_tx_witness: &close::Witness) -> bool {
     println!("Checking the predicate + witness!");
     println!("Predicate: {:?}", close::get_predicate_payload(close_tx_pred));
     println!("Witness: {:?}", close::get_witness_payload(spend_tx_witness));
 
     // check that signatures are valid with respect to wallets
-
     if spend_tx_witness.witness_type == 0x0 {
         // customer-initiated
         let cust_sig = reconstruct_secp_signature(spend_tx_witness.signature.as_slice());
