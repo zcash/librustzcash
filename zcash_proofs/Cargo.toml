@@ -12,7 +12,7 @@ license = "MIT OR Apache-2.0"
 edition = "2018"
 
 [dependencies]
-bellman = { version = "0.2.0", path = "../bellman" }
+bellman = { version = "0.2.0", path = "../bellman", default-features = false, features = ["groth16"] }
 blake2b_simd = "0.5"
 byteorder = "1"
 directories = { version = "1", optional = true }
@@ -25,8 +25,9 @@ zcash_primitives = { version = "0.1.0", path = "../zcash_primitives" }
 rand_xorshift = "0.2"
 
 [features]
-default = ["local-prover"]
+default = ["local-prover", "multicore"]
 local-prover = ["directories"]
+multicore = ["bellman/multicore"]
 
 [badges]
 maintenance = { status = "actively-developed" }
