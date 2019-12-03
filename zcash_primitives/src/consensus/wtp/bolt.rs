@@ -72,7 +72,8 @@ impl Program {
                 // NOTE: call the close-channel-verify program here
                 // In CLOSE mode, we only require that the predicate is satisfied:
                 // TODO: validate timelock
-                let is_valid = bolt::verify_channel_closing(p_close, w_close);
+                let tx_hash = ctx.get_tx_hash();
+                let is_valid = bolt::verify_channel_closing(p_close, w_close, &tx_hash);
                 if is_valid {
                     Ok(())
                 } else {
@@ -165,12 +166,12 @@ mod tests {
         });
         // to_customer
         mtx_b.wtp_outputs.push(WtpOut {
-            value: Amount::from_u64(4).unwrap(),
+            value: Amount::from_u64(140).unwrap(),
             predicate: wtp::Predicate::Bolt(bolt::Predicate::close(cust_close_tx_predicate)),
         });
         // to_merchant
         mtx_b.wtp_outputs.push(WtpOut {
-            value: Amount::from_u64(1).unwrap(),
+            value: Amount::from_u64(70).unwrap(),
             predicate: wtp::Predicate::Bolt(bolt::Predicate::close(merch_close_tx_predicate)),
         });
 

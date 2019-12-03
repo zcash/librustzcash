@@ -373,31 +373,35 @@ pub fn compute_tx_signature(sk: &Vec<u8>, txhash: &Vec<u8>) -> Vec<u8> {
 // -- one paying <balance-merch> to <merch-close-address>
 // -- one paying a cust-close WTP containing <channel-token> and <wallet> = <<wpk> || <balance-cust> || <balance-merch>>
 //
-// Also check that <cust-sig> is a valid signature and that <closing-token> contains a valid signature under <MERCH-PK> on <<cust-pk> || <wpk> || <balance-cust> || <balance-merch> || CLOSE>.
+// Also check that <cust-sig> is a valid signature and that <closing-token> contains a valid signature under <MERCH-PK> on <<cust-pk> || <wpk> || <balance-cust> || <balance-merch> || CLOSE>
 
 pub fn verify_channel_opening(escrow_pred: &open::Predicate, close_tx_witness: &open::Witness, tx_hash: &Vec<u8>) -> bool {
-    println!("Predicate: {:?}", open::get_predicate_payload(escrow_pred));
-    println!("Witness: {:?}", open::get_witness_payload(close_tx_witness));
-    println!("Tx hash: {:?}", tx_hash);
+    let _channel_token = &escrow_pred.channel_token;
+    let option_channel_token = reconstruct_channel_token_bls12(&_channel_token);
+    let channel_token = match option_channel_token {
+        Ok(n) => n.unwrap(),
+        Err(e) => {
+            println!("{}", e);
+            return false
+        }
+    };
+
+    let pkc = channel_token.pk_c.unwrap();
+    let pkm = channel_token.pk_m;
+
+    let cust_bal = close_tx_witness.cust_bal;
+    let merch_bal = close_tx_witness.merch_bal;
 
     if close_tx_witness.witness_type == 0x0 {
         // merchant-initiated
+        let cust_sig = reconstruct_secp_signature(close_tx_witness.cust_sig.as_slice());
+        let merch_sig = reconstruct_secp_signature(close_tx_witness.merch_sig.as_slice());
+
+        let is_cust_sig_valid = wtp_verify_secp_signature(&pkc, tx_hash, &cust_sig);
+        let is_merch_sig_valid = wtp_verify_secp_signature(&pkm, tx_hash, &merch_sig);
+
     } else if close_tx_witness.witness_type == 0x1 {
         // customer-initiated
-        let _channel_token = &escrow_pred.channel_token;
-        let cust_bal = close_tx_witness.cust_bal;
-        let merch_bal = close_tx_witness.merch_bal;
-
-        // reconstruct the close wallet
-        let option_channel_token = reconstruct_channel_token_bls12(&_channel_token);
-        let channel_token = match option_channel_token {
-            Ok(n) => n.unwrap(),
-            Err(e) => {
-                println!("{}", e);
-                return false
-            }
-        };
-
         let mut wpk_bytes = [0u8; 33];
         wpk_bytes.copy_from_slice(close_tx_witness.wpk.as_slice());
         let wpk = reconstruct_secp_public_key(&wpk_bytes);
@@ -405,7 +409,6 @@ pub fn verify_channel_opening(escrow_pred: &open::Predicate, close_tx_witness: &
         let close_wallet = reconstruct_close_wallet_bls12(&channel_token, &wpk, cust_bal, merch_bal);
 
         let cust_sig = reconstruct_secp_signature(close_tx_witness.cust_sig.as_slice());
-        let pkc = channel_token.pk_c.unwrap();
 
         let is_cust_sig_valid = wtp_verify_secp_signature(&pkc, tx_hash, &cust_sig);
 
@@ -430,23 +433,21 @@ pub fn verify_channel_opening(escrow_pred: &open::Predicate, close_tx_witness: &
 // Also check that <merch-sig> is a valid signature on <<address> || <revocation-token>>
 // and that <revocation-token> contains a valid signature under <wpk> on <<wpk> || REVOKED>
 
-pub fn verify_channel_closing(close_tx_pred: &close::Predicate, spend_tx_witness: &close::Witness) -> bool {
-    println!("Checking the predicate + witness!");
-    println!("Predicate: {:?}", close::get_predicate_payload(close_tx_pred));
-    println!("Witness: {:?}", close::get_witness_payload(spend_tx_witness));
+pub fn verify_channel_closing(close_tx_pred: &close::Predicate, spend_tx_witness: &close::Witness, tx_hash: &Vec<u8>) -> bool {
+    let option_channel_token = reconstruct_channel_token_bls12(&close_tx_pred.channel_token);
+    let channel_token = match option_channel_token {
+        Ok(n) => n.unwrap(),
+        Err(e) => return false
+    };
 
-    // check that signatures are valid with respect to wallets
     if spend_tx_witness.witness_type == 0x0 {
         // customer-initiated
+        let pkc = channel_token.pk_c.unwrap();
         let cust_sig = reconstruct_secp_signature(spend_tx_witness.signature.as_slice());
-        return true; //TODO: verify cust-sig
+        let is_cust_sig_valid = wtp_verify_secp_signature(&pkc, tx_hash, &cust_sig);
+        return is_cust_sig_valid;
     } else if spend_tx_witness.witness_type == 0x1 {
         // merchant-initiated
-        let option_channel_token = reconstruct_channel_token_bls12(&close_tx_pred.channel_token);
-        let channel_token = match option_channel_token {
-            Ok(n) => n.unwrap(),
-            Err(e) => return false
-        };
         let channel_close = reconstruct_secp_channel_close_m(&spend_tx_witness.address, &spend_tx_witness.revoke_token, &spend_tx_witness.signature);
         let mut wpk_bytes = [0u8; 33];
         wpk_bytes.copy_from_slice(close_tx_pred.pubkey.as_slice());
