@@ -52,6 +52,15 @@ mod context {
                 && self.tx.joinsplits.is_empty()
         }
 
+        pub(super) fn is_wtp_and_vout_only(&self) -> bool {
+            self.tx.vin.is_empty()
+                && self.tx.wtp_outputs.len() == 1
+                && self.tx.vout.len() <= 1
+                && self.tx.shielded_spends.is_empty()
+                && self.tx.shielded_outputs.is_empty()
+                && self.tx.joinsplits.is_empty()
+        }
+
         pub(super) fn tx_wtp_outputs(&self) -> &[WtpOut] {
             &self.tx.wtp_outputs
         }
