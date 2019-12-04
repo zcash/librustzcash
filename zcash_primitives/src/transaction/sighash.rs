@@ -7,7 +7,7 @@ use super::{
     Transaction, TransactionData, OVERWINTER_VERSION_GROUP_ID, SAPLING_TX_VERSION,
     SAPLING_VERSION_GROUP_ID,
 };
-use crate::legacy::Script;
+use crate::{consensus, legacy::Script};
 
 const ZCASH_SIGHASH_PERSONALIZATION_PREFIX: &[u8; 12] = b"ZcashSigHash";
 const ZCASH_PREVOUTS_HASH_PERSONALIZATION: &[u8; 16] = b"ZcashPrevoutHash";
@@ -152,7 +152,7 @@ fn shielded_outputs_hash(tx: &TransactionData) -> Blake2bHash {
 
 pub fn signature_hash_data(
     tx: &TransactionData,
-    consensus_branch_id: u32,
+    consensus_branch_id: consensus::BranchId,
     hash_type: u32,
     transparent_input: Option<(usize, &Script, Amount)>,
 ) -> Vec<u8> {
@@ -162,7 +162,7 @@ pub fn signature_hash_data(
             let mut personal = [0; 16];
             (&mut personal[..12]).copy_from_slice(ZCASH_SIGHASH_PERSONALIZATION_PREFIX);
             (&mut personal[12..])
-                .write_u32::<LittleEndian>(consensus_branch_id)
+                .write_u32::<LittleEndian>(consensus_branch_id.into())
                 .unwrap();
 
             let mut h = Blake2bParams::new()
@@ -230,7 +230,7 @@ pub fn signature_hash_data(
 
 pub fn signature_hash(
     tx: &Transaction,
-    consensus_branch_id: u32,
+    consensus_branch_id: consensus::BranchId,
     hash_type: u32,
     transparent_input: Option<(usize, &Script, Amount)>,
 ) -> Vec<u8> {
