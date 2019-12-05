@@ -181,7 +181,7 @@ fn append() {
         peaks.as_ptr(),
         peaks.len(),
         &new_node_data,
-        rt_ret.as_mut_ptr(),
+        &mut rt_ret,
         buf_ret.as_mut_ptr(),
     );
 
@@ -220,7 +220,7 @@ fn delete() {
         nodes.as_ptr(),
         peak_count,
         indices.len() - peak_count,
-        rt_ret.as_mut_ptr(),
+        &mut rt_ret,
     );
 
     // Deleting from full tree of 9 height would result in cascade deleting of 10 nodes
