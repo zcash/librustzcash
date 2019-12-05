@@ -157,7 +157,7 @@ mod tests {
     use crate::legacy::Script;
 
     const OPEN_WITNESS_LEN: usize = 212;
-    const CLOSE_WITNESS_LEN: usize = 179;
+    const CLOSE_WITNESS_LEN: usize = 180;
     const CLOSE_PREDICATE_LEN: usize = 1111;
     const OPEN_PREDICATE_LEN: usize = 1107;
 

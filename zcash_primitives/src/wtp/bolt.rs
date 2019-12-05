@@ -334,7 +334,7 @@ fn parse_open_witness_input(input: [u8; 212]) -> open::Witness {
     };
 }
 
-fn parse_close_witness_input(input: [u8; 179]) -> close::Witness {
+fn parse_close_witness_input(input: [u8; 180]) -> close::Witness {
     let witness_type = input[0];
     let mut address= Vec::new();
     let mut signature = Vec::new();
@@ -375,7 +375,7 @@ impl Witness {
         Witness::Open(parse_open_witness_input(input))
     }
 
-    pub fn close(input: [u8; 179]) -> Self {
+    pub fn close(input: [u8; 180]) -> Self {
         Witness::Close(parse_close_witness_input(input))
     }
 
@@ -404,17 +404,17 @@ impl TryFrom<(usize, &[u8])> for Witness {
                 }
             }
             close::MODE => {
-                if payload.len() == 179 {
+                if payload.len() == 180 {
                     let witness_type = payload[0];
                     if witness_type != 0x0 && witness_type != 0x1 {
                         return Err("Invalid witness for close channel mode");
                     }
-                    let mut witness_input = [0; 179];
+                    let mut witness_input = [0; 180];
                     witness_input.copy_from_slice(payload);
                     let witness = parse_close_witness_input(witness_input);
                     Ok(Witness::Close(witness))
                 } else {
-                    Err("Payload is not 179 bytes")
+                    Err("Payload is not 180 bytes")
                 }
             }
             merch_close::MODE => {
@@ -725,28 +725,28 @@ mod tests {
 
     #[test]
     fn witness_close_round_trip_mode0() {
-        let mut data = vec![7; 178];
+        let mut data = vec![7; 179];
         data.insert(0, 0x0);
-        data[33] = 0x48;
+        data[34] = 0x48;
 
         let w: Witness = (close::MODE, &data[..]).try_into().unwrap();
-        let mut witness_input = [0; 179];
+        let mut witness_input = [0; 180];
         witness_input.copy_from_slice(&data);
         let witness = parse_close_witness_input(witness_input);
 
         assert_eq!(w, Witness::Close(witness));
-        assert_eq!(w.to_payload(), (close::MODE, data[0..106].to_vec()));
+        assert_eq!(w.to_payload(), (close::MODE, data[0..107].to_vec()));
     }
 
     #[test]
     fn witness_close_round_trip_mode1() {
-        let mut data = vec![7; 178];
+        let mut data = vec![7; 179];
         data.insert(0, 0x1);
-        data[33] = 0x48;
-        data[106] = 0x48;
+        data[34] = 0x48;
+        data[107] = 0x48;
 
         let w: Witness = (close::MODE, &data[..]).try_into().unwrap();
-        let mut witness_input = [0; 179];
+        let mut witness_input = [0; 180];
         witness_input.copy_from_slice(&data);
         let witness = parse_close_witness_input(witness_input);
 
