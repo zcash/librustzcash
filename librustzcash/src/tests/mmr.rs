@@ -10,8 +10,8 @@ struct TreeView {
     extra: Vec<(u32, Entry)>,
 }
 
-fn draft(into: &mut Vec<(u32, Entry)>, vec: &Vec<NodeData>, peak_pos: usize, h: u32) {
-    let node_data = vec[peak_pos - 1].clone();
+fn draft(into: &mut Vec<(u32, Entry)>, nodes: &[NodeData], peak_pos: usize, h: u32) {
+    let node_data = nodes[peak_pos - 1].clone();
     let peak: Entry = match h {
         0 => node_data.into(),
         _ => Entry::new(
@@ -24,34 +24,34 @@ fn draft(into: &mut Vec<(u32, Entry)>, vec: &Vec<NodeData>, peak_pos: usize, h: 
     into.push(((peak_pos - 1) as u32, peak));
 }
 
-fn prepare_tree(vec: &Vec<NodeData>) -> TreeView {
-    assert!(vec.len() > 0);
+fn prepare_tree(nodes: &[NodeData]) -> TreeView {
+    assert!(!nodes.is_empty());
 
-    // integer log2 of (vec.len()+1), -1
-    let mut h = (32 - ((vec.len() + 1) as u32).leading_zeros() - 1) - 1;
+    // integer log2 of (nodes.len()+1), -1
+    let mut h = (32 - ((nodes.len() + 1) as u32).leading_zeros() - 1) - 1;
     let mut peak_pos = (1 << (h + 1)) - 1;
-    let mut nodes = Vec::new();
+    let mut peaks = Vec::new();
 
     // used later
     let mut last_peak_pos = 0;
     let mut last_peak_h = 0;
 
     loop {
-        if peak_pos > vec.len() {
+        if peak_pos > nodes.len() {
             // left child, -2^h
-            peak_pos = peak_pos - (1 << h);
-            h = h - 1;
+            peak_pos -= 1 << h;
+            h -= 1;
         }
 
-        if peak_pos <= vec.len() {
-            draft(&mut nodes, vec, peak_pos, h);
+        if peak_pos <= nodes.len() {
+            draft(&mut peaks, nodes, peak_pos, h);
 
             // save to be used in next loop
             last_peak_pos = peak_pos;
             last_peak_h = h;
 
             // right sibling
-            peak_pos = peak_pos + (1 << (h + 1)) - 1;
+            peak_pos += (1 << (h + 1)) - 1;
         }
 
         if h == 0 {
@@ -67,28 +67,25 @@ fn prepare_tree(vec: &Vec<NodeData>) -> TreeView {
     while h > 0 {
         let left_pos = peak_pos - (1 << h);
         let right_pos = peak_pos - 1;
-        h = h - 1;
+        h -= 1;
 
         // drafting left child
-        draft(&mut extra, vec, left_pos, h);
+        draft(&mut extra, nodes, left_pos, h);
 
         // drafting right child
-        draft(&mut extra, vec, right_pos, h);
+        draft(&mut extra, nodes, right_pos, h);
 
         // continuing on right slope
         peak_pos = right_pos;
     }
 
-    TreeView {
-        peaks: nodes,
-        extra,
-    }
+    TreeView { peaks, extra }
 }
 
-fn preload_tree_append(vec: &Vec<NodeData>) -> (Vec<u32>, Vec<[u8; zcash_mmr::MAX_ENTRY_SIZE]>) {
-    assert!(vec.len() > 0);
+fn preload_tree_append(nodes: &[NodeData]) -> (Vec<u32>, Vec<[u8; zcash_mmr::MAX_ENTRY_SIZE]>) {
+    assert!(!nodes.is_empty());
 
-    let tree_view = prepare_tree(vec);
+    let tree_view = prepare_tree(nodes);
 
     let mut indices = Vec::new();
     let mut bytes = Vec::new();
@@ -107,11 +104,11 @@ fn preload_tree_append(vec: &Vec<NodeData>) -> (Vec<u32>, Vec<[u8; zcash_mmr::MA
 
 // also returns number of peaks
 fn preload_tree_delete(
-    vec: &Vec<NodeData>,
+    nodes: &[NodeData],
 ) -> (Vec<u32>, Vec<[u8; zcash_mmr::MAX_ENTRY_SIZE]>, usize) {
-    assert!(vec.len() > 0);
+    assert!(!nodes.is_empty());
 
-    let tree_view = prepare_tree(vec);
+    let tree_view = prepare_tree(nodes);
 
     let mut indices = Vec::new();
     let mut bytes = Vec::new();
@@ -181,7 +178,7 @@ fn append() {
         peaks.as_ptr(),
         peaks.len(),
         &new_node_data,
-        rt_ret.as_mut_ptr(),
+        &mut rt_ret,
         buf_ret.as_mut_ptr(),
     );
 
@@ -220,7 +217,7 @@ fn delete() {
         nodes.as_ptr(),
         peak_count,
         indices.len() - peak_count,
-        rt_ret.as_mut_ptr(),
+        &mut rt_ret,
     );
 
     // Deleting from full tree of 9 height would result in cascade deleting of 10 nodes
