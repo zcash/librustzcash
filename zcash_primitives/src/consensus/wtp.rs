@@ -28,7 +28,8 @@ impl fmt::Display for Error {
 }
 
 mod context {
-    use crate::transaction::{components::WtpOut, Transaction, signature_hash, SIGHASH_ALL};
+    use crate::transaction::{components::WtpOut, components::Amount, Transaction, signature_hash, SIGHASH_ALL};
+    use crate::legacy::Script;
 
     pub(super) struct V1<'a> {
         height: i32,
@@ -63,6 +64,22 @@ mod context {
 
         pub(super) fn tx_wtp_outputs(&self) -> &[WtpOut] {
             &self.tx.wtp_outputs
+        }
+
+        pub(super) fn get_tx_output_value(&self) -> Result<Amount, ()> {
+            if self.tx.vout.len() == 1 {
+                Ok(self.tx.vout[0].value)
+            } else {
+                Err(())
+            }
+        }
+
+        pub(super) fn get_tx_output_pk(&self) -> Result<Vec<u8>, ()> {
+            if self.tx.vout.len() == 1 {
+                Ok(self.tx.vout[0].script_pubkey.0.clone())
+            } else {
+                Err(())
+            }
         }
 
         pub(super) fn get_tx_hash(&self) -> Vec<u8> {

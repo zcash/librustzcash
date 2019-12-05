@@ -1,20 +1,20 @@
 {
-    "wpk": "032ea8d5c660a8eed5ab973b09636e171863a0762bcc351def7c941be91818a232",
+    "wpk": "02b4395f62fc0b786902b37924c2773195ad707ef07dd5ec7e31f2b3cda4804d8c",
     "message": {
         "channelId": [
-            "9b08b887cb93a1f6dec4fdf9cf03c5676a070992d2e4f1027152bb816cfdc1af"
+            "e364621e321eb713c4ca523430a1b9b5c7d0542dad7d8dc24593b586503f2c43"
         ],
         "wpk": [
-            "55764b0d14d9c4201a2626177f46dae4262362373efc54b8388e3aeb64b3a8ba"
+            "e89587a54c69d77e1134a6ec3fc0d3921977e4fb6c9d6377118d19820e3a4ff1"
         ],
         "bc": 140,
         "bm": 70,
         "close": [
-            "bcd99a3e99e42360850e3e5eab0e5c8261fa14d6a47a20376be126a2f3ac5c0d"
+            "da216b09f459cfca3d162c993c191bc980f2eda5a1edf34200004737a55be223"
         ]
     },
     "signature": {
-        "h": "a823bc8be5e3176ef63f2671de7004e5a14cb174d008040413303fd7b7b9b68bcdfefc4e4cfa189d0a7dfa496dd6ce33",
-        "H": "97ad18ce0d3c89463c8e02de3f0a9435bd53160a725851fb312771a272289ad170cd3f9b52915fa9b6050590cec1d118"
+        "h": "8d4ff4d96f17760cabdd9728e667596c2c6d238427dd0529f2b6b60140fc71efc890e03502bdae679ca09236fbb11d9d",
+        "H": "832b9fc275bf44bad06fd9d0b0296722140273f6cba23859b48c3aaa5ed25455e70bd665165169956be25708026478b6"
     }
 }
