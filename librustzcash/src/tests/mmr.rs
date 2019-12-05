@@ -10,7 +10,7 @@ struct TreeView {
     extra: Vec<(u32, Entry)>,
 }
 
-fn draft(into: &mut Vec<(u32, Entry)>, vec: &Vec<NodeData>, peak_pos: usize, h: u32) {
+fn draft(into: &mut Vec<(u32, Entry)>, vec: &[NodeData], peak_pos: usize, h: u32) {
     let node_data = vec[peak_pos - 1].clone();
     let peak: Entry = match h {
         0 => node_data.into(),
@@ -24,8 +24,8 @@ fn draft(into: &mut Vec<(u32, Entry)>, vec: &Vec<NodeData>, peak_pos: usize, h: 
     into.push(((peak_pos - 1) as u32, peak));
 }
 
-fn prepare_tree(vec: &Vec<NodeData>) -> TreeView {
-    assert!(vec.len() > 0);
+fn prepare_tree(vec: &[NodeData]) -> TreeView {
+    assert!(!vec.is_empty());
 
     // integer log2 of (vec.len()+1), -1
     let mut h = (32 - ((vec.len() + 1) as u32).leading_zeros() - 1) - 1;
@@ -39,8 +39,8 @@ fn prepare_tree(vec: &Vec<NodeData>) -> TreeView {
     loop {
         if peak_pos > vec.len() {
             // left child, -2^h
-            peak_pos = peak_pos - (1 << h);
-            h = h - 1;
+            peak_pos -= 1 << h;
+            h -= 1;
         }
 
         if peak_pos <= vec.len() {
@@ -51,7 +51,7 @@ fn prepare_tree(vec: &Vec<NodeData>) -> TreeView {
             last_peak_h = h;
 
             // right sibling
-            peak_pos = peak_pos + (1 << (h + 1)) - 1;
+            peak_pos += (1 << (h + 1)) - 1;
         }
 
         if h == 0 {
@@ -67,7 +67,7 @@ fn prepare_tree(vec: &Vec<NodeData>) -> TreeView {
     while h > 0 {
         let left_pos = peak_pos - (1 << h);
         let right_pos = peak_pos - 1;
-        h = h - 1;
+        h -= 1;
 
         // drafting left child
         draft(&mut extra, vec, left_pos, h);
@@ -85,8 +85,8 @@ fn prepare_tree(vec: &Vec<NodeData>) -> TreeView {
     }
 }
 
-fn preload_tree_append(vec: &Vec<NodeData>) -> (Vec<u32>, Vec<[u8; zcash_mmr::MAX_ENTRY_SIZE]>) {
-    assert!(vec.len() > 0);
+fn preload_tree_append(vec: &[NodeData]) -> (Vec<u32>, Vec<[u8; zcash_mmr::MAX_ENTRY_SIZE]>) {
+    assert!(!vec.is_empty());
 
     let tree_view = prepare_tree(vec);
 
@@ -107,9 +107,9 @@ fn preload_tree_append(vec: &Vec<NodeData>) -> (Vec<u32>, Vec<[u8; zcash_mmr::MA
 
 // also returns number of peaks
 fn preload_tree_delete(
-    vec: &Vec<NodeData>,
+    vec: &[NodeData],
 ) -> (Vec<u32>, Vec<[u8; zcash_mmr::MAX_ENTRY_SIZE]>, usize) {
-    assert!(vec.len() > 0);
+    assert!(!vec.is_empty());
 
     let tree_view = prepare_tree(vec);
 

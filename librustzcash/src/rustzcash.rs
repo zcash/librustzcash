@@ -1352,5 +1352,5 @@ pub extern "system" fn librustzcash_mmr_hash_node(
         (*h_ret).copy_from_slice(&node.hash()[..]);
     }
 
-    return 0;
+    0
 }
