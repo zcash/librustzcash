@@ -1230,7 +1230,7 @@ pub extern "system" fn librustzcash_mmr_append(
     nn_ptr: *const [u8; zcash_mmr::MAX_NODE_DATA_SIZE],
     // Return of root commitment
     rt_ret: *mut [u8; 32],
-    // Return buffer for appended leaves, should be pre-allocated of log2(t_len)+1 length
+    // Return buffer for appended leaves, should be pre-allocated of ceiling(log2(t_len)) length
     buf_ret: *mut [c_uchar; zcash_mmr::MAX_NODE_DATA_SIZE],
 ) -> u32 {
     let new_node_bytes: &[u8; zcash_mmr::MAX_NODE_DATA_SIZE] = unsafe {
