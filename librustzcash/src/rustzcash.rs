@@ -1269,7 +1269,7 @@ pub extern "system" fn librustzcash_mmr_append(
         .root_node()
         .expect("Just added, should resolve always; qed");
     unsafe {
-        (*rt_ret).copy_from_slice(&root_node.data().subtree_commitment);
+        *rt_ret = root_node.data().subtree_commitment;
 
         for (idx, next_buf) in slice::from_raw_parts_mut(buf_ret, return_count as usize)
             .iter_mut()
@@ -1318,13 +1318,11 @@ pub extern "system" fn librustzcash_mmr_delete(
     };
 
     unsafe {
-        (*rt_ret).copy_from_slice(
-            &tree
-                .root_node()
-                .expect("Just generated without errors, root should be resolving")
-                .data()
-                .subtree_commitment,
-        );
+        *rt_ret = tree
+            .root_node()
+            .expect("Just generated without errors, root should be resolving")
+            .data()
+            .subtree_commitment;
     }
 
     truncate_len
@@ -1349,7 +1347,7 @@ pub extern "system" fn librustzcash_mmr_hash_node(
     };
 
     unsafe {
-        (*h_ret).copy_from_slice(&node.hash()[..]);
+        *h_ret = node.hash();
     }
 
     0
