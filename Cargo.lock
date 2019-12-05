@@ -130,7 +130,7 @@ dependencies = [
 [[package]]
 name = "bolt"
 version = "0.3.0"
-source = "git+https://github.com/boltlabs-inc/libbolt#a320ca943375d663232cbfdb05846a76b0dfb209"
+source = "git+https://github.com/boltlabs-inc/libbolt#426b0b1a162aafad7bbebece9d46365a5700794e"
 dependencies = [
  "ff_bl 0.4.0 (git+https://github.com/boltlabs-inc/ff)",
  "hex 0.4.0 (registry+https://github.com/rust-lang/crates.io-index)",

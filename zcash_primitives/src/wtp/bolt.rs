@@ -81,7 +81,7 @@ mod close {
     #[derive(Debug, PartialEq)]
     pub struct Witness {  // (pub [u8; 32]);
         pub witness_type: u8, // 1 byte
-        pub address: [u8; 32], // 32 bytes
+        pub address: Vec<u8>, // 32 bytes
         pub signature: Vec<u8>, // x bytes (cust-sig or merch-sig)
         pub revoke_token: Vec<u8>, // 33 + x (wpk + rev-sig)
     }
@@ -336,19 +336,19 @@ fn parse_open_witness_input(input: [u8; 212]) -> open::Witness {
 
 fn parse_close_witness_input(input: [u8; 179]) -> close::Witness {
     let witness_type = input[0];
-    let mut address= [0u8; 32];
+    let mut address= Vec::new();
     let mut signature = Vec::new();
     let mut revoke_token = Vec::new();
 
-    address.copy_from_slice(&input[1..33]);
+    address.extend_from_slice(&input[1..34]);
     // cust-sig or merch-sig (depending on witness type)
-    let end_first_sig = (34 + input[33]) as usize;
-    signature.extend_from_slice(&input[34..end_first_sig].to_vec());
+    let end_first_sig = (35 + input[34]) as usize;
+    signature.extend_from_slice(&input[35..end_first_sig]);
 
     if witness_type == 0x1 {
         let start_second_sig = (end_first_sig + 1) as usize;
         let end_second_sig = start_second_sig + input[end_first_sig] as usize;
-        revoke_token.extend_from_slice(&input[start_second_sig..end_second_sig].to_vec());
+        revoke_token.extend_from_slice(&input[start_second_sig..end_second_sig]);
     }
     return close::Witness {
         witness_type,
@@ -588,7 +588,9 @@ pub fn verify_channel_closing(close_tx_pred: &close::Predicate, spend_tx_witness
         return is_cust_sig_valid;
     } else if spend_tx_witness.witness_type == 0x1 {
         // merchant-initiated
-        let channel_close = reconstruct_secp_channel_close_m(&spend_tx_witness.address, &spend_tx_witness.revoke_token, &spend_tx_witness.signature);
+        let mut address_bytes = [0u8; 33];
+        address_bytes.copy_from_slice(spend_tx_witness.address.as_slice());
+        let channel_close = reconstruct_secp_channel_close_m(&address_bytes, &spend_tx_witness.revoke_token, &spend_tx_witness.signature);
         let mut wpk_bytes = [0u8; 33];
         wpk_bytes.copy_from_slice(close_tx_pred.pubkey.as_slice());
         let wpk = reconstruct_secp_public_key(&wpk_bytes);

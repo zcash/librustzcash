@@ -157,6 +157,7 @@ mod tests {
     use crate::legacy::Script;
 
     const OPEN_WITNESS_LEN: usize = 212;
+    const CLOSE_WITNESS_LEN: usize = 179;
     const CLOSE_PREDICATE_LEN: usize = 1111;
     const OPEN_PREDICATE_LEN: usize = 1107;
 
@@ -205,6 +206,23 @@ mod tests {
         }
         close_witness_input.copy_from_slice(close_witness_vec.as_slice());
         return close_witness_input;
+    }
+
+    fn generate_merchant_revoke_witness(address: &Vec<u8>, sig: &Vec<u8>, revoke_token: &Vec<u8>) -> [u8; CLOSE_WITNESS_LEN] {
+        let mut revoke_witness_input = [0u8; CLOSE_WITNESS_LEN];
+        let mut revoke_witness_vec: Vec<u8> = Vec::new();
+        revoke_witness_vec.push(0x1);
+        revoke_witness_vec.extend(address.iter());
+        revoke_witness_vec.push(sig.len() as u8);
+        revoke_witness_vec.extend(sig.iter());
+        revoke_witness_vec.push(revoke_token.len() as u8);
+        revoke_witness_vec.extend(revoke_token.iter());
+        let pad = CLOSE_WITNESS_LEN - revoke_witness_vec.len();
+        for i in 0 .. pad {
+            revoke_witness_vec.push(0x0);
+        }
+        revoke_witness_input.copy_from_slice(revoke_witness_vec.as_slice());
+        return revoke_witness_input;
     }
 
     fn generate_predicate(pubkey: &Vec<u8>, amount: [u8; 4], channel_token: &Vec<u8>) -> [u8; CLOSE_PREDICATE_LEN] {
@@ -374,5 +392,118 @@ mod tests {
             );
         }
 
+    }
+
+    #[test]
+    fn bolt_merch_revoke_program() {
+
+        let _ser_channel_token = hex::decode(read_file("bolt_testdata/channel.token").unwrap()).unwrap();
+
+        let escrow_tx_hash= vec![218, 142, 74, 74, 236, 37, 47, 120, 241, 20, 203, 94, 78, 126, 131, 174, 4, 3, 75, 81, 194, 90, 203, 24, 16, 158, 53, 237, 241, 57, 97, 137];
+
+        let pk_c = hex::decode("0398cb634c1bf97559dfcc47b6c8cc3cce8be2219e571ff721b95130efe065991a").unwrap();
+        let sk_c = hex::decode("ee3c802d34a1359b9d3b2a81773730325f7634e2991336c534cbd180980ec581").unwrap();
+
+        let pk_m = hex::decode("03504d8f01942e63cde2caa0c741f8e651a0d339afa9ad5a854bc41e9240492ac2").unwrap();
+        let sk_m = hex::decode("4a86f3d5a1edc4ae633216db6efe07d8f358626d595de288816619a10c61e98c").unwrap();
+
+        let cust_sig1 = bolt::compute_tx_signature(&sk_c, &escrow_tx_hash);
+        // println!("cust sig: {:?}, len: {}", cust_sig, cust_sig.len());
+
+        let merch_tx_hash = vec![161, 57, 186, 255, 37, 146, 146, 208, 208, 38, 1, 222, 7, 151, 43, 160, 164, 115, 162, 54, 211, 138, 190, 1, 179, 131, 22, 210, 56, 163, 143, 113];
+        let cust_sig2 = bolt::compute_tx_signature(&sk_c, &merch_tx_hash);
+        let merch_sig = bolt::compute_tx_signature(&sk_m, &merch_tx_hash);
+
+        let wpk = hex::decode("02b4395f62fc0b786902b37924c2773195ad707ef07dd5ec7e31f2b3cda4804d8c").unwrap();
+
+        let mut _merch_close_addr = hex::decode("0a1111111111111111111111111111111111111111111111111111111111111111").unwrap();
+        let _merch_close_addr2 = hex::decode("0b2222222222222222222222222222222222222222222222222222222222222222").unwrap();
+
+        let merch_close_address = Script(_merch_close_addr.clone());
+        let merch_close_address2 = Script(_merch_close_addr2.clone());
+
+        let escrow_tx_predicate= generate_open_predicate(&_merch_close_addr, &_ser_channel_token);
+
+        // 1 byte mode + 4 bytes cust_bal + 4 bytes merch_bal + 72 bytes cust_sig + 96 bytes close token
+        let close_token = hex::decode("8d4ff4d96f17760cabdd9728e667596c2c6d238427dd0529f2b6b60140fc71efc890e03502bdae679ca09236fbb11d9d832b9fc275bf44bad06fd9d0b0296722140273f6cba23859b48c3aaa5ed25455e70bd665165169956be25708026478b6").unwrap();
+
+        let cust_close_witness_input = generate_customer_close_witness([0,0,0,140], [0,0,0,70], &cust_sig1, &close_token, &wpk);
+        let merch_close_witness_input = generate_merchant_close_witness([0,0,0,200], [0,0,0,10], &cust_sig2, &merch_sig);
+
+
+        let cust_close_tx_predicate = generate_predicate(&wpk, [0,0,0,140], &_ser_channel_token);
+        let merch_close_tx_predicate = generate_open_predicate(&_merch_close_addr2, &_ser_channel_token);
+
+        let sig = hex::decode("3045022100e171be9eb5ffc799eb944e87762116ddff9ae77de58f63175ca354b9d93922390220601aed54bc60d03012f7d1b76d2caa78f9d461b83f014d40ec33ea233de2246e").unwrap();
+        let revoke_token = hex::decode("3045022100d4421207f4698bd93b0fd7de19a52f2cf90022c80261c4ff7423c6a5ae2c22e0022043eac6981cf37d873036cd5544dcf9a95cfe8271abc0d66f6c3db031307c2e52").unwrap();
+        let merch_revoke_witness_input = generate_merchant_revoke_witness(&_merch_close_addr2, &sig, &revoke_token);
+
+        let mut mtx_a = TransactionData::nu4();
+        mtx_a.wtp_outputs.push(WtpOut {
+            value: Amount::from_u64(210).unwrap(),
+            predicate: wtp::Predicate::Bolt(bolt::Predicate::open(escrow_tx_predicate)),
+        });
+        let tx_a = mtx_a.freeze().unwrap();
+        // println!("Escrow transaction: {:?}", tx_a);
+
+        // construct customer-close-tx
+        let mut mtx_b = TransactionData::nu4();
+        mtx_b.wtp_inputs.push(WtpIn {
+            prevout: OutPoint::new(tx_a.txid().0, 0),
+            witness: wtp::Witness::Bolt(bolt::Witness::open(cust_close_witness_input)),
+        });
+        // to_customer
+        mtx_b.wtp_outputs.push(WtpOut {
+            value: Amount::from_u64(140).unwrap(),
+            predicate: wtp::Predicate::Bolt(bolt::Predicate::close(cust_close_tx_predicate)),
+        });
+        // to_merchant
+        mtx_b.vout.push(TxOut {
+            value: Amount::from_u64(70).unwrap(),
+            script_pubkey: merch_close_address,
+        });
+
+        let tx_b = mtx_b.freeze().unwrap();
+
+        let mut mtx_c = TransactionData::nu4();
+        mtx_c.wtp_inputs.push(WtpIn {
+            prevout: OutPoint::new(tx_b.txid().0, 0),
+            witness: wtp::Witness::Bolt(bolt::Witness::close(merch_revoke_witness_input)),
+        });
+        // to_merchant
+        mtx_c.vout.push(TxOut {
+            value: Amount::from_u64(140).unwrap(),
+            script_pubkey: merch_close_address2,
+        });
+
+        let tx_c = mtx_c.freeze().unwrap();
+
+        let programs = Programs::for_epoch(0x7473_6554).unwrap();
+
+        // Verify tx_b
+        {
+            let ctx = Context::v1(1, &tx_b);
+            assert_eq!(
+                programs.verify(
+                    &tx_a.wtp_outputs[0].predicate, // escrow
+                    &tx_b.wtp_inputs[0].witness, // customer-close-tx
+                    &ctx
+                ),
+                Ok(())
+            );
+        }
+
+        // Verify tx_c
+        {
+            let ctx = Context::v1(1, &tx_c);
+            assert_eq!(
+                programs.verify(
+                    &tx_b.wtp_outputs[0].predicate, // customer-close-tx
+                    &tx_c.wtp_inputs[0].witness, // merchant-revoke-tx
+                    &ctx
+                ),
+                Ok(())
+            );
+        }
     }
 }
