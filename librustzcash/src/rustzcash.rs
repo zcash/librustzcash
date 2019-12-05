@@ -1199,31 +1199,17 @@ fn construct_mmr_tree(
         )
     };
 
-    let mut peaks = Vec::new();
-    for i in 0..p_len {
-        peaks.push((
-            indices[i],
-            match MMREntry::from_bytes(cbranch, &nodes[i][..]) {
-                Ok(entry) => entry,
-                _ => {
-                    return Err("Invalid encoding");
-                } // error
+    let mut peaks: Vec<_> = indices
+        .iter()
+        .zip(nodes.iter())
+        .map(
+            |(index, node)| match MMREntry::from_bytes(cbranch, &node[..]) {
+                Ok(entry) => Ok((*index, entry)),
+                Err(_) => Err("Invalid encoding"),
             },
-        ));
-    }
-
-    let mut extra = Vec::new();
-    for i in p_len..(p_len + e_len) {
-        extra.push((
-            indices[i],
-            match MMREntry::from_bytes(cbranch, &nodes[i][..]) {
-                Ok(entry) => entry,
-                _ => {
-                    return Err("Invalid encoding");
-                } // error
-            },
-        ));
-    }
+        )
+        .collect::<Result<_, _>>()?;
+    let extra = peaks.split_off(p_len);
 
     Ok(MMRTree::new(t_len, peaks, extra))
 }
