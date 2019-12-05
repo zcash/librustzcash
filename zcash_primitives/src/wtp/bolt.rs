@@ -45,7 +45,6 @@ mod open {
     pub fn get_predicate_payload(p: &Predicate) -> Vec<u8> {
         let mut output = Vec::new();
         output.extend(p.pubkey.iter());
-        // output.extend(convert_u32_to_bytes(p.amount).iter());
         output.extend(p.channel_token.iter());
         return output;
     }
@@ -117,7 +116,6 @@ mod merch_close {
     #[derive(Debug, PartialEq)]
     pub struct Predicate {
         pub pubkey: Vec<u8>, // 33 bytes
-        pub amount: u32, // merch-bal or cust-bal
         pub channel_token: Vec<u8> // (pkc, pkm, pkM, mpk, comparams) => 1074 bytes
     }
 
@@ -134,7 +132,6 @@ mod merch_close {
     pub fn get_predicate_payload(p: &Predicate) -> Vec<u8> {
         let mut output = Vec::new();
         output.extend(p.pubkey.iter());
-        output.extend(convert_u32_to_bytes(p.amount).iter());
         output.extend(p.channel_token.iter());
         return output;
     }
@@ -185,16 +182,14 @@ impl Predicate {
         Predicate::Close(close::Predicate { pubkey, amount, channel_token })
     }
 
-    pub fn merch_close(input: [u8; 1111]) -> Self {
+    pub fn merch_close(input: [u8; 1107]) -> Self {
         let mut channel_token = Vec::new();
         let mut pubkey = Vec::new();
         pubkey.extend(input[0..33].iter());
 
-        let amount = convert_bytes_to_u32(input[33..37].to_vec());
+        channel_token.extend(input[33..].iter());
 
-        channel_token.extend(input[37..].iter());
-
-        Predicate::MerchClose(merch_close::Predicate { pubkey, amount, channel_token })
+        Predicate::MerchClose(merch_close::Predicate { pubkey, channel_token })
     }
 }
 
@@ -232,17 +227,16 @@ impl TryFrom<(usize, &[u8])> for Predicate {
                 }
             }
             merch_close::MODE => {
-                if payload.len() == 1111 {
+                if payload.len() == 1107 {
                     let mut pubkey = Vec::new();
                     pubkey.extend(payload[0..33].iter());
-                    let amount = convert_bytes_to_u32(payload[33..37].to_vec());
                     let mut channel_token = Vec::new();
-                    channel_token.extend(payload[37..].iter());
+                    channel_token.extend(payload[33..].iter());
 
-                    let cl = merch_close::Predicate { pubkey, amount, channel_token };
+                    let cl = merch_close::Predicate { pubkey, channel_token };
                     Ok(Predicate::MerchClose(cl))
                 } else {
-                    Err("Payload is not 1111 bytes")
+                    Err("Payload is not 1107 bytes")
                 }
             }
             _ => Err("Invalid mode"),
@@ -434,7 +428,7 @@ impl TryFrom<(usize, &[u8])> for Witness {
                     let witness = parse_merch_close_witness_input(witness_input);
                     Ok(Witness::MerchClose(witness))
                 } else {
-                    Err("Payload is not 179 bytes")
+                    Err("Payload is not 212 bytes")
                 }
             }
             _ => Err("Invalid mode"),
@@ -688,17 +682,16 @@ mod tests {
 
     #[test]
     fn predicate_merch_close_round_trip() {
-        let data = vec![7; 1111];
+        let data = vec![7; 1107];
         let p: Predicate = (merch_close::MODE, &data[..]).try_into().unwrap();
 
         let mut pubkey = Vec::new();
         pubkey.extend(data[0..33].iter());
-        let amount = convert_bytes_to_u32(data[33..37].to_vec());
 
         let mut channel_token: Vec<u8> = Vec::new();
-        channel_token.extend(data[37..].iter());
+        channel_token.extend(data[33..].iter());
 
-        assert_eq!(p, Predicate::MerchClose(merch_close::Predicate { pubkey, amount, channel_token }));
+        assert_eq!(p, Predicate::MerchClose(merch_close::Predicate { pubkey, channel_token }));
         assert_eq!(p.to_payload(), (merch_close::MODE, data));
     }
 

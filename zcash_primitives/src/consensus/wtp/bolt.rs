@@ -263,7 +263,7 @@ mod tests {
         let merch_close_witness_input = generate_merchant_close_witness([0,0,0,200], [0,0,0,10], &cust_sig2, &merch_sig);
 
         let cust_close_tx_predicate = generate_predicate(&wpk, [0,0,0,140], &_ser_channel_token);
-        let merch_close_tx_predicate = generate_predicate(&_merch_close_addr2, [0,0,0,210], &_ser_channel_token);
+        let merch_close_tx_predicate = generate_open_predicate(&_merch_close_addr2, &_ser_channel_token);
 
         let merch_tx_hash2= vec![218, 142, 74, 74, 236, 37, 47, 120, 241, 20, 203, 94, 78, 126, 131, 174, 4, 3, 75, 81, 194, 90, 203, 24, 16, 158, 53, 237, 241, 57, 97, 137];
         let cust_sig3 = bolt::compute_tx_signature(&sk_c, &merch_tx_hash2);
@@ -306,7 +306,7 @@ mod tests {
         });
         // to_merchant
         mtx_c.wtp_outputs.push(WtpOut {
-            value: Amount::from_u64(140).unwrap(),
+            value: Amount::from_u64(210).unwrap(),
             predicate: wtp::Predicate::Bolt(bolt::Predicate::merch_close(merch_close_tx_predicate)),
         });
         let tx_c = mtx_c.freeze().unwrap();
