@@ -1228,8 +1228,8 @@ pub extern "system" fn librustzcash_mmr_append(
     p_len: size_t,
     // New node pointer
     nn_ptr: *const [u8; zcash_mmr::MAX_NODE_DATA_SIZE],
-    // Return of root commitment (32 byte hash)
-    rt_ret: *mut u8,
+    // Return of root commitment
+    rt_ret: *mut [u8; 32],
     // Return buffer for appended leaves, should be pre-allocated of log2(t_len)+1 length
     buf_ret: *mut [c_uchar; zcash_mmr::MAX_NODE_DATA_SIZE],
 ) -> u32 {
@@ -1269,7 +1269,7 @@ pub extern "system" fn librustzcash_mmr_append(
         .root_node()
         .expect("Just added, should resolve always; qed");
     unsafe {
-        slice::from_raw_parts_mut(rt_ret, 32).copy_from_slice(&root_node.data().subtree_commitment);
+        (*rt_ret).copy_from_slice(&root_node.data().subtree_commitment);
 
         for (idx, next_buf) in slice::from_raw_parts_mut(buf_ret, return_count as usize)
             .iter_mut()
@@ -1300,8 +1300,8 @@ pub extern "system" fn librustzcash_mmr_delete(
     p_len: size_t,
     // Extra nodes loaded (for deletion) count
     e_len: size_t,
-    // Return of root commitment (32 byte hash)
-    rt_ret: *mut u8,
+    // Return of root commitment
+    rt_ret: *mut [u8; 32],
 ) -> u32 {
     let mut tree = match construct_mmr_tree(cbranch, t_len, ni_ptr, n_ptr, p_len, e_len) {
         Ok(t) => t,
@@ -1318,7 +1318,7 @@ pub extern "system" fn librustzcash_mmr_delete(
     };
 
     unsafe {
-        slice::from_raw_parts_mut(rt_ret, 32).copy_from_slice(
+        (*rt_ret).copy_from_slice(
             &tree
                 .root_node()
                 .expect("Just generated without errors, root should be resolving")
@@ -1334,7 +1334,7 @@ pub extern "system" fn librustzcash_mmr_delete(
 pub extern "system" fn librustzcash_mmr_hash_node(
     cbranch: u32,
     n_ptr: *const [u8; zcash_mmr::MAX_NODE_DATA_SIZE],
-    h_ret: *mut u8,
+    h_ret: *mut [u8; 32],
 ) -> u32 {
     let node_bytes: &[u8; zcash_mmr::MAX_NODE_DATA_SIZE] = unsafe {
         match n_ptr.as_ref() {
@@ -1349,7 +1349,7 @@ pub extern "system" fn librustzcash_mmr_hash_node(
     };
 
     unsafe {
-        slice::from_raw_parts_mut(h_ret, 32).copy_from_slice(&node.hash()[..]);
+        (*h_ret).copy_from_slice(&node.hash()[..]);
     }
 
     return 0;
