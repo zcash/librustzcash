@@ -138,11 +138,12 @@ mod merch_close {
     pub fn get_witness_payload(w: &Witness) -> Vec<u8> {
         let mut output = Vec::new();
         output.push(w.witness_type);
-        output.extend(w.cust_bal.to_be_bytes().iter());
-        output.extend(w.merch_bal.to_be_bytes().iter());
         output.push(w.sig.len() as u8);
         output.extend(w.sig.iter());
         if w.witness_type == 0x1 {
+            output.extend(w.cust_bal.to_be_bytes().iter());
+            output.extend(w.merch_bal.to_be_bytes().iter());
+            println!("{:?}", w.close_token);
             output.push(w.close_token.len() as u8);
             output.extend(w.close_token.iter());
             output.extend(w.wpk.iter())
@@ -356,7 +357,26 @@ fn parse_close_witness_input(input: [u8; 180]) -> close::Witness {
 }
 
 fn parse_merch_close_witness_input(input: [u8; 212]) -> merch_close::Witness {
-    let (witness_type, cust_bal, merch_bal, cust_sig, merch_sig, wpk) = parse_witness_struct(input);
+    let witness_type = input[0];
+    let mut cust_sig = Vec::new();
+    let mut merch_sig = Vec::new();
+    let end_first_sig = (2 + input[1]) as usize;
+    cust_sig.extend_from_slice(&input[2..end_first_sig].to_vec()); // customer signature
+
+    let mut wpk = Vec::new();
+    let mut cust_bal = 0;
+    let mut merch_bal = 0;
+    if witness_type == 0x1 { // customer initiated (merch_sig : close-token = 96 bytes)
+        let end_cust_balance = end_first_sig + 4;
+        cust_bal = convert_bytes_to_u32(&input[end_first_sig..end_cust_balance]);
+        let end_merch_balance = end_cust_balance + 4;
+        merch_bal = convert_bytes_to_u32(&input[end_cust_balance..end_merch_balance]);
+        let start_second_sig = end_merch_balance + 1;
+        let end_second_sig = start_second_sig + input[end_merch_balance] as usize;
+        merch_sig.extend_from_slice(&input[start_second_sig..end_second_sig].to_vec());
+        let end_wpk = end_second_sig + 33;
+        wpk.extend(input[end_second_sig..end_wpk].iter());
+    }
 
     return merch_close::Witness {
         witness_type,
@@ -651,7 +671,7 @@ mod tests {
 
     use super::{merch_close, close, open, Predicate, Witness};
     use crate::wtp::ToPayload;
-    use crate::wtp::bolt::{parse_open_witness_input, parse_close_witness_input, convert_bytes_to_u32, convert_bytes_to_i32};
+    use crate::wtp::bolt::{parse_open_witness_input, parse_close_witness_input, convert_bytes_to_u32, convert_bytes_to_i32, parse_merch_close_witness_input};
 
     #[test]
     fn predicate_open_round_trip() {
@@ -757,6 +777,37 @@ mod tests {
 
         assert_eq!(w, Witness::Close(witness));
         assert_eq!(w.to_payload(), (close::MODE, data));
+    }
+
+    #[test]
+    fn witness_merch_close_round_trip_mode0() {
+        let mut data = vec![7; 211];
+        data.insert(0, 0x0);
+        data[1] = 72;
+
+        let w: Witness = (merch_close::MODE, &data[..]).try_into().unwrap();
+        let mut witness_input = [0; 212];
+        witness_input.copy_from_slice(&data);
+        let witness = parse_merch_close_witness_input(witness_input);
+
+        assert_eq!(w, Witness::MerchClose(witness));
+        assert_eq!(w.to_payload(), (merch_close::MODE, data[0..74].to_vec()));
+    }
+
+    #[test]
+    fn witness_merch_close_round_trip_mode1() {
+        let mut data = vec![7; 211];
+        data.insert(0, 0x1);
+        data[1] = 72;
+        data[82] = 96;
+
+        let w: Witness = (merch_close::MODE, &data[..]).try_into().unwrap();
+        let mut witness_input = [0; 212];
+        witness_input.copy_from_slice(&data);
+        let witness = parse_merch_close_witness_input(witness_input);
+
+        assert_eq!(w, Witness::MerchClose(witness));
+        assert_eq!(w.to_payload(), (merch_close::MODE, data));
     }
 
     #[test]
