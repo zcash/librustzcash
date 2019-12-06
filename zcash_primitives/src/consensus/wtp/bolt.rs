@@ -64,6 +64,13 @@ impl Program {
                             let tx1_value = wtp_out.value;
                             let tx2_output_value= ctx.get_tx_output_value().unwrap();
 
+                            // Check if block_height is more than 24h away.
+                            println!("{}", p_close.block_height);
+                            println!("{}", ctx.block_height());
+                            if p_close.block_height < 0 || p_close.block_height - ctx.block_height() < 144 {
+                                return Err("The block height should be more than 24h in the future");
+                            }
+
                             let is_tx_output_correct = bolt::check_customer_output(w_open, tx1_value, p_close,tx2_output_value);
 
                             let tx_hash = ctx.get_tx_hash();
@@ -278,6 +285,7 @@ mod tests {
 
         let merch_close_address = Script(_merch_close_addr.clone());
         let merch_close_address_dup = Script(_merch_close_addr.clone());
+        let merch_close_address_dup2 = Script(_merch_close_addr.clone());
 
         let escrow_tx_predicate= generate_open_predicate(&_merch_close_addr, &_ser_channel_token);
 
@@ -287,7 +295,8 @@ mod tests {
         let cust_close_witness_input = generate_customer_close_witness([0,0,0,140], [0,0,0,70], &cust_sig1, &close_token, &wpk);
         let merch_close_witness_input = generate_merchant_close_witness([0,0,0,200], [0,0,0,10], &cust_sig2, &merch_sig);
 
-        let cust_close_tx_predicate = generate_predicate(&wpk, [0,0,0,140], [0,0,0,2], &_ser_channel_token);
+        let cust_close_tx_predicate = generate_predicate(&wpk, [0,0,0,140], [0,0,0,146], &_ser_channel_token);
+        let cust_close_tx_predicate_too_early = generate_predicate(&wpk, [0,0,0,140], [0,0,0,110], &_ser_channel_token);
         let merch_close_tx_predicate = generate_open_predicate(&_merch_close_addr2, &_ser_channel_token);
 
         let merch_tx_hash2= vec![218, 142, 74, 74, 236, 37, 47, 120, 241, 20, 203, 94, 78, 126, 131, 174, 4, 3, 75, 81, 194, 90, 203, 24, 16, 158, 53, 237, 241, 57, 97, 137];
@@ -358,6 +367,24 @@ mod tests {
         // end - customer-close-tx (spending from merchant-close-tx)
         // println!("debug: Customer close transaction spending from merchant-close tx: {:?}", tx_d);
 
+        // begin - customer-close-tx
+        let mut mtx_e = TransactionData::nu4();
+        mtx_e.wtp_inputs.push(WtpIn {
+            prevout: OutPoint::new(tx_a.txid().0, 0),
+            witness: wtp::Witness::Bolt(bolt::Witness::open(cust_close_witness_input)),
+        });
+        // to_customer
+        mtx_e.wtp_outputs.push(WtpOut {
+            value: Amount::from_u64(140).unwrap(),
+            predicate: wtp::Predicate::Bolt(bolt::Predicate::close(cust_close_tx_predicate_too_early)),
+        });
+        // to_merchant
+        mtx_e.vout.push(TxOut {
+            value: Amount::from_u64(70).unwrap(),
+            script_pubkey: merch_close_address_dup2,
+        });
+        let tx_e = mtx_e.freeze().unwrap();
+
         let programs = Programs::for_epoch(0x7473_6554).unwrap();
 
         // Verify tx_b
@@ -370,6 +397,18 @@ mod tests {
                     &ctx
                 ),
                 Ok(())
+            );
+        }
+
+        // Verify tx_e time lock block height is too short
+        {
+            let ctx = Context::v1(1, &tx_e);
+            assert!(
+                programs.verify(
+                    &tx_a.wtp_outputs[0].predicate, // escrow
+                    &tx_e.wtp_inputs[0].witness, // customer-close-tx
+                    &ctx
+                ).is_err()
             );
         }
 
@@ -438,7 +477,7 @@ mod tests {
         let merch_close_witness_input = generate_merchant_close_witness([0,0,0,200], [0,0,0,10], &cust_sig2, &merch_sig);
 
 
-        let cust_close_tx_predicate = generate_predicate(&wpk, [0,0,0,140], [0,0,0,2], &_ser_channel_token);
+        let cust_close_tx_predicate = generate_predicate(&wpk, [0,0,0,140], [0,0,0,146], &_ser_channel_token);
         let merch_close_tx_predicate = generate_open_predicate(&_merch_close_addr2, &_ser_channel_token);
 
         let sig = hex::decode("3045022100e171be9eb5ffc799eb944e87762116ddff9ae77de58f63175ca354b9d93922390220601aed54bc60d03012f7d1b76d2caa78f9d461b83f014d40ec33ea233de2246e").unwrap();
