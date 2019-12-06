@@ -583,6 +583,7 @@ pub fn verify_channel_closing(close_tx_pred: &close::Predicate, spend_tx_witness
         // merchant-initiated
         let mut address_bytes = [0u8; 33];
         address_bytes.copy_from_slice(spend_tx_witness.address.as_slice());
+        println!("{:?}", tx_hash);
         let channel_close = reconstruct_secp_channel_close_m(&address_bytes, &spend_tx_witness.revoke_token, &spend_tx_witness.signature);
         let mut wpk_bytes = [0u8; 33];
         wpk_bytes.copy_from_slice(close_tx_pred.pubkey.as_slice());

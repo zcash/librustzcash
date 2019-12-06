@@ -65,8 +65,6 @@ impl Program {
                             let tx2_output_value= ctx.get_tx_output_value().unwrap();
 
                             // Check if block_height is more than 24h away.
-                            println!("{}", p_close.block_height);
-                            println!("{}", ctx.block_height());
                             if p_close.block_height < 0 || p_close.block_height - ctx.block_height() < 144 {
                                 return Err("The block height should be more than 24h in the future");
                             }
@@ -109,8 +107,8 @@ impl Program {
                         "Bolt WTP cannot be closed in a transaction with multiple outputs or WTP outputs",
                     );
                 }
-                if w_close.witness_type == 0x0 {
-                    // TODO: validate timelock
+                if w_close.witness_type == 0x0 && p_close.block_height > ctx.block_height() {
+                    return Err("Timelock has not been met")
                 }
                 let tx_hash = ctx.get_tx_hash();
                 let is_valid = bolt::verify_channel_closing(p_close, w_close, &tx_hash);
@@ -168,6 +166,8 @@ mod tests {
     use std::io::Read;
     use crate::transaction::components::TxOut;
     use crate::legacy::Script;
+    use crate::wtp::bolt::compute_tx_signature;
+    use crate::consensus::wtp::Error::Program;
 
     const OPEN_WITNESS_LEN: usize = 212;
     const CLOSE_WITNESS_LEN: usize = 180;
@@ -236,6 +236,21 @@ mod tests {
         }
         revoke_witness_input.copy_from_slice(revoke_witness_vec.as_slice());
         return revoke_witness_input;
+    }
+
+    fn generate_spend_tx_witness(address: &Vec<u8>, sig: &Vec<u8>) -> [u8; CLOSE_WITNESS_LEN] {
+        let mut spend_witness_input = [0u8; CLOSE_WITNESS_LEN];
+        let mut spend_witness_vec: Vec<u8> = Vec::new();
+        spend_witness_vec.push(0x0);
+        spend_witness_vec.extend(address.iter());
+        spend_witness_vec.push(sig.len() as u8);
+        spend_witness_vec.extend(sig.iter());
+        let pad = CLOSE_WITNESS_LEN - spend_witness_vec.len();
+        for i in 0 .. pad {
+            spend_witness_vec.push(0x0);
+        }
+        spend_witness_input.copy_from_slice(spend_witness_vec.as_slice());
+        return spend_witness_input;
     }
 
     fn generate_predicate(pubkey: &Vec<u8>, amount: [u8; 4], block_height: [u8; 4], channel_token: &Vec<u8>) -> [u8; CLOSE_PREDICATE_LEN] {
@@ -403,12 +418,13 @@ mod tests {
         // Verify tx_e time lock block height is too short
         {
             let ctx = Context::v1(1, &tx_e);
-            assert!(
+            assert_eq!(
                 programs.verify(
                     &tx_a.wtp_outputs[0].predicate, // escrow
                     &tx_e.wtp_inputs[0].witness, // customer-close-tx
                     &ctx
-                ).is_err()
+                ),
+                Err(Program("The block height should be more than 24h in the future"))
             );
         }
 
@@ -464,9 +480,13 @@ mod tests {
 
         let mut _merch_close_addr = hex::decode("0a1111111111111111111111111111111111111111111111111111111111111111").unwrap();
         let _merch_close_addr2 = hex::decode("0b2222222222222222222222222222222222222222222222222222222222222222").unwrap();
+        let _cust_close_addr = hex::decode("0c3333333333333333333333333333333333333333333333333333333333333333").unwrap();
 
         let merch_close_address = Script(_merch_close_addr.clone());
+        let merch_close_address_dup = Script(_merch_close_addr.clone());
         let merch_close_address2 = Script(_merch_close_addr2.clone());
+        let cust_close_addr = Script(_cust_close_addr.clone());
+        let cust_close_addr_dup = Script(_cust_close_addr.clone());
 
         let escrow_tx_predicate= generate_open_predicate(&_merch_close_addr, &_ser_channel_token);
 
@@ -480,9 +500,13 @@ mod tests {
         let cust_close_tx_predicate = generate_predicate(&wpk, [0,0,0,140], [0,0,0,146], &_ser_channel_token);
         let merch_close_tx_predicate = generate_open_predicate(&_merch_close_addr2, &_ser_channel_token);
 
-        let sig = hex::decode("3045022100e171be9eb5ffc799eb944e87762116ddff9ae77de58f63175ca354b9d93922390220601aed54bc60d03012f7d1b76d2caa78f9d461b83f014d40ec33ea233de2246e").unwrap();
+        let merch_sig = hex::decode("3045022100e171be9eb5ffc799eb944e87762116ddff9ae77de58f63175ca354b9d93922390220601aed54bc60d03012f7d1b76d2caa78f9d461b83f014d40ec33ea233de2246e").unwrap();
         let revoke_token = hex::decode("3045022100d4421207f4698bd93b0fd7de19a52f2cf90022c80261c4ff7423c6a5ae2c22e0022043eac6981cf37d873036cd5544dcf9a95cfe8271abc0d66f6c3db031307c2e52").unwrap();
-        let merch_revoke_witness_input = generate_merchant_revoke_witness(&_merch_close_addr2, &sig, &revoke_token);
+        let merch_revoke_witness_input = generate_merchant_revoke_witness(&_merch_close_addr2, &merch_sig, &revoke_token);
+
+        let cust_spend_tx_hash = vec![162, 216, 70, 64, 240, 17, 105, 190, 59, 6, 128, 231, 90, 96, 241, 201, 184, 90, 28, 9, 3, 175, 79, 250, 236, 33, 159, 103, 66, 16, 181, 207];
+        let cust_sig = compute_tx_signature(&sk_c, &cust_spend_tx_hash);
+        let cust_spend_tx_witness = generate_spend_tx_witness(&_cust_close_addr, &cust_sig);
 
         let mut mtx_a = TransactionData::nu4();
         mtx_a.wtp_outputs.push(WtpOut {
@@ -524,6 +548,32 @@ mod tests {
 
         let tx_c = mtx_c.freeze().unwrap();
 
+        let mut mtx_d = TransactionData::nu4();
+        mtx_d.wtp_inputs.push(WtpIn {
+            prevout: OutPoint::new(tx_b.txid().0, 0),
+            witness: wtp::Witness::Bolt(bolt::Witness::close(cust_spend_tx_witness)),
+        });
+        // to_merchant
+        mtx_d.vout.push(TxOut {
+            value: Amount::from_u64(140).unwrap(),
+            script_pubkey: cust_close_addr,
+        });
+
+        let tx_d = mtx_d.freeze().unwrap();
+
+        let mut mtx_e = TransactionData::nu4();
+        mtx_e.wtp_inputs.push(WtpIn {
+            prevout: OutPoint::new(tx_b.txid().0, 0),
+            witness: wtp::Witness::Bolt(bolt::Witness::close(cust_spend_tx_witness)),
+        });
+        // to_merchant
+        mtx_e.vout.push(TxOut {
+            value: Amount::from_u64(140).unwrap(),
+            script_pubkey: cust_close_addr_dup,
+        });
+
+        let tx_e = mtx_e.freeze().unwrap();
+
         let programs = Programs::for_epoch(0x7473_6554).unwrap();
 
         // Verify tx_b
@@ -549,6 +599,32 @@ mod tests {
                     &ctx
                 ),
                 Ok(())
+            );
+        }
+
+        // Verify tx_d
+        {
+            let ctx = Context::v1(150, &tx_d);
+            assert_eq!(
+                programs.verify(
+                    &tx_b.wtp_outputs[0].predicate, // customer-close-tx
+                    &tx_d.wtp_inputs[0].witness, // customer-spending-tx
+                    &ctx
+                ),
+                Ok(())
+            );
+        }
+
+        // Verify tx_e
+        {
+            let ctx = Context::v1(120, &tx_e);
+            assert_eq!(
+                programs.verify(
+                    &tx_b.wtp_outputs[0].predicate, // customer-close-tx
+                    &tx_e.wtp_inputs[0].witness, // customer-spending-tx
+                    &ctx
+                ),
+                Err(Program("Timelock has not been met"))
             );
         }
     }
