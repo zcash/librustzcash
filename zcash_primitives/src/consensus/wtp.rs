@@ -83,6 +83,14 @@ mod context {
             }
         }
 
+        pub(super) fn get_tx_wtp_output_value(&self) -> Result<Amount, ()> {
+            if self.tx.wtp_outputs.len() == 1 {
+                Ok(self.tx.wtp_outputs[0].value)
+            } else {
+                Err(())
+            }
+        }
+
         pub(super) fn get_tx_output_pk(&self) -> Result<Vec<u8>, ()> {
             if self.tx.vout.len() == 1 {
                 Ok(self.tx.vout[0].script_pubkey.0.clone())

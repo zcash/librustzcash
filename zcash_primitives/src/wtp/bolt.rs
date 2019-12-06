@@ -140,10 +140,9 @@ mod merch_close {
         output.push(w.witness_type);
         output.push(w.sig.len() as u8);
         output.extend(w.sig.iter());
+        output.extend(w.cust_bal.to_be_bytes().iter());
+        output.extend(w.merch_bal.to_be_bytes().iter());
         if w.witness_type == 0x1 {
-            output.extend(w.cust_bal.to_be_bytes().iter());
-            output.extend(w.merch_bal.to_be_bytes().iter());
-            println!("{:?}", w.close_token);
             output.push(w.close_token.len() as u8);
             output.extend(w.close_token.iter());
             output.extend(w.wpk.iter())
@@ -364,13 +363,11 @@ fn parse_merch_close_witness_input(input: [u8; 212]) -> merch_close::Witness {
     cust_sig.extend_from_slice(&input[2..end_first_sig].to_vec()); // customer signature
 
     let mut wpk = Vec::new();
-    let mut cust_bal = 0;
-    let mut merch_bal = 0;
+    let end_cust_balance = end_first_sig + 4;
+    let cust_bal = convert_bytes_to_u32(&input[end_first_sig..end_cust_balance]);
+    let end_merch_balance = end_cust_balance + 4;
+    let merch_bal = convert_bytes_to_u32(&input[end_cust_balance..end_merch_balance]);
     if witness_type == 0x1 { // customer initiated (merch_sig : close-token = 96 bytes)
-        let end_cust_balance = end_first_sig + 4;
-        cust_bal = convert_bytes_to_u32(&input[end_first_sig..end_cust_balance]);
-        let end_merch_balance = end_cust_balance + 4;
-        merch_bal = convert_bytes_to_u32(&input[end_cust_balance..end_merch_balance]);
         let start_second_sig = end_merch_balance + 1;
         let end_second_sig = start_second_sig + input[end_merch_balance] as usize;
         merch_sig.extend_from_slice(&input[start_second_sig..end_second_sig].to_vec());
@@ -608,7 +605,6 @@ pub fn verify_channel_closing(close_tx_pred: &close::Predicate, spend_tx_witness
         // merchant-initiated
         let mut address_bytes = [0u8; 33];
         address_bytes.copy_from_slice(spend_tx_witness.address.as_slice());
-        println!("{:?}", tx_hash);
         let channel_close = reconstruct_secp_channel_close_m(&address_bytes, &spend_tx_witness.revoke_token, &spend_tx_witness.signature);
         let mut wpk_bytes = [0u8; 33];
         wpk_bytes.copy_from_slice(close_tx_pred.pubkey.as_slice());
@@ -791,7 +787,7 @@ mod tests {
         let witness = parse_merch_close_witness_input(witness_input);
 
         assert_eq!(w, Witness::MerchClose(witness));
-        assert_eq!(w.to_payload(), (merch_close::MODE, data[0..74].to_vec()));
+        assert_eq!(w.to_payload(), (merch_close::MODE, data[0..82].to_vec()));
     }
 
     #[test]

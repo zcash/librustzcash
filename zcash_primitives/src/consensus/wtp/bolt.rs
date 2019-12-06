@@ -114,6 +114,10 @@ impl Program {
                 if w_close.witness_type == 0x0 && p_close.block_height > ctx.block_height() {
                     return Err("Timelock has not been met")
                 }
+                if Amount::from_u64(p_close.amount as u64).unwrap() != ctx.get_tx_output_value().unwrap() {
+                    return Err("The outgoing amount is not correct.")
+                }
+
                 let tx_hash = ctx.get_tx_hash();
                 let is_valid = bolt::verify_channel_closing(p_close, w_close, &tx_hash);
                 if is_valid {
@@ -131,6 +135,9 @@ impl Program {
                     }
                     if p_close.block_height > ctx.block_height() {
                         return Err("Timelock has not been met")
+                    }
+                    if ctx.get_tx_output_value().unwrap() != Amount::from_u64((w_close.merch_bal + w_close.cust_bal) as u64).unwrap() {
+                        return Err("The outgoing amount is not correct.");
                     }
                 }
 
@@ -151,6 +158,13 @@ impl Program {
                     };
 
                     tx2_pk = tx2_pubkey.unwrap();
+
+                    if ctx.get_tx_output_value().unwrap() != Amount::from_u64(w_close.merch_bal as u64).unwrap() {
+                        return Err("The outgoing amount to merchant is not correct.");
+                    }
+                    if ctx.get_tx_wtp_output_value().unwrap() != Amount::from_u64(w_close.cust_bal as u64).unwrap() {
+                        return Err("The outgoing amount to customer is not correct.");
+                    }
                 }
 
                 let tx_hash = ctx.get_tx_hash();
@@ -226,16 +240,13 @@ mod tests {
         let mut close_witness_input = [0u8; MERCH_CLOSE_WITNESS_LEN];
         let mut close_witness_vec: Vec<u8> = Vec::new();
         close_witness_vec.push(0x1);
-        println!("{}", cust_sig.len());
         close_witness_vec.push(cust_sig.len() as u8);
         close_witness_vec.extend(cust_sig.iter());
         close_witness_vec.extend(cust_bal.iter());
         close_witness_vec.extend(merch_bal.iter());
-        println!("{}", close_token.len());
         close_witness_vec.push(close_token.len() as u8);
         close_witness_vec.extend(close_token.iter());
         close_witness_vec.extend(wpk.iter());
-        println!("{}", close_witness_vec.len());
         let pad = MERCH_CLOSE_WITNESS_LEN - close_witness_vec.len();
         for i in 0 .. pad {
             close_witness_vec.push(0x0);
@@ -251,7 +262,9 @@ mod tests {
         close_witness_vec.push(0x0);
         close_witness_vec.push(sig.len() as u8);
         close_witness_vec.extend(sig.iter());
-        let pad = OPEN_WITNESS_LEN - close_witness_vec.len();
+        close_witness_vec.extend(cust_bal.iter());
+        close_witness_vec.extend(merch_bal.iter());
+        let pad = MERCH_CLOSE_WITNESS_LEN - close_witness_vec.len();
         for i in 0 .. pad {
             close_witness_vec.push(0x0);
         }
@@ -367,6 +380,8 @@ mod tests {
         let merch_close_address = Script(_merch_close_addr.clone());
         let merch_close_address_dup = Script(_merch_close_addr.clone());
         let merch_close_address_dup2 = Script(_merch_close_addr.clone());
+        let merch_close_address_dup3 = Script(_merch_close_addr.clone());
+        let merch_close_address_dup4 = Script(_merch_close_addr.clone());
 
         let escrow_tx_predicate= generate_open_predicate(&_merch_close_addr, &_ser_channel_token);
 
@@ -466,6 +481,44 @@ mod tests {
         });
         let tx_e = mtx_e.freeze().unwrap();
 
+        // begin - customer-close-tx (spending from merchant-close-tx)
+        let mut mtx_f = TransactionData::nu4();
+        mtx_f.wtp_inputs.push(WtpIn {
+            prevout: OutPoint::new(tx_c.txid().0, 0),
+            witness: wtp::Witness::Bolt(bolt::Witness::merch_close(cust_close_witness_input2)),
+        });
+        // to_customer
+        mtx_f.wtp_outputs.push(WtpOut {
+            value: Amount::from_u64(130).unwrap(),
+            predicate: wtp::Predicate::Bolt(bolt::Predicate::close(cust_close_tx_predicate)),
+        });
+        // to_merchant
+        mtx_f.vout.push(TxOut {
+            value: Amount::from_u64(70).unwrap(),
+            script_pubkey: merch_close_address_dup3,
+        });
+        let tx_f = mtx_f.freeze().unwrap();
+        // end - customer-close-tx (spending from merchant-close-tx)
+
+        // begin - customer-close-tx (spending from merchant-close-tx)
+        let mut mtx_g = TransactionData::nu4();
+        mtx_g.wtp_inputs.push(WtpIn {
+            prevout: OutPoint::new(tx_c.txid().0, 0),
+            witness: wtp::Witness::Bolt(bolt::Witness::merch_close(cust_close_witness_input2)),
+        });
+        // to_customer
+        mtx_g.wtp_outputs.push(WtpOut {
+            value: Amount::from_u64(140).unwrap(),
+            predicate: wtp::Predicate::Bolt(bolt::Predicate::close(cust_close_tx_predicate)),
+        });
+        // to_merchant
+        mtx_g.vout.push(TxOut {
+            value: Amount::from_u64(60).unwrap(),
+            script_pubkey: merch_close_address_dup4,
+        });
+        let tx_g = mtx_g.freeze().unwrap();
+        // end - customer-close-tx (spending from merchant-close-tx)
+
         let programs = Programs::for_epoch(0x7473_6554).unwrap();
 
         // Verify tx_b
@@ -517,6 +570,32 @@ mod tests {
                     &ctx
                 ),
                 Ok(())
+            );
+        }
+
+        // Verify tx_f (customer-close-tx spending from merch-close-tx)
+        {
+            let ctx = Context::v1(2, &tx_f);
+            assert_eq!(
+                programs.verify(
+                    &tx_c.wtp_outputs[0].predicate, // merchant-close-tx
+                    &tx_f.wtp_inputs[0].witness, // customer-close-tx
+                    &ctx
+                ),
+                Err(Program("The outgoing amount to customer is not correct."))
+            );
+        }
+
+        // Verify tx_g (customer-close-tx spending from merch-close-tx)
+        {
+            let ctx = Context::v1(2, &tx_g);
+            assert_eq!(
+                programs.verify(
+                    &tx_c.wtp_outputs[0].predicate, // merchant-close-tx
+                    &tx_g.wtp_inputs[0].witness, // customer-close-tx
+                    &ctx
+                ),
+                Err(Program("The outgoing amount to merchant is not correct."))
             );
         }
 
@@ -617,6 +696,20 @@ mod tests {
         // end - customer-close-tx (spending from merchant-close-tx)
         // println!("debug: Customer close transaction spending from merchant-close tx: {:?}", tx_d);
 
+        // begin - merchant-spending-tx (spending from merchant-close-tx)
+        let mut mtx_e = TransactionData::nu4();
+        mtx_e.wtp_inputs.push(WtpIn {
+            prevout: OutPoint::new(tx_c.txid().0, 0),
+            witness: wtp::Witness::Bolt(bolt::Witness::merch_close(merch_close_witness)),
+        });
+        // to_merchant
+        mtx_e.vout.push(TxOut {
+            value: Amount::from_u64(200).unwrap(),
+            script_pubkey: merch_close_address_dup2,
+        });
+        let tx_e = mtx_e.freeze().unwrap();
+        // end - customer-close-tx (spending from merchant-close-tx)
+
         let programs = Programs::for_epoch(0x7473_6554).unwrap();
 
         // Verify tx_b
@@ -671,6 +764,19 @@ mod tests {
             );
         }
 
+        // Verify tx_e (merch-spend-tx spending from merch-close-tx)
+        {
+            let ctx = Context::v1(150, &tx_e);
+            assert_eq!(
+                programs.verify(
+                    &tx_c.wtp_outputs[0].predicate, // merchant-close-tx
+                    &tx_e.wtp_inputs[0].witness, // customer-close-tx
+                    &ctx
+                ),
+                Err(Program("The outgoing amount is not correct."))
+            );
+        }
+
     }
 
     #[test]
@@ -704,6 +810,7 @@ mod tests {
         let merch_close_address2 = Script(_merch_close_addr2.clone());
         let cust_close_addr = Script(_cust_close_addr.clone());
         let cust_close_addr_dup = Script(_cust_close_addr.clone());
+        let cust_close_addr_dup2 = Script(_cust_close_addr.clone());
 
         let escrow_tx_predicate= generate_open_predicate(&_merch_close_addr, &_ser_channel_token);
 
@@ -789,6 +896,19 @@ mod tests {
 
         let tx_e = mtx_e.freeze().unwrap();
 
+        let mut mtx_f = TransactionData::nu4();
+        mtx_f.wtp_inputs.push(WtpIn {
+            prevout: OutPoint::new(tx_b.txid().0, 0),
+            witness: wtp::Witness::Bolt(bolt::Witness::close(cust_spend_tx_witness)),
+        });
+        // to_merchant
+        mtx_f.vout.push(TxOut {
+            value: Amount::from_u64(110).unwrap(),
+            script_pubkey: cust_close_addr_dup2,
+        });
+
+        let tx_f = mtx_f.freeze().unwrap();
+
         let programs = Programs::for_epoch(0x7473_6554).unwrap();
 
         // Verify tx_b
@@ -840,6 +960,19 @@ mod tests {
                     &ctx
                 ),
                 Err(Program("Timelock has not been met"))
+            );
+        }
+
+        // Verify tx_f
+        {
+            let ctx = Context::v1(150, &tx_f);
+            assert_eq!(
+                programs.verify(
+                    &tx_b.wtp_outputs[0].predicate, // customer-close-tx
+                    &tx_f.wtp_inputs[0].witness, // customer-spending-tx
+                    &ctx
+                ),
+                Err(Program("The outgoing amount is not correct."))
             );
         }
     }
