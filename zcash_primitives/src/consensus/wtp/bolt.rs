@@ -97,8 +97,14 @@ impl Program {
                 }
             }
             (bolt::Predicate::Close(p_close), bolt::Witness::Close(w_close)) => {
-                // In CLOSE mode, we only require that the predicate is satisfied:
-                // TODO: validate timelock
+                if !ctx.is_vout_only() {
+                    return Err(
+                        "Bolt WTP cannot be closed in a transaction with multiple outputs or WTP outputs",
+                    );
+                }
+                if w_close.witness_type == 0x0 {
+                    // TODO: validate timelock
+                }
                 let tx_hash = ctx.get_tx_hash();
                 let is_valid = bolt::verify_channel_closing(p_close, w_close, &tx_hash);
                 if is_valid {
@@ -158,7 +164,7 @@ mod tests {
 
     const OPEN_WITNESS_LEN: usize = 212;
     const CLOSE_WITNESS_LEN: usize = 180;
-    const CLOSE_PREDICATE_LEN: usize = 1111;
+    const CLOSE_PREDICATE_LEN: usize = 1115;
     const OPEN_PREDICATE_LEN: usize = 1107;
 
     fn read_file<'a>(name: &'a str) -> std::io::Result<Vec<u8>> {
@@ -225,11 +231,12 @@ mod tests {
         return revoke_witness_input;
     }
 
-    fn generate_predicate(pubkey: &Vec<u8>, amount: [u8; 4], channel_token: &Vec<u8>) -> [u8; CLOSE_PREDICATE_LEN] {
+    fn generate_predicate(pubkey: &Vec<u8>, amount: [u8; 4], block_height: [u8; 4], channel_token: &Vec<u8>) -> [u8; CLOSE_PREDICATE_LEN] {
         let mut tx_predicate = [0u8; CLOSE_PREDICATE_LEN];
         let mut tx_pred: Vec<u8> = Vec::new();
         tx_pred.extend(pubkey.iter());
         tx_pred.extend(amount.iter());
+        tx_pred.extend(block_height.iter());
         tx_pred.extend(channel_token.iter());
         tx_predicate.copy_from_slice(tx_pred.as_slice());
         return tx_predicate;
@@ -280,7 +287,7 @@ mod tests {
         let cust_close_witness_input = generate_customer_close_witness([0,0,0,140], [0,0,0,70], &cust_sig1, &close_token, &wpk);
         let merch_close_witness_input = generate_merchant_close_witness([0,0,0,200], [0,0,0,10], &cust_sig2, &merch_sig);
 
-        let cust_close_tx_predicate = generate_predicate(&wpk, [0,0,0,140], &_ser_channel_token);
+        let cust_close_tx_predicate = generate_predicate(&wpk, [0,0,0,140], [0,0,0,2], &_ser_channel_token);
         let merch_close_tx_predicate = generate_open_predicate(&_merch_close_addr2, &_ser_channel_token);
 
         let merch_tx_hash2= vec![218, 142, 74, 74, 236, 37, 47, 120, 241, 20, 203, 94, 78, 126, 131, 174, 4, 3, 75, 81, 194, 90, 203, 24, 16, 158, 53, 237, 241, 57, 97, 137];
@@ -431,7 +438,7 @@ mod tests {
         let merch_close_witness_input = generate_merchant_close_witness([0,0,0,200], [0,0,0,10], &cust_sig2, &merch_sig);
 
 
-        let cust_close_tx_predicate = generate_predicate(&wpk, [0,0,0,140], &_ser_channel_token);
+        let cust_close_tx_predicate = generate_predicate(&wpk, [0,0,0,140], [0,0,0,2], &_ser_channel_token);
         let merch_close_tx_predicate = generate_open_predicate(&_merch_close_addr2, &_ser_channel_token);
 
         let sig = hex::decode("3045022100e171be9eb5ffc799eb944e87762116ddff9ae77de58f63175ca354b9d93922390220601aed54bc60d03012f7d1b76d2caa78f9d461b83f014d40ec33ea233de2246e").unwrap();
