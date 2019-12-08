@@ -1,24 +1,12 @@
 //! Bolt implementation of WTP consensus rules.
 //!
-//! The bolt program implements a dual-hash-lock encumbrance with the following form:
+//! See `README.md` for a description of the three Bolt programs. Here's one scenario covered by the programs:
 //!
-//! > `hash = BLAKE2b_256(preimage_1 || BLAKE2b_256(preimage_2))`
+//! - `tx_a`: `[ [any input types...] ----> WtpOut(channel_token, merch-close-pk) ]` funding tx
+//! - `tx_b`: `[ WtpIn(tx_a, (wallet || cust-sig || close-token)) -> { WtpOut(cust-bal, (wpk || block-height)), TxOut(merch-bal, merch-close-pk) } ]` cust-close-tx
+//! - `tx_c`: `[ WtpIn(tx_b, (0x0 || cust-sig)) -> [any output types...] ]` cust-spending-tx after time delay
 //!
-//! The two preimages are revealed in sequential transactions, demonstrating how WTPs can
-//! impose constraints on how program modes are chained together.
-//!
-//! The bolt program has two modes:
-//!
-//! - Mode 0: `hash_1 = BLAKE2b_256(preimage_1 || hash_2)`
-//! - Mode 1: `hash_2 = BLAKE2b_256(preimage_2)`
-//!
-//! and uses the following transaction formats:
-//!
-//! - `tx_a`: `[ [any input types...] ----> WtpOut(value, hash_1) ]`
-//! - `tx_b`: `[ WtpIn(tx_a, preimage_1) -> WtpOut(value, hash_2) ]`
-//! - `tx_c`: `[ WtpIn(tx_b, preimage_2) -> [any output types...] ]`
-
-use blake2b_simd::Params;
+//! For all the cases, see tests below
 
 use super::context;
 use crate::wtp::{bolt, Predicate};
@@ -57,24 +45,34 @@ impl Program {
                 match &ctx.tx_wtp_outputs() {
                     [wtp_out] => match &wtp_out.predicate {
                         Predicate::Bolt(bolt::Predicate::Close(p_close)) => {
-                            // retrieve the two outputs here
-                            // to merchant output
+                            // to merchant output address and value
                             let tx2_pubkey = ctx.get_tx_output_pk().unwrap(); // TODO: handle safely
+                            let tx2_output_value = ctx.get_tx_output_value().unwrap();
 
+                            // to customer WTP output value
                             let tx1_value = wtp_out.value;
-                            let tx2_output_value= ctx.get_tx_output_value().unwrap();
 
                             // Check if block_height is more than 24h away.
                             if p_close.block_height < 0 || p_close.block_height - ctx.block_height() < 144 {
                                 return Err("The block height should be more than 24h in the future");
                             }
 
-                            let is_tx_output_correct = bolt::check_customer_output(w_open, tx1_value, p_close,tx2_output_value);
+                            // Check that witness type set correctly
+                            if w_open.witness_type != 0x1 {
+                                return Err("Invalid witness type specified for this Bolt WTP mode")
+                            }
 
+                            // Check that tx outputs have the correct balances
+                            let is_tx_output1_correct = bolt::convert_to_amount(w_open.cust_bal) == tx1_value;
+                            let is_tx_output2_correct = bolt::convert_to_amount(w_open.merch_bal) == tx2_output_value;
+                            let is_tx_output_correct= is_tx_output1_correct && is_tx_output2_correct;
+
+                            // Get the tx hash for the transaction (signatures in witness are supposed to be valid w.r.t this hash)
                             let tx_hash = ctx.get_tx_hash();
-                            let is_valid = bolt::verify_channel_opening(p_open, w_open, &tx_hash, tx2_pubkey);
+                            // Verify channel opening against the witness info provided
+                            let is_channel_valid = bolt::verify_channel_opening(p_open, w_open, &tx_hash, tx2_pubkey);
 
-                            if is_valid && is_tx_output_correct {
+                            if is_channel_valid && is_tx_output_correct {
                                 Ok(())
                             } else {
                                 Err("could not validate channel opening - cust close")
@@ -87,7 +85,8 @@ impl Program {
                             }
 
                             let tx1_value = wtp_out.value;
-                            let is_tx_output_correct = bolt::check_merchant_output(w_open, tx1_value, p_close);
+                            let is_tx_output_correct = bolt::convert_to_amount(w_open.cust_bal + w_open.merch_bal) == tx1_value;
+                            // bolt::check_merchant_output(w_open, tx1_value, p_close);
 
                             let tx_hash = ctx.get_tx_hash();
                             let tx2_pubkey = p_close.pubkey.clone();

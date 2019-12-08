@@ -1,9 +1,5 @@
 //! Bolt parsing logic for WTPs.
 //!
-//! See [the demo program's consensus rules][demo-rules] for details about the demo
-//! protocol. All the parser cares about is the lengths and types of the predicates and
-//! witnesses, which in this demo protocol are all 32-byte arrays.
-//!
 //! [bolt-rules]: crate::consensus::wtp::bolt
 
 use std::convert::{TryFrom, TryInto};
@@ -77,9 +73,9 @@ mod close {
     }
 
     #[derive(Debug, PartialEq)]
-    pub struct Witness {  // (pub [u8; 32]);
+    pub struct Witness {
         pub witness_type: u8, // 1 byte
-        pub address: Vec<u8>, // 32 bytes
+        pub address: Vec<u8>, // 33 bytes
         pub signature: Vec<u8>, // x bytes (cust-sig or merch-sig)
         pub revoke_token: Vec<u8>, // 33 + x (wpk + rev-sig)
     }
@@ -118,7 +114,7 @@ mod merch_close {
     }
 
     #[derive(Debug, PartialEq)]
-    pub struct Witness {     // 210 bytes
+    pub struct Witness {
         pub witness_type: u8, // 1 byte
         pub cust_bal: u32, // 4 bytes
         pub merch_bal: u32, // 4 bytes
@@ -496,27 +492,7 @@ pub fn convert_to_amount(value: u32) -> Amount {
     return Amount::from_u64(value as u64).unwrap();
 }
 
-pub fn check_customer_output(tx_in: &open::Witness, tx1_value: Amount, tx1_wtp_out: &close::Predicate, tx2_value: Amount) -> bool {
-    // println!("Predicate (CustClose): {:?}", tx1_wtp_out);
-    let is_tx_output1_correct = convert_to_amount(tx_in.cust_bal) == tx1_value;
-    let is_tx_output2_correct = convert_to_amount(tx_in.merch_bal) == tx2_value;
-    let is_correct_balances= is_tx_output1_correct && is_tx_output2_correct;
-
-    if tx_in.witness_type == 0x1 {
-        // customer-initiated
-        // println!("Customer initiated tx.");
-        return is_correct_balances;
-    }
-
-    return false;
-}
-
-pub fn check_merchant_output(tx_in: &open::Witness, tx1_value: Amount, tx_wtp_out: &merch_close::Predicate) -> bool {
-    // println!("Predicate (MerchClose): {:?}", tx_wtp_out);
-    return convert_to_amount(tx_in.cust_bal + tx_in.merch_bal) == tx1_value;
-}
-
-// open-channel program description
+// open-channel program
 // If witness is of type 0x0, check that 2 new outputs are created, with the specified amounts (unless one of the amounts is zero), and that the signatures verify.
 
 // If witness is of type 0x1, check that 2 new outputs are created (unless one of the amounts is zero), with the specified amounts:
@@ -531,10 +507,7 @@ pub fn verify_channel_opening(escrow_pred: &open::Predicate, close_tx_witness: &
     let option_channel_token = reconstruct_channel_token_bls12(&_channel_token);
     let channel_token = match option_channel_token {
         Ok(n) => n.unwrap(),
-        Err(e) => {
-            println!("{}", e);
-            return false
-        }
+        Err(_e) => return false
     };
 
     //println!("debug: verify_channel_opening - tx_hash: {:?}", &tx_hash);
@@ -570,7 +543,7 @@ pub fn verify_channel_opening(escrow_pred: &open::Predicate, close_tx_witness: &
         let option_close_token = reconstruct_signature_bls12(&close_tx_witness.merch_sig);
         let close_token = match option_close_token {
             Ok(n) => n.unwrap(),
-            Err(e) => return false
+            Err(_e) => return false
         };
 
         // check whether close token is valid
@@ -581,7 +554,7 @@ pub fn verify_channel_opening(escrow_pred: &open::Predicate, close_tx_witness: &
     return false;
 }
 
-// close-channel program description
+// close-channel program
 // If witness is of type 0x0, verify customer signature and relative timeout met
 
 // If witness is of type 0x1, check that 1 output is created paying <amount-merch + amount-cust> to <address>.
@@ -592,7 +565,7 @@ pub fn verify_channel_closing(close_tx_pred: &close::Predicate, spend_tx_witness
     let option_channel_token = reconstruct_channel_token_bls12(&close_tx_pred.channel_token);
     let channel_token = match option_channel_token {
         Ok(n) => n.unwrap(),
-        Err(e) => return false
+        Err(_e) => return false
     };
 
     if spend_tx_witness.witness_type == 0x0 {
@@ -616,11 +589,12 @@ pub fn verify_channel_closing(close_tx_pred: &close::Predicate, spend_tx_witness
     return false;
 }
 
+// merch-close program
 pub fn verify_channel_merch_closing(merch_tx_pred: &merch_close::Predicate, close_tx_witness: &merch_close::Witness, tx_hash: &Vec<u8>, tx2_pubkey: Vec<u8>) -> bool {
     let option_channel_token = reconstruct_channel_token_bls12(&merch_tx_pred.channel_token);
     let channel_token = match option_channel_token {
         Ok(n) => n.unwrap(),
-        Err(e) => return false
+        Err(_e) => return false
     };
 
     let pkc = channel_token.pk_c.unwrap();
@@ -649,7 +623,7 @@ pub fn verify_channel_merch_closing(merch_tx_pred: &merch_close::Predicate, clos
         let option_close_token = reconstruct_signature_bls12(&close_tx_witness.close_token);
         let close_token = match option_close_token {
             Ok(n) => n.unwrap(),
-            Err(e) => return false
+            Err(_e) => return false
         };
 
         // check whether close token is valid
