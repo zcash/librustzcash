@@ -1350,7 +1350,7 @@ fn test_mul_by_x() {
 #[test]
 fn test_clear_cofactor() {
     // the generator (and the identity) are always on the curve,
-    // even after clearning the cofactor
+    // even after clearing the cofactor
     let generator = G1Projective::generator();
     assert!(bool::from(generator.clear_cofactor().is_on_curve()));
     let id = G1Projective::identity();
