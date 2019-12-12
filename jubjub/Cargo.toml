@@ -14,6 +14,7 @@ version = "0.3.0"
 edition = "2018"
 
 [dependencies.bls12_381]
+path = "../bls12_381"
 version = "0.1"
 default-features = false
 
