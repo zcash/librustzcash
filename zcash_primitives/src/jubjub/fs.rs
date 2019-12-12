@@ -5,6 +5,7 @@ use ff::{
     PrimeField, PrimeFieldDecodingError, PrimeFieldRepr, SqrtField,
 };
 use rand_core::RngCore;
+use std::ops::{Add, AddAssign, Mul, MulAssign, Sub, SubAssign};
 
 use super::ToUniform;
 
@@ -268,6 +269,141 @@ impl From<Fs> for FsRepr {
     }
 }
 
+impl<'r> Add<&'r Fs> for Fs {
+    type Output = Self;
+
+    #[inline]
+    fn add(self, other: &Self) -> Self {
+        let mut ret = self;
+        ret.add_assign(other);
+        ret
+    }
+}
+
+impl Add for Fs {
+    type Output = Self;
+
+    #[inline]
+    fn add(self, other: Self) -> Self {
+        self + &other
+    }
+}
+
+impl<'r> AddAssign<&'r Fs> for Fs {
+    #[inline]
+    fn add_assign(&mut self, other: &Self) {
+        // This cannot exceed the backing capacity.
+        self.0.add_nocarry(&other.0);
+
+        // However, it may need to be reduced.
+        self.reduce();
+    }
+}
+
+impl AddAssign for Fs {
+    #[inline]
+    fn add_assign(&mut self, other: Self) {
+        self.add_assign(&other);
+    }
+}
+
+impl<'r> Sub<&'r Fs> for Fs {
+    type Output = Self;
+
+    #[inline]
+    fn sub(self, other: &Self) -> Self {
+        let mut ret = self;
+        ret.sub_assign(other);
+        ret
+    }
+}
+
+impl Sub for Fs {
+    type Output = Self;
+
+    #[inline]
+    fn sub(self, other: Self) -> Self {
+        self - &other
+    }
+}
+
+impl<'r> SubAssign<&'r Fs> for Fs {
+    #[inline]
+    fn sub_assign(&mut self, other: &Self) {
+        // If `other` is larger than `self`, we'll need to add the modulus to self first.
+        if other.0 > self.0 {
+            self.0.add_nocarry(&MODULUS);
+        }
+
+        self.0.sub_noborrow(&other.0);
+    }
+}
+
+impl SubAssign for Fs {
+    #[inline]
+    fn sub_assign(&mut self, other: Self) {
+        self.sub_assign(&other);
+    }
+}
+
+impl<'r> Mul<&'r Fs> for Fs {
+    type Output = Self;
+
+    #[inline]
+    fn mul(self, other: &Self) -> Self {
+        let mut ret = self;
+        ret.mul_assign(other);
+        ret
+    }
+}
+
+impl Mul for Fs {
+    type Output = Self;
+
+    #[inline]
+    fn mul(self, other: Self) -> Self {
+        self * &other
+    }
+}
+
+impl<'r> MulAssign<&'r Fs> for Fs {
+    #[inline]
+    fn mul_assign(&mut self, other: &Self) {
+        let mut carry = 0;
+        let r0 = mac_with_carry(0, (self.0).0[0], (other.0).0[0], &mut carry);
+        let r1 = mac_with_carry(0, (self.0).0[0], (other.0).0[1], &mut carry);
+        let r2 = mac_with_carry(0, (self.0).0[0], (other.0).0[2], &mut carry);
+        let r3 = mac_with_carry(0, (self.0).0[0], (other.0).0[3], &mut carry);
+        let r4 = carry;
+        let mut carry = 0;
+        let r1 = mac_with_carry(r1, (self.0).0[1], (other.0).0[0], &mut carry);
+        let r2 = mac_with_carry(r2, (self.0).0[1], (other.0).0[1], &mut carry);
+        let r3 = mac_with_carry(r3, (self.0).0[1], (other.0).0[2], &mut carry);
+        let r4 = mac_with_carry(r4, (self.0).0[1], (other.0).0[3], &mut carry);
+        let r5 = carry;
+        let mut carry = 0;
+        let r2 = mac_with_carry(r2, (self.0).0[2], (other.0).0[0], &mut carry);
+        let r3 = mac_with_carry(r3, (self.0).0[2], (other.0).0[1], &mut carry);
+        let r4 = mac_with_carry(r4, (self.0).0[2], (other.0).0[2], &mut carry);
+        let r5 = mac_with_carry(r5, (self.0).0[2], (other.0).0[3], &mut carry);
+        let r6 = carry;
+        let mut carry = 0;
+        let r3 = mac_with_carry(r3, (self.0).0[3], (other.0).0[0], &mut carry);
+        let r4 = mac_with_carry(r4, (self.0).0[3], (other.0).0[1], &mut carry);
+        let r5 = mac_with_carry(r5, (self.0).0[3], (other.0).0[2], &mut carry);
+        let r6 = mac_with_carry(r6, (self.0).0[3], (other.0).0[3], &mut carry);
+        let r7 = carry;
+        self.mont_reduce(r0, r1, r2, r3, r4, r5, r6, r7);
+    }
+}
+
+impl MulAssign for Fs {
+    #[inline]
+    fn mul_assign(&mut self, other: Self) {
+        self.mul_assign(&other);
+    }
+}
+
 impl PrimeField for Fs {
     type Repr = FsRepr;
 
@@ -352,31 +488,12 @@ impl Field for Fs {
     }
 
     #[inline]
-    fn add_assign(&mut self, other: &Fs) {
-        // This cannot exceed the backing capacity.
-        self.0.add_nocarry(&other.0);
-
-        // However, it may need to be reduced.
-        self.reduce();
-    }
-
-    #[inline]
     fn double(&mut self) {
         // This cannot exceed the backing capacity.
         self.0.mul2();
 
         // However, it may need to be reduced.
         self.reduce();
-    }
-
-    #[inline]
-    fn sub_assign(&mut self, other: &Fs) {
-        // If `other` is larger than `self`, we'll need to add the modulus to self first.
-        if other.0 > self.0 {
-            self.0.add_nocarry(&MODULUS);
-        }
-
-        self.0.sub_noborrow(&other.0);
     }
 
     #[inline]
@@ -446,35 +563,6 @@ impl Field for Fs {
     #[inline(always)]
     fn frobenius_map(&mut self, _: usize) {
         // This has no effect in a prime field.
-    }
-
-    #[inline]
-    fn mul_assign(&mut self, other: &Fs) {
-        let mut carry = 0;
-        let r0 = mac_with_carry(0, (self.0).0[0], (other.0).0[0], &mut carry);
-        let r1 = mac_with_carry(0, (self.0).0[0], (other.0).0[1], &mut carry);
-        let r2 = mac_with_carry(0, (self.0).0[0], (other.0).0[2], &mut carry);
-        let r3 = mac_with_carry(0, (self.0).0[0], (other.0).0[3], &mut carry);
-        let r4 = carry;
-        let mut carry = 0;
-        let r1 = mac_with_carry(r1, (self.0).0[1], (other.0).0[0], &mut carry);
-        let r2 = mac_with_carry(r2, (self.0).0[1], (other.0).0[1], &mut carry);
-        let r3 = mac_with_carry(r3, (self.0).0[1], (other.0).0[2], &mut carry);
-        let r4 = mac_with_carry(r4, (self.0).0[1], (other.0).0[3], &mut carry);
-        let r5 = carry;
-        let mut carry = 0;
-        let r2 = mac_with_carry(r2, (self.0).0[2], (other.0).0[0], &mut carry);
-        let r3 = mac_with_carry(r3, (self.0).0[2], (other.0).0[1], &mut carry);
-        let r4 = mac_with_carry(r4, (self.0).0[2], (other.0).0[2], &mut carry);
-        let r5 = mac_with_carry(r5, (self.0).0[2], (other.0).0[3], &mut carry);
-        let r6 = carry;
-        let mut carry = 0;
-        let r3 = mac_with_carry(r3, (self.0).0[3], (other.0).0[0], &mut carry);
-        let r4 = mac_with_carry(r4, (self.0).0[3], (other.0).0[1], &mut carry);
-        let r5 = mac_with_carry(r5, (self.0).0[3], (other.0).0[2], &mut carry);
-        let r6 = mac_with_carry(r6, (self.0).0[3], (other.0).0[3], &mut carry);
-        let r7 = carry;
-        self.mont_reduce(r0, r1, r2, r3, r4, r5, r6, r7);
     }
 
     #[inline]

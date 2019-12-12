@@ -627,6 +627,7 @@ pub mod g1 {
     use group::{CurveAffine, CurveProjective, EncodedPoint, GroupDecodingError};
     use rand_core::RngCore;
     use std::fmt;
+    use std::ops::{AddAssign, MulAssign, SubAssign};
 
     curve_impl!(
         "G1",
@@ -1296,6 +1297,7 @@ pub mod g2 {
     use group::{CurveAffine, CurveProjective, EncodedPoint, GroupDecodingError};
     use rand_core::RngCore;
     use std::fmt;
+    use std::ops::{AddAssign, MulAssign, SubAssign};
 
     curve_impl!(
         "G2",

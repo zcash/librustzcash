@@ -2,6 +2,7 @@
 
 use ff::Field;
 use pairing::Engine;
+use std::ops::{AddAssign, MulAssign, SubAssign};
 
 use bellman::{ConstraintSystem, SynthesisError};
 
@@ -668,6 +669,7 @@ mod test {
     use pairing::bls12_381::{Bls12, Fr};
     use rand_core::{RngCore, SeedableRng};
     use rand_xorshift::XorShiftRng;
+    use std::ops::SubAssign;
 
     use bellman::gadgets::test::*;
     use zcash_primitives::jubjub::fs::Fs;

@@ -3,6 +3,7 @@ use super::fq2::Fq2;
 use super::fq6::Fq6;
 use ff::Field;
 use rand_core::RngCore;
+use std::ops::{Add, AddAssign, Mul, MulAssign, Sub, SubAssign};
 
 /// An element of Fq12, represented by c0 + c1 * w.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -36,6 +37,112 @@ impl Fq12 {
         self.c0 = bb;
         self.c0.mul_by_nonresidue();
         self.c0.add_assign(&aa);
+    }
+}
+
+impl<'r> Add<&'r Fq12> for Fq12 {
+    type Output = Self;
+
+    fn add(self, other: &Self) -> Self {
+        Fq12 {
+            c0: self.c0 + other.c0,
+            c1: self.c1 + other.c1,
+        }
+    }
+}
+
+impl Add for Fq12 {
+    type Output = Self;
+
+    fn add(self, other: Self) -> Self {
+        self + &other
+    }
+}
+
+impl<'r> AddAssign<&'r Fq12> for Fq12 {
+    fn add_assign(&mut self, other: &'r Self) {
+        self.c0.add_assign(&other.c0);
+        self.c1.add_assign(&other.c1);
+    }
+}
+
+impl AddAssign for Fq12 {
+    fn add_assign(&mut self, other: Self) {
+        self.add_assign(&other);
+    }
+}
+
+impl<'r> Sub<&'r Fq12> for Fq12 {
+    type Output = Self;
+
+    fn sub(self, other: &Self) -> Self {
+        Fq12 {
+            c0: self.c0 - other.c0,
+            c1: self.c1 - other.c1,
+        }
+    }
+}
+
+impl Sub for Fq12 {
+    type Output = Self;
+
+    fn sub(self, other: Self) -> Self {
+        self - &other
+    }
+}
+
+impl<'r> SubAssign<&'r Fq12> for Fq12 {
+    fn sub_assign(&mut self, other: &'r Self) {
+        self.c0.sub_assign(&other.c0);
+        self.c1.sub_assign(&other.c1);
+    }
+}
+
+impl SubAssign for Fq12 {
+    fn sub_assign(&mut self, other: Self) {
+        self.sub_assign(&other);
+    }
+}
+
+impl<'r> Mul<&'r Fq12> for Fq12 {
+    type Output = Self;
+
+    fn mul(self, other: &Self) -> Self {
+        let mut ret = self;
+        ret.mul_assign(other);
+        ret
+    }
+}
+
+impl Mul for Fq12 {
+    type Output = Self;
+
+    fn mul(self, other: Self) -> Self {
+        self * &other
+    }
+}
+
+impl<'r> MulAssign<&'r Fq12> for Fq12 {
+    fn mul_assign(&mut self, other: &Self) {
+        let mut aa = self.c0;
+        aa.mul_assign(&other.c0);
+        let mut bb = self.c1;
+        bb.mul_assign(&other.c1);
+        let mut o = other.c0;
+        o.add_assign(&other.c1);
+        self.c1.add_assign(&self.c0);
+        self.c1.mul_assign(&o);
+        self.c1.sub_assign(&aa);
+        self.c1.sub_assign(&bb);
+        self.c0 = bb;
+        self.c0.mul_by_nonresidue();
+        self.c0.add_assign(&aa);
+    }
+}
+
+impl MulAssign for Fq12 {
+    fn mul_assign(&mut self, other: Self) {
+        self.mul_assign(&other);
     }
 }
 
@@ -75,16 +182,6 @@ impl Field for Fq12 {
         self.c1.negate();
     }
 
-    fn add_assign(&mut self, other: &Self) {
-        self.c0.add_assign(&other.c0);
-        self.c1.add_assign(&other.c1);
-    }
-
-    fn sub_assign(&mut self, other: &Self) {
-        self.c0.sub_assign(&other.c0);
-        self.c1.sub_assign(&other.c1);
-    }
-
     fn frobenius_map(&mut self, power: usize) {
         self.c0.frobenius_map(power);
         self.c1.frobenius_map(power);
@@ -109,22 +206,6 @@ impl Field for Fq12 {
         ab.mul_by_nonresidue();
         c0.sub_assign(&ab);
         self.c0 = c0;
-    }
-
-    fn mul_assign(&mut self, other: &Self) {
-        let mut aa = self.c0;
-        aa.mul_assign(&other.c0);
-        let mut bb = self.c1;
-        bb.mul_assign(&other.c1);
-        let mut o = other.c0;
-        o.add_assign(&other.c1);
-        self.c1.add_assign(&self.c0);
-        self.c1.mul_assign(&o);
-        self.c1.sub_assign(&aa);
-        self.c1.sub_assign(&bb);
-        self.c0 = bb;
-        self.c0.mul_by_nonresidue();
-        self.c0.add_assign(&aa);
     }
 
     fn inverse(&self) -> Option<Self> {

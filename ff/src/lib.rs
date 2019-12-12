@@ -11,10 +11,31 @@ use rand_core::RngCore;
 use std::error::Error;
 use std::fmt;
 use std::io::{self, Read, Write};
+use std::ops::{Add, AddAssign, Mul, MulAssign, Sub, SubAssign};
 
 /// This trait represents an element of a field.
 pub trait Field:
-    Sized + Eq + Copy + Clone + Send + Sync + fmt::Debug + fmt::Display + 'static
+    Sized
+    + Eq
+    + Copy
+    + Clone
+    + Send
+    + Sync
+    + fmt::Debug
+    + fmt::Display
+    + 'static
+    + Add<Output = Self>
+    + Sub<Output = Self>
+    + Mul<Output = Self>
+    + for<'a> Add<&'a Self, Output = Self>
+    + for<'a> Mul<&'a Self, Output = Self>
+    + for<'a> Sub<&'a Self, Output = Self>
+    + MulAssign
+    + AddAssign
+    + SubAssign
+    + for<'a> MulAssign<&'a Self>
+    + for<'a> AddAssign<&'a Self>
+    + for<'a> SubAssign<&'a Self>
 {
     /// Returns an element chosen uniformly at random using a user-provided RNG.
     fn random<R: RngCore>(rng: &mut R) -> Self;
@@ -36,15 +57,6 @@ pub trait Field:
 
     /// Negates this element.
     fn negate(&mut self);
-
-    /// Adds another element to this element.
-    fn add_assign(&mut self, other: &Self);
-
-    /// Subtracts another element from this element.
-    fn sub_assign(&mut self, other: &Self);
-
-    /// Multiplies another element by this element.
-    fn mul_assign(&mut self, other: &Self);
 
     /// Computes the multiplicative inverse of this element, if nonzero.
     fn inverse(&self) -> Option<Self>;

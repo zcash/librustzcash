@@ -1,4 +1,5 @@
 use ff::{Field, PrimeField, PrimeFieldDecodingError, PrimeFieldRepr};
+use std::ops::{AddAssign, MulAssign, SubAssign};
 
 #[derive(PrimeField)]
 #[PrimeFieldModulus = "52435875175126190479447740508185965837690552500527637822603658699938581184513"]

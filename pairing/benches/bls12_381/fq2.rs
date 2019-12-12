@@ -1,5 +1,6 @@
 use rand_core::SeedableRng;
 use rand_xorshift::XorShiftRng;
+use std::ops::{AddAssign, MulAssign, SubAssign};
 
 use ff::{Field, SqrtField};
 use pairing::bls12_381::*;
