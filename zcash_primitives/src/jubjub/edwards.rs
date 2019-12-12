@@ -107,8 +107,7 @@ impl<E: JubjubEngine> Point<E, Unknown> {
         // as dy^2 + 1 = 0 has no solution in Fr.
 
         // tmp1 = y^2
-        let mut tmp1 = y;
-        tmp1.square();
+        let mut tmp1 = y.square();
 
         // tmp2 = (y^2 * d) + 1
         let mut tmp2 = tmp1;
@@ -335,17 +334,13 @@ impl<E: JubjubEngine, Subgroup> Point<E, Subgroup> {
         //     http://hyperelliptic.org/EFD/g1p/auto-twisted-extended.html#doubling-dbl-2008-hwcd
 
         // A = X1^2
-        let mut a = self.x;
-        a.square();
+        let a = self.x.square();
 
         // B = Y1^2
-        let mut b = self.y;
-        b.square();
+        let b = self.y.square();
 
         // C = 2*Z1^2
-        let mut c = self.z;
-        c.square();
-        c = c.double();
+        let c = self.z.square().double();
 
         // D = a*A
         //   = -A
@@ -354,7 +349,7 @@ impl<E: JubjubEngine, Subgroup> Point<E, Subgroup> {
         // E = (X1+Y1)^2 - A - B
         let mut e = self.x;
         e.add_assign(&self.y);
-        e.square();
+        e = e.square();
         e.add_assign(&d); // -A = D
         e.sub_assign(&b);
 

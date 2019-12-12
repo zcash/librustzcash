@@ -303,35 +303,35 @@ impl Field for Fq6 {
         self.c2.mul_assign(&FROBENIUS_COEFF_FQ6_C2[power % 6]);
     }
 
-    fn square(&mut self) {
-        let mut s0 = self.c0;
-        s0.square();
+    fn square(&self) -> Self {
+        let s0 = self.c0.square();
         let mut ab = self.c0;
         ab.mul_assign(&self.c1);
         let s1 = ab.double();
         let mut s2 = self.c0;
         s2.sub_assign(&self.c1);
         s2.add_assign(&self.c2);
-        s2.square();
+        s2 = s2.square();
         let mut bc = self.c1;
         bc.mul_assign(&self.c2);
         let s3 = bc.double();
-        let mut s4 = self.c2;
-        s4.square();
+        let s4 = self.c2.square();
 
-        self.c0 = s3;
-        self.c0.mul_by_nonresidue();
-        self.c0.add_assign(&s0);
+        let mut c0 = s3;
+        c0.mul_by_nonresidue();
+        c0.add_assign(&s0);
 
-        self.c1 = s4;
-        self.c1.mul_by_nonresidue();
-        self.c1.add_assign(&s1);
+        let mut c1 = s4;
+        c1.mul_by_nonresidue();
+        c1.add_assign(&s1);
 
-        self.c2 = s1;
-        self.c2.add_assign(&s2);
-        self.c2.add_assign(&s3);
-        self.c2.sub_assign(&s0);
-        self.c2.sub_assign(&s4);
+        let mut c2 = s1;
+        c2.add_assign(&s2);
+        c2.add_assign(&s3);
+        c2.sub_assign(&s0);
+        c2.sub_assign(&s4);
+
+        Fq6 { c0, c1, c2 }
     }
 
     fn inverse(&self) -> Option<Self> {
@@ -340,20 +340,17 @@ impl Field for Fq6 {
         c0.mul_assign(&self.c1);
         c0 = c0.neg();
         {
-            let mut c0s = self.c0;
-            c0s.square();
+            let c0s = self.c0.square();
             c0.add_assign(&c0s);
         }
-        let mut c1 = self.c2;
-        c1.square();
+        let mut c1 = self.c2.square();
         c1.mul_by_nonresidue();
         {
             let mut c01 = self.c0;
             c01.mul_assign(&self.c1);
             c1.sub_assign(&c01);
         }
-        let mut c2 = self.c1;
-        c2.square();
+        let mut c2 = self.c1.square();
         {
             let mut c02 = self.c0;
             c02.mul_assign(&self.c2);

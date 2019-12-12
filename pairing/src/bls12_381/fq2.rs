@@ -46,10 +46,8 @@ impl Fq2 {
 
     /// Norm of Fq2 as extension field in i over Fq
     pub fn norm(&self) -> Fq {
-        let mut t0 = self.c0;
-        let mut t1 = self.c1;
-        t0.square();
-        t1.square();
+        let t0 = self.c0.square();
+        let mut t1 = self.c1.square();
         t1.add_assign(&t0);
 
         t1
@@ -198,7 +196,7 @@ impl Field for Fq2 {
         self.c0.is_zero() && self.c1.is_zero()
     }
 
-    fn square(&mut self) {
+    fn square(&self) -> Self {
         let mut ab = self.c0;
         ab.mul_assign(&self.c1);
         let mut c0c1 = self.c0;
@@ -207,10 +205,10 @@ impl Field for Fq2 {
         c0.add_assign(&self.c0);
         c0.mul_assign(&c0c1);
         c0.sub_assign(&ab);
-        self.c1 = ab;
-        self.c1.add_assign(&ab);
+        let mut c1 = ab;
+        c1.add_assign(&ab);
         c0.add_assign(&ab);
-        self.c0 = c0;
+        Fq2 { c0, c1 }
     }
 
     fn double(&self) -> Self {
@@ -221,10 +219,8 @@ impl Field for Fq2 {
     }
 
     fn inverse(&self) -> Option<Self> {
-        let mut t1 = self.c1;
-        t1.square();
-        let mut t0 = self.c0;
-        t0.square();
+        let t1 = self.c1.square();
+        let mut t0 = self.c0.square();
         t0.add_assign(&t1);
         t0.inverse().map(|t| Fq2 {
             c0: self.c0.mul(&t),
@@ -257,8 +253,7 @@ impl SqrtField for Fq2 {
                 0x92c6e9ed90d2eb35,
                 0x680447a8e5ff9a6,
             ]);
-            let mut alpha = a1;
-            alpha.square();
+            let mut alpha = a1.square();
             alpha.mul_assign(self);
             let mut a0 = alpha;
             a0.frobenius_map(1);
@@ -353,32 +348,30 @@ fn test_fq2_squaring() {
     use super::fq::FqRepr;
     use ff::PrimeField;
 
-    let mut a = Fq2 {
+    let a = Fq2 {
         c0: Fq::one(),
         c1: Fq::one(),
     }; // u + 1
-    a.square();
     assert_eq!(
-        a,
+        a.square(),
         Fq2 {
             c0: Fq::zero(),
             c1: Fq::from_repr(FqRepr::from(2)).unwrap(),
         }
     ); // 2u
 
-    let mut a = Fq2 {
+    let a = Fq2 {
         c0: Fq::zero(),
         c1: Fq::one(),
     }; // u
-    a.square();
-    assert_eq!(a, {
+    assert_eq!(a.square(), {
         Fq2 {
             c0: Fq::one().neg(),
             c1: Fq::zero(),
         }
     }); // -1
 
-    let mut a = Fq2 {
+    let a = Fq2 {
         c0: Fq::from_repr(FqRepr([
             0x9c2c6309bbf8b598,
             0x4eef5c946536f602,
@@ -398,9 +391,8 @@ fn test_fq2_squaring() {
         ]))
         .unwrap(),
     };
-    a.square();
     assert_eq!(
-        a,
+        a.square(),
         Fq2 {
             c0: Fq::from_repr(FqRepr([
                 0xf262c28c538bcf68,

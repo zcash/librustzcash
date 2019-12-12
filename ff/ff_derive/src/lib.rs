@@ -447,8 +447,7 @@ fn prime_field_constants_and_sqrt(
 
                         let mut a1 = self.pow(#mod_minus_3_over_4);
 
-                        let mut a0 = a1;
-                        a0.square();
+                        let mut a0 = a1.square();
                         a0.mul_assign(self);
 
                         if a0.0 == #repr(#rneg) {
@@ -484,22 +483,21 @@ fn prime_field_constants_and_sqrt(
                                 while t != Self::one() {
                                     let mut i = 1;
                                     {
-                                        let mut t2i = t;
-                                        t2i.square();
+                                        let mut t2i = t.square();
                                         loop {
                                             if t2i == Self::one() {
                                                 break;
                                             }
-                                            t2i.square();
+                                            t2i = t2i.square();
                                             i += 1;
                                         }
                                     }
 
                                     for _ in 0..(m - i - 1) {
-                                        c.square();
+                                        c = c.square();
                                     }
                                     r.mul_assign(&c);
-                                    c.square();
+                                    c = c.square();
                                     t.mul_assign(&c);
                                     m = i;
                                 }
@@ -715,7 +713,9 @@ fn prime_field_impl(
         );
 
         gen.extend(quote! {
-            self.mont_reduce(#mont_calling);
+            let mut ret = *self;
+            ret.mont_reduce(#mont_calling);
+            ret
         });
 
         gen
@@ -1113,7 +1113,7 @@ fn prime_field_impl(
             }
 
             #[inline]
-            fn square(&mut self)
+            fn square(&self) -> Self
             {
                 #squaring_impl
             }

@@ -323,8 +323,7 @@ impl<E: JubjubEngine> EdwardsPoint<E> {
 
         // Compute C = d*A*A
         let c = AllocatedNum::alloc(cs.namespace(|| "C"), || {
-            let mut t0 = *a.get_value().get()?;
-            t0.square();
+            let mut t0 = a.get_value().get()?.square();
             t0.mul_assign(params.edwards_d());
 
             Ok(t0)
@@ -612,8 +611,7 @@ impl<E: JubjubEngine> MontgomeryPoint<E> {
 
         // Compute x'' = lambda^2 - A - x - x'
         let xprime = AllocatedNum::alloc(cs.namespace(|| "xprime"), || {
-            let mut t0 = *lambda.get_value().get()?;
-            t0.square();
+            let mut t0 = lambda.get_value().get()?.square();
             t0.sub_assign(params.montgomery_a());
             t0.sub_assign(self.x.get_value().get()?);
             t0.sub_assign(other.x.get_value().get()?);

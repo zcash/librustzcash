@@ -20,11 +20,9 @@ pub fn test_suite<E: JubjubEngine>(params: &E::Params) {
 }
 
 fn is_on_mont_curve<E: JubjubEngine, P: JubjubParams<E>>(x: E::Fr, y: E::Fr, params: &P) -> bool {
-    let mut lhs = y;
-    lhs.square();
+    let lhs = y.square();
 
-    let mut x2 = x;
-    x2.square();
+    let x2 = x.square();
 
     let mut x3 = x2;
     x3.mul_assign(&x);
@@ -42,11 +40,9 @@ fn is_on_twisted_edwards_curve<E: JubjubEngine, P: JubjubParams<E>>(
     y: E::Fr,
     params: &P,
 ) -> bool {
-    let mut x2 = x;
-    x2.square();
+    let x2 = x.square();
 
-    let mut y2 = y;
-    y2.square();
+    let y2 = y.square();
 
     // -x^2 + y^2
     let mut lhs = y2;
@@ -346,8 +342,7 @@ fn test_jubjub_params<E: JubjubEngine>(params: &E::Params) {
 
     {
         // Check that A^2 - 4 is nonsquare:
-        let mut tmp = params.montgomery_a().clone();
-        tmp.square();
+        let mut tmp = params.montgomery_a().square();
         tmp.sub_assign(&E::Fr::from_str("4").unwrap());
         assert!(tmp.legendre() == LegendreSymbol::QuadraticNonResidue);
     }

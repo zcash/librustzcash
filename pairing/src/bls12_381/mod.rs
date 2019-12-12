@@ -97,7 +97,7 @@ impl Engine for Bls12 {
                 }
             }
 
-            f.square();
+            f = f.square();
         }
 
         for &mut (p, ref mut coeffs) in &mut pairs {
@@ -131,8 +131,7 @@ impl Engine for Bls12 {
                 }
 
                 let mut x = BLS_X;
-                let mut y0 = r;
-                y0.square();
+                let y0 = r.square();
                 let mut y1 = y0;
                 exp_by_x(&mut y1, x);
                 x >>= 1;
@@ -185,18 +184,15 @@ impl G2Prepared {
 
         fn doubling_step(r: &mut G2) -> (Fq2, Fq2, Fq2) {
             // Adaptation of Algorithm 26, https://eprint.iacr.org/2010/354.pdf
-            let mut tmp0 = r.x;
-            tmp0.square();
+            let mut tmp0 = r.x.square();
 
-            let mut tmp1 = r.y;
-            tmp1.square();
+            let mut tmp1 = r.y.square();
 
-            let mut tmp2 = tmp1;
-            tmp2.square();
+            let mut tmp2 = tmp1.square();
 
             let mut tmp3 = tmp1;
             tmp3.add_assign(&r.x);
-            tmp3.square();
+            tmp3 = tmp3.square();
             tmp3.sub_assign(&tmp0);
             tmp3.sub_assign(&tmp2);
             tmp3 = tmp3.double();
@@ -207,18 +203,16 @@ impl G2Prepared {
             let mut tmp6 = r.x;
             tmp6.add_assign(&tmp4);
 
-            let mut tmp5 = tmp4;
-            tmp5.square();
+            let tmp5 = tmp4.square();
 
-            let mut zsquared = r.z;
-            zsquared.square();
+            let zsquared = r.z.square();
 
             r.x = tmp5;
             r.x.sub_assign(&tmp3);
             r.x.sub_assign(&tmp3);
 
             r.z.add_assign(&r.y);
-            r.z.square();
+            r.z = r.z.square();
             r.z.sub_assign(&tmp1);
             r.z.sub_assign(&zsquared);
 
@@ -234,7 +228,7 @@ impl G2Prepared {
             tmp3.mul_assign(&zsquared);
             tmp3 = tmp3.double().neg();
 
-            tmp6.square();
+            tmp6 = tmp6.square();
             tmp6.sub_assign(&tmp0);
             tmp6.sub_assign(&tmp5);
 
@@ -251,18 +245,16 @@ impl G2Prepared {
 
         fn addition_step(r: &mut G2, q: &G2Affine) -> (Fq2, Fq2, Fq2) {
             // Adaptation of Algorithm 27, https://eprint.iacr.org/2010/354.pdf
-            let mut zsquared = r.z;
-            zsquared.square();
+            let zsquared = r.z.square();
 
-            let mut ysquared = q.y;
-            ysquared.square();
+            let ysquared = q.y.square();
 
             let mut t0 = zsquared;
             t0.mul_assign(&q.x);
 
             let mut t1 = q.y;
             t1.add_assign(&r.z);
-            t1.square();
+            t1 = t1.square();
             t1.sub_assign(&ysquared);
             t1.sub_assign(&zsquared);
             t1.mul_assign(&zsquared);
@@ -270,8 +262,7 @@ impl G2Prepared {
             let mut t2 = t0;
             t2.sub_assign(&r.x);
 
-            let mut t3 = t2;
-            t3.square();
+            let t3 = t2.square();
 
             let t4 = t3.double().double();
 
@@ -288,14 +279,13 @@ impl G2Prepared {
             let mut t7 = t4;
             t7.mul_assign(&r.x);
 
-            r.x = t6;
-            r.x.square();
+            r.x = t6.square();
             r.x.sub_assign(&t5);
             r.x.sub_assign(&t7);
             r.x.sub_assign(&t7);
 
             r.z.add_assign(&t2);
-            r.z.square();
+            r.z = r.z.square();
             r.z.sub_assign(&zsquared);
             r.z.sub_assign(&t3);
 
@@ -313,11 +303,10 @@ impl G2Prepared {
             r.y = t8;
             r.y.sub_assign(&t0);
 
-            t10.square();
+            t10 = t10.square();
             t10.sub_assign(&ysquared);
 
-            let mut ztsquared = r.z;
-            ztsquared.square();
+            let ztsquared = r.z.square();
 
             t10.sub_assign(&ztsquared);
 

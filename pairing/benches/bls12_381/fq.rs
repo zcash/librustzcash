@@ -210,8 +210,7 @@ fn bench_fq_square(b: &mut ::test::Bencher) {
 
     let mut count = 0;
     b.iter(|| {
-        let mut tmp = v[count];
-        tmp.square();
+        let tmp = v[count].square();
         count = (count + 1) % SAMPLES;
         tmp
     });
@@ -264,11 +263,7 @@ fn bench_fq_sqrt(b: &mut ::test::Bencher) {
     ]);
 
     let v: Vec<Fq> = (0..SAMPLES)
-        .map(|_| {
-            let mut tmp = Fq::random(&mut rng);
-            tmp.square();
-            tmp
-        })
+        .map(|_| Fq::random(&mut rng).square())
         .collect();
 
     let mut count = 0;

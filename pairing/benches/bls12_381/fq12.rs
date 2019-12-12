@@ -84,8 +84,7 @@ fn bench_fq12_squaring(b: &mut ::test::Bencher) {
 
     let mut count = 0;
     b.iter(|| {
-        let mut tmp = v[count];
-        tmp.square();
+        let tmp = v[count].square();
         count = (count + 1) % SAMPLES;
         tmp
     });

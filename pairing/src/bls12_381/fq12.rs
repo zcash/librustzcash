@@ -199,7 +199,7 @@ impl Field for Fq12 {
         self.c1.c2.mul_assign(&FROBENIUS_COEFF_FQ12_C1[power % 12]);
     }
 
-    fn square(&mut self) {
+    fn square(&self) -> Self {
         let mut ab = self.c0;
         ab.mul_assign(&self.c1);
         let mut c0c1 = self.c0;
@@ -209,18 +209,16 @@ impl Field for Fq12 {
         c0.add_assign(&self.c0);
         c0.mul_assign(&c0c1);
         c0.sub_assign(&ab);
-        self.c1 = ab;
-        self.c1.add_assign(&ab);
+        let mut c1 = ab;
+        c1.add_assign(&ab);
         ab.mul_by_nonresidue();
         c0.sub_assign(&ab);
-        self.c0 = c0;
+        Fq12 { c0, c1 }
     }
 
     fn inverse(&self) -> Option<Self> {
-        let mut c0s = self.c0;
-        c0s.square();
-        let mut c1s = self.c1;
-        c1s.square();
+        let mut c0s = self.c0.square();
+        let mut c1s = self.c1.square();
         c1s.mul_by_nonresidue();
         c0s.sub_assign(&c1s);
 

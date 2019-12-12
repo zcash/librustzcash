@@ -50,8 +50,7 @@ impl<E: JubjubEngine> Point<E, Unknown> {
     pub fn get_for_x(x: E::Fr, sign: bool, params: &E::Params) -> Option<Self> {
         // Given an x on the curve, y = sqrt(x^3 + A*x^2 + x)
 
-        let mut x2 = x;
-        x2.square();
+        let mut x2 = x.square();
 
         let mut rhs = x2;
         rhs.mul_assign(params.montgomery_a());
@@ -220,8 +219,7 @@ impl<E: JubjubEngine, Subgroup> Point<E, Subgroup> {
             delta.add_assign(&tmp);
         }
         {
-            let mut tmp = self.x;
-            tmp.square();
+            let mut tmp = self.x.square();
             delta.add_assign(&tmp);
             tmp = tmp.double();
             delta.add_assign(&tmp);
@@ -231,8 +229,7 @@ impl<E: JubjubEngine, Subgroup> Point<E, Subgroup> {
             delta.mul_assign(&tmp.inverse().expect("y is nonzero so this must be nonzero"));
         }
 
-        let mut x3 = delta;
-        x3.square();
+        let mut x3 = delta.square();
         x3.sub_assign(params.montgomery_a());
         x3.sub_assign(&self.x);
         x3.sub_assign(&self.x);
@@ -281,8 +278,7 @@ impl<E: JubjubEngine, Subgroup> Point<E, Subgroup> {
                         );
                     }
 
-                    let mut x3 = delta;
-                    x3.square();
+                    let mut x3 = delta.square();
                     x3.sub_assign(params.montgomery_a());
                     x3.sub_assign(&self.x);
                     x3.sub_assign(&other.x);

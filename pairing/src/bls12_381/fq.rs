@@ -1930,7 +1930,7 @@ fn test_fq_mul_assign() {
 
 #[test]
 fn test_fq_squaring() {
-    let mut a = Fq(FqRepr([
+    let a = Fq(FqRepr([
         0xffffffffffffffff,
         0xffffffffffffffff,
         0xffffffffffffffff,
@@ -1939,9 +1939,8 @@ fn test_fq_squaring() {
         0x19ffffffffffffff,
     ]));
     assert!(a.is_valid());
-    a.square();
     assert_eq!(
-        a,
+        a.square(),
         Fq::from_repr(FqRepr([
             0x1cfb28fe7dfbbb86,
             0x24cbe1731577a59,
@@ -1961,14 +1960,7 @@ fn test_fq_squaring() {
     for _ in 0..1000000 {
         // Ensure that (a * a) = a^2
         let a = Fq::random(&mut rng);
-
-        let mut tmp = a;
-        tmp.square();
-
-        let mut tmp2 = a;
-        tmp2.mul_assign(&a);
-
-        assert_eq!(tmp, tmp2);
+        assert_eq!(a.square(), a * a);
     }
 }
 
@@ -2071,8 +2063,7 @@ fn test_fq_sqrt() {
         // Ensure sqrt(a^2) = a or -a
         let a = Fq::random(&mut rng);
         let nega = a.neg();
-        let mut b = a;
-        b.square();
+        let b = a.square();
 
         let b = b.sqrt().unwrap();
 
@@ -2083,10 +2074,8 @@ fn test_fq_sqrt() {
         // Ensure sqrt(a)^2 = a for random a
         let a = Fq::random(&mut rng);
 
-        if let Some(mut tmp) = a.sqrt() {
-            tmp.square();
-
-            assert_eq!(a, tmp);
+        if let Some(tmp) = a.sqrt() {
+            assert_eq!(a, tmp.square());
         }
     }
 }

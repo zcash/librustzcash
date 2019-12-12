@@ -31,8 +31,7 @@ pub fn random_sqrt_tests<F: SqrtField>() {
 
     for _ in 0..10000 {
         let a = F::random(&mut rng);
-        let mut b = a;
-        b.square();
+        let b = a.square();
         assert_eq!(b.legendre(), LegendreSymbol::QuadraticResidue);
 
         let b = b.sqrt().unwrap();
@@ -43,8 +42,7 @@ pub fn random_sqrt_tests<F: SqrtField>() {
 
     let mut c = F::one();
     for _ in 0..10000 {
-        let mut b = c;
-        b.square();
+        let mut b = c.square();
         assert_eq!(b.legendre(), LegendreSymbol::QuadraticResidue);
 
         b = b.sqrt().unwrap();
@@ -218,12 +216,8 @@ fn random_doubling_tests<F: Field, R: RngCore>(rng: &mut R) {
 
 fn random_squaring_tests<F: Field, R: RngCore>(rng: &mut R) {
     for _ in 0..10000 {
-        let mut a = F::random(rng);
-        let mut b = a;
-        a.mul_assign(&b);
-        b.square();
-
-        assert_eq!(a, b);
+        let a = F::random(rng);
+        assert_eq!(a * a, a.square());
     }
 }
 
