@@ -8,6 +8,8 @@ members = [
     "zcash_client_backend",
     "zcash_primitives",
     "zcash_proofs",
+    "jubjub",
+    "bls12_381",
 ]
 
 [profile.release]
