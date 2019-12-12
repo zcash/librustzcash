@@ -216,19 +216,18 @@ impl<E: JubjubEngine, Subgroup> Point<E, Subgroup> {
         {
             let mut tmp = *params.montgomery_a();
             tmp.mul_assign(&self.x);
-            tmp.double();
+            tmp = tmp.double();
             delta.add_assign(&tmp);
         }
         {
             let mut tmp = self.x;
             tmp.square();
             delta.add_assign(&tmp);
-            tmp.double();
+            tmp = tmp.double();
             delta.add_assign(&tmp);
         }
         {
-            let mut tmp = self.y;
-            tmp.double();
+            let tmp = self.y.double();
             delta.mul_assign(&tmp.inverse().expect("y is nonzero so this must be nonzero"));
         }
 

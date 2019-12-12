@@ -213,9 +213,11 @@ impl Field for Fq2 {
         self.c0 = c0;
     }
 
-    fn double(&mut self) {
-        self.c0.double();
-        self.c1.double();
+    fn double(&self) -> Self {
+        Fq2 {
+            c0: self.c0.double(),
+            c1: self.c1.double(),
+        }
     }
 
     fn inverse(&self) -> Option<Self> {
@@ -741,7 +743,7 @@ fn test_fq2_doubling() {
     use super::fq::FqRepr;
     use ff::PrimeField;
 
-    let mut a = Fq2 {
+    let a = Fq2 {
         c0: Fq::from_repr(FqRepr([
             0x2d0078036923ffc7,
             0x11e59ea221a3b6d2,
@@ -761,9 +763,8 @@ fn test_fq2_doubling() {
         ]))
         .unwrap(),
     };
-    a.double();
     assert_eq!(
-        a,
+        a.double(),
         Fq2 {
             c0: Fq::from_repr(FqRepr([
                 0x5a00f006d247ff8e,

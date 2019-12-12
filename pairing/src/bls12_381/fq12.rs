@@ -183,9 +183,11 @@ impl Field for Fq12 {
         self.c0.is_zero() && self.c1.is_zero()
     }
 
-    fn double(&mut self) {
-        self.c0.double();
-        self.c1.double();
+    fn double(&self) -> Self {
+        Fq12 {
+            c0: self.c0.double(),
+            c1: self.c1.double(),
+        }
     }
 
     fn frobenius_map(&mut self, power: usize) {

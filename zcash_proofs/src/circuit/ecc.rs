@@ -340,7 +340,7 @@ impl<E: JubjubEngine> EdwardsPoint<E> {
         // Compute x3 = (2.A) / (1 + C)
         let x3 = AllocatedNum::alloc(cs.namespace(|| "x3"), || {
             let mut t0 = *a.get_value().get()?;
-            t0.double();
+            t0 = t0.double();
 
             let mut t1 = E::Fr::one();
             t1.add_assign(c.get_value().get()?);
@@ -366,8 +366,7 @@ impl<E: JubjubEngine> EdwardsPoint<E> {
         // Compute y3 = (U - 2.A) / (1 - C)
         let y3 = AllocatedNum::alloc(cs.namespace(|| "y3"), || {
             let mut t0 = *a.get_value().get()?;
-            t0.double();
-            t0 = t0.neg();
+            t0 = t0.double().neg();
             t0.add_assign(t.get_value().get()?);
 
             let mut t1 = E::Fr::one();

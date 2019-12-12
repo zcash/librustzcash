@@ -502,12 +502,16 @@ impl Field for Fs {
     }
 
     #[inline]
-    fn double(&mut self) {
+    fn double(&self) -> Self {
+        let mut ret = *self;
+
         // This cannot exceed the backing capacity.
-        self.0.mul2();
+        ret.0.mul2();
 
         // However, it may need to be reduced.
-        self.reduce();
+        ret.reduce();
+
+        ret
     }
 
     fn inverse(&self) -> Option<Self> {
@@ -680,7 +684,7 @@ impl Fs {
     fn mul_bits<S: AsRef<[u64]>>(&self, bits: BitIterator<S>) -> Self {
         let mut res = Self::zero();
         for bit in bits {
-            res.double();
+            res = res.double();
 
             if bit {
                 res.add_assign(self)
@@ -1466,11 +1470,8 @@ fn test_fs_double() {
 
     for _ in 0..1000 {
         // Ensure doubling a is equivalent to adding a to itself.
-        let mut a = Fs::random(&mut rng);
-        let mut b = a;
-        b.add_assign(&a);
-        a.double();
-        assert_eq!(a, b);
+        let a = Fs::random(&mut rng);
+        assert_eq!(a.double(), a + a);
     }
 }
 

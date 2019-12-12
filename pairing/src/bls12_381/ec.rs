@@ -322,11 +322,10 @@ macro_rules! curve_impl {
                 d.square();
                 d.sub_assign(&a);
                 d.sub_assign(&c);
-                d.double();
+                d = d.double();
 
                 // E = 3*A
-                let mut e = a;
-                e.double();
+                let mut e = a.double();
                 e.add_assign(&a);
 
                 // F = E^2
@@ -335,7 +334,7 @@ macro_rules! curve_impl {
 
                 // Z3 = 2*Y1*Z1
                 self.z.mul_assign(&self.y);
-                self.z.double();
+                self.z = self.z.double();
 
                 // X3 = F-2*D
                 self.x = f;
@@ -346,9 +345,7 @@ macro_rules! curve_impl {
                 self.y = d;
                 self.y.sub_assign(&self.x);
                 self.y.mul_assign(&e);
-                c.double();
-                c.double();
-                c.double();
+                c = c.double().double().double();
                 self.y.sub_assign(&c);
             }
 
@@ -401,8 +398,7 @@ macro_rules! curve_impl {
                     h.sub_assign(&u1);
 
                     // I = (2*H)^2
-                    let mut i = h;
-                    i.double();
+                    let mut i = h.double();
                     i.square();
 
                     // J = H*I
@@ -412,7 +408,7 @@ macro_rules! curve_impl {
                     // r = 2*(S2-S1)
                     let mut r = s2;
                     r.sub_assign(&s1);
-                    r.double();
+                    r = r.double();
 
                     // V = U1*I
                     let mut v = u1;
@@ -430,7 +426,7 @@ macro_rules! curve_impl {
                     self.y.sub_assign(&self.x);
                     self.y.mul_assign(&r);
                     s1.mul_assign(&j); // S1 = S1 * J * 2
-                    s1.double();
+                    s1 = s1.double();
                     self.y.sub_assign(&s1);
 
                     // Z3 = ((Z1+Z2)^2 - Z1Z1 - Z2Z2)*H
@@ -484,9 +480,7 @@ macro_rules! curve_impl {
                     hh.square();
 
                     // I = 4*HH
-                    let mut i = hh;
-                    i.double();
-                    i.double();
+                    let i = hh.double().double();
 
                     // J = H*I
                     let mut j = h;
@@ -495,7 +489,7 @@ macro_rules! curve_impl {
                     // r = 2*(S2-Y1)
                     let mut r = s2;
                     r.sub_assign(&self.y);
-                    r.double();
+                    r = r.double();
 
                     // V = X1*I
                     let mut v = self.x;
@@ -510,7 +504,7 @@ macro_rules! curve_impl {
 
                     // Y3 = r*(V-X3)-2*Y1*J
                     j.mul_assign(&self.y); // J = 2*Y1*J
-                    j.double();
+                    j = j.double();
                     self.y = v;
                     self.y.sub_assign(&self.x);
                     self.y.mul_assign(&r);

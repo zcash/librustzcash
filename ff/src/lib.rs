@@ -54,7 +54,8 @@ pub trait Field:
     fn square(&mut self);
 
     /// Doubles this element.
-    fn double(&mut self);
+    #[must_use]
+    fn double(&self) -> Self;
 
     /// Computes the multiplicative inverse of this element, if nonzero.
     fn inverse(&self) -> Option<Self>;

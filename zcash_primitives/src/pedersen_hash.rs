@@ -58,7 +58,7 @@ where
             if a {
                 tmp.add_assign(&cur);
             }
-            cur.double(); // 2^1 * cur
+            cur = cur.double(); // 2^1 * cur
             if b {
                 tmp.add_assign(&cur);
             }
@@ -75,9 +75,7 @@ where
             if chunks_remaining == 0 {
                 break;
             } else {
-                cur.double(); // 2^2 * cur
-                cur.double(); // 2^3 * cur
-                cur.double(); // 2^4 * cur
+                cur = cur.double().double().double(); // 2^4 * cur
             }
         }
 

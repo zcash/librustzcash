@@ -286,10 +286,12 @@ impl Field for Fq6 {
         self.c0.is_zero() && self.c1.is_zero() && self.c2.is_zero()
     }
 
-    fn double(&mut self) {
-        self.c0.double();
-        self.c1.double();
-        self.c2.double();
+    fn double(&self) -> Self {
+        Fq6 {
+            c0: self.c0.double(),
+            c1: self.c1.double(),
+            c2: self.c2.double(),
+        }
     }
 
     fn frobenius_map(&mut self, power: usize) {
@@ -306,16 +308,14 @@ impl Field for Fq6 {
         s0.square();
         let mut ab = self.c0;
         ab.mul_assign(&self.c1);
-        let mut s1 = ab;
-        s1.double();
+        let s1 = ab.double();
         let mut s2 = self.c0;
         s2.sub_assign(&self.c1);
         s2.add_assign(&self.c2);
         s2.square();
         let mut bc = self.c1;
         bc.mul_assign(&self.c2);
-        let mut s3 = bc;
-        s3.double();
+        let s3 = bc.double();
         let mut s4 = self.c2;
         s4.square();
 

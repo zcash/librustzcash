@@ -345,7 +345,7 @@ impl<E: JubjubEngine, Subgroup> Point<E, Subgroup> {
         // C = 2*Z1^2
         let mut c = self.z;
         c.square();
-        c.double();
+        c = c.double();
 
         // D = a*A
         //   = -A

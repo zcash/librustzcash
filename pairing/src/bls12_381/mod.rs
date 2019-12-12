@@ -199,10 +199,9 @@ impl G2Prepared {
             tmp3.square();
             tmp3.sub_assign(&tmp0);
             tmp3.sub_assign(&tmp2);
-            tmp3.double();
+            tmp3 = tmp3.double();
 
-            let mut tmp4 = tmp0;
-            tmp4.double();
+            let mut tmp4 = tmp0.double();
             tmp4.add_assign(&tmp0);
 
             let mut tmp6 = r.x;
@@ -227,29 +226,25 @@ impl G2Prepared {
             r.y.sub_assign(&r.x);
             r.y.mul_assign(&tmp4);
 
-            tmp2.double();
-            tmp2.double();
-            tmp2.double();
+            tmp2 = tmp2.double().double().double();
 
             r.y.sub_assign(&tmp2);
 
             tmp3 = tmp4;
             tmp3.mul_assign(&zsquared);
-            tmp3.double();
-            tmp3 = tmp3.neg();
+            tmp3 = tmp3.double().neg();
 
             tmp6.square();
             tmp6.sub_assign(&tmp0);
             tmp6.sub_assign(&tmp5);
 
-            tmp1.double();
-            tmp1.double();
+            tmp1 = tmp1.double().double();
 
             tmp6.sub_assign(&tmp1);
 
             tmp0 = r.z;
             tmp0.mul_assign(&zsquared);
-            tmp0.double();
+            tmp0 = tmp0.double();
 
             (tmp0, tmp3, tmp6)
         }
@@ -278,9 +273,7 @@ impl G2Prepared {
             let mut t3 = t2;
             t3.square();
 
-            let mut t4 = t3;
-            t4.double();
-            t4.double();
+            let t4 = t3.double().double();
 
             let mut t5 = t4;
             t5.mul_assign(&t2);
@@ -315,7 +308,7 @@ impl G2Prepared {
 
             t0 = r.y;
             t0.mul_assign(&t5);
-            t0.double();
+            t0 = t0.double();
 
             r.y = t8;
             r.y.sub_assign(&t0);
@@ -328,16 +321,14 @@ impl G2Prepared {
 
             t10.sub_assign(&ztsquared);
 
-            t9.double();
+            t9 = t9.double();
             t9.sub_assign(&t10);
 
-            t10 = r.z;
-            t10.double();
+            t10 = r.z.double();
 
             t6 = t6.neg();
 
-            t1 = t6;
-            t1.double();
+            t1 = t6.double();
 
             (t10, t1, t9)
         }

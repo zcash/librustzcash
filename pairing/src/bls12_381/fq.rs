@@ -2001,11 +2001,8 @@ fn test_fq_double() {
 
     for _ in 0..1000 {
         // Ensure doubling a is equivalent to adding a to itself.
-        let mut a = Fq::random(&mut rng);
-        let mut b = a;
-        b.add_assign(&a);
-        a.double();
-        assert_eq!(a, b);
+        let a = Fq::random(&mut rng);
+        assert_eq!(a.double(), a + a);
     }
 }
 

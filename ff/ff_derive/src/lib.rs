@@ -1040,12 +1040,16 @@ fn prime_field_impl(
             }
 
             #[inline]
-            fn double(&mut self) {
+            fn double(&self) -> Self {
+                let mut ret = *self;
+
                 // This cannot exceed the backing capacity.
-                self.0.mul2();
+                ret.0.mul2();
 
                 // However, it may need to be reduced.
-                self.reduce();
+                ret.reduce();
+
+                ret
             }
 
             fn inverse(&self) -> Option<Self> {
