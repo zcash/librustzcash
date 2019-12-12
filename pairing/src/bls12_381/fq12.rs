@@ -3,7 +3,7 @@ use super::fq2::Fq2;
 use super::fq6::Fq6;
 use ff::Field;
 use rand_core::RngCore;
-use std::ops::{Add, AddAssign, Mul, MulAssign, Sub, SubAssign};
+use std::ops::{Add, AddAssign, Mul, MulAssign, Neg, Sub, SubAssign};
 
 /// An element of Fq12, represented by c0 + c1 * w.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -20,7 +20,7 @@ impl ::std::fmt::Display for Fq12 {
 
 impl Fq12 {
     pub fn conjugate(&mut self) {
-        self.c1.negate();
+        self.c1 = self.c1.neg();
     }
 
     pub fn mul_by_014(&mut self, c0: &Fq2, c1: &Fq2, c4: &Fq2) {
@@ -37,6 +37,17 @@ impl Fq12 {
         self.c0 = bb;
         self.c0.mul_by_nonresidue();
         self.c0.add_assign(&aa);
+    }
+}
+
+impl Neg for Fq12 {
+    type Output = Self;
+
+    fn neg(self) -> Self {
+        Fq12 {
+            c0: self.c0.neg(),
+            c1: self.c1.neg(),
+        }
     }
 }
 
@@ -177,11 +188,6 @@ impl Field for Fq12 {
         self.c1.double();
     }
 
-    fn negate(&mut self) {
-        self.c0.negate();
-        self.c1.negate();
-    }
-
     fn frobenius_map(&mut self, power: usize) {
         self.c0.frobenius_map(power);
         self.c1.frobenius_map(power);
@@ -216,13 +222,9 @@ impl Field for Fq12 {
         c1s.mul_by_nonresidue();
         c0s.sub_assign(&c1s);
 
-        c0s.inverse().map(|t| {
-            let mut tmp = Fq12 { c0: t, c1: t };
-            tmp.c0.mul_assign(&self.c0);
-            tmp.c1.mul_assign(&self.c1);
-            tmp.c1.negate();
-
-            tmp
+        c0s.inverse().map(|t| Fq12 {
+            c0: t.mul(&self.c0),
+            c1: t.mul(&self.c1).neg(),
         })
     }
 }

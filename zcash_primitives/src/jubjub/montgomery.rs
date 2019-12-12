@@ -1,5 +1,5 @@
 use ff::{BitIterator, Field, PrimeField, PrimeFieldRepr, SqrtField};
-use std::ops::{AddAssign, MulAssign, SubAssign};
+use std::ops::{AddAssign, MulAssign, Neg, SubAssign};
 
 use super::{edwards, JubjubEngine, JubjubParams, PrimeOrder, Unknown};
 
@@ -62,7 +62,7 @@ impl<E: JubjubEngine> Point<E, Unknown> {
         match rhs.sqrt() {
             Some(mut y) => {
                 if y.into_repr().is_odd() != sign {
-                    y.negate();
+                    y = y.neg();
                 }
 
                 Some(Point {
@@ -190,7 +190,7 @@ impl<E: JubjubEngine, Subgroup> Point<E, Subgroup> {
     pub fn negate(&self) -> Self {
         let mut p = self.clone();
 
-        p.y.negate();
+        p.y = p.y.neg();
 
         p
     }
@@ -242,7 +242,7 @@ impl<E: JubjubEngine, Subgroup> Point<E, Subgroup> {
         y3.sub_assign(&self.x);
         y3.mul_assign(&delta);
         y3.add_assign(&self.y);
-        y3.negate();
+        y3 = y3.neg();
 
         Point {
             x: x3,
@@ -292,7 +292,7 @@ impl<E: JubjubEngine, Subgroup> Point<E, Subgroup> {
                     y3.sub_assign(&self.x);
                     y3.mul_assign(&delta);
                     y3.add_assign(&self.y);
-                    y3.negate();
+                    y3 = y3.neg();
 
                     Point {
                         x: x3,

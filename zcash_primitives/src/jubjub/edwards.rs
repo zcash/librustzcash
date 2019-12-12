@@ -1,5 +1,5 @@
 use ff::{BitIterator, Field, PrimeField, PrimeFieldRepr, SqrtField};
-use std::ops::{AddAssign, MulAssign, SubAssign};
+use std::ops::{AddAssign, MulAssign, Neg, SubAssign};
 
 use super::{montgomery, JubjubEngine, JubjubParams, PrimeOrder, Unknown};
 
@@ -126,7 +126,7 @@ impl<E: JubjubEngine> Point<E, Unknown> {
                 match tmp1.sqrt() {
                     Some(mut x) => {
                         if x.into_repr().is_odd() != sign {
-                            x.negate();
+                            x = x.neg();
                         }
 
                         let mut t = x;
@@ -213,12 +213,9 @@ impl<E: JubjubEngine, Subgroup> Point<E, Subgroup> {
                 // only point of order 2 that is not the neutral element.
                 if y.is_zero() {
                     // This must be the point (0, 0) as above.
-                    let mut neg1 = E::Fr::one();
-                    neg1.negate();
-
                     Point {
                         x: E::Fr::zero(),
-                        y: neg1,
+                        y: E::Fr::one().neg(),
                         t: E::Fr::zero(),
                         z: E::Fr::one(),
                         _marker: PhantomData,
@@ -324,8 +321,8 @@ impl<E: JubjubEngine, Subgroup> Point<E, Subgroup> {
     pub fn negate(&self) -> Self {
         let mut p = self.clone();
 
-        p.x.negate();
-        p.t.negate();
+        p.x = p.x.neg();
+        p.t = p.t.neg();
 
         p
     }
@@ -352,8 +349,7 @@ impl<E: JubjubEngine, Subgroup> Point<E, Subgroup> {
 
         // D = a*A
         //   = -A
-        let mut d = a;
-        d.negate();
+        let d = a.neg();
 
         // E = (X1+Y1)^2 - A - B
         let mut e = self.x;

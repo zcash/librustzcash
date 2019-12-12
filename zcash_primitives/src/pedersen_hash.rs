@@ -2,7 +2,7 @@
 
 use crate::jubjub::*;
 use ff::{Field, PrimeField, PrimeFieldRepr};
-use std::ops::AddAssign;
+use std::ops::{AddAssign, Neg};
 
 #[derive(Copy, Clone)]
 pub enum Personalization {
@@ -65,7 +65,7 @@ where
 
             // conditionally negate
             if c {
-                tmp.negate();
+                tmp = tmp.neg();
             }
 
             acc.add_assign(&tmp);

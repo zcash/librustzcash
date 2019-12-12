@@ -2,7 +2,7 @@ use super::fq::{Fq, FROBENIUS_COEFF_FQ2_C1, NEGATIVE_ONE};
 use ff::{Field, SqrtField};
 use rand_core::RngCore;
 use std::cmp::Ordering;
-use std::ops::{Add, AddAssign, Mul, MulAssign, Sub, SubAssign};
+use std::ops::{Add, AddAssign, Mul, MulAssign, Neg, Sub, SubAssign};
 
 /// An element of Fq2, represented by c0 + c1 * u.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -53,6 +53,17 @@ impl Fq2 {
         t1.add_assign(&t0);
 
         t1
+    }
+}
+
+impl Neg for Fq2 {
+    type Output = Self;
+
+    fn neg(self) -> Self {
+        Fq2 {
+            c0: self.c0.neg(),
+            c1: self.c1.neg(),
+        }
     }
 }
 
@@ -192,8 +203,7 @@ impl Field for Fq2 {
         ab.mul_assign(&self.c1);
         let mut c0c1 = self.c0;
         c0c1.add_assign(&self.c1);
-        let mut c0 = self.c1;
-        c0.negate();
+        let mut c0 = self.c1.neg();
         c0.add_assign(&self.c0);
         c0.mul_assign(&c0c1);
         c0.sub_assign(&ab);
@@ -208,27 +218,15 @@ impl Field for Fq2 {
         self.c1.double();
     }
 
-    fn negate(&mut self) {
-        self.c0.negate();
-        self.c1.negate();
-    }
-
     fn inverse(&self) -> Option<Self> {
         let mut t1 = self.c1;
         t1.square();
         let mut t0 = self.c0;
         t0.square();
         t0.add_assign(&t1);
-        t0.inverse().map(|t| {
-            let mut tmp = Fq2 {
-                c0: self.c0,
-                c1: self.c1,
-            };
-            tmp.c0.mul_assign(&t);
-            tmp.c1.mul_assign(&t);
-            tmp.c1.negate();
-
-            tmp
+        t0.inverse().map(|t| Fq2 {
+            c0: self.c0.mul(&t),
+            c1: self.c1.mul(&t).neg(),
         })
     }
 
@@ -372,10 +370,8 @@ fn test_fq2_squaring() {
     }; // u
     a.square();
     assert_eq!(a, {
-        let mut neg1 = Fq::one();
-        neg1.negate();
         Fq2 {
-            c0: neg1,
+            c0: Fq::one().neg(),
             c1: Fq::zero(),
         }
     }); // -1
@@ -694,7 +690,7 @@ fn test_fq2_negation() {
     use super::fq::FqRepr;
     use ff::PrimeField;
 
-    let mut a = Fq2 {
+    let a = Fq2 {
         c0: Fq::from_repr(FqRepr([
             0x2d0078036923ffc7,
             0x11e59ea221a3b6d2,
@@ -713,8 +709,8 @@ fn test_fq2_negation() {
             0x12d1137b8a6a837,
         ]))
         .unwrap(),
-    };
-    a.negate();
+    }
+    .neg();
     assert_eq!(
         a,
         Fq2 {
@@ -1000,8 +996,7 @@ fn test_fq2_legendre() {
 
     assert_eq!(Zero, Fq2::zero().legendre());
     // i^2 = -1
-    let mut m1 = Fq2::one();
-    m1.negate();
+    let mut m1 = Fq2::one().neg();
     assert_eq!(QuadraticResidue, m1.legendre());
     m1.mul_by_nonresidue();
     assert_eq!(QuadraticNonResidue, m1.legendre());

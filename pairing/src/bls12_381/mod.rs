@@ -25,7 +25,7 @@ use super::{Engine, PairingCurveAffine};
 
 use ff::{BitIterator, Field, ScalarEngine};
 use group::CurveAffine;
-use std::ops::{AddAssign, MulAssign, SubAssign};
+use std::ops::{AddAssign, MulAssign, Neg, SubAssign};
 
 // The BLS parameter x for BLS12-381 is -0xd201000000010000
 const BLS_X: u64 = 0xd201000000010000;
@@ -236,7 +236,7 @@ impl G2Prepared {
             tmp3 = tmp4;
             tmp3.mul_assign(&zsquared);
             tmp3.double();
-            tmp3.negate();
+            tmp3 = tmp3.neg();
 
             tmp6.square();
             tmp6.sub_assign(&tmp0);
@@ -334,7 +334,7 @@ impl G2Prepared {
             t10 = r.z;
             t10.double();
 
-            t6.negate();
+            t6 = t6.neg();
 
             t1 = t6;
             t1.double();

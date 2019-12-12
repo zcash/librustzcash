@@ -2,7 +2,7 @@
 
 use ff::Field;
 use pairing::Engine;
-use std::ops::{AddAssign, MulAssign, SubAssign};
+use std::ops::{AddAssign, MulAssign, Neg, SubAssign};
 
 use bellman::{ConstraintSystem, SynthesisError};
 
@@ -367,7 +367,7 @@ impl<E: JubjubEngine> EdwardsPoint<E> {
         let y3 = AllocatedNum::alloc(cs.namespace(|| "y3"), || {
             let mut t0 = *a.get_value().get()?;
             t0.double();
-            t0.negate();
+            t0 = t0.neg();
             t0.add_assign(t.get_value().get()?);
 
             let mut t1 = E::Fr::one();
@@ -642,7 +642,7 @@ impl<E: JubjubEngine> MontgomeryPoint<E> {
             t0.sub_assign(self.x.get_value().get()?);
             t0.mul_assign(lambda.get_value().get()?);
             t0.add_assign(self.y.get_value().get()?);
-            t0.negate();
+            t0 = t0.neg();
 
             Ok(t0)
         })?;

@@ -1,6 +1,6 @@
 use rand_core::SeedableRng;
 use rand_xorshift::XorShiftRng;
-use std::ops::{AddAssign, MulAssign, SubAssign};
+use std::ops::{AddAssign, MulAssign, Neg, SubAssign};
 
 use ff::{Field, PrimeField, PrimeFieldRepr, SqrtField};
 use pairing::bls12_381::*;
@@ -236,7 +236,7 @@ fn bench_fq_inverse(b: &mut ::test::Bencher) {
 }
 
 #[bench]
-fn bench_fq_negate(b: &mut ::test::Bencher) {
+fn bench_fq_neg(b: &mut ::test::Bencher) {
     const SAMPLES: usize = 1000;
 
     let mut rng = XorShiftRng::from_seed([
@@ -248,8 +248,7 @@ fn bench_fq_negate(b: &mut ::test::Bencher) {
 
     let mut count = 0;
     b.iter(|| {
-        let mut tmp = v[count];
-        tmp.negate();
+        let tmp = v[count].neg();
         count = (count + 1) % SAMPLES;
         tmp
     });

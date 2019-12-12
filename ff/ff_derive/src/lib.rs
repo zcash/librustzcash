@@ -833,6 +833,21 @@ fn prime_field_impl(
             }
         }
 
+        impl ::std::ops::Neg for #name {
+            type Output = #name;
+
+            #[inline]
+            fn neg(self) -> #name {
+                let mut ret = self;
+                if !ret.is_zero() {
+                    let mut tmp = MODULUS;
+                    tmp.sub_noborrow(&ret.0);
+                    ret.0 = tmp;
+                }
+                ret
+            }
+        }
+
         impl<'r> ::std::ops::Add<&'r #name> for #name {
             type Output = #name;
 
@@ -1031,15 +1046,6 @@ fn prime_field_impl(
 
                 // However, it may need to be reduced.
                 self.reduce();
-            }
-
-            #[inline]
-            fn negate(&mut self) {
-                if !self.is_zero() {
-                    let mut tmp = MODULUS;
-                    tmp.sub_noborrow(&self.0);
-                    self.0 = tmp;
-                }
             }
 
             fn inverse(&self) -> Option<Self> {

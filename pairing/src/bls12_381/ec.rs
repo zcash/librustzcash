@@ -107,8 +107,7 @@ macro_rules! curve_impl {
                 x3b.add_assign(&$affine::get_coeff_b());
 
                 x3b.sqrt().map(|y| {
-                    let mut negy = y;
-                    negy.negate();
+                    let negy = y.neg();
 
                     $affine {
                         x: x,
@@ -171,7 +170,7 @@ macro_rules! curve_impl {
 
             fn negate(&mut self) {
                 if !self.is_zero() {
-                    self.y.negate();
+                    self.y = self.y.neg();
                 }
             }
 
@@ -527,7 +526,7 @@ macro_rules! curve_impl {
 
             fn negate(&mut self) {
                 if !self.is_zero() {
-                    self.y.negate()
+                    self.y = self.y.neg();
                 }
             }
 
@@ -627,7 +626,7 @@ pub mod g1 {
     use group::{CurveAffine, CurveProjective, EncodedPoint, GroupDecodingError};
     use rand_core::RngCore;
     use std::fmt;
-    use std::ops::{AddAssign, MulAssign, SubAssign};
+    use std::ops::{AddAssign, MulAssign, Neg, SubAssign};
 
     curve_impl!(
         "G1",
@@ -849,8 +848,7 @@ pub mod g1 {
                     affine.x.into_repr().write_be(&mut writer).unwrap();
                 }
 
-                let mut negy = affine.y;
-                negy.negate();
+                let negy = affine.y.neg();
 
                 // Set the third most significant bit if the correct y-coordinate
                 // is lexicographically largest.
@@ -948,8 +946,7 @@ pub mod g1 {
 
             if let Some(y) = rhs.sqrt() {
                 let yrepr = y.into_repr();
-                let mut negy = y;
-                negy.negate();
+                let negy = y.neg();
                 let negyrepr = negy.into_repr();
 
                 let p = G1Affine {
@@ -1297,7 +1294,7 @@ pub mod g2 {
     use group::{CurveAffine, CurveProjective, EncodedPoint, GroupDecodingError};
     use rand_core::RngCore;
     use std::fmt;
-    use std::ops::{AddAssign, MulAssign, SubAssign};
+    use std::ops::{AddAssign, MulAssign, Neg, SubAssign};
 
     curve_impl!(
         "G2",
@@ -1544,8 +1541,7 @@ pub mod g2 {
                     affine.x.c0.into_repr().write_be(&mut writer).unwrap();
                 }
 
-                let mut negy = affine.y;
-                negy.negate();
+                let negy = affine.y.neg();
 
                 // Set the third most significant bit if the correct y-coordinate
                 // is lexicographically largest.
@@ -1654,8 +1650,7 @@ pub mod g2 {
             rhs.add_assign(&G2Affine::get_coeff_b());
 
             if let Some(y) = rhs.sqrt() {
-                let mut negy = y;
-                negy.negate();
+                let negy = y.neg();
 
                 let p = G2Affine {
                     x,

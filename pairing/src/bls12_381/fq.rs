@@ -2,6 +2,9 @@ use super::fq2::Fq2;
 use ff::{Field, PrimeField, PrimeFieldDecodingError, PrimeFieldRepr};
 use std::ops::{AddAssign, MulAssign, SubAssign};
 
+#[cfg(test)]
+use std::ops::Neg;
+
 // B coefficient of BLS12-381 curve, 4.
 pub const B_COEFF: Fq = Fq(FqRepr([
     0xaa270000000cfff3,
@@ -456,8 +459,7 @@ fn test_b_coeff() {
 
 #[test]
 fn test_frob_coeffs() {
-    let mut nqr = Fq::one();
-    nqr.negate();
+    let nqr = Fq::one().neg();
 
     assert_eq!(FROBENIUS_COEFF_FQ2_C1[0], Fq::one());
     assert_eq!(
@@ -1167,8 +1169,7 @@ fn test_frob_coeffs() {
 
 #[test]
 fn test_neg_one() {
-    let mut o = Fq::one();
-    o.negate();
+    let o = Fq::one().neg();
 
     assert_eq!(NEGATIVE_ONE, o);
 }
@@ -2009,10 +2010,9 @@ fn test_fq_double() {
 }
 
 #[test]
-fn test_fq_negate() {
+fn test_fq_neg() {
     {
-        let mut a = Fq::zero();
-        a.negate();
+        let a = Fq::zero().neg();
 
         assert!(a.is_zero());
     }
@@ -2025,8 +2025,7 @@ fn test_fq_negate() {
     for _ in 0..1000 {
         // Ensure (a - (-a)) = 0.
         let mut a = Fq::random(&mut rng);
-        let mut b = a;
-        b.negate();
+        let b = a.neg();
         a.add_assign(&b);
 
         assert!(a.is_zero());
@@ -2074,8 +2073,7 @@ fn test_fq_sqrt() {
     for _ in 0..1000 {
         // Ensure sqrt(a^2) = a or -a
         let a = Fq::random(&mut rng);
-        let mut nega = a;
-        nega.negate();
+        let nega = a.neg();
         let mut b = a;
         b.square();
 
