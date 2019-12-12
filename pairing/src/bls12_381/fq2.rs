@@ -3,6 +3,7 @@ use ff::{Field, SqrtField};
 use rand_core::RngCore;
 use std::cmp::Ordering;
 use std::ops::{Add, AddAssign, Mul, MulAssign, Neg, Sub, SubAssign};
+use subtle::{Choice, ConditionallySelectable};
 
 /// An element of Fq2, represented by c0 + c1 * u.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -51,6 +52,15 @@ impl Fq2 {
         t1.add_assign(&t0);
 
         t1
+    }
+}
+
+impl ConditionallySelectable for Fq2 {
+    fn conditional_select(a: &Self, b: &Self, choice: Choice) -> Self {
+        Fq2 {
+            c0: Fq::conditional_select(&a.c0, &b.c0, choice),
+            c1: Fq::conditional_select(&a.c1, &b.c1, choice),
+        }
     }
 }
 

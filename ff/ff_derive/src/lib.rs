@@ -833,6 +833,16 @@ fn prime_field_impl(
             }
         }
 
+        impl ::subtle::ConditionallySelectable for #name {
+            fn conditional_select(a: &#name, b: &#name, choice: ::subtle::Choice) -> #name {
+                let mut res = [0u64; #limbs];
+                for i in 0..#limbs {
+                    res[i] = u64::conditional_select(&(a.0).0[i], &(b.0).0[i], choice);
+                }
+                #name(#repr(res))
+            }
+        }
+
         impl ::std::ops::Neg for #name {
             type Output = #name;
 

@@ -12,6 +12,7 @@ use std::error::Error;
 use std::fmt;
 use std::io::{self, Read, Write};
 use std::ops::{Add, AddAssign, Mul, MulAssign, Neg, Sub, SubAssign};
+use subtle::ConditionallySelectable;
 
 /// This trait represents an element of a field.
 pub trait Field:
@@ -24,6 +25,7 @@ pub trait Field:
     + fmt::Debug
     + fmt::Display
     + 'static
+    + ConditionallySelectable
     + Add<Output = Self>
     + Sub<Output = Self>
     + Mul<Output = Self>

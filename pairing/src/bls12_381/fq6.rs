@@ -3,6 +3,7 @@ use super::fq2::Fq2;
 use ff::Field;
 use rand_core::RngCore;
 use std::ops::{Add, AddAssign, Mul, MulAssign, Neg, Sub, SubAssign};
+use subtle::{Choice, ConditionallySelectable};
 
 /// An element of Fq6, represented by c0 + c1 * v + c2 * v^(2).
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -97,6 +98,16 @@ impl Fq6 {
         self.c0 = t1;
         self.c1 = t2;
         self.c2 = t3;
+    }
+}
+
+impl ConditionallySelectable for Fq6 {
+    fn conditional_select(a: &Self, b: &Self, choice: Choice) -> Self {
+        Fq6 {
+            c0: Fq2::conditional_select(&a.c0, &b.c0, choice),
+            c1: Fq2::conditional_select(&a.c1, &b.c1, choice),
+            c2: Fq2::conditional_select(&a.c2, &b.c2, choice),
+        }
     }
 }
 

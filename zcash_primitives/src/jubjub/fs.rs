@@ -6,6 +6,7 @@ use ff::{
 };
 use rand_core::RngCore;
 use std::ops::{Add, AddAssign, Mul, MulAssign, Neg, Sub, SubAssign};
+use subtle::{Choice, ConditionallySelectable};
 
 use super::ToUniform;
 
@@ -266,6 +267,17 @@ impl ::std::fmt::Display for Fs {
 impl From<Fs> for FsRepr {
     fn from(e: Fs) -> FsRepr {
         e.into_repr()
+    }
+}
+
+impl ConditionallySelectable for Fs {
+    fn conditional_select(a: &Self, b: &Self, choice: Choice) -> Self {
+        Fs(FsRepr([
+            u64::conditional_select(&(a.0).0[0], &(b.0).0[0], choice),
+            u64::conditional_select(&(a.0).0[1], &(b.0).0[1], choice),
+            u64::conditional_select(&(a.0).0[2], &(b.0).0[2], choice),
+            u64::conditional_select(&(a.0).0[3], &(b.0).0[3], choice),
+        ]))
     }
 }
 
