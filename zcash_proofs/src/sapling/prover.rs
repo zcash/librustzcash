@@ -5,6 +5,7 @@ use bellman::{
 use ff::Field;
 use pairing::bls12_381::{Bls12, Fr};
 use rand_core::OsRng;
+use std::ops::AddAssign;
 use zcash_primitives::{
     jubjub::{edwards, fs::Fs, FixedGenerators, JubjubBls12, Unknown},
     primitives::{Diversifier, Note, PaymentAddress, ProofGenerationKey, ValueCommitment},

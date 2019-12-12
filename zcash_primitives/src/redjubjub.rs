@@ -7,6 +7,7 @@ use crate::jubjub::{edwards::Point, FixedGenerators, JubjubEngine, JubjubParams,
 use ff::{Field, PrimeField, PrimeFieldRepr};
 use rand_core::RngCore;
 use std::io::{self, Read, Write};
+use std::ops::{AddAssign, MulAssign};
 
 use crate::util::hash_to_scalar;
 

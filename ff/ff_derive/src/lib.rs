@@ -833,6 +833,119 @@ fn prime_field_impl(
             }
         }
 
+        impl<'r> ::std::ops::Add<&'r #name> for #name {
+            type Output = #name;
+
+            #[inline]
+            fn add(self, other: &#name) -> #name {
+                let mut ret = self;
+                ret.add_assign(other);
+                ret
+            }
+        }
+
+        impl ::std::ops::Add for #name {
+            type Output = #name;
+
+            #[inline]
+            fn add(self, other: #name) -> Self {
+                self + &other
+            }
+        }
+
+        impl<'r> ::std::ops::AddAssign<&'r #name> for #name {
+            #[inline]
+            fn add_assign(&mut self, other: &#name) {
+                // This cannot exceed the backing capacity.
+                self.0.add_nocarry(&other.0);
+
+                // However, it may need to be reduced.
+                self.reduce();
+            }
+        }
+
+        impl ::std::ops::AddAssign for #name {
+            #[inline]
+            fn add_assign(&mut self, other: #name) {
+                self.add_assign(&other);
+            }
+        }
+
+        impl<'r> ::std::ops::Sub<&'r #name> for #name {
+            type Output = #name;
+
+            #[inline]
+            fn sub(self, other: &#name) -> Self {
+                let mut ret = self;
+                ret.sub_assign(other);
+                ret
+            }
+        }
+
+        impl ::std::ops::Sub for #name {
+            type Output = #name;
+
+            #[inline]
+            fn sub(self, other: #name) -> Self {
+                self - &other
+            }
+        }
+
+        impl<'r> ::std::ops::SubAssign<&'r #name> for #name {
+            #[inline]
+            fn sub_assign(&mut self, other: &#name) {
+                // If `other` is larger than `self`, we'll need to add the modulus to self first.
+                if other.0 > self.0 {
+                    self.0.add_nocarry(&MODULUS);
+                }
+
+                self.0.sub_noborrow(&other.0);
+            }
+        }
+
+        impl ::std::ops::SubAssign for #name {
+            #[inline]
+            fn sub_assign(&mut self, other: #name) {
+                self.sub_assign(&other);
+            }
+        }
+
+        impl<'r> ::std::ops::Mul<&'r #name> for #name {
+            type Output = #name;
+
+            #[inline]
+            fn mul(self, other: &#name) -> Self {
+                let mut ret = self;
+                ret.mul_assign(other);
+                ret
+            }
+        }
+
+        impl ::std::ops::Mul for #name {
+            type Output = #name;
+
+            #[inline]
+            fn mul(self, other: #name) -> Self {
+                self * &other
+            }
+        }
+
+        impl<'r> ::std::ops::MulAssign<&'r #name> for #name {
+            #[inline]
+            fn mul_assign(&mut self, other: &#name)
+            {
+                #multiply_impl
+            }
+        }
+
+        impl ::std::ops::MulAssign for #name {
+            #[inline]
+            fn mul_assign(&mut self, other: #name)
+            {
+                self.mul_assign(&other);
+            }
+        }
+
         impl ::ff::PrimeField for #name {
             type Repr = #repr;
 
@@ -912,31 +1025,12 @@ fn prime_field_impl(
             }
 
             #[inline]
-            fn add_assign(&mut self, other: &#name) {
-                // This cannot exceed the backing capacity.
-                self.0.add_nocarry(&other.0);
-
-                // However, it may need to be reduced.
-                self.reduce();
-            }
-
-            #[inline]
             fn double(&mut self) {
                 // This cannot exceed the backing capacity.
                 self.0.mul2();
 
                 // However, it may need to be reduced.
                 self.reduce();
-            }
-
-            #[inline]
-            fn sub_assign(&mut self, other: &#name) {
-                // If `other` is larger than `self`, we'll need to add the modulus to self first.
-                if other.0 > self.0 {
-                    self.0.add_nocarry(&MODULUS);
-                }
-
-                self.0.sub_noborrow(&other.0);
             }
 
             #[inline]
@@ -1006,12 +1100,6 @@ fn prime_field_impl(
             #[inline(always)]
             fn frobenius_map(&mut self, _: usize) {
                 // This has no effect in a prime field.
-            }
-
-            #[inline]
-            fn mul_assign(&mut self, other: &#name)
-            {
-                #multiply_impl
             }
 
             #[inline]

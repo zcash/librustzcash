@@ -2,6 +2,7 @@
 
 use crate::jubjub::*;
 use ff::{Field, PrimeField, PrimeFieldRepr};
+use std::ops::AddAssign;
 
 #[derive(Copy, Clone)]
 pub enum Personalization {

@@ -25,6 +25,7 @@ use super::{Engine, PairingCurveAffine};
 
 use ff::{BitIterator, Field, ScalarEngine};
 use group::CurveAffine;
+use std::ops::{AddAssign, MulAssign, SubAssign};
 
 // The BLS parameter x for BLS12-381 is -0xd201000000010000
 const BLS_X: u64 = 0xd201000000010000;

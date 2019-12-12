@@ -1,6 +1,7 @@
 use super::{edwards, montgomery, JubjubEngine, JubjubParams, PrimeOrder};
 
 use ff::{Field, LegendreSymbol, PrimeField, PrimeFieldRepr, SqrtField};
+use std::ops::{AddAssign, MulAssign, SubAssign};
 
 use rand_core::{RngCore, SeedableRng};
 use rand_xorshift::XorShiftRng;

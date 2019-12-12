@@ -2,6 +2,7 @@ use super::fq::{FROBENIUS_COEFF_FQ6_C1, FROBENIUS_COEFF_FQ6_C2};
 use super::fq2::Fq2;
 use ff::Field;
 use rand_core::RngCore;
+use std::ops::{Add, AddAssign, Mul, MulAssign, Sub, SubAssign};
 
 /// An element of Fq6, represented by c0 + c1 * v + c2 * v^(2).
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -99,101 +100,93 @@ impl Fq6 {
     }
 }
 
-impl Field for Fq6 {
-    fn random<R: RngCore>(rng: &mut R) -> Self {
+impl<'r> Add<&'r Fq6> for Fq6 {
+    type Output = Self;
+
+    fn add(self, other: &Self) -> Self {
         Fq6 {
-            c0: Fq2::random(rng),
-            c1: Fq2::random(rng),
-            c2: Fq2::random(rng),
+            c0: self.c0 + other.c0,
+            c1: self.c1 + other.c1,
+            c2: self.c2 + other.c2,
         }
     }
+}
 
-    fn zero() -> Self {
-        Fq6 {
-            c0: Fq2::zero(),
-            c1: Fq2::zero(),
-            c2: Fq2::zero(),
-        }
+impl Add for Fq6 {
+    type Output = Self;
+
+    fn add(self, other: Self) -> Self {
+        self + &other
     }
+}
 
-    fn one() -> Self {
-        Fq6 {
-            c0: Fq2::one(),
-            c1: Fq2::zero(),
-            c2: Fq2::zero(),
-        }
-    }
-
-    fn is_zero(&self) -> bool {
-        self.c0.is_zero() && self.c1.is_zero() && self.c2.is_zero()
-    }
-
-    fn double(&mut self) {
-        self.c0.double();
-        self.c1.double();
-        self.c2.double();
-    }
-
-    fn negate(&mut self) {
-        self.c0.negate();
-        self.c1.negate();
-        self.c2.negate();
-    }
-
-    fn add_assign(&mut self, other: &Self) {
+impl<'r> AddAssign<&'r Fq6> for Fq6 {
+    fn add_assign(&mut self, other: &'r Self) {
         self.c0.add_assign(&other.c0);
         self.c1.add_assign(&other.c1);
         self.c2.add_assign(&other.c2);
     }
+}
 
-    fn sub_assign(&mut self, other: &Self) {
+impl AddAssign for Fq6 {
+    fn add_assign(&mut self, other: Self) {
+        self.add_assign(&other);
+    }
+}
+
+impl<'r> Sub<&'r Fq6> for Fq6 {
+    type Output = Self;
+
+    fn sub(self, other: &Self) -> Self {
+        Fq6 {
+            c0: self.c0 - other.c0,
+            c1: self.c1 - other.c1,
+            c2: self.c2 - other.c2,
+        }
+    }
+}
+
+impl Sub for Fq6 {
+    type Output = Self;
+
+    fn sub(self, other: Self) -> Self {
+        self - &other
+    }
+}
+
+impl<'r> SubAssign<&'r Fq6> for Fq6 {
+    fn sub_assign(&mut self, other: &'r Self) {
         self.c0.sub_assign(&other.c0);
         self.c1.sub_assign(&other.c1);
         self.c2.sub_assign(&other.c2);
     }
+}
 
-    fn frobenius_map(&mut self, power: usize) {
-        self.c0.frobenius_map(power);
-        self.c1.frobenius_map(power);
-        self.c2.frobenius_map(power);
-
-        self.c1.mul_assign(&FROBENIUS_COEFF_FQ6_C1[power % 6]);
-        self.c2.mul_assign(&FROBENIUS_COEFF_FQ6_C2[power % 6]);
+impl SubAssign for Fq6 {
+    fn sub_assign(&mut self, other: Self) {
+        self.sub_assign(&other);
     }
+}
 
-    fn square(&mut self) {
-        let mut s0 = self.c0;
-        s0.square();
-        let mut ab = self.c0;
-        ab.mul_assign(&self.c1);
-        let mut s1 = ab;
-        s1.double();
-        let mut s2 = self.c0;
-        s2.sub_assign(&self.c1);
-        s2.add_assign(&self.c2);
-        s2.square();
-        let mut bc = self.c1;
-        bc.mul_assign(&self.c2);
-        let mut s3 = bc;
-        s3.double();
-        let mut s4 = self.c2;
-        s4.square();
+impl<'r> Mul<&'r Fq6> for Fq6 {
+    type Output = Self;
 
-        self.c0 = s3;
-        self.c0.mul_by_nonresidue();
-        self.c0.add_assign(&s0);
-
-        self.c1 = s4;
-        self.c1.mul_by_nonresidue();
-        self.c1.add_assign(&s1);
-
-        self.c2 = s1;
-        self.c2.add_assign(&s2);
-        self.c2.add_assign(&s3);
-        self.c2.sub_assign(&s0);
-        self.c2.sub_assign(&s4);
+    fn mul(self, other: &Self) -> Self {
+        let mut ret = self;
+        ret.mul_assign(other);
+        ret
     }
+}
 
+impl Mul for Fq6 {
+    type Output = Self;
+
+    fn mul(self, other: Self) -> Self {
+        self * &other
+    }
+}
+
+impl<'r> MulAssign<&'r Fq6> for Fq6 {
     fn mul_assign(&mut self, other: &Self) {
         let mut a_a = self.c0;
         let mut b_b = self.c1;
@@ -243,6 +236,96 @@ impl Field for Fq6 {
         self.c0 = t1;
         self.c1 = t2;
         self.c2 = t3;
+    }
+}
+
+impl MulAssign for Fq6 {
+    fn mul_assign(&mut self, other: Self) {
+        self.mul_assign(&other);
+    }
+}
+
+impl Field for Fq6 {
+    fn random<R: RngCore>(rng: &mut R) -> Self {
+        Fq6 {
+            c0: Fq2::random(rng),
+            c1: Fq2::random(rng),
+            c2: Fq2::random(rng),
+        }
+    }
+
+    fn zero() -> Self {
+        Fq6 {
+            c0: Fq2::zero(),
+            c1: Fq2::zero(),
+            c2: Fq2::zero(),
+        }
+    }
+
+    fn one() -> Self {
+        Fq6 {
+            c0: Fq2::one(),
+            c1: Fq2::zero(),
+            c2: Fq2::zero(),
+        }
+    }
+
+    fn is_zero(&self) -> bool {
+        self.c0.is_zero() && self.c1.is_zero() && self.c2.is_zero()
+    }
+
+    fn double(&mut self) {
+        self.c0.double();
+        self.c1.double();
+        self.c2.double();
+    }
+
+    fn negate(&mut self) {
+        self.c0.negate();
+        self.c1.negate();
+        self.c2.negate();
+    }
+
+    fn frobenius_map(&mut self, power: usize) {
+        self.c0.frobenius_map(power);
+        self.c1.frobenius_map(power);
+        self.c2.frobenius_map(power);
+
+        self.c1.mul_assign(&FROBENIUS_COEFF_FQ6_C1[power % 6]);
+        self.c2.mul_assign(&FROBENIUS_COEFF_FQ6_C2[power % 6]);
+    }
+
+    fn square(&mut self) {
+        let mut s0 = self.c0;
+        s0.square();
+        let mut ab = self.c0;
+        ab.mul_assign(&self.c1);
+        let mut s1 = ab;
+        s1.double();
+        let mut s2 = self.c0;
+        s2.sub_assign(&self.c1);
+        s2.add_assign(&self.c2);
+        s2.square();
+        let mut bc = self.c1;
+        bc.mul_assign(&self.c2);
+        let mut s3 = bc;
+        s3.double();
+        let mut s4 = self.c2;
+        s4.square();
+
+        self.c0 = s3;
+        self.c0.mul_by_nonresidue();
+        self.c0.add_assign(&s0);
+
+        self.c1 = s4;
+        self.c1.mul_by_nonresidue();
+        self.c1.add_assign(&s1);
+
+        self.c2 = s1;
+        self.c2.add_assign(&s2);
+        self.c2.add_assign(&s3);
+        self.c2.sub_assign(&s0);
+        self.c2.sub_assign(&s4);
     }
 
     fn inverse(&self) -> Option<Self> {
