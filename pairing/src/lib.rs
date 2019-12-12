@@ -28,12 +28,8 @@ use group::{CurveAffine, CurveProjective};
 /// of prime order `r`, and are equipped with a bilinear pairing function.
 pub trait Engine: ScalarEngine {
     /// The projective representation of an element in G1.
-    type G1: CurveProjective<
-            Engine = Self,
-            Base = Self::Fq,
-            Scalar = Self::Fr,
-            Affine = Self::G1Affine,
-        > + From<Self::G1Affine>;
+    type G1: CurveProjective<Engine = Self, Base = Self::Fq, Scalar = Self::Fr, Affine = Self::G1Affine>
+        + From<Self::G1Affine>;
 
     /// The affine representation of an element in G1.
     type G1Affine: PairingCurveAffine<
@@ -46,12 +42,8 @@ pub trait Engine: ScalarEngine {
         > + From<Self::G1>;
 
     /// The projective representation of an element in G2.
-    type G2: CurveProjective<
-            Engine = Self,
-            Base = Self::Fqe,
-            Scalar = Self::Fr,
-            Affine = Self::G2Affine,
-        > + From<Self::G2Affine>;
+    type G2: CurveProjective<Engine = Self, Base = Self::Fqe, Scalar = Self::Fr, Affine = Self::G2Affine>
+        + From<Self::G2Affine>;
 
     /// The affine representation of an element in G2.
     type G2Affine: PairingCurveAffine<
