@@ -3,10 +3,10 @@ use ff::{Field, SqrtField};
 use rand_core::RngCore;
 use std::cmp::Ordering;
 use std::ops::{Add, AddAssign, Mul, MulAssign, Neg, Sub, SubAssign};
-use subtle::{Choice, ConditionallySelectable};
+use subtle::{Choice, ConditionallySelectable, CtOption};
 
 /// An element of Fq2, represented by c0 + c1 * u.
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
 pub struct Fq2 {
     pub c0: Fq,
     pub c1: Fq,
@@ -228,11 +228,11 @@ impl Field for Fq2 {
         }
     }
 
-    fn inverse(&self) -> Option<Self> {
+    fn invert(&self) -> CtOption<Self> {
         let t1 = self.c1.square();
         let mut t0 = self.c0.square();
         t0.add_assign(&t1);
-        t0.inverse().map(|t| Fq2 {
+        t0.invert().map(|t| Fq2 {
             c0: self.c0.mul(&t),
             c1: self.c1.mul(&t).neg(),
         })
@@ -244,15 +244,13 @@ impl Field for Fq2 {
 }
 
 impl SqrtField for Fq2 {
-    fn legendre(&self) -> ::ff::LegendreSymbol {
-        self.norm().legendre()
-    }
-
-    fn sqrt(&self) -> Option<Self> {
+    /// WARNING: THIS IS NOT ACTUALLY CONSTANT TIME YET!
+    /// THIS WILL BE REPLACED BY THE bls12_381 CRATE, WHICH IS CONSTANT TIME!
+    fn sqrt(&self) -> CtOption<Self> {
         // Algorithm 9, https://eprint.iacr.org/2012/685.pdf
 
         if self.is_zero() {
-            Some(Self::zero())
+            CtOption::new(Self::zero(), Choice::from(1))
         } else {
             // a1 = self^((q - 3) / 4)
             let mut a1 = self.pow([
@@ -275,7 +273,7 @@ impl SqrtField for Fq2 {
             };
 
             if a0 == neg1 {
-                None
+                CtOption::new(Self::zero(), Choice::from(0))
             } else {
                 a1.mul_assign(self);
 
@@ -298,7 +296,7 @@ impl SqrtField for Fq2 {
                     a1.mul_assign(&alpha);
                 }
 
-                Some(a1)
+                CtOption::new(a1, Choice::from(1))
             }
         }
     }
@@ -497,11 +495,11 @@ fn test_fq2_mul() {
 }
 
 #[test]
-fn test_fq2_inverse() {
+fn test_fq2_invert() {
     use super::fq::FqRepr;
     use ff::PrimeField;
 
-    assert!(Fq2::zero().inverse().is_none());
+    assert!(bool::from(Fq2::zero().invert().is_none()));
 
     let a = Fq2 {
         c0: Fq::from_repr(FqRepr([
@@ -523,7 +521,7 @@ fn test_fq2_inverse() {
         ]))
         .unwrap(),
     };
-    let a = a.inverse().unwrap();
+    let a = a.invert().unwrap();
     assert_eq!(
         a,
         Fq2 {
@@ -991,18 +989,6 @@ fn test_fq2_sqrt() {
             .unwrap(),
         }
     );
-}
-
-#[test]
-fn test_fq2_legendre() {
-    use ff::LegendreSymbol::*;
-
-    assert_eq!(Zero, Fq2::zero().legendre());
-    // i^2 = -1
-    let mut m1 = Fq2::one().neg();
-    assert_eq!(QuadraticResidue, m1.legendre());
-    m1.mul_by_nonresidue();
-    assert_eq!(QuadraticNonResidue, m1.legendre());
 }
 
 #[cfg(test)]

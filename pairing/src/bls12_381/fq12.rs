@@ -4,10 +4,10 @@ use super::fq6::Fq6;
 use ff::Field;
 use rand_core::RngCore;
 use std::ops::{Add, AddAssign, Mul, MulAssign, Neg, Sub, SubAssign};
-use subtle::{Choice, ConditionallySelectable};
+use subtle::{Choice, ConditionallySelectable, CtOption};
 
 /// An element of Fq12, represented by c0 + c1 * w.
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
 pub struct Fq12 {
     pub c0: Fq6,
     pub c1: Fq6,
@@ -226,13 +226,13 @@ impl Field for Fq12 {
         Fq12 { c0, c1 }
     }
 
-    fn inverse(&self) -> Option<Self> {
+    fn invert(&self) -> CtOption<Self> {
         let mut c0s = self.c0.square();
         let mut c1s = self.c1.square();
         c1s.mul_by_nonresidue();
         c0s.sub_assign(&c1s);
 
-        c0s.inverse().map(|t| Fq12 {
+        c0s.invert().map(|t| Fq12 {
             c0: t.mul(&self.c0),
             c1: t.mul(&self.c1).neg(),
         })

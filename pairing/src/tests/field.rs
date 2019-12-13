@@ -1,4 +1,4 @@
-use ff::{Field, LegendreSymbol, PrimeField, SqrtField};
+use ff::{Field, PrimeField, SqrtField};
 use rand_core::{RngCore, SeedableRng};
 use rand_xorshift::XorShiftRng;
 
@@ -32,7 +32,6 @@ pub fn random_sqrt_tests<F: SqrtField>() {
     for _ in 0..10000 {
         let a = F::random(&mut rng);
         let b = a.square();
-        assert_eq!(b.legendre(), LegendreSymbol::QuadraticResidue);
 
         let b = b.sqrt().unwrap();
         let negb = b.neg();
@@ -43,7 +42,6 @@ pub fn random_sqrt_tests<F: SqrtField>() {
     let mut c = F::one();
     for _ in 0..10000 {
         let mut b = c.square();
-        assert_eq!(b.legendre(), LegendreSymbol::QuadraticResidue);
 
         b = b.sqrt().unwrap();
 
@@ -78,7 +76,7 @@ pub fn random_field_tests<F: Field>() {
         assert!(z.is_zero());
     }
 
-    assert!(F::zero().inverse().is_none());
+    assert!(bool::from(F::zero().invert().is_none()));
 
     // Multiplication by zero
     {
@@ -222,11 +220,11 @@ fn random_squaring_tests<F: Field, R: RngCore>(rng: &mut R) {
 }
 
 fn random_inversion_tests<F: Field, R: RngCore>(rng: &mut R) {
-    assert!(F::zero().inverse().is_none());
+    assert!(bool::from(F::zero().invert().is_none()));
 
     for _ in 0..10000 {
         let mut a = F::random(rng);
-        let b = a.inverse().unwrap(); // probablistically nonzero
+        let b = a.invert().unwrap(); // probablistically nonzero
         a.mul_assign(&b);
 
         assert_eq!(a, F::one());

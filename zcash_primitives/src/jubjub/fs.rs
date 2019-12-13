@@ -1,12 +1,11 @@
 use byteorder::{ByteOrder, LittleEndian};
 use ff::{
-    adc, mac_with_carry, sbb, BitIterator, Field,
-    LegendreSymbol::{self, *},
-    PrimeField, PrimeFieldDecodingError, PrimeFieldRepr, SqrtField,
+    adc, mac_with_carry, sbb, BitIterator, Field, PrimeField, PrimeFieldDecodingError,
+    PrimeFieldRepr, SqrtField,
 };
 use rand_core::RngCore;
 use std::ops::{Add, AddAssign, Mul, MulAssign, Neg, Sub, SubAssign};
-use subtle::{Choice, ConditionallySelectable};
+use subtle::{Choice, ConditionallySelectable, ConstantTimeEq, CtOption};
 
 use super::ToUniform;
 
@@ -257,6 +256,21 @@ impl PrimeFieldRepr for FsRepr {
 /// This is an element of the scalar field of the Jubjub curve.
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub struct Fs(FsRepr);
+
+impl Default for Fs {
+    fn default() -> Self {
+        Fs::zero()
+    }
+}
+
+impl ConstantTimeEq for Fs {
+    fn ct_eq(&self, other: &Fs) -> Choice {
+        (self.0).0[0].ct_eq(&(other.0).0[0])
+            & (self.0).0[1].ct_eq(&(other.0).0[1])
+            & (self.0).0[2].ct_eq(&(other.0).0[2])
+            & (self.0).0[3].ct_eq(&(other.0).0[3])
+    }
+}
 
 impl ::std::fmt::Display for Fs {
     fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
@@ -526,9 +540,11 @@ impl Field for Fs {
         ret
     }
 
-    fn inverse(&self) -> Option<Self> {
+    /// WARNING: THIS IS NOT ACTUALLY CONSTANT TIME YET!
+    /// THIS WILL BE REPLACED BY THE jubjub CRATE, WHICH IS CONSTANT TIME!
+    fn invert(&self) -> CtOption<Self> {
         if self.is_zero() {
-            None
+            CtOption::new(Self::zero(), Choice::from(0))
         } else {
             // Guajardo Kumar Paar Pelzl
             // Efficient Software-Implementation of Finite Fields with Applications to Cryptography
@@ -574,9 +590,9 @@ impl Field for Fs {
             }
 
             if u == one {
-                Some(b)
+                CtOption::new(b, Choice::from(1))
             } else {
-                Some(c)
+                CtOption::new(c, Choice::from(1))
             }
         }
     }
@@ -723,24 +739,7 @@ impl ToUniform for Fs {
 }
 
 impl SqrtField for Fs {
-    fn legendre(&self) -> LegendreSymbol {
-        // s = self^((s - 1) // 2)
-        let s = self.pow([
-            0x684b872f6b7b965b,
-            0x53341049e6640841,
-            0x83339d80809a1d80,
-            0x73eda753299d7d4,
-        ]);
-        if s == Self::zero() {
-            Zero
-        } else if s == Self::one() {
-            QuadraticResidue
-        } else {
-            QuadraticNonResidue
-        }
-    }
-
-    fn sqrt(&self) -> Option<Self> {
+    fn sqrt(&self) -> CtOption<Self> {
         // Shank's algorithm for s mod 4 = 3
         // https://eprint.iacr.org/2012/685.pdf (page 9, algorithm 2)
 
@@ -753,13 +752,9 @@ impl SqrtField for Fs {
         ]);
         let mut a0 = a1.square();
         a0.mul_assign(self);
+        a1.mul_assign(self);
 
-        if a0 == NEGATIVE_ONE {
-            None
-        } else {
-            a1.mul_assign(self);
-            Some(a1)
-        }
+        CtOption::new(a1, !a0.ct_eq(&NEGATIVE_ONE))
     }
 }
 
@@ -1015,27 +1010,6 @@ fn test_fs_repr_sub_noborrow() {
 
         assert_eq!(csub_ab, csub_ba);
     }
-}
-
-#[test]
-fn test_fs_legendre() {
-    assert_eq!(QuadraticResidue, Fs::one().legendre());
-    assert_eq!(Zero, Fs::zero().legendre());
-
-    let e = FsRepr([
-        0x8385eec23df1f88e,
-        0x9a01fb412b2dba16,
-        0x4c928edcdd6c22f,
-        0x9f2df7ef69ecef9,
-    ]);
-    assert_eq!(QuadraticResidue, Fs::from_repr(e).unwrap().legendre());
-    let e = FsRepr([
-        0xe8ed9f299da78568,
-        0x35efdebc88b2209,
-        0xc82125cb1f916dbe,
-        0x6813d2b38c39bd0,
-    ]);
-    assert_eq!(QuadraticNonResidue, Fs::from_repr(e).unwrap().legendre());
 }
 
 #[test]
@@ -1454,8 +1428,8 @@ fn test_fr_squaring() {
 }
 
 #[test]
-fn test_fs_inverse() {
-    assert!(Fs::zero().inverse().is_none());
+fn test_fs_invert() {
+    assert!(bool::from(Fs::zero().invert().is_none()));
 
     let mut rng = XorShiftRng::from_seed([
         0x59, 0x62, 0xbe, 0x5d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06, 0xbc,
@@ -1467,7 +1441,7 @@ fn test_fs_inverse() {
     for _ in 0..1000 {
         // Ensure that a * a^-1 = 1
         let mut a = Fs::random(&mut rng);
-        let ainv = a.inverse().unwrap();
+        let ainv = a.invert().unwrap();
         a.mul_assign(&ainv);
         assert_eq!(a, one);
     }
@@ -1561,8 +1535,9 @@ fn test_fs_sqrt() {
         // Ensure sqrt(a)^2 = a for random a
         let a = Fs::random(&mut rng);
 
-        if let Some(tmp) = a.sqrt() {
-            assert_eq!(a, tmp.square());
+        let tmp = a.sqrt();
+        if tmp.is_some().into() {
+            assert_eq!(a, tmp.unwrap().square());
         }
     }
 }
@@ -1722,5 +1697,5 @@ fn test_fs_root_of_unity() {
         Fs::root_of_unity()
     );
     assert_eq!(Fs::root_of_unity().pow([1 << Fs::S]), Fs::one());
-    assert!(Fs::multiplicative_generator().sqrt().is_none());
+    assert!(bool::from(Fs::multiplicative_generator().sqrt().is_none()));
 }

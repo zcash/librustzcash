@@ -12,7 +12,7 @@ use std::error::Error;
 use std::fmt;
 use std::io::{self, Read, Write};
 use std::ops::{Add, AddAssign, Mul, MulAssign, Neg, Sub, SubAssign};
-use subtle::ConditionallySelectable;
+use subtle::{ConditionallySelectable, CtOption};
 
 /// This trait represents an element of a field.
 pub trait Field:
@@ -20,6 +20,7 @@ pub trait Field:
     + Eq
     + Copy
     + Clone
+    + Default
     + Send
     + Sync
     + fmt::Debug
@@ -60,8 +61,9 @@ pub trait Field:
     #[must_use]
     fn double(&self) -> Self;
 
-    /// Computes the multiplicative inverse of this element, if nonzero.
-    fn inverse(&self) -> Option<Self>;
+    /// Computes the multiplicative inverse of this element,
+    /// failing if the element is zero.
+    fn invert(&self) -> CtOption<Self>;
 
     /// Exponentiates this element by a power of the base prime modulus via
     /// the Frobenius automorphism.
@@ -92,12 +94,9 @@ pub trait Field:
 
 /// This trait represents an element of a field that has a square root operation described for it.
 pub trait SqrtField: Field {
-    /// Returns the Legendre symbol of the field element.
-    fn legendre(&self) -> LegendreSymbol;
-
     /// Returns the square root of the field element, if it is
     /// quadratic residue.
-    fn sqrt(&self) -> Option<Self>;
+    fn sqrt(&self) -> CtOption<Self>;
 }
 
 /// This trait represents a wrapper around a biginteger which can encode any element of a particular
@@ -195,13 +194,6 @@ pub trait PrimeFieldRepr:
 
         Ok(())
     }
-}
-
-#[derive(Debug, PartialEq)]
-pub enum LegendreSymbol {
-    Zero = 0,
-    QuadraticResidue = 1,
-    QuadraticNonResidue = -1,
 }
 
 /// An error that may occur when trying to interpret a `PrimeFieldRepr` as a

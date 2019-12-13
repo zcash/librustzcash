@@ -91,7 +91,7 @@ fn bench_fq12_squaring(b: &mut ::test::Bencher) {
 }
 
 #[bench]
-fn bench_fq12_inverse(b: &mut ::test::Bencher) {
+fn bench_fq12_invert(b: &mut ::test::Bencher) {
     const SAMPLES: usize = 1000;
 
     let mut rng = XorShiftRng::from_seed([
@@ -103,7 +103,7 @@ fn bench_fq12_inverse(b: &mut ::test::Bencher) {
 
     let mut count = 0;
     b.iter(|| {
-        let tmp = v[count].inverse();
+        let tmp = v[count].invert();
         count = (count + 1) % SAMPLES;
         tmp
     });

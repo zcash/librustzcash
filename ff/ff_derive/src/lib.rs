@@ -413,104 +413,81 @@ fn prime_field_constants_and_sqrt(
     );
     let generator = biguint_to_u64_vec((generator.clone() * &r) % &modulus, limbs);
 
-    let mod_minus_1_over_2 =
-        biguint_to_u64_vec((&modulus - BigUint::from_str("1").unwrap()) >> 1, limbs);
-    let legendre_impl = quote! {
-        fn legendre(&self) -> ::ff::LegendreSymbol {
-            // s = self^((modulus - 1) // 2)
-            let s = self.pow(#mod_minus_1_over_2);
-            if s == Self::zero() {
-                ::ff::LegendreSymbol::Zero
-            } else if s == Self::one() {
-                ::ff::LegendreSymbol::QuadraticResidue
-            } else {
-                ::ff::LegendreSymbol::QuadraticNonResidue
+    let sqrt_impl = if (&modulus % BigUint::from_str("4").unwrap())
+        == BigUint::from_str("3").unwrap()
+    {
+        let mod_plus_1_over_4 =
+            biguint_to_u64_vec((&modulus + BigUint::from_str("1").unwrap()) >> 2, limbs);
+
+        quote! {
+            impl ::ff::SqrtField for #name {
+                fn sqrt(&self) -> ::subtle::CtOption<Self> {
+                    use ::subtle::ConstantTimeEq;
+
+                    // Because r = 3 (mod 4)
+                    // sqrt can be done with only one exponentiation,
+                    // via the computation of  self^((r + 1) // 4) (mod r)
+                    let sqrt = self.pow(#mod_plus_1_over_4);
+
+                    ::subtle::CtOption::new(
+                        sqrt,
+                        (sqrt * &sqrt).ct_eq(self), // Only return Some if it's the square root.
+                    )
+                }
             }
         }
+    } else if (&modulus % BigUint::from_str("16").unwrap()) == BigUint::from_str("1").unwrap() {
+        let t_minus_1_over_2 = biguint_to_u64_vec((&t - BigUint::one()) >> 1, limbs);
+
+        quote! {
+            impl ::ff::SqrtField for #name {
+                fn sqrt(&self) -> ::subtle::CtOption<Self> {
+                    // Tonelli-Shank's algorithm for q mod 16 = 1
+                    // https://eprint.iacr.org/2012/685.pdf (page 12, algorithm 5)
+                    use ::subtle::{ConditionallySelectable, ConstantTimeEq};
+
+                    // w = self^((t - 1) // 2)
+                    let w = self.pow(#t_minus_1_over_2);
+
+                    let mut v = S;
+                    let mut x = *self * &w;
+                    let mut b = x * &w;
+
+                    // Initialize z as the 2^S root of unity.
+                    let mut z = #name(ROOT_OF_UNITY);
+
+                    for max_v in (1..=S).rev() {
+                        let mut k = 1;
+                        let mut tmp = b.square();
+                        let mut j_less_than_v: ::subtle::Choice = 1.into();
+
+                        for j in 2..max_v {
+                            let tmp_is_one = tmp.ct_eq(&#name::one());
+                            let squared = #name::conditional_select(&tmp, &z, tmp_is_one).square();
+                            tmp = #name::conditional_select(&squared, &tmp, tmp_is_one);
+                            let new_z = #name::conditional_select(&z, &squared, tmp_is_one);
+                            j_less_than_v &= !j.ct_eq(&v);
+                            k = u32::conditional_select(&j, &k, tmp_is_one);
+                            z = #name::conditional_select(&z, &new_z, j_less_than_v);
+                        }
+
+                        let result = x * &z;
+                        x = #name::conditional_select(&result, &x, b.ct_eq(&#name::one()));
+                        z = z.square();
+                        b = b * &z;
+                        v = k;
+                    }
+
+                    ::subtle::CtOption::new(
+                        x,
+                        (x * &x).ct_eq(self), // Only return Some if it's the square root.
+                    )
+                }
+            }
+        }
+    } else {
+        quote! {}
     };
-
-    let sqrt_impl =
-        if (&modulus % BigUint::from_str("4").unwrap()) == BigUint::from_str("3").unwrap() {
-            let mod_minus_3_over_4 =
-                biguint_to_u64_vec((&modulus - BigUint::from_str("3").unwrap()) >> 2, limbs);
-
-            // Compute -R as (m - r)
-            let rneg = biguint_to_u64_vec(&modulus - &r, limbs);
-
-            quote! {
-                impl ::ff::SqrtField for #name {
-                    #legendre_impl
-
-                    fn sqrt(&self) -> Option<Self> {
-                        // Shank's algorithm for q mod 4 = 3
-                        // https://eprint.iacr.org/2012/685.pdf (page 9, algorithm 2)
-
-                        let mut a1 = self.pow(#mod_minus_3_over_4);
-
-                        let mut a0 = a1.square();
-                        a0.mul_assign(self);
-
-                        if a0.0 == #repr(#rneg) {
-                            None
-                        } else {
-                            a1.mul_assign(self);
-                            Some(a1)
-                        }
-                    }
-                }
-            }
-        } else if (&modulus % BigUint::from_str("16").unwrap()) == BigUint::from_str("1").unwrap() {
-            let t_plus_1_over_2 = biguint_to_u64_vec((&t + BigUint::one()) >> 1, limbs);
-            let t = biguint_to_u64_vec(t.clone(), limbs);
-
-            quote! {
-                impl ::ff::SqrtField for #name {
-                    #legendre_impl
-
-                    fn sqrt(&self) -> Option<Self> {
-                        // Tonelli-Shank's algorithm for q mod 16 = 1
-                        // https://eprint.iacr.org/2012/685.pdf (page 12, algorithm 5)
-
-                        match self.legendre() {
-                            ::ff::LegendreSymbol::Zero => Some(*self),
-                            ::ff::LegendreSymbol::QuadraticNonResidue => None,
-                            ::ff::LegendreSymbol::QuadraticResidue => {
-                                let mut c = #name(ROOT_OF_UNITY);
-                                let mut r = self.pow(#t_plus_1_over_2);
-                                let mut t = self.pow(#t);
-                                let mut m = S;
-
-                                while t != Self::one() {
-                                    let mut i = 1;
-                                    {
-                                        let mut t2i = t.square();
-                                        loop {
-                                            if t2i == Self::one() {
-                                                break;
-                                            }
-                                            t2i = t2i.square();
-                                            i += 1;
-                                        }
-                                    }
-
-                                    for _ in 0..(m - i - 1) {
-                                        c = c.square();
-                                    }
-                                    r.mul_assign(&c);
-                                    c = c.square();
-                                    t.mul_assign(&c);
-                                    m = i;
-                                }
-
-                                Some(r)
-                            }
-                        }
-                    }
-                }
-            }
-        } else {
-            quote! {}
-        };
 
     // Compute R^2 mod m
     let r2 = biguint_to_u64_vec((&r * &r) % &modulus, limbs);
@@ -771,6 +748,13 @@ fn prime_field_impl(
     let multiply_impl = mul_impl(quote! {self}, quote! {other}, limbs);
     let montgomery_impl = mont_impl(limbs);
 
+    // (self.0).0[0].ct_eq(&(other.0).0[0]) & (self.0).0[1].ct_eq(&(other.0).0[1]) & ...
+    let mut ct_eq_impl = proc_macro2::TokenStream::new();
+    ct_eq_impl.append_separated(
+        (0..limbs).map(|i| quote! { (self.0).0[#i].ct_eq(&(other.0).0[#i]) }),
+        proc_macro2::Punct::new('&', proc_macro2::Spacing::Alone),
+    );
+
     // (self.0).0[0], (self.0).0[1], ..., 0, 0, 0, 0, ...
     let mut into_repr_params = proc_macro2::TokenStream::new();
     into_repr_params.append_separated(
@@ -788,6 +772,18 @@ fn prime_field_impl(
         impl ::std::clone::Clone for #name {
             fn clone(&self) -> #name {
                 *self
+            }
+        }
+
+        impl ::std::default::Default for #name {
+            fn default() -> #name {
+                #name::zero()
+            }
+        }
+
+        impl ::subtle::ConstantTimeEq for #name {
+            fn ct_eq(&self, other: &#name) -> ::subtle::Choice {
+                #ct_eq_impl
             }
         }
 
@@ -1062,9 +1058,11 @@ fn prime_field_impl(
                 ret
             }
 
-            fn inverse(&self) -> Option<Self> {
+            /// WARNING: THIS IS NOT ACTUALLY CONSTANT TIME YET!
+            /// TODO: Make this constant-time.
+            fn invert(&self) -> ::subtle::CtOption<Self> {
                 if self.is_zero() {
-                    None
+                    ::subtle::CtOption::new(#name::zero(), ::subtle::Choice::from(0))
                 } else {
                     // Guajardo Kumar Paar Pelzl
                     // Efficient Software-Implementation of Finite Fields with Applications to Cryptography
@@ -1110,9 +1108,9 @@ fn prime_field_impl(
                     }
 
                     if u == one {
-                        Some(b)
+                        ::subtle::CtOption::new(b, ::subtle::Choice::from(1))
                     } else {
-                        Some(c)
+                        ::subtle::CtOption::new(c, ::subtle::Choice::from(1))
                     }
                 }
             }
