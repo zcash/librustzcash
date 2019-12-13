@@ -1,6 +1,7 @@
 use ff::{Field, PrimeField};
 use rand::SeedableRng;
 use rand_xorshift::XorShiftRng;
+use std::ops::Neg;
 
 use crate::{CurveAffine, CurveProjective, EncodedPoint};
 
@@ -199,8 +200,7 @@ fn random_negation_tests<G: CurveProjective>() {
         let r = G::random(&mut rng);
 
         let s = G::Scalar::random(&mut rng);
-        let mut sneg = s;
-        sneg.negate();
+        let sneg = s.neg();
 
         let mut t1 = r;
         t1.mul_assign(s);

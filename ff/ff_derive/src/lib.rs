@@ -447,8 +447,7 @@ fn prime_field_constants_and_sqrt(
 
                         let mut a1 = self.pow(#mod_minus_3_over_4);
 
-                        let mut a0 = a1;
-                        a0.square();
+                        let mut a0 = a1.square();
                         a0.mul_assign(self);
 
                         if a0.0 == #repr(#rneg) {
@@ -484,22 +483,21 @@ fn prime_field_constants_and_sqrt(
                                 while t != Self::one() {
                                     let mut i = 1;
                                     {
-                                        let mut t2i = t;
-                                        t2i.square();
+                                        let mut t2i = t.square();
                                         loop {
                                             if t2i == Self::one() {
                                                 break;
                                             }
-                                            t2i.square();
+                                            t2i = t2i.square();
                                             i += 1;
                                         }
                                     }
 
                                     for _ in 0..(m - i - 1) {
-                                        c.square();
+                                        c = c.square();
                                     }
                                     r.mul_assign(&c);
-                                    c.square();
+                                    c = c.square();
                                     t.mul_assign(&c);
                                     m = i;
                                 }
@@ -715,7 +713,9 @@ fn prime_field_impl(
         );
 
         gen.extend(quote! {
-            self.mont_reduce(#mont_calling);
+            let mut ret = *self;
+            ret.mont_reduce(#mont_calling);
+            ret
         });
 
         gen
@@ -830,6 +830,31 @@ fn prime_field_impl(
         impl From<#name> for #repr {
             fn from(e: #name) -> #repr {
                 e.into_repr()
+            }
+        }
+
+        impl ::subtle::ConditionallySelectable for #name {
+            fn conditional_select(a: &#name, b: &#name, choice: ::subtle::Choice) -> #name {
+                let mut res = [0u64; #limbs];
+                for i in 0..#limbs {
+                    res[i] = u64::conditional_select(&(a.0).0[i], &(b.0).0[i], choice);
+                }
+                #name(#repr(res))
+            }
+        }
+
+        impl ::std::ops::Neg for #name {
+            type Output = #name;
+
+            #[inline]
+            fn neg(self) -> #name {
+                let mut ret = self;
+                if !ret.is_zero() {
+                    let mut tmp = MODULUS;
+                    tmp.sub_noborrow(&ret.0);
+                    ret.0 = tmp;
+                }
+                ret
             }
         }
 
@@ -1025,21 +1050,16 @@ fn prime_field_impl(
             }
 
             #[inline]
-            fn double(&mut self) {
+            fn double(&self) -> Self {
+                let mut ret = *self;
+
                 // This cannot exceed the backing capacity.
-                self.0.mul2();
+                ret.0.mul2();
 
                 // However, it may need to be reduced.
-                self.reduce();
-            }
+                ret.reduce();
 
-            #[inline]
-            fn negate(&mut self) {
-                if !self.is_zero() {
-                    let mut tmp = MODULUS;
-                    tmp.sub_noborrow(&self.0);
-                    self.0 = tmp;
-                }
+                ret
             }
 
             fn inverse(&self) -> Option<Self> {
@@ -1103,7 +1123,7 @@ fn prime_field_impl(
             }
 
             #[inline]
-            fn square(&mut self)
+            fn square(&self) -> Self
             {
                 #squaring_impl
             }

@@ -11,7 +11,8 @@ use rand_core::RngCore;
 use std::error::Error;
 use std::fmt;
 use std::io::{self, Read, Write};
-use std::ops::{Add, AddAssign, Mul, MulAssign, Sub, SubAssign};
+use std::ops::{Add, AddAssign, Mul, MulAssign, Neg, Sub, SubAssign};
+use subtle::ConditionallySelectable;
 
 /// This trait represents an element of a field.
 pub trait Field:
@@ -24,9 +25,11 @@ pub trait Field:
     + fmt::Debug
     + fmt::Display
     + 'static
+    + ConditionallySelectable
     + Add<Output = Self>
     + Sub<Output = Self>
     + Mul<Output = Self>
+    + Neg<Output = Self>
     + for<'a> Add<&'a Self, Output = Self>
     + for<'a> Mul<&'a Self, Output = Self>
     + for<'a> Sub<&'a Self, Output = Self>
@@ -50,13 +53,12 @@ pub trait Field:
     fn is_zero(&self) -> bool;
 
     /// Squares this element.
-    fn square(&mut self);
+    #[must_use]
+    fn square(&self) -> Self;
 
     /// Doubles this element.
-    fn double(&mut self);
-
-    /// Negates this element.
-    fn negate(&mut self);
+    #[must_use]
+    fn double(&self) -> Self;
 
     /// Computes the multiplicative inverse of this element, if nonzero.
     fn inverse(&self) -> Option<Self>;
@@ -74,7 +76,7 @@ pub trait Field:
 
         for i in BitIterator::new(exp) {
             if found_one {
-                res.square();
+                res = res.square();
             } else {
                 found_one = i;
             }

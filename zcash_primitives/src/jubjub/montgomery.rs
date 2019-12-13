@@ -1,5 +1,5 @@
 use ff::{BitIterator, Field, PrimeField, PrimeFieldRepr, SqrtField};
-use std::ops::{AddAssign, MulAssign, SubAssign};
+use std::ops::{AddAssign, MulAssign, Neg, SubAssign};
 
 use super::{edwards, JubjubEngine, JubjubParams, PrimeOrder, Unknown};
 
@@ -50,8 +50,7 @@ impl<E: JubjubEngine> Point<E, Unknown> {
     pub fn get_for_x(x: E::Fr, sign: bool, params: &E::Params) -> Option<Self> {
         // Given an x on the curve, y = sqrt(x^3 + A*x^2 + x)
 
-        let mut x2 = x;
-        x2.square();
+        let mut x2 = x.square();
 
         let mut rhs = x2;
         rhs.mul_assign(params.montgomery_a());
@@ -62,7 +61,7 @@ impl<E: JubjubEngine> Point<E, Unknown> {
         match rhs.sqrt() {
             Some(mut y) => {
                 if y.into_repr().is_odd() != sign {
-                    y.negate();
+                    y = y.neg();
                 }
 
                 Some(Point {
@@ -190,7 +189,7 @@ impl<E: JubjubEngine, Subgroup> Point<E, Subgroup> {
     pub fn negate(&self) -> Self {
         let mut p = self.clone();
 
-        p.y.negate();
+        p.y = p.y.neg();
 
         p
     }
@@ -216,24 +215,21 @@ impl<E: JubjubEngine, Subgroup> Point<E, Subgroup> {
         {
             let mut tmp = *params.montgomery_a();
             tmp.mul_assign(&self.x);
-            tmp.double();
+            tmp = tmp.double();
             delta.add_assign(&tmp);
         }
         {
-            let mut tmp = self.x;
-            tmp.square();
+            let mut tmp = self.x.square();
             delta.add_assign(&tmp);
-            tmp.double();
+            tmp = tmp.double();
             delta.add_assign(&tmp);
         }
         {
-            let mut tmp = self.y;
-            tmp.double();
+            let tmp = self.y.double();
             delta.mul_assign(&tmp.inverse().expect("y is nonzero so this must be nonzero"));
         }
 
-        let mut x3 = delta;
-        x3.square();
+        let mut x3 = delta.square();
         x3.sub_assign(params.montgomery_a());
         x3.sub_assign(&self.x);
         x3.sub_assign(&self.x);
@@ -242,7 +238,7 @@ impl<E: JubjubEngine, Subgroup> Point<E, Subgroup> {
         y3.sub_assign(&self.x);
         y3.mul_assign(&delta);
         y3.add_assign(&self.y);
-        y3.negate();
+        y3 = y3.neg();
 
         Point {
             x: x3,
@@ -282,8 +278,7 @@ impl<E: JubjubEngine, Subgroup> Point<E, Subgroup> {
                         );
                     }
 
-                    let mut x3 = delta;
-                    x3.square();
+                    let mut x3 = delta.square();
                     x3.sub_assign(params.montgomery_a());
                     x3.sub_assign(&self.x);
                     x3.sub_assign(&other.x);
@@ -292,7 +287,7 @@ impl<E: JubjubEngine, Subgroup> Point<E, Subgroup> {
                     y3.sub_assign(&self.x);
                     y3.mul_assign(&delta);
                     y3.add_assign(&self.y);
-                    y3.negate();
+                    y3 = y3.neg();
 
                     Point {
                         x: x3,

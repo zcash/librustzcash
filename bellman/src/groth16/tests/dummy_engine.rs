@@ -9,7 +9,8 @@ use rand_core::RngCore;
 use std::cmp::Ordering;
 use std::fmt;
 use std::num::Wrapping;
-use std::ops::{Add, AddAssign, Mul, MulAssign, Sub, SubAssign};
+use std::ops::{Add, AddAssign, Mul, MulAssign, Neg, Sub, SubAssign};
+use subtle::{Choice, ConditionallySelectable};
 
 const MODULUS_R: Wrapping<u32> = Wrapping(64513);
 
@@ -19,6 +20,27 @@ pub struct Fr(Wrapping<u32>);
 impl fmt::Display for Fr {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
         write!(f, "{}", (self.0).0)
+    }
+}
+
+impl ConditionallySelectable for Fr {
+    fn conditional_select(a: &Self, b: &Self, choice: Choice) -> Self {
+        Fr(Wrapping(u32::conditional_select(
+            &(a.0).0,
+            &(b.0).0,
+            choice,
+        )))
+    }
+}
+
+impl Neg for Fr {
+    type Output = Self;
+
+    fn neg(mut self) -> Self {
+        if !<Fr as Field>::is_zero(&self) {
+            self.0 = MODULUS_R - self.0;
+        }
+        self
     }
 }
 
@@ -129,18 +151,12 @@ impl Field for Fr {
         (self.0).0 == 0
     }
 
-    fn square(&mut self) {
-        self.0 = (self.0 * self.0) % MODULUS_R;
+    fn square(&self) -> Self {
+        Fr((self.0 * self.0) % MODULUS_R)
     }
 
-    fn double(&mut self) {
-        self.0 = (self.0 << 1) % MODULUS_R;
-    }
-
-    fn negate(&mut self) {
-        if !<Fr as Field>::is_zero(self) {
-            self.0 = MODULUS_R - self.0;
-        }
+    fn double(&self) -> Self {
+        Fr((self.0 << 1) % MODULUS_R)
     }
 
     fn inverse(&self) -> Option<Self> {
@@ -186,22 +202,21 @@ impl SqrtField for Fr {
                 while t != <Fr as Field>::one() {
                     let mut i = 1;
                     {
-                        let mut t2i = t;
-                        t2i.square();
+                        let mut t2i = t.square();
                         loop {
                             if t2i == <Fr as Field>::one() {
                                 break;
                             }
-                            t2i.square();
+                            t2i = t2i.square();
                             i += 1;
                         }
                     }
 
                     for _ in 0..(m - i - 1) {
-                        c.square();
+                        c = c.square();
                     }
                     MulAssign::mul_assign(&mut r, &c);
-                    c.square();
+                    c = c.square();
                     MulAssign::mul_assign(&mut t, &c);
                     m = i;
                 }
@@ -401,7 +416,7 @@ impl CurveProjective for Fr {
     }
 
     fn double(&mut self) {
-        <Fr as Field>::double(self);
+        self.0 = <Fr as Field>::double(self).0;
     }
 
     fn add_assign(&mut self, other: &Self) {
@@ -413,7 +428,7 @@ impl CurveProjective for Fr {
     }
 
     fn negate(&mut self) {
-        <Fr as Field>::negate(self);
+        self.0 = self.neg().0;
     }
 
     fn mul_assign<S: Into<<Self::Scalar as PrimeField>::Repr>>(&mut self, other: S) {
@@ -495,7 +510,7 @@ impl CurveAffine for Fr {
     }
 
     fn negate(&mut self) {
-        <Fr as Field>::negate(self);
+        self.0 = self.neg().0;
     }
 
     fn mul<S: Into<<Self::Scalar as PrimeField>::Repr>>(&self, other: S) -> Self::Projective {

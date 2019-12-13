@@ -1,6 +1,6 @@
 use rand_core::SeedableRng;
 use rand_xorshift::XorShiftRng;
-use std::ops::{AddAssign, MulAssign, SubAssign};
+use std::ops::{AddAssign, MulAssign, Neg, SubAssign};
 
 use ff::{Field, PrimeField, PrimeFieldRepr, SqrtField};
 use pairing::bls12_381::*;
@@ -210,8 +210,7 @@ fn bench_fq_square(b: &mut ::test::Bencher) {
 
     let mut count = 0;
     b.iter(|| {
-        let mut tmp = v[count];
-        tmp.square();
+        let tmp = v[count].square();
         count = (count + 1) % SAMPLES;
         tmp
     });
@@ -236,7 +235,7 @@ fn bench_fq_inverse(b: &mut ::test::Bencher) {
 }
 
 #[bench]
-fn bench_fq_negate(b: &mut ::test::Bencher) {
+fn bench_fq_neg(b: &mut ::test::Bencher) {
     const SAMPLES: usize = 1000;
 
     let mut rng = XorShiftRng::from_seed([
@@ -248,8 +247,7 @@ fn bench_fq_negate(b: &mut ::test::Bencher) {
 
     let mut count = 0;
     b.iter(|| {
-        let mut tmp = v[count];
-        tmp.negate();
+        let tmp = v[count].neg();
         count = (count + 1) % SAMPLES;
         tmp
     });
@@ -265,11 +263,7 @@ fn bench_fq_sqrt(b: &mut ::test::Bencher) {
     ]);
 
     let v: Vec<Fq> = (0..SAMPLES)
-        .map(|_| {
-            let mut tmp = Fq::random(&mut rng);
-            tmp.square();
-            tmp
-        })
+        .map(|_| Fq::random(&mut rng).square())
         .collect();
 
     let mut count = 0;

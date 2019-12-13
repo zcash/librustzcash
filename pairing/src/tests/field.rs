@@ -31,27 +31,24 @@ pub fn random_sqrt_tests<F: SqrtField>() {
 
     for _ in 0..10000 {
         let a = F::random(&mut rng);
-        let mut b = a;
-        b.square();
+        let b = a.square();
         assert_eq!(b.legendre(), LegendreSymbol::QuadraticResidue);
 
         let b = b.sqrt().unwrap();
-        let mut negb = b;
-        negb.negate();
+        let negb = b.neg();
 
         assert!(a == b || a == negb);
     }
 
     let mut c = F::one();
     for _ in 0..10000 {
-        let mut b = c;
-        b.square();
+        let mut b = c.square();
         assert_eq!(b.legendre(), LegendreSymbol::QuadraticResidue);
 
         b = b.sqrt().unwrap();
 
         if b != c {
-            b.negate();
+            b = b.neg();
         }
 
         assert_eq!(b, c);
@@ -77,8 +74,7 @@ pub fn random_field_tests<F: Field>() {
 
     assert!(F::zero().is_zero());
     {
-        let mut z = F::zero();
-        z.negate();
+        let z = F::zero().neg();
         assert!(z.is_zero());
     }
 
@@ -204,8 +200,7 @@ fn random_subtraction_tests<F: Field, R: RngCore>(rng: &mut R) {
 fn random_negation_tests<F: Field, R: RngCore>(rng: &mut R) {
     for _ in 0..10000 {
         let a = F::random(rng);
-        let mut b = a;
-        b.negate();
+        let mut b = a.neg();
         b.add_assign(&a);
 
         assert!(b.is_zero());
@@ -214,23 +209,15 @@ fn random_negation_tests<F: Field, R: RngCore>(rng: &mut R) {
 
 fn random_doubling_tests<F: Field, R: RngCore>(rng: &mut R) {
     for _ in 0..10000 {
-        let mut a = F::random(rng);
-        let mut b = a;
-        a.add_assign(&b);
-        b.double();
-
-        assert_eq!(a, b);
+        let a = F::random(rng);
+        assert_eq!(a + a, a.double());
     }
 }
 
 fn random_squaring_tests<F: Field, R: RngCore>(rng: &mut R) {
     for _ in 0..10000 {
-        let mut a = F::random(rng);
-        let mut b = a;
-        a.mul_assign(&b);
-        b.square();
-
-        assert_eq!(a, b);
+        let a = F::random(rng);
+        assert_eq!(a * a, a.square());
     }
 }
 

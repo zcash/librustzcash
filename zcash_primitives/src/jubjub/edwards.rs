@@ -1,5 +1,5 @@
 use ff::{BitIterator, Field, PrimeField, PrimeFieldRepr, SqrtField};
-use std::ops::{AddAssign, MulAssign, SubAssign};
+use std::ops::{AddAssign, MulAssign, Neg, SubAssign};
 
 use super::{montgomery, JubjubEngine, JubjubParams, PrimeOrder, Unknown};
 
@@ -107,8 +107,7 @@ impl<E: JubjubEngine> Point<E, Unknown> {
         // as dy^2 + 1 = 0 has no solution in Fr.
 
         // tmp1 = y^2
-        let mut tmp1 = y;
-        tmp1.square();
+        let mut tmp1 = y.square();
 
         // tmp2 = (y^2 * d) + 1
         let mut tmp2 = tmp1;
@@ -126,7 +125,7 @@ impl<E: JubjubEngine> Point<E, Unknown> {
                 match tmp1.sqrt() {
                     Some(mut x) => {
                         if x.into_repr().is_odd() != sign {
-                            x.negate();
+                            x = x.neg();
                         }
 
                         let mut t = x;
@@ -213,12 +212,9 @@ impl<E: JubjubEngine, Subgroup> Point<E, Subgroup> {
                 // only point of order 2 that is not the neutral element.
                 if y.is_zero() {
                     // This must be the point (0, 0) as above.
-                    let mut neg1 = E::Fr::one();
-                    neg1.negate();
-
                     Point {
                         x: E::Fr::zero(),
-                        y: neg1,
+                        y: E::Fr::one().neg(),
                         t: E::Fr::zero(),
                         z: E::Fr::one(),
                         _marker: PhantomData,
@@ -324,8 +320,8 @@ impl<E: JubjubEngine, Subgroup> Point<E, Subgroup> {
     pub fn negate(&self) -> Self {
         let mut p = self.clone();
 
-        p.x.negate();
-        p.t.negate();
+        p.x = p.x.neg();
+        p.t = p.t.neg();
 
         p
     }
@@ -338,27 +334,22 @@ impl<E: JubjubEngine, Subgroup> Point<E, Subgroup> {
         //     http://hyperelliptic.org/EFD/g1p/auto-twisted-extended.html#doubling-dbl-2008-hwcd
 
         // A = X1^2
-        let mut a = self.x;
-        a.square();
+        let a = self.x.square();
 
         // B = Y1^2
-        let mut b = self.y;
-        b.square();
+        let b = self.y.square();
 
         // C = 2*Z1^2
-        let mut c = self.z;
-        c.square();
-        c.double();
+        let c = self.z.square().double();
 
         // D = a*A
         //   = -A
-        let mut d = a;
-        d.negate();
+        let d = a.neg();
 
         // E = (X1+Y1)^2 - A - B
         let mut e = self.x;
         e.add_assign(&self.y);
-        e.square();
+        e = e.square();
         e.add_assign(&d); // -A = D
         e.sub_assign(&b);
 

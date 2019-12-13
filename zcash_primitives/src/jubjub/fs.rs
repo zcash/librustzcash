@@ -5,7 +5,8 @@ use ff::{
     PrimeField, PrimeFieldDecodingError, PrimeFieldRepr, SqrtField,
 };
 use rand_core::RngCore;
-use std::ops::{Add, AddAssign, Mul, MulAssign, Sub, SubAssign};
+use std::ops::{Add, AddAssign, Mul, MulAssign, Neg, Sub, SubAssign};
+use subtle::{Choice, ConditionallySelectable};
 
 use super::ToUniform;
 
@@ -269,6 +270,31 @@ impl From<Fs> for FsRepr {
     }
 }
 
+impl ConditionallySelectable for Fs {
+    fn conditional_select(a: &Self, b: &Self, choice: Choice) -> Self {
+        Fs(FsRepr([
+            u64::conditional_select(&(a.0).0[0], &(b.0).0[0], choice),
+            u64::conditional_select(&(a.0).0[1], &(b.0).0[1], choice),
+            u64::conditional_select(&(a.0).0[2], &(b.0).0[2], choice),
+            u64::conditional_select(&(a.0).0[3], &(b.0).0[3], choice),
+        ]))
+    }
+}
+
+impl Neg for Fs {
+    type Output = Self;
+
+    #[inline]
+    fn neg(mut self) -> Self {
+        if !self.is_zero() {
+            let mut tmp = MODULUS;
+            tmp.sub_noborrow(&self.0);
+            self.0 = tmp;
+        }
+        self
+    }
+}
+
 impl<'r> Add<&'r Fs> for Fs {
     type Output = Self;
 
@@ -488,21 +514,16 @@ impl Field for Fs {
     }
 
     #[inline]
-    fn double(&mut self) {
+    fn double(&self) -> Self {
+        let mut ret = *self;
+
         // This cannot exceed the backing capacity.
-        self.0.mul2();
+        ret.0.mul2();
 
         // However, it may need to be reduced.
-        self.reduce();
-    }
+        ret.reduce();
 
-    #[inline]
-    fn negate(&mut self) {
-        if !self.is_zero() {
-            let mut tmp = MODULUS;
-            tmp.sub_noborrow(&self.0);
-            self.0 = tmp;
-        }
+        ret
     }
 
     fn inverse(&self) -> Option<Self> {
@@ -566,7 +587,7 @@ impl Field for Fs {
     }
 
     #[inline]
-    fn square(&mut self) {
+    fn square(&self) -> Self {
         let mut carry = 0;
         let r1 = mac_with_carry(0, (self.0).0[0], (self.0).0[1], &mut carry);
         let r2 = mac_with_carry(0, (self.0).0[0], (self.0).0[2], &mut carry);
@@ -597,7 +618,10 @@ impl Field for Fs {
         let r5 = adc(r5, 0, &mut carry);
         let r6 = mac_with_carry(r6, (self.0).0[3], (self.0).0[3], &mut carry);
         let r7 = adc(r7, 0, &mut carry);
-        self.mont_reduce(r0, r1, r2, r3, r4, r5, r6, r7);
+
+        let mut ret = *self;
+        ret.mont_reduce(r0, r1, r2, r3, r4, r5, r6, r7);
+        ret
     }
 }
 
@@ -675,7 +699,7 @@ impl Fs {
     fn mul_bits<S: AsRef<[u64]>>(&self, bits: BitIterator<S>) -> Self {
         let mut res = Self::zero();
         for bit in bits {
-            res.double();
+            res = res.double();
 
             if bit {
                 res.add_assign(self)
@@ -727,8 +751,7 @@ impl SqrtField for Fs {
             0x4199cec0404d0ec0,
             0x39f6d3a994cebea,
         ]);
-        let mut a0 = a1;
-        a0.square();
+        let mut a0 = a1.square();
         a0.mul_assign(self);
 
         if a0 == NEGATIVE_ONE {
@@ -742,8 +765,7 @@ impl SqrtField for Fs {
 
 #[test]
 fn test_neg_one() {
-    let mut o = Fs::one();
-    o.negate();
+    let o = Fs::one().neg();
 
     assert_eq!(NEGATIVE_ONE, o);
 }
@@ -1395,16 +1417,15 @@ fn test_fs_mul_assign() {
 
 #[test]
 fn test_fr_squaring() {
-    let mut a = Fs(FsRepr([
+    let a = Fs(FsRepr([
         0xffffffffffffffff,
         0xffffffffffffffff,
         0xffffffffffffffff,
         0xe7db4ea6533afa8,
     ]));
     assert!(a.is_valid());
-    a.square();
     assert_eq!(
-        a,
+        a.square(),
         Fs::from_repr(FsRepr([
             0x12c7f55cbc52fbaa,
             0xdedc98a0b5e6ce9e,
@@ -1423,8 +1444,7 @@ fn test_fr_squaring() {
         // Ensure that (a * a) = a^2
         let a = Fs::random(&mut rng);
 
-        let mut tmp = a;
-        tmp.square();
+        let tmp = a.square();
 
         let mut tmp2 = a;
         tmp2.mul_assign(&a);
@@ -1462,19 +1482,15 @@ fn test_fs_double() {
 
     for _ in 0..1000 {
         // Ensure doubling a is equivalent to adding a to itself.
-        let mut a = Fs::random(&mut rng);
-        let mut b = a;
-        b.add_assign(&a);
-        a.double();
-        assert_eq!(a, b);
+        let a = Fs::random(&mut rng);
+        assert_eq!(a.double(), a + a);
     }
 }
 
 #[test]
-fn test_fs_negate() {
+fn test_fs_neg() {
     {
-        let mut a = Fs::zero();
-        a.negate();
+        let a = Fs::zero().neg();
 
         assert!(a.is_zero());
     }
@@ -1487,8 +1503,7 @@ fn test_fs_negate() {
     for _ in 0..1000 {
         // Ensure (a - (-a)) = 0.
         let mut a = Fs::random(&mut rng);
-        let mut b = a;
-        b.negate();
+        let b = a.neg();
         a.add_assign(&b);
 
         assert!(a.is_zero());
@@ -1534,10 +1549,8 @@ fn test_fs_sqrt() {
     for _ in 0..1000 {
         // Ensure sqrt(a^2) = a or -a
         let a = Fs::random(&mut rng);
-        let mut nega = a;
-        nega.negate();
-        let mut b = a;
-        b.square();
+        let nega = a.neg();
+        let b = a.square();
 
         let b = b.sqrt().unwrap();
 
@@ -1548,10 +1561,8 @@ fn test_fs_sqrt() {
         // Ensure sqrt(a)^2 = a for random a
         let a = Fs::random(&mut rng);
 
-        if let Some(mut tmp) = a.sqrt() {
-            tmp.square();
-
-            assert_eq!(a, tmp);
+        if let Some(tmp) = a.sqrt() {
+            assert_eq!(a, tmp.square());
         }
     }
 }

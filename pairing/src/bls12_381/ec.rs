@@ -54,10 +54,8 @@ macro_rules! curve_impl {
                 // are equal when (X * Z^2) = (X' * Z'^2)
                 // and (Y * Z^3) = (Y' * Z'^3).
 
-                let mut z1 = self.z;
-                z1.square();
-                let mut z2 = other.z;
-                z2.square();
+                let mut z1 = self.z.square();
+                let mut z2 = other.z.square();
 
                 let mut tmp1 = self.x;
                 tmp1.mul_assign(&z2);
@@ -101,14 +99,12 @@ macro_rules! curve_impl {
             /// largest y-coordinate be selected.
             fn get_point_from_x(x: $basefield, greatest: bool) -> Option<$affine> {
                 // Compute x^3 + b
-                let mut x3b = x;
-                x3b.square();
+                let mut x3b = x.square();
                 x3b.mul_assign(&x);
                 x3b.add_assign(&$affine::get_coeff_b());
 
                 x3b.sqrt().map(|y| {
-                    let mut negy = y;
-                    negy.negate();
+                    let negy = y.neg();
 
                     $affine {
                         x: x,
@@ -123,11 +119,9 @@ macro_rules! curve_impl {
                     true
                 } else {
                     // Check that the point is on the curve
-                    let mut y2 = self.y;
-                    y2.square();
+                    let y2 = self.y.square();
 
-                    let mut x3b = self.x;
-                    x3b.square();
+                    let mut x3b = self.x.square();
                     x3b.mul_assign(&self.x);
                     x3b.add_assign(&Self::get_coeff_b());
 
@@ -171,7 +165,7 @@ macro_rules! curve_impl {
 
             fn negate(&mut self) {
                 if !self.is_zero() {
-                    self.y.negate();
+                    self.y = self.y.neg();
                 }
             }
 
@@ -284,8 +278,7 @@ macro_rules! curve_impl {
 
                 // Perform affine transformations
                 for g in v.iter_mut().filter(|g| !g.is_normalized()) {
-                    let mut z = g.z; // 1/z
-                    z.square(); // 1/z^2
+                    let mut z = g.z.square(); // 1/z^2
                     g.x.mul_assign(&z); // x/z^2
                     z.mul_assign(&g.z); // 1/z^3
                     g.y.mul_assign(&z); // y/z^3
@@ -306,37 +299,32 @@ macro_rules! curve_impl {
                 // http://www.hyperelliptic.org/EFD/g1p/auto-shortw-jacobian-0.html#doubling-dbl-2009-l
 
                 // A = X1^2
-                let mut a = self.x;
-                a.square();
+                let a = self.x.square();
 
                 // B = Y1^2
-                let mut b = self.y;
-                b.square();
+                let b = self.y.square();
 
                 // C = B^2
-                let mut c = b;
-                c.square();
+                let mut c = b.square();
 
                 // D = 2*((X1+B)2-A-C)
                 let mut d = self.x;
                 d.add_assign(&b);
-                d.square();
+                d = d.square();
                 d.sub_assign(&a);
                 d.sub_assign(&c);
-                d.double();
+                d = d.double();
 
                 // E = 3*A
-                let mut e = a;
-                e.double();
+                let mut e = a.double();
                 e.add_assign(&a);
 
                 // F = E^2
-                let mut f = e;
-                f.square();
+                let f = e.square();
 
                 // Z3 = 2*Y1*Z1
                 self.z.mul_assign(&self.y);
-                self.z.double();
+                self.z = self.z.double();
 
                 // X3 = F-2*D
                 self.x = f;
@@ -347,9 +335,7 @@ macro_rules! curve_impl {
                 self.y = d;
                 self.y.sub_assign(&self.x);
                 self.y.mul_assign(&e);
-                c.double();
-                c.double();
-                c.double();
+                c = c.double().double().double();
                 self.y.sub_assign(&c);
             }
 
@@ -366,12 +352,10 @@ macro_rules! curve_impl {
                 // http://www.hyperelliptic.org/EFD/g1p/auto-shortw-jacobian-0.html#addition-add-2007-bl
 
                 // Z1Z1 = Z1^2
-                let mut z1z1 = self.z;
-                z1z1.square();
+                let z1z1 = self.z.square();
 
                 // Z2Z2 = Z2^2
-                let mut z2z2 = other.z;
-                z2z2.square();
+                let z2z2 = other.z.square();
 
                 // U1 = X1*Z2Z2
                 let mut u1 = self.x;
@@ -402,9 +386,7 @@ macro_rules! curve_impl {
                     h.sub_assign(&u1);
 
                     // I = (2*H)^2
-                    let mut i = h;
-                    i.double();
-                    i.square();
+                    let i = h.double().square();
 
                     // J = H*I
                     let mut j = h;
@@ -413,15 +395,14 @@ macro_rules! curve_impl {
                     // r = 2*(S2-S1)
                     let mut r = s2;
                     r.sub_assign(&s1);
-                    r.double();
+                    r = r.double();
 
                     // V = U1*I
                     let mut v = u1;
                     v.mul_assign(&i);
 
                     // X3 = r^2 - J - 2*V
-                    self.x = r;
-                    self.x.square();
+                    self.x = r.square();
                     self.x.sub_assign(&j);
                     self.x.sub_assign(&v);
                     self.x.sub_assign(&v);
@@ -431,12 +412,12 @@ macro_rules! curve_impl {
                     self.y.sub_assign(&self.x);
                     self.y.mul_assign(&r);
                     s1.mul_assign(&j); // S1 = S1 * J * 2
-                    s1.double();
+                    s1 = s1.double();
                     self.y.sub_assign(&s1);
 
                     // Z3 = ((Z1+Z2)^2 - Z1Z1 - Z2Z2)*H
                     self.z.add_assign(&other.z);
-                    self.z.square();
+                    self.z = self.z.square();
                     self.z.sub_assign(&z1z1);
                     self.z.sub_assign(&z2z2);
                     self.z.mul_assign(&h);
@@ -458,8 +439,7 @@ macro_rules! curve_impl {
                 // http://www.hyperelliptic.org/EFD/g1p/auto-shortw-jacobian-0.html#addition-madd-2007-bl
 
                 // Z1Z1 = Z1^2
-                let mut z1z1 = self.z;
-                z1z1.square();
+                let z1z1 = self.z.square();
 
                 // U2 = X2*Z1Z1
                 let mut u2 = other.x;
@@ -481,13 +461,10 @@ macro_rules! curve_impl {
                     h.sub_assign(&self.x);
 
                     // HH = H^2
-                    let mut hh = h;
-                    hh.square();
+                    let hh = h.square();
 
                     // I = 4*HH
-                    let mut i = hh;
-                    i.double();
-                    i.double();
+                    let i = hh.double().double();
 
                     // J = H*I
                     let mut j = h;
@@ -496,22 +473,21 @@ macro_rules! curve_impl {
                     // r = 2*(S2-Y1)
                     let mut r = s2;
                     r.sub_assign(&self.y);
-                    r.double();
+                    r = r.double();
 
                     // V = X1*I
                     let mut v = self.x;
                     v.mul_assign(&i);
 
                     // X3 = r^2 - J - 2*V
-                    self.x = r;
-                    self.x.square();
+                    self.x = r.square();
                     self.x.sub_assign(&j);
                     self.x.sub_assign(&v);
                     self.x.sub_assign(&v);
 
                     // Y3 = r*(V-X3)-2*Y1*J
                     j.mul_assign(&self.y); // J = 2*Y1*J
-                    j.double();
+                    j = j.double();
                     self.y = v;
                     self.y.sub_assign(&self.x);
                     self.y.mul_assign(&r);
@@ -519,7 +495,7 @@ macro_rules! curve_impl {
 
                     // Z3 = (Z1+H)^2-Z1Z1-HH
                     self.z.add_assign(&h);
-                    self.z.square();
+                    self.z = self.z.square();
                     self.z.sub_assign(&z1z1);
                     self.z.sub_assign(&hh);
                 }
@@ -527,7 +503,7 @@ macro_rules! curve_impl {
 
             fn negate(&mut self) {
                 if !self.is_zero() {
-                    self.y.negate()
+                    self.y = self.y.neg();
                 }
             }
 
@@ -596,8 +572,7 @@ macro_rules! curve_impl {
                 } else {
                     // Z is nonzero, so it must have an inverse in a field.
                     let zinv = p.z.inverse().unwrap();
-                    let mut zinv_powered = zinv;
-                    zinv_powered.square();
+                    let mut zinv_powered = zinv.square();
 
                     // X/Z^2
                     let mut x = p.x;
@@ -627,7 +602,7 @@ pub mod g1 {
     use group::{CurveAffine, CurveProjective, EncodedPoint, GroupDecodingError};
     use rand_core::RngCore;
     use std::fmt;
-    use std::ops::{AddAssign, MulAssign, SubAssign};
+    use std::ops::{AddAssign, MulAssign, Neg, SubAssign};
 
     curve_impl!(
         "G1",
@@ -849,8 +824,7 @@ pub mod g1 {
                     affine.x.into_repr().write_be(&mut writer).unwrap();
                 }
 
-                let mut negy = affine.y;
-                negy.negate();
+                let negy = affine.y.neg();
 
                 // Set the third most significant bit if the correct y-coordinate
                 // is lexicographically largest.
@@ -941,15 +915,13 @@ pub mod g1 {
         let mut i = 0;
         loop {
             // y^2 = x^3 + b
-            let mut rhs = x;
-            rhs.square();
+            let mut rhs = x.square();
             rhs.mul_assign(&x);
             rhs.add_assign(&G1Affine::get_coeff_b());
 
             if let Some(y) = rhs.sqrt() {
                 let yrepr = y.into_repr();
-                let mut negy = y;
-                negy.negate();
+                let negy = y.neg();
                 let negyrepr = negy.into_repr();
 
                 let p = G1Affine {
@@ -1297,7 +1269,7 @@ pub mod g2 {
     use group::{CurveAffine, CurveProjective, EncodedPoint, GroupDecodingError};
     use rand_core::RngCore;
     use std::fmt;
-    use std::ops::{AddAssign, MulAssign, SubAssign};
+    use std::ops::{AddAssign, MulAssign, Neg, SubAssign};
 
     curve_impl!(
         "G2",
@@ -1544,8 +1516,7 @@ pub mod g2 {
                     affine.x.c0.into_repr().write_be(&mut writer).unwrap();
                 }
 
-                let mut negy = affine.y;
-                negy.negate();
+                let negy = affine.y.neg();
 
                 // Set the third most significant bit if the correct y-coordinate
                 // is lexicographically largest.
@@ -1648,14 +1619,12 @@ pub mod g2 {
         let mut i = 0;
         loop {
             // y^2 = x^3 + b
-            let mut rhs = x;
-            rhs.square();
+            let mut rhs = x.square();
             rhs.mul_assign(&x);
             rhs.add_assign(&G2Affine::get_coeff_b());
 
             if let Some(y) = rhs.sqrt() {
-                let mut negy = y;
-                negy.negate();
+                let negy = y.neg();
 
                 let p = G2Affine {
                     x,

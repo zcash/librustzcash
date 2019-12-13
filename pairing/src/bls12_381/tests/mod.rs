@@ -189,8 +189,7 @@ fn test_g1_uncompressed_invalid_vectors() {
         let mut x = Fq::one();
 
         loop {
-            let mut x3b = x;
-            x3b.square();
+            let mut x3b = x.square();
             x3b.mul_assign(&x);
             x3b.add_assign(&Fq::from_repr(FqRepr::from(4)).unwrap()); // TODO: perhaps expose coeff_b through API?
 
@@ -326,8 +325,7 @@ fn test_g2_uncompressed_invalid_vectors() {
         let mut x = Fq2::one();
 
         loop {
-            let mut x3b = x;
-            x3b.square();
+            let mut x3b = x.square();
             x3b.mul_assign(&x);
             x3b.add_assign(&Fq2 {
                 c0: Fq::from_repr(FqRepr::from(4)).unwrap(),
@@ -422,8 +420,7 @@ fn test_g1_compressed_invalid_vectors() {
         let mut x = Fq::one();
 
         loop {
-            let mut x3b = x;
-            x3b.square();
+            let mut x3b = x.square();
             x3b.mul_assign(&x);
             x3b.add_assign(&Fq::from_repr(FqRepr::from(4)).unwrap()); // TODO: perhaps expose coeff_b through API?
 
@@ -447,8 +444,7 @@ fn test_g1_compressed_invalid_vectors() {
         let mut x = Fq::one();
 
         loop {
-            let mut x3b = x;
-            x3b.square();
+            let mut x3b = x.square();
             x3b.mul_assign(&x);
             x3b.add_assign(&Fq::from_repr(FqRepr::from(4)).unwrap()); // TODO: perhaps expose coeff_b through API?
 
@@ -553,8 +549,7 @@ fn test_g2_compressed_invalid_vectors() {
         };
 
         loop {
-            let mut x3b = x;
-            x3b.square();
+            let mut x3b = x.square();
             x3b.mul_assign(&x);
             x3b.add_assign(&Fq2 {
                 c0: Fq::from_repr(FqRepr::from(4)).unwrap(),
@@ -585,8 +580,7 @@ fn test_g2_compressed_invalid_vectors() {
         };
 
         loop {
-            let mut x3b = x;
-            x3b.square();
+            let mut x3b = x.square();
             x3b.mul_assign(&x);
             x3b.add_assign(&Fq2 {
                 c0: Fq::from_repr(FqRepr::from(4)).unwrap(),

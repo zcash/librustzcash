@@ -2,6 +2,9 @@ use super::fq2::Fq2;
 use ff::{Field, PrimeField, PrimeFieldDecodingError, PrimeFieldRepr};
 use std::ops::{AddAssign, MulAssign, SubAssign};
 
+#[cfg(test)]
+use std::ops::Neg;
+
 // B coefficient of BLS12-381 curve, 4.
 pub const B_COEFF: Fq = Fq(FqRepr([
     0xaa270000000cfff3,
@@ -456,8 +459,7 @@ fn test_b_coeff() {
 
 #[test]
 fn test_frob_coeffs() {
-    let mut nqr = Fq::one();
-    nqr.negate();
+    let nqr = Fq::one().neg();
 
     assert_eq!(FROBENIUS_COEFF_FQ2_C1[0], Fq::one());
     assert_eq!(
@@ -1167,8 +1169,7 @@ fn test_frob_coeffs() {
 
 #[test]
 fn test_neg_one() {
-    let mut o = Fq::one();
-    o.negate();
+    let o = Fq::one().neg();
 
     assert_eq!(NEGATIVE_ONE, o);
 }
@@ -1929,7 +1930,7 @@ fn test_fq_mul_assign() {
 
 #[test]
 fn test_fq_squaring() {
-    let mut a = Fq(FqRepr([
+    let a = Fq(FqRepr([
         0xffffffffffffffff,
         0xffffffffffffffff,
         0xffffffffffffffff,
@@ -1938,9 +1939,8 @@ fn test_fq_squaring() {
         0x19ffffffffffffff,
     ]));
     assert!(a.is_valid());
-    a.square();
     assert_eq!(
-        a,
+        a.square(),
         Fq::from_repr(FqRepr([
             0x1cfb28fe7dfbbb86,
             0x24cbe1731577a59,
@@ -1960,14 +1960,7 @@ fn test_fq_squaring() {
     for _ in 0..1000000 {
         // Ensure that (a * a) = a^2
         let a = Fq::random(&mut rng);
-
-        let mut tmp = a;
-        tmp.square();
-
-        let mut tmp2 = a;
-        tmp2.mul_assign(&a);
-
-        assert_eq!(tmp, tmp2);
+        assert_eq!(a.square(), a * a);
     }
 }
 
@@ -2000,19 +1993,15 @@ fn test_fq_double() {
 
     for _ in 0..1000 {
         // Ensure doubling a is equivalent to adding a to itself.
-        let mut a = Fq::random(&mut rng);
-        let mut b = a;
-        b.add_assign(&a);
-        a.double();
-        assert_eq!(a, b);
+        let a = Fq::random(&mut rng);
+        assert_eq!(a.double(), a + a);
     }
 }
 
 #[test]
-fn test_fq_negate() {
+fn test_fq_neg() {
     {
-        let mut a = Fq::zero();
-        a.negate();
+        let a = Fq::zero().neg();
 
         assert!(a.is_zero());
     }
@@ -2025,8 +2014,7 @@ fn test_fq_negate() {
     for _ in 0..1000 {
         // Ensure (a - (-a)) = 0.
         let mut a = Fq::random(&mut rng);
-        let mut b = a;
-        b.negate();
+        let b = a.neg();
         a.add_assign(&b);
 
         assert!(a.is_zero());
@@ -2074,10 +2062,8 @@ fn test_fq_sqrt() {
     for _ in 0..1000 {
         // Ensure sqrt(a^2) = a or -a
         let a = Fq::random(&mut rng);
-        let mut nega = a;
-        nega.negate();
-        let mut b = a;
-        b.square();
+        let nega = a.neg();
+        let b = a.square();
 
         let b = b.sqrt().unwrap();
 
@@ -2088,10 +2074,8 @@ fn test_fq_sqrt() {
         // Ensure sqrt(a)^2 = a for random a
         let a = Fq::random(&mut rng);
 
-        if let Some(mut tmp) = a.sqrt() {
-            tmp.square();
-
-            assert_eq!(a, tmp);
+        if let Some(tmp) = a.sqrt() {
+            assert_eq!(a, tmp.square());
         }
     }
 }

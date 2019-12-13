@@ -195,8 +195,7 @@ impl JubjubParams<Bls12> for JubjubBls12 {
 impl JubjubBls12 {
     pub fn new() -> Self {
         let montgomery_a = Fr::from_str("40962").unwrap();
-        let mut montgomery_2a = montgomery_a;
-        montgomery_2a.double();
+        let montgomery_2a = montgomery_a.double();
 
         let mut tmp_params = JubjubBls12 {
             // d = -(10240/10241)

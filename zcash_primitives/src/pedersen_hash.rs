@@ -2,7 +2,7 @@
 
 use crate::jubjub::*;
 use ff::{Field, PrimeField, PrimeFieldRepr};
-use std::ops::AddAssign;
+use std::ops::{AddAssign, Neg};
 
 #[derive(Copy, Clone)]
 pub enum Personalization {
@@ -58,14 +58,14 @@ where
             if a {
                 tmp.add_assign(&cur);
             }
-            cur.double(); // 2^1 * cur
+            cur = cur.double(); // 2^1 * cur
             if b {
                 tmp.add_assign(&cur);
             }
 
             // conditionally negate
             if c {
-                tmp.negate();
+                tmp = tmp.neg();
             }
 
             acc.add_assign(&tmp);
@@ -75,9 +75,7 @@ where
             if chunks_remaining == 0 {
                 break;
             } else {
-                cur.double(); // 2^2 * cur
-                cur.double(); // 2^3 * cur
-                cur.double(); // 2^4 * cur
+                cur = cur.double().double().double(); // 2^4 * cur
             }
         }
 
