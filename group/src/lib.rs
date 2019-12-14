@@ -12,6 +12,21 @@ pub mod tests;
 mod wnaf;
 pub use self::wnaf::Wnaf;
 
+/// A helper trait for types implementing group addition.
+pub trait CurveOps<Rhs = Self, Output = Self>:
+    Add<Rhs, Output = Output> + Sub<Rhs, Output = Output> + AddAssign<Rhs> + SubAssign<Rhs>
+{
+}
+
+impl<T, Rhs, Output> CurveOps<Rhs, Output> for T where
+    T: Add<Rhs, Output = Output> + Sub<Rhs, Output = Output> + AddAssign<Rhs> + SubAssign<Rhs>
+{
+}
+
+/// A helper trait for references implementing group addition.
+pub trait CurveOpsOwned<Rhs = Self, Output = Self>: for<'r> CurveOps<&'r Rhs, Output> {}
+impl<T, Rhs, Output> CurveOpsOwned<Rhs, Output> for T where T: for<'r> CurveOps<&'r Rhs, Output> {}
+
 /// Projective representation of an elliptic curve point guaranteed to be
 /// in the correct prime order subgroup.
 pub trait CurveProjective:
@@ -25,15 +40,9 @@ pub trait CurveProjective:
     + fmt::Debug
     + fmt::Display
     + 'static
-    + Add<Output = Self>
-    + Sub<Output = Self>
     + Neg<Output = Self>
-    + for<'a> Add<&'a Self, Output = Self>
-    + for<'a> Sub<&'a Self, Output = Self>
-    + AddAssign
-    + SubAssign
-    + for<'a> AddAssign<&'a Self>
-    + for<'a> SubAssign<&'a Self>
+    + CurveOps
+    + CurveOpsOwned
 {
     type Engine: ScalarEngine<Fr = Self::Scalar>;
     type Scalar: PrimeField + SqrtField;
