@@ -43,6 +43,8 @@ pub trait CurveProjective:
     + Neg<Output = Self>
     + CurveOps
     + CurveOpsOwned
+    + CurveOps<<Self as CurveProjective>::Affine>
+    + CurveOpsOwned<<Self as CurveProjective>::Affine>
 {
     type Engine: ScalarEngine<Fr = Self::Scalar>;
     type Scalar: PrimeField + SqrtField;
@@ -71,9 +73,6 @@ pub trait CurveProjective:
 
     /// Doubles this element.
     fn double(&mut self);
-
-    /// Adds an affine element to this element.
-    fn add_assign_mixed(&mut self, other: &Self::Affine);
 
     /// Performs scalar multiplication of this element.
     fn mul_assign<S: Into<<Self::Scalar as PrimeField>::Repr>>(&mut self, other: S);

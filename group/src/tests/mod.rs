@@ -30,19 +30,19 @@ pub fn curve_tests<G: CurveProjective>() {
         let rcopy = r;
         r.add_assign(&G::zero());
         assert_eq!(r, rcopy);
-        r.add_assign_mixed(&G::Affine::zero());
+        r.add_assign(&G::Affine::zero());
         assert_eq!(r, rcopy);
 
         let mut z = G::zero();
         z.add_assign(&G::zero());
         assert!(z.is_zero());
-        z.add_assign_mixed(&G::Affine::zero());
+        z.add_assign(&G::Affine::zero());
         assert!(z.is_zero());
 
         let mut z2 = z;
         z2.add_assign(&r);
 
-        z.add_assign_mixed(&r.into_affine());
+        z.add_assign(&r.into_affine());
 
         assert_eq!(z, z2);
         assert_eq!(z, r);
@@ -67,7 +67,7 @@ pub fn curve_tests<G: CurveProjective>() {
     random_negation_tests::<G>();
     random_transformation_tests::<G>();
     random_wnaf_tests::<G>();
-    random_encoding_tests::<G::Affine>();
+    random_encoding_tests::<G>();
 }
 
 fn random_wnaf_tests<G: CurveProjective>() {
@@ -212,7 +212,7 @@ fn random_negation_tests<G: CurveProjective>() {
         assert!(t3.is_zero());
 
         let mut t4 = t1;
-        t4.add_assign_mixed(&t2.into_affine());
+        t4.add_assign(&t2.into_affine());
         assert!(t4.is_zero());
 
         assert_eq!(t1.neg(), t2);
@@ -242,7 +242,7 @@ fn random_doubling_tests<G: CurveProjective>() {
         tmp2.add_assign(&b);
 
         let mut tmp3 = a;
-        tmp3.add_assign_mixed(&b.into_affine());
+        tmp3.add_assign(&b.into_affine());
 
         assert_eq!(tmp1, tmp2);
         assert_eq!(tmp1, tmp3);
@@ -304,7 +304,7 @@ fn random_addition_tests<G: CurveProjective>() {
             aplusa.add_assign(&a);
 
             let mut aplusamixed = a;
-            aplusamixed.add_assign_mixed(&a.into_affine());
+            aplusamixed.add_assign(&a.into_affine());
 
             let mut adouble = a;
             adouble.double();
@@ -334,18 +334,18 @@ fn random_addition_tests<G: CurveProjective>() {
 
         // (a + b) + c
         tmp[3] = a_affine.into_projective();
-        tmp[3].add_assign_mixed(&b_affine);
-        tmp[3].add_assign_mixed(&c_affine);
+        tmp[3].add_assign(&b_affine);
+        tmp[3].add_assign(&c_affine);
 
         // a + (b + c)
         tmp[4] = b_affine.into_projective();
-        tmp[4].add_assign_mixed(&c_affine);
-        tmp[4].add_assign_mixed(&a_affine);
+        tmp[4].add_assign(&c_affine);
+        tmp[4].add_assign(&a_affine);
 
         // (a + c) + b
         tmp[5] = a_affine.into_projective();
-        tmp[5].add_assign_mixed(&c_affine);
-        tmp[5].add_assign_mixed(&b_affine);
+        tmp[5].add_assign(&c_affine);
+        tmp[5].add_assign(&b_affine);
 
         // Comparisons
         for i in 0..6 {
@@ -411,24 +411,24 @@ fn random_transformation_tests<G: CurveProjective>() {
     }
 }
 
-fn random_encoding_tests<G: CurveAffine>() {
+fn random_encoding_tests<G: CurveProjective>() {
     let mut rng = XorShiftRng::from_seed([
         0x59, 0x62, 0xbe, 0x5d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06, 0xbc,
         0xe5,
     ]);
 
     assert_eq!(
-        G::zero().into_uncompressed().into_affine().unwrap(),
-        G::zero()
+        G::Affine::zero().into_uncompressed().into_affine().unwrap(),
+        G::Affine::zero()
     );
 
     assert_eq!(
-        G::zero().into_compressed().into_affine().unwrap(),
-        G::zero()
+        G::Affine::zero().into_compressed().into_affine().unwrap(),
+        G::Affine::zero()
     );
 
     for _ in 0..1000 {
-        let mut r = G::Projective::random(&mut rng).into_affine();
+        let mut r = G::random(&mut rng).into_affine();
 
         let uncompressed = r.into_uncompressed();
         let de_uncompressed = uncompressed.into_affine().unwrap();

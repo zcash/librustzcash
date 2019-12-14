@@ -70,7 +70,7 @@ pub(crate) mod g1 {
         c.bench_function("G1::add_assign_mixed", |b| {
             b.iter(|| {
                 let mut tmp = v[count].0;
-                tmp.add_assign_mixed(&v[count].1);
+                tmp.add_assign(&v[count].1);
                 count = (count + 1) % SAMPLES;
                 tmp
             })
@@ -157,7 +157,7 @@ pub(crate) mod g2 {
         c.bench_function("G2::add_assign_mixed", |b| {
             b.iter(|| {
                 let mut tmp = v[count].0;
-                tmp.add_assign_mixed(&v[count].1);
+                tmp.add_assign(&v[count].1);
                 count = (count + 1) % SAMPLES;
                 tmp
             })
