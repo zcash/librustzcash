@@ -20,6 +20,8 @@ all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
 [dependencies]
+sapling.workspace = true
+
 # - Logging and metrics
 memuse = { workspace = true, optional = true }
 

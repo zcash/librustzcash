@@ -1,14 +1,20 @@
 //! Handlers for structured memos.
 
+use alloc::string::String;
 use alloc::vec::Vec;
 
+use sapling::PaymentAddress;
 use wasabi_leb128::{ReadLeb128, WriteLeb128};
 
-use super::Error;
+use super::{Error, TextMemo};
 
 /// A payload within a [`StructuredMemo`].
 #[derive(Clone, Debug, PartialEq)]
 pub enum Payload {
+    /// A Sapling return address.
+    ReturnAddress(PaymentAddress),
+    /// UTF-8 text.
+    Text(TextMemo),
     /// A payload type we don't know about.
     Unknown {
         type_id: u64,
@@ -22,6 +28,38 @@ impl Payload {
     fn parse(mut bytes: &[u8]) -> Result<(&[u8], Option<Self>), Error> {
         match bytes.read_leb128().map_err(|_| Error::InvalidEncoding)? {
             (0x00, _) => Ok((bytes, None)),
+            (0x01, _) => {
+                let (length, _): (u16, _) =
+                    bytes.read_leb128().map_err(|_| Error::InvalidEncoding)?;
+                if length != 43 || length as usize > bytes.len() {
+                    return Err(Error::InvalidEncoding);
+                }
+
+                let mut pa_bytes = [0; 43];
+                pa_bytes.copy_from_slice(&bytes[..43]);
+
+                PaymentAddress::from_bytes(&pa_bytes)
+                    .ok_or(Error::InvalidEncoding)
+                    .map(|pa| (&bytes[43..], Some(Payload::ReturnAddress(pa))))
+            }
+            (0xa0, _) => {
+                let (length, _): (u16, _) =
+                    bytes.read_leb128().map_err(|_| Error::InvalidEncoding)?;
+                if length as usize > bytes.len() {
+                    return Err(Error::InvalidEncoding);
+                }
+
+                let (value, rem) = bytes.split_at(length as usize);
+
+                // Convert to UTF8, replacing invalid sequences with the replacement
+                // character U+FFFD
+                Ok((
+                    rem,
+                    Some(Payload::Text(TextMemo(
+                        String::from_utf8_lossy(value).into(),
+                    ))),
+                ))
+            }
             (type_id, _) => {
                 let (length, _): (u16, _) =
                     bytes.read_leb128().map_err(|_| Error::InvalidEncoding)?;
@@ -47,6 +85,13 @@ impl Payload {
     fn serialized_len(&self) -> usize {
         let mut buf = [0; wasabi_leb128::max_bytes::<u64>()];
         match self {
+            Payload::ReturnAddress(_) => 45,
+            Payload::Text(s) => {
+                let length_len = (&mut buf[..])
+                    .write_leb128(s.len())
+                    .expect("buffer is large enough");
+                1 + length_len + s.len()
+            }
             Payload::Unknown {
                 type_id, length, ..
             } => {
@@ -67,6 +112,19 @@ impl Payload {
     /// fit into `buf` by checking `serialized_len`.
     fn serialize(&self, mut buf: &mut [u8]) -> usize {
         match self {
+            Payload::ReturnAddress(pa) => {
+                let mut written = buf.write_leb128(0x01).expect("buffer is large enough");
+                written += buf.write_leb128(43).expect("buffer is large enough");
+                assert_eq!(written, 2);
+                buf[..43].copy_from_slice(&pa.to_bytes());
+                45
+            }
+            Payload::Text(s) => {
+                let mut written = buf.write_leb128(0xa0).expect("buffer is large enough");
+                written += buf.write_leb128(s.len()).expect("buffer is large enough");
+                buf[..s.len()].copy_from_slice(s.as_bytes());
+                written + s.len()
+            }
             Payload::Unknown {
                 type_id,
                 length,
@@ -98,9 +156,9 @@ impl StructuredMemo {
     /// Pack a set of [`Payload`]s into a `StructuredMemo`.
     ///
     /// Returns an error if `payloads` is empty or will not fit into a memo field.
-    pub fn new(payloads: Vec<Payload>) -> Result<Self, ()> {
+    pub fn new(payloads: Vec<Payload>) -> Result<Self, Error> {
         if payloads.is_empty() || payloads.iter().map(|p| p.serialized_len()).sum::<usize>() > 511 {
-            Err(())
+            Err(Error::InvalidPayload)
         } else {
             Ok(StructuredMemo(payloads))
         }

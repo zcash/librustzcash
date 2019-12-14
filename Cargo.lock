@@ -6723,6 +6723,7 @@ dependencies = [
  "incrementalmerkletree-testing",
  "memuse",
  "proptest",
+ "sapling-crypto",
  "wasabi_leb128",
 ]
 
