@@ -1,17 +1,10 @@
-#![feature(test)]
-
-extern crate pairing;
-extern crate rand_core;
-extern crate test;
-extern crate zcash_primitives;
-
+use criterion::{criterion_group, criterion_main, Criterion};
 use pairing::bls12_381::Bls12;
 use rand_core::{OsRng, RngCore};
 use zcash_primitives::jubjub::JubjubBls12;
 use zcash_primitives::pedersen_hash::{pedersen_hash, Personalization};
 
-#[bench]
-fn bench_pedersen_hash(b: &mut test::Bencher) {
+fn bench_pedersen_hash(c: &mut Criterion) {
     let params = JubjubBls12::new();
     let rng = &mut OsRng;
     let bits = (0..510)
@@ -19,5 +12,10 @@ fn bench_pedersen_hash(b: &mut test::Bencher) {
         .collect::<Vec<_>>();
     let personalization = Personalization::MerkleTree(31);
 
-    b.iter(|| pedersen_hash::<Bls12, _>(personalization, bits.clone(), &params));
+    c.bench_function("Pedersen hash", |b| {
+        b.iter(|| pedersen_hash::<Bls12, _>(personalization, bits.clone(), &params))
+    });
 }
+
+criterion_group!(benches, bench_pedersen_hash);
+criterion_main!(benches);

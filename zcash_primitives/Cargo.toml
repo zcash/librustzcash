@@ -31,11 +31,16 @@ sha2 = "0.8"
 subtle = "2.2.1"
 
 [dev-dependencies]
+criterion = "0.3"
 hex-literal = "0.2"
 rand_xorshift = "0.2"
 
 [features]
 transparent-inputs = ["ripemd160", "secp256k1"]
+
+[[bench]]
+name = "pedersen_hash"
+harness = false
 
 [badges]
 maintenance = { status = "actively-developed" }
