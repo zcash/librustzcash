@@ -51,7 +51,7 @@ pub fn prime_field(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
 
     gen.extend(constants_impl);
     gen.extend(prime_field_repr_impl(&repr_ident, limbs));
-    gen.extend(prime_field_impl(&ast.ident, &repr_ident, limbs));
+    gen.extend(prime_field_impl(&ast.ident, &repr_ident, &modulus, limbs));
     gen.extend(sqrt_impl);
 
     // Return the generated impl
@@ -540,6 +540,7 @@ fn prime_field_constants_and_sqrt(
 fn prime_field_impl(
     name: &syn::Ident,
     repr: &syn::Ident,
+    modulus: &BigUint,
     limbs: usize,
 ) -> proc_macro2::TokenStream {
     // Returns r{n} as an ident.
@@ -742,8 +743,35 @@ fn prime_field_impl(
         gen
     }
 
+    /// Generates an implementation of multiplicative inversion within the target prime
+    /// field.
+    fn inv_impl(
+        a: proc_macro2::TokenStream,
+        name: &syn::Ident,
+        modulus: &BigUint,
+        limbs: usize,
+    ) -> proc_macro2::TokenStream {
+        let mod_minus_2 = biguint_to_u64_vec(modulus - BigUint::from(2u64), limbs);
+
+        // TODO: Improve on this by computing an addition chain for mod_minus_two
+        quote! {
+            use ::subtle::ConstantTimeEq;
+
+            // By Euler's theorem, if `a` is coprime to `p` (i.e. `gcd(a, p) = 1`), then:
+            //     a^-1 ≡ a^(phi(p) - 1) mod p
+            //
+            // `ff_derive` requires that `p` is prime; in this case, `phi(p) = p - 1`, and
+            // thus:
+            //     a^-1 ≡ a^(p - 2) mod p
+            let inv = #a.pow_vartime(#mod_minus_2);
+
+            ::subtle::CtOption::new(inv, !#a.ct_eq(&#name::zero()))
+        }
+    }
+
     let squaring_impl = sqr_impl(quote! {self}, limbs);
     let multiply_impl = mul_impl(quote! {self}, quote! {other}, limbs);
+    let invert_impl = inv_impl(quote! {self}, name, modulus, limbs);
     let montgomery_impl = mont_impl(limbs);
 
     // (self.0).0[0].ct_eq(&(other.0).0[0]) & (self.0).0[1].ct_eq(&(other.0).0[1]) & ...
@@ -1056,61 +1084,8 @@ fn prime_field_impl(
                 ret
             }
 
-            /// WARNING: THIS IS NOT ACTUALLY CONSTANT TIME YET!
-            /// TODO: Make this constant-time.
             fn invert(&self) -> ::subtle::CtOption<Self> {
-                if self.is_zero() {
-                    ::subtle::CtOption::new(#name::zero(), ::subtle::Choice::from(0))
-                } else {
-                    // Guajardo Kumar Paar Pelzl
-                    // Efficient Software-Implementation of Finite Fields with Applications to Cryptography
-                    // Algorithm 16 (BEA for Inversion in Fp)
-
-                    let one = #repr::from(1);
-
-                    let mut u = self.0;
-                    let mut v = MODULUS;
-                    let mut b = #name(R2); // Avoids unnecessary reduction step.
-                    let mut c = Self::zero();
-
-                    while u != one && v != one {
-                        while u.is_even() {
-                            u.div2();
-
-                            if b.0.is_even() {
-                                b.0.div2();
-                            } else {
-                                b.0.add_nocarry(&MODULUS);
-                                b.0.div2();
-                            }
-                        }
-
-                        while v.is_even() {
-                            v.div2();
-
-                            if c.0.is_even() {
-                                c.0.div2();
-                            } else {
-                                c.0.add_nocarry(&MODULUS);
-                                c.0.div2();
-                            }
-                        }
-
-                        if v < u {
-                            u.sub_noborrow(&v);
-                            b.sub_assign(&c);
-                        } else {
-                            v.sub_noborrow(&u);
-                            c.sub_assign(&b);
-                        }
-                    }
-
-                    if u == one {
-                        ::subtle::CtOption::new(b, ::subtle::Choice::from(1))
-                    } else {
-                        ::subtle::CtOption::new(c, ::subtle::Choice::from(1))
-                    }
-                }
+                #invert_impl
             }
 
             #[inline(always)]
