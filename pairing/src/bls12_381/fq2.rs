@@ -253,7 +253,7 @@ impl SqrtField for Fq2 {
             CtOption::new(Self::zero(), Choice::from(1))
         } else {
             // a1 = self^((q - 3) / 4)
-            let mut a1 = self.pow([
+            let mut a1 = self.pow_vartime([
                 0xee7fbfffffffeaaa,
                 0x7aaffffac54ffff,
                 0xd9cc34a83dac3d89,
@@ -285,7 +285,7 @@ impl SqrtField for Fq2 {
                 } else {
                     alpha.add_assign(&Fq2::one());
                     // alpha = alpha^((q - 1) / 2)
-                    alpha = alpha.pow([
+                    alpha = alpha.pow_vartime([
                         0xdcff7fffffffd555,
                         0xf55ffff58a9ffff,
                         0xb39869507b587b12,

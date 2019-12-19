@@ -1,17 +1,22 @@
 //! This crate provides traits for working with finite fields.
 
 // Catch documentation errors caused by code changes.
+#![no_std]
 #![deny(intra_doc_link_resolution_failure)]
 #![allow(unused_imports)]
+
+#[cfg(feature = "std")]
+#[macro_use]
+extern crate std;
 
 #[cfg(feature = "derive")]
 pub use ff_derive::*;
 
+use core::fmt;
+use core::ops::{Add, AddAssign, Mul, MulAssign, Neg, Sub, SubAssign};
 use rand_core::RngCore;
-use std::error::Error;
-use std::fmt;
+#[cfg(feature = "std")]
 use std::io::{self, Read, Write};
-use std::ops::{Add, AddAssign, Mul, MulAssign, Neg, Sub, SubAssign};
 use subtle::{ConditionallySelectable, CtOption};
 
 /// This trait represents an element of a field.
@@ -69,22 +74,20 @@ pub trait Field:
     /// the Frobenius automorphism.
     fn frobenius_map(&mut self, power: usize);
 
-    /// Exponentiates this element by a number represented with `u64` limbs,
-    /// least significant digit first.
-    fn pow<S: AsRef<[u64]>>(&self, exp: S) -> Self {
+    /// Exponentiates `self` by `exp`, where `exp` is a little-endian order
+    /// integer exponent.
+    ///
+    /// **This operation is variable time with respect to the exponent.** If the
+    /// exponent is fixed, this operation is effectively constant time.
+    fn pow_vartime<S: AsRef<[u64]>>(&self, exp: S) -> Self {
         let mut res = Self::one();
-
-        let mut found_one = false;
-
-        for i in BitIterator::new(exp) {
-            if found_one {
+        for e in exp.as_ref().iter().rev() {
+            for i in (0..64).rev() {
                 res = res.square();
-            } else {
-                found_one = i;
-            }
 
-            if i {
-                res.mul_assign(self);
+                if ((*e >> i) & 1) == 1 {
+                    res.mul_assign(self);
+                }
             }
         }
 
@@ -152,6 +155,7 @@ pub trait PrimeFieldRepr:
     fn shl(&mut self, amt: u32);
 
     /// Writes this `PrimeFieldRepr` as a big endian integer.
+    #[cfg(feature = "std")]
     fn write_be<W: Write>(&self, mut writer: W) -> io::Result<()> {
         use byteorder::{BigEndian, WriteBytesExt};
 
@@ -163,6 +167,7 @@ pub trait PrimeFieldRepr:
     }
 
     /// Reads a big endian integer into this representation.
+    #[cfg(feature = "std")]
     fn read_be<R: Read>(&mut self, mut reader: R) -> io::Result<()> {
         use byteorder::{BigEndian, ReadBytesExt};
 
@@ -174,6 +179,7 @@ pub trait PrimeFieldRepr:
     }
 
     /// Writes this `PrimeFieldRepr` as a little endian integer.
+    #[cfg(feature = "std")]
     fn write_le<W: Write>(&self, mut writer: W) -> io::Result<()> {
         use byteorder::{LittleEndian, WriteBytesExt};
 
@@ -185,6 +191,7 @@ pub trait PrimeFieldRepr:
     }
 
     /// Reads a little endian integer into this representation.
+    #[cfg(feature = "std")]
     fn read_le<R: Read>(&mut self, mut reader: R) -> io::Result<()> {
         use byteorder::{LittleEndian, ReadBytesExt};
 
@@ -201,13 +208,14 @@ pub trait PrimeFieldRepr:
 #[derive(Debug)]
 pub enum PrimeFieldDecodingError {
     /// The encoded value is not in the field
-    NotInField(String),
+    NotInField,
 }
 
-impl Error for PrimeFieldDecodingError {
+#[cfg(feature = "std")]
+impl std::error::Error for PrimeFieldDecodingError {
     fn description(&self) -> &str {
         match *self {
-            PrimeFieldDecodingError::NotInField(..) => "not an element of the field",
+            PrimeFieldDecodingError::NotInField => "not an element of the field",
         }
     }
 }
@@ -215,9 +223,7 @@ impl Error for PrimeFieldDecodingError {
 impl fmt::Display for PrimeFieldDecodingError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
         match *self {
-            PrimeFieldDecodingError::NotInField(ref repr) => {
-                write!(f, "{} is not an element of the field", repr)
-            }
+            PrimeFieldDecodingError::NotInField => write!(f, "not an element of the field"),
         }
     }
 }

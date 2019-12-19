@@ -130,7 +130,7 @@ fn random_bilinearity_tests<E: Engine>() {
         let mut cd = c;
         cd.mul_assign(&d);
 
-        let abcd = E::pairing(a, b).pow(cd.into_repr());
+        let abcd = E::pairing(a, b).pow_vartime(cd.into_repr());
 
         assert_eq!(acbd, adbc);
         assert_eq!(acbd, abcd);

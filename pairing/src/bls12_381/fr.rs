@@ -767,7 +767,7 @@ fn test_fr_pow() {
         // Exponentiate by various small numbers and ensure it consists with repeated
         // multiplication.
         let a = Fr::random(&mut rng);
-        let target = a.pow(&[i]);
+        let target = a.pow_vartime(&[i]);
         let mut c = Fr::one();
         for _ in 0..i {
             c.mul_assign(&a);
@@ -779,7 +779,7 @@ fn test_fr_pow() {
         // Exponentiating by the modulus should have no effect in a prime field.
         let a = Fr::random(&mut rng);
 
-        assert_eq!(a, a.pow(Fr::char()));
+        assert_eq!(a, a.pow_vartime(Fr::char()));
     }
 }
 
@@ -964,7 +964,7 @@ fn test_fr_root_of_unity() {
         Fr::from_repr(FrRepr::from(7)).unwrap()
     );
     assert_eq!(
-        Fr::multiplicative_generator().pow([
+        Fr::multiplicative_generator().pow_vartime([
             0xfffe5bfeffffffff,
             0x9a1d80553bda402,
             0x299d7d483339d808,
@@ -972,7 +972,7 @@ fn test_fr_root_of_unity() {
         ]),
         Fr::root_of_unity()
     );
-    assert_eq!(Fr::root_of_unity().pow([1 << Fr::S]), Fr::one());
+    assert_eq!(Fr::root_of_unity().pow_vartime([1 << Fr::S]), Fr::one());
     assert!(bool::from(Fr::multiplicative_generator().sqrt().is_none()));
 }
 
