@@ -30,6 +30,13 @@ jobs:
           command: fmt
           args: --all -- --check --color always
 
+      # Build benchmarks to prevent bitrot
+      - name: Build benchmarks
+        uses: actions-rs/cargo@v1
+        with:
+          command: build
+          args: --all --benches
+
   test:
     name: Test on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
@@ -110,10 +117,3 @@ jobs:
         with:
           command: doc
           args: --all --document-private-items
-
-      # Build benchmarks to prevent bitrot
-      - name: Build benchmarks
-        uses: actions-rs/cargo@v1
-        with:
-          command: build
-          args: --verbose --all --benches
