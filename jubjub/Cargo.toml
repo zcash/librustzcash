@@ -22,6 +22,9 @@ default-features = false
 version = "^2.2.1"
 default-features = false
 
+[dev-dependencies]
+criterion = "0.3"
+
 [dev-dependencies.rand_core]
 version = "0.5"
 default-features = false
@@ -32,3 +35,15 @@ default-features = false
 
 [features]
 default = []
+
+[[bench]]
+name = "fq_bench"
+harness = false
+
+[[bench]]
+name = "fr_bench"
+harness = false
+
+[[bench]]
+name = "point_bench"
+harness = false

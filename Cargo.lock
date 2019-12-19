@@ -493,6 +493,7 @@ name = "jubjub"
 version = "0.3.0"
 dependencies = [
  "bls12_381 0.1.0",
+ "criterion 0.3.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "rand_core 0.5.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "rand_xorshift 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "subtle 2.2.1 (registry+https://github.com/rust-lang/crates.io-index)",
