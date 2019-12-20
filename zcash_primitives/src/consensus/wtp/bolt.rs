@@ -199,10 +199,10 @@ mod tests {
     use crate::wtp::bolt::compute_tx_signature;
     use crate::consensus::wtp::Error::Program;
 
-    const OPEN_WITNESS_LEN: usize = 212;
-    const MERCH_CLOSE_WITNESS_LEN: usize = 212;
+    const OPEN_WITNESS_LEN: usize = 220;
+    const MERCH_CLOSE_WITNESS_LEN: usize = 220;
     const CLOSE_WITNESS_LEN: usize = 180;
-    const CLOSE_PREDICATE_LEN: usize = 1115;
+    const CLOSE_PREDICATE_LEN: usize = 1119;
     const OPEN_PREDICATE_LEN: usize = 1107;
     const MERCH_CLOSE_PREDICATE_LEN: usize = 1111;
 
@@ -215,7 +215,7 @@ mod tests {
         return Ok(data);
     }
 
-    fn generate_customer_close_witness(cust_bal: [u8; 4], merch_bal: [u8; 4], cust_sig: &Vec<u8>, close_token: &Vec<u8>, wpk: &Vec<u8>) -> [u8; OPEN_WITNESS_LEN] {
+    fn generate_customer_close_witness(cust_bal: [u8; 8], merch_bal: [u8; 8], cust_sig: &Vec<u8>, close_token: &Vec<u8>, wpk: &Vec<u8>) -> [u8; OPEN_WITNESS_LEN] {
         let mut close_witness_input = [0u8; OPEN_WITNESS_LEN];
         let mut close_witness_vec: Vec<u8> = Vec::new();
         close_witness_vec.push(0x1);
@@ -235,7 +235,7 @@ mod tests {
         return close_witness_input;
     }
 
-    fn generate_customer_merch_close_witness(cust_bal: [u8; 4], merch_bal: [u8; 4], cust_sig: &Vec<u8>, close_token: &Vec<u8>, wpk: &Vec<u8>) -> [u8; MERCH_CLOSE_WITNESS_LEN] {
+    fn generate_customer_merch_close_witness(cust_bal: [u8; 8], merch_bal: [u8; 8], cust_sig: &Vec<u8>, close_token: &Vec<u8>, wpk: &Vec<u8>) -> [u8; MERCH_CLOSE_WITNESS_LEN] {
         let mut close_witness_input = [0u8; MERCH_CLOSE_WITNESS_LEN];
         let mut close_witness_vec: Vec<u8> = Vec::new();
         close_witness_vec.push(0x1);
@@ -255,7 +255,7 @@ mod tests {
         return close_witness_input;
     }
 
-    fn generate_merchant_unilateral_close_witness(cust_bal: [u8; 4], merch_bal: [u8; 4], sig: &Vec<u8>) -> [u8; MERCH_CLOSE_WITNESS_LEN] {
+    fn generate_merchant_unilateral_close_witness(cust_bal: [u8; 8], merch_bal: [u8; 8], sig: &Vec<u8>) -> [u8; MERCH_CLOSE_WITNESS_LEN] {
         let mut close_witness_input = [0u8; MERCH_CLOSE_WITNESS_LEN];
         let mut close_witness_vec: Vec<u8> = Vec::new();
         close_witness_vec.push(0x0);
@@ -271,7 +271,7 @@ mod tests {
         return close_witness_input;
     }
 
-    fn generate_merchant_close_witness(cust_bal: [u8; 4], merch_bal: [u8; 4], cust_sig: &Vec<u8>, merch_sig: &Vec<u8>) -> [u8; OPEN_WITNESS_LEN] {
+    fn generate_merchant_close_witness(cust_bal: [u8; 8], merch_bal: [u8; 8], cust_sig: &Vec<u8>, merch_sig: &Vec<u8>) -> [u8; OPEN_WITNESS_LEN] {
         let mut close_witness_input = [0u8; OPEN_WITNESS_LEN];
         let mut close_witness_vec: Vec<u8> = Vec::new();
         close_witness_vec.push(0x0);
@@ -321,7 +321,7 @@ mod tests {
         return spend_witness_input;
     }
 
-    fn generate_predicate(pubkey: &Vec<u8>, amount: [u8; 4], block_height: [u8; 4], channel_token: &Vec<u8>) -> [u8; CLOSE_PREDICATE_LEN] {
+    fn generate_predicate(pubkey: &Vec<u8>, amount: [u8; 8], block_height: [u8; 4], channel_token: &Vec<u8>) -> [u8; CLOSE_PREDICATE_LEN] {
         let mut tx_predicate = [0u8; CLOSE_PREDICATE_LEN];
         let mut tx_pred: Vec<u8> = Vec::new();
         tx_pred.extend(pubkey.iter());
@@ -387,16 +387,16 @@ mod tests {
         // 1 byte mode + 4 bytes cust_bal + 4 bytes merch_bal + 72 bytes cust_sig + 96 bytes close token
         let close_token = hex::decode("8d4ff4d96f17760cabdd9728e667596c2c6d238427dd0529f2b6b60140fc71efc890e03502bdae679ca09236fbb11d9d832b9fc275bf44bad06fd9d0b0296722140273f6cba23859b48c3aaa5ed25455e70bd665165169956be25708026478b6").unwrap();
 
-        let cust_close_witness_input = generate_customer_close_witness([0,0,0,140], [0,0,0,70], &cust_sig1, &close_token, &wpk);
-        let merch_close_witness_input = generate_merchant_close_witness([0,0,0,200], [0,0,0,10], &cust_sig2, &merch_sig);
+        let cust_close_witness_input = generate_customer_close_witness([0,0,0,0,0,0,0,140], [0,0,0,0,0,0,0,70], &cust_sig1, &close_token, &wpk);
+        let merch_close_witness_input = generate_merchant_close_witness([0,0,0,0,0,0,0,200], [0,0,0,0,0,0,0,10], &cust_sig2, &merch_sig);
 
-        let cust_close_tx_predicate = generate_predicate(&wpk, [0,0,0,140], [0,0,0,146], &_ser_channel_token);
-        let cust_close_tx_predicate_too_early = generate_predicate(&wpk, [0,0,0,140], [0,0,0,110], &_ser_channel_token);
+        let cust_close_tx_predicate = generate_predicate(&wpk, [0,0,0,0,0,0,0,140], [0,0,0,146], &_ser_channel_token);
+        let cust_close_tx_predicate_too_early = generate_predicate(&wpk, [0,0,0,0,0,0,0,140], [0,0,0,110], &_ser_channel_token);
         let merch_close_tx_predicate = generate_merch_close_predicate(&_merch_close_addr2, [0,0,0,146], &_ser_channel_token);
 
         let merch_tx_hash2= vec![218, 142, 74, 74, 236, 37, 47, 120, 241, 20, 203, 94, 78, 126, 131, 174, 4, 3, 75, 81, 194, 90, 203, 24, 16, 158, 53, 237, 241, 57, 97, 137];
         let cust_sig3 = bolt::compute_tx_signature(&sk_c, &merch_tx_hash2);
-        let cust_close_witness_input2 = generate_customer_merch_close_witness([0,0,0,140], [0,0,0,70], &cust_sig3, &close_token, &wpk);
+        let cust_close_witness_input2 = generate_customer_merch_close_witness([0,0,0,0,0,0,0,140], [0,0,0,0,0,0,0,70], &cust_sig3, &close_token, &wpk);
 
         // escrow-tx (lock up 210 zats)
         let mut mtx_a = TransactionData::nu4();
@@ -634,14 +634,14 @@ mod tests {
         // 1 byte mode + 4 bytes cust_bal + 4 bytes merch_bal + 72 bytes cust_sig + 96 bytes close token
         let close_token = hex::decode("8d4ff4d96f17760cabdd9728e667596c2c6d238427dd0529f2b6b60140fc71efc890e03502bdae679ca09236fbb11d9d832b9fc275bf44bad06fd9d0b0296722140273f6cba23859b48c3aaa5ed25455e70bd665165169956be25708026478b6").unwrap();
 
-        let merch_close_witness_input = generate_merchant_close_witness([0,0,0,200], [0,0,0,10], &cust_sig2, &merch_sig);
+        let merch_close_witness_input = generate_merchant_close_witness([0,0,0,0,0,0,0,200], [0,0,0,0,0,0,0,10], &cust_sig2, &merch_sig);
 
         let merch_close_tx_predicate = generate_merch_close_predicate(&_merch_close_addr2, [0,0,0,146], &_ser_channel_token);
         let merch_close_tx_predicate_too_early = generate_merch_close_predicate(&_merch_close_addr2, [0,0,0,110], &_ser_channel_token);
 
         let merch_tx_hash2= vec![175, 134, 188, 203, 129, 93, 74, 219, 67, 195, 80, 143, 144, 87, 109, 169, 129, 138, 65, 71, 66, 23, 117, 101, 91, 204, 217, 196, 36, 124, 91, 87];
         let merch_sig = bolt::compute_tx_signature(&sk_m, &merch_tx_hash2);
-        let merch_close_witness = generate_merchant_unilateral_close_witness([0,0,0,140], [0,0,0,70], &merch_sig);
+        let merch_close_witness = generate_merchant_unilateral_close_witness([0,0,0,0,0,0,0,140], [0,0,0,0,0,0,0,70], &merch_sig);
 
         // escrow-tx (lock up 210 zats)
         let mut mtx_a = TransactionData::nu4();
@@ -816,9 +816,9 @@ mod tests {
         // 1 byte mode + 4 bytes cust_bal + 4 bytes merch_bal + 72 bytes cust_sig + 96 bytes close token
         let close_token = hex::decode("8d4ff4d96f17760cabdd9728e667596c2c6d238427dd0529f2b6b60140fc71efc890e03502bdae679ca09236fbb11d9d832b9fc275bf44bad06fd9d0b0296722140273f6cba23859b48c3aaa5ed25455e70bd665165169956be25708026478b6").unwrap();
 
-        let cust_close_witness_input = generate_customer_close_witness([0,0,0,140], [0,0,0,70], &cust_sig1, &close_token, &wpk);
+        let cust_close_witness_input = generate_customer_close_witness([0,0,0,0,0,0,0,140], [0,0,0,0,0,0,0,70], &cust_sig1, &close_token, &wpk);
 
-        let cust_close_tx_predicate = generate_predicate(&wpk, [0,0,0,140], [0,0,0,146], &_ser_channel_token);
+        let cust_close_tx_predicate = generate_predicate(&wpk, [0,0,0,0,0,0,0,140], [0,0,0,146], &_ser_channel_token);
         let merch_close_tx_predicate = generate_open_predicate(&_merch_close_addr2, &_ser_channel_token);
 
         let merch_sig = hex::decode("3045022100e171be9eb5ffc799eb944e87762116ddff9ae77de58f63175ca354b9d93922390220601aed54bc60d03012f7d1b76d2caa78f9d461b83f014d40ec33ea233de2246e").unwrap();
