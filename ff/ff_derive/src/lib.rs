@@ -10,6 +10,8 @@ use quote::quote;
 use quote::TokenStreamExt;
 use std::str::FromStr;
 
+mod pow_fixed;
+
 #[proc_macro_derive(PrimeField, attributes(PrimeFieldModulus, PrimeFieldGenerator))]
 pub fn prime_field(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     // Parse the type definition
