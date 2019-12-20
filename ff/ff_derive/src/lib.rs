@@ -409,8 +409,11 @@ fn prime_field_constants_and_sqrt(
     let sqrt_impl = if (modulus % BigUint::from_str("4").unwrap())
         == BigUint::from_str("3").unwrap()
     {
-        let mod_plus_1_over_4 =
-            biguint_to_u64_vec((modulus + BigUint::from_str("1").unwrap()) >> 2, limbs);
+        // Addition chain for (r + 1) // 4
+        let mod_plus_1_over_4 = pow_fixed::generate(
+            &quote! {self},
+            (modulus + BigUint::from_str("1").unwrap()) >> 2,
+        );
 
         quote! {
             impl ::ff::SqrtField for #name {
@@ -420,7 +423,9 @@ fn prime_field_constants_and_sqrt(
                     // Because r = 3 (mod 4)
                     // sqrt can be done with only one exponentiation,
                     // via the computation of  self^((r + 1) // 4) (mod r)
-                    let sqrt = self.pow_vartime(#mod_plus_1_over_4);
+                    let sqrt = {
+                        #mod_plus_1_over_4
+                    };
 
                     ::subtle::CtOption::new(
                         sqrt,
@@ -430,7 +435,8 @@ fn prime_field_constants_and_sqrt(
             }
         }
     } else if (modulus % BigUint::from_str("16").unwrap()) == BigUint::from_str("1").unwrap() {
-        let t_minus_1_over_2 = biguint_to_u64_vec((&t - BigUint::one()) >> 1, limbs);
+        // Addition chain for (t - 1) // 2
+        let t_minus_1_over_2 = pow_fixed::generate(&quote! {self}, (&t - BigUint::one()) >> 1);
 
         quote! {
             impl ::ff::SqrtField for #name {
@@ -440,7 +446,9 @@ fn prime_field_constants_and_sqrt(
                     use ::subtle::{ConditionallySelectable, ConstantTimeEq};
 
                     // w = self^((t - 1) // 2)
-                    let w = self.pow_vartime(#t_minus_1_over_2);
+                    let w = {
+                        #t_minus_1_over_2
+                    };
 
                     let mut v = S;
                     let mut x = *self * &w;
@@ -744,11 +752,10 @@ fn prime_field_impl(
         a: proc_macro2::TokenStream,
         name: &syn::Ident,
         modulus: &BigUint,
-        limbs: usize,
     ) -> proc_macro2::TokenStream {
-        let mod_minus_2 = biguint_to_u64_vec(modulus - BigUint::from(2u64), limbs);
+        // Addition chain for p - 2
+        let mod_minus_2 = pow_fixed::generate(&a, modulus - BigUint::from(2u64));
 
-        // TODO: Improve on this by computing an addition chain for mod_minus_two
         quote! {
             use ::subtle::ConstantTimeEq;
 
@@ -758,7 +765,9 @@ fn prime_field_impl(
             // `ff_derive` requires that `p` is prime; in this case, `phi(p) = p - 1`, and
             // thus:
             //     a^-1 ≡ a^(p - 2) mod p
-            let inv = #a.pow_vartime(#mod_minus_2);
+            let inv = {
+                #mod_minus_2
+            };
 
             ::subtle::CtOption::new(inv, !#a.ct_eq(&#name::zero()))
         }
@@ -766,7 +775,7 @@ fn prime_field_impl(
 
     let squaring_impl = sqr_impl(quote! {self}, limbs);
     let multiply_impl = mul_impl(quote! {self}, quote! {other}, limbs);
-    let invert_impl = inv_impl(quote! {self}, name, modulus, limbs);
+    let invert_impl = inv_impl(quote! {self}, name, modulus);
     let montgomery_impl = mont_impl(limbs);
 
     // (self.0).0[0].ct_eq(&(other.0).0[0]) & (self.0).0[1].ct_eq(&(other.0).0[1]) & ...
