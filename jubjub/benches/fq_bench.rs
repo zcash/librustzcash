@@ -1,51 +1,58 @@
-#![feature(test)]
-
-extern crate test;
-
+use criterion::{criterion_group, criterion_main, Criterion};
 use jubjub::*;
-use test::Bencher;
 
-#[bench]
-fn bench_mul_assign(bencher: &mut Bencher) {
+fn bench_add_assign(c: &mut Criterion) {
     let mut n = Fq::one();
-    let b = -Fq::one();
-    bencher.iter(move || {
-        n *= &b;
+    let neg_one = -Fq::one();
+    c.bench_function("Fq add_assign", |b| {
+        b.iter(move || {
+            n += &neg_one;
+        })
     });
 }
 
-#[bench]
-fn bench_sub_assign(bencher: &mut Bencher) {
+fn bench_sub_assign(c: &mut Criterion) {
     let mut n = Fq::one();
-    let b = -Fq::one();
-    bencher.iter(move || {
-        n -= &b;
+    let neg_one = -Fq::one();
+    c.bench_function("Fq sub_assign", |b| {
+        b.iter(move || {
+            n -= &neg_one;
+        })
     });
 }
 
-#[bench]
-fn bench_add_assign(bencher: &mut Bencher) {
+fn bench_mul_assign(c: &mut Criterion) {
     let mut n = Fq::one();
-    let b = -Fq::one();
-    bencher.iter(move || {
-        n += &b;
+    let neg_one = -Fq::one();
+    c.bench_function("Fq mul_assign", |b| {
+        b.iter(move || {
+            n *= &neg_one;
+        })
     });
 }
 
-#[bench]
-fn bench_square_assign(bencher: &mut Bencher) {
+fn bench_square(c: &mut Criterion) {
     let n = Fq::one();
-    bencher.iter(move || n.square());
+    c.bench_function("Fq square", |b| b.iter(move || n.square()));
 }
 
-#[bench]
-fn bench_invert(bencher: &mut Bencher) {
+fn bench_invert(c: &mut Criterion) {
     let n = Fq::one();
-    bencher.iter(move || n.invert());
+    c.bench_function("Fq invert", |b| b.iter(move || n.invert()));
 }
 
-#[bench]
-fn bench_sqrt(bencher: &mut Bencher) {
+fn bench_sqrt(c: &mut Criterion) {
     let n = Fq::one().double().double();
-    bencher.iter(move || n.sqrt());
+    c.bench_function("Fq sqrt", |b| b.iter(move || n.sqrt()));
 }
+
+criterion_group!(
+    benches,
+    bench_add_assign,
+    bench_sub_assign,
+    bench_mul_assign,
+    bench_square,
+    bench_invert,
+    bench_sqrt,
+);
+criterion_main!(benches);

@@ -24,12 +24,17 @@ rand_core = "0.5"
 subtle = "2.2.1"
 
 [dev-dependencies]
+criterion = "0.3"
 rand_xorshift = "0.2"
 
 [features]
 unstable-features = ["expose-arith"]
 expose-arith = []
 default = []
+
+[[bench]]
+name = "pairing_benches"
+harness = false
 
 [badges]
 maintenance = { status = "actively-developed" }

@@ -13,7 +13,7 @@ edition = "2018"
 rustdoc-args = [ "--html-in-header", "katex-header.html" ]
 
 [dev-dependencies]
-criterion = "0.2.11"
+criterion = "0.3"
 
 [[bench]]
 name = "groups"
