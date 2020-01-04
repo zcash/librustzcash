@@ -30,3 +30,6 @@ groups = []
 pairings = ["groups"]
 alloc = []
 nightly = ["subtle/nightly"]
+
+# GLV patents US7110538B2 and US7995752B2 expire in September 2020.
+endo = []
