@@ -450,6 +450,7 @@ impl Fr {
     }
 
     #[inline]
+    #[allow(clippy::too_many_arguments)]
     const fn montgomery_reduce(
         r0: u64,
         r1: u64,
