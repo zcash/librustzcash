@@ -344,18 +344,18 @@ impl_binops_multiplicative_mixed!(ExtendedNielsPoint, Fr, ExtendedPoint);
 
 // `d = -(10240/10241)`
 const EDWARDS_D: Fq = Fq::from_raw([
-    0x01065fd6d6343eb1,
-    0x292d7f6d37579d26,
-    0xf5fd9207e6bd7fd4,
-    0x2a9318e74bfa2b48,
+    0x0106_5fd6_d634_3eb1,
+    0x292d_7f6d_3757_9d26,
+    0xf5fd_9207_e6bd_7fd4,
+    0x2a93_18e7_4bfa_2b48,
 ]);
 
 // `2*d`
 const EDWARDS_D2: Fq = Fq::from_raw([
-    0x020cbfadac687d62,
-    0x525afeda6eaf3a4c,
-    0xebfb240fcd7affa8,
-    0x552631ce97f45691,
+    0x020c_bfad_ac68_7d62,
+    0x525a_feda_6eaf_3a4c,
+    0xebfb_240f_cd7a_ffa8,
+    0x5526_31ce_97f4_5691,
 ]);
 
 impl AffinePoint {
@@ -952,16 +952,16 @@ fn test_extended_niels_point_identity() {
 fn test_assoc() {
     let p = ExtendedPoint::from(AffinePoint {
         u: Fq::from_raw([
-            0x81c571e5d883cfb0,
-            0x049f7a686f147029,
-            0xf539c860bc3ea21f,
-            0x4284715b7ccc8162,
+            0x81c5_71e5_d883_cfb0,
+            0x049f_7a68_6f14_7029,
+            0xf539_c860_bc3e_a21f,
+            0x4284_715b_7ccc_8162,
         ]),
         v: Fq::from_raw([
-            0xbf096275684bb8ca,
-            0xc7ba245890af256d,
-            0x59119f3e86380eb0,
-            0x3793de182f9fb1d2,
+            0xbf09_6275_684b_b8ca,
+            0xc7ba_2458_90af_256d,
+            0x5911_9f3e_8638_0eb0,
+            0x3793_de18_2f9f_b1d2,
         ]),
     })
     .mul_by_cofactor();
@@ -977,16 +977,16 @@ fn test_assoc() {
 fn test_batch_normalize() {
     let mut p = ExtendedPoint::from(AffinePoint {
         u: Fq::from_raw([
-            0x81c571e5d883cfb0,
-            0x049f7a686f147029,
-            0xf539c860bc3ea21f,
-            0x4284715b7ccc8162,
+            0x81c5_71e5_d883_cfb0,
+            0x049f_7a68_6f14_7029,
+            0xf539_c860_bc3e_a21f,
+            0x4284_715b_7ccc_8162,
         ]),
         v: Fq::from_raw([
-            0xbf096275684bb8ca,
-            0xc7ba245890af256d,
-            0x59119f3e86380eb0,
-            0x3793de182f9fb1d2,
+            0xbf09_6275_684b_b8ca,
+            0xc7ba_2458_90af_256d,
+            0x5911_9f3e_8638_0eb0,
+            0x3793_de18_2f9f_b1d2,
         ]),
     })
     .mul_by_cofactor();
@@ -1019,10 +1019,10 @@ fn test_batch_normalize() {
 #[cfg(test)]
 const FULL_GENERATOR: AffinePoint = AffinePoint::from_raw_unchecked(
     Fq::from_raw([
-        0xe4b3d35df1a7adfe,
-        0xcaf55d1b29bf81af,
-        0x8b0f03ddd60a8187,
-        0x62edcbb8bf3787c8,
+        0xe4b3_d35d_f1a7_adfe,
+        0xcaf5_5d1b_29bf_81af,
+        0x8b0f_03dd_d60a_8187,
+        0x62ed_cbb8_bf37_87c8,
     ]),
     Fq::from_raw([0xb, 0x0, 0x0, 0x0]),
 );
@@ -1031,80 +1031,85 @@ const FULL_GENERATOR: AffinePoint = AffinePoint::from_raw_unchecked(
 const EIGHT_TORSION: [AffinePoint; 8] = [
     AffinePoint::from_raw_unchecked(
         Fq::from_raw([
-            0xd92e6a7927200d43,
-            0x7aa41ac43dae8582,
-            0xeaaae086a16618d1,
-            0x71d4df38ba9e7973,
+            0xd92e_6a79_2720_0d43,
+            0x7aa4_1ac4_3dae_8582,
+            0xeaaa_e086_a166_18d1,
+            0x71d4_df38_ba9e_7973,
         ]),
         Fq::from_raw([
-            0xff0d2068eff496dd,
-            0x9106ee90f384a4a1,
-            0x16a13035ad4d7266,
-            0x4958bdb21966982e,
+            0xff0d_2068_eff4_96dd,
+            0x9106_ee90_f384_a4a1,
+            0x16a1_3035_ad4d_7266,
+            0x4958_bdb2_1966_982e,
         ]),
     ),
     AffinePoint::from_raw_unchecked(
         Fq::from_raw([
-            0xfffeffff00000001,
-            0x67baa40089fb5bfe,
-            0xa5e80b39939ed334,
-            0x73eda753299d7d47,
+            0xfffe_ffff_0000_0001,
+            0x67ba_a400_89fb_5bfe,
+            0xa5e8_0b39_939e_d334,
+            0x73ed_a753_299d_7d47,
         ]),
         Fq::from_raw([0x0, 0x0, 0x0, 0x0]),
     ),
     AffinePoint::from_raw_unchecked(
         Fq::from_raw([
-            0xd92e6a7927200d43,
-            0x7aa41ac43dae8582,
-            0xeaaae086a16618d1,
-            0x71d4df38ba9e7973,
+            0xd92e_6a79_2720_0d43,
+            0x7aa4_1ac4_3dae_8582,
+            0xeaaa_e086_a166_18d1,
+            0x71d4_df38_ba9e_7973,
         ]),
         Fq::from_raw([
-            0xf2df96100b6924,
-            0xc2b6b5720c79b75d,
-            0x1c98a7d25c54659e,
-            0x2a94e9a11036e51a,
+            0x00f2_df96_100b_6924,
+            0xc2b6_b572_0c79_b75d,
+            0x1c98_a7d2_5c54_659e,
+            0x2a94_e9a1_1036_e51a,
         ]),
     ),
     AffinePoint::from_raw_unchecked(
         Fq::from_raw([0x0, 0x0, 0x0, 0x0]),
         Fq::from_raw([
-            0xffffffff00000000,
-            0x53bda402fffe5bfe,
-            0x3339d80809a1d805,
-            0x73eda753299d7d48,
+            0xffff_ffff_0000_0000,
+            0x53bd_a402_fffe_5bfe,
+            0x3339_d808_09a1_d805,
+            0x73ed_a753_299d_7d48,
         ]),
     ),
     AffinePoint::from_raw_unchecked(
         Fq::from_raw([
-            0x26d19585d8dff2be,
-            0xd919893ec24fd67c,
-            0x488ef781683bbf33,
-            0x218c81a6eff03d4,
+            0x26d1_9585_d8df_f2be,
+            0xd919_893e_c24f_d67c,
+            0x488e_f781_683b_bf33,
+            0x0218_c81a_6eff_03d4,
         ]),
         Fq::from_raw([
-            0xf2df96100b6924,
-            0xc2b6b5720c79b75d,
-            0x1c98a7d25c54659e,
-            0x2a94e9a11036e51a,
+            0x00f2_df96_100b_6924,
+            0xc2b6_b572_0c79_b75d,
+            0x1c98_a7d2_5c54_659e,
+            0x2a94_e9a1_1036_e51a,
         ]),
     ),
     AffinePoint::from_raw_unchecked(
-        Fq::from_raw([0x1000000000000, 0xec03000276030000, 0x8d51ccce760304d0, 0x0]),
+        Fq::from_raw([
+            0x0001_0000_0000_0000,
+            0xec03_0002_7603_0000,
+            0x8d51_ccce_7603_04d0,
+            0x0,
+        ]),
         Fq::from_raw([0x0, 0x0, 0x0, 0x0]),
     ),
     AffinePoint::from_raw_unchecked(
         Fq::from_raw([
-            0x26d19585d8dff2be,
-            0xd919893ec24fd67c,
-            0x488ef781683bbf33,
-            0x218c81a6eff03d4,
+            0x26d1_9585_d8df_f2be,
+            0xd919_893e_c24f_d67c,
+            0x488e_f781_683b_bf33,
+            0x0218_c81a_6eff_03d4,
         ]),
         Fq::from_raw([
-            0xff0d2068eff496dd,
-            0x9106ee90f384a4a1,
-            0x16a13035ad4d7266,
-            0x4958bdb21966982e,
+            0xff0d_2068_eff4_96dd,
+            0x9106_ee90_f384_a4a1,
+            0x16a1_3035_ad4d_7266,
+            0x4958_bdb2_1966_982e,
         ]),
     ),
     AffinePoint::from_raw_unchecked(
@@ -1192,36 +1197,36 @@ fn test_is_identity() {
 #[test]
 fn test_mul_consistency() {
     let a = Fr([
-        0x21e61211d9934f2e,
-        0xa52c058a693c3e07,
-        0x9ccb77bfb12d6360,
-        0x07df2470ec94398e,
+        0x21e6_1211_d993_4f2e,
+        0xa52c_058a_693c_3e07,
+        0x9ccb_77bf_b12d_6360,
+        0x07df_2470_ec94_398e,
     ]);
     let b = Fr([
-        0x03336d1cbe19dbe0,
-        0x0153618f6156a536,
-        0x2604c9e1fc3c6b15,
-        0x04ae581ceb028720,
+        0x0333_6d1c_be19_dbe0,
+        0x0153_618f_6156_a536,
+        0x2604_c9e1_fc3c_6b15,
+        0x04ae_581c_eb02_8720,
     ]);
     let c = Fr([
-        0xd7abf5bb24683f4c,
-        0x9d7712cc274b7c03,
-        0x973293db9683789f,
-        0x0b677e29380a97a7,
+        0xd7ab_f5bb_2468_3f4c,
+        0x9d77_12cc_274b_7c03,
+        0x9732_93db_9683_789f,
+        0x0b67_7e29_380a_97a7,
     ]);
     assert_eq!(a * b, c);
     let p = ExtendedPoint::from(AffinePoint {
         u: Fq::from_raw([
-            0x81c571e5d883cfb0,
-            0x049f7a686f147029,
-            0xf539c860bc3ea21f,
-            0x4284715b7ccc8162,
+            0x81c5_71e5_d883_cfb0,
+            0x049f_7a68_6f14_7029,
+            0xf539_c860_bc3e_a21f,
+            0x4284_715b_7ccc_8162,
         ]),
         v: Fq::from_raw([
-            0xbf096275684bb8ca,
-            0xc7ba245890af256d,
-            0x59119f3e86380eb0,
-            0x3793de182f9fb1d2,
+            0xbf09_6275_684b_b8ca,
+            0xc7ba_2458_90af_256d,
+            0x5911_9f3e_8638_0eb0,
+            0x3793_de18_2f9f_b1d2,
         ]),
     })
     .mul_by_cofactor();
