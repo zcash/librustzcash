@@ -304,7 +304,7 @@ impl Fr {
 
         CtOption::new(
             sqrt,
-            (&sqrt * &sqrt).ct_eq(self), // Only return Some if it's the square root.
+            (sqrt * sqrt).ct_eq(self), // Only return Some if it's the square root.
         )
     }
 
@@ -355,25 +355,25 @@ impl Fr {
         // found using https://github.com/kwantam/addchain
         let mut t1 = self.square();
         let mut t0 = t1.square();
-        let mut t3 = t0 * &t1;
+        let mut t3 = t0 * t1;
         let t6 = t3 * self;
-        let t7 = t6 * &t1;
-        let t12 = t7 * &t3;
-        let t13 = t12 * &t0;
-        let t16 = t12 * &t3;
-        let t2 = t13 * &t3;
-        let t15 = t16 * &t3;
-        let t19 = t2 * &t0;
-        let t9 = t15 * &t3;
-        let t18 = t9 * &t3;
-        let t14 = t18 * &t1;
-        let t4 = t18 * &t0;
-        let t8 = t18 * &t3;
-        let t17 = t14 * &t3;
-        let t11 = t8 * &t3;
-        t1 = t17 * &t3;
-        let t5 = t11 * &t3;
-        t3 = t5 * &t0;
+        let t7 = t6 * t1;
+        let t12 = t7 * t3;
+        let t13 = t12 * t0;
+        let t16 = t12 * t3;
+        let t2 = t13 * t3;
+        let t15 = t16 * t3;
+        let t19 = t2 * t0;
+        let t9 = t15 * t3;
+        let t18 = t9 * t3;
+        let t14 = t18 * t1;
+        let t4 = t18 * t0;
+        let t8 = t18 * t3;
+        let t17 = t14 * t3;
+        let t11 = t8 * t3;
+        t1 = t17 * t3;
+        let t5 = t11 * t3;
+        t3 = t5 * t0;
         t0 = t5.square();
         square_assign_multi(&mut t0, 5);
         t0.mul_assign(&t3);

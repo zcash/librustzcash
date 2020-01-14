@@ -117,8 +117,8 @@ impl ConstantTimeEq for ExtendedPoint {
         //      (vz'z = v'z'z)
         // as z and z' are always nonzero.
 
-        (&self.u * &other.z).ct_eq(&(&other.u * &self.z))
-            & (&self.v * &other.z).ct_eq(&(&other.v * &self.z))
+        (self.u * other.z).ct_eq(&(other.u * self.z))
+            & (self.v * other.z).ct_eq(&(other.v * self.z))
     }
 }
 
@@ -184,8 +184,8 @@ impl<'a> From<&'a ExtendedPoint> for AffinePoint {
         let zinv = extended.z.invert().unwrap();
 
         AffinePoint {
-            u: extended.u * &zinv,
-            v: extended.v * &zinv,
+            u: extended.u * zinv,
+            v: extended.v * zinv,
         }
     }
 }
@@ -430,7 +430,7 @@ impl AffinePoint {
 
             let v2 = v.square();
 
-            ((v2 - Fq::one()) * ((Fq::one() + EDWARDS_D * &v2).invert().unwrap_or(Fq::zero())))
+            ((v2 - Fq::one()) * ((Fq::one() + EDWARDS_D * v2).invert().unwrap_or(Fq::zero())))
                 .sqrt()
                 .and_then(|u| {
                     // Fix the sign of `u` if necessary
@@ -477,7 +477,7 @@ impl AffinePoint {
         let u2 = self.u.square();
         let v2 = self.v.square();
 
-        &v2 - &u2 == Fq::one() + &EDWARDS_D * &u2 * &v2
+        v2 - u2 == Fq::one() + EDWARDS_D * u2 * v2
     }
 }
 
@@ -533,10 +533,10 @@ impl ExtendedPoint {
     /// for use in multiple additions.
     pub fn to_niels(&self) -> ExtendedNielsPoint {
         ExtendedNielsPoint {
-            v_plus_u: &self.v + &self.u,
-            v_minus_u: &self.v - &self.u,
+            v_plus_u: self.v + self.u,
+            v_minus_u: self.v - self.u,
             z: self.z,
-            t2d: &self.t1 * &self.t2 * EDWARDS_D2,
+            t2d: self.t1 * self.t2 * EDWARDS_D2,
         }
     }
 
@@ -618,17 +618,17 @@ impl ExtendedPoint {
         let uu = self.u.square();
         let vv = self.v.square();
         let zz2 = self.z.square().double();
-        let uv2 = (&self.u + &self.v).square();
-        let vv_plus_uu = &vv + &uu;
-        let vv_minus_uu = &vv - &uu;
+        let uv2 = (self.u + self.v).square();
+        let vv_plus_uu = vv + uu;
+        let vv_minus_uu = vv - uu;
 
         // The remaining arithmetic is exactly the process of converting
         // from a completed point to an extended point.
         CompletedPoint {
-            u: &uv2 - &vv_plus_uu,
+            u: uv2 - vv_plus_uu,
             v: vv_plus_uu,
             z: vv_minus_uu,
-            t: &zz2 - &vv_minus_uu,
+            t: zz2 - vv_minus_uu,
         }
         .into_extended()
     }
@@ -683,18 +683,18 @@ impl<'a, 'b> Add<&'b ExtendedNielsPoint> for &'a ExtendedPoint {
         // Z3 = F * G
         // T3 = E * H
 
-        let a = (&self.v - &self.u) * &other.v_minus_u;
-        let b = (&self.v + &self.u) * &other.v_plus_u;
-        let c = &self.t1 * &self.t2 * &other.t2d;
-        let d = (&self.z * &other.z).double();
+        let a = (self.v - self.u) * other.v_minus_u;
+        let b = (self.v + self.u) * other.v_plus_u;
+        let c = self.t1 * self.t2 * other.t2d;
+        let d = (self.z * other.z).double();
 
         // The remaining arithmetic is exactly the process of converting
         // from a completed point to an extended point.
         CompletedPoint {
-            u: &b - &a,
-            v: &b + &a,
-            z: &d + &c,
-            t: &d - &c,
+            u: b - a,
+            v: b + a,
+            z: d + c,
+            t: d - c,
         }
         .into_extended()
     }
@@ -705,16 +705,16 @@ impl<'a, 'b> Sub<&'b ExtendedNielsPoint> for &'a ExtendedPoint {
 
     #[allow(clippy::suspicious_arithmetic_impl)]
     fn sub(self, other: &'b ExtendedNielsPoint) -> ExtendedPoint {
-        let a = (&self.v - &self.u) * &other.v_plus_u;
-        let b = (&self.v + &self.u) * &other.v_minus_u;
-        let c = &self.t1 * &self.t2 * &other.t2d;
-        let d = (&self.z * &other.z).double();
+        let a = (self.v - self.u) * other.v_plus_u;
+        let b = (self.v + self.u) * other.v_minus_u;
+        let c = self.t1 * self.t2 * other.t2d;
+        let d = (self.z * other.z).double();
 
         CompletedPoint {
-            u: &b - &a,
-            v: &b + &a,
-            z: &d - &c,
-            t: &d + &c,
+            u: b - a,
+            v: b + a,
+            z: d - c,
+            t: d + c,
         }
         .into_extended()
     }
@@ -731,18 +731,18 @@ impl<'a, 'b> Add<&'b AffineNielsPoint> for &'a ExtendedPoint {
         // except we can assume that `other.z` is one, so that we perform
         // 7 multiplications.
 
-        let a = (&self.v - &self.u) * &other.v_minus_u;
-        let b = (&self.v + &self.u) * &other.v_plus_u;
-        let c = &self.t1 * &self.t2 * &other.t2d;
+        let a = (self.v - self.u) * other.v_minus_u;
+        let b = (self.v + self.u) * other.v_plus_u;
+        let c = self.t1 * self.t2 * other.t2d;
         let d = self.z.double();
 
         // The remaining arithmetic is exactly the process of converting
         // from a completed point to an extended point.
         CompletedPoint {
-            u: &b - &a,
-            v: &b + &a,
-            z: &d + &c,
-            t: &d - &c,
+            u: b - a,
+            v: b + a,
+            z: d + c,
+            t: d - c,
         }
         .into_extended()
     }
@@ -753,16 +753,16 @@ impl<'a, 'b> Sub<&'b AffineNielsPoint> for &'a ExtendedPoint {
 
     #[allow(clippy::suspicious_arithmetic_impl)]
     fn sub(self, other: &'b AffineNielsPoint) -> ExtendedPoint {
-        let a = (&self.v - &self.u) * &other.v_plus_u;
-        let b = (&self.v + &self.u) * &other.v_minus_u;
-        let c = &self.t1 * &self.t2 * &other.t2d;
+        let a = (self.v - self.u) * other.v_plus_u;
+        let b = (self.v + self.u) * other.v_minus_u;
+        let c = self.t1 * self.t2 * other.t2d;
         let d = self.z.double();
 
         CompletedPoint {
-            u: &b - &a,
-            v: &b + &a,
-            z: &d - &c,
-            t: &d + &c,
+            u: b - a,
+            v: b + a,
+            z: d - c,
+            t: d + c,
         }
         .into_extended()
     }
@@ -832,9 +832,9 @@ impl CompletedPoint {
     #[inline]
     fn into_extended(self) -> ExtendedPoint {
         ExtendedPoint {
-            u: &self.u * &self.t,
-            v: &self.v * &self.z,
-            z: &self.z * &self.t,
+            u: self.u * self.t,
+            v: self.v * self.z,
+            z: self.z * self.t,
             t1: self.u,
             t2: self.v,
         }
@@ -1323,6 +1323,6 @@ fn test_serialization_consistency() {
         let deserialized = AffinePoint::from_bytes(serialized).unwrap();
         assert_eq!(affine, deserialized);
         assert_eq!(expected_serialized, serialized);
-        p = p + &gen;
+        p += gen;
     }
 }
