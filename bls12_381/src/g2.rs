@@ -1208,7 +1208,7 @@ fn test_projective_addition() {
 
         let mut d = G2Projective::generator();
         for _ in 0..5 {
-            d = d + G2Projective::generator();
+            d += G2Projective::generator();
         }
         assert!(!bool::from(c.is_identity()));
         assert!(bool::from(c.is_on_curve()));
@@ -1372,7 +1372,7 @@ fn test_mixed_addition() {
 
         let mut d = G2Projective::generator();
         for _ in 0..5 {
-            d = d + G2Affine::generator();
+            d += G2Affine::generator();
         }
         assert!(!bool::from(c.is_identity()));
         assert!(bool::from(c.is_on_curve()));

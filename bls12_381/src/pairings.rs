@@ -57,28 +57,28 @@ impl MillerLoopResult {
 
             // For A
             z0 = t0 - z0;
-            z0 += z0 + t0;
+            z0 = z0 + z0 + t0;
 
             z1 = t1 + z1;
-            z1 += z1 + t1;
+            z1 = z1 + z1 + t1;
 
             let (mut t0, t1) = fp4_square(z2, z3);
             let (t2, t3) = fp4_square(z4, z5);
 
             // For C
             z4 = t0 - z4;
-            z4 += z4 + t0;
+            z4 = z4 + z4 + t0;
 
             z5 = t1 + z5;
-            z5 += z5 + t1;
+            z5 = z5 + z5 + t1;
 
             // For B
             t0 = t3.mul_by_nonresidue();
             z2 = t0 + z2;
-            z2 += z2 + t0;
+            z2 = z2 + z2 + t0;
 
             z3 = t2 - z3;
-            z3 += z3 + t2;
+            z3 = z3 + z3 + t2;
 
             Fp12 {
                 c0: Fp6 {
