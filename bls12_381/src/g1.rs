@@ -144,12 +144,12 @@ impl_binops_additive!(G1Projective, G1Affine);
 impl_binops_additive_specify_output!(G1Affine, G1Projective, G1Projective);
 
 const B: Fp = Fp::from_raw_unchecked([
-    0xaa270000000cfff3,
-    0x53cc0032fc34000a,
-    0x478fe97a6b0a807f,
-    0xb1d37ebee6ba24d7,
-    0x8ec9733bbf78ab2f,
-    0x9d645513d83de7e,
+    0xaa27_0000_000c_fff3,
+    0x53cc_0032_fc34_000a,
+    0x478f_e97a_6b0a_807f,
+    0xb1d3_7ebe_e6ba_24d7,
+    0x8ec9_733b_bf78_ab2f,
+    0x09d6_4551_3d83_de7e,
 ]);
 
 impl G1Affine {
@@ -167,20 +167,20 @@ impl G1Affine {
     pub fn generator() -> G1Affine {
         G1Affine {
             x: Fp::from_raw_unchecked([
-                0x5cb38790fd530c16,
-                0x7817fc679976fff5,
-                0x154f95c7143ba1c1,
-                0xf0ae6acdf3d0e747,
-                0xedce6ecc21dbf440,
-                0x120177419e0bfb75,
+                0x5cb3_8790_fd53_0c16,
+                0x7817_fc67_9976_fff5,
+                0x154f_95c7_143b_a1c1,
+                0xf0ae_6acd_f3d0_e747,
+                0xedce_6ecc_21db_f440,
+                0x1201_7741_9e0b_fb75,
             ]),
             y: Fp::from_raw_unchecked([
-                0xbaac93d50ce72271,
-                0x8c22631a7918fd8e,
-                0xdd595f13570725ce,
-                0x51ac582950405194,
-                0xe1c8c3fad0059c0,
-                0xbbc3efc5008a26a,
+                0xbaac_93d5_0ce7_2271,
+                0x8c22_631a_7918_fd8e,
+                0xdd59_5f13_5707_25ce,
+                0x51ac_5829_5040_5194,
+                0x0e1c_8c3f_ad00_59c0,
+                0x0bbc_3efc_5008_a26a,
             ]),
             infinity: Choice::from(0u8),
         }
@@ -527,20 +527,20 @@ impl G1Projective {
     pub fn generator() -> G1Projective {
         G1Projective {
             x: Fp::from_raw_unchecked([
-                0x5cb38790fd530c16,
-                0x7817fc679976fff5,
-                0x154f95c7143ba1c1,
-                0xf0ae6acdf3d0e747,
-                0xedce6ecc21dbf440,
-                0x120177419e0bfb75,
+                0x5cb3_8790_fd53_0c16,
+                0x7817_fc67_9976_fff5,
+                0x154f_95c7_143b_a1c1,
+                0xf0ae_6acd_f3d0_e747,
+                0xedce_6ecc_21db_f440,
+                0x1201_7741_9e0b_fb75,
             ]),
             y: Fp::from_raw_unchecked([
-                0xbaac93d50ce72271,
-                0x8c22631a7918fd8e,
-                0xdd595f13570725ce,
-                0x51ac582950405194,
-                0xe1c8c3fad0059c0,
-                0xbbc3efc5008a26a,
+                0xbaac_93d5_0ce7_2271,
+                0x8c22_631a_7918_fd8e,
+                0xdd59_5f13_5707_25ce,
+                0x51ac_5829_5040_5194,
+                0x0e1c_8c3f_ad00_59c0,
+                0x0bbc_3efc_5008_a26a,
             ]),
             z: Fp::one(),
         }
@@ -801,12 +801,12 @@ fn test_is_on_curve() {
     assert!(bool::from(G1Projective::generator().is_on_curve()));
 
     let z = Fp::from_raw_unchecked([
-        0xba7afa1f9a6fe250,
-        0xfa0f5b595eafe731,
-        0x3bdc477694c306e7,
-        0x2149be4b3949fa24,
-        0x64aa6e0649b2078c,
-        0x12b108ac33643c3e,
+        0xba7a_fa1f_9a6f_e250,
+        0xfa0f_5b59_5eaf_e731,
+        0x3bdc_4776_94c3_06e7,
+        0x2149_be4b_3949_fa24,
+        0x64aa_6e06_49b2_078c,
+        0x12b1_08ac_3364_3c3e,
     ]);
 
     let gen = G1Affine::generator();
@@ -844,12 +844,12 @@ fn test_projective_point_equality() {
     assert!(b != a);
 
     let z = Fp::from_raw_unchecked([
-        0xba7afa1f9a6fe250,
-        0xfa0f5b595eafe731,
-        0x3bdc477694c306e7,
-        0x2149be4b3949fa24,
-        0x64aa6e0649b2078c,
-        0x12b108ac33643c3e,
+        0xba7a_fa1f_9a6f_e250,
+        0xfa0f_5b59_5eaf_e731,
+        0x3bdc_4776_94c3_06e7,
+        0x2149_be4b_3949_fa24,
+        0x64aa_6e06_49b2_078c,
+        0x12b1_08ac_3364_3c3e,
     ]);
 
     let mut c = G1Projective {
@@ -915,12 +915,12 @@ fn test_projective_to_affine() {
     assert!(bool::from(G1Affine::from(b).is_identity()));
 
     let z = Fp::from_raw_unchecked([
-        0xba7afa1f9a6fe250,
-        0xfa0f5b595eafe731,
-        0x3bdc477694c306e7,
-        0x2149be4b3949fa24,
-        0x64aa6e0649b2078c,
-        0x12b108ac33643c3e,
+        0xba7a_fa1f_9a6f_e250,
+        0xfa0f_5b59_5eaf_e731,
+        0x3bdc_4776_94c3_06e7,
+        0x2149_be4b_3949_fa24,
+        0x64aa_6e06_49b2_078c,
+        0x12b1_08ac_3364_3c3e,
     ]);
 
     let c = G1Projective {
@@ -959,20 +959,20 @@ fn test_doubling() {
             G1Affine::from(tmp),
             G1Affine {
                 x: Fp::from_raw_unchecked([
-                    0x53e978ce58a9ba3c,
-                    0x3ea0583c4f3d65f9,
-                    0x4d20bb47f0012960,
-                    0xa54c664ae5b2b5d9,
-                    0x26b552a39d7eb21f,
-                    0x8895d26e68785
+                    0x53e9_78ce_58a9_ba3c,
+                    0x3ea0_583c_4f3d_65f9,
+                    0x4d20_bb47_f001_2960,
+                    0xa54c_664a_e5b2_b5d9,
+                    0x26b5_52a3_9d7e_b21f,
+                    0x0008_895d_26e6_8785,
                 ]),
                 y: Fp::from_raw_unchecked([
-                    0x70110b3298293940,
-                    0xda33c5393f1f6afc,
-                    0xb86edfd16a5aa785,
-                    0xaec6d1c9e7b1c895,
-                    0x25cfc2b522d11720,
-                    0x6361c83f8d09b15
+                    0x7011_0b32_9829_3940,
+                    0xda33_c539_3f1f_6afc,
+                    0xb86e_dfd1_6a5a_a785,
+                    0xaec6_d1c9_e7b1_c895,
+                    0x25cf_c2b5_22d1_1720,
+                    0x0636_1c83_f8d0_9b15,
                 ]),
                 infinity: Choice::from(0u8)
             }
@@ -994,12 +994,12 @@ fn test_projective_addition() {
         let mut b = G1Projective::generator();
         {
             let z = Fp::from_raw_unchecked([
-                0xba7afa1f9a6fe250,
-                0xfa0f5b595eafe731,
-                0x3bdc477694c306e7,
-                0x2149be4b3949fa24,
-                0x64aa6e0649b2078c,
-                0x12b108ac33643c3e,
+                0xba7a_fa1f_9a6f_e250,
+                0xfa0f_5b59_5eaf_e731,
+                0x3bdc_4776_94c3_06e7,
+                0x2149_be4b_3949_fa24,
+                0x64aa_6e06_49b2_078c,
+                0x12b1_08ac_3364_3c3e,
             ]);
 
             b = G1Projective {
@@ -1018,12 +1018,12 @@ fn test_projective_addition() {
         let mut b = G1Projective::generator();
         {
             let z = Fp::from_raw_unchecked([
-                0xba7afa1f9a6fe250,
-                0xfa0f5b595eafe731,
-                0x3bdc477694c306e7,
-                0x2149be4b3949fa24,
-                0x64aa6e0649b2078c,
-                0x12b108ac33643c3e,
+                0xba7a_fa1f_9a6f_e250,
+                0xfa0f_5b59_5eaf_e731,
+                0x3bdc_4776_94c3_06e7,
+                0x2149_be4b_3949_fa24,
+                0x64aa_6e06_49b2_078c,
+                0x12b1_08ac_3364_3c3e,
             ]);
 
             b = G1Projective {
@@ -1056,12 +1056,12 @@ fn test_projective_addition() {
     // Degenerate case
     {
         let beta = Fp::from_raw_unchecked([
-            0xcd03c9e48671f071,
-            0x5dab22461fcda5d2,
-            0x587042afd3851b95,
-            0x8eb60ebe01bacb9e,
-            0x3f97d6e83d050d2,
-            0x18f0206554638741,
+            0xcd03_c9e4_8671_f071,
+            0x5dab_2246_1fcd_a5d2,
+            0x5870_42af_d385_1b95,
+            0x8eb6_0ebe_01ba_cb9e,
+            0x03f9_7d6e_83d0_50d2,
+            0x18f0_2065_5463_8741,
         ]);
         let beta = beta.square();
         let a = G1Projective::generator().double().double();
@@ -1078,20 +1078,20 @@ fn test_projective_addition() {
             G1Affine::from(c),
             G1Affine::from(G1Projective {
                 x: Fp::from_raw_unchecked([
-                    0x29e1e987ef68f2d0,
-                    0xc5f3ec531db03233,
-                    0xacd6c4b6ca19730f,
-                    0x18ad9e827bc2bab7,
-                    0x46e3b2c5785cc7a9,
-                    0x7e571d42d22ddd6
+                    0x29e1_e987_ef68_f2d0,
+                    0xc5f3_ec53_1db0_3233,
+                    0xacd6_c4b6_ca19_730f,
+                    0x18ad_9e82_7bc2_bab7,
+                    0x46e3_b2c5_785c_c7a9,
+                    0x07e5_71d4_2d22_ddd6,
                 ]),
                 y: Fp::from_raw_unchecked([
-                    0x94d117a7e5a539e7,
-                    0x8e17ef673d4b5d22,
-                    0x9d746aaf508a33ea,
-                    0x8c6d883d2516c9a2,
-                    0xbc3b8d5fb0447f7,
-                    0x7bfa4c7210f4f44
+                    0x94d1_17a7_e5a5_39e7,
+                    0x8e17_ef67_3d4b_5d22,
+                    0x9d74_6aaf_508a_33ea,
+                    0x8c6d_883d_2516_c9a2,
+                    0x0bc3_b8d5_fb04_47f7,
+                    0x07bf_a4c7_210f_4f44,
                 ]),
                 z: Fp::one()
             })
@@ -1115,12 +1115,12 @@ fn test_mixed_addition() {
         let mut b = G1Projective::generator();
         {
             let z = Fp::from_raw_unchecked([
-                0xba7afa1f9a6fe250,
-                0xfa0f5b595eafe731,
-                0x3bdc477694c306e7,
-                0x2149be4b3949fa24,
-                0x64aa6e0649b2078c,
-                0x12b108ac33643c3e,
+                0xba7a_fa1f_9a6f_e250,
+                0xfa0f_5b59_5eaf_e731,
+                0x3bdc_4776_94c3_06e7,
+                0x2149_be4b_3949_fa24,
+                0x64aa_6e06_49b2_078c,
+                0x12b1_08ac_3364_3c3e,
             ]);
 
             b = G1Projective {
@@ -1139,12 +1139,12 @@ fn test_mixed_addition() {
         let mut b = G1Projective::generator();
         {
             let z = Fp::from_raw_unchecked([
-                0xba7afa1f9a6fe250,
-                0xfa0f5b595eafe731,
-                0x3bdc477694c306e7,
-                0x2149be4b3949fa24,
-                0x64aa6e0649b2078c,
-                0x12b108ac33643c3e,
+                0xba7a_fa1f_9a6f_e250,
+                0xfa0f_5b59_5eaf_e731,
+                0x3bdc_4776_94c3_06e7,
+                0x2149_be4b_3949_fa24,
+                0x64aa_6e06_49b2_078c,
+                0x12b1_08ac_3364_3c3e,
             ]);
 
             b = G1Projective {
@@ -1177,12 +1177,12 @@ fn test_mixed_addition() {
     // Degenerate case
     {
         let beta = Fp::from_raw_unchecked([
-            0xcd03c9e48671f071,
-            0x5dab22461fcda5d2,
-            0x587042afd3851b95,
-            0x8eb60ebe01bacb9e,
-            0x3f97d6e83d050d2,
-            0x18f0206554638741,
+            0xcd03_c9e4_8671_f071,
+            0x5dab_2246_1fcd_a5d2,
+            0x5870_42af_d385_1b95,
+            0x8eb6_0ebe_01ba_cb9e,
+            0x03f9_7d6e_83d0_50d2,
+            0x18f0_2065_5463_8741,
         ]);
         let beta = beta.square();
         let a = G1Projective::generator().double().double();
@@ -1200,20 +1200,20 @@ fn test_mixed_addition() {
             G1Affine::from(c),
             G1Affine::from(G1Projective {
                 x: Fp::from_raw_unchecked([
-                    0x29e1e987ef68f2d0,
-                    0xc5f3ec531db03233,
-                    0xacd6c4b6ca19730f,
-                    0x18ad9e827bc2bab7,
-                    0x46e3b2c5785cc7a9,
-                    0x7e571d42d22ddd6
+                    0x29e1_e987_ef68_f2d0,
+                    0xc5f3_ec53_1db0_3233,
+                    0xacd6_c4b6_ca19_730f,
+                    0x18ad_9e82_7bc2_bab7,
+                    0x46e3_b2c5_785c_c7a9,
+                    0x07e5_71d4_2d22_ddd6,
                 ]),
                 y: Fp::from_raw_unchecked([
-                    0x94d117a7e5a539e7,
-                    0x8e17ef673d4b5d22,
-                    0x9d746aaf508a33ea,
-                    0x8c6d883d2516c9a2,
-                    0xbc3b8d5fb0447f7,
-                    0x7bfa4c7210f4f44
+                    0x94d1_17a7_e5a5_39e7,
+                    0x8e17_ef67_3d4b_5d22,
+                    0x9d74_6aaf_508a_33ea,
+                    0x8c6d_883d_2516_c9a2,
+                    0x0bc3_b8d5_fb04_47f7,
+                    0x07bf_a4c7_210f_4f44,
                 ]),
                 z: Fp::one()
             })
@@ -1241,16 +1241,16 @@ fn test_affine_negation_and_subtraction() {
 fn test_projective_scalar_multiplication() {
     let g = G1Projective::generator();
     let a = Scalar::from_raw([
-        0x2b568297a56da71c,
-        0xd8c39ecb0ef375d1,
-        0x435c38da67bfbf96,
-        0x8088a05026b659b2,
+        0x2b56_8297_a56d_a71c,
+        0xd8c3_9ecb_0ef3_75d1,
+        0x435c_38da_67bf_bf96,
+        0x8088_a050_26b6_59b2,
     ]);
     let b = Scalar::from_raw([
-        0x785fdd9b26ef8b85,
-        0xc997f25837695c18,
-        0x4c8dbc39e7b756c1,
-        0x70d9b6cc6d87df20,
+        0x785f_dd9b_26ef_8b85,
+        0xc997_f258_3769_5c18,
+        0x4c8d_bc39_e7b7_56c1,
+        0x70d9_b6cc_6d87_df20,
     ]);
     let c = a * b;
 
@@ -1261,16 +1261,16 @@ fn test_projective_scalar_multiplication() {
 fn test_affine_scalar_multiplication() {
     let g = G1Affine::generator();
     let a = Scalar::from_raw([
-        0x2b568297a56da71c,
-        0xd8c39ecb0ef375d1,
-        0x435c38da67bfbf96,
-        0x8088a05026b659b2,
+        0x2b56_8297_a56d_a71c,
+        0xd8c3_9ecb_0ef3_75d1,
+        0x435c_38da_67bf_bf96,
+        0x8088_a050_26b6_59b2,
     ]);
     let b = Scalar::from_raw([
-        0x785fdd9b26ef8b85,
-        0xc997f25837695c18,
-        0x4c8dbc39e7b756c1,
-        0x70d9b6cc6d87df20,
+        0x785f_dd9b_26ef_8b85,
+        0xc997_f258_3769_5c18,
+        0x4c8d_bc39_e7b7_56c1,
+        0x70d9_b6cc_6d87_df20,
     ]);
     let c = a * b;
 
@@ -1281,20 +1281,20 @@ fn test_affine_scalar_multiplication() {
 fn test_is_torsion_free() {
     let a = G1Affine {
         x: Fp::from_raw_unchecked([
-            0xabaf895b97e43c8,
-            0xba4c6432eb9b61b0,
-            0x12506f52adfe307f,
-            0x75028c3439336b72,
-            0x84744f05b8e9bd71,
-            0x113d554fb09554f7,
+            0x0aba_f895_b97e_43c8,
+            0xba4c_6432_eb9b_61b0,
+            0x1250_6f52_adfe_307f,
+            0x7502_8c34_3933_6b72,
+            0x8474_4f05_b8e9_bd71,
+            0x113d_554f_b095_54f7,
         ]),
         y: Fp::from_raw_unchecked([
-            0x73e90e88f5cf01c0,
-            0x37007b65dd3197e2,
-            0x5cf9a1992f0d7c78,
-            0x4f83c10b9eb3330d,
-            0xf6a63f6f07f60961,
-            0xc53b5b97e634df3,
+            0x73e9_0e88_f5cf_01c0,
+            0x3700_7b65_dd31_97e2,
+            0x5cf9_a199_2f0d_7c78,
+            0x4f83_c10b_9eb3_330d,
+            0xf6a6_3f6f_07f6_0961,
+            0x0c53_b5b9_7e63_4df3,
         ]),
         infinity: Choice::from(0u8),
     };
