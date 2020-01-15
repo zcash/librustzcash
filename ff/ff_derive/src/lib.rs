@@ -465,7 +465,7 @@ fn prime_field_constants_and_sqrt(
                         let result = x * &z;
                         x = #name::conditional_select(&result, &x, b.ct_eq(&#name::one()));
                         z = z.square();
-                        b = b * &z;
+                        b *= &z;
                         v = k;
                     }
 
