@@ -40,7 +40,7 @@ pub fn prime_field(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
         let mut cur = BigUint::one() << 64; // always 64-bit limbs for now
         while cur < mod2 {
             limbs += 1;
-            cur = cur << 64;
+            cur <<= 64;
         }
     }
 
@@ -60,23 +60,16 @@ pub fn prime_field(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
 
 /// Fetches the ident being wrapped by the type we're deriving.
 fn fetch_wrapped_ident(body: &syn::Data) -> Option<syn::Ident> {
-    match body {
-        &syn::Data::Struct(ref variant_data) => match variant_data.fields {
-            syn::Fields::Unnamed(ref fields) => {
-                if fields.unnamed.len() == 1 {
-                    match fields.unnamed[0].ty {
-                        syn::Type::Path(ref path) => {
-                            if path.path.segments.len() == 1 {
-                                return Some(path.path.segments[0].ident.clone());
-                            }
-                        }
-                        _ => {}
+    if let syn::Data::Struct(ref variant_data) = body {
+        if let syn::Fields::Unnamed(ref fields) = variant_data.fields {
+            if fields.unnamed.len() == 1 {
+                if let syn::Type::Path(ref path) = fields.unnamed[0].ty {
+                    if path.path.segments.len() == 1 {
+                        return Some(path.path.segments[0].ident.clone());
                     }
                 }
             }
-            _ => {}
-        },
-        _ => {}
+        }
     };
 
     None
@@ -315,7 +308,7 @@ fn biguint_to_real_u64_vec(mut v: BigUint, limbs: usize) -> Vec<u64> {
 
     while v > BigUint::zero() {
         ret.push((&v % &m).to_u64().unwrap());
-        v = v >> 64;
+        v >>= 64;
     }
 
     while ret.len() < limbs {
@@ -337,7 +330,7 @@ fn biguint_num_bits(mut v: BigUint) -> u32 {
     let mut bits = 0;
 
     while v != BigUint::zero() {
-        v = v >> 1;
+        v >>= 1;
         bits += 1;
     }
 
@@ -402,7 +395,7 @@ fn prime_field_constants_and_sqrt(
     let mut s: u32 = 0;
     let mut t = modulus - BigUint::from_str("1").unwrap();
     while t.is_even() {
-        t = t >> 1;
+        t >>= 1;
         s += 1;
     }
 
@@ -684,7 +677,7 @@ fn prime_field_impl(
 
         let mut mont_calling = proc_macro2::TokenStream::new();
         mont_calling.append_separated(
-            (0..(limbs * 2)).map(|i| get_temp(i)),
+            (0..(limbs * 2)).map(get_temp),
             proc_macro2::Punct::new(',', proc_macro2::Spacing::Alone),
         );
 
@@ -732,7 +725,7 @@ fn prime_field_impl(
 
         let mut mont_calling = proc_macro2::TokenStream::new();
         mont_calling.append_separated(
-            (0..(limbs * 2)).map(|i| get_temp(i)),
+            (0..(limbs * 2)).map(get_temp),
             proc_macro2::Punct::new(',', proc_macro2::Spacing::Alone),
         );
 
