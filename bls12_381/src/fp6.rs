@@ -490,18 +490,15 @@ fn test_arithmetic() {
         },
     };
 
-    assert_eq!(a.square(), &a * &a);
-    assert_eq!(b.square(), &b * &b);
-    assert_eq!(c.square(), &c * &c);
+    assert_eq!(a.square(), a * a);
+    assert_eq!(b.square(), b * b);
+    assert_eq!(c.square(), c * c);
+
+    assert_eq!((a + b) * c.square(), (c * c * a) + (c * c * b));
 
     assert_eq!(
-        (a + b) * c.square(),
-        &(&(&c * &c) * &a) + &(&(&c * &c) * &b)
+        a.invert().unwrap() * b.invert().unwrap(),
+        (a * b).invert().unwrap()
     );
-
-    assert_eq!(
-        &a.invert().unwrap() * &b.invert().unwrap(),
-        (&a * &b).invert().unwrap()
-    );
-    assert_eq!(&a.invert().unwrap() * &a, Fp6::one());
+    assert_eq!(a.invert().unwrap() * a, Fp6::one());
 }

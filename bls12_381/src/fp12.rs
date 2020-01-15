@@ -600,24 +600,21 @@ fn test_arithmetic() {
     // because a and b and c are similar to each other and
     // I was lazy, this is just some arbitrary way to make
     // them a little more different
-    let a = &a.square().invert().unwrap().square() + &c;
-    let b = &b.square().invert().unwrap().square() + &a;
-    let c = &c.square().invert().unwrap().square() + &b;
+    let a = a.square().invert().unwrap().square() + c;
+    let b = b.square().invert().unwrap().square() + a;
+    let c = c.square().invert().unwrap().square() + b;
 
-    assert_eq!(a.square(), &a * &a);
-    assert_eq!(b.square(), &b * &b);
-    assert_eq!(c.square(), &c * &c);
+    assert_eq!(a.square(), a * a);
+    assert_eq!(b.square(), b * b);
+    assert_eq!(c.square(), c * c);
 
-    assert_eq!(
-        (a + b) * c.square(),
-        &(&(&c * &c) * &a) + &(&(&c * &c) * &b)
-    );
+    assert_eq!((a + b) * c.square(), (c * c * a) + (c * c * b));
 
     assert_eq!(
-        &a.invert().unwrap() * &b.invert().unwrap(),
-        (&a * &b).invert().unwrap()
+        a.invert().unwrap() * b.invert().unwrap(),
+        (a * b).invert().unwrap()
     );
-    assert_eq!(&a.invert().unwrap() * &a, Fp12::one());
+    assert_eq!(a.invert().unwrap() * a, Fp12::one());
 
     assert!(a != a.frobenius_map());
     assert_eq!(
