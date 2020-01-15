@@ -925,6 +925,7 @@ fn test_is_on_curve() {
 }
 
 #[test]
+#[allow(clippy::eq_op)]
 fn test_affine_point_equality() {
     let a = G2Affine::generator();
     let b = G2Affine::identity();
@@ -936,6 +937,7 @@ fn test_affine_point_equality() {
 }
 
 #[test]
+#[allow(clippy::eq_op)]
 fn test_projective_point_equality() {
     let a = G2Projective::generator();
     let b = G2Projective::identity();
@@ -1452,6 +1454,7 @@ fn test_mixed_addition() {
 }
 
 #[test]
+#[allow(clippy::eq_op)]
 fn test_projective_negation_and_subtraction() {
     let a = G2Projective::generator().double();
     assert_eq!(a + (-a), G2Projective::identity());
