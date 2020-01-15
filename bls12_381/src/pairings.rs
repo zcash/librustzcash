@@ -311,15 +311,9 @@ impl From<G2Affine> for G2Prepared {
                 let coeffs = addition_step(&mut self.cur, &self.base);
                 self.coeffs.push(coeffs);
             }
-            fn square_output(_: Self::Output) -> Self::Output {
-                ()
-            }
-            fn conjugate(_: Self::Output) -> Self::Output {
-                ()
-            }
-            fn one() -> Self::Output {
-                ()
-            }
+            fn square_output(_: Self::Output) -> Self::Output {}
+            fn conjugate(_: Self::Output) -> Self::Output {}
+            fn one() -> Self::Output {}
         }
 
         let is_identity = q.is_identity();
