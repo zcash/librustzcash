@@ -139,7 +139,7 @@ impl Add for Fq6 {
     type Output = Self;
 
     fn add(self, other: Self) -> Self {
-        self + &other
+        self.add(&other)
     }
 }
 
@@ -173,7 +173,7 @@ impl Sub for Fq6 {
     type Output = Self;
 
     fn sub(self, other: Self) -> Self {
-        self - &other
+        self.sub(&other)
     }
 }
 
@@ -205,7 +205,7 @@ impl Mul for Fq6 {
     type Output = Self;
 
     fn mul(self, other: Self) -> Self {
-        self * &other
+        self.mul(&other)
     }
 }
 

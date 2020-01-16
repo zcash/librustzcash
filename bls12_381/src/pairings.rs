@@ -46,39 +46,39 @@ impl MillerLoopResult {
         // https://eprint.iacr.org/2009/565.pdf
         #[must_use]
         fn cyclotomic_square(f: Fp12) -> Fp12 {
-            let mut z0 = f.c0.c0.clone();
-            let mut z4 = f.c0.c1.clone();
-            let mut z3 = f.c0.c2.clone();
-            let mut z2 = f.c1.c0.clone();
-            let mut z1 = f.c1.c1.clone();
-            let mut z5 = f.c1.c2.clone();
+            let mut z0 = f.c0.c0;
+            let mut z4 = f.c0.c1;
+            let mut z3 = f.c0.c2;
+            let mut z2 = f.c1.c0;
+            let mut z1 = f.c1.c1;
+            let mut z5 = f.c1.c2;
 
             let (t0, t1) = fp4_square(z0, z1);
 
             // For A
             z0 = t0 - z0;
-            z0 += z0 + t0;
+            z0 = z0 + z0 + t0;
 
             z1 = t1 + z1;
-            z1 += z1 + t1;
+            z1 = z1 + z1 + t1;
 
             let (mut t0, t1) = fp4_square(z2, z3);
             let (t2, t3) = fp4_square(z4, z5);
 
             // For C
             z4 = t0 - z4;
-            z4 += z4 + t0;
+            z4 = z4 + z4 + t0;
 
             z5 = t1 + z5;
-            z5 += z5 + t1;
+            z5 = z5 + z5 + t1;
 
             // For B
             t0 = t3.mul_by_nonresidue();
             z2 = t0 + z2;
-            z2 += z2 + t0;
+            z2 = z2 + z2 + t0;
 
             z3 = t2 - z3;
-            z3 += z3 + t2;
+            z3 = z3 + z3 + t2;
 
             Fp12 {
                 c0: Fp6 {
@@ -113,7 +113,7 @@ impl MillerLoopResult {
             tmp.conjugate()
         }
 
-        let mut f = self.0.clone();
+        let mut f = self.0;
         let mut t0 = f
             .frobenius_map()
             .frobenius_map()
@@ -124,7 +124,7 @@ impl MillerLoopResult {
         Gt(f.invert()
             .map(|mut t1| {
                 let mut t2 = t0 * t1;
-                t1 = t2.clone();
+                t1 = t2;
                 t2 = t2.frobenius_map().frobenius_map();
                 t2 *= t1;
                 t1 = cyclotomic_square(t2).conjugate();
@@ -311,15 +311,9 @@ impl From<G2Affine> for G2Prepared {
                 let coeffs = addition_step(&mut self.cur, &self.base);
                 self.coeffs.push(coeffs);
             }
-            fn square_output(_: Self::Output) -> Self::Output {
-                ()
-            }
-            fn conjugate(_: Self::Output) -> Self::Output {
-                ()
-            }
-            fn one() -> Self::Output {
-                ()
-            }
+            fn square_output(_: Self::Output) -> Self::Output {}
+            fn conjugate(_: Self::Output) -> Self::Output {}
+            fn one() -> Self::Output {}
         }
 
         let is_identity = q.is_identity();

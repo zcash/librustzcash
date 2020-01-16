@@ -15,7 +15,6 @@
 #![deny(missing_docs)]
 #![deny(unsafe_code)]
 #![allow(clippy::too_many_arguments)]
-#![allow(clippy::unreadable_literal)]
 #![allow(clippy::many_single_char_names)]
 // This lint is described at
 // https://rust-lang.github.io/rust-clippy/master/index.html#suspicious_arithmetic_impl
@@ -68,7 +67,7 @@ mod fp12;
 mod fp6;
 
 // The BLS parameter x for BLS12-381 is -0xd201000000010000
-const BLS_X: u64 = 0xd201000000010000;
+const BLS_X: u64 = 0xd201_0000_0001_0000;
 const BLS_X_IS_NEGATIVE: bool = true;
 
 #[cfg(feature = "pairings")]

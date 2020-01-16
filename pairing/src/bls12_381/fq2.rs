@@ -90,7 +90,7 @@ impl Add for Fq2 {
     type Output = Self;
 
     fn add(self, other: Self) -> Self {
-        self + &other
+        self.add(&other)
     }
 }
 
@@ -122,7 +122,7 @@ impl Sub for Fq2 {
     type Output = Self;
 
     fn sub(self, other: Self) -> Self {
-        self - &other
+        self.sub(&other)
     }
 }
 
@@ -153,7 +153,7 @@ impl Mul for Fq2 {
     type Output = Self;
 
     fn mul(self, other: Self) -> Self {
-        self * &other
+        self.mul(&other)
     }
 }
 
@@ -309,7 +309,7 @@ fn test_fq2_ordering() {
         c1: Fq::zero(),
     };
 
-    let mut b = a.clone();
+    let mut b = a;
 
     assert!(a.cmp(&b) == Ordering::Equal);
     b.c0.add_assign(&Fq::one());

@@ -64,10 +64,10 @@ impl ConditionallySelectable for Fr {
 /// Constant representing the modulus
 /// r = 0x0e7db4ea6533afa906673b0101343b00a6682093ccc81082d0970e5ed6f72cb7
 pub const MODULUS: Fr = Fr([
-    0xd0970e5ed6f72cb7,
-    0xa6682093ccc81082,
-    0x06673b0101343b00,
-    0x0e7db4ea6533afa9,
+    0xd097_0e5e_d6f7_2cb7,
+    0xa668_2093_ccc8_1082,
+    0x0667_3b01_0134_3b00,
+    0x0e7d_b4ea_6533_afa9,
 ]);
 
 impl<'a> Neg for &'a Fr {
@@ -121,30 +121,30 @@ impl_binops_additive!(Fr, Fr);
 impl_binops_multiplicative!(Fr, Fr);
 
 /// INV = -(r^{-1} mod 2^64) mod 2^64
-const INV: u64 = 0x1ba3a358ef788ef9;
+const INV: u64 = 0x1ba3_a358_ef78_8ef9;
 
 /// R = 2^256 mod r
 const R: Fr = Fr([
-    0x25f80bb3b99607d9,
-    0xf315d62f66b6e750,
-    0x932514eeeb8814f4,
-    0x09a6fc6f479155c6,
+    0x25f8_0bb3_b996_07d9,
+    0xf315_d62f_66b6_e750,
+    0x9325_14ee_eb88_14f4,
+    0x09a6_fc6f_4791_55c6,
 ]);
 
 /// R^2 = 2^512 mod r
 const R2: Fr = Fr([
-    0x67719aa495e57731,
-    0x51b0cef09ce3fc26,
-    0x69dab7fac026e9a5,
-    0x04f6547b8d127688,
+    0x6771_9aa4_95e5_7731,
+    0x51b0_cef0_9ce3_fc26,
+    0x69da_b7fa_c026_e9a5,
+    0x04f6_547b_8d12_7688,
 ]);
 
 /// R^2 = 2^768 mod r
 const R3: Fr = Fr([
-    0xe0d6c6563d830544,
-    0x323e3883598d0f85,
-    0xf0fea3004c2e2ba8,
-    0x05874f84946737ec,
+    0xe0d6_c656_3d83_0544,
+    0x323e_3883_598d_0f85,
+    0xf0fe_a300_4c2e_2ba8,
+    0x0587_4f84_9467_37ec,
 ]);
 
 impl Default for Fr {
@@ -296,15 +296,15 @@ impl Fr {
         // sqrt can be done with only one exponentiation,
         // via the computation of  self^((r + 1) // 4) (mod r)
         let sqrt = self.pow_vartime(&[
-            0xb425c397b5bdcb2e,
-            0x299a0824f3320420,
-            0x4199cec0404d0ec0,
-            0x039f6d3a994cebea,
+            0xb425_c397_b5bd_cb2e,
+            0x299a_0824_f332_0420,
+            0x4199_cec0_404d_0ec0,
+            0x039f_6d3a_994c_ebea,
         ]);
 
         CtOption::new(
             sqrt,
-            (&sqrt * &sqrt).ct_eq(self), // Only return Some if it's the square root.
+            (sqrt * sqrt).ct_eq(self), // Only return Some if it's the square root.
         )
     }
 
@@ -355,25 +355,25 @@ impl Fr {
         // found using https://github.com/kwantam/addchain
         let mut t1 = self.square();
         let mut t0 = t1.square();
-        let mut t3 = t0 * &t1;
+        let mut t3 = t0 * t1;
         let t6 = t3 * self;
-        let t7 = t6 * &t1;
-        let t12 = t7 * &t3;
-        let t13 = t12 * &t0;
-        let t16 = t12 * &t3;
-        let t2 = t13 * &t3;
-        let t15 = t16 * &t3;
-        let t19 = t2 * &t0;
-        let t9 = t15 * &t3;
-        let t18 = t9 * &t3;
-        let t14 = t18 * &t1;
-        let t4 = t18 * &t0;
-        let t8 = t18 * &t3;
-        let t17 = t14 * &t3;
-        let t11 = t8 * &t3;
-        t1 = t17 * &t3;
-        let t5 = t11 * &t3;
-        t3 = t5 * &t0;
+        let t7 = t6 * t1;
+        let t12 = t7 * t3;
+        let t13 = t12 * t0;
+        let t16 = t12 * t3;
+        let t2 = t13 * t3;
+        let t15 = t16 * t3;
+        let t19 = t2 * t0;
+        let t9 = t15 * t3;
+        let t18 = t9 * t3;
+        let t14 = t18 * t1;
+        let t4 = t18 * t0;
+        let t8 = t18 * t3;
+        let t17 = t14 * t3;
+        let t11 = t8 * t3;
+        t1 = t17 * t3;
+        let t5 = t11 * t3;
+        t3 = t5 * t0;
         t0 = t5.square();
         square_assign_multi(&mut t0, 5);
         t0.mul_assign(&t3);
@@ -450,6 +450,7 @@ impl Fr {
     }
 
     #[inline]
+    #[allow(clippy::too_many_arguments)]
     const fn montgomery_reduce(
         r0: u64,
         r1: u64,
@@ -768,7 +769,7 @@ fn test_from_u512_r2() {
 
 #[test]
 fn test_from_u512_max() {
-    let max_u64 = 0xffffffffffffffff;
+    let max_u64 = 0xffff_ffff_ffff_ffff;
     assert_eq!(
         R3 - R,
         Fr::from_u512([max_u64, max_u64, max_u64, max_u64, max_u64, max_u64, max_u64, max_u64])
@@ -803,10 +804,10 @@ fn test_from_bytes_wide_negative_one() {
 fn test_from_bytes_wide_maximum() {
     assert_eq!(
         Fr([
-            0x8b75c9015ae42a22,
-            0xe59082e7bf9e38b8,
-            0x6440c91261da51b3,
-            0xa5e07ffb20991cf
+            0x8b75_c901_5ae4_2a22,
+            0xe590_82e7_bf9e_38b8,
+            0x6440_c912_61da_51b3,
+            0x0a5e_07ff_b209_91cf,
         ]),
         Fr::from_bytes_wide(&[0xff; 64])
     );
@@ -822,10 +823,10 @@ fn test_zero() {
 
 #[cfg(test)]
 const LARGEST: Fr = Fr([
-    0xd0970e5ed6f72cb6,
-    0xa6682093ccc81082,
-    0x06673b0101343b00,
-    0x0e7db4ea6533afa9,
+    0xd097_0e5e_d6f7_2cb6,
+    0xa668_2093_ccc8_1082,
+    0x0667_3b01_0134_3b00,
+    0x0e7d_b4ea_6533_afa9,
 ]);
 
 #[test]
@@ -836,10 +837,10 @@ fn test_addition() {
     assert_eq!(
         tmp,
         Fr([
-            0xd0970e5ed6f72cb5,
-            0xa6682093ccc81082,
-            0x06673b0101343b00,
-            0x0e7db4ea6533afa9
+            0xd097_0e5e_d6f7_2cb5,
+            0xa668_2093_ccc8_1082,
+            0x0667_3b01_0134_3b00,
+            0x0e7d_b4ea_6533_afa9
         ])
     );
 
@@ -956,10 +957,10 @@ fn test_inversion() {
 #[test]
 fn test_invert_is_pow() {
     let r_minus_2 = [
-        0xd0970e5ed6f72cb5,
-        0xa6682093ccc81082,
-        0x06673b0101343b00,
-        0x0e7db4ea6533afa9,
+        0xd097_0e5e_d6f7_2cb5,
+        0xa668_2093_ccc8_1082,
+        0x0667_3b01_0134_3b00,
+        0x0e7d_b4ea_6533_afa9,
     ];
 
     let mut r1 = R;
@@ -984,10 +985,10 @@ fn test_invert_is_pow() {
 fn test_sqrt() {
     let mut square = Fr([
         // r - 2
-        0xd0970e5ed6f72cb5,
-        0xa6682093ccc81082,
-        0x06673b0101343b00,
-        0x0e7db4ea6533afa9,
+        0xd097_0e5e_d6f7_2cb5,
+        0xa668_2093_ccc8_1082,
+        0x0667_3b01_0134_3b00,
+        0x0e7d_b4ea_6533_afa9,
     ]);
 
     let mut none_count = 0;
@@ -1009,12 +1010,12 @@ fn test_sqrt() {
 fn test_from_raw() {
     assert_eq!(
         Fr::from_raw([
-            0x25f80bb3b99607d8,
-            0xf315d62f66b6e750,
-            0x932514eeeb8814f4,
-            0x9a6fc6f479155c6
+            0x25f8_0bb3_b996_07d8,
+            0xf315_d62f_66b6_e750,
+            0x9325_14ee_eb88_14f4,
+            0x09a6_fc6f_4791_55c6,
         ]),
-        Fr::from_raw([0xffffffffffffffff; 4])
+        Fr::from_raw([0xffff_ffff_ffff_ffff; 4])
     );
 
     assert_eq!(Fr::from_raw(MODULUS.0), Fr::zero());

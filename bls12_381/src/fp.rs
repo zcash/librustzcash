@@ -66,35 +66,35 @@ impl ConditionallySelectable for Fp {
 
 /// p = 4002409555221667393417789825735904156556882819939007885332058136124031650490837864442687629129015664037894272559787
 const MODULUS: [u64; 6] = [
-    0xb9feffffffffaaab,
-    0x1eabfffeb153ffff,
-    0x6730d2a0f6b0f624,
-    0x64774b84f38512bf,
-    0x4b1ba7b6434bacd7,
-    0x1a0111ea397fe69a,
+    0xb9fe_ffff_ffff_aaab,
+    0x1eab_fffe_b153_ffff,
+    0x6730_d2a0_f6b0_f624,
+    0x6477_4b84_f385_12bf,
+    0x4b1b_a7b6_434b_acd7,
+    0x1a01_11ea_397f_e69a,
 ];
 
 /// INV = -(p^{-1} mod 2^64) mod 2^64
-const INV: u64 = 0x89f3fffcfffcfffd;
+const INV: u64 = 0x89f3_fffc_fffc_fffd;
 
 /// R = 2^384 mod p
 const R: Fp = Fp([
-    0x760900000002fffd,
-    0xebf4000bc40c0002,
-    0x5f48985753c758ba,
-    0x77ce585370525745,
-    0x5c071a97a256ec6d,
-    0x15f65ec3fa80e493,
+    0x7609_0000_0002_fffd,
+    0xebf4_000b_c40c_0002,
+    0x5f48_9857_53c7_58ba,
+    0x77ce_5853_7052_5745,
+    0x5c07_1a97_a256_ec6d,
+    0x15f6_5ec3_fa80_e493,
 ]);
 
 /// R2 = 2^(384*2) mod p
 const R2: Fp = Fp([
-    0xf4df1f341c341746,
-    0xa76e6a609d104f1,
-    0x8de5476c4c95b6d5,
-    0x67eb88a9939d83c0,
-    0x9a793e85b519952d,
-    0x11988fe592cae3aa,
+    0xf4df_1f34_1c34_1746,
+    0x0a76_e6a6_09d1_04f1,
+    0x8de5_476c_4c95_b6d5,
+    0x67eb_88a9_939d_83c0,
+    0x9a79_3e85_b519_952d,
+    0x1198_8fe5_92ca_e3aa,
 ]);
 
 impl<'a> Neg for &'a Fp {
@@ -227,12 +227,12 @@ impl Fp {
             self.0[0], self.0[1], self.0[2], self.0[3], self.0[4], self.0[5], 0, 0, 0, 0, 0, 0,
         );
 
-        let (_, borrow) = sbb(tmp.0[0], 0xdcff7fffffffd556, 0);
-        let (_, borrow) = sbb(tmp.0[1], 0x0f55ffff58a9ffff, borrow);
-        let (_, borrow) = sbb(tmp.0[2], 0xb39869507b587b12, borrow);
-        let (_, borrow) = sbb(tmp.0[3], 0xb23ba5c279c2895f, borrow);
-        let (_, borrow) = sbb(tmp.0[4], 0x258dd3db21a5d66b, borrow);
-        let (_, borrow) = sbb(tmp.0[5], 0x0d0088f51cbff34d, borrow);
+        let (_, borrow) = sbb(tmp.0[0], 0xdcff_7fff_ffff_d556, 0);
+        let (_, borrow) = sbb(tmp.0[1], 0x0f55_ffff_58a9_ffff, borrow);
+        let (_, borrow) = sbb(tmp.0[2], 0xb398_6950_7b58_7b12, borrow);
+        let (_, borrow) = sbb(tmp.0[3], 0xb23b_a5c2_79c2_895f, borrow);
+        let (_, borrow) = sbb(tmp.0[4], 0x258d_d3db_21a5_d66b, borrow);
+        let (_, borrow) = sbb(tmp.0[5], 0x0d00_88f5_1cbf_f34d, borrow);
 
         // If the element was smaller, the subtraction will underflow
         // producing a borrow value of 0xffff...ffff, otherwise it will
@@ -274,12 +274,12 @@ impl Fp {
         // so we check that we got the correct result at the end.
 
         let sqrt = self.pow_vartime(&[
-            0xee7fbfffffffeaab,
-            0x7aaffffac54ffff,
-            0xd9cc34a83dac3d89,
-            0xd91dd2e13ce144af,
-            0x92c6e9ed90d2eb35,
-            0x680447a8e5ff9a6,
+            0xee7f_bfff_ffff_eaab,
+            0x07aa_ffff_ac54_ffff,
+            0xd9cc_34a8_3dac_3d89,
+            0xd91d_d2e1_3ce1_44af,
+            0x92c6_e9ed_90d2_eb35,
+            0x0680_447a_8e5f_f9a6,
         ]);
 
         CtOption::new(sqrt, sqrt.square().ct_eq(self))
@@ -292,12 +292,12 @@ impl Fp {
     pub fn invert(&self) -> CtOption<Self> {
         // Exponentiate by p - 2
         let t = self.pow_vartime(&[
-            0xb9feffffffffaaa9,
-            0x1eabfffeb153ffff,
-            0x6730d2a0f6b0f624,
-            0x64774b84f38512bf,
-            0x4b1ba7b6434bacd7,
-            0x1a0111ea397fe69a,
+            0xb9fe_ffff_ffff_aaa9,
+            0x1eab_fffe_b153_ffff,
+            0x6730_d2a0_f6b0_f624,
+            0x6477_4b84_f385_12bf,
+            0x4b1b_a7b6_434b_acd7,
+            0x1a01_11ea_397f_e69a,
         ]);
 
         CtOption::new(t, !self.is_zero())
@@ -584,20 +584,20 @@ fn test_equality() {
 #[test]
 fn test_squaring() {
     let a = Fp([
-        0xd215d2768e83191b,
-        0x5085d80f8fb28261,
-        0xce9a032ddf393a56,
-        0x3e9c4fff2ca0c4bb,
-        0x6436b6f7f4d95dfb,
-        0x10606628ad4a4d90,
+        0xd215_d276_8e83_191b,
+        0x5085_d80f_8fb2_8261,
+        0xce9a_032d_df39_3a56,
+        0x3e9c_4fff_2ca0_c4bb,
+        0x6436_b6f7_f4d9_5dfb,
+        0x1060_6628_ad4a_4d90,
     ]);
     let b = Fp([
-        0x33d9c42a3cb3e235,
-        0xdad11a094c4cd455,
-        0xa2f144bd729aaeba,
-        0xd4150932be9ffeac,
-        0xe27bc7c47d44ee50,
-        0x14b6a78d3ec7a560,
+        0x33d9_c42a_3cb3_e235,
+        0xdad1_1a09_4c4c_d455,
+        0xa2f1_44bd_729a_aeba,
+        0xd415_0932_be9f_feac,
+        0xe27b_c7c4_7d44_ee50,
+        0x14b6_a78d_3ec7_a560,
     ]);
 
     assert_eq!(a.square(), b);
@@ -606,28 +606,28 @@ fn test_squaring() {
 #[test]
 fn test_multiplication() {
     let a = Fp([
-        0x397a38320170cd4,
-        0x734c1b2c9e761d30,
-        0x5ed255ad9a48beb5,
-        0x95a3c6b22a7fcfc,
-        0x2294ce75d4e26a27,
-        0x13338bd870011ebb,
+        0x0397_a383_2017_0cd4,
+        0x734c_1b2c_9e76_1d30,
+        0x5ed2_55ad_9a48_beb5,
+        0x095a_3c6b_22a7_fcfc,
+        0x2294_ce75_d4e2_6a27,
+        0x1333_8bd8_7001_1ebb,
     ]);
     let b = Fp([
-        0xb9c3c7c5b1196af7,
-        0x2580e2086ce335c1,
-        0xf49aed3d8a57ef42,
-        0x41f281e49846e878,
-        0xe0762346c38452ce,
-        0x652e89326e57dc0,
+        0xb9c3_c7c5_b119_6af7,
+        0x2580_e208_6ce3_35c1,
+        0xf49a_ed3d_8a57_ef42,
+        0x41f2_81e4_9846_e878,
+        0xe076_2346_c384_52ce,
+        0x0652_e893_26e5_7dc0,
     ]);
     let c = Fp([
-        0xf96ef3d711ab5355,
-        0xe8d459ea00f148dd,
-        0x53f7354a5f00fa78,
-        0x9e34a4f3125c5f83,
-        0x3fbe0c47ca74c19e,
-        0x1b06a8bbd4adfe4,
+        0xf96e_f3d7_11ab_5355,
+        0xe8d4_59ea_00f1_48dd,
+        0x53f7_354a_5f00_fa78,
+        0x9e34_a4f3_125c_5f83,
+        0x3fbe_0c47_ca74_c19e,
+        0x01b0_6a8b_bd4a_dfe4,
     ]);
 
     assert_eq!(a * b, c);
@@ -636,28 +636,28 @@ fn test_multiplication() {
 #[test]
 fn test_addition() {
     let a = Fp([
-        0x5360bb5978678032,
-        0x7dd275ae799e128e,
-        0x5c5b5071ce4f4dcf,
-        0xcdb21f93078dbb3e,
-        0xc32365c5e73f474a,
-        0x115a2a5489babe5b,
+        0x5360_bb59_7867_8032,
+        0x7dd2_75ae_799e_128e,
+        0x5c5b_5071_ce4f_4dcf,
+        0xcdb2_1f93_078d_bb3e,
+        0xc323_65c5_e73f_474a,
+        0x115a_2a54_89ba_be5b,
     ]);
     let b = Fp([
-        0x9fd287733d23dda0,
-        0xb16bf2af738b3554,
-        0x3e57a75bd3cc6d1d,
-        0x900bc0bd627fd6d6,
-        0xd319a080efb245fe,
-        0x15fdcaa4e4bb2091,
+        0x9fd2_8773_3d23_dda0,
+        0xb16b_f2af_738b_3554,
+        0x3e57_a75b_d3cc_6d1d,
+        0x900b_c0bd_627f_d6d6,
+        0xd319_a080_efb2_45fe,
+        0x15fd_caa4_e4bb_2091,
     ]);
     let c = Fp([
-        0x393442ccb58bb327,
-        0x1092685f3bd547e3,
-        0x3382252cab6ac4c9,
-        0xf94694cb76887f55,
-        0x4b215e9093a5e071,
-        0xd56e30f34f5f853,
+        0x3934_42cc_b58b_b327,
+        0x1092_685f_3bd5_47e3,
+        0x3382_252c_ab6a_c4c9,
+        0xf946_94cb_7688_7f55,
+        0x4b21_5e90_93a5_e071,
+        0x0d56_e30f_34f5_f853,
     ]);
 
     assert_eq!(a + b, c);
@@ -666,28 +666,28 @@ fn test_addition() {
 #[test]
 fn test_subtraction() {
     let a = Fp([
-        0x5360bb5978678032,
-        0x7dd275ae799e128e,
-        0x5c5b5071ce4f4dcf,
-        0xcdb21f93078dbb3e,
-        0xc32365c5e73f474a,
-        0x115a2a5489babe5b,
+        0x5360_bb59_7867_8032,
+        0x7dd2_75ae_799e_128e,
+        0x5c5b_5071_ce4f_4dcf,
+        0xcdb2_1f93_078d_bb3e,
+        0xc323_65c5_e73f_474a,
+        0x115a_2a54_89ba_be5b,
     ]);
     let b = Fp([
-        0x9fd287733d23dda0,
-        0xb16bf2af738b3554,
-        0x3e57a75bd3cc6d1d,
-        0x900bc0bd627fd6d6,
-        0xd319a080efb245fe,
-        0x15fdcaa4e4bb2091,
+        0x9fd2_8773_3d23_dda0,
+        0xb16b_f2af_738b_3554,
+        0x3e57_a75b_d3cc_6d1d,
+        0x900b_c0bd_627f_d6d6,
+        0xd319_a080_efb2_45fe,
+        0x15fd_caa4_e4bb_2091,
     ]);
     let c = Fp([
-        0x6d8d33e63b434d3d,
-        0xeb1282fdb766dd39,
-        0x85347bb6f133d6d5,
-        0xa21daa5a9892f727,
-        0x3b256cfb3ad8ae23,
-        0x155d7199de7f8464,
+        0x6d8d_33e6_3b43_4d3d,
+        0xeb12_82fd_b766_dd39,
+        0x8534_7bb6_f133_d6d5,
+        0xa21d_aa5a_9892_f727,
+        0x3b25_6cfb_3ad8_ae23,
+        0x155d_7199_de7f_8464,
     ]);
 
     assert_eq!(a - b, c);
@@ -696,20 +696,20 @@ fn test_subtraction() {
 #[test]
 fn test_negation() {
     let a = Fp([
-        0x5360bb5978678032,
-        0x7dd275ae799e128e,
-        0x5c5b5071ce4f4dcf,
-        0xcdb21f93078dbb3e,
-        0xc32365c5e73f474a,
-        0x115a2a5489babe5b,
+        0x5360_bb59_7867_8032,
+        0x7dd2_75ae_799e_128e,
+        0x5c5b_5071_ce4f_4dcf,
+        0xcdb2_1f93_078d_bb3e,
+        0xc323_65c5_e73f_474a,
+        0x115a_2a54_89ba_be5b,
     ]);
     let b = Fp([
-        0x669e44a687982a79,
-        0xa0d98a5037b5ed71,
-        0xad5822f2861a854,
-        0x96c52bf1ebf75781,
-        0x87f841f05c0c658c,
-        0x8a6e795afc5283e,
+        0x669e_44a6_8798_2a79,
+        0xa0d9_8a50_37b5_ed71,
+        0x0ad5_822f_2861_a854,
+        0x96c5_2bf1_ebf7_5781,
+        0x87f8_41f0_5c0c_658c,
+        0x08a6_e795_afc5_283e,
     ]);
 
     assert_eq!(-a, b);
@@ -720,7 +720,14 @@ fn test_debug() {
     assert_eq!(
         format!(
             "{:?}",
-            Fp([0x5360bb5978678032, 0x7dd275ae799e128e, 0x5c5b5071ce4f4dcf, 0xcdb21f93078dbb3e, 0xc32365c5e73f474a, 0x115a2a5489babe5b])
+            Fp([
+                0x5360_bb59_7867_8032,
+                0x7dd2_75ae_799e_128e,
+                0x5c5b_5071_ce4f_4dcf,
+                0xcdb2_1f93_078d_bb3e,
+                0xc323_65c5_e73f_474a,
+                0x115a_2a54_89ba_be5b,
+            ])
         ),
         "0x104bf052ad3bc99bcb176c24a06a6c3aad4eaf2308fc4d282e106c84a757d061052630515305e59bdddf8111bfdeb704"
     );
@@ -729,12 +736,12 @@ fn test_debug() {
 #[test]
 fn test_from_bytes() {
     let mut a = Fp([
-        0xdc906d9be3f95dc8,
-        0x8755caf7459691a1,
-        0xcff1a7f4e9583ab3,
-        0x9b43821f849e2284,
-        0xf57554f3a2974f3f,
-        0x85dbea84ed47f79,
+        0xdc90_6d9b_e3f9_5dc8,
+        0x8755_caf7_4596_91a1,
+        0xcff1_a7f4_e958_3ab3,
+        0x9b43_821f_849e_2284,
+        0xf575_54f3_a297_4f3f,
+        0x085d_bea8_4ed4_7f79,
     ]);
 
     for _ in 0..100 {
@@ -773,12 +780,12 @@ fn test_from_bytes() {
 fn test_sqrt() {
     // a = 4
     let a = Fp::from_raw_unchecked([
-        0xaa270000000cfff3,
-        0x53cc0032fc34000a,
-        0x478fe97a6b0a807f,
-        0xb1d37ebee6ba24d7,
-        0x8ec9733bbf78ab2f,
-        0x9d645513d83de7e,
+        0xaa27_0000_000c_fff3,
+        0x53cc_0032_fc34_000a,
+        0x478f_e97a_6b0a_807f,
+        0xb1d3_7ebe_e6ba_24d7,
+        0x8ec9_733b_bf78_ab2f,
+        0x09d6_4551_3d83_de7e,
     ]);
 
     assert_eq!(
@@ -786,12 +793,12 @@ fn test_sqrt() {
         -a.sqrt().unwrap(),
         // 2
         Fp::from_raw_unchecked([
-            0x321300000006554f,
-            0xb93c0018d6c40005,
-            0x57605e0db0ddbb51,
-            0x8b256521ed1f9bcb,
-            0x6cf28d7901622c03,
-            0x11ebab9dbb81e28c
+            0x3213_0000_0006_554f,
+            0xb93c_0018_d6c4_0005,
+            0x5760_5e0d_b0dd_bb51,
+            0x8b25_6521_ed1f_9bcb,
+            0x6cf2_8d79_0162_2c03,
+            0x11eb_ab9d_bb81_e28c,
         ])
     );
 }
@@ -799,20 +806,20 @@ fn test_sqrt() {
 #[test]
 fn test_inversion() {
     let a = Fp([
-        0x43b43a5078ac2076,
-        0x1ce0763046f8962b,
-        0x724a5276486d735c,
-        0x6f05c2a6282d48fd,
-        0x2095bd5bb4ca9331,
-        0x3b35b3894b0f7da,
+        0x43b4_3a50_78ac_2076,
+        0x1ce0_7630_46f8_962b,
+        0x724a_5276_486d_735c,
+        0x6f05_c2a6_282d_48fd,
+        0x2095_bd5b_b4ca_9331,
+        0x03b3_5b38_94b0_f7da,
     ]);
     let b = Fp([
-        0x69ecd7040952148f,
-        0x985ccc2022190f55,
-        0xe19bba36a9ad2f41,
-        0x19bb16c95219dbd8,
-        0x14dcacfdfb478693,
-        0x115ff58afff9a8e1,
+        0x69ec_d704_0952_148f,
+        0x985c_cc20_2219_0f55,
+        0xe19b_ba36_a9ad_2f41,
+        0x19bb_16c9_5219_dbd8,
+        0x14dc_acfd_fb47_8693,
+        0x115f_f58a_fff9_a8e1,
     ]);
 
     assert_eq!(a.invert().unwrap(), b);
@@ -825,34 +832,34 @@ fn test_lexicographic_largest() {
     assert!(!bool::from(Fp::one().lexicographically_largest()));
     assert!(!bool::from(
         Fp::from_raw_unchecked([
-            0xa1fafffffffe5557,
-            0x995bfff976a3fffe,
-            0x3f41d24d174ceb4,
-            0xf6547998c1995dbd,
-            0x778a468f507a6034,
-            0x20559931f7f8103
+            0xa1fa_ffff_fffe_5557,
+            0x995b_fff9_76a3_fffe,
+            0x03f4_1d24_d174_ceb4,
+            0xf654_7998_c199_5dbd,
+            0x778a_468f_507a_6034,
+            0x0205_5993_1f7f_8103
         ])
         .lexicographically_largest()
     ));
     assert!(bool::from(
         Fp::from_raw_unchecked([
-            0x1804000000015554,
-            0x855000053ab00001,
-            0x633cb57c253c276f,
-            0x6e22d1ec31ebb502,
-            0xd3916126f2d14ca2,
-            0x17fbb8571a006596
+            0x1804_0000_0001_5554,
+            0x8550_0005_3ab0_0001,
+            0x633c_b57c_253c_276f,
+            0x6e22_d1ec_31eb_b502,
+            0xd391_6126_f2d1_4ca2,
+            0x17fb_b857_1a00_6596,
         ])
         .lexicographically_largest()
     ));
     assert!(bool::from(
         Fp::from_raw_unchecked([
-            0x43f5fffffffcaaae,
-            0x32b7fff2ed47fffd,
-            0x7e83a49a2e99d69,
-            0xeca8f3318332bb7a,
-            0xef148d1ea0f4c069,
-            0x40ab3263eff0206
+            0x43f5_ffff_fffc_aaae,
+            0x32b7_fff2_ed47_fffd,
+            0x07e8_3a49_a2e9_9d69,
+            0xeca8_f331_8332_bb7a,
+            0xef14_8d1e_a0f4_c069,
+            0x040a_b326_3eff_0206,
         ])
         .lexicographically_largest()
     ));

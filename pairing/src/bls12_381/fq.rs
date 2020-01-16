@@ -458,6 +458,7 @@ fn test_b_coeff() {
 }
 
 #[test]
+#[allow(clippy::cognitive_complexity)]
 fn test_frob_coeffs() {
     let nqr = Fq::one().neg();
 
