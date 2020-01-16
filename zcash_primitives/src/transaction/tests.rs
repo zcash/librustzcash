@@ -75,15 +75,13 @@ mod data;
 fn zip_0143() {
     for tv in self::data::zip_0143::make_test_vectors() {
         let tx = Transaction::read(&tv.tx[..]).unwrap();
-        let transparent_input = if let Some(n) = tv.transparent_input {
-            Some((
+        let transparent_input = tv.transparent_input.map(|n| {
+            (
                 n as usize,
                 &tv.script_code,
                 Amount::from_nonnegative_i64(tv.amount).unwrap(),
-            ))
-        } else {
-            None
-        };
+            )
+        });
 
         assert_eq!(
             signature_hash(&tx, tv.consensus_branch_id, tv.hash_type, transparent_input),
@@ -96,15 +94,13 @@ fn zip_0143() {
 fn zip_0243() {
     for tv in self::data::zip_0243::make_test_vectors() {
         let tx = Transaction::read(&tv.tx[..]).unwrap();
-        let transparent_input = if let Some(n) = tv.transparent_input {
-            Some((
+        let transparent_input = tv.transparent_input.map(|n| {
+            (
                 n as usize,
                 &tv.script_code,
                 Amount::from_nonnegative_i64(tv.amount).unwrap(),
-            ))
-        } else {
-            None
-        };
+            )
+        });
 
         assert_eq!(
             signature_hash(&tx, tv.consensus_branch_id, tv.hash_type, transparent_input),

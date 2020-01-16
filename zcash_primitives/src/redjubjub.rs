@@ -14,13 +14,8 @@ fn read_scalar<E: JubjubEngine, R: Read>(reader: R) -> io::Result<E::Fs> {
     let mut s_repr = <E::Fs as PrimeField>::Repr::default();
     s_repr.read_le(reader)?;
 
-    match E::Fs::from_repr(s_repr) {
-        Ok(s) => Ok(s),
-        Err(_) => Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "scalar is not in field",
-        )),
-    }
+    E::Fs::from_repr(s_repr)
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "scalar is not in field"))
 }
 
 fn write_scalar<E: JubjubEngine, W: Write>(s: &E::Fs, writer: W) -> io::Result<()> {

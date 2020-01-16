@@ -164,14 +164,8 @@ impl<Node: Hashable> CommitmentTree<Node> {
         //    - Empty leaves are used as needed.
         let leaf_root = Node::combine(
             0,
-            &match self.left {
-                Some(node) => node,
-                None => filler.next(0),
-            },
-            &match self.right {
-                Some(node) => node,
-                None => filler.next(0),
-            },
+            &self.left.unwrap_or_else(|| filler.next(0)),
+            &self.right.unwrap_or_else(|| filler.next(0)),
         );
 
         // 2) Hash in parents up to the currently-filled depth.

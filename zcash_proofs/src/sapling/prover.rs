@@ -83,10 +83,9 @@ impl SaplingProvingContext {
         let viewing_key = proof_generation_key.to_viewing_key(params);
 
         // Construct the payment address with the viewing key / diversifier
-        let payment_address = match viewing_key.to_payment_address(diversifier, params) {
-            Some(p) => p,
-            None => return Err(()),
-        };
+        let payment_address = viewing_key
+            .to_payment_address(diversifier, params)
+            .ok_or(())?;
 
         // This is the result of the re-randomization, we compute it for the caller
         let rk = PublicKey::<Bls12>(proof_generation_key.ak.clone().into()).randomize(
@@ -266,10 +265,7 @@ impl SaplingProvingContext {
         // against our derived bvk.
         {
             // Compute value balance
-            let mut value_balance = match compute_value_balance(value_balance, params) {
-                Some(a) => a,
-                None => return Err(()),
-            };
+            let mut value_balance = compute_value_balance(value_balance, params).ok_or(())?;
 
             // Subtract value_balance from cv_sum to get final bvk
             value_balance = value_balance.negate();
