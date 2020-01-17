@@ -7,7 +7,7 @@ use pairing::bls12_381::{Bls12, Fr, FrRepr};
 use std::io::{self, Read, Write};
 
 use crate::legacy::Script;
-use crate::redjubjub::{PublicKey, Signature};
+use crate::redjubjub::{PublicKey, PublicKeyBytes, Signature, SpendAuth};
 use crate::JUBJUB;
 
 pub mod amount;
@@ -113,18 +113,20 @@ pub struct SpendDescription {
     pub cv: edwards::Point<Bls12, Unknown>,
     pub anchor: Fr,
     pub nullifier: [u8; 32],
-    pub rk: PublicKey<Bls12>,
+    pub rk: PublicKeyBytes<SpendAuth>,
     pub zkproof: [u8; GROTH_PROOF_SIZE],
-    pub spend_auth_sig: Option<Signature>,
+    pub spend_auth_sig: Option<Signature<SpendAuth>>,
 }
 
 impl std::fmt::Debug for SpendDescription {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
-        write!(
-            f,
-            "SpendDescription(cv = {:?}, anchor = {:?}, nullifier = {:?}, rk = {:?}, spend_auth_sig = {:?})",
-            self.cv, self.anchor, self.nullifier, self.rk, self.spend_auth_sig
-        )
+        f.debug_struct("SpendDescription")
+            .field("cv", &self.cv)
+            .field("anchor", &self.anchor)
+            .field("nullifier", &self.nullifier)
+            .field("rk", &self.rk)
+            .field("spend_auth_sig", &self.spend_auth_sig)
+            .finish()
     }
 }
 
@@ -147,9 +149,13 @@ impl SpendDescription {
         reader.read_exact(&mut nullifier)?;
 
         // Consensus rules (§4.4):
-        // - Canonical encoding is enforced here.
-        // - "Not small order" is enforced in SaplingVerificationContext::check_spend()
-        let rk = PublicKey::<Bls12>::read(&mut reader, &JUBJUB)?;
+        // - Canonical encoding is enforced in PublicKey::try_from
+        // - "Not small order" is enforced in PublicKey::try_from
+        let rk = PublicKeyBytes::<SpendAuth>::from({
+            let mut bytes = [0u8; 32];
+            reader.read_exact(&mut bytes)?;
+            bytes
+        });
 
         // Consensus rules (§4.4):
         // - Canonical encoding is enforced by the API of SaplingVerificationContext::check_spend()
@@ -159,9 +165,13 @@ impl SpendDescription {
         reader.read_exact(&mut zkproof)?;
 
         // Consensus rules (§4.4):
-        // - Canonical encoding is enforced here.
+        // - Canonical encoding is enforced in signature validity check
         // - Signature validity is enforced in SaplingVerificationContext::check_spend()
-        let spend_auth_sig = Some(Signature::read(&mut reader)?);
+        let spend_auth_sig = Some(Signature::from({
+            let mut bytes = [0u8; 64];
+            reader.read_exact(&mut bytes)?;
+            bytes
+        }));
 
         Ok(SpendDescription {
             cv,
@@ -177,10 +187,10 @@ impl SpendDescription {
         self.cv.write(&mut writer)?;
         self.anchor.into_repr().write_le(&mut writer)?;
         writer.write_all(&self.nullifier)?;
-        self.rk.write(&mut writer)?;
+        writer.write_all(&<[u8; 32]>::from(self.rk)[..])?;
         writer.write_all(&self.zkproof)?;
         match self.spend_auth_sig {
-            Some(sig) => sig.write(&mut writer),
+            Some(sig) => writer.write_all(&<[u8; 64]>::from(sig)[..]),
             None => Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 "Missing spend auth signature",

@@ -1,5 +1,7 @@
 //! Structs for building transactions.
 
+use std::convert::TryFrom;
+
 use crate::zip32::ExtendedSpendingKey;
 use crate::{
     jubjub::fs::Fs,
@@ -16,8 +18,8 @@ use crate::{
     merkle_tree::{CommitmentTreeWitness, IncrementalWitness},
     note_encryption::{generate_esk, Memo, SaplingNoteEncryption},
     prover::TxProver,
-    redjubjub::PrivateKey,
-    sapling::{spend_sig, Node},
+    redjubjub::{Randomizer, SecretKey, SpendAuth},
+    sapling::Node,
     transaction::{
         components::{amount::DEFAULT_FEE, Amount, OutputDescription, SpendDescription, TxOut},
         signature_hash_data, Transaction, TransactionData, SIGHASH_ALL,
@@ -543,7 +545,7 @@ impl<R: RngCore + CryptoRng> Builder<R> {
                     cv,
                     anchor,
                     nullifier,
-                    rk,
+                    rk: rk.into(),
                     zkproof,
                     spend_auth_sig: None,
                 });
@@ -637,13 +639,37 @@ impl<R: RngCore + CryptoRng> Builder<R> {
 
         // Create Sapling spendAuth and binding signatures
         for (i, (_, spend)) in spends.into_iter().enumerate() {
-            self.mtx.shielded_spends[i].spend_auth_sig = Some(spend_sig(
-                PrivateKey(spend.extsk.expsk.ask),
-                spend.alpha,
-                &sighash,
-                &mut self.rng,
-                &JUBJUB,
-            ));
+            let ask_bytes = {
+                // is this how you get the bytes of a field element?
+                let mut bytes = [0u8; 32];
+                use ff::{PrimeField, PrimeFieldRepr};
+                use std::io::Cursor;
+                spend
+                    .extsk
+                    .expsk
+                    .ask
+                    .into_repr()
+                    .write_le(Cursor::new(&mut bytes[..]))
+                    .expect("must be able to serialize derived spending key into array");
+                bytes
+            };
+            let randomizer_bytes = {
+                let mut bytes = [0u8; 32];
+                use ff::{PrimeField, PrimeFieldRepr};
+                use std::io::Cursor;
+                spend
+                    .alpha
+                    .into_repr()
+                    .write_le(Cursor::new(&mut bytes[..]))
+                    .expect("must be able to serialize randomizer into array");
+                bytes
+            };
+
+            let ask = SecretKey::<SpendAuth>::try_from(ask_bytes)
+                .expect("derived spending key must be valid");
+
+            let rsk = ask.randomize(&Randomizer::from_bytes(&randomizer_bytes).unwrap());
+            self.mtx.shielded_spends[i].spend_auth_sig = Some(rsk.sign(&mut self.rng, &sighash));
         }
         self.mtx.binding_sig = Some(
             prover

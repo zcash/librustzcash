@@ -246,6 +246,7 @@ impl SaplingProvingContext {
 
     /// Create the bindingSig for a Sapling transaction. All calls to spend_proof()
     /// and output_proof() must be completed before calling this function.
+    // XXX this should just return the appropriate SecretKey -- there's no need for this function to exist i think?
     pub fn binding_sig(
         &self,
         value_balance: Amount,
@@ -260,6 +261,11 @@ impl SaplingProvingContext {
 
         // Grab the `bvk` using DerivePublic.
         let bvk = PublicKey::from_private(&bsk, FixedGenerators::ValueCommitmentRandomness, params);
+
+        // XXX is this actually necessary or is it a sanity check? if the
+        // binding signatures are properly encapsulated, the raw components of
+        // the signature are not available, so this check is much more difficult
+        // to do.
 
         // In order to check internal consistency, let's use the accumulated value
         // commitments (as the verifier would) and apply value_balance to compare

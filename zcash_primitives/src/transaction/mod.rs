@@ -7,7 +7,7 @@ use std::fmt;
 use std::io::{self, Read, Write};
 use std::ops::Deref;
 
-use crate::redjubjub::Signature;
+use crate::redjubjub::{Binding, Signature};
 use crate::serialize::Vector;
 
 pub mod builder;
@@ -72,7 +72,7 @@ pub struct TransactionData {
     pub joinsplits: Vec<JSDescription>,
     pub joinsplit_pubkey: Option<[u8; 32]>,
     pub joinsplit_sig: Option<[u8; 64]>,
-    pub binding_sig: Option<Signature>,
+    pub binding_sig: Option<Signature<Binding>>,
 }
 
 impl std::fmt::Debug for TransactionData {
@@ -228,7 +228,11 @@ impl Transaction {
 
         let binding_sig =
             if is_sapling_v4 && !(shielded_spends.is_empty() && shielded_outputs.is_empty()) {
-                Some(Signature::read(&mut reader)?)
+                Some(Signature::from({
+                    let mut bytes = [0u8; 64];
+                    reader.read_exact(&mut bytes)?;
+                    bytes
+                }))
             } else {
                 None
             };
@@ -324,7 +328,7 @@ impl Transaction {
 
         if is_sapling_v4 && !(self.shielded_spends.is_empty() && self.shielded_outputs.is_empty()) {
             match self.binding_sig {
-                Some(sig) => sig.write(&mut writer)?,
+                Some(sig) => writer.write_all(&<[u8; 64]>::from(sig)[..])?,
                 None => {
                     return Err(io::Error::new(
                         io::ErrorKind::InvalidInput,

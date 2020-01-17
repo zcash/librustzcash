@@ -12,7 +12,7 @@ use rand_core::{CryptoRng, RngCore};
 use std::io::{self, Read, Write};
 
 use crate::merkle_tree::Hashable;
-use crate::redjubjub::{PrivateKey, PublicKey, Signature};
+use crate::redjubjub::{PublicKey, SecretKey, Signature};
 use crate::JUBJUB;
 
 pub const SAPLING_COMMITMENT_TREE_DEPTH: usize = 32;
@@ -103,33 +103,4 @@ lazy_static! {
         }
         v
     };
-}
-
-/// Create the spendAuthSig for a Sapling SpendDescription.
-pub fn spend_sig<R: RngCore + CryptoRng>(
-    ask: PrivateKey<Bls12>,
-    ar: Fs,
-    sighash: &[u8; 32],
-    rng: &mut R,
-    params: &JubjubBls12,
-) -> Signature {
-    // We compute `rsk`...
-    let rsk = ask.randomize(ar);
-
-    // We compute `rk` from there (needed for key prefixing)
-    let rk = PublicKey::from_private(&rsk, FixedGenerators::SpendingKeyGenerator, params);
-
-    // Compute the signature's message for rk/spend_auth_sig
-    let mut data_to_be_signed = [0u8; 64];
-    rk.0.write(&mut data_to_be_signed[0..32])
-        .expect("message buffer should be 32 bytes");
-    (&mut data_to_be_signed[32..64]).copy_from_slice(&sighash[..]);
-
-    // Do the signing
-    rsk.sign(
-        &data_to_be_signed,
-        rng,
-        FixedGenerators::SpendingKeyGenerator,
-        params,
-    )
 }

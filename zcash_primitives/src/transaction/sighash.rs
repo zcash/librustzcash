@@ -125,12 +125,13 @@ fn joinsplits_hash(tx: &TransactionData) -> Blake2bHash {
 }
 
 fn shielded_spends_hash(tx: &TransactionData) -> Blake2bHash {
+    use std::io::Write;
     let mut data = Vec::with_capacity(tx.shielded_spends.len() * 384);
     for s_spend in &tx.shielded_spends {
         s_spend.cv.write(&mut data).unwrap();
         s_spend.anchor.into_repr().write_le(&mut data).unwrap();
         data.extend_from_slice(&s_spend.nullifier);
-        s_spend.rk.write(&mut data).unwrap();
+        data.write_all(&<[u8; 32]>::from(s_spend.rk)[..]).unwrap();
         data.extend_from_slice(&s_spend.zkproof);
     }
     Blake2bParams::new()

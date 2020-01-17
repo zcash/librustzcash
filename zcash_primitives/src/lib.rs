@@ -20,7 +20,6 @@ pub mod note_encryption;
 pub mod pedersen_hash;
 pub mod primitives;
 pub mod prover;
-pub mod redjubjub;
 pub mod sapling;
 pub mod serialize;
 pub mod transaction;
@@ -31,6 +30,8 @@ pub mod zip32;
 mod test_vectors;
 
 use crate::jubjub::JubjubBls12;
+
+pub use redjubjub;
 
 lazy_static! {
     pub static ref JUBJUB: JubjubBls12 = { JubjubBls12::new() };

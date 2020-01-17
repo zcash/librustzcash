@@ -8,7 +8,7 @@ use pairing::bls12_381::{Bls12, Fr};
 
 use crate::{
     merkle_tree::CommitmentTreeWitness,
-    redjubjub::{PublicKey, Signature},
+    redjubjub::{Binding, PublicKey, Signature, SpendAuth},
     sapling::Node,
     transaction::components::{Amount, GROTH_PROOF_SIZE},
 };
@@ -40,7 +40,7 @@ pub trait TxProver {
         (
             [u8; GROTH_PROOF_SIZE],
             edwards::Point<Bls12, Unknown>,
-            PublicKey<Bls12>,
+            PublicKey<SpendAuth>,
         ),
         (),
     >;
@@ -62,12 +62,13 @@ pub trait TxProver {
     /// Create the `bindingSig` for a Sapling transaction. All calls to
     /// [`TxProver::spend_proof`] and [`TxProver::output_proof`] must be completed before
     /// calling this function.
+    // XXX should this not just return a binding key?
     fn binding_sig(
         &self,
         ctx: &mut Self::SaplingProvingContext,
         value_balance: Amount,
         sighash: &[u8; 32],
-    ) -> Result<Signature, ()>;
+    ) -> Result<Signature<Binding>, ()>;
 }
 
 #[cfg(test)]
@@ -160,7 +161,7 @@ pub(crate) mod mock {
             _ctx: &mut Self::SaplingProvingContext,
             _value_balance: Amount,
             _sighash: &[u8; 32],
-        ) -> Result<Signature, ()> {
+        ) -> Result<Signature<Binding>, ()> {
             Err(())
         }
     }
