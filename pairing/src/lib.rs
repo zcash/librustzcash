@@ -21,7 +21,7 @@ pub mod tests;
 pub mod bls12_381;
 
 use ff::{Field, PrimeField, ScalarEngine, SqrtField};
-use group::{CurveAffine, CurveProjective};
+use group::{CurveAffine, CurveOps, CurveOpsOwned, CurveProjective};
 use subtle::CtOption;
 
 /// An "engine" is a collection of types (fields, elliptic curve groups, etc.)
@@ -30,7 +30,9 @@ use subtle::CtOption;
 pub trait Engine: ScalarEngine {
     /// The projective representation of an element in G1.
     type G1: CurveProjective<Engine = Self, Base = Self::Fq, Scalar = Self::Fr, Affine = Self::G1Affine>
-        + From<Self::G1Affine>;
+        + From<Self::G1Affine>
+        + CurveOps<Self::G1Affine>
+        + CurveOpsOwned<Self::G1Affine>;
 
     /// The affine representation of an element in G1.
     type G1Affine: PairingCurveAffine<
@@ -44,7 +46,9 @@ pub trait Engine: ScalarEngine {
 
     /// The projective representation of an element in G2.
     type G2: CurveProjective<Engine = Self, Base = Self::Fqe, Scalar = Self::Fr, Affine = Self::G2Affine>
-        + From<Self::G2Affine>;
+        + From<Self::G2Affine>
+        + CurveOps<Self::G2Affine>
+        + CurveOpsOwned<Self::G2Affine>;
 
     /// The affine representation of an element in G2.
     type G2Affine: PairingCurveAffine<

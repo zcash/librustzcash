@@ -5,16 +5,46 @@ use ff::{PrimeField, PrimeFieldDecodingError, ScalarEngine, SqrtField};
 use rand::RngCore;
 use std::error::Error;
 use std::fmt;
+use std::ops::{Add, AddAssign, Neg, Sub, SubAssign};
 
 pub mod tests;
 
 mod wnaf;
 pub use self::wnaf::Wnaf;
 
+/// A helper trait for types implementing group addition.
+pub trait CurveOps<Rhs = Self, Output = Self>:
+    Add<Rhs, Output = Output> + Sub<Rhs, Output = Output> + AddAssign<Rhs> + SubAssign<Rhs>
+{
+}
+
+impl<T, Rhs, Output> CurveOps<Rhs, Output> for T where
+    T: Add<Rhs, Output = Output> + Sub<Rhs, Output = Output> + AddAssign<Rhs> + SubAssign<Rhs>
+{
+}
+
+/// A helper trait for references implementing group addition.
+pub trait CurveOpsOwned<Rhs = Self, Output = Self>: for<'r> CurveOps<&'r Rhs, Output> {}
+impl<T, Rhs, Output> CurveOpsOwned<Rhs, Output> for T where T: for<'r> CurveOps<&'r Rhs, Output> {}
+
 /// Projective representation of an elliptic curve point guaranteed to be
 /// in the correct prime order subgroup.
 pub trait CurveProjective:
-    PartialEq + Eq + Sized + Copy + Clone + Send + Sync + fmt::Debug + fmt::Display + 'static
+    PartialEq
+    + Eq
+    + Sized
+    + Copy
+    + Clone
+    + Send
+    + Sync
+    + fmt::Debug
+    + fmt::Display
+    + 'static
+    + Neg<Output = Self>
+    + CurveOps
+    + CurveOpsOwned
+    + CurveOps<<Self as CurveProjective>::Affine>
+    + CurveOpsOwned<<Self as CurveProjective>::Affine>
 {
     type Engine: ScalarEngine<Fr = Self::Scalar>;
     type Scalar: PrimeField + SqrtField;
@@ -44,22 +74,6 @@ pub trait CurveProjective:
     /// Doubles this element.
     fn double(&mut self);
 
-    /// Adds another element to this element.
-    fn add_assign(&mut self, other: &Self);
-
-    /// Subtracts another element from this element.
-    fn sub_assign(&mut self, other: &Self) {
-        let mut tmp = *other;
-        tmp.negate();
-        self.add_assign(&tmp);
-    }
-
-    /// Adds an affine element to this element.
-    fn add_assign_mixed(&mut self, other: &Self::Affine);
-
-    /// Negates this element.
-    fn negate(&mut self);
-
     /// Performs scalar multiplication of this element.
     fn mul_assign<S: Into<<Self::Scalar as PrimeField>::Repr>>(&mut self, other: S);
 
@@ -78,7 +92,17 @@ pub trait CurveProjective:
 /// Affine representation of an elliptic curve point guaranteed to be
 /// in the correct prime order subgroup.
 pub trait CurveAffine:
-    Copy + Clone + Sized + Send + Sync + fmt::Debug + fmt::Display + PartialEq + Eq + 'static
+    Copy
+    + Clone
+    + Sized
+    + Send
+    + Sync
+    + fmt::Debug
+    + fmt::Display
+    + PartialEq
+    + Eq
+    + 'static
+    + Neg<Output = Self>
 {
     type Engine: ScalarEngine<Fr = Self::Scalar>;
     type Scalar: PrimeField + SqrtField;
@@ -96,9 +120,6 @@ pub trait CurveAffine:
     /// Determines if this point represents the point at infinity; the
     /// additive identity.
     fn is_zero(&self) -> bool;
-
-    /// Negates this element.
-    fn negate(&mut self);
 
     /// Performs scalar multiplication of this element with mixed addition.
     fn mul<S: Into<<Self::Scalar as PrimeField>::Repr>>(&self, other: S) -> Self::Projective;
