@@ -69,9 +69,10 @@ jobs:
 
     steps:
       - uses: actions/checkout@v1
+      # Use stable for this to ensure that cargo-tarpaulin can be built.
       - uses: actions-rs/toolchain@v1
         with:
-          toolchain: 1.37.0
+          toolchain: stable
           override: true
       - name: Install cargo-tarpaulin
         uses: actions-rs/cargo@v1
