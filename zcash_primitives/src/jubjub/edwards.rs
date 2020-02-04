@@ -89,10 +89,8 @@ impl<E: JubjubEngine> Point<E, Unknown> {
         y_repr.as_mut()[3] &= 0x7fffffffffffffff;
 
         match E::Fr::from_repr(y_repr) {
-            Ok(y) => match Self::get_for_y(y, x_sign, params) {
-                Some(p) => Ok(p),
-                None => Err(io::Error::new(io::ErrorKind::InvalidInput, "not on curve")),
-            },
+            Ok(y) => Self::get_for_y(y, x_sign, params)
+                .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "not on curve")),
             Err(_) => Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 "y is not in field",

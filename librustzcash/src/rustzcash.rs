@@ -402,26 +402,15 @@ fn priv_get_note(
     r: *const [c_uchar; 32],
 ) -> Result<Note<Bls12>, ()> {
     let diversifier = Diversifier(unsafe { *diversifier });
-    let g_d = match diversifier.g_d::<Bls12>(&JUBJUB) {
-        Some(g_d) => g_d,
-        None => return Err(()),
-    };
+    let g_d = diversifier.g_d::<Bls12>(&JUBJUB).ok_or(())?;
 
-    let pk_d = match edwards::Point::<Bls12, Unknown>::read(&(unsafe { &*pk_d })[..], &JUBJUB) {
-        Ok(p) => p,
-        Err(_) => return Err(()),
-    };
+    let pk_d = edwards::Point::<Bls12, Unknown>::read(&(unsafe { &*pk_d })[..], &JUBJUB)
+        .map_err(|_| ())?;
 
-    let pk_d = match pk_d.as_prime_order(&JUBJUB) {
-        Some(pk_d) => pk_d,
-        None => return Err(()),
-    };
+    let pk_d = pk_d.as_prime_order(&JUBJUB).ok_or(())?;
 
     // Deserialize randomness
-    let r = match Fs::from_repr(read_fs(unsafe { &*r })) {
-        Ok(r) => r,
-        Err(_) => return Err(()),
-    };
+    let r = Fs::from_repr(read_fs(unsafe { &*r })).map_err(|_| ())?;
 
     let note = Note {
         value,

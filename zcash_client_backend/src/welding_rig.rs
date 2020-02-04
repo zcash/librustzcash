@@ -134,12 +134,11 @@ pub fn scan_block(
             // mutable references to wtxs for too long.
             let mut block_witnesses: Vec<_> = wtxs
                 .iter_mut()
-                .map(|tx| {
+                .flat_map(|tx| {
                     tx.shielded_outputs
                         .iter_mut()
                         .map(|output| &mut output.witness)
                 })
-                .flatten()
                 .collect();
 
             for to_scan in tx.outputs.into_iter().enumerate() {
