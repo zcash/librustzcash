@@ -468,7 +468,7 @@ mod tests {
             value,
         );
         insert_into_cache(db_cache, &cb);
-        scan_cached_blocks(db_cache, db_data).unwrap();
+        scan_cached_blocks(db_cache, db_data, None).unwrap();
 
         // Verified balance matches total balance
         assert_eq!(get_balance(db_data, 0).unwrap(), value);
@@ -482,7 +482,7 @@ mod tests {
             value,
         );
         insert_into_cache(db_cache, &cb);
-        scan_cached_blocks(db_cache, db_data).unwrap();
+        scan_cached_blocks(db_cache, db_data, None).unwrap();
 
         // Verified balance does not include the second note
         assert_eq!(get_balance(db_data, 0).unwrap(), value + value);
@@ -518,7 +518,7 @@ mod tests {
             );
             insert_into_cache(db_cache, &cb);
         }
-        scan_cached_blocks(db_cache, db_data).unwrap();
+        scan_cached_blocks(db_cache, db_data, None).unwrap();
 
         // Second spend still fails
         match create_to_address(
@@ -545,7 +545,7 @@ mod tests {
             value,
         );
         insert_into_cache(db_cache, &cb);
-        scan_cached_blocks(db_cache, db_data).unwrap();
+        scan_cached_blocks(db_cache, db_data, None).unwrap();
 
         // Second spend should now succeed
         create_to_address(
@@ -584,7 +584,7 @@ mod tests {
             value,
         );
         insert_into_cache(db_cache, &cb);
-        scan_cached_blocks(db_cache, db_data).unwrap();
+        scan_cached_blocks(db_cache, db_data, None).unwrap();
         assert_eq!(get_balance(db_data, 0).unwrap(), value);
 
         // Send some of the funds to another address
@@ -629,7 +629,7 @@ mod tests {
             );
             insert_into_cache(db_cache, &cb);
         }
-        scan_cached_blocks(db_cache, db_data).unwrap();
+        scan_cached_blocks(db_cache, db_data, None).unwrap();
 
         // Second spend still fails
         match create_to_address(
@@ -656,7 +656,7 @@ mod tests {
             value,
         );
         insert_into_cache(db_cache, &cb);
-        scan_cached_blocks(db_cache, db_data).unwrap();
+        scan_cached_blocks(db_cache, db_data, None).unwrap();
 
         // Second spend should now succeed
         create_to_address(

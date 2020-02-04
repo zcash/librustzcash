@@ -30,8 +30,13 @@ struct WitnessRow {
     witness: IncrementalWitness<Node>,
 }
 
-/// Scans new blocks added to the cache for any transactions received by the tracked
-/// accounts.
+/// Scans at most `limit` new blocks added to the cache for any transactions received by
+/// the tracked accounts.
+///
+/// This function will return without error after scanning at most `limit` new blocks, to
+/// enable the caller to update their UI with scanning progress. Repeatedly calling this
+/// function will process sequential ranges of blocks, and is equivalent to calling
+/// `scan_cached_blocks` and passing `None` for the optional `limit` value.
 ///
 /// This function pays attention only to cached blocks with heights greater than the
 /// highest scanned block in `db_data`. Cached blocks with lower heights are not verified
@@ -50,13 +55,14 @@ struct WitnessRow {
 /// ```
 /// use zcash_client_sqlite::scan::scan_cached_blocks;
 ///
-/// scan_cached_blocks("/path/to/cache.db", "/path/to/data.db");
+/// scan_cached_blocks("/path/to/cache.db", "/path/to/data.db", None);
 /// ```
 ///
 /// [`init_blocks_table`]: crate::init::init_blocks_table
 pub fn scan_cached_blocks<P: AsRef<Path>, Q: AsRef<Path>>(
     db_cache: P,
     db_data: Q,
+    limit: Option<i32>,
 ) -> Result<(), Error> {
     let cache = Connection::open(db_cache)?;
     let data = Connection::open(db_data)?;
@@ -68,9 +74,10 @@ pub fn scan_cached_blocks<P: AsRef<Path>, Q: AsRef<Path>>(
     })?;
 
     // Fetch the CompactBlocks we need to scan
-    let mut stmt_blocks = cache
-        .prepare("SELECT height, data FROM compactblocks WHERE height > ? ORDER BY height ASC")?;
-    let rows = stmt_blocks.query_map(&[last_height], |row| {
+    let mut stmt_blocks = cache.prepare(
+        "SELECT height, data FROM compactblocks WHERE height > ? ORDER BY height ASC LIMIT ?",
+    )?;
+    let rows = stmt_blocks.query_map(&[last_height, limit.unwrap_or(i32::max_value())], |row| {
         Ok(CompactBlockRow {
             height: row.get(0)?,
             data: row.get(1)?,
@@ -356,7 +363,7 @@ mod tests {
             value,
         );
         insert_into_cache(db_cache, &cb1);
-        scan_cached_blocks(db_cache, db_data).unwrap();
+        scan_cached_blocks(db_cache, db_data, None).unwrap();
         assert_eq!(get_balance(db_data, 0).unwrap(), value);
 
         // We cannot scan a block of height SAPLING_ACTIVATION_HEIGHT + 2 next
@@ -373,7 +380,7 @@ mod tests {
             value,
         );
         insert_into_cache(db_cache, &cb3);
-        match scan_cached_blocks(db_cache, db_data) {
+        match scan_cached_blocks(db_cache, db_data, None) {
             Ok(_) => panic!("Should have failed"),
             Err(e) => assert_eq!(
                 e.to_string(),
@@ -387,7 +394,7 @@ mod tests {
 
         // If we add a block of height SAPLING_ACTIVATION_HEIGHT + 1, we can now scan both
         insert_into_cache(db_cache, &cb2);
-        scan_cached_blocks(db_cache, db_data).unwrap();
+        scan_cached_blocks(db_cache, db_data, None).unwrap();
         assert_eq!(
             get_balance(db_data, 0).unwrap(),
             Amount::from_u64(150_000).unwrap()
@@ -423,7 +430,7 @@ mod tests {
         insert_into_cache(db_cache, &cb);
 
         // Scan the cache
-        scan_cached_blocks(db_cache, db_data).unwrap();
+        scan_cached_blocks(db_cache, db_data, None).unwrap();
 
         // Account balance should reflect the received note
         assert_eq!(get_balance(db_data, 0).unwrap(), value);
@@ -434,7 +441,7 @@ mod tests {
         insert_into_cache(db_cache, &cb2);
 
         // Scan the cache again
-        scan_cached_blocks(db_cache, db_data).unwrap();
+        scan_cached_blocks(db_cache, db_data, None).unwrap();
 
         // Account balance should reflect both received notes
         assert_eq!(get_balance(db_data, 0).unwrap(), value + value2);
@@ -469,7 +476,7 @@ mod tests {
         insert_into_cache(db_cache, &cb);
 
         // Scan the cache
-        scan_cached_blocks(db_cache, db_data).unwrap();
+        scan_cached_blocks(db_cache, db_data, None).unwrap();
 
         // Account balance should reflect the received note
         assert_eq!(get_balance(db_data, 0).unwrap(), value);
@@ -491,7 +498,7 @@ mod tests {
         );
 
         // Scan the cache again
-        scan_cached_blocks(db_cache, db_data).unwrap();
+        scan_cached_blocks(db_cache, db_data, None).unwrap();
 
         // Account balance should equal the change
         assert_eq!(get_balance(db_data, 0).unwrap(), value - value2);

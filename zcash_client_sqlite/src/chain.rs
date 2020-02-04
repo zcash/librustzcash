@@ -52,7 +52,7 @@
 //! // At this point, the cache and scanned data are locally consistent (though not
 //! // necessarily consistent with the latest chain tip - this would be discovered the
 //! // next time this codepath is executed after new blocks are received).
-//! scan_cached_blocks(&db_cache, &db_data);
+//! scan_cached_blocks(&db_cache, &db_data, None);
 //! ```
 
 use protobuf::parse_from_bytes;
@@ -268,7 +268,7 @@ mod tests {
         validate_combined_chain(db_cache, db_data).unwrap();
 
         // Scan the cache
-        scan_cached_blocks(db_cache, db_data).unwrap();
+        scan_cached_blocks(db_cache, db_data, None).unwrap();
 
         // Data-only chain should be valid
         validate_combined_chain(db_cache, db_data).unwrap();
@@ -286,7 +286,7 @@ mod tests {
         validate_combined_chain(db_cache, db_data).unwrap();
 
         // Scan the cache again
-        scan_cached_blocks(db_cache, db_data).unwrap();
+        scan_cached_blocks(db_cache, db_data, None).unwrap();
 
         // Data-only chain should be valid
         validate_combined_chain(db_cache, db_data).unwrap();
@@ -324,7 +324,7 @@ mod tests {
         insert_into_cache(db_cache, &cb2);
 
         // Scan the cache
-        scan_cached_blocks(db_cache, db_data).unwrap();
+        scan_cached_blocks(db_cache, db_data, None).unwrap();
 
         // Data-only chain should be valid
         validate_combined_chain(db_cache, db_data).unwrap();
@@ -389,7 +389,7 @@ mod tests {
         insert_into_cache(db_cache, &cb2);
 
         // Scan the cache
-        scan_cached_blocks(db_cache, db_data).unwrap();
+        scan_cached_blocks(db_cache, db_data, None).unwrap();
 
         // Data-only chain should be valid
         validate_combined_chain(db_cache, db_data).unwrap();
@@ -454,7 +454,7 @@ mod tests {
         insert_into_cache(db_cache, &cb2);
 
         // Scan the cache
-        scan_cached_blocks(db_cache, db_data).unwrap();
+        scan_cached_blocks(db_cache, db_data, None).unwrap();
 
         // Account balance should reflect both received notes
         assert_eq!(get_balance(db_data, 0).unwrap(), value + value2);
