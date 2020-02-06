@@ -48,12 +48,50 @@ pub enum Error {
     SpendProof,
 }
 
-struct SpendDescriptionInfo {
+struct SaplingSpend {
     extsk: ExtendedSpendingKey,
     diversifier: Diversifier,
     note: Note<Bls12>,
     alpha: Fs,
     merkle_path: MerklePath<Node>,
+}
+
+impl SaplingSpend {
+    pub fn build<P: TxProver>(
+        &self,
+        prover: &P,
+        ctx: &mut P::SaplingProvingContext,
+        anchor: Fr,
+    ) -> Result<SpendDescription, ()> {
+        let proof_generation_key = self.extsk.expsk.proof_generation_key(&JUBJUB);
+
+        let mut nullifier = [0u8; 32];
+        nullifier.copy_from_slice(&self.note.nf(
+            &proof_generation_key.to_viewing_key(&JUBJUB),
+            self.merkle_path.position,
+            &JUBJUB,
+        ));
+
+        let (zkproof, cv, rk) = prover.spend_proof(
+            ctx,
+            proof_generation_key,
+            self.diversifier,
+            self.note.r,
+            self.alpha,
+            self.note.value,
+            anchor,
+            self.merkle_path.clone(),
+        )?;
+
+        Ok(SpendDescription {
+            cv,
+            anchor,
+            nullifier,
+            rk,
+            zkproof,
+            spend_auth_sig: None,
+        })
+    }
 }
 
 pub struct SaplingOutput {
@@ -285,7 +323,7 @@ pub struct Builder<R: RngCore + CryptoRng> {
     mtx: TransactionData,
     fee: Amount,
     anchor: Option<Fr>,
-    spends: Vec<SpendDescriptionInfo>,
+    spends: Vec<SaplingSpend>,
     outputs: Vec<SaplingOutput>,
     transparent_inputs: TransparentInputs,
     change_address: Option<(OutgoingViewingKey, PaymentAddress<Bls12>)>,
@@ -358,7 +396,7 @@ impl<R: RngCore + CryptoRng> Builder<R> {
 
         self.mtx.value_balance += Amount::from_u64(note.value).map_err(|_| Error::InvalidAmount)?;
 
-        self.spends.push(SpendDescriptionInfo {
+        self.spends.push(SaplingSpend {
             extsk,
             diversifier,
             note,
@@ -516,36 +554,11 @@ impl<R: RngCore + CryptoRng> Builder<R> {
             let anchor = self.anchor.expect("anchor was set if spends were added");
 
             for (i, (pos, spend)) in spends.iter().enumerate() {
-                let proof_generation_key = spend.extsk.expsk.proof_generation_key(&JUBJUB);
-
-                let mut nullifier = [0u8; 32];
-                nullifier.copy_from_slice(&spend.note.nf(
-                    &proof_generation_key.to_viewing_key(&JUBJUB),
-                    spend.merkle_path.position,
-                    &JUBJUB,
-                ));
-
-                let (zkproof, cv, rk) = prover
-                    .spend_proof(
-                        &mut ctx,
-                        proof_generation_key,
-                        spend.diversifier,
-                        spend.note.r,
-                        spend.alpha,
-                        spend.note.value,
-                        anchor,
-                        spend.merkle_path.clone(),
-                    )
-                    .map_err(|()| Error::SpendProof)?;
-
-                self.mtx.shielded_spends.push(SpendDescription {
-                    cv,
-                    anchor,
-                    nullifier,
-                    rk,
-                    zkproof,
-                    spend_auth_sig: None,
-                });
+                self.mtx.shielded_spends.push(
+                    spend
+                        .build(prover, &mut ctx, anchor)
+                        .map_err(|()| Error::SpendProof)?,
+                );
 
                 // Record the post-randomized spend location
                 tx_metadata.spend_indices[*pos] = i;
