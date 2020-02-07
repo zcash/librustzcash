@@ -117,7 +117,7 @@ impl SaplingProvingContext {
             auth_path: witness
                 .auth_path
                 .iter()
-                .map(|n| n.map(|(node, b)| (node.into(), b)))
+                .map(|(node, b)| Some(((*node).into(), *b)))
                 .collect(),
             anchor: Some(anchor),
         };

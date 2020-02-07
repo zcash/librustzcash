@@ -385,9 +385,9 @@ impl<Node: Hashable> IncrementalWitness<Node> {
 
         if let Some(node) = self.tree.left {
             if self.tree.right.is_some() {
-                auth_path.push(Some((node, true)));
+                auth_path.push((node, true));
             } else {
-                auth_path.push(Some((filler.next(0), false)));
+                auth_path.push((filler.next(0), false));
             }
         } else {
             // Can't create an authentication path for the beginning of the tree
@@ -396,13 +396,13 @@ impl<Node: Hashable> IncrementalWitness<Node> {
 
         for (i, p) in self.tree.parents.iter().enumerate() {
             auth_path.push(match p {
-                Some(node) => Some((*node, true)),
-                None => Some((filler.next(i + 1), false)),
+                Some(node) => (*node, true),
+                None => (filler.next(i + 1), false),
             });
         }
 
         for i in self.tree.parents.len()..(depth - 1) {
-            auth_path.push(Some((filler.next(i + 1), false)));
+            auth_path.push((filler.next(i + 1), false));
         }
         assert_eq!(auth_path.len(), depth);
 
@@ -417,13 +417,13 @@ impl<Node: Hashable> IncrementalWitness<Node> {
 /// that tree.
 #[derive(Clone, Debug, PartialEq)]
 pub struct CommitmentTreeWitness<Node: Hashable> {
-    pub auth_path: Vec<Option<(Node, bool)>>,
+    pub auth_path: Vec<(Node, bool)>,
     pub position: u64,
 }
 
 impl<Node: Hashable> CommitmentTreeWitness<Node> {
     /// Constructs a witness directly from its path and position.
-    pub fn from_path(auth_path: Vec<Option<(Node, bool)>>, position: u64) -> Self {
+    pub fn from_path(auth_path: Vec<(Node, bool)>, position: u64) -> Self {
         CommitmentTreeWitness {
             auth_path,
             position,
@@ -444,48 +444,41 @@ impl<Node: Hashable> CommitmentTreeWitness<Node> {
         witness = &witness[1..];
 
         // Begin to construct the authentication path
-        let mut auth_path = vec![None; depth];
+        let iter = witness.chunks_exact(33);
+        witness = iter.remainder();
 
         // The vector works in reverse
-        for i in (0..depth).rev() {
-            // skip length of inner vector
-            if witness[0] != 32 {
-                // the length of a pedersen hash
-                return Err(());
-            }
-            witness = &witness[1..];
-
-            // Grab the sibling node at this depth in the tree
-            let mut sibling = [0u8; 32];
-            sibling.copy_from_slice(&witness[0..32]);
-            witness = &witness[32..];
-
-            // Sibling node should be an element of Fr
-            let sibling = match Node::read(&sibling[..]) {
-                Ok(p) => p,
-                Err(_) => return Err(()),
-            };
-
-            // Set the value in the auth path; we put false here
-            // for now (signifying the position bit) which we'll
-            // fill in later.
-            auth_path[i] = Some((sibling, false));
+        let mut auth_path = iter
+            .rev()
+            .map(|bytes| {
+                // Length of inner vector should be the length of a Pedersen hash
+                if bytes[0] == 32 {
+                    // Sibling node should be an element of Fr
+                    Node::read(&bytes[1..])
+                        .map(|sibling| {
+                            // Set the value in the auth path; we put false here
+                            // for now (signifying the position bit) which we'll
+                            // fill in later.
+                            (sibling, false)
+                        })
+                        .map_err(|_| ())
+                } else {
+                    Err(())
+                }
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        if auth_path.len() != depth {
+            return Err(());
         }
 
         // Read the position from the witness
-        let position = match witness.read_u64::<LittleEndian>() {
-            Ok(pos) => pos,
-            Err(_) => return Err(()),
-        };
+        let position = witness.read_u64::<LittleEndian>().map_err(|_| ())?;
 
         // Given the position, let's finish constructing the authentication
         // path
         let mut tmp = position;
         for entry in auth_path.iter_mut() {
-            if let Some(p) = entry {
-                p.1 = (tmp & 1) == 1;
-            }
-
+            entry.1 = (tmp & 1) == 1;
             tmp >>= 1;
         }
 
