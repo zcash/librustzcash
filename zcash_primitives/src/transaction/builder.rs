@@ -35,7 +35,13 @@ const DEFAULT_TX_EXPIRY_DELTA: u32 = 20;
 
 /// If there are any shielded inputs, always have at least two shielded outputs, padding
 /// with dummy outputs if necessary. See https://github.com/zcash/zcash/issues/3615
-const MIN_SHIELDED_OUTPUTS: usize = 2;
+fn default_sapling_output_arity<T>(spends: &[T]) -> Option<Arity> {
+    if spends.is_empty() {
+        None
+    } else {
+        Some(Arity::Minimum(2))
+    }
+}
 
 #[derive(Debug, PartialEq)]
 pub enum Error {
@@ -44,8 +50,45 @@ pub enum Error {
     ChangeIsNegative(Amount),
     InvalidAddress,
     InvalidAmount,
+    InvalidOutputArity,
     NoChangeAddress,
     SpendProof,
+}
+
+/// Specifies the "arity" that the [`Builder`] should enforce on the spends or outputs
+/// within the transaction it is building.
+///
+/// See [`Builder::with_sapling_spend_arity`] and [`Builder::with_sapling_output_arity`]
+/// for more details.
+#[derive(Clone, Copy, Debug)]
+pub enum Arity {
+    /// Require an exact number of spends or outputs. The real number of spends or outputs
+    /// will be hidden.
+    Exact(usize),
+    /// Require a minimum number of spends or outputs. The real number of spends or
+    /// outputs in the transaction will be hidden if it is not greater than this number.
+    Minimum(usize),
+}
+
+impl Arity {
+    /// Enforces that `v` has the desired arity, padding with dummy entries if necessary.
+    fn enforce<T, F: FnMut() -> T>(self, v: &mut Vec<T>, mut dummy: F) -> Result<(), ()> {
+        let target = match self {
+            Arity::Exact(n) => {
+                if v.len() > n {
+                    return Err(());
+                }
+                n
+            }
+            Arity::Minimum(n) => n,
+        };
+
+        while v.len() < target {
+            v.push(dummy());
+        }
+
+        Ok(())
+    }
 }
 
 struct SaplingSpend {
@@ -327,6 +370,7 @@ pub struct Builder<R: RngCore + CryptoRng> {
     outputs: Vec<SaplingOutput>,
     transparent_inputs: TransparentInputs,
     change_address: Option<(OutgoingViewingKey, PaymentAddress<Bls12>)>,
+    output_arity: Option<Arity>,
 }
 
 impl Builder<OsRng> {
@@ -367,6 +411,7 @@ impl<R: RngCore + CryptoRng> Builder<R> {
             outputs: vec![],
             transparent_inputs: TransparentInputs::default(),
             change_address: None,
+            output_arity: None,
         }
     }
 
@@ -461,6 +506,41 @@ impl<R: RngCore + CryptoRng> Builder<R> {
         self.change_address = Some((ovk, to));
     }
 
+    /// Sets the number of Sapling [`OutputDescription`]s that should be present in the
+    /// final [`Transaction`].
+    ///
+    /// This can be used to hide the number of [`Note`]s being created, by padding the
+    /// transaction with dummy `OutputDescription`s. Doing so will make the transaction
+    /// larger.
+    ///
+    /// By default:
+    /// - If there are any Sapling spends, the Sapling output arity is set to
+    ///   [`Arity::Minimum(2)`](Arity::Minimum).
+    /// - If there are no Sapling spends, Sapling output arity is not hidden.
+    ///
+    /// See [issue #3615] for more details.
+    ///
+    /// [issue #3615]: https://github.com/zcash/zcash/issues/3615
+    ///
+    /// # Errors
+    ///
+    /// If this is set to [`Arity::Exact(n)`](Arity::Exact), and the transaction requires
+    /// more than `n` `SpendDescription`s (because [`Builder::add_sapling_output`] was
+    /// called more than `n` times, or because it was called `n` times but a change output
+    /// is needed), [`Builder::build`] will fail with [`Error::InvalidOutputArity`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use zcash_primitives::transaction::builder::{Arity, Builder};
+    ///
+    /// let mut builder = Builder::new(123_456);
+    /// builder.with_sapling_output_arity(Arity::Exact(4));
+    /// ```
+    pub fn with_sapling_output_arity(&mut self, output_arity: Arity) {
+        self.output_arity = Some(output_arity);
+    }
+
     /// Builds a transaction from the configured spends and outputs.
     ///
     /// Upon success, returns a tuple containing the final transaction, and the
@@ -537,10 +617,13 @@ impl<R: RngCore + CryptoRng> Builder<R> {
 
         // Pad Sapling outputs
         let orig_outputs_len = outputs.len();
-        if !spends.is_empty() {
-            while outputs.len() < MIN_SHIELDED_OUTPUTS {
-                outputs.push(None);
-            }
+        if let Some(output_arity) = self
+            .output_arity
+            .or_else(|| default_sapling_output_arity(&spends))
+        {
+            output_arity
+                .enforce(&mut outputs, || None)
+                .map_err(|()| Error::InvalidOutputArity)?;
         }
 
         // Randomize order of inputs and outputs
