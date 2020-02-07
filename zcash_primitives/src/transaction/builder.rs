@@ -13,7 +13,7 @@ use crate::{
     consensus,
     keys::OutgoingViewingKey,
     legacy::TransparentAddress,
-    merkle_tree::{CommitmentTreeWitness, IncrementalWitness},
+    merkle_tree::CommitmentTreeWitness,
     note_encryption::{generate_esk, Memo, SaplingNoteEncryption},
     prover::TxProver,
     redjubjub::PrivateKey,
@@ -44,7 +44,6 @@ pub enum Error {
     ChangeIsNegative(Amount),
     InvalidAddress,
     InvalidAmount,
-    InvalidWitness,
     NoChangeAddress,
     SpendProof,
 }
@@ -342,18 +341,18 @@ impl<R: RngCore + CryptoRng> Builder<R> {
         extsk: ExtendedSpendingKey,
         diversifier: Diversifier,
         note: Note<Bls12>,
-        witness: IncrementalWitness<Node>,
+        witness: CommitmentTreeWitness<Node>,
     ) -> Result<(), Error> {
         // Consistency check: all anchors must equal the first one
+        let cm = Node::new(note.cm(&JUBJUB).into());
         if let Some(anchor) = self.anchor {
-            let witness_root: Fr = witness.root().into();
+            let witness_root: Fr = witness.root(cm).into();
             if witness_root != anchor {
                 return Err(Error::AnchorMismatch);
             }
         } else {
-            self.anchor = Some(witness.root().into())
+            self.anchor = Some(witness.root(cm).into())
         }
-        let witness = witness.path().ok_or(Error::InvalidWitness)?;
 
         let alpha = Fs::random(&mut self.rng);
 
@@ -779,7 +778,7 @@ mod tests {
                     extsk.clone(),
                     *to.diversifier(),
                     note1.clone(),
-                    witness1.clone(),
+                    witness1.path().unwrap(),
                 )
                 .unwrap();
             builder
@@ -816,10 +815,15 @@ mod tests {
         {
             let mut builder = Builder::new(0);
             builder
-                .add_sapling_spend(extsk.clone(), *to.diversifier(), note1, witness1)
+                .add_sapling_spend(
+                    extsk.clone(),
+                    *to.diversifier(),
+                    note1,
+                    witness1.path().unwrap(),
+                )
                 .unwrap();
             builder
-                .add_sapling_spend(extsk, *to.diversifier(), note2, witness2)
+                .add_sapling_spend(extsk, *to.diversifier(), note2, witness2.path().unwrap())
                 .unwrap();
             builder
                 .add_sapling_output(ovk, to, Amount::from_u64(30000).unwrap(), None)
