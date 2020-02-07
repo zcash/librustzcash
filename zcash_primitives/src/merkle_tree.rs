@@ -418,6 +418,20 @@ pub struct MerklePath<Node: Hashable> {
 }
 
 impl<Node: Hashable> MerklePath<Node> {
+    /// Constructs an empty Merkle path.
+    ///
+    /// This is used to create dummy Sapling spends.
+    pub(crate) fn empty() -> Self {
+        let mut filler = PathFiller::empty();
+
+        MerklePath {
+            auth_path: (0..SAPLING_COMMITMENT_TREE_DEPTH)
+                .map(|i| (filler.next(i), false))
+                .collect(),
+            position: 0,
+        }
+    }
+
     /// Constructs a Merkle path directly from a path and position.
     pub fn from_path(auth_path: Vec<(Node, bool)>, position: u64) -> Self {
         MerklePath {
