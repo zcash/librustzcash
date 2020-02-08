@@ -50,7 +50,7 @@ use zcash_primitives::{
         fs::{Fs, FsRepr},
         FixedGenerators, JubjubEngine, JubjubParams, PrimeOrder, ToUniform, Unknown,
     },
-    merkle_tree::CommitmentTreeWitness,
+    merkle_tree::MerklePath,
     note_encryption::sapling_ka_agree,
     primitives::{Diversifier, Note, PaymentAddress, ProofGenerationKey, ViewingKey},
     redjubjub::{self, Signature},
@@ -980,7 +980,7 @@ pub extern "C" fn librustzcash_sapling_spend_proof(
     ar: *const [c_uchar; 32],
     value: u64,
     anchor: *const [c_uchar; 32],
-    witness: *const [c_uchar; 1 + 33 * SAPLING_TREE_DEPTH + 8],
+    merkle_path: *const [c_uchar; 1 + 33 * SAPLING_TREE_DEPTH + 8],
     cv: *mut [c_uchar; 32],
     rk_out: *mut [c_uchar; 32],
     zkproof: *mut [c_uchar; GROTH_PROOF_SIZE],
@@ -1030,9 +1030,8 @@ pub extern "C" fn librustzcash_sapling_spend_proof(
         Err(_) => return false,
     };
 
-    // The witness contains the incremental tree witness information, in a
-    // weird serialized format.
-    let witness = match CommitmentTreeWitness::from_slice(unsafe { &(&*witness)[..] }) {
+    // Parse the Merkle path from the caller
+    let merkle_path = match MerklePath::from_slice(unsafe { &(&*merkle_path)[..] }) {
         Ok(w) => w,
         Err(_) => return false,
     };
@@ -1046,7 +1045,7 @@ pub extern "C" fn librustzcash_sapling_spend_proof(
             ar,
             value,
             anchor,
-            witness,
+            merkle_path,
             unsafe { SAPLING_SPEND_PARAMS.as_ref() }.unwrap(),
             unsafe { SAPLING_SPEND_VK.as_ref() }.unwrap(),
             &JUBJUB,

@@ -9,7 +9,7 @@ use zcash_primitives::{
     primitives::{Diversifier, PaymentAddress, ProofGenerationKey},
 };
 use zcash_primitives::{
-    merkle_tree::CommitmentTreeWitness,
+    merkle_tree::MerklePath,
     prover::TxProver,
     redjubjub::{PublicKey, Signature},
     sapling::Node,
@@ -127,7 +127,7 @@ impl TxProver for LocalTxProver {
         ar: Fs,
         value: u64,
         anchor: Fr,
-        witness: CommitmentTreeWitness<Node>,
+        merkle_path: MerklePath<Node>,
     ) -> Result<
         (
             [u8; GROTH_PROOF_SIZE],
@@ -143,7 +143,7 @@ impl TxProver for LocalTxProver {
             ar,
             value,
             anchor,
-            witness,
+            merkle_path,
             &self.spend_params,
             &self.spend_vk,
             &JUBJUB,

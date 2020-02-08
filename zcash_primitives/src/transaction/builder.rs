@@ -13,7 +13,7 @@ use crate::{
     consensus,
     keys::OutgoingViewingKey,
     legacy::TransparentAddress,
-    merkle_tree::CommitmentTreeWitness,
+    merkle_tree::MerklePath,
     note_encryption::{generate_esk, Memo, SaplingNoteEncryption},
     prover::TxProver,
     redjubjub::PrivateKey,
@@ -53,7 +53,7 @@ struct SpendDescriptionInfo {
     diversifier: Diversifier,
     note: Note<Bls12>,
     alpha: Fs,
-    witness: CommitmentTreeWitness<Node>,
+    merkle_path: MerklePath<Node>,
 }
 
 pub struct SaplingOutput {
@@ -334,24 +334,24 @@ impl<R: RngCore + CryptoRng> Builder<R> {
 
     /// Adds a Sapling note to be spent in this transaction.
     ///
-    /// Returns an error if the given witness does not have the same anchor as previous
-    /// witnesses, or has no path.
+    /// Returns an error if the given Merkle path does not have the same anchor as the
+    /// paths for previous Sapling notes.
     pub fn add_sapling_spend(
         &mut self,
         extsk: ExtendedSpendingKey,
         diversifier: Diversifier,
         note: Note<Bls12>,
-        witness: CommitmentTreeWitness<Node>,
+        merkle_path: MerklePath<Node>,
     ) -> Result<(), Error> {
         // Consistency check: all anchors must equal the first one
         let cm = Node::new(note.cm(&JUBJUB).into());
         if let Some(anchor) = self.anchor {
-            let witness_root: Fr = witness.root(cm).into();
-            if witness_root != anchor {
+            let path_root: Fr = merkle_path.root(cm).into();
+            if path_root != anchor {
                 return Err(Error::AnchorMismatch);
             }
         } else {
-            self.anchor = Some(witness.root(cm).into())
+            self.anchor = Some(merkle_path.root(cm).into())
         }
 
         let alpha = Fs::random(&mut self.rng);
@@ -363,7 +363,7 @@ impl<R: RngCore + CryptoRng> Builder<R> {
             diversifier,
             note,
             alpha,
-            witness,
+            merkle_path,
         });
 
         Ok(())
@@ -521,7 +521,7 @@ impl<R: RngCore + CryptoRng> Builder<R> {
                 let mut nullifier = [0u8; 32];
                 nullifier.copy_from_slice(&spend.note.nf(
                     &proof_generation_key.to_viewing_key(&JUBJUB),
-                    spend.witness.position,
+                    spend.merkle_path.position,
                     &JUBJUB,
                 ));
 
@@ -534,7 +534,7 @@ impl<R: RngCore + CryptoRng> Builder<R> {
                         spend.alpha,
                         spend.note.value,
                         anchor,
-                        spend.witness.clone(),
+                        spend.merkle_path.clone(),
                     )
                     .map_err(|()| Error::SpendProof)?;
 

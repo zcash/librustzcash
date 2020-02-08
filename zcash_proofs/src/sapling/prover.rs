@@ -10,7 +10,7 @@ use zcash_primitives::{
     primitives::{Diversifier, Note, PaymentAddress, ProofGenerationKey, ValueCommitment},
 };
 use zcash_primitives::{
-    merkle_tree::CommitmentTreeWitness,
+    merkle_tree::MerklePath,
     redjubjub::{PrivateKey, PublicKey, Signature},
     sapling::Node,
     transaction::components::Amount,
@@ -46,7 +46,7 @@ impl SaplingProvingContext {
         ar: Fs,
         value: u64,
         anchor: Fr,
-        witness: CommitmentTreeWitness<Node>,
+        merkle_path: MerklePath<Node>,
         proving_key: &Parameters<Bls12>,
         verifying_key: &PreparedVerifyingKey<Bls12>,
         params: &JubjubBls12,
@@ -104,7 +104,7 @@ impl SaplingProvingContext {
             r: rcm,
         };
 
-        let nullifier = note.nf(&viewing_key, witness.position, params);
+        let nullifier = note.nf(&viewing_key, merkle_path.position, params);
 
         // We now have the full witness for our circuit
         let instance = Spend {
@@ -114,7 +114,7 @@ impl SaplingProvingContext {
             payment_address: Some(payment_address),
             commitment_randomness: Some(rcm),
             ar: Some(ar),
-            auth_path: witness
+            auth_path: merkle_path
                 .auth_path
                 .iter()
                 .map(|(node, b)| Some(((*node).into(), *b)))

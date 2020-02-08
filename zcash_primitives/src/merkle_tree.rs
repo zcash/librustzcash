@@ -375,11 +375,11 @@ impl<Node: Hashable> IncrementalWitness<Node> {
     }
 
     /// Returns the current witness, or None if the tree is empty.
-    pub fn path(&self) -> Option<CommitmentTreeWitness<Node>> {
+    pub fn path(&self) -> Option<MerklePath<Node>> {
         self.path_inner(SAPLING_COMMITMENT_TREE_DEPTH)
     }
 
-    fn path_inner(&self, depth: usize) -> Option<CommitmentTreeWitness<Node>> {
+    fn path_inner(&self, depth: usize) -> Option<MerklePath<Node>> {
         let mut filler = self.filler();
         let mut auth_path = Vec::new();
 
@@ -406,31 +406,27 @@ impl<Node: Hashable> IncrementalWitness<Node> {
         }
         assert_eq!(auth_path.len(), depth);
 
-        Some(CommitmentTreeWitness::from_path(
-            auth_path,
-            self.position() as u64,
-        ))
+        Some(MerklePath::from_path(auth_path, self.position() as u64))
     }
 }
 
-/// A witness to a path from a position in a particular commitment tree to the root of
-/// that tree.
+/// A path from a position in a particular commitment tree to the root of that tree.
 #[derive(Clone, Debug, PartialEq)]
-pub struct CommitmentTreeWitness<Node: Hashable> {
+pub struct MerklePath<Node: Hashable> {
     pub auth_path: Vec<(Node, bool)>,
     pub position: u64,
 }
 
-impl<Node: Hashable> CommitmentTreeWitness<Node> {
-    /// Constructs a witness directly from its path and position.
+impl<Node: Hashable> MerklePath<Node> {
+    /// Constructs a Merkle path directly from a path and position.
     pub fn from_path(auth_path: Vec<(Node, bool)>, position: u64) -> Self {
-        CommitmentTreeWitness {
+        MerklePath {
             auth_path,
             position,
         }
     }
 
-    /// Reads a witness from its serialized form.
+    /// Reads a Merkle path from its serialized form.
     pub fn from_slice(witness: &[u8]) -> Result<Self, ()> {
         Self::from_slice_with_depth(witness, SAPLING_COMMITMENT_TREE_DEPTH)
     }
@@ -486,7 +482,7 @@ impl<Node: Hashable> CommitmentTreeWitness<Node> {
         // have provided more information than they should have, indicating
         // a bug downstream
         if witness.is_empty() {
-            Ok(CommitmentTreeWitness {
+            Ok(MerklePath {
                 auth_path,
                 position,
             })
@@ -495,7 +491,7 @@ impl<Node: Hashable> CommitmentTreeWitness<Node> {
         }
     }
 
-    /// Returns the root of the tree corresponding to the witness.
+    /// Returns the root of the tree corresponding to this path applied to `leaf`.
     pub fn root(&self, leaf: Node) -> Node {
         self.auth_path
             .iter()
@@ -512,7 +508,7 @@ impl<Node: Hashable> CommitmentTreeWitness<Node> {
 
 #[cfg(test)]
 mod tests {
-    use super::{CommitmentTree, CommitmentTreeWitness, Hashable, IncrementalWitness, PathFiller};
+    use super::{CommitmentTree, Hashable, IncrementalWitness, MerklePath, PathFiller};
     use crate::sapling::Node;
 
     use ff::PrimeFieldRepr;
@@ -611,7 +607,7 @@ mod tests {
             self.0.root_inner(TESTING_DEPTH)
         }
 
-        fn path(&self) -> Option<CommitmentTreeWitness<Node>> {
+        fn path(&self) -> Option<MerklePath<Node>> {
             self.0.path_inner(TESTING_DEPTH)
         }
     }
@@ -1047,7 +1043,7 @@ mod tests {
 
                 if let Some(leaf) = leaf {
                     let path = witness.path().expect("should be able to create a path");
-                    let expected = CommitmentTreeWitness::from_slice_with_depth(
+                    let expected = MerklePath::from_slice_with_depth(
                         &mut hex::decode(paths[paths_i]).unwrap(),
                         TESTING_DEPTH,
                     )
