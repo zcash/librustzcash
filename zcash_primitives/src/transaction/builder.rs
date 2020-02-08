@@ -435,7 +435,7 @@ impl<R: RngCore + CryptoRng> Builder<R> {
     pub fn build(
         mut self,
         consensus_branch_id: consensus::BranchId,
-        prover: impl TxProver,
+        prover: &impl TxProver,
     ) -> Result<(Transaction, TransactionMetadata), Error> {
         let mut tx_metadata = TransactionMetadata::new();
 
@@ -558,7 +558,7 @@ impl<R: RngCore + CryptoRng> Builder<R> {
                 // Record the post-randomized output location
                 tx_metadata.output_indices[pos] = i;
 
-                output.build(&prover, &mut ctx, &mut self.rng)
+                output.build(prover, &mut ctx, &mut self.rng)
             } else {
                 // This is a dummy output
                 let (dummy_to, dummy_note) = {
@@ -718,7 +718,7 @@ mod tests {
         {
             let builder = Builder::new(0);
             assert_eq!(
-                builder.build(consensus::BranchId::Sapling, MockTxProver),
+                builder.build(consensus::BranchId::Sapling, &MockTxProver),
                 Err(Error::ChangeIsNegative(Amount::from_i64(-10000).unwrap()))
             );
         }
@@ -740,7 +740,7 @@ mod tests {
                 )
                 .unwrap();
             assert_eq!(
-                builder.build(consensus::BranchId::Sapling, MockTxProver),
+                builder.build(consensus::BranchId::Sapling, &MockTxProver),
                 Err(Error::ChangeIsNegative(Amount::from_i64(-60000).unwrap()))
             );
         }
@@ -756,7 +756,7 @@ mod tests {
                 )
                 .unwrap();
             assert_eq!(
-                builder.build(consensus::BranchId::Sapling, MockTxProver),
+                builder.build(consensus::BranchId::Sapling, &MockTxProver),
                 Err(Error::ChangeIsNegative(Amount::from_i64(-60000).unwrap()))
             );
         }
@@ -796,7 +796,7 @@ mod tests {
                 )
                 .unwrap();
             assert_eq!(
-                builder.build(consensus::BranchId::Sapling, MockTxProver),
+                builder.build(consensus::BranchId::Sapling, &MockTxProver),
                 Err(Error::ChangeIsNegative(Amount::from_i64(-1).unwrap()))
             );
         }
@@ -835,7 +835,7 @@ mod tests {
                 )
                 .unwrap();
             assert_eq!(
-                builder.build(consensus::BranchId::Sapling, MockTxProver),
+                builder.build(consensus::BranchId::Sapling, &MockTxProver),
                 Err(Error::BindingSig)
             )
         }
