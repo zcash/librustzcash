@@ -13,7 +13,7 @@ use crate::{
     consensus,
     keys::OutgoingViewingKey,
     legacy::TransparentAddress,
-    merkle_tree::{CommitmentTreeWitness, IncrementalWitness},
+    merkle_tree::MerklePath,
     note_encryption::{generate_esk, Memo, SaplingNoteEncryption},
     prover::TxProver,
     redjubjub::PrivateKey,
@@ -44,7 +44,6 @@ pub enum Error {
     ChangeIsNegative(Amount),
     InvalidAddress,
     InvalidAmount,
-    InvalidWitness,
     NoChangeAddress,
     SpendProof,
 }
@@ -54,7 +53,7 @@ struct SpendDescriptionInfo {
     diversifier: Diversifier,
     note: Note<Bls12>,
     alpha: Fs,
-    witness: CommitmentTreeWitness<Node>,
+    merkle_path: MerklePath<Node>,
 }
 
 pub struct SaplingOutput {
@@ -335,25 +334,25 @@ impl<R: RngCore + CryptoRng> Builder<R> {
 
     /// Adds a Sapling note to be spent in this transaction.
     ///
-    /// Returns an error if the given witness does not have the same anchor as previous
-    /// witnesses, or has no path.
+    /// Returns an error if the given Merkle path does not have the same anchor as the
+    /// paths for previous Sapling notes.
     pub fn add_sapling_spend(
         &mut self,
         extsk: ExtendedSpendingKey,
         diversifier: Diversifier,
         note: Note<Bls12>,
-        witness: IncrementalWitness<Node>,
+        merkle_path: MerklePath<Node>,
     ) -> Result<(), Error> {
         // Consistency check: all anchors must equal the first one
+        let cm = Node::new(note.cm(&JUBJUB).into());
         if let Some(anchor) = self.anchor {
-            let witness_root: Fr = witness.root().into();
-            if witness_root != anchor {
+            let path_root: Fr = merkle_path.root(cm).into();
+            if path_root != anchor {
                 return Err(Error::AnchorMismatch);
             }
         } else {
-            self.anchor = Some(witness.root().into())
+            self.anchor = Some(merkle_path.root(cm).into())
         }
-        let witness = witness.path().ok_or(Error::InvalidWitness)?;
 
         let alpha = Fs::random(&mut self.rng);
 
@@ -364,7 +363,7 @@ impl<R: RngCore + CryptoRng> Builder<R> {
             diversifier,
             note,
             alpha,
-            witness,
+            merkle_path,
         });
 
         Ok(())
@@ -436,7 +435,7 @@ impl<R: RngCore + CryptoRng> Builder<R> {
     pub fn build(
         mut self,
         consensus_branch_id: consensus::BranchId,
-        prover: impl TxProver,
+        prover: &impl TxProver,
     ) -> Result<(Transaction, TransactionMetadata), Error> {
         let mut tx_metadata = TransactionMetadata::new();
 
@@ -522,7 +521,7 @@ impl<R: RngCore + CryptoRng> Builder<R> {
                 let mut nullifier = [0u8; 32];
                 nullifier.copy_from_slice(&spend.note.nf(
                     &proof_generation_key.to_viewing_key(&JUBJUB),
-                    spend.witness.position,
+                    spend.merkle_path.position,
                     &JUBJUB,
                 ));
 
@@ -535,7 +534,7 @@ impl<R: RngCore + CryptoRng> Builder<R> {
                         spend.alpha,
                         spend.note.value,
                         anchor,
-                        spend.witness.clone(),
+                        spend.merkle_path.clone(),
                     )
                     .map_err(|()| Error::SpendProof)?;
 
@@ -559,7 +558,7 @@ impl<R: RngCore + CryptoRng> Builder<R> {
                 // Record the post-randomized output location
                 tx_metadata.output_indices[pos] = i;
 
-                output.build(&prover, &mut ctx, &mut self.rng)
+                output.build(prover, &mut ctx, &mut self.rng)
             } else {
                 // This is a dummy output
                 let (dummy_to, dummy_note) = {
@@ -719,7 +718,7 @@ mod tests {
         {
             let builder = Builder::new(0);
             assert_eq!(
-                builder.build(consensus::BranchId::Sapling, MockTxProver),
+                builder.build(consensus::BranchId::Sapling, &MockTxProver),
                 Err(Error::ChangeIsNegative(Amount::from_i64(-10000).unwrap()))
             );
         }
@@ -741,7 +740,7 @@ mod tests {
                 )
                 .unwrap();
             assert_eq!(
-                builder.build(consensus::BranchId::Sapling, MockTxProver),
+                builder.build(consensus::BranchId::Sapling, &MockTxProver),
                 Err(Error::ChangeIsNegative(Amount::from_i64(-60000).unwrap()))
             );
         }
@@ -757,7 +756,7 @@ mod tests {
                 )
                 .unwrap();
             assert_eq!(
-                builder.build(consensus::BranchId::Sapling, MockTxProver),
+                builder.build(consensus::BranchId::Sapling, &MockTxProver),
                 Err(Error::ChangeIsNegative(Amount::from_i64(-60000).unwrap()))
             );
         }
@@ -779,7 +778,7 @@ mod tests {
                     extsk.clone(),
                     *to.diversifier(),
                     note1.clone(),
-                    witness1.clone(),
+                    witness1.path().unwrap(),
                 )
                 .unwrap();
             builder
@@ -797,7 +796,7 @@ mod tests {
                 )
                 .unwrap();
             assert_eq!(
-                builder.build(consensus::BranchId::Sapling, MockTxProver),
+                builder.build(consensus::BranchId::Sapling, &MockTxProver),
                 Err(Error::ChangeIsNegative(Amount::from_i64(-1).unwrap()))
             );
         }
@@ -816,10 +815,15 @@ mod tests {
         {
             let mut builder = Builder::new(0);
             builder
-                .add_sapling_spend(extsk.clone(), *to.diversifier(), note1, witness1)
+                .add_sapling_spend(
+                    extsk.clone(),
+                    *to.diversifier(),
+                    note1,
+                    witness1.path().unwrap(),
+                )
                 .unwrap();
             builder
-                .add_sapling_spend(extsk, *to.diversifier(), note2, witness2)
+                .add_sapling_spend(extsk, *to.diversifier(), note2, witness2.path().unwrap())
                 .unwrap();
             builder
                 .add_sapling_output(ovk, to, Amount::from_u64(30000).unwrap(), None)
@@ -831,7 +835,7 @@ mod tests {
                 )
                 .unwrap();
             assert_eq!(
-                builder.build(consensus::BranchId::Sapling, MockTxProver),
+                builder.build(consensus::BranchId::Sapling, &MockTxProver),
                 Err(Error::BindingSig)
             )
         }
