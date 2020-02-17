@@ -35,8 +35,8 @@ const DEFAULT_TX_EXPIRY_DELTA: u32 = 20;
 
 /// If there are any shielded inputs, always have at least two shielded outputs, padding
 /// with dummy outputs if necessary. See https://github.com/zcash/zcash/issues/3615
-fn default_sapling_output_arity<T>(spends: &[T]) -> Option<Arity> {
-    if spends.is_empty() {
+fn default_sapling_output_arity(num_spends: usize) -> Option<Arity> {
+    if num_spends == 0 {
         None
     } else {
         Some(Arity::Minimum(2))
@@ -711,7 +711,7 @@ impl<R: RngCore + CryptoRng> Builder<R> {
         let orig_outputs_len = outputs.len();
         if let Some(output_arity) = self
             .output_arity
-            .or_else(|| default_sapling_output_arity(&spends))
+            .or_else(|| default_sapling_output_arity(spends.len()))
         {
             output_arity
                 .enforce(&mut outputs, || None)
