@@ -1,0 +1,14 @@
+[package]
+name = "zcash_history"
+version = "0.0.1"
+authors = ["NikVolf <nikvolf@gmail.com>"]
+edition = "2018"
+
+[dev-dependencies]
+assert_matches = "1.3.0"
+quickcheck = "0.8"
+
+[dependencies]
+bigint = "4"
+byteorder = "1"
+blake2 = { package = "blake2b_simd", version = "0.5" }

@@ -28,7 +28,7 @@ libc = "0.2"
 pairing = { version = "0.15.0", path = "../pairing" }
 lazy_static = "1"
 rand_core = "0.5.1"
-zcash_mmr = { git = "https://github.com/nikvolf/zcash-mmr" }
+zcash_history = { version = "0.0.1", path = "../zcash_history" }
 zcash_primitives = { version = "0.1.0", path = "../zcash_primitives" }
 zcash_proofs = { version = "0.1.0", path = "../zcash_proofs" }
 

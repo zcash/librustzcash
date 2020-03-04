@@ -6,6 +6,7 @@ members = [
     "librustzcash",
     "pairing",
     "zcash_client_backend",
+    "zcash_history",
     "zcash_primitives",
     "zcash_proofs",
 ]
