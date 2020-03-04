@@ -100,7 +100,7 @@ impl Fq6 {
 }
 
 impl Field for Fq6 {
-    fn random<R: RngCore>(rng: &mut R) -> Self {
+    fn random<R: RngCore + ?std::marker::Sized>(rng: &mut R) -> Self {
         Fq6 {
             c0: Fq2::random(rng),
             c1: Fq2::random(rng),
