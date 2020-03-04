@@ -1,4 +1,2 @@
 // dummy example
-pub fn main() {
-
-}
+pub fn main() {}

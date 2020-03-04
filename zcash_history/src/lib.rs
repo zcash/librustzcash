@@ -3,14 +3,13 @@
 //! To be used in zebra and via FFI bindings in zcashd
 #![warn(missing_docs)]
 
-mod tree;
-mod node_data;
 mod entry;
+mod node_data;
+mod tree;
 
-
-pub use tree::Tree;
-pub use node_data::{NodeData, MAX_NODE_DATA_SIZE};
 pub use entry::{Entry, MAX_ENTRY_SIZE};
+pub use node_data::{NodeData, MAX_NODE_DATA_SIZE};
+pub use tree::Tree;
 
 /// Crate-level error type
 #[derive(Debug)]
@@ -62,16 +61,19 @@ pub enum EntryKind {
 
 impl Error {
     /// Entry expected to be a node (specifying for which link this is not true).
-    pub fn link_node_expected(link: EntryLink) -> Self { Self::ExpectedNode(Some(link)) }
+    pub fn link_node_expected(link: EntryLink) -> Self {
+        Self::ExpectedNode(Some(link))
+    }
 
     /// Some entry is expected to be node
-    pub fn node_expected() -> Self { Self::ExpectedNode(None) }
+    pub fn node_expected() -> Self {
+        Self::ExpectedNode(None)
+    }
 
-    pub (crate) fn augment(self, link: EntryLink) -> Self {
+    pub(crate) fn augment(self, link: EntryLink) -> Self {
         match self {
             Error::ExpectedNode(_) => Error::ExpectedNode(Some(link)),
-            val => val
+            val => val,
         }
     }
 }
-

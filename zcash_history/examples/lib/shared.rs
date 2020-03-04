@@ -1,4 +1,4 @@
-use zcash_history:: {NodeData, Tree, Entry, EntryLink};
+use zcash_history::{Entry, EntryLink, NodeData, Tree};
 
 pub struct NodeDataIterator {
     return_stack: Vec<NodeData>,
@@ -22,11 +22,20 @@ impl Iterator for NodeDataIterator {
         } else if self.return_stack.len() > 0 {
             self.return_stack.pop()
         } else {
-            for n_append in
-                self.tree.append_leaf(leaf(self.leaf_cursor as u32))
-                    .expect("full tree cannot fail").into_iter().rev()
+            for n_append in self
+                .tree
+                .append_leaf(leaf(self.leaf_cursor as u32))
+                .expect("full tree cannot fail")
+                .into_iter()
+                .rev()
             {
-                self.return_stack.push(self.tree.resolve_link(n_append).expect("just pushed").data().clone())
+                self.return_stack.push(
+                    self.tree
+                        .resolve_link(n_append)
+                        .expect("just pushed")
+                        .data()
+                        .clone(),
+                )
             }
             self.leaf_cursor += 1;
             self.return_stack.pop()
@@ -42,14 +51,13 @@ impl NodeDataIterator {
         let root = Entry::new(
             NodeData::combine(&leaf(1), &leaf(2)),
             EntryLink::Stored(0),
-            EntryLink::Stored(1)
+            EntryLink::Stored(1),
         );
-        let tree =
-            Tree::new(
-                3,
-                vec![(2, root)],
-                vec![(0, leaf(1).into()), (1, leaf(2).into())]
-            );
+        let tree = Tree::new(
+            3,
+            vec![(2, root)],
+            vec![(0, leaf(1).into()), (1, leaf(2).into())],
+        );
 
         NodeDataIterator {
             return_stack: Vec::new(),
@@ -64,10 +72,10 @@ fn leaf(height: u32) -> NodeData {
     NodeData {
         consensus_branch_id: 0,
         subtree_commitment: [0u8; 32],
-        start_time: height*10+1,
-        end_time: (height+1)*10,
-        start_target: 100 + height*10,
-        end_target: 100 + (height+1)*10,
+        start_time: height * 10 + 1,
+        end_time: (height + 1) * 10,
+        start_target: 100 + height * 10,
+        end_target: 100 + (height + 1) * 10,
         start_sapling_root: [0u8; 32],
         end_sapling_root: [0u8; 32],
         subtree_total_work: 0.into(),

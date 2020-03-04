@@ -135,8 +135,8 @@ fn load_nodes(bytes: &'static [u8]) -> Vec<NodeData> {
     let mut res = Vec::new();
     let mut cursor = std::io::Cursor::new(bytes);
     while (cursor.position() as usize) < bytes.len() {
-        let node_data =
-            zcash_history::NodeData::read(0, &mut cursor).expect("Statically checked to be correct");
+        let node_data = zcash_history::NodeData::read(0, &mut cursor)
+            .expect("Statically checked to be correct");
         res.push(node_data);
     }
 

@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::{Entry, EntryLink, NodeData, Error, EntryKind};
+use crate::{Entry, EntryKind, EntryLink, Error, NodeData};
 
 /// Represents partially loaded tree.
 ///
@@ -28,15 +28,12 @@ pub struct Tree {
 impl Tree {
     /// Resolve link originated from this tree
     pub fn resolve_link(&self, link: EntryLink) -> Result<IndexedNode, Error> {
-         match link {
-             EntryLink::Generated(index) => self.generated.get(index as usize),
-             EntryLink::Stored(index) => self.stored.get(&index),
-         }
-         .map(|node| IndexedNode {
-             node,
-             link,
-         })
-         .ok_or(Error::ExpectedInMemory(link))
+        match link {
+            EntryLink::Generated(index) => self.generated.get(index as usize),
+            EntryLink::Stored(index) => self.stored.get(&index),
+        }
+        .map(|node| IndexedNode { node, link })
+        .ok_or(Error::ExpectedInMemory(link))
     }
 
     fn push(&mut self, data: Entry) -> EntryLink {
@@ -86,11 +83,7 @@ impl Tree {
     /// # Panics
     ///
     /// Will panic if `peaks` is empty.
-    pub fn new(
-        length: u32,
-        peaks: Vec<(u32, Entry)>,
-        extra: Vec<(u32, Entry)>,
-    ) -> Self {
+    pub fn new(length: u32, peaks: Vec<(u32, Entry)>, extra: Vec<(u32, Entry)>) -> Self {
         assert!(peaks.len() > 0);
 
         let mut result = Tree::invalid();
@@ -102,11 +95,14 @@ impl Tree {
         for (idx, node) in peaks.into_iter() {
             result.stored.insert(idx, node);
             if gen != 0 {
-                let next_generated =
-                    combine_nodes(result.
-                        resolve_link(root).expect("Inserted before, cannot fail; qed"),
-                      result.resolve_link(EntryLink::Stored(idx)).expect("Inserted before, cannot fail; qed")
-                    );
+                let next_generated = combine_nodes(
+                    result
+                        .resolve_link(root)
+                        .expect("Inserted before, cannot fail; qed"),
+                    result
+                        .resolve_link(EntryLink::Stored(idx))
+                        .expect("Inserted before, cannot fail; qed"),
+                );
                 root = result.push_generated(next_generated);
             }
             gen += 1;
@@ -122,17 +118,13 @@ impl Tree {
     }
 
     fn get_peaks(&self, root: EntryLink, target: &mut Vec<EntryLink>) -> Result<(), Error> {
-
         let (left_child_link, right_child_link) = {
             let root = self.resolve_link(root)?;
             if root.node.complete() {
                 target.push(root.link);
                 return Ok(());
             }
-            (
-                root.left()?,
-                root.right()?,
-            )
+            (root.left()?, root.right()?)
         };
 
         self.get_peaks(left_child_link, target)?;
@@ -161,14 +153,18 @@ impl Tree {
         // complete subtrees. After this, merge_stack only contains peaks of
         // unequal-sized subtrees.
         while let Some(next_peak) = peaks.pop() {
-            let next_merge = merge_stack.pop().expect("there should be at least one, initial or re-pushed");
+            let next_merge = merge_stack
+                .pop()
+                .expect("there should be at least one, initial or re-pushed");
 
             if let Some(stored) = {
                 let peak = self.resolve_link(next_peak)?;
                 let m = self.resolve_link(next_merge)?;
                 if peak.node.leaf_count() == m.node.leaf_count() {
                     Some(combine_nodes(peak, m))
-                } else { None }
+                } else {
+                    None
+                }
             } {
                 let link = self.push(stored);
                 merge_stack.push(link);
@@ -180,16 +176,16 @@ impl Tree {
             }
         }
 
-        let mut new_root = merge_stack.pop().expect("Loop above cannot reduce the merge_stack");
+        let mut new_root = merge_stack
+            .pop()
+            .expect("Loop above cannot reduce the merge_stack");
         // Scan the peaks left-to-right, producing new generated nodes that
         // connect the subtrees
         while let Some(next_child) = merge_stack.pop() {
-            new_root = self.push_generated(
-                combine_nodes(
-                    self.resolve_link(new_root)?,
-                    self.resolve_link(next_child)?,
-                )
-            )
+            new_root = self.push_generated(combine_nodes(
+                self.resolve_link(new_root)?,
+                self.resolve_link(next_child)?,
+            ))
         }
 
         self.root = new_root;
@@ -200,7 +196,9 @@ impl Tree {
     #[cfg(test)]
     fn for_children<F: Fn(EntryLink, EntryLink)>(&self, node: EntryLink, f: F) {
         let (left, right) = {
-            let link = self.resolve_link(node).expect("Failed to resolve link in test");
+            let link = self
+                .resolve_link(node)
+                .expect("Failed to resolve link in test");
             (
                 link.left().expect("Failed to find node in test"),
                 link.right().expect("Failed to find node in test"),
@@ -210,7 +208,7 @@ impl Tree {
     }
 
     fn pop(&mut self) {
-        self.stored.remove(&(self.stored_count-1));
+        self.stored.remove(&(self.stored_count - 1));
         self.stored_count = self.stored_count - 1;
     }
 
@@ -222,10 +220,7 @@ impl Tree {
         let root = {
             let (leaves, root_left_child) = {
                 let n = self.resolve_link(self.root)?;
-                (
-                    n.node.leaf_count(),
-                    n.node.left()?,
-                )
+                (n.node.leaf_count(), n.node.left()?)
             };
             if leaves & 1 != 0 {
                 self.pop();
@@ -247,7 +242,9 @@ impl Tree {
                 subtree_root_link = right;
                 truncated += 1;
             } else {
-                if root.node.complete() { truncated += 1; }
+                if root.node.complete() {
+                    truncated += 1;
+                }
                 break;
             }
         }
@@ -255,15 +252,15 @@ impl Tree {
         let mut new_root = *peaks.get(0).expect("At lest 1 elements in peaks");
 
         for next_peak in peaks.into_iter().skip(1) {
-            new_root = self.push_generated(
-                combine_nodes(
+            new_root = self.push_generated(combine_nodes(
                 self.resolve_link(new_root)?,
                 self.resolve_link(next_peak)?,
-                )
-            );
+            ));
         }
 
-        for _ in 0..truncated { self.pop(); }
+        for _ in 0..truncated {
+            self.pop();
+        }
 
         self.root = new_root;
 
@@ -276,7 +273,9 @@ impl Tree {
     }
 
     /// Link to the root node
-    pub fn root(&self) -> EntryLink { self.root }
+    pub fn root(&self) -> EntryLink {
+        self.root
+    }
 
     /// Reference to the root node.
     pub fn root_node(&self) -> Result<IndexedNode, Error> {
@@ -297,7 +296,6 @@ pub struct IndexedNode<'a> {
 }
 
 impl<'a> IndexedNode<'a> {
-
     fn left(&self) -> Result<EntryLink, Error> {
         self.node.left().map_err(|e| e.augment(self.link))
     }
@@ -332,9 +330,9 @@ fn combine_nodes<'a>(left: IndexedNode<'a>, right: IndexedNode<'a>) -> Entry {
 #[cfg(test)]
 mod tests {
 
-    use super::{Entry, NodeData, Tree, EntryLink, EntryKind};
-    use quickcheck::{quickcheck, TestResult};
+    use super::{Entry, EntryKind, EntryLink, NodeData, Tree};
     use assert_matches::assert_matches;
+    use quickcheck::{quickcheck, TestResult};
 
     fn leaf(height: u32) -> NodeData {
         NodeData {
@@ -370,7 +368,8 @@ mod tests {
         assert!(length >= 3);
         let mut tree = initial();
         for i in 2..length {
-            tree.append_leaf(leaf(i+1).into()).expect("Failed to append");
+            tree.append_leaf(leaf(i + 1).into())
+                .expect("Failed to append");
         }
 
         tree
@@ -381,9 +380,7 @@ mod tests {
         let mut tree = initial();
 
         // ** APPEND 3 **
-        let appended = tree
-            .append_leaf(leaf(3))
-            .expect("Failed to append");
+        let appended = tree.append_leaf(leaf(3)).expect("Failed to append");
         let new_root = tree.root_node().expect("Failed to resolve root").node;
 
         // initial tree:  (2)
@@ -403,9 +400,7 @@ mod tests {
         assert_eq!(appended.len(), 1);
 
         // ** APPEND 4 **
-        let appended = tree
-            .append_leaf(leaf(4))
-            .expect("Failed to append");
+        let appended = tree.append_leaf(leaf(4)).expect("Failed to append");
 
         let new_root = tree.root_node().expect("Failed to resolve root").node;
 
@@ -431,9 +426,7 @@ mod tests {
 
         // ** APPEND 5 **
 
-        let appended = tree
-            .append_leaf(leaf(5))
-            .expect("Failed to append");
+        let appended = tree.append_leaf(leaf(5)).expect("Failed to append");
         let new_root = tree.root_node().expect("Failed to resolve root").node;
 
         // intermediate tree:
@@ -463,9 +456,7 @@ mod tests {
         });
 
         // *** APPEND #6 ***
-        let appended = tree
-            .append_leaf(leaf(6))
-            .expect("Failed to append");
+        let appended = tree.append_leaf(leaf(6)).expect("Failed to append");
         let new_root = tree.root_node().expect("Failed to resolve root").node;
 
         // intermediate tree:
@@ -498,13 +489,8 @@ mod tests {
 
         // *** APPEND #7 ***
 
-        let appended = tree
-            .append_leaf(leaf(7))
-            .expect("Failed to append");
-        let new_root = tree
-            .root_node()
-            .expect("Failed to resolve root")
-            .node;
+        let appended = tree.append_leaf(leaf(7)).expect("Failed to append");
+        let new_root = tree.root_node().expect("Failed to resolve root").node;
 
         // intermediate tree:
         //                     (---8g---)
@@ -533,9 +519,9 @@ mod tests {
         assert_matches!(tree.root(), EntryLink::Generated(_));
         tree.for_children(tree.root(), |l, r| {
             assert_matches!(l, EntryLink::Generated(_));
-            tree.for_children(l, |l, r|
+            tree.for_children(l, |l, r| {
                 assert_matches!((l, r), (EntryLink::Stored(6), EntryLink::Stored(9)))
-            );
+            });
             assert_matches!(r, EntryLink::Stored(10));
         });
     }
@@ -606,12 +592,12 @@ mod tests {
 
         assert_matches!(tree.root(), EntryLink::Generated(_));
 
-        tree.for_children(tree.root(),|left, right|
+        tree.for_children(tree.root(), |left, right| {
             assert_matches!(
                 (left, right),
                 (EntryLink::Stored(14), EntryLink::Stored(15))
             )
-        );
+        });
 
         // two stored nodes should leave us (leaf 16 and no longer needed node 17)
         assert_eq!(deleted, 2);
@@ -625,7 +611,7 @@ mod tests {
         assert_eq!(tree.len(), 3);
 
         for i in 0..2 {
-            tree.append_leaf(leaf(i+3)).expect("Failed to append");
+            tree.append_leaf(leaf(i + 3)).expect("Failed to append");
         }
         assert_eq!(tree.len(), 7);
 
@@ -641,7 +627,7 @@ mod tests {
         assert_eq!(tree.len(), 3);
 
         for i in 0..4094 {
-            tree.append_leaf(leaf(i+3)).expect("Failed to append");
+            tree.append_leaf(leaf(i + 3)).expect("Failed to append");
         }
         assert_eq!(tree.len(), 8191); // 4096*2-1 (full tree)
 
@@ -651,7 +637,6 @@ mod tests {
 
         assert_eq!(tree.len(), 4083); // 4095 - log2(4096)
     }
-
 
     quickcheck! {
         fn there_and_back(number: u32) -> TestResult {

@@ -1,6 +1,6 @@
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 
-use crate::{EntryKind, NodeData, Error, EntryLink, MAX_NODE_DATA_SIZE};
+use crate::{EntryKind, EntryLink, Error, NodeData, MAX_NODE_DATA_SIZE};
 
 /// Max serialized length of entry data.
 pub const MAX_ENTRY_SIZE: usize = MAX_NODE_DATA_SIZE + 9;
@@ -34,22 +34,26 @@ impl Entry {
 
     /// Is this node a leaf.
     pub fn leaf(&self) -> bool {
-        if let EntryKind::Leaf = self.kind { true } else { false }
+        if let EntryKind::Leaf = self.kind {
+            true
+        } else {
+            false
+        }
     }
 
     /// Left child
     pub fn left(&self) -> Result<EntryLink, Error> {
         match self.kind {
-            EntryKind::Leaf => { Err(Error::node_expected()) }
-            EntryKind::Node(left, _) => Ok(left)
+            EntryKind::Leaf => Err(Error::node_expected()),
+            EntryKind::Node(left, _) => Ok(left),
         }
     }
 
     /// Right child.
     pub fn right(&self) -> Result<EntryLink, Error> {
         match self.kind {
-            EntryKind::Leaf => { Err(Error::node_expected()) }
-            EntryKind::Node(_, right) => Ok(right)
+            EntryKind::Leaf => Err(Error::node_expected()),
+            EntryKind::Node(_, right) => Ok(right),
         }
     }
 
@@ -61,22 +65,15 @@ impl Entry {
                     let left = r.read_u32::<LittleEndian>()?;
                     let right = r.read_u32::<LittleEndian>()?;
                     EntryKind::Node(EntryLink::Stored(left), EntryLink::Stored(right))
-                },
-                1 => {
-                    EntryKind::Leaf
-                },
-                _ => {
-                    return Err(std::io::Error::from(std::io::ErrorKind::InvalidData))
-                },
+                }
+                1 => EntryKind::Leaf,
+                _ => return Err(std::io::Error::from(std::io::ErrorKind::InvalidData)),
             }
         };
 
         let data = NodeData::read(consensus_branch_id, r)?;
 
-        Ok(Entry {
-            kind,
-            data,
-        })
+        Ok(Entry { kind, data })
     }
 
     /// Write to byte representation.
@@ -86,11 +83,13 @@ impl Entry {
                 w.write_u8(0)?;
                 w.write_u32::<LittleEndian>(left)?;
                 w.write_u32::<LittleEndian>(right)?;
-            },
+            }
             EntryKind::Leaf => {
                 w.write_u8(1)?;
-            },
-            _ => { return Err(std::io::Error::from(std::io::ErrorKind::InvalidData)); }
+            }
+            _ => {
+                return Err(std::io::Error::from(std::io::ErrorKind::InvalidData));
+            }
         }
 
         self.data.write(w)?;
@@ -107,7 +106,10 @@ impl Entry {
 
 impl From<NodeData> for Entry {
     fn from(s: NodeData) -> Self {
-        Entry { kind: EntryKind::Leaf, data: s }
+        Entry {
+            kind: EntryKind::Leaf,
+            data: s,
+        }
     }
 }
 

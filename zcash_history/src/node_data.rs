@@ -1,10 +1,9 @@
-use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt, ByteOrder};
 use bigint::U256;
 use blake2::Params as Blake2Params;
+use byteorder::{ByteOrder, LittleEndian, ReadBytesExt, WriteBytesExt};
 
 /// Maximum serialized size of the node metadata.
-pub const MAX_NODE_DATA_SIZE: usize =
-    32 + // subtree commitment
+pub const MAX_NODE_DATA_SIZE: usize = 32 + // subtree commitment
     4 +  // start time
     4 +  // end time
     4 +  // start target
@@ -14,8 +13,8 @@ pub const MAX_NODE_DATA_SIZE: usize =
     32 + // subtree total work
     9 +  // start height (compact uint)
     9 +  // end height (compact uint)
-    9;   // shielded tx count (compact uint)
-    // = total of 171
+    9; // shielded tx count (compact uint)
+       // = total of 171
 
 /// Node metadata.
 #[repr(C)]
@@ -75,14 +74,17 @@ impl NodeData {
         let mut hash_buf = [0u8; MAX_NODE_DATA_SIZE * 2];
         let size = {
             let mut cursor = ::std::io::Cursor::new(&mut hash_buf[..]);
-            left.write(&mut cursor).expect("Writing to memory buf with enough length cannot fail; qed");
-            right.write(&mut cursor).expect("Writing to memory buf with enough length cannot fail; qed");
+            left.write(&mut cursor)
+                .expect("Writing to memory buf with enough length cannot fail; qed");
+            right
+                .write(&mut cursor)
+                .expect("Writing to memory buf with enough length cannot fail; qed");
             cursor.position() as usize
         };
 
         let hash = blake2b_personal(
             &personalization(left.consensus_branch_id),
-            &hash_buf[..size]
+            &hash_buf[..size],
         );
 
         NodeData {
@@ -103,17 +105,15 @@ impl NodeData {
 
     fn write_compact<W: std::io::Write>(w: &mut W, compact: u64) -> std::io::Result<()> {
         match compact {
-            0..=0xfc => {
-                w.write_all(&[compact as u8])?
-            },
+            0..=0xfc => w.write_all(&[compact as u8])?,
             0xfd..=0xffff => {
                 w.write_all(&[0xfd])?;
                 w.write_u16::<LittleEndian>(compact as u16)?;
-            },
+            }
             0x10000..=0xffff_ffff => {
                 w.write_all(&[0xfe])?;
                 w.write_u32::<LittleEndian>(compact as u32)?;
-            },
+            }
             _ => {
                 w.write_all(&[0xff])?;
                 w.write_u64::<LittleEndian>(compact)?;
@@ -160,8 +160,8 @@ impl NodeData {
         r.read_exact(&mut data.subtree_commitment)?;
         data.start_time = r.read_u32::<LittleEndian>()?;
         data.end_time = r.read_u32::<LittleEndian>()?;
-        data.start_target= r.read_u32::<LittleEndian>()?;
-        data.end_target= r.read_u32::<LittleEndian>()?;
+        data.start_target = r.read_u32::<LittleEndian>()?;
+        data.end_target = r.read_u32::<LittleEndian>()?;
         r.read_exact(&mut data.start_sapling_root)?;
         r.read_exact(&mut data.end_sapling_root)?;
 
@@ -229,7 +229,6 @@ impl quickcheck::Arbitrary for NodeData {
 mod tests {
     use super::NodeData;
     use quickcheck::{quickcheck, TestResult};
-
 
     quickcheck! {
         fn serialization_round_trip(node_data: NodeData) -> TestResult {
