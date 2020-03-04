@@ -165,7 +165,7 @@ fn append() {
         subtree_total_work: Default::default(),
         start_height: 10,
         end_height: 10,
-        shielded_tx: 13,
+        sapling_tx: 13,
     };
     new_node
         .write(&mut &mut new_node_data[..])
@@ -200,7 +200,7 @@ fn append() {
     // this is combined new node (which is `new_node_1`) + the one which was there before (for block #9)
     assert_eq!(new_node_2.start_height, 9);
     assert_eq!(new_node_2.end_height, 10);
-    assert_eq!(new_node_2.shielded_tx, 27);
+    assert_eq!(new_node_2.sapling_tx, 27);
 }
 
 #[test]

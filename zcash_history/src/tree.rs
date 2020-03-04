@@ -347,7 +347,7 @@ mod tests {
             subtree_total_work: 0.into(),
             start_height: height as u64,
             end_height: height as u64,
-            shielded_tx: 7,
+            sapling_tx: 7,
         }
     }
 
