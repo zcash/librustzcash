@@ -1,7 +1,8 @@
-#![allow(unused_imports)]
+//! This crate provides traits for working with finite fields.
 
-extern crate byteorder;
-extern crate rand;
+// Catch documentation errors caused by code changes.
+#![deny(intra_doc_link_resolution_failure)]
+#![allow(unused_imports)]
 
 #[cfg(feature = "derive")]
 #[macro_use]
@@ -10,14 +11,18 @@ extern crate ff_derive;
 #[cfg(feature = "derive")]
 pub use ff_derive::*;
 
+use rand_core::RngCore;
 use std::error::Error;
 use std::fmt;
 use std::io::{self, Read, Write};
 
 /// This trait represents an element of a field.
 pub trait Field:
-    Sized + Eq + Copy + Clone + Send + Sync + fmt::Debug + fmt::Display + 'static + rand::Rand
+    Sized + Eq + Copy + Clone + Send + Sync + fmt::Debug + fmt::Display + 'static
 {
+    /// Returns an element chosen uniformly at random using a user-provided RNG.
+    fn random<R: RngCore + ?std::marker::Sized>(rng: &mut R) -> Self;
+
     /// Returns the zero element of the field, the additive identity.
     fn zero() -> Self;
 
@@ -100,7 +105,6 @@ pub trait PrimeFieldRepr:
     + fmt::Debug
     + fmt::Display
     + 'static
-    + rand::Rand
     + AsRef<[u64]>
     + AsMut<[u64]>
     + From<u64>
@@ -207,7 +211,7 @@ impl Error for PrimeFieldDecodingError {
 }
 
 impl fmt::Display for PrimeFieldDecodingError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
         match *self {
             PrimeFieldDecodingError::NotInField(ref repr) => {
                 write!(f, "{} is not an element of the field", repr)
@@ -263,7 +267,7 @@ pub trait PrimeField: Field {
     }
 
     /// Convert this prime field element into a biginteger representation.
-    fn from_repr(Self::Repr) -> Result<Self, PrimeFieldDecodingError>;
+    fn from_repr(_: Self::Repr) -> Result<Self, PrimeFieldDecodingError>;
 
     /// Convert a biginteger representation into a prime field element, if
     /// the number is an element of the field.
