@@ -13,7 +13,7 @@ pub const MAX_NODE_DATA_SIZE: usize = 32 + // subtree commitment
     32 + // subtree total work
     9 +  // start height (compact uint)
     9 +  // end height (compact uint)
-    9; // shielded tx count (compact uint)
+    9; // Sapling tx count (compact uint)
        // = total of 171
 
 /// Node metadata.
@@ -43,8 +43,8 @@ pub struct NodeData {
     pub start_height: u64,
     /// End height
     pub end_height: u64,
-    /// Number of shielded transactions.
-    pub shielded_tx: u64,
+    /// Number of Sapling transactions.
+    pub sapling_tx: u64,
 }
 
 fn blake2b_personal(personalization: &[u8], input: &[u8]) -> [u8; 32] {
@@ -99,7 +99,7 @@ impl NodeData {
             subtree_total_work: left.subtree_total_work + right.subtree_total_work,
             start_height: left.start_height,
             end_height: right.end_height,
-            shielded_tx: left.shielded_tx + right.shielded_tx,
+            sapling_tx: left.sapling_tx + right.sapling_tx,
         }
     }
 
@@ -149,7 +149,7 @@ impl NodeData {
 
         Self::write_compact(w, self.start_height)?;
         Self::write_compact(w, self.end_height)?;
-        Self::write_compact(w, self.shielded_tx)?;
+        Self::write_compact(w, self.sapling_tx)?;
         Ok(())
     }
 
@@ -171,7 +171,7 @@ impl NodeData {
 
         data.start_height = Self::read_compact(r)?;
         data.end_height = Self::read_compact(r)?;
-        data.shielded_tx = Self::read_compact(r)?;
+        data.sapling_tx = Self::read_compact(r)?;
 
         Ok(data)
     }
@@ -219,7 +219,7 @@ impl quickcheck::Arbitrary for NodeData {
         node_data.subtree_total_work = U256::from_little_endian(&number[..]);
         node_data.start_height = gen.next_u64();
         node_data.end_height = gen.next_u64();
-        node_data.shielded_tx = gen.next_u64();
+        node_data.sapling_tx = gen.next_u64();
 
         node_data
     }
