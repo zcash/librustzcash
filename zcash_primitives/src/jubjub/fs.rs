@@ -317,7 +317,7 @@ impl PrimeField for Fs {
 }
 
 impl Field for Fs {
-    fn random<R: RngCore>(rng: &mut R) -> Self {
+    fn random<R: RngCore + ?std::marker::Sized>(rng: &mut R) -> Self {
         loop {
             let mut tmp = {
                 let mut repr = [0u64; 4];
