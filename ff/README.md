@@ -12,7 +12,7 @@ Add the `ff` crate to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-ff = "0.4"
+ff = "0.5"
 ```
 
 The `ff` crate contains `Field`, `PrimeField`, `PrimeFieldRepr` and `SqrtField` traits.
