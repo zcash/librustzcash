@@ -1,4 +1,4 @@
-use zcash_mmr:: {NodeData, Tree, Entry, EntryLink};
+use zcash_history:: {NodeData, Tree, Entry, EntryLink};
 
 pub struct NodeDataIterator {
     return_stack: Vec<NodeData>,

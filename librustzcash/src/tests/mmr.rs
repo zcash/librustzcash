@@ -1,4 +1,4 @@
-use zcash_mmr::{Entry, EntryLink, NodeData};
+use zcash_history::{Entry, EntryLink, NodeData};
 
 use crate::{librustzcash_mmr_append, librustzcash_mmr_delete};
 
@@ -82,7 +82,7 @@ fn prepare_tree(nodes: &[NodeData]) -> TreeView {
     TreeView { peaks, extra }
 }
 
-fn preload_tree_append(nodes: &[NodeData]) -> (Vec<u32>, Vec<[u8; zcash_mmr::MAX_ENTRY_SIZE]>) {
+fn preload_tree_append(nodes: &[NodeData]) -> (Vec<u32>, Vec<[u8; zcash_history::MAX_ENTRY_SIZE]>) {
     assert!(!nodes.is_empty());
 
     let tree_view = prepare_tree(nodes);
@@ -91,7 +91,7 @@ fn preload_tree_append(nodes: &[NodeData]) -> (Vec<u32>, Vec<[u8; zcash_mmr::MAX
     let mut bytes = Vec::new();
 
     for (idx, entry) in tree_view.peaks.into_iter() {
-        let mut buf = [0u8; zcash_mmr::MAX_ENTRY_SIZE];
+        let mut buf = [0u8; zcash_history::MAX_ENTRY_SIZE];
         entry
             .write(&mut &mut buf[..])
             .expect("Cannot fail if enough buffer length");
@@ -105,7 +105,7 @@ fn preload_tree_append(nodes: &[NodeData]) -> (Vec<u32>, Vec<[u8; zcash_mmr::MAX
 // also returns number of peaks
 fn preload_tree_delete(
     nodes: &[NodeData],
-) -> (Vec<u32>, Vec<[u8; zcash_mmr::MAX_ENTRY_SIZE]>, usize) {
+) -> (Vec<u32>, Vec<[u8; zcash_history::MAX_ENTRY_SIZE]>, usize) {
     assert!(!nodes.is_empty());
 
     let tree_view = prepare_tree(nodes);
@@ -120,7 +120,7 @@ fn preload_tree_delete(
         .into_iter()
         .chain(tree_view.extra.into_iter())
     {
-        let mut buf = [0u8; zcash_mmr::MAX_ENTRY_SIZE];
+        let mut buf = [0u8; zcash_history::MAX_ENTRY_SIZE];
         entry
             .write(&mut &mut buf[..])
             .expect("Cannot fail if enough buffer length");
@@ -136,7 +136,7 @@ fn load_nodes(bytes: &'static [u8]) -> Vec<NodeData> {
     let mut cursor = std::io::Cursor::new(bytes);
     while (cursor.position() as usize) < bytes.len() {
         let node_data =
-            zcash_mmr::NodeData::read(0, &mut cursor).expect("Statically checked to be correct");
+            zcash_history::NodeData::read(0, &mut cursor).expect("Statically checked to be correct");
         res.push(node_data);
     }
 
@@ -150,9 +150,9 @@ fn append() {
 
     let mut rt_ret = [0u8; 32];
 
-    let mut buf_ret = Vec::<[u8; zcash_mmr::MAX_NODE_DATA_SIZE]>::with_capacity(32);
+    let mut buf_ret = Vec::<[u8; zcash_history::MAX_NODE_DATA_SIZE]>::with_capacity(32);
 
-    let mut new_node_data = [0u8; zcash_mmr::MAX_NODE_DATA_SIZE];
+    let mut new_node_data = [0u8; zcash_history::MAX_NODE_DATA_SIZE];
     let new_node = NodeData {
         consensus_branch_id: 0,
         subtree_commitment: [0u8; 32],

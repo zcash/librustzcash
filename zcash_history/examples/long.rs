@@ -1,4 +1,4 @@
-use zcash_mmr::{Entry, EntryLink, NodeData, Tree};
+use zcash_history::{Entry, EntryLink, NodeData, Tree};
 
 #[path= "lib/shared.rs"]
 mod share;

@@ -1,4 +1,4 @@
-# zcash_mmr
+# zcash_history
 
 Special implementation of Merkle mountain ranges (MMR) for Zcash!
 
@@ -14,7 +14,7 @@ The main design goals of this MMR implementation are
 
 # License
 
-`zcash_mmr` is distributed under the terms of both the MIT
+`zcash_history` is distributed under the terms of both the MIT
 license and the Apache License (Version 2.0), at your choice.
 
 See LICENSE-APACHE, and LICENSE-MIT for details.
@@ -22,5 +22,5 @@ See LICENSE-APACHE, and LICENSE-MIT for details.
 ### Contribution
 
 Unless you explicitly state otherwise, any contribution intentionally submitted
-for inclusion in `zcash_mmr` by you, as defined in the Apache-2.0 license, shall be
+for inclusion in `zcash_history` by you, as defined in the Apache-2.0 license, shall be
 dual licensed as above, without any additional terms or conditions.

@@ -1,4 +1,4 @@
-//! MMR library for Zcash
+//! Chain history library for Zcash
 //!
 //! To be used in zebra and via FFI bindings in zcashd
 #![warn(missing_docs)]
