@@ -877,7 +877,7 @@ fn prime_field_impl(
 
         impl ::ff::Field for #name {
             /// Computes a uniformly random element using rejection sampling.
-            fn random<R: ::rand_core::RngCore>(rng: &mut R) -> Self {
+            fn random<R: ::rand_core::RngCore + ?std::marker::Sized>(rng: &mut R) -> Self {
                 loop {
                     let mut tmp = {
                         let mut repr = [0u64; #limbs];

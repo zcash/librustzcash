@@ -17,7 +17,7 @@ pub trait Field:
     Sized + Eq + Copy + Clone + Send + Sync + fmt::Debug + fmt::Display + 'static
 {
     /// Returns an element chosen uniformly at random using a user-provided RNG.
-    fn random<R: RngCore>(rng: &mut R) -> Self;
+    fn random<R: RngCore + ?std::marker::Sized>(rng: &mut R) -> Self;
 
     /// Returns the zero element of the field, the additive identity.
     fn zero() -> Self;
