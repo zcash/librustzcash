@@ -143,10 +143,17 @@ pub fn scan_cached_blocks<P: AsRef<Path>, Q: AsRef<Path>>(
     let mut stmt_select_tx = data.prepare("SELECT id_tx FROM transactions WHERE txid = ?")?;
     let mut stmt_mark_spent_note =
         data.prepare("UPDATE received_notes SET spent = ? WHERE nf = ?")?;
+    let mut stmt_update_note = data.prepare(
+        "UPDATE received_notes
+        SET account = ?, diversifier = ?, value = ?, rcm = ?, nf = ?, is_change = ?
+        WHERE tx = ? AND output_index = ?",
+    )?;
     let mut stmt_insert_note = data.prepare(
         "INSERT INTO received_notes (tx, output_index, account, diversifier, value, rcm, nf, is_change)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
     )?;
+    let mut stmt_select_note =
+        data.prepare("SELECT id_note FROM received_notes WHERE tx = ? AND output_index = ?")?;
     let mut stmt_insert_witness = data.prepare(
         "INSERT INTO sapling_witnesses (note, block, witness)
         VALUES (?, ?, ?)",
@@ -267,21 +274,41 @@ pub fn scan_cached_blocks<P: AsRef<Path>, Q: AsRef<Path>>(
                     &JUBJUB,
                 );
 
-                // Insert received note into the database.
                 // Assumptions:
                 // - A transaction will not contain more than 2^63 shielded outputs.
                 // - A note value will never exceed 2^63 zatoshis.
-                stmt_insert_note.execute(&[
-                    tx_row.to_sql()?,
-                    (output.index as i64).to_sql()?,
+
+                // First try updating an existing received note into the database.
+                let note_row = if stmt_update_note.execute(&[
                     (output.account as i64).to_sql()?,
                     output.to.diversifier().0.to_sql()?,
                     (output.note.value as i64).to_sql()?,
                     rcm.as_ref().to_sql()?,
                     nf.to_sql()?,
                     output.is_change.to_sql()?,
-                ])?;
-                let note_row = data.last_insert_rowid();
+                    tx_row.to_sql()?,
+                    (output.index as i64).to_sql()?,
+                ])? == 0
+                {
+                    // It isn't there, so insert our note into the database.
+                    stmt_insert_note.execute(&[
+                        tx_row.to_sql()?,
+                        (output.index as i64).to_sql()?,
+                        (output.account as i64).to_sql()?,
+                        output.to.diversifier().0.to_sql()?,
+                        (output.note.value as i64).to_sql()?,
+                        rcm.as_ref().to_sql()?,
+                        nf.to_sql()?,
+                        output.is_change.to_sql()?,
+                    ])?;
+                    data.last_insert_rowid()
+                } else {
+                    // It was there, so grab its row number.
+                    stmt_select_note.query_row(
+                        &[tx_row.to_sql()?, (output.index as i64).to_sql()?],
+                        |row| row.get(0),
+                    )?
+                };
 
                 // Save witness for note.
                 witnesses.push(WitnessRow {

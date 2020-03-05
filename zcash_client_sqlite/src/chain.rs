@@ -470,5 +470,11 @@ mod tests {
 
         // Account balance should only contain the first received note
         assert_eq!(get_balance(db_data, 0).unwrap(), value);
+
+        // Scan the cache again
+        scan_cached_blocks(db_cache, db_data, None).unwrap();
+
+        // Account balance should again reflect both received notes
+        assert_eq!(get_balance(db_data, 0).unwrap(), value + value2);
     }
 }
