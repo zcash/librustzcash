@@ -1,6 +1,6 @@
 [package]
 name = "zcash_history"
-version = "0.0.1"
+version = "0.2.0"
 authors = ["NikVolf <nikvolf@gmail.com>"]
 edition = "2018"
 license = "MIT/Apache-2.0"

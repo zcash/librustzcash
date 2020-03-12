@@ -1,6 +1,6 @@
 [package]
 name = "ff"
-version = "0.5.2"
+version = "0.6.0"
 authors = ["Sean Bowe <ewillbefull@gmail.com>"]
 description = "Library for building and interfacing with finite fields"
 readme = "README.md"
@@ -12,7 +12,7 @@ edition = "2018"
 
 [dependencies]
 byteorder = "1"
-ff_derive = { version = "^0.4.1", path = "ff_derive", optional = true }
+ff_derive = { version = "0.6", path = "ff_derive", optional = true }
 rand_core = "0.5"
 
 [features]
