@@ -3,7 +3,6 @@ members = [
     "bellman",
     "ff",
     "group",
-    "librustzcash",
     "pairing",
     "zcash_client_backend",
     "zcash_history",
