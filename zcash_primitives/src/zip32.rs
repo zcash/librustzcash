@@ -5,9 +5,9 @@
 use aes::Aes256;
 use blake2b_simd::Params as Blake2bParams;
 use byteorder::{ByteOrder, LittleEndian, ReadBytesExt, WriteBytesExt};
-use ff::Field;
 use fpe::ff1::{BinaryNumeralString, FF1};
 use pairing::bls12_381::Bls12;
+use std::ops::AddAssign;
 
 use crate::{
     jubjub::{fs::Fs, FixedGenerators, JubjubEngine, JubjubParams, ToUniform},

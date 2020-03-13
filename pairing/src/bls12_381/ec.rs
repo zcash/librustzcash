@@ -54,10 +54,8 @@ macro_rules! curve_impl {
                 // are equal when (X * Z^2) = (X' * Z'^2)
                 // and (Y * Z^3) = (Y' * Z'^3).
 
-                let mut z1 = self.z;
-                z1.square();
-                let mut z2 = other.z;
-                z2.square();
+                let mut z1 = self.z.square();
+                let mut z2 = other.z.square();
 
                 let mut tmp1 = self.x;
                 tmp1.mul_assign(&z2);
@@ -88,7 +86,7 @@ macro_rules! curve_impl {
                 for i in bits {
                     res.double();
                     if i {
-                        res.add_assign_mixed(self)
+                        res.add_assign(self)
                     }
                 }
                 res
@@ -99,16 +97,14 @@ macro_rules! curve_impl {
             ///
             /// If and only if `greatest` is set will the lexicographically
             /// largest y-coordinate be selected.
-            fn get_point_from_x(x: $basefield, greatest: bool) -> Option<$affine> {
+            fn get_point_from_x(x: $basefield, greatest: bool) -> CtOption<$affine> {
                 // Compute x^3 + b
-                let mut x3b = x;
-                x3b.square();
+                let mut x3b = x.square();
                 x3b.mul_assign(&x);
                 x3b.add_assign(&$affine::get_coeff_b());
 
                 x3b.sqrt().map(|y| {
-                    let mut negy = y;
-                    negy.negate();
+                    let negy = y.neg();
 
                     $affine {
                         x: x,
@@ -123,11 +119,9 @@ macro_rules! curve_impl {
                     true
                 } else {
                     // Check that the point is on the curve
-                    let mut y2 = self.y;
-                    y2.square();
+                    let y2 = self.y.square();
 
-                    let mut x3b = self.x;
-                    x3b.square();
+                    let mut x3b = self.x.square();
                     x3b.mul_assign(&self.x);
                     x3b.add_assign(&Self::get_coeff_b());
 
@@ -137,6 +131,19 @@ macro_rules! curve_impl {
 
             fn is_in_correct_subgroup_assuming_on_curve(&self) -> bool {
                 self.mul($scalarfield::char()).is_zero()
+            }
+        }
+
+        impl ::std::ops::Neg for $affine {
+            type Output = Self;
+
+            #[inline]
+            fn neg(self) -> Self {
+                let mut ret = self;
+                if !ret.is_zero() {
+                    ret.y = ret.y.neg();
+                }
+                ret
             }
         }
 
@@ -169,12 +176,6 @@ macro_rules! curve_impl {
                 self.mul_bits(bits)
             }
 
-            fn negate(&mut self) {
-                if !self.is_zero() {
-                    self.y.negate();
-                }
-            }
-
             fn into_projective(&self) -> $projective {
                 (*self).into()
             }
@@ -194,6 +195,309 @@ macro_rules! curve_impl {
             }
         }
 
+        impl ::std::ops::Neg for $projective {
+            type Output = Self;
+
+            #[inline]
+            fn neg(self) -> Self {
+                let mut ret = self;
+                if !ret.is_zero() {
+                    ret.y = ret.y.neg();
+                }
+                ret
+            }
+        }
+
+        impl<'r> ::std::ops::Add<&'r $projective> for $projective {
+            type Output = Self;
+
+            #[inline]
+            fn add(self, other: &Self) -> Self {
+                let mut ret = self;
+                ret.add_assign(other);
+                ret
+            }
+        }
+
+        impl ::std::ops::Add for $projective {
+            type Output = Self;
+
+            #[inline]
+            fn add(self, other: Self) -> Self {
+                self + &other
+            }
+        }
+
+        impl<'r> ::std::ops::AddAssign<&'r $projective> for $projective {
+            fn add_assign(&mut self, other: &Self) {
+                if self.is_zero() {
+                    *self = *other;
+                    return;
+                }
+
+                if other.is_zero() {
+                    return;
+                }
+
+                // http://www.hyperelliptic.org/EFD/g1p/auto-shortw-jacobian-0.html#addition-add-2007-bl
+
+                // Z1Z1 = Z1^2
+                let z1z1 = self.z.square();
+
+                // Z2Z2 = Z2^2
+                let z2z2 = other.z.square();
+
+                // U1 = X1*Z2Z2
+                let mut u1 = self.x;
+                u1.mul_assign(&z2z2);
+
+                // U2 = X2*Z1Z1
+                let mut u2 = other.x;
+                u2.mul_assign(&z1z1);
+
+                // S1 = Y1*Z2*Z2Z2
+                let mut s1 = self.y;
+                s1.mul_assign(&other.z);
+                s1.mul_assign(&z2z2);
+
+                // S2 = Y2*Z1*Z1Z1
+                let mut s2 = other.y;
+                s2.mul_assign(&self.z);
+                s2.mul_assign(&z1z1);
+
+                if u1 == u2 && s1 == s2 {
+                    // The two points are equal, so we double.
+                    self.double();
+                } else {
+                    // If we're adding -a and a together, self.z becomes zero as H becomes zero.
+
+                    // H = U2-U1
+                    let mut h = u2;
+                    h.sub_assign(&u1);
+
+                    // I = (2*H)^2
+                    let i = h.double().square();
+
+                    // J = H*I
+                    let mut j = h;
+                    j.mul_assign(&i);
+
+                    // r = 2*(S2-S1)
+                    let mut r = s2;
+                    r.sub_assign(&s1);
+                    r = r.double();
+
+                    // V = U1*I
+                    let mut v = u1;
+                    v.mul_assign(&i);
+
+                    // X3 = r^2 - J - 2*V
+                    self.x = r.square();
+                    self.x.sub_assign(&j);
+                    self.x.sub_assign(&v);
+                    self.x.sub_assign(&v);
+
+                    // Y3 = r*(V - X3) - 2*S1*J
+                    self.y = v;
+                    self.y.sub_assign(&self.x);
+                    self.y.mul_assign(&r);
+                    s1.mul_assign(&j); // S1 = S1 * J * 2
+                    s1 = s1.double();
+                    self.y.sub_assign(&s1);
+
+                    // Z3 = ((Z1+Z2)^2 - Z1Z1 - Z2Z2)*H
+                    self.z.add_assign(&other.z);
+                    self.z = self.z.square();
+                    self.z.sub_assign(&z1z1);
+                    self.z.sub_assign(&z2z2);
+                    self.z.mul_assign(&h);
+                }
+            }
+        }
+
+        impl ::std::ops::AddAssign for $projective {
+            #[inline]
+            fn add_assign(&mut self, other: Self) {
+                self.add_assign(&other);
+            }
+        }
+
+        impl<'r> ::std::ops::Sub<&'r $projective> for $projective {
+            type Output = Self;
+
+            #[inline]
+            fn sub(self, other: &Self) -> Self {
+                let mut ret = self;
+                ret.sub_assign(other);
+                ret
+            }
+        }
+
+        impl ::std::ops::Sub for $projective {
+            type Output = Self;
+
+            #[inline]
+            fn sub(self, other: Self) -> Self {
+                self - &other
+            }
+        }
+
+        impl<'r> ::std::ops::SubAssign<&'r $projective> for $projective {
+            fn sub_assign(&mut self, other: &Self) {
+                self.add_assign(&other.neg());
+            }
+        }
+
+        impl ::std::ops::SubAssign for $projective {
+            #[inline]
+            fn sub_assign(&mut self, other: Self) {
+                self.sub_assign(&other);
+            }
+        }
+
+        impl<'r> ::std::ops::Add<&'r <$projective as CurveProjective>::Affine> for $projective {
+            type Output = Self;
+
+            #[inline]
+            fn add(self, other: &<$projective as CurveProjective>::Affine) -> Self {
+                let mut ret = self;
+                ret.add_assign(other);
+                ret
+            }
+        }
+
+        impl ::std::ops::Add<<$projective as CurveProjective>::Affine> for $projective {
+            type Output = Self;
+
+            #[inline]
+            fn add(self, other: <$projective as CurveProjective>::Affine) -> Self {
+                self + &other
+            }
+        }
+
+        impl<'r> ::std::ops::AddAssign<&'r <$projective as CurveProjective>::Affine>
+            for $projective
+        {
+            fn add_assign(&mut self, other: &<$projective as CurveProjective>::Affine) {
+                if other.is_zero() {
+                    return;
+                }
+
+                if self.is_zero() {
+                    self.x = other.x;
+                    self.y = other.y;
+                    self.z = $basefield::one();
+                    return;
+                }
+
+                // http://www.hyperelliptic.org/EFD/g1p/auto-shortw-jacobian-0.html#addition-madd-2007-bl
+
+                // Z1Z1 = Z1^2
+                let z1z1 = self.z.square();
+
+                // U2 = X2*Z1Z1
+                let mut u2 = other.x;
+                u2.mul_assign(&z1z1);
+
+                // S2 = Y2*Z1*Z1Z1
+                let mut s2 = other.y;
+                s2.mul_assign(&self.z);
+                s2.mul_assign(&z1z1);
+
+                if self.x == u2 && self.y == s2 {
+                    // The two points are equal, so we double.
+                    self.double();
+                } else {
+                    // If we're adding -a and a together, self.z becomes zero as H becomes zero.
+
+                    // H = U2-X1
+                    let mut h = u2;
+                    h.sub_assign(&self.x);
+
+                    // HH = H^2
+                    let hh = h.square();
+
+                    // I = 4*HH
+                    let i = hh.double().double();
+
+                    // J = H*I
+                    let mut j = h;
+                    j.mul_assign(&i);
+
+                    // r = 2*(S2-Y1)
+                    let mut r = s2;
+                    r.sub_assign(&self.y);
+                    r = r.double();
+
+                    // V = X1*I
+                    let mut v = self.x;
+                    v.mul_assign(&i);
+
+                    // X3 = r^2 - J - 2*V
+                    self.x = r.square();
+                    self.x.sub_assign(&j);
+                    self.x.sub_assign(&v);
+                    self.x.sub_assign(&v);
+
+                    // Y3 = r*(V-X3)-2*Y1*J
+                    j.mul_assign(&self.y); // J = 2*Y1*J
+                    j = j.double();
+                    self.y = v;
+                    self.y.sub_assign(&self.x);
+                    self.y.mul_assign(&r);
+                    self.y.sub_assign(&j);
+
+                    // Z3 = (Z1+H)^2-Z1Z1-HH
+                    self.z.add_assign(&h);
+                    self.z = self.z.square();
+                    self.z.sub_assign(&z1z1);
+                    self.z.sub_assign(&hh);
+                }
+            }
+        }
+
+        impl ::std::ops::AddAssign<<$projective as CurveProjective>::Affine> for $projective {
+            #[inline]
+            fn add_assign(&mut self, other: <$projective as CurveProjective>::Affine) {
+                self.add_assign(&other);
+            }
+        }
+
+        impl<'r> ::std::ops::Sub<&'r <$projective as CurveProjective>::Affine> for $projective {
+            type Output = Self;
+
+            #[inline]
+            fn sub(self, other: &<$projective as CurveProjective>::Affine) -> Self {
+                let mut ret = self;
+                ret.sub_assign(other);
+                ret
+            }
+        }
+
+        impl ::std::ops::Sub<<$projective as CurveProjective>::Affine> for $projective {
+            type Output = Self;
+
+            #[inline]
+            fn sub(self, other: <$projective as CurveProjective>::Affine) -> Self {
+                self - &other
+            }
+        }
+
+        impl<'r> ::std::ops::SubAssign<&'r <$projective as CurveProjective>::Affine>
+            for $projective
+        {
+            fn sub_assign(&mut self, other: &<$projective as CurveProjective>::Affine) {
+                self.add_assign(&other.neg());
+            }
+        }
+
+        impl ::std::ops::SubAssign<<$projective as CurveProjective>::Affine> for $projective {
+            #[inline]
+            fn sub_assign(&mut self, other: <$projective as CurveProjective>::Affine) {
+                self.sub_assign(&other);
+            }
+        }
+
         impl CurveProjective for $projective {
             type Engine = Bls12;
             type Scalar = $scalarfield;
@@ -205,8 +509,9 @@ macro_rules! curve_impl {
                     let x = $basefield::random(rng);
                     let greatest = rng.next_u32() % 2 != 0;
 
-                    if let Some(p) = $affine::get_point_from_x(x, greatest) {
-                        let p = p.scale_by_cofactor();
+                    let p = $affine::get_point_from_x(x, greatest);
+                    if p.is_some().into() {
+                        let p = p.unwrap().scale_by_cofactor();
 
                         if !p.is_zero() {
                             return p;
@@ -257,7 +562,7 @@ macro_rules! curve_impl {
                 }
 
                 // Invert `tmp`.
-                tmp = tmp.inverse().unwrap(); // Guaranteed to be nonzero.
+                tmp = tmp.invert().unwrap(); // Guaranteed to be nonzero.
 
                 // Second pass: iterate backwards to compute inverses
                 for (g, s) in v
@@ -284,8 +589,7 @@ macro_rules! curve_impl {
 
                 // Perform affine transformations
                 for g in v.iter_mut().filter(|g| !g.is_normalized()) {
-                    let mut z = g.z; // 1/z
-                    z.square(); // 1/z^2
+                    let mut z = g.z.square(); // 1/z^2
                     g.x.mul_assign(&z); // x/z^2
                     z.mul_assign(&g.z); // 1/z^3
                     g.y.mul_assign(&z); // y/z^3
@@ -306,37 +610,32 @@ macro_rules! curve_impl {
                 // http://www.hyperelliptic.org/EFD/g1p/auto-shortw-jacobian-0.html#doubling-dbl-2009-l
 
                 // A = X1^2
-                let mut a = self.x;
-                a.square();
+                let a = self.x.square();
 
                 // B = Y1^2
-                let mut b = self.y;
-                b.square();
+                let b = self.y.square();
 
                 // C = B^2
-                let mut c = b;
-                c.square();
+                let mut c = b.square();
 
                 // D = 2*((X1+B)2-A-C)
                 let mut d = self.x;
                 d.add_assign(&b);
-                d.square();
+                d = d.square();
                 d.sub_assign(&a);
                 d.sub_assign(&c);
-                d.double();
+                d = d.double();
 
                 // E = 3*A
-                let mut e = a;
-                e.double();
+                let mut e = a.double();
                 e.add_assign(&a);
 
                 // F = E^2
-                let mut f = e;
-                f.square();
+                let f = e.square();
 
                 // Z3 = 2*Y1*Z1
                 self.z.mul_assign(&self.y);
-                self.z.double();
+                self.z = self.z.double();
 
                 // X3 = F-2*D
                 self.x = f;
@@ -347,188 +646,8 @@ macro_rules! curve_impl {
                 self.y = d;
                 self.y.sub_assign(&self.x);
                 self.y.mul_assign(&e);
-                c.double();
-                c.double();
-                c.double();
+                c = c.double().double().double();
                 self.y.sub_assign(&c);
-            }
-
-            fn add_assign(&mut self, other: &Self) {
-                if self.is_zero() {
-                    *self = *other;
-                    return;
-                }
-
-                if other.is_zero() {
-                    return;
-                }
-
-                // http://www.hyperelliptic.org/EFD/g1p/auto-shortw-jacobian-0.html#addition-add-2007-bl
-
-                // Z1Z1 = Z1^2
-                let mut z1z1 = self.z;
-                z1z1.square();
-
-                // Z2Z2 = Z2^2
-                let mut z2z2 = other.z;
-                z2z2.square();
-
-                // U1 = X1*Z2Z2
-                let mut u1 = self.x;
-                u1.mul_assign(&z2z2);
-
-                // U2 = X2*Z1Z1
-                let mut u2 = other.x;
-                u2.mul_assign(&z1z1);
-
-                // S1 = Y1*Z2*Z2Z2
-                let mut s1 = self.y;
-                s1.mul_assign(&other.z);
-                s1.mul_assign(&z2z2);
-
-                // S2 = Y2*Z1*Z1Z1
-                let mut s2 = other.y;
-                s2.mul_assign(&self.z);
-                s2.mul_assign(&z1z1);
-
-                if u1 == u2 && s1 == s2 {
-                    // The two points are equal, so we double.
-                    self.double();
-                } else {
-                    // If we're adding -a and a together, self.z becomes zero as H becomes zero.
-
-                    // H = U2-U1
-                    let mut h = u2;
-                    h.sub_assign(&u1);
-
-                    // I = (2*H)^2
-                    let mut i = h;
-                    i.double();
-                    i.square();
-
-                    // J = H*I
-                    let mut j = h;
-                    j.mul_assign(&i);
-
-                    // r = 2*(S2-S1)
-                    let mut r = s2;
-                    r.sub_assign(&s1);
-                    r.double();
-
-                    // V = U1*I
-                    let mut v = u1;
-                    v.mul_assign(&i);
-
-                    // X3 = r^2 - J - 2*V
-                    self.x = r;
-                    self.x.square();
-                    self.x.sub_assign(&j);
-                    self.x.sub_assign(&v);
-                    self.x.sub_assign(&v);
-
-                    // Y3 = r*(V - X3) - 2*S1*J
-                    self.y = v;
-                    self.y.sub_assign(&self.x);
-                    self.y.mul_assign(&r);
-                    s1.mul_assign(&j); // S1 = S1 * J * 2
-                    s1.double();
-                    self.y.sub_assign(&s1);
-
-                    // Z3 = ((Z1+Z2)^2 - Z1Z1 - Z2Z2)*H
-                    self.z.add_assign(&other.z);
-                    self.z.square();
-                    self.z.sub_assign(&z1z1);
-                    self.z.sub_assign(&z2z2);
-                    self.z.mul_assign(&h);
-                }
-            }
-
-            fn add_assign_mixed(&mut self, other: &Self::Affine) {
-                if other.is_zero() {
-                    return;
-                }
-
-                if self.is_zero() {
-                    self.x = other.x;
-                    self.y = other.y;
-                    self.z = $basefield::one();
-                    return;
-                }
-
-                // http://www.hyperelliptic.org/EFD/g1p/auto-shortw-jacobian-0.html#addition-madd-2007-bl
-
-                // Z1Z1 = Z1^2
-                let mut z1z1 = self.z;
-                z1z1.square();
-
-                // U2 = X2*Z1Z1
-                let mut u2 = other.x;
-                u2.mul_assign(&z1z1);
-
-                // S2 = Y2*Z1*Z1Z1
-                let mut s2 = other.y;
-                s2.mul_assign(&self.z);
-                s2.mul_assign(&z1z1);
-
-                if self.x == u2 && self.y == s2 {
-                    // The two points are equal, so we double.
-                    self.double();
-                } else {
-                    // If we're adding -a and a together, self.z becomes zero as H becomes zero.
-
-                    // H = U2-X1
-                    let mut h = u2;
-                    h.sub_assign(&self.x);
-
-                    // HH = H^2
-                    let mut hh = h;
-                    hh.square();
-
-                    // I = 4*HH
-                    let mut i = hh;
-                    i.double();
-                    i.double();
-
-                    // J = H*I
-                    let mut j = h;
-                    j.mul_assign(&i);
-
-                    // r = 2*(S2-Y1)
-                    let mut r = s2;
-                    r.sub_assign(&self.y);
-                    r.double();
-
-                    // V = X1*I
-                    let mut v = self.x;
-                    v.mul_assign(&i);
-
-                    // X3 = r^2 - J - 2*V
-                    self.x = r;
-                    self.x.square();
-                    self.x.sub_assign(&j);
-                    self.x.sub_assign(&v);
-                    self.x.sub_assign(&v);
-
-                    // Y3 = r*(V-X3)-2*Y1*J
-                    j.mul_assign(&self.y); // J = 2*Y1*J
-                    j.double();
-                    self.y = v;
-                    self.y.sub_assign(&self.x);
-                    self.y.mul_assign(&r);
-                    self.y.sub_assign(&j);
-
-                    // Z3 = (Z1+H)^2-Z1Z1-HH
-                    self.z.add_assign(&h);
-                    self.z.square();
-                    self.z.sub_assign(&z1z1);
-                    self.z.sub_assign(&hh);
-                }
-            }
-
-            fn negate(&mut self) {
-                if !self.is_zero() {
-                    self.y.negate()
-                }
             }
 
             fn mul_assign<S: Into<<Self::Scalar as PrimeField>::Repr>>(&mut self, other: S) {
@@ -544,7 +663,7 @@ macro_rules! curve_impl {
                     }
 
                     if i {
-                        res.add_assign(self);
+                        res.add_assign(&*self);
                     }
                 }
 
@@ -595,9 +714,8 @@ macro_rules! curve_impl {
                     }
                 } else {
                     // Z is nonzero, so it must have an inverse in a field.
-                    let zinv = p.z.inverse().unwrap();
-                    let mut zinv_powered = zinv;
-                    zinv_powered.square();
+                    let zinv = p.z.invert().unwrap();
+                    let mut zinv_powered = zinv.square();
 
                     // X/Z^2
                     let mut x = p.x;
@@ -627,6 +745,8 @@ pub mod g1 {
     use group::{CurveAffine, CurveProjective, EncodedPoint, GroupDecodingError};
     use rand_core::RngCore;
     use std::fmt;
+    use std::ops::{AddAssign, MulAssign, Neg, SubAssign};
+    use subtle::CtOption;
 
     curve_impl!(
         "G1",
@@ -831,7 +951,12 @@ pub mod g1 {
                 let x = Fq::from_repr(x)
                     .map_err(|e| GroupDecodingError::CoordinateDecodingError("x coordinate", e))?;
 
-                G1Affine::get_point_from_x(x, greatest).ok_or(GroupDecodingError::NotOnCurve)
+                let ret = G1Affine::get_point_from_x(x, greatest);
+                if ret.is_some().into() {
+                    Ok(ret.unwrap())
+                } else {
+                    Err(GroupDecodingError::NotOnCurve)
+                }
             }
         }
         fn from_affine(affine: G1Affine) -> Self {
@@ -848,8 +973,7 @@ pub mod g1 {
                     affine.x.into_repr().write_be(&mut writer).unwrap();
                 }
 
-                let mut negy = affine.y;
-                negy.negate();
+                let negy = affine.y.neg();
 
                 // Set the third most significant bit if the correct y-coordinate
                 // is lexicographically largest.
@@ -940,15 +1064,15 @@ pub mod g1 {
         let mut i = 0;
         loop {
             // y^2 = x^3 + b
-            let mut rhs = x;
-            rhs.square();
+            let mut rhs = x.square();
             rhs.mul_assign(&x);
             rhs.add_assign(&G1Affine::get_coeff_b());
 
-            if let Some(y) = rhs.sqrt() {
+            let y = rhs.sqrt();
+            if y.is_some().into() {
+                let y = y.unwrap();
                 let yrepr = y.into_repr();
-                let mut negy = y;
-                negy.negate();
+                let negy = y.neg();
                 let negyrepr = negy.into_repr();
 
                 let p = G1Affine {
@@ -1276,7 +1400,7 @@ pub mod g1 {
         assert_eq!(tmp1, c.into_projective());
 
         let mut tmp2 = a.into_projective();
-        tmp2.add_assign_mixed(&b);
+        tmp2.add_assign(&b);
         assert_eq!(tmp2.into_affine(), c);
         assert_eq!(tmp2, c.into_projective());
     }
@@ -1296,6 +1420,8 @@ pub mod g2 {
     use group::{CurveAffine, CurveProjective, EncodedPoint, GroupDecodingError};
     use rand_core::RngCore;
     use std::fmt;
+    use std::ops::{AddAssign, MulAssign, Neg, SubAssign};
+    use subtle::CtOption;
 
     curve_impl!(
         "G2",
@@ -1524,7 +1650,12 @@ pub mod g2 {
                     })?,
                 };
 
-                G2Affine::get_point_from_x(x, greatest).ok_or(GroupDecodingError::NotOnCurve)
+                let ret = G2Affine::get_point_from_x(x, greatest);
+                if ret.is_some().into() {
+                    Ok(ret.unwrap())
+                } else {
+                    Err(GroupDecodingError::NotOnCurve)
+                }
             }
         }
         fn from_affine(affine: G2Affine) -> Self {
@@ -1542,8 +1673,7 @@ pub mod g2 {
                     affine.x.c0.into_repr().write_be(&mut writer).unwrap();
                 }
 
-                let mut negy = affine.y;
-                negy.negate();
+                let negy = affine.y.neg();
 
                 // Set the third most significant bit if the correct y-coordinate
                 // is lexicographically largest.
@@ -1646,14 +1776,14 @@ pub mod g2 {
         let mut i = 0;
         loop {
             // y^2 = x^3 + b
-            let mut rhs = x;
-            rhs.square();
+            let mut rhs = x.square();
             rhs.mul_assign(&x);
             rhs.add_assign(&G2Affine::get_coeff_b());
 
-            if let Some(y) = rhs.sqrt() {
-                let mut negy = y;
-                negy.negate();
+            let y = rhs.sqrt();
+            if y.is_some().into() {
+                let y = y.unwrap();
+                let negy = y.neg();
 
                 let p = G2Affine {
                     x,

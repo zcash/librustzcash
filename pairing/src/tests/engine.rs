@@ -1,6 +1,7 @@
 use group::{CurveAffine, CurveProjective};
 use rand_core::SeedableRng;
 use rand_xorshift::XorShiftRng;
+use std::ops::MulAssign;
 
 use crate::{Engine, Field, PairingCurveAffine, PrimeField};
 
@@ -129,7 +130,7 @@ fn random_bilinearity_tests<E: Engine>() {
         let mut cd = c;
         cd.mul_assign(&d);
 
-        let abcd = E::pairing(a, b).pow(cd.into_repr());
+        let abcd = E::pairing(a, b).pow_vartime(cd.into_repr());
 
         assert_eq!(acbd, adbc);
         assert_eq!(acbd, abcd);

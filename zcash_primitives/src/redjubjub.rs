@@ -7,6 +7,7 @@ use crate::jubjub::{edwards::Point, FixedGenerators, JubjubEngine, JubjubParams,
 use ff::{Field, PrimeField, PrimeFieldRepr};
 use rand_core::RngCore;
 use std::io::{self, Read, Write};
+use std::ops::{AddAssign, MulAssign, Neg};
 
 use crate::util::hash_to_scalar;
 
@@ -188,7 +189,7 @@ pub fn batch_verify<'a, E: JubjubEngine, R: RngCore>(
         let z = E::Fs::random(rng);
 
         s.mul_assign(&z);
-        s.negate();
+        s = s.neg();
 
         r = r.mul(z, params);
 

@@ -1,6 +1,7 @@
 //! Gadgets representing numbers in the scalar field of the underlying curve.
 
 use ff::{BitIterator, Field, PrimeField, PrimeFieldRepr, ScalarEngine};
+use std::ops::{AddAssign, MulAssign};
 
 use crate::{ConstraintSystem, LinearCombination, SynthesisError, Variable};
 
@@ -176,7 +177,7 @@ impl<E: ScalarEngine> AllocatedNum<E> {
         for bit in result.iter().rev() {
             lc = lc + (coeff, bit.get_variable());
 
-            coeff.double();
+            coeff = coeff.double();
         }
 
         lc = lc - self.variable;
@@ -202,7 +203,7 @@ impl<E: ScalarEngine> AllocatedNum<E> {
         for bit in bits.iter() {
             lc = lc + (coeff, bit.get_variable());
 
-            coeff.double();
+            coeff = coeff.double();
         }
 
         lc = lc - self.variable;
@@ -253,8 +254,7 @@ impl<E: ScalarEngine> AllocatedNum<E> {
         let var = cs.alloc(
             || "squared num",
             || {
-                let mut tmp = *self.value.get()?;
-                tmp.square();
+                let tmp = self.value.get()?.square();
 
                 value = Some(tmp);
 
@@ -288,7 +288,7 @@ impl<E: ScalarEngine> AllocatedNum<E> {
                 if tmp.is_zero() {
                     Err(SynthesisError::DivisionByZero)
                 } else {
-                    Ok(tmp.inverse().unwrap())
+                    Ok(tmp.invert().unwrap())
                 }
             },
         )?;
@@ -416,6 +416,7 @@ mod test {
     use pairing::bls12_381::{Bls12, Fr};
     use rand_core::SeedableRng;
     use rand_xorshift::XorShiftRng;
+    use std::ops::{Neg, SubAssign};
 
     use super::{AllocatedNum, Boolean};
     use crate::gadgets::test::*;
@@ -517,8 +518,7 @@ mod test {
 
     #[test]
     fn test_into_bits_strict() {
-        let mut negone = Fr::one();
-        negone.negate();
+        let negone = Fr::one().neg();
 
         let mut cs = TestConstraintSystem::<Bls12>::new();
 

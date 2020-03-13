@@ -1,4 +1,6 @@
 use ff::{BitIterator, Field, PrimeField, PrimeFieldRepr, SqrtField};
+use std::ops::{AddAssign, MulAssign, Neg, SubAssign};
+use subtle::CtOption;
 
 use super::{montgomery, JubjubEngine, JubjubParams, PrimeOrder, Unknown};
 
@@ -89,8 +91,14 @@ impl<E: JubjubEngine> Point<E, Unknown> {
         y_repr.as_mut()[3] &= 0x7fffffffffffffff;
 
         match E::Fr::from_repr(y_repr) {
-            Ok(y) => Self::get_for_y(y, x_sign, params)
-                .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "not on curve")),
+            Ok(y) => {
+                let p = Self::get_for_y(y, x_sign, params);
+                if bool::from(p.is_some()) {
+                    Ok(p.unwrap())
+                } else {
+                    Err(io::Error::new(io::ErrorKind::InvalidInput, "not on curve"))
+                }
+            }
             Err(_) => Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 "y is not in field",
@@ -98,14 +106,13 @@ impl<E: JubjubEngine> Point<E, Unknown> {
         }
     }
 
-    pub fn get_for_y(y: E::Fr, sign: bool, params: &E::Params) -> Option<Self> {
+    pub fn get_for_y(y: E::Fr, sign: bool, params: &E::Params) -> CtOption<Self> {
         // Given a y on the curve, x^2 = (y^2 - 1) / (dy^2 + 1)
         // This is defined for all valid y-coordinates,
         // as dy^2 + 1 = 0 has no solution in Fr.
 
         // tmp1 = y^2
-        let mut tmp1 = y;
-        tmp1.square();
+        let mut tmp1 = y.square();
 
         // tmp2 = (y^2 * d) + 1
         let mut tmp2 = tmp1;
@@ -115,33 +122,27 @@ impl<E: JubjubEngine> Point<E, Unknown> {
         // tmp1 = y^2 - 1
         tmp1.sub_assign(&E::Fr::one());
 
-        match tmp2.inverse() {
-            Some(tmp2) => {
-                // tmp1 = (y^2 - 1) / (dy^2 + 1)
-                tmp1.mul_assign(&tmp2);
+        tmp2.invert().and_then(|tmp2| {
+            // tmp1 = (y^2 - 1) / (dy^2 + 1)
+            tmp1.mul_assign(&tmp2);
 
-                match tmp1.sqrt() {
-                    Some(mut x) => {
-                        if x.into_repr().is_odd() != sign {
-                            x.negate();
-                        }
-
-                        let mut t = x;
-                        t.mul_assign(&y);
-
-                        Some(Point {
-                            x,
-                            y,
-                            t,
-                            z: E::Fr::one(),
-                            _marker: PhantomData,
-                        })
-                    }
-                    None => None,
+            tmp1.sqrt().map(|mut x| {
+                if x.into_repr().is_odd() != sign {
+                    x = x.neg();
                 }
-            }
-            None => None,
-        }
+
+                let mut t = x;
+                t.mul_assign(&y);
+
+                Point {
+                    x,
+                    y,
+                    t,
+                    z: E::Fr::one(),
+                    _marker: PhantomData,
+                }
+            })
+        })
     }
 
     /// This guarantees the point is in the prime order subgroup
@@ -157,8 +158,9 @@ impl<E: JubjubEngine> Point<E, Unknown> {
             let y = E::Fr::random(rng);
             let sign = rng.next_u32() % 2 != 0;
 
-            if let Some(p) = Self::get_for_y(y, sign, params) {
-                return p;
+            let p = Self::get_for_y(y, sign, params);
+            if bool::from(p.is_some()) {
+                return p.unwrap();
             }
         }
     }
@@ -210,12 +212,9 @@ impl<E: JubjubEngine, Subgroup> Point<E, Subgroup> {
                 // only point of order 2 that is not the neutral element.
                 if y.is_zero() {
                     // This must be the point (0, 0) as above.
-                    let mut neg1 = E::Fr::one();
-                    neg1.negate();
-
                     Point {
                         x: E::Fr::zero(),
-                        y: neg1,
+                        y: E::Fr::one().neg(),
                         t: E::Fr::zero(),
                         z: E::Fr::one(),
                         _marker: PhantomData,
@@ -306,7 +305,7 @@ impl<E: JubjubEngine, Subgroup> Point<E, Subgroup> {
 
     /// Convert to affine coordinates
     pub fn to_xy(&self) -> (E::Fr, E::Fr) {
-        let zinv = self.z.inverse().unwrap();
+        let zinv = self.z.invert().unwrap();
 
         let mut x = self.x;
         x.mul_assign(&zinv);
@@ -321,8 +320,8 @@ impl<E: JubjubEngine, Subgroup> Point<E, Subgroup> {
     pub fn negate(&self) -> Self {
         let mut p = self.clone();
 
-        p.x.negate();
-        p.t.negate();
+        p.x = p.x.neg();
+        p.t = p.t.neg();
 
         p
     }
@@ -335,27 +334,22 @@ impl<E: JubjubEngine, Subgroup> Point<E, Subgroup> {
         //     http://hyperelliptic.org/EFD/g1p/auto-twisted-extended.html#doubling-dbl-2008-hwcd
 
         // A = X1^2
-        let mut a = self.x;
-        a.square();
+        let a = self.x.square();
 
         // B = Y1^2
-        let mut b = self.y;
-        b.square();
+        let b = self.y.square();
 
         // C = 2*Z1^2
-        let mut c = self.z;
-        c.square();
-        c.double();
+        let c = self.z.square().double();
 
         // D = a*A
         //   = -A
-        let mut d = a;
-        d.negate();
+        let d = a.neg();
 
         // E = (X1+Y1)^2 - A - B
         let mut e = self.x;
         e.add_assign(&self.y);
-        e.square();
+        e = e.square();
         e.add_assign(&d); // -A = D
         e.sub_assign(&b);
 

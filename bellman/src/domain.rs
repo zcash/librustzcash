@@ -13,6 +13,7 @@
 
 use ff::{Field, PrimeField, ScalarEngine};
 use group::CurveProjective;
+use std::ops::{AddAssign, MulAssign, SubAssign};
 
 use super::SynthesisError;
 
@@ -62,7 +63,7 @@ impl<E: ScalarEngine, G: Group<E>> EvaluationDomain<E, G> {
         // Compute omega, the 2^exp primitive root of unity
         let mut omega = E::Fr::root_of_unity();
         for _ in exp..E::Fr::S {
-            omega.square();
+            omega = omega.square();
         }
 
         // Extend the coeffs vector with zeroes if necessary
@@ -72,11 +73,11 @@ impl<E: ScalarEngine, G: Group<E>> EvaluationDomain<E, G> {
             coeffs,
             exp,
             omega,
-            omegainv: omega.inverse().unwrap(),
-            geninv: E::Fr::multiplicative_generator().inverse().unwrap(),
+            omegainv: omega.invert().unwrap(),
+            geninv: E::Fr::multiplicative_generator().invert().unwrap(),
             minv: E::Fr::from_str(&format!("{}", m))
                 .unwrap()
-                .inverse()
+                .invert()
                 .unwrap(),
         })
     }
@@ -105,7 +106,7 @@ impl<E: ScalarEngine, G: Group<E>> EvaluationDomain<E, G> {
         worker.scope(self.coeffs.len(), |scope, chunk| {
             for (i, v) in self.coeffs.chunks_mut(chunk).enumerate() {
                 scope.spawn(move |_scope| {
-                    let mut u = g.pow(&[(i * chunk) as u64]);
+                    let mut u = g.pow_vartime(&[(i * chunk) as u64]);
                     for v in v.iter_mut() {
                         v.group_mul_assign(&u);
                         u.mul_assign(&g);
@@ -130,7 +131,7 @@ impl<E: ScalarEngine, G: Group<E>> EvaluationDomain<E, G> {
     /// This evaluates t(tau) for this domain, which is
     /// tau^m - 1 for these radix-2 domains.
     pub fn z(&self, tau: &E::Fr) -> E::Fr {
-        let mut tmp = tau.pow(&[self.coeffs.len() as u64]);
+        let mut tmp = tau.pow_vartime(&[self.coeffs.len() as u64]);
         tmp.sub_assign(&E::Fr::one());
 
         tmp
@@ -140,10 +141,7 @@ impl<E: ScalarEngine, G: Group<E>> EvaluationDomain<E, G> {
     /// evaluation domain, so we must perform division over
     /// a coset.
     pub fn divide_by_z_on_coset(&mut self, worker: &Worker) {
-        let i = self
-            .z(&E::Fr::multiplicative_generator())
-            .inverse()
-            .unwrap();
+        let i = self.z(&E::Fr::multiplicative_generator()).invert().unwrap();
 
         worker.scope(self.coeffs.len(), |scope, chunk| {
             for v in self.coeffs.chunks_mut(chunk) {
@@ -296,7 +294,7 @@ fn serial_fft<E: ScalarEngine, T: Group<E>>(a: &mut [T], omega: &E::Fr, log_n: u
 
     let mut m = 1;
     for _ in 0..log_n {
-        let w_m = omega.pow(&[u64::from(n / (2 * m))]);
+        let w_m = omega.pow_vartime(&[u64::from(n / (2 * m))]);
 
         let mut k = 0;
         while k < n {
@@ -330,7 +328,7 @@ fn parallel_fft<E: ScalarEngine, T: Group<E>>(
     let num_cpus = 1 << log_cpus;
     let log_new_n = log_n - log_cpus;
     let mut tmp = vec![vec![T::group_zero(); 1 << log_new_n]; num_cpus];
-    let new_omega = omega.pow(&[num_cpus as u64]);
+    let new_omega = omega.pow_vartime(&[num_cpus as u64]);
 
     worker.scope(0, |scope, _| {
         let a = &*a;
@@ -338,8 +336,8 @@ fn parallel_fft<E: ScalarEngine, T: Group<E>>(
         for (j, tmp) in tmp.iter_mut().enumerate() {
             scope.spawn(move |_scope| {
                 // Shuffle into a sub-FFT
-                let omega_j = omega.pow(&[j as u64]);
-                let omega_step = omega.pow(&[(j as u64) << log_new_n]);
+                let omega_j = omega.pow_vartime(&[j as u64]);
+                let omega_step = omega.pow_vartime(&[(j as u64) << log_new_n]);
 
                 let mut elt = E::Fr::one();
                 for (i, tmp) in tmp.iter_mut().enumerate() {

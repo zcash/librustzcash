@@ -268,7 +268,7 @@ impl NoteValue {
         let mut coeff = E::Fr::one();
         for b in &self.bits {
             tmp = tmp + (coeff, b.get_variable());
-            coeff.double();
+            coeff = coeff.double();
         }
 
         tmp

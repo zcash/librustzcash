@@ -1,5 +1,9 @@
 use super::fq2::Fq2;
 use ff::{Field, PrimeField, PrimeFieldDecodingError, PrimeFieldRepr};
+use std::ops::{AddAssign, MulAssign, SubAssign};
+
+#[cfg(test)]
+use std::ops::Neg;
 
 // B coefficient of BLS12-381 curve, 4.
 pub const B_COEFF: Fq = Fq(FqRepr([
@@ -454,14 +458,14 @@ fn test_b_coeff() {
 }
 
 #[test]
+#[allow(clippy::cognitive_complexity)]
 fn test_frob_coeffs() {
-    let mut nqr = Fq::one();
-    nqr.negate();
+    let nqr = Fq::one().neg();
 
     assert_eq!(FROBENIUS_COEFF_FQ2_C1[0], Fq::one());
     assert_eq!(
         FROBENIUS_COEFF_FQ2_C1[1],
-        nqr.pow([
+        nqr.pow_vartime([
             0xdcff7fffffffd555,
             0xf55ffff58a9ffff,
             0xb39869507b587b12,
@@ -479,7 +483,7 @@ fn test_frob_coeffs() {
     assert_eq!(FROBENIUS_COEFF_FQ6_C1[0], Fq2::one());
     assert_eq!(
         FROBENIUS_COEFF_FQ6_C1[1],
-        nqr.pow([
+        nqr.pow_vartime([
             0x9354ffffffffe38e,
             0xa395554e5c6aaaa,
             0xcd104635a790520c,
@@ -490,7 +494,7 @@ fn test_frob_coeffs() {
     );
     assert_eq!(
         FROBENIUS_COEFF_FQ6_C1[2],
-        nqr.pow([
+        nqr.pow_vartime([
             0xb78e0000097b2f68,
             0xd44f23b47cbd64e3,
             0x5cb9668120b069a9,
@@ -507,7 +511,7 @@ fn test_frob_coeffs() {
     );
     assert_eq!(
         FROBENIUS_COEFF_FQ6_C1[3],
-        nqr.pow([
+        nqr.pow_vartime([
             0xdbc6fcd6f35b9e06,
             0x997dead10becd6aa,
             0x9dbbd24c17206460,
@@ -530,7 +534,7 @@ fn test_frob_coeffs() {
     );
     assert_eq!(
         FROBENIUS_COEFF_FQ6_C1[4],
-        nqr.pow([
+        nqr.pow_vartime([
             0x4649add3c71c6d90,
             0x43caa6528972a865,
             0xcda8445bbaaa0fbb,
@@ -559,7 +563,7 @@ fn test_frob_coeffs() {
     );
     assert_eq!(
         FROBENIUS_COEFF_FQ6_C1[5],
-        nqr.pow([
+        nqr.pow_vartime([
             0xf896f792732eb2be,
             0x49c86a6d1dc593a1,
             0xe5b31e94581f91c3,
@@ -596,7 +600,7 @@ fn test_frob_coeffs() {
     assert_eq!(FROBENIUS_COEFF_FQ6_C2[0], Fq2::one());
     assert_eq!(
         FROBENIUS_COEFF_FQ6_C2[1],
-        nqr.pow([
+        nqr.pow_vartime([
             0x26a9ffffffffc71c,
             0x1472aaa9cb8d5555,
             0x9a208c6b4f20a418,
@@ -607,7 +611,7 @@ fn test_frob_coeffs() {
     );
     assert_eq!(
         FROBENIUS_COEFF_FQ6_C2[2],
-        nqr.pow([
+        nqr.pow_vartime([
             0x6f1c000012f65ed0,
             0xa89e4768f97ac9c7,
             0xb972cd024160d353,
@@ -624,7 +628,7 @@ fn test_frob_coeffs() {
     );
     assert_eq!(
         FROBENIUS_COEFF_FQ6_C2[3],
-        nqr.pow([
+        nqr.pow_vartime([
             0xb78df9ade6b73c0c,
             0x32fbd5a217d9ad55,
             0x3b77a4982e40c8c1,
@@ -647,7 +651,7 @@ fn test_frob_coeffs() {
     );
     assert_eq!(
         FROBENIUS_COEFF_FQ6_C2[4],
-        nqr.pow([
+        nqr.pow_vartime([
             0x8c935ba78e38db20,
             0x87954ca512e550ca,
             0x9b5088b775541f76,
@@ -676,7 +680,7 @@ fn test_frob_coeffs() {
     );
     assert_eq!(
         FROBENIUS_COEFF_FQ6_C2[5],
-        nqr.pow([
+        nqr.pow_vartime([
             0xf12def24e65d657c,
             0x9390d4da3b8b2743,
             0xcb663d28b03f2386,
@@ -713,7 +717,7 @@ fn test_frob_coeffs() {
     assert_eq!(FROBENIUS_COEFF_FQ12_C1[0], Fq2::one());
     assert_eq!(
         FROBENIUS_COEFF_FQ12_C1[1],
-        nqr.pow([
+        nqr.pow_vartime([
             0x49aa7ffffffff1c7,
             0x51caaaa72e35555,
             0xe688231ad3c82906,
@@ -724,7 +728,7 @@ fn test_frob_coeffs() {
     );
     assert_eq!(
         FROBENIUS_COEFF_FQ12_C1[2],
-        nqr.pow([
+        nqr.pow_vartime([
             0xdbc7000004bd97b4,
             0xea2791da3e5eb271,
             0x2e5cb340905834d4,
@@ -741,7 +745,7 @@ fn test_frob_coeffs() {
     );
     assert_eq!(
         FROBENIUS_COEFF_FQ12_C1[3],
-        nqr.pow(vec![
+        nqr.pow_vartime(vec![
             0x6de37e6b79adcf03,
             0x4cbef56885f66b55,
             0x4edde9260b903230,
@@ -764,7 +768,7 @@ fn test_frob_coeffs() {
     );
     assert_eq!(
         FROBENIUS_COEFF_FQ12_C1[4],
-        nqr.pow(vec![
+        nqr.pow_vartime(vec![
             0xa324d6e9e38e36c8,
             0xa1e5532944b95432,
             0x66d4222ddd5507dd,
@@ -793,7 +797,7 @@ fn test_frob_coeffs() {
     );
     assert_eq!(
         FROBENIUS_COEFF_FQ12_C1[5],
-        nqr.pow(vec![
+        nqr.pow_vartime(vec![
             0xfc4b7bc93997595f,
             0xa4e435368ee2c9d0,
             0xf2d98f4a2c0fc8e1,
@@ -828,7 +832,7 @@ fn test_frob_coeffs() {
     );
     assert_eq!(
         FROBENIUS_COEFF_FQ12_C1[6],
-        nqr.pow(vec![
+        nqr.pow_vartime(vec![
             0x21219610a012ba3c,
             0xa5c19ad35375325,
             0x4e9df1e497674396,
@@ -869,7 +873,7 @@ fn test_frob_coeffs() {
     );
     assert_eq!(
         FROBENIUS_COEFF_FQ12_C1[7],
-        nqr.pow(vec![
+        nqr.pow_vartime(vec![
             0x742754a1f22fdb,
             0x2a1955c2dec3a702,
             0x9747b28c796d134e,
@@ -916,7 +920,7 @@ fn test_frob_coeffs() {
     );
     assert_eq!(
         FROBENIUS_COEFF_FQ12_C1[8],
-        nqr.pow(vec![
+        nqr.pow_vartime(vec![
             0x802f5720d0b25710,
             0x6714f0a258b85c7c,
             0x31394c90afdf16e,
@@ -969,7 +973,7 @@ fn test_frob_coeffs() {
     );
     assert_eq!(
         FROBENIUS_COEFF_FQ12_C1[9],
-        nqr.pow(vec![
+        nqr.pow_vartime(vec![
             0x4af4accf7de0b977,
             0x742485e21805b4ee,
             0xee388fbc4ac36dec,
@@ -1028,7 +1032,7 @@ fn test_frob_coeffs() {
     );
     assert_eq!(
         FROBENIUS_COEFF_FQ12_C1[10],
-        nqr.pow(vec![
+        nqr.pow_vartime(vec![
             0xe5953a4f96cdda44,
             0x336b2d734cbc32bb,
             0x3f79bfe3cd7410e,
@@ -1093,7 +1097,7 @@ fn test_frob_coeffs() {
     );
     assert_eq!(
         FROBENIUS_COEFF_FQ12_C1[11],
-        nqr.pow(vec![
+        nqr.pow_vartime(vec![
             0x107db680942de533,
             0x6262b24d2052393b,
             0x6136df824159ebc,
@@ -1166,8 +1170,7 @@ fn test_frob_coeffs() {
 
 #[test]
 fn test_neg_one() {
-    let mut o = Fq::one();
-    o.negate();
+    let o = Fq::one().neg();
 
     assert_eq!(NEGATIVE_ONE, o);
 }
@@ -1928,7 +1931,7 @@ fn test_fq_mul_assign() {
 
 #[test]
 fn test_fq_squaring() {
-    let mut a = Fq(FqRepr([
+    let a = Fq(FqRepr([
         0xffffffffffffffff,
         0xffffffffffffffff,
         0xffffffffffffffff,
@@ -1937,9 +1940,8 @@ fn test_fq_squaring() {
         0x19ffffffffffffff,
     ]));
     assert!(a.is_valid());
-    a.square();
     assert_eq!(
-        a,
+        a.square(),
         Fq::from_repr(FqRepr([
             0x1cfb28fe7dfbbb86,
             0x24cbe1731577a59,
@@ -1959,20 +1961,13 @@ fn test_fq_squaring() {
     for _ in 0..1000000 {
         // Ensure that (a * a) = a^2
         let a = Fq::random(&mut rng);
-
-        let mut tmp = a;
-        tmp.square();
-
-        let mut tmp2 = a;
-        tmp2.mul_assign(&a);
-
-        assert_eq!(tmp, tmp2);
+        assert_eq!(a.square(), a * a);
     }
 }
 
 #[test]
-fn test_fq_inverse() {
-    assert!(Fq::zero().inverse().is_none());
+fn test_fq_invert() {
+    assert!(bool::from(Fq::zero().invert().is_none()));
 
     let mut rng = XorShiftRng::from_seed([
         0x59, 0x62, 0xbe, 0x5d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06, 0xbc,
@@ -1984,7 +1979,7 @@ fn test_fq_inverse() {
     for _ in 0..1000 {
         // Ensure that a * a^-1 = 1
         let mut a = Fq::random(&mut rng);
-        let ainv = a.inverse().unwrap();
+        let ainv = a.invert().unwrap();
         a.mul_assign(&ainv);
         assert_eq!(a, one);
     }
@@ -1999,19 +1994,15 @@ fn test_fq_double() {
 
     for _ in 0..1000 {
         // Ensure doubling a is equivalent to adding a to itself.
-        let mut a = Fq::random(&mut rng);
-        let mut b = a;
-        b.add_assign(&a);
-        a.double();
-        assert_eq!(a, b);
+        let a = Fq::random(&mut rng);
+        assert_eq!(a.double(), a + a);
     }
 }
 
 #[test]
-fn test_fq_negate() {
+fn test_fq_neg() {
     {
-        let mut a = Fq::zero();
-        a.negate();
+        let a = Fq::zero().neg();
 
         assert!(a.is_zero());
     }
@@ -2024,8 +2015,7 @@ fn test_fq_negate() {
     for _ in 0..1000 {
         // Ensure (a - (-a)) = 0.
         let mut a = Fq::random(&mut rng);
-        let mut b = a;
-        b.negate();
+        let b = a.neg();
         a.add_assign(&b);
 
         assert!(a.is_zero());
@@ -2043,7 +2033,7 @@ fn test_fq_pow() {
         // Exponentiate by various small numbers and ensure it consists with repeated
         // multiplication.
         let a = Fq::random(&mut rng);
-        let target = a.pow(&[i]);
+        let target = a.pow_vartime(&[i]);
         let mut c = Fq::one();
         for _ in 0..i {
             c.mul_assign(&a);
@@ -2055,7 +2045,7 @@ fn test_fq_pow() {
         // Exponentiating by the modulus should have no effect in a prime field.
         let a = Fq::random(&mut rng);
 
-        assert_eq!(a, a.pow(Fq::char()));
+        assert_eq!(a, a.pow_vartime(Fq::char()));
     }
 }
 
@@ -2073,10 +2063,8 @@ fn test_fq_sqrt() {
     for _ in 0..1000 {
         // Ensure sqrt(a^2) = a or -a
         let a = Fq::random(&mut rng);
-        let mut nega = a;
-        nega.negate();
-        let mut b = a;
-        b.square();
+        let nega = a.neg();
+        let b = a.square();
 
         let b = b.sqrt().unwrap();
 
@@ -2087,10 +2075,9 @@ fn test_fq_sqrt() {
         // Ensure sqrt(a)^2 = a for random a
         let a = Fq::random(&mut rng);
 
-        if let Some(mut tmp) = a.sqrt() {
-            tmp.square();
-
-            assert_eq!(a, tmp);
+        let tmp = a.sqrt();
+        if tmp.is_some().into() {
+            assert_eq!(a, tmp.unwrap().square());
         }
     }
 }
@@ -2209,7 +2196,7 @@ fn test_fq_root_of_unity() {
         Fq::from_repr(FqRepr::from(2)).unwrap()
     );
     assert_eq!(
-        Fq::multiplicative_generator().pow([
+        Fq::multiplicative_generator().pow_vartime([
             0xdcff7fffffffd555,
             0xf55ffff58a9ffff,
             0xb39869507b587b12,
@@ -2219,8 +2206,8 @@ fn test_fq_root_of_unity() {
         ]),
         Fq::root_of_unity()
     );
-    assert_eq!(Fq::root_of_unity().pow([1 << Fq::S]), Fq::one());
-    assert!(Fq::multiplicative_generator().sqrt().is_none());
+    assert_eq!(Fq::root_of_unity().pow_vartime([1 << Fq::S]), Fq::one());
+    assert!(bool::from(Fq::multiplicative_generator().sqrt().is_none()));
 }
 
 #[test]
@@ -2245,41 +2232,4 @@ fn test_fq_ordering() {
 #[test]
 fn fq_repr_tests() {
     crate::tests::repr::random_repr_tests::<Fq>();
-}
-
-#[test]
-fn test_fq_legendre() {
-    use ff::LegendreSymbol::*;
-    use ff::SqrtField;
-
-    assert_eq!(QuadraticResidue, Fq::one().legendre());
-    assert_eq!(Zero, Fq::zero().legendre());
-
-    assert_eq!(
-        QuadraticNonResidue,
-        Fq::from_repr(FqRepr::from(2)).unwrap().legendre()
-    );
-    assert_eq!(
-        QuadraticResidue,
-        Fq::from_repr(FqRepr::from(4)).unwrap().legendre()
-    );
-
-    let e = FqRepr([
-        0x52a112f249778642,
-        0xd0bedb989b7991f,
-        0xdad3b6681aa63c05,
-        0xf2efc0bb4721b283,
-        0x6057a98f18c24733,
-        0x1022c2fd122889e4,
-    ]);
-    assert_eq!(QuadraticNonResidue, Fq::from_repr(e).unwrap().legendre());
-    let e = FqRepr([
-        0x6dae594e53a96c74,
-        0x19b16ca9ba64b37b,
-        0x5c764661a59bfc68,
-        0xaa346e9b31c60a,
-        0x346059f9d87a9fa9,
-        0x1d61ac6bfd5c88b,
-    ]);
-    assert_eq!(QuadraticResidue, Fq::from_repr(e).unwrap().legendre());
 }

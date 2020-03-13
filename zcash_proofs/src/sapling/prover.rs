@@ -5,6 +5,7 @@ use bellman::{
 use ff::Field;
 use pairing::bls12_381::{Bls12, Fr};
 use rand_core::OsRng;
+use std::ops::{AddAssign, Neg};
 use zcash_primitives::{
     jubjub::{edwards, fs::Fs, FixedGenerators, JubjubBls12, Unknown},
     primitives::{Diversifier, Note, PaymentAddress, ProofGenerationKey, ValueCommitment},
@@ -200,8 +201,7 @@ impl SaplingProvingContext {
 
         // Accumulate the value commitment randomness in the context
         {
-            let mut tmp = rcv;
-            tmp.negate(); // Outputs subtract from the total.
+            let mut tmp = rcv.neg(); // Outputs subtract from the total.
             tmp.add_assign(&self.bsk);
 
             // Update the context
