@@ -35,7 +35,13 @@ const DEFAULT_TX_EXPIRY_DELTA: u32 = 20;
 
 /// If there are any shielded inputs, always have at least two shielded outputs, padding
 /// with dummy outputs if necessary. See https://github.com/zcash/zcash/issues/3615
-const MIN_SHIELDED_OUTPUTS: usize = 2;
+fn default_sapling_output_arity(num_spends: usize) -> Option<Arity> {
+    if num_spends == 0 {
+        None
+    } else {
+        Some(Arity::Minimum(2))
+    }
+}
 
 #[derive(Debug, PartialEq)]
 pub enum Error {
@@ -44,16 +50,136 @@ pub enum Error {
     ChangeIsNegative(Amount),
     InvalidAddress,
     InvalidAmount,
+    InvalidOutputArity,
+    InvalidSpendArity,
     NoChangeAddress,
     SpendProof,
 }
 
-struct SpendDescriptionInfo {
+/// Specifies the "arity" that the [`Builder`] should enforce on the spends or outputs
+/// within the transaction it is building.
+///
+/// See [`Builder::with_sapling_spend_arity`] and [`Builder::with_sapling_output_arity`]
+/// for more details.
+#[derive(Clone, Copy, Debug)]
+pub enum Arity {
+    /// Require an exact number of spends or outputs. The real number of spends or outputs
+    /// will be hidden.
+    Exact(usize),
+    /// Require a minimum number of spends or outputs. The real number of spends or
+    /// outputs in the transaction will be hidden if it is not greater than this number.
+    Minimum(usize),
+}
+
+impl Arity {
+    /// Enforces that `v` has the desired arity, padding with dummy entries if necessary.
+    fn enforce<T, F: FnMut() -> T>(self, v: &mut Vec<T>, mut dummy: F) -> Result<(), ()> {
+        let target = match self {
+            Arity::Exact(n) => {
+                if v.len() > n {
+                    return Err(());
+                }
+                n
+            }
+            Arity::Minimum(n) => n,
+        };
+
+        while v.len() < target {
+            v.push(dummy());
+        }
+
+        Ok(())
+    }
+}
+
+struct SaplingSpend {
     extsk: ExtendedSpendingKey,
     diversifier: Diversifier,
     note: Note<Bls12>,
     alpha: Fs,
     merkle_path: MerklePath<Node>,
+}
+
+impl SaplingSpend {
+    pub fn build<P: TxProver>(
+        &self,
+        prover: &P,
+        ctx: &mut P::SaplingProvingContext,
+        anchor: Fr,
+    ) -> Result<SpendDescription, ()> {
+        let proof_generation_key = self.extsk.expsk.proof_generation_key(&JUBJUB);
+
+        let mut nullifier = [0u8; 32];
+        nullifier.copy_from_slice(&self.note.nf(
+            &proof_generation_key.to_viewing_key(&JUBJUB),
+            self.merkle_path.position,
+            &JUBJUB,
+        ));
+
+        let (zkproof, cv, rk) = prover.spend_proof(
+            ctx,
+            proof_generation_key,
+            self.diversifier,
+            self.note.r,
+            self.alpha,
+            self.note.value,
+            anchor,
+            self.merkle_path.clone(),
+        )?;
+
+        Ok(SpendDescription {
+            cv,
+            anchor,
+            nullifier,
+            rk,
+            zkproof,
+            spend_auth_sig: None,
+        })
+    }
+}
+
+/// The concrete type of a particular Sapling [`SpendDescription`] to be created within
+/// a [`Transaction`].
+enum SpendType {
+    /// A [`SpendDescription`] bound to a real [`Note`].
+    Real((usize, SaplingSpend)),
+    /// A dummy [`SpendDescription`] that spends no value.
+    Dummy(SaplingSpend),
+}
+
+impl SpendType {
+    fn dummy<R: RngCore + CryptoRng>(rng: &mut R) -> Self {
+        // Generate a random spending key. We will forget about it once the transaction
+        // has been built.
+        let mut seed = [0; 32];
+        rng.fill_bytes(&mut seed);
+        let extsk = ExtendedSpendingKey::master(&seed);
+
+        let (diversifier, note) = {
+            let (_, payment_address) = extsk.default_address().expect("Very unlikely to fail");
+
+            (
+                *payment_address.diversifier(),
+                Note {
+                    g_d: payment_address.g_d(&JUBJUB).expect("Already validated"),
+                    pk_d: payment_address.pk_d().clone(),
+                    r: Fs::random(rng),
+                    value: 0,
+                },
+            )
+        };
+
+        let alpha = Fs::random(rng);
+        let merkle_path = MerklePath::empty();
+
+        SpendType::Dummy(SaplingSpend {
+            extsk,
+            diversifier,
+            note,
+            alpha,
+            merkle_path,
+        })
+    }
 }
 
 pub struct SaplingOutput {
@@ -285,10 +411,12 @@ pub struct Builder<R: RngCore + CryptoRng> {
     mtx: TransactionData,
     fee: Amount,
     anchor: Option<Fr>,
-    spends: Vec<SpendDescriptionInfo>,
+    spends: Vec<SaplingSpend>,
     outputs: Vec<SaplingOutput>,
     transparent_inputs: TransparentInputs,
     change_address: Option<(OutgoingViewingKey, PaymentAddress<Bls12>)>,
+    spend_arity: Option<Arity>,
+    output_arity: Option<Arity>,
 }
 
 impl Builder<OsRng> {
@@ -329,6 +457,8 @@ impl<R: RngCore + CryptoRng> Builder<R> {
             outputs: vec![],
             transparent_inputs: TransparentInputs::default(),
             change_address: None,
+            spend_arity: None,
+            output_arity: None,
         }
     }
 
@@ -358,7 +488,7 @@ impl<R: RngCore + CryptoRng> Builder<R> {
 
         self.mtx.value_balance += Amount::from_u64(note.value).map_err(|_| Error::InvalidAmount)?;
 
-        self.spends.push(SpendDescriptionInfo {
+        self.spends.push(SaplingSpend {
             extsk,
             diversifier,
             note,
@@ -423,6 +553,72 @@ impl<R: RngCore + CryptoRng> Builder<R> {
         self.change_address = Some((ovk, to));
     }
 
+    /// Sets the number of Sapling [`SpendDescription`]s that should be present in the
+    /// final [`Transaction`].
+    ///
+    /// This can be used to hide the number of [`Note`]s being spent, by padding the
+    /// transaction with dummy `SpendDescription`s. Doing so will make the transaction
+    /// larger.
+    ///
+    /// By default, Sapling spend arity is not hidden. See [issue #3615] for more details.
+    ///
+    /// [issue #3615]: https://github.com/zcash/zcash/issues/3615
+    ///
+    /// # Errors
+    ///
+    /// If this is set to [`Arity::Exact(n)`](Arity::Exact), and the transaction requires
+    /// more than `n` `SpendDescription`s (because [`Builder::add_sapling_spend`] was
+    /// called more than `n` times), [`Builder::build`] will fail with
+    /// [`Error::InvalidSpendArity`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use zcash_primitives::transaction::builder::{Arity, Builder};
+    ///
+    /// let mut builder = Builder::new(123_456);
+    /// builder.with_sapling_spend_arity(Arity::Minimum(2));
+    /// ```
+    pub fn with_sapling_spend_arity(&mut self, spend_arity: Arity) {
+        self.spend_arity = Some(spend_arity);
+    }
+
+    /// Sets the number of Sapling [`OutputDescription`]s that should be present in the
+    /// final [`Transaction`].
+    ///
+    /// This can be used to hide the number of [`Note`]s being created, by padding the
+    /// transaction with dummy `OutputDescription`s. Doing so will make the transaction
+    /// larger.
+    ///
+    /// By default:
+    /// - If there are any Sapling spends, the Sapling output arity is set to
+    ///   [`Arity::Minimum(2)`](Arity::Minimum).
+    /// - If there are no Sapling spends, Sapling output arity is not hidden.
+    ///
+    /// See [issue #3615] for more details. Spend arity is enforced before output arity,
+    /// so calls to [`Builder::with_sapling_spend_arity`] are reflected here.
+    ///
+    /// [issue #3615]: https://github.com/zcash/zcash/issues/3615
+    ///
+    /// # Errors
+    ///
+    /// If this is set to [`Arity::Exact(n)`](Arity::Exact), and the transaction requires
+    /// more than `n` `SpendDescription`s (because [`Builder::add_sapling_output`] was
+    /// called more than `n` times, or because it was called `n` times but a change output
+    /// is needed), [`Builder::build`] will fail with [`Error::InvalidOutputArity`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use zcash_primitives::transaction::builder::{Arity, Builder};
+    ///
+    /// let mut builder = Builder::new(123_456);
+    /// builder.with_sapling_output_arity(Arity::Exact(4));
+    /// ```
+    pub fn with_sapling_output_arity(&mut self, output_arity: Arity) {
+        self.output_arity = Some(output_arity);
+    }
+
     /// Builds a transaction from the configured spends and outputs.
     ///
     /// Upon success, returns a tuple containing the final transaction, and the
@@ -483,7 +679,12 @@ impl<R: RngCore + CryptoRng> Builder<R> {
         //
         // Record initial positions of spends and outputs
         //
-        let mut spends: Vec<_> = self.spends.into_iter().enumerate().collect();
+        let mut spends: Vec<_> = self
+            .spends
+            .into_iter()
+            .enumerate()
+            .map(|(i, s)| SpendType::Real((i, s)))
+            .collect();
         let mut outputs: Vec<_> = self
             .outputs
             .into_iter()
@@ -497,58 +698,51 @@ impl<R: RngCore + CryptoRng> Builder<R> {
 
         let mut ctx = prover.new_sapling_proving_context();
 
+        // Pad Sapling spends
+        let orig_spends_len = spends.len();
+        if let Some(spend_arity) = self.spend_arity {
+            let rng = &mut self.rng;
+            spend_arity
+                .enforce(&mut spends, || SpendType::dummy(rng))
+                .map_err(|()| Error::InvalidSpendArity)?;
+        }
+
         // Pad Sapling outputs
         let orig_outputs_len = outputs.len();
-        if !spends.is_empty() {
-            while outputs.len() < MIN_SHIELDED_OUTPUTS {
-                outputs.push(None);
-            }
+        if let Some(output_arity) = self
+            .output_arity
+            .or_else(|| default_sapling_output_arity(spends.len()))
+        {
+            output_arity
+                .enforce(&mut outputs, || None)
+                .map_err(|()| Error::InvalidOutputArity)?;
         }
 
         // Randomize order of inputs and outputs
         spends.shuffle(&mut self.rng);
         outputs.shuffle(&mut self.rng);
-        tx_metadata.spend_indices.resize(spends.len(), 0);
+        tx_metadata.spend_indices.resize(orig_spends_len, 0);
         tx_metadata.output_indices.resize(orig_outputs_len, 0);
 
         // Create Sapling SpendDescriptions
         if !spends.is_empty() {
             let anchor = self.anchor.expect("anchor was set if spends were added");
 
-            for (i, (pos, spend)) in spends.iter().enumerate() {
-                let proof_generation_key = spend.extsk.expsk.proof_generation_key(&JUBJUB);
+            for (i, spend_type) in spends.iter().enumerate() {
+                let spend = match spend_type {
+                    SpendType::Real((pos, spend)) => {
+                        // Record the post-randomized spend location
+                        tx_metadata.spend_indices[*pos] = i;
+                        spend
+                    }
+                    SpendType::Dummy(spend) => spend,
+                };
 
-                let mut nullifier = [0u8; 32];
-                nullifier.copy_from_slice(&spend.note.nf(
-                    &proof_generation_key.to_viewing_key(&JUBJUB),
-                    spend.merkle_path.position,
-                    &JUBJUB,
-                ));
-
-                let (zkproof, cv, rk) = prover
-                    .spend_proof(
-                        &mut ctx,
-                        proof_generation_key,
-                        spend.diversifier,
-                        spend.note.r,
-                        spend.alpha,
-                        spend.note.value,
-                        anchor,
-                        spend.merkle_path.clone(),
-                    )
-                    .map_err(|()| Error::SpendProof)?;
-
-                self.mtx.shielded_spends.push(SpendDescription {
-                    cv,
-                    anchor,
-                    nullifier,
-                    rk,
-                    zkproof,
-                    spend_auth_sig: None,
-                });
-
-                // Record the post-randomized spend location
-                tx_metadata.spend_indices[*pos] = i;
+                self.mtx.shielded_spends.push(
+                    spend
+                        .build(prover, &mut ctx, anchor)
+                        .map_err(|()| Error::SpendProof)?,
+                );
             }
         }
 
@@ -635,10 +829,13 @@ impl<R: RngCore + CryptoRng> Builder<R> {
         ));
 
         // Create Sapling spendAuth and binding signatures
-        for (i, (_, spend)) in spends.into_iter().enumerate() {
+        for (i, spend) in spends.into_iter().enumerate() {
+            let (extsk, alpha) = match spend {
+                SpendType::Real((_, s)) | SpendType::Dummy(s) => (s.extsk, s.alpha),
+            };
             self.mtx.shielded_spends[i].spend_auth_sig = Some(spend_sig(
-                PrivateKey(spend.extsk.expsk.ask),
-                spend.alpha,
+                PrivateKey(extsk.expsk.ask),
+                alpha,
                 &sighash,
                 &mut self.rng,
                 &JUBJUB,
