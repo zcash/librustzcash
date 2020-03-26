@@ -115,7 +115,7 @@ impl<G: CurveProjective> Wnaf<(), Vec<G>, Vec<i64>> {
         scalar: <<G as CurveProjective>::Scalar as PrimeField>::Repr,
     ) -> Wnaf<usize, &mut Vec<G>, &[i64]> {
         // Compute the appropriate window size for the scalar.
-        let window_size = G::recommended_wnaf_for_scalar(scalar);
+        let window_size = G::recommended_wnaf_for_scalar(&scalar);
 
         // Compute the wNAF form of the scalar.
         wnaf_form(&mut self.scalar, scalar, window_size);

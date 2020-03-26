@@ -82,7 +82,7 @@ pub trait CurveProjective:
 
     /// Recommends a wNAF window table size given a scalar. Always returns a number
     /// between 2 and 22, inclusive.
-    fn recommended_wnaf_for_scalar(scalar: <Self::Scalar as PrimeField>::Repr) -> usize;
+    fn recommended_wnaf_for_scalar(scalar: &<Self::Scalar as PrimeField>::Repr) -> usize;
 
     /// Recommends a wNAF window size given the number of scalars you intend to multiply
     /// a base by. Always returns a number between 2 and 22, inclusive.

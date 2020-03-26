@@ -674,7 +674,7 @@ macro_rules! curve_impl {
                 (*self).into()
             }
 
-            fn recommended_wnaf_for_scalar(scalar: <Self::Scalar as PrimeField>::Repr) -> usize {
+            fn recommended_wnaf_for_scalar(scalar: &<Self::Scalar as PrimeField>::Repr) -> usize {
                 Self::empirical_recommended_wnaf_for_scalar(scalar)
             }
 
@@ -1014,7 +1014,7 @@ pub mod g1 {
     }
 
     impl G1 {
-        fn empirical_recommended_wnaf_for_scalar(scalar: FrRepr) -> usize {
+        fn empirical_recommended_wnaf_for_scalar(scalar: &FrRepr) -> usize {
             let num_bits = scalar.num_bits() as usize;
 
             if num_bits >= 130 {
@@ -1733,7 +1733,7 @@ pub mod g2 {
     }
 
     impl G2 {
-        fn empirical_recommended_wnaf_for_scalar(scalar: FrRepr) -> usize {
+        fn empirical_recommended_wnaf_for_scalar(scalar: &FrRepr) -> usize {
             let num_bits = scalar.num_bits() as usize;
 
             if num_bits >= 103 {
