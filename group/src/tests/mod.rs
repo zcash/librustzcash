@@ -85,12 +85,12 @@ fn random_wnaf_tests<G: CurveProjective>() {
         for w in 2..14 {
             for _ in 0..100 {
                 let g = G::random(&mut rng);
-                let s = G::Scalar::random(&mut rng).into_repr();
+                let s = G::Scalar::random(&mut rng);
                 let mut g1 = g;
                 g1.mul_assign(s);
 
                 wnaf_table(&mut table, g, w);
-                wnaf_form(&mut wnaf, s, w);
+                wnaf_form(&mut wnaf, s.into_repr(), w);
                 let g2 = wnaf_exp(&table, &wnaf);
 
                 assert_eq!(g1, g2);
@@ -103,17 +103,17 @@ fn random_wnaf_tests<G: CurveProjective>() {
 
         for _ in 0..100 {
             let g = G::random(&mut rng);
-            let s = G::Scalar::random(&mut rng).into_repr();
+            let s = G::Scalar::random(&mut rng);
             let mut g1 = g;
             g1.mul_assign(s);
 
             let g2 = {
                 let mut wnaf = Wnaf::new();
-                wnaf.base(g, 1).scalar(s)
+                wnaf.base(g, 1).scalar(&s)
             };
             let g3 = {
                 let mut wnaf = Wnaf::new();
-                wnaf.scalar(s).base(g)
+                wnaf.scalar(&s).base(g)
             };
             let g4 = {
                 let mut wnaf = Wnaf::new();
@@ -121,11 +121,11 @@ fn random_wnaf_tests<G: CurveProjective>() {
 
                 only_compiles_if_send(&shared);
 
-                shared.scalar(s)
+                shared.scalar(&s)
             };
             let g5 = {
                 let mut wnaf = Wnaf::new();
-                let mut shared = wnaf.scalar(s).shared();
+                let mut shared = wnaf.scalar(&s).shared();
 
                 only_compiles_if_send(&shared);
 
@@ -137,40 +137,40 @@ fn random_wnaf_tests<G: CurveProjective>() {
                 {
                     // Populate the vectors.
                     wnaf.base(G::random(&mut rng), 1)
-                        .scalar(G::Scalar::random(&mut rng).into_repr());
+                        .scalar(&G::Scalar::random(&mut rng));
                 }
-                wnaf.base(g, 1).scalar(s)
+                wnaf.base(g, 1).scalar(&s)
             };
             let g7 = {
                 let mut wnaf = Wnaf::new();
                 {
                     // Populate the vectors.
                     wnaf.base(G::random(&mut rng), 1)
-                        .scalar(G::Scalar::random(&mut rng).into_repr());
+                        .scalar(&G::Scalar::random(&mut rng));
                 }
-                wnaf.scalar(s).base(g)
+                wnaf.scalar(&s).base(g)
             };
             let g8 = {
                 let mut wnaf = Wnaf::new();
                 {
                     // Populate the vectors.
                     wnaf.base(G::random(&mut rng), 1)
-                        .scalar(G::Scalar::random(&mut rng).into_repr());
+                        .scalar(&G::Scalar::random(&mut rng));
                 }
                 let mut shared = wnaf.base(g, 1).shared();
 
                 only_compiles_if_send(&shared);
 
-                shared.scalar(s)
+                shared.scalar(&s)
             };
             let g9 = {
                 let mut wnaf = Wnaf::new();
                 {
                     // Populate the vectors.
                     wnaf.base(G::random(&mut rng), 1)
-                        .scalar(G::Scalar::random(&mut rng).into_repr());
+                        .scalar(&G::Scalar::random(&mut rng));
                 }
-                let mut shared = wnaf.scalar(s).shared();
+                let mut shared = wnaf.scalar(&s).shared();
 
                 only_compiles_if_send(&shared);
 
