@@ -1,6 +1,6 @@
 use byteorder::{ByteOrder, LittleEndian};
 use ff::{
-    adc, mac_with_carry, sbb, BitIterator, Field, PrimeField, PrimeFieldDecodingError,
+    adc, mac_with_carry, sbb, BitIterator, Field, PowVartime, PrimeField, PrimeFieldDecodingError,
     PrimeFieldRepr, SqrtField,
 };
 use rand_core::RngCore;
@@ -745,7 +745,7 @@ impl SqrtField for Fs {
 
         // a1 = self^((s - 3) // 4)
         let mut a1 = self.pow_vartime([
-            0xb425c397b5bdcb2d,
+            0xb425c397b5bdcb2du64,
             0x299a0824f3320420,
             0x4199cec0404d0ec0,
             0x39f6d3a994cebea,
@@ -1491,7 +1491,7 @@ fn test_fs_pow() {
         0xe5,
     ]);
 
-    for i in 0..1000 {
+    for i in 0u64..1000 {
         // Exponentiate by various small numbers and ensure it consists with repeated
         // multiplication.
         let a = Fs::random(&mut rng);
@@ -1689,13 +1689,13 @@ fn test_fs_root_of_unity() {
     );
     assert_eq!(
         Fs::multiplicative_generator().pow_vartime([
-            0x684b872f6b7b965b,
+            0x684b872f6b7b965bu64,
             0x53341049e6640841,
             0x83339d80809a1d80,
             0x73eda753299d7d4
         ]),
         Fs::root_of_unity()
     );
-    assert_eq!(Fs::root_of_unity().pow_vartime([1 << Fs::S]), Fs::one());
+    assert_eq!(Fs::root_of_unity().pow_vartime([1u64 << Fs::S]), Fs::one());
     assert!(bool::from(Fs::multiplicative_generator().sqrt().is_none()));
 }

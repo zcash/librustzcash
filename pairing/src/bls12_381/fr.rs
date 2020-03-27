@@ -7,6 +7,8 @@ use std::ops::{AddAssign, MulAssign, SubAssign};
 pub struct Fr(FrRepr);
 
 #[cfg(test)]
+use ff::PowVartime;
+#[cfg(test)]
 use rand_core::SeedableRng;
 #[cfg(test)]
 use rand_xorshift::XorShiftRng;
@@ -763,7 +765,7 @@ fn test_fr_pow() {
         0xe5,
     ]);
 
-    for i in 0..1000 {
+    for i in 0u64..1000 {
         // Exponentiate by various small numbers and ensure it consists with repeated
         // multiplication.
         let a = Fr::random(&mut rng);
@@ -965,14 +967,14 @@ fn test_fr_root_of_unity() {
     );
     assert_eq!(
         Fr::multiplicative_generator().pow_vartime([
-            0xfffe5bfeffffffff,
+            0xfffe5bfeffffffffu64,
             0x9a1d80553bda402,
             0x299d7d483339d808,
             0x73eda753
         ]),
         Fr::root_of_unity()
     );
-    assert_eq!(Fr::root_of_unity().pow_vartime([1 << Fr::S]), Fr::one());
+    assert_eq!(Fr::root_of_unity().pow_vartime([1u64 << Fr::S]), Fr::one());
     assert!(bool::from(Fr::multiplicative_generator().sqrt().is_none()));
 }
 

@@ -3,6 +3,8 @@ use ff::{Field, PrimeField, PrimeFieldDecodingError, PrimeFieldRepr};
 use std::ops::{AddAssign, MulAssign, SubAssign};
 
 #[cfg(test)]
+use ff::PowVartime;
+#[cfg(test)]
 use std::ops::Neg;
 
 // B coefficient of BLS12-381 curve, 4.
@@ -466,7 +468,7 @@ fn test_frob_coeffs() {
     assert_eq!(
         FROBENIUS_COEFF_FQ2_C1[1],
         nqr.pow_vartime([
-            0xdcff7fffffffd555,
+            0xdcff7fffffffd555u64,
             0xf55ffff58a9ffff,
             0xb39869507b587b12,
             0xb23ba5c279c2895f,
@@ -484,7 +486,7 @@ fn test_frob_coeffs() {
     assert_eq!(
         FROBENIUS_COEFF_FQ6_C1[1],
         nqr.pow_vartime([
-            0x9354ffffffffe38e,
+            0x9354ffffffffe38eu64,
             0xa395554e5c6aaaa,
             0xcd104635a790520c,
             0xcc27c3d6fbd7063f,
@@ -495,7 +497,7 @@ fn test_frob_coeffs() {
     assert_eq!(
         FROBENIUS_COEFF_FQ6_C1[2],
         nqr.pow_vartime([
-            0xb78e0000097b2f68,
+            0xb78e0000097b2f68u64,
             0xd44f23b47cbd64e3,
             0x5cb9668120b069a9,
             0xccea85f9bf7b3d16,
@@ -512,7 +514,7 @@ fn test_frob_coeffs() {
     assert_eq!(
         FROBENIUS_COEFF_FQ6_C1[3],
         nqr.pow_vartime([
-            0xdbc6fcd6f35b9e06,
+            0xdbc6fcd6f35b9e06u64,
             0x997dead10becd6aa,
             0x9dbbd24c17206460,
             0x72b97acc6057c45e,
@@ -535,7 +537,7 @@ fn test_frob_coeffs() {
     assert_eq!(
         FROBENIUS_COEFF_FQ6_C1[4],
         nqr.pow_vartime([
-            0x4649add3c71c6d90,
+            0x4649add3c71c6d90u64,
             0x43caa6528972a865,
             0xcda8445bbaaa0fbb,
             0xc93dea665662aa66,
@@ -564,7 +566,7 @@ fn test_frob_coeffs() {
     assert_eq!(
         FROBENIUS_COEFF_FQ6_C1[5],
         nqr.pow_vartime([
-            0xf896f792732eb2be,
+            0xf896f792732eb2beu64,
             0x49c86a6d1dc593a1,
             0xe5b31e94581f91c3,
             0xe3da5cc0a6b20d7f,
@@ -601,7 +603,7 @@ fn test_frob_coeffs() {
     assert_eq!(
         FROBENIUS_COEFF_FQ6_C2[1],
         nqr.pow_vartime([
-            0x26a9ffffffffc71c,
+            0x26a9ffffffffc71cu64,
             0x1472aaa9cb8d5555,
             0x9a208c6b4f20a418,
             0x984f87adf7ae0c7f,
@@ -612,7 +614,7 @@ fn test_frob_coeffs() {
     assert_eq!(
         FROBENIUS_COEFF_FQ6_C2[2],
         nqr.pow_vartime([
-            0x6f1c000012f65ed0,
+            0x6f1c000012f65ed0u64,
             0xa89e4768f97ac9c7,
             0xb972cd024160d353,
             0x99d50bf37ef67a2c,
@@ -629,7 +631,7 @@ fn test_frob_coeffs() {
     assert_eq!(
         FROBENIUS_COEFF_FQ6_C2[3],
         nqr.pow_vartime([
-            0xb78df9ade6b73c0c,
+            0xb78df9ade6b73c0cu64,
             0x32fbd5a217d9ad55,
             0x3b77a4982e40c8c1,
             0xe572f598c0af88bd,
@@ -652,7 +654,7 @@ fn test_frob_coeffs() {
     assert_eq!(
         FROBENIUS_COEFF_FQ6_C2[4],
         nqr.pow_vartime([
-            0x8c935ba78e38db20,
+            0x8c935ba78e38db20u64,
             0x87954ca512e550ca,
             0x9b5088b775541f76,
             0x927bd4ccacc554cd,
@@ -681,7 +683,7 @@ fn test_frob_coeffs() {
     assert_eq!(
         FROBENIUS_COEFF_FQ6_C2[5],
         nqr.pow_vartime([
-            0xf12def24e65d657c,
+            0xf12def24e65d657cu64,
             0x9390d4da3b8b2743,
             0xcb663d28b03f2386,
             0xc7b4b9814d641aff,
@@ -718,7 +720,7 @@ fn test_frob_coeffs() {
     assert_eq!(
         FROBENIUS_COEFF_FQ12_C1[1],
         nqr.pow_vartime([
-            0x49aa7ffffffff1c7,
+            0x49aa7ffffffff1c7u64,
             0x51caaaa72e35555,
             0xe688231ad3c82906,
             0xe613e1eb7deb831f,
@@ -729,7 +731,7 @@ fn test_frob_coeffs() {
     assert_eq!(
         FROBENIUS_COEFF_FQ12_C1[2],
         nqr.pow_vartime([
-            0xdbc7000004bd97b4,
+            0xdbc7000004bd97b4u64,
             0xea2791da3e5eb271,
             0x2e5cb340905834d4,
             0xe67542fcdfbd9e8b,
@@ -746,7 +748,7 @@ fn test_frob_coeffs() {
     assert_eq!(
         FROBENIUS_COEFF_FQ12_C1[3],
         nqr.pow_vartime(vec![
-            0x6de37e6b79adcf03,
+            0x6de37e6b79adcf03u64,
             0x4cbef56885f66b55,
             0x4edde9260b903230,
             0x395cbd66302be22f,
@@ -769,7 +771,7 @@ fn test_frob_coeffs() {
     assert_eq!(
         FROBENIUS_COEFF_FQ12_C1[4],
         nqr.pow_vartime(vec![
-            0xa324d6e9e38e36c8,
+            0xa324d6e9e38e36c8u64,
             0xa1e5532944b95432,
             0x66d4222ddd5507dd,
             0xe49ef5332b315533,
@@ -798,7 +800,7 @@ fn test_frob_coeffs() {
     assert_eq!(
         FROBENIUS_COEFF_FQ12_C1[5],
         nqr.pow_vartime(vec![
-            0xfc4b7bc93997595f,
+            0xfc4b7bc93997595fu64,
             0xa4e435368ee2c9d0,
             0xf2d98f4a2c0fc8e1,
             0xf1ed2e60535906bf,
@@ -833,7 +835,7 @@ fn test_frob_coeffs() {
     assert_eq!(
         FROBENIUS_COEFF_FQ12_C1[6],
         nqr.pow_vartime(vec![
-            0x21219610a012ba3c,
+            0x21219610a012ba3cu64,
             0xa5c19ad35375325,
             0x4e9df1e497674396,
             0xfb05b717c991c6ef,
@@ -874,7 +876,7 @@ fn test_frob_coeffs() {
     assert_eq!(
         FROBENIUS_COEFF_FQ12_C1[7],
         nqr.pow_vartime(vec![
-            0x742754a1f22fdb,
+            0x742754a1f22fdbu64,
             0x2a1955c2dec3a702,
             0x9747b28c796d134e,
             0xc113a0411f59db79,
@@ -921,7 +923,7 @@ fn test_frob_coeffs() {
     assert_eq!(
         FROBENIUS_COEFF_FQ12_C1[8],
         nqr.pow_vartime(vec![
-            0x802f5720d0b25710,
+            0x802f5720d0b25710u64,
             0x6714f0a258b85c7c,
             0x31394c90afdf16e,
             0xe9d2b0c64f957b19,
@@ -974,7 +976,7 @@ fn test_frob_coeffs() {
     assert_eq!(
         FROBENIUS_COEFF_FQ12_C1[9],
         nqr.pow_vartime(vec![
-            0x4af4accf7de0b977,
+            0x4af4accf7de0b977u64,
             0x742485e21805b4ee,
             0xee388fbc4ac36dec,
             0x1e199da57ad178a,
@@ -1033,7 +1035,7 @@ fn test_frob_coeffs() {
     assert_eq!(
         FROBENIUS_COEFF_FQ12_C1[10],
         nqr.pow_vartime(vec![
-            0xe5953a4f96cdda44,
+            0xe5953a4f96cdda44u64,
             0x336b2d734cbc32bb,
             0x3f79bfe3cd7410e,
             0x267ae19aaa0f0332,
@@ -1098,7 +1100,7 @@ fn test_frob_coeffs() {
     assert_eq!(
         FROBENIUS_COEFF_FQ12_C1[11],
         nqr.pow_vartime(vec![
-            0x107db680942de533,
+            0x107db680942de533u64,
             0x6262b24d2052393b,
             0x6136df824159ebc,
             0xedb052c9970c5deb,
@@ -2029,7 +2031,7 @@ fn test_fq_pow() {
         0xe5,
     ]);
 
-    for i in 0..1000 {
+    for i in 0u64..1000 {
         // Exponentiate by various small numbers and ensure it consists with repeated
         // multiplication.
         let a = Fq::random(&mut rng);
@@ -2197,7 +2199,7 @@ fn test_fq_root_of_unity() {
     );
     assert_eq!(
         Fq::multiplicative_generator().pow_vartime([
-            0xdcff7fffffffd555,
+            0xdcff7fffffffd555u64,
             0xf55ffff58a9ffff,
             0xb39869507b587b12,
             0xb23ba5c279c2895f,
@@ -2206,7 +2208,7 @@ fn test_fq_root_of_unity() {
         ]),
         Fq::root_of_unity()
     );
-    assert_eq!(Fq::root_of_unity().pow_vartime([1 << Fq::S]), Fq::one());
+    assert_eq!(Fq::root_of_unity().pow_vartime([1u64 << Fq::S]), Fq::one());
     assert!(bool::from(Fq::multiplicative_generator().sqrt().is_none()));
 }
 

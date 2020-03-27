@@ -13,7 +13,7 @@ extern crate std;
 pub use ff_derive::*;
 
 use core::fmt;
-use core::ops::{Add, AddAssign, Mul, MulAssign, Neg, Sub, SubAssign};
+use core::ops::{Add, AddAssign, BitAnd, Mul, MulAssign, Neg, Shr, Sub, SubAssign};
 use rand_core::RngCore;
 #[cfg(feature = "std")]
 use std::io::{self, Read, Write};
@@ -73,26 +73,53 @@ pub trait Field:
     /// Exponentiates this element by a power of the base prime modulus via
     /// the Frobenius automorphism.
     fn frobenius_map(&mut self, power: usize);
+}
+
+pub trait PowVartime<L>: Field
+where
+    L: Copy + PartialEq + PartialOrd + AddAssign,
+    L: BitAnd<Output = L>,
+    L: Shr<Output = L>,
+    L: Sub<Output = L>,
+{
+    const ZERO: L;
+    const ONE: L;
+    const LIMB_SIZE: L;
 
     /// Exponentiates `self` by `exp`, where `exp` is a little-endian order
     /// integer exponent.
     ///
     /// **This operation is variable time with respect to the exponent.** If the
     /// exponent is fixed, this operation is effectively constant time.
-    fn pow_vartime<S: AsRef<[u64]>>(&self, exp: S) -> Self {
+    fn pow_vartime<S: AsRef<[L]>>(&self, exp: S) -> Self {
         let mut res = Self::one();
         for e in exp.as_ref().iter().rev() {
-            for i in (0..64).rev() {
+            let mut i = Self::ZERO;
+            while i < Self::LIMB_SIZE {
                 res = res.square();
 
-                if ((*e >> i) & 1) == 1 {
+                if ((*e >> (Self::LIMB_SIZE - Self::ONE - i)) & Self::ONE) == Self::ONE {
                     res.mul_assign(self);
                 }
+
+                i += Self::ONE;
             }
         }
 
         res
     }
+}
+
+impl<T: Field> PowVartime<u8> for T {
+    const ZERO: u8 = 0;
+    const ONE: u8 = 1;
+    const LIMB_SIZE: u8 = 8;
+}
+
+impl<T: Field> PowVartime<u64> for T {
+    const ZERO: u64 = 0;
+    const ONE: u64 = 1;
+    const LIMB_SIZE: u64 = 64;
 }
 
 /// This trait represents an element of a field that has a square root operation described for it.
