@@ -853,6 +853,15 @@ fn prime_field_impl(
             }
         }
 
+        impl From<u64> for #name {
+            #[inline(always)]
+            fn from(val: u64) -> #name {
+                let mut raw = [0u64; #limbs];
+                raw[0] = val;
+                #name(#repr(raw)) * #name(R2)
+            }
+        }
+
         impl From<#name> for #repr {
             fn from(e: #name) -> #repr {
                 e.into_repr()

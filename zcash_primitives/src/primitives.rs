@@ -24,7 +24,7 @@ impl<E: JubjubEngine> ValueCommitment<E> {
     pub fn cm(&self, params: &E::Params) -> edwards::Point<E, PrimeOrder> {
         params
             .generator(FixedGenerators::ValueCommitmentValue)
-            .mul(self.value, params)
+            .mul(E::Fs::from(self.value), params)
             .add(
                 &params
                     .generator(FixedGenerators::ValueCommitmentRandomness)
@@ -291,7 +291,7 @@ impl<E: JubjubEngine> Note<E> {
         let rho = self.cm_full_point(params).add(
             &params
                 .generator(FixedGenerators::NullifierPosition)
-                .mul(position, params),
+                .mul(E::Fs::from(position), params),
             params,
         );
 

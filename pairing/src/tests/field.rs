@@ -119,7 +119,7 @@ pub fn from_str_tests<F: PrimeField>() {
             let n = rng.next_u64();
 
             let a = F::from_str(&format!("{}", n)).unwrap();
-            let b = F::from_repr(n.into()).unwrap();
+            let b = F::from(n);
 
             assert_eq!(a, b);
         }

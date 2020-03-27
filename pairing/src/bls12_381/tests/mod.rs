@@ -191,7 +191,7 @@ fn test_g1_uncompressed_invalid_vectors() {
         loop {
             let mut x3b = x.square();
             x3b.mul_assign(&x);
-            x3b.add_assign(&Fq::from_repr(FqRepr::from(4)).unwrap()); // TODO: perhaps expose coeff_b through API?
+            x3b.add_assign(&Fq::from(4)); // TODO: perhaps expose coeff_b through API?
 
             let y = x3b.sqrt();
             if y.is_some().into() {
@@ -331,8 +331,8 @@ fn test_g2_uncompressed_invalid_vectors() {
             let mut x3b = x.square();
             x3b.mul_assign(&x);
             x3b.add_assign(&Fq2 {
-                c0: Fq::from_repr(FqRepr::from(4)).unwrap(),
-                c1: Fq::from_repr(FqRepr::from(4)).unwrap(),
+                c0: Fq::from(4),
+                c1: Fq::from(4),
             }); // TODO: perhaps expose coeff_b through API?
 
             let y = x3b.sqrt();
@@ -428,7 +428,7 @@ fn test_g1_compressed_invalid_vectors() {
         loop {
             let mut x3b = x.square();
             x3b.mul_assign(&x);
-            x3b.add_assign(&Fq::from_repr(FqRepr::from(4)).unwrap()); // TODO: perhaps expose coeff_b through API?
+            x3b.add_assign(&Fq::from(4)); // TODO: perhaps expose coeff_b through API?
 
             if x3b.sqrt().is_some().into() {
                 x.add_assign(&Fq::one());
@@ -452,7 +452,7 @@ fn test_g1_compressed_invalid_vectors() {
         loop {
             let mut x3b = x.square();
             x3b.mul_assign(&x);
-            x3b.add_assign(&Fq::from_repr(FqRepr::from(4)).unwrap()); // TODO: perhaps expose coeff_b through API?
+            x3b.add_assign(&Fq::from(4)); // TODO: perhaps expose coeff_b through API?
 
             if x3b.sqrt().is_some().into() {
                 // We know this is on the curve, but it's likely not going to be in the correct subgroup.
@@ -558,8 +558,8 @@ fn test_g2_compressed_invalid_vectors() {
             let mut x3b = x.square();
             x3b.mul_assign(&x);
             x3b.add_assign(&Fq2 {
-                c0: Fq::from_repr(FqRepr::from(4)).unwrap(),
-                c1: Fq::from_repr(FqRepr::from(4)).unwrap(),
+                c0: Fq::from(4),
+                c1: Fq::from(4),
             }); // TODO: perhaps expose coeff_b through API?
 
             if x3b.sqrt().is_some().into() {
@@ -589,8 +589,8 @@ fn test_g2_compressed_invalid_vectors() {
             let mut x3b = x.square();
             x3b.mul_assign(&x);
             x3b.add_assign(&Fq2 {
-                c0: Fq::from_repr(FqRepr::from(4)).unwrap(),
-                c1: Fq::from_repr(FqRepr::from(4)).unwrap(),
+                c0: Fq::from(4),
+                c1: Fq::from(4),
             }); // TODO: perhaps expose coeff_b through API?
 
             if x3b.sqrt().is_some().into() {

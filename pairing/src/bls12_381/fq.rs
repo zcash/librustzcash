@@ -456,7 +456,7 @@ pub struct Fq(FqRepr);
 
 #[test]
 fn test_b_coeff() {
-    assert_eq!(Fq::from_repr(FqRepr::from(4)).unwrap(), B_COEFF);
+    assert_eq!(Fq::from(4), B_COEFF);
 }
 
 #[test]
@@ -1586,7 +1586,7 @@ fn test_fq_is_valid() {
     assert!(!a.is_valid());
     a.0.sub_noborrow(&FqRepr::from(1));
     assert!(a.is_valid());
-    assert!(Fq(FqRepr::from(0)).is_valid());
+    assert!(Fq::from(0).is_valid());
     assert!(Fq(FqRepr([
         0xdf4671abd14dab3e,
         0xe2dc0c9f534fbd33,
@@ -2193,10 +2193,7 @@ fn test_fq_root_of_unity() {
     use ff::SqrtField;
 
     assert_eq!(Fq::S, 1);
-    assert_eq!(
-        Fq::multiplicative_generator(),
-        Fq::from_repr(FqRepr::from(2)).unwrap()
-    );
+    assert_eq!(Fq::multiplicative_generator(), Fq::from(2));
     assert_eq!(
         Fq::multiplicative_generator().pow_vartime([
             0xdcff7fffffffd555u64,
@@ -2225,9 +2222,7 @@ fn test_fq_ordering() {
     // FqRepr's ordering is well-tested, but we still need to make sure the Fq
     // elements aren't being compared in Montgomery form.
     for i in 0..100 {
-        assert!(
-            Fq::from_repr(FqRepr::from(i + 1)).unwrap() > Fq::from_repr(FqRepr::from(i)).unwrap()
-        );
+        assert!(Fq::from(i + 1) > Fq::from(i));
     }
 }
 

@@ -364,7 +364,7 @@ fn test_fq2_squaring() {
         a.square(),
         Fq2 {
             c0: Fq::zero(),
-            c1: Fq::from_repr(FqRepr::from(2)).unwrap(),
+            c1: Fq::from(2),
         }
     ); // 2u
 

@@ -278,6 +278,15 @@ impl ::std::fmt::Display for Fs {
     }
 }
 
+impl From<u64> for Fs {
+    #[inline(always)]
+    fn from(val: u64) -> Fs {
+        let mut raw = [0u64; 4];
+        raw[0] = val;
+        Fs(FsRepr(raw)) * Fs(R2)
+    }
+}
+
 impl From<Fs> for FsRepr {
     fn from(e: Fs) -> FsRepr {
         e.into_repr()
@@ -514,7 +523,7 @@ impl Field for Fs {
 
     #[inline]
     fn zero() -> Self {
-        Fs(FsRepr::from(0))
+        Fs::from(0)
     }
 
     #[inline]
@@ -1683,10 +1692,7 @@ fn test_fs_num_bits() {
 #[test]
 fn test_fs_root_of_unity() {
     assert_eq!(Fs::S, 1);
-    assert_eq!(
-        Fs::multiplicative_generator(),
-        Fs::from_repr(FsRepr::from(6)).unwrap()
-    );
+    assert_eq!(Fs::multiplicative_generator(), Fs::from(6));
     assert_eq!(
         Fs::multiplicative_generator().pow_vartime([
             0x684b872f6b7b965bu64,

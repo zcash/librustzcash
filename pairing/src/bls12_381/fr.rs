@@ -368,7 +368,7 @@ fn test_fr_is_valid() {
     assert!(!a.is_valid());
     a.0.sub_noborrow(&FrRepr::from(1));
     assert!(a.is_valid());
-    assert!(Fr(FrRepr::from(0)).is_valid());
+    assert!(Fr::from(0).is_valid());
     assert!(Fr(FrRepr([
         0xffffffff00000000,
         0x53bda402fffe5bfe,
@@ -961,10 +961,7 @@ fn test_fr_root_of_unity() {
     use ff::SqrtField;
 
     assert_eq!(Fr::S, 32);
-    assert_eq!(
-        Fr::multiplicative_generator(),
-        Fr::from_repr(FrRepr::from(7)).unwrap()
-    );
+    assert_eq!(Fr::multiplicative_generator(), Fr::from(7));
     assert_eq!(
         Fr::multiplicative_generator().pow_vartime([
             0xfffe5bfeffffffffu64,

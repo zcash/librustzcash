@@ -256,7 +256,7 @@ impl fmt::Display for PrimeFieldDecodingError {
 }
 
 /// This represents an element of a prime field.
-pub trait PrimeField: Field {
+pub trait PrimeField: Field + From<u64> {
     /// The prime field can be converted back and forth into this biginteger
     /// representation.
     type Repr: PrimeFieldRepr + From<Self>;
@@ -274,7 +274,7 @@ pub trait PrimeField: Field {
 
         let mut res = Self::zero();
 
-        let ten = Self::from_repr(Self::Repr::from(10)).unwrap();
+        let ten = Self::from(10);
 
         let mut first_digit = true;
 
@@ -290,7 +290,7 @@ pub trait PrimeField: Field {
                     }
 
                     res.mul_assign(&ten);
-                    res.add_assign(&Self::from_repr(Self::Repr::from(u64::from(c))).unwrap());
+                    res.add_assign(&Self::from(u64::from(c)));
                 }
                 None => {
                     return None;
