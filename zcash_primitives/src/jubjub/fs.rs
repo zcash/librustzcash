@@ -1,4 +1,3 @@
-use byteorder::{ByteOrder, LittleEndian};
 use ff::{
     adc, mac_with_carry, sbb, BitIterator, Field, PowVartime, PrimeField, PrimeFieldDecodingError,
     PrimeFieldRepr, SqrtField,
@@ -721,7 +720,7 @@ impl Fs {
         self.reduce();
     }
 
-    fn mul_bits<S: AsRef<[u64]>>(&self, bits: BitIterator<S>) -> Self {
+    fn mul_bits<S: AsRef<[u8]>>(&self, bits: BitIterator<u8, S>) -> Self {
         let mut res = Self::zero();
         for bit in bits {
             res = res.double();
@@ -741,9 +740,7 @@ impl ToUniform for Fs {
     /// Random Oracle output.
     fn to_uniform(digest: &[u8]) -> Self {
         assert_eq!(digest.len(), 64);
-        let mut repr: [u64; 8] = [0; 8];
-        LittleEndian::read_u64_into(digest, &mut repr);
-        Self::one().mul_bits(BitIterator::new(repr))
+        Self::one().mul_bits(BitIterator::<u8, _>::new(digest))
     }
 }
 

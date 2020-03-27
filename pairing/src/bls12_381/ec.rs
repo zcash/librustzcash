@@ -81,7 +81,18 @@ macro_rules! curve_impl {
         }
 
         impl $affine {
-            fn mul_bits<S: AsRef<[u64]>>(&self, bits: BitIterator<S>) -> $projective {
+            fn mul_bits_u64<S: AsRef<[u64]>>(&self, bits: BitIterator<u64, S>) -> $projective {
+                let mut res = $projective::zero();
+                for i in bits {
+                    res.double();
+                    if i {
+                        res.add_assign(self)
+                    }
+                }
+                res
+            }
+
+            fn mul_bits_u8<S: AsRef<[u8]>>(&self, bits: BitIterator<u8, S>) -> $projective {
                 let mut res = $projective::zero();
                 for i in bits {
                     res.double();
@@ -172,8 +183,8 @@ macro_rules! curve_impl {
             }
 
             fn mul<S: Into<<Self::Scalar as PrimeField>::Repr>>(&self, by: S) -> $projective {
-                let bits = BitIterator::new(by.into());
-                self.mul_bits(bits)
+                let bits = BitIterator::<u64, _>::new(by.into());
+                self.mul_bits_u64(bits)
             }
 
             fn into_projective(&self) -> $projective {
@@ -655,7 +666,7 @@ macro_rules! curve_impl {
 
                 let mut found_one = false;
 
-                for i in BitIterator::new(other.into()) {
+                for i in BitIterator::<u64, _>::new(other.into()) {
                     if found_one {
                         res.double();
                     } else {
@@ -992,8 +1003,8 @@ pub mod g1 {
     impl G1Affine {
         fn scale_by_cofactor(&self) -> G1 {
             // G1 cofactor = (x - 1)^2 / 3  = 76329603384216526031706109802092473003
-            let cofactor = BitIterator::new([0x8c00aaab0000aaab, 0x396c8c005555e156]);
-            self.mul_bits(cofactor)
+            let cofactor = BitIterator::<u64, _>::new([0x8c00aaab0000aaab, 0x396c8c005555e156]);
+            self.mul_bits_u64(cofactor)
         }
 
         fn get_generator() -> Self {
@@ -1714,7 +1725,7 @@ pub mod g2 {
         fn scale_by_cofactor(&self) -> G2 {
             // G2 cofactor = (x^8 - 4 x^7 + 5 x^6) - (4 x^4 + 6 x^3 - 4 x^2 - 4 x + 13) // 9
             // 0x5d543a95414e7f1091d50792876a202cd91de4547085abaa68a205b2e5a7ddfa628f1cb4d9e82ef21537e293a6691ae1616ec6e786f0c70cf1c38e31c7238e5
-            let cofactor = BitIterator::new([
+            let cofactor = BitIterator::<u64, _>::new([
                 0xcf1c38e31c7238e5,
                 0x1616ec6e786f0c70,
                 0x21537e293a6691ae,
@@ -1724,7 +1735,7 @@ pub mod g2 {
                 0x91d50792876a202,
                 0x5d543a95414e7f1,
             ]);
-            self.mul_bits(cofactor)
+            self.mul_bits_u64(cofactor)
         }
 
         fn perform_pairing(&self, other: &G1Affine) -> Fq12 {

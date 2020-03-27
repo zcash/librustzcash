@@ -13,6 +13,7 @@ extern crate std;
 pub use ff_derive::*;
 
 use core::fmt;
+use core::marker::PhantomData;
 use core::ops::{Add, AddAssign, BitAnd, Mul, MulAssign, Neg, Shr, Sub, SubAssign};
 use rand_core::RngCore;
 #[cfg(feature = "std")]
@@ -338,20 +339,25 @@ pub trait ScalarEngine: Sized + 'static + Clone {
 }
 
 #[derive(Debug)]
-pub struct BitIterator<E> {
+pub struct BitIterator<T, E: AsRef<[T]>> {
     t: E,
     n: usize,
+    _limb: PhantomData<T>,
 }
 
-impl<E: AsRef<[u64]>> BitIterator<E> {
+impl<E: AsRef<[u64]>> BitIterator<u64, E> {
     pub fn new(t: E) -> Self {
         let n = t.as_ref().len() * 64;
 
-        BitIterator { t, n }
+        BitIterator {
+            t,
+            n,
+            _limb: PhantomData::default(),
+        }
     }
 }
 
-impl<E: AsRef<[u64]>> Iterator for BitIterator<E> {
+impl<E: AsRef<[u64]>> Iterator for BitIterator<u64, E> {
     type Item = bool;
 
     fn next(&mut self) -> Option<bool> {
@@ -367,9 +373,37 @@ impl<E: AsRef<[u64]>> Iterator for BitIterator<E> {
     }
 }
 
+impl<E: AsRef<[u8]>> BitIterator<u8, E> {
+    pub fn new(t: E) -> Self {
+        let n = t.as_ref().len() * 8;
+
+        BitIterator {
+            t,
+            n,
+            _limb: PhantomData::default(),
+        }
+    }
+}
+
+impl<E: AsRef<[u8]>> Iterator for BitIterator<u8, E> {
+    type Item = bool;
+
+    fn next(&mut self) -> Option<bool> {
+        if self.n == 0 {
+            None
+        } else {
+            self.n -= 1;
+            let part = self.n / 8;
+            let bit = self.n - (8 * part);
+
+            Some(self.t.as_ref()[part] & (1 << bit) > 0)
+        }
+    }
+}
+
 #[test]
 fn test_bit_iterator() {
-    let mut a = BitIterator::new([0xa953_d79b_83f6_ab59, 0x6dea_2059_e200_bd39]);
+    let mut a = BitIterator::<u64, _>::new([0xa953_d79b_83f6_ab59, 0x6dea_2059_e200_bd39]);
     let expected = "01101101111010100010000001011001111000100000000010111101001110011010100101010011110101111001101110000011111101101010101101011001";
 
     for e in expected.chars() {
@@ -380,7 +414,7 @@ fn test_bit_iterator() {
 
     let expected = "1010010101111110101010000101101011101000011101110101001000011001100100100011011010001011011011010001011011101100110100111011010010110001000011110100110001100110011101101000101100011100100100100100001010011101010111110011101011000011101000111011011101011001";
 
-    let mut a = BitIterator::new([
+    let mut a = BitIterator::<u64, _>::new([
         0x429d_5f3a_c3a3_b759,
         0xb10f_4c66_768b_1c92,
         0x9236_8b6d_16ec_d3b4,
