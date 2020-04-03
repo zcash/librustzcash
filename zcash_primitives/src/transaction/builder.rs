@@ -511,6 +511,9 @@ impl<R: RngCore + CryptoRng> Builder<R> {
         tx_metadata.spend_indices.resize(spends.len(), 0);
         tx_metadata.output_indices.resize(orig_outputs_len, 0);
 
+        // Record if we'll need a binding signature
+        let binding_sig_needed = !spends.is_empty() || !outputs.is_empty();
+
         // Create Sapling SpendDescriptions
         if !spends.is_empty() {
             let anchor = self.anchor.expect("anchor was set if spends were added");
@@ -644,11 +647,17 @@ impl<R: RngCore + CryptoRng> Builder<R> {
                 &JUBJUB,
             ));
         }
-        self.mtx.binding_sig = Some(
-            prover
-                .binding_sig(&mut ctx, self.mtx.value_balance, &sighash)
-                .map_err(|()| Error::BindingSig)?,
-        );
+
+        // Add a binding signature if needed
+        if binding_sig_needed {
+            self.mtx.binding_sig = Some(
+                prover
+                    .binding_sig(&mut ctx, self.mtx.value_balance, &sighash)
+                    .map_err(|()| Error::BindingSig)?,
+            );
+        } else {
+            self.mtx.binding_sig = None;
+        }
 
         // Transparent signatures
         self.transparent_inputs
@@ -691,6 +700,77 @@ mod tests {
         assert_eq!(
             builder.add_sapling_output(ovk, to, Amount::from_i64(-1).unwrap(), None),
             Err(Error::InvalidAmount)
+        );
+    }
+
+    #[test]
+    fn binding_sig_absent_if_no_shielded_spend_or_output() {
+        use crate::transaction::{
+            builder::{self, TransparentInputs},
+            TransactionData,
+        };
+
+        // Create a builder with 0 fee, so we can construct t outputs
+        let mut builder = builder::Builder {
+            rng: OsRng,
+            mtx: TransactionData::new(),
+            fee: Amount::zero(),
+            anchor: None,
+            spends: vec![],
+            outputs: vec![],
+            transparent_inputs: TransparentInputs::default(),
+            change_address: None,
+        };
+
+        // Create a tx with only t output. No binding_sig should be present
+        builder
+            .add_transparent_output(&TransparentAddress::PublicKey([0; 20]), Amount::zero())
+            .unwrap();
+
+        let (tx, _) = builder
+            .build(consensus::BranchId::Sapling, &MockTxProver)
+            .unwrap();
+        // No binding signature, because only t input and outputs
+        assert!(tx.binding_sig.is_none());
+    }
+
+    #[test]
+    fn binding_sig_present_if_shielded_spend() {
+        let extsk = ExtendedSpendingKey::master(&[]);
+        let extfvk = ExtendedFullViewingKey::from(&extsk);
+        let to = extfvk.default_address().unwrap().1;
+
+        let mut rng = OsRng;
+
+        let note1 = to
+            .create_note(50000, Fs::random(&mut rng), &JUBJUB)
+            .unwrap();
+        let cm1 = Node::new(note1.cm(&JUBJUB).into_repr());
+        let mut tree = CommitmentTree::new();
+        tree.append(cm1).unwrap();
+        let witness1 = IncrementalWitness::from_tree(&tree);
+
+        let mut builder = Builder::new(0);
+
+        // Create a tx with a sapling spend. binding_sig should be present
+        builder
+            .add_sapling_spend(
+                extsk.clone(),
+                *to.diversifier(),
+                note1.clone(),
+                witness1.path().unwrap(),
+            )
+            .unwrap();
+
+        builder
+            .add_transparent_output(&TransparentAddress::PublicKey([0; 20]), Amount::zero())
+            .unwrap();
+
+        // Expect a binding signature error, because our inputs aren't valid, but this shows
+        // that a binding signature was attempted
+        assert_eq!(
+            builder.build(consensus::BranchId::Sapling, &MockTxProver),
+            Err(Error::BindingSig)
         );
     }
 
