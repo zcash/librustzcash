@@ -1,6 +1,6 @@
 //! The Sapling circuits.
 
-use ff::{Field, PrimeField, PrimeFieldRepr};
+use ff::{Field, PrimeField};
 
 use bellman::{Circuit, ConstraintSystem, SynthesisError};
 
@@ -478,7 +478,7 @@ impl<'a, E: JubjubEngine> Circuit<E> for Output<'a, E> {
             // Witness the sign bit
             let sign_bit = boolean::Boolean::from(boolean::AllocatedBit::alloc(
                 cs.namespace(|| "pk_d bit of x"),
-                pk_d.map(|e| e.0.into_repr().is_odd()),
+                pk_d.map(|e| e.0.is_odd()),
             )?);
 
             // Extend the note with pk_d representation

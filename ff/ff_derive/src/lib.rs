@@ -1029,6 +1029,11 @@ fn prime_field_impl(
                 r.0
             }
 
+            #[inline(always)]
+            fn is_odd(&self) -> bool {
+                self.into_repr().is_odd()
+            }
+
             fn char() -> #repr {
                 MODULUS
             }

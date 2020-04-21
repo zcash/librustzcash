@@ -2183,6 +2183,18 @@ fn test_fq_display() {
 }
 
 #[test]
+fn test_fq_is_odd() {
+    assert!(!Fq::from(0).is_odd());
+    assert!(Fq::from(0).is_even());
+    assert!(Fq::from(1).is_odd());
+    assert!(!Fq::from(1).is_even());
+    assert!(!Fq::from(324834872).is_odd());
+    assert!(Fq::from(324834872).is_even());
+    assert!(Fq::from(324834873).is_odd());
+    assert!(!Fq::from(324834873).is_even());
+}
+
+#[test]
 fn test_fq_num_bits() {
     assert_eq!(Fq::NUM_BITS, 381);
     assert_eq!(Fq::CAPACITY, 380);

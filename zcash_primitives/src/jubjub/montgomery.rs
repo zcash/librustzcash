@@ -1,4 +1,4 @@
-use ff::{BitIterator, Field, PrimeField, PrimeFieldRepr, SqrtField};
+use ff::{BitIterator, Field, PrimeField, SqrtField};
 use std::ops::{AddAssign, MulAssign, Neg, SubAssign};
 use subtle::CtOption;
 
@@ -60,7 +60,7 @@ impl<E: JubjubEngine> Point<E, Unknown> {
         rhs.add_assign(&x2);
 
         rhs.sqrt().map(|mut y| {
-            if y.into_repr().is_odd() != sign {
+            if y.is_odd() != sign {
                 y = y.neg();
             }
 

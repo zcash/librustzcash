@@ -951,6 +951,18 @@ fn test_fr_display() {
 }
 
 #[test]
+fn test_fr_is_odd() {
+    assert!(!Fr::from(0).is_odd());
+    assert!(Fr::from(0).is_even());
+    assert!(Fr::from(1).is_odd());
+    assert!(!Fr::from(1).is_even());
+    assert!(!Fr::from(324834872).is_odd());
+    assert!(Fr::from(324834872).is_even());
+    assert!(Fr::from(324834873).is_odd());
+    assert!(!Fr::from(324834873).is_even());
+}
+
+#[test]
 fn test_fr_num_bits() {
     assert_eq!(Fr::NUM_BITS, 255);
     assert_eq!(Fr::CAPACITY, 254);

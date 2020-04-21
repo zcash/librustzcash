@@ -309,6 +309,15 @@ pub trait PrimeField: Field + From<u64> {
     /// the number is an element of the field.
     fn into_repr(&self) -> Self::Repr;
 
+    /// Returns true iff this element is odd.
+    fn is_odd(&self) -> bool;
+
+    /// Returns true iff this element is even.
+    #[inline(always)]
+    fn is_even(&self) -> bool {
+        !self.is_odd()
+    }
+
     /// Returns the field characteristic; the modulus.
     fn char() -> Self::Repr;
 

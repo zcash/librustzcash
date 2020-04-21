@@ -237,7 +237,7 @@ fn test_get_for<E: JubjubEngine>(params: &E::Params) {
         let p = edwards::Point::<E, _>::get_for_y(y, sign, params);
         if bool::from(p.is_some()) {
             let mut p = p.unwrap();
-            assert!(p.to_xy().0.into_repr().is_odd() == sign);
+            assert!(p.to_xy().0.is_odd() == sign);
             p = p.negate();
             assert!(edwards::Point::<E, _>::get_for_y(y, !sign, params).unwrap() == p);
         }

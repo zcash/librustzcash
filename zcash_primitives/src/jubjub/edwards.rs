@@ -127,7 +127,7 @@ impl<E: JubjubEngine> Point<E, Unknown> {
             tmp1.mul_assign(&tmp2);
 
             tmp1.sqrt().map(|mut x| {
-                if x.into_repr().is_odd() != sign {
+                if x.is_odd() != sign {
                     x = x.neg();
                 }
 
@@ -172,9 +172,8 @@ impl<E: JubjubEngine, Subgroup> Point<E, Subgroup> {
 
         assert_eq!(E::Fr::NUM_BITS, 255);
 
-        let x_repr = x.into_repr();
         let mut y_repr = y.into_repr();
-        if x_repr.is_odd() {
+        if x.is_odd() {
             y_repr.as_mut()[3] |= 0x8000000000000000u64;
         }
 
