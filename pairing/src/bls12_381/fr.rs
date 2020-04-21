@@ -670,6 +670,67 @@ fn test_fr_mul_assign() {
 }
 
 #[test]
+fn test_fr_shr() {
+    let mut a = Fr::from_repr(FrRepr([
+        0xb33fbaec482a283f,
+        0x997de0d3a88cb3df,
+        0x9af62d2a9a0e5525,
+        0x36003ab08de70da1,
+    ]))
+    .unwrap();
+    a = a >> 0;
+    assert_eq!(
+        a.into_repr(),
+        FrRepr([
+            0xb33fbaec482a283f,
+            0x997de0d3a88cb3df,
+            0x9af62d2a9a0e5525,
+            0x36003ab08de70da1,
+        ])
+    );
+    a = a >> 1;
+    assert_eq!(
+        a.into_repr(),
+        FrRepr([
+            0xd99fdd762415141f,
+            0xccbef069d44659ef,
+            0xcd7b16954d072a92,
+            0x1b001d5846f386d0,
+        ])
+    );
+    a = a >> 50;
+    assert_eq!(
+        a.into_repr(),
+        FrRepr([
+            0xbc1a7511967bf667,
+            0xc5a55341caa4b32f,
+            0x075611bce1b4335e,
+            0x00000000000006c0,
+        ])
+    );
+    a = a >> 130;
+    assert_eq!(
+        a.into_repr(),
+        FrRepr([
+            0x01d5846f386d0cd7,
+            0x00000000000001b0,
+            0x0000000000000000,
+            0x0000000000000000,
+        ])
+    );
+    a = a >> 64;
+    assert_eq!(
+        a.into_repr(),
+        FrRepr([
+            0x00000000000001b0,
+            0x0000000000000000,
+            0x0000000000000000,
+            0x0000000000000000,
+        ])
+    );
+}
+
+#[test]
 fn test_fr_squaring() {
     let a = Fr(FrRepr([
         0xffffffffffffffff,

@@ -257,7 +257,9 @@ impl fmt::Display for PrimeFieldDecodingError {
 }
 
 /// This represents an element of a prime field.
-pub trait PrimeField: Field + From<u64> {
+pub trait PrimeField:
+    Field + From<u64> + BitAnd<u64, Output = u64> + Shr<u32, Output = Self>
+{
     /// The prime field can be converted back and forth into this biginteger
     /// representation.
     type Repr: PrimeFieldRepr + From<Self>;

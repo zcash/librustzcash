@@ -785,14 +785,19 @@ fn prime_field_impl(
         proc_macro2::Punct::new('&', proc_macro2::Spacing::Alone),
     );
 
-    // (self.0).0[0], (self.0).0[1], ..., 0, 0, 0, 0, ...
-    let mut into_repr_params = proc_macro2::TokenStream::new();
-    into_repr_params.append_separated(
-        (0..limbs)
-            .map(|i| quote! { (self.0).0[#i] })
-            .chain((0..limbs).map(|_| quote! {0})),
-        proc_macro2::Punct::new(',', proc_macro2::Spacing::Alone),
-    );
+    fn mont_reduce_params(a: proc_macro2::TokenStream, limbs: usize) -> proc_macro2::TokenStream {
+        // a.0[0], a.0[1], ..., 0, 0, 0, 0, ...
+        let mut mont_reduce_params = proc_macro2::TokenStream::new();
+        mont_reduce_params.append_separated(
+            (0..limbs)
+                .map(|i| quote! { (#a.0).0[#i] })
+                .chain((0..limbs).map(|_| quote! {0})),
+            proc_macro2::Punct::new(',', proc_macro2::Spacing::Alone),
+        );
+        mont_reduce_params
+    }
+
+    let mont_reduce_self_params = mont_reduce_params(quote! {self}, limbs);
 
     let top_limb_index = limbs - 1;
 
@@ -1006,6 +1011,56 @@ fn prime_field_impl(
             }
         }
 
+        impl ::core::ops::BitAnd<u64> for #name {
+            type Output = u64;
+
+            #[inline(always)]
+            fn bitand(mut self, rhs: u64) -> u64 {
+                self.mont_reduce(
+                    #mont_reduce_self_params
+                );
+
+                (self.0).0[0] & rhs
+            }
+        }
+
+        impl ::core::ops::Shr<u32> for #name {
+            type Output = #name;
+
+            #[inline(always)]
+            fn shr(mut self, mut n: u32) -> #name {
+                if n as usize >= 64 * #limbs {
+                    return Self::from(0);
+                }
+
+                // Convert from Montgomery to native representation.
+                self.mont_reduce(
+                    #mont_reduce_self_params
+                );
+
+                while n >= 64 {
+                    let mut t = 0;
+                    for i in (self.0).0.iter_mut().rev() {
+                        ::core::mem::swap(&mut t, i);
+                    }
+                    n -= 64;
+                }
+
+                if n > 0 {
+                    let mut t = 0;
+                    for i in (self.0).0.iter_mut().rev() {
+                        let t2 = *i << (64 - n);
+                        *i >>= n;
+                        *i |= t;
+                        t = t2;
+                    }
+                }
+
+                // Convert back to Montgomery representation
+                self * #name(R2)
+            }
+        }
+
         impl ::ff::PrimeField for #name {
             type Repr = #repr;
 
@@ -1023,7 +1078,7 @@ fn prime_field_impl(
             fn into_repr(&self) -> #repr {
                 let mut r = *self;
                 r.mont_reduce(
-                    #into_repr_params
+                    #mont_reduce_self_params
                 );
 
                 r.0

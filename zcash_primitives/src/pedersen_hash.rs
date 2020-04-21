@@ -1,7 +1,7 @@
 //! Implementation of the Pedersen hash function used in Sapling.
 
 use crate::jubjub::*;
-use ff::{Field, PrimeField, PrimeFieldRepr};
+use ff::Field;
 use std::ops::{AddAssign, Neg};
 
 #[derive(Copy, Clone)]
@@ -88,16 +88,14 @@ where
         let window = JubjubBls12::pedersen_hash_exp_window_size();
         let window_mask = (1 << window) - 1;
 
-        let mut acc = acc.into_repr();
-
         let mut tmp = edwards::Point::zero();
 
         while !acc.is_zero() {
-            let i = (acc.as_ref()[0] & window_mask) as usize;
+            let i = (acc & window_mask) as usize;
 
             tmp = tmp.add(&table[0][i], params);
 
-            acc.shr(window);
+            acc = acc >> window;
             table = &table[1..];
         }
 

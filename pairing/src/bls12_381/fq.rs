@@ -1932,6 +1932,79 @@ fn test_fq_mul_assign() {
 }
 
 #[test]
+fn test_fq_shr() {
+    let mut a = Fq::from_repr(FqRepr([
+        0xaa5cdd6172847ffd,
+        0x43242c06aed55287,
+        0x9ddd5b312f3dd104,
+        0xc5541fd48046b7e7,
+        0x16080cf4071e0b05,
+        0x1225f2901aea514e,
+    ]))
+    .unwrap();
+    a = a >> 0;
+    assert_eq!(
+        a.into_repr(),
+        FqRepr([
+            0xaa5cdd6172847ffd,
+            0x43242c06aed55287,
+            0x9ddd5b312f3dd104,
+            0xc5541fd48046b7e7,
+            0x16080cf4071e0b05,
+            0x1225f2901aea514e,
+        ])
+    );
+    a = a >> 1;
+    assert_eq!(
+        a.into_repr(),
+        FqRepr([
+            0xd52e6eb0b9423ffe,
+            0x21921603576aa943,
+            0xceeead98979ee882,
+            0xe2aa0fea40235bf3,
+            0x0b04067a038f0582,
+            0x0912f9480d7528a7,
+        ])
+    );
+    a = a >> 50;
+    assert_eq!(
+        a.into_repr(),
+        FqRepr([
+            0x8580d5daaa50f54b,
+            0xab6625e7ba208864,
+            0x83fa9008d6fcf3bb,
+            0x019e80e3c160b8aa,
+            0xbe52035d4a29c2c1,
+            0x0000000000000244,
+        ])
+    );
+    a = a >> 130;
+    assert_eq!(
+        a.into_repr(),
+        FqRepr([
+            0xa0fea40235bf3cee,
+            0x4067a038f0582e2a,
+            0x2f9480d7528a70b0,
+            0x0000000000000091,
+            0x0000000000000000,
+            0x0000000000000000,
+        ])
+    );
+    a = a >> 64;
+    assert_eq!(
+        a.into_repr(),
+        FqRepr([
+            0x4067a038f0582e2a,
+            0x2f9480d7528a70b0,
+            0x0000000000000091,
+            0x0000000000000000,
+            0x0000000000000000,
+            0x0000000000000000,
+        ])
+    );
+}
+
+#[test]
 fn test_fq_squaring() {
     let a = Fq(FqRepr([
         0xffffffffffffffff,

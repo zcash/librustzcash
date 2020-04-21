@@ -3,7 +3,8 @@ use ff::{
     PrimeFieldRepr, SqrtField,
 };
 use rand_core::RngCore;
-use std::ops::{Add, AddAssign, Mul, MulAssign, Neg, Sub, SubAssign};
+use std::mem;
+use std::ops::{Add, AddAssign, BitAnd, Mul, MulAssign, Neg, Shr, Sub, SubAssign};
 use subtle::{Choice, ConditionallySelectable, ConstantTimeEq, CtOption};
 
 use super::ToUniform;
@@ -449,6 +450,69 @@ impl MulAssign for Fs {
     #[inline]
     fn mul_assign(&mut self, other: Self) {
         self.mul_assign(&other);
+    }
+}
+
+impl BitAnd<u64> for Fs {
+    type Output = u64;
+
+    #[inline(always)]
+    fn bitand(mut self, rhs: u64) -> u64 {
+        self.mont_reduce(
+            (self.0).0[0],
+            (self.0).0[1],
+            (self.0).0[2],
+            (self.0).0[3],
+            0,
+            0,
+            0,
+            0,
+        );
+        (self.0).0[0] & rhs
+    }
+}
+
+impl Shr<u32> for Fs {
+    type Output = Self;
+
+    #[inline(always)]
+    fn shr(mut self, mut n: u32) -> Self {
+        if n as usize >= 64 * 4 {
+            return Self::from(0);
+        }
+
+        // Convert from Montgomery to native representation.
+        self.mont_reduce(
+            (self.0).0[0],
+            (self.0).0[1],
+            (self.0).0[2],
+            (self.0).0[3],
+            0,
+            0,
+            0,
+            0,
+        );
+
+        while n >= 64 {
+            let mut t = 0;
+            for i in (self.0).0.iter_mut().rev() {
+                mem::swap(&mut t, i);
+            }
+            n -= 64;
+        }
+
+        if n > 0 {
+            let mut t = 0;
+            for i in (self.0).0.iter_mut().rev() {
+                let t2 = *i << (64 - n);
+                *i >>= n;
+                *i |= t;
+                t = t2;
+            }
+        }
+
+        // Convert back to Montgomery representation
+        self * Fs(R2)
     }
 }
 
@@ -1398,6 +1462,67 @@ fn test_fs_mul_assign() {
 
         assert_eq!(tmp1, a);
     }
+}
+
+#[test]
+fn test_fs_shr() {
+    let mut a = Fs::from_repr(FsRepr([
+        0xb33fbaec482a283f,
+        0x997de0d3a88cb3df,
+        0x9af62d2a9a0e5525,
+        0x06003ab08de70da1,
+    ]))
+    .unwrap();
+    a = a >> 0;
+    assert_eq!(
+        a.into_repr(),
+        FsRepr([
+            0xb33fbaec482a283f,
+            0x997de0d3a88cb3df,
+            0x9af62d2a9a0e5525,
+            0x06003ab08de70da1,
+        ])
+    );
+    a = a >> 1;
+    assert_eq!(
+        a.into_repr(),
+        FsRepr([
+            0xd99fdd762415141f,
+            0xccbef069d44659ef,
+            0xcd7b16954d072a92,
+            0x03001d5846f386d0,
+        ])
+    );
+    a = a >> 50;
+    assert_eq!(
+        a.into_repr(),
+        FsRepr([
+            0xbc1a7511967bf667,
+            0xc5a55341caa4b32f,
+            0x075611bce1b4335e,
+            0x00000000000000c0,
+        ])
+    );
+    a = a >> 130;
+    assert_eq!(
+        a.into_repr(),
+        FsRepr([
+            0x01d5846f386d0cd7,
+            0x0000000000000030,
+            0x0000000000000000,
+            0x0000000000000000,
+        ])
+    );
+    a = a >> 64;
+    assert_eq!(
+        a.into_repr(),
+        FsRepr([
+            0x0000000000000030,
+            0x0000000000000000,
+            0x0000000000000000,
+            0x0000000000000000,
+        ])
+    );
 }
 
 #[test]
