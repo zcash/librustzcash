@@ -617,61 +617,23 @@ impl Field for Fs {
         ret
     }
 
-    /// WARNING: THIS IS NOT ACTUALLY CONSTANT TIME YET!
-    /// THIS WILL BE REPLACED BY THE jubjub CRATE, WHICH IS CONSTANT TIME!
     fn invert(&self) -> CtOption<Self> {
-        if self.is_zero() {
-            CtOption::new(Self::zero(), Choice::from(0))
-        } else {
-            // Guajardo Kumar Paar Pelzl
-            // Efficient Software-Implementation of Finite Fields with Applications to Cryptography
-            // Algorithm 16 (BEA for Inversion in Fp)
+        // We need to find b such that b * a ≡ 1 mod p. As we are in a prime
+        // field, we can apply Fermat's Little Theorem:
+        //
+        //    a^p         ≡ a mod p
+        //    a^(p-1)     ≡ 1 mod p
+        //    a^(p-2) * a ≡ 1 mod p
+        //
+        // Thus inversion can be implemented with a single exponentiation.
+        let inverse = self.pow_vartime(&[
+            0xd097_0e5e_d6f7_2cb5u64,
+            0xa668_2093_ccc8_1082,
+            0x0667_3b01_0134_3b00,
+            0x0e7d_b4ea_6533_afa9,
+        ]);
 
-            let one = FsRepr::from(1);
-
-            let mut u = self.0;
-            let mut v = MODULUS;
-            let mut b = Fs(R2); // Avoids unnecessary reduction step.
-            let mut c = Self::zero();
-
-            while u != one && v != one {
-                while u.is_even() {
-                    u.div2();
-
-                    if b.0.is_even() {
-                        b.0.div2();
-                    } else {
-                        b.0.add_nocarry(&MODULUS);
-                        b.0.div2();
-                    }
-                }
-
-                while v.is_even() {
-                    v.div2();
-
-                    if c.0.is_even() {
-                        c.0.div2();
-                    } else {
-                        c.0.add_nocarry(&MODULUS);
-                        c.0.div2();
-                    }
-                }
-
-                if v < u {
-                    u.sub_noborrow(&v);
-                    b.sub_assign(&c);
-                } else {
-                    v.sub_noborrow(&u);
-                    c.sub_assign(&b);
-                }
-            }
-
-            if u == one {
-                CtOption::new(b, Choice::from(1))
-            } else {
-                CtOption::new(c, Choice::from(1))
-            }
-        }
+        CtOption::new(inverse, Choice::from(if self.is_zero() { 0 } else { 1 }))
     }
 
     #[inline(always)]
