@@ -1,6 +1,6 @@
 //! Structs for core Zcash primitives.
 
-use ff::{Field, PrimeField, PrimeFieldRepr};
+use ff::{Field, PrimeField};
 
 use crate::constants;
 
@@ -86,7 +86,7 @@ impl<E: JubjubEngine> ViewingKey<E> {
         h[31] &= 0b0000_0111;
 
         let mut e = <E::Fs as PrimeField>::Repr::default();
-        e.read_le(&h[..]).unwrap();
+        e.as_mut().copy_from_slice(&h[..]);
 
         E::Fs::from_repr(e).expect("should be a valid scalar")
     }

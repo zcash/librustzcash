@@ -304,7 +304,7 @@ impl<E: JubjubEngine, Subgroup> Point<E, Subgroup> {
 
         let mut res = Self::zero();
 
-        for b in BitIterator::<u64, _>::new(scalar.into()) {
+        for b in BitIterator::<u8, _>::new(scalar.into()) {
             res = res.double(params);
 
             if b {

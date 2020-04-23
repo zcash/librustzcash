@@ -1,7 +1,5 @@
-use ff::{
-    adc, mac_with_carry, sbb, BitIterator, Field, PowVartime, PrimeField, PrimeFieldDecodingError,
-    PrimeFieldRepr, SqrtField,
-};
+use byteorder::{ByteOrder, LittleEndian};
+use ff::{adc, mac_with_carry, sbb, BitIterator, Field, PowVartime, PrimeField, SqrtField};
 use rand_core::RngCore;
 use std::mem;
 use std::ops::{Add, AddAssign, BitAnd, Mul, MulAssign, Neg, Shr, Sub, SubAssign};
@@ -11,6 +9,11 @@ use super::ToUniform;
 
 // s = 6554484396890773809930967563523245729705921265872317281365359162392183254199
 const MODULUS: FsRepr = FsRepr([
+    0xb7, 0x2c, 0xf7, 0xd6, 0x5e, 0x0e, 0x97, 0xd0, 0x82, 0x10, 0xc8, 0xcc, 0x93, 0x20, 0x68, 0xa6,
+    0x00, 0x3b, 0x34, 0x01, 0x01, 0x3b, 0x67, 0x06, 0xa9, 0xaf, 0x33, 0x65, 0xea, 0xb4, 0x7d, 0x0e,
+]);
+
+const MODULUS_LIMBS: Fs = Fs([
     0xd0970e5ed6f72cb7,
     0xa6682093ccc81082,
     0x6673b0101343b00,
@@ -25,7 +28,7 @@ const MODULUS_BITS: u32 = 252;
 const REPR_SHAVE_BITS: u32 = 4;
 
 // R = 2**256 % s
-const R: FsRepr = FsRepr([
+const R: Fs = Fs([
     0x25f80bb3b99607d9,
     0xf315d62f66b6e750,
     0x932514eeeb8814f4,
@@ -33,7 +36,7 @@ const R: FsRepr = FsRepr([
 ]);
 
 // R2 = R^2 % s
-const R2: FsRepr = FsRepr([
+const R2: Fs = Fs([
     0x67719aa495e57731,
     0x51b0cef09ce3fc26,
     0x69dab7fac026e9a5,
@@ -44,7 +47,7 @@ const R2: FsRepr = FsRepr([
 const INV: u64 = 0x1ba3a358ef788ef9;
 
 // GENERATOR = 6 (multiplicative generator of r-1 order, that is also quadratic nonresidue)
-const GENERATOR: FsRepr = FsRepr([
+const GENERATOR: Fs = Fs([
     0x720b1b19d49ea8f1,
     0xbf4aa36101f13a58,
     0x5fa8cc968193ccbb,
@@ -55,7 +58,7 @@ const GENERATOR: FsRepr = FsRepr([
 const S: u32 = 1;
 
 // 2^S root of unity computed by GENERATOR^t
-const ROOT_OF_UNITY: FsRepr = FsRepr([
+const ROOT_OF_UNITY: Fs = Fs([
     0xaa9f02ab1d6124de,
     0xb3524a6466112932,
     0x7342261215ac260b,
@@ -63,199 +66,45 @@ const ROOT_OF_UNITY: FsRepr = FsRepr([
 ]);
 
 // -((2**256) mod s) mod s
-const NEGATIVE_ONE: Fs = Fs(FsRepr([
+const NEGATIVE_ONE: Fs = Fs([
     0xaa9f02ab1d6124de,
     0xb3524a6466112932,
     0x7342261215ac260b,
     0x4d6b87b1da259e2,
-]));
+]);
 
 /// This is the underlying representation of an element of `Fs`.
 #[derive(Copy, Clone, PartialEq, Eq, Default, Debug)]
-pub struct FsRepr(pub [u64; 4]);
+pub struct FsRepr(pub [u8; 32]);
 
 impl ::std::fmt::Display for FsRepr {
     fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
         write!(f, "0x")?;
         for i in self.0.iter().rev() {
-            write!(f, "{:016x}", *i)?;
+            write!(f, "{:02x}", *i)?;
         }
 
         Ok(())
     }
 }
 
-impl AsRef<[u64]> for FsRepr {
+impl AsRef<[u8]> for FsRepr {
     #[inline(always)]
-    fn as_ref(&self) -> &[u64] {
+    fn as_ref(&self) -> &[u8] {
         &self.0
     }
 }
 
-impl AsMut<[u64]> for FsRepr {
+impl AsMut<[u8]> for FsRepr {
     #[inline(always)]
-    fn as_mut(&mut self) -> &mut [u64] {
+    fn as_mut(&mut self) -> &mut [u8] {
         &mut self.0
-    }
-}
-
-impl From<u64> for FsRepr {
-    #[inline(always)]
-    fn from(val: u64) -> FsRepr {
-        let mut repr = Self::default();
-        repr.0[0] = val;
-        repr
-    }
-}
-
-impl Ord for FsRepr {
-    #[inline(always)]
-    fn cmp(&self, other: &FsRepr) -> ::std::cmp::Ordering {
-        for (a, b) in self.0.iter().rev().zip(other.0.iter().rev()) {
-            if a < b {
-                return ::std::cmp::Ordering::Less;
-            } else if a > b {
-                return ::std::cmp::Ordering::Greater;
-            }
-        }
-
-        ::std::cmp::Ordering::Equal
-    }
-}
-
-impl PartialOrd for FsRepr {
-    #[inline(always)]
-    fn partial_cmp(&self, other: &FsRepr) -> Option<::std::cmp::Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl PrimeFieldRepr for FsRepr {
-    #[inline(always)]
-    fn is_odd(&self) -> bool {
-        self.0[0] & 1 == 1
-    }
-
-    #[inline(always)]
-    fn is_even(&self) -> bool {
-        !self.is_odd()
-    }
-
-    #[inline(always)]
-    fn is_zero(&self) -> bool {
-        self.0.iter().all(|&e| e == 0)
-    }
-
-    #[inline(always)]
-    fn shr(&mut self, mut n: u32) {
-        if n >= 64 * 4 {
-            *self = Self::from(0);
-            return;
-        }
-
-        while n >= 64 {
-            let mut t = 0;
-            for i in self.0.iter_mut().rev() {
-                ::std::mem::swap(&mut t, i);
-            }
-            n -= 64;
-        }
-
-        if n > 0 {
-            let mut t = 0;
-            for i in self.0.iter_mut().rev() {
-                let t2 = *i << (64 - n);
-                *i >>= n;
-                *i |= t;
-                t = t2;
-            }
-        }
-    }
-
-    #[inline(always)]
-    fn div2(&mut self) {
-        let mut t = 0;
-        for i in self.0.iter_mut().rev() {
-            let t2 = *i << 63;
-            *i >>= 1;
-            *i |= t;
-            t = t2;
-        }
-    }
-
-    #[inline(always)]
-    fn mul2(&mut self) {
-        let mut last = 0;
-        for i in &mut self.0 {
-            let tmp = *i >> 63;
-            *i <<= 1;
-            *i |= last;
-            last = tmp;
-        }
-    }
-
-    #[inline(always)]
-    fn shl(&mut self, mut n: u32) {
-        if n >= 64 * 4 {
-            *self = Self::from(0);
-            return;
-        }
-
-        while n >= 64 {
-            let mut t = 0;
-            for i in &mut self.0 {
-                ::std::mem::swap(&mut t, i);
-            }
-            n -= 64;
-        }
-
-        if n > 0 {
-            let mut t = 0;
-            for i in &mut self.0 {
-                let t2 = *i >> (64 - n);
-                *i <<= n;
-                *i |= t;
-                t = t2;
-            }
-        }
-    }
-
-    #[inline(always)]
-    fn num_bits(&self) -> u32 {
-        let mut ret = (4 as u32) * 64;
-        for i in self.0.iter().rev() {
-            let leading = i.leading_zeros();
-            ret -= leading;
-            if leading != 64 {
-                break;
-            }
-        }
-
-        ret
-    }
-
-    #[inline(always)]
-    fn add_nocarry(&mut self, other: &FsRepr) {
-        let mut carry = 0;
-
-        for (a, b) in self.0.iter_mut().zip(other.0.iter()) {
-            *a = adc(*a, *b, &mut carry);
-        }
-    }
-
-    #[inline(always)]
-    fn sub_noborrow(&mut self, other: &FsRepr) {
-        let mut borrow = 0;
-
-        for (a, b) in self.0.iter_mut().zip(other.0.iter()) {
-            *a = sbb(*a, *b, &mut borrow);
-        }
     }
 }
 
 /// This is an element of the scalar field of the Jubjub curve.
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
-pub struct Fs(FsRepr);
+pub struct Fs([u64; 4]);
 
 impl Default for Fs {
     fn default() -> Self {
@@ -265,17 +114,23 @@ impl Default for Fs {
 
 impl ConstantTimeEq for Fs {
     fn ct_eq(&self, other: &Fs) -> Choice {
-        (self.0).0[0].ct_eq(&(other.0).0[0])
-            & (self.0).0[1].ct_eq(&(other.0).0[1])
-            & (self.0).0[2].ct_eq(&(other.0).0[2])
-            & (self.0).0[3].ct_eq(&(other.0).0[3])
+        self.0[0].ct_eq(&other.0[0])
+            & self.0[1].ct_eq(&other.0[1])
+            & self.0[2].ct_eq(&other.0[2])
+            & self.0[3].ct_eq(&other.0[3])
     }
 }
 
 impl Ord for Fs {
     #[inline(always)]
     fn cmp(&self, other: &Fs) -> ::std::cmp::Ordering {
-        self.into_repr().cmp(&other.into_repr())
+        let mut a = *self;
+        a.mont_reduce(self.0[0], self.0[1], self.0[2], self.0[3], 0, 0, 0, 0);
+
+        let mut b = *other;
+        b.mont_reduce(other.0[0], other.0[1], other.0[2], other.0[3], 0, 0, 0, 0);
+
+        a.cmp_native(&b)
     }
 }
 
@@ -297,7 +152,7 @@ impl From<u64> for Fs {
     fn from(val: u64) -> Fs {
         let mut raw = [0u64; 4];
         raw[0] = val;
-        Fs(FsRepr(raw)) * Fs(R2)
+        Fs(raw) * R2
     }
 }
 
@@ -307,14 +162,20 @@ impl From<Fs> for FsRepr {
     }
 }
 
+impl<'a> From<&'a Fs> for FsRepr {
+    fn from(e: &'a Fs) -> FsRepr {
+        e.into_repr()
+    }
+}
+
 impl ConditionallySelectable for Fs {
     fn conditional_select(a: &Self, b: &Self, choice: Choice) -> Self {
-        Fs(FsRepr([
-            u64::conditional_select(&(a.0).0[0], &(b.0).0[0], choice),
-            u64::conditional_select(&(a.0).0[1], &(b.0).0[1], choice),
-            u64::conditional_select(&(a.0).0[2], &(b.0).0[2], choice),
-            u64::conditional_select(&(a.0).0[3], &(b.0).0[3], choice),
-        ]))
+        Fs([
+            u64::conditional_select(&a.0[0], &b.0[0], choice),
+            u64::conditional_select(&a.0[1], &b.0[1], choice),
+            u64::conditional_select(&a.0[2], &b.0[2], choice),
+            u64::conditional_select(&a.0[3], &b.0[3], choice),
+        ])
     }
 }
 
@@ -324,9 +185,9 @@ impl Neg for Fs {
     #[inline]
     fn neg(mut self) -> Self {
         if !self.is_zero() {
-            let mut tmp = MODULUS;
-            tmp.sub_noborrow(&self.0);
-            self.0 = tmp;
+            let mut tmp = MODULUS_LIMBS;
+            tmp.sub_noborrow(&self);
+            self = tmp;
         }
         self
     }
@@ -356,7 +217,7 @@ impl<'r> AddAssign<&'r Fs> for Fs {
     #[inline]
     fn add_assign(&mut self, other: &Self) {
         // This cannot exceed the backing capacity.
-        self.0.add_nocarry(&other.0);
+        self.add_nocarry(&other);
 
         // However, it may need to be reduced.
         self.reduce();
@@ -394,11 +255,11 @@ impl<'r> SubAssign<&'r Fs> for Fs {
     #[inline]
     fn sub_assign(&mut self, other: &Self) {
         // If `other` is larger than `self`, we'll need to add the modulus to self first.
-        if other.0 > self.0 {
-            self.0.add_nocarry(&MODULUS);
+        if other.cmp_native(self) == ::core::cmp::Ordering::Greater {
+            self.add_nocarry(&MODULUS_LIMBS);
         }
 
-        self.0.sub_noborrow(&other.0);
+        self.sub_noborrow(&other);
     }
 }
 
@@ -433,28 +294,28 @@ impl<'r> MulAssign<&'r Fs> for Fs {
     #[inline]
     fn mul_assign(&mut self, other: &Self) {
         let mut carry = 0;
-        let r0 = mac_with_carry(0, (self.0).0[0], (other.0).0[0], &mut carry);
-        let r1 = mac_with_carry(0, (self.0).0[0], (other.0).0[1], &mut carry);
-        let r2 = mac_with_carry(0, (self.0).0[0], (other.0).0[2], &mut carry);
-        let r3 = mac_with_carry(0, (self.0).0[0], (other.0).0[3], &mut carry);
+        let r0 = mac_with_carry(0, self.0[0], other.0[0], &mut carry);
+        let r1 = mac_with_carry(0, self.0[0], other.0[1], &mut carry);
+        let r2 = mac_with_carry(0, self.0[0], other.0[2], &mut carry);
+        let r3 = mac_with_carry(0, self.0[0], other.0[3], &mut carry);
         let r4 = carry;
         let mut carry = 0;
-        let r1 = mac_with_carry(r1, (self.0).0[1], (other.0).0[0], &mut carry);
-        let r2 = mac_with_carry(r2, (self.0).0[1], (other.0).0[1], &mut carry);
-        let r3 = mac_with_carry(r3, (self.0).0[1], (other.0).0[2], &mut carry);
-        let r4 = mac_with_carry(r4, (self.0).0[1], (other.0).0[3], &mut carry);
+        let r1 = mac_with_carry(r1, self.0[1], other.0[0], &mut carry);
+        let r2 = mac_with_carry(r2, self.0[1], other.0[1], &mut carry);
+        let r3 = mac_with_carry(r3, self.0[1], other.0[2], &mut carry);
+        let r4 = mac_with_carry(r4, self.0[1], other.0[3], &mut carry);
         let r5 = carry;
         let mut carry = 0;
-        let r2 = mac_with_carry(r2, (self.0).0[2], (other.0).0[0], &mut carry);
-        let r3 = mac_with_carry(r3, (self.0).0[2], (other.0).0[1], &mut carry);
-        let r4 = mac_with_carry(r4, (self.0).0[2], (other.0).0[2], &mut carry);
-        let r5 = mac_with_carry(r5, (self.0).0[2], (other.0).0[3], &mut carry);
+        let r2 = mac_with_carry(r2, self.0[2], other.0[0], &mut carry);
+        let r3 = mac_with_carry(r3, self.0[2], other.0[1], &mut carry);
+        let r4 = mac_with_carry(r4, self.0[2], other.0[2], &mut carry);
+        let r5 = mac_with_carry(r5, self.0[2], other.0[3], &mut carry);
         let r6 = carry;
         let mut carry = 0;
-        let r3 = mac_with_carry(r3, (self.0).0[3], (other.0).0[0], &mut carry);
-        let r4 = mac_with_carry(r4, (self.0).0[3], (other.0).0[1], &mut carry);
-        let r5 = mac_with_carry(r5, (self.0).0[3], (other.0).0[2], &mut carry);
-        let r6 = mac_with_carry(r6, (self.0).0[3], (other.0).0[3], &mut carry);
+        let r3 = mac_with_carry(r3, self.0[3], other.0[0], &mut carry);
+        let r4 = mac_with_carry(r4, self.0[3], other.0[1], &mut carry);
+        let r5 = mac_with_carry(r5, self.0[3], other.0[2], &mut carry);
+        let r6 = mac_with_carry(r6, self.0[3], other.0[3], &mut carry);
         let r7 = carry;
         self.mont_reduce(r0, r1, r2, r3, r4, r5, r6, r7);
     }
@@ -472,17 +333,8 @@ impl BitAnd<u64> for Fs {
 
     #[inline(always)]
     fn bitand(mut self, rhs: u64) -> u64 {
-        self.mont_reduce(
-            (self.0).0[0],
-            (self.0).0[1],
-            (self.0).0[2],
-            (self.0).0[3],
-            0,
-            0,
-            0,
-            0,
-        );
-        (self.0).0[0] & rhs
+        self.mont_reduce(self.0[0], self.0[1], self.0[2], self.0[3], 0, 0, 0, 0);
+        self.0[0] & rhs
     }
 }
 
@@ -496,20 +348,11 @@ impl Shr<u32> for Fs {
         }
 
         // Convert from Montgomery to native representation.
-        self.mont_reduce(
-            (self.0).0[0],
-            (self.0).0[1],
-            (self.0).0[2],
-            (self.0).0[3],
-            0,
-            0,
-            0,
-            0,
-        );
+        self.mont_reduce(self.0[0], self.0[1], self.0[2], self.0[3], 0, 0, 0, 0);
 
         while n >= 64 {
             let mut t = 0;
-            for i in (self.0).0.iter_mut().rev() {
+            for i in self.0.iter_mut().rev() {
                 mem::swap(&mut t, i);
             }
             n -= 64;
@@ -517,7 +360,7 @@ impl Shr<u32> for Fs {
 
         if n > 0 {
             let mut t = 0;
-            for i in (self.0).0.iter_mut().rev() {
+            for i in self.0.iter_mut().rev() {
                 let t2 = *i << (64 - n);
                 *i >>= n;
                 *i |= t;
@@ -526,42 +369,42 @@ impl Shr<u32> for Fs {
         }
 
         // Convert back to Montgomery representation
-        self * Fs(R2)
+        self * R2
     }
 }
 
 impl PrimeField for Fs {
     type Repr = FsRepr;
 
-    fn from_repr(r: FsRepr) -> Result<Fs, PrimeFieldDecodingError> {
-        let mut r = Fs(r);
-        if r.is_valid() {
-            r.mul_assign(&Fs(R2));
+    fn from_repr(r: FsRepr) -> Option<Fs> {
+        let r = {
+            let mut inner = [0; 4];
+            LittleEndian::read_u64_into(r.as_ref(), &mut inner[..]);
+            Fs(inner)
+        };
 
-            Ok(r)
+        if r.is_valid() {
+            Some(r * &R2)
         } else {
-            Err(PrimeFieldDecodingError::NotInField)
+            None
         }
     }
 
     fn into_repr(&self) -> FsRepr {
         let mut r = *self;
-        r.mont_reduce(
-            (self.0).0[0],
-            (self.0).0[1],
-            (self.0).0[2],
-            (self.0).0[3],
-            0,
-            0,
-            0,
-            0,
-        );
-        r.0
+        r.mont_reduce(self.0[0], self.0[1], self.0[2], self.0[3], 0, 0, 0, 0);
+
+        let mut repr = [0; 32];
+        LittleEndian::write_u64_into(&r.0, &mut repr[..]);
+        FsRepr(repr)
     }
 
     #[inline(always)]
     fn is_odd(&self) -> bool {
-        self.into_repr().is_odd()
+        let mut r = *self;
+        r.mont_reduce(self.0[0], self.0[1], self.0[2], self.0[3], 0, 0, 0, 0);
+
+        r.0[0] & 1 == 1
     }
 
     fn char() -> FsRepr {
@@ -573,13 +416,13 @@ impl PrimeField for Fs {
     const CAPACITY: u32 = Self::NUM_BITS - 1;
 
     fn multiplicative_generator() -> Self {
-        Fs(GENERATOR)
+        GENERATOR
     }
 
     const S: u32 = S;
 
     fn root_of_unity() -> Self {
-        Fs(ROOT_OF_UNITY)
+        ROOT_OF_UNITY
     }
 }
 
@@ -591,7 +434,7 @@ impl Field for Fs {
                 for limb in &mut repr {
                     *limb = rng.next_u64();
                 }
-                Fs(FsRepr(repr))
+                Fs(repr)
             };
 
             // Mask away the unused most-significant bits.
@@ -610,12 +453,12 @@ impl Field for Fs {
 
     #[inline]
     fn one() -> Self {
-        Fs(R)
+        R
     }
 
     #[inline]
     fn is_zero(&self) -> bool {
-        self.0.is_zero()
+        self.0.iter().all(|&e| e == 0)
     }
 
     #[inline]
@@ -623,7 +466,13 @@ impl Field for Fs {
         let mut ret = *self;
 
         // This cannot exceed the backing capacity.
-        ret.0.mul2();
+        let mut last = 0;
+        for i in &mut ret.0 {
+            let tmp = *i >> 63;
+            *i <<= 1;
+            *i |= last;
+            last = tmp;
+        }
 
         // However, it may need to be reduced.
         ret.reduce();
@@ -658,16 +507,16 @@ impl Field for Fs {
     #[inline]
     fn square(&self) -> Self {
         let mut carry = 0;
-        let r1 = mac_with_carry(0, (self.0).0[0], (self.0).0[1], &mut carry);
-        let r2 = mac_with_carry(0, (self.0).0[0], (self.0).0[2], &mut carry);
-        let r3 = mac_with_carry(0, (self.0).0[0], (self.0).0[3], &mut carry);
+        let r1 = mac_with_carry(0, self.0[0], self.0[1], &mut carry);
+        let r2 = mac_with_carry(0, self.0[0], self.0[2], &mut carry);
+        let r3 = mac_with_carry(0, self.0[0], self.0[3], &mut carry);
         let r4 = carry;
         let mut carry = 0;
-        let r3 = mac_with_carry(r3, (self.0).0[1], (self.0).0[2], &mut carry);
-        let r4 = mac_with_carry(r4, (self.0).0[1], (self.0).0[3], &mut carry);
+        let r3 = mac_with_carry(r3, self.0[1], self.0[2], &mut carry);
+        let r4 = mac_with_carry(r4, self.0[1], self.0[3], &mut carry);
         let r5 = carry;
         let mut carry = 0;
-        let r5 = mac_with_carry(r5, (self.0).0[2], (self.0).0[3], &mut carry);
+        let r5 = mac_with_carry(r5, self.0[2], self.0[3], &mut carry);
         let r6 = carry;
 
         let r7 = r6 >> 63;
@@ -679,13 +528,13 @@ impl Field for Fs {
         let r1 = r1 << 1;
 
         let mut carry = 0;
-        let r0 = mac_with_carry(0, (self.0).0[0], (self.0).0[0], &mut carry);
+        let r0 = mac_with_carry(0, self.0[0], self.0[0], &mut carry);
         let r1 = adc(r1, 0, &mut carry);
-        let r2 = mac_with_carry(r2, (self.0).0[1], (self.0).0[1], &mut carry);
+        let r2 = mac_with_carry(r2, self.0[1], self.0[1], &mut carry);
         let r3 = adc(r3, 0, &mut carry);
-        let r4 = mac_with_carry(r4, (self.0).0[2], (self.0).0[2], &mut carry);
+        let r4 = mac_with_carry(r4, self.0[2], self.0[2], &mut carry);
         let r5 = adc(r5, 0, &mut carry);
-        let r6 = mac_with_carry(r6, (self.0).0[3], (self.0).0[3], &mut carry);
+        let r6 = mac_with_carry(r6, self.0[3], self.0[3], &mut carry);
         let r7 = adc(r7, 0, &mut carry);
 
         let mut ret = *self;
@@ -695,11 +544,46 @@ impl Field for Fs {
 }
 
 impl Fs {
+    /// Compares two elements in native representation. This is only used
+    /// internally.
+    #[inline(always)]
+    fn cmp_native(&self, other: &Fs) -> ::std::cmp::Ordering {
+        for (a, b) in self.0.iter().rev().zip(other.0.iter().rev()) {
+            if a < b {
+                return ::std::cmp::Ordering::Less;
+            } else if a > b {
+                return ::std::cmp::Ordering::Greater;
+            }
+        }
+
+        ::std::cmp::Ordering::Equal
+    }
+
     /// Determines if the element is really in the field. This is only used
     /// internally.
     #[inline(always)]
     fn is_valid(&self) -> bool {
-        self.0 < MODULUS
+        // The Ord impl calls `reduce`, which in turn calls `is_valid`, so we use
+        // this internal function to eliminate the cycle.
+        self.cmp_native(&MODULUS_LIMBS) == ::core::cmp::Ordering::Less
+    }
+
+    #[inline(always)]
+    fn add_nocarry(&mut self, other: &Fs) {
+        let mut carry = 0;
+
+        for (a, b) in self.0.iter_mut().zip(other.0.iter()) {
+            *a = adc(*a, *b, &mut carry);
+        }
+    }
+
+    #[inline(always)]
+    fn sub_noborrow(&mut self, other: &Fs) {
+        let mut borrow = 0;
+
+        for (a, b) in self.0.iter_mut().zip(other.0.iter()) {
+            *a = sbb(*a, *b, &mut borrow);
+        }
     }
 
     /// Subtracts the modulus from this element if this element is not in the
@@ -707,7 +591,7 @@ impl Fs {
     #[inline(always)]
     fn reduce(&mut self) {
         if !self.is_valid() {
-            self.0.sub_noborrow(&MODULUS);
+            self.sub_noborrow(&MODULUS_LIMBS);
         }
     }
 
@@ -729,39 +613,39 @@ impl Fs {
 
         let k = r0.wrapping_mul(INV);
         let mut carry = 0;
-        mac_with_carry(r0, k, MODULUS.0[0], &mut carry);
-        r1 = mac_with_carry(r1, k, MODULUS.0[1], &mut carry);
-        r2 = mac_with_carry(r2, k, MODULUS.0[2], &mut carry);
-        r3 = mac_with_carry(r3, k, MODULUS.0[3], &mut carry);
+        mac_with_carry(r0, k, MODULUS_LIMBS.0[0], &mut carry);
+        r1 = mac_with_carry(r1, k, MODULUS_LIMBS.0[1], &mut carry);
+        r2 = mac_with_carry(r2, k, MODULUS_LIMBS.0[2], &mut carry);
+        r3 = mac_with_carry(r3, k, MODULUS_LIMBS.0[3], &mut carry);
         r4 = adc(r4, 0, &mut carry);
         let carry2 = carry;
         let k = r1.wrapping_mul(INV);
         let mut carry = 0;
-        mac_with_carry(r1, k, MODULUS.0[0], &mut carry);
-        r2 = mac_with_carry(r2, k, MODULUS.0[1], &mut carry);
-        r3 = mac_with_carry(r3, k, MODULUS.0[2], &mut carry);
-        r4 = mac_with_carry(r4, k, MODULUS.0[3], &mut carry);
+        mac_with_carry(r1, k, MODULUS_LIMBS.0[0], &mut carry);
+        r2 = mac_with_carry(r2, k, MODULUS_LIMBS.0[1], &mut carry);
+        r3 = mac_with_carry(r3, k, MODULUS_LIMBS.0[2], &mut carry);
+        r4 = mac_with_carry(r4, k, MODULUS_LIMBS.0[3], &mut carry);
         r5 = adc(r5, carry2, &mut carry);
         let carry2 = carry;
         let k = r2.wrapping_mul(INV);
         let mut carry = 0;
-        mac_with_carry(r2, k, MODULUS.0[0], &mut carry);
-        r3 = mac_with_carry(r3, k, MODULUS.0[1], &mut carry);
-        r4 = mac_with_carry(r4, k, MODULUS.0[2], &mut carry);
-        r5 = mac_with_carry(r5, k, MODULUS.0[3], &mut carry);
+        mac_with_carry(r2, k, MODULUS_LIMBS.0[0], &mut carry);
+        r3 = mac_with_carry(r3, k, MODULUS_LIMBS.0[1], &mut carry);
+        r4 = mac_with_carry(r4, k, MODULUS_LIMBS.0[2], &mut carry);
+        r5 = mac_with_carry(r5, k, MODULUS_LIMBS.0[3], &mut carry);
         r6 = adc(r6, carry2, &mut carry);
         let carry2 = carry;
         let k = r3.wrapping_mul(INV);
         let mut carry = 0;
-        mac_with_carry(r3, k, MODULUS.0[0], &mut carry);
-        r4 = mac_with_carry(r4, k, MODULUS.0[1], &mut carry);
-        r5 = mac_with_carry(r5, k, MODULUS.0[2], &mut carry);
-        r6 = mac_with_carry(r6, k, MODULUS.0[3], &mut carry);
+        mac_with_carry(r3, k, MODULUS_LIMBS.0[0], &mut carry);
+        r4 = mac_with_carry(r4, k, MODULUS_LIMBS.0[1], &mut carry);
+        r5 = mac_with_carry(r5, k, MODULUS_LIMBS.0[2], &mut carry);
+        r6 = mac_with_carry(r6, k, MODULUS_LIMBS.0[3], &mut carry);
         r7 = adc(r7, carry2, &mut carry);
-        (self.0).0[0] = r4;
-        (self.0).0[1] = r5;
-        (self.0).0[2] = r6;
-        (self.0).0[3] = r7;
+        self.0[0] = r4;
+        self.0[1] = r5;
+        self.0[2] = r6;
+        self.0[3] = r7;
         self.reduce();
     }
 
@@ -822,339 +706,25 @@ use rand_core::SeedableRng;
 use rand_xorshift::XorShiftRng;
 
 #[test]
-fn test_fs_repr_ordering() {
-    fn assert_equality(a: FsRepr, b: FsRepr) {
-        assert_eq!(a, b);
-        assert!(a.cmp(&b) == ::std::cmp::Ordering::Equal);
-    }
-
-    fn assert_lt(a: FsRepr, b: FsRepr) {
-        assert!(a < b);
-        assert!(b > a);
-    }
-
-    assert_equality(
-        FsRepr([9999, 9999, 9999, 9999]),
-        FsRepr([9999, 9999, 9999, 9999]),
-    );
-    assert_equality(
-        FsRepr([9999, 9998, 9999, 9999]),
-        FsRepr([9999, 9998, 9999, 9999]),
-    );
-    assert_equality(
-        FsRepr([9999, 9999, 9999, 9997]),
-        FsRepr([9999, 9999, 9999, 9997]),
-    );
-    assert_lt(
-        FsRepr([9999, 9997, 9999, 9998]),
-        FsRepr([9999, 9997, 9999, 9999]),
-    );
-    assert_lt(
-        FsRepr([9999, 9997, 9998, 9999]),
-        FsRepr([9999, 9997, 9999, 9999]),
-    );
-    assert_lt(
-        FsRepr([9, 9999, 9999, 9997]),
-        FsRepr([9999, 9999, 9999, 9997]),
-    );
-}
-
-#[test]
-fn test_fs_repr_from() {
-    assert_eq!(FsRepr::from(100), FsRepr([100, 0, 0, 0]));
-}
-
-#[test]
-fn test_fs_repr_is_odd() {
-    assert!(!FsRepr::from(0).is_odd());
-    assert!(FsRepr::from(0).is_even());
-    assert!(FsRepr::from(1).is_odd());
-    assert!(!FsRepr::from(1).is_even());
-    assert!(!FsRepr::from(324834872).is_odd());
-    assert!(FsRepr::from(324834872).is_even());
-    assert!(FsRepr::from(324834873).is_odd());
-    assert!(!FsRepr::from(324834873).is_even());
-}
-
-#[test]
-fn test_fs_repr_is_zero() {
-    assert!(FsRepr::from(0).is_zero());
-    assert!(!FsRepr::from(1).is_zero());
-    assert!(!FsRepr([0, 0, 1, 0]).is_zero());
-}
-
-#[test]
-fn test_fs_repr_div2() {
-    let mut a = FsRepr([
-        0xbd2920b19c972321,
-        0x174ed0466a3be37e,
-        0xd468d5e3b551f0b5,
-        0xcb67c072733beefc,
-    ]);
-    a.div2();
-    assert_eq!(
-        a,
-        FsRepr([
-            0x5e949058ce4b9190,
-            0x8ba76823351df1bf,
-            0x6a346af1daa8f85a,
-            0x65b3e039399df77e
-        ])
-    );
-    for _ in 0..10 {
-        a.div2();
-    }
-    assert_eq!(
-        a,
-        FsRepr([
-            0x6fd7a524163392e4,
-            0x16a2e9da08cd477c,
-            0xdf9a8d1abc76aa3e,
-            0x196cf80e4e677d
-        ])
-    );
-    for _ in 0..200 {
-        a.div2();
-    }
-    assert_eq!(a, FsRepr([0x196cf80e4e67, 0x0, 0x0, 0x0]));
-    for _ in 0..40 {
-        a.div2();
-    }
-    assert_eq!(a, FsRepr([0x19, 0x0, 0x0, 0x0]));
-    for _ in 0..4 {
-        a.div2();
-    }
-    assert_eq!(a, FsRepr([0x1, 0x0, 0x0, 0x0]));
-    a.div2();
-    assert!(a.is_zero());
-}
-
-#[test]
-fn test_fs_repr_shr() {
-    let mut a = FsRepr([
-        0xb33fbaec482a283f,
-        0x997de0d3a88cb3df,
-        0x9af62d2a9a0e5525,
-        0x36003ab08de70da1,
-    ]);
-    a.shr(0);
-    assert_eq!(
-        a,
-        FsRepr([
-            0xb33fbaec482a283f,
-            0x997de0d3a88cb3df,
-            0x9af62d2a9a0e5525,
-            0x36003ab08de70da1
-        ])
-    );
-    a.shr(1);
-    assert_eq!(
-        a,
-        FsRepr([
-            0xd99fdd762415141f,
-            0xccbef069d44659ef,
-            0xcd7b16954d072a92,
-            0x1b001d5846f386d0
-        ])
-    );
-    a.shr(50);
-    assert_eq!(
-        a,
-        FsRepr([
-            0xbc1a7511967bf667,
-            0xc5a55341caa4b32f,
-            0x75611bce1b4335e,
-            0x6c0
-        ])
-    );
-    a.shr(130);
-    assert_eq!(a, FsRepr([0x1d5846f386d0cd7, 0x1b0, 0x0, 0x0]));
-    a.shr(64);
-    assert_eq!(a, FsRepr([0x1b0, 0x0, 0x0, 0x0]));
-}
-
-#[test]
-fn test_fs_repr_mul2() {
-    let mut a = FsRepr::from(23712937547);
-    a.mul2();
-    assert_eq!(a, FsRepr([0xb0acd6c96, 0x0, 0x0, 0x0]));
-    for _ in 0..60 {
-        a.mul2();
-    }
-    assert_eq!(a, FsRepr([0x6000000000000000, 0xb0acd6c9, 0x0, 0x0]));
-    for _ in 0..128 {
-        a.mul2();
-    }
-    assert_eq!(a, FsRepr([0x0, 0x0, 0x6000000000000000, 0xb0acd6c9]));
-    for _ in 0..60 {
-        a.mul2();
-    }
-    assert_eq!(a, FsRepr([0x0, 0x0, 0x0, 0x9600000000000000]));
-    for _ in 0..7 {
-        a.mul2();
-    }
-    assert!(a.is_zero());
-}
-
-#[test]
-fn test_fs_repr_num_bits() {
-    let mut a = FsRepr::from(0);
-    assert_eq!(0, a.num_bits());
-    a = FsRepr::from(1);
-    for i in 1..257 {
-        assert_eq!(i, a.num_bits());
-        a.mul2();
-    }
-    assert_eq!(0, a.num_bits());
-}
-
-#[test]
-fn test_fs_repr_sub_noborrow() {
-    let mut rng = XorShiftRng::from_seed([
-        0x59, 0x62, 0xbe, 0x5d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06, 0xbc,
-        0xe5,
-    ]);
-
-    let mut t = FsRepr([
-        0x8e62a7e85264e2c3,
-        0xb23d34c1941d3ca,
-        0x5976930b7502dd15,
-        0x600f3fb517bf5495,
-    ]);
-    t.sub_noborrow(&FsRepr([
-        0xd64f669809cbc6a4,
-        0xfa76cb9d90cf7637,
-        0xfefb0df9038d43b3,
-        0x298a30c744b31acf,
-    ]));
-    assert!(
-        t == FsRepr([
-            0xb813415048991c1f,
-            0x10ad07ae88725d92,
-            0x5a7b851271759961,
-            0x36850eedd30c39c5
-        ])
-    );
-
-    for _ in 0..1000 {
-        let mut a = Fs::random(&mut rng).into_repr();
-        a.0[3] >>= 30;
-        let mut b = a;
-        for _ in 0..10 {
-            b.mul2();
-        }
-        let mut c = b;
-        for _ in 0..10 {
-            c.mul2();
-        }
-
-        assert!(a < b);
-        assert!(b < c);
-
-        let mut csub_ba = c;
-        csub_ba.sub_noborrow(&b);
-        csub_ba.sub_noborrow(&a);
-
-        let mut csub_ab = c;
-        csub_ab.sub_noborrow(&a);
-        csub_ab.sub_noborrow(&b);
-
-        assert_eq!(csub_ab, csub_ba);
-    }
-}
-
-#[test]
-fn test_fr_repr_add_nocarry() {
-    let mut rng = XorShiftRng::from_seed([
-        0x59, 0x62, 0xbe, 0x5d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06, 0xbc,
-        0xe5,
-    ]);
-
-    let mut t = FsRepr([
-        0xd64f669809cbc6a4,
-        0xfa76cb9d90cf7637,
-        0xfefb0df9038d43b3,
-        0x298a30c744b31acf,
-    ]);
-    t.add_nocarry(&FsRepr([
-        0x8e62a7e85264e2c3,
-        0xb23d34c1941d3ca,
-        0x5976930b7502dd15,
-        0x600f3fb517bf5495,
-    ]));
-    assert_eq!(
-        t,
-        FsRepr([
-            0x64b20e805c30a967,
-            0x59a9ee9aa114a02,
-            0x5871a104789020c9,
-            0x8999707c5c726f65
-        ])
-    );
-
-    // Test for the associativity of addition.
-    for _ in 0..1000 {
-        let mut a = Fs::random(&mut rng).into_repr();
-        let mut b = Fs::random(&mut rng).into_repr();
-        let mut c = Fs::random(&mut rng).into_repr();
-
-        // Unset the first few bits, so that overflow won't occur.
-        a.0[3] >>= 3;
-        b.0[3] >>= 3;
-        c.0[3] >>= 3;
-
-        let mut abc = a;
-        abc.add_nocarry(&b);
-        abc.add_nocarry(&c);
-
-        let mut acb = a;
-        acb.add_nocarry(&c);
-        acb.add_nocarry(&b);
-
-        let mut bac = b;
-        bac.add_nocarry(&a);
-        bac.add_nocarry(&c);
-
-        let mut bca = b;
-        bca.add_nocarry(&c);
-        bca.add_nocarry(&a);
-
-        let mut cab = c;
-        cab.add_nocarry(&a);
-        cab.add_nocarry(&b);
-
-        let mut cba = c;
-        cba.add_nocarry(&b);
-        cba.add_nocarry(&a);
-
-        assert_eq!(abc, acb);
-        assert_eq!(abc, bac);
-        assert_eq!(abc, bca);
-        assert_eq!(abc, cab);
-        assert_eq!(abc, cba);
-    }
-}
-
-#[test]
 fn test_fs_is_valid() {
-    let mut a = Fs(MODULUS);
+    let mut a = MODULUS_LIMBS;
     assert!(!a.is_valid());
-    a.0.sub_noborrow(&FsRepr::from(1));
+    a.sub_noborrow(&Fs([1, 0, 0, 0]));
     assert!(a.is_valid());
-    assert!(Fs(FsRepr::from(0)).is_valid());
-    assert!(Fs(FsRepr([
+    assert!(Fs::zero().is_valid());
+    assert!(Fs([
         0xd0970e5ed6f72cb6,
         0xa6682093ccc81082,
         0x6673b0101343b00,
         0xe7db4ea6533afa9
-    ]))
+    ])
     .is_valid());
-    assert!(!Fs(FsRepr([
+    assert!(!Fs([
         0xffffffffffffffff,
         0xffffffffffffffff,
         0xffffffffffffffff,
         0xffffffffffffffff
-    ]))
+    ])
     .is_valid());
 
     let mut rng = XorShiftRng::from_seed([
@@ -1178,77 +748,77 @@ fn test_fs_add_assign() {
         .unwrap();
         assert!(tmp.is_valid());
         // Test that adding zero has no effect.
-        tmp.add_assign(&Fs(FsRepr::from(0)));
+        tmp.add_assign(&Fs::zero());
         assert_eq!(
             tmp,
-            Fs(FsRepr([
+            Fs([
                 0x8e6bfff4722d6e67,
                 0x5643da5c892044f9,
                 0x9465f4b281921a69,
                 0x25f752d3edd7162
-            ]))
+            ])
         );
         // Add one and test for the result.
-        tmp.add_assign(&Fs(FsRepr::from(1)));
+        tmp.add_assign(&Fs([1, 0, 0, 0]));
         assert_eq!(
             tmp,
-            Fs(FsRepr([
+            Fs([
                 0x8e6bfff4722d6e68,
                 0x5643da5c892044f9,
                 0x9465f4b281921a69,
                 0x25f752d3edd7162
-            ]))
+            ])
         );
         // Add another random number that exercises the reduction.
-        tmp.add_assign(&Fs(FsRepr([
+        tmp.add_assign(&Fs([
             0xb634d07bc42d4a70,
             0xf724f0c008411f5f,
             0x456d4053d865af34,
             0x24ce814e8c63027,
-        ])));
+        ]));
         assert_eq!(
             tmp,
-            Fs(FsRepr([
+            Fs([
                 0x44a0d070365ab8d8,
                 0x4d68cb1c91616459,
                 0xd9d3350659f7c99e,
                 0x4ac5d4227a3a189
-            ]))
+            ])
         );
         // Add one to (s - 1) and test for the result.
-        tmp = Fs(FsRepr([
+        tmp = Fs([
             0xd0970e5ed6f72cb6,
             0xa6682093ccc81082,
             0x6673b0101343b00,
             0xe7db4ea6533afa9,
-        ]));
-        tmp.add_assign(&Fs(FsRepr::from(1)));
-        assert!(tmp.0.is_zero());
+        ]);
+        tmp.add_assign(&Fs([1, 0, 0, 0]));
+        assert!(tmp.is_zero());
         // Add a random number to another one such that the result is s - 1
-        tmp = Fs(FsRepr([
+        tmp = Fs([
             0xa11fda5950ce3636,
             0x922e0dbccfe0ca0e,
             0xacebb6e215b82d4a,
             0x97ffb8cdc3aee93,
-        ]));
-        tmp.add_assign(&Fs(FsRepr([
+        ]);
+        tmp.add_assign(&Fs([
             0x2f7734058628f680,
             0x143a12d6fce74674,
             0x597b841eeb7c0db6,
             0x4fdb95d88f8c115,
-        ])));
+        ]));
         assert_eq!(
             tmp,
-            Fs(FsRepr([
+            Fs([
                 0xd0970e5ed6f72cb6,
                 0xa6682093ccc81082,
                 0x6673b0101343b00,
                 0xe7db4ea6533afa9
-            ]))
+            ])
         );
         // Add one to the result and test for it.
-        tmp.add_assign(&Fs(FsRepr::from(1)));
-        assert!(tmp.0.is_zero());
+        tmp.add_assign(&Fs([1, 0, 0, 0]));
+        assert!(tmp.is_zero());
     }
 
     // Test associativity
@@ -1282,71 +852,71 @@ fn test_fs_add_assign() {
 fn test_fs_sub_assign() {
     {
         // Test arbitrary subtraction that tests reduction.
-        let mut tmp = Fs(FsRepr([
+        let mut tmp = Fs([
             0xb384d9f6877afd99,
             0x4442513958e1a1c1,
             0x352c4b8a95eccc3f,
             0x2db62dee4b0f2,
-        ]));
-        tmp.sub_assign(&Fs(FsRepr([
+        ]);
+        tmp.sub_assign(&Fs([
             0xec5bd2d13ed6b05a,
             0x2adc0ab3a39b5fa,
             0x82d3360a493e637e,
             0x53ccff4a64d6679,
-        ])));
+        ]));
         assert_eq!(
             tmp,
-            Fs(FsRepr([
+            Fs([
                 0x97c015841f9b79f6,
                 0xe7fcb121eb6ffc49,
                 0xb8c050814de2a3c1,
                 0x943c0589dcafa21
-            ]))
+            ])
         );
 
         // Test the opposite subtraction which doesn't test reduction.
-        tmp = Fs(FsRepr([
+        tmp = Fs([
             0xec5bd2d13ed6b05a,
             0x2adc0ab3a39b5fa,
             0x82d3360a493e637e,
             0x53ccff4a64d6679,
-        ]));
-        tmp.sub_assign(&Fs(FsRepr([
+        ]);
+        tmp.sub_assign(&Fs([
             0xb384d9f6877afd99,
             0x4442513958e1a1c1,
             0x352c4b8a95eccc3f,
             0x2db62dee4b0f2,
-        ])));
+        ]));
         assert_eq!(
             tmp,
-            Fs(FsRepr([
+            Fs([
                 0x38d6f8dab75bb2c1,
                 0xbe6b6f71e1581439,
                 0x4da6ea7fb351973e,
                 0x539f491c768b587
-            ]))
+            ])
         );
 
         // Test for sensible results with zero
-        tmp = Fs(FsRepr::from(0));
-        tmp.sub_assign(&Fs(FsRepr::from(0)));
+        tmp = Fs::zero();
+        tmp.sub_assign(&Fs::from(0));
         assert!(tmp.is_zero());
 
-        tmp = Fs(FsRepr([
+        tmp = Fs([
             0x361e16aef5cce835,
             0x55bbde2536e274c1,
             0x4dc77a63fd15ee75,
             0x1e14bb37c14f230,
-        ]));
-        tmp.sub_assign(&Fs(FsRepr::from(0)));
+        ]);
+        tmp.sub_assign(&Fs::from(0));
         assert_eq!(
             tmp,
-            Fs(FsRepr([
+            Fs([
                 0x361e16aef5cce835,
                 0x55bbde2536e274c1,
                 0x4dc77a63fd15ee75,
                 0x1e14bb37c14f230
-            ]))
+            ])
         );
     }
 
@@ -1373,25 +943,25 @@ fn test_fs_sub_assign() {
 
 #[test]
 fn test_fs_mul_assign() {
-    let mut tmp = Fs(FsRepr([
+    let mut tmp = Fs([
         0xb433b01287f71744,
         0x4eafb86728c4d108,
         0xfdd52c14b9dfbe65,
         0x2ff1f3434821118,
-    ]));
-    tmp.mul_assign(&Fs(FsRepr([
+    ]);
+    tmp.mul_assign(&Fs([
         0xdae00fc63c9fa90f,
         0x5a5ed89b96ce21ce,
         0x913cd26101bd6f58,
         0x3f0822831697fe9,
-    ])));
+    ]));
     assert!(
-        tmp == Fs(FsRepr([
+        tmp == Fs([
             0xb68ecb61d54d2992,
             0x5ff95874defce6a6,
             0x3590eb053894657d,
             0x53823a118515933
-        ]))
+        ])
     );
 
     let mut rng = XorShiftRng::from_seed([
@@ -1443,80 +1013,73 @@ fn test_fs_mul_assign() {
 #[test]
 fn test_fs_shr() {
     let mut a = Fs::from_repr(FsRepr([
-        0xb33fbaec482a283f,
-        0x997de0d3a88cb3df,
-        0x9af62d2a9a0e5525,
-        0x06003ab08de70da1,
+        0x3f, 0x28, 0x2a, 0x48, 0xec, 0xba, 0x3f, 0xb3, 0xdf, 0xb3, 0x8c, 0xa8, 0xd3, 0xe0, 0x7d,
+        0x99, 0x25, 0x55, 0x0e, 0x9a, 0x2a, 0x2d, 0xf6, 0x9a, 0xa1, 0x0d, 0xe7, 0x8d, 0xb0, 0x3a,
+        0x00, 0x06,
     ]))
     .unwrap();
     a = a >> 0;
     assert_eq!(
         a.into_repr(),
         FsRepr([
-            0xb33fbaec482a283f,
-            0x997de0d3a88cb3df,
-            0x9af62d2a9a0e5525,
-            0x06003ab08de70da1,
+            0x3f, 0x28, 0x2a, 0x48, 0xec, 0xba, 0x3f, 0xb3, 0xdf, 0xb3, 0x8c, 0xa8, 0xd3, 0xe0,
+            0x7d, 0x99, 0x25, 0x55, 0x0e, 0x9a, 0x2a, 0x2d, 0xf6, 0x9a, 0xa1, 0x0d, 0xe7, 0x8d,
+            0xb0, 0x3a, 0x00, 0x06,
         ])
     );
     a = a >> 1;
     assert_eq!(
         a.into_repr(),
         FsRepr([
-            0xd99fdd762415141f,
-            0xccbef069d44659ef,
-            0xcd7b16954d072a92,
-            0x03001d5846f386d0,
+            0x1f, 0x14, 0x15, 0x24, 0x76, 0xdd, 0x9f, 0xd9, 0xef, 0x59, 0x46, 0xd4, 0x69, 0xf0,
+            0xbe, 0xcc, 0x92, 0x2a, 0x07, 0x4d, 0x95, 0x16, 0x7b, 0xcd, 0xd0, 0x86, 0xf3, 0x46,
+            0x58, 0x1d, 0x00, 0x03,
         ])
     );
     a = a >> 50;
     assert_eq!(
         a.into_repr(),
         FsRepr([
-            0xbc1a7511967bf667,
-            0xc5a55341caa4b32f,
-            0x075611bce1b4335e,
-            0x00000000000000c0,
+            0x67, 0xf6, 0x7b, 0x96, 0x11, 0x75, 0x1a, 0xbc, 0x2f, 0xb3, 0xa4, 0xca, 0x41, 0x53,
+            0xa5, 0xc5, 0x5e, 0x33, 0xb4, 0xe1, 0xbc, 0x11, 0x56, 0x07, 0xc0, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00,
         ])
     );
     a = a >> 130;
     assert_eq!(
         a.into_repr(),
         FsRepr([
-            0x01d5846f386d0cd7,
-            0x0000000000000030,
-            0x0000000000000000,
-            0x0000000000000000,
+            0xd7, 0x0c, 0x6d, 0x38, 0x6f, 0x84, 0xd5, 0x01, 0x30, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00,
         ])
     );
     a = a >> 64;
     assert_eq!(
         a.into_repr(),
         FsRepr([
-            0x0000000000000030,
-            0x0000000000000000,
-            0x0000000000000000,
-            0x0000000000000000,
+            0x30, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00,
         ])
     );
 }
 
 #[test]
-fn test_fr_squaring() {
-    let a = Fs(FsRepr([
+fn test_fs_squaring() {
+    let a = Fs([
         0xffffffffffffffff,
         0xffffffffffffffff,
         0xffffffffffffffff,
         0xe7db4ea6533afa8,
-    ]));
+    ]);
     assert!(a.is_valid());
     assert_eq!(
         a.square(),
         Fs::from_repr(FsRepr([
-            0x12c7f55cbc52fbaa,
-            0xdedc98a0b5e6ce9e,
-            0xad2892726a5396a,
-            0x9fe82af8fee77b3
+            0xaa, 0xfb, 0x52, 0xbc, 0x5c, 0xf5, 0xc7, 0x12, 0x9e, 0xce, 0xe6, 0xb5, 0xa0, 0x98,
+            0xdc, 0xde, 0x6a, 0x39, 0xa5, 0x26, 0x27, 0x89, 0xd2, 0x0a, 0xb3, 0x77, 0xee, 0x8f,
+            0xaf, 0x82, 0xfe, 0x09,
         ]))
         .unwrap()
     );
@@ -1658,42 +1221,39 @@ fn test_fs_sqrt() {
 fn test_fs_from_into_repr() {
     // r + 1 should not be in the field
     assert!(Fs::from_repr(FsRepr([
-        0xd0970e5ed6f72cb8,
-        0xa6682093ccc81082,
-        0x6673b0101343b00,
-        0xe7db4ea6533afa9
+        0xb8, 0x2c, 0xf7, 0xd6, 0x5e, 0x0e, 0x97, 0xd0, 0x82, 0x10, 0xc8, 0xcc, 0x93, 0x20, 0x68,
+        0xa6, 0x00, 0x3b, 0x34, 0x01, 0x01, 0x3b, 0x67, 0x06, 0xa9, 0xaf, 0x33, 0x65, 0xea, 0xb4,
+        0x7d, 0x0e,
     ]))
-    .is_err());
+    .is_none());
 
     // r should not be in the field
-    assert!(Fs::from_repr(Fs::char()).is_err());
+    assert!(Fs::from_repr(Fs::char()).is_none());
 
     // Multiply some arbitrary representations to see if the result is as expected.
-    let a = FsRepr([
-        0x5f2d0c05d0337b71,
-        0xa1df2b0f8a20479,
-        0xad73785e71bb863,
-        0x504a00480c9acec,
-    ]);
-    let mut a_fs = Fs::from_repr(a).unwrap();
-    let b = FsRepr([
-        0x66356ff51e477562,
-        0x60a92ab55cf7603,
-        0x8e4273c7364dd192,
-        0x36df8844a344dc5,
-    ]);
-    let b_fs = Fs::from_repr(b).unwrap();
-    let c = FsRepr([
-        0x7eef61708f4f2868,
-        0x747a7e6cf52946fb,
-        0x83dd75d7c9120017,
-        0x762f5177f0f3df7,
-    ]);
+    let mut a_fs = Fs::from_repr(FsRepr([
+        0x71, 0x7b, 0x33, 0xd0, 0x05, 0x0c, 0x2d, 0x5f, 0x79, 0x04, 0xa2, 0xf8, 0xb0, 0xf2, 0x1d,
+        0x0a, 0x63, 0xb8, 0x1b, 0xe7, 0x85, 0x37, 0xd7, 0x0a, 0xec, 0xac, 0xc9, 0x80, 0x04, 0xa0,
+        0x04, 0x05,
+    ]))
+    .unwrap();
+    let b_fs = Fs::from_repr(FsRepr([
+        0x62, 0x75, 0x47, 0x1e, 0xf5, 0x6f, 0x35, 0x66, 0x03, 0x76, 0xcf, 0x55, 0xab, 0x92, 0x0a,
+        0x06, 0x92, 0xd1, 0x4d, 0x36, 0xc7, 0x73, 0x42, 0x8e, 0xc5, 0x4d, 0x34, 0x4a, 0x84, 0xf8,
+        0x6d, 0x03,
+    ]))
+    .unwrap();
+    let c_fs = Fs::from_repr(FsRepr([
+        0x68, 0x28, 0x4f, 0x8f, 0x70, 0x61, 0xef, 0x7e, 0xfb, 0x46, 0x29, 0xf5, 0x6c, 0x7e, 0x7a,
+        0x74, 0x17, 0x00, 0x12, 0xc9, 0xd7, 0x75, 0xdd, 0x83, 0xf7, 0x3d, 0x0f, 0x7f, 0x17, 0xf5,
+        0x62, 0x07,
+    ]))
+    .unwrap();
     a_fs.mul_assign(&b_fs);
-    assert_eq!(a_fs.into_repr(), c);
+    assert_eq!(a_fs, c_fs);
 
     // Zero should be in the field.
-    assert!(Fs::from_repr(FsRepr::from(0)).unwrap().is_zero());
+    assert!(Fs::from_repr(FsRepr::default()).unwrap().is_zero());
 
     let mut rng = XorShiftRng::from_seed([
         0x59, 0x62, 0xbe, 0x5d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06, 0xbc,
@@ -1713,59 +1273,14 @@ fn test_fs_from_into_repr() {
 }
 
 #[test]
-fn test_fs_repr_display() {
-    assert_eq!(
-        format!(
-            "{}",
-            FsRepr([
-                0xa296db59787359df,
-                0x8d3e33077430d318,
-                0xd1abf5c606102eb7,
-                0xcbc33ee28108f0
-            ])
-        ),
-        "0x00cbc33ee28108f0d1abf5c606102eb78d3e33077430d318a296db59787359df".to_string()
-    );
-    assert_eq!(
-        format!(
-            "{}",
-            FsRepr([
-                0x14cb03535054a620,
-                0x312aa2bf2d1dff52,
-                0x970fe98746ab9361,
-                0xc1e18acf82711e6
-            ])
-        ),
-        "0x0c1e18acf82711e6970fe98746ab9361312aa2bf2d1dff5214cb03535054a620".to_string()
-    );
-    assert_eq!(
-        format!(
-            "{}",
-            FsRepr([
-                0xffffffffffffffff,
-                0xffffffffffffffff,
-                0xffffffffffffffff,
-                0xffffffffffffffff
-            ])
-        ),
-        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff".to_string()
-    );
-    assert_eq!(
-        format!("{}", FsRepr([0, 0, 0, 0])),
-        "0x0000000000000000000000000000000000000000000000000000000000000000".to_string()
-    );
-}
-
-#[test]
 fn test_fs_display() {
     assert_eq!(
         format!(
             "{}",
             Fs::from_repr(FsRepr([
-                0x5528efb9998a01a3,
-                0x5bd2add5cb357089,
-                0xc061fa6adb491f98,
-                0x70db9d143db03d9
+                0xa3, 0x01, 0x8a, 0x99, 0xb9, 0xef, 0x28, 0x55, 0x89, 0x70, 0x35, 0xcb, 0xd5, 0xad,
+                0xd2, 0x5b, 0x98, 0x1f, 0x49, 0xdb, 0x6a, 0xfa, 0x61, 0xc0, 0xd9, 0x03, 0xdb, 0x43,
+                0xd1, 0xb9, 0x0d, 0x07,
             ]))
             .unwrap()
         ),
@@ -1775,10 +1290,9 @@ fn test_fs_display() {
         format!(
             "{}",
             Fs::from_repr(FsRepr([
-                0xd674745e2717999e,
-                0xbeb1f52d3e96f338,
-                0x9c7ae147549482b9,
-                0x999706024530d22
+                0x9e, 0x99, 0x17, 0x27, 0x5e, 0x74, 0x74, 0xd6, 0x38, 0xf3, 0x96, 0x3e, 0x2d, 0xf5,
+                0xb1, 0xbe, 0xb9, 0x82, 0x94, 0x54, 0x47, 0xe1, 0x7a, 0x9c, 0x22, 0x0d, 0x53, 0x24,
+                0x60, 0x70, 0x99, 0x09,
             ]))
             .unwrap()
         ),

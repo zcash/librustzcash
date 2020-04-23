@@ -2,7 +2,7 @@
 
 use crate::jubjub::{edwards, Unknown};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
-use ff::{PrimeField, PrimeFieldRepr};
+use ff::PrimeField;
 use pairing::bls12_381::{Bls12, Fr, FrRepr};
 use std::io::{self, Read, Write};
 
@@ -138,9 +138,10 @@ impl SpendDescription {
 
         // Consensus rule (§7.3): Canonical encoding is enforced here
         let anchor = {
-            let mut f = FrRepr::default();
-            f.read_le(&mut reader)?;
-            Fr::from_repr(f).map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?
+            let mut f = FrRepr([0; 32]);
+            reader.read_exact(&mut f.0)?;
+            Fr::from_repr(f)
+                .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "anchor not in field"))?
         };
 
         let mut nullifier = [0; 32];
@@ -175,7 +176,7 @@ impl SpendDescription {
 
     pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
         self.cv.write(&mut writer)?;
-        self.anchor.into_repr().write_le(&mut writer)?;
+        writer.write_all(self.anchor.into_repr().as_ref())?;
         writer.write_all(&self.nullifier)?;
         self.rk.write(&mut writer)?;
         writer.write_all(&self.zkproof)?;
@@ -218,9 +219,10 @@ impl OutputDescription {
 
         // Consensus rule (§7.4): Canonical encoding is enforced here
         let cmu = {
-            let mut f = FrRepr::default();
-            f.read_le(&mut reader)?;
-            Fr::from_repr(f).map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?
+            let mut f = FrRepr([0; 32]);
+            reader.read_exact(&mut f.0)?;
+            Fr::from_repr(f)
+                .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "cmu not in field"))?
         };
 
         // Consensus rules (§4.5):
@@ -252,7 +254,7 @@ impl OutputDescription {
 
     pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
         self.cv.write(&mut writer)?;
-        self.cmu.into_repr().write_le(&mut writer)?;
+        writer.write_all(self.cmu.into_repr().as_ref())?;
         self.ephemeral_key.write(&mut writer)?;
         writer.write_all(&self.enc_ciphertext)?;
         writer.write_all(&self.out_ciphertext)?;

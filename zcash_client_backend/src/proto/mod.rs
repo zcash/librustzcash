@@ -1,6 +1,6 @@
 //! Generated code for handling light client protobuf structs.
 
-use ff::{PrimeField, PrimeFieldRepr};
+use ff::PrimeField;
 use pairing::bls12_381::{Bls12, Fr, FrRepr};
 use zcash_primitives::{
     block::{BlockHash, BlockHeader},
@@ -67,8 +67,8 @@ impl compact_formats::CompactOutput {
     /// [`CompactOutput.cmu`]: #structfield.cmu
     pub fn cmu(&self) -> Result<Fr, ()> {
         let mut repr = FrRepr::default();
-        repr.read_le(&self.cmu[..]).map_err(|_| ())?;
-        Fr::from_repr(repr).map_err(|_| ())
+        repr.as_mut().copy_from_slice(&self.cmu[..]);
+        Fr::from_repr(repr).ok_or(())
     }
 
     /// Returns the ephemeral public key for this output.

@@ -511,9 +511,9 @@ mod tests {
     use super::{CommitmentTree, Hashable, IncrementalWitness, MerklePath, PathFiller};
     use crate::sapling::Node;
 
-    use ff::PrimeFieldRepr;
     use hex;
     use pairing::bls12_381::FrRepr;
+    use std::convert::TryInto;
     use std::io::{self, Read, Write};
 
     const HEX_EMPTY_ROOTS: [&str; 33] = [
@@ -1016,9 +1016,7 @@ mod tests {
         let mut paths_i = 0;
         let mut witness_ser_i = 0;
         for i in 0..16 {
-            let mut cm = FrRepr::default();
-            cm.read_le(&hex::decode(commitments[i]).unwrap()[..])
-                .expect("length is 32 bytes");
+            let cm = FrRepr(hex::decode(commitments[i]).unwrap()[..].try_into().unwrap());
 
             let cm = Node::new(cm);
 

@@ -1,3 +1,4 @@
+use byteorder::{ByteOrder, LittleEndian};
 use ff::PrimeField;
 use std::iter;
 
@@ -19,7 +20,7 @@ pub(crate) fn wnaf_table<G: CurveProjective>(table: &mut Vec<G>, mut base: G, wi
 
 /// Replaces the contents of `wnaf` with the w-NAF representation of a little-endian
 /// scalar.
-pub(crate) fn wnaf_form<S: AsRef<[u64]>>(wnaf: &mut Vec<i64>, c: S, window: usize) {
+pub(crate) fn wnaf_form<S: AsRef<[u8]>>(wnaf: &mut Vec<i64>, c: S, window: usize) {
     // Required by the NAF definition
     debug_assert!(window >= 2);
     // Required so that the NAF digits fit in i64
@@ -27,11 +28,11 @@ pub(crate) fn wnaf_form<S: AsRef<[u64]>>(wnaf: &mut Vec<i64>, c: S, window: usiz
 
     wnaf.truncate(0);
 
-    let u64_len = c.as_ref().len();
-    let bit_len = u64_len * 64;
+    let bit_len = c.as_ref().len() * 8;
+    let u64_len = (bit_len + 1) / 64;
 
     let mut c_u64 = vec![0u64; u64_len + 1];
-    c_u64[0..u64_len].copy_from_slice(c.as_ref());
+    LittleEndian::read_u64_into(c.as_ref(), &mut c_u64[0..u64_len]);
 
     let width = 1u64 << window;
     let window_mask = width - 1;
@@ -144,13 +145,11 @@ impl<G: CurveProjective> Wnaf<(), Vec<G>, Vec<i64>> {
         &mut self,
         scalar: &<G as CurveProjective>::Scalar,
     ) -> Wnaf<usize, &mut Vec<G>, &[i64]> {
-        let scalar = scalar.into_repr();
-
         // Compute the appropriate window size for the scalar.
         let window_size = G::recommended_wnaf_for_scalar(&scalar);
 
         // Compute the wNAF form of the scalar.
-        wnaf_form(&mut self.scalar, scalar, window_size);
+        wnaf_form(&mut self.scalar, scalar.into_repr(), window_size);
 
         // Return a Wnaf object that mutably borrows the base storage location, but
         // immutably borrows the computed wNAF form scalar location.

@@ -1,4 +1,4 @@
-use ff::{BitIterator, Field, PrimeField, PrimeFieldRepr, SqrtField};
+use ff::{BitIterator, Field, PrimeField, SqrtField};
 use std::ops::{AddAssign, MulAssign, Neg, SubAssign};
 use subtle::CtOption;
 
@@ -83,15 +83,15 @@ impl<E: JubjubEngine, Subgroup> PartialEq for Point<E, Subgroup> {
 }
 
 impl<E: JubjubEngine> Point<E, Unknown> {
-    pub fn read<R: Read>(reader: R, params: &E::Params) -> io::Result<Self> {
+    pub fn read<R: Read>(mut reader: R, params: &E::Params) -> io::Result<Self> {
         let mut y_repr = <E::Fr as PrimeField>::Repr::default();
-        y_repr.read_le(reader)?;
+        reader.read_exact(y_repr.as_mut())?;
 
-        let x_sign = (y_repr.as_ref()[3] >> 63) == 1;
-        y_repr.as_mut()[3] &= 0x7fffffffffffffff;
+        let x_sign = (y_repr.as_ref()[31] >> 7) == 1;
+        y_repr.as_mut()[31] &= 0x7f;
 
         match E::Fr::from_repr(y_repr) {
-            Ok(y) => {
+            Some(y) => {
                 let p = Self::get_for_y(y, x_sign, params);
                 if bool::from(p.is_some()) {
                     Ok(p.unwrap())
@@ -99,7 +99,7 @@ impl<E: JubjubEngine> Point<E, Unknown> {
                     Err(io::Error::new(io::ErrorKind::InvalidInput, "not on curve"))
                 }
             }
-            Err(_) => Err(io::Error::new(
+            None => Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 "y is not in field",
             )),
@@ -167,17 +167,17 @@ impl<E: JubjubEngine> Point<E, Unknown> {
 }
 
 impl<E: JubjubEngine, Subgroup> Point<E, Subgroup> {
-    pub fn write<W: Write>(&self, writer: W) -> io::Result<()> {
+    pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
         let (x, y) = self.to_xy();
 
         assert_eq!(E::Fr::NUM_BITS, 255);
 
         let mut y_repr = y.into_repr();
         if x.is_odd() {
-            y_repr.as_mut()[3] |= 0x8000000000000000u64;
+            y_repr.as_mut()[31] |= 0x80;
         }
 
-        y_repr.write_le(writer)
+        writer.write_all(y_repr.as_ref())
     }
 
     /// Convert from a Montgomery point
@@ -467,7 +467,7 @@ impl<E: JubjubEngine, Subgroup> Point<E, Subgroup> {
 
         let mut res = Self::zero();
 
-        for b in BitIterator::<u64, _>::new(scalar.into()) {
+        for b in BitIterator::<u8, _>::new(scalar.into()) {
             res = res.double(params);
 
             if b {

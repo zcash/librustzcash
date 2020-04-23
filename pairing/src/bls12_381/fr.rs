@@ -1,10 +1,11 @@
-use ff::{Field, PrimeField, PrimeFieldDecodingError, PrimeFieldRepr};
+use ff::{Field, PrimeField};
 use std::ops::{AddAssign, MulAssign, SubAssign};
 
 #[derive(PrimeField)]
 #[PrimeFieldModulus = "52435875175126190479447740508185965837690552500527637822603658699938581184513"]
 #[PrimeFieldGenerator = "7"]
-pub struct Fr(FrRepr);
+#[PrimeFieldReprEndianness = "little"]
+pub struct Fr([u64; 4]);
 
 #[cfg(test)]
 use ff::PowVartime;
@@ -16,372 +17,25 @@ use rand_xorshift::XorShiftRng;
 use std::ops::Neg;
 
 #[test]
-fn test_fr_repr_ordering() {
-    fn assert_equality(a: FrRepr, b: FrRepr) {
-        assert_eq!(a, b);
-        assert!(a.cmp(&b) == ::std::cmp::Ordering::Equal);
-    }
-
-    fn assert_lt(a: FrRepr, b: FrRepr) {
-        assert!(a < b);
-        assert!(b > a);
-    }
-
-    assert_equality(
-        FrRepr([9999, 9999, 9999, 9999]),
-        FrRepr([9999, 9999, 9999, 9999]),
-    );
-    assert_equality(
-        FrRepr([9999, 9998, 9999, 9999]),
-        FrRepr([9999, 9998, 9999, 9999]),
-    );
-    assert_equality(
-        FrRepr([9999, 9999, 9999, 9997]),
-        FrRepr([9999, 9999, 9999, 9997]),
-    );
-    assert_lt(
-        FrRepr([9999, 9997, 9999, 9998]),
-        FrRepr([9999, 9997, 9999, 9999]),
-    );
-    assert_lt(
-        FrRepr([9999, 9997, 9998, 9999]),
-        FrRepr([9999, 9997, 9999, 9999]),
-    );
-    assert_lt(
-        FrRepr([9, 9999, 9999, 9997]),
-        FrRepr([9999, 9999, 9999, 9997]),
-    );
-}
-
-#[test]
-fn test_fr_repr_from() {
-    assert_eq!(FrRepr::from(100), FrRepr([100, 0, 0, 0]));
-}
-
-#[test]
-fn test_fr_repr_is_odd() {
-    assert!(!FrRepr::from(0).is_odd());
-    assert!(FrRepr::from(0).is_even());
-    assert!(FrRepr::from(1).is_odd());
-    assert!(!FrRepr::from(1).is_even());
-    assert!(!FrRepr::from(324834872).is_odd());
-    assert!(FrRepr::from(324834872).is_even());
-    assert!(FrRepr::from(324834873).is_odd());
-    assert!(!FrRepr::from(324834873).is_even());
-}
-
-#[test]
-fn test_fr_repr_is_zero() {
-    assert!(FrRepr::from(0).is_zero());
-    assert!(!FrRepr::from(1).is_zero());
-    assert!(!FrRepr([0, 0, 1, 0]).is_zero());
-}
-
-#[test]
-fn test_fr_repr_div2() {
-    let mut a = FrRepr([
-        0xbd2920b19c972321,
-        0x174ed0466a3be37e,
-        0xd468d5e3b551f0b5,
-        0xcb67c072733beefc,
-    ]);
-    a.div2();
-    assert_eq!(
-        a,
-        FrRepr([
-            0x5e949058ce4b9190,
-            0x8ba76823351df1bf,
-            0x6a346af1daa8f85a,
-            0x65b3e039399df77e
-        ])
-    );
-    for _ in 0..10 {
-        a.div2();
-    }
-    assert_eq!(
-        a,
-        FrRepr([
-            0x6fd7a524163392e4,
-            0x16a2e9da08cd477c,
-            0xdf9a8d1abc76aa3e,
-            0x196cf80e4e677d
-        ])
-    );
-    for _ in 0..200 {
-        a.div2();
-    }
-    assert_eq!(a, FrRepr([0x196cf80e4e67, 0x0, 0x0, 0x0]));
-    for _ in 0..40 {
-        a.div2();
-    }
-    assert_eq!(a, FrRepr([0x19, 0x0, 0x0, 0x0]));
-    for _ in 0..4 {
-        a.div2();
-    }
-    assert_eq!(a, FrRepr([0x1, 0x0, 0x0, 0x0]));
-    a.div2();
-    assert!(a.is_zero());
-}
-
-#[test]
-fn test_fr_repr_shr() {
-    let mut a = FrRepr([
-        0xb33fbaec482a283f,
-        0x997de0d3a88cb3df,
-        0x9af62d2a9a0e5525,
-        0x36003ab08de70da1,
-    ]);
-    a.shr(0);
-    assert_eq!(
-        a,
-        FrRepr([
-            0xb33fbaec482a283f,
-            0x997de0d3a88cb3df,
-            0x9af62d2a9a0e5525,
-            0x36003ab08de70da1
-        ])
-    );
-    a.shr(1);
-    assert_eq!(
-        a,
-        FrRepr([
-            0xd99fdd762415141f,
-            0xccbef069d44659ef,
-            0xcd7b16954d072a92,
-            0x1b001d5846f386d0
-        ])
-    );
-    a.shr(50);
-    assert_eq!(
-        a,
-        FrRepr([
-            0xbc1a7511967bf667,
-            0xc5a55341caa4b32f,
-            0x75611bce1b4335e,
-            0x6c0
-        ])
-    );
-    a.shr(130);
-    assert_eq!(a, FrRepr([0x1d5846f386d0cd7, 0x1b0, 0x0, 0x0]));
-    a.shr(64);
-    assert_eq!(a, FrRepr([0x1b0, 0x0, 0x0, 0x0]));
-}
-
-#[test]
-fn test_fr_repr_mul2() {
-    let mut a = FrRepr::from(23712937547);
-    a.mul2();
-    assert_eq!(a, FrRepr([0xb0acd6c96, 0x0, 0x0, 0x0]));
-    for _ in 0..60 {
-        a.mul2();
-    }
-    assert_eq!(a, FrRepr([0x6000000000000000, 0xb0acd6c9, 0x0, 0x0]));
-    for _ in 0..128 {
-        a.mul2();
-    }
-    assert_eq!(a, FrRepr([0x0, 0x0, 0x6000000000000000, 0xb0acd6c9]));
-    for _ in 0..60 {
-        a.mul2();
-    }
-    assert_eq!(a, FrRepr([0x0, 0x0, 0x0, 0x9600000000000000]));
-    for _ in 0..7 {
-        a.mul2();
-    }
-    assert!(a.is_zero());
-}
-
-#[test]
-fn test_fr_repr_num_bits() {
-    let mut a = FrRepr::from(0);
-    assert_eq!(0, a.num_bits());
-    a = FrRepr::from(1);
-    for i in 1..257 {
-        assert_eq!(i, a.num_bits());
-        a.mul2();
-    }
-    assert_eq!(0, a.num_bits());
-}
-
-#[test]
-fn test_fr_repr_sub_noborrow() {
-    let mut rng = XorShiftRng::from_seed([
-        0x59, 0x62, 0xbe, 0x5d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06, 0xbc,
-        0xe5,
-    ]);
-
-    let mut t = FrRepr([
-        0x8e62a7e85264e2c3,
-        0xb23d34c1941d3ca,
-        0x5976930b7502dd15,
-        0x600f3fb517bf5495,
-    ]);
-    t.sub_noborrow(&FrRepr([
-        0xd64f669809cbc6a4,
-        0xfa76cb9d90cf7637,
-        0xfefb0df9038d43b3,
-        0x298a30c744b31acf,
-    ]));
-    assert!(
-        t == FrRepr([
-            0xb813415048991c1f,
-            0x10ad07ae88725d92,
-            0x5a7b851271759961,
-            0x36850eedd30c39c5
-        ])
-    );
-
-    for _ in 0..1000 {
-        let mut a = Fr::random(&mut rng).into_repr();
-        a.0[3] >>= 30;
-        let mut b = a;
-        for _ in 0..10 {
-            b.mul2();
-        }
-        let mut c = b;
-        for _ in 0..10 {
-            c.mul2();
-        }
-
-        assert!(a < b);
-        assert!(b < c);
-
-        let mut csub_ba = c;
-        csub_ba.sub_noborrow(&b);
-        csub_ba.sub_noborrow(&a);
-
-        let mut csub_ab = c;
-        csub_ab.sub_noborrow(&a);
-        csub_ab.sub_noborrow(&b);
-
-        assert_eq!(csub_ab, csub_ba);
-    }
-
-    // Subtracting r+1 from r should produce -1 (mod 2**256)
-    let mut qplusone = FrRepr([
-        0xffffffff00000001,
-        0x53bda402fffe5bfe,
-        0x3339d80809a1d805,
-        0x73eda753299d7d48,
-    ]);
-    qplusone.sub_noborrow(&FrRepr([
-        0xffffffff00000002,
-        0x53bda402fffe5bfe,
-        0x3339d80809a1d805,
-        0x73eda753299d7d48,
-    ]));
-    assert_eq!(
-        qplusone,
-        FrRepr([
-            0xffffffffffffffff,
-            0xffffffffffffffff,
-            0xffffffffffffffff,
-            0xffffffffffffffff
-        ])
-    );
-}
-
-#[test]
-fn test_fr_repr_add_nocarry() {
-    let mut rng = XorShiftRng::from_seed([
-        0x59, 0x62, 0xbe, 0x5d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06, 0xbc,
-        0xe5,
-    ]);
-
-    let mut t = FrRepr([
-        0xd64f669809cbc6a4,
-        0xfa76cb9d90cf7637,
-        0xfefb0df9038d43b3,
-        0x298a30c744b31acf,
-    ]);
-    t.add_nocarry(&FrRepr([
-        0x8e62a7e85264e2c3,
-        0xb23d34c1941d3ca,
-        0x5976930b7502dd15,
-        0x600f3fb517bf5495,
-    ]));
-    assert_eq!(
-        t,
-        FrRepr([
-            0x64b20e805c30a967,
-            0x59a9ee9aa114a02,
-            0x5871a104789020c9,
-            0x8999707c5c726f65
-        ])
-    );
-
-    // Test for the associativity of addition.
-    for _ in 0..1000 {
-        let mut a = Fr::random(&mut rng).into_repr();
-        let mut b = Fr::random(&mut rng).into_repr();
-        let mut c = Fr::random(&mut rng).into_repr();
-
-        // Unset the first few bits, so that overflow won't occur.
-        a.0[3] >>= 3;
-        b.0[3] >>= 3;
-        c.0[3] >>= 3;
-
-        let mut abc = a;
-        abc.add_nocarry(&b);
-        abc.add_nocarry(&c);
-
-        let mut acb = a;
-        acb.add_nocarry(&c);
-        acb.add_nocarry(&b);
-
-        let mut bac = b;
-        bac.add_nocarry(&a);
-        bac.add_nocarry(&c);
-
-        let mut bca = b;
-        bca.add_nocarry(&c);
-        bca.add_nocarry(&a);
-
-        let mut cab = c;
-        cab.add_nocarry(&a);
-        cab.add_nocarry(&b);
-
-        let mut cba = c;
-        cba.add_nocarry(&b);
-        cba.add_nocarry(&a);
-
-        assert_eq!(abc, acb);
-        assert_eq!(abc, bac);
-        assert_eq!(abc, bca);
-        assert_eq!(abc, cab);
-        assert_eq!(abc, cba);
-    }
-
-    // Adding 1 to (2^256 - 1) should produce zero
-    let mut x = FrRepr([
-        0xffffffffffffffff,
-        0xffffffffffffffff,
-        0xffffffffffffffff,
-        0xffffffffffffffff,
-    ]);
-    x.add_nocarry(&FrRepr::from(1));
-    assert!(x.is_zero());
-}
-
-#[test]
 fn test_fr_is_valid() {
-    let mut a = Fr(MODULUS);
+    let mut a = MODULUS_LIMBS;
     assert!(!a.is_valid());
-    a.0.sub_noborrow(&FrRepr::from(1));
+    a.sub_noborrow(&Fr([1, 0, 0, 0]));
     assert!(a.is_valid());
     assert!(Fr::from(0).is_valid());
-    assert!(Fr(FrRepr([
+    assert!(Fr([
         0xffffffff00000000,
         0x53bda402fffe5bfe,
         0x3339d80809a1d805,
         0x73eda753299d7d48
-    ]))
+    ])
     .is_valid());
-    assert!(!Fr(FrRepr([
+    assert!(!Fr([
         0xffffffffffffffff,
         0xffffffffffffffff,
         0xffffffffffffffff,
         0xffffffffffffffff
-    ]))
+    ])
     .is_valid());
 
     let mut rng = XorShiftRng::from_seed([
@@ -399,85 +53,85 @@ fn test_fr_is_valid() {
 fn test_fr_add_assign() {
     {
         // Random number
-        let mut tmp = Fr(FrRepr([
+        let mut tmp = Fr([
             0x437ce7616d580765,
             0xd42d1ccb29d1235b,
             0xed8f753821bd1423,
             0x4eede1c9c89528ca,
-        ]));
+        ]);
         assert!(tmp.is_valid());
         // Test that adding zero has no effect.
-        tmp.add_assign(&Fr(FrRepr::from(0)));
+        tmp.add_assign(&Fr([0, 0, 0, 0]));
         assert_eq!(
             tmp,
-            Fr(FrRepr([
+            Fr([
                 0x437ce7616d580765,
                 0xd42d1ccb29d1235b,
                 0xed8f753821bd1423,
                 0x4eede1c9c89528ca
-            ]))
+            ])
         );
         // Add one and test for the result.
-        tmp.add_assign(&Fr(FrRepr::from(1)));
+        tmp.add_assign(&Fr([1, 0, 0, 0]));
         assert_eq!(
             tmp,
-            Fr(FrRepr([
+            Fr([
                 0x437ce7616d580766,
                 0xd42d1ccb29d1235b,
                 0xed8f753821bd1423,
                 0x4eede1c9c89528ca
-            ]))
+            ])
         );
         // Add another random number that exercises the reduction.
-        tmp.add_assign(&Fr(FrRepr([
+        tmp.add_assign(&Fr([
             0x946f435944f7dc79,
             0xb55e7ee6533a9b9b,
             0x1e43b84c2f6194ca,
             0x58717ab525463496,
-        ])));
+        ]));
         assert_eq!(
             tmp,
-            Fr(FrRepr([
+            Fr([
                 0xd7ec2abbb24fe3de,
                 0x35cdf7ae7d0d62f7,
                 0xd899557c477cd0e9,
                 0x3371b52bc43de018
-            ]))
+            ])
         );
         // Add one to (r - 1) and test for the result.
-        tmp = Fr(FrRepr([
+        tmp = Fr([
             0xffffffff00000000,
             0x53bda402fffe5bfe,
             0x3339d80809a1d805,
             0x73eda753299d7d48,
-        ]));
-        tmp.add_assign(&Fr(FrRepr::from(1)));
-        assert!(tmp.0.is_zero());
+        ]);
+        tmp.add_assign(&Fr([1, 0, 0, 0]));
+        assert!(tmp.is_zero());
         // Add a random number to another one such that the result is r - 1
-        tmp = Fr(FrRepr([
+        tmp = Fr([
             0xade5adacdccb6190,
             0xaa21ee0f27db3ccd,
             0x2550f4704ae39086,
             0x591d1902e7c5ba27,
-        ]));
-        tmp.add_assign(&Fr(FrRepr([
+        ]);
+        tmp.add_assign(&Fr([
             0x521a525223349e70,
             0xa99bb5f3d8231f31,
             0xde8e397bebe477e,
             0x1ad08e5041d7c321,
-        ])));
+        ]));
         assert_eq!(
             tmp,
-            Fr(FrRepr([
+            Fr([
                 0xffffffff00000000,
                 0x53bda402fffe5bfe,
                 0x3339d80809a1d805,
                 0x73eda753299d7d48
-            ]))
+            ])
         );
         // Add one to the result and test for it.
-        tmp.add_assign(&Fr(FrRepr::from(1)));
-        assert!(tmp.0.is_zero());
+        tmp.add_assign(&Fr([1, 0, 0, 0]));
+        assert!(tmp.is_zero());
     }
 
     // Test associativity
@@ -511,71 +165,71 @@ fn test_fr_add_assign() {
 fn test_fr_sub_assign() {
     {
         // Test arbitrary subtraction that tests reduction.
-        let mut tmp = Fr(FrRepr([
+        let mut tmp = Fr([
             0x6a68c64b6f735a2b,
             0xd5f4d143fe0a1972,
             0x37c17f3829267c62,
             0xa2f37391f30915c,
-        ]));
-        tmp.sub_assign(&Fr(FrRepr([
+        ]);
+        tmp.sub_assign(&Fr([
             0xade5adacdccb6190,
             0xaa21ee0f27db3ccd,
             0x2550f4704ae39086,
             0x591d1902e7c5ba27,
-        ])));
+        ]));
         assert_eq!(
             tmp,
-            Fr(FrRepr([
+            Fr([
                 0xbc83189d92a7f89c,
                 0x7f908737d62d38a3,
                 0x45aa62cfe7e4c3e1,
                 0x24ffc5896108547d
-            ]))
+            ])
         );
 
         // Test the opposite subtraction which doesn't test reduction.
-        tmp = Fr(FrRepr([
+        tmp = Fr([
             0xade5adacdccb6190,
             0xaa21ee0f27db3ccd,
             0x2550f4704ae39086,
             0x591d1902e7c5ba27,
-        ]));
-        tmp.sub_assign(&Fr(FrRepr([
+        ]);
+        tmp.sub_assign(&Fr([
             0x6a68c64b6f735a2b,
             0xd5f4d143fe0a1972,
             0x37c17f3829267c62,
             0xa2f37391f30915c,
-        ])));
+        ]));
         assert_eq!(
             tmp,
-            Fr(FrRepr([
+            Fr([
                 0x437ce7616d580765,
                 0xd42d1ccb29d1235b,
                 0xed8f753821bd1423,
                 0x4eede1c9c89528ca
-            ]))
+            ])
         );
 
         // Test for sensible results with zero
-        tmp = Fr(FrRepr::from(0));
-        tmp.sub_assign(&Fr(FrRepr::from(0)));
+        tmp = Fr::from(0);
+        tmp.sub_assign(&Fr::from(0));
         assert!(tmp.is_zero());
 
-        tmp = Fr(FrRepr([
+        tmp = Fr([
             0x437ce7616d580765,
             0xd42d1ccb29d1235b,
             0xed8f753821bd1423,
             0x4eede1c9c89528ca,
-        ]));
-        tmp.sub_assign(&Fr(FrRepr::from(0)));
+        ]);
+        tmp.sub_assign(&Fr::from(0));
         assert_eq!(
             tmp,
-            Fr(FrRepr([
+            Fr([
                 0x437ce7616d580765,
                 0xd42d1ccb29d1235b,
                 0xed8f753821bd1423,
                 0x4eede1c9c89528ca
-            ]))
+            ])
         );
     }
 
@@ -602,25 +256,25 @@ fn test_fr_sub_assign() {
 
 #[test]
 fn test_fr_mul_assign() {
-    let mut tmp = Fr(FrRepr([
+    let mut tmp = Fr([
         0x6b7e9b8faeefc81a,
         0xe30a8463f348ba42,
         0xeff3cb67a8279c9c,
         0x3d303651bd7c774d,
-    ]));
-    tmp.mul_assign(&Fr(FrRepr([
+    ]);
+    tmp.mul_assign(&Fr([
         0x13ae28e3bc35ebeb,
         0xa10f4488075cae2c,
         0x8160e95a853c3b5d,
         0x5ae3f03b561a841d,
-    ])));
+    ]));
     assert!(
-        tmp == Fr(FrRepr([
+        tmp == Fr([
             0x23717213ce710f71,
             0xdbee1fe53a16e1af,
             0xf565d3e1c2a48000,
             0x4426507ee75df9d7
-        ]))
+        ])
     );
 
     let mut rng = XorShiftRng::from_seed([
@@ -672,80 +326,73 @@ fn test_fr_mul_assign() {
 #[test]
 fn test_fr_shr() {
     let mut a = Fr::from_repr(FrRepr([
-        0xb33fbaec482a283f,
-        0x997de0d3a88cb3df,
-        0x9af62d2a9a0e5525,
-        0x36003ab08de70da1,
+        0x3f, 0x28, 0x2a, 0x48, 0xec, 0xba, 0x3f, 0xb3, 0xdf, 0xb3, 0x8c, 0xa8, 0xd3, 0xe0, 0x7d,
+        0x99, 0x25, 0x55, 0x0e, 0x9a, 0x2a, 0x2d, 0xf6, 0x9a, 0xa1, 0x0d, 0xe7, 0x8d, 0xb0, 0x3a,
+        0x00, 0x36,
     ]))
     .unwrap();
     a = a >> 0;
     assert_eq!(
         a.into_repr(),
         FrRepr([
-            0xb33fbaec482a283f,
-            0x997de0d3a88cb3df,
-            0x9af62d2a9a0e5525,
-            0x36003ab08de70da1,
+            0x3f, 0x28, 0x2a, 0x48, 0xec, 0xba, 0x3f, 0xb3, 0xdf, 0xb3, 0x8c, 0xa8, 0xd3, 0xe0,
+            0x7d, 0x99, 0x25, 0x55, 0x0e, 0x9a, 0x2a, 0x2d, 0xf6, 0x9a, 0xa1, 0x0d, 0xe7, 0x8d,
+            0xb0, 0x3a, 0x00, 0x36,
         ])
     );
     a = a >> 1;
     assert_eq!(
         a.into_repr(),
         FrRepr([
-            0xd99fdd762415141f,
-            0xccbef069d44659ef,
-            0xcd7b16954d072a92,
-            0x1b001d5846f386d0,
+            0x1f, 0x14, 0x15, 0x24, 0x76, 0xdd, 0x9f, 0xd9, 0xef, 0x59, 0x46, 0xd4, 0x69, 0xf0,
+            0xbe, 0xcc, 0x92, 0x2a, 0x07, 0x4d, 0x95, 0x16, 0x7b, 0xcd, 0xd0, 0x86, 0xf3, 0x46,
+            0x58, 0x1d, 0x00, 0x1b,
         ])
     );
     a = a >> 50;
     assert_eq!(
         a.into_repr(),
         FrRepr([
-            0xbc1a7511967bf667,
-            0xc5a55341caa4b32f,
-            0x075611bce1b4335e,
-            0x00000000000006c0,
+            0x67, 0xf6, 0x7b, 0x96, 0x11, 0x75, 0x1a, 0xbc, 0x2f, 0xb3, 0xa4, 0xca, 0x41, 0x53,
+            0xa5, 0xc5, 0x5e, 0x33, 0xb4, 0xe1, 0xbc, 0x11, 0x56, 0x07, 0xc0, 0x06, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00,
         ])
     );
     a = a >> 130;
     assert_eq!(
         a.into_repr(),
         FrRepr([
-            0x01d5846f386d0cd7,
-            0x00000000000001b0,
-            0x0000000000000000,
-            0x0000000000000000,
+            0xd7, 0x0c, 0x6d, 0x38, 0x6f, 0x84, 0xd5, 0x01, 0xb0, 0x01, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00,
         ])
     );
     a = a >> 64;
     assert_eq!(
         a.into_repr(),
         FrRepr([
-            0x00000000000001b0,
-            0x0000000000000000,
-            0x0000000000000000,
-            0x0000000000000000,
+            0xb0, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00,
         ])
     );
 }
 
 #[test]
 fn test_fr_squaring() {
-    let a = Fr(FrRepr([
+    let a = Fr([
         0xffffffffffffffff,
         0xffffffffffffffff,
         0xffffffffffffffff,
         0x73eda753299d7d47,
-    ]));
+    ]);
     assert!(a.is_valid());
     assert_eq!(
         a.square(),
         Fr::from_repr(FrRepr([
-            0xc0d698e7bde077b8,
-            0xb79a310579e76ec2,
-            0xac1da8d0a9af4e5f,
-            0x13f629c49bf23e97
+            0xb8, 0x77, 0xe0, 0xbd, 0xe7, 0x98, 0xd6, 0xc0, 0xc2, 0x6e, 0xe7, 0x79, 0x05, 0x31,
+            0x9a, 0xb7, 0x5f, 0x4e, 0xaf, 0xa9, 0xd0, 0xa8, 0x1d, 0xac, 0x97, 0x3e, 0xf2, 0x9b,
+            0xc4, 0x29, 0xf6, 0x13,
         ]))
         .unwrap()
     );
@@ -883,42 +530,38 @@ fn test_fr_sqrt() {
 fn test_fr_from_into_repr() {
     // r + 1 should not be in the field
     assert!(Fr::from_repr(FrRepr([
-        0xffffffff00000002,
-        0x53bda402fffe5bfe,
-        0x3339d80809a1d805,
-        0x73eda753299d7d48
+        0x02, 0x00, 0x00, 0x00, 0xff, 0xff, 0xff, 0xff, 0xfe, 0x5b, 0xfe, 0xff, 0x02, 0xa4, 0xbd,
+        0x53, 0x05, 0xd8, 0xa1, 0x09, 0x08, 0xd8, 0x39, 0x33, 0x48, 0x7d, 0x9d, 0x29, 0x53, 0xa7,
+        0xed, 0x73,
     ]))
-    .is_err());
+    .is_none());
 
     // r should not be in the field
-    assert!(Fr::from_repr(Fr::char()).is_err());
+    assert!(Fr::from_repr(Fr::char()).is_none());
 
     // Multiply some arbitrary representations to see if the result is as expected.
     let a = FrRepr([
-        0x25ebe3a3ad3c0c6a,
-        0x6990e39d092e817c,
-        0x941f900d42f5658e,
-        0x44f8a103b38a71e0,
+        0x6a, 0x0c, 0x3c, 0xad, 0xa3, 0xe3, 0xeb, 0x25, 0x7c, 0x81, 0x2e, 0x09, 0x9d, 0xe3, 0x90,
+        0x69, 0x8e, 0x65, 0xf5, 0x42, 0x0d, 0x90, 0x1f, 0x94, 0xe0, 0x71, 0x8a, 0xb3, 0x03, 0xa1,
+        0xf8, 0x44,
     ]);
     let mut a_fr = Fr::from_repr(a).unwrap();
     let b = FrRepr([
-        0x264e9454885e2475,
-        0x46f7746bb0308370,
-        0x4683ef5347411f9,
-        0x58838d7f208d4492,
+        0x75, 0x24, 0x5e, 0x88, 0x54, 0x94, 0x4e, 0x26, 0x70, 0x83, 0x30, 0xb0, 0x6b, 0x74, 0xf7,
+        0x46, 0xf9, 0x11, 0x74, 0x34, 0xf5, 0x3e, 0x68, 0x04, 0x92, 0x44, 0x8d, 0x20, 0x7f, 0x8d,
+        0x83, 0x58,
     ]);
     let b_fr = Fr::from_repr(b).unwrap();
     let c = FrRepr([
-        0x48a09ab93cfc740d,
-        0x3a6600fbfc7a671,
-        0x838567017501d767,
-        0x7161d6da77745512,
+        0x0d, 0x74, 0xfc, 0x3c, 0xb9, 0x9a, 0xa0, 0x48, 0x71, 0xa6, 0xc7, 0xbf, 0x0f, 0x60, 0xa6,
+        0x03, 0x67, 0xd7, 0x01, 0x75, 0x01, 0x67, 0x85, 0x83, 0x12, 0x55, 0x74, 0x77, 0xda, 0xd6,
+        0x61, 0x71,
     ]);
     a_fr.mul_assign(&b_fr);
     assert_eq!(a_fr.into_repr(), c);
 
     // Zero should be in the field.
-    assert!(Fr::from_repr(FrRepr::from(0)).unwrap().is_zero());
+    assert!(Fr::from_repr(FrRepr([0; 32])).unwrap().is_zero());
 
     let mut rng = XorShiftRng::from_seed([
         0x59, 0x62, 0xbe, 0x5d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06, 0xbc,
@@ -938,59 +581,14 @@ fn test_fr_from_into_repr() {
 }
 
 #[test]
-fn test_fr_repr_display() {
-    assert_eq!(
-        format!(
-            "{}",
-            FrRepr([
-                0x2829c242fa826143,
-                0x1f32cf4dd4330917,
-                0x932e4e479d168cd9,
-                0x513c77587f563f64
-            ])
-        ),
-        "0x513c77587f563f64932e4e479d168cd91f32cf4dd43309172829c242fa826143".to_string()
-    );
-    assert_eq!(
-        format!(
-            "{}",
-            FrRepr([
-                0x25ebe3a3ad3c0c6a,
-                0x6990e39d092e817c,
-                0x941f900d42f5658e,
-                0x44f8a103b38a71e0
-            ])
-        ),
-        "0x44f8a103b38a71e0941f900d42f5658e6990e39d092e817c25ebe3a3ad3c0c6a".to_string()
-    );
-    assert_eq!(
-        format!(
-            "{}",
-            FrRepr([
-                0xffffffffffffffff,
-                0xffffffffffffffff,
-                0xffffffffffffffff,
-                0xffffffffffffffff
-            ])
-        ),
-        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff".to_string()
-    );
-    assert_eq!(
-        format!("{}", FrRepr([0, 0, 0, 0])),
-        "0x0000000000000000000000000000000000000000000000000000000000000000".to_string()
-    );
-}
-
-#[test]
 fn test_fr_display() {
     assert_eq!(
         format!(
             "{}",
             Fr::from_repr(FrRepr([
-                0xc3cae746a3b5ecc7,
-                0x185ec8eb3f5b5aee,
-                0x684499ffe4b9dd99,
-                0x7c9bba7afb68faa
+                0xc7, 0xec, 0xb5, 0xa3, 0x46, 0xe7, 0xca, 0xc3, 0xee, 0x5a, 0x5b, 0x3f, 0xeb, 0xc8,
+                0x5e, 0x18, 0x99, 0xdd, 0xb9, 0xe4, 0xff, 0x99, 0x44, 0x68, 0xaa, 0x8f, 0xb6, 0xaf,
+                0xa7, 0xbb, 0xc9, 0x07,
             ]))
             .unwrap()
         ),
@@ -1000,10 +598,9 @@ fn test_fr_display() {
         format!(
             "{}",
             Fr::from_repr(FrRepr([
-                0x44c71298ff198106,
-                0xb0ad10817df79b6a,
-                0xd034a80a2b74132b,
-                0x41cf9a1336f50719
+                0x06, 0x81, 0x19, 0xff, 0x98, 0x12, 0xc7, 0x44, 0x6a, 0x9b, 0xf7, 0x7d, 0x81, 0x10,
+                0xad, 0xb0, 0x2b, 0x13, 0x74, 0x2b, 0x0a, 0xa8, 0x34, 0xd0, 0x19, 0x07, 0xf5, 0x36,
+                0x13, 0x9a, 0xcf, 0x41,
             ]))
             .unwrap()
         ),

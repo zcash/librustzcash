@@ -9,7 +9,7 @@ use crate::{
     primitives::{ProofGenerationKey, ViewingKey},
 };
 use blake2b_simd::{Hash as Blake2bHash, Params as Blake2bParams};
-use ff::{PrimeField, PrimeFieldRepr};
+use ff::PrimeField;
 use std::io::{self, Read, Write};
 
 pub const PRF_EXPAND_PERSONALIZATION: &[u8; 16] = b"Zcash_ExpandSeed";
@@ -71,14 +71,14 @@ impl<E: JubjubEngine> ExpandedSpendingKey<E> {
 
     pub fn read<R: Read>(mut reader: R) -> io::Result<Self> {
         let mut ask_repr = <E::Fs as PrimeField>::Repr::default();
-        ask_repr.read_le(&mut reader)?;
+        reader.read_exact(ask_repr.as_mut())?;
         let ask = E::Fs::from_repr(ask_repr)
-            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "ask not in field"))?;
 
         let mut nsk_repr = <E::Fs as PrimeField>::Repr::default();
-        nsk_repr.read_le(&mut reader)?;
+        reader.read_exact(nsk_repr.as_mut())?;
         let nsk = E::Fs::from_repr(nsk_repr)
-            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "nsk not in field"))?;
 
         let mut ovk = [0; 32];
         reader.read_exact(&mut ovk)?;
@@ -91,8 +91,8 @@ impl<E: JubjubEngine> ExpandedSpendingKey<E> {
     }
 
     pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
-        self.ask.into_repr().write_le(&mut writer)?;
-        self.nsk.into_repr().write_le(&mut writer)?;
+        writer.write_all(self.ask.into_repr().as_ref())?;
+        writer.write_all(self.nsk.into_repr().as_ref())?;
         writer.write_all(&self.ovk.0)?;
 
         Ok(())

@@ -5,7 +5,7 @@ use crate::{
     pedersen_hash::{pedersen_hash, Personalization},
     primitives::Note,
 };
-use ff::{BitIterator, PrimeField, PrimeFieldRepr};
+use ff::{BitIterator, PrimeField};
 use lazy_static::lazy_static;
 use pairing::bls12_381::{Bls12, Fr, FrRepr};
 use rand_core::{CryptoRng, RngCore};
@@ -21,7 +21,7 @@ pub const SAPLING_COMMITMENT_TREE_DEPTH: usize = 32;
 pub fn merkle_hash(depth: usize, lhs: &FrRepr, rhs: &FrRepr) -> FrRepr {
     let lhs = {
         let mut tmp = [false; 256];
-        for (a, b) in tmp.iter_mut().rev().zip(BitIterator::<u64, _>::new(lhs)) {
+        for (a, b) in tmp.iter_mut().rev().zip(BitIterator::<u8, _>::new(lhs)) {
             *a = b;
         }
         tmp
@@ -29,7 +29,7 @@ pub fn merkle_hash(depth: usize, lhs: &FrRepr, rhs: &FrRepr) -> FrRepr {
 
     let rhs = {
         let mut tmp = [false; 256];
-        for (a, b) in tmp.iter_mut().rev().zip(BitIterator::<u64, _>::new(rhs)) {
+        for (a, b) in tmp.iter_mut().rev().zip(BitIterator::<u8, _>::new(rhs)) {
             *a = b;
         }
         tmp
@@ -62,13 +62,13 @@ impl Node {
 
 impl Hashable for Node {
     fn read<R: Read>(mut reader: R) -> io::Result<Self> {
-        let mut repr = FrRepr::default();
-        repr.read_le(&mut reader)?;
+        let mut repr = FrRepr([0; 32]);
+        reader.read_exact(&mut repr.0)?;
         Ok(Node::new(repr))
     }
 
     fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
-        self.repr.write_le(&mut writer)
+        writer.write_all(self.repr.as_ref())
     }
 
     fn combine(depth: usize, lhs: &Self, rhs: &Self) -> Self {
