@@ -272,6 +272,20 @@ impl ConstantTimeEq for Fs {
     }
 }
 
+impl Ord for Fs {
+    #[inline(always)]
+    fn cmp(&self, other: &Fs) -> ::std::cmp::Ordering {
+        self.into_repr().cmp(&other.into_repr())
+    }
+}
+
+impl PartialOrd for Fs {
+    #[inline(always)]
+    fn partial_cmp(&self, other: &Fs) -> Option<::std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
 impl ::std::fmt::Display for Fs {
     fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
         write!(f, "Fs({})", self.into_repr())
