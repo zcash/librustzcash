@@ -1,7 +1,9 @@
-//! Consensus parameters.
+//! Consensus logic and parameters.
 
 use std::convert::TryFrom;
 use std::fmt;
+
+pub mod extensions;
 
 /// Zcash consensus parameters.
 pub trait Parameters {
