@@ -515,7 +515,7 @@ macro_rules! curve_impl {
             type Base = $basefield;
             type Affine = $affine;
 
-            fn random<R: RngCore + ?std::marker::Sized>(rng: &mut R) -> Self {
+            fn random<R: RngCore + ?Sized>(rng: &mut R) -> Self {
                 loop {
                     let x = $basefield::random(rng);
                     let greatest = rng.next_u32() % 2 != 0;

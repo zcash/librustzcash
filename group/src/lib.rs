@@ -52,7 +52,7 @@ pub trait CurveProjective:
     type Affine: CurveAffine<Projective = Self, Scalar = Self::Scalar>;
 
     /// Returns an element chosen uniformly at random using a user-provided RNG.
-    fn random<R: RngCore + ?std::marker::Sized>(rng: &mut R) -> Self;
+    fn random<R: RngCore + ?Sized>(rng: &mut R) -> Self;
 
     /// Returns the additive identity.
     fn zero() -> Self;
