@@ -1,6 +1,6 @@
 //! The Sapling circuits.
 
-use ff::{Field, PrimeField, PrimeFieldRepr};
+use ff::{Field, PrimeField};
 
 use bellman::{Circuit, ConstraintSystem, SynthesisError};
 
@@ -478,7 +478,7 @@ impl<'a, E: JubjubEngine> Circuit<E> for Output<'a, E> {
             // Witness the sign bit
             let sign_bit = boolean::Boolean::from(boolean::AllocatedBit::alloc(
                 cs.namespace(|| "pk_d bit of x"),
-                pk_d.map(|e| e.0.into_repr().is_odd()),
+                pk_d.map(|e| e.0.is_odd()),
             )?);
 
             // Extend the note with pk_d representation
@@ -615,8 +615,8 @@ fn test_input_circuit_with_bls12_381() {
                     ::std::mem::swap(&mut lhs, &mut rhs);
                 }
 
-                let mut lhs: Vec<bool> = BitIterator::new(lhs.into_repr()).collect();
-                let mut rhs: Vec<bool> = BitIterator::new(rhs.into_repr()).collect();
+                let mut lhs: Vec<bool> = BitIterator::<u8, _>::new(lhs.into_repr()).collect();
+                let mut rhs: Vec<bool> = BitIterator::<u8, _>::new(rhs.into_repr()).collect();
 
                 lhs.reverse();
                 rhs.reverse();
@@ -799,8 +799,8 @@ fn test_input_circuit_with_bls12_381_external_test_vectors() {
                     ::std::mem::swap(&mut lhs, &mut rhs);
                 }
 
-                let mut lhs: Vec<bool> = BitIterator::new(lhs.into_repr()).collect();
-                let mut rhs: Vec<bool> = BitIterator::new(rhs.into_repr()).collect();
+                let mut lhs: Vec<bool> = BitIterator::<u8, _>::new(lhs.into_repr()).collect();
+                let mut rhs: Vec<bool> = BitIterator::<u8, _>::new(rhs.into_repr()).collect();
 
                 lhs.reverse();
                 rhs.reverse();

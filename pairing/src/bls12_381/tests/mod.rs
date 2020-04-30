@@ -1,4 +1,4 @@
-use ff::PrimeFieldRepr;
+use ff::PrimeField;
 use group::{CurveAffine, CurveProjective, EncodedPoint, GroupDecodingError};
 
 use super::*;
@@ -147,13 +147,15 @@ fn test_g1_uncompressed_invalid_vectors() {
         }
     }
 
-    let m = Fq::char();
+    // PrimeField::char() returns the modulus in its little-endian byte representation,
+    // but Fq field elements use big-endian encoding, so flip the endianness.
+    let m: Vec<_> = Fq::char().as_ref().iter().cloned().rev().collect();
 
     {
         let mut o = o;
-        m.write_be(&mut o.as_mut()[0..]).unwrap();
+        o.as_mut()[..48].copy_from_slice(&m[..]);
 
-        if let Err(GroupDecodingError::CoordinateDecodingError(coordinate, _)) = o.into_affine() {
+        if let Err(GroupDecodingError::CoordinateDecodingError(coordinate)) = o.into_affine() {
             assert_eq!(coordinate, "x coordinate");
         } else {
             panic!("should have rejected the point")
@@ -162,9 +164,9 @@ fn test_g1_uncompressed_invalid_vectors() {
 
     {
         let mut o = o;
-        m.write_be(&mut o.as_mut()[48..]).unwrap();
+        o.as_mut()[48..].copy_from_slice(&m[..]);
 
-        if let Err(GroupDecodingError::CoordinateDecodingError(coordinate, _)) = o.into_affine() {
+        if let Err(GroupDecodingError::CoordinateDecodingError(coordinate)) = o.into_affine() {
             assert_eq!(coordinate, "y coordinate");
         } else {
             panic!("should have rejected the point")
@@ -175,7 +177,7 @@ fn test_g1_uncompressed_invalid_vectors() {
         let m = Fq::zero().into_repr();
 
         let mut o = o;
-        m.write_be(&mut o.as_mut()[0..]).unwrap();
+        o.as_mut()[..48].copy_from_slice(m.as_ref());
 
         if let Err(GroupDecodingError::NotOnCurve) = o.into_affine() {
             // :)
@@ -191,15 +193,15 @@ fn test_g1_uncompressed_invalid_vectors() {
         loop {
             let mut x3b = x.square();
             x3b.mul_assign(&x);
-            x3b.add_assign(&Fq::from_repr(FqRepr::from(4)).unwrap()); // TODO: perhaps expose coeff_b through API?
+            x3b.add_assign(&Fq::from(4)); // TODO: perhaps expose coeff_b through API?
 
             let y = x3b.sqrt();
             if y.is_some().into() {
                 let y = y.unwrap();
 
                 // We know this is on the curve, but it's likely not going to be in the correct subgroup.
-                x.into_repr().write_be(&mut o.as_mut()[0..]).unwrap();
-                y.into_repr().write_be(&mut o.as_mut()[48..]).unwrap();
+                o.as_mut()[..48].copy_from_slice(x.into_repr().as_ref());
+                o.as_mut()[48..].copy_from_slice(y.into_repr().as_ref());
 
                 if let Err(GroupDecodingError::NotInSubgroup) = o.into_affine() {
                     break;
@@ -263,13 +265,15 @@ fn test_g2_uncompressed_invalid_vectors() {
         }
     }
 
-    let m = Fq::char();
+    // PrimeField::char() returns the modulus in its little-endian byte representation,
+    // but Fq field elements use big-endian encoding, so flip the endianness.
+    let m: Vec<_> = Fq::char().as_ref().iter().cloned().rev().collect();
 
     {
         let mut o = o;
-        m.write_be(&mut o.as_mut()[0..]).unwrap();
+        o.as_mut()[..48].copy_from_slice(&m[..]);
 
-        if let Err(GroupDecodingError::CoordinateDecodingError(coordinate, _)) = o.into_affine() {
+        if let Err(GroupDecodingError::CoordinateDecodingError(coordinate)) = o.into_affine() {
             assert_eq!(coordinate, "x coordinate (c1)");
         } else {
             panic!("should have rejected the point")
@@ -278,9 +282,9 @@ fn test_g2_uncompressed_invalid_vectors() {
 
     {
         let mut o = o;
-        m.write_be(&mut o.as_mut()[48..]).unwrap();
+        o.as_mut()[48..96].copy_from_slice(&m[..]);
 
-        if let Err(GroupDecodingError::CoordinateDecodingError(coordinate, _)) = o.into_affine() {
+        if let Err(GroupDecodingError::CoordinateDecodingError(coordinate)) = o.into_affine() {
             assert_eq!(coordinate, "x coordinate (c0)");
         } else {
             panic!("should have rejected the point")
@@ -289,9 +293,9 @@ fn test_g2_uncompressed_invalid_vectors() {
 
     {
         let mut o = o;
-        m.write_be(&mut o.as_mut()[96..]).unwrap();
+        o.as_mut()[96..144].copy_from_slice(&m[..]);
 
-        if let Err(GroupDecodingError::CoordinateDecodingError(coordinate, _)) = o.into_affine() {
+        if let Err(GroupDecodingError::CoordinateDecodingError(coordinate)) = o.into_affine() {
             assert_eq!(coordinate, "y coordinate (c1)");
         } else {
             panic!("should have rejected the point")
@@ -300,9 +304,9 @@ fn test_g2_uncompressed_invalid_vectors() {
 
     {
         let mut o = o;
-        m.write_be(&mut o.as_mut()[144..]).unwrap();
+        o.as_mut()[144..].copy_from_slice(&m[..]);
 
-        if let Err(GroupDecodingError::CoordinateDecodingError(coordinate, _)) = o.into_affine() {
+        if let Err(GroupDecodingError::CoordinateDecodingError(coordinate)) = o.into_affine() {
             assert_eq!(coordinate, "y coordinate (c0)");
         } else {
             panic!("should have rejected the point")
@@ -313,8 +317,8 @@ fn test_g2_uncompressed_invalid_vectors() {
         let m = Fq::zero().into_repr();
 
         let mut o = o;
-        m.write_be(&mut o.as_mut()[0..]).unwrap();
-        m.write_be(&mut o.as_mut()[48..]).unwrap();
+        o.as_mut()[..48].copy_from_slice(m.as_ref());
+        o.as_mut()[48..96].copy_from_slice(m.as_ref());
 
         if let Err(GroupDecodingError::NotOnCurve) = o.into_affine() {
             // :)
@@ -331,8 +335,8 @@ fn test_g2_uncompressed_invalid_vectors() {
             let mut x3b = x.square();
             x3b.mul_assign(&x);
             x3b.add_assign(&Fq2 {
-                c0: Fq::from_repr(FqRepr::from(4)).unwrap(),
-                c1: Fq::from_repr(FqRepr::from(4)).unwrap(),
+                c0: Fq::from(4),
+                c1: Fq::from(4),
             }); // TODO: perhaps expose coeff_b through API?
 
             let y = x3b.sqrt();
@@ -340,10 +344,10 @@ fn test_g2_uncompressed_invalid_vectors() {
                 let y = y.unwrap();
 
                 // We know this is on the curve, but it's likely not going to be in the correct subgroup.
-                x.c1.into_repr().write_be(&mut o.as_mut()[0..]).unwrap();
-                x.c0.into_repr().write_be(&mut o.as_mut()[48..]).unwrap();
-                y.c1.into_repr().write_be(&mut o.as_mut()[96..]).unwrap();
-                y.c0.into_repr().write_be(&mut o.as_mut()[144..]).unwrap();
+                o.as_mut()[..48].copy_from_slice(x.c1.into_repr().as_ref());
+                o.as_mut()[48..96].copy_from_slice(x.c0.into_repr().as_ref());
+                o.as_mut()[96..144].copy_from_slice(y.c1.into_repr().as_ref());
+                o.as_mut()[144..].copy_from_slice(y.c0.into_repr().as_ref());
 
                 if let Err(GroupDecodingError::NotInSubgroup) = o.into_affine() {
                     break;
@@ -407,14 +411,16 @@ fn test_g1_compressed_invalid_vectors() {
         }
     }
 
-    let m = Fq::char();
+    // PrimeField::char() returns the modulus in its little-endian byte representation,
+    // but Fq field elements use big-endian encoding, so flip the endianness.
+    let m: Vec<_> = Fq::char().as_ref().iter().cloned().rev().collect();
 
     {
         let mut o = o;
-        m.write_be(&mut o.as_mut()[0..]).unwrap();
+        o.as_mut()[..48].copy_from_slice(&m[..]);
         o.as_mut()[0] |= 0b1000_0000;
 
-        if let Err(GroupDecodingError::CoordinateDecodingError(coordinate, _)) = o.into_affine() {
+        if let Err(GroupDecodingError::CoordinateDecodingError(coordinate)) = o.into_affine() {
             assert_eq!(coordinate, "x coordinate");
         } else {
             panic!("should have rejected the point")
@@ -428,12 +434,12 @@ fn test_g1_compressed_invalid_vectors() {
         loop {
             let mut x3b = x.square();
             x3b.mul_assign(&x);
-            x3b.add_assign(&Fq::from_repr(FqRepr::from(4)).unwrap()); // TODO: perhaps expose coeff_b through API?
+            x3b.add_assign(&Fq::from(4)); // TODO: perhaps expose coeff_b through API?
 
             if x3b.sqrt().is_some().into() {
                 x.add_assign(&Fq::one());
             } else {
-                x.into_repr().write_be(&mut o.as_mut()[0..]).unwrap();
+                o.as_mut().copy_from_slice(x.into_repr().as_ref());
                 o.as_mut()[0] |= 0b1000_0000;
 
                 if let Err(GroupDecodingError::NotOnCurve) = o.into_affine() {
@@ -452,11 +458,11 @@ fn test_g1_compressed_invalid_vectors() {
         loop {
             let mut x3b = x.square();
             x3b.mul_assign(&x);
-            x3b.add_assign(&Fq::from_repr(FqRepr::from(4)).unwrap()); // TODO: perhaps expose coeff_b through API?
+            x3b.add_assign(&Fq::from(4)); // TODO: perhaps expose coeff_b through API?
 
             if x3b.sqrt().is_some().into() {
                 // We know this is on the curve, but it's likely not going to be in the correct subgroup.
-                x.into_repr().write_be(&mut o.as_mut()[0..]).unwrap();
+                o.as_mut().copy_from_slice(x.into_repr().as_ref());
                 o.as_mut()[0] |= 0b1000_0000;
 
                 if let Err(GroupDecodingError::NotInSubgroup) = o.into_affine() {
@@ -521,14 +527,16 @@ fn test_g2_compressed_invalid_vectors() {
         }
     }
 
-    let m = Fq::char();
+    // PrimeField::char() returns the modulus in its little-endian byte representation,
+    // but Fq field elements use big-endian encoding, so flip the endianness.
+    let m: Vec<_> = Fq::char().as_ref().iter().cloned().rev().collect();
 
     {
         let mut o = o;
-        m.write_be(&mut o.as_mut()[0..]).unwrap();
+        o.as_mut()[..48].copy_from_slice(&m[..]);
         o.as_mut()[0] |= 0b1000_0000;
 
-        if let Err(GroupDecodingError::CoordinateDecodingError(coordinate, _)) = o.into_affine() {
+        if let Err(GroupDecodingError::CoordinateDecodingError(coordinate)) = o.into_affine() {
             assert_eq!(coordinate, "x coordinate (c1)");
         } else {
             panic!("should have rejected the point")
@@ -537,10 +545,10 @@ fn test_g2_compressed_invalid_vectors() {
 
     {
         let mut o = o;
-        m.write_be(&mut o.as_mut()[48..]).unwrap();
+        o.as_mut()[48..96].copy_from_slice(&m[..]);
         o.as_mut()[0] |= 0b1000_0000;
 
-        if let Err(GroupDecodingError::CoordinateDecodingError(coordinate, _)) = o.into_affine() {
+        if let Err(GroupDecodingError::CoordinateDecodingError(coordinate)) = o.into_affine() {
             assert_eq!(coordinate, "x coordinate (c0)");
         } else {
             panic!("should have rejected the point")
@@ -558,15 +566,15 @@ fn test_g2_compressed_invalid_vectors() {
             let mut x3b = x.square();
             x3b.mul_assign(&x);
             x3b.add_assign(&Fq2 {
-                c0: Fq::from_repr(FqRepr::from(4)).unwrap(),
-                c1: Fq::from_repr(FqRepr::from(4)).unwrap(),
+                c0: Fq::from(4),
+                c1: Fq::from(4),
             }); // TODO: perhaps expose coeff_b through API?
 
             if x3b.sqrt().is_some().into() {
                 x.add_assign(&Fq2::one());
             } else {
-                x.c1.into_repr().write_be(&mut o.as_mut()[0..]).unwrap();
-                x.c0.into_repr().write_be(&mut o.as_mut()[48..]).unwrap();
+                o.as_mut()[..48].copy_from_slice(x.c1.into_repr().as_ref());
+                o.as_mut()[48..].copy_from_slice(x.c0.into_repr().as_ref());
                 o.as_mut()[0] |= 0b1000_0000;
 
                 if let Err(GroupDecodingError::NotOnCurve) = o.into_affine() {
@@ -589,14 +597,14 @@ fn test_g2_compressed_invalid_vectors() {
             let mut x3b = x.square();
             x3b.mul_assign(&x);
             x3b.add_assign(&Fq2 {
-                c0: Fq::from_repr(FqRepr::from(4)).unwrap(),
-                c1: Fq::from_repr(FqRepr::from(4)).unwrap(),
+                c0: Fq::from(4),
+                c1: Fq::from(4),
             }); // TODO: perhaps expose coeff_b through API?
 
             if x3b.sqrt().is_some().into() {
                 // We know this is on the curve, but it's likely not going to be in the correct subgroup.
-                x.c1.into_repr().write_be(&mut o.as_mut()[0..]).unwrap();
-                x.c0.into_repr().write_be(&mut o.as_mut()[48..]).unwrap();
+                o.as_mut()[..48].copy_from_slice(x.c1.into_repr().as_ref());
+                o.as_mut()[48..].copy_from_slice(x.c0.into_repr().as_ref());
                 o.as_mut()[0] |= 0b1000_0000;
 
                 if let Err(GroupDecodingError::NotInSubgroup) = o.into_affine() {

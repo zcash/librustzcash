@@ -23,7 +23,7 @@ pub use self::fr::{Fr, FrRepr};
 
 use super::{Engine, PairingCurveAffine};
 
-use ff::{BitIterator, Field, ScalarEngine};
+use ff::{BitIterator, Field, PowVartime, ScalarEngine};
 use group::CurveAffine;
 use std::ops::{AddAssign, MulAssign, Neg, SubAssign};
 use subtle::CtOption;
@@ -82,7 +82,7 @@ impl Engine for Bls12 {
         let mut f = Fq12::one();
 
         let mut found_one = false;
-        for i in BitIterator::new(&[BLS_X >> 1]) {
+        for i in BitIterator::<u64, _>::new(&[BLS_X >> 1]) {
             if !found_one {
                 found_one = i;
                 continue;
@@ -324,7 +324,7 @@ impl G2Prepared {
         let mut r: G2 = q.into();
 
         let mut found_one = false;
-        for i in BitIterator::new([BLS_X >> 1]) {
+        for i in BitIterator::<u64, _>::new([BLS_X >> 1]) {
             if !found_one {
                 found_one = i;
                 continue;

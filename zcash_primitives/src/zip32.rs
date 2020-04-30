@@ -453,7 +453,7 @@ impl ExtendedFullViewingKey {
 mod tests {
     use super::*;
 
-    use ff::{PrimeField, PrimeFieldRepr};
+    use ff::PrimeField;
 
     #[test]
     fn derive_nonhardened_child() {
@@ -1014,11 +1014,8 @@ mod tests {
             let xsk = &xsks[j];
             let tv = &test_vectors[j];
 
-            let mut buf = [0; 32];
-            xsk.expsk.ask.into_repr().write_le(&mut buf[..]).unwrap();
-            assert_eq!(buf, tv.ask.unwrap());
-            xsk.expsk.nsk.into_repr().write_le(&mut buf[..]).unwrap();
-            assert_eq!(buf, tv.nsk.unwrap());
+            assert_eq!(xsk.expsk.ask.into_repr().as_ref(), tv.ask.unwrap());
+            assert_eq!(xsk.expsk.nsk.into_repr().as_ref(), tv.nsk.unwrap());
 
             assert_eq!(xsk.expsk.ovk.0, tv.ovk);
             assert_eq!(xsk.dk.0, tv.dk);
@@ -1043,13 +1040,7 @@ mod tests {
             assert_eq!(xfvk.dk.0, tv.dk);
             assert_eq!(xfvk.chain_code.0, tv.c);
 
-            xfvk.fvk
-                .vk
-                .ivk()
-                .into_repr()
-                .write_le(&mut buf[..])
-                .unwrap();
-            assert_eq!(buf, tv.ivk);
+            assert_eq!(xfvk.fvk.vk.ivk().into_repr().as_ref(), tv.ivk);
 
             let mut ser = vec![];
             xfvk.write(&mut ser).unwrap();

@@ -8,18 +8,104 @@ use num_integer::Integer;
 use num_traits::{One, ToPrimitive, Zero};
 use quote::quote;
 use quote::TokenStreamExt;
+use std::iter;
 use std::str::FromStr;
 
 mod pow_fixed;
 
-#[proc_macro_derive(PrimeField, attributes(PrimeFieldModulus, PrimeFieldGenerator))]
+enum ReprEndianness {
+    Big,
+    Little,
+}
+
+impl FromStr for ReprEndianness {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "big" => Ok(ReprEndianness::Big),
+            "little" => Ok(ReprEndianness::Little),
+            _ => Err(()),
+        }
+    }
+}
+
+impl ReprEndianness {
+    fn from_repr(&self, name: &syn::Ident, limbs: usize) -> proc_macro2::TokenStream {
+        let read_repr = match self {
+            ReprEndianness::Big => quote! {
+                ::byteorder::BigEndian::read_u64_into(r.as_ref(), &mut inner[..]);
+                inner.reverse();
+            },
+            ReprEndianness::Little => quote! {
+                ::byteorder::LittleEndian::read_u64_into(r.as_ref(), &mut inner[..]);
+            },
+        };
+
+        quote! {
+            use ::byteorder::ByteOrder;
+
+            let r = {
+                let mut inner = [0u64; #limbs];
+                #read_repr
+                #name(inner)
+            };
+
+            if r.is_valid() {
+                Some(r * R2)
+            } else {
+                None
+            }
+        }
+    }
+
+    fn into_repr(
+        &self,
+        repr: &syn::Ident,
+        mont_reduce_self_params: &proc_macro2::TokenStream,
+        limbs: usize,
+    ) -> proc_macro2::TokenStream {
+        let bytes = limbs * 8;
+
+        let write_repr = match self {
+            ReprEndianness::Big => quote! {
+                r.0.reverse();
+                ::byteorder::BigEndian::write_u64_into(&r.0, &mut repr[..]);
+            },
+            ReprEndianness::Little => quote! {
+                ::byteorder::LittleEndian::write_u64_into(&r.0, &mut repr[..]);
+            },
+        };
+
+        quote! {
+            use ::byteorder::ByteOrder;
+
+            let mut r = *self;
+            r.mont_reduce(
+                #mont_reduce_self_params
+            );
+
+            let mut repr = [0u8; #bytes];
+            #write_repr
+            #repr(repr)
+        }
+    }
+
+    fn iter_be(&self) -> proc_macro2::TokenStream {
+        match self {
+            ReprEndianness::Big => quote! {self.0.iter()},
+            ReprEndianness::Little => quote! {self.0.iter().rev()},
+        }
+    }
+}
+
+#[proc_macro_derive(
+    PrimeField,
+    attributes(PrimeFieldModulus, PrimeFieldGenerator, PrimeFieldReprEndianness)
+)]
 pub fn prime_field(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     // Parse the type definition
     let ast: syn::DeriveInput = syn::parse(input).unwrap();
-
-    // The struct we're deriving for is a wrapper around a "Repr" type we must construct.
-    let repr_ident = fetch_wrapped_ident(&ast.data)
-        .expect("PrimeField derive only operates over tuple structs of a single item");
 
     // We're given the modulus p of the prime field
     let modulus: BigUint = fetch_attr("PrimeFieldModulus", &ast.attrs)
@@ -29,10 +115,17 @@ pub fn prime_field(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
 
     // We may be provided with a generator of p - 1 order. It is required that this generator be quadratic
     // nonresidue.
+    // TODO: Compute this ourselves.
     let generator: BigUint = fetch_attr("PrimeFieldGenerator", &ast.attrs)
         .expect("Please supply a PrimeFieldGenerator attribute")
         .parse()
         .expect("PrimeFieldGenerator should be a number");
+
+    // Field element representations may be in little-endian or big-endian.
+    let endianness = fetch_attr("PrimeFieldReprEndianness", &ast.attrs)
+        .expect("Please supply a PrimeFieldReprEndianness attribute")
+        .parse()
+        .expect("PrimeFieldReprEndianness should be 'big' or 'little'");
 
     // The arithmetic in this library only works if the modulus*2 is smaller than the backing
     // representation. Compute the number of limbs we need.
@@ -46,34 +139,146 @@ pub fn prime_field(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
         }
     }
 
+    // The struct we're deriving for must be a wrapper around `pub [u64; limbs]`.
+    if let Some(err) = validate_struct(&ast, limbs) {
+        return err.into();
+    }
+
+    // Generate the identifier for the "Repr" type we must construct.
+    let repr_ident = syn::Ident::new(
+        &format!("{}Repr", ast.ident),
+        proc_macro2::Span::call_site(),
+    );
+
     let mut gen = proc_macro2::TokenStream::new();
 
     let (constants_impl, sqrt_impl) =
         prime_field_constants_and_sqrt(&ast.ident, &repr_ident, &modulus, limbs, generator);
 
     gen.extend(constants_impl);
-    gen.extend(prime_field_repr_impl(&repr_ident, limbs));
-    gen.extend(prime_field_impl(&ast.ident, &repr_ident, &modulus, limbs));
+    gen.extend(prime_field_repr_impl(&repr_ident, &endianness, limbs * 8));
+    gen.extend(prime_field_impl(
+        &ast.ident,
+        &repr_ident,
+        &modulus,
+        &endianness,
+        limbs,
+    ));
     gen.extend(sqrt_impl);
 
     // Return the generated impl
     gen.into()
 }
 
-/// Fetches the ident being wrapped by the type we're deriving.
-fn fetch_wrapped_ident(body: &syn::Data) -> Option<syn::Ident> {
-    if let syn::Data::Struct(ref variant_data) = body {
-        if let syn::Fields::Unnamed(ref fields) = variant_data.fields {
-            if fields.unnamed.len() == 1 {
-                if let syn::Type::Path(ref path) = fields.unnamed[0].ty {
-                    if path.path.segments.len() == 1 {
-                        return Some(path.path.segments[0].ident.clone());
-                    }
-                }
-            }
+/// Checks that `body` contains `pub [u64; limbs]`.
+fn validate_struct(ast: &syn::DeriveInput, limbs: usize) -> Option<proc_macro2::TokenStream> {
+    // The body should be a struct.
+    let variant_data = match &ast.data {
+        syn::Data::Struct(x) => x,
+        _ => {
+            return Some(
+                syn::Error::new_spanned(ast, "PrimeField derive only works for structs.")
+                    .to_compile_error(),
+            )
         }
     };
 
+    // The struct should contain a single unnamed field.
+    let fields = match &variant_data.fields {
+        syn::Fields::Unnamed(x) if x.unnamed.len() == 1 => x,
+        _ => {
+            return Some(
+                syn::Error::new_spanned(
+                    &ast.ident,
+                    format!(
+                        "The struct must contain an array of limbs. Change this to `{}([u64; {}])`",
+                        ast.ident, limbs,
+                    ),
+                )
+                .to_compile_error(),
+            )
+        }
+    };
+    let field = &fields.unnamed[0];
+
+    // The field should be an array.
+    let arr = match &field.ty {
+        syn::Type::Array(x) => x,
+        _ => {
+            return Some(
+                syn::Error::new_spanned(
+                    field,
+                    format!(
+                        "The inner field must be an array of limbs. Change this to `[u64; {}]`",
+                        limbs,
+                    ),
+                )
+                .to_compile_error(),
+            )
+        }
+    };
+
+    // The array's element type should be `u64`.
+    if match arr.elem.as_ref() {
+        syn::Type::Path(path) => path
+            .path
+            .get_ident()
+            .map(|x| x.to_string() != "u64")
+            .unwrap_or(true),
+        _ => true,
+    } {
+        return Some(
+            syn::Error::new_spanned(
+                arr,
+                format!(
+                    "PrimeField derive requires 64-bit limbs. Change this to `[u64; {}]",
+                    limbs
+                ),
+            )
+            .to_compile_error(),
+        );
+    }
+
+    // The array's length should be a literal int equal to `limbs`.
+    let lit_int = match match &arr.len {
+        syn::Expr::Lit(expr_lit) => match &expr_lit.lit {
+            syn::Lit::Int(lit_int) => Some(lit_int),
+            _ => None,
+        },
+        _ => None,
+    } {
+        Some(x) => x,
+        _ => {
+            return Some(
+                syn::Error::new_spanned(
+                    arr,
+                    format!("To derive PrimeField, change this to `[u64; {}]`.", limbs),
+                )
+                .to_compile_error(),
+            )
+        }
+    };
+    if lit_int.base10_digits() != limbs.to_string() {
+        return Some(
+            syn::Error::new_spanned(
+                lit_int,
+                format!("The given modulus requires {} limbs.", limbs),
+            )
+            .to_compile_error(),
+        );
+    }
+
+    // The field should not be public.
+    match &field.vis {
+        syn::Visibility::Inherited => (),
+        _ => {
+            return Some(
+                syn::Error::new_spanned(&field.vis, "Field must not be public.").to_compile_error(),
+            )
+        }
+    }
+
+    // Valid!
     None
 }
 
@@ -102,18 +307,49 @@ fn fetch_attr(name: &str, attrs: &[syn::Attribute]) -> Option<String> {
     None
 }
 
-// Implement PrimeFieldRepr for the wrapped ident `repr` with `limbs` limbs.
-fn prime_field_repr_impl(repr: &syn::Ident, limbs: usize) -> proc_macro2::TokenStream {
+// Implement the wrapped ident `repr` with `bytes` bytes.
+fn prime_field_repr_impl(
+    repr: &syn::Ident,
+    endianness: &ReprEndianness,
+    bytes: usize,
+) -> proc_macro2::TokenStream {
+    let repr_iter_be = endianness.iter_be();
+
     quote! {
-        #[derive(Copy, Clone, PartialEq, Eq, Default)]
-        pub struct #repr(pub [u64; #limbs]);
+        #[derive(Copy, Clone)]
+        pub struct #repr(pub [u8; #bytes]);
+
+        impl ::subtle::ConstantTimeEq for #repr {
+            fn ct_eq(&self, other: &#repr) -> ::subtle::Choice {
+                self.0
+                    .iter()
+                    .zip(other.0.iter())
+                    .map(|(a, b)| a.ct_eq(b))
+                    .fold(1.into(), |acc, x| acc & x)
+            }
+        }
+
+        impl ::core::cmp::PartialEq for #repr {
+            fn eq(&self, other: &#repr) -> bool {
+                use ::subtle::ConstantTimeEq;
+                self.ct_eq(other).into()
+            }
+        }
+
+        impl ::core::cmp::Eq for #repr { }
+
+        impl ::core::default::Default for #repr {
+            fn default() -> #repr {
+                #repr([0u8; #bytes])
+            }
+        }
 
         impl ::core::fmt::Debug for #repr
         {
             fn fmt(&self, f: &mut ::core::fmt::Formatter) -> ::core::fmt::Result {
                 write!(f, "0x")?;
-                for i in self.0.iter().rev() {
-                    write!(f, "{:016x}", *i)?;
+                for i in #repr_iter_be {
+                    write!(f, "{:02x}", *i)?;
                 }
 
                 Ok(())
@@ -123,181 +359,25 @@ fn prime_field_repr_impl(repr: &syn::Ident, limbs: usize) -> proc_macro2::TokenS
         impl ::core::fmt::Display for #repr {
             fn fmt(&self, f: &mut ::core::fmt::Formatter) -> ::core::fmt::Result {
                 write!(f, "0x")?;
-                for i in self.0.iter().rev() {
-                    write!(f, "{:016x}", *i)?;
+                for i in #repr_iter_be {
+                    write!(f, "{:02x}", *i)?;
                 }
 
                 Ok(())
             }
         }
 
-        impl AsRef<[u64]> for #repr {
+        impl AsRef<[u8]> for #repr {
             #[inline(always)]
-            fn as_ref(&self) -> &[u64] {
+            fn as_ref(&self) -> &[u8] {
                 &self.0
             }
         }
 
-        impl AsMut<[u64]> for #repr {
+        impl AsMut<[u8]> for #repr {
             #[inline(always)]
-            fn as_mut(&mut self) -> &mut [u64] {
+            fn as_mut(&mut self) -> &mut [u8] {
                 &mut self.0
-            }
-        }
-
-        impl From<u64> for #repr {
-            #[inline(always)]
-            fn from(val: u64) -> #repr {
-                use core::default::Default;
-
-                let mut repr = Self::default();
-                repr.0[0] = val;
-                repr
-            }
-        }
-
-        impl Ord for #repr {
-            #[inline(always)]
-            fn cmp(&self, other: &#repr) -> ::core::cmp::Ordering {
-                for (a, b) in self.0.iter().rev().zip(other.0.iter().rev()) {
-                    if a < b {
-                        return ::core::cmp::Ordering::Less
-                    } else if a > b {
-                        return ::core::cmp::Ordering::Greater
-                    }
-                }
-
-                ::core::cmp::Ordering::Equal
-            }
-        }
-
-        impl PartialOrd for #repr {
-            #[inline(always)]
-            fn partial_cmp(&self, other: &#repr) -> Option<::core::cmp::Ordering> {
-                Some(self.cmp(other))
-            }
-        }
-
-        impl ::ff::PrimeFieldRepr for #repr {
-            #[inline(always)]
-            fn is_odd(&self) -> bool {
-                self.0[0] & 1 == 1
-            }
-
-            #[inline(always)]
-            fn is_even(&self) -> bool {
-                !self.is_odd()
-            }
-
-            #[inline(always)]
-            fn is_zero(&self) -> bool {
-                self.0.iter().all(|&e| e == 0)
-            }
-
-            #[inline(always)]
-            fn shr(&mut self, mut n: u32) {
-                if n as usize >= 64 * #limbs {
-                    *self = Self::from(0);
-                    return;
-                }
-
-                while n >= 64 {
-                    let mut t = 0;
-                    for i in self.0.iter_mut().rev() {
-                        ::core::mem::swap(&mut t, i);
-                    }
-                    n -= 64;
-                }
-
-                if n > 0 {
-                    let mut t = 0;
-                    for i in self.0.iter_mut().rev() {
-                        let t2 = *i << (64 - n);
-                        *i >>= n;
-                        *i |= t;
-                        t = t2;
-                    }
-                }
-            }
-
-            #[inline(always)]
-            fn div2(&mut self) {
-                let mut t = 0;
-                for i in self.0.iter_mut().rev() {
-                    let t2 = *i << 63;
-                    *i >>= 1;
-                    *i |= t;
-                    t = t2;
-                }
-            }
-
-            #[inline(always)]
-            fn mul2(&mut self) {
-                let mut last = 0;
-                for i in &mut self.0 {
-                    let tmp = *i >> 63;
-                    *i <<= 1;
-                    *i |= last;
-                    last = tmp;
-                }
-            }
-
-            #[inline(always)]
-            fn shl(&mut self, mut n: u32) {
-                if n as usize >= 64 * #limbs {
-                    *self = Self::from(0);
-                    return;
-                }
-
-                while n >= 64 {
-                    let mut t = 0;
-                    for i in &mut self.0 {
-                        ::core::mem::swap(&mut t, i);
-                    }
-                    n -= 64;
-                }
-
-                if n > 0 {
-                    let mut t = 0;
-                    for i in &mut self.0 {
-                        let t2 = *i >> (64 - n);
-                        *i <<= n;
-                        *i |= t;
-                        t = t2;
-                    }
-                }
-            }
-
-            #[inline(always)]
-            fn num_bits(&self) -> u32 {
-                let mut ret = (#limbs as u32) * 64;
-                for i in self.0.iter().rev() {
-                    let leading = i.leading_zeros();
-                    ret -= leading;
-                    if leading != 64 {
-                        break;
-                    }
-                }
-
-                ret
-            }
-
-            #[inline(always)]
-            fn add_nocarry(&mut self, other: &#repr) {
-                let mut carry = 0;
-
-                for (a, b) in self.0.iter_mut().zip(other.0.iter()) {
-                    *a = ::ff::adc(*a, *b, &mut carry);
-                }
-            }
-
-            #[inline(always)]
-            fn sub_noborrow(&mut self, other: &#repr) {
-                let mut borrow = 0;
-
-                for (a, b) in self.0.iter_mut().zip(other.0.iter()) {
-                    *a = ::ff::sbb(*a, *b, &mut borrow);
-                }
             }
         }
     }
@@ -455,7 +535,7 @@ fn prime_field_constants_and_sqrt(
                     let mut b = x * &w;
 
                     // Initialize z as the 2^S root of unity.
-                    let mut z = #name(ROOT_OF_UNITY);
+                    let mut z = ROOT_OF_UNITY;
 
                     for max_v in (1..=S).rev() {
                         let mut k = 1;
@@ -494,6 +574,11 @@ fn prime_field_constants_and_sqrt(
     let r2 = biguint_to_u64_vec((&r * &r) % modulus, limbs);
 
     let r = biguint_to_u64_vec(r, limbs);
+    let modulus_repr = {
+        let mut buf = modulus.to_bytes_le();
+        buf.extend(iter::repeat(0).take((limbs * 8) - buf.len()));
+        buf
+    };
     let modulus = biguint_to_real_u64_vec(modulus.clone(), limbs);
 
     // Compute -m^-1 mod 2**64 by exponentiating by totient(2**64) - 1
@@ -507,7 +592,10 @@ fn prime_field_constants_and_sqrt(
     (
         quote! {
             /// This is the modulus m of the prime field
-            const MODULUS: #repr = #repr([#(#modulus,)*]);
+            const MODULUS: #repr = #repr([#(#modulus_repr,)*]);
+
+            /// This is the modulus m of the prime field in limb form
+            const MODULUS_LIMBS: #name = #name([#(#modulus,)*]);
 
             /// The number of bits needed to represent the modulus.
             const MODULUS_BITS: u32 = #modulus_num_bits;
@@ -517,23 +605,23 @@ fn prime_field_constants_and_sqrt(
             const REPR_SHAVE_BITS: u32 = #repr_shave_bits;
 
             /// 2^{limbs*64} mod m
-            const R: #repr = #repr(#r);
+            const R: #name = #name(#r);
 
             /// 2^{limbs*64*2} mod m
-            const R2: #repr = #repr(#r2);
+            const R2: #name = #name(#r2);
 
             /// -(m^{-1} mod m) mod m
             const INV: u64 = #inv;
 
             /// Multiplicative generator of `MODULUS` - 1 order, also quadratic
             /// nonresidue.
-            const GENERATOR: #repr = #repr(#generator);
+            const GENERATOR: #name = #name(#generator);
 
             /// 2^s * t = MODULUS - 1 with t odd
             const S: u32 = #s;
 
             /// 2^s root of unity computed by GENERATOR^t
-            const ROOT_OF_UNITY: #repr = #repr(#root_of_unity);
+            const ROOT_OF_UNITY: #name = #name(#root_of_unity);
         },
         sqrt_impl,
     )
@@ -544,6 +632,7 @@ fn prime_field_impl(
     name: &syn::Ident,
     repr: &syn::Ident,
     modulus: &BigUint,
+    endianness: &ReprEndianness,
     limbs: usize,
 ) -> proc_macro2::TokenStream {
     // Returns r{n} as an ident.
@@ -575,14 +664,14 @@ fn prime_field_impl(
                 gen.extend(quote! {
                     let k = #temp.wrapping_mul(INV);
                     let mut carry = 0;
-                    ::ff::mac_with_carry(#temp, k, MODULUS.0[0], &mut carry);
+                    ::ff::mac_with_carry(#temp, k, MODULUS_LIMBS.0[0], &mut carry);
                 });
             }
 
             for j in 1..limbs {
                 let temp = get_temp(i + j);
                 gen.extend(quote! {
-                    #temp = ::ff::mac_with_carry(#temp, k, MODULUS.0[#j], &mut carry);
+                    #temp = ::ff::mac_with_carry(#temp, k, MODULUS_LIMBS.0[#j], &mut carry);
                 });
             }
 
@@ -609,7 +698,7 @@ fn prime_field_impl(
             let temp = get_temp(limbs + i);
 
             gen.extend(quote! {
-                (self.0).0[#i] = #temp;
+                self.0[#i] = #temp;
             });
         }
 
@@ -628,11 +717,11 @@ fn prime_field_impl(
                 let temp = get_temp(i + j);
                 if i == 0 {
                     gen.extend(quote! {
-                        let #temp = ::ff::mac_with_carry(0, (#a.0).0[#i], (#a.0).0[#j], &mut carry);
+                        let #temp = ::ff::mac_with_carry(0, #a.0[#i], #a.0[#j], &mut carry);
                     });
                 } else {
-                    gen.extend(quote!{
-                        let #temp = ::ff::mac_with_carry(#temp, (#a.0).0[#i], (#a.0).0[#j], &mut carry);
+                    gen.extend(quote! {
+                        let #temp = ::ff::mac_with_carry(#temp, #a.0[#i], #a.0[#j], &mut carry);
                     });
                 }
             }
@@ -672,11 +761,11 @@ fn prime_field_impl(
             let temp1 = get_temp(i * 2 + 1);
             if i == 0 {
                 gen.extend(quote! {
-                    let #temp0 = ::ff::mac_with_carry(0, (#a.0).0[#i], (#a.0).0[#i], &mut carry);
+                    let #temp0 = ::ff::mac_with_carry(0, #a.0[#i], #a.0[#i], &mut carry);
                 });
             } else {
-                gen.extend(quote!{
-                    let #temp0 = ::ff::mac_with_carry(#temp0, (#a.0).0[#i], (#a.0).0[#i], &mut carry);
+                gen.extend(quote! {
+                    let #temp0 = ::ff::mac_with_carry(#temp0, #a.0[#i], #a.0[#i], &mut carry);
                 });
             }
 
@@ -717,11 +806,11 @@ fn prime_field_impl(
 
                 if i == 0 {
                     gen.extend(quote! {
-                        let #temp = ::ff::mac_with_carry(0, (#a.0).0[#i], (#b.0).0[#j], &mut carry);
+                        let #temp = ::ff::mac_with_carry(0, #a.0[#i], #b.0[#j], &mut carry);
                     });
                 } else {
-                    gen.extend(quote!{
-                        let #temp = ::ff::mac_with_carry(#temp, (#a.0).0[#i], (#b.0).0[#j], &mut carry);
+                    gen.extend(quote! {
+                        let #temp = ::ff::mac_with_carry(#temp, #a.0[#i], #b.0[#j], &mut carry);
                     });
                 }
             }
@@ -778,21 +867,30 @@ fn prime_field_impl(
     let invert_impl = inv_impl(quote! {self}, name, modulus);
     let montgomery_impl = mont_impl(limbs);
 
-    // (self.0).0[0].ct_eq(&(other.0).0[0]) & (self.0).0[1].ct_eq(&(other.0).0[1]) & ...
+    // self.0[0].ct_eq(&other.0[0]) & self.0[1].ct_eq(&other.0[1]) & ...
     let mut ct_eq_impl = proc_macro2::TokenStream::new();
     ct_eq_impl.append_separated(
-        (0..limbs).map(|i| quote! { (self.0).0[#i].ct_eq(&(other.0).0[#i]) }),
+        (0..limbs).map(|i| quote! { self.0[#i].ct_eq(&other.0[#i]) }),
         proc_macro2::Punct::new('&', proc_macro2::Spacing::Alone),
     );
 
-    // (self.0).0[0], (self.0).0[1], ..., 0, 0, 0, 0, ...
-    let mut into_repr_params = proc_macro2::TokenStream::new();
-    into_repr_params.append_separated(
-        (0..limbs)
-            .map(|i| quote! { (self.0).0[#i] })
-            .chain((0..limbs).map(|_| quote! {0})),
-        proc_macro2::Punct::new(',', proc_macro2::Spacing::Alone),
-    );
+    fn mont_reduce_params(a: proc_macro2::TokenStream, limbs: usize) -> proc_macro2::TokenStream {
+        // a.0[0], a.0[1], ..., 0, 0, 0, 0, ...
+        let mut mont_reduce_params = proc_macro2::TokenStream::new();
+        mont_reduce_params.append_separated(
+            (0..limbs)
+                .map(|i| quote! { #a.0[#i] })
+                .chain((0..limbs).map(|_| quote! {0})),
+            proc_macro2::Punct::new(',', proc_macro2::Spacing::Alone),
+        );
+        mont_reduce_params
+    }
+
+    let mont_reduce_self_params = mont_reduce_params(quote! {self}, limbs);
+    let mont_reduce_other_params = mont_reduce_params(quote! {other}, limbs);
+
+    let from_repr_impl = endianness.from_repr(name, limbs);
+    let into_repr_impl = endianness.into_repr(repr, &mont_reduce_self_params, limbs);
 
     let top_limb_index = limbs - 1;
 
@@ -813,13 +911,14 @@ fn prime_field_impl(
 
         impl ::subtle::ConstantTimeEq for #name {
             fn ct_eq(&self, other: &#name) -> ::subtle::Choice {
-                #ct_eq_impl
+                self.into_repr().ct_eq(&other.into_repr())
             }
         }
 
         impl ::core::cmp::PartialEq for #name {
             fn eq(&self, other: &#name) -> bool {
-                self.0 == other.0
+                use ::subtle::ConstantTimeEq;
+                self.ct_eq(other).into()
             }
         }
 
@@ -836,7 +935,17 @@ fn prime_field_impl(
         impl Ord for #name {
             #[inline(always)]
             fn cmp(&self, other: &#name) -> ::core::cmp::Ordering {
-                self.into_repr().cmp(&other.into_repr())
+                let mut a = *self;
+                a.mont_reduce(
+                    #mont_reduce_self_params
+                );
+
+                let mut b = *other;
+                b.mont_reduce(
+                    #mont_reduce_other_params
+                );
+
+                a.cmp_native(&b)
             }
         }
 
@@ -853,8 +962,23 @@ fn prime_field_impl(
             }
         }
 
+        impl From<u64> for #name {
+            #[inline(always)]
+            fn from(val: u64) -> #name {
+                let mut raw = [0u64; #limbs];
+                raw[0] = val;
+                #name(raw) * R2
+            }
+        }
+
         impl From<#name> for #repr {
             fn from(e: #name) -> #repr {
+                e.into_repr()
+            }
+        }
+
+        impl<'a> From<&'a #name> for #repr {
+            fn from(e: &'a #name) -> #repr {
                 e.into_repr()
             }
         }
@@ -863,9 +987,9 @@ fn prime_field_impl(
             fn conditional_select(a: &#name, b: &#name, choice: ::subtle::Choice) -> #name {
                 let mut res = [0u64; #limbs];
                 for i in 0..#limbs {
-                    res[i] = u64::conditional_select(&(a.0).0[i], &(b.0).0[i], choice);
+                    res[i] = u64::conditional_select(&a.0[i], &b.0[i], choice);
                 }
-                #name(#repr(res))
+                #name(res)
             }
         }
 
@@ -876,9 +1000,9 @@ fn prime_field_impl(
             fn neg(self) -> #name {
                 let mut ret = self;
                 if !ret.is_zero() {
-                    let mut tmp = MODULUS;
-                    tmp.sub_noborrow(&ret.0);
-                    ret.0 = tmp;
+                    let mut tmp = MODULUS_LIMBS;
+                    tmp.sub_noborrow(&ret);
+                    ret = tmp;
                 }
                 ret
             }
@@ -908,7 +1032,7 @@ fn prime_field_impl(
             #[inline]
             fn add_assign(&mut self, other: &#name) {
                 // This cannot exceed the backing capacity.
-                self.0.add_nocarry(&other.0);
+                self.add_nocarry(other);
 
                 // However, it may need to be reduced.
                 self.reduce();
@@ -946,11 +1070,11 @@ fn prime_field_impl(
             #[inline]
             fn sub_assign(&mut self, other: &#name) {
                 // If `other` is larger than `self`, we'll need to add the modulus to self first.
-                if other.0 > self.0 {
-                    self.0.add_nocarry(&MODULUS);
+                if other.cmp_native(self) == ::core::cmp::Ordering::Greater {
+                    self.add_nocarry(&MODULUS_LIMBS);
                 }
 
-                self.0.sub_noborrow(&other.0);
+                self.sub_noborrow(other);
             }
         }
 
@@ -997,30 +1121,78 @@ fn prime_field_impl(
             }
         }
 
+        impl ::core::ops::BitAnd<u64> for #name {
+            type Output = u64;
+
+            #[inline(always)]
+            fn bitand(mut self, rhs: u64) -> u64 {
+                self.mont_reduce(
+                    #mont_reduce_self_params
+                );
+
+                self.0[0] & rhs
+            }
+        }
+
+        impl ::core::ops::Shr<u32> for #name {
+            type Output = #name;
+
+            #[inline(always)]
+            fn shr(mut self, mut n: u32) -> #name {
+                if n as usize >= 64 * #limbs {
+                    return Self::from(0);
+                }
+
+                // Convert from Montgomery to native representation.
+                self.mont_reduce(
+                    #mont_reduce_self_params
+                );
+
+                while n >= 64 {
+                    let mut t = 0;
+                    for i in self.0.iter_mut().rev() {
+                        ::core::mem::swap(&mut t, i);
+                    }
+                    n -= 64;
+                }
+
+                if n > 0 {
+                    let mut t = 0;
+                    for i in self.0.iter_mut().rev() {
+                        let t2 = *i << (64 - n);
+                        *i >>= n;
+                        *i |= t;
+                        t = t2;
+                    }
+                }
+
+                // Convert back to Montgomery representation
+                self * R2
+            }
+        }
+
         impl ::ff::PrimeField for #name {
             type Repr = #repr;
 
-            fn from_repr(r: #repr) -> Result<#name, PrimeFieldDecodingError> {
-                let mut r = #name(r);
-                if r.is_valid() {
-                    r.mul_assign(&#name(R2));
-
-                    Ok(r)
-                } else {
-                    Err(PrimeFieldDecodingError::NotInField)
-                }
+            fn from_repr(r: #repr) -> Option<#name> {
+                #from_repr_impl
             }
 
             fn into_repr(&self) -> #repr {
-                let mut r = *self;
-                r.mont_reduce(
-                    #into_repr_params
-                );
-
-                r.0
+                #into_repr_impl
             }
 
-            fn char() -> #repr {
+            #[inline(always)]
+            fn is_odd(&self) -> bool {
+                let mut r = *self;
+                r.mont_reduce(
+                    #mont_reduce_self_params
+                );
+
+                r.0[0] & 1 == 1
+            }
+
+            fn char() -> Self::Repr {
                 MODULUS
             }
 
@@ -1029,13 +1201,13 @@ fn prime_field_impl(
             const CAPACITY: u32 = Self::NUM_BITS - 1;
 
             fn multiplicative_generator() -> Self {
-                #name(GENERATOR)
+                GENERATOR
             }
 
             const S: u32 = S;
 
             fn root_of_unity() -> Self {
-                #name(ROOT_OF_UNITY)
+                ROOT_OF_UNITY
             }
         }
 
@@ -1048,7 +1220,7 @@ fn prime_field_impl(
                         for i in 0..#limbs {
                             repr[i] = rng.next_u64();
                         }
-                        #name(#repr(repr))
+                        #name(repr)
                     };
 
                     // Mask away the unused most-significant bits.
@@ -1062,17 +1234,17 @@ fn prime_field_impl(
 
             #[inline]
             fn zero() -> Self {
-                #name(#repr::from(0))
+                #name([0; #limbs])
             }
 
             #[inline]
             fn one() -> Self {
-                #name(R)
+                R
             }
 
             #[inline]
             fn is_zero(&self) -> bool {
-                self.0.is_zero()
+                self.0.iter().all(|&e| e == 0)
             }
 
             #[inline]
@@ -1080,7 +1252,13 @@ fn prime_field_impl(
                 let mut ret = *self;
 
                 // This cannot exceed the backing capacity.
-                ret.0.mul2();
+                let mut last = 0;
+                for i in &mut ret.0 {
+                    let tmp = *i >> 63;
+                    *i <<= 1;
+                    *i |= last;
+                    last = tmp;
+                }
 
                 // However, it may need to be reduced.
                 ret.reduce();
@@ -1105,11 +1283,46 @@ fn prime_field_impl(
         }
 
         impl #name {
+            /// Compares two elements in native representation. This is only used
+            /// internally.
+            #[inline(always)]
+            fn cmp_native(&self, other: &#name) -> ::core::cmp::Ordering {
+                for (a, b) in self.0.iter().rev().zip(other.0.iter().rev()) {
+                    if a < b {
+                        return ::core::cmp::Ordering::Less
+                    } else if a > b {
+                        return ::core::cmp::Ordering::Greater
+                    }
+                }
+
+                ::core::cmp::Ordering::Equal
+            }
+
             /// Determines if the element is really in the field. This is only used
             /// internally.
             #[inline(always)]
             fn is_valid(&self) -> bool {
-                self.0 < MODULUS
+                // The Ord impl calls `reduce`, which in turn calls `is_valid`, so we use
+                // this internal function to eliminate the cycle.
+                self.cmp_native(&MODULUS_LIMBS) == ::core::cmp::Ordering::Less
+            }
+
+            #[inline(always)]
+            fn add_nocarry(&mut self, other: &#name) {
+                let mut carry = 0;
+
+                for (a, b) in self.0.iter_mut().zip(other.0.iter()) {
+                    *a = ::ff::adc(*a, *b, &mut carry);
+                }
+            }
+
+            #[inline(always)]
+            fn sub_noborrow(&mut self, other: &#name) {
+                let mut borrow = 0;
+
+                for (a, b) in self.0.iter_mut().zip(other.0.iter()) {
+                    *a = ::ff::sbb(*a, *b, &mut borrow);
+                }
             }
 
             /// Subtracts the modulus from this element if this element is not in the
@@ -1117,7 +1330,7 @@ fn prime_field_impl(
             #[inline(always)]
             fn reduce(&mut self) {
                 if !self.is_valid() {
-                    self.0.sub_noborrow(&MODULUS);
+                    self.sub_noborrow(&MODULUS_LIMBS);
                 }
             }
 

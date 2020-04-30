@@ -1,8 +1,8 @@
-use ff::{Field, PrimeField, SqrtField};
+use ff::{Field, PowVartime, PrimeField, SqrtField};
 use rand_core::{RngCore, SeedableRng};
 use rand_xorshift::XorShiftRng;
 
-pub fn random_frobenius_tests<F: Field, C: AsRef<[u64]>>(characteristic: C, maxpower: usize) {
+pub fn random_frobenius_tests<F: Field, C: AsRef<[u8]>>(characteristic: C, maxpower: usize) {
     let mut rng = XorShiftRng::from_seed([
         0x59, 0x62, 0xbe, 0x5d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06, 0xbc,
         0xe5,
@@ -119,7 +119,7 @@ pub fn from_str_tests<F: PrimeField>() {
             let n = rng.next_u64();
 
             let a = F::from_str(&format!("{}", n)).unwrap();
-            let b = F::from_repr(n.into()).unwrap();
+            let b = F::from(n);
 
             assert_eq!(a, b);
         }

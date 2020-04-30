@@ -11,9 +11,10 @@ use crate::{
 use blake2b_simd::{Hash as Blake2bHash, Params as Blake2bParams};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use crypto_api_chachapoly::{ChaCha20Ietf, ChachaPolyIetf};
-use ff::{PrimeField, PrimeFieldRepr};
+use ff::PrimeField;
 use pairing::bls12_381::{Bls12, Fr};
 use rand_core::{CryptoRng, RngCore};
+use std::convert::TryInto;
 use std::fmt;
 use std::str;
 
@@ -192,7 +193,7 @@ fn prf_ock(
     let mut ock_input = [0u8; 128];
     ock_input[0..32].copy_from_slice(&ovk.0);
     cv.write(&mut ock_input[32..64]).unwrap();
-    cmu.into_repr().write_le(&mut ock_input[64..96]).unwrap();
+    ock_input[64..96].copy_from_slice(cmu.into_repr().as_ref());
     epk.write(&mut ock_input[96..128]).unwrap();
 
     Blake2bParams::new()
@@ -302,11 +303,7 @@ impl SaplingNoteEncryption {
         (&mut input[12..20])
             .write_u64::<LittleEndian>(self.note.value)
             .unwrap();
-        self.note
-            .r
-            .into_repr()
-            .write_le(&mut input[20..COMPACT_NOTE_SIZE])
-            .unwrap();
+        input[20..COMPACT_NOTE_SIZE].copy_from_slice(self.note.r.into_repr().as_ref());
         input[COMPACT_NOTE_SIZE..NOTE_PLAINTEXT_SIZE].copy_from_slice(&self.memo.0);
 
         let mut output = [0u8; ENC_CIPHERTEXT_SIZE];
@@ -330,10 +327,7 @@ impl SaplingNoteEncryption {
 
         let mut input = [0u8; OUT_PLAINTEXT_SIZE];
         self.note.pk_d.write(&mut input[0..32]).unwrap();
-        self.esk
-            .into_repr()
-            .write_le(&mut input[32..OUT_PLAINTEXT_SIZE])
-            .unwrap();
+        input[32..OUT_PLAINTEXT_SIZE].copy_from_slice(self.esk.into_repr().as_ref());
 
         let mut output = [0u8; OUT_CIPHERTEXT_SIZE];
         assert_eq!(
@@ -363,9 +357,11 @@ fn parse_note_plaintext_without_memo(
 
     let v = (&plaintext[12..20]).read_u64::<LittleEndian>().ok()?;
 
-    let mut rcm = FsRepr::default();
-    rcm.read_le(&plaintext[20..COMPACT_NOTE_SIZE]).ok()?;
-    let rcm = Fs::from_repr(rcm).ok()?;
+    let rcm = Fs::from_repr(FsRepr(
+        plaintext[20..COMPACT_NOTE_SIZE]
+            .try_into()
+            .expect("slice is the correct length"),
+    ))?;
 
     let diversifier = Diversifier(d);
     let pk_d = diversifier
@@ -483,9 +479,11 @@ pub fn try_sapling_output_recovery(
         .ok()?
         .as_prime_order(&JUBJUB)?;
 
-    let mut esk = FsRepr::default();
-    esk.read_le(&op[32..OUT_PLAINTEXT_SIZE]).ok()?;
-    let esk = Fs::from_repr(esk).ok()?;
+    let esk = Fs::from_repr(FsRepr(
+        op[32..OUT_PLAINTEXT_SIZE]
+            .try_into()
+            .expect("slice is the correct length"),
+    ))?;
 
     let shared_secret = sapling_ka_agree(&esk, &pk_d);
     let key = kdf_sapling(shared_secret, &epk);
@@ -515,9 +513,11 @@ pub fn try_sapling_output_recovery(
 
     let v = (&plaintext[12..20]).read_u64::<LittleEndian>().ok()?;
 
-    let mut rcm = FsRepr::default();
-    rcm.read_le(&plaintext[20..COMPACT_NOTE_SIZE]).ok()?;
-    let rcm = Fs::from_repr(rcm).ok()?;
+    let rcm = Fs::from_repr(FsRepr(
+        plaintext[20..COMPACT_NOTE_SIZE]
+            .try_into()
+            .expect("slice is the correct length"),
+    ))?;
 
     let mut memo = [0u8; 512];
     memo.copy_from_slice(&plaintext[COMPACT_NOTE_SIZE..NOTE_PLAINTEXT_SIZE]);
@@ -554,10 +554,11 @@ mod tests {
         primitives::{Diversifier, PaymentAddress, ValueCommitment},
     };
     use crypto_api_chachapoly::ChachaPolyIetf;
-    use ff::{Field, PrimeField, PrimeFieldRepr};
+    use ff::{Field, PrimeField};
     use pairing::bls12_381::{Bls12, Fr, FrRepr};
     use rand_core::OsRng;
     use rand_core::{CryptoRng, RngCore};
+    use std::convert::TryInto;
     use std::str::FromStr;
 
     use super::{
@@ -791,9 +792,7 @@ mod tests {
             .as_prime_order(&JUBJUB)
             .unwrap();
 
-        let mut esk = FsRepr::default();
-        esk.read_le(&op[32..OUT_PLAINTEXT_SIZE]).unwrap();
-        let esk = Fs::from_repr(esk).unwrap();
+        let esk = Fs::from_repr(FsRepr(op[32..OUT_PLAINTEXT_SIZE].try_into().unwrap())).unwrap();
 
         let shared_secret = sapling_ka_agree(&esk, &pk_d);
         let key = kdf_sapling(shared_secret, &epk);
@@ -1292,17 +1291,13 @@ mod tests {
 
         macro_rules! read_fr {
             ($field:expr) => {{
-                let mut repr = FrRepr::default();
-                repr.read_le(&$field[..]).unwrap();
-                Fr::from_repr(repr).unwrap()
+                Fr::from_repr(FrRepr($field[..].try_into().unwrap())).unwrap()
             }};
         }
 
         macro_rules! read_fs {
             ($field:expr) => {{
-                let mut repr = FsRepr::default();
-                repr.read_le(&$field[..]).unwrap();
-                Fs::from_repr(repr).unwrap()
+                Fs::from_repr(FsRepr($field[..].try_into().unwrap())).unwrap()
             }};
         }
 

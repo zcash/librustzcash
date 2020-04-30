@@ -1,6 +1,6 @@
 use super::{edwards, montgomery, JubjubEngine, JubjubParams, PrimeOrder};
 
-use ff::{Field, PrimeField, PrimeFieldRepr, SqrtField};
+use ff::{Field, PrimeField, SqrtField};
 use std::ops::{AddAssign, MulAssign, Neg, SubAssign};
 
 use rand_core::{RngCore, SeedableRng};
@@ -237,7 +237,7 @@ fn test_get_for<E: JubjubEngine>(params: &E::Params) {
         let p = edwards::Point::<E, _>::get_for_y(y, sign, params);
         if bool::from(p.is_some()) {
             let mut p = p.unwrap();
-            assert!(p.to_xy().0.into_repr().is_odd() == sign);
+            assert!(p.to_xy().0.is_odd() == sign);
             p = p.negate();
             assert!(edwards::Point::<E, _>::get_for_y(y, !sign, params).unwrap() == p);
         }
@@ -370,32 +370,26 @@ fn test_jubjub_params<E: JubjubEngine>(params: &E::Params) {
         // Check that the number of windows per generator
         // in the Pedersen hash does not allow for collisions
 
-        let mut cur = E::Fs::one().into_repr();
+        let mut cur = E::Fs::one();
 
-        let mut max = E::Fs::char();
-        {
-            max.sub_noborrow(&E::Fs::one().into_repr());
-            max.div2();
-        }
+        let max = (-E::Fs::one()) >> 1;
 
-        let mut pacc = E::Fs::zero().into_repr();
-        let mut nacc = E::Fs::char();
+        let mut pacc = E::Fs::zero();
+        let mut nacc = E::Fs::zero();
 
         for _ in 0..params.pedersen_hash_chunks_per_generator() {
             // tmp = cur * 4
-            let mut tmp = cur;
-            tmp.mul2();
-            tmp.mul2();
+            let tmp = cur.double().double();
 
-            pacc.add_nocarry(&tmp);
-            nacc.sub_noborrow(&tmp);
+            pacc += &tmp;
+            nacc -= &tmp; // The first subtraction wraps intentionally.
 
             assert!(pacc < max);
             assert!(pacc < nacc);
 
             // cur = cur * 16
             for _ in 0..4 {
-                cur.mul2();
+                cur = cur.double();
             }
         }
     }
