@@ -12,6 +12,7 @@ extern crate std;
 #[cfg(feature = "derive")]
 pub use ff_derive::*;
 
+use byteorder::ByteOrder;
 use core::convert::TryFrom;
 use core::fmt;
 use core::marker::PhantomData;
@@ -124,13 +125,35 @@ impl<T: Field> PowVartime<u64> for T {
     const LIMB_SIZE: u64 = 64;
 }
 
+/// Helper trait for converting the binary representation of a prime field element into a
+/// specific endianness. This is useful when you need to act on the bit representation
+/// of an element generically, as the native binary representation of a prime field is
+/// field-dependent.
+pub trait Endianness: ByteOrder {
+    /// Converts the provided representation between native and little-endian.
+    fn toggle_little_endian<T: AsMut<[u8]>>(t: &mut T);
+}
+
+impl Endianness for byteorder::BigEndian {
+    fn toggle_little_endian<T: AsMut<[u8]>>(t: &mut T) {
+        t.as_mut().reverse();
+    }
+}
+
+impl Endianness for byteorder::LittleEndian {
+    fn toggle_little_endian<T: AsMut<[u8]>>(_: &mut T) {
+        // No-op
+    }
+}
+
 /// This represents an element of a prime field.
-pub trait PrimeField:
-    Field + Ord + From<u64> + BitAnd<u64, Output = u64> + Shr<u32, Output = Self>
-{
+pub trait PrimeField: Field + Ord + From<u64> {
     /// The prime field can be converted back and forth into this binary
     /// representation.
     type Repr: Default + AsRef<[u8]> + AsMut<[u8]> + From<Self> + for<'r> From<&'r Self>;
+
+    /// This indicates the endianness of [`PrimeField::Repr`].
+    type ReprEndianness: Endianness;
 
     /// Interpret a string of numbers as a (congruent) prime field element.
     /// Does not accept unnecessary leading zeroes or a blank string.
@@ -176,16 +199,15 @@ pub trait PrimeField:
     /// this prime field, failing if the input is not canonical (is not smaller than the
     /// field's modulus).
     ///
-    /// The byte representation is interpreted with the same endianness as is returned
-    /// by [`PrimeField::into_repr`].
+    /// The byte representation is interpreted with the endianness defined by
+    /// [`PrimeField::ReprEndianness`].
     fn from_repr(_: Self::Repr) -> Option<Self>;
 
     /// Converts an element of the prime field into the standard byte representation for
     /// this field.
     ///
-    /// Endianness of the byte representation is defined by the field implementation.
-    /// Callers should assume that it is the standard endianness used to represent encoded
-    /// elements of this particular field.
+    /// The endianness of the byte representation is defined by
+    /// [`PrimeField::ReprEndianness`].
     fn into_repr(&self) -> Self::Repr;
 
     /// Returns true iff this element is odd.

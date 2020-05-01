@@ -1,6 +1,6 @@
 use super::{edwards, montgomery, JubjubEngine, JubjubParams, PrimeOrder};
 
-use ff::{Field, PrimeField};
+use ff::{Endianness, Field, PrimeField};
 use std::ops::{AddAssign, MulAssign, Neg, SubAssign};
 
 use rand_core::{RngCore, SeedableRng};
@@ -372,7 +372,23 @@ fn test_jubjub_params<E: JubjubEngine>(params: &E::Params) {
 
         let mut cur = E::Fs::one();
 
-        let max = (-E::Fs::one()) >> 1;
+        let max = {
+            // Grab char - 1 in little endian.
+            let mut tmp = (-E::Fs::one()).into_repr();
+            <E::Fs as PrimeField>::ReprEndianness::toggle_little_endian(&mut tmp);
+
+            // Shift right by 1 bit.
+            let mut borrow = 0;
+            for b in tmp.as_mut().iter_mut().rev() {
+                let new_borrow = *b & 1;
+                *b = (borrow << 7) | (*b >> 1);
+                borrow = new_borrow;
+            }
+
+            // Convert back to a field element.
+            <E::Fs as PrimeField>::ReprEndianness::toggle_little_endian(&mut tmp);
+            E::Fs::from_repr(tmp).unwrap()
+        };
 
         let mut pacc = E::Fs::zero();
         let mut nacc = E::Fs::zero();

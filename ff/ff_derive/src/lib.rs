@@ -31,6 +31,13 @@ impl FromStr for ReprEndianness {
 }
 
 impl ReprEndianness {
+    fn repr_endianness(&self) -> proc_macro2::TokenStream {
+        match self {
+            ReprEndianness::Big => quote! {::byteorder::BigEndian},
+            ReprEndianness::Little => quote! {::byteorder::LittleEndian},
+        }
+    }
+
     fn from_repr(&self, name: &syn::Ident, limbs: usize) -> proc_macro2::TokenStream {
         let read_repr = match self {
             ReprEndianness::Big => quote! {
@@ -885,6 +892,7 @@ fn prime_field_impl(
     let mont_reduce_self_params = mont_reduce_params(quote! {self}, limbs);
     let mont_reduce_other_params = mont_reduce_params(quote! {other}, limbs);
 
+    let repr_endianness = endianness.repr_endianness();
     let from_repr_impl = endianness.from_repr(name, limbs);
     let into_repr_impl = endianness.into_repr(repr, &mont_reduce_self_params, limbs);
 
@@ -1117,58 +1125,9 @@ fn prime_field_impl(
             }
         }
 
-        impl ::core::ops::BitAnd<u64> for #name {
-            type Output = u64;
-
-            #[inline(always)]
-            fn bitand(mut self, rhs: u64) -> u64 {
-                self.mont_reduce(
-                    #mont_reduce_self_params
-                );
-
-                self.0[0] & rhs
-            }
-        }
-
-        impl ::core::ops::Shr<u32> for #name {
-            type Output = #name;
-
-            #[inline(always)]
-            fn shr(mut self, mut n: u32) -> #name {
-                if n as usize >= 64 * #limbs {
-                    return Self::from(0);
-                }
-
-                // Convert from Montgomery to native representation.
-                self.mont_reduce(
-                    #mont_reduce_self_params
-                );
-
-                while n >= 64 {
-                    let mut t = 0;
-                    for i in self.0.iter_mut().rev() {
-                        ::core::mem::swap(&mut t, i);
-                    }
-                    n -= 64;
-                }
-
-                if n > 0 {
-                    let mut t = 0;
-                    for i in self.0.iter_mut().rev() {
-                        let t2 = *i << (64 - n);
-                        *i >>= n;
-                        *i |= t;
-                        t = t2;
-                    }
-                }
-
-                // Convert back to Montgomery representation
-                self * R2
-            }
-        }
-
         impl ::ff::PrimeField for #name {
             type Repr = #repr;
+            type ReprEndianness = #repr_endianness;
 
             fn from_repr(r: #repr) -> Option<#name> {
                 #from_repr_impl
