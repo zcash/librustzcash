@@ -237,6 +237,10 @@ impl Field for Fq12 {
             c1: t.mul(&self.c1).neg(),
         })
     }
+
+    fn sqrt(&self) -> CtOption<Self> {
+        unimplemented!()
+    }
 }
 
 #[cfg(test)]

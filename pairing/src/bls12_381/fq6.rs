@@ -391,6 +391,10 @@ impl Field for Fq6 {
             tmp
         })
     }
+
+    fn sqrt(&self) -> CtOption<Self> {
+        unimplemented!()
+    }
 }
 
 #[cfg(test)]

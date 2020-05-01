@@ -1,5 +1,5 @@
 use byteorder::{ByteOrder, LittleEndian};
-use ff::{adc, mac_with_carry, sbb, BitIterator, Field, PowVartime, PrimeField, SqrtField};
+use ff::{adc, mac_with_carry, sbb, BitIterator, Field, PowVartime, PrimeField};
 use rand_core::RngCore;
 use std::mem;
 use std::ops::{Add, AddAssign, BitAnd, Mul, MulAssign, Neg, Shr, Sub, SubAssign};
@@ -541,6 +541,24 @@ impl Field for Fs {
         ret.mont_reduce(r0, r1, r2, r3, r4, r5, r6, r7);
         ret
     }
+
+    fn sqrt(&self) -> CtOption<Self> {
+        // Shank's algorithm for s mod 4 = 3
+        // https://eprint.iacr.org/2012/685.pdf (page 9, algorithm 2)
+
+        // a1 = self^((s - 3) // 4)
+        let mut a1 = self.pow_vartime([
+            0xb425c397b5bdcb2du64,
+            0x299a0824f3320420,
+            0x4199cec0404d0ec0,
+            0x39f6d3a994cebea,
+        ]);
+        let mut a0 = a1.square();
+        a0.mul_assign(self);
+        a1.mul_assign(self);
+
+        CtOption::new(a1, !a0.ct_eq(&NEGATIVE_ONE))
+    }
 }
 
 impl Fs {
@@ -670,26 +688,6 @@ impl ToUniform for Fs {
     fn to_uniform(digest: &[u8]) -> Self {
         assert_eq!(digest.len(), 64);
         Self::one().mul_bits(BitIterator::<u8, _>::new(digest))
-    }
-}
-
-impl SqrtField for Fs {
-    fn sqrt(&self) -> CtOption<Self> {
-        // Shank's algorithm for s mod 4 = 3
-        // https://eprint.iacr.org/2012/685.pdf (page 9, algorithm 2)
-
-        // a1 = self^((s - 3) // 4)
-        let mut a1 = self.pow_vartime([
-            0xb425c397b5bdcb2du64,
-            0x299a0824f3320420,
-            0x4199cec0404d0ec0,
-            0x39f6d3a994cebea,
-        ]);
-        let mut a0 = a1.square();
-        a0.mul_assign(self);
-        a1.mul_assign(self);
-
-        CtOption::new(a1, !a0.ct_eq(&NEGATIVE_ONE))
     }
 }
 

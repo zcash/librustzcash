@@ -163,8 +163,8 @@ pub fn prime_field(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
         &modulus,
         &endianness,
         limbs,
+        sqrt_impl,
     ));
-    gen.extend(sqrt_impl);
 
     // Return the generated impl
     gen.into()
@@ -486,89 +486,84 @@ fn prime_field_constants_and_sqrt(
         biguint_to_u64_vec((exp(generator.clone(), &t, &modulus) * &r) % modulus, limbs);
     let generator = biguint_to_u64_vec((generator.clone() * &r) % modulus, limbs);
 
-    let sqrt_impl = if (modulus % BigUint::from_str("4").unwrap())
-        == BigUint::from_str("3").unwrap()
-    {
-        // Addition chain for (r + 1) // 4
-        let mod_plus_1_over_4 = pow_fixed::generate(
-            &quote! {self},
-            (modulus + BigUint::from_str("1").unwrap()) >> 2,
-        );
+    let sqrt_impl =
+        if (modulus % BigUint::from_str("4").unwrap()) == BigUint::from_str("3").unwrap() {
+            // Addition chain for (r + 1) // 4
+            let mod_plus_1_over_4 = pow_fixed::generate(
+                &quote! {self},
+                (modulus + BigUint::from_str("1").unwrap()) >> 2,
+            );
 
-        quote! {
-            impl ::ff::SqrtField for #name {
-                fn sqrt(&self) -> ::subtle::CtOption<Self> {
-                    use ::subtle::ConstantTimeEq;
+            quote! {
+                use ::subtle::ConstantTimeEq;
 
-                    // Because r = 3 (mod 4)
-                    // sqrt can be done with only one exponentiation,
-                    // via the computation of  self^((r + 1) // 4) (mod r)
-                    let sqrt = {
-                        #mod_plus_1_over_4
-                    };
+                // Because r = 3 (mod 4)
+                // sqrt can be done with only one exponentiation,
+                // via the computation of  self^((r + 1) // 4) (mod r)
+                let sqrt = {
+                    #mod_plus_1_over_4
+                };
 
-                    ::subtle::CtOption::new(
-                        sqrt,
-                        (sqrt * &sqrt).ct_eq(self), // Only return Some if it's the square root.
-                    )
-                }
+                ::subtle::CtOption::new(
+                    sqrt,
+                    (sqrt * &sqrt).ct_eq(self), // Only return Some if it's the square root.
+                )
             }
-        }
-    } else if (modulus % BigUint::from_str("16").unwrap()) == BigUint::from_str("1").unwrap() {
-        // Addition chain for (t - 1) // 2
-        let t_minus_1_over_2 = pow_fixed::generate(&quote! {self}, (&t - BigUint::one()) >> 1);
+        } else if (modulus % BigUint::from_str("16").unwrap()) == BigUint::from_str("1").unwrap() {
+            // Addition chain for (t - 1) // 2
+            let t_minus_1_over_2 = pow_fixed::generate(&quote! {self}, (&t - BigUint::one()) >> 1);
 
-        quote! {
-            impl ::ff::SqrtField for #name {
-                fn sqrt(&self) -> ::subtle::CtOption<Self> {
-                    // Tonelli-Shank's algorithm for q mod 16 = 1
-                    // https://eprint.iacr.org/2012/685.pdf (page 12, algorithm 5)
-                    use ::subtle::{ConditionallySelectable, ConstantTimeEq};
+            quote! {
+                // Tonelli-Shank's algorithm for q mod 16 = 1
+                // https://eprint.iacr.org/2012/685.pdf (page 12, algorithm 5)
+                use ::subtle::{ConditionallySelectable, ConstantTimeEq};
 
-                    // w = self^((t - 1) // 2)
-                    let w = {
-                        #t_minus_1_over_2
-                    };
+                // w = self^((t - 1) // 2)
+                let w = {
+                    #t_minus_1_over_2
+                };
 
-                    let mut v = S;
-                    let mut x = *self * &w;
-                    let mut b = x * &w;
+                let mut v = S;
+                let mut x = *self * &w;
+                let mut b = x * &w;
 
-                    // Initialize z as the 2^S root of unity.
-                    let mut z = ROOT_OF_UNITY;
+                // Initialize z as the 2^S root of unity.
+                let mut z = ROOT_OF_UNITY;
 
-                    for max_v in (1..=S).rev() {
-                        let mut k = 1;
-                        let mut tmp = b.square();
-                        let mut j_less_than_v: ::subtle::Choice = 1.into();
+                for max_v in (1..=S).rev() {
+                    let mut k = 1;
+                    let mut tmp = b.square();
+                    let mut j_less_than_v: ::subtle::Choice = 1.into();
 
-                        for j in 2..max_v {
-                            let tmp_is_one = tmp.ct_eq(&#name::one());
-                            let squared = #name::conditional_select(&tmp, &z, tmp_is_one).square();
-                            tmp = #name::conditional_select(&squared, &tmp, tmp_is_one);
-                            let new_z = #name::conditional_select(&z, &squared, tmp_is_one);
-                            j_less_than_v &= !j.ct_eq(&v);
-                            k = u32::conditional_select(&j, &k, tmp_is_one);
-                            z = #name::conditional_select(&z, &new_z, j_less_than_v);
-                        }
-
-                        let result = x * &z;
-                        x = #name::conditional_select(&result, &x, b.ct_eq(&#name::one()));
-                        z = z.square();
-                        b *= &z;
-                        v = k;
+                    for j in 2..max_v {
+                        let tmp_is_one = tmp.ct_eq(&#name::one());
+                        let squared = #name::conditional_select(&tmp, &z, tmp_is_one).square();
+                        tmp = #name::conditional_select(&squared, &tmp, tmp_is_one);
+                        let new_z = #name::conditional_select(&z, &squared, tmp_is_one);
+                        j_less_than_v &= !j.ct_eq(&v);
+                        k = u32::conditional_select(&j, &k, tmp_is_one);
+                        z = #name::conditional_select(&z, &new_z, j_less_than_v);
                     }
 
-                    ::subtle::CtOption::new(
-                        x,
-                        (x * &x).ct_eq(self), // Only return Some if it's the square root.
-                    )
+                    let result = x * &z;
+                    x = #name::conditional_select(&result, &x, b.ct_eq(&#name::one()));
+                    z = z.square();
+                    b *= &z;
+                    v = k;
                 }
+
+                ::subtle::CtOption::new(
+                    x,
+                    (x * &x).ct_eq(self), // Only return Some if it's the square root.
+                )
             }
-        }
-    } else {
-        quote! {}
-    };
+        } else {
+            syn::Error::new_spanned(
+                &name,
+                "ff_derive can't generate a square root function for this field.",
+            )
+            .to_compile_error()
+        };
 
     // Compute R^2 mod m
     let r2 = biguint_to_u64_vec((&r * &r) % modulus, limbs);
@@ -634,6 +629,7 @@ fn prime_field_impl(
     modulus: &BigUint,
     endianness: &ReprEndianness,
     limbs: usize,
+    sqrt_impl: proc_macro2::TokenStream,
 ) -> proc_macro2::TokenStream {
     // Returns r{n} as an ident.
     fn get_temp(n: usize) -> syn::Ident {
@@ -1279,6 +1275,10 @@ fn prime_field_impl(
             fn square(&self) -> Self
             {
                 #squaring_impl
+            }
+
+            fn sqrt(&self) -> ::subtle::CtOption<Self> {
+                #sqrt_impl
             }
         }
 

@@ -3,7 +3,7 @@ use rand_core::SeedableRng;
 use rand_xorshift::XorShiftRng;
 use std::ops::{AddAssign, MulAssign, Neg, SubAssign};
 
-use ff::{Field, PrimeField, SqrtField};
+use ff::{Field, PrimeField};
 use pairing::bls12_381::*;
 
 fn bench_fr_add_assign(c: &mut Criterion) {

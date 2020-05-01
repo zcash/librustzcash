@@ -1,5 +1,5 @@
 use super::fq::{Fq, FROBENIUS_COEFF_FQ2_C1, NEGATIVE_ONE};
-use ff::{Field, PowVartime, SqrtField};
+use ff::{Field, PowVartime};
 use rand_core::RngCore;
 use std::cmp::Ordering;
 use std::ops::{Add, AddAssign, Mul, MulAssign, Neg, Sub, SubAssign};
@@ -241,9 +241,7 @@ impl Field for Fq2 {
     fn frobenius_map(&mut self, power: usize) {
         self.c1.mul_assign(&FROBENIUS_COEFF_FQ2_C1[power % 2]);
     }
-}
 
-impl SqrtField for Fq2 {
     /// WARNING: THIS IS NOT ACTUALLY CONSTANT TIME YET!
     /// THIS WILL BE REPLACED BY THE bls12_381 CRATE, WHICH IS CONSTANT TIME!
     fn sqrt(&self) -> CtOption<Self> {

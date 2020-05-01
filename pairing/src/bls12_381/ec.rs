@@ -754,7 +754,7 @@ pub mod g1 {
     use super::super::{Bls12, Fq, Fq12, FqRepr, Fr};
     use super::g2::G2Affine;
     use crate::{Engine, PairingCurveAffine};
-    use ff::{BitIterator, Field, PrimeField, SqrtField};
+    use ff::{BitIterator, Field, PrimeField};
     use group::{CurveAffine, CurveProjective, EncodedPoint, GroupDecodingError};
     use rand_core::RngCore;
     use std::fmt;
@@ -1054,8 +1054,6 @@ pub mod g1 {
 
     #[test]
     fn g1_generator() {
-        use crate::SqrtField;
-
         let mut x = Fq::zero();
         let mut i = 0;
         loop {
@@ -1366,7 +1364,7 @@ pub mod g2 {
     use super::super::{Bls12, Fq, Fq12, Fq2, FqRepr, Fr};
     use super::g1::G1Affine;
     use crate::{Engine, PairingCurveAffine};
-    use ff::{BitIterator, Field, PrimeField, SqrtField};
+    use ff::{BitIterator, Field, PrimeField};
     use group::{CurveAffine, CurveProjective, EncodedPoint, GroupDecodingError};
     use rand_core::RngCore;
     use std::fmt;
@@ -1708,8 +1706,6 @@ pub mod g2 {
 
     #[test]
     fn g2_generator() {
-        use crate::SqrtField;
-
         let mut x = Fq2::zero();
         let mut i = 0;
         loop {

@@ -1,7 +1,7 @@
 // Catch documentation errors caused by code changes.
 #![deny(intra_doc_link_resolution_failure)]
 
-use ff::{PrimeField, ScalarEngine, SqrtField};
+use ff::{Field, PrimeField, ScalarEngine};
 use rand::RngCore;
 use std::error::Error;
 use std::fmt;
@@ -47,8 +47,8 @@ pub trait CurveProjective:
     + CurveOpsOwned<<Self as CurveProjective>::Affine>
 {
     type Engine: ScalarEngine<Fr = Self::Scalar>;
-    type Scalar: PrimeField + SqrtField;
-    type Base: SqrtField;
+    type Scalar: PrimeField;
+    type Base: Field;
     type Affine: CurveAffine<Projective = Self, Scalar = Self::Scalar>;
 
     /// Returns an element chosen uniformly at random using a user-provided RNG.
@@ -105,8 +105,8 @@ pub trait CurveAffine:
     + Neg<Output = Self>
 {
     type Engine: ScalarEngine<Fr = Self::Scalar>;
-    type Scalar: PrimeField + SqrtField;
-    type Base: SqrtField;
+    type Scalar: PrimeField;
+    type Base: Field;
     type Projective: CurveProjective<Affine = Self, Scalar = Self::Scalar>;
     type Uncompressed: EncodedPoint<Affine = Self>;
     type Compressed: EncodedPoint<Affine = Self>;
