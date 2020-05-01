@@ -39,6 +39,15 @@ impl Fq12 {
         self.c0.mul_by_nonresidue();
         self.c0.add_assign(&aa);
     }
+
+    pub fn frobenius_map(&mut self, power: usize) {
+        self.c0.frobenius_map(power);
+        self.c1.frobenius_map(power);
+
+        self.c1.c0.mul_assign(&FROBENIUS_COEFF_FQ12_C1[power % 12]);
+        self.c1.c1.mul_assign(&FROBENIUS_COEFF_FQ12_C1[power % 12]);
+        self.c1.c2.mul_assign(&FROBENIUS_COEFF_FQ12_C1[power % 12]);
+    }
 }
 
 impl ConditionallySelectable for Fq12 {
@@ -200,15 +209,6 @@ impl Field for Fq12 {
         }
     }
 
-    fn frobenius_map(&mut self, power: usize) {
-        self.c0.frobenius_map(power);
-        self.c1.frobenius_map(power);
-
-        self.c1.c0.mul_assign(&FROBENIUS_COEFF_FQ12_C1[power % 12]);
-        self.c1.c1.mul_assign(&FROBENIUS_COEFF_FQ12_C1[power % 12]);
-        self.c1.c2.mul_assign(&FROBENIUS_COEFF_FQ12_C1[power % 12]);
-    }
-
     fn square(&self) -> Self {
         let mut ab = self.c0;
         ab.mul_assign(&self.c1);
@@ -282,8 +282,5 @@ fn test_fq12_mul_by_014() {
 
 #[test]
 fn fq12_field_tests() {
-    use ff::PrimeField;
-
     crate::tests::field::random_field_tests::<Fq12>();
-    crate::tests::field::random_frobenius_tests::<Fq12, _>(super::fq::Fq::char(), 13);
 }

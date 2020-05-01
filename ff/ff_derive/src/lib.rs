@@ -1266,11 +1266,6 @@ fn prime_field_impl(
                 #invert_impl
             }
 
-            #[inline(always)]
-            fn frobenius_map(&mut self, _: usize) {
-                // This has no effect in a prime field.
-            }
-
             #[inline]
             fn square(&self) -> Self
             {

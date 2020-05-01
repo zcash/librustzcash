@@ -53,6 +53,10 @@ impl Fq2 {
 
         t1
     }
+
+    pub fn frobenius_map(&mut self, power: usize) {
+        self.c1.mul_assign(&FROBENIUS_COEFF_FQ2_C1[power % 2]);
+    }
 }
 
 impl ConditionallySelectable for Fq2 {
@@ -236,10 +240,6 @@ impl Field for Fq2 {
             c0: self.c0.mul(&t),
             c1: self.c1.mul(&t).neg(),
         })
-    }
-
-    fn frobenius_map(&mut self, power: usize) {
-        self.c1.mul_assign(&FROBENIUS_COEFF_FQ2_C1[power % 2]);
     }
 
     /// WARNING: THIS IS NOT ACTUALLY CONSTANT TIME YET!
@@ -920,9 +920,6 @@ fn test_fq2_mul_nonresidue() {
 
 #[test]
 fn fq2_field_tests() {
-    use ff::PrimeField;
-
     crate::tests::field::random_field_tests::<Fq2>();
     crate::tests::field::random_sqrt_tests::<Fq2>();
-    crate::tests::field::random_frobenius_tests::<Fq2, _>(super::fq::Fq::char(), 13);
 }

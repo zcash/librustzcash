@@ -99,6 +99,15 @@ impl Fq6 {
         self.c1 = t2;
         self.c2 = t3;
     }
+
+    pub fn frobenius_map(&mut self, power: usize) {
+        self.c0.frobenius_map(power);
+        self.c1.frobenius_map(power);
+        self.c2.frobenius_map(power);
+
+        self.c1.mul_assign(&FROBENIUS_COEFF_FQ6_C1[power % 6]);
+        self.c2.mul_assign(&FROBENIUS_COEFF_FQ6_C2[power % 6]);
+    }
 }
 
 impl ConditionallySelectable for Fq6 {
@@ -305,15 +314,6 @@ impl Field for Fq6 {
         }
     }
 
-    fn frobenius_map(&mut self, power: usize) {
-        self.c0.frobenius_map(power);
-        self.c1.frobenius_map(power);
-        self.c2.frobenius_map(power);
-
-        self.c1.mul_assign(&FROBENIUS_COEFF_FQ6_C1[power % 6]);
-        self.c2.mul_assign(&FROBENIUS_COEFF_FQ6_C2[power % 6]);
-    }
-
     fn square(&self) -> Self {
         let s0 = self.c0.square();
         let mut ab = self.c0;
@@ -474,8 +474,5 @@ fn test_fq6_mul_by_01() {
 
 #[test]
 fn fq6_field_tests() {
-    use ff::PrimeField;
-
     crate::tests::field::random_field_tests::<Fq6>();
-    crate::tests::field::random_frobenius_tests::<Fq6, _>(super::fq::Fq::char(), 13);
 }

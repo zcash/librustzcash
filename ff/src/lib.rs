@@ -72,10 +72,6 @@ pub trait Field:
     /// failing if the element is zero.
     fn invert(&self) -> CtOption<Self>;
 
-    /// Exponentiates this element by a power of the base prime modulus via
-    /// the Frobenius automorphism.
-    fn frobenius_map(&mut self, power: usize);
-
     /// Returns the square root of the field element, if it is
     /// quadratic residue.
     fn sqrt(&self) -> CtOption<Self>;

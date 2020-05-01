@@ -499,11 +499,6 @@ impl Field for Fs {
         CtOption::new(inverse, Choice::from(if self.is_zero() { 0 } else { 1 }))
     }
 
-    #[inline(always)]
-    fn frobenius_map(&mut self, _: usize) {
-        // This has no effect in a prime field.
-    }
-
     #[inline]
     fn square(&self) -> Self {
         let mut carry = 0;

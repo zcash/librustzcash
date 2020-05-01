@@ -1865,7 +1865,6 @@ fn test_fq_root_of_unity() {
 fn fq_field_tests() {
     crate::tests::field::random_field_tests::<Fq>();
     crate::tests::field::random_sqrt_tests::<Fq>();
-    crate::tests::field::random_frobenius_tests::<Fq, _>(Fq::char(), 13);
     crate::tests::field::from_str_tests::<Fq>();
 }
 

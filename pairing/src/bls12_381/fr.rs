@@ -645,7 +645,6 @@ fn test_fr_root_of_unity() {
 fn fr_field_tests() {
     crate::tests::field::random_field_tests::<Fr>();
     crate::tests::field::random_sqrt_tests::<Fr>();
-    crate::tests::field::random_frobenius_tests::<Fr, _>(Fr::char(), 13);
     crate::tests::field::from_str_tests::<Fr>();
 }
 
