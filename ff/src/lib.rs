@@ -147,7 +147,7 @@ impl Endianness for byteorder::LittleEndian {
 }
 
 /// This represents an element of a prime field.
-pub trait PrimeField: Field + Ord + From<u64> {
+pub trait PrimeField: Field + From<u64> {
     /// The prime field can be converted back and forth into this binary
     /// representation.
     type Repr: Default + AsRef<[u8]> + AsMut<[u8]> + From<Self> + for<'r> From<&'r Self>;

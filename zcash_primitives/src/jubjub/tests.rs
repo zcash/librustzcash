@@ -385,9 +385,8 @@ fn test_jubjub_params<E: JubjubEngine>(params: &E::Params) {
                 borrow = new_borrow;
             }
 
-            // Convert back to a field element.
-            <E::Fs as PrimeField>::ReprEndianness::toggle_little_endian(&mut tmp);
-            E::Fs::from_repr(tmp).unwrap()
+            // Turns out we want this in little endian!
+            tmp
         };
 
         let mut pacc = E::Fs::zero();
@@ -400,8 +399,22 @@ fn test_jubjub_params<E: JubjubEngine>(params: &E::Params) {
             pacc += &tmp;
             nacc -= &tmp; // The first subtraction wraps intentionally.
 
-            assert!(pacc < max);
-            assert!(pacc < nacc);
+            let mut pacc_repr = pacc.into_repr();
+            let mut nacc_repr = nacc.into_repr();
+            <E::Fs as PrimeField>::ReprEndianness::toggle_little_endian(&mut pacc_repr);
+            <E::Fs as PrimeField>::ReprEndianness::toggle_little_endian(&mut nacc_repr);
+
+            fn less_than(val: &[u8], bound: &[u8]) -> bool {
+                for (a, b) in val.iter().rev().zip(bound.iter().rev()) {
+                    if a < b {
+                        return true;
+                    }
+                }
+
+                false
+            }
+            assert!(less_than(pacc_repr.as_ref(), max.as_ref()));
+            assert!(less_than(pacc_repr.as_ref(), nacc_repr.as_ref()));
 
             // cur = cur * 16
             for _ in 0..4 {

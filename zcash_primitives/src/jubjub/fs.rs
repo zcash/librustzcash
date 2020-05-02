@@ -120,26 +120,6 @@ impl ConstantTimeEq for Fs {
     }
 }
 
-impl Ord for Fs {
-    #[inline(always)]
-    fn cmp(&self, other: &Fs) -> ::std::cmp::Ordering {
-        let mut a = *self;
-        a.mont_reduce(self.0[0], self.0[1], self.0[2], self.0[3], 0, 0, 0, 0);
-
-        let mut b = *other;
-        b.mont_reduce(other.0[0], other.0[1], other.0[2], other.0[3], 0, 0, 0, 0);
-
-        a.cmp_native(&b)
-    }
-}
-
-impl PartialOrd for Fs {
-    #[inline(always)]
-    fn partial_cmp(&self, other: &Fs) -> Option<::std::cmp::Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
 impl ::std::fmt::Display for Fs {
     fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
         write!(f, "Fs({})", self.into_repr())
