@@ -122,7 +122,7 @@ impl ConstantTimeEq for Fs {
 
 impl ::std::fmt::Display for Fs {
     fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
-        write!(f, "Fs({})", self.into_repr())
+        write!(f, "Fs({})", self.to_repr())
     }
 }
 
@@ -137,13 +137,13 @@ impl From<u64> for Fs {
 
 impl From<Fs> for FsRepr {
     fn from(e: Fs) -> FsRepr {
-        e.into_repr()
+        e.to_repr()
     }
 }
 
 impl<'a> From<&'a Fs> for FsRepr {
     fn from(e: &'a Fs) -> FsRepr {
-        e.into_repr()
+        e.to_repr()
     }
 }
 
@@ -325,7 +325,7 @@ impl PrimeField for Fs {
         }
     }
 
-    fn into_repr(&self) -> FsRepr {
+    fn to_repr(&self) -> FsRepr {
         let mut r = *self;
         r.mont_reduce(self.0[0], self.0[1], self.0[2], self.0[3], 0, 0, 0, 0);
 
@@ -1095,7 +1095,7 @@ fn test_fs_sqrt() {
 }
 
 #[test]
-fn test_fs_from_into_repr() {
+fn test_fs_from_to_repr() {
     // r + 1 should not be in the field
     assert!(Fs::from_repr(FsRepr([
         0xb8, 0x2c, 0xf7, 0xd6, 0x5e, 0x0e, 0x97, 0xd0, 0x82, 0x10, 0xc8, 0xcc, 0x93, 0x20, 0x68,
@@ -1140,7 +1140,7 @@ fn test_fs_from_into_repr() {
     for _ in 0..1000 {
         // Try to turn Fs elements into representations and back again, and compare.
         let a = Fs::random(&mut rng);
-        let a_repr = a.into_repr();
+        let a_repr = a.to_repr();
         let b_repr = FsRepr::from(a);
         assert_eq!(a_repr, b_repr);
         let a_again = Fs::from_repr(a_repr).unwrap();

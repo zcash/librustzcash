@@ -130,7 +130,7 @@ fn random_bilinearity_tests<E: Engine>() {
 
         let mut cd = c;
         cd.mul_assign(&d);
-        let mut cd = cd.into_repr();
+        let mut cd = cd.to_repr();
         <E::Fr as PrimeField>::ReprEndianness::toggle_little_endian(&mut cd);
 
         use byteorder::ByteOrder;

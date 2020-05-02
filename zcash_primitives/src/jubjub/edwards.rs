@@ -172,7 +172,7 @@ impl<E: JubjubEngine, Subgroup> Point<E, Subgroup> {
 
         assert_eq!(E::Fr::NUM_BITS, 255);
 
-        let mut y_repr = y.into_repr();
+        let mut y_repr = y.to_repr();
         if x.is_odd() {
             y_repr.as_mut()[31] |= 0x80;
         }

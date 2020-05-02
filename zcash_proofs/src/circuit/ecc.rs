@@ -769,7 +769,7 @@ mod test {
             let q = p.mul(s, params);
             let (x1, y1) = q.to_xy();
 
-            let mut s_bits = BitIterator::<u8, _>::new(s.into_repr()).collect::<Vec<_>>();
+            let mut s_bits = BitIterator::<u8, _>::new(s.to_repr()).collect::<Vec<_>>();
             s_bits.reverse();
             s_bits.truncate(Fs::NUM_BITS as usize);
 
@@ -822,7 +822,7 @@ mod test {
                 y: num_y0,
             };
 
-            let mut s_bits = BitIterator::<u8, _>::new(s.into_repr()).collect::<Vec<_>>();
+            let mut s_bits = BitIterator::<u8, _>::new(s.to_repr()).collect::<Vec<_>>();
             s_bits.reverse();
             s_bits.truncate(Fs::NUM_BITS as usize);
 

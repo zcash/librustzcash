@@ -89,7 +89,7 @@ where
         let window = JubjubBls12::pedersen_hash_exp_window_size() as usize;
         let window_mask = (1u64 << window) - 1;
 
-        let mut acc = acc.into_repr();
+        let mut acc = acc.to_repr();
         <E::Fs as PrimeField>::ReprEndianness::toggle_little_endian(&mut acc);
         let num_limbs: usize = acc.as_ref().len() / 8;
         let mut limbs = vec![0u64; num_limbs + 1];

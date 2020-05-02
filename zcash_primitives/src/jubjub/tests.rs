@@ -374,7 +374,7 @@ fn test_jubjub_params<E: JubjubEngine>(params: &E::Params) {
 
         let max = {
             // Grab char - 1 in little endian.
-            let mut tmp = (-E::Fs::one()).into_repr();
+            let mut tmp = (-E::Fs::one()).to_repr();
             <E::Fs as PrimeField>::ReprEndianness::toggle_little_endian(&mut tmp);
 
             // Shift right by 1 bit.
@@ -399,8 +399,8 @@ fn test_jubjub_params<E: JubjubEngine>(params: &E::Params) {
             pacc += &tmp;
             nacc -= &tmp; // The first subtraction wraps intentionally.
 
-            let mut pacc_repr = pacc.into_repr();
-            let mut nacc_repr = nacc.into_repr();
+            let mut pacc_repr = pacc.to_repr();
+            let mut nacc_repr = nacc.to_repr();
             <E::Fs as PrimeField>::ReprEndianness::toggle_little_endian(&mut pacc_repr);
             <E::Fs as PrimeField>::ReprEndianness::toggle_little_endian(&mut nacc_repr);
 

@@ -472,7 +472,7 @@ fn test_fr_sqrt() {
 }
 
 #[test]
-fn test_fr_from_into_repr() {
+fn test_fr_from_to_repr() {
     // r + 1 should not be in the field
     assert!(Fr::from_repr(FrRepr([
         0x02, 0x00, 0x00, 0x00, 0xff, 0xff, 0xff, 0xff, 0xfe, 0x5b, 0xfe, 0xff, 0x02, 0xa4, 0xbd,
@@ -503,7 +503,7 @@ fn test_fr_from_into_repr() {
         0x61, 0x71,
     ]);
     a_fr.mul_assign(&b_fr);
-    assert_eq!(a_fr.into_repr(), c);
+    assert_eq!(a_fr.to_repr(), c);
 
     // Zero should be in the field.
     assert!(Fr::from_repr(FrRepr([0; 32])).unwrap().is_zero());
@@ -516,7 +516,7 @@ fn test_fr_from_into_repr() {
     for _ in 0..1000 {
         // Try to turn Fr elements into representations and back again, and compare.
         let a = Fr::random(&mut rng);
-        let a_repr = a.into_repr();
+        let a_repr = a.to_repr();
         let b_repr = FrRepr::from(a);
         assert_eq!(a_repr, b_repr);
         let a_again = Fr::from_repr(a_repr).unwrap();

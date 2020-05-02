@@ -36,7 +36,7 @@ fn scan_output(
     let ct = output.ciphertext;
 
     // Increment tree and witnesses
-    let node = Node::new(cmu.into_repr());
+    let node = Node::new(cmu.to_repr());
     for witness in existing_witnesses {
         witness.append(node).unwrap();
     }
@@ -207,7 +207,7 @@ mod tests {
         };
         let fake_cmu = {
             let fake_cmu = Fr::random(rng);
-            fake_cmu.into_repr().as_ref().to_owned()
+            fake_cmu.to_repr().as_ref().to_owned()
         };
         let fake_epk = {
             let mut buffer = vec![0; 64];
@@ -262,7 +262,7 @@ mod tests {
             Memo::default(),
             &mut rng,
         );
-        let cmu = note.cm(&JUBJUB).into_repr().as_ref().to_owned();
+        let cmu = note.cm(&JUBJUB).to_repr().as_ref().to_owned();
         let mut epk = vec![];
         encryptor.epk().write(&mut epk).unwrap();
         let enc_ciphertext = encryptor.encrypt_note_plaintext();

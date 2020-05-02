@@ -128,7 +128,7 @@ fn shielded_spends_hash(tx: &TransactionData) -> Blake2bHash {
     let mut data = Vec::with_capacity(tx.shielded_spends.len() * 384);
     for s_spend in &tx.shielded_spends {
         s_spend.cv.write(&mut data).unwrap();
-        data.extend_from_slice(s_spend.anchor.into_repr().as_ref());
+        data.extend_from_slice(s_spend.anchor.to_repr().as_ref());
         data.extend_from_slice(&s_spend.nullifier);
         s_spend.rk.write(&mut data).unwrap();
         data.extend_from_slice(&s_spend.zkproof);

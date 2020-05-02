@@ -615,8 +615,8 @@ fn test_input_circuit_with_bls12_381() {
                     ::std::mem::swap(&mut lhs, &mut rhs);
                 }
 
-                let mut lhs: Vec<bool> = BitIterator::<u8, _>::new(lhs.into_repr()).collect();
-                let mut rhs: Vec<bool> = BitIterator::<u8, _>::new(rhs.into_repr()).collect();
+                let mut lhs: Vec<bool> = BitIterator::<u8, _>::new(lhs.to_repr()).collect();
+                let mut rhs: Vec<bool> = BitIterator::<u8, _>::new(rhs.to_repr()).collect();
 
                 lhs.reverse();
                 rhs.reverse();
@@ -799,8 +799,8 @@ fn test_input_circuit_with_bls12_381_external_test_vectors() {
                     ::std::mem::swap(&mut lhs, &mut rhs);
                 }
 
-                let mut lhs: Vec<bool> = BitIterator::<u8, _>::new(lhs.into_repr()).collect();
-                let mut rhs: Vec<bool> = BitIterator::<u8, _>::new(rhs.into_repr()).collect();
+                let mut lhs: Vec<bool> = BitIterator::<u8, _>::new(lhs.to_repr()).collect();
+                let mut rhs: Vec<bool> = BitIterator::<u8, _>::new(rhs.to_repr()).collect();
 
                 lhs.reverse();
                 rhs.reverse();

@@ -872,8 +872,8 @@ pub mod g1 {
                 // is at infinity.
                 res.0[0] |= 1 << 6;
             } else {
-                res.0[..48].copy_from_slice(&affine.x.into_repr().0);
-                res.0[48..].copy_from_slice(&affine.y.into_repr().0);
+                res.0[..48].copy_from_slice(&affine.x.to_repr().0);
+                res.0[48..].copy_from_slice(&affine.y.to_repr().0);
             }
 
             res
@@ -969,7 +969,7 @@ pub mod g1 {
                 // is at infinity.
                 res.0[0] |= 1 << 6;
             } else {
-                res.0 = affine.x.into_repr().0;
+                res.0 = affine.x.to_repr().0;
 
                 let negy = affine.y.neg();
 
@@ -1494,10 +1494,10 @@ pub mod g2 {
                 // is at infinity.
                 res.0[0] |= 1 << 6;
             } else {
-                res.0[0..48].copy_from_slice(&affine.x.c1.into_repr().0);
-                res.0[48..96].copy_from_slice(&affine.x.c0.into_repr().0);
-                res.0[96..144].copy_from_slice(&affine.y.c1.into_repr().0);
-                res.0[144..192].copy_from_slice(&affine.y.c0.into_repr().0);
+                res.0[0..48].copy_from_slice(&affine.x.c1.to_repr().0);
+                res.0[48..96].copy_from_slice(&affine.x.c0.to_repr().0);
+                res.0[96..144].copy_from_slice(&affine.y.c1.to_repr().0);
+                res.0[144..192].copy_from_slice(&affine.y.c0.to_repr().0);
             }
 
             res
@@ -1608,8 +1608,8 @@ pub mod g2 {
                 // is at infinity.
                 res.0[0] |= 1 << 6;
             } else {
-                res.0[..48].copy_from_slice(&affine.x.c1.into_repr().0);
-                res.0[48..].copy_from_slice(&affine.x.c0.into_repr().0);
+                res.0[..48].copy_from_slice(&affine.x.c1.to_repr().0);
+                res.0[48..].copy_from_slice(&affine.x.c0.to_repr().0);
 
                 let negy = affine.y.neg();
 

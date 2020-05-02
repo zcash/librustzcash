@@ -83,7 +83,7 @@ impl ReprEndianness {
         }
     }
 
-    fn into_repr(
+    fn to_repr(
         &self,
         repr: &syn::Ident,
         mont_reduce_self_params: &proc_macro2::TokenStream,
@@ -914,7 +914,7 @@ fn prime_field_impl(
 
     let repr_endianness = endianness.repr_endianness();
     let from_repr_impl = endianness.from_repr(name, limbs);
-    let into_repr_impl = endianness.into_repr(repr, &mont_reduce_self_params, limbs);
+    let to_repr_impl = endianness.to_repr(repr, &mont_reduce_self_params, limbs);
 
     let top_limb_index = limbs - 1;
 
@@ -935,7 +935,7 @@ fn prime_field_impl(
 
         impl ::subtle::ConstantTimeEq for #name {
             fn ct_eq(&self, other: &#name) -> ::subtle::Choice {
-                self.into_repr().ct_eq(&other.into_repr())
+                self.to_repr().ct_eq(&other.to_repr())
             }
         }
 
@@ -951,7 +951,7 @@ fn prime_field_impl(
         impl ::core::fmt::Debug for #name
         {
             fn fmt(&self, f: &mut ::core::fmt::Formatter) -> ::core::fmt::Result {
-                write!(f, "{}({:?})", stringify!(#name), self.into_repr())
+                write!(f, "{}({:?})", stringify!(#name), self.to_repr())
             }
         }
 
@@ -982,7 +982,7 @@ fn prime_field_impl(
 
         impl ::core::fmt::Display for #name {
             fn fmt(&self, f: &mut ::core::fmt::Formatter) -> ::core::fmt::Result {
-                write!(f, "{}({})", stringify!(#name), self.into_repr())
+                write!(f, "{}({})", stringify!(#name), self.to_repr())
             }
         }
 
@@ -997,13 +997,13 @@ fn prime_field_impl(
 
         impl From<#name> for #repr {
             fn from(e: #name) -> #repr {
-                e.into_repr()
+                e.to_repr()
             }
         }
 
         impl<'a> From<&'a #name> for #repr {
             fn from(e: &'a #name) -> #repr {
-                e.into_repr()
+                e.to_repr()
             }
         }
 
@@ -1153,8 +1153,8 @@ fn prime_field_impl(
                 #from_repr_impl
             }
 
-            fn into_repr(&self) -> #repr {
-                #into_repr_impl
+            fn to_repr(&self) -> #repr {
+                #to_repr_impl
             }
 
             #[inline(always)]

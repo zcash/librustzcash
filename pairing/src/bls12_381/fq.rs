@@ -1687,7 +1687,7 @@ fn test_fq_sqrt() {
 }
 
 #[test]
-fn test_fq_from_into_repr() {
+fn test_fq_from_to_repr() {
     // q + 1 should not be in the field
     assert!(Fq::from_repr(FqRepr([
         0x1a, 0x01, 0x11, 0xea, 0x39, 0x7f, 0xe6, 0x9a, 0x4b, 0x1b, 0xa7, 0xb6, 0x43, 0x4b, 0xac,
@@ -1722,7 +1722,7 @@ fn test_fq_from_into_repr() {
         0x17, 0x91, 0x4c,
     ]);
     a_fq.mul_assign(&b_fq);
-    assert_eq!(a_fq.into_repr(), c);
+    assert_eq!(a_fq.to_repr(), c);
 
     // Zero should be in the field.
     assert!(Fq::from_repr(FqRepr([0; 48])).unwrap().is_zero());
@@ -1735,7 +1735,7 @@ fn test_fq_from_into_repr() {
     for _ in 0..1000 {
         // Try to turn Fq elements into representations and back again, and compare.
         let a = Fq::random(&mut rng);
-        let a_repr = a.into_repr();
+        let a_repr = a.to_repr();
         let b_repr = FqRepr::from(a);
         assert_eq!(a_repr, b_repr);
         let a_again = Fq::from_repr(a_repr).unwrap();

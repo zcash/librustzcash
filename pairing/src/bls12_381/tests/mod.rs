@@ -172,7 +172,7 @@ fn test_g1_uncompressed_invalid_vectors() {
     }
 
     {
-        let m = Fq::zero().into_repr();
+        let m = Fq::zero().to_repr();
 
         let mut o = o;
         o.as_mut()[..48].copy_from_slice(m.as_ref());
@@ -198,8 +198,8 @@ fn test_g1_uncompressed_invalid_vectors() {
                 let y = y.unwrap();
 
                 // We know this is on the curve, but it's likely not going to be in the correct subgroup.
-                o.as_mut()[..48].copy_from_slice(x.into_repr().as_ref());
-                o.as_mut()[48..].copy_from_slice(y.into_repr().as_ref());
+                o.as_mut()[..48].copy_from_slice(x.to_repr().as_ref());
+                o.as_mut()[48..].copy_from_slice(y.to_repr().as_ref());
 
                 if let Err(GroupDecodingError::NotInSubgroup) = o.into_affine() {
                     break;
@@ -310,7 +310,7 @@ fn test_g2_uncompressed_invalid_vectors() {
     }
 
     {
-        let m = Fq::zero().into_repr();
+        let m = Fq::zero().to_repr();
 
         let mut o = o;
         o.as_mut()[..48].copy_from_slice(m.as_ref());
@@ -340,10 +340,10 @@ fn test_g2_uncompressed_invalid_vectors() {
                 let y = y.unwrap();
 
                 // We know this is on the curve, but it's likely not going to be in the correct subgroup.
-                o.as_mut()[..48].copy_from_slice(x.c1.into_repr().as_ref());
-                o.as_mut()[48..96].copy_from_slice(x.c0.into_repr().as_ref());
-                o.as_mut()[96..144].copy_from_slice(y.c1.into_repr().as_ref());
-                o.as_mut()[144..].copy_from_slice(y.c0.into_repr().as_ref());
+                o.as_mut()[..48].copy_from_slice(x.c1.to_repr().as_ref());
+                o.as_mut()[48..96].copy_from_slice(x.c0.to_repr().as_ref());
+                o.as_mut()[96..144].copy_from_slice(y.c1.to_repr().as_ref());
+                o.as_mut()[144..].copy_from_slice(y.c0.to_repr().as_ref());
 
                 if let Err(GroupDecodingError::NotInSubgroup) = o.into_affine() {
                     break;
@@ -433,7 +433,7 @@ fn test_g1_compressed_invalid_vectors() {
             if x3b.sqrt().is_some().into() {
                 x.add_assign(&Fq::one());
             } else {
-                o.as_mut().copy_from_slice(x.into_repr().as_ref());
+                o.as_mut().copy_from_slice(x.to_repr().as_ref());
                 o.as_mut()[0] |= 0b1000_0000;
 
                 if let Err(GroupDecodingError::NotOnCurve) = o.into_affine() {
@@ -456,7 +456,7 @@ fn test_g1_compressed_invalid_vectors() {
 
             if x3b.sqrt().is_some().into() {
                 // We know this is on the curve, but it's likely not going to be in the correct subgroup.
-                o.as_mut().copy_from_slice(x.into_repr().as_ref());
+                o.as_mut().copy_from_slice(x.to_repr().as_ref());
                 o.as_mut()[0] |= 0b1000_0000;
 
                 if let Err(GroupDecodingError::NotInSubgroup) = o.into_affine() {
@@ -565,8 +565,8 @@ fn test_g2_compressed_invalid_vectors() {
             if x3b.sqrt().is_some().into() {
                 x.add_assign(&Fq2::one());
             } else {
-                o.as_mut()[..48].copy_from_slice(x.c1.into_repr().as_ref());
-                o.as_mut()[48..].copy_from_slice(x.c0.into_repr().as_ref());
+                o.as_mut()[..48].copy_from_slice(x.c1.to_repr().as_ref());
+                o.as_mut()[48..].copy_from_slice(x.c0.to_repr().as_ref());
                 o.as_mut()[0] |= 0b1000_0000;
 
                 if let Err(GroupDecodingError::NotOnCurve) = o.into_affine() {
@@ -595,8 +595,8 @@ fn test_g2_compressed_invalid_vectors() {
 
             if x3b.sqrt().is_some().into() {
                 // We know this is on the curve, but it's likely not going to be in the correct subgroup.
-                o.as_mut()[..48].copy_from_slice(x.c1.into_repr().as_ref());
-                o.as_mut()[48..].copy_from_slice(x.c0.into_repr().as_ref());
+                o.as_mut()[..48].copy_from_slice(x.c1.to_repr().as_ref());
+                o.as_mut()[48..].copy_from_slice(x.c0.to_repr().as_ref());
                 o.as_mut()[0] |= 0b1000_0000;
 
                 if let Err(GroupDecodingError::NotInSubgroup) = o.into_affine() {

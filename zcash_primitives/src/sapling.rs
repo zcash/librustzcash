@@ -45,7 +45,7 @@ pub fn merkle_hash(depth: usize, lhs: &FrRepr, rhs: &FrRepr) -> FrRepr {
     )
     .to_xy()
     .0
-    .into_repr()
+    .to_repr()
 }
 
 /// A node within the Sapling commitment tree.
@@ -79,7 +79,7 @@ impl Hashable for Node {
 
     fn blank() -> Self {
         Node {
-            repr: Note::<Bls12>::uncommitted().into_repr(),
+            repr: Note::<Bls12>::uncommitted().to_repr(),
         }
     }
 

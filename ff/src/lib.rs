@@ -181,7 +181,7 @@ pub trait PrimeField: Field + From<u64> {
     ///
     /// The endianness of the byte representation is defined by
     /// [`PrimeField::ReprEndianness`].
-    fn into_repr(&self) -> Self::Repr;
+    fn to_repr(&self) -> Self::Repr;
 
     /// Returns true iff this element is odd.
     fn is_odd(&self) -> bool;

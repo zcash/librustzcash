@@ -15,7 +15,7 @@ fn random_encoding_tests<P: PrimeField>() {
     for _ in 0..1000 {
         let r = P::random(&mut rng);
 
-        let v = r.into_repr();
+        let v = r.to_repr();
         let rdecoded = P::from_repr(v).unwrap();
 
         assert_eq!(r, rdecoded);
