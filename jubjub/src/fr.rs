@@ -5,6 +5,8 @@ use core::convert::TryInto;
 use core::fmt;
 use core::ops::{Add, AddAssign, Mul, MulAssign, Neg, Sub, SubAssign};
 
+use ff::{Field, PrimeField};
+use rand_core::RngCore;
 use subtle::{Choice, ConditionallySelectable, ConstantTimeEq, CtOption};
 
 use crate::util::{adc, mac, sbb};
@@ -25,6 +27,12 @@ impl fmt::Debug for Fr {
             write!(f, "{:02x}", b)?;
         }
         Ok(())
+    }
+}
+
+impl fmt::Display for Fr {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{:?}", self)
     }
 }
 
@@ -68,6 +76,33 @@ pub const MODULUS: Fr = Fr([
     0xa668_2093_ccc8_1082,
     0x0667_3b01_0134_3b00,
     0x0e7d_b4ea_6533_afa9,
+]);
+
+const MODULUS_BYTES: [u8; 32] = [
+    0xb7, 0x2c, 0xf7, 0xd6, 0x5e, 0x0e, 0x97, 0xd0, 0x82, 0x10, 0xc8, 0xcc, 0x93, 0x20, 0x68, 0xa6,
+    0x00, 0x3b, 0x34, 0x01, 0x01, 0x3b, 0x67, 0x06, 0xa9, 0xaf, 0x33, 0x65, 0xea, 0xb4, 0x7d, 0x0e,
+];
+
+// The number of bits needed to represent the modulus.
+const MODULUS_BITS: u32 = 252;
+
+// GENERATOR = 6 (multiplicative generator of r-1 order, that is also quadratic nonresidue)
+const GENERATOR: Fr = Fr([
+    0x720b_1b19_d49e_a8f1,
+    0xbf4a_a361_01f1_3a58,
+    0x5fa8_cc96_8193_ccbb,
+    0x0e70_cbdc_7dcc_f3ac,
+]);
+
+// 2^S * t = MODULUS - 1 with t odd
+const S: u32 = 1;
+
+// 2^S root of unity computed by GENERATOR^t
+const ROOT_OF_UNITY: Fr = Fr([
+    0xaa9f_02ab_1d61_24de,
+    0xb352_4a64_6611_2932,
+    0x7342_2612_15ac_260b,
+    0x04d6_b87b_1da2_59e2,
 ]);
 
 impl<'a> Neg for &'a Fr {
@@ -575,9 +610,92 @@ impl Fr {
     }
 }
 
+impl From<Fr> for [u8; 32] {
+    fn from(value: Fr) -> [u8; 32] {
+        value.to_bytes()
+    }
+}
+
 impl<'a> From<&'a Fr> for [u8; 32] {
     fn from(value: &'a Fr) -> [u8; 32] {
         value.to_bytes()
+    }
+}
+
+impl Field for Fr {
+    fn random<R: RngCore + ?Sized>(rng: &mut R) -> Self {
+        let mut buf = [0; 64];
+        rng.fill_bytes(&mut buf);
+        Self::from_bytes_wide(&buf)
+    }
+
+    fn zero() -> Self {
+        Self::zero()
+    }
+
+    fn one() -> Self {
+        Self::one()
+    }
+
+    fn is_zero(&self) -> bool {
+        self.ct_eq(&Self::zero()).into()
+    }
+
+    #[must_use]
+    fn square(&self) -> Self {
+        self.square()
+    }
+
+    #[must_use]
+    fn double(&self) -> Self {
+        self.double()
+    }
+
+    fn invert(&self) -> CtOption<Self> {
+        self.invert()
+    }
+
+    fn sqrt(&self) -> CtOption<Self> {
+        self.sqrt()
+    }
+}
+
+impl PrimeField for Fr {
+    type Repr = [u8; 32];
+    type ReprEndianness = byteorder::LittleEndian;
+
+    fn from_repr(r: Self::Repr) -> Option<Self> {
+        let res = Self::from_bytes(&r);
+        if res.is_some().into() {
+            Some(res.unwrap())
+        } else {
+            None
+        }
+    }
+
+    fn to_repr(&self) -> Self::Repr {
+        self.to_bytes()
+    }
+
+    fn is_odd(&self) -> bool {
+        self.to_bytes()[0] & 1 == 1
+    }
+
+    fn char() -> Self::Repr {
+        MODULUS_BYTES
+    }
+
+    const NUM_BITS: u32 = MODULUS_BITS;
+    const CAPACITY: u32 = Self::NUM_BITS - 1;
+
+    fn multiplicative_generator() -> Self {
+        GENERATOR
+    }
+
+    const S: u32 = S;
+
+    fn root_of_unity() -> Self {
+        ROOT_OF_UNITY
     }
 }
 
