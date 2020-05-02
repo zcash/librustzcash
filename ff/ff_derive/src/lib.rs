@@ -38,6 +38,23 @@ impl ReprEndianness {
         }
     }
 
+    fn modulus_repr(&self, modulus: &BigUint, bytes: usize) -> Vec<u8> {
+        match self {
+            ReprEndianness::Big => {
+                let buf = modulus.to_bytes_be();
+                iter::repeat(0)
+                    .take(bytes - buf.len())
+                    .chain(buf.into_iter())
+                    .collect()
+            }
+            ReprEndianness::Little => {
+                let mut buf = modulus.to_bytes_le();
+                buf.extend(iter::repeat(0).take(bytes - buf.len()));
+                buf
+            }
+        }
+    }
+
     fn from_repr(&self, name: &syn::Ident, limbs: usize) -> proc_macro2::TokenStream {
         let read_repr = match self {
             ReprEndianness::Big => quote! {
@@ -159,8 +176,14 @@ pub fn prime_field(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
 
     let mut gen = proc_macro2::TokenStream::new();
 
-    let (constants_impl, sqrt_impl) =
-        prime_field_constants_and_sqrt(&ast.ident, &repr_ident, &modulus, limbs, generator);
+    let (constants_impl, sqrt_impl) = prime_field_constants_and_sqrt(
+        &ast.ident,
+        &repr_ident,
+        &modulus,
+        &endianness,
+        limbs,
+        generator,
+    );
 
     gen.extend(constants_impl);
     gen.extend(prime_field_repr_impl(&repr_ident, &endianness, limbs * 8));
@@ -466,6 +489,7 @@ fn prime_field_constants_and_sqrt(
     name: &syn::Ident,
     repr: &syn::Ident,
     modulus: &BigUint,
+    endianness: &ReprEndianness,
     limbs: usize,
     generator: BigUint,
 ) -> (proc_macro2::TokenStream, proc_macro2::TokenStream) {
@@ -576,11 +600,7 @@ fn prime_field_constants_and_sqrt(
     let r2 = biguint_to_u64_vec((&r * &r) % modulus, limbs);
 
     let r = biguint_to_u64_vec(r, limbs);
-    let modulus_repr = {
-        let mut buf = modulus.to_bytes_le();
-        buf.extend(iter::repeat(0).take((limbs * 8) - buf.len()));
-        buf
-    };
+    let modulus_repr = endianness.modulus_repr(modulus, limbs * 8);
     let modulus = biguint_to_real_u64_vec(modulus.clone(), limbs);
 
     // Compute -m^-1 mod 2**64 by exponentiating by totient(2**64) - 1

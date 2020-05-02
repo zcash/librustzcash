@@ -147,13 +147,11 @@ fn test_g1_uncompressed_invalid_vectors() {
         }
     }
 
-    // PrimeField::char() returns the modulus in its little-endian byte representation,
-    // but Fq field elements use big-endian encoding, so flip the endianness.
-    let m: Vec<_> = Fq::char().as_ref().iter().cloned().rev().collect();
+    let m = Fq::char();
 
     {
         let mut o = o;
-        o.as_mut()[..48].copy_from_slice(&m[..]);
+        o.as_mut()[..48].copy_from_slice(m.as_ref());
 
         if let Err(GroupDecodingError::CoordinateDecodingError(coordinate)) = o.into_affine() {
             assert_eq!(coordinate, "x coordinate");
@@ -164,7 +162,7 @@ fn test_g1_uncompressed_invalid_vectors() {
 
     {
         let mut o = o;
-        o.as_mut()[48..].copy_from_slice(&m[..]);
+        o.as_mut()[48..].copy_from_slice(m.as_ref());
 
         if let Err(GroupDecodingError::CoordinateDecodingError(coordinate)) = o.into_affine() {
             assert_eq!(coordinate, "y coordinate");
@@ -265,13 +263,11 @@ fn test_g2_uncompressed_invalid_vectors() {
         }
     }
 
-    // PrimeField::char() returns the modulus in its little-endian byte representation,
-    // but Fq field elements use big-endian encoding, so flip the endianness.
-    let m: Vec<_> = Fq::char().as_ref().iter().cloned().rev().collect();
+    let m = Fq::char();
 
     {
         let mut o = o;
-        o.as_mut()[..48].copy_from_slice(&m[..]);
+        o.as_mut()[..48].copy_from_slice(m.as_ref());
 
         if let Err(GroupDecodingError::CoordinateDecodingError(coordinate)) = o.into_affine() {
             assert_eq!(coordinate, "x coordinate (c1)");
@@ -282,7 +278,7 @@ fn test_g2_uncompressed_invalid_vectors() {
 
     {
         let mut o = o;
-        o.as_mut()[48..96].copy_from_slice(&m[..]);
+        o.as_mut()[48..96].copy_from_slice(m.as_ref());
 
         if let Err(GroupDecodingError::CoordinateDecodingError(coordinate)) = o.into_affine() {
             assert_eq!(coordinate, "x coordinate (c0)");
@@ -293,7 +289,7 @@ fn test_g2_uncompressed_invalid_vectors() {
 
     {
         let mut o = o;
-        o.as_mut()[96..144].copy_from_slice(&m[..]);
+        o.as_mut()[96..144].copy_from_slice(m.as_ref());
 
         if let Err(GroupDecodingError::CoordinateDecodingError(coordinate)) = o.into_affine() {
             assert_eq!(coordinate, "y coordinate (c1)");
@@ -304,7 +300,7 @@ fn test_g2_uncompressed_invalid_vectors() {
 
     {
         let mut o = o;
-        o.as_mut()[144..].copy_from_slice(&m[..]);
+        o.as_mut()[144..].copy_from_slice(m.as_ref());
 
         if let Err(GroupDecodingError::CoordinateDecodingError(coordinate)) = o.into_affine() {
             assert_eq!(coordinate, "y coordinate (c0)");
@@ -411,13 +407,11 @@ fn test_g1_compressed_invalid_vectors() {
         }
     }
 
-    // PrimeField::char() returns the modulus in its little-endian byte representation,
-    // but Fq field elements use big-endian encoding, so flip the endianness.
-    let m: Vec<_> = Fq::char().as_ref().iter().cloned().rev().collect();
+    let m = Fq::char();
 
     {
         let mut o = o;
-        o.as_mut()[..48].copy_from_slice(&m[..]);
+        o.as_mut()[..48].copy_from_slice(m.as_ref());
         o.as_mut()[0] |= 0b1000_0000;
 
         if let Err(GroupDecodingError::CoordinateDecodingError(coordinate)) = o.into_affine() {
@@ -527,13 +521,11 @@ fn test_g2_compressed_invalid_vectors() {
         }
     }
 
-    // PrimeField::char() returns the modulus in its little-endian byte representation,
-    // but Fq field elements use big-endian encoding, so flip the endianness.
-    let m: Vec<_> = Fq::char().as_ref().iter().cloned().rev().collect();
+    let m = Fq::char();
 
     {
         let mut o = o;
-        o.as_mut()[..48].copy_from_slice(&m[..]);
+        o.as_mut()[..48].copy_from_slice(m.as_ref());
         o.as_mut()[0] |= 0b1000_0000;
 
         if let Err(GroupDecodingError::CoordinateDecodingError(coordinate)) = o.into_affine() {
@@ -545,7 +537,7 @@ fn test_g2_compressed_invalid_vectors() {
 
     {
         let mut o = o;
-        o.as_mut()[48..96].copy_from_slice(&m[..]);
+        o.as_mut()[48..96].copy_from_slice(m.as_ref());
         o.as_mut()[0] |= 0b1000_0000;
 
         if let Err(GroupDecodingError::CoordinateDecodingError(coordinate)) = o.into_affine() {

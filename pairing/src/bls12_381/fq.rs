@@ -1644,7 +1644,8 @@ fn test_fq_pow() {
 
     use byteorder::ByteOrder;
     let mut char_limbs = [0; 6];
-    byteorder::LittleEndian::read_u64_into(Fq::char().as_ref(), &mut char_limbs);
+    byteorder::BigEndian::read_u64_into(Fq::char().as_ref(), &mut char_limbs);
+    char_limbs.reverse();
 
     for _ in 0..1000 {
         // Exponentiating by the modulus should have no effect in a prime field.
