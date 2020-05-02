@@ -8,8 +8,6 @@ use std::ops::{AddAssign, MulAssign, SubAssign};
 pub struct Fr([u64; 4]);
 
 #[cfg(test)]
-use ff::PowVartime;
-#[cfg(test)]
 use rand_core::SeedableRng;
 #[cfg(test)]
 use rand_xorshift::XorShiftRng;
@@ -430,11 +428,15 @@ fn test_fr_pow() {
         assert_eq!(c, target);
     }
 
+    use byteorder::ByteOrder;
+    let mut char_limbs = [0; 4];
+    byteorder::LittleEndian::read_u64_into(Fr::char().as_ref(), &mut char_limbs);
+
     for _ in 0..1000 {
         // Exponentiating by the modulus should have no effect in a prime field.
         let a = Fr::random(&mut rng);
 
-        assert_eq!(a, a.pow_vartime(Fr::char()));
+        assert_eq!(a, a.pow_vartime(char_limbs));
     }
 }
 

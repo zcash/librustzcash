@@ -1,5 +1,5 @@
 use byteorder::{ByteOrder, LittleEndian};
-use ff::{adc, mac_with_carry, sbb, BitIterator, Field, PowVartime, PrimeField};
+use ff::{adc, mac_with_carry, sbb, BitIterator, Field, PrimeField};
 use rand_core::RngCore;
 use std::ops::{Add, AddAssign, Mul, MulAssign, Neg, Sub, SubAssign};
 use subtle::{Choice, ConditionallySelectable, ConstantTimeEq, CtOption};
@@ -1051,11 +1051,15 @@ fn test_fs_pow() {
         assert_eq!(c, target);
     }
 
+    use byteorder::ByteOrder;
+    let mut char_limbs = [0; 4];
+    byteorder::LittleEndian::read_u64_into(Fs::char().as_ref(), &mut char_limbs);
+
     for _ in 0..1000 {
         // Exponentiating by the modulus should have no effect in a prime field.
         let a = Fs::random(&mut rng);
 
-        assert_eq!(a, a.pow_vartime(Fs::char()));
+        assert_eq!(a, a.pow_vartime(char_limbs));
     }
 }
 

@@ -76,53 +76,26 @@ pub trait Field:
     /// Returns the square root of the field element, if it is
     /// quadratic residue.
     fn sqrt(&self) -> CtOption<Self>;
-}
-
-pub trait PowVartime<L>: Field
-where
-    L: Copy + PartialEq + PartialOrd + AddAssign,
-    L: BitAnd<Output = L>,
-    L: Shr<Output = L>,
-    L: Sub<Output = L>,
-{
-    const ZERO: L;
-    const ONE: L;
-    const LIMB_SIZE: L;
 
     /// Exponentiates `self` by `exp`, where `exp` is a little-endian order
     /// integer exponent.
     ///
     /// **This operation is variable time with respect to the exponent.** If the
     /// exponent is fixed, this operation is effectively constant time.
-    fn pow_vartime<S: AsRef<[L]>>(&self, exp: S) -> Self {
+    fn pow_vartime<S: AsRef<[u64]>>(&self, exp: S) -> Self {
         let mut res = Self::one();
         for e in exp.as_ref().iter().rev() {
-            let mut i = Self::ZERO;
-            while i < Self::LIMB_SIZE {
+            for i in (0..64).rev() {
                 res = res.square();
 
-                if ((*e >> (Self::LIMB_SIZE - Self::ONE - i)) & Self::ONE) == Self::ONE {
+                if ((*e >> i) & 1) == 1 {
                     res.mul_assign(self);
                 }
-
-                i += Self::ONE;
             }
         }
 
         res
     }
-}
-
-impl<T: Field> PowVartime<u8> for T {
-    const ZERO: u8 = 0;
-    const ONE: u8 = 1;
-    const LIMB_SIZE: u8 = 8;
-}
-
-impl<T: Field> PowVartime<u64> for T {
-    const ZERO: u64 = 0;
-    const ONE: u64 = 1;
-    const LIMB_SIZE: u64 = 64;
 }
 
 /// Helper trait for converting the binary representation of a prime field element into a

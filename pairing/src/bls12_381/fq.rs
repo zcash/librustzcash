@@ -3,8 +3,6 @@ use ff::{Field, PrimeField};
 use std::ops::{AddAssign, MulAssign, SubAssign};
 
 #[cfg(test)]
-use ff::PowVartime;
-#[cfg(test)]
 use std::ops::Neg;
 
 // B coefficient of BLS12-381 curve, 4.
@@ -1644,11 +1642,15 @@ fn test_fq_pow() {
         assert_eq!(c, target);
     }
 
+    use byteorder::ByteOrder;
+    let mut char_limbs = [0; 6];
+    byteorder::LittleEndian::read_u64_into(Fq::char().as_ref(), &mut char_limbs);
+
     for _ in 0..1000 {
         // Exponentiating by the modulus should have no effect in a prime field.
         let a = Fq::random(&mut rng);
 
-        assert_eq!(a, a.pow_vartime(Fq::char()));
+        assert_eq!(a, a.pow_vartime(char_limbs));
     }
 }
 

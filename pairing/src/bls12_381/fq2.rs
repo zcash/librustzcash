@@ -1,5 +1,5 @@
 use super::fq::{Fq, FROBENIUS_COEFF_FQ2_C1, NEGATIVE_ONE};
-use ff::{Field, PowVartime};
+use ff::Field;
 use rand_core::RngCore;
 use std::cmp::Ordering;
 use std::ops::{Add, AddAssign, Mul, MulAssign, Neg, Sub, SubAssign};
