@@ -19,8 +19,7 @@ pub fn curve_tests<G: CurveProjective>() {
 
     // Doubling edge case with identity.
     {
-        let mut z = G::identity();
-        z.double();
+        let z = G::identity().double();
         assert!(z.is_identity());
     }
 
@@ -230,13 +229,11 @@ fn random_doubling_tests<G: CurveProjective>() {
         let mut b = G::random(&mut rng);
 
         // 2(a + b)
-        let mut tmp1 = a;
-        tmp1.add_assign(&b);
-        tmp1.double();
+        let tmp1 = (a + b).double();
 
         // 2a + 2b
-        a.double();
-        b.double();
+        a = a.double();
+        b = b.double();
 
         let mut tmp2 = a;
         tmp2.add_assign(&b);
@@ -306,8 +303,7 @@ fn random_addition_tests<G: CurveProjective>() {
             let mut aplusamixed = a;
             aplusamixed.add_assign(&a.into_affine());
 
-            let mut adouble = a;
-            adouble.double();
+            let adouble = a.double();
 
             assert_eq!(aplusa, adouble);
             assert_eq!(aplusa, aplusamixed);

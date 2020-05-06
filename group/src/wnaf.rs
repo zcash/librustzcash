@@ -9,8 +9,7 @@ pub(crate) fn wnaf_table<G: CurveProjective>(table: &mut Vec<G>, mut base: G, wi
     table.truncate(0);
     table.reserve(1 << (window - 1));
 
-    let mut dbl = base;
-    dbl.double();
+    let dbl = base.double();
 
     for _ in 0..(1 << (window - 1)) {
         table.push(base);
@@ -86,7 +85,7 @@ pub(crate) fn wnaf_exp<G: CurveProjective>(table: &[G], wnaf: &[i64]) -> G {
 
     for n in wnaf.iter().rev() {
         if found_one {
-            result.double();
+            result = result.double();
         }
 
         if *n != 0 {

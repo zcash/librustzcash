@@ -72,7 +72,8 @@ pub trait CurveProjective:
     fn is_normalized(&self) -> bool;
 
     /// Doubles this element.
-    fn double(&mut self);
+    #[must_use]
+    fn double(&self) -> Self;
 
     /// Performs scalar multiplication of this element.
     fn mul_assign<S: Into<<Self::Scalar as PrimeField>::Repr>>(&mut self, other: S);

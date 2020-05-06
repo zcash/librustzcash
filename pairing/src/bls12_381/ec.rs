@@ -84,7 +84,7 @@ macro_rules! curve_impl {
             fn mul_bits_u64<S: AsRef<[u64]>>(&self, bits: BitIterator<u64, S>) -> $projective {
                 let mut res = $projective::identity();
                 for i in bits {
-                    res.double();
+                    res = res.double();
                     if i {
                         res.add_assign(self)
                     }
@@ -95,7 +95,7 @@ macro_rules! curve_impl {
             fn mul_bits_u8<S: AsRef<[u8]>>(&self, bits: BitIterator<u8, S>) -> $projective {
                 let mut res = $projective::identity();
                 for i in bits {
-                    res.double();
+                    res = res.double();
                     if i {
                         res.add_assign(self)
                     }
@@ -278,7 +278,7 @@ macro_rules! curve_impl {
 
                 if u1 == u2 && s1 == s2 {
                     // The two points are equal, so we double.
-                    self.double();
+                    *self = self.double();
                 } else {
                     // If we're adding -a and a together, self.z becomes zero as H becomes zero.
 
@@ -417,7 +417,7 @@ macro_rules! curve_impl {
 
                 if self.x == u2 && self.y == s2 {
                     // The two points are equal, so we double.
-                    self.double();
+                    *self = self.double();
                 } else {
                     // If we're adding -a and a together, self.z becomes zero as H becomes zero.
 
@@ -608,9 +608,9 @@ macro_rules! curve_impl {
                 }
             }
 
-            fn double(&mut self) {
+            fn double(&self) -> Self {
                 if self.is_identity() {
-                    return;
+                    return *self;
                 }
 
                 // Other than the point at infinity, no points on E or E'
@@ -627,7 +627,7 @@ macro_rules! curve_impl {
                 let b = self.y.square();
 
                 // C = B^2
-                let mut c = b.square();
+                let c = b.square();
 
                 // D = 2*((X1+B)2-A-C)
                 let mut d = self.x;
@@ -645,20 +645,15 @@ macro_rules! curve_impl {
                 let f = e.square();
 
                 // Z3 = 2*Y1*Z1
-                self.z.mul_assign(&self.y);
-                self.z = self.z.double();
+                let z = self.z.double() * self.y;
 
                 // X3 = F-2*D
-                self.x = f;
-                self.x.sub_assign(&d);
-                self.x.sub_assign(&d);
+                let x = f - d.double();
 
                 // Y3 = E*(D-X3)-8*C
-                self.y = d;
-                self.y.sub_assign(&self.x);
-                self.y.mul_assign(&e);
-                c = c.double().double().double();
-                self.y.sub_assign(&c);
+                let y = e * (d - x) - c.double().double().double();
+
+                $projective { x, y, z }
             }
 
             fn mul_assign<S: Into<<Self::Scalar as PrimeField>::Repr>>(&mut self, other: S) {
@@ -668,7 +663,7 @@ macro_rules! curve_impl {
 
                 for i in BitIterator::<u8, _>::new(other.into()) {
                     if found_one {
-                        res.double();
+                        res = res.double();
                     } else {
                         found_one = i;
                     }
@@ -1228,7 +1223,7 @@ pub mod g1 {
 
     #[test]
     fn test_g1_doubling_correctness() {
-        let mut p = G1 {
+        let p = G1 {
             x: Fq::from_repr(FqRepr([
                 0x08, 0x6e, 0xd4, 0xd9, 0x90, 0x6f, 0xb0, 0x64, 0x4c, 0x6f, 0xca, 0xc4, 0xb5, 0x5f,
                 0xd4, 0x79, 0x48, 0x5e, 0x77, 0xd5, 0x0a, 0x5d, 0xf1, 0x0d, 0x08, 0x1f, 0x33, 0x39,
@@ -1246,9 +1241,7 @@ pub mod g1 {
             z: Fq::one(),
         };
 
-        p.double();
-
-        let p = G1Affine::from(p);
+        let p = G1Affine::from(p.double());
 
         assert_eq!(
             p,
@@ -1988,7 +1981,7 @@ pub mod g2 {
 
     #[test]
     fn test_g2_doubling_correctness() {
-        let mut p = G2 {
+        let p = G2 {
             x: Fq2 {
                 c0: Fq::from_repr(FqRepr([
                     0x10, 0x0b, 0x2f, 0xe5, 0xbf, 0xfe, 0x03, 0x0b, 0x46, 0x17, 0xf2, 0xe6, 0x77,
@@ -2024,9 +2017,7 @@ pub mod g2 {
             z: Fq2::one(),
         };
 
-        p.double();
-
-        let p = G2Affine::from(p);
+        let p = G2Affine::from(p.double());
 
         assert_eq!(
             p,
