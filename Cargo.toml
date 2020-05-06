@@ -5,7 +5,7 @@ members = [
     "group",
     "pairing",
     "zcash_client_backend",
-    "zcash_extensions_api",
+    "zcash_extensions",
     "zcash_history",
     "zcash_primitives",
     "zcash_proofs",

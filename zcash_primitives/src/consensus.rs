@@ -3,8 +3,6 @@
 use std::convert::TryFrom;
 use std::fmt;
 
-pub mod extensions;
-
 /// Zcash consensus parameters.
 pub trait Parameters {
     fn activation_height(nu: NetworkUpgrade) -> Option<u32>;

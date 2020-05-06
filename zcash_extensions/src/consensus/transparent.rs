@@ -1,11 +1,11 @@
 //! Consensus logic for Transparent Zcash Extensions.
 
 use std::convert::TryFrom;
-use zcash_extensions_api::transparent::{Error, Extension, Precondition, Witness};
+use zcash_primitives::transaction::components::TzeOut;
+use zcash_primitives::transaction::Transaction;
+use zcash_primitives::extensions::transparent::{Error, Extension, Precondition, Witness};
 
-use crate::extensions::transparent::demo;
-use crate::transaction::components::TzeOut;
-use crate::transaction::Transaction;
+use crate::transparent::demo;
 
 /// The set of programs that have assigned type IDs within the Zcash consensus rules.
 #[derive(Debug, Clone, Copy)]

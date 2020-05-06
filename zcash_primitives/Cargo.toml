@@ -29,7 +29,6 @@ ripemd160 = { version = "0.8", optional = true }
 secp256k1 = { version = "=0.15.0", optional = true }
 sha2 = "0.8"
 subtle = "2.2.1"
-zcash_extensions_api = { version = "0.0", path = "../zcash_extensions_api" }
 
 [dev-dependencies]
 criterion = "0.3"

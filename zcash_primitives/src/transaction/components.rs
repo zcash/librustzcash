@@ -5,8 +5,8 @@ use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use ff::{PrimeField, PrimeFieldRepr};
 use pairing::bls12_381::{Bls12, Fr, FrRepr};
 use std::io::{self, Read, Write};
-use zcash_extensions_api::transparent as tze;
 
+use crate::extensions::transparent as tze;
 use crate::legacy::Script;
 use crate::redjubjub::{PublicKey, Signature};
 use crate::serialize::{CompactSize, Vector};
@@ -111,7 +111,7 @@ impl TxOut {
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct TzeIn {
     pub prevout: OutPoint,
     pub witness: tze::Witness,
@@ -144,7 +144,7 @@ impl TzeIn {
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct TzeOut {
     pub value: Amount,
     pub precondition: tze::Precondition,
@@ -178,7 +178,9 @@ impl TzeOut {
 
         CompactSize::write(&mut writer, self.precondition.extension_id)?;
         CompactSize::write(&mut writer, self.precondition.mode)?;
-        Vector::write(&mut writer, &self.precondition.payload, |w, b| w.write_u8(*b))
+        Vector::write(&mut writer, &self.precondition.payload, |w, b| {
+            w.write_u8(*b)
+        })
     }
 }
 
