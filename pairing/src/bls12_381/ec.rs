@@ -159,7 +159,6 @@ macro_rules! curve_impl {
         }
 
         impl CurveAffine for $affine {
-            type Engine = Bls12;
             type Scalar = $scalarfield;
             type Base = $basefield;
             type Projective = $projective;
@@ -510,7 +509,6 @@ macro_rules! curve_impl {
         }
 
         impl CurveProjective for $projective {
-            type Engine = Bls12;
             type Scalar = $scalarfield;
             type Base = $basefield;
             type Affine = $affine;
@@ -746,7 +744,7 @@ macro_rules! curve_impl {
 }
 
 pub mod g1 {
-    use super::super::{Bls12, Fq, Fq12, FqRepr, Fr};
+    use super::super::{Fq, Fq12, FqRepr, Fr};
     use super::g2::G2Affine;
     use crate::{Engine, PairingCurveAffine};
     use ff::{BitIterator, Field, PrimeField};
@@ -1354,7 +1352,7 @@ pub mod g1 {
 }
 
 pub mod g2 {
-    use super::super::{Bls12, Fq, Fq12, Fq2, FqRepr, Fr};
+    use super::super::{Fq, Fq12, Fq2, FqRepr, Fr};
     use super::g1::G1Affine;
     use crate::{Engine, PairingCurveAffine};
     use ff::{BitIterator, Field, PrimeField};

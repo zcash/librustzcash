@@ -1,7 +1,7 @@
 // Catch documentation errors caused by code changes.
 #![deny(intra_doc_link_resolution_failure)]
 
-use ff::{Field, PrimeField, ScalarEngine};
+use ff::{Field, PrimeField};
 use rand::RngCore;
 use std::error::Error;
 use std::fmt;
@@ -46,7 +46,6 @@ pub trait CurveProjective:
     + CurveOps<<Self as CurveProjective>::Affine>
     + CurveOpsOwned<<Self as CurveProjective>::Affine>
 {
-    type Engine: ScalarEngine<Fr = Self::Scalar>;
     type Scalar: PrimeField;
     type Base: Field;
     type Affine: CurveAffine<Projective = Self, Scalar = Self::Scalar>;
@@ -105,7 +104,6 @@ pub trait CurveAffine:
     + 'static
     + Neg<Output = Self>
 {
-    type Engine: ScalarEngine<Fr = Self::Scalar>;
     type Scalar: PrimeField;
     type Base: Field;
     type Projective: CurveProjective<Affine = Self, Scalar = Self::Scalar>;
