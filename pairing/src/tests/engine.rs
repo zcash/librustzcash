@@ -21,8 +21,8 @@ pub fn engine_tests<E: Engine>() {
     }
 
     for _ in 0..1000 {
-        let z1 = E::G1Affine::zero().prepare();
-        let z2 = E::G2Affine::zero().prepare();
+        let z1 = E::G1Affine::identity().prepare();
+        let z2 = E::G2Affine::identity().prepare();
 
         let a = E::G1::random(&mut rng).into_affine().prepare();
         let b = E::G2::random(&mut rng).into_affine().prepare();

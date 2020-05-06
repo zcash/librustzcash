@@ -11,33 +11,33 @@ pub fn curve_tests<G: CurveProjective>() {
         0xe5,
     ]);
 
-    // Negation edge case with zero.
+    // Negation edge case with identity.
     {
-        let z = G::zero().neg();
-        assert!(z.is_zero());
+        let z = G::identity().neg();
+        assert!(z.is_identity());
     }
 
-    // Doubling edge case with zero.
+    // Doubling edge case with identity.
     {
-        let mut z = G::zero();
+        let mut z = G::identity();
         z.double();
-        assert!(z.is_zero());
+        assert!(z.is_identity());
     }
 
-    // Addition edge cases with zero
+    // Addition edge cases with identity
     {
         let mut r = G::random(&mut rng);
         let rcopy = r;
-        r.add_assign(&G::zero());
+        r.add_assign(&G::identity());
         assert_eq!(r, rcopy);
-        r.add_assign(&G::Affine::zero());
+        r.add_assign(&G::Affine::identity());
         assert_eq!(r, rcopy);
 
-        let mut z = G::zero();
-        z.add_assign(&G::zero());
-        assert!(z.is_zero());
-        z.add_assign(&G::Affine::zero());
-        assert!(z.is_zero());
+        let mut z = G::identity();
+        z.add_assign(&G::identity());
+        assert!(z.is_identity());
+        z.add_assign(&G::Affine::identity());
+        assert!(z.is_identity());
 
         let mut z2 = z;
         z2.add_assign(&r);
@@ -209,11 +209,11 @@ fn random_negation_tests<G: CurveProjective>() {
 
         let mut t3 = t1;
         t3.add_assign(&t2);
-        assert!(t3.is_zero());
+        assert!(t3.is_identity());
 
         let mut t4 = t1;
         t4.add_assign(&t2.into_affine());
-        assert!(t4.is_zero());
+        assert!(t4.is_identity());
 
         assert_eq!(t1.neg(), t2);
     }
@@ -313,7 +313,7 @@ fn random_addition_tests<G: CurveProjective>() {
             assert_eq!(aplusa, aplusamixed);
         }
 
-        let mut tmp = vec![G::zero(); 6];
+        let mut tmp = vec![G::identity(); 6];
 
         // (a + b) + c
         tmp[0] = a;
@@ -390,7 +390,7 @@ fn random_transformation_tests<G: CurveProjective>() {
         let between = Uniform::new(0, 1000);
         // Sprinkle in some normalized points
         for _ in 0..5 {
-            v[between.sample(&mut rng)] = G::zero();
+            v[between.sample(&mut rng)] = G::identity();
         }
         for _ in 0..5 {
             let s = between.sample(&mut rng);
@@ -418,13 +418,19 @@ fn random_encoding_tests<G: CurveProjective>() {
     ]);
 
     assert_eq!(
-        G::Affine::zero().into_uncompressed().into_affine().unwrap(),
-        G::Affine::zero()
+        G::Affine::identity()
+            .into_uncompressed()
+            .into_affine()
+            .unwrap(),
+        G::Affine::identity()
     );
 
     assert_eq!(
-        G::Affine::zero().into_compressed().into_affine().unwrap(),
-        G::Affine::zero()
+        G::Affine::identity()
+            .into_compressed()
+            .into_affine()
+            .unwrap(),
+        G::Affine::identity()
     );
 
     for _ in 0..1000 {

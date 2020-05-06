@@ -42,11 +42,11 @@ macro_rules! curve_impl {
 
         impl PartialEq for $projective {
             fn eq(&self, other: &$projective) -> bool {
-                if self.is_zero() {
-                    return other.is_zero();
+                if self.is_identity() {
+                    return other.is_identity();
                 }
 
-                if other.is_zero() {
+                if other.is_identity() {
                     return false;
                 }
 
@@ -82,7 +82,7 @@ macro_rules! curve_impl {
 
         impl $affine {
             fn mul_bits_u64<S: AsRef<[u64]>>(&self, bits: BitIterator<u64, S>) -> $projective {
-                let mut res = $projective::zero();
+                let mut res = $projective::identity();
                 for i in bits {
                     res.double();
                     if i {
@@ -93,7 +93,7 @@ macro_rules! curve_impl {
             }
 
             fn mul_bits_u8<S: AsRef<[u8]>>(&self, bits: BitIterator<u8, S>) -> $projective {
-                let mut res = $projective::zero();
+                let mut res = $projective::identity();
                 for i in bits {
                     res.double();
                     if i {
@@ -126,7 +126,7 @@ macro_rules! curve_impl {
             }
 
             fn is_on_curve(&self) -> bool {
-                if self.is_zero() {
+                if self.is_identity() {
                     true
                 } else {
                     // Check that the point is on the curve
@@ -141,7 +141,7 @@ macro_rules! curve_impl {
             }
 
             fn is_in_correct_subgroup_assuming_on_curve(&self) -> bool {
-                self.mul($scalarfield::char()).is_zero()
+                self.mul($scalarfield::char()).is_identity()
             }
         }
 
@@ -151,7 +151,7 @@ macro_rules! curve_impl {
             #[inline]
             fn neg(self) -> Self {
                 let mut ret = self;
-                if !ret.is_zero() {
+                if !ret.is_identity() {
                     ret.y = ret.y.neg();
                 }
                 ret
@@ -166,7 +166,7 @@ macro_rules! curve_impl {
             type Uncompressed = $uncompressed;
             type Compressed = $compressed;
 
-            fn zero() -> Self {
+            fn identity() -> Self {
                 $affine {
                     x: $basefield::zero(),
                     y: $basefield::one(),
@@ -174,11 +174,11 @@ macro_rules! curve_impl {
                 }
             }
 
-            fn one() -> Self {
+            fn generator() -> Self {
                 Self::get_generator()
             }
 
-            fn is_zero(&self) -> bool {
+            fn is_identity(&self) -> bool {
                 self.infinity
             }
 
@@ -212,7 +212,7 @@ macro_rules! curve_impl {
             #[inline]
             fn neg(self) -> Self {
                 let mut ret = self;
-                if !ret.is_zero() {
+                if !ret.is_identity() {
                     ret.y = ret.y.neg();
                 }
                 ret
@@ -241,12 +241,12 @@ macro_rules! curve_impl {
 
         impl<'r> ::std::ops::AddAssign<&'r $projective> for $projective {
             fn add_assign(&mut self, other: &Self) {
-                if self.is_zero() {
+                if self.is_identity() {
                     *self = *other;
                     return;
                 }
 
-                if other.is_zero() {
+                if other.is_identity() {
                     return;
                 }
 
@@ -390,11 +390,11 @@ macro_rules! curve_impl {
             for $projective
         {
             fn add_assign(&mut self, other: &<$projective as CurveProjective>::Affine) {
-                if other.is_zero() {
+                if other.is_identity() {
                     return;
                 }
 
-                if self.is_zero() {
+                if self.is_identity() {
                     self.x = other.x;
                     self.y = other.y;
                     self.z = $basefield::one();
@@ -524,7 +524,7 @@ macro_rules! curve_impl {
                     if p.is_some().into() {
                         let p = p.unwrap().scale_by_cofactor();
 
-                        if !p.is_zero() {
+                        if !p.is_identity() {
                             return p;
                         }
                     }
@@ -533,7 +533,7 @@ macro_rules! curve_impl {
 
             // The point at infinity is always represented by
             // Z = 0.
-            fn zero() -> Self {
+            fn identity() -> Self {
                 $projective {
                     x: $basefield::zero(),
                     y: $basefield::one(),
@@ -541,18 +541,18 @@ macro_rules! curve_impl {
                 }
             }
 
-            fn one() -> Self {
-                $affine::one().into()
+            fn generator() -> Self {
+                $affine::generator().into()
             }
 
             // The point at infinity is always represented by
             // Z = 0.
-            fn is_zero(&self) -> bool {
+            fn is_identity(&self) -> bool {
                 self.z.is_zero()
             }
 
             fn is_normalized(&self) -> bool {
-                self.is_zero() || self.z == $basefield::one()
+                self.is_identity() || self.z == $basefield::one()
             }
 
             fn batch_normalization(v: &mut [Self]) {
@@ -609,7 +609,7 @@ macro_rules! curve_impl {
             }
 
             fn double(&mut self) {
-                if self.is_zero() {
+                if self.is_identity() {
                     return;
                 }
 
@@ -662,7 +662,7 @@ macro_rules! curve_impl {
             }
 
             fn mul_assign<S: Into<<Self::Scalar as PrimeField>::Repr>>(&mut self, other: S) {
-                let mut res = Self::zero();
+                let mut res = Self::identity();
 
                 let mut found_one = false;
 
@@ -700,8 +700,8 @@ macro_rules! curve_impl {
         // coordinates with Z = 1.
         impl From<$affine> for $projective {
             fn from(p: $affine) -> $projective {
-                if p.is_zero() {
-                    $projective::zero()
+                if p.is_identity() {
+                    $projective::identity()
                 } else {
                     $projective {
                         x: p.x,
@@ -716,8 +716,8 @@ macro_rules! curve_impl {
         // coordinates as X/Z^2, Y/Z^3.
         impl From<$projective> for $affine {
             fn from(p: $projective) -> $affine {
-                if p.is_zero() {
-                    $affine::zero()
+                if p.is_identity() {
+                    $affine::identity()
                 } else if p.z == $basefield::one() {
                     // If Z is one, the point is already normalized.
                     $affine {
@@ -830,7 +830,7 @@ pub mod g1 {
                 copy[0] &= 0x3f;
 
                 if copy.iter().all(|b| *b == 0) {
-                    Ok(G1Affine::zero())
+                    Ok(G1Affine::identity())
                 } else {
                     Err(GroupDecodingError::UnexpectedInformation)
                 }
@@ -867,7 +867,7 @@ pub mod g1 {
         fn from_affine(affine: G1Affine) -> Self {
             let mut res = Self::empty();
 
-            if affine.is_zero() {
+            if affine.is_identity() {
                 // Set the second-most significant bit to indicate this point
                 // is at infinity.
                 res.0[0] |= 1 << 6;
@@ -937,7 +937,7 @@ pub mod g1 {
                 copy[0] &= 0x3f;
 
                 if copy.iter().all(|b| *b == 0) {
-                    Ok(G1Affine::zero())
+                    Ok(G1Affine::identity())
                 } else {
                     Err(GroupDecodingError::UnexpectedInformation)
                 }
@@ -964,7 +964,7 @@ pub mod g1 {
         fn from_affine(affine: G1Affine) -> Self {
             let mut res = Self::empty();
 
-            if affine.is_zero() {
+            if affine.is_identity() {
                 // Set the second-most significant bit to indicate this point
                 // is at infinity.
                 res.0[0] |= 1 << 6;
@@ -1043,8 +1043,8 @@ pub mod g1 {
     pub struct G1Prepared(pub(crate) G1Affine);
 
     impl G1Prepared {
-        pub fn is_zero(&self) -> bool {
-            self.0.is_zero()
+        pub fn is_identity(&self) -> bool {
+            self.0.is_identity()
         }
 
         pub fn from_affine(p: G1Affine) -> Self {
@@ -1075,13 +1075,13 @@ pub mod g1 {
                 assert!(!p.is_in_correct_subgroup_assuming_on_curve());
 
                 let g1 = p.scale_by_cofactor();
-                if !g1.is_zero() {
+                if !g1.is_identity() {
                     assert_eq!(i, 4);
                     let g1 = G1Affine::from(g1);
 
                     assert!(g1.is_in_correct_subgroup_assuming_on_curve());
 
-                    assert_eq!(g1, G1Affine::one());
+                    assert_eq!(g1, G1Affine::generator());
                     break;
                 }
             }
@@ -1440,7 +1440,7 @@ pub mod g2 {
                 copy[0] &= 0x3f;
 
                 if copy.iter().all(|b| *b == 0) {
-                    Ok(G2Affine::zero())
+                    Ok(G2Affine::identity())
                 } else {
                     Err(GroupDecodingError::UnexpectedInformation)
                 }
@@ -1489,7 +1489,7 @@ pub mod g2 {
         fn from_affine(affine: G2Affine) -> Self {
             let mut res = Self::empty();
 
-            if affine.is_zero() {
+            if affine.is_identity() {
                 // Set the second-most significant bit to indicate this point
                 // is at infinity.
                 res.0[0] |= 1 << 6;
@@ -1561,7 +1561,7 @@ pub mod g2 {
                 copy[0] &= 0x3f;
 
                 if copy.iter().all(|b| *b == 0) {
-                    Ok(G2Affine::zero())
+                    Ok(G2Affine::identity())
                 } else {
                     Err(GroupDecodingError::UnexpectedInformation)
                 }
@@ -1603,7 +1603,7 @@ pub mod g2 {
         fn from_affine(affine: G2Affine) -> Self {
             let mut res = Self::empty();
 
-            if affine.is_zero() {
+            if affine.is_identity() {
                 // Set the second-most significant bit to indicate this point
                 // is at infinity.
                 res.0[0] |= 1 << 6;
@@ -1728,12 +1728,12 @@ pub mod g2 {
                 assert!(!p.is_in_correct_subgroup_assuming_on_curve());
 
                 let g2 = p.scale_by_cofactor();
-                if !g2.is_zero() {
+                if !g2.is_identity() {
                     assert_eq!(i, 2);
                     let g2 = G2Affine::from(g2);
 
                     assert!(g2.is_in_correct_subgroup_assuming_on_curve());
-                    assert_eq!(g2, G2Affine::one());
+                    assert_eq!(g2, G2Affine::generator());
                     break;
                 }
             }

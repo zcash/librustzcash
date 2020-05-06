@@ -59,7 +59,7 @@ impl Engine for Bls12 {
     {
         let mut pairs = vec![];
         for &(p, q) in i {
-            if !p.is_zero() && !q.is_zero() {
+            if !p.is_identity() && !q.is_identity() {
                 pairs.push((p, q.coeffs.iter()));
             }
         }
@@ -168,12 +168,12 @@ impl Engine for Bls12 {
 }
 
 impl G2Prepared {
-    pub fn is_zero(&self) -> bool {
+    pub fn is_identity(&self) -> bool {
         self.infinity
     }
 
     pub fn from_affine(q: G2Affine) -> Self {
-        if q.is_zero() {
+        if q.is_identity() {
             return G2Prepared {
                 coeffs: vec![],
                 infinity: true,

@@ -55,13 +55,13 @@ pub trait CurveProjective:
     fn random<R: RngCore + ?Sized>(rng: &mut R) -> Self;
 
     /// Returns the additive identity.
-    fn zero() -> Self;
+    fn identity() -> Self;
 
     /// Returns a fixed generator of unknown exponent.
-    fn one() -> Self;
+    fn generator() -> Self;
 
     /// Determines if this point is the point at infinity.
-    fn is_zero(&self) -> bool;
+    fn is_identity(&self) -> bool;
 
     /// Normalizes a slice of projective elements so that
     /// conversion to affine is cheap.
@@ -112,14 +112,14 @@ pub trait CurveAffine:
     type Compressed: EncodedPoint<Affine = Self>;
 
     /// Returns the additive identity.
-    fn zero() -> Self;
+    fn identity() -> Self;
 
     /// Returns a fixed generator of unknown exponent.
-    fn one() -> Self;
+    fn generator() -> Self;
 
     /// Determines if this point represents the point at infinity; the
     /// additive identity.
-    fn is_zero(&self) -> bool;
+    fn is_identity(&self) -> bool;
 
     /// Performs scalar multiplication of this element with mixed addition.
     fn mul<S: Into<<Self::Scalar as PrimeField>::Repr>>(&self, other: S) -> Self::Projective;
