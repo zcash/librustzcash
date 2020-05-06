@@ -1,23 +1,53 @@
 //! This crate provides traits for working with finite fields.
 
 // Catch documentation errors caused by code changes.
+#![no_std]
 #![deny(intra_doc_link_resolution_failure)]
 #![allow(unused_imports)]
+
+#[cfg(feature = "std")]
+#[macro_use]
+extern crate std;
 
 #[cfg(feature = "derive")]
 pub use ff_derive::*;
 
+use core::fmt;
+use core::ops::{Add, AddAssign, Mul, MulAssign, Neg, Sub, SubAssign};
 use rand_core::RngCore;
-use std::error::Error;
-use std::fmt;
+#[cfg(feature = "std")]
 use std::io::{self, Read, Write};
+use subtle::{ConditionallySelectable, CtOption};
 
 /// This trait represents an element of a field.
 pub trait Field:
-    Sized + Eq + Copy + Clone + Send + Sync + fmt::Debug + fmt::Display + 'static
+    Sized
+    + Eq
+    + Copy
+    + Clone
+    + Default
+    + Send
+    + Sync
+    + fmt::Debug
+    + fmt::Display
+    + 'static
+    + ConditionallySelectable
+    + Add<Output = Self>
+    + Sub<Output = Self>
+    + Mul<Output = Self>
+    + Neg<Output = Self>
+    + for<'a> Add<&'a Self, Output = Self>
+    + for<'a> Mul<&'a Self, Output = Self>
+    + for<'a> Sub<&'a Self, Output = Self>
+    + MulAssign
+    + AddAssign
+    + SubAssign
+    + for<'a> MulAssign<&'a Self>
+    + for<'a> AddAssign<&'a Self>
+    + for<'a> SubAssign<&'a Self>
 {
     /// Returns an element chosen uniformly at random using a user-provided RNG.
-    fn random<R: RngCore>(rng: &mut R) -> Self;
+    fn random<R: RngCore + ?std::marker::Sized>(rng: &mut R) -> Self;
 
     /// Returns the zero element of the field, the additive identity.
     fn zero() -> Self;
@@ -29,46 +59,35 @@ pub trait Field:
     fn is_zero(&self) -> bool;
 
     /// Squares this element.
-    fn square(&mut self);
+    #[must_use]
+    fn square(&self) -> Self;
 
     /// Doubles this element.
-    fn double(&mut self);
+    #[must_use]
+    fn double(&self) -> Self;
 
-    /// Negates this element.
-    fn negate(&mut self);
-
-    /// Adds another element to this element.
-    fn add_assign(&mut self, other: &Self);
-
-    /// Subtracts another element from this element.
-    fn sub_assign(&mut self, other: &Self);
-
-    /// Multiplies another element by this element.
-    fn mul_assign(&mut self, other: &Self);
-
-    /// Computes the multiplicative inverse of this element, if nonzero.
-    fn inverse(&self) -> Option<Self>;
+    /// Computes the multiplicative inverse of this element,
+    /// failing if the element is zero.
+    fn invert(&self) -> CtOption<Self>;
 
     /// Exponentiates this element by a power of the base prime modulus via
     /// the Frobenius automorphism.
     fn frobenius_map(&mut self, power: usize);
 
-    /// Exponentiates this element by a number represented with `u64` limbs,
-    /// least significant digit first.
-    fn pow<S: AsRef<[u64]>>(&self, exp: S) -> Self {
+    /// Exponentiates `self` by `exp`, where `exp` is a little-endian order
+    /// integer exponent.
+    ///
+    /// **This operation is variable time with respect to the exponent.** If the
+    /// exponent is fixed, this operation is effectively constant time.
+    fn pow_vartime<S: AsRef<[u64]>>(&self, exp: S) -> Self {
         let mut res = Self::one();
+        for e in exp.as_ref().iter().rev() {
+            for i in (0..64).rev() {
+                res = res.square();
 
-        let mut found_one = false;
-
-        for i in BitIterator::new(exp) {
-            if found_one {
-                res.square();
-            } else {
-                found_one = i;
-            }
-
-            if i {
-                res.mul_assign(self);
+                if ((*e >> i) & 1) == 1 {
+                    res.mul_assign(self);
+                }
             }
         }
 
@@ -78,12 +97,9 @@ pub trait Field:
 
 /// This trait represents an element of a field that has a square root operation described for it.
 pub trait SqrtField: Field {
-    /// Returns the Legendre symbol of the field element.
-    fn legendre(&self) -> LegendreSymbol;
-
     /// Returns the square root of the field element, if it is
     /// quadratic residue.
-    fn sqrt(&self) -> Option<Self>;
+    fn sqrt(&self) -> CtOption<Self>;
 }
 
 /// This trait represents a wrapper around a biginteger which can encode any element of a particular
@@ -139,6 +155,7 @@ pub trait PrimeFieldRepr:
     fn shl(&mut self, amt: u32);
 
     /// Writes this `PrimeFieldRepr` as a big endian integer.
+    #[cfg(feature = "std")]
     fn write_be<W: Write>(&self, mut writer: W) -> io::Result<()> {
         use byteorder::{BigEndian, WriteBytesExt};
 
@@ -150,6 +167,7 @@ pub trait PrimeFieldRepr:
     }
 
     /// Reads a big endian integer into this representation.
+    #[cfg(feature = "std")]
     fn read_be<R: Read>(&mut self, mut reader: R) -> io::Result<()> {
         use byteorder::{BigEndian, ReadBytesExt};
 
@@ -161,6 +179,7 @@ pub trait PrimeFieldRepr:
     }
 
     /// Writes this `PrimeFieldRepr` as a little endian integer.
+    #[cfg(feature = "std")]
     fn write_le<W: Write>(&self, mut writer: W) -> io::Result<()> {
         use byteorder::{LittleEndian, WriteBytesExt};
 
@@ -172,6 +191,7 @@ pub trait PrimeFieldRepr:
     }
 
     /// Reads a little endian integer into this representation.
+    #[cfg(feature = "std")]
     fn read_le<R: Read>(&mut self, mut reader: R) -> io::Result<()> {
         use byteorder::{LittleEndian, ReadBytesExt};
 
@@ -183,25 +203,19 @@ pub trait PrimeFieldRepr:
     }
 }
 
-#[derive(Debug, PartialEq)]
-pub enum LegendreSymbol {
-    Zero = 0,
-    QuadraticResidue = 1,
-    QuadraticNonResidue = -1,
-}
-
 /// An error that may occur when trying to interpret a `PrimeFieldRepr` as a
 /// `PrimeField` element.
 #[derive(Debug)]
 pub enum PrimeFieldDecodingError {
     /// The encoded value is not in the field
-    NotInField(String),
+    NotInField,
 }
 
-impl Error for PrimeFieldDecodingError {
+#[cfg(feature = "std")]
+impl std::error::Error for PrimeFieldDecodingError {
     fn description(&self) -> &str {
         match *self {
-            PrimeFieldDecodingError::NotInField(..) => "not an element of the field",
+            PrimeFieldDecodingError::NotInField => "not an element of the field",
         }
     }
 }
@@ -209,9 +223,7 @@ impl Error for PrimeFieldDecodingError {
 impl fmt::Display for PrimeFieldDecodingError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
         match *self {
-            PrimeFieldDecodingError::NotInField(ref repr) => {
-                write!(f, "{} is not an element of the field", repr)
-            }
+            PrimeFieldDecodingError::NotInField => write!(f, "not an element of the field"),
         }
     }
 }
@@ -330,7 +342,7 @@ impl<E: AsRef<[u64]>> Iterator for BitIterator<E> {
 
 #[test]
 fn test_bit_iterator() {
-    let mut a = BitIterator::new([0xa953d79b83f6ab59, 0x6dea2059e200bd39]);
+    let mut a = BitIterator::new([0xa953_d79b_83f6_ab59, 0x6dea_2059_e200_bd39]);
     let expected = "01101101111010100010000001011001111000100000000010111101001110011010100101010011110101111001101110000011111101101010101101011001";
 
     for e in expected.chars() {
@@ -342,10 +354,10 @@ fn test_bit_iterator() {
     let expected = "1010010101111110101010000101101011101000011101110101001000011001100100100011011010001011011011010001011011101100110100111011010010110001000011110100110001100110011101101000101100011100100100100100001010011101010111110011101011000011101000111011011101011001";
 
     let mut a = BitIterator::new([
-        0x429d5f3ac3a3b759,
-        0xb10f4c66768b1c92,
-        0x92368b6d16ecd3b4,
-        0xa57ea85ae8775219,
+        0x429d_5f3a_c3a3_b759,
+        0xb10f_4c66_768b_1c92,
+        0x9236_8b6d_16ec_d3b4,
+        0xa57e_a85a_e877_5219,
     ]);
 
     for e in expected.chars() {

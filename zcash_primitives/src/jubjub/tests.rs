@@ -1,6 +1,7 @@
 use super::{edwards, montgomery, JubjubEngine, JubjubParams, PrimeOrder};
 
-use ff::{Field, LegendreSymbol, PrimeField, PrimeFieldRepr, SqrtField};
+use ff::{Field, PrimeField, PrimeFieldRepr, SqrtField};
+use std::ops::{AddAssign, MulAssign, Neg, SubAssign};
 
 use rand_core::{RngCore, SeedableRng};
 use rand_xorshift::XorShiftRng;
@@ -19,11 +20,9 @@ pub fn test_suite<E: JubjubEngine>(params: &E::Params) {
 }
 
 fn is_on_mont_curve<E: JubjubEngine, P: JubjubParams<E>>(x: E::Fr, y: E::Fr, params: &P) -> bool {
-    let mut lhs = y;
-    lhs.square();
+    let lhs = y.square();
 
-    let mut x2 = x;
-    x2.square();
+    let x2 = x.square();
 
     let mut x3 = x2;
     x3.mul_assign(&x);
@@ -41,11 +40,9 @@ fn is_on_twisted_edwards_curve<E: JubjubEngine, P: JubjubParams<E>>(
     y: E::Fr,
     params: &P,
 ) -> bool {
-    let mut x2 = x;
-    x2.square();
+    let x2 = x.square();
 
-    let mut y2 = y;
-    y2.square();
+    let y2 = y.square();
 
     // -x^2 + y^2
     let mut lhs = y2;
@@ -237,7 +234,9 @@ fn test_get_for<E: JubjubEngine>(params: &E::Params) {
         let y = E::Fr::random(rng);
         let sign = rng.next_u32() % 2 == 1;
 
-        if let Some(mut p) = edwards::Point::<E, _>::get_for_y(y, sign, params) {
+        let p = edwards::Point::<E, _>::get_for_y(y, sign, params);
+        if bool::from(p.is_some()) {
+            let mut p = p.unwrap();
             assert!(p.to_xy().0.into_repr().is_odd() == sign);
             p = p.negate();
             assert!(edwards::Point::<E, _>::get_for_y(y, !sign, params).unwrap() == p);
@@ -309,23 +308,19 @@ fn test_back_and_forth<E: JubjubEngine>(params: &E::Params) {
 
 fn test_jubjub_params<E: JubjubEngine>(params: &E::Params) {
     // a = -1
-    let mut a = E::Fr::one();
-    a.negate();
+    let a = E::Fr::one().neg();
 
     {
         // Check that 2A is consistent with A
-        let mut tmp = *params.montgomery_a();
-        tmp.double();
-
-        assert_eq!(&tmp, params.montgomery_2a());
+        assert_eq!(&params.montgomery_a().double(), params.montgomery_2a());
     }
 
     {
         // The twisted Edwards addition law is complete when d is nonsquare
         // and a is square.
 
-        assert!(params.edwards_d().legendre() == LegendreSymbol::QuadraticNonResidue);
-        assert!(a.legendre() == LegendreSymbol::QuadraticResidue);
+        assert!(bool::from(params.edwards_d().sqrt().is_none()));
+        assert!(bool::from(a.sqrt().is_some()));
     }
 
     {
@@ -335,38 +330,37 @@ fn test_jubjub_params<E: JubjubEngine>(params: &E::Params) {
         let mut tmp = *params.edwards_d();
 
         // 1 / d is nonsquare
-        assert!(tmp.inverse().unwrap().legendre() == LegendreSymbol::QuadraticNonResidue);
+        assert!(bool::from(tmp.invert().unwrap().sqrt().is_none()));
 
         // tmp = -d
-        tmp.negate();
+        tmp = tmp.neg();
 
         // -d is nonsquare
-        assert!(tmp.legendre() == LegendreSymbol::QuadraticNonResidue);
+        assert!(bool::from(tmp.sqrt().is_none()));
 
         // 1 / -d is nonsquare
-        assert!(tmp.inverse().unwrap().legendre() == LegendreSymbol::QuadraticNonResidue);
+        assert!(bool::from(tmp.invert().unwrap().sqrt().is_none()));
     }
 
     {
         // Check that A^2 - 4 is nonsquare:
-        let mut tmp = params.montgomery_a().clone();
-        tmp.square();
+        let mut tmp = params.montgomery_a().square();
         tmp.sub_assign(&E::Fr::from_str("4").unwrap());
-        assert!(tmp.legendre() == LegendreSymbol::QuadraticNonResidue);
+        assert!(bool::from(tmp.sqrt().is_none()));
     }
 
     {
         // Check that A - 2 is nonsquare:
         let mut tmp = params.montgomery_a().clone();
         tmp.sub_assign(&E::Fr::from_str("2").unwrap());
-        assert!(tmp.legendre() == LegendreSymbol::QuadraticNonResidue);
+        assert!(bool::from(tmp.sqrt().is_none()));
     }
 
     {
         // Check the validity of the scaling factor
         let mut tmp = a;
         tmp.sub_assign(&params.edwards_d());
-        tmp = tmp.inverse().unwrap();
+        tmp = tmp.invert().unwrap();
         tmp.mul_assign(&E::Fr::from_str("4").unwrap());
         tmp = tmp.sqrt().unwrap();
         assert_eq!(&tmp, params.scale());

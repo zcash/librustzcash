@@ -1,12 +1,6 @@
 language: rust
 rust:
-  - 1.37.0
-
-addons:
-  apt:
-    packages:
-      # For cargo-tarpaulin
-      - libssl-dev
+  - 1.39.0
 
 cache: cargo
 
@@ -21,11 +15,5 @@ script:
 
 before_cache:
   - rm -rf "$TRAVIS_HOME/.cargo/registry/src"
-  - cargo install cargo-tarpaulin || echo "cargo-tarpaulin already installed"
   - cargo install cargo-update || echo "cargo-update already installed"
   - cargo install-update -a # update outdated cached binaries
-
-after_success:
-  # Manually exclude packages that are going to be removed from the workspace
-  - travis_wait 35 cargo tarpaulin --release --timeout 600 --out Xml --packages "librustzcash,zcash_client_backend,zcash_primitives,zcash_proofs"
-  - bash <(curl -s https://codecov.io/bash)

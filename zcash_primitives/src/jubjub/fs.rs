@@ -1,10 +1,11 @@
 use byteorder::{ByteOrder, LittleEndian};
 use ff::{
-    adc, mac_with_carry, sbb, BitIterator, Field,
-    LegendreSymbol::{self, *},
-    PrimeField, PrimeFieldDecodingError, PrimeFieldRepr, SqrtField,
+    adc, mac_with_carry, sbb, BitIterator, Field, PrimeField, PrimeFieldDecodingError,
+    PrimeFieldRepr, SqrtField,
 };
 use rand_core::RngCore;
+use std::ops::{Add, AddAssign, Mul, MulAssign, Neg, Sub, SubAssign};
+use subtle::{Choice, ConditionallySelectable, ConstantTimeEq, CtOption};
 
 use super::ToUniform;
 
@@ -256,6 +257,21 @@ impl PrimeFieldRepr for FsRepr {
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub struct Fs(FsRepr);
 
+impl Default for Fs {
+    fn default() -> Self {
+        Fs::zero()
+    }
+}
+
+impl ConstantTimeEq for Fs {
+    fn ct_eq(&self, other: &Fs) -> Choice {
+        (self.0).0[0].ct_eq(&(other.0).0[0])
+            & (self.0).0[1].ct_eq(&(other.0).0[1])
+            & (self.0).0[2].ct_eq(&(other.0).0[2])
+            & (self.0).0[3].ct_eq(&(other.0).0[3])
+    }
+}
+
 impl ::std::fmt::Display for Fs {
     fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
         write!(f, "Fs({})", self.into_repr())
@@ -265,6 +281,166 @@ impl ::std::fmt::Display for Fs {
 impl From<Fs> for FsRepr {
     fn from(e: Fs) -> FsRepr {
         e.into_repr()
+    }
+}
+
+impl ConditionallySelectable for Fs {
+    fn conditional_select(a: &Self, b: &Self, choice: Choice) -> Self {
+        Fs(FsRepr([
+            u64::conditional_select(&(a.0).0[0], &(b.0).0[0], choice),
+            u64::conditional_select(&(a.0).0[1], &(b.0).0[1], choice),
+            u64::conditional_select(&(a.0).0[2], &(b.0).0[2], choice),
+            u64::conditional_select(&(a.0).0[3], &(b.0).0[3], choice),
+        ]))
+    }
+}
+
+impl Neg for Fs {
+    type Output = Self;
+
+    #[inline]
+    fn neg(mut self) -> Self {
+        if !self.is_zero() {
+            let mut tmp = MODULUS;
+            tmp.sub_noborrow(&self.0);
+            self.0 = tmp;
+        }
+        self
+    }
+}
+
+impl<'r> Add<&'r Fs> for Fs {
+    type Output = Self;
+
+    #[inline]
+    fn add(self, other: &Self) -> Self {
+        let mut ret = self;
+        ret.add_assign(other);
+        ret
+    }
+}
+
+impl Add for Fs {
+    type Output = Self;
+
+    #[inline]
+    fn add(self, other: Self) -> Self {
+        self + &other
+    }
+}
+
+impl<'r> AddAssign<&'r Fs> for Fs {
+    #[inline]
+    fn add_assign(&mut self, other: &Self) {
+        // This cannot exceed the backing capacity.
+        self.0.add_nocarry(&other.0);
+
+        // However, it may need to be reduced.
+        self.reduce();
+    }
+}
+
+impl AddAssign for Fs {
+    #[inline]
+    fn add_assign(&mut self, other: Self) {
+        self.add_assign(&other);
+    }
+}
+
+impl<'r> Sub<&'r Fs> for Fs {
+    type Output = Self;
+
+    #[inline]
+    fn sub(self, other: &Self) -> Self {
+        let mut ret = self;
+        ret.sub_assign(other);
+        ret
+    }
+}
+
+impl Sub for Fs {
+    type Output = Self;
+
+    #[inline]
+    fn sub(self, other: Self) -> Self {
+        self - &other
+    }
+}
+
+impl<'r> SubAssign<&'r Fs> for Fs {
+    #[inline]
+    fn sub_assign(&mut self, other: &Self) {
+        // If `other` is larger than `self`, we'll need to add the modulus to self first.
+        if other.0 > self.0 {
+            self.0.add_nocarry(&MODULUS);
+        }
+
+        self.0.sub_noborrow(&other.0);
+    }
+}
+
+impl SubAssign for Fs {
+    #[inline]
+    fn sub_assign(&mut self, other: Self) {
+        self.sub_assign(&other);
+    }
+}
+
+impl<'r> Mul<&'r Fs> for Fs {
+    type Output = Self;
+
+    #[inline]
+    fn mul(self, other: &Self) -> Self {
+        let mut ret = self;
+        ret.mul_assign(other);
+        ret
+    }
+}
+
+impl Mul for Fs {
+    type Output = Self;
+
+    #[inline]
+    fn mul(self, other: Self) -> Self {
+        self * &other
+    }
+}
+
+impl<'r> MulAssign<&'r Fs> for Fs {
+    #[inline]
+    fn mul_assign(&mut self, other: &Self) {
+        let mut carry = 0;
+        let r0 = mac_with_carry(0, (self.0).0[0], (other.0).0[0], &mut carry);
+        let r1 = mac_with_carry(0, (self.0).0[0], (other.0).0[1], &mut carry);
+        let r2 = mac_with_carry(0, (self.0).0[0], (other.0).0[2], &mut carry);
+        let r3 = mac_with_carry(0, (self.0).0[0], (other.0).0[3], &mut carry);
+        let r4 = carry;
+        let mut carry = 0;
+        let r1 = mac_with_carry(r1, (self.0).0[1], (other.0).0[0], &mut carry);
+        let r2 = mac_with_carry(r2, (self.0).0[1], (other.0).0[1], &mut carry);
+        let r3 = mac_with_carry(r3, (self.0).0[1], (other.0).0[2], &mut carry);
+        let r4 = mac_with_carry(r4, (self.0).0[1], (other.0).0[3], &mut carry);
+        let r5 = carry;
+        let mut carry = 0;
+        let r2 = mac_with_carry(r2, (self.0).0[2], (other.0).0[0], &mut carry);
+        let r3 = mac_with_carry(r3, (self.0).0[2], (other.0).0[1], &mut carry);
+        let r4 = mac_with_carry(r4, (self.0).0[2], (other.0).0[2], &mut carry);
+        let r5 = mac_with_carry(r5, (self.0).0[2], (other.0).0[3], &mut carry);
+        let r6 = carry;
+        let mut carry = 0;
+        let r3 = mac_with_carry(r3, (self.0).0[3], (other.0).0[0], &mut carry);
+        let r4 = mac_with_carry(r4, (self.0).0[3], (other.0).0[1], &mut carry);
+        let r5 = mac_with_carry(r5, (self.0).0[3], (other.0).0[2], &mut carry);
+        let r6 = mac_with_carry(r6, (self.0).0[3], (other.0).0[3], &mut carry);
+        let r7 = carry;
+        self.mont_reduce(r0, r1, r2, r3, r4, r5, r6, r7);
+    }
+}
+
+impl MulAssign for Fs {
+    #[inline]
+    fn mul_assign(&mut self, other: Self) {
+        self.mul_assign(&other);
     }
 }
 
@@ -278,7 +454,7 @@ impl PrimeField for Fs {
 
             Ok(r)
         } else {
-            Err(PrimeFieldDecodingError::NotInField(format!("{}", r.0)))
+            Err(PrimeFieldDecodingError::NotInField)
         }
     }
 
@@ -317,7 +493,7 @@ impl PrimeField for Fs {
 }
 
 impl Field for Fs {
-    fn random<R: RngCore>(rng: &mut R) -> Self {
+    fn random<R: RngCore + ?std::marker::Sized>(rng: &mut R) -> Self {
         loop {
             let mut tmp = {
                 let mut repr = [0u64; 4];
@@ -352,45 +528,23 @@ impl Field for Fs {
     }
 
     #[inline]
-    fn add_assign(&mut self, other: &Fs) {
+    fn double(&self) -> Self {
+        let mut ret = *self;
+
         // This cannot exceed the backing capacity.
-        self.0.add_nocarry(&other.0);
+        ret.0.mul2();
 
         // However, it may need to be reduced.
-        self.reduce();
+        ret.reduce();
+
+        ret
     }
 
-    #[inline]
-    fn double(&mut self) {
-        // This cannot exceed the backing capacity.
-        self.0.mul2();
-
-        // However, it may need to be reduced.
-        self.reduce();
-    }
-
-    #[inline]
-    fn sub_assign(&mut self, other: &Fs) {
-        // If `other` is larger than `self`, we'll need to add the modulus to self first.
-        if other.0 > self.0 {
-            self.0.add_nocarry(&MODULUS);
-        }
-
-        self.0.sub_noborrow(&other.0);
-    }
-
-    #[inline]
-    fn negate(&mut self) {
-        if !self.is_zero() {
-            let mut tmp = MODULUS;
-            tmp.sub_noborrow(&self.0);
-            self.0 = tmp;
-        }
-    }
-
-    fn inverse(&self) -> Option<Self> {
+    /// WARNING: THIS IS NOT ACTUALLY CONSTANT TIME YET!
+    /// THIS WILL BE REPLACED BY THE jubjub CRATE, WHICH IS CONSTANT TIME!
+    fn invert(&self) -> CtOption<Self> {
         if self.is_zero() {
-            None
+            CtOption::new(Self::zero(), Choice::from(0))
         } else {
             // Guajardo Kumar Paar Pelzl
             // Efficient Software-Implementation of Finite Fields with Applications to Cryptography
@@ -436,9 +590,9 @@ impl Field for Fs {
             }
 
             if u == one {
-                Some(b)
+                CtOption::new(b, Choice::from(1))
             } else {
-                Some(c)
+                CtOption::new(c, Choice::from(1))
             }
         }
     }
@@ -449,36 +603,7 @@ impl Field for Fs {
     }
 
     #[inline]
-    fn mul_assign(&mut self, other: &Fs) {
-        let mut carry = 0;
-        let r0 = mac_with_carry(0, (self.0).0[0], (other.0).0[0], &mut carry);
-        let r1 = mac_with_carry(0, (self.0).0[0], (other.0).0[1], &mut carry);
-        let r2 = mac_with_carry(0, (self.0).0[0], (other.0).0[2], &mut carry);
-        let r3 = mac_with_carry(0, (self.0).0[0], (other.0).0[3], &mut carry);
-        let r4 = carry;
-        let mut carry = 0;
-        let r1 = mac_with_carry(r1, (self.0).0[1], (other.0).0[0], &mut carry);
-        let r2 = mac_with_carry(r2, (self.0).0[1], (other.0).0[1], &mut carry);
-        let r3 = mac_with_carry(r3, (self.0).0[1], (other.0).0[2], &mut carry);
-        let r4 = mac_with_carry(r4, (self.0).0[1], (other.0).0[3], &mut carry);
-        let r5 = carry;
-        let mut carry = 0;
-        let r2 = mac_with_carry(r2, (self.0).0[2], (other.0).0[0], &mut carry);
-        let r3 = mac_with_carry(r3, (self.0).0[2], (other.0).0[1], &mut carry);
-        let r4 = mac_with_carry(r4, (self.0).0[2], (other.0).0[2], &mut carry);
-        let r5 = mac_with_carry(r5, (self.0).0[2], (other.0).0[3], &mut carry);
-        let r6 = carry;
-        let mut carry = 0;
-        let r3 = mac_with_carry(r3, (self.0).0[3], (other.0).0[0], &mut carry);
-        let r4 = mac_with_carry(r4, (self.0).0[3], (other.0).0[1], &mut carry);
-        let r5 = mac_with_carry(r5, (self.0).0[3], (other.0).0[2], &mut carry);
-        let r6 = mac_with_carry(r6, (self.0).0[3], (other.0).0[3], &mut carry);
-        let r7 = carry;
-        self.mont_reduce(r0, r1, r2, r3, r4, r5, r6, r7);
-    }
-
-    #[inline]
-    fn square(&mut self) {
+    fn square(&self) -> Self {
         let mut carry = 0;
         let r1 = mac_with_carry(0, (self.0).0[0], (self.0).0[1], &mut carry);
         let r2 = mac_with_carry(0, (self.0).0[0], (self.0).0[2], &mut carry);
@@ -509,7 +634,10 @@ impl Field for Fs {
         let r5 = adc(r5, 0, &mut carry);
         let r6 = mac_with_carry(r6, (self.0).0[3], (self.0).0[3], &mut carry);
         let r7 = adc(r7, 0, &mut carry);
-        self.mont_reduce(r0, r1, r2, r3, r4, r5, r6, r7);
+
+        let mut ret = *self;
+        ret.mont_reduce(r0, r1, r2, r3, r4, r5, r6, r7);
+        ret
     }
 }
 
@@ -587,7 +715,7 @@ impl Fs {
     fn mul_bits<S: AsRef<[u64]>>(&self, bits: BitIterator<S>) -> Self {
         let mut res = Self::zero();
         for bit in bits {
-            res.double();
+            res = res.double();
 
             if bit {
                 res.add_assign(self)
@@ -611,51 +739,28 @@ impl ToUniform for Fs {
 }
 
 impl SqrtField for Fs {
-    fn legendre(&self) -> LegendreSymbol {
-        // s = self^((s - 1) // 2)
-        let s = self.pow([
-            0x684b872f6b7b965b,
-            0x53341049e6640841,
-            0x83339d80809a1d80,
-            0x73eda753299d7d4,
-        ]);
-        if s == Self::zero() {
-            Zero
-        } else if s == Self::one() {
-            QuadraticResidue
-        } else {
-            QuadraticNonResidue
-        }
-    }
-
-    fn sqrt(&self) -> Option<Self> {
+    fn sqrt(&self) -> CtOption<Self> {
         // Shank's algorithm for s mod 4 = 3
         // https://eprint.iacr.org/2012/685.pdf (page 9, algorithm 2)
 
         // a1 = self^((s - 3) // 4)
-        let mut a1 = self.pow([
+        let mut a1 = self.pow_vartime([
             0xb425c397b5bdcb2d,
             0x299a0824f3320420,
             0x4199cec0404d0ec0,
             0x39f6d3a994cebea,
         ]);
-        let mut a0 = a1;
-        a0.square();
+        let mut a0 = a1.square();
         a0.mul_assign(self);
+        a1.mul_assign(self);
 
-        if a0 == NEGATIVE_ONE {
-            None
-        } else {
-            a1.mul_assign(self);
-            Some(a1)
-        }
+        CtOption::new(a1, !a0.ct_eq(&NEGATIVE_ONE))
     }
 }
 
 #[test]
 fn test_neg_one() {
-    let mut o = Fs::one();
-    o.negate();
+    let o = Fs::one().neg();
 
     assert_eq!(NEGATIVE_ONE, o);
 }
@@ -905,27 +1010,6 @@ fn test_fs_repr_sub_noborrow() {
 
         assert_eq!(csub_ab, csub_ba);
     }
-}
-
-#[test]
-fn test_fs_legendre() {
-    assert_eq!(QuadraticResidue, Fs::one().legendre());
-    assert_eq!(Zero, Fs::zero().legendre());
-
-    let e = FsRepr([
-        0x8385eec23df1f88e,
-        0x9a01fb412b2dba16,
-        0x4c928edcdd6c22f,
-        0x9f2df7ef69ecef9,
-    ]);
-    assert_eq!(QuadraticResidue, Fs::from_repr(e).unwrap().legendre());
-    let e = FsRepr([
-        0xe8ed9f299da78568,
-        0x35efdebc88b2209,
-        0xc82125cb1f916dbe,
-        0x6813d2b38c39bd0,
-    ]);
-    assert_eq!(QuadraticNonResidue, Fs::from_repr(e).unwrap().legendre());
 }
 
 #[test]
@@ -1307,16 +1391,15 @@ fn test_fs_mul_assign() {
 
 #[test]
 fn test_fr_squaring() {
-    let mut a = Fs(FsRepr([
+    let a = Fs(FsRepr([
         0xffffffffffffffff,
         0xffffffffffffffff,
         0xffffffffffffffff,
         0xe7db4ea6533afa8,
     ]));
     assert!(a.is_valid());
-    a.square();
     assert_eq!(
-        a,
+        a.square(),
         Fs::from_repr(FsRepr([
             0x12c7f55cbc52fbaa,
             0xdedc98a0b5e6ce9e,
@@ -1335,8 +1418,7 @@ fn test_fr_squaring() {
         // Ensure that (a * a) = a^2
         let a = Fs::random(&mut rng);
 
-        let mut tmp = a;
-        tmp.square();
+        let tmp = a.square();
 
         let mut tmp2 = a;
         tmp2.mul_assign(&a);
@@ -1346,8 +1428,8 @@ fn test_fr_squaring() {
 }
 
 #[test]
-fn test_fs_inverse() {
-    assert!(Fs::zero().inverse().is_none());
+fn test_fs_invert() {
+    assert!(bool::from(Fs::zero().invert().is_none()));
 
     let mut rng = XorShiftRng::from_seed([
         0x59, 0x62, 0xbe, 0x5d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06, 0xbc,
@@ -1359,7 +1441,7 @@ fn test_fs_inverse() {
     for _ in 0..1000 {
         // Ensure that a * a^-1 = 1
         let mut a = Fs::random(&mut rng);
-        let ainv = a.inverse().unwrap();
+        let ainv = a.invert().unwrap();
         a.mul_assign(&ainv);
         assert_eq!(a, one);
     }
@@ -1374,19 +1456,15 @@ fn test_fs_double() {
 
     for _ in 0..1000 {
         // Ensure doubling a is equivalent to adding a to itself.
-        let mut a = Fs::random(&mut rng);
-        let mut b = a;
-        b.add_assign(&a);
-        a.double();
-        assert_eq!(a, b);
+        let a = Fs::random(&mut rng);
+        assert_eq!(a.double(), a + a);
     }
 }
 
 #[test]
-fn test_fs_negate() {
+fn test_fs_neg() {
     {
-        let mut a = Fs::zero();
-        a.negate();
+        let a = Fs::zero().neg();
 
         assert!(a.is_zero());
     }
@@ -1399,8 +1477,7 @@ fn test_fs_negate() {
     for _ in 0..1000 {
         // Ensure (a - (-a)) = 0.
         let mut a = Fs::random(&mut rng);
-        let mut b = a;
-        b.negate();
+        let b = a.neg();
         a.add_assign(&b);
 
         assert!(a.is_zero());
@@ -1418,7 +1495,7 @@ fn test_fs_pow() {
         // Exponentiate by various small numbers and ensure it consists with repeated
         // multiplication.
         let a = Fs::random(&mut rng);
-        let target = a.pow(&[i]);
+        let target = a.pow_vartime(&[i]);
         let mut c = Fs::one();
         for _ in 0..i {
             c.mul_assign(&a);
@@ -1430,7 +1507,7 @@ fn test_fs_pow() {
         // Exponentiating by the modulus should have no effect in a prime field.
         let a = Fs::random(&mut rng);
 
-        assert_eq!(a, a.pow(Fs::char()));
+        assert_eq!(a, a.pow_vartime(Fs::char()));
     }
 }
 
@@ -1446,10 +1523,8 @@ fn test_fs_sqrt() {
     for _ in 0..1000 {
         // Ensure sqrt(a^2) = a or -a
         let a = Fs::random(&mut rng);
-        let mut nega = a;
-        nega.negate();
-        let mut b = a;
-        b.square();
+        let nega = a.neg();
+        let b = a.square();
 
         let b = b.sqrt().unwrap();
 
@@ -1460,10 +1535,9 @@ fn test_fs_sqrt() {
         // Ensure sqrt(a)^2 = a for random a
         let a = Fs::random(&mut rng);
 
-        if let Some(mut tmp) = a.sqrt() {
-            tmp.square();
-
-            assert_eq!(a, tmp);
+        let tmp = a.sqrt();
+        if tmp.is_some().into() {
+            assert_eq!(a, tmp.unwrap().square());
         }
     }
 }
@@ -1614,7 +1688,7 @@ fn test_fs_root_of_unity() {
         Fs::from_repr(FsRepr::from(6)).unwrap()
     );
     assert_eq!(
-        Fs::multiplicative_generator().pow([
+        Fs::multiplicative_generator().pow_vartime([
             0x684b872f6b7b965b,
             0x53341049e6640841,
             0x83339d80809a1d80,
@@ -1622,6 +1696,6 @@ fn test_fs_root_of_unity() {
         ]),
         Fs::root_of_unity()
     );
-    assert_eq!(Fs::root_of_unity().pow([1 << Fs::S]), Fs::one());
-    assert!(Fs::multiplicative_generator().sqrt().is_none());
+    assert_eq!(Fs::root_of_unity().pow_vartime([1 << Fs::S]), Fs::one());
+    assert!(bool::from(Fs::multiplicative_generator().sqrt().is_none()));
 }

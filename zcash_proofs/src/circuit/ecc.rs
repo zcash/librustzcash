@@ -2,6 +2,7 @@
 
 use ff::Field;
 use pairing::Engine;
+use std::ops::{AddAssign, MulAssign, Neg, SubAssign};
 
 use bellman::{ConstraintSystem, SynthesisError};
 
@@ -322,8 +323,7 @@ impl<E: JubjubEngine> EdwardsPoint<E> {
 
         // Compute C = d*A*A
         let c = AllocatedNum::alloc(cs.namespace(|| "C"), || {
-            let mut t0 = *a.get_value().get()?;
-            t0.square();
+            let mut t0 = a.get_value().get()?.square();
             t0.mul_assign(params.edwards_d());
 
             Ok(t0)
@@ -339,18 +339,16 @@ impl<E: JubjubEngine> EdwardsPoint<E> {
         // Compute x3 = (2.A) / (1 + C)
         let x3 = AllocatedNum::alloc(cs.namespace(|| "x3"), || {
             let mut t0 = *a.get_value().get()?;
-            t0.double();
+            t0 = t0.double();
 
             let mut t1 = E::Fr::one();
             t1.add_assign(c.get_value().get()?);
 
-            match t1.inverse() {
-                Some(t1) => {
-                    t0.mul_assign(&t1);
-
-                    Ok(t0)
-                }
-                None => Err(SynthesisError::DivisionByZero),
+            let res = t1.invert().map(|t1| t0 * &t1);
+            if bool::from(res.is_some()) {
+                Ok(res.unwrap())
+            } else {
+                Err(SynthesisError::DivisionByZero)
             }
         })?;
 
@@ -365,20 +363,17 @@ impl<E: JubjubEngine> EdwardsPoint<E> {
         // Compute y3 = (U - 2.A) / (1 - C)
         let y3 = AllocatedNum::alloc(cs.namespace(|| "y3"), || {
             let mut t0 = *a.get_value().get()?;
-            t0.double();
-            t0.negate();
+            t0 = t0.double().neg();
             t0.add_assign(t.get_value().get()?);
 
             let mut t1 = E::Fr::one();
             t1.sub_assign(c.get_value().get()?);
 
-            match t1.inverse() {
-                Some(t1) => {
-                    t0.mul_assign(&t1);
-
-                    Ok(t0)
-                }
-                None => Err(SynthesisError::DivisionByZero),
+            let res = t1.invert().map(|t1| t0 * &t1);
+            if bool::from(res.is_some()) {
+                Ok(res.unwrap())
+            } else {
+                Err(SynthesisError::DivisionByZero)
             }
         })?;
 
@@ -452,13 +447,11 @@ impl<E: JubjubEngine> EdwardsPoint<E> {
             let mut t1 = E::Fr::one();
             t1.add_assign(c.get_value().get()?);
 
-            match t1.inverse() {
-                Some(t1) => {
-                    t0.mul_assign(&t1);
-
-                    Ok(t0)
-                }
-                None => Err(SynthesisError::DivisionByZero),
+            let ret = t1.invert().map(|t1| t0 * &t1);
+            if bool::from(ret.is_some()) {
+                Ok(ret.unwrap())
+            } else {
+                Err(SynthesisError::DivisionByZero)
             }
         })?;
 
@@ -479,13 +472,11 @@ impl<E: JubjubEngine> EdwardsPoint<E> {
             let mut t1 = E::Fr::one();
             t1.sub_assign(c.get_value().get()?);
 
-            match t1.inverse() {
-                Some(t1) => {
-                    t0.mul_assign(&t1);
-
-                    Ok(t0)
-                }
-                None => Err(SynthesisError::DivisionByZero),
+            let ret = t1.invert().map(|t1| t0 * &t1);
+            if bool::from(ret.is_some()) {
+                Ok(ret.unwrap())
+            } else {
+                Err(SynthesisError::DivisionByZero)
             }
         })?;
 
@@ -522,13 +513,11 @@ impl<E: JubjubEngine> MontgomeryPoint<E> {
             let mut t0 = *self.x.get_value().get()?;
             t0.mul_assign(params.scale());
 
-            match self.y.get_value().get()?.inverse() {
-                Some(invy) => {
-                    t0.mul_assign(&invy);
-
-                    Ok(t0)
-                }
-                None => Err(SynthesisError::DivisionByZero),
+            let ret = self.y.get_value().get()?.invert().map(|invy| t0 * &invy);
+            if bool::from(ret.is_some()) {
+                Ok(ret.unwrap())
+            } else {
+                Err(SynthesisError::DivisionByZero)
             }
         })?;
 
@@ -546,13 +535,11 @@ impl<E: JubjubEngine> MontgomeryPoint<E> {
             t0.sub_assign(&E::Fr::one());
             t1.add_assign(&E::Fr::one());
 
-            match t1.inverse() {
-                Some(t1) => {
-                    t0.mul_assign(&t1);
-
-                    Ok(t0)
-                }
-                None => Err(SynthesisError::DivisionByZero),
+            let ret = t1.invert().map(|t1| t0 * &t1);
+            if bool::from(ret.is_some()) {
+                Ok(ret.unwrap())
+            } else {
+                Err(SynthesisError::DivisionByZero)
             }
         })?;
 
@@ -594,12 +581,11 @@ impl<E: JubjubEngine> MontgomeryPoint<E> {
             let mut d = *other.x.get_value().get()?;
             d.sub_assign(self.x.get_value().get()?);
 
-            match d.inverse() {
-                Some(d) => {
-                    n.mul_assign(&d);
-                    Ok(n)
-                }
-                None => Err(SynthesisError::DivisionByZero),
+            let ret = d.invert().map(|d| n * &d);
+            if bool::from(ret.is_some()) {
+                Ok(ret.unwrap())
+            } else {
+                Err(SynthesisError::DivisionByZero)
             }
         })?;
 
@@ -612,8 +598,7 @@ impl<E: JubjubEngine> MontgomeryPoint<E> {
 
         // Compute x'' = lambda^2 - A - x - x'
         let xprime = AllocatedNum::alloc(cs.namespace(|| "xprime"), || {
-            let mut t0 = *lambda.get_value().get()?;
-            t0.square();
+            let mut t0 = lambda.get_value().get()?.square();
             t0.sub_assign(params.montgomery_a());
             t0.sub_assign(self.x.get_value().get()?);
             t0.sub_assign(other.x.get_value().get()?);
@@ -641,7 +626,7 @@ impl<E: JubjubEngine> MontgomeryPoint<E> {
             t0.sub_assign(self.x.get_value().get()?);
             t0.mul_assign(lambda.get_value().get()?);
             t0.add_assign(self.y.get_value().get()?);
-            t0.negate();
+            t0 = t0.neg();
 
             Ok(t0)
         })?;
@@ -668,6 +653,7 @@ mod test {
     use pairing::bls12_381::{Bls12, Fr};
     use rand_core::{RngCore, SeedableRng};
     use rand_xorshift::XorShiftRng;
+    use std::ops::SubAssign;
 
     use bellman::gadgets::test::*;
     use zcash_primitives::jubjub::fs::Fs;
@@ -1039,8 +1025,9 @@ mod test {
                 let x = Fr::random(rng);
                 let s: bool = rng.next_u32() % 2 != 0;
 
-                if let Some(p) = montgomery::Point::<Bls12, _>::get_for_x(x, s, params) {
-                    break p;
+                let p = montgomery::Point::<Bls12, _>::get_for_x(x, s, params);
+                if p.is_some().into() {
+                    break p.unwrap();
                 }
             };
 
@@ -1048,8 +1035,9 @@ mod test {
                 let x = Fr::random(rng);
                 let s: bool = rng.next_u32() % 2 != 0;
 
-                if let Some(p) = montgomery::Point::<Bls12, _>::get_for_x(x, s, params) {
-                    break p;
+                let p = montgomery::Point::<Bls12, _>::get_for_x(x, s, params);
+                if p.is_some().into() {
+                    break p.unwrap();
                 }
             };
 

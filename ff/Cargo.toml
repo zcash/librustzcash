@@ -1,6 +1,6 @@
 [package]
 name = "ff"
-version = "0.5.0"
+version = "0.6.0"
 authors = ["Sean Bowe <ewillbefull@gmail.com>"]
 description = "Library for building and interfacing with finite fields"
 readme = "README.md"
@@ -11,13 +11,15 @@ repository = "https://github.com/ebfull/ff"
 edition = "2018"
 
 [dependencies]
-byteorder = "1"
-ff_derive = { version = "0.4.0", path = "ff_derive", optional = true }
-rand_core = "0.5"
+byteorder = { version = "1", optional = true }
+ff_derive = { version = "0.6", path = "ff_derive", optional = true }
+rand_core = { version = "0.5", default-features = false }
+subtle = { version = "2.2.1", default-features = false, features = ["i128"] }
 
 [features]
-default = []
+default = ["std"]
 derive = ["ff_derive"]
+std = ["byteorder"]
 
 [badges]
 maintenance = { status = "actively-developed" }

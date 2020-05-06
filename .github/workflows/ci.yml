@@ -1,0 +1,120 @@
+name: CI checks
+
+on: [push, pull_request]
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v1
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: 1.39.0
+          override: true
+
+      # cargo fmt does not build the code, and running it in a fresh clone of
+      # the codebase will fail because the protobuf code has not been generated.
+      - name: cargo build
+        uses: actions-rs/cargo@v1
+        with:
+          command: build
+          args: --all
+
+      # Ensure all code has been formatted with rustfmt
+      - run: rustup component add rustfmt
+      - name: Check formatting
+        uses: actions-rs/cargo@v1
+        with:
+          command: fmt
+          args: --all -- --check --color always
+
+      # Build benchmarks to prevent bitrot
+      - name: Build benchmarks
+        uses: actions-rs/cargo@v1
+        with:
+          command: build
+          args: --all --benches
+
+  test:
+    name: Test on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macOS-latest]
+
+    steps:
+      - uses: actions/checkout@v1
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: 1.39.0
+          override: true
+      - name: cargo fetch
+        uses: actions-rs/cargo@v1
+        with:
+          command: fetch
+      - name: Build tests
+        uses: actions-rs/cargo@v1
+        with:
+          command: build
+          args: --verbose --release --all --tests
+      - name: Run tests
+        uses: actions-rs/cargo@v1
+        with:
+          command: test
+          args: --verbose --release --all
+      - name: Run slow tests
+        uses: actions-rs/cargo@v1
+        with:
+          command: test
+          args: --verbose --release --all -- --ignored
+
+  codecov:
+    name: Code coverage
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v1
+      # Use stable for this to ensure that cargo-tarpaulin can be built.
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          override: true
+      - name: Install cargo-tarpaulin
+        uses: actions-rs/cargo@v1
+        with:
+          command: install
+          args: cargo-tarpaulin
+      - name: Generate coverage report
+        uses: actions-rs/cargo@v1
+        with:
+          command: tarpaulin
+          args: --release --timeout 600 --out Xml --packages "zcash_client_backend,zcash_primitives,zcash_proofs"
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v1.0.3
+        with:
+          token: ${{secrets.CODECOV_TOKEN}}
+
+  doc-links:
+    name: Nightly lint
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v1
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: nightly
+          override: true
+      - name: cargo fetch
+        uses: actions-rs/cargo@v1
+        with:
+          command: fetch
+
+      # Ensure intra-documentation links all resolve correctly
+      # Requires #![deny(intra_doc_link_resolution_failure)] in crates.
+      - name: Check intra-doc links
+        uses: actions-rs/cargo@v1
+        with:
+          command: doc
+          args: --all --document-private-items

@@ -20,7 +20,7 @@ mod tests;
 pub use self::sighash::{signature_hash, signature_hash_data, SIGHASH_ALL};
 
 use self::components::{
-    Amount, JSDescription, OutputDescription, SpendDescription, TxIn, TxOut, WtpIn, WtpOut,
+    Amount, JSDescription, OutputDescription, SpendDescription, TxIn, TxOut, TzeIn, TzeOut,
 };
 
 const OVERWINTER_VERSION_GROUP_ID: u32 = 0x03C48270;
@@ -68,8 +68,8 @@ pub struct TransactionData {
     pub version_group_id: u32,
     pub vin: Vec<TxIn>,
     pub vout: Vec<TxOut>,
-    pub wtp_inputs: Vec<WtpIn>,
-    pub wtp_outputs: Vec<WtpOut>,
+    pub tze_inputs: Vec<TzeIn>,
+    pub tze_outputs: Vec<TzeOut>,
     pub lock_time: u32,
     pub expiry_height: u32,
     pub value_balance: Amount,
@@ -91,8 +91,8 @@ impl std::fmt::Debug for TransactionData {
                 version_group_id = {:?},
                 vin = {:?},
                 vout = {:?},
-                wtp_inputs = {:?},
-                wtp_outputs = {:?},
+                tze_inputs = {:?},
+                tze_outputs = {:?},
                 lock_time = {:?},
                 expiry_height = {:?},
                 value_balance = {:?},
@@ -106,8 +106,8 @@ impl std::fmt::Debug for TransactionData {
             self.version_group_id,
             self.vin,
             self.vout,
-            self.wtp_inputs,
-            self.wtp_outputs,
+            self.tze_inputs,
+            self.tze_outputs,
             self.lock_time,
             self.expiry_height,
             self.value_balance,
@@ -128,8 +128,8 @@ impl TransactionData {
             version_group_id: SAPLING_VERSION_GROUP_ID,
             vin: vec![],
             vout: vec![],
-            wtp_inputs: vec![],
-            wtp_outputs: vec![],
+            tze_inputs: vec![],
+            tze_outputs: vec![],
             lock_time: 0,
             expiry_height: 0,
             value_balance: Amount::zero(),
@@ -149,8 +149,8 @@ impl TransactionData {
             version_group_id: NU4_VERSION_GROUP_ID,
             vin: vec![],
             vout: vec![],
-            wtp_inputs: vec![],
-            wtp_outputs: vec![],
+            tze_inputs: vec![],
+            tze_outputs: vec![],
             lock_time: 0,
             expiry_height: 0,
             value_balance: Amount::zero(),
@@ -222,9 +222,9 @@ impl Transaction {
 
         let vin = Vector::read(&mut reader, TxIn::read)?;
         let vout = Vector::read(&mut reader, TxOut::read)?;
-        let (wtp_inputs, wtp_outputs) = if is_nu4_v5 {
-            let wi = Vector::read(&mut reader, WtpIn::read)?;
-            let wo = Vector::read(&mut reader, WtpOut::read)?;
+        let (tze_inputs, tze_outputs) = if is_nu4_v5 {
+            let wi = Vector::read(&mut reader, TzeIn::read)?;
+            let wo = Vector::read(&mut reader, TzeOut::read)?;
             (wi, wo)
         } else {
             (vec![], vec![])
@@ -282,8 +282,8 @@ impl Transaction {
             version_group_id,
             vin,
             vout,
-            wtp_inputs,
-            wtp_outputs,
+            tze_inputs,
+            tze_outputs,
             lock_time,
             expiry_height,
             value_balance,
@@ -321,8 +321,8 @@ impl Transaction {
         Vector::write(&mut writer, &self.vin, |w, e| e.write(w))?;
         Vector::write(&mut writer, &self.vout, |w, e| e.write(w))?;
         if is_nu4_v5 {
-            Vector::write(&mut writer, &self.wtp_inputs, |w, e| e.write(w))?;
-            Vector::write(&mut writer, &self.wtp_outputs, |w, e| e.write(w))?;
+            Vector::write(&mut writer, &self.tze_inputs, |w, e| e.write(w))?;
+            Vector::write(&mut writer, &self.tze_outputs, |w, e| e.write(w))?;
         }
         writer.write_u32::<LittleEndian>(self.lock_time)?;
         if is_overwinter_v3 || is_sapling_v4 || is_nu4_v5 {

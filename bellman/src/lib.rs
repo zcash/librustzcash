@@ -148,7 +148,7 @@ use std::error::Error;
 use std::fmt;
 use std::io;
 use std::marker::PhantomData;
-use std::ops::{Add, Sub};
+use std::ops::{Add, MulAssign, Neg, Sub};
 
 /// Computations are expressed in terms of arithmetic circuits, in particular
 /// rank-1 quadratic constraint systems. The `Circuit` trait represents a
@@ -216,10 +216,8 @@ impl<E: ScalarEngine> Sub<(E::Fr, Variable)> for LinearCombination<E> {
     type Output = LinearCombination<E>;
 
     #[allow(clippy::suspicious_arithmetic_impl)]
-    fn sub(self, (mut coeff, var): (E::Fr, Variable)) -> LinearCombination<E> {
-        coeff.negate();
-
-        self + (coeff, var)
+    fn sub(self, (coeff, var): (E::Fr, Variable)) -> LinearCombination<E> {
+        self + (coeff.neg(), var)
     }
 }
 

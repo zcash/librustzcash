@@ -1,5 +1,7 @@
 //! Circuit representation of a [`u32`], with helpers for the [`sha256`]
 //! gadgets.
+//!
+//! [`sha256`]: crate::gadgets::sha256
 
 use ff::{Field, PrimeField, ScalarEngine};
 
@@ -328,7 +330,7 @@ impl UInt32 {
 
                 all_constants &= bit.is_constant();
 
-                coeff.double();
+                coeff = coeff.double();
             }
         }
 
@@ -366,7 +368,7 @@ impl UInt32 {
 
             max_value >>= 1;
             i += 1;
-            coeff.double();
+            coeff = coeff.double();
         }
 
         // Enforce equality between the sum and result

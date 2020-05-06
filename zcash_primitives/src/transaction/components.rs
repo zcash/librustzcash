@@ -5,10 +5,11 @@ use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use ff::{PrimeField, PrimeFieldRepr};
 use pairing::bls12_381::{Bls12, Fr, FrRepr};
 use std::io::{self, Read, Write};
+use zcash_extensions_api::transparent as tze;
 
 use crate::legacy::Script;
 use crate::redjubjub::{PublicKey, Signature};
-use crate::wtp;
+use crate::serialize::{CompactSize, Vector};
 use crate::JUBJUB;
 
 pub mod amount;
@@ -22,7 +23,7 @@ const PHGR_PROOF_SIZE: usize = (33 + 33 + 65 + 33 + 33 + 33 + 33 + 33);
 const ZC_NUM_JS_INPUTS: usize = 2;
 const ZC_NUM_JS_OUTPUTS: usize = 2;
 
-#[derive(Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct OutPoint {
     hash: [u8; 32],
     n: u32,
@@ -49,11 +50,20 @@ impl OutPoint {
 #[derive(Debug)]
 pub struct TxIn {
     pub prevout: OutPoint,
-    script_sig: Script,
+    pub script_sig: Script,
     pub sequence: u32,
 }
 
 impl TxIn {
+    #[cfg(feature = "transparent-inputs")]
+    pub fn new(prevout: OutPoint) -> Self {
+        TxIn {
+            prevout,
+            script_sig: Script::default(),
+            sequence: std::u32::MAX,
+        }
+    }
+
     pub fn read<R: Read>(mut reader: &mut R) -> io::Result<Self> {
         let prevout = OutPoint::read(&mut reader)?;
         let script_sig = Script::read(&mut reader)?;
@@ -73,7 +83,7 @@ impl TxIn {
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct TxOut {
     pub value: Amount,
     pub script_pubkey: Script,
@@ -102,32 +112,45 @@ impl TxOut {
 }
 
 #[derive(Debug)]
-pub struct WtpIn {
+pub struct TzeIn {
     pub prevout: OutPoint,
-    pub witness: wtp::Witness,
+    pub witness: tze::Witness,
 }
 
-impl WtpIn {
+impl TzeIn {
     pub fn read<R: Read>(mut reader: &mut R) -> io::Result<Self> {
         let prevout = OutPoint::read(&mut reader)?;
-        let witness = wtp::Witness::read(&mut reader)?;
 
-        Ok(WtpIn { prevout, witness })
+        let extension_id = CompactSize::read(&mut reader)?;
+        let mode = CompactSize::read(&mut reader)?;
+        let payload = Vector::read(&mut reader, |r| r.read_u8())?;
+
+        Ok(TzeIn {
+            prevout,
+            witness: tze::Witness {
+                extension_id,
+                mode,
+                payload,
+            },
+        })
     }
 
     pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
         self.prevout.write(&mut writer)?;
-        self.witness.write(&mut writer)
+
+        CompactSize::write(&mut writer, self.witness.extension_id)?;
+        CompactSize::write(&mut writer, self.witness.mode)?;
+        Vector::write(&mut writer, &self.witness.payload, |w, b| w.write_u8(*b))
     }
 }
 
 #[derive(Debug)]
-pub struct WtpOut {
+pub struct TzeOut {
     pub value: Amount,
-    pub predicate: wtp::Predicate,
+    pub precondition: tze::Precondition,
 }
 
-impl WtpOut {
+impl TzeOut {
     pub fn read<R: Read>(mut reader: &mut R) -> io::Result<Self> {
         let value = {
             let mut tmp = [0; 8];
@@ -135,14 +158,27 @@ impl WtpOut {
             Amount::from_nonnegative_i64_le_bytes(tmp)
         }
         .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "value out of range"))?;
-        let predicate = wtp::Predicate::read(&mut reader)?;
 
-        Ok(WtpOut { value, predicate })
+        let extension_id = CompactSize::read(&mut reader)?;
+        let mode = CompactSize::read(&mut reader)?;
+        let payload = Vector::read(&mut reader, |r| r.read_u8())?;
+
+        Ok(TzeOut {
+            value,
+            precondition: tze::Precondition {
+                extension_id,
+                mode,
+                payload,
+            },
+        })
     }
 
     pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
         writer.write_all(&self.value.to_i64_le_bytes())?;
-        self.predicate.write(&mut writer)
+
+        CompactSize::write(&mut writer, self.precondition.extension_id)?;
+        CompactSize::write(&mut writer, self.precondition.mode)?;
+        Vector::write(&mut writer, &self.precondition.payload, |w, b| w.write_u8(*b))
     }
 }
 

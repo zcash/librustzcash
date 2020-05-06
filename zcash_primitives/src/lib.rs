@@ -11,6 +11,7 @@ use lazy_static::lazy_static;
 pub mod block;
 pub mod consensus;
 pub mod constants;
+pub mod extensions;
 pub mod group_hash;
 pub mod jubjub;
 pub mod keys;
@@ -22,10 +23,9 @@ pub mod primitives;
 pub mod prover;
 pub mod redjubjub;
 pub mod sapling;
-mod serialize;
+pub mod serialize;
 pub mod transaction;
 mod util;
-pub mod wtp;
 pub mod zip32;
 
 #[cfg(test)]

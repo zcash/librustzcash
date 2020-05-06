@@ -7,6 +7,7 @@ use std::time::{Duration, Instant};
 // Bring in some tools for using pairing-friendly curves
 use ff::{Field, ScalarEngine};
 use pairing::Engine;
+use std::ops::{AddAssign, MulAssign};
 
 // We're going to use the BLS12-381 pairing-friendly elliptic curve.
 use pairing::bls12_381::Bls12;
@@ -40,8 +41,7 @@ fn mimc<E: Engine>(mut xl: E::Fr, mut xr: E::Fr, constants: &[E::Fr]) -> E::Fr {
     for i in 0..MIMC_ROUNDS {
         let mut tmp1 = xl;
         tmp1.add_assign(&constants[i]);
-        let mut tmp2 = tmp1;
-        tmp2.square();
+        let mut tmp2 = tmp1.square();
         tmp2.mul_assign(&tmp1);
         tmp2.add_assign(&xr);
         xr = xl;
@@ -87,8 +87,7 @@ impl<'a, E: Engine> Circuit<E> for MiMCDemo<'a, E> {
             // tmp = (xL + Ci)^2
             let tmp_value = xl_value.map(|mut e| {
                 e.add_assign(&self.constants[i]);
-                e.square();
-                e
+                e.square()
             });
             let tmp = cs.alloc(
                 || "tmp",

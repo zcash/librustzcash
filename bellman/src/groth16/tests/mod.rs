@@ -5,6 +5,7 @@ mod dummy_engine;
 use self::dummy_engine::*;
 
 use std::marker::PhantomData;
+use std::ops::{AddAssign, MulAssign, SubAssign};
 
 use crate::{Circuit, ConstraintSystem, SynthesisError};
 
@@ -126,22 +127,22 @@ fn test_xordemo() {
     let mut root_of_unity = Fr::root_of_unity();
 
     // We expect this to be a 2^10 root of unity
-    assert_eq!(Fr::one(), root_of_unity.pow(&[1 << 10]));
+    assert_eq!(Fr::one(), root_of_unity.pow_vartime(&[1 << 10]));
 
     // Let's turn it into a 2^3 root of unity.
-    root_of_unity = root_of_unity.pow(&[1 << 7]);
-    assert_eq!(Fr::one(), root_of_unity.pow(&[1 << 3]));
+    root_of_unity = root_of_unity.pow_vartime(&[1 << 7]);
+    assert_eq!(Fr::one(), root_of_unity.pow_vartime(&[1 << 3]));
     assert_eq!(Fr::from_str("20201").unwrap(), root_of_unity);
 
     // Let's compute all the points in our evaluation domain.
     let mut points = Vec::with_capacity(8);
     for i in 0..8 {
-        points.push(root_of_unity.pow(&[i]));
+        points.push(root_of_unity.pow_vartime(&[i]));
     }
 
     // Let's compute t(tau) = (tau - p_0)(tau - p_1)...
     //                      = tau^8 - 1
-    let mut t_at_tau = tau.pow(&[8]);
+    let mut t_at_tau = tau.pow_vartime(&[8]);
     t_at_tau.sub_assign(&Fr::one());
     {
         let mut tmp = Fr::one();
@@ -155,8 +156,8 @@ fn test_xordemo() {
 
     // We expect our H query to be 7 elements of the form...
     // {tau^i t(tau) / delta}
-    let delta_inverse = delta.inverse().unwrap();
-    let gamma_inverse = gamma.inverse().unwrap();
+    let delta_inverse = delta.invert().unwrap();
+    let gamma_inverse = gamma.invert().unwrap();
     {
         let mut coeff = delta_inverse;
         coeff.mul_assign(&t_at_tau);

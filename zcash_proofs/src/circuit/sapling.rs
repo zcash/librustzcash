@@ -245,7 +245,7 @@ impl<'a, E: JubjubEngine> Circuit<E> for Spend<'a, E> {
             let mut coeff = E::Fr::one();
             for bit in &value_bits {
                 value_num = value_num.add_bool_with_coeff(CS::one(), bit, coeff);
-                coeff.double();
+                coeff = coeff.double();
             }
 
             // Place the value in the note

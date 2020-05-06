@@ -255,18 +255,18 @@ fn tree_validator(p: &Params, state: &Blake2bState, indices: &[u32]) -> Option<N
     if indices.len() > 1 {
         let end = indices.len();
         let mid = end / 2;
-        match tree_validator(p, state, &indices[0..mid]) {
-            Some(a) => match tree_validator(p, state, &indices[mid..end]) {
-                Some(b) => {
-                    if validate_subtrees(p, &a, &b) {
-                        Some(Node::from_children(a, b, p.collision_byte_length()))
-                    } else {
-                        None
-                    }
+        match (
+            tree_validator(p, state, &indices[0..mid]),
+            tree_validator(p, state, &indices[mid..end]),
+        ) {
+            (Some(a), Some(b)) => {
+                if validate_subtrees(p, &a, &b) {
+                    Some(Node::from_children(a, b, p.collision_byte_length()))
+                } else {
+                    None
                 }
-                None => None,
-            },
-            None => None,
+            }
+            _ => None,
         }
     } else {
         Some(Node::new(&p, &state, indices[0]))

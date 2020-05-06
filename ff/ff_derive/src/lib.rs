@@ -10,6 +10,8 @@ use quote::quote;
 use quote::TokenStreamExt;
 use std::str::FromStr;
 
+mod pow_fixed;
+
 #[proc_macro_derive(PrimeField, attributes(PrimeFieldModulus, PrimeFieldGenerator))]
 pub fn prime_field(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     // Parse the type definition
@@ -40,18 +42,18 @@ pub fn prime_field(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
         let mut cur = BigUint::one() << 64; // always 64-bit limbs for now
         while cur < mod2 {
             limbs += 1;
-            cur = cur << 64;
+            cur <<= 64;
         }
     }
 
     let mut gen = proc_macro2::TokenStream::new();
 
     let (constants_impl, sqrt_impl) =
-        prime_field_constants_and_sqrt(&ast.ident, &repr_ident, modulus, limbs, generator);
+        prime_field_constants_and_sqrt(&ast.ident, &repr_ident, &modulus, limbs, generator);
 
     gen.extend(constants_impl);
     gen.extend(prime_field_repr_impl(&repr_ident, limbs));
-    gen.extend(prime_field_impl(&ast.ident, &repr_ident, limbs));
+    gen.extend(prime_field_impl(&ast.ident, &repr_ident, &modulus, limbs));
     gen.extend(sqrt_impl);
 
     // Return the generated impl
@@ -60,23 +62,16 @@ pub fn prime_field(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
 
 /// Fetches the ident being wrapped by the type we're deriving.
 fn fetch_wrapped_ident(body: &syn::Data) -> Option<syn::Ident> {
-    match body {
-        &syn::Data::Struct(ref variant_data) => match variant_data.fields {
-            syn::Fields::Unnamed(ref fields) => {
-                if fields.unnamed.len() == 1 {
-                    match fields.unnamed[0].ty {
-                        syn::Type::Path(ref path) => {
-                            if path.path.segments.len() == 1 {
-                                return Some(path.path.segments[0].ident.clone());
-                            }
-                        }
-                        _ => {}
+    if let syn::Data::Struct(ref variant_data) = body {
+        if let syn::Fields::Unnamed(ref fields) = variant_data.fields {
+            if fields.unnamed.len() == 1 {
+                if let syn::Type::Path(ref path) = fields.unnamed[0].ty {
+                    if path.path.segments.len() == 1 {
+                        return Some(path.path.segments[0].ident.clone());
                     }
                 }
             }
-            _ => {}
-        },
-        _ => {}
+        }
     };
 
     None
@@ -113,9 +108,9 @@ fn prime_field_repr_impl(repr: &syn::Ident, limbs: usize) -> proc_macro2::TokenS
         #[derive(Copy, Clone, PartialEq, Eq, Default)]
         pub struct #repr(pub [u64; #limbs]);
 
-        impl ::std::fmt::Debug for #repr
+        impl ::core::fmt::Debug for #repr
         {
-            fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+            fn fmt(&self, f: &mut ::core::fmt::Formatter) -> ::core::fmt::Result {
                 write!(f, "0x")?;
                 for i in self.0.iter().rev() {
                     write!(f, "{:016x}", *i)?;
@@ -125,8 +120,8 @@ fn prime_field_repr_impl(repr: &syn::Ident, limbs: usize) -> proc_macro2::TokenS
             }
         }
 
-        impl ::std::fmt::Display for #repr {
-            fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+        impl ::core::fmt::Display for #repr {
+            fn fmt(&self, f: &mut ::core::fmt::Formatter) -> ::core::fmt::Result {
                 write!(f, "0x")?;
                 for i in self.0.iter().rev() {
                     write!(f, "{:016x}", *i)?;
@@ -153,7 +148,7 @@ fn prime_field_repr_impl(repr: &syn::Ident, limbs: usize) -> proc_macro2::TokenS
         impl From<u64> for #repr {
             #[inline(always)]
             fn from(val: u64) -> #repr {
-                use std::default::Default;
+                use core::default::Default;
 
                 let mut repr = Self::default();
                 repr.0[0] = val;
@@ -163,22 +158,22 @@ fn prime_field_repr_impl(repr: &syn::Ident, limbs: usize) -> proc_macro2::TokenS
 
         impl Ord for #repr {
             #[inline(always)]
-            fn cmp(&self, other: &#repr) -> ::std::cmp::Ordering {
+            fn cmp(&self, other: &#repr) -> ::core::cmp::Ordering {
                 for (a, b) in self.0.iter().rev().zip(other.0.iter().rev()) {
                     if a < b {
-                        return ::std::cmp::Ordering::Less
+                        return ::core::cmp::Ordering::Less
                     } else if a > b {
-                        return ::std::cmp::Ordering::Greater
+                        return ::core::cmp::Ordering::Greater
                     }
                 }
 
-                ::std::cmp::Ordering::Equal
+                ::core::cmp::Ordering::Equal
             }
         }
 
         impl PartialOrd for #repr {
             #[inline(always)]
-            fn partial_cmp(&self, other: &#repr) -> Option<::std::cmp::Ordering> {
+            fn partial_cmp(&self, other: &#repr) -> Option<::core::cmp::Ordering> {
                 Some(self.cmp(other))
             }
         }
@@ -209,7 +204,7 @@ fn prime_field_repr_impl(repr: &syn::Ident, limbs: usize) -> proc_macro2::TokenS
                 while n >= 64 {
                     let mut t = 0;
                     for i in self.0.iter_mut().rev() {
-                        ::std::mem::swap(&mut t, i);
+                        ::core::mem::swap(&mut t, i);
                     }
                     n -= 64;
                 }
@@ -257,7 +252,7 @@ fn prime_field_repr_impl(repr: &syn::Ident, limbs: usize) -> proc_macro2::TokenS
                 while n >= 64 {
                     let mut t = 0;
                     for i in &mut self.0 {
-                        ::std::mem::swap(&mut t, i);
+                        ::core::mem::swap(&mut t, i);
                     }
                     n -= 64;
                 }
@@ -315,7 +310,7 @@ fn biguint_to_real_u64_vec(mut v: BigUint, limbs: usize) -> Vec<u64> {
 
     while v > BigUint::zero() {
         ret.push((&v % &m).to_u64().unwrap());
-        v = v >> 64;
+        v >>= 64;
     }
 
     while ret.len() < limbs {
@@ -337,7 +332,7 @@ fn biguint_num_bits(mut v: BigUint) -> u32 {
     let mut bits = 0;
 
     while v != BigUint::zero() {
-        v = v >> 1;
+        v >>= 1;
         bits += 1;
     }
 
@@ -383,7 +378,7 @@ fn test_exp() {
 fn prime_field_constants_and_sqrt(
     name: &syn::Ident,
     repr: &syn::Ident,
-    modulus: BigUint,
+    modulus: &BigUint,
     limbs: usize,
     generator: BigUint,
 ) -> (proc_macro2::TokenStream, proc_macro2::TokenStream) {
@@ -396,129 +391,110 @@ fn prime_field_constants_and_sqrt(
     let repr_shave_bits = (64 * limbs as u32) - biguint_num_bits(modulus.clone());
 
     // Compute R = 2**(64 * limbs) mod m
-    let r = (BigUint::one() << (limbs * 64)) % &modulus;
+    let r = (BigUint::one() << (limbs * 64)) % modulus;
 
     // modulus - 1 = 2^s * t
     let mut s: u32 = 0;
-    let mut t = &modulus - BigUint::from_str("1").unwrap();
+    let mut t = modulus - BigUint::from_str("1").unwrap();
     while t.is_even() {
-        t = t >> 1;
+        t >>= 1;
         s += 1;
     }
 
     // Compute 2^s root of unity given the generator
-    let root_of_unity = biguint_to_u64_vec(
-        (exp(generator.clone(), &t, &modulus) * &r) % &modulus,
-        limbs,
-    );
-    let generator = biguint_to_u64_vec((generator.clone() * &r) % &modulus, limbs);
+    let root_of_unity =
+        biguint_to_u64_vec((exp(generator.clone(), &t, &modulus) * &r) % modulus, limbs);
+    let generator = biguint_to_u64_vec((generator.clone() * &r) % modulus, limbs);
 
-    let mod_minus_1_over_2 =
-        biguint_to_u64_vec((&modulus - BigUint::from_str("1").unwrap()) >> 1, limbs);
-    let legendre_impl = quote! {
-        fn legendre(&self) -> ::ff::LegendreSymbol {
-            // s = self^((modulus - 1) // 2)
-            let s = self.pow(#mod_minus_1_over_2);
-            if s == Self::zero() {
-                ::ff::LegendreSymbol::Zero
-            } else if s == Self::one() {
-                ::ff::LegendreSymbol::QuadraticResidue
-            } else {
-                ::ff::LegendreSymbol::QuadraticNonResidue
+    let sqrt_impl = if (modulus % BigUint::from_str("4").unwrap())
+        == BigUint::from_str("3").unwrap()
+    {
+        // Addition chain for (r + 1) // 4
+        let mod_plus_1_over_4 = pow_fixed::generate(
+            &quote! {self},
+            (modulus + BigUint::from_str("1").unwrap()) >> 2,
+        );
+
+        quote! {
+            impl ::ff::SqrtField for #name {
+                fn sqrt(&self) -> ::subtle::CtOption<Self> {
+                    use ::subtle::ConstantTimeEq;
+
+                    // Because r = 3 (mod 4)
+                    // sqrt can be done with only one exponentiation,
+                    // via the computation of  self^((r + 1) // 4) (mod r)
+                    let sqrt = {
+                        #mod_plus_1_over_4
+                    };
+
+                    ::subtle::CtOption::new(
+                        sqrt,
+                        (sqrt * &sqrt).ct_eq(self), // Only return Some if it's the square root.
+                    )
+                }
             }
         }
+    } else if (modulus % BigUint::from_str("16").unwrap()) == BigUint::from_str("1").unwrap() {
+        // Addition chain for (t - 1) // 2
+        let t_minus_1_over_2 = pow_fixed::generate(&quote! {self}, (&t - BigUint::one()) >> 1);
+
+        quote! {
+            impl ::ff::SqrtField for #name {
+                fn sqrt(&self) -> ::subtle::CtOption<Self> {
+                    // Tonelli-Shank's algorithm for q mod 16 = 1
+                    // https://eprint.iacr.org/2012/685.pdf (page 12, algorithm 5)
+                    use ::subtle::{ConditionallySelectable, ConstantTimeEq};
+
+                    // w = self^((t - 1) // 2)
+                    let w = {
+                        #t_minus_1_over_2
+                    };
+
+                    let mut v = S;
+                    let mut x = *self * &w;
+                    let mut b = x * &w;
+
+                    // Initialize z as the 2^S root of unity.
+                    let mut z = #name(ROOT_OF_UNITY);
+
+                    for max_v in (1..=S).rev() {
+                        let mut k = 1;
+                        let mut tmp = b.square();
+                        let mut j_less_than_v: ::subtle::Choice = 1.into();
+
+                        for j in 2..max_v {
+                            let tmp_is_one = tmp.ct_eq(&#name::one());
+                            let squared = #name::conditional_select(&tmp, &z, tmp_is_one).square();
+                            tmp = #name::conditional_select(&squared, &tmp, tmp_is_one);
+                            let new_z = #name::conditional_select(&z, &squared, tmp_is_one);
+                            j_less_than_v &= !j.ct_eq(&v);
+                            k = u32::conditional_select(&j, &k, tmp_is_one);
+                            z = #name::conditional_select(&z, &new_z, j_less_than_v);
+                        }
+
+                        let result = x * &z;
+                        x = #name::conditional_select(&result, &x, b.ct_eq(&#name::one()));
+                        z = z.square();
+                        b *= &z;
+                        v = k;
+                    }
+
+                    ::subtle::CtOption::new(
+                        x,
+                        (x * &x).ct_eq(self), // Only return Some if it's the square root.
+                    )
+                }
+            }
+        }
+    } else {
+        quote! {}
     };
 
-    let sqrt_impl =
-        if (&modulus % BigUint::from_str("4").unwrap()) == BigUint::from_str("3").unwrap() {
-            let mod_minus_3_over_4 =
-                biguint_to_u64_vec((&modulus - BigUint::from_str("3").unwrap()) >> 2, limbs);
-
-            // Compute -R as (m - r)
-            let rneg = biguint_to_u64_vec(&modulus - &r, limbs);
-
-            quote! {
-                impl ::ff::SqrtField for #name {
-                    #legendre_impl
-
-                    fn sqrt(&self) -> Option<Self> {
-                        // Shank's algorithm for q mod 4 = 3
-                        // https://eprint.iacr.org/2012/685.pdf (page 9, algorithm 2)
-
-                        let mut a1 = self.pow(#mod_minus_3_over_4);
-
-                        let mut a0 = a1;
-                        a0.square();
-                        a0.mul_assign(self);
-
-                        if a0.0 == #repr(#rneg) {
-                            None
-                        } else {
-                            a1.mul_assign(self);
-                            Some(a1)
-                        }
-                    }
-                }
-            }
-        } else if (&modulus % BigUint::from_str("16").unwrap()) == BigUint::from_str("1").unwrap() {
-            let t_plus_1_over_2 = biguint_to_u64_vec((&t + BigUint::one()) >> 1, limbs);
-            let t = biguint_to_u64_vec(t.clone(), limbs);
-
-            quote! {
-                impl ::ff::SqrtField for #name {
-                    #legendre_impl
-
-                    fn sqrt(&self) -> Option<Self> {
-                        // Tonelli-Shank's algorithm for q mod 16 = 1
-                        // https://eprint.iacr.org/2012/685.pdf (page 12, algorithm 5)
-
-                        match self.legendre() {
-                            ::ff::LegendreSymbol::Zero => Some(*self),
-                            ::ff::LegendreSymbol::QuadraticNonResidue => None,
-                            ::ff::LegendreSymbol::QuadraticResidue => {
-                                let mut c = #name(ROOT_OF_UNITY);
-                                let mut r = self.pow(#t_plus_1_over_2);
-                                let mut t = self.pow(#t);
-                                let mut m = S;
-
-                                while t != Self::one() {
-                                    let mut i = 1;
-                                    {
-                                        let mut t2i = t;
-                                        t2i.square();
-                                        loop {
-                                            if t2i == Self::one() {
-                                                break;
-                                            }
-                                            t2i.square();
-                                            i += 1;
-                                        }
-                                    }
-
-                                    for _ in 0..(m - i - 1) {
-                                        c.square();
-                                    }
-                                    r.mul_assign(&c);
-                                    c.square();
-                                    t.mul_assign(&c);
-                                    m = i;
-                                }
-
-                                Some(r)
-                            }
-                        }
-                    }
-                }
-            }
-        } else {
-            quote! {}
-        };
-
     // Compute R^2 mod m
-    let r2 = biguint_to_u64_vec((&r * &r) % &modulus, limbs);
+    let r2 = biguint_to_u64_vec((&r * &r) % modulus, limbs);
 
     let r = biguint_to_u64_vec(r, limbs);
-    let modulus = biguint_to_real_u64_vec(modulus, limbs);
+    let modulus = biguint_to_real_u64_vec(modulus.clone(), limbs);
 
     // Compute -m^-1 mod 2**64 by exponentiating by totient(2**64) - 1
     let mut inv = 1u64;
@@ -567,6 +543,7 @@ fn prime_field_constants_and_sqrt(
 fn prime_field_impl(
     name: &syn::Ident,
     repr: &syn::Ident,
+    modulus: &BigUint,
     limbs: usize,
 ) -> proc_macro2::TokenStream {
     // Returns r{n} as an ident.
@@ -710,12 +687,14 @@ fn prime_field_impl(
 
         let mut mont_calling = proc_macro2::TokenStream::new();
         mont_calling.append_separated(
-            (0..(limbs * 2)).map(|i| get_temp(i)),
+            (0..(limbs * 2)).map(get_temp),
             proc_macro2::Punct::new(',', proc_macro2::Spacing::Alone),
         );
 
         gen.extend(quote! {
-            self.mont_reduce(#mont_calling);
+            let mut ret = *self;
+            ret.mont_reduce(#mont_calling);
+            ret
         });
 
         gen
@@ -756,7 +735,7 @@ fn prime_field_impl(
 
         let mut mont_calling = proc_macro2::TokenStream::new();
         mont_calling.append_separated(
-            (0..(limbs * 2)).map(|i| get_temp(i)),
+            (0..(limbs * 2)).map(get_temp),
             proc_macro2::Punct::new(',', proc_macro2::Spacing::Alone),
         );
 
@@ -767,9 +746,44 @@ fn prime_field_impl(
         gen
     }
 
+    /// Generates an implementation of multiplicative inversion within the target prime
+    /// field.
+    fn inv_impl(
+        a: proc_macro2::TokenStream,
+        name: &syn::Ident,
+        modulus: &BigUint,
+    ) -> proc_macro2::TokenStream {
+        // Addition chain for p - 2
+        let mod_minus_2 = pow_fixed::generate(&a, modulus - BigUint::from(2u64));
+
+        quote! {
+            use ::subtle::ConstantTimeEq;
+
+            // By Euler's theorem, if `a` is coprime to `p` (i.e. `gcd(a, p) = 1`), then:
+            //     a^-1 ≡ a^(phi(p) - 1) mod p
+            //
+            // `ff_derive` requires that `p` is prime; in this case, `phi(p) = p - 1`, and
+            // thus:
+            //     a^-1 ≡ a^(p - 2) mod p
+            let inv = {
+                #mod_minus_2
+            };
+
+            ::subtle::CtOption::new(inv, !#a.ct_eq(&#name::zero()))
+        }
+    }
+
     let squaring_impl = sqr_impl(quote! {self}, limbs);
     let multiply_impl = mul_impl(quote! {self}, quote! {other}, limbs);
+    let invert_impl = inv_impl(quote! {self}, name, modulus);
     let montgomery_impl = mont_impl(limbs);
+
+    // (self.0).0[0].ct_eq(&(other.0).0[0]) & (self.0).0[1].ct_eq(&(other.0).0[1]) & ...
+    let mut ct_eq_impl = proc_macro2::TokenStream::new();
+    ct_eq_impl.append_separated(
+        (0..limbs).map(|i| quote! { (self.0).0[#i].ct_eq(&(other.0).0[#i]) }),
+        proc_macro2::Punct::new('&', proc_macro2::Spacing::Alone),
+    );
 
     // (self.0).0[0], (self.0).0[1], ..., 0, 0, 0, 0, ...
     let mut into_repr_params = proc_macro2::TokenStream::new();
@@ -783,25 +797,37 @@ fn prime_field_impl(
     let top_limb_index = limbs - 1;
 
     quote! {
-        impl ::std::marker::Copy for #name { }
+        impl ::core::marker::Copy for #name { }
 
-        impl ::std::clone::Clone for #name {
+        impl ::core::clone::Clone for #name {
             fn clone(&self) -> #name {
                 *self
             }
         }
 
-        impl ::std::cmp::PartialEq for #name {
+        impl ::core::default::Default for #name {
+            fn default() -> #name {
+                #name::zero()
+            }
+        }
+
+        impl ::subtle::ConstantTimeEq for #name {
+            fn ct_eq(&self, other: &#name) -> ::subtle::Choice {
+                #ct_eq_impl
+            }
+        }
+
+        impl ::core::cmp::PartialEq for #name {
             fn eq(&self, other: &#name) -> bool {
                 self.0 == other.0
             }
         }
 
-        impl ::std::cmp::Eq for #name { }
+        impl ::core::cmp::Eq for #name { }
 
-        impl ::std::fmt::Debug for #name
+        impl ::core::fmt::Debug for #name
         {
-            fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+            fn fmt(&self, f: &mut ::core::fmt::Formatter) -> ::core::fmt::Result {
                 write!(f, "{}({:?})", stringify!(#name), self.into_repr())
             }
         }
@@ -809,20 +835,20 @@ fn prime_field_impl(
         /// Elements are ordered lexicographically.
         impl Ord for #name {
             #[inline(always)]
-            fn cmp(&self, other: &#name) -> ::std::cmp::Ordering {
+            fn cmp(&self, other: &#name) -> ::core::cmp::Ordering {
                 self.into_repr().cmp(&other.into_repr())
             }
         }
 
         impl PartialOrd for #name {
             #[inline(always)]
-            fn partial_cmp(&self, other: &#name) -> Option<::std::cmp::Ordering> {
+            fn partial_cmp(&self, other: &#name) -> Option<::core::cmp::Ordering> {
                 Some(self.cmp(other))
             }
         }
 
-        impl ::std::fmt::Display for #name {
-            fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+        impl ::core::fmt::Display for #name {
+            fn fmt(&self, f: &mut ::core::fmt::Formatter) -> ::core::fmt::Result {
                 write!(f, "{}({})", stringify!(#name), self.into_repr())
             }
         }
@@ -830,6 +856,144 @@ fn prime_field_impl(
         impl From<#name> for #repr {
             fn from(e: #name) -> #repr {
                 e.into_repr()
+            }
+        }
+
+        impl ::subtle::ConditionallySelectable for #name {
+            fn conditional_select(a: &#name, b: &#name, choice: ::subtle::Choice) -> #name {
+                let mut res = [0u64; #limbs];
+                for i in 0..#limbs {
+                    res[i] = u64::conditional_select(&(a.0).0[i], &(b.0).0[i], choice);
+                }
+                #name(#repr(res))
+            }
+        }
+
+        impl ::core::ops::Neg for #name {
+            type Output = #name;
+
+            #[inline]
+            fn neg(self) -> #name {
+                let mut ret = self;
+                if !ret.is_zero() {
+                    let mut tmp = MODULUS;
+                    tmp.sub_noborrow(&ret.0);
+                    ret.0 = tmp;
+                }
+                ret
+            }
+        }
+
+        impl<'r> ::core::ops::Add<&'r #name> for #name {
+            type Output = #name;
+
+            #[inline]
+            fn add(self, other: &#name) -> #name {
+                let mut ret = self;
+                ret.add_assign(other);
+                ret
+            }
+        }
+
+        impl ::core::ops::Add for #name {
+            type Output = #name;
+
+            #[inline]
+            fn add(self, other: #name) -> Self {
+                self + &other
+            }
+        }
+
+        impl<'r> ::core::ops::AddAssign<&'r #name> for #name {
+            #[inline]
+            fn add_assign(&mut self, other: &#name) {
+                // This cannot exceed the backing capacity.
+                self.0.add_nocarry(&other.0);
+
+                // However, it may need to be reduced.
+                self.reduce();
+            }
+        }
+
+        impl ::core::ops::AddAssign for #name {
+            #[inline]
+            fn add_assign(&mut self, other: #name) {
+                self.add_assign(&other);
+            }
+        }
+
+        impl<'r> ::core::ops::Sub<&'r #name> for #name {
+            type Output = #name;
+
+            #[inline]
+            fn sub(self, other: &#name) -> Self {
+                let mut ret = self;
+                ret.sub_assign(other);
+                ret
+            }
+        }
+
+        impl ::core::ops::Sub for #name {
+            type Output = #name;
+
+            #[inline]
+            fn sub(self, other: #name) -> Self {
+                self - &other
+            }
+        }
+
+        impl<'r> ::core::ops::SubAssign<&'r #name> for #name {
+            #[inline]
+            fn sub_assign(&mut self, other: &#name) {
+                // If `other` is larger than `self`, we'll need to add the modulus to self first.
+                if other.0 > self.0 {
+                    self.0.add_nocarry(&MODULUS);
+                }
+
+                self.0.sub_noborrow(&other.0);
+            }
+        }
+
+        impl ::core::ops::SubAssign for #name {
+            #[inline]
+            fn sub_assign(&mut self, other: #name) {
+                self.sub_assign(&other);
+            }
+        }
+
+        impl<'r> ::core::ops::Mul<&'r #name> for #name {
+            type Output = #name;
+
+            #[inline]
+            fn mul(self, other: &#name) -> Self {
+                let mut ret = self;
+                ret.mul_assign(other);
+                ret
+            }
+        }
+
+        impl ::core::ops::Mul for #name {
+            type Output = #name;
+
+            #[inline]
+            fn mul(self, other: #name) -> Self {
+                self * &other
+            }
+        }
+
+        impl<'r> ::core::ops::MulAssign<&'r #name> for #name {
+            #[inline]
+            fn mul_assign(&mut self, other: &#name)
+            {
+                #multiply_impl
+            }
+        }
+
+        impl ::core::ops::MulAssign for #name {
+            #[inline]
+            fn mul_assign(&mut self, other: #name)
+            {
+                self.mul_assign(&other);
             }
         }
 
@@ -843,7 +1007,7 @@ fn prime_field_impl(
 
                     Ok(r)
                 } else {
-                    Err(PrimeFieldDecodingError::NotInField(format!("{}", r.0)))
+                    Err(PrimeFieldDecodingError::NotInField)
                 }
             }
 
@@ -877,7 +1041,7 @@ fn prime_field_impl(
 
         impl ::ff::Field for #name {
             /// Computes a uniformly random element using rejection sampling.
-            fn random<R: ::rand_core::RngCore>(rng: &mut R) -> Self {
+            fn random<R: ::rand_core::RngCore + ?std::marker::Sized>(rng: &mut R) -> Self {
                 loop {
                     let mut tmp = {
                         let mut repr = [0u64; #limbs];
@@ -912,95 +1076,20 @@ fn prime_field_impl(
             }
 
             #[inline]
-            fn add_assign(&mut self, other: &#name) {
+            fn double(&self) -> Self {
+                let mut ret = *self;
+
                 // This cannot exceed the backing capacity.
-                self.0.add_nocarry(&other.0);
+                ret.0.mul2();
 
                 // However, it may need to be reduced.
-                self.reduce();
+                ret.reduce();
+
+                ret
             }
 
-            #[inline]
-            fn double(&mut self) {
-                // This cannot exceed the backing capacity.
-                self.0.mul2();
-
-                // However, it may need to be reduced.
-                self.reduce();
-            }
-
-            #[inline]
-            fn sub_assign(&mut self, other: &#name) {
-                // If `other` is larger than `self`, we'll need to add the modulus to self first.
-                if other.0 > self.0 {
-                    self.0.add_nocarry(&MODULUS);
-                }
-
-                self.0.sub_noborrow(&other.0);
-            }
-
-            #[inline]
-            fn negate(&mut self) {
-                if !self.is_zero() {
-                    let mut tmp = MODULUS;
-                    tmp.sub_noborrow(&self.0);
-                    self.0 = tmp;
-                }
-            }
-
-            fn inverse(&self) -> Option<Self> {
-                if self.is_zero() {
-                    None
-                } else {
-                    // Guajardo Kumar Paar Pelzl
-                    // Efficient Software-Implementation of Finite Fields with Applications to Cryptography
-                    // Algorithm 16 (BEA for Inversion in Fp)
-
-                    let one = #repr::from(1);
-
-                    let mut u = self.0;
-                    let mut v = MODULUS;
-                    let mut b = #name(R2); // Avoids unnecessary reduction step.
-                    let mut c = Self::zero();
-
-                    while u != one && v != one {
-                        while u.is_even() {
-                            u.div2();
-
-                            if b.0.is_even() {
-                                b.0.div2();
-                            } else {
-                                b.0.add_nocarry(&MODULUS);
-                                b.0.div2();
-                            }
-                        }
-
-                        while v.is_even() {
-                            v.div2();
-
-                            if c.0.is_even() {
-                                c.0.div2();
-                            } else {
-                                c.0.add_nocarry(&MODULUS);
-                                c.0.div2();
-                            }
-                        }
-
-                        if v < u {
-                            u.sub_noborrow(&v);
-                            b.sub_assign(&c);
-                        } else {
-                            v.sub_noborrow(&u);
-                            c.sub_assign(&b);
-                        }
-                    }
-
-                    if u == one {
-                        Some(b)
-                    } else {
-                        Some(c)
-                    }
-                }
+            fn invert(&self) -> ::subtle::CtOption<Self> {
+                #invert_impl
             }
 
             #[inline(always)]
@@ -1009,13 +1098,7 @@ fn prime_field_impl(
             }
 
             #[inline]
-            fn mul_assign(&mut self, other: &#name)
-            {
-                #multiply_impl
-            }
-
-            #[inline]
-            fn square(&mut self)
+            fn square(&self) -> Self
             {
                 #squaring_impl
             }

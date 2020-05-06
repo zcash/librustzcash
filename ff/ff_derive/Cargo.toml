@@ -1,7 +1,10 @@
 [package]
 name = "ff_derive"
-version = "0.4.0"
-authors = ["Sean Bowe <ewillbefull@gmail.com>"]
+version = "0.6.0"
+authors = [
+    "Sean Bowe <ewillbefull@gmail.com>",
+    "Jack Grigg <thestr4d@gmail.com>",
+]
 description = "Procedural macro library used to build custom prime field implementations"
 documentation = "https://docs.rs/ff/"
 homepage = "https://github.com/ebfull/ff"
@@ -13,6 +16,7 @@ edition = "2018"
 proc-macro = true
 
 [dependencies]
+addchain = "0.1"
 num-bigint = "0.2"
 num-traits = "0.2"
 num-integer = "0.1"

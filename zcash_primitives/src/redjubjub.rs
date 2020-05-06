@@ -7,6 +7,7 @@ use crate::jubjub::{edwards::Point, FixedGenerators, JubjubEngine, JubjubParams,
 use ff::{Field, PrimeField, PrimeFieldRepr};
 use rand_core::RngCore;
 use std::io::{self, Read, Write};
+use std::ops::{AddAssign, MulAssign, Neg};
 
 use crate::util::hash_to_scalar;
 
@@ -14,13 +15,8 @@ fn read_scalar<E: JubjubEngine, R: Read>(reader: R) -> io::Result<E::Fs> {
     let mut s_repr = <E::Fs as PrimeField>::Repr::default();
     s_repr.read_le(reader)?;
 
-    match E::Fs::from_repr(s_repr) {
-        Ok(s) => Ok(s),
-        Err(_) => Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "scalar is not in field",
-        )),
-    }
+    E::Fs::from_repr(s_repr)
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "scalar is not in field"))
 }
 
 fn write_scalar<E: JubjubEngine, W: Write>(s: &E::Fs, writer: W) -> io::Result<()> {
@@ -193,7 +189,7 @@ pub fn batch_verify<'a, E: JubjubEngine, R: RngCore>(
         let z = E::Fs::random(rng);
 
         s.mul_assign(&z);
-        s.negate();
+        s = s.neg();
 
         r = r.mul(z, params);
 

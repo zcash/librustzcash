@@ -1,4 +1,5 @@
 use ff::{Field, PrimeField, PrimeFieldDecodingError, PrimeFieldRepr};
+use std::ops::{AddAssign, MulAssign, SubAssign};
 
 #[derive(PrimeField)]
 #[PrimeFieldModulus = "52435875175126190479447740508185965837690552500527637822603658699938581184513"]
@@ -9,6 +10,8 @@ pub struct Fr(FrRepr);
 use rand_core::SeedableRng;
 #[cfg(test)]
 use rand_xorshift::XorShiftRng;
+#[cfg(test)]
+use std::ops::Neg;
 
 #[test]
 fn test_fr_repr_ordering() {
@@ -273,30 +276,6 @@ fn test_fr_repr_sub_noborrow() {
             0xffffffffffffffff
         ])
     );
-}
-
-#[test]
-fn test_fr_legendre() {
-    use ff::LegendreSymbol::*;
-    use ff::SqrtField;
-
-    assert_eq!(QuadraticResidue, Fr::one().legendre());
-    assert_eq!(Zero, Fr::zero().legendre());
-
-    let e = FrRepr([
-        0x0dbc5349cd5664da,
-        0x8ac5b6296e3ae29d,
-        0x127cb819feceaa3b,
-        0x3a6b21fb03867191,
-    ]);
-    assert_eq!(QuadraticResidue, Fr::from_repr(e).unwrap().legendre());
-    let e = FrRepr([
-        0x96341aefd047c045,
-        0x9b5f4254500a4d65,
-        0x1ee08223b68ac240,
-        0x31d9cd545c0ec7c6,
-    ]);
-    assert_eq!(QuadraticNonResidue, Fr::from_repr(e).unwrap().legendre());
 }
 
 #[test]
@@ -690,16 +669,15 @@ fn test_fr_mul_assign() {
 
 #[test]
 fn test_fr_squaring() {
-    let mut a = Fr(FrRepr([
+    let a = Fr(FrRepr([
         0xffffffffffffffff,
         0xffffffffffffffff,
         0xffffffffffffffff,
         0x73eda753299d7d47,
     ]));
     assert!(a.is_valid());
-    a.square();
     assert_eq!(
-        a,
+        a.square(),
         Fr::from_repr(FrRepr([
             0xc0d698e7bde077b8,
             0xb79a310579e76ec2,
@@ -717,20 +695,13 @@ fn test_fr_squaring() {
     for _ in 0..1000000 {
         // Ensure that (a * a) = a^2
         let a = Fr::random(&mut rng);
-
-        let mut tmp = a;
-        tmp.square();
-
-        let mut tmp2 = a;
-        tmp2.mul_assign(&a);
-
-        assert_eq!(tmp, tmp2);
+        assert_eq!(a.square(), a * a);
     }
 }
 
 #[test]
-fn test_fr_inverse() {
-    assert!(Fr::zero().inverse().is_none());
+fn test_fr_invert() {
+    assert!(bool::from(Fr::zero().invert().is_none()));
 
     let mut rng = XorShiftRng::from_seed([
         0x59, 0x62, 0xbe, 0x5d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06, 0xbc,
@@ -742,7 +713,7 @@ fn test_fr_inverse() {
     for _ in 0..1000 {
         // Ensure that a * a^-1 = 1
         let mut a = Fr::random(&mut rng);
-        let ainv = a.inverse().unwrap();
+        let ainv = a.invert().unwrap();
         a.mul_assign(&ainv);
         assert_eq!(a, one);
     }
@@ -757,19 +728,15 @@ fn test_fr_double() {
 
     for _ in 0..1000 {
         // Ensure doubling a is equivalent to adding a to itself.
-        let mut a = Fr::random(&mut rng);
-        let mut b = a;
-        b.add_assign(&a);
-        a.double();
-        assert_eq!(a, b);
+        let a = Fr::random(&mut rng);
+        assert_eq!(a.double(), a + a);
     }
 }
 
 #[test]
-fn test_fr_negate() {
+fn test_fr_neg() {
     {
-        let mut a = Fr::zero();
-        a.negate();
+        let a = Fr::zero().neg();
 
         assert!(a.is_zero());
     }
@@ -782,8 +749,7 @@ fn test_fr_negate() {
     for _ in 0..1000 {
         // Ensure (a - (-a)) = 0.
         let mut a = Fr::random(&mut rng);
-        let mut b = a;
-        b.negate();
+        let b = a.neg();
         a.add_assign(&b);
 
         assert!(a.is_zero());
@@ -801,7 +767,7 @@ fn test_fr_pow() {
         // Exponentiate by various small numbers and ensure it consists with repeated
         // multiplication.
         let a = Fr::random(&mut rng);
-        let target = a.pow(&[i]);
+        let target = a.pow_vartime(&[i]);
         let mut c = Fr::one();
         for _ in 0..i {
             c.mul_assign(&a);
@@ -813,7 +779,7 @@ fn test_fr_pow() {
         // Exponentiating by the modulus should have no effect in a prime field.
         let a = Fr::random(&mut rng);
 
-        assert_eq!(a, a.pow(Fr::char()));
+        assert_eq!(a, a.pow_vartime(Fr::char()));
     }
 }
 
@@ -831,10 +797,8 @@ fn test_fr_sqrt() {
     for _ in 0..1000 {
         // Ensure sqrt(a^2) = a or -a
         let a = Fr::random(&mut rng);
-        let mut nega = a;
-        nega.negate();
-        let mut b = a;
-        b.square();
+        let nega = a.neg();
+        let b = a.square();
 
         let b = b.sqrt().unwrap();
 
@@ -845,10 +809,9 @@ fn test_fr_sqrt() {
         // Ensure sqrt(a)^2 = a for random a
         let a = Fr::random(&mut rng);
 
-        if let Some(mut tmp) = a.sqrt() {
-            tmp.square();
-
-            assert_eq!(a, tmp);
+        let tmp = a.sqrt();
+        if tmp.is_some().into() {
+            assert_eq!(a, tmp.unwrap().square());
         }
     }
 }
@@ -1001,7 +964,7 @@ fn test_fr_root_of_unity() {
         Fr::from_repr(FrRepr::from(7)).unwrap()
     );
     assert_eq!(
-        Fr::multiplicative_generator().pow([
+        Fr::multiplicative_generator().pow_vartime([
             0xfffe5bfeffffffff,
             0x9a1d80553bda402,
             0x299d7d483339d808,
@@ -1009,8 +972,8 @@ fn test_fr_root_of_unity() {
         ]),
         Fr::root_of_unity()
     );
-    assert_eq!(Fr::root_of_unity().pow([1 << Fr::S]), Fr::one());
-    assert!(Fr::multiplicative_generator().sqrt().is_none());
+    assert_eq!(Fr::root_of_unity().pow_vartime([1 << Fr::S]), Fr::one());
+    assert!(bool::from(Fr::multiplicative_generator().sqrt().is_none()));
 }
 
 #[test]
