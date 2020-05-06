@@ -1,27 +1,33 @@
 //! Structs for building transactions.
 
-use crate::primitives::{Diversifier, Note, PaymentAddress};
-use crate::zip32::ExtendedSpendingKey;
-use ff::Field;
-use rand::{rngs::OsRng, seq::SliceRandom, CryptoRng, RngCore};
+use std::boxed::Box;
 use std::error;
 use std::fmt;
 use std::marker::PhantomData;
 
+use ff::Field;
+use rand::{rngs::OsRng, seq::SliceRandom, CryptoRng, RngCore};
+
 use crate::{
     consensus,
+    extensions::transparent::{self as tze, ExtensionTxBuilder, ToPayload},
     keys::OutgoingViewingKey,
     legacy::TransparentAddress,
     merkle_tree::MerklePath,
     note_encryption::{Memo, SaplingNoteEncryption},
+    primitives::{Diversifier, Note, PaymentAddress},
     prover::TxProver,
     redjubjub::PrivateKey,
     sapling::{spend_sig, Node},
     transaction::{
-        components::{amount::DEFAULT_FEE, Amount, OutputDescription, SpendDescription, TxOut},
+        components::{
+            amount::Amount, amount::DEFAULT_FEE, OutPoint, OutputDescription, SpendDescription,
+            TxOut, TzeIn, TzeOut,
+        },
         signature_hash_data, Transaction, TransactionData, SIGHASH_ALL,
     },
     util::generate_random_rseed,
+    zip32::ExtendedSpendingKey,
 };
 
 #[cfg(feature = "transparent-inputs")]
@@ -186,17 +192,14 @@ struct TransparentInputs;
 
 impl TransparentInputs {
     #[cfg(feature = "transparent-inputs")]
-    fn push(
-        &mut self,
-        mtx: &mut TransactionData,
-        sk: secp256k1::SecretKey,
-        utxo: OutPoint,
-        coin: TxOut,
-    ) -> Result<(), Error> {
+    fn push(&mut self, sk: secp256k1::SecretKey, coin: TxOut) -> Result<(), Error> {
         if coin.value.is_negative() {
             return Err(Error::InvalidAmount);
         }
 
+        // ensure that the ripemd160 digest of the public key associated with the
+        // provided secret key matches that of the address to which the provided
+        // output may be spent
         let pubkey = secp256k1::PublicKey::from_secret_key(&self.secp, &sk).serialize();
         match coin.script_pubkey.address() {
             Some(TransparentAddress::PublicKey(hash)) => {
@@ -210,7 +213,6 @@ impl TransparentInputs {
             _ => return Err(Error::InvalidAddress),
         }
 
-        mtx.vin.push(TxIn::new(utxo));
         self.inputs.push(TransparentInputInfo { sk, pubkey, coin });
 
         Ok(())
@@ -244,6 +246,7 @@ impl TransparentInputs {
                 consensus_branch_id,
                 SIGHASH_ALL,
                 Some((i, &info.coin.script_pubkey, info.coin.value)),
+                // tze equivalent is ???
             ));
 
             let msg = secp256k1::Message::from_slice(&sighash).expect("32 bytes");
@@ -260,6 +263,42 @@ impl TransparentInputs {
 
     #[cfg(not(feature = "transparent-inputs"))]
     fn apply_signatures(&self, _: &mut TransactionData, _: consensus::BranchId) {}
+}
+
+struct TzeInputInfo<'a, BuildCtx> {
+    prevout: TzeOut,
+    builder: Box<dyn FnOnce(&BuildCtx) -> Result<TzeIn, Error> + 'a>,
+}
+
+struct TzeInputs<'a, BuildCtx> {
+    builders: Vec<TzeInputInfo<'a, BuildCtx>>,
+}
+
+impl<'a, BuildCtx> TzeInputs<'a, BuildCtx> {
+    fn push<WBuilder, W: ToPayload>(
+        &mut self,
+        extension_id: usize,
+        prevout: (OutPoint, TzeOut),
+        builder: WBuilder,
+    ) where
+        WBuilder: 'a + FnOnce(&BuildCtx) -> Result<W, Error>,
+    {
+        let (outpoint, tzeout) = prevout;
+        self.builders.push(TzeInputInfo {
+            prevout: tzeout,
+            builder: Box::new(move |ctx| {
+                let (mode, payload) = builder(&ctx).map(|x| x.to_payload())?;
+                Ok(TzeIn {
+                    prevout: outpoint,
+                    witness: tze::Witness {
+                        extension_id,
+                        mode,
+                        payload,
+                    },
+                })
+            }),
+        });
+    }
 }
 
 /// Metadata about a transaction created by a [`Builder`].
@@ -301,7 +340,7 @@ impl TransactionMetadata {
 }
 
 /// Generates a [`Transaction`] from its inputs and outputs.
-pub struct Builder<P: consensus::Parameters, R: RngCore + CryptoRng> {
+pub struct Builder<'a, P: consensus::Parameters, R: RngCore + CryptoRng> {
     rng: R,
     height: u32,
     mtx: TransactionData,
@@ -310,11 +349,12 @@ pub struct Builder<P: consensus::Parameters, R: RngCore + CryptoRng> {
     spends: Vec<SpendDescriptionInfo>,
     outputs: Vec<SaplingOutput>,
     transparent_inputs: TransparentInputs,
+    tze_inputs: TzeInputs<'a, TransactionData>,
     change_address: Option<(OutgoingViewingKey, PaymentAddress)>,
     phantom: PhantomData<P>,
 }
 
-impl<P: consensus::Parameters> Builder<P, OsRng> {
+impl<'a, P: consensus::Parameters> Builder<'a, P, OsRng> {
     /// Creates a new `Builder` targeted for inclusion in the block with the given height,
     /// using default values for general transaction fields and the default OS random.
     ///
@@ -329,7 +369,7 @@ impl<P: consensus::Parameters> Builder<P, OsRng> {
     }
 }
 
-impl<P: consensus::Parameters, R: RngCore + CryptoRng> Builder<P, R> {
+impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng> Builder<'a, P, R> {
     /// Creates a new `Builder` targeted for inclusion in the block with the given height
     /// and randomness source, using default values for general transaction fields.
     ///
@@ -339,7 +379,7 @@ impl<P: consensus::Parameters, R: RngCore + CryptoRng> Builder<P, R> {
     /// expiry delta (20 blocks).
     ///
     /// The fee will be set to the default fee (0.0001 ZEC).
-    pub fn new_with_rng(height: u32, rng: R) -> Builder<P, R> {
+    pub fn new_with_rng(height: u32, rng: R) -> Builder<'a, P, R> {
         let mut mtx = TransactionData::new();
         mtx.expiry_height = height + DEFAULT_TX_EXPIRY_DELTA;
 
@@ -352,6 +392,7 @@ impl<P: consensus::Parameters, R: RngCore + CryptoRng> Builder<P, R> {
             spends: vec![],
             outputs: vec![],
             transparent_inputs: TransparentInputs::default(),
+            tze_inputs: TzeInputs { builders: vec![] },
             change_address: None,
             phantom: PhantomData,
         }
@@ -420,7 +461,8 @@ impl<P: consensus::Parameters, R: RngCore + CryptoRng> Builder<P, R> {
         utxo: OutPoint,
         coin: TxOut,
     ) -> Result<(), Error> {
-        self.transparent_inputs.push(&mut self.mtx, sk, utxo, coin)
+        self.mtx.vin.push(TxIn::new(utxo));
+        self.transparent_inputs.push(sk, coin)
     }
 
     /// Adds a transparent address to send funds to.
@@ -462,6 +504,7 @@ impl<P: consensus::Parameters, R: RngCore + CryptoRng> Builder<P, R> {
         mut self,
         consensus_branch_id: consensus::BranchId,
         prover: &impl TxProver,
+        // epoch: &Epoch<TransactionData>
     ) -> Result<(Transaction, TransactionMetadata), Error> {
         let mut tx_metadata = TransactionMetadata::new();
 
@@ -471,12 +514,20 @@ impl<P: consensus::Parameters, R: RngCore + CryptoRng> Builder<P, R> {
 
         // Valid change
         let change = self.mtx.value_balance - self.fee + self.transparent_inputs.value_sum()
+            - self.mtx.vout.iter().map(|vo| vo.value).sum::<Amount>()
+            + self
+                .tze_inputs
+                .builders
+                .iter()
+                .map(|ein| ein.prevout.value)
+                .sum::<Amount>()
             - self
                 .mtx
-                .vout
+                .tze_outputs
                 .iter()
-                .map(|output| output.value)
+                .map(|tzo| tzo.value)
                 .sum::<Amount>();
+
         if change.is_negative() {
             return Err(Error::ChangeIsNegative(change));
         }
@@ -658,7 +709,7 @@ impl<P: consensus::Parameters, R: RngCore + CryptoRng> Builder<P, R> {
         }
 
         //
-        // Signatures
+        // Signatures -- all effects must have been applied.
         //
 
         let mut sighash = [0u8; 32];
@@ -690,6 +741,19 @@ impl<P: consensus::Parameters, R: RngCore + CryptoRng> Builder<P, R> {
             self.mtx.binding_sig = None;
         }
 
+        // // Create TZE input witnesses
+        for tze_in in self.tze_inputs.builders {
+            // Need to enable witness to commit to the amount.
+            // - So hardware wallets "know" the amount without having to be sent all the
+            //   prior TZE outputs to which this witness gives evidence.
+            //
+            // The witness is expected to commit to the precommitment internally?
+            // (Or make it part of the sighash?)
+            // - TODO: Check whether transparent inputs committing to script_pubkey was
+            //   only so that hardware wallets "knew" what address was being spent from.
+            self.mtx.tze_inputs.push((tze_in.builder)(&self.mtx)?);
+        }
+
         // Transparent signatures
         self.transparent_inputs
             .apply_signatures(&mut self.mtx, consensus_branch_id);
@@ -698,6 +762,50 @@ impl<P: consensus::Parameters, R: RngCore + CryptoRng> Builder<P, R> {
             self.mtx.freeze().expect("Transaction should be complete"),
             tx_metadata,
         ))
+    }
+}
+
+impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng> ExtensionTxBuilder<'a>
+    for Builder<'a, P, R>
+{
+    type BuildCtx = TransactionData;
+    type BuildError = Error;
+
+    fn add_tze_input<WBuilder, W: ToPayload>(
+        &mut self,
+        extension_id: usize,
+        prevout: (OutPoint, TzeOut),
+        witness_builder: WBuilder,
+    ) -> Result<(), Self::BuildError>
+    where
+        WBuilder: 'a + (FnOnce(&Self::BuildCtx) -> Result<W, Self::BuildError>),
+    {
+        // where WBuilder: WitnessBuilder<Self::BuildCtx, Witness = impl ToPayload, Error = Self::BuildError> {
+        self.tze_inputs.push(extension_id, prevout, witness_builder);
+        Ok(())
+    }
+
+    fn add_tze_output<G: ToPayload>(
+        &mut self,
+        extension_id: usize,
+        value: Amount,
+        guarded_by: &G,
+    ) -> Result<(), Self::BuildError> {
+        if value.is_negative() {
+            return Err(Error::InvalidAmount);
+        }
+
+        let (mode, payload) = guarded_by.to_payload();
+        self.mtx.tze_outputs.push(TzeOut {
+            value,
+            precondition: tze::Precondition {
+                extension_id,
+                mode,
+                payload,
+            },
+        });
+
+        Ok(())
     }
 }
 
