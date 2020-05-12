@@ -176,7 +176,7 @@ impl SpendDescription {
 
     pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
         self.cv.write(&mut writer)?;
-        writer.write_all(self.anchor.into_repr().as_ref())?;
+        writer.write_all(self.anchor.to_repr().as_ref())?;
         writer.write_all(&self.nullifier)?;
         self.rk.write(&mut writer)?;
         writer.write_all(&self.zkproof)?;
@@ -254,7 +254,7 @@ impl OutputDescription {
 
     pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
         self.cv.write(&mut writer)?;
-        writer.write_all(self.cmu.into_repr().as_ref())?;
+        writer.write_all(self.cmu.to_repr().as_ref())?;
         self.ephemeral_key.write(&mut writer)?;
         writer.write_all(&self.enc_ciphertext)?;
         writer.write_all(&self.out_ciphertext)?;

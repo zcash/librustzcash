@@ -1,6 +1,6 @@
 use super::multicore::Worker;
 use bit_vec::{self, BitVec};
-use ff::{Field, PrimeField, ScalarEngine};
+use ff::{Endianness, Field, PrimeField, ScalarEngine};
 use futures::Future;
 use group::{CurveAffine, CurveProjective};
 use std::io;
@@ -195,8 +195,18 @@ where
                             bases.skip(1)?;
                         }
                     } else {
-                        let exp = exp >> skip;
-                        let exp = exp & ((1 << c) - 1);
+                        let mut exp = exp.to_repr();
+                        <<G::Engine as ScalarEngine>::Fr as PrimeField>::ReprEndianness::toggle_little_endian(&mut exp);
+
+                        let exp = exp
+                            .as_ref()
+                            .into_iter()
+                            .map(|b| (0..8).map(move |i| (b >> i) & 1u8))
+                            .flatten()
+                            .skip(skip as usize)
+                            .take(c as usize)
+                            .enumerate()
+                            .fold(0u64, |acc, (i, b)| acc + ((b as u64) << i));
 
                         if exp != 0 {
                             (&mut buckets[(exp - 1) as usize])
@@ -295,7 +305,7 @@ fn test_with_bls12() {
         let mut acc = G::zero();
 
         for (base, exp) in bases.iter().zip(exponents.iter()) {
-            AddAssign::<&G>::add_assign(&mut acc, &base.mul(exp.into_repr()));
+            AddAssign::<&G>::add_assign(&mut acc, &base.mul(exp.to_repr()));
         }
 
         acc

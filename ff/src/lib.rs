@@ -12,6 +12,7 @@ extern crate std;
 #[cfg(feature = "derive")]
 pub use ff_derive::*;
 
+use byteorder::ByteOrder;
 use core::convert::TryFrom;
 use core::fmt;
 use core::marker::PhantomData;
@@ -72,39 +73,24 @@ pub trait Field:
     /// failing if the element is zero.
     fn invert(&self) -> CtOption<Self>;
 
-    /// Exponentiates this element by a power of the base prime modulus via
-    /// the Frobenius automorphism.
-    fn frobenius_map(&mut self, power: usize);
-}
-
-pub trait PowVartime<L>: Field
-where
-    L: Copy + PartialEq + PartialOrd + AddAssign,
-    L: BitAnd<Output = L>,
-    L: Shr<Output = L>,
-    L: Sub<Output = L>,
-{
-    const ZERO: L;
-    const ONE: L;
-    const LIMB_SIZE: L;
+    /// Returns the square root of the field element, if it is
+    /// quadratic residue.
+    fn sqrt(&self) -> CtOption<Self>;
 
     /// Exponentiates `self` by `exp`, where `exp` is a little-endian order
     /// integer exponent.
     ///
     /// **This operation is variable time with respect to the exponent.** If the
     /// exponent is fixed, this operation is effectively constant time.
-    fn pow_vartime<S: AsRef<[L]>>(&self, exp: S) -> Self {
+    fn pow_vartime<S: AsRef<[u64]>>(&self, exp: S) -> Self {
         let mut res = Self::one();
         for e in exp.as_ref().iter().rev() {
-            let mut i = Self::ZERO;
-            while i < Self::LIMB_SIZE {
+            for i in (0..64).rev() {
                 res = res.square();
 
-                if ((*e >> (Self::LIMB_SIZE - Self::ONE - i)) & Self::ONE) == Self::ONE {
+                if ((*e >> i) & 1) == 1 {
                     res.mul_assign(self);
                 }
-
-                i += Self::ONE;
             }
         }
 
@@ -112,32 +98,35 @@ where
     }
 }
 
-impl<T: Field> PowVartime<u8> for T {
-    const ZERO: u8 = 0;
-    const ONE: u8 = 1;
-    const LIMB_SIZE: u8 = 8;
+/// Helper trait for converting the binary representation of a prime field element into a
+/// specific endianness. This is useful when you need to act on the bit representation
+/// of an element generically, as the native binary representation of a prime field is
+/// field-dependent.
+pub trait Endianness: ByteOrder {
+    /// Converts the provided representation between native and little-endian.
+    fn toggle_little_endian<T: AsMut<[u8]>>(t: &mut T);
 }
 
-impl<T: Field> PowVartime<u64> for T {
-    const ZERO: u64 = 0;
-    const ONE: u64 = 1;
-    const LIMB_SIZE: u64 = 64;
+impl Endianness for byteorder::BigEndian {
+    fn toggle_little_endian<T: AsMut<[u8]>>(t: &mut T) {
+        t.as_mut().reverse();
+    }
 }
 
-/// This trait represents an element of a field that has a square root operation described for it.
-pub trait SqrtField: Field {
-    /// Returns the square root of the field element, if it is
-    /// quadratic residue.
-    fn sqrt(&self) -> CtOption<Self>;
+impl Endianness for byteorder::LittleEndian {
+    fn toggle_little_endian<T: AsMut<[u8]>>(_: &mut T) {
+        // No-op
+    }
 }
 
 /// This represents an element of a prime field.
-pub trait PrimeField:
-    Field + Ord + From<u64> + BitAnd<u64, Output = u64> + Shr<u32, Output = Self>
-{
+pub trait PrimeField: Field + From<u64> {
     /// The prime field can be converted back and forth into this binary
     /// representation.
     type Repr: Default + AsRef<[u8]> + AsMut<[u8]> + From<Self> + for<'r> From<&'r Self>;
+
+    /// This indicates the endianness of [`PrimeField::Repr`].
+    type ReprEndianness: Endianness;
 
     /// Interpret a string of numbers as a (congruent) prime field element.
     /// Does not accept unnecessary leading zeroes or a blank string.
@@ -183,17 +172,16 @@ pub trait PrimeField:
     /// this prime field, failing if the input is not canonical (is not smaller than the
     /// field's modulus).
     ///
-    /// The byte representation is interpreted with the same endianness as is returned
-    /// by [`PrimeField::into_repr`].
+    /// The byte representation is interpreted with the endianness defined by
+    /// [`PrimeField::ReprEndianness`].
     fn from_repr(_: Self::Repr) -> Option<Self>;
 
     /// Converts an element of the prime field into the standard byte representation for
     /// this field.
     ///
-    /// Endianness of the byte representation is defined by the field implementation.
-    /// Callers should assume that it is the standard endianness used to represent encoded
-    /// elements of this particular field.
-    fn into_repr(&self) -> Self::Repr;
+    /// The endianness of the byte representation is defined by
+    /// [`PrimeField::ReprEndianness`].
+    fn to_repr(&self) -> Self::Repr;
 
     /// Returns true iff this element is odd.
     fn is_odd(&self) -> bool;
@@ -230,7 +218,7 @@ pub trait PrimeField:
 /// pairing-friendly curve) can be defined in a subtrait.
 pub trait ScalarEngine: Sized + 'static + Clone {
     /// This is the scalar field of the engine's groups.
-    type Fr: PrimeField + SqrtField;
+    type Fr: PrimeField;
 }
 
 #[derive(Debug)]

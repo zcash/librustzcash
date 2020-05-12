@@ -1014,8 +1014,8 @@ mod tests {
             let xsk = &xsks[j];
             let tv = &test_vectors[j];
 
-            assert_eq!(xsk.expsk.ask.into_repr().as_ref(), tv.ask.unwrap());
-            assert_eq!(xsk.expsk.nsk.into_repr().as_ref(), tv.nsk.unwrap());
+            assert_eq!(xsk.expsk.ask.to_repr().as_ref(), tv.ask.unwrap());
+            assert_eq!(xsk.expsk.nsk.to_repr().as_ref(), tv.nsk.unwrap());
 
             assert_eq!(xsk.expsk.ovk.0, tv.ovk);
             assert_eq!(xsk.dk.0, tv.dk);
@@ -1040,7 +1040,7 @@ mod tests {
             assert_eq!(xfvk.dk.0, tv.dk);
             assert_eq!(xfvk.chain_code.0, tv.c);
 
-            assert_eq!(xfvk.fvk.vk.ivk().into_repr().as_ref(), tv.ivk);
+            assert_eq!(xfvk.fvk.vk.ivk().to_repr().as_ref(), tv.ivk);
 
             let mut ser = vec![];
             xfvk.write(&mut ser).unwrap();

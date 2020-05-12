@@ -90,7 +90,7 @@ fn random_wnaf_tests<G: CurveProjective>() {
                 g1.mul_assign(s);
 
                 wnaf_table(&mut table, g, w);
-                wnaf_form(&mut wnaf, s.into_repr(), w);
+                wnaf_form(&mut wnaf, s.to_repr(), w);
                 let g2 = wnaf_exp(&table, &wnaf);
 
                 assert_eq!(g1, g2);

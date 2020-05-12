@@ -23,7 +23,7 @@
 //! [Jubjub]: https://zips.z.cash/protocol/protocol.pdf#jubjub
 //! [BLS12-381]: pairing::bls12_381
 
-use ff::{Field, PrimeField, SqrtField};
+use ff::{Field, PrimeField};
 use pairing::Engine;
 
 use crate::group_hash::group_hash;
@@ -95,7 +95,7 @@ pub trait ToUniform {
 /// and some pre-computed parameters.
 pub trait JubjubEngine: Engine {
     /// The scalar field of the Jubjub curve
-    type Fs: PrimeField + SqrtField + ToUniform;
+    type Fs: PrimeField + ToUniform;
     /// The parameters of Jubjub and the Sapling protocol
     type Params: JubjubParams<Self>;
 }

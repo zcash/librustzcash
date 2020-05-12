@@ -11,7 +11,7 @@
 //! [`EvaluationDomain`]: crate::domain::EvaluationDomain
 //! [Groth16]: https://eprint.iacr.org/2016/260
 
-use ff::{Field, PowVartime, PrimeField, ScalarEngine};
+use ff::{Field, PrimeField, ScalarEngine};
 use group::CurveProjective;
 use std::ops::{AddAssign, MulAssign, SubAssign};
 
@@ -221,7 +221,7 @@ impl<G: CurveProjective> Group<G::Engine> for Point<G> {
         Point(G::zero())
     }
     fn group_mul_assign(&mut self, by: &G::Scalar) {
-        self.0.mul_assign(by.into_repr());
+        self.0.mul_assign(by.to_repr());
     }
     fn group_add_assign(&mut self, other: &Self) {
         self.0.add_assign(&other.0);

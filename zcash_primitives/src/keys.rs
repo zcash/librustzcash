@@ -91,8 +91,8 @@ impl<E: JubjubEngine> ExpandedSpendingKey<E> {
     }
 
     pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
-        writer.write_all(self.ask.into_repr().as_ref())?;
-        writer.write_all(self.nsk.into_repr().as_ref())?;
+        writer.write_all(self.ask.to_repr().as_ref())?;
+        writer.write_all(self.nsk.to_repr().as_ref())?;
         writer.write_all(&self.ovk.0)?;
 
         Ok(())

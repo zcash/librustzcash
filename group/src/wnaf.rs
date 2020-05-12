@@ -149,7 +149,7 @@ impl<G: CurveProjective> Wnaf<(), Vec<G>, Vec<i64>> {
         let window_size = G::recommended_wnaf_for_scalar(&scalar);
 
         // Compute the wNAF form of the scalar.
-        wnaf_form(&mut self.scalar, scalar.into_repr(), window_size);
+        wnaf_form(&mut self.scalar, scalar.to_repr(), window_size);
 
         // Return a Wnaf object that mutably borrows the base storage location, but
         // immutably borrows the computed wNAF form scalar location.
@@ -203,7 +203,7 @@ impl<B, S: AsMut<Vec<i64>>> Wnaf<usize, B, S> {
     where
         B: AsRef<[G]>,
     {
-        wnaf_form(self.scalar.as_mut(), scalar.into_repr(), self.window_size);
+        wnaf_form(self.scalar.as_mut(), scalar.to_repr(), self.window_size);
         wnaf_exp(self.base.as_ref(), self.scalar.as_mut())
     }
 }

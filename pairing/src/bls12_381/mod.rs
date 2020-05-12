@@ -23,7 +23,7 @@ pub use self::fr::{Fr, FrRepr};
 
 use super::{Engine, PairingCurveAffine};
 
-use ff::{BitIterator, Field, PowVartime, ScalarEngine};
+use ff::{BitIterator, Field, ScalarEngine};
 use group::CurveAffine;
 use std::ops::{AddAssign, MulAssign, Neg, SubAssign};
 use subtle::CtOption;

@@ -3,7 +3,7 @@ use rand_core::SeedableRng;
 use rand_xorshift::XorShiftRng;
 use std::ops::{AddAssign, MulAssign, Neg, SubAssign};
 
-use ff::{Field, PrimeField, SqrtField};
+use ff::{Field, PrimeField};
 use pairing::bls12_381::*;
 
 fn bench_fr_add_assign(c: &mut Criterion) {
@@ -155,7 +155,7 @@ fn bench_fr_sqrt(c: &mut Criterion) {
     });
 }
 
-fn bench_fr_into_repr(c: &mut Criterion) {
+fn bench_fr_to_repr(c: &mut Criterion) {
     const SAMPLES: usize = 1000;
 
     let mut rng = XorShiftRng::from_seed([
@@ -166,10 +166,10 @@ fn bench_fr_into_repr(c: &mut Criterion) {
     let v: Vec<Fr> = (0..SAMPLES).map(|_| Fr::random(&mut rng)).collect();
 
     let mut count = 0;
-    c.bench_function("Fr::into_repr", |b| {
+    c.bench_function("Fr::to_repr", |b| {
         b.iter(|| {
             count = (count + 1) % SAMPLES;
-            v[count].into_repr()
+            v[count].to_repr()
         })
     });
 }
@@ -183,7 +183,7 @@ fn bench_fr_from_repr(c: &mut Criterion) {
     ]);
 
     let v: Vec<FrRepr> = (0..SAMPLES)
-        .map(|_| Fr::random(&mut rng).into_repr())
+        .map(|_| Fr::random(&mut rng).to_repr())
         .collect();
 
     let mut count = 0;
@@ -204,6 +204,6 @@ criterion_group!(
     bench_fr_invert,
     bench_fr_neg,
     bench_fr_sqrt,
-    bench_fr_into_repr,
+    bench_fr_to_repr,
     bench_fr_from_repr,
 );

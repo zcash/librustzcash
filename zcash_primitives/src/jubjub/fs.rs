@@ -1,8 +1,7 @@
 use byteorder::{ByteOrder, LittleEndian};
-use ff::{adc, mac_with_carry, sbb, BitIterator, Field, PowVartime, PrimeField, SqrtField};
+use ff::{adc, mac_with_carry, sbb, BitIterator, Field, PrimeField};
 use rand_core::RngCore;
-use std::mem;
-use std::ops::{Add, AddAssign, BitAnd, Mul, MulAssign, Neg, Shr, Sub, SubAssign};
+use std::ops::{Add, AddAssign, Mul, MulAssign, Neg, Sub, SubAssign};
 use subtle::{Choice, ConditionallySelectable, ConstantTimeEq, CtOption};
 
 use super::ToUniform;
@@ -121,29 +120,9 @@ impl ConstantTimeEq for Fs {
     }
 }
 
-impl Ord for Fs {
-    #[inline(always)]
-    fn cmp(&self, other: &Fs) -> ::std::cmp::Ordering {
-        let mut a = *self;
-        a.mont_reduce(self.0[0], self.0[1], self.0[2], self.0[3], 0, 0, 0, 0);
-
-        let mut b = *other;
-        b.mont_reduce(other.0[0], other.0[1], other.0[2], other.0[3], 0, 0, 0, 0);
-
-        a.cmp_native(&b)
-    }
-}
-
-impl PartialOrd for Fs {
-    #[inline(always)]
-    fn partial_cmp(&self, other: &Fs) -> Option<::std::cmp::Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
 impl ::std::fmt::Display for Fs {
     fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
-        write!(f, "Fs({})", self.into_repr())
+        write!(f, "Fs({})", self.to_repr())
     }
 }
 
@@ -158,13 +137,13 @@ impl From<u64> for Fs {
 
 impl From<Fs> for FsRepr {
     fn from(e: Fs) -> FsRepr {
-        e.into_repr()
+        e.to_repr()
     }
 }
 
 impl<'a> From<&'a Fs> for FsRepr {
     fn from(e: &'a Fs) -> FsRepr {
-        e.into_repr()
+        e.to_repr()
     }
 }
 
@@ -328,53 +307,9 @@ impl MulAssign for Fs {
     }
 }
 
-impl BitAnd<u64> for Fs {
-    type Output = u64;
-
-    #[inline(always)]
-    fn bitand(mut self, rhs: u64) -> u64 {
-        self.mont_reduce(self.0[0], self.0[1], self.0[2], self.0[3], 0, 0, 0, 0);
-        self.0[0] & rhs
-    }
-}
-
-impl Shr<u32> for Fs {
-    type Output = Self;
-
-    #[inline(always)]
-    fn shr(mut self, mut n: u32) -> Self {
-        if n as usize >= 64 * 4 {
-            return Self::from(0);
-        }
-
-        // Convert from Montgomery to native representation.
-        self.mont_reduce(self.0[0], self.0[1], self.0[2], self.0[3], 0, 0, 0, 0);
-
-        while n >= 64 {
-            let mut t = 0;
-            for i in self.0.iter_mut().rev() {
-                mem::swap(&mut t, i);
-            }
-            n -= 64;
-        }
-
-        if n > 0 {
-            let mut t = 0;
-            for i in self.0.iter_mut().rev() {
-                let t2 = *i << (64 - n);
-                *i >>= n;
-                *i |= t;
-                t = t2;
-            }
-        }
-
-        // Convert back to Montgomery representation
-        self * R2
-    }
-}
-
 impl PrimeField for Fs {
     type Repr = FsRepr;
+    type ReprEndianness = byteorder::LittleEndian;
 
     fn from_repr(r: FsRepr) -> Option<Fs> {
         let r = {
@@ -390,7 +325,7 @@ impl PrimeField for Fs {
         }
     }
 
-    fn into_repr(&self) -> FsRepr {
+    fn to_repr(&self) -> FsRepr {
         let mut r = *self;
         r.mont_reduce(self.0[0], self.0[1], self.0[2], self.0[3], 0, 0, 0, 0);
 
@@ -499,11 +434,6 @@ impl Field for Fs {
         CtOption::new(inverse, Choice::from(if self.is_zero() { 0 } else { 1 }))
     }
 
-    #[inline(always)]
-    fn frobenius_map(&mut self, _: usize) {
-        // This has no effect in a prime field.
-    }
-
     #[inline]
     fn square(&self) -> Self {
         let mut carry = 0;
@@ -540,6 +470,24 @@ impl Field for Fs {
         let mut ret = *self;
         ret.mont_reduce(r0, r1, r2, r3, r4, r5, r6, r7);
         ret
+    }
+
+    fn sqrt(&self) -> CtOption<Self> {
+        // Shank's algorithm for s mod 4 = 3
+        // https://eprint.iacr.org/2012/685.pdf (page 9, algorithm 2)
+
+        // a1 = self^((s - 3) // 4)
+        let mut a1 = self.pow_vartime([
+            0xb425c397b5bdcb2du64,
+            0x299a0824f3320420,
+            0x4199cec0404d0ec0,
+            0x39f6d3a994cebea,
+        ]);
+        let mut a0 = a1.square();
+        a0.mul_assign(self);
+        a1.mul_assign(self);
+
+        CtOption::new(a1, !a0.ct_eq(&NEGATIVE_ONE))
     }
 }
 
@@ -670,26 +618,6 @@ impl ToUniform for Fs {
     fn to_uniform(digest: &[u8]) -> Self {
         assert_eq!(digest.len(), 64);
         Self::one().mul_bits(BitIterator::<u8, _>::new(digest))
-    }
-}
-
-impl SqrtField for Fs {
-    fn sqrt(&self) -> CtOption<Self> {
-        // Shank's algorithm for s mod 4 = 3
-        // https://eprint.iacr.org/2012/685.pdf (page 9, algorithm 2)
-
-        // a1 = self^((s - 3) // 4)
-        let mut a1 = self.pow_vartime([
-            0xb425c397b5bdcb2du64,
-            0x299a0824f3320420,
-            0x4199cec0404d0ec0,
-            0x39f6d3a994cebea,
-        ]);
-        let mut a0 = a1.square();
-        a0.mul_assign(self);
-        a1.mul_assign(self);
-
-        CtOption::new(a1, !a0.ct_eq(&NEGATIVE_ONE))
     }
 }
 
@@ -1011,61 +939,6 @@ fn test_fs_mul_assign() {
 }
 
 #[test]
-fn test_fs_shr() {
-    let mut a = Fs::from_repr(FsRepr([
-        0x3f, 0x28, 0x2a, 0x48, 0xec, 0xba, 0x3f, 0xb3, 0xdf, 0xb3, 0x8c, 0xa8, 0xd3, 0xe0, 0x7d,
-        0x99, 0x25, 0x55, 0x0e, 0x9a, 0x2a, 0x2d, 0xf6, 0x9a, 0xa1, 0x0d, 0xe7, 0x8d, 0xb0, 0x3a,
-        0x00, 0x06,
-    ]))
-    .unwrap();
-    a = a >> 0;
-    assert_eq!(
-        a.into_repr(),
-        FsRepr([
-            0x3f, 0x28, 0x2a, 0x48, 0xec, 0xba, 0x3f, 0xb3, 0xdf, 0xb3, 0x8c, 0xa8, 0xd3, 0xe0,
-            0x7d, 0x99, 0x25, 0x55, 0x0e, 0x9a, 0x2a, 0x2d, 0xf6, 0x9a, 0xa1, 0x0d, 0xe7, 0x8d,
-            0xb0, 0x3a, 0x00, 0x06,
-        ])
-    );
-    a = a >> 1;
-    assert_eq!(
-        a.into_repr(),
-        FsRepr([
-            0x1f, 0x14, 0x15, 0x24, 0x76, 0xdd, 0x9f, 0xd9, 0xef, 0x59, 0x46, 0xd4, 0x69, 0xf0,
-            0xbe, 0xcc, 0x92, 0x2a, 0x07, 0x4d, 0x95, 0x16, 0x7b, 0xcd, 0xd0, 0x86, 0xf3, 0x46,
-            0x58, 0x1d, 0x00, 0x03,
-        ])
-    );
-    a = a >> 50;
-    assert_eq!(
-        a.into_repr(),
-        FsRepr([
-            0x67, 0xf6, 0x7b, 0x96, 0x11, 0x75, 0x1a, 0xbc, 0x2f, 0xb3, 0xa4, 0xca, 0x41, 0x53,
-            0xa5, 0xc5, 0x5e, 0x33, 0xb4, 0xe1, 0xbc, 0x11, 0x56, 0x07, 0xc0, 0x00, 0x00, 0x00,
-            0x00, 0x00, 0x00, 0x00,
-        ])
-    );
-    a = a >> 130;
-    assert_eq!(
-        a.into_repr(),
-        FsRepr([
-            0xd7, 0x0c, 0x6d, 0x38, 0x6f, 0x84, 0xd5, 0x01, 0x30, 0x00, 0x00, 0x00, 0x00, 0x00,
-            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-            0x00, 0x00, 0x00, 0x00,
-        ])
-    );
-    a = a >> 64;
-    assert_eq!(
-        a.into_repr(),
-        FsRepr([
-            0x30, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-            0x00, 0x00, 0x00, 0x00,
-        ])
-    );
-}
-
-#[test]
 fn test_fs_squaring() {
     let a = Fs([
         0xffffffffffffffff,
@@ -1178,11 +1051,15 @@ fn test_fs_pow() {
         assert_eq!(c, target);
     }
 
+    use byteorder::ByteOrder;
+    let mut char_limbs = [0; 4];
+    byteorder::LittleEndian::read_u64_into(Fs::char().as_ref(), &mut char_limbs);
+
     for _ in 0..1000 {
         // Exponentiating by the modulus should have no effect in a prime field.
         let a = Fs::random(&mut rng);
 
-        assert_eq!(a, a.pow_vartime(Fs::char()));
+        assert_eq!(a, a.pow_vartime(char_limbs));
     }
 }
 
@@ -1218,7 +1095,7 @@ fn test_fs_sqrt() {
 }
 
 #[test]
-fn test_fs_from_into_repr() {
+fn test_fs_from_to_repr() {
     // r + 1 should not be in the field
     assert!(Fs::from_repr(FsRepr([
         0xb8, 0x2c, 0xf7, 0xd6, 0x5e, 0x0e, 0x97, 0xd0, 0x82, 0x10, 0xc8, 0xcc, 0x93, 0x20, 0x68,
@@ -1263,7 +1140,7 @@ fn test_fs_from_into_repr() {
     for _ in 0..1000 {
         // Try to turn Fs elements into representations and back again, and compare.
         let a = Fs::random(&mut rng);
-        let a_repr = a.into_repr();
+        let a_repr = a.to_repr();
         let b_repr = FsRepr::from(a);
         assert_eq!(a_repr, b_repr);
         let a_again = Fs::from_repr(a_repr).unwrap();

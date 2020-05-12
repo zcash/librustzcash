@@ -193,7 +193,7 @@ fn prf_ock(
     let mut ock_input = [0u8; 128];
     ock_input[0..32].copy_from_slice(&ovk.0);
     cv.write(&mut ock_input[32..64]).unwrap();
-    ock_input[64..96].copy_from_slice(cmu.into_repr().as_ref());
+    ock_input[64..96].copy_from_slice(cmu.to_repr().as_ref());
     epk.write(&mut ock_input[96..128]).unwrap();
 
     Blake2bParams::new()
@@ -303,7 +303,7 @@ impl SaplingNoteEncryption {
         (&mut input[12..20])
             .write_u64::<LittleEndian>(self.note.value)
             .unwrap();
-        input[20..COMPACT_NOTE_SIZE].copy_from_slice(self.note.r.into_repr().as_ref());
+        input[20..COMPACT_NOTE_SIZE].copy_from_slice(self.note.r.to_repr().as_ref());
         input[COMPACT_NOTE_SIZE..NOTE_PLAINTEXT_SIZE].copy_from_slice(&self.memo.0);
 
         let mut output = [0u8; ENC_CIPHERTEXT_SIZE];
@@ -327,7 +327,7 @@ impl SaplingNoteEncryption {
 
         let mut input = [0u8; OUT_PLAINTEXT_SIZE];
         self.note.pk_d.write(&mut input[0..32]).unwrap();
-        input[32..OUT_PLAINTEXT_SIZE].copy_from_slice(self.esk.into_repr().as_ref());
+        input[32..OUT_PLAINTEXT_SIZE].copy_from_slice(self.esk.to_repr().as_ref());
 
         let mut output = [0u8; OUT_CIPHERTEXT_SIZE];
         assert_eq!(
@@ -366,7 +366,7 @@ fn parse_note_plaintext_without_memo(
     let diversifier = Diversifier(d);
     let pk_d = diversifier
         .g_d::<Bls12>(&JUBJUB)?
-        .mul(ivk.into_repr(), &JUBJUB);
+        .mul(ivk.to_repr(), &JUBJUB);
 
     let to = PaymentAddress::from_parts(diversifier, pk_d)?;
     let note = to.create_note(v, rcm, &JUBJUB).unwrap();
@@ -525,7 +525,7 @@ pub fn try_sapling_output_recovery(
     let diversifier = Diversifier(d);
     if diversifier
         .g_d::<Bls12>(&JUBJUB)?
-        .mul(esk.into_repr(), &JUBJUB)
+        .mul(esk.to_repr(), &JUBJUB)
         != *epk
     {
         // Published epk doesn't match calculated epk

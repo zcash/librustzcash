@@ -11,7 +11,7 @@ repository = "https://github.com/ebfull/ff"
 edition = "2018"
 
 [dependencies]
-byteorder = { version = "1", optional = true }
+byteorder = { version = "1", default-features = false }
 ff_derive = { version = "0.6", path = "ff_derive", optional = true }
 rand_core = { version = "0.5", default-features = false }
 subtle = { version = "2.2.1", default-features = false, features = ["i128"] }
@@ -19,7 +19,7 @@ subtle = { version = "2.2.1", default-features = false, features = ["i128"] }
 [features]
 default = ["std"]
 derive = ["ff_derive"]
-std = ["byteorder"]
+std = []
 
 [badges]
 maintenance = { status = "actively-developed" }

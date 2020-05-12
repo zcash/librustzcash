@@ -1,7 +1,8 @@
 //! Implementation of the Pedersen hash function used in Sapling.
 
 use crate::jubjub::*;
-use ff::Field;
+use byteorder::{ByteOrder, LittleEndian};
+use ff::{Endianness, Field, PrimeField};
 use std::ops::{AddAssign, Neg};
 
 #[derive(Copy, Clone)]
@@ -85,17 +86,32 @@ where
 
         let mut table: &[Vec<edwards::Point<E, _>>] =
             &generators.next().expect("we don't have enough generators");
-        let window = JubjubBls12::pedersen_hash_exp_window_size();
-        let window_mask = (1 << window) - 1;
+        let window = JubjubBls12::pedersen_hash_exp_window_size() as usize;
+        let window_mask = (1u64 << window) - 1;
+
+        let mut acc = acc.to_repr();
+        <E::Fs as PrimeField>::ReprEndianness::toggle_little_endian(&mut acc);
+        let num_limbs: usize = acc.as_ref().len() / 8;
+        let mut limbs = vec![0u64; num_limbs + 1];
+        LittleEndian::read_u64_into(acc.as_ref(), &mut limbs[..num_limbs]);
 
         let mut tmp = edwards::Point::zero();
 
-        while !acc.is_zero() {
-            let i = (acc & window_mask) as usize;
+        let mut pos = 0;
+        while pos < E::Fs::NUM_BITS as usize {
+            let u64_idx = pos / 64;
+            let bit_idx = pos % 64;
+            let i = (if bit_idx + window < 64 {
+                // This window's bits are contained in a single u64.
+                limbs[u64_idx] >> bit_idx
+            } else {
+                // Combine the current u64's bits with the bits from the next u64.
+                (limbs[u64_idx] >> bit_idx) | (limbs[u64_idx + 1] << (64 - bit_idx))
+            } & window_mask) as usize;
 
             tmp = tmp.add(&table[0][i], params);
 
-            acc = acc >> window;
+            pos += window;
             table = &table[1..];
         }
 

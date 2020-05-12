@@ -20,7 +20,7 @@ fn read_scalar<E: JubjubEngine, R: Read>(mut reader: R) -> io::Result<E::Fs> {
 }
 
 fn write_scalar<E: JubjubEngine, W: Write>(s: &E::Fs, mut writer: W) -> io::Result<()> {
-    writer.write_all(s.into_repr().as_ref())
+    writer.write_all(s.to_repr().as_ref())
 }
 
 fn h_star<E: JubjubEngine>(a: &[u8], b: &[u8]) -> E::Fs {

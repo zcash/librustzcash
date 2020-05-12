@@ -1,6 +1,6 @@
 use super::{edwards, montgomery, JubjubEngine, JubjubParams, PrimeOrder};
 
-use ff::{Field, PrimeField, SqrtField};
+use ff::{Endianness, Field, PrimeField};
 use std::ops::{AddAssign, MulAssign, Neg, SubAssign};
 
 use rand_core::{RngCore, SeedableRng};
@@ -372,7 +372,22 @@ fn test_jubjub_params<E: JubjubEngine>(params: &E::Params) {
 
         let mut cur = E::Fs::one();
 
-        let max = (-E::Fs::one()) >> 1;
+        let max = {
+            // Grab char - 1 in little endian.
+            let mut tmp = (-E::Fs::one()).to_repr();
+            <E::Fs as PrimeField>::ReprEndianness::toggle_little_endian(&mut tmp);
+
+            // Shift right by 1 bit.
+            let mut borrow = 0;
+            for b in tmp.as_mut().iter_mut().rev() {
+                let new_borrow = *b & 1;
+                *b = (borrow << 7) | (*b >> 1);
+                borrow = new_borrow;
+            }
+
+            // Turns out we want this in little endian!
+            tmp
+        };
 
         let mut pacc = E::Fs::zero();
         let mut nacc = E::Fs::zero();
@@ -384,8 +399,22 @@ fn test_jubjub_params<E: JubjubEngine>(params: &E::Params) {
             pacc += &tmp;
             nacc -= &tmp; // The first subtraction wraps intentionally.
 
-            assert!(pacc < max);
-            assert!(pacc < nacc);
+            let mut pacc_repr = pacc.to_repr();
+            let mut nacc_repr = nacc.to_repr();
+            <E::Fs as PrimeField>::ReprEndianness::toggle_little_endian(&mut pacc_repr);
+            <E::Fs as PrimeField>::ReprEndianness::toggle_little_endian(&mut nacc_repr);
+
+            fn less_than(val: &[u8], bound: &[u8]) -> bool {
+                for (a, b) in val.iter().rev().zip(bound.iter().rev()) {
+                    if a < b {
+                        return true;
+                    }
+                }
+
+                false
+            }
+            assert!(less_than(pacc_repr.as_ref(), max.as_ref()));
+            assert!(less_than(pacc_repr.as_ref(), nacc_repr.as_ref()));
 
             // cur = cur * 16
             for _ in 0..4 {

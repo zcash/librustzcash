@@ -1,10 +1,10 @@
-use ff::PowVartime;
+use ff::{Endianness, Field, PrimeField};
 use group::{CurveAffine, CurveProjective};
 use rand_core::SeedableRng;
 use rand_xorshift::XorShiftRng;
 use std::ops::MulAssign;
 
-use crate::{Engine, Field, PairingCurveAffine, PrimeField};
+use crate::{Engine, PairingCurveAffine};
 
 pub fn engine_tests<E: Engine>() {
     let mut rng = XorShiftRng::from_seed([
@@ -130,8 +130,14 @@ fn random_bilinearity_tests<E: Engine>() {
 
         let mut cd = c;
         cd.mul_assign(&d);
+        let mut cd = cd.to_repr();
+        <E::Fr as PrimeField>::ReprEndianness::toggle_little_endian(&mut cd);
 
-        let abcd = E::pairing(a, b).pow_vartime(cd.into_repr());
+        use byteorder::ByteOrder;
+        let mut cd_limbs = [0; 4];
+        byteorder::LittleEndian::read_u64_into(cd.as_ref(), &mut cd_limbs);
+
+        let abcd = E::pairing(a, b).pow_vartime(cd_limbs);
 
         assert_eq!(acbd, adbc);
         assert_eq!(acbd, abcd);
