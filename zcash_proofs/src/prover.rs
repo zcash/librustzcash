@@ -19,9 +19,6 @@ use zcash_primitives::{
 
 use crate::{load_parameters, sapling::SaplingProvingContext};
 
-const SAPLING_SPEND_HASH: &str = "8270785a1a0d0bc77196f000ee6d221c9c9894f55307bd9357c3f0105d31ca63991ab91324160d8f53e2bbd3c2633a6eb8bdf5205d822e7f3f73edac51b2b70c";
-const SAPLING_OUTPUT_HASH: &str = "657e3d38dbb5cb5e7dd2970e8b03d69b4787dd907285b5a7f0790dcc8072f60bf593b32cc2d1c030e00ff5ae64bf84c5c3beb84ddc841d48264b4a171744d028";
-
 /// An implementation of [`TxProver`] using Sapling Spend and Output parameters from
 /// locally-accessible paths.
 pub struct LocalTxProver {
@@ -50,14 +47,8 @@ impl LocalTxProver {
     /// This function will panic if the paths do not point to valid parameter files with
     /// the expected hashes.
     pub fn new(spend_path: &Path, output_path: &Path) -> Self {
-        let (spend_params, spend_vk, output_params, _, _) = load_parameters(
-            spend_path,
-            SAPLING_SPEND_HASH,
-            output_path,
-            SAPLING_OUTPUT_HASH,
-            None,
-            None,
-        );
+        let (spend_params, spend_vk, output_params, _, _) =
+            load_parameters(spend_path, output_path, None);
         LocalTxProver {
             spend_params,
             spend_vk,
