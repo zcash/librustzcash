@@ -84,7 +84,7 @@ pub fn load_parameters(
         panic!("Sapling output parameter file is not correct, please clean your `~/.zcash-params/` and re-run `fetch-params`.");
     }
 
-    if sprout_fs.map(|fs| fs.into_hash()) != Some(SPROUT_HASH.to_owned()) {
+    if sprout_fs.map(|fs| fs.into_hash() != SPROUT_HASH).unwrap_or(false) {
         panic!("Sprout groth16 parameter file is not correct, please clean your `~/.zcash-params/` and re-run `fetch-params`.");
     }
 
