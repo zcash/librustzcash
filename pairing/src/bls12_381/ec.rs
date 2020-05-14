@@ -521,6 +521,8 @@ macro_rules! curve_impl {
         }
 
         impl Group for $projective {
+            type Subgroup = Self;
+
             fn random<R: RngCore + ?Sized>(rng: &mut R) -> Self {
                 loop {
                     let x = $basefield::random(rng);

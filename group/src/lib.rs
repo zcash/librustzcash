@@ -44,7 +44,13 @@ pub trait Group:
     + Neg<Output = Self>
     + GroupOps
     + GroupOpsOwned
+    + GroupOps<<Self as Group>::Subgroup>
+    + GroupOpsOwned<<Self as Group>::Subgroup>
 {
+    /// The large prime-order subgroup in which cryptographic operations are performed.
+    /// If `Self` implements `PrimeGroup`, then `Self::Subgroup` may be `Self`.
+    type Subgroup: PrimeGroup;
+
     /// Returns an element chosen uniformly at random using a user-provided RNG.
     fn random<R: RngCore + ?Sized>(rng: &mut R) -> Self;
 
@@ -52,7 +58,7 @@ pub trait Group:
     fn identity() -> Self;
 
     /// Returns a fixed generator of the prime-order subgroup.
-    fn generator() -> Self;
+    fn generator() -> Self::Subgroup;
 
     /// Determines if this point is the identity.
     fn is_identity(&self) -> bool;
