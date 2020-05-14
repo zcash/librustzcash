@@ -520,8 +520,55 @@ macro_rules! curve_impl {
             }
         }
 
+        impl ::std::ops::Mul<<$projective as Group>::Scalar> for $projective {
+            type Output = Self;
+
+            fn mul(mut self, other: <$projective as Group>::Scalar) -> Self {
+                self.mul_assign(&other);
+                self
+            }
+        }
+
+        impl<'r> ::std::ops::Mul<&'r <$projective as Group>::Scalar> for $projective {
+            type Output = Self;
+
+            fn mul(mut self, other: &'r <$projective as Group>::Scalar) -> Self {
+                self.mul_assign(other);
+                self
+            }
+        }
+
+        impl ::std::ops::MulAssign<<$projective as Group>::Scalar> for $projective {
+            fn mul_assign(&mut self, other: <$projective as Group>::Scalar) {
+                self.mul_assign(&other);
+            }
+        }
+
+        impl<'r> ::std::ops::MulAssign<&'r <$projective as Group>::Scalar> for $projective {
+            fn mul_assign(&mut self, other: &'r <$projective as Group>::Scalar) {
+                let mut res = Self::identity();
+
+                let mut found_one = false;
+
+                for i in BitIterator::<u8, _>::new(other.to_repr()) {
+                    if found_one {
+                        res = res.double();
+                    } else {
+                        found_one = i;
+                    }
+
+                    if i {
+                        res.add_assign(&*self);
+                    }
+                }
+
+                *self = res;
+            }
+        }
+
         impl Group for $projective {
             type Subgroup = Self;
+            type Scalar = $scalarfield;
 
             fn random<R: RngCore + ?Sized>(rng: &mut R) -> Self {
                 loop {
@@ -611,7 +658,6 @@ macro_rules! curve_impl {
         impl PrimeGroup for $projective {}
 
         impl CurveProjective for $projective {
-            type Scalar = $scalarfield;
             type Base = $basefield;
             type Affine = $affine;
 
@@ -670,26 +716,6 @@ macro_rules! curve_impl {
                     g.y.mul_assign(&z); // y/z^3
                     g.z = $basefield::one(); // z = 1
                 }
-            }
-
-            fn mul_assign<S: Into<<Self::Scalar as PrimeField>::Repr>>(&mut self, other: S) {
-                let mut res = Self::identity();
-
-                let mut found_one = false;
-
-                for i in BitIterator::<u8, _>::new(other.into()) {
-                    if found_one {
-                        res = res.double();
-                    } else {
-                        found_one = i;
-                    }
-
-                    if i {
-                        res.add_assign(&*self);
-                    }
-                }
-
-                *self = res;
             }
 
             fn into_affine(&self) -> $affine {

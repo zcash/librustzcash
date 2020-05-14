@@ -6,7 +6,7 @@ use rand::RngCore;
 use std::error::Error;
 use std::fmt;
 use std::iter::Sum;
-use std::ops::{Add, AddAssign, Neg, Sub, SubAssign};
+use std::ops::{Add, AddAssign, Mul, MulAssign, Neg, Sub, SubAssign};
 
 pub mod tests;
 
@@ -28,6 +28,20 @@ impl<T, Rhs, Output> GroupOps<Rhs, Output> for T where
 pub trait GroupOpsOwned<Rhs = Self, Output = Self>: for<'r> GroupOps<&'r Rhs, Output> {}
 impl<T, Rhs, Output> GroupOpsOwned<Rhs, Output> for T where T: for<'r> GroupOps<&'r Rhs, Output> {}
 
+/// A helper trait for types implementing group scalar multiplication.
+pub trait ScalarMul<Rhs, Output = Self>: Mul<Rhs, Output = Output> + MulAssign<Rhs> {}
+
+impl<T, Rhs, Output> ScalarMul<Rhs, Output> for T where T: Mul<Rhs, Output = Output> + MulAssign<Rhs>
+{}
+
+/// A helper trait for references implementing group scalar multiplication.
+///
+/// This trait, in combination with `ScalarMul`, is necessary to address type constraint
+/// issues in `pairing::Engine` (specifically, to ensure that [`ff::ScalarEngine::Fr`] is
+/// correctly constrained to implement these traits required by [`Group::Scalar`]).
+pub trait ScalarMulOwned<Rhs, Output = Self>: for<'r> ScalarMul<&'r Rhs, Output> {}
+impl<T, Rhs, Output> ScalarMulOwned<Rhs, Output> for T where T: for<'r> ScalarMul<&'r Rhs, Output> {}
+
 /// This trait represents an element of a cryptographic group.
 pub trait Group:
     Clone
@@ -46,10 +60,15 @@ pub trait Group:
     + GroupOpsOwned
     + GroupOps<<Self as Group>::Subgroup>
     + GroupOpsOwned<<Self as Group>::Subgroup>
+    + ScalarMul<<Self as Group>::Scalar>
+    + ScalarMulOwned<<Self as Group>::Scalar>
 {
     /// The large prime-order subgroup in which cryptographic operations are performed.
     /// If `Self` implements `PrimeGroup`, then `Self::Subgroup` may be `Self`.
     type Subgroup: PrimeGroup;
+
+    /// Scalars modulo the order of [`Group::Subgroup`].
+    type Scalar: PrimeField;
 
     /// Returns an element chosen uniformly at random using a user-provided RNG.
     fn random<R: RngCore + ?Sized>(rng: &mut R) -> Self;
@@ -78,7 +97,6 @@ pub trait CurveProjective:
     + GroupOps<<Self as CurveProjective>::Affine>
     + GroupOpsOwned<<Self as CurveProjective>::Affine>
 {
-    type Scalar: PrimeField;
     type Base: Field;
     type Affine: CurveAffine<Projective = Self, Scalar = Self::Scalar>;
 
@@ -89,9 +107,6 @@ pub trait CurveProjective:
     /// Checks if the point is already "normalized" so that
     /// cheap affine conversion is possible.
     fn is_normalized(&self) -> bool;
-
-    /// Performs scalar multiplication of this element.
-    fn mul_assign<S: Into<<Self::Scalar as PrimeField>::Repr>>(&mut self, other: S);
 
     /// Converts this element into its affine representation.
     fn into_affine(&self) -> Self::Affine;

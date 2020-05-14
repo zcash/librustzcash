@@ -2,7 +2,7 @@ use byteorder::{ByteOrder, LittleEndian};
 use ff::PrimeField;
 use std::iter;
 
-use super::CurveProjective;
+use super::{CurveProjective, Group};
 
 /// Replaces the contents of `table` with a w-NAF window table for the given window size.
 pub(crate) fn wnaf_table<G: CurveProjective>(table: &mut Vec<G>, mut base: G, window: usize) {
@@ -140,10 +140,7 @@ impl<G: CurveProjective> Wnaf<(), Vec<G>, Vec<i64>> {
 
     /// Given a scalar, compute its wNAF representation and return a `Wnaf` object that can perform
     /// exponentiations with `.base(..)`.
-    pub fn scalar(
-        &mut self,
-        scalar: &<G as CurveProjective>::Scalar,
-    ) -> Wnaf<usize, &mut Vec<G>, &[i64]> {
+    pub fn scalar(&mut self, scalar: &<G as Group>::Scalar) -> Wnaf<usize, &mut Vec<G>, &[i64]> {
         // Compute the appropriate window size for the scalar.
         let window_size = G::recommended_wnaf_for_scalar(&scalar);
 
@@ -198,7 +195,7 @@ impl<B, S: AsRef<[i64]>> Wnaf<usize, B, S> {
 
 impl<B, S: AsMut<Vec<i64>>> Wnaf<usize, B, S> {
     /// Performs exponentiation given a scalar.
-    pub fn scalar<G: CurveProjective>(&mut self, scalar: &<G as CurveProjective>::Scalar) -> G
+    pub fn scalar<G: CurveProjective>(&mut self, scalar: &<G as Group>::Scalar) -> G
     where
         B: AsRef<[G]>,
     {
