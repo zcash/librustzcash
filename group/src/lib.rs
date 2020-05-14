@@ -12,9 +12,35 @@ pub mod tests;
 mod wnaf;
 pub use self::wnaf::Wnaf;
 
+/// A helper trait for types with a group operation.
+pub trait GroupOps<Rhs = Self, Output = Self>:
+    Add<Rhs, Output = Output> + Sub<Rhs, Output = Output> + AddAssign<Rhs> + SubAssign<Rhs>
+{
+}
+
+impl<T, Rhs, Output> GroupOps<Rhs, Output> for T where
+    T: Add<Rhs, Output = Output> + Sub<Rhs, Output = Output> + AddAssign<Rhs> + SubAssign<Rhs>
+{
+}
+
+/// A helper trait for references with a group operation.
+pub trait GroupOpsOwned<Rhs = Self, Output = Self>: for<'r> GroupOps<&'r Rhs, Output> {}
+impl<T, Rhs, Output> GroupOpsOwned<Rhs, Output> for T where T: for<'r> GroupOps<&'r Rhs, Output> {}
+
 /// This trait represents an element of a cryptographic group.
 pub trait Group:
-    Clone + Copy + fmt::Debug + fmt::Display + Eq + Sized + Send + Sync + 'static
+    Clone
+    + Copy
+    + fmt::Debug
+    + fmt::Display
+    + Eq
+    + Sized
+    + Send
+    + Sync
+    + 'static
+    + Neg<Output = Self>
+    + GroupOps
+    + GroupOpsOwned
 {
     /// Returns an element chosen uniformly at random using a user-provided RNG.
     fn random<R: RngCore + ?Sized>(rng: &mut R) -> Self;
@@ -32,30 +58,12 @@ pub trait Group:
 /// This trait represents an element of a prime-order cryptographic group.
 pub trait PrimeGroup: Group {}
 
-/// A helper trait for types implementing group addition.
-pub trait CurveOps<Rhs = Self, Output = Self>:
-    Add<Rhs, Output = Output> + Sub<Rhs, Output = Output> + AddAssign<Rhs> + SubAssign<Rhs>
-{
-}
-
-impl<T, Rhs, Output> CurveOps<Rhs, Output> for T where
-    T: Add<Rhs, Output = Output> + Sub<Rhs, Output = Output> + AddAssign<Rhs> + SubAssign<Rhs>
-{
-}
-
-/// A helper trait for references implementing group addition.
-pub trait CurveOpsOwned<Rhs = Self, Output = Self>: for<'r> CurveOps<&'r Rhs, Output> {}
-impl<T, Rhs, Output> CurveOpsOwned<Rhs, Output> for T where T: for<'r> CurveOps<&'r Rhs, Output> {}
-
 /// Projective representation of an elliptic curve point guaranteed to be
 /// in the correct prime order subgroup.
 pub trait CurveProjective:
     Group
-    + Neg<Output = Self>
-    + CurveOps
-    + CurveOpsOwned
-    + CurveOps<<Self as CurveProjective>::Affine>
-    + CurveOpsOwned<<Self as CurveProjective>::Affine>
+    + GroupOps<<Self as CurveProjective>::Affine>
+    + GroupOpsOwned<<Self as CurveProjective>::Affine>
 {
     type Scalar: PrimeField;
     type Base: Field;
