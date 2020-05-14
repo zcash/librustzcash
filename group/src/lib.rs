@@ -56,6 +56,10 @@ pub trait Group:
 
     /// Determines if this point is the identity.
     fn is_identity(&self) -> bool;
+
+    /// Doubles this element.
+    #[must_use]
+    fn double(&self) -> Self;
 }
 
 /// This trait represents an element of a prime-order cryptographic group.
@@ -79,10 +83,6 @@ pub trait CurveProjective:
     /// Checks if the point is already "normalized" so that
     /// cheap affine conversion is possible.
     fn is_normalized(&self) -> bool;
-
-    /// Doubles this element.
-    #[must_use]
-    fn double(&self) -> Self;
 
     /// Performs scalar multiplication of this element.
     fn mul_assign<S: Into<<Self::Scalar as PrimeField>::Repr>>(&mut self, other: S);

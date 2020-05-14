@@ -556,6 +556,54 @@ macro_rules! curve_impl {
             fn is_identity(&self) -> bool {
                 self.z.is_zero()
             }
+
+            fn double(&self) -> Self {
+                if self.is_identity() {
+                    return *self;
+                }
+
+                // Other than the point at infinity, no points on E or E'
+                // can double to equal the point at infinity, as y=0 is
+                // never true for points on the curve. (-4 and -4u-4
+                // are not cubic residue in their respective fields.)
+
+                // http://www.hyperelliptic.org/EFD/g1p/auto-shortw-jacobian-0.html#doubling-dbl-2009-l
+
+                // A = X1^2
+                let a = self.x.square();
+
+                // B = Y1^2
+                let b = self.y.square();
+
+                // C = B^2
+                let c = b.square();
+
+                // D = 2*((X1+B)2-A-C)
+                let mut d = self.x;
+                d.add_assign(&b);
+                d = d.square();
+                d.sub_assign(&a);
+                d.sub_assign(&c);
+                d = d.double();
+
+                // E = 3*A
+                let mut e = a.double();
+                e.add_assign(&a);
+
+                // F = E^2
+                let f = e.square();
+
+                // Z3 = 2*Y1*Z1
+                let z = self.z.double() * self.y;
+
+                // X3 = F-2*D
+                let x = f - d.double();
+
+                // Y3 = E*(D-X3)-8*C
+                let y = e * (d - x) - c.double().double().double();
+
+                $projective { x, y, z }
+            }
         }
 
         impl PrimeGroup for $projective {}
@@ -620,54 +668,6 @@ macro_rules! curve_impl {
                     g.y.mul_assign(&z); // y/z^3
                     g.z = $basefield::one(); // z = 1
                 }
-            }
-
-            fn double(&self) -> Self {
-                if self.is_identity() {
-                    return *self;
-                }
-
-                // Other than the point at infinity, no points on E or E'
-                // can double to equal the point at infinity, as y=0 is
-                // never true for points on the curve. (-4 and -4u-4
-                // are not cubic residue in their respective fields.)
-
-                // http://www.hyperelliptic.org/EFD/g1p/auto-shortw-jacobian-0.html#doubling-dbl-2009-l
-
-                // A = X1^2
-                let a = self.x.square();
-
-                // B = Y1^2
-                let b = self.y.square();
-
-                // C = B^2
-                let c = b.square();
-
-                // D = 2*((X1+B)2-A-C)
-                let mut d = self.x;
-                d.add_assign(&b);
-                d = d.square();
-                d.sub_assign(&a);
-                d.sub_assign(&c);
-                d = d.double();
-
-                // E = 3*A
-                let mut e = a.double();
-                e.add_assign(&a);
-
-                // F = E^2
-                let f = e.square();
-
-                // Z3 = 2*Y1*Z1
-                let z = self.z.double() * self.y;
-
-                // X3 = F-2*D
-                let x = f - d.double();
-
-                // Y3 = E*(D-X3)-8*C
-                let y = e * (d - x) - c.double().double().double();
-
-                $projective { x, y, z }
             }
 
             fn mul_assign<S: Into<<Self::Scalar as PrimeField>::Repr>>(&mut self, other: S) {
