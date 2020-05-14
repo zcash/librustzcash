@@ -42,11 +42,11 @@ macro_rules! curve_impl {
 
         impl PartialEq for $projective {
             fn eq(&self, other: &$projective) -> bool {
-                if self.is_identity() {
-                    return other.is_identity();
+                if self.is_identity().into() {
+                    return other.is_identity().into();
                 }
 
-                if other.is_identity() {
+                if other.is_identity().into() {
                     return false;
                 }
 
@@ -126,7 +126,7 @@ macro_rules! curve_impl {
             }
 
             fn is_on_curve(&self) -> bool {
-                if self.is_identity() {
+                if self.is_identity().into() {
                     true
                 } else {
                     // Check that the point is on the curve
@@ -141,7 +141,7 @@ macro_rules! curve_impl {
             }
 
             fn is_in_correct_subgroup_assuming_on_curve(&self) -> bool {
-                self.mul($scalarfield::char()).is_identity()
+                self.mul($scalarfield::char()).is_identity().into()
             }
         }
 
@@ -151,7 +151,7 @@ macro_rules! curve_impl {
             #[inline]
             fn neg(self) -> Self {
                 let mut ret = self;
-                if !ret.is_identity() {
+                if bool::from(!ret.is_identity()) {
                     ret.y = ret.y.neg();
                 }
                 ret
@@ -223,7 +223,7 @@ macro_rules! curve_impl {
             #[inline]
             fn neg(self) -> Self {
                 let mut ret = self;
-                if !ret.is_identity() {
+                if bool::from(!ret.is_identity()) {
                     ret.y = ret.y.neg();
                 }
                 ret
@@ -252,12 +252,12 @@ macro_rules! curve_impl {
 
         impl<'r> ::std::ops::AddAssign<&'r $projective> for $projective {
             fn add_assign(&mut self, other: &Self) {
-                if self.is_identity() {
+                if self.is_identity().into() {
                     *self = *other;
                     return;
                 }
 
-                if other.is_identity() {
+                if other.is_identity().into() {
                     return;
                 }
 
@@ -401,11 +401,11 @@ macro_rules! curve_impl {
             for $projective
         {
             fn add_assign(&mut self, other: &<$projective as CurveProjective>::Affine) {
-                if other.is_identity() {
+                if other.is_identity().into() {
                     return;
                 }
 
-                if self.is_identity() {
+                if self.is_identity().into() {
                     self.x = other.x;
                     self.y = other.y;
                     self.z = $basefield::one();
@@ -579,7 +579,7 @@ macro_rules! curve_impl {
                     if p.is_some().into() {
                         let p = p.unwrap().scale_by_cofactor();
 
-                        if !p.is_identity() {
+                        if bool::from(!p.is_identity()) {
                             return p;
                         }
                     }
@@ -602,12 +602,12 @@ macro_rules! curve_impl {
 
             // The point at infinity is always represented by
             // Z = 0.
-            fn is_identity(&self) -> bool {
-                self.z.is_zero()
+            fn is_identity(&self) -> Choice {
+                Choice::from(if self.z.is_zero() { 1 } else { 0 })
             }
 
             fn double(&self) -> Self {
-                if self.is_identity() {
+                if self.is_identity().into() {
                     return *self;
                 }
 
@@ -662,7 +662,7 @@ macro_rules! curve_impl {
             type Affine = $affine;
 
             fn is_normalized(&self) -> bool {
-                self.is_identity() || self.z == $basefield::one()
+                self.is_identity().into() || self.z == $basefield::one()
             }
 
             fn batch_normalization(v: &mut [Self]) {
@@ -737,7 +737,7 @@ macro_rules! curve_impl {
         // coordinates with Z = 1.
         impl From<$affine> for $projective {
             fn from(p: $affine) -> $projective {
-                if p.is_identity() {
+                if p.is_identity().into() {
                     $projective::identity()
                 } else {
                     $projective {
@@ -753,7 +753,7 @@ macro_rules! curve_impl {
         // coordinates as X/Z^2, Y/Z^3.
         impl From<$projective> for $affine {
             fn from(p: $projective) -> $affine {
-                if p.is_identity() {
+                if p.is_identity().into() {
                     $affine::identity()
                 } else if p.z == $basefield::one() {
                     // If Z is one, the point is already normalized.
@@ -798,7 +798,7 @@ pub mod g1 {
     use rand_core::RngCore;
     use std::fmt;
     use std::ops::{AddAssign, MulAssign, Neg, SubAssign};
-    use subtle::CtOption;
+    use subtle::{Choice, CtOption};
 
     curve_impl!(
         "G1",
@@ -1114,7 +1114,7 @@ pub mod g1 {
                 assert!(!p.is_in_correct_subgroup_assuming_on_curve());
 
                 let g1 = p.scale_by_cofactor();
-                if !g1.is_identity() {
+                if bool::from(!g1.is_identity()) {
                     assert_eq!(i, 4);
                     let g1 = G1Affine::from(g1);
 
@@ -1408,7 +1408,7 @@ pub mod g2 {
     use rand_core::RngCore;
     use std::fmt;
     use std::ops::{AddAssign, MulAssign, Neg, SubAssign};
-    use subtle::CtOption;
+    use subtle::{Choice, CtOption};
 
     curve_impl!(
         "G2",
@@ -1767,7 +1767,7 @@ pub mod g2 {
                 assert!(!p.is_in_correct_subgroup_assuming_on_curve());
 
                 let g2 = p.scale_by_cofactor();
-                if !g2.is_identity() {
+                if bool::from(!g2.is_identity()) {
                     assert_eq!(i, 2);
                     let g2 = G2Affine::from(g2);
 

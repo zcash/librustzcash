@@ -7,6 +7,7 @@ use std::error::Error;
 use std::fmt;
 use std::iter::Sum;
 use std::ops::{Add, AddAssign, Mul, MulAssign, Neg, Sub, SubAssign};
+use subtle::Choice;
 
 pub mod tests;
 
@@ -80,7 +81,7 @@ pub trait Group:
     fn generator() -> Self::Subgroup;
 
     /// Determines if this point is the identity.
-    fn is_identity(&self) -> bool;
+    fn is_identity(&self) -> Choice;
 
     /// Doubles this element.
     #[must_use]

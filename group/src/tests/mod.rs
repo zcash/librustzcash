@@ -14,13 +14,13 @@ pub fn curve_tests<G: CurveProjective>() {
     // Negation edge case with identity.
     {
         let z = G::identity().neg();
-        assert!(z.is_identity());
+        assert!(bool::from(z.is_identity()));
     }
 
     // Doubling edge case with identity.
     {
         let z = G::identity().double();
-        assert!(z.is_identity());
+        assert!(bool::from(z.is_identity()));
     }
 
     // Addition edge cases with identity
@@ -34,9 +34,9 @@ pub fn curve_tests<G: CurveProjective>() {
 
         let mut z = G::identity();
         z.add_assign(&G::identity());
-        assert!(z.is_identity());
+        assert!(bool::from(z.is_identity()));
         z.add_assign(&G::Affine::identity());
-        assert!(z.is_identity());
+        assert!(bool::from(z.is_identity()));
 
         let mut z2 = z;
         z2.add_assign(&r);
@@ -208,11 +208,11 @@ fn random_negation_tests<G: CurveProjective>() {
 
         let mut t3 = t1;
         t3.add_assign(&t2);
-        assert!(t3.is_identity());
+        assert!(bool::from(t3.is_identity()));
 
         let mut t4 = t1;
         t4.add_assign(&t2.into_affine());
-        assert!(t4.is_identity());
+        assert!(bool::from(t4.is_identity()));
 
         assert_eq!(t1.neg(), t2);
     }
