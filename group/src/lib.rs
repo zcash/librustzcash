@@ -5,6 +5,7 @@ use ff::{Field, PrimeField};
 use rand::RngCore;
 use std::error::Error;
 use std::fmt;
+use std::iter::Sum;
 use std::ops::{Add, AddAssign, Neg, Sub, SubAssign};
 
 pub mod tests;
@@ -38,6 +39,8 @@ pub trait Group:
     + Send
     + Sync
     + 'static
+    + Sum
+    + for<'a> Sum<&'a Self>
     + Neg<Output = Self>
     + GroupOps
     + GroupOpsOwned

@@ -205,6 +205,18 @@ macro_rules! curve_impl {
             }
         }
 
+        impl ::std::iter::Sum for $projective {
+            fn sum<I: Iterator<Item = Self>>(iter: I) -> Self {
+                iter.fold(Self::identity(), ::std::ops::Add::add)
+            }
+        }
+
+        impl<'r> ::std::iter::Sum<&'r $projective> for $projective {
+            fn sum<I: Iterator<Item = &'r $projective>>(iter: I) -> Self {
+                iter.fold(Self::identity(), ::std::ops::Add::add)
+            }
+        }
+
         impl ::std::ops::Neg for $projective {
             type Output = Self;
 
