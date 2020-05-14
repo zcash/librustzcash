@@ -5,7 +5,7 @@ pub(crate) mod g1 {
     use std::ops::AddAssign;
 
     use ff::Field;
-    use group::CurveProjective;
+    use group::{CurveProjective, Group};
     use pairing::bls12_381::*;
 
     fn bench_g1_mul_assign(c: &mut Criterion) {
@@ -92,7 +92,7 @@ pub(crate) mod g2 {
     use std::ops::AddAssign;
 
     use ff::Field;
-    use group::CurveProjective;
+    use group::{CurveProjective, Group};
     use pairing::bls12_381::*;
 
     fn bench_g2_mul_assign(c: &mut Criterion) {

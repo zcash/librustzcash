@@ -508,11 +508,7 @@ macro_rules! curve_impl {
             }
         }
 
-        impl CurveProjective for $projective {
-            type Scalar = $scalarfield;
-            type Base = $basefield;
-            type Affine = $affine;
-
+        impl Group for $projective {
             fn random<R: RngCore + ?Sized>(rng: &mut R) -> Self {
                 loop {
                     let x = $basefield::random(rng);
@@ -548,6 +544,14 @@ macro_rules! curve_impl {
             fn is_identity(&self) -> bool {
                 self.z.is_zero()
             }
+        }
+
+        impl PrimeGroup for $projective {}
+
+        impl CurveProjective for $projective {
+            type Scalar = $scalarfield;
+            type Base = $basefield;
+            type Affine = $affine;
 
             fn is_normalized(&self) -> bool {
                 self.is_identity() || self.z == $basefield::one()
@@ -748,7 +752,9 @@ pub mod g1 {
     use super::g2::G2Affine;
     use crate::{Engine, PairingCurveAffine};
     use ff::{BitIterator, Field, PrimeField};
-    use group::{CurveAffine, CurveProjective, EncodedPoint, GroupDecodingError};
+    use group::{
+        CurveAffine, CurveProjective, EncodedPoint, Group, GroupDecodingError, PrimeGroup,
+    };
     use rand_core::RngCore;
     use std::fmt;
     use std::ops::{AddAssign, MulAssign, Neg, SubAssign};
@@ -1356,7 +1362,9 @@ pub mod g2 {
     use super::g1::G1Affine;
     use crate::{Engine, PairingCurveAffine};
     use ff::{BitIterator, Field, PrimeField};
-    use group::{CurveAffine, CurveProjective, EncodedPoint, GroupDecodingError};
+    use group::{
+        CurveAffine, CurveProjective, EncodedPoint, Group, GroupDecodingError, PrimeGroup,
+    };
     use rand_core::RngCore;
     use std::fmt;
     use std::ops::{AddAssign, MulAssign, Neg, SubAssign};

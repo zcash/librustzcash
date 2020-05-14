@@ -1,5 +1,5 @@
 use ff::PrimeField;
-use group::{CurveAffine, CurveProjective, EncodedPoint, GroupDecodingError};
+use group::{CurveAffine, CurveProjective, EncodedPoint, Group, GroupDecodingError};
 
 use super::*;
 use crate::*;

@@ -12,6 +12,26 @@ pub mod tests;
 mod wnaf;
 pub use self::wnaf::Wnaf;
 
+/// This trait represents an element of a cryptographic group.
+pub trait Group:
+    Clone + Copy + fmt::Debug + fmt::Display + Eq + Sized + Send + Sync + 'static
+{
+    /// Returns an element chosen uniformly at random using a user-provided RNG.
+    fn random<R: RngCore + ?Sized>(rng: &mut R) -> Self;
+
+    /// Returns the additive identity, also known as the "neutral element".
+    fn identity() -> Self;
+
+    /// Returns a fixed generator of the prime-order subgroup.
+    fn generator() -> Self;
+
+    /// Determines if this point is the identity.
+    fn is_identity(&self) -> bool;
+}
+
+/// This trait represents an element of a prime-order cryptographic group.
+pub trait PrimeGroup: Group {}
+
 /// A helper trait for types implementing group addition.
 pub trait CurveOps<Rhs = Self, Output = Self>:
     Add<Rhs, Output = Output> + Sub<Rhs, Output = Output> + AddAssign<Rhs> + SubAssign<Rhs>
@@ -30,16 +50,7 @@ impl<T, Rhs, Output> CurveOpsOwned<Rhs, Output> for T where T: for<'r> CurveOps<
 /// Projective representation of an elliptic curve point guaranteed to be
 /// in the correct prime order subgroup.
 pub trait CurveProjective:
-    PartialEq
-    + Eq
-    + Sized
-    + Copy
-    + Clone
-    + Send
-    + Sync
-    + fmt::Debug
-    + fmt::Display
-    + 'static
+    Group
     + Neg<Output = Self>
     + CurveOps
     + CurveOpsOwned
@@ -49,18 +60,6 @@ pub trait CurveProjective:
     type Scalar: PrimeField;
     type Base: Field;
     type Affine: CurveAffine<Projective = Self, Scalar = Self::Scalar>;
-
-    /// Returns an element chosen uniformly at random using a user-provided RNG.
-    fn random<R: RngCore + ?Sized>(rng: &mut R) -> Self;
-
-    /// Returns the additive identity.
-    fn identity() -> Self;
-
-    /// Returns a fixed generator of unknown exponent.
-    fn generator() -> Self;
-
-    /// Determines if this point is the point at infinity.
-    fn is_identity(&self) -> bool;
 
     /// Normalizes a slice of projective elements so that
     /// conversion to affine is cheap.

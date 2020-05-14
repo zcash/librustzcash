@@ -8,7 +8,7 @@ use criterion::{criterion_group, Criterion};
 use rand_core::SeedableRng;
 use rand_xorshift::XorShiftRng;
 
-use group::CurveProjective;
+use group::Group;
 use pairing::bls12_381::*;
 use pairing::{Engine, PairingCurveAffine};
 
