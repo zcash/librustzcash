@@ -141,7 +141,8 @@ macro_rules! curve_impl {
             }
 
             fn is_in_correct_subgroup_assuming_on_curve(&self) -> bool {
-                self.mul($scalarfield::char()).is_identity().into()
+                let bits = BitIterator::<u8, _>::new($scalarfield::char());
+                self.mul_bits_u8(bits).is_identity().into()
             }
         }
 
@@ -155,6 +156,24 @@ macro_rules! curve_impl {
                     ret.y = ret.y.neg();
                 }
                 ret
+            }
+        }
+
+        impl ::std::ops::Mul<$scalarfield> for $affine {
+            type Output = $projective;
+
+            fn mul(self, by: $scalarfield) -> $projective {
+                let bits = BitIterator::<u8, <$scalarfield as PrimeField>::Repr>::new(by.into());
+                self.mul_bits_u8(bits)
+            }
+        }
+
+        impl<'r> ::std::ops::Mul<&'r $scalarfield> for $affine {
+            type Output = $projective;
+
+            fn mul(self, by: &'r $scalarfield) -> $projective {
+                let bits = BitIterator::<u8, <$scalarfield as PrimeField>::Repr>::new(by.into());
+                self.mul_bits_u8(bits)
             }
         }
 
@@ -179,11 +198,6 @@ macro_rules! curve_impl {
 
             fn is_identity(&self) -> Choice {
                 Choice::from(if self.infinity { 1 } else { 0 })
-            }
-
-            fn mul<S: Into<<Self::Scalar as PrimeField>::Repr>>(&self, by: S) -> $projective {
-                let bits = BitIterator::<u8, _>::new(by.into());
-                self.mul_bits_u8(bits)
             }
 
             fn into_projective(&self) -> $projective {

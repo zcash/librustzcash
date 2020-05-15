@@ -1,7 +1,7 @@
 use ff::{Field, PrimeField};
 use rand::SeedableRng;
 use rand_xorshift::XorShiftRng;
-use std::ops::Neg;
+use std::ops::{Mul, Neg};
 
 use crate::{CurveAffine, CurveProjective, EncodedPoint};
 
@@ -273,8 +273,8 @@ fn random_multiplication_tests<G: CurveProjective>() {
         tmp2.add_assign(&b);
 
         // Affine multiplication
-        let mut tmp3 = a_affine.mul(s);
-        tmp3.add_assign(&b_affine.mul(s));
+        let mut tmp3 = Mul::<G::Scalar>::mul(a_affine, s);
+        tmp3.add_assign(Mul::<G::Scalar>::mul(b_affine, s));
 
         assert_eq!(tmp1, tmp2);
         assert_eq!(tmp1, tmp3);

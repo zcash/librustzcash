@@ -20,6 +20,7 @@ pub mod tests;
 
 pub mod bls12_381;
 
+use core::ops::Mul;
 use ff::{Field, PrimeField, ScalarEngine};
 use group::{CurveAffine, CurveProjective, GroupOps, GroupOpsOwned, ScalarMul, ScalarMulOwned};
 use subtle::CtOption;
@@ -43,7 +44,9 @@ pub trait Engine: ScalarEngine {
             Projective = Self::G1,
             Pair = Self::G2Affine,
             PairingResult = Self::Fqk,
-        > + From<Self::G1>;
+        > + From<Self::G1>
+        + Mul<Self::Fr, Output = Self::G1>
+        + for<'a> Mul<&'a Self::Fr, Output = Self::G1>;
 
     /// The projective representation of an element in G2.
     type G2: CurveProjective<Base = Self::Fqe, Scalar = Self::Fr, Affine = Self::G2Affine>
@@ -60,7 +63,9 @@ pub trait Engine: ScalarEngine {
             Projective = Self::G2,
             Pair = Self::G1Affine,
             PairingResult = Self::Fqk,
-        > + From<Self::G2>;
+        > + From<Self::G2>
+        + Mul<Self::Fr, Output = Self::G2>
+        + for<'a> Mul<&'a Self::Fr, Output = Self::G2>;
 
     /// The base field that hosts G1.
     type Fq: PrimeField;

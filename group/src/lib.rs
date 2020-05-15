@@ -99,7 +99,9 @@ pub trait CurveProjective:
     + GroupOpsOwned<<Self as CurveProjective>::Affine>
 {
     type Base: Field;
-    type Affine: CurveAffine<Projective = Self, Scalar = Self::Scalar>;
+    type Affine: CurveAffine<Projective = Self, Scalar = Self::Scalar>
+        + Mul<Self::Scalar, Output = Self>
+        + for<'r> Mul<Self::Scalar, Output = Self>;
 
     /// Converts a batch of projective elements into affine elements. This function will
     /// panic if `p.len() != q.len()`.
@@ -131,6 +133,8 @@ pub trait CurveAffine:
     + Eq
     + 'static
     + Neg<Output = Self>
+    + Mul<<Self as CurveAffine>::Scalar, Output = <Self as CurveAffine>::Projective>
+    + for<'r> Mul<<Self as CurveAffine>::Scalar, Output = <Self as CurveAffine>::Projective>
 {
     type Scalar: PrimeField;
     type Base: Field;
@@ -147,9 +151,6 @@ pub trait CurveAffine:
     /// Determines if this point represents the point at infinity; the
     /// additive identity.
     fn is_identity(&self) -> Choice;
-
-    /// Performs scalar multiplication of this element with mixed addition.
-    fn mul<S: Into<<Self::Scalar as PrimeField>::Repr>>(&self, other: S) -> Self::Projective;
 
     /// Converts this element into its affine representation.
     fn into_projective(&self) -> Self::Projective;
