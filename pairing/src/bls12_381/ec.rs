@@ -177,8 +177,8 @@ macro_rules! curve_impl {
                 Self::get_generator()
             }
 
-            fn is_identity(&self) -> bool {
-                self.infinity
+            fn is_identity(&self) -> Choice {
+                Choice::from(if self.infinity { 1 } else { 0 })
             }
 
             fn mul<S: Into<<Self::Scalar as PrimeField>::Repr>>(&self, by: S) -> $projective {
@@ -893,7 +893,7 @@ pub mod g1 {
         fn from_affine(affine: G1Affine) -> Self {
             let mut res = Self::empty();
 
-            if affine.is_identity() {
+            if affine.is_identity().into() {
                 // Set the second-most significant bit to indicate this point
                 // is at infinity.
                 res.0[0] |= 1 << 6;
@@ -990,7 +990,7 @@ pub mod g1 {
         fn from_affine(affine: G1Affine) -> Self {
             let mut res = Self::empty();
 
-            if affine.is_identity() {
+            if affine.is_identity().into() {
                 // Set the second-most significant bit to indicate this point
                 // is at infinity.
                 res.0[0] |= 1 << 6;
@@ -1070,7 +1070,7 @@ pub mod g1 {
 
     impl G1Prepared {
         pub fn is_identity(&self) -> bool {
-            self.0.is_identity()
+            self.0.is_identity().into()
         }
 
         pub fn from_affine(p: G1Affine) -> Self {
@@ -1515,7 +1515,7 @@ pub mod g2 {
         fn from_affine(affine: G2Affine) -> Self {
             let mut res = Self::empty();
 
-            if affine.is_identity() {
+            if affine.is_identity().into() {
                 // Set the second-most significant bit to indicate this point
                 // is at infinity.
                 res.0[0] |= 1 << 6;
@@ -1629,7 +1629,7 @@ pub mod g2 {
         fn from_affine(affine: G2Affine) -> Self {
             let mut res = Self::empty();
 
-            if affine.is_identity() {
+            if affine.is_identity().into() {
                 // Set the second-most significant bit to indicate this point
                 // is at infinity.
                 res.0[0] |= 1 << 6;

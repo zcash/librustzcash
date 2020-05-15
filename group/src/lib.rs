@@ -146,7 +146,7 @@ pub trait CurveAffine:
 
     /// Determines if this point represents the point at infinity; the
     /// additive identity.
-    fn is_identity(&self) -> bool;
+    fn is_identity(&self) -> Choice;
 
     /// Performs scalar multiplication of this element with mixed addition.
     fn mul<S: Into<<Self::Scalar as PrimeField>::Repr>>(&self, other: S) -> Self::Projective;
