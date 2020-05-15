@@ -101,13 +101,9 @@ pub trait CurveProjective:
     type Base: Field;
     type Affine: CurveAffine<Projective = Self, Scalar = Self::Scalar>;
 
-    /// Normalizes a slice of projective elements so that
-    /// conversion to affine is cheap.
-    fn batch_normalization(v: &mut [Self]);
-
-    /// Checks if the point is already "normalized" so that
-    /// cheap affine conversion is possible.
-    fn is_normalized(&self) -> bool;
+    /// Converts a batch of projective elements into affine elements. This function will
+    /// panic if `p.len() != q.len()`.
+    fn batch_normalize(p: &[Self], q: &mut [Self::Affine]);
 
     /// Converts this element into its affine representation.
     fn into_affine(&self) -> Self::Affine;

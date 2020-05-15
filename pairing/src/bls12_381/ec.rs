@@ -661,60 +661,47 @@ macro_rules! curve_impl {
             type Base = $basefield;
             type Affine = $affine;
 
-            fn is_normalized(&self) -> bool {
-                self.is_identity().into() || self.z == $basefield::one()
-            }
+            fn batch_normalize(p: &[Self], q: &mut [$affine]) {
+                assert_eq!(p.len(), q.len());
 
-            fn batch_normalization(v: &mut [Self]) {
-                // Montgomery’s Trick and Fast Implementation of Masked AES
-                // Genelle, Prouff and Quisquater
-                // Section 3.2
+                let mut acc = $basefield::one();
+                for (p, q) in p.iter().zip(q.iter_mut()) {
+                    // We use the `x` field of $affine to store the product
+                    // of previous z-coordinates seen.
+                    q.x = acc;
 
-                // First pass: compute [a, ab, abc, ...]
-                let mut prod = Vec::with_capacity(v.len());
-                let mut tmp = $basefield::one();
-                for g in v
-                    .iter_mut()
-                    // Ignore normalized elements
-                    .filter(|g| !g.is_normalized())
-                {
-                    tmp.mul_assign(&g.z);
-                    prod.push(tmp);
+                    // We will end up skipping all identities in p
+                    if bool::from(!p.is_identity()) {
+                        acc *= p.z;
+                    }
                 }
 
-                // Invert `tmp`.
-                tmp = tmp.invert().unwrap(); // Guaranteed to be nonzero.
+                // This is the inverse, as all z-coordinates are nonzero and the ones
+                // that are not are skipped.
+                acc = acc.invert().unwrap();
 
-                // Second pass: iterate backwards to compute inverses
-                for (g, s) in v
-                    .iter_mut()
-                    // Backwards
-                    .rev()
-                    // Ignore normalized elements
-                    .filter(|g| !g.is_normalized())
-                    // Backwards, skip last element, fill in one for last term.
-                    .zip(
-                        prod.into_iter()
-                            .rev()
-                            .skip(1)
-                            .chain(Some($basefield::one())),
-                    )
-                {
-                    // tmp := tmp * g.z; g.z := tmp * s = 1/z
-                    let mut newtmp = tmp;
-                    newtmp.mul_assign(&g.z);
-                    g.z = tmp;
-                    g.z.mul_assign(&s);
-                    tmp = newtmp;
-                }
+                for (p, q) in p.iter().rev().zip(q.iter_mut().rev()) {
+                    let skip = p.is_identity();
 
-                // Perform affine transformations
-                for g in v.iter_mut().filter(|g| !g.is_normalized()) {
-                    let mut z = g.z.square(); // 1/z^2
-                    g.x.mul_assign(&z); // x/z^2
-                    z.mul_assign(&g.z); // 1/z^3
-                    g.y.mul_assign(&z); // y/z^3
-                    g.z = $basefield::one(); // z = 1
+                    // Compute tmp = 1/z
+                    let tmp = q.x * acc;
+
+                    // Cancel out z-coordinate in denominator of `acc`
+                    if bool::from(!skip) {
+                        acc *= p.z;
+                    }
+
+                    // Set the coordinates to the correct value
+                    let tmp2 = tmp.square();
+                    let tmp3 = tmp2 * tmp;
+
+                    if skip.into() {
+                        *q = $affine::identity();
+                    } else {
+                        q.x = p.x * tmp2;
+                        q.y = p.y * tmp3;
+                        q.infinity = false;
+                    }
                 }
             }
 

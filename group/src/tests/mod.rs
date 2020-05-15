@@ -378,10 +378,6 @@ fn random_transformation_tests<G: CurveProjective>() {
     for _ in 0..10 {
         let mut v = (0..1000).map(|_| G::random(&mut rng)).collect::<Vec<_>>();
 
-        for i in &v {
-            assert!(!i.is_normalized());
-        }
-
         use rand::distributions::{Distribution, Uniform};
         let between = Uniform::new(0, 1000);
         // Sprinkle in some normalized points
@@ -393,17 +389,12 @@ fn random_transformation_tests<G: CurveProjective>() {
             v[s] = v[s].into_affine().into_projective();
         }
 
-        let expected_v = v
-            .iter()
-            .map(|v| v.into_affine().into_projective())
-            .collect::<Vec<_>>();
-        G::batch_normalization(&mut v);
+        let expected_v = v.iter().map(|v| v.into_affine()).collect::<Vec<_>>();
 
-        for i in &v {
-            assert!(i.is_normalized());
-        }
+        let mut normalized = vec![G::Affine::identity(); v.len()];
+        G::batch_normalize(&v, &mut normalized);
 
-        assert_eq!(v, expected_v);
+        assert_eq!(normalized, expected_v);
     }
 }
 
