@@ -2,15 +2,14 @@ use byteorder::{ByteOrder, LittleEndian};
 use ff::PrimeField;
 use std::iter;
 
-use super::CurveProjective;
+use super::{CurveProjective, Group};
 
 /// Replaces the contents of `table` with a w-NAF window table for the given window size.
 pub(crate) fn wnaf_table<G: CurveProjective>(table: &mut Vec<G>, mut base: G, window: usize) {
     table.truncate(0);
     table.reserve(1 << (window - 1));
 
-    let mut dbl = base;
-    dbl.double();
+    let dbl = base.double();
 
     for _ in 0..(1 << (window - 1)) {
         table.push(base);
@@ -80,13 +79,13 @@ pub(crate) fn wnaf_form<S: AsRef<[u8]>>(wnaf: &mut Vec<i64>, c: S, window: usize
 /// This function must be provided a `table` and `wnaf` that were constructed with
 /// the same window size; otherwise, it may panic or produce invalid results.
 pub(crate) fn wnaf_exp<G: CurveProjective>(table: &[G], wnaf: &[i64]) -> G {
-    let mut result = G::zero();
+    let mut result = G::identity();
 
     let mut found_one = false;
 
     for n in wnaf.iter().rev() {
         if found_one {
-            result.double();
+            result = result.double();
         }
 
         if *n != 0 {
@@ -141,10 +140,7 @@ impl<G: CurveProjective> Wnaf<(), Vec<G>, Vec<i64>> {
 
     /// Given a scalar, compute its wNAF representation and return a `Wnaf` object that can perform
     /// exponentiations with `.base(..)`.
-    pub fn scalar(
-        &mut self,
-        scalar: &<G as CurveProjective>::Scalar,
-    ) -> Wnaf<usize, &mut Vec<G>, &[i64]> {
+    pub fn scalar(&mut self, scalar: &<G as Group>::Scalar) -> Wnaf<usize, &mut Vec<G>, &[i64]> {
         // Compute the appropriate window size for the scalar.
         let window_size = G::recommended_wnaf_for_scalar(&scalar);
 
@@ -199,7 +195,7 @@ impl<B, S: AsRef<[i64]>> Wnaf<usize, B, S> {
 
 impl<B, S: AsMut<Vec<i64>>> Wnaf<usize, B, S> {
     /// Performs exponentiation given a scalar.
-    pub fn scalar<G: CurveProjective>(&mut self, scalar: &<G as CurveProjective>::Scalar) -> G
+    pub fn scalar<G: CurveProjective>(&mut self, scalar: &<G as Group>::Scalar) -> G
     where
         B: AsRef<[G]>,
     {

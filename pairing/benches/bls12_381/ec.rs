@@ -5,7 +5,7 @@ pub(crate) mod g1 {
     use std::ops::AddAssign;
 
     use ff::Field;
-    use group::CurveProjective;
+    use group::Group;
     use pairing::bls12_381::*;
 
     fn bench_g1_mul_assign(c: &mut Criterion) {
@@ -24,7 +24,7 @@ pub(crate) mod g1 {
         c.bench_function("G1::mul_assign", |b| {
             b.iter(|| {
                 let mut tmp = v[count].0;
-                tmp.mul_assign(v[count].1);
+                tmp *= v[count].1;
                 count = (count + 1) % SAMPLES;
                 tmp
             })
@@ -92,7 +92,7 @@ pub(crate) mod g2 {
     use std::ops::AddAssign;
 
     use ff::Field;
-    use group::CurveProjective;
+    use group::Group;
     use pairing::bls12_381::*;
 
     fn bench_g2_mul_assign(c: &mut Criterion) {
@@ -111,7 +111,7 @@ pub(crate) mod g2 {
         c.bench_function("G2::mul_assign", |b| {
             b.iter(|| {
                 let mut tmp = v[count].0;
-                tmp.mul_assign(v[count].1);
+                tmp *= v[count].1;
                 count = (count + 1) % SAMPLES;
                 tmp
             })

@@ -1,5 +1,5 @@
 use ff::{Endianness, Field, PrimeField};
-use group::{CurveAffine, CurveProjective};
+use group::{CurveAffine, CurveProjective, Group};
 use rand_core::SeedableRng;
 use rand_xorshift::XorShiftRng;
 use std::ops::MulAssign;
@@ -21,8 +21,8 @@ pub fn engine_tests<E: Engine>() {
     }
 
     for _ in 0..1000 {
-        let z1 = E::G1Affine::zero().prepare();
-        let z2 = E::G2Affine::zero().prepare();
+        let z1 = E::G1Affine::identity().prepare();
+        let z2 = E::G2Affine::identity().prepare();
 
         let a = E::G1::random(&mut rng).into_affine().prepare();
         let b = E::G2::random(&mut rng).into_affine().prepare();
@@ -114,23 +114,21 @@ fn random_bilinearity_tests<E: Engine>() {
         let d = E::Fr::random(&mut rng);
 
         let mut ac = a;
-        ac.mul_assign(c);
+        MulAssign::<&E::Fr>::mul_assign(&mut ac, &c);
 
         let mut ad = a;
-        ad.mul_assign(d);
+        MulAssign::<&E::Fr>::mul_assign(&mut ad, &d);
 
         let mut bc = b;
-        bc.mul_assign(c);
+        MulAssign::<&E::Fr>::mul_assign(&mut bc, &c);
 
         let mut bd = b;
-        bd.mul_assign(d);
+        MulAssign::<&E::Fr>::mul_assign(&mut bd, &d);
 
         let acbd = E::pairing(ac, bd);
         let adbc = E::pairing(ad, bc);
 
-        let mut cd = c;
-        cd.mul_assign(&d);
-        let mut cd = cd.to_repr();
+        let mut cd = (c * &d).to_repr();
         <E::Fr as PrimeField>::ReprEndianness::toggle_little_endian(&mut cd);
 
         use byteorder::ByteOrder;

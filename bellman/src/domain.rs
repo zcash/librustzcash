@@ -216,12 +216,12 @@ impl<G: CurveProjective> Clone for Point<G> {
     }
 }
 
-impl<G: CurveProjective> Group<G::Engine> for Point<G> {
+impl<G: CurveProjective, E: ScalarEngine<Fr = G::Scalar>> Group<E> for Point<G> {
     fn group_zero() -> Self {
-        Point(G::zero())
+        Point(G::identity())
     }
     fn group_mul_assign(&mut self, by: &G::Scalar) {
-        self.0.mul_assign(by.to_repr());
+        self.0.mul_assign(by);
     }
     fn group_add_assign(&mut self, other: &Self) {
         self.0.add_assign(&other.0);

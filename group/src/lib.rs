@@ -1,67 +1,105 @@
 // Catch documentation errors caused by code changes.
 #![deny(intra_doc_link_resolution_failure)]
 
-use ff::{Field, PrimeField, ScalarEngine};
+use ff::{Field, PrimeField};
 use rand::RngCore;
 use std::error::Error;
 use std::fmt;
-use std::ops::{Add, AddAssign, Neg, Sub, SubAssign};
+use std::iter::Sum;
+use std::ops::{Add, AddAssign, Mul, MulAssign, Neg, Sub, SubAssign};
+use subtle::Choice;
 
 pub mod tests;
 
 mod wnaf;
 pub use self::wnaf::Wnaf;
 
-/// A helper trait for types implementing group addition.
-pub trait CurveOps<Rhs = Self, Output = Self>:
+/// A helper trait for types with a group operation.
+pub trait GroupOps<Rhs = Self, Output = Self>:
     Add<Rhs, Output = Output> + Sub<Rhs, Output = Output> + AddAssign<Rhs> + SubAssign<Rhs>
 {
 }
 
-impl<T, Rhs, Output> CurveOps<Rhs, Output> for T where
+impl<T, Rhs, Output> GroupOps<Rhs, Output> for T where
     T: Add<Rhs, Output = Output> + Sub<Rhs, Output = Output> + AddAssign<Rhs> + SubAssign<Rhs>
 {
 }
 
-/// A helper trait for references implementing group addition.
-pub trait CurveOpsOwned<Rhs = Self, Output = Self>: for<'r> CurveOps<&'r Rhs, Output> {}
-impl<T, Rhs, Output> CurveOpsOwned<Rhs, Output> for T where T: for<'r> CurveOps<&'r Rhs, Output> {}
+/// A helper trait for references with a group operation.
+pub trait GroupOpsOwned<Rhs = Self, Output = Self>: for<'r> GroupOps<&'r Rhs, Output> {}
+impl<T, Rhs, Output> GroupOpsOwned<Rhs, Output> for T where T: for<'r> GroupOps<&'r Rhs, Output> {}
+
+/// A helper trait for types implementing group scalar multiplication.
+pub trait ScalarMul<Rhs, Output = Self>: Mul<Rhs, Output = Output> + MulAssign<Rhs> {}
+
+impl<T, Rhs, Output> ScalarMul<Rhs, Output> for T where T: Mul<Rhs, Output = Output> + MulAssign<Rhs>
+{}
+
+/// A helper trait for references implementing group scalar multiplication.
+///
+/// This trait, in combination with `ScalarMul`, is necessary to address type constraint
+/// issues in `pairing::Engine` (specifically, to ensure that [`ff::ScalarEngine::Fr`] is
+/// correctly constrained to implement these traits required by [`Group::Scalar`]).
+pub trait ScalarMulOwned<Rhs, Output = Self>: for<'r> ScalarMul<&'r Rhs, Output> {}
+impl<T, Rhs, Output> ScalarMulOwned<Rhs, Output> for T where T: for<'r> ScalarMul<&'r Rhs, Output> {}
+
+/// This trait represents an element of a cryptographic group.
+pub trait Group:
+    Clone
+    + Copy
+    + fmt::Debug
+    + fmt::Display
+    + Eq
+    + Sized
+    + Send
+    + Sync
+    + 'static
+    + Sum
+    + for<'a> Sum<&'a Self>
+    + Neg<Output = Self>
+    + GroupOps
+    + GroupOpsOwned
+    + GroupOps<<Self as Group>::Subgroup>
+    + GroupOpsOwned<<Self as Group>::Subgroup>
+    + ScalarMul<<Self as Group>::Scalar>
+    + ScalarMulOwned<<Self as Group>::Scalar>
+{
+    /// The large prime-order subgroup in which cryptographic operations are performed.
+    /// If `Self` implements `PrimeGroup`, then `Self::Subgroup` may be `Self`.
+    type Subgroup: PrimeGroup;
+
+    /// Scalars modulo the order of [`Group::Subgroup`].
+    type Scalar: PrimeField;
+
+    /// Returns an element chosen uniformly at random using a user-provided RNG.
+    fn random<R: RngCore + ?Sized>(rng: &mut R) -> Self;
+
+    /// Returns the additive identity, also known as the "neutral element".
+    fn identity() -> Self;
+
+    /// Returns a fixed generator of the prime-order subgroup.
+    fn generator() -> Self::Subgroup;
+
+    /// Determines if this point is the identity.
+    fn is_identity(&self) -> Choice;
+
+    /// Doubles this element.
+    #[must_use]
+    fn double(&self) -> Self;
+}
+
+/// This trait represents an element of a prime-order cryptographic group.
+pub trait PrimeGroup: Group {}
 
 /// Projective representation of an elliptic curve point guaranteed to be
 /// in the correct prime order subgroup.
 pub trait CurveProjective:
-    PartialEq
-    + Eq
-    + Sized
-    + Copy
-    + Clone
-    + Send
-    + Sync
-    + fmt::Debug
-    + fmt::Display
-    + 'static
-    + Neg<Output = Self>
-    + CurveOps
-    + CurveOpsOwned
-    + CurveOps<<Self as CurveProjective>::Affine>
-    + CurveOpsOwned<<Self as CurveProjective>::Affine>
+    Group
+    + GroupOps<<Self as CurveProjective>::Affine>
+    + GroupOpsOwned<<Self as CurveProjective>::Affine>
 {
-    type Engine: ScalarEngine<Fr = Self::Scalar>;
-    type Scalar: PrimeField;
     type Base: Field;
     type Affine: CurveAffine<Projective = Self, Scalar = Self::Scalar>;
-
-    /// Returns an element chosen uniformly at random using a user-provided RNG.
-    fn random<R: RngCore + ?std::marker::Sized>(rng: &mut R) -> Self;
-
-    /// Returns the additive identity.
-    fn zero() -> Self;
-
-    /// Returns a fixed generator of unknown exponent.
-    fn one() -> Self;
-
-    /// Determines if this point is the point at infinity.
-    fn is_zero(&self) -> bool;
 
     /// Normalizes a slice of projective elements so that
     /// conversion to affine is cheap.
@@ -70,12 +108,6 @@ pub trait CurveProjective:
     /// Checks if the point is already "normalized" so that
     /// cheap affine conversion is possible.
     fn is_normalized(&self) -> bool;
-
-    /// Doubles this element.
-    fn double(&mut self);
-
-    /// Performs scalar multiplication of this element.
-    fn mul_assign<S: Into<<Self::Scalar as PrimeField>::Repr>>(&mut self, other: S);
 
     /// Converts this element into its affine representation.
     fn into_affine(&self) -> Self::Affine;
@@ -104,7 +136,6 @@ pub trait CurveAffine:
     + 'static
     + Neg<Output = Self>
 {
-    type Engine: ScalarEngine<Fr = Self::Scalar>;
     type Scalar: PrimeField;
     type Base: Field;
     type Projective: CurveProjective<Affine = Self, Scalar = Self::Scalar>;
@@ -112,14 +143,14 @@ pub trait CurveAffine:
     type Compressed: EncodedPoint<Affine = Self>;
 
     /// Returns the additive identity.
-    fn zero() -> Self;
+    fn identity() -> Self;
 
     /// Returns a fixed generator of unknown exponent.
-    fn one() -> Self;
+    fn generator() -> Self;
 
     /// Determines if this point represents the point at infinity; the
     /// additive identity.
-    fn is_zero(&self) -> bool;
+    fn is_identity(&self) -> bool;
 
     /// Performs scalar multiplication of this element with mixed addition.
     fn mul<S: Into<<Self::Scalar as PrimeField>::Repr>>(&self, other: S) -> Self::Projective;

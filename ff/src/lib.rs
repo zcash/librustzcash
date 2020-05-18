@@ -50,7 +50,7 @@ pub trait Field:
     + for<'a> SubAssign<&'a Self>
 {
     /// Returns an element chosen uniformly at random using a user-provided RNG.
-    fn random<R: RngCore + ?std::marker::Sized>(rng: &mut R) -> Self;
+    fn random<R: RngCore + ?Sized>(rng: &mut R) -> Self;
 
     /// Returns the zero element of the field, the additive identity.
     fn zero() -> Self;

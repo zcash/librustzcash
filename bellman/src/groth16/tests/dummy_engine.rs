@@ -1,9 +1,10 @@
 use ff::{Field, PrimeField, ScalarEngine};
-use group::{CurveAffine, CurveProjective, EncodedPoint, GroupDecodingError};
+use group::{CurveAffine, CurveProjective, EncodedPoint, Group, GroupDecodingError, PrimeGroup};
 use pairing::{Engine, PairingCurveAffine};
 
 use rand_core::RngCore;
 use std::fmt;
+use std::iter::Sum;
 use std::num::Wrapping;
 use std::ops::{Add, AddAssign, BitAnd, Mul, MulAssign, Neg, Shr, Sub, SubAssign};
 use subtle::{Choice, ConditionallySelectable, ConstantTimeEq, CtOption};
@@ -44,6 +45,18 @@ impl ConditionallySelectable for Fr {
             &(b.0).0,
             choice,
         )))
+    }
+}
+
+impl Sum for Fr {
+    fn sum<I: Iterator<Item = Self>>(iter: I) -> Self {
+        iter.fold(Self::zero(), ::std::ops::Add::add)
+    }
+}
+
+impl<'r> Sum<&'r Fr> for Fr {
+    fn sum<I: Iterator<Item = &'r Fr>>(iter: I) -> Self {
+        iter.fold(Self::zero(), ::std::ops::Add::add)
     }
 }
 
@@ -166,7 +179,7 @@ impl Shr<u32> for Fr {
 }
 
 impl Field for Fr {
-    fn random<R: RngCore + ?std::marker::Sized>(rng: &mut R) -> Self {
+    fn random<R: RngCore + ?Sized>(rng: &mut R) -> Self {
         Fr(Wrapping(rng.next_u32()) % MODULUS_R)
     }
 
@@ -352,42 +365,41 @@ impl Engine for DummyEngine {
     }
 }
 
-impl CurveProjective for Fr {
-    type Affine = Fr;
-    type Base = Fr;
+impl Group for Fr {
+    type Subgroup = Fr;
     type Scalar = Fr;
-    type Engine = DummyEngine;
 
-    fn random<R: RngCore + ?std::marker::Sized>(rng: &mut R) -> Self {
+    fn random<R: RngCore + ?Sized>(rng: &mut R) -> Self {
         <Fr as Field>::random(rng)
     }
 
-    fn zero() -> Self {
+    fn identity() -> Self {
         <Fr as Field>::zero()
     }
 
-    fn one() -> Self {
+    fn generator() -> Self {
         <Fr as Field>::one()
     }
 
-    fn is_zero(&self) -> bool {
-        <Fr as Field>::is_zero(self)
+    fn is_identity(&self) -> Choice {
+        Choice::from(if <Fr as Field>::is_zero(self) { 1 } else { 0 })
     }
+
+    fn double(&self) -> Self {
+        <Fr as Field>::double(self)
+    }
+}
+
+impl PrimeGroup for Fr {}
+
+impl CurveProjective for Fr {
+    type Affine = Fr;
+    type Base = Fr;
 
     fn batch_normalization(_: &mut [Self]) {}
 
     fn is_normalized(&self) -> bool {
         true
-    }
-
-    fn double(&mut self) {
-        self.0 = <Fr as Field>::double(self).0;
-    }
-
-    fn mul_assign<S: Into<<Self::Scalar as PrimeField>::Repr>>(&mut self, other: S) {
-        let tmp = Fr::from_repr(other.into()).unwrap();
-
-        MulAssign::mul_assign(self, &tmp);
     }
 
     fn into_affine(&self) -> Fr {
@@ -448,17 +460,16 @@ impl CurveAffine for Fr {
     type Projective = Fr;
     type Base = Fr;
     type Scalar = Fr;
-    type Engine = DummyEngine;
 
-    fn zero() -> Self {
+    fn identity() -> Self {
         <Fr as Field>::zero()
     }
 
-    fn one() -> Self {
+    fn generator() -> Self {
         <Fr as Field>::one()
     }
 
-    fn is_zero(&self) -> bool {
+    fn is_identity(&self) -> bool {
         <Fr as Field>::is_zero(self)
     }
 

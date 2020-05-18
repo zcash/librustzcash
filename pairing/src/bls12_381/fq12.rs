@@ -177,7 +177,7 @@ impl MulAssign for Fq12 {
 }
 
 impl Field for Fq12 {
-    fn random<R: RngCore + ?std::marker::Sized>(rng: &mut R) -> Self {
+    fn random<R: RngCore + ?Sized>(rng: &mut R) -> Self {
         Fq12 {
             c0: Fq6::random(rng),
             c1: Fq6::random(rng),
