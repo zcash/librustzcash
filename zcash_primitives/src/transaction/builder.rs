@@ -274,6 +274,10 @@ struct TzeInputs<'a, BuildCtx> {
 }
 
 impl<'a, BuildCtx> TzeInputs<'a, BuildCtx> {
+    fn default() -> Self {
+        TzeInputs { builders: vec![] }
+    }
+
     fn push<WBuilder, W: ToPayload>(
         &mut self,
         extension_id: usize,
@@ -391,7 +395,7 @@ impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng> Builder<'a, P, R> {
             spends: vec![],
             outputs: vec![],
             transparent_inputs: TransparentInputs::default(),
-            tze_inputs: TzeInputs { builders: vec![] },
+            tze_inputs: TzeInputs::default(),
             change_address: None,
             phantom: PhantomData,
         }
@@ -814,7 +818,6 @@ mod tests {
     use rand_core::OsRng;
     use std::marker::PhantomData;
 
-    use super::{Builder, Error};
     use crate::{
         consensus,
         consensus::TestNetwork,
@@ -826,6 +829,8 @@ mod tests {
         transaction::components::Amount,
         zip32::{ExtendedFullViewingKey, ExtendedSpendingKey},
     };
+
+    use super::{Builder, Error, TzeInputs};
 
     #[test]
     fn fails_on_negative_output() {
@@ -853,7 +858,7 @@ mod tests {
             TestNetwork::activation_height(NetworkUpgrade::Sapling).unwrap();
 
         // Create a builder with 0 fee, so we can construct t outputs
-        let mut builder = builder::Builder::<TestNetwork, OsRng> {
+        let mut builder = builder::Builder::<'_, TestNetwork, OsRng> {
             rng: OsRng,
             height: sapling_activation_height,
             mtx: TransactionData::new(),
@@ -862,6 +867,7 @@ mod tests {
             spends: vec![],
             outputs: vec![],
             transparent_inputs: TransparentInputs::default(),
+            tze_inputs: TzeInputs::default(),
             change_address: None,
             phantom: PhantomData,
         };
