@@ -1,7 +1,7 @@
 //! Core traits and structs for Transparent Zcash Extensions.
 
-use std::fmt;
 use crate::transaction::components::{Amount, OutPoint, TzeOut};
+use std::fmt;
 
 pub trait FromPayload: Sized {
     type Error;
@@ -90,7 +90,7 @@ pub trait Extension<C> {
 
     fn verify_inner(
         &self,
-        precondition: &Self::P, 
+        precondition: &Self::P,
         witness: &Self::W,
         context: &C,
     ) -> Result<(), Self::Error>;
@@ -116,7 +116,7 @@ pub trait Extension<C> {
 // pub trait WitnessBuilder<BuildCtx> {
 //     type Error;
 //     type Witness: ToPayload;
-// 
+//
 //     fn build_witness(ctx: BuildCtx) -> Result<Witness, Self::Error>;
 // }
 
@@ -131,12 +131,13 @@ pub trait ExtensionTxBuilder<'a> {
     type BuildError;
 
     fn add_tze_input<WBuilder, W: ToPayload>(
-        &mut self, 
+        &mut self,
         extension_id: usize,
         prevout: (OutPoint, TzeOut),
-        witness_builder: WBuilder
+        witness_builder: WBuilder,
     ) -> Result<(), Self::BuildError>
-    where WBuilder: 'a + (FnOnce(&Self::BuildCtx) -> Result<W, Self::BuildError>);
+    where
+        WBuilder: 'a + (FnOnce(&Self::BuildCtx) -> Result<W, Self::BuildError>);
     //where WBuilder: WitnessBuilder<Self::BuildCtx, Witness = W, Error = Self::BuildError>;
 
     fn add_tze_output<P: ToPayload>(
@@ -157,6 +158,6 @@ pub trait Epoch<VerifyCtx> {
         &self,
         precondition: &Precondition,
         witness: &Witness,
-        ctx: &VerifyCtx
+        ctx: &VerifyCtx,
     ) -> Result<(), Error<Self::VerifyError>>;
 }

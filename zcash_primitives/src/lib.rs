@@ -9,8 +9,8 @@
 use lazy_static::lazy_static;
 
 pub mod block;
-pub mod constants;
 pub mod consensus;
+pub mod constants;
 pub mod extensions;
 pub mod group_hash;
 pub mod jubjub;

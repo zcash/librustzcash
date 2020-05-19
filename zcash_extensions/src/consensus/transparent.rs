@@ -1,9 +1,9 @@
 //! Consensus logic for Transparent Zcash Extensions.
 
 use std::convert::TryFrom;
+use zcash_primitives::extensions::transparent::{Error, Extension, Precondition, Witness};
 use zcash_primitives::transaction::components::TzeOut;
 use zcash_primitives::transaction::Transaction;
-use zcash_primitives::extensions::transparent::{Error, Extension, Precondition, Witness};
 
 use crate::transparent::demo;
 

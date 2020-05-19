@@ -22,8 +22,10 @@ use blake2b_simd::Params;
 use std::convert::TryFrom;
 use std::fmt;
 
-use zcash_primitives::extensions::transparent::{Extension, FromPayload, ToPayload, ExtensionTxBuilder};
-use zcash_primitives::transaction::components::{OutPoint, TzeOut, amount::Amount};
+use zcash_primitives::extensions::transparent::{
+    Extension, ExtensionTxBuilder, FromPayload, ToPayload,
+};
+use zcash_primitives::transaction::components::{amount::Amount, OutPoint, TzeOut};
 
 mod open {
     pub const MODE: usize = 0;
@@ -297,59 +299,55 @@ fn builder_hashes(preimage_1: &[u8; 32], preimage_2: &[u8; 32]) -> ([u8; 32], [u
         );
         hash
     };
-    
+
     (hash_1, hash_2)
 }
 
-pub struct DemoBuilder<'a, B> { 
+pub struct DemoBuilder<'a, B> {
     txn_builder: &'a mut B,
     extension_id: usize,
 }
 
 impl<'a, B: ExtensionTxBuilder<'a>> DemoBuilder<'a, B> {
     pub fn demo_open(
-        &mut self, 
-        value: Amount, 
-        preimage_1: [u8; 32], 
-        preimage_2: [u8; 32]
+        &mut self,
+        value: Amount,
+        preimage_1: [u8; 32],
+        preimage_2: [u8; 32],
     ) -> Result<(), B::BuildError> {
         let (hash_1, _) = builder_hashes(&preimage_1, &preimage_2);
 
         // Call through to the generic builder.
-        self.txn_builder.add_tze_output(
-            self.extension_id, 
-            value, 
-            &Precondition::open(hash_1),
-        )
+        self.txn_builder
+            .add_tze_output(self.extension_id, value, &Precondition::open(hash_1))
     }
 
     pub fn demo_transfer_to_close(
-        &mut self, 
+        &mut self,
         prevout: (OutPoint, TzeOut),
         transfer_amount: Amount,
-        preimage_1: [u8; 32], 
-        preimage_2: [u8; 32]
+        preimage_1: [u8; 32],
+        preimage_2: [u8; 32],
     ) -> Result<(), B::BuildError> {
         let (_, hash_2) = builder_hashes(&preimage_1, &preimage_2);
 
         // should we eagerly validate the relationship between prevout.1 and preimage_1?
-        self.txn_builder.add_tze_input(
-            self.extension_id,
-            prevout,
-            move |_| Ok(Witness::open(preimage_1))
-        )?;
+        self.txn_builder
+            .add_tze_input(self.extension_id, prevout, move |_| {
+                Ok(Witness::open(preimage_1))
+            })?;
 
         self.txn_builder.add_tze_output(
-            self.extension_id, 
+            self.extension_id,
             transfer_amount, // can this be > prevout.1.value?
-            &Precondition::close(hash_2)
+            &Precondition::close(hash_2),
         )
     }
 
     pub fn demo_close(
-        &mut self, 
-        prevout: (OutPoint, TzeOut), 
-        preimage: [u8; 32]
+        &mut self,
+        prevout: (OutPoint, TzeOut),
+        preimage: [u8; 32],
     ) -> Result<(), B::BuildError> {
         let hash_2 = {
             let mut hash = [0; 32];
@@ -357,11 +355,10 @@ impl<'a, B: ExtensionTxBuilder<'a>> DemoBuilder<'a, B> {
             hash
         };
 
-        self.txn_builder.add_tze_input(
-            self.extension_id,
-            prevout,
-            move |_| Ok(Witness::close(hash_2))
-        )
+        self.txn_builder
+            .add_tze_input(self.extension_id, prevout, move |_| {
+                Ok(Witness::close(hash_2))
+            })
     }
 }
 
@@ -491,7 +488,7 @@ mod tests {
         mtx_a.tze_outputs.push(out_a);
         let tx_a = mtx_a.freeze().unwrap();
 
-        // 
+        //
         // Transfer
         //
 
@@ -508,7 +505,7 @@ mod tests {
         mtx_b.tze_outputs.push(out_b);
         let tx_b = mtx_b.freeze().unwrap();
 
-        // 
+        //
         // Closing transaction
         //
 
@@ -520,7 +517,6 @@ mod tests {
         let mut mtx_c = TransactionData::nu4();
         mtx_c.tze_inputs.push(in_c);
         let tx_c = mtx_c.freeze().unwrap();
-
 
         // Verify tx_b
         {

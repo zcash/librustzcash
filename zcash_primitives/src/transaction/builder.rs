@@ -1,20 +1,20 @@
 //! Structs for building transactions.
 
-use std::boxed::Box;
 use crate::zip32::ExtendedSpendingKey;
 use crate::{
+    extensions::transparent::ExtensionTxBuilder,
     jubjub::fs::Fs,
     primitives::{Diversifier, Note, PaymentAddress},
-    extensions::transparent::ExtensionTxBuilder,
 };
 use ff::Field;
 use pairing::bls12_381::{Bls12, Fr};
 use rand::{rngs::OsRng, seq::SliceRandom, CryptoRng, RngCore};
+use std::boxed::Box;
 
 use crate::{
     consensus,
-    keys::OutgoingViewingKey,
     extensions::transparent::{self as tze, ToPayload},
+    keys::OutgoingViewingKey,
     legacy::TransparentAddress,
     merkle_tree::MerklePath,
     note_encryption::{generate_esk, Memo, SaplingNoteEncryption},
@@ -23,8 +23,8 @@ use crate::{
     sapling::{spend_sig, Node},
     transaction::{
         components::{
-            amount::DEFAULT_FEE, amount::Amount, 
-            OutputDescription, SpendDescription, TxOut, TzeIn, TzeOut, OutPoint
+            amount::Amount, amount::DEFAULT_FEE, OutPoint, OutputDescription, SpendDescription,
+            TxOut, TzeIn, TzeOut,
         },
         signature_hash_data, Transaction, TransactionData, SIGHASH_ALL,
     },
@@ -171,11 +171,7 @@ struct TransparentInputs;
 
 impl TransparentInputs {
     #[cfg(feature = "transparent-inputs")]
-    fn push(
-        &mut self,
-        sk: secp256k1::SecretKey,
-        coin: TxOut,
-    ) -> Result<(), Error> {
+    fn push(&mut self, sk: secp256k1::SecretKey, coin: TxOut) -> Result<(), Error> {
         if coin.value.is_negative() {
             return Err(Error::InvalidAmount);
         }
@@ -248,7 +244,6 @@ impl TransparentInputs {
     fn apply_signatures(&self, _: &mut TransactionData, _: consensus::BranchId) {}
 }
 
-
 struct TzeInputInfo<'a, BuildCtx> {
     prevout: TzeOut,
     builder: Box<dyn FnOnce(&BuildCtx) -> Result<TzeIn, Error> + 'a>,
@@ -260,22 +255,27 @@ struct TzeInputs<'a, BuildCtx> {
 
 impl<'a, BuildCtx> TzeInputs<'a, BuildCtx> {
     fn push<WBuilder, W: ToPayload>(
-            &mut self, 
-            extension_id: usize, 
-            prevout: (OutPoint, TzeOut), 
-            builder: WBuilder) 
-    where WBuilder: 'a + FnOnce(&BuildCtx) -> Result<W, Error> { 
+        &mut self,
+        extension_id: usize,
+        prevout: (OutPoint, TzeOut),
+        builder: WBuilder,
+    ) where
+        WBuilder: 'a + FnOnce(&BuildCtx) -> Result<W, Error>,
+    {
         let (outpoint, tzeout) = prevout;
-        self.builders.push(TzeInputInfo { 
-            prevout: tzeout, 
-            builder: Box::new(
-                move |ctx| {
-                    let (mode, payload) = builder(&ctx).map(|x| x.to_payload())?;
-                    Ok(TzeIn { 
-                        prevout: outpoint,
-                        witness: tze::Witness { extension_id, mode, payload }
-                    })
+        self.builders.push(TzeInputInfo {
+            prevout: tzeout,
+            builder: Box::new(move |ctx| {
+                let (mode, payload) = builder(&ctx).map(|x| x.to_payload())?;
+                Ok(TzeIn {
+                    prevout: outpoint,
+                    witness: tze::Witness {
+                        extension_id,
+                        mode,
+                        payload,
+                    },
                 })
+            }),
         });
     }
 }
@@ -479,7 +479,7 @@ impl<'a, R: RngCore + CryptoRng> Builder<'a, R> {
         consensus_branch_id: consensus::BranchId,
         prover: &impl TxProver,
         // epoch: &Epoch<TransactionData>
-    ) -> Result<(Transaction, TransactionMetadata), Error>  {
+    ) -> Result<(Transaction, TransactionMetadata), Error> {
         let mut tx_metadata = TransactionMetadata::new();
 
         //
@@ -487,13 +487,20 @@ impl<'a, R: RngCore + CryptoRng> Builder<'a, R> {
         //
 
         // Valid change
-        let change = 
-            self.mtx.value_balance 
-            - self.fee 
-            + self.transparent_inputs.value_sum()
+        let change = self.mtx.value_balance - self.fee + self.transparent_inputs.value_sum()
             - self.mtx.vout.iter().map(|vo| vo.value).sum::<Amount>()
-            + self.tze_inputs.builders.iter().map(|ein| ein.prevout.value).sum::<Amount>()
-            - self.mtx.tze_outputs.iter().map(|tzo| tzo.value).sum::<Amount>();
+            + self
+                .tze_inputs
+                .builders
+                .iter()
+                .map(|ein| ein.prevout.value)
+                .sum::<Amount>()
+            - self
+                .mtx
+                .tze_outputs
+                .iter()
+                .map(|tzo| tzo.value)
+                .sum::<Amount>();
 
         if change.is_negative() {
             return Err(Error::ChangeIsNegative(change));
@@ -718,20 +725,20 @@ impl<'a, R: RngCore + CryptoRng> Builder<'a, R> {
     }
 }
 
-
-
 impl<'a, R: RngCore + CryptoRng> ExtensionTxBuilder<'a> for Builder<'a, R> {
     type BuildCtx = TransactionData;
     type BuildError = Error;
 
     fn add_tze_input<WBuilder, W: ToPayload>(
-        &mut self, 
+        &mut self,
         extension_id: usize,
         prevout: (OutPoint, TzeOut),
-        witness_builder: WBuilder
-    ) -> Result<(), Self::BuildError> 
-    where WBuilder: 'a + (FnOnce(&Self::BuildCtx) -> Result<W, Self::BuildError>) { 
-    // where WBuilder: WitnessBuilder<Self::BuildCtx, Witness = impl ToPayload, Error = Self::BuildError> {
+        witness_builder: WBuilder,
+    ) -> Result<(), Self::BuildError>
+    where
+        WBuilder: 'a + (FnOnce(&Self::BuildCtx) -> Result<W, Self::BuildError>),
+    {
+        // where WBuilder: WitnessBuilder<Self::BuildCtx, Witness = impl ToPayload, Error = Self::BuildError> {
         self.tze_inputs.push(extension_id, prevout, witness_builder);
         Ok(())
     }
@@ -740,7 +747,7 @@ impl<'a, R: RngCore + CryptoRng> ExtensionTxBuilder<'a> for Builder<'a, R> {
         &mut self,
         extension_id: usize,
         value: Amount,
-        guarded_by: &P
+        guarded_by: &P,
     ) -> Result<(), Self::BuildError> {
         if value.is_negative() {
             return Err(Error::InvalidAmount);
@@ -759,7 +766,6 @@ impl<'a, R: RngCore + CryptoRng> ExtensionTxBuilder<'a> for Builder<'a, R> {
         Ok(())
     }
 }
-
 
 #[cfg(test)]
 mod tests {
