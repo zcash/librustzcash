@@ -18,14 +18,15 @@
 //! - `tx_b`: `[ TzeIn(tx_a, preimage_1) -> TzeOut(value, hash_2) ]`
 //! - `tx_c`: `[ TzeIn(tx_b, preimage_2) -> [any output types...] ]`
 
-use blake2b_simd::Params;
 use std::convert::TryFrom;
 use std::fmt;
 
-use zcash_primitives::extensions::transparent::{
-    Extension, ExtensionTxBuilder, FromPayload, ToPayload,
+use blake2b_simd::Params;
+
+use zcash_primitives::{
+    extensions::transparent::{Extension, ExtensionTxBuilder, FromPayload, ToPayload},
+    transaction::components::{amount::Amount, OutPoint, TzeOut},
 };
-use zcash_primitives::transaction::components::{amount::Amount, OutPoint, TzeOut};
 
 mod open {
     pub const MODE: usize = 0;
@@ -100,8 +101,10 @@ impl TryFrom<(usize, Precondition)> for Precondition {
     }
 }
 
-impl FromPayload<Error> for Precondition {
-    fn from_payload(mode: usize, payload: &[u8]) -> Result<Self, Error> {
+impl FromPayload for Precondition {
+    type Error = Error;
+
+    fn from_payload(mode: usize, payload: &[u8]) -> Result<Self, Self::Error> {
         match mode {
             open::MODE => {
                 if payload.len() == 32 {
@@ -163,8 +166,10 @@ impl TryFrom<(usize, Witness)> for Witness {
     }
 }
 
-impl FromPayload<Error> for Witness {
-    fn from_payload(mode: usize, payload: &[u8]) -> Result<Self, Error> {
+impl FromPayload for Witness {
+    type Error = Error;
+
+    fn from_payload(mode: usize, payload: &[u8]) -> Result<Self, Self::Error> {
         match mode {
             open::MODE => {
                 if payload.len() == 32 {
@@ -361,12 +366,14 @@ impl<'a, B: ExtensionTxBuilder<'a>> DemoBuilder<'a, B> {
 #[cfg(test)]
 mod tests {
     use blake2b_simd::Params;
-    use zcash_extensions_api::transparent::{self as tze, Extension, FromPayload, ToPayload};
 
     use super::{close, open, Context, Precondition, Program, Witness};
-    use crate::transaction::{
-        components::{Amount, OutPoint, TzeIn, TzeOut},
-        Transaction, TransactionData,
+    use zcash_primitives::{
+        extensions::transparent::{self as tze, Extension, FromPayload, ToPayload},
+        transaction::{
+            components::{Amount, OutPoint, TzeIn, TzeOut},
+            Transaction, TransactionData,
+        },
     };
 
     #[test]
@@ -476,7 +483,7 @@ mod tests {
             precondition: tze::Precondition::from(0, &Precondition::open(hash_1)),
         };
 
-        println!("{:x?}", precondition.payload);
+        // println!("{:x?}", precondition.payload);
 
         let mut mtx_a = TransactionData::nu4();
         mtx_a.tze_outputs.push(out_a);
