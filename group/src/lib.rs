@@ -107,7 +107,7 @@ pub trait CurveProjective:
     fn batch_normalize(p: &[Self], q: &mut [Self::Affine]);
 
     /// Converts this element into its affine representation.
-    fn into_affine(&self) -> Self::Affine;
+    fn to_affine(&self) -> Self::Affine;
 
     /// Recommends a wNAF window table size given a scalar. Always returns a number
     /// between 2 and 22, inclusive.
@@ -152,7 +152,7 @@ pub trait CurveAffine:
     fn is_identity(&self) -> Choice;
 
     /// Converts this element into its affine representation.
-    fn into_projective(&self) -> Self::Projective;
+    fn to_projective(&self) -> Self::Projective;
 
     /// Attempts to deserialize an element from its compressed encoding.
     fn from_compressed(bytes: &Self::Compressed) -> CtOption<Self>;
@@ -167,7 +167,7 @@ pub trait CurveAffine:
 
     /// Converts this element into its compressed encoding, so long as it's not
     /// the point at infinity.
-    fn into_compressed(&self) -> Self::Compressed;
+    fn to_compressed(&self) -> Self::Compressed;
 
     /// Attempts to deserialize an element from its uncompressed encoding.
     fn from_uncompressed(bytes: &Self::Uncompressed) -> CtOption<Self>;
@@ -182,5 +182,5 @@ pub trait CurveAffine:
 
     /// Converts this element into its uncompressed encoding, so long as it's not
     /// the point at infinity.
-    fn into_uncompressed(&self) -> Self::Uncompressed;
+    fn to_uncompressed(&self) -> Self::Uncompressed;
 }

@@ -57,7 +57,7 @@ macro_rules! curve_impl {
 
         impl ::std::fmt::Display for $projective {
             fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
-                write!(f, "{}", self.into_affine())
+                write!(f, "{}", self.to_affine())
             }
         }
 
@@ -221,7 +221,7 @@ macro_rules! curve_impl {
                 Choice::from(if self.infinity { 1 } else { 0 })
             }
 
-            fn into_projective(&self) -> $projective {
+            fn to_projective(&self) -> $projective {
                 (*self).into()
             }
 
@@ -247,7 +247,7 @@ macro_rules! curve_impl {
                 }
             }
 
-            fn into_compressed(&self) -> Self::Compressed {
+            fn to_compressed(&self) -> Self::Compressed {
                 $compressed::from_affine(*self)
             }
 
@@ -276,7 +276,7 @@ macro_rules! curve_impl {
                 }
             }
 
-            fn into_uncompressed(&self) -> Self::Uncompressed {
+            fn to_uncompressed(&self) -> Self::Uncompressed {
                 $uncompressed::from_affine(*self)
             }
         }
@@ -795,7 +795,7 @@ macro_rules! curve_impl {
                 }
             }
 
-            fn into_affine(&self) -> $affine {
+            fn to_affine(&self) -> $affine {
                 (*self).into()
             }
 
@@ -1476,15 +1476,15 @@ pub mod g1 {
         assert!(b.is_on_curve() && b.is_in_correct_subgroup_assuming_on_curve());
         assert!(c.is_on_curve() && c.is_in_correct_subgroup_assuming_on_curve());
 
-        let mut tmp1 = a.into_projective();
-        tmp1.add_assign(&b.into_projective());
-        assert_eq!(tmp1.into_affine(), c);
-        assert_eq!(tmp1, c.into_projective());
+        let mut tmp1 = a.to_projective();
+        tmp1.add_assign(&b.to_projective());
+        assert_eq!(tmp1.to_affine(), c);
+        assert_eq!(tmp1, c.to_projective());
 
-        let mut tmp2 = a.into_projective();
+        let mut tmp2 = a.to_projective();
         tmp2.add_assign(&b);
-        assert_eq!(tmp2.into_affine(), c);
-        assert_eq!(tmp2, c.into_projective());
+        assert_eq!(tmp2.to_affine(), c);
+        assert_eq!(tmp2, c.to_projective());
     }
 
     #[test]

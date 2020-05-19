@@ -65,8 +65,8 @@ fn uncompressed_test_vectors<G: CurveProjective>(expected: &[u8]) {
     {
         let mut expected = expected;
         for _ in 0..1000 {
-            let e_affine = e.into_affine();
-            let encoded = e_affine.into_uncompressed();
+            let e_affine = e.to_affine();
+            let encoded = e_affine.to_uncompressed();
             v.extend_from_slice(encoded.as_ref());
 
             let mut decoded = <G::Affine as CurveAffine>::Uncompressed::default();
@@ -92,8 +92,8 @@ fn compressed_test_vectors<G: CurveProjective>(expected: &[u8]) {
     {
         let mut expected = expected;
         for _ in 0..1000 {
-            let e_affine = e.into_affine();
-            let encoded = e_affine.into_compressed();
+            let e_affine = e.to_affine();
+            let encoded = e_affine.to_compressed();
             v.extend_from_slice(encoded.as_ref());
 
             let mut decoded = <G::Affine as CurveAffine>::Compressed::default();
@@ -132,7 +132,7 @@ fn test_g2_compressed_valid_vectors() {
 #[test]
 fn test_g1_uncompressed_invalid_vectors() {
     {
-        let z = G1Affine::identity().into_uncompressed();
+        let z = G1Affine::identity().to_uncompressed();
 
         {
             let mut z = z;
@@ -165,7 +165,7 @@ fn test_g1_uncompressed_invalid_vectors() {
         }
     }
 
-    let o = G1Affine::generator().into_uncompressed();
+    let o = G1Affine::generator().to_uncompressed();
 
     {
         let mut o = o;
@@ -248,7 +248,7 @@ fn test_g1_uncompressed_invalid_vectors() {
 #[test]
 fn test_g2_uncompressed_invalid_vectors() {
     {
-        let z = G2Affine::identity().into_uncompressed();
+        let z = G2Affine::identity().to_uncompressed();
 
         {
             let mut z = z;
@@ -281,7 +281,7 @@ fn test_g2_uncompressed_invalid_vectors() {
         }
     }
 
-    let o = G2Affine::generator().into_uncompressed();
+    let o = G2Affine::generator().to_uncompressed();
 
     {
         let mut o = o;
@@ -392,7 +392,7 @@ fn test_g2_uncompressed_invalid_vectors() {
 #[test]
 fn test_g1_compressed_invalid_vectors() {
     {
-        let z = G1Affine::identity().into_compressed();
+        let z = G1Affine::identity().to_compressed();
 
         {
             let mut z = z;
@@ -425,7 +425,7 @@ fn test_g1_compressed_invalid_vectors() {
         }
     }
 
-    let o = G1Affine::generator().into_compressed();
+    let o = G1Affine::generator().to_compressed();
 
     {
         let mut o = o;
@@ -506,7 +506,7 @@ fn test_g1_compressed_invalid_vectors() {
 #[test]
 fn test_g2_compressed_invalid_vectors() {
     {
-        let z = G2Affine::identity().into_compressed();
+        let z = G2Affine::identity().to_compressed();
 
         {
             let mut z = z;
@@ -539,7 +539,7 @@ fn test_g2_compressed_invalid_vectors() {
         }
     }
 
-    let o = G2Affine::generator().into_compressed();
+    let o = G2Affine::generator().to_compressed();
 
     {
         let mut o = o;
