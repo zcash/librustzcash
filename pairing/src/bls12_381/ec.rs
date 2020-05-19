@@ -247,6 +247,10 @@ macro_rules! curve_impl {
                 }
             }
 
+            fn into_compressed(&self) -> Self::Compressed {
+                $compressed::from_affine(*self)
+            }
+
             fn from_uncompressed(bytes: &Self::Uncompressed) -> CtOption<Self> {
                 Self::from_uncompressed_unchecked(bytes).and_then(|affine| {
                     CtOption::new(
@@ -270,6 +274,10 @@ macro_rules! curve_impl {
                 } else {
                     CtOption::new(Self::identity(), Choice::from(0))
                 }
+            }
+
+            fn into_uncompressed(&self) -> Self::Uncompressed {
+                $uncompressed::from_affine(*self)
             }
         }
 
@@ -901,7 +909,7 @@ pub mod g1 {
     use super::{g2::G2Affine, GroupDecodingError};
     use crate::{Engine, PairingCurveAffine};
     use ff::{BitIterator, Field, PrimeField};
-    use group::{CurveAffine, CurveProjective, EncodedPoint, Group, PrimeGroup};
+    use group::{CurveAffine, CurveProjective, Group, PrimeGroup};
     use rand_core::RngCore;
     use std::fmt;
     use std::ops::{AddAssign, MulAssign, Neg, SubAssign};
@@ -922,6 +930,12 @@ pub mod g1 {
     #[derive(Copy, Clone)]
     pub struct G1Uncompressed([u8; 96]);
 
+    impl Default for G1Uncompressed {
+        fn default() -> Self {
+            G1Uncompressed([0; 96])
+        }
+    }
+
     impl AsRef<[u8]> for G1Uncompressed {
         fn as_ref(&self) -> &[u8] {
             &self.0
@@ -941,6 +955,10 @@ pub mod g1 {
     }
 
     impl G1Uncompressed {
+        #[cfg(test)]
+        pub(crate) fn size() -> usize {
+            96
+        }
         fn into_affine_unchecked(&self) -> Result<G1Affine, GroupDecodingError> {
             // Create a copy of this representation.
             let mut copy = self.0;
@@ -991,19 +1009,8 @@ pub mod g1 {
                 })
             }
         }
-    }
-
-    impl EncodedPoint for G1Uncompressed {
-        type Affine = G1Affine;
-
-        fn empty() -> Self {
-            G1Uncompressed([0; 96])
-        }
-        fn size() -> usize {
-            96
-        }
         fn from_affine(affine: G1Affine) -> Self {
-            let mut res = Self::empty();
+            let mut res = Self::default();
 
             if affine.is_identity().into() {
                 // Set the second-most significant bit to indicate this point
@@ -1020,6 +1027,12 @@ pub mod g1 {
 
     #[derive(Copy, Clone)]
     pub struct G1Compressed([u8; 48]);
+
+    impl Default for G1Compressed {
+        fn default() -> Self {
+            G1Compressed([0; 48])
+        }
+    }
 
     impl AsRef<[u8]> for G1Compressed {
         fn as_ref(&self) -> &[u8] {
@@ -1040,6 +1053,10 @@ pub mod g1 {
     }
 
     impl G1Compressed {
+        #[cfg(test)]
+        pub(crate) fn size() -> usize {
+            48
+        }
         fn into_affine_unchecked(&self) -> Result<G1Affine, GroupDecodingError> {
             // Create a copy of this representation.
             let mut copy = self.0;
@@ -1080,19 +1097,8 @@ pub mod g1 {
                 }
             }
         }
-    }
-
-    impl EncodedPoint for G1Compressed {
-        type Affine = G1Affine;
-
-        fn empty() -> Self {
-            G1Compressed([0; 48])
-        }
-        fn size() -> usize {
-            48
-        }
         fn from_affine(affine: G1Affine) -> Self {
-            let mut res = Self::empty();
+            let mut res = Self::default();
 
             if affine.is_identity().into() {
                 // Set the second-most significant bit to indicate this point
@@ -1493,7 +1499,7 @@ pub mod g2 {
     use super::{g1::G1Affine, GroupDecodingError};
     use crate::{Engine, PairingCurveAffine};
     use ff::{BitIterator, Field, PrimeField};
-    use group::{CurveAffine, CurveProjective, EncodedPoint, Group, PrimeGroup};
+    use group::{CurveAffine, CurveProjective, Group, PrimeGroup};
     use rand_core::RngCore;
     use std::fmt;
     use std::ops::{AddAssign, MulAssign, Neg, SubAssign};
@@ -1514,6 +1520,12 @@ pub mod g2 {
     #[derive(Copy, Clone)]
     pub struct G2Uncompressed([u8; 192]);
 
+    impl Default for G2Uncompressed {
+        fn default() -> Self {
+            G2Uncompressed([0; 192])
+        }
+    }
+
     impl AsRef<[u8]> for G2Uncompressed {
         fn as_ref(&self) -> &[u8] {
             &self.0
@@ -1533,6 +1545,10 @@ pub mod g2 {
     }
 
     impl G2Uncompressed {
+        #[cfg(test)]
+        pub(crate) fn size() -> usize {
+            192
+        }
         fn into_affine_unchecked(&self) -> Result<G2Affine, GroupDecodingError> {
             // Create a copy of this representation.
             let mut copy = self.0;
@@ -1595,19 +1611,8 @@ pub mod g2 {
                 })
             }
         }
-    }
-
-    impl EncodedPoint for G2Uncompressed {
-        type Affine = G2Affine;
-
-        fn empty() -> Self {
-            G2Uncompressed([0; 192])
-        }
-        fn size() -> usize {
-            192
-        }
         fn from_affine(affine: G2Affine) -> Self {
-            let mut res = Self::empty();
+            let mut res = Self::default();
 
             if affine.is_identity().into() {
                 // Set the second-most significant bit to indicate this point
@@ -1626,6 +1631,12 @@ pub mod g2 {
 
     #[derive(Copy, Clone)]
     pub struct G2Compressed([u8; 96]);
+
+    impl Default for G2Compressed {
+        fn default() -> Self {
+            G2Compressed([0; 96])
+        }
+    }
 
     impl AsRef<[u8]> for G2Compressed {
         fn as_ref(&self) -> &[u8] {
@@ -1646,6 +1657,10 @@ pub mod g2 {
     }
 
     impl G2Compressed {
+        #[cfg(test)]
+        pub(crate) fn size() -> usize {
+            96
+        }
         fn into_affine_unchecked(&self) -> Result<G2Affine, GroupDecodingError> {
             // Create a copy of this representation.
             let mut copy = self.0;
@@ -1701,19 +1716,8 @@ pub mod g2 {
                 }
             }
         }
-    }
-
-    impl EncodedPoint for G2Compressed {
-        type Affine = G2Affine;
-
-        fn empty() -> Self {
-            G2Compressed([0; 96])
-        }
-        fn size() -> usize {
-            96
-        }
         fn from_affine(affine: G2Affine) -> Self {
-            let mut res = Self::empty();
+            let mut res = Self::default();
 
             if affine.is_identity().into() {
                 // Set the second-most significant bit to indicate this point

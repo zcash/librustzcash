@@ -1,5 +1,5 @@
 use ff::PrimeField;
-use group::{CurveAffine, CurveProjective, EncodedPoint, Group};
+use group::{CurveAffine, CurveProjective, Group};
 
 use super::*;
 use crate::*;
@@ -57,20 +57,21 @@ fn test_pairing_result_against_relic() {
 
 fn uncompressed_test_vectors<G: CurveProjective>(expected: &[u8]) {
     let mut e = G::identity();
+    let encoded_len = <G::Affine as CurveAffine>::Uncompressed::default()
+        .as_ref()
+        .len();
 
     let mut v = vec![];
     {
         let mut expected = expected;
         for _ in 0..1000 {
             let e_affine = e.into_affine();
-            let encoded = <G::Affine as CurveAffine>::Uncompressed::from_affine(e_affine);
+            let encoded = e_affine.into_uncompressed();
             v.extend_from_slice(encoded.as_ref());
 
-            let mut decoded = <G::Affine as CurveAffine>::Uncompressed::empty();
-            decoded
-                .as_mut()
-                .copy_from_slice(&expected[0..<G::Affine as CurveAffine>::Uncompressed::size()]);
-            expected = &expected[<G::Affine as CurveAffine>::Uncompressed::size()..];
+            let mut decoded = <G::Affine as CurveAffine>::Uncompressed::default();
+            decoded.as_mut().copy_from_slice(&expected[0..encoded_len]);
+            expected = &expected[encoded_len..];
             let decoded = G::Affine::from_uncompressed(&decoded).unwrap();
             assert_eq!(e_affine, decoded);
 
@@ -83,20 +84,21 @@ fn uncompressed_test_vectors<G: CurveProjective>(expected: &[u8]) {
 
 fn compressed_test_vectors<G: CurveProjective>(expected: &[u8]) {
     let mut e = G::identity();
+    let encoded_len = <G::Affine as CurveAffine>::Compressed::default()
+        .as_ref()
+        .len();
 
     let mut v = vec![];
     {
         let mut expected = expected;
         for _ in 0..1000 {
             let e_affine = e.into_affine();
-            let encoded = <G::Affine as CurveAffine>::Compressed::from_affine(e_affine);
+            let encoded = e_affine.into_compressed();
             v.extend_from_slice(encoded.as_ref());
 
-            let mut decoded = <G::Affine as CurveAffine>::Compressed::empty();
-            decoded
-                .as_mut()
-                .copy_from_slice(&expected[0..<G::Affine as CurveAffine>::Compressed::size()]);
-            expected = &expected[<G::Affine as CurveAffine>::Compressed::size()..];
+            let mut decoded = <G::Affine as CurveAffine>::Compressed::default();
+            decoded.as_mut().copy_from_slice(&expected[0..encoded_len]);
+            expected = &expected[encoded_len..];
             let decoded = G::Affine::from_compressed(&decoded).unwrap();
             assert_eq!(e_affine, decoded);
 

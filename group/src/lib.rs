@@ -138,8 +138,8 @@ pub trait CurveAffine:
     type Scalar: PrimeField;
     type Base: Field;
     type Projective: CurveProjective<Affine = Self, Scalar = Self::Scalar>;
-    type Uncompressed: EncodedPoint<Affine = Self>;
-    type Compressed: EncodedPoint<Affine = Self>;
+    type Uncompressed: Default + AsRef<[u8]> + AsMut<[u8]>;
+    type Compressed: Default + AsRef<[u8]> + AsMut<[u8]>;
 
     /// Returns the additive identity.
     fn identity() -> Self;
@@ -167,9 +167,7 @@ pub trait CurveAffine:
 
     /// Converts this element into its compressed encoding, so long as it's not
     /// the point at infinity.
-    fn into_compressed(&self) -> Self::Compressed {
-        <Self::Compressed as EncodedPoint>::from_affine(*self)
-    }
+    fn into_compressed(&self) -> Self::Compressed;
 
     /// Attempts to deserialize an element from its uncompressed encoding.
     fn from_uncompressed(bytes: &Self::Uncompressed) -> CtOption<Self>;
@@ -184,24 +182,5 @@ pub trait CurveAffine:
 
     /// Converts this element into its uncompressed encoding, so long as it's not
     /// the point at infinity.
-    fn into_uncompressed(&self) -> Self::Uncompressed {
-        <Self::Uncompressed as EncodedPoint>::from_affine(*self)
-    }
-}
-
-/// An encoded elliptic curve point, which should essentially wrap a `[u8; N]`.
-pub trait EncodedPoint:
-    Sized + Send + Sync + AsRef<[u8]> + AsMut<[u8]> + Clone + Copy + 'static
-{
-    type Affine: CurveAffine;
-
-    /// Creates an empty representation.
-    fn empty() -> Self;
-
-    /// Returns the number of bytes consumed by this representation.
-    fn size() -> usize;
-
-    /// Creates an `EncodedPoint` from an affine point, as long as the
-    /// point is not the point at infinity.
-    fn from_affine(affine: Self::Affine) -> Self;
+    fn into_uncompressed(&self) -> Self::Uncompressed;
 }
