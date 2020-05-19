@@ -3,9 +3,11 @@
 use std::fmt;
 use crate::transaction::components::{Amount, OutPoint, TzeOut};
 
-pub trait FromPayload<E>: Sized {
+pub trait FromPayload: Sized {
+    type Error;
+
     /// Parses an extension type from a mode and payload.
-    fn from_payload(mode: usize, payload: &[u8]) -> Result<Self, E>;
+    fn from_payload(mode: usize, payload: &[u8]) -> Result<Self, Self::Error>;
 }
 
 pub trait ToPayload {
@@ -29,6 +31,10 @@ impl Precondition {
             mode,
             payload,
         }
+    }
+
+    pub fn try_to<P: FromPayload>(&self) -> Result<P, P::Error> {
+        P::from_payload(self.mode, &self.payload)
     }
 }
 
@@ -96,8 +102,8 @@ pub trait Extension<C> {
         context: &C,
     ) -> Result<(), Self::Error>
     where
-        Self::P: FromPayload<Self::Error>,
-        Self::W: FromPayload<Self::Error>,
+        Self::P: FromPayload<Error = Self::Error>,
+        Self::W: FromPayload<Error = Self::Error>,
     {
         self.verify_inner(
             &Self::P::from_payload(precondition.mode, &precondition.payload)?,
@@ -154,5 +160,3 @@ pub trait Epoch<VerifyCtx> {
         ctx: &VerifyCtx
     ) -> Result<(), Error<Self::VerifyError>>;
 }
-
-

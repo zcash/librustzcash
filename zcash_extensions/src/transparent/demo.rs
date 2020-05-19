@@ -22,8 +22,8 @@ use blake2b_simd::Params;
 use std::convert::TryFrom;
 use std::fmt;
 
-use zcash_primitives::transaction::components::{OutPoint, TzeOut, amount::Amount};
 use zcash_primitives::extensions::transparent::{Extension, FromPayload, ToPayload, ExtensionTxBuilder};
+use zcash_primitives::transaction::components::{OutPoint, TzeOut, amount::Amount};
 
 mod open {
     pub const MODE: usize = 0;
@@ -98,8 +98,10 @@ impl TryFrom<(usize, Precondition)> for Precondition {
     }
 }
 
-impl FromPayload<Error> for Precondition {
-    fn from_payload(mode: usize, payload: &[u8]) -> Result<Self, Error> {
+impl FromPayload for Precondition {
+    type Error = Error;
+
+    fn from_payload(mode: usize, payload: &[u8]) -> Result<Self, Self::Error> {
         match mode {
             open::MODE => {
                 if payload.len() == 32 {
@@ -161,8 +163,10 @@ impl TryFrom<(usize, Witness)> for Witness {
     }
 }
 
-impl FromPayload<Error> for Witness {
-    fn from_payload(mode: usize, payload: &[u8]) -> Result<Self, Error> {
+impl FromPayload for Witness {
+    type Error = Error;
+
+    fn from_payload(mode: usize, payload: &[u8]) -> Result<Self, Self::Error> {
         match mode {
             open::MODE => {
                 if payload.len() == 32 {
