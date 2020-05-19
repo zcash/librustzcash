@@ -368,12 +368,14 @@ impl<'a, B: ExtensionTxBuilder<'a>> DemoBuilder<'a, B> {
 #[cfg(test)]
 mod tests {
     use blake2b_simd::Params;
-    use zcash_extensions_api::transparent::{self as tze, Extension, FromPayload, ToPayload};
 
     use super::{close, open, Context, Precondition, Program, Witness};
-    use crate::transaction::{
-        components::{Amount, OutPoint, TzeIn, TzeOut},
-        Transaction, TransactionData,
+    use zcash_primitives::{
+        extensions::transparent::{self as tze, Extension, FromPayload, ToPayload},
+        transaction::{
+            components::{Amount, OutPoint, TzeIn, TzeOut},
+            Transaction, TransactionData,
+        },
     };
 
     #[test]
@@ -483,7 +485,7 @@ mod tests {
             precondition: tze::Precondition::from(0, &Precondition::open(hash_1)),
         };
 
-        println!("{:x?}", precondition.payload);
+        // println!("{:x?}", precondition.payload);
 
         let mut mtx_a = TransactionData::nu4();
         mtx_a.tze_outputs.push(out_a);
