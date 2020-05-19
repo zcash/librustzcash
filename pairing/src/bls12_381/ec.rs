@@ -17,12 +17,33 @@ macro_rules! curve_impl {
             pub(crate) infinity: bool,
         }
 
+        impl Default for $affine {
+            fn default() -> Self {
+                Self::identity()
+            }
+        }
+
         impl ::std::fmt::Display for $affine {
             fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
                 if self.infinity {
                     write!(f, "{}(Infinity)", $name)
                 } else {
                     write!(f, "{}(x={}, y={})", $name, self.x, self.y)
+                }
+            }
+        }
+
+        impl ::subtle::ConditionallySelectable for $affine {
+            fn conditional_select(a: &Self, b: &Self, choice: Choice) -> Self {
+                $affine {
+                    x: $basefield::conditional_select(&a.x, &b.x, choice),
+                    y: $basefield::conditional_select(&a.y, &b.y, choice),
+                    // Obviously not constant-time, but this code will be replaced.
+                    infinity: if choice.into() {
+                        b.infinity
+                    } else {
+                        a.infinity
+                    },
                 }
             }
         }
@@ -202,6 +223,53 @@ macro_rules! curve_impl {
 
             fn into_projective(&self) -> $projective {
                 (*self).into()
+            }
+
+            fn from_compressed(bytes: &Self::Compressed) -> CtOption<Self> {
+                Self::from_compressed_unchecked(bytes).and_then(|affine| {
+                    // NB: Decompression guarantees that it is on the curve already.
+                    CtOption::new(
+                        affine,
+                        Choice::from(if affine.is_in_correct_subgroup_assuming_on_curve() {
+                            1
+                        } else {
+                            0
+                        }),
+                    )
+                })
+            }
+
+            fn from_compressed_unchecked(bytes: &Self::Compressed) -> CtOption<Self> {
+                if let Ok(p) = bytes.into_affine_unchecked() {
+                    CtOption::new(p, Choice::from(1))
+                } else {
+                    CtOption::new(Self::identity(), Choice::from(0))
+                }
+            }
+
+            fn from_uncompressed(bytes: &Self::Uncompressed) -> CtOption<Self> {
+                Self::from_uncompressed_unchecked(bytes).and_then(|affine| {
+                    CtOption::new(
+                        affine,
+                        Choice::from(
+                            if affine.is_on_curve()
+                                && affine.is_in_correct_subgroup_assuming_on_curve()
+                            {
+                                1
+                            } else {
+                                0
+                            },
+                        ),
+                    )
+                })
+            }
+
+            fn from_uncompressed_unchecked(bytes: &Self::Uncompressed) -> CtOption<Self> {
+                if let Ok(p) = bytes.into_affine_unchecked() {
+                    CtOption::new(p, Choice::from(1))
+                } else {
+                    CtOption::new(Self::identity(), Choice::from(0))
+                }
             }
         }
 
@@ -788,14 +856,52 @@ macro_rules! curve_impl {
     };
 }
 
+use std::error::Error;
+use std::fmt;
+
+/// An error that may occur when trying to decode an `EncodedPoint`.
+#[derive(Debug)]
+enum GroupDecodingError {
+    /// The coordinate(s) do not lie on the curve.
+    NotOnCurve,
+    /// One of the coordinates could not be decoded
+    CoordinateDecodingError(&'static str),
+    /// The compression mode of the encoded element was not as expected
+    UnexpectedCompressionMode,
+    /// The encoding contained bits that should not have been set
+    UnexpectedInformation,
+}
+
+impl Error for GroupDecodingError {
+    fn description(&self) -> &str {
+        match *self {
+            GroupDecodingError::NotOnCurve => "coordinate(s) do not lie on the curve",
+            GroupDecodingError::CoordinateDecodingError(..) => "coordinate(s) could not be decoded",
+            GroupDecodingError::UnexpectedCompressionMode => {
+                "encoding has unexpected compression mode"
+            }
+            GroupDecodingError::UnexpectedInformation => "encoding has unexpected information",
+        }
+    }
+}
+
+impl fmt::Display for GroupDecodingError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+        match *self {
+            GroupDecodingError::CoordinateDecodingError(description) => {
+                write!(f, "{} decoding error", description)
+            }
+            _ => write!(f, "{}", self.description()),
+        }
+    }
+}
+
 pub mod g1 {
     use super::super::{Fq, Fq12, FqRepr, Fr};
-    use super::g2::G2Affine;
+    use super::{g2::G2Affine, GroupDecodingError};
     use crate::{Engine, PairingCurveAffine};
     use ff::{BitIterator, Field, PrimeField};
-    use group::{
-        CurveAffine, CurveProjective, EncodedPoint, Group, GroupDecodingError, PrimeGroup,
-    };
+    use group::{CurveAffine, CurveProjective, EncodedPoint, Group, PrimeGroup};
     use rand_core::RngCore;
     use std::fmt;
     use std::ops::{AddAssign, MulAssign, Neg, SubAssign};
@@ -834,26 +940,7 @@ pub mod g1 {
         }
     }
 
-    impl EncodedPoint for G1Uncompressed {
-        type Affine = G1Affine;
-
-        fn empty() -> Self {
-            G1Uncompressed([0; 96])
-        }
-        fn size() -> usize {
-            96
-        }
-        fn into_affine(&self) -> Result<G1Affine, GroupDecodingError> {
-            let affine = self.into_affine_unchecked()?;
-
-            if !affine.is_on_curve() {
-                Err(GroupDecodingError::NotOnCurve)
-            } else if !affine.is_in_correct_subgroup_assuming_on_curve() {
-                Err(GroupDecodingError::NotInSubgroup)
-            } else {
-                Ok(affine)
-            }
-        }
+    impl G1Uncompressed {
         fn into_affine_unchecked(&self) -> Result<G1Affine, GroupDecodingError> {
             // Create a copy of this representation.
             let mut copy = self.0;
@@ -904,6 +991,17 @@ pub mod g1 {
                 })
             }
         }
+    }
+
+    impl EncodedPoint for G1Uncompressed {
+        type Affine = G1Affine;
+
+        fn empty() -> Self {
+            G1Uncompressed([0; 96])
+        }
+        fn size() -> usize {
+            96
+        }
         fn from_affine(affine: G1Affine) -> Self {
             let mut res = Self::empty();
 
@@ -941,26 +1039,7 @@ pub mod g1 {
         }
     }
 
-    impl EncodedPoint for G1Compressed {
-        type Affine = G1Affine;
-
-        fn empty() -> Self {
-            G1Compressed([0; 48])
-        }
-        fn size() -> usize {
-            48
-        }
-        fn into_affine(&self) -> Result<G1Affine, GroupDecodingError> {
-            let affine = self.into_affine_unchecked()?;
-
-            // NB: Decompression guarantees that it is on the curve already.
-
-            if !affine.is_in_correct_subgroup_assuming_on_curve() {
-                Err(GroupDecodingError::NotInSubgroup)
-            } else {
-                Ok(affine)
-            }
-        }
+    impl G1Compressed {
         fn into_affine_unchecked(&self) -> Result<G1Affine, GroupDecodingError> {
             // Create a copy of this representation.
             let mut copy = self.0;
@@ -1000,6 +1079,17 @@ pub mod g1 {
                     Err(GroupDecodingError::NotOnCurve)
                 }
             }
+        }
+    }
+
+    impl EncodedPoint for G1Compressed {
+        type Affine = G1Affine;
+
+        fn empty() -> Self {
+            G1Compressed([0; 48])
+        }
+        fn size() -> usize {
+            48
         }
         fn from_affine(affine: G1Affine) -> Self {
             let mut res = Self::empty();
@@ -1400,12 +1490,10 @@ pub mod g1 {
 
 pub mod g2 {
     use super::super::{Fq, Fq12, Fq2, FqRepr, Fr};
-    use super::g1::G1Affine;
+    use super::{g1::G1Affine, GroupDecodingError};
     use crate::{Engine, PairingCurveAffine};
     use ff::{BitIterator, Field, PrimeField};
-    use group::{
-        CurveAffine, CurveProjective, EncodedPoint, Group, GroupDecodingError, PrimeGroup,
-    };
+    use group::{CurveAffine, CurveProjective, EncodedPoint, Group, PrimeGroup};
     use rand_core::RngCore;
     use std::fmt;
     use std::ops::{AddAssign, MulAssign, Neg, SubAssign};
@@ -1444,26 +1532,7 @@ pub mod g2 {
         }
     }
 
-    impl EncodedPoint for G2Uncompressed {
-        type Affine = G2Affine;
-
-        fn empty() -> Self {
-            G2Uncompressed([0; 192])
-        }
-        fn size() -> usize {
-            192
-        }
-        fn into_affine(&self) -> Result<G2Affine, GroupDecodingError> {
-            let affine = self.into_affine_unchecked()?;
-
-            if !affine.is_on_curve() {
-                Err(GroupDecodingError::NotOnCurve)
-            } else if !affine.is_in_correct_subgroup_assuming_on_curve() {
-                Err(GroupDecodingError::NotInSubgroup)
-            } else {
-                Ok(affine)
-            }
-        }
+    impl G2Uncompressed {
         fn into_affine_unchecked(&self) -> Result<G2Affine, GroupDecodingError> {
             // Create a copy of this representation.
             let mut copy = self.0;
@@ -1526,6 +1595,17 @@ pub mod g2 {
                 })
             }
         }
+    }
+
+    impl EncodedPoint for G2Uncompressed {
+        type Affine = G2Affine;
+
+        fn empty() -> Self {
+            G2Uncompressed([0; 192])
+        }
+        fn size() -> usize {
+            192
+        }
         fn from_affine(affine: G2Affine) -> Self {
             let mut res = Self::empty();
 
@@ -1565,26 +1645,7 @@ pub mod g2 {
         }
     }
 
-    impl EncodedPoint for G2Compressed {
-        type Affine = G2Affine;
-
-        fn empty() -> Self {
-            G2Compressed([0; 96])
-        }
-        fn size() -> usize {
-            96
-        }
-        fn into_affine(&self) -> Result<G2Affine, GroupDecodingError> {
-            let affine = self.into_affine_unchecked()?;
-
-            // NB: Decompression guarantees that it is on the curve already.
-
-            if !affine.is_in_correct_subgroup_assuming_on_curve() {
-                Err(GroupDecodingError::NotInSubgroup)
-            } else {
-                Ok(affine)
-            }
-        }
+    impl G2Compressed {
         fn into_affine_unchecked(&self) -> Result<G2Affine, GroupDecodingError> {
             // Create a copy of this representation.
             let mut copy = self.0;
@@ -1639,6 +1700,17 @@ pub mod g2 {
                     Err(GroupDecodingError::NotOnCurve)
                 }
             }
+        }
+    }
+
+    impl EncodedPoint for G2Compressed {
+        type Affine = G2Affine;
+
+        fn empty() -> Self {
+            G2Compressed([0; 96])
+        }
+        fn size() -> usize {
+            96
         }
         fn from_affine(affine: G2Affine) -> Self {
             let mut res = Self::empty();

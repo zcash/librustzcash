@@ -3,7 +3,7 @@ use rand::SeedableRng;
 use rand_xorshift::XorShiftRng;
 use std::ops::{Mul, Neg};
 
-use crate::{CurveAffine, CurveProjective, EncodedPoint};
+use crate::{CurveAffine, CurveProjective};
 
 pub fn curve_tests<G: CurveProjective>() {
     let mut rng = XorShiftRng::from_seed([
@@ -405,18 +405,12 @@ fn random_encoding_tests<G: CurveProjective>() {
     ]);
 
     assert_eq!(
-        G::Affine::identity()
-            .into_uncompressed()
-            .into_affine()
-            .unwrap(),
+        G::Affine::from_uncompressed(&G::Affine::identity().into_uncompressed()).unwrap(),
         G::Affine::identity()
     );
 
     assert_eq!(
-        G::Affine::identity()
-            .into_compressed()
-            .into_affine()
-            .unwrap(),
+        G::Affine::from_compressed(&G::Affine::identity().into_compressed()).unwrap(),
         G::Affine::identity()
     );
 
@@ -424,17 +418,17 @@ fn random_encoding_tests<G: CurveProjective>() {
         let mut r = G::random(&mut rng).into_affine();
 
         let uncompressed = r.into_uncompressed();
-        let de_uncompressed = uncompressed.into_affine().unwrap();
+        let de_uncompressed = G::Affine::from_uncompressed(&uncompressed).unwrap();
         assert_eq!(de_uncompressed, r);
 
         let compressed = r.into_compressed();
-        let de_compressed = compressed.into_affine().unwrap();
+        let de_compressed = G::Affine::from_compressed(&compressed).unwrap();
         assert_eq!(de_compressed, r);
 
         r = r.neg();
 
         let compressed = r.into_compressed();
-        let de_compressed = compressed.into_affine().unwrap();
+        let de_compressed = G::Affine::from_compressed(&compressed).unwrap();
         assert_eq!(de_compressed, r);
     }
 }
