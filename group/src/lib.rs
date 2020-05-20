@@ -99,7 +99,13 @@ pub trait CurveProjective:
 
     /// Converts a batch of projective elements into affine elements. This function will
     /// panic if `p.len() != q.len()`.
-    fn batch_normalize(p: &[Self], q: &mut [Self::Affine]);
+    fn batch_normalize(p: &[Self], q: &mut [Self::Affine]) {
+        assert_eq!(p.len(), q.len());
+
+        for (p, q) in p.iter().zip(q.iter_mut()) {
+            *q = p.to_affine();
+        }
+    }
 
     /// Converts this element into its affine representation.
     fn to_affine(&self) -> Self::Affine;
