@@ -200,7 +200,6 @@ macro_rules! curve_impl {
         impl CurveAffine for $affine {
             type Scalar = $scalarfield;
             type Projective = $projective;
-            type Uncompressed = $uncompressed;
             type Compressed = $compressed;
 
             fn identity() -> Self {
@@ -248,6 +247,10 @@ macro_rules! curve_impl {
             fn to_compressed(&self) -> Self::Compressed {
                 $compressed::from_affine(*self)
             }
+        }
+
+        impl UncompressedEncoding for $affine {
+            type Uncompressed = $uncompressed;
 
             fn from_uncompressed(bytes: &Self::Uncompressed) -> CtOption<Self> {
                 Self::from_uncompressed_unchecked(bytes).and_then(|affine| {
@@ -901,7 +904,7 @@ pub mod g1 {
     use super::{g2::G2Affine, GroupDecodingError};
     use crate::{Engine, PairingCurveAffine};
     use ff::{BitIterator, Field, PrimeField};
-    use group::{CurveAffine, CurveProjective, Group, PrimeGroup};
+    use group::{CurveAffine, CurveProjective, Group, PrimeGroup, UncompressedEncoding};
     use rand_core::RngCore;
     use std::fmt;
     use std::ops::{AddAssign, MulAssign, Neg, SubAssign};
@@ -1467,8 +1470,9 @@ pub mod g1 {
 
     #[test]
     fn g1_curve_tests() {
-        use group::tests::curve_tests;
+        use group::tests::{curve_tests, random_uncompressed_encoding_tests};
         curve_tests::<G1>();
+        random_uncompressed_encoding_tests::<G1>();
     }
 }
 
@@ -1477,7 +1481,7 @@ pub mod g2 {
     use super::{g1::G1Affine, GroupDecodingError};
     use crate::{Engine, PairingCurveAffine};
     use ff::{BitIterator, Field, PrimeField};
-    use group::{CurveAffine, CurveProjective, Group, PrimeGroup};
+    use group::{CurveAffine, CurveProjective, Group, PrimeGroup, UncompressedEncoding};
     use rand_core::RngCore;
     use std::fmt;
     use std::ops::{AddAssign, MulAssign, Neg, SubAssign};
@@ -2167,8 +2171,9 @@ pub mod g2 {
 
     #[test]
     fn g2_curve_tests() {
-        use group::tests::curve_tests;
+        use group::tests::{curve_tests, random_uncompressed_encoding_tests};
         curve_tests::<G2>();
+        random_uncompressed_encoding_tests::<G2>();
     }
 }
 

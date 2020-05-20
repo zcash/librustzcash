@@ -132,7 +132,6 @@ pub trait CurveAffine:
 {
     type Scalar: PrimeField;
     type Projective: CurveProjective<Affine = Self, Scalar = Self::Scalar>;
-    type Uncompressed: Default + AsRef<[u8]> + AsMut<[u8]>;
     type Compressed: Default + AsRef<[u8]> + AsMut<[u8]>;
 
     /// Returns the additive identity.
@@ -162,6 +161,12 @@ pub trait CurveAffine:
     /// Converts this element into its compressed encoding, so long as it's not
     /// the point at infinity.
     fn to_compressed(&self) -> Self::Compressed;
+}
+
+/// Affine representation of a point on an elliptic curve that has a defined uncompressed
+/// encoding.
+pub trait UncompressedEncoding: CurveAffine {
+    type Uncompressed: Default + AsRef<[u8]> + AsMut<[u8]>;
 
     /// Attempts to deserialize an element from its uncompressed encoding.
     fn from_uncompressed(bytes: &Self::Uncompressed) -> CtOption<Self>;
@@ -171,7 +176,7 @@ pub trait CurveAffine:
     ///
     /// **This is dangerous to call unless you trust the bytes you are reading; otherwise,
     /// API invariants may be broken.** Please consider using
-    /// [`CurveAffine::from_uncompressed`] instead.
+    /// [`UncompressedEncoding::from_uncompressed`] instead.
     fn from_uncompressed_unchecked(bytes: &Self::Uncompressed) -> CtOption<Self>;
 
     /// Converts this element into its uncompressed encoding, so long as it's not

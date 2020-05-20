@@ -1,5 +1,5 @@
 use ff::PrimeField;
-use group::{CurveAffine, CurveProjective};
+use group::{CurveAffine, CurveProjective, UncompressedEncoding};
 
 use super::*;
 use crate::*;
@@ -55,9 +55,12 @@ fn test_pairing_result_against_relic() {
     });
 }
 
-fn uncompressed_test_vectors<G: CurveProjective>(expected: &[u8]) {
+fn uncompressed_test_vectors<G: CurveProjective>(expected: &[u8])
+where
+    G::Affine: UncompressedEncoding,
+{
     let mut e = G::identity();
-    let encoded_len = <G::Affine as CurveAffine>::Uncompressed::default()
+    let encoded_len = <G::Affine as UncompressedEncoding>::Uncompressed::default()
         .as_ref()
         .len();
 
@@ -69,7 +72,7 @@ fn uncompressed_test_vectors<G: CurveProjective>(expected: &[u8]) {
             let encoded = e_affine.to_uncompressed();
             v.extend_from_slice(encoded.as_ref());
 
-            let mut decoded = <G::Affine as CurveAffine>::Uncompressed::default();
+            let mut decoded = <G::Affine as UncompressedEncoding>::Uncompressed::default();
             decoded.as_mut().copy_from_slice(&expected[0..encoded_len]);
             expected = &expected[encoded_len..];
             let decoded = G::Affine::from_uncompressed(&decoded).unwrap();

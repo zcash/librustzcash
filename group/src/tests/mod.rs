@@ -3,7 +3,7 @@ use rand::SeedableRng;
 use rand_xorshift::XorShiftRng;
 use std::ops::{Mul, Neg};
 
-use crate::{CurveAffine, CurveProjective};
+use crate::{CurveAffine, CurveProjective, UncompressedEncoding};
 
 pub fn curve_tests<G: CurveProjective>() {
     let mut rng = XorShiftRng::from_seed([
@@ -62,7 +62,7 @@ pub fn curve_tests<G: CurveProjective>() {
     random_negation_tests::<G>();
     random_transformation_tests::<G>();
     random_wnaf_tests::<G>();
-    random_encoding_tests::<G>();
+    random_compressed_encoding_tests::<G>();
 }
 
 fn random_wnaf_tests<G: CurveProjective>() {
@@ -394,16 +394,11 @@ fn random_transformation_tests<G: CurveProjective>() {
     }
 }
 
-fn random_encoding_tests<G: CurveProjective>() {
+fn random_compressed_encoding_tests<G: CurveProjective>() {
     let mut rng = XorShiftRng::from_seed([
         0x59, 0x62, 0xbe, 0x5d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06, 0xbc,
         0xe5,
     ]);
-
-    assert_eq!(
-        G::Affine::from_uncompressed(&G::Affine::identity().to_uncompressed()).unwrap(),
-        G::Affine::identity()
-    );
 
     assert_eq!(
         G::Affine::from_compressed(&G::Affine::identity().to_compressed()).unwrap(),
@@ -412,10 +407,6 @@ fn random_encoding_tests<G: CurveProjective>() {
 
     for _ in 0..1000 {
         let mut r = G::random(&mut rng).to_affine();
-
-        let uncompressed = r.to_uncompressed();
-        let de_uncompressed = G::Affine::from_uncompressed(&uncompressed).unwrap();
-        assert_eq!(de_uncompressed, r);
 
         let compressed = r.to_compressed();
         let de_compressed = G::Affine::from_compressed(&compressed).unwrap();
@@ -426,5 +417,28 @@ fn random_encoding_tests<G: CurveProjective>() {
         let compressed = r.to_compressed();
         let de_compressed = G::Affine::from_compressed(&compressed).unwrap();
         assert_eq!(de_compressed, r);
+    }
+}
+
+pub fn random_uncompressed_encoding_tests<G: CurveProjective>()
+where
+    G::Affine: UncompressedEncoding,
+{
+    let mut rng = XorShiftRng::from_seed([
+        0x59, 0x62, 0xbe, 0x5d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06, 0xbc,
+        0xe5,
+    ]);
+
+    assert_eq!(
+        G::Affine::from_uncompressed(&G::Affine::identity().to_uncompressed()).unwrap(),
+        G::Affine::identity()
+    );
+
+    for _ in 0..1000 {
+        let r = G::random(&mut rng).to_affine();
+
+        let uncompressed = r.to_uncompressed();
+        let de_uncompressed = G::Affine::from_uncompressed(&uncompressed).unwrap();
+        assert_eq!(de_uncompressed, r);
     }
 }
