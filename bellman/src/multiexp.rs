@@ -55,7 +55,7 @@ impl<G: CurveAffine> Source<G> for (Arc<Vec<G>>, usize) {
             .into());
         }
 
-        if self.0[self.1].is_identity() {
+        if self.0[self.1].is_identity().into() {
             return Err(SynthesisError::UnexpectedIdentity);
         }
 
@@ -308,7 +308,7 @@ fn test_with_bls12() {
         let mut acc = G::identity();
 
         for (base, exp) in bases.iter().zip(exponents.iter()) {
-            AddAssign::<&G>::add_assign(&mut acc, &base.mul(exp.to_repr()));
+            AddAssign::<&G>::add_assign(&mut acc, &(*base * *exp));
         }
 
         acc
@@ -328,7 +328,7 @@ fn test_with_bls12() {
     );
     let g = Arc::new(
         (0..SAMPLES)
-            .map(|_| <Bls12 as Engine>::G1::random(rng).into_affine())
+            .map(|_| <Bls12 as Engine>::G1::random(rng).to_affine())
             .collect::<Vec<_>>(),
     );
 

@@ -1,4 +1,3 @@
-use ff::PrimeField;
 use group::{CurveAffine, CurveProjective};
 use pairing::{Engine, PairingCurveAffine};
 use std::ops::{AddAssign, Neg};
@@ -28,10 +27,10 @@ pub fn verify_proof<'a, E: Engine>(
         return Err(SynthesisError::MalformedVerifyingKey);
     }
 
-    let mut acc = pvk.ic[0].into_projective();
+    let mut acc = pvk.ic[0].to_projective();
 
     for (i, b) in public_inputs.iter().zip(pvk.ic.iter().skip(1)) {
-        AddAssign::<&E::G1>::add_assign(&mut acc, &b.mul(i.to_repr()));
+        AddAssign::<&E::G1>::add_assign(&mut acc, &(*b * i));
     }
 
     // The original verification equation is:
@@ -45,7 +44,7 @@ pub fn verify_proof<'a, E: Engine>(
     Ok(E::final_exponentiation(&E::miller_loop(
         [
             (&proof.a.prepare(), &proof.b.prepare()),
-            (&acc.into_affine().prepare(), &pvk.neg_gamma_g2),
+            (&acc.to_affine().prepare(), &pvk.neg_gamma_g2),
             (&proof.c.prepare(), &pvk.neg_delta_g2),
         ]
         .iter(),

@@ -1,5 +1,5 @@
 use ff::{Field, PrimeField, ScalarEngine};
-use group::{CurveAffine, CurveProjective, EncodedPoint, Group, GroupDecodingError, PrimeGroup};
+use group::{CurveAffine, CurveProjective, Group, PrimeGroup};
 use pairing::{Engine, PairingCurveAffine};
 
 use rand_core::RngCore;
@@ -396,13 +396,15 @@ impl CurveProjective for Fr {
     type Affine = Fr;
     type Base = Fr;
 
-    fn batch_normalization(_: &mut [Self]) {}
+    fn batch_normalize(p: &[Self], q: &mut [Self::Affine]) {
+        assert_eq!(p.len(), q.len());
 
-    fn is_normalized(&self) -> bool {
-        true
+        for (p, q) in p.iter().zip(q.iter_mut()) {
+            *q = p.to_affine();
+        }
     }
 
-    fn into_affine(&self) -> Fr {
+    fn to_affine(&self) -> Fr {
         *self
     }
 
@@ -415,7 +417,7 @@ impl CurveProjective for Fr {
     }
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Default)]
 pub struct FakePoint;
 
 impl AsMut<[u8]> for FakePoint {
@@ -426,30 +428,6 @@ impl AsMut<[u8]> for FakePoint {
 
 impl AsRef<[u8]> for FakePoint {
     fn as_ref(&self) -> &[u8] {
-        unimplemented!()
-    }
-}
-
-impl EncodedPoint for FakePoint {
-    type Affine = Fr;
-
-    fn empty() -> Self {
-        unimplemented!()
-    }
-
-    fn size() -> usize {
-        unimplemented!()
-    }
-
-    fn into_affine(&self) -> Result<Self::Affine, GroupDecodingError> {
-        unimplemented!()
-    }
-
-    fn into_affine_unchecked(&self) -> Result<Self::Affine, GroupDecodingError> {
-        unimplemented!()
-    }
-
-    fn from_affine(_: Self::Affine) -> Self {
         unimplemented!()
     }
 }
@@ -469,21 +447,36 @@ impl CurveAffine for Fr {
         <Fr as Field>::one()
     }
 
-    fn is_identity(&self) -> bool {
-        <Fr as Field>::is_zero(self)
+    fn is_identity(&self) -> Choice {
+        Choice::from(if <Fr as Field>::is_zero(self) { 1 } else { 0 })
     }
 
-    fn mul<S: Into<<Self::Scalar as PrimeField>::Repr>>(&self, other: S) -> Self::Projective {
-        let mut res = *self;
-        let tmp = Fr::from_repr(other.into()).unwrap();
-
-        MulAssign::mul_assign(&mut res, &tmp);
-
-        res
-    }
-
-    fn into_projective(&self) -> Self::Projective {
+    fn to_projective(&self) -> Self::Projective {
         *self
+    }
+
+    fn from_compressed(_bytes: &Self::Compressed) -> CtOption<Self> {
+        unimplemented!()
+    }
+
+    fn from_compressed_unchecked(_bytes: &Self::Compressed) -> CtOption<Self> {
+        unimplemented!()
+    }
+
+    fn to_compressed(&self) -> Self::Compressed {
+        unimplemented!()
+    }
+
+    fn from_uncompressed(_bytes: &Self::Uncompressed) -> CtOption<Self> {
+        unimplemented!()
+    }
+
+    fn from_uncompressed_unchecked(_bytes: &Self::Uncompressed) -> CtOption<Self> {
+        unimplemented!()
+    }
+
+    fn to_uncompressed(&self) -> Self::Uncompressed {
+        unimplemented!()
     }
 }
 

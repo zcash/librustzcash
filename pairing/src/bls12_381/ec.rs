@@ -17,12 +17,33 @@ macro_rules! curve_impl {
             pub(crate) infinity: bool,
         }
 
+        impl Default for $affine {
+            fn default() -> Self {
+                Self::identity()
+            }
+        }
+
         impl ::std::fmt::Display for $affine {
             fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
                 if self.infinity {
                     write!(f, "{}(Infinity)", $name)
                 } else {
                     write!(f, "{}(x={}, y={})", $name, self.x, self.y)
+                }
+            }
+        }
+
+        impl ::subtle::ConditionallySelectable for $affine {
+            fn conditional_select(a: &Self, b: &Self, choice: Choice) -> Self {
+                $affine {
+                    x: $basefield::conditional_select(&a.x, &b.x, choice),
+                    y: $basefield::conditional_select(&a.y, &b.y, choice),
+                    // Obviously not constant-time, but this code will be replaced.
+                    infinity: if choice.into() {
+                        b.infinity
+                    } else {
+                        a.infinity
+                    },
                 }
             }
         }
@@ -36,7 +57,7 @@ macro_rules! curve_impl {
 
         impl ::std::fmt::Display for $projective {
             fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
-                write!(f, "{}", self.into_affine())
+                write!(f, "{}", self.to_affine())
             }
         }
 
@@ -141,7 +162,8 @@ macro_rules! curve_impl {
             }
 
             fn is_in_correct_subgroup_assuming_on_curve(&self) -> bool {
-                self.mul($scalarfield::char()).is_identity().into()
+                let bits = BitIterator::<u8, _>::new($scalarfield::char());
+                self.mul_bits_u8(bits).is_identity().into()
             }
         }
 
@@ -155,6 +177,24 @@ macro_rules! curve_impl {
                     ret.y = ret.y.neg();
                 }
                 ret
+            }
+        }
+
+        impl ::std::ops::Mul<$scalarfield> for $affine {
+            type Output = $projective;
+
+            fn mul(self, by: $scalarfield) -> $projective {
+                let bits = BitIterator::<u8, <$scalarfield as PrimeField>::Repr>::new(by.into());
+                self.mul_bits_u8(bits)
+            }
+        }
+
+        impl<'r> ::std::ops::Mul<&'r $scalarfield> for $affine {
+            type Output = $projective;
+
+            fn mul(self, by: &'r $scalarfield) -> $projective {
+                let bits = BitIterator::<u8, <$scalarfield as PrimeField>::Repr>::new(by.into());
+                self.mul_bits_u8(bits)
             }
         }
 
@@ -177,17 +217,67 @@ macro_rules! curve_impl {
                 Self::get_generator()
             }
 
-            fn is_identity(&self) -> bool {
-                self.infinity
+            fn is_identity(&self) -> Choice {
+                Choice::from(if self.infinity { 1 } else { 0 })
             }
 
-            fn mul<S: Into<<Self::Scalar as PrimeField>::Repr>>(&self, by: S) -> $projective {
-                let bits = BitIterator::<u8, _>::new(by.into());
-                self.mul_bits_u8(bits)
-            }
-
-            fn into_projective(&self) -> $projective {
+            fn to_projective(&self) -> $projective {
                 (*self).into()
+            }
+
+            fn from_compressed(bytes: &Self::Compressed) -> CtOption<Self> {
+                Self::from_compressed_unchecked(bytes).and_then(|affine| {
+                    // NB: Decompression guarantees that it is on the curve already.
+                    CtOption::new(
+                        affine,
+                        Choice::from(if affine.is_in_correct_subgroup_assuming_on_curve() {
+                            1
+                        } else {
+                            0
+                        }),
+                    )
+                })
+            }
+
+            fn from_compressed_unchecked(bytes: &Self::Compressed) -> CtOption<Self> {
+                if let Ok(p) = bytes.into_affine_unchecked() {
+                    CtOption::new(p, Choice::from(1))
+                } else {
+                    CtOption::new(Self::identity(), Choice::from(0))
+                }
+            }
+
+            fn to_compressed(&self) -> Self::Compressed {
+                $compressed::from_affine(*self)
+            }
+
+            fn from_uncompressed(bytes: &Self::Uncompressed) -> CtOption<Self> {
+                Self::from_uncompressed_unchecked(bytes).and_then(|affine| {
+                    CtOption::new(
+                        affine,
+                        Choice::from(
+                            if affine.is_on_curve()
+                                && affine.is_in_correct_subgroup_assuming_on_curve()
+                            {
+                                1
+                            } else {
+                                0
+                            },
+                        ),
+                    )
+                })
+            }
+
+            fn from_uncompressed_unchecked(bytes: &Self::Uncompressed) -> CtOption<Self> {
+                if let Ok(p) = bytes.into_affine_unchecked() {
+                    CtOption::new(p, Choice::from(1))
+                } else {
+                    CtOption::new(Self::identity(), Choice::from(0))
+                }
+            }
+
+            fn to_uncompressed(&self) -> Self::Uncompressed {
+                $uncompressed::from_affine(*self)
             }
         }
 
@@ -661,64 +751,51 @@ macro_rules! curve_impl {
             type Base = $basefield;
             type Affine = $affine;
 
-            fn is_normalized(&self) -> bool {
-                self.is_identity().into() || self.z == $basefield::one()
-            }
+            fn batch_normalize(p: &[Self], q: &mut [$affine]) {
+                assert_eq!(p.len(), q.len());
 
-            fn batch_normalization(v: &mut [Self]) {
-                // Montgomery’s Trick and Fast Implementation of Masked AES
-                // Genelle, Prouff and Quisquater
-                // Section 3.2
+                let mut acc = $basefield::one();
+                for (p, q) in p.iter().zip(q.iter_mut()) {
+                    // We use the `x` field of $affine to store the product
+                    // of previous z-coordinates seen.
+                    q.x = acc;
 
-                // First pass: compute [a, ab, abc, ...]
-                let mut prod = Vec::with_capacity(v.len());
-                let mut tmp = $basefield::one();
-                for g in v
-                    .iter_mut()
-                    // Ignore normalized elements
-                    .filter(|g| !g.is_normalized())
-                {
-                    tmp.mul_assign(&g.z);
-                    prod.push(tmp);
+                    // We will end up skipping all identities in p
+                    if bool::from(!p.is_identity()) {
+                        acc *= p.z;
+                    }
                 }
 
-                // Invert `tmp`.
-                tmp = tmp.invert().unwrap(); // Guaranteed to be nonzero.
+                // This is the inverse, as all z-coordinates are nonzero and the ones
+                // that are not are skipped.
+                acc = acc.invert().unwrap();
 
-                // Second pass: iterate backwards to compute inverses
-                for (g, s) in v
-                    .iter_mut()
-                    // Backwards
-                    .rev()
-                    // Ignore normalized elements
-                    .filter(|g| !g.is_normalized())
-                    // Backwards, skip last element, fill in one for last term.
-                    .zip(
-                        prod.into_iter()
-                            .rev()
-                            .skip(1)
-                            .chain(Some($basefield::one())),
-                    )
-                {
-                    // tmp := tmp * g.z; g.z := tmp * s = 1/z
-                    let mut newtmp = tmp;
-                    newtmp.mul_assign(&g.z);
-                    g.z = tmp;
-                    g.z.mul_assign(&s);
-                    tmp = newtmp;
-                }
+                for (p, q) in p.iter().rev().zip(q.iter_mut().rev()) {
+                    let skip = p.is_identity();
 
-                // Perform affine transformations
-                for g in v.iter_mut().filter(|g| !g.is_normalized()) {
-                    let mut z = g.z.square(); // 1/z^2
-                    g.x.mul_assign(&z); // x/z^2
-                    z.mul_assign(&g.z); // 1/z^3
-                    g.y.mul_assign(&z); // y/z^3
-                    g.z = $basefield::one(); // z = 1
+                    // Compute tmp = 1/z
+                    let tmp = q.x * acc;
+
+                    // Cancel out z-coordinate in denominator of `acc`
+                    if bool::from(!skip) {
+                        acc *= p.z;
+                    }
+
+                    // Set the coordinates to the correct value
+                    let tmp2 = tmp.square();
+                    let tmp3 = tmp2 * tmp;
+
+                    if skip.into() {
+                        *q = $affine::identity();
+                    } else {
+                        q.x = p.x * tmp2;
+                        q.y = p.y * tmp3;
+                        q.infinity = false;
+                    }
                 }
             }
 
-            fn into_affine(&self) -> $affine {
+            fn to_affine(&self) -> $affine {
                 (*self).into()
             }
 
@@ -787,14 +864,52 @@ macro_rules! curve_impl {
     };
 }
 
+use std::error::Error;
+use std::fmt;
+
+/// An error that may occur when trying to decode an `EncodedPoint`.
+#[derive(Debug)]
+enum GroupDecodingError {
+    /// The coordinate(s) do not lie on the curve.
+    NotOnCurve,
+    /// One of the coordinates could not be decoded
+    CoordinateDecodingError(&'static str),
+    /// The compression mode of the encoded element was not as expected
+    UnexpectedCompressionMode,
+    /// The encoding contained bits that should not have been set
+    UnexpectedInformation,
+}
+
+impl Error for GroupDecodingError {
+    fn description(&self) -> &str {
+        match *self {
+            GroupDecodingError::NotOnCurve => "coordinate(s) do not lie on the curve",
+            GroupDecodingError::CoordinateDecodingError(..) => "coordinate(s) could not be decoded",
+            GroupDecodingError::UnexpectedCompressionMode => {
+                "encoding has unexpected compression mode"
+            }
+            GroupDecodingError::UnexpectedInformation => "encoding has unexpected information",
+        }
+    }
+}
+
+impl fmt::Display for GroupDecodingError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+        match *self {
+            GroupDecodingError::CoordinateDecodingError(description) => {
+                write!(f, "{} decoding error", description)
+            }
+            _ => write!(f, "{}", self.description()),
+        }
+    }
+}
+
 pub mod g1 {
     use super::super::{Fq, Fq12, FqRepr, Fr};
-    use super::g2::G2Affine;
+    use super::{g2::G2Affine, GroupDecodingError};
     use crate::{Engine, PairingCurveAffine};
     use ff::{BitIterator, Field, PrimeField};
-    use group::{
-        CurveAffine, CurveProjective, EncodedPoint, Group, GroupDecodingError, PrimeGroup,
-    };
+    use group::{CurveAffine, CurveProjective, Group, PrimeGroup};
     use rand_core::RngCore;
     use std::fmt;
     use std::ops::{AddAssign, MulAssign, Neg, SubAssign};
@@ -815,6 +930,12 @@ pub mod g1 {
     #[derive(Copy, Clone)]
     pub struct G1Uncompressed([u8; 96]);
 
+    impl Default for G1Uncompressed {
+        fn default() -> Self {
+            G1Uncompressed([0; 96])
+        }
+    }
+
     impl AsRef<[u8]> for G1Uncompressed {
         fn as_ref(&self) -> &[u8] {
             &self.0
@@ -833,25 +954,10 @@ pub mod g1 {
         }
     }
 
-    impl EncodedPoint for G1Uncompressed {
-        type Affine = G1Affine;
-
-        fn empty() -> Self {
-            G1Uncompressed([0; 96])
-        }
-        fn size() -> usize {
+    impl G1Uncompressed {
+        #[cfg(test)]
+        pub(crate) fn size() -> usize {
             96
-        }
-        fn into_affine(&self) -> Result<G1Affine, GroupDecodingError> {
-            let affine = self.into_affine_unchecked()?;
-
-            if !affine.is_on_curve() {
-                Err(GroupDecodingError::NotOnCurve)
-            } else if !affine.is_in_correct_subgroup_assuming_on_curve() {
-                Err(GroupDecodingError::NotInSubgroup)
-            } else {
-                Ok(affine)
-            }
         }
         fn into_affine_unchecked(&self) -> Result<G1Affine, GroupDecodingError> {
             // Create a copy of this representation.
@@ -904,9 +1010,9 @@ pub mod g1 {
             }
         }
         fn from_affine(affine: G1Affine) -> Self {
-            let mut res = Self::empty();
+            let mut res = Self::default();
 
-            if affine.is_identity() {
+            if affine.is_identity().into() {
                 // Set the second-most significant bit to indicate this point
                 // is at infinity.
                 res.0[0] |= 1 << 6;
@@ -921,6 +1027,12 @@ pub mod g1 {
 
     #[derive(Copy, Clone)]
     pub struct G1Compressed([u8; 48]);
+
+    impl Default for G1Compressed {
+        fn default() -> Self {
+            G1Compressed([0; 48])
+        }
+    }
 
     impl AsRef<[u8]> for G1Compressed {
         fn as_ref(&self) -> &[u8] {
@@ -940,25 +1052,10 @@ pub mod g1 {
         }
     }
 
-    impl EncodedPoint for G1Compressed {
-        type Affine = G1Affine;
-
-        fn empty() -> Self {
-            G1Compressed([0; 48])
-        }
-        fn size() -> usize {
+    impl G1Compressed {
+        #[cfg(test)]
+        pub(crate) fn size() -> usize {
             48
-        }
-        fn into_affine(&self) -> Result<G1Affine, GroupDecodingError> {
-            let affine = self.into_affine_unchecked()?;
-
-            // NB: Decompression guarantees that it is on the curve already.
-
-            if !affine.is_in_correct_subgroup_assuming_on_curve() {
-                Err(GroupDecodingError::NotInSubgroup)
-            } else {
-                Ok(affine)
-            }
         }
         fn into_affine_unchecked(&self) -> Result<G1Affine, GroupDecodingError> {
             // Create a copy of this representation.
@@ -1001,9 +1098,9 @@ pub mod g1 {
             }
         }
         fn from_affine(affine: G1Affine) -> Self {
-            let mut res = Self::empty();
+            let mut res = Self::default();
 
-            if affine.is_identity() {
+            if affine.is_identity().into() {
                 // Set the second-most significant bit to indicate this point
                 // is at infinity.
                 res.0[0] |= 1 << 6;
@@ -1083,7 +1180,7 @@ pub mod g1 {
 
     impl G1Prepared {
         pub fn is_identity(&self) -> bool {
-            self.0.is_identity()
+            self.0.is_identity().into()
         }
 
         pub fn from_affine(p: G1Affine) -> Self {
@@ -1379,15 +1476,15 @@ pub mod g1 {
         assert!(b.is_on_curve() && b.is_in_correct_subgroup_assuming_on_curve());
         assert!(c.is_on_curve() && c.is_in_correct_subgroup_assuming_on_curve());
 
-        let mut tmp1 = a.into_projective();
-        tmp1.add_assign(&b.into_projective());
-        assert_eq!(tmp1.into_affine(), c);
-        assert_eq!(tmp1, c.into_projective());
+        let mut tmp1 = a.to_projective();
+        tmp1.add_assign(&b.to_projective());
+        assert_eq!(tmp1.to_affine(), c);
+        assert_eq!(tmp1, c.to_projective());
 
-        let mut tmp2 = a.into_projective();
+        let mut tmp2 = a.to_projective();
         tmp2.add_assign(&b);
-        assert_eq!(tmp2.into_affine(), c);
-        assert_eq!(tmp2, c.into_projective());
+        assert_eq!(tmp2.to_affine(), c);
+        assert_eq!(tmp2, c.to_projective());
     }
 
     #[test]
@@ -1399,12 +1496,10 @@ pub mod g1 {
 
 pub mod g2 {
     use super::super::{Fq, Fq12, Fq2, FqRepr, Fr};
-    use super::g1::G1Affine;
+    use super::{g1::G1Affine, GroupDecodingError};
     use crate::{Engine, PairingCurveAffine};
     use ff::{BitIterator, Field, PrimeField};
-    use group::{
-        CurveAffine, CurveProjective, EncodedPoint, Group, GroupDecodingError, PrimeGroup,
-    };
+    use group::{CurveAffine, CurveProjective, Group, PrimeGroup};
     use rand_core::RngCore;
     use std::fmt;
     use std::ops::{AddAssign, MulAssign, Neg, SubAssign};
@@ -1425,6 +1520,12 @@ pub mod g2 {
     #[derive(Copy, Clone)]
     pub struct G2Uncompressed([u8; 192]);
 
+    impl Default for G2Uncompressed {
+        fn default() -> Self {
+            G2Uncompressed([0; 192])
+        }
+    }
+
     impl AsRef<[u8]> for G2Uncompressed {
         fn as_ref(&self) -> &[u8] {
             &self.0
@@ -1443,25 +1544,10 @@ pub mod g2 {
         }
     }
 
-    impl EncodedPoint for G2Uncompressed {
-        type Affine = G2Affine;
-
-        fn empty() -> Self {
-            G2Uncompressed([0; 192])
-        }
-        fn size() -> usize {
+    impl G2Uncompressed {
+        #[cfg(test)]
+        pub(crate) fn size() -> usize {
             192
-        }
-        fn into_affine(&self) -> Result<G2Affine, GroupDecodingError> {
-            let affine = self.into_affine_unchecked()?;
-
-            if !affine.is_on_curve() {
-                Err(GroupDecodingError::NotOnCurve)
-            } else if !affine.is_in_correct_subgroup_assuming_on_curve() {
-                Err(GroupDecodingError::NotInSubgroup)
-            } else {
-                Ok(affine)
-            }
         }
         fn into_affine_unchecked(&self) -> Result<G2Affine, GroupDecodingError> {
             // Create a copy of this representation.
@@ -1526,9 +1612,9 @@ pub mod g2 {
             }
         }
         fn from_affine(affine: G2Affine) -> Self {
-            let mut res = Self::empty();
+            let mut res = Self::default();
 
-            if affine.is_identity() {
+            if affine.is_identity().into() {
                 // Set the second-most significant bit to indicate this point
                 // is at infinity.
                 res.0[0] |= 1 << 6;
@@ -1545,6 +1631,12 @@ pub mod g2 {
 
     #[derive(Copy, Clone)]
     pub struct G2Compressed([u8; 96]);
+
+    impl Default for G2Compressed {
+        fn default() -> Self {
+            G2Compressed([0; 96])
+        }
+    }
 
     impl AsRef<[u8]> for G2Compressed {
         fn as_ref(&self) -> &[u8] {
@@ -1564,25 +1656,10 @@ pub mod g2 {
         }
     }
 
-    impl EncodedPoint for G2Compressed {
-        type Affine = G2Affine;
-
-        fn empty() -> Self {
-            G2Compressed([0; 96])
-        }
-        fn size() -> usize {
+    impl G2Compressed {
+        #[cfg(test)]
+        pub(crate) fn size() -> usize {
             96
-        }
-        fn into_affine(&self) -> Result<G2Affine, GroupDecodingError> {
-            let affine = self.into_affine_unchecked()?;
-
-            // NB: Decompression guarantees that it is on the curve already.
-
-            if !affine.is_in_correct_subgroup_assuming_on_curve() {
-                Err(GroupDecodingError::NotInSubgroup)
-            } else {
-                Ok(affine)
-            }
         }
         fn into_affine_unchecked(&self) -> Result<G2Affine, GroupDecodingError> {
             // Create a copy of this representation.
@@ -1640,9 +1717,9 @@ pub mod g2 {
             }
         }
         fn from_affine(affine: G2Affine) -> Self {
-            let mut res = Self::empty();
+            let mut res = Self::default();
 
-            if affine.is_identity() {
+            if affine.is_identity().into() {
                 // Set the second-most significant bit to indicate this point
                 // is at infinity.
                 res.0[0] |= 1 << 6;

@@ -173,7 +173,7 @@ impl G2Prepared {
     }
 
     pub fn from_affine(q: G2Affine) -> Self {
-        if q.is_identity() {
+        if q.is_identity().into() {
             return G2Prepared {
                 coeffs: vec![],
                 infinity: true,

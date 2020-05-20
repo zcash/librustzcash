@@ -295,24 +295,24 @@ where
     );
     let b_g2_aux = multiexp(&worker, b_g2_aux_source, b_aux_density, aux_assignment);
 
-    if vk.delta_g1.is_identity() || vk.delta_g2.is_identity() {
+    if bool::from(vk.delta_g1.is_identity() | vk.delta_g2.is_identity()) {
         // If this element is zero, someone is trying to perform a
         // subversion-CRS attack.
         return Err(SynthesisError::UnexpectedIdentity);
     }
 
-    let mut g_a = vk.delta_g1.mul(r);
+    let mut g_a = vk.delta_g1 * &r;
     AddAssign::<&E::G1Affine>::add_assign(&mut g_a, &vk.alpha_g1);
-    let mut g_b = vk.delta_g2.mul(s);
+    let mut g_b = vk.delta_g2 * &s;
     AddAssign::<&E::G2Affine>::add_assign(&mut g_b, &vk.beta_g2);
     let mut g_c;
     {
         let mut rs = r;
         rs.mul_assign(&s);
 
-        g_c = vk.delta_g1.mul(rs);
-        AddAssign::<&E::G1>::add_assign(&mut g_c, &vk.alpha_g1.mul(s));
-        AddAssign::<&E::G1>::add_assign(&mut g_c, &vk.beta_g1.mul(r));
+        g_c = vk.delta_g1 * &rs;
+        AddAssign::<&E::G1>::add_assign(&mut g_c, &(vk.alpha_g1 * &s));
+        AddAssign::<&E::G1>::add_assign(&mut g_c, &(vk.beta_g1 * &r));
     }
     let mut a_answer = a_inputs.wait()?;
     AddAssign::<&E::G1>::add_assign(&mut a_answer, &a_aux.wait()?);
@@ -332,8 +332,8 @@ where
     AddAssign::<&E::G1>::add_assign(&mut g_c, &l.wait()?);
 
     Ok(Proof {
-        a: g_a.into_affine(),
-        b: g_b.into_affine(),
-        c: g_c.into_affine(),
+        a: g_a.to_affine(),
+        b: g_b.to_affine(),
+        c: g_c.to_affine(),
     })
 }
