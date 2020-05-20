@@ -1,7 +1,7 @@
 // Catch documentation errors caused by code changes.
 #![deny(intra_doc_link_resolution_failure)]
 
-use ff::{Field, PrimeField};
+use ff::PrimeField;
 use rand::RngCore;
 use std::fmt;
 use std::iter::Sum;
@@ -97,7 +97,6 @@ pub trait CurveProjective:
     + GroupOps<<Self as CurveProjective>::Affine>
     + GroupOpsOwned<<Self as CurveProjective>::Affine>
 {
-    type Base: Field;
     type Affine: CurveAffine<Projective = Self, Scalar = Self::Scalar>
         + Mul<Self::Scalar, Output = Self>
         + for<'r> Mul<Self::Scalar, Output = Self>;
@@ -136,7 +135,6 @@ pub trait CurveAffine:
     + for<'r> Mul<<Self as CurveAffine>::Scalar, Output = <Self as CurveAffine>::Projective>
 {
     type Scalar: PrimeField;
-    type Base: Field;
     type Projective: CurveProjective<Affine = Self, Scalar = Self::Scalar>;
     type Uncompressed: Default + AsRef<[u8]> + AsMut<[u8]>;
     type Compressed: Default + AsRef<[u8]> + AsMut<[u8]>;

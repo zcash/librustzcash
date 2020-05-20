@@ -200,7 +200,6 @@ macro_rules! curve_impl {
 
         impl CurveAffine for $affine {
             type Scalar = $scalarfield;
-            type Base = $basefield;
             type Projective = $projective;
             type Uncompressed = $uncompressed;
             type Compressed = $compressed;
@@ -748,7 +747,6 @@ macro_rules! curve_impl {
         impl PrimeGroup for $projective {}
 
         impl CurveProjective for $projective {
-            type Base = $basefield;
             type Affine = $affine;
 
             fn batch_normalize(p: &[Self], q: &mut [$affine]) {
