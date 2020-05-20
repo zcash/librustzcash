@@ -65,12 +65,6 @@ pub trait Engine: ScalarEngine {
         + Mul<Self::Fr, Output = Self::G2>
         + for<'a> Mul<&'a Self::Fr, Output = Self::G2>;
 
-    /// The base field that hosts G1.
-    type Fq: PrimeField;
-
-    /// The extension field that hosts G2.
-    type Fqe: Field;
-
     /// The extension field that hosts the target group of the pairing.
     type Fqk: Field;
 

@@ -44,8 +44,6 @@ impl Engine for Bls12 {
     type G1Affine = G1Affine;
     type G2 = G2;
     type G2Affine = G2Affine;
-    type Fq = Fq;
-    type Fqe = Fq2;
     type Fqk = Fq12;
 
     fn miller_loop<'a, I>(i: I) -> Self::Fqk
