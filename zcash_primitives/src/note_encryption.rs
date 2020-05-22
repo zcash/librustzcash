@@ -23,19 +23,13 @@ use crate::{keys::OutgoingViewingKey, JUBJUB};
 pub const KDF_SAPLING_PERSONALIZATION: &[u8; 16] = b"Zcash_SaplingKDF";
 pub const PRF_OCK_PERSONALIZATION: &[u8; 16] = b"Zcash_Derive_ock";
 
-const COMPACT_NOTE_SIZE: usize = (
-    1  + // version
+const COMPACT_NOTE_SIZE: usize = 1 + // version
     11 + // diversifier
     8  + // value
-    32
-    // rcv
-);
+    32; // rcv
 const NOTE_PLAINTEXT_SIZE: usize = COMPACT_NOTE_SIZE + 512;
-const OUT_PLAINTEXT_SIZE: usize = (
-    32 + // pk_d
-    32
-    // esk
-);
+const OUT_PLAINTEXT_SIZE: usize = 32 + // pk_d
+    32; // esk
 const ENC_CIPHERTEXT_SIZE: usize = NOTE_PLAINTEXT_SIZE + 16;
 const OUT_CIPHERTEXT_SIZE: usize = OUT_PLAINTEXT_SIZE + 16;
 

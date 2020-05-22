@@ -899,7 +899,7 @@ impl fmt::Display for GroupDecodingError {
             GroupDecodingError::CoordinateDecodingError(description) => {
                 write!(f, "{} decoding error", description)
             }
-            _ => write!(f, "{}", self.description()),
+            _ => write!(f, "{}", self),
         }
     }
 }
