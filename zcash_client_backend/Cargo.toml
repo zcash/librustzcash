@@ -21,7 +21,7 @@ subtle = "2"
 zcash_primitives = { version = "0.2", path = "../zcash_primitives" }
 
 [build-dependencies]
-protobuf-codegen-pure = "2"
+protobuf-codegen-pure = "2.14"
 
 [dev-dependencies]
 rand_core = "0.5"

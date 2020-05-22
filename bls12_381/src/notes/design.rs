@@ -18,7 +18,7 @@
 //!
 //! This can be derived using the following sage script:
 //!
-//! ```norun
+//! ```text
 //! param = -0xd201000000010000
 //! def r(x):
 //!     return (x**4) - (x**2) + 1

@@ -14,9 +14,9 @@ pub mod amount;
 pub use self::amount::Amount;
 
 // π_A + π_B + π_C
-pub const GROTH_PROOF_SIZE: usize = (48 + 96 + 48);
+pub const GROTH_PROOF_SIZE: usize = 48 + 96 + 48;
 // π_A + π_A' + π_B + π_B' + π_C + π_C' + π_K + π_H
-const PHGR_PROOF_SIZE: usize = (33 + 33 + 65 + 33 + 33 + 33 + 33 + 33);
+const PHGR_PROOF_SIZE: usize = 33 + 33 + 65 + 33 + 33 + 33 + 33 + 33;
 
 const ZC_NUM_JS_INPUTS: usize = 2;
 const ZC_NUM_JS_OUTPUTS: usize = 2;
