@@ -4,7 +4,7 @@ use ff::PrimeField;
 use rusqlite::{types::ToSql, Connection, NO_PARAMS};
 use std::convert::TryInto;
 use std::path::Path;
-use zcash_client_backend::encoding::encode_extended_full_viewing_key;
+use zcash_client_backend::{address::RecipientAddress, encoding::encode_extended_full_viewing_key};
 use zcash_primitives::{
     consensus::{self, NetworkUpgrade},
     keys::OutgoingViewingKey,
@@ -21,7 +21,6 @@ use zcash_primitives::{
 };
 
 use crate::{
-    address::RecipientAddress,
     error::{Error, ErrorKind},
     get_target_and_anchor_heights,
 };
