@@ -43,6 +43,14 @@ impl OutPoint {
         writer.write_all(&self.hash)?;
         writer.write_u32::<LittleEndian>(self.n)
     }
+
+    pub fn n(&self) -> u32 {
+        self.n
+    }
+
+    pub fn hash(&self) -> &[u8; 32] {
+        &self.hash
+    }
 }
 
 #[derive(Debug)]
