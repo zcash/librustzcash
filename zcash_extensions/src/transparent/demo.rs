@@ -308,18 +308,26 @@ pub struct DemoBuilder<'a, B> {
     extension_id: usize,
 }
 
+pub enum DemoBuildError<E> {
+    BaseBuilderError(E),
+    ExpectedOpen,
+    PrevoutParseFailure(Error),
+    TransferCloseMismatch { expected: [u8; 32], actual: [u8; 32] },
+}
+
 impl<'a, B: ExtensionTxBuilder<'a>> DemoBuilder<'a, B> {
     pub fn demo_open(
         &mut self,
         value: Amount,
         preimage_1: [u8; 32],
         preimage_2: [u8; 32],
-    ) -> Result<(), B::BuildError> {
+    ) -> Result<(), DemoBuildError<B::BuildError>> {
         let (hash_1, _) = builder_hashes(&preimage_1, &preimage_2);
 
         // Call through to the generic builder.
         self.txn_builder
             .add_tze_output(self.extension_id, value, &Precondition::open(hash_1))
+            .map_err(DemoBuildError::BaseBuilderError)
     }
 
     pub fn demo_transfer_to_close(
@@ -328,30 +336,43 @@ impl<'a, B: ExtensionTxBuilder<'a>> DemoBuilder<'a, B> {
         transfer_amount: Amount,
         preimage_1: [u8; 32],
         preimage_2: [u8; 32],
-    ) -> Result<(), B::BuildError> {
-        let (_, hash_2) = builder_hashes(&preimage_1, &preimage_2);
+    ) -> Result<(), DemoBuildError<B::BuildError>> {
+        let (hash_1, hash_2) = builder_hashes(&preimage_1, &preimage_2);
 
-        // should we eagerly validate the relationship between prevout.1 and preimage_1?
+        // eagerly validate the relationship between prevout.1 and preimage_1?
+        match Precondition::from_payload(prevout.1.precondition.mode, &prevout.1.precondition.payload) {
+            Ok(Precondition::Open(hash)) =>
+                if hash.0 != hash_1 {
+                    Err(DemoBuildError::TransferCloseMismatch { expected: hash.0, actual: hash_1})?
+                } 
+            Ok(Precondition::Close(_)) =>
+                Err(DemoBuildError::ExpectedOpen)?,
+            Err(parse_failure) => 
+                Err(DemoBuildError::PrevoutParseFailure(parse_failure))?
+        }
+
         self.txn_builder
             .add_tze_input(self.extension_id, prevout, move |_| {
                 Ok(Witness::open(preimage_1))
-            })?;
+            })
+            .map_err(DemoBuildError::BaseBuilderError)?;
 
         self.txn_builder.add_tze_output(
             self.extension_id,
             transfer_amount, // can this be > prevout.1.value?
             &Precondition::close(hash_2),
         )
+        .map_err(DemoBuildError::BaseBuilderError)
     }
 
     pub fn demo_close(
         &mut self,
         prevout: (OutPoint, TzeOut),
-        preimage: [u8; 32],
+        preimage_2: [u8; 32],
     ) -> Result<(), B::BuildError> {
         let hash_2 = {
             let mut hash = [0; 32];
-            hash.copy_from_slice(Params::new().hash_length(32).hash(&preimage).as_bytes());
+            hash.copy_from_slice(Params::new().hash_length(32).hash(&preimage_2).as_bytes());
             hash
         };
 
