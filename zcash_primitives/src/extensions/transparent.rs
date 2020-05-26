@@ -113,13 +113,6 @@ pub trait Extension<C> {
     }
 }
 
-// pub trait WitnessBuilder<BuildCtx> {
-//     type Error;
-//     type Witness: ToPayload;
-//
-//     fn build_witness(ctx: BuildCtx) -> Result<Witness, Self::Error>;
-// }
-
 // This extension trait is satisfied by the transaction::builder::Builder type. It provides a
 // minimal contract for interacting with the transaction builder, that extension library authors
 // can use to add extension-specific builder traits that may be used to interact with the
@@ -138,7 +131,6 @@ pub trait ExtensionTxBuilder<'a> {
     ) -> Result<(), Self::BuildError>
     where
         WBuilder: 'a + (FnOnce(&Self::BuildCtx) -> Result<W, Self::BuildError>);
-    //where WBuilder: WitnessBuilder<Self::BuildCtx, Witness = W, Error = Self::BuildError>;
 
     fn add_tze_output<P: ToPayload>(
         &mut self,
