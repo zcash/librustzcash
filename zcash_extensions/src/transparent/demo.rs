@@ -311,8 +311,10 @@ pub struct DemoBuilder<'a, B> {
 pub enum DemoBuildError<E> {
     BaseBuilderError(E),
     ExpectedOpen,
+    ExpectedClose,
     PrevoutParseFailure(Error),
-    TransferCloseMismatch { expected: [u8; 32], actual: [u8; 32] },
+    TransferMismatch { expected: [u8; 32], actual: [u8; 32] },
+    CloseMismatch { expected: [u8; 32], actual: [u8; 32] },
 }
 
 impl<'a, B: ExtensionTxBuilder<'a>> DemoBuilder<'a, B> {
@@ -339,11 +341,11 @@ impl<'a, B: ExtensionTxBuilder<'a>> DemoBuilder<'a, B> {
     ) -> Result<(), DemoBuildError<B::BuildError>> {
         let (hash_1, hash_2) = builder_hashes(&preimage_1, &preimage_2);
 
-        // eagerly validate the relationship between prevout.1 and preimage_1?
+        // eagerly validate the relationship between prevout.1 and preimage_1
         match Precondition::from_payload(prevout.1.precondition.mode, &prevout.1.precondition.payload) {
             Ok(Precondition::Open(hash)) =>
                 if hash.0 != hash_1 {
-                    Err(DemoBuildError::TransferCloseMismatch { expected: hash.0, actual: hash_1})?
+                    Err(DemoBuildError::TransferMismatch { expected: hash.0, actual: hash_1})?
                 } 
             Ok(Precondition::Close(_)) =>
                 Err(DemoBuildError::ExpectedOpen)?,
@@ -369,17 +371,30 @@ impl<'a, B: ExtensionTxBuilder<'a>> DemoBuilder<'a, B> {
         &mut self,
         prevout: (OutPoint, TzeOut),
         preimage_2: [u8; 32],
-    ) -> Result<(), B::BuildError> {
+    ) -> Result<(), DemoBuildError<B::BuildError>> {
         let hash_2 = {
             let mut hash = [0; 32];
             hash.copy_from_slice(Params::new().hash_length(32).hash(&preimage_2).as_bytes());
             hash
         };
 
+        // eagerly validate the relationship between prevout.1 and preimage_2
+        match Precondition::from_payload(prevout.1.precondition.mode, &prevout.1.precondition.payload) {
+            Ok(Precondition::Open(_)) =>
+                Err(DemoBuildError::ExpectedClose)?,
+            Ok(Precondition::Close(hash)) =>
+                if hash.0 != hash_2 {
+                    Err(DemoBuildError::CloseMismatch { expected: hash.0, actual: hash_2})?
+                } 
+            Err(parse_failure) => 
+                Err(DemoBuildError::PrevoutParseFailure(parse_failure))?
+        }
+
         self.txn_builder
             .add_tze_input(self.extension_id, prevout, move |_| {
                 Ok(Witness::close(hash_2))
             })
+            .map_err(DemoBuildError::BaseBuilderError)
     }
 }
 
@@ -502,8 +517,6 @@ mod tests {
             value: Amount::from_u64(1).unwrap(),
             precondition: tze::Precondition::from(0, &Precondition::open(hash_1)),
         };
-
-        // println!("{:x?}", precondition.payload);
 
         let mut mtx_a = TransactionData::nu4();
         mtx_a.tze_outputs.push(out_a);
