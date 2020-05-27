@@ -6,7 +6,7 @@ use group::GroupEncoding;
 use super::{
     components::{Amount, TxOut},
     Transaction, TransactionData, OVERWINTER_VERSION_GROUP_ID, SAPLING_TX_VERSION,
-    SAPLING_VERSION_GROUP_ID,
+    SAPLING_VERSION_GROUP_ID, FUTURE_VERSION_GROUP_ID,
 };
 use crate::{consensus, legacy::Script};
 
@@ -54,6 +54,7 @@ impl SigHashVersion {
             match tx.version_group_id {
                 OVERWINTER_VERSION_GROUP_ID => SigHashVersion::Overwinter,
                 SAPLING_VERSION_GROUP_ID => SigHashVersion::Sapling,
+                FUTURE_VERSION_GROUP_ID => SigHashVersion::Sapling, //FIXME
                 _ => unimplemented!(),
             }
         } else {

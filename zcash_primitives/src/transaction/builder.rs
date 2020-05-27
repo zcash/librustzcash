@@ -371,20 +371,14 @@ impl<'a, P: consensus::Parameters> Builder<'a, P, OsRng> {
     pub fn new(height: u32) -> Self {
         Builder::new_with_rng(height, OsRng)
     }
+
+    pub fn new_future(height: u32) -> Self {
+        Builder::new_with_rng_future(height, OsRng)
+    }
 }
 
 impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng> Builder<'a, P, R> {
-    /// Creates a new `Builder` targeted for inclusion in the block with the given height
-    /// and randomness source, using default values for general transaction fields.
-    ///
-    /// # Default values
-    ///
-    /// The expiry height will be set to the given height plus the default transaction
-    /// expiry delta (20 blocks).
-    ///
-    /// The fee will be set to the default fee (0.0001 ZEC).
-    pub fn new_with_rng(height: u32, rng: R) -> Builder<'a, P, R> {
-        let mut mtx = TransactionData::new();
+    fn new_with_mtx(height: u32, rng: R, mut mtx: TransactionData) -> Builder<'a, P, R> {
         mtx.expiry_height = height + DEFAULT_TX_EXPIRY_DELTA;
 
         Builder {
@@ -400,6 +394,25 @@ impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng> Builder<'a, P, R> {
             change_address: None,
             phantom: PhantomData,
         }
+    }
+
+    /// Creates a new `Builder` targeted for inclusion in the block with the given height
+    /// and randomness source, using default values for general transaction fields.
+    ///
+    /// # Default values
+    ///
+    /// The expiry height will be set to the given height plus the default transaction
+    /// expiry delta (20 blocks).
+    ///
+    /// The fee will be set to the default fee (0.0001 ZEC).
+    pub fn new_with_rng(height: u32, rng: R) -> Builder<'a, P, R> {
+        let mtx = TransactionData::new();
+        Self::new_with_mtx(height, rng, mtx)
+    }
+
+    pub fn new_with_rng_future(height: u32, rng: R) -> Builder<'a, P, R> {
+        let mtx = TransactionData::future();
+        Self::new_with_mtx(height, rng, mtx)
     }
 
     /// Adds a Sapling note to be spent in this transaction.
@@ -508,7 +521,6 @@ impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng> Builder<'a, P, R> {
         mut self,
         consensus_branch_id: consensus::BranchId,
         prover: &impl TxProver,
-        // epoch: &Epoch<TransactionData>
     ) -> Result<(Transaction, TransactionMetadata), Error> {
         let mut tx_metadata = TransactionMetadata::new();
 
@@ -517,7 +529,9 @@ impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng> Builder<'a, P, R> {
         //
 
         // Valid change
-        let change = self.mtx.value_balance - self.fee + self.transparent_inputs.value_sum()
+        let change = self.mtx.value_balance
+            - self.fee
+            + self.transparent_inputs.value_sum()
             - self.mtx.vout.iter().map(|vo| vo.value).sum::<Amount>()
             + self
                 .tze_inputs
@@ -735,15 +749,15 @@ impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng> Builder<'a, P, R> {
         }
 
         // Add a binding signature if needed
-        if binding_sig_needed {
-            self.mtx.binding_sig = Some(
+        self.mtx.binding_sig = if binding_sig_needed {
+            Some(
                 prover
                     .binding_sig(&mut ctx, self.mtx.value_balance, &sighash)
-                    .map_err(|()| Error::BindingSig)?,
-            );
+                    .map_err(|_| Error::BindingSig)?,
+            )
         } else {
-            self.mtx.binding_sig = None;
-        }
+            None
+        };
 
         // // Create TZE input witnesses
         for tze_in in self.tze_inputs.builders {
@@ -784,7 +798,6 @@ impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng> ExtensionTxBuilder<'a
     where
         WBuilder: 'a + (FnOnce(&Self::BuildCtx) -> Result<W, Self::BuildError>),
     {
-        // where WBuilder: WitnessBuilder<Self::BuildCtx, Witness = impl ToPayload, Error = Self::BuildError> {
         self.tze_inputs.push(extension_id, prevout, witness_builder);
         Ok(())
     }
