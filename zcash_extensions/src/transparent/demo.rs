@@ -392,7 +392,7 @@ impl<'a, B: ExtensionTxBuilder<'a>> DemoBuilder<'a, B> {
 
         self.txn_builder
             .add_tze_input(self.extension_id, prevout, move |_| {
-                Ok(Witness::close(hash_2))
+                Ok(Witness::close(preimage_2))
             })
             .map_err(DemoBuildError::BaseBuilderError)
     }
