@@ -304,10 +304,12 @@ fn builder_hashes(preimage_1: &[u8; 32], preimage_2: &[u8; 32]) -> ([u8; 32], [u
 }
 
 pub struct DemoBuilder<'a, B> {
-    txn_builder: &'a mut B,
-    extension_id: usize,
+    pub txn_builder: &'a mut B,
+    pub extension_id: usize,
 }
 
+
+#[derive(Debug)]
 pub enum DemoBuildError<E> {
     BaseBuilderError(E),
     ExpectedOpen,
@@ -402,12 +404,20 @@ impl<'a, B: ExtensionTxBuilder<'a>> DemoBuilder<'a, B> {
 mod tests {
     use blake2b_simd::Params;
 
-    use super::{close, open, Context, Precondition, Program, Witness};
+    use super::{close, open, Context, Precondition, Program, Witness, DemoBuilder};
     use zcash_primitives::{
-        extensions::transparent::{self as tze, Extension, FromPayload, ToPayload},
+        consensus::{BranchId},
+        extensions::transparent::{
+            self as tze, 
+            Extension, 
+            FromPayload, 
+            ToPayload,
+            ExtensionTxBuilder,
+        },
         transaction::{
+            builder::Builder,
             components::{Amount, OutPoint, TzeIn, TzeOut},
-            Transaction, TransactionData,
+            Transaction, TransactionData, 
         },
     };
 
@@ -577,5 +587,82 @@ mod tests {
                 Ok(())
             );
         }
+    }
+
+    #[test]
+    fn demo_builder_program() -> Result<(), String> {
+        let preimage_1 = [1; 32];
+        let preimage_2 = [2; 32];
+
+        //
+        // Opening transaction
+        //
+        
+        let builder_a = DemoBuilder {
+            txn_builder: &mut Builder::new_nu4(0),
+            extension_id: 0
+        };
+
+        let open_value = Amount::from_u64(1).unwrap();
+        builder_a.demo_open(open_value, preimage_1, preimage_2)
+                 .map_err(|e| format!("open failure: {:?}", e))?;
+        let (tx_a, _) = builder_a.txn_builder.build(BranchId::Canopy, MockTxProver)
+                                 .map_err(|e| format!("build failure: {:?}", e))?;
+
+        //
+        // Transfer
+        //
+        
+        let builder_b = DemoBuilder {
+            txn_builder: &mut Builder::new_nu4(0),
+            extension_id: 0
+        };
+        let prevout_a = (OutPoint::new(tx_a.txid().0, 0), tx_a.data.tze_outputs[0]);
+        builder_b.demo_transfer_to_close(prevout_a, open_value, preimage_1, preimage_2)
+                 .map_err(|e| format!("transfer failure: {:?}", e))?;
+        let (tx_b, _) = builder_b.txn_builder.build(BranchId::Canopy, MockTxProver)
+                                 .map_err(|e| format!("build failure: {:?}", e))?;
+        
+        //
+        // Closing transaction
+        //
+
+        let builder_c = DemoBuilder {
+            txn_builder: &mut Builder::new_nu4(0),
+            extension_id: 0
+        };
+        let prevout_b = (OutPoint::new(tx_a.txid().0, 0), tx_b.data.tze_outputs[0]);
+        builder_c.demo_close(prevout_b, preimage_2)
+                 .map_err(|e| format!("close failure: {:?}", e))?;
+        let (tx_c, _) = builder_b.txn_builder.build(BranchId::Canopy, MockTxProver)
+                                 .map_err(|e| format!("build failure: {:?}", e))?;
+        
+        // Verify tx_b
+        {
+            let ctx = Ctx { tx: &tx_b };
+            assert_eq!(
+                Program.verify(
+                    &tx_a.data.tze_outputs[0].precondition,
+                    &tx_b.data.tze_inputs[0].witness,
+                    &ctx
+                ),
+                Ok(())
+            );
+        }
+
+        // Verify tx_c
+        {
+            let ctx = Ctx { tx: &tx_b };
+            assert_eq!(
+                Program.verify(
+                    &tx_b.data.tze_outputs[0].precondition,
+                    &tx_c.data.tze_inputs[0].witness,
+                    &ctx
+                ),
+                Ok(())
+            );
+        }
+
+        Ok(())
     }
 }

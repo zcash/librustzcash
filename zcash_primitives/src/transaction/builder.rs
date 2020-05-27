@@ -344,20 +344,14 @@ impl Builder<'_, OsRng> {
     pub fn new(height: u32) -> Self {
         Builder::new_with_rng(height, OsRng)
     }
+
+    pub fn new_nu4(height: u32) -> Self {
+        Builder::new_with_rng_nu4(height, OsRng)
+    }
 }
 
 impl<'a, R: RngCore + CryptoRng> Builder<'a, R> {
-    /// Creates a new `Builder` targeted for inclusion in the block with the given height
-    /// and randomness source, using default values for general transaction fields.
-    ///
-    /// # Default values
-    ///
-    /// The expiry height will be set to the given height plus the default transaction
-    /// expiry delta (20 blocks).
-    ///
-    /// The fee will be set to the default fee (0.0001 ZEC).
-    pub fn new_with_rng(height: u32, rng: R) -> Builder<'a, R> {
-        let mut mtx = TransactionData::new();
+    fn new_with_mtx(height: u32, rng: R, mut mtx: TransactionData) -> Builder<'a, R> {
         mtx.expiry_height = height + DEFAULT_TX_EXPIRY_DELTA;
 
         Builder {
@@ -371,6 +365,25 @@ impl<'a, R: RngCore + CryptoRng> Builder<'a, R> {
             tze_inputs: TzeInputs { builders: vec![] },
             change_address: None,
         }
+    }
+
+    /// Creates a new `Builder` targeted for inclusion in the block with the given height
+    /// and randomness source, using default values for general transaction fields.
+    ///
+    /// # Default values
+    ///
+    /// The expiry height will be set to the given height plus the default transaction
+    /// expiry delta (20 blocks).
+    ///
+    /// The fee will be set to the default fee (0.0001 ZEC).
+    pub fn new_with_rng(height: u32, rng: R) -> Builder<'a, R> {
+        let mtx = TransactionData::new();
+        Self::new_with_mtx(height, rng, mtx)
+    }
+
+    pub fn new_with_rng_nu4(height: u32, rng: R) -> Builder<'a, R> {
+        let mtx = TransactionData::nu4();
+        Self::new_with_mtx(height, rng, mtx)
     }
 
     /// Adds a Sapling note to be spent in this transaction.
@@ -478,7 +491,6 @@ impl<'a, R: RngCore + CryptoRng> Builder<'a, R> {
         mut self,
         consensus_branch_id: consensus::BranchId,
         prover: &impl TxProver,
-        // epoch: &Epoch<TransactionData>
     ) -> Result<(Transaction, TransactionMetadata), Error> {
         let mut tx_metadata = TransactionMetadata::new();
 

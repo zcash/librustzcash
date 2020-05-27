@@ -26,6 +26,7 @@ impl Parameters for MainNetwork {
             NetworkUpgrade::Sapling => Some(419_200),
             NetworkUpgrade::Blossom => Some(653_600),
             NetworkUpgrade::Heartwood => None,
+            NetworkUpgrade::Canopy => None,
         }
     }
 }
@@ -41,6 +42,7 @@ impl Parameters for TestNetwork {
             NetworkUpgrade::Sapling => Some(280_000),
             NetworkUpgrade::Blossom => Some(584_000),
             NetworkUpgrade::Heartwood => None,
+            NetworkUpgrade::Canopy => None,
         }
     }
 }
@@ -67,6 +69,10 @@ pub enum NetworkUpgrade {
     ///
     /// [Heartwood]: https://z.cash/upgrade/heartwood/
     Heartwood,
+    /// The [Canopy] network upgrade.
+    ///
+    /// [Canopy]: https://z.cash/upgrade/canopy/
+    Canopy,
 }
 
 impl fmt::Display for NetworkUpgrade {
@@ -76,6 +82,7 @@ impl fmt::Display for NetworkUpgrade {
             NetworkUpgrade::Sapling => write!(f, "Sapling"),
             NetworkUpgrade::Blossom => write!(f, "Blossom"),
             NetworkUpgrade::Heartwood => write!(f, "Heartwood"),
+            NetworkUpgrade::Canopy => write!(f, "Canopy"),
         }
     }
 }
@@ -87,6 +94,7 @@ impl NetworkUpgrade {
             NetworkUpgrade::Sapling => BranchId::Sapling,
             NetworkUpgrade::Blossom => BranchId::Blossom,
             NetworkUpgrade::Heartwood => BranchId::Heartwood,
+            NetworkUpgrade::Canopy => BranchId::Canopy,
         }
     }
 }
@@ -127,6 +135,8 @@ pub enum BranchId {
     Blossom,
     /// The consensus rules deployed by [`NetworkUpgrade::Heartwood`].
     Heartwood,
+    /// The consensus rules deployed by [`NetworkUpgrade::Canopy`].
+    Canopy,
 }
 
 impl TryFrom<u32> for BranchId {
@@ -139,6 +149,7 @@ impl TryFrom<u32> for BranchId {
             0x76b8_09bb => Ok(BranchId::Sapling),
             0x2bb4_0e60 => Ok(BranchId::Blossom),
             0xf5b9_230b => Ok(BranchId::Heartwood),
+            0x1111_1111 => Ok(BranchId::Canopy), //FIXME
             _ => Err("Unknown consensus branch ID"),
         }
     }
@@ -152,6 +163,7 @@ impl From<BranchId> for u32 {
             BranchId::Sapling => 0x76b8_09bb,
             BranchId::Blossom => 0x2bb4_0e60,
             BranchId::Heartwood => 0xf5b9_230b,
+            BranchId::Canopy => 0x1111_1111, //FIXME
         }
     }
 }
