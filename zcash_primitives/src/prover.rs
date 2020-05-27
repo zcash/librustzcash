@@ -60,7 +60,7 @@ pub trait TxProver {
 }
 
 #[cfg(test)]
-pub(crate) mod mock {
+pub mod mock {
     use ff::Field;
     use rand_core::OsRng;
 

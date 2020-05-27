@@ -304,21 +304,28 @@ fn builder_hashes(preimage_1: &[u8; 32], preimage_2: &[u8; 32]) -> ([u8; 32], [u
     (hash_1, hash_2)
 }
 
-pub struct DemoBuilder<'a, B> {
-    txn_builder: &'a mut B,
-    extension_id: usize,
+pub struct DemoBuilder<B> {
+    pub txn_builder: B,
+    pub extension_id: usize,
 }
 
+#[derive(Debug)]
 pub enum DemoBuildError<E> {
     BaseBuilderError(E),
     ExpectedOpen,
     ExpectedClose,
     PrevoutParseFailure(Error),
-    TransferMismatch { expected: [u8; 32], actual: [u8; 32] },
-    CloseMismatch { expected: [u8; 32], actual: [u8; 32] },
+    TransferMismatch {
+        expected: [u8; 32],
+        actual: [u8; 32],
+    },
+    CloseMismatch {
+        expected: [u8; 32],
+        actual: [u8; 32],
+    },
 }
 
-impl<'a, B: ExtensionTxBuilder<'a>> DemoBuilder<'a, B> {
+impl<'a, B: ExtensionTxBuilder<'a>> DemoBuilder<&mut B> {
     pub fn demo_open(
         &mut self,
         value: Amount,
@@ -343,15 +350,20 @@ impl<'a, B: ExtensionTxBuilder<'a>> DemoBuilder<'a, B> {
         let (hash_1, hash_2) = builder_hashes(&preimage_1, &preimage_2);
 
         // eagerly validate the relationship between prevout.1 and preimage_1
-        match Precondition::from_payload(prevout.1.precondition.mode, &prevout.1.precondition.payload) {
-            Ok(Precondition::Open(hash)) =>
+        match Precondition::from_payload(
+            prevout.1.precondition.mode,
+            &prevout.1.precondition.payload,
+        ) {
+            Ok(Precondition::Open(hash)) => {
                 if hash.0 != hash_1 {
-                    Err(DemoBuildError::TransferMismatch { expected: hash.0, actual: hash_1})?
-                } 
-            Ok(Precondition::Close(_)) =>
-                Err(DemoBuildError::ExpectedOpen)?,
-            Err(parse_failure) => 
-                Err(DemoBuildError::PrevoutParseFailure(parse_failure))?
+                    Err(DemoBuildError::TransferMismatch {
+                        expected: hash.0,
+                        actual: hash_1,
+                    })?
+                }
+            }
+            Ok(Precondition::Close(_)) => Err(DemoBuildError::ExpectedOpen)?,
+            Err(parse_failure) => Err(DemoBuildError::PrevoutParseFailure(parse_failure))?,
         }
 
         self.txn_builder
@@ -360,12 +372,13 @@ impl<'a, B: ExtensionTxBuilder<'a>> DemoBuilder<'a, B> {
             })
             .map_err(DemoBuildError::BaseBuilderError)?;
 
-        self.txn_builder.add_tze_output(
-            self.extension_id,
-            transfer_amount, // can this be > prevout.1.value?
-            &Precondition::close(hash_2),
-        )
-        .map_err(DemoBuildError::BaseBuilderError)
+        self.txn_builder
+            .add_tze_output(
+                self.extension_id,
+                transfer_amount, // can this be > prevout.1.value?
+                &Precondition::close(hash_2),
+            )
+            .map_err(DemoBuildError::BaseBuilderError)
     }
 
     pub fn demo_close(
@@ -380,15 +393,20 @@ impl<'a, B: ExtensionTxBuilder<'a>> DemoBuilder<'a, B> {
         };
 
         // eagerly validate the relationship between prevout.1 and preimage_2
-        match Precondition::from_payload(prevout.1.precondition.mode, &prevout.1.precondition.payload) {
-            Ok(Precondition::Open(_)) =>
-                Err(DemoBuildError::ExpectedClose)?,
-            Ok(Precondition::Close(hash)) =>
+        match Precondition::from_payload(
+            prevout.1.precondition.mode,
+            &prevout.1.precondition.payload,
+        ) {
+            Ok(Precondition::Open(_)) => Err(DemoBuildError::ExpectedClose)?,
+            Ok(Precondition::Close(hash)) => {
                 if hash.0 != hash_2 {
-                    Err(DemoBuildError::CloseMismatch { expected: hash.0, actual: hash_2})?
-                } 
-            Err(parse_failure) => 
-                Err(DemoBuildError::PrevoutParseFailure(parse_failure))?
+                    Err(DemoBuildError::CloseMismatch {
+                        expected: hash.0,
+                        actual: hash_2,
+                    })?
+                }
+            }
+            Err(parse_failure) => Err(DemoBuildError::PrevoutParseFailure(parse_failure))?,
         }
 
         self.txn_builder
@@ -401,16 +419,32 @@ impl<'a, B: ExtensionTxBuilder<'a>> DemoBuilder<'a, B> {
 
 #[cfg(test)]
 mod tests {
+    use ff::{Field, PrimeField};
     use blake2b_simd::Params;
+    use rand_core::OsRng;
 
-    use super::{close, open, Context, Precondition, Program, Witness};
+    use zcash_proofs::prover::LocalTxProver;
+
     use zcash_primitives::{
+        consensus::{
+            BranchId,
+            TestNetwork,
+        },
         extensions::transparent::{self as tze, Extension, FromPayload, ToPayload},
+        legacy::TransparentAddress,
+        merkle_tree::{CommitmentTree, IncrementalWitness},
+        primitives::Rseed,
+        sapling::Node,
         transaction::{
+            builder::Builder,
             components::{Amount, OutPoint, TzeIn, TzeOut},
             Transaction, TransactionData,
         },
+        zip32::ExtendedSpendingKey,
     };
+
+    use super::{close, open, Context, DemoBuilder, Precondition, Program, Witness};
+
 
     #[test]
     fn precondition_open_round_trip() {
@@ -519,7 +553,7 @@ mod tests {
             precondition: tze::Precondition::from(0, &Precondition::open(hash_1)),
         };
 
-        let mut mtx_a = TransactionData::nu4();
+        let mut mtx_a = TransactionData::future();
         mtx_a.tze_outputs.push(out_a);
         let tx_a = mtx_a.freeze().unwrap();
 
@@ -535,7 +569,7 @@ mod tests {
             value: Amount::from_u64(1).unwrap(),
             precondition: tze::Precondition::from(0, &Precondition::close(hash_2)),
         };
-        let mut mtx_b = TransactionData::nu4();
+        let mut mtx_b = TransactionData::future();
         mtx_b.tze_inputs.push(in_b);
         mtx_b.tze_outputs.push(out_b);
         let tx_b = mtx_b.freeze().unwrap();
@@ -549,7 +583,7 @@ mod tests {
             witness: tze::Witness::from(0, &Witness::close(preimage_2)),
         };
 
-        let mut mtx_c = TransactionData::nu4();
+        let mut mtx_c = TransactionData::future();
         mtx_c.tze_inputs.push(in_c);
         let tx_c = mtx_c.freeze().unwrap();
 
@@ -578,5 +612,119 @@ mod tests {
                 Ok(())
             );
         }
+    }
+
+    #[test]
+    fn demo_builder_program() {
+        let preimage_1 = [1; 32];
+        let preimage_2 = [2; 32];
+
+        let prover = LocalTxProver::with_default_location().unwrap();
+
+        //
+        // Opening transaction
+        //
+
+        let mut rng = OsRng;
+        let mut builder_a: Builder<'_, TestNetwork, OsRng> = Builder::new_future(0);
+
+        // create some inputs to spend
+        let extsk = ExtendedSpendingKey::master(&[]);
+        let to = extsk.default_address().unwrap().1;
+        let note1 = to
+            .create_note(110000, Rseed::BeforeZip212(jubjub::Fr::random(&mut rng)))
+            .unwrap();
+        let cm1 = Node::new(note1.cmu().to_repr());
+        let mut tree = CommitmentTree::new();
+        // fake that the note appears in some previous
+        // shielded output
+        tree.append(cm1).unwrap();
+        let witness1 = IncrementalWitness::from_tree(&tree);
+
+        builder_a
+            .add_sapling_spend(
+                extsk.clone(),
+                *to.diversifier(),
+                note1.clone(),
+                witness1.path().unwrap(),
+            )
+            .unwrap();
+
+        let mut db_a = DemoBuilder {
+            txn_builder: &mut builder_a,
+            extension_id: 0,
+        };
+
+        let value = Amount::from_u64(100000).unwrap();
+        db_a.demo_open(value, preimage_1, preimage_2)
+            .map_err(|e| format!("open failure: {:?}", e))
+            .unwrap();
+        let (tx_a, _) = builder_a
+            .build(BranchId::Canopy, &prover)
+            .map_err(|e| format!("build failure: {:?}", e))
+            .unwrap();
+
+        //
+        // Transfer
+        //
+
+        let mut builder_b: Builder<'_, TestNetwork, OsRng> = Builder::new_future(0);
+        let mut db_b = DemoBuilder {
+            txn_builder: &mut builder_b,
+            extension_id: 0,
+        };
+        let prevout_a = (OutPoint::new(tx_a.txid().0, 0), tx_a.data.tze_outputs[0].clone());
+        let value_xfr = Amount::from_u64(90000).unwrap();
+        db_b.demo_transfer_to_close(prevout_a, value_xfr, preimage_1, preimage_2)
+            .map_err(|e| format!("transfer failure: {:?}", e))
+            .unwrap();
+        let (tx_b, _) = builder_b
+            .build(BranchId::Canopy, &prover)
+            .map_err(|e| format!("build failure: {:?}", e))
+            .unwrap();
+
+        //
+        // Closing transaction
+        //
+
+        let mut builder_c: Builder<'_, TestNetwork, OsRng> = Builder::new_future(0);
+        let mut db_c = DemoBuilder {
+            txn_builder: &mut builder_c,
+            extension_id: 0,
+        };
+        let prevout_b = (OutPoint::new(tx_a.txid().0, 0), tx_b.data.tze_outputs[0].clone());
+        db_c.demo_close(prevout_b, preimage_2)
+            .map_err(|e| format!("close failure: {:?}", e))
+            .unwrap();
+
+        builder_c.add_transparent_output(&TransparentAddress::PublicKey([0; 20]), Amount::from_u64(80000).unwrap())
+                 .unwrap();
+
+        let (tx_c, _) = builder_c
+            .build(BranchId::Canopy, &prover)
+            .map_err(|e| format!("build failure: {:?}", e))
+            .unwrap();
+
+        // Verify tx_b
+        let ctx0 = Ctx { tx: &tx_b };
+        assert_eq!(
+            Program.verify(
+                &tx_a.data.tze_outputs[0].precondition,
+                &tx_b.data.tze_inputs[0].witness,
+                &ctx0
+            ),
+            Ok(())
+        );
+
+        // Verify tx_c
+        let ctx1 = Ctx { tx: &tx_b };
+        assert_eq!(
+            Program.verify(
+                &tx_b.data.tze_outputs[0].precondition,
+                &tx_c.data.tze_inputs[0].witness,
+                &ctx1
+            ),
+            Ok(())
+        );
     }
 }

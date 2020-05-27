@@ -44,8 +44,8 @@ impl fmt::Display for TxId {
 /// A Zcash transaction.
 #[derive(Debug)]
 pub struct Transaction {
-    txid: TxId,
-    data: TransactionData,
+    pub txid: TxId,
+    pub data: TransactionData,
 }
 
 impl Deref for Transaction {
@@ -142,7 +142,7 @@ impl TransactionData {
         }
     }
 
-    pub fn nu4() -> Self {
+    pub fn future() -> Self {
         TransactionData {
             overwintered: true,
             version: FUTURE_TX_VERSION,
@@ -310,10 +310,11 @@ impl Transaction {
         let is_sapling_v4 = self.overwintered
             && self.version_group_id == SAPLING_VERSION_GROUP_ID
             && self.version == SAPLING_TX_VERSION;
-        let is_nu4_v5 = self.overwintered
+        let has_tze = self.overwintered
             && self.version_group_id == FUTURE_VERSION_GROUP_ID
             && self.version == FUTURE_TX_VERSION;
-        if self.overwintered && !(is_overwinter_v3 || is_sapling_v4 || is_nu4_v5) {
+
+        if self.overwintered && !(is_overwinter_v3 || is_sapling_v4 || has_tze) {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 "Unknown transaction format",
@@ -322,16 +323,16 @@ impl Transaction {
 
         Vector::write(&mut writer, &self.vin, |w, e| e.write(w))?;
         Vector::write(&mut writer, &self.vout, |w, e| e.write(w))?;
-        if is_nu4_v5 {
+        if has_tze {
             Vector::write(&mut writer, &self.tze_inputs, |w, e| e.write(w))?;
             Vector::write(&mut writer, &self.tze_outputs, |w, e| e.write(w))?;
         }
         writer.write_u32::<LittleEndian>(self.lock_time)?;
-        if is_overwinter_v3 || is_sapling_v4 || is_nu4_v5 {
+        if is_overwinter_v3 || is_sapling_v4 || has_tze {
             writer.write_u32::<LittleEndian>(self.expiry_height)?;
         }
 
-        if is_sapling_v4 || is_nu4_v5 {
+        if is_sapling_v4 || has_tze {
             writer.write_all(&self.value_balance.to_i64_le_bytes())?;
             Vector::write(&mut writer, &self.shielded_spends, |w, e| e.write(w))?;
             Vector::write(&mut writer, &self.shielded_outputs, |w, e| e.write(w))?;
@@ -376,7 +377,7 @@ impl Transaction {
             }
         }
 
-        if (is_sapling_v4 || is_nu4_v5)
+        if (is_sapling_v4 || has_tze)
             && !(self.shielded_spends.is_empty() && self.shielded_outputs.is_empty())
         {
             match self.binding_sig {
