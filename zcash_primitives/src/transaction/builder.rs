@@ -499,7 +499,9 @@ impl<'a, R: RngCore + CryptoRng> Builder<'a, R> {
         //
 
         // Valid change
-        let change = self.mtx.value_balance - self.fee + self.transparent_inputs.value_sum()
+        let change = self.mtx.value_balance
+            - self.fee
+            + self.transparent_inputs.value_sum()
             - self.mtx.vout.iter().map(|vo| vo.value).sum::<Amount>()
             + self
                 .tze_inputs
@@ -707,11 +709,13 @@ impl<'a, R: RngCore + CryptoRng> Builder<'a, R> {
                 &JUBJUB,
             ));
         }
-        self.mtx.binding_sig = Some(
-            prover
-                .binding_sig(&mut ctx, self.mtx.value_balance, &sighash)
-                .map_err(|()| Error::BindingSig)?,
-        );
+        if !self.mtx.shielded_spends.is_empty() {
+            self.mtx.binding_sig = Some(
+                prover
+                    .binding_sig(&mut ctx, self.mtx.value_balance, &sighash)
+                    .map_err(|_| Error::BindingSig)?,
+            );
+        }
 
         // // Create TZE input witnesses
         for tze_in in self.tze_inputs.builders {
@@ -750,7 +754,6 @@ impl<'a, R: RngCore + CryptoRng> ExtensionTxBuilder<'a> for Builder<'a, R> {
     where
         WBuilder: 'a + (FnOnce(&Self::BuildCtx) -> Result<W, Self::BuildError>),
     {
-        // where WBuilder: WitnessBuilder<Self::BuildCtx, Witness = impl ToPayload, Error = Self::BuildError> {
         self.tze_inputs.push(extension_id, prevout, witness_builder);
         Ok(())
     }
