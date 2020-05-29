@@ -156,22 +156,22 @@ pub trait CurveAffine:
 
 pub trait GroupEncoding: Sized {
     /// The encoding of group elements.
-    type Compressed: Default + AsRef<[u8]> + AsMut<[u8]>;
+    type Repr: Default + AsRef<[u8]> + AsMut<[u8]>;
 
-    /// Attempts to deserialize an element from its compressed encoding.
-    fn from_compressed(bytes: &Self::Compressed) -> CtOption<Self>;
+    /// Attempts to deserialize a group element from its encoding.
+    fn from_bytes(bytes: &Self::Repr) -> CtOption<Self>;
 
-    /// Attempts to deserialize a compressed element, not checking if the element is in
-    /// the correct subgroup.
+    /// Attempts to deserialize a group element, not checking if the element is valid.
     ///
     /// **This is dangerous to call unless you trust the bytes you are reading; otherwise,
     /// API invariants may be broken.** Please consider using
-    /// [`CurveAffine::from_compressed`] instead.
-    fn from_compressed_unchecked(bytes: &Self::Compressed) -> CtOption<Self>;
+    /// [`GroupEncoding::from_bytes`] instead.
+    fn from_bytes_unchecked(bytes: &Self::Repr) -> CtOption<Self>;
 
-    /// Converts this element into its compressed encoding, so long as it's not
-    /// the point at infinity.
-    fn to_compressed(&self) -> Self::Compressed;
+    /// Converts this element into its byte encoding. This may or may not support
+    /// encoding the identity.
+    // TODO: Figure out how to handle identity encoding generically.
+    fn to_bytes(&self) -> Self::Repr;
 }
 
 /// Affine representation of a point on an elliptic curve that has a defined uncompressed

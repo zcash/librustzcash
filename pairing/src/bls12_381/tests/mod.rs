@@ -87,22 +87,20 @@ where
 
 fn compressed_test_vectors<G: CurveProjective>(expected: &[u8]) {
     let mut e = G::identity();
-    let encoded_len = <G::Affine as GroupEncoding>::Compressed::default()
-        .as_ref()
-        .len();
+    let encoded_len = <G::Affine as GroupEncoding>::Repr::default().as_ref().len();
 
     let mut v = vec![];
     {
         let mut expected = expected;
         for _ in 0..1000 {
             let e_affine = e.to_affine();
-            let encoded = e_affine.to_compressed();
+            let encoded = e_affine.to_bytes();
             v.extend_from_slice(encoded.as_ref());
 
-            let mut decoded = <G::Affine as GroupEncoding>::Compressed::default();
+            let mut decoded = <G::Affine as GroupEncoding>::Repr::default();
             decoded.as_mut().copy_from_slice(&expected[0..encoded_len]);
             expected = &expected[encoded_len..];
-            let decoded = G::Affine::from_compressed(&decoded).unwrap();
+            let decoded = G::Affine::from_bytes(&decoded).unwrap();
             assert_eq!(e_affine, decoded);
 
             e.add_assign(&G::generator());
@@ -395,12 +393,12 @@ fn test_g2_uncompressed_invalid_vectors() {
 #[test]
 fn test_g1_compressed_invalid_vectors() {
     {
-        let z = G1Affine::identity().to_compressed();
+        let z = G1Affine::identity().to_bytes();
 
         {
             let mut z = z;
             z.as_mut()[0] &= 0b0111_1111;
-            if G1Affine::from_compressed(&z).is_none().into() {
+            if G1Affine::from_bytes(&z).is_none().into() {
                 // :)
             } else {
                 panic!("should have rejected the point because we expected a compressed point");
@@ -410,7 +408,7 @@ fn test_g1_compressed_invalid_vectors() {
         {
             let mut z = z;
             z.as_mut()[0] |= 0b0010_0000;
-            if G1Affine::from_compressed(&z).is_none().into() {
+            if G1Affine::from_bytes(&z).is_none().into() {
                 // :)
             } else {
                 panic!("should have rejected the point because the parity bit should not be set if the point is at infinity");
@@ -420,7 +418,7 @@ fn test_g1_compressed_invalid_vectors() {
         for i in 0..G1Compressed::size() {
             let mut z = z;
             z.as_mut()[i] |= 0b0000_0001;
-            if G1Affine::from_compressed(&z).is_none().into() {
+            if G1Affine::from_bytes(&z).is_none().into() {
                 // :)
             } else {
                 panic!("should have rejected the point because the coordinates should be zeroes at the point at infinity");
@@ -428,12 +426,12 @@ fn test_g1_compressed_invalid_vectors() {
         }
     }
 
-    let o = G1Affine::generator().to_compressed();
+    let o = G1Affine::generator().to_bytes();
 
     {
         let mut o = o;
         o.as_mut()[0] &= 0b0111_1111;
-        if G1Affine::from_compressed(&o).is_none().into() {
+        if G1Affine::from_bytes(&o).is_none().into() {
             // :)
         } else {
             panic!("should have rejected the point because we expected a compressed point");
@@ -447,7 +445,7 @@ fn test_g1_compressed_invalid_vectors() {
         o.as_mut()[..48].copy_from_slice(m.as_ref());
         o.as_mut()[0] |= 0b1000_0000;
 
-        if G1Affine::from_compressed(&o).is_none().into() {
+        if G1Affine::from_bytes(&o).is_none().into() {
             // x coordinate
         } else {
             panic!("should have rejected the point")
@@ -469,7 +467,7 @@ fn test_g1_compressed_invalid_vectors() {
                 o.as_mut().copy_from_slice(x.to_repr().as_ref());
                 o.as_mut()[0] |= 0b1000_0000;
 
-                if G1Affine::from_compressed(&o).is_none().into() {
+                if G1Affine::from_bytes(&o).is_none().into() {
                     break;
                 } else {
                     panic!("should have rejected the point because it isn't on the curve")
@@ -492,7 +490,7 @@ fn test_g1_compressed_invalid_vectors() {
                 o.as_mut().copy_from_slice(x.to_repr().as_ref());
                 o.as_mut()[0] |= 0b1000_0000;
 
-                if G1Affine::from_compressed(&o).is_none().into() {
+                if G1Affine::from_bytes(&o).is_none().into() {
                     break;
                 } else {
                     panic!(
@@ -509,12 +507,12 @@ fn test_g1_compressed_invalid_vectors() {
 #[test]
 fn test_g2_compressed_invalid_vectors() {
     {
-        let z = G2Affine::identity().to_compressed();
+        let z = G2Affine::identity().to_bytes();
 
         {
             let mut z = z;
             z.as_mut()[0] &= 0b0111_1111;
-            if G2Affine::from_compressed(&z).is_none().into() {
+            if G2Affine::from_bytes(&z).is_none().into() {
                 // :)
             } else {
                 panic!("should have rejected the point because we expected a compressed point");
@@ -524,7 +522,7 @@ fn test_g2_compressed_invalid_vectors() {
         {
             let mut z = z;
             z.as_mut()[0] |= 0b0010_0000;
-            if G2Affine::from_compressed(&z).is_none().into() {
+            if G2Affine::from_bytes(&z).is_none().into() {
                 // :)
             } else {
                 panic!("should have rejected the point because the parity bit should not be set if the point is at infinity");
@@ -534,7 +532,7 @@ fn test_g2_compressed_invalid_vectors() {
         for i in 0..G2Compressed::size() {
             let mut z = z;
             z.as_mut()[i] |= 0b0000_0001;
-            if G2Affine::from_compressed(&z).is_none().into() {
+            if G2Affine::from_bytes(&z).is_none().into() {
                 // :)
             } else {
                 panic!("should have rejected the point because the coordinates should be zeroes at the point at infinity");
@@ -542,12 +540,12 @@ fn test_g2_compressed_invalid_vectors() {
         }
     }
 
-    let o = G2Affine::generator().to_compressed();
+    let o = G2Affine::generator().to_bytes();
 
     {
         let mut o = o;
         o.as_mut()[0] &= 0b0111_1111;
-        if G2Affine::from_compressed(&o).is_none().into() {
+        if G2Affine::from_bytes(&o).is_none().into() {
             // :)
         } else {
             panic!("should have rejected the point because we expected a compressed point");
@@ -561,7 +559,7 @@ fn test_g2_compressed_invalid_vectors() {
         o.as_mut()[..48].copy_from_slice(m.as_ref());
         o.as_mut()[0] |= 0b1000_0000;
 
-        if G2Affine::from_compressed(&o).is_none().into() {
+        if G2Affine::from_bytes(&o).is_none().into() {
             // x coordinate (c1)
         } else {
             panic!("should have rejected the point")
@@ -573,7 +571,7 @@ fn test_g2_compressed_invalid_vectors() {
         o.as_mut()[48..96].copy_from_slice(m.as_ref());
         o.as_mut()[0] |= 0b1000_0000;
 
-        if G2Affine::from_compressed(&o).is_none().into() {
+        if G2Affine::from_bytes(&o).is_none().into() {
             // x coordinate (c0)
         } else {
             panic!("should have rejected the point")
@@ -602,7 +600,7 @@ fn test_g2_compressed_invalid_vectors() {
                 o.as_mut()[48..].copy_from_slice(x.c0.to_repr().as_ref());
                 o.as_mut()[0] |= 0b1000_0000;
 
-                if G2Affine::from_compressed(&o).is_none().into() {
+                if G2Affine::from_bytes(&o).is_none().into() {
                     break;
                 } else {
                     panic!("should have rejected the point because it isn't on the curve")
@@ -632,7 +630,7 @@ fn test_g2_compressed_invalid_vectors() {
                 o.as_mut()[48..].copy_from_slice(x.c0.to_repr().as_ref());
                 o.as_mut()[0] |= 0b1000_0000;
 
-                if G2Affine::from_compressed(&o).is_none().into() {
+                if G2Affine::from_bytes(&o).is_none().into() {
                     break;
                 } else {
                     panic!(

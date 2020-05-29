@@ -223,10 +223,10 @@ macro_rules! curve_impl {
         }
 
         impl GroupEncoding for $affine {
-            type Compressed = $compressed;
+            type Repr = $compressed;
 
-            fn from_compressed(bytes: &Self::Compressed) -> CtOption<Self> {
-                Self::from_compressed_unchecked(bytes).and_then(|affine| {
+            fn from_bytes(bytes: &Self::Repr) -> CtOption<Self> {
+                Self::from_bytes_unchecked(bytes).and_then(|affine| {
                     // NB: Decompression guarantees that it is on the curve already.
                     CtOption::new(
                         affine,
@@ -239,7 +239,7 @@ macro_rules! curve_impl {
                 })
             }
 
-            fn from_compressed_unchecked(bytes: &Self::Compressed) -> CtOption<Self> {
+            fn from_bytes_unchecked(bytes: &Self::Repr) -> CtOption<Self> {
                 if let Ok(p) = bytes.into_affine_unchecked() {
                     CtOption::new(p, Choice::from(1))
                 } else {
@@ -247,7 +247,7 @@ macro_rules! curve_impl {
                 }
             }
 
-            fn to_compressed(&self) -> Self::Compressed {
+            fn to_bytes(&self) -> Self::Repr {
                 $compressed::from_affine(*self)
             }
         }

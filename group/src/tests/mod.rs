@@ -401,21 +401,21 @@ fn random_compressed_encoding_tests<G: CurveProjective>() {
     ]);
 
     assert_eq!(
-        G::Affine::from_compressed(&G::Affine::identity().to_compressed()).unwrap(),
+        G::Affine::from_bytes(&G::Affine::identity().to_bytes()).unwrap(),
         G::Affine::identity()
     );
 
     for _ in 0..1000 {
         let mut r = G::random(&mut rng).to_affine();
 
-        let compressed = r.to_compressed();
-        let de_compressed = G::Affine::from_compressed(&compressed).unwrap();
+        let compressed = r.to_bytes();
+        let de_compressed = G::Affine::from_bytes(&compressed).unwrap();
         assert_eq!(de_compressed, r);
 
         r = r.neg();
 
-        let compressed = r.to_compressed();
-        let de_compressed = G::Affine::from_compressed(&compressed).unwrap();
+        let compressed = r.to_bytes();
+        let de_compressed = G::Affine::from_bytes(&compressed).unwrap();
         assert_eq!(de_compressed, r);
     }
 }
