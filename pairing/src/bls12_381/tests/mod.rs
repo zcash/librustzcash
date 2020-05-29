@@ -1,5 +1,5 @@
 use ff::PrimeField;
-use group::{CurveAffine, CurveProjective, UncompressedEncoding};
+use group::{CurveAffine, CurveProjective, GroupEncoding, UncompressedEncoding};
 
 use super::*;
 use crate::*;
@@ -87,7 +87,7 @@ where
 
 fn compressed_test_vectors<G: CurveProjective>(expected: &[u8]) {
     let mut e = G::identity();
-    let encoded_len = <G::Affine as CurveAffine>::Compressed::default()
+    let encoded_len = <G::Affine as GroupEncoding>::Compressed::default()
         .as_ref()
         .len();
 
@@ -99,7 +99,7 @@ fn compressed_test_vectors<G: CurveProjective>(expected: &[u8]) {
             let encoded = e_affine.to_compressed();
             v.extend_from_slice(encoded.as_ref());
 
-            let mut decoded = <G::Affine as CurveAffine>::Compressed::default();
+            let mut decoded = <G::Affine as GroupEncoding>::Compressed::default();
             decoded.as_mut().copy_from_slice(&expected[0..encoded_len]);
             expected = &expected[encoded_len..];
             let decoded = G::Affine::from_compressed(&decoded).unwrap();

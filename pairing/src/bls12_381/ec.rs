@@ -200,7 +200,6 @@ macro_rules! curve_impl {
         impl CurveAffine for $affine {
             type Scalar = $scalarfield;
             type Projective = $projective;
-            type Compressed = $compressed;
 
             fn identity() -> Self {
                 $affine {
@@ -221,6 +220,10 @@ macro_rules! curve_impl {
             fn to_projective(&self) -> $projective {
                 (*self).into()
             }
+        }
+
+        impl GroupEncoding for $affine {
+            type Compressed = $compressed;
 
             fn from_compressed(bytes: &Self::Compressed) -> CtOption<Self> {
                 Self::from_compressed_unchecked(bytes).and_then(|affine| {
@@ -904,7 +907,9 @@ pub mod g1 {
     use super::{g2::G2Affine, GroupDecodingError};
     use crate::{Engine, PairingCurveAffine};
     use ff::{BitIterator, Field, PrimeField};
-    use group::{CurveAffine, CurveProjective, Group, PrimeGroup, UncompressedEncoding};
+    use group::{
+        CurveAffine, CurveProjective, Group, GroupEncoding, PrimeGroup, UncompressedEncoding,
+    };
     use rand_core::RngCore;
     use std::fmt;
     use std::ops::{AddAssign, MulAssign, Neg, SubAssign};
@@ -1481,7 +1486,9 @@ pub mod g2 {
     use super::{g1::G1Affine, GroupDecodingError};
     use crate::{Engine, PairingCurveAffine};
     use ff::{BitIterator, Field, PrimeField};
-    use group::{CurveAffine, CurveProjective, Group, PrimeGroup, UncompressedEncoding};
+    use group::{
+        CurveAffine, CurveProjective, Group, GroupEncoding, PrimeGroup, UncompressedEncoding,
+    };
     use rand_core::RngCore;
     use std::fmt;
     use std::ops::{AddAssign, MulAssign, Neg, SubAssign};

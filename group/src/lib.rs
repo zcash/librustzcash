@@ -132,13 +132,13 @@ pub trait CurveAffine:
     + PartialEq
     + Eq
     + 'static
+    + GroupEncoding
     + Neg<Output = Self>
     + Mul<<Self as CurveAffine>::Scalar, Output = <Self as CurveAffine>::Projective>
     + for<'r> Mul<<Self as CurveAffine>::Scalar, Output = <Self as CurveAffine>::Projective>
 {
     type Scalar: PrimeField;
     type Projective: CurveProjective<Affine = Self, Scalar = Self::Scalar>;
-    type Compressed: Default + AsRef<[u8]> + AsMut<[u8]>;
 
     /// Returns the additive identity.
     fn identity() -> Self;
@@ -152,6 +152,11 @@ pub trait CurveAffine:
 
     /// Converts this element into its affine representation.
     fn to_projective(&self) -> Self::Projective;
+}
+
+pub trait GroupEncoding: Sized {
+    /// The encoding of group elements.
+    type Compressed: Default + AsRef<[u8]> + AsMut<[u8]>;
 
     /// Attempts to deserialize an element from its compressed encoding.
     fn from_compressed(bytes: &Self::Compressed) -> CtOption<Self>;
