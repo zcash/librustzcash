@@ -23,8 +23,8 @@ pub mod bls12_381;
 use core::ops::Mul;
 use ff::{Field, PrimeField};
 use group::{
-    CofactorCurve, CurveAffine, GroupOps, GroupOpsOwned, ScalarMul, ScalarMulOwned,
-    UncompressedEncoding,
+    cofactor::{CofactorCurve, CofactorCurveAffine},
+    GroupOps, GroupOpsOwned, ScalarMul, ScalarMulOwned, UncompressedEncoding,
 };
 
 /// An "engine" is a collection of types (fields, elliptic curve groups, etc.)
@@ -80,7 +80,7 @@ pub trait Engine: Sized + 'static + Clone {
 
 /// Affine representation of an elliptic curve point that can be used
 /// to perform pairings.
-pub trait PairingCurveAffine: CurveAffine + UncompressedEncoding {
+pub trait PairingCurveAffine: CofactorCurveAffine + UncompressedEncoding {
     type Pair: PairingCurveAffine<Pair = Self>;
     type PairingResult: Field;
 

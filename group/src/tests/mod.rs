@@ -3,7 +3,10 @@ use rand::SeedableRng;
 use rand_xorshift::XorShiftRng;
 use std::ops::{Mul, Neg};
 
-use crate::{CofactorCurve, CurveAffine, GroupEncoding, UncompressedEncoding};
+use crate::{
+    cofactor::{CofactorCurve, CofactorCurveAffine},
+    GroupEncoding, UncompressedEncoding,
+};
 
 pub fn curve_tests<G: CofactorCurve>() {
     let mut rng = XorShiftRng::from_seed([

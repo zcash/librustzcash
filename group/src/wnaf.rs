@@ -2,7 +2,7 @@ use byteorder::{ByteOrder, LittleEndian};
 use ff::PrimeField;
 use std::iter;
 
-use super::{CofactorCurve, Group};
+use super::{cofactor::CofactorCurve, Group};
 
 /// Replaces the contents of `table` with a w-NAF window table for the given window size.
 pub(crate) fn wnaf_table<G: CofactorCurve>(table: &mut Vec<G>, mut base: G, window: usize) {
@@ -92,9 +92,9 @@ pub(crate) fn wnaf_exp<G: CofactorCurve>(table: &[G], wnaf: &[i64]) -> G {
             found_one = true;
 
             if *n > 0 {
-                result.add_assign(&table[(n / 2) as usize]);
+                result += &table[(n / 2) as usize];
             } else {
-                result.sub_assign(&table[((-n) / 2) as usize]);
+                result -= &table[((-n) / 2) as usize];
             }
         }
     }

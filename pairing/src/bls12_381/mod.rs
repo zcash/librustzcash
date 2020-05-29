@@ -24,7 +24,7 @@ pub use self::fr::{Fr, FrRepr};
 use super::{Engine, MillerLoopResult, MultiMillerLoop};
 
 use ff::{BitIterator, Field};
-use group::CurveAffine;
+use group::cofactor::CofactorCurveAffine;
 use std::ops::{AddAssign, MulAssign, Neg, SubAssign};
 
 // The BLS parameter x for BLS12-381 is -0xd201000000010000

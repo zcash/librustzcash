@@ -1,5 +1,8 @@
 use ff::PrimeField;
-use group::{CofactorCurve, CurveAffine, GroupEncoding, UncompressedEncoding};
+use group::{
+    cofactor::{CofactorCurve, CofactorCurveAffine},
+    GroupEncoding, UncompressedEncoding,
+};
 
 use super::*;
 use crate::*;
