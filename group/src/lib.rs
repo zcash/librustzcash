@@ -88,12 +88,10 @@ pub trait PrimeGroup: Group {}
 
 /// Projective representation of an elliptic curve point guaranteed to be
 /// in the correct prime order subgroup.
-pub trait CurveProjective:
-    Group
-    + GroupOps<<Self as CurveProjective>::Affine>
-    + GroupOpsOwned<<Self as CurveProjective>::Affine>
+pub trait CofactorCurve:
+    Group + GroupOps<<Self as CofactorCurve>::Affine> + GroupOpsOwned<<Self as CofactorCurve>::Affine>
 {
-    type Affine: CurveAffine<Projective = Self, Scalar = Self::Scalar>
+    type Affine: CurveAffine<Curve = Self, Scalar = Self::Scalar>
         + Mul<Self::Scalar, Output = Self>
         + for<'r> Mul<Self::Scalar, Output = Self>;
 
@@ -134,11 +132,11 @@ pub trait CurveAffine:
     + 'static
     + GroupEncoding
     + Neg<Output = Self>
-    + Mul<<Self as CurveAffine>::Scalar, Output = <Self as CurveAffine>::Projective>
-    + for<'r> Mul<<Self as CurveAffine>::Scalar, Output = <Self as CurveAffine>::Projective>
+    + Mul<<Self as CurveAffine>::Scalar, Output = <Self as CurveAffine>::Curve>
+    + for<'r> Mul<<Self as CurveAffine>::Scalar, Output = <Self as CurveAffine>::Curve>
 {
     type Scalar: PrimeField;
-    type Projective: CurveProjective<Affine = Self, Scalar = Self::Scalar>;
+    type Curve: CofactorCurve<Affine = Self, Scalar = Self::Scalar>;
 
     /// Returns the additive identity.
     fn identity() -> Self;
@@ -150,8 +148,8 @@ pub trait CurveAffine:
     /// additive identity.
     fn is_identity(&self) -> Choice;
 
-    /// Converts this element into its affine representation.
-    fn to_projective(&self) -> Self::Projective;
+    /// Converts this element into its efficient representation.
+    fn to_curve(&self) -> Self::Curve;
 }
 
 pub trait GroupEncoding: Sized {

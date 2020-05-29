@@ -199,7 +199,7 @@ macro_rules! curve_impl {
 
         impl CurveAffine for $affine {
             type Scalar = $scalarfield;
-            type Projective = $projective;
+            type Curve = $projective;
 
             fn identity() -> Self {
                 $affine {
@@ -217,7 +217,7 @@ macro_rules! curve_impl {
                 Choice::from(if self.infinity { 1 } else { 0 })
             }
 
-            fn to_projective(&self) -> $projective {
+            fn to_curve(&self) -> $projective {
                 (*self).into()
             }
         }
@@ -466,30 +466,28 @@ macro_rules! curve_impl {
             }
         }
 
-        impl<'r> ::std::ops::Add<&'r <$projective as CurveProjective>::Affine> for $projective {
+        impl<'r> ::std::ops::Add<&'r $affine> for $projective {
             type Output = Self;
 
             #[inline]
-            fn add(self, other: &<$projective as CurveProjective>::Affine) -> Self {
+            fn add(self, other: &$affine) -> Self {
                 let mut ret = self;
                 ret.add_assign(other);
                 ret
             }
         }
 
-        impl ::std::ops::Add<<$projective as CurveProjective>::Affine> for $projective {
+        impl ::std::ops::Add<$affine> for $projective {
             type Output = Self;
 
             #[inline]
-            fn add(self, other: <$projective as CurveProjective>::Affine) -> Self {
+            fn add(self, other: $affine) -> Self {
                 self + &other
             }
         }
 
-        impl<'r> ::std::ops::AddAssign<&'r <$projective as CurveProjective>::Affine>
-            for $projective
-        {
-            fn add_assign(&mut self, other: &<$projective as CurveProjective>::Affine) {
+        impl<'r> ::std::ops::AddAssign<&'r $affine> for $projective {
+            fn add_assign(&mut self, other: &$affine) {
                 if other.is_identity().into() {
                     return;
                 }
@@ -567,44 +565,42 @@ macro_rules! curve_impl {
             }
         }
 
-        impl ::std::ops::AddAssign<<$projective as CurveProjective>::Affine> for $projective {
+        impl ::std::ops::AddAssign<$affine> for $projective {
             #[inline]
-            fn add_assign(&mut self, other: <$projective as CurveProjective>::Affine) {
+            fn add_assign(&mut self, other: $affine) {
                 self.add_assign(&other);
             }
         }
 
-        impl<'r> ::std::ops::Sub<&'r <$projective as CurveProjective>::Affine> for $projective {
+        impl<'r> ::std::ops::Sub<&'r $affine> for $projective {
             type Output = Self;
 
             #[inline]
-            fn sub(self, other: &<$projective as CurveProjective>::Affine) -> Self {
+            fn sub(self, other: &$affine) -> Self {
                 let mut ret = self;
                 ret.sub_assign(other);
                 ret
             }
         }
 
-        impl ::std::ops::Sub<<$projective as CurveProjective>::Affine> for $projective {
+        impl ::std::ops::Sub<$affine> for $projective {
             type Output = Self;
 
             #[inline]
-            fn sub(self, other: <$projective as CurveProjective>::Affine) -> Self {
+            fn sub(self, other: $affine) -> Self {
                 self - &other
             }
         }
 
-        impl<'r> ::std::ops::SubAssign<&'r <$projective as CurveProjective>::Affine>
-            for $projective
-        {
-            fn sub_assign(&mut self, other: &<$projective as CurveProjective>::Affine) {
+        impl<'r> ::std::ops::SubAssign<&'r $affine> for $projective {
+            fn sub_assign(&mut self, other: &$affine) {
                 self.add_assign(&other.neg());
             }
         }
 
-        impl ::std::ops::SubAssign<<$projective as CurveProjective>::Affine> for $projective {
+        impl ::std::ops::SubAssign<$affine> for $projective {
             #[inline]
-            fn sub_assign(&mut self, other: <$projective as CurveProjective>::Affine) {
+            fn sub_assign(&mut self, other: $affine) {
                 self.sub_assign(&other);
             }
         }
@@ -746,7 +742,7 @@ macro_rules! curve_impl {
 
         impl PrimeGroup for $projective {}
 
-        impl CurveProjective for $projective {
+        impl CofactorCurve for $projective {
             type Affine = $affine;
 
             fn batch_normalize(p: &[Self], q: &mut [$affine]) {
@@ -908,7 +904,7 @@ pub mod g1 {
     use crate::{Engine, PairingCurveAffine};
     use ff::{BitIterator, Field, PrimeField};
     use group::{
-        CurveAffine, CurveProjective, Group, GroupEncoding, PrimeGroup, UncompressedEncoding,
+        CofactorCurve, CurveAffine, Group, GroupEncoding, PrimeGroup, UncompressedEncoding,
     };
     use rand_core::RngCore;
     use std::fmt;
@@ -1462,15 +1458,15 @@ pub mod g1 {
         assert!(b.is_on_curve() && b.is_in_correct_subgroup_assuming_on_curve());
         assert!(c.is_on_curve() && c.is_in_correct_subgroup_assuming_on_curve());
 
-        let mut tmp1 = a.to_projective();
-        tmp1.add_assign(&b.to_projective());
+        let mut tmp1 = a.to_curve();
+        tmp1.add_assign(&b.to_curve());
         assert_eq!(tmp1.to_affine(), c);
-        assert_eq!(tmp1, c.to_projective());
+        assert_eq!(tmp1, c.to_curve());
 
-        let mut tmp2 = a.to_projective();
+        let mut tmp2 = a.to_curve();
         tmp2.add_assign(&b);
         assert_eq!(tmp2.to_affine(), c);
-        assert_eq!(tmp2, c.to_projective());
+        assert_eq!(tmp2, c.to_curve());
     }
 
     #[test]
@@ -1487,7 +1483,7 @@ pub mod g2 {
     use crate::{Engine, PairingCurveAffine};
     use ff::{BitIterator, Field, PrimeField};
     use group::{
-        CurveAffine, CurveProjective, Group, GroupEncoding, PrimeGroup, UncompressedEncoding,
+        CofactorCurve, CurveAffine, Group, GroupEncoding, PrimeGroup, UncompressedEncoding,
     };
     use rand_core::RngCore;
     use std::fmt;

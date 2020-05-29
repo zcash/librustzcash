@@ -3,9 +3,9 @@ use rand::SeedableRng;
 use rand_xorshift::XorShiftRng;
 use std::ops::{Mul, Neg};
 
-use crate::{CurveAffine, CurveProjective, GroupEncoding, UncompressedEncoding};
+use crate::{CofactorCurve, CurveAffine, GroupEncoding, UncompressedEncoding};
 
-pub fn curve_tests<G: CurveProjective>() {
+pub fn curve_tests<G: CofactorCurve>() {
     let mut rng = XorShiftRng::from_seed([
         0x59, 0x62, 0xbe, 0x5d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06, 0xbc,
         0xe5,
@@ -50,8 +50,8 @@ pub fn curve_tests<G: CurveProjective>() {
     // Transformations
     {
         let a = G::random(&mut rng);
-        let b = a.to_affine().to_projective();
-        let c = a.to_affine().to_projective().to_affine().to_projective();
+        let b = a.to_affine().to_curve();
+        let c = a.to_affine().to_curve().to_affine().to_curve();
         assert_eq!(a, b);
         assert_eq!(b, c);
     }
@@ -65,7 +65,7 @@ pub fn curve_tests<G: CurveProjective>() {
     random_compressed_encoding_tests::<G>();
 }
 
-fn random_wnaf_tests<G: CurveProjective>() {
+fn random_wnaf_tests<G: CofactorCurve>() {
     use crate::wnaf::*;
 
     let mut rng = XorShiftRng::from_seed([
@@ -184,7 +184,7 @@ fn random_wnaf_tests<G: CurveProjective>() {
     }
 }
 
-fn random_negation_tests<G: CurveProjective>() {
+fn random_negation_tests<G: CofactorCurve>() {
     let mut rng = XorShiftRng::from_seed([
         0x59, 0x62, 0xbe, 0x5d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06, 0xbc,
         0xe5,
@@ -214,7 +214,7 @@ fn random_negation_tests<G: CurveProjective>() {
     }
 }
 
-fn random_doubling_tests<G: CurveProjective>() {
+fn random_doubling_tests<G: CofactorCurve>() {
     let mut rng = XorShiftRng::from_seed([
         0x59, 0x62, 0xbe, 0x5d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06, 0xbc,
         0xe5,
@@ -242,7 +242,7 @@ fn random_doubling_tests<G: CurveProjective>() {
     }
 }
 
-fn random_multiplication_tests<G: CurveProjective>() {
+fn random_multiplication_tests<G: CofactorCurve>() {
     let mut rng = XorShiftRng::from_seed([
         0x59, 0x62, 0xbe, 0x5d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06, 0xbc,
         0xe5,
@@ -277,7 +277,7 @@ fn random_multiplication_tests<G: CurveProjective>() {
     }
 }
 
-fn random_addition_tests<G: CurveProjective>() {
+fn random_addition_tests<G: CofactorCurve>() {
     let mut rng = XorShiftRng::from_seed([
         0x59, 0x62, 0xbe, 0x5d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06, 0xbc,
         0xe5,
@@ -325,17 +325,17 @@ fn random_addition_tests<G: CurveProjective>() {
         // Mixed addition
 
         // (a + b) + c
-        tmp[3] = a_affine.to_projective();
+        tmp[3] = a_affine.to_curve();
         tmp[3].add_assign(&b_affine);
         tmp[3].add_assign(&c_affine);
 
         // a + (b + c)
-        tmp[4] = b_affine.to_projective();
+        tmp[4] = b_affine.to_curve();
         tmp[4].add_assign(&c_affine);
         tmp[4].add_assign(&a_affine);
 
         // (a + c) + b
-        tmp[5] = a_affine.to_projective();
+        tmp[5] = a_affine.to_curve();
         tmp[5].add_assign(&c_affine);
         tmp[5].add_assign(&b_affine);
 
@@ -357,7 +357,7 @@ fn random_addition_tests<G: CurveProjective>() {
     }
 }
 
-fn random_transformation_tests<G: CurveProjective>() {
+fn random_transformation_tests<G: CofactorCurve>() {
     let mut rng = XorShiftRng::from_seed([
         0x59, 0x62, 0xbe, 0x5d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06, 0xbc,
         0xe5,
@@ -366,7 +366,7 @@ fn random_transformation_tests<G: CurveProjective>() {
     for _ in 0..1000 {
         let g = G::random(&mut rng);
         let g_affine = g.to_affine();
-        let g_projective = g_affine.to_projective();
+        let g_projective = g_affine.to_curve();
         assert_eq!(g, g_projective);
     }
 
@@ -382,7 +382,7 @@ fn random_transformation_tests<G: CurveProjective>() {
         }
         for _ in 0..5 {
             let s = between.sample(&mut rng);
-            v[s] = v[s].to_affine().to_projective();
+            v[s] = v[s].to_affine().to_curve();
         }
 
         let expected_v = v.iter().map(|v| v.to_affine()).collect::<Vec<_>>();
@@ -394,7 +394,7 @@ fn random_transformation_tests<G: CurveProjective>() {
     }
 }
 
-fn random_compressed_encoding_tests<G: CurveProjective>() {
+fn random_compressed_encoding_tests<G: CofactorCurve>() {
     let mut rng = XorShiftRng::from_seed([
         0x59, 0x62, 0xbe, 0x5d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06, 0xbc,
         0xe5,
@@ -420,9 +420,9 @@ fn random_compressed_encoding_tests<G: CurveProjective>() {
     }
 }
 
-pub fn random_uncompressed_encoding_tests<G: CurveProjective>()
+pub fn random_uncompressed_encoding_tests<G: CofactorCurve>()
 where
-    G::Affine: UncompressedEncoding,
+    <G as CofactorCurve>::Affine: UncompressedEncoding,
 {
     let mut rng = XorShiftRng::from_seed([
         0x59, 0x62, 0xbe, 0x5d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06, 0xbc,
