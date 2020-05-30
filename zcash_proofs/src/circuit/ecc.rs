@@ -18,8 +18,8 @@ use bellman::gadgets::boolean::Boolean;
 
 #[derive(Clone)]
 pub struct EdwardsPoint<E: Engine> {
-    x: AllocatedNum<E>,
-    y: AllocatedNum<E>,
+    x: AllocatedNum<E::Fr>,
+    y: AllocatedNum<E::Fr>,
 }
 
 /// Perform a fixed-base scalar multiplication with
@@ -31,7 +31,7 @@ pub fn fixed_base_multiplication<E, CS>(
     params: &E::Params,
 ) -> Result<EdwardsPoint<E>, SynthesisError>
 where
-    CS: ConstraintSystem<E>,
+    CS: ConstraintSystem<E::Fr>,
     E: JubjubEngine,
 {
     // Represents the result of the multiplication
@@ -78,11 +78,11 @@ where
 }
 
 impl<E: JubjubEngine> EdwardsPoint<E> {
-    pub fn get_x(&self) -> &AllocatedNum<E> {
+    pub fn get_x(&self) -> &AllocatedNum<E::Fr> {
         &self.x
     }
 
-    pub fn get_y(&self) -> &AllocatedNum<E> {
+    pub fn get_y(&self) -> &AllocatedNum<E::Fr> {
         &self.y
     }
 
@@ -92,7 +92,7 @@ impl<E: JubjubEngine> EdwardsPoint<E> {
         params: &E::Params,
     ) -> Result<(), SynthesisError>
     where
-        CS: ConstraintSystem<E>,
+        CS: ConstraintSystem<E::Fr>,
     {
         let tmp = self.double(cs.namespace(|| "first doubling"), params)?;
         let tmp = tmp.double(cs.namespace(|| "second doubling"), params)?;
@@ -109,7 +109,7 @@ impl<E: JubjubEngine> EdwardsPoint<E> {
 
     pub fn inputize<CS>(&self, mut cs: CS) -> Result<(), SynthesisError>
     where
-        CS: ConstraintSystem<E>,
+        CS: ConstraintSystem<E::Fr>,
     {
         self.x.inputize(cs.namespace(|| "x"))?;
         self.y.inputize(cs.namespace(|| "y"))?;
@@ -120,7 +120,7 @@ impl<E: JubjubEngine> EdwardsPoint<E> {
     /// This converts the point into a representation.
     pub fn repr<CS>(&self, mut cs: CS) -> Result<Vec<Boolean>, SynthesisError>
     where
-        CS: ConstraintSystem<E>,
+        CS: ConstraintSystem<E::Fr>,
     {
         let mut tmp = vec![];
 
@@ -142,7 +142,7 @@ impl<E: JubjubEngine> EdwardsPoint<E> {
         params: &E::Params,
     ) -> Result<Self, SynthesisError>
     where
-        CS: ConstraintSystem<E>,
+        CS: ConstraintSystem<E::Fr>,
     {
         let p = p.map(|p| p.to_xy());
 
@@ -163,7 +163,7 @@ impl<E: JubjubEngine> EdwardsPoint<E> {
         condition: &Boolean,
     ) -> Result<Self, SynthesisError>
     where
-        CS: ConstraintSystem<E>,
+        CS: ConstraintSystem<E::Fr>,
     {
         // Compute x' = self.x if condition, and 0 otherwise
         let x_prime = AllocatedNum::alloc(cs.namespace(|| "x'"), || {
@@ -220,7 +220,7 @@ impl<E: JubjubEngine> EdwardsPoint<E> {
         params: &E::Params,
     ) -> Result<Self, SynthesisError>
     where
-        CS: ConstraintSystem<E>,
+        CS: ConstraintSystem<E::Fr>,
     {
         // Represents the current "magnitude" of the base
         // that we're operating over. Starts at self,
@@ -267,12 +267,12 @@ impl<E: JubjubEngine> EdwardsPoint<E> {
 
     pub fn interpret<CS>(
         mut cs: CS,
-        x: &AllocatedNum<E>,
-        y: &AllocatedNum<E>,
+        x: &AllocatedNum<E::Fr>,
+        y: &AllocatedNum<E::Fr>,
         params: &E::Params,
     ) -> Result<Self, SynthesisError>
     where
-        CS: ConstraintSystem<E>,
+        CS: ConstraintSystem<E::Fr>,
     {
         // -x^2 + y^2 = 1 + dx^2y^2
 
@@ -296,7 +296,7 @@ impl<E: JubjubEngine> EdwardsPoint<E> {
 
     pub fn double<CS>(&self, mut cs: CS, params: &E::Params) -> Result<Self, SynthesisError>
     where
-        CS: ConstraintSystem<E>,
+        CS: ConstraintSystem<E::Fr>,
     {
         // Compute T = (x1 + y1) * (x1 + y1)
         let t = AllocatedNum::alloc(cs.namespace(|| "T"), || {
@@ -395,7 +395,7 @@ impl<E: JubjubEngine> EdwardsPoint<E> {
         params: &E::Params,
     ) -> Result<Self, SynthesisError>
     where
-        CS: ConstraintSystem<E>,
+        CS: ConstraintSystem<E::Fr>,
     {
         // Compute U = (x1 + y1) * (x2 + y2)
         let u = AllocatedNum::alloc(cs.namespace(|| "U"), || {
@@ -492,8 +492,8 @@ impl<E: JubjubEngine> EdwardsPoint<E> {
 }
 
 pub struct MontgomeryPoint<E: Engine> {
-    x: Num<E>,
-    y: Num<E>,
+    x: Num<E::Fr>,
+    y: Num<E::Fr>,
 }
 
 impl<E: JubjubEngine> MontgomeryPoint<E> {
@@ -506,7 +506,7 @@ impl<E: JubjubEngine> MontgomeryPoint<E> {
         params: &E::Params,
     ) -> Result<EdwardsPoint<E>, SynthesisError>
     where
-        CS: ConstraintSystem<E>,
+        CS: ConstraintSystem<E::Fr>,
     {
         // Compute u = (scale*x) / y
         let u = AllocatedNum::alloc(cs.namespace(|| "u"), || {
@@ -558,7 +558,7 @@ impl<E: JubjubEngine> MontgomeryPoint<E> {
     /// in Montgomery, does not check that it's
     /// on the curve. Useful for constants and
     /// window table lookups.
-    pub fn interpret_unchecked(x: Num<E>, y: Num<E>) -> Self {
+    pub fn interpret_unchecked(x: Num<E::Fr>, y: Num<E::Fr>) -> Self {
         MontgomeryPoint { x, y }
     }
 
@@ -571,7 +571,7 @@ impl<E: JubjubEngine> MontgomeryPoint<E> {
         params: &E::Params,
     ) -> Result<Self, SynthesisError>
     where
-        CS: ConstraintSystem<E>,
+        CS: ConstraintSystem<E::Fr>,
     {
         // Compute lambda = (y' - y) / (x' - x)
         let lambda = AllocatedNum::alloc(cs.namespace(|| "lambda"), || {
@@ -673,7 +673,7 @@ mod test {
         ]);
 
         for _ in 0..100 {
-            let mut cs = TestConstraintSystem::<Bls12>::new();
+            let mut cs = TestConstraintSystem::new();
 
             let p = montgomery::Point::<Bls12, _>::rand(rng, params);
             let (u, v) = edwards::Point::from_montgomery(&p, params).to_xy();
@@ -682,7 +682,7 @@ mod test {
             let numx = AllocatedNum::alloc(cs.namespace(|| "mont x"), || Ok(x)).unwrap();
             let numy = AllocatedNum::alloc(cs.namespace(|| "mont y"), || Ok(y)).unwrap();
 
-            let p = MontgomeryPoint::interpret_unchecked(numx.into(), numy.into());
+            let p = MontgomeryPoint::<Bls12>::interpret_unchecked(numx.into(), numy.into());
 
             let q = p.into_edwards(&mut cs, params).unwrap();
 
@@ -713,7 +713,7 @@ mod test {
         for _ in 0..100 {
             let p = edwards::Point::<Bls12, _>::rand(rng, &params);
 
-            let mut cs = TestConstraintSystem::<Bls12>::new();
+            let mut cs = TestConstraintSystem::new();
             let q = EdwardsPoint::witness(&mut cs, Some(p.clone()), &params).unwrap();
 
             let p = p.to_xy();
@@ -727,11 +727,11 @@ mod test {
             let p = edwards::Point::<Bls12, _>::rand(rng, &params);
             let (x, y) = p.to_xy();
 
-            let mut cs = TestConstraintSystem::<Bls12>::new();
+            let mut cs = TestConstraintSystem::new();
             let numx = AllocatedNum::alloc(cs.namespace(|| "x"), || Ok(x)).unwrap();
             let numy = AllocatedNum::alloc(cs.namespace(|| "y"), || Ok(y)).unwrap();
 
-            let p = EdwardsPoint::interpret(&mut cs, &numx, &numy, &params).unwrap();
+            let p = EdwardsPoint::<Bls12>::interpret(&mut cs, &numx, &numy, &params).unwrap();
 
             assert!(cs.is_satisfied());
             assert_eq!(p.x.get_value().unwrap(), x);
@@ -743,11 +743,11 @@ mod test {
             let x = Fr::random(rng);
             let y = Fr::random(rng);
 
-            let mut cs = TestConstraintSystem::<Bls12>::new();
+            let mut cs = TestConstraintSystem::new();
             let numx = AllocatedNum::alloc(cs.namespace(|| "x"), || Ok(x)).unwrap();
             let numy = AllocatedNum::alloc(cs.namespace(|| "y"), || Ok(y)).unwrap();
 
-            EdwardsPoint::interpret(&mut cs, &numx, &numy, &params).unwrap();
+            EdwardsPoint::<Bls12>::interpret(&mut cs, &numx, &numy, &params).unwrap();
 
             assert_eq!(cs.which_is_unsatisfied().unwrap(), "on curve check");
         }
@@ -762,7 +762,7 @@ mod test {
         ]);
 
         for _ in 0..100 {
-            let mut cs = TestConstraintSystem::<Bls12>::new();
+            let mut cs = TestConstraintSystem::<Fr>::new();
 
             let p = params.generator(FixedGenerators::NoteCommitmentRandomness);
             let s = Fs::random(rng);
@@ -783,7 +783,7 @@ mod test {
                 .map(|v| Boolean::from(v))
                 .collect::<Vec<_>>();
 
-            let q = fixed_base_multiplication(
+            let q = fixed_base_multiplication::<Bls12, _>(
                 cs.namespace(|| "multiplication"),
                 FixedGenerators::NoteCommitmentRandomness,
                 &s_bits,
@@ -805,7 +805,7 @@ mod test {
         ]);
 
         for _ in 0..100 {
-            let mut cs = TestConstraintSystem::<Bls12>::new();
+            let mut cs = TestConstraintSystem::new();
 
             let p = edwards::Point::<Bls12, _>::rand(rng, params);
             let s = Fs::random(rng);
@@ -817,7 +817,7 @@ mod test {
             let num_x0 = AllocatedNum::alloc(cs.namespace(|| "x0"), || Ok(x0)).unwrap();
             let num_y0 = AllocatedNum::alloc(cs.namespace(|| "y0"), || Ok(y0)).unwrap();
 
-            let p = EdwardsPoint {
+            let p = EdwardsPoint::<Bls12> {
                 x: num_x0,
                 y: num_y0,
             };
@@ -857,7 +857,7 @@ mod test {
         ]);
 
         for _ in 0..1000 {
-            let mut cs = TestConstraintSystem::<Bls12>::new();
+            let mut cs = TestConstraintSystem::new();
 
             let p = edwards::Point::<Bls12, _>::rand(rng, params);
 
@@ -866,7 +866,7 @@ mod test {
             let num_x0 = AllocatedNum::alloc(cs.namespace(|| "x0"), || Ok(x0)).unwrap();
             let num_y0 = AllocatedNum::alloc(cs.namespace(|| "y0"), || Ok(y0)).unwrap();
 
-            let p = EdwardsPoint {
+            let p = EdwardsPoint::<Bls12> {
                 x: num_x0,
                 y: num_y0,
             };
@@ -933,7 +933,7 @@ mod test {
             let (x1, y1) = p2.to_xy();
             let (x2, y2) = p3.to_xy();
 
-            let mut cs = TestConstraintSystem::<Bls12>::new();
+            let mut cs = TestConstraintSystem::new();
 
             let num_x0 = AllocatedNum::alloc(cs.namespace(|| "x0"), || Ok(x0)).unwrap();
             let num_y0 = AllocatedNum::alloc(cs.namespace(|| "y0"), || Ok(y0)).unwrap();
@@ -941,7 +941,7 @@ mod test {
             let num_x1 = AllocatedNum::alloc(cs.namespace(|| "x1"), || Ok(x1)).unwrap();
             let num_y1 = AllocatedNum::alloc(cs.namespace(|| "y1"), || Ok(y1)).unwrap();
 
-            let p1 = EdwardsPoint {
+            let p1 = EdwardsPoint::<Bls12> {
                 x: num_x0,
                 y: num_y0,
             };
@@ -993,12 +993,12 @@ mod test {
             let (x0, y0) = p1.to_xy();
             let (x1, y1) = p2.to_xy();
 
-            let mut cs = TestConstraintSystem::<Bls12>::new();
+            let mut cs = TestConstraintSystem::new();
 
             let num_x0 = AllocatedNum::alloc(cs.namespace(|| "x0"), || Ok(x0)).unwrap();
             let num_y0 = AllocatedNum::alloc(cs.namespace(|| "y0"), || Ok(y0)).unwrap();
 
-            let p1 = EdwardsPoint {
+            let p1 = EdwardsPoint::<Bls12> {
                 x: num_x0,
                 y: num_y0,
             };
@@ -1047,7 +1047,7 @@ mod test {
             let (x1, y1) = p2.to_xy().unwrap();
             let (x2, y2) = p3.to_xy().unwrap();
 
-            let mut cs = TestConstraintSystem::<Bls12>::new();
+            let mut cs = TestConstraintSystem::new();
 
             let num_x0 = AllocatedNum::alloc(cs.namespace(|| "x0"), || Ok(x0)).unwrap();
             let num_y0 = AllocatedNum::alloc(cs.namespace(|| "y0"), || Ok(y0)).unwrap();
@@ -1055,7 +1055,7 @@ mod test {
             let num_x1 = AllocatedNum::alloc(cs.namespace(|| "x1"), || Ok(x1)).unwrap();
             let num_y1 = AllocatedNum::alloc(cs.namespace(|| "y1"), || Ok(y1)).unwrap();
 
-            let p1 = MontgomeryPoint {
+            let p1 = MontgomeryPoint::<Bls12> {
                 x: num_x0.into(),
                 y: num_y0.into(),
             };
@@ -1092,7 +1092,7 @@ mod test {
         let params = &JubjubBls12::new();
 
         let check_small_order_from_p = |p: edwards::Point<Bls12, _>, is_small_order| {
-            let mut cs = TestConstraintSystem::<Bls12>::new();
+            let mut cs = TestConstraintSystem::new();
 
             let p = EdwardsPoint::witness(&mut cs, Some(p), params).unwrap();
             assert!(cs.is_satisfied());

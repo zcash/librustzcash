@@ -1,9 +1,9 @@
 use bellman::gadgets::boolean::Boolean;
 use bellman::gadgets::sha256::sha256;
 use bellman::{ConstraintSystem, SynthesisError};
-use pairing::Engine;
+use ff::PrimeField;
 
-pub fn note_comm<E, CS>(
+pub fn note_comm<Scalar, CS>(
     cs: CS,
     a_pk: &[Boolean],
     value: &[Boolean],
@@ -11,8 +11,8 @@ pub fn note_comm<E, CS>(
     r: &[Boolean],
 ) -> Result<Vec<Boolean>, SynthesisError>
 where
-    E: Engine,
-    CS: ConstraintSystem<E>,
+    Scalar: PrimeField,
+    CS: ConstraintSystem<Scalar>,
 {
     assert_eq!(a_pk.len(), 256);
     assert_eq!(value.len(), 64);

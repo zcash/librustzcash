@@ -22,7 +22,7 @@ pub fn pedersen_hash<E: JubjubEngine, CS>(
     params: &E::Params,
 ) -> Result<EdwardsPoint<E>, SynthesisError>
 where
-    CS: ConstraintSystem<E>,
+    CS: ConstraintSystem<E::Fr>,
 {
     let personalization = get_constant_bools(&personalization);
     assert_eq!(personalization.len(), 6);
@@ -162,7 +162,7 @@ mod test {
         ]
         .iter()
         {
-            let mut cs = TestConstraintSystem::<Bls12>::new();
+            let mut cs = TestConstraintSystem::new();
 
             let input: Vec<bool> = (0..n_bits).map(|_| rng.next_u32() % 2 != 0).collect();
 
@@ -177,7 +177,7 @@ mod test {
                 })
                 .collect();
 
-            pedersen_hash(
+            pedersen_hash::<Bls12, _>(
                 cs.namespace(|| "pedersen hash"),
                 Personalization::NoteCommitment,
                 &input_bools,
@@ -212,7 +212,7 @@ mod test {
             for _ in 0..5 {
                 let input: Vec<bool> = (0..length).map(|_| rng.next_u32() % 2 != 0).collect();
 
-                let mut cs = TestConstraintSystem::<Bls12>::new();
+                let mut cs = TestConstraintSystem::new();
 
                 let input_bools: Vec<Boolean> = input
                     .iter()
@@ -225,7 +225,7 @@ mod test {
                     })
                     .collect();
 
-                let res = pedersen_hash(
+                let res = pedersen_hash::<Bls12, _>(
                     cs.namespace(|| "pedersen hash"),
                     Personalization::MerkleTree(1),
                     &input_bools,
@@ -278,7 +278,7 @@ mod test {
         for length in 300..302 {
             let input: Vec<bool> = (0..length).map(|_| rng.next_u32() % 2 != 0).collect();
 
-            let mut cs = TestConstraintSystem::<Bls12>::new();
+            let mut cs = TestConstraintSystem::new();
 
             let input_bools: Vec<Boolean> = input
                 .iter()
@@ -291,7 +291,7 @@ mod test {
                 })
                 .collect();
 
-            let res = pedersen_hash(
+            let res = pedersen_hash::<Bls12, _>(
                 cs.namespace(|| "pedersen hash"),
                 Personalization::MerkleTree(1),
                 &input_bools,

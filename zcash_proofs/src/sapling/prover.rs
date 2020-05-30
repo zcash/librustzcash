@@ -145,7 +145,7 @@ impl SaplingProvingContext {
         // Add the nullifier through multiscalar packing
         {
             let nullifier = multipack::bytes_to_bits_le(&nullifier);
-            let nullifier = multipack::compute_multipacking::<Bls12>(&nullifier);
+            let nullifier = multipack::compute_multipacking(&nullifier);
 
             assert_eq!(nullifier.len(), 2);
 

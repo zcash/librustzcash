@@ -1,7 +1,7 @@
 use bellman::gadgets::boolean::{AllocatedBit, Boolean};
 use bellman::gadgets::sha256::sha256_block_no_padding;
 use bellman::{ConstraintSystem, SynthesisError};
-use pairing::Engine;
+use ff::PrimeField;
 
 use super::commitment::note_comm;
 use super::prfs::*;
@@ -13,7 +13,7 @@ pub struct InputNote {
 }
 
 impl InputNote {
-    pub fn compute<E, CS>(
+    pub fn compute<Scalar, CS>(
         mut cs: CS,
         a_sk: Option<SpendingKey>,
         rho: Option<UniqueRandomness>,
@@ -25,8 +25,8 @@ impl InputNote {
         rt: &[Boolean],
     ) -> Result<InputNote, SynthesisError>
     where
-        E: Engine,
-        CS: ConstraintSystem<E>,
+        Scalar: PrimeField,
+        CS: ConstraintSystem<Scalar>,
     {
         let a_sk = witness_u252(
             cs.namespace(|| "a_sk"),
@@ -106,7 +106,7 @@ impl InputNote {
             // if enforce is one, they must be equal
             cs.enforce(
                 || format!("conditionally enforce correct root for bit {}", i),
-                |_| cur.lc(CS::one(), E::Fr::one()) - &rt.lc(CS::one(), E::Fr::one()),
+                |_| cur.lc(CS::one(), Scalar::one()) - &rt.lc(CS::one(), Scalar::one()),
                 |lc| lc + enforce.get_variable(),
                 |lc| lc,
             );
@@ -118,15 +118,15 @@ impl InputNote {
 
 /// Swaps two 256-bit blobs conditionally, returning the
 /// 512-bit concatenation.
-pub fn conditionally_swap_u256<E, CS>(
+pub fn conditionally_swap_u256<Scalar, CS>(
     mut cs: CS,
     lhs: &[Boolean],
     rhs: &[Boolean],
     condition: &AllocatedBit,
 ) -> Result<Vec<Boolean>, SynthesisError>
 where
-    E: Engine,
-    CS: ConstraintSystem<E>,
+    Scalar: PrimeField,
+    CS: ConstraintSystem<Scalar>,
 {
     assert_eq!(lhs.len(), 256);
     assert_eq!(rhs.len(), 256);
@@ -155,9 +155,9 @@ where
         //   x = rhs
         cs.enforce(
             || "conditional swap for x",
-            |lc| lc + &rhs.lc(CS::one(), E::Fr::one()) - &lhs.lc(CS::one(), E::Fr::one()),
+            |lc| lc + &rhs.lc(CS::one(), Scalar::one()) - &lhs.lc(CS::one(), Scalar::one()),
             |lc| lc + condition.get_variable(),
-            |lc| lc + &x.lc(CS::one(), E::Fr::one()) - &lhs.lc(CS::one(), E::Fr::one()),
+            |lc| lc + &x.lc(CS::one(), Scalar::one()) - &lhs.lc(CS::one(), Scalar::one()),
         );
 
         let y = Boolean::from(AllocatedBit::alloc(
@@ -171,9 +171,9 @@ where
         // y - rhs = condition (lhs - rhs)
         cs.enforce(
             || "conditional swap for y",
-            |lc| lc + &lhs.lc(CS::one(), E::Fr::one()) - &rhs.lc(CS::one(), E::Fr::one()),
+            |lc| lc + &lhs.lc(CS::one(), Scalar::one()) - &rhs.lc(CS::one(), Scalar::one()),
             |lc| lc + condition.get_variable(),
-            |lc| lc + &y.lc(CS::one(), E::Fr::one()) - &rhs.lc(CS::one(), E::Fr::one()),
+            |lc| lc + &y.lc(CS::one(), Scalar::one()) - &rhs.lc(CS::one(), Scalar::one()),
         );
 
         new_lhs.push(x);
