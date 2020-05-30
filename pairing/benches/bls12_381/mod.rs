@@ -115,14 +115,14 @@ fn bench_pairing_full(c: &mut Criterion) {
         0xe5,
     ]);
 
-    let v: Vec<(G1, G2)> = (0..SAMPLES)
-        .map(|_| (G1::random(&mut rng), G2::random(&mut rng)))
+    let v: Vec<(G1Affine, G2Affine)> = (0..SAMPLES)
+        .map(|_| (G1::random(&mut rng).into(), G2::random(&mut rng).into()))
         .collect();
 
     let mut count = 0;
     c.bench_function("Full pairing", |b| {
         b.iter(|| {
-            let tmp = Bls12::pairing(v[count].0, v[count].1);
+            let tmp = Bls12::pairing(&v[count].0, &v[count].1);
             count = (count + 1) % SAMPLES;
             tmp
         })

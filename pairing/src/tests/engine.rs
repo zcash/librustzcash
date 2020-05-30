@@ -17,7 +17,7 @@ pub fn engine_tests<E: Engine>() {
         let b = E::G2::random(&mut rng).to_affine();
 
         assert!(a.pairing_with(&b) == b.pairing_with(&a));
-        assert!(a.pairing_with(&b) == E::pairing(a, b));
+        assert!(a.pairing_with(&b) == E::pairing(&a, &b));
     }
 
     for _ in 0..1000 {
@@ -62,13 +62,13 @@ fn random_miller_loop_tests<E: Engine>() {
 
     // Exercise the miller loop for a reduced pairing
     for _ in 0..1000 {
-        let a = E::G1::random(&mut rng);
-        let b = E::G2::random(&mut rng);
+        let a = E::G1::random(&mut rng).to_affine();
+        let b = E::G2::random(&mut rng).to_affine();
 
-        let p2 = E::pairing(a, b);
+        let p2 = E::pairing(&a, &b);
 
-        let a = a.to_affine().prepare();
-        let b = b.to_affine().prepare();
+        let a = a.prepare();
+        let b = b.prepare();
 
         let p1 = E::miller_loop(&[(&a, &b)]).final_exponentiation();
 
@@ -77,21 +77,21 @@ fn random_miller_loop_tests<E: Engine>() {
 
     // Exercise a double miller loop
     for _ in 0..1000 {
-        let a = E::G1::random(&mut rng);
-        let b = E::G2::random(&mut rng);
-        let c = E::G1::random(&mut rng);
-        let d = E::G2::random(&mut rng);
+        let a = E::G1::random(&mut rng).to_affine();
+        let b = E::G2::random(&mut rng).to_affine();
+        let c = E::G1::random(&mut rng).to_affine();
+        let d = E::G2::random(&mut rng).to_affine();
 
-        let ab = E::pairing(a, b);
-        let cd = E::pairing(c, d);
+        let ab = E::pairing(&a, &b);
+        let cd = E::pairing(&c, &d);
 
         let mut abcd = ab;
         abcd.mul_assign(&cd);
 
-        let a = a.to_affine().prepare();
-        let b = b.to_affine().prepare();
-        let c = c.to_affine().prepare();
-        let d = d.to_affine().prepare();
+        let a = a.prepare();
+        let b = b.prepare();
+        let c = c.prepare();
+        let d = d.prepare();
 
         let abcd_with_double_loop = E::miller_loop(&[(&a, &b), (&c, &d)]).final_exponentiation();
 
@@ -106,26 +106,19 @@ fn random_bilinearity_tests<E: Engine>() {
     ]);
 
     for _ in 0..1000 {
-        let a = E::G1::random(&mut rng);
-        let b = E::G2::random(&mut rng);
+        let a = E::G1::random(&mut rng).to_affine();
+        let b = E::G2::random(&mut rng).to_affine();
 
         let c = E::Fr::random(&mut rng);
         let d = E::Fr::random(&mut rng);
 
-        let mut ac = a;
-        MulAssign::<&E::Fr>::mul_assign(&mut ac, &c);
+        let ac = (a * &c).to_affine();
+        let ad = (a * &d).to_affine();
+        let bc = (b * &c).to_affine();
+        let bd = (b * &d).to_affine();
 
-        let mut ad = a;
-        MulAssign::<&E::Fr>::mul_assign(&mut ad, &d);
-
-        let mut bc = b;
-        MulAssign::<&E::Fr>::mul_assign(&mut bc, &c);
-
-        let mut bd = b;
-        MulAssign::<&E::Fr>::mul_assign(&mut bd, &d);
-
-        let acbd = E::pairing(ac, bd);
-        let adbc = E::pairing(ad, bc);
+        let acbd = E::pairing(&ac, &bd);
+        let adbc = E::pairing(&ad, &bc);
 
         let mut cd = (c * &d).to_repr();
         <E::Fr as PrimeField>::ReprEndianness::toggle_little_endian(&mut cd);
@@ -134,7 +127,7 @@ fn random_bilinearity_tests<E: Engine>() {
         let mut cd_limbs = [0; 4];
         byteorder::LittleEndian::read_u64_into(cd.as_ref(), &mut cd_limbs);
 
-        let abcd = E::pairing(a, b).pow_vartime(cd_limbs);
+        let abcd = E::pairing(&a, &b).pow_vartime(cd_limbs);
 
         assert_eq!(acbd, adbc);
         assert_eq!(acbd, abcd);

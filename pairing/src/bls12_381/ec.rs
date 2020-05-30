@@ -1141,7 +1141,7 @@ pub mod g1 {
         }
 
         fn perform_pairing(&self, other: &G2Affine) -> Fq12 {
-            super::super::Bls12::pairing(*self, *other)
+            super::super::Bls12::pairing(self, other)
         }
     }
 
@@ -1780,7 +1780,7 @@ pub mod g2 {
         }
 
         fn perform_pairing(&self, other: &G1Affine) -> Fq12 {
-            super::super::Bls12::pairing(*other, *self)
+            super::super::Bls12::pairing(other, self)
         }
     }
 

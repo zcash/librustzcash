@@ -80,14 +80,10 @@ pub trait Engine: ScalarEngine {
             ),
         >;
 
-    /// Performs a complete pairing operation `(p, q)`.
-    fn pairing<G1, G2>(p: G1, q: G2) -> Self::Gt
-    where
-        G1: Into<Self::G1Affine>,
-        G2: Into<Self::G2Affine>,
-    {
-        Self::miller_loop([(&(p.into().prepare()), &(q.into().prepare()))].iter())
-            .final_exponentiation()
+    /// Invoke the pairing function `G1 x G2 -> Gt` without the use of precomputation and
+    /// other optimizations.
+    fn pairing(p: &Self::G1Affine, q: &Self::G2Affine) -> Self::Gt {
+        Self::miller_loop([(&(p.prepare()), &(q.prepare()))].iter()).final_exponentiation()
     }
 }
 
