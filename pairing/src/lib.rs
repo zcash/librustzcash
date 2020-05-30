@@ -21,14 +21,17 @@ pub mod tests;
 pub mod bls12_381;
 
 use core::ops::Mul;
-use ff::{Field, PrimeField, ScalarEngine};
+use ff::{Field, PrimeField};
 use group::{CurveAffine, CurveProjective, GroupOps, GroupOpsOwned, ScalarMul, ScalarMulOwned};
 use subtle::CtOption;
 
 /// An "engine" is a collection of types (fields, elliptic curve groups, etc.)
 /// with well-defined relationships. In particular, the G1/G2 curve groups are
 /// of prime order `r`, and are equipped with a bilinear pairing function.
-pub trait Engine: ScalarEngine {
+pub trait Engine: Sized + 'static + Clone {
+    /// This is the scalar field of the engine's groups.
+    type Fr: PrimeField;
+
     /// The projective representation of an element in G1.
     type G1: CurveProjective<Base = Self::Fq, Scalar = Self::Fr, Affine = Self::G1Affine>
         + From<Self::G1Affine>

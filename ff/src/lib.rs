@@ -213,14 +213,6 @@ pub trait PrimeField: Field + From<u64> {
     fn root_of_unity() -> Self;
 }
 
-/// An "engine" is a collection of types (fields, elliptic curve groups, etc.)
-/// with well-defined relationships. Specific relationships (for example, a
-/// pairing-friendly curve) can be defined in a subtrait.
-pub trait ScalarEngine: Sized + 'static + Clone {
-    /// This is the scalar field of the engine's groups.
-    type Fr: PrimeField;
-}
-
 #[derive(Debug)]
 pub struct BitIterator<T, E: AsRef<[T]>> {
     t: E,

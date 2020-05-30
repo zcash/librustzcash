@@ -35,10 +35,6 @@ impl<T, Rhs, Output> ScalarMul<Rhs, Output> for T where T: Mul<Rhs, Output = Out
 {}
 
 /// A helper trait for references implementing group scalar multiplication.
-///
-/// This trait, in combination with `ScalarMul`, is necessary to address type constraint
-/// issues in `pairing::Engine` (specifically, to ensure that [`ff::ScalarEngine::Fr`] is
-/// correctly constrained to implement these traits required by [`Group::Scalar`]).
 pub trait ScalarMulOwned<Rhs, Output = Self>: for<'r> ScalarMul<&'r Rhs, Output> {}
 impl<T, Rhs, Output> ScalarMulOwned<Rhs, Output> for T where T: for<'r> ScalarMul<&'r Rhs, Output> {}
 
