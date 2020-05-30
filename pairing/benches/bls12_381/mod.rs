@@ -10,7 +10,7 @@ use rand_xorshift::XorShiftRng;
 
 use group::Group;
 use pairing::bls12_381::*;
-use pairing::{Engine, PairingCurveAffine};
+use pairing::{Engine, MillerLoopResult, PairingCurveAffine};
 
 fn bench_pairing_g1_preparation(c: &mut Criterion) {
     const SAMPLES: usize = 1000;
@@ -100,7 +100,7 @@ fn bench_pairing_final_exponentiation(c: &mut Criterion) {
     let mut count = 0;
     c.bench_function("Final exponentiation", |b| {
         b.iter(|| {
-            let tmp = Bls12::final_exponentiation(&v[count]);
+            let tmp = v[count].final_exponentiation();
             count = (count + 1) % SAMPLES;
             tmp
         })

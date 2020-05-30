@@ -23,7 +23,6 @@ pub mod bls12_381;
 use core::ops::Mul;
 use ff::{Field, PrimeField, ScalarEngine};
 use group::{CurveAffine, CurveProjective, GroupOps, GroupOpsOwned, ScalarMul, ScalarMulOwned};
-use subtle::CtOption;
 
 /// An "engine" is a collection of types (fields, elliptic curve groups, etc.)
 /// with well-defined relationships. In particular, the G1/G2 curve groups are
@@ -66,7 +65,7 @@ pub trait Engine: ScalarEngine {
         + for<'a> Mul<&'a Self::Fr, Output = Self::G2>;
 
     /// The type returned by `Engine::miller_loop`.
-    type MillerLoopResult;
+    type MillerLoopResult: MillerLoopResult<Gt = Self::Gt>;
 
     /// The extension field that hosts the target group of the pairing.
     type Gt: Field;
@@ -81,19 +80,14 @@ pub trait Engine: ScalarEngine {
             ),
         >;
 
-    /// Perform final exponentiation of the result of a miller loop.
-    fn final_exponentiation(_: &Self::MillerLoopResult) -> CtOption<Self::Gt>;
-
     /// Performs a complete pairing operation `(p, q)`.
     fn pairing<G1, G2>(p: G1, q: G2) -> Self::Gt
     where
         G1: Into<Self::G1Affine>,
         G2: Into<Self::G2Affine>,
     {
-        Self::final_exponentiation(&Self::miller_loop(
-            [(&(p.into().prepare()), &(q.into().prepare()))].iter(),
-        ))
-        .unwrap()
+        Self::miller_loop([(&(p.into().prepare()), &(q.into().prepare()))].iter())
+            .final_exponentiation()
     }
 }
 
@@ -109,4 +103,19 @@ pub trait PairingCurveAffine: CurveAffine {
 
     /// Perform a pairing
     fn pairing_with(&self, other: &Self::Pair) -> Self::PairingResult;
+}
+
+/// Represents results of a Miller loop, one of the most expensive portions of the pairing
+/// function.
+///
+/// `MillerLoopResult`s cannot be compared with each other until
+/// [`MillerLoopResult::final_exponentiation`] is called, which is also expensive.
+pub trait MillerLoopResult {
+    /// The extension field that hosts the target group of the pairing.
+    type Gt: Field;
+
+    /// This performs a "final exponentiation" routine to convert the result of a Miller
+    /// loop into an element of [`MillerLoopResult::Gt`], so that it can be compared with
+    /// other elements of `Gt`.
+    fn final_exponentiation(&self) -> Self::Gt;
 }

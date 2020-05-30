@@ -21,12 +21,11 @@ pub use self::fq2::Fq2;
 pub use self::fq6::Fq6;
 pub use self::fr::{Fr, FrRepr};
 
-use super::{Engine, PairingCurveAffine};
+use super::{Engine, MillerLoopResult, PairingCurveAffine};
 
 use ff::{BitIterator, Field, ScalarEngine};
 use group::CurveAffine;
 use std::ops::{AddAssign, MulAssign, Neg, SubAssign};
-use subtle::CtOption;
 
 // The BLS parameter x for BLS12-381 is -0xd201000000010000
 const BLS_X: u64 = 0xd201000000010000;
@@ -110,59 +109,66 @@ impl Engine for Bls12 {
 
         f
     }
+}
 
-    fn final_exponentiation(r: &Fq12) -> CtOption<Fq12> {
-        let mut f1 = *r;
+impl MillerLoopResult for Fq12 {
+    type Gt = Fq12;
+
+    fn final_exponentiation(&self) -> Fq12 {
+        let mut f1 = *self;
         f1.conjugate();
 
-        r.invert().map(|mut f2| {
-            let mut r = f1;
-            r.mul_assign(&f2);
-            f2 = r;
-            r.frobenius_map(2);
-            r.mul_assign(&f2);
+        self.invert()
+            .map(|mut f2| {
+                let mut r = f1;
+                r.mul_assign(&f2);
+                f2 = r;
+                r.frobenius_map(2);
+                r.mul_assign(&f2);
 
-            fn exp_by_x(f: &mut Fq12, x: u64) {
-                *f = f.pow_vartime(&[x]);
-                if BLS_X_IS_NEGATIVE {
-                    f.conjugate();
+                fn exp_by_x(f: &mut Fq12, x: u64) {
+                    *f = f.pow_vartime(&[x]);
+                    if BLS_X_IS_NEGATIVE {
+                        f.conjugate();
+                    }
                 }
-            }
 
-            let mut x = BLS_X;
-            let y0 = r.square();
-            let mut y1 = y0;
-            exp_by_x(&mut y1, x);
-            x >>= 1;
-            let mut y2 = y1;
-            exp_by_x(&mut y2, x);
-            x <<= 1;
-            let mut y3 = r;
-            y3.conjugate();
-            y1.mul_assign(&y3);
-            y1.conjugate();
-            y1.mul_assign(&y2);
-            y2 = y1;
-            exp_by_x(&mut y2, x);
-            y3 = y2;
-            exp_by_x(&mut y3, x);
-            y1.conjugate();
-            y3.mul_assign(&y1);
-            y1.conjugate();
-            y1.frobenius_map(3);
-            y2.frobenius_map(2);
-            y1.mul_assign(&y2);
-            y2 = y3;
-            exp_by_x(&mut y2, x);
-            y2.mul_assign(&y0);
-            y2.mul_assign(&r);
-            y1.mul_assign(&y2);
-            y2 = y3;
-            y2.frobenius_map(1);
-            y1.mul_assign(&y2);
+                let mut x = BLS_X;
+                let y0 = r.square();
+                let mut y1 = y0;
+                exp_by_x(&mut y1, x);
+                x >>= 1;
+                let mut y2 = y1;
+                exp_by_x(&mut y2, x);
+                x <<= 1;
+                let mut y3 = r;
+                y3.conjugate();
+                y1.mul_assign(&y3);
+                y1.conjugate();
+                y1.mul_assign(&y2);
+                y2 = y1;
+                exp_by_x(&mut y2, x);
+                y3 = y2;
+                exp_by_x(&mut y3, x);
+                y1.conjugate();
+                y3.mul_assign(&y1);
+                y1.conjugate();
+                y1.frobenius_map(3);
+                y2.frobenius_map(2);
+                y1.mul_assign(&y2);
+                y2 = y3;
+                exp_by_x(&mut y2, x);
+                y2.mul_assign(&y0);
+                y2.mul_assign(&r);
+                y1.mul_assign(&y2);
+                y2 = y3;
+                y2.frobenius_map(1);
+                y1.mul_assign(&y2);
 
-            y1
-        })
+                y1
+            })
+            // self must be nonzero.
+            .unwrap()
     }
 }
 

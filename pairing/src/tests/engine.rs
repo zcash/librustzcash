@@ -4,7 +4,7 @@ use rand_core::SeedableRng;
 use rand_xorshift::XorShiftRng;
 use std::ops::MulAssign;
 
-use crate::{Engine, PairingCurveAffine};
+use crate::{Engine, MillerLoopResult, PairingCurveAffine};
 
 pub fn engine_tests<E: Engine>() {
     let mut rng = XorShiftRng::from_seed([
@@ -31,22 +31,22 @@ pub fn engine_tests<E: Engine>() {
 
         assert_eq!(
             E::Gt::one(),
-            E::final_exponentiation(&E::miller_loop(&[(&z1, &b)])).unwrap()
+            E::miller_loop(&[(&z1, &b)]).final_exponentiation()
         );
 
         assert_eq!(
             E::Gt::one(),
-            E::final_exponentiation(&E::miller_loop(&[(&a, &z2)])).unwrap()
+            E::miller_loop(&[(&a, &z2)]).final_exponentiation()
         );
 
         assert_eq!(
-            E::final_exponentiation(&E::miller_loop(&[(&z1, &b), (&c, &d)])).unwrap(),
-            E::final_exponentiation(&E::miller_loop(&[(&a, &z2), (&c, &d)])).unwrap()
+            E::miller_loop(&[(&z1, &b), (&c, &d)]).final_exponentiation(),
+            E::miller_loop(&[(&a, &z2), (&c, &d)]).final_exponentiation()
         );
 
         assert_eq!(
-            E::final_exponentiation(&E::miller_loop(&[(&a, &b), (&z1, &d)])).unwrap(),
-            E::final_exponentiation(&E::miller_loop(&[(&a, &b), (&c, &z2)])).unwrap()
+            E::miller_loop(&[(&a, &b), (&z1, &d)]).final_exponentiation(),
+            E::miller_loop(&[(&a, &b), (&c, &z2)]).final_exponentiation()
         );
     }
 
@@ -70,7 +70,7 @@ fn random_miller_loop_tests<E: Engine>() {
         let a = a.to_affine().prepare();
         let b = b.to_affine().prepare();
 
-        let p1 = E::final_exponentiation(&E::miller_loop(&[(&a, &b)])).unwrap();
+        let p1 = E::miller_loop(&[(&a, &b)]).final_exponentiation();
 
         assert_eq!(p1, p2);
     }
@@ -93,8 +93,7 @@ fn random_miller_loop_tests<E: Engine>() {
         let c = c.to_affine().prepare();
         let d = d.to_affine().prepare();
 
-        let abcd_with_double_loop =
-            E::final_exponentiation(&E::miller_loop(&[(&a, &b), (&c, &d)])).unwrap();
+        let abcd_with_double_loop = E::miller_loop(&[(&a, &b), (&c, &d)]).final_exponentiation();
 
         assert_eq!(abcd, abcd_with_double_loop);
     }

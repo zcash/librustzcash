@@ -1,6 +1,6 @@
 use ff::{Field, PrimeField, ScalarEngine};
 use group::{CurveAffine, CurveProjective, Group, PrimeGroup};
-use pairing::{Engine, PairingCurveAffine};
+use pairing::{Engine, MillerLoopResult, PairingCurveAffine};
 
 use rand_core::RngCore;
 use std::fmt;
@@ -357,10 +357,14 @@ impl Engine for DummyEngine {
 
         acc
     }
+}
+
+impl MillerLoopResult for Fr {
+    type Gt = Fr;
 
     /// Perform final exponentiation of the result of a miller loop.
-    fn final_exponentiation(this: &Self::MillerLoopResult) -> CtOption<Self::Gt> {
-        CtOption::new(*this, Choice::from(1))
+    fn final_exponentiation(&self) -> Self::Gt {
+        *self
     }
 }
 
