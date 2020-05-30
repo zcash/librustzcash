@@ -42,7 +42,7 @@ pub trait Engine: ScalarEngine {
             Scalar = Self::Fr,
             Projective = Self::G1,
             Pair = Self::G2Affine,
-            PairingResult = Self::Fqk,
+            PairingResult = Self::Gt,
         > + From<Self::G1>
         + Mul<Self::Fr, Output = Self::G1>
         + for<'a> Mul<&'a Self::Fr, Output = Self::G1>;
@@ -60,16 +60,19 @@ pub trait Engine: ScalarEngine {
             Scalar = Self::Fr,
             Projective = Self::G2,
             Pair = Self::G1Affine,
-            PairingResult = Self::Fqk,
+            PairingResult = Self::Gt,
         > + From<Self::G2>
         + Mul<Self::Fr, Output = Self::G2>
         + for<'a> Mul<&'a Self::Fr, Output = Self::G2>;
 
+    /// The type returned by `Engine::miller_loop`.
+    type MillerLoopResult;
+
     /// The extension field that hosts the target group of the pairing.
-    type Fqk: Field;
+    type Gt: Field;
 
     /// Perform a miller loop with some number of (G1, G2) pairs.
-    fn miller_loop<'a, I>(i: I) -> Self::Fqk
+    fn miller_loop<'a, I>(i: I) -> Self::MillerLoopResult
     where
         I: IntoIterator<
             Item = &'a (
@@ -79,10 +82,10 @@ pub trait Engine: ScalarEngine {
         >;
 
     /// Perform final exponentiation of the result of a miller loop.
-    fn final_exponentiation(_: &Self::Fqk) -> CtOption<Self::Fqk>;
+    fn final_exponentiation(_: &Self::MillerLoopResult) -> CtOption<Self::Gt>;
 
     /// Performs a complete pairing operation `(p, q)`.
-    fn pairing<G1, G2>(p: G1, q: G2) -> Self::Fqk
+    fn pairing<G1, G2>(p: G1, q: G2) -> Self::Gt
     where
         G1: Into<Self::G1Affine>,
         G2: Into<Self::G2Affine>,

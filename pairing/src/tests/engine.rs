@@ -30,12 +30,12 @@ pub fn engine_tests<E: Engine>() {
         let d = E::G2::random(&mut rng).to_affine().prepare();
 
         assert_eq!(
-            E::Fqk::one(),
+            E::Gt::one(),
             E::final_exponentiation(&E::miller_loop(&[(&z1, &b)])).unwrap()
         );
 
         assert_eq!(
-            E::Fqk::one(),
+            E::Gt::one(),
             E::final_exponentiation(&E::miller_loop(&[(&a, &z2)])).unwrap()
         );
 

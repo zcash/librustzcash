@@ -44,9 +44,10 @@ impl Engine for Bls12 {
     type G1Affine = G1Affine;
     type G2 = G2;
     type G2Affine = G2Affine;
-    type Fqk = Fq12;
+    type MillerLoopResult = Fq12;
+    type Gt = Fq12;
 
-    fn miller_loop<'a, I>(i: I) -> Self::Fqk
+    fn miller_loop<'a, I>(i: I) -> Self::MillerLoopResult
     where
         I: IntoIterator<
             Item = &'a (
