@@ -64,27 +64,12 @@ pub trait Engine: ScalarEngine {
         + Mul<Self::Fr, Output = Self::G2>
         + for<'a> Mul<&'a Self::Fr, Output = Self::G2>;
 
-    /// The type returned by `Engine::miller_loop`.
-    type MillerLoopResult: MillerLoopResult<Gt = Self::Gt>;
-
     /// The extension field that hosts the target group of the pairing.
     type Gt: Field;
 
-    /// Perform a miller loop with some number of (G1, G2) pairs.
-    fn miller_loop<'a, I>(i: I) -> Self::MillerLoopResult
-    where
-        I: IntoIterator<
-            Item = &'a (
-                &'a <Self::G1Affine as PairingCurveAffine>::Prepared,
-                &'a <Self::G2Affine as PairingCurveAffine>::Prepared,
-            ),
-        >;
-
     /// Invoke the pairing function `G1 x G2 -> Gt` without the use of precomputation and
     /// other optimizations.
-    fn pairing(p: &Self::G1Affine, q: &Self::G2Affine) -> Self::Gt {
-        Self::miller_loop([(&(p.prepare()), &(q.prepare()))].iter()).final_exponentiation()
-    }
+    fn pairing(p: &Self::G1Affine, q: &Self::G2Affine) -> Self::Gt;
 }
 
 /// Affine representation of an elliptic curve point that can be used
@@ -99,6 +84,21 @@ pub trait PairingCurveAffine: CurveAffine {
 
     /// Perform a pairing
     fn pairing_with(&self, other: &Self::Pair) -> Self::PairingResult;
+}
+
+/// An engine that can compute sums of pairings in an efficient way.
+pub trait MultiMillerLoop: Engine {
+    /// The type returned by `Engine::miller_loop`.
+    type Result: MillerLoopResult<Gt = Self::Gt>;
+
+    /// Computes $$\sum_{i=1}^n \textbf{ML}(a_i, b_i)$$ given a series of terms
+    /// $$(a_1, b_1), (a_2, b_2), ..., (a_n, b_n).$$
+    fn multi_miller_loop(
+        terms: &[(
+            &Self::G1Affine,
+            &<Self::G2Affine as PairingCurveAffine>::Prepared,
+        )],
+    ) -> Self::Result;
 }
 
 /// Represents results of a Miller loop, one of the most expensive portions of the pairing

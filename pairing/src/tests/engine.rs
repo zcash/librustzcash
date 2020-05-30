@@ -4,9 +4,9 @@ use rand_core::SeedableRng;
 use rand_xorshift::XorShiftRng;
 use std::ops::MulAssign;
 
-use crate::{Engine, MillerLoopResult, PairingCurveAffine};
+use crate::{Engine, MillerLoopResult, MultiMillerLoop, PairingCurveAffine};
 
-pub fn engine_tests<E: Engine>() {
+pub fn engine_tests<E: MultiMillerLoop>() {
     let mut rng = XorShiftRng::from_seed([
         0x59, 0x62, 0xbe, 0x5d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06, 0xbc,
         0xe5,
@@ -21,32 +21,32 @@ pub fn engine_tests<E: Engine>() {
     }
 
     for _ in 0..1000 {
-        let z1 = E::G1Affine::identity().prepare();
+        let z1 = E::G1Affine::identity();
         let z2 = E::G2Affine::identity().prepare();
 
-        let a = E::G1::random(&mut rng).to_affine().prepare();
+        let a = E::G1::random(&mut rng).to_affine();
         let b = E::G2::random(&mut rng).to_affine().prepare();
-        let c = E::G1::random(&mut rng).to_affine().prepare();
+        let c = E::G1::random(&mut rng).to_affine();
         let d = E::G2::random(&mut rng).to_affine().prepare();
 
         assert_eq!(
             E::Gt::one(),
-            E::miller_loop(&[(&z1, &b)]).final_exponentiation()
+            E::multi_miller_loop(&[(&z1, &b)]).final_exponentiation()
         );
 
         assert_eq!(
             E::Gt::one(),
-            E::miller_loop(&[(&a, &z2)]).final_exponentiation()
+            E::multi_miller_loop(&[(&a, &z2)]).final_exponentiation()
         );
 
         assert_eq!(
-            E::miller_loop(&[(&z1, &b), (&c, &d)]).final_exponentiation(),
-            E::miller_loop(&[(&a, &z2), (&c, &d)]).final_exponentiation()
+            E::multi_miller_loop(&[(&z1, &b), (&c, &d)]).final_exponentiation(),
+            E::multi_miller_loop(&[(&a, &z2), (&c, &d)]).final_exponentiation()
         );
 
         assert_eq!(
-            E::miller_loop(&[(&a, &b), (&z1, &d)]).final_exponentiation(),
-            E::miller_loop(&[(&a, &b), (&c, &z2)]).final_exponentiation()
+            E::multi_miller_loop(&[(&a, &b), (&z1, &d)]).final_exponentiation(),
+            E::multi_miller_loop(&[(&a, &b), (&c, &z2)]).final_exponentiation()
         );
     }
 
@@ -54,7 +54,7 @@ pub fn engine_tests<E: Engine>() {
     random_miller_loop_tests::<E>();
 }
 
-fn random_miller_loop_tests<E: Engine>() {
+fn random_miller_loop_tests<E: MultiMillerLoop>() {
     let mut rng = XorShiftRng::from_seed([
         0x59, 0x62, 0xbe, 0x5d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06, 0xbc,
         0xe5,
@@ -67,10 +67,10 @@ fn random_miller_loop_tests<E: Engine>() {
 
         let p2 = E::pairing(&a, &b);
 
-        let a = a.prepare();
+        let a = a;
         let b = b.prepare();
 
-        let p1 = E::miller_loop(&[(&a, &b)]).final_exponentiation();
+        let p1 = E::multi_miller_loop(&[(&a, &b)]).final_exponentiation();
 
         assert_eq!(p1, p2);
     }
@@ -88,12 +88,13 @@ fn random_miller_loop_tests<E: Engine>() {
         let mut abcd = ab;
         abcd.mul_assign(&cd);
 
-        let a = a.prepare();
+        let a = a;
         let b = b.prepare();
-        let c = c.prepare();
+        let c = c;
         let d = d.prepare();
 
-        let abcd_with_double_loop = E::miller_loop(&[(&a, &b), (&c, &d)]).final_exponentiation();
+        let abcd_with_double_loop =
+            E::multi_miller_loop(&[(&a, &b), (&c, &d)]).final_exponentiation();
 
         assert_eq!(abcd, abcd_with_double_loop);
     }

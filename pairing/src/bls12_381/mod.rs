@@ -21,7 +21,7 @@ pub use self::fq2::Fq2;
 pub use self::fq6::Fq6;
 pub use self::fr::{Fr, FrRepr};
 
-use super::{Engine, MillerLoopResult, PairingCurveAffine};
+use super::{Engine, MillerLoopResult, MultiMillerLoop, PairingCurveAffine};
 
 use ff::{BitIterator, Field, ScalarEngine};
 use group::CurveAffine;
@@ -43,21 +43,25 @@ impl Engine for Bls12 {
     type G1Affine = G1Affine;
     type G2 = G2;
     type G2Affine = G2Affine;
-    type MillerLoopResult = Fq12;
     type Gt = Fq12;
 
-    fn miller_loop<'a, I>(i: I) -> Self::MillerLoopResult
-    where
-        I: IntoIterator<
-            Item = &'a (
-                &'a <Self::G1Affine as PairingCurveAffine>::Prepared,
-                &'a <Self::G2Affine as PairingCurveAffine>::Prepared,
-            ),
-        >,
-    {
+    fn pairing(p: &Self::G1Affine, q: &Self::G2Affine) -> Self::Gt {
+        Self::multi_miller_loop(&[(p, &(q.prepare()))]).final_exponentiation()
+    }
+}
+
+impl MultiMillerLoop for Bls12 {
+    type Result = Fq12;
+
+    fn multi_miller_loop(
+        terms: &[(
+            &Self::G1Affine,
+            &<Self::G2Affine as PairingCurveAffine>::Prepared,
+        )],
+    ) -> Self::Result {
         let mut pairs = vec![];
-        for &(p, q) in i {
-            if !p.is_identity() && !q.is_identity() {
+        for &(p, q) in terms {
+            if !bool::from(p.is_identity()) && !q.is_identity() {
                 pairs.push((p, q.coeffs.iter()));
             }
         }
@@ -87,12 +91,12 @@ impl Engine for Bls12 {
             }
 
             for &mut (p, ref mut coeffs) in &mut pairs {
-                ell(&mut f, coeffs.next().unwrap(), &p.0);
+                ell(&mut f, coeffs.next().unwrap(), p);
             }
 
             if i {
                 for &mut (p, ref mut coeffs) in &mut pairs {
-                    ell(&mut f, coeffs.next().unwrap(), &p.0);
+                    ell(&mut f, coeffs.next().unwrap(), p);
                 }
             }
 
@@ -100,7 +104,7 @@ impl Engine for Bls12 {
         }
 
         for &mut (p, ref mut coeffs) in &mut pairs {
-            ell(&mut f, coeffs.next().unwrap(), &p.0);
+            ell(&mut f, coeffs.next().unwrap(), p);
         }
 
         if BLS_X_IS_NEGATIVE {

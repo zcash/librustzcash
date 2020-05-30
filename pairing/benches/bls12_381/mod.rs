@@ -10,7 +10,7 @@ use rand_xorshift::XorShiftRng;
 
 use group::Group;
 use pairing::bls12_381::*;
-use pairing::{Engine, MillerLoopResult, PairingCurveAffine};
+use pairing::{Engine, MillerLoopResult, MultiMillerLoop, PairingCurveAffine};
 
 fn bench_pairing_g1_preparation(c: &mut Criterion) {
     const SAMPLES: usize = 1000;
@@ -60,10 +60,10 @@ fn bench_pairing_miller_loop(c: &mut Criterion) {
         0xe5,
     ]);
 
-    let v: Vec<(G1Prepared, G2Prepared)> = (0..SAMPLES)
+    let v: Vec<(G1Affine, G2Prepared)> = (0..SAMPLES)
         .map(|_| {
             (
-                G1Affine::from(G1::random(&mut rng)).prepare(),
+                G1Affine::from(G1::random(&mut rng)),
                 G2Affine::from(G2::random(&mut rng)).prepare(),
             )
         })
@@ -72,7 +72,7 @@ fn bench_pairing_miller_loop(c: &mut Criterion) {
     let mut count = 0;
     c.bench_function("Miller loop", |b| {
         b.iter(|| {
-            let tmp = Bls12::miller_loop(&[(&v[count].0, &v[count].1)]);
+            let tmp = Bls12::multi_miller_loop(&[(&v[count].0, &v[count].1)]);
             count = (count + 1) % SAMPLES;
             tmp
         })
@@ -90,11 +90,11 @@ fn bench_pairing_final_exponentiation(c: &mut Criterion) {
     let v: Vec<Fq12> = (0..SAMPLES)
         .map(|_| {
             (
-                G1Affine::from(G1::random(&mut rng)).prepare(),
+                G1Affine::from(G1::random(&mut rng)),
                 G2Affine::from(G2::random(&mut rng)).prepare(),
             )
         })
-        .map(|(ref p, ref q)| Bls12::miller_loop(&[(p, q)]))
+        .map(|(ref p, ref q)| Bls12::multi_miller_loop(&[(p, q)]))
         .collect();
 
     let mut count = 0;
