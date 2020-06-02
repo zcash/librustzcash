@@ -478,8 +478,9 @@ impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng> Builder<'a, P, R> {
         utxo: OutPoint,
         coin: TxOut,
     ) -> Result<(), Error> {
+        self.transparent_inputs.push(sk, coin)?;
         self.mtx.vin.push(TxIn::new(utxo));
-        self.transparent_inputs.push(sk, coin)
+        Ok(());
     }
 
     /// Adds a transparent address to send funds to.
@@ -529,9 +530,7 @@ impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng> Builder<'a, P, R> {
         //
 
         // Valid change
-        let change = self.mtx.value_balance
-            - self.fee
-            + self.transparent_inputs.value_sum()
+        let change = self.mtx.value_balance - self.fee + self.transparent_inputs.value_sum()
             - self.mtx.vout.iter().map(|vo| vo.value).sum::<Amount>()
             + self
                 .tze_inputs

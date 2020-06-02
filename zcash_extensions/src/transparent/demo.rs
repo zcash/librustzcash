@@ -419,17 +419,14 @@ impl<'a, B: ExtensionTxBuilder<'a>> DemoBuilder<&mut B> {
 
 #[cfg(test)]
 mod tests {
-    use ff::{Field, PrimeField};
     use blake2b_simd::Params;
+    use ff::{Field, PrimeField};
     use rand_core::OsRng;
 
     use zcash_proofs::prover::LocalTxProver;
 
     use zcash_primitives::{
-        consensus::{
-            BranchId,
-            TestNetwork,
-        },
+        consensus::{BranchId, TestNetwork},
         extensions::transparent::{self as tze, Extension, FromPayload, ToPayload},
         legacy::TransparentAddress,
         merkle_tree::{CommitmentTree, IncrementalWitness},
@@ -444,7 +441,6 @@ mod tests {
     };
 
     use super::{close, open, Context, DemoBuilder, Precondition, Program, Witness};
-
 
     #[test]
     fn precondition_open_round_trip() {
@@ -673,7 +669,10 @@ mod tests {
             txn_builder: &mut builder_b,
             extension_id: 0,
         };
-        let prevout_a = (OutPoint::new(tx_a.txid().0, 0), tx_a.data.tze_outputs[0].clone());
+        let prevout_a = (
+            OutPoint::new(tx_a.txid().0, 0),
+            tx_a.data.tze_outputs[0].clone(),
+        );
         let value_xfr = Amount::from_u64(90000).unwrap();
         db_b.demo_transfer_to_close(prevout_a, value_xfr, preimage_1, preimage_2)
             .map_err(|e| format!("transfer failure: {:?}", e))
@@ -692,13 +691,20 @@ mod tests {
             txn_builder: &mut builder_c,
             extension_id: 0,
         };
-        let prevout_b = (OutPoint::new(tx_a.txid().0, 0), tx_b.data.tze_outputs[0].clone());
+        let prevout_b = (
+            OutPoint::new(tx_a.txid().0, 0),
+            tx_b.data.tze_outputs[0].clone(),
+        );
         db_c.demo_close(prevout_b, preimage_2)
             .map_err(|e| format!("close failure: {:?}", e))
             .unwrap();
 
-        builder_c.add_transparent_output(&TransparentAddress::PublicKey([0; 20]), Amount::from_u64(80000).unwrap())
-                 .unwrap();
+        builder_c
+            .add_transparent_output(
+                &TransparentAddress::PublicKey([0; 20]),
+                Amount::from_u64(80000).unwrap(),
+            )
+            .unwrap();
 
         let (tx_c, _) = builder_c
             .build(BranchId::Canopy, &prover)

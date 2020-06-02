@@ -5,8 +5,8 @@ use group::GroupEncoding;
 
 use super::{
     components::{Amount, TxOut},
-    Transaction, TransactionData, OVERWINTER_VERSION_GROUP_ID, SAPLING_TX_VERSION,
-    SAPLING_VERSION_GROUP_ID, FUTURE_VERSION_GROUP_ID,
+    Transaction, TransactionData, FUTURE_VERSION_GROUP_ID, OVERWINTER_VERSION_GROUP_ID,
+    SAPLING_TX_VERSION, SAPLING_VERSION_GROUP_ID,
 };
 use crate::{consensus, legacy::Script};
 
