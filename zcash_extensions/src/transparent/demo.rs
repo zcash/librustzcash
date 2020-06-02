@@ -422,12 +422,11 @@ mod tests {
     use ff::PrimeField;
 
     use super::{close, open, Context, DemoBuilder, Precondition, Program, Witness};
-    use zcash_proofs::prover::LocalTxProver;
     use zcash_primitives::{
         consensus::BranchId,
         extensions::transparent::{self as tze, Extension, FromPayload, ToPayload},
+        jubjub::fs::Fs,
         legacy::TransparentAddress,
-        jubjub::{fs::Fs},
         merkle_tree::{CommitmentTree, IncrementalWitness},
         sapling::Node,
         transaction::{
@@ -438,6 +437,7 @@ mod tests {
         zip32::ExtendedSpendingKey,
         JUBJUB,
     };
+    use zcash_proofs::prover::LocalTxProver;
 
     use ff::Field;
     use rand_core::OsRng;
@@ -636,13 +636,14 @@ mod tests {
         // shielded output
         tree.append(cm1).unwrap();
         let witness1 = IncrementalWitness::from_tree(&tree);
-        builder_a.add_sapling_spend(
-                    extsk.clone(),
-                    *to.diversifier(),
-                    note1.clone(),
-                    witness1.path().unwrap(),
-                )
-                .unwrap();
+        builder_a
+            .add_sapling_spend(
+                extsk.clone(),
+                *to.diversifier(),
+                note1.clone(),
+                witness1.path().unwrap(),
+            )
+            .unwrap();
 
         let mut db_a = DemoBuilder {
             txn_builder: &mut builder_a,
@@ -667,7 +668,10 @@ mod tests {
             txn_builder: &mut builder_b,
             extension_id: 0,
         };
-        let prevout_a = (OutPoint::new(tx_a.txid().0, 0), tx_a.data.tze_outputs[0].clone());
+        let prevout_a = (
+            OutPoint::new(tx_a.txid().0, 0),
+            tx_a.data.tze_outputs[0].clone(),
+        );
         let value_xfr = Amount::from_u64(90000).unwrap();
         db_b.demo_transfer_to_close(prevout_a, value_xfr, preimage_1, preimage_2)
             .map_err(|e| format!("transfer failure: {:?}", e))
@@ -686,13 +690,20 @@ mod tests {
             txn_builder: &mut builder_c,
             extension_id: 0,
         };
-        let prevout_b = (OutPoint::new(tx_a.txid().0, 0), tx_b.data.tze_outputs[0].clone());
+        let prevout_b = (
+            OutPoint::new(tx_a.txid().0, 0),
+            tx_b.data.tze_outputs[0].clone(),
+        );
         db_c.demo_close(prevout_b, preimage_2)
             .map_err(|e| format!("close failure: {:?}", e))
             .unwrap();
 
-        builder_c.add_transparent_output(&TransparentAddress::PublicKey([0; 20]), Amount::from_u64(80000).unwrap())
-                 .unwrap();
+        builder_c
+            .add_transparent_output(
+                &TransparentAddress::PublicKey([0; 20]),
+                Amount::from_u64(80000).unwrap(),
+            )
+            .unwrap();
 
         let (tx_c, _) = builder_c
             .build(BranchId::Canopy, &prover)
