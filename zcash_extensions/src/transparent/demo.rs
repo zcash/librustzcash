@@ -671,7 +671,7 @@ mod tests {
         };
         let prevout_a = (
             OutPoint::new(tx_a.txid().0, 0),
-            tx_a.data.tze_outputs[0].clone(),
+            tx_a.tze_outputs[0].clone(),
         );
         let value_xfr = Amount::from_u64(90000).unwrap();
         db_b.demo_transfer_to_close(prevout_a, value_xfr, preimage_1, preimage_2)
@@ -693,7 +693,7 @@ mod tests {
         };
         let prevout_b = (
             OutPoint::new(tx_a.txid().0, 0),
-            tx_b.data.tze_outputs[0].clone(),
+            tx_b.tze_outputs[0].clone(),
         );
         db_c.demo_close(prevout_b, preimage_2)
             .map_err(|e| format!("close failure: {:?}", e))
@@ -715,8 +715,8 @@ mod tests {
         let ctx0 = Ctx { tx: &tx_b };
         assert_eq!(
             Program.verify(
-                &tx_a.data.tze_outputs[0].precondition,
-                &tx_b.data.tze_inputs[0].witness,
+                &tx_a.tze_outputs[0].precondition,
+                &tx_b.tze_inputs[0].witness,
                 &ctx0
             ),
             Ok(())
@@ -726,8 +726,8 @@ mod tests {
         let ctx1 = Ctx { tx: &tx_b };
         assert_eq!(
             Program.verify(
-                &tx_b.data.tze_outputs[0].precondition,
-                &tx_c.data.tze_inputs[0].witness,
+                &tx_b.tze_outputs[0].precondition,
+                &tx_c.tze_inputs[0].witness,
                 &ctx1
             ),
             Ok(())
