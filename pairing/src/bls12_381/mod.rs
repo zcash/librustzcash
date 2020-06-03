@@ -12,8 +12,8 @@ mod fr;
 mod tests;
 
 pub use self::ec::{
-    G1Affine, G1Compressed, G1Prepared, G1Uncompressed, G2Affine, G2Compressed, G2Prepared,
-    G2Uncompressed, G1, G2,
+    G1Affine, G1Compressed, G1Uncompressed, G2Affine, G2Compressed, G2Prepared, G2Uncompressed, G1,
+    G2,
 };
 pub use self::fq::{Fq, FqRepr};
 pub use self::fq12::Fq12;
@@ -21,7 +21,7 @@ pub use self::fq2::Fq2;
 pub use self::fq6::Fq6;
 pub use self::fr::{Fr, FrRepr};
 
-use super::{Engine, MillerLoopResult, MultiMillerLoop, PairingCurveAffine};
+use super::{Engine, MillerLoopResult, MultiMillerLoop};
 
 use ff::{BitIterator, Field, ScalarEngine};
 use group::CurveAffine;
@@ -46,19 +46,15 @@ impl Engine for Bls12 {
     type Gt = Fq12;
 
     fn pairing(p: &Self::G1Affine, q: &Self::G2Affine) -> Self::Gt {
-        Self::multi_miller_loop(&[(p, &(q.prepare()))]).final_exponentiation()
+        Self::multi_miller_loop(&[(p, &(*q).into())]).final_exponentiation()
     }
 }
 
 impl MultiMillerLoop for Bls12 {
+    type G2Prepared = G2Prepared;
     type Result = Fq12;
 
-    fn multi_miller_loop(
-        terms: &[(
-            &Self::G1Affine,
-            &<Self::G2Affine as PairingCurveAffine>::Prepared,
-        )],
-    ) -> Self::Result {
+    fn multi_miller_loop(terms: &[(&Self::G1Affine, &Self::G2Prepared)]) -> Self::Result {
         let mut pairs = vec![];
         for &(p, q) in terms {
             if !bool::from(p.is_identity()) && !q.is_identity() {

@@ -21,7 +21,7 @@ pub mod tests;
 pub mod bls12_381;
 
 use core::ops::Mul;
-use ff::{Field, PrimeField, ScalarEngine};
+use ff::{Field, ScalarEngine};
 use group::{CurveAffine, CurveProjective, GroupOps, GroupOpsOwned, ScalarMul, ScalarMulOwned};
 
 /// An "engine" is a collection of types (fields, elliptic curve groups, etc.)
@@ -75,12 +75,8 @@ pub trait Engine: ScalarEngine {
 /// Affine representation of an elliptic curve point that can be used
 /// to perform pairings.
 pub trait PairingCurveAffine: CurveAffine {
-    type Prepared: Clone + Send + Sync + 'static;
     type Pair: PairingCurveAffine<Pair = Self>;
     type PairingResult: Field;
-
-    /// Prepares this element for pairing purposes.
-    fn prepare(&self) -> Self::Prepared;
 
     /// Perform a pairing
     fn pairing_with(&self, other: &Self::Pair) -> Self::PairingResult;
@@ -88,17 +84,15 @@ pub trait PairingCurveAffine: CurveAffine {
 
 /// An engine that can compute sums of pairings in an efficient way.
 pub trait MultiMillerLoop: Engine {
+    /// The prepared form of `Self::G2Affine`.
+    type G2Prepared: Clone + Send + Sync + From<Self::G2Affine>;
+
     /// The type returned by `Engine::miller_loop`.
     type Result: MillerLoopResult<Gt = Self::Gt>;
 
     /// Computes $$\sum_{i=1}^n \textbf{ML}(a_i, b_i)$$ given a series of terms
     /// $$(a_1, b_1), (a_2, b_2), ..., (a_n, b_n).$$
-    fn multi_miller_loop(
-        terms: &[(
-            &Self::G1Affine,
-            &<Self::G2Affine as PairingCurveAffine>::Prepared,
-        )],
-    ) -> Self::Result;
+    fn multi_miller_loop(terms: &[(&Self::G1Affine, &Self::G2Prepared)]) -> Self::Result;
 }
 
 /// Represents results of a Miller loop, one of the most expensive portions of the pairing

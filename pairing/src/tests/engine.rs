@@ -22,12 +22,12 @@ pub fn engine_tests<E: MultiMillerLoop>() {
 
     for _ in 0..1000 {
         let z1 = E::G1Affine::identity();
-        let z2 = E::G2Affine::identity().prepare();
+        let z2 = E::G2Affine::identity().into();
 
         let a = E::G1::random(&mut rng).to_affine();
-        let b = E::G2::random(&mut rng).to_affine().prepare();
+        let b = E::G2::random(&mut rng).to_affine().into();
         let c = E::G1::random(&mut rng).to_affine();
-        let d = E::G2::random(&mut rng).to_affine().prepare();
+        let d = E::G2::random(&mut rng).to_affine().into();
 
         assert_eq!(
             E::Gt::one(),
@@ -68,7 +68,7 @@ fn random_miller_loop_tests<E: MultiMillerLoop>() {
         let p2 = E::pairing(&a, &b);
 
         let a = a;
-        let b = b.prepare();
+        let b = b.into();
 
         let p1 = E::multi_miller_loop(&[(&a, &b)]).final_exponentiation();
 
@@ -89,9 +89,9 @@ fn random_miller_loop_tests<E: MultiMillerLoop>() {
         abcd.mul_assign(&cd);
 
         let a = a;
-        let b = b.prepare();
+        let b = b.into();
         let c = c;
-        let d = d.prepare();
+        let d = d.into();
 
         let abcd_with_double_loop =
             E::multi_miller_loop(&[(&a, &b), (&c, &d)]).final_exponentiation();

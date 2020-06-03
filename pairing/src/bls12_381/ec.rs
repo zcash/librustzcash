@@ -3,7 +3,6 @@ macro_rules! curve_impl {
         $name:expr,
         $projective:ident,
         $affine:ident,
-        $prepared:ident,
         $basefield:ident,
         $scalarfield:ident,
         $uncompressed:ident,
@@ -281,13 +280,8 @@ macro_rules! curve_impl {
         }
 
         impl PairingCurveAffine for $affine {
-            type Prepared = $prepared;
             type Pair = $pairing;
             type PairingResult = Fq12;
-
-            fn prepare(&self) -> Self::Prepared {
-                $prepared::from_affine(*self)
-            }
 
             fn pairing_with(&self, other: &Self::Pair) -> Self::PairingResult {
                 self.perform_pairing(other)
@@ -917,7 +911,6 @@ pub mod g1 {
         "G1",
         G1,
         G1Affine,
-        G1Prepared,
         Fq,
         Fr,
         G1Uncompressed,
@@ -1170,19 +1163,6 @@ pub mod g1 {
             }
 
             ret
-        }
-    }
-
-    #[derive(Clone, Debug)]
-    pub struct G1Prepared(pub(crate) G1Affine);
-
-    impl G1Prepared {
-        pub fn is_identity(&self) -> bool {
-            self.0.is_identity().into()
-        }
-
-        pub fn from_affine(p: G1Affine) -> Self {
-            G1Prepared(p)
         }
     }
 
@@ -1507,7 +1487,6 @@ pub mod g2 {
         "G2",
         G2,
         G2Affine,
-        G2Prepared,
         Fq2,
         Fr,
         G2Uncompressed,
@@ -1816,6 +1795,12 @@ pub mod g2 {
     pub struct G2Prepared {
         pub(crate) coeffs: Vec<(Fq2, Fq2, Fq2)>,
         pub(crate) infinity: bool,
+    }
+
+    impl From<G2Affine> for G2Prepared {
+        fn from(val: G2Affine) -> Self {
+            Self::from_affine(val)
+        }
     }
 
     #[test]
