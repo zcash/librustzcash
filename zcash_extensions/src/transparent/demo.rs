@@ -615,7 +615,11 @@ mod tests {
         let preimage_1 = [1; 32];
         let preimage_2 = [2; 32];
 
-        let prover = LocalTxProver::with_default_location().unwrap();
+        // Only run the test if we have the prover parameters.
+        let prover = match LocalTxProver::with_default_location() {
+            Some(prover) => prover,
+            None => return,
+        };
 
         //
         // Opening transaction
