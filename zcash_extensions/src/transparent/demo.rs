@@ -29,7 +29,7 @@ use zcash_primitives::{
 };
 
 mod open {
-    pub const MODE: usize = 0;
+    pub const MODE: u32 = 0;
 
     #[derive(Debug, PartialEq)]
     pub struct Precondition(pub [u8; 32]);
@@ -39,7 +39,7 @@ mod open {
 }
 
 mod close {
-    pub const MODE: usize = 1;
+    pub const MODE: u32 = 1;
 
     #[derive(Debug, PartialEq)]
     pub struct Precondition(pub [u8; 32]);
@@ -67,7 +67,7 @@ impl Precondition {
 #[derive(Debug, PartialEq)]
 pub enum Error {
     IllegalPayloadLength(usize),
-    ModeInvalid(usize),
+    ModeInvalid(u32),
     NonTzeTxn,
     HashMismatch, // include hashes?
     ModeMismatch,
@@ -89,10 +89,10 @@ impl fmt::Display for Error {
     }
 }
 
-impl TryFrom<(usize, Precondition)> for Precondition {
+impl TryFrom<(u32, Precondition)> for Precondition {
     type Error = Error;
 
-    fn try_from(from: (usize, Self)) -> Result<Self, Self::Error> {
+    fn try_from(from: (u32, Self)) -> Result<Self, Self::Error> {
         match from {
             (open::MODE, Precondition::Open(p)) => Ok(Precondition::Open(p)),
             (close::MODE, Precondition::Close(p)) => Ok(Precondition::Close(p)),
@@ -104,7 +104,7 @@ impl TryFrom<(usize, Precondition)> for Precondition {
 impl FromPayload for Precondition {
     type Error = Error;
 
-    fn from_payload(mode: usize, payload: &[u8]) -> Result<Self, Self::Error> {
+    fn from_payload(mode: u32, payload: &[u8]) -> Result<Self, Self::Error> {
         match mode {
             open::MODE => {
                 if payload.len() == 32 {
@@ -130,7 +130,7 @@ impl FromPayload for Precondition {
 }
 
 impl ToPayload for Precondition {
-    fn to_payload(&self) -> (usize, Vec<u8>) {
+    fn to_payload(&self) -> (u32, Vec<u8>) {
         match self {
             Precondition::Open(p) => (open::MODE, p.0.to_vec()),
             Precondition::Close(p) => (close::MODE, p.0.to_vec()),
@@ -154,10 +154,10 @@ impl Witness {
     }
 }
 
-impl TryFrom<(usize, Witness)> for Witness {
+impl TryFrom<(u32, Witness)> for Witness {
     type Error = Error;
 
-    fn try_from(from: (usize, Self)) -> Result<Self, Self::Error> {
+    fn try_from(from: (u32, Self)) -> Result<Self, Self::Error> {
         match from {
             (open::MODE, Witness::Open(p)) => Ok(Witness::Open(p)),
             (close::MODE, Witness::Close(p)) => Ok(Witness::Close(p)),
@@ -169,7 +169,7 @@ impl TryFrom<(usize, Witness)> for Witness {
 impl FromPayload for Witness {
     type Error = Error;
 
-    fn from_payload(mode: usize, payload: &[u8]) -> Result<Self, Self::Error> {
+    fn from_payload(mode: u32, payload: &[u8]) -> Result<Self, Self::Error> {
         match mode {
             open::MODE => {
                 if payload.len() == 32 {
@@ -195,7 +195,7 @@ impl FromPayload for Witness {
 }
 
 impl ToPayload for Witness {
-    fn to_payload(&self) -> (usize, Vec<u8>) {
+    fn to_payload(&self) -> (u32, Vec<u8>) {
         match self {
             Witness::Open(w) => (open::MODE, w.0.to_vec()),
             Witness::Close(w) => (close::MODE, w.0.to_vec()),
@@ -306,7 +306,7 @@ fn builder_hashes(preimage_1: &[u8; 32], preimage_2: &[u8; 32]) -> ([u8; 32], [u
 
 pub struct DemoBuilder<B> {
     pub txn_builder: B,
-    pub extension_id: usize,
+    pub extension_id: u32,
 }
 
 #[derive(Debug)]
@@ -669,10 +669,7 @@ mod tests {
             txn_builder: &mut builder_b,
             extension_id: 0,
         };
-        let prevout_a = (
-            OutPoint::new(tx_a.txid().0, 0),
-            tx_a.tze_outputs[0].clone(),
-        );
+        let prevout_a = (OutPoint::new(tx_a.txid().0, 0), tx_a.tze_outputs[0].clone());
         let value_xfr = Amount::from_u64(90000).unwrap();
         db_b.demo_transfer_to_close(prevout_a, value_xfr, preimage_1, preimage_2)
             .map_err(|e| format!("transfer failure: {:?}", e))
@@ -691,10 +688,7 @@ mod tests {
             txn_builder: &mut builder_c,
             extension_id: 0,
         };
-        let prevout_b = (
-            OutPoint::new(tx_a.txid().0, 0),
-            tx_b.tze_outputs[0].clone(),
-        );
+        let prevout_b = (OutPoint::new(tx_a.txid().0, 0), tx_b.tze_outputs[0].clone());
         db_c.demo_close(prevout_b, preimage_2)
             .map_err(|e| format!("close failure: {:?}", e))
             .unwrap();

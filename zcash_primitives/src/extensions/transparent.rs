@@ -7,24 +7,24 @@ pub trait FromPayload: Sized {
     type Error;
 
     /// Parses an extension type from a mode and payload.
-    fn from_payload(mode: usize, payload: &[u8]) -> Result<Self, Self::Error>;
+    fn from_payload(mode: u32, payload: &[u8]) -> Result<Self, Self::Error>;
 }
 
 pub trait ToPayload {
     /// Returns a serialized payload and its corresponding mode.
-    fn to_payload(&self) -> (usize, Vec<u8>);
+    fn to_payload(&self) -> (u32, Vec<u8>);
 }
 
 /// A condition that can be used to encumber transparent funds.
 #[derive(Clone, Debug)]
 pub struct Precondition {
-    pub extension_id: usize,
-    pub mode: usize,
+    pub extension_id: u32,
+    pub mode: u32,
     pub payload: Vec<u8>,
 }
 
 impl Precondition {
-    pub fn from<P: ToPayload>(extension_id: usize, value: &P) -> Precondition {
+    pub fn from<P: ToPayload>(extension_id: u32, value: &P) -> Precondition {
         let (mode, payload) = value.to_payload();
         Precondition {
             extension_id,
@@ -42,13 +42,13 @@ impl Precondition {
 /// spent.
 #[derive(Clone, Debug)]
 pub struct Witness {
-    pub extension_id: usize,
-    pub mode: usize,
+    pub extension_id: u32,
+    pub mode: u32,
     pub payload: Vec<u8>,
 }
 
 impl Witness {
-    pub fn from<P: ToPayload>(extension_id: usize, value: &P) -> Witness {
+    pub fn from<P: ToPayload>(extension_id: u32, value: &P) -> Witness {
         let (mode, payload) = value.to_payload();
         Witness {
             extension_id,
@@ -60,8 +60,8 @@ impl Witness {
 
 #[derive(Debug, PartialEq)]
 pub enum Error<E> {
-    InvalidForEpoch(u32, usize),
-    InvalidExtensionId(usize),
+    InvalidForEpoch(u32, u32),
+    InvalidExtensionId(u32),
     ProgramError(E),
 }
 
@@ -125,7 +125,7 @@ pub trait ExtensionTxBuilder<'a> {
 
     fn add_tze_input<WBuilder, W: ToPayload>(
         &mut self,
-        extension_id: usize,
+        extension_id: u32,
         prevout: (OutPoint, TzeOut),
         witness_builder: WBuilder,
     ) -> Result<(), Self::BuildError>
@@ -134,7 +134,7 @@ pub trait ExtensionTxBuilder<'a> {
 
     fn add_tze_output<P: ToPayload>(
         &mut self,
-        extension_id: usize,
+        extension_id: u32,
         value: Amount,
         guarded_by: &P,
     ) -> Result<(), Self::BuildError>;
