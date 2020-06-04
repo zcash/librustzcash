@@ -13,12 +13,12 @@ pub enum ExtensionId {
     Demo,
 }
 
-pub struct InvalidExtId(usize);
+pub struct InvalidExtId(u32);
 
-impl TryFrom<usize> for ExtensionId {
+impl TryFrom<u32> for ExtensionId {
     type Error = InvalidExtId;
 
-    fn try_from(t: usize) -> Result<Self, Self::Error> {
+    fn try_from(t: u32) -> Result<Self, Self::Error> {
         match t {
             0 => Ok(ExtensionId::Demo),
             n => Err(InvalidExtId(n)),
@@ -26,8 +26,8 @@ impl TryFrom<usize> for ExtensionId {
     }
 }
 
-impl From<ExtensionId> for usize {
-    fn from(type_id: ExtensionId) -> usize {
+impl From<ExtensionId> for u32 {
+    fn from(type_id: ExtensionId) -> u32 {
         match type_id {
             ExtensionId::Demo => 0,
         }

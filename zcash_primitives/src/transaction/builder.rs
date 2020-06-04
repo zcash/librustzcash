@@ -256,7 +256,7 @@ struct TzeInputs<'a, BuildCtx> {
 impl<'a, BuildCtx> TzeInputs<'a, BuildCtx> {
     fn push<WBuilder, W: ToPayload>(
         &mut self,
-        extension_id: usize,
+        extension_id: u32,
         prevout: (OutPoint, TzeOut),
         builder: WBuilder,
     ) where
@@ -746,7 +746,7 @@ impl<'a, R: RngCore + CryptoRng> ExtensionTxBuilder<'a> for Builder<'a, R> {
 
     fn add_tze_input<WBuilder, W: ToPayload>(
         &mut self,
-        extension_id: usize,
+        extension_id: u32,
         prevout: (OutPoint, TzeOut),
         witness_builder: WBuilder,
     ) -> Result<(), Self::BuildError>
@@ -759,7 +759,7 @@ impl<'a, R: RngCore + CryptoRng> ExtensionTxBuilder<'a> for Builder<'a, R> {
 
     fn add_tze_output<P: ToPayload>(
         &mut self,
-        extension_id: usize,
+        extension_id: u32,
         value: Amount,
         guarded_by: &P,
     ) -> Result<(), Self::BuildError> {
