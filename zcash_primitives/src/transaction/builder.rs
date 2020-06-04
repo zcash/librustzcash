@@ -24,7 +24,7 @@ use crate::{
             amount::Amount, amount::DEFAULT_FEE, OutPoint, OutputDescription, SpendDescription,
             TxOut, TzeIn, TzeOut,
         },
-        signature_hash_data, Transaction, TransactionData, SIGHASH_ALL,
+        signature_hash_data, SignableInput, Transaction, TransactionData, SIGHASH_ALL,
     },
     util::generate_random_rseed,
     zip32::ExtendedSpendingKey,
@@ -244,8 +244,7 @@ impl TransparentInputs {
                 mtx,
                 consensus_branch_id,
                 SIGHASH_ALL,
-                Some((i, &info.coin.script_pubkey, info.coin.value)),
-                // tze equivalent is ???
+                SignableInput::transparent(i, &info.coin.script_pubkey, info.coin.value),
             ));
 
             let msg = secp256k1::Message::from_slice(&sighash).expect("32 bytes");
@@ -733,7 +732,7 @@ impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng> Builder<'a, P, R> {
             &self.mtx,
             consensus_branch_id,
             SIGHASH_ALL,
-            None,
+            SignableInput::Shielded,
         ));
 
         // Create Sapling spendAuth and binding signatures
