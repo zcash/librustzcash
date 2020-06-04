@@ -27,7 +27,7 @@ const OVERWINTER_VERSION_GROUP_ID: u32 = 0x03C48270;
 const OVERWINTER_TX_VERSION: u32 = 3;
 const SAPLING_VERSION_GROUP_ID: u32 = 0x892F2085;
 const SAPLING_TX_VERSION: u32 = 4;
-const NU4_VERSION_GROUP_ID: u32 = 0x77777777;
+const NU4_VERSION_GROUP_ID: u32 = 0x83252789;
 const NU4_TX_VERSION: u32 = 5;
 
 #[derive(Clone, Copy, Debug, PartialOrd, Ord, PartialEq, Eq, Hash)]
