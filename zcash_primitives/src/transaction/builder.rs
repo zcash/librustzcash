@@ -280,7 +280,7 @@ impl<'a, BuildCtx> TzeInputs<'a, BuildCtx> {
 
     fn push<WBuilder, W: ToPayload>(
         &mut self,
-        extension_id: usize,
+        extension_id: u32,
         prevout: (OutPoint, TzeOut),
         builder: WBuilder,
     ) where
@@ -789,7 +789,7 @@ impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng> ExtensionTxBuilder<'a
 
     fn add_tze_input<WBuilder, W: ToPayload>(
         &mut self,
-        extension_id: usize,
+        extension_id: u32,
         prevout: (OutPoint, TzeOut),
         witness_builder: WBuilder,
     ) -> Result<(), Self::BuildError>
@@ -802,7 +802,7 @@ impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng> ExtensionTxBuilder<'a
 
     fn add_tze_output<G: ToPayload>(
         &mut self,
-        extension_id: usize,
+        extension_id: u32,
         value: Amount,
         guarded_by: &G,
     ) -> Result<(), Self::BuildError> {
