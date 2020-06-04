@@ -17,7 +17,7 @@ mod sighash;
 #[cfg(test)]
 mod tests;
 
-pub use self::sighash::{signature_hash, signature_hash_data, SIGHASH_ALL};
+pub use self::sighash::{signature_hash, signature_hash_data, SignableInput, SIGHASH_ALL};
 
 use self::components::{
     Amount, JSDescription, OutputDescription, SpendDescription, TxIn, TxOut, TzeIn, TzeOut,

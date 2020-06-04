@@ -4,7 +4,11 @@ use rand_core::OsRng;
 
 use crate::jubjub::{fs::Fs, FixedGenerators};
 
-use super::{components::Amount, sighash::signature_hash, Transaction, TransactionData};
+use super::{
+    components::Amount,
+    sighash::{signature_hash, SignableInput},
+    Transaction, TransactionData,
+};
 use crate::redjubjub::PrivateKey;
 use crate::JUBJUB;
 
@@ -75,16 +79,17 @@ mod data;
 fn zip_0143() {
     for tv in self::data::zip_0143::make_test_vectors() {
         let tx = Transaction::read(&tv.tx[..]).unwrap();
-        let transparent_input = tv.transparent_input.map(|n| {
-            (
+        let signable_input = match tv.transparent_input {
+            Some(n) => SignableInput::transparent(
                 n as usize,
                 &tv.script_code,
                 Amount::from_nonnegative_i64(tv.amount).unwrap(),
-            )
-        });
+            ),
+            _ => SignableInput::Shielded,
+        };
 
         assert_eq!(
-            signature_hash(&tx, tv.consensus_branch_id, tv.hash_type, transparent_input),
+            signature_hash(&tx, tv.consensus_branch_id, tv.hash_type, signable_input),
             tv.sighash
         );
     }
@@ -94,16 +99,17 @@ fn zip_0143() {
 fn zip_0243() {
     for tv in self::data::zip_0243::make_test_vectors() {
         let tx = Transaction::read(&tv.tx[..]).unwrap();
-        let transparent_input = tv.transparent_input.map(|n| {
-            (
+        let signable_input = match tv.transparent_input {
+            Some(n) => SignableInput::transparent(
                 n as usize,
                 &tv.script_code,
                 Amount::from_nonnegative_i64(tv.amount).unwrap(),
-            )
-        });
+            ),
+            _ => SignableInput::Shielded,
+        };
 
         assert_eq!(
-            signature_hash(&tx, tv.consensus_branch_id, tv.hash_type, transparent_input),
+            signature_hash(&tx, tv.consensus_branch_id, tv.hash_type, signable_input),
             tv.sighash
         );
     }
