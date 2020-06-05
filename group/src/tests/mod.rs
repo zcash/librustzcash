@@ -5,6 +5,7 @@ use std::ops::{Mul, Neg};
 
 use crate::{
     cofactor::{CofactorCurve, CofactorCurveAffine},
+    wnaf::WnafGroup,
     GroupEncoding, UncompressedEncoding,
 };
 
@@ -64,11 +65,10 @@ pub fn curve_tests<G: CofactorCurve>() {
     random_doubling_tests::<G>();
     random_negation_tests::<G>();
     random_transformation_tests::<G>();
-    random_wnaf_tests::<G>();
     random_compressed_encoding_tests::<G>();
 }
 
-fn random_wnaf_tests<G: CofactorCurve>() {
+pub fn random_wnaf_tests<G: WnafGroup>() {
     use crate::wnaf::*;
 
     let mut rng = XorShiftRng::from_seed([

@@ -1092,7 +1092,9 @@ macro_rules! curve_impl {
             fn to_affine(&self) -> $affine {
                 (*self).into()
             }
+        }
 
+        impl WnafGroup for $projective {
             fn recommended_wnaf_for_scalar(_: &Self::Scalar) -> usize {
                 Self::empirical_recommended_wnaf_for_scalar(
                     <Self::Scalar as PrimeField>::NUM_BITS as usize,
@@ -1210,7 +1212,7 @@ pub mod g1 {
     use group::{
         cofactor::{CofactorCurve, CofactorCurveAffine, CofactorGroup},
         prime::PrimeGroup,
-        Curve, Group, GroupEncoding, UncompressedEncoding,
+        Curve, Group, GroupEncoding, UncompressedEncoding, WnafGroup,
     };
     use rand_core::RngCore;
     use std::fmt;
@@ -1778,8 +1780,9 @@ pub mod g1 {
 
     #[test]
     fn g1_curve_tests() {
-        use group::tests::{curve_tests, random_uncompressed_encoding_tests};
+        use group::tests::{curve_tests, random_uncompressed_encoding_tests, random_wnaf_tests};
         curve_tests::<G1>();
+        random_wnaf_tests::<G1>();
         random_uncompressed_encoding_tests::<G1>();
     }
 }
@@ -1792,7 +1795,7 @@ pub mod g2 {
     use group::{
         cofactor::{CofactorCurve, CofactorCurveAffine, CofactorGroup},
         prime::PrimeGroup,
-        Curve, Group, GroupEncoding, UncompressedEncoding,
+        Curve, Group, GroupEncoding, UncompressedEncoding, WnafGroup,
     };
     use rand_core::RngCore;
     use std::fmt;
@@ -2484,8 +2487,9 @@ pub mod g2 {
 
     #[test]
     fn g2_curve_tests() {
-        use group::tests::{curve_tests, random_uncompressed_encoding_tests};
+        use group::tests::{curve_tests, random_uncompressed_encoding_tests, random_wnaf_tests};
         curve_tests::<G2>();
+        random_wnaf_tests::<G2>();
         random_uncompressed_encoding_tests::<G2>();
     }
 }

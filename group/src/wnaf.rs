@@ -2,10 +2,21 @@ use byteorder::{ByteOrder, LittleEndian};
 use ff::PrimeField;
 use std::iter;
 
-use super::{cofactor::CofactorCurve, Group};
+use super::Group;
+
+/// Extension trait on a [`Group`] that provides helpers used by [`Wnaf`].
+pub trait WnafGroup: Group {
+    /// Recommends a wNAF window table size given a scalar. Always returns a number
+    /// between 2 and 22, inclusive.
+    fn recommended_wnaf_for_scalar(scalar: &Self::Scalar) -> usize;
+
+    /// Recommends a wNAF window size given the number of scalars you intend to multiply
+    /// a base by. Always returns a number between 2 and 22, inclusive.
+    fn recommended_wnaf_for_num_scalars(num_scalars: usize) -> usize;
+}
 
 /// Replaces the contents of `table` with a w-NAF window table for the given window size.
-pub(crate) fn wnaf_table<G: CofactorCurve>(table: &mut Vec<G>, mut base: G, window: usize) {
+pub(crate) fn wnaf_table<G: Group>(table: &mut Vec<G>, mut base: G, window: usize) {
     table.truncate(0);
     table.reserve(1 << (window - 1));
 
@@ -78,7 +89,7 @@ pub(crate) fn wnaf_form<S: AsRef<[u8]>>(wnaf: &mut Vec<i64>, c: S, window: usize
 ///
 /// This function must be provided a `table` and `wnaf` that were constructed with
 /// the same window size; otherwise, it may panic or produce invalid results.
-pub(crate) fn wnaf_exp<G: CofactorCurve>(table: &[G], wnaf: &[i64]) -> G {
+pub(crate) fn wnaf_exp<G: Group>(table: &[G], wnaf: &[i64]) -> G {
     let mut result = G::identity();
 
     let mut found_one = false;
@@ -110,7 +121,7 @@ pub struct Wnaf<W, B, S> {
     window_size: W,
 }
 
-impl<G: CofactorCurve> Wnaf<(), Vec<G>, Vec<i64>> {
+impl<G: Group> Wnaf<(), Vec<G>, Vec<i64>> {
     /// Construct a new wNAF context without allocating.
     pub fn new() -> Self {
         Wnaf {
@@ -119,7 +130,9 @@ impl<G: CofactorCurve> Wnaf<(), Vec<G>, Vec<i64>> {
             window_size: (),
         }
     }
+}
 
+impl<G: WnafGroup> Wnaf<(), Vec<G>, Vec<i64>> {
     /// Given a base and a number of scalars, compute a window table and return a `Wnaf` object that
     /// can perform exponentiations with `.scalar(..)`.
     pub fn base(&mut self, base: G, num_scalars: usize) -> Wnaf<usize, &[G], &mut Vec<i64>> {
@@ -157,7 +170,7 @@ impl<G: CofactorCurve> Wnaf<(), Vec<G>, Vec<i64>> {
     }
 }
 
-impl<'a, G: CofactorCurve> Wnaf<usize, &'a [G], &'a mut Vec<i64>> {
+impl<'a, G: Group> Wnaf<usize, &'a [G], &'a mut Vec<i64>> {
     /// Constructs new space for the scalar representation while borrowing
     /// the computed window table, for sending the window table across threads.
     pub fn shared(&self) -> Wnaf<usize, &'a [G], Vec<i64>> {
@@ -169,7 +182,7 @@ impl<'a, G: CofactorCurve> Wnaf<usize, &'a [G], &'a mut Vec<i64>> {
     }
 }
 
-impl<'a, G: CofactorCurve> Wnaf<usize, &'a mut Vec<G>, &'a [i64]> {
+impl<'a, G: Group> Wnaf<usize, &'a mut Vec<G>, &'a [i64]> {
     /// Constructs new space for the window table while borrowing
     /// the computed scalar representation, for sending the scalar representation
     /// across threads.
@@ -184,7 +197,7 @@ impl<'a, G: CofactorCurve> Wnaf<usize, &'a mut Vec<G>, &'a [i64]> {
 
 impl<B, S: AsRef<[i64]>> Wnaf<usize, B, S> {
     /// Performs exponentiation given a base.
-    pub fn base<G: CofactorCurve>(&mut self, base: G) -> G
+    pub fn base<G: Group>(&mut self, base: G) -> G
     where
         B: AsMut<Vec<G>>,
     {
@@ -195,7 +208,7 @@ impl<B, S: AsRef<[i64]>> Wnaf<usize, B, S> {
 
 impl<B, S: AsMut<Vec<i64>>> Wnaf<usize, B, S> {
     /// Performs exponentiation given a scalar.
-    pub fn scalar<G: CofactorCurve>(&mut self, scalar: &<G as Group>::Scalar) -> G
+    pub fn scalar<G: Group>(&mut self, scalar: &<G as Group>::Scalar) -> G
     where
         B: AsRef<[G]>,
     {

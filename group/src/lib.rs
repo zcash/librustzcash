@@ -13,7 +13,7 @@ pub mod prime;
 pub mod tests;
 
 mod wnaf;
-pub use self::wnaf::Wnaf;
+pub use self::wnaf::{Wnaf, WnafGroup};
 
 /// A helper trait for types with a group operation.
 pub trait GroupOps<Rhs = Self, Output = Self>:
@@ -98,14 +98,6 @@ pub trait Curve:
 
     /// Converts this element into its affine representation.
     fn to_affine(&self) -> Self::AffineRepr;
-
-    /// Recommends a wNAF window table size given a scalar. Always returns a number
-    /// between 2 and 22, inclusive.
-    fn recommended_wnaf_for_scalar(scalar: &Self::Scalar) -> usize;
-
-    /// Recommends a wNAF window size given the number of scalars you intend to multiply
-    /// a base by. Always returns a number between 2 and 22, inclusive.
-    fn recommended_wnaf_for_num_scalars(num_scalars: usize) -> usize;
 }
 
 pub trait GroupEncoding: Sized {
