@@ -222,6 +222,7 @@ impl Transaction {
 
         let vin = Vector::read(&mut reader, TxIn::read)?;
         let vout = Vector::read(&mut reader, TxOut::read)?;
+
         let (tze_inputs, tze_outputs) = if is_nu4_v5 {
             let wi = Vector::read(&mut reader, TzeIn::read)?;
             let wo = Vector::read(&mut reader, TzeOut::read)?;
@@ -229,6 +230,7 @@ impl Transaction {
         } else {
             (vec![], vec![])
         };
+
         let lock_time = reader.read_u32::<LittleEndian>()?;
         let expiry_height = if is_overwinter_v3 || is_sapling_v4 || is_nu4_v5 {
             reader.read_u32::<LittleEndian>()?

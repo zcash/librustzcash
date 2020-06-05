@@ -75,7 +75,7 @@ impl<'a> demo::Context for Context<'a> {
 }
 
 /// Wire identifier for the dummy network upgrade epoch.
-pub const V1_EPOCH_ID: u32 = 0x7473_6554;
+pub const NU4_BRANCH_ID: u32 = 0xe9ff75a6;
 
 /// A set of demo TZEs associated with the dummy network upgrade.
 struct EpochV1;
@@ -103,7 +103,7 @@ impl Epoch for EpochV1 {
 pub fn epoch_for_branch(consensus_branch_id: u32) -> Option<Box<dyn Epoch<Error = String>>> {
     // Map from consensus branch IDs to epochs.
     match consensus_branch_id {
-        V1_EPOCH_ID => Some(Box::new(EpochV1)),
+        NU4_BRANCH_ID => Some(Box::new(EpochV1)),
         _ => None,
     }
 }
