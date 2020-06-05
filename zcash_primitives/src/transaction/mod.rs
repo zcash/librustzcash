@@ -231,6 +231,7 @@ impl Transaction {
         } else {
             (vec![], vec![])
         };
+
         let lock_time = reader.read_u32::<LittleEndian>()?;
         let expiry_height = if is_overwinter_v3 || is_sapling_v4 || has_tze {
             reader.read_u32::<LittleEndian>()?
