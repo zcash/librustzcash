@@ -344,8 +344,8 @@ impl Builder<'_, OsRng> {
         Builder::new_with_rng(height, OsRng)
     }
 
-    pub fn new_nu4(height: u32) -> Self {
-        Builder::new_with_rng_nu4(height, OsRng)
+    pub fn new_next(height: u32) -> Self {
+        Builder::new_with_rng_next(height, OsRng)
     }
 }
 
@@ -380,8 +380,8 @@ impl<'a, R: RngCore + CryptoRng> Builder<'a, R> {
         Self::new_with_mtx(height, rng, mtx)
     }
 
-    pub fn new_with_rng_nu4(height: u32, rng: R) -> Builder<'a, R> {
-        let mtx = TransactionData::nu4();
+    pub fn new_with_rng_next(height: u32, rng: R) -> Builder<'a, R> {
+        let mtx = TransactionData::next();
         Self::new_with_mtx(height, rng, mtx)
     }
 

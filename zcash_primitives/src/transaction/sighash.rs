@@ -4,7 +4,7 @@ use ff::{PrimeField, PrimeFieldRepr};
 
 use super::{
     components::{Amount, TxOut},
-    Transaction, TransactionData, NU4_VERSION_GROUP_ID, OVERWINTER_VERSION_GROUP_ID,
+    Transaction, TransactionData, NEXT_VERSION_GROUP_ID, OVERWINTER_VERSION_GROUP_ID,
     SAPLING_TX_VERSION, SAPLING_VERSION_GROUP_ID,
 };
 use crate::{consensus, extensions::transparent::Precondition, legacy::Script};
@@ -46,6 +46,7 @@ enum SigHashVersion {
     Sprout,
     Overwinter,
     Sapling,
+    Next,
 }
 
 impl SigHashVersion {
@@ -54,7 +55,7 @@ impl SigHashVersion {
             match tx.version_group_id {
                 OVERWINTER_VERSION_GROUP_ID => SigHashVersion::Overwinter,
                 SAPLING_VERSION_GROUP_ID => SigHashVersion::Sapling,
-                NU4_VERSION_GROUP_ID => SigHashVersion::Sapling, //FIXME
+                NEXT_VERSION_GROUP_ID => SigHashVersion::Next, 
                 _ => unimplemented!(),
             }
         } else {
@@ -192,7 +193,7 @@ pub fn signature_hash_data<'a>(
 ) -> Vec<u8> {
     let sigversion = SigHashVersion::from_tx(tx);
     match sigversion {
-        SigHashVersion::Overwinter | SigHashVersion::Sapling => {
+        SigHashVersion::Overwinter | SigHashVersion::Sapling | SigHashVersion::Next => {
             let mut personal = [0; 16];
             (&mut personal[..12]).copy_from_slice(ZCASH_SIGHASH_PERSONALIZATION_PREFIX);
             (&mut personal[12..])
@@ -261,11 +262,12 @@ pub fn signature_hash_data<'a>(
                         .unwrap();
                     h.update(&data);
                 }
+
                 SignableInput::Tze {
                     index,
                     precondition,
                     value,
-                } => {
+                } if sigversion == SigHashVersion::Next => {
                     let mut data = ZCASH_TZE_SIGNED_INPUT_DOMAIN_SEPARATOR.to_vec();
 
                     tx.tze_inputs[index].prevout.write(&mut data).unwrap();
