@@ -10,35 +10,38 @@
 
 use std::convert::{TryFrom, TryInto};
 
-use zcash_extensions_api::transparent::{ToPayload, FromPayload, Extension};
-use crate::consensus::{BranchId};
-use crate::transaction::{Transaction, signature_hash, SIGHASH_ALL};
-use crate::transaction::components::{Amount, TzeOut};
+use zcash_primitives::{
+    consensus::BranchId,
+    extensions::transparent::{Extension, FromPayload, ToPayload},
+    transaction::components::{Amount, TzeOut},
+    transaction::{signature_hash, SignableInput, Transaction, SIGHASH_ALL},
+};
 
-use bolt::tze_utils::{reconstruct_channel_token_bls12, reconstruct_close_wallet_bls12,
-                      reconstruct_secp_public_key, reconstruct_signature_bls12,
-                      verify_secp_signature, verify_cust_close_message,
-                      reconstruct_secp_channel_close_m, reconstruct_secp_signature,
-                      generate_secp_signature};
-use bolt::bidirectional::{wtp_verify_revoke_message, wtp_verify_merch_close_message};
+use bolt::bidirectional::{wtp_verify_merch_close_message, wtp_verify_revoke_message};
+use bolt::tze_utils::{
+    generate_secp_signature, reconstruct_channel_token_bls12, reconstruct_close_wallet_bls12,
+    reconstruct_secp_channel_close_m, reconstruct_secp_public_key, reconstruct_secp_signature,
+    reconstruct_signature_bls12, verify_cust_close_message, verify_secp_signature,
+};
 
 mod open {
-    pub const MODE: usize = 0;
+    pub const MODE: u32 = 0;
 
     #[derive(Debug, PartialEq)]
     pub struct Predicate {
         pub pubkey: Vec<u8>,
-        pub channel_token: Vec<u8> // (pkc, pkm, pkM, mpk, comparams) => 1074 bytes
+        pub channel_token: Vec<u8>, // (pkc, pkm, pkM, mpk, comparams) => 1074 bytes
     }
 
     #[derive(Debug, PartialEq)]
-    pub struct Witness {     // 210 bytes
+    pub struct Witness {
+        // 210 bytes
         pub witness_type: u8,
         pub cust_bal: u64,
         pub merch_bal: u64,
         pub cust_sig: Vec<u8>,
         pub merch_sig: Vec<u8>,
-        pub wpk: Vec<u8> // 33 bytes
+        pub wpk: Vec<u8>, // 33 bytes
     }
 
     pub fn get_predicate_payload(p: &Predicate) -> Vec<u8> {
@@ -62,25 +65,24 @@ mod open {
         }
         return output;
     }
-
 }
 
 mod close {
-    pub const MODE: usize = 1;
+    pub const MODE: u32 = 1;
 
     #[derive(Debug, PartialEq)]
     pub struct Predicate {
         pub pubkey: Vec<u8>, // 33 bytes
-        pub amount: u64, // merch-bal or cust-bal
+        pub amount: u64,     // merch-bal or cust-bal
         pub block_height: i32,
-        pub channel_token: Vec<u8> // (pkc, pkm, pkM, mpk, comparams) => 1074 bytes
+        pub channel_token: Vec<u8>, // (pkc, pkm, pkM, mpk, comparams) => 1074 bytes
     }
 
     #[derive(Debug, PartialEq)]
     pub struct Witness {
-        pub witness_type: u8, // 1 byte
-        pub address: Vec<u8>, // 33 bytes
-        pub signature: Vec<u8>, // x bytes (cust-sig or merch-sig)
+        pub witness_type: u8,      // 1 byte
+        pub address: Vec<u8>,      // 33 bytes
+        pub signature: Vec<u8>,    // x bytes (cust-sig or merch-sig)
         pub revoke_token: Vec<u8>, // 33 + x (wpk + rev-sig)
     }
 
@@ -108,23 +110,23 @@ mod close {
 }
 
 mod merch_close {
-    pub const MODE: usize = 2;
+    pub const MODE: u32 = 2;
 
     #[derive(Debug, PartialEq)]
     pub struct Predicate {
         pub pubkey: Vec<u8>, // 33 bytes
         pub block_height: i32,
-        pub channel_token: Vec<u8> // (pkc, pkm, pkM, mpk, comparams) => 1074 bytes
+        pub channel_token: Vec<u8>, // (pkc, pkm, pkM, mpk, comparams) => 1074 bytes
     }
 
     #[derive(Debug, PartialEq)]
     pub struct Witness {
-        pub witness_type: u8, // 1 byte
-        pub cust_bal: u64, // 4 bytes
-        pub merch_bal: u64, // 4 bytes
-        pub sig: Vec<u8>, // 73 bytes
+        pub witness_type: u8,     // 1 byte
+        pub cust_bal: u64,        // 4 bytes
+        pub merch_bal: u64,       // 4 bytes
+        pub sig: Vec<u8>,         // 73 bytes
         pub close_token: Vec<u8>, // 73 or 96 bytes
-        pub wpk: Vec<u8> // 33 bytes
+        pub wpk: Vec<u8>,         // 33 bytes
     }
 
     pub fn get_predicate_payload(p: &Predicate) -> Vec<u8> {
@@ -151,12 +153,11 @@ mod merch_close {
     }
 }
 
-
 #[derive(Debug, PartialEq)]
 pub enum Predicate {
     Open(open::Predicate),
     Close(close::Predicate),
-    MerchClose(merch_close::Predicate)
+    MerchClose(merch_close::Predicate),
 }
 
 impl Predicate {
@@ -166,7 +167,10 @@ impl Predicate {
         pubkey.extend(input[0..33].iter());
 
         channel_token.extend(input[33..].iter());
-        Predicate::Open(open::Predicate { pubkey, channel_token })
+        Predicate::Open(open::Predicate {
+            pubkey,
+            channel_token,
+        })
     }
 
     pub fn close(input: [u8; 1119]) -> Self {
@@ -179,7 +183,12 @@ impl Predicate {
 
         channel_token.extend(input[45..].iter());
 
-        Predicate::Close(close::Predicate { pubkey, amount, block_height, channel_token })
+        Predicate::Close(close::Predicate {
+            pubkey,
+            amount,
+            block_height,
+            channel_token,
+        })
     }
 
     pub fn merch_close(input: [u8; 1111]) -> Self {
@@ -190,14 +199,18 @@ impl Predicate {
 
         channel_token.extend(input[37..].iter());
 
-        Predicate::MerchClose(merch_close::Predicate { pubkey, block_height, channel_token })
+        Predicate::MerchClose(merch_close::Predicate {
+            pubkey,
+            block_height,
+            channel_token,
+        })
     }
 }
 
-impl TryFrom<(usize, &[u8])> for Predicate {
+impl TryFrom<(u32, &[u8])> for Predicate {
     type Error = &'static str;
 
-    fn try_from((mode, payload): (usize, &[u8])) -> Result<Self, Self::Error> {
+    fn try_from((mode, payload): (u32, &[u8])) -> Result<Self, Self::Error> {
         match mode {
             open::MODE => {
                 if payload.len() == 1107 {
@@ -207,7 +220,10 @@ impl TryFrom<(usize, &[u8])> for Predicate {
                     let mut channel_token = Vec::new();
                     channel_token.extend(payload[33..].iter());
 
-                    let op = open::Predicate { pubkey, channel_token };
+                    let op = open::Predicate {
+                        pubkey,
+                        channel_token,
+                    };
                     Ok(Predicate::Open(op))
                 } else {
                     Err("Payload is not 1107 bytes")
@@ -222,7 +238,12 @@ impl TryFrom<(usize, &[u8])> for Predicate {
                     let mut channel_token = Vec::new();
                     channel_token.extend(payload[45..].iter());
 
-                    let cl = close::Predicate { pubkey, amount, block_height, channel_token };
+                    let cl = close::Predicate {
+                        pubkey,
+                        amount,
+                        block_height,
+                        channel_token,
+                    };
                     Ok(Predicate::Close(cl))
                 } else {
                     Err("Payload is not 1119 bytes")
@@ -236,7 +257,11 @@ impl TryFrom<(usize, &[u8])> for Predicate {
                     let mut channel_token = Vec::new();
                     channel_token.extend(payload[37..].iter());
 
-                    let cl = merch_close::Predicate { pubkey, block_height, channel_token };
+                    let cl = merch_close::Predicate {
+                        pubkey,
+                        block_height,
+                        channel_token,
+                    };
                     Ok(Predicate::MerchClose(cl))
                 } else {
                     Err("Payload is not 1111 bytes")
@@ -247,18 +272,18 @@ impl TryFrom<(usize, &[u8])> for Predicate {
     }
 }
 
-impl TryFrom<(usize, &Vec<u8>)> for Predicate {
+impl TryFrom<(u32, &Vec<u8>)> for Predicate {
     type Error = &'static str;
 
-    fn try_from((mode, payload): (usize, &Vec<u8>)) -> Result<Self, Self::Error> {
+    fn try_from((mode, payload): (u32, &Vec<u8>)) -> Result<Self, Self::Error> {
         (mode, &payload[..]).try_into()
     }
 }
 
-impl TryFrom<(usize, Predicate)> for Predicate {
+impl TryFrom<(u32, Predicate)> for Predicate {
     type Error = &'static str;
 
-    fn try_from(from: (usize, Self)) -> Result<Self, Self::Error> {
+    fn try_from(from: (u32, Self)) -> Result<Self, Self::Error> {
         match from {
             (open::MODE, Predicate::Open(p)) => Ok(Predicate::Open(p)),
             (close::MODE, Predicate::Close(p)) => Ok(Predicate::Close(p)),
@@ -271,13 +296,13 @@ impl TryFrom<(usize, Predicate)> for Predicate {
 impl FromPayload for Predicate {
     type Error = &'static str;
 
-    fn from_payload(mode: usize, payload: &[u8]) -> Result<Self, Self::Error> {
+    fn from_payload(mode: u32, payload: &[u8]) -> Result<Self, Self::Error> {
         (mode, payload).try_into()
     }
 }
 
 impl ToPayload for Predicate {
-    fn to_payload(&self) -> (usize, Vec<u8>) {
+    fn to_payload(&self) -> (u32, Vec<u8>) {
         match self {
             Predicate::Open(p) => (open::MODE, open::get_predicate_payload(p)),
             Predicate::Close(p) => (close::MODE, close::get_predicate_payload(p)),
@@ -308,7 +333,7 @@ fn convert_bytes_to_u64(x: &[u8]) -> u64 {
 pub enum Witness {
     Open(open::Witness),
     Close(close::Witness),
-    MerchClose(merch_close::Witness)
+    MerchClose(merch_close::Witness),
 }
 
 fn parse_witness_struct(input: [u8; 220]) -> (u8, u64, u64, Vec<u8>, Vec<u8>, Vec<u8>) {
@@ -324,17 +349,18 @@ fn parse_witness_struct(input: [u8; 220]) -> (u8, u64, u64, Vec<u8>, Vec<u8>, Ve
     let end_index = (18 + input[17]) as usize;
 
     // customer signature
-    cust_sig.extend_from_slice(&input[start_index .. end_index].to_vec());
+    cust_sig.extend_from_slice(&input[start_index..end_index].to_vec());
 
     let start_merch_sig = end_index + 1;
     let end_merch_sig = start_merch_sig + input[end_index] as usize;
 
     // merchant signature
-    merch_sig.extend_from_slice(&input[start_merch_sig .. end_merch_sig].to_vec());
+    merch_sig.extend_from_slice(&input[start_merch_sig..end_merch_sig].to_vec());
 
-    if witness_type == 0x1 { // customer initiated (merch_sig : close-token = 96 bytes)
+    if witness_type == 0x1 {
+        // customer initiated (merch_sig : close-token = 96 bytes)
         let end_wpk = end_merch_sig + 33;
-        wpk.extend(input[end_merch_sig .. end_wpk].iter());
+        wpk.extend(input[end_merch_sig..end_wpk].iter());
     }
 
     return (witness_type, cust_bal, merch_bal, cust_sig, merch_sig, wpk);
@@ -349,13 +375,13 @@ fn parse_open_witness_input(input: [u8; 220]) -> open::Witness {
         merch_bal,
         cust_sig,
         merch_sig,
-        wpk
+        wpk,
     };
 }
 
 fn parse_close_witness_input(input: [u8; 180]) -> close::Witness {
     let witness_type = input[0];
-    let mut address= Vec::new();
+    let mut address = Vec::new();
     let mut signature = Vec::new();
     let mut revoke_token = Vec::new();
 
@@ -373,7 +399,7 @@ fn parse_close_witness_input(input: [u8; 180]) -> close::Witness {
         witness_type,
         address,
         signature,
-        revoke_token
+        revoke_token,
     };
 }
 
@@ -391,7 +417,8 @@ fn parse_merch_close_witness_input(input: [u8; 220]) -> merch_close::Witness {
     let end_merch_balance = end_cust_balance + 8;
     let merch_bal = convert_bytes_to_u64(&input[end_cust_balance..end_merch_balance]);
 
-    if witness_type == 0x1 { // customer initiated (merch_sig : close-token = 96 bytes)
+    if witness_type == 0x1 {
+        // customer initiated (merch_sig : close-token = 96 bytes)
         let start_second_sig = end_merch_balance + 1;
         let end_second_sig = start_second_sig + input[end_merch_balance] as usize;
         merch_sig.extend_from_slice(&input[start_second_sig..end_second_sig].to_vec());
@@ -404,10 +431,10 @@ fn parse_merch_close_witness_input(input: [u8; 220]) -> merch_close::Witness {
         cust_bal,
         merch_bal,
         sig: cust_sig,
-        close_token: merch_sig, wpk
+        close_token: merch_sig,
+        wpk,
     };
 }
-
 
 impl Witness {
     pub fn open(input: [u8; 220]) -> Self {
@@ -423,10 +450,10 @@ impl Witness {
     }
 }
 
-impl TryFrom<(usize, &[u8])> for Witness {
+impl TryFrom<(u32, &[u8])> for Witness {
     type Error = &'static str;
 
-    fn try_from((mode, payload): (usize, &[u8])) -> Result<Self, Self::Error> {
+    fn try_from((mode, payload): (u32, &[u8])) -> Result<Self, Self::Error> {
         match mode {
             open::MODE => {
                 if payload.len() == 220 {
@@ -475,18 +502,18 @@ impl TryFrom<(usize, &[u8])> for Witness {
     }
 }
 
-impl TryFrom<(usize, &Vec<u8>)> for Witness {
+impl TryFrom<(u32, &Vec<u8>)> for Witness {
     type Error = &'static str;
 
-    fn try_from((mode, payload): (usize, &Vec<u8>)) -> Result<Self, Self::Error> {
+    fn try_from((mode, payload): (u32, &Vec<u8>)) -> Result<Self, Self::Error> {
         (mode, &payload[..]).try_into()
     }
 }
 
-impl TryFrom<(usize, Witness)> for Witness {
+impl TryFrom<(u32, Witness)> for Witness {
     type Error = &'static str;
 
-    fn try_from(from: (usize, Self)) -> Result<Self, Self::Error> {
+    fn try_from(from: (u32, Self)) -> Result<Self, Self::Error> {
         match from {
             (open::MODE, Witness::Open(p)) => Ok(Witness::Open(p)),
             (close::MODE, Witness::Close(p)) => Ok(Witness::Close(p)),
@@ -499,13 +526,13 @@ impl TryFrom<(usize, Witness)> for Witness {
 impl FromPayload for Witness {
     type Error = &'static str;
 
-    fn from_payload(mode: usize, payload: &[u8]) -> Result<Self, Self::Error> {
+    fn from_payload(mode: u32, payload: &[u8]) -> Result<Self, Self::Error> {
         (mode, payload).try_into()
     }
 }
 
 impl ToPayload for Witness {
-    fn to_payload(&self) -> (usize, Vec<u8>) {
+    fn to_payload(&self) -> (u32, Vec<u8>) {
         match self {
             Witness::Open(w) => (open::MODE, open::get_witness_payload(w)),
             Witness::Close(w) => (close::MODE, close::get_witness_payload(w)),
@@ -538,12 +565,17 @@ pub fn convert_to_amount(value: u64) -> Amount {
 //
 // Also check that <cust-sig> is a valid signature and that <closing-token> contains a valid signature under <MERCH-PK> on <<cust-pk> || <wpk> || <amount-cust> || <amount-merch> || CLOSE>
 
-pub fn verify_channel_opening(escrow_pred: &open::Predicate, close_tx_witness: &open::Witness, tx_hash: &Vec<u8>, tx2_pubkey: Vec<u8>) -> bool {
+pub fn verify_channel_opening(
+    escrow_pred: &open::Predicate,
+    close_tx_witness: &open::Witness,
+    tx_hash: &Vec<u8>,
+    tx2_pubkey: Vec<u8>,
+) -> bool {
     let _channel_token = &escrow_pred.channel_token;
     let option_channel_token = reconstruct_channel_token_bls12(&_channel_token);
     let channel_token = match option_channel_token {
         Ok(n) => n.unwrap(),
-        Err(_e) => return false
+        Err(_e) => return false,
     };
 
     //println!("debug: verify_channel_opening - tx_hash: {:?}", &tx_hash);
@@ -564,13 +596,14 @@ pub fn verify_channel_opening(escrow_pred: &open::Predicate, close_tx_witness: &
         return is_cust_sig_valid && is_merch_sig_valid;
     } else if close_tx_witness.witness_type == 0x1 {
         // customer-initiated
-        let is_merch_pk_thesame= tx2_pubkey == escrow_pred.pubkey;
+        let is_merch_pk_thesame = tx2_pubkey == escrow_pred.pubkey;
 
         let mut wpk_bytes = [0u8; 33];
         wpk_bytes.copy_from_slice(close_tx_witness.wpk.as_slice());
         let wpk = reconstruct_secp_public_key(&wpk_bytes);
 
-        let close_wallet = reconstruct_close_wallet_bls12(&channel_token, &wpk, cust_bal, merch_bal);
+        let close_wallet =
+            reconstruct_close_wallet_bls12(&channel_token, &wpk, cust_bal, merch_bal);
 
         let cust_sig = reconstruct_secp_signature(close_tx_witness.cust_sig.as_slice());
 
@@ -579,11 +612,12 @@ pub fn verify_channel_opening(escrow_pred: &open::Predicate, close_tx_witness: &
         let option_close_token = reconstruct_signature_bls12(&close_tx_witness.merch_sig);
         let close_token = match option_close_token {
             Ok(n) => n.unwrap(),
-            Err(_e) => return false
+            Err(_e) => return false,
         };
 
         // check whether close token is valid
-        let is_close_token_valid = verify_cust_close_message(&channel_token, &wpk, &close_wallet, &close_token);
+        let is_close_token_valid =
+            verify_cust_close_message(&channel_token, &wpk, &close_wallet, &close_token);
         return is_cust_sig_valid && is_close_token_valid && is_merch_pk_thesame;
     }
 
@@ -597,11 +631,15 @@ pub fn verify_channel_opening(escrow_pred: &open::Predicate, close_tx_witness: &
 // Also check that <merch-sig> is a valid signature on <<address> || <revocation-token>>
 // and that <revocation-token> contains a valid signature under <wpk> on <<wpk> || REVOKED>
 
-pub fn verify_channel_closing(close_tx_pred: &close::Predicate, spend_tx_witness: &close::Witness, tx_hash: &Vec<u8>) -> bool {
+pub fn verify_channel_closing(
+    close_tx_pred: &close::Predicate,
+    spend_tx_witness: &close::Witness,
+    tx_hash: &Vec<u8>,
+) -> bool {
     let option_channel_token = reconstruct_channel_token_bls12(&close_tx_pred.channel_token);
     let channel_token = match option_channel_token {
         Ok(n) => n.unwrap(),
-        Err(_e) => return false
+        Err(_e) => return false,
     };
 
     if spend_tx_witness.witness_type == 0x0 {
@@ -614,23 +652,33 @@ pub fn verify_channel_closing(close_tx_pred: &close::Predicate, spend_tx_witness
         // merchant-initiated
         let mut address_bytes = [0u8; 33];
         address_bytes.copy_from_slice(spend_tx_witness.address.as_slice());
-        let channel_close = reconstruct_secp_channel_close_m(&address_bytes, &spend_tx_witness.revoke_token, &spend_tx_witness.signature);
+        let channel_close = reconstruct_secp_channel_close_m(
+            &address_bytes,
+            &spend_tx_witness.revoke_token,
+            &spend_tx_witness.signature,
+        );
         let mut wpk_bytes = [0u8; 33];
         wpk_bytes.copy_from_slice(close_tx_pred.pubkey.as_slice());
         let wpk = reconstruct_secp_public_key(&wpk_bytes);
         let revoke_token = reconstruct_secp_signature(spend_tx_witness.revoke_token.as_slice());
-        return wtp_verify_revoke_message(&wpk, &revoke_token) &&  wtp_verify_merch_close_message(&channel_token, &channel_close);
+        return wtp_verify_revoke_message(&wpk, &revoke_token)
+            && wtp_verify_merch_close_message(&channel_token, &channel_close);
     }
 
     return false;
 }
 
 // merch-close program
-pub fn verify_channel_merch_closing(merch_tx_pred: &merch_close::Predicate, close_tx_witness: &merch_close::Witness, tx_hash: &Vec<u8>, tx2_pubkey: Vec<u8>) -> bool {
+pub fn verify_channel_merch_closing(
+    merch_tx_pred: &merch_close::Predicate,
+    close_tx_witness: &merch_close::Witness,
+    tx_hash: &Vec<u8>,
+    tx2_pubkey: Vec<u8>,
+) -> bool {
     let option_channel_token = reconstruct_channel_token_bls12(&merch_tx_pred.channel_token);
     let channel_token = match option_channel_token {
         Ok(n) => n.unwrap(),
-        Err(_e) => return false
+        Err(_e) => return false,
     };
 
     let pkc = channel_token.pk_c.unwrap();
@@ -644,13 +692,14 @@ pub fn verify_channel_merch_closing(merch_tx_pred: &merch_close::Predicate, clos
         return is_merch_sig_valid;
     } else if close_tx_witness.witness_type == 0x1 {
         // customer spending from merchant-initiated close tx
-        let is_merch_pk_thesame= tx2_pubkey != merch_tx_pred.pubkey;
+        let is_merch_pk_thesame = tx2_pubkey != merch_tx_pred.pubkey;
 
         let mut wpk_bytes = [0u8; 33];
         wpk_bytes.copy_from_slice(close_tx_witness.wpk.as_slice());
         let wpk = reconstruct_secp_public_key(&wpk_bytes);
 
-        let close_wallet = reconstruct_close_wallet_bls12(&channel_token, &wpk, cust_bal, merch_bal);
+        let close_wallet =
+            reconstruct_close_wallet_bls12(&channel_token, &wpk, cust_bal, merch_bal);
 
         let cust_sig = reconstruct_secp_signature(close_tx_witness.sig.as_slice());
 
@@ -659,11 +708,12 @@ pub fn verify_channel_merch_closing(merch_tx_pred: &merch_close::Predicate, clos
         let option_close_token = reconstruct_signature_bls12(&close_tx_witness.close_token);
         let close_token = match option_close_token {
             Ok(n) => n.unwrap(),
-            Err(_e) => return false
+            Err(_e) => return false,
         };
 
         // check whether close token is valid
-        let is_close_token_valid = verify_cust_close_message(&channel_token, &wpk, &close_wallet, &close_token);
+        let is_close_token_valid =
+            verify_cust_close_message(&channel_token, &wpk, &close_wallet, &close_token);
         return is_cust_sig_valid && is_close_token_valid && is_merch_pk_thesame;
     }
 
@@ -689,7 +739,12 @@ pub trait Context {
     }
 
     fn get_tx_hash(&self) -> Vec<u8> {
-        signature_hash(&self.tx(), BranchId::Heartwood, SIGHASH_ALL, None)
+        signature_hash(
+            &self.tx(),
+            BranchId::Heartwood,
+            SIGHASH_ALL,
+            SignableInput::Shielded,
+        ) //FIXME, this probably shouldn't be Shielded?
     }
 
     fn get_tx_tze_output_value(&self) -> Result<Amount, ()> {
@@ -785,24 +840,32 @@ impl<C: Context> Extension<C> for Program {
                             let tx1_value = tze_out.value;
 
                             // Check if block_height is more than 24h away.
-                            if p_close.block_height < 0 || p_close.block_height - ctx.block_height() < 144 {
-                                return Err("The block height should be more than 24h in the future");
+                            if p_close.block_height < 0
+                                || p_close.block_height - ctx.block_height() < 144
+                            {
+                                return Err(
+                                    "The block height should be more than 24h in the future",
+                                );
                             }
 
                             // Check that witness type set correctly
                             if w_open.witness_type != 0x1 {
-                                return Err("Invalid witness type specified for this Bolt WTP mode")
+                                return Err("Invalid witness type specified for this Bolt WTP mode");
                             }
 
                             // Check that tx outputs have the correct balances
-                            let is_tx_output1_correct = convert_to_amount(w_open.cust_bal) == tx1_value;
-                            let is_tx_output2_correct = convert_to_amount(w_open.merch_bal) == tx2_output_value;
-                            let is_tx_output_correct= is_tx_output1_correct && is_tx_output2_correct;
+                            let is_tx_output1_correct =
+                                convert_to_amount(w_open.cust_bal) == tx1_value;
+                            let is_tx_output2_correct =
+                                convert_to_amount(w_open.merch_bal) == tx2_output_value;
+                            let is_tx_output_correct =
+                                is_tx_output1_correct && is_tx_output2_correct;
 
                             // Get the tx hash for the transaction (signatures in witness are supposed to be valid w.r.t this hash)
                             let tx_hash = ctx.get_tx_hash();
                             // Verify channel opening against the witness info provided
-                            let is_channel_valid = verify_channel_opening(p_open, w_open, &tx_hash, tx2_pubkey);
+                            let is_channel_valid =
+                                verify_channel_opening(p_open, w_open, &tx_hash, tx2_pubkey);
 
                             if is_channel_valid && is_tx_output_correct {
                                 Ok(())
@@ -812,17 +875,23 @@ impl<C: Context> Extension<C> for Program {
                         }
                         Ok(Predicate::MerchClose(p_close)) => {
                             // Check if block_height is more than 24h away.
-                            if p_close.block_height < 0 || p_close.block_height - ctx.block_height() < 144 {
-                                return Err("The block height should be more than 24h in the future");
+                            if p_close.block_height < 0
+                                || p_close.block_height - ctx.block_height() < 144
+                            {
+                                return Err(
+                                    "The block height should be more than 24h in the future",
+                                );
                             }
 
                             let tx1_value = tze_out.value;
-                            let is_tx_output_correct = convert_to_amount(w_open.cust_bal + w_open.merch_bal) == tx1_value;
+                            let is_tx_output_correct =
+                                convert_to_amount(w_open.cust_bal + w_open.merch_bal) == tx1_value;
                             // check_merchant_output(w_open, tx1_value, p_close);
 
                             let tx_hash = ctx.get_tx_hash();
                             let tx2_pubkey = p_close.pubkey.clone();
-                            let is_valid = verify_channel_opening(p_open, w_open, &tx_hash, tx2_pubkey);
+                            let is_valid =
+                                verify_channel_opening(p_open, w_open, &tx_hash, tx2_pubkey);
 
                             if is_valid && is_tx_output_correct {
                                 Ok(())
@@ -842,10 +911,12 @@ impl<C: Context> Extension<C> for Program {
                     );
                 }
                 if w_close.witness_type == 0x0 && p_close.block_height > ctx.block_height() {
-                    return Err("Timelock has not been met")
+                    return Err("Timelock has not been met");
                 }
-                if Amount::from_u64(p_close.amount as u64).unwrap() != ctx.get_tx_output_value().unwrap() {
-                    return Err("The outgoing amount is not correct.")
+                if Amount::from_u64(p_close.amount as u64).unwrap()
+                    != ctx.get_tx_output_value().unwrap()
+                {
+                    return Err("The outgoing amount is not correct.");
                 }
 
                 let tx_hash = ctx.get_tx_hash();
@@ -864,9 +935,11 @@ impl<C: Context> Extension<C> for Program {
                         );
                     }
                     if p_close.block_height > ctx.block_height() {
-                        return Err("Timelock has not been met")
+                        return Err("Timelock has not been met");
                     }
-                    if ctx.get_tx_output_value().unwrap() != Amount::from_u64((w_close.merch_bal + w_close.cust_bal) as u64).unwrap() {
+                    if ctx.get_tx_output_value().unwrap()
+                        != Amount::from_u64((w_close.merch_bal + w_close.cust_bal) as u64).unwrap()
+                    {
                         return Err("The outgoing amount is not correct.");
                     }
                 }
@@ -882,16 +955,20 @@ impl<C: Context> Extension<C> for Program {
                         [tze_out] => match &tze_out.precondition.try_to::<Predicate>() {
                             Ok(Predicate::Close(out)) => Ok(out.pubkey.clone()),
                             _ => Err("Invalid BOLT output type"),
-                        }
+                        },
                         _ => Err("Invalid number of BOLT outputs"),
                     };
 
                     tx2_pk = tx2_pubkey.unwrap();
 
-                    if ctx.get_tx_output_value().unwrap() != Amount::from_u64(w_close.merch_bal as u64).unwrap() {
+                    if ctx.get_tx_output_value().unwrap()
+                        != Amount::from_u64(w_close.merch_bal as u64).unwrap()
+                    {
                         return Err("The outgoing amount to merchant is not correct.");
                     }
-                    if ctx.get_tx_tze_output_value().unwrap() != Amount::from_u64(w_close.cust_bal as u64).unwrap() {
+                    if ctx.get_tx_tze_output_value().unwrap()
+                        != Amount::from_u64(w_close.cust_bal as u64).unwrap()
+                    {
                         return Err("The outgoing amount to customer is not correct.");
                     }
                 }
@@ -903,46 +980,35 @@ impl<C: Context> Extension<C> for Program {
                 } else {
                     Err("could not validate channel closing initiated by merchant")
                 }
-
             }
             _ => Err("Mode mismatch"),
         }
     }
-
 }
-
 
 #[cfg(test)]
 mod tests {
-    use std::convert::TryInto;
     use blake2b_simd::Params;
+    use std::convert::TryInto;
     use std::fs::File;
     use std::io::Read;
 
-    use zcash_extensions_api::transparent::{self as tze, Extension, ToPayload, FromPayload};
-    use crate::{
+    use zcash_primitives::{
+        extensions::transparent::{self as tze, Extension, FromPayload, ToPayload},
+        legacy::Script,
         transaction::{
-            components::{Amount, OutPoint, TzeIn, TzeOut},
-            Transaction, TxId,
-            TransactionData,
+            components::{Amount, OutPoint, TxOut, TzeIn, TzeOut},
+            Transaction, TransactionData, TxId,
         },
-        extensions::transparent::{
-            bolt,
-        }
     };
+
+    use crate::transparent::bolt;
 
     use super::{
-        parse_open_witness_input, 
-        parse_close_witness_input, 
-        convert_bytes_to_u64, 
-        convert_bytes_to_i32, 
-        parse_merch_close_witness_input,
-        compute_tx_signature,
-        merch_close, close, open, Predicate, Witness, Program
+        close, compute_tx_signature, convert_bytes_to_i32, convert_bytes_to_u64, merch_close, open,
+        parse_close_witness_input, parse_merch_close_witness_input, parse_open_witness_input,
+        Predicate, Program, Witness,
     };
-
-    use crate::transaction::components::TxOut;
-    use crate::legacy::Script;
 
     #[test]
     fn predicate_open_round_trip() {
@@ -955,7 +1021,13 @@ mod tests {
 
         channel_token.extend(data[33..].iter());
 
-        assert_eq!(p, Predicate::Open(open::Predicate { pubkey, channel_token }));
+        assert_eq!(
+            p,
+            Predicate::Open(open::Predicate {
+                pubkey,
+                channel_token
+            })
+        );
         assert_eq!(p.to_payload(), (open::MODE, data));
     }
 
@@ -972,7 +1044,15 @@ mod tests {
         let mut channel_token: Vec<u8> = Vec::new();
         channel_token.extend(data[45..].iter());
 
-        assert_eq!(p, Predicate::Close(close::Predicate { pubkey, amount, block_height, channel_token }));
+        assert_eq!(
+            p,
+            Predicate::Close(close::Predicate {
+                pubkey,
+                amount,
+                block_height,
+                channel_token
+            })
+        );
         assert_eq!(p.to_payload(), (close::MODE, data));
     }
 
@@ -988,7 +1068,14 @@ mod tests {
         let mut channel_token: Vec<u8> = Vec::new();
         channel_token.extend(data[37..].iter());
 
-        assert_eq!(p, Predicate::MerchClose(merch_close::Predicate { pubkey, block_height, channel_token }));
+        assert_eq!(
+            p,
+            Predicate::MerchClose(merch_close::Predicate {
+                pubkey,
+                block_height,
+                channel_token
+            })
+        );
         assert_eq!(p.to_payload(), (merch_close::MODE, data));
     }
 
@@ -1106,7 +1193,13 @@ mod tests {
         return Ok(data);
     }
 
-    fn generate_customer_close_witness(cust_bal: [u8; 8], merch_bal: [u8; 8], cust_sig: &Vec<u8>, close_token: &Vec<u8>, wpk: &Vec<u8>) -> [u8; OPEN_WITNESS_LEN] {
+    fn generate_customer_close_witness(
+        cust_bal: [u8; 8],
+        merch_bal: [u8; 8],
+        cust_sig: &Vec<u8>,
+        close_token: &Vec<u8>,
+        wpk: &Vec<u8>,
+    ) -> [u8; OPEN_WITNESS_LEN] {
         let mut close_witness_input = [0u8; OPEN_WITNESS_LEN];
         let mut close_witness_vec: Vec<u8> = Vec::new();
         close_witness_vec.push(0x1);
@@ -1118,7 +1211,7 @@ mod tests {
         close_witness_vec.extend(close_token.iter());
         close_witness_vec.extend(wpk.iter());
         let pad = OPEN_WITNESS_LEN - close_witness_vec.len();
-        for i in 0 .. pad {
+        for i in 0..pad {
             close_witness_vec.push(0x0);
         }
         close_witness_input.copy_from_slice(close_witness_vec.as_slice());
@@ -1126,7 +1219,13 @@ mod tests {
         return close_witness_input;
     }
 
-    fn generate_customer_merch_close_witness(cust_bal: [u8; 8], merch_bal: [u8; 8], cust_sig: &Vec<u8>, close_token: &Vec<u8>, wpk: &Vec<u8>) -> [u8; MERCH_CLOSE_WITNESS_LEN] {
+    fn generate_customer_merch_close_witness(
+        cust_bal: [u8; 8],
+        merch_bal: [u8; 8],
+        cust_sig: &Vec<u8>,
+        close_token: &Vec<u8>,
+        wpk: &Vec<u8>,
+    ) -> [u8; MERCH_CLOSE_WITNESS_LEN] {
         let mut close_witness_input = [0u8; MERCH_CLOSE_WITNESS_LEN];
         let mut close_witness_vec: Vec<u8> = Vec::new();
         close_witness_vec.push(0x1);
@@ -1138,7 +1237,7 @@ mod tests {
         close_witness_vec.extend(close_token.iter());
         close_witness_vec.extend(wpk.iter());
         let pad = MERCH_CLOSE_WITNESS_LEN - close_witness_vec.len();
-        for i in 0 .. pad {
+        for i in 0..pad {
             close_witness_vec.push(0x0);
         }
         close_witness_input.copy_from_slice(close_witness_vec.as_slice());
@@ -1146,7 +1245,11 @@ mod tests {
         return close_witness_input;
     }
 
-    fn generate_merchant_unilateral_close_witness(cust_bal: [u8; 8], merch_bal: [u8; 8], sig: &Vec<u8>) -> [u8; MERCH_CLOSE_WITNESS_LEN] {
+    fn generate_merchant_unilateral_close_witness(
+        cust_bal: [u8; 8],
+        merch_bal: [u8; 8],
+        sig: &Vec<u8>,
+    ) -> [u8; MERCH_CLOSE_WITNESS_LEN] {
         let mut close_witness_input = [0u8; MERCH_CLOSE_WITNESS_LEN];
         let mut close_witness_vec: Vec<u8> = Vec::new();
         close_witness_vec.push(0x0);
@@ -1155,14 +1258,19 @@ mod tests {
         close_witness_vec.extend(cust_bal.iter());
         close_witness_vec.extend(merch_bal.iter());
         let pad = MERCH_CLOSE_WITNESS_LEN - close_witness_vec.len();
-        for i in 0 .. pad {
+        for i in 0..pad {
             close_witness_vec.push(0x0);
         }
         close_witness_input.copy_from_slice(close_witness_vec.as_slice());
         return close_witness_input;
     }
 
-    fn generate_merchant_close_witness(cust_bal: [u8; 8], merch_bal: [u8; 8], cust_sig: &Vec<u8>, merch_sig: &Vec<u8>) -> [u8; OPEN_WITNESS_LEN] {
+    fn generate_merchant_close_witness(
+        cust_bal: [u8; 8],
+        merch_bal: [u8; 8],
+        cust_sig: &Vec<u8>,
+        merch_sig: &Vec<u8>,
+    ) -> [u8; OPEN_WITNESS_LEN] {
         let mut close_witness_input = [0u8; OPEN_WITNESS_LEN];
         let mut close_witness_vec: Vec<u8> = Vec::new();
         close_witness_vec.push(0x0);
@@ -1173,14 +1281,18 @@ mod tests {
         close_witness_vec.push(merch_sig.len() as u8);
         close_witness_vec.extend(merch_sig.iter());
         let pad = OPEN_WITNESS_LEN - close_witness_vec.len();
-        for i in 0 .. pad {
+        for i in 0..pad {
             close_witness_vec.push(0x0);
         }
         close_witness_input.copy_from_slice(close_witness_vec.as_slice());
         return close_witness_input;
     }
 
-    fn generate_merchant_revoke_witness(address: &Vec<u8>, sig: &Vec<u8>, revoke_token: &Vec<u8>) -> [u8; CLOSE_WITNESS_LEN] {
+    fn generate_merchant_revoke_witness(
+        address: &Vec<u8>,
+        sig: &Vec<u8>,
+        revoke_token: &Vec<u8>,
+    ) -> [u8; CLOSE_WITNESS_LEN] {
         let mut revoke_witness_input = [0u8; CLOSE_WITNESS_LEN];
         let mut revoke_witness_vec: Vec<u8> = Vec::new();
         revoke_witness_vec.push(0x1);
@@ -1190,7 +1302,7 @@ mod tests {
         revoke_witness_vec.push(revoke_token.len() as u8);
         revoke_witness_vec.extend(revoke_token.iter());
         let pad = CLOSE_WITNESS_LEN - revoke_witness_vec.len();
-        for i in 0 .. pad {
+        for i in 0..pad {
             revoke_witness_vec.push(0x0);
         }
         revoke_witness_input.copy_from_slice(revoke_witness_vec.as_slice());
@@ -1205,14 +1317,19 @@ mod tests {
         spend_witness_vec.push(sig.len() as u8);
         spend_witness_vec.extend(sig.iter());
         let pad = CLOSE_WITNESS_LEN - spend_witness_vec.len();
-        for i in 0 .. pad {
+        for i in 0..pad {
             spend_witness_vec.push(0x0);
         }
         spend_witness_input.copy_from_slice(spend_witness_vec.as_slice());
         return spend_witness_input;
     }
 
-    fn generate_predicate(pubkey: &Vec<u8>, amount: [u8; 8], block_height: [u8; 4], channel_token: &Vec<u8>) -> [u8; CLOSE_PREDICATE_LEN] {
+    fn generate_predicate(
+        pubkey: &Vec<u8>,
+        amount: [u8; 8],
+        block_height: [u8; 4],
+        channel_token: &Vec<u8>,
+    ) -> [u8; CLOSE_PREDICATE_LEN] {
         let mut tx_predicate = [0u8; CLOSE_PREDICATE_LEN];
         let mut tx_pred: Vec<u8> = Vec::new();
         tx_pred.extend(pubkey.iter());
@@ -1223,7 +1340,10 @@ mod tests {
         return tx_predicate;
     }
 
-    fn generate_open_predicate(pubkey: &Vec<u8>, channel_token: &Vec<u8>) -> [u8; OPEN_PREDICATE_LEN] {
+    fn generate_open_predicate(
+        pubkey: &Vec<u8>,
+        channel_token: &Vec<u8>,
+    ) -> [u8; OPEN_PREDICATE_LEN] {
         let mut tx_predicate = [0u8; OPEN_PREDICATE_LEN];
         let mut tx_pred: Vec<u8> = Vec::new();
         tx_pred.extend(pubkey.iter());
@@ -1232,7 +1352,11 @@ mod tests {
         return tx_predicate;
     }
 
-    fn generate_merch_close_predicate(pubkey: &Vec<u8>, block_height: [u8; 4], channel_token: &Vec<u8>) -> [u8; MERCH_CLOSE_PREDICATE_LEN] {
+    fn generate_merch_close_predicate(
+        pubkey: &Vec<u8>,
+        block_height: [u8; 4],
+        channel_token: &Vec<u8>,
+    ) -> [u8; MERCH_CLOSE_PREDICATE_LEN] {
         let mut tx_predicate = [0u8; MERCH_CLOSE_PREDICATE_LEN];
         let mut tx_pred: Vec<u8> = Vec::new();
         tx_pred.extend(pubkey.iter());
@@ -1256,7 +1380,7 @@ mod tests {
         }
     }
 
-    // this is 
+    // this is
     pub struct Ctx<'a> {
         pub height: i32,
         pub tx: &'a Transaction,
@@ -1284,28 +1408,45 @@ mod tests {
 
     #[test]
     fn bolt_program_open_and_close() {
+        let _ser_channel_token =
+            hex::decode(read_file("bolt_testdata/channel.token").unwrap()).unwrap();
 
-        let _ser_channel_token = hex::decode(read_file("bolt_testdata/channel.token").unwrap()).unwrap();
+        let escrow_tx_hash = vec![
+            218, 142, 74, 74, 236, 37, 47, 120, 241, 20, 203, 94, 78, 126, 131, 174, 4, 3, 75, 81,
+            194, 90, 203, 24, 16, 158, 53, 237, 241, 57, 97, 137,
+        ];
 
-        let escrow_tx_hash= vec![218, 142, 74, 74, 236, 37, 47, 120, 241, 20, 203, 94, 78, 126, 131, 174, 4, 3, 75, 81, 194, 90, 203, 24, 16, 158, 53, 237, 241, 57, 97, 137];
+        let pk_c =
+            hex::decode("0398cb634c1bf97559dfcc47b6c8cc3cce8be2219e571ff721b95130efe065991a")
+                .unwrap();
+        let sk_c = hex::decode("ee3c802d34a1359b9d3b2a81773730325f7634e2991336c534cbd180980ec581")
+            .unwrap();
 
-        let pk_c = hex::decode("0398cb634c1bf97559dfcc47b6c8cc3cce8be2219e571ff721b95130efe065991a").unwrap();
-        let sk_c = hex::decode("ee3c802d34a1359b9d3b2a81773730325f7634e2991336c534cbd180980ec581").unwrap();
-
-        let pk_m = hex::decode("03504d8f01942e63cde2caa0c741f8e651a0d339afa9ad5a854bc41e9240492ac2").unwrap();
-        let sk_m = hex::decode("4a86f3d5a1edc4ae633216db6efe07d8f358626d595de288816619a10c61e98c").unwrap();
+        let pk_m =
+            hex::decode("03504d8f01942e63cde2caa0c741f8e651a0d339afa9ad5a854bc41e9240492ac2")
+                .unwrap();
+        let sk_m = hex::decode("4a86f3d5a1edc4ae633216db6efe07d8f358626d595de288816619a10c61e98c")
+            .unwrap();
 
         let cust_sig1 = compute_tx_signature(&sk_c, &escrow_tx_hash);
         // println!("cust sig: {:?}, len: {}", cust_sig, cust_sig.len());
 
-        let merch_tx_hash = vec![161, 57, 186, 255, 37, 146, 146, 208, 208, 38, 1, 222, 7, 151, 43, 160, 164, 115, 162, 54, 211, 138, 190, 1, 179, 131, 22, 210, 56, 163, 143, 113];
+        let merch_tx_hash = vec![
+            161, 57, 186, 255, 37, 146, 146, 208, 208, 38, 1, 222, 7, 151, 43, 160, 164, 115, 162,
+            54, 211, 138, 190, 1, 179, 131, 22, 210, 56, 163, 143, 113,
+        ];
         let cust_sig2 = compute_tx_signature(&sk_c, &merch_tx_hash);
         let merch_sig = compute_tx_signature(&sk_m, &merch_tx_hash);
 
-        let wpk = hex::decode("02b4395f62fc0b786902b37924c2773195ad707ef07dd5ec7e31f2b3cda4804d8c").unwrap();
+        let wpk = hex::decode("02b4395f62fc0b786902b37924c2773195ad707ef07dd5ec7e31f2b3cda4804d8c")
+            .unwrap();
 
-        let mut _merch_close_addr = hex::decode("0a1111111111111111111111111111111111111111111111111111111111111111").unwrap();
-        let _merch_close_addr2 = hex::decode("0b2222222222222222222222222222222222222222222222222222222222222222").unwrap();
+        let mut _merch_close_addr =
+            hex::decode("0a1111111111111111111111111111111111111111111111111111111111111111")
+                .unwrap();
+        let _merch_close_addr2 =
+            hex::decode("0b2222222222222222222222222222222222222222222222222222222222222222")
+                .unwrap();
 
         let merch_close_address = Script(_merch_close_addr.clone());
         let merch_close_address_dup = Script(_merch_close_addr.clone());
@@ -1313,35 +1454,75 @@ mod tests {
         let merch_close_address_dup3 = Script(_merch_close_addr.clone());
         let merch_close_address_dup4 = Script(_merch_close_addr.clone());
 
-        let escrow_tx_predicate= generate_open_predicate(&_merch_close_addr, &_ser_channel_token);
+        let escrow_tx_predicate = generate_open_predicate(&_merch_close_addr, &_ser_channel_token);
 
         // 1 byte mode + 4 bytes cust_bal + 4 bytes merch_bal + 72 bytes cust_sig + 96 bytes close token
         let close_token = hex::decode("8d4ff4d96f17760cabdd9728e667596c2c6d238427dd0529f2b6b60140fc71efc890e03502bdae679ca09236fbb11d9d832b9fc275bf44bad06fd9d0b0296722140273f6cba23859b48c3aaa5ed25455e70bd665165169956be25708026478b6").unwrap();
 
-        let cust_close_witness_input = generate_customer_close_witness([0,0,0,0,0,0,0,140], [0,0,0,0,0,0,0,70], &cust_sig1, &close_token, &wpk);
-        let merch_close_witness_input = generate_merchant_close_witness([0,0,0,0,0,0,0,200], [0,0,0,0,0,0,0,10], &cust_sig2, &merch_sig);
+        let cust_close_witness_input = generate_customer_close_witness(
+            [0, 0, 0, 0, 0, 0, 0, 140],
+            [0, 0, 0, 0, 0, 0, 0, 70],
+            &cust_sig1,
+            &close_token,
+            &wpk,
+        );
+        let merch_close_witness_input = generate_merchant_close_witness(
+            [0, 0, 0, 0, 0, 0, 0, 200],
+            [0, 0, 0, 0, 0, 0, 0, 10],
+            &cust_sig2,
+            &merch_sig,
+        );
 
-        let cust_close_tx_predicate = generate_predicate(&wpk, [0,0,0,0,0,0,0,140], [0,0,0,146], &_ser_channel_token);
-        let cust_close_tx_predicate_too_early = generate_predicate(&wpk, [0,0,0,0,0,0,0,140], [0,0,0,110], &_ser_channel_token);
-        let merch_close_tx_predicate = generate_merch_close_predicate(&_merch_close_addr2, [0,0,0,146], &_ser_channel_token);
+        let cust_close_tx_predicate = generate_predicate(
+            &wpk,
+            [0, 0, 0, 0, 0, 0, 0, 140],
+            [0, 0, 0, 146],
+            &_ser_channel_token,
+        );
+        let cust_close_tx_predicate_too_early = generate_predicate(
+            &wpk,
+            [0, 0, 0, 0, 0, 0, 0, 140],
+            [0, 0, 0, 110],
+            &_ser_channel_token,
+        );
+        let merch_close_tx_predicate = generate_merch_close_predicate(
+            &_merch_close_addr2,
+            [0, 0, 0, 146],
+            &_ser_channel_token,
+        );
 
-        let merch_tx_hash2= vec![218, 142, 74, 74, 236, 37, 47, 120, 241, 20, 203, 94, 78, 126, 131, 174, 4, 3, 75, 81, 194, 90, 203, 24, 16, 158, 53, 237, 241, 57, 97, 137];
+        let merch_tx_hash2 = vec![
+            218, 142, 74, 74, 236, 37, 47, 120, 241, 20, 203, 94, 78, 126, 131, 174, 4, 3, 75, 81,
+            194, 90, 203, 24, 16, 158, 53, 237, 241, 57, 97, 137,
+        ];
         let cust_sig3 = compute_tx_signature(&sk_c, &merch_tx_hash2);
-        let cust_close_witness_input2 = generate_customer_merch_close_witness([0,0,0,0,0,0,0,140], [0,0,0,0,0,0,0,70], &cust_sig3, &close_token, &wpk);
+        let cust_close_witness_input2 = generate_customer_merch_close_witness(
+            [0, 0, 0, 0, 0, 0, 0, 140],
+            [0, 0, 0, 0, 0, 0, 0, 70],
+            &cust_sig3,
+            &close_token,
+            &wpk,
+        );
 
         let extId = 1;
 
         // escrow-tx (lock up 210 zats)
-        let mut mtx_a = TransactionData::nu4();
-        mtx_a.tze_outputs.push(tzeOut(210, &Predicate::open(escrow_tx_predicate)));
+        let mut mtx_a = TransactionData::next();
+        mtx_a
+            .tze_outputs
+            .push(tzeOut(210, &Predicate::open(escrow_tx_predicate)));
         let tx_a = mtx_a.freeze().unwrap();
         // println!("debug: Escrow transaction: {:?}", tx_a);
 
         // begin - customer-close-tx
-        let mut mtx_b = TransactionData::nu4();
-        mtx_b.tze_inputs.push(tzeIn(tx_a.txid(), &Witness::open(cust_close_witness_input)));
+        let mut mtx_b = TransactionData::next();
+        mtx_b
+            .tze_inputs
+            .push(tzeIn(tx_a.txid(), &Witness::open(cust_close_witness_input)));
         // to_customer
-        mtx_b.tze_outputs.push(tzeOut(140, &Predicate::close(cust_close_tx_predicate)));
+        mtx_b
+            .tze_outputs
+            .push(tzeOut(140, &Predicate::close(cust_close_tx_predicate)));
         // to_merchant
         mtx_b.vout.push(TxOut {
             value: Amount::from_u64(70).unwrap(),
@@ -1352,19 +1533,30 @@ mod tests {
         // println!("debug: Customer close transaction: {:?}", tx_b);
 
         // begin - merchant-close-tx
-        let mut mtx_c = TransactionData::nu4();
-        mtx_c.tze_inputs.push(tzeIn(tx_a.txid(), &Witness::open(merch_close_witness_input)));
+        let mut mtx_c = TransactionData::next();
+        mtx_c.tze_inputs.push(tzeIn(
+            tx_a.txid(),
+            &Witness::open(merch_close_witness_input),
+        ));
         // to_merchant
-        mtx_c.tze_outputs.push(tzeOut(210, &Predicate::merch_close(merch_close_tx_predicate)));
+        mtx_c.tze_outputs.push(tzeOut(
+            210,
+            &Predicate::merch_close(merch_close_tx_predicate),
+        ));
         let tx_c = mtx_c.freeze().unwrap();
         // end - merchant-close-tx
         // println!("debug: Merchant close transaction: {:?}", tx_c);
 
         // begin - customer-close-tx (spending from merchant-close-tx)
-        let mut mtx_d = TransactionData::nu4();
-        mtx_d.tze_inputs.push(tzeIn(tx_c.txid(), &Witness::merch_close(cust_close_witness_input2)));
+        let mut mtx_d = TransactionData::next();
+        mtx_d.tze_inputs.push(tzeIn(
+            tx_c.txid(),
+            &Witness::merch_close(cust_close_witness_input2),
+        ));
         // to_customer
-        mtx_d.tze_outputs.push(tzeOut(140, &Predicate::close(cust_close_tx_predicate)));
+        mtx_d
+            .tze_outputs
+            .push(tzeOut(140, &Predicate::close(cust_close_tx_predicate)));
         // to_merchant
         mtx_d.vout.push(TxOut {
             value: Amount::from_u64(70).unwrap(),
@@ -1375,10 +1567,15 @@ mod tests {
         // println!("debug: Customer close transaction spending from merchant-close tx: {:?}", tx_d);
 
         // begin - customer-close-tx
-        let mut mtx_e = TransactionData::nu4();
-        mtx_e.tze_inputs.push(tzeIn(tx_a.txid(), &Witness::open(cust_close_witness_input)));
+        let mut mtx_e = TransactionData::next();
+        mtx_e
+            .tze_inputs
+            .push(tzeIn(tx_a.txid(), &Witness::open(cust_close_witness_input)));
         // to_customer
-        mtx_e.tze_outputs.push(tzeOut(140, &Predicate::close(cust_close_tx_predicate_too_early)));
+        mtx_e.tze_outputs.push(tzeOut(
+            140,
+            &Predicate::close(cust_close_tx_predicate_too_early),
+        ));
         // to_merchant
         mtx_e.vout.push(TxOut {
             value: Amount::from_u64(70).unwrap(),
@@ -1387,10 +1584,15 @@ mod tests {
         let tx_e = mtx_e.freeze().unwrap();
 
         // begin - customer-close-tx (spending from merchant-close-tx)
-        let mut mtx_f = TransactionData::nu4();
-        mtx_f.tze_inputs.push(tzeIn(tx_c.txid(), &Witness::merch_close(cust_close_witness_input2)));
+        let mut mtx_f = TransactionData::next();
+        mtx_f.tze_inputs.push(tzeIn(
+            tx_c.txid(),
+            &Witness::merch_close(cust_close_witness_input2),
+        ));
         // to_customer
-        mtx_f.tze_outputs.push(tzeOut(130, &Predicate::close(cust_close_tx_predicate)));
+        mtx_f
+            .tze_outputs
+            .push(tzeOut(130, &Predicate::close(cust_close_tx_predicate)));
         // to_merchant
         mtx_f.vout.push(TxOut {
             value: Amount::from_u64(70).unwrap(),
@@ -1400,10 +1602,15 @@ mod tests {
         // end - customer-close-tx (spending from merchant-close-tx)
 
         // begin - customer-close-tx (spending from merchant-close-tx)
-        let mut mtx_g = TransactionData::nu4();
-        mtx_g.tze_inputs.push(tzeIn(tx_c.txid(), &Witness::merch_close(cust_close_witness_input2)));
+        let mut mtx_g = TransactionData::next();
+        mtx_g.tze_inputs.push(tzeIn(
+            tx_c.txid(),
+            &Witness::merch_close(cust_close_witness_input2),
+        ));
         // to_customer
-        mtx_g.tze_outputs.push(tzeOut(140, &Predicate::close(cust_close_tx_predicate)));
+        mtx_g
+            .tze_outputs
+            .push(tzeOut(140, &Predicate::close(cust_close_tx_predicate)));
         // to_merchant
         mtx_g.vout.push(TxOut {
             value: Amount::from_u64(60).unwrap(),
@@ -1412,7 +1619,7 @@ mod tests {
         let tx_g = mtx_g.freeze().unwrap();
         // end - customer-close-tx (spending from merchant-close-tx)
 
-        let program = Program { };
+        let program = Program {};
 
         // Verify tx_b
         {
@@ -1420,7 +1627,7 @@ mod tests {
             assert_eq!(
                 program.verify(
                     &tx_a.tze_outputs[0].precondition, // escrow
-                    &tx_b.tze_inputs[0].witness, // customer-close-tx
+                    &tx_b.tze_inputs[0].witness,       // customer-close-tx
                     &ctx
                 ),
                 Ok(())
@@ -1433,7 +1640,7 @@ mod tests {
             assert_eq!(
                 program.verify(
                     &tx_a.tze_outputs[0].precondition, // escrow
-                    &tx_e.tze_inputs[0].witness, // customer-close-tx
+                    &tx_e.tze_inputs[0].witness,       // customer-close-tx
                     &ctx
                 ),
                 Err("The block height should be more than 24h in the future")
@@ -1446,7 +1653,7 @@ mod tests {
             assert_eq!(
                 program.verify(
                     &tx_a.tze_outputs[0].precondition, // escrow
-                    &tx_c.tze_inputs[0].witness, // merchant-close-tx (initiating closing)
+                    &tx_c.tze_inputs[0].witness,       // merchant-close-tx (initiating closing)
                     &ctx
                 ),
                 Ok(())
@@ -1459,7 +1666,7 @@ mod tests {
             assert_eq!(
                 program.verify(
                     &tx_c.tze_outputs[0].precondition, // merchant-close-tx
-                    &tx_d.tze_inputs[0].witness, // customer-close-tx
+                    &tx_d.tze_inputs[0].witness,       // customer-close-tx
                     &ctx
                 ),
                 Ok(())
@@ -1472,7 +1679,7 @@ mod tests {
             assert_eq!(
                 program.verify(
                     &tx_c.tze_outputs[0].precondition, // merchant-close-tx
-                    &tx_f.tze_inputs[0].witness, // customer-close-tx
+                    &tx_f.tze_inputs[0].witness,       // customer-close-tx
                     &ctx
                 ),
                 Err("The outgoing amount to customer is not correct.")
@@ -1485,83 +1692,136 @@ mod tests {
             assert_eq!(
                 program.verify(
                     &tx_c.tze_outputs[0].precondition, // merchant-close-tx
-                    &tx_g.tze_inputs[0].witness, // customer-close-tx
+                    &tx_g.tze_inputs[0].witness,       // customer-close-tx
                     &ctx
                 ),
                 Err("The outgoing amount to merchant is not correct.")
             );
         }
-
     }
 
     #[test]
     fn bolt_program_unilateral_merch() {
+        let _ser_channel_token =
+            hex::decode(read_file("bolt_testdata/channel.token").unwrap()).unwrap();
 
-        let _ser_channel_token = hex::decode(read_file("bolt_testdata/channel.token").unwrap()).unwrap();
+        let escrow_tx_hash = vec![
+            218, 142, 74, 74, 236, 37, 47, 120, 241, 20, 203, 94, 78, 126, 131, 174, 4, 3, 75, 81,
+            194, 90, 203, 24, 16, 158, 53, 237, 241, 57, 97, 137,
+        ];
 
-        let escrow_tx_hash= vec![218, 142, 74, 74, 236, 37, 47, 120, 241, 20, 203, 94, 78, 126, 131, 174, 4, 3, 75, 81, 194, 90, 203, 24, 16, 158, 53, 237, 241, 57, 97, 137];
+        let pk_c =
+            hex::decode("0398cb634c1bf97559dfcc47b6c8cc3cce8be2219e571ff721b95130efe065991a")
+                .unwrap();
+        let sk_c = hex::decode("ee3c802d34a1359b9d3b2a81773730325f7634e2991336c534cbd180980ec581")
+            .unwrap();
 
-        let pk_c = hex::decode("0398cb634c1bf97559dfcc47b6c8cc3cce8be2219e571ff721b95130efe065991a").unwrap();
-        let sk_c = hex::decode("ee3c802d34a1359b9d3b2a81773730325f7634e2991336c534cbd180980ec581").unwrap();
-
-        let pk_m = hex::decode("03504d8f01942e63cde2caa0c741f8e651a0d339afa9ad5a854bc41e9240492ac2").unwrap();
-        let sk_m = hex::decode("4a86f3d5a1edc4ae633216db6efe07d8f358626d595de288816619a10c61e98c").unwrap();
+        let pk_m =
+            hex::decode("03504d8f01942e63cde2caa0c741f8e651a0d339afa9ad5a854bc41e9240492ac2")
+                .unwrap();
+        let sk_m = hex::decode("4a86f3d5a1edc4ae633216db6efe07d8f358626d595de288816619a10c61e98c")
+            .unwrap();
 
         let cust_sig1 = compute_tx_signature(&sk_c, &escrow_tx_hash);
         // println!("cust sig: {:?}, len: {}", cust_sig, cust_sig.len());
 
-        let merch_tx_hash = vec![161, 57, 186, 255, 37, 146, 146, 208, 208, 38, 1, 222, 7, 151, 43, 160, 164, 115, 162, 54, 211, 138, 190, 1, 179, 131, 22, 210, 56, 163, 143, 113];
+        let merch_tx_hash = vec![
+            161, 57, 186, 255, 37, 146, 146, 208, 208, 38, 1, 222, 7, 151, 43, 160, 164, 115, 162,
+            54, 211, 138, 190, 1, 179, 131, 22, 210, 56, 163, 143, 113,
+        ];
         let cust_sig2 = compute_tx_signature(&sk_c, &merch_tx_hash);
         let merch_sig = compute_tx_signature(&sk_m, &merch_tx_hash);
 
-        let wpk = hex::decode("02b4395f62fc0b786902b37924c2773195ad707ef07dd5ec7e31f2b3cda4804d8c").unwrap();
+        let wpk = hex::decode("02b4395f62fc0b786902b37924c2773195ad707ef07dd5ec7e31f2b3cda4804d8c")
+            .unwrap();
 
-        let mut _merch_close_addr = hex::decode("0a1111111111111111111111111111111111111111111111111111111111111111").unwrap();
-        let _merch_close_addr2 = hex::decode("0b2222222222222222222222222222222222222222222222222222222222222222").unwrap();
+        let mut _merch_close_addr =
+            hex::decode("0a1111111111111111111111111111111111111111111111111111111111111111")
+                .unwrap();
+        let _merch_close_addr2 =
+            hex::decode("0b2222222222222222222222222222222222222222222222222222222222222222")
+                .unwrap();
 
         let merch_close_address = Script(_merch_close_addr.clone());
         let merch_close_address_dup = Script(_merch_close_addr.clone());
         let merch_close_address_dup2 = Script(_merch_close_addr.clone());
 
-        let escrow_tx_predicate= generate_open_predicate(&_merch_close_addr, &_ser_channel_token);
+        let escrow_tx_predicate = generate_open_predicate(&_merch_close_addr, &_ser_channel_token);
 
         // 1 byte mode + 4 bytes cust_bal + 4 bytes merch_bal + 72 bytes cust_sig + 96 bytes close token
         let close_token = hex::decode("8d4ff4d96f17760cabdd9728e667596c2c6d238427dd0529f2b6b60140fc71efc890e03502bdae679ca09236fbb11d9d832b9fc275bf44bad06fd9d0b0296722140273f6cba23859b48c3aaa5ed25455e70bd665165169956be25708026478b6").unwrap();
 
-        let merch_close_witness_input = generate_merchant_close_witness([0,0,0,0,0,0,0,200], [0,0,0,0,0,0,0,10], &cust_sig2, &merch_sig);
+        let merch_close_witness_input = generate_merchant_close_witness(
+            [0, 0, 0, 0, 0, 0, 0, 200],
+            [0, 0, 0, 0, 0, 0, 0, 10],
+            &cust_sig2,
+            &merch_sig,
+        );
 
-        let merch_close_tx_predicate = generate_merch_close_predicate(&_merch_close_addr2, [0,0,0,146], &_ser_channel_token);
-        let merch_close_tx_predicate_too_early = generate_merch_close_predicate(&_merch_close_addr2, [0,0,0,110], &_ser_channel_token);
+        let merch_close_tx_predicate = generate_merch_close_predicate(
+            &_merch_close_addr2,
+            [0, 0, 0, 146],
+            &_ser_channel_token,
+        );
+        let merch_close_tx_predicate_too_early = generate_merch_close_predicate(
+            &_merch_close_addr2,
+            [0, 0, 0, 110],
+            &_ser_channel_token,
+        );
 
-        let merch_tx_hash2= vec![175, 134, 188, 203, 129, 93, 74, 219, 67, 195, 80, 143, 144, 87, 109, 169, 129, 138, 65, 71, 66, 23, 117, 101, 91, 204, 217, 196, 36, 124, 91, 87];
+        let merch_tx_hash2 = vec![
+            175, 134, 188, 203, 129, 93, 74, 219, 67, 195, 80, 143, 144, 87, 109, 169, 129, 138,
+            65, 71, 66, 23, 117, 101, 91, 204, 217, 196, 36, 124, 91, 87,
+        ];
         let merch_sig = compute_tx_signature(&sk_m, &merch_tx_hash2);
-        let merch_close_witness = generate_merchant_unilateral_close_witness([0,0,0,0,0,0,0,140], [0,0,0,0,0,0,0,70], &merch_sig);
+        let merch_close_witness = generate_merchant_unilateral_close_witness(
+            [0, 0, 0, 0, 0, 0, 0, 140],
+            [0, 0, 0, 0, 0, 0, 0, 70],
+            &merch_sig,
+        );
 
         // escrow-tx (lock up 210 zats)
-        let mut mtx_a = TransactionData::nu4();
-        mtx_a.tze_outputs.push(tzeOut(210, &Predicate::open(escrow_tx_predicate)));
+        let mut mtx_a = TransactionData::next();
+        mtx_a
+            .tze_outputs
+            .push(tzeOut(210, &Predicate::open(escrow_tx_predicate)));
         let tx_a = mtx_a.freeze().unwrap();
         // println!("debug: Escrow transaction: {:?}", tx_a);
 
         // begin - merchant-close-tx
-        let mut mtx_b = TransactionData::nu4();
-        mtx_b.tze_inputs.push(tzeIn(tx_a.txid(), &Witness::open(merch_close_witness_input)));
+        let mut mtx_b = TransactionData::next();
+        mtx_b.tze_inputs.push(tzeIn(
+            tx_a.txid(),
+            &Witness::open(merch_close_witness_input),
+        ));
         // to_merchant
-        mtx_b.tze_outputs.push(tzeOut(210, &Predicate::merch_close(merch_close_tx_predicate_too_early)));
+        mtx_b.tze_outputs.push(tzeOut(
+            210,
+            &Predicate::merch_close(merch_close_tx_predicate_too_early),
+        ));
         let tx_b = mtx_b.freeze().unwrap();
         // end - merchant-close-tx
 
         // begin - merchant-close-tx
-        let mut mtx_c = TransactionData::nu4();
-        mtx_c.tze_inputs.push(tzeIn(tx_a.txid(), &Witness::open(merch_close_witness_input)));
+        let mut mtx_c = TransactionData::next();
+        mtx_c.tze_inputs.push(tzeIn(
+            tx_a.txid(),
+            &Witness::open(merch_close_witness_input),
+        ));
         // to_merchant
-        mtx_c.tze_outputs.push(tzeOut(210, &Predicate::merch_close(merch_close_tx_predicate)));
+        mtx_c.tze_outputs.push(tzeOut(
+            210,
+            &Predicate::merch_close(merch_close_tx_predicate),
+        ));
         let tx_c = mtx_c.freeze().unwrap();
         // end - merchant-close-tx
 
         // begin - merchant-spending-tx (spending from merchant-close-tx)
-        let mut mtx_d = TransactionData::nu4();
-        mtx_d.tze_inputs.push(tzeIn(tx_c.txid(), &Witness::merch_close(merch_close_witness)));
+        let mut mtx_d = TransactionData::next();
+        mtx_d.tze_inputs.push(tzeIn(
+            tx_c.txid(),
+            &Witness::merch_close(merch_close_witness),
+        ));
         // to_merchant
         mtx_d.vout.push(TxOut {
             value: Amount::from_u64(210).unwrap(),
@@ -1572,8 +1832,11 @@ mod tests {
         // println!("debug: Customer close transaction spending from merchant-close tx: {:?}", tx_d);
 
         // begin - merchant-spending-tx (spending from merchant-close-tx)
-        let mut mtx_e = TransactionData::nu4();
-        mtx_e.tze_inputs.push(tzeIn(tx_c.txid(), &Witness::merch_close(merch_close_witness)));
+        let mut mtx_e = TransactionData::next();
+        mtx_e.tze_inputs.push(tzeIn(
+            tx_c.txid(),
+            &Witness::merch_close(merch_close_witness),
+        ));
         // to_merchant
         mtx_e.vout.push(TxOut {
             value: Amount::from_u64(200).unwrap(),
@@ -1582,7 +1845,7 @@ mod tests {
         let tx_e = mtx_e.freeze().unwrap();
         // end - customer-close-tx (spending from merchant-close-tx)
 
-        let program = Program { };
+        let program = Program {};
 
         // Verify tx_b
         {
@@ -1590,7 +1853,7 @@ mod tests {
             assert_eq!(
                 program.verify(
                     &tx_a.tze_outputs[0].precondition, // escrow
-                    &tx_b.tze_inputs[0].witness, // merchant-close-tx (initiating closing)
+                    &tx_b.tze_inputs[0].witness,       // merchant-close-tx (initiating closing)
                     &ctx
                 ),
                 Err("The block height should be more than 24h in the future")
@@ -1603,7 +1866,7 @@ mod tests {
             assert_eq!(
                 program.verify(
                     &tx_a.tze_outputs[0].precondition, // escrow
-                    &tx_c.tze_inputs[0].witness, // merchant-close-tx (initiating closing)
+                    &tx_c.tze_inputs[0].witness,       // merchant-close-tx (initiating closing)
                     &ctx
                 ),
                 Ok(())
@@ -1616,7 +1879,7 @@ mod tests {
             assert_eq!(
                 program.verify(
                     &tx_c.tze_outputs[0].precondition, // merchant-close-tx
-                    &tx_d.tze_inputs[0].witness, // customer-close-tx
+                    &tx_d.tze_inputs[0].witness,       // customer-close-tx
                     &ctx
                 ),
                 Err("Timelock has not been met")
@@ -1629,7 +1892,7 @@ mod tests {
             assert_eq!(
                 program.verify(
                     &tx_c.tze_outputs[0].precondition, // merchant-close-tx
-                    &tx_d.tze_inputs[0].witness, // customer-close-tx
+                    &tx_d.tze_inputs[0].witness,       // customer-close-tx
                     &ctx
                 ),
                 Ok(())
@@ -1642,40 +1905,58 @@ mod tests {
             assert_eq!(
                 program.verify(
                     &tx_c.tze_outputs[0].precondition, // merchant-close-tx
-                    &tx_e.tze_inputs[0].witness, // customer-close-tx
+                    &tx_e.tze_inputs[0].witness,       // customer-close-tx
                     &ctx
                 ),
                 Err("The outgoing amount is not correct.")
             );
         }
-
     }
 
     #[test]
     fn bolt_merch_revoke_program() {
+        let _ser_channel_token =
+            hex::decode(read_file("bolt_testdata/channel.token").unwrap()).unwrap();
 
-        let _ser_channel_token = hex::decode(read_file("bolt_testdata/channel.token").unwrap()).unwrap();
+        let escrow_tx_hash = vec![
+            218, 142, 74, 74, 236, 37, 47, 120, 241, 20, 203, 94, 78, 126, 131, 174, 4, 3, 75, 81,
+            194, 90, 203, 24, 16, 158, 53, 237, 241, 57, 97, 137,
+        ];
 
-        let escrow_tx_hash= vec![218, 142, 74, 74, 236, 37, 47, 120, 241, 20, 203, 94, 78, 126, 131, 174, 4, 3, 75, 81, 194, 90, 203, 24, 16, 158, 53, 237, 241, 57, 97, 137];
+        let pk_c =
+            hex::decode("0398cb634c1bf97559dfcc47b6c8cc3cce8be2219e571ff721b95130efe065991a")
+                .unwrap();
+        let sk_c = hex::decode("ee3c802d34a1359b9d3b2a81773730325f7634e2991336c534cbd180980ec581")
+            .unwrap();
 
-        let pk_c = hex::decode("0398cb634c1bf97559dfcc47b6c8cc3cce8be2219e571ff721b95130efe065991a").unwrap();
-        let sk_c = hex::decode("ee3c802d34a1359b9d3b2a81773730325f7634e2991336c534cbd180980ec581").unwrap();
-
-        let pk_m = hex::decode("03504d8f01942e63cde2caa0c741f8e651a0d339afa9ad5a854bc41e9240492ac2").unwrap();
-        let sk_m = hex::decode("4a86f3d5a1edc4ae633216db6efe07d8f358626d595de288816619a10c61e98c").unwrap();
+        let pk_m =
+            hex::decode("03504d8f01942e63cde2caa0c741f8e651a0d339afa9ad5a854bc41e9240492ac2")
+                .unwrap();
+        let sk_m = hex::decode("4a86f3d5a1edc4ae633216db6efe07d8f358626d595de288816619a10c61e98c")
+            .unwrap();
 
         let cust_sig1 = compute_tx_signature(&sk_c, &escrow_tx_hash);
         // println!("cust sig: {:?}, len: {}", cust_sig, cust_sig.len());
 
-        let merch_tx_hash = vec![161, 57, 186, 255, 37, 146, 146, 208, 208, 38, 1, 222, 7, 151, 43, 160, 164, 115, 162, 54, 211, 138, 190, 1, 179, 131, 22, 210, 56, 163, 143, 113];
+        let merch_tx_hash = vec![
+            161, 57, 186, 255, 37, 146, 146, 208, 208, 38, 1, 222, 7, 151, 43, 160, 164, 115, 162,
+            54, 211, 138, 190, 1, 179, 131, 22, 210, 56, 163, 143, 113,
+        ];
         let cust_sig2 = compute_tx_signature(&sk_c, &merch_tx_hash);
         let merch_sig = compute_tx_signature(&sk_m, &merch_tx_hash);
 
-        let wpk = hex::decode("02b4395f62fc0b786902b37924c2773195ad707ef07dd5ec7e31f2b3cda4804d8c").unwrap();
+        let wpk = hex::decode("02b4395f62fc0b786902b37924c2773195ad707ef07dd5ec7e31f2b3cda4804d8c")
+            .unwrap();
 
-        let mut _merch_close_addr = hex::decode("0a1111111111111111111111111111111111111111111111111111111111111111").unwrap();
-        let _merch_close_addr2 = hex::decode("0b2222222222222222222222222222222222222222222222222222222222222222").unwrap();
-        let _cust_close_addr = hex::decode("0c3333333333333333333333333333333333333333333333333333333333333333").unwrap();
+        let mut _merch_close_addr =
+            hex::decode("0a1111111111111111111111111111111111111111111111111111111111111111")
+                .unwrap();
+        let _merch_close_addr2 =
+            hex::decode("0b2222222222222222222222222222222222222222222222222222222222222222")
+                .unwrap();
+        let _cust_close_addr =
+            hex::decode("0c3333333333333333333333333333333333333333333333333333333333333333")
+                .unwrap();
 
         let merch_close_address = Script(_merch_close_addr.clone());
         let merch_close_address_dup = Script(_merch_close_addr.clone());
@@ -1684,34 +1965,56 @@ mod tests {
         let cust_close_addr_dup = Script(_cust_close_addr.clone());
         let cust_close_addr_dup2 = Script(_cust_close_addr.clone());
 
-        let escrow_tx_predicate= generate_open_predicate(&_merch_close_addr, &_ser_channel_token);
+        let escrow_tx_predicate = generate_open_predicate(&_merch_close_addr, &_ser_channel_token);
 
         // 1 byte mode + 4 bytes cust_bal + 4 bytes merch_bal + 72 bytes cust_sig + 96 bytes close token
         let close_token = hex::decode("8d4ff4d96f17760cabdd9728e667596c2c6d238427dd0529f2b6b60140fc71efc890e03502bdae679ca09236fbb11d9d832b9fc275bf44bad06fd9d0b0296722140273f6cba23859b48c3aaa5ed25455e70bd665165169956be25708026478b6").unwrap();
 
-        let cust_close_witness_input = generate_customer_close_witness([0,0,0,0,0,0,0,140], [0,0,0,0,0,0,0,70], &cust_sig1, &close_token, &wpk);
+        let cust_close_witness_input = generate_customer_close_witness(
+            [0, 0, 0, 0, 0, 0, 0, 140],
+            [0, 0, 0, 0, 0, 0, 0, 70],
+            &cust_sig1,
+            &close_token,
+            &wpk,
+        );
 
-        let cust_close_tx_predicate = generate_predicate(&wpk, [0,0,0,0,0,0,0,140], [0,0,0,146], &_ser_channel_token);
-        let merch_close_tx_predicate = generate_open_predicate(&_merch_close_addr2, &_ser_channel_token);
+        let cust_close_tx_predicate = generate_predicate(
+            &wpk,
+            [0, 0, 0, 0, 0, 0, 0, 140],
+            [0, 0, 0, 146],
+            &_ser_channel_token,
+        );
+        let merch_close_tx_predicate =
+            generate_open_predicate(&_merch_close_addr2, &_ser_channel_token);
 
         let merch_sig = hex::decode("3045022100e171be9eb5ffc799eb944e87762116ddff9ae77de58f63175ca354b9d93922390220601aed54bc60d03012f7d1b76d2caa78f9d461b83f014d40ec33ea233de2246e").unwrap();
         let revoke_token = hex::decode("3045022100d4421207f4698bd93b0fd7de19a52f2cf90022c80261c4ff7423c6a5ae2c22e0022043eac6981cf37d873036cd5544dcf9a95cfe8271abc0d66f6c3db031307c2e52").unwrap();
-        let merch_revoke_witness_input = generate_merchant_revoke_witness(&_merch_close_addr2, &merch_sig, &revoke_token);
+        let merch_revoke_witness_input =
+            generate_merchant_revoke_witness(&_merch_close_addr2, &merch_sig, &revoke_token);
 
-        let cust_spend_tx_hash = vec![162, 216, 70, 64, 240, 17, 105, 190, 59, 6, 128, 231, 90, 96, 241, 201, 184, 90, 28, 9, 3, 175, 79, 250, 236, 33, 159, 103, 66, 16, 181, 207];
+        let cust_spend_tx_hash = vec![
+            162, 216, 70, 64, 240, 17, 105, 190, 59, 6, 128, 231, 90, 96, 241, 201, 184, 90, 28, 9,
+            3, 175, 79, 250, 236, 33, 159, 103, 66, 16, 181, 207,
+        ];
         let cust_sig = compute_tx_signature(&sk_c, &cust_spend_tx_hash);
         let cust_spend_tx_witness = generate_spend_tx_witness(&_cust_close_addr, &cust_sig);
 
-        let mut mtx_a = TransactionData::nu4();
-        mtx_a.tze_outputs.push(tzeOut(210, &Predicate::open(escrow_tx_predicate)));
+        let mut mtx_a = TransactionData::next();
+        mtx_a
+            .tze_outputs
+            .push(tzeOut(210, &Predicate::open(escrow_tx_predicate)));
         let tx_a = mtx_a.freeze().unwrap();
         // println!("Escrow transaction: {:?}", tx_a);
 
         // construct customer-close-tx
-        let mut mtx_b = TransactionData::nu4();
-        mtx_b.tze_inputs.push(tzeIn(tx_a.txid(), &Witness::open(cust_close_witness_input)));
+        let mut mtx_b = TransactionData::next();
+        mtx_b
+            .tze_inputs
+            .push(tzeIn(tx_a.txid(), &Witness::open(cust_close_witness_input)));
         // to_customer
-        mtx_b.tze_outputs.push(tzeOut(140, &Predicate::close(cust_close_tx_predicate)));
+        mtx_b
+            .tze_outputs
+            .push(tzeOut(140, &Predicate::close(cust_close_tx_predicate)));
         // to_merchant
         mtx_b.vout.push(TxOut {
             value: Amount::from_u64(70).unwrap(),
@@ -1720,8 +2023,11 @@ mod tests {
 
         let tx_b = mtx_b.freeze().unwrap();
 
-        let mut mtx_c = TransactionData::nu4();
-        mtx_c.tze_inputs.push(tzeIn(tx_b.txid(), &Witness::close(merch_revoke_witness_input)));
+        let mut mtx_c = TransactionData::next();
+        mtx_c.tze_inputs.push(tzeIn(
+            tx_b.txid(),
+            &Witness::close(merch_revoke_witness_input),
+        ));
         // to_merchant
         mtx_c.vout.push(TxOut {
             value: Amount::from_u64(140).unwrap(),
@@ -1730,8 +2036,10 @@ mod tests {
 
         let tx_c = mtx_c.freeze().unwrap();
 
-        let mut mtx_d = TransactionData::nu4();
-        mtx_d.tze_inputs.push(tzeIn(tx_b.txid(), &Witness::close(cust_spend_tx_witness)));
+        let mut mtx_d = TransactionData::next();
+        mtx_d
+            .tze_inputs
+            .push(tzeIn(tx_b.txid(), &Witness::close(cust_spend_tx_witness)));
         // to_merchant
         mtx_d.vout.push(TxOut {
             value: Amount::from_u64(140).unwrap(),
@@ -1740,8 +2048,10 @@ mod tests {
 
         let tx_d = mtx_d.freeze().unwrap();
 
-        let mut mtx_e = TransactionData::nu4();
-        mtx_e.tze_inputs.push(tzeIn(tx_b.txid(), &Witness::close(cust_spend_tx_witness)));
+        let mut mtx_e = TransactionData::next();
+        mtx_e
+            .tze_inputs
+            .push(tzeIn(tx_b.txid(), &Witness::close(cust_spend_tx_witness)));
         // to_merchant
         mtx_e.vout.push(TxOut {
             value: Amount::from_u64(140).unwrap(),
@@ -1750,8 +2060,10 @@ mod tests {
 
         let tx_e = mtx_e.freeze().unwrap();
 
-        let mut mtx_f = TransactionData::nu4();
-        mtx_f.tze_inputs.push(tzeIn(tx_b.txid(), &Witness::close(cust_spend_tx_witness)));
+        let mut mtx_f = TransactionData::next();
+        mtx_f
+            .tze_inputs
+            .push(tzeIn(tx_b.txid(), &Witness::close(cust_spend_tx_witness)));
         // to_merchant
         mtx_f.vout.push(TxOut {
             value: Amount::from_u64(110).unwrap(),
@@ -1760,7 +2072,7 @@ mod tests {
 
         let tx_f = mtx_f.freeze().unwrap();
 
-        let program = Program { };
+        let program = Program {};
 
         // Verify tx_b
         {
@@ -1768,7 +2080,7 @@ mod tests {
             assert_eq!(
                 program.verify(
                     &tx_a.tze_outputs[0].precondition, // escrow
-                    &tx_b.tze_inputs[0].witness, // customer-close-tx
+                    &tx_b.tze_inputs[0].witness,       // customer-close-tx
                     &ctx
                 ),
                 Ok(())
@@ -1781,7 +2093,7 @@ mod tests {
             assert_eq!(
                 program.verify(
                     &tx_b.tze_outputs[0].precondition, // customer-close-tx
-                    &tx_c.tze_inputs[0].witness, // merchant-revoke-tx
+                    &tx_c.tze_inputs[0].witness,       // merchant-revoke-tx
                     &ctx
                 ),
                 Ok(())
@@ -1794,7 +2106,7 @@ mod tests {
             assert_eq!(
                 program.verify(
                     &tx_b.tze_outputs[0].precondition, // customer-close-tx
-                    &tx_d.tze_inputs[0].witness, // customer-spending-tx
+                    &tx_d.tze_inputs[0].witness,       // customer-spending-tx
                     &ctx
                 ),
                 Ok(())
@@ -1807,7 +2119,7 @@ mod tests {
             assert_eq!(
                 program.verify(
                     &tx_b.tze_outputs[0].precondition, // customer-close-tx
-                    &tx_e.tze_inputs[0].witness, // customer-spending-tx
+                    &tx_e.tze_inputs[0].witness,       // customer-spending-tx
                     &ctx
                 ),
                 Err("Timelock has not been met")
@@ -1820,7 +2132,7 @@ mod tests {
             assert_eq!(
                 program.verify(
                     &tx_b.tze_outputs[0].precondition, // customer-close-tx
-                    &tx_f.tze_inputs[0].witness, // customer-spending-tx
+                    &tx_f.tze_inputs[0].witness,       // customer-spending-tx
                     &ctx
                 ),
                 Err("The outgoing amount is not correct.")

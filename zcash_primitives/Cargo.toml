@@ -4,6 +4,7 @@ description = "Rust implementations of the Zcash primitives"
 version = "0.2.0"
 authors = [
     "Jack Grigg <jack@z.cash>",
+    "Kris Nuttycombe <kris@z.cash>",
 ]
 homepage = "https://github.com/zcash/librustzcash"
 repository = "https://github.com/zcash/librustzcash"
@@ -29,8 +30,6 @@ ripemd160 = { version = "0.8", optional = true }
 secp256k1 = { version = "=0.15.0", optional = true }
 sha2 = "0.8"
 subtle = "2.2.1"
-zcash_extensions_api = { version = "0.0", path = "../zcash_extensions_api" }
-bolt = { git = "https://github.com/boltlabs-inc/libbolt", branch = "master" }
 
 [dev-dependencies]
 criterion = "0.3"

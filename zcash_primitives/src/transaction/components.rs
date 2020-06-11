@@ -4,9 +4,10 @@ use crate::jubjub::{edwards, Unknown};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use ff::{PrimeField, PrimeFieldRepr};
 use pairing::bls12_381::{Bls12, Fr, FrRepr};
+use std::convert::TryFrom;
 use std::io::{self, Read, Write};
-use zcash_extensions_api::transparent as tze;
 
+use crate::extensions::transparent as tze;
 use crate::legacy::Script;
 use crate::redjubjub::{PublicKey, Signature};
 use crate::serialize::{CompactSize, Vector};
@@ -111,10 +112,14 @@ impl TxOut {
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct TzeIn {
     pub prevout: OutPoint,
     pub witness: tze::Witness,
+}
+
+fn to_io_error(_: std::num::TryFromIntError) -> io::Error {
+    io::Error::new(io::ErrorKind::InvalidData, "value out of range")
 }
 
 impl TzeIn {
@@ -128,8 +133,8 @@ impl TzeIn {
         Ok(TzeIn {
             prevout,
             witness: tze::Witness {
-                extension_id,
-                mode,
+                extension_id: u32::try_from(extension_id).map_err(|e| to_io_error(e))?,
+                mode: u32::try_from(mode).map_err(|e| to_io_error(e))?,
                 payload,
             },
         })
@@ -138,13 +143,19 @@ impl TzeIn {
     pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
         self.prevout.write(&mut writer)?;
 
-        CompactSize::write(&mut writer, self.witness.extension_id)?;
-        CompactSize::write(&mut writer, self.witness.mode)?;
+        CompactSize::write(
+            &mut writer,
+            usize::try_from(self.witness.extension_id).map_err(|e| to_io_error(e))?,
+        )?;
+        CompactSize::write(
+            &mut writer,
+            usize::try_from(self.witness.mode).map_err(|e| to_io_error(e))?,
+        )?;
         Vector::write(&mut writer, &self.witness.payload, |w, b| w.write_u8(*b))
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct TzeOut {
     pub value: Amount,
     pub precondition: tze::Precondition,
@@ -166,8 +177,8 @@ impl TzeOut {
         Ok(TzeOut {
             value,
             precondition: tze::Precondition {
-                extension_id,
-                mode,
+                extension_id: u32::try_from(extension_id).map_err(|e| to_io_error(e))?,
+                mode: u32::try_from(mode).map_err(|e| to_io_error(e))?,
                 payload,
             },
         })
@@ -176,9 +187,17 @@ impl TzeOut {
     pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
         writer.write_all(&self.value.to_i64_le_bytes())?;
 
-        CompactSize::write(&mut writer, self.precondition.extension_id)?;
-        CompactSize::write(&mut writer, self.precondition.mode)?;
-        Vector::write(&mut writer, &self.precondition.payload, |w, b| w.write_u8(*b))
+        CompactSize::write(
+            &mut writer,
+            usize::try_from(self.precondition.extension_id).map_err(|e| to_io_error(e))?,
+        )?;
+        CompactSize::write(
+            &mut writer,
+            usize::try_from(self.precondition.mode).map_err(|e| to_io_error(e))?,
+        )?;
+        Vector::write(&mut writer, &self.precondition.payload, |w, b| {
+            w.write_u8(*b)
+        })
     }
 }
 

@@ -1,11 +1,12 @@
 //! Consensus logic for Transparent Zcash Extensions.
 
 use std::convert::TryFrom;
-use zcash_extensions_api::transparent::{Error, Extension, Precondition, Witness};
+use zcash_primitives::extensions::transparent::{Error, Extension, Precondition, Witness};
+use zcash_primitives::transaction::components::TzeOut;
+use zcash_primitives::transaction::Transaction;
 
-use crate::extensions::transparent::demo;
-use crate::extensions::transparent::bolt;
-use crate::transaction::{components::TzeOut, Transaction};
+use crate::transparent::bolt;
+use crate::transparent::demo;
 
 /// The set of programs that have assigned type IDs within the Zcash consensus rules.
 #[derive(Debug, Clone, Copy)]
@@ -14,12 +15,12 @@ pub enum ExtensionId {
     Bolt,
 }
 
-pub struct InvalidExtId(usize);
+pub struct InvalidExtId(u32);
 
-impl TryFrom<usize> for ExtensionId {
+impl TryFrom<u32> for ExtensionId {
     type Error = InvalidExtId;
 
-    fn try_from(t: usize) -> Result<Self, Self::Error> {
+    fn try_from(t: u32) -> Result<Self, Self::Error> {
         match t {
             0 => Ok(ExtensionId::Demo),
             1 => Ok(ExtensionId::Bolt),
@@ -28,8 +29,8 @@ impl TryFrom<usize> for ExtensionId {
     }
 }
 
-impl From<ExtensionId> for usize {
-    fn from(type_id: ExtensionId) -> usize {
+impl From<ExtensionId> for u32 {
+    fn from(type_id: ExtensionId) -> u32 {
         match type_id {
             ExtensionId::Demo => 0,
             ExtensionId::Bolt => 1,
@@ -88,7 +89,7 @@ impl<'a> bolt::Context for Context<'a> {
 }
 
 /// Wire identifier for the dummy network upgrade epoch.
-pub const V1_EPOCH_ID: u32 = 0x7473_6554;
+pub const NEXT_BRANCH_ID: u32 = 0x7374f403;
 
 /// A set of demo TZEs associated with the dummy network upgrade.
 struct EpochV1;
@@ -118,8 +119,9 @@ impl Epoch for EpochV1 {
 
 pub fn epoch_for_branch(consensus_branch_id: u32) -> Option<Box<dyn Epoch<Error = String>>> {
     // Map from consensus branch IDs to epochs.
+    let _tmp_branch_id = NEXT_BRANCH_ID;
     match consensus_branch_id {
-        V1_EPOCH_ID => Some(Box::new(EpochV1)),
+        NEXT_BRANCH_ID => Some(Box::new(EpochV1)),
         _ => None,
     }
 }
