@@ -23,7 +23,6 @@ pub mod bls12_381;
 use core::ops::Mul;
 use ff::{Field, PrimeField};
 use group::{CurveAffine, CurveProjective, GroupOps, GroupOpsOwned, ScalarMul, ScalarMulOwned};
-use subtle::CtOption;
 
 /// An "engine" is a collection of types (fields, elliptic curve groups, etc.)
 /// with well-defined relationships. In particular, the G1/G2 curve groups are
@@ -33,7 +32,7 @@ pub trait Engine: Sized + 'static + Clone {
     type Fr: PrimeField;
 
     /// The projective representation of an element in G1.
-    type G1: CurveProjective<Base = Self::Fq, Scalar = Self::Fr, Affine = Self::G1Affine>
+    type G1: CurveProjective<Scalar = Self::Fr, Affine = Self::G1Affine>
         + From<Self::G1Affine>
         + GroupOps<Self::G1Affine>
         + GroupOpsOwned<Self::G1Affine>
@@ -42,17 +41,16 @@ pub trait Engine: Sized + 'static + Clone {
 
     /// The affine representation of an element in G1.
     type G1Affine: PairingCurveAffine<
-            Base = Self::Fq,
             Scalar = Self::Fr,
             Projective = Self::G1,
             Pair = Self::G2Affine,
-            PairingResult = Self::Fqk,
+            PairingResult = Self::Gt,
         > + From<Self::G1>
         + Mul<Self::Fr, Output = Self::G1>
         + for<'a> Mul<&'a Self::Fr, Output = Self::G1>;
 
     /// The projective representation of an element in G2.
-    type G2: CurveProjective<Base = Self::Fqe, Scalar = Self::Fr, Affine = Self::G2Affine>
+    type G2: CurveProjective<Scalar = Self::Fr, Affine = Self::G2Affine>
         + From<Self::G2Affine>
         + GroupOps<Self::G2Affine>
         + GroupOpsOwned<Self::G2Affine>
@@ -61,60 +59,56 @@ pub trait Engine: Sized + 'static + Clone {
 
     /// The affine representation of an element in G2.
     type G2Affine: PairingCurveAffine<
-            Base = Self::Fqe,
             Scalar = Self::Fr,
             Projective = Self::G2,
             Pair = Self::G1Affine,
-            PairingResult = Self::Fqk,
+            PairingResult = Self::Gt,
         > + From<Self::G2>
         + Mul<Self::Fr, Output = Self::G2>
         + for<'a> Mul<&'a Self::Fr, Output = Self::G2>;
 
-    /// The base field that hosts G1.
-    type Fq: PrimeField;
-
-    /// The extension field that hosts G2.
-    type Fqe: Field;
-
     /// The extension field that hosts the target group of the pairing.
-    type Fqk: Field;
+    type Gt: Field;
 
-    /// Perform a miller loop with some number of (G1, G2) pairs.
-    fn miller_loop<'a, I>(i: I) -> Self::Fqk
-    where
-        I: IntoIterator<
-            Item = &'a (
-                &'a <Self::G1Affine as PairingCurveAffine>::Prepared,
-                &'a <Self::G2Affine as PairingCurveAffine>::Prepared,
-            ),
-        >;
-
-    /// Perform final exponentiation of the result of a miller loop.
-    fn final_exponentiation(_: &Self::Fqk) -> CtOption<Self::Fqk>;
-
-    /// Performs a complete pairing operation `(p, q)`.
-    fn pairing<G1, G2>(p: G1, q: G2) -> Self::Fqk
-    where
-        G1: Into<Self::G1Affine>,
-        G2: Into<Self::G2Affine>,
-    {
-        Self::final_exponentiation(&Self::miller_loop(
-            [(&(p.into().prepare()), &(q.into().prepare()))].iter(),
-        ))
-        .unwrap()
-    }
+    /// Invoke the pairing function `G1 x G2 -> Gt` without the use of precomputation and
+    /// other optimizations.
+    fn pairing(p: &Self::G1Affine, q: &Self::G2Affine) -> Self::Gt;
 }
 
 /// Affine representation of an elliptic curve point that can be used
 /// to perform pairings.
 pub trait PairingCurveAffine: CurveAffine {
-    type Prepared: Clone + Send + Sync + 'static;
     type Pair: PairingCurveAffine<Pair = Self>;
     type PairingResult: Field;
 
-    /// Prepares this element for pairing purposes.
-    fn prepare(&self) -> Self::Prepared;
-
     /// Perform a pairing
     fn pairing_with(&self, other: &Self::Pair) -> Self::PairingResult;
+}
+
+/// An engine that can compute sums of pairings in an efficient way.
+pub trait MultiMillerLoop: Engine {
+    /// The prepared form of `Self::G2Affine`.
+    type G2Prepared: Clone + Send + Sync + From<Self::G2Affine>;
+
+    /// The type returned by `Engine::miller_loop`.
+    type Result: MillerLoopResult<Gt = Self::Gt>;
+
+    /// Computes $$\sum_{i=1}^n \textbf{ML}(a_i, b_i)$$ given a series of terms
+    /// $$(a_1, b_1), (a_2, b_2), ..., (a_n, b_n).$$
+    fn multi_miller_loop(terms: &[(&Self::G1Affine, &Self::G2Prepared)]) -> Self::Result;
+}
+
+/// Represents results of a Miller loop, one of the most expensive portions of the pairing
+/// function.
+///
+/// `MillerLoopResult`s cannot be compared with each other until
+/// [`MillerLoopResult::final_exponentiation`] is called, which is also expensive.
+pub trait MillerLoopResult {
+    /// The extension field that hosts the target group of the pairing.
+    type Gt: Field;
+
+    /// This performs a "final exponentiation" routine to convert the result of a Miller
+    /// loop into an element of [`MillerLoopResult::Gt`], so that it can be compared with
+    /// other elements of `Gt`.
+    fn final_exponentiation(&self) -> Self::Gt;
 }

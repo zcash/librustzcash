@@ -1,5 +1,5 @@
 use ff::PrimeField;
-use group::{CurveAffine, CurveProjective, Group};
+use group::{CurveAffine, CurveProjective};
 
 use super::*;
 use crate::*;
@@ -23,7 +23,7 @@ fn test_pairing_result_against_relic() {
     0F41E58663BF08CF 068672CBD01A7EC7 3BACA4D72CA93544 DEFF686BFD6DF543 D48EAA24AFE47E1E FDE449383B676631
     */
 
-    assert_eq!(Bls12::pairing(G1::generator(), G2::generator()), Fq12 {
+    assert_eq!(Bls12::pairing(&G1Affine::generator(), &G2Affine::generator()), Fq12 {
         c0: Fq6 {
             c0: Fq2 {
                 c0: Fq::from_str("2819105605953691245277803056322684086884703000473961065716485506033588504203831029066448642358042597501014294104502").unwrap(),

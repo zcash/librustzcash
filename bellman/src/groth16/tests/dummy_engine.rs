@@ -1,6 +1,6 @@
 use ff::{Field, PrimeField};
 use group::{CurveAffine, CurveProjective, Group, PrimeGroup};
-use pairing::{Engine, PairingCurveAffine};
+use pairing::{Engine, MillerLoopResult, MultiMillerLoop, PairingCurveAffine};
 
 use rand_core::RngCore;
 use std::fmt;
@@ -330,24 +330,24 @@ impl Engine for DummyEngine {
     type G1Affine = Fr;
     type G2 = Fr;
     type G2Affine = Fr;
-    type Fq = Fr;
-    type Fqe = Fr;
 
     // TODO: This should be F_645131 or something. Doesn't matter for now.
-    type Fqk = Fr;
+    type Gt = Fr;
 
-    fn miller_loop<'a, I>(i: I) -> Self::Fqk
-    where
-        I: IntoIterator<
-            Item = &'a (
-                &'a <Self::G1Affine as PairingCurveAffine>::Prepared,
-                &'a <Self::G2Affine as PairingCurveAffine>::Prepared,
-            ),
-        >,
-    {
+    fn pairing(p: &Self::G1Affine, q: &Self::G2Affine) -> Self::Gt {
+        Self::multi_miller_loop(&[(p, &(*q).into())]).final_exponentiation()
+    }
+}
+
+impl MultiMillerLoop for DummyEngine {
+    type G2Prepared = Fr;
+    // TODO: This should be F_645131 or something. Doesn't matter for now.
+    type Result = Fr;
+
+    fn multi_miller_loop(terms: &[(&Self::G1Affine, &Self::G2Prepared)]) -> Self::Result {
         let mut acc = <Fr as Field>::zero();
 
-        for &(a, b) in i {
+        for &(a, b) in terms {
             let mut tmp = *a;
             MulAssign::mul_assign(&mut tmp, b);
             AddAssign::add_assign(&mut acc, &tmp);
@@ -355,10 +355,14 @@ impl Engine for DummyEngine {
 
         acc
     }
+}
+
+impl MillerLoopResult for Fr {
+    type Gt = Fr;
 
     /// Perform final exponentiation of the result of a miller loop.
-    fn final_exponentiation(this: &Self::Fqk) -> CtOption<Self::Fqk> {
-        CtOption::new(*this, Choice::from(1))
+    fn final_exponentiation(&self) -> Self::Gt {
+        *self
     }
 }
 
@@ -391,7 +395,6 @@ impl PrimeGroup for Fr {}
 
 impl CurveProjective for Fr {
     type Affine = Fr;
-    type Base = Fr;
 
     fn batch_normalize(p: &[Self], q: &mut [Self::Affine]) {
         assert_eq!(p.len(), q.len());
@@ -433,7 +436,6 @@ impl CurveAffine for Fr {
     type Compressed = FakePoint;
     type Uncompressed = FakePoint;
     type Projective = Fr;
-    type Base = Fr;
     type Scalar = Fr;
 
     fn identity() -> Self {
@@ -478,13 +480,8 @@ impl CurveAffine for Fr {
 }
 
 impl PairingCurveAffine for Fr {
-    type Prepared = Fr;
     type Pair = Fr;
     type PairingResult = Fr;
-
-    fn prepare(&self) -> Self::Prepared {
-        *self
-    }
 
     fn pairing_with(&self, other: &Self::Pair) -> Self::PairingResult {
         self.mul(*other)

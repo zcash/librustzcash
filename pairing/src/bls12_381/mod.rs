@@ -12,8 +12,8 @@ mod fr;
 mod tests;
 
 pub use self::ec::{
-    G1Affine, G1Compressed, G1Prepared, G1Uncompressed, G2Affine, G2Compressed, G2Prepared,
-    G2Uncompressed, G1, G2,
+    G1Affine, G1Compressed, G1Uncompressed, G2Affine, G2Compressed, G2Prepared, G2Uncompressed, G1,
+    G2,
 };
 pub use self::fq::{Fq, FqRepr};
 pub use self::fq12::Fq12;
@@ -21,12 +21,11 @@ pub use self::fq2::Fq2;
 pub use self::fq6::Fq6;
 pub use self::fr::{Fr, FrRepr};
 
-use super::{Engine, PairingCurveAffine};
+use super::{Engine, MillerLoopResult, MultiMillerLoop};
 
 use ff::{BitIterator, Field};
 use group::CurveAffine;
 use std::ops::{AddAssign, MulAssign, Neg, SubAssign};
-use subtle::CtOption;
 
 // The BLS parameter x for BLS12-381 is -0xd201000000010000
 const BLS_X: u64 = 0xd201000000010000;
@@ -41,22 +40,21 @@ impl Engine for Bls12 {
     type G1Affine = G1Affine;
     type G2 = G2;
     type G2Affine = G2Affine;
-    type Fq = Fq;
-    type Fqe = Fq2;
-    type Fqk = Fq12;
+    type Gt = Fq12;
 
-    fn miller_loop<'a, I>(i: I) -> Self::Fqk
-    where
-        I: IntoIterator<
-            Item = &'a (
-                &'a <Self::G1Affine as PairingCurveAffine>::Prepared,
-                &'a <Self::G2Affine as PairingCurveAffine>::Prepared,
-            ),
-        >,
-    {
+    fn pairing(p: &Self::G1Affine, q: &Self::G2Affine) -> Self::Gt {
+        Self::multi_miller_loop(&[(p, &(*q).into())]).final_exponentiation()
+    }
+}
+
+impl MultiMillerLoop for Bls12 {
+    type G2Prepared = G2Prepared;
+    type Result = Fq12;
+
+    fn multi_miller_loop(terms: &[(&Self::G1Affine, &Self::G2Prepared)]) -> Self::Result {
         let mut pairs = vec![];
-        for &(p, q) in i {
-            if !p.is_identity() && !q.is_identity() {
+        for &(p, q) in terms {
+            if !bool::from(p.is_identity()) && !q.is_identity() {
                 pairs.push((p, q.coeffs.iter()));
             }
         }
@@ -86,12 +84,12 @@ impl Engine for Bls12 {
             }
 
             for &mut (p, ref mut coeffs) in &mut pairs {
-                ell(&mut f, coeffs.next().unwrap(), &p.0);
+                ell(&mut f, coeffs.next().unwrap(), p);
             }
 
             if i {
                 for &mut (p, ref mut coeffs) in &mut pairs {
-                    ell(&mut f, coeffs.next().unwrap(), &p.0);
+                    ell(&mut f, coeffs.next().unwrap(), p);
                 }
             }
 
@@ -99,7 +97,7 @@ impl Engine for Bls12 {
         }
 
         for &mut (p, ref mut coeffs) in &mut pairs {
-            ell(&mut f, coeffs.next().unwrap(), &p.0);
+            ell(&mut f, coeffs.next().unwrap(), p);
         }
 
         if BLS_X_IS_NEGATIVE {
@@ -108,59 +106,66 @@ impl Engine for Bls12 {
 
         f
     }
+}
 
-    fn final_exponentiation(r: &Fq12) -> CtOption<Fq12> {
-        let mut f1 = *r;
+impl MillerLoopResult for Fq12 {
+    type Gt = Fq12;
+
+    fn final_exponentiation(&self) -> Fq12 {
+        let mut f1 = *self;
         f1.conjugate();
 
-        r.invert().map(|mut f2| {
-            let mut r = f1;
-            r.mul_assign(&f2);
-            f2 = r;
-            r.frobenius_map(2);
-            r.mul_assign(&f2);
+        self.invert()
+            .map(|mut f2| {
+                let mut r = f1;
+                r.mul_assign(&f2);
+                f2 = r;
+                r.frobenius_map(2);
+                r.mul_assign(&f2);
 
-            fn exp_by_x(f: &mut Fq12, x: u64) {
-                *f = f.pow_vartime(&[x]);
-                if BLS_X_IS_NEGATIVE {
-                    f.conjugate();
+                fn exp_by_x(f: &mut Fq12, x: u64) {
+                    *f = f.pow_vartime(&[x]);
+                    if BLS_X_IS_NEGATIVE {
+                        f.conjugate();
+                    }
                 }
-            }
 
-            let mut x = BLS_X;
-            let y0 = r.square();
-            let mut y1 = y0;
-            exp_by_x(&mut y1, x);
-            x >>= 1;
-            let mut y2 = y1;
-            exp_by_x(&mut y2, x);
-            x <<= 1;
-            let mut y3 = r;
-            y3.conjugate();
-            y1.mul_assign(&y3);
-            y1.conjugate();
-            y1.mul_assign(&y2);
-            y2 = y1;
-            exp_by_x(&mut y2, x);
-            y3 = y2;
-            exp_by_x(&mut y3, x);
-            y1.conjugate();
-            y3.mul_assign(&y1);
-            y1.conjugate();
-            y1.frobenius_map(3);
-            y2.frobenius_map(2);
-            y1.mul_assign(&y2);
-            y2 = y3;
-            exp_by_x(&mut y2, x);
-            y2.mul_assign(&y0);
-            y2.mul_assign(&r);
-            y1.mul_assign(&y2);
-            y2 = y3;
-            y2.frobenius_map(1);
-            y1.mul_assign(&y2);
+                let mut x = BLS_X;
+                let y0 = r.square();
+                let mut y1 = y0;
+                exp_by_x(&mut y1, x);
+                x >>= 1;
+                let mut y2 = y1;
+                exp_by_x(&mut y2, x);
+                x <<= 1;
+                let mut y3 = r;
+                y3.conjugate();
+                y1.mul_assign(&y3);
+                y1.conjugate();
+                y1.mul_assign(&y2);
+                y2 = y1;
+                exp_by_x(&mut y2, x);
+                y3 = y2;
+                exp_by_x(&mut y3, x);
+                y1.conjugate();
+                y3.mul_assign(&y1);
+                y1.conjugate();
+                y1.frobenius_map(3);
+                y2.frobenius_map(2);
+                y1.mul_assign(&y2);
+                y2 = y3;
+                exp_by_x(&mut y2, x);
+                y2.mul_assign(&y0);
+                y2.mul_assign(&r);
+                y1.mul_assign(&y2);
+                y2 = y3;
+                y2.frobenius_map(1);
+                y1.mul_assign(&y2);
 
-            y1
-        })
+                y1
+            })
+            // self must be nonzero.
+            .unwrap()
     }
 }
 
