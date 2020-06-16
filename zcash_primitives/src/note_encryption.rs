@@ -1,6 +1,8 @@
 //! Implementation of in-band secret distribution for Zcash transactions.
 
 use crate::{
+    consensus,
+    consensus::NetworkUpgrade,
     jubjub::{
         edwards,
         fs::{Fs, FsRepr},
@@ -18,7 +20,10 @@ use std::convert::TryInto;
 use std::fmt;
 use std::str;
 
-use crate::{keys::OutgoingViewingKey, JUBJUB};
+use crate::{
+    keys::{prf_expand, OutgoingViewingKey},
+    JUBJUB,
+};
 
 pub const KDF_SAPLING_PERSONALIZATION: &[u8; 16] = b"Zcash_SaplingKDF";
 pub const PRF_OCK_PERSONALIZATION: &[u8; 16] = b"Zcash_Derive_ock";
@@ -32,6 +37,12 @@ const OUT_PLAINTEXT_SIZE: usize = 32 + // pk_d
     32; // esk
 const ENC_CIPHERTEXT_SIZE: usize = NOTE_PLAINTEXT_SIZE + 16;
 const OUT_CIPHERTEXT_SIZE: usize = OUT_PLAINTEXT_SIZE + 16;
+const ZIP212_GRACE_PERIOD: u32 = 32256;
+
+#[derive(Debug)]
+pub enum Error {
+    InconsistentRseed,
+}
 
 /// Format a byte array as a colon-delimited hex string.
 ///
@@ -133,13 +144,17 @@ impl str::FromStr for Memo {
     }
 }
 
-pub fn generate_esk<R: RngCore + CryptoRng>(rng: &mut R) -> Fs {
+pub fn generate_esk_v1<R: RngCore + CryptoRng>(rng: &mut R) -> Fs {
     // create random 64 byte buffer
     let mut buffer = [0u8; 64];
     rng.fill_bytes(&mut buffer);
 
     // reduce to uniform value
     Fs::to_uniform(&buffer[..])
+}
+
+pub fn generate_esk_v2(rseed: [u8; 32]) -> Fs {
+    Fs::to_uniform(prf_expand(&rseed, &[0x05]).as_bytes())
 }
 
 /// Sapling key agreement for note encryption.
@@ -218,7 +233,7 @@ fn prf_ock(
 /// use zcash_primitives::{
 ///     jubjub::fs::Fs,
 ///     keys::OutgoingViewingKey,
-///     note_encryption::{Memo, SaplingNoteEncryption},
+///     note_encryption::{generate_esk_v1, Memo, SaplingNoteEncryption},
 ///     primitives::{Diversifier, PaymentAddress, ValueCommitment},
 ///     JUBJUB,
 /// };
@@ -238,8 +253,12 @@ fn prf_ock(
 /// };
 /// let note = to.create_note(value, rcv, &JUBJUB).unwrap();
 /// let cmu = note.cm(&JUBJUB);
+/// let esk = generate_esk_v1(&mut rng);
 ///
-/// let enc = SaplingNoteEncryption::new(ovk, note, to, Memo::default(), &mut rng);
+/// let enc = match SaplingNoteEncryption::new(esk, ovk, note, to, Memo::default(), None) {
+///         Some(encryption) => encryption,
+///         None => return (),
+///     };
 /// let encCiphertext = enc.encrypt_note_plaintext();
 /// let outCiphertext = enc.encrypt_outgoing_plaintext(&cv.cm(&JUBJUB).into(), &cmu);
 /// ```
@@ -250,28 +269,47 @@ pub struct SaplingNoteEncryption {
     to: PaymentAddress<Bls12>,
     memo: Memo,
     ovk: OutgoingViewingKey,
+    rseed: Option<[u8; 32]>,
 }
 
 impl SaplingNoteEncryption {
     /// Creates a new encryption context for the given note.
-    pub fn new<R: RngCore + CryptoRng>(
+    pub fn new(
+        esk: Fs,
         ovk: OutgoingViewingKey,
         note: Note<Bls12>,
         to: PaymentAddress<Bls12>,
         memo: Memo,
-        rng: &mut R,
-    ) -> SaplingNoteEncryption {
-        let esk = generate_esk(rng);
+        rseed: Option<[u8; 32]>,
+    ) -> Option<SaplingNoteEncryption> {
+        match rseed {
+            Some(seed) => {
+                let derived_rcm = Fs::to_uniform(prf_expand(&seed, &[0x04]).as_bytes());
+                let derived_esk = Fs::to_uniform(prf_expand(&seed, &[0x05]).as_bytes());
+                if note.r != derived_rcm {
+                    // check derived rcm is equal to parsed rcm
+                    return None;
+                } else if esk != derived_esk {
+                    // check derived esk is equal to parsed esk
+                    return None;
+                } else {
+                    ()
+                }
+            }
+            _ => (),
+        };
+
         let epk = note.g_d.mul(esk, &JUBJUB);
 
-        SaplingNoteEncryption {
+        Some(SaplingNoteEncryption {
             epk,
             esk,
             note,
             to,
             memo,
             ovk,
-        }
+            rseed,
+        })
     }
 
     /// Exposes the ephemeral secret key being used to encrypt this note.
@@ -284,7 +322,7 @@ impl SaplingNoteEncryption {
         &self.epk
     }
 
-    /// Generates `encCiphertext` for this note.
+    /// Generates `encCiphertext` for v1 note.
     pub fn encrypt_note_plaintext(&self) -> [u8; ENC_CIPHERTEXT_SIZE] {
         let shared_secret = sapling_ka_agree(&self.esk, self.to.pk_d());
         let key = kdf_sapling(shared_secret, &self.epk);
@@ -292,12 +330,20 @@ impl SaplingNoteEncryption {
         // Note plaintext encoding is defined in section 5.5 of the Zcash Protocol
         // Specification.
         let mut input = [0; NOTE_PLAINTEXT_SIZE];
-        input[0] = 1;
         input[1..12].copy_from_slice(&self.to.diversifier().0);
         (&mut input[12..20])
             .write_u64::<LittleEndian>(self.note.value)
             .unwrap();
-        input[20..COMPACT_NOTE_SIZE].copy_from_slice(self.note.r.to_repr().as_ref());
+        match &self.rseed {
+            Some(seed) => {
+                input[20..COMPACT_NOTE_SIZE].copy_from_slice(seed);
+                input[0] = 2;
+            }
+            None => {
+                input[20..COMPACT_NOTE_SIZE].copy_from_slice(self.note.r.to_repr().as_ref());
+                input[0] = 1;
+            }
+        }
         input[COMPACT_NOTE_SIZE..NOTE_PLAINTEXT_SIZE].copy_from_slice(&self.memo.0);
 
         let mut output = [0u8; ENC_CIPHERTEXT_SIZE];
@@ -335,32 +381,85 @@ impl SaplingNoteEncryption {
     }
 }
 
-fn parse_note_plaintext_without_memo(
+fn check_note_plaintext_version<P: consensus::Parameters>(
+    parameters: &P,
+    height: u32,
+    lead_byte: u8,
+) -> Option<()> {
+    let is_past_canopy = parameters.is_nu_active(NetworkUpgrade::Canopy, height);
+
+    let is_past_zip212_grace_period = if is_past_canopy {
+        parameters.is_nu_active(NetworkUpgrade::Canopy, height - ZIP212_GRACE_PERIOD)
+    } else {
+        false
+    };
+
+    // Check note plaintext version
+    if is_past_zip212_grace_period {
+        match lead_byte {
+            0x02 => Some(()),
+            _ => return None,
+        }
+    } else if is_past_canopy {
+        match lead_byte {
+            0x01 => Some(()),
+            0x02 => Some(()),
+            _ => return None,
+        }
+    } else {
+        match lead_byte {
+            0x01 => Some(()),
+            _ => return None,
+        }
+    }
+}
+
+fn parse_note_plaintext_without_memo<P: consensus::Parameters>(
+    parameters: &P,
+    height: u32,
     ivk: &Fs,
+    epk: &edwards::Point<Bls12, PrimeOrder>,
     cmu: &Fr,
     plaintext: &[u8],
 ) -> Option<(Note<Bls12>, PaymentAddress<Bls12>)> {
-    // Check note plaintext version
-    match plaintext[0] {
-        0x01 => (),
-        _ => return None,
-    }
+    if check_note_plaintext_version(parameters, height, plaintext[0]).is_none() {
+        return None;
+    };
 
     let mut d = [0u8; 11];
     d.copy_from_slice(&plaintext[1..12]);
 
     let v = (&plaintext[12..20]).read_u64::<LittleEndian>().ok()?;
-
-    let rcm = Fs::from_repr(FsRepr(
-        plaintext[20..COMPACT_NOTE_SIZE]
-            .try_into()
-            .expect("slice is the correct length"),
-    ))?;
-
     let diversifier = Diversifier(d);
     let pk_d = diversifier
         .g_d::<Bls12>(&JUBJUB)?
         .mul(ivk.to_repr(), &JUBJUB);
+
+    let rcm = match plaintext[0] {
+        0x01 => Fs::from_repr(FsRepr(
+            plaintext[20..COMPACT_NOTE_SIZE]
+                .try_into()
+                .expect("slice is the correct length"),
+        ))?,
+        0x02 => {
+            let mut rseed = [0u8; 32];
+            rseed.copy_from_slice(&plaintext[20..COMPACT_NOTE_SIZE]);
+
+            let esk = Fs::to_uniform(prf_expand(&rseed, &[0x05]).as_bytes());
+
+            if diversifier
+                .g_d::<Bls12>(&JUBJUB)?
+                .mul(esk.to_repr(), &JUBJUB)
+                != *epk
+            {
+                // Published epk doesn't match calculated epk
+                return None;
+            }
+
+            Fs::to_uniform(prf_expand(&rseed, &[0x04]).as_bytes())
+        }
+        _ => return None,
+    };
 
     let to = PaymentAddress::from_parts(diversifier, pk_d)?;
     let note = to.create_note(v, rcm, &JUBJUB).unwrap();
@@ -380,7 +479,9 @@ fn parse_note_plaintext_without_memo(
 /// `PaymentAddress` to which the note was sent.
 ///
 /// Implements section 4.17.2 of the Zcash Protocol Specification.
-pub fn try_sapling_note_decryption(
+pub fn try_sapling_note_decryption<P: consensus::Parameters>(
+    parameters: &P,
+    height: u32,
     ivk: &Fs,
     epk: &edwards::Point<Bls12, PrimeOrder>,
     cmu: &Fr,
@@ -405,7 +506,8 @@ pub fn try_sapling_note_decryption(
         NOTE_PLAINTEXT_SIZE
     );
 
-    let (note, to) = parse_note_plaintext_without_memo(ivk, cmu, &plaintext)?;
+    let (note, to) =
+        parse_note_plaintext_without_memo(parameters, height, ivk, epk, cmu, &plaintext)?;
 
     let mut memo = [0u8; 512];
     memo.copy_from_slice(&plaintext[COMPACT_NOTE_SIZE..NOTE_PLAINTEXT_SIZE]);
@@ -422,7 +524,9 @@ pub fn try_sapling_note_decryption(
 /// Implements the procedure specified in [`ZIP 307`].
 ///
 /// [`ZIP 307`]: https://github.com/zcash/zips/pull/226
-pub fn try_sapling_compact_note_decryption(
+pub fn try_sapling_compact_note_decryption<P: consensus::Parameters>(
+    parameters: &P,
+    height: u32,
     ivk: &Fs,
     epk: &edwards::Point<Bls12, PrimeOrder>,
     cmu: &Fr,
@@ -438,7 +542,7 @@ pub fn try_sapling_compact_note_decryption(
     plaintext.copy_from_slice(&enc_ciphertext);
     ChaCha20Ietf::xor(key.as_bytes(), &[0u8; 12], 1, &mut plaintext);
 
-    parse_note_plaintext_without_memo(ivk, cmu, &plaintext)
+    parse_note_plaintext_without_memo(parameters, height, ivk, epk, cmu, &plaintext)
 }
 
 /// Recovery of the full note plaintext by the sender.
@@ -448,7 +552,9 @@ pub fn try_sapling_compact_note_decryption(
 /// `PaymentAddress` to which the note was sent.
 ///
 /// Implements section 4.17.3 of the Zcash Protocol Specification.
-pub fn try_sapling_output_recovery(
+pub fn try_sapling_output_recovery<P: consensus::Parameters>(
+    parameters: &P,
+    height: u32,
     ovk: &OutgoingViewingKey,
     cv: &edwards::Point<Bls12, Unknown>,
     cmu: &Fr,
@@ -496,10 +602,8 @@ pub fn try_sapling_output_recovery(
         NOTE_PLAINTEXT_SIZE
     );
 
-    // Check note plaintext version
-    match plaintext[0] {
-        0x01 => (),
-        _ => return None,
+    if check_note_plaintext_version(parameters, height, plaintext[0]).is_none() {
+        return None;
     }
 
     let mut d = [0u8; 11];
@@ -507,11 +611,26 @@ pub fn try_sapling_output_recovery(
 
     let v = (&plaintext[12..20]).read_u64::<LittleEndian>().ok()?;
 
-    let rcm = Fs::from_repr(FsRepr(
-        plaintext[20..COMPACT_NOTE_SIZE]
-            .try_into()
-            .expect("slice is the correct length"),
-    ))?;
+    let rcm = match plaintext[0] {
+        0x01 => Fs::from_repr(FsRepr(
+            plaintext[20..COMPACT_NOTE_SIZE]
+                .try_into()
+                .expect("slice is the correct length"),
+        ))?,
+        0x02 => {
+            let mut rseed = [0u8; 32];
+            rseed.copy_from_slice(&plaintext[20..COMPACT_NOTE_SIZE]);
+
+            let derived_esk = Fs::to_uniform(prf_expand(&rseed, &[0x05]).as_bytes());
+            if esk != derived_esk {
+                // check derived esk is equal to parsed esk
+                return None;
+            }
+
+            Fs::to_uniform(prf_expand(&rseed, &[0x04]).as_bytes())
+        }
+        _ => return None,
+    };
 
     let mut memo = [0u8; 512];
     memo.copy_from_slice(&plaintext[COMPACT_NOTE_SIZE..NOTE_PLAINTEXT_SIZE]);

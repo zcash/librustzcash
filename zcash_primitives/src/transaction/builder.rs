@@ -11,10 +11,12 @@ use rand::{rngs::OsRng, seq::SliceRandom, CryptoRng, RngCore};
 
 use crate::{
     consensus,
-    keys::OutgoingViewingKey,
+    consensus::NetworkUpgrade,
+    jubjub::ToUniform,
+    keys::{prf_expand, OutgoingViewingKey},
     legacy::TransparentAddress,
     merkle_tree::MerklePath,
-    note_encryption::{generate_esk, Memo, SaplingNoteEncryption},
+    note_encryption::{generate_esk_v1, generate_esk_v2, Memo, SaplingNoteEncryption},
     prover::TxProver,
     redjubjub::PrivateKey,
     sapling::{spend_sig, Node},
@@ -46,6 +48,7 @@ pub enum Error {
     InvalidAmount,
     NoChangeAddress,
     SpendProof,
+    InconsistentRseed,
 }
 
 struct SpendDescriptionInfo {
@@ -61,10 +64,13 @@ pub struct SaplingOutput {
     to: PaymentAddress<Bls12>,
     note: Note<Bls12>,
     memo: Memo,
+    rseed: Option<[u8; 32]>,
 }
 
 impl SaplingOutput {
-    pub fn new<R: RngCore + CryptoRng>(
+    pub fn new<R: RngCore + CryptoRng, P: consensus::Parameters>(
+        parameters: P,
+        height: u32,
         rng: &mut R,
         ovk: OutgoingViewingKey,
         to: PaymentAddress<Bls12>,
@@ -79,7 +85,17 @@ impl SaplingOutput {
             return Err(Error::InvalidAmount);
         }
 
-        let rcm = Fs::random(rng);
+        let (rcm, rseed) = if parameters.is_nu_active(NetworkUpgrade::Canopy, height) {
+            let mut rseed_bytes = [0u8; 32];
+            // rseed is a random 32-byte sequence
+            rng.fill_bytes(&mut rseed_bytes);
+            (
+                Fs::to_uniform(prf_expand(&rseed_bytes, &[0x04]).as_bytes()),
+                Some(rseed_bytes),
+            )
+        } else {
+            (Fs::random(rng), None)
+        };
 
         let note = Note {
             g_d,
@@ -93,6 +109,7 @@ impl SaplingOutput {
             to,
             note,
             memo: memo.unwrap_or_default(),
+            rseed,
         })
     }
 
@@ -101,15 +118,23 @@ impl SaplingOutput {
         prover: &P,
         ctx: &mut P::SaplingProvingContext,
         rng: &mut R,
-    ) -> OutputDescription {
-        let encryptor = SaplingNoteEncryption::new(
+    ) -> Result<OutputDescription, Error> {
+        let (rseed_input, esk) = match self.rseed {
+            Some(seed) => (Some(seed), generate_esk_v2(seed)),
+            None => (None, generate_esk_v1(rng)),
+        };
+
+        let encryptor = match SaplingNoteEncryption::new(
+            esk,
             self.ovk,
             self.note.clone(),
             self.to.clone(),
             self.memo,
-            rng,
-        );
-
+            rseed_input,
+        ) {
+            Some(encryption) => encryption,
+            None => return Err(Error::InconsistentRseed),
+        };
         let (zkproof, cv) = prover.output_proof(
             ctx,
             encryptor.esk().clone(),
@@ -121,18 +146,19 @@ impl SaplingOutput {
         let cmu = self.note.cm(&JUBJUB);
 
         let enc_ciphertext = encryptor.encrypt_note_plaintext();
+
         let out_ciphertext = encryptor.encrypt_outgoing_plaintext(&cv, &cmu);
 
         let ephemeral_key = encryptor.epk().clone().into();
 
-        OutputDescription {
+        Ok(OutputDescription {
             cv,
             cmu,
             ephemeral_key,
             enc_ciphertext,
             out_ciphertext,
             zkproof,
-        }
+        })
     }
 }
 
@@ -282,6 +308,7 @@ impl TransactionMetadata {
 /// Generates a [`Transaction`] from its inputs and outputs.
 pub struct Builder<R: RngCore + CryptoRng> {
     rng: R,
+    height: u32,
     mtx: TransactionData,
     fee: Amount,
     anchor: Option<Fr>,
@@ -322,6 +349,7 @@ impl<R: RngCore + CryptoRng> Builder<R> {
 
         Builder {
             rng,
+            height,
             mtx,
             fee: DEFAULT_FEE,
             anchor: None,
@@ -377,7 +405,15 @@ impl<R: RngCore + CryptoRng> Builder<R> {
         value: Amount,
         memo: Option<Memo>,
     ) -> Result<(), Error> {
-        let output = SaplingOutput::new(&mut self.rng, ovk, to, value, memo)?;
+        let output = SaplingOutput::new(
+            consensus::MainNetwork,
+            self.height,
+            &mut self.rng,
+            ovk,
+            to,
+            value,
+            memo,
+        )?;
 
         self.mtx.value_balance -= value;
 
@@ -432,8 +468,9 @@ impl<R: RngCore + CryptoRng> Builder<R> {
     /// targeting. An invalid `consensus_branch_id` will *not* result in an error from
     /// this function, and instead will generate a transaction that will be rejected by
     /// the network.
-    pub fn build(
+    pub fn build<P: consensus::Parameters>(
         mut self,
+        parameters: P,
         consensus_branch_id: consensus::BranchId,
         prover: &impl TxProver,
     ) -> Result<(Transaction, TransactionMetadata), Error> {
@@ -561,8 +598,9 @@ impl<R: RngCore + CryptoRng> Builder<R> {
                 // Record the post-randomized output location
                 tx_metadata.output_indices[pos] = i;
 
-                output.build(prover, &mut ctx, &mut self.rng)
+                output.build(prover, &mut ctx, &mut self.rng)?
             } else {
+                let esk;
                 // This is a dummy output
                 let (dummy_to, dummy_note) = {
                     let (diversifier, g_d) = {
@@ -588,18 +626,28 @@ impl<R: RngCore + CryptoRng> Builder<R> {
                         }
                     };
 
+                    let rcm = if !parameters.is_nu_active(NetworkUpgrade::Canopy, self.height) {
+                        esk = generate_esk_v1(&mut self.rng);
+                        Fs::random(&mut self.rng)
+                    } else {
+                        // rseed is a random 32-byte sequence
+                        let mut rseed = [0u8; 32];
+                        self.rng.fill_bytes(&mut rseed);
+                        esk = generate_esk_v2(rseed);
+                        Fs::to_uniform(prf_expand(&rseed, &[0x04]).as_bytes())
+                    };
+
                     (
                         payment_address,
                         Note {
                             g_d,
                             pk_d,
-                            r: Fs::random(&mut self.rng),
+                            r: rcm,
                             value: 0,
                         },
                     )
                 };
 
-                let esk = generate_esk(&mut self.rng);
                 let epk = dummy_note.g_d.mul(esk, &JUBJUB);
 
                 let (zkproof, cv) =
