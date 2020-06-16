@@ -19,7 +19,7 @@ fn main() {
 
     println!("Creating sample parameters...");
     let groth_params = generate_random_parameters::<Bls12, _, _>(
-        Spend {
+        Spend::<Bls12> {
             params: jubjub_params,
             value_commitment: None,
             proof_generation_key: None,
@@ -37,7 +37,7 @@ fn main() {
 
     let mut total_time = Duration::new(0, 0);
     for _ in 0..SAMPLES {
-        let value_commitment = ValueCommitment {
+        let value_commitment = ValueCommitment::<Bls12> {
             value: 1,
             randomness: fs::Fs::random(rng),
         };

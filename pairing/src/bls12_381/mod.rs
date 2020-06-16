@@ -23,7 +23,7 @@ pub use self::fr::{Fr, FrRepr};
 
 use super::{Engine, PairingCurveAffine};
 
-use ff::{BitIterator, Field, ScalarEngine};
+use ff::{BitIterator, Field};
 use group::CurveAffine;
 use std::ops::{AddAssign, MulAssign, Neg, SubAssign};
 use subtle::CtOption;
@@ -35,11 +35,8 @@ const BLS_X_IS_NEGATIVE: bool = true;
 #[derive(Clone, Debug)]
 pub struct Bls12;
 
-impl ScalarEngine for Bls12 {
-    type Fr = Fr;
-}
-
 impl Engine for Bls12 {
+    type Fr = Fr;
     type G1 = G1;
     type G1Affine = G1Affine;
     type G2 = G2;

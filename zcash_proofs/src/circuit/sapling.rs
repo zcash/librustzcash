@@ -74,7 +74,7 @@ fn expose_value_commitment<E, CS>(
 ) -> Result<Vec<boolean::Boolean>, SynthesisError>
 where
     E: JubjubEngine,
-    CS: ConstraintSystem<E>,
+    CS: ConstraintSystem<E::Fr>,
 {
     // Booleanize the value into little-endian bit order
     let value_bits = boolean::u64_into_boolean_vec_le(
@@ -83,7 +83,7 @@ where
     )?;
 
     // Compute the note value in the exponent
-    let value = ecc::fixed_base_multiplication(
+    let value = ecc::fixed_base_multiplication::<E, _>(
         cs.namespace(|| "compute the value in the exponent"),
         FixedGenerators::ValueCommitmentValue,
         &value_bits,
@@ -99,7 +99,7 @@ where
     )?;
 
     // Compute the randomness in the exponent
-    let rcv = ecc::fixed_base_multiplication(
+    let rcv = ecc::fixed_base_multiplication::<E, _>(
         cs.namespace(|| "computation of rcv"),
         FixedGenerators::ValueCommitmentRandomness,
         &rcv,
@@ -115,8 +115,8 @@ where
     Ok(value_bits)
 }
 
-impl<'a, E: JubjubEngine> Circuit<E> for Spend<'a, E> {
-    fn synthesize<CS: ConstraintSystem<E>>(self, cs: &mut CS) -> Result<(), SynthesisError> {
+impl<'a, E: JubjubEngine> Circuit<E::Fr> for Spend<'a, E> {
+    fn synthesize<CS: ConstraintSystem<E::Fr>>(self, cs: &mut CS) -> Result<(), SynthesisError> {
         // Prover witnesses ak (ensures that it's on the curve)
         let ak = ecc::EdwardsPoint::witness(
             cs.namespace(|| "ak"),
@@ -134,7 +134,7 @@ impl<'a, E: JubjubEngine> Circuit<E> for Spend<'a, E> {
             let ar = boolean::field_into_boolean_vec_le(cs.namespace(|| "ar"), self.ar)?;
 
             // Compute the randomness in the exponent
-            let ar = ecc::fixed_base_multiplication(
+            let ar = ecc::fixed_base_multiplication::<E, _>(
                 cs.namespace(|| "computation of randomization for the signing key"),
                 FixedGenerators::SpendingKeyGenerator,
                 &ar,
@@ -161,7 +161,7 @@ impl<'a, E: JubjubEngine> Circuit<E> for Spend<'a, E> {
             // congruency then that's equivalent.
 
             // Compute nk = [nsk] ProvingPublicKey
-            nk = ecc::fixed_base_multiplication(
+            nk = ecc::fixed_base_multiplication::<E, _>(
                 cs.namespace(|| "computation of nk"),
                 FixedGenerators::ProofGenerationKey,
                 &nsk,
@@ -266,7 +266,7 @@ impl<'a, E: JubjubEngine> Circuit<E> for Spend<'a, E> {
         );
 
         // Compute the hash of the note contents
-        let mut cm = pedersen_hash::pedersen_hash(
+        let mut cm = pedersen_hash::pedersen_hash::<E, _>(
             cs.namespace(|| "note content hash"),
             pedersen_hash::Personalization::NoteCommitment,
             &note_contents,
@@ -281,7 +281,7 @@ impl<'a, E: JubjubEngine> Circuit<E> for Spend<'a, E> {
             )?;
 
             // Compute the note commitment randomness in the exponent
-            let rcm = ecc::fixed_base_multiplication(
+            let rcm = ecc::fixed_base_multiplication::<E, _>(
                 cs.namespace(|| "computation of commitment randomness"),
                 FixedGenerators::NoteCommitmentRandomness,
                 &rcm,
@@ -342,7 +342,7 @@ impl<'a, E: JubjubEngine> Circuit<E> for Spend<'a, E> {
             preimage.extend(xr.to_bits_le(cs.namespace(|| "xr into bits"))?);
 
             // Compute the new subtree value
-            cur = pedersen_hash::pedersen_hash(
+            cur = pedersen_hash::pedersen_hash::<E, _>(
                 cs.namespace(|| "computation of pedersen hash"),
                 pedersen_hash::Personalization::MerkleTree(i),
                 &preimage,
@@ -379,7 +379,7 @@ impl<'a, E: JubjubEngine> Circuit<E> for Spend<'a, E> {
         let mut rho = cm;
         {
             // Compute the position in the exponent
-            let position = ecc::fixed_base_multiplication(
+            let position = ecc::fixed_base_multiplication::<E, _>(
                 cs.namespace(|| "g^position"),
                 FixedGenerators::NullifierPosition,
                 &position_bits,
@@ -410,8 +410,8 @@ impl<'a, E: JubjubEngine> Circuit<E> for Spend<'a, E> {
     }
 }
 
-impl<'a, E: JubjubEngine> Circuit<E> for Output<'a, E> {
-    fn synthesize<CS: ConstraintSystem<E>>(self, cs: &mut CS) -> Result<(), SynthesisError> {
+impl<'a, E: JubjubEngine> Circuit<E::Fr> for Output<'a, E> {
+    fn synthesize<CS: ConstraintSystem<E::Fr>>(self, cs: &mut CS) -> Result<(), SynthesisError> {
         // Let's start to construct our note, which contains
         // value (big endian)
         let mut note_contents = vec![];
@@ -494,7 +494,7 @@ impl<'a, E: JubjubEngine> Circuit<E> for Output<'a, E> {
         );
 
         // Compute the hash of the note contents
-        let mut cm = pedersen_hash::pedersen_hash(
+        let mut cm = pedersen_hash::pedersen_hash::<E, _>(
             cs.namespace(|| "note content hash"),
             pedersen_hash::Personalization::NoteCommitment,
             &note_contents,
@@ -509,7 +509,7 @@ impl<'a, E: JubjubEngine> Circuit<E> for Output<'a, E> {
             )?;
 
             // Compute the note commitment randomness in the exponent
-            let rcm = ecc::fixed_base_multiplication(
+            let rcm = ecc::fixed_base_multiplication::<E, _>(
                 cs.namespace(|| "computation of commitment randomness"),
                 FixedGenerators::NoteCommitmentRandomness,
                 &rcm,
@@ -556,7 +556,7 @@ fn test_input_circuit_with_bls12_381() {
     let tree_depth = 32;
 
     for _ in 0..10 {
-        let value_commitment = ValueCommitment {
+        let value_commitment = ValueCommitment::<Bls12> {
             value: rng.next_u64(),
             randomness: fs::Fs::random(rng),
         };
@@ -638,10 +638,10 @@ fn test_input_circuit_with_bls12_381() {
 
             let expected_nf = note.nf(&viewing_key, position, params);
             let expected_nf = multipack::bytes_to_bits_le(&expected_nf);
-            let expected_nf = multipack::compute_multipacking::<Bls12>(&expected_nf);
+            let expected_nf = multipack::compute_multipacking(&expected_nf);
             assert_eq!(expected_nf.len(), 2);
 
-            let mut cs = TestConstraintSystem::<Bls12>::new();
+            let mut cs = TestConstraintSystem::new();
 
             let instance = Spend {
                 params,
@@ -732,7 +732,7 @@ fn test_input_circuit_with_bls12_381_external_test_vectors() {
     ];
 
     for i in 0..10 {
-        let value_commitment = ValueCommitment {
+        let value_commitment = ValueCommitment::<Bls12> {
             value: i,
             randomness: fs::Fs::from_str(&(1000 * (i + 1)).to_string()).unwrap(),
         };
@@ -822,10 +822,10 @@ fn test_input_circuit_with_bls12_381_external_test_vectors() {
 
             let expected_nf = note.nf(&viewing_key, position, params);
             let expected_nf = multipack::bytes_to_bits_le(&expected_nf);
-            let expected_nf = multipack::compute_multipacking::<Bls12>(&expected_nf);
+            let expected_nf = multipack::compute_multipacking(&expected_nf);
             assert_eq!(expected_nf.len(), 2);
 
-            let mut cs = TestConstraintSystem::<Bls12>::new();
+            let mut cs = TestConstraintSystem::new();
 
             let instance = Spend {
                 params: params,
@@ -887,7 +887,7 @@ fn test_output_circuit_with_bls12_381() {
     ]);
 
     for _ in 0..100 {
-        let value_commitment = ValueCommitment {
+        let value_commitment = ValueCommitment::<Bls12> {
             value: rng.next_u64(),
             randomness: fs::Fs::random(rng),
         };
@@ -921,7 +921,7 @@ fn test_output_circuit_with_bls12_381() {
         let esk = fs::Fs::random(rng);
 
         {
-            let mut cs = TestConstraintSystem::<Bls12>::new();
+            let mut cs = TestConstraintSystem::new();
 
             let instance = Output {
                 params,

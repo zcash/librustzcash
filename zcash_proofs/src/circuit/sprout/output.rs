@@ -1,6 +1,6 @@
 use bellman::gadgets::boolean::Boolean;
 use bellman::{ConstraintSystem, SynthesisError};
-use pairing::Engine;
+use ff::PrimeField;
 
 use super::commitment::note_comm;
 use super::prfs::*;
@@ -11,7 +11,7 @@ pub struct OutputNote {
 }
 
 impl OutputNote {
-    pub fn compute<E, CS>(
+    pub fn compute<Scalar, CS>(
         mut cs: CS,
         a_pk: Option<PayingKey>,
         value: &NoteValue,
@@ -21,8 +21,8 @@ impl OutputNote {
         nonce: bool,
     ) -> Result<Self, SynthesisError>
     where
-        E: Engine,
-        CS: ConstraintSystem<E>,
+        Scalar: PrimeField,
+        CS: ConstraintSystem<Scalar>,
     {
         let rho = prf_rho(cs.namespace(|| "rho"), phi, h_sig, nonce)?;
 
