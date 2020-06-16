@@ -198,8 +198,8 @@ mod tests {
             let nu_a = UPGRADES_IN_ORDER[i - 1];
             let nu_b = UPGRADES_IN_ORDER[i];
             match (
-                MainNetwork::activation_height(nu_a),
-                MainNetwork::activation_height(nu_b),
+                MainNetwork.activation_height(nu_a),
+                MainNetwork.activation_height(nu_b),
             ) {
                 (Some(a), Some(b)) if a < b => (),
                 (Some(_), None) => (),
@@ -214,15 +214,9 @@ mod tests {
 
     #[test]
     fn nu_is_active() {
-        assert!(!MainNetwork::is_nu_active(NetworkUpgrade::Overwinter, 0));
-        assert!(!MainNetwork::is_nu_active(
-            NetworkUpgrade::Overwinter,
-            347_499
-        ));
-        assert!(MainNetwork::is_nu_active(
-            NetworkUpgrade::Overwinter,
-            347_500
-        ));
+        assert!(!MainNetwork.is_nu_active(NetworkUpgrade::Overwinter, 0));
+        assert!(!MainNetwork.is_nu_active(NetworkUpgrade::Overwinter, 347_499));
+        assert!(MainNetwork.is_nu_active(NetworkUpgrade::Overwinter, 347_500));
     }
 
     #[test]
@@ -233,17 +227,20 @@ mod tests {
 
     #[test]
     fn branch_id_for_height() {
-        assert_eq!(BranchId::for_height::<MainNetwork>(0), BranchId::Sprout,);
         assert_eq!(
-            BranchId::for_height::<MainNetwork>(419_199),
+            BranchId::for_height::<MainNetwork>(MainNetwork, 0),
+            BranchId::Sprout,
+        );
+        assert_eq!(
+            BranchId::for_height::<MainNetwork>(MainNetwork, 419_199),
             BranchId::Overwinter,
         );
         assert_eq!(
-            BranchId::for_height::<MainNetwork>(419_200),
+            BranchId::for_height::<MainNetwork>(MainNetwork, 419_200),
             BranchId::Sapling,
         );
         assert_eq!(
-            BranchId::for_height::<MainNetwork>(1_000_000),
+            BranchId::for_height::<MainNetwork>(MainNetwork, 1_000_000),
             BranchId::Heartwood,
         );
     }

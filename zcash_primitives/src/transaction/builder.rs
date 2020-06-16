@@ -761,6 +761,7 @@ mod tests {
         // Create a builder with 0 fee, so we can construct t outputs
         let mut builder = builder::Builder {
             rng: OsRng,
+            height: 0,
             mtx: TransactionData::new(),
             fee: Amount::zero(),
             anchor: None,
@@ -776,7 +777,11 @@ mod tests {
             .unwrap();
 
         let (tx, _) = builder
-            .build(consensus::BranchId::Sapling, &MockTxProver)
+            .build(
+                consensus::MainNetwork,
+                consensus::BranchId::Sapling,
+                &MockTxProver,
+            )
             .unwrap();
         // No binding signature, because only t input and outputs
         assert!(tx.binding_sig.is_none());
@@ -817,7 +822,11 @@ mod tests {
         // Expect a binding signature error, because our inputs aren't valid, but this shows
         // that a binding signature was attempted
         assert_eq!(
-            builder.build(consensus::BranchId::Sapling, &MockTxProver),
+            builder.build(
+                consensus::MainNetwork,
+                consensus::BranchId::Sapling,
+                &MockTxProver
+            ),
             Err(Error::BindingSig)
         );
     }
@@ -846,7 +855,11 @@ mod tests {
         {
             let builder = Builder::new(0);
             assert_eq!(
-                builder.build(consensus::BranchId::Sapling, &MockTxProver),
+                builder.build(
+                    consensus::MainNetwork,
+                    consensus::BranchId::Sapling,
+                    &MockTxProver
+                ),
                 Err(Error::ChangeIsNegative(Amount::from_i64(-10000).unwrap()))
             );
         }
@@ -868,7 +881,11 @@ mod tests {
                 )
                 .unwrap();
             assert_eq!(
-                builder.build(consensus::BranchId::Sapling, &MockTxProver),
+                builder.build(
+                    consensus::MainNetwork,
+                    consensus::BranchId::Sapling,
+                    &MockTxProver
+                ),
                 Err(Error::ChangeIsNegative(Amount::from_i64(-60000).unwrap()))
             );
         }
@@ -884,7 +901,11 @@ mod tests {
                 )
                 .unwrap();
             assert_eq!(
-                builder.build(consensus::BranchId::Sapling, &MockTxProver),
+                builder.build(
+                    consensus::MainNetwork,
+                    consensus::BranchId::Sapling,
+                    &MockTxProver
+                ),
                 Err(Error::ChangeIsNegative(Amount::from_i64(-60000).unwrap()))
             );
         }
@@ -924,7 +945,11 @@ mod tests {
                 )
                 .unwrap();
             assert_eq!(
-                builder.build(consensus::BranchId::Sapling, &MockTxProver),
+                builder.build(
+                    consensus::MainNetwork,
+                    consensus::BranchId::Sapling,
+                    &MockTxProver
+                ),
                 Err(Error::ChangeIsNegative(Amount::from_i64(-1).unwrap()))
             );
         }
@@ -963,7 +988,11 @@ mod tests {
                 )
                 .unwrap();
             assert_eq!(
-                builder.build(consensus::BranchId::Sapling, &MockTxProver),
+                builder.build(
+                    consensus::MainNetwork,
+                    consensus::BranchId::Sapling,
+                    &MockTxProver
+                ),
                 Err(Error::BindingSig)
             )
         }

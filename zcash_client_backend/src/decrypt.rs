@@ -1,5 +1,6 @@
 use pairing::bls12_381::Bls12;
 use zcash_primitives::{
+    consensus,
     note_encryption::{try_sapling_note_decryption, try_sapling_output_recovery, Memo},
     primitives::{Note, PaymentAddress},
     transaction::Transaction,
@@ -26,9 +27,12 @@ pub struct DecryptedOutput {
     pub outgoing: bool,
 }
 
+const DEFAULT_TX_EXPIRY_DELTA: u32 = 20;
+
 /// Scans a [`Transaction`] for any information that can be decrypted by the set of
 /// [`ExtendedFullViewingKey`]s.
-pub fn decrypt_transaction(
+pub fn decrypt_transaction<P: consensus::Parameters>(
+    parameters: &P,
     tx: &Transaction,
     extfvks: &[ExtendedFullViewingKey],
 ) -> Vec<DecryptedOutput> {
@@ -45,23 +49,32 @@ pub fn decrypt_transaction(
             Some(p) => p,
             None => continue,
         };
+        let height = tx.expiry_height - DEFAULT_TX_EXPIRY_DELTA;
 
         for (ivk, ovk) in &vks {
-            let ((note, to, memo), outgoing) =
-                match try_sapling_note_decryption(ivk, &epk, &output.cmu, &output.enc_ciphertext) {
-                    Some(ret) => (ret, false),
-                    None => match try_sapling_output_recovery(
-                        ovk,
-                        &output.cv,
-                        &output.cmu,
-                        &epk,
-                        &output.enc_ciphertext,
-                        &output.out_ciphertext,
-                    ) {
-                        Some(ret) => (ret, true),
-                        None => continue,
-                    },
-                };
+            let ((note, to, memo), outgoing) = match try_sapling_note_decryption(
+                parameters,
+                height,
+                ivk,
+                &epk,
+                &output.cmu,
+                &output.enc_ciphertext,
+            ) {
+                Some(ret) => (ret, false),
+                None => match try_sapling_output_recovery(
+                    parameters,
+                    height,
+                    ovk,
+                    &output.cv,
+                    &output.cmu,
+                    &epk,
+                    &output.enc_ciphertext,
+                    &output.out_ciphertext,
+                ) {
+                    Some(ret) => (ret, true),
+                    None => continue,
+                },
+            };
             decrypted.push(DecryptedOutput {
                 index,
                 note,
