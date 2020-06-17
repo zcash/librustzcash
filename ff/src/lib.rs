@@ -213,6 +213,8 @@ pub trait PrimeField: Field + From<u64> {
     fn root_of_unity() -> Self;
 }
 
+/// Takes a little-endian representation of some value, and returns its bits in big-endian
+/// order.
 #[derive(Debug)]
 pub struct BitIterator<T, E: AsRef<[T]>> {
     t: E,

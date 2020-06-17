@@ -22,7 +22,10 @@ pub mod bls12_381;
 
 use core::ops::Mul;
 use ff::{Field, PrimeField};
-use group::{CurveAffine, CurveProjective, GroupOps, GroupOpsOwned, ScalarMul, ScalarMulOwned};
+use group::{
+    cofactor::{CofactorCurve, CofactorCurveAffine},
+    GroupOps, GroupOpsOwned, ScalarMul, ScalarMulOwned, UncompressedEncoding,
+};
 
 /// An "engine" is a collection of types (fields, elliptic curve groups, etc.)
 /// with well-defined relationships. In particular, the G1/G2 curve groups are
@@ -32,7 +35,7 @@ pub trait Engine: Sized + 'static + Clone {
     type Fr: PrimeField;
 
     /// The projective representation of an element in G1.
-    type G1: CurveProjective<Scalar = Self::Fr, Affine = Self::G1Affine>
+    type G1: CofactorCurve<Scalar = Self::Fr, Affine = Self::G1Affine>
         + From<Self::G1Affine>
         + GroupOps<Self::G1Affine>
         + GroupOpsOwned<Self::G1Affine>
@@ -42,7 +45,7 @@ pub trait Engine: Sized + 'static + Clone {
     /// The affine representation of an element in G1.
     type G1Affine: PairingCurveAffine<
             Scalar = Self::Fr,
-            Projective = Self::G1,
+            Curve = Self::G1,
             Pair = Self::G2Affine,
             PairingResult = Self::Gt,
         > + From<Self::G1>
@@ -50,7 +53,7 @@ pub trait Engine: Sized + 'static + Clone {
         + for<'a> Mul<&'a Self::Fr, Output = Self::G1>;
 
     /// The projective representation of an element in G2.
-    type G2: CurveProjective<Scalar = Self::Fr, Affine = Self::G2Affine>
+    type G2: CofactorCurve<Scalar = Self::Fr, Affine = Self::G2Affine>
         + From<Self::G2Affine>
         + GroupOps<Self::G2Affine>
         + GroupOpsOwned<Self::G2Affine>
@@ -60,7 +63,7 @@ pub trait Engine: Sized + 'static + Clone {
     /// The affine representation of an element in G2.
     type G2Affine: PairingCurveAffine<
             Scalar = Self::Fr,
-            Projective = Self::G2,
+            Curve = Self::G2,
             Pair = Self::G1Affine,
             PairingResult = Self::Gt,
         > + From<Self::G2>
@@ -77,7 +80,7 @@ pub trait Engine: Sized + 'static + Clone {
 
 /// Affine representation of an elliptic curve point that can be used
 /// to perform pairings.
-pub trait PairingCurveAffine: CurveAffine {
+pub trait PairingCurveAffine: CofactorCurveAffine + UncompressedEncoding {
     type Pair: PairingCurveAffine<Pair = Self>;
     type PairingResult: Field;
 

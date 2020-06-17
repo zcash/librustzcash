@@ -1,5 +1,5 @@
 use ff::{Endianness, Field, PrimeField};
-use group::{CurveAffine, CurveProjective, Group};
+use group::{cofactor::CofactorCurveAffine, Curve, Group};
 use rand_core::SeedableRng;
 use rand_xorshift::XorShiftRng;
 use std::ops::MulAssign;

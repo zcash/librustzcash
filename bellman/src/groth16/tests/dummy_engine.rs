@@ -1,5 +1,9 @@
 use ff::{Field, PrimeField};
-use group::{CurveAffine, CurveProjective, Group, PrimeGroup};
+use group::{
+    cofactor::{CofactorCurve, CofactorCurveAffine, CofactorGroup},
+    prime::PrimeGroup,
+    Curve, Group, GroupEncoding, UncompressedEncoding, WnafGroup,
+};
 use pairing::{Engine, MillerLoopResult, MultiMillerLoop, PairingCurveAffine};
 
 use rand_core::RngCore;
@@ -367,7 +371,6 @@ impl MillerLoopResult for Fr {
 }
 
 impl Group for Fr {
-    type Subgroup = Fr;
     type Scalar = Fr;
 
     fn random<R: RngCore + ?Sized>(rng: &mut R) -> Self {
@@ -393,21 +396,27 @@ impl Group for Fr {
 
 impl PrimeGroup for Fr {}
 
-impl CurveProjective for Fr {
-    type Affine = Fr;
+impl CofactorGroup for Fr {
+    type Subgroup = Fr;
 
-    fn batch_normalize(p: &[Self], q: &mut [Self::Affine]) {
-        assert_eq!(p.len(), q.len());
-
-        for (p, q) in p.iter().zip(q.iter_mut()) {
-            *q = p.to_affine();
-        }
+    fn mul_by_cofactor(&self) -> Self::Subgroup {
+        *self
     }
+
+    fn into_subgroup(self) -> CtOption<Self::Subgroup> {
+        CtOption::new(self, Choice::from(1))
+    }
+}
+
+impl Curve for Fr {
+    type AffineRepr = Fr;
 
     fn to_affine(&self) -> Fr {
         *self
     }
+}
 
+impl WnafGroup for Fr {
     fn recommended_wnaf_for_scalar(_: &Self::Scalar) -> usize {
         3
     }
@@ -415,6 +424,10 @@ impl CurveProjective for Fr {
     fn recommended_wnaf_for_num_scalars(_: usize) -> usize {
         3
     }
+}
+
+impl CofactorCurve for Fr {
+    type Affine = Fr;
 }
 
 #[derive(Copy, Clone, Default)]
@@ -432,10 +445,8 @@ impl AsRef<[u8]> for FakePoint {
     }
 }
 
-impl CurveAffine for Fr {
-    type Compressed = FakePoint;
-    type Uncompressed = FakePoint;
-    type Projective = Fr;
+impl CofactorCurveAffine for Fr {
+    type Curve = Fr;
     type Scalar = Fr;
 
     fn identity() -> Self {
@@ -450,21 +461,29 @@ impl CurveAffine for Fr {
         Choice::from(if <Fr as Field>::is_zero(self) { 1 } else { 0 })
     }
 
-    fn to_projective(&self) -> Self::Projective {
+    fn to_curve(&self) -> Self::Curve {
         *self
     }
+}
 
-    fn from_compressed(_bytes: &Self::Compressed) -> CtOption<Self> {
+impl GroupEncoding for Fr {
+    type Repr = FakePoint;
+
+    fn from_bytes(_bytes: &Self::Repr) -> CtOption<Self> {
         unimplemented!()
     }
 
-    fn from_compressed_unchecked(_bytes: &Self::Compressed) -> CtOption<Self> {
+    fn from_bytes_unchecked(_bytes: &Self::Repr) -> CtOption<Self> {
         unimplemented!()
     }
 
-    fn to_compressed(&self) -> Self::Compressed {
+    fn to_bytes(&self) -> Self::Repr {
         unimplemented!()
     }
+}
+
+impl UncompressedEncoding for Fr {
+    type Uncompressed = FakePoint;
 
     fn from_uncompressed(_bytes: &Self::Uncompressed) -> CtOption<Self> {
         unimplemented!()

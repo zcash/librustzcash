@@ -8,10 +8,12 @@ use std::iter::Sum;
 use std::ops::{Add, AddAssign, Mul, MulAssign, Neg, Sub, SubAssign};
 use subtle::{Choice, CtOption};
 
+pub mod cofactor;
+pub mod prime;
 pub mod tests;
 
 mod wnaf;
-pub use self::wnaf::Wnaf;
+pub use self::wnaf::{Wnaf, WnafGroup};
 
 /// A helper trait for types with a group operation.
 pub trait GroupOps<Rhs = Self, Output = Self>:
@@ -54,16 +56,10 @@ pub trait Group:
     + Neg<Output = Self>
     + GroupOps
     + GroupOpsOwned
-    + GroupOps<<Self as Group>::Subgroup>
-    + GroupOpsOwned<<Self as Group>::Subgroup>
     + ScalarMul<<Self as Group>::Scalar>
     + ScalarMulOwned<<Self as Group>::Scalar>
 {
-    /// The large prime-order subgroup in which cryptographic operations are performed.
-    /// If `Self` implements `PrimeGroup`, then `Self::Subgroup` may be `Self`.
-    type Subgroup: PrimeGroup;
-
-    /// Scalars modulo the order of [`Group::Subgroup`].
+    /// Scalars modulo the order of this group's scalar field.
     type Scalar: PrimeField;
 
     /// Returns an element chosen uniformly at random using a user-provided RNG.
@@ -73,7 +69,7 @@ pub trait Group:
     fn identity() -> Self;
 
     /// Returns a fixed generator of the prime-order subgroup.
-    fn generator() -> Self::Subgroup;
+    fn generator() -> Self;
 
     /// Determines if this point is the identity.
     fn is_identity(&self) -> Choice;
@@ -83,85 +79,51 @@ pub trait Group:
     fn double(&self) -> Self;
 }
 
-/// This trait represents an element of a prime-order cryptographic group.
-pub trait PrimeGroup: Group {}
-
-/// Projective representation of an elliptic curve point guaranteed to be
-/// in the correct prime order subgroup.
-pub trait CurveProjective:
-    Group
-    + GroupOps<<Self as CurveProjective>::Affine>
-    + GroupOpsOwned<<Self as CurveProjective>::Affine>
+/// Efficient representation of an elliptic curve point guaranteed.
+pub trait Curve:
+    Group + GroupOps<<Self as Curve>::AffineRepr> + GroupOpsOwned<<Self as Curve>::AffineRepr>
 {
-    type Affine: CurveAffine<Projective = Self, Scalar = Self::Scalar>
-        + Mul<Self::Scalar, Output = Self>
-        + for<'r> Mul<Self::Scalar, Output = Self>;
+    /// The affine representation for this elliptic curve.
+    type AffineRepr;
 
     /// Converts a batch of projective elements into affine elements. This function will
     /// panic if `p.len() != q.len()`.
-    fn batch_normalize(p: &[Self], q: &mut [Self::Affine]);
+    fn batch_normalize(p: &[Self], q: &mut [Self::AffineRepr]) {
+        assert_eq!(p.len(), q.len());
+
+        for (p, q) in p.iter().zip(q.iter_mut()) {
+            *q = p.to_affine();
+        }
+    }
 
     /// Converts this element into its affine representation.
-    fn to_affine(&self) -> Self::Affine;
-
-    /// Recommends a wNAF window table size given a scalar. Always returns a number
-    /// between 2 and 22, inclusive.
-    fn recommended_wnaf_for_scalar(scalar: &Self::Scalar) -> usize;
-
-    /// Recommends a wNAF window size given the number of scalars you intend to multiply
-    /// a base by. Always returns a number between 2 and 22, inclusive.
-    fn recommended_wnaf_for_num_scalars(num_scalars: usize) -> usize;
+    fn to_affine(&self) -> Self::AffineRepr;
 }
 
-/// Affine representation of an elliptic curve point guaranteed to be
-/// in the correct prime order subgroup.
-pub trait CurveAffine:
-    Copy
-    + Clone
-    + Sized
-    + Send
-    + Sync
-    + fmt::Debug
-    + fmt::Display
-    + PartialEq
-    + Eq
-    + 'static
-    + Neg<Output = Self>
-    + Mul<<Self as CurveAffine>::Scalar, Output = <Self as CurveAffine>::Projective>
-    + for<'r> Mul<<Self as CurveAffine>::Scalar, Output = <Self as CurveAffine>::Projective>
-{
-    type Scalar: PrimeField;
-    type Projective: CurveProjective<Affine = Self, Scalar = Self::Scalar>;
-    type Uncompressed: Default + AsRef<[u8]> + AsMut<[u8]>;
-    type Compressed: Default + AsRef<[u8]> + AsMut<[u8]>;
+pub trait GroupEncoding: Sized {
+    /// The encoding of group elements.
+    type Repr: Default + AsRef<[u8]> + AsMut<[u8]>;
 
-    /// Returns the additive identity.
-    fn identity() -> Self;
+    /// Attempts to deserialize a group element from its encoding.
+    fn from_bytes(bytes: &Self::Repr) -> CtOption<Self>;
 
-    /// Returns a fixed generator of unknown exponent.
-    fn generator() -> Self;
-
-    /// Determines if this point represents the point at infinity; the
-    /// additive identity.
-    fn is_identity(&self) -> Choice;
-
-    /// Converts this element into its affine representation.
-    fn to_projective(&self) -> Self::Projective;
-
-    /// Attempts to deserialize an element from its compressed encoding.
-    fn from_compressed(bytes: &Self::Compressed) -> CtOption<Self>;
-
-    /// Attempts to deserialize a compressed element, not checking if the element is in
-    /// the correct subgroup.
+    /// Attempts to deserialize a group element, not checking if the element is valid.
     ///
     /// **This is dangerous to call unless you trust the bytes you are reading; otherwise,
     /// API invariants may be broken.** Please consider using
-    /// [`CurveAffine::from_compressed`] instead.
-    fn from_compressed_unchecked(bytes: &Self::Compressed) -> CtOption<Self>;
+    /// [`GroupEncoding::from_bytes`] instead.
+    fn from_bytes_unchecked(bytes: &Self::Repr) -> CtOption<Self>;
 
-    /// Converts this element into its compressed encoding, so long as it's not
-    /// the point at infinity.
-    fn to_compressed(&self) -> Self::Compressed;
+    /// Converts this element into its byte encoding. This may or may not support
+    /// encoding the identity.
+    // TODO: Figure out how to handle identity encoding generically.
+    fn to_bytes(&self) -> Self::Repr;
+}
+
+/// Affine representation of a point on an elliptic curve that has a defined uncompressed
+/// encoding.
+pub trait UncompressedEncoding: Sized {
+    type Uncompressed: Default + AsRef<[u8]> + AsMut<[u8]>;
 
     /// Attempts to deserialize an element from its uncompressed encoding.
     fn from_uncompressed(bytes: &Self::Uncompressed) -> CtOption<Self>;
@@ -171,7 +133,7 @@ pub trait CurveAffine:
     ///
     /// **This is dangerous to call unless you trust the bytes you are reading; otherwise,
     /// API invariants may be broken.** Please consider using
-    /// [`CurveAffine::from_uncompressed`] instead.
+    /// [`UncompressedEncoding::from_uncompressed`] instead.
     fn from_uncompressed_unchecked(bytes: &Self::Uncompressed) -> CtOption<Self>;
 
     /// Converts this element into its uncompressed encoding, so long as it's not

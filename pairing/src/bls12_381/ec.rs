@@ -2,6 +2,7 @@ macro_rules! curve_impl {
     (
         $name:expr,
         $projective:ident,
+        $subgroup:ident,
         $affine:ident,
         $basefield:ident,
         $scalarfield:ident,
@@ -97,6 +98,21 @@ macro_rules! curve_impl {
                 }
 
                 true
+            }
+        }
+
+        #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+        pub struct $subgroup($projective);
+
+        impl ::std::fmt::Display for $subgroup {
+            fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+                write!(f, "{}", self.0)
+            }
+        }
+
+        impl From<$subgroup> for $projective {
+            fn from(val: $subgroup) -> $projective {
+                val.0
             }
         }
 
@@ -197,11 +213,9 @@ macro_rules! curve_impl {
             }
         }
 
-        impl CurveAffine for $affine {
+        impl CofactorCurveAffine for $affine {
             type Scalar = $scalarfield;
-            type Projective = $projective;
-            type Uncompressed = $uncompressed;
-            type Compressed = $compressed;
+            type Curve = $projective;
 
             fn identity() -> Self {
                 $affine {
@@ -219,12 +233,80 @@ macro_rules! curve_impl {
                 Choice::from(if self.infinity { 1 } else { 0 })
             }
 
-            fn to_projective(&self) -> $projective {
+            fn to_curve(&self) -> $projective {
                 (*self).into()
             }
+        }
 
-            fn from_compressed(bytes: &Self::Compressed) -> CtOption<Self> {
-                Self::from_compressed_unchecked(bytes).and_then(|affine| {
+        impl GroupEncoding for $projective {
+            type Repr = $compressed;
+
+            fn from_bytes(bytes: &Self::Repr) -> CtOption<Self> {
+                if let Ok(affine) = bytes.into_affine_unchecked() {
+                    // NB: Decompression guarantees that it is on the curve already.
+                    CtOption::new(
+                        affine.into(),
+                        Choice::from(if affine.is_in_correct_subgroup_assuming_on_curve() {
+                            1
+                        } else {
+                            0
+                        }),
+                    )
+                } else {
+                    CtOption::new(Self::identity(), Choice::from(0))
+                }
+            }
+
+            fn from_bytes_unchecked(bytes: &Self::Repr) -> CtOption<Self> {
+                if let Ok(p) = bytes.into_affine_unchecked() {
+                    CtOption::new(p.into(), Choice::from(1))
+                } else {
+                    CtOption::new(Self::identity(), Choice::from(0))
+                }
+            }
+
+            fn to_bytes(&self) -> Self::Repr {
+                self.to_affine().to_bytes()
+            }
+        }
+
+        impl GroupEncoding for $subgroup {
+            type Repr = $compressed;
+
+            fn from_bytes(bytes: &Self::Repr) -> CtOption<Self> {
+                if let Ok(affine) = bytes.into_affine_unchecked() {
+                    // NB: Decompression guarantees that it is on the curve already.
+                    CtOption::new(
+                        $subgroup(affine.into()),
+                        Choice::from(if affine.is_in_correct_subgroup_assuming_on_curve() {
+                            1
+                        } else {
+                            0
+                        }),
+                    )
+                } else {
+                    CtOption::new(Self::identity(), Choice::from(0))
+                }
+            }
+
+            fn from_bytes_unchecked(bytes: &Self::Repr) -> CtOption<Self> {
+                if let Ok(p) = bytes.into_affine_unchecked() {
+                    CtOption::new($subgroup(p.into()), Choice::from(1))
+                } else {
+                    CtOption::new(Self::identity(), Choice::from(0))
+                }
+            }
+
+            fn to_bytes(&self) -> Self::Repr {
+                self.0.to_bytes()
+            }
+        }
+
+        impl GroupEncoding for $affine {
+            type Repr = $compressed;
+
+            fn from_bytes(bytes: &Self::Repr) -> CtOption<Self> {
+                Self::from_bytes_unchecked(bytes).and_then(|affine| {
                     // NB: Decompression guarantees that it is on the curve already.
                     CtOption::new(
                         affine,
@@ -237,7 +319,7 @@ macro_rules! curve_impl {
                 })
             }
 
-            fn from_compressed_unchecked(bytes: &Self::Compressed) -> CtOption<Self> {
+            fn from_bytes_unchecked(bytes: &Self::Repr) -> CtOption<Self> {
                 if let Ok(p) = bytes.into_affine_unchecked() {
                     CtOption::new(p, Choice::from(1))
                 } else {
@@ -245,9 +327,13 @@ macro_rules! curve_impl {
                 }
             }
 
-            fn to_compressed(&self) -> Self::Compressed {
+            fn to_bytes(&self) -> Self::Repr {
                 $compressed::from_affine(*self)
             }
+        }
+
+        impl UncompressedEncoding for $affine {
+            type Uncompressed = $uncompressed;
 
             fn from_uncompressed(bytes: &Self::Uncompressed) -> CtOption<Self> {
                 Self::from_uncompressed_unchecked(bytes).and_then(|affine| {
@@ -460,30 +546,28 @@ macro_rules! curve_impl {
             }
         }
 
-        impl<'r> ::std::ops::Add<&'r <$projective as CurveProjective>::Affine> for $projective {
+        impl<'r> ::std::ops::Add<&'r $affine> for $projective {
             type Output = Self;
 
             #[inline]
-            fn add(self, other: &<$projective as CurveProjective>::Affine) -> Self {
+            fn add(self, other: &$affine) -> Self {
                 let mut ret = self;
                 ret.add_assign(other);
                 ret
             }
         }
 
-        impl ::std::ops::Add<<$projective as CurveProjective>::Affine> for $projective {
+        impl ::std::ops::Add<$affine> for $projective {
             type Output = Self;
 
             #[inline]
-            fn add(self, other: <$projective as CurveProjective>::Affine) -> Self {
+            fn add(self, other: $affine) -> Self {
                 self + &other
             }
         }
 
-        impl<'r> ::std::ops::AddAssign<&'r <$projective as CurveProjective>::Affine>
-            for $projective
-        {
-            fn add_assign(&mut self, other: &<$projective as CurveProjective>::Affine) {
+        impl<'r> ::std::ops::AddAssign<&'r $affine> for $projective {
+            fn add_assign(&mut self, other: &$affine) {
                 if other.is_identity().into() {
                     return;
                 }
@@ -561,44 +645,42 @@ macro_rules! curve_impl {
             }
         }
 
-        impl ::std::ops::AddAssign<<$projective as CurveProjective>::Affine> for $projective {
+        impl ::std::ops::AddAssign<$affine> for $projective {
             #[inline]
-            fn add_assign(&mut self, other: <$projective as CurveProjective>::Affine) {
+            fn add_assign(&mut self, other: $affine) {
                 self.add_assign(&other);
             }
         }
 
-        impl<'r> ::std::ops::Sub<&'r <$projective as CurveProjective>::Affine> for $projective {
+        impl<'r> ::std::ops::Sub<&'r $affine> for $projective {
             type Output = Self;
 
             #[inline]
-            fn sub(self, other: &<$projective as CurveProjective>::Affine) -> Self {
+            fn sub(self, other: &$affine) -> Self {
                 let mut ret = self;
                 ret.sub_assign(other);
                 ret
             }
         }
 
-        impl ::std::ops::Sub<<$projective as CurveProjective>::Affine> for $projective {
+        impl ::std::ops::Sub<$affine> for $projective {
             type Output = Self;
 
             #[inline]
-            fn sub(self, other: <$projective as CurveProjective>::Affine) -> Self {
+            fn sub(self, other: $affine) -> Self {
                 self - &other
             }
         }
 
-        impl<'r> ::std::ops::SubAssign<&'r <$projective as CurveProjective>::Affine>
-            for $projective
-        {
-            fn sub_assign(&mut self, other: &<$projective as CurveProjective>::Affine) {
+        impl<'r> ::std::ops::SubAssign<&'r $affine> for $projective {
+            fn sub_assign(&mut self, other: &$affine) {
                 self.add_assign(&other.neg());
             }
         }
 
-        impl ::std::ops::SubAssign<<$projective as CurveProjective>::Affine> for $projective {
+        impl ::std::ops::SubAssign<$affine> for $projective {
             #[inline]
-            fn sub_assign(&mut self, other: <$projective as CurveProjective>::Affine) {
+            fn sub_assign(&mut self, other: $affine) {
                 self.sub_assign(&other);
             }
         }
@@ -649,8 +731,182 @@ macro_rules! curve_impl {
             }
         }
 
+        impl ::std::iter::Sum for $subgroup {
+            fn sum<I: Iterator<Item = Self>>(iter: I) -> Self {
+                iter.fold(Self::identity(), ::std::ops::Add::add)
+            }
+        }
+
+        impl<'r> ::std::iter::Sum<&'r $subgroup> for $subgroup {
+            fn sum<I: Iterator<Item = &'r Self>>(iter: I) -> Self {
+                iter.fold(Self::identity(), ::std::ops::Add::add)
+            }
+        }
+
+        impl ::std::ops::Neg for $subgroup {
+            type Output = Self;
+
+            #[inline]
+            fn neg(self) -> Self {
+                $subgroup(self.0.neg())
+            }
+        }
+
+        impl<'r> ::std::ops::Add<&'r $subgroup> for $projective {
+            type Output = Self;
+
+            #[inline]
+            fn add(self, other: &$subgroup) -> Self {
+                self + &other.0
+            }
+        }
+
+        impl ::std::ops::Add<$subgroup> for $projective {
+            type Output = Self;
+
+            #[inline]
+            fn add(self, other: $subgroup) -> Self {
+                self + &other.0
+            }
+        }
+
+        impl<'r> ::std::ops::AddAssign<&'r $subgroup> for $projective {
+            fn add_assign(&mut self, other: &$subgroup) {
+                self.add_assign(&other.0)
+            }
+        }
+
+        impl ::std::ops::AddAssign<$subgroup> for $projective {
+            #[inline]
+            fn add_assign(&mut self, other: $subgroup) {
+                self.add_assign(&other.0);
+            }
+        }
+
+        impl<'r> ::std::ops::Sub<&'r $subgroup> for $projective {
+            type Output = Self;
+
+            #[inline]
+            fn sub(self, other: &$subgroup) -> Self {
+                self - &other.0
+            }
+        }
+
+        impl ::std::ops::Sub<$subgroup> for $projective {
+            type Output = Self;
+
+            #[inline]
+            fn sub(self, other: $subgroup) -> Self {
+                self - &other.0
+            }
+        }
+
+        impl<'r> ::std::ops::SubAssign<&'r $subgroup> for $projective {
+            fn sub_assign(&mut self, other: &$subgroup) {
+                self.sub_assign(&other.0);
+            }
+        }
+
+        impl ::std::ops::SubAssign<$subgroup> for $projective {
+            #[inline]
+            fn sub_assign(&mut self, other: $subgroup) {
+                self.sub_assign(&other.0);
+            }
+        }
+
+        impl<'r> ::std::ops::Add<&'r $subgroup> for $subgroup {
+            type Output = Self;
+
+            #[inline]
+            fn add(self, other: &$subgroup) -> Self {
+                $subgroup(self.0 + &other.0)
+            }
+        }
+
+        impl ::std::ops::Add<$subgroup> for $subgroup {
+            type Output = Self;
+
+            #[inline]
+            fn add(self, other: $subgroup) -> Self {
+                $subgroup(self.0 + &other.0)
+            }
+        }
+
+        impl<'r> ::std::ops::AddAssign<&'r $subgroup> for $subgroup {
+            fn add_assign(&mut self, other: &$subgroup) {
+                self.0.add_assign(&other.0)
+            }
+        }
+
+        impl ::std::ops::AddAssign<$subgroup> for $subgroup {
+            #[inline]
+            fn add_assign(&mut self, other: $subgroup) {
+                self.0.add_assign(&other.0);
+            }
+        }
+
+        impl<'r> ::std::ops::Sub<&'r $subgroup> for $subgroup {
+            type Output = Self;
+
+            #[inline]
+            fn sub(self, other: &$subgroup) -> Self {
+                $subgroup(self.0 - &other.0)
+            }
+        }
+
+        impl ::std::ops::Sub<$subgroup> for $subgroup {
+            type Output = Self;
+
+            #[inline]
+            fn sub(self, other: $subgroup) -> Self {
+                $subgroup(self.0 - &other.0)
+            }
+        }
+
+        impl<'r> ::std::ops::SubAssign<&'r $subgroup> for $subgroup {
+            fn sub_assign(&mut self, other: &$subgroup) {
+                self.0.sub_assign(&other.0);
+            }
+        }
+
+        impl ::std::ops::SubAssign<$subgroup> for $subgroup {
+            #[inline]
+            fn sub_assign(&mut self, other: $subgroup) {
+                self.0.sub_assign(&other.0);
+            }
+        }
+
+        impl ::std::ops::Mul<<$projective as Group>::Scalar> for $subgroup {
+            type Output = Self;
+
+            fn mul(mut self, other: <$projective as Group>::Scalar) -> Self {
+                self.0.mul_assign(&other);
+                self
+            }
+        }
+
+        impl<'r> ::std::ops::Mul<&'r <$projective as Group>::Scalar> for $subgroup {
+            type Output = Self;
+
+            fn mul(mut self, other: &'r <$projective as Group>::Scalar) -> Self {
+                self.0.mul_assign(other);
+                self
+            }
+        }
+
+        impl ::std::ops::MulAssign<<$projective as Group>::Scalar> for $subgroup {
+            fn mul_assign(&mut self, other: <$projective as Group>::Scalar) {
+                self.0.mul_assign(&other);
+            }
+        }
+
+        impl<'r> ::std::ops::MulAssign<&'r <$projective as Group>::Scalar> for $subgroup {
+            fn mul_assign(&mut self, other: &'r <$projective as Group>::Scalar) {
+                self.0.mul_assign(other)
+            }
+        }
+
         impl Group for $projective {
-            type Subgroup = Self;
             type Scalar = $scalarfield;
 
             fn random<R: RngCore + ?Sized>(rng: &mut R) -> Self {
@@ -738,10 +994,56 @@ macro_rules! curve_impl {
             }
         }
 
-        impl PrimeGroup for $projective {}
+        impl Group for $subgroup {
+            type Scalar = $scalarfield;
 
-        impl CurveProjective for $projective {
-            type Affine = $affine;
+            fn random<R: RngCore + ?Sized>(rng: &mut R) -> Self {
+                $subgroup($projective::random(rng))
+            }
+
+            fn identity() -> Self {
+                $subgroup($projective::identity())
+            }
+
+            fn generator() -> Self {
+                $subgroup($projective::generator())
+            }
+
+            fn is_identity(&self) -> Choice {
+                self.0.is_identity()
+            }
+
+            #[must_use]
+            fn double(&self) -> Self {
+                $subgroup(self.0.double())
+            }
+        }
+
+        impl PrimeGroup for $subgroup {}
+
+        impl CofactorGroup for $projective {
+            type Subgroup = $subgroup;
+
+            fn mul_by_cofactor(&self) -> Self::Subgroup {
+                $subgroup($affine::from(*self).scale_by_cofactor().into())
+            }
+
+            fn into_subgroup(self) -> CtOption<Self::Subgroup> {
+                CtOption::new(
+                    $subgroup(self),
+                    Choice::from(
+                        if $affine::from(self).is_in_correct_subgroup_assuming_on_curve() {
+                            1
+                        } else {
+                            0
+                        },
+                    ),
+                )
+            }
+        }
+
+        impl Curve for $projective {
+            type AffineRepr = $affine;
 
             fn batch_normalize(p: &[Self], q: &mut [$affine]) {
                 assert_eq!(p.len(), q.len());
@@ -790,7 +1092,9 @@ macro_rules! curve_impl {
             fn to_affine(&self) -> $affine {
                 (*self).into()
             }
+        }
 
+        impl WnafGroup for $projective {
             fn recommended_wnaf_for_scalar(_: &Self::Scalar) -> usize {
                 Self::empirical_recommended_wnaf_for_scalar(
                     <Self::Scalar as PrimeField>::NUM_BITS as usize,
@@ -800,6 +1104,10 @@ macro_rules! curve_impl {
             fn recommended_wnaf_for_num_scalars(num_scalars: usize) -> usize {
                 Self::empirical_recommended_wnaf_for_num_scalars(num_scalars)
             }
+        }
+
+        impl CofactorCurve for $projective {
+            type Affine = $affine;
         }
 
         // The affine point X, Y is represented in the jacobian
@@ -901,7 +1209,11 @@ pub mod g1 {
     use super::{g2::G2Affine, GroupDecodingError};
     use crate::{Engine, PairingCurveAffine};
     use ff::{BitIterator, Field, PrimeField};
-    use group::{CurveAffine, CurveProjective, Group, PrimeGroup};
+    use group::{
+        cofactor::{CofactorCurve, CofactorCurveAffine, CofactorGroup},
+        prime::PrimeGroup,
+        Curve, Group, GroupEncoding, UncompressedEncoding, WnafGroup,
+    };
     use rand_core::RngCore;
     use std::fmt;
     use std::ops::{AddAssign, MulAssign, Neg, SubAssign};
@@ -910,6 +1222,7 @@ pub mod g1 {
     curve_impl!(
         "G1",
         G1,
+        G1Subgroup,
         G1Affine,
         Fq,
         Fr,
@@ -1454,21 +1767,23 @@ pub mod g1 {
         assert!(b.is_on_curve() && b.is_in_correct_subgroup_assuming_on_curve());
         assert!(c.is_on_curve() && c.is_in_correct_subgroup_assuming_on_curve());
 
-        let mut tmp1 = a.to_projective();
-        tmp1.add_assign(&b.to_projective());
+        let mut tmp1 = a.to_curve();
+        tmp1.add_assign(&b.to_curve());
         assert_eq!(tmp1.to_affine(), c);
-        assert_eq!(tmp1, c.to_projective());
+        assert_eq!(tmp1, c.to_curve());
 
-        let mut tmp2 = a.to_projective();
+        let mut tmp2 = a.to_curve();
         tmp2.add_assign(&b);
         assert_eq!(tmp2.to_affine(), c);
-        assert_eq!(tmp2, c.to_projective());
+        assert_eq!(tmp2, c.to_curve());
     }
 
     #[test]
     fn g1_curve_tests() {
-        use group::tests::curve_tests;
+        use group::tests::{curve_tests, random_uncompressed_encoding_tests, random_wnaf_tests};
         curve_tests::<G1>();
+        random_wnaf_tests::<G1>();
+        random_uncompressed_encoding_tests::<G1>();
     }
 }
 
@@ -1477,7 +1792,11 @@ pub mod g2 {
     use super::{g1::G1Affine, GroupDecodingError};
     use crate::{Engine, PairingCurveAffine};
     use ff::{BitIterator, Field, PrimeField};
-    use group::{CurveAffine, CurveProjective, Group, PrimeGroup};
+    use group::{
+        cofactor::{CofactorCurve, CofactorCurveAffine, CofactorGroup},
+        prime::PrimeGroup,
+        Curve, Group, GroupEncoding, UncompressedEncoding, WnafGroup,
+    };
     use rand_core::RngCore;
     use std::fmt;
     use std::ops::{AddAssign, MulAssign, Neg, SubAssign};
@@ -1486,6 +1805,7 @@ pub mod g2 {
     curve_impl!(
         "G2",
         G2,
+        G2Subgroup,
         G2Affine,
         Fq2,
         Fr,
@@ -2167,8 +2487,10 @@ pub mod g2 {
 
     #[test]
     fn g2_curve_tests() {
-        use group::tests::curve_tests;
+        use group::tests::{curve_tests, random_uncompressed_encoding_tests, random_wnaf_tests};
         curve_tests::<G2>();
+        random_wnaf_tests::<G2>();
+        random_uncompressed_encoding_tests::<G2>();
     }
 }
 
