@@ -162,7 +162,7 @@ impl Fp {
         self.ct_eq(&Fp::zero())
     }
 
-    /// Attempts to convert a little-endian byte representation of
+    /// Attempts to convert a big-endian byte representation of
     /// a scalar into an `Fp`, failing if the input is not canonical.
     pub fn from_bytes(bytes: &[u8; 48]) -> CtOption<Fp> {
         let mut tmp = Fp([0, 0, 0, 0, 0, 0]);

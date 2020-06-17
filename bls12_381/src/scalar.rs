@@ -4,7 +4,9 @@
 use core::convert::TryFrom;
 use core::fmt;
 use core::ops::{Add, AddAssign, Mul, MulAssign, Neg, Sub, SubAssign};
+use rand_core::RngCore;
 
+use ff::{Field, PrimeField};
 use subtle::{Choice, ConditionallySelectable, ConstantTimeEq, CtOption};
 
 use crate::util::{adc, mac, sbb};
@@ -25,6 +27,12 @@ impl fmt::Debug for Scalar {
             write!(f, "{:02x}", b)?;
         }
         Ok(())
+    }
+}
+
+impl fmt::Display for Scalar {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{:?}", self)
     }
 }
 
@@ -68,6 +76,22 @@ const MODULUS: Scalar = Scalar([
     0x53bd_a402_fffe_5bfe,
     0x3339_d808_09a1_d805,
     0x73ed_a753_299d_7d48,
+]);
+
+const MODULUS_BYTES: [u8; 32] = [
+    0x01, 0x00, 0x00, 0x00, 0xff, 0xff, 0xff, 0xff, 0xfe, 0x5b, 0xfe, 0xff, 0x02, 0xa4, 0xbd, 0x53,
+    0x05, 0xd8, 0xa1, 0x09, 0x08, 0xd8, 0x39, 0x33, 0x48, 0x7d, 0x9d, 0x29, 0x53, 0xa7, 0xed, 0x73,
+];
+
+// The number of bits needed to represent the modulus.
+const MODULUS_BITS: u32 = 255;
+
+// GENERATOR = 7 (multiplicative generator of r-1 order, that is also quadratic nonresidue)
+const GENERATOR: Scalar = Scalar([
+    0x0000_000e_ffff_fff1,
+    0x17e3_63d3_0018_9c0f,
+    0xff9c_5787_6f84_57b0,
+    0x3513_3220_8fc5_a8c4,
 ]);
 
 impl<'a> Neg for &'a Scalar {
@@ -145,6 +169,7 @@ const R3: Scalar = Scalar([
     0x6e2a_5bb9_c8db_33e9,
 ]);
 
+// 2^S * t = MODULUS - 1 with t odd
 const S: u32 = 32;
 
 /// GENERATOR^t where t * 2^s + 1 = q
@@ -613,9 +638,92 @@ impl Scalar {
     }
 }
 
+impl From<Scalar> for [u8; 32] {
+    fn from(value: Scalar) -> [u8; 32] {
+        value.to_bytes()
+    }
+}
+
 impl<'a> From<&'a Scalar> for [u8; 32] {
     fn from(value: &'a Scalar) -> [u8; 32] {
         value.to_bytes()
+    }
+}
+
+impl Field for Scalar {
+    fn random<R: RngCore + ?Sized>(rng: &mut R) -> Self {
+        let mut buf = [0; 64];
+        rng.fill_bytes(&mut buf);
+        Self::from_bytes_wide(&buf)
+    }
+
+    fn zero() -> Self {
+        Self::zero()
+    }
+
+    fn one() -> Self {
+        Self::one()
+    }
+
+    fn is_zero(&self) -> bool {
+        self.ct_eq(&Self::zero()).into()
+    }
+
+    #[must_use]
+    fn square(&self) -> Self {
+        self.square()
+    }
+
+    #[must_use]
+    fn double(&self) -> Self {
+        self.double()
+    }
+
+    fn invert(&self) -> CtOption<Self> {
+        self.invert()
+    }
+
+    fn sqrt(&self) -> CtOption<Self> {
+        self.sqrt()
+    }
+}
+
+impl PrimeField for Scalar {
+    type Repr = [u8; 32];
+    type ReprEndianness = byteorder::LittleEndian;
+
+    fn from_repr(r: Self::Repr) -> Option<Self> {
+        let res = Self::from_bytes(&r);
+        if res.is_some().into() {
+            Some(res.unwrap())
+        } else {
+            None
+        }
+    }
+
+    fn to_repr(&self) -> Self::Repr {
+        self.to_bytes()
+    }
+
+    fn is_odd(&self) -> bool {
+        self.to_bytes()[0] & 1 == 1
+    }
+
+    fn char() -> Self::Repr {
+        MODULUS_BYTES
+    }
+
+    const NUM_BITS: u32 = MODULUS_BITS;
+    const CAPACITY: u32 = Self::NUM_BITS - 1;
+
+    fn multiplicative_generator() -> Self {
+        GENERATOR
+    }
+
+    const S: u32 = S;
+
+    fn root_of_unity() -> Self {
+        ROOT_OF_UNITY
     }
 }
 

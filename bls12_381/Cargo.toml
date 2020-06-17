@@ -20,6 +20,19 @@ name = "groups"
 harness = false
 required-features = ["groups"]
 
+[dependencies.byteorder]
+version = "1"
+default-features = false
+
+[dependencies.ff]
+path = "../ff"
+version = "0.6"
+default-features = false
+
+[dependencies.rand_core]
+version = "0.5"
+default-features = false
+
 [dependencies.subtle]
 version = "2.2.1"
 default-features = false
