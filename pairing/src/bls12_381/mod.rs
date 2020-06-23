@@ -23,13 +23,183 @@ pub use self::fr::{Fr, FrRepr};
 
 use super::{Engine, MillerLoopResult, MultiMillerLoop};
 
-use ff::{BitIterator, Field};
-use group::cofactor::CofactorCurveAffine;
-use std::ops::{AddAssign, MulAssign, Neg, SubAssign};
+use ff::{BitIterator, Field, PrimeField};
+use group::{cofactor::CofactorCurveAffine, Group};
+use rand_core::RngCore;
+use std::fmt;
+use std::iter::Sum;
+use std::ops::{Add, AddAssign, Mul, MulAssign, Neg, Sub, SubAssign};
+use subtle::{Choice, ConditionallySelectable};
 
 // The BLS parameter x for BLS12-381 is -0xd201000000010000
 const BLS_X: u64 = 0xd201000000010000;
 const BLS_X_IS_NEGATIVE: bool = true;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Gt(Fq12);
+
+impl fmt::Display for Gt {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
+impl ConditionallySelectable for Gt {
+    fn conditional_select(a: &Self, b: &Self, choice: Choice) -> Self {
+        Gt(Fq12::conditional_select(&a.0, &b.0, choice))
+    }
+}
+
+impl Neg for Gt {
+    type Output = Gt;
+
+    fn neg(self) -> Self::Output {
+        let mut ret = self.0;
+        ret.conjugate();
+        Gt(ret)
+    }
+}
+
+impl Sum for Gt {
+    fn sum<I: Iterator<Item = Self>>(iter: I) -> Self {
+        iter.fold(Self::identity(), Add::add)
+    }
+}
+
+impl<'r> Sum<&'r Gt> for Gt {
+    fn sum<I: Iterator<Item = &'r Self>>(iter: I) -> Self {
+        iter.fold(Self::identity(), Add::add)
+    }
+}
+
+impl Add for Gt {
+    type Output = Gt;
+
+    fn add(self, rhs: Self) -> Self::Output {
+        Gt(self.0 * rhs.0)
+    }
+}
+
+impl Add<&Gt> for Gt {
+    type Output = Gt;
+
+    fn add(self, rhs: &Gt) -> Self::Output {
+        Gt(self.0 * rhs.0)
+    }
+}
+
+impl AddAssign for Gt {
+    fn add_assign(&mut self, rhs: Self) {
+        self.0 *= rhs.0;
+    }
+}
+
+impl AddAssign<&Gt> for Gt {
+    fn add_assign(&mut self, rhs: &Gt) {
+        self.0 *= rhs.0;
+    }
+}
+
+impl Sub for Gt {
+    type Output = Gt;
+
+    fn sub(self, rhs: Self) -> Self::Output {
+        self + (-rhs)
+    }
+}
+
+impl Sub<&Gt> for Gt {
+    type Output = Gt;
+
+    fn sub(self, rhs: &Gt) -> Self::Output {
+        self + (-*rhs)
+    }
+}
+
+impl SubAssign for Gt {
+    fn sub_assign(&mut self, rhs: Self) {
+        *self = *self - rhs;
+    }
+}
+
+impl SubAssign<&Gt> for Gt {
+    fn sub_assign(&mut self, rhs: &Gt) {
+        *self = *self - rhs;
+    }
+}
+
+impl Mul<&Fr> for Gt {
+    type Output = Gt;
+
+    fn mul(self, other: &Fr) -> Self::Output {
+        let mut acc = Self::identity();
+
+        // This is a simple double-and-add implementation of group element
+        // multiplication, moving from most significant to least
+        // significant bit of the scalar.
+        //
+        // We skip the leading bit because it's always unset for Fr
+        // elements.
+        for bit in other
+            .to_repr()
+            .as_ref()
+            .iter()
+            .rev()
+            .flat_map(|byte| (0..8).rev().map(move |i| Choice::from((byte >> i) & 1u8)))
+            .skip(1)
+        {
+            acc = acc.double();
+            acc = Gt::conditional_select(&acc, &(acc + self), bit);
+        }
+
+        acc
+    }
+}
+
+impl Mul<Fr> for Gt {
+    type Output = Gt;
+
+    fn mul(self, other: Fr) -> Self::Output {
+        self * &other
+    }
+}
+
+impl<'r> MulAssign<&'r Fr> for Gt {
+    fn mul_assign(&mut self, other: &'r Fr) {
+        *self = *self * other
+    }
+}
+
+impl MulAssign<Fr> for Gt {
+    fn mul_assign(&mut self, other: Fr) {
+        self.mul_assign(&other);
+    }
+}
+
+impl Group for Gt {
+    type Scalar = Fr;
+
+    fn random<R: RngCore + ?Sized>(_rng: &mut R) -> Self {
+        unimplemented!()
+    }
+
+    fn identity() -> Self {
+        Gt(Fq12::one())
+    }
+
+    fn generator() -> Self {
+        unimplemented!()
+    }
+
+    fn is_identity(&self) -> Choice {
+        Choice::from(if self.0 == Fq12::one() { 1 } else { 0 })
+    }
+
+    #[must_use]
+    fn double(&self) -> Self {
+        Gt(self.0.square())
+    }
+}
 
 #[derive(Clone, Debug)]
 pub struct Bls12;
@@ -40,7 +210,7 @@ impl Engine for Bls12 {
     type G1Affine = G1Affine;
     type G2 = G2;
     type G2Affine = G2Affine;
-    type Gt = Fq12;
+    type Gt = Gt;
 
     fn pairing(p: &Self::G1Affine, q: &Self::G2Affine) -> Self::Gt {
         Self::multi_miller_loop(&[(p, &(*q).into())]).final_exponentiation()
@@ -109,9 +279,9 @@ impl MultiMillerLoop for Bls12 {
 }
 
 impl MillerLoopResult for Fq12 {
-    type Gt = Fq12;
+    type Gt = Gt;
 
-    fn final_exponentiation(&self) -> Fq12 {
+    fn final_exponentiation(&self) -> Gt {
         let mut f1 = *self;
         f1.conjugate();
 
@@ -162,7 +332,7 @@ impl MillerLoopResult for Fq12 {
                 y2.frobenius_map(1);
                 y1.mul_assign(&y2);
 
-                y1
+                Gt(y1)
             })
             // self must be nonzero.
             .unwrap()

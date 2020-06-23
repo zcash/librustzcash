@@ -367,7 +367,7 @@ macro_rules! curve_impl {
 
         impl PairingCurveAffine for $affine {
             type Pair = $pairing;
-            type PairingResult = Fq12;
+            type PairingResult = Gt;
 
             fn pairing_with(&self, other: &Self::Pair) -> Self::PairingResult {
                 self.perform_pairing(other)
@@ -1205,7 +1205,7 @@ impl fmt::Display for GroupDecodingError {
 }
 
 pub mod g1 {
-    use super::super::{Fq, Fq12, FqRepr, Fr};
+    use super::super::{Fq, FqRepr, Fr, Gt};
     use super::{g2::G2Affine, GroupDecodingError};
     use crate::{Engine, PairingCurveAffine};
     use ff::{BitIterator, Field, PrimeField};
@@ -1446,7 +1446,7 @@ pub mod g1 {
             super::super::fq::B_COEFF
         }
 
-        fn perform_pairing(&self, other: &G2Affine) -> Fq12 {
+        fn perform_pairing(&self, other: &G2Affine) -> Gt {
             super::super::Bls12::pairing(self, other)
         }
     }
@@ -1788,7 +1788,7 @@ pub mod g1 {
 }
 
 pub mod g2 {
-    use super::super::{Fq, Fq12, Fq2, FqRepr, Fr};
+    use super::super::{Fq, Fq2, FqRepr, Fr, Gt};
     use super::{g1::G1Affine, GroupDecodingError};
     use crate::{Engine, PairingCurveAffine};
     use ff::{BitIterator, Field, PrimeField};
@@ -2078,7 +2078,7 @@ pub mod g2 {
             self.mul_bits_u64(cofactor)
         }
 
-        fn perform_pairing(&self, other: &G1Affine) -> Fq12 {
+        fn perform_pairing(&self, other: &G1Affine) -> Gt {
             super::super::Bls12::pairing(other, self)
         }
     }

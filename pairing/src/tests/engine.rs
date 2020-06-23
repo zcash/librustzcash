@@ -1,8 +1,8 @@
-use ff::{Endianness, Field, PrimeField};
+use ff::Field;
 use group::{cofactor::CofactorCurveAffine, Curve, Group};
 use rand_core::SeedableRng;
 use rand_xorshift::XorShiftRng;
-use std::ops::MulAssign;
+use std::ops::Mul;
 
 use crate::{Engine, MillerLoopResult, MultiMillerLoop, PairingCurveAffine};
 
@@ -30,12 +30,12 @@ pub fn engine_tests<E: MultiMillerLoop>() {
         let d = E::G2::random(&mut rng).to_affine().into();
 
         assert_eq!(
-            E::Gt::one(),
+            E::Gt::identity(),
             E::multi_miller_loop(&[(&z1, &b)]).final_exponentiation()
         );
 
         assert_eq!(
-            E::Gt::one(),
+            E::Gt::identity(),
             E::multi_miller_loop(&[(&a, &z2)]).final_exponentiation()
         );
 
@@ -85,8 +85,7 @@ fn random_miller_loop_tests<E: MultiMillerLoop>() {
         let ab = E::pairing(&a, &b);
         let cd = E::pairing(&c, &d);
 
-        let mut abcd = ab;
-        abcd.mul_assign(&cd);
+        let abcd = ab + &cd;
 
         let a = a;
         let b = b.into();
@@ -121,14 +120,9 @@ fn random_bilinearity_tests<E: Engine>() {
         let acbd = E::pairing(&ac, &bd);
         let adbc = E::pairing(&ad, &bc);
 
-        let mut cd = (c * &d).to_repr();
-        <E::Fr as PrimeField>::ReprEndianness::toggle_little_endian(&mut cd);
-
-        use byteorder::ByteOrder;
-        let mut cd_limbs = [0; 4];
-        byteorder::LittleEndian::read_u64_into(cd.as_ref(), &mut cd_limbs);
-
-        let abcd = E::pairing(&a, &b).pow_vartime(cd_limbs);
+        let ab = E::pairing(&a, &b);
+        let cd = c * &d;
+        let abcd = Mul::<E::Fr>::mul(ab, cd);
 
         assert_eq!(acbd, adbc);
         assert_eq!(acbd, abcd);
