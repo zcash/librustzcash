@@ -20,14 +20,14 @@ group = "0.8"
 hex = "0.4"
 jubjub = "0.5.1"
 protobuf = "2.15"
-subtle = "2"
+subtle = "2.2.3"
 zcash_primitives = { version = "0.4", path = "../zcash_primitives" }
 
 [build-dependencies]
 protobuf-codegen-pure = "2.15"
 
 [dev-dependencies]
-rand_core = "0.5"
+rand_core = "0.5.1"
 rand_xorshift = "0.2"
 
 [badges]
