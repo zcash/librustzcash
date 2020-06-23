@@ -20,7 +20,7 @@ group = "0.7"
 hex = "0.4"
 jubjub = "0.4"
 protobuf = "=2.14.0" # 2.15 has MSRV of 1.44.1
-subtle = "2"
+subtle = "2.2.3"
 zcash_primitives = { version = "0.3", path = "../zcash_primitives" }
 
 [build-dependencies]
