@@ -4,6 +4,7 @@ use crate::fp6::*;
 
 use core::fmt;
 use core::ops::{Add, AddAssign, Mul, MulAssign, Neg, Sub, SubAssign};
+use rand_core::RngCore;
 use subtle::{Choice, ConditionallySelectable, ConstantTimeEq, CtOption};
 
 /// This represents an element $c_0 + c_1 w$ of $\mathbb{F}_{p^12} = \mathbb{F}_{p^6} / w^2 - v$.
@@ -96,6 +97,13 @@ impl Fp12 {
         Fp12 {
             c0: Fp6::one(),
             c1: Fp6::zero(),
+        }
+    }
+
+    pub(crate) fn random<R: RngCore + ?Sized>(rng: &mut R) -> Self {
+        Fp12 {
+            c0: Fp6::random(rng),
+            c1: Fp6::random(rng),
         }
     }
 
