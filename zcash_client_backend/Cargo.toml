@@ -17,7 +17,7 @@ bs58 = { version = "0.3", features = ["check"] }
 ff = { version = "0.6", path = "../ff" }
 hex = "0.3"
 pairing = { version = "0.16", path = "../pairing" }
-protobuf = "2"
+protobuf = "=2.14.0" # 2.15 has MSRV of 1.44.1
 subtle = "2"
 zcash_primitives = { version = "0.2", path = "../zcash_primitives" }
 
