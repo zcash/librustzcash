@@ -21,10 +21,10 @@ pub mod tests;
 pub mod bls12_381;
 
 use core::ops::Mul;
-use ff::{Field, PrimeField};
+use ff::PrimeField;
 use group::{
     cofactor::{CofactorCurve, CofactorCurveAffine},
-    GroupOps, GroupOpsOwned, ScalarMul, ScalarMulOwned, UncompressedEncoding,
+    Group, GroupOps, GroupOpsOwned, ScalarMul, ScalarMulOwned, UncompressedEncoding,
 };
 
 /// An "engine" is a collection of types (fields, elliptic curve groups, etc.)
@@ -71,7 +71,7 @@ pub trait Engine: Sized + 'static + Clone {
         + for<'a> Mul<&'a Self::Fr, Output = Self::G2>;
 
     /// The extension field that hosts the target group of the pairing.
-    type Gt: Field;
+    type Gt: Group<Scalar = Self::Fr> + ScalarMul<Self::Fr> + ScalarMulOwned<Self::Fr>;
 
     /// Invoke the pairing function `G1 x G2 -> Gt` without the use of precomputation and
     /// other optimizations.
@@ -82,7 +82,7 @@ pub trait Engine: Sized + 'static + Clone {
 /// to perform pairings.
 pub trait PairingCurveAffine: CofactorCurveAffine + UncompressedEncoding {
     type Pair: PairingCurveAffine<Pair = Self>;
-    type PairingResult: Field;
+    type PairingResult: Group;
 
     /// Perform a pairing
     fn pairing_with(&self, other: &Self::Pair) -> Self::PairingResult;
@@ -108,7 +108,7 @@ pub trait MultiMillerLoop: Engine {
 /// [`MillerLoopResult::final_exponentiation`] is called, which is also expensive.
 pub trait MillerLoopResult {
     /// The extension field that hosts the target group of the pairing.
-    type Gt: Field;
+    type Gt: Group;
 
     /// This performs a "final exponentiation" routine to convert the result of a Miller
     /// loop into an element of [`MillerLoopResult::Gt`], so that it can be compared with
