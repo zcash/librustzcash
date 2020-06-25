@@ -17,14 +17,13 @@ bs58 = { version = "0.3", features = ["check"] }
 ff = { version = "0.6", path = "../ff" }
 pairing = { version = "0.16", path = "../pairing" }
 protobuf = "2"
-rusqlite = { version = "0.20", features = ["bundled"] }
+rusqlite = { version = "0.23", features = ["bundled"] }
 time = "0.1"
 zcash_client_backend = { version = "0.2", path = "../zcash_client_backend" }
 zcash_primitives = { version = "0.2", path = "../zcash_primitives" }
 
 [dev-dependencies]
 rand_core = "0.5.1"
-remove_dir_all = "=0.5.2" # tempfile dependency; 0.5.3 bumped the MSRV
 tempfile = "3"
 zcash_proofs = { version = "0.2", path = "../zcash_proofs" }
 
