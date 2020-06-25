@@ -20,7 +20,7 @@ crypto_api_chachapoly = "0.2.1"
 equihash = { version = "0.1", path = "../components/equihash" }
 ff = { version = "0.6", path = "../ff" }
 fpe = "0.2"
-hex = "0.3"
+hex = "0.4"
 lazy_static = "1"
 log = "0.4"
 pairing = { version = "0.16", path = "../pairing" }
