@@ -12,6 +12,11 @@ use std::fs::File;
 use std::io::{self, BufReader};
 use std::path::Path;
 
+#[cfg(feature = "directories")]
+use directories::BaseDirs;
+#[cfg(feature = "directories")]
+use std::path::PathBuf;
+
 pub mod circuit;
 mod hashreader;
 pub mod sapling;
@@ -19,6 +24,22 @@ pub mod sprout;
 
 #[cfg(feature = "local-prover")]
 pub mod prover;
+
+// Circuit names
+const SAPLING_SPEND_NAME: &str = "sapling-spend.params";
+const SAPLING_OUTPUT_NAME: &str = "sapling-output.params";
+
+/// Returns the default folder that the Zcash proving parameters are located in.
+#[cfg(feature = "directories")]
+fn default_params_folder() -> Option<PathBuf> {
+    BaseDirs::new().map(|base_dirs| {
+        if cfg!(any(windows, target_os = "macos")) {
+            base_dirs.data_dir().join("ZcashParams")
+        } else {
+            base_dirs.home_dir().join(".zcash-params")
+        }
+    })
+}
 
 pub fn load_parameters(
     spend_path: &Path,
