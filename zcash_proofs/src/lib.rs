@@ -39,7 +39,7 @@ const DOWNLOAD_URL: &str = "https://download.z.cash/downloads";
 
 /// Returns the default folder that the Zcash proving parameters are located in.
 #[cfg(feature = "directories")]
-fn default_params_folder() -> Option<PathBuf> {
+pub fn default_params_folder() -> Option<PathBuf> {
     BaseDirs::new().map(|base_dirs| {
         if cfg!(any(windows, target_os = "macos")) {
             base_dirs.data_dir().join("ZcashParams")

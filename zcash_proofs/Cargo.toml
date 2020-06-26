@@ -32,6 +32,10 @@ local-prover = ["directories"]
 multicore = ["bellman/multicore"]
 
 [[example]]
+name = "get-params-path"
+required-features = ["directories"]
+
+[[example]]
 name = "download-params"
 required-features = ["download-params"]
 
