@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "bellman",
+    "components/equihash",
     "ff",
     "group",
     "pairing",
