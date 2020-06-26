@@ -29,6 +29,14 @@ pub mod prover;
 const SAPLING_SPEND_NAME: &str = "sapling-spend.params";
 const SAPLING_OUTPUT_NAME: &str = "sapling-output.params";
 
+// Circuit hashes
+const SAPLING_SPEND_HASH: &str = "8270785a1a0d0bc77196f000ee6d221c9c9894f55307bd9357c3f0105d31ca63991ab91324160d8f53e2bbd3c2633a6eb8bdf5205d822e7f3f73edac51b2b70c";
+const SAPLING_OUTPUT_HASH: &str = "657e3d38dbb5cb5e7dd2970e8b03d69b4787dd907285b5a7f0790dcc8072f60bf593b32cc2d1c030e00ff5ae64bf84c5c3beb84ddc841d48264b4a171744d028";
+const SPROUT_HASH: &str = "e9b238411bd6c0ec4791e9d04245ec350c9c5744f5610dfcce4365d5ca49dfefd5054e371842b3f88fa1b9d7e8e075249b3ebabd167fa8b0f3161292d36c180a";
+
+#[cfg(feature = "download-params")]
+const DOWNLOAD_URL: &str = "https://download.z.cash/downloads";
+
 /// Returns the default folder that the Zcash proving parameters are located in.
 #[cfg(feature = "directories")]
 fn default_params_folder() -> Option<PathBuf> {
@@ -39,6 +47,58 @@ fn default_params_folder() -> Option<PathBuf> {
             base_dirs.home_dir().join(".zcash-params")
         }
     })
+}
+
+/// Download the Zcash Sapling parameters, storing them in the default location.
+///
+/// This mirrors the behaviour of the `fetch-params.sh` script from `zcashd`.
+#[cfg(feature = "download-params")]
+pub fn download_parameters() -> Result<(), minreq::Error> {
+    // Ensure that the default Zcash parameters location exists.
+    let params_dir = default_params_folder().ok_or(io::Error::new(
+        io::ErrorKind::Other,
+        "Could not load default params folder",
+    ))?;
+    std::fs::create_dir_all(&params_dir)?;
+
+    let fetch_params = |name: &str, expected_hash: &str| -> Result<(), minreq::Error> {
+        use std::io::Write;
+
+        // Download the parts directly (Sapling parameters are small enough for this).
+        let part_1 = minreq::get(format!("{}/{}.part.1", DOWNLOAD_URL, name)).send()?;
+        let part_2 = minreq::get(format!("{}/{}.part.2", DOWNLOAD_URL, name)).send()?;
+
+        // Verify parameter file hash.
+        let hash = blake2b_simd::State::new()
+            .update(part_1.as_bytes())
+            .update(part_2.as_bytes())
+            .finalize()
+            .to_hex();
+        if &hash != expected_hash {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "{} failed validation (expected: {}, actual: {}, fetched {} bytes)",
+                    name,
+                    expected_hash,
+                    hash,
+                    part_1.as_bytes().len() + part_2.as_bytes().len()
+                ),
+            )
+            .into());
+        }
+
+        // Write parameter file.
+        let mut f = File::create(params_dir.join(name))?;
+        f.write_all(part_1.as_bytes())?;
+        f.write_all(part_2.as_bytes())?;
+        Ok(())
+    };
+
+    fetch_params(SAPLING_SPEND_NAME, SAPLING_SPEND_HASH)?;
+    fetch_params(SAPLING_OUTPUT_NAME, SAPLING_OUTPUT_HASH)?;
+
+    Ok(())
 }
 
 pub fn load_parameters(
@@ -52,11 +112,6 @@ pub fn load_parameters(
     PreparedVerifyingKey<Bls12>,
     Option<PreparedVerifyingKey<Bls12>>,
 ) {
-    // Sapling circuit hashes
-    const SAPLING_SPEND_HASH: &str = "8270785a1a0d0bc77196f000ee6d221c9c9894f55307bd9357c3f0105d31ca63991ab91324160d8f53e2bbd3c2633a6eb8bdf5205d822e7f3f73edac51b2b70c";
-    const SAPLING_OUTPUT_HASH: &str = "657e3d38dbb5cb5e7dd2970e8b03d69b4787dd907285b5a7f0790dcc8072f60bf593b32cc2d1c030e00ff5ae64bf84c5c3beb84ddc841d48264b4a171744d028";
-    const SPROUT_HASH: &str = "e9b238411bd6c0ec4791e9d04245ec350c9c5744f5610dfcce4365d5ca49dfefd5054e371842b3f88fa1b9d7e8e075249b3ebabd167fa8b0f3161292d36c180a";
-
     // Load from each of the paths
     let spend_fs = File::open(spend_path).expect("couldn't load Sapling spend parameters file");
     let output_fs = File::open(output_path).expect("couldn't load Sapling output parameters file");
