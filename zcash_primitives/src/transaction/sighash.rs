@@ -47,7 +47,7 @@ enum SigHashVersion {
     Sprout,
     Overwinter,
     Sapling,
-    Next,
+    Future,
 }
 
 impl SigHashVersion {
@@ -56,7 +56,7 @@ impl SigHashVersion {
             match tx.version_group_id {
                 OVERWINTER_VERSION_GROUP_ID => SigHashVersion::Overwinter,
                 SAPLING_VERSION_GROUP_ID => SigHashVersion::Sapling,
-                FUTURE_VERSION_GROUP_ID => SigHashVersion::Next,
+                FUTURE_VERSION_GROUP_ID => SigHashVersion::Future,
                 _ => unimplemented!(),
             }
         } else {
@@ -194,7 +194,7 @@ pub fn signature_hash_data<'a>(
 ) -> Vec<u8> {
     let sigversion = SigHashVersion::from_tx(tx);
     match sigversion {
-        SigHashVersion::Overwinter | SigHashVersion::Sapling | SigHashVersion::Next => {
+        SigHashVersion::Overwinter | SigHashVersion::Sapling | SigHashVersion::Future => {
             let mut personal = [0; 16];
             (&mut personal[..12]).copy_from_slice(ZCASH_SIGHASH_PERSONALIZATION_PREFIX);
             (&mut personal[12..])
@@ -268,7 +268,7 @@ pub fn signature_hash_data<'a>(
                     index,
                     precondition,
                     value,
-                } if sigversion == SigHashVersion::Next => {
+                } if sigversion == SigHashVersion::Future => {
                     let mut data = ZCASH_TZE_SIGNED_INPUT_DOMAIN_SEPARATOR.to_vec();
 
                     tx.tze_inputs[index].prevout.write(&mut data).unwrap();
