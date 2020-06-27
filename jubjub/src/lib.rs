@@ -492,6 +492,17 @@ impl AffinePoint {
         self.v
     }
 
+    /// Returns an `ExtendedPoint` for use in arithmetic operations.
+    pub const fn to_extended(&self) -> ExtendedPoint {
+        ExtendedPoint {
+            u: self.u,
+            v: self.v,
+            z: Fq::one(),
+            t1: self.u,
+            t2: self.v,
+        }
+    }
+
     /// Performs a pre-processing step that produces an `AffineNielsPoint`
     /// for use in multiple additions.
     pub const fn to_niels(&self) -> AffineNielsPoint {
@@ -1007,6 +1018,17 @@ impl fmt::Display for SubgroupPoint {
 impl ConditionallySelectable for SubgroupPoint {
     fn conditional_select(a: &Self, b: &Self, choice: Choice) -> Self {
         SubgroupPoint(ExtendedPoint::conditional_select(&a.0, &b.0, choice))
+    }
+}
+
+impl SubgroupPoint {
+    /// Constructs an AffinePoint given `u` and `v` without checking that the point is on
+    /// the curve or in the prime-order subgroup.
+    ///
+    /// This should only be used for hard-coding constants (e.g. fixed generators); in all
+    /// other cases, use [`SubgroupPoint::from_bytes`] instead.
+    pub const fn from_raw_unchecked(u: Fq, v: Fq) -> Self {
+        SubgroupPoint(AffinePoint::from_raw_unchecked(u, v).to_extended())
     }
 }
 
