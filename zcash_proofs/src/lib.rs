@@ -7,7 +7,7 @@
 #![deny(intra_doc_link_resolution_failure)]
 
 use bellman::groth16::{prepare_verifying_key, Parameters, PreparedVerifyingKey, VerifyingKey};
-use pairing::bls12_381::Bls12;
+use bls12_381::Bls12;
 use std::fs::File;
 use std::io::{self, BufReader};
 use std::path::Path;

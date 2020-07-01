@@ -1,16 +1,13 @@
 //! Functions for creating transactions.
 
 use ff::PrimeField;
-use pairing::bls12_381::Bls12;
 use rand_core::{OsRng, RngCore};
 use rusqlite::{types::ToSql, Connection, NO_PARAMS};
 use std::convert::TryInto;
 use std::path::Path;
 use zcash_client_backend::encoding::encode_extended_full_viewing_key;
 use zcash_primitives::{
-    consensus,
-    consensus::{NetworkUpgrade, Parameters},
-    jubjub::fs::{Fs, FsRepr},
+    consensus::{self, NetworkUpgrade, Parameters},
     keys::OutgoingViewingKey,
     merkle_tree::{IncrementalWitness, MerklePath},
     note_encryption::Memo,
@@ -22,7 +19,6 @@ use zcash_primitives::{
         components::{amount::DEFAULT_FEE, Amount},
     },
     zip32::{ExtendedFullViewingKey, ExtendedSpendingKey},
-    JUBJUB,
 };
 
 use crate::{
@@ -59,7 +55,7 @@ pub enum OvkPolicy {
 
 struct SelectedNoteRow {
     diversifier: Diversifier,
-    note: Note<Bls12>,
+    note: Note,
     merkle_path: MerklePath<Node>,
 }
 
@@ -243,22 +239,18 @@ pub fn create_to_address<P: AsRef<Path>>(
                     r.copy_from_slice(&d[..]);
                     Rseed::AfterZip212(r)
                 } else {
-                    let tmp = FsRepr(
+                    let r = jubjub::Fr::from_repr(
                         d[..]
                             .try_into()
                             .map_err(|_| Error(ErrorKind::InvalidNote))?,
-                    );
-                    let r = Fs::from_repr(tmp).ok_or(Error(ErrorKind::InvalidNote))?;
+                    )
+                    .ok_or(Error(ErrorKind::InvalidNote))?;
                     Rseed::BeforeZip212(r)
                 }
             };
 
-            let from = extfvk
-                .fvk
-                .vk
-                .to_payment_address(diversifier, &JUBJUB)
-                .unwrap();
-            let note = from.create_note(note_value as u64, rseed, &JUBJUB).unwrap();
+            let from = extfvk.fvk.vk.to_payment_address(diversifier).unwrap();
+            let note = from.create_note(note_value as u64, rseed).unwrap();
 
             let merkle_path = {
                 let d: Vec<_> = row.get(3)?;
@@ -381,6 +373,7 @@ pub fn create_to_address<P: AsRef<Path>>(
 
 #[cfg(test)]
 mod tests {
+    use group::cofactor::CofactorGroup;
     use rusqlite::Connection;
     use tempfile::NamedTempFile;
     use zcash_primitives::{
@@ -390,7 +383,6 @@ mod tests {
         prover::TxProver,
         transaction::{components::Amount, Transaction},
         zip32::{ExtendedFullViewingKey, ExtendedSpendingKey},
-        JUBJUB,
     };
     use zcash_proofs::prover::LocalTxProver;
 
@@ -827,7 +819,7 @@ mod tests {
                 &extfvk.fvk.ovk,
                 &output.cv,
                 &output.cmu,
-                &output.ephemeral_key.as_prime_order(&JUBJUB).unwrap(),
+                &output.ephemeral_key.into_subgroup().unwrap(),
                 &output.enc_ciphertext,
                 &output.out_ciphertext,
             )

@@ -1,14 +1,12 @@
 //! Structs representing the components within Zcash transactions.
 
-use crate::jubjub::{edwards, Unknown};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use ff::PrimeField;
-use pairing::bls12_381::{Bls12, Fr, FrRepr};
+use group::GroupEncoding;
 use std::io::{self, Read, Write};
 
 use crate::legacy::Script;
 use crate::redjubjub::{PublicKey, Signature};
-use crate::JUBJUB;
 
 pub mod amount;
 pub use self::amount::Amount;
@@ -118,10 +116,10 @@ impl TxOut {
 }
 
 pub struct SpendDescription {
-    pub cv: edwards::Point<Bls12, Unknown>,
-    pub anchor: Fr,
+    pub cv: jubjub::ExtendedPoint,
+    pub anchor: bls12_381::Scalar,
     pub nullifier: [u8; 32],
-    pub rk: PublicKey<Bls12>,
+    pub rk: PublicKey,
     pub zkproof: [u8; GROTH_PROOF_SIZE],
     pub spend_auth_sig: Option<Signature>,
 }
@@ -142,13 +140,21 @@ impl SpendDescription {
         // - Canonical encoding is enforced here.
         // - "Not small order" is enforced in SaplingVerificationContext::check_spend()
         //   (located in zcash_proofs::sapling::verifier).
-        let cv = edwards::Point::<Bls12, Unknown>::read(&mut reader, &JUBJUB)?;
+        let cv = {
+            let mut bytes = [0; 32];
+            reader.read_exact(&mut bytes)?;
+            let cv = jubjub::ExtendedPoint::from_bytes(&bytes);
+            if cv.is_none().into() {
+                return Err(io::Error::new(io::ErrorKind::InvalidInput, "invalid cv"));
+            }
+            cv.unwrap()
+        };
 
         // Consensus rule (§7.3): Canonical encoding is enforced here
         let anchor = {
-            let mut f = FrRepr([0; 32]);
-            reader.read_exact(&mut f.0)?;
-            Fr::from_repr(f)
+            let mut f = [0; 32];
+            reader.read_exact(&mut f)?;
+            bls12_381::Scalar::from_repr(f)
                 .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "anchor not in field"))?
         };
 
@@ -158,7 +164,7 @@ impl SpendDescription {
         // Consensus rules (§4.4):
         // - Canonical encoding is enforced here.
         // - "Not small order" is enforced in SaplingVerificationContext::check_spend()
-        let rk = PublicKey::<Bls12>::read(&mut reader, &JUBJUB)?;
+        let rk = PublicKey::read(&mut reader)?;
 
         // Consensus rules (§4.4):
         // - Canonical encoding is enforced by the API of SaplingVerificationContext::check_spend()
@@ -183,7 +189,7 @@ impl SpendDescription {
     }
 
     pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
-        self.cv.write(&mut writer)?;
+        writer.write_all(&self.cv.to_bytes())?;
         writer.write_all(self.anchor.to_repr().as_ref())?;
         writer.write_all(&self.nullifier)?;
         self.rk.write(&mut writer)?;
@@ -199,9 +205,9 @@ impl SpendDescription {
 }
 
 pub struct OutputDescription {
-    pub cv: edwards::Point<Bls12, Unknown>,
-    pub cmu: Fr,
-    pub ephemeral_key: edwards::Point<Bls12, Unknown>,
+    pub cv: jubjub::ExtendedPoint,
+    pub cmu: bls12_381::Scalar,
+    pub ephemeral_key: jubjub::ExtendedPoint,
     pub enc_ciphertext: [u8; 580],
     pub out_ciphertext: [u8; 80],
     pub zkproof: [u8; GROTH_PROOF_SIZE],
@@ -218,25 +224,44 @@ impl std::fmt::Debug for OutputDescription {
 }
 
 impl OutputDescription {
-    pub fn read<R: Read>(mut reader: &mut R) -> io::Result<Self> {
+    pub fn read<R: Read>(reader: &mut R) -> io::Result<Self> {
         // Consensus rules (§4.5):
         // - Canonical encoding is enforced here.
         // - "Not small order" is enforced in SaplingVerificationContext::check_output()
         //   (located in zcash_proofs::sapling::verifier).
-        let cv = edwards::Point::<Bls12, Unknown>::read(&mut reader, &JUBJUB)?;
+        let cv = {
+            let mut bytes = [0; 32];
+            reader.read_exact(&mut bytes)?;
+            let cv = jubjub::ExtendedPoint::from_bytes(&bytes);
+            if cv.is_none().into() {
+                return Err(io::Error::new(io::ErrorKind::InvalidInput, "invalid cv"));
+            }
+            cv.unwrap()
+        };
 
         // Consensus rule (§7.4): Canonical encoding is enforced here
         let cmu = {
-            let mut f = FrRepr([0; 32]);
-            reader.read_exact(&mut f.0)?;
-            Fr::from_repr(f)
+            let mut f = [0; 32];
+            reader.read_exact(&mut f)?;
+            bls12_381::Scalar::from_repr(f)
                 .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "cmu not in field"))?
         };
 
         // Consensus rules (§4.5):
         // - Canonical encoding is enforced here.
         // - "Not small order" is enforced in SaplingVerificationContext::check_output()
-        let ephemeral_key = edwards::Point::<Bls12, Unknown>::read(&mut reader, &JUBJUB)?;
+        let ephemeral_key = {
+            let mut bytes = [0; 32];
+            reader.read_exact(&mut bytes)?;
+            let ephemeral_key = jubjub::ExtendedPoint::from_bytes(&bytes);
+            if ephemeral_key.is_none().into() {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "invalid ephemeral_key",
+                ));
+            }
+            ephemeral_key.unwrap()
+        };
 
         let mut enc_ciphertext = [0; 580];
         let mut out_ciphertext = [0; 80];
@@ -261,9 +286,9 @@ impl OutputDescription {
     }
 
     pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
-        self.cv.write(&mut writer)?;
+        writer.write_all(&self.cv.to_bytes())?;
         writer.write_all(self.cmu.to_repr().as_ref())?;
-        self.ephemeral_key.write(&mut writer)?;
+        writer.write_all(&self.ephemeral_key.to_bytes())?;
         writer.write_all(&self.enc_ciphertext)?;
         writer.write_all(&self.out_ciphertext)?;
         writer.write_all(&self.zkproof)

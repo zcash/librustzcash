@@ -2,31 +2,27 @@ use bellman::{
     gadgets::multipack,
     groth16::{verify_proof, PreparedVerifyingKey, Proof},
 };
-use ff::Field;
-use pairing::bls12_381::{Bls12, Fr};
-use zcash_primitives::jubjub::{edwards, FixedGenerators, JubjubBls12, Unknown};
+use bls12_381::Bls12;
+use group::{Curve, GroupEncoding};
 use zcash_primitives::{
+    constants::{SPENDING_KEY_GENERATOR, VALUE_COMMITMENT_RANDOMNESS_GENERATOR},
     redjubjub::{PublicKey, Signature},
     transaction::components::Amount,
 };
 
 use super::compute_value_balance;
 
-fn is_small_order<Order>(p: &edwards::Point<Bls12, Order>, params: &JubjubBls12) -> bool {
-    p.double(params).double(params).double(params) == edwards::Point::zero()
-}
-
 /// A context object for verifying the Sapling components of a Zcash transaction.
 pub struct SaplingVerificationContext {
     // (sum of the Spend value commitments) - (sum of the Output value commitments)
-    cv_sum: edwards::Point<Bls12, Unknown>,
+    cv_sum: jubjub::ExtendedPoint,
 }
 
 impl SaplingVerificationContext {
     /// Construct a new context to be used with a single transaction.
     pub fn new() -> Self {
         SaplingVerificationContext {
-            cv_sum: edwards::Point::zero(),
+            cv_sum: jubjub::ExtendedPoint::identity(),
         }
     }
 
@@ -34,61 +30,46 @@ impl SaplingVerificationContext {
     /// accumulating its value commitment inside the context for later use.
     pub fn check_spend(
         &mut self,
-        cv: edwards::Point<Bls12, Unknown>,
-        anchor: Fr,
+        cv: jubjub::ExtendedPoint,
+        anchor: bls12_381::Scalar,
         nullifier: &[u8; 32],
-        rk: PublicKey<Bls12>,
+        rk: PublicKey,
         sighash_value: &[u8; 32],
         spend_auth_sig: Signature,
         zkproof: Proof<Bls12>,
         verifying_key: &PreparedVerifyingKey<Bls12>,
-        params: &JubjubBls12,
     ) -> bool {
-        if is_small_order(&cv, params) {
-            return false;
-        }
-
-        if is_small_order(&rk.0, params) {
+        if (cv.is_small_order() | rk.0.is_small_order()).into() {
             return false;
         }
 
         // Accumulate the value commitment in the context
-        {
-            let mut tmp = cv.clone();
-            tmp = tmp.add(&self.cv_sum, params);
-
-            // Update the context
-            self.cv_sum = tmp;
-        }
+        self.cv_sum += cv;
 
         // Grab the nullifier as a sequence of bytes
         let nullifier = &nullifier[..];
 
         // Compute the signature's message for rk/spend_auth_sig
         let mut data_to_be_signed = [0u8; 64];
-        rk.0.write(&mut data_to_be_signed[0..32])
-            .expect("message buffer should be 32 bytes");
+        data_to_be_signed[0..32].copy_from_slice(&rk.0.to_bytes());
         (&mut data_to_be_signed[32..64]).copy_from_slice(&sighash_value[..]);
 
         // Verify the spend_auth_sig
-        if !rk.verify(
-            &data_to_be_signed,
-            &spend_auth_sig,
-            FixedGenerators::SpendingKeyGenerator,
-            params,
-        ) {
+        if !rk.verify(&data_to_be_signed, &spend_auth_sig, SPENDING_KEY_GENERATOR) {
             return false;
         }
 
         // Construct public input for circuit
-        let mut public_input = [Fr::zero(); 7];
+        let mut public_input = [bls12_381::Scalar::zero(); 7];
         {
-            let (x, y) = rk.0.to_xy();
+            let affine = rk.0.to_affine();
+            let (x, y) = (affine.get_u(), affine.get_v());
             public_input[0] = x;
             public_input[1] = y;
         }
         {
-            let (x, y) = cv.to_xy();
+            let affine = cv.to_affine();
+            let (x, y) = (affine.get_u(), affine.get_v());
             public_input[2] = x;
             public_input[3] = y;
         }
@@ -113,40 +94,30 @@ impl SaplingVerificationContext {
     /// accumulating its value commitment inside the context for later use.
     pub fn check_output(
         &mut self,
-        cv: edwards::Point<Bls12, Unknown>,
-        cm: Fr,
-        epk: edwards::Point<Bls12, Unknown>,
+        cv: jubjub::ExtendedPoint,
+        cm: bls12_381::Scalar,
+        epk: jubjub::ExtendedPoint,
         zkproof: Proof<Bls12>,
         verifying_key: &PreparedVerifyingKey<Bls12>,
-        params: &JubjubBls12,
     ) -> bool {
-        if is_small_order(&cv, params) {
-            return false;
-        }
-
-        if is_small_order(&epk, params) {
+        if (cv.is_small_order() | epk.is_small_order()).into() {
             return false;
         }
 
         // Accumulate the value commitment in the context
-        {
-            let mut tmp = cv.clone();
-            tmp = tmp.negate(); // Outputs subtract from the total.
-            tmp = tmp.add(&self.cv_sum, params);
-
-            // Update the context
-            self.cv_sum = tmp;
-        }
+        self.cv_sum -= cv;
 
         // Construct public input for circuit
-        let mut public_input = [Fr::zero(); 5];
+        let mut public_input = [bls12_381::Scalar::zero(); 5];
         {
-            let (x, y) = cv.to_xy();
+            let affine = cv.to_affine();
+            let (x, y) = (affine.get_u(), affine.get_v());
             public_input[0] = x;
             public_input[1] = y;
         }
         {
-            let (x, y) = epk.to_xy();
+            let affine = epk.to_affine();
+            let (x, y) = (affine.get_u(), affine.get_v());
             public_input[2] = x;
             public_input[3] = y;
         }
@@ -164,34 +135,29 @@ impl SaplingVerificationContext {
         value_balance: Amount,
         sighash_value: &[u8; 32],
         binding_sig: Signature,
-        params: &JubjubBls12,
     ) -> bool {
         // Obtain current cv_sum from the context
         let mut bvk = PublicKey(self.cv_sum.clone());
 
         // Compute value balance
-        let mut value_balance = match compute_value_balance(value_balance, params) {
+        let value_balance = match compute_value_balance(value_balance) {
             Some(a) => a,
             None => return false,
         };
 
         // Subtract value_balance from current cv_sum to get final bvk
-        value_balance = value_balance.negate();
-        bvk.0 = bvk.0.add(&value_balance, params);
+        bvk.0 -= value_balance;
 
         // Compute the signature's message for bvk/binding_sig
         let mut data_to_be_signed = [0u8; 64];
-        bvk.0
-            .write(&mut data_to_be_signed[0..32])
-            .expect("bvk is 32 bytes");
+        data_to_be_signed[0..32].copy_from_slice(&bvk.0.to_bytes());
         (&mut data_to_be_signed[32..64]).copy_from_slice(&sighash_value[..]);
 
         // Verify the binding_sig
         bvk.verify(
             &data_to_be_signed,
             &binding_sig,
-            FixedGenerators::ValueCommitmentRandomness,
-            params,
+            VALUE_COMMITMENT_RANDOMNESS_GENERATOR,
         )
     }
 }

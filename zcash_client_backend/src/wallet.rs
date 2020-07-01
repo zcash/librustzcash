@@ -1,9 +1,7 @@
 //! Structs representing transaction data scanned from the block chain by a wallet or
 //! light client.
 
-use pairing::bls12_381::{Bls12, Fr};
 use zcash_primitives::{
-    jubjub::{edwards, PrimeOrder},
     merkle_tree::IncrementalWitness,
     primitives::{Note, PaymentAddress},
     sapling::Node,
@@ -36,11 +34,11 @@ pub struct WalletShieldedSpend {
 /// [`OutputDescription`]: zcash_primitives::transaction::components::OutputDescription
 pub struct WalletShieldedOutput {
     pub index: usize,
-    pub cmu: Fr,
-    pub epk: edwards::Point<Bls12, PrimeOrder>,
+    pub cmu: bls12_381::Scalar,
+    pub epk: jubjub::SubgroupPoint,
     pub account: usize,
-    pub note: Note<Bls12>,
-    pub to: PaymentAddress<Bls12>,
+    pub note: Note,
+    pub to: PaymentAddress,
     pub is_change: bool,
     pub witness: IncrementalWitness<Node>,
 }

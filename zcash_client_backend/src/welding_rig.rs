@@ -5,7 +5,6 @@ use std::collections::HashSet;
 use subtle::{ConditionallySelectable, ConstantTimeEq, CtOption};
 use zcash_primitives::{
     consensus,
-    jubjub::fs::Fs,
     merkle_tree::{CommitmentTree, IncrementalWitness},
     note_encryption::try_sapling_compact_note_decryption,
     sapling::Node,
@@ -26,7 +25,7 @@ use crate::wallet::{WalletShieldedOutput, WalletShieldedSpend, WalletTx};
 fn scan_output<P: consensus::Parameters>(
     height: u32,
     (index, output): (usize, CompactOutput),
-    ivks: &[Fs],
+    ivks: &[jubjub::Fr],
     spent_from_accounts: &HashSet<usize>,
     tree: &mut CommitmentTree<Node>,
     existing_witnesses: &mut [&mut IncrementalWitness<Node>],
@@ -188,18 +187,17 @@ pub fn scan_block<P: consensus::Parameters>(
 #[cfg(test)]
 mod tests {
     use ff::{Field, PrimeField};
-    use pairing::bls12_381::{Bls12, Fr};
+    use group::GroupEncoding;
     use rand_core::{OsRng, RngCore};
     use zcash_primitives::{
         consensus::TestNetwork,
-        jubjub::{fs::Fs, FixedGenerators, JubjubParams, ToUniform},
+        constants::SPENDING_KEY_GENERATOR,
         merkle_tree::CommitmentTree,
         note_encryption::{Memo, SaplingNoteEncryption},
         primitives::Note,
         transaction::components::Amount,
         util::generate_random_rseed,
         zip32::{ExtendedFullViewingKey, ExtendedSpendingKey},
-        JUBJUB,
     };
 
     use super::scan_block;
@@ -212,19 +210,15 @@ mod tests {
             nf
         };
         let fake_cmu = {
-            let fake_cmu = Fr::random(rng);
+            let fake_cmu = bls12_381::Scalar::random(rng);
             fake_cmu.to_repr().as_ref().to_owned()
         };
         let fake_epk = {
-            let mut buffer = vec![0; 64];
+            let mut buffer = [0; 64];
             rng.fill_bytes(&mut buffer);
-            let fake_esk = Fs::to_uniform(&buffer[..]);
-            let fake_epk = JUBJUB
-                .generator(FixedGenerators::SpendingKeyGenerator)
-                .mul(fake_esk, &JUBJUB);
-            let mut bytes = vec![];
-            fake_epk.write(&mut bytes).unwrap();
-            bytes
+            let fake_esk = jubjub::Fr::from_bytes_wide(&buffer);
+            let fake_epk = SPENDING_KEY_GENERATOR * fake_esk;
+            fake_epk.to_bytes().to_vec()
         };
         let mut cspend = CompactSpend::new();
         cspend.set_nf(fake_nf);
@@ -257,7 +251,7 @@ mod tests {
         let mut rng = OsRng;
         let rseed = generate_random_rseed::<TestNetwork, OsRng>(height as u32, &mut rng);
         let note = Note {
-            g_d: to.diversifier().g_d::<Bls12>(&JUBJUB).unwrap(),
+            g_d: to.diversifier().g_d().unwrap(),
             pk_d: to.pk_d().clone(),
             value: value.into(),
             rseed,
@@ -269,9 +263,8 @@ mod tests {
             Memo::default(),
             &mut rng,
         );
-        let cmu = note.cm(&JUBJUB).to_repr().as_ref().to_owned();
-        let mut epk = vec![];
-        encryptor.epk().write(&mut epk).unwrap();
+        let cmu = note.cm().to_repr().as_ref().to_owned();
+        let epk = encryptor.epk().to_bytes().to_vec();
         let enc_ciphertext = encryptor.encrypt_note_plaintext();
 
         // Create a fake CompactBlock containing the note

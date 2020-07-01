@@ -168,19 +168,12 @@ fn generate_pedersen_circuit_generators() -> Vec<Vec<Vec<(Scalar, Scalar)>>> {
 
 #[cfg(test)]
 mod tests {
-    use bls12_381::Scalar;
-    use ff::PrimeField;
-    use pairing::bls12_381::Fr;
     use zcash_primitives::{
         jubjub::{FixedGenerators, JubjubParams},
         JUBJUB,
     };
 
     use super::*;
-
-    fn check_scalar(expected: Fr, actual: Scalar) {
-        assert_eq!(expected.to_repr().0, actual.to_bytes());
-    }
 
     fn check_generator(expected: FixedGenerators, actual: FixedGenerator) {
         let expected = JUBJUB.circuit_generators(expected);
@@ -192,25 +185,25 @@ mod tests {
             assert_eq!(expected.len(), actual.len());
             for (expected, actual) in expected.iter().zip(actual) {
                 // Same coordinates.
-                check_scalar(expected.0, actual.0);
-                check_scalar(expected.1, actual.1);
+                assert_eq!(expected.0, actual.0);
+                assert_eq!(expected.1, actual.1);
             }
         }
     }
 
     #[test]
     fn edwards_d() {
-        check_scalar(*JUBJUB.edwards_d(), EDWARDS_D);
+        assert_eq!(*JUBJUB.edwards_d(), EDWARDS_D);
     }
 
     #[test]
     fn montgomery_a() {
-        check_scalar(*JUBJUB.montgomery_a(), MONTGOMERY_A);
+        assert_eq!(*JUBJUB.montgomery_a(), MONTGOMERY_A);
     }
 
     #[test]
     fn montgomery_scale() {
-        check_scalar(*JUBJUB.scale(), MONTGOMERY_SCALE);
+        assert_eq!(*JUBJUB.scale(), MONTGOMERY_SCALE);
     }
 
     #[test]
@@ -267,27 +260,5 @@ mod tests {
             FixedGenerators::SpendingKeyGenerator,
             &SPENDING_KEY_GENERATOR,
         );
-    }
-
-    #[test]
-    fn pedersen_circuit_generators() {
-        let expected = JUBJUB.pedersen_circuit_generators();
-        let actual = &PEDERSEN_CIRCUIT_GENERATORS;
-
-        // Same number of Pedersen hash generators.
-        assert_eq!(expected.len(), actual.len());
-        for (expected, actual) in expected.iter().zip(actual.iter()) {
-            // Same number of windows per generator.
-            assert_eq!(expected.len(), actual.len());
-            for (expected, actual) in expected.iter().zip(actual) {
-                // Same size table per window.
-                assert_eq!(expected.len(), actual.len());
-                for (expected, actual) in expected.iter().zip(actual) {
-                    // Same coordinates.
-                    check_scalar(expected.0, actual.0);
-                    check_scalar(expected.1, actual.1);
-                }
-            }
-        }
     }
 }

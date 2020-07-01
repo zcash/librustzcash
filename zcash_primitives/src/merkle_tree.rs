@@ -194,13 +194,7 @@ impl<Node: Hashable> CommitmentTree<Node> {
 /// # Examples
 ///
 /// ```
-/// extern crate ff;
-/// extern crate pairing;
-/// extern crate rand_core;
-/// extern crate zcash_primitives;
-///
 /// use ff::{Field, PrimeField};
-/// use pairing::bls12_381::Fr;
 /// use rand_core::OsRng;
 /// use zcash_primitives::{
 ///     merkle_tree::{CommitmentTree, IncrementalWitness},
@@ -211,13 +205,13 @@ impl<Node: Hashable> CommitmentTree<Node> {
 ///
 /// let mut tree = CommitmentTree::<Node>::new();
 ///
-/// tree.append(Node::new(Fr::random(&mut rng).to_repr()));
-/// tree.append(Node::new(Fr::random(&mut rng).to_repr()));
+/// tree.append(Node::new(bls12_381::Scalar::random(&mut rng).to_repr()));
+/// tree.append(Node::new(bls12_381::Scalar::random(&mut rng).to_repr()));
 /// let mut witness = IncrementalWitness::from_tree(&tree);
 /// assert_eq!(witness.position(), 1);
 /// assert_eq!(tree.root(), witness.root());
 ///
-/// let cmu = Node::new(Fr::random(&mut rng).to_repr());
+/// let cmu = Node::new(bls12_381::Scalar::random(&mut rng).to_repr());
 /// tree.append(cmu);
 /// witness.append(cmu);
 /// assert_eq!(tree.root(), witness.root());
@@ -512,7 +506,6 @@ mod tests {
     use crate::sapling::Node;
 
     use hex;
-    use pairing::bls12_381::FrRepr;
     use std::convert::TryInto;
     use std::io::{self, Read, Write};
 
@@ -1016,9 +1009,9 @@ mod tests {
         let mut paths_i = 0;
         let mut witness_ser_i = 0;
         for i in 0..16 {
-            let cm = FrRepr(hex::decode(commitments[i]).unwrap()[..].try_into().unwrap());
+            let cm = hex::decode(commitments[i]).unwrap();
 
-            let cm = Node::new(cm);
+            let cm = Node::new(cm[..].try_into().unwrap());
 
             // Witness here
             witnesses.push((TestIncrementalWitness::from_tree(&tree), last_cm));

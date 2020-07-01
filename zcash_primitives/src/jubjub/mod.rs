@@ -23,14 +23,13 @@
 //! [Jubjub]: https://zips.z.cash/protocol/protocol.pdf#jubjub
 //! [BLS12-381]: pairing::bls12_381
 
-use ff::{Field, PrimeField};
+use ff::PrimeField;
+use group::{Curve, Group};
 use pairing::Engine;
 
 use crate::group_hash::group_hash;
 
 use crate::constants;
-
-use pairing::bls12_381::{Bls12, Fr};
 
 /// This is an implementation of the twisted Edwards Jubjub curve.
 pub mod edwards;
@@ -95,7 +94,7 @@ pub trait ToUniform {
 /// and some pre-computed parameters.
 pub trait JubjubEngine: Engine {
     /// The scalar field of the Jubjub curve
-    type Fs: PrimeField + ToUniform;
+    type Fs: PrimeField;
     /// The parameters of Jubjub and the Sapling protocol
     type Params: JubjubParams<Self>;
 }
@@ -112,20 +111,17 @@ pub trait JubjubParams<E: JubjubEngine>: Sized {
     /// The scaling factor used for conversion from the Montgomery form.
     fn scale(&self) -> &E::Fr;
     /// Returns the generators (for each segment) used in all Pedersen commitments.
-    fn pedersen_hash_generators(&self) -> &[edwards::Point<E, PrimeOrder>];
+    fn pedersen_hash_generators(&self) -> &[jubjub::SubgroupPoint];
     /// Returns the exp table for Pedersen hashes.
-    fn pedersen_hash_exp_table(&self) -> &[Vec<Vec<edwards::Point<E, PrimeOrder>>>];
+    fn pedersen_hash_exp_table(&self) -> &[Vec<Vec<jubjub::SubgroupPoint>>];
     /// Returns the maximum number of chunks per segment of the Pedersen hash.
     fn pedersen_hash_chunks_per_generator(&self) -> usize;
-    /// Returns the pre-computed window tables [-4, 3, 2, 1, 1, 2, 3, 4] of different
-    /// magnitudes of the Pedersen hash segment generators.
-    fn pedersen_circuit_generators(&self) -> &[Vec<Vec<(E::Fr, E::Fr)>>];
 
     /// Returns the number of chunks needed to represent a full scalar during fixed-base
     /// exponentiation.
     fn fixed_base_chunks_per_generator(&self) -> usize;
     /// Returns a fixed generator.
-    fn generator(&self, base: FixedGenerators) -> &edwards::Point<E, PrimeOrder>;
+    fn generator(&self, base: FixedGenerators) -> &jubjub::SubgroupPoint;
     /// Returns a window table [0, 1, ..., 8] for different magnitudes of some
     /// fixed generator.
     fn circuit_generators(&self, _: FixedGenerators) -> &[Vec<(E::Fr, E::Fr)>];
@@ -134,42 +130,41 @@ pub trait JubjubParams<E: JubjubEngine>: Sized {
     fn pedersen_hash_exp_window_size() -> u32;
 }
 
-impl JubjubEngine for Bls12 {
-    type Fs = self::fs::Fs;
+impl JubjubEngine for bls12_381::Bls12 {
+    type Fs = jubjub::Fr;
     type Params = JubjubBls12;
 }
 
 pub struct JubjubBls12 {
-    edwards_d: Fr,
-    montgomery_a: Fr,
-    montgomery_2a: Fr,
-    scale: Fr,
+    edwards_d: bls12_381::Scalar,
+    montgomery_a: bls12_381::Scalar,
+    montgomery_2a: bls12_381::Scalar,
+    scale: bls12_381::Scalar,
 
-    pedersen_hash_generators: Vec<edwards::Point<Bls12, PrimeOrder>>,
-    pedersen_hash_exp: Vec<Vec<Vec<edwards::Point<Bls12, PrimeOrder>>>>,
-    pedersen_circuit_generators: Vec<Vec<Vec<(Fr, Fr)>>>,
+    pedersen_hash_generators: Vec<jubjub::SubgroupPoint>,
+    pedersen_hash_exp: Vec<Vec<Vec<jubjub::SubgroupPoint>>>,
 
-    fixed_base_generators: Vec<edwards::Point<Bls12, PrimeOrder>>,
-    fixed_base_circuit_generators: Vec<Vec<Vec<(Fr, Fr)>>>,
+    fixed_base_generators: Vec<jubjub::SubgroupPoint>,
+    fixed_base_circuit_generators: Vec<Vec<Vec<(bls12_381::Scalar, bls12_381::Scalar)>>>,
 }
 
-impl JubjubParams<Bls12> for JubjubBls12 {
-    fn edwards_d(&self) -> &Fr {
+impl JubjubParams<bls12_381::Bls12> for JubjubBls12 {
+    fn edwards_d(&self) -> &bls12_381::Scalar {
         &self.edwards_d
     }
-    fn montgomery_a(&self) -> &Fr {
+    fn montgomery_a(&self) -> &bls12_381::Scalar {
         &self.montgomery_a
     }
-    fn montgomery_2a(&self) -> &Fr {
+    fn montgomery_2a(&self) -> &bls12_381::Scalar {
         &self.montgomery_2a
     }
-    fn scale(&self) -> &Fr {
+    fn scale(&self) -> &bls12_381::Scalar {
         &self.scale
     }
-    fn pedersen_hash_generators(&self) -> &[edwards::Point<Bls12, PrimeOrder>] {
+    fn pedersen_hash_generators(&self) -> &[jubjub::SubgroupPoint] {
         &self.pedersen_hash_generators
     }
-    fn pedersen_hash_exp_table(&self) -> &[Vec<Vec<edwards::Point<Bls12, PrimeOrder>>>] {
+    fn pedersen_hash_exp_table(&self) -> &[Vec<Vec<jubjub::SubgroupPoint>>] {
         &self.pedersen_hash_exp
     }
     fn pedersen_hash_chunks_per_generator(&self) -> usize {
@@ -178,13 +173,13 @@ impl JubjubParams<Bls12> for JubjubBls12 {
     fn fixed_base_chunks_per_generator(&self) -> usize {
         84
     }
-    fn pedersen_circuit_generators(&self) -> &[Vec<Vec<(Fr, Fr)>>] {
-        &self.pedersen_circuit_generators
-    }
-    fn generator(&self, base: FixedGenerators) -> &edwards::Point<Bls12, PrimeOrder> {
+    fn generator(&self, base: FixedGenerators) -> &jubjub::SubgroupPoint {
         &self.fixed_base_generators[base as usize]
     }
-    fn circuit_generators(&self, base: FixedGenerators) -> &[Vec<(Fr, Fr)>] {
+    fn circuit_generators(
+        &self,
+        base: FixedGenerators,
+    ) -> &[Vec<(bls12_381::Scalar, bls12_381::Scalar)>] {
         &self.fixed_base_circuit_generators[base as usize][..]
     }
     fn pedersen_hash_exp_window_size() -> u32 {
@@ -194,12 +189,12 @@ impl JubjubParams<Bls12> for JubjubBls12 {
 
 impl JubjubBls12 {
     pub fn new() -> Self {
-        let montgomery_a = Fr::from_str("40962").unwrap();
+        let montgomery_a = bls12_381::Scalar::from_str("40962").unwrap();
         let montgomery_2a = montgomery_a.double();
 
         let mut tmp_params = JubjubBls12 {
             // d = -(10240/10241)
-            edwards_d: Fr::from_str(
+            edwards_d: bls12_381::Scalar::from_str(
                 "19257038036680949359750312669786877991949435402254120286184196891950884077233",
             )
             .unwrap(),
@@ -208,7 +203,7 @@ impl JubjubBls12 {
             // 2A = 2.A
             montgomery_2a,
             // scaling factor = sqrt(4 / (a - d))
-            scale: Fr::from_str(
+            scale: bls12_381::Scalar::from_str(
                 "17814886934372412843466061268024708274627479829237077604635722030778476050649",
             )
             .unwrap(),
@@ -216,7 +211,6 @@ impl JubjubBls12 {
             // We'll initialize these below
             pedersen_hash_generators: vec![],
             pedersen_hash_exp: vec![],
-            pedersen_circuit_generators: vec![],
             fixed_base_generators: vec![],
             fixed_base_circuit_generators: vec![],
         };
@@ -236,14 +230,10 @@ impl JubjubBls12 {
                 pedersen_hash_generators.push(JubjubBls12::find_group_hash(
                     &segment_number,
                     constants::PEDERSEN_HASH_GENERATORS_PERSONALIZATION,
-                    &tmp_params,
                 ));
             }
 
-            JubjubBls12::check_consistency_of_pedersen_hash_generators(
-                &tmp_params,
-                &pedersen_hash_generators,
-            );
+            JubjubBls12::check_consistency_of_pedersen_hash_generators(&pedersen_hash_generators);
             tmp_params.pedersen_hash_generators = pedersen_hash_generators;
         }
 
@@ -259,21 +249,21 @@ impl JubjubBls12 {
                 let mut tables = vec![];
 
                 let mut num_bits = 0;
-                while num_bits <= fs::Fs::NUM_BITS {
+                while num_bits <= jubjub::Fr::NUM_BITS {
                     let mut table = Vec::with_capacity(1 << window);
 
-                    let mut base = edwards::Point::zero();
+                    let mut base = jubjub::SubgroupPoint::identity();
 
                     for _ in 0..(1 << window) {
                         table.push(base.clone());
-                        base = base.add(&g, &tmp_params);
+                        base += g;
                     }
 
                     tables.push(table);
                     num_bits += window;
 
                     for _ in 0..window {
-                        g = g.double(&tmp_params);
+                        g = g.double();
                     }
                 }
 
@@ -286,53 +276,47 @@ impl JubjubBls12 {
         // Create the bases for other parts of the protocol
         {
             let mut fixed_base_generators =
-                vec![edwards::Point::zero(); FixedGenerators::Max as usize];
+                vec![jubjub::SubgroupPoint::identity(); FixedGenerators::Max as usize];
 
             fixed_base_generators[FixedGenerators::ProofGenerationKey as usize] =
                 JubjubBls12::find_group_hash(
                     &[],
                     constants::PROOF_GENERATION_KEY_BASE_GENERATOR_PERSONALIZATION,
-                    &tmp_params,
                 );
 
             fixed_base_generators[FixedGenerators::NoteCommitmentRandomness as usize] =
                 JubjubBls12::find_group_hash(
                     b"r",
                     constants::PEDERSEN_HASH_GENERATORS_PERSONALIZATION,
-                    &tmp_params,
                 );
 
             fixed_base_generators[FixedGenerators::NullifierPosition as usize] =
                 JubjubBls12::find_group_hash(
                     &[],
                     constants::NULLIFIER_POSITION_IN_TREE_GENERATOR_PERSONALIZATION,
-                    &tmp_params,
                 );
 
             fixed_base_generators[FixedGenerators::ValueCommitmentValue as usize] =
                 JubjubBls12::find_group_hash(
                     b"v",
                     constants::VALUE_COMMITMENT_GENERATOR_PERSONALIZATION,
-                    &tmp_params,
                 );
 
             fixed_base_generators[FixedGenerators::ValueCommitmentRandomness as usize] =
                 JubjubBls12::find_group_hash(
                     b"r",
                     constants::VALUE_COMMITMENT_GENERATOR_PERSONALIZATION,
-                    &tmp_params,
                 );
 
             fixed_base_generators[FixedGenerators::SpendingKeyGenerator as usize] =
                 JubjubBls12::find_group_hash(
                     &[],
                     constants::SPENDING_KEY_GENERATOR_PERSONALIZATION,
-                    &tmp_params,
                 );
 
             // Check for duplicates, far worse than spec inconsistencies!
             for (i, p1) in fixed_base_generators.iter().enumerate() {
-                if p1 == &edwards::Point::zero() {
+                if p1.is_identity().into() {
                     panic!("Neutral element!");
                 }
 
@@ -346,38 +330,6 @@ impl JubjubBls12 {
             tmp_params.fixed_base_generators = fixed_base_generators;
         }
 
-        // Create the 2-bit window table lookups for each 4-bit
-        // "chunk" in each segment of the Pedersen hash
-        {
-            let mut pedersen_circuit_generators = vec![];
-
-            // Process each segment
-            for gen in tmp_params.pedersen_hash_generators.iter().cloned() {
-                let mut gen = montgomery::Point::from_edwards(&gen, &tmp_params);
-                let mut windows = vec![];
-                for _ in 0..tmp_params.pedersen_hash_chunks_per_generator() {
-                    // Create (x, y) coeffs for this chunk
-                    let mut coeffs = vec![];
-                    let mut g = gen.clone();
-
-                    // coeffs = g, g*2, g*3, g*4
-                    for _ in 0..4 {
-                        coeffs.push(g.to_xy().expect("cannot produce O"));
-                        g = g.add(&gen, &tmp_params);
-                    }
-                    windows.push(coeffs);
-
-                    // Our chunks are separated by 2 bits to prevent overlap.
-                    for _ in 0..4 {
-                        gen = gen.double(&tmp_params);
-                    }
-                }
-                pedersen_circuit_generators.push(windows);
-            }
-
-            tmp_params.pedersen_circuit_generators = pedersen_circuit_generators;
-        }
-
         // Create the 3-bit window table lookups for fixed-base
         // exp of each base in the protocol.
         {
@@ -386,11 +338,12 @@ impl JubjubBls12 {
             for mut gen in tmp_params.fixed_base_generators.iter().cloned() {
                 let mut windows = vec![];
                 for _ in 0..tmp_params.fixed_base_chunks_per_generator() {
-                    let mut coeffs = vec![(Fr::zero(), Fr::one())];
+                    let mut coeffs = vec![(bls12_381::Scalar::zero(), bls12_381::Scalar::one())];
                     let mut g = gen.clone();
                     for _ in 0..7 {
-                        coeffs.push(g.to_xy());
-                        g = g.add(&gen, &tmp_params);
+                        let g_affine = jubjub::ExtendedPoint::from(g).to_affine();
+                        coeffs.push((g_affine.get_u(), g_affine.get_v()));
+                        g += gen;
                     }
                     windows.push(coeffs);
 
@@ -406,17 +359,13 @@ impl JubjubBls12 {
         tmp_params
     }
 
-    fn find_group_hash<E: JubjubEngine>(
-        m: &[u8],
-        personalization: &[u8; 8],
-        params: &E::Params,
-    ) -> edwards::Point<E, PrimeOrder> {
+    fn find_group_hash(m: &[u8], personalization: &[u8; 8]) -> jubjub::SubgroupPoint {
         let mut tag = m.to_vec();
         let i = tag.len();
         tag.push(0u8);
 
         loop {
-            let gh = group_hash(&tag, personalization, params);
+            let gh = group_hash(&tag, personalization);
 
             // We don't want to overflow and start reusing generators
             assert!(tag[i] != u8::max_value());
@@ -430,19 +379,18 @@ impl JubjubBls12 {
 
     /// Check for simple relations between the generators, that make finding collisions easy;
     /// far worse than spec inconsistencies!
-    fn check_consistency_of_pedersen_hash_generators<E: JubjubEngine>(
-        tmp_params: &E::Params,
-        pedersen_hash_generators: &[edwards::Point<E, PrimeOrder>],
+    fn check_consistency_of_pedersen_hash_generators(
+        pedersen_hash_generators: &[jubjub::SubgroupPoint],
     ) {
         for (i, p1) in pedersen_hash_generators.iter().enumerate() {
-            if p1 == &edwards::Point::zero() {
+            if p1.is_identity().into() {
                 panic!("Neutral element!");
             }
             for p2 in pedersen_hash_generators.iter().skip(i + 1) {
                 if p1 == p2 {
                     panic!("Duplicate generator!");
                 }
-                if p1 == &p2.negate() {
+                if *p1 == -p2 {
                     panic!("Inverse generator!");
                 }
             }
@@ -456,8 +404,8 @@ impl JubjubBls12 {
                     if k == j || k == i {
                         continue;
                     }
-                    let sum = &p2.add(&p3, &tmp_params);
-                    if sum == p1 {
+                    let sum = p2 + p3;
+                    if sum == *p1 {
                         panic!("Linear relation between generators!");
                     }
                 }
@@ -468,6 +416,7 @@ impl JubjubBls12 {
 
 #[test]
 fn test_jubjub_bls12() {
+    use bls12_381::Bls12;
     use hex_literal::hex;
 
     let params = JubjubBls12::new();
@@ -477,7 +426,7 @@ fn test_jubjub_bls12() {
     let test_repr = hex!("9d12b88b08dcbef8a11ee0712d94cb236ee2f4ca17317075bfafc82ce3139d31");
     let p = edwards::Point::<Bls12, _>::read(&test_repr[..], &params).unwrap();
     let q = edwards::Point::<Bls12, _>::get_for_y(
-        Fr::from_str(
+        bls12_381::Scalar::from_str(
             "22440861827555040311190986994816762244378363690614952020532787748720529117853",
         )
         .unwrap(),
@@ -492,7 +441,7 @@ fn test_jubjub_bls12() {
     let test_repr = hex!("9d12b88b08dcbef8a11ee0712d94cb236ee2f4ca17317075bfafc82ce3139db1");
     let p = edwards::Point::<Bls12, _>::read(&test_repr[..], &params).unwrap();
     let q = edwards::Point::<Bls12, _>::get_for_y(
-        Fr::from_str(
+        bls12_381::Scalar::from_str(
             "22440861827555040311190986994816762244378363690614952020532787748720529117853",
         )
         .unwrap(),
@@ -507,9 +456,7 @@ fn test_jubjub_bls12() {
 #[test]
 #[should_panic(expected = "Linear relation between generators!")]
 fn test_jubjub_bls12_pedersen_hash_generators_consistency_check_linear_relation() {
-    let params = JubjubBls12::new();
-
-    let mut pedersen_hash_generators: Vec<edwards::Point<Bls12, PrimeOrder>> = vec![];
+    let mut pedersen_hash_generators: Vec<jubjub::SubgroupPoint> = vec![];
 
     use byteorder::{LittleEndian, WriteBytesExt};
 
@@ -522,7 +469,6 @@ fn test_jubjub_bls12_pedersen_hash_generators_consistency_check_linear_relation(
         let p = JubjubBls12::find_group_hash(
             &segment_number,
             constants::PEDERSEN_HASH_GENERATORS_PERSONALIZATION,
-            &params,
         );
         pedersen_hash_generators.push(p);
     }
@@ -531,7 +477,7 @@ fn test_jubjub_bls12_pedersen_hash_generators_consistency_check_linear_relation(
     let p2 = pedersen_hash_generators[1].clone();
 
     //test for linear relation
-    pedersen_hash_generators.push(p1.add(&p2, &params));
+    pedersen_hash_generators.push(p1 + p2);
 
-    JubjubBls12::check_consistency_of_pedersen_hash_generators(&params, &pedersen_hash_generators);
+    JubjubBls12::check_consistency_of_pedersen_hash_generators(&pedersen_hash_generators);
 }

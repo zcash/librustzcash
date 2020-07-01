@@ -12,7 +12,6 @@ use zcash_primitives::{
     merkle_tree::{CommitmentTree, IncrementalWitness},
     sapling::Node,
     transaction::Transaction,
-    JUBJUB,
 };
 
 use crate::{
@@ -273,7 +272,6 @@ pub fn scan_cached_blocks<P: AsRef<Path>, Q: AsRef<Path>>(
                 let nf = output.note.nf(
                     &extfvks[output.account].fvk.vk,
                     output.witness.position() as u64,
-                    &JUBJUB,
                 );
 
                 // Assumptions:

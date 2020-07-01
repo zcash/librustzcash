@@ -1,12 +1,8 @@
 //! Structs for building transactions.
 
+use crate::primitives::{Diversifier, Note, PaymentAddress};
 use crate::zip32::ExtendedSpendingKey;
-use crate::{
-    jubjub::fs::Fs,
-    primitives::{Diversifier, Note, PaymentAddress},
-};
 use ff::Field;
-use pairing::bls12_381::{Bls12, Fr};
 use rand::{rngs::OsRng, seq::SliceRandom, CryptoRng, RngCore};
 use std::error;
 use std::fmt;
@@ -26,7 +22,6 @@ use crate::{
         signature_hash_data, Transaction, TransactionData, SIGHASH_ALL,
     },
     util::generate_random_rseed,
-    JUBJUB,
 };
 
 #[cfg(feature = "transparent-inputs")]
@@ -75,15 +70,15 @@ impl error::Error for Error {}
 struct SpendDescriptionInfo {
     extsk: ExtendedSpendingKey,
     diversifier: Diversifier,
-    note: Note<Bls12>,
-    alpha: Fs,
+    note: Note,
+    alpha: jubjub::Fr,
     merkle_path: MerklePath<Node>,
 }
 
 pub struct SaplingOutput {
     ovk: OutgoingViewingKey,
-    to: PaymentAddress<Bls12>,
-    note: Note<Bls12>,
+    to: PaymentAddress,
+    note: Note,
     memo: Memo,
 }
 
@@ -92,11 +87,11 @@ impl SaplingOutput {
         height: u32,
         rng: &mut R,
         ovk: OutgoingViewingKey,
-        to: PaymentAddress<Bls12>,
+        to: PaymentAddress,
         value: Amount,
         memo: Option<Memo>,
     ) -> Result<Self, Error> {
-        let g_d = match to.g_d(&JUBJUB) {
+        let g_d = match to.g_d() {
             Some(g_d) => g_d,
             None => return Err(Error::InvalidAddress),
         };
@@ -143,7 +138,7 @@ impl SaplingOutput {
             self.note.value,
         );
 
-        let cmu = self.note.cm(&JUBJUB);
+        let cmu = self.note.cm();
 
         let enc_ciphertext = encryptor.encrypt_note_plaintext();
         let out_ciphertext = encryptor.encrypt_outgoing_plaintext(&cv, &cmu);
@@ -310,11 +305,11 @@ pub struct Builder<P: consensus::Parameters, R: RngCore + CryptoRng> {
     height: u32,
     mtx: TransactionData,
     fee: Amount,
-    anchor: Option<Fr>,
+    anchor: Option<bls12_381::Scalar>,
     spends: Vec<SpendDescriptionInfo>,
     outputs: Vec<SaplingOutput>,
     transparent_inputs: TransparentInputs,
-    change_address: Option<(OutgoingViewingKey, PaymentAddress<Bls12>)>,
+    change_address: Option<(OutgoingViewingKey, PaymentAddress)>,
     phantom: PhantomData<P>,
 }
 
@@ -369,13 +364,13 @@ impl<P: consensus::Parameters, R: RngCore + CryptoRng> Builder<P, R> {
         &mut self,
         extsk: ExtendedSpendingKey,
         diversifier: Diversifier,
-        note: Note<Bls12>,
+        note: Note,
         merkle_path: MerklePath<Node>,
     ) -> Result<(), Error> {
         // Consistency check: all anchors must equal the first one
-        let cm = Node::new(note.cm(&JUBJUB).into());
+        let cm = Node::new(note.cm().into());
         if let Some(anchor) = self.anchor {
-            let path_root: Fr = merkle_path.root(cm).into();
+            let path_root: bls12_381::Scalar = merkle_path.root(cm).into();
             if path_root != anchor {
                 return Err(Error::AnchorMismatch);
             }
@@ -383,7 +378,7 @@ impl<P: consensus::Parameters, R: RngCore + CryptoRng> Builder<P, R> {
             self.anchor = Some(merkle_path.root(cm).into())
         }
 
-        let alpha = Fs::random(&mut self.rng);
+        let alpha = jubjub::Fr::random(&mut self.rng);
 
         self.mtx.value_balance += Amount::from_u64(note.value).map_err(|_| Error::InvalidAmount)?;
 
@@ -402,7 +397,7 @@ impl<P: consensus::Parameters, R: RngCore + CryptoRng> Builder<P, R> {
     pub fn add_sapling_output(
         &mut self,
         ovk: OutgoingViewingKey,
-        to: PaymentAddress<Bls12>,
+        to: PaymentAddress,
         value: Amount,
         memo: Option<Memo>,
     ) -> Result<(), Error> {
@@ -448,7 +443,7 @@ impl<P: consensus::Parameters, R: RngCore + CryptoRng> Builder<P, R> {
     ///
     /// By default, change is sent to the Sapling address corresponding to the first note
     /// being spent (i.e. the first call to [`Builder::add_sapling_spend`]).
-    pub fn send_change_to(&mut self, ovk: OutgoingViewingKey, to: PaymentAddress<Bls12>) {
+    pub fn send_change_to(&mut self, ovk: OutgoingViewingKey, to: PaymentAddress) {
         self.change_address = Some((ovk, to));
     }
 
@@ -548,13 +543,12 @@ impl<P: consensus::Parameters, R: RngCore + CryptoRng> Builder<P, R> {
             let anchor = self.anchor.expect("anchor was set if spends were added");
 
             for (i, (pos, spend)) in spends.iter().enumerate() {
-                let proof_generation_key = spend.extsk.expsk.proof_generation_key(&JUBJUB);
+                let proof_generation_key = spend.extsk.expsk.proof_generation_key();
 
                 let mut nullifier = [0u8; 32];
                 nullifier.copy_from_slice(&spend.note.nf(
-                    &proof_generation_key.to_viewing_key(&JUBJUB),
+                    &proof_generation_key.to_viewing_key(),
                     spend.merkle_path.position,
-                    &JUBJUB,
                 ));
 
                 let (zkproof, cv, rk) = prover
@@ -601,7 +595,7 @@ impl<P: consensus::Parameters, R: RngCore + CryptoRng> Builder<P, R> {
                             let mut d = [0; 11];
                             self.rng.fill_bytes(&mut d);
                             diversifier = Diversifier(d);
-                            if let Some(val) = diversifier.g_d::<Bls12>(&JUBJUB) {
+                            if let Some(val) = diversifier.g_d() {
                                 g_d = val;
                                 break;
                             }
@@ -610,8 +604,8 @@ impl<P: consensus::Parameters, R: RngCore + CryptoRng> Builder<P, R> {
                     };
 
                     let (pk_d, payment_address) = loop {
-                        let dummy_ivk = Fs::random(&mut self.rng);
-                        let pk_d = g_d.mul(dummy_ivk, &JUBJUB);
+                        let dummy_ivk = jubjub::Fr::random(&mut self.rng);
+                        let pk_d = g_d * dummy_ivk;
                         if let Some(addr) = PaymentAddress::from_parts(diversifier, pk_d.clone()) {
                             break (pk_d, addr);
                         }
@@ -631,7 +625,7 @@ impl<P: consensus::Parameters, R: RngCore + CryptoRng> Builder<P, R> {
                 };
 
                 let esk = dummy_note.generate_or_derive_esk(&mut self.rng);
-                let epk = dummy_note.g_d.mul(esk, &JUBJUB);
+                let epk = dummy_note.g_d * esk;
 
                 let (zkproof, cv) = prover.output_proof(
                     &mut ctx,
@@ -641,7 +635,7 @@ impl<P: consensus::Parameters, R: RngCore + CryptoRng> Builder<P, R> {
                     dummy_note.value,
                 );
 
-                let cmu = dummy_note.cm(&JUBJUB);
+                let cmu = dummy_note.cm();
 
                 let mut enc_ciphertext = [0u8; 580];
                 let mut out_ciphertext = [0u8; 80];
@@ -680,7 +674,6 @@ impl<P: consensus::Parameters, R: RngCore + CryptoRng> Builder<P, R> {
                 spend.alpha,
                 &sighash,
                 &mut self.rng,
-                &JUBJUB,
             ));
         }
 
@@ -712,8 +705,6 @@ mod tests {
     use rand_core::OsRng;
     use std::marker::PhantomData;
 
-    use crate::jubjub::fs::Fs;
-
     use super::{Builder, Error};
     use crate::{
         consensus,
@@ -725,7 +716,6 @@ mod tests {
         sapling::Node,
         transaction::components::Amount,
         zip32::{ExtendedFullViewingKey, ExtendedSpendingKey},
-        JUBJUB,
     };
 
     #[test]
@@ -788,9 +778,9 @@ mod tests {
         let mut rng = OsRng;
 
         let note1 = to
-            .create_note(50000, Rseed::BeforeZip212(Fs::random(&mut rng)), &JUBJUB)
+            .create_note(50000, Rseed::BeforeZip212(jubjub::Fr::random(&mut rng)))
             .unwrap();
-        let cm1 = Node::new(note1.cm(&JUBJUB).to_repr());
+        let cm1 = Node::new(note1.cm().to_repr());
         let mut tree = CommitmentTree::new();
         tree.append(cm1).unwrap();
         let witness1 = IncrementalWitness::from_tree(&tree);
@@ -887,9 +877,9 @@ mod tests {
         }
 
         let note1 = to
-            .create_note(59999, Rseed::BeforeZip212(Fs::random(&mut rng)), &JUBJUB)
+            .create_note(59999, Rseed::BeforeZip212(jubjub::Fr::random(&mut rng)))
             .unwrap();
-        let cm1 = Node::new(note1.cm(&JUBJUB).to_repr());
+        let cm1 = Node::new(note1.cm().to_repr());
         let mut tree = CommitmentTree::new();
         tree.append(cm1).unwrap();
         let mut witness1 = IncrementalWitness::from_tree(&tree);
@@ -927,9 +917,9 @@ mod tests {
         }
 
         let note2 = to
-            .create_note(1, Rseed::BeforeZip212(Fs::random(&mut rng)), &JUBJUB)
+            .create_note(1, Rseed::BeforeZip212(jubjub::Fr::random(&mut rng)))
             .unwrap();
-        let cm2 = Node::new(note2.cm(&JUBJUB).to_repr());
+        let cm2 = Node::new(note2.cm().to_repr());
         tree.append(cm2).unwrap();
         witness1.append(cm2).unwrap();
         let witness2 = IncrementalWitness::from_tree(&tree);

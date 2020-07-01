@@ -1,6 +1,5 @@
 //! Structs for handling supported address types.
 
-use pairing::bls12_381::Bls12;
 use zcash_client_backend::encoding::{
     decode_payment_address, decode_transparent_address, encode_payment_address,
     encode_transparent_address,
@@ -19,12 +18,12 @@ use zcash_client_backend::constants::testnet::{
 
 /// An address that funds can be sent to.
 pub enum RecipientAddress {
-    Shielded(PaymentAddress<Bls12>),
+    Shielded(PaymentAddress),
     Transparent(TransparentAddress),
 }
 
-impl From<PaymentAddress<Bls12>> for RecipientAddress {
-    fn from(addr: PaymentAddress<Bls12>) -> Self {
+impl From<PaymentAddress> for RecipientAddress {
+    fn from(addr: PaymentAddress) -> Self {
         RecipientAddress::Shielded(addr)
     }
 }

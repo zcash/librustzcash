@@ -96,7 +96,7 @@ fn get_target_and_anchor_heights(data: &Connection) -> Result<(u32, u32), error:
 mod tests {
     use crate::Network;
     use ff::PrimeField;
-    use pairing::bls12_381::Bls12;
+    use group::GroupEncoding;
     use protobuf::Message;
     use rand_core::{OsRng, RngCore};
     use rusqlite::{types::ToSql, Connection};
@@ -111,7 +111,6 @@ mod tests {
         transaction::components::Amount,
         util::generate_random_rseed,
         zip32::ExtendedFullViewingKey,
-        JUBJUB,
     };
 
     /// Create a fake CompactBlock at the given height, containing a single output paying
@@ -128,7 +127,7 @@ mod tests {
         let mut rng = OsRng;
         let rseed = generate_random_rseed::<Network, OsRng>(height as u32, &mut rng);
         let note = Note {
-            g_d: to.diversifier().g_d::<Bls12>(&JUBJUB).unwrap(),
+            g_d: to.diversifier().g_d().unwrap(),
             pk_d: to.pk_d().clone(),
             value: value.into(),
             rseed,
@@ -140,9 +139,8 @@ mod tests {
             Memo::default(),
             &mut rng,
         );
-        let cmu = note.cm(&JUBJUB).to_repr().as_ref().to_vec();
-        let mut epk = vec![];
-        encryptor.epk().write(&mut epk).unwrap();
+        let cmu = note.cm().to_repr().as_ref().to_vec();
+        let epk = encryptor.epk().to_bytes().to_vec();
         let enc_ciphertext = encryptor.encrypt_note_plaintext();
 
         // Create a fake CompactBlock containing the note
@@ -161,7 +159,7 @@ mod tests {
         rng.fill_bytes(&mut cb.hash);
         cb.prevHash.extend_from_slice(&prev_hash.0);
         cb.vtx.push(ctx);
-        (cb, note.nf(&extfvk.fvk.vk, 0, &JUBJUB))
+        (cb, note.nf(&extfvk.fvk.vk, 0))
     }
 
     /// Create a fake CompactBlock at the given height, spending a single note from the
@@ -171,7 +169,7 @@ mod tests {
         prev_hash: BlockHash,
         (nf, in_value): (Vec<u8>, Amount),
         extfvk: ExtendedFullViewingKey,
-        to: PaymentAddress<Bls12>,
+        to: PaymentAddress,
         value: Amount,
     ) -> CompactBlock {
         let mut rng = OsRng;
@@ -189,7 +187,7 @@ mod tests {
         // Create a fake Note for the payment
         ctx.outputs.push({
             let note = Note {
-                g_d: to.diversifier().g_d::<Bls12>(&JUBJUB).unwrap(),
+                g_d: to.diversifier().g_d().unwrap(),
                 pk_d: to.pk_d().clone(),
                 value: value.into(),
                 rseed,
@@ -201,9 +199,8 @@ mod tests {
                 Memo::default(),
                 &mut rng,
             );
-            let cmu = note.cm(&JUBJUB).to_repr().as_ref().to_vec();
-            let mut epk = vec![];
-            encryptor.epk().write(&mut epk).unwrap();
+            let cmu = note.cm().to_repr().as_ref().to_vec();
+            let epk = encryptor.epk().to_bytes().to_vec();
             let enc_ciphertext = encryptor.encrypt_note_plaintext();
 
             let mut cout = CompactOutput::new();
@@ -218,7 +215,7 @@ mod tests {
             let change_addr = extfvk.default_address().unwrap().1;
             let rseed = generate_random_rseed::<Network, OsRng>(height as u32, &mut rng);
             let note = Note {
-                g_d: change_addr.diversifier().g_d::<Bls12>(&JUBJUB).unwrap(),
+                g_d: change_addr.diversifier().g_d().unwrap(),
                 pk_d: change_addr.pk_d().clone(),
                 value: (in_value - value).into(),
                 rseed,
@@ -230,9 +227,8 @@ mod tests {
                 Memo::default(),
                 &mut rng,
             );
-            let cmu = note.cm(&JUBJUB).to_repr().as_ref().to_vec();
-            let mut epk = vec![];
-            encryptor.epk().write(&mut epk).unwrap();
+            let cmu = note.cm().to_repr().as_ref().to_vec();
+            let epk = encryptor.epk().to_bytes().to_vec();
             let enc_ciphertext = encryptor.encrypt_note_plaintext();
 
             let mut cout = CompactOutput::new();

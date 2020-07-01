@@ -273,30 +273,16 @@ fn generate_pedersen_hash_exp_table() -> Vec<Vec<Vec<SubgroupPoint>>> {
 
 #[cfg(test)]
 mod tests {
-    use group::{cofactor::CofactorGroup, GroupEncoding};
-    use jubjub::{ExtendedPoint, SubgroupPoint};
-    use pairing::bls12_381::Bls12;
+    use jubjub::SubgroupPoint;
 
     use super::*;
     use crate::{
-        jubjub::{edwards, FixedGenerators, JubjubParams, PrimeOrder},
+        jubjub::{FixedGenerators, JubjubParams},
         JUBJUB,
     };
 
-    fn check_edwards(expected: &edwards::Point<Bls12, PrimeOrder>, actual: SubgroupPoint) {
-        // Check that the generator is indeed in the subgroup.
-        assert!(bool::from(
-            ExtendedPoint::from(actual).into_subgroup().is_some()
-        ));
-
-        // Check that the generator is correctly derived.
-        let mut expected_bytes = [0; 32];
-        expected.write(&mut expected_bytes[..]).unwrap();
-        assert_eq!(expected_bytes[..], actual.to_bytes()[..]);
-    }
-
     fn check_generator(expected: FixedGenerators, actual: SubgroupPoint) {
-        check_edwards(JUBJUB.generator(expected), actual)
+        assert_eq!(JUBJUB.generator(expected), &actual)
     }
 
     #[test]
@@ -354,7 +340,7 @@ mod tests {
 
         assert_eq!(expected.len(), actual.len());
         for (expected, actual) in expected.iter().zip(actual.iter()) {
-            check_edwards(expected, *actual);
+            assert_eq!(expected, actual);
         }
     }
 
@@ -373,7 +359,7 @@ mod tests {
                 assert_eq!(expected.len(), actual.len());
                 for (expected, actual) in expected.iter().zip(actual) {
                     // Same table points.
-                    check_edwards(expected, *actual);
+                    assert_eq!(expected, actual);
                 }
             }
         }
