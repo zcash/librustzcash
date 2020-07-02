@@ -401,8 +401,8 @@ mod test {
     use crate::gadgets::multieq::MultiEq;
     use crate::gadgets::test::*;
     use crate::ConstraintSystem;
+    use bls12_381::Scalar;
     use ff::Field;
-    use pairing::bls12_381::Fr;
     use rand_core::{RngCore, SeedableRng};
     use rand_xorshift::XorShiftRng;
 
@@ -484,7 +484,7 @@ mod test {
         ]);
 
         for _ in 0..1000 {
-            let mut cs = TestConstraintSystem::<Fr>::new();
+            let mut cs = TestConstraintSystem::<Scalar>::new();
 
             let a = rng.next_u32();
             let b = rng.next_u32();
@@ -529,7 +529,7 @@ mod test {
         ]);
 
         for _ in 0..1000 {
-            let mut cs = TestConstraintSystem::<Fr>::new();
+            let mut cs = TestConstraintSystem::<Scalar>::new();
 
             let a = rng.next_u32();
             let b = rng.next_u32();
@@ -572,7 +572,7 @@ mod test {
         ]);
 
         for _ in 0..1000 {
-            let mut cs = TestConstraintSystem::<Fr>::new();
+            let mut cs = TestConstraintSystem::<Scalar>::new();
 
             let a = rng.next_u32();
             let b = rng.next_u32();
@@ -685,7 +685,7 @@ mod test {
         ]);
 
         for _ in 0..1000 {
-            let mut cs = TestConstraintSystem::<Fr>::new();
+            let mut cs = TestConstraintSystem::<Scalar>::new();
 
             let a = rng.next_u32();
             let b = rng.next_u32();
@@ -729,7 +729,7 @@ mod test {
         ]);
 
         for _ in 0..1000 {
-            let mut cs = TestConstraintSystem::<Fr>::new();
+            let mut cs = TestConstraintSystem::<Scalar>::new();
 
             let a = rng.next_u32();
             let b = rng.next_u32();

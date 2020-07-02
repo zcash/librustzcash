@@ -32,9 +32,5 @@ unstable-features = ["expose-arith"]
 expose-arith = []
 default = []
 
-[[bench]]
-name = "pairing_benches"
-harness = false
-
 [badges]
 maintenance = { status = "actively-developed" }
