@@ -276,100 +276,161 @@ mod tests {
     use jubjub::SubgroupPoint;
 
     use super::*;
-    use crate::{
-        jubjub::{FixedGenerators, JubjubParams},
-        JUBJUB,
-    };
+    use crate::group_hash::group_hash;
 
-    fn check_generator(expected: FixedGenerators, actual: SubgroupPoint) {
-        assert_eq!(JUBJUB.generator(expected), &actual)
+    fn find_group_hash(m: &[u8], personalization: &[u8; 8]) -> SubgroupPoint {
+        let mut tag = m.to_vec();
+        let i = tag.len();
+        tag.push(0u8);
+
+        loop {
+            let gh = group_hash(&tag, personalization);
+
+            // We don't want to overflow and start reusing generators
+            assert!(tag[i] != u8::max_value());
+            tag[i] += 1;
+
+            if let Some(gh) = gh {
+                break gh;
+            }
+        }
     }
 
     #[test]
     fn proof_generation_key_base_generator() {
-        check_generator(
-            FixedGenerators::ProofGenerationKey,
+        assert_eq!(
+            find_group_hash(&[], PROOF_GENERATION_KEY_BASE_GENERATOR_PERSONALIZATION),
             PROOF_GENERATION_KEY_GENERATOR,
         );
     }
 
     #[test]
     fn note_commitment_randomness_generator() {
-        check_generator(
-            FixedGenerators::NoteCommitmentRandomness,
+        assert_eq!(
+            find_group_hash(b"r", PEDERSEN_HASH_GENERATORS_PERSONALIZATION),
             NOTE_COMMITMENT_RANDOMNESS_GENERATOR,
         );
     }
 
     #[test]
     fn nullifier_position_generator() {
-        check_generator(
-            FixedGenerators::NullifierPosition,
+        assert_eq!(
+            find_group_hash(&[], NULLIFIER_POSITION_IN_TREE_GENERATOR_PERSONALIZATION),
             NULLIFIER_POSITION_GENERATOR,
         );
     }
 
     #[test]
     fn value_commitment_value_generator() {
-        check_generator(
-            FixedGenerators::ValueCommitmentValue,
+        assert_eq!(
+            find_group_hash(b"v", VALUE_COMMITMENT_GENERATOR_PERSONALIZATION),
             VALUE_COMMITMENT_VALUE_GENERATOR,
         );
     }
 
     #[test]
     fn value_commitment_randomness_generator() {
-        check_generator(
-            FixedGenerators::ValueCommitmentRandomness,
+        assert_eq!(
+            find_group_hash(b"r", VALUE_COMMITMENT_GENERATOR_PERSONALIZATION),
             VALUE_COMMITMENT_RANDOMNESS_GENERATOR,
         );
     }
 
     #[test]
     fn spending_key_generator() {
-        check_generator(
-            FixedGenerators::SpendingKeyGenerator,
+        assert_eq!(
+            find_group_hash(&[], SPENDING_KEY_GENERATOR_PERSONALIZATION),
             SPENDING_KEY_GENERATOR,
         );
     }
 
     #[test]
     fn pedersen_hash_generators() {
-        let expected = JUBJUB.pedersen_hash_generators();
-        let actual = PEDERSEN_HASH_GENERATORS;
-
-        assert_eq!(expected.len(), actual.len());
-        for (expected, actual) in expected.iter().zip(actual.iter()) {
-            assert_eq!(expected, actual);
+        for (m, actual) in PEDERSEN_HASH_GENERATORS.iter().enumerate() {
+            assert_eq!(
+                &find_group_hash(
+                    &(m as u32).to_le_bytes(),
+                    PEDERSEN_HASH_GENERATORS_PERSONALIZATION
+                ),
+                actual
+            );
         }
     }
 
     #[test]
-    fn pedersen_hash_exp_table() {
-        let expected = JUBJUB.pedersen_hash_exp_table();
-        let actual = &PEDERSEN_HASH_EXP_TABLE;
+    fn no_duplicate_fixed_base_generators() {
+        let fixed_base_generators = [
+            PROOF_GENERATION_KEY_GENERATOR,
+            NOTE_COMMITMENT_RANDOMNESS_GENERATOR,
+            NULLIFIER_POSITION_GENERATOR,
+            VALUE_COMMITMENT_VALUE_GENERATOR,
+            VALUE_COMMITMENT_RANDOMNESS_GENERATOR,
+            SPENDING_KEY_GENERATOR,
+        ];
 
-        // Same number of Pedersen hash generators.
-        assert_eq!(expected.len(), actual.len());
-        for (expected, actual) in expected.iter().zip(actual.iter()) {
-            // Same number of windows per generator.
-            assert_eq!(expected.len(), actual.len());
-            for (expected, actual) in expected.iter().zip(actual) {
-                // Same size table per window.
-                assert_eq!(expected.len(), actual.len());
-                for (expected, actual) in expected.iter().zip(actual) {
-                    // Same table points.
-                    assert_eq!(expected, actual);
+        // Check for duplicates, far worse than spec inconsistencies!
+        for (i, p1) in fixed_base_generators.iter().enumerate() {
+            if p1.is_identity().into() {
+                panic!("Neutral element!");
+            }
+
+            for p2 in fixed_base_generators.iter().skip(i + 1) {
+                if p1 == p2 {
+                    panic!("Duplicate generator!");
+                }
+            }
+        }
+    }
+
+    /// Check for simple relations between the generators, that make finding collisions easy;
+    /// far worse than spec inconsistencies!
+    fn check_consistency_of_pedersen_hash_generators(
+        pedersen_hash_generators: &[jubjub::SubgroupPoint],
+    ) {
+        for (i, p1) in pedersen_hash_generators.iter().enumerate() {
+            if p1.is_identity().into() {
+                panic!("Neutral element!");
+            }
+            for p2 in pedersen_hash_generators.iter().skip(i + 1) {
+                if p1 == p2 {
+                    panic!("Duplicate generator!");
+                }
+                if *p1 == -p2 {
+                    panic!("Inverse generator!");
+                }
+            }
+
+            // check for a generator being the sum of any other two
+            for (j, p2) in pedersen_hash_generators.iter().enumerate() {
+                if j == i {
+                    continue;
+                }
+                for (k, p3) in pedersen_hash_generators.iter().enumerate() {
+                    if k == j || k == i {
+                        continue;
+                    }
+                    let sum = p2 + p3;
+                    if sum == *p1 {
+                        panic!("Linear relation between generators!");
+                    }
                 }
             }
         }
     }
 
     #[test]
-    fn pedersen_hash_chunks_per_generator() {
-        assert_eq!(
-            JUBJUB.pedersen_hash_chunks_per_generator(),
-            PEDERSEN_HASH_CHUNKS_PER_GENERATOR
-        );
+    fn pedersen_hash_generators_consistency() {
+        check_consistency_of_pedersen_hash_generators(PEDERSEN_HASH_GENERATORS);
+    }
+
+    #[test]
+    #[should_panic(expected = "Linear relation between generators!")]
+    fn test_jubjub_bls12_pedersen_hash_generators_consistency_check_linear_relation() {
+        let mut pedersen_hash_generators = PEDERSEN_HASH_GENERATORS.to_vec();
+
+        // Test for linear relation
+        pedersen_hash_generators.push(PEDERSEN_HASH_GENERATORS[0] + PEDERSEN_HASH_GENERATORS[1]);
+
+        check_consistency_of_pedersen_hash_generators(&pedersen_hash_generators);
     }
 }

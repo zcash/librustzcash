@@ -168,97 +168,31 @@ fn generate_pedersen_circuit_generators() -> Vec<Vec<Vec<(Scalar, Scalar)>>> {
 
 #[cfg(test)]
 mod tests {
-    use zcash_primitives::{
-        jubjub::{FixedGenerators, JubjubParams},
-        JUBJUB,
-    };
+    use ff::PrimeField;
 
     use super::*;
 
-    fn check_generator(expected: FixedGenerators, actual: FixedGenerator) {
-        let expected = JUBJUB.circuit_generators(expected);
-
-        // Same number of windows per generator.
-        assert_eq!(expected.len(), actual.len());
-        for (expected, actual) in expected.iter().zip(actual) {
-            // Same size table per window.
-            assert_eq!(expected.len(), actual.len());
-            for (expected, actual) in expected.iter().zip(actual) {
-                // Same coordinates.
-                assert_eq!(expected.0, actual.0);
-                assert_eq!(expected.1, actual.1);
-            }
-        }
-    }
-
     #[test]
     fn edwards_d() {
-        assert_eq!(*JUBJUB.edwards_d(), EDWARDS_D);
+        // d = -(10240/10241)
+        assert_eq!(
+            -Scalar::from_str("10240").unwrap()
+                * Scalar::from_str("10241").unwrap().invert().unwrap(),
+            EDWARDS_D
+        );
     }
 
     #[test]
     fn montgomery_a() {
-        assert_eq!(*JUBJUB.montgomery_a(), MONTGOMERY_A);
+        assert_eq!(Scalar::from_str("40962").unwrap(), MONTGOMERY_A);
     }
 
     #[test]
     fn montgomery_scale() {
-        assert_eq!(*JUBJUB.scale(), MONTGOMERY_SCALE);
-    }
-
-    #[test]
-    fn fixed_base_chunks_per_generator() {
+        // scaling factor = sqrt(4 / (a - d))
         assert_eq!(
-            JUBJUB.fixed_base_chunks_per_generator(),
-            FIXED_BASE_CHUNKS_PER_GENERATOR
-        );
-    }
-
-    #[test]
-    fn proof_generation_key_base_generator() {
-        check_generator(
-            FixedGenerators::ProofGenerationKey,
-            &PROOF_GENERATION_KEY_GENERATOR,
-        );
-    }
-
-    #[test]
-    fn note_commitment_randomness_generator() {
-        check_generator(
-            FixedGenerators::NoteCommitmentRandomness,
-            &NOTE_COMMITMENT_RANDOMNESS_GENERATOR,
-        );
-    }
-
-    #[test]
-    fn nullifier_position_generator() {
-        check_generator(
-            FixedGenerators::NullifierPosition,
-            &NULLIFIER_POSITION_GENERATOR,
-        );
-    }
-
-    #[test]
-    fn value_commitment_value_generator() {
-        check_generator(
-            FixedGenerators::ValueCommitmentValue,
-            &VALUE_COMMITMENT_VALUE_GENERATOR,
-        );
-    }
-
-    #[test]
-    fn value_commitment_randomness_generator() {
-        check_generator(
-            FixedGenerators::ValueCommitmentRandomness,
-            &VALUE_COMMITMENT_RANDOMNESS_GENERATOR,
-        );
-    }
-
-    #[test]
-    fn spending_key_generator() {
-        check_generator(
-            FixedGenerators::SpendingKeyGenerator,
-            &SPENDING_KEY_GENERATOR,
+            MONTGOMERY_SCALE.square() * (-Scalar::one() - EDWARDS_D),
+            Scalar::from(4),
         );
     }
 }
