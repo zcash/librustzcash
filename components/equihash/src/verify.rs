@@ -9,7 +9,7 @@ use std::io::Cursor;
 use std::mem::size_of;
 
 #[derive(Clone, Copy)]
-pub struct Params {
+struct Params {
     n: u32,
     k: u32,
 }
@@ -21,7 +21,7 @@ struct Node {
 }
 
 impl Params {
-    pub fn new(n: u32, k: u32) -> Result<Self, Error> {
+    fn new(n: u32, k: u32) -> Result<Self, Error> {
         if (k < n) && (n % 8 == 0) {
             Ok(Params { n, k })
         } else {
@@ -40,6 +40,7 @@ impl Params {
     fn collision_byte_length(&self) -> usize {
         (self.collision_bit_length() + 7) / 8
     }
+    #[cfg(test)]
     fn hash_length(&self) -> usize {
         ((self.k as usize) + 1) * self.collision_byte_length()
     }
@@ -76,6 +77,7 @@ impl Node {
         Node { hash, indices }
     }
 
+    #[cfg(test)]
     fn from_children_ref(a: &Node, b: &Node, trim: usize) -> Self {
         let hash: Vec<_> = a
             .hash
@@ -256,7 +258,8 @@ fn validate_subtrees(p: &Params, a: &Node, b: &Node) -> Result<(), Kind> {
     }
 }
 
-pub fn is_valid_solution_iterative(
+#[cfg(test)]
+fn is_valid_solution_iterative(
     p: Params,
     input: &[u8],
     nonce: &[u8],
@@ -306,7 +309,7 @@ fn tree_validator(p: &Params, state: &Blake2bState, indices: &[u32]) -> Result<N
     }
 }
 
-pub fn is_valid_solution_recursive(
+fn is_valid_solution_recursive(
     p: Params,
     input: &[u8],
     nonce: &[u8],
