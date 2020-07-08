@@ -108,6 +108,7 @@ impl Node {
     }
 }
 
+/// An Equihash solution failed to verify.
 #[derive(Debug)]
 pub struct Error(Kind);
 
@@ -329,6 +330,8 @@ fn is_valid_solution_recursive(
     }
 }
 
+/// Checks whether `soln` is a valid solution for `(input, nonce)` with the
+/// parameters `(n, k)`.
 pub fn is_valid_solution(
     n: u32,
     k: u32,
