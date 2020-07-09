@@ -2,6 +2,7 @@
 
 use ff::PrimeField;
 use pairing::bls12_381::Bls12;
+use rand_core::{OsRng, RngCore};
 use rusqlite::{types::ToSql, Connection, NO_PARAMS};
 use std::convert::TryInto;
 use std::path::Path;
@@ -9,6 +10,7 @@ use zcash_client_backend::encoding::encode_extended_full_viewing_key;
 use zcash_primitives::{
     consensus,
     jubjub::fs::{Fs, FsRepr},
+    keys::OutgoingViewingKey,
     merkle_tree::{IncrementalWitness, MerklePath},
     note_encryption::Memo,
     primitives::{Diversifier, Note},
@@ -28,6 +30,32 @@ use crate::{
     get_target_and_anchor_heights, HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY,
 };
 
+/// Describes a policy for which outgoing viewing key should be able to decrypt
+/// transaction outputs.
+///
+/// For details on what transaction information is visible to the holder of an outgoing
+/// viewing key, refer to [ZIP 310].
+///
+/// [ZIP 310]: https://zips.z.cash/zip-0310
+pub enum OvkPolicy {
+    /// Use the outgoing viewing key from the sender's [`ExtendedFullViewingKey`].
+    ///
+    /// Transaction outputs will be decryptable by the sender, in addition to the
+    /// recipients.
+    Sender,
+
+    /// Use a custom outgoing viewing key. This might for instance be derived from a
+    /// separate seed than the wallet's spending keys.
+    ///
+    /// Transaction outputs will be decryptable by the recipients, and whoever controls
+    /// the provided outgoing viewing key.
+    Custom(OutgoingViewingKey),
+
+    /// Use no outgoing viewing key. Transaction outputs will be decryptable by their
+    /// recipients, but not by the sender.
+    Discard,
+}
+
 struct SelectedNoteRow {
     diversifier: Diversifier,
     note: Note<Bls12>,
@@ -43,6 +71,23 @@ struct SelectedNoteRow {
 /// Do not call this multiple times in parallel, or you will generate transactions that
 /// double-spend the same notes.
 ///
+/// # Transaction privacy
+///
+/// `ovk_policy` specifies the desired policy for which outgoing viewing key should be
+/// able to decrypt the outputs of this transaction. This is primarily relevant to
+/// wallet recovery from backup; in particular, [`OvkPolicy::Discard`] will prevent the
+/// recipient's address, and the contents of `memo`, from ever being recovered from the
+/// block chain. (The total value sent can always be inferred by the sender from the spent
+/// notes and received change.)
+///
+/// Regardless of the specified policy, `create_to_address` saves `to`, `value`, and
+/// `memo` in `db_data`. This can be deleted independently of `ovk_policy`.
+///
+/// For details on what transaction information is visible to the holder of a full or
+/// outgoing viewing key, refer to [ZIP 310].
+///
+/// [ZIP 310]: https://zips.z.cash/zip-0310
+///
 /// # Examples
 ///
 /// ```
@@ -50,7 +95,7 @@ struct SelectedNoteRow {
 ///     constants::testnet::COIN_TYPE,
 ///     keys::spending_key,
 /// };
-/// use zcash_client_sqlite::transact::create_to_address;
+/// use zcash_client_sqlite::transact::{create_to_address, OvkPolicy};
 /// use zcash_primitives::{consensus, transaction::components::Amount};
 /// use zcash_proofs::prover::LocalTxProver;
 ///
@@ -72,6 +117,7 @@ struct SelectedNoteRow {
 ///     &to,
 ///     Amount::from_u64(1).unwrap(),
 ///     None,
+///     OvkPolicy::Sender,
 /// ) {
 ///     Ok(tx_row) => (),
 ///     Err(e) => (),
@@ -85,6 +131,7 @@ pub fn create_to_address<P: AsRef<Path>>(
     to: &RecipientAddress,
     value: Amount,
     memo: Option<Memo>,
+    ovk_policy: OvkPolicy,
 ) -> Result<i64, Error> {
     let data = Connection::open(db_data)?;
 
@@ -101,7 +148,20 @@ pub fn create_to_address<P: AsRef<Path>>(
     {
         return Err(Error(ErrorKind::InvalidExtSK(account)));
     }
-    let ovk = extfvk.fvk.ovk;
+
+    // Apply the outgoing viewing key policy.
+    let ovk = match ovk_policy {
+        OvkPolicy::Sender => extfvk.fvk.ovk,
+        OvkPolicy::Custom(ovk) => ovk,
+        OvkPolicy::Discard => {
+            // Generate a random outgoing viewing key that the caller does not know.
+            // The probability of this colliding with a legitimate outgoing viewing
+            // key is negligible.
+            let mut ovk = [0; 32];
+            OsRng.fill_bytes(&mut ovk);
+            OutgoingViewingKey(ovk)
+        }
+    };
 
     // Target the next block, assuming we are up-to-date.
     let (height, anchor_height) = {
@@ -312,17 +372,20 @@ pub fn create_to_address<P: AsRef<Path>>(
 
 #[cfg(test)]
 mod tests {
+    use rusqlite::Connection;
     use tempfile::NamedTempFile;
     use zcash_primitives::{
         block::BlockHash,
         consensus,
+        note_encryption::try_sapling_output_recovery,
         prover::TxProver,
-        transaction::components::Amount,
+        transaction::{components::Amount, Transaction},
         zip32::{ExtendedFullViewingKey, ExtendedSpendingKey},
+        JUBJUB,
     };
     use zcash_proofs::prover::LocalTxProver;
 
-    use super::create_to_address;
+    use super::{create_to_address, OvkPolicy};
     use crate::{
         init::{init_accounts_table, init_blocks_table, init_cache_database, init_data_database},
         query::{get_balance, get_verified_balance},
@@ -365,6 +428,7 @@ mod tests {
             &to,
             Amount::from_u64(1).unwrap(),
             None,
+            OvkPolicy::Sender,
         ) {
             Ok(_) => panic!("Should have failed"),
             Err(e) => assert_eq!(e.to_string(), "Incorrect ExtendedSpendingKey for account 0"),
@@ -377,6 +441,7 @@ mod tests {
             &to,
             Amount::from_u64(1).unwrap(),
             None,
+            OvkPolicy::Sender,
         ) {
             Ok(_) => panic!("Should have failed"),
             Err(e) => assert_eq!(e.to_string(), "Incorrect ExtendedSpendingKey for account 1"),
@@ -404,6 +469,7 @@ mod tests {
             &to,
             Amount::from_u64(1).unwrap(),
             None,
+            OvkPolicy::Sender,
         ) {
             Ok(_) => panic!("Should have failed"),
             Err(e) => assert_eq!(e.to_string(), "Must scan blocks first"),
@@ -435,6 +501,7 @@ mod tests {
             &to,
             Amount::from_u64(1).unwrap(),
             None,
+            OvkPolicy::Sender,
         ) {
             Ok(_) => panic!("Should have failed"),
             Err(e) => assert_eq!(
@@ -499,6 +566,7 @@ mod tests {
             &to,
             Amount::from_u64(70000).unwrap(),
             None,
+            OvkPolicy::Sender,
         ) {
             Ok(_) => panic!("Should have failed"),
             Err(e) => assert_eq!(
@@ -529,6 +597,7 @@ mod tests {
             &to,
             Amount::from_u64(70000).unwrap(),
             None,
+            OvkPolicy::Sender,
         ) {
             Ok(_) => panic!("Should have failed"),
             Err(e) => assert_eq!(
@@ -556,6 +625,7 @@ mod tests {
             &to,
             Amount::from_u64(70000).unwrap(),
             None,
+            OvkPolicy::Sender,
         )
         .unwrap();
     }
@@ -598,6 +668,7 @@ mod tests {
             &to,
             Amount::from_u64(15000).unwrap(),
             None,
+            OvkPolicy::Sender,
         )
         .unwrap();
 
@@ -610,6 +681,7 @@ mod tests {
             &to,
             Amount::from_u64(2000).unwrap(),
             None,
+            OvkPolicy::Sender,
         ) {
             Ok(_) => panic!("Should have failed"),
             Err(e) => assert_eq!(
@@ -640,6 +712,7 @@ mod tests {
             &to,
             Amount::from_u64(2000).unwrap(),
             None,
+            OvkPolicy::Sender,
         ) {
             Ok(_) => panic!("Should have failed"),
             Err(e) => assert_eq!(
@@ -667,7 +740,109 @@ mod tests {
             &to,
             Amount::from_u64(2000).unwrap(),
             None,
+            OvkPolicy::Sender,
         )
         .unwrap();
+    }
+
+    #[test]
+    fn ovk_policy_prevents_recovery_from_chain() {
+        let cache_file = NamedTempFile::new().unwrap();
+        let db_cache = cache_file.path();
+        init_cache_database(&db_cache).unwrap();
+
+        let data_file = NamedTempFile::new().unwrap();
+        let db_data = data_file.path();
+        init_data_database(&db_data).unwrap();
+
+        // Add an account to the wallet
+        let extsk = ExtendedSpendingKey::master(&[]);
+        let extfvk = ExtendedFullViewingKey::from(&extsk);
+        init_accounts_table(&db_data, &[extfvk.clone()]).unwrap();
+
+        // Add funds to the wallet in a single note
+        let value = Amount::from_u64(50000).unwrap();
+        let (cb, _) = fake_compact_block(
+            SAPLING_ACTIVATION_HEIGHT,
+            BlockHash([0; 32]),
+            extfvk.clone(),
+            value,
+        );
+        insert_into_cache(db_cache, &cb);
+        scan_cached_blocks(db_cache, db_data, None).unwrap();
+        assert_eq!(get_balance(db_data, 0).unwrap(), value);
+
+        let extsk2 = ExtendedSpendingKey::master(&[]);
+        let addr2 = extsk2.default_address().unwrap().1;
+        let to = addr2.clone().into();
+
+        let send_and_recover_with_policy = |ovk_policy| {
+            let tx_row = create_to_address(
+                db_data,
+                consensus::BranchId::Blossom,
+                test_prover(),
+                (0, &extsk),
+                &to,
+                Amount::from_u64(15000).unwrap(),
+                None,
+                ovk_policy,
+            )
+            .unwrap();
+
+            let data = Connection::open(db_data).unwrap();
+
+            // Fetch the transaction from the database
+            let raw_tx: Vec<_> = data
+                .query_row(
+                    "SELECT raw FROM transactions
+                    WHERE id_tx = ?",
+                    &[tx_row],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            let tx = Transaction::read(&raw_tx[..]).unwrap();
+
+            // Fetch the output index from the database
+            let output_index: i64 = data
+                .query_row(
+                    "SELECT output_index FROM sent_notes
+                    WHERE tx = ?",
+                    &[tx_row],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            let output = &tx.shielded_outputs[output_index as usize];
+
+            try_sapling_output_recovery(
+                &extfvk.fvk.ovk,
+                &output.cv,
+                &output.cmu,
+                &output.ephemeral_key.as_prime_order(&JUBJUB).unwrap(),
+                &output.enc_ciphertext,
+                &output.out_ciphertext,
+            )
+        };
+
+        // Send some of the funds to another address, keeping history.
+        // The recipient output is decryptable by the sender.
+        let (_, recovered_to, _) = send_and_recover_with_policy(OvkPolicy::Sender).unwrap();
+        assert_eq!(&recovered_to, &addr2);
+
+        // Mine blocks SAPLING_ACTIVATION_HEIGHT + 1 to 22 (that don't send us funds)
+        // so that the first transaction expires
+        for i in 1..=22 {
+            let (cb, _) = fake_compact_block(
+                SAPLING_ACTIVATION_HEIGHT + i,
+                cb.hash(),
+                ExtendedFullViewingKey::from(&ExtendedSpendingKey::master(&[i as u8])),
+                value,
+            );
+            insert_into_cache(db_cache, &cb);
+        }
+        scan_cached_blocks(db_cache, db_data, None).unwrap();
+
+        // Send the funds again, discarding history.
+        // Neither transaction output is decryptable by the sender.
+        assert!(send_and_recover_with_policy(OvkPolicy::Discard).is_none());
     }
 }
