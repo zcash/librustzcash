@@ -15,6 +15,8 @@ pub struct DecryptedOutput {
     pub index: usize,
     /// The note within the output.
     pub note: Note<Bls12>,
+    /// The account that decrypted the note.
+    pub account: usize,
     /// The address the note was sent to.
     pub to: PaymentAddress<Bls12>,
     /// The memo included with the note.
@@ -46,7 +48,7 @@ pub fn decrypt_transaction(
             None => continue,
         };
 
-        for (ivk, ovk) in &vks {
+        for (account, (ivk, ovk)) in vks.iter().enumerate() {
             let ((note, to, memo), outgoing) =
                 match try_sapling_note_decryption(ivk, &epk, &output.cmu, &output.enc_ciphertext) {
                     Some(ret) => (ret, false),
@@ -65,6 +67,7 @@ pub fn decrypt_transaction(
             decrypted.push(DecryptedOutput {
                 index,
                 note,
+                account,
                 to,
                 memo,
                 outgoing,

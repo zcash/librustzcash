@@ -1,7 +1,6 @@
 //! Abstractions over the proving system and parameters for ease of use.
 
 use bellman::groth16::{Parameters, PreparedVerifyingKey};
-use directories::BaseDirs;
 use pairing::bls12_381::{Bls12, Fr};
 use std::path::Path;
 use zcash_primitives::{
@@ -17,7 +16,10 @@ use zcash_primitives::{
     JUBJUB,
 };
 
-use crate::{load_parameters, sapling::SaplingProvingContext};
+use crate::{
+    default_params_folder, load_parameters, sapling::SaplingProvingContext, SAPLING_OUTPUT_NAME,
+    SAPLING_SPEND_NAME,
+};
 
 /// An implementation of [`TxProver`] using Sapling Spend and Output parameters from
 /// locally-accessible paths.
@@ -78,18 +80,11 @@ impl LocalTxProver {
     /// This function will panic if the parameters in the default local location do not
     /// have the expected hashes.
     pub fn with_default_location() -> Option<Self> {
-        let base_dirs = BaseDirs::new()?;
-        let unix_params_dir = base_dirs.home_dir().join(".zcash-params");
-        let win_osx_params_dir = base_dirs.data_dir().join("ZcashParams");
-        let (spend_path, output_path) = if unix_params_dir.exists() {
+        let params_dir = default_params_folder()?;
+        let (spend_path, output_path) = if params_dir.exists() {
             (
-                unix_params_dir.join("sapling-spend.params"),
-                unix_params_dir.join("sapling-output.params"),
-            )
-        } else if win_osx_params_dir.exists() {
-            (
-                win_osx_params_dir.join("sapling-spend.params"),
-                win_osx_params_dir.join("sapling-output.params"),
+                params_dir.join(SAPLING_SPEND_NAME),
+                params_dir.join(SAPLING_OUTPUT_NAME),
             )
         } else {
             return None;

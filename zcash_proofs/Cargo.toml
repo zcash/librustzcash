@@ -17,6 +17,7 @@ blake2b_simd = "0.5"
 byteorder = "1"
 directories = { version = "1", optional = true }
 ff = { version = "0.6", path = "../ff" }
+minreq = { version = "2", features = ["https"], optional = true }
 pairing = { version = "0.16", path = "../pairing" }
 rand_core = "0.5.1"
 zcash_primitives = { version = "0.2", path = "../zcash_primitives" }
@@ -26,8 +27,17 @@ rand_xorshift = "0.2"
 
 [features]
 default = ["local-prover", "multicore"]
+download-params = ["minreq"]
 local-prover = ["directories"]
 multicore = ["bellman/multicore"]
+
+[[example]]
+name = "get-params-path"
+required-features = ["directories"]
+
+[[example]]
+name = "download-params"
+required-features = ["download-params"]
 
 [badges]
 maintenance = { status = "actively-developed" }

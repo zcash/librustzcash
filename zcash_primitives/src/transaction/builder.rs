@@ -8,6 +8,8 @@ use crate::{
 use ff::Field;
 use pairing::bls12_381::{Bls12, Fr};
 use rand::{rngs::OsRng, seq::SliceRandom, CryptoRng, RngCore};
+use std::error;
+use std::fmt;
 
 use crate::{
     consensus,
@@ -47,6 +49,26 @@ pub enum Error {
     NoChangeAddress,
     SpendProof,
 }
+
+impl fmt::Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Error::AnchorMismatch => {
+                write!(f, "Anchor mismatch (anchors for all spends must be equal)")
+            }
+            Error::BindingSig => write!(f, "Failed to create bindingSig"),
+            Error::ChangeIsNegative(amount) => {
+                write!(f, "Change is negative ({:?} zatoshis)", amount)
+            }
+            Error::InvalidAddress => write!(f, "Invalid address"),
+            Error::InvalidAmount => write!(f, "Invalid amount"),
+            Error::NoChangeAddress => write!(f, "No change address specified or discoverable"),
+            Error::SpendProof => write!(f, "Failed to create Sapling spend proof"),
+        }
+    }
+}
+
+impl error::Error for Error {}
 
 struct SpendDescriptionInfo {
     extsk: ExtendedSpendingKey,
