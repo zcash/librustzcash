@@ -22,7 +22,12 @@ struct Node {
 
 impl Params {
     fn new(n: u32, k: u32) -> Result<Self, Error> {
-        if (k < n) && (n % 8 == 0) {
+        // We place the following requirements on the parameters:
+        // - n is a multiple of 8, so the hash output has an exact byte length.
+        // - k >= 3 so the encoded solutions have an exact byte length.
+        // - k < n, so the collision bit length is at least 1.
+        // - n is a multiple of k + 1, so we have an integer collision bit length.
+        if (n % 8 == 0) && (k >= 3) && (k < n) && (n % (k + 1) == 0) {
             Ok(Params { n, k })
         } else {
             Err(Error(Kind::InvalidParams))
