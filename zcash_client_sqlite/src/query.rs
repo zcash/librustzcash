@@ -34,6 +34,11 @@ pub fn get_address<P: AsRef<Path>>(db_data: P, account: u32) -> Result<String, E
 /// Returns the balance for the account, including all mined unspent notes that we know
 /// about.
 ///
+/// WARNING: This balance is potentially unreliable, as mined notes may become unmined due
+/// to chain reorgs. You should generally not show this balance to users without some
+/// caveat. Use [`get_verified_balance`] where you need a more reliable indication of the
+/// wallet balance.
+///
 /// # Examples
 ///
 /// ```
