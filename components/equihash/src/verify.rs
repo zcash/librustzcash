@@ -213,7 +213,8 @@ fn expand_array(vin: &[u8], bit_len: usize, byte_pad: usize) -> Vec<u8> {
 
 fn indices_from_minimal(p: Params, minimal: &[u8]) -> Result<Vec<u32>, Error> {
     let c_bit_len = p.collision_bit_length();
-    if minimal.len() != (1 << p.k) * (c_bit_len + 1) / 8 {
+    // Division is exact because k >= 3.
+    if minimal.len() != ((1 << p.k) * (c_bit_len + 1)) / 8 {
         return Err(Error(Kind::InvalidParams));
     }
 
