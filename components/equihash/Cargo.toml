@@ -1,7 +1,7 @@
 [package]
 name = "equihash"
 description = "The Equihash Proof-of-Work function"
-version = "0.0.0"
+version = "0.1.0"
 authors = ["Jack Grigg <jack@z.cash>"]
 homepage = "https://github.com/zcash/librustzcash"
 repository = "https://github.com/zcash/librustzcash"
