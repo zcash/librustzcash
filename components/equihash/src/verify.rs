@@ -4,10 +4,11 @@
 
 use blake2b_simd::{Hash as Blake2bHash, Params as Blake2bParams, State as Blake2bState};
 use byteorder::{BigEndian, LittleEndian, ReadBytesExt, WriteBytesExt};
-use log::error;
+use std::fmt;
 use std::io::Cursor;
 use std::mem::size_of;
 
+#[derive(Clone, Copy)]
 struct Params {
     n: u32,
     k: u32,
@@ -20,6 +21,18 @@ struct Node {
 }
 
 impl Params {
+    fn new(n: u32, k: u32) -> Result<Self, Error> {
+        // We place the following requirements on the parameters:
+        // - n is a multiple of 8, so the hash output has an exact byte length.
+        // - k >= 3 so the encoded solutions have an exact byte length.
+        // - k < n, so the collision bit length is at least 1.
+        // - n is a multiple of k + 1, so we have an integer collision bit length.
+        if (n % 8 == 0) && (k >= 3) && (k < n) && (n % (k + 1) == 0) {
+            Ok(Params { n, k })
+        } else {
+            Err(Error(Kind::InvalidParams))
+        }
+    }
     fn indices_per_hash_output(&self) -> u32 {
         512 / self.n
     }
@@ -32,6 +45,7 @@ impl Params {
     fn collision_byte_length(&self) -> usize {
         (self.collision_bit_length() + 7) / 8
     }
+    #[cfg(test)]
     fn hash_length(&self) -> usize {
         ((self.k as usize) + 1) * self.collision_byte_length()
     }
@@ -68,6 +82,7 @@ impl Node {
         Node { hash, indices }
     }
 
+    #[cfg(test)]
     fn from_children_ref(a: &Node, b: &Node, trim: usize) -> Self {
         let hash: Vec<_> = a
             .hash
@@ -95,6 +110,39 @@ impl Node {
 
     fn is_zero(&self, len: usize) -> bool {
         self.hash.iter().take(len).all(|v| *v == 0)
+    }
+}
+
+/// An Equihash solution failed to verify.
+#[derive(Debug)]
+pub struct Error(Kind);
+
+impl fmt::Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "Invalid solution: {}", self.0)
+    }
+}
+
+impl std::error::Error for Error {}
+
+#[derive(Debug)]
+enum Kind {
+    InvalidParams,
+    Collision,
+    OutOfOrder,
+    DuplicateIdxs,
+    NonZeroRootHash,
+}
+
+impl fmt::Display for Kind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Kind::InvalidParams => f.write_str("invalid parameters"),
+            Kind::Collision => f.write_str("invalid collision length between StepRows"),
+            Kind::OutOfOrder => f.write_str("Index tree incorrectly ordered"),
+            Kind::DuplicateIdxs => f.write_str("duplicate indices"),
+            Kind::NonZeroRootHash => f.write_str("root hash of tree is non-zero"),
+        }
     }
 }
 
@@ -163,7 +211,13 @@ fn expand_array(vin: &[u8], bit_len: usize, byte_pad: usize) -> Vec<u8> {
     vout
 }
 
-fn indices_from_minimal(minimal: &[u8], c_bit_len: usize) -> Vec<u32> {
+fn indices_from_minimal(p: Params, minimal: &[u8]) -> Result<Vec<u32>, Error> {
+    let c_bit_len = p.collision_bit_length();
+    // Division is exact because k >= 3.
+    if minimal.len() != ((1 << p.k) * (c_bit_len + 1)) / 8 {
+        return Err(Error(Kind::InvalidParams));
+    }
+
     assert!(((c_bit_len + 1) + 7) / 8 <= size_of::<u32>());
     let len_indices = 8 * size_of::<u32>() * minimal.len() / (c_bit_len + 1);
     let byte_pad = size_of::<u32>() - ((c_bit_len + 1) + 7) / 8;
@@ -177,7 +231,7 @@ fn indices_from_minimal(minimal: &[u8], c_bit_len: usize) -> Vec<u32> {
         ret.push(i);
     }
 
-    ret
+    Ok(ret)
 }
 
 fn has_collision(a: &Node, b: &Node, len: usize) -> bool {
@@ -199,30 +253,25 @@ fn distinct_indices(a: &Node, b: &Node) -> bool {
     true
 }
 
-fn validate_subtrees(p: &Params, a: &Node, b: &Node) -> bool {
+fn validate_subtrees(p: &Params, a: &Node, b: &Node) -> Result<(), Kind> {
     if !has_collision(a, b, p.collision_byte_length()) {
-        error!("Invalid solution: invalid collision length between StepRows");
-        false
+        Err(Kind::Collision)
     } else if b.indices_before(a) {
-        error!("Invalid solution: Index tree incorrectly ordered");
-        false
+        Err(Kind::OutOfOrder)
     } else if !distinct_indices(a, b) {
-        error!("Invalid solution: duplicate indices");
-        false
+        Err(Kind::DuplicateIdxs)
     } else {
-        true
+        Ok(())
     }
 }
 
-pub fn is_valid_solution_iterative(
-    n: u32,
-    k: u32,
+#[cfg(test)]
+fn is_valid_solution_iterative(
+    p: Params,
     input: &[u8],
     nonce: &[u8],
     indices: &[u32],
-) -> bool {
-    let p = Params { n, k };
-
+) -> Result<(), Error> {
     let mut state = initialise_state(p.n, p.k, p.hash_output());
     state.update(input);
     state.update(nonce);
@@ -238,9 +287,7 @@ pub fn is_valid_solution_iterative(
         for pair in rows.chunks(2) {
             let a = &pair[0];
             let b = &pair[1];
-            if !validate_subtrees(&p, a, b) {
-                return false;
-            }
+            validate_subtrees(&p, a, b).map_err(Error)?;
             cur_rows.push(Node::from_children_ref(a, b, p.collision_byte_length()));
         }
         rows = cur_rows;
@@ -248,71 +295,81 @@ pub fn is_valid_solution_iterative(
     }
 
     assert!(rows.len() == 1);
-    rows[0].is_zero(hash_len)
-}
 
-fn tree_validator(p: &Params, state: &Blake2bState, indices: &[u32]) -> Option<Node> {
-    if indices.len() > 1 {
-        let end = indices.len();
-        let mid = end / 2;
-        match (
-            tree_validator(p, state, &indices[0..mid]),
-            tree_validator(p, state, &indices[mid..end]),
-        ) {
-            (Some(a), Some(b)) => {
-                if validate_subtrees(p, &a, &b) {
-                    Some(Node::from_children(a, b, p.collision_byte_length()))
-                } else {
-                    None
-                }
-            }
-            _ => None,
-        }
+    if rows[0].is_zero(hash_len) {
+        Ok(())
     } else {
-        Some(Node::new(&p, &state, indices[0]))
+        Err(Error(Kind::NonZeroRootHash))
     }
 }
 
-pub fn is_valid_solution_recursive(
-    n: u32,
-    k: u32,
+fn tree_validator(p: &Params, state: &Blake2bState, indices: &[u32]) -> Result<Node, Error> {
+    if indices.len() > 1 {
+        let end = indices.len();
+        let mid = end / 2;
+        let a = tree_validator(p, state, &indices[0..mid])?;
+        let b = tree_validator(p, state, &indices[mid..end])?;
+        validate_subtrees(p, &a, &b).map_err(Error)?;
+        Ok(Node::from_children(a, b, p.collision_byte_length()))
+    } else {
+        Ok(Node::new(&p, &state, indices[0]))
+    }
+}
+
+fn is_valid_solution_recursive(
+    p: Params,
     input: &[u8],
     nonce: &[u8],
     indices: &[u32],
-) -> bool {
-    let p = Params { n, k };
-
+) -> Result<(), Error> {
     let mut state = initialise_state(p.n, p.k, p.hash_output());
     state.update(input);
     state.update(nonce);
 
-    match tree_validator(&p, &state, indices) {
-        Some(root) => {
-            // Hashes were trimmed, so only need to check remaining length
-            root.is_zero(p.collision_byte_length())
-        }
-        None => false,
+    let root = tree_validator(&p, &state, indices)?;
+
+    // Hashes were trimmed, so only need to check remaining length
+    if root.is_zero(p.collision_byte_length()) {
+        Ok(())
+    } else {
+        Err(Error(Kind::NonZeroRootHash))
     }
 }
 
-pub fn is_valid_solution(n: u32, k: u32, input: &[u8], nonce: &[u8], soln: &[u8]) -> bool {
-    let p = Params { n, k };
-    let indices = indices_from_minimal(soln, p.collision_bit_length());
+/// Checks whether `soln` is a valid solution for `(input, nonce)` with the
+/// parameters `(n, k)`.
+pub fn is_valid_solution(
+    n: u32,
+    k: u32,
+    input: &[u8],
+    nonce: &[u8],
+    soln: &[u8],
+) -> Result<(), Error> {
+    let p = Params::new(n, k)?;
+    let indices = indices_from_minimal(p, soln)?;
 
     // Recursive validation is faster
-    is_valid_solution_recursive(n, k, input, nonce, &indices)
+    is_valid_solution_recursive(p, input, nonce, &indices)
 }
 
 #[cfg(test)]
 mod tests {
     use super::is_valid_solution_iterative;
     use super::is_valid_solution_recursive;
+    use super::{Error, Params};
 
-    fn is_valid_solution(n: u32, k: u32, input: &[u8], nonce: &[u8], indices: &[u32]) -> bool {
-        let a = is_valid_solution_iterative(n, k, input, nonce, indices);
-        let b = is_valid_solution_recursive(n, k, input, nonce, indices);
-        assert!(a == b);
-        a
+    fn is_valid_solution(
+        n: u32,
+        k: u32,
+        input: &[u8],
+        nonce: &[u8],
+        indices: &[u32],
+    ) -> Result<(), Error> {
+        let p = Params::new(n, k).unwrap();
+        is_valid_solution_iterative(p, input, nonce, indices)?;
+        is_valid_solution_recursive(p, input, nonce, indices)?;
+
+        Ok(())
     }
 
     #[test]
@@ -324,14 +381,14 @@ mod tests {
             25557, 92292, 38525, 56514, 1110, 98024, 15426, 74455, 3185, 84007, 24328, 36473,
             17427, 129451, 27556, 119967, 31704, 62448, 110460, 117894,
         ];
-        assert!(is_valid_solution(96, 5, input, &nonce, &indices));
+        is_valid_solution(96, 5, input, &nonce, &indices).unwrap();
 
         indices = vec![
             1008, 18280, 34711, 57439, 3903, 104059, 81195, 95931, 58336, 118687, 67931, 123026,
             64235, 95595, 84355, 122946, 8131, 88988, 45130, 58986, 59899, 78278, 94769, 118158,
             25569, 106598, 44224, 96285, 54009, 67246, 85039, 127667,
         ];
-        assert!(is_valid_solution(96, 5, input, &nonce, &indices));
+        is_valid_solution(96, 5, input, &nonce, &indices).unwrap();
 
         indices = vec![
             4313, 223176, 448870, 1692641, 214911, 551567, 1696002, 1768726, 500589, 938660,
@@ -387,19 +444,19 @@ mod tests {
             981619, 683206, 1485056, 766481, 2047708, 930443, 2040726, 1136227, 1945705, 1722044,
             1971986,
         ];
-        assert!(!is_valid_solution(96, 5, input, &nonce, &indices));
-        assert!(is_valid_solution(200, 9, input, &nonce, &indices));
+        is_valid_solution(96, 5, input, &nonce, &indices).unwrap_err();
+        is_valid_solution(200, 9, input, &nonce, &indices).unwrap();
 
         nonce[0] = 1;
-        assert!(!is_valid_solution(96, 5, input, &nonce, &indices));
-        assert!(!is_valid_solution(200, 9, input, &nonce, &indices));
+        is_valid_solution(96, 5, input, &nonce, &indices).unwrap_err();
+        is_valid_solution(200, 9, input, &nonce, &indices).unwrap_err();
 
         indices = vec![
             1911, 96020, 94086, 96830, 7895, 51522, 56142, 62444, 15441, 100732, 48983, 64776,
             27781, 85932, 101138, 114362, 4497, 14199, 36249, 41817, 23995, 93888, 35798, 96337,
             5530, 82377, 66438, 85247, 39332, 78978, 83015, 123505,
         ];
-        assert!(is_valid_solution(96, 5, input, &nonce, &indices));
+        is_valid_solution(96, 5, input, &nonce, &indices).unwrap();
 
         indices = vec![
             1505, 1380774, 200806, 1787044, 101056, 1697952, 281464, 374899, 263712, 1532496,
@@ -455,8 +512,8 @@ mod tests {
             1644978, 278248, 2024807, 297914, 419798, 555747, 712605, 1012424, 1428921, 890113,
             1822645, 1082368, 1392894,
         ];
-        assert!(!is_valid_solution(96, 5, input, &nonce, &indices));
-        assert!(is_valid_solution(200, 9, input, &nonce, &indices));
+        is_valid_solution(96, 5, input, &nonce, &indices).unwrap_err();
+        is_valid_solution(200, 9, input, &nonce, &indices).unwrap();
 
         let input2 = b"Equihash is an asymmetric PoW based on the Generalised Birthday problem.";
         indices = vec![
@@ -464,6 +521,6 @@ mod tests {
             45858, 116805, 92842, 111026, 15972, 115059, 85191, 90330, 68190, 122819, 81830, 91132,
             23460, 49807, 52426, 80391, 69567, 114474, 104973, 122568,
         ];
-        assert!(is_valid_solution(96, 5, input2, &nonce, &indices));
+        is_valid_solution(96, 5, input2, &nonce, &indices).unwrap();
     }
 }
