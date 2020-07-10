@@ -354,8 +354,7 @@ pub fn is_valid_solution(
 
 #[cfg(test)]
 mod tests {
-    use super::is_valid_solution_iterative;
-    use super::is_valid_solution_recursive;
+    use super::{is_valid_solution, is_valid_solution_iterative, is_valid_solution_recursive};
     use crate::test_vectors::{INVALID_TEST_VECTORS, VALID_TEST_VECTORS};
 
     #[test]
@@ -383,6 +382,35 @@ mod tests {
                     .0,
                 tv.error
             );
+        }
+    }
+
+    #[test]
+    fn all_bits_matter() {
+        // Initialize the state according to one of the valid test vectors.
+        let n = 96;
+        let k = 5;
+        let input = b"Equihash is an asymmetric PoW based on the Generalised Birthday problem.";
+        let nonce = [
+            1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0,
+        ];
+        let soln = &[
+            0x04, 0x6a, 0x8e, 0xd4, 0x51, 0xa2, 0x19, 0x73, 0x32, 0xe7, 0x1f, 0x39, 0xdb, 0x9c,
+            0x79, 0xfb, 0xf9, 0x3f, 0xc1, 0x44, 0x3d, 0xa5, 0x8f, 0xb3, 0x8d, 0x05, 0x99, 0x17,
+            0x21, 0x16, 0xd5, 0x55, 0xb1, 0xb2, 0x1f, 0x32, 0x70, 0x5c, 0xe9, 0x98, 0xf6, 0x0d,
+            0xa8, 0x52, 0xf7, 0x7f, 0x0e, 0x7f, 0x4d, 0x63, 0xfc, 0x2d, 0xd2, 0x30, 0xa3, 0xd9,
+            0x99, 0x53, 0xa0, 0x78, 0x7d, 0xfe, 0xfc, 0xab, 0x34, 0x1b, 0xde, 0xc8,
+        ];
+
+        // Prove that the solution is valid.
+        is_valid_solution(n, k, input, &nonce, soln).unwrap();
+
+        // Changing any single bit of the encoded solution should make it invalid.
+        for i in 0..soln.len() * 8 {
+            let mut mutated = soln.to_vec();
+            mutated[i / 8] ^= 1 << (i % 8);
+            is_valid_solution(n, k, input, &nonce, &mutated).unwrap_err();
         }
     }
 }
