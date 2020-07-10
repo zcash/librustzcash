@@ -2,7 +2,6 @@
 
 use bellman::groth16::{Parameters, PreparedVerifyingKey};
 use pairing::bls12_381::{Bls12, Fr};
-use std::path::Path;
 use zcash_primitives::{
     jubjub::{edwards, fs::Fs, Unknown},
     primitives::{Diversifier, PaymentAddress, ProofGenerationKey},
@@ -16,10 +15,15 @@ use zcash_primitives::{
     JUBJUB,
 };
 
-use crate::{
-    default_params_folder, load_parameters, sapling::SaplingProvingContext, SAPLING_OUTPUT_NAME,
-    SAPLING_SPEND_NAME,
-};
+use crate::sapling::SaplingProvingContext;
+
+#[cfg(feature = "local-prover")]
+use crate::{default_params_folder, load_parameters, SAPLING_OUTPUT_NAME, SAPLING_SPEND_NAME};
+#[cfg(feature = "local-prover")]
+use std::path::Path;
+
+#[cfg(feature = "bundled-prover")]
+use crate::parse_parameters;
 
 /// An implementation of [`TxProver`] using Sapling Spend and Output parameters from
 /// locally-accessible paths.
@@ -48,6 +52,7 @@ impl LocalTxProver {
     ///
     /// This function will panic if the paths do not point to valid parameter files with
     /// the expected hashes.
+    #[cfg(feature = "local-prover")]
     pub fn new(spend_path: &Path, output_path: &Path) -> Self {
         let (spend_params, spend_vk, output_params, _, _) =
             load_parameters(spend_path, output_path, None);
@@ -79,6 +84,7 @@ impl LocalTxProver {
     ///
     /// This function will panic if the parameters in the default local location do not
     /// have the expected hashes.
+    #[cfg(feature = "local-prover")]
     pub fn with_default_location() -> Option<Self> {
         let params_dir = default_params_folder()?;
         let (spend_path, output_path) = if params_dir.exists() {
@@ -94,6 +100,23 @@ impl LocalTxProver {
         }
 
         Some(LocalTxProver::new(&spend_path, &output_path))
+    }
+
+    /// Creates a `LocalTxProver` using Sapling parameters bundled inside the binary.
+    ///
+    /// This requires the `bundled-prover` feature, which will increase the binary size by
+    /// around 50 MiB.
+    #[cfg(feature = "bundled-prover")]
+    pub fn bundled() -> Self {
+        let (spend_buf, output_buf) = wagyu_zcash_parameters::load_sapling_parameters();
+        let (spend_params, spend_vk, output_params, _, _) =
+            parse_parameters(&spend_buf[..], &output_buf[..], None);
+
+        LocalTxProver {
+            spend_params,
+            spend_vk,
+            output_params,
+        }
     }
 }
 
