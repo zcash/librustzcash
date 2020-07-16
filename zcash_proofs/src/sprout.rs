@@ -169,11 +169,5 @@ pub fn verify_proof(
     };
 
     // Verify the proof
-    match groth16::verify_proof(verifying_key, &proof, &public_input[..]) {
-        // No error, and proof verification successful
-        Ok(true) => true,
-
-        // Any other case
-        _ => false,
-    }
+    groth16::verify_proof(verifying_key, &proof, &public_input[..]).is_ok()
 }

@@ -301,7 +301,7 @@ impl<'a, Scalar: PrimeField> Sub<(Scalar, &'a LinearCombination<Scalar>)>
 }
 
 /// This is an error that could occur during circuit synthesis contexts,
-/// such as CRS generation, proving or verification.
+/// such as CRS generation or proving.
 #[derive(Debug)]
 pub enum SynthesisError {
     /// During synthesis, we lacked knowledge of a variable assignment.
@@ -316,8 +316,6 @@ pub enum SynthesisError {
     UnexpectedIdentity,
     /// During proof generation, we encountered an I/O error with the CRS
     IoError(io::Error),
-    /// During verification, our verifying key was malformed.
-    MalformedVerifyingKey,
     /// During CRS generation, we observed an unconstrained auxiliary variable
     UnconstrainedVariable,
 }
@@ -339,7 +337,6 @@ impl Error for SynthesisError {
             SynthesisError::PolynomialDegreeTooLarge => "polynomial degree is too large",
             SynthesisError::UnexpectedIdentity => "encountered an identity element in the CRS",
             SynthesisError::IoError(_) => "encountered an I/O error",
-            SynthesisError::MalformedVerifyingKey => "malformed verifying key",
             SynthesisError::UnconstrainedVariable => "auxiliary variable was unconstrained",
         }
     }
@@ -353,6 +350,30 @@ impl fmt::Display for SynthesisError {
         } else {
             write!(f, "{}", self)
         }
+    }
+}
+
+/// An error during verification.
+#[derive(Debug)]
+pub enum VerificationError {
+    /// Verification was attempted with a malformed verifying key.
+    MalformedVerifyingKey,
+    /// Proof verification failed.
+    Failed,
+}
+
+impl Error for VerificationError {
+    fn description(&self) -> &str {
+        match *self {
+            VerificationError::MalformedVerifyingKey => "malformed verifying key",
+            VerificationError::Failed => "proof verification failed",
+        }
+    }
+}
+
+impl fmt::Display for VerificationError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+        write!(f, "{}", self)
     }
 }
 

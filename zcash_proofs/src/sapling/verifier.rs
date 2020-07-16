@@ -106,13 +106,7 @@ impl SaplingVerificationContext {
         }
 
         // Verify the proof
-        match verify_proof(verifying_key, &zkproof, &public_input[..]) {
-            // No error, and proof verification successful
-            Ok(true) => true,
-
-            // Any other case
-            _ => false,
-        }
+        verify_proof(verifying_key, &zkproof, &public_input[..]).is_ok()
     }
 
     /// Perform consensus checks on a Sapling OutputDescription, while
@@ -159,13 +153,7 @@ impl SaplingVerificationContext {
         public_input[4] = cm;
 
         // Verify the proof
-        match verify_proof(verifying_key, &zkproof, &public_input[..]) {
-            // No error, and proof verification successful
-            Ok(true) => true,
-
-            // Any other case
-            _ => false,
-        }
+        verify_proof(verifying_key, &zkproof, &public_input[..]).is_ok()
     }
 
     /// Perform consensus checks on the valueBalance and bindingSig parts of a
