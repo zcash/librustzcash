@@ -45,9 +45,23 @@ impl From<u32> for BlockHeight {
     }
 }
 
-impl From<u64> for BlockHeight {
-    fn from(value: u64) -> Self {
-        BlockHeight(value as u32)
+impl From<BlockHeight> for u32 {
+    fn from(value: BlockHeight) -> u32 {
+        value.0
+    }
+}
+
+impl TryFrom<u64> for BlockHeight {
+    type Error = std::num::TryFromIntError;
+
+    fn try_from(value: u64) -> Result<Self, Self::Error> {
+        u32::try_from(value).map(BlockHeight)
+    }
+}
+
+impl From<BlockHeight> for u64 {
+    fn from(value: BlockHeight) -> u64 {
+        value.0 as u64
     }
 }
 
@@ -64,18 +78,6 @@ impl TryFrom<i64> for BlockHeight {
 
     fn try_from(value: i64) -> Result<Self, Self::Error> {
         u32::try_from(value).map(BlockHeight)
-    }
-}
-
-impl From<BlockHeight> for u32 {
-    fn from(value: BlockHeight) -> u32 {
-        value.0
-    }
-}
-
-impl From<BlockHeight> for u64 {
-    fn from(value: BlockHeight) -> u64 {
-        value.0 as u64
     }
 }
 
