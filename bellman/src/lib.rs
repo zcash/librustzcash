@@ -357,16 +357,16 @@ impl fmt::Display for SynthesisError {
 #[derive(Debug)]
 pub enum VerificationError {
     /// Verification was attempted with a malformed verifying key.
-    MalformedVerifyingKey,
+    InvalidVerifyingKey,
     /// Proof verification failed.
-    Failed,
+    InvalidProof,
 }
 
 impl Error for VerificationError {
     fn description(&self) -> &str {
         match *self {
-            VerificationError::MalformedVerifyingKey => "malformed verifying key",
-            VerificationError::Failed => "proof verification failed",
+            VerificationError::InvalidVerifyingKey => "malformed verifying key",
+            VerificationError::InvalidProof => "proof verification failed",
         }
     }
 }

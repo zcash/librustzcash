@@ -24,7 +24,7 @@ pub fn verify_proof<'a, E: MultiMillerLoop>(
     public_inputs: &[E::Fr],
 ) -> Result<(), VerificationError> {
     if (public_inputs.len() + 1) != pvk.ic.len() {
-        return Err(VerificationError::MalformedVerifyingKey);
+        return Err(VerificationError::InvalidVerifyingKey);
     }
 
     let mut acc = pvk.ic[0].to_curve();
@@ -51,6 +51,6 @@ pub fn verify_proof<'a, E: MultiMillerLoop>(
     {
         Ok(())
     } else {
-        Err(VerificationError::Failed)
+        Err(VerificationError::InvalidProof)
     }
 }
