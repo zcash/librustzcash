@@ -26,7 +26,7 @@ impl Parameters for MainNetwork {
             NetworkUpgrade::Sapling => Some(419_200),
             NetworkUpgrade::Blossom => Some(653_600),
             NetworkUpgrade::Heartwood => Some(903_000),
-            NetworkUpgrade::Canopy => None,
+            NetworkUpgrade::Canopy => Some(1_046_400),
         }
     }
 }
@@ -42,7 +42,7 @@ impl Parameters for TestNetwork {
             NetworkUpgrade::Sapling => Some(280_000),
             NetworkUpgrade::Blossom => Some(584_000),
             NetworkUpgrade::Heartwood => Some(903_800),
-            NetworkUpgrade::Canopy => None,
+            NetworkUpgrade::Canopy => Some(1_028_500),
         }
     }
 }
@@ -243,8 +243,16 @@ mod tests {
             BranchId::Sapling,
         );
         assert_eq!(
-            BranchId::for_height::<MainNetwork>(5_000_000),
+            BranchId::for_height::<MainNetwork>(903_000),
             BranchId::Heartwood,
+        );
+        assert_eq!(
+            BranchId::for_height::<MainNetwork>(1_046_400),
+            BranchId::Canopy,
+        );
+        assert_eq!(
+            BranchId::for_height::<MainNetwork>(5_000_000),
+            BranchId::Canopy,
         );
     }
 }
