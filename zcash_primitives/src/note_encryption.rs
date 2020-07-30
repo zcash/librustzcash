@@ -344,9 +344,9 @@ fn parse_note_plaintext_without_memo<P: consensus::Parameters>(
     plaintext: &[u8],
 ) -> Option<(Note<Bls12>, PaymentAddress<Bls12>)> {
     // Check note plaintext version
-    match plaintext[0] {
-        0x01 => (),
-        _ => return None,
+    match plaintext_version_is_valid(parameters, height, plaintext[0]) {
+        true => (),
+        false => return None,
     }
 
     let mut d = [0u8; 11];
@@ -378,6 +378,32 @@ fn parse_note_plaintext_without_memo<P: consensus::Parameters>(
     }
 
     Some((note, to))
+}
+
+pub fn plaintext_version_is_valid<P: consensus::Parameters>(
+    parameters: &P,
+    height: u32,
+    leadbyte: u8,
+) -> bool {
+    if parameters.is_nu_active(NetworkUpgrade::Canopy, height) {
+        let grace_period_end_height = parameters
+            .activation_height(NetworkUpgrade::Canopy)
+            .expect("Should have Canopy activation height")
+            + parameters.zip_212_grace_period();
+
+        if height < grace_period_end_height && leadbyte != 0x01 && leadbyte != 0x02 {
+            // non-{0x01,0x02} received after Canopy activation and before grace period has elapsed
+            false
+        } else if height >= grace_period_end_height && leadbyte != 0x02 {
+            // non-0x02 received past (Canopy activation height + grace period)
+            false
+        } else {
+            true
+        }
+    } else {
+        // return false if non-0x01 received when Canopy is not active
+        leadbyte == 0x01
+    }
 }
 
 /// Trial decryption of the full note plaintext by the recipient.
@@ -510,9 +536,9 @@ pub fn try_sapling_output_recovery<P: consensus::Parameters>(
     );
 
     // Check note plaintext version
-    match plaintext[0] {
-        0x01 => (),
-        _ => return None,
+    match plaintext_version_is_valid(parameters, height, plaintext[0]) {
+        true => (),
+        false => return None,
     }
 
     let mut d = [0u8; 11];

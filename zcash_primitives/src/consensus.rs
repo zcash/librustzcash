@@ -13,6 +13,10 @@ pub trait Parameters {
             _ => false,
         }
     }
+
+    fn zip_212_grace_period(&self) -> u32 {
+        32256
+    }
 }
 
 /// Marker struct for the production network.
