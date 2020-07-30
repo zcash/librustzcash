@@ -8,7 +8,7 @@ use rand_core::OsRng;
 use std::ops::{AddAssign, Neg};
 use zcash_primitives::{
     jubjub::{edwards, fs::Fs, FixedGenerators, JubjubBls12, Unknown},
-    primitives::{Diversifier, Note, PaymentAddress, ProofGenerationKey, ValueCommitment},
+    primitives::{Diversifier, Note, PaymentAddress, ProofGenerationKey, Rseed, ValueCommitment},
 };
 use zcash_primitives::{
     merkle_tree::MerklePath,
@@ -102,7 +102,7 @@ impl SaplingProvingContext {
                 .g_d::<Bls12>(params)
                 .expect("was a valid diversifier before"),
             pk_d: payment_address.pk_d().clone(),
-            r: rcm,
+            rseed: Rseed::BeforeZip212(rcm),
         };
 
         let nullifier = note.nf(&viewing_key, merkle_path.position, params);

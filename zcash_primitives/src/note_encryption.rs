@@ -8,7 +8,7 @@ use crate::{
         fs::{Fs, FsRepr},
         PrimeOrder, ToUniform, Unknown,
     },
-    primitives::{Diversifier, Note, PaymentAddress},
+    primitives::{Diversifier, Note, PaymentAddress, Rseed},
 };
 use blake2b_simd::{Hash as Blake2bHash, Params as Blake2bParams};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
@@ -233,12 +233,12 @@ fn prf_ock(
 /// let ovk = OutgoingViewingKey([0; 32]);
 ///
 /// let value = 1000;
-/// let rcv = Fs::random(&mut rng);
+/// let rcm = Fs::random(&mut rng);
 /// let cv = ValueCommitment::<Bls12> {
 ///     value,
 ///     randomness: rcv.clone(),
 /// };
-/// let note = to.create_note(value, rcv, &JUBJUB).unwrap();
+/// let note = to.create_note(value, Rseed::BeforeZip212(rcm), &JUBJUB).unwrap();
 /// let cmu = note.cm(&JUBJUB);
 ///
 /// let enc = SaplingNoteEncryption::new(ovk, note, to, Memo::default(), &mut rng);
@@ -294,12 +294,22 @@ impl SaplingNoteEncryption {
         // Note plaintext encoding is defined in section 5.5 of the Zcash Protocol
         // Specification.
         let mut input = [0; NOTE_PLAINTEXT_SIZE];
-        input[0] = 1;
+        input[0] = match self.note.rseed {
+            Rseed::BeforeZip212(_) => 1,
+            Rseed::AfterZip212(_) => 2,
+        };
         input[1..12].copy_from_slice(&self.to.diversifier().0);
         (&mut input[12..20])
             .write_u64::<LittleEndian>(self.note.value)
             .unwrap();
-        input[20..COMPACT_NOTE_SIZE].copy_from_slice(self.note.r.to_repr().as_ref());
+        match self.note.rseed {
+            Rseed::BeforeZip212(rcm) => {
+                input[20..COMPACT_NOTE_SIZE].copy_from_slice(rcm.to_repr().as_ref());
+            }
+            Rseed::AfterZip212(rseed) => {
+                input[20..COMPACT_NOTE_SIZE].copy_from_slice(&rseed);
+            }
+        }
         input[COMPACT_NOTE_SIZE..NOTE_PLAINTEXT_SIZE].copy_from_slice(&self.memo.0);
 
         let mut output = [0u8; ENC_CIPHERTEXT_SIZE];
@@ -355,11 +365,15 @@ fn parse_note_plaintext_without_memo<P: consensus::Parameters>(
 
     let v = (&plaintext[12..20]).read_u64::<LittleEndian>().ok()?;
 
-    let rcm = Fs::from_repr(FsRepr(
-        plaintext[20..COMPACT_NOTE_SIZE]
-            .try_into()
-            .expect("slice is the correct length"),
-    ))?;
+    let mut r = [0u8; 32];
+    r.copy_from_slice(&plaintext[20..COMPACT_NOTE_SIZE]);
+
+    let rseed = if parameters.is_nu_active(NetworkUpgrade::Canopy, height) {
+        Rseed::AfterZip212(r)
+    } else {
+        let rcm = Fs::from_repr(FsRepr(r.try_into().expect("slice is the correct length")))?;
+        Rseed::BeforeZip212(rcm)
+    };
 
     let diversifier = Diversifier(d);
     let pk_d = diversifier
@@ -367,7 +381,7 @@ fn parse_note_plaintext_without_memo<P: consensus::Parameters>(
         .mul(ivk.to_repr(), &JUBJUB);
 
     let to = PaymentAddress::from_parts(diversifier, pk_d)?;
-    let note = to.create_note(v, rcm, &JUBJUB).unwrap();
+    let note = to.create_note(v, rseed, &JUBJUB).unwrap();
 
     if note.cm(&JUBJUB) != *cmu {
         // Published commitment doesn't match calculated commitment
@@ -517,11 +531,15 @@ pub fn try_sapling_output_recovery<P: consensus::Parameters>(
 
     let v = (&plaintext[12..20]).read_u64::<LittleEndian>().ok()?;
 
-    let rcm = Fs::from_repr(FsRepr(
-        plaintext[20..COMPACT_NOTE_SIZE]
-            .try_into()
-            .expect("slice is the correct length"),
-    ))?;
+    let mut r = [0u8; 32];
+    r.copy_from_slice(&plaintext[20..COMPACT_NOTE_SIZE]);
+
+    let rseed = if parameters.is_nu_active(NetworkUpgrade::Canopy, height) {
+        Rseed::AfterZip212(r)
+    } else {
+        let rcm = Fs::from_repr(FsRepr(r.try_into().expect("slice is the correct length")))?;
+        Rseed::BeforeZip212(rcm)
+    };
 
     let mut memo = [0u8; 512];
     memo.copy_from_slice(&plaintext[COMPACT_NOTE_SIZE..NOTE_PLAINTEXT_SIZE]);
@@ -537,7 +555,7 @@ pub fn try_sapling_output_recovery<P: consensus::Parameters>(
     }
 
     let to = PaymentAddress::from_parts(diversifier, pk_d)?;
-    let note = to.create_note(v, rcm, &JUBJUB).unwrap();
+    let note = to.create_note(v, rseed, &JUBJUB).unwrap();
 
     if note.cm(&JUBJUB) != *cmu {
         // Published commitment doesn't match calculated commitment
@@ -555,7 +573,7 @@ mod tests {
             fs::{Fs, FsRepr},
             PrimeOrder, Unknown,
         },
-        primitives::{Diversifier, PaymentAddress, ValueCommitment},
+        primitives::{Diversifier, PaymentAddress, Rseed, ValueCommitment},
     };
     use crypto_api_chachapoly::ChachaPolyIetf;
     use ff::{Field, PrimeField};
@@ -752,7 +770,7 @@ mod tests {
         let cv = value_commitment.cm(&JUBJUB).into();
 
         let note = pa
-            .create_note(value, Fs::random(&mut rng), &JUBJUB)
+            .create_note(value, Rseed::BeforeZip212(Fs::random(&mut rng)), &JUBJUB)
             .unwrap();
         let cmu = note.cm(&JUBJUB);
 
@@ -1348,7 +1366,9 @@ mod tests {
             assert_eq!(ock.as_bytes(), tv.ock);
 
             let to = PaymentAddress::from_parts(Diversifier(tv.default_d), pk_d).unwrap();
-            let note = to.create_note(tv.v, rcm, &JUBJUB).unwrap();
+            let note = to
+                .create_note(tv.v, Rseed::BeforeZip212(rcm), &JUBJUB)
+                .unwrap();
             assert_eq!(note.cm(&JUBJUB), cmu);
 
             //

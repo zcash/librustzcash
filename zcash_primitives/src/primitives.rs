@@ -8,9 +8,11 @@ use crate::group_hash::group_hash;
 
 use crate::pedersen_hash::{pedersen_hash, Personalization};
 
-use byteorder::{LittleEndian, WriteBytesExt};
+use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
 
-use crate::jubjub::{edwards, FixedGenerators, JubjubEngine, JubjubParams, PrimeOrder};
+use crate::jubjub::{edwards, FixedGenerators, JubjubEngine, JubjubParams, PrimeOrder, ToUniform};
+
+use crate::keys::prf_expand;
 
 use blake2s_simd::Params as Blake2sParams;
 
@@ -207,16 +209,22 @@ impl<E: JubjubEngine> PaymentAddress<E> {
     pub fn create_note(
         &self,
         value: u64,
-        randomness: E::Fs,
+        randomness: Rseed<E::Fs>,
         params: &E::Params,
     ) -> Option<Note<E>> {
         self.g_d(params).map(|g_d| Note {
             value,
-            r: randomness,
+            rseed: randomness,
             g_d,
             pk_d: self.pk_d.clone(),
         })
     }
+}
+
+#[derive(Clone, Debug)]
+pub enum Rseed<Fs> {
+    BeforeZip212(Fs),
+    AfterZip212([u8; 32]),
 }
 
 #[derive(Clone, Debug)]
@@ -227,8 +235,8 @@ pub struct Note<E: JubjubEngine> {
     pub g_d: edwards::Point<E, PrimeOrder>,
     /// The public key of the address, g_d^ivk
     pub pk_d: edwards::Point<E, PrimeOrder>,
-    /// The commitment randomness
-    pub r: E::Fs,
+    /// rseed
+    pub rseed: Rseed<E::Fs>,
 }
 
 impl<E: JubjubEngine> PartialEq for Note<E> {
@@ -236,7 +244,7 @@ impl<E: JubjubEngine> PartialEq for Note<E> {
         self.value == other.value
             && self.g_d == other.g_d
             && self.pk_d == other.pk_d
-            && self.r == other.r
+            && self.rcm() == other.rcm()
     }
 }
 
@@ -280,7 +288,7 @@ impl<E: JubjubEngine> Note<E> {
         // Compute final commitment
         params
             .generator(FixedGenerators::NoteCommitmentRandomness)
-            .mul(self.r, params)
+            .mul(self.rcm(), params)
             .add(&hash_of_contents, params)
     }
 
@@ -312,5 +320,12 @@ impl<E: JubjubEngine> Note<E> {
         // The commitment is in the prime order subgroup, so mapping the
         // commitment to the x-coordinate is an injective encoding.
         self.cm_full_point(params).to_xy().0
+    }
+
+    pub fn rcm(&self) -> E::Fs {
+        match self.rseed {
+            Rseed::BeforeZip212(rcm) => rcm,
+            Rseed::AfterZip212(rseed) => E::Fs::to_uniform(prf_expand(&rseed, &[0x04]).as_bytes()),
+        }
     }
 }

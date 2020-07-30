@@ -3,7 +3,7 @@
 use crate::zip32::ExtendedSpendingKey;
 use crate::{
     jubjub::fs::Fs,
-    primitives::{Diversifier, Note, PaymentAddress},
+    primitives::{Diversifier, Note, PaymentAddress, Rseed},
 };
 use ff::Field;
 use pairing::bls12_381::{Bls12, Fr};
@@ -110,7 +110,7 @@ impl SaplingOutput {
             g_d,
             pk_d: to.pk_d().clone(),
             value: value.into(),
-            r: rcm,
+            rseed: Rseed::BeforeZip212(rcm),
         };
 
         Ok(SaplingOutput {
@@ -139,7 +139,7 @@ impl SaplingOutput {
             ctx,
             encryptor.esk().clone(),
             self.to,
-            self.note.r,
+            self.note.rcm(),
             self.note.value,
         );
 
@@ -568,7 +568,7 @@ impl<R: RngCore + CryptoRng> Builder<R> {
                         &mut ctx,
                         proof_generation_key,
                         spend.diversifier,
-                        spend.note.r,
+                        spend.note.rcm(),
                         spend.alpha,
                         spend.note.value,
                         anchor,
@@ -628,7 +628,7 @@ impl<R: RngCore + CryptoRng> Builder<R> {
                         Note {
                             g_d,
                             pk_d,
-                            r: Fs::random(&mut self.rng),
+                            rseed: Rseed::BeforeZip212(Fs::random(&mut self.rng)),
                             value: 0,
                         },
                     )
@@ -637,8 +637,13 @@ impl<R: RngCore + CryptoRng> Builder<R> {
                 let esk = generate_esk(&mut self.rng);
                 let epk = dummy_note.g_d.mul(esk, &JUBJUB);
 
-                let (zkproof, cv) =
-                    prover.output_proof(&mut ctx, esk, dummy_to, dummy_note.r, dummy_note.value);
+                let (zkproof, cv) = prover.output_proof(
+                    &mut ctx,
+                    esk,
+                    dummy_to,
+                    dummy_note.rcm(),
+                    dummy_note.value,
+                );
 
                 let cmu = dummy_note.cm(&JUBJUB);
 
@@ -717,6 +722,7 @@ mod tests {
         consensus,
         legacy::TransparentAddress,
         merkle_tree::{CommitmentTree, IncrementalWitness},
+        primitives::Rseed,
         prover::mock::MockTxProver,
         sapling::Node,
         transaction::components::Amount,
@@ -778,7 +784,7 @@ mod tests {
         let mut rng = OsRng;
 
         let note1 = to
-            .create_note(50000, Fs::random(&mut rng), &JUBJUB)
+            .create_note(50000, Rseed::BeforeZip212(Fs::random(&mut rng)), &JUBJUB)
             .unwrap();
         let cm1 = Node::new(note1.cm(&JUBJUB).to_repr());
         let mut tree = CommitmentTree::new();
@@ -877,7 +883,7 @@ mod tests {
         }
 
         let note1 = to
-            .create_note(59999, Fs::random(&mut rng), &JUBJUB)
+            .create_note(59999, Rseed::BeforeZip212(Fs::random(&mut rng)), &JUBJUB)
             .unwrap();
         let cm1 = Node::new(note1.cm(&JUBJUB).to_repr());
         let mut tree = CommitmentTree::new();
@@ -916,7 +922,9 @@ mod tests {
             );
         }
 
-        let note2 = to.create_note(1, Fs::random(&mut rng), &JUBJUB).unwrap();
+        let note2 = to
+            .create_note(1, Rseed::BeforeZip212(Fs::random(&mut rng)), &JUBJUB)
+            .unwrap();
         let cm2 = Node::new(note2.cm(&JUBJUB).to_repr());
         tree.append(cm2).unwrap();
         witness1.append(cm2).unwrap();

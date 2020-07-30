@@ -271,7 +271,7 @@ pub fn scan_cached_blocks<P: AsRef<Path>, Q: AsRef<Path>>(
                 .collect();
 
             for output in tx.shielded_outputs {
-                let rcm = output.note.r.to_repr();
+                let rcm = output.note.rcm().to_repr();
                 let nf = output.note.nf(
                     &extfvks[output.account].fvk.vk,
                     output.witness.position() as u64,
@@ -459,7 +459,7 @@ pub fn decrypt_and_store_transaction<P: AsRef<Path>>(
                 ])?;
             }
         } else {
-            let rcm = output.note.r.to_repr();
+            let rcm = output.note.rcm().to_repr();
 
             // Try updating an existing received note.
             if stmt_update_received_note.execute(&[
