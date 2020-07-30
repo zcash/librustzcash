@@ -6,7 +6,7 @@ use crate::{
     jubjub::{
         edwards,
         fs::{Fs, FsRepr},
-        PrimeOrder, ToUniform, Unknown,
+        PrimeOrder, Unknown,
     },
     primitives::{Diversifier, Note, PaymentAddress, Rseed},
 };
@@ -15,7 +15,6 @@ use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use crypto_api_chachapoly::{ChaCha20Ietf, ChachaPolyIetf};
 use ff::PrimeField;
 use pairing::bls12_381::{Bls12, Fr};
-use rand_core::{CryptoRng, RngCore};
 use std::convert::TryInto;
 use std::fmt;
 use std::str;
@@ -135,15 +134,6 @@ impl str::FromStr for Memo {
     }
 }
 
-pub fn generate_esk<R: RngCore + CryptoRng>(rng: &mut R) -> Fs {
-    // create random 64 byte buffer
-    let mut buffer = [0u8; 64];
-    rng.fill_bytes(&mut buffer);
-
-    // reduce to uniform value
-    Fs::to_uniform(&buffer[..])
-}
-
 /// Sapling key agreement for note encryption.
 ///
 /// Implements section 5.4.4.3 of the Zcash Protocol Specification.
@@ -256,14 +246,13 @@ pub struct SaplingNoteEncryption {
 
 impl SaplingNoteEncryption {
     /// Creates a new encryption context for the given note.
-    pub fn new<R: RngCore + CryptoRng>(
+    pub fn new(
         ovk: OutgoingViewingKey,
         note: Note<Bls12>,
         to: PaymentAddress<Bls12>,
         memo: Memo,
-        rng: &mut R,
+        esk: Fs,
     ) -> SaplingNoteEncryption {
-        let esk = generate_esk(rng);
         let epk = note.g_d.mul(esk, &JUBJUB);
 
         SaplingNoteEncryption {

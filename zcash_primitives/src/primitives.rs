@@ -8,13 +8,15 @@ use crate::group_hash::group_hash;
 
 use crate::pedersen_hash::{pedersen_hash, Personalization};
 
-use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
+use byteorder::{LittleEndian, WriteBytesExt};
 
 use crate::jubjub::{edwards, FixedGenerators, JubjubEngine, JubjubParams, PrimeOrder, ToUniform};
 
 use crate::keys::prf_expand;
 
 use blake2s_simd::Params as Blake2sParams;
+
+use rand_core::{CryptoRng, RngCore};
 
 #[derive(Clone)]
 pub struct ValueCommitment<E: JubjubEngine> {
@@ -326,6 +328,20 @@ impl<E: JubjubEngine> Note<E> {
         match self.rseed {
             Rseed::BeforeZip212(rcm) => rcm,
             Rseed::AfterZip212(rseed) => E::Fs::to_uniform(prf_expand(&rseed, &[0x04]).as_bytes()),
+        }
+    }
+
+    pub fn generate_or_derive_esk<R: RngCore + CryptoRng>(&self, rng: &mut R) -> E::Fs {
+        match self.rseed {
+            Rseed::BeforeZip212(_) => {
+                // create random 64 byte buffer
+                let mut buffer = [0u8; 64];
+                &rng.fill_bytes(&mut buffer);
+
+                // reduce to uniform value
+                E::Fs::to_uniform(&buffer[..])
+            }
+            Rseed::AfterZip212(rseed) => E::Fs::to_uniform(prf_expand(&rseed, &[0x05]).as_bytes()),
         }
     }
 }
