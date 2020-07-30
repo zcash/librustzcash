@@ -816,6 +816,8 @@ mod tests {
             let output = &tx.shielded_outputs[output_index as usize];
 
             try_sapling_output_recovery(
+                &consensus::MainNetwork,
+                SAPLING_ACTIVATION_HEIGHT as u32,
                 &extfvk.fvk.ovk,
                 &output.cv,
                 &output.cmu,

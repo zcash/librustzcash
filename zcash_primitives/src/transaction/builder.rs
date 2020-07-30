@@ -726,6 +726,7 @@ mod tests {
     use super::{Builder, Error};
     use crate::{
         consensus,
+        consensus::SAPLING_ACTIVATION_HEIGHT,
         legacy::TransparentAddress,
         merkle_tree::{CommitmentTree, IncrementalWitness},
         primitives::Rseed,
@@ -760,6 +761,7 @@ mod tests {
         // Create a builder with 0 fee, so we can construct t outputs
         let mut builder = builder::Builder {
             rng: OsRng,
+            height: SAPLING_ACTIVATION_HEIGHT,
             mtx: TransactionData::new(),
             fee: Amount::zero(),
             anchor: None,

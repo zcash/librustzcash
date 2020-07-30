@@ -100,9 +100,11 @@ mod tests {
     };
     use zcash_primitives::{
         block::BlockHash,
+        consensus,
+        consensus::{NetworkUpgrade, Parameters},
         jubjub::fs::Fs,
         note_encryption::{Memo, SaplingNoteEncryption},
-        primitives::{Note, PaymentAddress},
+        primitives::{Note, PaymentAddress, Rseed},
         transaction::components::Amount,
         zip32::ExtendedFullViewingKey,
         JUBJUB,
@@ -120,18 +122,26 @@ mod tests {
 
         // Create a fake Note for the account
         let mut rng = OsRng;
+        let rseed = if consensus::MainNetwork.is_nu_active(NetworkUpgrade::Canopy, height as u32) {
+            let mut buffer = [0u8; 32];
+            &rng.fill_bytes(&mut buffer);
+            Rseed::AfterZip212(buffer)
+        } else {
+            Rseed::BeforeZip212(Fs::random(&mut rng))
+        };
         let note = Note {
             g_d: to.diversifier().g_d::<Bls12>(&JUBJUB).unwrap(),
             pk_d: to.pk_d().clone(),
             value: value.into(),
-            r: Fs::random(&mut rng),
+            rseed,
         };
+        let esk = note.generate_or_derive_esk(&mut rng);
         let encryptor = SaplingNoteEncryption::new(
             extfvk.fvk.ovk,
             note.clone(),
             to.clone(),
             Memo::default(),
-            &mut rng,
+            esk,
         );
         let cmu = note.cm(&JUBJUB).to_repr().as_ref().to_vec();
         let mut epk = vec![];
@@ -168,6 +178,13 @@ mod tests {
         value: Amount,
     ) -> CompactBlock {
         let mut rng = OsRng;
+        let rseed = if consensus::MainNetwork.is_nu_active(NetworkUpgrade::Canopy, height as u32) {
+            let mut buffer = [0u8; 32];
+            &rng.fill_bytes(&mut buffer);
+            Rseed::AfterZip212(buffer)
+        } else {
+            Rseed::BeforeZip212(Fs::random(&mut rng))
+        };
 
         // Create a fake CompactBlock containing the note
         let mut cspend = CompactSpend::new();
@@ -184,15 +201,11 @@ mod tests {
                 g_d: to.diversifier().g_d::<Bls12>(&JUBJUB).unwrap(),
                 pk_d: to.pk_d().clone(),
                 value: value.into(),
-                r: Fs::random(&mut rng),
+                rseed,
             };
-            let encryptor = SaplingNoteEncryption::new(
-                extfvk.fvk.ovk,
-                note.clone(),
-                to,
-                Memo::default(),
-                &mut rng,
-            );
+            let esk = note.generate_or_derive_esk(&mut rng);
+            let encryptor =
+                SaplingNoteEncryption::new(extfvk.fvk.ovk, note.clone(), to, Memo::default(), esk);
             let cmu = note.cm(&JUBJUB).to_repr().as_ref().to_vec();
             let mut epk = vec![];
             encryptor.epk().write(&mut epk).unwrap();
@@ -208,18 +221,27 @@ mod tests {
         // Create a fake Note for the change
         ctx.outputs.push({
             let change_addr = extfvk.default_address().unwrap().1;
+            let rseed =
+                if consensus::MainNetwork.is_nu_active(NetworkUpgrade::Canopy, height as u32) {
+                    let mut buffer = [0u8; 32];
+                    &rng.fill_bytes(&mut buffer);
+                    Rseed::AfterZip212(buffer)
+                } else {
+                    Rseed::BeforeZip212(Fs::random(&mut rng))
+                };
             let note = Note {
                 g_d: change_addr.diversifier().g_d::<Bls12>(&JUBJUB).unwrap(),
                 pk_d: change_addr.pk_d().clone(),
                 value: (in_value - value).into(),
-                r: Fs::random(&mut rng),
+                rseed,
             };
+            let esk = note.generate_or_derive_esk(&mut rng);
             let encryptor = SaplingNoteEncryption::new(
                 extfvk.fvk.ovk,
                 note.clone(),
                 change_addr,
                 Memo::default(),
-                &mut rng,
+                esk,
             );
             let cmu = note.cm(&JUBJUB).to_repr().as_ref().to_vec();
             let mut epk = vec![];

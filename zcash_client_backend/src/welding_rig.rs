@@ -195,10 +195,11 @@ mod tests {
     use rand_core::{OsRng, RngCore};
     use zcash_primitives::{
         consensus,
+        consensus::{NetworkUpgrade, Parameters},
         jubjub::{fs::Fs, FixedGenerators, JubjubParams, ToUniform},
         merkle_tree::CommitmentTree,
         note_encryption::{Memo, SaplingNoteEncryption},
-        primitives::Note,
+        primitives::{Note, Rseed},
         transaction::components::Amount,
         zip32::{ExtendedFullViewingKey, ExtendedSpendingKey},
         JUBJUB,
@@ -257,18 +258,26 @@ mod tests {
 
         // Create a fake Note for the account
         let mut rng = OsRng;
+        let rseed = if consensus::MainNetwork.is_nu_active(NetworkUpgrade::Canopy, height as u32) {
+            let mut buffer = [0u8; 32];
+            &rng.fill_bytes(&mut buffer);
+            Rseed::AfterZip212(buffer)
+        } else {
+            Rseed::BeforeZip212(Fs::random(&mut rng))
+        };
         let note = Note {
             g_d: to.diversifier().g_d::<Bls12>(&JUBJUB).unwrap(),
             pk_d: to.pk_d().clone(),
             value: value.into(),
-            r: Fs::random(&mut rng),
+            rseed,
         };
+        let esk = note.generate_or_derive_esk(&mut rng);
         let encryptor = SaplingNoteEncryption::new(
             extfvk.fvk.ovk,
             note.clone(),
             to.clone(),
             Memo::default(),
-            &mut rng,
+            esk,
         );
         let cmu = note.cm(&JUBJUB).to_repr().as_ref().to_owned();
         let mut epk = vec![];
