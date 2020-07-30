@@ -1,6 +1,8 @@
 //! Implementation of in-band secret distribution for Zcash transactions.
 
 use crate::{
+    consensus,
+    consensus::NetworkUpgrade,
     jubjub::{
         edwards,
         fs::{Fs, FsRepr},
@@ -335,7 +337,9 @@ impl SaplingNoteEncryption {
     }
 }
 
-fn parse_note_plaintext_without_memo(
+fn parse_note_plaintext_without_memo<P: consensus::Parameters>(
+    parameters: &P,
+    height: u32,
     ivk: &Fs,
     cmu: &Fr,
     plaintext: &[u8],
@@ -380,7 +384,9 @@ fn parse_note_plaintext_without_memo(
 /// `PaymentAddress` to which the note was sent.
 ///
 /// Implements section 4.17.2 of the Zcash Protocol Specification.
-pub fn try_sapling_note_decryption(
+pub fn try_sapling_note_decryption<P: consensus::Parameters>(
+    parameters: &P,
+    height: u32,
     ivk: &Fs,
     epk: &edwards::Point<Bls12, PrimeOrder>,
     cmu: &Fr,
@@ -405,7 +411,7 @@ pub fn try_sapling_note_decryption(
         NOTE_PLAINTEXT_SIZE
     );
 
-    let (note, to) = parse_note_plaintext_without_memo(ivk, cmu, &plaintext)?;
+    let (note, to) = parse_note_plaintext_without_memo(parameters, height, ivk, cmu, &plaintext)?;
 
     let mut memo = [0u8; 512];
     memo.copy_from_slice(&plaintext[COMPACT_NOTE_SIZE..NOTE_PLAINTEXT_SIZE]);
@@ -422,7 +428,9 @@ pub fn try_sapling_note_decryption(
 /// Implements the procedure specified in [`ZIP 307`].
 ///
 /// [`ZIP 307`]: https://github.com/zcash/zips/pull/226
-pub fn try_sapling_compact_note_decryption(
+pub fn try_sapling_compact_note_decryption<P: consensus::Parameters>(
+    parameters: &P,
+    height: u32,
     ivk: &Fs,
     epk: &edwards::Point<Bls12, PrimeOrder>,
     cmu: &Fr,
@@ -438,7 +446,7 @@ pub fn try_sapling_compact_note_decryption(
     plaintext.copy_from_slice(&enc_ciphertext);
     ChaCha20Ietf::xor(key.as_bytes(), &[0u8; 12], 1, &mut plaintext);
 
-    parse_note_plaintext_without_memo(ivk, cmu, &plaintext)
+    parse_note_plaintext_without_memo(parameters, height, ivk, cmu, &plaintext)
 }
 
 /// Recovery of the full note plaintext by the sender.
@@ -448,7 +456,9 @@ pub fn try_sapling_compact_note_decryption(
 /// `PaymentAddress` to which the note was sent.
 ///
 /// Implements section 4.17.3 of the Zcash Protocol Specification.
-pub fn try_sapling_output_recovery(
+pub fn try_sapling_output_recovery<P: consensus::Parameters>(
+    parameters: &P,
+    height: u32,
     ovk: &OutgoingViewingKey,
     cv: &edwards::Point<Bls12, Unknown>,
     cmu: &Fr,
@@ -717,6 +727,7 @@ mod tests {
     }
 
     fn random_enc_ciphertext_with<R: RngCore + CryptoRng>(
+        height: u32,
         ivk: Fs,
         mut rng: &mut R,
     ) -> (

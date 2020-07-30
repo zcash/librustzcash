@@ -13,6 +13,7 @@ use std::fmt;
 
 use crate::{
     consensus,
+    consensus::NetworkUpgrade,
     keys::OutgoingViewingKey,
     legacy::TransparentAddress,
     merkle_tree::MerklePath,
@@ -86,7 +87,9 @@ pub struct SaplingOutput {
 }
 
 impl SaplingOutput {
-    pub fn new<R: RngCore + CryptoRng>(
+    pub fn new<R: RngCore + CryptoRng, P: consensus::Parameters>(
+        parameters: P,
+        height: u32,
         rng: &mut R,
         ovk: OutgoingViewingKey,
         to: PaymentAddress<Bls12>,
@@ -304,6 +307,7 @@ impl TransactionMetadata {
 /// Generates a [`Transaction`] from its inputs and outputs.
 pub struct Builder<R: RngCore + CryptoRng> {
     rng: R,
+    height: u32,
     mtx: TransactionData,
     fee: Amount,
     anchor: Option<Fr>,
@@ -344,6 +348,7 @@ impl<R: RngCore + CryptoRng> Builder<R> {
 
         Builder {
             rng,
+            height,
             mtx,
             fee: DEFAULT_FEE,
             anchor: None,
@@ -399,7 +404,15 @@ impl<R: RngCore + CryptoRng> Builder<R> {
         value: Amount,
         memo: Option<Memo>,
     ) -> Result<(), Error> {
-        let output = SaplingOutput::new(&mut self.rng, ovk, to, value, memo)?;
+        let output = SaplingOutput::new(
+            consensus::MainNetwork,
+            self.height,
+            &mut self.rng,
+            ovk,
+            to,
+            value,
+            memo,
+        )?;
 
         self.mtx.value_balance -= value;
 

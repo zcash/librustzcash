@@ -9,6 +9,7 @@ use zcash_client_backend::{
     proto::compact_formats::CompactBlock, welding_rig::scan_block,
 };
 use zcash_primitives::{
+    consensus,
     merkle_tree::{CommitmentTree, IncrementalWitness},
     sapling::Node,
     transaction::Transaction,
@@ -188,6 +189,7 @@ pub fn scan_cached_blocks<P: AsRef<Path>, Q: AsRef<Path>>(
             let nf_refs: Vec<_> = nullifiers.iter().map(|(nf, acc)| (&nf[..], *acc)).collect();
             let mut witness_refs: Vec<_> = witnesses.iter_mut().map(|w| &mut w.witness).collect();
             scan_block(
+                &consensus::MainNetwork,
                 block,
                 &extfvks[..],
                 &nf_refs,
@@ -372,7 +374,7 @@ pub fn decrypt_and_store_transaction<P: AsRef<Path>>(
         .collect::<Result<Result<Option<_>, _>, _>>()??
         .ok_or(Error(ErrorKind::IncorrectHRPExtFVK))?;
 
-    let outputs = decrypt_transaction(tx, &extfvks);
+    let outputs = decrypt_transaction(&consensus::MainNetwork, tx, &extfvks);
 
     if outputs.is_empty() {
         // Nothing to see here
