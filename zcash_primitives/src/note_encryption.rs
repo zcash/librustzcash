@@ -6,7 +6,7 @@ use crate::{
     jubjub::{
         edwards,
         fs::{Fs, FsRepr},
-        PrimeOrder, Unknown,
+        PrimeOrder, ToUniform, Unknown,
     },
     primitives::{Diversifier, Note, PaymentAddress, Rseed},
 };
@@ -19,7 +19,10 @@ use std::convert::TryInto;
 use std::fmt;
 use std::str;
 
-use crate::{keys::OutgoingViewingKey, JUBJUB};
+use crate::{
+    keys::{prf_expand, OutgoingViewingKey},
+    JUBJUB,
+};
 
 pub const KDF_SAPLING_PERSONALIZATION: &[u8; 16] = b"Zcash_SaplingKDF";
 pub const PRF_OCK_PERSONALIZATION: &[u8; 16] = b"Zcash_Derive_ock";
@@ -209,7 +212,7 @@ fn prf_ock(
 /// use rand_core::OsRng;
 /// use zcash_primitives::{
 ///     jubjub::fs::Fs,
-///     keys::OutgoingViewingKey,
+///     keys::{OutgoingViewingKey, prf_expand},
 ///     note_encryption::{Memo, SaplingNoteEncryption},
 ///     primitives::{Diversifier, PaymentAddress, Rseed, ValueCommitment},
 ///     JUBJUB,
@@ -442,6 +445,14 @@ pub fn try_sapling_note_decryption<P: consensus::Parameters>(
     );
 
     let (note, to) = parse_note_plaintext_without_memo(parameters, height, ivk, cmu, &plaintext)?;
+
+    match note.rseed {
+        Rseed::AfterZip212(rseed) => {
+            let derived_esk = Fs::to_uniform(prf_expand(&rseed, &[0x05]).as_bytes());
+            assert_eq!(note.g_d.mul(derived_esk, &JUBJUB), *epk);
+        }
+        _ => (),
+    }
 
     let mut memo = [0u8; 512];
     memo.copy_from_slice(&plaintext[COMPACT_NOTE_SIZE..NOTE_PLAINTEXT_SIZE]);
