@@ -1036,10 +1036,11 @@ mod tests {
     fn decryption_with_invalid_version_byte() {
         let mut rng = OsRng;
         let height_array = [
-            consensus::MainNetwork::SAPLING_ACTIVATION_HEIGHT,
+            consensus::MainNetwork::CANOPY_ACTIVATION_HEIGHT - 1,
             consensus::MainNetwork::CANOPY_ACTIVATION_HEIGHT,
+            consensus::MainNetwork::CANOPY_ACTIVATION_HEIGHT + ZIP212_GRACE_PERIOD,
         ];
-        let leadbyte_array = [0x02, 0x03];
+        let leadbyte_array = [0x02, 0x03, 0x01];
 
         for (i, height_ref) in height_array.iter().enumerate() {
             let height = *height_ref;
@@ -1223,10 +1224,11 @@ mod tests {
     fn compact_decryption_with_invalid_version_byte() {
         let mut rng = OsRng;
         let height_array = [
-            consensus::MainNetwork::SAPLING_ACTIVATION_HEIGHT,
+            consensus::MainNetwork::CANOPY_ACTIVATION_HEIGHT - 1,
             consensus::MainNetwork::CANOPY_ACTIVATION_HEIGHT,
+            consensus::MainNetwork::CANOPY_ACTIVATION_HEIGHT + ZIP212_GRACE_PERIOD,
         ];
-        let leadbyte_array = [0x02, 0x03];
+        let leadbyte_array = [0x02, 0x03, 0x01];
 
         for (i, height_ref) in height_array.iter().enumerate() {
             let height = *height_ref;
@@ -1509,10 +1511,11 @@ mod tests {
     fn recovery_with_invalid_version_byte() {
         let mut rng = OsRng;
         let height_array = [
-            consensus::MainNetwork::SAPLING_ACTIVATION_HEIGHT,
+            consensus::MainNetwork::CANOPY_ACTIVATION_HEIGHT - 1,
             consensus::MainNetwork::CANOPY_ACTIVATION_HEIGHT,
+            consensus::MainNetwork::CANOPY_ACTIVATION_HEIGHT + ZIP212_GRACE_PERIOD,
         ];
-        let leadbyte_array = [0x02, 0x03];
+        let leadbyte_array = [0x02, 0x03, 0x01];
 
         for (i, height_ref) in height_array.iter().enumerate() {
             let height = *height_ref;
