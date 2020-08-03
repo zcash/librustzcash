@@ -22,11 +22,13 @@ mod hashreader;
 pub mod sapling;
 pub mod sprout;
 
-#[cfg(feature = "local-prover")]
+#[cfg(any(feature = "local-prover", feature = "bundled-prover"))]
 pub mod prover;
 
 // Circuit names
+#[cfg(feature = "local-prover")]
 const SAPLING_SPEND_NAME: &str = "sapling-spend.params";
+#[cfg(feature = "local-prover")]
 const SAPLING_OUTPUT_NAME: &str = "sapling-output.params";
 
 // Circuit hashes
@@ -118,11 +120,27 @@ pub fn load_parameters(
     let sprout_fs =
         sprout_path.map(|p| File::open(p).expect("couldn't load Sprout groth16 parameters file"));
 
-    let mut spend_fs = hashreader::HashReader::new(BufReader::with_capacity(1024 * 1024, spend_fs));
-    let mut output_fs =
-        hashreader::HashReader::new(BufReader::with_capacity(1024 * 1024, output_fs));
-    let mut sprout_fs =
-        sprout_fs.map(|fs| hashreader::HashReader::new(BufReader::with_capacity(1024 * 1024, fs)));
+    parse_parameters(
+        BufReader::with_capacity(1024 * 1024, spend_fs),
+        BufReader::with_capacity(1024 * 1024, output_fs),
+        sprout_fs.map(|fs| BufReader::with_capacity(1024 * 1024, fs)),
+    )
+}
+
+fn parse_parameters<R: io::Read>(
+    spend_fs: R,
+    output_fs: R,
+    sprout_fs: Option<R>,
+) -> (
+    Parameters<Bls12>,
+    PreparedVerifyingKey<Bls12>,
+    Parameters<Bls12>,
+    PreparedVerifyingKey<Bls12>,
+    Option<PreparedVerifyingKey<Bls12>>,
+) {
+    let mut spend_fs = hashreader::HashReader::new(spend_fs);
+    let mut output_fs = hashreader::HashReader::new(output_fs);
+    let mut sprout_fs = sprout_fs.map(|fs| hashreader::HashReader::new(fs));
 
     // Deserialize params
     let spend_params = Parameters::<Bls12>::read(&mut spend_fs, false)
