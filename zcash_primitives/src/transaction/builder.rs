@@ -726,7 +726,6 @@ mod tests {
     use super::{Builder, Error};
     use crate::{
         consensus,
-        consensus::SAPLING_ACTIVATION_HEIGHT,
         legacy::TransparentAddress,
         merkle_tree::{CommitmentTree, IncrementalWitness},
         primitives::Rseed,
@@ -753,15 +752,20 @@ mod tests {
 
     #[test]
     fn binding_sig_absent_if_no_shielded_spend_or_output() {
+        use crate::consensus::{NetworkUpgrade, Parameters};
         use crate::transaction::{
             builder::{self, TransparentInputs},
             TransactionData,
         };
 
+        let sapling_activation_height = consensus::MainNetwork
+            .activation_height(NetworkUpgrade::Sapling)
+            .unwrap();
+
         // Create a builder with 0 fee, so we can construct t outputs
         let mut builder = builder::Builder {
             rng: OsRng,
-            height: SAPLING_ACTIVATION_HEIGHT,
+            height: sapling_activation_height,
             mtx: TransactionData::new(),
             fee: Amount::zero(),
             anchor: None,

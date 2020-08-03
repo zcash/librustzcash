@@ -2,7 +2,7 @@
 
 use crate::{
     consensus,
-    consensus::NetworkUpgrade,
+    consensus::{NetworkUpgrade, ZIP212_GRACE_PERIOD},
     jubjub::{
         edwards,
         fs::{Fs, FsRepr},
@@ -393,7 +393,7 @@ pub fn plaintext_version_is_valid<P: consensus::Parameters>(
         let grace_period_end_height = parameters
             .activation_height(NetworkUpgrade::Canopy)
             .expect("Should have Canopy activation height")
-            + parameters.zip_212_grace_period();
+            + ZIP212_GRACE_PERIOD;
 
         if height < grace_period_end_height && leadbyte != 0x01 && leadbyte != 0x02 {
             // non-{0x01,0x02} received after Canopy activation and before grace period has elapsed
@@ -596,7 +596,7 @@ pub fn try_sapling_output_recovery<P: consensus::Parameters>(
 mod tests {
     use crate::{
         consensus,
-        consensus::{NetworkUpgrade, Parameters, SAPLING_ACTIVATION_HEIGHT},
+        consensus::{NetworkUpgrade, Parameters, ZIP212_GRACE_PERIOD},
         jubjub::{
             edwards,
             fs::{Fs, FsRepr},
@@ -929,11 +929,10 @@ mod tests {
     #[test]
     fn decryption_with_invalid_ivk() {
         let mut rng = OsRng;
-        let height_v1 = SAPLING_ACTIVATION_HEIGHT;
-        let height_v2 = consensus::MainNetwork
-            .activation_height(NetworkUpgrade::Canopy)
-            .unwrap();
-        let height_array = [height_v1, height_v2];
+        let height_array = [
+            consensus::MainNetwork::SAPLING_ACTIVATION_HEIGHT,
+            consensus::MainNetwork::CANOPY_ACTIVATION_HEIGHT,
+        ];
 
         for height_ref in height_array.iter() {
             let height = *height_ref;
@@ -956,11 +955,10 @@ mod tests {
     #[test]
     fn decryption_with_invalid_epk() {
         let mut rng = OsRng;
-        let height_v1 = SAPLING_ACTIVATION_HEIGHT;
-        let height_v2 = consensus::MainNetwork
-            .activation_height(NetworkUpgrade::Canopy)
-            .unwrap();
-        let height_array = [height_v1, height_v2];
+        let height_array = [
+            consensus::MainNetwork::SAPLING_ACTIVATION_HEIGHT,
+            consensus::MainNetwork::CANOPY_ACTIVATION_HEIGHT,
+        ];
 
         for height_ref in height_array.iter() {
             let height = *height_ref;
@@ -983,11 +981,10 @@ mod tests {
     #[test]
     fn decryption_with_invalid_cmu() {
         let mut rng = OsRng;
-        let height_v1 = SAPLING_ACTIVATION_HEIGHT;
-        let height_v2 = consensus::MainNetwork
-            .activation_height(NetworkUpgrade::Canopy)
-            .unwrap();
-        let height_array = [height_v1, height_v2];
+        let height_array = [
+            consensus::MainNetwork::SAPLING_ACTIVATION_HEIGHT,
+            consensus::MainNetwork::CANOPY_ACTIVATION_HEIGHT,
+        ];
 
         for height_ref in height_array.iter() {
             let height = *height_ref;
@@ -1010,11 +1007,10 @@ mod tests {
     #[test]
     fn decryption_with_invalid_tag() {
         let mut rng = OsRng;
-        let height_v1 = SAPLING_ACTIVATION_HEIGHT;
-        let height_v2 = consensus::MainNetwork
-            .activation_height(NetworkUpgrade::Canopy)
-            .unwrap();
-        let height_array = [height_v1, height_v2];
+        let height_array = [
+            consensus::MainNetwork::SAPLING_ACTIVATION_HEIGHT,
+            consensus::MainNetwork::CANOPY_ACTIVATION_HEIGHT,
+        ];
 
         for height_ref in height_array.iter() {
             let height = *height_ref;
@@ -1039,11 +1035,10 @@ mod tests {
     #[test]
     fn decryption_with_invalid_version_byte() {
         let mut rng = OsRng;
-        let height_v1 = SAPLING_ACTIVATION_HEIGHT;
-        let height_v2 = consensus::MainNetwork
-            .activation_height(NetworkUpgrade::Canopy)
-            .unwrap();
-        let height_array = [height_v1, height_v2];
+        let height_array = [
+            consensus::MainNetwork::SAPLING_ACTIVATION_HEIGHT,
+            consensus::MainNetwork::CANOPY_ACTIVATION_HEIGHT,
+        ];
         let leadbyte_array = [0x02, 0x03];
 
         for (i, height_ref) in height_array.iter().enumerate() {
@@ -1077,11 +1072,10 @@ mod tests {
     #[test]
     fn decryption_with_invalid_diversifier() {
         let mut rng = OsRng;
-        let height_v1 = SAPLING_ACTIVATION_HEIGHT;
-        let height_v2 = consensus::MainNetwork
-            .activation_height(NetworkUpgrade::Canopy)
-            .unwrap();
-        let height_array = [height_v1, height_v2];
+        let height_array = [
+            consensus::MainNetwork::SAPLING_ACTIVATION_HEIGHT,
+            consensus::MainNetwork::CANOPY_ACTIVATION_HEIGHT,
+        ];
 
         for height_ref in height_array.iter() {
             let height = *height_ref;
@@ -1114,11 +1108,10 @@ mod tests {
     #[test]
     fn decryption_with_incorrect_diversifier() {
         let mut rng = OsRng;
-        let height_v1 = SAPLING_ACTIVATION_HEIGHT;
-        let height_v2 = consensus::MainNetwork
-            .activation_height(NetworkUpgrade::Canopy)
-            .unwrap();
-        let height_array = [height_v1, height_v2];
+        let height_array = [
+            consensus::MainNetwork::SAPLING_ACTIVATION_HEIGHT,
+            consensus::MainNetwork::CANOPY_ACTIVATION_HEIGHT,
+        ];
 
         for height_ref in height_array.iter() {
             let height = *height_ref;
@@ -1151,11 +1144,10 @@ mod tests {
     #[test]
     fn compact_decryption_with_invalid_ivk() {
         let mut rng = OsRng;
-        let height_v1 = SAPLING_ACTIVATION_HEIGHT;
-        let height_v2 = consensus::MainNetwork
-            .activation_height(NetworkUpgrade::Canopy)
-            .unwrap();
-        let height_array = [height_v1, height_v2];
+        let height_array = [
+            consensus::MainNetwork::SAPLING_ACTIVATION_HEIGHT,
+            consensus::MainNetwork::CANOPY_ACTIVATION_HEIGHT,
+        ];
 
         for height_ref in height_array.iter() {
             let height = *height_ref;
@@ -1178,11 +1170,10 @@ mod tests {
     #[test]
     fn compact_decryption_with_invalid_epk() {
         let mut rng = OsRng;
-        let height_v1 = SAPLING_ACTIVATION_HEIGHT;
-        let height_v2 = consensus::MainNetwork
-            .activation_height(NetworkUpgrade::Canopy)
-            .unwrap();
-        let height_array = [height_v1, height_v2];
+        let height_array = [
+            consensus::MainNetwork::SAPLING_ACTIVATION_HEIGHT,
+            consensus::MainNetwork::CANOPY_ACTIVATION_HEIGHT,
+        ];
 
         for height_ref in height_array.iter() {
             let height = *height_ref;
@@ -1205,11 +1196,10 @@ mod tests {
     #[test]
     fn compact_decryption_with_invalid_cmu() {
         let mut rng = OsRng;
-        let height_v1 = SAPLING_ACTIVATION_HEIGHT;
-        let height_v2 = consensus::MainNetwork
-            .activation_height(NetworkUpgrade::Canopy)
-            .unwrap();
-        let height_array = [height_v1, height_v2];
+        let height_array = [
+            consensus::MainNetwork::SAPLING_ACTIVATION_HEIGHT,
+            consensus::MainNetwork::CANOPY_ACTIVATION_HEIGHT,
+        ];
 
         for height_ref in height_array.iter() {
             let height = *height_ref;
@@ -1232,11 +1222,10 @@ mod tests {
     #[test]
     fn compact_decryption_with_invalid_version_byte() {
         let mut rng = OsRng;
-        let height_v1 = SAPLING_ACTIVATION_HEIGHT;
-        let height_v2 = consensus::MainNetwork
-            .activation_height(NetworkUpgrade::Canopy)
-            .unwrap();
-        let height_array = [height_v1, height_v2];
+        let height_array = [
+            consensus::MainNetwork::SAPLING_ACTIVATION_HEIGHT,
+            consensus::MainNetwork::CANOPY_ACTIVATION_HEIGHT,
+        ];
         let leadbyte_array = [0x02, 0x03];
 
         for (i, height_ref) in height_array.iter().enumerate() {
@@ -1270,11 +1259,10 @@ mod tests {
     #[test]
     fn compact_decryption_with_invalid_diversifier() {
         let mut rng = OsRng;
-        let height_v1 = SAPLING_ACTIVATION_HEIGHT;
-        let height_v2 = consensus::MainNetwork
-            .activation_height(NetworkUpgrade::Canopy)
-            .unwrap();
-        let height_array = [height_v1, height_v2];
+        let height_array = [
+            consensus::MainNetwork::SAPLING_ACTIVATION_HEIGHT,
+            consensus::MainNetwork::CANOPY_ACTIVATION_HEIGHT,
+        ];
 
         for height_ref in height_array.iter() {
             let height = *height_ref;
@@ -1307,11 +1295,10 @@ mod tests {
     #[test]
     fn compact_decryption_with_incorrect_diversifier() {
         let mut rng = OsRng;
-        let height_v1 = SAPLING_ACTIVATION_HEIGHT;
-        let height_v2 = consensus::MainNetwork
-            .activation_height(NetworkUpgrade::Canopy)
-            .unwrap();
-        let height_array = [height_v1, height_v2];
+        let height_array = [
+            consensus::MainNetwork::SAPLING_ACTIVATION_HEIGHT,
+            consensus::MainNetwork::CANOPY_ACTIVATION_HEIGHT,
+        ];
 
         for height_ref in height_array.iter() {
             let height = *height_ref;
@@ -1344,11 +1331,10 @@ mod tests {
     #[test]
     fn recovery_with_invalid_ovk() {
         let mut rng = OsRng;
-        let height_v1 = SAPLING_ACTIVATION_HEIGHT;
-        let height_v2 = consensus::MainNetwork
-            .activation_height(NetworkUpgrade::Canopy)
-            .unwrap();
-        let height_array = [height_v1, height_v2];
+        let height_array = [
+            consensus::MainNetwork::SAPLING_ACTIVATION_HEIGHT,
+            consensus::MainNetwork::CANOPY_ACTIVATION_HEIGHT,
+        ];
 
         for height_ref in height_array.iter() {
             let height = *height_ref;
@@ -1375,11 +1361,10 @@ mod tests {
     #[test]
     fn recovery_with_invalid_cv() {
         let mut rng = OsRng;
-        let height_v1 = SAPLING_ACTIVATION_HEIGHT;
-        let height_v2 = consensus::MainNetwork
-            .activation_height(NetworkUpgrade::Canopy)
-            .unwrap();
-        let height_array = [height_v1, height_v2];
+        let height_array = [
+            consensus::MainNetwork::SAPLING_ACTIVATION_HEIGHT,
+            consensus::MainNetwork::CANOPY_ACTIVATION_HEIGHT,
+        ];
 
         for height_ref in height_array.iter() {
             let height = *height_ref;
@@ -1405,11 +1390,10 @@ mod tests {
     #[test]
     fn recovery_with_invalid_cmu() {
         let mut rng = OsRng;
-        let height_v1 = SAPLING_ACTIVATION_HEIGHT;
-        let height_v2 = consensus::MainNetwork
-            .activation_height(NetworkUpgrade::Canopy)
-            .unwrap();
-        let height_array = [height_v1, height_v2];
+        let height_array = [
+            consensus::MainNetwork::SAPLING_ACTIVATION_HEIGHT,
+            consensus::MainNetwork::CANOPY_ACTIVATION_HEIGHT,
+        ];
 
         for height_ref in height_array.iter() {
             let height = *height_ref;
@@ -1435,11 +1419,10 @@ mod tests {
     #[test]
     fn recovery_with_invalid_epk() {
         let mut rng = OsRng;
-        let height_v1 = SAPLING_ACTIVATION_HEIGHT;
-        let height_v2 = consensus::MainNetwork
-            .activation_height(NetworkUpgrade::Canopy)
-            .unwrap();
-        let height_array = [height_v1, height_v2];
+        let height_array = [
+            consensus::MainNetwork::SAPLING_ACTIVATION_HEIGHT,
+            consensus::MainNetwork::CANOPY_ACTIVATION_HEIGHT,
+        ];
 
         for height_ref in height_array.iter() {
             let height = *height_ref;
@@ -1465,11 +1448,10 @@ mod tests {
     #[test]
     fn recovery_with_invalid_enc_tag() {
         let mut rng = OsRng;
-        let height_v1 = SAPLING_ACTIVATION_HEIGHT;
-        let height_v2 = consensus::MainNetwork
-            .activation_height(NetworkUpgrade::Canopy)
-            .unwrap();
-        let height_array = [height_v1, height_v2];
+        let height_array = [
+            consensus::MainNetwork::SAPLING_ACTIVATION_HEIGHT,
+            consensus::MainNetwork::CANOPY_ACTIVATION_HEIGHT,
+        ];
 
         for height_ref in height_array.iter() {
             let height = *height_ref;
@@ -1496,11 +1478,10 @@ mod tests {
     #[test]
     fn recovery_with_invalid_out_tag() {
         let mut rng = OsRng;
-        let height_v1 = SAPLING_ACTIVATION_HEIGHT;
-        let height_v2 = consensus::MainNetwork
-            .activation_height(NetworkUpgrade::Canopy)
-            .unwrap();
-        let height_array = [height_v1, height_v2];
+        let height_array = [
+            consensus::MainNetwork::SAPLING_ACTIVATION_HEIGHT,
+            consensus::MainNetwork::CANOPY_ACTIVATION_HEIGHT,
+        ];
 
         for height_ref in height_array.iter() {
             let height = *height_ref;
@@ -1527,11 +1508,10 @@ mod tests {
     #[test]
     fn recovery_with_invalid_version_byte() {
         let mut rng = OsRng;
-        let height_v1 = SAPLING_ACTIVATION_HEIGHT;
-        let height_v2 = consensus::MainNetwork
-            .activation_height(NetworkUpgrade::Canopy)
-            .unwrap();
-        let height_array = [height_v1, height_v2];
+        let height_array = [
+            consensus::MainNetwork::SAPLING_ACTIVATION_HEIGHT,
+            consensus::MainNetwork::CANOPY_ACTIVATION_HEIGHT,
+        ];
         let leadbyte_array = [0x02, 0x03];
 
         for (i, height_ref) in height_array.iter().enumerate() {
@@ -1567,11 +1547,10 @@ mod tests {
     #[test]
     fn recovery_with_invalid_diversifier() {
         let mut rng = OsRng;
-        let height_v1 = SAPLING_ACTIVATION_HEIGHT;
-        let height_v2 = consensus::MainNetwork
-            .activation_height(NetworkUpgrade::Canopy)
-            .unwrap();
-        let height_array = [height_v1, height_v2];
+        let height_array = [
+            consensus::MainNetwork::SAPLING_ACTIVATION_HEIGHT,
+            consensus::MainNetwork::CANOPY_ACTIVATION_HEIGHT,
+        ];
 
         for height_ref in height_array.iter() {
             let height = *height_ref;
@@ -1606,11 +1585,10 @@ mod tests {
     #[test]
     fn recovery_with_incorrect_diversifier() {
         let mut rng = OsRng;
-        let height_v1 = SAPLING_ACTIVATION_HEIGHT;
-        let height_v2 = consensus::MainNetwork
-            .activation_height(NetworkUpgrade::Canopy)
-            .unwrap();
-        let height_array = [height_v1, height_v2];
+        let height_array = [
+            consensus::MainNetwork::SAPLING_ACTIVATION_HEIGHT,
+            consensus::MainNetwork::CANOPY_ACTIVATION_HEIGHT,
+        ];
 
         for height_ref in height_array.iter() {
             let height = *height_ref;
@@ -1646,11 +1624,10 @@ mod tests {
     #[test]
     fn recovery_with_invalid_pk_d() {
         let mut rng = OsRng;
-        let height_v1 = SAPLING_ACTIVATION_HEIGHT;
-        let height_v2 = consensus::MainNetwork
-            .activation_height(NetworkUpgrade::Canopy)
-            .unwrap();
-        let height_array = [height_v1, height_v2];
+        let height_array = [
+            consensus::MainNetwork::SAPLING_ACTIVATION_HEIGHT,
+            consensus::MainNetwork::CANOPY_ACTIVATION_HEIGHT,
+        ];
 
         for height_ref in height_array.iter() {
             let height = *height_ref;

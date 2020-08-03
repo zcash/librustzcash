@@ -3,12 +3,6 @@
 use std::convert::TryFrom;
 use std::fmt;
 
-#[cfg(feature = "mainnet")]
-pub const SAPLING_ACTIVATION_HEIGHT: u32 = 419_200;
-
-#[cfg(not(feature = "mainnet"))]
-pub const SAPLING_ACTIVATION_HEIGHT: u32 = 280_000;
-
 /// Zcash consensus parameters.
 pub trait Parameters {
     fn activation_height(&self, nu: NetworkUpgrade) -> Option<u32>;
@@ -20,9 +14,11 @@ pub trait Parameters {
         }
     }
 
-    fn zip_212_grace_period(&self) -> u32 {
-        32256
-    }
+    const OVERWINTER_ACTIVATION_HEIGHT: u32;
+    const SAPLING_ACTIVATION_HEIGHT: u32;
+    const BLOSSOM_ACTIVATION_HEIGHT: u32;
+    const HEARTWOOD_ACTIVATION_HEIGHT: u32;
+    const CANOPY_ACTIVATION_HEIGHT: u32;
 }
 
 /// Marker struct for the production network.
@@ -39,6 +35,12 @@ impl Parameters for MainNetwork {
             NetworkUpgrade::Canopy => Some(1_046_400),
         }
     }
+
+    const OVERWINTER_ACTIVATION_HEIGHT: u32 = 347_500;
+    const SAPLING_ACTIVATION_HEIGHT: u32 = 419_200;
+    const BLOSSOM_ACTIVATION_HEIGHT: u32 = 653_600;
+    const HEARTWOOD_ACTIVATION_HEIGHT: u32 = 903_000;
+    const CANOPY_ACTIVATION_HEIGHT: u32 = 1_046_400;
 }
 
 /// Marker struct for the test network.
@@ -55,6 +57,12 @@ impl Parameters for TestNetwork {
             NetworkUpgrade::Canopy => Some(1_028_500),
         }
     }
+
+    const OVERWINTER_ACTIVATION_HEIGHT: u32 = 207_500;
+    const SAPLING_ACTIVATION_HEIGHT: u32 = 280_200;
+    const BLOSSOM_ACTIVATION_HEIGHT: u32 = 584_000;
+    const HEARTWOOD_ACTIVATION_HEIGHT: u32 = 903_800;
+    const CANOPY_ACTIVATION_HEIGHT: u32 = 1_028_500;
 }
 
 /// An event that occurs at a specified height on the Zcash chain, at which point the
@@ -120,6 +128,8 @@ const UPGRADES_IN_ORDER: &[NetworkUpgrade] = &[
     NetworkUpgrade::Heartwood,
     NetworkUpgrade::Canopy,
 ];
+
+pub const ZIP212_GRACE_PERIOD: u32 = 32256;
 
 /// A globally-unique identifier for a set of consensus rules within the Zcash chain.
 ///
