@@ -59,6 +59,10 @@ impl DataConnection {
 impl DBOps for DataConnection {
     type Error = Error<rusqlite::Error>;
 
+    fn init_db(&self) -> Result<(), Self::Error> {
+        init::init_data_database(self).map_err(Error::Database)
+    }
+
     fn block_height_extrema(&self) -> Result<Option<(BlockHeight, BlockHeight)>, Self::Error> {
         chain::block_height_extrema(self).map_err(Error::Database)
     }
@@ -86,6 +90,10 @@ impl CacheConnection {
 
 impl CacheOps for CacheConnection {
     type Error = Error<rusqlite::Error>;
+
+    fn init_cache(&self) -> Result<(), Self::Error> {
+        init::init_cache_database(self).map_err(Error::Database)
+    }
 
     fn validate_chain<F>(
         &self,
