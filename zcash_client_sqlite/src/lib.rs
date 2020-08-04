@@ -24,8 +24,7 @@
 //! [`CompactBlock`]: zcash_client_backend::proto::compact_formats::CompactBlock
 //! [`init_cache_database`]: crate::init::init_cache_database
 
-use rusqlite::{Connection, NO_PARAMS};
-use std::cmp;
+use rusqlite::Connection;
 use std::path::Path;
 
 use zcash_primitives::{
@@ -35,12 +34,10 @@ use zcash_primitives::{
 };
 
 use zcash_client_backend::{
-    data_api::{chain::ANCHOR_OFFSET, error::Error, CacheOps, DBOps},
+    data_api::{error::Error, CacheOps, DBOps},
     encoding::encode_payment_address,
     proto::compact_formats::CompactBlock,
 };
-
-use crate::error::SqliteClientError;
 
 pub mod chain;
 pub mod error;
@@ -108,38 +105,6 @@ fn address_from_extfvk<P: consensus::Parameters>(
 ) -> String {
     let addr = extfvk.default_address().unwrap().1;
     encode_payment_address(params.hrp_sapling_payment_address(), &addr)
-}
-
-/// Determines the target height for a transaction, and the height from which to
-/// select anchors, based on the current synchronised block chain.
-fn get_target_and_anchor_heights(
-    data: &DataConnection,
-) -> Result<(BlockHeight, BlockHeight), SqliteClientError> {
-    data.0.query_row_and_then(
-        "SELECT MIN(height), MAX(height) FROM blocks",
-        NO_PARAMS,
-        |row| match (row.get::<_, u32>(0), row.get::<_, u32>(1)) {
-            // If there are no blocks, the query returns NULL.
-            (Err(rusqlite::Error::InvalidColumnType(_, _, _)), _)
-            | (_, Err(rusqlite::Error::InvalidColumnType(_, _, _))) => {
-                Err(Error::ScanRequired.into())
-            }
-            (Err(e), _) | (_, Err(e)) => Err(e.into()),
-            (Ok(min_height), Ok(max_height)) => {
-                let target_height = max_height + 1;
-
-                // Select an anchor ANCHOR_OFFSET back from the target block,
-                // unless that would be before the earliest block we have.
-                let anchor_height =
-                    cmp::max(target_height.saturating_sub(ANCHOR_OFFSET), min_height);
-
-                Ok((
-                    BlockHeight::from(target_height),
-                    BlockHeight::from(anchor_height),
-                ))
-            }
-        },
-    )
 }
 
 #[cfg(test)]

@@ -3,9 +3,7 @@
 use ff::PrimeField;
 use rusqlite::{types::ToSql, NO_PARAMS};
 use std::convert::TryInto;
-use zcash_client_backend::{
-    address::RecipientAddress, data_api::error::Error, encoding::encode_extended_full_viewing_key,
-};
+
 use zcash_primitives::{
     consensus,
     keys::OutgoingViewingKey,
@@ -21,7 +19,13 @@ use zcash_primitives::{
     zip32::{ExtendedFullViewingKey, ExtendedSpendingKey},
 };
 
-use crate::{error::SqliteClientError, get_target_and_anchor_heights, DataConnection};
+use zcash_client_backend::{
+    address::RecipientAddress,
+    data_api::{chain::get_target_and_anchor_heights, error::Error},
+    encoding::encode_extended_full_viewing_key,
+};
+
+use crate::{error::SqliteClientError, DataConnection};
 
 /// Describes a policy for which outgoing viewing key should be able to decrypt
 /// transaction outputs.
@@ -164,7 +168,7 @@ pub fn create_to_address<P: consensus::Parameters>(
     };
 
     // Target the next block, assuming we are up-to-date.
-    let (height, anchor_height) = get_target_and_anchor_heights(&data)?;
+    let (height, anchor_height) = get_target_and_anchor_heights(data)?;
 
     // The goal of this SQL statement is to select the oldest notes until the required
     // value has been reached, and then fetch the witnesses at the desired height for the

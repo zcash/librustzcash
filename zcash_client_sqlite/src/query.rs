@@ -2,9 +2,9 @@
 
 use zcash_primitives::{note_encryption::Memo, transaction::components::Amount};
 
-use zcash_client_backend::data_api::error::Error;
+use zcash_client_backend::data_api::{chain::get_target_and_anchor_heights, error::Error};
 
-use crate::{error::SqliteClientError, get_target_and_anchor_heights, DataConnection};
+use crate::{error::SqliteClientError, DataConnection};
 
 /// Returns the address for the account.
 ///
@@ -90,7 +90,7 @@ pub fn get_verified_balance(
     data: &DataConnection,
     account: u32,
 ) -> Result<Amount, SqliteClientError> {
-    let (_, anchor_height) = get_target_and_anchor_heights(&data)?;
+    let (_, anchor_height) = get_target_and_anchor_heights(data)?;
 
     let balance = data.0.query_row(
         "SELECT SUM(value) FROM received_notes
