@@ -574,7 +574,7 @@ impl<R: RngCore + CryptoRng> Builder<R> {
                         &mut ctx,
                         proof_generation_key,
                         spend.diversifier,
-                        spend.note.rcm(),
+                        spend.note.rseed,
                         spend.alpha,
                         spend.note.value,
                         anchor,

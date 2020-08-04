@@ -43,7 +43,7 @@ impl SaplingProvingContext {
         &mut self,
         proof_generation_key: ProofGenerationKey<Bls12>,
         diversifier: Diversifier,
-        rcm: Fs,
+        rseed: Rseed<Fs>,
         ar: Fs,
         value: u64,
         anchor: Fr,
@@ -102,7 +102,7 @@ impl SaplingProvingContext {
                 .g_d::<Bls12>(params)
                 .expect("was a valid diversifier before"),
             pk_d: payment_address.pk_d().clone(),
-            rseed: Rseed::BeforeZip212(rcm),
+            rseed,
         };
 
         let nullifier = note.nf(&viewing_key, merkle_path.position, params);
@@ -113,7 +113,7 @@ impl SaplingProvingContext {
             value_commitment: Some(value_commitment.clone()),
             proof_generation_key: Some(proof_generation_key),
             payment_address: Some(payment_address),
-            commitment_randomness: Some(rcm),
+            commitment_randomness: Some(note.rcm()),
             ar: Some(ar),
             auth_path: merkle_path
                 .auth_path

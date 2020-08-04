@@ -223,7 +223,7 @@ impl<E: JubjubEngine> PaymentAddress<E> {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Copy, Clone, Debug)]
 pub enum Rseed<Fs> {
     BeforeZip212(Fs),
     AfterZip212([u8; 32]),
