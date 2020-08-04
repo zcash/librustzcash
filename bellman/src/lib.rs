@@ -122,7 +122,7 @@
 //! let inputs = multipack::compute_multipacking(&hash_bits);
 //!
 //! // Check the proof!
-//! assert!(groth16::verify_proof(&pvk, &proof, &inputs).unwrap());
+//! assert!(groth16::verify_proof(&pvk, &proof, &inputs).is_ok());
 //! ```
 //!
 //! # Roadmap
