@@ -21,7 +21,7 @@ pub trait DBOps {
     //    type TxRef;   // Backend-specific transaction handle
     //    type NoteRef; // Backend-specific note identifier`
 
-    //    fn init_db() -> Result<(), Self::Error>;
+    fn init_db(&self) -> Result<(), Self::Error>;
     //
     //    fn init_accounts(extfvks: &[ExtendedFullViewingKey]) -> Result<(), Self::Error>;
     //
@@ -83,6 +83,8 @@ pub trait DBOps {
 
 pub trait CacheOps {
     type Error;
+
+    fn init_cache(&self) -> Result<(), Self::Error>;
 
     // Validate the cached chain by applying a function that checks pairwise constraints
     // (top_block :: &CompactBlock, next_block :: &CompactBlock) -> Result<(), Self::Error)
