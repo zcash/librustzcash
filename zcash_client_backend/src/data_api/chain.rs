@@ -1,4 +1,6 @@
-use zcash_primitives::consensus::{self, NetworkUpgrade};
+use std::cmp;
+
+use zcash_primitives::consensus::{self, BlockHeight, NetworkUpgrade};
 
 use crate::data_api::{
     error::{ChainInvalid, Error},
@@ -76,4 +78,28 @@ pub fn validate_combined_chain<
             Ok(())
         }
     }
+}
+
+/// Determines the target height for a transaction, and the height from which to
+/// select anchors, based on the current synchronised block chain.
+pub fn get_target_and_anchor_heights<E, D: DBOps<Error = Error<E>>>(
+    data: &D,
+) -> Result<(BlockHeight, BlockHeight), Error<E>> {
+    data.block_height_extrema().and_then(|heights| {
+        match heights {
+            Some((min_height, max_height)) => {
+                let target_height = max_height + 1;
+
+                // Select an anchor ANCHOR_OFFSET back from the target block,
+                // unless that would be before the earliest block we have.
+                let anchor_height = BlockHeight::from(cmp::max(
+                    u32::from(target_height).saturating_sub(ANCHOR_OFFSET),
+                    u32::from(min_height),
+                ));
+
+                Ok((target_height, anchor_height))
+            }
+            None => Err(Error::ScanRequired),
+        }
+    })
 }
