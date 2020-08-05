@@ -42,8 +42,6 @@ pub trait DBOps {
         block_height: BlockHeight,
     ) -> Result<(), Self::Error>;
     //
-    //    // fn get_target_and_anchor_heights() -> Result<(u32, u32), Self::Error>;
-    //
     //    fn get_address(account: Account) -> Result<String, Self::Error>;
     //
     //    fn get_balance(account: Account) -> Result<Amount, Self::Error>;
