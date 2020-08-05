@@ -158,8 +158,8 @@ pub fn block_height_extrema(
                 Ok(Some((min_height.into(), max_height.into())))
             },
         )
-        // cannot use .optional() here because the result of a failed group
-        // operation is an error, not an empty row.
+        //.optional() doesn't work here because a failed aggregate function
+        //produces a runtime error, not an empty set of rows.
         .or(Ok(None))
 }
 

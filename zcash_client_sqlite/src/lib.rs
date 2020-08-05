@@ -30,6 +30,7 @@ use std::path::Path;
 use zcash_primitives::{
     block::BlockHash,
     consensus::{self, BlockHeight},
+    primitives::PaymentAddress,
     zip32::ExtendedFullViewingKey,
 };
 
@@ -46,7 +47,7 @@ pub mod query;
 pub mod scan;
 pub mod transact;
 
-pub struct Account(u32);
+pub struct Account(pub u32);
 
 pub struct DataConnection(Connection);
 
@@ -58,17 +59,28 @@ impl DataConnection {
 
 impl DBOps for DataConnection {
     type Error = Error<rusqlite::Error>;
+    type Account = Account;
 
     fn init_db(&self) -> Result<(), Self::Error> {
         init::init_data_database(self).map_err(Error::Database)
     }
 
-    fn init_accounts<P: consensus::Parameters>(
+    fn init_account_storage<P: consensus::Parameters>(
         &self,
         params: &P,
         extfvks: &[ExtendedFullViewingKey],
     ) -> Result<(), Self::Error> {
         init::init_accounts_table(self, params, extfvks).map_err(|e| e.0)
+    }
+
+    fn init_block_storage(
+        &self,
+        height: BlockHeight,
+        hash: BlockHash,
+        time: u32,
+        sapling_tree: &[u8],
+    ) -> Result<(), Self::Error> {
+        init::init_blocks_table(self, height, hash, time, sapling_tree).map_err(|e| e.0)
     }
 
     fn block_height_extrema(&self) -> Result<Option<(BlockHeight, BlockHeight)>, Self::Error> {
@@ -85,6 +97,14 @@ impl DBOps for DataConnection {
         block_height: BlockHeight,
     ) -> Result<(), Self::Error> {
         chain::rewind_to_height(self, parameters, block_height).map_err(|e| e.0)
+    }
+
+    fn get_address<P: consensus::Parameters>(
+        &self,
+        params: &P,
+        account: Self::Account,
+    ) -> Result<Option<PaymentAddress>, Self::Error> {
+        query::get_address(self, params, account).map_err(|e| e.0)
     }
 }
 
