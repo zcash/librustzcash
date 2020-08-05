@@ -154,15 +154,7 @@ impl SaplingProvingContext {
         }
 
         // Verify the proof
-        match verify_proof(verifying_key, &proof, &public_input[..]) {
-            // No error, and proof verification successful
-            Ok(true) => {}
-
-            // Any other case
-            _ => {
-                return Err(());
-            }
-        }
+        verify_proof(verifying_key, &proof, &public_input[..]).map_err(|_| ())?;
 
         // Compute value commitment
         let value_commitment: edwards::Point<Bls12, Unknown> = value_commitment.cm(params).into();
