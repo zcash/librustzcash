@@ -31,6 +31,7 @@ pub struct DecryptedOutput {
 /// Scans a [`Transaction`] for any information that can be decrypted by the set of
 /// [`ExtendedFullViewingKey`]s.
 pub fn decrypt_transaction<P: consensus::Parameters>(
+    params: &P,
     height: BlockHeight,
     tx: &Transaction,
     extfvks: &[ExtendedFullViewingKey],
@@ -51,7 +52,8 @@ pub fn decrypt_transaction<P: consensus::Parameters>(
         let epk = epk.unwrap();
 
         for (account, (ivk, ovk)) in vks.iter().enumerate() {
-            let ((note, to, memo), outgoing) = match try_sapling_note_decryption::<P>(
+            let ((note, to, memo), outgoing) = match try_sapling_note_decryption(
+                params,
                 height,
                 ivk,
                 &epk,
@@ -59,7 +61,8 @@ pub fn decrypt_transaction<P: consensus::Parameters>(
                 &output.enc_ciphertext,
             ) {
                 Some(ret) => (ret, false),
-                None => match try_sapling_output_recovery::<P>(
+                None => match try_sapling_output_recovery(
+                    params,
                     height,
                     ovk,
                     &output.cv,

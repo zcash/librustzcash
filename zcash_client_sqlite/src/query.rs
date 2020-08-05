@@ -176,6 +176,7 @@ mod tests {
     use crate::{
         error::ErrorKind,
         init::{init_accounts_table, init_data_database},
+        tests::{self},
     };
 
     #[test]
@@ -187,7 +188,7 @@ mod tests {
         // Add an account to the wallet
         let extsk = ExtendedSpendingKey::master(&[]);
         let extfvks = [ExtendedFullViewingKey::from(&extsk)];
-        init_accounts_table(&db_data, &extfvks).unwrap();
+        init_accounts_table(&db_data, &tests::network(), &extfvks).unwrap();
 
         // The account should be empty
         assert_eq!(get_balance(db_data, 0).unwrap(), Amount::zero());

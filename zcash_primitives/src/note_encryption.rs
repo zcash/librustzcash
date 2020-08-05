@@ -359,6 +359,7 @@ impl<R: RngCore + CryptoRng> SaplingNoteEncryption<R> {
 }
 
 fn parse_note_plaintext_without_memo<P: consensus::Parameters>(
+    params: &P,
     height: BlockHeight,
     ivk: &jubjub::Fr,
     epk: &jubjub::SubgroupPoint,
@@ -366,7 +367,7 @@ fn parse_note_plaintext_without_memo<P: consensus::Parameters>(
     plaintext: &[u8],
 ) -> Option<(Note, PaymentAddress)> {
     // Check note plaintext version
-    if !plaintext_version_is_valid::<P>(height, plaintext[0]) {
+    if !plaintext_version_is_valid(params, height, plaintext[0]) {
         return None;
     }
 
@@ -407,11 +408,13 @@ fn parse_note_plaintext_without_memo<P: consensus::Parameters>(
 }
 
 pub fn plaintext_version_is_valid<P: consensus::Parameters>(
+    params: &P,
     height: BlockHeight,
     leadbyte: u8,
 ) -> bool {
-    if P::is_nu_active(NetworkUpgrade::Canopy, height) {
-        let grace_period_end_height = P::activation_height(NetworkUpgrade::Canopy)
+    if params.is_nu_active(NetworkUpgrade::Canopy, height) {
+        let grace_period_end_height = params
+            .activation_height(NetworkUpgrade::Canopy)
             .expect("Should have Canopy activation height")
             + ZIP212_GRACE_PERIOD;
 
@@ -438,6 +441,7 @@ pub fn plaintext_version_is_valid<P: consensus::Parameters>(
 ///
 /// Implements section 4.17.2 of the Zcash Protocol Specification.
 pub fn try_sapling_note_decryption<P: consensus::Parameters>(
+    params: &P,
     height: BlockHeight,
     ivk: &jubjub::Fr,
     epk: &jubjub::SubgroupPoint,
@@ -463,7 +467,7 @@ pub fn try_sapling_note_decryption<P: consensus::Parameters>(
         NOTE_PLAINTEXT_SIZE
     );
 
-    let (note, to) = parse_note_plaintext_without_memo::<P>(height, ivk, epk, cmu, &plaintext)?;
+    let (note, to) = parse_note_plaintext_without_memo(params, height, ivk, epk, cmu, &plaintext)?;
 
     let mut memo = [0u8; 512];
     memo.copy_from_slice(&plaintext[COMPACT_NOTE_SIZE..NOTE_PLAINTEXT_SIZE]);
@@ -481,6 +485,7 @@ pub fn try_sapling_note_decryption<P: consensus::Parameters>(
 ///
 /// [`ZIP 307`]: https://zips.z.cash/zip-0307
 pub fn try_sapling_compact_note_decryption<P: consensus::Parameters>(
+    params: &P,
     height: BlockHeight,
     ivk: &jubjub::Fr,
     epk: &jubjub::SubgroupPoint,
@@ -497,7 +502,7 @@ pub fn try_sapling_compact_note_decryption<P: consensus::Parameters>(
     plaintext.copy_from_slice(&enc_ciphertext);
     ChaCha20Ietf::xor(key.as_bytes(), &[0u8; 12], 1, &mut plaintext);
 
-    parse_note_plaintext_without_memo::<P>(height, ivk, epk, cmu, &plaintext)
+    parse_note_plaintext_without_memo(params, height, ivk, epk, cmu, &plaintext)
 }
 
 /// Recovery of the full note plaintext by the sender.
@@ -509,6 +514,7 @@ pub fn try_sapling_compact_note_decryption<P: consensus::Parameters>(
 /// Implements part of section 4.17.3 of the Zcash Protocol Specification.
 /// For decryption using a Full Viewing Key see [`try_sapling_output_recovery`].
 pub fn try_sapling_output_recovery_with_ock<P: consensus::Parameters>(
+    params: &P,
     height: BlockHeight,
     ock: &OutgoingCipherKey,
     cmu: &bls12_381::Scalar,
@@ -561,7 +567,7 @@ pub fn try_sapling_output_recovery_with_ock<P: consensus::Parameters>(
     );
 
     // Check note plaintext version
-    if !plaintext_version_is_valid::<P>(height, plaintext[0]) {
+    if !plaintext_version_is_valid(params, height, plaintext[0]) {
         return None;
     }
 
@@ -615,6 +621,7 @@ pub fn try_sapling_output_recovery_with_ock<P: consensus::Parameters>(
 ///
 /// Implements section 4.17.3 of the Zcash Protocol Specification.
 pub fn try_sapling_output_recovery<P: consensus::Parameters>(
+    params: &P,
     height: BlockHeight,
     ovk: &OutgoingViewingKey,
     cv: &jubjub::ExtendedPoint,
@@ -624,6 +631,7 @@ pub fn try_sapling_output_recovery<P: consensus::Parameters>(
     out_ciphertext: &[u8],
 ) -> Option<(Note, PaymentAddress, Memo)> {
     try_sapling_output_recovery_with_ock::<P>(
+        params,
         height,
         &prf_ock(&ovk, &cv, &cmu, &epk),
         cmu,
@@ -651,12 +659,20 @@ mod tests {
         COMPACT_NOTE_SIZE, ENC_CIPHERTEXT_SIZE, NOTE_PLAINTEXT_SIZE, OUT_CIPHERTEXT_SIZE,
         OUT_PLAINTEXT_SIZE,
     };
+
     use crate::{
         consensus::{
-            BlockHeight, NetworkUpgrade,
+            BlockHeight, Network,
+            Network::TestNetwork,
+            NetworkUpgrade,
             NetworkUpgrade::{Canopy, Sapling},
-            Parameters, TestNetwork, ZIP212_GRACE_PERIOD,
+            Parameters, ZIP212_GRACE_PERIOD,
         },
+        //        jubjub::{
+        //            edwards,
+        //            fs::{Fs, FsRepr},
+        //            PrimeOrder, Unknown,
+        //        },
         keys::OutgoingViewingKey,
         primitives::{Diversifier, PaymentAddress, Rseed, ValueCommitment},
         util::generate_random_rseed,
@@ -796,7 +812,8 @@ mod tests {
         let (ovk, ock, ivk, cv, cmu, epk, enc_ciphertext, out_ciphertext) =
             random_enc_ciphertext_with(height, ivk, rng);
 
-        assert!(try_sapling_note_decryption::<TestNetwork>(
+        assert!(try_sapling_note_decryption(
+            &Network::TestNetwork,
             height,
             &ivk,
             &epk,
@@ -804,7 +821,8 @@ mod tests {
             &enc_ciphertext
         )
         .is_some());
-        assert!(try_sapling_compact_note_decryption::<TestNetwork>(
+        assert!(try_sapling_compact_note_decryption(
+            &Network::TestNetwork,
             height,
             &ivk,
             &epk,
@@ -813,7 +831,8 @@ mod tests {
         )
         .is_some());
 
-        let ovk_output_recovery = try_sapling_output_recovery::<TestNetwork>(
+        let ovk_output_recovery = try_sapling_output_recovery(
+            &Network::TestNetwork,
             height,
             &ovk,
             &cv,
@@ -822,7 +841,9 @@ mod tests {
             &enc_ciphertext,
             &out_ciphertext,
         );
-        let ock_output_recovery = try_sapling_output_recovery_with_ock::<TestNetwork>(
+
+        let ock_output_recovery = try_sapling_output_recovery_with_ock(
+            &Network::TestNetwork,
             height,
             &ock,
             &cmu,
@@ -863,7 +884,7 @@ mod tests {
         };
         let cv = value_commitment.commitment().into();
 
-        let rseed = generate_random_rseed::<TestNetwork, R>(height, &mut rng);
+        let rseed = generate_random_rseed(&Network::TestNetwork, height, &mut rng);
 
         let note = pa.create_note(value, rseed).unwrap();
         let cmu = note.cmu();
@@ -965,15 +986,16 @@ mod tests {
     fn decryption_with_invalid_ivk() {
         let mut rng = OsRng;
         let heights = [
-            TestNetwork::activation_height(Sapling).unwrap(),
-            TestNetwork::activation_height(Canopy).unwrap(),
+            TestNetwork.activation_height(Sapling).unwrap(),
+            TestNetwork.activation_height(Canopy).unwrap(),
         ];
 
         for &height in heights.iter() {
             let (_, _, _, _, cmu, epk, enc_ciphertext, _) = random_enc_ciphertext(height, &mut rng);
 
             assert_eq!(
-                try_sapling_note_decryption::<TestNetwork>(
+                try_sapling_note_decryption(
+                    &Network::TestNetwork,
                     height,
                     &jubjub::Fr::random(&mut rng),
                     &epk,
@@ -989,15 +1011,16 @@ mod tests {
     fn decryption_with_invalid_epk() {
         let mut rng = OsRng;
         let heights = [
-            TestNetwork::activation_height(Sapling).unwrap(),
-            TestNetwork::activation_height(Canopy).unwrap(),
+            TestNetwork.activation_height(Sapling).unwrap(),
+            TestNetwork.activation_height(Canopy).unwrap(),
         ];
 
         for &height in heights.iter() {
             let (_, _, ivk, _, cmu, _, enc_ciphertext, _) = random_enc_ciphertext(height, &mut rng);
 
             assert_eq!(
-                try_sapling_note_decryption::<TestNetwork>(
+                try_sapling_note_decryption(
+                    &Network::TestNetwork,
                     height,
                     &ivk,
                     &jubjub::SubgroupPoint::random(&mut rng),
@@ -1013,15 +1036,16 @@ mod tests {
     fn decryption_with_invalid_cmu() {
         let mut rng = OsRng;
         let heights = [
-            TestNetwork::activation_height(Sapling).unwrap(),
-            TestNetwork::activation_height(Canopy).unwrap(),
+            TestNetwork.activation_height(Sapling).unwrap(),
+            TestNetwork.activation_height(Canopy).unwrap(),
         ];
 
         for &height in heights.iter() {
             let (_, _, ivk, _, _, epk, enc_ciphertext, _) = random_enc_ciphertext(height, &mut rng);
 
             assert_eq!(
-                try_sapling_note_decryption::<TestNetwork>(
+                try_sapling_note_decryption(
+                    &Network::TestNetwork,
                     height,
                     &ivk,
                     &epk,
@@ -1037,8 +1061,8 @@ mod tests {
     fn decryption_with_invalid_tag() {
         let mut rng = OsRng;
         let heights = [
-            TestNetwork::activation_height(Sapling).unwrap(),
-            TestNetwork::activation_height(Canopy).unwrap(),
+            TestNetwork.activation_height(Sapling).unwrap(),
+            TestNetwork.activation_height(Canopy).unwrap(),
         ];
 
         for &height in heights.iter() {
@@ -1047,7 +1071,8 @@ mod tests {
 
             enc_ciphertext[ENC_CIPHERTEXT_SIZE - 1] ^= 0xff;
             assert_eq!(
-                try_sapling_note_decryption::<TestNetwork>(
+                try_sapling_note_decryption(
+                    &Network::TestNetwork,
                     height,
                     &ivk,
                     &epk,
@@ -1062,7 +1087,7 @@ mod tests {
     #[test]
     fn decryption_with_invalid_version_byte() {
         let mut rng = OsRng;
-        let canopy_activation_height = TestNetwork::activation_height(Canopy).unwrap();
+        let canopy_activation_height = TestNetwork.activation_height(Canopy).unwrap();
         let heights = [
             canopy_activation_height - 1,
             canopy_activation_height,
@@ -1084,7 +1109,8 @@ mod tests {
                 |pt| pt[0] = leadbyte,
             );
             assert_eq!(
-                try_sapling_note_decryption::<TestNetwork>(
+                try_sapling_note_decryption(
+                    &Network::TestNetwork,
                     height,
                     &ivk,
                     &epk,
@@ -1100,8 +1126,8 @@ mod tests {
     fn decryption_with_invalid_diversifier() {
         let mut rng = OsRng;
         let heights = [
-            TestNetwork::activation_height(Sapling).unwrap(),
-            TestNetwork::activation_height(Canopy).unwrap(),
+            TestNetwork.activation_height(Sapling).unwrap(),
+            TestNetwork.activation_height(Canopy).unwrap(),
         ];
 
         for &height in heights.iter() {
@@ -1118,7 +1144,8 @@ mod tests {
                 |pt| pt[1..12].copy_from_slice(&find_invalid_diversifier().0),
             );
             assert_eq!(
-                try_sapling_note_decryption::<TestNetwork>(
+                try_sapling_note_decryption(
+                    &Network::TestNetwork,
                     height,
                     &ivk,
                     &epk,
@@ -1134,8 +1161,8 @@ mod tests {
     fn decryption_with_incorrect_diversifier() {
         let mut rng = OsRng;
         let heights = [
-            TestNetwork::activation_height(Sapling).unwrap(),
-            TestNetwork::activation_height(Canopy).unwrap(),
+            TestNetwork.activation_height(Sapling).unwrap(),
+            TestNetwork.activation_height(Canopy).unwrap(),
         ];
 
         for &height in heights.iter() {
@@ -1151,8 +1178,10 @@ mod tests {
                 &out_ciphertext,
                 |pt| pt[1..12].copy_from_slice(&find_valid_diversifier().0),
             );
+
             assert_eq!(
-                try_sapling_note_decryption::<TestNetwork>(
+                try_sapling_note_decryption(
+                    &Network::TestNetwork,
                     height,
                     &ivk,
                     &epk,
@@ -1168,15 +1197,16 @@ mod tests {
     fn compact_decryption_with_invalid_ivk() {
         let mut rng = OsRng;
         let heights = [
-            TestNetwork::activation_height(Sapling).unwrap(),
-            TestNetwork::activation_height(Canopy).unwrap(),
+            TestNetwork.activation_height(Sapling).unwrap(),
+            TestNetwork.activation_height(Canopy).unwrap(),
         ];
 
         for &height in heights.iter() {
             let (_, _, _, _, cmu, epk, enc_ciphertext, _) = random_enc_ciphertext(height, &mut rng);
 
             assert_eq!(
-                try_sapling_compact_note_decryption::<TestNetwork>(
+                try_sapling_compact_note_decryption(
+                    &Network::TestNetwork,
                     height,
                     &jubjub::Fr::random(&mut rng),
                     &epk,
@@ -1192,15 +1222,16 @@ mod tests {
     fn compact_decryption_with_invalid_epk() {
         let mut rng = OsRng;
         let heights = [
-            TestNetwork::activation_height(Sapling).unwrap(),
-            TestNetwork::activation_height(Canopy).unwrap(),
+            TestNetwork.activation_height(Sapling).unwrap(),
+            TestNetwork.activation_height(Canopy).unwrap(),
         ];
 
         for &height in heights.iter() {
             let (_, _, ivk, _, cmu, _, enc_ciphertext, _) = random_enc_ciphertext(height, &mut rng);
 
             assert_eq!(
-                try_sapling_compact_note_decryption::<TestNetwork>(
+                try_sapling_compact_note_decryption(
+                    &Network::TestNetwork,
                     height,
                     &ivk,
                     &jubjub::SubgroupPoint::random(&mut rng),
@@ -1216,15 +1247,16 @@ mod tests {
     fn compact_decryption_with_invalid_cmu() {
         let mut rng = OsRng;
         let heights = [
-            TestNetwork::activation_height(Sapling).unwrap(),
-            TestNetwork::activation_height(Canopy).unwrap(),
+            TestNetwork.activation_height(Sapling).unwrap(),
+            TestNetwork.activation_height(Canopy).unwrap(),
         ];
 
         for &height in heights.iter() {
             let (_, _, ivk, _, _, epk, enc_ciphertext, _) = random_enc_ciphertext(height, &mut rng);
 
             assert_eq!(
-                try_sapling_compact_note_decryption::<TestNetwork>(
+                try_sapling_compact_note_decryption(
+                    &Network::TestNetwork,
                     height,
                     &ivk,
                     &epk,
@@ -1239,7 +1271,7 @@ mod tests {
     #[test]
     fn compact_decryption_with_invalid_version_byte() {
         let mut rng = OsRng;
-        let canopy_activation_height = TestNetwork::activation_height(Canopy).unwrap();
+        let canopy_activation_height = TestNetwork.activation_height(Canopy).unwrap();
         let heights = [
             canopy_activation_height - 1,
             canopy_activation_height,
@@ -1261,7 +1293,8 @@ mod tests {
                 |pt| pt[0] = leadbyte,
             );
             assert_eq!(
-                try_sapling_compact_note_decryption::<TestNetwork>(
+                try_sapling_compact_note_decryption(
+                    &Network::TestNetwork,
                     height,
                     &ivk,
                     &epk,
@@ -1277,8 +1310,8 @@ mod tests {
     fn compact_decryption_with_invalid_diversifier() {
         let mut rng = OsRng;
         let heights = [
-            TestNetwork::activation_height(Sapling).unwrap(),
-            TestNetwork::activation_height(Canopy).unwrap(),
+            TestNetwork.activation_height(Sapling).unwrap(),
+            TestNetwork.activation_height(Canopy).unwrap(),
         ];
 
         for &height in heights.iter() {
@@ -1295,7 +1328,8 @@ mod tests {
                 |pt| pt[1..12].copy_from_slice(&find_invalid_diversifier().0),
             );
             assert_eq!(
-                try_sapling_compact_note_decryption::<TestNetwork>(
+                try_sapling_compact_note_decryption(
+                    &Network::TestNetwork,
                     height,
                     &ivk,
                     &epk,
@@ -1311,8 +1345,8 @@ mod tests {
     fn compact_decryption_with_incorrect_diversifier() {
         let mut rng = OsRng;
         let heights = [
-            TestNetwork::activation_height(Sapling).unwrap(),
-            TestNetwork::activation_height(Canopy).unwrap(),
+            TestNetwork.activation_height(Sapling).unwrap(),
+            TestNetwork.activation_height(Canopy).unwrap(),
         ];
 
         for &height in heights.iter() {
@@ -1329,7 +1363,8 @@ mod tests {
                 |pt| pt[1..12].copy_from_slice(&find_valid_diversifier().0),
             );
             assert_eq!(
-                try_sapling_compact_note_decryption::<TestNetwork>(
+                try_sapling_compact_note_decryption(
+                    &Network::TestNetwork,
                     height,
                     &ivk,
                     &epk,
@@ -1345,8 +1380,8 @@ mod tests {
     fn recovery_with_invalid_ovk() {
         let mut rng = OsRng;
         let heights = [
-            TestNetwork::activation_height(Sapling).unwrap(),
-            TestNetwork::activation_height(Canopy).unwrap(),
+            TestNetwork.activation_height(Sapling).unwrap(),
+            TestNetwork.activation_height(Canopy).unwrap(),
         ];
 
         for &height in heights.iter() {
@@ -1355,7 +1390,8 @@ mod tests {
 
             ovk.0[0] ^= 0xff;
             assert_eq!(
-                try_sapling_output_recovery::<TestNetwork>(
+                try_sapling_output_recovery(
+                    &Network::TestNetwork,
                     height,
                     &ovk,
                     &cv,
@@ -1373,8 +1409,8 @@ mod tests {
     fn recovery_with_invalid_ock() {
         let mut rng = OsRng;
         let heights = [
-            TestNetwork::activation_height(Sapling).unwrap(),
-            TestNetwork::activation_height(Canopy).unwrap(),
+            TestNetwork.activation_height(Sapling).unwrap(),
+            TestNetwork.activation_height(Canopy).unwrap(),
         ];
 
         for &height in heights.iter() {
@@ -1382,7 +1418,8 @@ mod tests {
                 random_enc_ciphertext(height, &mut rng);
 
             assert_eq!(
-                try_sapling_output_recovery_with_ock::<TestNetwork>(
+                try_sapling_output_recovery_with_ock(
+                    &Network::TestNetwork,
                     height,
                     &OutgoingCipherKey([0u8; 32]),
                     &cmu,
@@ -1399,8 +1436,8 @@ mod tests {
     fn recovery_with_invalid_cv() {
         let mut rng = OsRng;
         let heights = [
-            TestNetwork::activation_height(Sapling).unwrap(),
-            TestNetwork::activation_height(Canopy).unwrap(),
+            TestNetwork.activation_height(Sapling).unwrap(),
+            TestNetwork.activation_height(Canopy).unwrap(),
         ];
 
         for &height in heights.iter() {
@@ -1408,7 +1445,8 @@ mod tests {
                 random_enc_ciphertext(height, &mut rng);
 
             assert_eq!(
-                try_sapling_output_recovery::<TestNetwork>(
+                try_sapling_output_recovery(
+                    &Network::TestNetwork,
                     height,
                     &ovk,
                     &jubjub::ExtendedPoint::random(&mut rng),
@@ -1426,8 +1464,8 @@ mod tests {
     fn recovery_with_invalid_cmu() {
         let mut rng = OsRng;
         let heights = [
-            TestNetwork::activation_height(Sapling).unwrap(),
-            TestNetwork::activation_height(Canopy).unwrap(),
+            TestNetwork.activation_height(Sapling).unwrap(),
+            TestNetwork.activation_height(Canopy).unwrap(),
         ];
 
         for &height in heights.iter() {
@@ -1435,7 +1473,8 @@ mod tests {
                 random_enc_ciphertext(height, &mut rng);
 
             assert_eq!(
-                try_sapling_output_recovery::<TestNetwork>(
+                try_sapling_output_recovery(
+                    &Network::TestNetwork,
                     height,
                     &ovk,
                     &cv,
@@ -1446,8 +1485,10 @@ mod tests {
                 ),
                 None
             );
+
             assert_eq!(
-                try_sapling_output_recovery_with_ock::<TestNetwork>(
+                try_sapling_output_recovery_with_ock(
+                    &Network::TestNetwork,
                     height,
                     &ock,
                     &bls12_381::Scalar::random(&mut rng),
@@ -1464,8 +1505,8 @@ mod tests {
     fn recovery_with_invalid_epk() {
         let mut rng = OsRng;
         let heights = [
-            TestNetwork::activation_height(Sapling).unwrap(),
-            TestNetwork::activation_height(Canopy).unwrap(),
+            TestNetwork.activation_height(Sapling).unwrap(),
+            TestNetwork.activation_height(Canopy).unwrap(),
         ];
 
         for &height in heights.iter() {
@@ -1473,7 +1514,8 @@ mod tests {
                 random_enc_ciphertext(height, &mut rng);
 
             assert_eq!(
-                try_sapling_output_recovery::<TestNetwork>(
+                try_sapling_output_recovery(
+                    &Network::TestNetwork,
                     height,
                     &ovk,
                     &cv,
@@ -1484,8 +1526,10 @@ mod tests {
                 ),
                 None
             );
+
             assert_eq!(
-                try_sapling_output_recovery_with_ock::<TestNetwork>(
+                try_sapling_output_recovery_with_ock(
+                    &Network::TestNetwork,
                     height,
                     &ock,
                     &cmu,
@@ -1502,8 +1546,8 @@ mod tests {
     fn recovery_with_invalid_enc_tag() {
         let mut rng = OsRng;
         let heights = [
-            TestNetwork::activation_height(Sapling).unwrap(),
-            TestNetwork::activation_height(Canopy).unwrap(),
+            TestNetwork.activation_height(Sapling).unwrap(),
+            TestNetwork.activation_height(Canopy).unwrap(),
         ];
 
         for &height in heights.iter() {
@@ -1512,7 +1556,8 @@ mod tests {
 
             enc_ciphertext[ENC_CIPHERTEXT_SIZE - 1] ^= 0xff;
             assert_eq!(
-                try_sapling_output_recovery::<TestNetwork>(
+                try_sapling_output_recovery(
+                    &Network::TestNetwork,
                     height,
                     &ovk,
                     &cv,
@@ -1524,7 +1569,8 @@ mod tests {
                 None
             );
             assert_eq!(
-                try_sapling_output_recovery_with_ock::<TestNetwork>(
+                try_sapling_output_recovery_with_ock(
+                    &Network::TestNetwork,
                     height,
                     &ock,
                     &cmu,
@@ -1541,8 +1587,8 @@ mod tests {
     fn recovery_with_invalid_out_tag() {
         let mut rng = OsRng;
         let heights = [
-            TestNetwork::activation_height(Sapling).unwrap(),
-            TestNetwork::activation_height(Canopy).unwrap(),
+            TestNetwork.activation_height(Sapling).unwrap(),
+            TestNetwork.activation_height(Canopy).unwrap(),
         ];
 
         for &height in heights.iter() {
@@ -1551,7 +1597,8 @@ mod tests {
 
             out_ciphertext[OUT_CIPHERTEXT_SIZE - 1] ^= 0xff;
             assert_eq!(
-                try_sapling_output_recovery::<TestNetwork>(
+                try_sapling_output_recovery(
+                    &Network::TestNetwork,
                     height,
                     &ovk,
                     &cv,
@@ -1563,7 +1610,8 @@ mod tests {
                 None
             );
             assert_eq!(
-                try_sapling_output_recovery_with_ock::<TestNetwork>(
+                try_sapling_output_recovery_with_ock(
+                    &Network::TestNetwork,
                     height,
                     &ock,
                     &cmu,
@@ -1579,7 +1627,7 @@ mod tests {
     #[test]
     fn recovery_with_invalid_version_byte() {
         let mut rng = OsRng;
-        let canopy_activation_height = TestNetwork::activation_height(Canopy).unwrap();
+        let canopy_activation_height = TestNetwork.activation_height(Canopy).unwrap();
         let heights = [
             canopy_activation_height - 1,
             canopy_activation_height,
@@ -1601,7 +1649,8 @@ mod tests {
                 |pt| pt[0] = leadbyte,
             );
             assert_eq!(
-                try_sapling_output_recovery::<TestNetwork>(
+                try_sapling_output_recovery(
+                    &Network::TestNetwork,
                     height,
                     &ovk,
                     &cv,
@@ -1613,7 +1662,8 @@ mod tests {
                 None
             );
             assert_eq!(
-                try_sapling_output_recovery_with_ock::<TestNetwork>(
+                try_sapling_output_recovery_with_ock(
+                    &Network::TestNetwork,
                     height,
                     &ock,
                     &cmu,
@@ -1630,8 +1680,8 @@ mod tests {
     fn recovery_with_invalid_diversifier() {
         let mut rng = OsRng;
         let heights = [
-            TestNetwork::activation_height(Sapling).unwrap(),
-            TestNetwork::activation_height(Canopy).unwrap(),
+            TestNetwork.activation_height(Sapling).unwrap(),
+            TestNetwork.activation_height(Canopy).unwrap(),
         ];
 
         for &height in heights.iter() {
@@ -1648,7 +1698,8 @@ mod tests {
                 |pt| pt[1..12].copy_from_slice(&find_invalid_diversifier().0),
             );
             assert_eq!(
-                try_sapling_output_recovery::<TestNetwork>(
+                try_sapling_output_recovery(
+                    &Network::TestNetwork,
                     height,
                     &ovk,
                     &cv,
@@ -1660,7 +1711,8 @@ mod tests {
                 None
             );
             assert_eq!(
-                try_sapling_output_recovery_with_ock::<TestNetwork>(
+                try_sapling_output_recovery_with_ock(
+                    &Network::TestNetwork,
                     height,
                     &ock,
                     &cmu,
@@ -1677,8 +1729,8 @@ mod tests {
     fn recovery_with_incorrect_diversifier() {
         let mut rng = OsRng;
         let heights = [
-            TestNetwork::activation_height(Sapling).unwrap(),
-            TestNetwork::activation_height(Canopy).unwrap(),
+            TestNetwork.activation_height(Sapling).unwrap(),
+            TestNetwork.activation_height(Canopy).unwrap(),
         ];
 
         for &height in heights.iter() {
@@ -1695,7 +1747,8 @@ mod tests {
                 |pt| pt[1..12].copy_from_slice(&find_valid_diversifier().0),
             );
             assert_eq!(
-                try_sapling_output_recovery::<TestNetwork>(
+                try_sapling_output_recovery(
+                    &Network::TestNetwork,
                     height,
                     &ovk,
                     &cv,
@@ -1707,7 +1760,8 @@ mod tests {
                 None
             );
             assert_eq!(
-                try_sapling_output_recovery_with_ock::<TestNetwork>(
+                try_sapling_output_recovery_with_ock(
+                    &Network::TestNetwork,
                     height,
                     &ock,
                     &cmu,
@@ -1724,8 +1778,8 @@ mod tests {
     fn recovery_with_invalid_pk_d() {
         let mut rng = OsRng;
         let heights = [
-            TestNetwork::activation_height(Sapling).unwrap(),
-            TestNetwork::activation_height(Canopy).unwrap(),
+            TestNetwork.activation_height(Sapling).unwrap(),
+            TestNetwork.activation_height(Canopy).unwrap(),
         ];
 
         for &height in heights.iter() {
@@ -1734,7 +1788,8 @@ mod tests {
                 random_enc_ciphertext_with(height, ivk, &mut rng);
 
             assert_eq!(
-                try_sapling_output_recovery::<TestNetwork>(
+                try_sapling_output_recovery(
+                    &Network::TestNetwork,
                     height,
                     &ovk,
                     &cv,
@@ -1746,7 +1801,8 @@ mod tests {
                 None
             );
             assert_eq!(
-                try_sapling_output_recovery_with_ock::<TestNetwork>(
+                try_sapling_output_recovery_with_ock(
+                    &Network::TestNetwork,
                     height,
                     &ock,
                     &cmu,
@@ -1781,7 +1837,8 @@ mod tests {
             };
         }
 
-        let height = TestNetwork::activation_height(NetworkUpgrade::Sapling)
+        let height = TestNetwork
+            .activation_height(NetworkUpgrade::Sapling)
             .expect("Should have Sapling activation height");
 
         for tv in test_vectors {
@@ -1820,7 +1877,14 @@ mod tests {
             // (Tested first because it only requires immutable references.)
             //
 
-            match try_sapling_note_decryption::<TestNetwork>(height, &ivk, &epk, &cmu, &tv.c_enc) {
+            match try_sapling_note_decryption(
+                &Network::TestNetwork,
+                height,
+                &ivk,
+                &epk,
+                &cmu,
+                &tv.c_enc,
+            ) {
                 Some((decrypted_note, decrypted_to, decrypted_memo)) => {
                     assert_eq!(decrypted_note, note);
                     assert_eq!(decrypted_to, to);
@@ -1829,7 +1893,8 @@ mod tests {
                 None => panic!("Note decryption failed"),
             }
 
-            match try_sapling_compact_note_decryption::<TestNetwork>(
+            match try_sapling_compact_note_decryption(
+                &Network::TestNetwork,
                 height,
                 &ivk,
                 &epk,
@@ -1843,8 +1908,15 @@ mod tests {
                 None => panic!("Compact note decryption failed"),
             }
 
-            match try_sapling_output_recovery::<TestNetwork>(
-                height, &ovk, &cv, &cmu, &epk, &tv.c_enc, &tv.c_out,
+            match try_sapling_output_recovery(
+                &Network::TestNetwork,
+                height,
+                &ovk,
+                &cv,
+                &cmu,
+                &epk,
+                &tv.c_enc,
+                &tv.c_out,
             ) {
                 Some((decrypted_note, decrypted_to, decrypted_memo)) => {
                     assert_eq!(decrypted_note, note);

@@ -26,6 +26,7 @@ pub enum ErrorKind {
     Database(rusqlite::Error),
     Io(std::io::Error),
     Protobuf(protobuf::ProtobufError),
+    SaplingNotActive,
 }
 
 #[derive(Debug)]
@@ -72,6 +73,7 @@ impl fmt::Display for Error {
             ErrorKind::Database(e) => write!(f, "{}", e),
             ErrorKind::Io(e) => write!(f, "{}", e),
             ErrorKind::Protobuf(e) => write!(f, "{}", e),
+            ErrorKind::SaplingNotActive => write!(f, "Sapling activation height not specified for network."),
         }
     }
 }

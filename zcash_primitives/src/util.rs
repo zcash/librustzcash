@@ -17,10 +17,11 @@ pub fn hash_to_scalar(persona: &[u8], a: &[u8], b: &[u8]) -> jubjub::Fr {
 }
 
 pub fn generate_random_rseed<P: consensus::Parameters, R: RngCore + CryptoRng>(
+    params: &P,
     height: BlockHeight,
     rng: &mut R,
 ) -> Rseed {
-    if P::is_nu_active(NetworkUpgrade::Canopy, height) {
+    if params.is_nu_active(NetworkUpgrade::Canopy, height) {
         let mut buffer = [0u8; 32];
         &rng.fill_bytes(&mut buffer);
         Rseed::AfterZip212(buffer)

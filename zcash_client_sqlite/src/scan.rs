@@ -11,7 +11,7 @@ use zcash_client_backend::{
     proto::compact_formats::CompactBlock, welding_rig::scan_block,
 };
 use zcash_primitives::{
-    consensus::BlockHeight,
+    consensus::{self, BlockHeight, NetworkUpgrade},
     merkle_tree::{CommitmentTree, IncrementalWitness},
     sapling::Node,
     transaction::Transaction,
@@ -20,7 +20,6 @@ use zcash_primitives::{
 use crate::{
     address::RecipientAddress,
     error::{Error, ErrorKind},
-    Network, HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY, SAPLING_ACTIVATION_HEIGHT,
 };
 
 struct CompactBlockRow {
@@ -57,27 +56,36 @@ struct WitnessRow {
 /// # Examples
 ///
 /// ```
+/// use zcash_primitives::consensus::{
+///     Network,
+///     Parameters,
+/// };
 /// use zcash_client_sqlite::scan::scan_cached_blocks;
 ///
-/// scan_cached_blocks("/path/to/cache.db", "/path/to/data.db", None);
+/// scan_cached_blocks(&Network::TestNetwork, "/path/to/cache.db", "/path/to/data.db", None);
 /// ```
 ///
 /// [`init_blocks_table`]: crate::init::init_blocks_table
-pub fn scan_cached_blocks<P: AsRef<Path>, Q: AsRef<Path>>(
+pub fn scan_cached_blocks<Params: consensus::Parameters, P: AsRef<Path>, Q: AsRef<Path>>(
+    params: &Params,
     db_cache: P,
     db_data: Q,
     limit: Option<u32>,
 ) -> Result<(), Error> {
     let cache = Connection::open(db_cache)?;
     let data = Connection::open(db_data)?;
+    let sapling_activation_height = params
+        .activation_height(NetworkUpgrade::Sapling)
+        .ok_or(Error(ErrorKind::SaplingNotActive))?;
 
     // Recall where we synced up to previously.
     // If we have never synced, use sapling activation height to select all cached CompactBlocks.
-    let mut last_height = data.query_row("SELECT MAX(height) FROM blocks", NO_PARAMS, |row| {
-        row.get::<_, u32>(0)
-            .map(BlockHeight::from)
-            .or(Ok(SAPLING_ACTIVATION_HEIGHT - 1))
-    })?;
+    let mut last_height: BlockHeight =
+        data.query_row("SELECT MAX(height) FROM blocks", NO_PARAMS, |row| {
+            row.get::<_, u32>(0)
+                .map(BlockHeight::from)
+                .or(Ok(sapling_activation_height - 1))
+        })?;
 
     // Fetch the CompactBlocks we need to scan
     let mut stmt_blocks = cache.prepare(
@@ -98,7 +106,10 @@ pub fn scan_cached_blocks<P: AsRef<Path>, Q: AsRef<Path>>(
         data.prepare("SELECT extfvk FROM accounts ORDER BY account ASC")?;
     let extfvks = stmt_fetch_accounts.query_map(NO_PARAMS, |row| {
         row.get(0).map(|extfvk: String| {
-            decode_extended_full_viewing_key(HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY, &extfvk)
+            decode_extended_full_viewing_key(
+                params.hrp_sapling_extended_full_viewing_key(),
+                &extfvk,
+            )
         })
     })?;
     // Raise SQL errors from the query, IO errors from parsing, and incorrect HRP errors.
@@ -194,7 +205,8 @@ pub fn scan_cached_blocks<P: AsRef<Path>, Q: AsRef<Path>>(
         let txs = {
             let nf_refs: Vec<_> = nullifiers.iter().map(|(nf, acc)| (&nf[..], *acc)).collect();
             let mut witness_refs: Vec<_> = witnesses.iter_mut().map(|w| &mut w.witness).collect();
-            scan_block::<Network>(
+            scan_block(
+                params,
                 block,
                 &extfvks[..],
                 &nf_refs,
@@ -359,8 +371,9 @@ pub fn scan_cached_blocks<P: AsRef<Path>, Q: AsRef<Path>>(
 
 /// Scans a [`Transaction`] for any information that can be decrypted by the accounts in
 /// the wallet, and saves it to the wallet.
-pub fn decrypt_and_store_transaction<P: AsRef<Path>>(
-    db_data: P,
+pub fn decrypt_and_store_transaction<D: AsRef<Path>, P: consensus::Parameters>(
+    db_data: D,
+    params: &P,
     tx: &Transaction,
 ) -> Result<(), Error> {
     let data = Connection::open(db_data)?;
@@ -370,7 +383,10 @@ pub fn decrypt_and_store_transaction<P: AsRef<Path>>(
         data.prepare("SELECT extfvk FROM accounts ORDER BY account ASC")?;
     let extfvks = stmt_fetch_accounts.query_map(NO_PARAMS, |row| {
         row.get(0).map(|extfvk: String| {
-            decode_extended_full_viewing_key(HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY, &extfvk)
+            decode_extended_full_viewing_key(
+                params.hrp_sapling_extended_full_viewing_key(),
+                &extfvk,
+            )
         })
     })?;
     // Raise SQL errors from the query, IO errors from parsing, and incorrect HRP errors.
@@ -393,10 +409,11 @@ pub fn decrypt_and_store_transaction<P: AsRef<Path>>(
             })
             .optional()?
             .map(|last_height: u32| BlockHeight::from(last_height + 1))
-            .unwrap_or(SAPLING_ACTIVATION_HEIGHT),
+            .and(params.activation_height(NetworkUpgrade::Sapling))
+            .ok_or(Error(ErrorKind::SaplingNotActive))?,
     };
 
-    let outputs = decrypt_transaction::<Network>(height, tx, &extfvks);
+    let outputs = decrypt_transaction(params, height, tx, &extfvks);
 
     if outputs.is_empty() {
         // Nothing to see here
@@ -462,7 +479,7 @@ pub fn decrypt_and_store_transaction<P: AsRef<Path>>(
         let value = output.note.value as i64;
 
         if output.outgoing {
-            let to_str = RecipientAddress::from(output.to).to_string();
+            let to_str = RecipientAddress::from(output.to).to_string(params);
 
             // Try updating an existing sent note.
             if stmt_update_sent_note.execute(&[
@@ -530,8 +547,10 @@ mod tests {
     use crate::{
         init::{init_accounts_table, init_cache_database, init_data_database},
         query::get_balance,
-        tests::{fake_compact_block, fake_compact_block_spending, insert_into_cache},
-        SAPLING_ACTIVATION_HEIGHT,
+        tests::{
+            self, fake_compact_block, fake_compact_block_spending, insert_into_cache,
+            sapling_activation_height,
+        },
     };
 
     #[test]
@@ -547,49 +566,49 @@ mod tests {
         // Add an account to the wallet
         let extsk = ExtendedSpendingKey::master(&[]);
         let extfvk = ExtendedFullViewingKey::from(&extsk);
-        init_accounts_table(&db_data, &[extfvk.clone()]).unwrap();
+        init_accounts_table(&db_data, &tests::network(), &[extfvk.clone()]).unwrap();
 
         // Create a block with height SAPLING_ACTIVATION_HEIGHT
         let value = Amount::from_u64(50000).unwrap();
         let (cb1, _) = fake_compact_block(
-            SAPLING_ACTIVATION_HEIGHT,
+            sapling_activation_height(),
             BlockHash([0; 32]),
             extfvk.clone(),
             value,
         );
         insert_into_cache(db_cache, &cb1);
-        scan_cached_blocks(db_cache, db_data, None).unwrap();
+        scan_cached_blocks(&tests::network(), db_cache, db_data, None).unwrap();
         assert_eq!(get_balance(db_data, 0).unwrap(), value);
 
         // We cannot scan a block of height SAPLING_ACTIVATION_HEIGHT + 2 next
         let (cb2, _) = fake_compact_block(
-            SAPLING_ACTIVATION_HEIGHT + 1,
+            sapling_activation_height() + 1,
             cb1.hash(),
             extfvk.clone(),
             value,
         );
         let (cb3, _) = fake_compact_block(
-            SAPLING_ACTIVATION_HEIGHT + 2,
+            sapling_activation_height() + 2,
             cb2.hash(),
             extfvk.clone(),
             value,
         );
         insert_into_cache(db_cache, &cb3);
-        match scan_cached_blocks(db_cache, db_data, None) {
+        match scan_cached_blocks(&tests::network(), db_cache, db_data, None) {
             Ok(_) => panic!("Should have failed"),
             Err(e) => assert_eq!(
                 e.to_string(),
                 format!(
                     "Expected height of next CompactBlock to be {}, but was {}",
-                    SAPLING_ACTIVATION_HEIGHT + 1,
-                    SAPLING_ACTIVATION_HEIGHT + 2
+                    sapling_activation_height() + 1,
+                    sapling_activation_height() + 2
                 )
             ),
         }
 
         // If we add a block of height SAPLING_ACTIVATION_HEIGHT + 1, we can now scan both
         insert_into_cache(db_cache, &cb2);
-        scan_cached_blocks(db_cache, db_data, None).unwrap();
+        scan_cached_blocks(&tests::network(), db_cache, db_data, None).unwrap();
         assert_eq!(
             get_balance(db_data, 0).unwrap(),
             Amount::from_u64(150_000).unwrap()
@@ -609,7 +628,7 @@ mod tests {
         // Add an account to the wallet
         let extsk = ExtendedSpendingKey::master(&[]);
         let extfvk = ExtendedFullViewingKey::from(&extsk);
-        init_accounts_table(&db_data, &[extfvk.clone()]).unwrap();
+        init_accounts_table(&db_data, &tests::network(), &[extfvk.clone()]).unwrap();
 
         // Account balance should be zero
         assert_eq!(get_balance(db_data, 0).unwrap(), Amount::zero());
@@ -617,7 +636,7 @@ mod tests {
         // Create a fake CompactBlock sending value to the address
         let value = Amount::from_u64(5).unwrap();
         let (cb, _) = fake_compact_block(
-            SAPLING_ACTIVATION_HEIGHT,
+            sapling_activation_height(),
             BlockHash([0; 32]),
             extfvk.clone(),
             value,
@@ -625,18 +644,19 @@ mod tests {
         insert_into_cache(db_cache, &cb);
 
         // Scan the cache
-        scan_cached_blocks(db_cache, db_data, None).unwrap();
+        scan_cached_blocks(&tests::network(), db_cache, db_data, None).unwrap();
 
         // Account balance should reflect the received note
         assert_eq!(get_balance(db_data, 0).unwrap(), value);
 
         // Create a second fake CompactBlock sending more value to the address
         let value2 = Amount::from_u64(7).unwrap();
-        let (cb2, _) = fake_compact_block(SAPLING_ACTIVATION_HEIGHT + 1, cb.hash(), extfvk, value2);
+        let (cb2, _) =
+            fake_compact_block(sapling_activation_height() + 1, cb.hash(), extfvk, value2);
         insert_into_cache(db_cache, &cb2);
 
         // Scan the cache again
-        scan_cached_blocks(db_cache, db_data, None).unwrap();
+        scan_cached_blocks(&tests::network(), db_cache, db_data, None).unwrap();
 
         // Account balance should reflect both received notes
         assert_eq!(get_balance(db_data, 0).unwrap(), value + value2);
@@ -655,7 +675,7 @@ mod tests {
         // Add an account to the wallet
         let extsk = ExtendedSpendingKey::master(&[]);
         let extfvk = ExtendedFullViewingKey::from(&extsk);
-        init_accounts_table(&db_data, &[extfvk.clone()]).unwrap();
+        init_accounts_table(&db_data, &tests::network(), &[extfvk.clone()]).unwrap();
 
         // Account balance should be zero
         assert_eq!(get_balance(db_data, 0).unwrap(), Amount::zero());
@@ -663,7 +683,7 @@ mod tests {
         // Create a fake CompactBlock sending value to the address
         let value = Amount::from_u64(5).unwrap();
         let (cb, nf) = fake_compact_block(
-            SAPLING_ACTIVATION_HEIGHT,
+            sapling_activation_height(),
             BlockHash([0; 32]),
             extfvk.clone(),
             value,
@@ -671,7 +691,7 @@ mod tests {
         insert_into_cache(db_cache, &cb);
 
         // Scan the cache
-        scan_cached_blocks(db_cache, db_data, None).unwrap();
+        scan_cached_blocks(&tests::network(), db_cache, db_data, None).unwrap();
 
         // Account balance should reflect the received note
         assert_eq!(get_balance(db_data, 0).unwrap(), value);
@@ -683,7 +703,7 @@ mod tests {
         insert_into_cache(
             db_cache,
             &fake_compact_block_spending(
-                SAPLING_ACTIVATION_HEIGHT + 1,
+                sapling_activation_height() + 1,
                 cb.hash(),
                 (nf, value),
                 extfvk,
@@ -693,7 +713,7 @@ mod tests {
         );
 
         // Scan the cache again
-        scan_cached_blocks(db_cache, db_data, None).unwrap();
+        scan_cached_blocks(&tests::network(), db_cache, db_data, None).unwrap();
 
         // Account balance should equal the change
         assert_eq!(get_balance(db_data, 0).unwrap(), value - value2);

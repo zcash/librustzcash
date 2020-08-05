@@ -1,9 +1,9 @@
 //! Encoding and decoding functions for Zcash key and address structs.
 //!
-//! Human-Readable Prefixes (HRPs) for Bech32 encodings are located in the [`constants`]
+//! Human-Readable Prefixes (HRPs) for Bech32 encodings are located in the [`zcash_primitives::constants`]
 //! module.
 //!
-//! [`constants`]: crate::constants
+//! [`constants`]: zcash_primitives::constants
 
 use bech32::{self, Error, FromBase32, ToBase32};
 use bs58::{self, decode::Error as Bs58Error};
@@ -41,8 +41,10 @@ where
 /// # Examples
 ///
 /// ```
-/// use zcash_client_backend::{
+/// use zcash_primitives::{
 ///     constants::testnet::{COIN_TYPE, HRP_SAPLING_EXTENDED_SPENDING_KEY},
+/// };
+/// use zcash_client_backend::{
 ///     encoding::encode_extended_spending_key,
 ///     keys::spending_key,
 /// };
@@ -67,8 +69,10 @@ pub fn decode_extended_spending_key(
 /// # Examples
 ///
 /// ```
-/// use zcash_client_backend::{
+/// use zcash_primitives::{
 ///     constants::testnet::{COIN_TYPE, HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY},
+/// };
+/// use zcash_client_backend::{
 ///     encoding::encode_extended_full_viewing_key,
 ///     keys::spending_key,
 /// };
@@ -100,10 +104,12 @@ pub fn decode_extended_full_viewing_key(
 /// use rand_core::SeedableRng;
 /// use rand_xorshift::XorShiftRng;
 /// use zcash_client_backend::{
-///     constants::testnet::HRP_SAPLING_PAYMENT_ADDRESS,
 ///     encoding::encode_payment_address,
 /// };
-/// use zcash_primitives::primitives::{Diversifier, PaymentAddress};
+/// use zcash_primitives::{
+///     constants::testnet::HRP_SAPLING_PAYMENT_ADDRESS,
+///     primitives::{Diversifier, PaymentAddress},
+/// };
 ///
 /// let rng = &mut XorShiftRng::from_seed([
 ///     0x59, 0x62, 0xbe, 0x3d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06,
@@ -135,10 +141,12 @@ pub fn encode_payment_address(hrp: &str, addr: &PaymentAddress) -> String {
 /// use rand_core::SeedableRng;
 /// use rand_xorshift::XorShiftRng;
 /// use zcash_client_backend::{
-///     constants::testnet::HRP_SAPLING_PAYMENT_ADDRESS,
 ///     encoding::decode_payment_address,
 /// };
-/// use zcash_primitives::primitives::{Diversifier, PaymentAddress};
+/// use zcash_primitives::{
+///     constants::testnet::HRP_SAPLING_PAYMENT_ADDRESS,
+///     primitives::{Diversifier, PaymentAddress},
+/// };
 ///
 /// let rng = &mut XorShiftRng::from_seed([
 ///     0x59, 0x62, 0xbe, 0x3d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06,
@@ -177,10 +185,12 @@ pub fn decode_payment_address(hrp: &str, s: &str) -> Result<Option<PaymentAddres
 ///
 /// ```
 /// use zcash_client_backend::{
-///     constants::testnet::{B58_PUBKEY_ADDRESS_PREFIX, B58_SCRIPT_ADDRESS_PREFIX},
 ///     encoding::encode_transparent_address,
 /// };
-/// use zcash_primitives::legacy::TransparentAddress;
+/// use zcash_primitives::{
+///     constants::testnet::{B58_PUBKEY_ADDRESS_PREFIX, B58_SCRIPT_ADDRESS_PREFIX},
+///     legacy::TransparentAddress,
+/// };
 ///
 /// assert_eq!(
 ///     encode_transparent_address(
@@ -227,8 +237,10 @@ pub fn encode_transparent_address(
 /// # Examples
 ///
 /// ```
-/// use zcash_client_backend::{
+/// use zcash_primitives::{
 ///     constants::testnet::{B58_PUBKEY_ADDRESS_PREFIX, B58_SCRIPT_ADDRESS_PREFIX},
+/// };
+/// use zcash_client_backend::{
 ///     encoding::decode_transparent_address,
 /// };
 /// use zcash_primitives::legacy::TransparentAddress;
@@ -279,6 +291,7 @@ mod tests {
     use rand_core::SeedableRng;
     use rand_xorshift::XorShiftRng;
     use zcash_primitives::{
+        constants::{self},
         primitives::{Diversifier, PaymentAddress},
         zip32::ExtendedSpendingKey,
     };
@@ -287,7 +300,6 @@ mod tests {
         decode_extended_full_viewing_key, decode_extended_spending_key, decode_payment_address,
         encode_extended_full_viewing_key, encode_extended_spending_key, encode_payment_address,
     };
-    use crate::constants;
 
     #[test]
     fn extended_spending_key() {
