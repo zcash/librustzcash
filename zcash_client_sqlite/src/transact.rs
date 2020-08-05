@@ -9,6 +9,7 @@ use std::path::Path;
 use zcash_client_backend::encoding::encode_extended_full_viewing_key;
 use zcash_primitives::{
     consensus,
+    consensus::Parameters,
     jubjub::fs::{Fs, FsRepr},
     keys::OutgoingViewingKey,
     merkle_tree::{IncrementalWitness, MerklePath},
@@ -234,14 +235,20 @@ pub fn create_to_address<P: AsRef<Path>>(
 
             let note_value: i64 = row.get(1)?;
 
-            let rcm = {
-                let d: Vec<_> = row.get(2)?;
+            let d: Vec<_> = row.get(2)?;
+
+            let rseed = if height >= Network::CANOPY_ACTIVATION_HEIGHT {
+                let mut r = [0u8; 32];
+                r.copy_from_slice(&d[..]);
+                Rseed::AfterZip212(r)
+            } else {
                 let tmp = FsRepr(
                     d[..]
                         .try_into()
                         .map_err(|_| Error(ErrorKind::InvalidNote))?,
                 );
-                Fs::from_repr(tmp).ok_or(Error(ErrorKind::InvalidNote))?
+                let r = Fs::from_repr(tmp).ok_or(Error(ErrorKind::InvalidNote))?;
+                Rseed::BeforeZip212(r)
             };
 
             let from = extfvk
@@ -249,9 +256,7 @@ pub fn create_to_address<P: AsRef<Path>>(
                 .vk
                 .to_payment_address(diversifier, &JUBJUB)
                 .unwrap();
-            let note = from
-                .create_note(note_value as u64, Rseed::BeforeZip212(rcm), &JUBJUB)
-                .unwrap();
+            let note = from.create_note(note_value as u64, rseed, &JUBJUB).unwrap();
 
             let merkle_path = {
                 let d: Vec<_> = row.get(3)?;
