@@ -373,12 +373,15 @@ pub fn decrypt_and_store_transaction<P: AsRef<Path>>(
         .ok_or(Error(ErrorKind::IncorrectHRPExtFVK))?;
 
     // Height is block height for mined transactions, and the "mempool height" (chain height + 1) for mempool transactions.
-    let last_height = data.query_row("SELECT MAX(height) FROM blocks", NO_PARAMS, |row| {
-        row.get(0).or(Ok(SAPLING_ACTIVATION_HEIGHT - 1))
-    })?;
     let mut stmt_select_block = data.prepare("SELECT block FROM transactions WHERE txid = ?")?;
     let height = stmt_select_block.query_row(&[tx.txid().0.to_vec()], |row| {
-        row.get(0).or(Ok(last_height + 1))
+        row.get(0).or({
+            let last_height =
+                data.query_row("SELECT MAX(height) FROM blocks", NO_PARAMS, |row| {
+                    row.get(0).or(Ok(SAPLING_ACTIVATION_HEIGHT - 1))
+                })?;
+            Ok(last_height + 1)
+        })
     })?;
 
     let outputs = decrypt_transaction::<Network>(height as u32, tx, &extfvks);
