@@ -1,5 +1,6 @@
 use zcash_primitives::{
     block::BlockHash,
+    consensus::{self, BlockHeight},
     //merkle_tree::{CommitmentTree, IncrementalWitness},
     //sapling::Node,
     //transaction::{
@@ -7,8 +8,7 @@ use zcash_primitives::{
     //    TxId,
     //    components::Amount,
     //},
-    //zip32::ExtendedFullViewingKey,
-    consensus::{self, BlockHeight},
+    zip32::ExtendedFullViewingKey,
 };
 
 use crate::proto::compact_formats::CompactBlock;
@@ -22,16 +22,20 @@ pub trait DBOps {
     //    type NoteRef; // Backend-specific note identifier`
 
     fn init_db(&self) -> Result<(), Self::Error>;
-    //
-    //    fn init_accounts(extfvks: &[ExtendedFullViewingKey]) -> Result<(), Self::Error>;
-    //
+
+    fn init_accounts<P: consensus::Parameters>(
+        &self,
+        params: &P,
+        extfvks: &[ExtendedFullViewingKey],
+    ) -> Result<(), Self::Error>;
+
     //    fn init_blocks(
     //        height: i32,
     //        hash: BlockHash,
     //        time: u32,
     //        sapling_tree: &[u8],
     //    ) -> Result<(), Self::Error>;
-    //
+
     fn block_height_extrema(&self) -> Result<Option<(BlockHeight, BlockHeight)>, Self::Error>;
 
     fn get_block_hash(&self, block_height: BlockHeight) -> Result<Option<BlockHash>, Self::Error>;
@@ -41,7 +45,7 @@ pub trait DBOps {
         parameters: &P,
         block_height: BlockHeight,
     ) -> Result<(), Self::Error>;
-    //
+
     //    fn get_address(account: Account) -> Result<String, Self::Error>;
     //
     //    fn get_balance(account: Account) -> Result<Amount, Self::Error>;

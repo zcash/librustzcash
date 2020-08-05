@@ -63,6 +63,14 @@ impl DBOps for DataConnection {
         init::init_data_database(self).map_err(Error::Database)
     }
 
+    fn init_accounts<P: consensus::Parameters>(
+        &self,
+        params: &P,
+        extfvks: &[ExtendedFullViewingKey],
+    ) -> Result<(), Self::Error> {
+        init::init_accounts_table(self, params, extfvks).map_err(|e| e.0)
+    }
+
     fn block_height_extrema(&self) -> Result<Option<(BlockHeight, BlockHeight)>, Self::Error> {
         chain::block_height_extrema(self).map_err(Error::Database)
     }
