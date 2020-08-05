@@ -1,10 +1,18 @@
 //! Functions for querying information in the data database.
 
-use zcash_primitives::{note_encryption::Memo, transaction::components::Amount};
+use zcash_primitives::{
+    consensus::{self},
+    note_encryption::Memo,
+    primitives::PaymentAddress,
+    transaction::components::Amount,
+};
 
-use zcash_client_backend::data_api::{chain::get_target_and_anchor_heights, error::Error};
+use zcash_client_backend::{
+    data_api::{chain::get_target_and_anchor_heights, error::Error},
+    encoding::decode_payment_address,
+};
 
-use crate::{error::SqliteClientError, DataConnection};
+use crate::{error::SqliteClientError, Account, DataConnection};
 
 /// Returns the address for the account.
 ///
@@ -12,24 +20,33 @@ use crate::{error::SqliteClientError, DataConnection};
 ///
 /// ```
 /// use tempfile::NamedTempFile;
+/// use zcash_primitives::{
+///     consensus::{self, Network},
+/// };
 /// use zcash_client_sqlite::{
+///     Account,
 ///     DataConnection,
 ///     query::get_address,
 /// };
 ///
 /// let data_file = NamedTempFile::new().unwrap();
 /// let db = DataConnection::for_path(data_file).unwrap();
-/// let addr = get_address(&db, 0);
+/// let addr = get_address(&db, &Network::TestNetwork, Account(0));
 /// ```
-pub fn get_address(data: &DataConnection, account: u32) -> Result<String, rusqlite::Error> {
-    let addr = data.0.query_row(
+pub fn get_address<P: consensus::Parameters>(
+    data: &DataConnection,
+    params: &P,
+    account: Account,
+) -> Result<Option<PaymentAddress>, SqliteClientError> {
+    let addr: String = data.0.query_row(
         "SELECT address FROM accounts
         WHERE account = ?",
-        &[account],
+        &[account.0],
         |row| row.get(0),
     )?;
 
-    Ok(addr)
+    decode_payment_address(params.hrp_sapling_payment_address(), &addr)
+        .map_err(|e| SqliteClientError(e.into()))
 }
 
 /// Returns the balance for the account, including all mined unspent notes that we know
@@ -200,7 +217,7 @@ mod tests {
 
     use crate::{
         init::{init_accounts_table, init_data_database},
-        tests, DataConnection,
+        tests, Account, DataConnection,
     };
 
     use super::{get_address, get_balance, get_verified_balance};
@@ -227,7 +244,7 @@ mod tests {
         }
 
         // An invalid account has zero balance
-        assert!(get_address(&db_data, 1).is_err());
+        assert!(get_address(&db_data, &tests::network(), Account(1)).is_err());
         assert_eq!(get_balance(&db_data, 1).unwrap(), Amount::zero());
     }
 }

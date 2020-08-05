@@ -377,7 +377,7 @@ mod tests {
 
     use zcash_primitives::{
         block::BlockHash,
-        consensus,
+        consensus::{self, BlockHeight},
         note_encryption::try_sapling_output_recovery,
         prover::TxProver,
         transaction::{components::Amount, Transaction},
@@ -487,7 +487,14 @@ mod tests {
         let data_file = NamedTempFile::new().unwrap();
         let db_data = DataConnection(Connection::open(data_file.path()).unwrap());
         init_data_database(&db_data).unwrap();
-        init_blocks_table(&db_data, 1, BlockHash([1; 32]), 1, &[]).unwrap();
+        init_blocks_table(
+            &db_data,
+            BlockHeight::from(1u32),
+            BlockHash([1; 32]),
+            1,
+            &[],
+        )
+        .unwrap();
 
         // Add an account to the wallet
         let extsk = ExtendedSpendingKey::master(&[]);

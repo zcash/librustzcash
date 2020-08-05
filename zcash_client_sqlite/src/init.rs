@@ -1,11 +1,14 @@
 //! Functions for initializing the various databases.
 
 use rusqlite::{types::ToSql, NO_PARAMS};
-use zcash_client_backend::encoding::encode_extended_full_viewing_key;
 
-use zcash_primitives::{block::BlockHash, consensus, zip32::ExtendedFullViewingKey};
+use zcash_primitives::{
+    block::BlockHash,
+    consensus::{self, BlockHeight},
+    zip32::ExtendedFullViewingKey,
+};
 
-use zcash_client_backend::data_api::error::Error;
+use zcash_client_backend::{data_api::error::Error, encoding::encode_extended_full_viewing_key};
 
 use crate::{address_from_extfvk, error::SqliteClientError, CacheConnection, DataConnection};
 
@@ -178,18 +181,20 @@ pub fn init_accounts_table<P: consensus::Parameters>(
     // Insert accounts atomically
     data.0.execute("BEGIN IMMEDIATE", NO_PARAMS)?;
     for (account, extfvk) in extfvks.iter().enumerate() {
-        let address = address_from_extfvk(params, extfvk);
-        let extfvk = encode_extended_full_viewing_key(
+        let extfvk_str = encode_extended_full_viewing_key(
             params.hrp_sapling_extended_full_viewing_key(),
             extfvk,
         );
+
+        let address_str = address_from_extfvk(params, extfvk);
+
         data.0.execute(
             "INSERT INTO accounts (account, extfvk, address)
             VALUES (?, ?, ?)",
             &[
                 (account as u32).to_sql()?,
-                extfvk.to_sql()?,
-                address.to_sql()?,
+                extfvk_str.to_sql()?,
+                address_str.to_sql()?,
             ],
         )?;
     }
@@ -207,14 +212,17 @@ pub fn init_accounts_table<P: consensus::Parameters>(
 ///
 /// ```
 /// use tempfile::NamedTempFile;
-/// use zcash_primitives::block::BlockHash;
+/// use zcash_primitives::{
+///     block::BlockHash,
+///     consensus::BlockHeight,
+/// };
 /// use zcash_client_sqlite::{
 ///     DataConnection,
 ///     init::init_blocks_table,
 /// };
 ///
 /// // The block height.
-/// let height = 500_000;
+/// let height = BlockHeight(500_000);
 /// // The hash of the block header.
 /// let hash = BlockHash([0; 32]);
 /// // The nTime field from the block header.
@@ -229,7 +237,7 @@ pub fn init_accounts_table<P: consensus::Parameters>(
 /// ```
 pub fn init_blocks_table(
     data: &DataConnection,
-    height: i32,
+    height: BlockHeight,
     hash: BlockHash,
     time: u32,
     sapling_tree: &[u8],
@@ -243,7 +251,7 @@ pub fn init_blocks_table(
         "INSERT INTO blocks (height, hash, time, sapling_tree)
         VALUES (?, ?, ?, ?)",
         &[
-            height.to_sql()?,
+            u32::from(height).to_sql()?,
             hash.0.to_sql()?,
             time.to_sql()?,
             sapling_tree.to_sql()?,
@@ -260,13 +268,11 @@ mod tests {
 
     use zcash_primitives::{
         block::BlockHash,
-        consensus::Parameters,
+        consensus::BlockHeight,
         zip32::{ExtendedFullViewingKey, ExtendedSpendingKey},
     };
 
-    use zcash_client_backend::encoding::decode_payment_address;
-
-    use crate::{query::get_address, tests, DataConnection};
+    use crate::{query::get_address, tests, Account, DataConnection};
 
     use super::{init_accounts_table, init_blocks_table, init_data_database};
 
@@ -298,10 +304,24 @@ mod tests {
         init_data_database(&db_data).unwrap();
 
         // First call with data should initialise the blocks table
-        init_blocks_table(&db_data, 1, BlockHash([1; 32]), 1, &[]).unwrap();
+        init_blocks_table(
+            &db_data,
+            BlockHeight::from(1u32),
+            BlockHash([1; 32]),
+            1,
+            &[],
+        )
+        .unwrap();
 
         // Subsequent calls should return an error
-        init_blocks_table(&db_data, 2, BlockHash([2; 32]), 2, &[]).unwrap_err();
+        init_blocks_table(
+            &db_data,
+            BlockHeight::from(2u32),
+            BlockHash([2; 32]),
+            2,
+            &[],
+        )
+        .unwrap_err();
     }
 
     #[test]
@@ -316,9 +336,7 @@ mod tests {
         init_accounts_table(&db_data, &tests::network(), &extfvks).unwrap();
 
         // The account's address should be in the data DB
-        let addr = get_address(&db_data, 0).unwrap();
-        let pa =
-            decode_payment_address(tests::network().hrp_sapling_payment_address(), &addr).unwrap();
+        let pa = get_address(&db_data, &tests::network(), Account(0)).unwrap();
         assert_eq!(pa.unwrap(), extsk.default_address().unwrap().1);
     }
 }

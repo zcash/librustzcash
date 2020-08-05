@@ -1,6 +1,7 @@
 use zcash_primitives::{
     block::BlockHash,
     consensus::{self, BlockHeight},
+    primitives::PaymentAddress,
     //merkle_tree::{CommitmentTree, IncrementalWitness},
     //sapling::Node,
     //transaction::{
@@ -18,23 +19,25 @@ pub mod error;
 
 pub trait DBOps {
     type Error;
+    type Account;
     //    type TxRef;   // Backend-specific transaction handle
     //    type NoteRef; // Backend-specific note identifier`
 
     fn init_db(&self) -> Result<(), Self::Error>;
 
-    fn init_accounts<P: consensus::Parameters>(
+    fn init_account_storage<P: consensus::Parameters>(
         &self,
         params: &P,
         extfvks: &[ExtendedFullViewingKey],
     ) -> Result<(), Self::Error>;
 
-    //    fn init_blocks(
-    //        height: i32,
-    //        hash: BlockHash,
-    //        time: u32,
-    //        sapling_tree: &[u8],
-    //    ) -> Result<(), Self::Error>;
+    fn init_block_storage(
+        &self,
+        height: BlockHeight,
+        hash: BlockHash,
+        time: u32,           //TODO: Newtype!
+        sapling_tree: &[u8], //TODO: Newtype!
+    ) -> Result<(), Self::Error>;
 
     fn block_height_extrema(&self) -> Result<Option<(BlockHeight, BlockHeight)>, Self::Error>;
 
@@ -46,8 +49,12 @@ pub trait DBOps {
         block_height: BlockHeight,
     ) -> Result<(), Self::Error>;
 
-    //    fn get_address(account: Account) -> Result<String, Self::Error>;
-    //
+    fn get_address<P: consensus::Parameters>(
+        &self,
+        params: &P,
+        account: Self::Account,
+    ) -> Result<Option<PaymentAddress>, Self::Error>;
+
     //    fn get_balance(account: Account) -> Result<Amount, Self::Error>;
     //
     //    fn get_verified_balance(account: Account) -> Result<Amount, Self::Error>;
