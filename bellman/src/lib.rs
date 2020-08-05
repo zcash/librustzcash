@@ -354,7 +354,7 @@ impl fmt::Display for SynthesisError {
 }
 
 /// An error during verification.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum VerificationError {
     /// Verification was attempted with a malformed verifying key.
     InvalidVerifyingKey,
