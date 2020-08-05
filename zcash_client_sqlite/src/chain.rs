@@ -3,6 +3,10 @@
 //! # Examples
 //!
 //! ```
+//! use std::ops::{Sub};
+//! use zcash_primitives::{
+//!     consensus::BlockHeight,
+//! };
 //! use zcash_client_sqlite::{
 //!     chain::{rewind_to_height, validate_combined_chain},
 //!     error::ErrorKind,
@@ -26,7 +30,7 @@
 //!             // This might be informed by some external chain reorg information, or
 //!             // heuristics such as the platform, available bandwidth, size of recent
 //!             // CompactBlocks, etc.
-//!             let rewind_height = upper_bound - 10;
+//!             let rewind_height = upper_bound.sub(10);
 //!
 //!             // b) Rewind scanned block information.
 //!             rewind_to_height(&db_data, rewind_height);
@@ -58,6 +62,9 @@
 use protobuf::parse_from_bytes;
 use rusqlite::{Connection, NO_PARAMS};
 use std::path::Path;
+
+use zcash_primitives::consensus::BlockHeight;
+
 use zcash_client_backend::proto::compact_formats::CompactBlock;
 
 use crate::{
@@ -69,11 +76,11 @@ use crate::{
 pub enum ChainInvalidCause {
     PrevHashMismatch,
     /// (expected_height, actual_height)
-    HeightMismatch(i32, i32),
+    HeightMismatch(BlockHeight, BlockHeight),
 }
 
 struct CompactBlockRow {
-    height: i32,
+    height: BlockHeight,
     data: Vec<u8>,
 }
 
@@ -105,16 +112,16 @@ pub fn validate_combined_chain<P: AsRef<Path>, Q: AsRef<Path>>(
     let (have_scanned, last_scanned_height) =
         data.query_row("SELECT MAX(height) FROM blocks", NO_PARAMS, |row| {
             row.get(0)
-                .map(|h| (true, h))
+                .map(|h: u32| (true, h.into()))
                 .or(Ok((false, SAPLING_ACTIVATION_HEIGHT - 1)))
         })?;
 
     // Fetch the CompactBlocks we need to validate
     let mut stmt_blocks = cache
         .prepare("SELECT height, data FROM compactblocks WHERE height > ? ORDER BY height DESC")?;
-    let mut rows = stmt_blocks.query_map(&[last_scanned_height], |row| {
+    let mut rows = stmt_blocks.query_map(&[u32::from(last_scanned_height)], |row| {
         Ok(CompactBlockRow {
-            height: row.get(0)?,
+            height: row.get(0).map(u32::into)?,
             data: row.get(1)?,
         })
     })?;
@@ -132,7 +139,7 @@ pub fn validate_combined_chain<P: AsRef<Path>, Q: AsRef<Path>>(
             }
         };
         let block: CompactBlock = parse_from_bytes(&assumed_correct.data)?;
-        (block.height as i32, block.prev_hash())
+        (block.height(), block.prev_hash())
     };
 
     for row in rows {
@@ -163,7 +170,7 @@ pub fn validate_combined_chain<P: AsRef<Path>, Q: AsRef<Path>>(
         // Cached blocks MUST hash-chain to the last scanned block.
         let last_scanned_hash = data.query_row(
             "SELECT hash FROM blocks WHERE height = ?",
-            &[last_scanned_height],
+            &[u32::from(last_scanned_height)],
             |row| row.get::<_, Vec<_>>(0),
         )?;
         if &last_scanned_hash[..] != &last_prev_hash.0[..] {
@@ -182,14 +189,16 @@ pub fn validate_combined_chain<P: AsRef<Path>, Q: AsRef<Path>>(
 ///
 /// If the requested height is greater than or equal to the height of the last scanned
 /// block, this function does nothing.
-pub fn rewind_to_height<P: AsRef<Path>>(db_data: P, height: i32) -> Result<(), Error> {
+pub fn rewind_to_height<P: AsRef<Path>>(db_data: P, height: BlockHeight) -> Result<(), Error> {
     let data = Connection::open(db_data)?;
 
     // Recall where we synced up to previously.
     // If we have never synced, use Sapling activation height.
     let last_scanned_height =
         data.query_row("SELECT MAX(height) FROM blocks", NO_PARAMS, |row| {
-            row.get(0).or(Ok(SAPLING_ACTIVATION_HEIGHT - 1))
+            row.get(0)
+                .map(u32::into)
+                .or(Ok(SAPLING_ACTIVATION_HEIGHT - 1))
         })?;
 
     if height >= last_scanned_height {
@@ -201,16 +210,19 @@ pub fn rewind_to_height<P: AsRef<Path>>(db_data: P, height: i32) -> Result<(), E
     data.execute("BEGIN IMMEDIATE", NO_PARAMS)?;
 
     // Decrement witnesses.
-    data.execute("DELETE FROM sapling_witnesses WHERE block > ?", &[height])?;
+    data.execute(
+        "DELETE FROM sapling_witnesses WHERE block > ?",
+        &[u32::from(height)],
+    )?;
 
     // Un-mine transactions.
     data.execute(
         "UPDATE transactions SET block = NULL, tx_index = NULL WHERE block > ?",
-        &[height],
+        &[u32::from(height)],
     )?;
 
     // Now that they aren't depended on, delete scanned blocks.
-    data.execute("DELETE FROM blocks WHERE height > ?", &[height])?;
+    data.execute("DELETE FROM blocks WHERE height > ?", &[u32::from(height)])?;
 
     // Commit the SQL transaction, rewinding atomically.
     data.execute("COMMIT", NO_PARAMS)?;

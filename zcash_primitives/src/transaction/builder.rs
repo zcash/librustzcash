@@ -9,7 +9,7 @@ use std::fmt;
 use std::marker::PhantomData;
 
 use crate::{
-    consensus,
+    consensus::{self, BlockHeight},
     keys::OutgoingViewingKey,
     legacy::TransparentAddress,
     merkle_tree::MerklePath,
@@ -85,7 +85,7 @@ pub struct SaplingOutput {
 
 impl SaplingOutput {
     pub fn new<R: RngCore + CryptoRng, P: consensus::Parameters>(
-        height: u32,
+        height: BlockHeight,
         rng: &mut R,
         ovk: Option<OutgoingViewingKey>,
         to: PaymentAddress,
@@ -303,7 +303,7 @@ impl TransactionMetadata {
 /// Generates a [`Transaction`] from its inputs and outputs.
 pub struct Builder<P: consensus::Parameters, R: RngCore + CryptoRng> {
     rng: R,
-    height: u32,
+    height: BlockHeight,
     mtx: TransactionData,
     fee: Amount,
     anchor: Option<bls12_381::Scalar>,
@@ -324,7 +324,7 @@ impl<P: consensus::Parameters> Builder<P, OsRng> {
     /// expiry delta (20 blocks).
     ///
     /// The fee will be set to the default fee (0.0001 ZEC).
-    pub fn new(height: u32) -> Self {
+    pub fn new(height: BlockHeight) -> Self {
         Builder::new_with_rng(height, OsRng)
     }
 }
@@ -339,7 +339,7 @@ impl<P: consensus::Parameters, R: RngCore + CryptoRng> Builder<P, R> {
     /// expiry delta (20 blocks).
     ///
     /// The fee will be set to the default fee (0.0001 ZEC).
-    pub fn new_with_rng(height: u32, rng: R) -> Builder<P, R> {
+    pub fn new_with_rng(height: BlockHeight, rng: R) -> Builder<P, R> {
         let mut mtx = TransactionData::new();
         mtx.expiry_height = height + DEFAULT_TX_EXPIRY_DELTA;
 
@@ -709,8 +709,8 @@ mod tests {
 
     use super::{Builder, Error};
     use crate::{
-        consensus,
         consensus::TestNetwork,
+        consensus::{self, H0},
         legacy::TransparentAddress,
         merkle_tree::{CommitmentTree, IncrementalWitness},
         primitives::Rseed,
@@ -727,7 +727,7 @@ mod tests {
         let ovk = extfvk.fvk.ovk;
         let to = extfvk.default_address().unwrap().1;
 
-        let mut builder = Builder::<TestNetwork, OsRng>::new(0);
+        let mut builder = Builder::<TestNetwork, OsRng>::new(H0);
         assert_eq!(
             builder.add_sapling_output(Some(ovk), to, Amount::from_i64(-1).unwrap(), None),
             Err(Error::InvalidAmount)
@@ -787,7 +787,7 @@ mod tests {
         tree.append(cmu1).unwrap();
         let witness1 = IncrementalWitness::from_tree(&tree);
 
-        let mut builder = Builder::<TestNetwork, OsRng>::new(0);
+        let mut builder = Builder::<TestNetwork, OsRng>::new(H0);
 
         // Create a tx with a sapling spend. binding_sig should be present
         builder
@@ -813,7 +813,7 @@ mod tests {
 
     #[test]
     fn fails_on_negative_transparent_output() {
-        let mut builder = Builder::<TestNetwork, OsRng>::new(0);
+        let mut builder = Builder::<TestNetwork, OsRng>::new(H0);
         assert_eq!(
             builder.add_transparent_output(
                 &TransparentAddress::PublicKey([0; 20]),
@@ -833,7 +833,7 @@ mod tests {
         // Fails with no inputs or outputs
         // 0.0001 t-ZEC fee
         {
-            let builder = Builder::<TestNetwork, OsRng>::new(0);
+            let builder = Builder::<TestNetwork, OsRng>::new(H0);
             assert_eq!(
                 builder.build(consensus::BranchId::Sapling, &MockTxProver),
                 Err(Error::ChangeIsNegative(Amount::from_i64(-10000).unwrap()))
@@ -847,7 +847,7 @@ mod tests {
         // Fail if there is only a Sapling output
         // 0.0005 z-ZEC out, 0.0001 t-ZEC fee
         {
-            let mut builder = Builder::<TestNetwork, OsRng>::new(0);
+            let mut builder = Builder::<TestNetwork, OsRng>::new(H0);
             builder
                 .add_sapling_output(
                     ovk.clone(),
@@ -865,7 +865,7 @@ mod tests {
         // Fail if there is only a transparent output
         // 0.0005 t-ZEC out, 0.0001 t-ZEC fee
         {
-            let mut builder = Builder::<TestNetwork, OsRng>::new(0);
+            let mut builder = Builder::<TestNetwork, OsRng>::new(H0);
             builder
                 .add_transparent_output(
                     &TransparentAddress::PublicKey([0; 20]),
@@ -889,7 +889,7 @@ mod tests {
         // Fail if there is insufficient input
         // 0.0003 z-ZEC out, 0.0002 t-ZEC out, 0.0001 t-ZEC fee, 0.00059999 z-ZEC in
         {
-            let mut builder = Builder::<TestNetwork, OsRng>::new(0);
+            let mut builder = Builder::<TestNetwork, OsRng>::new(H0);
             builder
                 .add_sapling_spend(
                     extsk.clone(),
@@ -932,7 +932,7 @@ mod tests {
         // (Still fails because we are using a MockTxProver which doesn't correctly
         // compute bindingSig.)
         {
-            let mut builder = Builder::<TestNetwork, OsRng>::new(0);
+            let mut builder = Builder::<TestNetwork, OsRng>::new(H0);
             builder
                 .add_sapling_spend(
                     extsk.clone(),

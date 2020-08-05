@@ -154,10 +154,7 @@ pub fn create_to_address<P: AsRef<Path>>(
     };
 
     // Target the next block, assuming we are up-to-date.
-    let (height, anchor_height) = {
-        let (target_height, anchor_height) = get_target_and_anchor_heights(&data)?;
-        (target_height, i64::from(anchor_height))
-    };
+    let (height, anchor_height) = get_target_and_anchor_heights(&data)?;
 
     // The goal of this SQL statement is to select the oldest notes until the required
     // value has been reached, and then fetch the witnesses at the desired height for the
@@ -204,10 +201,10 @@ pub fn create_to_address<P: AsRef<Path>>(
     let notes = stmt_select_notes.query_and_then::<_, Error, _, _>(
         &[
             i64::from(account),
-            anchor_height,
+            i64::from(anchor_height),
             target_value,
             target_value,
-            anchor_height,
+            i64::from(anchor_height),
         ],
         |row| {
             let diversifier = {
@@ -309,7 +306,7 @@ pub fn create_to_address<P: AsRef<Path>>(
     stmt_insert_tx.execute(&[
         tx.txid().0.to_sql()?,
         created.to_sql()?,
-        tx.expiry_height.to_sql()?,
+        i64::from(tx.expiry_height).to_sql()?,
         raw_tx.to_sql()?,
     ])?;
     let id_tx = data.last_insert_rowid();
@@ -808,7 +805,7 @@ mod tests {
             let output = &tx.shielded_outputs[output_index as usize];
 
             try_sapling_output_recovery::<Network>(
-                SAPLING_ACTIVATION_HEIGHT as u32,
+                SAPLING_ACTIVATION_HEIGHT,
                 &extfvk.fvk.ovk,
                 &output.cv,
                 &output.cmu,

@@ -1,6 +1,7 @@
 use std::error;
 use std::fmt;
 use zcash_primitives::{
+    consensus::BlockHeight,
     sapling::Node,
     transaction::{builder, TxId},
 };
@@ -10,13 +11,13 @@ pub enum ErrorKind {
     CorruptedData(&'static str),
     IncorrectHRPExtFVK,
     InsufficientBalance(u64, u64),
-    InvalidChain(i32, crate::chain::ChainInvalidCause),
+    InvalidChain(BlockHeight, crate::chain::ChainInvalidCause),
     InvalidExtSK(u32),
-    InvalidHeight(i32, i32),
+    InvalidHeight(BlockHeight, BlockHeight),
     InvalidMemo(std::str::Utf8Error),
-    InvalidNewWitnessAnchor(usize, TxId, i32, Node),
+    InvalidNewWitnessAnchor(usize, TxId, BlockHeight, Node),
     InvalidNote,
-    InvalidWitnessAnchor(i64, i32),
+    InvalidWitnessAnchor(i64, BlockHeight),
     ScanRequired,
     TableNotEmpty,
     Bech32(bech32::Error),

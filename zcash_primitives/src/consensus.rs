@@ -1,13 +1,127 @@
 //! Consensus parameters.
 
+use std::cmp::{Ord, Ordering};
 use std::convert::TryFrom;
 use std::fmt;
+use std::ops::{Add, Sub};
+
+#[repr(transparent)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct BlockHeight(u32);
+
+pub const H0: BlockHeight = BlockHeight(0);
+
+impl BlockHeight {
+    pub const fn from_u32(v: u32) -> BlockHeight {
+        BlockHeight(v)
+    }
+}
+
+impl fmt::Display for BlockHeight {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt(formatter)
+    }
+}
+
+impl Ord for BlockHeight {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.0.cmp(&other.0)
+    }
+}
+
+impl PartialOrd for BlockHeight {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl From<u32> for BlockHeight {
+    fn from(value: u32) -> Self {
+        BlockHeight(value)
+    }
+}
+
+impl From<u64> for BlockHeight {
+    fn from(value: u64) -> Self {
+        BlockHeight(value as u32)
+    }
+}
+
+impl TryFrom<i32> for BlockHeight {
+    type Error = std::num::TryFromIntError;
+
+    fn try_from(value: i32) -> Result<Self, Self::Error> {
+        u32::try_from(value).map(BlockHeight)
+    }
+}
+
+impl TryFrom<i64> for BlockHeight {
+    type Error = std::num::TryFromIntError;
+
+    fn try_from(value: i64) -> Result<Self, Self::Error> {
+        u32::try_from(value).map(BlockHeight)
+    }
+}
+
+impl From<BlockHeight> for u32 {
+    fn from(value: BlockHeight) -> u32 {
+        value.0
+    }
+}
+
+impl From<BlockHeight> for u64 {
+    fn from(value: BlockHeight) -> u64 {
+        value.0 as u64
+    }
+}
+
+impl From<BlockHeight> for i64 {
+    fn from(value: BlockHeight) -> i64 {
+        value.0 as i64
+    }
+}
+
+impl Add<u32> for BlockHeight {
+    type Output = Self;
+
+    fn add(self, other: u32) -> Self {
+        BlockHeight(self.0 + other)
+    }
+}
+
+impl Add for BlockHeight {
+    type Output = Self;
+
+    fn add(self, other: Self) -> Self {
+        self + other.0
+    }
+}
+
+impl Sub<u32> for BlockHeight {
+    type Output = Self;
+
+    fn sub(self, other: u32) -> Self {
+        if other > self.0 {
+            panic!("Subtraction resulted in negative block height.");
+        }
+
+        BlockHeight(self.0 - other)
+    }
+}
+
+impl Sub for BlockHeight {
+    type Output = Self;
+
+    fn sub(self, other: Self) -> Self {
+        self - other.0
+    }
+}
 
 /// Zcash consensus parameters.
 pub trait Parameters {
-    fn activation_height(nu: NetworkUpgrade) -> Option<u32>;
+    fn activation_height(nu: NetworkUpgrade) -> Option<BlockHeight>;
 
-    fn is_nu_active(nu: NetworkUpgrade, height: u32) -> bool {
+    fn is_nu_active(nu: NetworkUpgrade, height: BlockHeight) -> bool {
         match Self::activation_height(nu) {
             Some(h) if h <= height => true,
             _ => false,
@@ -20,13 +134,13 @@ pub trait Parameters {
 pub struct MainNetwork;
 
 impl Parameters for MainNetwork {
-    fn activation_height(nu: NetworkUpgrade) -> Option<u32> {
+    fn activation_height(nu: NetworkUpgrade) -> Option<BlockHeight> {
         match nu {
-            NetworkUpgrade::Overwinter => Some(347_500),
-            NetworkUpgrade::Sapling => Some(419_200),
-            NetworkUpgrade::Blossom => Some(653_600),
-            NetworkUpgrade::Heartwood => Some(903_000),
-            NetworkUpgrade::Canopy => Some(1_046_400),
+            NetworkUpgrade::Overwinter => Some(BlockHeight(347_500)),
+            NetworkUpgrade::Sapling => Some(BlockHeight(419_200)),
+            NetworkUpgrade::Blossom => Some(BlockHeight(653_600)),
+            NetworkUpgrade::Heartwood => Some(BlockHeight(903_000)),
+            NetworkUpgrade::Canopy => Some(BlockHeight(1_046_400)),
         }
     }
 }
@@ -36,13 +150,13 @@ impl Parameters for MainNetwork {
 pub struct TestNetwork;
 
 impl Parameters for TestNetwork {
-    fn activation_height(nu: NetworkUpgrade) -> Option<u32> {
+    fn activation_height(nu: NetworkUpgrade) -> Option<BlockHeight> {
         match nu {
-            NetworkUpgrade::Overwinter => Some(207_500),
-            NetworkUpgrade::Sapling => Some(280_000),
-            NetworkUpgrade::Blossom => Some(584_000),
-            NetworkUpgrade::Heartwood => Some(903_800),
-            NetworkUpgrade::Canopy => Some(1_028_500),
+            NetworkUpgrade::Overwinter => Some(BlockHeight(207_500)),
+            NetworkUpgrade::Sapling => Some(BlockHeight(280_000)),
+            NetworkUpgrade::Blossom => Some(BlockHeight(584_000)),
+            NetworkUpgrade::Heartwood => Some(BlockHeight(903_800)),
+            NetworkUpgrade::Canopy => Some(BlockHeight(1_028_500)),
         }
     }
 }
@@ -176,7 +290,7 @@ impl BranchId {
     /// the given height.
     ///
     /// This is the branch ID that should be used when creating transactions.
-    pub fn for_height<C: Parameters>(height: u32) -> Self {
+    pub fn for_height<C: Parameters>(height: BlockHeight) -> Self {
         for nu in UPGRADES_IN_ORDER.iter().rev() {
             if C::is_nu_active(*nu, height) {
                 return nu.branch_id();
@@ -192,7 +306,9 @@ impl BranchId {
 mod tests {
     use std::convert::TryFrom;
 
-    use super::{BranchId, MainNetwork, NetworkUpgrade, Parameters, UPGRADES_IN_ORDER};
+    use super::{
+        BlockHeight, BranchId, MainNetwork, NetworkUpgrade, Parameters, UPGRADES_IN_ORDER,
+    };
 
     #[test]
     fn nu_ordering() {
@@ -216,14 +332,17 @@ mod tests {
 
     #[test]
     fn nu_is_active() {
-        assert!(!MainNetwork::is_nu_active(NetworkUpgrade::Overwinter, 0));
         assert!(!MainNetwork::is_nu_active(
             NetworkUpgrade::Overwinter,
-            347_499
+            BlockHeight(0)
+        ));
+        assert!(!MainNetwork::is_nu_active(
+            NetworkUpgrade::Overwinter,
+            BlockHeight(347_499)
         ));
         assert!(MainNetwork::is_nu_active(
             NetworkUpgrade::Overwinter,
-            347_500
+            BlockHeight(347_500)
         ));
     }
 
@@ -235,25 +354,28 @@ mod tests {
 
     #[test]
     fn branch_id_for_height() {
-        assert_eq!(BranchId::for_height::<MainNetwork>(0), BranchId::Sprout,);
         assert_eq!(
-            BranchId::for_height::<MainNetwork>(419_199),
+            BranchId::for_height::<MainNetwork>(BlockHeight(0)),
+            BranchId::Sprout,
+        );
+        assert_eq!(
+            BranchId::for_height::<MainNetwork>(BlockHeight(419_199)),
             BranchId::Overwinter,
         );
         assert_eq!(
-            BranchId::for_height::<MainNetwork>(419_200),
+            BranchId::for_height::<MainNetwork>(BlockHeight(419_200)),
             BranchId::Sapling,
         );
         assert_eq!(
-            BranchId::for_height::<MainNetwork>(903_000),
+            BranchId::for_height::<MainNetwork>(BlockHeight(903_000)),
             BranchId::Heartwood,
         );
         assert_eq!(
-            BranchId::for_height::<MainNetwork>(1_046_400),
+            BranchId::for_height::<MainNetwork>(BlockHeight(1_046_400)),
             BranchId::Canopy,
         );
         assert_eq!(
-            BranchId::for_height::<MainNetwork>(5_000_000),
+            BranchId::for_height::<MainNetwork>(BlockHeight(5_000_000)),
             BranchId::Canopy,
         );
     }

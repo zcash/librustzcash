@@ -1,6 +1,10 @@
 use blake2b_simd::Params;
 
-use crate::{consensus, consensus::NetworkUpgrade, primitives::Rseed};
+use crate::{
+    consensus::{self, BlockHeight, NetworkUpgrade},
+    primitives::Rseed,
+};
+
 use ff::Field;
 use rand_core::{CryptoRng, RngCore};
 
@@ -13,7 +17,7 @@ pub fn hash_to_scalar(persona: &[u8], a: &[u8], b: &[u8]) -> jubjub::Fr {
 }
 
 pub fn generate_random_rseed<P: consensus::Parameters, R: RngCore + CryptoRng>(
-    height: u32,
+    height: BlockHeight,
     rng: &mut R,
 ) -> Rseed {
     if P::is_nu_active(NetworkUpgrade::Canopy, height) {

@@ -1,7 +1,7 @@
 //! Implementation of in-band secret distribution for Zcash transactions.
 
 use crate::{
-    consensus::{self, NetworkUpgrade, ZIP212_GRACE_PERIOD},
+    consensus::{self, BlockHeight, NetworkUpgrade, ZIP212_GRACE_PERIOD},
     primitives::{Diversifier, Note, PaymentAddress, Rseed},
 };
 use blake2b_simd::{Hash as Blake2bHash, Params as Blake2bParams};
@@ -359,7 +359,7 @@ impl<R: RngCore + CryptoRng> SaplingNoteEncryption<R> {
 }
 
 fn parse_note_plaintext_without_memo<P: consensus::Parameters>(
-    height: u32,
+    height: BlockHeight,
     ivk: &jubjub::Fr,
     epk: &jubjub::SubgroupPoint,
     cmu: &bls12_381::Scalar,
@@ -406,7 +406,10 @@ fn parse_note_plaintext_without_memo<P: consensus::Parameters>(
     Some((note, to))
 }
 
-pub fn plaintext_version_is_valid<P: consensus::Parameters>(height: u32, leadbyte: u8) -> bool {
+pub fn plaintext_version_is_valid<P: consensus::Parameters>(
+    height: BlockHeight,
+    leadbyte: u8,
+) -> bool {
     if P::is_nu_active(NetworkUpgrade::Canopy, height) {
         let grace_period_end_height = P::activation_height(NetworkUpgrade::Canopy)
             .expect("Should have Canopy activation height")
@@ -435,7 +438,7 @@ pub fn plaintext_version_is_valid<P: consensus::Parameters>(height: u32, leadbyt
 ///
 /// Implements section 4.17.2 of the Zcash Protocol Specification.
 pub fn try_sapling_note_decryption<P: consensus::Parameters>(
-    height: u32,
+    height: BlockHeight,
     ivk: &jubjub::Fr,
     epk: &jubjub::SubgroupPoint,
     cmu: &bls12_381::Scalar,
@@ -478,7 +481,7 @@ pub fn try_sapling_note_decryption<P: consensus::Parameters>(
 ///
 /// [`ZIP 307`]: https://zips.z.cash/zip-0307
 pub fn try_sapling_compact_note_decryption<P: consensus::Parameters>(
-    height: u32,
+    height: BlockHeight,
     ivk: &jubjub::Fr,
     epk: &jubjub::SubgroupPoint,
     cmu: &bls12_381::Scalar,
@@ -506,7 +509,7 @@ pub fn try_sapling_compact_note_decryption<P: consensus::Parameters>(
 /// Implements part of section 4.17.3 of the Zcash Protocol Specification.
 /// For decryption using a Full Viewing Key see [`try_sapling_output_recovery`].
 pub fn try_sapling_output_recovery_with_ock<P: consensus::Parameters>(
-    height: u32,
+    height: BlockHeight,
     ock: &OutgoingCipherKey,
     cmu: &bls12_381::Scalar,
     epk: &jubjub::SubgroupPoint,
@@ -612,7 +615,7 @@ pub fn try_sapling_output_recovery_with_ock<P: consensus::Parameters>(
 ///
 /// Implements section 4.17.3 of the Zcash Protocol Specification.
 pub fn try_sapling_output_recovery<P: consensus::Parameters>(
-    height: u32,
+    height: BlockHeight,
     ovk: &OutgoingViewingKey,
     cv: &jubjub::ExtendedPoint,
     cmu: &bls12_381::Scalar,
@@ -650,7 +653,7 @@ mod tests {
     };
     use crate::{
         consensus::{
-            NetworkUpgrade,
+            BlockHeight, NetworkUpgrade,
             NetworkUpgrade::{Canopy, Sapling},
             Parameters, TestNetwork, ZIP212_GRACE_PERIOD,
         },
@@ -776,7 +779,7 @@ mod tests {
     }
 
     fn random_enc_ciphertext<R: RngCore + CryptoRng>(
-        height: u32,
+        height: BlockHeight,
         mut rng: &mut R,
     ) -> (
         OutgoingViewingKey,
@@ -835,7 +838,7 @@ mod tests {
     }
 
     fn random_enc_ciphertext_with<R: RngCore + CryptoRng>(
-        height: u32,
+        height: BlockHeight,
         ivk: jubjub::Fr,
         mut rng: &mut R,
     ) -> (

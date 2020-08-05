@@ -7,8 +7,7 @@ use std::fmt;
 use std::io::{self, Read, Write};
 use std::ops::Deref;
 
-use crate::redjubjub::Signature;
-use crate::serialize::Vector;
+use crate::{consensus::BlockHeight, redjubjub::Signature, serialize::Vector};
 
 pub mod builder;
 pub mod components;
@@ -65,7 +64,7 @@ pub struct TransactionData {
     pub vin: Vec<TxIn>,
     pub vout: Vec<TxOut>,
     pub lock_time: u32,
-    pub expiry_height: u32,
+    pub expiry_height: BlockHeight,
     pub value_balance: Amount,
     pub shielded_spends: Vec<SpendDescription>,
     pub shielded_outputs: Vec<OutputDescription>,
@@ -119,7 +118,7 @@ impl TransactionData {
             vin: vec![],
             vout: vec![],
             lock_time: 0,
-            expiry_height: 0,
+            expiry_height: 0u32.into(),
             value_balance: Amount::zero(),
             shielded_spends: vec![],
             shielded_outputs: vec![],
@@ -188,10 +187,10 @@ impl Transaction {
         let vin = Vector::read(&mut reader, TxIn::read)?;
         let vout = Vector::read(&mut reader, TxOut::read)?;
         let lock_time = reader.read_u32::<LittleEndian>()?;
-        let expiry_height = if is_overwinter_v3 || is_sapling_v4 {
-            reader.read_u32::<LittleEndian>()?
+        let expiry_height: BlockHeight = if is_overwinter_v3 || is_sapling_v4 {
+            reader.read_u32::<LittleEndian>()?.into()
         } else {
-            0
+            0u32.into()
         };
 
         let (value_balance, shielded_spends, shielded_outputs) = if is_sapling_v4 {
@@ -274,7 +273,7 @@ impl Transaction {
         Vector::write(&mut writer, &self.vout, |w, e| e.write(w))?;
         writer.write_u32::<LittleEndian>(self.lock_time)?;
         if is_overwinter_v3 || is_sapling_v4 {
-            writer.write_u32::<LittleEndian>(self.expiry_height)?;
+            writer.write_u32::<LittleEndian>(u32::from(self.expiry_height))?;
         }
 
         if is_sapling_v4 {

@@ -84,7 +84,7 @@ pub fn get_verified_balance<P: AsRef<Path>>(db_data: P, account: u32) -> Result<
         "SELECT SUM(value) FROM received_notes
         INNER JOIN transactions ON transactions.id_tx = received_notes.tx
         WHERE account = ? AND spent IS NULL AND transactions.block <= ?",
-        &[account, anchor_height],
+        &[account, u32::from(anchor_height)],
         |row| row.get(0).or(Ok(0)),
     )?;
 

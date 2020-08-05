@@ -1,14 +1,17 @@
 //! Functions for scanning the chain and extracting relevant information.
 
+use std::path::Path;
+
 use ff::PrimeField;
 use protobuf::parse_from_bytes;
 use rusqlite::{types::ToSql, Connection, OptionalExtension, NO_PARAMS};
-use std::path::Path;
+
 use zcash_client_backend::{
     decrypt_transaction, encoding::decode_extended_full_viewing_key,
     proto::compact_formats::CompactBlock, welding_rig::scan_block,
 };
 use zcash_primitives::{
+    consensus::BlockHeight,
     merkle_tree::{CommitmentTree, IncrementalWitness},
     sapling::Node,
     transaction::Transaction,
@@ -21,7 +24,7 @@ use crate::{
 };
 
 struct CompactBlockRow {
-    height: i32,
+    height: BlockHeight,
     data: Vec<u8>,
 }
 
@@ -63,7 +66,7 @@ struct WitnessRow {
 pub fn scan_cached_blocks<P: AsRef<Path>, Q: AsRef<Path>>(
     db_cache: P,
     db_data: Q,
-    limit: Option<i32>,
+    limit: Option<u32>,
 ) -> Result<(), Error> {
     let cache = Connection::open(db_cache)?;
     let data = Connection::open(db_data)?;
@@ -71,19 +74,24 @@ pub fn scan_cached_blocks<P: AsRef<Path>, Q: AsRef<Path>>(
     // Recall where we synced up to previously.
     // If we have never synced, use sapling activation height to select all cached CompactBlocks.
     let mut last_height = data.query_row("SELECT MAX(height) FROM blocks", NO_PARAMS, |row| {
-        row.get(0).or(Ok(SAPLING_ACTIVATION_HEIGHT - 1))
+        row.get::<_, u32>(0)
+            .map(BlockHeight::from)
+            .or(Ok(SAPLING_ACTIVATION_HEIGHT - 1))
     })?;
 
     // Fetch the CompactBlocks we need to scan
     let mut stmt_blocks = cache.prepare(
         "SELECT height, data FROM compactblocks WHERE height > ? ORDER BY height ASC LIMIT ?",
     )?;
-    let rows = stmt_blocks.query_map(&[last_height, limit.unwrap_or(i32::max_value())], |row| {
-        Ok(CompactBlockRow {
-            height: row.get(0)?,
-            data: row.get(1)?,
-        })
-    })?;
+    let rows = stmt_blocks.query_map(
+        &[u32::from(last_height), limit.unwrap_or(u32::max_value())],
+        |row| {
+            Ok(CompactBlockRow {
+                height: row.get::<_, u32>(0).map(BlockHeight::from)?,
+                data: row.get(1)?,
+            })
+        },
+    )?;
 
     // Fetch the ExtendedFullViewingKeys we are tracking
     let mut stmt_fetch_accounts =
@@ -101,7 +109,7 @@ pub fn scan_cached_blocks<P: AsRef<Path>, Q: AsRef<Path>>(
     // Get the most recent CommitmentTree
     let mut stmt_fetch_tree = data.prepare("SELECT sapling_tree FROM blocks WHERE height = ?")?;
     let mut tree = stmt_fetch_tree
-        .query_row(&[last_height], |row| {
+        .query_row(&[u32::from(last_height)], |row| {
             row.get(0).map(|data: Vec<_>| {
                 CommitmentTree::read(&data[..]).unwrap_or_else(|_| CommitmentTree::new())
             })
@@ -111,7 +119,7 @@ pub fn scan_cached_blocks<P: AsRef<Path>, Q: AsRef<Path>>(
     // Get most recent incremental witnesses for the notes we are tracking
     let mut stmt_fetch_witnesses =
         data.prepare("SELECT note, witness FROM sapling_witnesses WHERE block = ?")?;
-    let witnesses = stmt_fetch_witnesses.query_map(&[last_height], |row| {
+    let witnesses = stmt_fetch_witnesses.query_map(&[u32::from(last_height)], |row| {
         let id_note = row.get(0)?;
         let data: Vec<_> = row.get(1)?;
         Ok(IncrementalWitness::read(&data[..]).map(|witness| WitnessRow { id_note, witness }))
@@ -226,7 +234,7 @@ pub fn scan_cached_blocks<P: AsRef<Path>, Q: AsRef<Path>>(
         tree.write(&mut encoded_tree)
             .expect("Should be able to write to a Vec");
         stmt_insert_block.execute(&[
-            row.height.to_sql()?,
+            u32::from(row.height).to_sql()?,
             block_hash.to_sql()?,
             block_time.to_sql()?,
             encoded_tree.to_sql()?,
@@ -236,7 +244,7 @@ pub fn scan_cached_blocks<P: AsRef<Path>, Q: AsRef<Path>>(
             // First try update an existing transaction in the database.
             let txid = tx.txid.0.to_vec();
             let tx_row = if stmt_update_tx.execute(&[
-                row.height.to_sql()?,
+                u32::from(row.height).to_sql()?,
                 (tx.index as i64).to_sql()?,
                 txid.to_sql()?,
             ])? == 0
@@ -244,7 +252,7 @@ pub fn scan_cached_blocks<P: AsRef<Path>, Q: AsRef<Path>>(
                 // It isn't there, so insert our transaction into the database.
                 stmt_insert_tx.execute(&[
                     txid.to_sql()?,
-                    row.height.to_sql()?,
+                    u32::from(row.height).to_sql()?,
                     (tx.index as i64).to_sql()?,
                 ])?;
                 data.last_insert_rowid()
@@ -331,16 +339,16 @@ pub fn scan_cached_blocks<P: AsRef<Path>, Q: AsRef<Path>>(
                 .expect("Should be able to write to a Vec");
             stmt_insert_witness.execute(&[
                 witness_row.id_note.to_sql()?,
-                last_height.to_sql()?,
+                u32::from(last_height).to_sql()?,
                 encoded.to_sql()?,
             ])?;
         }
 
         // Prune the stored witnesses (we only expect rollbacks of at most 100 blocks).
-        stmt_prune_witnesses.execute(&[last_height - 100])?;
+        stmt_prune_witnesses.execute(&[u32::from(last_height - 100)])?;
 
         // Update now-expired transactions that didn't get mined.
-        stmt_update_expired.execute(&[last_height])?;
+        stmt_update_expired.execute(&[u32::from(last_height)])?;
 
         // Commit the SQL transaction, writing this block's data atomically.
         data.execute("COMMIT", NO_PARAMS)?;
@@ -373,7 +381,9 @@ pub fn decrypt_and_store_transaction<P: AsRef<Path>>(
     // Height is block height for mined transactions, and the "mempool height" (chain height + 1) for mempool transactions.
     let mut stmt_select_block = data.prepare("SELECT block FROM transactions WHERE txid = ?")?;
     let height = match stmt_select_block
-        .query_row(&[tx.txid().0.to_vec()], |row| row.get(0))
+        .query_row(&[tx.txid().0.to_vec()], |row| {
+            row.get::<_, u32>(0).map(BlockHeight::from)
+        })
         .optional()?
     {
         Some(height) => height,
@@ -382,11 +392,11 @@ pub fn decrypt_and_store_transaction<P: AsRef<Path>>(
                 row.get(0)
             })
             .optional()?
-            .map(|last_height: u32| last_height + 1)
-            .unwrap_or(SAPLING_ACTIVATION_HEIGHT as u32),
+            .map(|last_height: u32| BlockHeight::from(last_height + 1))
+            .unwrap_or(SAPLING_ACTIVATION_HEIGHT),
     };
 
-    let outputs = decrypt_transaction::<Network>(height as u32, tx, &extfvks);
+    let outputs = decrypt_transaction::<Network>(height, tx, &extfvks);
 
     if outputs.is_empty() {
         // Nothing to see here
@@ -429,13 +439,17 @@ pub fn decrypt_and_store_transaction<P: AsRef<Path>>(
     let mut raw_tx = vec![];
     tx.write(&mut raw_tx)?;
     let tx_row = if stmt_update_tx.execute(&[
-        tx.expiry_height.to_sql()?,
+        u32::from(tx.expiry_height).to_sql()?,
         raw_tx.to_sql()?,
         txid.to_sql()?,
     ])? == 0
     {
         // It isn't there, so insert our transaction into the database.
-        stmt_insert_tx.execute(&[txid.to_sql()?, tx.expiry_height.to_sql()?, raw_tx.to_sql()?])?;
+        stmt_insert_tx.execute(&[
+            txid.to_sql()?,
+            u32::from(tx.expiry_height).to_sql()?,
+            raw_tx.to_sql()?,
+        ])?;
         data.last_insert_rowid()
     } else {
         // It was there, so grab its row number.

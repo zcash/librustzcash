@@ -27,7 +27,7 @@
 use rusqlite::{Connection, NO_PARAMS};
 use std::cmp;
 use zcash_client_backend::encoding::encode_payment_address;
-use zcash_primitives::zip32::ExtendedFullViewingKey;
+use zcash_primitives::{consensus::BlockHeight, zip32::ExtendedFullViewingKey};
 
 #[cfg(feature = "mainnet")]
 use zcash_client_backend::constants::mainnet::{
@@ -55,10 +55,10 @@ pub mod transact;
 const ANCHOR_OFFSET: u32 = 10;
 
 #[cfg(feature = "mainnet")]
-const SAPLING_ACTIVATION_HEIGHT: i32 = 419_200;
+const SAPLING_ACTIVATION_HEIGHT: BlockHeight = BlockHeight::from_u32(419_200);
 
 #[cfg(not(feature = "mainnet"))]
-const SAPLING_ACTIVATION_HEIGHT: i32 = 280_000;
+const SAPLING_ACTIVATION_HEIGHT: BlockHeight = BlockHeight::from_u32(280_000);
 
 fn address_from_extfvk(extfvk: &ExtendedFullViewingKey) -> String {
     let addr = extfvk.default_address().unwrap().1;
@@ -67,7 +67,9 @@ fn address_from_extfvk(extfvk: &ExtendedFullViewingKey) -> String {
 
 /// Determines the target height for a transaction, and the height from which to
 /// select anchors, based on the current synchronised block chain.
-fn get_target_and_anchor_heights(data: &Connection) -> Result<(u32, u32), error::Error> {
+fn get_target_and_anchor_heights(
+    data: &Connection,
+) -> Result<(BlockHeight, BlockHeight), error::Error> {
     data.query_row_and_then(
         "SELECT MIN(height), MAX(height) FROM blocks",
         NO_PARAMS,
@@ -86,7 +88,10 @@ fn get_target_and_anchor_heights(data: &Connection) -> Result<(u32, u32), error:
                 let anchor_height =
                     cmp::max(target_height.saturating_sub(ANCHOR_OFFSET), min_height);
 
-                Ok((target_height, anchor_height))
+                Ok((
+                    BlockHeight::from(target_height),
+                    BlockHeight::from(anchor_height),
+                ))
             }
         },
     )
@@ -106,6 +111,7 @@ mod tests {
     };
     use zcash_primitives::{
         block::BlockHash,
+        consensus::BlockHeight,
         note_encryption::{Memo, SaplingNoteEncryption},
         primitives::{Note, PaymentAddress},
         transaction::components::Amount,
@@ -116,7 +122,7 @@ mod tests {
     /// Create a fake CompactBlock at the given height, containing a single output paying
     /// the given address. Returns the CompactBlock and the nullifier for the new note.
     pub(crate) fn fake_compact_block(
-        height: i32,
+        height: BlockHeight,
         prev_hash: BlockHash,
         extfvk: ExtendedFullViewingKey,
         value: Amount,
@@ -125,7 +131,7 @@ mod tests {
 
         // Create a fake Note for the account
         let mut rng = OsRng;
-        let rseed = generate_random_rseed::<Network, OsRng>(height as u32, &mut rng);
+        let rseed = generate_random_rseed::<Network, OsRng>(height, &mut rng);
         let note = Note {
             g_d: to.diversifier().g_d().unwrap(),
             pk_d: to.pk_d().clone(),
@@ -154,7 +160,7 @@ mod tests {
         ctx.set_hash(txid);
         ctx.outputs.push(cout);
         let mut cb = CompactBlock::new();
-        cb.set_height(height as u64);
+        cb.set_height(u64::from(height));
         cb.hash.resize(32, 0);
         rng.fill_bytes(&mut cb.hash);
         cb.prevHash.extend_from_slice(&prev_hash.0);
@@ -165,7 +171,7 @@ mod tests {
     /// Create a fake CompactBlock at the given height, spending a single note from the
     /// given address.
     pub(crate) fn fake_compact_block_spending(
-        height: i32,
+        height: BlockHeight,
         prev_hash: BlockHash,
         (nf, in_value): (Vec<u8>, Amount),
         extfvk: ExtendedFullViewingKey,
@@ -173,7 +179,7 @@ mod tests {
         value: Amount,
     ) -> CompactBlock {
         let mut rng = OsRng;
-        let rseed = generate_random_rseed::<Network, OsRng>(height as u32, &mut rng);
+        let rseed = generate_random_rseed::<Network, OsRng>(height, &mut rng);
 
         // Create a fake CompactBlock containing the note
         let mut cspend = CompactSpend::new();
@@ -213,7 +219,7 @@ mod tests {
         // Create a fake Note for the change
         ctx.outputs.push({
             let change_addr = extfvk.default_address().unwrap().1;
-            let rseed = generate_random_rseed::<Network, OsRng>(height as u32, &mut rng);
+            let rseed = generate_random_rseed::<Network, OsRng>(height, &mut rng);
             let note = Note {
                 g_d: change_addr.diversifier().g_d().unwrap(),
                 pk_d: change_addr.pk_d().clone(),
@@ -239,7 +245,7 @@ mod tests {
         });
 
         let mut cb = CompactBlock::new();
-        cb.set_height(height as u64);
+        cb.set_height(u64::from(height));
         cb.hash.resize(32, 0);
         rng.fill_bytes(&mut cb.hash);
         cb.prevHash.extend_from_slice(&prev_hash.0);
@@ -255,7 +261,7 @@ mod tests {
             .prepare("INSERT INTO compactblocks (height, data) VALUES (?, ?)")
             .unwrap()
             .execute(&[
-                (cb.height as i32).to_sql().unwrap(),
+                (cb.height as u32).to_sql().unwrap(),
                 cb_bytes.to_sql().unwrap(),
             ])
             .unwrap();
