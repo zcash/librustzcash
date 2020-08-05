@@ -35,3 +35,9 @@ use crate::jubjub::JubjubBls12;
 lazy_static! {
     pub static ref JUBJUB: JubjubBls12 = JubjubBls12::new();
 }
+
+#[cfg(feature = "mainnet")]
+use crate::consensus::MainNetwork as Network;
+
+#[cfg(not(feature = "mainnet"))]
+use crate::consensus::TestNetwork as Network;

@@ -5,10 +5,10 @@ use std::fmt;
 
 /// Zcash consensus parameters.
 pub trait Parameters {
-    fn activation_height(&self, nu: NetworkUpgrade) -> Option<u32>;
+    fn activation_height(nu: NetworkUpgrade) -> Option<u32>;
 
-    fn is_nu_active(&self, nu: NetworkUpgrade, height: u32) -> bool {
-        match self.activation_height(nu) {
+    fn is_nu_active(nu: NetworkUpgrade, height: u32) -> bool {
+        match Self::activation_height(nu) {
             Some(h) if h <= height => true,
             _ => false,
         }
@@ -26,7 +26,7 @@ pub trait Parameters {
 pub struct MainNetwork;
 
 impl Parameters for MainNetwork {
-    fn activation_height(&self, nu: NetworkUpgrade) -> Option<u32> {
+    fn activation_height(nu: NetworkUpgrade) -> Option<u32> {
         match nu {
             NetworkUpgrade::Overwinter => Some(347_500),
             NetworkUpgrade::Sapling => Some(419_200),
@@ -48,7 +48,7 @@ impl Parameters for MainNetwork {
 pub struct TestNetwork;
 
 impl Parameters for TestNetwork {
-    fn activation_height(&self, nu: NetworkUpgrade) -> Option<u32> {
+    fn activation_height(nu: NetworkUpgrade) -> Option<u32> {
         match nu {
             NetworkUpgrade::Overwinter => Some(207_500),
             NetworkUpgrade::Sapling => Some(280_000),
@@ -194,9 +194,9 @@ impl BranchId {
     /// the given height.
     ///
     /// This is the branch ID that should be used when creating transactions.
-    pub fn for_height<C: Parameters>(parameters: C, height: u32) -> Self {
+    pub fn for_height<C: Parameters>(height: u32) -> Self {
         for nu in UPGRADES_IN_ORDER.iter().rev() {
-            if parameters.is_nu_active(*nu, height) {
+            if C::is_nu_active(*nu, height) {
                 return nu.branch_id();
             }
         }
@@ -208,9 +208,9 @@ impl BranchId {
 
 #[cfg(test)]
 mod tests {
+    use super::{BranchId, MainNetwork, NetworkUpgrade, UPGRADES_IN_ORDER};
+    use crate::consensus::Parameters;
     use std::convert::TryFrom;
-
-    use super::{BranchId, MainNetwork, NetworkUpgrade, Parameters, UPGRADES_IN_ORDER};
 
     #[test]
     fn nu_ordering() {
@@ -218,8 +218,8 @@ mod tests {
             let nu_a = UPGRADES_IN_ORDER[i - 1];
             let nu_b = UPGRADES_IN_ORDER[i];
             match (
-                MainNetwork.activation_height(nu_a),
-                MainNetwork.activation_height(nu_b),
+                MainNetwork::activation_height(nu_a),
+                MainNetwork::activation_height(nu_b),
             ) {
                 (Some(a), Some(b)) if a < b => (),
                 (Some(_), None) => (),
@@ -234,9 +234,15 @@ mod tests {
 
     #[test]
     fn nu_is_active() {
-        assert!(!MainNetwork.is_nu_active(NetworkUpgrade::Overwinter, 0));
-        assert!(!MainNetwork.is_nu_active(NetworkUpgrade::Overwinter, 347_499));
-        assert!(MainNetwork.is_nu_active(NetworkUpgrade::Overwinter, 347_500));
+        assert!(!MainNetwork::is_nu_active(NetworkUpgrade::Overwinter, 0));
+        assert!(!MainNetwork::is_nu_active(
+            NetworkUpgrade::Overwinter,
+            347_499
+        ));
+        assert!(MainNetwork::is_nu_active(
+            NetworkUpgrade::Overwinter,
+            347_500
+        ));
     }
 
     #[test]
@@ -247,28 +253,25 @@ mod tests {
 
     #[test]
     fn branch_id_for_height() {
+        assert_eq!(BranchId::for_height::<MainNetwork>(0), BranchId::Sprout,);
         assert_eq!(
-            BranchId::for_height::<MainNetwork>(MainNetwork, 0),
-            BranchId::Sprout,
-        );
-        assert_eq!(
-            BranchId::for_height::<MainNetwork>(MainNetwork, 419_199),
+            BranchId::for_height::<MainNetwork>(419_199),
             BranchId::Overwinter,
         );
         assert_eq!(
-            BranchId::for_height::<MainNetwork>(MainNetwork, 419_200),
+            BranchId::for_height::<MainNetwork>(419_200),
             BranchId::Sapling,
         );
         assert_eq!(
-            BranchId::for_height::<MainNetwork>(MainNetwork, 903_000),
+            BranchId::for_height::<MainNetwork>(903_000),
             BranchId::Heartwood,
         );
         assert_eq!(
-            BranchId::for_height::<MainNetwork>(MainNetwork, 1_046_400),
+            BranchId::for_height::<MainNetwork>(1_046_400),
             BranchId::Canopy,
         );
         assert_eq!(
-            BranchId::for_height::<MainNetwork>(MainNetwork, 5_000_000),
+            BranchId::for_height::<MainNetwork>(5_000_000),
             BranchId::Canopy,
         );
     }

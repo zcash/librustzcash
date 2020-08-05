@@ -25,7 +25,7 @@ use crate::{
         components::{amount::DEFAULT_FEE, Amount, OutputDescription, SpendDescription, TxOut},
         signature_hash_data, Transaction, TransactionData, SIGHASH_ALL,
     },
-    JUBJUB,
+    Network, JUBJUB,
 };
 
 #[cfg(feature = "transparent-inputs")]
@@ -88,7 +88,6 @@ pub struct SaplingOutput {
 
 impl SaplingOutput {
     pub fn new<R: RngCore + CryptoRng, P: consensus::Parameters>(
-        parameters: P,
         height: u32,
         rng: &mut R,
         ovk: OutgoingViewingKey,
@@ -104,7 +103,7 @@ impl SaplingOutput {
             return Err(Error::InvalidAmount);
         }
 
-        let rseed = if parameters.is_nu_active(NetworkUpgrade::Canopy, height) {
+        let rseed = if P::is_nu_active(NetworkUpgrade::Canopy, height) {
             let mut buffer = [0u8; 32];
             &rng.fill_bytes(&mut buffer);
             Rseed::AfterZip212(buffer)
@@ -403,22 +402,14 @@ impl<R: RngCore + CryptoRng> Builder<R> {
     }
 
     /// Adds a Sapling address to send funds to.
-    pub fn add_sapling_output(
+    pub fn add_sapling_output<P: consensus::Parameters>(
         &mut self,
         ovk: OutgoingViewingKey,
         to: PaymentAddress<Bls12>,
         value: Amount,
         memo: Option<Memo>,
     ) -> Result<(), Error> {
-        let output = SaplingOutput::new(
-            consensus::MainNetwork,
-            self.height,
-            &mut self.rng,
-            ovk,
-            to,
-            value,
-            memo,
-        )?;
+        let output = SaplingOutput::new::<R, P>(self.height, &mut self.rng, ovk, to, value, memo)?;
 
         self.mtx.value_balance -= value;
 
@@ -518,7 +509,7 @@ impl<R: RngCore + CryptoRng> Builder<R> {
                 return Err(Error::NoChangeAddress);
             };
 
-            self.add_sapling_output(change_address.0, change_address.1, change, None)?;
+            self.add_sapling_output::<Network>(change_address.0, change_address.1, change, None)?;
         }
 
         //
@@ -733,7 +724,7 @@ mod tests {
         sapling::Node,
         transaction::components::Amount,
         zip32::{ExtendedFullViewingKey, ExtendedSpendingKey},
-        JUBJUB,
+        Network, JUBJUB,
     };
 
     #[test]
@@ -745,7 +736,7 @@ mod tests {
 
         let mut builder = Builder::new(0);
         assert_eq!(
-            builder.add_sapling_output(ovk, to, Amount::from_i64(-1).unwrap(), None),
+            builder.add_sapling_output::<Network>(ovk, to, Amount::from_i64(-1).unwrap(), None),
             Err(Error::InvalidAmount)
         );
     }
@@ -758,9 +749,8 @@ mod tests {
             TransactionData,
         };
 
-        let sapling_activation_height = consensus::MainNetwork
-            .activation_height(NetworkUpgrade::Sapling)
-            .unwrap();
+        let sapling_activation_height =
+            Network::activation_height(NetworkUpgrade::Sapling).unwrap();
 
         // Create a builder with 0 fee, so we can construct t outputs
         let mut builder = builder::Builder {
@@ -865,7 +855,7 @@ mod tests {
         {
             let mut builder = Builder::new(0);
             builder
-                .add_sapling_output(
+                .add_sapling_output::<Network>(
                     ovk.clone(),
                     to.clone(),
                     Amount::from_u64(50000).unwrap(),
@@ -915,7 +905,7 @@ mod tests {
                 )
                 .unwrap();
             builder
-                .add_sapling_output(
+                .add_sapling_output::<Network>(
                     ovk.clone(),
                     to.clone(),
                     Amount::from_u64(30000).unwrap(),
@@ -961,7 +951,7 @@ mod tests {
                 .add_sapling_spend(extsk, *to.diversifier(), note2, witness2.path().unwrap())
                 .unwrap();
             builder
-                .add_sapling_output(ovk, to, Amount::from_u64(30000).unwrap(), None)
+                .add_sapling_output::<Network>(ovk, to, Amount::from_u64(30000).unwrap(), None)
                 .unwrap();
             builder
                 .add_transparent_output(

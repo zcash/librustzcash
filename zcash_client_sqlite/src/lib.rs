@@ -33,11 +33,16 @@ use zcash_primitives::zip32::ExtendedFullViewingKey;
 use zcash_client_backend::constants::mainnet::{
     HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY, HRP_SAPLING_PAYMENT_ADDRESS,
 };
-
 #[cfg(not(feature = "mainnet"))]
 use zcash_client_backend::constants::testnet::{
     HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY, HRP_SAPLING_PAYMENT_ADDRESS,
 };
+
+#[cfg(feature = "mainnet")]
+pub use zcash_primitives::consensus::MainNetwork as Network;
+
+#[cfg(not(feature = "mainnet"))]
+pub use zcash_primitives::consensus::TestNetwork as Network;
 
 pub mod address;
 pub mod chain;
@@ -89,6 +94,7 @@ fn get_target_and_anchor_heights(data: &Connection) -> Result<(u32, u32), error:
 
 #[cfg(test)]
 mod tests {
+    use crate::Network;
     use ff::{Field, PrimeField};
     use pairing::bls12_381::Bls12;
     use protobuf::Message;
@@ -100,7 +106,6 @@ mod tests {
     };
     use zcash_primitives::{
         block::BlockHash,
-        consensus,
         consensus::{NetworkUpgrade, Parameters},
         jubjub::fs::Fs,
         note_encryption::{Memo, SaplingNoteEncryption},
@@ -122,7 +127,7 @@ mod tests {
 
         // Create a fake Note for the account
         let mut rng = OsRng;
-        let rseed = if consensus::MainNetwork.is_nu_active(NetworkUpgrade::Canopy, height as u32) {
+        let rseed = if Network::is_nu_active(NetworkUpgrade::Canopy, height as u32) {
             let mut buffer = [0u8; 32];
             &rng.fill_bytes(&mut buffer);
             Rseed::AfterZip212(buffer)
@@ -178,7 +183,7 @@ mod tests {
         value: Amount,
     ) -> CompactBlock {
         let mut rng = OsRng;
-        let rseed = if consensus::MainNetwork.is_nu_active(NetworkUpgrade::Canopy, height as u32) {
+        let rseed = if Network::is_nu_active(NetworkUpgrade::Canopy, height as u32) {
             let mut buffer = [0u8; 32];
             &rng.fill_bytes(&mut buffer);
             Rseed::AfterZip212(buffer)
@@ -221,14 +226,13 @@ mod tests {
         // Create a fake Note for the change
         ctx.outputs.push({
             let change_addr = extfvk.default_address().unwrap().1;
-            let rseed =
-                if consensus::MainNetwork.is_nu_active(NetworkUpgrade::Canopy, height as u32) {
-                    let mut buffer = [0u8; 32];
-                    &rng.fill_bytes(&mut buffer);
-                    Rseed::AfterZip212(buffer)
-                } else {
-                    Rseed::BeforeZip212(Fs::random(&mut rng))
-                };
+            let rseed = if Network::is_nu_active(NetworkUpgrade::Canopy, height as u32) {
+                let mut buffer = [0u8; 32];
+                &rng.fill_bytes(&mut buffer);
+                Rseed::AfterZip212(buffer)
+            } else {
+                Rseed::BeforeZip212(Fs::random(&mut rng))
+            };
             let note = Note {
                 g_d: change_addr.diversifier().g_d::<Bls12>(&JUBJUB).unwrap(),
                 pk_d: change_addr.pk_d().clone(),

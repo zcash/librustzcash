@@ -9,7 +9,6 @@ use zcash_client_backend::{
     proto::compact_formats::CompactBlock, welding_rig::scan_block,
 };
 use zcash_primitives::{
-    consensus,
     merkle_tree::{CommitmentTree, IncrementalWitness},
     sapling::Node,
     transaction::Transaction,
@@ -19,7 +18,7 @@ use zcash_primitives::{
 use crate::{
     address::RecipientAddress,
     error::{Error, ErrorKind},
-    HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY, SAPLING_ACTIVATION_HEIGHT,
+    Network, HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY, SAPLING_ACTIVATION_HEIGHT,
 };
 
 struct CompactBlockRow {
@@ -188,8 +187,7 @@ pub fn scan_cached_blocks<P: AsRef<Path>, Q: AsRef<Path>>(
         let txs = {
             let nf_refs: Vec<_> = nullifiers.iter().map(|(nf, acc)| (&nf[..], *acc)).collect();
             let mut witness_refs: Vec<_> = witnesses.iter_mut().map(|w| &mut w.witness).collect();
-            scan_block(
-                &consensus::MainNetwork,
+            scan_block::<Network>(
                 block,
                 &extfvks[..],
                 &nf_refs,
@@ -383,7 +381,7 @@ pub fn decrypt_and_store_transaction<P: AsRef<Path>>(
         row.get(0).or(Ok(last_height + 1))
     })?;
 
-    let outputs = decrypt_transaction(height as u32, &consensus::MainNetwork, tx, &extfvks);
+    let outputs = decrypt_transaction::<Network>(height as u32, tx, &extfvks);
 
     if outputs.is_empty() {
         // Nothing to see here

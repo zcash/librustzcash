@@ -27,7 +27,7 @@ use zcash_primitives::{
 use crate::{
     address::RecipientAddress,
     error::{Error, ErrorKind},
-    get_target_and_anchor_heights, HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY,
+    get_target_and_anchor_heights, Network, HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY,
 };
 
 /// Describes a policy for which outgoing viewing key should be able to decrypt
@@ -292,7 +292,7 @@ pub fn create_to_address<P: AsRef<Path>>(
     }
     match to {
         RecipientAddress::Shielded(to) => {
-            builder.add_sapling_output(ovk, to.clone(), value, memo.clone())
+            builder.add_sapling_output::<Network>(ovk, to.clone(), value, memo.clone())
         }
         RecipientAddress::Transparent(to) => builder.add_transparent_output(&to, value),
     }?;
@@ -393,7 +393,7 @@ mod tests {
         query::{get_balance, get_verified_balance},
         scan::scan_cached_blocks,
         tests::{fake_compact_block, insert_into_cache},
-        SAPLING_ACTIVATION_HEIGHT,
+        Network, SAPLING_ACTIVATION_HEIGHT,
     };
 
     fn test_prover() -> impl TxProver {
@@ -815,8 +815,7 @@ mod tests {
                 .unwrap();
             let output = &tx.shielded_outputs[output_index as usize];
 
-            try_sapling_output_recovery(
-                &consensus::MainNetwork,
+            try_sapling_output_recovery::<Network>(
                 SAPLING_ACTIVATION_HEIGHT as u32,
                 &extfvk.fvk.ovk,
                 &output.cv,

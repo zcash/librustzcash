@@ -24,7 +24,6 @@ use crate::wallet::{WalletShieldedOutput, WalletShieldedSpend, WalletTx};
 /// The given [`CommitmentTree`] and existing [`IncrementalWitness`]es are incremented
 /// with this output's commitment.
 fn scan_output<P: consensus::Parameters>(
-    parameters: &P,
     height: u32,
     (index, output): (usize, CompactOutput),
     ivks: &[Fs],
@@ -53,7 +52,7 @@ fn scan_output<P: consensus::Parameters>(
 
     for (account, ivk) in ivks.iter().enumerate() {
         let (note, to) =
-            match try_sapling_compact_note_decryption(parameters, height, ivk, &epk, &cmu, &ct) {
+            match try_sapling_compact_note_decryption::<P>(height, ivk, &epk, &cmu, &ct) {
                 Some(ret) => ret,
                 None => continue,
             };
@@ -88,7 +87,6 @@ fn scan_output<P: consensus::Parameters>(
 /// The given [`CommitmentTree`] and existing [`IncrementalWitness`]es are
 /// incremented appropriately.
 pub fn scan_block<P: consensus::Parameters>(
-    parameters: &P,
     block: CompactBlock,
     extfvks: &[ExtendedFullViewingKey],
     nullifiers: &[(&[u8], usize)],
@@ -155,8 +153,7 @@ pub fn scan_block<P: consensus::Parameters>(
                     .map(|output| &mut output.witness)
                     .collect();
 
-                if let Some(output) = scan_output(
-                    parameters,
+                if let Some(output) = scan_output::<P>(
                     block.height as u32,
                     to_scan,
                     &ivks,
@@ -194,7 +191,6 @@ mod tests {
     use pairing::bls12_381::{Bls12, Fr};
     use rand_core::{OsRng, RngCore};
     use zcash_primitives::{
-        consensus,
         consensus::{NetworkUpgrade, Parameters},
         jubjub::{fs::Fs, FixedGenerators, JubjubParams, ToUniform},
         merkle_tree::CommitmentTree,
@@ -206,7 +202,10 @@ mod tests {
     };
 
     use super::scan_block;
-    use crate::proto::compact_formats::{CompactBlock, CompactOutput, CompactSpend, CompactTx};
+    use crate::{
+        proto::compact_formats::{CompactBlock, CompactOutput, CompactSpend, CompactTx},
+        Network,
+    };
 
     fn random_compact_tx<R: RngCore>(rng: &mut R) -> CompactTx {
         let fake_nf = {
@@ -258,7 +257,7 @@ mod tests {
 
         // Create a fake Note for the account
         let mut rng = OsRng;
-        let rseed = if consensus::MainNetwork.is_nu_active(NetworkUpgrade::Canopy, height as u32) {
+        let rseed = if Network::is_nu_active(NetworkUpgrade::Canopy, height as u32) {
             let mut buffer = [0u8; 32];
             &rng.fill_bytes(&mut buffer);
             Rseed::AfterZip212(buffer)
@@ -335,14 +334,7 @@ mod tests {
         assert_eq!(cb.vtx.len(), 2);
 
         let mut tree = CommitmentTree::new();
-        let txs = scan_block(
-            &consensus::MainNetwork,
-            cb,
-            &[extfvk],
-            &[],
-            &mut tree,
-            &mut [],
-        );
+        let txs = scan_block::<Network>(cb, &[extfvk], &[], &mut tree, &mut []);
         assert_eq!(txs.len(), 1);
 
         let tx = &txs[0];
@@ -374,14 +366,7 @@ mod tests {
         assert_eq!(cb.vtx.len(), 3);
 
         let mut tree = CommitmentTree::new();
-        let txs = scan_block(
-            &consensus::MainNetwork,
-            cb,
-            &[extfvk],
-            &[],
-            &mut tree,
-            &mut [],
-        );
+        let txs = scan_block::<Network>(cb, &[extfvk], &[], &mut tree, &mut []);
         assert_eq!(txs.len(), 1);
 
         let tx = &txs[0];
@@ -409,14 +394,7 @@ mod tests {
         assert_eq!(cb.vtx.len(), 2);
 
         let mut tree = CommitmentTree::new();
-        let txs = scan_block(
-            &consensus::MainNetwork,
-            cb,
-            &[],
-            &[(&nf, account)],
-            &mut tree,
-            &mut [],
-        );
+        let txs = scan_block::<Network>(cb, &[], &[(&nf, account)], &mut tree, &mut []);
         assert_eq!(txs.len(), 1);
 
         let tx = &txs[0];
