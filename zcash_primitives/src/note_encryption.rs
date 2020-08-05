@@ -198,6 +198,7 @@ fn prf_ock(
 /// are consistent with each other.
 ///
 /// Implements section 4.17.1 of the Zcash Protocol Specification.
+/// NB: the example code is only covering the pre-Canopy case.
 ///
 /// # Examples
 ///
@@ -226,11 +227,12 @@ fn prf_ock(
 /// let ovk = OutgoingViewingKey([0; 32]);
 ///
 /// let value = 1000;
-/// let rcm = Fs::random(&mut rng);
+/// let rcv = Fs::random(&mut rng);
 /// let cv = ValueCommitment::<Bls12> {
 ///     value,
-///     randomness: rcm.clone(),
+///     randomness: rcv.clone(),
 /// };
+/// let rcm = Fs::random(&mut rng);
 /// let note = to.create_note(value, Rseed::BeforeZip212(rcm), &JUBJUB).unwrap();
 /// let cmu = note.cm(&JUBJUB);
 ///
@@ -347,9 +349,8 @@ fn parse_note_plaintext_without_memo<P: consensus::Parameters>(
     plaintext: &[u8],
 ) -> Option<(Note<Bls12>, PaymentAddress<Bls12>)> {
     // Check note plaintext version
-    match plaintext_version_is_valid::<P>(height, plaintext[0]) {
-        true => (),
-        false => return None,
+    if !plaintext_version_is_valid::<P>(height, plaintext[0]) {
+        return None;
     }
 
     let mut d = [0u8; 11];
@@ -539,9 +540,8 @@ pub fn try_sapling_output_recovery<P: consensus::Parameters>(
     );
 
     // Check note plaintext version
-    match plaintext_version_is_valid::<P>(height, plaintext[0]) {
-        true => (),
-        false => return None,
+    if !plaintext_version_is_valid::<P>(height, plaintext[0]) {
+        return None;
     }
 
     let mut d = [0u8; 11];
@@ -908,13 +908,12 @@ mod tests {
     #[test]
     fn decryption_with_invalid_ivk() {
         let mut rng = OsRng;
-        let height_array = [
+        let heights = [
             Network::SAPLING_ACTIVATION_HEIGHT,
             Network::CANOPY_ACTIVATION_HEIGHT,
         ];
 
-        for height_ref in height_array.iter() {
-            let height = *height_ref;
+        for &height in heights.iter() {
             let (_, _, _, cmu, epk, enc_ciphertext, _) = random_enc_ciphertext(height, &mut rng);
 
             assert_eq!(
@@ -933,13 +932,12 @@ mod tests {
     #[test]
     fn decryption_with_invalid_epk() {
         let mut rng = OsRng;
-        let height_array = [
+        let heights = [
             Network::SAPLING_ACTIVATION_HEIGHT,
             Network::CANOPY_ACTIVATION_HEIGHT,
         ];
 
-        for height_ref in height_array.iter() {
-            let height = *height_ref;
+        for &height in heights.iter() {
             let (_, ivk, _, cmu, _, enc_ciphertext, _) = random_enc_ciphertext(height, &mut rng);
 
             assert_eq!(
@@ -958,13 +956,12 @@ mod tests {
     #[test]
     fn decryption_with_invalid_cmu() {
         let mut rng = OsRng;
-        let height_array = [
+        let heights = [
             Network::SAPLING_ACTIVATION_HEIGHT,
             Network::CANOPY_ACTIVATION_HEIGHT,
         ];
 
-        for height_ref in height_array.iter() {
-            let height = *height_ref;
+        for &height in heights.iter() {
             let (_, ivk, _, _, epk, enc_ciphertext, _) = random_enc_ciphertext(height, &mut rng);
 
             assert_eq!(
@@ -983,13 +980,12 @@ mod tests {
     #[test]
     fn decryption_with_invalid_tag() {
         let mut rng = OsRng;
-        let height_array = [
+        let heights = [
             Network::SAPLING_ACTIVATION_HEIGHT,
             Network::CANOPY_ACTIVATION_HEIGHT,
         ];
 
-        for height_ref in height_array.iter() {
-            let height = *height_ref;
+        for &height in heights.iter() {
             let (_, ivk, _, cmu, epk, mut enc_ciphertext, _) =
                 random_enc_ciphertext(height, &mut rng);
 
@@ -1004,15 +1000,14 @@ mod tests {
     #[test]
     fn decryption_with_invalid_version_byte() {
         let mut rng = OsRng;
-        let height_array = [
+        let heights = [
             Network::CANOPY_ACTIVATION_HEIGHT - 1,
             Network::CANOPY_ACTIVATION_HEIGHT,
             Network::CANOPY_ACTIVATION_HEIGHT + ZIP212_GRACE_PERIOD,
         ];
         let leadbyte_array = [0x02, 0x03, 0x01];
 
-        for (i, height_ref) in height_array.iter().enumerate() {
-            let height = *height_ref;
+        for (i, &height) in heights.iter().enumerate() {
             let (ovk, ivk, cv, cmu, epk, mut enc_ciphertext, out_ciphertext) =
                 random_enc_ciphertext(height, &mut rng);
 
@@ -1035,13 +1030,12 @@ mod tests {
     #[test]
     fn decryption_with_invalid_diversifier() {
         let mut rng = OsRng;
-        let height_array = [
+        let heights = [
             Network::SAPLING_ACTIVATION_HEIGHT,
             Network::CANOPY_ACTIVATION_HEIGHT,
         ];
 
-        for height_ref in height_array.iter() {
-            let height = *height_ref;
+        for &height in heights.iter() {
             let (ovk, ivk, cv, cmu, epk, mut enc_ciphertext, out_ciphertext) =
                 random_enc_ciphertext(height, &mut rng);
 
@@ -1064,13 +1058,12 @@ mod tests {
     #[test]
     fn decryption_with_incorrect_diversifier() {
         let mut rng = OsRng;
-        let height_array = [
+        let heights = [
             Network::SAPLING_ACTIVATION_HEIGHT,
             Network::CANOPY_ACTIVATION_HEIGHT,
         ];
 
-        for height_ref in height_array.iter() {
-            let height = *height_ref;
+        for &height in heights.iter() {
             let (ovk, ivk, cv, cmu, epk, mut enc_ciphertext, out_ciphertext) =
                 random_enc_ciphertext(height, &mut rng);
 
@@ -1093,13 +1086,12 @@ mod tests {
     #[test]
     fn compact_decryption_with_invalid_ivk() {
         let mut rng = OsRng;
-        let height_array = [
+        let heights = [
             Network::SAPLING_ACTIVATION_HEIGHT,
             Network::CANOPY_ACTIVATION_HEIGHT,
         ];
 
-        for height_ref in height_array.iter() {
-            let height = *height_ref;
+        for &height in heights.iter() {
             let (_, _, _, cmu, epk, enc_ciphertext, _) = random_enc_ciphertext(height, &mut rng);
 
             assert_eq!(
@@ -1118,13 +1110,12 @@ mod tests {
     #[test]
     fn compact_decryption_with_invalid_epk() {
         let mut rng = OsRng;
-        let height_array = [
+        let heights = [
             Network::SAPLING_ACTIVATION_HEIGHT,
             Network::CANOPY_ACTIVATION_HEIGHT,
         ];
 
-        for height_ref in height_array.iter() {
-            let height = *height_ref;
+        for &height in heights.iter() {
             let (_, ivk, _, cmu, _, enc_ciphertext, _) = random_enc_ciphertext(height, &mut rng);
 
             assert_eq!(
@@ -1143,13 +1134,12 @@ mod tests {
     #[test]
     fn compact_decryption_with_invalid_cmu() {
         let mut rng = OsRng;
-        let height_array = [
+        let heights = [
             Network::SAPLING_ACTIVATION_HEIGHT,
             Network::CANOPY_ACTIVATION_HEIGHT,
         ];
 
-        for height_ref in height_array.iter() {
-            let height = *height_ref;
+        for &height in heights.iter() {
             let (_, ivk, _, _, epk, enc_ciphertext, _) = random_enc_ciphertext(height, &mut rng);
 
             assert_eq!(
@@ -1168,15 +1158,14 @@ mod tests {
     #[test]
     fn compact_decryption_with_invalid_version_byte() {
         let mut rng = OsRng;
-        let height_array = [
+        let heights = [
             Network::CANOPY_ACTIVATION_HEIGHT - 1,
             Network::CANOPY_ACTIVATION_HEIGHT,
             Network::CANOPY_ACTIVATION_HEIGHT + ZIP212_GRACE_PERIOD,
         ];
         let leadbyte_array = [0x02, 0x03, 0x01];
 
-        for (i, height_ref) in height_array.iter().enumerate() {
-            let height = *height_ref;
+        for (i, &height) in heights.iter().enumerate() {
             let (ovk, ivk, cv, cmu, epk, mut enc_ciphertext, out_ciphertext) =
                 random_enc_ciphertext(height, &mut rng);
 
@@ -1205,13 +1194,12 @@ mod tests {
     #[test]
     fn compact_decryption_with_invalid_diversifier() {
         let mut rng = OsRng;
-        let height_array = [
+        let heights = [
             Network::SAPLING_ACTIVATION_HEIGHT,
             Network::CANOPY_ACTIVATION_HEIGHT,
         ];
 
-        for height_ref in height_array.iter() {
-            let height = *height_ref;
+        for &height in heights.iter() {
             let (ovk, ivk, cv, cmu, epk, mut enc_ciphertext, out_ciphertext) =
                 random_enc_ciphertext(height, &mut rng);
 
@@ -1240,13 +1228,12 @@ mod tests {
     #[test]
     fn compact_decryption_with_incorrect_diversifier() {
         let mut rng = OsRng;
-        let height_array = [
+        let heights = [
             Network::SAPLING_ACTIVATION_HEIGHT,
             Network::CANOPY_ACTIVATION_HEIGHT,
         ];
 
-        for height_ref in height_array.iter() {
-            let height = *height_ref;
+        for &height in heights.iter() {
             let (ovk, ivk, cv, cmu, epk, mut enc_ciphertext, out_ciphertext) =
                 random_enc_ciphertext(height, &mut rng);
 
@@ -1275,13 +1262,12 @@ mod tests {
     #[test]
     fn recovery_with_invalid_ovk() {
         let mut rng = OsRng;
-        let height_array = [
+        let heights = [
             Network::SAPLING_ACTIVATION_HEIGHT,
             Network::CANOPY_ACTIVATION_HEIGHT,
         ];
 
-        for height_ref in height_array.iter() {
-            let height = *height_ref;
+        for &height in heights.iter() {
             let (mut ovk, _, cv, cmu, epk, enc_ciphertext, out_ciphertext) =
                 random_enc_ciphertext(height, &mut rng);
 
@@ -1304,13 +1290,12 @@ mod tests {
     #[test]
     fn recovery_with_invalid_cv() {
         let mut rng = OsRng;
-        let height_array = [
+        let heights = [
             Network::SAPLING_ACTIVATION_HEIGHT,
             Network::CANOPY_ACTIVATION_HEIGHT,
         ];
 
-        for height_ref in height_array.iter() {
-            let height = *height_ref;
+        for &height in heights.iter() {
             let (ovk, _, _, cmu, epk, enc_ciphertext, out_ciphertext) =
                 random_enc_ciphertext(height, &mut rng);
 
@@ -1332,14 +1317,13 @@ mod tests {
     #[test]
     fn recovery_with_invalid_cmu() {
         let mut rng = OsRng;
-        let height_array = [
+        let heights = [
             Network::SAPLING_ACTIVATION_HEIGHT,
             Network::CANOPY_ACTIVATION_HEIGHT,
         ];
 
-        for height_ref in height_array.iter() {
-            let height = *height_ref;
-            let (ovk, _, cv, _, epk, enc_ciphertext, out_ciphertext) =
+        for &height in heights.iter() {
+            let (ovk, _, cv, _, epk, enc_ctext, out_ctext) =
                 random_enc_ciphertext(height, &mut rng);
 
             assert_eq!(
@@ -1349,8 +1333,8 @@ mod tests {
                     &cv,
                     &Fr::random(&mut rng),
                     &epk,
-                    &enc_ciphertext,
-                    &out_ciphertext
+                    &enc_ctext,
+                    &out_ctext
                 ),
                 None
             );
@@ -1360,13 +1344,12 @@ mod tests {
     #[test]
     fn recovery_with_invalid_epk() {
         let mut rng = OsRng;
-        let height_array = [
+        let heights = [
             Network::SAPLING_ACTIVATION_HEIGHT,
             Network::CANOPY_ACTIVATION_HEIGHT,
         ];
 
-        for height_ref in height_array.iter() {
-            let height = *height_ref;
+        for &height in heights.iter() {
             let (ovk, _, cv, cmu, _, enc_ciphertext, out_ciphertext) =
                 random_enc_ciphertext(height, &mut rng);
 
@@ -1388,13 +1371,12 @@ mod tests {
     #[test]
     fn recovery_with_invalid_enc_tag() {
         let mut rng = OsRng;
-        let height_array = [
+        let heights = [
             Network::SAPLING_ACTIVATION_HEIGHT,
             Network::CANOPY_ACTIVATION_HEIGHT,
         ];
 
-        for height_ref in height_array.iter() {
-            let height = *height_ref;
+        for &height in heights.iter() {
             let (ovk, _, cv, cmu, epk, mut enc_ciphertext, out_ciphertext) =
                 random_enc_ciphertext(height, &mut rng);
 
@@ -1417,13 +1399,12 @@ mod tests {
     #[test]
     fn recovery_with_invalid_out_tag() {
         let mut rng = OsRng;
-        let height_array = [
+        let heights = [
             Network::SAPLING_ACTIVATION_HEIGHT,
             Network::CANOPY_ACTIVATION_HEIGHT,
         ];
 
-        for height_ref in height_array.iter() {
-            let height = *height_ref;
+        for &height in heights.iter() {
             let (ovk, _, cv, cmu, epk, enc_ciphertext, mut out_ciphertext) =
                 random_enc_ciphertext(height, &mut rng);
 
@@ -1446,15 +1427,14 @@ mod tests {
     #[test]
     fn recovery_with_invalid_version_byte() {
         let mut rng = OsRng;
-        let height_array = [
+        let heights = [
             Network::CANOPY_ACTIVATION_HEIGHT - 1,
             Network::CANOPY_ACTIVATION_HEIGHT,
             Network::CANOPY_ACTIVATION_HEIGHT + ZIP212_GRACE_PERIOD,
         ];
         let leadbyte_array = [0x02, 0x03, 0x01];
 
-        for (i, height_ref) in height_array.iter().enumerate() {
-            let height = *height_ref;
+        for (i, &height) in heights.iter().enumerate() {
             let (ovk, _, cv, cmu, epk, mut enc_ciphertext, out_ciphertext) =
                 random_enc_ciphertext(height, &mut rng);
 
@@ -1485,13 +1465,12 @@ mod tests {
     #[test]
     fn recovery_with_invalid_diversifier() {
         let mut rng = OsRng;
-        let height_array = [
+        let heights = [
             Network::SAPLING_ACTIVATION_HEIGHT,
             Network::CANOPY_ACTIVATION_HEIGHT,
         ];
 
-        for height_ref in height_array.iter() {
-            let height = *height_ref;
+        for &height in heights.iter() {
             let (ovk, _, cv, cmu, epk, mut enc_ciphertext, out_ciphertext) =
                 random_enc_ciphertext(height, &mut rng);
 
@@ -1522,14 +1501,12 @@ mod tests {
     #[test]
     fn recovery_with_incorrect_diversifier() {
         let mut rng = OsRng;
-        let height_array = [
+        let heights = [
             Network::SAPLING_ACTIVATION_HEIGHT,
             Network::CANOPY_ACTIVATION_HEIGHT,
         ];
 
-        for height_ref in height_array.iter() {
-            let height = *height_ref;
-
+        for &height in heights.iter() {
             let (ovk, _, cv, cmu, epk, mut enc_ciphertext, out_ciphertext) =
                 random_enc_ciphertext(height, &mut rng);
 
@@ -1560,13 +1537,12 @@ mod tests {
     #[test]
     fn recovery_with_invalid_pk_d() {
         let mut rng = OsRng;
-        let height_array = [
+        let heights = [
             Network::SAPLING_ACTIVATION_HEIGHT,
             Network::CANOPY_ACTIVATION_HEIGHT,
         ];
 
-        for height_ref in height_array.iter() {
-            let height = *height_ref;
+        for &height in heights.iter() {
             let ivk = Fs::zero();
             let (ovk, _, cv, cmu, epk, enc_ciphertext, out_ciphertext) =
                 random_enc_ciphertext_with(height, ivk, &mut rng);
