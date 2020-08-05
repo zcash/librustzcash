@@ -593,6 +593,7 @@ mod tests {
             PrimeOrder, Unknown,
         },
         primitives::{Diversifier, PaymentAddress, Rseed, ValueCommitment},
+        util::generate_random_rseed,
         Network,
     };
     use crypto_api_chachapoly::ChachaPolyIetf;
@@ -795,13 +796,7 @@ mod tests {
         };
         let cv = value_commitment.cm(&JUBJUB).into();
 
-        let rseed = if Network::is_nu_active(NetworkUpgrade::Canopy, height) {
-            let mut buffer = [0u8; 32];
-            &rng.fill_bytes(&mut buffer);
-            Rseed::AfterZip212(buffer)
-        } else {
-            Rseed::BeforeZip212(Fs::random(rng))
-        };
+        let rseed = generate_random_rseed::<Network, R>(NetworkUpgrade::Canopy, height, &mut rng);
 
         let note = pa.create_note(value, rseed, &JUBJUB).unwrap();
         let cmu = note.cm(&JUBJUB);

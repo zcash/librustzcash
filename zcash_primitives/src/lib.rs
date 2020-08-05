@@ -24,7 +24,7 @@ pub mod redjubjub;
 pub mod sapling;
 pub mod serialize;
 pub mod transaction;
-mod util;
+pub mod util;
 pub mod zip32;
 
 #[cfg(test)]

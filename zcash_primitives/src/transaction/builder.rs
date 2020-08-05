@@ -25,6 +25,7 @@ use crate::{
         components::{amount::DEFAULT_FEE, Amount, OutputDescription, SpendDescription, TxOut},
         signature_hash_data, Transaction, TransactionData, SIGHASH_ALL,
     },
+    util::generate_random_rseed,
     Network, JUBJUB,
 };
 
@@ -103,13 +104,7 @@ impl SaplingOutput {
             return Err(Error::InvalidAmount);
         }
 
-        let rseed = if P::is_nu_active(NetworkUpgrade::Canopy, height) {
-            let mut buffer = [0u8; 32];
-            &rng.fill_bytes(&mut buffer);
-            Rseed::AfterZip212(buffer)
-        } else {
-            Rseed::BeforeZip212(Fs::random(rng))
-        };
+        let rseed = generate_random_rseed::<P, R>(NetworkUpgrade::Canopy, height, rng);
 
         let note = Note {
             g_d,

@@ -95,7 +95,7 @@ fn get_target_and_anchor_heights(data: &Connection) -> Result<(u32, u32), error:
 #[cfg(test)]
 mod tests {
     use crate::Network;
-    use ff::{Field, PrimeField};
+    use ff::PrimeField;
     use pairing::bls12_381::Bls12;
     use protobuf::Message;
     use rand_core::{OsRng, RngCore};
@@ -106,11 +106,11 @@ mod tests {
     };
     use zcash_primitives::{
         block::BlockHash,
-        consensus::{NetworkUpgrade, Parameters},
-        jubjub::fs::Fs,
+        consensus::NetworkUpgrade,
         note_encryption::{Memo, SaplingNoteEncryption},
-        primitives::{Note, PaymentAddress, Rseed},
+        primitives::{Note, PaymentAddress},
         transaction::components::Amount,
+        util::generate_random_rseed,
         zip32::ExtendedFullViewingKey,
         JUBJUB,
     };
@@ -127,13 +127,11 @@ mod tests {
 
         // Create a fake Note for the account
         let mut rng = OsRng;
-        let rseed = if Network::is_nu_active(NetworkUpgrade::Canopy, height as u32) {
-            let mut buffer = [0u8; 32];
-            &rng.fill_bytes(&mut buffer);
-            Rseed::AfterZip212(buffer)
-        } else {
-            Rseed::BeforeZip212(Fs::random(&mut rng))
-        };
+        let rseed = generate_random_rseed::<Network, OsRng>(
+            NetworkUpgrade::Canopy,
+            height as u32,
+            &mut rng,
+        );
         let note = Note {
             g_d: to.diversifier().g_d::<Bls12>(&JUBJUB).unwrap(),
             pk_d: to.pk_d().clone(),
@@ -183,13 +181,11 @@ mod tests {
         value: Amount,
     ) -> CompactBlock {
         let mut rng = OsRng;
-        let rseed = if Network::is_nu_active(NetworkUpgrade::Canopy, height as u32) {
-            let mut buffer = [0u8; 32];
-            &rng.fill_bytes(&mut buffer);
-            Rseed::AfterZip212(buffer)
-        } else {
-            Rseed::BeforeZip212(Fs::random(&mut rng))
-        };
+        let rseed = generate_random_rseed::<Network, OsRng>(
+            NetworkUpgrade::Canopy,
+            height as u32,
+            &mut rng,
+        );
 
         // Create a fake CompactBlock containing the note
         let mut cspend = CompactSpend::new();
@@ -226,13 +222,11 @@ mod tests {
         // Create a fake Note for the change
         ctx.outputs.push({
             let change_addr = extfvk.default_address().unwrap().1;
-            let rseed = if Network::is_nu_active(NetworkUpgrade::Canopy, height as u32) {
-                let mut buffer = [0u8; 32];
-                &rng.fill_bytes(&mut buffer);
-                Rseed::AfterZip212(buffer)
-            } else {
-                Rseed::BeforeZip212(Fs::random(&mut rng))
-            };
+            let rseed = generate_random_rseed::<Network, OsRng>(
+                NetworkUpgrade::Canopy,
+                height as u32,
+                &mut rng,
+            );
             let note = Note {
                 g_d: change_addr.diversifier().g_d::<Bls12>(&JUBJUB).unwrap(),
                 pk_d: change_addr.pk_d().clone(),
