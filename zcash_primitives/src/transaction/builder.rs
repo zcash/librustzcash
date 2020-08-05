@@ -13,7 +13,7 @@ use std::fmt;
 
 use crate::{
     consensus,
-    consensus::NetworkUpgrade,
+    consensus::{NetworkUpgrade, Parameters},
     keys::OutgoingViewingKey,
     legacy::TransparentAddress,
     merkle_tree::MerklePath,
@@ -620,12 +620,20 @@ impl<R: RngCore + CryptoRng> Builder<R> {
                         }
                     };
 
+                    let rseed = if self.height >= Network::CANOPY_ACTIVATION_HEIGHT {
+                        let mut buffer = [0u8; 32];
+                        &mut self.rng.fill_bytes(&mut buffer);
+                        Rseed::AfterZip212(buffer)
+                    } else {
+                        Rseed::BeforeZip212(Fs::random(&mut self.rng))
+                    };
+
                     (
                         payment_address,
                         Note {
                             g_d,
                             pk_d,
-                            rseed: Rseed::BeforeZip212(Fs::random(&mut self.rng)),
+                            rseed,
                             value: 0,
                         },
                     )
