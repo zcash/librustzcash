@@ -8,6 +8,7 @@
 
 pub mod address;
 pub mod api;
+pub mod data_api;
 mod decrypt;
 pub mod encoding;
 pub mod keys;

@@ -46,6 +46,16 @@ impl compact_formats::CompactBlock {
         }
     }
 
+    /// Returns the [`BlockHeight`] value for this block
+    ///
+    /// # Panics
+    ///
+    /// This function will panic if [`CompactBlock.height`] is not
+    /// representable within a u32.
+    pub fn height(&self) -> BlockHeight {
+        self.height.try_into().unwrap()
+    }
+
     /// Returns the [`BlockHeader`] for this block if present.
     ///
     /// A convenience method that parses [`CompactBlock.header`] if present.
@@ -57,15 +67,6 @@ impl compact_formats::CompactBlock {
         } else {
             BlockHeader::read(&self.header[..]).ok()
         }
-    }
-
-    /// Returns the [`BlockHeight`] for this block.
-    ///
-    /// A convenience method that wraps [`CompactBlock.height`]
-    ///
-    /// [`CompactBlock.height`]: #structfield.height
-    pub fn height(&self) -> BlockHeight {
-        BlockHeight::from(self.height)
     }
 }
 

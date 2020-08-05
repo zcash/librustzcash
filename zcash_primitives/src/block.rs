@@ -3,71 +3,13 @@
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use hex;
 use sha2::{Digest, Sha256};
-use std::cmp::{Ord, Ordering};
 use std::fmt;
 use std::io::{self, Read, Write};
-use std::ops::{Add, Deref, Sub};
+use std::ops::Deref;
 
 use crate::serialize::Vector;
 
 pub use equihash;
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct BlockHeight(pub u32);
-
-impl fmt::Display for BlockHeight {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.0.fmt(formatter)
-    }
-}
-
-impl Ord for BlockHeight {
-    fn cmp(&self, other: &Self) -> Ordering {
-        self.0.cmp(&other.0)
-    }
-}
-
-impl PartialOrd for BlockHeight {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl Add<u32> for BlockHeight {
-    type Output = Self;
-
-    fn add(self, other: u32) -> Self {
-        BlockHeight(self.0 + other)
-    }
-}
-
-impl Add for BlockHeight {
-    type Output = Self;
-
-    fn add(self, other: Self) -> Self {
-        self + other.0
-    }
-}
-
-impl Sub<u32> for BlockHeight {
-    type Output = Self;
-
-    fn sub(self, other: u32) -> Self {
-        if other > self.0 {
-            panic!("Subtraction resulted in negative block height.");
-        }
-
-        BlockHeight(self.0 - other)
-    }
-}
-
-impl Sub for BlockHeight {
-    type Output = Self;
-
-    fn sub(self, other: Self) -> Self {
-        self - other.0
-    }
-}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct BlockHash(pub [u8; 32]);
