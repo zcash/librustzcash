@@ -191,7 +191,7 @@ mod tests {
     use pairing::bls12_381::{Bls12, Fr};
     use rand_core::{OsRng, RngCore};
     use zcash_primitives::{
-        consensus::NetworkUpgrade,
+        consensus::{NetworkUpgrade, TestNetwork},
         jubjub::{fs::Fs, FixedGenerators, JubjubParams, ToUniform},
         merkle_tree::CommitmentTree,
         note_encryption::{Memo, SaplingNoteEncryption},
@@ -203,10 +203,7 @@ mod tests {
     };
 
     use super::scan_block;
-    use crate::{
-        proto::compact_formats::{CompactBlock, CompactOutput, CompactSpend, CompactTx},
-        Network,
-    };
+    use crate::proto::compact_formats::{CompactBlock, CompactOutput, CompactSpend, CompactTx};
 
     fn random_compact_tx<R: RngCore>(rng: &mut R) -> CompactTx {
         let fake_nf = {
@@ -258,7 +255,7 @@ mod tests {
 
         // Create a fake Note for the account
         let mut rng = OsRng;
-        let rseed = generate_random_rseed::<Network, OsRng>(
+        let rseed = generate_random_rseed::<TestNetwork, OsRng>(
             NetworkUpgrade::Canopy,
             height as u32,
             &mut rng,
@@ -333,7 +330,7 @@ mod tests {
         assert_eq!(cb.vtx.len(), 2);
 
         let mut tree = CommitmentTree::new();
-        let txs = scan_block::<Network>(cb, &[extfvk], &[], &mut tree, &mut []);
+        let txs = scan_block::<TestNetwork>(cb, &[extfvk], &[], &mut tree, &mut []);
         assert_eq!(txs.len(), 1);
 
         let tx = &txs[0];
@@ -365,7 +362,7 @@ mod tests {
         assert_eq!(cb.vtx.len(), 3);
 
         let mut tree = CommitmentTree::new();
-        let txs = scan_block::<Network>(cb, &[extfvk], &[], &mut tree, &mut []);
+        let txs = scan_block::<TestNetwork>(cb, &[extfvk], &[], &mut tree, &mut []);
         assert_eq!(txs.len(), 1);
 
         let tx = &txs[0];
@@ -393,7 +390,7 @@ mod tests {
         assert_eq!(cb.vtx.len(), 2);
 
         let mut tree = CommitmentTree::new();
-        let txs = scan_block::<Network>(cb, &[], &[(&nf, account)], &mut tree, &mut []);
+        let txs = scan_block::<TestNetwork>(cb, &[], &[(&nf, account)], &mut tree, &mut []);
         assert_eq!(txs.len(), 1);
 
         let tx = &txs[0];

@@ -15,9 +15,3 @@ pub mod wallet;
 pub mod welding_rig;
 
 pub use decrypt::{decrypt_transaction, DecryptedOutput};
-
-#[cfg(feature = "mainnet")]
-pub use zcash_primitives::consensus::MainNetwork as Network;
-
-#[cfg(not(feature = "mainnet"))]
-pub use zcash_primitives::consensus::TestNetwork as Network;
