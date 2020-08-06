@@ -13,12 +13,6 @@ pub trait Parameters {
             _ => false,
         }
     }
-
-    const OVERWINTER_ACTIVATION_HEIGHT: u32;
-    const SAPLING_ACTIVATION_HEIGHT: u32;
-    const BLOSSOM_ACTIVATION_HEIGHT: u32;
-    const HEARTWOOD_ACTIVATION_HEIGHT: u32;
-    const CANOPY_ACTIVATION_HEIGHT: u32;
 }
 
 /// Marker struct for the production network.
@@ -35,12 +29,6 @@ impl Parameters for MainNetwork {
             NetworkUpgrade::Canopy => Some(1_046_400),
         }
     }
-
-    const OVERWINTER_ACTIVATION_HEIGHT: u32 = 347_500;
-    const SAPLING_ACTIVATION_HEIGHT: u32 = 419_200;
-    const BLOSSOM_ACTIVATION_HEIGHT: u32 = 653_600;
-    const HEARTWOOD_ACTIVATION_HEIGHT: u32 = 903_000;
-    const CANOPY_ACTIVATION_HEIGHT: u32 = 1_046_400;
 }
 
 /// Marker struct for the test network.
@@ -57,12 +45,6 @@ impl Parameters for TestNetwork {
             NetworkUpgrade::Canopy => Some(1_028_500),
         }
     }
-
-    const OVERWINTER_ACTIVATION_HEIGHT: u32 = 207_500;
-    const SAPLING_ACTIVATION_HEIGHT: u32 = 280_200;
-    const BLOSSOM_ACTIVATION_HEIGHT: u32 = 584_000;
-    const HEARTWOOD_ACTIVATION_HEIGHT: u32 = 903_800;
-    const CANOPY_ACTIVATION_HEIGHT: u32 = 1_028_500;
 }
 
 /// An event that occurs at a specified height on the Zcash chain, at which point the
@@ -208,9 +190,9 @@ impl BranchId {
 
 #[cfg(test)]
 mod tests {
-    use super::{BranchId, MainNetwork, NetworkUpgrade, UPGRADES_IN_ORDER};
-    use crate::consensus::Parameters;
     use std::convert::TryFrom;
+
+    use super::{BranchId, MainNetwork, NetworkUpgrade, Parameters, UPGRADES_IN_ORDER};
 
     #[test]
     fn nu_ordering() {

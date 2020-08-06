@@ -586,7 +586,11 @@ pub fn try_sapling_output_recovery<P: consensus::Parameters>(
 #[cfg(test)]
 mod tests {
     use crate::{
-        consensus::{NetworkUpgrade, Parameters, TestNetwork, ZIP212_GRACE_PERIOD},
+        consensus::{
+            NetworkUpgrade,
+            NetworkUpgrade::{Canopy, Sapling},
+            Parameters, TestNetwork, ZIP212_GRACE_PERIOD,
+        },
         jubjub::{
             edwards,
             fs::{Fs, FsRepr},
@@ -912,8 +916,8 @@ mod tests {
     fn decryption_with_invalid_ivk() {
         let mut rng = OsRng;
         let heights = [
-            TestNetwork::SAPLING_ACTIVATION_HEIGHT,
-            TestNetwork::CANOPY_ACTIVATION_HEIGHT,
+            TestNetwork::activation_height(Sapling).unwrap(),
+            TestNetwork::activation_height(Canopy).unwrap(),
         ];
 
         for &height in heights.iter() {
@@ -936,8 +940,8 @@ mod tests {
     fn decryption_with_invalid_epk() {
         let mut rng = OsRng;
         let heights = [
-            TestNetwork::SAPLING_ACTIVATION_HEIGHT,
-            TestNetwork::CANOPY_ACTIVATION_HEIGHT,
+            TestNetwork::activation_height(Sapling).unwrap(),
+            TestNetwork::activation_height(Canopy).unwrap(),
         ];
 
         for &height in heights.iter() {
@@ -960,8 +964,8 @@ mod tests {
     fn decryption_with_invalid_cmu() {
         let mut rng = OsRng;
         let heights = [
-            TestNetwork::SAPLING_ACTIVATION_HEIGHT,
-            TestNetwork::CANOPY_ACTIVATION_HEIGHT,
+            TestNetwork::activation_height(Sapling).unwrap(),
+            TestNetwork::activation_height(Canopy).unwrap(),
         ];
 
         for &height in heights.iter() {
@@ -984,8 +988,8 @@ mod tests {
     fn decryption_with_invalid_tag() {
         let mut rng = OsRng;
         let heights = [
-            TestNetwork::SAPLING_ACTIVATION_HEIGHT,
-            TestNetwork::CANOPY_ACTIVATION_HEIGHT,
+            TestNetwork::activation_height(Sapling).unwrap(),
+            TestNetwork::activation_height(Canopy).unwrap(),
         ];
 
         for &height in heights.iter() {
@@ -1009,10 +1013,11 @@ mod tests {
     #[test]
     fn decryption_with_invalid_version_byte() {
         let mut rng = OsRng;
+        let canopy_activation_height = TestNetwork::activation_height(Canopy).unwrap();
         let heights = [
-            TestNetwork::CANOPY_ACTIVATION_HEIGHT - 1,
-            TestNetwork::CANOPY_ACTIVATION_HEIGHT,
-            TestNetwork::CANOPY_ACTIVATION_HEIGHT + ZIP212_GRACE_PERIOD,
+            canopy_activation_height - 1,
+            canopy_activation_height,
+            canopy_activation_height + ZIP212_GRACE_PERIOD,
         ];
         let leadbyte_array = [0x02, 0x03, 0x01];
 
@@ -1046,8 +1051,8 @@ mod tests {
     fn decryption_with_invalid_diversifier() {
         let mut rng = OsRng;
         let heights = [
-            TestNetwork::SAPLING_ACTIVATION_HEIGHT,
-            TestNetwork::CANOPY_ACTIVATION_HEIGHT,
+            TestNetwork::activation_height(Sapling).unwrap(),
+            TestNetwork::activation_height(Canopy).unwrap(),
         ];
 
         for &height in heights.iter() {
@@ -1080,8 +1085,8 @@ mod tests {
     fn decryption_with_incorrect_diversifier() {
         let mut rng = OsRng;
         let heights = [
-            TestNetwork::SAPLING_ACTIVATION_HEIGHT,
-            TestNetwork::CANOPY_ACTIVATION_HEIGHT,
+            TestNetwork::activation_height(Sapling).unwrap(),
+            TestNetwork::activation_height(Canopy).unwrap(),
         ];
 
         for &height in heights.iter() {
@@ -1114,8 +1119,8 @@ mod tests {
     fn compact_decryption_with_invalid_ivk() {
         let mut rng = OsRng;
         let heights = [
-            TestNetwork::SAPLING_ACTIVATION_HEIGHT,
-            TestNetwork::CANOPY_ACTIVATION_HEIGHT,
+            TestNetwork::activation_height(Sapling).unwrap(),
+            TestNetwork::activation_height(Canopy).unwrap(),
         ];
 
         for &height in heights.iter() {
@@ -1138,8 +1143,8 @@ mod tests {
     fn compact_decryption_with_invalid_epk() {
         let mut rng = OsRng;
         let heights = [
-            TestNetwork::SAPLING_ACTIVATION_HEIGHT,
-            TestNetwork::CANOPY_ACTIVATION_HEIGHT,
+            TestNetwork::activation_height(Sapling).unwrap(),
+            TestNetwork::activation_height(Canopy).unwrap(),
         ];
 
         for &height in heights.iter() {
@@ -1162,8 +1167,8 @@ mod tests {
     fn compact_decryption_with_invalid_cmu() {
         let mut rng = OsRng;
         let heights = [
-            TestNetwork::SAPLING_ACTIVATION_HEIGHT,
-            TestNetwork::CANOPY_ACTIVATION_HEIGHT,
+            TestNetwork::activation_height(Sapling).unwrap(),
+            TestNetwork::activation_height(Canopy).unwrap(),
         ];
 
         for &height in heights.iter() {
@@ -1185,10 +1190,11 @@ mod tests {
     #[test]
     fn compact_decryption_with_invalid_version_byte() {
         let mut rng = OsRng;
+        let canopy_activation_height = TestNetwork::activation_height(Canopy).unwrap();
         let heights = [
-            TestNetwork::CANOPY_ACTIVATION_HEIGHT - 1,
-            TestNetwork::CANOPY_ACTIVATION_HEIGHT,
-            TestNetwork::CANOPY_ACTIVATION_HEIGHT + ZIP212_GRACE_PERIOD,
+            canopy_activation_height - 1,
+            canopy_activation_height,
+            canopy_activation_height + ZIP212_GRACE_PERIOD,
         ];
         let leadbyte_array = [0x02, 0x03, 0x01];
 
@@ -1222,8 +1228,8 @@ mod tests {
     fn compact_decryption_with_invalid_diversifier() {
         let mut rng = OsRng;
         let heights = [
-            TestNetwork::SAPLING_ACTIVATION_HEIGHT,
-            TestNetwork::CANOPY_ACTIVATION_HEIGHT,
+            TestNetwork::activation_height(Sapling).unwrap(),
+            TestNetwork::activation_height(Canopy).unwrap(),
         ];
 
         for &height in heights.iter() {
@@ -1256,8 +1262,8 @@ mod tests {
     fn compact_decryption_with_incorrect_diversifier() {
         let mut rng = OsRng;
         let heights = [
-            TestNetwork::SAPLING_ACTIVATION_HEIGHT,
-            TestNetwork::CANOPY_ACTIVATION_HEIGHT,
+            TestNetwork::activation_height(Sapling).unwrap(),
+            TestNetwork::activation_height(Canopy).unwrap(),
         ];
 
         for &height in heights.iter() {
@@ -1290,8 +1296,8 @@ mod tests {
     fn recovery_with_invalid_ovk() {
         let mut rng = OsRng;
         let heights = [
-            TestNetwork::SAPLING_ACTIVATION_HEIGHT,
-            TestNetwork::CANOPY_ACTIVATION_HEIGHT,
+            TestNetwork::activation_height(Sapling).unwrap(),
+            TestNetwork::activation_height(Canopy).unwrap(),
         ];
 
         for &height in heights.iter() {
@@ -1318,8 +1324,8 @@ mod tests {
     fn recovery_with_invalid_cv() {
         let mut rng = OsRng;
         let heights = [
-            TestNetwork::SAPLING_ACTIVATION_HEIGHT,
-            TestNetwork::CANOPY_ACTIVATION_HEIGHT,
+            TestNetwork::activation_height(Sapling).unwrap(),
+            TestNetwork::activation_height(Canopy).unwrap(),
         ];
 
         for &height in heights.iter() {
@@ -1345,8 +1351,8 @@ mod tests {
     fn recovery_with_invalid_cmu() {
         let mut rng = OsRng;
         let heights = [
-            TestNetwork::SAPLING_ACTIVATION_HEIGHT,
-            TestNetwork::CANOPY_ACTIVATION_HEIGHT,
+            TestNetwork::activation_height(Sapling).unwrap(),
+            TestNetwork::activation_height(Canopy).unwrap(),
         ];
 
         for &height in heights.iter() {
@@ -1372,8 +1378,8 @@ mod tests {
     fn recovery_with_invalid_epk() {
         let mut rng = OsRng;
         let heights = [
-            TestNetwork::SAPLING_ACTIVATION_HEIGHT,
-            TestNetwork::CANOPY_ACTIVATION_HEIGHT,
+            TestNetwork::activation_height(Sapling).unwrap(),
+            TestNetwork::activation_height(Canopy).unwrap(),
         ];
 
         for &height in heights.iter() {
@@ -1399,8 +1405,8 @@ mod tests {
     fn recovery_with_invalid_enc_tag() {
         let mut rng = OsRng;
         let heights = [
-            TestNetwork::SAPLING_ACTIVATION_HEIGHT,
-            TestNetwork::CANOPY_ACTIVATION_HEIGHT,
+            TestNetwork::activation_height(Sapling).unwrap(),
+            TestNetwork::activation_height(Canopy).unwrap(),
         ];
 
         for &height in heights.iter() {
@@ -1427,8 +1433,8 @@ mod tests {
     fn recovery_with_invalid_out_tag() {
         let mut rng = OsRng;
         let heights = [
-            TestNetwork::SAPLING_ACTIVATION_HEIGHT,
-            TestNetwork::CANOPY_ACTIVATION_HEIGHT,
+            TestNetwork::activation_height(Sapling).unwrap(),
+            TestNetwork::activation_height(Canopy).unwrap(),
         ];
 
         for &height in heights.iter() {
@@ -1454,10 +1460,11 @@ mod tests {
     #[test]
     fn recovery_with_invalid_version_byte() {
         let mut rng = OsRng;
+        let canopy_activation_height = TestNetwork::activation_height(Canopy).unwrap();
         let heights = [
-            TestNetwork::CANOPY_ACTIVATION_HEIGHT - 1,
-            TestNetwork::CANOPY_ACTIVATION_HEIGHT,
-            TestNetwork::CANOPY_ACTIVATION_HEIGHT + ZIP212_GRACE_PERIOD,
+            canopy_activation_height - 1,
+            canopy_activation_height,
+            canopy_activation_height + ZIP212_GRACE_PERIOD,
         ];
         let leadbyte_array = [0x02, 0x03, 0x01];
 
@@ -1493,8 +1500,8 @@ mod tests {
     fn recovery_with_invalid_diversifier() {
         let mut rng = OsRng;
         let heights = [
-            TestNetwork::SAPLING_ACTIVATION_HEIGHT,
-            TestNetwork::CANOPY_ACTIVATION_HEIGHT,
+            TestNetwork::activation_height(Sapling).unwrap(),
+            TestNetwork::activation_height(Canopy).unwrap(),
         ];
 
         for &height in heights.iter() {
@@ -1529,8 +1536,8 @@ mod tests {
     fn recovery_with_incorrect_diversifier() {
         let mut rng = OsRng;
         let heights = [
-            TestNetwork::SAPLING_ACTIVATION_HEIGHT,
-            TestNetwork::CANOPY_ACTIVATION_HEIGHT,
+            TestNetwork::activation_height(Sapling).unwrap(),
+            TestNetwork::activation_height(Canopy).unwrap(),
         ];
 
         for &height in heights.iter() {
@@ -1565,8 +1572,8 @@ mod tests {
     fn recovery_with_invalid_pk_d() {
         let mut rng = OsRng;
         let heights = [
-            TestNetwork::SAPLING_ACTIVATION_HEIGHT,
-            TestNetwork::CANOPY_ACTIVATION_HEIGHT,
+            TestNetwork::activation_height(Sapling).unwrap(),
+            TestNetwork::activation_height(Canopy).unwrap(),
         ];
 
         for &height in heights.iter() {
