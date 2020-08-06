@@ -26,13 +26,21 @@
 
 use rusqlite::{Connection, NO_PARAMS};
 use std::cmp;
+use std::path::Path;
 
 use zcash_primitives::{
+    block::BlockHash,
     consensus::{self, BlockHeight},
     zip32::ExtendedFullViewingKey,
 };
 
-use zcash_client_backend::encoding::encode_payment_address;
+use zcash_client_backend::{
+    data_api::{chain::ANCHOR_OFFSET, error::Error, CacheOps, DBOps},
+    encoding::encode_payment_address,
+    proto::compact_formats::CompactBlock,
+};
+
+use crate::error::SqliteClientError;
 
 pub mod chain;
 pub mod error;
@@ -41,7 +49,58 @@ pub mod query;
 pub mod scan;
 pub mod transact;
 
-const ANCHOR_OFFSET: u32 = 10;
+pub struct Account(u32);
+
+pub struct DataConnection(Connection);
+
+impl DataConnection {
+    pub fn for_path<P: AsRef<Path>>(path: P) -> Result<Self, rusqlite::Error> {
+        Connection::open(path).map(DataConnection)
+    }
+}
+
+impl DBOps for DataConnection {
+    type Error = Error<rusqlite::Error>;
+
+    fn block_height_extrema(&self) -> Result<Option<(BlockHeight, BlockHeight)>, Self::Error> {
+        chain::block_height_extrema(self).map_err(Error::Database)
+    }
+
+    fn get_block_hash(&self, block_height: BlockHeight) -> Result<Option<BlockHash>, Self::Error> {
+        chain::get_block_hash(self, block_height).map_err(Error::Database)
+    }
+
+    fn rewind_to_height<P: consensus::Parameters>(
+        &self,
+        parameters: &P,
+        block_height: BlockHeight,
+    ) -> Result<(), Self::Error> {
+        chain::rewind_to_height(self, parameters, block_height).map_err(|e| e.0)
+    }
+}
+
+pub struct CacheConnection(Connection);
+
+impl CacheConnection {
+    pub fn for_path<P: AsRef<Path>>(path: P) -> Result<Self, rusqlite::Error> {
+        Connection::open(path).map(CacheConnection)
+    }
+}
+
+impl CacheOps for CacheConnection {
+    type Error = Error<rusqlite::Error>;
+
+    fn validate_chain<F>(
+        &self,
+        from_height: BlockHeight,
+        validate: F,
+    ) -> Result<Option<BlockHash>, Self::Error>
+    where
+        F: Fn(&CompactBlock, &CompactBlock) -> Result<(), Self::Error>,
+    {
+        chain::validate_chain(self, from_height, validate).map_err(|s| s.0)
+    }
+}
 
 fn address_from_extfvk<P: consensus::Parameters>(
     params: &P,
@@ -54,16 +113,16 @@ fn address_from_extfvk<P: consensus::Parameters>(
 /// Determines the target height for a transaction, and the height from which to
 /// select anchors, based on the current synchronised block chain.
 fn get_target_and_anchor_heights(
-    data: &Connection,
-) -> Result<(BlockHeight, BlockHeight), error::Error> {
-    data.query_row_and_then(
+    data: &DataConnection,
+) -> Result<(BlockHeight, BlockHeight), SqliteClientError> {
+    data.0.query_row_and_then(
         "SELECT MIN(height), MAX(height) FROM blocks",
         NO_PARAMS,
         |row| match (row.get::<_, u32>(0), row.get::<_, u32>(1)) {
             // If there are no blocks, the query returns NULL.
             (Err(rusqlite::Error::InvalidColumnType(_, _, _)), _)
             | (_, Err(rusqlite::Error::InvalidColumnType(_, _, _))) => {
-                Err(error::Error(error::ErrorKind::ScanRequired))
+                Err(Error::ScanRequired.into())
             }
             (Err(e), _) | (_, Err(e)) => Err(e.into()),
             (Ok(min_height), Ok(max_height)) => {
@@ -89,8 +148,7 @@ mod tests {
     use group::GroupEncoding;
     use protobuf::Message;
     use rand_core::{OsRng, RngCore};
-    use rusqlite::{types::ToSql, Connection};
-    use std::path::Path;
+    use rusqlite::types::ToSql;
 
     use zcash_client_backend::proto::compact_formats::{
         CompactBlock, CompactOutput, CompactSpend, CompactTx,
@@ -105,6 +163,8 @@ mod tests {
         util::generate_random_rseed,
         zip32::ExtendedFullViewingKey,
     };
+
+    use super::CacheConnection;
 
     #[cfg(feature = "mainnet")]
     pub(crate) fn network() -> Network {
@@ -265,10 +325,10 @@ mod tests {
     }
 
     /// Insert a fake CompactBlock into the cache DB.
-    pub(crate) fn insert_into_cache<P: AsRef<Path>>(db_cache: P, cb: &CompactBlock) {
+    pub(crate) fn insert_into_cache(db_cache: &CacheConnection, cb: &CompactBlock) {
         let cb_bytes = cb.write_to_bytes().unwrap();
-        let cache = Connection::open(&db_cache).unwrap();
-        cache
+        db_cache
+            .0
             .prepare("INSERT INTO compactblocks (height, data) VALUES (?, ?)")
             .unwrap()
             .execute(&[

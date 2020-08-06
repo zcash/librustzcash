@@ -1,15 +1,19 @@
 //! Functions for scanning the chain and extracting relevant information.
 
-use std::path::Path;
-
 use ff::PrimeField;
 use protobuf::parse_from_bytes;
-use rusqlite::{types::ToSql, Connection, OptionalExtension, NO_PARAMS};
+
+use rusqlite::{types::ToSql, OptionalExtension, NO_PARAMS};
 
 use zcash_client_backend::{
-    address::RecipientAddress, decrypt_transaction, encoding::decode_extended_full_viewing_key,
-    proto::compact_formats::CompactBlock, welding_rig::scan_block,
+    address::RecipientAddress,
+    data_api::error::{ChainInvalid, Error},
+    decrypt_transaction,
+    encoding::decode_extended_full_viewing_key,
+    proto::compact_formats::CompactBlock,
+    welding_rig::scan_block,
 };
+
 use zcash_primitives::{
     consensus::{self, BlockHeight, NetworkUpgrade},
     merkle_tree::{CommitmentTree, IncrementalWitness},
@@ -17,7 +21,7 @@ use zcash_primitives::{
     transaction::Transaction,
 };
 
-use crate::error::{Error, ErrorKind};
+use crate::{error::SqliteClientError, CacheConnection, DataConnection};
 
 struct CompactBlockRow {
     height: BlockHeight,
@@ -48,44 +52,52 @@ struct WitnessRow {
 /// [`init_blocks_table`] before this function.
 ///
 /// Scanned blocks are required to be height-sequential. If a block is missing from the
-/// cache, an error will be returned with kind [`ErrorKind::InvalidHeight`].
+/// cache, an error will be returned with kind [`ChainInvalid::HeightMismatch`].
 ///
 /// # Examples
 ///
 /// ```
+/// use tempfile::NamedTempFile;
 /// use zcash_primitives::consensus::{
 ///     Network,
 ///     Parameters,
 /// };
-/// use zcash_client_sqlite::scan::scan_cached_blocks;
+/// use zcash_client_sqlite::{
+///     CacheConnection,
+///     DataConnection,
+///     scan::scan_cached_blocks,
+/// };
 ///
-/// scan_cached_blocks(&Network::TestNetwork, "/path/to/cache.db", "/path/to/data.db", None);
+/// let cache_file = NamedTempFile::new().unwrap();
+/// let cache = CacheConnection::for_path(cache_file).unwrap();
+/// let data_file = NamedTempFile::new().unwrap();
+/// let data = DataConnection::for_path(data_file).unwrap();
+/// scan_cached_blocks(&Network::TestNetwork, &cache, &data, None);
 /// ```
 ///
 /// [`init_blocks_table`]: crate::init::init_blocks_table
-pub fn scan_cached_blocks<Params: consensus::Parameters, P: AsRef<Path>, Q: AsRef<Path>>(
-    params: &Params,
-    db_cache: P,
-    db_data: Q,
+pub fn scan_cached_blocks<P: consensus::Parameters>(
+    params: &P,
+    cache: &CacheConnection,
+    data: &DataConnection,
     limit: Option<u32>,
-) -> Result<(), Error> {
-    let cache = Connection::open(db_cache)?;
-    let data = Connection::open(db_data)?;
+) -> Result<(), SqliteClientError> {
     let sapling_activation_height = params
         .activation_height(NetworkUpgrade::Sapling)
-        .ok_or(Error(ErrorKind::SaplingNotActive))?;
+        .ok_or(Error::SaplingNotActive)?;
 
     // Recall where we synced up to previously.
     // If we have never synced, use sapling activation height to select all cached CompactBlocks.
     let mut last_height: BlockHeight =
-        data.query_row("SELECT MAX(height) FROM blocks", NO_PARAMS, |row| {
-            row.get::<_, u32>(0)
-                .map(BlockHeight::from)
-                .or(Ok(sapling_activation_height - 1))
-        })?;
+        data.0
+            .query_row("SELECT MAX(height) FROM blocks", NO_PARAMS, |row| {
+                row.get::<_, u32>(0)
+                    .map(BlockHeight::from)
+                    .or(Ok(sapling_activation_height - 1))
+            })?;
 
     // Fetch the CompactBlocks we need to scan
-    let mut stmt_blocks = cache.prepare(
+    let mut stmt_blocks = cache.0.prepare(
         "SELECT height, data FROM compactblocks WHERE height > ? ORDER BY height ASC LIMIT ?",
     )?;
     let rows = stmt_blocks.query_map(
@@ -99,8 +111,9 @@ pub fn scan_cached_blocks<Params: consensus::Parameters, P: AsRef<Path>, Q: AsRe
     )?;
 
     // Fetch the ExtendedFullViewingKeys we are tracking
-    let mut stmt_fetch_accounts =
-        data.prepare("SELECT extfvk FROM accounts ORDER BY account ASC")?;
+    let mut stmt_fetch_accounts = data
+        .0
+        .prepare("SELECT extfvk FROM accounts ORDER BY account ASC")?;
     let extfvks = stmt_fetch_accounts.query_map(NO_PARAMS, |row| {
         row.get(0).map(|extfvk: String| {
             decode_extended_full_viewing_key(
@@ -112,10 +125,12 @@ pub fn scan_cached_blocks<Params: consensus::Parameters, P: AsRef<Path>, Q: AsRe
     // Raise SQL errors from the query, IO errors from parsing, and incorrect HRP errors.
     let extfvks: Vec<_> = extfvks
         .collect::<Result<Result<Option<_>, _>, _>>()??
-        .ok_or(Error(ErrorKind::IncorrectHRPExtFVK))?;
+        .ok_or(Error::IncorrectHRPExtFVK)?;
 
     // Get the most recent CommitmentTree
-    let mut stmt_fetch_tree = data.prepare("SELECT sapling_tree FROM blocks WHERE height = ?")?;
+    let mut stmt_fetch_tree = data
+        .0
+        .prepare("SELECT sapling_tree FROM blocks WHERE height = ?")?;
     let mut tree = stmt_fetch_tree
         .query_row(&[u32::from(last_height)], |row| {
             row.get(0).map(|data: Vec<_>| {
@@ -125,8 +140,9 @@ pub fn scan_cached_blocks<Params: consensus::Parameters, P: AsRef<Path>, Q: AsRe
         .unwrap_or_else(|_| CommitmentTree::new());
 
     // Get most recent incremental witnesses for the notes we are tracking
-    let mut stmt_fetch_witnesses =
-        data.prepare("SELECT note, witness FROM sapling_witnesses WHERE block = ?")?;
+    let mut stmt_fetch_witnesses = data
+        .0
+        .prepare("SELECT note, witness FROM sapling_witnesses WHERE block = ?")?;
     let witnesses = stmt_fetch_witnesses.query_map(&[u32::from(last_height)], |row| {
         let id_note = row.get(0)?;
         let data: Vec<_> = row.get(1)?;
@@ -135,8 +151,9 @@ pub fn scan_cached_blocks<Params: consensus::Parameters, P: AsRef<Path>, Q: AsRe
     let mut witnesses: Vec<_> = witnesses.collect::<Result<Result<_, _>, _>>()??;
 
     // Get the nullifiers for the notes we are tracking
-    let mut stmt_fetch_nullifiers =
-        data.prepare("SELECT id_note, nf, account FROM received_notes WHERE spent IS NULL")?;
+    let mut stmt_fetch_nullifiers = data
+        .0
+        .prepare("SELECT id_note, nf, account FROM received_notes WHERE spent IS NULL")?;
     let nullifiers = stmt_fetch_nullifiers.query_map(NO_PARAMS, |row| {
         let nf: Vec<_> = row.get(1)?;
         let account: i64 = row.get(2)?;
@@ -145,38 +162,44 @@ pub fn scan_cached_blocks<Params: consensus::Parameters, P: AsRef<Path>, Q: AsRe
     let mut nullifiers: Vec<_> = nullifiers.collect::<Result<_, _>>()?;
 
     // Prepare per-block SQL statements
-    let mut stmt_insert_block = data.prepare(
+    let mut stmt_insert_block = data.0.prepare(
         "INSERT INTO blocks (height, hash, time, sapling_tree)
         VALUES (?, ?, ?, ?)",
     )?;
-    let mut stmt_update_tx = data.prepare(
+    let mut stmt_update_tx = data.0.prepare(
         "UPDATE transactions
         SET block = ?, tx_index = ? WHERE txid = ?",
     )?;
-    let mut stmt_insert_tx = data.prepare(
+    let mut stmt_insert_tx = data.0.prepare(
         "INSERT INTO transactions (txid, block, tx_index)
         VALUES (?, ?, ?)",
     )?;
-    let mut stmt_select_tx = data.prepare("SELECT id_tx FROM transactions WHERE txid = ?")?;
-    let mut stmt_mark_spent_note =
-        data.prepare("UPDATE received_notes SET spent = ? WHERE nf = ?")?;
-    let mut stmt_update_note = data.prepare(
+    let mut stmt_select_tx = data
+        .0
+        .prepare("SELECT id_tx FROM transactions WHERE txid = ?")?;
+    let mut stmt_mark_spent_note = data
+        .0
+        .prepare("UPDATE received_notes SET spent = ? WHERE nf = ?")?;
+    let mut stmt_update_note = data.0.prepare(
         "UPDATE received_notes
         SET account = ?, diversifier = ?, value = ?, rcm = ?, nf = ?, is_change = ?
         WHERE tx = ? AND output_index = ?",
     )?;
-    let mut stmt_insert_note = data.prepare(
+    let mut stmt_insert_note = data.0.prepare(
         "INSERT INTO received_notes (tx, output_index, account, diversifier, value, rcm, nf, is_change)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
     )?;
-    let mut stmt_select_note =
-        data.prepare("SELECT id_note FROM received_notes WHERE tx = ? AND output_index = ?")?;
-    let mut stmt_insert_witness = data.prepare(
+    let mut stmt_select_note = data
+        .0
+        .prepare("SELECT id_note FROM received_notes WHERE tx = ? AND output_index = ?")?;
+    let mut stmt_insert_witness = data.0.prepare(
         "INSERT INTO sapling_witnesses (note, block, witness)
         VALUES (?, ?, ?)",
     )?;
-    let mut stmt_prune_witnesses = data.prepare("DELETE FROM sapling_witnesses WHERE block < ?")?;
-    let mut stmt_update_expired = data.prepare(
+    let mut stmt_prune_witnesses = data
+        .0
+        .prepare("DELETE FROM sapling_witnesses WHERE block < ?")?;
+    let mut stmt_update_expired = data.0.prepare(
         "UPDATE received_notes SET spent = NULL WHERE EXISTS (
             SELECT id_tx FROM transactions
             WHERE id_tx = received_notes.spent AND block IS NULL AND expiry_height < ?
@@ -187,11 +210,14 @@ pub fn scan_cached_blocks<Params: consensus::Parameters, P: AsRef<Path>, Q: AsRe
         let row = row?;
 
         // Start an SQL transaction for this block.
-        data.execute("BEGIN IMMEDIATE", NO_PARAMS)?;
+        data.0.execute("BEGIN IMMEDIATE", NO_PARAMS)?;
 
         // Scanned blocks MUST be height-sequential.
         if row.height != (last_height + 1) {
-            return Err(Error(ErrorKind::InvalidHeight(last_height + 1, row.height)));
+            return Err(SqliteClientError(ChainInvalid::block_height_mismatch(
+                last_height + 1,
+                row.height,
+            )));
         }
         last_height = row.height;
 
@@ -218,7 +244,7 @@ pub fn scan_cached_blocks<Params: consensus::Parameters, P: AsRef<Path>, Q: AsRe
             let cur_root = tree.root();
             for row in &witnesses {
                 if row.witness.root() != cur_root {
-                    return Err(Error(ErrorKind::InvalidWitnessAnchor(
+                    return Err(SqliteClientError(Error::InvalidWitnessAnchor(
                         row.id_note,
                         last_height,
                     )));
@@ -227,12 +253,13 @@ pub fn scan_cached_blocks<Params: consensus::Parameters, P: AsRef<Path>, Q: AsRe
             for tx in &txs {
                 for output in tx.shielded_outputs.iter() {
                     if output.witness.root() != cur_root {
-                        return Err(Error(ErrorKind::InvalidNewWitnessAnchor(
+                        return Err(Error::InvalidNewWitnessAnchor(
                             output.index,
                             tx.txid,
                             last_height,
                             output.witness.root(),
-                        )));
+                        )
+                        .into());
                     }
                 }
             }
@@ -264,7 +291,7 @@ pub fn scan_cached_blocks<Params: consensus::Parameters, P: AsRef<Path>, Q: AsRe
                     u32::from(row.height).to_sql()?,
                     (tx.index as i64).to_sql()?,
                 ])?;
-                data.last_insert_rowid()
+                data.0.last_insert_rowid()
             } else {
                 // It was there, so grab its row number.
                 stmt_select_tx.query_row(&[txid], |row| row.get(0))?
@@ -318,7 +345,7 @@ pub fn scan_cached_blocks<Params: consensus::Parameters, P: AsRef<Path>, Q: AsRe
                         nf.to_sql()?,
                         output.is_change.to_sql()?,
                     ])?;
-                    data.last_insert_rowid()
+                    data.0.last_insert_rowid()
                 } else {
                     // It was there, so grab its row number.
                     stmt_select_note.query_row(
@@ -360,7 +387,7 @@ pub fn scan_cached_blocks<Params: consensus::Parameters, P: AsRef<Path>, Q: AsRe
         stmt_update_expired.execute(&[u32::from(last_height)])?;
 
         // Commit the SQL transaction, writing this block's data atomically.
-        data.execute("COMMIT", NO_PARAMS)?;
+        data.0.execute("COMMIT", NO_PARAMS)?;
     }
 
     Ok(())
@@ -368,16 +395,16 @@ pub fn scan_cached_blocks<Params: consensus::Parameters, P: AsRef<Path>, Q: AsRe
 
 /// Scans a [`Transaction`] for any information that can be decrypted by the accounts in
 /// the wallet, and saves it to the wallet.
-pub fn decrypt_and_store_transaction<D: AsRef<Path>, P: consensus::Parameters>(
-    db_data: D,
+pub fn decrypt_and_store_transaction<P: consensus::Parameters>(
+    data: &DataConnection,
     params: &P,
     tx: &Transaction,
-) -> Result<(), Error> {
-    let data = Connection::open(db_data)?;
-
+) -> Result<(), SqliteClientError> {
     // Fetch the ExtendedFullViewingKeys we are tracking
-    let mut stmt_fetch_accounts =
-        data.prepare("SELECT extfvk FROM accounts ORDER BY account ASC")?;
+    let mut stmt_fetch_accounts = data
+        .0
+        .prepare("SELECT extfvk FROM accounts ORDER BY account ASC")?;
+
     let extfvks = stmt_fetch_accounts.query_map(NO_PARAMS, |row| {
         row.get(0).map(|extfvk: String| {
             decode_extended_full_viewing_key(
@@ -386,13 +413,16 @@ pub fn decrypt_and_store_transaction<D: AsRef<Path>, P: consensus::Parameters>(
             )
         })
     })?;
+
     // Raise SQL errors from the query, IO errors from parsing, and incorrect HRP errors.
     let extfvks: Vec<_> = extfvks
         .collect::<Result<Result<Option<_>, _>, _>>()??
-        .ok_or(Error(ErrorKind::IncorrectHRPExtFVK))?;
+        .ok_or(SqliteClientError(Error::IncorrectHRPExtFVK))?;
 
     // Height is block height for mined transactions, and the "mempool height" (chain height + 1) for mempool transactions.
-    let mut stmt_select_block = data.prepare("SELECT block FROM transactions WHERE txid = ?")?;
+    let mut stmt_select_block = data
+        .0
+        .prepare("SELECT block FROM transactions WHERE txid = ?")?;
     let height = match stmt_select_block
         .query_row(&[tx.txid().0.to_vec()], |row| {
             row.get::<_, u32>(0).map(BlockHeight::from)
@@ -401,13 +431,14 @@ pub fn decrypt_and_store_transaction<D: AsRef<Path>, P: consensus::Parameters>(
     {
         Some(height) => height,
         None => data
+            .0
             .query_row("SELECT MAX(height) FROM blocks", NO_PARAMS, |row| {
                 row.get(0)
             })
             .optional()?
             .map(|last_height: u32| BlockHeight::from(last_height + 1))
             .or_else(|| params.activation_height(NetworkUpgrade::Sapling))
-            .ok_or(Error(ErrorKind::SaplingNotActive))?,
+            .ok_or(SqliteClientError(Error::SaplingNotActive))?,
     };
 
     let outputs = decrypt_transaction(params, height, tx, &extfvks);
@@ -417,36 +448,38 @@ pub fn decrypt_and_store_transaction<D: AsRef<Path>, P: consensus::Parameters>(
         return Ok(());
     }
 
-    let mut stmt_update_tx = data.prepare(
+    let mut stmt_update_tx = data.0.prepare(
         "UPDATE transactions
         SET expiry_height = ?, raw = ? WHERE txid = ?",
     )?;
-    let mut stmt_insert_tx = data.prepare(
+    let mut stmt_insert_tx = data.0.prepare(
         "INSERT INTO transactions (txid, expiry_height, raw)
         VALUES (?, ?, ?)",
     )?;
-    let mut stmt_select_tx = data.prepare("SELECT id_tx FROM transactions WHERE txid = ?")?;
-    let mut stmt_update_sent_note = data.prepare(
+    let mut stmt_select_tx = data
+        .0
+        .prepare("SELECT id_tx FROM transactions WHERE txid = ?")?;
+    let mut stmt_update_sent_note = data.0.prepare(
         "UPDATE sent_notes
         SET from_account = ?, address = ?, value = ?, memo = ?
         WHERE tx = ? AND output_index = ?",
     )?;
-    let mut stmt_insert_sent_note = data.prepare(
+    let mut stmt_insert_sent_note = data.0.prepare(
         "INSERT INTO sent_notes (tx, output_index, from_account, address, value, memo)
         VALUES (?, ?, ?, ?, ?, ?)",
     )?;
-    let mut stmt_update_received_note = data.prepare(
+    let mut stmt_update_received_note = data.0.prepare(
         "UPDATE received_notes
         SET account = ?, diversifier = ?, value = ?, rcm = ?, memo = ?
         WHERE tx = ? AND output_index = ?",
     )?;
-    let mut stmt_insert_received_note = data.prepare(
+    let mut stmt_insert_received_note = data.0.prepare(
         "INSERT INTO received_notes (tx, output_index, account, diversifier, value, rcm, memo)
         VALUES (?, ?, ?, ?, ?, ?, ?)",
     )?;
 
     // Update the database atomically, to ensure the result is internally consistent.
-    data.execute("BEGIN IMMEDIATE", NO_PARAMS)?;
+    data.0.execute("BEGIN IMMEDIATE", NO_PARAMS)?;
 
     // First try update an existing transaction in the database.
     let txid = tx.txid().0.to_vec();
@@ -464,7 +497,7 @@ pub fn decrypt_and_store_transaction<D: AsRef<Path>, P: consensus::Parameters>(
             u32::from(tx.expiry_height).to_sql()?,
             raw_tx.to_sql()?,
         ])?;
-        data.last_insert_rowid()
+        data.0.last_insert_rowid()
     } else {
         // It was there, so grab its row number.
         stmt_select_tx.query_row(&[txid], |row| row.get(0))?
@@ -526,21 +559,25 @@ pub fn decrypt_and_store_transaction<D: AsRef<Path>, P: consensus::Parameters>(
         }
     }
 
-    data.execute("COMMIT", NO_PARAMS)?;
+    data.0.execute("COMMIT", NO_PARAMS)?;
 
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
+    use rusqlite::{Connection, NO_PARAMS};
+
     use tempfile::NamedTempFile;
+
     use zcash_primitives::{
         block::BlockHash,
         transaction::components::Amount,
         zip32::{ExtendedFullViewingKey, ExtendedSpendingKey},
     };
 
-    use super::scan_cached_blocks;
+    use zcash_client_backend::data_api::error::ChainInvalid;
+
     use crate::{
         init::{init_accounts_table, init_cache_database, init_data_database},
         query::get_balance,
@@ -548,16 +585,19 @@ mod tests {
             self, fake_compact_block, fake_compact_block_spending, insert_into_cache,
             sapling_activation_height,
         },
+        CacheConnection, DataConnection,
     };
+
+    use super::scan_cached_blocks;
 
     #[test]
     fn scan_cached_blocks_requires_sequential_blocks() {
         let cache_file = NamedTempFile::new().unwrap();
-        let db_cache = cache_file.path();
+        let db_cache = CacheConnection(Connection::open(cache_file.path()).unwrap());
         init_cache_database(&db_cache).unwrap();
 
         let data_file = NamedTempFile::new().unwrap();
-        let db_data = data_file.path();
+        let db_data = DataConnection(Connection::open(data_file.path()).unwrap());
         init_data_database(&db_data).unwrap();
 
         // Add an account to the wallet
@@ -573,9 +613,9 @@ mod tests {
             extfvk.clone(),
             value,
         );
-        insert_into_cache(db_cache, &cb1);
-        scan_cached_blocks(&tests::network(), db_cache, db_data, None).unwrap();
-        assert_eq!(get_balance(db_data, 0).unwrap(), value);
+        insert_into_cache(&db_cache, &cb1);
+        scan_cached_blocks(&tests::network(), &db_cache, &db_data, None).unwrap();
+        assert_eq!(get_balance(&db_data, 0).unwrap(), value);
 
         // We cannot scan a block of height SAPLING_ACTIVATION_HEIGHT + 2 next
         let (cb2, _) = fake_compact_block(
@@ -590,24 +630,31 @@ mod tests {
             extfvk.clone(),
             value,
         );
-        insert_into_cache(db_cache, &cb3);
-        match scan_cached_blocks(&tests::network(), db_cache, db_data, None) {
+        insert_into_cache(&db_cache, &cb3);
+        match scan_cached_blocks(&tests::network(), &db_cache, &db_data, None) {
             Ok(_) => panic!("Should have failed"),
-            Err(e) => assert_eq!(
-                e.to_string(),
-                format!(
-                    "Expected height of next CompactBlock to be {}, but was {}",
-                    sapling_activation_height() + 1,
-                    sapling_activation_height() + 2
-                )
-            ),
+            Err(e) => {
+                assert_eq!(
+                    e.0.to_string(),
+                    ChainInvalid::block_height_mismatch::<rusqlite::Error>(
+                        sapling_activation_height() + 1,
+                        sapling_activation_height() + 2
+                    )
+                    .to_string()
+                );
+
+                //FIXME: scan_cached_blocks is leaving the database in an invalid
+                //transactional state on error; this rollback should be intrinsic
+                //to the failure path.
+                db_data.0.execute("ROLLBACK", NO_PARAMS).unwrap();
+            }
         }
 
         // If we add a block of height SAPLING_ACTIVATION_HEIGHT + 1, we can now scan both
-        insert_into_cache(db_cache, &cb2);
-        scan_cached_blocks(&tests::network(), db_cache, db_data, None).unwrap();
+        insert_into_cache(&db_cache, &cb2);
+        scan_cached_blocks(&tests::network(), &db_cache, &db_data, None).unwrap();
         assert_eq!(
-            get_balance(db_data, 0).unwrap(),
+            get_balance(&db_data, 0).unwrap(),
             Amount::from_u64(150_000).unwrap()
         );
     }
@@ -615,11 +662,11 @@ mod tests {
     #[test]
     fn scan_cached_blocks_finds_received_notes() {
         let cache_file = NamedTempFile::new().unwrap();
-        let db_cache = cache_file.path();
+        let db_cache = CacheConnection(Connection::open(cache_file.path()).unwrap());
         init_cache_database(&db_cache).unwrap();
 
         let data_file = NamedTempFile::new().unwrap();
-        let db_data = data_file.path();
+        let db_data = DataConnection(Connection::open(data_file.path()).unwrap());
         init_data_database(&db_data).unwrap();
 
         // Add an account to the wallet
@@ -628,7 +675,7 @@ mod tests {
         init_accounts_table(&db_data, &tests::network(), &[extfvk.clone()]).unwrap();
 
         // Account balance should be zero
-        assert_eq!(get_balance(db_data, 0).unwrap(), Amount::zero());
+        assert_eq!(get_balance(&db_data, 0).unwrap(), Amount::zero());
 
         // Create a fake CompactBlock sending value to the address
         let value = Amount::from_u64(5).unwrap();
@@ -638,35 +685,35 @@ mod tests {
             extfvk.clone(),
             value,
         );
-        insert_into_cache(db_cache, &cb);
+        insert_into_cache(&db_cache, &cb);
 
         // Scan the cache
-        scan_cached_blocks(&tests::network(), db_cache, db_data, None).unwrap();
+        scan_cached_blocks(&tests::network(), &db_cache, &db_data, None).unwrap();
 
         // Account balance should reflect the received note
-        assert_eq!(get_balance(db_data, 0).unwrap(), value);
+        assert_eq!(get_balance(&db_data, 0).unwrap(), value);
 
         // Create a second fake CompactBlock sending more value to the address
         let value2 = Amount::from_u64(7).unwrap();
         let (cb2, _) =
             fake_compact_block(sapling_activation_height() + 1, cb.hash(), extfvk, value2);
-        insert_into_cache(db_cache, &cb2);
+        insert_into_cache(&db_cache, &cb2);
 
         // Scan the cache again
-        scan_cached_blocks(&tests::network(), db_cache, db_data, None).unwrap();
+        scan_cached_blocks(&tests::network(), &db_cache, &db_data, None).unwrap();
 
         // Account balance should reflect both received notes
-        assert_eq!(get_balance(db_data, 0).unwrap(), value + value2);
+        assert_eq!(get_balance(&db_data, 0).unwrap(), value + value2);
     }
 
     #[test]
     fn scan_cached_blocks_finds_change_notes() {
         let cache_file = NamedTempFile::new().unwrap();
-        let db_cache = cache_file.path();
+        let db_cache = CacheConnection(Connection::open(cache_file.path()).unwrap());
         init_cache_database(&db_cache).unwrap();
 
         let data_file = NamedTempFile::new().unwrap();
-        let db_data = data_file.path();
+        let db_data = DataConnection(Connection::open(data_file.path()).unwrap());
         init_data_database(&db_data).unwrap();
 
         // Add an account to the wallet
@@ -675,7 +722,7 @@ mod tests {
         init_accounts_table(&db_data, &tests::network(), &[extfvk.clone()]).unwrap();
 
         // Account balance should be zero
-        assert_eq!(get_balance(db_data, 0).unwrap(), Amount::zero());
+        assert_eq!(get_balance(&db_data, 0).unwrap(), Amount::zero());
 
         // Create a fake CompactBlock sending value to the address
         let value = Amount::from_u64(5).unwrap();
@@ -685,20 +732,20 @@ mod tests {
             extfvk.clone(),
             value,
         );
-        insert_into_cache(db_cache, &cb);
+        insert_into_cache(&db_cache, &cb);
 
         // Scan the cache
-        scan_cached_blocks(&tests::network(), db_cache, db_data, None).unwrap();
+        scan_cached_blocks(&tests::network(), &db_cache, &db_data, None).unwrap();
 
         // Account balance should reflect the received note
-        assert_eq!(get_balance(db_data, 0).unwrap(), value);
+        assert_eq!(get_balance(&db_data, 0).unwrap(), value);
 
         // Create a second fake CompactBlock spending value from the address
         let extsk2 = ExtendedSpendingKey::master(&[0]);
         let to2 = extsk2.default_address().unwrap().1;
         let value2 = Amount::from_u64(2).unwrap();
         insert_into_cache(
-            db_cache,
+            &db_cache,
             &fake_compact_block_spending(
                 sapling_activation_height() + 1,
                 cb.hash(),
@@ -710,9 +757,9 @@ mod tests {
         );
 
         // Scan the cache again
-        scan_cached_blocks(&tests::network(), db_cache, db_data, None).unwrap();
+        scan_cached_blocks(&tests::network(), &db_cache, &db_data, None).unwrap();
 
         // Account balance should equal the change
-        assert_eq!(get_balance(db_data, 0).unwrap(), value - value2);
+        assert_eq!(get_balance(&db_data, 0).unwrap(), value - value2);
     }
 }

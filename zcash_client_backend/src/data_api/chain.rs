@@ -39,15 +39,13 @@ pub fn validate_combined_chain<
 
     // Recall where we synced up to previously.
     // If we have never synced, use Sapling activation height to select all cached CompactBlocks.
-    let data_scan_max_height = data
-        .block_height_extrema()?
-        .map(|(_, max)| max)
-        .unwrap_or(sapling_activation_height - 1);
+    let data_max_height = data.block_height_extrema()?.map(|(_, max)| max);
 
     // The cache will contain blocks above the maximum height of data in the database;
     // validate from that maximum height up to the chain tip, returning the
-    // hash of the block at data_scan_max_height
-    let cached_hash_opt = cache.validate_chain(data_scan_max_height, |top_block, next_block| {
+    // hash of the block at data_max_height
+    let from_height = data_max_height.unwrap_or(sapling_activation_height - 1);
+    let cached_hash_opt = cache.validate_chain(from_height, |top_block, next_block| {
         if next_block.height() != top_block.height() - 1 {
             Err(ChainInvalid::block_height_mismatch(
                 top_block.height() - 1,
@@ -60,22 +58,21 @@ pub fn validate_combined_chain<
         }
     })?;
 
-    match (cached_hash_opt, data.get_block_hash(data_scan_max_height)?) {
-        (Some(cached_hash), Some(data_scan_max_hash)) =>
-        // Cached blocks must hash-chain to the last scanned block.
-        {
-            if cached_hash == data_scan_max_hash {
-                Ok(())
-            } else {
-                Err(ChainInvalid::prev_hash_mismatch::<E>(data_scan_max_height))
+    match (cached_hash_opt, data_max_height) {
+        (Some(cached_hash), Some(h)) => match data.get_block_hash(h)? {
+            Some(data_scan_max_hash) => {
+                if cached_hash == data_scan_max_hash {
+                    Ok(())
+                } else {
+                    Err(ChainInvalid::prev_hash_mismatch::<E>(h))
+                }
             }
-        }
-        (Some(_), None) => Err(Error::CorruptedData(
-            "No block hash available at last scanned height.",
-        )),
-        (None, _) =>
-        // No cached blocks are present, this is fine.
-        {
+            None => Err(Error::CorruptedData(
+                "No block hash available for block at maximum chain height.",
+            )),
+        },
+        _ => {
+            // No cached blocks are present, or the max data height is absent, this is fine.
             Ok(())
         }
     }

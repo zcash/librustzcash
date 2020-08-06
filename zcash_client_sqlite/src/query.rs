@@ -1,27 +1,28 @@
 //! Functions for querying information in the data database.
 
-use rusqlite::Connection;
-use std::path::Path;
 use zcash_primitives::{note_encryption::Memo, transaction::components::Amount};
 
-use crate::{
-    error::{Error, ErrorKind},
-    get_target_and_anchor_heights,
-};
+use zcash_client_backend::data_api::error::Error;
+
+use crate::{error::SqliteClientError, get_target_and_anchor_heights, DataConnection};
 
 /// Returns the address for the account.
 ///
 /// # Examples
 ///
 /// ```
-/// use zcash_client_sqlite::query::get_address;
+/// use tempfile::NamedTempFile;
+/// use zcash_client_sqlite::{
+///     DataConnection,
+///     query::get_address,
+/// };
 ///
-/// let addr = get_address("/path/to/data.db", 0);
+/// let data_file = NamedTempFile::new().unwrap();
+/// let db = DataConnection::for_path(data_file).unwrap();
+/// let addr = get_address(&db, 0);
 /// ```
-pub fn get_address<P: AsRef<Path>>(db_data: P, account: u32) -> Result<String, Error> {
-    let data = Connection::open(db_data)?;
-
-    let addr = data.query_row(
+pub fn get_address(data: &DataConnection, account: u32) -> Result<String, rusqlite::Error> {
+    let addr = data.0.query_row(
         "SELECT address FROM accounts
         WHERE account = ?",
         &[account],
@@ -42,14 +43,18 @@ pub fn get_address<P: AsRef<Path>>(db_data: P, account: u32) -> Result<String, E
 /// # Examples
 ///
 /// ```
-/// use zcash_client_sqlite::query::get_balance;
+/// use tempfile::NamedTempFile;
+/// use zcash_client_sqlite::{
+///     DataConnection,
+///     query::get_balance,
+/// };
 ///
-/// let addr = get_balance("/path/to/data.db", 0);
+/// let data_file = NamedTempFile::new().unwrap();
+/// let db = DataConnection::for_path(data_file).unwrap();
+/// let addr = get_balance(&db, 0);
 /// ```
-pub fn get_balance<P: AsRef<Path>>(db_data: P, account: u32) -> Result<Amount, Error> {
-    let data = Connection::open(db_data)?;
-
-    let balance = data.query_row(
+pub fn get_balance(data: &DataConnection, account: u32) -> Result<Amount, SqliteClientError> {
+    let balance = data.0.query_row(
         "SELECT SUM(value) FROM received_notes
         INNER JOIN transactions ON transactions.id_tx = received_notes.tx
         WHERE account = ? AND spent IS NULL AND transactions.block IS NOT NULL",
@@ -59,7 +64,7 @@ pub fn get_balance<P: AsRef<Path>>(db_data: P, account: u32) -> Result<Amount, E
 
     match Amount::from_i64(balance) {
         Ok(amount) if !amount.is_negative() => Ok(amount),
-        _ => Err(Error(ErrorKind::CorruptedData(
+        _ => Err(SqliteClientError(Error::CorruptedData(
             "Sum of values in received_notes is out of range",
         ))),
     }
@@ -71,16 +76,23 @@ pub fn get_balance<P: AsRef<Path>>(db_data: P, account: u32) -> Result<Amount, E
 /// # Examples
 ///
 /// ```
-/// use zcash_client_sqlite::query::get_verified_balance;
+/// use tempfile::NamedTempFile;
+/// use zcash_client_sqlite::{
+///     DataConnection,
+///     query::get_verified_balance,
+/// };
 ///
-/// let addr = get_verified_balance("/path/to/data.db", 0);
+/// let data_file = NamedTempFile::new().unwrap();
+/// let db = DataConnection::for_path(data_file).unwrap();
+/// let addr = get_verified_balance(&db, 0);
 /// ```
-pub fn get_verified_balance<P: AsRef<Path>>(db_data: P, account: u32) -> Result<Amount, Error> {
-    let data = Connection::open(db_data)?;
-
+pub fn get_verified_balance(
+    data: &DataConnection,
+    account: u32,
+) -> Result<Amount, SqliteClientError> {
     let (_, anchor_height) = get_target_and_anchor_heights(&data)?;
 
-    let balance = data.query_row(
+    let balance = data.0.query_row(
         "SELECT SUM(value) FROM received_notes
         INNER JOIN transactions ON transactions.id_tx = received_notes.tx
         WHERE account = ? AND spent IS NULL AND transactions.block <= ?",
@@ -90,7 +102,7 @@ pub fn get_verified_balance<P: AsRef<Path>>(db_data: P, account: u32) -> Result<
 
     match Amount::from_i64(balance) {
         Ok(amount) if !amount.is_negative() => Ok(amount),
-        _ => Err(Error(ErrorKind::CorruptedData(
+        _ => Err(SqliteClientError(Error::CorruptedData(
             "Sum of values in received_notes is out of range",
         ))),
     }
@@ -104,16 +116,21 @@ pub fn get_verified_balance<P: AsRef<Path>>(db_data: P, account: u32) -> Result<
 /// # Examples
 ///
 /// ```
-/// use zcash_client_sqlite::query::get_received_memo_as_utf8;
+/// use tempfile::NamedTempFile;
+/// use zcash_client_sqlite::{
+///     DataConnection,
+///     query::get_received_memo_as_utf8,
+/// };
 ///
-/// let memo = get_received_memo_as_utf8("/path/to/data.db", 27);
-pub fn get_received_memo_as_utf8<P: AsRef<Path>>(
-    db_data: P,
+/// let data_file = NamedTempFile::new().unwrap();
+/// let db = DataConnection::for_path(data_file).unwrap();
+/// let memo = get_received_memo_as_utf8(&db, 27);
+/// ```
+pub fn get_received_memo_as_utf8(
+    data: &DataConnection,
     id_note: i64,
-) -> Result<Option<String>, Error> {
-    let data = Connection::open(db_data)?;
-
-    let memo: Vec<_> = data.query_row(
+) -> Result<Option<String>, SqliteClientError> {
+    let memo: Vec<_> = data.0.query_row(
         "SELECT memo FROM received_notes
         WHERE id_note = ?",
         &[id_note],
@@ -123,7 +140,7 @@ pub fn get_received_memo_as_utf8<P: AsRef<Path>>(
     match Memo::from_bytes(&memo) {
         Some(memo) => match memo.to_utf8() {
             Some(Ok(res)) => Ok(Some(res)),
-            Some(Err(e)) => Err(Error(ErrorKind::InvalidMemo(e))),
+            Some(Err(e)) => Err(SqliteClientError(Error::InvalidMemo(e))),
             None => Ok(None),
         },
         None => Ok(None),
@@ -138,16 +155,21 @@ pub fn get_received_memo_as_utf8<P: AsRef<Path>>(
 /// # Examples
 ///
 /// ```
-/// use zcash_client_sqlite::query::get_sent_memo_as_utf8;
+/// use tempfile::NamedTempFile;
+/// use zcash_client_sqlite::{
+///     DataConnection,
+///     query::get_sent_memo_as_utf8,
+/// };
 ///
-/// let memo = get_sent_memo_as_utf8("/path/to/data.db", 12);
-pub fn get_sent_memo_as_utf8<P: AsRef<Path>>(
-    db_data: P,
+/// let data_file = NamedTempFile::new().unwrap();
+/// let db = DataConnection::for_path(data_file).unwrap();
+/// let memo = get_sent_memo_as_utf8(&db, 12);
+/// ```
+pub fn get_sent_memo_as_utf8(
+    data: &DataConnection,
     id_note: i64,
-) -> Result<Option<String>, Error> {
-    let data = Connection::open(db_data)?;
-
-    let memo: Vec<_> = data.query_row(
+) -> Result<Option<String>, SqliteClientError> {
+    let memo: Vec<_> = data.0.query_row(
         "SELECT memo FROM sent_notes
         WHERE id_note = ?",
         &[id_note],
@@ -157,7 +179,7 @@ pub fn get_sent_memo_as_utf8<P: AsRef<Path>>(
     match Memo::from_bytes(&memo) {
         Some(memo) => match memo.to_utf8() {
             Some(Ok(res)) => Ok(Some(res)),
-            Some(Err(e)) => Err(Error(ErrorKind::InvalidMemo(e))),
+            Some(Err(e)) => Err(SqliteClientError(Error::InvalidMemo(e))),
             None => Ok(None),
         },
         None => Ok(None),
@@ -166,23 +188,27 @@ pub fn get_sent_memo_as_utf8<P: AsRef<Path>>(
 
 #[cfg(test)]
 mod tests {
+    use rusqlite::Connection;
     use tempfile::NamedTempFile;
+
     use zcash_primitives::{
         transaction::components::Amount,
         zip32::{ExtendedFullViewingKey, ExtendedSpendingKey},
     };
 
-    use super::{get_address, get_balance, get_verified_balance};
+    use zcash_client_backend::data_api::error::Error;
+
     use crate::{
-        error::ErrorKind,
         init::{init_accounts_table, init_data_database},
-        tests,
+        tests, DataConnection,
     };
+
+    use super::{get_address, get_balance, get_verified_balance};
 
     #[test]
     fn empty_database_has_no_balance() {
         let data_file = NamedTempFile::new().unwrap();
-        let db_data = data_file.path();
+        let db_data = DataConnection(Connection::open(data_file.path()).unwrap());
         init_data_database(&db_data).unwrap();
 
         // Add an account to the wallet
@@ -191,17 +217,17 @@ mod tests {
         init_accounts_table(&db_data, &tests::network(), &extfvks).unwrap();
 
         // The account should be empty
-        assert_eq!(get_balance(db_data, 0).unwrap(), Amount::zero());
+        assert_eq!(get_balance(&db_data, 0).unwrap(), Amount::zero());
 
         // The account should have no verified balance, as we haven't scanned any blocks
-        let e = get_verified_balance(db_data, 0).unwrap_err();
-        match e.kind() {
-            ErrorKind::ScanRequired => (),
+        let e = get_verified_balance(&db_data, 0).unwrap_err();
+        match e.0 {
+            Error::ScanRequired => (),
             _ => panic!("Unexpected error: {:?}", e),
         }
 
         // An invalid account has zero balance
-        assert!(get_address(db_data, 1).is_err());
-        assert_eq!(get_balance(db_data, 1).unwrap(), Amount::zero());
+        assert!(get_address(&db_data, 1).is_err());
+        assert_eq!(get_balance(&db_data, 1).unwrap(), Amount::zero());
     }
 }
