@@ -391,7 +391,7 @@ mod tests {
         query::{get_balance, get_verified_balance},
         scan::scan_cached_blocks,
         tests::{self, fake_compact_block, insert_into_cache, sapling_activation_height},
-        CacheConnection, DataConnection,
+        Account, CacheConnection, DataConnection,
     };
 
     use super::{create_to_address, OvkPolicy};
@@ -503,7 +503,7 @@ mod tests {
         let to = extsk.default_address().unwrap().1.into();
 
         // Account balance should be zero
-        assert_eq!(get_balance(&db_data, 0).unwrap(), Amount::zero());
+        assert_eq!(get_balance(&db_data, Account(0)).unwrap(), Amount::zero());
 
         // We cannot spend anything
         match create_to_address(
@@ -552,8 +552,8 @@ mod tests {
         scan_cached_blocks(&tests::network(), &db_cache, &db_data, None).unwrap();
 
         // Verified balance matches total balance
-        assert_eq!(get_balance(&db_data, 0).unwrap(), value);
-        assert_eq!(get_verified_balance(&db_data, 0).unwrap(), value);
+        assert_eq!(get_balance(&db_data, Account(0)).unwrap(), value);
+        assert_eq!(get_verified_balance(&db_data, Account(0)).unwrap(), value);
 
         // Add more funds to the wallet in a second note
         let (cb, _) = fake_compact_block(
@@ -566,8 +566,8 @@ mod tests {
         scan_cached_blocks(&tests::network(), &db_cache, &db_data, None).unwrap();
 
         // Verified balance does not include the second note
-        assert_eq!(get_balance(&db_data, 0).unwrap(), value + value);
-        assert_eq!(get_verified_balance(&db_data, 0).unwrap(), value);
+        assert_eq!(get_balance(&db_data, Account(0)).unwrap(), value + value);
+        assert_eq!(get_verified_balance(&db_data, Account(0)).unwrap(), value);
 
         // Spend fails because there are insufficient verified notes
         let extsk2 = ExtendedSpendingKey::master(&[]);
@@ -672,7 +672,7 @@ mod tests {
         );
         insert_into_cache(&db_cache, &cb);
         scan_cached_blocks(&tests::network(), &db_cache, &db_data, None).unwrap();
-        assert_eq!(get_balance(&db_data, 0).unwrap(), value);
+        assert_eq!(get_balance(&db_data, Account(0)).unwrap(), value);
 
         // Send some of the funds to another address
         let extsk2 = ExtendedSpendingKey::master(&[]);
@@ -792,7 +792,7 @@ mod tests {
         );
         insert_into_cache(&db_cache, &cb);
         scan_cached_blocks(&network, &db_cache, &db_data, None).unwrap();
-        assert_eq!(get_balance(&db_data, 0).unwrap(), value);
+        assert_eq!(get_balance(&db_data, Account(0)).unwrap(), value);
 
         let extsk2 = ExtendedSpendingKey::master(&[]);
         let addr2 = extsk2.default_address().unwrap().1;

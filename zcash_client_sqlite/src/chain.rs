@@ -252,7 +252,7 @@ mod tests {
         query::get_balance,
         scan::scan_cached_blocks,
         tests::{self, fake_compact_block, insert_into_cache, sapling_activation_height},
-        CacheConnection, DataConnection,
+        Account, CacheConnection, DataConnection,
     };
 
     use super::rewind_to_height;
@@ -452,7 +452,7 @@ mod tests {
         init_accounts_table(&db_data, &tests::network(), &[extfvk.clone()]).unwrap();
 
         // Account balance should be zero
-        assert_eq!(get_balance(&db_data, 0).unwrap(), Amount::zero());
+        assert_eq!(get_balance(&db_data, Account(0)).unwrap(), Amount::zero());
 
         // Create fake CompactBlocks sending value to the address
         let value = Amount::from_u64(5).unwrap();
@@ -473,24 +473,24 @@ mod tests {
         scan_cached_blocks(&tests::network(), &db_cache, &db_data, None).unwrap();
 
         // Account balance should reflect both received notes
-        assert_eq!(get_balance(&db_data, 0).unwrap(), value + value2);
+        assert_eq!(get_balance(&db_data, Account(0)).unwrap(), value + value2);
 
         // "Rewind" to height of last scanned block
         rewind_to_height(&db_data, &tests::network(), sapling_activation_height() + 1).unwrap();
 
         // Account balance should be unaltered
-        assert_eq!(get_balance(&db_data, 0).unwrap(), value + value2);
+        assert_eq!(get_balance(&db_data, Account(0)).unwrap(), value + value2);
 
         // Rewind so that one block is dropped
         rewind_to_height(&db_data, &tests::network(), sapling_activation_height()).unwrap();
 
         // Account balance should only contain the first received note
-        assert_eq!(get_balance(&db_data, 0).unwrap(), value);
+        assert_eq!(get_balance(&db_data, Account(0)).unwrap(), value);
 
         // Scan the cache again
         scan_cached_blocks(&tests::network(), &db_cache, &db_data, None).unwrap();
 
         // Account balance should again reflect both received notes
-        assert_eq!(get_balance(&db_data, 0).unwrap(), value + value2);
+        assert_eq!(get_balance(&db_data, Account(0)).unwrap(), value + value2);
     }
 }

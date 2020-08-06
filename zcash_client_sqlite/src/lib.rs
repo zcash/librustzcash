@@ -31,6 +31,7 @@ use zcash_primitives::{
     block::BlockHash,
     consensus::{self, BlockHeight},
     primitives::PaymentAddress,
+    transaction::components::Amount,
     zip32::ExtendedFullViewingKey,
 };
 
@@ -105,6 +106,14 @@ impl DBOps for DataConnection {
         account: Self::Account,
     ) -> Result<Option<PaymentAddress>, Self::Error> {
         query::get_address(self, params, account).map_err(|e| e.0)
+    }
+
+    fn get_balance(&self, account: Account) -> Result<Amount, Self::Error> {
+        query::get_balance(self, account).map_err(|e| e.0)
+    }
+
+    fn get_verified_balance(&self, account: Self::Account) -> Result<Amount, Self::Error> {
+        query::get_verified_balance(self, account).map_err(|e| e.0)
     }
 }
 

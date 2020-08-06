@@ -585,7 +585,7 @@ mod tests {
             self, fake_compact_block, fake_compact_block_spending, insert_into_cache,
             sapling_activation_height,
         },
-        CacheConnection, DataConnection,
+        Account, CacheConnection, DataConnection,
     };
 
     use super::scan_cached_blocks;
@@ -615,7 +615,7 @@ mod tests {
         );
         insert_into_cache(&db_cache, &cb1);
         scan_cached_blocks(&tests::network(), &db_cache, &db_data, None).unwrap();
-        assert_eq!(get_balance(&db_data, 0).unwrap(), value);
+        assert_eq!(get_balance(&db_data, Account(0)).unwrap(), value);
 
         // We cannot scan a block of height SAPLING_ACTIVATION_HEIGHT + 2 next
         let (cb2, _) = fake_compact_block(
@@ -654,7 +654,7 @@ mod tests {
         insert_into_cache(&db_cache, &cb2);
         scan_cached_blocks(&tests::network(), &db_cache, &db_data, None).unwrap();
         assert_eq!(
-            get_balance(&db_data, 0).unwrap(),
+            get_balance(&db_data, Account(0)).unwrap(),
             Amount::from_u64(150_000).unwrap()
         );
     }
@@ -675,7 +675,7 @@ mod tests {
         init_accounts_table(&db_data, &tests::network(), &[extfvk.clone()]).unwrap();
 
         // Account balance should be zero
-        assert_eq!(get_balance(&db_data, 0).unwrap(), Amount::zero());
+        assert_eq!(get_balance(&db_data, Account(0)).unwrap(), Amount::zero());
 
         // Create a fake CompactBlock sending value to the address
         let value = Amount::from_u64(5).unwrap();
@@ -691,7 +691,7 @@ mod tests {
         scan_cached_blocks(&tests::network(), &db_cache, &db_data, None).unwrap();
 
         // Account balance should reflect the received note
-        assert_eq!(get_balance(&db_data, 0).unwrap(), value);
+        assert_eq!(get_balance(&db_data, Account(0)).unwrap(), value);
 
         // Create a second fake CompactBlock sending more value to the address
         let value2 = Amount::from_u64(7).unwrap();
@@ -703,7 +703,7 @@ mod tests {
         scan_cached_blocks(&tests::network(), &db_cache, &db_data, None).unwrap();
 
         // Account balance should reflect both received notes
-        assert_eq!(get_balance(&db_data, 0).unwrap(), value + value2);
+        assert_eq!(get_balance(&db_data, Account(0)).unwrap(), value + value2);
     }
 
     #[test]
@@ -722,7 +722,7 @@ mod tests {
         init_accounts_table(&db_data, &tests::network(), &[extfvk.clone()]).unwrap();
 
         // Account balance should be zero
-        assert_eq!(get_balance(&db_data, 0).unwrap(), Amount::zero());
+        assert_eq!(get_balance(&db_data, Account(0)).unwrap(), Amount::zero());
 
         // Create a fake CompactBlock sending value to the address
         let value = Amount::from_u64(5).unwrap();
@@ -738,7 +738,7 @@ mod tests {
         scan_cached_blocks(&tests::network(), &db_cache, &db_data, None).unwrap();
 
         // Account balance should reflect the received note
-        assert_eq!(get_balance(&db_data, 0).unwrap(), value);
+        assert_eq!(get_balance(&db_data, Account(0)).unwrap(), value);
 
         // Create a second fake CompactBlock spending value from the address
         let extsk2 = ExtendedSpendingKey::master(&[0]);
@@ -760,6 +760,6 @@ mod tests {
         scan_cached_blocks(&tests::network(), &db_cache, &db_data, None).unwrap();
 
         // Account balance should equal the change
-        assert_eq!(get_balance(&db_data, 0).unwrap(), value - value2);
+        assert_eq!(get_balance(&db_data, Account(0)).unwrap(), value - value2);
     }
 }
