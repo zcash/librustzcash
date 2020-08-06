@@ -1019,9 +1019,9 @@ mod tests {
             canopy_activation_height,
             canopy_activation_height + ZIP212_GRACE_PERIOD,
         ];
-        let leadbyte_array = [0x02, 0x03, 0x01];
+        let leadbytes = [0x02, 0x03, 0x01];
 
-        for (i, &height) in heights.iter().enumerate() {
+        for (_i, (&height, &leadbyte)) in heights.iter().zip(leadbytes.iter()).enumerate() {
             let (ovk, ivk, cv, cmu, epk, mut enc_ciphertext, out_ciphertext) =
                 random_enc_ciphertext(height, &mut rng);
 
@@ -1032,7 +1032,7 @@ mod tests {
                 &epk,
                 &mut enc_ciphertext,
                 &out_ciphertext,
-                |pt| pt[0] = leadbyte_array[i],
+                |pt| pt[0] = leadbyte,
             );
             assert_eq!(
                 try_sapling_note_decryption::<TestNetwork>(
@@ -1196,9 +1196,9 @@ mod tests {
             canopy_activation_height,
             canopy_activation_height + ZIP212_GRACE_PERIOD,
         ];
-        let leadbyte_array = [0x02, 0x03, 0x01];
+        let leadbytes = [0x02, 0x03, 0x01];
 
-        for (i, &height) in heights.iter().enumerate() {
+        for (_i, (&height, &leadbyte)) in heights.iter().zip(leadbytes.iter()).enumerate() {
             let (ovk, ivk, cv, cmu, epk, mut enc_ciphertext, out_ciphertext) =
                 random_enc_ciphertext(height, &mut rng);
 
@@ -1209,7 +1209,7 @@ mod tests {
                 &epk,
                 &mut enc_ciphertext,
                 &out_ciphertext,
-                |pt| pt[0] = leadbyte_array[i],
+                |pt| pt[0] = leadbyte,
             );
             assert_eq!(
                 try_sapling_compact_note_decryption::<TestNetwork>(
@@ -1466,9 +1466,9 @@ mod tests {
             canopy_activation_height,
             canopy_activation_height + ZIP212_GRACE_PERIOD,
         ];
-        let leadbyte_array = [0x02, 0x03, 0x01];
+        let leadbytes = [0x02, 0x03, 0x01];
 
-        for (i, &height) in heights.iter().enumerate() {
+        for (_i, (&height, &leadbyte)) in heights.iter().zip(leadbytes.iter()).enumerate() {
             let (ovk, _, cv, cmu, epk, mut enc_ciphertext, out_ciphertext) =
                 random_enc_ciphertext(height, &mut rng);
 
@@ -1479,7 +1479,7 @@ mod tests {
                 &epk,
                 &mut enc_ciphertext,
                 &out_ciphertext,
-                |pt| pt[0] = leadbyte_array[i],
+                |pt| pt[0] = leadbyte,
             );
             assert_eq!(
                 try_sapling_output_recovery::<TestNetwork>(
