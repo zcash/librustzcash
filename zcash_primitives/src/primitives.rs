@@ -337,8 +337,8 @@ impl<E: JubjubEngine> Note<E> {
     }
 
     pub fn generate_or_derive_esk<R: RngCore + CryptoRng>(&self, rng: &mut R) -> E::Fs {
-        match self.rseed {
-            Rseed::BeforeZip212(_) => {
+        match self.derive_esk() {
+            None => {
                 // create random 64 byte buffer
                 let mut buffer = [0u8; 64];
                 &rng.fill_bytes(&mut buffer);
@@ -346,7 +346,7 @@ impl<E: JubjubEngine> Note<E> {
                 // reduce to uniform value
                 E::Fs::to_uniform(&buffer[..])
             }
-            Rseed::AfterZip212(_) => self.derive_esk().unwrap(),
+            Some(esk) => esk,
         }
     }
 

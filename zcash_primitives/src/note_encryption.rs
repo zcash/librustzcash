@@ -381,8 +381,7 @@ fn parse_note_plaintext_without_memo<P: consensus::Parameters>(
         return None;
     }
 
-    if let Rseed::AfterZip212(_) = note.rseed {
-        let derived_esk = note.derive_esk().unwrap();
+    if let Some(derived_esk) = note.derive_esk() {
         if note.g_d.mul(derived_esk, &JUBJUB) != *epk {
             return None;
         }
@@ -461,7 +460,7 @@ pub fn try_sapling_note_decryption<P: consensus::Parameters>(
 ///
 /// Implements the procedure specified in [`ZIP 307`].
 ///
-/// [`ZIP 307`]: https://github.com/zcash/zips/pull/226
+/// [`ZIP 307`]: https://zips.z.cash/zip-0307
 pub fn try_sapling_compact_note_decryption<P: consensus::Parameters>(
     height: u32,
     ivk: &Fs,
@@ -580,8 +579,8 @@ pub fn try_sapling_output_recovery<P: consensus::Parameters>(
         return None;
     }
 
-    if let Rseed::AfterZip212(_) = note.rseed {
-        if note.derive_esk().unwrap() != esk {
+    if let Some(derived_esk) = note.derive_esk() {
+        if derived_esk != esk {
             return None;
         }
     }
