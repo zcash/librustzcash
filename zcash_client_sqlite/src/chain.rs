@@ -3,20 +3,30 @@
 //! # Examples
 //!
 //! ```
-//! use rusqlite::Connection;
+//! use tempfile::NamedTempFile;
 //! use zcash_primitives::{
 //!     consensus::{BlockHeight, Network, Parameters}
 //! };
 //!
+//! use zcash_client_backend::{
+//!     data_api::{
+//!         chain::validate_combined_chain,
+//!         error::Error,
+//!     }
+//! };
+//!
 //! use zcash_client_sqlite::{
-//!     chain::{rewind_to_height, validate_combined_chain},
-//!     error::ErrorKind,
+//!     DataConnection,
+//!     CacheConnection,
+//!     chain::{rewind_to_height},
 //!     scan::scan_cached_blocks,
 //! };
 //!
 //! let network = Network::TestNetwork;
-//! let db_cache = "/path/to/cache.db";
-//! let db_data = "/path/to/data.db";
+//! let cache_file = NamedTempFile::new().unwrap();
+//! let db_cache = CacheConnection::for_path(cache_file).unwrap();
+//! let data_file = NamedTempFile::new().unwrap();
+//! let db_data = DataConnection::for_path(data_file).unwrap();
 //!
 //! // 1) Download new CompactBlocks into db_cache.
 //!
@@ -24,18 +34,18 @@
 //! //
 //! // Given that we assume the server always gives us correct-at-the-time blocks, any
 //! // errors are in the blocks we have previously cached or scanned.
-//! if let Err(e) = validate_combined_chain(network, &db_cache, &db_data) {
-//!     match e.kind() {
-//!         ErrorKind::InvalidChain(upper_bound, _) => {
+//! if let Err(e) = validate_combined_chain(&network, &db_cache, &db_data) {
+//!     match e {
+//!         Error::InvalidChain(upper_bound, _) => {
 //!             // a) Pick a height to rewind to.
 //!             //
 //!             // This might be informed by some external chain reorg information, or
 //!             // heuristics such as the platform, available bandwidth, size of recent
 //!             // CompactBlocks, etc.
-//!             let rewind_height = *upper_bound - 10;
+//!             let rewind_height = upper_bound - 10;
 //!
 //!             // b) Rewind scanned block information.
-//!             rewind_to_height(network, &db_data, rewind_height);
+//!             rewind_to_height(&db_data, &network, rewind_height);
 //!
 //!             // c) Delete cached blocks from rewind_height onwards.
 //!             //
@@ -60,212 +70,201 @@
 //! // next time this codepath is executed after new blocks are received).
 //! scan_cached_blocks(&network, &db_cache, &db_data, None);
 //! ```
-
 use protobuf::parse_from_bytes;
-use rusqlite::{Connection, NO_PARAMS};
-use std::path::Path;
+use rusqlite::{OptionalExtension, NO_PARAMS};
 
-use zcash_primitives::consensus::{self, BlockHeight, NetworkUpgrade};
+use zcash_primitives::{
+    block::BlockHash,
+    consensus::{self, BlockHeight, NetworkUpgrade},
+};
 
-use zcash_client_backend::proto::compact_formats::CompactBlock;
+use zcash_client_backend::{
+    data_api::error::{ChainInvalid, Error},
+    proto::compact_formats::CompactBlock,
+};
 
-use crate::error::{Error, ErrorKind};
-
-#[derive(Debug)]
-pub enum ChainInvalidCause {
-    PrevHashMismatch,
-    /// (expected_height, actual_height)
-    HeightMismatch(BlockHeight, BlockHeight),
-}
+use crate::{error::SqliteClientError, CacheConnection, DataConnection};
 
 struct CompactBlockRow {
     height: BlockHeight,
     data: Vec<u8>,
 }
 
-/// Checks that the scanned blocks in the data database, when combined with the recent
-/// `CompactBlock`s in the cache database, form a valid chain.
-///
-/// This function is built on the core assumption that the information provided in the
-/// cache database is more likely to be accurate than the previously-scanned information.
-/// This follows from the design (and trust) assumption that the `lightwalletd` server
-/// provides accurate block information as of the time it was requested.
-///
-/// Returns:
-/// - `Ok(())` if the combined chain is valid.
-/// - `Err(ErrorKind::InvalidChain(upper_bound, cause))` if the combined chain is invalid.
-///   `upper_bound` is the height of the highest invalid block (on the assumption that the
-///   highest block in the cache database is correct).
-/// - `Err(e)` if there was an error during validation unrelated to chain validity.
-///
-/// This function does not mutate either of the databases.
-pub fn validate_combined_chain<Params: consensus::Parameters, P: AsRef<Path>, Q: AsRef<Path>>(
-    parameters: Params,
-    db_cache: P,
-    db_data: Q,
-) -> Result<(), Error> {
-    let cache = Connection::open(db_cache)?;
-    let data = Connection::open(db_data)?;
-    let sapling_activation_height = parameters
-        .activation_height(NetworkUpgrade::Sapling)
-        .ok_or(Error(ErrorKind::SaplingNotActive))?;
+pub fn validate_chain<F>(
+    conn: &CacheConnection,
+    from_height: BlockHeight,
+    validate: F,
+) -> Result<Option<BlockHash>, SqliteClientError>
+where
+    F: Fn(&CompactBlock, &CompactBlock) -> Result<(), Error<rusqlite::Error>>,
+{
+    let mut stmt_blocks = conn
+        .0
+        .prepare("SELECT height, data FROM compactblocks WHERE height >= ? ORDER BY height DESC")?;
 
-    // Recall where we synced up to previously.
-    // If we have never synced, use Sapling activation height to select all cached CompactBlocks.
-    let (have_scanned, last_scanned_height) =
-        data.query_row("SELECT MAX(height) FROM blocks", NO_PARAMS, |row| {
-            row.get(0)
-                .map(|h: u32| (true, h.into()))
-                .or(Ok((false, sapling_activation_height - 1)))
-        })?;
-
-    // Fetch the CompactBlocks we need to validate
-    let mut stmt_blocks = cache
-        .prepare("SELECT height, data FROM compactblocks WHERE height > ? ORDER BY height DESC")?;
-    let mut rows = stmt_blocks.query_map(&[u32::from(last_scanned_height)], |row| {
-        Ok(CompactBlockRow {
-            height: row.get(0).map(u32::into)?,
-            data: row.get(1)?,
-        })
+    let block_rows = stmt_blocks.query_map(&[u32::from(from_height)], |row| {
+        let height: BlockHeight = row.get(0).map(u32::into)?;
+        let data = row.get::<_, Vec<_>>(1)?;
+        Ok(CompactBlockRow { height, data })
     })?;
 
-    // Take the highest cached block as accurate.
-    let (mut last_height, mut last_prev_hash) = {
-        let assumed_correct = match rows.next() {
-            Some(row) => row?,
-            None => {
-                // No cached blocks, and we've already validated the blocks we've scanned,
-                // so there's nothing to validate.
-                // TODO: Maybe we still want to check if there are cached blocks that are at heights we previously scanned? Check scanning flow again.
-                return Ok(());
-            }
-        };
-        let block: CompactBlock = parse_from_bytes(&assumed_correct.data)?;
-        (block.height(), block.prev_hash())
+    let mut blocks = block_rows.map(|cbr_result| {
+        let cbr = cbr_result.map_err(Error::Database)?;
+        let block: CompactBlock = parse_from_bytes(&cbr.data).map_err(Error::from)?;
+
+        if block.height() == cbr.height {
+            Ok(block)
+        } else {
+            Err(ChainInvalid::block_height_mismatch(
+                cbr.height,
+                block.height(),
+            ))
+        }
+    });
+
+    let mut current_block: CompactBlock = match blocks.next() {
+        Some(Ok(block)) => block,
+        Some(Err(error)) => {
+            return Err(SqliteClientError(error));
+        }
+        None => {
+            // No cached blocks, and we've already validated the blocks we've scanned,
+            // so there's nothing to validate.
+            // TODO: Maybe we still want to check if there are cached blocks that are
+            // at heights we previously scanned? Check scanning flow again.
+            return Ok(None);
+        }
     };
 
-    for row in rows {
-        let row = row?;
-
-        // Scanned blocks MUST be height-sequential.
-        if row.height != (last_height - 1) {
-            return Err(Error(ErrorKind::InvalidChain(
-                last_height - 1,
-                ChainInvalidCause::HeightMismatch(last_height - 1, row.height),
-            )));
-        }
-        last_height = row.height;
-
-        let block: CompactBlock = parse_from_bytes(&row.data)?;
-
-        // Cached blocks MUST be hash-chained.
-        if block.hash() != last_prev_hash {
-            return Err(Error(ErrorKind::InvalidChain(
-                last_height,
-                ChainInvalidCause::PrevHashMismatch,
-            )));
-        }
-        last_prev_hash = block.prev_hash();
+    for block_result in blocks {
+        let block = block_result?;
+        validate(&current_block, &block)?;
+        current_block = block;
     }
 
-    if have_scanned {
-        // Cached blocks MUST hash-chain to the last scanned block.
-        let last_scanned_hash = data.query_row(
-            "SELECT hash FROM blocks WHERE height = ?",
-            &[u32::from(last_scanned_height)],
-            |row| row.get::<_, Vec<_>>(0),
-        )?;
-        if &last_scanned_hash[..] != &last_prev_hash.0[..] {
-            return Err(Error(ErrorKind::InvalidChain(
-                last_scanned_height,
-                ChainInvalidCause::PrevHashMismatch,
-            )));
-        }
-    }
-
-    // All good!
-    Ok(())
+    Ok(Some(current_block.hash()))
 }
 
-/// Rewinds the data database to the given height.
+pub fn block_height_extrema(
+    conn: &DataConnection,
+) -> Result<Option<(BlockHeight, BlockHeight)>, rusqlite::Error> {
+    conn.0
+        .query_row(
+            "SELECT MIN(height), MAX(height) FROM blocks",
+            NO_PARAMS,
+            |row| {
+                let min_height: u32 = row.get(0)?;
+                let max_height: u32 = row.get(1)?;
+                Ok(Some((min_height.into(), max_height.into())))
+            },
+        )
+        // cannot use .optional() here because the result of a failed group
+        // operation is an error, not an empty row.
+        .or(Ok(None))
+}
+
+pub fn get_block_hash(
+    conn: &DataConnection,
+    block_height: BlockHeight,
+) -> Result<Option<BlockHash>, rusqlite::Error> {
+    conn.0
+        .query_row(
+            "SELECT hash FROM blocks WHERE height = ?",
+            &[u32::from(block_height)],
+            |row| {
+                let row_data = row.get::<_, Vec<_>>(0)?;
+                Ok(BlockHash::from_slice(&row_data))
+            },
+        )
+        .optional()
+}
+
+/// Rewinds the database to the given height.
 ///
 /// If the requested height is greater than or equal to the height of the last scanned
 /// block, this function does nothing.
-pub fn rewind_to_height<Params: consensus::Parameters, P: AsRef<Path>>(
-    parameters: Params,
-    db_data: P,
-    height: BlockHeight,
-) -> Result<(), Error> {
-    let data = Connection::open(db_data)?;
+pub fn rewind_to_height<P: consensus::Parameters>(
+    conn: &DataConnection,
+    parameters: &P,
+    block_height: BlockHeight,
+) -> Result<(), SqliteClientError> {
     let sapling_activation_height = parameters
         .activation_height(NetworkUpgrade::Sapling)
-        .ok_or(Error(ErrorKind::SaplingNotActive))?;
+        .ok_or(SqliteClientError(Error::SaplingNotActive))?;
 
     // Recall where we synced up to previously.
     // If we have never synced, use Sapling activation height.
     let last_scanned_height =
-        data.query_row("SELECT MAX(height) FROM blocks", NO_PARAMS, |row| {
-            row.get(0)
-                .map(u32::into)
-                .or(Ok(sapling_activation_height - 1))
-        })?;
+        conn.0
+            .query_row("SELECT MAX(height) FROM blocks", NO_PARAMS, |row| {
+                row.get(0)
+                    .map(u32::into)
+                    .or(Ok(sapling_activation_height - 1))
+            })?;
 
-    if height >= last_scanned_height {
+    if block_height >= last_scanned_height {
         // Nothing to do.
         return Ok(());
     }
 
     // Start an SQL transaction for rewinding.
-    data.execute("BEGIN IMMEDIATE", NO_PARAMS)?;
+    conn.0.execute("BEGIN IMMEDIATE", NO_PARAMS)?;
 
     // Decrement witnesses.
-    data.execute(
+    conn.0.execute(
         "DELETE FROM sapling_witnesses WHERE block > ?",
-        &[u32::from(height)],
+        &[u32::from(block_height)],
     )?;
 
     // Un-mine transactions.
-    data.execute(
+    conn.0.execute(
         "UPDATE transactions SET block = NULL, tx_index = NULL WHERE block > ?",
-        &[u32::from(height)],
+        &[u32::from(block_height)],
     )?;
 
     // Now that they aren't depended on, delete scanned blocks.
-    data.execute("DELETE FROM blocks WHERE height > ?", &[u32::from(height)])?;
+    conn.0.execute(
+        "DELETE FROM blocks WHERE height > ?",
+        &[u32::from(block_height)],
+    )?;
 
     // Commit the SQL transaction, rewinding atomically.
-    data.execute("COMMIT", NO_PARAMS)?;
+    conn.0.execute("COMMIT", NO_PARAMS)?;
 
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
+    use rusqlite::Connection;
     use tempfile::NamedTempFile;
+
     use zcash_primitives::{
         block::BlockHash,
         transaction::components::Amount,
         zip32::{ExtendedFullViewingKey, ExtendedSpendingKey},
     };
 
-    use super::{rewind_to_height, validate_combined_chain};
+    use zcash_client_backend::data_api::{chain::validate_combined_chain, error::Error};
 
     use crate::{
-        error::ErrorKind,
         init::{init_accounts_table, init_cache_database, init_data_database},
         query::get_balance,
         scan::scan_cached_blocks,
         tests::{self, fake_compact_block, insert_into_cache, sapling_activation_height},
+        CacheConnection, DataConnection,
     };
+
+    use super::rewind_to_height;
 
     #[test]
     fn valid_chain_states() {
         let cache_file = NamedTempFile::new().unwrap();
-        let db_cache = cache_file.path();
+        let db_cache = CacheConnection(Connection::open(cache_file.path()).unwrap());
         init_cache_database(&db_cache).unwrap();
 
         let data_file = NamedTempFile::new().unwrap();
-        let db_data = data_file.path();
+        let db_data = DataConnection(Connection::open(data_file.path()).unwrap());
         init_data_database(&db_data).unwrap();
 
         // Add an account to the wallet
@@ -274,7 +273,7 @@ mod tests {
         init_accounts_table(&db_data, &tests::network(), &[extfvk.clone()]).unwrap();
 
         // Empty chain should be valid
-        validate_combined_chain(tests::network(), db_cache, db_data).unwrap();
+        validate_combined_chain(&tests::network(), &db_cache, &db_data).unwrap();
 
         // Create a fake CompactBlock sending value to the address
         let (cb, _) = fake_compact_block(
@@ -283,16 +282,16 @@ mod tests {
             extfvk.clone(),
             Amount::from_u64(5).unwrap(),
         );
-        insert_into_cache(db_cache, &cb);
+        insert_into_cache(&db_cache, &cb);
 
         // Cache-only chain should be valid
-        validate_combined_chain(tests::network(), db_cache, db_data).unwrap();
+        validate_combined_chain(&tests::network(), &db_cache, &db_data).unwrap();
 
         // Scan the cache
-        scan_cached_blocks(&tests::network(), db_cache, db_data, None).unwrap();
+        scan_cached_blocks(&tests::network(), &db_cache, &db_data, None).unwrap();
 
         // Data-only chain should be valid
-        validate_combined_chain(tests::network(), db_cache, db_data).unwrap();
+        validate_combined_chain(&tests::network(), &db_cache, &db_data).unwrap();
 
         // Create a second fake CompactBlock sending more value to the address
         let (cb2, _) = fake_compact_block(
@@ -301,26 +300,26 @@ mod tests {
             extfvk,
             Amount::from_u64(7).unwrap(),
         );
-        insert_into_cache(db_cache, &cb2);
+        insert_into_cache(&db_cache, &cb2);
 
         // Data+cache chain should be valid
-        validate_combined_chain(tests::network(), db_cache, db_data).unwrap();
+        validate_combined_chain(&tests::network(), &db_cache, &db_data).unwrap();
 
         // Scan the cache again
-        scan_cached_blocks(&tests::network(), db_cache, db_data, None).unwrap();
+        scan_cached_blocks(&tests::network(), &db_cache, &db_data, None).unwrap();
 
         // Data-only chain should be valid
-        validate_combined_chain(tests::network(), db_cache, db_data).unwrap();
+        validate_combined_chain(&tests::network(), &db_cache, &db_data).unwrap();
     }
 
     #[test]
     fn invalid_chain_cache_disconnected() {
         let cache_file = NamedTempFile::new().unwrap();
-        let db_cache = cache_file.path();
+        let db_cache = CacheConnection(Connection::open(cache_file.path()).unwrap());
         init_cache_database(&db_cache).unwrap();
 
         let data_file = NamedTempFile::new().unwrap();
-        let db_data = data_file.path();
+        let db_data = DataConnection(Connection::open(data_file.path()).unwrap());
         init_data_database(&db_data).unwrap();
 
         // Add an account to the wallet
@@ -341,14 +340,14 @@ mod tests {
             extfvk.clone(),
             Amount::from_u64(7).unwrap(),
         );
-        insert_into_cache(db_cache, &cb);
-        insert_into_cache(db_cache, &cb2);
+        insert_into_cache(&db_cache, &cb);
+        insert_into_cache(&db_cache, &cb2);
 
         // Scan the cache
-        scan_cached_blocks(&tests::network(), db_cache, db_data, None).unwrap();
+        scan_cached_blocks(&tests::network(), &db_cache, &db_data, None).unwrap();
 
         // Data-only chain should be valid
-        validate_combined_chain(tests::network(), db_cache, db_data).unwrap();
+        validate_combined_chain(&tests::network(), &db_cache, &db_data).unwrap();
 
         // Create more fake CompactBlocks that don't connect to the scanned ones
         let (cb3, _) = fake_compact_block(
@@ -363,17 +362,14 @@ mod tests {
             extfvk.clone(),
             Amount::from_u64(3).unwrap(),
         );
-        insert_into_cache(db_cache, &cb3);
-        insert_into_cache(db_cache, &cb4);
+        insert_into_cache(&db_cache, &cb3);
+        insert_into_cache(&db_cache, &cb4);
 
         // Data+cache chain should be invalid at the data/cache boundary
-        match validate_combined_chain(tests::network(), db_cache, db_data) {
-            Err(e) => match e.kind() {
-                ErrorKind::InvalidChain(upper_bound, _) => {
-                    assert_eq!(*upper_bound, sapling_activation_height() + 1)
-                }
-                _ => panic!(),
-            },
+        match validate_combined_chain(&tests::network(), &db_cache, &db_data) {
+            Err(Error::InvalidChain(upper_bound, _)) => {
+                assert_eq!(upper_bound, sapling_activation_height() + 1)
+            }
             _ => panic!(),
         }
     }
@@ -381,11 +377,11 @@ mod tests {
     #[test]
     fn invalid_chain_cache_reorg() {
         let cache_file = NamedTempFile::new().unwrap();
-        let db_cache = cache_file.path();
+        let db_cache = CacheConnection(Connection::open(cache_file.path()).unwrap());
         init_cache_database(&db_cache).unwrap();
 
         let data_file = NamedTempFile::new().unwrap();
-        let db_data = data_file.path();
+        let db_data = DataConnection(Connection::open(data_file.path()).unwrap());
         init_data_database(&db_data).unwrap();
 
         // Add an account to the wallet
@@ -406,14 +402,14 @@ mod tests {
             extfvk.clone(),
             Amount::from_u64(7).unwrap(),
         );
-        insert_into_cache(db_cache, &cb);
-        insert_into_cache(db_cache, &cb2);
+        insert_into_cache(&db_cache, &cb);
+        insert_into_cache(&db_cache, &cb2);
 
         // Scan the cache
-        scan_cached_blocks(&tests::network(), db_cache, db_data, None).unwrap();
+        scan_cached_blocks(&tests::network(), &db_cache, &db_data, None).unwrap();
 
         // Data-only chain should be valid
-        validate_combined_chain(tests::network(), db_cache, db_data).unwrap();
+        validate_combined_chain(&tests::network(), &db_cache, &db_data).unwrap();
 
         // Create more fake CompactBlocks that contain a reorg
         let (cb3, _) = fake_compact_block(
@@ -428,17 +424,14 @@ mod tests {
             extfvk.clone(),
             Amount::from_u64(3).unwrap(),
         );
-        insert_into_cache(db_cache, &cb3);
-        insert_into_cache(db_cache, &cb4);
+        insert_into_cache(&db_cache, &cb3);
+        insert_into_cache(&db_cache, &cb4);
 
         // Data+cache chain should be invalid inside the cache
-        match validate_combined_chain(tests::network(), db_cache, db_data) {
-            Err(e) => match e.kind() {
-                ErrorKind::InvalidChain(upper_bound, _) => {
-                    assert_eq!(*upper_bound, sapling_activation_height() + 2)
-                }
-                _ => panic!(),
-            },
+        match validate_combined_chain(&tests::network(), &db_cache, &db_data) {
+            Err(Error::InvalidChain(upper_bound, _)) => {
+                assert_eq!(upper_bound, sapling_activation_height() + 2)
+            }
             _ => panic!(),
         }
     }
@@ -446,11 +439,11 @@ mod tests {
     #[test]
     fn data_db_rewinding() {
         let cache_file = NamedTempFile::new().unwrap();
-        let db_cache = cache_file.path();
+        let db_cache = CacheConnection(Connection::open(cache_file.path()).unwrap());
         init_cache_database(&db_cache).unwrap();
 
         let data_file = NamedTempFile::new().unwrap();
-        let db_data = data_file.path();
+        let db_data = DataConnection(Connection::open(data_file.path()).unwrap());
         init_data_database(&db_data).unwrap();
 
         // Add an account to the wallet
@@ -459,7 +452,7 @@ mod tests {
         init_accounts_table(&db_data, &tests::network(), &[extfvk.clone()]).unwrap();
 
         // Account balance should be zero
-        assert_eq!(get_balance(db_data, 0).unwrap(), Amount::zero());
+        assert_eq!(get_balance(&db_data, 0).unwrap(), Amount::zero());
 
         // Create fake CompactBlocks sending value to the address
         let value = Amount::from_u64(5).unwrap();
@@ -470,33 +463,34 @@ mod tests {
             extfvk.clone(),
             value,
         );
+
         let (cb2, _) =
             fake_compact_block(sapling_activation_height() + 1, cb.hash(), extfvk, value2);
-        insert_into_cache(db_cache, &cb);
-        insert_into_cache(db_cache, &cb2);
+        insert_into_cache(&db_cache, &cb);
+        insert_into_cache(&db_cache, &cb2);
 
         // Scan the cache
-        scan_cached_blocks(&tests::network(), db_cache, db_data, None).unwrap();
+        scan_cached_blocks(&tests::network(), &db_cache, &db_data, None).unwrap();
 
         // Account balance should reflect both received notes
-        assert_eq!(get_balance(db_data, 0).unwrap(), value + value2);
+        assert_eq!(get_balance(&db_data, 0).unwrap(), value + value2);
 
         // "Rewind" to height of last scanned block
-        rewind_to_height(tests::network(), db_data, sapling_activation_height() + 1).unwrap();
+        rewind_to_height(&db_data, &tests::network(), sapling_activation_height() + 1).unwrap();
 
         // Account balance should be unaltered
-        assert_eq!(get_balance(db_data, 0).unwrap(), value + value2);
+        assert_eq!(get_balance(&db_data, 0).unwrap(), value + value2);
 
         // Rewind so that one block is dropped
-        rewind_to_height(tests::network(), db_data, sapling_activation_height()).unwrap();
+        rewind_to_height(&db_data, &tests::network(), sapling_activation_height()).unwrap();
 
         // Account balance should only contain the first received note
-        assert_eq!(get_balance(db_data, 0).unwrap(), value);
+        assert_eq!(get_balance(&db_data, 0).unwrap(), value);
 
         // Scan the cache again
-        scan_cached_blocks(&tests::network(), db_cache, db_data, None).unwrap();
+        scan_cached_blocks(&tests::network(), &db_cache, &db_data, None).unwrap();
 
         // Account balance should again reflect both received notes
-        assert_eq!(get_balance(db_data, 0).unwrap(), value + value2);
+        assert_eq!(get_balance(&db_data, 0).unwrap(), value + value2);
     }
 }

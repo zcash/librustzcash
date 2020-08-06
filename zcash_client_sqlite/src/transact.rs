@@ -1,10 +1,11 @@
 //! Functions for creating transactions.
 
 use ff::PrimeField;
-use rusqlite::{types::ToSql, Connection, NO_PARAMS};
+use rusqlite::{types::ToSql, NO_PARAMS};
 use std::convert::TryInto;
-use std::path::Path;
-use zcash_client_backend::{address::RecipientAddress, encoding::encode_extended_full_viewing_key};
+use zcash_client_backend::{
+    address::RecipientAddress, data_api::error::Error, encoding::encode_extended_full_viewing_key,
+};
 use zcash_primitives::{
     consensus,
     keys::OutgoingViewingKey,
@@ -20,10 +21,7 @@ use zcash_primitives::{
     zip32::{ExtendedFullViewingKey, ExtendedSpendingKey},
 };
 
-use crate::{
-    error::{Error, ErrorKind},
-    get_target_and_anchor_heights,
-};
+use crate::{error::SqliteClientError, get_target_and_anchor_heights, DataConnection};
 
 /// Describes a policy for which outgoing viewing key should be able to decrypt
 /// transaction outputs.
@@ -86,6 +84,7 @@ struct SelectedNoteRow {
 /// # Examples
 ///
 /// ```
+/// use tempfile::NamedTempFile;
 /// use zcash_primitives::{
 ///     consensus::{self, Network},
 ///     constants::testnet::COIN_TYPE,
@@ -95,7 +94,10 @@ struct SelectedNoteRow {
 /// use zcash_client_backend::{
 ///     keys::spending_key,
 /// };
-/// use zcash_client_sqlite::transact::{create_to_address, OvkPolicy};
+/// use zcash_client_sqlite::{
+///     DataConnection,
+///     transact::{create_to_address, OvkPolicy},
+/// };
 ///
 /// let tx_prover = match LocalTxProver::with_default_location() {
 ///     Some(tx_prover) => tx_prover,
@@ -107,8 +109,11 @@ struct SelectedNoteRow {
 /// let account = 0;
 /// let extsk = spending_key(&[0; 32][..], COIN_TYPE, account);
 /// let to = extsk.default_address().unwrap().1.into();
+///
+/// let data_file = NamedTempFile::new().unwrap();
+/// let db = DataConnection::for_path(data_file).unwrap();
 /// match create_to_address(
-///     "/path/to/data.db",
+///     &db,
 ///     &Network::TestNetwork,
 ///     consensus::BranchId::Sapling,
 ///     tx_prover,
@@ -122,8 +127,8 @@ struct SelectedNoteRow {
 ///     Err(e) => (),
 /// }
 /// ```
-pub fn create_to_address<DB: AsRef<Path>, P: consensus::Parameters>(
-    db_data: DB,
+pub fn create_to_address<P: consensus::Parameters>(
+    data: &DataConnection,
     params: &P,
     consensus_branch_id: consensus::BranchId,
     prover: impl TxProver,
@@ -132,13 +137,12 @@ pub fn create_to_address<DB: AsRef<Path>, P: consensus::Parameters>(
     value: Amount,
     memo: Option<Memo>,
     ovk_policy: OvkPolicy,
-) -> Result<i64, Error> {
-    let data = Connection::open(db_data)?;
-
+) -> Result<i64, SqliteClientError> {
     // Check that the ExtendedSpendingKey we have been given corresponds to the
     // ExtendedFullViewingKey for the account we are spending from.
     let extfvk = ExtendedFullViewingKey::from(extsk);
     if !data
+        .0
         .prepare("SELECT * FROM accounts WHERE account = ? AND extfvk = ?")?
         .exists(&[
             account.to_sql()?,
@@ -149,7 +153,7 @@ pub fn create_to_address<DB: AsRef<Path>, P: consensus::Parameters>(
             .to_sql()?,
         ])?
     {
-        return Err(Error(ErrorKind::InvalidExtSK(account)));
+        return Err(Error::InvalidExtSK(account).into());
     }
 
     // Apply the outgoing viewing key policy.
@@ -181,7 +185,7 @@ pub fn create_to_address<DB: AsRef<Path>, P: consensus::Parameters>(
     //
     // 4) Match the selected notes against the witnesses at the desired height.
     let target_value = i64::from(value + DEFAULT_FEE);
-    let mut stmt_select_notes = data.prepare(
+    let mut stmt_select_notes = data.0.prepare(
         "WITH selected AS (
             WITH eligible AS (
                 SELECT id_note, diversifier, value, rcm,
@@ -204,7 +208,7 @@ pub fn create_to_address<DB: AsRef<Path>, P: consensus::Parameters>(
     )?;
 
     // Select notes
-    let notes = stmt_select_notes.query_and_then::<_, Error, _, _>(
+    let notes = stmt_select_notes.query_and_then::<_, SqliteClientError, _, _>(
         &[
             i64::from(account),
             i64::from(anchor_height),
@@ -216,7 +220,7 @@ pub fn create_to_address<DB: AsRef<Path>, P: consensus::Parameters>(
             let diversifier = {
                 let d: Vec<_> = row.get(0)?;
                 if d.len() != 11 {
-                    return Err(Error(ErrorKind::CorruptedData(
+                    return Err(SqliteClientError(Error::CorruptedData(
                         "Invalid diversifier length",
                     )));
                 }
@@ -236,9 +240,9 @@ pub fn create_to_address<DB: AsRef<Path>, P: consensus::Parameters>(
                 let rcm = jubjub::Fr::from_repr(
                     rcm_bytes[..]
                         .try_into()
-                        .map_err(|_| Error(ErrorKind::InvalidNote))?,
+                        .map_err(|_| SqliteClientError(Error::InvalidNote))?,
                 )
-                .ok_or(Error(ErrorKind::InvalidNote))?;
+                .ok_or(SqliteClientError(Error::InvalidNote))?;
                 Rseed::BeforeZip212(rcm)
             };
 
@@ -266,10 +270,7 @@ pub fn create_to_address<DB: AsRef<Path>, P: consensus::Parameters>(
         .iter()
         .fold(0, |acc, selected| acc + selected.note.value);
     if selected_value < target_value as u64 {
-        return Err(Error(ErrorKind::InsufficientBalance(
-            selected_value,
-            target_value as u64,
-        )));
+        return Err(Error::InsufficientBalance(selected_value, target_value as u64).into());
     }
 
     // Create the transaction
@@ -297,12 +298,12 @@ pub fn create_to_address<DB: AsRef<Path>, P: consensus::Parameters>(
     let created = time::OffsetDateTime::now_utc();
 
     // Update the database atomically, to ensure the result is internally consistent.
-    data.execute("BEGIN IMMEDIATE", NO_PARAMS)?;
+    data.0.execute("BEGIN IMMEDIATE", NO_PARAMS)?;
 
     // Save the transaction in the database.
     let mut raw_tx = vec![];
     tx.write(&mut raw_tx)?;
-    let mut stmt_insert_tx = data.prepare(
+    let mut stmt_insert_tx = data.0.prepare(
         "INSERT INTO transactions (txid, created, expiry_height, raw)
         VALUES (?, ?, ?, ?)",
     )?;
@@ -312,7 +313,7 @@ pub fn create_to_address<DB: AsRef<Path>, P: consensus::Parameters>(
         i64::from(tx.expiry_height).to_sql()?,
         raw_tx.to_sql()?,
     ])?;
-    let id_tx = data.last_insert_rowid();
+    let id_tx = data.0.last_insert_rowid();
 
     // Mark notes as spent.
     //
@@ -322,8 +323,9 @@ pub fn create_to_address<DB: AsRef<Path>, P: consensus::Parameters>(
     //
     // Assumes that create_to_address() will never be called in parallel, which is a
     // reasonable assumption for a light client such as a mobile phone.
-    let mut stmt_mark_spent_note =
-        data.prepare("UPDATE received_notes SET spent = ? WHERE nf = ?")?;
+    let mut stmt_mark_spent_note = data
+        .0
+        .prepare("UPDATE received_notes SET spent = ? WHERE nf = ?")?;
     for spend in &tx.shielded_spends {
         stmt_mark_spent_note.execute(&[id_tx.to_sql()?, spend.nullifier.to_sql()?])?;
     }
@@ -332,7 +334,7 @@ pub fn create_to_address<DB: AsRef<Path>, P: consensus::Parameters>(
     // TODO: Decide how to save transparent output information.
     let to_str = to.encode(params);
     if let Some(memo) = memo {
-        let mut stmt_insert_sent_note = data.prepare(
+        let mut stmt_insert_sent_note = data.0.prepare(
             "INSERT INTO sent_notes (tx, output_index, from_account, address, value, memo)
             VALUES (?, ?, ?, ?, ?, ?)",
         )?;
@@ -345,7 +347,7 @@ pub fn create_to_address<DB: AsRef<Path>, P: consensus::Parameters>(
             memo.as_bytes().to_sql()?,
         ])?;
     } else {
-        let mut stmt_insert_sent_note = data.prepare(
+        let mut stmt_insert_sent_note = data.0.prepare(
             "INSERT INTO sent_notes (tx, output_index, from_account, address, value)
             VALUES (?, ?, ?, ?, ?)",
         )?;
@@ -358,7 +360,7 @@ pub fn create_to_address<DB: AsRef<Path>, P: consensus::Parameters>(
         ])?;
     }
 
-    data.execute("COMMIT", NO_PARAMS)?;
+    data.0.execute("COMMIT", NO_PARAMS)?;
 
     // Return the row number of the transaction, so the caller can fetch it for sending.
     Ok(id_tx)
@@ -385,6 +387,7 @@ mod tests {
         query::{get_balance, get_verified_balance},
         scan::scan_cached_blocks,
         tests::{self, fake_compact_block, insert_into_cache, sapling_activation_height},
+        CacheConnection, DataConnection,
     };
 
     use super::{create_to_address, OvkPolicy};
@@ -401,7 +404,7 @@ mod tests {
     #[test]
     fn create_to_address_fails_on_incorrect_extsk() {
         let data_file = NamedTempFile::new().unwrap();
-        let db_data = data_file.path();
+        let db_data = DataConnection(Connection::open(data_file.path()).unwrap());
         init_data_database(&db_data).unwrap();
 
         // Add two accounts to the wallet
@@ -416,7 +419,7 @@ mod tests {
 
         // Invalid extsk for the given account should cause an error
         match create_to_address(
-            db_data,
+            &db_data,
             &tests::network(),
             consensus::BranchId::Blossom,
             test_prover(),
@@ -429,8 +432,9 @@ mod tests {
             Ok(_) => panic!("Should have failed"),
             Err(e) => assert_eq!(e.to_string(), "Incorrect ExtendedSpendingKey for account 0"),
         }
+
         match create_to_address(
-            db_data,
+            &db_data,
             &tests::network(),
             consensus::BranchId::Blossom,
             test_prover(),
@@ -448,7 +452,7 @@ mod tests {
     #[test]
     fn create_to_address_fails_with_no_blocks() {
         let data_file = NamedTempFile::new().unwrap();
-        let db_data = data_file.path();
+        let db_data = DataConnection(Connection::open(data_file.path()).unwrap());
         init_data_database(&db_data).unwrap();
 
         // Add an account to the wallet
@@ -459,7 +463,7 @@ mod tests {
 
         // We cannot do anything if we aren't synchronised
         match create_to_address(
-            db_data,
+            &db_data,
             &tests::network(),
             consensus::BranchId::Blossom,
             test_prover(),
@@ -477,7 +481,7 @@ mod tests {
     #[test]
     fn create_to_address_fails_on_insufficient_balance() {
         let data_file = NamedTempFile::new().unwrap();
-        let db_data = data_file.path();
+        let db_data = DataConnection(Connection::open(data_file.path()).unwrap());
         init_data_database(&db_data).unwrap();
         init_blocks_table(&db_data, 1, BlockHash([1; 32]), 1, &[]).unwrap();
 
@@ -488,11 +492,11 @@ mod tests {
         let to = extsk.default_address().unwrap().1.into();
 
         // Account balance should be zero
-        assert_eq!(get_balance(db_data, 0).unwrap(), Amount::zero());
+        assert_eq!(get_balance(&db_data, 0).unwrap(), Amount::zero());
 
         // We cannot spend anything
         match create_to_address(
-            db_data,
+            &db_data,
             &tests::network(),
             consensus::BranchId::Blossom,
             test_prover(),
@@ -513,11 +517,11 @@ mod tests {
     #[test]
     fn create_to_address_fails_on_unverified_notes() {
         let cache_file = NamedTempFile::new().unwrap();
-        let db_cache = cache_file.path();
+        let db_cache = CacheConnection(Connection::open(cache_file.path()).unwrap());
         init_cache_database(&db_cache).unwrap();
 
         let data_file = NamedTempFile::new().unwrap();
-        let db_data = data_file.path();
+        let db_data = DataConnection(Connection::open(data_file.path()).unwrap());
         init_data_database(&db_data).unwrap();
 
         // Add an account to the wallet
@@ -533,12 +537,12 @@ mod tests {
             extfvk.clone(),
             value,
         );
-        insert_into_cache(db_cache, &cb);
-        scan_cached_blocks(&tests::network(), db_cache, db_data, None).unwrap();
+        insert_into_cache(&db_cache, &cb);
+        scan_cached_blocks(&tests::network(), &db_cache, &db_data, None).unwrap();
 
         // Verified balance matches total balance
-        assert_eq!(get_balance(db_data, 0).unwrap(), value);
-        assert_eq!(get_verified_balance(db_data, 0).unwrap(), value);
+        assert_eq!(get_balance(&db_data, 0).unwrap(), value);
+        assert_eq!(get_verified_balance(&db_data, 0).unwrap(), value);
 
         // Add more funds to the wallet in a second note
         let (cb, _) = fake_compact_block(
@@ -547,18 +551,18 @@ mod tests {
             extfvk.clone(),
             value,
         );
-        insert_into_cache(db_cache, &cb);
-        scan_cached_blocks(&tests::network(), db_cache, db_data, None).unwrap();
+        insert_into_cache(&db_cache, &cb);
+        scan_cached_blocks(&tests::network(), &db_cache, &db_data, None).unwrap();
 
         // Verified balance does not include the second note
-        assert_eq!(get_balance(db_data, 0).unwrap(), value + value);
-        assert_eq!(get_verified_balance(db_data, 0).unwrap(), value);
+        assert_eq!(get_balance(&db_data, 0).unwrap(), value + value);
+        assert_eq!(get_verified_balance(&db_data, 0).unwrap(), value);
 
         // Spend fails because there are insufficient verified notes
         let extsk2 = ExtendedSpendingKey::master(&[]);
         let to = extsk2.default_address().unwrap().1.into();
         match create_to_address(
-            db_data,
+            &db_data,
             &tests::network(),
             consensus::BranchId::Blossom,
             test_prover(),
@@ -584,13 +588,13 @@ mod tests {
                 extfvk.clone(),
                 value,
             );
-            insert_into_cache(db_cache, &cb);
+            insert_into_cache(&db_cache, &cb);
         }
-        scan_cached_blocks(&tests::network(), db_cache, db_data, None).unwrap();
+        scan_cached_blocks(&tests::network(), &db_cache, &db_data, None).unwrap();
 
         // Second spend still fails
         match create_to_address(
-            db_data,
+            &db_data,
             &tests::network(),
             consensus::BranchId::Blossom,
             test_prover(),
@@ -614,12 +618,12 @@ mod tests {
             extfvk.clone(),
             value,
         );
-        insert_into_cache(db_cache, &cb);
-        scan_cached_blocks(&tests::network(), db_cache, db_data, None).unwrap();
+        insert_into_cache(&db_cache, &cb);
+        scan_cached_blocks(&tests::network(), &db_cache, &db_data, None).unwrap();
 
         // Second spend should now succeed
         create_to_address(
-            db_data,
+            &db_data,
             &tests::network(),
             consensus::BranchId::Blossom,
             test_prover(),
@@ -635,11 +639,11 @@ mod tests {
     #[test]
     fn create_to_address_fails_on_locked_notes() {
         let cache_file = NamedTempFile::new().unwrap();
-        let db_cache = cache_file.path();
+        let db_cache = CacheConnection(Connection::open(cache_file.path()).unwrap());
         init_cache_database(&db_cache).unwrap();
 
         let data_file = NamedTempFile::new().unwrap();
-        let db_data = data_file.path();
+        let db_data = DataConnection(Connection::open(data_file.path()).unwrap());
         init_data_database(&db_data).unwrap();
 
         // Add an account to the wallet
@@ -655,15 +659,15 @@ mod tests {
             extfvk.clone(),
             value,
         );
-        insert_into_cache(db_cache, &cb);
-        scan_cached_blocks(&tests::network(), db_cache, db_data, None).unwrap();
-        assert_eq!(get_balance(db_data, 0).unwrap(), value);
+        insert_into_cache(&db_cache, &cb);
+        scan_cached_blocks(&tests::network(), &db_cache, &db_data, None).unwrap();
+        assert_eq!(get_balance(&db_data, 0).unwrap(), value);
 
         // Send some of the funds to another address
         let extsk2 = ExtendedSpendingKey::master(&[]);
         let to = extsk2.default_address().unwrap().1.into();
         create_to_address(
-            db_data,
+            &db_data,
             &tests::network(),
             consensus::BranchId::Blossom,
             test_prover(),
@@ -677,7 +681,7 @@ mod tests {
 
         // A second spend fails because there are no usable notes
         match create_to_address(
-            db_data,
+            &db_data,
             &tests::network(),
             consensus::BranchId::Blossom,
             test_prover(),
@@ -703,13 +707,13 @@ mod tests {
                 ExtendedFullViewingKey::from(&ExtendedSpendingKey::master(&[i as u8])),
                 value,
             );
-            insert_into_cache(db_cache, &cb);
+            insert_into_cache(&db_cache, &cb);
         }
-        scan_cached_blocks(&tests::network(), db_cache, db_data, None).unwrap();
+        scan_cached_blocks(&tests::network(), &db_cache, &db_data, None).unwrap();
 
         // Second spend still fails
         match create_to_address(
-            db_data,
+            &db_data,
             &tests::network(),
             consensus::BranchId::Blossom,
             test_prover(),
@@ -733,12 +737,12 @@ mod tests {
             ExtendedFullViewingKey::from(&ExtendedSpendingKey::master(&[22])),
             value,
         );
-        insert_into_cache(db_cache, &cb);
-        scan_cached_blocks(&tests::network(), db_cache, db_data, None).unwrap();
+        insert_into_cache(&db_cache, &cb);
+        scan_cached_blocks(&tests::network(), &db_cache, &db_data, None).unwrap();
 
         // Second spend should now succeed
         create_to_address(
-            db_data,
+            &db_data,
             &tests::network(),
             consensus::BranchId::Blossom,
             test_prover(),
@@ -755,11 +759,11 @@ mod tests {
     fn ovk_policy_prevents_recovery_from_chain() {
         let network = tests::network();
         let cache_file = NamedTempFile::new().unwrap();
-        let db_cache = cache_file.path();
+        let db_cache = CacheConnection(Connection::open(cache_file.path()).unwrap());
         init_cache_database(&db_cache).unwrap();
 
         let data_file = NamedTempFile::new().unwrap();
-        let db_data = data_file.path();
+        let db_data = DataConnection(Connection::open(data_file.path()).unwrap());
         init_data_database(&db_data).unwrap();
 
         // Add an account to the wallet
@@ -775,9 +779,9 @@ mod tests {
             extfvk.clone(),
             value,
         );
-        insert_into_cache(db_cache, &cb);
-        scan_cached_blocks(&network, db_cache, db_data, None).unwrap();
-        assert_eq!(get_balance(db_data, 0).unwrap(), value);
+        insert_into_cache(&db_cache, &cb);
+        scan_cached_blocks(&network, &db_cache, &db_data, None).unwrap();
+        assert_eq!(get_balance(&db_data, 0).unwrap(), value);
 
         let extsk2 = ExtendedSpendingKey::master(&[]);
         let addr2 = extsk2.default_address().unwrap().1;
@@ -785,7 +789,7 @@ mod tests {
 
         let send_and_recover_with_policy = |ovk_policy| {
             let tx_row = create_to_address(
-                db_data,
+                &db_data,
                 &network,
                 consensus::BranchId::Blossom,
                 test_prover(),
@@ -797,10 +801,9 @@ mod tests {
             )
             .unwrap();
 
-            let data = Connection::open(db_data).unwrap();
-
             // Fetch the transaction from the database
-            let raw_tx: Vec<_> = data
+            let raw_tx: Vec<_> = db_data
+                .0
                 .query_row(
                     "SELECT raw FROM transactions
                     WHERE id_tx = ?",
@@ -811,7 +814,8 @@ mod tests {
             let tx = Transaction::read(&raw_tx[..]).unwrap();
 
             // Fetch the output index from the database
-            let output_index: i64 = data
+            let output_index: i64 = db_data
+                .0
                 .query_row(
                     "SELECT output_index FROM sent_notes
                     WHERE tx = ?",
@@ -847,9 +851,9 @@ mod tests {
                 ExtendedFullViewingKey::from(&ExtendedSpendingKey::master(&[i as u8])),
                 value,
             );
-            insert_into_cache(db_cache, &cb);
+            insert_into_cache(&db_cache, &cb);
         }
-        scan_cached_blocks(&network, db_cache, db_data, None).unwrap();
+        scan_cached_blocks(&network, &db_cache, &db_data, None).unwrap();
 
         // Send the funds again, discarding history.
         // Neither transaction output is decryptable by the sender.
