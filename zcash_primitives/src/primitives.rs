@@ -223,6 +223,11 @@ impl<E: JubjubEngine> PaymentAddress<E> {
     }
 }
 
+/// Enum for note randomness before and after [ZIP 212](https://zips.z.cash/zip-0212).
+///
+/// Before ZIP 212, the note commitment trapdoor `rcm` must be a scalar value.
+/// After ZIP 212, the note randomness `rseed` is a 32-byte sequence, used to derive
+/// both the note commitment trapdoor `rcm` and the ephemeral private key `esk`.
 #[derive(Copy, Clone, Debug)]
 pub enum Rseed<Fs> {
     BeforeZip212(Fs),
