@@ -15,7 +15,8 @@ pub mod error;
 
 pub trait DBOps {
     type Error;
-    type Account;
+    type AccountId;
+    type NoteId;
     //    type TxRef;   // Backend-specific transaction handle
     //    type NoteRef; // Backend-specific note identifier`
 
@@ -48,17 +49,23 @@ pub trait DBOps {
     fn get_address<P: consensus::Parameters>(
         &self,
         params: &P,
-        account: Self::Account,
+        account: Self::AccountId,
     ) -> Result<Option<PaymentAddress>, Self::Error>;
 
-    fn get_balance(&self, account: Self::Account) -> Result<Amount, Self::Error>;
+    fn get_balance(&self, account: Self::AccountId) -> Result<Amount, Self::Error>;
 
-    fn get_verified_balance(&self, account: Self::Account) -> Result<Amount, Self::Error>;
+    fn get_verified_balance(&self, account: Self::AccountId) -> Result<Amount, Self::Error>;
 
-    //    fn get_received_memo_as_utf8(id_note: i64) -> Result<Option<String>, Self::Error>;
-    //
-    //    fn get_extended_full_viewing_keys() -> Result<Box<dyn Iterator<Item = ExtendedFullViewingKey>>, Self::Error>;
-    //
+    fn get_received_memo_as_utf8(
+        &self,
+        id_note: Self::NoteId,
+    ) -> Result<Option<String>, Self::Error>;
+
+    fn get_extended_full_viewing_keys<P: consensus::Parameters>(
+        &self,
+        params: &P,
+    ) -> Result<Vec<ExtendedFullViewingKey>, Self::Error>;
+
     //    fn get_commitment_tree(block_height: BlockHeight) -> Result<Option<CommitmentTree<Node>>, Self::Error>;
     //
     //    fn get_witnesses(block_height: BlockHeight) -> Result<Box<dyn Iterator<Item = IncrementalWitness<Node>>>, Self::Error>;

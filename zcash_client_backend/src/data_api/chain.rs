@@ -26,15 +26,16 @@ pub const ANCHOR_OFFSET: u32 = 10;
 ///
 /// This function does not mutate either of the databases.
 pub fn validate_combined_chain<
-    E,
+    E0,
+    E: From<Error<E0>>,
     P: consensus::Parameters,
-    C: CacheOps<Error = Error<E>>,
-    D: DBOps<Error = Error<E>>,
+    C: CacheOps<Error = E>,
+    D: DBOps<Error = E>,
 >(
     parameters: &P,
     cache: &C,
     data: &D,
-) -> Result<(), Error<E>> {
+) -> Result<(), E> {
     let sapling_activation_height = parameters
         .activation_height(NetworkUpgrade::Sapling)
         .ok_or(Error::SaplingNotActive)?;
@@ -49,12 +50,12 @@ pub fn validate_combined_chain<
     let from_height = data_max_height.unwrap_or(sapling_activation_height - 1);
     let cached_hash_opt = cache.validate_chain(from_height, |top_block, next_block| {
         if next_block.height() != top_block.height() - 1 {
-            Err(ChainInvalid::block_height_mismatch(
-                top_block.height() - 1,
-                next_block.height(),
-            ))
+            Err(
+                ChainInvalid::block_height_mismatch(top_block.height() - 1, next_block.height())
+                    .into(),
+            )
         } else if next_block.hash() != top_block.prev_hash() {
-            Err(ChainInvalid::prev_hash_mismatch(next_block.height()))
+            Err(ChainInvalid::prev_hash_mismatch(next_block.height()).into())
         } else {
             Ok(())
         }
@@ -66,12 +67,13 @@ pub fn validate_combined_chain<
                 if cached_hash == data_scan_max_hash {
                     Ok(())
                 } else {
-                    Err(ChainInvalid::prev_hash_mismatch::<E>(h))
+                    Err(ChainInvalid::prev_hash_mismatch(h).into())
                 }
             }
             None => Err(Error::CorruptedData(
                 "No block hash available for block at maximum chain height.",
-            )),
+            )
+            .into()),
         },
         _ => {
             // No cached blocks are present, or the max data height is absent, this is fine.
@@ -82,9 +84,9 @@ pub fn validate_combined_chain<
 
 /// Determines the target height for a transaction, and the height from which to
 /// select anchors, based on the current synchronised block chain.
-pub fn get_target_and_anchor_heights<E, D: DBOps<Error = Error<E>>>(
+pub fn get_target_and_anchor_heights<E0, E: From<Error<E0>>, D: DBOps<Error = E>>(
     data: &D,
-) -> Result<(BlockHeight, BlockHeight), Error<E>> {
+) -> Result<(BlockHeight, BlockHeight), E> {
     data.block_height_extrema().and_then(|heights| {
         match heights {
             Some((min_height, max_height)) => {
@@ -99,7 +101,7 @@ pub fn get_target_and_anchor_heights<E, D: DBOps<Error = Error<E>>>(
 
                 Ok((target_height, anchor_height))
             }
-            None => Err(Error::ScanRequired),
+            None => Err(Error::ScanRequired.into()),
         }
     })
 }
