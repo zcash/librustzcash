@@ -133,13 +133,12 @@ mod tests {
             value: value.into(),
             rseed,
         };
-        let esk = note.generate_or_derive_esk(&mut rng);
         let encryptor = SaplingNoteEncryption::new(
             extfvk.fvk.ovk,
             note.clone(),
             to.clone(),
             Memo::default(),
-            esk,
+            &mut rng,
         );
         let cmu = note.cm(&JUBJUB).to_repr().as_ref().to_vec();
         let mut epk = vec![];
@@ -195,9 +194,13 @@ mod tests {
                 value: value.into(),
                 rseed,
             };
-            let esk = note.generate_or_derive_esk(&mut rng);
-            let encryptor =
-                SaplingNoteEncryption::new(extfvk.fvk.ovk, note.clone(), to, Memo::default(), esk);
+            let encryptor = SaplingNoteEncryption::new(
+                extfvk.fvk.ovk,
+                note.clone(),
+                to,
+                Memo::default(),
+                &mut rng,
+            );
             let cmu = note.cm(&JUBJUB).to_repr().as_ref().to_vec();
             let mut epk = vec![];
             encryptor.epk().write(&mut epk).unwrap();
@@ -220,13 +223,12 @@ mod tests {
                 value: (in_value - value).into(),
                 rseed,
             };
-            let esk = note.generate_or_derive_esk(&mut rng);
             let encryptor = SaplingNoteEncryption::new(
                 extfvk.fvk.ovk,
                 note.clone(),
                 change_addr,
                 Memo::default(),
-                esk,
+                &mut rng,
             );
             let cmu = note.cm(&JUBJUB).to_repr().as_ref().to_vec();
             let mut epk = vec![];

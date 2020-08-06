@@ -15,6 +15,7 @@ use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use crypto_api_chachapoly::{ChaCha20Ietf, ChachaPolyIetf};
 use ff::PrimeField;
 use pairing::bls12_381::{Bls12, Fr};
+use rand_core::{CryptoRng, RngCore};
 use std::convert::TryInto;
 use std::fmt;
 use std::str;
@@ -236,8 +237,7 @@ fn prf_ock(
 /// let note = to.create_note(value, Rseed::BeforeZip212(rcm), &JUBJUB).unwrap();
 /// let cmu = note.cm(&JUBJUB);
 ///
-/// let esk = note.generate_or_derive_esk(&mut rng);
-/// let enc = SaplingNoteEncryption::new(ovk, note, to, Memo::default(), esk);
+/// let enc = SaplingNoteEncryption::new(ovk, note, to, Memo::default(), &mut rng);
 /// let encCiphertext = enc.encrypt_note_plaintext();
 /// let outCiphertext = enc.encrypt_outgoing_plaintext(&cv.cm(&JUBJUB).into(), &cmu);
 /// ```
@@ -252,13 +252,14 @@ pub struct SaplingNoteEncryption {
 
 impl SaplingNoteEncryption {
     /// Creates a new encryption context for the given note.
-    pub fn new(
+    pub fn new<R: RngCore + CryptoRng>(
         ovk: OutgoingViewingKey,
         note: Note<Bls12>,
         to: PaymentAddress<Bls12>,
         memo: Memo,
-        esk: Fs,
+        rng: &mut R,
     ) -> SaplingNoteEncryption {
+        let esk = note.generate_or_derive_esk(rng);
         let epk = note.g_d.mul(esk, &JUBJUB);
 
         SaplingNoteEncryption {
@@ -809,8 +810,7 @@ mod tests {
         let cmu = note.cm(&JUBJUB);
 
         let ovk = OutgoingViewingKey([0; 32]);
-        let esk = note.generate_or_derive_esk(&mut rng);
-        let ne = SaplingNoteEncryption::new(ovk, note, pa, Memo([0; 512]), esk);
+        let ne = SaplingNoteEncryption::new(ovk, note, pa, Memo([0; 512]), &mut rng);
         let epk = ne.epk();
         let enc_ciphertext = ne.encrypt_note_plaintext();
         let out_ciphertext = ne.encrypt_outgoing_plaintext(&cv, &cmu);
@@ -1705,9 +1705,7 @@ mod tests {
             // Test encryption
             //
 
-            let _esk = note.generate_or_derive_esk(&mut OsRng);
-
-            let mut ne = SaplingNoteEncryption::new(ovk, note, to, Memo(tv.memo), _esk);
+            let mut ne = SaplingNoteEncryption::new(ovk, note, to, Memo(tv.memo), &mut OsRng);
             // Swap in the ephemeral keypair from the test vectors
             ne.esk = esk;
             ne.epk = epk;
