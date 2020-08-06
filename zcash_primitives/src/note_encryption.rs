@@ -6,7 +6,7 @@ use crate::{
     jubjub::{
         edwards,
         fs::{Fs, FsRepr},
-        PrimeOrder, ToUniform, Unknown,
+        PrimeOrder, Unknown,
     },
     primitives::{Diversifier, Note, PaymentAddress, Rseed},
 };
@@ -20,10 +20,7 @@ use std::convert::TryInto;
 use std::fmt;
 use std::str;
 
-use crate::{
-    keys::{prf_expand, OutgoingViewingKey},
-    JUBJUB,
-};
+use crate::{keys::OutgoingViewingKey, JUBJUB};
 
 pub const KDF_SAPLING_PERSONALIZATION: &[u8; 16] = b"Zcash_SaplingKDF";
 pub const PRF_OCK_PERSONALIZATION: &[u8; 16] = b"Zcash_Derive_ock";
@@ -346,6 +343,7 @@ impl SaplingNoteEncryption {
 fn parse_note_plaintext_without_memo<P: consensus::Parameters>(
     height: u32,
     ivk: &Fs,
+    epk: &edwards::Point<Bls12, PrimeOrder>,
     cmu: &Fr,
     plaintext: &[u8],
 ) -> Option<(Note<Bls12>, PaymentAddress<Bls12>)> {
@@ -381,6 +379,13 @@ fn parse_note_plaintext_without_memo<P: consensus::Parameters>(
     if note.cm(&JUBJUB) != *cmu {
         // Published commitment doesn't match calculated commitment
         return None;
+    }
+
+    if let Rseed::AfterZip212(_) = note.rseed {
+        let derived_esk = note.derive_esk().unwrap();
+        if note.g_d.mul(derived_esk, &JUBJUB) != *epk {
+            return None;
+        }
     }
 
     Some((note, to))
@@ -440,15 +445,7 @@ pub fn try_sapling_note_decryption<P: consensus::Parameters>(
         NOTE_PLAINTEXT_SIZE
     );
 
-    let (note, to) = parse_note_plaintext_without_memo::<P>(height, ivk, cmu, &plaintext)?;
-
-    match note.rseed {
-        Rseed::AfterZip212(rseed) => {
-            let derived_esk = Fs::to_uniform(prf_expand(&rseed, &[0x05]).as_bytes());
-            assert_eq!(note.g_d.mul(derived_esk, &JUBJUB), *epk);
-        }
-        _ => (),
-    }
+    let (note, to) = parse_note_plaintext_without_memo::<P>(height, ivk, epk, cmu, &plaintext)?;
 
     let mut memo = [0u8; 512];
     memo.copy_from_slice(&plaintext[COMPACT_NOTE_SIZE..NOTE_PLAINTEXT_SIZE]);
@@ -482,7 +479,7 @@ pub fn try_sapling_compact_note_decryption<P: consensus::Parameters>(
     plaintext.copy_from_slice(&enc_ciphertext);
     ChaCha20Ietf::xor(key.as_bytes(), &[0u8; 12], 1, &mut plaintext);
 
-    parse_note_plaintext_without_memo::<P>(height, ivk, cmu, &plaintext)
+    parse_note_plaintext_without_memo::<P>(height, ivk, epk, cmu, &plaintext)
 }
 
 /// Recovery of the full note plaintext by the sender.
@@ -581,6 +578,12 @@ pub fn try_sapling_output_recovery<P: consensus::Parameters>(
     if note.cm(&JUBJUB) != *cmu {
         // Published commitment doesn't match calculated commitment
         return None;
+    }
+
+    if let Rseed::AfterZip212(_) = note.rseed {
+        if note.derive_esk().unwrap() != esk {
+            return None;
+        }
     }
 
     Some((note, to, Memo(memo)))
