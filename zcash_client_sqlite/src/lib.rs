@@ -111,6 +111,10 @@ impl DBOps for DataConnection {
     fn get_balance(&self, account: Account) -> Result<Amount, Self::Error> {
         query::get_balance(self, account).map_err(|e| e.0)
     }
+
+    fn get_verified_balance(&self, account: Self::Account) -> Result<Amount, Self::Error> {
+        query::get_verified_balance(self, account).map_err(|e| e.0)
+    }
 }
 
 pub struct CacheConnection(Connection);

@@ -53,8 +53,8 @@ pub trait DBOps {
 
     fn get_balance(&self, account: Self::Account) -> Result<Amount, Self::Error>;
 
-    //    fn get_verified_balance(account: Account) -> Result<Amount, Self::Error>;
-    //
+    fn get_verified_balance(&self, account: Self::Account) -> Result<Amount, Self::Error>;
+
     //    fn get_received_memo_as_utf8(id_note: i64) -> Result<Option<String>, Self::Error>;
     //
     //    fn get_extended_full_viewing_keys() -> Result<Box<dyn Iterator<Item = ExtendedFullViewingKey>>, Self::Error>;

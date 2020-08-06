@@ -96,17 +96,18 @@ pub fn get_balance(data: &DataConnection, account: Account) -> Result<Amount, Sq
 /// ```
 /// use tempfile::NamedTempFile;
 /// use zcash_client_sqlite::{
+///     Account,
 ///     DataConnection,
 ///     query::get_verified_balance,
 /// };
 ///
 /// let data_file = NamedTempFile::new().unwrap();
 /// let db = DataConnection::for_path(data_file).unwrap();
-/// let addr = get_verified_balance(&db, 0);
+/// let addr = get_verified_balance(&db, Account(0));
 /// ```
 pub fn get_verified_balance(
     data: &DataConnection,
-    account: u32,
+    account: Account,
 ) -> Result<Amount, SqliteClientError> {
     let (_, anchor_height) = get_target_and_anchor_heights(data)?;
 
@@ -114,7 +115,7 @@ pub fn get_verified_balance(
         "SELECT SUM(value) FROM received_notes
         INNER JOIN transactions ON transactions.id_tx = received_notes.tx
         WHERE account = ? AND spent IS NULL AND transactions.block <= ?",
-        &[account, u32::from(anchor_height)],
+        &[account.0, u32::from(anchor_height)],
         |row| row.get(0).or(Ok(0)),
     )?;
 
@@ -238,7 +239,7 @@ mod tests {
         assert_eq!(get_balance(&db_data, Account(0)).unwrap(), Amount::zero());
 
         // The account should have no verified balance, as we haven't scanned any blocks
-        let e = get_verified_balance(&db_data, 0).unwrap_err();
+        let e = get_verified_balance(&db_data, Account(0)).unwrap_err();
         match e.0 {
             Error::ScanRequired => (),
             _ => panic!("Unexpected error: {:?}", e),

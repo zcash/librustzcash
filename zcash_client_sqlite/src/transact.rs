@@ -556,7 +556,7 @@ mod tests {
 
         // Verified balance matches total balance
         assert_eq!(get_balance(&db_data, Account(0)).unwrap(), value);
-        assert_eq!(get_verified_balance(&db_data, 0).unwrap(), value);
+        assert_eq!(get_verified_balance(&db_data, Account(0)).unwrap(), value);
 
         // Add more funds to the wallet in a second note
         let (cb, _) = fake_compact_block(
@@ -570,7 +570,7 @@ mod tests {
 
         // Verified balance does not include the second note
         assert_eq!(get_balance(&db_data, Account(0)).unwrap(), value + value);
-        assert_eq!(get_verified_balance(&db_data, 0).unwrap(), value);
+        assert_eq!(get_verified_balance(&db_data, Account(0)).unwrap(), value);
 
         // Spend fails because there are insufficient verified notes
         let extsk2 = ExtendedSpendingKey::master(&[]);
