@@ -14,7 +14,7 @@ use std::marker::PhantomData;
 
 use crate::{
     consensus,
-    consensus::{MainNetwork, NetworkUpgrade, TestNetwork},
+    consensus::{MainNetwork, TestNetwork},
     keys::OutgoingViewingKey,
     legacy::TransparentAddress,
     merkle_tree::MerklePath,
@@ -105,7 +105,7 @@ impl SaplingOutput {
             return Err(Error::InvalidAmount);
         }
 
-        let rseed = generate_random_rseed::<P, R>(NetworkUpgrade::Canopy, height, rng);
+        let rseed = generate_random_rseed::<P, R>(height, rng);
 
         let note = Note {
             g_d,
@@ -633,11 +633,7 @@ impl<P: consensus::Parameters, R: RngCore + CryptoRng> Builder<P, R> {
                         }
                     };
 
-                    let rseed = generate_random_rseed::<P, R>(
-                        NetworkUpgrade::Canopy,
-                        self.height,
-                        &mut self.rng,
-                    );
+                    let rseed = generate_random_rseed::<P, R>(self.height, &mut self.rng);
 
                     (
                         payment_address,

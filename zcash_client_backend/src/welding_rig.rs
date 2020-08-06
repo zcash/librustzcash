@@ -191,7 +191,7 @@ mod tests {
     use pairing::bls12_381::{Bls12, Fr};
     use rand_core::{OsRng, RngCore};
     use zcash_primitives::{
-        consensus::{NetworkUpgrade, TestNetwork},
+        consensus::{TestNetwork},
         jubjub::{fs::Fs, FixedGenerators, JubjubParams, ToUniform},
         merkle_tree::CommitmentTree,
         note_encryption::{Memo, SaplingNoteEncryption},
@@ -255,11 +255,7 @@ mod tests {
 
         // Create a fake Note for the account
         let mut rng = OsRng;
-        let rseed = generate_random_rseed::<TestNetwork, OsRng>(
-            NetworkUpgrade::Canopy,
-            height as u32,
-            &mut rng,
-        );
+        let rseed = generate_random_rseed::<TestNetwork, OsRng>(height as u32, &mut rng);
         let note = Note {
             g_d: to.diversifier().g_d::<Bls12>(&JUBJUB).unwrap(),
             pk_d: to.pk_d().clone(),

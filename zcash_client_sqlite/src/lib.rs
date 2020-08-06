@@ -106,7 +106,6 @@ mod tests {
     };
     use zcash_primitives::{
         block::BlockHash,
-        consensus::NetworkUpgrade,
         note_encryption::{Memo, SaplingNoteEncryption},
         primitives::{Note, PaymentAddress},
         transaction::components::Amount,
@@ -127,11 +126,7 @@ mod tests {
 
         // Create a fake Note for the account
         let mut rng = OsRng;
-        let rseed = generate_random_rseed::<Network, OsRng>(
-            NetworkUpgrade::Canopy,
-            height as u32,
-            &mut rng,
-        );
+        let rseed = generate_random_rseed::<Network, OsRng>(height as u32, &mut rng);
         let note = Note {
             g_d: to.diversifier().g_d::<Bls12>(&JUBJUB).unwrap(),
             pk_d: to.pk_d().clone(),
@@ -181,11 +176,7 @@ mod tests {
         value: Amount,
     ) -> CompactBlock {
         let mut rng = OsRng;
-        let rseed = generate_random_rseed::<Network, OsRng>(
-            NetworkUpgrade::Canopy,
-            height as u32,
-            &mut rng,
-        );
+        let rseed = generate_random_rseed::<Network, OsRng>(height as u32, &mut rng);
 
         // Create a fake CompactBlock containing the note
         let mut cspend = CompactSpend::new();
@@ -222,11 +213,7 @@ mod tests {
         // Create a fake Note for the change
         ctx.outputs.push({
             let change_addr = extfvk.default_address().unwrap().1;
-            let rseed = generate_random_rseed::<Network, OsRng>(
-                NetworkUpgrade::Canopy,
-                height as u32,
-                &mut rng,
-            );
+            let rseed = generate_random_rseed::<Network, OsRng>(height as u32, &mut rng);
             let note = Note {
                 g_d: change_addr.diversifier().g_d::<Bls12>(&JUBJUB).unwrap(),
                 pk_d: change_addr.pk_d().clone(),

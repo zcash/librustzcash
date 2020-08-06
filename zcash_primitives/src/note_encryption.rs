@@ -799,8 +799,7 @@ mod tests {
         };
         let cv = value_commitment.cm(&JUBJUB).into();
 
-        let rseed =
-            generate_random_rseed::<TestNetwork, R>(NetworkUpgrade::Canopy, height, &mut rng);
+        let rseed = generate_random_rseed::<TestNetwork, R>(height, &mut rng);
 
         let note = pa.create_note(value, rseed, &JUBJUB).unwrap();
         let cmu = note.cm(&JUBJUB);
