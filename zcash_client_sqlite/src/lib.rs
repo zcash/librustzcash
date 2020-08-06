@@ -36,10 +36,12 @@ use zcash_primitives::{
 };
 
 use zcash_client_backend::{
-    data_api::{error::Error, CacheOps, DBOps},
+    data_api::{CacheOps, DBOps},
     encoding::encode_payment_address,
     proto::compact_formats::CompactBlock,
 };
+
+use crate::error::SqliteClientError;
 
 pub mod chain;
 pub mod error;
@@ -48,7 +50,8 @@ pub mod query;
 pub mod scan;
 pub mod transact;
 
-pub struct Account(pub u32);
+pub struct AccountId(pub u32);
+pub struct NoteId(pub i64);
 
 pub struct DataConnection(Connection);
 
@@ -59,11 +62,12 @@ impl DataConnection {
 }
 
 impl DBOps for DataConnection {
-    type Error = Error<rusqlite::Error>;
-    type Account = Account;
+    type Error = SqliteClientError;
+    type AccountId = AccountId;
+    type NoteId = NoteId;
 
     fn init_db(&self) -> Result<(), Self::Error> {
-        init::init_data_database(self).map_err(Error::Database)
+        init::init_data_database(self).map_err(SqliteClientError::from)
     }
 
     fn init_account_storage<P: consensus::Parameters>(
@@ -71,7 +75,7 @@ impl DBOps for DataConnection {
         params: &P,
         extfvks: &[ExtendedFullViewingKey],
     ) -> Result<(), Self::Error> {
-        init::init_accounts_table(self, params, extfvks).map_err(|e| e.0)
+        init::init_accounts_table(self, params, extfvks)
     }
 
     fn init_block_storage(
@@ -81,15 +85,15 @@ impl DBOps for DataConnection {
         time: u32,
         sapling_tree: &[u8],
     ) -> Result<(), Self::Error> {
-        init::init_blocks_table(self, height, hash, time, sapling_tree).map_err(|e| e.0)
+        init::init_blocks_table(self, height, hash, time, sapling_tree)
     }
 
     fn block_height_extrema(&self) -> Result<Option<(BlockHeight, BlockHeight)>, Self::Error> {
-        chain::block_height_extrema(self).map_err(Error::Database)
+        chain::block_height_extrema(self).map_err(SqliteClientError::from)
     }
 
     fn get_block_hash(&self, block_height: BlockHeight) -> Result<Option<BlockHash>, Self::Error> {
-        chain::get_block_hash(self, block_height).map_err(Error::Database)
+        chain::get_block_hash(self, block_height).map_err(SqliteClientError::from)
     }
 
     fn rewind_to_height<P: consensus::Parameters>(
@@ -97,23 +101,37 @@ impl DBOps for DataConnection {
         parameters: &P,
         block_height: BlockHeight,
     ) -> Result<(), Self::Error> {
-        chain::rewind_to_height(self, parameters, block_height).map_err(|e| e.0)
+        chain::rewind_to_height(self, parameters, block_height)
     }
 
     fn get_address<P: consensus::Parameters>(
         &self,
         params: &P,
-        account: Self::Account,
+        account: Self::AccountId,
     ) -> Result<Option<PaymentAddress>, Self::Error> {
-        query::get_address(self, params, account).map_err(|e| e.0)
+        query::get_address(self, params, account)
     }
 
-    fn get_balance(&self, account: Account) -> Result<Amount, Self::Error> {
-        query::get_balance(self, account).map_err(|e| e.0)
+    fn get_balance(&self, account: Self::AccountId) -> Result<Amount, Self::Error> {
+        query::get_balance(self, account)
     }
 
-    fn get_verified_balance(&self, account: Self::Account) -> Result<Amount, Self::Error> {
-        query::get_verified_balance(self, account).map_err(|e| e.0)
+    fn get_verified_balance(&self, account: Self::AccountId) -> Result<Amount, Self::Error> {
+        query::get_verified_balance(self, account)
+    }
+
+    fn get_received_memo_as_utf8(
+        &self,
+        id_note: Self::NoteId,
+    ) -> Result<Option<String>, Self::Error> {
+        query::get_received_memo_as_utf8(self, id_note)
+    }
+
+    fn get_extended_full_viewing_keys<P: consensus::Parameters>(
+        &self,
+        params: &P,
+    ) -> Result<Vec<ExtendedFullViewingKey>, Self::Error> {
+        query::get_extended_full_viewing_keys(self, params)
     }
 }
 
@@ -126,10 +144,10 @@ impl CacheConnection {
 }
 
 impl CacheOps for CacheConnection {
-    type Error = Error<rusqlite::Error>;
+    type Error = SqliteClientError;
 
     fn init_cache(&self) -> Result<(), Self::Error> {
-        init::init_cache_database(self).map_err(Error::Database)
+        init::init_cache_database(self).map_err(SqliteClientError::from)
     }
 
     fn validate_chain<F>(
@@ -140,7 +158,7 @@ impl CacheOps for CacheConnection {
     where
         F: Fn(&CompactBlock, &CompactBlock) -> Result<(), Self::Error>,
     {
-        chain::validate_chain(self, from_height, validate).map_err(|s| s.0)
+        chain::validate_chain(self, from_height, validate)
     }
 }
 

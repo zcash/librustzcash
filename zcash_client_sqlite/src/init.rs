@@ -272,7 +272,7 @@ mod tests {
         zip32::{ExtendedFullViewingKey, ExtendedSpendingKey},
     };
 
-    use crate::{query::get_address, tests, Account, DataConnection};
+    use crate::{query::get_address, tests, AccountId, DataConnection};
 
     use super::{init_accounts_table, init_blocks_table, init_data_database};
 
@@ -336,7 +336,7 @@ mod tests {
         init_accounts_table(&db_data, &tests::network(), &extfvks).unwrap();
 
         // The account's address should be in the data DB
-        let pa = get_address(&db_data, &tests::network(), Account(0)).unwrap();
+        let pa = get_address(&db_data, &tests::network(), AccountId(0)).unwrap();
         assert_eq!(pa.unwrap(), extsk.default_address().unwrap().1);
     }
 }
