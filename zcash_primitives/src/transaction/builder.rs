@@ -14,7 +14,6 @@ use std::marker::PhantomData;
 
 use crate::{
     consensus,
-    consensus::{MainNetwork, TestNetwork},
     keys::OutgoingViewingKey,
     legacy::TransparentAddress,
     merkle_tree::MerklePath,
@@ -319,22 +318,7 @@ pub struct Builder<P: consensus::Parameters, R: RngCore + CryptoRng> {
     phantom: PhantomData<P>,
 }
 
-impl Builder<MainNetwork, OsRng> {
-    /// Creates a new `Builder` targeted for inclusion in the block with the given height,
-    /// using default values for general transaction fields and the default OS random.
-    ///
-    /// # Default values
-    ///
-    /// The expiry height will be set to the given height plus the default transaction
-    /// expiry delta (20 blocks).
-    ///
-    /// The fee will be set to the default fee (0.0001 ZEC).
-    pub fn new(height: u32) -> Self {
-        Builder::new_with_rng(height, OsRng)
-    }
-}
-
-impl Builder<TestNetwork, OsRng> {
+impl<P: consensus::Parameters> Builder<P, OsRng> {
     /// Creates a new `Builder` targeted for inclusion in the block with the given height,
     /// using default values for general transaction fields and the default OS random.
     ///
