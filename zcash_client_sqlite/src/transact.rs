@@ -9,7 +9,7 @@ use std::path::Path;
 use zcash_client_backend::encoding::encode_extended_full_viewing_key;
 use zcash_primitives::{
     consensus,
-    consensus::Parameters,
+    consensus::{NetworkUpgrade, Parameters},
     jubjub::fs::{Fs, FsRepr},
     keys::OutgoingViewingKey,
     merkle_tree::{IncrementalWitness, MerklePath},
@@ -235,20 +235,22 @@ pub fn create_to_address<P: AsRef<Path>>(
 
             let note_value: i64 = row.get(1)?;
 
-            let d: Vec<_> = row.get(2)?;
+            let rseed = {
+                let d: Vec<_> = row.get(2)?;
 
-            let rseed = if height >= Network::CANOPY_ACTIVATION_HEIGHT {
-                let mut r = [0u8; 32];
-                r.copy_from_slice(&d[..]);
-                Rseed::AfterZip212(r)
-            } else {
-                let tmp = FsRepr(
-                    d[..]
-                        .try_into()
-                        .map_err(|_| Error(ErrorKind::InvalidNote))?,
-                );
-                let r = Fs::from_repr(tmp).ok_or(Error(ErrorKind::InvalidNote))?;
-                Rseed::BeforeZip212(r)
+                if Network::is_nu_active(NetworkUpgrade::Canopy, height) {
+                    let mut r = [0u8; 32];
+                    r.copy_from_slice(&d[..]);
+                    Rseed::AfterZip212(r)
+                } else {
+                    let tmp = FsRepr(
+                        d[..]
+                            .try_into()
+                            .map_err(|_| Error(ErrorKind::InvalidNote))?,
+                    );
+                    let r = Fs::from_repr(tmp).ok_or(Error(ErrorKind::InvalidNote))?;
+                    Rseed::BeforeZip212(r)
+                }
             };
 
             let from = extfvk

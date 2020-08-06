@@ -2,7 +2,7 @@
 
 use ff::PrimeField;
 use protobuf::parse_from_bytes;
-use rusqlite::{types::ToSql, Connection, NO_PARAMS};
+use rusqlite::{types::ToSql, Connection, OptionalExtension, NO_PARAMS};
 use std::path::Path;
 use zcash_client_backend::{
     decrypt_transaction, encoding::decode_extended_full_viewing_key,
@@ -374,15 +374,19 @@ pub fn decrypt_and_store_transaction<P: AsRef<Path>>(
 
     // Height is block height for mined transactions, and the "mempool height" (chain height + 1) for mempool transactions.
     let mut stmt_select_block = data.prepare("SELECT block FROM transactions WHERE txid = ?")?;
-    let height = stmt_select_block.query_row(&[tx.txid().0.to_vec()], |row| {
-        row.get(0).or({
-            let last_height =
-                data.query_row("SELECT MAX(height) FROM blocks", NO_PARAMS, |row| {
-                    row.get(0).or(Ok(SAPLING_ACTIVATION_HEIGHT - 1))
-                })?;
-            Ok(last_height + 1)
-        })
-    })?;
+    let height = match stmt_select_block
+        .query_row(&[tx.txid().0.to_vec()], |row| row.get(0))
+        .optional()?
+    {
+        Some(height) => height,
+        None => data
+            .query_row("SELECT MAX(height) FROM blocks", NO_PARAMS, |row| {
+                row.get(0)
+            })
+            .optional()?
+            .map(|last_height: u32| last_height + 1)
+            .unwrap_or(SAPLING_ACTIVATION_HEIGHT as u32),
+    };
 
     let outputs = decrypt_transaction::<Network>(height as u32, tx, &extfvks);
 
