@@ -359,11 +359,12 @@ fn parse_note_plaintext_without_memo<P: consensus::Parameters>(
 
     let v = (&plaintext[12..20]).read_u64::<LittleEndian>().ok()?;
 
-    let mut r = [0u8; 32];
-    r.copy_from_slice(&plaintext[20..COMPACT_NOTE_SIZE]);
+    let r: [u8; 32] = plaintext[20..COMPACT_NOTE_SIZE]
+        .try_into()
+        .expect("slice is the correct length");
 
     let rseed = if plaintext[0] == 0x01 {
-        let rcm = Fs::from_repr(FsRepr(r.try_into().expect("slice is the correct length")))?;
+        let rcm = Fs::from_repr(FsRepr(r))?;
         Rseed::BeforeZip212(rcm)
     } else {
         Rseed::AfterZip212(r)
@@ -550,11 +551,12 @@ pub fn try_sapling_output_recovery<P: consensus::Parameters>(
 
     let v = (&plaintext[12..20]).read_u64::<LittleEndian>().ok()?;
 
-    let mut r = [0u8; 32];
-    r.copy_from_slice(&plaintext[20..COMPACT_NOTE_SIZE]);
+    let r: [u8; 32] = plaintext[20..COMPACT_NOTE_SIZE]
+        .try_into()
+        .expect("slice is the correct length");
 
     let rseed = if plaintext[0] == 0x01 {
-        let rcm = Fs::from_repr(FsRepr(r.try_into().expect("slice is the correct length")))?;
+        let rcm = Fs::from_repr(FsRepr(r))?;
         Rseed::BeforeZip212(rcm)
     } else {
         Rseed::AfterZip212(r)
