@@ -286,7 +286,7 @@ pub fn create_to_address<P: AsRef<Path>>(
     }
 
     // Create the transaction
-    let mut builder = Builder::new(height);
+    let mut builder = Builder::<Network, OsRng>::new(height);
     for selected in notes {
         builder.add_sapling_spend(
             extsk.clone(),
@@ -297,7 +297,7 @@ pub fn create_to_address<P: AsRef<Path>>(
     }
     match to {
         RecipientAddress::Shielded(to) => {
-            builder.add_sapling_output::<Network>(ovk, to.clone(), value, memo.clone())
+            builder.add_sapling_output(ovk, to.clone(), value, memo.clone())
         }
         RecipientAddress::Transparent(to) => builder.add_transparent_output(&to, value),
     }?;
