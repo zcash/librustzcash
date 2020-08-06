@@ -346,7 +346,17 @@ impl<E: JubjubEngine> Note<E> {
                 // reduce to uniform value
                 E::Fs::to_uniform(&buffer[..])
             }
-            Rseed::AfterZip212(rseed) => E::Fs::to_uniform(prf_expand(&rseed, &[0x05]).as_bytes()),
+            Rseed::AfterZip212(_) => self.derive_esk().unwrap(),
+        }
+    }
+
+    /// Returns the derived `esk` if this note was created after ZIP 212 activated.
+    pub fn derive_esk(&self) -> Option<E::Fs> {
+        match self.rseed {
+            Rseed::BeforeZip212(_) => None,
+            Rseed::AfterZip212(rseed) => {
+                Some(E::Fs::to_uniform(prf_expand(&rseed, &[0x05]).as_bytes()))
+            }
         }
     }
 }
