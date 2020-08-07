@@ -1,11 +1,13 @@
 //! Functions for querying information in the data database.
 
-use rusqlite::NO_PARAMS;
+use rusqlite::{OptionalExtension, NO_PARAMS};
 
 use zcash_primitives::{
-    consensus::{self},
+    consensus::{self, BlockHeight},
+    merkle_tree::CommitmentTree,
     note_encryption::Memo,
     primitives::PaymentAddress,
+    sapling::Node,
     transaction::components::Amount,
     zip32::ExtendedFullViewingKey,
 };
@@ -234,6 +236,29 @@ pub fn get_extended_full_viewing_keys<P: consensus::Parameters>(
         .map_err(|e| SqliteClientError(Error::Database(e)))?;
 
     rows.collect::<Result<Result<_, _>, _>>()?
+}
+
+pub fn get_commitment_tree(
+    data: &DataConnection,
+    block_height: BlockHeight,
+) -> Result<Option<CommitmentTree<Node>>, SqliteClientError> {
+    data.0
+        .query_row_and_then(
+            "SELECT sapling_tree FROM blocks WHERE height = ?",
+            &[u32::from(block_height)],
+            |row| {
+                let row_data: Vec<u8> = row.get(0)?;
+                CommitmentTree::read(&row_data[..]).map_err(|e| {
+                    rusqlite::Error::FromSqlConversionFailure(
+                        row_data.len(),
+                        rusqlite::types::Type::Blob,
+                        Box::new(e),
+                    )
+                })
+            },
+        )
+        .optional()
+        .map_err(SqliteClientError::from)
 }
 
 #[cfg(test)]

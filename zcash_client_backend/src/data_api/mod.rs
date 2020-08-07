@@ -1,9 +1,9 @@
 use zcash_primitives::{
     block::BlockHash,
     consensus::{self, BlockHeight},
+    merkle_tree::CommitmentTree,
     primitives::PaymentAddress,
-    //merkle_tree::{CommitmentTree, IncrementalWitness},
-    //sapling::Node,
+    sapling::Node,
     transaction::components::Amount,
     zip32::ExtendedFullViewingKey,
 };
@@ -66,8 +66,11 @@ pub trait DBOps {
         params: &P,
     ) -> Result<Vec<ExtendedFullViewingKey>, Self::Error>;
 
-    //    fn get_commitment_tree(block_height: BlockHeight) -> Result<Option<CommitmentTree<Node>>, Self::Error>;
-    //
+    fn get_commitment_tree(
+        &self,
+        block_height: BlockHeight,
+    ) -> Result<Option<CommitmentTree<Node>>, Self::Error>;
+
     //    fn get_witnesses(block_height: BlockHeight) -> Result<Box<dyn Iterator<Item = IncrementalWitness<Node>>>, Self::Error>;
     //
     //    fn get_nullifiers() -> Result<(Vec<u8>, Account), Self::Error>;

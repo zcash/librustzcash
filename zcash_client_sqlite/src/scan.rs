@@ -7,7 +7,10 @@ use rusqlite::{types::ToSql, OptionalExtension, NO_PARAMS};
 
 use zcash_client_backend::{
     address::RecipientAddress,
-    data_api::error::{ChainInvalid, Error},
+    data_api::{
+        error::{ChainInvalid, Error},
+        DBOps,
+    },
     decrypt_transaction,
     encoding::decode_extended_full_viewing_key,
     proto::compact_formats::CompactBlock,
@@ -88,56 +91,18 @@ pub fn scan_cached_blocks<P: consensus::Parameters>(
 
     // Recall where we synced up to previously.
     // If we have never synced, use sapling activation height to select all cached CompactBlocks.
-    let mut last_height: BlockHeight =
-        data.0
-            .query_row("SELECT MAX(height) FROM blocks", NO_PARAMS, |row| {
-                row.get::<_, u32>(0)
-                    .map(BlockHeight::from)
-                    .or(Ok(sapling_activation_height - 1))
-            })?;
-
-    // Fetch the CompactBlocks we need to scan
-    let mut stmt_blocks = cache.0.prepare(
-        "SELECT height, data FROM compactblocks WHERE height > ? ORDER BY height ASC LIMIT ?",
-    )?;
-    let rows = stmt_blocks.query_map(
-        &[u32::from(last_height), limit.unwrap_or(u32::max_value())],
-        |row| {
-            Ok(CompactBlockRow {
-                height: row.get::<_, u32>(0).map(BlockHeight::from)?,
-                data: row.get(1)?,
-            })
-        },
-    )?;
-
-    // Fetch the ExtendedFullViewingKeys we are tracking
-    let mut stmt_fetch_accounts = data
-        .0
-        .prepare("SELECT extfvk FROM accounts ORDER BY account ASC")?;
-    let extfvks = stmt_fetch_accounts.query_map(NO_PARAMS, |row| {
-        row.get(0).map(|extfvk: String| {
-            decode_extended_full_viewing_key(
-                params.hrp_sapling_extended_full_viewing_key(),
-                &extfvk,
-            )
-        })
+    let mut last_height = data.block_height_extrema().map(|opt| {
+        opt.map(|(_, max)| max)
+            .unwrap_or(sapling_activation_height - 1)
     })?;
+
     // Raise SQL errors from the query, IO errors from parsing, and incorrect HRP errors.
-    let extfvks: Vec<_> = extfvks
-        .collect::<Result<Result<Option<_>, _>, _>>()??
-        .ok_or(Error::IncorrectHRPExtFVK)?;
+    let extfvks = data.get_extended_full_viewing_keys(params)?;
 
     // Get the most recent CommitmentTree
-    let mut stmt_fetch_tree = data
-        .0
-        .prepare("SELECT sapling_tree FROM blocks WHERE height = ?")?;
-    let mut tree = stmt_fetch_tree
-        .query_row(&[u32::from(last_height)], |row| {
-            row.get(0).map(|data: Vec<_>| {
-                CommitmentTree::read(&data[..]).unwrap_or_else(|_| CommitmentTree::new())
-            })
-        })
-        .unwrap_or_else(|_| CommitmentTree::new());
+    let mut tree = data
+        .get_commitment_tree(last_height)
+        .map(|t| t.unwrap_or(CommitmentTree::new()))?;
 
     // Get most recent incremental witnesses for the notes we are tracking
     let mut stmt_fetch_witnesses = data
@@ -204,6 +169,23 @@ pub fn scan_cached_blocks<P: consensus::Parameters>(
             SELECT id_tx FROM transactions
             WHERE id_tx = received_notes.spent AND block IS NULL AND expiry_height < ?
         )",
+    )?;
+
+    // Fetch the CompactBlocks we need to scan
+    let mut stmt_blocks = cache.0.prepare(
+        "SELECT height, data FROM compactblocks WHERE height > ? ORDER BY height ASC LIMIT ?",
+    )?;
+    let rows = stmt_blocks.query_map(
+        &[
+            u32::from(last_height).to_sql()?,
+            limit.unwrap_or(u32::max_value()).to_sql()?,
+        ],
+        |row| {
+            Ok(CompactBlockRow {
+                height: BlockHeight::from_u32(row.get(0)?),
+                data: row.get(1)?,
+            })
+        },
     )?;
 
     for row in rows {
