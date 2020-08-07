@@ -30,7 +30,9 @@ use std::path::Path;
 use zcash_primitives::{
     block::BlockHash,
     consensus::{self, BlockHeight},
+    merkle_tree::CommitmentTree,
     primitives::PaymentAddress,
+    sapling::Node,
     transaction::components::Amount,
     zip32::ExtendedFullViewingKey,
 };
@@ -132,6 +134,13 @@ impl DBOps for DataConnection {
         params: &P,
     ) -> Result<Vec<ExtendedFullViewingKey>, Self::Error> {
         query::get_extended_full_viewing_keys(self, params)
+    }
+
+    fn get_commitment_tree(
+        &self,
+        block_height: BlockHeight,
+    ) -> Result<Option<CommitmentTree<Node>>, Self::Error> {
+        query::get_commitment_tree(self, block_height)
     }
 }
 
