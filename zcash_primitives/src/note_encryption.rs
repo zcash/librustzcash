@@ -1025,7 +1025,7 @@ mod tests {
         ];
         let leadbytes = [0x02, 0x03, 0x01];
 
-        for (_i, (&height, &leadbyte)) in heights.iter().zip(leadbytes.iter()).enumerate() {
+        for (&height, &leadbyte) in heights.iter().zip(leadbytes.iter()) {
             let (ovk, ivk, cv, cmu, epk, mut enc_ciphertext, out_ciphertext) =
                 random_enc_ciphertext(height, &mut rng);
 
@@ -1202,7 +1202,7 @@ mod tests {
         ];
         let leadbytes = [0x02, 0x03, 0x01];
 
-        for (_i, (&height, &leadbyte)) in heights.iter().zip(leadbytes.iter()).enumerate() {
+        for (&height, &leadbyte) in heights.iter().zip(leadbytes.iter()) {
             let (ovk, ivk, cv, cmu, epk, mut enc_ciphertext, out_ciphertext) =
                 random_enc_ciphertext(height, &mut rng);
 
@@ -1472,7 +1472,7 @@ mod tests {
         ];
         let leadbytes = [0x02, 0x03, 0x01];
 
-        for (_i, (&height, &leadbyte)) in heights.iter().zip(leadbytes.iter()).enumerate() {
+        for (&height, &leadbyte) in heights.iter().zip(leadbytes.iter()) {
             let (ovk, _, cv, cmu, epk, mut enc_ciphertext, out_ciphertext) =
                 random_enc_ciphertext(height, &mut rng);
 
