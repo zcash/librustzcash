@@ -54,7 +54,7 @@ impl ConstantTimeEq for Scalar {
 impl PartialEq for Scalar {
     #[inline]
     fn eq(&self, other: &Self) -> bool {
-        self.ct_eq(other).unwrap_u8() == 1
+        bool::from(self.ct_eq(other))
     }
 }
 
@@ -834,55 +834,45 @@ fn test_from_bytes() {
     );
 
     // -1 should work
-    assert!(
+    assert!(bool::from(
         Scalar::from_bytes(&[
             0, 0, 0, 0, 255, 255, 255, 255, 254, 91, 254, 255, 2, 164, 189, 83, 5, 216, 161, 9, 8,
             216, 57, 51, 72, 125, 157, 41, 83, 167, 237, 115
         ])
         .is_some()
-        .unwrap_u8()
-            == 1
-    );
+    ));
 
     // modulus is invalid
-    assert!(
+    assert!(bool::from(
         Scalar::from_bytes(&[
             1, 0, 0, 0, 255, 255, 255, 255, 254, 91, 254, 255, 2, 164, 189, 83, 5, 216, 161, 9, 8,
             216, 57, 51, 72, 125, 157, 41, 83, 167, 237, 115
         ])
         .is_none()
-        .unwrap_u8()
-            == 1
-    );
+    ));
 
     // Anything larger than the modulus is invalid
-    assert!(
+    assert!(bool::from(
         Scalar::from_bytes(&[
             2, 0, 0, 0, 255, 255, 255, 255, 254, 91, 254, 255, 2, 164, 189, 83, 5, 216, 161, 9, 8,
             216, 57, 51, 72, 125, 157, 41, 83, 167, 237, 115
         ])
         .is_none()
-        .unwrap_u8()
-            == 1
-    );
-    assert!(
+    ));
+    assert!(bool::from(
         Scalar::from_bytes(&[
             1, 0, 0, 0, 255, 255, 255, 255, 254, 91, 254, 255, 2, 164, 189, 83, 5, 216, 161, 9, 8,
             216, 58, 51, 72, 125, 157, 41, 83, 167, 237, 115
         ])
         .is_none()
-        .unwrap_u8()
-            == 1
-    );
-    assert!(
+    ));
+    assert!(bool::from(
         Scalar::from_bytes(&[
             1, 0, 0, 0, 255, 255, 255, 255, 254, 91, 254, 255, 2, 164, 189, 83, 5, 216, 161, 9, 8,
             216, 57, 51, 72, 125, 157, 41, 83, 167, 237, 116
         ])
         .is_none()
-        .unwrap_u8()
-            == 1
-    );
+    ));
 }
 
 #[test]
@@ -1083,7 +1073,7 @@ fn test_squaring() {
 
 #[test]
 fn test_inversion() {
-    assert_eq!(Scalar::zero().invert().is_none().unwrap_u8(), 1);
+    assert!(bool::from(Scalar::zero().invert().is_none()));
     assert_eq!(Scalar::one().invert().unwrap(), Scalar::one());
     assert_eq!((-&Scalar::one()).invert().unwrap(), -&Scalar::one());
 
@@ -1143,7 +1133,7 @@ fn test_sqrt() {
 
     for _ in 0..100 {
         let square_root = square.sqrt();
-        if square_root.is_none().unwrap_u8() == 1 {
+        if bool::from(square_root.is_none()) {
             none_count += 1;
         } else {
             assert_eq!(square_root.unwrap() * square_root.unwrap(), square);

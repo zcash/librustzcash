@@ -44,7 +44,7 @@ impl Eq for Fp2 {}
 impl PartialEq for Fp2 {
     #[inline]
     fn eq(&self, other: &Self) -> bool {
-        self.ct_eq(other).unwrap_u8() == 1
+        bool::from(self.ct_eq(other))
     }
 }
 
@@ -361,7 +361,7 @@ fn test_equality() {
         let eq = a == b;
         let ct_eq = a.ct_eq(&b);
 
-        assert_eq!(eq, ct_eq.unwrap_u8() == 1);
+        assert_eq!(eq, bool::from(ct_eq));
 
         eq
     }
@@ -788,7 +788,7 @@ fn test_inversion() {
 
     assert_eq!(a.invert().unwrap(), b);
 
-    assert!(Fp2::zero().invert().is_none().unwrap_u8() == 1);
+    assert!(bool::from(Fp2::zero().invert().is_none()));
 }
 
 #[test]
