@@ -46,10 +46,9 @@
 //! 		y = psqrt(rhs)
 //! 		p = ec(x, y) * g1_h(param)
 //! 		if (not p.is_zero()) and (p * r).is_zero():
-//! 			print "g1 generator: %s" % p
+//! 			print("g1 generator: {}".format(p))
 //! 			break
-//! Fqx.<j> = PolynomialRing(Fq, 'j')
-//! Fq2.<i> = GF(q^2, modulus=j^2 + 1)
+//! Fq2.<i> = GF(q^2, modulus=[1, 0, 1])
 //! ec2 = EllipticCurve(Fq2, [0, (4 * (1 + i))])
 //! assert(ec2.order() == (r * g2_h(param)))
 //! for x in range(0,100):
@@ -57,7 +56,7 @@
 //! 	if rhs.is_square():
 //! 		y = psqrt(rhs)
 //! 		p = ec2(Fq2(x), y) * g2_h(param)
-//! 		if (not p.is_zero()) and (p * r).is_zero():
-//! 			print "g2 generator: %s" % p
+//! 		if not p.is_zero() and (p * r).is_zero():
+//! 			print("g2 generator: {}".format(p))
 //! 			break
 //! ```

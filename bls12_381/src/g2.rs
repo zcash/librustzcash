@@ -1,5 +1,7 @@
 //! This module provides an implementation of the $\mathbb{G}_2$ group of BLS12-381.
 
+use core::borrow::Borrow;
+use core::iter::Sum;
 use core::ops::{Add, AddAssign, Mul, MulAssign, Neg, Sub, SubAssign};
 
 use subtle::{Choice, ConditionallySelectable, ConstantTimeEq, CtOption};
@@ -138,6 +140,18 @@ impl<'a, 'b> Sub<&'b G2Affine> for &'a G2Projective {
     #[inline]
     fn sub(self, rhs: &'b G2Affine) -> G2Projective {
         self + (-rhs)
+    }
+}
+
+impl<T> Sum<T> for G2Projective
+where
+    T: Borrow<G2Projective>,
+{
+    fn sum<I>(iter: I) -> Self
+    where
+        I: Iterator<Item = T>,
+    {
+        iter.fold(Self::identity(), |acc, item| acc + item.borrow())
     }
 }
 
@@ -806,7 +820,7 @@ impl G2Projective {
         G2Projective::conditional_select(&res, &tmp, (!f1) & (!f2) & (!f3))
     }
 
-    fn multiply(&self, by: &[u8; 32]) -> G2Projective {
+    fn multiply(&self, by: &[u8]) -> G2Projective {
         let mut acc = G2Projective::identity();
 
         // This is a simple double-and-add implementation of point
@@ -826,6 +840,132 @@ impl G2Projective {
         }
 
         acc
+    }
+
+    #[cfg(feature = "endo")]
+    fn psi(&self) -> G2Projective {
+        // 1 / ((u+1) ^ ((q-1)/3))
+        let psi_coeff_x = Fp2 {
+            c0: Fp::zero(),
+            c1: Fp::from_raw_unchecked([
+                0x890dc9e4867545c3,
+                0x2af322533285a5d5,
+                0x50880866309b7e2c,
+                0xa20d1b8c7e881024,
+                0x14e4f04fe2db9068,
+                0x14e56d3f1564853a,
+            ]),
+        };
+        // 1 / ((u+1) ^ (p-1)/2)
+        let psi_coeff_y = Fp2 {
+            c0: Fp::from_raw_unchecked([
+                0x3e2f585da55c9ad1,
+                0x4294213d86c18183,
+                0x382844c88b623732,
+                0x92ad2afd19103e18,
+                0x1d794e4fac7cf0b9,
+                0x0bd592fc7d825ec8,
+            ]),
+            c1: Fp::from_raw_unchecked([
+                0x7bcfa7a25aa30fda,
+                0xdc17dec12a927e7c,
+                0x2f088dd86b4ebef1,
+                0xd1ca2087da74d4a7,
+                0x2da2596696cebc1d,
+                0x0e2b7eedbbfd87d2,
+            ]),
+        };
+
+        G2Projective {
+            // x = frobenius(x)/((u+1)^((p-1)/3))
+            x: self.x.frobenius_map() * psi_coeff_x,
+            // y = frobenius(y)/(u+1)^((p-1)/2)
+            y: self.y.frobenius_map() * psi_coeff_y,
+            // z = frobenius(z)
+            z: self.z.frobenius_map(),
+        }
+    }
+
+    #[cfg(feature = "endo")]
+    fn psi2(&self) -> G2Projective {
+        // 1 / 2 ^ ((q-1)/3)
+        let psi2_coeff_x = Fp2 {
+            c0: Fp::from_raw_unchecked([
+                0xcd03c9e48671f071,
+                0x5dab22461fcda5d2,
+                0x587042afd3851b95,
+                0x8eb60ebe01bacb9e,
+                0x03f97d6e83d050d2,
+                0x18f0206554638741,
+            ]),
+            c1: Fp::zero(),
+        };
+
+        G2Projective {
+            // x = frobenius^2(x)/2^((p-1)/3)
+            x: self.x.frobenius_map().frobenius_map() * psi2_coeff_x,
+            // y = -frobenius^2(y)
+            y: self.y.frobenius_map().frobenius_map().neg(),
+            // z = z
+            z: self.z,
+        }
+    }
+
+    /// Multiply `self` by `crate::BLS_X`, using double and add.
+    #[cfg(feature = "endo")]
+    fn mul_by_x(&self) -> G2Projective {
+        let mut xself = G2Projective::identity();
+        // NOTE: in BLS12-381 we can just skip the first bit.
+        let mut x = crate::BLS_X >> 1;
+        let mut acc = *self;
+        while x != 0 {
+            acc = acc.double();
+            if x % 2 == 1 {
+                xself += acc;
+            }
+            x >>= 1;
+        }
+        // finally, flip the sign
+        if crate::BLS_X_IS_NEGATIVE {
+            xself = -xself;
+        }
+        xself
+    }
+
+    /// Clears the cofactor, using [Budroni-Pintore](https://ia.cr/2017/419).
+    /// This is equivalent to multiplying by $h\_\textrm{eff} = 3(z^2 - 1) \cdot
+    /// h_2$, where $h_2$ is the cofactor of $\mathbb{G}\_2$ and $z$ is the
+    /// parameter of BLS12-381.
+    ///
+    /// The endomorphism is only actually used if the crate feature `endo` is
+    /// enabled, and it is disabled by default to mitigate potential patent
+    /// issues.
+    pub fn clear_cofactor(&self) -> G2Projective {
+        #[cfg(feature = "endo")]
+        fn clear_cofactor(this: &G2Projective) -> G2Projective {
+            let t1 = this.mul_by_x(); // [x] P
+            let t2 = this.psi(); // psi(P)
+
+            this.double().psi2() // psi^2(2P)
+                + (t1 + t2).mul_by_x() // psi^2(2P) + [x^2] P + [x] psi(P)
+                - t1 // psi^2(2P) + [x^2 - x] P + [x] psi(P)
+                - t2 // psi^2(2P) + [x^2 - x] P + [x - 1] psi(P)
+                - this // psi^2(2P) + [x^2 - x - 1] P + [x - 1] psi(P)
+        }
+
+        #[cfg(not(feature = "endo"))]
+        fn clear_cofactor(this: &G2Projective) -> G2Projective {
+            this.multiply(&[
+                0x51, 0x55, 0xa9, 0xaa, 0x5, 0x0, 0x2, 0xe8, 0xb4, 0xf6, 0xbb, 0xde, 0xa, 0x4c,
+                0x89, 0x59, 0xa3, 0xf6, 0x89, 0x66, 0xc0, 0xcb, 0x54, 0xe9, 0x1a, 0x7c, 0x47, 0xd7,
+                0x69, 0xec, 0xc0, 0x2e, 0xb0, 0x12, 0x12, 0x5d, 0x1, 0xbf, 0x82, 0x6d, 0x95, 0xdb,
+                0x31, 0x87, 0x17, 0x2f, 0x9c, 0x32, 0xe1, 0xff, 0x8, 0x15, 0x3, 0xff, 0x86, 0x99,
+                0x68, 0xd7, 0x5a, 0x14, 0xe9, 0xa8, 0xe2, 0x88, 0x28, 0x35, 0x1b, 0xa9, 0xe, 0x6a,
+                0x4c, 0x58, 0xb3, 0x75, 0xee, 0xf2, 0x8, 0x9f, 0xc6, 0xb,
+            ])
+        }
+
+        clear_cofactor(self)
     }
 
     /// Converts a batch of `G2Projective` elements into `G2Affine` elements. This
@@ -1553,6 +1693,189 @@ fn test_is_torsion_free() {
 
     assert!(bool::from(G2Affine::identity().is_torsion_free()));
     assert!(bool::from(G2Affine::generator().is_torsion_free()));
+}
+
+#[cfg(feature = "endo")]
+#[test]
+fn test_mul_by_x() {
+    // multiplying by `x` a point in G2 is the same as multiplying by
+    // the equivalent scalar.
+    let generator = G2Projective::generator();
+    let x = if crate::BLS_X_IS_NEGATIVE {
+        -Scalar::from(crate::BLS_X)
+    } else {
+        Scalar::from(crate::BLS_X)
+    };
+    assert_eq!(generator.mul_by_x(), generator * x);
+
+    let point = G2Projective::generator() * Scalar::from(42);
+    assert_eq!(point.mul_by_x(), point * x);
+}
+
+#[cfg(feature = "endo")]
+#[test]
+fn test_psi() {
+    let generator = G2Projective::generator();
+
+    // `point` is a random point in the curve
+    let point = G2Projective {
+        x: Fp2 {
+            c0: Fp::from_raw_unchecked([
+                0xee4c8cb7c047eaf2,
+                0x44ca22eee036b604,
+                0x33b3affb2aefe101,
+                0x15d3e45bbafaeb02,
+                0x7bfc2154cd7419a4,
+                0x0a2d0c2b756e5edc,
+            ]),
+            c1: Fp::from_raw_unchecked([
+                0xfc224361029a8777,
+                0x4cbf2baab8740924,
+                0xc5008c6ec6592c89,
+                0xecc2c57b472a9c2d,
+                0x8613eafd9d81ffb1,
+                0x10fe54daa2d3d495,
+            ]),
+        },
+        y: Fp2 {
+            c0: Fp::from_raw_unchecked([
+                0x7de7edc43953b75c,
+                0x58be1d2de35e87dc,
+                0x5731d30b0e337b40,
+                0xbe93b60cfeaae4c9,
+                0x8b22c203764bedca,
+                0x01616c8d1033b771,
+            ]),
+            c1: Fp::from_raw_unchecked([
+                0xea126fe476b5733b,
+                0x85cee68b5dae1652,
+                0x98247779f7272b04,
+                0xa649c8b468c6e808,
+                0xb5b9a62dff0c4e45,
+                0x1555b67fc7bbe73d,
+            ]),
+        },
+        z: Fp2 {
+            c0: Fp::from_raw_unchecked([
+                0x0ef2ddffab187c0a,
+                0x2424522b7d5ecbfc,
+                0xc6f341a3398054f4,
+                0x5523ddf409502df0,
+                0xd55c0b5a88e0dd97,
+                0x066428d704923e52,
+            ]),
+            c1: Fp::from_raw_unchecked([
+                0x538bbe0c95b4878d,
+                0xad04a50379522881,
+                0x6d5c05bf5c12fb64,
+                0x4ce4a069a2d34787,
+                0x59ea6c8d0dffaeaf,
+                0x0d42a083a75bd6f3,
+            ]),
+        },
+    };
+    assert!(bool::from(point.is_on_curve()));
+
+    // psi2(P) = psi(psi(P))
+    assert_eq!(generator.psi2(), generator.psi().psi());
+    assert_eq!(point.psi2(), point.psi().psi());
+    // psi(P) is a morphism
+    assert_eq!(generator.double().psi(), generator.psi().double());
+    assert_eq!(point.psi() + generator.psi(), (point + generator).psi());
+    // psi(P) behaves in the same way on the same projective point
+    let mut normalized_point = [G2Affine::identity()];
+    G2Projective::batch_normalize(&[point], &mut normalized_point);
+    let normalized_point = G2Projective::from(normalized_point[0]);
+    assert_eq!(point.psi(), normalized_point.psi());
+    assert_eq!(point.psi2(), normalized_point.psi2());
+}
+
+#[test]
+fn test_clear_cofactor() {
+    // `point` is a random point in the curve
+    let point = G2Projective {
+        x: Fp2 {
+            c0: Fp::from_raw_unchecked([
+                0xee4c8cb7c047eaf2,
+                0x44ca22eee036b604,
+                0x33b3affb2aefe101,
+                0x15d3e45bbafaeb02,
+                0x7bfc2154cd7419a4,
+                0x0a2d0c2b756e5edc,
+            ]),
+            c1: Fp::from_raw_unchecked([
+                0xfc224361029a8777,
+                0x4cbf2baab8740924,
+                0xc5008c6ec6592c89,
+                0xecc2c57b472a9c2d,
+                0x8613eafd9d81ffb1,
+                0x10fe54daa2d3d495,
+            ]),
+        },
+        y: Fp2 {
+            c0: Fp::from_raw_unchecked([
+                0x7de7edc43953b75c,
+                0x58be1d2de35e87dc,
+                0x5731d30b0e337b40,
+                0xbe93b60cfeaae4c9,
+                0x8b22c203764bedca,
+                0x01616c8d1033b771,
+            ]),
+            c1: Fp::from_raw_unchecked([
+                0xea126fe476b5733b,
+                0x85cee68b5dae1652,
+                0x98247779f7272b04,
+                0xa649c8b468c6e808,
+                0xb5b9a62dff0c4e45,
+                0x1555b67fc7bbe73d,
+            ]),
+        },
+        z: Fp2 {
+            c0: Fp::from_raw_unchecked([
+                0x0ef2ddffab187c0a,
+                0x2424522b7d5ecbfc,
+                0xc6f341a3398054f4,
+                0x5523ddf409502df0,
+                0xd55c0b5a88e0dd97,
+                0x066428d704923e52,
+            ]),
+            c1: Fp::from_raw_unchecked([
+                0x538bbe0c95b4878d,
+                0xad04a50379522881,
+                0x6d5c05bf5c12fb64,
+                0x4ce4a069a2d34787,
+                0x59ea6c8d0dffaeaf,
+                0x0d42a083a75bd6f3,
+            ]),
+        },
+    };
+
+    assert!(bool::from(point.is_on_curve()));
+    assert!(!bool::from(G2Affine::from(point).is_torsion_free()));
+    let cleared_point = point.clear_cofactor();
+
+    assert!(bool::from(cleared_point.is_on_curve()));
+    assert!(bool::from(G2Affine::from(cleared_point).is_torsion_free()));
+
+    // the generator (and the identity) are always on the curve,
+    // even after clearing the cofactor
+    let generator = G2Projective::generator();
+    assert!(bool::from(generator.clear_cofactor().is_on_curve()));
+    let id = G2Projective::identity();
+    assert!(bool::from(id.clear_cofactor().is_on_curve()));
+
+    // test the effect on q-torsion points multiplying by h_eff modulo |Scalar|
+    // h_eff % q = 0x2b116900400069009a40200040001ffff
+    let h_eff_modq: [u8; 32] = [
+        0xff, 0xff, 0x01, 0x00, 0x04, 0x00, 0x02, 0xa4, 0x09, 0x90, 0x06, 0x00, 0x04, 0x90, 0x16,
+        0xb1, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00,
+    ];
+    assert_eq!(generator.clear_cofactor(), generator.multiply(&h_eff_modq));
+    assert_eq!(
+        cleared_point.clear_cofactor(),
+        cleared_point.multiply(&h_eff_modq)
+    );
 }
 
 #[test]
