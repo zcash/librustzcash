@@ -10,9 +10,13 @@ use crate::pedersen_hash::{pedersen_hash, Personalization};
 
 use byteorder::{LittleEndian, WriteBytesExt};
 
-use crate::jubjub::{edwards, FixedGenerators, JubjubEngine, JubjubParams, PrimeOrder};
+use crate::jubjub::{edwards, FixedGenerators, JubjubEngine, JubjubParams, PrimeOrder, ToUniform};
+
+use crate::keys::prf_expand;
 
 use blake2s_simd::Params as Blake2sParams;
+
+use rand_core::{CryptoRng, RngCore};
 
 #[derive(Clone)]
 pub struct ValueCommitment<E: JubjubEngine> {
@@ -207,16 +211,27 @@ impl<E: JubjubEngine> PaymentAddress<E> {
     pub fn create_note(
         &self,
         value: u64,
-        randomness: E::Fs,
+        randomness: Rseed<E::Fs>,
         params: &E::Params,
     ) -> Option<Note<E>> {
         self.g_d(params).map(|g_d| Note {
             value,
-            r: randomness,
+            rseed: randomness,
             g_d,
             pk_d: self.pk_d.clone(),
         })
     }
+}
+
+/// Enum for note randomness before and after [ZIP 212](https://zips.z.cash/zip-0212).
+///
+/// Before ZIP 212, the note commitment trapdoor `rcm` must be a scalar value.
+/// After ZIP 212, the note randomness `rseed` is a 32-byte sequence, used to derive
+/// both the note commitment trapdoor `rcm` and the ephemeral private key `esk`.
+#[derive(Copy, Clone, Debug)]
+pub enum Rseed<Fs> {
+    BeforeZip212(Fs),
+    AfterZip212([u8; 32]),
 }
 
 #[derive(Clone, Debug)]
@@ -227,8 +242,8 @@ pub struct Note<E: JubjubEngine> {
     pub g_d: edwards::Point<E, PrimeOrder>,
     /// The public key of the address, g_d^ivk
     pub pk_d: edwards::Point<E, PrimeOrder>,
-    /// The commitment randomness
-    pub r: E::Fs,
+    /// rseed
+    pub rseed: Rseed<E::Fs>,
 }
 
 impl<E: JubjubEngine> PartialEq for Note<E> {
@@ -236,7 +251,7 @@ impl<E: JubjubEngine> PartialEq for Note<E> {
         self.value == other.value
             && self.g_d == other.g_d
             && self.pk_d == other.pk_d
-            && self.r == other.r
+            && self.rcm() == other.rcm()
     }
 }
 
@@ -280,7 +295,7 @@ impl<E: JubjubEngine> Note<E> {
         // Compute final commitment
         params
             .generator(FixedGenerators::NoteCommitmentRandomness)
-            .mul(self.r, params)
+            .mul(self.rcm(), params)
             .add(&hash_of_contents, params)
     }
 
@@ -312,5 +327,36 @@ impl<E: JubjubEngine> Note<E> {
         // The commitment is in the prime order subgroup, so mapping the
         // commitment to the x-coordinate is an injective encoding.
         self.cm_full_point(params).to_xy().0
+    }
+
+    pub fn rcm(&self) -> E::Fs {
+        match self.rseed {
+            Rseed::BeforeZip212(rcm) => rcm,
+            Rseed::AfterZip212(rseed) => E::Fs::to_uniform(prf_expand(&rseed, &[0x04]).as_bytes()),
+        }
+    }
+
+    pub fn generate_or_derive_esk<R: RngCore + CryptoRng>(&self, rng: &mut R) -> E::Fs {
+        match self.derive_esk() {
+            None => {
+                // create random 64 byte buffer
+                let mut buffer = [0u8; 64];
+                &rng.fill_bytes(&mut buffer);
+
+                // reduce to uniform value
+                E::Fs::to_uniform(&buffer[..])
+            }
+            Some(esk) => esk,
+        }
+    }
+
+    /// Returns the derived `esk` if this note was created after ZIP 212 activated.
+    pub fn derive_esk(&self) -> Option<E::Fs> {
+        match self.rseed {
+            Rseed::BeforeZip212(_) => None,
+            Rseed::AfterZip212(rseed) => {
+                Some(E::Fs::to_uniform(prf_expand(&rseed, &[0x05]).as_bytes()))
+            }
+        }
     }
 }

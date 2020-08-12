@@ -4,7 +4,7 @@ use bellman::groth16::{Parameters, PreparedVerifyingKey};
 use pairing::bls12_381::{Bls12, Fr};
 use zcash_primitives::{
     jubjub::{edwards, fs::Fs, Unknown},
-    primitives::{Diversifier, PaymentAddress, ProofGenerationKey},
+    primitives::{Diversifier, PaymentAddress, ProofGenerationKey, Rseed},
 };
 use zcash_primitives::{
     merkle_tree::MerklePath,
@@ -132,7 +132,7 @@ impl TxProver for LocalTxProver {
         ctx: &mut Self::SaplingProvingContext,
         proof_generation_key: ProofGenerationKey<Bls12>,
         diversifier: Diversifier,
-        rcm: Fs,
+        rseed: Rseed<Fs>,
         ar: Fs,
         value: u64,
         anchor: Fr,
@@ -148,7 +148,7 @@ impl TxProver for LocalTxProver {
         let (proof, cv, rk) = ctx.spend_proof(
             proof_generation_key,
             diversifier,
-            rcm,
+            rseed,
             ar,
             value,
             anchor,

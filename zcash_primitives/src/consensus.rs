@@ -111,6 +111,8 @@ const UPGRADES_IN_ORDER: &[NetworkUpgrade] = &[
     NetworkUpgrade::Canopy,
 ];
 
+pub const ZIP212_GRACE_PERIOD: u32 = 32256;
+
 /// A globally-unique identifier for a set of consensus rules within the Zcash chain.
 ///
 /// Each branch ID in this enum corresponds to one of the epochs between a pair of Zcash

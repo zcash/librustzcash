@@ -544,7 +544,7 @@ fn test_input_circuit_with_bls12_381() {
     use zcash_primitives::{
         jubjub::{edwards, fs, JubjubBls12},
         pedersen_hash,
-        primitives::{Diversifier, Note, ProofGenerationKey},
+        primitives::{Diversifier, Note, ProofGenerationKey, Rseed},
     };
 
     let params = &JubjubBls12::new();
@@ -598,7 +598,7 @@ fn test_input_circuit_with_bls12_381() {
                 value: value_commitment.value,
                 g_d: g_d.clone(),
                 pk_d: payment_address.pk_d().clone(),
-                r: commitment_randomness.clone(),
+                rseed: Rseed::BeforeZip212(commitment_randomness.clone()),
             };
 
             let mut position = 0u64;
@@ -694,7 +694,7 @@ fn test_input_circuit_with_bls12_381_external_test_vectors() {
     use zcash_primitives::{
         jubjub::{edwards, fs, JubjubBls12},
         pedersen_hash,
-        primitives::{Diversifier, Note, ProofGenerationKey},
+        primitives::{Diversifier, Note, ProofGenerationKey, Rseed},
     };
 
     let params = &JubjubBls12::new();
@@ -782,7 +782,7 @@ fn test_input_circuit_with_bls12_381_external_test_vectors() {
                 value: value_commitment.value,
                 g_d: g_d.clone(),
                 pk_d: payment_address.pk_d().clone(),
-                r: commitment_randomness.clone(),
+                rseed: Rseed::BeforeZip212(commitment_randomness.clone()),
             };
 
             let mut position = 0u64;
@@ -877,7 +877,7 @@ fn test_output_circuit_with_bls12_381() {
     use rand_xorshift::XorShiftRng;
     use zcash_primitives::{
         jubjub::{edwards, fs, JubjubBls12},
-        primitives::{Diversifier, ProofGenerationKey},
+        primitives::{Diversifier, ProofGenerationKey, Rseed},
     };
 
     let params = &JubjubBls12::new();
@@ -941,7 +941,11 @@ fn test_output_circuit_with_bls12_381() {
             );
 
             let expected_cm = payment_address
-                .create_note(value_commitment.value, commitment_randomness, params)
+                .create_note(
+                    value_commitment.value,
+                    Rseed::BeforeZip212(commitment_randomness),
+                    params,
+                )
                 .expect("should be valid")
                 .cm(params);
 

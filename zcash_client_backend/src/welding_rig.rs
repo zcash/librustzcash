@@ -4,6 +4,7 @@ use ff::PrimeField;
 use std::collections::HashSet;
 use subtle::{ConditionallySelectable, ConstantTimeEq, CtOption};
 use zcash_primitives::{
+    consensus,
     jubjub::fs::Fs,
     merkle_tree::{CommitmentTree, IncrementalWitness},
     note_encryption::try_sapling_compact_note_decryption,
@@ -22,7 +23,8 @@ use crate::wallet::{WalletShieldedOutput, WalletShieldedSpend, WalletTx};
 ///
 /// The given [`CommitmentTree`] and existing [`IncrementalWitness`]es are incremented
 /// with this output's commitment.
-fn scan_output(
+fn scan_output<P: consensus::Parameters>(
+    height: u32,
     (index, output): (usize, CompactOutput),
     ivks: &[Fs],
     spent_from_accounts: &HashSet<usize>,
@@ -49,10 +51,11 @@ fn scan_output(
     tree.append(node).unwrap();
 
     for (account, ivk) in ivks.iter().enumerate() {
-        let (note, to) = match try_sapling_compact_note_decryption(ivk, &epk, &cmu, &ct) {
-            Some(ret) => ret,
-            None => continue,
-        };
+        let (note, to) =
+            match try_sapling_compact_note_decryption::<P>(height, ivk, &epk, &cmu, &ct) {
+                Some(ret) => ret,
+                None => continue,
+            };
 
         // A note is marked as "change" if the account that received it
         // also spent notes in the same transaction. This will catch,
@@ -83,7 +86,7 @@ fn scan_output(
 ///
 /// The given [`CommitmentTree`] and existing [`IncrementalWitness`]es are
 /// incremented appropriately.
-pub fn scan_block(
+pub fn scan_block<P: consensus::Parameters>(
     block: CompactBlock,
     extfvks: &[ExtendedFullViewingKey],
     nullifiers: &[(&[u8], usize)],
@@ -150,7 +153,8 @@ pub fn scan_block(
                     .map(|output| &mut output.witness)
                     .collect();
 
-                if let Some(output) = scan_output(
+                if let Some(output) = scan_output::<P>(
+                    block.height as u32,
                     to_scan,
                     &ivks,
                     &spent_from_accounts,
@@ -187,11 +191,13 @@ mod tests {
     use pairing::bls12_381::{Bls12, Fr};
     use rand_core::{OsRng, RngCore};
     use zcash_primitives::{
+        consensus::TestNetwork,
         jubjub::{fs::Fs, FixedGenerators, JubjubParams, ToUniform},
         merkle_tree::CommitmentTree,
         note_encryption::{Memo, SaplingNoteEncryption},
         primitives::Note,
         transaction::components::Amount,
+        util::generate_random_rseed,
         zip32::{ExtendedFullViewingKey, ExtendedSpendingKey},
         JUBJUB,
     };
@@ -249,11 +255,12 @@ mod tests {
 
         // Create a fake Note for the account
         let mut rng = OsRng;
+        let rseed = generate_random_rseed::<TestNetwork, OsRng>(height as u32, &mut rng);
         let note = Note {
             g_d: to.diversifier().g_d::<Bls12>(&JUBJUB).unwrap(),
             pk_d: to.pk_d().clone(),
             value: value.into(),
-            r: Fs::random(&mut rng),
+            rseed,
         };
         let encryptor = SaplingNoteEncryption::new(
             extfvk.fvk.ovk,
@@ -318,7 +325,7 @@ mod tests {
         assert_eq!(cb.vtx.len(), 2);
 
         let mut tree = CommitmentTree::new();
-        let txs = scan_block(cb, &[extfvk], &[], &mut tree, &mut []);
+        let txs = scan_block::<TestNetwork>(cb, &[extfvk], &[], &mut tree, &mut []);
         assert_eq!(txs.len(), 1);
 
         let tx = &txs[0];
@@ -350,7 +357,7 @@ mod tests {
         assert_eq!(cb.vtx.len(), 3);
 
         let mut tree = CommitmentTree::new();
-        let txs = scan_block(cb, &[extfvk], &[], &mut tree, &mut []);
+        let txs = scan_block::<TestNetwork>(cb, &[extfvk], &[], &mut tree, &mut []);
         assert_eq!(txs.len(), 1);
 
         let tx = &txs[0];
@@ -378,7 +385,7 @@ mod tests {
         assert_eq!(cb.vtx.len(), 2);
 
         let mut tree = CommitmentTree::new();
-        let txs = scan_block(cb, &[], &[(&nf, account)], &mut tree, &mut []);
+        let txs = scan_block::<TestNetwork>(cb, &[], &[(&nf, account)], &mut tree, &mut []);
         assert_eq!(txs.len(), 1);
 
         let tx = &txs[0];

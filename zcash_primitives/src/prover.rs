@@ -2,7 +2,7 @@
 
 use crate::{
     jubjub::{edwards, fs::Fs, Unknown},
-    primitives::{Diversifier, PaymentAddress, ProofGenerationKey},
+    primitives::{Diversifier, PaymentAddress, ProofGenerationKey, Rseed},
 };
 use pairing::bls12_381::{Bls12, Fr};
 
@@ -31,7 +31,7 @@ pub trait TxProver {
         ctx: &mut Self::SaplingProvingContext,
         proof_generation_key: ProofGenerationKey<Bls12>,
         diversifier: Diversifier,
-        rcm: Fs,
+        rseed: Rseed<Fs>,
         ar: Fs,
         value: u64,
         anchor: Fr,
@@ -78,7 +78,7 @@ pub(crate) mod mock {
 
     use crate::{
         jubjub::{edwards, fs::Fs, FixedGenerators, Unknown},
-        primitives::{Diversifier, PaymentAddress, ProofGenerationKey, ValueCommitment},
+        primitives::{Diversifier, PaymentAddress, ProofGenerationKey, Rseed, ValueCommitment},
     };
 
     use crate::{
@@ -104,7 +104,7 @@ pub(crate) mod mock {
             _ctx: &mut Self::SaplingProvingContext,
             proof_generation_key: ProofGenerationKey<Bls12>,
             _diversifier: Diversifier,
-            _rcm: Fs,
+            _rcm: Rseed<Fs>,
             ar: Fs,
             value: u64,
             _anchor: Fr,

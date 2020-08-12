@@ -2,7 +2,7 @@
 
 use ff::PrimeField;
 use protobuf::parse_from_bytes;
-use rusqlite::{types::ToSql, Connection, NO_PARAMS};
+use rusqlite::{types::ToSql, Connection, OptionalExtension, NO_PARAMS};
 use std::path::Path;
 use zcash_client_backend::{
     decrypt_transaction, encoding::decode_extended_full_viewing_key,
@@ -18,7 +18,7 @@ use zcash_primitives::{
 use crate::{
     address::RecipientAddress,
     error::{Error, ErrorKind},
-    HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY, SAPLING_ACTIVATION_HEIGHT,
+    Network, HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY, SAPLING_ACTIVATION_HEIGHT,
 };
 
 struct CompactBlockRow {
@@ -187,7 +187,7 @@ pub fn scan_cached_blocks<P: AsRef<Path>, Q: AsRef<Path>>(
         let txs = {
             let nf_refs: Vec<_> = nullifiers.iter().map(|(nf, acc)| (&nf[..], *acc)).collect();
             let mut witness_refs: Vec<_> = witnesses.iter_mut().map(|w| &mut w.witness).collect();
-            scan_block(
+            scan_block::<Network>(
                 block,
                 &extfvks[..],
                 &nf_refs,
@@ -269,7 +269,7 @@ pub fn scan_cached_blocks<P: AsRef<Path>, Q: AsRef<Path>>(
                 .collect();
 
             for output in tx.shielded_outputs {
-                let rcm = output.note.r.to_repr();
+                let rcm = output.note.rcm().to_repr();
                 let nf = output.note.nf(
                     &extfvks[output.account].fvk.vk,
                     output.witness.position() as u64,
@@ -372,7 +372,23 @@ pub fn decrypt_and_store_transaction<P: AsRef<Path>>(
         .collect::<Result<Result<Option<_>, _>, _>>()??
         .ok_or(Error(ErrorKind::IncorrectHRPExtFVK))?;
 
-    let outputs = decrypt_transaction(tx, &extfvks);
+    // Height is block height for mined transactions, and the "mempool height" (chain height + 1) for mempool transactions.
+    let mut stmt_select_block = data.prepare("SELECT block FROM transactions WHERE txid = ?")?;
+    let height = match stmt_select_block
+        .query_row(&[tx.txid().0.to_vec()], |row| row.get(0))
+        .optional()?
+    {
+        Some(height) => height,
+        None => data
+            .query_row("SELECT MAX(height) FROM blocks", NO_PARAMS, |row| {
+                row.get(0)
+            })
+            .optional()?
+            .map(|last_height: u32| last_height + 1)
+            .unwrap_or(SAPLING_ACTIVATION_HEIGHT as u32),
+    };
+
+    let outputs = decrypt_transaction::<Network>(height as u32, tx, &extfvks);
 
     if outputs.is_empty() {
         // Nothing to see here
@@ -457,7 +473,7 @@ pub fn decrypt_and_store_transaction<P: AsRef<Path>>(
                 ])?;
             }
         } else {
-            let rcm = output.note.r.to_repr();
+            let rcm = output.note.rcm().to_repr();
 
             // Try updating an existing received note.
             if stmt_update_received_note.execute(&[

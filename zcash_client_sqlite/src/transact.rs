@@ -9,11 +9,12 @@ use std::path::Path;
 use zcash_client_backend::encoding::encode_extended_full_viewing_key;
 use zcash_primitives::{
     consensus,
+    consensus::{NetworkUpgrade, Parameters},
     jubjub::fs::{Fs, FsRepr},
     keys::OutgoingViewingKey,
     merkle_tree::{IncrementalWitness, MerklePath},
     note_encryption::Memo,
-    primitives::{Diversifier, Note},
+    primitives::{Diversifier, Note, Rseed},
     prover::TxProver,
     sapling::Node,
     transaction::{
@@ -27,7 +28,7 @@ use zcash_primitives::{
 use crate::{
     address::RecipientAddress,
     error::{Error, ErrorKind},
-    get_target_and_anchor_heights, HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY,
+    get_target_and_anchor_heights, Network, HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY,
 };
 
 /// Describes a policy for which outgoing viewing key should be able to decrypt
@@ -234,14 +235,22 @@ pub fn create_to_address<P: AsRef<Path>>(
 
             let note_value: i64 = row.get(1)?;
 
-            let rcm = {
+            let rseed = {
                 let d: Vec<_> = row.get(2)?;
-                let tmp = FsRepr(
-                    d[..]
-                        .try_into()
-                        .map_err(|_| Error(ErrorKind::InvalidNote))?,
-                );
-                Fs::from_repr(tmp).ok_or(Error(ErrorKind::InvalidNote))?
+
+                if Network::is_nu_active(NetworkUpgrade::Canopy, height) {
+                    let mut r = [0u8; 32];
+                    r.copy_from_slice(&d[..]);
+                    Rseed::AfterZip212(r)
+                } else {
+                    let tmp = FsRepr(
+                        d[..]
+                            .try_into()
+                            .map_err(|_| Error(ErrorKind::InvalidNote))?,
+                    );
+                    let r = Fs::from_repr(tmp).ok_or(Error(ErrorKind::InvalidNote))?;
+                    Rseed::BeforeZip212(r)
+                }
             };
 
             let from = extfvk
@@ -249,7 +258,7 @@ pub fn create_to_address<P: AsRef<Path>>(
                 .vk
                 .to_payment_address(diversifier, &JUBJUB)
                 .unwrap();
-            let note = from.create_note(note_value as u64, rcm, &JUBJUB).unwrap();
+            let note = from.create_note(note_value as u64, rseed, &JUBJUB).unwrap();
 
             let merkle_path = {
                 let d: Vec<_> = row.get(3)?;
@@ -279,7 +288,7 @@ pub fn create_to_address<P: AsRef<Path>>(
     }
 
     // Create the transaction
-    let mut builder = Builder::new(height);
+    let mut builder = Builder::<Network, OsRng>::new(height);
     for selected in notes {
         builder.add_sapling_spend(
             extsk.clone(),
@@ -391,7 +400,7 @@ mod tests {
         query::{get_balance, get_verified_balance},
         scan::scan_cached_blocks,
         tests::{fake_compact_block, insert_into_cache},
-        SAPLING_ACTIVATION_HEIGHT,
+        Network, SAPLING_ACTIVATION_HEIGHT,
     };
 
     fn test_prover() -> impl TxProver {
@@ -813,7 +822,8 @@ mod tests {
                 .unwrap();
             let output = &tx.shielded_outputs[output_index as usize];
 
-            try_sapling_output_recovery(
+            try_sapling_output_recovery::<Network>(
+                SAPLING_ACTIVATION_HEIGHT as u32,
                 &extfvk.fvk.ovk,
                 &output.cv,
                 &output.cmu,
