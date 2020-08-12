@@ -62,7 +62,9 @@ pub trait Group:
     /// Scalars modulo the order of this group's scalar field.
     type Scalar: PrimeField;
 
-    /// Returns an element chosen uniformly at random using a user-provided RNG.
+    /// Returns an element chosen uniformly at random from this group.
+    ///
+    /// This function is non-deterministic, and samples from the user-provided RNG.
     fn random<R: RngCore + ?Sized>(rng: &mut R) -> Self;
 
     /// Returns the additive identity, also known as the "neutral element".

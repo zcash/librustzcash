@@ -399,7 +399,7 @@ impl PrimeGroup for Fr {}
 impl CofactorGroup for Fr {
     type Subgroup = Fr;
 
-    fn mul_by_cofactor(&self) -> Self::Subgroup {
+    fn clear_cofactor(&self) -> Self::Subgroup {
         *self
     }
 
@@ -417,10 +417,6 @@ impl Curve for Fr {
 }
 
 impl WnafGroup for Fr {
-    fn recommended_wnaf_for_scalar(_: &Self::Scalar) -> usize {
-        3
-    }
-
     fn recommended_wnaf_for_num_scalars(_: usize) -> usize {
         3
     }
