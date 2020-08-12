@@ -1097,12 +1097,6 @@ macro_rules! curve_impl {
         }
 
         impl WnafGroup for $projective {
-            fn recommended_wnaf_for_scalar(_: &Self::Scalar) -> usize {
-                Self::empirical_recommended_wnaf_for_scalar(
-                    <Self::Scalar as PrimeField>::NUM_BITS as usize,
-                )
-            }
-
             fn recommended_wnaf_for_num_scalars(num_scalars: usize) -> usize {
                 Self::empirical_recommended_wnaf_for_num_scalars(num_scalars)
             }
@@ -1454,16 +1448,6 @@ pub mod g1 {
     }
 
     impl G1 {
-        fn empirical_recommended_wnaf_for_scalar(num_bits: usize) -> usize {
-            if num_bits >= 130 {
-                4
-            } else if num_bits >= 34 {
-                3
-            } else {
-                2
-            }
-        }
-
         fn empirical_recommended_wnaf_for_num_scalars(num_scalars: usize) -> usize {
             const RECOMMENDATIONS: [usize; 12] =
                 [1, 3, 7, 20, 43, 120, 273, 563, 1630, 3128, 7933, 62569];
@@ -2086,16 +2070,6 @@ pub mod g2 {
     }
 
     impl G2 {
-        fn empirical_recommended_wnaf_for_scalar(num_bits: usize) -> usize {
-            if num_bits >= 103 {
-                4
-            } else if num_bits >= 37 {
-                3
-            } else {
-                2
-            }
-        }
-
         fn empirical_recommended_wnaf_for_num_scalars(num_scalars: usize) -> usize {
             const RECOMMENDATIONS: [usize; 11] =
                 [1, 3, 8, 20, 47, 126, 260, 826, 1501, 4555, 84071];

@@ -6,10 +6,6 @@ use super::Group;
 
 /// Extension trait on a [`Group`] that provides helpers used by [`Wnaf`].
 pub trait WnafGroup: Group {
-    /// Recommends a wNAF window table size given a scalar. Always returns a number
-    /// between 2 and 22, inclusive.
-    fn recommended_wnaf_for_scalar(scalar: &Self::Scalar) -> usize;
-
     /// Recommends a wNAF window size given the number of scalars you intend to multiply
     /// a base by. Always returns a number between 2 and 22, inclusive.
     fn recommended_wnaf_for_num_scalars(num_scalars: usize) -> usize;
@@ -154,8 +150,8 @@ impl<G: WnafGroup> Wnaf<(), Vec<G>, Vec<i64>> {
     /// Given a scalar, compute its wNAF representation and return a `Wnaf` object that can perform
     /// exponentiations with `.base(..)`.
     pub fn scalar(&mut self, scalar: &<G as Group>::Scalar) -> Wnaf<usize, &mut Vec<G>, &[i64]> {
-        // Compute the appropriate window size for the scalar.
-        let window_size = G::recommended_wnaf_for_scalar(&scalar);
+        // We hard-code a window size of 4.
+        let window_size = 4;
 
         // Compute the wNAF form of the scalar.
         wnaf_form(&mut self.scalar, scalar.to_repr(), window_size);
