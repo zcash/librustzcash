@@ -1,5 +1,7 @@
 //! This module provides an implementation of the $\mathbb{G}_1$ group of BLS12-381.
 
+use core::borrow::Borrow;
+use core::iter::Sum;
 use core::ops::{Add, AddAssign, Mul, MulAssign, Neg, Sub, SubAssign};
 
 use subtle::{Choice, ConditionallySelectable, ConstantTimeEq, CtOption};
@@ -137,6 +139,18 @@ impl<'a, 'b> Sub<&'b G1Affine> for &'a G1Projective {
     #[inline]
     fn sub(self, rhs: &'b G1Affine) -> G1Projective {
         self + (-rhs)
+    }
+}
+
+impl<T> Sum<T> for G1Projective
+where
+    T: Borrow<G1Projective>,
+{
+    fn sum<I>(iter: I) -> Self
+    where
+        I: Iterator<Item = T>,
+    {
+        iter.fold(Self::identity(), |acc, item| acc + item.borrow())
     }
 }
 
@@ -735,6 +749,34 @@ impl G1Projective {
         acc
     }
 
+    /// Multiply `self` by `crate::BLS_X`, using double and add.
+    fn mul_by_x(&self) -> G1Projective {
+        let mut xself = G1Projective::identity();
+        // NOTE: in BLS12-381 we can just skip the first bit.
+        let mut x = crate::BLS_X >> 1;
+        let mut tmp = *self;
+        while x != 0 {
+            tmp = tmp.double();
+
+            if x % 2 == 1 {
+                xself += tmp;
+            }
+            x >>= 1;
+        }
+        // finally, flip the sign
+        if crate::BLS_X_IS_NEGATIVE {
+            xself = -xself;
+        }
+        xself
+    }
+
+    /// Multiplies by $(1 - z)$, where $z$ is the parameter of BLS12-381, which
+    /// [suffices to clear](https://ia.cr/2019/403) the cofactor and map
+    /// elliptic curve points to elements of $\mathbb{G}\_1$.
+    pub fn clear_cofactor(&self) -> G1Projective {
+        self - self.mul_by_x()
+    }
+
     /// Converts a batch of `G1Projective` elements into `G1Affine` elements. This
     /// function will panic if `p.len() != q.len()`.
     pub fn batch_normalize(p: &[Self], q: &mut [G1Affine]) {
@@ -1301,6 +1343,70 @@ fn test_is_torsion_free() {
 
     assert!(bool::from(G1Affine::identity().is_torsion_free()));
     assert!(bool::from(G1Affine::generator().is_torsion_free()));
+}
+
+#[test]
+fn test_mul_by_x() {
+    // multiplying by `x` a point in G1 is the same as multiplying by
+    // the equivalent scalar.
+    let generator = G1Projective::generator();
+    let x = if crate::BLS_X_IS_NEGATIVE {
+        -Scalar::from(crate::BLS_X)
+    } else {
+        Scalar::from(crate::BLS_X)
+    };
+    assert_eq!(generator.mul_by_x(), generator * x);
+
+    let point = G1Projective::generator() * Scalar::from(42);
+    assert_eq!(point.mul_by_x(), point * x);
+}
+
+#[test]
+fn test_clear_cofactor() {
+    // the generator (and the identity) are always on the curve,
+    // even after clearing the cofactor
+    let generator = G1Projective::generator();
+    assert!(bool::from(generator.clear_cofactor().is_on_curve()));
+    let id = G1Projective::identity();
+    assert!(bool::from(id.clear_cofactor().is_on_curve()));
+
+    let point = G1Projective {
+        x: Fp::from_raw_unchecked([
+            0x48af5ff540c817f0,
+            0xd73893acaf379d5a,
+            0xe6c43584e18e023c,
+            0x1eda39c30f188b3e,
+            0xf618c6d3ccc0f8d8,
+            0x0073542cd671e16c,
+        ]),
+        y: Fp::from_raw_unchecked([
+            0x57bf8be79461d0ba,
+            0xfc61459cee3547c3,
+            0x0d23567df1ef147b,
+            0x0ee187bcce1d9b64,
+            0xb0c8cfbe9dc8fdc1,
+            0x1328661767ef368b,
+        ]),
+        z: Fp::from_raw_unchecked([
+            0x3d2d1c670671394e,
+            0x0ee3a800a2f7c1ca,
+            0x270f4f21da2e5050,
+            0xe02840a53f1be768,
+            0x55debeb597512690,
+            0x08bd25353dc8f791,
+        ]),
+    };
+
+    assert!(bool::from(point.is_on_curve()));
+    assert!(!bool::from(G1Affine::from(point).is_torsion_free()));
+    let cleared_point = point.clear_cofactor();
+    assert!(bool::from(cleared_point.is_on_curve()));
+    assert!(bool::from(G1Affine::from(cleared_point).is_torsion_free()));
+
+    // in BLS12-381 the cofactor in G1 can be
+    // cleared multiplying by (1-x)
+    let h_eff = Scalar::from(1) + Scalar::from(crate::BLS_X);
+    assert_eq!(point.clear_cofactor(), point * h_eff);
 }
 
 #[test]
