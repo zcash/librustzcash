@@ -1024,7 +1024,9 @@ macro_rules! curve_impl {
         impl CofactorGroup for $projective {
             type Subgroup = $subgroup;
 
-            fn mul_by_cofactor(&self) -> Self::Subgroup {
+            fn clear_cofactor(&self) -> Self::Subgroup {
+                // This implementation uses the cofactor directly, and differs from the
+                // bls12_381 crate which uses a multiple of the cofactor.
                 $subgroup($affine::from(*self).scale_by_cofactor().into())
             }
 

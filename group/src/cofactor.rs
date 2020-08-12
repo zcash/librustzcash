@@ -17,10 +17,16 @@ pub trait CofactorGroup:
     /// If `Self` implements `PrimeGroup`, then `Self::Subgroup` may be `Self`.
     type Subgroup: PrimeGroup<Scalar = Self::Scalar> + Into<Self>;
 
-    /// Returns `[h] self`, where `h` is the cofactor of the group.
+    /// Maps `self` to the prime-order subgroup by clearing any torsion component.
+    ///
+    /// This function computes `[k.h] self`; that is, this function multiplies `self` by a
+    /// multiple of the cofactor (not necessarily the actual cofactor).
+    ///
+    /// This function is deterministic: `k` is fixed for a given implementation, and the
+    /// map defined by this function is opaque, but well-defined.
     ///
     /// If `Self` implements [`PrimeGroup`], this returns `self`.
-    fn mul_by_cofactor(&self) -> Self::Subgroup;
+    fn clear_cofactor(&self) -> Self::Subgroup;
 
     /// Returns `self` if it is contained in the prime-order subgroup.
     ///
@@ -33,7 +39,7 @@ pub trait CofactorGroup:
     /// - `true` if `self` is in the torsion subgroup.
     /// - `false` if `self` is not in the torsion subgroup.
     fn is_small_order(&self) -> Choice {
-        self.mul_by_cofactor().is_identity()
+        self.clear_cofactor().is_identity()
     }
 
     /// Determines if this element is "torsion free", i.e., is contained in the
