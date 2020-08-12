@@ -17,13 +17,13 @@ pub trait CofactorGroup:
     /// If `Self` implements `PrimeGroup`, then `Self::Subgroup` may be `Self`.
     type Subgroup: PrimeGroup<Scalar = Self::Scalar> + Into<Self>;
 
-    /// Maps `self` to the prime-order subgroup by clearing any torsion component.
+    /// Maps `self` to the prime-order subgroup by multiplying this element by some
+    /// `k`-multiple of the cofactor.
     ///
-    /// This function computes `[k.h] self`; that is, this function multiplies `self` by a
-    /// multiple of the cofactor (not necessarily the actual cofactor).
-    ///
-    /// This function is deterministic: `k` is fixed for a given implementation, and the
-    /// map defined by this function is opaque, but well-defined.
+    /// The value `k` does not vary between inputs for a given implementation, but may
+    /// vary between different implementations of `CofactorGroup` because some groups have
+    /// more efficient methods of clearing the cofactor when `k` is allowed to be
+    /// different than `1`.
     ///
     /// If `Self` implements [`PrimeGroup`], this returns `self`.
     fn clear_cofactor(&self) -> Self::Subgroup;
