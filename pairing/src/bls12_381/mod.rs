@@ -24,7 +24,7 @@ pub use self::fr::{Fr, FrRepr};
 use super::{Engine, MillerLoopResult, MultiMillerLoop};
 
 use ff::{BitIterator, Field, PrimeField};
-use group::{cofactor::CofactorCurveAffine, Group};
+use group::{prime::PrimeCurveAffine, Group};
 use rand_core::RngCore;
 use std::fmt;
 use std::iter::Sum;

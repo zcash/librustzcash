@@ -1,5 +1,5 @@
 use ff::Field;
-use group::{cofactor::CofactorCurveAffine, Curve, Group};
+use group::{prime::PrimeCurveAffine, Curve, Group};
 use rand_core::SeedableRng;
 use rand_xorshift::XorShiftRng;
 use std::ops::Mul;

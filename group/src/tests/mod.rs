@@ -4,12 +4,12 @@ use rand_xorshift::XorShiftRng;
 use std::ops::{Mul, Neg};
 
 use crate::{
-    cofactor::{CofactorCurve, CofactorCurveAffine},
+    prime::{PrimeCurve, PrimeCurveAffine},
     wnaf::WnafGroup,
     GroupEncoding, UncompressedEncoding,
 };
 
-pub fn curve_tests<G: CofactorCurve>() {
+pub fn curve_tests<G: PrimeCurve>() {
     let mut rng = XorShiftRng::from_seed([
         0x59, 0x62, 0xbe, 0x5d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06, 0xbc,
         0xe5,
@@ -187,7 +187,7 @@ pub fn random_wnaf_tests<G: WnafGroup>() {
     }
 }
 
-fn random_negation_tests<G: CofactorCurve>() {
+fn random_negation_tests<G: PrimeCurve>() {
     let mut rng = XorShiftRng::from_seed([
         0x59, 0x62, 0xbe, 0x5d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06, 0xbc,
         0xe5,
@@ -217,7 +217,7 @@ fn random_negation_tests<G: CofactorCurve>() {
     }
 }
 
-fn random_doubling_tests<G: CofactorCurve>() {
+fn random_doubling_tests<G: PrimeCurve>() {
     let mut rng = XorShiftRng::from_seed([
         0x59, 0x62, 0xbe, 0x5d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06, 0xbc,
         0xe5,
@@ -245,7 +245,7 @@ fn random_doubling_tests<G: CofactorCurve>() {
     }
 }
 
-fn random_multiplication_tests<G: CofactorCurve>() {
+fn random_multiplication_tests<G: PrimeCurve>() {
     let mut rng = XorShiftRng::from_seed([
         0x59, 0x62, 0xbe, 0x5d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06, 0xbc,
         0xe5,
@@ -280,7 +280,7 @@ fn random_multiplication_tests<G: CofactorCurve>() {
     }
 }
 
-fn random_addition_tests<G: CofactorCurve>() {
+fn random_addition_tests<G: PrimeCurve>() {
     let mut rng = XorShiftRng::from_seed([
         0x59, 0x62, 0xbe, 0x5d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06, 0xbc,
         0xe5,
@@ -360,7 +360,7 @@ fn random_addition_tests<G: CofactorCurve>() {
     }
 }
 
-fn random_transformation_tests<G: CofactorCurve>() {
+fn random_transformation_tests<G: PrimeCurve>() {
     let mut rng = XorShiftRng::from_seed([
         0x59, 0x62, 0xbe, 0x5d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06, 0xbc,
         0xe5,
@@ -397,7 +397,7 @@ fn random_transformation_tests<G: CofactorCurve>() {
     }
 }
 
-fn random_compressed_encoding_tests<G: CofactorCurve>() {
+fn random_compressed_encoding_tests<G: PrimeCurve>() {
     let mut rng = XorShiftRng::from_seed([
         0x59, 0x62, 0xbe, 0x5d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06, 0xbc,
         0xe5,
@@ -423,9 +423,9 @@ fn random_compressed_encoding_tests<G: CofactorCurve>() {
     }
 }
 
-pub fn random_uncompressed_encoding_tests<G: CofactorCurve>()
+pub fn random_uncompressed_encoding_tests<G: PrimeCurve>()
 where
-    <G as CofactorCurve>::Affine: UncompressedEncoding,
+    <G as PrimeCurve>::Affine: UncompressedEncoding,
 {
     let mut rng = XorShiftRng::from_seed([
         0x59, 0x62, 0xbe, 0x5d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06, 0xbc,
