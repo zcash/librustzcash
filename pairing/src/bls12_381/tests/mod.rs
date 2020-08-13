@@ -1,8 +1,5 @@
 use ff::PrimeField;
-use group::{
-    cofactor::{CofactorCurve, CofactorCurveAffine},
-    GroupEncoding, UncompressedEncoding,
-};
+use group::{GroupEncoding, UncompressedEncoding};
 
 use super::*;
 use crate::*;
@@ -58,7 +55,7 @@ fn test_pairing_result_against_relic() {
     }));
 }
 
-fn uncompressed_test_vectors<G: CofactorCurve>(expected: &[u8])
+fn uncompressed_test_vectors<G: PrimeCurve>(expected: &[u8])
 where
     G::Affine: UncompressedEncoding,
 {
@@ -88,7 +85,7 @@ where
     assert_eq!(&v[..], expected);
 }
 
-fn compressed_test_vectors<G: CofactorCurve>(expected: &[u8]) {
+fn compressed_test_vectors<G: PrimeCurve>(expected: &[u8]) {
     let mut e = G::identity();
     let encoded_len = <G::Affine as GroupEncoding>::Repr::default().as_ref().len();
 

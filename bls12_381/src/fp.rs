@@ -47,7 +47,7 @@ impl Eq for Fp {}
 impl PartialEq for Fp {
     #[inline]
     fn eq(&self, other: &Self) -> bool {
-        self.ct_eq(other).unwrap_u8() == 1
+        bool::from(self.ct_eq(other))
     }
 }
 
@@ -566,7 +566,7 @@ fn test_equality() {
         let eq = a == b;
         let ct_eq = a.ct_eq(&b);
 
-        assert_eq!(eq, ct_eq.unwrap_u8() == 1);
+        assert_eq!(eq, bool::from(ct_eq));
 
         eq
     }
@@ -762,18 +762,16 @@ fn test_from_bytes() {
         .unwrap()
     );
 
-    assert!(
+    assert!(bool::from(
         Fp::from_bytes(&[
             27, 1, 17, 234, 57, 127, 230, 154, 75, 27, 167, 182, 67, 75, 172, 215, 100, 119, 75,
             132, 243, 133, 18, 191, 103, 48, 210, 160, 246, 176, 246, 36, 30, 171, 255, 254, 177,
             83, 255, 255, 185, 254, 255, 255, 255, 255, 170, 170
         ])
         .is_none()
-        .unwrap_u8()
-            == 1
-    );
+    ));
 
-    assert!(Fp::from_bytes(&[0xff; 48]).is_none().unwrap_u8() == 1);
+    assert!(bool::from(Fp::from_bytes(&[0xff; 48]).is_none()));
 }
 
 #[test]
@@ -823,7 +821,7 @@ fn test_inversion() {
     ]);
 
     assert_eq!(a.invert().unwrap(), b);
-    assert!(Fp::zero().invert().is_none().unwrap_u8() == 1);
+    assert!(bool::from(Fp::zero().invert().is_none()));
 }
 
 #[test]

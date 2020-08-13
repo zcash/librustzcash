@@ -77,7 +77,7 @@ impl ConstantTimeEq for AffinePoint {
 
 impl PartialEq for AffinePoint {
     fn eq(&self, other: &Self) -> bool {
-        self.ct_eq(other).unwrap_u8() == 1
+        bool::from(self.ct_eq(other))
     }
 }
 
@@ -136,7 +136,7 @@ impl ConditionallySelectable for ExtendedPoint {
 
 impl PartialEq for ExtendedPoint {
     fn eq(&self, other: &Self) -> bool {
-        self.ct_eq(other).unwrap_u8() == 1
+        bool::from(self.ct_eq(other))
     }
 }
 
@@ -907,9 +907,9 @@ fn test_is_on_curve_var() {
 
 #[test]
 fn test_d_is_non_quadratic_residue() {
-    assert!(EDWARDS_D.sqrt().is_none().unwrap_u8() == 1);
-    assert!((-EDWARDS_D).sqrt().is_none().unwrap_u8() == 1);
-    assert!((-EDWARDS_D).invert().unwrap().sqrt().is_none().unwrap_u8() == 1);
+    assert!(bool::from(EDWARDS_D.sqrt().is_none()));
+    assert!(bool::from((-EDWARDS_D).sqrt().is_none()));
+    assert!(bool::from((-EDWARDS_D).invert().unwrap().sqrt().is_none()));
 }
 
 #[test]
@@ -1121,9 +1121,9 @@ const EIGHT_TORSION: [AffinePoint; 8] = [
 #[test]
 fn find_eight_torsion() {
     let g = ExtendedPoint::from(FULL_GENERATOR);
-    assert!(g.is_small_order().unwrap_u8() == 0);
+    assert!(!bool::from(g.is_small_order()));
     let g = g.multiply(&FR_MODULUS_BYTES);
-    assert!(g.is_small_order().unwrap_u8() == 1);
+    assert!(bool::from(g.is_small_order()));
 
     let mut cur = g;
 
@@ -1142,22 +1142,22 @@ fn find_curve_generator() {
     let mut trial_bytes = [0; 32];
     for _ in 0..255 {
         let a = AffinePoint::from_bytes(trial_bytes);
-        if a.is_some().unwrap_u8() == 1 {
+        if bool::from(a.is_some()) {
             let a = a.unwrap();
             assert!(a.is_on_curve_vartime());
             let b = ExtendedPoint::from(a);
             let b = b.multiply(&FR_MODULUS_BYTES);
-            assert!(b.is_small_order().unwrap_u8() == 1);
+            assert!(bool::from(b.is_small_order()));
             let b = b.double();
-            assert!(b.is_small_order().unwrap_u8() == 1);
+            assert!(bool::from(b.is_small_order()));
             let b = b.double();
-            assert!(b.is_small_order().unwrap_u8() == 1);
-            if b.is_identity().unwrap_u8() == 0 {
+            assert!(bool::from(b.is_small_order()));
+            if !bool::from(b.is_identity()) {
                 let b = b.double();
-                assert!(b.is_small_order().unwrap_u8() == 1);
-                assert!(b.is_identity().unwrap_u8() == 1);
+                assert!(bool::from(b.is_small_order()));
+                assert!(bool::from(b.is_identity()));
                 assert_eq!(FULL_GENERATOR, a);
-                assert!(a.mul_by_cofactor().is_torsion_free().unwrap_u8() == 1);
+                assert!(bool::from(a.mul_by_cofactor().is_torsion_free()));
                 return;
             }
         }
@@ -1171,7 +1171,7 @@ fn find_curve_generator() {
 #[test]
 fn test_small_order() {
     for point in EIGHT_TORSION.iter() {
-        assert!(point.is_small_order().unwrap_u8() == 1);
+        assert!(bool::from(point.is_small_order()));
     }
 }
 
@@ -1186,11 +1186,11 @@ fn test_is_identity() {
     assert!(a.v != b.v);
     assert!(a.z != b.z);
 
-    assert!(a.is_identity().unwrap_u8() == 1);
-    assert!(b.is_identity().unwrap_u8() == 1);
+    assert!(bool::from(a.is_identity()));
+    assert!(bool::from(b.is_identity()));
 
     for point in EIGHT_TORSION.iter() {
-        assert!(point.mul_by_cofactor().is_identity().unwrap_u8() == 1);
+        assert!(bool::from(point.mul_by_cofactor().is_identity()));
     }
 }
 

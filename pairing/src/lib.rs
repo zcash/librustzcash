@@ -23,7 +23,7 @@ pub mod bls12_381;
 use core::ops::Mul;
 use ff::PrimeField;
 use group::{
-    cofactor::{CofactorCurve, CofactorCurveAffine},
+    prime::{PrimeCurve, PrimeCurveAffine},
     Group, GroupOps, GroupOpsOwned, ScalarMul, ScalarMulOwned, UncompressedEncoding,
 };
 
@@ -35,7 +35,7 @@ pub trait Engine: Sized + 'static + Clone {
     type Fr: PrimeField;
 
     /// The projective representation of an element in G1.
-    type G1: CofactorCurve<Scalar = Self::Fr, Affine = Self::G1Affine>
+    type G1: PrimeCurve<Scalar = Self::Fr, Affine = Self::G1Affine>
         + From<Self::G1Affine>
         + GroupOps<Self::G1Affine>
         + GroupOpsOwned<Self::G1Affine>
@@ -53,7 +53,7 @@ pub trait Engine: Sized + 'static + Clone {
         + for<'a> Mul<&'a Self::Fr, Output = Self::G1>;
 
     /// The projective representation of an element in G2.
-    type G2: CofactorCurve<Scalar = Self::Fr, Affine = Self::G2Affine>
+    type G2: PrimeCurve<Scalar = Self::Fr, Affine = Self::G2Affine>
         + From<Self::G2Affine>
         + GroupOps<Self::G2Affine>
         + GroupOpsOwned<Self::G2Affine>
@@ -80,7 +80,7 @@ pub trait Engine: Sized + 'static + Clone {
 
 /// Affine representation of an elliptic curve point that can be used
 /// to perform pairings.
-pub trait PairingCurveAffine: CofactorCurveAffine + UncompressedEncoding {
+pub trait PairingCurveAffine: PrimeCurveAffine + UncompressedEncoding {
     type Pair: PairingCurveAffine<Pair = Self>;
     type PairingResult: Group;
 

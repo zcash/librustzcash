@@ -54,7 +54,7 @@ impl ConstantTimeEq for Fr {
 impl PartialEq for Fr {
     #[inline]
     fn eq(&self, other: &Self) -> bool {
-        self.ct_eq(other).unwrap_u8() == 1
+        bool::from(self.ct_eq(other))
     }
 }
 
@@ -805,57 +805,47 @@ fn test_from_bytes() {
     );
 
     // -1 should work
-    assert!(
+    assert!(bool::from(
         Fr::from_bytes(&[
             182, 44, 247, 214, 94, 14, 151, 208, 130, 16, 200, 204, 147, 32, 104, 166, 0, 59, 52,
             1, 1, 59, 103, 6, 169, 175, 51, 101, 234, 180, 125, 14
         ])
         .is_some()
-        .unwrap_u8()
-            == 1
-    );
+    ));
 
     // modulus is invalid
-    assert!(
+    assert!(bool::from(
         Fr::from_bytes(&[
             183, 44, 247, 214, 94, 14, 151, 208, 130, 16, 200, 204, 147, 32, 104, 166, 0, 59, 52,
             1, 1, 59, 103, 6, 169, 175, 51, 101, 234, 180, 125, 14
         ])
         .is_none()
-        .unwrap_u8()
-            == 1
-    );
+    ));
 
     // Anything larger than the modulus is invalid
-    assert!(
+    assert!(bool::from(
         Fr::from_bytes(&[
             184, 44, 247, 214, 94, 14, 151, 208, 130, 16, 200, 204, 147, 32, 104, 166, 0, 59, 52,
             1, 1, 59, 103, 6, 169, 175, 51, 101, 234, 180, 125, 14
         ])
         .is_none()
-        .unwrap_u8()
-            == 1
-    );
+    ));
 
-    assert!(
+    assert!(bool::from(
         Fr::from_bytes(&[
             183, 44, 247, 214, 94, 14, 151, 208, 130, 16, 200, 204, 147, 32, 104, 166, 0, 59, 52,
             1, 1, 59, 104, 6, 169, 175, 51, 101, 234, 180, 125, 14
         ])
         .is_none()
-        .unwrap_u8()
-            == 1
-    );
+    ));
 
-    assert!(
+    assert!(bool::from(
         Fr::from_bytes(&[
             183, 44, 247, 214, 94, 14, 151, 208, 130, 16, 200, 204, 147, 32, 104, 166, 0, 59, 52,
             1, 1, 59, 103, 6, 169, 175, 51, 101, 234, 180, 125, 15
         ])
         .is_none()
-        .unwrap_u8()
-            == 1
-    );
+    ));
 }
 
 #[test]
@@ -1056,7 +1046,7 @@ fn test_squaring() {
 
 #[test]
 fn test_inversion() {
-    assert_eq!(Fr::zero().invert().is_none().unwrap_u8(), 1);
+    assert!(bool::from(Fr::zero().invert().is_none()));
     assert_eq!(Fr::one().invert().unwrap(), Fr::one());
     assert_eq!((-&Fr::one()).invert().unwrap(), -&Fr::one());
 
@@ -1113,7 +1103,7 @@ fn test_sqrt() {
 
     for _ in 0..100 {
         let square_root = square.sqrt();
-        if square_root.is_none().unwrap_u8() == 1 {
+        if bool::from(square_root.is_none()) {
             none_count += 1;
         } else {
             assert_eq!(square_root.unwrap() * square_root.unwrap(), square);
