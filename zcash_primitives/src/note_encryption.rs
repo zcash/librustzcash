@@ -491,7 +491,7 @@ pub fn try_sapling_compact_note_decryption<P: consensus::Parameters>(
 /// for decryption using a Full Viewing Key see [try_sapling_output_recovery].
 pub fn try_sapling_output_recovery_with_ock<P: consensus::Parameters>(
     height: u32,
-    ock: &Blake2bHash,
+    ock: &[u8],
     cmu: &Fr,
     epk: &edwards::Point<Bls12, PrimeOrder>,
     enc_ciphertext: &[u8],
@@ -503,7 +503,7 @@ pub fn try_sapling_output_recovery_with_ock<P: consensus::Parameters>(
     let mut op = [0; OUT_CIPHERTEXT_SIZE];
     assert_eq!(
         ChachaPolyIetf::aead_cipher()
-            .open_to(&mut op, &out_ciphertext, &[], &ock.as_bytes(), &[0u8; 12])
+            .open_to(&mut op, &out_ciphertext, &[], &ock, &[0u8; 12])
             .ok()?,
         OUT_PLAINTEXT_SIZE
     );
@@ -604,7 +604,7 @@ pub fn try_sapling_output_recovery<P: consensus::Parameters>(
 ) -> Option<(Note<Bls12>, PaymentAddress<Bls12>, Memo)> {
     try_sapling_output_recovery_with_ock::<P>(
       height,
-      &prf_ock(&ovk, &cv, &cmu, &epk),
+      &prf_ock(&ovk, &cv, &cmu, &epk).as_bytes(),
       cmu,
       epk,
       enc_ciphertext,
