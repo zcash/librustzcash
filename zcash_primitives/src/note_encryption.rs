@@ -171,7 +171,7 @@ fn kdf_sapling(
 /// Sapling PRF^ock.
 ///
 /// Implemented per section 5.4.2 of the Zcash Protocol Specification.
-fn prf_ock(
+pub fn prf_ock(
     ovk: &OutgoingViewingKey,
     cv: &edwards::Point<Bls12, Unknown>,
     cmu: &Fr,
