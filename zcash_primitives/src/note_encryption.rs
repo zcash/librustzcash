@@ -483,15 +483,15 @@ pub fn try_sapling_compact_note_decryption<P: consensus::Parameters>(
 
 /// Recovery of the full note plaintext by the sender.
 ///
-/// Attempts to decrypt and validate the given `enc_ciphertext` using the given `ovk`.
+/// Attempts to decrypt and validate the given `enc_ciphertext` using the given `ock`.
 /// If successful, the corresponding Sapling note and memo are returned, along with the
 /// `PaymentAddress` to which the note was sent.
 ///
-/// Implements section 4.17.3 of the Zcash Protocol Specification.
-pub fn try_sapling_output_recovery<P: consensus::Parameters>(
+/// Implements part of section 4.17.3 of the Zcash Protocol Specification.
+/// for decryption using a Full Viewing Key see [try_sapling_output_recovery].
+pub fn try_sapling_output_recovery_with_ock<P: consensus::Parameters>(
     height: u32,
-    ovk: &OutgoingViewingKey,
-    cv: &edwards::Point<Bls12, Unknown>,
+    ock: Blake2bHash,
     cmu: &Fr,
     epk: &edwards::Point<Bls12, PrimeOrder>,
     enc_ciphertext: &[u8],
@@ -499,8 +499,6 @@ pub fn try_sapling_output_recovery<P: consensus::Parameters>(
 ) -> Option<(Note<Bls12>, PaymentAddress<Bls12>, Memo)> {
     assert_eq!(enc_ciphertext.len(), ENC_CIPHERTEXT_SIZE);
     assert_eq!(out_ciphertext.len(), OUT_CIPHERTEXT_SIZE);
-
-    let ock = prf_ock(&ovk, &cv, &cmu, &epk);
 
     let mut op = [0; OUT_CIPHERTEXT_SIZE];
     assert_eq!(
@@ -586,6 +584,32 @@ pub fn try_sapling_output_recovery<P: consensus::Parameters>(
     }
 
     Some((note, to, Memo(memo)))
+}
+
+/// Recovery of the full note plaintext by the sender.
+///
+/// Attempts to decrypt and validate the given `enc_ciphertext` using the given `ovk`.
+/// If successful, the corresponding Sapling note and memo are returned, along with the
+/// `PaymentAddress` to which the note was sent.
+///
+/// Implements section 4.17.3 of the Zcash Protocol Specification.
+pub fn try_sapling_output_recovery<P: consensus::Parameters>(
+    height: u32,
+    ovk: &OutgoingViewingKey,
+    cv: &edwards::Point<Bls12, Unknown>,
+    cmu: &Fr,
+    epk: &edwards::Point<Bls12, PrimeOrder>,
+    enc_ciphertext: &[u8],
+    out_ciphertext: &[u8],
+) -> Option<(Note<Bls12>, PaymentAddress<Bls12>, Memo)> {
+    try_sapling_output_recovery_with_ock::<P>(
+      height,
+      prf_ock(&ovk, &cv, &cmu, &epk),
+      cmu,
+      epk,
+      enc_ciphertext,
+      out_ciphertext
+  )
 }
 
 #[cfg(test)]
