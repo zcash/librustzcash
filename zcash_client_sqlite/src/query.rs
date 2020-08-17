@@ -233,7 +233,7 @@ pub fn get_extended_full_viewing_keys<P: consensus::Parameters>(
                 .map_err(SqliteClientError)
             })
         })
-        .map_err(|e| SqliteClientError(Error::Database(e)))?;
+        .map_err(SqliteClientError::from)?;
 
     rows.collect::<Result<Result<_, _>, _>>()?
 }

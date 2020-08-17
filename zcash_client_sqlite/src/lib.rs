@@ -129,6 +129,10 @@ impl DBOps for DataConnection {
         query::get_received_memo_as_utf8(self, id_note)
     }
 
+    fn get_sent_memo_as_utf8(&self, id_note: Self::NoteId) -> Result<Option<String>, Self::Error> {
+        query::get_sent_memo_as_utf8(self, id_note)
+    }
+
     fn get_extended_full_viewing_keys<P: consensus::Parameters>(
         &self,
         params: &P,
