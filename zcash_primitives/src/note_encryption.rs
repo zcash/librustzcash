@@ -604,7 +604,7 @@ pub fn try_sapling_output_recovery<P: consensus::Parameters>(
 ) -> Option<(Note<Bls12>, PaymentAddress<Bls12>, Memo)> {
     try_sapling_output_recovery_with_ock::<P>(
       height,
-      &prf_ock(&ovk, &cv, &cmu, &epk).as_bytes(),
+      prf_ock(&ovk, &cv, &cmu, &epk).as_bytes(),
       cmu,
       epk,
       enc_ciphertext,
