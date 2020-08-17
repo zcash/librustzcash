@@ -603,13 +603,13 @@ pub fn try_sapling_output_recovery<P: consensus::Parameters>(
     out_ciphertext: &[u8],
 ) -> Option<(Note<Bls12>, PaymentAddress<Bls12>, Memo)> {
     try_sapling_output_recovery_with_ock::<P>(
-      height,
-      prf_ock(&ovk, &cv, &cmu, &epk).as_bytes(),
-      cmu,
-      epk,
-      enc_ciphertext,
-      out_ciphertext
-  )
+        height,
+        prf_ock(&ovk, &cv, &cmu, &epk).as_bytes(),
+        cmu,
+        epk,
+        enc_ciphertext,
+        out_ciphertext,
+    )
 }
 
 #[cfg(test)]
