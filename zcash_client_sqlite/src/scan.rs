@@ -24,7 +24,7 @@ use zcash_primitives::{
     transaction::Transaction,
 };
 
-use crate::{error::SqliteClientError, CacheConnection, DataConnection};
+use crate::{error::SqliteClientError, CacheConnection, DataConnection, NoteId};
 
 struct CompactBlockRow {
     height: BlockHeight,
@@ -105,15 +105,7 @@ pub fn scan_cached_blocks<P: consensus::Parameters>(
         .map(|t| t.unwrap_or(CommitmentTree::new()))?;
 
     // Get most recent incremental witnesses for the notes we are tracking
-    let mut stmt_fetch_witnesses = data
-        .0
-        .prepare("SELECT note, witness FROM sapling_witnesses WHERE block = ?")?;
-    let witnesses = stmt_fetch_witnesses.query_map(&[u32::from(last_height)], |row| {
-        let id_note = row.get(0)?;
-        let data: Vec<_> = row.get(1)?;
-        Ok(IncrementalWitness::read(&data[..]).map(|witness| WitnessRow { id_note, witness }))
-    })?;
-    let mut witnesses: Vec<_> = witnesses.collect::<Result<Result<_, _>, _>>()??;
+    let mut witnesses = data.get_witnesses(last_height)?;
 
     // Get the nullifiers for the notes we are tracking
     let mut stmt_fetch_nullifiers = data
@@ -209,7 +201,7 @@ pub fn scan_cached_blocks<P: consensus::Parameters>(
 
         let txs = {
             let nf_refs: Vec<_> = nullifiers.iter().map(|(nf, acc)| (&nf[..], *acc)).collect();
-            let mut witness_refs: Vec<_> = witnesses.iter_mut().map(|w| &mut w.witness).collect();
+            let mut witness_refs: Vec<_> = witnesses.iter_mut().map(|w| &mut w.1).collect();
             scan_block(
                 params,
                 block,
@@ -225,9 +217,9 @@ pub fn scan_cached_blocks<P: consensus::Parameters>(
         {
             let cur_root = tree.root();
             for row in &witnesses {
-                if row.witness.root() != cur_root {
+                if row.1.root() != cur_root {
                     return Err(SqliteClientError(Error::InvalidWitnessAnchor(
-                        row.id_note,
+                        row.0,
                         last_height,
                     )));
                 }
@@ -305,7 +297,7 @@ pub fn scan_cached_blocks<P: consensus::Parameters>(
                 // - A note value will never exceed 2^63 zatoshis.
 
                 // First try updating an existing received note into the database.
-                let note_row = if stmt_update_note.execute(&[
+                let note_id = if stmt_update_note.execute(&[
                     (output.account as i64).to_sql()?,
                     output.to.diversifier().0.to_sql()?,
                     (output.note.value as i64).to_sql()?,
@@ -327,20 +319,17 @@ pub fn scan_cached_blocks<P: consensus::Parameters>(
                         nf.to_sql()?,
                         output.is_change.to_sql()?,
                     ])?;
-                    data.0.last_insert_rowid()
+                    NoteId(data.0.last_insert_rowid())
                 } else {
                     // It was there, so grab its row number.
                     stmt_select_note.query_row(
                         &[tx_row.to_sql()?, (output.index as i64).to_sql()?],
-                        |row| row.get(0),
+                        |row| row.get(0).map(NoteId),
                     )?
                 };
 
                 // Save witness for note.
-                witnesses.push(WitnessRow {
-                    id_note: note_row,
-                    witness: output.witness,
-                });
+                witnesses.push((note_id, output.witness));
 
                 // Cache nullifier for note (to detect subsequent spends in this scan).
                 nullifiers.push((nf, output.account));
@@ -352,11 +341,11 @@ pub fn scan_cached_blocks<P: consensus::Parameters>(
         for witness_row in witnesses.iter() {
             encoded.clear();
             witness_row
-                .witness
+                .1
                 .write(&mut encoded)
                 .expect("Should be able to write to a Vec");
             stmt_insert_witness.execute(&[
-                witness_row.id_note.to_sql()?,
+                (witness_row.0).0.to_sql()?,
                 u32::from(last_height).to_sql()?,
                 encoded.to_sql()?,
             ])?;
@@ -567,7 +556,7 @@ mod tests {
             self, fake_compact_block, fake_compact_block_spending, insert_into_cache,
             sapling_activation_height,
         },
-        AccountId, CacheConnection, DataConnection,
+        AccountId, CacheConnection, DataConnection, NoteId,
     };
 
     use super::scan_cached_blocks;
@@ -617,8 +606,8 @@ mod tests {
             Ok(_) => panic!("Should have failed"),
             Err(e) => {
                 assert_eq!(
-                    e.0.to_string(),
-                    ChainInvalid::block_height_mismatch::<rusqlite::Error>(
+                    e.to_string(),
+                    ChainInvalid::block_height_mismatch::<rusqlite::Error, NoteId>(
                         sapling_activation_height() + 1,
                         sapling_activation_height() + 2
                     )

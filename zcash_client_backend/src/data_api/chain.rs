@@ -27,7 +27,8 @@ pub const ANCHOR_OFFSET: u32 = 10;
 /// This function does not mutate either of the databases.
 pub fn validate_combined_chain<
     E0,
-    E: From<Error<E0>>,
+    N,
+    E: From<Error<E0, N>>,
     P: consensus::Parameters,
     C: CacheOps<Error = E>,
     D: DBOps<Error = E>,
@@ -84,7 +85,7 @@ pub fn validate_combined_chain<
 
 /// Determines the target height for a transaction, and the height from which to
 /// select anchors, based on the current synchronised block chain.
-pub fn get_target_and_anchor_heights<E0, E: From<Error<E0>>, D: DBOps<Error = E>>(
+pub fn get_target_and_anchor_heights<E0, N, E: From<Error<E0, N>>, D: DBOps<Error = E>>(
     data: &D,
 ) -> Result<(BlockHeight, BlockHeight), E> {
     data.block_height_extrema().and_then(|heights| {

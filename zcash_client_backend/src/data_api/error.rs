@@ -14,7 +14,7 @@ pub enum ChainInvalid {
 }
 
 #[derive(Debug)]
-pub enum Error<DbError> {
+pub enum Error<DbError, NoteId> {
     CorruptedData(&'static str),
     IncorrectHRPExtFVK,
     InsufficientBalance(u64, u64),
@@ -23,7 +23,7 @@ pub enum Error<DbError> {
     InvalidMemo(std::str::Utf8Error),
     InvalidNewWitnessAnchor(usize, TxId, BlockHeight, Node),
     InvalidNote,
-    InvalidWitnessAnchor(i64, BlockHeight),
+    InvalidWitnessAnchor(NoteId, BlockHeight),
     ScanRequired,
     TableNotEmpty,
     Bech32(bech32::Error),
@@ -36,16 +36,16 @@ pub enum Error<DbError> {
 }
 
 impl ChainInvalid {
-    pub fn prev_hash_mismatch<E>(at_height: BlockHeight) -> Error<E> {
+    pub fn prev_hash_mismatch<E, N>(at_height: BlockHeight) -> Error<E, N> {
         Error::InvalidChain(at_height, ChainInvalid::PrevHashMismatch)
     }
 
-    pub fn block_height_mismatch<E>(at_height: BlockHeight, found: BlockHeight) -> Error<E> {
+    pub fn block_height_mismatch<E, N>(at_height: BlockHeight, found: BlockHeight) -> Error<E, N> {
         Error::InvalidChain(at_height, ChainInvalid::BlockHeightMismatch(found))
     }
 }
 
-impl<E: fmt::Display> fmt::Display for Error<E> {
+impl<E: fmt::Display, N: fmt::Display> fmt::Display for Error<E, N> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match &self {
             Error::CorruptedData(reason) => write!(f, "Data DB is corrupted: {}", reason),
@@ -86,7 +86,7 @@ impl<E: fmt::Display> fmt::Display for Error<E> {
     }
 }
 
-impl<E: error::Error + 'static> error::Error for Error<E> {
+impl<E: error::Error + 'static, N: error::Error + 'static> error::Error for Error<E, N> {
     fn source(&self) -> Option<&(dyn error::Error + 'static)> {
         match &self {
             Error::InvalidMemo(e) => Some(e),
@@ -100,31 +100,31 @@ impl<E: error::Error + 'static> error::Error for Error<E> {
     }
 }
 
-impl<E> From<bech32::Error> for Error<E> {
+impl<E, N> From<bech32::Error> for Error<E, N> {
     fn from(e: bech32::Error) -> Self {
         Error::Bech32(e)
     }
 }
 
-impl<E> From<bs58::decode::Error> for Error<E> {
+impl<E, N> From<bs58::decode::Error> for Error<E, N> {
     fn from(e: bs58::decode::Error) -> Self {
         Error::Base58(e)
     }
 }
 
-impl<E> From<builder::Error> for Error<E> {
+impl<E, N> From<builder::Error> for Error<E, N> {
     fn from(e: builder::Error) -> Self {
         Error::Builder(e)
     }
 }
 
-impl<E> From<std::io::Error> for Error<E> {
+impl<E, N> From<std::io::Error> for Error<E, N> {
     fn from(e: std::io::Error) -> Self {
         Error::Io(e)
     }
 }
 
-impl<E> From<protobuf::ProtobufError> for Error<E> {
+impl<E, N> From<protobuf::ProtobufError> for Error<E, N> {
     fn from(e: protobuf::ProtobufError) -> Self {
         Error::Protobuf(e)
     }
