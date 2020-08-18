@@ -628,8 +628,8 @@ mod tests {
         primitives::{Diversifier, PaymentAddress, Rseed, ValueCommitment},
         util::generate_random_rseed,
     };
+    use blake2b_simd::Hash as Blake2bHash;
     use crypto_api_chachapoly::ChachaPolyIetf;
-    use blake2b_simd::{Hash as Blake2bHash};
     use ff::{Field, PrimeField};
     use pairing::bls12_381::{Bls12, Fr, FrRepr};
     use rand_core::OsRng;
@@ -639,9 +639,9 @@ mod tests {
 
     use super::{
         kdf_sapling, prf_ock, sapling_ka_agree, try_sapling_compact_note_decryption,
-        try_sapling_note_decryption, try_sapling_output_recovery, try_sapling_output_recovery_with_ock,
-        Memo, SaplingNoteEncryption, COMPACT_NOTE_SIZE, ENC_CIPHERTEXT_SIZE, NOTE_PLAINTEXT_SIZE,
-        OUT_CIPHERTEXT_SIZE, OUT_PLAINTEXT_SIZE,
+        try_sapling_note_decryption, try_sapling_output_recovery,
+        try_sapling_output_recovery_with_ock, Memo, SaplingNoteEncryption, COMPACT_NOTE_SIZE,
+        ENC_CIPHERTEXT_SIZE, NOTE_PLAINTEXT_SIZE, OUT_CIPHERTEXT_SIZE, OUT_PLAINTEXT_SIZE,
     };
     use crate::{keys::OutgoingViewingKey, JUBJUB};
 
@@ -805,7 +805,7 @@ mod tests {
             &cmu,
             &epk,
             &enc_ciphertext,
-            &out_ciphertext
+            &out_ciphertext,
         );
         let ock_output_recovery = try_sapling_output_recovery_with_ock::<TestNetwork>(
             height,
@@ -813,7 +813,7 @@ mod tests {
             &cmu,
             &epk,
             &enc_ciphertext,
-            &out_ciphertext
+            &out_ciphertext,
         );
         assert!(ovk_output_recovery.is_some());
         assert!(ock_output_recovery.is_some());
