@@ -171,7 +171,7 @@ fn kdf_sapling(
 /// Sapling PRF^ock.
 ///
 /// Implemented per section 5.4.2 of the Zcash Protocol Specification.
-fn prf_ock(
+pub fn prf_ock(
     ovk: &OutgoingViewingKey,
     cv: &edwards::Point<Bls12, Unknown>,
     cmu: &Fr,
@@ -483,15 +483,15 @@ pub fn try_sapling_compact_note_decryption<P: consensus::Parameters>(
 
 /// Recovery of the full note plaintext by the sender.
 ///
-/// Attempts to decrypt and validate the given `enc_ciphertext` using the given `ovk`.
+/// Attempts to decrypt and validate the given `enc_ciphertext` using the given `ock`.
 /// If successful, the corresponding Sapling note and memo are returned, along with the
 /// `PaymentAddress` to which the note was sent.
 ///
-/// Implements section 4.17.3 of the Zcash Protocol Specification.
-pub fn try_sapling_output_recovery<P: consensus::Parameters>(
+/// Implements part of section 4.17.3 of the Zcash Protocol Specification.
+/// For decryption using a Full Viewing Key see [`try_sapling_output_recovery`].
+pub fn try_sapling_output_recovery_with_ock<P: consensus::Parameters>(
     height: u32,
-    ovk: &OutgoingViewingKey,
-    cv: &edwards::Point<Bls12, Unknown>,
+    ock: &[u8],
     cmu: &Fr,
     epk: &edwards::Point<Bls12, PrimeOrder>,
     enc_ciphertext: &[u8],
@@ -500,12 +500,10 @@ pub fn try_sapling_output_recovery<P: consensus::Parameters>(
     assert_eq!(enc_ciphertext.len(), ENC_CIPHERTEXT_SIZE);
     assert_eq!(out_ciphertext.len(), OUT_CIPHERTEXT_SIZE);
 
-    let ock = prf_ock(&ovk, &cv, &cmu, &epk);
-
     let mut op = [0; OUT_CIPHERTEXT_SIZE];
     assert_eq!(
         ChachaPolyIetf::aead_cipher()
-            .open_to(&mut op, &out_ciphertext, &[], ock.as_bytes(), &[0u8; 12])
+            .open_to(&mut op, &out_ciphertext, &[], &ock, &[0u8; 12])
             .ok()?,
         OUT_PLAINTEXT_SIZE
     );
@@ -588,6 +586,32 @@ pub fn try_sapling_output_recovery<P: consensus::Parameters>(
     Some((note, to, Memo(memo)))
 }
 
+/// Recovery of the full note plaintext by the sender.
+///
+/// Attempts to decrypt and validate the given `enc_ciphertext` using the given `ovk`.
+/// If successful, the corresponding Sapling note and memo are returned, along with the
+/// `PaymentAddress` to which the note was sent.
+///
+/// Implements section 4.17.3 of the Zcash Protocol Specification.
+pub fn try_sapling_output_recovery<P: consensus::Parameters>(
+    height: u32,
+    ovk: &OutgoingViewingKey,
+    cv: &edwards::Point<Bls12, Unknown>,
+    cmu: &Fr,
+    epk: &edwards::Point<Bls12, PrimeOrder>,
+    enc_ciphertext: &[u8],
+    out_ciphertext: &[u8],
+) -> Option<(Note<Bls12>, PaymentAddress<Bls12>, Memo)> {
+    try_sapling_output_recovery_with_ock::<P>(
+        height,
+        prf_ock(&ovk, &cv, &cmu, &epk).as_bytes(),
+        cmu,
+        epk,
+        enc_ciphertext,
+        out_ciphertext,
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use crate::{
@@ -604,6 +628,7 @@ mod tests {
         primitives::{Diversifier, PaymentAddress, Rseed, ValueCommitment},
         util::generate_random_rseed,
     };
+    use blake2b_simd::Hash as Blake2bHash;
     use crypto_api_chachapoly::ChachaPolyIetf;
     use ff::{Field, PrimeField};
     use pairing::bls12_381::{Bls12, Fr, FrRepr};
@@ -614,9 +639,9 @@ mod tests {
 
     use super::{
         kdf_sapling, prf_ock, sapling_ka_agree, try_sapling_compact_note_decryption,
-        try_sapling_note_decryption, try_sapling_output_recovery, Memo, SaplingNoteEncryption,
-        COMPACT_NOTE_SIZE, ENC_CIPHERTEXT_SIZE, NOTE_PLAINTEXT_SIZE, OUT_CIPHERTEXT_SIZE,
-        OUT_PLAINTEXT_SIZE,
+        try_sapling_note_decryption, try_sapling_output_recovery,
+        try_sapling_output_recovery_with_ock, Memo, SaplingNoteEncryption, COMPACT_NOTE_SIZE,
+        ENC_CIPHERTEXT_SIZE, NOTE_PLAINTEXT_SIZE, OUT_CIPHERTEXT_SIZE, OUT_PLAINTEXT_SIZE,
     };
     use crate::{keys::OutgoingViewingKey, JUBJUB};
 
@@ -741,6 +766,7 @@ mod tests {
         mut rng: &mut R,
     ) -> (
         OutgoingViewingKey,
+        Blake2bHash,
         Fs,
         edwards::Point<Bls12, Unknown>,
         Fr,
@@ -750,7 +776,7 @@ mod tests {
     ) {
         let ivk = Fs::random(&mut rng);
 
-        let (ovk, ivk, cv, cmu, epk, enc_ciphertext, out_ciphertext) =
+        let (ovk, ock, ivk, cv, cmu, epk, enc_ciphertext, out_ciphertext) =
             random_enc_ciphertext_with(height, ivk, rng);
 
         assert!(try_sapling_note_decryption::<TestNetwork>(
@@ -769,18 +795,29 @@ mod tests {
             &enc_ciphertext[..COMPACT_NOTE_SIZE]
         )
         .is_some());
-        assert!(try_sapling_output_recovery::<TestNetwork>(
+
+        let ovk_output_recovery = try_sapling_output_recovery::<TestNetwork>(
             height,
             &ovk,
             &cv,
             &cmu,
             &epk,
             &enc_ciphertext,
-            &out_ciphertext
-        )
-        .is_some());
+            &out_ciphertext,
+        );
+        let ock_output_recovery = try_sapling_output_recovery_with_ock::<TestNetwork>(
+            height,
+            ock.as_bytes(),
+            &cmu,
+            &epk,
+            &enc_ciphertext,
+            &out_ciphertext,
+        );
+        assert!(ovk_output_recovery.is_some());
+        assert!(ock_output_recovery.is_some());
+        assert_eq!(ovk_output_recovery, ock_output_recovery);
 
-        (ovk, ivk, cv, cmu, epk, enc_ciphertext, out_ciphertext)
+        (ovk, ock, ivk, cv, cmu, epk, enc_ciphertext, out_ciphertext)
     }
 
     fn random_enc_ciphertext_with<R: RngCore + CryptoRng>(
@@ -789,6 +826,7 @@ mod tests {
         mut rng: &mut R,
     ) -> (
         OutgoingViewingKey,
+        Blake2bHash,
         Fs,
         edwards::Point<Bls12, Unknown>,
         Fr,
@@ -818,9 +856,11 @@ mod tests {
         let epk = ne.epk();
         let enc_ciphertext = ne.encrypt_note_plaintext();
         let out_ciphertext = ne.encrypt_outgoing_plaintext(&cv, &cmu);
+        let ock = prf_ock(&ovk, &cv, &cmu, &epk);
 
         (
             ovk,
+            ock,
             ivk,
             cv,
             cmu,
@@ -925,7 +965,7 @@ mod tests {
         ];
 
         for &height in heights.iter() {
-            let (_, _, _, cmu, epk, enc_ciphertext, _) = random_enc_ciphertext(height, &mut rng);
+            let (_, _, _, _, cmu, epk, enc_ciphertext, _) = random_enc_ciphertext(height, &mut rng);
 
             assert_eq!(
                 try_sapling_note_decryption::<TestNetwork>(
@@ -949,7 +989,7 @@ mod tests {
         ];
 
         for &height in heights.iter() {
-            let (_, ivk, _, cmu, _, enc_ciphertext, _) = random_enc_ciphertext(height, &mut rng);
+            let (_, _, ivk, _, cmu, _, enc_ciphertext, _) = random_enc_ciphertext(height, &mut rng);
 
             assert_eq!(
                 try_sapling_note_decryption::<TestNetwork>(
@@ -973,7 +1013,7 @@ mod tests {
         ];
 
         for &height in heights.iter() {
-            let (_, ivk, _, _, epk, enc_ciphertext, _) = random_enc_ciphertext(height, &mut rng);
+            let (_, _, ivk, _, _, epk, enc_ciphertext, _) = random_enc_ciphertext(height, &mut rng);
 
             assert_eq!(
                 try_sapling_note_decryption::<TestNetwork>(
@@ -997,7 +1037,7 @@ mod tests {
         ];
 
         for &height in heights.iter() {
-            let (_, ivk, _, cmu, epk, mut enc_ciphertext, _) =
+            let (_, _, ivk, _, cmu, epk, mut enc_ciphertext, _) =
                 random_enc_ciphertext(height, &mut rng);
 
             enc_ciphertext[ENC_CIPHERTEXT_SIZE - 1] ^= 0xff;
@@ -1026,7 +1066,7 @@ mod tests {
         let leadbytes = [0x02, 0x03, 0x01];
 
         for (&height, &leadbyte) in heights.iter().zip(leadbytes.iter()) {
-            let (ovk, ivk, cv, cmu, epk, mut enc_ciphertext, out_ciphertext) =
+            let (ovk, _, ivk, cv, cmu, epk, mut enc_ciphertext, out_ciphertext) =
                 random_enc_ciphertext(height, &mut rng);
 
             reencrypt_enc_ciphertext(
@@ -1060,7 +1100,7 @@ mod tests {
         ];
 
         for &height in heights.iter() {
-            let (ovk, ivk, cv, cmu, epk, mut enc_ciphertext, out_ciphertext) =
+            let (ovk, _, ivk, cv, cmu, epk, mut enc_ciphertext, out_ciphertext) =
                 random_enc_ciphertext(height, &mut rng);
 
             reencrypt_enc_ciphertext(
@@ -1094,7 +1134,7 @@ mod tests {
         ];
 
         for &height in heights.iter() {
-            let (ovk, ivk, cv, cmu, epk, mut enc_ciphertext, out_ciphertext) =
+            let (ovk, _, ivk, cv, cmu, epk, mut enc_ciphertext, out_ciphertext) =
                 random_enc_ciphertext(height, &mut rng);
 
             reencrypt_enc_ciphertext(
@@ -1128,7 +1168,7 @@ mod tests {
         ];
 
         for &height in heights.iter() {
-            let (_, _, _, cmu, epk, enc_ciphertext, _) = random_enc_ciphertext(height, &mut rng);
+            let (_, _, _, _, cmu, epk, enc_ciphertext, _) = random_enc_ciphertext(height, &mut rng);
 
             assert_eq!(
                 try_sapling_compact_note_decryption::<TestNetwork>(
@@ -1152,7 +1192,7 @@ mod tests {
         ];
 
         for &height in heights.iter() {
-            let (_, ivk, _, cmu, _, enc_ciphertext, _) = random_enc_ciphertext(height, &mut rng);
+            let (_, _, ivk, _, cmu, _, enc_ciphertext, _) = random_enc_ciphertext(height, &mut rng);
 
             assert_eq!(
                 try_sapling_compact_note_decryption::<TestNetwork>(
@@ -1176,7 +1216,7 @@ mod tests {
         ];
 
         for &height in heights.iter() {
-            let (_, ivk, _, _, epk, enc_ciphertext, _) = random_enc_ciphertext(height, &mut rng);
+            let (_, _, ivk, _, _, epk, enc_ciphertext, _) = random_enc_ciphertext(height, &mut rng);
 
             assert_eq!(
                 try_sapling_compact_note_decryption::<TestNetwork>(
@@ -1203,7 +1243,7 @@ mod tests {
         let leadbytes = [0x02, 0x03, 0x01];
 
         for (&height, &leadbyte) in heights.iter().zip(leadbytes.iter()) {
-            let (ovk, ivk, cv, cmu, epk, mut enc_ciphertext, out_ciphertext) =
+            let (ovk, _, ivk, cv, cmu, epk, mut enc_ciphertext, out_ciphertext) =
                 random_enc_ciphertext(height, &mut rng);
 
             reencrypt_enc_ciphertext(
@@ -1237,7 +1277,7 @@ mod tests {
         ];
 
         for &height in heights.iter() {
-            let (ovk, ivk, cv, cmu, epk, mut enc_ciphertext, out_ciphertext) =
+            let (ovk, _, ivk, cv, cmu, epk, mut enc_ciphertext, out_ciphertext) =
                 random_enc_ciphertext(height, &mut rng);
 
             reencrypt_enc_ciphertext(
@@ -1271,7 +1311,7 @@ mod tests {
         ];
 
         for &height in heights.iter() {
-            let (ovk, ivk, cv, cmu, epk, mut enc_ciphertext, out_ciphertext) =
+            let (ovk, _, ivk, cv, cmu, epk, mut enc_ciphertext, out_ciphertext) =
                 random_enc_ciphertext(height, &mut rng);
 
             reencrypt_enc_ciphertext(
@@ -1305,7 +1345,7 @@ mod tests {
         ];
 
         for &height in heights.iter() {
-            let (mut ovk, _, cv, cmu, epk, enc_ciphertext, out_ciphertext) =
+            let (mut ovk, _, _, cv, cmu, epk, enc_ciphertext, out_ciphertext) =
                 random_enc_ciphertext(height, &mut rng);
 
             ovk.0[0] ^= 0xff;
@@ -1325,6 +1365,32 @@ mod tests {
     }
 
     #[test]
+    fn recovery_with_invalid_ock() {
+        let mut rng = OsRng;
+        let heights = [
+            TestNetwork::activation_height(Sapling).unwrap(),
+            TestNetwork::activation_height(Canopy).unwrap(),
+        ];
+
+        for &height in heights.iter() {
+            let (_, _, _, _, cmu, epk, enc_ciphertext, out_ciphertext) =
+                random_enc_ciphertext(height, &mut rng);
+
+            assert_eq!(
+                try_sapling_output_recovery_with_ock::<TestNetwork>(
+                    height,
+                    &[0u8; 32],
+                    &cmu,
+                    &epk,
+                    &enc_ciphertext,
+                    &out_ciphertext
+                ),
+                None
+            );
+        }
+    }
+
+    #[test]
     fn recovery_with_invalid_cv() {
         let mut rng = OsRng;
         let heights = [
@@ -1333,7 +1399,7 @@ mod tests {
         ];
 
         for &height in heights.iter() {
-            let (ovk, _, _, cmu, epk, enc_ciphertext, out_ciphertext) =
+            let (ovk, _, _, _, cmu, epk, enc_ciphertext, out_ciphertext) =
                 random_enc_ciphertext(height, &mut rng);
 
             assert_eq!(
@@ -1360,7 +1426,7 @@ mod tests {
         ];
 
         for &height in heights.iter() {
-            let (ovk, _, cv, _, epk, enc_ctext, out_ctext) =
+            let (ovk, ock, _, cv, _, epk, enc_ctext, out_ctext) =
                 random_enc_ciphertext(height, &mut rng);
 
             assert_eq!(
@@ -1368,6 +1434,17 @@ mod tests {
                     height,
                     &ovk,
                     &cv,
+                    &Fr::random(&mut rng),
+                    &epk,
+                    &enc_ctext,
+                    &out_ctext
+                ),
+                None
+            );
+            assert_eq!(
+                try_sapling_output_recovery_with_ock::<TestNetwork>(
+                    height,
+                    &ock.as_bytes(),
                     &Fr::random(&mut rng),
                     &epk,
                     &enc_ctext,
@@ -1387,7 +1464,7 @@ mod tests {
         ];
 
         for &height in heights.iter() {
-            let (ovk, _, cv, cmu, _, enc_ciphertext, out_ciphertext) =
+            let (ovk, ock, _, cv, cmu, _, enc_ciphertext, out_ciphertext) =
                 random_enc_ciphertext(height, &mut rng);
 
             assert_eq!(
@@ -1395,6 +1472,17 @@ mod tests {
                     height,
                     &ovk,
                     &cv,
+                    &cmu,
+                    &edwards::Point::<Bls12, _>::rand(&mut rng, &JUBJUB).mul_by_cofactor(&JUBJUB),
+                    &enc_ciphertext,
+                    &out_ciphertext
+                ),
+                None
+            );
+            assert_eq!(
+                try_sapling_output_recovery_with_ock::<TestNetwork>(
+                    height,
+                    &ock.as_bytes(),
                     &cmu,
                     &edwards::Point::<Bls12, _>::rand(&mut rng, &JUBJUB).mul_by_cofactor(&JUBJUB),
                     &enc_ciphertext,
@@ -1414,7 +1502,7 @@ mod tests {
         ];
 
         for &height in heights.iter() {
-            let (ovk, _, cv, cmu, epk, mut enc_ciphertext, out_ciphertext) =
+            let (ovk, ock, _, cv, cmu, epk, mut enc_ciphertext, out_ciphertext) =
                 random_enc_ciphertext(height, &mut rng);
 
             enc_ciphertext[ENC_CIPHERTEXT_SIZE - 1] ^= 0xff;
@@ -1423,6 +1511,17 @@ mod tests {
                     height,
                     &ovk,
                     &cv,
+                    &cmu,
+                    &epk,
+                    &enc_ciphertext,
+                    &out_ciphertext
+                ),
+                None
+            );
+            assert_eq!(
+                try_sapling_output_recovery_with_ock::<TestNetwork>(
+                    height,
+                    &ock.as_bytes(),
                     &cmu,
                     &epk,
                     &enc_ciphertext,
@@ -1442,7 +1541,7 @@ mod tests {
         ];
 
         for &height in heights.iter() {
-            let (ovk, _, cv, cmu, epk, enc_ciphertext, mut out_ciphertext) =
+            let (ovk, ock, _, cv, cmu, epk, enc_ciphertext, mut out_ciphertext) =
                 random_enc_ciphertext(height, &mut rng);
 
             out_ciphertext[OUT_CIPHERTEXT_SIZE - 1] ^= 0xff;
@@ -1451,6 +1550,17 @@ mod tests {
                     height,
                     &ovk,
                     &cv,
+                    &cmu,
+                    &epk,
+                    &enc_ciphertext,
+                    &out_ciphertext
+                ),
+                None
+            );
+            assert_eq!(
+                try_sapling_output_recovery_with_ock::<TestNetwork>(
+                    height,
+                    &ock.as_bytes(),
                     &cmu,
                     &epk,
                     &enc_ciphertext,
@@ -1473,7 +1583,7 @@ mod tests {
         let leadbytes = [0x02, 0x03, 0x01];
 
         for (&height, &leadbyte) in heights.iter().zip(leadbytes.iter()) {
-            let (ovk, _, cv, cmu, epk, mut enc_ciphertext, out_ciphertext) =
+            let (ovk, ock, _, cv, cmu, epk, mut enc_ciphertext, out_ciphertext) =
                 random_enc_ciphertext(height, &mut rng);
 
             reencrypt_enc_ciphertext(
@@ -1497,6 +1607,17 @@ mod tests {
                 ),
                 None
             );
+            assert_eq!(
+                try_sapling_output_recovery_with_ock::<TestNetwork>(
+                    height,
+                    &ock.as_bytes(),
+                    &cmu,
+                    &epk,
+                    &enc_ciphertext,
+                    &out_ciphertext
+                ),
+                None
+            );
         }
     }
 
@@ -1509,7 +1630,7 @@ mod tests {
         ];
 
         for &height in heights.iter() {
-            let (ovk, _, cv, cmu, epk, mut enc_ciphertext, out_ciphertext) =
+            let (ovk, ock, _, cv, cmu, epk, mut enc_ciphertext, out_ciphertext) =
                 random_enc_ciphertext(height, &mut rng);
 
             reencrypt_enc_ciphertext(
@@ -1533,6 +1654,17 @@ mod tests {
                 ),
                 None
             );
+            assert_eq!(
+                try_sapling_output_recovery_with_ock::<TestNetwork>(
+                    height,
+                    &ock.as_bytes(),
+                    &cmu,
+                    &epk,
+                    &enc_ciphertext,
+                    &out_ciphertext
+                ),
+                None
+            );
         }
     }
 
@@ -1545,7 +1677,7 @@ mod tests {
         ];
 
         for &height in heights.iter() {
-            let (ovk, _, cv, cmu, epk, mut enc_ciphertext, out_ciphertext) =
+            let (ovk, ock, _, cv, cmu, epk, mut enc_ciphertext, out_ciphertext) =
                 random_enc_ciphertext(height, &mut rng);
 
             reencrypt_enc_ciphertext(
@@ -1569,6 +1701,17 @@ mod tests {
                 ),
                 None
             );
+            assert_eq!(
+                try_sapling_output_recovery_with_ock::<TestNetwork>(
+                    height,
+                    &ock.as_bytes(),
+                    &cmu,
+                    &epk,
+                    &enc_ciphertext,
+                    &out_ciphertext
+                ),
+                None
+            );
         }
     }
 
@@ -1582,7 +1725,7 @@ mod tests {
 
         for &height in heights.iter() {
             let ivk = Fs::zero();
-            let (ovk, _, cv, cmu, epk, enc_ciphertext, out_ciphertext) =
+            let (ovk, ock, _, cv, cmu, epk, enc_ciphertext, out_ciphertext) =
                 random_enc_ciphertext_with(height, ivk, &mut rng);
 
             assert_eq!(
@@ -1590,6 +1733,17 @@ mod tests {
                     height,
                     &ovk,
                     &cv,
+                    &cmu,
+                    &epk,
+                    &enc_ciphertext,
+                    &out_ciphertext
+                ),
+                None
+            );
+            assert_eq!(
+                try_sapling_output_recovery_with_ock::<TestNetwork>(
+                    height,
+                    &ock.as_bytes(),
                     &cmu,
                     &epk,
                     &enc_ciphertext,
