@@ -195,6 +195,18 @@ impl CacheOps for CacheConnection {
     {
         chain::validate_chain(self, from_height, validate)
     }
+
+    fn with_cached_blocks<F>(
+        &self,
+        from_height: BlockHeight,
+        limit: Option<u32>,
+        with_row: F,
+    ) -> Result<(), Self::Error>
+    where
+        F: FnMut(BlockHeight, CompactBlock) -> Result<(), Self::Error>,
+    {
+        scan::with_cached_blocks(self, from_height, limit, with_row)
+    }
 }
 
 fn address_from_extfvk<P: consensus::Parameters>(

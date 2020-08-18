@@ -121,4 +121,13 @@ pub trait CacheOps {
     ) -> Result<Option<BlockHash>, Self::Error>
     where
         F: Fn(&CompactBlock, &CompactBlock) -> Result<(), Self::Error>;
+
+    fn with_cached_blocks<F>(
+        &self,
+        from_height: BlockHeight,
+        limit: Option<u32>,
+        with_row: F,
+    ) -> Result<(), Self::Error>
+    where
+        F: FnMut(BlockHeight, CompactBlock) -> Result<(), Self::Error>;
 }
