@@ -4,7 +4,7 @@ use rusqlite::{OptionalExtension, NO_PARAMS};
 
 use zcash_primitives::{
     consensus::{self, BlockHeight},
-    merkle_tree::CommitmentTree,
+    merkle_tree::{CommitmentTree, IncrementalWitness},
     note_encryption::Memo,
     primitives::PaymentAddress,
     sapling::Node,
@@ -259,6 +259,30 @@ pub fn get_commitment_tree(
         )
         .optional()
         .map_err(SqliteClientError::from)
+}
+
+pub fn get_witnesses(
+    data: &DataConnection,
+    block_height: BlockHeight,
+) -> Result<Vec<(NoteId, IncrementalWitness<Node>)>, SqliteClientError> {
+    let mut stmt_fetch_witnesses = data
+        .0
+        .prepare("SELECT note, witness FROM sapling_witnesses WHERE block = ?")?;
+    let witnesses = stmt_fetch_witnesses
+        .query_map(&[u32::from(block_height)], |row| {
+            let id_note = NoteId(row.get(0)?);
+            let data: Vec<u8> = row.get(1)?;
+            Ok(IncrementalWitness::read(&data[..]).map(|witness| (id_note, witness)))
+        })
+        .map_err(SqliteClientError::from)?;
+
+    let mut res = vec![];
+    for witness in witnesses {
+        // unwrap database error & IO error from IncrementalWitness::read
+        res.push(witness??);
+    }
+
+    Ok(res)
 }
 
 #[cfg(test)]

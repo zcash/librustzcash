@@ -4,8 +4,10 @@ use zcash_primitives::transaction::builder;
 
 use zcash_client_backend::data_api::error::Error;
 
+use crate::NoteId;
+
 #[derive(Debug)]
-pub struct SqliteClientError(pub Error<rusqlite::Error>);
+pub struct SqliteClientError(pub Error<rusqlite::Error, NoteId>);
 
 impl fmt::Display for SqliteClientError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -13,8 +15,8 @@ impl fmt::Display for SqliteClientError {
     }
 }
 
-impl From<Error<rusqlite::Error>> for SqliteClientError {
-    fn from(e: Error<rusqlite::Error>) -> Self {
+impl From<Error<rusqlite::Error, NoteId>> for SqliteClientError {
+    fn from(e: Error<rusqlite::Error, NoteId>) -> Self {
         SqliteClientError(e)
     }
 }

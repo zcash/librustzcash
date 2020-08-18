@@ -1,7 +1,7 @@
 use zcash_primitives::{
     block::BlockHash,
     consensus::{self, BlockHeight},
-    merkle_tree::CommitmentTree,
+    merkle_tree::{CommitmentTree, IncrementalWitness},
     primitives::PaymentAddress,
     sapling::Node,
     transaction::components::Amount,
@@ -72,6 +72,11 @@ pub trait DBOps {
         &self,
         block_height: BlockHeight,
     ) -> Result<Option<CommitmentTree<Node>>, Self::Error>;
+
+    fn get_witnesses(
+        &self,
+        block_height: BlockHeight,
+    ) -> Result<Vec<(Self::NoteId, IncrementalWitness<Node>)>, Self::Error>;
 
     //    fn get_witnesses(block_height: BlockHeight) -> Result<Box<dyn Iterator<Item = IncrementalWitness<Node>>>, Self::Error>;
     //

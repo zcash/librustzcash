@@ -24,13 +24,15 @@
 //! [`CompactBlock`]: zcash_client_backend::proto::compact_formats::CompactBlock
 //! [`init_cache_database`]: crate::init::init_cache_database
 
-use rusqlite::Connection;
+use std::fmt;
 use std::path::Path;
+
+use rusqlite::Connection;
 
 use zcash_primitives::{
     block::BlockHash,
     consensus::{self, BlockHeight},
-    merkle_tree::CommitmentTree,
+    merkle_tree::{CommitmentTree, IncrementalWitness},
     primitives::PaymentAddress,
     sapling::Node,
     transaction::components::Amount,
@@ -52,8 +54,17 @@ pub mod query;
 pub mod scan;
 pub mod transact;
 
+#[derive(Debug, Copy, Clone)]
 pub struct AccountId(pub u32);
+
+#[derive(Debug, Copy, Clone)]
 pub struct NoteId(pub i64);
+
+impl fmt::Display for NoteId {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "Note {}", self.0)
+    }
+}
 
 pub struct DataConnection(Connection);
 
@@ -145,6 +156,13 @@ impl DBOps for DataConnection {
         block_height: BlockHeight,
     ) -> Result<Option<CommitmentTree<Node>>, Self::Error> {
         query::get_commitment_tree(self, block_height)
+    }
+
+    fn get_witnesses(
+        &self,
+        block_height: BlockHeight,
+    ) -> Result<Vec<(Self::NoteId, IncrementalWitness<Node>)>, Self::Error> {
+        query::get_witnesses(self, block_height)
     }
 }
 
