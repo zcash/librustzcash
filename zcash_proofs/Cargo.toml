@@ -15,7 +15,7 @@ edition = "2018"
 bellman = { version = "0.6", path = "../bellman", default-features = false, features = ["groth16"] }
 blake2b_simd = "0.5"
 byteorder = "1"
-directories = { version = "1", optional = true }
+directories = { version = "3", optional = true }
 ff = { version = "0.6", path = "../ff" }
 minreq = { version = "2", features = ["https"], optional = true }
 pairing = { version = "0.16", path = "../pairing" }

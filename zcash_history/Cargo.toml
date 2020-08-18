@@ -9,7 +9,7 @@ description = "Library for Zcash blockchain history tools"
 
 [dev-dependencies]
 assert_matches = "1.3.0"
-quickcheck = "0.8"
+quickcheck = "0.9"
 
 [dependencies]
 bigint = "4"

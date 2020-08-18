@@ -10,7 +10,7 @@ use rand_xorshift::XorShiftRng;
 
 use group::Group;
 use pairing::bls12_381::*;
-use pairing::{Engine, MillerLoopResult, MultiMillerLoop, PairingCurveAffine};
+use pairing::{Engine, MillerLoopResult, MultiMillerLoop};
 
 fn bench_pairing_g2_preparation(c: &mut Criterion) {
     const SAMPLES: usize = 1000;
