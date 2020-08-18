@@ -24,7 +24,7 @@ use zcash_primitives::{
     transaction::Transaction,
 };
 
-use crate::{error::SqliteClientError, CacheConnection, DataConnection, NoteId};
+use crate::{error::SqliteClientError, AccountId, CacheConnection, DataConnection, NoteId};
 
 struct CompactBlockRow {
     height: BlockHeight,
@@ -107,16 +107,7 @@ pub fn scan_cached_blocks<P: consensus::Parameters>(
     // Get most recent incremental witnesses for the notes we are tracking
     let mut witnesses = data.get_witnesses(last_height)?;
 
-    // Get the nullifiers for the notes we are tracking
-    let mut stmt_fetch_nullifiers = data
-        .0
-        .prepare("SELECT id_note, nf, account FROM received_notes WHERE spent IS NULL")?;
-    let nullifiers = stmt_fetch_nullifiers.query_map(NO_PARAMS, |row| {
-        let nf: Vec<_> = row.get(1)?;
-        let account: i64 = row.get(2)?;
-        Ok((nf, account as usize))
-    })?;
-    let mut nullifiers: Vec<_> = nullifiers.collect::<Result<_, _>>()?;
+    let mut nullifiers = data.get_nullifiers()?;
 
     // Prepare per-block SQL statements
     let mut stmt_insert_block = data.0.prepare(
@@ -200,7 +191,10 @@ pub fn scan_cached_blocks<P: consensus::Parameters>(
         let block_time = block.time;
 
         let txs = {
-            let nf_refs: Vec<_> = nullifiers.iter().map(|(nf, acc)| (&nf[..], *acc)).collect();
+            let nf_refs: Vec<_> = nullifiers
+                .iter()
+                .map(|(nf, acc)| (&nf[..], acc.0 as usize))
+                .collect();
             let mut witness_refs: Vec<_> = witnesses.iter_mut().map(|w| &mut w.1).collect();
             scan_block(
                 params,
@@ -332,7 +326,7 @@ pub fn scan_cached_blocks<P: consensus::Parameters>(
                 witnesses.push((note_id, output.witness));
 
                 // Cache nullifier for note (to detect subsequent spends in this scan).
-                nullifiers.push((nf, output.account));
+                nullifiers.push((nf, AccountId(output.account as u32)));
             }
         }
 
