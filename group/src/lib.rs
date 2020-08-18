@@ -105,6 +105,25 @@ pub trait Curve:
 
 pub trait GroupEncoding: Sized {
     /// The encoding of group elements.
+    ///
+    /// The `Default` implementation is not required to return a valid point encoding. The
+    /// bound is present to enable encodings to be constructed generically:
+    /// ```
+    /// # use group::GroupEncoding;
+    /// # use subtle::CtOption;
+    /// # struct G;
+    /// # impl GroupEncoding for G {
+    /// #     type Repr = [u8; 0];
+    /// #     fn from_bytes(bytes: &Self::Repr) -> CtOption<Self> { unimplemented!() }
+    /// #     fn from_bytes_unchecked(bytes: &Self::Repr) -> CtOption<Self> { unimplemented!() }
+    /// #     fn to_bytes(&self) -> Self::Repr { unimplemented!() }
+    /// # }
+    /// # let buf = &[0u8; 0][..];
+    /// let mut encoding = <G as GroupEncoding>::Repr::default();
+    /// encoding.as_mut().copy_from_slice(buf);
+    /// ```
+    ///
+    /// It is recommended that the default should be the all-zeroes encoding.
     type Repr: Default + AsRef<[u8]> + AsMut<[u8]>;
 
     /// Attempts to deserialize a group element from its encoding.
