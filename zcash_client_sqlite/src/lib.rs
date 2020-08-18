@@ -164,6 +164,10 @@ impl DBOps for DataConnection {
     ) -> Result<Vec<(Self::NoteId, IncrementalWitness<Node>)>, Self::Error> {
         query::get_witnesses(self, block_height)
     }
+
+    fn get_nullifiers(&self) -> Result<Vec<(Vec<u8>, Self::AccountId)>, Self::Error> {
+        query::get_nullifiers(self)
+    }
 }
 
 pub struct CacheConnection(Connection);

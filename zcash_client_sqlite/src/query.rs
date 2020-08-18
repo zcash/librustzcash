@@ -285,6 +285,27 @@ pub fn get_witnesses(
     Ok(res)
 }
 
+pub fn get_nullifiers(
+    data: &DataConnection,
+) -> Result<Vec<(Vec<u8>, AccountId)>, SqliteClientError> {
+    // Get the nullifiers for the notes we are tracking
+    let mut stmt_fetch_nullifiers = data
+        .0
+        .prepare("SELECT id_note, nf, account FROM received_notes WHERE spent IS NULL")?;
+    let nullifiers = stmt_fetch_nullifiers.query_map(NO_PARAMS, |row| {
+        let nf: Vec<u8> = row.get(1)?;
+        let account = AccountId(row.get(2)?);
+        Ok((nf, account))
+    })?;
+
+    let mut res = vec![];
+    for nullifier in nullifiers {
+        // unwrap database error
+        res.push(nullifier?);
+    }
+    Ok(res)
+}
+
 #[cfg(test)]
 mod tests {
     use rusqlite::Connection;

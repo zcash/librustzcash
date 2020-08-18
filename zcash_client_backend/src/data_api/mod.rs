@@ -78,6 +78,8 @@ pub trait DBOps {
         block_height: BlockHeight,
     ) -> Result<Vec<(Self::NoteId, IncrementalWitness<Node>)>, Self::Error>;
 
+    fn get_nullifiers(&self) -> Result<Vec<(Vec<u8>, Self::AccountId)>, Self::Error>;
+
     //    fn get_witnesses(block_height: BlockHeight) -> Result<Box<dyn Iterator<Item = IncrementalWitness<Node>>>, Self::Error>;
     //
     //    fn get_nullifiers() -> Result<(Vec<u8>, Account), Self::Error>;
