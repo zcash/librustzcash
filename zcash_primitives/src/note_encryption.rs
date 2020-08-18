@@ -488,7 +488,7 @@ pub fn try_sapling_compact_note_decryption<P: consensus::Parameters>(
 /// `PaymentAddress` to which the note was sent.
 ///
 /// Implements part of section 4.17.3 of the Zcash Protocol Specification.
-/// For decryption using a Full Viewing Key see [try_sapling_output_recovery].
+/// For decryption using a Full Viewing Key see [`try_sapling_output_recovery`].
 pub fn try_sapling_output_recovery_with_ock<P: consensus::Parameters>(
     height: u32,
     ock: &[u8],
@@ -776,10 +776,8 @@ mod tests {
     ) {
         let ivk = Fs::random(&mut rng);
 
-        let (ovk, _, ivk, cv, cmu, epk, enc_ciphertext, out_ciphertext) =
+        let (ovk, ock, ivk, cv, cmu, epk, enc_ciphertext, out_ciphertext) =
             random_enc_ciphertext_with(height, ivk, rng);
-
-        let ock = prf_ock(&ovk, &cv, &cmu, &epk);
 
         assert!(try_sapling_note_decryption::<TestNetwork>(
             height,
