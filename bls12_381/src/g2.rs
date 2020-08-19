@@ -1,9 +1,14 @@
 //! This module provides an implementation of the $\mathbb{G}_2$ group of BLS12-381.
 
 use core::borrow::Borrow;
+use core::fmt;
 use core::iter::Sum;
 use core::ops::{Add, AddAssign, Mul, MulAssign, Neg, Sub, SubAssign};
-
+use group::{
+    prime::{PrimeCurve, PrimeCurveAffine, PrimeGroup},
+    Curve, Group, GroupEncoding, UncompressedEncoding, WnafGroup,
+};
+use rand_core::RngCore;
 use subtle::{Choice, ConditionallySelectable, ConstantTimeEq, CtOption};
 
 use crate::fp::Fp;
@@ -26,6 +31,12 @@ pub struct G2Affine {
 impl Default for G2Affine {
     fn default() -> G2Affine {
         G2Affine::identity()
+    }
+}
+
+impl fmt::Display for G2Affine {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{:?}", self)
     }
 }
 
@@ -480,6 +491,18 @@ pub struct G2Projective {
     pub(crate) x: Fp2,
     pub(crate) y: Fp2,
     pub(crate) z: Fp2,
+}
+
+impl Default for G2Projective {
+    fn default() -> G2Projective {
+        G2Projective::identity()
+    }
+}
+
+impl fmt::Display for G2Projective {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{:?}", self)
+    }
 }
 
 impl<'a> From<&'a G2Affine> for G2Projective {
@@ -1022,6 +1045,205 @@ impl G2Projective {
         (self.y.square() - (self.x.square() * self.x))
             .ct_eq(&((self.z.square() * self.z).square() * B))
             | self.z.is_zero()
+    }
+}
+
+pub struct G2Compressed([u8; 96]);
+
+impl fmt::Debug for G2Compressed {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        self.0[..].fmt(f)
+    }
+}
+
+impl Default for G2Compressed {
+    fn default() -> Self {
+        G2Compressed([0; 96])
+    }
+}
+
+impl AsRef<[u8]> for G2Compressed {
+    fn as_ref(&self) -> &[u8] {
+        &self.0
+    }
+}
+
+impl AsMut<[u8]> for G2Compressed {
+    fn as_mut(&mut self) -> &mut [u8] {
+        &mut self.0
+    }
+}
+
+pub struct G2Uncompressed([u8; 192]);
+
+impl fmt::Debug for G2Uncompressed {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        self.0[..].fmt(f)
+    }
+}
+
+impl Default for G2Uncompressed {
+    fn default() -> Self {
+        G2Uncompressed([0; 192])
+    }
+}
+
+impl AsRef<[u8]> for G2Uncompressed {
+    fn as_ref(&self) -> &[u8] {
+        &self.0
+    }
+}
+
+impl AsMut<[u8]> for G2Uncompressed {
+    fn as_mut(&mut self) -> &mut [u8] {
+        &mut self.0
+    }
+}
+
+impl Group for G2Projective {
+    type Scalar = Scalar;
+
+    fn random<R: RngCore + ?Sized>(rng: &mut R) -> Self {
+        loop {
+            let x = Fp2::random(rng);
+            let flip_sign = rng.next_u32() % 2 != 0;
+
+            // Obtain the corresponding y-coordinate given x as y = sqrt(x^3 + 4)
+            let p = ((x.square() * x) + B).sqrt().map(|y| G2Affine {
+                x,
+                y: if flip_sign { -y } else { y },
+                infinity: 0.into(),
+            });
+
+            if p.is_some().into() {
+                let p = p.unwrap().to_curve().clear_cofactor();
+
+                if bool::from(!p.is_identity()) {
+                    return p;
+                }
+            }
+        }
+    }
+
+    fn identity() -> Self {
+        Self::identity()
+    }
+
+    fn generator() -> Self {
+        Self::generator()
+    }
+
+    fn is_identity(&self) -> Choice {
+        self.is_identity()
+    }
+
+    #[must_use]
+    fn double(&self) -> Self {
+        self.double()
+    }
+}
+
+impl WnafGroup for G2Projective {
+    fn recommended_wnaf_for_num_scalars(num_scalars: usize) -> usize {
+        const RECOMMENDATIONS: [usize; 11] = [1, 3, 8, 20, 47, 126, 260, 826, 1501, 4555, 84071];
+
+        let mut ret = 4;
+        for r in &RECOMMENDATIONS {
+            if num_scalars > *r {
+                ret += 1;
+            } else {
+                break;
+            }
+        }
+
+        ret
+    }
+}
+
+impl PrimeGroup for G2Projective {}
+
+impl Curve for G2Projective {
+    type AffineRepr = G2Affine;
+
+    fn batch_normalize(p: &[Self], q: &mut [Self::AffineRepr]) {
+        Self::batch_normalize(p, q);
+    }
+
+    fn to_affine(&self) -> Self::AffineRepr {
+        self.into()
+    }
+}
+
+impl PrimeCurve for G2Projective {
+    type Affine = G2Affine;
+}
+
+impl PrimeCurveAffine for G2Affine {
+    type Scalar = Scalar;
+    type Curve = G2Projective;
+
+    fn identity() -> Self {
+        Self::identity()
+    }
+
+    fn generator() -> Self {
+        Self::generator()
+    }
+
+    fn is_identity(&self) -> Choice {
+        self.is_identity()
+    }
+
+    fn to_curve(&self) -> Self::Curve {
+        self.into()
+    }
+}
+
+impl GroupEncoding for G2Projective {
+    type Repr = G2Compressed;
+
+    fn from_bytes(bytes: &Self::Repr) -> CtOption<Self> {
+        G2Affine::from_bytes(bytes).map(Self::from)
+    }
+
+    fn from_bytes_unchecked(bytes: &Self::Repr) -> CtOption<Self> {
+        G2Affine::from_bytes_unchecked(bytes).map(Self::from)
+    }
+
+    fn to_bytes(&self) -> Self::Repr {
+        G2Affine::from(self).to_bytes()
+    }
+}
+
+impl GroupEncoding for G2Affine {
+    type Repr = G2Compressed;
+
+    fn from_bytes(bytes: &Self::Repr) -> CtOption<Self> {
+        Self::from_compressed(&bytes.0)
+    }
+
+    fn from_bytes_unchecked(bytes: &Self::Repr) -> CtOption<Self> {
+        Self::from_compressed_unchecked(&bytes.0)
+    }
+
+    fn to_bytes(&self) -> Self::Repr {
+        G2Compressed(self.to_compressed())
+    }
+}
+
+impl UncompressedEncoding for G2Affine {
+    type Uncompressed = G2Uncompressed;
+
+    fn from_uncompressed(bytes: &Self::Uncompressed) -> CtOption<Self> {
+        Self::from_uncompressed(&bytes.0)
+    }
+
+    fn from_uncompressed_unchecked(bytes: &Self::Uncompressed) -> CtOption<Self> {
+        Self::from_uncompressed_unchecked(&bytes.0)
+    }
+
+    fn to_uncompressed(&self) -> Self::Uncompressed {
+        G2Uncompressed(self.to_uncompressed())
     }
 }
 

@@ -32,7 +32,17 @@
 #[macro_use]
 extern crate std;
 
+use core::borrow::Borrow;
+use core::fmt;
+use core::iter::Sum;
 use core::ops::{Add, AddAssign, Mul, MulAssign, Neg, Sub, SubAssign};
+use ff::Field;
+use group::{
+    cofactor::{CofactorCurve, CofactorCurveAffine, CofactorGroup},
+    prime::PrimeGroup,
+    Curve, Group, GroupEncoding, WnafGroup,
+};
+use rand_core::RngCore;
 use subtle::{Choice, ConditionallySelectable, ConstantTimeEq, CtOption};
 
 #[macro_use]
@@ -49,10 +59,16 @@ const FR_MODULUS_BYTES: [u8; 32] = [
 
 /// This represents a Jubjub point in the affine `(u, v)`
 /// coordinates.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Eq)]
 pub struct AffinePoint {
     u: Fq,
     v: Fq,
+}
+
+impl fmt::Display for AffinePoint {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{:?}", self)
+    }
 }
 
 impl Neg for AffinePoint {
@@ -101,13 +117,19 @@ impl ConditionallySelectable for AffinePoint {
 /// * Add it to an `ExtendedPoint`, `AffineNielsPoint` or `ExtendedNielsPoint`.
 /// * Double it using `double()`.
 /// * Compare it with another extended point using `PartialEq` or `ct_eq()`.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Eq)]
 pub struct ExtendedPoint {
     u: Fq,
     v: Fq,
     z: Fq,
     t1: Fq,
     t2: Fq,
+}
+
+impl fmt::Display for ExtendedPoint {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{:?}", self)
+    }
 }
 
 impl ConstantTimeEq for ExtendedPoint {
@@ -137,6 +159,18 @@ impl ConditionallySelectable for ExtendedPoint {
 impl PartialEq for ExtendedPoint {
     fn eq(&self, other: &Self) -> bool {
         bool::from(self.ct_eq(other))
+    }
+}
+
+impl<T> Sum<T> for ExtendedPoint
+where
+    T: Borrow<ExtendedPoint>,
+{
+    fn sum<I>(iter: I) -> Self
+    where
+        I: Iterator<Item = T>,
+    {
+        iter.fold(Self::identity(), |acc, item| acc + item.borrow())
     }
 }
 
@@ -365,6 +399,11 @@ impl AffinePoint {
             u: Fq::zero(),
             v: Fq::one(),
         }
+    }
+
+    /// Determines if this point is the identity.
+    pub fn is_identity(&self) -> Choice {
+        ExtendedPoint::from(*self).is_identity()
     }
 
     /// Multiplies this point by the cofactor, producing an
@@ -638,6 +677,38 @@ impl ExtendedPoint {
         self.to_niels().multiply(by)
     }
 
+    /// Converts a batch of projective elements into affine elements.
+    ///
+    /// This function will panic if `p.len() != q.len()`.
+    ///
+    /// This costs 5 multiplications per element, and a field inversion.
+    fn batch_normalize(p: &[Self], q: &mut [AffinePoint]) {
+        assert_eq!(p.len(), q.len());
+
+        let mut acc = Fq::one();
+        for (p, q) in p.iter().zip(q.iter_mut()) {
+            // We use the `u` field of `AffinePoint` to store the product
+            // of previous z-coordinates seen.
+            q.u = acc;
+            acc *= &p.z;
+        }
+
+        // This is the inverse, as all z-coordinates are nonzero.
+        acc = acc.invert().unwrap();
+
+        for (p, q) in p.iter().zip(q.iter_mut()).rev() {
+            // Compute tmp = 1/z
+            let tmp = q.u * acc;
+
+            // Cancel out z-coordinate in denominator of `acc`
+            acc *= &p.z;
+
+            // Set the coordinates to the correct value
+            q.u = p.u * &tmp; // Multiply by 1/z
+            q.v = p.v * &tmp; // Multiply by 1/z
+        }
+    }
+
     /// This is only for debugging purposes and not
     /// exposed in the public API. Checks that this
     /// point is on the curve.
@@ -900,6 +971,335 @@ pub fn batch_normalize<'a>(v: &'a mut [ExtendedPoint]) -> impl Iterator<Item = A
     v.iter().map(|p| AffinePoint { u: p.u, v: p.v })
 }
 
+impl<'a, 'b> Mul<&'b Fr> for &'a AffinePoint {
+    type Output = ExtendedPoint;
+
+    fn mul(self, other: &'b Fr) -> ExtendedPoint {
+        self.to_niels().multiply(&other.to_bytes())
+    }
+}
+
+impl_binops_multiplicative_mixed!(AffinePoint, Fr, ExtendedPoint);
+
+/// This represents a point in the prime-order subgroup of Jubjub, in extended
+/// coordinates.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct SubgroupPoint(ExtendedPoint);
+
+impl From<SubgroupPoint> for ExtendedPoint {
+    fn from(val: SubgroupPoint) -> ExtendedPoint {
+        val.0
+    }
+}
+
+impl<'a> From<&'a SubgroupPoint> for &'a ExtendedPoint {
+    fn from(val: &'a SubgroupPoint) -> &'a ExtendedPoint {
+        &val.0
+    }
+}
+
+impl fmt::Display for SubgroupPoint {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl ConditionallySelectable for SubgroupPoint {
+    fn conditional_select(a: &Self, b: &Self, choice: Choice) -> Self {
+        SubgroupPoint(ExtendedPoint::conditional_select(&a.0, &b.0, choice))
+    }
+}
+
+impl<T> Sum<T> for SubgroupPoint
+where
+    T: Borrow<SubgroupPoint>,
+{
+    fn sum<I>(iter: I) -> Self
+    where
+        I: Iterator<Item = T>,
+    {
+        iter.fold(Self::identity(), |acc, item| acc + item.borrow())
+    }
+}
+
+impl Neg for SubgroupPoint {
+    type Output = SubgroupPoint;
+
+    #[inline]
+    fn neg(self) -> SubgroupPoint {
+        SubgroupPoint(-self.0)
+    }
+}
+
+impl Neg for &SubgroupPoint {
+    type Output = SubgroupPoint;
+
+    #[inline]
+    fn neg(self) -> SubgroupPoint {
+        SubgroupPoint(-self.0)
+    }
+}
+
+impl<'a, 'b> Add<&'b SubgroupPoint> for &'a ExtendedPoint {
+    type Output = ExtendedPoint;
+
+    #[inline]
+    fn add(self, other: &'b SubgroupPoint) -> ExtendedPoint {
+        self + &other.0
+    }
+}
+
+impl<'a, 'b> Sub<&'b SubgroupPoint> for &'a ExtendedPoint {
+    type Output = ExtendedPoint;
+
+    #[inline]
+    fn sub(self, other: &'b SubgroupPoint) -> ExtendedPoint {
+        self - &other.0
+    }
+}
+
+impl_binops_additive!(ExtendedPoint, SubgroupPoint);
+
+impl<'a, 'b> Add<&'b SubgroupPoint> for &'a SubgroupPoint {
+    type Output = SubgroupPoint;
+
+    #[inline]
+    fn add(self, other: &'b SubgroupPoint) -> SubgroupPoint {
+        SubgroupPoint(self.0 + &other.0)
+    }
+}
+
+impl<'a, 'b> Sub<&'b SubgroupPoint> for &'a SubgroupPoint {
+    type Output = SubgroupPoint;
+
+    #[inline]
+    fn sub(self, other: &'b SubgroupPoint) -> SubgroupPoint {
+        SubgroupPoint(self.0 - &other.0)
+    }
+}
+
+impl_binops_additive!(SubgroupPoint, SubgroupPoint);
+
+impl<'a, 'b> Mul<&'b Fr> for &'a SubgroupPoint {
+    type Output = SubgroupPoint;
+
+    fn mul(self, other: &'b Fr) -> SubgroupPoint {
+        SubgroupPoint(self.0.multiply(&other.to_bytes()))
+    }
+}
+
+impl_binops_multiplicative!(SubgroupPoint, Fr);
+
+impl Group for ExtendedPoint {
+    type Scalar = Fr;
+
+    fn random<R: RngCore + ?Sized>(rng: &mut R) -> Self {
+        loop {
+            let v = Fq::random(rng);
+            let flip_sign = rng.next_u32() % 2 != 0;
+
+            // See AffinePoint::from_bytes for details.
+            let v2 = v.square();
+            let p = ((v2 - Fq::one())
+                * ((Fq::one() + EDWARDS_D * v2).invert().unwrap_or(Fq::zero())))
+            .sqrt()
+            .map(|u| AffinePoint {
+                u: if flip_sign { -u } else { u },
+                v,
+            });
+
+            if p.is_some().into() {
+                let p = p.unwrap().to_curve();
+
+                if bool::from(!p.is_identity()) {
+                    return p;
+                }
+            }
+        }
+    }
+
+    fn identity() -> Self {
+        Self::identity()
+    }
+
+    fn generator() -> Self {
+        AffinePoint::generator().into()
+    }
+
+    fn is_identity(&self) -> Choice {
+        self.is_identity()
+    }
+
+    #[must_use]
+    fn double(&self) -> Self {
+        self.double()
+    }
+}
+
+impl Group for SubgroupPoint {
+    type Scalar = Fr;
+
+    fn random<R: RngCore + ?Sized>(rng: &mut R) -> Self {
+        loop {
+            let p = ExtendedPoint::random(rng).clear_cofactor();
+
+            if bool::from(!p.is_identity()) {
+                return p;
+            }
+        }
+    }
+
+    fn identity() -> Self {
+        SubgroupPoint(ExtendedPoint::identity())
+    }
+
+    fn generator() -> Self {
+        ExtendedPoint::generator().clear_cofactor()
+    }
+
+    fn is_identity(&self) -> Choice {
+        self.0.is_identity()
+    }
+
+    #[must_use]
+    fn double(&self) -> Self {
+        SubgroupPoint(self.0.double())
+    }
+}
+
+impl WnafGroup for ExtendedPoint {
+    fn recommended_wnaf_for_num_scalars(num_scalars: usize) -> usize {
+        // Copied from bls12_381::g1, should be updated.
+        const RECOMMENDATIONS: [usize; 12] =
+            [1, 3, 7, 20, 43, 120, 273, 563, 1630, 3128, 7933, 62569];
+
+        let mut ret = 4;
+        for r in &RECOMMENDATIONS {
+            if num_scalars > *r {
+                ret += 1;
+            } else {
+                break;
+            }
+        }
+
+        ret
+    }
+}
+
+impl PrimeGroup for SubgroupPoint {}
+
+impl CofactorGroup for ExtendedPoint {
+    type Subgroup = SubgroupPoint;
+
+    fn clear_cofactor(&self) -> Self::Subgroup {
+        SubgroupPoint(self.mul_by_cofactor())
+    }
+
+    fn into_subgroup(self) -> CtOption<Self::Subgroup> {
+        CtOption::new(SubgroupPoint(self), self.is_torsion_free())
+    }
+}
+
+impl Curve for ExtendedPoint {
+    type AffineRepr = AffinePoint;
+
+    fn batch_normalize(p: &[Self], q: &mut [Self::AffineRepr]) {
+        Self::batch_normalize(p, q);
+    }
+
+    fn to_affine(&self) -> Self::AffineRepr {
+        self.into()
+    }
+}
+
+impl CofactorCurve for ExtendedPoint {
+    type Affine = AffinePoint;
+}
+
+impl CofactorCurveAffine for AffinePoint {
+    type Scalar = Fr;
+    type Curve = ExtendedPoint;
+
+    fn identity() -> Self {
+        Self::identity()
+    }
+
+    fn generator() -> Self {
+        // The point with the lowest positive v-coordinate and positive u-coordinate.
+        AffinePoint {
+            u: Fq::from_raw([
+                0xe4b3_d35d_f1a7_adfe,
+                0xcaf5_5d1b_29bf_81af,
+                0x8b0f_03dd_d60a_8187,
+                0x62ed_cbb8_bf37_87c8,
+            ]),
+            v: Fq::from_raw([
+                0x0000_0000_0000_000b,
+                0x0000_0000_0000_0000,
+                0x0000_0000_0000_0000,
+                0x0000_0000_0000_0000,
+            ]),
+        }
+    }
+
+    fn is_identity(&self) -> Choice {
+        self.is_identity()
+    }
+
+    fn to_curve(&self) -> Self::Curve {
+        (*self).into()
+    }
+}
+
+impl GroupEncoding for ExtendedPoint {
+    type Repr = [u8; 32];
+
+    fn from_bytes(bytes: &Self::Repr) -> CtOption<Self> {
+        AffinePoint::from_bytes(*bytes).map(Self::from)
+    }
+
+    fn from_bytes_unchecked(bytes: &Self::Repr) -> CtOption<Self> {
+        // We can't avoid curve checks when parsing a compressed encoding.
+        AffinePoint::from_bytes(*bytes).map(Self::from)
+    }
+
+    fn to_bytes(&self) -> Self::Repr {
+        AffinePoint::from(self).to_bytes()
+    }
+}
+
+impl GroupEncoding for SubgroupPoint {
+    type Repr = [u8; 32];
+
+    fn from_bytes(bytes: &Self::Repr) -> CtOption<Self> {
+        ExtendedPoint::from_bytes(bytes).and_then(|p| p.into_subgroup())
+    }
+
+    fn from_bytes_unchecked(bytes: &Self::Repr) -> CtOption<Self> {
+        ExtendedPoint::from_bytes_unchecked(bytes).map(SubgroupPoint)
+    }
+
+    fn to_bytes(&self) -> Self::Repr {
+        self.0.to_bytes()
+    }
+}
+
+impl GroupEncoding for AffinePoint {
+    type Repr = [u8; 32];
+
+    fn from_bytes(bytes: &Self::Repr) -> CtOption<Self> {
+        Self::from_bytes(*bytes)
+    }
+
+    fn from_bytes_unchecked(bytes: &Self::Repr) -> CtOption<Self> {
+        Self::from_bytes(*bytes)
+    }
+
+    fn to_bytes(&self) -> Self::Repr {
+        self.to_bytes()
+    }
+}
+
 #[test]
 fn test_is_on_curve_var() {
     assert!(AffinePoint::identity().is_on_curve_vartime());
@@ -1157,6 +1557,7 @@ fn find_curve_generator() {
                 assert!(bool::from(b.is_small_order()));
                 assert!(bool::from(b.is_identity()));
                 assert_eq!(FULL_GENERATOR, a);
+                assert_eq!(AffinePoint::generator(), a);
                 assert!(bool::from(a.mul_by_cofactor().is_torsion_free()));
                 return;
             }
