@@ -386,10 +386,11 @@ mod tests {
 
     use zcash_proofs::prover::LocalTxProver;
 
+    use zcash_client_backend::data_api::chain::scan_cached_blocks;
+
     use crate::{
         init::{init_accounts_table, init_blocks_table, init_cache_database, init_data_database},
         query::{get_balance, get_verified_balance},
-        scan::scan_cached_blocks,
         tests::{self, fake_compact_block, insert_into_cache, sapling_activation_height},
         AccountId, CacheConnection, DataConnection,
     };
