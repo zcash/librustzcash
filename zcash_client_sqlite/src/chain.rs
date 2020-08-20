@@ -10,7 +10,10 @@
 //!
 //! use zcash_client_backend::{
 //!     data_api::{
-//!         chain::validate_combined_chain,
+//!         chain::{
+//!             validate_combined_chain,
+//!             scan_cached_blocks,
+//!         },
 //!         error::Error,
 //!     }
 //! };
@@ -19,7 +22,6 @@
 //!     DataConnection,
 //!     CacheConnection,
 //!     chain::{rewind_to_height},
-//!     scan::scan_cached_blocks,
 //! };
 //!
 //! let network = Network::TestNetwork;
@@ -245,12 +247,14 @@ mod tests {
         zip32::{ExtendedFullViewingKey, ExtendedSpendingKey},
     };
 
-    use zcash_client_backend::data_api::{chain::validate_combined_chain, error::Error};
+    use zcash_client_backend::data_api::{
+        chain::{scan_cached_blocks, validate_combined_chain},
+        error::Error,
+    };
 
     use crate::{
         init::{init_accounts_table, init_cache_database, init_data_database},
         query::get_balance,
-        scan::scan_cached_blocks,
         tests::{self, fake_compact_block, insert_into_cache, sapling_activation_height},
         AccountId, CacheConnection, DataConnection,
     };
