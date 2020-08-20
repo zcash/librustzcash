@@ -25,18 +25,17 @@ pub const ANCHOR_OFFSET: u32 = 10;
 /// - `Err(e)` if there was an error during validation unrelated to chain validity.
 ///
 /// This function does not mutate either of the databases.
-pub fn validate_combined_chain<
-    E0,
-    N,
+pub fn validate_combined_chain<'db, E0, N, E, P, C, D>(
+    parameters: &P,
+    cache: &C,
+    data: &'db D,
+) -> Result<(), E>
+where
     E: From<Error<E0, N>>,
     P: consensus::Parameters,
     C: CacheOps<Error = E>,
-    D: DBOps<Error = E>,
->(
-    parameters: &P,
-    cache: &C,
-    data: &D,
-) -> Result<(), E> {
+    &'db D: DBOps<Error = E>,
+{
     let sapling_activation_height = parameters
         .activation_height(NetworkUpgrade::Sapling)
         .ok_or(Error::SaplingNotActive)?;
@@ -85,9 +84,13 @@ pub fn validate_combined_chain<
 
 /// Determines the target height for a transaction, and the height from which to
 /// select anchors, based on the current synchronised block chain.
-pub fn get_target_and_anchor_heights<E0, N, E: From<Error<E0, N>>, D: DBOps<Error = E>>(
-    data: &D,
-) -> Result<(BlockHeight, BlockHeight), E> {
+pub fn get_target_and_anchor_heights<'db, E0, N, E, D>(
+    data: &'db D,
+) -> Result<(BlockHeight, BlockHeight), E>
+where
+    E: From<Error<E0, N>>,
+    &'db D: DBOps<Error = E>,
+{
     data.block_height_extrema().and_then(|heights| {
         match heights {
             Some((min_height, max_height)) => {
