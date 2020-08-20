@@ -8,6 +8,11 @@ use zcash_primitives::{
     transaction::TxId,
 };
 
+
+/// A type-safe wrapper for account identifiers.
+#[derive(Debug, Copy, Clone)]
+pub struct AccountId(pub u32);
+
 /// A subset of a [`Transaction`] relevant to wallets and light clients.
 ///
 /// [`Transaction`]: zcash_primitives::transaction::Transaction

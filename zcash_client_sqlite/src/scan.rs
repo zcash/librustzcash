@@ -5,36 +5,31 @@ use protobuf::parse_from_bytes;
 
 use rusqlite::{types::ToSql, OptionalExtension, NO_PARAMS};
 
+use zcash_primitives::{
+    block::BlockHash,
+    consensus::{self, BlockHeight, NetworkUpgrade},
+    merkle_tree::CommitmentTree,
+    transaction::Transaction,
+};
+
 use zcash_client_backend::{
     address::RecipientAddress,
     data_api::{
         error::{ChainInvalid, Error},
-        CacheOps, DBOps,
+        CacheOps, DBOps, DBUpdate,
     },
     decrypt_transaction,
     encoding::decode_extended_full_viewing_key,
     proto::compact_formats::CompactBlock,
+    wallet::WalletTx,
     welding_rig::scan_block,
 };
 
-use zcash_primitives::{
-    consensus::{self, BlockHeight, NetworkUpgrade},
-    merkle_tree::{CommitmentTree, IncrementalWitness},
-    sapling::Node,
-    transaction::Transaction,
-};
-
-use crate::{error::SqliteClientError, AccountId, CacheConnection, DataConnection, NoteId};
+use crate::{error::SqliteClientError, AccountId, CacheConnection, DataConnection};
 
 struct CompactBlockRow {
     height: BlockHeight,
     data: Vec<u8>,
-}
-
-#[derive(Clone)]
-struct WitnessRow {
-    id_note: i64,
-    witness: IncrementalWitness<Node>,
 }
 
 /// Scans at most `limit` new blocks added to the cache for any transactions received by
@@ -79,12 +74,19 @@ struct WitnessRow {
 /// ```
 ///
 /// [`init_blocks_table`]: crate::init::init_blocks_table
-pub fn scan_cached_blocks<P: consensus::Parameters>(
+pub fn scan_cached_blocks<'db, E, E0, N, P, C, D>(
     params: &P,
-    cache: &CacheConnection,
-    data: &DataConnection,
+    cache: &C,
+    data: &'db D,
     limit: Option<u32>,
-) -> Result<(), SqliteClientError> {
+) -> Result<(), E>
+where
+    P: consensus::Parameters,
+    C: CacheOps<Error = E>,
+    &'db D: DBOps<Error = E, NoteRef = N>,
+    N: Copy,
+    E: From<Error<E0, N>>,
+{
     let sapling_activation_height = params
         .activation_height(NetworkUpgrade::Sapling)
         .ok_or(Error::SaplingNotActive)?;
@@ -110,71 +112,20 @@ pub fn scan_cached_blocks<P: consensus::Parameters>(
     // Get the nullifiers for the notes we are tracking
     let mut nullifiers = data.get_nullifiers()?;
 
-    // Prepare per-block SQL statements
-    let mut stmt_insert_block = data.0.prepare(
-        "INSERT INTO blocks (height, hash, time, sapling_tree)
-        VALUES (?, ?, ?, ?)",
-    )?;
-    let mut stmt_update_tx = data.0.prepare(
-        "UPDATE transactions
-        SET block = ?, tx_index = ? WHERE txid = ?",
-    )?;
-    let mut stmt_insert_tx = data.0.prepare(
-        "INSERT INTO transactions (txid, block, tx_index)
-        VALUES (?, ?, ?)",
-    )?;
-    let mut stmt_select_tx = data
-        .0
-        .prepare("SELECT id_tx FROM transactions WHERE txid = ?")?;
-    let mut stmt_mark_spent_note = data
-        .0
-        .prepare("UPDATE received_notes SET spent = ? WHERE nf = ?")?;
-    let mut stmt_update_note = data.0.prepare(
-        "UPDATE received_notes
-        SET account = ?, diversifier = ?, value = ?, rcm = ?, nf = ?, is_change = ?
-        WHERE tx = ? AND output_index = ?",
-    )?;
-    let mut stmt_insert_note = data.0.prepare(
-        "INSERT INTO received_notes (tx, output_index, account, diversifier, value, rcm, nf, is_change)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-    )?;
-    let mut stmt_select_note = data
-        .0
-        .prepare("SELECT id_note FROM received_notes WHERE tx = ? AND output_index = ?")?;
-    let mut stmt_insert_witness = data.0.prepare(
-        "INSERT INTO sapling_witnesses (note, block, witness)
-        VALUES (?, ?, ?)",
-    )?;
-    let mut stmt_prune_witnesses = data
-        .0
-        .prepare("DELETE FROM sapling_witnesses WHERE block < ?")?;
-    let mut stmt_update_expired = data.0.prepare(
-        "UPDATE received_notes SET spent = NULL WHERE EXISTS (
-            SELECT id_tx FROM transactions
-            WHERE id_tx = received_notes.spent AND block IS NULL AND expiry_height < ?
-        )",
-    )?;
-
     cache.with_cached_blocks(
         last_height,
         limit,
         |height: BlockHeight, block: CompactBlock| {
-            // Start an SQL transaction for this block.
-            data.0.execute("BEGIN IMMEDIATE", NO_PARAMS)?;
-
             // Scanned blocks MUST be height-sequential.
             if height != (last_height + 1) {
-                return Err(SqliteClientError(ChainInvalid::block_height_mismatch(
-                    last_height + 1,
-                    height,
-                )));
+                return Err(ChainInvalid::block_height_mismatch(last_height + 1, height).into());
             }
             last_height = height;
 
-            let block_hash = block.hash.clone();
+            let block_hash = BlockHash::from_slice(&block.hash);
             let block_time = block.time;
 
-            let txs = {
+            let txs: Vec<WalletTx> = {
                 let nf_refs: Vec<_> = nullifiers
                     .iter()
                     .map(|(nf, acc)| (&nf[..], acc.0 as usize))
@@ -196,10 +147,7 @@ pub fn scan_cached_blocks<P: consensus::Parameters>(
                 let cur_root = tree.root();
                 for row in &witnesses {
                     if row.1.root() != cur_root {
-                        return Err(SqliteClientError(Error::InvalidWitnessAnchor(
-                            row.0,
-                            last_height,
-                        )));
+                        return Err(Error::InvalidWitnessAnchor(row.0, last_height).into());
                     }
                 }
                 for tx in &txs {
@@ -217,126 +165,55 @@ pub fn scan_cached_blocks<P: consensus::Parameters>(
                 }
             }
 
-            // Insert the block into the database.
-            let mut encoded_tree = Vec::new();
-            tree.write(&mut encoded_tree)
-                .expect("Should be able to write to a Vec");
-            stmt_insert_block.execute(&[
-                u32::from(height).to_sql()?,
-                block_hash.to_sql()?,
-                block_time.to_sql()?,
-                encoded_tree.to_sql()?,
-            ])?;
+            // database updates for each block are transactional
+            data.transactionally(&mut data.get_mutator()?, |mutator| {
+                // Insert the block into the database.
+                mutator.insert_block(height, block_hash, block_time, &tree)?;
 
-            for tx in txs {
-                // First try update an existing transaction in the database.
-                let txid = tx.txid.0.to_vec();
-                let tx_row = if stmt_update_tx.execute(&[
-                    u32::from(height).to_sql()?,
-                    (tx.index as i64).to_sql()?,
-                    txid.to_sql()?,
-                ])? == 0
-                {
-                    // It isn't there, so insert our transaction into the database.
-                    stmt_insert_tx.execute(&[
-                        txid.to_sql()?,
-                        u32::from(height).to_sql()?,
-                        (tx.index as i64).to_sql()?,
-                    ])?;
-                    data.0.last_insert_rowid()
-                } else {
-                    // It was there, so grab its row number.
-                    stmt_select_tx.query_row(&[txid], |row| row.get(0))?
-                };
+                for tx in txs {
+                    let tx_row = mutator.put_tx(&tx, height)?;
 
-                // Mark notes as spent and remove them from the scanning cache
-                for spend in &tx.shielded_spends {
-                    stmt_mark_spent_note.execute(&[tx_row.to_sql()?, spend.nf.to_sql()?])?;
+                    // Mark notes as spent and remove them from the scanning cache
+                    for spend in &tx.shielded_spends {
+                        mutator.mark_spent(tx_row, &spend.nf)?;
+                    }
+
+                    nullifiers.retain(|(nf, _acc)| {
+                        tx.shielded_spends
+                            .iter()
+                            .find(|spend| &spend.nf == nf)
+                            .is_none()
+                    });
+
+                    for output in tx.shielded_outputs {
+                        let nf = output.note.nf(
+                            &extfvks[output.account].fvk.vk,
+                            output.witness.position() as u64,
+                        );
+
+                        let note_id = mutator.put_note(&output, &nf, tx_row)?;
+
+                        // Save witness for note.
+                        witnesses.push((note_id, output.witness));
+
+                        // Cache nullifier for note (to detect subsequent spends in this scan).
+                        nullifiers.push((nf, AccountId(output.account as u32)));
+                    }
                 }
 
-                nullifiers.retain(|(nf, _acc)| {
-                    tx.shielded_spends
-                        .iter()
-                        .find(|spend| &spend.nf == nf)
-                        .is_none()
-                });
-
-                for output in tx.shielded_outputs {
-                    let rcm = output.note.rcm().to_repr();
-                    let nf = output.note.nf(
-                        &extfvks[output.account].fvk.vk,
-                        output.witness.position() as u64,
-                    );
-
-                    // Assumptions:
-                    // - A transaction will not contain more than 2^63 shielded outputs.
-                    // - A note value will never exceed 2^63 zatoshis.
-
-                    // First try updating an existing received note into the database.
-                    let note_id = if stmt_update_note.execute(&[
-                        (output.account as i64).to_sql()?,
-                        output.to.diversifier().0.to_sql()?,
-                        (output.note.value as i64).to_sql()?,
-                        rcm.as_ref().to_sql()?,
-                        nf.to_sql()?,
-                        output.is_change.to_sql()?,
-                        tx_row.to_sql()?,
-                        (output.index as i64).to_sql()?,
-                    ])? == 0
-                    {
-                        // It isn't there, so insert our note into the database.
-                        stmt_insert_note.execute(&[
-                            tx_row.to_sql()?,
-                            (output.index as i64).to_sql()?,
-                            (output.account as i64).to_sql()?,
-                            output.to.diversifier().0.to_sql()?,
-                            (output.note.value as i64).to_sql()?,
-                            rcm.as_ref().to_sql()?,
-                            nf.to_sql()?,
-                            output.is_change.to_sql()?,
-                        ])?;
-                        NoteId(data.0.last_insert_rowid())
-                    } else {
-                        // It was there, so grab its row number.
-                        stmt_select_note.query_row(
-                            &[tx_row.to_sql()?, (output.index as i64).to_sql()?],
-                            |row| row.get(0).map(NoteId),
-                        )?
-                    };
-
-                    // Save witness for note.
-                    witnesses.push((note_id, output.witness));
-
-                    // Cache nullifier for note (to detect subsequent spends in this scan).
-                    nullifiers.push((nf, AccountId(output.account as u32)));
+                // Insert current witnesses into the database.
+                for (note_id, witness) in witnesses.iter() {
+                    mutator.insert_witness(*note_id, witness, last_height)?;
                 }
-            }
 
-            // Insert current witnesses into the database.
-            let mut encoded = Vec::new();
-            for witness_row in witnesses.iter() {
-                encoded.clear();
-                witness_row
-                    .1
-                    .write(&mut encoded)
-                    .expect("Should be able to write to a Vec");
-                stmt_insert_witness.execute(&[
-                    (witness_row.0).0.to_sql()?,
-                    u32::from(last_height).to_sql()?,
-                    encoded.to_sql()?,
-                ])?;
-            }
+                // Prune the stored witnesses (we only expect rollbacks of at most 100 blocks).
+                mutator.prune_witnesses(last_height - 100)?;
 
-            // Prune the stored witnesses (we only expect rollbacks of at most 100 blocks).
-            stmt_prune_witnesses.execute(&[u32::from(last_height - 100)])?;
+                // Update now-expired transactions that didn't get mined.
+                mutator.update_expired_notes(last_height)?;
 
-            // Update now-expired transactions that didn't get mined.
-            stmt_update_expired.execute(&[u32::from(last_height)])?;
-
-            // Commit the SQL transaction, writing this block's data atomically.
-            data.0.execute("COMMIT", NO_PARAMS)?;
-
-            Ok(())
+                Ok(())
+            })
         },
     )?;
 

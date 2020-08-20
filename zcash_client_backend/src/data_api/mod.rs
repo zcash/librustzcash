@@ -8,17 +8,18 @@ use zcash_primitives::{
     zip32::ExtendedFullViewingKey,
 };
 
-use crate::proto::compact_formats::CompactBlock;
+use crate::{
+    proto::compact_formats::CompactBlock,
+    wallet::{AccountId, WalletShieldedOutput, WalletTx},
+};
 
 pub mod chain;
 pub mod error;
 
 pub trait DBOps {
     type Error;
-    type AccountId;
-    type NoteId;
-    //    type TxRef;   // Backend-specific transaction handle
-    //    type NoteRef; // Backend-specific note identifier`
+    type NoteRef: Copy; // Backend-specific note identifier
+    type Mutator: DBUpdate<Error = Self::Error, NoteRef = Self::NoteRef>;
 
     fn init_db(&self) -> Result<(), Self::Error>;
 
@@ -49,19 +50,19 @@ pub trait DBOps {
     fn get_address<P: consensus::Parameters>(
         &self,
         params: &P,
-        account: Self::AccountId,
+        account: AccountId,
     ) -> Result<Option<PaymentAddress>, Self::Error>;
 
-    fn get_balance(&self, account: Self::AccountId) -> Result<Amount, Self::Error>;
+    fn get_balance(&self, account: AccountId) -> Result<Amount, Self::Error>;
 
-    fn get_verified_balance(&self, account: Self::AccountId) -> Result<Amount, Self::Error>;
+    fn get_verified_balance(&self, account: AccountId) -> Result<Amount, Self::Error>;
 
     fn get_received_memo_as_utf8(
         &self,
-        id_note: Self::NoteId,
+        id_note: Self::NoteRef,
     ) -> Result<Option<String>, Self::Error>;
 
-    fn get_sent_memo_as_utf8(&self, id_note: Self::NoteId) -> Result<Option<String>, Self::Error>;
+    fn get_sent_memo_as_utf8(&self, id_note: Self::NoteRef) -> Result<Option<String>, Self::Error>;
 
     fn get_extended_full_viewing_keys<P: consensus::Parameters>(
         &self,
@@ -76,33 +77,55 @@ pub trait DBOps {
     fn get_witnesses(
         &self,
         block_height: BlockHeight,
-    ) -> Result<Vec<(Self::NoteId, IncrementalWitness<Node>)>, Self::Error>;
+    ) -> Result<Vec<(Self::NoteRef, IncrementalWitness<Node>)>, Self::Error>;
 
-    fn get_nullifiers(&self) -> Result<Vec<(Vec<u8>, Self::AccountId)>, Self::Error>;
+    fn get_nullifiers(&self) -> Result<Vec<(Vec<u8>, AccountId)>, Self::Error>;
 
-    //    fn get_witnesses(block_height: BlockHeight) -> Result<Box<dyn Iterator<Item = IncrementalWitness<Node>>>, Self::Error>;
-    //
-    //    fn get_nullifiers() -> Result<(Vec<u8>, Account), Self::Error>;
-    //
-    //    fn create_block(block_height: BlockHeight, hash: BlockHash, time: u32, sapling_tree: CommitmentTree<Node>) -> Result<(), Self::Error>;
-    //
-    //    fn put_transaction(transaction: Transaction, block_height: BlockHeight) -> Result<Self::TxRef, Self::Error>;
-    //
-    //    fn get_txref(txid: TxId) -> Result<Option<Self::TxRef>, Self::Error>;
-    //
-    //    fn mark_spent(tx_ref: Self::TxRef, nullifier: Vec<u8>) -> Result<(), Self::Error>;
-    //
-    //    fn put_note(output: WalletShieldedOutput, tx_ref: Self::TxRef, nullifier: Vec<u8>) -> Result<(), Self::Error>;
-    //
-    //    fn get_note(tx_ref: Self::TxRef, output_index: i64) -> Result<Self::NoteRef, Self::Error>;
-    //
-    //    fn prune_witnesses(to_height: BlockHeight) -> Result<(), Self::Error>;
-    //
-    //    fn mark_expired_unspent(to_height: BlockHeight) -> Result<(), Self::Error>;
-    //
+    fn get_mutator(&self) -> Result<Self::Mutator, Self::Error>;
+
+    fn transactionally<F>(&self, mutator: &mut Self::Mutator, f: F) -> Result<(), Self::Error>
+    where
+        F: FnOnce(&mut Self::Mutator) -> Result<(), Self::Error>;
+
     //    fn put_sent_note(tx_ref: Self::TxRef, output: DecryptedOutput) -> Result<(), Self::Error>;
     //
     //    fn put_received_note(tx_ref: Self::TxRef, output: DecryptedOutput) -> Result<(), Self::Error>;
+}
+
+pub trait DBUpdate {
+    type Error;
+    type TxRef: Copy;
+    type NoteRef: Copy;
+
+    fn insert_block(
+        &mut self,
+        block_height: BlockHeight,
+        block_hash: BlockHash,
+        block_time: u32,
+        commitment_tree: &CommitmentTree<Node>,
+    ) -> Result<(), Self::Error>;
+
+    fn put_tx(&mut self, tx: &WalletTx, height: BlockHeight) -> Result<Self::TxRef, Self::Error>;
+
+    fn mark_spent(&mut self, tx_ref: Self::TxRef, nf: &Vec<u8>) -> Result<(), Self::Error>;
+
+    fn put_note(
+        &mut self,
+        output: &WalletShieldedOutput,
+        nf: &Vec<u8>,
+        tx_ref: Self::TxRef,
+    ) -> Result<Self::NoteRef, Self::Error>;
+
+    fn insert_witness(
+        &mut self,
+        note_id: Self::NoteRef,
+        witness: &IncrementalWitness<Node>,
+        height: BlockHeight,
+    ) -> Result<(), Self::Error>;
+
+    fn prune_witnesses(&mut self, from_height: BlockHeight) -> Result<(), Self::Error>;
+
+    fn update_expired_notes(&mut self, from_height: BlockHeight) -> Result<(), Self::Error>;
 }
 
 pub trait CacheOps {

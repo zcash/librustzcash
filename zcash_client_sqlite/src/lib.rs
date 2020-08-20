@@ -27,7 +27,9 @@
 use std::fmt;
 use std::path::Path;
 
-use rusqlite::Connection;
+use rusqlite::{types::ToSql, Connection, Statement, NO_PARAMS};
+
+use ff::PrimeField;
 
 use zcash_primitives::{
     block::BlockHash,
@@ -40,9 +42,10 @@ use zcash_primitives::{
 };
 
 use zcash_client_backend::{
-    data_api::{CacheOps, DBOps},
+    data_api::{CacheOps, DBOps, DBUpdate},
     encoding::encode_payment_address,
     proto::compact_formats::CompactBlock,
+    wallet::{AccountId, WalletShieldedOutput, WalletTx},
 };
 
 use crate::error::SqliteClientError;
@@ -53,9 +56,6 @@ pub mod init;
 pub mod query;
 pub mod scan;
 pub mod transact;
-
-#[derive(Debug, Copy, Clone)]
-pub struct AccountId(pub u32);
 
 #[derive(Debug, Copy, Clone)]
 pub struct NoteId(pub i64);
@@ -74,10 +74,10 @@ impl DataConnection {
     }
 }
 
-impl DBOps for DataConnection {
+impl<'a> DBOps for &'a DataConnection {
     type Error = SqliteClientError;
-    type AccountId = AccountId;
-    type NoteId = NoteId;
+    type NoteRef = NoteId;
+    type Mutator = DBMutator<'a>;
 
     fn init_db(&self) -> Result<(), Self::Error> {
         init::init_data_database(self).map_err(SqliteClientError::from)
@@ -120,27 +120,27 @@ impl DBOps for DataConnection {
     fn get_address<P: consensus::Parameters>(
         &self,
         params: &P,
-        account: Self::AccountId,
+        account: AccountId,
     ) -> Result<Option<PaymentAddress>, Self::Error> {
         query::get_address(self, params, account)
     }
 
-    fn get_balance(&self, account: Self::AccountId) -> Result<Amount, Self::Error> {
+    fn get_balance(&self, account: AccountId) -> Result<Amount, Self::Error> {
         query::get_balance(self, account)
     }
 
-    fn get_verified_balance(&self, account: Self::AccountId) -> Result<Amount, Self::Error> {
+    fn get_verified_balance(&self, account: AccountId) -> Result<Amount, Self::Error> {
         query::get_verified_balance(self, account)
     }
 
     fn get_received_memo_as_utf8(
         &self,
-        id_note: Self::NoteId,
+        id_note: Self::NoteRef,
     ) -> Result<Option<String>, Self::Error> {
         query::get_received_memo_as_utf8(self, id_note)
     }
 
-    fn get_sent_memo_as_utf8(&self, id_note: Self::NoteId) -> Result<Option<String>, Self::Error> {
+    fn get_sent_memo_as_utf8(&self, id_note: Self::NoteRef) -> Result<Option<String>, Self::Error> {
         query::get_sent_memo_as_utf8(self, id_note)
     }
 
@@ -161,12 +161,240 @@ impl DBOps for DataConnection {
     fn get_witnesses(
         &self,
         block_height: BlockHeight,
-    ) -> Result<Vec<(Self::NoteId, IncrementalWitness<Node>)>, Self::Error> {
+    ) -> Result<Vec<(Self::NoteRef, IncrementalWitness<Node>)>, Self::Error> {
         query::get_witnesses(self, block_height)
     }
 
-    fn get_nullifiers(&self) -> Result<Vec<(Vec<u8>, Self::AccountId)>, Self::Error> {
+    fn get_nullifiers(&self) -> Result<Vec<(Vec<u8>, AccountId)>, Self::Error> {
         query::get_nullifiers(self)
+    }
+
+    fn get_mutator(&self) -> Result<Self::Mutator, Self::Error> {
+        Ok(
+            DBMutator {
+                conn: self,
+                stmt_insert_block: self.0.prepare(
+                    "INSERT INTO blocks (height, hash, time, sapling_tree)
+                    VALUES (?, ?, ?, ?)",
+                )?,
+                stmt_insert_tx: self.0.prepare(
+                    "INSERT INTO transactions (txid, block, tx_index)
+                    VALUES (?, ?, ?)",
+                )?,
+                stmt_update_tx: self.0.prepare(
+                    "UPDATE transactions
+                    SET block = ?, tx_index = ? WHERE txid = ?",
+                )?,
+                stmt_select_tx: self.0.prepare(
+                    "SELECT id_tx FROM transactions WHERE txid = ?",
+                )?,
+                stmt_mark_spent_note: self.0.prepare(
+                    "UPDATE received_notes SET spent = ? WHERE nf = ?"
+                )?,
+                stmt_update_note: self.0.prepare(
+                    "UPDATE received_notes
+                    SET account = ?, diversifier = ?, value = ?, rcm = ?, nf = ?, is_change = ?
+                    WHERE tx = ? AND output_index = ?",
+                )?,
+                stmt_insert_note: self.0.prepare(
+                    "INSERT INTO received_notes (tx, output_index, account, diversifier, value, rcm, nf, is_change)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                )?,
+                stmt_select_note: self.0.prepare(
+                    "SELECT id_note FROM received_notes WHERE tx = ? AND output_index = ?"
+                )?,
+                stmt_insert_witness: self.0.prepare(
+                    "INSERT INTO sapling_witnesses (note, block, witness)
+                    VALUES (?, ?, ?)",
+                )?,
+                stmt_prune_witnesses: self.0.prepare(
+                    "DELETE FROM sapling_witnesses WHERE block < ?"
+                )?,
+                stmt_update_expired: self.0.prepare(
+                    "UPDATE received_notes SET spent = NULL WHERE EXISTS (
+                        SELECT id_tx FROM transactions
+                        WHERE id_tx = received_notes.spent AND block IS NULL AND expiry_height < ?
+                    )",
+                )?,
+            }
+        )
+    }
+
+    fn transactionally<F>(&self, mutator: &mut Self::Mutator, f: F) -> Result<(), Self::Error>
+    where
+        F: FnOnce(&mut Self::Mutator) -> Result<(), Self::Error>,
+    {
+        self.0.execute("BEGIN IMMEDIATE", NO_PARAMS)?;
+        match f(mutator) {
+            Ok(_) => {
+                self.0.execute("COMMIT", NO_PARAMS)?;
+                Ok(())
+            }
+            Err(error) => {
+                match self.0.execute("ROLLBACK", NO_PARAMS) {
+                    Ok(_) => Err(error),
+                    // REVIEW: If rollback fails, what do we want to do? I think that
+                    // panicking here is probably the right thing to do, because it
+                    // means the database is corrupt?
+                    Err(e) => panic!(
+                        "Rollback failed with error {} while attempting to recover from error {}; database is likely corrupt.",
+                        e,
+                        error.0
+                    )
+                }
+            }
+        }
+    }
+}
+
+pub struct DBMutator<'a> {
+    conn: &'a DataConnection,
+    stmt_insert_block: Statement<'a>,
+    stmt_insert_tx: Statement<'a>,
+    stmt_update_tx: Statement<'a>,
+    stmt_select_tx: Statement<'a>,
+    stmt_mark_spent_note: Statement<'a>,
+    stmt_insert_note: Statement<'a>,
+    stmt_update_note: Statement<'a>,
+    stmt_select_note: Statement<'a>,
+    stmt_insert_witness: Statement<'a>,
+    stmt_prune_witnesses: Statement<'a>,
+    stmt_update_expired: Statement<'a>,
+}
+
+impl<'a> DBUpdate for DBMutator<'a> {
+    type Error = SqliteClientError;
+    type TxRef = i64;
+    type NoteRef = NoteId;
+
+    fn insert_block(
+        &mut self,
+        block_height: BlockHeight,
+        block_hash: BlockHash,
+        block_time: u32,
+        commitment_tree: &CommitmentTree<Node>,
+    ) -> Result<(), Self::Error> {
+        let mut encoded_tree = Vec::new();
+
+        commitment_tree
+            .write(&mut encoded_tree)
+            .expect("Should be able to write to a Vec");
+
+        self.stmt_insert_block.execute(&[
+            u32::from(block_height).to_sql()?,
+            block_hash.0.to_sql()?,
+            block_time.to_sql()?,
+            encoded_tree.to_sql()?,
+        ])?;
+
+        Ok(())
+    }
+
+    fn put_tx(&mut self, tx: &WalletTx, height: BlockHeight) -> Result<Self::TxRef, Self::Error> {
+        let txid = tx.txid.0.to_vec();
+        if self.stmt_update_tx.execute(&[
+            u32::from(height).to_sql()?,
+            (tx.index as i64).to_sql()?,
+            txid.to_sql()?,
+        ])? == 0
+        {
+            // It isn't there, so insert our transaction into the database.
+            self.stmt_insert_tx.execute(&[
+                txid.to_sql()?,
+                u32::from(height).to_sql()?,
+                (tx.index as i64).to_sql()?,
+            ])?;
+
+            Ok(self.conn.0.last_insert_rowid())
+        } else {
+            // It was there, so grab its row number.
+            self.stmt_select_tx
+                .query_row(&[txid], |row| row.get(0))
+                .map_err(SqliteClientError::from)
+        }
+    }
+
+    fn mark_spent(&mut self, tx_ref: Self::TxRef, nf: &Vec<u8>) -> Result<(), Self::Error> {
+        self.stmt_mark_spent_note
+            .execute(&[tx_ref.to_sql()?, nf.to_sql()?])?;
+        Ok(())
+    }
+
+    fn put_note(
+        &mut self,
+        output: &WalletShieldedOutput,
+        nf: &Vec<u8>,
+        tx_ref: Self::TxRef,
+    ) -> Result<Self::NoteRef, Self::Error> {
+        let rcm = output.note.rcm().to_repr();
+        // Assumptions:
+        // - A transaction will not contain more than 2^63 shielded outputs.
+        // - A note value will never exceed 2^63 zatoshis.
+
+        // First try updating an existing received note into the database.
+        if self.stmt_update_note.execute(&[
+            (output.account as i64).to_sql()?,
+            output.to.diversifier().0.to_sql()?,
+            (output.note.value as i64).to_sql()?,
+            rcm.as_ref().to_sql()?,
+            nf.to_sql()?,
+            output.is_change.to_sql()?,
+            tx_ref.to_sql()?,
+            (output.index as i64).to_sql()?,
+        ])? == 0
+        {
+            // It isn't there, so insert our note into the database.
+            self.stmt_insert_note.execute(&[
+                tx_ref.to_sql()?,
+                (output.index as i64).to_sql()?,
+                (output.account as i64).to_sql()?,
+                output.to.diversifier().0.to_sql()?,
+                (output.note.value as i64).to_sql()?,
+                rcm.as_ref().to_sql()?,
+                nf.to_sql()?,
+                output.is_change.to_sql()?,
+            ])?;
+
+            Ok(NoteId(self.conn.0.last_insert_rowid()))
+        } else {
+            // It was there, so grab its row number.
+            self.stmt_select_note
+                .query_row(
+                    &[tx_ref.to_sql()?, (output.index as i64).to_sql()?],
+                    |row| row.get(0).map(NoteId),
+                )
+                .map_err(SqliteClientError::from)
+        }
+    }
+
+    fn insert_witness(
+        &mut self,
+        note_id: Self::NoteRef,
+        witness: &IncrementalWitness<Node>,
+        height: BlockHeight,
+    ) -> Result<(), Self::Error> {
+        let mut encoded = Vec::new();
+        witness
+            .write(&mut encoded)
+            .expect("Should be able to write to a Vec");
+        self.stmt_insert_witness.execute(&[
+            note_id.0.to_sql()?,
+            u32::from(height).to_sql()?,
+            encoded.to_sql()?,
+        ])?;
+
+        Ok(())
+    }
+
+    fn prune_witnesses(&mut self, below_height: BlockHeight) -> Result<(), Self::Error> {
+        self.stmt_prune_witnesses
+            .execute(&[u32::from(below_height)])?;
+        Ok(())
+    }
+
+    fn update_expired_notes(&mut self, height: BlockHeight) -> Result<(), Self::Error> {
+        self.stmt_update_expired.execute(&[u32::from(height)])?;
+        Ok(())
     }
 }
 
