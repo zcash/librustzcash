@@ -120,48 +120,50 @@ where
     })
 }
 
-/// Scans at most `limit` new blocks added to the cache for any transactions received by
-/// the tracked accounts.
-///
-/// This function will return without error after scanning at most `limit` new blocks, to
-/// enable the caller to update their UI with scanning progress. Repeatedly calling this
-/// function will process sequential ranges of blocks, and is equivalent to calling
-/// `scan_cached_blocks` and passing `None` for the optional `limit` value.
-///
-/// This function pays attention only to cached blocks with heights greater than the
-/// highest scanned block in `db_data`. Cached blocks with lower heights are not verified
-/// against previously-scanned blocks. In particular, this function **assumes** that the
-/// caller is handling rollbacks.
-///
-/// For brand-new light client databases, this function starts scanning from the Sapling
-/// activation height. This height can be fast-forwarded to a more recent block by calling
-/// [`init_blocks_table`] before this function.
-///
-/// Scanned blocks are required to be height-sequential. If a block is missing from the
-/// cache, an error will be returned with kind [`ChainInvalid::HeightMismatch`].
-///
-/// # Examples
-///
-/// ```
-/// use tempfile::NamedTempFile;
-/// use zcash_primitives::consensus::{
-///     Network,
-///     Parameters,
-/// };
-/// use zcash_client_sqlite::{
-///     CacheConnection,
-///     DataConnection,
-///     scan::scan_cached_blocks,
-/// };
-///
-/// let cache_file = NamedTempFile::new().unwrap();
-/// let cache = CacheConnection::for_path(cache_file).unwrap();
-/// let data_file = NamedTempFile::new().unwrap();
-/// let data = DataConnection::for_path(data_file).unwrap();
-/// scan_cached_blocks(&Network::TestNetwork, &cache, &data, None);
-/// ```
-///
-/// [`init_blocks_table`]: crate::init::init_blocks_table
+// Scans at most `limit` new blocks added to the cache for any transactions received by
+// the tracked accounts.
+//
+// This function will return without error after scanning at most `limit` new blocks, to
+// enable the caller to update their UI with scanning progress. Repeatedly calling this
+// function will process sequential ranges of blocks, and is equivalent to calling
+// `scan_cached_blocks` and passing `None` for the optional `limit` value.
+//
+// This function pays attention only to cached blocks with heights greater than the
+// highest scanned block in `db_data`. Cached blocks with lower heights are not verified
+// against previously-scanned blocks. In particular, this function **assumes** that the
+// caller is handling rollbacks.
+//
+// For brand-new light client databases, this function starts scanning from the Sapling
+// activation height. This height can be fast-forwarded to a more recent block by calling
+// [`init_blocks_table`] before this function.
+//
+// Scanned blocks are required to be height-sequential. If a block is missing from the
+// cache, an error will be returned with kind [`ChainInvalid::HeightMismatch`].
+//
+// # Examples
+//
+// ```
+// use tempfile::NamedTempFile;
+// use zcash_primitives::consensus::{
+//     Network,
+//     Parameters,
+// };
+// use zcash_client_backend::{
+//     data_api::chain::scan_cached_blocks,
+// };
+// use zcash_client_sqlite::{
+//     CacheConnection,
+//     DataConnection,
+// };
+//
+// let cache_file = NamedTempFile::new().unwrap();
+// let cache = CacheConnection::for_path(cache_file).unwrap();
+// let data_file = NamedTempFile::new().unwrap();
+// let data = DataConnection::for_path(data_file).unwrap();
+// scan_cached_blocks(&Network::TestNetwork, &cache, &data, None);
+// ```
+//
+// [`init_blocks_table`]: crate::init::init_blocks_table
 pub fn scan_cached_blocks<'db, E, E0, N, P, C, D>(
     params: &P,
     cache: &C,
