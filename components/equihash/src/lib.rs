@@ -19,4 +19,7 @@
 
 mod verify;
 
+#[cfg(test)]
+mod test_vectors;
+
 pub use verify::{is_valid_solution, Error};
