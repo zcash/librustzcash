@@ -1731,13 +1731,13 @@ mod tests {
     fn test_vectors() {
         let test_vectors = crate::test_vectors::note_encryption::make_test_vectors();
 
-        macro_rules! read_fr {
+        macro_rules! read_bls12_381_scalar {
             ($field:expr) => {{
                 bls12_381::Scalar::from_repr($field[..].try_into().unwrap()).unwrap()
             }};
         }
 
-        macro_rules! read_fs {
+        macro_rules! read_jubjub_scalar {
             ($field:expr) => {{
                 jubjub::Fr::from_repr($field[..].try_into().unwrap()).unwrap()
             }};
@@ -1757,12 +1757,12 @@ mod tests {
             // Load the test vector components
             //
 
-            let ivk = read_fs!(tv.ivk);
+            let ivk = read_jubjub_scalar!(tv.ivk);
             let pk_d = read_point!(tv.default_pk_d).into_subgroup().unwrap();
-            let rcm = read_fs!(tv.rcm);
+            let rcm = read_jubjub_scalar!(tv.rcm);
             let cv = read_point!(tv.cv);
-            let cmu = read_fr!(tv.cmu);
-            let esk = read_fs!(tv.esk);
+            let cmu = read_bls12_381_scalar!(tv.cmu);
+            let esk = read_jubjub_scalar!(tv.esk);
             let epk = read_point!(tv.epk).into_subgroup().unwrap();
 
             //
