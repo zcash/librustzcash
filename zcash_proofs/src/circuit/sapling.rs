@@ -576,8 +576,8 @@ fn test_input_circuit_with_bls12_381() {
             };
 
             let mut position = 0u64;
-            let cm = note.cmu();
-            let mut cur = cm.clone();
+            let cmu = note.cmu();
+            let mut cur = cmu.clone();
 
             for (i, val) in auth_path.clone().into_iter().enumerate() {
                 let (uncle, b) = val.unwrap();
@@ -635,7 +635,7 @@ fn test_input_circuit_with_bls12_381() {
                 "d37c738e83df5d9b0bb6495ac96abf21bcb2697477e2c15c2c7916ff7a3b6a89"
             );
 
-            assert_eq!(cs.get("randomization of note commitment/x3/num"), cm);
+            assert_eq!(cs.get("randomization of note commitment/x3/num"), cmu);
 
             assert_eq!(cs.num_inputs(), 8);
             assert_eq!(cs.get_input(0, "ONE"), bls12_381::Scalar::one());
@@ -757,8 +757,8 @@ fn test_input_circuit_with_bls12_381_external_test_vectors() {
             };
 
             let mut position = 0u64;
-            let cm = note.cmu();
-            let mut cur = cm.clone();
+            let cmu = note.cmu();
+            let mut cur = cmu.clone();
 
             for (i, val) in auth_path.clone().into_iter().enumerate() {
                 let (uncle, b) = val.unwrap();
@@ -816,7 +816,7 @@ fn test_input_circuit_with_bls12_381_external_test_vectors() {
                 "d37c738e83df5d9b0bb6495ac96abf21bcb2697477e2c15c2c7916ff7a3b6a89"
             );
 
-            assert_eq!(cs.get("randomization of note commitment/x3/num"), cm);
+            assert_eq!(cs.get("randomization of note commitment/x3/num"), cmu);
 
             assert_eq!(cs.num_inputs(), 8);
             assert_eq!(cs.get_input(0, "ONE"), bls12_381::Scalar::one());
@@ -904,7 +904,7 @@ fn test_output_circuit_with_bls12_381() {
                 "c26d5cdfe6ccd65c03390902c02e11393ea6bb96aae32a7f2ecb12eb9103faee"
             );
 
-            let expected_cm = payment_address
+            let expected_cmu = payment_address
                 .create_note(
                     value_commitment.value,
                     Rseed::BeforeZip212(commitment_randomness),
@@ -936,7 +936,7 @@ fn test_output_circuit_with_bls12_381() {
                 cs.get_input(4, "epk/y/input variable"),
                 expected_epk.get_v()
             );
-            assert_eq!(cs.get_input(5, "commitment/input variable"), expected_cm);
+            assert_eq!(cs.get_input(5, "commitment/input variable"), expected_cmu);
         }
     }
 }

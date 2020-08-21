@@ -95,7 +95,7 @@ impl SaplingVerificationContext {
     pub fn check_output(
         &mut self,
         cv: jubjub::ExtendedPoint,
-        cm: bls12_381::Scalar,
+        cmu: bls12_381::Scalar,
         epk: jubjub::ExtendedPoint,
         zkproof: Proof<Bls12>,
         verifying_key: &PreparedVerifyingKey<Bls12>,
@@ -121,7 +121,7 @@ impl SaplingVerificationContext {
             public_input[2] = x;
             public_input[3] = y;
         }
-        public_input[4] = cm;
+        public_input[4] = cmu;
 
         // Verify the proof
         verify_proof(verifying_key, &zkproof, &public_input[..]).is_ok()
