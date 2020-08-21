@@ -1040,7 +1040,6 @@ mod test {
         };
 
         let check_small_order_from_strs = |x, y| {
-            //let (x,y) = (bls12_381::Scalar::from_str("14080418777298869350588389379361252092475090129841789940098060767181937064268").unwrap(), bls12_381::Scalar::from_str("4408371274642418797323679050836535851651768103477128764103246588657558662748").unwrap());
             let (x, y) = (
                 bls12_381::Scalar::from_str(x).unwrap(),
                 bls12_381::Scalar::from_str(y).unwrap(),
