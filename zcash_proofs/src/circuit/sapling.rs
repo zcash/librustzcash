@@ -576,7 +576,7 @@ fn test_input_circuit_with_bls12_381() {
             };
 
             let mut position = 0u64;
-            let cm = note.cm();
+            let cm = note.cmu();
             let mut cur = cm.clone();
 
             for (i, val) in auth_path.clone().into_iter().enumerate() {
@@ -757,7 +757,7 @@ fn test_input_circuit_with_bls12_381_external_test_vectors() {
             };
 
             let mut position = 0u64;
-            let cm = note.cm();
+            let cm = note.cmu();
             let mut cur = cm.clone();
 
             for (i, val) in auth_path.clone().into_iter().enumerate() {
@@ -910,7 +910,7 @@ fn test_output_circuit_with_bls12_381() {
                     Rseed::BeforeZip212(commitment_randomness),
                 )
                 .expect("should be valid")
-                .cm();
+                .cmu();
 
             let expected_value_cm = jubjub::ExtendedPoint::from(value_commitment.cm()).to_affine();
 

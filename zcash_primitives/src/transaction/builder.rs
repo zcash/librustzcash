@@ -138,7 +138,7 @@ impl SaplingOutput {
             self.note.value,
         );
 
-        let cmu = self.note.cm();
+        let cmu = self.note.cmu();
 
         let enc_ciphertext = encryptor.encrypt_note_plaintext();
         let out_ciphertext = encryptor.encrypt_outgoing_plaintext(&cv, &cmu);
@@ -368,7 +368,7 @@ impl<P: consensus::Parameters, R: RngCore + CryptoRng> Builder<P, R> {
         merkle_path: MerklePath<Node>,
     ) -> Result<(), Error> {
         // Consistency check: all anchors must equal the first one
-        let cm = Node::new(note.cm().into());
+        let cm = Node::new(note.cmu().into());
         if let Some(anchor) = self.anchor {
             let path_root: bls12_381::Scalar = merkle_path.root(cm).into();
             if path_root != anchor {
@@ -635,7 +635,7 @@ impl<P: consensus::Parameters, R: RngCore + CryptoRng> Builder<P, R> {
                     dummy_note.value,
                 );
 
-                let cmu = dummy_note.cm();
+                let cmu = dummy_note.cmu();
 
                 let mut enc_ciphertext = [0u8; 580];
                 let mut out_ciphertext = [0u8; 80];
@@ -780,9 +780,9 @@ mod tests {
         let note1 = to
             .create_note(50000, Rseed::BeforeZip212(jubjub::Fr::random(&mut rng)))
             .unwrap();
-        let cm1 = Node::new(note1.cm().to_repr());
+        let cmu1 = Node::new(note1.cmu().to_repr());
         let mut tree = CommitmentTree::new();
-        tree.append(cm1).unwrap();
+        tree.append(cmu1).unwrap();
         let witness1 = IncrementalWitness::from_tree(&tree);
 
         let mut builder = Builder::<TestNetwork, OsRng>::new(0);
@@ -879,9 +879,9 @@ mod tests {
         let note1 = to
             .create_note(59999, Rseed::BeforeZip212(jubjub::Fr::random(&mut rng)))
             .unwrap();
-        let cm1 = Node::new(note1.cm().to_repr());
+        let cmu1 = Node::new(note1.cmu().to_repr());
         let mut tree = CommitmentTree::new();
-        tree.append(cm1).unwrap();
+        tree.append(cmu1).unwrap();
         let mut witness1 = IncrementalWitness::from_tree(&tree);
 
         // Fail if there is insufficient input
@@ -919,9 +919,9 @@ mod tests {
         let note2 = to
             .create_note(1, Rseed::BeforeZip212(jubjub::Fr::random(&mut rng)))
             .unwrap();
-        let cm2 = Node::new(note2.cm().to_repr());
-        tree.append(cm2).unwrap();
-        witness1.append(cm2).unwrap();
+        let cmu2 = Node::new(note2.cmu().to_repr());
+        tree.append(cmu2).unwrap();
+        witness1.append(cmu2).unwrap();
         let witness2 = IncrementalWitness::from_tree(&tree);
 
         // Succeeds if there is sufficient input

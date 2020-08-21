@@ -276,7 +276,7 @@ impl Note {
     }
 
     /// Computes the note commitment
-    pub fn cm(&self) -> bls12_381::Scalar {
+    pub fn cmu(&self) -> bls12_381::Scalar {
         // The commitment is in the prime order subgroup, so mapping the
         // commitment to the u-coordinate is an injective encoding.
         jubjub::ExtendedPoint::from(self.cm_full_point())

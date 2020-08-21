@@ -139,7 +139,7 @@ mod tests {
             Memo::default(),
             &mut rng,
         );
-        let cmu = note.cm().to_repr().as_ref().to_vec();
+        let cmu = note.cmu().to_repr().as_ref().to_vec();
         let epk = encryptor.epk().to_bytes().to_vec();
         let enc_ciphertext = encryptor.encrypt_note_plaintext();
 
@@ -199,7 +199,7 @@ mod tests {
                 Memo::default(),
                 &mut rng,
             );
-            let cmu = note.cm().to_repr().as_ref().to_vec();
+            let cmu = note.cmu().to_repr().as_ref().to_vec();
             let epk = encryptor.epk().to_bytes().to_vec();
             let enc_ciphertext = encryptor.encrypt_note_plaintext();
 
@@ -227,7 +227,7 @@ mod tests {
                 Memo::default(),
                 &mut rng,
             );
-            let cmu = note.cm().to_repr().as_ref().to_vec();
+            let cmu = note.cmu().to_repr().as_ref().to_vec();
             let epk = encryptor.epk().to_bytes().to_vec();
             let enc_ciphertext = encryptor.encrypt_note_plaintext();
 

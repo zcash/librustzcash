@@ -212,7 +212,7 @@ pub fn prf_ock(
 /// };
 /// let rcm = jubjub::Fr::random(&mut rng);
 /// let note = to.create_note(value, Rseed::BeforeZip212(rcm)).unwrap();
-/// let cmu = note.cm();
+/// let cmu = note.cmu();
 ///
 /// let enc = SaplingNoteEncryption::new(ovk, note, to, Memo::default(), &mut rng);
 /// let encCiphertext = enc.encrypt_note_plaintext();
@@ -354,7 +354,7 @@ fn parse_note_plaintext_without_memo<P: consensus::Parameters>(
     let to = PaymentAddress::from_parts(diversifier, pk_d)?;
     let note = to.create_note(v, rseed).unwrap();
 
-    if note.cm() != *cmu {
+    if note.cmu() != *cmu {
         // Published commitment doesn't match calculated commitment
         return None;
     }
@@ -552,7 +552,7 @@ pub fn try_sapling_output_recovery_with_ock<P: consensus::Parameters>(
     let to = PaymentAddress::from_parts(diversifier, pk_d)?;
     let note = to.create_note(v, rseed).unwrap();
 
-    if note.cm() != *cmu {
+    if note.cmu() != *cmu {
         // Published commitment doesn't match calculated commitment
         return None;
     }
@@ -825,7 +825,7 @@ mod tests {
         let rseed = generate_random_rseed::<TestNetwork, R>(height, &mut rng);
 
         let note = pa.create_note(value, rseed).unwrap();
-        let cmu = note.cm();
+        let cmu = note.cmu();
 
         let ovk = OutgoingViewingKey([0; 32]);
         let ne = SaplingNoteEncryption::new(ovk, note, pa, Memo([0; 512]), &mut rng);
@@ -1781,7 +1781,7 @@ mod tests {
 
             let to = PaymentAddress::from_parts(Diversifier(tv.default_d), pk_d).unwrap();
             let note = to.create_note(tv.v, Rseed::BeforeZip212(rcm)).unwrap();
-            assert_eq!(note.cm(), cmu);
+            assert_eq!(note.cmu(), cmu);
 
             //
             // Test decryption
