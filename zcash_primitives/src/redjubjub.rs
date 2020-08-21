@@ -13,7 +13,7 @@ use std::ops::{AddAssign, MulAssign, Neg};
 use crate::util::hash_to_scalar;
 
 fn read_scalar<R: Read>(mut reader: R) -> io::Result<jubjub::Fr> {
-    let mut s_repr = [0; 32];
+    let mut s_repr = [0u8; 32];
     reader.read_exact(s_repr.as_mut())?;
 
     jubjub::Fr::from_repr(s_repr)
@@ -105,7 +105,7 @@ impl PublicKey {
     }
 
     pub fn read<R: Read>(mut reader: R) -> io::Result<Self> {
-        let mut bytes = [0; 32];
+        let mut bytes = [0u8; 32];
         reader.read_exact(&mut bytes)?;
         let p = ExtendedPoint::from_bytes(&bytes).map(PublicKey);
         if p.is_some().into() {

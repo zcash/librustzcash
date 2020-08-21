@@ -31,7 +31,7 @@ impl OutPoint {
     }
 
     pub fn read<R: Read>(mut reader: R) -> io::Result<Self> {
-        let mut hash = [0; 32];
+        let mut hash = [0u8; 32];
         reader.read_exact(&mut hash)?;
         let n = reader.read_u32::<LittleEndian>()?;
         Ok(OutPoint { hash, n })
@@ -96,7 +96,7 @@ pub struct TxOut {
 impl TxOut {
     pub fn read<R: Read>(mut reader: &mut R) -> io::Result<Self> {
         let value = {
-            let mut tmp = [0; 8];
+            let mut tmp = [0u8; 8];
             reader.read_exact(&mut tmp)?;
             Amount::from_nonnegative_i64_le_bytes(tmp)
         }
@@ -141,7 +141,7 @@ impl SpendDescription {
         // - "Not small order" is enforced in SaplingVerificationContext::check_spend()
         //   (located in zcash_proofs::sapling::verifier).
         let cv = {
-            let mut bytes = [0; 32];
+            let mut bytes = [0u8; 32];
             reader.read_exact(&mut bytes)?;
             let cv = jubjub::ExtendedPoint::from_bytes(&bytes);
             if cv.is_none().into() {
@@ -152,13 +152,13 @@ impl SpendDescription {
 
         // Consensus rule (§7.3): Canonical encoding is enforced here
         let anchor = {
-            let mut f = [0; 32];
+            let mut f = [0u8; 32];
             reader.read_exact(&mut f)?;
             bls12_381::Scalar::from_repr(f)
                 .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "anchor not in field"))?
         };
 
-        let mut nullifier = [0; 32];
+        let mut nullifier = [0u8; 32];
         reader.read_exact(&mut nullifier)?;
 
         // Consensus rules (§4.4):
@@ -170,7 +170,7 @@ impl SpendDescription {
         // - Canonical encoding is enforced by the API of SaplingVerificationContext::check_spend()
         //   due to the need to parse this into a bellman::groth16::Proof.
         // - Proof validity is enforced in SaplingVerificationContext::check_spend()
-        let mut zkproof = [0; GROTH_PROOF_SIZE];
+        let mut zkproof = [0u8; GROTH_PROOF_SIZE];
         reader.read_exact(&mut zkproof)?;
 
         // Consensus rules (§4.4):
@@ -230,7 +230,7 @@ impl OutputDescription {
         // - "Not small order" is enforced in SaplingVerificationContext::check_output()
         //   (located in zcash_proofs::sapling::verifier).
         let cv = {
-            let mut bytes = [0; 32];
+            let mut bytes = [0u8; 32];
             reader.read_exact(&mut bytes)?;
             let cv = jubjub::ExtendedPoint::from_bytes(&bytes);
             if cv.is_none().into() {
@@ -241,7 +241,7 @@ impl OutputDescription {
 
         // Consensus rule (§7.4): Canonical encoding is enforced here
         let cmu = {
-            let mut f = [0; 32];
+            let mut f = [0u8; 32];
             reader.read_exact(&mut f)?;
             bls12_381::Scalar::from_repr(f)
                 .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "cmu not in field"))?
@@ -251,7 +251,7 @@ impl OutputDescription {
         // - Canonical encoding is enforced here.
         // - "Not small order" is enforced in SaplingVerificationContext::check_output()
         let ephemeral_key = {
-            let mut bytes = [0; 32];
+            let mut bytes = [0u8; 32];
             reader.read_exact(&mut bytes)?;
             let ephemeral_key = jubjub::ExtendedPoint::from_bytes(&bytes);
             if ephemeral_key.is_none().into() {
@@ -263,8 +263,8 @@ impl OutputDescription {
             ephemeral_key.unwrap()
         };
 
-        let mut enc_ciphertext = [0; 580];
-        let mut out_ciphertext = [0; 80];
+        let mut enc_ciphertext = [0u8; 580];
+        let mut out_ciphertext = [0u8; 80];
         reader.read_exact(&mut enc_ciphertext)?;
         reader.read_exact(&mut out_ciphertext)?;
 
@@ -272,7 +272,7 @@ impl OutputDescription {
         // - Canonical encoding is enforced by the API of SaplingVerificationContext::check_output()
         //   due to the need to parse this into a bellman::groth16::Proof.
         // - Proof validity is enforced in SaplingVerificationContext::check_output()
-        let mut zkproof = [0; GROTH_PROOF_SIZE];
+        let mut zkproof = [0u8; GROTH_PROOF_SIZE];
         reader.read_exact(&mut zkproof)?;
 
         Ok(OutputDescription {
@@ -350,7 +350,7 @@ impl JSDescription {
     pub fn read<R: Read>(mut reader: R, use_groth: bool) -> io::Result<Self> {
         // Consensus rule (§4.3): Canonical encoding is enforced here
         let vpub_old = {
-            let mut tmp = [0; 8];
+            let mut tmp = [0u8; 8];
             reader.read_exact(&mut tmp)?;
             Amount::from_u64_le_bytes(tmp)
         }
@@ -358,7 +358,7 @@ impl JSDescription {
 
         // Consensus rule (§4.3): Canonical encoding is enforced here
         let vpub_new = {
-            let mut tmp = [0; 8];
+            let mut tmp = [0u8; 8];
             reader.read_exact(&mut tmp)?;
             Amount::from_u64_le_bytes(tmp)
         }
@@ -367,16 +367,16 @@ impl JSDescription {
         // Consensus rule (§4.3): One of vpub_old and vpub_new being zero is
         // enforced by CheckTransactionWithoutProofVerification() in zcashd.
 
-        let mut anchor = [0; 32];
+        let mut anchor = [0u8; 32];
         reader.read_exact(&mut anchor)?;
 
-        let mut nullifiers = [[0; 32]; ZC_NUM_JS_INPUTS];
+        let mut nullifiers = [[0u8; 32]; ZC_NUM_JS_INPUTS];
         nullifiers
             .iter_mut()
             .map(|nf| reader.read_exact(nf))
             .collect::<io::Result<()>>()?;
 
-        let mut commitments = [[0; 32]; ZC_NUM_JS_OUTPUTS];
+        let mut commitments = [[0u8; 32]; ZC_NUM_JS_OUTPUTS];
         commitments
             .iter_mut()
             .map(|cm| reader.read_exact(cm))
@@ -384,13 +384,13 @@ impl JSDescription {
 
         // Consensus rule (§4.3): Canonical encoding is enforced by
         // ZCNoteDecryption::decrypt() in zcashd
-        let mut ephemeral_key = [0; 32];
+        let mut ephemeral_key = [0u8; 32];
         reader.read_exact(&mut ephemeral_key)?;
 
-        let mut random_seed = [0; 32];
+        let mut random_seed = [0u8; 32];
         reader.read_exact(&mut random_seed)?;
 
-        let mut macs = [[0; 32]; ZC_NUM_JS_INPUTS];
+        let mut macs = [[0u8; 32]; ZC_NUM_JS_INPUTS];
         macs.iter_mut()
             .map(|mac| reader.read_exact(mac))
             .collect::<io::Result<()>>()?;
@@ -399,19 +399,19 @@ impl JSDescription {
             // Consensus rules (§4.3):
             // - Canonical encoding is enforced in librustzcash_sprout_verify()
             // - Proof validity is enforced in librustzcash_sprout_verify()
-            let mut proof = [0; GROTH_PROOF_SIZE];
+            let mut proof = [0u8; GROTH_PROOF_SIZE];
             reader.read_exact(&mut proof)?;
             SproutProof::Groth(proof)
         } else {
             // Consensus rules (§4.3):
             // - Canonical encoding is enforced by PHGRProof in zcashd
             // - Proof validity is enforced by JSDescription::Verify() in zcashd
-            let mut proof = [0; PHGR_PROOF_SIZE];
+            let mut proof = [0u8; PHGR_PROOF_SIZE];
             reader.read_exact(&mut proof)?;
             SproutProof::PHGR(proof)
         };
 
-        let mut ciphertexts = [[0; 601]; ZC_NUM_JS_OUTPUTS];
+        let mut ciphertexts = [[0u8; 601]; ZC_NUM_JS_OUTPUTS];
         ciphertexts
             .iter_mut()
             .map(|ct| reader.read_exact(ct))

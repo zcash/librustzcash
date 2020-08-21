@@ -70,17 +70,17 @@ impl ExpandedSpendingKey {
     }
 
     pub fn read<R: Read>(mut reader: R) -> io::Result<Self> {
-        let mut ask_repr = [0; 32];
+        let mut ask_repr = [0u8; 32];
         reader.read_exact(ask_repr.as_mut())?;
         let ask = jubjub::Fr::from_repr(ask_repr)
             .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "ask not in field"))?;
 
-        let mut nsk_repr = [0; 32];
+        let mut nsk_repr = [0u8; 32];
         reader.read_exact(nsk_repr.as_mut())?;
         let nsk = jubjub::Fr::from_repr(nsk_repr)
             .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "nsk not in field"))?;
 
-        let mut ovk = [0; 32];
+        let mut ovk = [0u8; 32];
         reader.read_exact(&mut ovk)?;
 
         Ok(ExpandedSpendingKey {
@@ -131,12 +131,12 @@ impl FullViewingKey {
 
     pub fn read<R: Read>(mut reader: R) -> io::Result<Self> {
         let ak = {
-            let mut buf = [0; 32];
+            let mut buf = [0u8; 32];
             reader.read_exact(&mut buf)?;
             jubjub::SubgroupPoint::from_bytes(&buf).and_then(|p| CtOption::new(p, !p.is_identity()))
         };
         let nk = {
-            let mut buf = [0; 32];
+            let mut buf = [0u8; 32];
             reader.read_exact(&mut buf)?;
             jubjub::SubgroupPoint::from_bytes(&buf)
         };
@@ -155,7 +155,7 @@ impl FullViewingKey {
         let ak = ak.unwrap();
         let nk = nk.unwrap();
 
-        let mut ovk = [0; 32];
+        let mut ovk = [0u8; 32];
         reader.read_exact(&mut ovk)?;
 
         Ok(FullViewingKey {

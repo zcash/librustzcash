@@ -64,7 +64,7 @@ impl Node {
 
 impl Hashable for Node {
     fn read<R: Read>(mut reader: R) -> io::Result<Self> {
-        let mut repr = [0; 32];
+        let mut repr = [0u8; 32];
         reader.read_exact(&mut repr)?;
         Ok(Node::new(repr))
     }
