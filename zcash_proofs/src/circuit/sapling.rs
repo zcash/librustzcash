@@ -567,7 +567,8 @@ fn test_input_circuit_with_bls12_381() {
 
         {
             let rk = jubjub::ExtendedPoint::from(viewing_key.rk(ar)).to_affine();
-            let expected_value_cm = jubjub::ExtendedPoint::from(value_commitment.cm()).to_affine();
+            let expected_value_commitment =
+                jubjub::ExtendedPoint::from(value_commitment.commitment()).to_affine();
             let note = Note {
                 value: value_commitment.value,
                 g_d: g_d.clone(),
@@ -643,11 +644,11 @@ fn test_input_circuit_with_bls12_381() {
             assert_eq!(cs.get_input(2, "rk/y/input variable"), rk.get_v());
             assert_eq!(
                 cs.get_input(3, "value commitment/commitment point/x/input variable"),
-                expected_value_cm.get_u()
+                expected_value_commitment.get_u()
             );
             assert_eq!(
                 cs.get_input(4, "value commitment/commitment point/y/input variable"),
-                expected_value_cm.get_v()
+                expected_value_commitment.get_v()
             );
             assert_eq!(cs.get_input(5, "anchor/input variable"), cur);
             assert_eq!(cs.get_input(6, "pack nullifier/input 0"), expected_nf[0]);
@@ -675,7 +676,7 @@ fn test_input_circuit_with_bls12_381_external_test_vectors() {
 
     let tree_depth = 32;
 
-    let expected_cm_xs = vec![
+    let expected_commitment_xs = vec![
         "43821661663052659750276289184181083197337192946256245809816728673021647664276",
         "7220807656052227578299730541645543434083158611414003423211850718229633594616",
         "13239753550660714843257636471668037031928211668773449453628093339627668081697",
@@ -688,7 +689,7 @@ fn test_input_circuit_with_bls12_381_external_test_vectors() {
         "18269767207277008186871145355531741929166733260352590789136389380124992250945",
     ];
 
-    let expected_cm_ys = vec![
+    let expected_commitment_ys = vec![
         "27630722367128086497290371604583225252915685718989450292520883698391703910",
         "23310648738313092772044712773481584369462075017189681529702825235349449805260",
         "25709635353183537915646348052945798827495141780341329896098121888376871589480",
@@ -740,14 +741,15 @@ fn test_input_circuit_with_bls12_381_external_test_vectors() {
 
         {
             let rk = jubjub::ExtendedPoint::from(viewing_key.rk(ar)).to_affine();
-            let expected_value_cm = jubjub::ExtendedPoint::from(value_commitment.cm()).to_affine();
+            let expected_value_commitment =
+                jubjub::ExtendedPoint::from(value_commitment.commitment()).to_affine();
             assert_eq!(
-                expected_value_cm.get_u(),
-                bls12_381::Scalar::from_str(&expected_cm_xs[i as usize]).unwrap()
+                expected_value_commitment.get_u(),
+                bls12_381::Scalar::from_str(&expected_commitment_xs[i as usize]).unwrap()
             );
             assert_eq!(
-                expected_value_cm.get_v(),
-                bls12_381::Scalar::from_str(&expected_cm_ys[i as usize]).unwrap()
+                expected_value_commitment.get_v(),
+                bls12_381::Scalar::from_str(&expected_commitment_ys[i as usize]).unwrap()
             );
             let note = Note {
                 value: value_commitment.value,
@@ -824,11 +826,11 @@ fn test_input_circuit_with_bls12_381_external_test_vectors() {
             assert_eq!(cs.get_input(2, "rk/y/input variable"), rk.get_v());
             assert_eq!(
                 cs.get_input(3, "value commitment/commitment point/x/input variable"),
-                expected_value_cm.get_u()
+                expected_value_commitment.get_u()
             );
             assert_eq!(
                 cs.get_input(4, "value commitment/commitment point/y/input variable"),
-                expected_value_cm.get_v()
+                expected_value_commitment.get_v()
             );
             assert_eq!(cs.get_input(5, "anchor/input variable"), cur);
             assert_eq!(cs.get_input(6, "pack nullifier/input 0"), expected_nf[0]);
@@ -912,7 +914,8 @@ fn test_output_circuit_with_bls12_381() {
                 .expect("should be valid")
                 .cmu();
 
-            let expected_value_cm = jubjub::ExtendedPoint::from(value_commitment.cm()).to_affine();
+            let expected_value_commitment =
+                jubjub::ExtendedPoint::from(value_commitment.commitment()).to_affine();
 
             let expected_epk =
                 jubjub::ExtendedPoint::from(payment_address.g_d().expect("should be valid") * esk)
@@ -922,11 +925,11 @@ fn test_output_circuit_with_bls12_381() {
             assert_eq!(cs.get_input(0, "ONE"), bls12_381::Scalar::one());
             assert_eq!(
                 cs.get_input(1, "value commitment/commitment point/x/input variable"),
-                expected_value_cm.get_u()
+                expected_value_commitment.get_u()
             );
             assert_eq!(
                 cs.get_input(2, "value commitment/commitment point/y/input variable"),
-                expected_value_cm.get_v()
+                expected_value_commitment.get_v()
             );
             assert_eq!(
                 cs.get_input(3, "epk/x/input variable"),

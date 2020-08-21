@@ -216,7 +216,7 @@ pub fn prf_ock(
 ///
 /// let enc = SaplingNoteEncryption::new(ovk, note, to, Memo::default(), &mut rng);
 /// let encCiphertext = enc.encrypt_note_plaintext();
-/// let outCiphertext = enc.encrypt_outgoing_plaintext(&cv.cm().into(), &cmu);
+/// let outCiphertext = enc.encrypt_outgoing_plaintext(&cv.commitment().into(), &cmu);
 /// ```
 pub struct SaplingNoteEncryption {
     epk: jubjub::SubgroupPoint,
@@ -820,7 +820,7 @@ mod tests {
             value,
             randomness: jubjub::Fr::random(&mut rng),
         };
-        let cv = value_commitment.cm().into();
+        let cv = value_commitment.commitment().into();
 
         let rseed = generate_random_rseed::<TestNetwork, R>(height, &mut rng);
 
