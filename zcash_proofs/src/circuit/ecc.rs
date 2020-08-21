@@ -539,7 +539,7 @@ impl MontgomeryPoint {
     }
 
     /// Performs an affine point addition, not defined for
-    /// coincident points.
+    /// points with the same x-coordinate.
     pub fn add<CS>(&self, mut cs: CS, other: &Self) -> Result<Self, SynthesisError>
     where
         CS: ConstraintSystem<bls12_381::Scalar>,

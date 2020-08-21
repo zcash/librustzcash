@@ -153,9 +153,9 @@ impl Circuit<bls12_381::Scalar> for Spend {
             )?;
 
             // NB: We don't ensure that the bit representation of nsk
-            // is "in the field" (Fs) because it's not used except to
-            // demonstrate the prover knows it. If they know a
-            // congruency then that's equivalent.
+            // is "in the field" (jubjub::Fr) because it's not used
+            // except to demonstrate the prover knows it. If they know
+            // a congruency then that's equivalent.
 
             // Compute nk = [nsk] ProvingPublicKey
             nk = ecc::fixed_base_multiplication(
@@ -501,8 +501,8 @@ impl Circuit<bls12_381::Scalar> for Output {
 
         // Only the u-coordinate of the output is revealed,
         // since we know it is prime order, and we know that
-        // the x-coordinate is an injective encoding for
-        // prime-order elements.
+        // the u-coordinate is an injective encoding for
+        // elements in the prime-order subgroup.
         cm.get_u().inputize(cs.namespace(|| "commitment"))?;
 
         Ok(())
