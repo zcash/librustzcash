@@ -223,9 +223,6 @@ impl Note {
     pub fn uncommitted() -> bls12_381::Scalar {
         // The smallest u-coordinate that is not on the curve
         // is one.
-        // TODO: This should be relocated to JubjubEngine as
-        // it's specific to the curve we're using, not all
-        // twisted edwards curves.
         bls12_381::Scalar::one()
     }
 
