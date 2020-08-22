@@ -14,9 +14,13 @@ edition = "2018"
 [dependencies]
 bellman = { version = "0.6", path = "../bellman", default-features = false, features = ["groth16"] }
 blake2b_simd = "0.5"
+bls12_381 = { version = "0.1", path = "../bls12_381" }
 byteorder = "1"
 directories = { version = "3", optional = true }
 ff = { version = "0.6", path = "../ff" }
+group = { version = "0.6", path = "../group" }
+jubjub = { version = "0.3", path = "../jubjub" }
+lazy_static = "1"
 minreq = { version = "2", features = ["https"], optional = true }
 pairing = { version = "0.16", path = "../pairing" }
 rand_core = "0.5.1"

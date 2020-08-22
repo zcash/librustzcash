@@ -337,7 +337,7 @@ where
 #[ignore]
 fn test_sprout_constraints() {
     use bellman::gadgets::test::*;
-    use pairing::bls12_381::Fr;
+    use bls12_381::Scalar;
 
     use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 
@@ -355,7 +355,7 @@ fn test_sprout_constraints() {
     }
 
     while test_vector.len() != 0 {
-        let mut cs = TestConstraintSystem::<Fr>::new();
+        let mut cs = TestConstraintSystem::<Scalar>::new();
 
         let phi = Some(get_u256(&mut test_vector));
         let rt = Some(get_u256(&mut test_vector));

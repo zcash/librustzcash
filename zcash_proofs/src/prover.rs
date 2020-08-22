@@ -1,18 +1,14 @@
 //! Abstractions over the proving system and parameters for ease of use.
 
 use bellman::groth16::{Parameters, PreparedVerifyingKey};
-use pairing::bls12_381::{Bls12, Fr};
-use zcash_primitives::{
-    jubjub::{edwards, fs::Fs, Unknown},
-    primitives::{Diversifier, PaymentAddress, ProofGenerationKey, Rseed},
-};
+use bls12_381::Bls12;
 use zcash_primitives::{
     merkle_tree::MerklePath,
+    primitives::{Diversifier, PaymentAddress, ProofGenerationKey, Rseed},
     prover::TxProver,
     redjubjub::{PublicKey, Signature},
     sapling::Node,
     transaction::components::{Amount, GROTH_PROOF_SIZE},
-    JUBJUB,
 };
 
 use crate::sapling::SaplingProvingContext;
@@ -130,21 +126,14 @@ impl TxProver for LocalTxProver {
     fn spend_proof(
         &self,
         ctx: &mut Self::SaplingProvingContext,
-        proof_generation_key: ProofGenerationKey<Bls12>,
+        proof_generation_key: ProofGenerationKey,
         diversifier: Diversifier,
-        rseed: Rseed<Fs>,
-        ar: Fs,
+        rseed: Rseed,
+        ar: jubjub::Fr,
         value: u64,
-        anchor: Fr,
+        anchor: bls12_381::Scalar,
         merkle_path: MerklePath<Node>,
-    ) -> Result<
-        (
-            [u8; GROTH_PROOF_SIZE],
-            edwards::Point<Bls12, Unknown>,
-            PublicKey<Bls12>,
-        ),
-        (),
-    > {
+    ) -> Result<([u8; GROTH_PROOF_SIZE], jubjub::ExtendedPoint, PublicKey), ()> {
         let (proof, cv, rk) = ctx.spend_proof(
             proof_generation_key,
             diversifier,
@@ -155,7 +144,6 @@ impl TxProver for LocalTxProver {
             merkle_path,
             &self.spend_params,
             &self.spend_vk,
-            &JUBJUB,
         )?;
 
         let mut zkproof = [0u8; GROTH_PROOF_SIZE];
@@ -169,19 +157,12 @@ impl TxProver for LocalTxProver {
     fn output_proof(
         &self,
         ctx: &mut Self::SaplingProvingContext,
-        esk: Fs,
-        payment_address: PaymentAddress<Bls12>,
-        rcm: Fs,
+        esk: jubjub::Fr,
+        payment_address: PaymentAddress,
+        rcm: jubjub::Fr,
         value: u64,
-    ) -> ([u8; GROTH_PROOF_SIZE], edwards::Point<Bls12, Unknown>) {
-        let (proof, cv) = ctx.output_proof(
-            esk,
-            payment_address,
-            rcm,
-            value,
-            &self.output_params,
-            &JUBJUB,
-        );
+    ) -> ([u8; GROTH_PROOF_SIZE], jubjub::ExtendedPoint) {
+        let (proof, cv) = ctx.output_proof(esk, payment_address, rcm, value, &self.output_params);
 
         let mut zkproof = [0u8; GROTH_PROOF_SIZE];
         proof
@@ -197,6 +178,6 @@ impl TxProver for LocalTxProver {
         value_balance: Amount,
         sighash: &[u8; 32],
     ) -> Result<Signature, ()> {
-        ctx.binding_sig(value_balance, sighash, &JUBJUB)
+        ctx.binding_sig(value_balance, sighash)
     }
 }

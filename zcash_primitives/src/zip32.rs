@@ -6,18 +6,16 @@ use aes::Aes256;
 use blake2b_simd::Params as Blake2bParams;
 use byteorder::{ByteOrder, LittleEndian, ReadBytesExt, WriteBytesExt};
 use fpe::ff1::{BinaryNumeralString, FF1};
-use pairing::bls12_381::Bls12;
 use std::ops::AddAssign;
 
 use crate::{
-    jubjub::{fs::Fs, FixedGenerators, JubjubEngine, JubjubParams, ToUniform},
+    constants::{PROOF_GENERATION_KEY_GENERATOR, SPENDING_KEY_GENERATOR},
     primitives::{Diversifier, PaymentAddress, ViewingKey},
 };
 use std::io::{self, Read, Write};
 
-use crate::{
-    keys::{prf_expand, prf_expand_vec, ExpandedSpendingKey, FullViewingKey, OutgoingViewingKey},
-    JUBJUB,
+use crate::keys::{
+    prf_expand, prf_expand_vec, ExpandedSpendingKey, FullViewingKey, OutgoingViewingKey,
 };
 
 pub const ZIP32_SAPLING_MASTER_PERSONALIZATION: &[u8; 16] = b"ZcashIP32Sapling";
@@ -36,8 +34,8 @@ fn derive_child_ovk(parent: &OutgoingViewingKey, i_l: &[u8]) -> OutgoingViewingK
 /// A Sapling full viewing key fingerprint
 struct FVKFingerprint([u8; 32]);
 
-impl<E: JubjubEngine> From<&FullViewingKey<E>> for FVKFingerprint {
-    fn from(fvk: &FullViewingKey<E>) -> Self {
+impl From<&FullViewingKey> for FVKFingerprint {
+    fn from(fvk: &FullViewingKey) -> Self {
         let mut h = Blake2bParams::new()
             .hash_length(32)
             .personal(ZIP32_SAPLING_FVFP_PERSONALIZATION)
@@ -154,7 +152,7 @@ impl DiversifierKey {
             let d_j = Diversifier(d_j);
 
             // Return (j, d_j) if valid, else increment j and try again
-            match d_j.g_d::<Bls12>(&JUBJUB) {
+            match d_j.g_d() {
                 Some(_) => return Ok((j, d_j)),
                 None => {
                     if j.increment().is_err() {
@@ -173,7 +171,7 @@ pub struct ExtendedSpendingKey {
     parent_fvk_tag: FVKTag,
     child_index: ChildIndex,
     chain_code: ChainCode,
-    pub expsk: ExpandedSpendingKey<Bls12>,
+    pub expsk: ExpandedSpendingKey,
     dk: DiversifierKey,
 }
 
@@ -184,7 +182,7 @@ pub struct ExtendedFullViewingKey {
     parent_fvk_tag: FVKTag,
     child_index: ChildIndex,
     chain_code: ChainCode,
-    pub fvk: FullViewingKey<Bls12>,
+    pub fvk: FullViewingKey,
     dk: DiversifierKey,
 }
 
@@ -297,7 +295,7 @@ impl ExtendedSpendingKey {
     }
 
     pub fn derive_child(&self, i: ChildIndex) -> Self {
-        let fvk = FullViewingKey::from_expanded_spending_key(&self.expsk, &JUBJUB);
+        let fvk = FullViewingKey::from_expanded_spending_key(&self.expsk);
         let tmp = match i {
             ChildIndex::Hardened(i) => {
                 let mut le_i = [0; 4];
@@ -326,8 +324,8 @@ impl ExtendedSpendingKey {
             child_index: i,
             chain_code: ChainCode(c_i),
             expsk: {
-                let mut ask = Fs::to_uniform(prf_expand(i_l, &[0x13]).as_bytes());
-                let mut nsk = Fs::to_uniform(prf_expand(i_l, &[0x14]).as_bytes());
+                let mut ask = jubjub::Fr::from_bytes_wide(prf_expand(i_l, &[0x13]).as_array());
+                let mut nsk = jubjub::Fr::from_bytes_wide(prf_expand(i_l, &[0x14]).as_array());
                 ask.add_assign(&self.expsk.ask);
                 nsk.add_assign(&self.expsk.nsk);
                 let ovk = derive_child_ovk(&self.expsk.ovk, i_l);
@@ -337,7 +335,7 @@ impl ExtendedSpendingKey {
         }
     }
 
-    pub fn default_address(&self) -> Result<(DiversifierIndex, PaymentAddress<Bls12>), ()> {
+    pub fn default_address(&self) -> Result<(DiversifierIndex, PaymentAddress), ()> {
         ExtendedFullViewingKey::from(self).default_address()
     }
 }
@@ -349,7 +347,7 @@ impl<'a> From<&'a ExtendedSpendingKey> for ExtendedFullViewingKey {
             parent_fvk_tag: xsk.parent_fvk_tag,
             child_index: xsk.child_index,
             chain_code: xsk.chain_code,
-            fvk: FullViewingKey::from_expanded_spending_key(&xsk.expsk, &JUBJUB),
+            fvk: FullViewingKey::from_expanded_spending_key(&xsk.expsk),
             dk: xsk.dk,
         }
     }
@@ -363,7 +361,7 @@ impl ExtendedFullViewingKey {
         let i = reader.read_u32::<LittleEndian>()?;
         let mut c = [0; 32];
         reader.read_exact(&mut c)?;
-        let fvk = FullViewingKey::read(&mut reader, &*JUBJUB)?;
+        let fvk = FullViewingKey::read(&mut reader)?;
         let mut dk = [0; 32];
         reader.read_exact(&mut dk)?;
 
@@ -410,16 +408,10 @@ impl ExtendedFullViewingKey {
             child_index: i,
             chain_code: ChainCode(c_i),
             fvk: {
-                let i_ask = Fs::to_uniform(prf_expand(i_l, &[0x13]).as_bytes());
-                let i_nsk = Fs::to_uniform(prf_expand(i_l, &[0x14]).as_bytes());
-                let ak = JUBJUB
-                    .generator(FixedGenerators::SpendingKeyGenerator)
-                    .mul(i_ask, &JUBJUB)
-                    .add(&self.fvk.vk.ak, &JUBJUB);
-                let nk = JUBJUB
-                    .generator(FixedGenerators::ProofGenerationKey)
-                    .mul(i_nsk, &JUBJUB)
-                    .add(&self.fvk.vk.nk, &JUBJUB);
+                let i_ask = jubjub::Fr::from_bytes_wide(prf_expand(i_l, &[0x13]).as_array());
+                let i_nsk = jubjub::Fr::from_bytes_wide(prf_expand(i_l, &[0x14]).as_array());
+                let ak = (SPENDING_KEY_GENERATOR * i_ask) + self.fvk.vk.ak;
+                let nk = (PROOF_GENERATION_KEY_GENERATOR * i_nsk) + self.fvk.vk.nk;
 
                 FullViewingKey {
                     vk: ViewingKey { ak, nk },
@@ -430,21 +422,18 @@ impl ExtendedFullViewingKey {
         })
     }
 
-    pub fn address(
-        &self,
-        j: DiversifierIndex,
-    ) -> Result<(DiversifierIndex, PaymentAddress<Bls12>), ()> {
+    pub fn address(&self, j: DiversifierIndex) -> Result<(DiversifierIndex, PaymentAddress), ()> {
         let (j, d_j) = match self.dk.diversifier(j) {
             Ok(ret) => ret,
             Err(()) => return Err(()),
         };
-        match self.fvk.vk.to_payment_address(d_j, &JUBJUB) {
+        match self.fvk.vk.to_payment_address(d_j) {
             Some(addr) => Ok((j, addr)),
             None => Err(()),
         }
     }
 
-    pub fn default_address(&self) -> Result<(DiversifierIndex, PaymentAddress<Bls12>), ()> {
+    pub fn default_address(&self) -> Result<(DiversifierIndex, PaymentAddress), ()> {
         self.address(DiversifierIndex::new())
     }
 }
@@ -454,6 +443,7 @@ mod tests {
     use super::*;
 
     use ff::PrimeField;
+    use group::GroupEncoding;
 
     #[test]
     fn derive_nonhardened_child() {
@@ -1030,11 +1020,8 @@ mod tests {
             let xfvk = &xfvks[j];
             let tv = &test_vectors[j];
 
-            let mut buf = [0; 32];
-            xfvk.fvk.vk.ak.write(&mut buf[..]).unwrap();
-            assert_eq!(buf, tv.ak);
-            xfvk.fvk.vk.nk.write(&mut buf[..]).unwrap();
-            assert_eq!(buf, tv.nk);
+            assert_eq!(xfvk.fvk.vk.ak.to_bytes(), tv.ak);
+            assert_eq!(xfvk.fvk.vk.nk.to_bytes(), tv.nk);
 
             assert_eq!(xfvk.fvk.ovk.0, tv.ovk);
             assert_eq!(xfvk.dk.0, tv.dk);

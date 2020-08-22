@@ -13,9 +13,12 @@ edition = "2018"
 
 [dependencies]
 bech32 = "0.7"
+bls12_381 = { version = "0.1", path = "../bls12_381" }
 bs58 = { version = "0.3", features = ["check"] }
 ff = { version = "0.6", path = "../ff" }
+group = { version = "0.6", path = "../group" }
 hex = "0.4"
+jubjub = { version = "0.3", path = "../jubjub" }
 pairing = { version = "0.16", path = "../pairing" }
 protobuf = "=2.14.0" # 2.15 has MSRV of 1.44.1
 subtle = "2"

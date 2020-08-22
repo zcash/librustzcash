@@ -1,26 +1,20 @@
 //! Implementation of in-band secret distribution for Zcash transactions.
 
 use crate::{
-    consensus,
-    consensus::{NetworkUpgrade, ZIP212_GRACE_PERIOD},
-    jubjub::{
-        edwards,
-        fs::{Fs, FsRepr},
-        PrimeOrder, Unknown,
-    },
+    consensus::{self, NetworkUpgrade, ZIP212_GRACE_PERIOD},
     primitives::{Diversifier, Note, PaymentAddress, Rseed},
 };
 use blake2b_simd::{Hash as Blake2bHash, Params as Blake2bParams};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use crypto_api_chachapoly::{ChaCha20Ietf, ChachaPolyIetf};
 use ff::PrimeField;
-use pairing::bls12_381::{Bls12, Fr};
+use group::{cofactor::CofactorGroup, GroupEncoding};
 use rand_core::{CryptoRng, RngCore};
 use std::convert::TryInto;
 use std::fmt;
 use std::str;
 
-use crate::{keys::OutgoingViewingKey, JUBJUB};
+use crate::keys::OutgoingViewingKey;
 
 pub const KDF_SAPLING_PERSONALIZATION: &[u8; 16] = b"Zcash_SaplingKDF";
 pub const PRF_OCK_PERSONALIZATION: &[u8; 16] = b"Zcash_Derive_ock";
@@ -138,34 +132,24 @@ impl str::FromStr for Memo {
 /// Sapling key agreement for note encryption.
 ///
 /// Implements section 5.4.4.3 of the Zcash Protocol Specification.
-pub fn sapling_ka_agree<'a, P>(esk: &Fs, pk_d: &'a P) -> edwards::Point<Bls12, PrimeOrder>
-where
-    edwards::Point<Bls12, Unknown>: From<&'a P>,
-{
-    let p: edwards::Point<Bls12, Unknown> = pk_d.into();
-
-    // Multiply by 8
-    let p = p.mul_by_cofactor(&JUBJUB);
-
-    // Multiply by esk
-    p.mul(*esk, &JUBJUB)
+pub fn sapling_ka_agree(esk: &jubjub::Fr, pk_d: &jubjub::ExtendedPoint) -> jubjub::SubgroupPoint {
+    // [8 esk] pk_d
+    // <ExtendedPoint as CofactorGroup>::clear_cofactor is implemented using
+    // ExtendedPoint::mul_by_cofactor in the jubjub crate.
+    CofactorGroup::clear_cofactor(&(pk_d * esk))
 }
 
 /// Sapling KDF for note encryption.
 ///
 /// Implements section 5.4.4.4 of the Zcash Protocol Specification.
-fn kdf_sapling(
-    dhsecret: edwards::Point<Bls12, PrimeOrder>,
-    epk: &edwards::Point<Bls12, PrimeOrder>,
-) -> Blake2bHash {
-    let mut input = [0u8; 64];
-    dhsecret.write(&mut input[0..32]).unwrap();
-    epk.write(&mut input[32..64]).unwrap();
-
+fn kdf_sapling(dhsecret: jubjub::SubgroupPoint, epk: &jubjub::SubgroupPoint) -> Blake2bHash {
     Blake2bParams::new()
         .hash_length(32)
         .personal(KDF_SAPLING_PERSONALIZATION)
-        .hash(&input)
+        .to_state()
+        .update(&dhsecret.to_bytes())
+        .update(&epk.to_bytes())
+        .finalize()
 }
 
 /// Sapling PRF^ock.
@@ -173,20 +157,19 @@ fn kdf_sapling(
 /// Implemented per section 5.4.2 of the Zcash Protocol Specification.
 pub fn prf_ock(
     ovk: &OutgoingViewingKey,
-    cv: &edwards::Point<Bls12, Unknown>,
-    cmu: &Fr,
-    epk: &edwards::Point<Bls12, PrimeOrder>,
+    cv: &jubjub::ExtendedPoint,
+    cmu: &bls12_381::Scalar,
+    epk: &jubjub::SubgroupPoint,
 ) -> Blake2bHash {
-    let mut ock_input = [0u8; 128];
-    ock_input[0..32].copy_from_slice(&ovk.0);
-    cv.write(&mut ock_input[32..64]).unwrap();
-    ock_input[64..96].copy_from_slice(cmu.to_repr().as_ref());
-    epk.write(&mut ock_input[96..128]).unwrap();
-
     Blake2bParams::new()
         .hash_length(32)
         .personal(PRF_OCK_PERSONALIZATION)
-        .hash(&ock_input)
+        .to_state()
+        .update(&ovk.0)
+        .update(&cv.to_bytes())
+        .update(&cmu.to_repr())
+        .update(&epk.to_bytes())
+        .finalize()
 }
 
 /// An API for encrypting Sapling notes.
@@ -207,42 +190,39 @@ pub fn prf_ock(
 /// extern crate zcash_primitives;
 ///
 /// use ff::Field;
-/// use pairing::bls12_381::Bls12;
 /// use rand_core::OsRng;
 /// use zcash_primitives::{
-///     jubjub::fs::Fs,
 ///     keys::{OutgoingViewingKey, prf_expand},
 ///     note_encryption::{Memo, SaplingNoteEncryption},
 ///     primitives::{Diversifier, PaymentAddress, Rseed, ValueCommitment},
-///     JUBJUB,
 /// };
 ///
 /// let mut rng = OsRng;
 ///
 /// let diversifier = Diversifier([0; 11]);
-/// let pk_d = diversifier.g_d::<Bls12>(&JUBJUB).unwrap();
+/// let pk_d = diversifier.g_d().unwrap();
 /// let to = PaymentAddress::from_parts(diversifier, pk_d).unwrap();
 /// let ovk = OutgoingViewingKey([0; 32]);
 ///
 /// let value = 1000;
-/// let rcv = Fs::random(&mut rng);
-/// let cv = ValueCommitment::<Bls12> {
+/// let rcv = jubjub::Fr::random(&mut rng);
+/// let cv = ValueCommitment {
 ///     value,
 ///     randomness: rcv.clone(),
 /// };
-/// let rcm = Fs::random(&mut rng);
-/// let note = to.create_note(value, Rseed::BeforeZip212(rcm), &JUBJUB).unwrap();
-/// let cmu = note.cm(&JUBJUB);
+/// let rcm = jubjub::Fr::random(&mut rng);
+/// let note = to.create_note(value, Rseed::BeforeZip212(rcm)).unwrap();
+/// let cmu = note.cmu();
 ///
 /// let enc = SaplingNoteEncryption::new(ovk, note, to, Memo::default(), &mut rng);
 /// let encCiphertext = enc.encrypt_note_plaintext();
-/// let outCiphertext = enc.encrypt_outgoing_plaintext(&cv.cm(&JUBJUB).into(), &cmu);
+/// let outCiphertext = enc.encrypt_outgoing_plaintext(&cv.cm().into(), &cmu);
 /// ```
 pub struct SaplingNoteEncryption {
-    epk: edwards::Point<Bls12, PrimeOrder>,
-    esk: Fs,
-    note: Note<Bls12>,
-    to: PaymentAddress<Bls12>,
+    epk: jubjub::SubgroupPoint,
+    esk: jubjub::Fr,
+    note: Note,
+    to: PaymentAddress,
     memo: Memo,
     ovk: OutgoingViewingKey,
 }
@@ -251,13 +231,13 @@ impl SaplingNoteEncryption {
     /// Creates a new encryption context for the given note.
     pub fn new<R: RngCore + CryptoRng>(
         ovk: OutgoingViewingKey,
-        note: Note<Bls12>,
-        to: PaymentAddress<Bls12>,
+        note: Note,
+        to: PaymentAddress,
         memo: Memo,
         rng: &mut R,
     ) -> SaplingNoteEncryption {
         let esk = note.generate_or_derive_esk(rng);
-        let epk = note.g_d.mul(esk, &JUBJUB);
+        let epk = note.g_d * esk;
 
         SaplingNoteEncryption {
             epk,
@@ -270,18 +250,18 @@ impl SaplingNoteEncryption {
     }
 
     /// Exposes the ephemeral secret key being used to encrypt this note.
-    pub fn esk(&self) -> &Fs {
+    pub fn esk(&self) -> &jubjub::Fr {
         &self.esk
     }
 
     /// Exposes the ephemeral public key being used to encrypt this note.
-    pub fn epk(&self) -> &edwards::Point<Bls12, PrimeOrder> {
+    pub fn epk(&self) -> &jubjub::SubgroupPoint {
         &self.epk
     }
 
     /// Generates `encCiphertext` for this note.
     pub fn encrypt_note_plaintext(&self) -> [u8; ENC_CIPHERTEXT_SIZE] {
-        let shared_secret = sapling_ka_agree(&self.esk, self.to.pk_d());
+        let shared_secret = sapling_ka_agree(&self.esk, self.to.pk_d().into());
         let key = kdf_sapling(shared_secret, &self.epk);
 
         // Note plaintext encoding is defined in section 5.5 of the Zcash Protocol
@@ -319,13 +299,13 @@ impl SaplingNoteEncryption {
     /// Generates `outCiphertext` for this note.
     pub fn encrypt_outgoing_plaintext(
         &self,
-        cv: &edwards::Point<Bls12, Unknown>,
-        cmu: &Fr,
+        cv: &jubjub::ExtendedPoint,
+        cmu: &bls12_381::Scalar,
     ) -> [u8; OUT_CIPHERTEXT_SIZE] {
         let key = prf_ock(&self.ovk, &cv, &cmu, &self.epk);
 
         let mut input = [0u8; OUT_PLAINTEXT_SIZE];
-        self.note.pk_d.write(&mut input[0..32]).unwrap();
+        input[0..32].copy_from_slice(&self.note.pk_d.to_bytes());
         input[32..OUT_PLAINTEXT_SIZE].copy_from_slice(self.esk.to_repr().as_ref());
 
         let mut output = [0u8; OUT_CIPHERTEXT_SIZE];
@@ -342,11 +322,11 @@ impl SaplingNoteEncryption {
 
 fn parse_note_plaintext_without_memo<P: consensus::Parameters>(
     height: u32,
-    ivk: &Fs,
-    epk: &edwards::Point<Bls12, PrimeOrder>,
-    cmu: &Fr,
+    ivk: &jubjub::Fr,
+    epk: &jubjub::SubgroupPoint,
+    cmu: &bls12_381::Scalar,
     plaintext: &[u8],
-) -> Option<(Note<Bls12>, PaymentAddress<Bls12>)> {
+) -> Option<(Note, PaymentAddress)> {
     // Check note plaintext version
     if !plaintext_version_is_valid::<P>(height, plaintext[0]) {
         return None;
@@ -362,27 +342,25 @@ fn parse_note_plaintext_without_memo<P: consensus::Parameters>(
         .expect("slice is the correct length");
 
     let rseed = if plaintext[0] == 0x01 {
-        let rcm = Fs::from_repr(FsRepr(r))?;
+        let rcm = jubjub::Fr::from_repr(r)?;
         Rseed::BeforeZip212(rcm)
     } else {
         Rseed::AfterZip212(r)
     };
 
     let diversifier = Diversifier(d);
-    let pk_d = diversifier
-        .g_d::<Bls12>(&JUBJUB)?
-        .mul(ivk.to_repr(), &JUBJUB);
+    let pk_d = diversifier.g_d()? * ivk;
 
     let to = PaymentAddress::from_parts(diversifier, pk_d)?;
-    let note = to.create_note(v, rseed, &JUBJUB).unwrap();
+    let note = to.create_note(v, rseed).unwrap();
 
-    if note.cm(&JUBJUB) != *cmu {
+    if note.cmu() != *cmu {
         // Published commitment doesn't match calculated commitment
         return None;
     }
 
     if let Some(derived_esk) = note.derive_esk() {
-        if note.g_d.mul(derived_esk, &JUBJUB) != *epk {
+        if (note.g_d * derived_esk) != *epk {
             return None;
         }
     }
@@ -420,14 +398,14 @@ pub fn plaintext_version_is_valid<P: consensus::Parameters>(height: u32, leadbyt
 /// Implements section 4.17.2 of the Zcash Protocol Specification.
 pub fn try_sapling_note_decryption<P: consensus::Parameters>(
     height: u32,
-    ivk: &Fs,
-    epk: &edwards::Point<Bls12, PrimeOrder>,
-    cmu: &Fr,
+    ivk: &jubjub::Fr,
+    epk: &jubjub::SubgroupPoint,
+    cmu: &bls12_381::Scalar,
     enc_ciphertext: &[u8],
-) -> Option<(Note<Bls12>, PaymentAddress<Bls12>, Memo)> {
+) -> Option<(Note, PaymentAddress, Memo)> {
     assert_eq!(enc_ciphertext.len(), ENC_CIPHERTEXT_SIZE);
 
-    let shared_secret = sapling_ka_agree(ivk, epk);
+    let shared_secret = sapling_ka_agree(ivk, epk.into());
     let key = kdf_sapling(shared_secret, &epk);
 
     let mut plaintext = [0; ENC_CIPHERTEXT_SIZE];
@@ -463,14 +441,14 @@ pub fn try_sapling_note_decryption<P: consensus::Parameters>(
 /// [`ZIP 307`]: https://zips.z.cash/zip-0307
 pub fn try_sapling_compact_note_decryption<P: consensus::Parameters>(
     height: u32,
-    ivk: &Fs,
-    epk: &edwards::Point<Bls12, PrimeOrder>,
-    cmu: &Fr,
+    ivk: &jubjub::Fr,
+    epk: &jubjub::SubgroupPoint,
+    cmu: &bls12_381::Scalar,
     enc_ciphertext: &[u8],
-) -> Option<(Note<Bls12>, PaymentAddress<Bls12>)> {
+) -> Option<(Note, PaymentAddress)> {
     assert_eq!(enc_ciphertext.len(), COMPACT_NOTE_SIZE);
 
-    let shared_secret = sapling_ka_agree(ivk, epk);
+    let shared_secret = sapling_ka_agree(ivk, epk.into());
     let key = kdf_sapling(shared_secret, &epk);
 
     // Start from block 1 to skip over Poly1305 keying output
@@ -492,11 +470,11 @@ pub fn try_sapling_compact_note_decryption<P: consensus::Parameters>(
 pub fn try_sapling_output_recovery_with_ock<P: consensus::Parameters>(
     height: u32,
     ock: &[u8],
-    cmu: &Fr,
-    epk: &edwards::Point<Bls12, PrimeOrder>,
+    cmu: &bls12_381::Scalar,
+    epk: &jubjub::SubgroupPoint,
     enc_ciphertext: &[u8],
     out_ciphertext: &[u8],
-) -> Option<(Note<Bls12>, PaymentAddress<Bls12>, Memo)> {
+) -> Option<(Note, PaymentAddress, Memo)> {
     assert_eq!(enc_ciphertext.len(), ENC_CIPHERTEXT_SIZE);
     assert_eq!(out_ciphertext.len(), OUT_CIPHERTEXT_SIZE);
 
@@ -508,17 +486,23 @@ pub fn try_sapling_output_recovery_with_ock<P: consensus::Parameters>(
         OUT_PLAINTEXT_SIZE
     );
 
-    let pk_d = edwards::Point::<Bls12, _>::read(&op[0..32], &JUBJUB)
-        .ok()?
-        .as_prime_order(&JUBJUB)?;
+    let pk_d = {
+        let pk_d = jubjub::SubgroupPoint::from_bytes(
+            op[0..32].try_into().expect("slice is the correct length"),
+        );
+        if pk_d.is_none().into() {
+            return None;
+        }
+        pk_d.unwrap()
+    };
 
-    let esk = Fs::from_repr(FsRepr(
+    let esk = jubjub::Fr::from_repr(
         op[32..OUT_PLAINTEXT_SIZE]
             .try_into()
             .expect("slice is the correct length"),
-    ))?;
+    )?;
 
-    let shared_secret = sapling_ka_agree(&esk, &pk_d);
+    let shared_secret = sapling_ka_agree(&esk, &pk_d.into());
     let key = kdf_sapling(shared_secret, &epk);
 
     let mut plaintext = [0; ENC_CIPHERTEXT_SIZE];
@@ -550,7 +534,7 @@ pub fn try_sapling_output_recovery_with_ock<P: consensus::Parameters>(
         .expect("slice is the correct length");
 
     let rseed = if plaintext[0] == 0x01 {
-        let rcm = Fs::from_repr(FsRepr(r))?;
+        let rcm = jubjub::Fr::from_repr(r)?;
         Rseed::BeforeZip212(rcm)
     } else {
         Rseed::AfterZip212(r)
@@ -560,19 +544,15 @@ pub fn try_sapling_output_recovery_with_ock<P: consensus::Parameters>(
     memo.copy_from_slice(&plaintext[COMPACT_NOTE_SIZE..NOTE_PLAINTEXT_SIZE]);
 
     let diversifier = Diversifier(d);
-    if diversifier
-        .g_d::<Bls12>(&JUBJUB)?
-        .mul(esk.to_repr(), &JUBJUB)
-        != *epk
-    {
+    if diversifier.g_d()? * esk != *epk {
         // Published epk doesn't match calculated epk
         return None;
     }
 
     let to = PaymentAddress::from_parts(diversifier, pk_d)?;
-    let note = to.create_note(v, rseed, &JUBJUB).unwrap();
+    let note = to.create_note(v, rseed).unwrap();
 
-    if note.cm(&JUBJUB) != *cmu {
+    if note.cmu() != *cmu {
         // Published commitment doesn't match calculated commitment
         return None;
     }
@@ -596,12 +576,12 @@ pub fn try_sapling_output_recovery_with_ock<P: consensus::Parameters>(
 pub fn try_sapling_output_recovery<P: consensus::Parameters>(
     height: u32,
     ovk: &OutgoingViewingKey,
-    cv: &edwards::Point<Bls12, Unknown>,
-    cmu: &Fr,
-    epk: &edwards::Point<Bls12, PrimeOrder>,
+    cv: &jubjub::ExtendedPoint,
+    cmu: &bls12_381::Scalar,
+    epk: &jubjub::SubgroupPoint,
     enc_ciphertext: &[u8],
     out_ciphertext: &[u8],
-) -> Option<(Note<Bls12>, PaymentAddress<Bls12>, Memo)> {
+) -> Option<(Note, PaymentAddress, Memo)> {
     try_sapling_output_recovery_with_ock::<P>(
         height,
         prf_ock(&ovk, &cv, &cmu, &epk).as_bytes(),
@@ -614,24 +594,11 @@ pub fn try_sapling_output_recovery<P: consensus::Parameters>(
 
 #[cfg(test)]
 mod tests {
-    use crate::{
-        consensus::{
-            NetworkUpgrade,
-            NetworkUpgrade::{Canopy, Sapling},
-            Parameters, TestNetwork, ZIP212_GRACE_PERIOD,
-        },
-        jubjub::{
-            edwards,
-            fs::{Fs, FsRepr},
-            PrimeOrder, Unknown,
-        },
-        primitives::{Diversifier, PaymentAddress, Rseed, ValueCommitment},
-        util::generate_random_rseed,
-    };
     use blake2b_simd::Hash as Blake2bHash;
     use crypto_api_chachapoly::ChachaPolyIetf;
     use ff::{Field, PrimeField};
-    use pairing::bls12_381::{Bls12, Fr, FrRepr};
+    use group::Group;
+    use group::{cofactor::CofactorGroup, GroupEncoding};
     use rand_core::OsRng;
     use rand_core::{CryptoRng, RngCore};
     use std::convert::TryInto;
@@ -643,7 +610,16 @@ mod tests {
         try_sapling_output_recovery_with_ock, Memo, SaplingNoteEncryption, COMPACT_NOTE_SIZE,
         ENC_CIPHERTEXT_SIZE, NOTE_PLAINTEXT_SIZE, OUT_CIPHERTEXT_SIZE, OUT_PLAINTEXT_SIZE,
     };
-    use crate::{keys::OutgoingViewingKey, JUBJUB};
+    use crate::{
+        consensus::{
+            NetworkUpgrade,
+            NetworkUpgrade::{Canopy, Sapling},
+            Parameters, TestNetwork, ZIP212_GRACE_PERIOD,
+        },
+        keys::OutgoingViewingKey,
+        primitives::{Diversifier, PaymentAddress, Rseed, ValueCommitment},
+        util::generate_random_rseed,
+    };
 
     #[test]
     fn memo_from_str() {
@@ -767,14 +743,14 @@ mod tests {
     ) -> (
         OutgoingViewingKey,
         Blake2bHash,
-        Fs,
-        edwards::Point<Bls12, Unknown>,
-        Fr,
-        edwards::Point<Bls12, PrimeOrder>,
+        jubjub::Fr,
+        jubjub::ExtendedPoint,
+        bls12_381::Scalar,
+        jubjub::SubgroupPoint,
         [u8; ENC_CIPHERTEXT_SIZE],
         [u8; OUT_CIPHERTEXT_SIZE],
     ) {
-        let ivk = Fs::random(&mut rng);
+        let ivk = jubjub::Fr::random(&mut rng);
 
         let (ovk, ock, ivk, cv, cmu, epk, enc_ciphertext, out_ciphertext) =
             random_enc_ciphertext_with(height, ivk, rng);
@@ -822,34 +798,34 @@ mod tests {
 
     fn random_enc_ciphertext_with<R: RngCore + CryptoRng>(
         height: u32,
-        ivk: Fs,
+        ivk: jubjub::Fr,
         mut rng: &mut R,
     ) -> (
         OutgoingViewingKey,
         Blake2bHash,
-        Fs,
-        edwards::Point<Bls12, Unknown>,
-        Fr,
-        edwards::Point<Bls12, PrimeOrder>,
+        jubjub::Fr,
+        jubjub::ExtendedPoint,
+        bls12_381::Scalar,
+        jubjub::SubgroupPoint,
         [u8; ENC_CIPHERTEXT_SIZE],
         [u8; OUT_CIPHERTEXT_SIZE],
     ) {
         let diversifier = Diversifier([0; 11]);
-        let pk_d = diversifier.g_d::<Bls12>(&JUBJUB).unwrap().mul(ivk, &JUBJUB);
+        let pk_d = diversifier.g_d().unwrap() * ivk;
         let pa = PaymentAddress::from_parts_unchecked(diversifier, pk_d);
 
         // Construct the value commitment for the proof instance
         let value = 100;
-        let value_commitment = ValueCommitment::<Bls12> {
+        let value_commitment = ValueCommitment {
             value,
-            randomness: Fs::random(&mut rng),
+            randomness: jubjub::Fr::random(&mut rng),
         };
-        let cv = value_commitment.cm(&JUBJUB).into();
+        let cv = value_commitment.cm().into();
 
         let rseed = generate_random_rseed::<TestNetwork, R>(height, &mut rng);
 
-        let note = pa.create_note(value, rseed, &JUBJUB).unwrap();
-        let cmu = note.cm(&JUBJUB);
+        let note = pa.create_note(value, rseed).unwrap();
+        let cmu = note.cmu();
 
         let ovk = OutgoingViewingKey([0; 32]);
         let ne = SaplingNoteEncryption::new(ovk, note, pa, Memo([0; 512]), &mut rng);
@@ -872,9 +848,9 @@ mod tests {
 
     fn reencrypt_enc_ciphertext(
         ovk: &OutgoingViewingKey,
-        cv: &edwards::Point<Bls12, Unknown>,
-        cmu: &Fr,
-        epk: &edwards::Point<Bls12, PrimeOrder>,
+        cv: &jubjub::ExtendedPoint,
+        cmu: &bls12_381::Scalar,
+        epk: &jubjub::SubgroupPoint,
         enc_ciphertext: &mut [u8; ENC_CIPHERTEXT_SIZE],
         out_ciphertext: &[u8; OUT_CIPHERTEXT_SIZE],
         modify_plaintext: impl Fn(&mut [u8; NOTE_PLAINTEXT_SIZE]),
@@ -889,14 +865,11 @@ mod tests {
             OUT_PLAINTEXT_SIZE
         );
 
-        let pk_d = edwards::Point::<Bls12, _>::read(&op[0..32], &JUBJUB)
-            .unwrap()
-            .as_prime_order(&JUBJUB)
-            .unwrap();
+        let pk_d = jubjub::SubgroupPoint::from_bytes(&op[0..32].try_into().unwrap()).unwrap();
 
-        let esk = Fs::from_repr(FsRepr(op[32..OUT_PLAINTEXT_SIZE].try_into().unwrap())).unwrap();
+        let esk = jubjub::Fr::from_repr(op[32..OUT_PLAINTEXT_SIZE].try_into().unwrap()).unwrap();
 
-        let shared_secret = sapling_ka_agree(&esk, &pk_d);
+        let shared_secret = sapling_ka_agree(&esk, &pk_d.into());
         let key = kdf_sapling(shared_secret, &epk);
 
         let mut plaintext = {
@@ -932,7 +905,7 @@ mod tests {
                     break;
                 }
             }
-            if d.g_d::<Bls12>(&JUBJUB).is_none() {
+            if d.g_d().is_none() {
                 break;
             }
         }
@@ -949,7 +922,7 @@ mod tests {
                     break;
                 }
             }
-            if d.g_d::<Bls12>(&JUBJUB).is_some() {
+            if d.g_d().is_some() {
                 break;
             }
         }
@@ -970,7 +943,7 @@ mod tests {
             assert_eq!(
                 try_sapling_note_decryption::<TestNetwork>(
                     height,
-                    &Fs::random(&mut rng),
+                    &jubjub::Fr::random(&mut rng),
                     &epk,
                     &cmu,
                     &enc_ciphertext
@@ -995,7 +968,7 @@ mod tests {
                 try_sapling_note_decryption::<TestNetwork>(
                     height,
                     &ivk,
-                    &edwards::Point::<Bls12, _>::rand(&mut rng, &JUBJUB).mul_by_cofactor(&JUBJUB),
+                    &jubjub::SubgroupPoint::random(&mut rng),
                     &cmu,
                     &enc_ciphertext
                 ),
@@ -1020,7 +993,7 @@ mod tests {
                     height,
                     &ivk,
                     &epk,
-                    &Fr::random(&mut rng),
+                    &bls12_381::Scalar::random(&mut rng),
                     &enc_ciphertext
                 ),
                 None
@@ -1173,7 +1146,7 @@ mod tests {
             assert_eq!(
                 try_sapling_compact_note_decryption::<TestNetwork>(
                     height,
-                    &Fs::random(&mut rng),
+                    &jubjub::Fr::random(&mut rng),
                     &epk,
                     &cmu,
                     &enc_ciphertext[..COMPACT_NOTE_SIZE]
@@ -1198,7 +1171,7 @@ mod tests {
                 try_sapling_compact_note_decryption::<TestNetwork>(
                     height,
                     &ivk,
-                    &edwards::Point::<Bls12, _>::rand(&mut rng, &JUBJUB).mul_by_cofactor(&JUBJUB),
+                    &jubjub::SubgroupPoint::random(&mut rng),
                     &cmu,
                     &enc_ciphertext[..COMPACT_NOTE_SIZE]
                 ),
@@ -1223,7 +1196,7 @@ mod tests {
                     height,
                     &ivk,
                     &epk,
-                    &Fr::random(&mut rng),
+                    &bls12_381::Scalar::random(&mut rng),
                     &enc_ciphertext[..COMPACT_NOTE_SIZE]
                 ),
                 None
@@ -1406,7 +1379,7 @@ mod tests {
                 try_sapling_output_recovery::<TestNetwork>(
                     height,
                     &ovk,
-                    &edwards::Point::<Bls12, _>::rand(&mut rng, &JUBJUB),
+                    &jubjub::ExtendedPoint::random(&mut rng),
                     &cmu,
                     &epk,
                     &enc_ciphertext,
@@ -1434,7 +1407,7 @@ mod tests {
                     height,
                     &ovk,
                     &cv,
-                    &Fr::random(&mut rng),
+                    &bls12_381::Scalar::random(&mut rng),
                     &epk,
                     &enc_ctext,
                     &out_ctext
@@ -1445,7 +1418,7 @@ mod tests {
                 try_sapling_output_recovery_with_ock::<TestNetwork>(
                     height,
                     &ock.as_bytes(),
-                    &Fr::random(&mut rng),
+                    &bls12_381::Scalar::random(&mut rng),
                     &epk,
                     &enc_ctext,
                     &out_ctext
@@ -1473,7 +1446,7 @@ mod tests {
                     &ovk,
                     &cv,
                     &cmu,
-                    &edwards::Point::<Bls12, _>::rand(&mut rng, &JUBJUB).mul_by_cofactor(&JUBJUB),
+                    &jubjub::SubgroupPoint::random(&mut rng),
                     &enc_ciphertext,
                     &out_ciphertext
                 ),
@@ -1484,7 +1457,7 @@ mod tests {
                     height,
                     &ock.as_bytes(),
                     &cmu,
-                    &edwards::Point::<Bls12, _>::rand(&mut rng, &JUBJUB).mul_by_cofactor(&JUBJUB),
+                    &jubjub::SubgroupPoint::random(&mut rng),
                     &enc_ciphertext,
                     &out_ciphertext
                 ),
@@ -1724,7 +1697,7 @@ mod tests {
         ];
 
         for &height in heights.iter() {
-            let ivk = Fs::zero();
+            let ivk = jubjub::Fr::zero();
             let (ovk, ock, _, cv, cmu, epk, enc_ciphertext, out_ciphertext) =
                 random_enc_ciphertext_with(height, ivk, &mut rng);
 
@@ -1758,21 +1731,21 @@ mod tests {
     fn test_vectors() {
         let test_vectors = crate::test_vectors::note_encryption::make_test_vectors();
 
-        macro_rules! read_fr {
+        macro_rules! read_bls12_381_scalar {
             ($field:expr) => {{
-                Fr::from_repr(FrRepr($field[..].try_into().unwrap())).unwrap()
+                bls12_381::Scalar::from_repr($field[..].try_into().unwrap()).unwrap()
             }};
         }
 
-        macro_rules! read_fs {
+        macro_rules! read_jubjub_scalar {
             ($field:expr) => {{
-                Fs::from_repr(FsRepr($field[..].try_into().unwrap())).unwrap()
+                jubjub::Fr::from_repr($field[..].try_into().unwrap()).unwrap()
             }};
         }
 
         macro_rules! read_point {
             ($field:expr) => {
-                edwards::Point::<Bls12, _>::read(&$field[..], &JUBJUB).unwrap()
+                jubjub::ExtendedPoint::from_bytes(&$field).unwrap()
             };
         }
 
@@ -1784,28 +1757,20 @@ mod tests {
             // Load the test vector components
             //
 
-            let ivk = read_fs!(tv.ivk);
-            let pk_d = read_point!(tv.default_pk_d)
-                .as_prime_order(&JUBJUB)
-                .unwrap();
-            let rcm = read_fs!(tv.rcm);
+            let ivk = read_jubjub_scalar!(tv.ivk);
+            let pk_d = read_point!(tv.default_pk_d).into_subgroup().unwrap();
+            let rcm = read_jubjub_scalar!(tv.rcm);
             let cv = read_point!(tv.cv);
-            let cmu = read_fr!(tv.cmu);
-            let esk = read_fs!(tv.esk);
-            let epk = read_point!(tv.epk).as_prime_order(&JUBJUB).unwrap();
+            let cmu = read_bls12_381_scalar!(tv.cmu);
+            let esk = read_jubjub_scalar!(tv.esk);
+            let epk = read_point!(tv.epk).into_subgroup().unwrap();
 
             //
             // Test the individual components
             //
 
-            let shared_secret = sapling_ka_agree(&esk, &pk_d);
-            {
-                let mut encoded = [0; 32];
-                shared_secret
-                    .write(&mut encoded[..])
-                    .expect("length is not 32 bytes");
-                assert_eq!(encoded, tv.shared_secret);
-            }
+            let shared_secret = sapling_ka_agree(&esk, &pk_d.into());
+            assert_eq!(shared_secret.to_bytes(), tv.shared_secret);
 
             let k_enc = kdf_sapling(shared_secret, &epk);
             assert_eq!(k_enc.as_bytes(), tv.k_enc);
@@ -1815,10 +1780,8 @@ mod tests {
             assert_eq!(ock.as_bytes(), tv.ock);
 
             let to = PaymentAddress::from_parts(Diversifier(tv.default_d), pk_d).unwrap();
-            let note = to
-                .create_note(tv.v, Rseed::BeforeZip212(rcm), &JUBJUB)
-                .unwrap();
-            assert_eq!(note.cm(&JUBJUB), cmu);
+            let note = to.create_note(tv.v, Rseed::BeforeZip212(rcm)).unwrap();
+            assert_eq!(note.cmu(), cmu);
 
             //
             // Test decryption

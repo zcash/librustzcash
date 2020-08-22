@@ -1,11 +1,10 @@
-use pairing::bls12_381::Bls12;
+use group::cofactor::CofactorGroup;
 use zcash_primitives::{
     consensus,
     note_encryption::{try_sapling_note_decryption, try_sapling_output_recovery, Memo},
     primitives::{Note, PaymentAddress},
     transaction::Transaction,
     zip32::ExtendedFullViewingKey,
-    JUBJUB,
 };
 
 /// A decrypted shielded output.
@@ -15,11 +14,11 @@ pub struct DecryptedOutput {
     /// [`shielded_outputs`]: zcash_primitives::transaction::TransactionData
     pub index: usize,
     /// The note within the output.
-    pub note: Note<Bls12>,
+    pub note: Note,
     /// The account that decrypted the note.
     pub account: usize,
     /// The address the note was sent to.
-    pub to: PaymentAddress<Bls12>,
+    pub to: PaymentAddress,
     /// The memo included with the note.
     pub memo: Memo,
     /// True if this output was recovered using an [`OutgoingViewingKey`], meaning that
@@ -45,10 +44,11 @@ pub fn decrypt_transaction<P: consensus::Parameters>(
         .collect();
 
     for (index, output) in tx.shielded_outputs.iter().enumerate() {
-        let epk = match output.ephemeral_key.as_prime_order(&JUBJUB) {
-            Some(p) => p,
-            None => continue,
-        };
+        let epk = output.ephemeral_key.into_subgroup();
+        if epk.is_none().into() {
+            continue;
+        }
+        let epk = epk.unwrap();
 
         for (account, (ivk, ovk)) in vks.iter().enumerate() {
             let ((note, to, memo), outgoing) = match try_sapling_note_decryption::<P>(

@@ -4,7 +4,7 @@ use bellman::{
     gadgets::multipack,
     groth16::{self, create_random_proof, Parameters, PreparedVerifyingKey, Proof},
 };
-use pairing::bls12_381::Bls12;
+use bls12_381::Bls12;
 use rand_core::OsRng;
 
 use crate::circuit::sprout::*;

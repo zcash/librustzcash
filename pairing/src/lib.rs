@@ -18,8 +18,6 @@
 #[cfg(test)]
 pub mod tests;
 
-pub mod bls12_381;
-
 use core::ops::Mul;
 use ff::PrimeField;
 use group::{

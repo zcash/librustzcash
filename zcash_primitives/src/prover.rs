@@ -1,10 +1,6 @@
 //! Abstractions over the proving system and parameters.
 
-use crate::{
-    jubjub::{edwards, fs::Fs, Unknown},
-    primitives::{Diversifier, PaymentAddress, ProofGenerationKey, Rseed},
-};
-use pairing::bls12_381::{Bls12, Fr};
+use crate::primitives::{Diversifier, PaymentAddress, ProofGenerationKey, Rseed};
 
 use crate::{
     merkle_tree::MerklePath,
@@ -29,21 +25,14 @@ pub trait TxProver {
     fn spend_proof(
         &self,
         ctx: &mut Self::SaplingProvingContext,
-        proof_generation_key: ProofGenerationKey<Bls12>,
+        proof_generation_key: ProofGenerationKey,
         diversifier: Diversifier,
-        rseed: Rseed<Fs>,
-        ar: Fs,
+        rseed: Rseed,
+        ar: jubjub::Fr,
         value: u64,
-        anchor: Fr,
+        anchor: bls12_381::Scalar,
         merkle_path: MerklePath<Node>,
-    ) -> Result<
-        (
-            [u8; GROTH_PROOF_SIZE],
-            edwards::Point<Bls12, Unknown>,
-            PublicKey<Bls12>,
-        ),
-        (),
-    >;
+    ) -> Result<([u8; GROTH_PROOF_SIZE], jubjub::ExtendedPoint, PublicKey), ()>;
 
     /// Create the value commitment and proof for a Sapling [`OutputDescription`],
     /// while accumulating its value commitment randomness inside the context for later
@@ -53,11 +42,11 @@ pub trait TxProver {
     fn output_proof(
         &self,
         ctx: &mut Self::SaplingProvingContext,
-        esk: Fs,
-        payment_address: PaymentAddress<Bls12>,
-        rcm: Fs,
+        esk: jubjub::Fr,
+        payment_address: PaymentAddress,
+        rcm: jubjub::Fr,
         value: u64,
-    ) -> ([u8; GROTH_PROOF_SIZE], edwards::Point<Bls12, Unknown>);
+    ) -> ([u8; GROTH_PROOF_SIZE], jubjub::ExtendedPoint);
 
     /// Create the `bindingSig` for a Sapling transaction. All calls to
     /// [`TxProver::spend_proof`] and [`TxProver::output_proof`] must be completed before
@@ -73,11 +62,10 @@ pub trait TxProver {
 #[cfg(test)]
 pub(crate) mod mock {
     use ff::Field;
-    use pairing::bls12_381::{Bls12, Fr};
     use rand_core::OsRng;
 
     use crate::{
-        jubjub::{edwards, fs::Fs, FixedGenerators, Unknown},
+        constants::SPENDING_KEY_GENERATOR,
         primitives::{Diversifier, PaymentAddress, ProofGenerationKey, Rseed, ValueCommitment},
     };
 
@@ -86,7 +74,6 @@ pub(crate) mod mock {
         redjubjub::{PublicKey, Signature},
         sapling::Node,
         transaction::components::{Amount, GROTH_PROOF_SIZE},
-        JUBJUB,
     };
 
     use super::TxProver;
@@ -102,35 +89,25 @@ pub(crate) mod mock {
         fn spend_proof(
             &self,
             _ctx: &mut Self::SaplingProvingContext,
-            proof_generation_key: ProofGenerationKey<Bls12>,
+            proof_generation_key: ProofGenerationKey,
             _diversifier: Diversifier,
-            _rcm: Rseed<Fs>,
-            ar: Fs,
+            _rcm: Rseed,
+            ar: jubjub::Fr,
             value: u64,
-            _anchor: Fr,
+            _anchor: bls12_381::Scalar,
             _merkle_path: MerklePath<Node>,
-        ) -> Result<
-            (
-                [u8; GROTH_PROOF_SIZE],
-                edwards::Point<Bls12, Unknown>,
-                PublicKey<Bls12>,
-            ),
-            (),
-        > {
+        ) -> Result<([u8; GROTH_PROOF_SIZE], jubjub::ExtendedPoint, PublicKey), ()> {
             let mut rng = OsRng;
 
-            let cv = ValueCommitment::<Bls12> {
+            let cv = ValueCommitment {
                 value,
-                randomness: Fs::random(&mut rng),
+                randomness: jubjub::Fr::random(&mut rng),
             }
-            .cm(&JUBJUB)
+            .cm()
             .into();
 
-            let rk = PublicKey::<Bls12>(proof_generation_key.ak.clone().into()).randomize(
-                ar,
-                FixedGenerators::SpendingKeyGenerator,
-                &JUBJUB,
-            );
+            let rk = PublicKey(proof_generation_key.ak.clone().into())
+                .randomize(ar, SPENDING_KEY_GENERATOR);
 
             Ok(([0u8; GROTH_PROOF_SIZE], cv, rk))
         }
@@ -138,18 +115,18 @@ pub(crate) mod mock {
         fn output_proof(
             &self,
             _ctx: &mut Self::SaplingProvingContext,
-            _esk: Fs,
-            _payment_address: PaymentAddress<Bls12>,
-            _rcm: Fs,
+            _esk: jubjub::Fr,
+            _payment_address: PaymentAddress,
+            _rcm: jubjub::Fr,
             value: u64,
-        ) -> ([u8; GROTH_PROOF_SIZE], edwards::Point<Bls12, Unknown>) {
+        ) -> ([u8; GROTH_PROOF_SIZE], jubjub::ExtendedPoint) {
             let mut rng = OsRng;
 
-            let cv = ValueCommitment::<Bls12> {
+            let cv = ValueCommitment {
                 value,
-                randomness: Fs::random(&mut rng),
+                randomness: jubjub::Fr::random(&mut rng),
             }
-            .cm(&JUBJUB)
+            .cm()
             .into();
 
             ([0u8; GROTH_PROOF_SIZE], cv)
