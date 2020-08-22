@@ -27,7 +27,7 @@ zcash_primitives = { version = "0.3", path = "../zcash_primitives" }
 [dev-dependencies]
 rand_core = "0.5.1"
 tempfile = "3"
-zcash_proofs = { version = "0.2", path = "../zcash_proofs" }
+zcash_proofs = { version = "0.3", path = "../zcash_proofs" }
 
 [features]
 mainnet = []
