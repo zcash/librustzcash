@@ -19,7 +19,7 @@ edition ="2018"
 [dependencies]
 byteorder = "1"
 ff = { version = "0.7", path = "../ff", features = ["derive"] }
-group = { version = "0.6", path = "../group" }
+group = { version = "0.7", path = "../group" }
 rand_core = "0.5"
 subtle = "2.2.1"
 

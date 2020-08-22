@@ -24,7 +24,7 @@ crypto_api_chachapoly = "0.4"
 equihash = { version = "0.1", path = "../components/equihash" }
 ff = { version = "0.7", path = "../ff" }
 fpe = "0.3"
-group = { version = "0.6", path = "../group" }
+group = { version = "0.7", path = "../group" }
 hex = "0.4"
 jubjub = { version = "0.3", path = "../jubjub" }
 lazy_static = "1"

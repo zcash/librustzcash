@@ -1,6 +1,6 @@
 [package]
 name = "group"
-version = "0.6.0"
+version = "0.7.0"
 authors = [
     "Sean Bowe <ewillbefull@gmail.com>",
     "Jack Grigg <jack@z.cash>",
