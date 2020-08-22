@@ -22,7 +22,7 @@ byteorder = "1"
 directories = { version = "3", optional = true }
 ff = { version = "0.7", path = "../ff" }
 group = { version = "0.7", path = "../group" }
-jubjub = { version = "0.3", path = "../jubjub" }
+jubjub = { version = "0.4", path = "../jubjub" }
 lazy_static = "1"
 minreq = { version = "2", features = ["https"], optional = true }
 rand_core = "0.5.1"

@@ -26,7 +26,7 @@ ff = { version = "0.7", path = "../ff" }
 fpe = "0.3"
 group = { version = "0.7", path = "../group" }
 hex = "0.4"
-jubjub = { version = "0.3", path = "../jubjub" }
+jubjub = { version = "0.4", path = "../jubjub" }
 lazy_static = "1"
 log = "0.4"
 rand = "0.7"
