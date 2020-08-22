@@ -17,7 +17,7 @@ all-features = true
 [dependencies]
 bellman = { version = "0.6", path = "../bellman", default-features = false, features = ["groth16"] }
 blake2b_simd = "0.5"
-bls12_381 = { version = "0.1", path = "../bls12_381" }
+bls12_381 = { version = "0.2", path = "../bls12_381" }
 byteorder = "1"
 directories = { version = "3", optional = true }
 ff = { version = "0.7", path = "../ff" }
