@@ -52,6 +52,9 @@ mod fr;
 pub use bls12_381::Scalar as Fq;
 pub use fr::Fr;
 
+/// A better name than Fr.
+pub type Scalar = Fr;
+
 const FR_MODULUS_BYTES: [u8; 32] = [
     183, 44, 247, 214, 94, 14, 151, 208, 130, 16, 200, 204, 147, 32, 104, 166, 0, 59, 52, 1, 1, 59,
     103, 6, 169, 175, 51, 101, 234, 180, 125, 14,
