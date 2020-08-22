@@ -63,15 +63,15 @@ impl SaplingVerificationContext {
         let mut public_input = [bls12_381::Scalar::zero(); 7];
         {
             let affine = rk.0.to_affine();
-            let (x, y) = (affine.get_u(), affine.get_v());
-            public_input[0] = x;
-            public_input[1] = y;
+            let (u, v) = (affine.get_u(), affine.get_v());
+            public_input[0] = u;
+            public_input[1] = v;
         }
         {
             let affine = cv.to_affine();
-            let (x, y) = (affine.get_u(), affine.get_v());
-            public_input[2] = x;
-            public_input[3] = y;
+            let (u, v) = (affine.get_u(), affine.get_v());
+            public_input[2] = u;
+            public_input[3] = v;
         }
         public_input[4] = anchor;
 
@@ -95,7 +95,7 @@ impl SaplingVerificationContext {
     pub fn check_output(
         &mut self,
         cv: jubjub::ExtendedPoint,
-        cm: bls12_381::Scalar,
+        cmu: bls12_381::Scalar,
         epk: jubjub::ExtendedPoint,
         zkproof: Proof<Bls12>,
         verifying_key: &PreparedVerifyingKey<Bls12>,
@@ -111,17 +111,17 @@ impl SaplingVerificationContext {
         let mut public_input = [bls12_381::Scalar::zero(); 5];
         {
             let affine = cv.to_affine();
-            let (x, y) = (affine.get_u(), affine.get_v());
-            public_input[0] = x;
-            public_input[1] = y;
+            let (u, v) = (affine.get_u(), affine.get_v());
+            public_input[0] = u;
+            public_input[1] = v;
         }
         {
             let affine = epk.to_affine();
-            let (x, y) = (affine.get_u(), affine.get_v());
-            public_input[2] = x;
-            public_input[3] = y;
+            let (u, v) = (affine.get_u(), affine.get_v());
+            public_input[2] = u;
+            public_input[3] = v;
         }
-        public_input[4] = cm;
+        public_input[4] = cmu;
 
         // Verify the proof
         verify_proof(verifying_key, &zkproof, &public_input[..]).is_ok()

@@ -25,7 +25,7 @@ pub struct ValueCommitment {
 }
 
 impl ValueCommitment {
-    pub fn cm(&self) -> jubjub::SubgroupPoint {
+    pub fn commitment(&self) -> jubjub::SubgroupPoint {
         (constants::VALUE_COMMITMENT_VALUE_GENERATOR * jubjub::Fr::from(self.value))
             + (constants::VALUE_COMMITMENT_RANDOMNESS_GENERATOR * self.randomness)
     }

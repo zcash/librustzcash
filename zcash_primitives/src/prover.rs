@@ -103,7 +103,7 @@ pub(crate) mod mock {
                 value,
                 randomness: jubjub::Fr::random(&mut rng),
             }
-            .cm()
+            .commitment()
             .into();
 
             let rk = PublicKey(proof_generation_key.ak.clone().into())
@@ -126,7 +126,7 @@ pub(crate) mod mock {
                 value,
                 randomness: jubjub::Fr::random(&mut rng),
             }
-            .cm()
+            .commitment()
             .into();
 
             ([0u8; GROTH_PROOF_SIZE], cv)

@@ -129,8 +129,8 @@ pub mod test {
     pub struct TestVector<'a> {
         pub personalization: Personalization,
         pub input_bits: Vec<u8>,
-        pub hash_x: &'a str,
-        pub hash_y: &'a str,
+        pub hash_u: &'a str,
+        pub hash_v: &'a str,
     }
 
     #[test]
@@ -151,8 +151,8 @@ pub mod test {
             ))
             .to_affine();
 
-            assert_eq!(p.get_u().to_string(), v.hash_x);
-            assert_eq!(p.get_v().to_string(), v.hash_y);
+            assert_eq!(p.get_u().to_string(), v.hash_u);
+            assert_eq!(p.get_v().to_string(), v.hash_v);
         }
     }
 }

@@ -368,14 +368,14 @@ impl<P: consensus::Parameters, R: RngCore + CryptoRng> Builder<P, R> {
         merkle_path: MerklePath<Node>,
     ) -> Result<(), Error> {
         // Consistency check: all anchors must equal the first one
-        let cm = Node::new(note.cmu().into());
+        let cmu = Node::new(note.cmu().into());
         if let Some(anchor) = self.anchor {
-            let path_root: bls12_381::Scalar = merkle_path.root(cm).into();
+            let path_root: bls12_381::Scalar = merkle_path.root(cmu).into();
             if path_root != anchor {
                 return Err(Error::AnchorMismatch);
             }
         } else {
-            self.anchor = Some(merkle_path.root(cm).into())
+            self.anchor = Some(merkle_path.root(cmu).into())
         }
 
         let alpha = jubjub::Fr::random(&mut self.rng);

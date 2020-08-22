@@ -234,8 +234,8 @@ mod test {
                 ))
                 .to_affine();
 
-                assert_eq!(res.get_x().get_value().unwrap(), expected.get_u());
-                assert_eq!(res.get_y().get_value().unwrap(), expected.get_v());
+                assert_eq!(res.get_u().get_value().unwrap(), expected.get_u());
+                assert_eq!(res.get_v().get_value().unwrap(), expected.get_v());
 
                 // Test against the output of a different personalization
                 let unexpected = jubjub::ExtendedPoint::from(pedersen_hash::pedersen_hash(
@@ -244,8 +244,8 @@ mod test {
                 ))
                 .to_affine();
 
-                assert!(res.get_x().get_value().unwrap() != unexpected.get_u());
-                assert!(res.get_y().get_value().unwrap() != unexpected.get_v());
+                assert!(res.get_u().get_value().unwrap() != unexpected.get_u());
+                assert!(res.get_v().get_value().unwrap() != unexpected.get_v());
             }
         }
     }
@@ -257,11 +257,11 @@ mod test {
             0xbc, 0xe5,
         ]);
 
-        let expected_xs = [
+        let expected_us = [
             "28161926966428986673895580777285905189725480206811328272001879986576840909576",
             "39669831794597628158501766225645040955899576179071014703006420393381978263045",
         ];
-        let expected_ys = [
+        let expected_vs = [
             "26869991781071974894722407757894142583682396277979904369818887810555917099932",
             "2112827187110048608327330788910224944044097981650120385961435904443901436107",
         ];
@@ -291,12 +291,12 @@ mod test {
             assert!(cs.is_satisfied());
 
             assert_eq!(
-                res.get_x().get_value().unwrap(),
-                bls12_381::Scalar::from_str(expected_xs[length - 300]).unwrap()
+                res.get_u().get_value().unwrap(),
+                bls12_381::Scalar::from_str(expected_us[length - 300]).unwrap()
             );
             assert_eq!(
-                res.get_y().get_value().unwrap(),
-                bls12_381::Scalar::from_str(expected_ys[length - 300]).unwrap()
+                res.get_v().get_value().unwrap(),
+                bls12_381::Scalar::from_str(expected_vs[length - 300]).unwrap()
             );
         }
     }
