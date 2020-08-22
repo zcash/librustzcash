@@ -21,7 +21,7 @@ protobuf = "2"
 rand_core = "0.5.1"
 rusqlite = { version = "0.23", features = ["bundled"] }
 time = "0.1"
-zcash_client_backend = { version = "0.2", path = "../zcash_client_backend" }
+zcash_client_backend = { version = "0.3", path = "../zcash_client_backend" }
 zcash_primitives = { version = "0.3", path = "../zcash_primitives" }
 
 [dev-dependencies]
