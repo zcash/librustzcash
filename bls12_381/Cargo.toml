@@ -26,7 +26,7 @@ default-features = false
 
 [dependencies.ff]
 path = "../ff"
-version = "0.6"
+version = "0.7"
 default-features = false
 
 [dependencies.group]

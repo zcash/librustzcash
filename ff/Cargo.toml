@@ -1,7 +1,10 @@
 [package]
 name = "ff"
-version = "0.6.0"
-authors = ["Sean Bowe <ewillbefull@gmail.com>"]
+version = "0.7.0"
+authors = [
+    "Sean Bowe <ewillbefull@gmail.com>",
+    "Jack Grigg <thestr4d@gmail.com>",
+]
 description = "Library for building and interfacing with finite fields"
 readme = "README.md"
 documentation = "https://docs.rs/ff/"
@@ -12,7 +15,7 @@ edition = "2018"
 
 [dependencies]
 byteorder = { version = "1", default-features = false }
-ff_derive = { version = "0.6", path = "ff_derive", optional = true }
+ff_derive = { version = "0.7", path = "ff_derive", optional = true }
 rand_core = { version = "0.5", default-features = false }
 subtle = { version = "2.2.1", default-features = false, features = ["i128"] }
 
