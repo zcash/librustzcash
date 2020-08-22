@@ -287,7 +287,7 @@ impl Circuit<bls12_381::Scalar> for Spend {
 
         // This is an injective encoding, as cur is a
         // point in the prime order subgroup.
-        let mut cur = cm.get_x().clone();
+        let mut cur = cm.get_u().clone();
 
         // Ascend the merkle tree authentication path
         for (i, e) in self.auth_path.into_iter().enumerate() {
@@ -309,7 +309,7 @@ impl Circuit<bls12_381::Scalar> for Spend {
                 num::AllocatedNum::alloc(cs.namespace(|| "path element"), || Ok(e.get()?.0))?;
 
             // Swap the two if the current subtree is on the right
-            let (xl, xr) = num::AllocatedNum::conditionally_reverse(
+            let (ul, ur) = num::AllocatedNum::conditionally_reverse(
                 cs.namespace(|| "conditional reversal of preimage"),
                 &cur,
                 &path_element,
@@ -321,8 +321,8 @@ impl Circuit<bls12_381::Scalar> for Spend {
             // they will be unable to find an authentication path in the
             // tree with high probability.
             let mut preimage = vec![];
-            preimage.extend(xl.to_bits_le(cs.namespace(|| "xl into bits"))?);
-            preimage.extend(xr.to_bits_le(cs.namespace(|| "xr into bits"))?);
+            preimage.extend(ul.to_bits_le(cs.namespace(|| "ul into bits"))?);
+            preimage.extend(ur.to_bits_le(cs.namespace(|| "ur into bits"))?);
 
             // Compute the new subtree value
             cur = pedersen_hash::pedersen_hash(
@@ -330,7 +330,7 @@ impl Circuit<bls12_381::Scalar> for Spend {
                 pedersen_hash::Personalization::MerkleTree(i),
                 &preimage,
             )?
-            .get_x()
+            .get_u()
             .clone(); // Injective encoding
         }
 
@@ -449,21 +449,21 @@ impl Circuit<bls12_381::Scalar> for Output {
                 .as_ref()
                 .map(|e| jubjub::ExtendedPoint::from(*e.pk_d()).to_affine());
 
-            // Witness the y-coordinate, encoded as little
+            // Witness the v-coordinate, encoded as little
             // endian bits (to match the representation)
-            let y_contents = boolean::field_into_boolean_vec_le(
-                cs.namespace(|| "pk_d bits of y"),
+            let v_contents = boolean::field_into_boolean_vec_le(
+                cs.namespace(|| "pk_d bits of v"),
                 pk_d.map(|e| e.get_v()),
             )?;
 
             // Witness the sign bit
             let sign_bit = boolean::Boolean::from(boolean::AllocatedBit::alloc(
-                cs.namespace(|| "pk_d bit of x"),
+                cs.namespace(|| "pk_d bit of u"),
                 pk_d.map(|e| e.get_u().is_odd()),
             )?);
 
             // Extend the note with pk_d representation
-            note_contents.extend(y_contents);
+            note_contents.extend(v_contents);
             note_contents.push(sign_bit);
         }
 
@@ -499,11 +499,11 @@ impl Circuit<bls12_381::Scalar> for Output {
             cm = cm.add(cs.namespace(|| "randomization of note commitment"), &rcm)?;
         }
 
-        // Only the x-coordinate of the output is revealed,
+        // Only the u-coordinate of the output is revealed,
         // since we know it is prime order, and we know that
         // the x-coordinate is an injective encoding for
         // prime-order elements.
-        cm.get_x().inputize(cs.namespace(|| "commitment"))?;
+        cm.get_u().inputize(cs.namespace(|| "commitment"))?;
 
         Ok(())
     }
@@ -636,18 +636,18 @@ fn test_input_circuit_with_bls12_381() {
                 "d37c738e83df5d9b0bb6495ac96abf21bcb2697477e2c15c2c7916ff7a3b6a89"
             );
 
-            assert_eq!(cs.get("randomization of note commitment/x3/num"), cmu);
+            assert_eq!(cs.get("randomization of note commitment/u3/num"), cmu);
 
             assert_eq!(cs.num_inputs(), 8);
             assert_eq!(cs.get_input(0, "ONE"), bls12_381::Scalar::one());
-            assert_eq!(cs.get_input(1, "rk/x/input variable"), rk.get_u());
-            assert_eq!(cs.get_input(2, "rk/y/input variable"), rk.get_v());
+            assert_eq!(cs.get_input(1, "rk/u/input variable"), rk.get_u());
+            assert_eq!(cs.get_input(2, "rk/v/input variable"), rk.get_v());
             assert_eq!(
-                cs.get_input(3, "value commitment/commitment point/x/input variable"),
+                cs.get_input(3, "value commitment/commitment point/u/input variable"),
                 expected_value_commitment.get_u()
             );
             assert_eq!(
-                cs.get_input(4, "value commitment/commitment point/y/input variable"),
+                cs.get_input(4, "value commitment/commitment point/v/input variable"),
                 expected_value_commitment.get_v()
             );
             assert_eq!(cs.get_input(5, "anchor/input variable"), cur);
@@ -676,7 +676,7 @@ fn test_input_circuit_with_bls12_381_external_test_vectors() {
 
     let tree_depth = 32;
 
-    let expected_commitment_xs = vec![
+    let expected_commitment_us = vec![
         "43821661663052659750276289184181083197337192946256245809816728673021647664276",
         "7220807656052227578299730541645543434083158611414003423211850718229633594616",
         "13239753550660714843257636471668037031928211668773449453628093339627668081697",
@@ -689,7 +689,7 @@ fn test_input_circuit_with_bls12_381_external_test_vectors() {
         "18269767207277008186871145355531741929166733260352590789136389380124992250945",
     ];
 
-    let expected_commitment_ys = vec![
+    let expected_commitment_vs = vec![
         "27630722367128086497290371604583225252915685718989450292520883698391703910",
         "23310648738313092772044712773481584369462075017189681529702825235349449805260",
         "25709635353183537915646348052945798827495141780341329896098121888376871589480",
@@ -745,11 +745,11 @@ fn test_input_circuit_with_bls12_381_external_test_vectors() {
                 jubjub::ExtendedPoint::from(value_commitment.commitment()).to_affine();
             assert_eq!(
                 expected_value_commitment.get_u(),
-                bls12_381::Scalar::from_str(&expected_commitment_xs[i as usize]).unwrap()
+                bls12_381::Scalar::from_str(&expected_commitment_us[i as usize]).unwrap()
             );
             assert_eq!(
                 expected_value_commitment.get_v(),
-                bls12_381::Scalar::from_str(&expected_commitment_ys[i as usize]).unwrap()
+                bls12_381::Scalar::from_str(&expected_commitment_vs[i as usize]).unwrap()
             );
             let note = Note {
                 value: value_commitment.value,
@@ -818,18 +818,18 @@ fn test_input_circuit_with_bls12_381_external_test_vectors() {
                 "d37c738e83df5d9b0bb6495ac96abf21bcb2697477e2c15c2c7916ff7a3b6a89"
             );
 
-            assert_eq!(cs.get("randomization of note commitment/x3/num"), cmu);
+            assert_eq!(cs.get("randomization of note commitment/u3/num"), cmu);
 
             assert_eq!(cs.num_inputs(), 8);
             assert_eq!(cs.get_input(0, "ONE"), bls12_381::Scalar::one());
-            assert_eq!(cs.get_input(1, "rk/x/input variable"), rk.get_u());
-            assert_eq!(cs.get_input(2, "rk/y/input variable"), rk.get_v());
+            assert_eq!(cs.get_input(1, "rk/u/input variable"), rk.get_u());
+            assert_eq!(cs.get_input(2, "rk/v/input variable"), rk.get_v());
             assert_eq!(
-                cs.get_input(3, "value commitment/commitment point/x/input variable"),
+                cs.get_input(3, "value commitment/commitment point/u/input variable"),
                 expected_value_commitment.get_u()
             );
             assert_eq!(
-                cs.get_input(4, "value commitment/commitment point/y/input variable"),
+                cs.get_input(4, "value commitment/commitment point/v/input variable"),
                 expected_value_commitment.get_v()
             );
             assert_eq!(cs.get_input(5, "anchor/input variable"), cur);
@@ -924,19 +924,19 @@ fn test_output_circuit_with_bls12_381() {
             assert_eq!(cs.num_inputs(), 6);
             assert_eq!(cs.get_input(0, "ONE"), bls12_381::Scalar::one());
             assert_eq!(
-                cs.get_input(1, "value commitment/commitment point/x/input variable"),
+                cs.get_input(1, "value commitment/commitment point/u/input variable"),
                 expected_value_commitment.get_u()
             );
             assert_eq!(
-                cs.get_input(2, "value commitment/commitment point/y/input variable"),
+                cs.get_input(2, "value commitment/commitment point/v/input variable"),
                 expected_value_commitment.get_v()
             );
             assert_eq!(
-                cs.get_input(3, "epk/x/input variable"),
+                cs.get_input(3, "epk/u/input variable"),
                 expected_epk.get_u()
             );
             assert_eq!(
-                cs.get_input(4, "epk/y/input variable"),
+                cs.get_input(4, "epk/v/input variable"),
                 expected_epk.get_v()
             );
             assert_eq!(cs.get_input(5, "commitment/input variable"), expected_cmu);

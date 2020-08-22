@@ -18,8 +18,8 @@ use crate::constants::{FixedGenerator, EDWARDS_D, MONTGOMERY_A, MONTGOMERY_SCALE
 
 #[derive(Clone)]
 pub struct EdwardsPoint {
-    x: AllocatedNum<bls12_381::Scalar>,
-    y: AllocatedNum<bls12_381::Scalar>,
+    u: AllocatedNum<bls12_381::Scalar>,
+    v: AllocatedNum<bls12_381::Scalar>,
 }
 
 /// Perform a fixed-base scalar multiplication with
@@ -49,13 +49,14 @@ where
             .cloned()
             .unwrap_or_else(|| Boolean::constant(false));
 
-        let (x, y) = lookup3_xy(
+        // TODO: rename to lookup3_uv
+        let (u, v) = lookup3_xy(
             cs.namespace(|| format!("window table lookup {}", i)),
             &[chunk_a, chunk_b, chunk_c],
             window,
         )?;
 
-        let p = EdwardsPoint { x, y };
+        let p = EdwardsPoint { u, v };
 
         if result.is_none() {
             result = Some(p);
@@ -72,12 +73,12 @@ where
 }
 
 impl EdwardsPoint {
-    pub fn get_x(&self) -> &AllocatedNum<bls12_381::Scalar> {
-        &self.x
+    pub fn get_u(&self) -> &AllocatedNum<bls12_381::Scalar> {
+        &self.u
     }
 
-    pub fn get_y(&self) -> &AllocatedNum<bls12_381::Scalar> {
-        &self.y
+    pub fn get_v(&self) -> &AllocatedNum<bls12_381::Scalar> {
+        &self.v
     }
 
     pub fn assert_not_small_order<CS>(&self, mut cs: CS) -> Result<(), SynthesisError>
@@ -90,9 +91,9 @@ impl EdwardsPoint {
 
         // (0, -1) is a small order point, but won't ever appear here
         // because cofactor is 2^3, and we performed three doublings.
-        // (0, 1) is the neutral element, so checking if x is nonzero
+        // (0, 1) is the neutral element, so checking if u is nonzero
         // is sufficient to prevent small order points here.
-        tmp.x.assert_nonzero(cs.namespace(|| "check x != 0"))?;
+        tmp.u.assert_nonzero(cs.namespace(|| "check u != 0"))?;
 
         Ok(())
     }
@@ -101,8 +102,8 @@ impl EdwardsPoint {
     where
         CS: ConstraintSystem<bls12_381::Scalar>,
     {
-        self.x.inputize(cs.namespace(|| "x"))?;
-        self.y.inputize(cs.namespace(|| "y"))?;
+        self.u.inputize(cs.namespace(|| "u"))?;
+        self.v.inputize(cs.namespace(|| "v"))?;
 
         Ok(())
     }
@@ -114,12 +115,12 @@ impl EdwardsPoint {
     {
         let mut tmp = vec![];
 
-        let x = self.x.to_bits_le_strict(cs.namespace(|| "unpack x"))?;
+        let u = self.u.to_bits_le_strict(cs.namespace(|| "unpack u"))?;
 
-        let y = self.y.to_bits_le_strict(cs.namespace(|| "unpack y"))?;
+        let v = self.v.to_bits_le_strict(cs.namespace(|| "unpack v"))?;
 
-        tmp.extend(y);
-        tmp.push(x[0].clone());
+        tmp.extend(v);
+        tmp.push(u[0].clone());
 
         Ok(tmp)
     }
@@ -132,13 +133,13 @@ impl EdwardsPoint {
     {
         let p = p.map(|p| p.to_affine());
 
-        // Allocate x
-        let x = AllocatedNum::alloc(cs.namespace(|| "x"), || Ok(p.get()?.get_u()))?;
+        // Allocate u
+        let u = AllocatedNum::alloc(cs.namespace(|| "u"), || Ok(p.get()?.get_u()))?;
 
-        // Allocate y
-        let y = AllocatedNum::alloc(cs.namespace(|| "y"), || Ok(p.get()?.get_v()))?;
+        // Allocate v
+        let v = AllocatedNum::alloc(cs.namespace(|| "v"), || Ok(p.get()?.get_v()))?;
 
-        Self::interpret(cs.namespace(|| "point interpretation"), &x, &y)
+        Self::interpret(cs.namespace(|| "point interpretation"), &u, &v)
     }
 
     /// Returns `self` if condition is true, and the neutral
@@ -151,48 +152,48 @@ impl EdwardsPoint {
     where
         CS: ConstraintSystem<bls12_381::Scalar>,
     {
-        // Compute x' = self.x if condition, and 0 otherwise
-        let x_prime = AllocatedNum::alloc(cs.namespace(|| "x'"), || {
+        // Compute u' = self.u if condition, and 0 otherwise
+        let u_prime = AllocatedNum::alloc(cs.namespace(|| "u'"), || {
             if *condition.get_value().get()? {
-                Ok(*self.x.get_value().get()?)
+                Ok(*self.u.get_value().get()?)
             } else {
                 Ok(bls12_381::Scalar::zero())
             }
         })?;
 
-        // condition * x = x'
-        // if condition is 0, x' must be 0
-        // if condition is 1, x' must be x
+        // condition * u = u'
+        // if condition is 0, u' must be 0
+        // if condition is 1, u' must be u
         let one = CS::one();
         cs.enforce(
-            || "x' computation",
-            |lc| lc + self.x.get_variable(),
+            || "u' computation",
+            |lc| lc + self.u.get_variable(),
             |_| condition.lc(one, bls12_381::Scalar::one()),
-            |lc| lc + x_prime.get_variable(),
+            |lc| lc + u_prime.get_variable(),
         );
 
-        // Compute y' = self.y if condition, and 1 otherwise
-        let y_prime = AllocatedNum::alloc(cs.namespace(|| "y'"), || {
+        // Compute v' = self.v if condition, and 1 otherwise
+        let v_prime = AllocatedNum::alloc(cs.namespace(|| "v'"), || {
             if *condition.get_value().get()? {
-                Ok(*self.y.get_value().get()?)
+                Ok(*self.v.get_value().get()?)
             } else {
                 Ok(bls12_381::Scalar::one())
             }
         })?;
 
-        // condition * y = y' - (1 - condition)
-        // if condition is 0, y' must be 1
-        // if condition is 1, y' must be y
+        // condition * v = v' - (1 - condition)
+        // if condition is 0, v' must be 1
+        // if condition is 1, v' must be v
         cs.enforce(
-            || "y' computation",
-            |lc| lc + self.y.get_variable(),
+            || "v' computation",
+            |lc| lc + self.v.get_variable(),
             |_| condition.lc(one, bls12_381::Scalar::one()),
-            |lc| lc + y_prime.get_variable() - &condition.not().lc(one, bls12_381::Scalar::one()),
+            |lc| lc + v_prime.get_variable() - &condition.not().lc(one, bls12_381::Scalar::one()),
         );
 
         Ok(EdwardsPoint {
-            x: x_prime,
-            y: y_prime,
+            u: u_prime,
+            v: v_prime,
         })
     }
 
@@ -248,29 +249,29 @@ impl EdwardsPoint {
 
     pub fn interpret<CS>(
         mut cs: CS,
-        x: &AllocatedNum<bls12_381::Scalar>,
-        y: &AllocatedNum<bls12_381::Scalar>,
+        u: &AllocatedNum<bls12_381::Scalar>,
+        v: &AllocatedNum<bls12_381::Scalar>,
     ) -> Result<Self, SynthesisError>
     where
         CS: ConstraintSystem<bls12_381::Scalar>,
     {
-        // -x^2 + y^2 = 1 + dx^2y^2
+        // -u^2 + v^2 = 1 + du^2v^2
 
-        let x2 = x.square(cs.namespace(|| "x^2"))?;
-        let y2 = y.square(cs.namespace(|| "y^2"))?;
-        let x2y2 = x2.mul(cs.namespace(|| "x^2 y^2"), &y2)?;
+        let u2 = u.square(cs.namespace(|| "u^2"))?;
+        let v2 = v.square(cs.namespace(|| "v^2"))?;
+        let u2v2 = u2.mul(cs.namespace(|| "u^2 v^2"), &v2)?;
 
         let one = CS::one();
         cs.enforce(
             || "on curve check",
-            |lc| lc - x2.get_variable() + y2.get_variable(),
+            |lc| lc - u2.get_variable() + v2.get_variable(),
             |lc| lc + one,
-            |lc| lc + one + (EDWARDS_D, x2y2.get_variable()),
+            |lc| lc + one + (EDWARDS_D, u2v2.get_variable()),
         );
 
         Ok(EdwardsPoint {
-            x: x.clone(),
-            y: y.clone(),
+            u: u.clone(),
+            v: v.clone(),
         })
     }
 
@@ -278,13 +279,14 @@ impl EdwardsPoint {
     where
         CS: ConstraintSystem<bls12_381::Scalar>,
     {
-        // Compute T = (x1 + y1) * (x1 + y1)
+        // Compute T = (u + v) * (v - EDWARDS_A*u)
+        //           = (u + v) * (u + v)
         let t = AllocatedNum::alloc(cs.namespace(|| "T"), || {
-            let mut t0 = *self.x.get_value().get()?;
-            t0.add_assign(self.y.get_value().get()?);
+            let mut t0 = *self.u.get_value().get()?;
+            t0.add_assign(self.v.get_value().get()?);
 
-            let mut t1 = *self.x.get_value().get()?;
-            t1.add_assign(self.y.get_value().get()?);
+            let mut t1 = *self.u.get_value().get()?;
+            t1.add_assign(self.v.get_value().get()?);
 
             t0.mul_assign(&t1);
 
@@ -293,13 +295,13 @@ impl EdwardsPoint {
 
         cs.enforce(
             || "T computation",
-            |lc| lc + self.x.get_variable() + self.y.get_variable(),
-            |lc| lc + self.x.get_variable() + self.y.get_variable(),
+            |lc| lc + self.u.get_variable() + self.v.get_variable(),
+            |lc| lc + self.u.get_variable() + self.v.get_variable(),
             |lc| lc + t.get_variable(),
         );
 
-        // Compute A = x1 * y1
-        let a = self.x.mul(cs.namespace(|| "A computation"), &self.y)?;
+        // Compute A = u * v
+        let a = self.u.mul(cs.namespace(|| "A computation"), &self.v)?;
 
         // Compute C = d*A*A
         let c = AllocatedNum::alloc(cs.namespace(|| "C"), || {
@@ -316,8 +318,8 @@ impl EdwardsPoint {
             |lc| lc + c.get_variable(),
         );
 
-        // Compute x3 = (2.A) / (1 + C)
-        let x3 = AllocatedNum::alloc(cs.namespace(|| "x3"), || {
+        // Compute u3 = (2.A) / (1 + C)
+        let u3 = AllocatedNum::alloc(cs.namespace(|| "u3"), || {
             let mut t0 = *a.get_value().get()?;
             t0 = t0.double();
 
@@ -334,14 +336,15 @@ impl EdwardsPoint {
 
         let one = CS::one();
         cs.enforce(
-            || "x3 computation",
+            || "u3 computation",
             |lc| lc + one + c.get_variable(),
-            |lc| lc + x3.get_variable(),
+            |lc| lc + u3.get_variable(),
             |lc| lc + a.get_variable() + a.get_variable(),
         );
 
-        // Compute y3 = (U - 2.A) / (1 - C)
-        let y3 = AllocatedNum::alloc(cs.namespace(|| "y3"), || {
+        // Compute v3 = (T + (EDWARDS_A-1)*A) / (1 - C)
+        //            = (T - 2.A) / (1 - C)
+        let v3 = AllocatedNum::alloc(cs.namespace(|| "v3"), || {
             let mut t0 = *a.get_value().get()?;
             t0 = t0.double().neg();
             t0.add_assign(t.get_value().get()?);
@@ -358,13 +361,13 @@ impl EdwardsPoint {
         })?;
 
         cs.enforce(
-            || "y3 computation",
+            || "v3 computation",
             |lc| lc + one - c.get_variable(),
-            |lc| lc + y3.get_variable(),
+            |lc| lc + v3.get_variable(),
             |lc| lc + t.get_variable() - a.get_variable() - a.get_variable(),
         );
 
-        Ok(EdwardsPoint { x: x3, y: y3 })
+        Ok(EdwardsPoint { u: u3, v: v3 })
     }
 
     /// Perform addition between any two points
@@ -372,13 +375,15 @@ impl EdwardsPoint {
     where
         CS: ConstraintSystem<bls12_381::Scalar>,
     {
-        // Compute U = (x1 + y1) * (x2 + y2)
-        let u = AllocatedNum::alloc(cs.namespace(|| "U"), || {
-            let mut t0 = *self.x.get_value().get()?;
-            t0.add_assign(self.y.get_value().get()?);
+        // Compute U = (u1 + v1) * (v2 - EDWARDS_A*u2)
+        //           = (u1 + v1) * (u2 + v2)
+        // (In hindsight, U was a poor choice of name.)
+        let uppercase_u = AllocatedNum::alloc(cs.namespace(|| "U"), || {
+            let mut t0 = *self.u.get_value().get()?;
+            t0.add_assign(self.v.get_value().get()?);
 
-            let mut t1 = *other.x.get_value().get()?;
-            t1.add_assign(other.y.get_value().get()?);
+            let mut t1 = *other.u.get_value().get()?;
+            t1.add_assign(other.v.get_value().get()?);
 
             t0.mul_assign(&t1);
 
@@ -387,16 +392,16 @@ impl EdwardsPoint {
 
         cs.enforce(
             || "U computation",
-            |lc| lc + self.x.get_variable() + self.y.get_variable(),
-            |lc| lc + other.x.get_variable() + other.y.get_variable(),
-            |lc| lc + u.get_variable(),
+            |lc| lc + self.u.get_variable() + self.v.get_variable(),
+            |lc| lc + other.u.get_variable() + other.v.get_variable(),
+            |lc| lc + uppercase_u.get_variable(),
         );
 
-        // Compute A = y2 * x1
-        let a = other.y.mul(cs.namespace(|| "A computation"), &self.x)?;
+        // Compute A = v2 * u1
+        let a = other.v.mul(cs.namespace(|| "A computation"), &self.u)?;
 
-        // Compute B = x2 * y1
-        let b = other.x.mul(cs.namespace(|| "B computation"), &self.y)?;
+        // Compute B = u2 * v1
+        let b = other.u.mul(cs.namespace(|| "B computation"), &self.v)?;
 
         // Compute C = d*A*B
         let c = AllocatedNum::alloc(cs.namespace(|| "C"), || {
@@ -414,8 +419,8 @@ impl EdwardsPoint {
             |lc| lc + c.get_variable(),
         );
 
-        // Compute x3 = (A + B) / (1 + C)
-        let x3 = AllocatedNum::alloc(cs.namespace(|| "x3"), || {
+        // Compute u3 = (A + B) / (1 + C)
+        let u3 = AllocatedNum::alloc(cs.namespace(|| "u3"), || {
             let mut t0 = *a.get_value().get()?;
             t0.add_assign(b.get_value().get()?);
 
@@ -432,15 +437,15 @@ impl EdwardsPoint {
 
         let one = CS::one();
         cs.enforce(
-            || "x3 computation",
+            || "u3 computation",
             |lc| lc + one + c.get_variable(),
-            |lc| lc + x3.get_variable(),
+            |lc| lc + u3.get_variable(),
             |lc| lc + a.get_variable() + b.get_variable(),
         );
 
-        // Compute y3 = (U - A - B) / (1 - C)
-        let y3 = AllocatedNum::alloc(cs.namespace(|| "y3"), || {
-            let mut t0 = *u.get_value().get()?;
+        // Compute v3 = (U - A - B) / (1 - C)
+        let v3 = AllocatedNum::alloc(cs.namespace(|| "v3"), || {
+            let mut t0 = *uppercase_u.get_value().get()?;
             t0.sub_assign(a.get_value().get()?);
             t0.sub_assign(b.get_value().get()?);
 
@@ -456,13 +461,13 @@ impl EdwardsPoint {
         })?;
 
         cs.enforce(
-            || "y3 computation",
+            || "v3 computation",
             |lc| lc + one - c.get_variable(),
-            |lc| lc + y3.get_variable(),
-            |lc| lc + u.get_variable() - a.get_variable() - b.get_variable(),
+            |lc| lc + v3.get_variable(),
+            |lc| lc + uppercase_u.get_variable() - a.get_variable() - b.get_variable(),
         );
 
-        Ok(EdwardsPoint { x: x3, y: y3 })
+        Ok(EdwardsPoint { u: u3, v: v3 })
     }
 }
 
@@ -522,7 +527,7 @@ impl MontgomeryPoint {
             |lc| lc + &self.x.lc(bls12_381::Scalar::one()) - one,
         );
 
-        Ok(EdwardsPoint { x: u, y: v })
+        Ok(EdwardsPoint { u, v })
     }
 
     /// Interprets an (x, y) pair as a point
@@ -649,8 +654,8 @@ mod test {
             let q = p.into_edwards(&mut cs).unwrap();
 
             assert!(cs.is_satisfied());
-            assert!(q.x.get_value().unwrap() == u);
-            assert!(q.y.get_value().unwrap() == v);
+            assert!(q.u.get_value().unwrap() == u);
+            assert!(q.v.get_value().unwrap() == v);
 
             cs.set("u/num", bls12_381::Scalar::random(rng));
             assert_eq!(cs.which_is_unsatisfied().unwrap(), "u computation");
@@ -680,35 +685,35 @@ mod test {
             let p = p.to_affine();
 
             assert!(cs.is_satisfied());
-            assert_eq!(q.x.get_value().unwrap(), p.get_u());
-            assert_eq!(q.y.get_value().unwrap(), p.get_v());
+            assert_eq!(q.u.get_value().unwrap(), p.get_u());
+            assert_eq!(q.v.get_value().unwrap(), p.get_v());
         }
 
         for _ in 0..100 {
             let p = jubjub::ExtendedPoint::random(rng).to_affine();
-            let (x, y) = (p.get_u(), p.get_v());
+            let (u, v) = (p.get_u(), p.get_v());
 
             let mut cs = TestConstraintSystem::new();
-            let numx = AllocatedNum::alloc(cs.namespace(|| "x"), || Ok(x)).unwrap();
-            let numy = AllocatedNum::alloc(cs.namespace(|| "y"), || Ok(y)).unwrap();
+            let numu = AllocatedNum::alloc(cs.namespace(|| "u"), || Ok(u)).unwrap();
+            let numv = AllocatedNum::alloc(cs.namespace(|| "v"), || Ok(v)).unwrap();
 
-            let p = EdwardsPoint::interpret(&mut cs, &numx, &numy).unwrap();
+            let p = EdwardsPoint::interpret(&mut cs, &numu, &numv).unwrap();
 
             assert!(cs.is_satisfied());
-            assert_eq!(p.x.get_value().unwrap(), x);
-            assert_eq!(p.y.get_value().unwrap(), y);
+            assert_eq!(p.u.get_value().unwrap(), u);
+            assert_eq!(p.v.get_value().unwrap(), v);
         }
 
-        // Random (x, y) are unlikely to be on the curve.
+        // Random (u, v) are unlikely to be on the curve.
         for _ in 0..100 {
-            let x = bls12_381::Scalar::random(rng);
-            let y = bls12_381::Scalar::random(rng);
+            let u = bls12_381::Scalar::random(rng);
+            let v = bls12_381::Scalar::random(rng);
 
             let mut cs = TestConstraintSystem::new();
-            let numx = AllocatedNum::alloc(cs.namespace(|| "x"), || Ok(x)).unwrap();
-            let numy = AllocatedNum::alloc(cs.namespace(|| "y"), || Ok(y)).unwrap();
+            let numu = AllocatedNum::alloc(cs.namespace(|| "u"), || Ok(u)).unwrap();
+            let numv = AllocatedNum::alloc(cs.namespace(|| "v"), || Ok(v)).unwrap();
 
-            EdwardsPoint::interpret(&mut cs, &numx, &numy).unwrap();
+            EdwardsPoint::interpret(&mut cs, &numu, &numv).unwrap();
 
             assert_eq!(cs.which_is_unsatisfied().unwrap(), "on curve check");
         }
@@ -727,7 +732,7 @@ mod test {
             let p = zcash_primitives::constants::NOTE_COMMITMENT_RANDOMNESS_GENERATOR;
             let s = jubjub::Fr::random(rng);
             let q = jubjub::ExtendedPoint::from(p * s).to_affine();
-            let (x1, y1) = (q.get_u(), q.get_v());
+            let (u1, v1) = (q.get_u(), q.get_v());
 
             let mut s_bits = BitIterator::<u8, _>::new(s.to_repr()).collect::<Vec<_>>();
             s_bits.reverse();
@@ -750,8 +755,8 @@ mod test {
             )
             .unwrap();
 
-            assert_eq!(q.x.get_value().unwrap(), x1);
-            assert_eq!(q.y.get_value().unwrap(), y1);
+            assert_eq!(q.u.get_value().unwrap(), u1);
+            assert_eq!(q.v.get_value().unwrap(), v1);
         }
     }
 
@@ -770,15 +775,15 @@ mod test {
             let q = (p * s).to_affine();
             let p = p.to_affine();
 
-            let (x0, y0) = (p.get_u(), p.get_v());
-            let (x1, y1) = (q.get_u(), q.get_v());
+            let (u0, v0) = (p.get_u(), p.get_v());
+            let (u1, v1) = (q.get_u(), q.get_v());
 
-            let num_x0 = AllocatedNum::alloc(cs.namespace(|| "x0"), || Ok(x0)).unwrap();
-            let num_y0 = AllocatedNum::alloc(cs.namespace(|| "y0"), || Ok(y0)).unwrap();
+            let num_u0 = AllocatedNum::alloc(cs.namespace(|| "u0"), || Ok(u0)).unwrap();
+            let num_v0 = AllocatedNum::alloc(cs.namespace(|| "v0"), || Ok(v0)).unwrap();
 
             let p = EdwardsPoint {
-                x: num_x0,
-                y: num_y0,
+                u: num_u0,
+                v: num_v0,
             };
 
             let mut s_bits = BitIterator::<u8, _>::new(s.to_repr()).collect::<Vec<_>>();
@@ -799,9 +804,9 @@ mod test {
 
             assert!(cs.is_satisfied());
 
-            assert_eq!(q.x.get_value().unwrap(), x1);
+            assert_eq!(q.u.get_value().unwrap(), u1);
 
-            assert_eq!(q.y.get_value().unwrap(), y1);
+            assert_eq!(q.v.get_value().unwrap(), v1);
         }
     }
 
@@ -817,14 +822,14 @@ mod test {
 
             let p = jubjub::ExtendedPoint::random(rng).to_affine();
 
-            let (x0, y0) = (p.get_u(), p.get_v());
+            let (u0, v0) = (p.get_u(), p.get_v());
 
-            let num_x0 = AllocatedNum::alloc(cs.namespace(|| "x0"), || Ok(x0)).unwrap();
-            let num_y0 = AllocatedNum::alloc(cs.namespace(|| "y0"), || Ok(y0)).unwrap();
+            let num_u0 = AllocatedNum::alloc(cs.namespace(|| "u0"), || Ok(u0)).unwrap();
+            let num_v0 = AllocatedNum::alloc(cs.namespace(|| "v0"), || Ok(v0)).unwrap();
 
             let p = EdwardsPoint {
-                x: num_x0,
-                y: num_y0,
+                u: num_u0,
+                v: num_v0,
             };
 
             let mut should_we_select = rng.next_u32() % 2 != 0;
@@ -852,21 +857,21 @@ mod test {
             assert!(cs.is_satisfied());
 
             if should_we_select {
-                assert_eq!(q.x.get_value().unwrap(), x0);
-                assert_eq!(q.y.get_value().unwrap(), y0);
+                assert_eq!(q.u.get_value().unwrap(), u0);
+                assert_eq!(q.v.get_value().unwrap(), v0);
 
-                cs.set("select/y'/num", bls12_381::Scalar::one());
-                assert_eq!(cs.which_is_unsatisfied().unwrap(), "select/y' computation");
-                cs.set("select/x'/num", bls12_381::Scalar::zero());
-                assert_eq!(cs.which_is_unsatisfied().unwrap(), "select/x' computation");
+                cs.set("select/v'/num", bls12_381::Scalar::one());
+                assert_eq!(cs.which_is_unsatisfied().unwrap(), "select/v' computation");
+                cs.set("select/u'/num", bls12_381::Scalar::zero());
+                assert_eq!(cs.which_is_unsatisfied().unwrap(), "select/u' computation");
             } else {
-                assert_eq!(q.x.get_value().unwrap(), bls12_381::Scalar::zero());
-                assert_eq!(q.y.get_value().unwrap(), bls12_381::Scalar::one());
+                assert_eq!(q.u.get_value().unwrap(), bls12_381::Scalar::zero());
+                assert_eq!(q.v.get_value().unwrap(), bls12_381::Scalar::one());
 
-                cs.set("select/y'/num", x0);
-                assert_eq!(cs.which_is_unsatisfied().unwrap(), "select/y' computation");
-                cs.set("select/x'/num", y0);
-                assert_eq!(cs.which_is_unsatisfied().unwrap(), "select/x' computation");
+                cs.set("select/v'/num", u0);
+                assert_eq!(cs.which_is_unsatisfied().unwrap(), "select/v' computation");
+                cs.set("select/u'/num", v0);
+                assert_eq!(cs.which_is_unsatisfied().unwrap(), "select/u' computation");
             }
         }
     }
@@ -888,51 +893,51 @@ mod test {
             let p2 = p2.to_affine();
             let p3 = p3.to_affine();
 
-            let (x0, y0) = (p1.get_u(), p1.get_v());
-            let (x1, y1) = (p2.get_u(), p2.get_v());
-            let (x2, y2) = (p3.get_u(), p3.get_v());
+            let (u0, v0) = (p1.get_u(), p1.get_v());
+            let (u1, v1) = (p2.get_u(), p2.get_v());
+            let (u2, v2) = (p3.get_u(), p3.get_v());
 
             let mut cs = TestConstraintSystem::new();
 
-            let num_x0 = AllocatedNum::alloc(cs.namespace(|| "x0"), || Ok(x0)).unwrap();
-            let num_y0 = AllocatedNum::alloc(cs.namespace(|| "y0"), || Ok(y0)).unwrap();
+            let num_u0 = AllocatedNum::alloc(cs.namespace(|| "u0"), || Ok(u0)).unwrap();
+            let num_v0 = AllocatedNum::alloc(cs.namespace(|| "v0"), || Ok(v0)).unwrap();
 
-            let num_x1 = AllocatedNum::alloc(cs.namespace(|| "x1"), || Ok(x1)).unwrap();
-            let num_y1 = AllocatedNum::alloc(cs.namespace(|| "y1"), || Ok(y1)).unwrap();
+            let num_u1 = AllocatedNum::alloc(cs.namespace(|| "u1"), || Ok(u1)).unwrap();
+            let num_v1 = AllocatedNum::alloc(cs.namespace(|| "v1"), || Ok(v1)).unwrap();
 
             let p1 = EdwardsPoint {
-                x: num_x0,
-                y: num_y0,
+                u: num_u0,
+                v: num_v0,
             };
 
             let p2 = EdwardsPoint {
-                x: num_x1,
-                y: num_y1,
+                u: num_u1,
+                v: num_v1,
             };
 
             let p3 = p1.add(cs.namespace(|| "addition"), &p2).unwrap();
 
             assert!(cs.is_satisfied());
 
-            assert!(p3.x.get_value().unwrap() == x2);
-            assert!(p3.y.get_value().unwrap() == y2);
+            assert!(p3.u.get_value().unwrap() == u2);
+            assert!(p3.v.get_value().unwrap() == v2);
 
-            let u = cs.get("addition/U/num");
+            let uppercase_u = cs.get("addition/U/num");
             cs.set("addition/U/num", bls12_381::Scalar::random(rng));
             assert_eq!(cs.which_is_unsatisfied(), Some("addition/U computation"));
-            cs.set("addition/U/num", u);
+            cs.set("addition/U/num", uppercase_u);
             assert!(cs.is_satisfied());
 
-            let x3 = cs.get("addition/x3/num");
-            cs.set("addition/x3/num", bls12_381::Scalar::random(rng));
-            assert_eq!(cs.which_is_unsatisfied(), Some("addition/x3 computation"));
-            cs.set("addition/x3/num", x3);
+            let u3 = cs.get("addition/u3/num");
+            cs.set("addition/u3/num", bls12_381::Scalar::random(rng));
+            assert_eq!(cs.which_is_unsatisfied(), Some("addition/u3 computation"));
+            cs.set("addition/u3/num", u3);
             assert!(cs.is_satisfied());
 
-            let y3 = cs.get("addition/y3/num");
-            cs.set("addition/y3/num", bls12_381::Scalar::random(rng));
-            assert_eq!(cs.which_is_unsatisfied(), Some("addition/y3 computation"));
-            cs.set("addition/y3/num", y3);
+            let v3 = cs.get("addition/v3/num");
+            cs.set("addition/v3/num", bls12_381::Scalar::random(rng));
+            assert_eq!(cs.which_is_unsatisfied(), Some("addition/v3 computation"));
+            cs.set("addition/v3/num", v3);
             assert!(cs.is_satisfied());
         }
     }
@@ -951,25 +956,25 @@ mod test {
             let p1 = p1.to_affine();
             let p2 = p2.to_affine();
 
-            let (x0, y0) = (p1.get_u(), p1.get_v());
-            let (x1, y1) = (p2.get_u(), p2.get_v());
+            let (u0, v0) = (p1.get_u(), p1.get_v());
+            let (u1, v1) = (p2.get_u(), p2.get_v());
 
             let mut cs = TestConstraintSystem::new();
 
-            let num_x0 = AllocatedNum::alloc(cs.namespace(|| "x0"), || Ok(x0)).unwrap();
-            let num_y0 = AllocatedNum::alloc(cs.namespace(|| "y0"), || Ok(y0)).unwrap();
+            let num_u0 = AllocatedNum::alloc(cs.namespace(|| "u0"), || Ok(u0)).unwrap();
+            let num_v0 = AllocatedNum::alloc(cs.namespace(|| "v0"), || Ok(v0)).unwrap();
 
             let p1 = EdwardsPoint {
-                x: num_x0,
-                y: num_y0,
+                u: num_u0,
+                v: num_v0,
             };
 
             let p2 = p1.double(cs.namespace(|| "doubling")).unwrap();
 
             assert!(cs.is_satisfied());
 
-            assert!(p2.x.get_value().unwrap() == x1);
-            assert!(p2.y.get_value().unwrap() == y1);
+            assert!(p2.u.get_value().unwrap() == u1);
+            assert!(p2.v.get_value().unwrap() == v1);
         }
     }
 
@@ -1039,12 +1044,12 @@ mod test {
             assert!(p.assert_not_small_order(&mut cs).is_err() == is_small_order);
         };
 
-        let check_small_order_from_strs = |x, y| {
-            let (x, y) = (
-                bls12_381::Scalar::from_str(x).unwrap(),
-                bls12_381::Scalar::from_str(y).unwrap(),
+        let check_small_order_from_strs = |u, v| {
+            let (u, v) = (
+                bls12_381::Scalar::from_str(u).unwrap(),
+                bls12_381::Scalar::from_str(v).unwrap(),
             );
-            let p = jubjub::AffinePoint::from_raw_unchecked(x, y);
+            let p = jubjub::AffinePoint::from_raw_unchecked(u, v);
 
             check_small_order_from_p(p.into(), true);
         };
@@ -1059,10 +1064,10 @@ mod test {
         .unwrap();
         let largest_small_subgroup_order = jubjub::Fr::from_str("8").unwrap();
 
-        let (zero_x, zero_y) = (bls12_381::Scalar::zero(), bls12_381::Scalar::one());
+        let (zero_u, zero_v) = (bls12_381::Scalar::zero(), bls12_381::Scalar::one());
 
         // generator for jubjub
-        let (x, y) = (
+        let (u, v) = (
             bls12_381::Scalar::from_str(
                 "11076627216317271660298050606127911965867021807910416450833192264015104452986",
             )
@@ -1072,7 +1077,7 @@ mod test {
             )
             .unwrap(),
         );
-        let g = jubjub::AffinePoint::from_raw_unchecked(x, y).into();
+        let g = jubjub::AffinePoint::from_raw_unchecked(u, v).into();
         check_small_order_from_p(g, false);
 
         // generator for the prime subgroup
@@ -1081,11 +1086,11 @@ mod test {
         let prime_subgroup_order_minus_1 = prime_subgroup_order - jubjub::Fr::one();
 
         let should_not_be_zero = g_prime * prime_subgroup_order_minus_1;
-        assert_ne!(zero_x, should_not_be_zero.to_affine().get_u());
-        assert_ne!(zero_y, should_not_be_zero.to_affine().get_v());
+        assert_ne!(zero_u, should_not_be_zero.to_affine().get_u());
+        assert_ne!(zero_v, should_not_be_zero.to_affine().get_v());
         let should_be_zero = should_not_be_zero + g_prime;
-        assert_eq!(zero_x, should_be_zero.to_affine().get_u());
-        assert_eq!(zero_y, should_be_zero.to_affine().get_v());
+        assert_eq!(zero_u, should_be_zero.to_affine().get_u());
+        assert_eq!(zero_v, should_be_zero.to_affine().get_v());
 
         // generator for the small order subgroup
         let g_small = g * prime_subgroup_order_minus_1;
@@ -1096,12 +1101,12 @@ mod test {
         let largest_small_subgroup_order_minus_1 = largest_small_subgroup_order - jubjub::Fr::one();
 
         let should_not_be_zero = g_small * largest_small_subgroup_order_minus_1;
-        assert_ne!(zero_x, should_not_be_zero.to_affine().get_u());
-        assert_ne!(zero_y, should_not_be_zero.to_affine().get_v());
+        assert_ne!(zero_u, should_not_be_zero.to_affine().get_u());
+        assert_ne!(zero_v, should_not_be_zero.to_affine().get_v());
 
         let should_be_zero = should_not_be_zero + g_small;
-        assert_eq!(zero_x, should_be_zero.to_affine().get_u());
-        assert_eq!(zero_y, should_be_zero.to_affine().get_v());
+        assert_eq!(zero_u, should_be_zero.to_affine().get_u());
+        assert_eq!(zero_v, should_be_zero.to_affine().get_v());
 
         // take all the points from the script
         // assert should be different than multiplying by cofactor, which is the solution
