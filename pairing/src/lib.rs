@@ -11,7 +11,7 @@
 #![cfg_attr(feature = "cargo-clippy", allow(clippy::new_without_default))]
 #![cfg_attr(feature = "cargo-clippy", allow(clippy::write_literal))]
 // Catch documentation errors caused by code changes.
-#![deny(intra_doc_link_resolution_failure)]
+#![deny(broken_intra_doc_links)]
 // Force public structures to implement Debug
 #![deny(missing_debug_implementations)]
 

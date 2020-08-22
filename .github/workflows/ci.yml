@@ -167,7 +167,7 @@ jobs:
           command: fetch
 
       # Ensure intra-documentation links all resolve correctly
-      # Requires #![deny(intra_doc_link_resolution_failure)] in crates.
+      # Requires #![deny(broken_intra_doc_links)] in crates.
       - name: Check intra-doc links
         uses: actions-rs/cargo@v1
         with:
