@@ -29,7 +29,6 @@ hex = "0.4"
 jubjub = { version = "0.3", path = "../jubjub" }
 lazy_static = "1"
 log = "0.4"
-pairing = { version = "0.16", path = "../pairing" }
 rand = "0.7"
 rand_core = "0.5.1"
 ripemd160 = { version = "0.9", optional = true }
