@@ -174,7 +174,7 @@ const R2: Fr = Fr([
     0x04f6_547b_8d12_7688,
 ]);
 
-/// R^2 = 2^768 mod r
+/// R^3 = 2^768 mod r
 const R3: Fr = Fr([
     0xe0d6_c656_3d83_0544,
     0x323e_3883_598d_0f85,
@@ -276,7 +276,7 @@ impl Fr {
         //
         // and computing their sum in the field. It remains to see that arbitrary 256-bit
         // numbers can be placed into Montgomery form safely using the reduction. The
-        // reduction works so long as the product is less than R=2^256 multipled by
+        // reduction works so long as the product is less than R=2^256 multiplied by
         // the modulus. This holds because for any `c` smaller than the modulus, we have
         // that (2^256 - 1)*c is an acceptable product for the reduction. Therefore, the
         // reduction always works so long as `c` is in the field; in this case it is either the
