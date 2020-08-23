@@ -3,6 +3,7 @@
 //! `zcash_proofs` contains the zk-SNARK circuits used by Zcash, and the APIs for creating
 //! and verifying proofs.
 
+#![cfg_attr(docsrs, feature(doc_cfg))]
 // Catch documentation errors caused by code changes.
 #![deny(intra_doc_link_resolution_failure)]
 
@@ -24,6 +25,10 @@ pub mod sapling;
 pub mod sprout;
 
 #[cfg(any(feature = "local-prover", feature = "bundled-prover"))]
+#[cfg_attr(
+    docsrs,
+    doc(cfg(any(feature = "local-prover", feature = "bundled-prover")))
+)]
 pub mod prover;
 
 // Circuit names
@@ -42,6 +47,7 @@ const DOWNLOAD_URL: &str = "https://download.z.cash/downloads";
 
 /// Returns the default folder that the Zcash proving parameters are located in.
 #[cfg(feature = "directories")]
+#[cfg_attr(docsrs, doc(cfg(feature = "directories")))]
 pub fn default_params_folder() -> Option<PathBuf> {
     BaseDirs::new().map(|base_dirs| {
         if cfg!(any(windows, target_os = "macos")) {
@@ -56,6 +62,7 @@ pub fn default_params_folder() -> Option<PathBuf> {
 ///
 /// This mirrors the behaviour of the `fetch-params.sh` script from `zcashd`.
 #[cfg(feature = "download-params")]
+#[cfg_attr(docsrs, doc(cfg(feature = "download-params")))]
 pub fn download_parameters() -> Result<(), minreq::Error> {
     // Ensure that the default Zcash parameters location exists.
     let params_dir = default_params_folder().ok_or(io::Error::new(

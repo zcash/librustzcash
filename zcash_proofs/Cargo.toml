@@ -11,6 +11,9 @@ readme = "README.md"
 license = "MIT OR Apache-2.0"
 edition = "2018"
 
+[package.metadata.docs.rs]
+all-features = true
+
 [dependencies]
 bellman = { version = "0.6", path = "../bellman", default-features = false, features = ["groth16"] }
 blake2b_simd = "0.5"

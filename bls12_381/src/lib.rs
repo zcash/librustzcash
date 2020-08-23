@@ -9,6 +9,7 @@
 //! * All operations are constant time unless explicitly noted.
 
 #![no_std]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 // Catch documentation errors caused by code changes.
 #![deny(intra_doc_link_resolution_failure)]
 #![deny(missing_debug_implementations)]

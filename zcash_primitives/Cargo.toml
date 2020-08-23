@@ -11,6 +11,9 @@ readme = "README.md"
 license = "MIT OR Apache-2.0"
 edition = "2018"
 
+[package.metadata.docs.rs]
+all-features = true
+
 [dependencies]
 aes = "0.5"
 blake2b_simd = "0.5"

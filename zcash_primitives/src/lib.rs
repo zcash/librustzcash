@@ -3,6 +3,7 @@
 //! `zcash_primitives` is a library that provides the core structs and functions necessary
 //! for working with Zcash.
 
+#![cfg_attr(docsrs, feature(doc_cfg))]
 // Catch documentation errors caused by code changes.
 #![deny(intra_doc_link_resolution_failure)]
 
