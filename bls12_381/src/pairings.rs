@@ -19,6 +19,7 @@ use alloc::vec::Vec;
 /// Represents results of a Miller loop, one of the most expensive portions
 /// of the pairing function. `MillerLoopResult`s cannot be compared with each
 /// other until `.final_exponentiation()` is called, which is also expensive.
+#[cfg_attr(docsrs, doc(cfg(feature = "pairings")))]
 #[derive(Copy, Clone, Debug)]
 pub struct MillerLoopResult(pub(crate) Fp12);
 
@@ -180,6 +181,7 @@ impl_add_binop_specify_output!(MillerLoopResult, MillerLoopResult, MillerLoopRes
 ///
 /// Typically, $\mathbb{G}_T$ is written multiplicatively but we will write it additively to
 /// keep code and abstractions consistent.
+#[cfg_attr(docsrs, doc(cfg(feature = "pairings")))]
 #[derive(Copy, Clone, Debug, Default)]
 pub struct Gt(pub(crate) Fp12);
 
@@ -449,6 +451,7 @@ impl Group for Gt {
 }
 
 #[cfg(feature = "alloc")]
+#[cfg_attr(docsrs, doc(cfg(all(feature = "pairings", feature = "alloc"))))]
 #[derive(Clone, Debug)]
 /// This structure contains cached computations pertaining to a $\mathbb{G}_2$
 /// element as part of the pairing function (specifically, the Miller loop) and
@@ -509,6 +512,7 @@ impl From<G2Affine> for G2Prepared {
 }
 
 #[cfg(feature = "alloc")]
+#[cfg_attr(docsrs, doc(cfg(all(feature = "pairings", feature = "alloc"))))]
 /// Computes $$\sum_{i=1}^n \textbf{ML}(a_i, b_i)$$ given a series of terms
 /// $$(a_1, b_1), (a_2, b_2), ..., (a_n, b_n).$$
 ///
@@ -565,6 +569,7 @@ pub fn multi_miller_loop(terms: &[(&G1Affine, &G2Prepared)]) -> MillerLoopResult
 }
 
 /// Invoke the pairing function without the use of precomputation and other optimizations.
+#[cfg_attr(docsrs, doc(cfg(feature = "pairings")))]
 pub fn pairing(p: &G1Affine, q: &G2Affine) -> Gt {
     struct Adder {
         cur: G2Projective,
@@ -749,6 +754,7 @@ impl PairingCurveAffine for G2Affine {
 }
 
 /// A [`pairing::Engine`] for BLS12-381 pairing operations.
+#[cfg_attr(docsrs, doc(cfg(feature = "pairings")))]
 #[derive(Clone, Debug)]
 pub struct Bls12;
 

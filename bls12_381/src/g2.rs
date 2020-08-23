@@ -21,6 +21,7 @@ use crate::Scalar;
 ///
 /// Values of `G2Affine` are guaranteed to be in the $q$-order subgroup unless an
 /// "unchecked" API was misused.
+#[cfg_attr(docsrs, doc(cfg(feature = "groups")))]
 #[derive(Copy, Clone, Debug)]
 pub struct G2Affine {
     pub(crate) x: Fp2,
@@ -486,6 +487,7 @@ impl G2Affine {
 }
 
 /// This is an element of $\mathbb{G}_2$ represented in the projective coordinate space.
+#[cfg_attr(docsrs, doc(cfg(feature = "groups")))]
 #[derive(Copy, Clone, Debug)]
 pub struct G2Projective {
     pub(crate) x: Fp2,
