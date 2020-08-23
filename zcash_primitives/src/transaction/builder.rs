@@ -412,6 +412,7 @@ impl<P: consensus::Parameters, R: RngCore + CryptoRng> Builder<P, R> {
 
     /// Adds a transparent coin to be spent in this transaction.
     #[cfg(feature = "transparent-inputs")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "transparent-inputs")))]
     pub fn add_transparent_input(
         &mut self,
         sk: secp256k1::SecretKey,
