@@ -1030,6 +1030,8 @@ impl SubgroupPoint {
     ///
     /// This should only be used for hard-coding constants (e.g. fixed generators); in all
     /// other cases, use [`SubgroupPoint::from_bytes`] instead.
+    ///
+    /// [`SubgroupPoint::from_bytes`]: SubgroupPoint#impl-GroupEncoding
     pub const fn from_raw_unchecked(u: Fq, v: Fq) -> Self {
         SubgroupPoint(AffinePoint::from_raw_unchecked(u, v).to_extended())
     }
