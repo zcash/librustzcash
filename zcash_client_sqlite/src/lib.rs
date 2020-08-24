@@ -77,7 +77,7 @@ impl DataConnection {
 impl<'a> DBOps for &'a DataConnection {
     type Error = SqliteClientError;
     type NoteRef = NoteId;
-    type Mutator = DBMutator<'a>;
+    type UpdateOps = DataConnStmtCache<'a>;
 
     fn init_db(&self) -> Result<(), Self::Error> {
         init::init_data_database(self).map_err(SqliteClientError::from)
@@ -169,9 +169,9 @@ impl<'a> DBOps for &'a DataConnection {
         query::get_nullifiers(self)
     }
 
-    fn get_mutator(&self) -> Result<Self::Mutator, Self::Error> {
+    fn get_update_ops(&self) -> Result<Self::UpdateOps, Self::Error> {
         Ok(
-            DBMutator {
+            DataConnStmtCache {
                 conn: self,
                 stmt_insert_block: self.0.prepare(
                     "INSERT INTO blocks (height, hash, time, sapling_tree)
@@ -220,9 +220,9 @@ impl<'a> DBOps for &'a DataConnection {
         )
     }
 
-    fn transactionally<F>(&self, mutator: &mut Self::Mutator, f: F) -> Result<(), Self::Error>
+    fn transactionally<F>(&self, mutator: &mut Self::UpdateOps, f: F) -> Result<(), Self::Error>
     where
-        F: FnOnce(&mut Self::Mutator) -> Result<(), Self::Error>,
+        F: FnOnce(&mut Self::UpdateOps) -> Result<(), Self::Error>,
     {
         self.0.execute("BEGIN IMMEDIATE", NO_PARAMS)?;
         match f(mutator) {
@@ -247,7 +247,7 @@ impl<'a> DBOps for &'a DataConnection {
     }
 }
 
-pub struct DBMutator<'a> {
+pub struct DataConnStmtCache<'a> {
     conn: &'a DataConnection,
     stmt_insert_block: Statement<'a>,
     stmt_insert_tx: Statement<'a>,
@@ -262,7 +262,7 @@ pub struct DBMutator<'a> {
     stmt_update_expired: Statement<'a>,
 }
 
-impl<'a> DBUpdate for DBMutator<'a> {
+impl<'a> DBUpdate for DataConnStmtCache<'a> {
     type Error = SqliteClientError;
     type TxRef = i64;
     type NoteRef = NoteId;

@@ -255,16 +255,16 @@ where
             }
 
             // database updates for each block are transactional
-            data.transactionally(&mut data.get_mutator()?, |mutator| {
+            data.transactionally(&mut data.get_update_ops()?, |db_update| {
                 // Insert the block into the database.
-                mutator.insert_block(height, block_hash, block_time, &tree)?;
+                db_update.insert_block(height, block_hash, block_time, &tree)?;
 
                 for tx in txs {
-                    let tx_row = mutator.put_tx(&tx, height)?;
+                    let tx_row = db_update.put_tx(&tx, height)?;
 
                     // Mark notes as spent and remove them from the scanning cache
                     for spend in &tx.shielded_spends {
-                        mutator.mark_spent(tx_row, &spend.nf)?;
+                        db_update.mark_spent(tx_row, &spend.nf)?;
                     }
 
                     nullifiers.retain(|(nf, _acc)| {
@@ -280,7 +280,7 @@ where
                             output.witness.position() as u64,
                         );
 
-                        let note_id = mutator.put_note(&output, &nf, tx_row)?;
+                        let note_id = db_update.put_note(&output, &nf, tx_row)?;
 
                         // Save witness for note.
                         witnesses.push((note_id, output.witness));
@@ -292,14 +292,14 @@ where
 
                 // Insert current witnesses into the database.
                 for (note_id, witness) in witnesses.iter() {
-                    mutator.insert_witness(*note_id, witness, last_height)?;
+                    db_update.insert_witness(*note_id, witness, last_height)?;
                 }
 
                 // Prune the stored witnesses (we only expect rollbacks of at most 100 blocks).
-                mutator.prune_witnesses(last_height - 100)?;
+                db_update.prune_witnesses(last_height - 100)?;
 
                 // Update now-expired transactions that didn't get mined.
-                mutator.update_expired_notes(last_height)?;
+                db_update.update_expired_notes(last_height)?;
 
                 Ok(())
             })

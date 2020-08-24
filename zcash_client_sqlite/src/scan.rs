@@ -229,7 +229,7 @@ pub fn decrypt_and_store_transaction<P: consensus::Parameters>(
 
 #[cfg(test)]
 mod tests {
-    use rusqlite::{Connection, NO_PARAMS};
+    use rusqlite::Connection;
 
     use tempfile::NamedTempFile;
 
@@ -303,11 +303,6 @@ mod tests {
                     )
                     .to_string()
                 );
-
-                //FIXME: scan_cached_blocks is leaving the database in an invalid
-                //transactional state on error; this rollback should be intrinsic
-                //to the failure path.
-                db_data.0.execute("ROLLBACK", NO_PARAMS).unwrap();
             }
         }
 

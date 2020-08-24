@@ -19,7 +19,7 @@ pub mod error;
 pub trait DBOps {
     type Error;
     type NoteRef: Copy; // Backend-specific note identifier
-    type Mutator: DBUpdate<Error = Self::Error, NoteRef = Self::NoteRef>;
+    type UpdateOps: DBUpdate<Error = Self::Error, NoteRef = Self::NoteRef>;
 
     fn init_db(&self) -> Result<(), Self::Error>;
 
@@ -81,11 +81,11 @@ pub trait DBOps {
 
     fn get_nullifiers(&self) -> Result<Vec<(Vec<u8>, AccountId)>, Self::Error>;
 
-    fn get_mutator(&self) -> Result<Self::Mutator, Self::Error>;
+    fn get_update_ops(&self) -> Result<Self::UpdateOps, Self::Error>;
 
-    fn transactionally<F>(&self, mutator: &mut Self::Mutator, f: F) -> Result<(), Self::Error>
+    fn transactionally<F>(&self, mutator: &mut Self::UpdateOps, f: F) -> Result<(), Self::Error>
     where
-        F: FnOnce(&mut Self::Mutator) -> Result<(), Self::Error>;
+        F: FnOnce(&mut Self::UpdateOps) -> Result<(), Self::Error>;
 
     //    fn put_sent_note(tx_ref: Self::TxRef, output: DecryptedOutput) -> Result<(), Self::Error>;
     //
