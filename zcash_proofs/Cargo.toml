@@ -1,7 +1,7 @@
 [package]
 name = "zcash_proofs"
 description = "Zcash zk-SNARK circuits and proving APIs"
-version = "0.2.0"
+version = "0.3.0"
 authors = [
     "Jack Grigg <jack@z.cash>",
 ]
@@ -15,20 +15,19 @@ edition = "2018"
 all-features = true
 
 [dependencies]
-bellman = { version = "0.6", path = "../bellman", default-features = false, features = ["groth16"] }
+bellman = { version = "0.7", path = "../bellman", default-features = false, features = ["groth16"] }
 blake2b_simd = "0.5"
-bls12_381 = { version = "0.1", path = "../bls12_381" }
+bls12_381 = { version = "0.2", path = "../bls12_381" }
 byteorder = "1"
 directories = { version = "3", optional = true }
-ff = { version = "0.6", path = "../ff" }
-group = { version = "0.6", path = "../group" }
-jubjub = { version = "0.3", path = "../jubjub" }
+ff = { version = "0.7", path = "../ff" }
+group = { version = "0.7", path = "../group" }
+jubjub = { version = "0.4", path = "../jubjub" }
 lazy_static = "1"
 minreq = { version = "2", features = ["https"], optional = true }
-pairing = { version = "0.16", path = "../pairing" }
 rand_core = "0.5.1"
 wagyu-zcash-parameters = { version = "0.2", optional = true }
-zcash_primitives = { version = "0.2", path = "../zcash_primitives" }
+zcash_primitives = { version = "0.3", path = "../zcash_primitives" }
 
 [dev-dependencies]
 rand_xorshift = "0.2"

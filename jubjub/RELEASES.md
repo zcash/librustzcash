@@ -1,3 +1,32 @@
+# 0.4.0
+
+This release adds implementations of the `ff` and `group` traits. Additional trait
+implementations (for standard traits) have been added where the `ff` and `group` trait
+bounds require them.
+
+## Added
+* `jubjub::SubgroupPoint`, which represents an element of Jubjub's prime-order subgroup.
+  It implements the following traits:
+  * `group::{Group, GroupEncoding}`
+  * `group::prime::PrimeGroup`
+* New trait implementations for `jubjub::ExtendedPoint`:
+  * `group::{Curve, Group, GroupEncoding, WnafGroup}`
+  * `group::cofactor::{CofactorCurve, CofactorGroup}`
+* New trait implementations for `jubjub::AffinePoint`:
+  * `group::GroupEncoding`
+  * `group::cofactor::CofactorCurveAffine`
+* New trait implementations for `jubjub::Fr`:
+  * `ff::{Field, PrimeField}`
+* `jubjub::AffinePoint::is_identity`
+* `jubjub::AffinePoint::to_extended`
+* `jubjub::Scalar`, as an alias for `jubjub::Fr`.
+
+## Changed
+* We've migrated to `bls12_381 0.2`.
+* `rand_core` is now a regular dependency.
+* We depend on the `byteorder` crate again, as it is part of the `ff::PrimeField` trait.
+* The benchmarks are now implemented using `criterion`.
+
 # 0.3.0
 
 This release now depends on the `bls12_381` crate, which exposes the `Fq` field type that we re-export.

@@ -2,15 +2,10 @@
 
 `pairing` is a crate for using pairing-friendly elliptic curves.
 
-Currently, only the [BLS12-381](https://z.cash/blog/new-snark-curve.html)
-construction is implemented.
+`pairing` provides basic traits for pairing-friendly elliptic curve constructions.
+Specific curves are implemented in separate crates:
 
-## Roadmap
-
-`pairing` is being refactored into a generic library for working with
-pairing-friendly curves. After the refactor, `pairing` will provide basic traits
-for pairing-friendly elliptic curve constructions, while specific curves will be
-in separate crates.
+- [`bls12_381`](https://crates.io/crates/bls12_381) - the BLS12-381 curve.
 
 ## [Documentation](https://docs.rs/pairing/)
 

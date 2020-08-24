@@ -185,7 +185,6 @@ pub fn prf_ock(
 ///
 /// ```
 /// extern crate ff;
-/// extern crate pairing;
 /// extern crate rand_core;
 /// extern crate zcash_primitives;
 ///
