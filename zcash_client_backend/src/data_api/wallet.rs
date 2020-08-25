@@ -23,7 +23,7 @@ where
     &'db D: DBOps<Error = E>,
 {
     // Fetch the ExtendedFullViewingKeys we are tracking
-    let extfvks = data.get_account_extfvks(params)?;
+    let extfvks = data.get_extended_full_viewing_keys(params)?;
 
     // Height is block height for mined transactions, and the "mempool height" (chain height + 1)
     // for mempool transactions.
