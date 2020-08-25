@@ -84,6 +84,8 @@ use zcash_client_backend::{
 
 use crate::{error::SqliteClientError, CacheConnection};
 
+pub mod init;
+
 struct CompactBlockRow {
     height: BlockHeight,
     data: Vec<u8>,
@@ -195,12 +197,16 @@ mod tests {
     };
 
     use crate::{
-        init::{init_accounts_table, init_cache_database, init_data_database},
+        chain::init::init_cache_database,
         tests::{
             self, fake_compact_block, fake_compact_block_spending, insert_into_cache,
             sapling_activation_height,
         },
-        wallet::{get_balance, rewind_to_height},
+        wallet::{
+            get_balance,
+            init::{init_accounts_table, init_data_database},
+            rewind_to_height,
+        },
         AccountId, CacheConnection, DataConnection, NoteId,
     };
 

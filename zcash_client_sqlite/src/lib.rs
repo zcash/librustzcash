@@ -53,7 +53,6 @@ use crate::error::SqliteClientError;
 
 pub mod chain;
 pub mod error;
-pub mod init;
 pub mod transact;
 pub mod wallet;
 
@@ -80,7 +79,7 @@ impl<'a> DBOps for &'a DataConnection {
     type UpdateOps = DataConnStmtCache<'a>;
 
     fn init_db(&self) -> Result<(), Self::Error> {
-        init::init_data_database(self).map_err(SqliteClientError::from)
+        wallet::init::init_data_database(self).map_err(SqliteClientError::from)
     }
 
     fn init_account_storage<P: consensus::Parameters>(
@@ -88,7 +87,7 @@ impl<'a> DBOps for &'a DataConnection {
         params: &P,
         extfvks: &[ExtendedFullViewingKey],
     ) -> Result<(), Self::Error> {
-        init::init_accounts_table(self, params, extfvks)
+        wallet::init::init_accounts_table(self, params, extfvks)
     }
 
     fn init_block_storage(
@@ -98,7 +97,7 @@ impl<'a> DBOps for &'a DataConnection {
         time: u32,
         sapling_tree: &[u8],
     ) -> Result<(), Self::Error> {
-        init::init_blocks_table(self, height, hash, time, sapling_tree)
+        wallet::init::init_blocks_table(self, height, hash, time, sapling_tree)
     }
 
     fn block_height_extrema(&self) -> Result<Option<(BlockHeight, BlockHeight)>, Self::Error> {
@@ -534,7 +533,7 @@ impl CacheOps for CacheConnection {
     type Error = SqliteClientError;
 
     fn init_cache(&self) -> Result<(), Self::Error> {
-        init::init_cache_database(self).map_err(SqliteClientError::from)
+        chain::init::init_cache_database(self).map_err(SqliteClientError::from)
     }
 
     fn validate_chain<F>(

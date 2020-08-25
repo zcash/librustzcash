@@ -389,9 +389,12 @@ mod tests {
     use zcash_client_backend::data_api::chain::scan_cached_blocks;
 
     use crate::{
-        init::{init_accounts_table, init_blocks_table, init_cache_database, init_data_database},
+        chain::init::init_cache_database,
         tests::{self, fake_compact_block, insert_into_cache, sapling_activation_height},
-        wallet::{get_balance, get_verified_balance},
+        wallet::{
+            get_balance, get_verified_balance,
+            init::{init_accounts_table, init_blocks_table, init_data_database},
+        },
         AccountId, CacheConnection, DataConnection,
     };
 
