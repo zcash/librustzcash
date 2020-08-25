@@ -20,6 +20,8 @@ use zcash_client_backend::{
 
 use crate::{error::SqliteClientError, AccountId, DataConnection, NoteId};
 
+pub mod init;
+
 /// Returns the address for the account.
 ///
 /// # Examples
@@ -424,8 +426,9 @@ mod tests {
     use zcash_client_backend::data_api::error::Error;
 
     use crate::{
-        init::{init_accounts_table, init_data_database},
-        tests, AccountId, DataConnection,
+        tests,
+        wallet::init::{init_accounts_table, init_data_database},
+        AccountId, DataConnection,
     };
 
     use super::{get_address, get_balance, get_verified_balance};
