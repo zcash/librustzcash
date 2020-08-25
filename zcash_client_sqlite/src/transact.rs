@@ -390,8 +390,8 @@ mod tests {
 
     use crate::{
         init::{init_accounts_table, init_blocks_table, init_cache_database, init_data_database},
-        query::{get_balance, get_verified_balance},
         tests::{self, fake_compact_block, insert_into_cache, sapling_activation_height},
+        wallet::{get_balance, get_verified_balance},
         AccountId, CacheConnection, DataConnection,
     };
 

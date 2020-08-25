@@ -54,9 +54,8 @@ use crate::error::SqliteClientError;
 pub mod chain;
 pub mod error;
 pub mod init;
-pub mod query;
-pub mod scan;
 pub mod transact;
+pub mod wallet;
 
 #[derive(Debug, Copy, Clone)]
 pub struct NoteId(pub i64);
@@ -103,15 +102,15 @@ impl<'a> DBOps for &'a DataConnection {
     }
 
     fn block_height_extrema(&self) -> Result<Option<(BlockHeight, BlockHeight)>, Self::Error> {
-        chain::block_height_extrema(self).map_err(SqliteClientError::from)
+        wallet::block_height_extrema(self).map_err(SqliteClientError::from)
     }
 
     fn get_block_hash(&self, block_height: BlockHeight) -> Result<Option<BlockHash>, Self::Error> {
-        chain::get_block_hash(self, block_height).map_err(SqliteClientError::from)
+        wallet::get_block_hash(self, block_height).map_err(SqliteClientError::from)
     }
 
     fn get_tx_height(&self, txid: TxId) -> Result<Option<BlockHeight>, Self::Error> {
-        chain::get_tx_height(self, txid).map_err(SqliteClientError::from)
+        wallet::get_tx_height(self, txid).map_err(SqliteClientError::from)
     }
 
     fn rewind_to_height<P: consensus::Parameters>(
@@ -119,7 +118,7 @@ impl<'a> DBOps for &'a DataConnection {
         parameters: &P,
         block_height: BlockHeight,
     ) -> Result<(), Self::Error> {
-        chain::rewind_to_height(self, parameters, block_height)
+        wallet::rewind_to_height(self, parameters, block_height)
     }
 
     fn get_address<P: consensus::Parameters>(
@@ -127,7 +126,7 @@ impl<'a> DBOps for &'a DataConnection {
         params: &P,
         account: AccountId,
     ) -> Result<Option<PaymentAddress>, Self::Error> {
-        query::get_address(self, params, account)
+        wallet::get_address(self, params, account)
     }
 
     fn get_account_extfvks<P: consensus::Parameters>(
@@ -150,47 +149,47 @@ impl<'a> DBOps for &'a DataConnection {
     }
 
     fn get_balance(&self, account: AccountId) -> Result<Amount, Self::Error> {
-        query::get_balance(self, account)
+        wallet::get_balance(self, account)
     }
 
     fn get_verified_balance(&self, account: AccountId) -> Result<Amount, Self::Error> {
-        query::get_verified_balance(self, account)
+        wallet::get_verified_balance(self, account)
     }
 
     fn get_received_memo_as_utf8(
         &self,
         id_note: Self::NoteRef,
     ) -> Result<Option<String>, Self::Error> {
-        query::get_received_memo_as_utf8(self, id_note)
+        wallet::get_received_memo_as_utf8(self, id_note)
     }
 
     fn get_sent_memo_as_utf8(&self, id_note: Self::NoteRef) -> Result<Option<String>, Self::Error> {
-        query::get_sent_memo_as_utf8(self, id_note)
+        wallet::get_sent_memo_as_utf8(self, id_note)
     }
 
     fn get_extended_full_viewing_keys<P: consensus::Parameters>(
         &self,
         params: &P,
     ) -> Result<Vec<ExtendedFullViewingKey>, Self::Error> {
-        query::get_extended_full_viewing_keys(self, params)
+        wallet::get_extended_full_viewing_keys(self, params)
     }
 
     fn get_commitment_tree(
         &self,
         block_height: BlockHeight,
     ) -> Result<Option<CommitmentTree<Node>>, Self::Error> {
-        query::get_commitment_tree(self, block_height)
+        wallet::get_commitment_tree(self, block_height)
     }
 
     fn get_witnesses(
         &self,
         block_height: BlockHeight,
     ) -> Result<Vec<(Self::NoteRef, IncrementalWitness<Node>)>, Self::Error> {
-        query::get_witnesses(self, block_height)
+        wallet::get_witnesses(self, block_height)
     }
 
     fn get_nullifiers(&self) -> Result<Vec<(Vec<u8>, AccountId)>, Self::Error> {
-        query::get_nullifiers(self)
+        wallet::get_nullifiers(self)
     }
 
     fn get_update_ops(&self) -> Result<Self::UpdateOps, Self::Error> {
@@ -558,7 +557,7 @@ impl CacheOps for CacheConnection {
     where
         F: FnMut(BlockHeight, CompactBlock) -> Result<(), Self::Error>,
     {
-        scan::with_cached_blocks(self, from_height, limit, with_row)
+        chain::with_cached_blocks(self, from_height, limit, with_row)
     }
 }
 
