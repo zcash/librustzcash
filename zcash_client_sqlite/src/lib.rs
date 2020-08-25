@@ -54,7 +54,6 @@ use crate::error::SqliteClientError;
 
 pub mod chain;
 pub mod error;
-pub mod transact;
 pub mod wallet;
 
 #[derive(Debug, Copy, Clone)]

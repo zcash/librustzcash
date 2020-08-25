@@ -21,6 +21,7 @@ use zcash_client_backend::{
 use crate::{error::SqliteClientError, AccountId, DataConnection, NoteId};
 
 pub mod init;
+pub mod transact;
 
 /// Returns the address for the account.
 ///
