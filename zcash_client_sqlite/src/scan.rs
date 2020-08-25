@@ -1,21 +1,14 @@
 //! Functions for scanning the chain and extracting relevant information.
 
-use ff::PrimeField;
 use protobuf::parse_from_bytes;
 
-use rusqlite::{types::ToSql, OptionalExtension, NO_PARAMS};
+use rusqlite::types::ToSql;
 
-use zcash_primitives::{
-    consensus::{self, BlockHeight, NetworkUpgrade},
-    transaction::Transaction,
-};
+use zcash_primitives::consensus::BlockHeight;
 
-use zcash_client_backend::{
-    address::RecipientAddress, data_api::error::Error, decrypt_transaction,
-    encoding::decode_extended_full_viewing_key, proto::compact_formats::CompactBlock,
-};
+use zcash_client_backend::proto::compact_formats::CompactBlock;
 
-use crate::{error::SqliteClientError, CacheConnection, DataConnection};
+use crate::{error::SqliteClientError, CacheConnection};
 
 struct CompactBlockRow {
     height: BlockHeight,
@@ -52,177 +45,6 @@ where
         let row = row_result?;
         with_row(row.height, parse_from_bytes(&row.data)?)?;
     }
-
-    Ok(())
-}
-
-/// Scans a [`Transaction`] for any information that can be decrypted by the accounts in
-/// the wallet, and saves it to the wallet.
-pub fn decrypt_and_store_transaction<P: consensus::Parameters>(
-    data: &DataConnection,
-    params: &P,
-    tx: &Transaction,
-) -> Result<(), SqliteClientError> {
-    // Fetch the ExtendedFullViewingKeys we are tracking
-    let mut stmt_fetch_accounts = data
-        .0
-        .prepare("SELECT extfvk FROM accounts ORDER BY account ASC")?;
-
-    let extfvks = stmt_fetch_accounts.query_map(NO_PARAMS, |row| {
-        row.get(0).map(|extfvk: String| {
-            decode_extended_full_viewing_key(
-                params.hrp_sapling_extended_full_viewing_key(),
-                &extfvk,
-            )
-        })
-    })?;
-
-    // Raise SQL errors from the query, IO errors from parsing, and incorrect HRP errors.
-    let extfvks: Vec<_> = extfvks
-        .collect::<Result<Result<Option<_>, _>, _>>()??
-        .ok_or(SqliteClientError(Error::IncorrectHRPExtFVK))?;
-
-    // Height is block height for mined transactions, and the "mempool height" (chain height + 1) for mempool transactions.
-    let mut stmt_select_block = data
-        .0
-        .prepare("SELECT block FROM transactions WHERE txid = ?")?;
-    let height = match stmt_select_block
-        .query_row(&[tx.txid().0.to_vec()], |row| {
-            row.get::<_, u32>(0).map(BlockHeight::from)
-        })
-        .optional()?
-    {
-        Some(height) => height,
-        None => data
-            .0
-            .query_row("SELECT MAX(height) FROM blocks", NO_PARAMS, |row| {
-                row.get(0)
-            })
-            .optional()?
-            .map(|last_height: u32| BlockHeight::from(last_height + 1))
-            .or_else(|| params.activation_height(NetworkUpgrade::Sapling))
-            .ok_or(SqliteClientError(Error::SaplingNotActive))?,
-    };
-
-    let outputs = decrypt_transaction(params, height, tx, &extfvks);
-
-    if outputs.is_empty() {
-        // Nothing to see here
-        return Ok(());
-    }
-
-    let mut stmt_update_tx = data.0.prepare(
-        "UPDATE transactions
-        SET expiry_height = ?, raw = ? WHERE txid = ?",
-    )?;
-    let mut stmt_insert_tx = data.0.prepare(
-        "INSERT INTO transactions (txid, expiry_height, raw)
-        VALUES (?, ?, ?)",
-    )?;
-    let mut stmt_select_tx = data
-        .0
-        .prepare("SELECT id_tx FROM transactions WHERE txid = ?")?;
-    let mut stmt_update_sent_note = data.0.prepare(
-        "UPDATE sent_notes
-        SET from_account = ?, address = ?, value = ?, memo = ?
-        WHERE tx = ? AND output_index = ?",
-    )?;
-    let mut stmt_insert_sent_note = data.0.prepare(
-        "INSERT INTO sent_notes (tx, output_index, from_account, address, value, memo)
-        VALUES (?, ?, ?, ?, ?, ?)",
-    )?;
-    let mut stmt_update_received_note = data.0.prepare(
-        "UPDATE received_notes
-        SET account = ?, diversifier = ?, value = ?, rcm = ?, memo = ?
-        WHERE tx = ? AND output_index = ?",
-    )?;
-    let mut stmt_insert_received_note = data.0.prepare(
-        "INSERT INTO received_notes (tx, output_index, account, diversifier, value, rcm, memo)
-        VALUES (?, ?, ?, ?, ?, ?, ?)",
-    )?;
-
-    // Update the database atomically, to ensure the result is internally consistent.
-    data.0.execute("BEGIN IMMEDIATE", NO_PARAMS)?;
-
-    // First try update an existing transaction in the database.
-    let txid = tx.txid().0.to_vec();
-    let mut raw_tx = vec![];
-    tx.write(&mut raw_tx)?;
-    let tx_row = if stmt_update_tx.execute(&[
-        u32::from(tx.expiry_height).to_sql()?,
-        raw_tx.to_sql()?,
-        txid.to_sql()?,
-    ])? == 0
-    {
-        // It isn't there, so insert our transaction into the database.
-        stmt_insert_tx.execute(&[
-            txid.to_sql()?,
-            u32::from(tx.expiry_height).to_sql()?,
-            raw_tx.to_sql()?,
-        ])?;
-        data.0.last_insert_rowid()
-    } else {
-        // It was there, so grab its row number.
-        stmt_select_tx.query_row(&[txid], |row| row.get(0))?
-    };
-
-    for output in outputs {
-        let output_index = output.index as i64;
-        let account = output.account as i64;
-        let value = output.note.value as i64;
-
-        if output.outgoing {
-            let to_str = RecipientAddress::from(output.to).encode(params);
-
-            // Try updating an existing sent note.
-            if stmt_update_sent_note.execute(&[
-                account.to_sql()?,
-                to_str.to_sql()?,
-                value.to_sql()?,
-                output.memo.as_bytes().to_sql()?,
-                tx_row.to_sql()?,
-                output_index.to_sql()?,
-            ])? == 0
-            {
-                // It isn't there, so insert.
-                stmt_insert_sent_note.execute(&[
-                    tx_row.to_sql()?,
-                    output_index.to_sql()?,
-                    account.to_sql()?,
-                    to_str.to_sql()?,
-                    value.to_sql()?,
-                    output.memo.as_bytes().to_sql()?,
-                ])?;
-            }
-        } else {
-            let rcm = output.note.rcm().to_repr();
-
-            // Try updating an existing received note.
-            if stmt_update_received_note.execute(&[
-                account.to_sql()?,
-                output.to.diversifier().0.to_sql()?,
-                value.to_sql()?,
-                rcm.as_ref().to_sql()?,
-                output.memo.as_bytes().to_sql()?,
-                tx_row.to_sql()?,
-                output_index.to_sql()?,
-            ])? == 0
-            {
-                // It isn't there, so insert.
-                stmt_insert_received_note.execute(&[
-                    tx_row.to_sql()?,
-                    output_index.to_sql()?,
-                    account.to_sql()?,
-                    output.to.diversifier().0.to_sql()?,
-                    value.to_sql()?,
-                    rcm.as_ref().to_sql()?,
-                    output.memo.as_bytes().to_sql()?,
-                ])?;
-            }
-        }
-    }
-
-    data.0.execute("COMMIT", NO_PARAMS)?;
 
     Ok(())
 }

@@ -78,6 +78,7 @@ use rusqlite::{OptionalExtension, NO_PARAMS};
 use zcash_primitives::{
     block::BlockHash,
     consensus::{self, BlockHeight, NetworkUpgrade},
+    transaction::TxId,
 };
 
 use zcash_client_backend::{
@@ -163,6 +164,19 @@ pub fn block_height_extrema(
         //.optional() doesn't work here because a failed aggregate function
         //produces a runtime error, not an empty set of rows.
         .or(Ok(None))
+}
+
+pub fn get_tx_height(
+    conn: &DataConnection,
+    txid: TxId,
+) -> Result<Option<BlockHeight>, rusqlite::Error> {
+    conn.0
+        .query_row(
+            "SELECT block FROM transactions WHERE txid = ?",
+            &[txid.0.to_vec()],
+            |row| row.get(0).map(u32::into),
+        )
+        .optional()
 }
 
 pub fn get_block_hash(

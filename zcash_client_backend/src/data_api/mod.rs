@@ -2,20 +2,23 @@ use zcash_primitives::{
     block::BlockHash,
     consensus::{self, BlockHeight},
     merkle_tree::{CommitmentTree, IncrementalWitness},
-    primitives::PaymentAddress,
+    note_encryption::Memo,
+    primitives::{Note, PaymentAddress},
     sapling::Node,
-    transaction::components::Amount,
+    transaction::{components::Amount, Transaction, TxId},
     zip32::ExtendedFullViewingKey,
 };
 
 use crate::{
     api::AccountId,
+    decrypt::DecryptedOutput,
     proto::compact_formats::CompactBlock,
     wallet::{WalletShieldedOutput, WalletTx},
 };
 
 pub mod chain;
 pub mod error;
+pub mod wallet;
 
 pub trait DBOps {
     type Error;
@@ -42,6 +45,8 @@ pub trait DBOps {
 
     fn get_block_hash(&self, block_height: BlockHeight) -> Result<Option<BlockHash>, Self::Error>;
 
+    fn get_tx_height(&self, txid: TxId) -> Result<Option<BlockHeight>, Self::Error>;
+
     fn rewind_to_height<P: consensus::Parameters>(
         &self,
         parameters: &P,
@@ -53,6 +58,11 @@ pub trait DBOps {
         params: &P,
         account: AccountId,
     ) -> Result<Option<PaymentAddress>, Self::Error>;
+
+    fn get_account_extfvks<P: consensus::Parameters>(
+        &self,
+        params: &P,
+    ) -> Result<Vec<ExtendedFullViewingKey>, Self::Error>;
 
     fn get_balance(&self, account: AccountId) -> Result<Amount, Self::Error>;
 
@@ -87,10 +97,6 @@ pub trait DBOps {
     fn transactionally<F>(&self, mutator: &mut Self::UpdateOps, f: F) -> Result<(), Self::Error>
     where
         F: FnOnce(&mut Self::UpdateOps) -> Result<(), Self::Error>;
-
-    //    fn put_sent_note(tx_ref: Self::TxRef, output: DecryptedOutput) -> Result<(), Self::Error>;
-    //
-    //    fn put_received_note(tx_ref: Self::TxRef, output: DecryptedOutput) -> Result<(), Self::Error>;
 }
 
 pub trait DBUpdate {
@@ -106,14 +112,20 @@ pub trait DBUpdate {
         commitment_tree: &CommitmentTree<Node>,
     ) -> Result<(), Self::Error>;
 
-    fn put_tx(&mut self, tx: &WalletTx, height: BlockHeight) -> Result<Self::TxRef, Self::Error>;
+    fn put_tx_meta(
+        &mut self,
+        tx: &WalletTx,
+        height: BlockHeight,
+    ) -> Result<Self::TxRef, Self::Error>;
+
+    fn put_tx_data(&mut self, tx: &Transaction) -> Result<Self::TxRef, Self::Error>;
 
     fn mark_spent(&mut self, tx_ref: Self::TxRef, nf: &Vec<u8>) -> Result<(), Self::Error>;
 
-    fn put_note(
+    fn put_received_note<T: ShieldedOutput>(
         &mut self,
-        output: &WalletShieldedOutput,
-        nf: &Vec<u8>,
+        output: &T,
+        nf: Option<&[u8]>,
         tx_ref: Self::TxRef,
     ) -> Result<Self::NoteRef, Self::Error>;
 
@@ -127,6 +139,13 @@ pub trait DBUpdate {
     fn prune_witnesses(&mut self, from_height: BlockHeight) -> Result<(), Self::Error>;
 
     fn update_expired_notes(&mut self, from_height: BlockHeight) -> Result<(), Self::Error>;
+
+    fn put_sent_note<P: consensus::Parameters>(
+        &mut self,
+        params: &P,
+        output: &DecryptedOutput,
+        tx_ref: Self::TxRef,
+    ) -> Result<(), Self::Error>;
 }
 
 pub trait CacheOps {
@@ -154,4 +173,55 @@ pub trait CacheOps {
     ) -> Result<(), Self::Error>
     where
         F: FnMut(BlockHeight, CompactBlock) -> Result<(), Self::Error>;
+}
+
+pub trait ShieldedOutput {
+    fn index(&self) -> usize;
+    fn account(&self) -> AccountId;
+    fn to(&self) -> &PaymentAddress;
+    fn note(&self) -> &Note;
+    fn memo(&self) -> Option<&Memo>;
+    fn is_change(&self) -> Option<bool>;
+}
+
+impl ShieldedOutput for WalletShieldedOutput {
+    fn index(&self) -> usize {
+        self.index
+    }
+    fn account(&self) -> AccountId {
+        AccountId(self.account as u32)
+    }
+    fn to(&self) -> &PaymentAddress {
+        &self.to
+    }
+    fn note(&self) -> &Note {
+        &self.note
+    }
+    fn memo(&self) -> Option<&Memo> {
+        None
+    }
+    fn is_change(&self) -> Option<bool> {
+        Some(self.is_change)
+    }
+}
+
+impl ShieldedOutput for DecryptedOutput {
+    fn index(&self) -> usize {
+        self.index
+    }
+    fn account(&self) -> AccountId {
+        AccountId(self.account as u32)
+    }
+    fn to(&self) -> &PaymentAddress {
+        &self.to
+    }
+    fn note(&self) -> &Note {
+        &self.note
+    }
+    fn memo(&self) -> Option<&Memo> {
+        Some(&self.memo)
+    }
+    fn is_change(&self) -> Option<bool> {
+        None
+    }
 }
