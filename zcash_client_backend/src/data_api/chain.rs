@@ -260,7 +260,7 @@ where
                 db_update.insert_block(height, block_hash, block_time, &tree)?;
 
                 for tx in txs {
-                    let tx_row = db_update.put_tx(&tx, height)?;
+                    let tx_row = db_update.put_tx_meta(&tx, height)?;
 
                     // Mark notes as spent and remove them from the scanning cache
                     for spend in &tx.shielded_spends {
@@ -280,7 +280,7 @@ where
                             output.witness.position() as u64,
                         );
 
-                        let note_id = db_update.put_note(&output, &nf, tx_row)?;
+                        let note_id = db_update.put_received_note(&output, Some(&nf), tx_row)?;
 
                         // Save witness for note.
                         witnesses.push((note_id, output.witness));
