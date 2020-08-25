@@ -3,12 +3,13 @@
 use rusqlite::{OptionalExtension, NO_PARAMS};
 
 use zcash_primitives::{
-    consensus::{self, BlockHeight},
+    block::BlockHash,
+    consensus::{self, BlockHeight, NetworkUpgrade},
     merkle_tree::{CommitmentTree, IncrementalWitness},
     note_encryption::Memo,
     primitives::PaymentAddress,
     sapling::Node,
-    transaction::components::Amount,
+    transaction::{components::Amount, TxId},
     zip32::ExtendedFullViewingKey,
 };
 
@@ -212,6 +213,110 @@ pub fn get_sent_memo_as_utf8(
     }
 }
 
+pub fn block_height_extrema(
+    conn: &DataConnection,
+) -> Result<Option<(BlockHeight, BlockHeight)>, rusqlite::Error> {
+    conn.0
+        .query_row(
+            "SELECT MIN(height), MAX(height) FROM blocks",
+            NO_PARAMS,
+            |row| {
+                let min_height: u32 = row.get(0)?;
+                let max_height: u32 = row.get(1)?;
+                Ok(Some((
+                    BlockHeight::from(min_height),
+                    BlockHeight::from(max_height),
+                )))
+            },
+        )
+        //.optional() doesn't work here because a failed aggregate function
+        //produces a runtime error, not an empty set of rows.
+        .or(Ok(None))
+}
+
+pub fn get_tx_height(
+    conn: &DataConnection,
+    txid: TxId,
+) -> Result<Option<BlockHeight>, rusqlite::Error> {
+    conn.0
+        .query_row(
+            "SELECT block FROM transactions WHERE txid = ?",
+            &[txid.0.to_vec()],
+            |row| row.get(0).map(u32::into),
+        )
+        .optional()
+}
+
+pub fn get_block_hash(
+    conn: &DataConnection,
+    block_height: BlockHeight,
+) -> Result<Option<BlockHash>, rusqlite::Error> {
+    conn.0
+        .query_row(
+            "SELECT hash FROM blocks WHERE height = ?",
+            &[u32::from(block_height)],
+            |row| {
+                let row_data = row.get::<_, Vec<_>>(0)?;
+                Ok(BlockHash::from_slice(&row_data))
+            },
+        )
+        .optional()
+}
+
+/// Rewinds the database to the given height.
+///
+/// If the requested height is greater than or equal to the height of the last scanned
+/// block, this function does nothing.
+pub fn rewind_to_height<P: consensus::Parameters>(
+    conn: &DataConnection,
+    parameters: &P,
+    block_height: BlockHeight,
+) -> Result<(), SqliteClientError> {
+    let sapling_activation_height = parameters
+        .activation_height(NetworkUpgrade::Sapling)
+        .ok_or(SqliteClientError(Error::SaplingNotActive))?;
+
+    // Recall where we synced up to previously.
+    // If we have never synced, use Sapling activation height.
+    let last_scanned_height =
+        conn.0
+            .query_row("SELECT MAX(height) FROM blocks", NO_PARAMS, |row| {
+                row.get(0)
+                    .map(u32::into)
+                    .or(Ok(sapling_activation_height - 1))
+            })?;
+
+    if block_height >= last_scanned_height {
+        // Nothing to do.
+        return Ok(());
+    }
+
+    // Start an SQL transaction for rewinding.
+    conn.0.execute("BEGIN IMMEDIATE", NO_PARAMS)?;
+
+    // Decrement witnesses.
+    conn.0.execute(
+        "DELETE FROM sapling_witnesses WHERE block > ?",
+        &[u32::from(block_height)],
+    )?;
+
+    // Un-mine transactions.
+    conn.0.execute(
+        "UPDATE transactions SET block = NULL, tx_index = NULL WHERE block > ?",
+        &[u32::from(block_height)],
+    )?;
+
+    // Now that they aren't depended on, delete scanned blocks.
+    conn.0.execute(
+        "DELETE FROM blocks WHERE height > ?",
+        &[u32::from(block_height)],
+    )?;
+
+    // Commit the SQL transaction, rewinding atomically.
+    conn.0.execute("COMMIT", NO_PARAMS)?;
+
+    Ok(())
+}
 pub fn get_extended_full_viewing_keys<P: consensus::Parameters>(
     data: &DataConnection,
     params: &P,

@@ -165,7 +165,7 @@ pub fn init_data_database(db_data: &DataConnection) -> Result<(), rusqlite::Erro
 /// init_accounts_table(&db_data, &Network::TestNetwork, &extfvks).unwrap();
 /// ```
 ///
-/// [`get_address`]: crate::query::get_address
+/// [`get_address`]: crate::wallet::get_address
 /// [`scan_cached_blocks`]: crate::scan::scan_cached_blocks
 /// [`create_to_address`]: crate::transact::create_to_address
 pub fn init_accounts_table<P: consensus::Parameters>(
@@ -272,7 +272,7 @@ mod tests {
         zip32::{ExtendedFullViewingKey, ExtendedSpendingKey},
     };
 
-    use crate::{query::get_address, tests, AccountId, DataConnection};
+    use crate::{tests, wallet::get_address, AccountId, DataConnection};
 
     use super::{init_accounts_table, init_blocks_table, init_data_database};
 
