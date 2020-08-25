@@ -42,8 +42,8 @@ use zcash_primitives::{
 };
 
 use zcash_client_backend::{
-    data_api::{error::Error, CacheOps, DBOps, DBUpdate, ShieldedOutput},
-    encoding::{decode_extended_full_viewing_key, encode_payment_address},
+    data_api::{CacheOps, DBOps, DBUpdate, ShieldedOutput},
+    encoding::encode_payment_address,
     proto::compact_formats::CompactBlock,
     wallet::{AccountId, WalletTx},
     DecryptedOutput,
@@ -125,25 +125,6 @@ impl<'a> DBOps for &'a DataConnection {
         account: AccountId,
     ) -> Result<Option<PaymentAddress>, Self::Error> {
         wallet::get_address(self, params, account)
-    }
-
-    fn get_account_extfvks<P: consensus::Parameters>(
-        &self,
-        params: &P,
-    ) -> Result<Vec<ExtendedFullViewingKey>, Self::Error> {
-        self.0
-            .prepare("SELECT extfvk FROM accounts ORDER BY account ASC")?
-            .query_map(NO_PARAMS, |row| {
-                row.get(0).map(|extfvk: String| {
-                    decode_extended_full_viewing_key(
-                        params.hrp_sapling_extended_full_viewing_key(),
-                        &extfvk,
-                    )
-                })
-            })?
-            // Raise SQL errors from the query, IO errors from parsing, and incorrect HRP errors.
-            .collect::<Result<Result<Option<_>, _>, _>>()??
-            .ok_or(SqliteClientError(Error::IncorrectHRPExtFVK))
     }
 
     fn get_balance(&self, account: AccountId) -> Result<Amount, Self::Error> {

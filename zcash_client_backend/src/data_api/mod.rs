@@ -58,7 +58,7 @@ pub trait DBOps {
         account: AccountId,
     ) -> Result<Option<PaymentAddress>, Self::Error>;
 
-    fn get_account_extfvks<P: consensus::Parameters>(
+    fn get_extended_full_viewing_keys<P: consensus::Parameters>(
         &self,
         params: &P,
     ) -> Result<Vec<ExtendedFullViewingKey>, Self::Error>;
@@ -73,11 +73,6 @@ pub trait DBOps {
     ) -> Result<Option<String>, Self::Error>;
 
     fn get_sent_memo_as_utf8(&self, id_note: Self::NoteRef) -> Result<Option<String>, Self::Error>;
-
-    fn get_extended_full_viewing_keys<P: consensus::Parameters>(
-        &self,
-        params: &P,
-    ) -> Result<Vec<ExtendedFullViewingKey>, Self::Error>;
 
     fn get_commitment_tree(
         &self,
