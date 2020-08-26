@@ -35,6 +35,7 @@ use zcash_primitives::{
     block::BlockHash,
     consensus::{self, BlockHeight},
     merkle_tree::{CommitmentTree, IncrementalWitness},
+    note_encryption::Memo,
     primitives::PaymentAddress,
     sapling::Node,
     transaction::{components::Amount, Transaction, TxId},
@@ -42,7 +43,8 @@ use zcash_primitives::{
 };
 
 use zcash_client_backend::{
-    data_api::{CacheOps, DBOps, DBUpdate, ShieldedOutput},
+    address::RecipientAddress,
+    data_api::{error::Error, CacheOps, DBOps, DBUpdate, ShieldedOutput},
     encoding::encode_payment_address,
     proto::compact_formats::CompactBlock,
     wallet::{AccountId, WalletTx},
@@ -381,7 +383,7 @@ impl<'a> DBUpdate for DataConnStmtCache<'a> {
         }
     }
 
-    fn mark_spent(&mut self, tx_ref: Self::TxRef, nf: &Vec<u8>) -> Result<(), Self::Error> {
+    fn mark_spent(&mut self, tx_ref: Self::TxRef, nf: &[u8]) -> Result<(), Self::Error> {
         self.stmt_mark_recived_note_spent
             .execute(&[tx_ref.to_sql()?, nf.to_sql()?])?;
         Ok(())
@@ -487,15 +489,41 @@ impl<'a> DBUpdate for DataConnStmtCache<'a> {
         ])? == 0
         {
             // It isn't there, so insert.
-            self.stmt_insert_sent_note.execute(&[
-                tx_ref.to_sql()?,
-                output_index.to_sql()?,
-                account.to_sql()?,
-                to_str.to_sql()?,
-                value.to_sql()?,
-                output.memo.as_bytes().to_sql()?,
-            ])?;
+            self.insert_sent_note(
+                params,
+                tx_ref,
+                output.index,
+                AccountId(output.account as u32),
+                &RecipientAddress::Shielded(output.to.clone()),
+                Amount::from_u64(output.note.value)
+                    .map_err(|_| Error::CorruptedData("Note value invalue."))?,
+                Some(output.memo.clone()),
+            )?
         }
+
+        Ok(())
+    }
+
+    fn insert_sent_note<P: consensus::Parameters>(
+        &mut self,
+        params: &P,
+        tx_ref: Self::TxRef,
+        output_index: usize,
+        account: AccountId,
+        to: &RecipientAddress,
+        value: Amount,
+        memo: Option<Memo>,
+    ) -> Result<(), Self::Error> {
+        let to_str = to.encode(params);
+        let ivalue: i64 = value.into();
+        self.stmt_insert_sent_note.execute(&[
+            tx_ref.to_sql()?,
+            (output_index as i64).to_sql()?,
+            account.0.to_sql()?,
+            to_str.to_sql()?,
+            ivalue.to_sql()?,
+            memo.map(|m| m.as_bytes().to_vec()).to_sql()?,
+        ])?;
 
         Ok(())
     }

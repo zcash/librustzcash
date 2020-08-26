@@ -21,8 +21,9 @@ use zcash_primitives::{
 
 use zcash_client_backend::{
     address::RecipientAddress,
-    data_api::{chain::get_target_and_anchor_heights, error::Error},
+    data_api::{chain::get_target_and_anchor_heights, error::Error, DBOps, DBUpdate},
     encoding::encode_extended_full_viewing_key,
+    wallet::AccountId,
 };
 
 use crate::{error::SqliteClientError, DataConnection};
@@ -303,6 +304,7 @@ pub fn create_to_address<P: consensus::Parameters>(
 
     // Update the database atomically, to ensure the result is internally consistent.
     data.0.execute("BEGIN IMMEDIATE", NO_PARAMS)?;
+    let mut db_update = data.get_update_ops()?;
 
     // Save the transaction in the database.
     let mut raw_tx = vec![];
@@ -317,7 +319,7 @@ pub fn create_to_address<P: consensus::Parameters>(
         i64::from(tx.expiry_height).to_sql()?,
         raw_tx.to_sql()?,
     ])?;
-    let id_tx = data.0.last_insert_rowid();
+    let tx_ref = data.0.last_insert_rowid();
 
     // Mark notes as spent.
     //
@@ -327,47 +329,26 @@ pub fn create_to_address<P: consensus::Parameters>(
     //
     // Assumes that create_to_address() will never be called in parallel, which is a
     // reasonable assumption for a light client such as a mobile phone.
-    let mut stmt_mark_spent_note = data
-        .0
-        .prepare("UPDATE received_notes SET spent = ? WHERE nf = ?")?;
     for spend in &tx.shielded_spends {
-        stmt_mark_spent_note.execute(&[id_tx.to_sql()?, spend.nullifier.to_sql()?])?;
+        db_update.mark_spent(tx_ref, &spend.nullifier)?;
     }
 
     // Save the sent note in the database.
     // TODO: Decide how to save transparent output information.
-    let to_str = to.encode(params);
-    if let Some(memo) = memo {
-        let mut stmt_insert_sent_note = data.0.prepare(
-            "INSERT INTO sent_notes (tx, output_index, from_account, address, value, memo)
-            VALUES (?, ?, ?, ?, ?, ?)",
-        )?;
-        stmt_insert_sent_note.execute(&[
-            id_tx.to_sql()?,
-            output_index.to_sql()?,
-            account.to_sql()?,
-            to_str.to_sql()?,
-            i64::from(value).to_sql()?,
-            memo.as_bytes().to_sql()?,
-        ])?;
-    } else {
-        let mut stmt_insert_sent_note = data.0.prepare(
-            "INSERT INTO sent_notes (tx, output_index, from_account, address, value)
-            VALUES (?, ?, ?, ?, ?)",
-        )?;
-        stmt_insert_sent_note.execute(&[
-            id_tx.to_sql()?,
-            output_index.to_sql()?,
-            account.to_sql()?,
-            to_str.to_sql()?,
-            i64::from(value).to_sql()?,
-        ])?;
-    }
+    db_update.insert_sent_note(
+        params,
+        tx_ref,
+        output_index as usize,
+        AccountId(account),
+        to,
+        value,
+        memo,
+    )?;
 
     data.0.execute("COMMIT", NO_PARAMS)?;
 
     // Return the row number of the transaction, so the caller can fetch it for sending.
-    Ok(id_tx)
+    Ok(tx_ref)
 }
 
 #[cfg(test)]
@@ -838,6 +819,7 @@ mod tests {
                     |row| row.get(0),
                 )
                 .unwrap();
+
             let output = &tx.shielded_outputs[output_index as usize];
 
             try_sapling_output_recovery(

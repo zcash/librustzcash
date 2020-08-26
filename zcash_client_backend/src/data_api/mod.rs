@@ -10,6 +10,7 @@ use zcash_primitives::{
 };
 
 use crate::{
+    address::RecipientAddress,
     decrypt::DecryptedOutput,
     proto::compact_formats::CompactBlock,
     wallet::{AccountId, WalletShieldedOutput, WalletTx},
@@ -114,7 +115,7 @@ pub trait DBUpdate {
 
     fn put_tx_data(&mut self, tx: &Transaction) -> Result<Self::TxRef, Self::Error>;
 
-    fn mark_spent(&mut self, tx_ref: Self::TxRef, nf: &Vec<u8>) -> Result<(), Self::Error>;
+    fn mark_spent(&mut self, tx_ref: Self::TxRef, nf: &[u8]) -> Result<(), Self::Error>;
 
     fn put_received_note<T: ShieldedOutput>(
         &mut self,
@@ -139,6 +140,17 @@ pub trait DBUpdate {
         params: &P,
         output: &DecryptedOutput,
         tx_ref: Self::TxRef,
+    ) -> Result<(), Self::Error>;
+
+    fn insert_sent_note<P: consensus::Parameters>(
+        &mut self,
+        params: &P,
+        tx_ref: Self::TxRef,
+        output_index: usize,
+        account: AccountId,
+        to: &RecipientAddress,
+        value: Amount,
+        memo: Option<Memo>,
     ) -> Result<(), Self::Error>;
 }
 
