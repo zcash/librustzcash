@@ -223,16 +223,17 @@ where
             }
 
             // database updates for each block are transactional
-            data.transactionally(&mut data.get_update_ops()?, |db_update| {
+            let mut db_update = data.get_update_ops()?;
+            db_update.transactionally(|up| {
                 // Insert the block into the database.
-                db_update.insert_block(height, block_hash, block_time, &tree)?;
+                up.insert_block(height, block_hash, block_time, &tree)?;
 
                 for tx in txs {
-                    let tx_row = db_update.put_tx_meta(&tx, height)?;
+                    let tx_row = up.put_tx_meta(&tx, height)?;
 
                     // Mark notes as spent and remove them from the scanning cache
                     for spend in &tx.shielded_spends {
-                        db_update.mark_spent(tx_row, &spend.nf)?;
+                        up.mark_spent(tx_row, &spend.nf)?;
                     }
 
                     nullifiers.retain(|(nf, _acc)| {
@@ -248,7 +249,7 @@ where
                             output.witness.position() as u64,
                         );
 
-                        let note_id = db_update.put_received_note(&output, Some(&nf), tx_row)?;
+                        let note_id = up.put_received_note(&output, Some(&nf), tx_row)?;
 
                         // Save witness for note.
                         witnesses.push((note_id, output.witness));
@@ -260,14 +261,14 @@ where
 
                 // Insert current witnesses into the database.
                 for (note_id, witness) in witnesses.iter() {
-                    db_update.insert_witness(*note_id, witness, last_height)?;
+                    up.insert_witness(*note_id, witness, last_height)?;
                 }
 
                 // Prune the stored witnesses (we only expect rollbacks of at most 100 blocks).
-                db_update.prune_witnesses(last_height - 100)?;
+                up.prune_witnesses(last_height - 100)?;
 
                 // Update now-expired transactions that didn't get mined.
-                db_update.update_expired_notes(last_height)?;
+                up.update_expired_notes(last_height)?;
 
                 Ok(())
             })

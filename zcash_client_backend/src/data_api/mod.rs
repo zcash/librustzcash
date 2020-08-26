@@ -70,12 +70,6 @@ pub trait DBOps {
 
     fn get_tx_height(&self, txid: TxId) -> Result<Option<BlockHeight>, Self::Error>;
 
-    fn rewind_to_height<P: consensus::Parameters>(
-        &self,
-        parameters: &P,
-        block_height: BlockHeight,
-    ) -> Result<(), Self::Error>;
-
     fn get_address<P: consensus::Parameters>(
         &self,
         params: &P,
@@ -121,8 +115,6 @@ pub trait DBOps {
 
     fn get_nullifiers(&self) -> Result<Vec<(Vec<u8>, AccountId)>, Self::Error>;
 
-    fn get_update_ops(&self) -> Result<Self::UpdateOps, Self::Error>;
-
     fn select_spendable_notes(
         &self,
         account: AccountId,
@@ -130,9 +122,7 @@ pub trait DBOps {
         anchor_height: BlockHeight,
     ) -> Result<Vec<SpendableNote>, Self::Error>;
 
-    fn transactionally<F, A>(&self, mutator: &mut Self::UpdateOps, f: F) -> Result<A, Self::Error>
-    where
-        F: FnOnce(&mut Self::UpdateOps) -> Result<A, Self::Error>;
+    fn get_update_ops(&self) -> Result<Self::UpdateOps, Self::Error>;
 }
 
 pub trait DBUpdate {
@@ -140,12 +130,22 @@ pub trait DBUpdate {
     type NoteRef: Copy;
     type TxRef: Copy;
 
+    fn transactionally<F, A>(&mut self, f: F) -> Result<A, Self::Error>
+    where
+        F: FnOnce(&mut Self) -> Result<A, Self::Error>;
+
     fn insert_block(
         &mut self,
         block_height: BlockHeight,
         block_hash: BlockHash,
         block_time: u32,
         commitment_tree: &CommitmentTree<Node>,
+    ) -> Result<(), Self::Error>;
+
+    fn rewind_to_height<P: consensus::Parameters>(
+        &mut self,
+        parameters: &P,
+        block_height: BlockHeight,
     ) -> Result<(), Self::Error>;
 
     fn put_tx_meta(

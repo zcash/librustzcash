@@ -5,14 +5,14 @@ use std::convert::TryInto;
 use ff::PrimeField;
 
 use zcash_primitives::{
-    consensus::{BlockHeight},
+    consensus::BlockHeight,
     merkle_tree::IncrementalWitness,
     primitives::{Diversifier, Rseed},
     transaction::components::Amount,
 };
 
 use zcash_client_backend::{
-    data_api::{error::Error},
+    data_api::error::Error,
     wallet::{AccountId, SpendableNote},
 };
 
