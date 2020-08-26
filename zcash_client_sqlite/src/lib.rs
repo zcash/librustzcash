@@ -115,14 +115,6 @@ impl<'a> DBOps for &'a DataConnection {
         wallet::get_tx_height(self, txid).map_err(SqliteClientError::from)
     }
 
-    fn rewind_to_height<P: consensus::Parameters>(
-        &self,
-        parameters: &P,
-        block_height: BlockHeight,
-    ) -> Result<(), Self::Error> {
-        wallet::rewind_to_height(self, parameters, block_height)
-    }
-
     fn get_extended_full_viewing_keys<P: consensus::Parameters>(
         &self,
         params: &P,
@@ -279,33 +271,6 @@ impl<'a> DBOps for &'a DataConnection {
             }
         )
     }
-
-    fn transactionally<F, A>(&self, mutator: &mut Self::UpdateOps, f: F) -> Result<A, Self::Error>
-    where
-        F: FnOnce(&mut Self::UpdateOps) -> Result<A, Self::Error>,
-    {
-        self.0.execute("BEGIN IMMEDIATE", NO_PARAMS)?;
-        match f(mutator) {
-            Ok(result) => {
-                self.0.execute("COMMIT", NO_PARAMS)?;
-                Ok(result)
-            }
-            Err(error) => {
-                match self.0.execute("ROLLBACK", NO_PARAMS) {
-                    Ok(_) => Err(error),
-                    Err(e) =>
-                        // REVIEW: If rollback fails, what do we want to do? I think that
-                        // panicking here is probably the right thing to do, because it
-                        // means the database is corrupt?
-                        panic!(
-                            "Rollback failed with error {} while attempting to recover from error {}; database is likely corrupt.",
-                            e,
-                            error.0
-                        )
-                }
-            }
-        }
-    }
 }
 
 pub struct DataConnStmtCache<'a> {
@@ -338,6 +303,33 @@ impl<'a> DBUpdate for DataConnStmtCache<'a> {
     type TxRef = i64;
     type NoteRef = NoteId;
 
+    fn transactionally<F, A>(&mut self, f: F) -> Result<A, Self::Error>
+    where
+        F: FnOnce(&mut Self) -> Result<A, Self::Error>,
+    {
+        self.conn.0.execute("BEGIN IMMEDIATE", NO_PARAMS)?;
+        match f(self) {
+            Ok(result) => {
+                self.conn.0.execute("COMMIT", NO_PARAMS)?;
+                Ok(result)
+            }
+            Err(error) => {
+                match self.conn.0.execute("ROLLBACK", NO_PARAMS) {
+                    Ok(_) => Err(error),
+                    Err(e) =>
+                        // REVIEW: If rollback fails, what do we want to do? I think that
+                        // panicking here is probably the right thing to do, because it
+                        // means the database is corrupt?
+                        panic!(
+                            "Rollback failed with error {} while attempting to recover from error {}; database is likely corrupt.",
+                            e,
+                            error.0
+                        )
+                }
+            }
+        }
+    }
+
     fn insert_block(
         &mut self,
         block_height: BlockHeight,
@@ -359,6 +351,14 @@ impl<'a> DBUpdate for DataConnStmtCache<'a> {
         ])?;
 
         Ok(())
+    }
+
+    fn rewind_to_height<P: consensus::Parameters>(
+        &mut self,
+        parameters: &P,
+        block_height: BlockHeight,
+    ) -> Result<(), Self::Error> {
+        wallet::rewind_to_height(self.conn, parameters, block_height)
     }
 
     fn put_tx_meta(
@@ -535,7 +535,7 @@ impl<'a> DBUpdate for DataConnStmtCache<'a> {
                 AccountId(output.account as u32),
                 &RecipientAddress::Shielded(output.to.clone()),
                 Amount::from_u64(output.note.value)
-                    .map_err(|_| Error::CorruptedData("Note value invalue."))?,
+                    .map_err(|_| Error::CorruptedData("Note value invalid."))?,
                 Some(output.memo.clone()),
             )?
         }

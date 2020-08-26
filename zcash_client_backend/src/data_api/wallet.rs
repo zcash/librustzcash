@@ -54,7 +54,7 @@ where
         let mut db_update = data.get_update_ops()?;
 
         // Update the database atomically, to ensure the result is internally consistent.
-        data.transactionally(&mut db_update, |up| {
+        db_update.transactionally(|up| {
             let tx_ref = up.put_tx_data(tx, None)?;
 
             for output in outputs {
@@ -96,53 +96,52 @@ where
 ///
 /// [ZIP 310]: https://zips.z.cash/zip-0310
 ///
-/// # Examples
-///
-/// ```
-/// use tempfile::NamedTempFile;
-/// use zcash_primitives::{
-///     consensus::{self, Network},
-///     constants::testnet::COIN_TYPE,
-///     transaction::components::Amount
-/// };
-/// use zcash_proofs::prover::LocalTxProver;
-/// use zcash_client_backend::{
-///     keys::spending_key,
-/// };
-/// use zcash_client_sqlite::{
-///     DataConnection,
-///     transact::{create_spend_to_address, OvkPolicy},
-/// };
-///
-/// let tx_prover = match LocalTxProver::with_default_location() {
-///     Some(tx_prover) => tx_prover,
-///     None => {
-///         panic!("Cannot locate the Zcash parameters. Please run zcash-fetch-params or fetch-params.sh to download the parameters, and then re-run the tests.");
-///     }
-/// };
-///
-/// let account = AccountId(0);
-/// let extsk = spending_key(&[0; 32][..], COIN_TYPE, account);
-/// let to = extsk.default_address().unwrap().1.into();
-///
-/// let data_file = NamedTempFile::new().unwrap();
-/// let db = DataConnection::for_path(data_file).unwrap();
-/// match create_spend_to_address(
-///     &db,
-///     &Network::TestNetwork,
-///     consensus::BranchId::Sapling,
-///     tx_prover,
-///     account,
-///     &extsk,
-///     &to,
-///     Amount::from_u64(1).unwrap(),
-///     None,
-///     OvkPolicy::Sender,
-/// ) {
-///     Ok(tx_row) => (),
-///     Err(e) => (),
-/// }
-/// ```
+// # Examples
+//
+// ```
+// use tempfile::NamedTempFile;
+// use zcash_primitives::{
+//     consensus::{self, Network},
+//     constants::testnet::COIN_TYPE,
+//     transaction::components::Amount
+// };
+// use zcash_proofs::prover::LocalTxProver;
+// use zcash_client_backend::{
+//     keys::spending_key,
+// };
+// use zcash_client_sqlite::{
+//     DataConnection,
+//     transact::{create_spend_to_address, OvkPolicy},
+// };
+//
+// let tx_prover = match LocalTxProver::with_default_location() {
+//     Some(tx_prover) => tx_prover,
+//     None => {
+//         panic!("Cannot locate the Zcash parameters. Please run zcash-fetch-params or fetch-params.sh to download the parameters, and then re-run the tests.");
+//     }
+// };
+//
+// let account = AccountId(0);
+// let extsk = spending_key(&[0; 32][..], COIN_TYPE, account);
+// let to = extsk.default_address().unwrap().1.into();
+//
+// let data_file = NamedTempFile::new().unwrap();
+// let db = DataConnection::for_path(data_file).unwrap();
+// match create_spend_to_address(
+//     &db,
+//     &Network::TestNetwork,
+//     tx_prover,
+//     account,
+//     &extsk,
+//     &to,
+//     Amount::from_u64(1).unwrap(),
+//     None,
+//     OvkPolicy::Sender,
+// ) {
+//     Ok(tx_row) => (),
+//     Err(e) => (),
+// }
+// ```
 pub fn create_spend_to_address<'db, E0, N, E, P, D, R>(
     data: &'db D,
     params: &P,
@@ -235,34 +234,35 @@ where
 
     // Update the database atomically, to ensure the result is internally consistent.
     let mut db_update = data.get_update_ops().map_err(|e| e.into())?;
-    data.transactionally(&mut db_update, |up| {
-        let created = time::OffsetDateTime::now_utc();
-        let tx_ref = up.put_tx_data(&tx, Some(created))?;
+    db_update
+        .transactionally(|up| {
+            let created = time::OffsetDateTime::now_utc();
+            let tx_ref = up.put_tx_data(&tx, Some(created))?;
 
-        // Mark notes as spent.
-        //
-        // This locks the notes so they aren't selected again by a subsequent call to
-        // create_spend_to_address() before this transaction has been mined (at which point the notes
-        // get re-marked as spent).
-        //
-        // Assumes that create_spend_to_address() will never be called in parallel, which is a
-        // reasonable assumption for a light client such as a mobile phone.
-        for spend in &tx.shielded_spends {
-            up.mark_spent(tx_ref, &spend.nullifier)?;
-        }
+            // Mark notes as spent.
+            //
+            // This locks the notes so they aren't selected again by a subsequent call to
+            // create_spend_to_address() before this transaction has been mined (at which point the notes
+            // get re-marked as spent).
+            //
+            // Assumes that create_spend_to_address() will never be called in parallel, which is a
+            // reasonable assumption for a light client such as a mobile phone.
+            for spend in &tx.shielded_spends {
+                up.mark_spent(tx_ref, &spend.nullifier)?;
+            }
 
-        up.insert_sent_note(
-            params,
-            tx_ref,
-            output_index as usize,
-            account,
-            to,
-            value,
-            memo,
-        )?;
+            up.insert_sent_note(
+                params,
+                tx_ref,
+                output_index as usize,
+                account,
+                to,
+                value,
+                memo,
+            )?;
 
-        // Return the row number of the transaction, so the caller can fetch it for sending.
-        Ok(tx_ref)
-    })
-    .map_err(|e| e.into())
+            // Return the row number of the transaction, so the caller can fetch it for sending.
+            Ok(tx_ref)
+        })
+        .map_err(|e| e.into())
 }

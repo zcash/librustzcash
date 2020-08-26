@@ -3,7 +3,6 @@ use std::collections::HashMap;
 use zcash_primitives::{
     note_encryption::Memo,
     primitives::Diversifier,
-    //prover::TxProver,
     transaction::{
         //builder::Builder,
         components::{Amount, OutPoint},
