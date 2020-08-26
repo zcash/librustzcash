@@ -1,176 +1,29 @@
 //! Functions for creating transactions.
-
-use ff::PrimeField;
-use rusqlite::{types::ToSql, NO_PARAMS};
+//!
 use std::convert::TryInto;
 
+use ff::PrimeField;
+
 use zcash_primitives::{
-    consensus,
-    keys::OutgoingViewingKey,
-    merkle_tree::{IncrementalWitness, MerklePath},
-    note_encryption::Memo,
-    primitives::{Diversifier, Note, Rseed},
-    prover::TxProver,
-    sapling::Node,
-    transaction::{
-        builder::Builder,
-        components::{amount::DEFAULT_FEE, Amount},
-    },
-    zip32::{ExtendedFullViewingKey, ExtendedSpendingKey},
+    consensus::{BlockHeight},
+    merkle_tree::IncrementalWitness,
+    primitives::{Diversifier, Rseed},
+    transaction::components::Amount,
 };
 
 use zcash_client_backend::{
-    address::RecipientAddress,
-    data_api::{chain::get_target_and_anchor_heights, error::Error, DBOps, DBUpdate},
-    encoding::encode_extended_full_viewing_key,
-    wallet::AccountId,
+    data_api::{error::Error},
+    wallet::{AccountId, SpendableNote},
 };
 
 use crate::{error::SqliteClientError, DataConnection};
 
-/// Describes a policy for which outgoing viewing key should be able to decrypt
-/// transaction outputs.
-///
-/// For details on what transaction information is visible to the holder of an outgoing
-/// viewing key, refer to [ZIP 310].
-///
-/// [ZIP 310]: https://zips.z.cash/zip-0310
-pub enum OvkPolicy {
-    /// Use the outgoing viewing key from the sender's [`ExtendedFullViewingKey`].
-    ///
-    /// Transaction outputs will be decryptable by the sender, in addition to the
-    /// recipients.
-    Sender,
-
-    /// Use a custom outgoing viewing key. This might for instance be derived from a
-    /// separate seed than the wallet's spending keys.
-    ///
-    /// Transaction outputs will be decryptable by the recipients, and whoever controls
-    /// the provided outgoing viewing key.
-    Custom(OutgoingViewingKey),
-
-    /// Use no outgoing viewing key. Transaction outputs will be decryptable by their
-    /// recipients, but not by the sender.
-    Discard,
-}
-
-struct SelectedNoteRow {
-    diversifier: Diversifier,
-    note: Note,
-    merkle_path: MerklePath<Node>,
-}
-
-/// Creates a transaction paying the specified address from the given account.
-///
-/// Returns the row index of the newly-created transaction in the `transactions` table
-/// within the data database. The caller can read the raw transaction bytes from the `raw`
-/// column in order to broadcast the transaction to the network.
-///
-/// Do not call this multiple times in parallel, or you will generate transactions that
-/// double-spend the same notes.
-///
-/// # Transaction privacy
-///
-/// `ovk_policy` specifies the desired policy for which outgoing viewing key should be
-/// able to decrypt the outputs of this transaction. This is primarily relevant to
-/// wallet recovery from backup; in particular, [`OvkPolicy::Discard`] will prevent the
-/// recipient's address, and the contents of `memo`, from ever being recovered from the
-/// block chain. (The total value sent can always be inferred by the sender from the spent
-/// notes and received change.)
-///
-/// Regardless of the specified policy, `create_to_address` saves `to`, `value`, and
-/// `memo` in `db_data`. This can be deleted independently of `ovk_policy`.
-///
-/// For details on what transaction information is visible to the holder of a full or
-/// outgoing viewing key, refer to [ZIP 310].
-///
-/// [ZIP 310]: https://zips.z.cash/zip-0310
-///
-/// # Examples
-///
-/// ```
-/// use tempfile::NamedTempFile;
-/// use zcash_primitives::{
-///     consensus::{self, Network},
-///     constants::testnet::COIN_TYPE,
-///     transaction::components::Amount
-/// };
-/// use zcash_proofs::prover::LocalTxProver;
-/// use zcash_client_backend::{
-///     keys::spending_key,
-/// };
-/// use zcash_client_sqlite::{
-///     DataConnection,
-///     transact::{create_to_address, OvkPolicy},
-/// };
-///
-/// let tx_prover = match LocalTxProver::with_default_location() {
-///     Some(tx_prover) => tx_prover,
-///     None => {
-///         panic!("Cannot locate the Zcash parameters. Please run zcash-fetch-params or fetch-params.sh to download the parameters, and then re-run the tests.");
-///     }
-/// };
-///
-/// let account = 0;
-/// let extsk = spending_key(&[0; 32][..], COIN_TYPE, account);
-/// let to = extsk.default_address().unwrap().1.into();
-///
-/// let data_file = NamedTempFile::new().unwrap();
-/// let db = DataConnection::for_path(data_file).unwrap();
-/// match create_to_address(
-///     &db,
-///     &Network::TestNetwork,
-///     consensus::BranchId::Sapling,
-///     tx_prover,
-///     (account, &extsk),
-///     &to,
-///     Amount::from_u64(1).unwrap(),
-///     None,
-///     OvkPolicy::Sender,
-/// ) {
-///     Ok(tx_row) => (),
-///     Err(e) => (),
-/// }
-/// ```
-pub fn create_to_address<P: consensus::Parameters>(
+pub fn select_spendable_notes(
     data: &DataConnection,
-    params: &P,
-    consensus_branch_id: consensus::BranchId,
-    prover: impl TxProver,
-    (account, extsk): (u32, &ExtendedSpendingKey),
-    to: &RecipientAddress,
-    value: Amount,
-    memo: Option<Memo>,
-    ovk_policy: OvkPolicy,
-) -> Result<i64, SqliteClientError> {
-    // Check that the ExtendedSpendingKey we have been given corresponds to the
-    // ExtendedFullViewingKey for the account we are spending from.
-    let extfvk = ExtendedFullViewingKey::from(extsk);
-    if !data
-        .0
-        .prepare("SELECT * FROM accounts WHERE account = ? AND extfvk = ?")?
-        .exists(&[
-            account.to_sql()?,
-            encode_extended_full_viewing_key(
-                params.hrp_sapling_extended_full_viewing_key(),
-                &extfvk,
-            )
-            .to_sql()?,
-        ])?
-    {
-        return Err(Error::InvalidExtSK(account).into());
-    }
-
-    // Apply the outgoing viewing key policy.
-    let ovk = match ovk_policy {
-        OvkPolicy::Sender => Some(extfvk.fvk.ovk),
-        OvkPolicy::Custom(ovk) => Some(ovk),
-        OvkPolicy::Discard => None,
-    };
-
-    // Target the next block, assuming we are up-to-date.
-    let (height, anchor_height) = get_target_and_anchor_heights(data)?;
-
+    account: AccountId,
+    target_value: Amount,
+    anchor_height: BlockHeight,
+) -> Result<Vec<SpendableNote>, SqliteClientError> {
     // The goal of this SQL statement is to select the oldest notes until the required
     // value has been reached, and then fetch the witnesses at the desired height for the
     // selected notes. This is achieved in several steps:
@@ -189,7 +42,6 @@ pub fn create_to_address<P: consensus::Parameters>(
     //    required value, bringing the sum of all selected notes across the threshold.
     //
     // 4) Match the selected notes against the witnesses at the desired height.
-    let target_value = i64::from(value + DEFAULT_FEE);
     let mut stmt_select_notes = data.0.prepare(
         "WITH selected AS (
             WITH eligible AS (
@@ -198,14 +50,14 @@ pub fn create_to_address<P: consensus::Parameters>(
                         (PARTITION BY account, spent ORDER BY id_note) AS so_far
                 FROM received_notes
                 INNER JOIN transactions ON transactions.id_tx = received_notes.tx
-                WHERE account = ? AND spent IS NULL AND transactions.block <= ?
+                WHERE account = :account AND spent IS NULL AND transactions.block <= :anchor_height
             )
-            SELECT * FROM eligible WHERE so_far < ?
+            SELECT * FROM eligible WHERE so_far < :target_value
             UNION
-            SELECT * FROM (SELECT * FROM eligible WHERE so_far >= ? LIMIT 1)
+            SELECT * FROM (SELECT * FROM eligible WHERE so_far >= :target_value LIMIT 1)
         ), witnesses AS (
             SELECT note, witness FROM sapling_witnesses
-            WHERE block = ?
+            WHERE block = :anchor_height
         )
         SELECT selected.diversifier, selected.value, selected.rcm, witnesses.witness
         FROM selected
@@ -213,13 +65,11 @@ pub fn create_to_address<P: consensus::Parameters>(
     )?;
 
     // Select notes
-    let notes = stmt_select_notes.query_and_then::<_, SqliteClientError, _, _>(
+    let notes = stmt_select_notes.query_and_then_named::<_, SqliteClientError, _>(
         &[
-            i64::from(account),
-            i64::from(anchor_height),
-            target_value,
-            target_value,
-            i64::from(anchor_height),
+            (&"account", &i64::from(account.0)),
+            (&"anchor_height", &u32::from(anchor_height)),
+            (&"target_value", &i64::from(target_value)),
         ],
         |row| {
             let diversifier = {
@@ -234,7 +84,7 @@ pub fn create_to_address<P: consensus::Parameters>(
                 Diversifier(tmp)
             };
 
-            let note_value: i64 = row.get(1)?;
+            let note_value = Amount::from_i64(row.get(1)?).unwrap();
 
             let rseed = {
                 let rcm_bytes: Vec<_> = row.get(2)?;
@@ -251,104 +101,22 @@ pub fn create_to_address<P: consensus::Parameters>(
                 Rseed::BeforeZip212(rcm)
             };
 
-            let from = extfvk.fvk.vk.to_payment_address(diversifier).unwrap();
-            let note = from.create_note(note_value as u64, rseed).unwrap();
-
-            let merkle_path = {
+            let witness = {
                 let d: Vec<_> = row.get(3)?;
                 IncrementalWitness::read(&d[..])?
-                    .path()
-                    .expect("the tree is not empty")
             };
 
-            Ok(SelectedNoteRow {
+            Ok(SpendableNote {
                 diversifier,
-                note,
-                merkle_path,
+                note_value,
+                rseed,
+                witness,
             })
         },
     )?;
-    let notes: Vec<SelectedNoteRow> = notes.collect::<Result<_, _>>()?;
 
-    // Confirm we were able to select sufficient value
-    let selected_value = notes
-        .iter()
-        .fold(0, |acc, selected| acc + selected.note.value);
-    if selected_value < target_value as u64 {
-        return Err(Error::InsufficientBalance(selected_value, target_value as u64).into());
-    }
-
-    // Create the transaction
-    let mut builder = Builder::new(params.clone(), height);
-    for selected in notes {
-        builder.add_sapling_spend(
-            extsk.clone(),
-            selected.diversifier,
-            selected.note,
-            selected.merkle_path,
-        )?;
-    }
-    match to {
-        RecipientAddress::Shielded(to) => {
-            builder.add_sapling_output(ovk, to.clone(), value, memo.clone())
-        }
-        RecipientAddress::Transparent(to) => builder.add_transparent_output(&to, value),
-    }?;
-    let (tx, tx_metadata) = builder.build(consensus_branch_id, &prover)?;
-    // We only called add_sapling_output() once.
-    let output_index = match tx_metadata.output_index(0) {
-        Some(idx) => idx as i64,
-        None => panic!("Output 0 should exist in the transaction"),
-    };
-    let created = time::OffsetDateTime::now_utc();
-
-    // Update the database atomically, to ensure the result is internally consistent.
-    data.0.execute("BEGIN IMMEDIATE", NO_PARAMS)?;
-    let mut db_update = data.get_update_ops()?;
-
-    // Save the transaction in the database.
-    let mut raw_tx = vec![];
-    tx.write(&mut raw_tx)?;
-    let mut stmt_insert_tx = data.0.prepare(
-        "INSERT INTO transactions (txid, created, expiry_height, raw)
-        VALUES (?, ?, ?, ?)",
-    )?;
-    stmt_insert_tx.execute(&[
-        tx.txid().0.to_sql()?,
-        created.to_sql()?,
-        i64::from(tx.expiry_height).to_sql()?,
-        raw_tx.to_sql()?,
-    ])?;
-    let tx_ref = data.0.last_insert_rowid();
-
-    // Mark notes as spent.
-    //
-    // This locks the notes so they aren't selected again by a subsequent call to
-    // create_to_address() before this transaction has been mined (at which point the notes
-    // get re-marked as spent).
-    //
-    // Assumes that create_to_address() will never be called in parallel, which is a
-    // reasonable assumption for a light client such as a mobile phone.
-    for spend in &tx.shielded_spends {
-        db_update.mark_spent(tx_ref, &spend.nullifier)?;
-    }
-
-    // Save the sent note in the database.
-    // TODO: Decide how to save transparent output information.
-    db_update.insert_sent_note(
-        params,
-        tx_ref,
-        output_index as usize,
-        AccountId(account),
-        to,
-        value,
-        memo,
-    )?;
-
-    data.0.execute("COMMIT", NO_PARAMS)?;
-
-    // Return the row number of the transaction, so the caller can fetch it for sending.
-    Ok(tx_ref)
+    let notes: Vec<SpendableNote> = notes.collect::<Result<_, _>>()?;
+    Ok(notes)
 }
 
 #[cfg(test)]
@@ -358,7 +126,7 @@ mod tests {
 
     use zcash_primitives::{
         block::BlockHash,
-        consensus::{self, BlockHeight},
+        consensus::BlockHeight,
         note_encryption::try_sapling_output_recovery,
         prover::TxProver,
         transaction::{components::Amount, Transaction},
@@ -367,7 +135,10 @@ mod tests {
 
     use zcash_proofs::prover::LocalTxProver;
 
-    use zcash_client_backend::data_api::chain::scan_cached_blocks;
+    use zcash_client_backend::{
+        data_api::{chain::scan_cached_blocks, wallet::create_spend_to_address, DBOps},
+        wallet::OvkPolicy,
+    };
 
     use crate::{
         chain::init::init_cache_database,
@@ -378,8 +149,6 @@ mod tests {
         },
         AccountId, CacheConnection, DataConnection,
     };
-
-    use super::{create_to_address, OvkPolicy};
 
     fn test_prover() -> impl TxProver {
         match LocalTxProver::with_default_location() {
@@ -407,12 +176,12 @@ mod tests {
         let to = extsk0.default_address().unwrap().1.into();
 
         // Invalid extsk for the given account should cause an error
-        match create_to_address(
+        match create_spend_to_address(
             &db_data,
             &tests::network(),
-            consensus::BranchId::Blossom,
             test_prover(),
-            (0, &extsk1),
+            AccountId(0),
+            &extsk1,
             &to,
             Amount::from_u64(1).unwrap(),
             None,
@@ -422,12 +191,12 @@ mod tests {
             Err(e) => assert_eq!(e.to_string(), "Incorrect ExtendedSpendingKey for account 0"),
         }
 
-        match create_to_address(
+        match create_spend_to_address(
             &db_data,
             &tests::network(),
-            consensus::BranchId::Blossom,
             test_prover(),
-            (1, &extsk0),
+            AccountId(1),
+            &extsk0,
             &to,
             Amount::from_u64(1).unwrap(),
             None,
@@ -451,12 +220,12 @@ mod tests {
         let to = extsk.default_address().unwrap().1.into();
 
         // We cannot do anything if we aren't synchronised
-        match create_to_address(
+        match create_spend_to_address(
             &db_data,
             &tests::network(),
-            consensus::BranchId::Blossom,
             test_prover(),
-            (0, &extsk),
+            AccountId(0),
+            &extsk,
             &to,
             Amount::from_u64(1).unwrap(),
             None,
@@ -491,12 +260,12 @@ mod tests {
         assert_eq!(get_balance(&db_data, AccountId(0)).unwrap(), Amount::zero());
 
         // We cannot spend anything
-        match create_to_address(
+        match create_spend_to_address(
             &db_data,
             &tests::network(),
-            consensus::BranchId::Blossom,
             test_prover(),
-            (0, &extsk),
+            AccountId(0),
+            &extsk,
             &to,
             Amount::from_u64(1).unwrap(),
             None,
@@ -537,8 +306,12 @@ mod tests {
         scan_cached_blocks(&tests::network(), &db_cache, &db_data, None).unwrap();
 
         // Verified balance matches total balance
+        let (_, anchor_height) = (&db_data).get_target_and_anchor_heights().unwrap().unwrap();
         assert_eq!(get_balance(&db_data, AccountId(0)).unwrap(), value);
-        assert_eq!(get_verified_balance(&db_data, AccountId(0)).unwrap(), value);
+        assert_eq!(
+            get_verified_balance(&db_data, AccountId(0), anchor_height).unwrap(),
+            value
+        );
 
         // Add more funds to the wallet in a second note
         let (cb, _) = fake_compact_block(
@@ -551,18 +324,22 @@ mod tests {
         scan_cached_blocks(&tests::network(), &db_cache, &db_data, None).unwrap();
 
         // Verified balance does not include the second note
+        let (_, anchor_height2) = (&db_data).get_target_and_anchor_heights().unwrap().unwrap();
         assert_eq!(get_balance(&db_data, AccountId(0)).unwrap(), value + value);
-        assert_eq!(get_verified_balance(&db_data, AccountId(0)).unwrap(), value);
+        assert_eq!(
+            get_verified_balance(&db_data, AccountId(0), anchor_height2).unwrap(),
+            value
+        );
 
         // Spend fails because there are insufficient verified notes
         let extsk2 = ExtendedSpendingKey::master(&[]);
         let to = extsk2.default_address().unwrap().1.into();
-        match create_to_address(
+        match create_spend_to_address(
             &db_data,
             &tests::network(),
-            consensus::BranchId::Blossom,
             test_prover(),
-            (0, &extsk),
+            AccountId(0),
+            &extsk,
             &to,
             Amount::from_u64(70000).unwrap(),
             None,
@@ -589,12 +366,12 @@ mod tests {
         scan_cached_blocks(&tests::network(), &db_cache, &db_data, None).unwrap();
 
         // Second spend still fails
-        match create_to_address(
+        match create_spend_to_address(
             &db_data,
             &tests::network(),
-            consensus::BranchId::Blossom,
             test_prover(),
-            (0, &extsk),
+            AccountId(0),
+            &extsk,
             &to,
             Amount::from_u64(70000).unwrap(),
             None,
@@ -618,12 +395,12 @@ mod tests {
         scan_cached_blocks(&tests::network(), &db_cache, &db_data, None).unwrap();
 
         // Second spend should now succeed
-        create_to_address(
+        create_spend_to_address(
             &db_data,
             &tests::network(),
-            consensus::BranchId::Blossom,
             test_prover(),
-            (0, &extsk),
+            AccountId(0),
+            &extsk,
             &to,
             Amount::from_u64(70000).unwrap(),
             None,
@@ -662,12 +439,12 @@ mod tests {
         // Send some of the funds to another address
         let extsk2 = ExtendedSpendingKey::master(&[]);
         let to = extsk2.default_address().unwrap().1.into();
-        create_to_address(
+        create_spend_to_address(
             &db_data,
             &tests::network(),
-            consensus::BranchId::Blossom,
             test_prover(),
-            (0, &extsk),
+            AccountId(0),
+            &extsk,
             &to,
             Amount::from_u64(15000).unwrap(),
             None,
@@ -676,12 +453,12 @@ mod tests {
         .unwrap();
 
         // A second spend fails because there are no usable notes
-        match create_to_address(
+        match create_spend_to_address(
             &db_data,
             &tests::network(),
-            consensus::BranchId::Blossom,
             test_prover(),
-            (0, &extsk),
+            AccountId(0),
+            &extsk,
             &to,
             Amount::from_u64(2000).unwrap(),
             None,
@@ -708,12 +485,12 @@ mod tests {
         scan_cached_blocks(&tests::network(), &db_cache, &db_data, None).unwrap();
 
         // Second spend still fails
-        match create_to_address(
+        match create_spend_to_address(
             &db_data,
             &tests::network(),
-            consensus::BranchId::Blossom,
             test_prover(),
-            (0, &extsk),
+            AccountId(0),
+            &extsk,
             &to,
             Amount::from_u64(2000).unwrap(),
             None,
@@ -737,12 +514,12 @@ mod tests {
         scan_cached_blocks(&tests::network(), &db_cache, &db_data, None).unwrap();
 
         // Second spend should now succeed
-        create_to_address(
+        create_spend_to_address(
             &db_data,
             &tests::network(),
-            consensus::BranchId::Blossom,
             test_prover(),
-            (0, &extsk),
+            AccountId(0),
+            &extsk,
             &to,
             Amount::from_u64(2000).unwrap(),
             None,
@@ -784,12 +561,12 @@ mod tests {
         let to = addr2.clone().into();
 
         let send_and_recover_with_policy = |ovk_policy| {
-            let tx_row = create_to_address(
+            let tx_row = create_spend_to_address(
                 &db_data,
                 &network,
-                consensus::BranchId::Blossom,
                 test_prover(),
-                (0, &extsk),
+                AccountId(0),
+                &extsk,
                 &to,
                 Amount::from_u64(15000).unwrap(),
                 None,

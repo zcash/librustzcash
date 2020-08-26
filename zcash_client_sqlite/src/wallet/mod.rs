@@ -1,6 +1,6 @@
 //! Functions for querying information in the data database.
 
-use rusqlite::{OptionalExtension, NO_PARAMS};
+use rusqlite::{OptionalExtension, ToSql, NO_PARAMS};
 
 use zcash_primitives::{
     block::BlockHash,
@@ -14,8 +14,10 @@ use zcash_primitives::{
 };
 
 use zcash_client_backend::{
-    data_api::{chain::get_target_and_anchor_heights, error::Error},
-    encoding::{decode_extended_full_viewing_key, decode_payment_address},
+    data_api::error::Error,
+    encoding::{
+        decode_extended_full_viewing_key, decode_payment_address, encode_extended_full_viewing_key,
+    },
 };
 
 use crate::{error::SqliteClientError, AccountId, DataConnection, NoteId};
@@ -56,6 +58,51 @@ pub fn get_address<P: consensus::Parameters>(
 
     decode_payment_address(params.hrp_sapling_payment_address(), &addr)
         .map_err(|e| SqliteClientError(e.into()))
+}
+
+pub fn get_extended_full_viewing_keys<P: consensus::Parameters>(
+    data: &DataConnection,
+    params: &P,
+) -> Result<Vec<ExtendedFullViewingKey>, SqliteClientError> {
+    // Fetch the ExtendedFullViewingKeys we are tracking
+    let mut stmt_fetch_accounts = data
+        .0
+        .prepare("SELECT extfvk FROM accounts ORDER BY account ASC")?;
+
+    let rows = stmt_fetch_accounts
+        .query_map(NO_PARAMS, |row| {
+            row.get(0).map(|extfvk: String| {
+                decode_extended_full_viewing_key(
+                    params.hrp_sapling_extended_full_viewing_key(),
+                    &extfvk,
+                )
+                .map_err(|e| Error::Bech32(e))
+                .and_then(|k| k.ok_or(Error::IncorrectHRPExtFVK))
+                .map_err(SqliteClientError)
+            })
+        })
+        .map_err(SqliteClientError::from)?;
+
+    rows.collect::<Result<Result<_, _>, _>>()?
+}
+
+pub fn is_valid_account_extfvk<P: consensus::Parameters>(
+    data: &DataConnection,
+    params: &P,
+    account: AccountId,
+    extfvk: &ExtendedFullViewingKey,
+) -> Result<bool, SqliteClientError> {
+    data.0
+        .prepare("SELECT * FROM accounts WHERE account = ? AND extfvk = ?")?
+        .exists(&[
+            account.0.to_sql()?,
+            encode_extended_full_viewing_key(
+                params.hrp_sapling_extended_full_viewing_key(),
+                extfvk,
+            )
+            .to_sql()?,
+        ])
+        .map_err(SqliteClientError::from)
 }
 
 /// Returns the balance for the account, including all mined unspent notes that we know
@@ -117,9 +164,8 @@ pub fn get_balance(data: &DataConnection, account: AccountId) -> Result<Amount, 
 pub fn get_verified_balance(
     data: &DataConnection,
     account: AccountId,
+    anchor_height: BlockHeight,
 ) -> Result<Amount, SqliteClientError> {
-    let (_, anchor_height) = get_target_and_anchor_heights(data)?;
-
     let balance = data.0.query_row(
         "SELECT SUM(value) FROM received_notes
         INNER JOIN transactions ON transactions.id_tx = received_notes.tx
@@ -320,31 +366,6 @@ pub fn rewind_to_height<P: consensus::Parameters>(
 
     Ok(())
 }
-pub fn get_extended_full_viewing_keys<P: consensus::Parameters>(
-    data: &DataConnection,
-    params: &P,
-) -> Result<Vec<ExtendedFullViewingKey>, SqliteClientError> {
-    // Fetch the ExtendedFullViewingKeys we are tracking
-    let mut stmt_fetch_accounts = data
-        .0
-        .prepare("SELECT extfvk FROM accounts ORDER BY account ASC")?;
-
-    let rows = stmt_fetch_accounts
-        .query_map(NO_PARAMS, |row| {
-            row.get(0).map(|extfvk: String| {
-                decode_extended_full_viewing_key(
-                    params.hrp_sapling_extended_full_viewing_key(),
-                    &extfvk,
-                )
-                .map_err(|e| Error::Bech32(e))
-                .and_then(|k| k.ok_or(Error::IncorrectHRPExtFVK))
-                .map_err(SqliteClientError)
-            })
-        })
-        .map_err(SqliteClientError::from)?;
-
-    rows.collect::<Result<Result<_, _>, _>>()?
-}
 
 pub fn get_commitment_tree(
     data: &DataConnection,
@@ -424,7 +445,7 @@ mod tests {
         zip32::{ExtendedFullViewingKey, ExtendedSpendingKey},
     };
 
-    use zcash_client_backend::data_api::error::Error;
+    use zcash_client_backend::data_api::{error::Error, DBOps};
 
     use crate::{
         tests,
@@ -449,7 +470,8 @@ mod tests {
         assert_eq!(get_balance(&db_data, AccountId(0)).unwrap(), Amount::zero());
 
         // The account should have no verified balance, as we haven't scanned any blocks
-        let e = get_verified_balance(&db_data, AccountId(0)).unwrap_err();
+        let (_, anchor_height) = (&db_data).get_target_and_anchor_heights().unwrap().unwrap();
+        let e = get_verified_balance(&db_data, AccountId(0), anchor_height).unwrap_err();
         match e.0 {
             Error::ScanRequired => (),
             _ => panic!("Unexpected error: {:?}", e),

@@ -1,3 +1,5 @@
+use std::cmp;
+
 use zcash_primitives::{
     block::BlockHash,
     consensus::{self, BlockHeight},
@@ -11,9 +13,10 @@ use zcash_primitives::{
 
 use crate::{
     address::RecipientAddress,
+    data_api::wallet::ANCHOR_OFFSET,
     decrypt::DecryptedOutput,
     proto::compact_formats::CompactBlock,
-    wallet::{AccountId, WalletShieldedOutput, WalletTx},
+    wallet::{AccountId, SpendableNote, WalletShieldedOutput, WalletTx},
 };
 
 pub mod chain;
@@ -23,7 +26,8 @@ pub mod wallet;
 pub trait DBOps {
     type Error;
     type NoteRef: Copy; // Backend-specific note identifier
-    type UpdateOps: DBUpdate<Error = Self::Error, NoteRef = Self::NoteRef>;
+    type TxRef: Copy;
+    type UpdateOps: DBUpdate<Error = Self::Error, NoteRef = Self::NoteRef, TxRef = Self::TxRef>;
 
     fn init_db(&self) -> Result<(), Self::Error>;
 
@@ -42,6 +46,25 @@ pub trait DBOps {
     ) -> Result<(), Self::Error>;
 
     fn block_height_extrema(&self) -> Result<Option<(BlockHeight, BlockHeight)>, Self::Error>;
+
+    fn get_target_and_anchor_heights(
+        &self,
+    ) -> Result<Option<(BlockHeight, BlockHeight)>, Self::Error> {
+        self.block_height_extrema().map(|heights| {
+            heights.map(|(min_height, max_height)| {
+                let target_height = max_height + 1;
+
+                // Select an anchor ANCHOR_OFFSET back from the target block,
+                // unless that would be before the earliest block we have.
+                let anchor_height = BlockHeight::from(cmp::max(
+                    u32::from(target_height).saturating_sub(ANCHOR_OFFSET),
+                    u32::from(min_height),
+                ));
+
+                (target_height, anchor_height)
+            })
+        })
+    }
 
     fn get_block_hash(&self, block_height: BlockHeight) -> Result<Option<BlockHash>, Self::Error>;
 
@@ -64,9 +87,20 @@ pub trait DBOps {
         params: &P,
     ) -> Result<Vec<ExtendedFullViewingKey>, Self::Error>;
 
+    fn is_valid_account_extfvk<P: consensus::Parameters>(
+        &self,
+        params: &P,
+        account: AccountId,
+        extfvk: &ExtendedFullViewingKey,
+    ) -> Result<bool, Self::Error>;
+
     fn get_balance(&self, account: AccountId) -> Result<Amount, Self::Error>;
 
-    fn get_verified_balance(&self, account: AccountId) -> Result<Amount, Self::Error>;
+    fn get_verified_balance(
+        &self,
+        account: AccountId,
+        anchor_height: BlockHeight,
+    ) -> Result<Amount, Self::Error>;
 
     fn get_received_memo_as_utf8(
         &self,
@@ -89,15 +123,22 @@ pub trait DBOps {
 
     fn get_update_ops(&self) -> Result<Self::UpdateOps, Self::Error>;
 
-    fn transactionally<F>(&self, mutator: &mut Self::UpdateOps, f: F) -> Result<(), Self::Error>
+    fn select_spendable_notes(
+        &self,
+        account: AccountId,
+        target_value: Amount,
+        anchor_height: BlockHeight,
+    ) -> Result<Vec<SpendableNote>, Self::Error>;
+
+    fn transactionally<F, A>(&self, mutator: &mut Self::UpdateOps, f: F) -> Result<A, Self::Error>
     where
-        F: FnOnce(&mut Self::UpdateOps) -> Result<(), Self::Error>;
+        F: FnOnce(&mut Self::UpdateOps) -> Result<A, Self::Error>;
 }
 
 pub trait DBUpdate {
     type Error;
-    type TxRef: Copy;
     type NoteRef: Copy;
+    type TxRef: Copy;
 
     fn insert_block(
         &mut self,
@@ -113,7 +154,11 @@ pub trait DBUpdate {
         height: BlockHeight,
     ) -> Result<Self::TxRef, Self::Error>;
 
-    fn put_tx_data(&mut self, tx: &Transaction) -> Result<Self::TxRef, Self::Error>;
+    fn put_tx_data(
+        &mut self,
+        tx: &Transaction,
+        created_at: Option<time::OffsetDateTime>,
+    ) -> Result<Self::TxRef, Self::Error>;
 
     fn mark_spent(&mut self, tx_ref: Self::TxRef, nf: &[u8]) -> Result<(), Self::Error>;
 

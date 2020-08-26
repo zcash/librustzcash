@@ -2,10 +2,11 @@
 //! light client.
 
 use zcash_primitives::{
+    keys::OutgoingViewingKey,
     merkle_tree::IncrementalWitness,
-    primitives::{Note, PaymentAddress},
+    primitives::{Diversifier, Note, PaymentAddress, Rseed},
     sapling::Node,
-    transaction::TxId,
+    transaction::{components::Amount, TxId},
 };
 
 /// A type-safe wrapper for account identifiers.
@@ -45,4 +46,37 @@ pub struct WalletShieldedOutput {
     pub to: PaymentAddress,
     pub is_change: bool,
     pub witness: IncrementalWitness<Node>,
+}
+
+pub struct SpendableNote {
+    pub diversifier: Diversifier,
+    pub note_value: Amount,
+    pub rseed: Rseed,
+    pub witness: IncrementalWitness<Node>,
+}
+
+/// Describes a policy for which outgoing viewing key should be able to decrypt
+/// transaction outputs.
+///
+/// For details on what transaction information is visible to the holder of an outgoing
+/// viewing key, refer to [ZIP 310].
+///
+/// [ZIP 310]: https://zips.z.cash/zip-0310
+pub enum OvkPolicy {
+    /// Use the outgoing viewing key from the sender's [`ExtendedFullViewingKey`].
+    ///
+    /// Transaction outputs will be decryptable by the sender, in addition to the
+    /// recipients.
+    Sender,
+
+    /// Use a custom outgoing viewing key. This might for instance be derived from a
+    /// separate seed than the wallet's spending keys.
+    ///
+    /// Transaction outputs will be decryptable by the recipients, and whoever controls
+    /// the provided outgoing viewing key.
+    Custom(OutgoingViewingKey),
+
+    /// Use no outgoing viewing key. Transaction outputs will be decryptable by their
+    /// recipients, but not by the sender.
+    Discard,
 }

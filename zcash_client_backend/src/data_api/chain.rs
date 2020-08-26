@@ -1,5 +1,3 @@
-use std::cmp;
-
 use zcash_primitives::{
     block::BlockHash,
     consensus::{self, BlockHeight, NetworkUpgrade},
@@ -15,8 +13,6 @@ use crate::{
     wallet::{AccountId, WalletTx},
     welding_rig::scan_block,
 };
-
-pub const ANCHOR_OFFSET: u32 = 10;
 
 /// Checks that the scanned blocks in the data database, when combined with the recent
 /// `CompactBlock`s in the cache database, form a valid chain.
@@ -89,34 +85,6 @@ where
             Ok(())
         }
     }
-}
-
-/// Determines the target height for a transaction, and the height from which to
-/// select anchors, based on the current synchronised block chain.
-pub fn get_target_and_anchor_heights<'db, E0, N, E, D>(
-    data: &'db D,
-) -> Result<(BlockHeight, BlockHeight), E>
-where
-    E: From<Error<E0, N>>,
-    &'db D: DBOps<Error = E>,
-{
-    data.block_height_extrema().and_then(|heights| {
-        match heights {
-            Some((min_height, max_height)) => {
-                let target_height = max_height + 1;
-
-                // Select an anchor ANCHOR_OFFSET back from the target block,
-                // unless that would be before the earliest block we have.
-                let anchor_height = BlockHeight::from(cmp::max(
-                    u32::from(target_height).saturating_sub(ANCHOR_OFFSET),
-                    u32::from(min_height),
-                ));
-
-                Ok((target_height, anchor_height))
-            }
-            None => Err(Error::ScanRequired.into()),
-        }
-    })
 }
 
 /// Scans at most `limit` new blocks added to the cache for any transactions received by

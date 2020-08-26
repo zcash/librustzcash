@@ -56,3 +56,9 @@ impl From<protobuf::ProtobufError> for SqliteClientError {
         SqliteClientError(Error::Protobuf(e))
     }
 }
+
+impl From<SqliteClientError> for Error<rusqlite::Error, NoteId> {
+    fn from(e: SqliteClientError) -> Self {
+        e.0
+    }
+}

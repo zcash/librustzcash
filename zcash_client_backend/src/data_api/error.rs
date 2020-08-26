@@ -3,8 +3,10 @@ use std::fmt;
 use zcash_primitives::{
     consensus::BlockHeight,
     sapling::Node,
-    transaction::{builder, TxId},
+    transaction::{builder, components::amount::Amount, TxId},
 };
+
+use crate::wallet::AccountId;
 
 #[derive(Debug)]
 pub enum ChainInvalid {
@@ -17,9 +19,9 @@ pub enum ChainInvalid {
 pub enum Error<DbError, NoteId> {
     CorruptedData(&'static str),
     IncorrectHRPExtFVK,
-    InsufficientBalance(u64, u64),
+    InsufficientBalance(Amount, Amount),
     InvalidChain(BlockHeight, ChainInvalid),
-    InvalidExtSK(u32),
+    InvalidExtSK(AccountId),
     InvalidMemo(std::str::Utf8Error),
     InvalidNewWitnessAnchor(usize, TxId, BlockHeight, Node),
     InvalidNote,
@@ -53,13 +55,13 @@ impl<E: fmt::Display, N: fmt::Display> fmt::Display for Error<E, N> {
             Error::InsufficientBalance(have, need) => write!(
                 f,
                 "Insufficient balance (have {}, need {} including fee)",
-                have, need
+                i64::from(*have), i64::from(*need)
             ),
             Error::InvalidChain(upper_bound, cause) => {
                 write!(f, "Invalid chain (upper bound: {}): {:?}", u32::from(*upper_bound), cause)
             }
             Error::InvalidExtSK(account) => {
-                write!(f, "Incorrect ExtendedSpendingKey for account {}", account)
+                write!(f, "Incorrect ExtendedSpendingKey for account {}", account.0)
             }
             Error::InvalidMemo(e) => write!(f, "{}", e),
             Error::InvalidNewWitnessAnchor(output, txid, last_height, anchor) => write!(

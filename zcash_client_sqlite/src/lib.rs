@@ -47,7 +47,7 @@ use zcash_client_backend::{
     data_api::{error::Error, CacheOps, DBOps, DBUpdate, ShieldedOutput},
     encoding::encode_payment_address,
     proto::compact_formats::CompactBlock,
-    wallet::{AccountId, WalletTx},
+    wallet::{AccountId, SpendableNote, WalletTx},
     DecryptedOutput,
 };
 
@@ -77,6 +77,7 @@ impl DataConnection {
 impl<'a> DBOps for &'a DataConnection {
     type Error = SqliteClientError;
     type NoteRef = NoteId;
+    type TxRef = i64;
     type UpdateOps = DataConnStmtCache<'a>;
 
     fn init_db(&self) -> Result<(), Self::Error> {
@@ -121,6 +122,13 @@ impl<'a> DBOps for &'a DataConnection {
         wallet::rewind_to_height(self, parameters, block_height)
     }
 
+    fn get_extended_full_viewing_keys<P: consensus::Parameters>(
+        &self,
+        params: &P,
+    ) -> Result<Vec<ExtendedFullViewingKey>, Self::Error> {
+        wallet::get_extended_full_viewing_keys(self, params)
+    }
+
     fn get_address<P: consensus::Parameters>(
         &self,
         params: &P,
@@ -129,12 +137,25 @@ impl<'a> DBOps for &'a DataConnection {
         wallet::get_address(self, params, account)
     }
 
+    fn is_valid_account_extfvk<P: consensus::Parameters>(
+        &self,
+        params: &P,
+        account: AccountId,
+        extfvk: &ExtendedFullViewingKey,
+    ) -> Result<bool, Self::Error> {
+        wallet::is_valid_account_extfvk(self, params, account, extfvk)
+    }
+
     fn get_balance(&self, account: AccountId) -> Result<Amount, Self::Error> {
         wallet::get_balance(self, account)
     }
 
-    fn get_verified_balance(&self, account: AccountId) -> Result<Amount, Self::Error> {
-        wallet::get_verified_balance(self, account)
+    fn get_verified_balance(
+        &self,
+        account: AccountId,
+        anchor_height: BlockHeight,
+    ) -> Result<Amount, Self::Error> {
+        wallet::get_verified_balance(self, account, anchor_height)
     }
 
     fn get_received_memo_as_utf8(
@@ -146,13 +167,6 @@ impl<'a> DBOps for &'a DataConnection {
 
     fn get_sent_memo_as_utf8(&self, id_note: Self::NoteRef) -> Result<Option<String>, Self::Error> {
         wallet::get_sent_memo_as_utf8(self, id_note)
-    }
-
-    fn get_extended_full_viewing_keys<P: consensus::Parameters>(
-        &self,
-        params: &P,
-    ) -> Result<Vec<ExtendedFullViewingKey>, Self::Error> {
-        wallet::get_extended_full_viewing_keys(self, params)
     }
 
     fn get_commitment_tree(
@@ -173,6 +187,20 @@ impl<'a> DBOps for &'a DataConnection {
         wallet::get_nullifiers(self)
     }
 
+    fn select_spendable_notes(
+        &self,
+        account: AccountId,
+        target_value: Amount,
+        anchor_height: BlockHeight,
+    ) -> Result<Vec<SpendableNote>, Self::Error> {
+        wallet::transact::select_spendable_notes(
+            self,
+            account,
+            target_value,
+            anchor_height,
+        )
+    }
+
     fn get_update_ops(&self) -> Result<Self::UpdateOps, Self::Error> {
         Ok(
             DataConnStmtCache {
@@ -190,8 +218,8 @@ impl<'a> DBOps for &'a DataConnection {
                     SET block = ?, tx_index = ? WHERE txid = ?",
                 )?,
                 stmt_insert_tx_data: self.0.prepare(
-                    "INSERT INTO transactions (txid, expiry_height, raw)
-                    VALUES (?, ?, ?)",
+                    "INSERT INTO transactions (txid, created, expiry_height, raw)
+                    VALUES (?, ?, ?, ?)",
                 )?,
                 stmt_update_tx_data: self.0.prepare(
                     "UPDATE transactions
@@ -210,12 +238,12 @@ impl<'a> DBOps for &'a DataConnection {
                 stmt_update_received_note: self.0.prepare(
                     "UPDATE received_notes
                     SET account = :account,
-                        diversifier = :diversifier, 
-                        value = :value, 
-                        rcm = :rcm, 
-                        nf = IFNULL(:memo, nf), 
-                        memo = IFNULL(:nf, memo), 
-                        is_change = :is_change 
+                        diversifier = :diversifier,
+                        value = :value,
+                        rcm = :rcm,
+                        nf = IFNULL(:memo, nf),
+                        memo = IFNULL(:nf, memo),
+                        is_change = :is_change
                     WHERE tx = :tx AND output_index = :output_index",
                 )?,
                 stmt_select_received_note: self.0.prepare(
@@ -247,27 +275,28 @@ impl<'a> DBOps for &'a DataConnection {
         )
     }
 
-    fn transactionally<F>(&self, mutator: &mut Self::UpdateOps, f: F) -> Result<(), Self::Error>
+    fn transactionally<F, A>(&self, mutator: &mut Self::UpdateOps, f: F) -> Result<A, Self::Error>
     where
-        F: FnOnce(&mut Self::UpdateOps) -> Result<(), Self::Error>,
+        F: FnOnce(&mut Self::UpdateOps) -> Result<A, Self::Error>,
     {
         self.0.execute("BEGIN IMMEDIATE", NO_PARAMS)?;
         match f(mutator) {
-            Ok(_) => {
+            Ok(result) => {
                 self.0.execute("COMMIT", NO_PARAMS)?;
-                Ok(())
+                Ok(result)
             }
             Err(error) => {
                 match self.0.execute("ROLLBACK", NO_PARAMS) {
                     Ok(_) => Err(error),
-                    // REVIEW: If rollback fails, what do we want to do? I think that
-                    // panicking here is probably the right thing to do, because it
-                    // means the database is corrupt?
-                    Err(e) => panic!(
-                        "Rollback failed with error {} while attempting to recover from error {}; database is likely corrupt.",
-                        e,
-                        error.0
-                    )
+                    Err(e) =>
+                        // REVIEW: If rollback fails, what do we want to do? I think that
+                        // panicking here is probably the right thing to do, because it
+                        // means the database is corrupt?
+                        panic!(
+                            "Rollback failed with error {} while attempting to recover from error {}; database is likely corrupt.",
+                            e,
+                            error.0
+                        )
                 }
             }
         }
@@ -355,7 +384,11 @@ impl<'a> DBUpdate for DataConnStmtCache<'a> {
         }
     }
 
-    fn put_tx_data(&mut self, tx: &Transaction) -> Result<Self::TxRef, Self::Error> {
+    fn put_tx_data(
+        &mut self,
+        tx: &Transaction,
+        created_at: Option<time::OffsetDateTime>,
+    ) -> Result<Self::TxRef, Self::Error> {
         let txid = tx.txid().0.to_vec();
 
         let mut raw_tx = vec![];
@@ -371,6 +404,7 @@ impl<'a> DBUpdate for DataConnStmtCache<'a> {
             self.stmt_insert_tx_data.execute(&[
                 txid.to_sql()?,
                 u32::from(tx.expiry_height).to_sql()?,
+                created_at.to_sql()?,
                 raw_tx.to_sql()?,
             ])?;
 
