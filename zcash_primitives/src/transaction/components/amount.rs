@@ -17,7 +17,7 @@ pub const DEFAULT_FEE: Amount = Amount(10000);
 /// by the network consensus rules.
 ///
 /// [`Transaction`]: crate::transaction::Transaction
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, PartialOrd)]
 pub struct Amount(i64);
 
 impl Amount {

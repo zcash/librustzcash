@@ -1,5 +1,3 @@
-use std::cmp;
-
 use zcash_primitives::{
     block::BlockHash,
     consensus::{self, BlockHeight, NetworkUpgrade},
@@ -16,8 +14,6 @@ use crate::{
     wallet::WalletTx,
     welding_rig::scan_block,
 };
-
-pub const ANCHOR_OFFSET: u32 = 10;
 
 /// Checks that the scanned blocks in the data database, when combined with the recent
 /// `CompactBlock`s in the cache database, form a valid chain.
@@ -92,53 +88,25 @@ where
     }
 }
 
-/// Determines the target height for a transaction, and the height from which to
-/// select anchors, based on the current synchronised block chain.
-pub fn get_target_and_anchor_heights<'db, E0, N, E, D>(
-    data: &'db D,
-) -> Result<(BlockHeight, BlockHeight), E>
-where
-    E: From<Error<E0, N>>,
-    &'db D: DBOps<Error = E>,
-{
-    data.block_height_extrema().and_then(|heights| {
-        match heights {
-            Some((min_height, max_height)) => {
-                let target_height = max_height + 1;
-
-                // Select an anchor ANCHOR_OFFSET back from the target block,
-                // unless that would be before the earliest block we have.
-                let anchor_height = BlockHeight::from(cmp::max(
-                    u32::from(target_height).saturating_sub(ANCHOR_OFFSET),
-                    u32::from(min_height),
-                ));
-
-                Ok((target_height, anchor_height))
-            }
-            None => Err(Error::ScanRequired.into()),
-        }
-    })
-}
-
-// Scans at most `limit` new blocks added to the cache for any transactions received by
-// the tracked accounts.
-//
-// This function will return without error after scanning at most `limit` new blocks, to
-// enable the caller to update their UI with scanning progress. Repeatedly calling this
-// function will process sequential ranges of blocks, and is equivalent to calling
-// `scan_cached_blocks` and passing `None` for the optional `limit` value.
-//
-// This function pays attention only to cached blocks with heights greater than the
-// highest scanned block in `db_data`. Cached blocks with lower heights are not verified
-// against previously-scanned blocks. In particular, this function **assumes** that the
-// caller is handling rollbacks.
-//
-// For brand-new light client databases, this function starts scanning from the Sapling
-// activation height. This height can be fast-forwarded to a more recent block by calling
-// [`init_blocks_table`] before this function.
-//
-// Scanned blocks are required to be height-sequential. If a block is missing from the
-// cache, an error will be returned with kind [`ChainInvalid::HeightMismatch`].
+/// Scans at most `limit` new blocks added to the cache for any transactions received by
+/// the tracked accounts.
+///
+/// This function will return without error after scanning at most `limit` new blocks, to
+/// enable the caller to update their UI with scanning progress. Repeatedly calling this
+/// function will process sequential ranges of blocks, and is equivalent to calling
+/// `scan_cached_blocks` and passing `None` for the optional `limit` value.
+///
+/// This function pays attention only to cached blocks with heights greater than the
+/// highest scanned block in `db_data`. Cached blocks with lower heights are not verified
+/// against previously-scanned blocks. In particular, this function **assumes** that the
+/// caller is handling rollbacks.
+///
+/// For brand-new light client databases, this function starts scanning from the Sapling
+/// activation height. This height can be fast-forwarded to a more recent block by calling
+/// [`init_blocks_table`] before this function.
+///
+/// Scanned blocks are required to be height-sequential. If a block is missing from the
+/// cache, an error will be returned with kind [`ChainInvalid::HeightMismatch`].
 //
 // # Examples
 //
