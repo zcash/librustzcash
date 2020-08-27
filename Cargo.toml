@@ -1,17 +1,11 @@
 [workspace]
 members = [
-    "bellman",
     "components/equihash",
-    "ff",
-    "group",
-    "pairing",
     "zcash_client_backend",
     "zcash_client_sqlite",
     "zcash_history",
     "zcash_primitives",
     "zcash_proofs",
-    "jubjub",
-    "bls12_381",
 ]
 
 [profile.release]
