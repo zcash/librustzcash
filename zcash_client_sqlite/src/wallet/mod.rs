@@ -341,28 +341,28 @@ pub fn rewind_to_height<P: consensus::Parameters>(
     }
 
     // Start an SQL transaction for rewinding.
-    conn.0.execute("BEGIN IMMEDIATE", NO_PARAMS)?;
+    let tx = conn.0.unchecked_transaction()?;
 
     // Decrement witnesses.
-    conn.0.execute(
+    tx.execute(
         "DELETE FROM sapling_witnesses WHERE block > ?",
         &[u32::from(block_height)],
     )?;
 
     // Un-mine transactions.
-    conn.0.execute(
+    tx.execute(
         "UPDATE transactions SET block = NULL, tx_index = NULL WHERE block > ?",
         &[u32::from(block_height)],
     )?;
 
     // Now that they aren't depended on, delete scanned blocks.
-    conn.0.execute(
+    tx.execute(
         "DELETE FROM blocks WHERE height > ?",
         &[u32::from(block_height)],
     )?;
 
     // Commit the SQL transaction, rewinding atomically.
-    conn.0.execute("COMMIT", NO_PARAMS)?;
+    tx.commit()?;
 
     Ok(())
 }
