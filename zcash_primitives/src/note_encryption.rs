@@ -221,7 +221,7 @@ pub fn prf_ock(
 /// let diversifier = Diversifier([0; 11]);
 /// let pk_d = diversifier.g_d().unwrap();
 /// let to = PaymentAddress::from_parts(diversifier, pk_d).unwrap();
-/// let ovk = OutgoingViewingKey([0; 32]);
+/// let ovk = Some(OutgoingViewingKey([0; 32]));
 ///
 /// let value = 1000;
 /// let rcv = jubjub::Fr::random(&mut rng);
@@ -233,29 +233,34 @@ pub fn prf_ock(
 /// let note = to.create_note(value, Rseed::BeforeZip212(rcm)).unwrap();
 /// let cmu = note.cmu();
 ///
-/// let enc = SaplingNoteEncryption::new(ovk, note, to, Memo::default(), &mut rng);
+/// let mut enc = SaplingNoteEncryption::new(ovk, note, to, Memo::default(), &mut rng);
 /// let encCiphertext = enc.encrypt_note_plaintext();
 /// let outCiphertext = enc.encrypt_outgoing_plaintext(&cv.commitment().into(), &cmu);
 /// ```
-pub struct SaplingNoteEncryption {
+pub struct SaplingNoteEncryption<R: RngCore + CryptoRng> {
     epk: jubjub::SubgroupPoint,
     esk: jubjub::Fr,
     note: Note,
     to: PaymentAddress,
     memo: Memo,
-    ovk: OutgoingViewingKey,
+    /// `None` represents the `ovk = ⊥` case.
+    ovk: Option<OutgoingViewingKey>,
+    rng: R,
 }
 
-impl SaplingNoteEncryption {
+impl<R: RngCore + CryptoRng> SaplingNoteEncryption<R> {
     /// Creates a new encryption context for the given note.
-    pub fn new<R: RngCore + CryptoRng>(
-        ovk: OutgoingViewingKey,
+    ///
+    /// Setting `ovk` to `None` represents the `ovk = ⊥` case, where the note cannot be
+    /// recovered by the sender.
+    pub fn new(
+        ovk: Option<OutgoingViewingKey>,
         note: Note,
         to: PaymentAddress,
         memo: Memo,
-        rng: &mut R,
-    ) -> SaplingNoteEncryption {
-        let esk = note.generate_or_derive_esk(rng);
+        mut rng: R,
+    ) -> Self {
+        let esk = note.generate_or_derive_esk(&mut rng);
         let epk = note.g_d * esk;
 
         SaplingNoteEncryption {
@@ -265,6 +270,7 @@ impl SaplingNoteEncryption {
             to,
             memo,
             ovk,
+            rng,
         }
     }
 
@@ -317,15 +323,28 @@ impl SaplingNoteEncryption {
 
     /// Generates `outCiphertext` for this note.
     pub fn encrypt_outgoing_plaintext(
-        &self,
+        &mut self,
         cv: &jubjub::ExtendedPoint,
         cmu: &bls12_381::Scalar,
     ) -> [u8; OUT_CIPHERTEXT_SIZE] {
-        let ock = prf_ock(&self.ovk, &cv, &cmu, &self.epk);
+        let (ock, input) = if let Some(ovk) = &self.ovk {
+            let ock = prf_ock(ovk, &cv, &cmu, &self.epk);
 
-        let mut input = [0u8; OUT_PLAINTEXT_SIZE];
-        input[0..32].copy_from_slice(&self.note.pk_d.to_bytes());
-        input[32..OUT_PLAINTEXT_SIZE].copy_from_slice(self.esk.to_repr().as_ref());
+            let mut input = [0u8; OUT_PLAINTEXT_SIZE];
+            input[0..32].copy_from_slice(&self.note.pk_d.to_bytes());
+            input[32..OUT_PLAINTEXT_SIZE].copy_from_slice(self.esk.to_repr().as_ref());
+
+            (ock, input)
+        } else {
+            // ovk = ⊥
+            let mut ock = OutgoingCipherKey([0; 32]);
+            let mut input = [0u8; OUT_PLAINTEXT_SIZE];
+
+            self.rng.fill_bytes(&mut ock.0);
+            self.rng.fill_bytes(&mut input);
+
+            (ock, input)
+        };
 
         let mut output = [0u8; OUT_CIPHERTEXT_SIZE];
         assert_eq!(
@@ -847,22 +866,13 @@ mod tests {
         let cmu = note.cmu();
 
         let ovk = OutgoingViewingKey([0; 32]);
-        let ne = SaplingNoteEncryption::new(ovk, note, pa, Memo([0; 512]), &mut rng);
-        let epk = ne.epk();
+        let mut ne = SaplingNoteEncryption::new(Some(ovk), note, pa, Memo([0; 512]), &mut rng);
+        let epk = ne.epk().clone();
         let enc_ciphertext = ne.encrypt_note_plaintext();
         let out_ciphertext = ne.encrypt_outgoing_plaintext(&cv, &cmu);
         let ock = prf_ock(&ovk, &cv, &cmu, &epk);
 
-        (
-            ovk,
-            ock,
-            ivk,
-            cv,
-            cmu,
-            epk.clone(),
-            enc_ciphertext,
-            out_ciphertext,
-        )
+        (ovk, ock, ivk, cv, cmu, epk, enc_ciphertext, out_ciphertext)
     }
 
     fn reencrypt_enc_ciphertext(
@@ -1845,7 +1855,7 @@ mod tests {
             // Test encryption
             //
 
-            let mut ne = SaplingNoteEncryption::new(ovk, note, to, Memo(tv.memo), &mut OsRng);
+            let mut ne = SaplingNoteEncryption::new(Some(ovk), note, to, Memo(tv.memo), OsRng);
             // Swap in the ephemeral keypair from the test vectors
             ne.esk = esk;
             ne.epk = epk;

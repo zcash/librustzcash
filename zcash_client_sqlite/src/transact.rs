@@ -1,7 +1,7 @@
 //! Functions for creating transactions.
 
 use ff::PrimeField;
-use rand_core::{OsRng, RngCore};
+use rand_core::OsRng;
 use rusqlite::{types::ToSql, Connection, NO_PARAMS};
 use std::convert::TryInto;
 use std::path::Path;
@@ -148,16 +148,9 @@ pub fn create_to_address<P: AsRef<Path>>(
 
     // Apply the outgoing viewing key policy.
     let ovk = match ovk_policy {
-        OvkPolicy::Sender => extfvk.fvk.ovk,
-        OvkPolicy::Custom(ovk) => ovk,
-        OvkPolicy::Discard => {
-            // Generate a random outgoing viewing key that the caller does not know.
-            // The probability of this colliding with a legitimate outgoing viewing
-            // key is negligible.
-            let mut ovk = [0; 32];
-            OsRng.fill_bytes(&mut ovk);
-            OutgoingViewingKey(ovk)
-        }
+        OvkPolicy::Sender => Some(extfvk.fvk.ovk),
+        OvkPolicy::Custom(ovk) => Some(ovk),
+        OvkPolicy::Discard => None,
     };
 
     // Target the next block, assuming we are up-to-date.

@@ -257,7 +257,7 @@ mod tests {
             rseed,
         };
         let encryptor = SaplingNoteEncryption::new(
-            extfvk.fvk.ovk,
+            Some(extfvk.fvk.ovk),
             note.clone(),
             to.clone(),
             Memo::default(),
