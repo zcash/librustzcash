@@ -152,6 +152,21 @@ fn kdf_sapling(dhsecret: jubjub::SubgroupPoint, epk: &jubjub::SubgroupPoint) -> 
         .finalize()
 }
 
+/// A symmetric key that can be used to recover a single Sapling output.
+pub struct OutgoingCipherKey([u8; 32]);
+
+impl From<[u8; 32]> for OutgoingCipherKey {
+    fn from(ock: [u8; 32]) -> Self {
+        OutgoingCipherKey(ock)
+    }
+}
+
+impl AsRef<[u8]> for OutgoingCipherKey {
+    fn as_ref(&self) -> &[u8] {
+        &self.0
+    }
+}
+
 /// Sapling PRF^ock.
 ///
 /// Implemented per section 5.4.2 of the Zcash Protocol Specification.
@@ -160,16 +175,21 @@ pub fn prf_ock(
     cv: &jubjub::ExtendedPoint,
     cmu: &bls12_381::Scalar,
     epk: &jubjub::SubgroupPoint,
-) -> Blake2bHash {
-    Blake2bParams::new()
-        .hash_length(32)
-        .personal(PRF_OCK_PERSONALIZATION)
-        .to_state()
-        .update(&ovk.0)
-        .update(&cv.to_bytes())
-        .update(&cmu.to_repr())
-        .update(&epk.to_bytes())
-        .finalize()
+) -> OutgoingCipherKey {
+    OutgoingCipherKey(
+        Blake2bParams::new()
+            .hash_length(32)
+            .personal(PRF_OCK_PERSONALIZATION)
+            .to_state()
+            .update(&ovk.0)
+            .update(&cv.to_bytes())
+            .update(&cmu.to_repr())
+            .update(&epk.to_bytes())
+            .finalize()
+            .as_bytes()
+            .try_into()
+            .unwrap(),
+    )
 }
 
 /// An API for encrypting Sapling notes.
@@ -301,7 +321,7 @@ impl SaplingNoteEncryption {
         cv: &jubjub::ExtendedPoint,
         cmu: &bls12_381::Scalar,
     ) -> [u8; OUT_CIPHERTEXT_SIZE] {
-        let key = prf_ock(&self.ovk, &cv, &cmu, &self.epk);
+        let ock = prf_ock(&self.ovk, &cv, &cmu, &self.epk);
 
         let mut input = [0u8; OUT_PLAINTEXT_SIZE];
         input[0..32].copy_from_slice(&self.note.pk_d.to_bytes());
@@ -310,7 +330,7 @@ impl SaplingNoteEncryption {
         let mut output = [0u8; OUT_CIPHERTEXT_SIZE];
         assert_eq!(
             ChachaPolyIetf::aead_cipher()
-                .seal_to(&mut output, &input, &[], key.as_bytes(), &[0u8; 12])
+                .seal_to(&mut output, &input, &[], ock.as_ref(), &[0u8; 12])
                 .unwrap(),
             OUT_CIPHERTEXT_SIZE
         );
@@ -468,7 +488,7 @@ pub fn try_sapling_compact_note_decryption<P: consensus::Parameters>(
 /// For decryption using a Full Viewing Key see [`try_sapling_output_recovery`].
 pub fn try_sapling_output_recovery_with_ock<P: consensus::Parameters>(
     height: u32,
-    ock: &[u8],
+    ock: &OutgoingCipherKey,
     cmu: &bls12_381::Scalar,
     epk: &jubjub::SubgroupPoint,
     enc_ciphertext: &[u8],
@@ -480,7 +500,7 @@ pub fn try_sapling_output_recovery_with_ock<P: consensus::Parameters>(
     let mut op = [0; OUT_CIPHERTEXT_SIZE];
     assert_eq!(
         ChachaPolyIetf::aead_cipher()
-            .open_to(&mut op, &out_ciphertext, &[], &ock, &[0u8; 12])
+            .open_to(&mut op, &out_ciphertext, &[], ock.as_ref(), &[0u8; 12])
             .ok()?,
         OUT_PLAINTEXT_SIZE
     );
@@ -583,7 +603,7 @@ pub fn try_sapling_output_recovery<P: consensus::Parameters>(
 ) -> Option<(Note, PaymentAddress, Memo)> {
     try_sapling_output_recovery_with_ock::<P>(
         height,
-        prf_ock(&ovk, &cv, &cmu, &epk).as_bytes(),
+        &prf_ock(&ovk, &cv, &cmu, &epk),
         cmu,
         epk,
         enc_ciphertext,
@@ -593,7 +613,6 @@ pub fn try_sapling_output_recovery<P: consensus::Parameters>(
 
 #[cfg(test)]
 mod tests {
-    use blake2b_simd::Hash as Blake2bHash;
     use crypto_api_chachapoly::ChachaPolyIetf;
     use ff::{Field, PrimeField};
     use group::Group;
@@ -606,8 +625,9 @@ mod tests {
     use super::{
         kdf_sapling, prf_ock, sapling_ka_agree, try_sapling_compact_note_decryption,
         try_sapling_note_decryption, try_sapling_output_recovery,
-        try_sapling_output_recovery_with_ock, Memo, SaplingNoteEncryption, COMPACT_NOTE_SIZE,
-        ENC_CIPHERTEXT_SIZE, NOTE_PLAINTEXT_SIZE, OUT_CIPHERTEXT_SIZE, OUT_PLAINTEXT_SIZE,
+        try_sapling_output_recovery_with_ock, Memo, OutgoingCipherKey, SaplingNoteEncryption,
+        COMPACT_NOTE_SIZE, ENC_CIPHERTEXT_SIZE, NOTE_PLAINTEXT_SIZE, OUT_CIPHERTEXT_SIZE,
+        OUT_PLAINTEXT_SIZE,
     };
     use crate::{
         consensus::{
@@ -741,7 +761,7 @@ mod tests {
         mut rng: &mut R,
     ) -> (
         OutgoingViewingKey,
-        Blake2bHash,
+        OutgoingCipherKey,
         jubjub::Fr,
         jubjub::ExtendedPoint,
         bls12_381::Scalar,
@@ -782,7 +802,7 @@ mod tests {
         );
         let ock_output_recovery = try_sapling_output_recovery_with_ock::<TestNetwork>(
             height,
-            ock.as_bytes(),
+            &ock,
             &cmu,
             &epk,
             &enc_ciphertext,
@@ -801,7 +821,7 @@ mod tests {
         mut rng: &mut R,
     ) -> (
         OutgoingViewingKey,
-        Blake2bHash,
+        OutgoingCipherKey,
         jubjub::Fr,
         jubjub::ExtendedPoint,
         bls12_381::Scalar,
@@ -859,7 +879,7 @@ mod tests {
         let mut op = [0; OUT_CIPHERTEXT_SIZE];
         assert_eq!(
             ChachaPolyIetf::aead_cipher()
-                .open_to(&mut op, out_ciphertext, &[], ock.as_bytes(), &[0u8; 12])
+                .open_to(&mut op, out_ciphertext, &[], ock.as_ref(), &[0u8; 12])
                 .unwrap(),
             OUT_PLAINTEXT_SIZE
         );
@@ -1351,7 +1371,7 @@ mod tests {
             assert_eq!(
                 try_sapling_output_recovery_with_ock::<TestNetwork>(
                     height,
-                    &[0u8; 32],
+                    &OutgoingCipherKey([0u8; 32]),
                     &cmu,
                     &epk,
                     &enc_ciphertext,
@@ -1416,7 +1436,7 @@ mod tests {
             assert_eq!(
                 try_sapling_output_recovery_with_ock::<TestNetwork>(
                     height,
-                    &ock.as_bytes(),
+                    &ock,
                     &bls12_381::Scalar::random(&mut rng),
                     &epk,
                     &enc_ctext,
@@ -1454,7 +1474,7 @@ mod tests {
             assert_eq!(
                 try_sapling_output_recovery_with_ock::<TestNetwork>(
                     height,
-                    &ock.as_bytes(),
+                    &ock,
                     &cmu,
                     &jubjub::SubgroupPoint::random(&mut rng),
                     &enc_ciphertext,
@@ -1493,7 +1513,7 @@ mod tests {
             assert_eq!(
                 try_sapling_output_recovery_with_ock::<TestNetwork>(
                     height,
-                    &ock.as_bytes(),
+                    &ock,
                     &cmu,
                     &epk,
                     &enc_ciphertext,
@@ -1532,7 +1552,7 @@ mod tests {
             assert_eq!(
                 try_sapling_output_recovery_with_ock::<TestNetwork>(
                     height,
-                    &ock.as_bytes(),
+                    &ock,
                     &cmu,
                     &epk,
                     &enc_ciphertext,
@@ -1582,7 +1602,7 @@ mod tests {
             assert_eq!(
                 try_sapling_output_recovery_with_ock::<TestNetwork>(
                     height,
-                    &ock.as_bytes(),
+                    &ock,
                     &cmu,
                     &epk,
                     &enc_ciphertext,
@@ -1629,7 +1649,7 @@ mod tests {
             assert_eq!(
                 try_sapling_output_recovery_with_ock::<TestNetwork>(
                     height,
-                    &ock.as_bytes(),
+                    &ock,
                     &cmu,
                     &epk,
                     &enc_ciphertext,
@@ -1676,7 +1696,7 @@ mod tests {
             assert_eq!(
                 try_sapling_output_recovery_with_ock::<TestNetwork>(
                     height,
-                    &ock.as_bytes(),
+                    &ock,
                     &cmu,
                     &epk,
                     &enc_ciphertext,
@@ -1715,7 +1735,7 @@ mod tests {
             assert_eq!(
                 try_sapling_output_recovery_with_ock::<TestNetwork>(
                     height,
-                    &ock.as_bytes(),
+                    &ock,
                     &cmu,
                     &epk,
                     &enc_ciphertext,
@@ -1776,7 +1796,7 @@ mod tests {
 
             let ovk = OutgoingViewingKey(tv.ovk);
             let ock = prf_ock(&ovk, &cv, &cmu, &epk);
-            assert_eq!(ock.as_bytes(), tv.ock);
+            assert_eq!(ock.as_ref(), tv.ock);
 
             let to = PaymentAddress::from_parts(Diversifier(tv.default_d), pk_d).unwrap();
             let note = to.create_note(tv.v, Rseed::BeforeZip212(rcm)).unwrap();
