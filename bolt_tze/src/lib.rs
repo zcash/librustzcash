@@ -9,7 +9,7 @@
 //! For all the cases, see tests below
 
 use super::context;
-use crate::wtp::{bolt, Predicate};
+use crate::types::{bolt, Predicate};
 use crate::transaction::components::Amount;
 
 pub struct Program;
