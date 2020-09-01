@@ -4,37 +4,37 @@
 
 use std::convert::{TryFrom, TryInto};
 
-use super::ToPayload;
-use crate::transaction::builder::Error::InvalidWitness;
-use crate::wtp::bolt::open::get_witness_payload;
-use crate::transaction::components::Amount;
+use zcash_primitives::{
+    extensions::transparent::{FromPayload, ToPayload},
+    transaction::components::Amount,
+};
 
-use bolt::tze_utils::{reconstruct_channel_token_bls12, reconstruct_close_wallet_bls12,
-                      reconstruct_secp_public_key, reconstruct_signature_bls12,
-                      verify_secp_signature, verify_cust_close_message,
-                      reconstruct_secp_channel_close_m, reconstruct_secp_signature,
-                      generate_secp_signature};
-use bolt::bidirectional::{wtp_verify_revoke_message, wtp_verify_merch_close_message};
+use bolt::tze_utils::{
+    generate_secp_signature, reconstruct_channel_token_bls12, reconstruct_close_wallet_bls12,
+    reconstruct_secp_channel_close_m, reconstruct_secp_public_key, reconstruct_secp_signature,
+    reconstruct_signature_bls12, verify_cust_close_message, verify_secp_signature,
+};
+
+use bolt::bidirectional::{wtp_verify_merch_close_message, wtp_verify_revoke_message};
 
 mod open {
-    use std::convert::TryInto;
-
-    pub const MODE: usize = 0;
+    pub const MODE: u32 = 0;
 
     #[derive(Debug, PartialEq)]
     pub struct Predicate {
         pub pubkey: Vec<u8>,
-        pub channel_token: Vec<u8> // (pkc, pkm, pkM, mpk, comparams) => 1074 bytes
+        pub channel_token: Vec<u8>, // (pkc, pkm, pkM, mpk, comparams) => 1074 bytes
     }
 
     #[derive(Debug, PartialEq)]
-    pub struct Witness {     // 210 bytes
+    pub struct Witness {
+        // 210 bytes
         pub witness_type: u8,
         pub cust_bal: u64,
         pub merch_bal: u64,
         pub cust_sig: Vec<u8>,
         pub merch_sig: Vec<u8>,
-        pub wpk: Vec<u8> // 33 bytes
+        pub wpk: Vec<u8>, // 33 bytes
     }
 
     pub fn get_predicate_payload(p: &Predicate) -> Vec<u8> {
@@ -58,25 +58,24 @@ mod open {
         }
         return output;
     }
-
 }
 
 mod close {
-    pub const MODE: usize = 1;
+    pub const MODE: u32 = 1;
 
     #[derive(Debug, PartialEq)]
     pub struct Predicate {
         pub pubkey: Vec<u8>, // 33 bytes
-        pub amount: u64, // merch-bal or cust-bal
+        pub amount: u64,     // merch-bal or cust-bal
         pub block_height: i32,
-        pub channel_token: Vec<u8> // (pkc, pkm, pkM, mpk, comparams) => 1074 bytes
+        pub channel_token: Vec<u8>, // (pkc, pkm, pkM, mpk, comparams) => 1074 bytes
     }
 
     #[derive(Debug, PartialEq)]
     pub struct Witness {
-        pub witness_type: u8, // 1 byte
-        pub address: Vec<u8>, // 33 bytes
-        pub signature: Vec<u8>, // x bytes (cust-sig or merch-sig)
+        pub witness_type: u8,      // 1 byte
+        pub address: Vec<u8>,      // 33 bytes
+        pub signature: Vec<u8>,    // x bytes (cust-sig or merch-sig)
         pub revoke_token: Vec<u8>, // 33 + x (wpk + rev-sig)
     }
 
@@ -104,23 +103,23 @@ mod close {
 }
 
 mod merch_close {
-    pub const MODE: usize = 2;
+    pub const MODE: u32 = 2;
 
     #[derive(Debug, PartialEq)]
     pub struct Predicate {
         pub pubkey: Vec<u8>, // 33 bytes
         pub block_height: i32,
-        pub channel_token: Vec<u8> // (pkc, pkm, pkM, mpk, comparams) => 1074 bytes
+        pub channel_token: Vec<u8>, // (pkc, pkm, pkM, mpk, comparams) => 1074 bytes
     }
 
     #[derive(Debug, PartialEq)]
     pub struct Witness {
-        pub witness_type: u8, // 1 byte
-        pub cust_bal: u64, // 4 bytes
-        pub merch_bal: u64, // 4 bytes
-        pub sig: Vec<u8>, // 73 bytes
+        pub witness_type: u8,     // 1 byte
+        pub cust_bal: u64,        // 4 bytes
+        pub merch_bal: u64,       // 4 bytes
+        pub sig: Vec<u8>,         // 73 bytes
         pub close_token: Vec<u8>, // 73 or 96 bytes
-        pub wpk: Vec<u8> // 33 bytes
+        pub wpk: Vec<u8>,         // 33 bytes
     }
 
     pub fn get_predicate_payload(p: &Predicate) -> Vec<u8> {
@@ -147,12 +146,11 @@ mod merch_close {
     }
 }
 
-
 #[derive(Debug, PartialEq)]
 pub enum Predicate {
     Open(open::Predicate),
     Close(close::Predicate),
-    MerchClose(merch_close::Predicate)
+    MerchClose(merch_close::Predicate),
 }
 
 impl Predicate {
@@ -162,7 +160,10 @@ impl Predicate {
         pubkey.extend(input[0..33].iter());
 
         channel_token.extend(input[33..].iter());
-        Predicate::Open(open::Predicate { pubkey, channel_token })
+        Predicate::Open(open::Predicate {
+            pubkey,
+            channel_token,
+        })
     }
 
     pub fn close(input: [u8; 1119]) -> Self {
@@ -175,7 +176,12 @@ impl Predicate {
 
         channel_token.extend(input[45..].iter());
 
-        Predicate::Close(close::Predicate { pubkey, amount, block_height, channel_token })
+        Predicate::Close(close::Predicate {
+            pubkey,
+            amount,
+            block_height,
+            channel_token,
+        })
     }
 
     pub fn merch_close(input: [u8; 1111]) -> Self {
@@ -186,14 +192,18 @@ impl Predicate {
 
         channel_token.extend(input[37..].iter());
 
-        Predicate::MerchClose(merch_close::Predicate { pubkey, block_height, channel_token })
+        Predicate::MerchClose(merch_close::Predicate {
+            pubkey,
+            block_height,
+            channel_token,
+        })
     }
 }
 
-impl TryFrom<(usize, &[u8])> for Predicate {
+impl TryFrom<(u32, &[u8])> for Predicate {
     type Error = &'static str;
 
-    fn try_from((mode, payload): (usize, &[u8])) -> Result<Self, Self::Error> {
+    fn try_from((mode, payload): (u32, &[u8])) -> Result<Self, Self::Error> {
         match mode {
             open::MODE => {
                 if payload.len() == 1107 {
@@ -203,7 +213,10 @@ impl TryFrom<(usize, &[u8])> for Predicate {
                     let mut channel_token = Vec::new();
                     channel_token.extend(payload[33..].iter());
 
-                    let op = open::Predicate { pubkey, channel_token };
+                    let op = open::Predicate {
+                        pubkey,
+                        channel_token,
+                    };
                     Ok(Predicate::Open(op))
                 } else {
                     Err("Payload is not 1107 bytes")
@@ -218,7 +231,12 @@ impl TryFrom<(usize, &[u8])> for Predicate {
                     let mut channel_token = Vec::new();
                     channel_token.extend(payload[45..].iter());
 
-                    let cl = close::Predicate { pubkey, amount, block_height, channel_token };
+                    let cl = close::Predicate {
+                        pubkey,
+                        amount,
+                        block_height,
+                        channel_token,
+                    };
                     Ok(Predicate::Close(cl))
                 } else {
                     Err("Payload is not 1119 bytes")
@@ -232,7 +250,11 @@ impl TryFrom<(usize, &[u8])> for Predicate {
                     let mut channel_token = Vec::new();
                     channel_token.extend(payload[37..].iter());
 
-                    let cl = merch_close::Predicate { pubkey, block_height, channel_token };
+                    let cl = merch_close::Predicate {
+                        pubkey,
+                        block_height,
+                        channel_token,
+                    };
                     Ok(Predicate::MerchClose(cl))
                 } else {
                     Err("Payload is not 1111 bytes")
@@ -243,18 +265,18 @@ impl TryFrom<(usize, &[u8])> for Predicate {
     }
 }
 
-impl TryFrom<(usize, &Vec<u8>)> for Predicate {
+impl TryFrom<(u32, &Vec<u8>)> for Predicate {
     type Error = &'static str;
 
-    fn try_from((mode, payload): (usize, &Vec<u8>)) -> Result<Self, Self::Error> {
+    fn try_from((mode, payload): (u32, &Vec<u8>)) -> Result<Self, Self::Error> {
         (mode, &payload[..]).try_into()
     }
 }
 
-impl TryFrom<(usize, Predicate)> for Predicate {
+impl TryFrom<(u32, Predicate)> for Predicate {
     type Error = &'static str;
 
-    fn try_from(from: (usize, Self)) -> Result<Self, Self::Error> {
+    fn try_from(from: (u32, Self)) -> Result<Self, Self::Error> {
         match from {
             (open::MODE, Predicate::Open(p)) => Ok(Predicate::Open(p)),
             (close::MODE, Predicate::Close(p)) => Ok(Predicate::Close(p)),
@@ -264,8 +286,16 @@ impl TryFrom<(usize, Predicate)> for Predicate {
     }
 }
 
+impl FromPayload for Predicate {
+    type Error = &'static str;
+
+    fn from_payload(mode: u32, payload: &[u8]) -> Result<Self, Self::Error> {
+        (mode, payload).try_into()
+    }
+}
+
 impl ToPayload for Predicate {
-    fn to_payload(&self) -> (usize, Vec<u8>) {
+    fn to_payload(&self) -> (u32, Vec<u8>) {
         match self {
             Predicate::Open(p) => (open::MODE, open::get_predicate_payload(p)),
             Predicate::Close(p) => (close::MODE, close::get_predicate_payload(p)),
@@ -296,7 +326,7 @@ fn convert_bytes_to_u64(x: &[u8]) -> u64 {
 pub enum Witness {
     Open(open::Witness),
     Close(close::Witness),
-    MerchClose(merch_close::Witness)
+    MerchClose(merch_close::Witness),
 }
 
 fn parse_witness_struct(input: [u8; 220]) -> (u8, u64, u64, Vec<u8>, Vec<u8>, Vec<u8>) {
@@ -308,21 +338,22 @@ fn parse_witness_struct(input: [u8; 220]) -> (u8, u64, u64, Vec<u8>, Vec<u8>, Ve
     let mut merch_sig = Vec::new();
     let mut wpk = Vec::new();
 
-    let mut start_index = 18;
-    let mut end_index = (18 + input[17]) as usize;
+    let start_index = 18;
+    let end_index = (18 + input[17]) as usize;
 
     // customer signature
-    cust_sig.extend_from_slice(&input[start_index .. end_index].to_vec());
+    cust_sig.extend_from_slice(&input[start_index..end_index].to_vec());
 
     let start_merch_sig = end_index + 1;
     let end_merch_sig = start_merch_sig + input[end_index] as usize;
 
     // merchant signature
-    merch_sig.extend_from_slice(&input[start_merch_sig .. end_merch_sig].to_vec());
+    merch_sig.extend_from_slice(&input[start_merch_sig..end_merch_sig].to_vec());
 
-    if witness_type == 0x1 { // customer initiated (merch_sig : close-token = 96 bytes)
+    if witness_type == 0x1 {
+        // customer initiated (merch_sig : close-token = 96 bytes)
         let end_wpk = end_merch_sig + 33;
-        wpk.extend(input[end_merch_sig .. end_wpk].iter());
+        wpk.extend(input[end_merch_sig..end_wpk].iter());
     }
 
     return (witness_type, cust_bal, merch_bal, cust_sig, merch_sig, wpk);
@@ -337,13 +368,13 @@ fn parse_open_witness_input(input: [u8; 220]) -> open::Witness {
         merch_bal,
         cust_sig,
         merch_sig,
-        wpk
+        wpk,
     };
 }
 
 fn parse_close_witness_input(input: [u8; 180]) -> close::Witness {
     let witness_type = input[0];
-    let mut address= Vec::new();
+    let mut address = Vec::new();
     let mut signature = Vec::new();
     let mut revoke_token = Vec::new();
 
@@ -361,7 +392,7 @@ fn parse_close_witness_input(input: [u8; 180]) -> close::Witness {
         witness_type,
         address,
         signature,
-        revoke_token
+        revoke_token,
     };
 }
 
@@ -379,7 +410,8 @@ fn parse_merch_close_witness_input(input: [u8; 220]) -> merch_close::Witness {
     let end_merch_balance = end_cust_balance + 8;
     let merch_bal = convert_bytes_to_u64(&input[end_cust_balance..end_merch_balance]);
 
-    if witness_type == 0x1 { // customer initiated (merch_sig : close-token = 96 bytes)
+    if witness_type == 0x1 {
+        // customer initiated (merch_sig : close-token = 96 bytes)
         let start_second_sig = end_merch_balance + 1;
         let end_second_sig = start_second_sig + input[end_merch_balance] as usize;
         merch_sig.extend_from_slice(&input[start_second_sig..end_second_sig].to_vec());
@@ -392,10 +424,10 @@ fn parse_merch_close_witness_input(input: [u8; 220]) -> merch_close::Witness {
         cust_bal,
         merch_bal,
         sig: cust_sig,
-        close_token: merch_sig, wpk
+        close_token: merch_sig,
+        wpk,
     };
 }
-
 
 impl Witness {
     pub fn open(input: [u8; 220]) -> Self {
@@ -411,10 +443,10 @@ impl Witness {
     }
 }
 
-impl TryFrom<(usize, &[u8])> for Witness {
+impl TryFrom<(u32, &[u8])> for Witness {
     type Error = &'static str;
 
-    fn try_from((mode, payload): (usize, &[u8])) -> Result<Self, Self::Error> {
+    fn try_from((mode, payload): (u32, &[u8])) -> Result<Self, Self::Error> {
         match mode {
             open::MODE => {
                 if payload.len() == 220 {
@@ -463,18 +495,18 @@ impl TryFrom<(usize, &[u8])> for Witness {
     }
 }
 
-impl TryFrom<(usize, &Vec<u8>)> for Witness {
+impl TryFrom<(u32, &Vec<u8>)> for Witness {
     type Error = &'static str;
 
-    fn try_from((mode, payload): (usize, &Vec<u8>)) -> Result<Self, Self::Error> {
+    fn try_from((mode, payload): (u32, &Vec<u8>)) -> Result<Self, Self::Error> {
         (mode, &payload[..]).try_into()
     }
 }
 
-impl TryFrom<(usize, Witness)> for Witness {
+impl TryFrom<(u32, Witness)> for Witness {
     type Error = &'static str;
 
-    fn try_from(from: (usize, Self)) -> Result<Self, Self::Error> {
+    fn try_from(from: (u32, Self)) -> Result<Self, Self::Error> {
         match from {
             (open::MODE, Witness::Open(p)) => Ok(Witness::Open(p)),
             (close::MODE, Witness::Close(p)) => Ok(Witness::Close(p)),
@@ -484,8 +516,16 @@ impl TryFrom<(usize, Witness)> for Witness {
     }
 }
 
+impl FromPayload for Witness {
+    type Error = &'static str;
+
+    fn from_payload(mode: u32, payload: &[u8]) -> Result<Self, Self::Error> {
+        (mode, payload).try_into()
+    }
+}
+
 impl ToPayload for Witness {
-    fn to_payload(&self) -> (usize, Vec<u8>) {
+    fn to_payload(&self) -> (u32, Vec<u8>) {
         match self {
             Witness::Open(w) => (open::MODE, open::get_witness_payload(w)),
             Witness::Close(w) => (close::MODE, close::get_witness_payload(w)),
@@ -518,12 +558,17 @@ pub fn convert_to_amount(value: u64) -> Amount {
 //
 // Also check that <cust-sig> is a valid signature and that <closing-token> contains a valid signature under <MERCH-PK> on <<cust-pk> || <wpk> || <amount-cust> || <amount-merch> || CLOSE>
 
-pub fn verify_channel_opening(escrow_pred: &open::Predicate, close_tx_witness: &open::Witness, tx_hash: &Vec<u8>, tx2_pubkey: Vec<u8>) -> bool {
+pub fn verify_channel_opening(
+    escrow_pred: &open::Predicate,
+    close_tx_witness: &open::Witness,
+    tx_hash: &Vec<u8>,
+    tx2_pubkey: Vec<u8>,
+) -> bool {
     let _channel_token = &escrow_pred.channel_token;
     let option_channel_token = reconstruct_channel_token_bls12(&_channel_token);
     let channel_token = match option_channel_token {
         Ok(n) => n.unwrap(),
-        Err(_e) => return false
+        Err(_e) => return false,
     };
 
     //println!("debug: verify_channel_opening - tx_hash: {:?}", &tx_hash);
@@ -544,13 +589,14 @@ pub fn verify_channel_opening(escrow_pred: &open::Predicate, close_tx_witness: &
         return is_cust_sig_valid && is_merch_sig_valid;
     } else if close_tx_witness.witness_type == 0x1 {
         // customer-initiated
-        let is_merch_pk_thesame= tx2_pubkey == escrow_pred.pubkey;
+        let is_merch_pk_thesame = tx2_pubkey == escrow_pred.pubkey;
 
         let mut wpk_bytes = [0u8; 33];
         wpk_bytes.copy_from_slice(close_tx_witness.wpk.as_slice());
         let wpk = reconstruct_secp_public_key(&wpk_bytes);
 
-        let close_wallet = reconstruct_close_wallet_bls12(&channel_token, &wpk, cust_bal, merch_bal);
+        let close_wallet =
+            reconstruct_close_wallet_bls12(&channel_token, &wpk, cust_bal, merch_bal);
 
         let cust_sig = reconstruct_secp_signature(close_tx_witness.cust_sig.as_slice());
 
@@ -559,11 +605,12 @@ pub fn verify_channel_opening(escrow_pred: &open::Predicate, close_tx_witness: &
         let option_close_token = reconstruct_signature_bls12(&close_tx_witness.merch_sig);
         let close_token = match option_close_token {
             Ok(n) => n.unwrap(),
-            Err(_e) => return false
+            Err(_e) => return false,
         };
 
         // check whether close token is valid
-        let is_close_token_valid = verify_cust_close_message(&channel_token, &wpk, &close_wallet, &close_token);
+        let is_close_token_valid =
+            verify_cust_close_message(&channel_token, &wpk, &close_wallet, &close_token);
         return is_cust_sig_valid && is_close_token_valid && is_merch_pk_thesame;
     }
 
@@ -577,11 +624,15 @@ pub fn verify_channel_opening(escrow_pred: &open::Predicate, close_tx_witness: &
 // Also check that <merch-sig> is a valid signature on <<address> || <revocation-token>>
 // and that <revocation-token> contains a valid signature under <wpk> on <<wpk> || REVOKED>
 
-pub fn verify_channel_closing(close_tx_pred: &close::Predicate, spend_tx_witness: &close::Witness, tx_hash: &Vec<u8>) -> bool {
+pub fn verify_channel_closing(
+    close_tx_pred: &close::Predicate,
+    spend_tx_witness: &close::Witness,
+    tx_hash: &Vec<u8>,
+) -> bool {
     let option_channel_token = reconstruct_channel_token_bls12(&close_tx_pred.channel_token);
     let channel_token = match option_channel_token {
         Ok(n) => n.unwrap(),
-        Err(_e) => return false
+        Err(_e) => return false,
     };
 
     if spend_tx_witness.witness_type == 0x0 {
@@ -594,23 +645,33 @@ pub fn verify_channel_closing(close_tx_pred: &close::Predicate, spend_tx_witness
         // merchant-initiated
         let mut address_bytes = [0u8; 33];
         address_bytes.copy_from_slice(spend_tx_witness.address.as_slice());
-        let channel_close = reconstruct_secp_channel_close_m(&address_bytes, &spend_tx_witness.revoke_token, &spend_tx_witness.signature);
+        let channel_close = reconstruct_secp_channel_close_m(
+            &address_bytes,
+            &spend_tx_witness.revoke_token,
+            &spend_tx_witness.signature,
+        );
         let mut wpk_bytes = [0u8; 33];
         wpk_bytes.copy_from_slice(close_tx_pred.pubkey.as_slice());
         let wpk = reconstruct_secp_public_key(&wpk_bytes);
         let revoke_token = reconstruct_secp_signature(spend_tx_witness.revoke_token.as_slice());
-        return wtp_verify_revoke_message(&wpk, &revoke_token) &&  wtp_verify_merch_close_message(&channel_token, &channel_close);
+        return wtp_verify_revoke_message(&wpk, &revoke_token)
+            && wtp_verify_merch_close_message(&channel_token, &channel_close);
     }
 
     return false;
 }
 
 // merch-close program
-pub fn verify_channel_merch_closing(merch_tx_pred: &merch_close::Predicate, close_tx_witness: &merch_close::Witness, tx_hash: &Vec<u8>, tx2_pubkey: Vec<u8>) -> bool {
+pub fn verify_channel_merch_closing(
+    merch_tx_pred: &merch_close::Predicate,
+    close_tx_witness: &merch_close::Witness,
+    tx_hash: &Vec<u8>,
+    tx2_pubkey: Vec<u8>,
+) -> bool {
     let option_channel_token = reconstruct_channel_token_bls12(&merch_tx_pred.channel_token);
     let channel_token = match option_channel_token {
         Ok(n) => n.unwrap(),
-        Err(_e) => return false
+        Err(_e) => return false,
     };
 
     let pkc = channel_token.pk_c.unwrap();
@@ -624,13 +685,14 @@ pub fn verify_channel_merch_closing(merch_tx_pred: &merch_close::Predicate, clos
         return is_merch_sig_valid;
     } else if close_tx_witness.witness_type == 0x1 {
         // customer spending from merchant-initiated close tx
-        let is_merch_pk_thesame= tx2_pubkey != merch_tx_pred.pubkey;
+        let is_merch_pk_thesame = tx2_pubkey != merch_tx_pred.pubkey;
 
         let mut wpk_bytes = [0u8; 33];
         wpk_bytes.copy_from_slice(close_tx_witness.wpk.as_slice());
         let wpk = reconstruct_secp_public_key(&wpk_bytes);
 
-        let close_wallet = reconstruct_close_wallet_bls12(&channel_token, &wpk, cust_bal, merch_bal);
+        let close_wallet =
+            reconstruct_close_wallet_bls12(&channel_token, &wpk, cust_bal, merch_bal);
 
         let cust_sig = reconstruct_secp_signature(close_tx_witness.sig.as_slice());
 
@@ -639,25 +701,29 @@ pub fn verify_channel_merch_closing(merch_tx_pred: &merch_close::Predicate, clos
         let option_close_token = reconstruct_signature_bls12(&close_tx_witness.close_token);
         let close_token = match option_close_token {
             Ok(n) => n.unwrap(),
-            Err(_e) => return false
+            Err(_e) => return false,
         };
 
         // check whether close token is valid
-        let is_close_token_valid = verify_cust_close_message(&channel_token, &wpk, &close_wallet, &close_token);
+        let is_close_token_valid =
+            verify_cust_close_message(&channel_token, &wpk, &close_wallet, &close_token);
         return is_cust_sig_valid && is_close_token_valid && is_merch_pk_thesame;
     }
 
     return false;
 }
 
-
 #[cfg(test)]
 mod tests {
     use std::convert::TryInto;
 
-    use super::{merch_close, close, open, Predicate, Witness};
-    use crate::wtp::ToPayload;
-    use crate::wtp::bolt::{parse_open_witness_input, parse_close_witness_input, convert_bytes_to_u64, convert_bytes_to_i32, parse_merch_close_witness_input};
+    use zcash_primitives::extensions::transparent::ToPayload;
+
+    use super::{
+        close, convert_bytes_to_i32, convert_bytes_to_u64, merch_close, open,
+        parse_close_witness_input, parse_merch_close_witness_input, parse_open_witness_input,
+        Predicate, Witness,
+    };
 
     #[test]
     fn predicate_open_round_trip() {
@@ -670,7 +736,13 @@ mod tests {
 
         channel_token.extend(data[33..].iter());
 
-        assert_eq!(p, Predicate::Open(open::Predicate { pubkey, channel_token }));
+        assert_eq!(
+            p,
+            Predicate::Open(open::Predicate {
+                pubkey,
+                channel_token
+            })
+        );
         assert_eq!(p.to_payload(), (open::MODE, data));
     }
 
@@ -687,7 +759,15 @@ mod tests {
         let mut channel_token: Vec<u8> = Vec::new();
         channel_token.extend(data[45..].iter());
 
-        assert_eq!(p, Predicate::Close(close::Predicate { pubkey, amount, block_height, channel_token }));
+        assert_eq!(
+            p,
+            Predicate::Close(close::Predicate {
+                pubkey,
+                amount,
+                block_height,
+                channel_token
+            })
+        );
         assert_eq!(p.to_payload(), (close::MODE, data));
     }
 
@@ -703,7 +783,14 @@ mod tests {
         let mut channel_token: Vec<u8> = Vec::new();
         channel_token.extend(data[37..].iter());
 
-        assert_eq!(p, Predicate::MerchClose(merch_close::Predicate { pubkey, block_height, channel_token }));
+        assert_eq!(
+            p,
+            Predicate::MerchClose(merch_close::Predicate {
+                pubkey,
+                block_height,
+                channel_token
+            })
+        );
         assert_eq!(p.to_payload(), (merch_close::MODE, data));
     }
 

@@ -5,11 +5,10 @@ version = "0.0.0"
 license = "MIT OR Apache-2.0"
 edition = "2018"
 
-[lib]
-path = "src/lib.rs"
-
 [dependencies]
+blake2b_simd = "0.5"
 bolt = { git = "https://github.com/boltlabs-inc/libbolt", branch = "master" }
+hex = "0.3"
 zcash_extensions = { path = "../zcash_extensions" }
 zcash_primitives = { version = "0.3.0", path = "../zcash_primitives" }
 
