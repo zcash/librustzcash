@@ -13,8 +13,7 @@
 use bellman::gadgets::boolean::{AllocatedBit, Boolean};
 use bellman::gadgets::multipack::pack_into_inputs;
 use bellman::{Circuit, ConstraintSystem, LinearCombination, SynthesisError};
-use ff::Field;
-use pairing::Engine;
+use ff::PrimeField;
 
 mod commitment;
 mod input;
@@ -55,8 +54,8 @@ pub struct JSOutput {
     pub r: Option<CommitmentRandomness>,
 }
 
-impl<E: Engine> Circuit<E> for JoinSplit {
-    fn synthesize<CS: ConstraintSystem<E>>(self, cs: &mut CS) -> Result<(), SynthesisError> {
+impl<Scalar: PrimeField> Circuit<Scalar> for JoinSplit {
+    fn synthesize<CS: ConstraintSystem<Scalar>>(self, cs: &mut CS) -> Result<(), SynthesisError> {
         assert_eq!(self.inputs.len(), 2);
         assert_eq!(self.outputs.len(), 2);
 
@@ -219,10 +218,10 @@ pub struct NoteValue {
 }
 
 impl NoteValue {
-    fn new<E, CS>(mut cs: CS, value: Option<u64>) -> Result<NoteValue, SynthesisError>
+    fn new<Scalar, CS>(mut cs: CS, value: Option<u64>) -> Result<NoteValue, SynthesisError>
     where
-        E: Engine,
-        CS: ConstraintSystem<E>,
+        Scalar: PrimeField,
+        CS: ConstraintSystem<Scalar>,
     {
         let mut values;
         match value {
@@ -262,13 +261,13 @@ impl NoteValue {
 
     /// Computes this value as a linear combination of
     /// its bits.
-    fn lc<E: Engine>(&self) -> LinearCombination<E> {
+    fn lc<Scalar: PrimeField>(&self) -> LinearCombination<Scalar> {
         let mut tmp = LinearCombination::zero();
 
-        let mut coeff = E::Fr::one();
+        let mut coeff = Scalar::one();
         for b in &self.bits {
             tmp = tmp + (coeff, b.get_variable());
-            coeff.double();
+            coeff = coeff.double();
         }
 
         tmp
@@ -281,15 +280,15 @@ impl NoteValue {
 
 /// Witnesses some bytes in the constraint system,
 /// skipping the first `skip_bits`.
-fn witness_bits<E, CS>(
+fn witness_bits<Scalar, CS>(
     mut cs: CS,
     value: Option<&[u8]>,
     num_bits: usize,
     skip_bits: usize,
 ) -> Result<Vec<Boolean>, SynthesisError>
 where
-    E: Engine,
-    CS: ConstraintSystem<E>,
+    Scalar: PrimeField,
+    CS: ConstraintSystem<Scalar>,
 {
     let bit_values = if let Some(value) = value {
         let mut tmp = vec![];
@@ -318,18 +317,18 @@ where
     Ok(bits)
 }
 
-fn witness_u256<E, CS>(cs: CS, value: Option<&[u8]>) -> Result<Vec<Boolean>, SynthesisError>
+fn witness_u256<Scalar, CS>(cs: CS, value: Option<&[u8]>) -> Result<Vec<Boolean>, SynthesisError>
 where
-    E: Engine,
-    CS: ConstraintSystem<E>,
+    Scalar: PrimeField,
+    CS: ConstraintSystem<Scalar>,
 {
     witness_bits(cs, value, 256, 0)
 }
 
-fn witness_u252<E, CS>(cs: CS, value: Option<&[u8]>) -> Result<Vec<Boolean>, SynthesisError>
+fn witness_u252<Scalar, CS>(cs: CS, value: Option<&[u8]>) -> Result<Vec<Boolean>, SynthesisError>
 where
-    E: Engine,
-    CS: ConstraintSystem<E>,
+    Scalar: PrimeField,
+    CS: ConstraintSystem<Scalar>,
 {
     witness_bits(cs, value, 252, 4)
 }
@@ -338,7 +337,7 @@ where
 #[ignore]
 fn test_sprout_constraints() {
     use bellman::gadgets::test::*;
-    use pairing::bls12_381::Bls12;
+    use bls12_381::Scalar;
 
     use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 
@@ -356,7 +355,7 @@ fn test_sprout_constraints() {
     }
 
     while test_vector.len() != 0 {
-        let mut cs = TestConstraintSystem::<Bls12>::new();
+        let mut cs = TestConstraintSystem::<Scalar>::new();
 
         let phi = Some(get_u256(&mut test_vector));
         let rt = Some(get_u256(&mut test_vector));
@@ -462,7 +461,7 @@ fn test_sprout_constraints() {
         use bellman::gadgets::multipack;
 
         let expected_inputs = multipack::bytes_to_bits(&expected_inputs);
-        let expected_inputs = multipack::compute_multipacking::<Bls12>(&expected_inputs);
+        let expected_inputs = multipack::compute_multipacking(&expected_inputs);
 
         assert!(cs.verify(&expected_inputs));
     }

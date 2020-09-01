@@ -1,10 +1,8 @@
 //! Helpers for creating Sapling proofs.
 
-use pairing::bls12_381::Bls12;
-use zcash_primitives::jubjub::{
-    edwards, fs::FsRepr, FixedGenerators, JubjubBls12, JubjubParams, Unknown,
+use zcash_primitives::{
+    constants::VALUE_COMMITMENT_VALUE_GENERATOR, transaction::components::Amount,
 };
-use zcash_primitives::transaction::components::Amount;
 
 mod prover;
 mod verifier;
@@ -13,10 +11,7 @@ pub use self::prover::SaplingProvingContext;
 pub use self::verifier::SaplingVerificationContext;
 
 // This function computes `value` in the exponent of the value commitment base
-fn compute_value_balance(
-    value: Amount,
-    params: &JubjubBls12,
-) -> Option<edwards::Point<Bls12, Unknown>> {
+fn compute_value_balance(value: Amount) -> Option<jubjub::ExtendedPoint> {
     // Compute the absolute value (failing if -i64::MAX is
     // the value)
     let abs = match i64::from(value).checked_abs() {
@@ -28,13 +23,11 @@ fn compute_value_balance(
     let is_negative = value.is_negative();
 
     // Compute it in the exponent
-    let mut value_balance = params
-        .generator(FixedGenerators::ValueCommitmentValue)
-        .mul(FsRepr::from(abs), params);
+    let mut value_balance = VALUE_COMMITMENT_VALUE_GENERATOR * jubjub::Fr::from(abs);
 
     // Negate if necessary
     if is_negative {
-        value_balance = value_balance.negate();
+        value_balance = -value_balance;
     }
 
     // Convert to unknown order point

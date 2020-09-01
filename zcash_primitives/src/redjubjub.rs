@@ -3,32 +3,29 @@
 //!
 //! [RedJubjub]: https://zips.z.cash/protocol/protocol.pdf#concretereddsa
 
-use crate::jubjub::{edwards::Point, FixedGenerators, JubjubEngine, JubjubParams, Unknown};
-use ff::{Field, PrimeField, PrimeFieldRepr};
+use ff::{Field, PrimeField};
+use group::GroupEncoding;
+use jubjub::{ExtendedPoint, SubgroupPoint};
 use rand_core::RngCore;
 use std::io::{self, Read, Write};
+use std::ops::{AddAssign, MulAssign, Neg};
 
 use crate::util::hash_to_scalar;
 
-fn read_scalar<E: JubjubEngine, R: Read>(reader: R) -> io::Result<E::Fs> {
-    let mut s_repr = <E::Fs as PrimeField>::Repr::default();
-    s_repr.read_le(reader)?;
+fn read_scalar<R: Read>(mut reader: R) -> io::Result<jubjub::Fr> {
+    let mut s_repr = [0u8; 32];
+    reader.read_exact(s_repr.as_mut())?;
 
-    match E::Fs::from_repr(s_repr) {
-        Ok(s) => Ok(s),
-        Err(_) => Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "scalar is not in field",
-        )),
-    }
+    jubjub::Fr::from_repr(s_repr)
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "scalar is not in field"))
 }
 
-fn write_scalar<E: JubjubEngine, W: Write>(s: &E::Fs, writer: W) -> io::Result<()> {
-    s.into_repr().write_le(writer)
+fn write_scalar<W: Write>(s: &jubjub::Fr, mut writer: W) -> io::Result<()> {
+    writer.write_all(s.to_repr().as_ref())
 }
 
-fn h_star<E: JubjubEngine>(a: &[u8], b: &[u8]) -> E::Fs {
-    hash_to_scalar::<E>(b"Zcash_RedJubjubH", a, b)
+fn h_star(a: &[u8], b: &[u8]) -> jubjub::Fr {
+    hash_to_scalar(b"Zcash_RedJubjubH", a, b)
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -37,10 +34,10 @@ pub struct Signature {
     sbar: [u8; 32],
 }
 
-pub struct PrivateKey<E: JubjubEngine>(pub E::Fs);
+pub struct PrivateKey(pub jubjub::Fr);
 
 #[derive(Debug)]
-pub struct PublicKey<E: JubjubEngine>(pub Point<E, Unknown>);
+pub struct PublicKey(pub ExtendedPoint);
 
 impl Signature {
     pub fn read<R: Read>(mut reader: R) -> io::Result<Self> {
@@ -57,167 +54,156 @@ impl Signature {
     }
 }
 
-impl<E: JubjubEngine> PrivateKey<E> {
-    pub fn randomize(&self, alpha: E::Fs) -> Self {
+impl PrivateKey {
+    pub fn randomize(&self, alpha: jubjub::Fr) -> Self {
         let mut tmp = self.0;
         tmp.add_assign(&alpha);
         PrivateKey(tmp)
     }
 
     pub fn read<R: Read>(reader: R) -> io::Result<Self> {
-        let pk = read_scalar::<E, R>(reader)?;
+        let pk = read_scalar::<R>(reader)?;
         Ok(PrivateKey(pk))
     }
 
     pub fn write<W: Write>(&self, writer: W) -> io::Result<()> {
-        write_scalar::<E, W>(&self.0, writer)
+        write_scalar::<W>(&self.0, writer)
     }
 
-    pub fn sign<R: RngCore>(
-        &self,
-        msg: &[u8],
-        rng: &mut R,
-        p_g: FixedGenerators,
-        params: &E::Params,
-    ) -> Signature {
+    pub fn sign<R: RngCore>(&self, msg: &[u8], rng: &mut R, p_g: SubgroupPoint) -> Signature {
         // T = (l_H + 128) bits of randomness
         // For H*, l_H = 512 bits
         let mut t = [0u8; 80];
         rng.fill_bytes(&mut t[..]);
 
         // r = H*(T || M)
-        let r = h_star::<E>(&t[..], msg);
+        let r = h_star(&t[..], msg);
 
         // R = r . P_G
-        let r_g = params.generator(p_g).mul(r, params);
-        let mut rbar = [0u8; 32];
-        r_g.write(&mut rbar[..])
-            .expect("Jubjub points should serialize to 32 bytes");
+        let r_g = p_g * r;
+        let rbar = r_g.to_bytes();
 
         // S = r + H*(Rbar || M) . sk
-        let mut s = h_star::<E>(&rbar[..], msg);
+        let mut s = h_star(&rbar[..], msg);
         s.mul_assign(&self.0);
         s.add_assign(&r);
         let mut sbar = [0u8; 32];
-        write_scalar::<E, &mut [u8]>(&s, &mut sbar[..])
+        write_scalar::<&mut [u8]>(&s, &mut sbar[..])
             .expect("Jubjub scalars should serialize to 32 bytes");
 
         Signature { rbar, sbar }
     }
 }
 
-impl<E: JubjubEngine> PublicKey<E> {
-    pub fn from_private(privkey: &PrivateKey<E>, p_g: FixedGenerators, params: &E::Params) -> Self {
-        let res = params.generator(p_g).mul(privkey.0, params).into();
-        PublicKey(res)
+impl PublicKey {
+    pub fn from_private(privkey: &PrivateKey, p_g: SubgroupPoint) -> Self {
+        PublicKey((p_g * privkey.0).into())
     }
 
-    pub fn randomize(&self, alpha: E::Fs, p_g: FixedGenerators, params: &E::Params) -> Self {
-        let res: Point<E, Unknown> = params.generator(p_g).mul(alpha, params).into();
-        let res = res.add(&self.0, params);
-        PublicKey(res)
+    pub fn randomize(&self, alpha: jubjub::Fr, p_g: SubgroupPoint) -> Self {
+        PublicKey(ExtendedPoint::from(p_g * alpha) + self.0)
     }
 
-    pub fn read<R: Read>(reader: R, params: &E::Params) -> io::Result<Self> {
-        let p = Point::read(reader, params)?;
-        Ok(PublicKey(p))
+    pub fn read<R: Read>(mut reader: R) -> io::Result<Self> {
+        let mut bytes = [0u8; 32];
+        reader.read_exact(&mut bytes)?;
+        let p = ExtendedPoint::from_bytes(&bytes).map(PublicKey);
+        if p.is_some().into() {
+            Ok(p.unwrap())
+        } else {
+            Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "invalid RedJubjub public key",
+            ))
+        }
     }
 
-    pub fn write<W: Write>(&self, writer: W) -> io::Result<()> {
-        self.0.write(writer)
+    pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
+        writer.write_all(&self.0.to_bytes())
     }
 
-    pub fn verify(
-        &self,
-        msg: &[u8],
-        sig: &Signature,
-        p_g: FixedGenerators,
-        params: &E::Params,
-    ) -> bool {
+    pub fn verify(&self, msg: &[u8], sig: &Signature, p_g: SubgroupPoint) -> bool {
         // c = H*(Rbar || M)
-        let c = h_star::<E>(&sig.rbar[..], msg);
+        let c = h_star(&sig.rbar[..], msg);
 
         // Signature checks:
         // R != invalid
-        let r = match Point::read(&sig.rbar[..], params) {
-            Ok(r) => r,
-            Err(_) => return false,
+        let r = {
+            let r = ExtendedPoint::from_bytes(&sig.rbar);
+            if r.is_none().into() {
+                return false;
+            }
+            r.unwrap()
         };
         // S < order(G)
-        // (E::Fs guarantees its representation is in the field)
-        let s = match read_scalar::<E, &[u8]>(&sig.sbar[..]) {
+        // (jubjub::Scalar guarantees its representation is in the field)
+        let s = match read_scalar::<&[u8]>(&sig.sbar[..]) {
             Ok(s) => s,
             Err(_) => return false,
         };
         // 0 = h_G(-S . P_G + R + c . vk)
-        self.0
-            .mul(c, params)
-            .add(&r, params)
-            .add(
-                &params.generator(p_g).mul(s, params).negate().into(),
-                params,
-            )
-            .mul_by_cofactor(params)
-            .eq(&Point::zero())
+        ((self.0 * c) + r - (p_g * s))
+            .mul_by_cofactor()
+            .is_identity()
+            .into()
     }
 }
 
-pub struct BatchEntry<'a, E: JubjubEngine> {
-    vk: PublicKey<E>,
+pub struct BatchEntry<'a> {
+    vk: PublicKey,
     msg: &'a [u8],
     sig: Signature,
 }
 
 // TODO: #82: This is a naive implementation currently,
 // and doesn't use multiexp.
-pub fn batch_verify<'a, E: JubjubEngine, R: RngCore>(
+pub fn batch_verify<'a, R: RngCore>(
     rng: &mut R,
-    batch: &[BatchEntry<'a, E>],
-    p_g: FixedGenerators,
-    params: &E::Params,
+    batch: &[BatchEntry<'a>],
+    p_g: SubgroupPoint,
 ) -> bool {
-    let mut acc = Point::<E, Unknown>::zero();
+    let mut acc = ExtendedPoint::identity();
 
     for entry in batch {
-        let mut r = match Point::<E, Unknown>::read(&entry.sig.rbar[..], params) {
-            Ok(r) => r,
-            Err(_) => return false,
+        let mut r = {
+            let r = ExtendedPoint::from_bytes(&entry.sig.rbar);
+            if r.is_none().into() {
+                return false;
+            }
+            r.unwrap()
         };
-        let mut s = match read_scalar::<E, &[u8]>(&entry.sig.sbar[..]) {
+        let mut s = match read_scalar::<&[u8]>(&entry.sig.sbar[..]) {
             Ok(s) => s,
             Err(_) => return false,
         };
 
-        let mut c = h_star::<E>(&entry.sig.rbar[..], entry.msg);
+        let mut c = h_star(&entry.sig.rbar[..], entry.msg);
 
-        let z = E::Fs::random(rng);
+        let z = jubjub::Fr::random(rng);
 
         s.mul_assign(&z);
-        s.negate();
+        s = s.neg();
 
-        r = r.mul(z, params);
+        r = r * z;
 
         c.mul_assign(&z);
 
-        acc = acc.add(&r, params);
-        acc = acc.add(&entry.vk.0.mul(c, params), params);
-        acc = acc.add(&params.generator(p_g).mul(s, params).into(), params);
+        acc = acc + r + (&entry.vk.0 * c) + (p_g * s);
     }
 
-    acc = acc.mul_by_cofactor(params).into();
+    acc = acc.mul_by_cofactor().into();
 
-    acc.eq(&Point::zero())
+    acc.is_identity().into()
 }
 
 #[cfg(test)]
 mod tests {
-    use pairing::bls12_381::Bls12;
+    use group::Group;
     use rand_core::SeedableRng;
     use rand_xorshift::XorShiftRng;
 
-    use crate::jubjub::{edwards, fs::Fs, JubjubBls12};
-
     use super::*;
+    use crate::constants::SPENDING_KEY_GENERATOR;
 
     #[test]
     fn test_batch_verify() {
@@ -225,20 +211,19 @@ mod tests {
             0x59, 0x62, 0xbe, 0x5d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06,
             0xbc, 0xe5,
         ]);
-        let params = &JubjubBls12::new();
-        let p_g = FixedGenerators::SpendingKeyGenerator;
+        let p_g = SPENDING_KEY_GENERATOR;
 
-        let sk1 = PrivateKey::<Bls12>(Fs::random(rng));
-        let vk1 = PublicKey::from_private(&sk1, p_g, params);
+        let sk1 = PrivateKey(jubjub::Fr::random(rng));
+        let vk1 = PublicKey::from_private(&sk1, p_g);
         let msg1 = b"Foo bar";
-        let sig1 = sk1.sign(msg1, rng, p_g, params);
-        assert!(vk1.verify(msg1, &sig1, p_g, params));
+        let sig1 = sk1.sign(msg1, rng, p_g);
+        assert!(vk1.verify(msg1, &sig1, p_g));
 
-        let sk2 = PrivateKey::<Bls12>(Fs::random(rng));
-        let vk2 = PublicKey::from_private(&sk2, p_g, params);
+        let sk2 = PrivateKey(jubjub::Fr::random(rng));
+        let vk2 = PublicKey::from_private(&sk2, p_g);
         let msg2 = b"Foo bar";
-        let sig2 = sk2.sign(msg2, rng, p_g, params);
-        assert!(vk2.verify(msg2, &sig2, p_g, params));
+        let sig2 = sk2.sign(msg2, rng, p_g);
+        assert!(vk2.verify(msg2, &sig2, p_g));
 
         let mut batch = vec![
             BatchEntry {
@@ -253,11 +238,11 @@ mod tests {
             },
         ];
 
-        assert!(batch_verify(rng, &batch, p_g, params));
+        assert!(batch_verify(rng, &batch, p_g));
 
         batch[0].sig = sig2;
 
-        assert!(!batch_verify(rng, &batch, p_g, params));
+        assert!(!batch_verify(rng, &batch, p_g));
     }
 
     #[test]
@@ -266,33 +251,34 @@ mod tests {
             0x59, 0x62, 0xbe, 0x5d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06,
             0xbc, 0xe5,
         ]);
-        let params = &JubjubBls12::new();
-        let zero = edwards::Point::zero();
-        let p_g = FixedGenerators::SpendingKeyGenerator;
+        let zero = jubjub::ExtendedPoint::identity();
+        let p_g = SPENDING_KEY_GENERATOR;
 
         // Get a point of order 8
         let p8 = loop {
-            let r = edwards::Point::<Bls12, _>::rand(rng, params).mul(Fs::char(), params);
+            let r = jubjub::ExtendedPoint::random(rng)
+                .to_niels()
+                .multiply_bits(&jubjub::Fr::char());
 
-            let r2 = r.double(params);
-            let r4 = r2.double(params);
-            let r8 = r4.double(params);
+            let r2 = r.double();
+            let r4 = r2.double();
+            let r8 = r4.double();
 
             if r2 != zero && r4 != zero && r8 == zero {
                 break r;
             }
         };
 
-        let sk = PrivateKey::<Bls12>(Fs::random(rng));
-        let vk = PublicKey::from_private(&sk, p_g, params);
+        let sk = PrivateKey(jubjub::Fr::random(rng));
+        let vk = PublicKey::from_private(&sk, p_g);
 
         // TODO: This test will need to change when #77 is fixed
         let msg = b"Foo bar";
-        let sig = sk.sign(msg, rng, p_g, params);
-        assert!(vk.verify(msg, &sig, p_g, params));
+        let sig = sk.sign(msg, rng, p_g);
+        assert!(vk.verify(msg, &sig, p_g));
 
-        let vktorsion = PublicKey(vk.0.add(&p8, params));
-        assert!(vktorsion.verify(msg, &sig, p_g, params));
+        let vktorsion = PublicKey(vk.0 + p8);
+        assert!(vktorsion.verify(msg, &sig, p_g));
     }
 
     #[test]
@@ -301,14 +287,13 @@ mod tests {
             0x59, 0x62, 0xbe, 0x5d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06,
             0xbc, 0xe5,
         ]);
-        let p_g = FixedGenerators::SpendingKeyGenerator;
-        let params = &JubjubBls12::new();
+        let p_g = SPENDING_KEY_GENERATOR;
 
         for _ in 0..1000 {
-            let sk = PrivateKey::<Bls12>(Fs::random(rng));
-            let vk = PublicKey::from_private(&sk, p_g, params);
+            let sk = PrivateKey(jubjub::Fr::random(rng));
+            let vk = PublicKey::from_private(&sk, p_g);
             let msg = b"Foo bar";
-            let sig = sk.sign(msg, rng, p_g, params);
+            let sig = sk.sign(msg, rng, p_g);
 
             let mut sk_bytes = [0u8; 32];
             let mut vk_bytes = [0u8; 32];
@@ -317,17 +302,17 @@ mod tests {
             vk.write(&mut vk_bytes[..]).unwrap();
             sig.write(&mut sig_bytes[..]).unwrap();
 
-            let sk_2 = PrivateKey::<Bls12>::read(&sk_bytes[..]).unwrap();
-            let vk_2 = PublicKey::from_private(&sk_2, p_g, params);
+            let sk_2 = PrivateKey::read(&sk_bytes[..]).unwrap();
+            let vk_2 = PublicKey::from_private(&sk_2, p_g);
             let mut vk_2_bytes = [0u8; 32];
             vk_2.write(&mut vk_2_bytes[..]).unwrap();
             assert!(vk_bytes == vk_2_bytes);
 
-            let vk_2 = PublicKey::<Bls12>::read(&vk_bytes[..], params).unwrap();
+            let vk_2 = PublicKey::read(&vk_bytes[..]).unwrap();
             let sig_2 = Signature::read(&sig_bytes[..]).unwrap();
-            assert!(vk.verify(msg, &sig_2, p_g, params));
-            assert!(vk_2.verify(msg, &sig, p_g, params));
-            assert!(vk_2.verify(msg, &sig_2, p_g, params));
+            assert!(vk.verify(msg, &sig_2, p_g));
+            assert!(vk_2.verify(msg, &sig, p_g));
+            assert!(vk_2.verify(msg, &sig_2, p_g));
         }
     }
 
@@ -337,35 +322,34 @@ mod tests {
             0x59, 0x62, 0xbe, 0x5d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06,
             0xbc, 0xe5,
         ]);
-        let p_g = FixedGenerators::SpendingKeyGenerator;
-        let params = &JubjubBls12::new();
+        let p_g = SPENDING_KEY_GENERATOR;
 
         for _ in 0..1000 {
-            let sk = PrivateKey::<Bls12>(Fs::random(rng));
-            let vk = PublicKey::from_private(&sk, p_g, params);
+            let sk = PrivateKey(jubjub::Fr::random(rng));
+            let vk = PublicKey::from_private(&sk, p_g);
 
             let msg1 = b"Foo bar";
             let msg2 = b"Spam eggs";
 
-            let sig1 = sk.sign(msg1, rng, p_g, params);
-            let sig2 = sk.sign(msg2, rng, p_g, params);
+            let sig1 = sk.sign(msg1, rng, p_g);
+            let sig2 = sk.sign(msg2, rng, p_g);
 
-            assert!(vk.verify(msg1, &sig1, p_g, params));
-            assert!(vk.verify(msg2, &sig2, p_g, params));
-            assert!(!vk.verify(msg1, &sig2, p_g, params));
-            assert!(!vk.verify(msg2, &sig1, p_g, params));
+            assert!(vk.verify(msg1, &sig1, p_g));
+            assert!(vk.verify(msg2, &sig2, p_g));
+            assert!(!vk.verify(msg1, &sig2, p_g));
+            assert!(!vk.verify(msg2, &sig1, p_g));
 
-            let alpha = Fs::random(rng);
+            let alpha = jubjub::Fr::random(rng);
             let rsk = sk.randomize(alpha);
-            let rvk = vk.randomize(alpha, p_g, params);
+            let rvk = vk.randomize(alpha, p_g);
 
-            let sig1 = rsk.sign(msg1, rng, p_g, params);
-            let sig2 = rsk.sign(msg2, rng, p_g, params);
+            let sig1 = rsk.sign(msg1, rng, p_g);
+            let sig2 = rsk.sign(msg2, rng, p_g);
 
-            assert!(rvk.verify(msg1, &sig1, p_g, params));
-            assert!(rvk.verify(msg2, &sig2, p_g, params));
-            assert!(!rvk.verify(msg1, &sig2, p_g, params));
-            assert!(!rvk.verify(msg2, &sig1, p_g, params));
+            assert!(rvk.verify(msg1, &sig1, p_g));
+            assert!(rvk.verify(msg2, &sig2, p_g));
+            assert!(!rvk.verify(msg1, &sig2, p_g));
+            assert!(!rvk.verify(msg2, &sig1, p_g));
         }
     }
 }

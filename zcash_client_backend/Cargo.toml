@@ -1,7 +1,7 @@
 [package]
 name = "zcash_client_backend"
 description = "APIs for creating shielded Zcash light clients"
-version = "0.1.0"
+version = "0.3.0"
 authors = [
     "Jack Grigg <jack@z.cash>",
 ]
@@ -13,15 +13,18 @@ edition = "2018"
 
 [dependencies]
 bech32 = "0.7"
-ff = { version = "0.5.0", path = "../ff" }
-hex = "0.3"
-pairing = { version = "0.15.0", path = "../pairing" }
-protobuf = "2"
-subtle = "2"
-zcash_primitives = { version = "0.1.0", path = "../zcash_primitives" }
+bls12_381 = "0.2"
+bs58 = { version = "0.3", features = ["check"] }
+ff = "0.7"
+group = "0.7"
+hex = "0.4"
+jubjub = "0.4"
+protobuf = "=2.14.0" # 2.15 has MSRV of 1.44.1
+subtle = "2.2.3"
+zcash_primitives = { version = "0.3", path = "../zcash_primitives" }
 
 [build-dependencies]
-protobuf-codegen-pure = "2"
+protobuf-codegen-pure = "2.14"
 
 [dev-dependencies]
 rand_core = "0.5"

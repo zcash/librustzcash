@@ -1,27 +1,26 @@
 //! Structs and constants specific to the Sapling shielded pool.
 
 use crate::{
-    jubjub::{fs::Fs, FixedGenerators, JubjubBls12},
+    constants::SPENDING_KEY_GENERATOR,
     pedersen_hash::{pedersen_hash, Personalization},
     primitives::Note,
 };
-use ff::{BitIterator, PrimeField, PrimeFieldRepr};
+use ff::{BitIterator, PrimeField};
+use group::{Curve, GroupEncoding};
 use lazy_static::lazy_static;
-use pairing::bls12_381::{Bls12, Fr, FrRepr};
 use rand_core::{CryptoRng, RngCore};
 use std::io::{self, Read, Write};
 
 use crate::merkle_tree::Hashable;
 use crate::redjubjub::{PrivateKey, PublicKey, Signature};
-use crate::JUBJUB;
 
 pub const SAPLING_COMMITMENT_TREE_DEPTH: usize = 32;
 
 /// Compute a parent node in the Sapling commitment tree given its two children.
-pub fn merkle_hash(depth: usize, lhs: &FrRepr, rhs: &FrRepr) -> FrRepr {
+pub fn merkle_hash(depth: usize, lhs: &[u8; 32], rhs: &[u8; 32]) -> [u8; 32] {
     let lhs = {
         let mut tmp = [false; 256];
-        for (a, b) in tmp.iter_mut().rev().zip(BitIterator::new(lhs)) {
+        for (a, b) in tmp.iter_mut().rev().zip(BitIterator::<u8, _>::new(lhs)) {
             *a = b;
         }
         tmp
@@ -29,46 +28,49 @@ pub fn merkle_hash(depth: usize, lhs: &FrRepr, rhs: &FrRepr) -> FrRepr {
 
     let rhs = {
         let mut tmp = [false; 256];
-        for (a, b) in tmp.iter_mut().rev().zip(BitIterator::new(rhs)) {
+        for (a, b) in tmp.iter_mut().rev().zip(BitIterator::<u8, _>::new(rhs)) {
             *a = b;
         }
         tmp
     };
 
-    pedersen_hash::<Bls12, _>(
+    jubjub::ExtendedPoint::from(pedersen_hash(
         Personalization::MerkleTree(depth),
         lhs.iter()
             .copied()
-            .take(Fr::NUM_BITS as usize)
-            .chain(rhs.iter().copied().take(Fr::NUM_BITS as usize)),
-        &JUBJUB,
-    )
-    .to_xy()
-    .0
-    .into_repr()
+            .take(bls12_381::Scalar::NUM_BITS as usize)
+            .chain(
+                rhs.iter()
+                    .copied()
+                    .take(bls12_381::Scalar::NUM_BITS as usize),
+            ),
+    ))
+    .to_affine()
+    .get_u()
+    .to_repr()
 }
 
 /// A node within the Sapling commitment tree.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Node {
-    repr: FrRepr,
+    repr: [u8; 32],
 }
 
 impl Node {
-    pub fn new(repr: FrRepr) -> Self {
+    pub fn new(repr: [u8; 32]) -> Self {
         Node { repr }
     }
 }
 
 impl Hashable for Node {
     fn read<R: Read>(mut reader: R) -> io::Result<Self> {
-        let mut repr = FrRepr::default();
-        repr.read_le(&mut reader)?;
+        let mut repr = [0u8; 32];
+        reader.read_exact(&mut repr)?;
         Ok(Node::new(repr))
     }
 
     fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
-        self.repr.write_le(&mut writer)
+        writer.write_all(self.repr.as_ref())
     }
 
     fn combine(depth: usize, lhs: &Self, rhs: &Self) -> Self {
@@ -79,7 +81,7 @@ impl Hashable for Node {
 
     fn blank() -> Self {
         Node {
-            repr: Note::<Bls12>::uncommitted().into_repr(),
+            repr: Note::uncommitted().to_repr(),
         }
     }
 
@@ -88,9 +90,9 @@ impl Hashable for Node {
     }
 }
 
-impl From<Node> for Fr {
+impl From<Node> for bls12_381::Scalar {
     fn from(node: Node) -> Self {
-        Fr::from_repr(node.repr).expect("Tree nodes should be in the prime field")
+        bls12_381::Scalar::from_repr(node.repr).expect("Tree nodes should be in the prime field")
     }
 }
 
@@ -107,29 +109,22 @@ lazy_static! {
 
 /// Create the spendAuthSig for a Sapling SpendDescription.
 pub fn spend_sig<R: RngCore + CryptoRng>(
-    ask: PrivateKey<Bls12>,
-    ar: Fs,
+    ask: PrivateKey,
+    ar: jubjub::Fr,
     sighash: &[u8; 32],
     rng: &mut R,
-    params: &JubjubBls12,
 ) -> Signature {
     // We compute `rsk`...
     let rsk = ask.randomize(ar);
 
     // We compute `rk` from there (needed for key prefixing)
-    let rk = PublicKey::from_private(&rsk, FixedGenerators::SpendingKeyGenerator, params);
+    let rk = PublicKey::from_private(&rsk, SPENDING_KEY_GENERATOR);
 
     // Compute the signature's message for rk/spend_auth_sig
     let mut data_to_be_signed = [0u8; 64];
-    rk.0.write(&mut data_to_be_signed[0..32])
-        .expect("message buffer should be 32 bytes");
+    data_to_be_signed[0..32].copy_from_slice(&rk.0.to_bytes());
     (&mut data_to_be_signed[32..64]).copy_from_slice(&sighash[..]);
 
     // Do the signing
-    rsk.sign(
-        &data_to_be_signed,
-        rng,
-        FixedGenerators::SpendingKeyGenerator,
-        params,
-    )
+    rsk.sign(&data_to_be_signed, rng, SPENDING_KEY_GENERATOR)
 }

@@ -1,13 +1,14 @@
 use blake2b_simd::{Hash as Blake2bHash, Params as Blake2bParams};
 use byteorder::{LittleEndian, WriteBytesExt};
-use ff::{PrimeField, PrimeFieldRepr};
+use ff::PrimeField;
+use group::GroupEncoding;
 
 use super::{
     components::{Amount, TxOut},
-    Transaction, TransactionData, OVERWINTER_VERSION_GROUP_ID, SAPLING_TX_VERSION,
-    SAPLING_VERSION_GROUP_ID, NU4_VERSION_GROUP_ID
+    Transaction, TransactionData, FUTURE_VERSION_GROUP_ID, OVERWINTER_VERSION_GROUP_ID,
+    SAPLING_TX_VERSION, SAPLING_VERSION_GROUP_ID,
 };
-use crate::legacy::Script;
+use crate::{consensus, extensions::transparent::Precondition, legacy::Script};
 
 const ZCASH_SIGHASH_PERSONALIZATION_PREFIX: &[u8; 12] = b"ZcashSigHash";
 const ZCASH_PREVOUTS_HASH_PERSONALIZATION: &[u8; 16] = b"ZcashPrevoutHash";
@@ -16,6 +17,7 @@ const ZCASH_OUTPUTS_HASH_PERSONALIZATION: &[u8; 16] = b"ZcashOutputsHash";
 const ZCASH_JOINSPLITS_HASH_PERSONALIZATION: &[u8; 16] = b"ZcashJSplitsHash";
 const ZCASH_SHIELDED_SPENDS_HASH_PERSONALIZATION: &[u8; 16] = b"ZcashSSpendsHash";
 const ZCASH_SHIELDED_OUTPUTS_HASH_PERSONALIZATION: &[u8; 16] = b"ZcashSOutputHash";
+const ZCASH_TZE_SIGNED_INPUT_DOMAIN_SEPARATOR: &[u8; 16] = b"ZcashTZE_SigHash";
 
 pub const SIGHASH_ALL: u32 = 1;
 const SIGHASH_NONE: u32 = 2;
@@ -45,7 +47,7 @@ enum SigHashVersion {
     Sprout,
     Overwinter,
     Sapling,
-    NU4
+    Future,
 }
 
 impl SigHashVersion {
@@ -54,7 +56,7 @@ impl SigHashVersion {
             match tx.version_group_id {
                 OVERWINTER_VERSION_GROUP_ID => SigHashVersion::Overwinter,
                 SAPLING_VERSION_GROUP_ID => SigHashVersion::Sapling,
-                NU4_VERSION_GROUP_ID => SigHashVersion::NU4,
+                FUTURE_VERSION_GROUP_ID => SigHashVersion::Future,
                 _ => unimplemented!(),
             }
         } else {
@@ -129,8 +131,8 @@ fn joinsplits_hash(tx: &TransactionData) -> Blake2bHash {
 fn shielded_spends_hash(tx: &TransactionData) -> Blake2bHash {
     let mut data = Vec::with_capacity(tx.shielded_spends.len() * 384);
     for s_spend in &tx.shielded_spends {
-        s_spend.cv.write(&mut data).unwrap();
-        s_spend.anchor.into_repr().write_le(&mut data).unwrap();
+        data.extend_from_slice(&s_spend.cv.to_bytes());
+        data.extend_from_slice(s_spend.anchor.to_repr().as_ref());
         data.extend_from_slice(&s_spend.nullifier);
         s_spend.rk.write(&mut data).unwrap();
         data.extend_from_slice(&s_spend.zkproof);
@@ -152,19 +154,51 @@ fn shielded_outputs_hash(tx: &TransactionData) -> Blake2bHash {
         .hash(&data)
 }
 
-pub fn signature_hash_data(
+pub enum SignableInput<'a> {
+    Shielded,
+    Transparent {
+        index: usize,
+        script_code: &'a Script,
+        value: Amount,
+    },
+    Tze {
+        index: usize,
+        precondition: &'a Precondition,
+        value: Amount,
+    },
+}
+
+impl<'a> SignableInput<'a> {
+    pub fn transparent(index: usize, script_code: &'a Script, value: Amount) -> Self {
+        SignableInput::Transparent {
+            index,
+            script_code,
+            value,
+        }
+    }
+
+    pub fn tze(index: usize, precondition: &'a Precondition, value: Amount) -> Self {
+        SignableInput::Tze {
+            index,
+            precondition,
+            value,
+        }
+    }
+}
+
+pub fn signature_hash_data<'a>(
     tx: &TransactionData,
-    consensus_branch_id: u32,
+    consensus_branch_id: consensus::BranchId,
     hash_type: u32,
-    transparent_input: Option<(usize, Script, Amount)>,
+    signable_input: SignableInput<'a>,
 ) -> Vec<u8> {
     let sigversion = SigHashVersion::from_tx(tx);
     match sigversion {
-        SigHashVersion::Overwinter | SigHashVersion::Sapling | SigHashVersion::NU4 => {
+        SigHashVersion::Overwinter | SigHashVersion::Sapling | SigHashVersion::Future => {
             let mut personal = [0; 16];
             (&mut personal[..12]).copy_from_slice(ZCASH_SIGHASH_PERSONALIZATION_PREFIX);
             (&mut personal[12..])
-                .write_u32::<LittleEndian>(consensus_branch_id)
+                .write_u32::<LittleEndian>(consensus_branch_id.into())
                 .unwrap();
 
             let mut h = Blake2bParams::new()
@@ -183,17 +217,18 @@ pub fn signature_hash_data(
                     && (hash_type & SIGHASH_MASK) != SIGHASH_NONE,
                 sequence_hash(tx)
             );
+
             if (hash_type & SIGHASH_MASK) != SIGHASH_SINGLE
                 && (hash_type & SIGHASH_MASK) != SIGHASH_NONE
             {
                 h.update(outputs_hash(tx).as_ref());
-            } else if (hash_type & SIGHASH_MASK) == SIGHASH_SINGLE
-                && transparent_input.is_some()
-                && transparent_input.as_ref().unwrap().0 < tx.vout.len()
-            {
-                h.update(
-                    single_output_hash(&tx.vout[transparent_input.as_ref().unwrap().0]).as_ref(),
-                );
+            } else if (hash_type & SIGHASH_MASK) == SIGHASH_SINGLE {
+                match signable_input {
+                    SignableInput::Transparent { index, .. } if index < tx.vout.len() => {
+                        h.update(single_output_hash(&tx.vout[index]).as_ref())
+                    }
+                    _ => h.update(&[0; 32]),
+                };
             } else {
                 h.update(&[0; 32]);
             };
@@ -213,15 +248,38 @@ pub fn signature_hash_data(
             }
             update_u32!(h, hash_type, tmp);
 
-            if let Some((n, script_code, amount)) = transparent_input {
-                let mut data = vec![];
-                tx.vin[n].prevout.write(&mut data).unwrap();
-                script_code.write(&mut data).unwrap();
-                data.extend_from_slice(&amount.to_i64_le_bytes());
-                (&mut data)
-                    .write_u32::<LittleEndian>(tx.vin[n].sequence)
-                    .unwrap();
-                h.update(&data);
+            match signable_input {
+                SignableInput::Transparent {
+                    index,
+                    script_code,
+                    value,
+                } => {
+                    let mut data = vec![];
+                    tx.vin[index].prevout.write(&mut data).unwrap();
+                    script_code.write(&mut data).unwrap();
+                    data.extend_from_slice(&value.to_i64_le_bytes());
+                    (&mut data)
+                        .write_u32::<LittleEndian>(tx.vin[index].sequence)
+                        .unwrap();
+                    h.update(&data);
+                }
+
+                SignableInput::Tze {
+                    index,
+                    precondition,
+                    value,
+                } if sigversion == SigHashVersion::Future => {
+                    let mut data = ZCASH_TZE_SIGNED_INPUT_DOMAIN_SEPARATOR.to_vec();
+
+                    tx.tze_inputs[index].prevout.write(&mut data).unwrap();
+                    data.write_u32::<LittleEndian>(precondition.extension_id)
+                        .unwrap();
+                    data.write_u32::<LittleEndian>(precondition.mode).unwrap();
+                    data.extend(&precondition.payload);
+                    data.extend_from_slice(&value.to_i64_le_bytes());
+                    h.update(&data);
+                }
+                _ => (),
             }
 
             h.finalize().as_ref().to_vec()
@@ -230,11 +288,11 @@ pub fn signature_hash_data(
     }
 }
 
-pub fn signature_hash(
+pub fn signature_hash<'a>(
     tx: &Transaction,
-    consensus_branch_id: u32,
+    consensus_branch_id: consensus::BranchId,
     hash_type: u32,
-    transparent_input: Option<(usize, Script, Amount)>,
+    signable_input: SignableInput<'a>,
 ) -> Vec<u8> {
-    signature_hash_data(tx, consensus_branch_id, hash_type, transparent_input)
+    signature_hash_data(tx, consensus_branch_id, hash_type, signable_input)
 }

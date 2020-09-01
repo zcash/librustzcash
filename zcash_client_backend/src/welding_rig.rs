@@ -4,7 +4,7 @@ use ff::PrimeField;
 use std::collections::HashSet;
 use subtle::{ConditionallySelectable, ConstantTimeEq, CtOption};
 use zcash_primitives::{
-    jubjub::fs::Fs,
+    consensus,
     merkle_tree::{CommitmentTree, IncrementalWitness},
     note_encryption::try_sapling_compact_note_decryption,
     sapling::Node,
@@ -22,9 +22,10 @@ use crate::wallet::{WalletShieldedOutput, WalletShieldedSpend, WalletTx};
 ///
 /// The given [`CommitmentTree`] and existing [`IncrementalWitness`]es are incremented
 /// with this output's commitment.
-fn scan_output(
+fn scan_output<P: consensus::Parameters>(
+    height: u32,
     (index, output): (usize, CompactOutput),
-    ivks: &[Fs],
+    ivks: &[jubjub::Fr],
     spent_from_accounts: &HashSet<usize>,
     tree: &mut CommitmentTree<Node>,
     existing_witnesses: &mut [&mut IncrementalWitness<Node>],
@@ -36,7 +37,7 @@ fn scan_output(
     let ct = output.ciphertext;
 
     // Increment tree and witnesses
-    let node = Node::new(cmu.into_repr());
+    let node = Node::new(cmu.to_repr());
     for witness in existing_witnesses {
         witness.append(node).unwrap();
     }
@@ -49,10 +50,11 @@ fn scan_output(
     tree.append(node).unwrap();
 
     for (account, ivk) in ivks.iter().enumerate() {
-        let (note, to) = match try_sapling_compact_note_decryption(ivk, &epk, &cmu, &ct) {
-            Some(ret) => ret,
-            None => continue,
-        };
+        let (note, to) =
+            match try_sapling_compact_note_decryption::<P>(height, ivk, &epk, &cmu, &ct) {
+                Some(ret) => ret,
+                None => continue,
+            };
 
         // A note is marked as "change" if the account that received it
         // also spent notes in the same transaction. This will catch,
@@ -83,7 +85,7 @@ fn scan_output(
 ///
 /// The given [`CommitmentTree`] and existing [`IncrementalWitness`]es are
 /// incremented appropriately.
-pub fn scan_block(
+pub fn scan_block<P: consensus::Parameters>(
     block: CompactBlock,
     extfvks: &[ExtendedFullViewingKey],
     nullifiers: &[(&[u8], usize)],
@@ -134,12 +136,11 @@ pub fn scan_block(
             // mutable references to wtxs for too long.
             let mut block_witnesses: Vec<_> = wtxs
                 .iter_mut()
-                .map(|tx| {
+                .flat_map(|tx| {
                     tx.shielded_outputs
                         .iter_mut()
                         .map(|output| &mut output.witness)
                 })
-                .flatten()
                 .collect();
 
             for to_scan in tx.outputs.into_iter().enumerate() {
@@ -151,7 +152,8 @@ pub fn scan_block(
                     .map(|output| &mut output.witness)
                     .collect();
 
-                if let Some(output) = scan_output(
+                if let Some(output) = scan_output::<P>(
+                    block.height as u32,
                     to_scan,
                     &ivks,
                     &spent_from_accounts,
@@ -184,17 +186,18 @@ pub fn scan_block(
 
 #[cfg(test)]
 mod tests {
-    use ff::{Field, PrimeField, PrimeFieldRepr};
-    use pairing::bls12_381::{Bls12, Fr};
+    use ff::{Field, PrimeField};
+    use group::GroupEncoding;
     use rand_core::{OsRng, RngCore};
     use zcash_primitives::{
-        jubjub::{fs::Fs, FixedGenerators, JubjubParams, ToUniform},
+        consensus::TestNetwork,
+        constants::SPENDING_KEY_GENERATOR,
         merkle_tree::CommitmentTree,
         note_encryption::{Memo, SaplingNoteEncryption},
         primitives::Note,
         transaction::components::Amount,
+        util::generate_random_rseed,
         zip32::{ExtendedFullViewingKey, ExtendedSpendingKey},
-        JUBJUB,
     };
 
     use super::scan_block;
@@ -207,21 +210,15 @@ mod tests {
             nf
         };
         let fake_cmu = {
-            let fake_cmu = Fr::random(rng);
-            let mut bytes = vec![];
-            fake_cmu.into_repr().write_le(&mut bytes).unwrap();
-            bytes
+            let fake_cmu = bls12_381::Scalar::random(rng);
+            fake_cmu.to_repr().as_ref().to_owned()
         };
         let fake_epk = {
-            let mut buffer = vec![0; 64];
+            let mut buffer = [0; 64];
             rng.fill_bytes(&mut buffer);
-            let fake_esk = Fs::to_uniform(&buffer[..]);
-            let fake_epk = JUBJUB
-                .generator(FixedGenerators::SpendingKeyGenerator)
-                .mul(fake_esk, &JUBJUB);
-            let mut bytes = vec![];
-            fake_epk.write(&mut bytes).unwrap();
-            bytes
+            let fake_esk = jubjub::Fr::from_bytes_wide(&buffer);
+            let fake_epk = SPENDING_KEY_GENERATOR * fake_esk;
+            fake_epk.to_bytes().to_vec()
         };
         let mut cspend = CompactSpend::new();
         cspend.set_nf(fake_nf);
@@ -252,11 +249,12 @@ mod tests {
 
         // Create a fake Note for the account
         let mut rng = OsRng;
+        let rseed = generate_random_rseed::<TestNetwork, OsRng>(height as u32, &mut rng);
         let note = Note {
-            g_d: to.diversifier().g_d::<Bls12>(&JUBJUB).unwrap(),
+            g_d: to.diversifier().g_d().unwrap(),
             pk_d: to.pk_d().clone(),
             value: value.into(),
-            r: Fs::random(&mut rng),
+            rseed,
         };
         let encryptor = SaplingNoteEncryption::new(
             extfvk.fvk.ovk,
@@ -265,10 +263,8 @@ mod tests {
             Memo::default(),
             &mut rng,
         );
-        let mut cmu = vec![];
-        note.cm(&JUBJUB).into_repr().write_le(&mut cmu).unwrap();
-        let mut epk = vec![];
-        encryptor.epk().write(&mut epk).unwrap();
+        let cmu = note.cmu().to_repr().as_ref().to_owned();
+        let epk = encryptor.epk().to_bytes().to_vec();
         let enc_ciphertext = encryptor.encrypt_note_plaintext();
 
         // Create a fake CompactBlock containing the note
@@ -322,7 +318,7 @@ mod tests {
         assert_eq!(cb.vtx.len(), 2);
 
         let mut tree = CommitmentTree::new();
-        let txs = scan_block(cb, &[extfvk], &[], &mut tree, &mut []);
+        let txs = scan_block::<TestNetwork>(cb, &[extfvk], &[], &mut tree, &mut []);
         assert_eq!(txs.len(), 1);
 
         let tx = &txs[0];
@@ -354,7 +350,7 @@ mod tests {
         assert_eq!(cb.vtx.len(), 3);
 
         let mut tree = CommitmentTree::new();
-        let txs = scan_block(cb, &[extfvk], &[], &mut tree, &mut []);
+        let txs = scan_block::<TestNetwork>(cb, &[extfvk], &[], &mut tree, &mut []);
         assert_eq!(txs.len(), 1);
 
         let tx = &txs[0];
@@ -382,7 +378,7 @@ mod tests {
         assert_eq!(cb.vtx.len(), 2);
 
         let mut tree = CommitmentTree::new();
-        let txs = scan_block(cb, &[], &[(&nf, account)], &mut tree, &mut []);
+        let txs = scan_block::<TestNetwork>(cb, &[], &[(&nf, account)], &mut tree, &mut []);
         assert_eq!(txs.len(), 1);
 
         let tx = &txs[0];

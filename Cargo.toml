@@ -1,11 +1,10 @@
 [workspace]
 members = [
-    "bellman",
-    "ff",
-    "group",
-    "librustzcash",
-    "pairing",
+    "components/equihash",
     "zcash_client_backend",
+    "zcash_client_sqlite",
+    "zcash_extensions",
+    "zcash_history",
     "zcash_primitives",
     "zcash_proofs",
 ]
@@ -14,3 +13,7 @@ members = [
 lto = true
 panic = 'abort'
 codegen-units = 1
+
+[profile.dev]
+debug = true
+opt-level = 0

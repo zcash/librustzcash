@@ -1,7 +1,7 @@
 [package]
 name = "zcash_primitives"
 description = "Rust implementations of the Zcash primitives"
-version = "0.1.0"
+version = "0.3.0"
 authors = [
     "Jack Grigg <jack@z.cash>",
 ]
@@ -11,26 +11,42 @@ readme = "README.md"
 license = "MIT OR Apache-2.0"
 edition = "2018"
 
+[package.metadata.docs.rs]
+all-features = true
+
 [dependencies]
-aes = "0.3"
+aes = "0.5"
 blake2b_simd = "0.5"
 blake2s_simd = "0.5"
+bls12_381 = "0.2"
 byteorder = "1"
-crypto_api_chachapoly = "0.2.1"
-ff = { version = "0.5.0", path = "../ff" }
-fpe = "0.2"
-hex = "0.3"
+crypto_api_chachapoly = "0.4"
+equihash = { version = "0.1", path = "../components/equihash" }
+ff = "0.7"
+fpe = "0.3"
+group = "0.7"
+hex = "0.4"
+jubjub = "0.4"
 lazy_static = "1"
 log = "0.4"
-pairing = { version = "0.15.0", path = "../pairing" }
 rand = "0.7"
 rand_core = "0.5.1"
-sha2 = "0.8"
-bolt = { git = "https://github.com/boltlabs-inc/libbolt", branch = "master" }
+ripemd160 = { version = "0.9", optional = true }
+secp256k1 = { version = "0.17", optional = true }
+sha2 = "0.9"
+subtle = "2.2.3"
 
 [dev-dependencies]
+criterion = "0.3"
 hex-literal = "0.2"
 rand_xorshift = "0.2"
+
+[features]
+transparent-inputs = ["ripemd160", "secp256k1"]
+
+[[bench]]
+name = "pedersen_hash"
+harness = false
 
 [badges]
 maintenance = { status = "actively-developed" }
