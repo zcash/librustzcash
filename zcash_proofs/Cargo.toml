@@ -30,6 +30,7 @@ wagyu-zcash-parameters = { version = "0.2", optional = true }
 zcash_primitives = { version = "0.3", path = "../zcash_primitives" }
 
 [dev-dependencies]
+criterion = "0.3"
 rand_xorshift = "0.2"
 
 [features]
@@ -38,6 +39,11 @@ bundled-prover = ["wagyu-zcash-parameters"]
 download-params = ["minreq"]
 local-prover = ["directories"]
 multicore = ["bellman/multicore"]
+
+[[bench]]
+name = "sapling"
+harness = false
+required-features = ["local-prover"]
 
 [[example]]
 name = "get-params-path"
