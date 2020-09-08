@@ -301,7 +301,7 @@ pub fn create_to_address<P: AsRef<Path>>(
         Some(idx) => idx as i64,
         None => panic!("Output 0 should exist in the transaction"),
     };
-    let created = time::get_time();
+    let created = time::OffsetDateTime::now_utc();
 
     // Update the database atomically, to ensure the result is internally consistent.
     data.execute("BEGIN IMMEDIATE", NO_PARAMS)?;
