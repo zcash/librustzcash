@@ -512,7 +512,7 @@ impl Circuit<bls12_381::Scalar> for Output {
 #[test]
 fn test_input_circuit_with_bls12_381() {
     use bellman::gadgets::test::*;
-    use ff::{BitIterator, Field};
+    use ff::Field;
     use group::Group;
     use rand_core::{RngCore, SeedableRng};
     use rand_xorshift::XorShiftRng;
@@ -521,7 +521,7 @@ fn test_input_circuit_with_bls12_381() {
         primitives::{Diversifier, Note, ProofGenerationKey, Rseed},
     };
 
-    let rng = &mut XorShiftRng::from_seed([
+    let mut rng = XorShiftRng::from_seed([
         0x58, 0x62, 0xbe, 0x3d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06, 0xbc,
         0xe5,
     ]);
@@ -531,11 +531,11 @@ fn test_input_circuit_with_bls12_381() {
     for _ in 0..10 {
         let value_commitment = ValueCommitment {
             value: rng.next_u64(),
-            randomness: jubjub::Fr::random(rng),
+            randomness: jubjub::Fr::random(&mut rng),
         };
 
-        let nsk = jubjub::Fr::random(rng);
-        let ak = jubjub::SubgroupPoint::random(rng);
+        let nsk = jubjub::Fr::random(&mut rng);
+        let ak = jubjub::SubgroupPoint::random(&mut rng);
 
         let proof_generation_key = ProofGenerationKey {
             ak: ak.clone(),
@@ -560,10 +560,10 @@ fn test_input_circuit_with_bls12_381() {
         }
 
         let g_d = payment_address.diversifier().g_d().unwrap();
-        let commitment_randomness = jubjub::Fr::random(rng);
+        let commitment_randomness = jubjub::Fr::random(&mut rng);
         let auth_path =
-            vec![Some((bls12_381::Scalar::random(rng), rng.next_u32() % 2 != 0)); tree_depth];
-        let ar = jubjub::Fr::random(rng);
+            vec![Some((bls12_381::Scalar::random(&mut rng), rng.next_u32() % 2 != 0)); tree_depth];
+        let ar = jubjub::Fr::random(&mut rng);
 
         {
             let rk = jubjub::ExtendedPoint::from(viewing_key.rk(ar)).to_affine();
@@ -590,17 +590,15 @@ fn test_input_circuit_with_bls12_381() {
                     ::std::mem::swap(&mut lhs, &mut rhs);
                 }
 
-                let mut lhs: Vec<bool> = BitIterator::<u8, _>::new(lhs.to_repr()).collect();
-                let mut rhs: Vec<bool> = BitIterator::<u8, _>::new(rhs.to_repr()).collect();
-
-                lhs.reverse();
-                rhs.reverse();
+                let lhs = lhs.to_le_bits();
+                let rhs = rhs.to_le_bits();
 
                 cur = jubjub::ExtendedPoint::from(pedersen_hash::pedersen_hash(
                     pedersen_hash::Personalization::MerkleTree(i),
                     lhs.into_iter()
                         .take(bls12_381::Scalar::NUM_BITS as usize)
-                        .chain(rhs.into_iter().take(bls12_381::Scalar::NUM_BITS as usize)),
+                        .chain(rhs.into_iter().take(bls12_381::Scalar::NUM_BITS as usize))
+                        .cloned(),
                 ))
                 .to_affine()
                 .get_u();
@@ -660,7 +658,7 @@ fn test_input_circuit_with_bls12_381() {
 #[test]
 fn test_input_circuit_with_bls12_381_external_test_vectors() {
     use bellman::gadgets::test::*;
-    use ff::{BitIterator, Field};
+    use ff::Field;
     use group::Group;
     use rand_core::{RngCore, SeedableRng};
     use rand_xorshift::XorShiftRng;
@@ -669,7 +667,7 @@ fn test_input_circuit_with_bls12_381_external_test_vectors() {
         primitives::{Diversifier, Note, ProofGenerationKey, Rseed},
     };
 
-    let rng = &mut XorShiftRng::from_seed([
+    let mut rng = XorShiftRng::from_seed([
         0x59, 0x62, 0xbe, 0x3d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06, 0xbc,
         0xe5,
     ]);
@@ -708,8 +706,8 @@ fn test_input_circuit_with_bls12_381_external_test_vectors() {
             randomness: jubjub::Fr::from_str(&(1000 * (i + 1)).to_string()).unwrap(),
         };
 
-        let nsk = jubjub::Fr::random(rng);
-        let ak = jubjub::SubgroupPoint::random(rng);
+        let nsk = jubjub::Fr::random(&mut rng);
+        let ak = jubjub::SubgroupPoint::random(&mut rng);
 
         let proof_generation_key = ProofGenerationKey {
             ak: ak.clone(),
@@ -734,10 +732,10 @@ fn test_input_circuit_with_bls12_381_external_test_vectors() {
         }
 
         let g_d = payment_address.diversifier().g_d().unwrap();
-        let commitment_randomness = jubjub::Fr::random(rng);
+        let commitment_randomness = jubjub::Fr::random(&mut rng);
         let auth_path =
-            vec![Some((bls12_381::Scalar::random(rng), rng.next_u32() % 2 != 0)); tree_depth];
-        let ar = jubjub::Fr::random(rng);
+            vec![Some((bls12_381::Scalar::random(&mut rng), rng.next_u32() % 2 != 0)); tree_depth];
+        let ar = jubjub::Fr::random(&mut rng);
 
         {
             let rk = jubjub::ExtendedPoint::from(viewing_key.rk(ar)).to_affine();
@@ -772,17 +770,15 @@ fn test_input_circuit_with_bls12_381_external_test_vectors() {
                     ::std::mem::swap(&mut lhs, &mut rhs);
                 }
 
-                let mut lhs: Vec<bool> = BitIterator::<u8, _>::new(lhs.to_repr()).collect();
-                let mut rhs: Vec<bool> = BitIterator::<u8, _>::new(rhs.to_repr()).collect();
-
-                lhs.reverse();
-                rhs.reverse();
+                let lhs = lhs.to_le_bits();
+                let rhs = rhs.to_le_bits();
 
                 cur = jubjub::ExtendedPoint::from(pedersen_hash::pedersen_hash(
                     pedersen_hash::Personalization::MerkleTree(i),
                     lhs.into_iter()
                         .take(bls12_381::Scalar::NUM_BITS as usize)
-                        .chain(rhs.into_iter().take(bls12_381::Scalar::NUM_BITS as usize)),
+                        .chain(rhs.into_iter().take(bls12_381::Scalar::NUM_BITS as usize))
+                        .cloned(),
                 ))
                 .to_affine()
                 .get_u();
@@ -848,7 +844,7 @@ fn test_output_circuit_with_bls12_381() {
     use rand_xorshift::XorShiftRng;
     use zcash_primitives::primitives::{Diversifier, ProofGenerationKey, Rseed};
 
-    let rng = &mut XorShiftRng::from_seed([
+    let mut rng = XorShiftRng::from_seed([
         0x58, 0x62, 0xbe, 0x3d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06, 0xbc,
         0xe5,
     ]);
@@ -856,11 +852,11 @@ fn test_output_circuit_with_bls12_381() {
     for _ in 0..100 {
         let value_commitment = ValueCommitment {
             value: rng.next_u64(),
-            randomness: jubjub::Fr::random(rng),
+            randomness: jubjub::Fr::random(&mut rng),
         };
 
-        let nsk = jubjub::Fr::random(rng);
-        let ak = jubjub::SubgroupPoint::random(rng);
+        let nsk = jubjub::Fr::random(&mut rng);
+        let ak = jubjub::SubgroupPoint::random(&mut rng);
 
         let proof_generation_key = ProofGenerationKey {
             ak: ak.clone(),
@@ -884,8 +880,8 @@ fn test_output_circuit_with_bls12_381() {
             }
         }
 
-        let commitment_randomness = jubjub::Fr::random(rng);
-        let esk = jubjub::Fr::random(rng);
+        let commitment_randomness = jubjub::Fr::random(&mut rng);
+        let esk = jubjub::Fr::random(&mut rng);
 
         {
             let mut cs = TestConstraintSystem::new();

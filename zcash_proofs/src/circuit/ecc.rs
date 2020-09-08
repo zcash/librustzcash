@@ -620,7 +620,7 @@ impl MontgomeryPoint {
 #[cfg(test)]
 mod test {
     use bellman::ConstraintSystem;
-    use ff::{BitIterator, Field, PrimeField};
+    use ff::{Field, PrimeField};
     use group::{Curve, Group};
     use rand_core::{RngCore, SeedableRng};
     use rand_xorshift::XorShiftRng;
@@ -633,7 +633,7 @@ mod test {
 
     #[test]
     fn test_into_edwards() {
-        let rng = &mut XorShiftRng::from_seed([
+        let mut rng = XorShiftRng::from_seed([
             0x59, 0x62, 0xbe, 0x3d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06,
             0xbc, 0xe5,
         ]);
@@ -641,7 +641,7 @@ mod test {
         for _ in 0..100 {
             let mut cs = TestConstraintSystem::new();
 
-            let p = jubjub::ExtendedPoint::random(rng);
+            let p = jubjub::ExtendedPoint::random(&mut rng);
             let (x, y) = to_montgomery_coords(p).unwrap();
             let p = p.to_affine();
             let (u, v) = (p.get_u(), p.get_v());
@@ -657,12 +657,12 @@ mod test {
             assert!(q.u.get_value().unwrap() == u);
             assert!(q.v.get_value().unwrap() == v);
 
-            cs.set("u/num", bls12_381::Scalar::random(rng));
+            cs.set("u/num", bls12_381::Scalar::random(&mut rng));
             assert_eq!(cs.which_is_unsatisfied().unwrap(), "u computation");
             cs.set("u/num", u);
             assert!(cs.is_satisfied());
 
-            cs.set("v/num", bls12_381::Scalar::random(rng));
+            cs.set("v/num", bls12_381::Scalar::random(&mut rng));
             assert_eq!(cs.which_is_unsatisfied().unwrap(), "v computation");
             cs.set("v/num", v);
             assert!(cs.is_satisfied());
@@ -671,13 +671,13 @@ mod test {
 
     #[test]
     fn test_interpret() {
-        let rng = &mut XorShiftRng::from_seed([
+        let mut rng = XorShiftRng::from_seed([
             0x59, 0x62, 0xbe, 0x5d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06,
             0xbc, 0xe5,
         ]);
 
         for _ in 0..100 {
-            let p = jubjub::ExtendedPoint::random(rng);
+            let p = jubjub::ExtendedPoint::random(&mut rng);
 
             let mut cs = TestConstraintSystem::new();
             let q = EdwardsPoint::witness(&mut cs, Some(p.clone())).unwrap();
@@ -690,7 +690,7 @@ mod test {
         }
 
         for _ in 0..100 {
-            let p = jubjub::ExtendedPoint::random(rng).to_affine();
+            let p = jubjub::ExtendedPoint::random(&mut rng).to_affine();
             let (u, v) = (p.get_u(), p.get_v());
 
             let mut cs = TestConstraintSystem::new();
@@ -706,8 +706,8 @@ mod test {
 
         // Random (u, v) are unlikely to be on the curve.
         for _ in 0..100 {
-            let u = bls12_381::Scalar::random(rng);
-            let v = bls12_381::Scalar::random(rng);
+            let u = bls12_381::Scalar::random(&mut rng);
+            let v = bls12_381::Scalar::random(&mut rng);
 
             let mut cs = TestConstraintSystem::new();
             let numu = AllocatedNum::alloc(cs.namespace(|| "u"), || Ok(u)).unwrap();
@@ -721,7 +721,7 @@ mod test {
 
     #[test]
     fn test_edwards_fixed_base_multiplication() {
-        let rng = &mut XorShiftRng::from_seed([
+        let mut rng = XorShiftRng::from_seed([
             0x59, 0x62, 0xbe, 0x5d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06,
             0xbc, 0xe5,
         ]);
@@ -730,16 +730,15 @@ mod test {
             let mut cs = TestConstraintSystem::<bls12_381::Scalar>::new();
 
             let p = zcash_primitives::constants::NOTE_COMMITMENT_RANDOMNESS_GENERATOR;
-            let s = jubjub::Fr::random(rng);
+            let s = jubjub::Fr::random(&mut rng);
             let q = jubjub::ExtendedPoint::from(p * s).to_affine();
             let (u1, v1) = (q.get_u(), q.get_v());
 
-            let mut s_bits = BitIterator::<u8, _>::new(s.to_repr()).collect::<Vec<_>>();
-            s_bits.reverse();
-            s_bits.truncate(jubjub::Fr::NUM_BITS as usize);
-
-            let s_bits = s_bits
+            let s_bits = s
+                .to_le_bits()
                 .into_iter()
+                .take(jubjub::Fr::NUM_BITS as usize)
+                .cloned()
                 .enumerate()
                 .map(|(i, b)| {
                     AllocatedBit::alloc(cs.namespace(|| format!("scalar bit {}", i)), Some(b))
@@ -762,7 +761,7 @@ mod test {
 
     #[test]
     fn test_edwards_multiplication() {
-        let rng = &mut XorShiftRng::from_seed([
+        let mut rng = XorShiftRng::from_seed([
             0x59, 0x62, 0xbe, 0x5d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06,
             0xbc, 0xe5,
         ]);
@@ -770,8 +769,8 @@ mod test {
         for _ in 0..100 {
             let mut cs = TestConstraintSystem::new();
 
-            let p = jubjub::ExtendedPoint::random(rng);
-            let s = jubjub::Fr::random(rng);
+            let p = jubjub::ExtendedPoint::random(&mut rng);
+            let s = jubjub::Fr::random(&mut rng);
             let q = (p * s).to_affine();
             let p = p.to_affine();
 
@@ -786,12 +785,11 @@ mod test {
                 v: num_v0,
             };
 
-            let mut s_bits = BitIterator::<u8, _>::new(s.to_repr()).collect::<Vec<_>>();
-            s_bits.reverse();
-            s_bits.truncate(jubjub::Fr::NUM_BITS as usize);
-
-            let s_bits = s_bits
+            let s_bits = s
+                .to_le_bits()
                 .into_iter()
+                .take(jubjub::Fr::NUM_BITS as usize)
+                .cloned()
                 .enumerate()
                 .map(|(i, b)| {
                     AllocatedBit::alloc(cs.namespace(|| format!("scalar bit {}", i)), Some(b))
@@ -812,7 +810,7 @@ mod test {
 
     #[test]
     fn test_conditionally_select() {
-        let rng = &mut XorShiftRng::from_seed([
+        let mut rng = XorShiftRng::from_seed([
             0x59, 0x62, 0xbe, 0x5d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06,
             0xbc, 0xe5,
         ]);
@@ -820,7 +818,7 @@ mod test {
         for _ in 0..1000 {
             let mut cs = TestConstraintSystem::new();
 
-            let p = jubjub::ExtendedPoint::random(rng).to_affine();
+            let p = jubjub::ExtendedPoint::random(&mut rng).to_affine();
 
             let (u0, v0) = (p.get_u(), p.get_v());
 
@@ -878,14 +876,14 @@ mod test {
 
     #[test]
     fn test_edwards_addition() {
-        let rng = &mut XorShiftRng::from_seed([
+        let mut rng = XorShiftRng::from_seed([
             0x59, 0x62, 0xbe, 0x5d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06,
             0xbc, 0xe5,
         ]);
 
         for _ in 0..100 {
-            let p1 = jubjub::ExtendedPoint::random(rng);
-            let p2 = jubjub::ExtendedPoint::random(rng);
+            let p1 = jubjub::ExtendedPoint::random(&mut rng);
+            let p2 = jubjub::ExtendedPoint::random(&mut rng);
 
             let p3 = p1 + p2;
 
@@ -923,19 +921,19 @@ mod test {
             assert!(p3.v.get_value().unwrap() == v2);
 
             let uppercase_u = cs.get("addition/U/num");
-            cs.set("addition/U/num", bls12_381::Scalar::random(rng));
+            cs.set("addition/U/num", bls12_381::Scalar::random(&mut rng));
             assert_eq!(cs.which_is_unsatisfied(), Some("addition/U computation"));
             cs.set("addition/U/num", uppercase_u);
             assert!(cs.is_satisfied());
 
             let u3 = cs.get("addition/u3/num");
-            cs.set("addition/u3/num", bls12_381::Scalar::random(rng));
+            cs.set("addition/u3/num", bls12_381::Scalar::random(&mut rng));
             assert_eq!(cs.which_is_unsatisfied(), Some("addition/u3 computation"));
             cs.set("addition/u3/num", u3);
             assert!(cs.is_satisfied());
 
             let v3 = cs.get("addition/v3/num");
-            cs.set("addition/v3/num", bls12_381::Scalar::random(rng));
+            cs.set("addition/v3/num", bls12_381::Scalar::random(&mut rng));
             assert_eq!(cs.which_is_unsatisfied(), Some("addition/v3 computation"));
             cs.set("addition/v3/num", v3);
             assert!(cs.is_satisfied());
@@ -944,13 +942,13 @@ mod test {
 
     #[test]
     fn test_edwards_doubling() {
-        let rng = &mut XorShiftRng::from_seed([
+        let mut rng = XorShiftRng::from_seed([
             0x59, 0x62, 0xbe, 0x5d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06,
             0xbc, 0xe5,
         ]);
 
         for _ in 0..100 {
-            let p1 = jubjub::ExtendedPoint::random(rng);
+            let p1 = jubjub::ExtendedPoint::random(&mut rng);
             let p2 = p1.double();
 
             let p1 = p1.to_affine();
@@ -980,14 +978,14 @@ mod test {
 
     #[test]
     fn test_montgomery_addition() {
-        let rng = &mut XorShiftRng::from_seed([
+        let mut rng = XorShiftRng::from_seed([
             0x59, 0x62, 0xbe, 0x5d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06,
             0xbc, 0xe5,
         ]);
 
         for _ in 0..100 {
-            let p1 = jubjub::ExtendedPoint::random(rng);
-            let p2 = jubjub::ExtendedPoint::random(rng);
+            let p1 = jubjub::ExtendedPoint::random(&mut rng);
+            let p2 = jubjub::ExtendedPoint::random(&mut rng);
             let p3 = p1 + p2;
 
             let (x0, y0) = to_montgomery_coords(p1).unwrap();
@@ -1019,17 +1017,17 @@ mod test {
             assert!(p3.x.get_value().unwrap() == x2);
             assert!(p3.y.get_value().unwrap() == y2);
 
-            cs.set("addition/yprime/num", bls12_381::Scalar::random(rng));
+            cs.set("addition/yprime/num", bls12_381::Scalar::random(&mut rng));
             assert_eq!(cs.which_is_unsatisfied(), Some("addition/evaluate yprime"));
             cs.set("addition/yprime/num", y2);
             assert!(cs.is_satisfied());
 
-            cs.set("addition/xprime/num", bls12_381::Scalar::random(rng));
+            cs.set("addition/xprime/num", bls12_381::Scalar::random(&mut rng));
             assert_eq!(cs.which_is_unsatisfied(), Some("addition/evaluate xprime"));
             cs.set("addition/xprime/num", x2);
             assert!(cs.is_satisfied());
 
-            cs.set("addition/lambda/num", bls12_381::Scalar::random(rng));
+            cs.set("addition/lambda/num", bls12_381::Scalar::random(&mut rng));
             assert_eq!(cs.which_is_unsatisfied(), Some("addition/evaluate lambda"));
         }
     }

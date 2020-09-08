@@ -16,17 +16,18 @@ all-features = true
 
 [dependencies]
 aes = "0.5"
+bitvec = "0.18"
 blake2b_simd = "0.5"
 blake2s_simd = "0.5"
-bls12_381 = "0.2"
+bls12_381 = "0.3"
 byteorder = "1"
 crypto_api_chachapoly = "0.4"
 equihash = { version = "0.1", path = "../components/equihash" }
-ff = "0.7"
+ff = "0.8"
 fpe = "0.3"
-group = "0.7"
+group = "0.8"
 hex = "0.4"
-jubjub = "0.4"
+jubjub = "0.5"
 lazy_static = "1"
 log = "0.4"
 rand = "0.7"
