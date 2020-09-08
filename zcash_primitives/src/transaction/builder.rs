@@ -281,12 +281,11 @@ impl<'a, BuildCtx> TzeInputs<'a, BuildCtx> {
     fn push<WBuilder, W: ToPayload>(
         &mut self,
         extension_id: u32,
-        prevout: (OutPoint, TzeOut),
+        (outpoint, tzeout): (OutPoint, TzeOut),
         builder: WBuilder,
     ) where
         WBuilder: 'a + FnOnce(&BuildCtx) -> Result<W, Error>,
     {
-        let (outpoint, tzeout) = prevout;
         self.builders.push(TzeInputInfo {
             prevout: tzeout,
             builder: Box::new(move |ctx| {
@@ -405,13 +404,11 @@ impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng> Builder<'a, P, R> {
     ///
     /// The fee will be set to the default fee (0.0001 ZEC).
     pub fn new_with_rng(height: u32, rng: R) -> Builder<'a, P, R> {
-        let mtx = TransactionData::new();
-        Self::new_with_mtx(height, rng, mtx)
+        Self::new_with_mtx(height, rng, TransactionData::new())
     }
 
     pub fn new_with_rng_future(height: u32, rng: R) -> Builder<'a, P, R> {
-        let mtx = TransactionData::future();
-        Self::new_with_mtx(height, rng, mtx)
+        Self::new_with_mtx(height, rng, TransactionData::future())
     }
 
     /// Adds a Sapling note to be spent in this transaction.
