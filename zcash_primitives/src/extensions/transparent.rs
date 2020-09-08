@@ -138,9 +138,8 @@ pub trait ExtensionTxBuilder<'a> {
 pub trait Epoch<VerifyCtx> {
     type VerifyError;
 
-    // Implementation of this method should check that the provided witness
-    // satisfies the specified precondition, given the context. This verification
-    // becomes part of the consensus rules.
+    /// Checks that the provided witness satisfies the specified precondition,
+    /// given the context. This verification becomes part of the consensus rules.
     fn verify(
         &self,
         precondition: &Precondition,
