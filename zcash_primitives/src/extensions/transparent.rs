@@ -106,12 +106,14 @@ pub trait Extension<C> {
     }
 }
 
-// This extension trait is satisfied by the transaction::builder::Builder type. It provides a
-// minimal contract for interacting with the transaction builder, that extension library authors
-// can use to add extension-specific builder traits that may be used to interact with the
-// transaction builder.  This may make it simpler for projects that include transaction-builder
-// functionality to integrate with third-party extensions without those extensions being coupled to
-// a particular transaction or builder representation.
+/// This extension trait is satisfied by [`transaction::builder::Builder`]. It provides a
+/// minimal contract for interacting with the transaction builder, that extension library authors
+/// can use to add extension-specific builder traits that may be used to interact with the
+/// transaction builder.  This may make it simpler for projects that include transaction-builder
+/// functionality to integrate with third-party extensions without those extensions being coupled to
+/// a particular transaction or builder representation.
+///
+/// [`transaction::builder::Builder`]: crate::transaction::builder::Builder
 pub trait ExtensionTxBuilder<'a> {
     type BuildCtx;
     type BuildError;
