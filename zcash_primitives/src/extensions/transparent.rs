@@ -179,16 +179,3 @@ pub trait ExtensionTxBuilder<'a> {
         guarded_by: &P,
     ) -> Result<(), Self::BuildError>;
 }
-
-pub trait Epoch<VerifyCtx> {
-    type VerifyError;
-
-    /// Checks that the provided witness satisfies the specified precondition,
-    /// given the context. This verification becomes part of the consensus rules.
-    fn verify(
-        &self,
-        precondition: &Precondition,
-        witness: &Witness,
-        ctx: &VerifyCtx,
-    ) -> Result<(), Error<Self::VerifyError>>;
-}
