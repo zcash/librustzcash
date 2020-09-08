@@ -280,28 +280,18 @@ impl<C: Context> Extension<C> for Program {
     }
 }
 
-fn builder_hashes(preimage_1: &[u8; 32], preimage_2: &[u8; 32]) -> ([u8; 32], [u8; 32]) {
-    let hash_2 = {
-        let mut hash = [0; 32];
-        hash.copy_from_slice(Params::new().hash_length(32).hash(preimage_2).as_bytes());
-        hash
-    };
-
-    let hash_1 = {
-        let mut hash = [0; 32];
-        hash.copy_from_slice(
-            Params::new()
-                .hash_length(32)
-                .to_state()
-                .update(preimage_1)
-                .update(&hash_2)
-                .finalize()
-                .as_bytes(),
-        );
-        hash
-    };
-
-    (hash_1, hash_2)
+fn hash_1(preimage_1: &[u8; 32], hash_2: &[u8; 32]) -> [u8; 32] {
+    let mut hash = [0; 32];
+    hash.copy_from_slice(
+        Params::new()
+            .hash_length(32)
+            .to_state()
+            .update(preimage_1)
+            .update(hash_2)
+            .finalize()
+            .as_bytes(),
+    );
+    hash
 }
 
 pub struct DemoBuilder<B> {
@@ -329,11 +319,8 @@ impl<'a, B: ExtensionTxBuilder<'a>> DemoBuilder<&mut B> {
     pub fn demo_open(
         &mut self,
         value: Amount,
-        preimage_1: [u8; 32],
-        preimage_2: [u8; 32],
+        hash_1: [u8; 32],
     ) -> Result<(), DemoBuildError<B::BuildError>> {
-        let (hash_1, _) = builder_hashes(&preimage_1, &preimage_2);
-
         // Call through to the generic builder.
         self.txn_builder
             .add_tze_output(self.extension_id, value, &Precondition::open(hash_1))
@@ -345,9 +332,9 @@ impl<'a, B: ExtensionTxBuilder<'a>> DemoBuilder<&mut B> {
         prevout: (OutPoint, TzeOut),
         transfer_amount: Amount,
         preimage_1: [u8; 32],
-        preimage_2: [u8; 32],
+        hash_2: [u8; 32],
     ) -> Result<(), DemoBuildError<B::BuildError>> {
-        let (hash_1, hash_2) = builder_hashes(&preimage_1, &preimage_2);
+        let h1 = hash_1(&preimage_1, &hash_2);
 
         // eagerly validate the relationship between prevout.1 and preimage_1
         match Precondition::from_payload(
@@ -355,10 +342,10 @@ impl<'a, B: ExtensionTxBuilder<'a>> DemoBuilder<&mut B> {
             &prevout.1.precondition.payload,
         ) {
             Ok(Precondition::Open(hash)) => {
-                if hash.0 != hash_1 {
+                if hash.0 != h1 {
                     Err(DemoBuildError::TransferMismatch {
                         expected: hash.0,
-                        actual: hash_1,
+                        actual: h1,
                     })?
                 }
             }
@@ -440,7 +427,17 @@ mod tests {
         zip32::ExtendedSpendingKey,
     };
 
-    use super::{close, open, Context, DemoBuilder, Precondition, Program, Witness};
+    use super::{close, hash_1, open, Context, DemoBuilder, Precondition, Program, Witness};
+
+    fn demo_hashes(preimage_1: &[u8; 32], preimage_2: &[u8; 32]) -> ([u8; 32], [u8; 32]) {
+        let hash_2 = {
+            let mut hash = [0; 32];
+            hash.copy_from_slice(Params::new().hash_length(32).hash(preimage_2).as_bytes());
+            hash
+        };
+
+        (hash_1(preimage_1, &hash_2), hash_2)
+    }
 
     #[test]
     fn precondition_open_round_trip() {
@@ -598,7 +595,7 @@ mod tests {
 
         // Verify tx_c
         {
-            let ctx = Ctx { tx: &tx_b };
+            let ctx = Ctx { tx: &tx_c };
             assert_eq!(
                 Program.verify(
                     &tx_b.tze_outputs[0].precondition,
@@ -656,7 +653,8 @@ mod tests {
         };
 
         let value = Amount::from_u64(100000).unwrap();
-        db_a.demo_open(value, preimage_1, preimage_2)
+        let (h1, h2) = demo_hashes(&preimage_1, &preimage_2);
+        db_a.demo_open(value, h1)
             .map_err(|e| format!("open failure: {:?}", e))
             .unwrap();
         let (tx_a, _) = builder_a
@@ -675,7 +673,7 @@ mod tests {
         };
         let prevout_a = (OutPoint::new(tx_a.txid().0, 0), tx_a.tze_outputs[0].clone());
         let value_xfr = Amount::from_u64(90000).unwrap();
-        db_b.demo_transfer_to_close(prevout_a, value_xfr, preimage_1, preimage_2)
+        db_b.demo_transfer_to_close(prevout_a, value_xfr, preimage_1, h2)
             .map_err(|e| format!("transfer failure: {:?}", e))
             .unwrap();
         let (tx_b, _) = builder_b
@@ -721,7 +719,7 @@ mod tests {
         );
 
         // Verify tx_c
-        let ctx1 = Ctx { tx: &tx_b };
+        let ctx1 = Ctx { tx: &tx_c };
         assert_eq!(
             Program.verify(
                 &tx_b.tze_outputs[0].precondition,

@@ -60,7 +60,6 @@ impl Witness {
 
 #[derive(Debug, PartialEq)]
 pub enum Error<E> {
-    InvalidForEpoch(u32, u32),
     InvalidExtensionId(u32),
     ProgramError(E),
 }
@@ -68,12 +67,6 @@ pub enum Error<E> {
 impl<E: fmt::Display> fmt::Display for Error<E> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Error::InvalidForEpoch(cid, ptype) => write!(
-                f,
-                "Program type {} is invalid for consensus branch id {}",
-                ptype, cid
-            ),
-
             Error::InvalidExtensionId(extension_id) => {
                 write!(f, "Unrecognized program type id {}", extension_id)
             }
