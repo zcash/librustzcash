@@ -362,7 +362,7 @@ impl<'a, B: ExtensionTxBuilder<'a>> DemoBuilder<&mut B> {
         self.txn_builder
             .add_tze_output(
                 self.extension_id,
-                transfer_amount, // can this be > prevout.1.value?
+                transfer_amount, 
                 &Precondition::close(hash_2),
             )
             .map_err(DemoBuildError::BaseBuilderError)
