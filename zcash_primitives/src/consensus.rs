@@ -27,6 +27,7 @@ impl Parameters for MainNetwork {
             NetworkUpgrade::Blossom => Some(653_600),
             NetworkUpgrade::Heartwood => Some(903_000),
             NetworkUpgrade::Canopy => Some(1_046_400),
+            NetworkUpgrade::Future => None,
         }
     }
 }
@@ -43,6 +44,7 @@ impl Parameters for TestNetwork {
             NetworkUpgrade::Blossom => Some(584_000),
             NetworkUpgrade::Heartwood => Some(903_800),
             NetworkUpgrade::Canopy => Some(1_028_500),
+            NetworkUpgrade::Future => None,
         }
     }
 }
@@ -73,6 +75,12 @@ pub enum NetworkUpgrade {
     ///
     /// [Canopy]: https://z.cash/upgrade/canopy/
     Canopy,
+    /// The [FUTURE] network upgrade.
+    ///
+    /// This upgrade is expected never to activate on mainnet;
+    /// it is intended for use in integration testing of functionality
+    /// that is a candidate for integration in a future network upgrade.
+    Future,
 }
 
 impl fmt::Display for NetworkUpgrade {
@@ -83,6 +91,7 @@ impl fmt::Display for NetworkUpgrade {
             NetworkUpgrade::Blossom => write!(f, "Blossom"),
             NetworkUpgrade::Heartwood => write!(f, "Heartwood"),
             NetworkUpgrade::Canopy => write!(f, "Canopy"),
+            NetworkUpgrade::Future => write!(f, "FUTURE"),
         }
     }
 }
@@ -95,6 +104,7 @@ impl NetworkUpgrade {
             NetworkUpgrade::Blossom => BranchId::Blossom,
             NetworkUpgrade::Heartwood => BranchId::Heartwood,
             NetworkUpgrade::Canopy => BranchId::Canopy,
+            NetworkUpgrade::Future => BranchId::Future,
         }
     }
 }
@@ -140,6 +150,9 @@ pub enum BranchId {
     Heartwood,
     /// The consensus rules deployed by [`NetworkUpgrade::Canopy`].
     Canopy,
+    /// Candidates for future consensus rules; this branch will never
+    /// activate on mainnet.
+    Future,
 }
 
 impl TryFrom<u32> for BranchId {
@@ -153,6 +166,7 @@ impl TryFrom<u32> for BranchId {
             0x2bb4_0e60 => Ok(BranchId::Blossom),
             0xf5b9_230b => Ok(BranchId::Heartwood),
             0xe9ff_75a6 => Ok(BranchId::Canopy),
+            0xffff_ffff => Ok(BranchId::Future),
             _ => Err("Unknown consensus branch ID"),
         }
     }
@@ -167,6 +181,7 @@ impl From<BranchId> for u32 {
             BranchId::Blossom => 0x2bb4_0e60,
             BranchId::Heartwood => 0xf5b9_230b,
             BranchId::Canopy => 0xe9ff_75a6,
+            BranchId::Future => 0xffff_ffff,
         }
     }
 }

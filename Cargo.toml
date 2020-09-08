@@ -13,7 +13,3 @@ members = [
 lto = true
 panic = 'abort'
 codegen-units = 1
-
-[profile.dev]
-debug = true
-opt-level = 0

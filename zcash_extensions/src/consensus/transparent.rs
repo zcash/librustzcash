@@ -1,11 +1,14 @@
 //! Consensus logic for Transparent Zcash Extensions.
 
 use std::convert::TryFrom;
+use zcash_primitives::consensus::NetworkUpgrade;
 use zcash_primitives::extensions::transparent::{Error, Extension, Precondition, Witness};
-use zcash_primitives::transaction::components::TzeOut;
-use zcash_primitives::transaction::Transaction;
+use zcash_primitives::transaction::{components::TzeOut, Transaction};
 
 use crate::transparent::demo;
+
+/// Wire value for the demo extension identifier.
+pub const EXTENSION_DEMO: u32 = 0;
 
 /// The set of programs that have assigned type IDs within the Zcash consensus rules.
 #[derive(Debug, Clone, Copy)]
@@ -20,7 +23,7 @@ impl TryFrom<u32> for ExtensionId {
 
     fn try_from(t: u32) -> Result<Self, Self::Error> {
         match t {
-            0 => Ok(ExtensionId::Demo),
+            EXTENSION_DEMO => Ok(ExtensionId::Demo),
             n => Err(InvalidExtId(n)),
         }
     }
@@ -29,13 +32,14 @@ impl TryFrom<u32> for ExtensionId {
 impl From<ExtensionId> for u32 {
     fn from(type_id: ExtensionId) -> u32 {
         match type_id {
-            ExtensionId::Demo => 0,
+            ExtensionId::Demo => EXTENSION_DEMO,
         }
     }
 }
 
 /// The complete set of context data that is available to any extension having
-/// an assigned extension type ID.
+/// an assigned extension type ID. This type may be modified in the future if
+/// additional context information is required by newly integrated TZEs.
 pub struct Context<'a> {
     pub height: i32,
     pub tx: &'a Transaction,
@@ -47,9 +51,19 @@ impl<'a> Context<'a> {
     }
 }
 
+/// Implementations of this trait provide complete extension validation rules
+/// for a specific epoch, and handle dispatch of verification to individual
+/// TZEs based upon extension ID and mode.
 pub trait Epoch {
     type Error;
 
+    /// For a specific epoch, if the extension ID and mode of the supplied
+    /// witness matches that of the supplied precondition, these values will
+    /// be passed to the associated extension for verification, along with
+    /// whatever that extension requires of the provided `Context`.
+    ///
+    /// Successful validation is indicated by the returned Result containing
+    /// no errors.
     fn verify<'a>(
         &self,
         precondition: &Precondition,
@@ -74,13 +88,11 @@ impl<'a> demo::Context for Context<'a> {
     }
 }
 
-/// Wire identifier for the dummy network upgrade epoch.
-pub const NEXT_BRANCH_ID: u32 = 0x7374f403;
+/// Identifier for the set of TZEs associated with the FUTURE network upgrade.
+/// This epoch is intended only for use on test networks.
+struct EpochVTest;
 
-/// A set of demo TZEs associated with the dummy network upgrade.
-struct EpochV1;
-
-impl Epoch for EpochV1 {
+impl Epoch for EpochVTest {
     type Error = String;
 
     fn verify<'a>(
@@ -89,9 +101,10 @@ impl Epoch for EpochV1 {
         witness: &Witness,
         ctx: &Context<'a>,
     ) -> Result<(), Error<Self::Error>> {
-        // This epoch contains the following set of programs:
         let ext_id = ExtensionId::try_from(precondition.extension_id)
             .map_err(|InvalidExtId(id)| Error::InvalidExtensionId(id))?;
+
+        // This epoch recognizes the following set of extensions:
         match ext_id {
             ExtensionId::Demo => demo::Program
                 .verify(precondition, witness, ctx)
@@ -100,11 +113,10 @@ impl Epoch for EpochV1 {
     }
 }
 
-pub fn epoch_for_branch(consensus_branch_id: u32) -> Option<Box<dyn Epoch<Error = String>>> {
+pub fn epoch_for_branch(network_upgrade: NetworkUpgrade) -> Option<Box<dyn Epoch<Error = String>>> {
     // Map from consensus branch IDs to epochs.
-    let _tmp_branch_id = NEXT_BRANCH_ID;
-    match consensus_branch_id {
-        NEXT_BRANCH_ID => Some(Box::new(EpochV1)),
+    match network_upgrade {
+        NetworkUpgrade::Future => Some(Box::new(EpochVTest)),
         _ => None,
     }
 }

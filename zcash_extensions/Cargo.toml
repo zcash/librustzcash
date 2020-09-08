@@ -16,4 +16,4 @@ zcash_primitives = { version = "0.4.0", path = "../zcash_primitives" }
 ff = "0.8"
 jubjub = "0.5.1"
 rand_core = "0.5.1"
-zcash_proofs = { path = "../zcash_proofs" }
+zcash_proofs = { version = "0.3.0", path = "../zcash_proofs" }
