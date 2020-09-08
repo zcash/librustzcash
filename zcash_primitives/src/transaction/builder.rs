@@ -370,12 +370,58 @@ impl<'a, P: consensus::Parameters> Builder<'a, P, OsRng> {
         Builder::new_with_rng(height, OsRng)
     }
 
+    /// Creates a new `Builder` targeted for inclusion in the block with the given height,
+    /// using default values for general transaction fields and the default OS random,
+    /// and the `FUTURE_TX_VERSION` and `FUTURE_VERSION_GROUP_ID` version identifiers.
+    ///
+    /// # Default values
+    ///
+    /// The expiry height will be set to the given height plus the default transaction
+    /// expiry delta (20 blocks).
+    ///
+    /// The fee will be set to the default fee (0.0001 ZEC).
+    ///
+    /// The transaction will be constructed and serialized according to the Future
+    /// network upgrade rules. This is intended only for use in integration testing of
+    /// new features.
     pub fn new_future(height: u32) -> Self {
         Builder::new_with_rng_future(height, OsRng)
     }
 }
 
 impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng> Builder<'a, P, R> {
+    /// Creates a new `Builder` targeted for inclusion in the block with the given height
+    /// and randomness source, using default values for general transaction fields.
+    ///
+    /// # Default values
+    ///
+    /// The expiry height will be set to the given height plus the default transaction
+    /// expiry delta (20 blocks).
+    ///
+    /// The fee will be set to the default fee (0.0001 ZEC).
+    pub fn new_with_rng(height: u32, rng: R) -> Builder<'a, P, R> {
+        Self::new_with_mtx(height, rng, TransactionData::new())
+    }
+
+    /// Creates a new `Builder` targeted for inclusion in the block with the given height,
+    /// and randomness source, using default values for general transaction fields
+    /// and the `FUTURE_TX_VERSION` and `FUTURE_VERSION_GROUP_ID` version identifiers.
+    ///
+    /// # Default values
+    ///
+    /// The expiry height will be set to the given height plus the default transaction
+    /// expiry delta (20 blocks).
+    ///
+    /// The fee will be set to the default fee (0.0001 ZEC).
+    ///
+    /// The transaction will be constructed and serialized according to the Future
+    /// network upgrade rules. This is intended only for use in integration testing of
+    /// new features.
+    pub fn new_with_rng_future(height: u32, rng: R) -> Builder<'a, P, R> {
+        Self::new_with_mtx(height, rng, TransactionData::future())
+    }
+
+    /// Common utility function for builder construction.
     fn new_with_mtx(height: u32, rng: R, mut mtx: TransactionData) -> Builder<'a, P, R> {
         mtx.expiry_height = height + DEFAULT_TX_EXPIRY_DELTA;
 
@@ -392,23 +438,6 @@ impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng> Builder<'a, P, R> {
             change_address: None,
             phantom: PhantomData,
         }
-    }
-
-    /// Creates a new `Builder` targeted for inclusion in the block with the given height
-    /// and randomness source, using default values for general transaction fields.
-    ///
-    /// # Default values
-    ///
-    /// The expiry height will be set to the given height plus the default transaction
-    /// expiry delta (20 blocks).
-    ///
-    /// The fee will be set to the default fee (0.0001 ZEC).
-    pub fn new_with_rng(height: u32, rng: R) -> Builder<'a, P, R> {
-        Self::new_with_mtx(height, rng, TransactionData::new())
-    }
-
-    pub fn new_with_rng_future(height: u32, rng: R) -> Builder<'a, P, R> {
-        Self::new_with_mtx(height, rng, TransactionData::future())
     }
 
     /// Adds a Sapling note to be spent in this transaction.
