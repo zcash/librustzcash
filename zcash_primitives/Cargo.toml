@@ -46,6 +46,10 @@ rand_xorshift = "0.2"
 transparent-inputs = ["ripemd160", "secp256k1"]
 
 [[bench]]
+name = "note_decryption"
+harness = false
+
+[[bench]]
 name = "pedersen_hash"
 harness = false
 
