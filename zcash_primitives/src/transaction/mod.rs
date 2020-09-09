@@ -27,6 +27,13 @@ const OVERWINTER_VERSION_GROUP_ID: u32 = 0x03C48270;
 const OVERWINTER_TX_VERSION: u32 = 3;
 const SAPLING_VERSION_GROUP_ID: u32 = 0x892F2085;
 const SAPLING_TX_VERSION: u32 = 4;
+
+/// These versions are used exclusively for in-development transaction
+/// serialization, and will never be active under the consensus rules.
+/// When new consensus transaction versions are added, all call sites
+/// using these constants should be inspected, and use of these constants
+/// should be removed as appropriate in favor of the new consensus
+/// transaction version and group.
 const FUTURE_VERSION_GROUP_ID: u32 = 0xFFFFFFFF;
 const FUTURE_TX_VERSION: u32 = 0x0000FFFF;
 
