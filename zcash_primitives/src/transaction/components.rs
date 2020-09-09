@@ -132,6 +132,16 @@ fn to_io_error(_: std::num::TryFromIntError) -> io::Error {
 }
 
 impl TzeIn {
+    pub fn new(prevout: OutPoint, extension_id: u32, mode: u32) -> Self {
+        TzeIn {
+            prevout,
+            witness: tze::Witness {
+                extension_id,
+                mode,
+                payload: vec![],
+            },
+        }
+    }
     pub fn read<R: Read>(mut reader: &mut R) -> io::Result<Self> {
         let prevout = OutPoint::read(&mut reader)?;
 

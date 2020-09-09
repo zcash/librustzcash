@@ -354,7 +354,7 @@ impl<'a, B: ExtensionTxBuilder<'a>> DemoBuilder<&mut B> {
         }
 
         self.txn_builder
-            .add_tze_input(self.extension_id, prevout, move |_| {
+            .add_tze_input(self.extension_id, open::MODE, prevout, move |_| {
                 Ok(Witness::open(preimage_1))
             })
             .map_err(DemoBuildError::BaseBuilderError)?;
@@ -362,7 +362,7 @@ impl<'a, B: ExtensionTxBuilder<'a>> DemoBuilder<&mut B> {
         self.txn_builder
             .add_tze_output(
                 self.extension_id,
-                transfer_amount, 
+                transfer_amount,
                 &Precondition::close(hash_2),
             )
             .map_err(DemoBuildError::BaseBuilderError)
@@ -397,7 +397,7 @@ impl<'a, B: ExtensionTxBuilder<'a>> DemoBuilder<&mut B> {
         }
 
         self.txn_builder
-            .add_tze_input(self.extension_id, prevout, move |_| {
+            .add_tze_input(self.extension_id, close::MODE, prevout, move |_| {
                 Ok(Witness::close(preimage_2))
             })
             .map_err(DemoBuildError::BaseBuilderError)

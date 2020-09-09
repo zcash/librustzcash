@@ -27,7 +27,7 @@ pub trait ToPayload {
 
 /// A condition that can be used to encumber transparent funds.
 ///
-/// This struct is an intermediate representation between the 
+/// This struct is an intermediate representation between the
 /// serialized binary format which is used inside of a transaction
 /// and extension-specific types. The payload field of this struct
 /// is treated as opaque to all but extension corresponding to the
@@ -51,7 +51,7 @@ impl Precondition {
         }
     }
 
-    /// Attempt to parse an extension-specific precondition value from the 
+    /// Attempt to parse an extension-specific precondition value from the
     /// intermediate representation.
     pub fn try_to<P: FromPayload>(&self) -> Result<P, P::Error> {
         P::from_payload(self.mode, &self.payload)
@@ -61,7 +61,7 @@ impl Precondition {
 /// Data that satisfies the precondition for prior encumbered funds, enabling them to be
 /// spent.
 ///
-/// This struct is an intermediate representation between the 
+/// This struct is an intermediate representation between the
 /// serialized binary format which is used inside of a transaction
 /// and extension-specific types. The payload field of this struct
 /// is treated as opaque to all but extension corresponding to the
@@ -85,7 +85,7 @@ impl Witness {
         }
     }
 
-    /// Attempt to parse an extension-specific witness value from the 
+    /// Attempt to parse an extension-specific witness value from the
     /// intermediate representation.
     pub fn try_to<P: FromPayload>(&self) -> Result<P, P::Error> {
         P::from_payload(self.mode, &self.payload)
@@ -153,10 +153,10 @@ pub trait ExtensionTxBuilder<'a> {
     type BuildError;
 
     /// Add a TZE input to the transaction under construction by providing a witness
-    /// to a precondition identified by a prior outpoint. 
+    /// to a precondition identified by a prior outpoint.
     ///
     /// The `witness_builder` function allows the transaction builder to provide extra
-    /// contextual information from the transaction under construction to be used 
+    /// contextual information from the transaction under construction to be used
     /// in the production of this witness (for example, so that the witness may
     /// internally make commitments based upon this information.) For the standard
     /// transaction builder, the value provided here is the transaction under
@@ -164,6 +164,7 @@ pub trait ExtensionTxBuilder<'a> {
     fn add_tze_input<WBuilder, W: ToPayload>(
         &mut self,
         extension_id: u32,
+        mode: u32,
         prevout: (OutPoint, TzeOut),
         witness_builder: WBuilder,
     ) -> Result<(), Self::BuildError>

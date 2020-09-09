@@ -51,6 +51,7 @@ pub enum Error {
     InvalidAmount,
     NoChangeAddress,
     SpendProof,
+    TzeWitnessModeMismatch(u32, u32),
 }
 
 impl fmt::Display for Error {
@@ -67,6 +68,8 @@ impl fmt::Display for Error {
             Error::InvalidAmount => write!(f, "Invalid amount"),
             Error::NoChangeAddress => write!(f, "No change address specified or discoverable"),
             Error::SpendProof => write!(f, "Failed to create Sapling spend proof"),
+            Error::TzeWitnessModeMismatch(expected, actual) =>
+                write!(f, "TZE witness builder returned a mode that did not match the mode with which the input was initially constructed: expected = {:?}, actual = {:?}", expected, actual),
         }
     }
 }
@@ -266,7 +269,7 @@ impl TransparentInputs {
 
 struct TzeInputInfo<'a, BuildCtx> {
     prevout: TzeOut,
-    builder: Box<dyn FnOnce(&BuildCtx) -> Result<TzeIn, Error> + 'a>,
+    builder: Box<dyn FnOnce(&BuildCtx) -> Result<(u32, Vec<u8>), Error> + 'a>,
 }
 
 struct TzeInputs<'a, BuildCtx> {
@@ -278,27 +281,13 @@ impl<'a, BuildCtx> TzeInputs<'a, BuildCtx> {
         TzeInputs { builders: vec![] }
     }
 
-    fn push<WBuilder, W: ToPayload>(
-        &mut self,
-        extension_id: u32,
-        (outpoint, tzeout): (OutPoint, TzeOut),
-        builder: WBuilder,
-    ) where
+    fn push<WBuilder, W: ToPayload>(&mut self, tzeout: TzeOut, builder: WBuilder)
+    where
         WBuilder: 'a + FnOnce(&BuildCtx) -> Result<W, Error>,
     {
         self.builders.push(TzeInputInfo {
             prevout: tzeout,
-            builder: Box::new(move |ctx| {
-                let (mode, payload) = builder(&ctx).map(|x| x.to_payload())?;
-                Ok(TzeIn {
-                    prevout: outpoint,
-                    witness: tze::Witness {
-                        extension_id,
-                        mode,
-                        payload,
-                    },
-                })
-            }),
+            builder: Box::new(move |ctx| builder(&ctx).map(|x| x.to_payload())),
         });
     }
 }
@@ -784,7 +773,7 @@ impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng> Builder<'a, P, R> {
         };
 
         // // Create TZE input witnesses
-        for tze_in in self.tze_inputs.builders {
+        for (i, tze_in) in self.tze_inputs.builders.into_iter().enumerate() {
             // Need to enable witness to commit to the amount.
             // - So hardware wallets "know" the amount without having to be sent all the
             //   prior TZE outputs to which this witness gives evidence.
@@ -793,7 +782,13 @@ impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng> Builder<'a, P, R> {
             // (Or make it part of the sighash?)
             // - TODO: Check whether transparent inputs committing to script_pubkey was
             //   only so that hardware wallets "knew" what address was being spent from.
-            self.mtx.tze_inputs.push((tze_in.builder)(&self.mtx)?);
+            let (mode, payload) = (tze_in.builder)(&self.mtx)?;
+            let mut current = self.mtx.tze_inputs.get_mut(i).unwrap();
+            if mode != current.witness.mode {
+                return Err(Error::TzeWitnessModeMismatch(current.witness.mode, mode));
+            }
+
+            current.witness.payload = payload;
         }
 
         // Transparent signatures
@@ -816,13 +811,17 @@ impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng> ExtensionTxBuilder<'a
     fn add_tze_input<WBuilder, W: ToPayload>(
         &mut self,
         extension_id: u32,
-        prevout: (OutPoint, TzeOut),
+        mode: u32,
+        (outpoint, prevout): (OutPoint, TzeOut),
         witness_builder: WBuilder,
     ) -> Result<(), Self::BuildError>
     where
         WBuilder: 'a + (FnOnce(&Self::BuildCtx) -> Result<W, Self::BuildError>),
     {
-        self.tze_inputs.push(extension_id, prevout, witness_builder);
+        self.mtx
+            .tze_inputs
+            .push(TzeIn::new(outpoint, extension_id, mode));
+        self.tze_inputs.push(prevout, witness_builder);
         Ok(())
     }
 
