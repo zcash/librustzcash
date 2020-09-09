@@ -255,7 +255,12 @@ pub fn signature_hash_data<'a>(
                     script_code,
                     value,
                 } => {
-                    let mut data = vec![];
+                    let mut data = if sigversion == SigHashVersion::Future {
+                        ZCASH_TRANSPARENT_SIGNED_INPUT_DOMAIN_SEPARATOR.to_vec()
+                    } else {
+                        vec![]
+                    };
+
                     tx.vin[index].prevout.write(&mut data).unwrap();
                     script_code.write(&mut data).unwrap();
                     data.extend_from_slice(&value.to_i64_le_bytes());
@@ -280,6 +285,11 @@ pub fn signature_hash_data<'a>(
                     data.extend_from_slice(&value.to_i64_le_bytes());
                     h.update(&data);
                 }
+
+                SignableInput::Tze { .. } => {
+                    panic!("A request has been made to sign a TZE input, but the signature hash version is not Future");
+                }
+
                 _ => (),
             }
 
