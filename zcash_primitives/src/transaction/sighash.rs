@@ -17,6 +17,9 @@ const ZCASH_OUTPUTS_HASH_PERSONALIZATION: &[u8; 16] = b"ZcashOutputsHash";
 const ZCASH_JOINSPLITS_HASH_PERSONALIZATION: &[u8; 16] = b"ZcashJSplitsHash";
 const ZCASH_SHIELDED_SPENDS_HASH_PERSONALIZATION: &[u8; 16] = b"ZcashSSpendsHash";
 const ZCASH_SHIELDED_OUTPUTS_HASH_PERSONALIZATION: &[u8; 16] = b"ZcashSOutputHash";
+const ZCASH_TZE_INPUTS_HASH_PERSONALIZATION: &[u8; 16] = b"Zcash_TzeInsHash";
+const ZCASH_TZE_OUTPUTS_HASH_PERSONALIZATION: &[u8; 16] = b"ZcashTzeOutsHash";
+
 const ZCASH_TZE_SIGNED_INPUT_DOMAIN_SEPARATOR: &[u8; 16] = b"ZcashTZESigInput";
 const ZCASH_TRANSPARENT_SIGNED_INPUT_DOMAIN_SEPARATOR: &[u8; 16] = b"Zcash_TransInput";
 
@@ -155,6 +158,28 @@ fn shielded_outputs_hash(tx: &TransactionData) -> Blake2bHash {
         .hash(&data)
 }
 
+fn tze_inputs_hash(tx: &TransactionData) -> Blake2bHash {
+    let mut data = vec![];
+    for tzein in &tx.tze_inputs {
+        tzein.write_without_witness(&mut data).unwrap();
+    }
+    Blake2bParams::new()
+        .hash_length(32)
+        .personal(ZCASH_TZE_INPUTS_HASH_PERSONALIZATION)
+        .hash(&data)
+}
+
+fn tze_outputs_hash(tx: &TransactionData) -> Blake2bHash {
+    let mut data = vec![];
+    for tzeout in &tx.tze_outputs {
+        tzeout.write(&mut data).unwrap();
+    }
+    Blake2bParams::new()
+        .hash_length(32)
+        .personal(ZCASH_TZE_OUTPUTS_HASH_PERSONALIZATION)
+        .hash(&data)
+}
+
 pub enum SignableInput<'a> {
     Shielded,
     Transparent {
@@ -233,8 +258,12 @@ pub fn signature_hash_data<'a>(
             } else {
                 h.update(&[0; 32]);
             };
+            if sigversion == SigHashVersion::Future {
+                update_hash!(h, !tx.tze_inputs.is_empty(), tze_inputs_hash(tx));
+                update_hash!(h, !tx.tze_outputs.is_empty(), tze_outputs_hash(tx));
+            }
             update_hash!(h, !tx.joinsplits.is_empty(), joinsplits_hash(tx));
-            if sigversion == SigHashVersion::Sapling {
+            if sigversion == SigHashVersion::Sapling || sigversion == SigHashVersion::Future {
                 update_hash!(h, !tx.shielded_spends.is_empty(), shielded_spends_hash(tx));
                 update_hash!(
                     h,
@@ -244,7 +273,7 @@ pub fn signature_hash_data<'a>(
             }
             update_u32!(h, tx.lock_time, tmp);
             update_u32!(h, tx.expiry_height, tmp);
-            if sigversion == SigHashVersion::Sapling {
+            if sigversion == SigHashVersion::Sapling || sigversion == SigHashVersion::Future {
                 h.update(&tx.value_balance.to_i64_le_bytes());
             }
             update_u32!(h, hash_type, tmp);

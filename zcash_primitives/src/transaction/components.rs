@@ -159,17 +159,22 @@ impl TzeIn {
         })
     }
 
-    pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
+    pub fn write_without_witness<W: Write>(&self, mut writer: W) -> io::Result<()> {
         self.prevout.write(&mut writer)?;
 
         CompactSize::write(
             &mut writer,
             usize::try_from(self.witness.extension_id).map_err(|e| to_io_error(e))?,
         )?;
+
         CompactSize::write(
             &mut writer,
             usize::try_from(self.witness.mode).map_err(|e| to_io_error(e))?,
-        )?;
+        )
+    } 
+
+    pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
+        self.write_without_witness(&mut writer)?;
         Vector::write(&mut writer, &self.witness.payload, |w, b| w.write_u8(*b))
     }
 }
