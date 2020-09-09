@@ -76,7 +76,8 @@ struct SpendDescriptionInfo {
 }
 
 pub struct SaplingOutput {
-    ovk: OutgoingViewingKey,
+    /// `None` represents the `ovk = ⊥` case.
+    ovk: Option<OutgoingViewingKey>,
     to: PaymentAddress,
     note: Note,
     memo: Memo,
@@ -86,7 +87,7 @@ impl SaplingOutput {
     pub fn new<R: RngCore + CryptoRng, P: consensus::Parameters>(
         height: u32,
         rng: &mut R,
-        ovk: OutgoingViewingKey,
+        ovk: Option<OutgoingViewingKey>,
         to: PaymentAddress,
         value: Amount,
         memo: Option<Memo>,
@@ -122,7 +123,7 @@ impl SaplingOutput {
         ctx: &mut P::SaplingProvingContext,
         rng: &mut R,
     ) -> OutputDescription {
-        let encryptor = SaplingNoteEncryption::new(
+        let mut encryptor = SaplingNoteEncryption::new(
             self.ovk,
             self.note.clone(),
             self.to.clone(),
@@ -396,7 +397,7 @@ impl<P: consensus::Parameters, R: RngCore + CryptoRng> Builder<P, R> {
     /// Adds a Sapling address to send funds to.
     pub fn add_sapling_output(
         &mut self,
-        ovk: OutgoingViewingKey,
+        ovk: Option<OutgoingViewingKey>,
         to: PaymentAddress,
         value: Amount,
         memo: Option<Memo>,
@@ -502,7 +503,7 @@ impl<P: consensus::Parameters, R: RngCore + CryptoRng> Builder<P, R> {
                 return Err(Error::NoChangeAddress);
             };
 
-            self.add_sapling_output(change_address.0, change_address.1, change, None)?;
+            self.add_sapling_output(Some(change_address.0), change_address.1, change, None)?;
         }
 
         //
@@ -728,7 +729,7 @@ mod tests {
 
         let mut builder = Builder::<TestNetwork, OsRng>::new(0);
         assert_eq!(
-            builder.add_sapling_output(ovk, to, Amount::from_i64(-1).unwrap(), None),
+            builder.add_sapling_output(Some(ovk), to, Amount::from_i64(-1).unwrap(), None),
             Err(Error::InvalidAmount)
         );
     }
@@ -840,7 +841,7 @@ mod tests {
         }
 
         let extfvk = ExtendedFullViewingKey::from(&extsk);
-        let ovk = extfvk.fvk.ovk;
+        let ovk = Some(extfvk.fvk.ovk);
         let to = extfvk.default_address().unwrap().1;
 
         // Fail if there is only a Sapling output
