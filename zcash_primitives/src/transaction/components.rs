@@ -56,7 +56,7 @@ impl OutPoint {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct TxIn {
     pub prevout: OutPoint,
     pub script_sig: Script,
@@ -93,7 +93,7 @@ impl TxIn {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct TxOut {
     pub value: Amount,
     pub script_pubkey: Script,
@@ -121,7 +121,7 @@ impl TxOut {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct TzeIn {
     pub prevout: OutPoint,
     pub witness: tze::Witness,
@@ -171,7 +171,7 @@ impl TzeIn {
             &mut writer,
             usize::try_from(self.witness.mode).map_err(|e| to_io_error(e))?,
         )
-    } 
+    }
 
     pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
         self.write_without_witness(&mut writer)?;
@@ -179,7 +179,7 @@ impl TzeIn {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct TzeOut {
     pub value: Amount,
     pub precondition: tze::Precondition,
@@ -225,6 +225,7 @@ impl TzeOut {
     }
 }
 
+#[derive(Clone)]
 pub struct SpendDescription {
     pub cv: jubjub::ExtendedPoint,
     pub anchor: bls12_381::Scalar,
@@ -314,6 +315,7 @@ impl SpendDescription {
     }
 }
 
+#[derive(Clone)]
 pub struct OutputDescription {
     pub cv: jubjub::ExtendedPoint,
     pub cmu: bls12_381::Scalar,
@@ -405,6 +407,7 @@ impl OutputDescription {
     }
 }
 
+#[derive(Clone)]
 enum SproutProof {
     Groth([u8; GROTH_PROOF_SIZE]),
     PHGR([u8; PHGR_PROOF_SIZE]),
@@ -419,6 +422,7 @@ impl std::fmt::Debug for SproutProof {
     }
 }
 
+#[derive(Clone)]
 pub struct JSDescription {
     vpub_old: Amount,
     vpub_new: Amount,

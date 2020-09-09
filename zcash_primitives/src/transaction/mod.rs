@@ -42,7 +42,7 @@ impl fmt::Display for TxId {
 }
 
 /// A Zcash transaction.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Transaction {
     txid: TxId,
     data: TransactionData,
@@ -62,6 +62,7 @@ impl PartialEq for Transaction {
     }
 }
 
+#[derive(Clone)]
 pub struct TransactionData {
     pub overwintered: bool,
     pub version: u32,

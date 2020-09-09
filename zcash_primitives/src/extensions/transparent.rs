@@ -32,7 +32,7 @@ pub trait ToPayload {
 /// and extension-specific types. The payload field of this struct
 /// is treated as opaque to all but extension corresponding to the
 /// encapsulated extension_id value.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Precondition {
     pub extension_id: u32,
     pub mode: u32,
@@ -66,7 +66,7 @@ impl Precondition {
 /// and extension-specific types. The payload field of this struct
 /// is treated as opaque to all but extension corresponding to the
 /// encapsulated extension_id value.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Witness {
     pub extension_id: u32,
     pub mode: u32,

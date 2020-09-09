@@ -41,6 +41,7 @@ subtle = "2.2.3"
 criterion = "0.3"
 hex-literal = "0.2"
 rand_xorshift = "0.2"
+proptest = "0.10.1"
 
 [features]
 transparent-inputs = ["ripemd160", "secp256k1"]

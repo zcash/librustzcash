@@ -1,13 +1,123 @@
 use ff::Field;
 use rand_core::OsRng;
 
-use crate::{constants::SPENDING_KEY_GENERATOR, redjubjub::PrivateKey};
+use proptest::collection::vec;
+use proptest::prelude::*;
+
+use crate::{
+    consensus::BranchId, constants::SPENDING_KEY_GENERATOR, extensions::transparent as tze,
+    legacy::Script, redjubjub::PrivateKey,
+};
 
 use super::{
-    components::Amount,
+    components::amount::MAX_MONEY,
+    components::{Amount, OutPoint, TxIn, TxOut, TzeIn, TzeOut},
     sighash::{signature_hash, SignableInput},
-    Transaction, TransactionData,
+    Transaction, TransactionData, FUTURE_TX_VERSION, FUTURE_VERSION_GROUP_ID,
+    OVERWINTER_TX_VERSION, OVERWINTER_VERSION_GROUP_ID, SAPLING_TX_VERSION,
+    SAPLING_VERSION_GROUP_ID,
 };
+
+prop_compose! {
+    fn arb_outpoint()(hash in prop::array::uniform32(1u8..), n in 1..(100 as u32)) -> OutPoint {
+        OutPoint::new(hash, n)
+    }
+}
+
+// TODO: actually generate real possible script values?
+prop_compose! {
+    fn arb_script()(v in vec(any::<u8>(), 1..256)) -> Script {
+        Script(v)
+    }
+}
+
+prop_compose! {
+    fn arb_txin()(prevout in arb_outpoint(), script_sig in arb_script(), sequence in any::<u32>()) -> TxIn {
+        TxIn { prevout, script_sig, sequence }
+    }
+}
+
+prop_compose! {
+    fn arb_amount()(value in 0..MAX_MONEY) -> Amount {
+        Amount::from_i64(value).unwrap()
+    }
+}
+
+prop_compose! {
+    fn arb_txout()(value in arb_amount(), script_pubkey in arb_script()) -> TxOut {
+        TxOut { value, script_pubkey }
+    }
+}
+
+prop_compose! {
+    fn arb_witness()(extension_id in 0..(100 as u32), mode in (0..100 as u32), payload in vec(any::<u8>(), 32..256))  -> tze::Witness {
+        tze::Witness { extension_id, mode, payload }
+    }
+}
+
+prop_compose! {
+    fn arb_tzein()(prevout in arb_outpoint(), witness in arb_witness()) -> TzeIn {
+        TzeIn { prevout, witness }
+    }
+}
+
+prop_compose! {
+    fn arb_precondition()(extension_id in 0..(100 as u32), mode in (0..100 as u32), payload in vec(any::<u8>(), 32..256))  -> tze::Precondition {
+        tze::Precondition { extension_id, mode, payload }
+    }
+}
+
+prop_compose! {
+    fn arb_tzeout()(value in arb_amount(), precondition in arb_precondition()) -> TzeOut {
+        TzeOut { value, precondition }
+    }
+}
+
+fn tx_versions(branch_id: BranchId) -> impl Strategy<Value = (u32, u32)> {
+    match branch_id {
+        BranchId::Sprout => (1..(2 as u32)).prop_map(|i| (i, 0)).boxed(),
+        BranchId::Overwinter => Just((OVERWINTER_TX_VERSION, OVERWINTER_VERSION_GROUP_ID)).boxed(),
+        BranchId::Future => Just((FUTURE_TX_VERSION, FUTURE_VERSION_GROUP_ID)).boxed(),
+        _otherwise => Just((SAPLING_TX_VERSION, SAPLING_VERSION_GROUP_ID)).boxed(),
+    }
+}
+
+prop_compose! {
+    fn arb_txdata(branch_id: BranchId)(
+        (version, version_group_id) in tx_versions(branch_id),
+        vin in vec(arb_txin(), 0..10),
+        vout in vec(arb_txout(), 0..10),
+        tze_inputs in vec(arb_tzein(), 0..10),
+        tze_outputs in vec(arb_tzeout(), 0..10),
+        lock_time in any::<u32>(),
+        expiry_height in any::<u32>(),
+        value_balance in arb_amount(),
+    ) -> TransactionData {
+        TransactionData {
+            overwintered: branch_id != BranchId::Sprout,
+            version,
+            version_group_id,
+            vin, vout,
+            tze_inputs:  if branch_id == BranchId::Future { tze_inputs } else { vec![] },
+            tze_outputs: if branch_id == BranchId::Future { tze_outputs } else { vec![] },
+            lock_time,
+            expiry_height,
+            value_balance,
+            shielded_spends: vec![], //FIXME
+            shielded_outputs: vec![], //FIXME
+            joinsplits: vec![], //FIXME
+            joinsplit_pubkey: None, //FIXME
+            joinsplit_sig: None, //FIXME
+            binding_sig: None, //FIXME
+        }
+    }
+}
+
+prop_compose! {
+    fn arb_tx(branch_id: BranchId)(tx_data in arb_txdata(branch_id)) -> Transaction {
+        Transaction::from_data(tx_data).unwrap()
+    }
+}
 
 #[test]
 fn tx_read_write() {
@@ -63,6 +173,26 @@ fn tx_write_rejects_unexpected_binding_sig() {
         let mut tx = TransactionData::new();
         tx.binding_sig = Some(sig);
         assert!(tx.freeze().is_err());
+    }
+}
+
+proptest! {
+    #[test]
+    fn test_tze_roundtrip(tx in arb_tx(BranchId::Future)) {
+        let mut txn_bytes = vec![];
+        tx.write(&mut txn_bytes).unwrap();
+
+        let txo = Transaction::read(&txn_bytes[..]).unwrap();
+
+        assert_eq!(tx.overwintered, txo.overwintered);
+        assert_eq!(tx.version, txo.version);
+        assert_eq!(tx.version_group_id, txo.version_group_id);
+        assert_eq!(tx.vin, txo.vin);
+        assert_eq!(tx.vout, txo.vout);
+        assert_eq!(tx.tze_inputs, txo.tze_inputs);
+        assert_eq!(tx.tze_outputs, txo.tze_outputs);
+        assert_eq!(tx.lock_time, txo.lock_time);
+        assert_eq!(tx.value_balance, txo.value_balance);
     }
 }
 
