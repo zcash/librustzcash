@@ -13,12 +13,12 @@ edition = "2018"
 
 [dependencies]
 bech32 = "0.7"
-bls12_381 = "0.3"
+bls12_381 = "0.3.1"
 bs58 = { version = "0.3", features = ["check"] }
 ff = "0.8"
 group = "0.8"
 hex = "0.4"
-jubjub = "0.5"
+jubjub = "0.5.1"
 protobuf = "2.15"
 subtle = "2"
 zcash_primitives = { version = "0.3", path = "../zcash_primitives" }
