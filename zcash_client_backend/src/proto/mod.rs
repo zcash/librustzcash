@@ -73,8 +73,8 @@ impl compact_formats::CompactOutput {
     /// A convenience method that parses [`CompactOutput.epk`].
     ///
     /// [`CompactOutput.epk`]: #structfield.epk
-    pub fn epk(&self) -> Result<jubjub::SubgroupPoint, ()> {
-        let p = jubjub::SubgroupPoint::from_bytes(&self.epk[..].try_into().map_err(|_| ())?);
+    pub fn epk(&self) -> Result<jubjub::ExtendedPoint, ()> {
+        let p = jubjub::ExtendedPoint::from_bytes(&self.epk[..].try_into().map_err(|_| ())?);
         if p.is_some().into() {
             Ok(p.unwrap())
         } else {

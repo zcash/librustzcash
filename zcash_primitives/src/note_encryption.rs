@@ -142,7 +142,7 @@ pub fn sapling_ka_agree(esk: &jubjub::Fr, pk_d: &jubjub::ExtendedPoint) -> jubju
 /// Sapling KDF for note encryption.
 ///
 /// Implements section 5.4.4.4 of the Zcash Protocol Specification.
-fn kdf_sapling(dhsecret: jubjub::SubgroupPoint, epk: &jubjub::SubgroupPoint) -> Blake2bHash {
+fn kdf_sapling(dhsecret: jubjub::SubgroupPoint, epk: &jubjub::ExtendedPoint) -> Blake2bHash {
     Blake2bParams::new()
         .hash_length(32)
         .personal(KDF_SAPLING_PERSONALIZATION)
@@ -174,7 +174,7 @@ pub fn prf_ock(
     ovk: &OutgoingViewingKey,
     cv: &jubjub::ExtendedPoint,
     cmu: &bls12_381::Scalar,
-    epk: &jubjub::SubgroupPoint,
+    epk: &jubjub::ExtendedPoint,
 ) -> OutgoingCipherKey {
     OutgoingCipherKey(
         Blake2bParams::new()
@@ -287,7 +287,7 @@ impl<R: RngCore + CryptoRng> SaplingNoteEncryption<R> {
     /// Generates `encCiphertext` for this note.
     pub fn encrypt_note_plaintext(&self) -> [u8; ENC_CIPHERTEXT_SIZE] {
         let shared_secret = sapling_ka_agree(&self.esk, self.to.pk_d().into());
-        let key = kdf_sapling(shared_secret, &self.epk);
+        let key = kdf_sapling(shared_secret, &self.epk.into());
 
         // Note plaintext encoding is defined in section 5.5 of the Zcash Protocol
         // Specification.
@@ -328,7 +328,7 @@ impl<R: RngCore + CryptoRng> SaplingNoteEncryption<R> {
         cmu: &bls12_381::Scalar,
     ) -> [u8; OUT_CIPHERTEXT_SIZE] {
         let (ock, input) = if let Some(ovk) = &self.ovk {
-            let ock = prf_ock(ovk, &cv, &cmu, &self.epk);
+            let ock = prf_ock(ovk, &cv, &cmu, &self.epk.into());
 
             let mut input = [0u8; OUT_PLAINTEXT_SIZE];
             input[0..32].copy_from_slice(&self.note.pk_d.to_bytes());
@@ -361,7 +361,7 @@ impl<R: RngCore + CryptoRng> SaplingNoteEncryption<R> {
 fn parse_note_plaintext_without_memo<P: consensus::Parameters>(
     height: u32,
     ivk: &jubjub::Fr,
-    epk: &jubjub::SubgroupPoint,
+    epk: &jubjub::ExtendedPoint,
     cmu: &bls12_381::Scalar,
     plaintext: &[u8],
 ) -> Option<(Note, PaymentAddress)> {
@@ -398,7 +398,8 @@ fn parse_note_plaintext_without_memo<P: consensus::Parameters>(
     }
 
     if let Some(derived_esk) = note.derive_esk() {
-        if (note.g_d * derived_esk) != *epk {
+        // This enforces that epk is a jubjub::SubgroupPoint.
+        if (note.g_d * derived_esk).to_bytes() != epk.to_bytes() {
             return None;
         }
     }
@@ -437,13 +438,13 @@ pub fn plaintext_version_is_valid<P: consensus::Parameters>(height: u32, leadbyt
 pub fn try_sapling_note_decryption<P: consensus::Parameters>(
     height: u32,
     ivk: &jubjub::Fr,
-    epk: &jubjub::SubgroupPoint,
+    epk: &jubjub::ExtendedPoint,
     cmu: &bls12_381::Scalar,
     enc_ciphertext: &[u8],
 ) -> Option<(Note, PaymentAddress, Memo)> {
     assert_eq!(enc_ciphertext.len(), ENC_CIPHERTEXT_SIZE);
 
-    let shared_secret = sapling_ka_agree(ivk, epk.into());
+    let shared_secret = sapling_ka_agree(ivk, &epk);
     let key = kdf_sapling(shared_secret, &epk);
 
     let mut plaintext = [0; ENC_CIPHERTEXT_SIZE];
@@ -480,13 +481,13 @@ pub fn try_sapling_note_decryption<P: consensus::Parameters>(
 pub fn try_sapling_compact_note_decryption<P: consensus::Parameters>(
     height: u32,
     ivk: &jubjub::Fr,
-    epk: &jubjub::SubgroupPoint,
+    epk: &jubjub::ExtendedPoint,
     cmu: &bls12_381::Scalar,
     enc_ciphertext: &[u8],
 ) -> Option<(Note, PaymentAddress)> {
     assert_eq!(enc_ciphertext.len(), COMPACT_NOTE_SIZE);
 
-    let shared_secret = sapling_ka_agree(ivk, epk.into());
+    let shared_secret = sapling_ka_agree(ivk, epk);
     let key = kdf_sapling(shared_secret, &epk);
 
     // Start from block 1 to skip over Poly1305 keying output
@@ -509,7 +510,7 @@ pub fn try_sapling_output_recovery_with_ock<P: consensus::Parameters>(
     height: u32,
     ock: &OutgoingCipherKey,
     cmu: &bls12_381::Scalar,
-    epk: &jubjub::SubgroupPoint,
+    epk: &jubjub::ExtendedPoint,
     enc_ciphertext: &[u8],
     out_ciphertext: &[u8],
 ) -> Option<(Note, PaymentAddress, Memo)> {
@@ -582,7 +583,7 @@ pub fn try_sapling_output_recovery_with_ock<P: consensus::Parameters>(
     memo.copy_from_slice(&plaintext[COMPACT_NOTE_SIZE..NOTE_PLAINTEXT_SIZE]);
 
     let diversifier = Diversifier(d);
-    if diversifier.g_d()? * esk != *epk {
+    if (diversifier.g_d()? * esk).to_bytes() != epk.to_bytes() {
         // Published epk doesn't match calculated epk
         return None;
     }
@@ -616,7 +617,7 @@ pub fn try_sapling_output_recovery<P: consensus::Parameters>(
     ovk: &OutgoingViewingKey,
     cv: &jubjub::ExtendedPoint,
     cmu: &bls12_381::Scalar,
-    epk: &jubjub::SubgroupPoint,
+    epk: &jubjub::ExtendedPoint,
     enc_ciphertext: &[u8],
     out_ciphertext: &[u8],
 ) -> Option<(Note, PaymentAddress, Memo)> {
@@ -784,7 +785,7 @@ mod tests {
         jubjub::Fr,
         jubjub::ExtendedPoint,
         bls12_381::Scalar,
-        jubjub::SubgroupPoint,
+        jubjub::ExtendedPoint,
         [u8; ENC_CIPHERTEXT_SIZE],
         [u8; OUT_CIPHERTEXT_SIZE],
     ) {
@@ -844,7 +845,7 @@ mod tests {
         jubjub::Fr,
         jubjub::ExtendedPoint,
         bls12_381::Scalar,
-        jubjub::SubgroupPoint,
+        jubjub::ExtendedPoint,
         [u8; ENC_CIPHERTEXT_SIZE],
         [u8; OUT_CIPHERTEXT_SIZE],
     ) {
@@ -867,7 +868,7 @@ mod tests {
 
         let ovk = OutgoingViewingKey([0; 32]);
         let mut ne = SaplingNoteEncryption::new(Some(ovk), note, pa, Memo([0; 512]), &mut rng);
-        let epk = ne.epk().clone();
+        let epk = ne.epk().clone().into();
         let enc_ciphertext = ne.encrypt_note_plaintext();
         let out_ciphertext = ne.encrypt_outgoing_plaintext(&cv, &cmu);
         let ock = prf_ock(&ovk, &cv, &cmu, &epk);
@@ -879,7 +880,7 @@ mod tests {
         ovk: &OutgoingViewingKey,
         cv: &jubjub::ExtendedPoint,
         cmu: &bls12_381::Scalar,
-        epk: &jubjub::SubgroupPoint,
+        epk: &jubjub::ExtendedPoint,
         enc_ciphertext: &mut [u8; ENC_CIPHERTEXT_SIZE],
         out_ciphertext: &[u8; OUT_CIPHERTEXT_SIZE],
         modify_plaintext: impl Fn(&mut [u8; NOTE_PLAINTEXT_SIZE]),
@@ -997,7 +998,7 @@ mod tests {
                 try_sapling_note_decryption::<TestNetwork>(
                     height,
                     &ivk,
-                    &jubjub::SubgroupPoint::random(&mut rng),
+                    &jubjub::ExtendedPoint::random(&mut rng),
                     &cmu,
                     &enc_ciphertext
                 ),
@@ -1200,7 +1201,7 @@ mod tests {
                 try_sapling_compact_note_decryption::<TestNetwork>(
                     height,
                     &ivk,
-                    &jubjub::SubgroupPoint::random(&mut rng),
+                    &jubjub::ExtendedPoint::random(&mut rng),
                     &cmu,
                     &enc_ciphertext[..COMPACT_NOTE_SIZE]
                 ),
@@ -1475,7 +1476,7 @@ mod tests {
                     &ovk,
                     &cv,
                     &cmu,
-                    &jubjub::SubgroupPoint::random(&mut rng),
+                    &jubjub::ExtendedPoint::random(&mut rng),
                     &enc_ciphertext,
                     &out_ciphertext
                 ),
@@ -1486,7 +1487,7 @@ mod tests {
                     height,
                     &ock,
                     &cmu,
-                    &jubjub::SubgroupPoint::random(&mut rng),
+                    &jubjub::ExtendedPoint::random(&mut rng),
                     &enc_ciphertext,
                     &out_ciphertext
                 ),
@@ -1792,7 +1793,7 @@ mod tests {
             let cv = read_point!(tv.cv);
             let cmu = read_bls12_381_scalar!(tv.cmu);
             let esk = read_jubjub_scalar!(tv.esk);
-            let epk = read_point!(tv.epk).into_subgroup().unwrap();
+            let epk = read_point!(tv.epk);
 
             //
             // Test the individual components
@@ -1858,7 +1859,7 @@ mod tests {
             let mut ne = SaplingNoteEncryption::new(Some(ovk), note, to, Memo(tv.memo), OsRng);
             // Swap in the ephemeral keypair from the test vectors
             ne.esk = esk;
-            ne.epk = epk;
+            ne.epk = epk.into_subgroup().unwrap();
 
             assert_eq!(&ne.encrypt_note_plaintext()[..], &tv.c_enc[..]);
             assert_eq!(&ne.encrypt_outgoing_plaintext(&cv, &cmu)[..], &tv.c_out[..]);

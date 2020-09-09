@@ -366,7 +366,6 @@ pub fn create_to_address<P: AsRef<Path>>(
 
 #[cfg(test)]
 mod tests {
-    use group::cofactor::CofactorGroup;
     use rusqlite::Connection;
     use tempfile::NamedTempFile;
     use zcash_primitives::{
@@ -812,7 +811,7 @@ mod tests {
                 &extfvk.fvk.ovk,
                 &output.cv,
                 &output.cmu,
-                &output.ephemeral_key.into_subgroup().unwrap(),
+                &output.ephemeral_key,
                 &output.enc_ciphertext,
                 &output.out_ciphertext,
             )

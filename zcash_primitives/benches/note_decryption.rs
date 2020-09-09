@@ -1,6 +1,5 @@
 use criterion::{criterion_group, criterion_main, Criterion};
 use ff::Field;
-use group::cofactor::CofactorGroup;
 use rand_core::OsRng;
 use zcash_primitives::{
     consensus::{NetworkUpgrade::Canopy, Parameters, TestNetwork},
@@ -58,7 +57,7 @@ fn bench_note_decryption(c: &mut Criterion) {
             try_sapling_note_decryption::<TestNetwork>(
                 height,
                 &valid_ivk,
-                &output.ephemeral_key.into_subgroup().unwrap(),
+                &output.ephemeral_key,
                 &output.cmu,
                 &output.enc_ciphertext,
             )
@@ -71,7 +70,7 @@ fn bench_note_decryption(c: &mut Criterion) {
             try_sapling_note_decryption::<TestNetwork>(
                 height,
                 &invalid_ivk,
-                &output.ephemeral_key.into_subgroup().unwrap(),
+                &output.ephemeral_key,
                 &output.cmu,
                 &output.enc_ciphertext,
             )
