@@ -14,13 +14,13 @@ edition = "2018"
 [dependencies]
 bech32 = "0.7"
 bs58 = { version = "0.3", features = ["check"] }
-ff = "0.7"
-group = "0.7"
-jubjub = "0.4"
-protobuf = "2"
+ff = "0.8"
+group = "0.8"
+jubjub = "0.5.1"
+protobuf = "2.15"
 rand_core = "0.5.1"
-rusqlite = { version = "0.23", features = ["bundled"] }
-time = "0.1"
+rusqlite = { version = "0.24", features = ["bundled", "time"] }
+time = "0.2"
 zcash_client_backend = { version = "0.3", path = "../zcash_client_backend" }
 zcash_primitives = { version = "0.3", path = "../zcash_primitives" }
 

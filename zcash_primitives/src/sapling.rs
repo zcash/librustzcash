@@ -5,7 +5,8 @@ use crate::{
     pedersen_hash::{pedersen_hash, Personalization},
     primitives::Note,
 };
-use ff::{BitIterator, PrimeField};
+use bitvec::{order::Lsb0, view::AsBits};
+use ff::PrimeField;
 use group::{Curve, GroupEncoding};
 use lazy_static::lazy_static;
 use rand_core::{CryptoRng, RngCore};
@@ -20,16 +21,16 @@ pub const SAPLING_COMMITMENT_TREE_DEPTH: usize = 32;
 pub fn merkle_hash(depth: usize, lhs: &[u8; 32], rhs: &[u8; 32]) -> [u8; 32] {
     let lhs = {
         let mut tmp = [false; 256];
-        for (a, b) in tmp.iter_mut().rev().zip(BitIterator::<u8, _>::new(lhs)) {
-            *a = b;
+        for (a, b) in tmp.iter_mut().zip(lhs.as_bits::<Lsb0>()) {
+            *a = *b;
         }
         tmp
     };
 
     let rhs = {
         let mut tmp = [false; 256];
-        for (a, b) in tmp.iter_mut().rev().zip(BitIterator::<u8, _>::new(rhs)) {
-            *a = b;
+        for (a, b) in tmp.iter_mut().zip(rhs.as_bits::<Lsb0>()) {
+            *a = *b;
         }
         tmp
     };

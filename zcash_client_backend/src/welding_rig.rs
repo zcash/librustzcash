@@ -203,14 +203,14 @@ mod tests {
     use super::scan_block;
     use crate::proto::compact_formats::{CompactBlock, CompactOutput, CompactSpend, CompactTx};
 
-    fn random_compact_tx<R: RngCore>(rng: &mut R) -> CompactTx {
+    fn random_compact_tx(mut rng: impl RngCore) -> CompactTx {
         let fake_nf = {
             let mut nf = vec![0; 32];
             rng.fill_bytes(&mut nf);
             nf
         };
         let fake_cmu = {
-            let fake_cmu = bls12_381::Scalar::random(rng);
+            let fake_cmu = bls12_381::Scalar::random(&mut rng);
             fake_cmu.to_repr().as_ref().to_owned()
         };
         let fake_epk = {

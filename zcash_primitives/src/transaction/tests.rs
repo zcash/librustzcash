@@ -51,9 +51,9 @@ fn tx_write_rejects_unexpected_binding_sig() {
 
     // Fails with an unexpected binding signature
     {
-        let rng = &mut OsRng;
-        let sk = PrivateKey(jubjub::Fr::random(rng));
-        let sig = sk.sign(b"Foo bar", rng, SPENDING_KEY_GENERATOR);
+        let mut rng = OsRng;
+        let sk = PrivateKey(jubjub::Fr::random(&mut rng));
+        let sig = sk.sign(b"Foo bar", &mut rng, SPENDING_KEY_GENERATOR);
 
         let mut tx = TransactionData::new();
         tx.binding_sig = Some(sig);

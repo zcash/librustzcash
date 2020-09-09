@@ -13,18 +13,18 @@ edition = "2018"
 
 [dependencies]
 bech32 = "0.7"
-bls12_381 = "0.2"
+bls12_381 = "0.3.1"
 bs58 = { version = "0.3", features = ["check"] }
-ff = "0.7"
-group = "0.7"
+ff = "0.8"
+group = "0.8"
 hex = "0.4"
-jubjub = "0.4"
-protobuf = "=2.14.0" # 2.15 has MSRV of 1.44.1
+jubjub = "0.5.1"
+protobuf = "2.15"
 subtle = "2"
 zcash_primitives = { version = "0.3", path = "../zcash_primitives" }
 
 [build-dependencies]
-protobuf-codegen-pure = "2.14"
+protobuf-codegen-pure = "2.15"
 
 [dev-dependencies]
 rand_core = "0.5"
