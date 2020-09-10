@@ -1,6 +1,7 @@
 //! Functions for creating transactions.
 //!
 use std::convert::TryInto;
+use rusqlite::named_params;
 
 use ff::PrimeField;
 
@@ -66,10 +67,10 @@ pub fn select_spendable_notes(
 
     // Select notes
     let notes = stmt_select_notes.query_and_then_named::<_, SqliteClientError, _>(
-        &[
-            (&"account", &i64::from(account.0)),
-            (&"anchor_height", &u32::from(anchor_height)),
-            (&"target_value", &i64::from(target_value)),
+        named_params![
+            ":account": &i64::from(account.0),
+            ":anchor_height": &u32::from(anchor_height),
+            ":target_value": &i64::from(target_value),
         ],
         |row| {
             let diversifier = {
