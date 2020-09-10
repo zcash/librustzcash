@@ -29,22 +29,6 @@ pub trait DBOps {
     type TxRef: Copy;
     type UpdateOps: DBUpdate<Error = Self::Error, NoteRef = Self::NoteRef, TxRef = Self::TxRef>;
 
-    fn init_db(&self) -> Result<(), Self::Error>;
-
-    fn init_account_storage<P: consensus::Parameters>(
-        &self,
-        params: &P,
-        extfvks: &[ExtendedFullViewingKey],
-    ) -> Result<(), Self::Error>;
-
-    fn init_block_storage(
-        &self,
-        height: BlockHeight,
-        hash: BlockHash,
-        time: u32,           //TODO: Newtype!
-        sapling_tree: &[u8], //TODO: Newtype!
-    ) -> Result<(), Self::Error>;
-
     fn block_height_extrema(&self) -> Result<Option<(BlockHeight, BlockHeight)>, Self::Error>;
 
     fn get_target_and_anchor_heights(

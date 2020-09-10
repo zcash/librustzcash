@@ -80,28 +80,6 @@ impl<'a> DBOps for &'a DataConnection {
     type TxRef = i64;
     type UpdateOps = DataConnStmtCache<'a>;
 
-    fn init_db(&self) -> Result<(), Self::Error> {
-        wallet::init::init_data_database(self).map_err(SqliteClientError::from)
-    }
-
-    fn init_account_storage<P: consensus::Parameters>(
-        &self,
-        params: &P,
-        extfvks: &[ExtendedFullViewingKey],
-    ) -> Result<(), Self::Error> {
-        wallet::init::init_accounts_table(self, params, extfvks)
-    }
-
-    fn init_block_storage(
-        &self,
-        height: BlockHeight,
-        hash: BlockHash,
-        time: u32,
-        sapling_tree: &[u8],
-    ) -> Result<(), Self::Error> {
-        wallet::init::init_blocks_table(self, height, hash, time, sapling_tree)
-    }
-
     fn block_height_extrema(&self) -> Result<Option<(BlockHeight, BlockHeight)>, Self::Error> {
         wallet::block_height_extrema(self).map_err(SqliteClientError::from)
     }
