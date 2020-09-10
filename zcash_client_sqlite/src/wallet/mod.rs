@@ -445,7 +445,7 @@ mod tests {
         zip32::{ExtendedFullViewingKey, ExtendedSpendingKey},
     };
 
-    use zcash_client_backend::data_api::{error::Error, DBOps};
+    use zcash_client_backend::data_api::DBOps;
 
     use crate::{
         tests,
@@ -453,7 +453,7 @@ mod tests {
         AccountId, DataConnection,
     };
 
-    use super::{get_address, get_balance, get_verified_balance};
+    use super::{get_address, get_balance};
 
     #[test]
     fn empty_database_has_no_balance() {
@@ -469,13 +469,8 @@ mod tests {
         // The account should be empty
         assert_eq!(get_balance(&db_data, AccountId(0)).unwrap(), Amount::zero());
 
-        // The account should have no verified balance, as we haven't scanned any blocks
-        let (_, anchor_height) = (&db_data).get_target_and_anchor_heights().unwrap().unwrap();
-        let e = get_verified_balance(&db_data, AccountId(0), anchor_height).unwrap_err();
-        match e.0 {
-            Error::ScanRequired => (),
-            _ => panic!("Unexpected error: {:?}", e),
-        }
+        // We can't get an anchor height, as we have not scanned any blocks.
+        assert_eq!((&db_data).get_target_and_anchor_heights().unwrap(), None);
 
         // An invalid account has zero balance
         assert!(get_address(&db_data, &tests::network(), AccountId(1)).is_err());
