@@ -194,7 +194,7 @@ impl<'a> DBOps for &'a DataConnection {
                 )?,
                 stmt_insert_tx_data: self.0.prepare(
                     "INSERT INTO transactions (txid, created, expiry_height, raw)
-                    VALUES (?, ?, ?)",
+                    VALUES (?, ?, ?, ?)",
                 )?,
                 stmt_update_tx_data: self.0.prepare(
                     "UPDATE transactions
