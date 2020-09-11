@@ -12,7 +12,7 @@ use crate::CacheConnection;
 /// use tempfile::NamedTempFile;
 /// use zcash_client_sqlite::{
 ///     CacheConnection,
-///     init::init_cache_database,
+///     chain::init::init_cache_database,
 /// };
 ///
 /// let cache_file = NamedTempFile::new().unwrap();

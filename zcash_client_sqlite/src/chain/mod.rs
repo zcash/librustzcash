@@ -18,8 +18,9 @@
 //!     }
 //! };
 //!
-//! use crate::{
+//! use zcash_client_sqlite::{
 //!     CacheConnection,
+//!     DataConnection,
 //!     wallet::{rewind_to_height},
 //! };
 //!

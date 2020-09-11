@@ -20,7 +20,7 @@ use crate::{address_from_extfvk, error::SqliteClientError, DataConnection};
 /// use tempfile::NamedTempFile;
 /// use zcash_client_sqlite::{
 ///     DataConnection,
-///     init::init_data_database,
+///     wallet::init::init_data_database,
 /// };
 ///
 /// let data_file = NamedTempFile::new().unwrap();
@@ -127,7 +127,7 @@ pub fn init_data_database(db_data: &DataConnection) -> Result<(), rusqlite::Erro
 ///
 /// use zcash_client_sqlite::{
 ///     DataConnection,
-///     init::{init_accounts_table, init_data_database}
+///     wallet::init::{init_accounts_table, init_data_database}
 /// };
 ///
 /// let data_file = NamedTempFile::new().unwrap();
@@ -192,11 +192,11 @@ pub fn init_accounts_table<P: consensus::Parameters>(
 /// };
 /// use zcash_client_sqlite::{
 ///     DataConnection,
-///     init::init_blocks_table,
+///     wallet::init::init_blocks_table,
 /// };
 ///
 /// // The block height.
-/// let height = BlockHeight(500_000);
+/// let height = BlockHeight::from_u32(500_000);
 /// // The hash of the block header.
 /// let hash = BlockHash([0; 32]);
 /// // The nTime field from the block header.
