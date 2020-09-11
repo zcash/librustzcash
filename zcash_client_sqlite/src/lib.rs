@@ -376,8 +376,8 @@ impl<'a> DBUpdate for DataConnStmtCache<'a> {
             // It isn't there, so insert our transaction into the database.
             self.stmt_insert_tx_data.execute(&[
                 txid.to_sql()?,
-                u32::from(tx.expiry_height).to_sql()?,
                 created_at.to_sql()?,
+                u32::from(tx.expiry_height).to_sql()?,
                 raw_tx.to_sql()?,
             ])?;
 

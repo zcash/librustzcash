@@ -1,4 +1,5 @@
 //! Functions for scanning the chain and extracting relevant information.
+use std::fmt::Debug;
 
 use zcash_primitives::{
     consensus::{self, BranchId, NetworkUpgrade},
@@ -157,7 +158,7 @@ pub fn create_spend_to_address<'db, E0, N, E, P, D, R>(
 where
     E0: Into<Error<E, N>>,
     P: consensus::Parameters + Clone,
-    R: Copy,
+    R: Copy + Debug,
     &'db D: DBOps<Error = E0, TxRef = R>,
 {
     // Check that the ExtendedSpendingKey we have been given corresponds to the

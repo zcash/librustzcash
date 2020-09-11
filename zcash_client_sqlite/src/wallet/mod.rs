@@ -34,10 +34,10 @@ pub mod transact;
 /// use zcash_primitives::{
 ///     consensus::{self, Network},
 /// };
+/// use zcash_client_backend::api::AccountId;
 /// use zcash_client_sqlite::{
-///     AccountId,
 ///     DataConnection,
-///     query::get_address,
+///     wallet::get_address,
 /// };
 ///
 /// let data_file = NamedTempFile::new().unwrap();
@@ -117,10 +117,10 @@ pub fn is_valid_account_extfvk<P: consensus::Parameters>(
 ///
 /// ```
 /// use tempfile::NamedTempFile;
+/// use zcash_client_backend::api::AccountId;
 /// use zcash_client_sqlite::{
-///     AccountId,
 ///     DataConnection,
-///     query::get_balance,
+///     wallet::get_balance,
 /// };
 ///
 /// let data_file = NamedTempFile::new().unwrap();
@@ -151,15 +151,16 @@ pub fn get_balance(data: &DataConnection, account: AccountId) -> Result<Amount, 
 ///
 /// ```
 /// use tempfile::NamedTempFile;
+/// use zcash_primitives::consensus::{BlockHeight};
+/// use zcash_client_backend::api::AccountId;
 /// use zcash_client_sqlite::{
-///     AccountId,
 ///     DataConnection,
-///     query::get_verified_balance,
+///     wallet::get_verified_balance,
 /// };
 ///
 /// let data_file = NamedTempFile::new().unwrap();
 /// let db = DataConnection::for_path(data_file).unwrap();
-/// let addr = get_verified_balance(&db, AccountId(0));
+/// let addr = get_verified_balance(&db, AccountId(0), BlockHeight::from_u32(0));
 /// ```
 pub fn get_verified_balance(
     data: &DataConnection,
@@ -194,7 +195,7 @@ pub fn get_verified_balance(
 /// use zcash_client_sqlite::{
 ///     NoteId,
 ///     DataConnection,
-///     query::get_received_memo_as_utf8,
+///     wallet::get_received_memo_as_utf8,
 /// };
 ///
 /// let data_file = NamedTempFile::new().unwrap();
@@ -234,7 +235,7 @@ pub fn get_received_memo_as_utf8(
 /// use zcash_client_sqlite::{
 ///     NoteId,
 ///     DataConnection,
-///     query::get_sent_memo_as_utf8,
+///     wallet::get_sent_memo_as_utf8,
 /// };
 ///
 /// let data_file = NamedTempFile::new().unwrap();

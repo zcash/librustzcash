@@ -1,4 +1,5 @@
 use std::cmp;
+use std::fmt::Debug;
 
 use zcash_primitives::{
     block::BlockHash,
@@ -25,8 +26,8 @@ pub mod wallet;
 
 pub trait DBOps {
     type Error;
-    type NoteRef: Copy; // Backend-specific note identifier
-    type TxRef: Copy;
+    type NoteRef: Copy + Debug; // Backend-specific note identifier
+    type TxRef: Copy + Debug;
     type UpdateOps: DBUpdate<Error = Self::Error, NoteRef = Self::NoteRef, TxRef = Self::TxRef>;
 
     fn block_height_extrema(&self) -> Result<Option<(BlockHeight, BlockHeight)>, Self::Error>;

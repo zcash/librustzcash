@@ -1,3 +1,5 @@
+use std::fmt::Debug;
+
 use zcash_primitives::{
     block::BlockHash,
     consensus::{self, BlockHeight, NetworkUpgrade},
@@ -141,7 +143,7 @@ where
     P: consensus::Parameters,
     C: CacheOps<Error = E>,
     &'db D: DBOps<Error = E, NoteRef = N>,
-    N: Copy,
+    N: Copy + Debug,
     E: From<Error<E0, N>>,
 {
     let sapling_activation_height = params
@@ -155,7 +157,7 @@ where
             .unwrap_or(sapling_activation_height - 1)
     })?;
 
-    // Raise SQL errors from the query, IO errors from parsing, and incorrect HRP errors.
+    // Fetch the ExtendedFullViewingKeys we are tracking
     let extfvks = data.get_extended_full_viewing_keys(params)?;
 
     // Get the most recent CommitmentTree
