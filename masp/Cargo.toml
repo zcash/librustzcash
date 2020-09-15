@@ -1,0 +1,41 @@
+[package]
+name = "libmasp"
+description = "Rust experimental MASP FFI"
+version = "0.2.0"
+authors = [
+    "Sean Bowe <ewillbefull@gmail.com>",
+    "Jack Grigg <jack@z.cash>",
+    "Jay Graber <jay@z.cash>",
+    "Simon Liu <simon@z.cash>",
+    "joe <joe@cryptium.ch>"
+]
+#homepage = "https://github.com/zcash/librustzcash"
+#repository = "https://github.com/zcash/librustzcash"
+readme = "README.md"
+license = "MIT OR Apache-2.0"
+edition = "2018"
+
+[lib]
+name = "masp"
+path = "src/rustmasp.rs"
+crate-type = ["staticlib"]
+
+[dependencies]
+bellman = { version = "0.8", default-features = false, features = ["groth16"] }
+blake2b_simd = "0.5"
+blake2s_simd = "0.5"
+bls12_381 = "0.3.1"
+ff = "0.8"
+group = "0.8"
+jubjub = "0.5.1"
+libc = "0.2"
+lazy_static = "1"
+rand_core = "0.5.1"
+zcash_primitives = { path = "../zcash_primitives" }
+masp_primitives = { path = "../masp_primitives" }
+masp_proofs = { path = "../masp_proofs" }
+itertools = "0.9"
+subtle = "2.2.1"
+
+[badges]
+maintenance = { status = "actively-developed" }

@@ -1,0 +1,61 @@
+[package]
+name = "masp_proofs"
+description = "Experimental MASP zk-SNARK circuits and proving APIs, based on zcash_proofs"
+version = "0.4.0"
+authors = [
+    "Jack Grigg <jack@z.cash>",
+    "joe <joe@cryptium.ch>",
+]
+#homepage = "https://github.com/zcash/librustzcash"
+#repository = "https://github.com/zcash/librustzcash"
+readme = "README.md"
+license = "MIT OR Apache-2.0"
+edition = "2018"
+
+[package.metadata.docs.rs]
+all-features = true
+
+[dependencies]
+bellman = { version = "0.8", default-features = false, features = ["groth16"] }
+blake2b_simd = "0.5"
+bls12_381 = "0.3.1"
+byteorder = "1"
+directories = { version = "3", optional = true }
+ff = "0.8"
+group = "0.8"
+itertools = "0.9"
+jubjub = "0.5.1"
+lazy_static = "1"
+minreq = { version = "2", features = ["https"], optional = true }
+rand_core = "0.5.1"
+wagyu-zcash-parameters = { version = "0.2", optional = true }
+masp_primitives = { version = "0.3", path = "../masp_primitives" }
+zcash_primitives = { path = "../zcash_primitives" }
+zcash_proofs = { path = "../zcash_proofs" }
+
+[dev-dependencies]
+criterion = "0.3"
+rand_xorshift = "0.2"
+
+[features]
+default = ["local-prover", "multicore"]
+bundled-prover = ["wagyu-zcash-parameters"]
+download-params = ["minreq"]
+local-prover = ["directories"]
+multicore = ["bellman/multicore"]
+
+[[bench]]
+name = "sapling"
+harness = false
+required-features = ["local-prover"]
+
+[[example]]
+name = "get-params-path"
+required-features = ["directories"]
+
+[[example]]
+name = "download-params"
+required-features = ["download-params"]
+
+[badges]
+maintenance = { status = "actively-developed" }
