@@ -720,7 +720,7 @@ mod tests {
 
     use super::{Builder, Error};
     use crate::{
-        consensus::{self, Network::TestNetwork, H0},
+        consensus::{self, Parameters, H0, TEST_NETWORK},
         legacy::TransparentAddress,
         merkle_tree::{CommitmentTree, IncrementalWitness},
         primitives::Rseed,
@@ -737,7 +737,7 @@ mod tests {
         let ovk = extfvk.fvk.ovk;
         let to = extfvk.default_address().unwrap().1;
 
-        let mut builder = Builder::new(TestNetwork, H0);
+        let mut builder = Builder::new(TEST_NETWORK, H0);
         assert_eq!(
             builder.add_sapling_output(Some(ovk), to, Amount::from_i64(-1).unwrap(), None),
             Err(Error::InvalidAmount)
@@ -746,19 +746,19 @@ mod tests {
 
     #[test]
     fn binding_sig_absent_if_no_shielded_spend_or_output() {
-        use crate::consensus::{NetworkUpgrade, Parameters};
+        use crate::consensus::NetworkUpgrade;
         use crate::transaction::{
             builder::{self, TransparentInputs},
             TransactionData,
         };
 
-        let sapling_activation_height = TestNetwork
+        let sapling_activation_height = TEST_NETWORK
             .activation_height(NetworkUpgrade::Sapling)
             .unwrap();
 
         // Create a builder with 0 fee, so we can construct t outputs
         let mut builder = builder::Builder {
-            params: TestNetwork,
+            params: TEST_NETWORK,
             rng: OsRng,
             height: sapling_activation_height,
             mtx: TransactionData::new(),
@@ -799,7 +799,7 @@ mod tests {
         tree.append(cmu1).unwrap();
         let witness1 = IncrementalWitness::from_tree(&tree);
 
-        let mut builder = Builder::new(TestNetwork, H0);
+        let mut builder = Builder::new(TEST_NETWORK, H0);
 
         // Create a tx with a sapling spend. binding_sig should be present
         builder
@@ -825,7 +825,7 @@ mod tests {
 
     #[test]
     fn fails_on_negative_transparent_output() {
-        let mut builder = Builder::new(TestNetwork, H0);
+        let mut builder = Builder::new(TEST_NETWORK, H0);
         assert_eq!(
             builder.add_transparent_output(
                 &TransparentAddress::PublicKey([0; 20]),
@@ -845,7 +845,7 @@ mod tests {
         // Fails with no inputs or outputs
         // 0.0001 t-ZEC fee
         {
-            let builder = Builder::new(TestNetwork, H0);
+            let builder = Builder::new(TEST_NETWORK, H0);
             assert_eq!(
                 builder.build(consensus::BranchId::Sapling, &MockTxProver),
                 Err(Error::ChangeIsNegative(Amount::from_i64(-10000).unwrap()))
@@ -859,7 +859,7 @@ mod tests {
         // Fail if there is only a Sapling output
         // 0.0005 z-ZEC out, 0.0001 t-ZEC fee
         {
-            let mut builder = Builder::new(TestNetwork, H0);
+            let mut builder = Builder::new(TEST_NETWORK, H0);
             builder
                 .add_sapling_output(
                     ovk.clone(),
@@ -877,7 +877,7 @@ mod tests {
         // Fail if there is only a transparent output
         // 0.0005 t-ZEC out, 0.0001 t-ZEC fee
         {
-            let mut builder = Builder::new(TestNetwork, H0);
+            let mut builder = Builder::new(TEST_NETWORK, H0);
             builder
                 .add_transparent_output(
                     &TransparentAddress::PublicKey([0; 20]),
@@ -901,7 +901,7 @@ mod tests {
         // Fail if there is insufficient input
         // 0.0003 z-ZEC out, 0.0002 t-ZEC out, 0.0001 t-ZEC fee, 0.00059999 z-ZEC in
         {
-            let mut builder = Builder::new(TestNetwork, H0);
+            let mut builder = Builder::new(TEST_NETWORK, H0);
             builder
                 .add_sapling_spend(
                     extsk.clone(),
@@ -944,7 +944,7 @@ mod tests {
         // (Still fails because we are using a MockTxProver which doesn't correctly
         // compute bindingSig.)
         {
-            let mut builder = Builder::new(TestNetwork, H0);
+            let mut builder = Builder::new(TEST_NETWORK, H0);
             builder
                 .add_sapling_spend(
                     extsk.clone(),
