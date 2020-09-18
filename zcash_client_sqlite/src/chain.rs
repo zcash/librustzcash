@@ -4,7 +4,6 @@
 //!
 //! ```
 //! use rusqlite::Connection;
-//! use std::ops::Sub;
 //! use zcash_primitives::{
 //!     consensus::{BlockHeight, Network, Parameters}
 //! };
@@ -33,7 +32,7 @@
 //!             // This might be informed by some external chain reorg information, or
 //!             // heuristics such as the platform, available bandwidth, size of recent
 //!             // CompactBlocks, etc.
-//!             let rewind_height = upper_bound.sub(10);
+//!             let rewind_height = *upper_bound - 10;
 //!
 //!             // b) Rewind scanned block information.
 //!             rewind_to_height(network, &db_data, rewind_height);

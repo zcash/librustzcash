@@ -273,7 +273,7 @@ mod tests {
             .prepare("INSERT INTO compactblocks (height, data) VALUES (?, ?)")
             .unwrap()
             .execute(&[
-                (cb.height as u32).to_sql().unwrap(),
+                u32::from(cb.height()).to_sql().unwrap(),
                 cb_bytes.to_sql().unwrap(),
             ])
             .unwrap();

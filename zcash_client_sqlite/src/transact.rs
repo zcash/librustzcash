@@ -123,7 +123,7 @@ struct SelectedNoteRow {
 ///     Err(e) => (),
 /// }
 /// ```
-pub fn create_to_address<DB: AsRef<Path>, P: consensus::Parameters + Clone>(
+pub fn create_to_address<DB: AsRef<Path>, P: consensus::Parameters>(
     db_data: DB,
     params: &P,
     consensus_branch_id: consensus::BranchId,
@@ -334,7 +334,7 @@ pub fn create_to_address<DB: AsRef<Path>, P: consensus::Parameters + Clone>(
 
     // Save the sent note in the database.
     // TODO: Decide how to save transparent output information.
-    let to_str = to.to_string(params);
+    let to_str = to.encode(params);
     if let Some(memo) = memo {
         let mut stmt_insert_sent_note = data.prepare(
             "INSERT INTO sent_notes (tx, output_index, from_account, address, value, memo)

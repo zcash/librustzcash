@@ -479,7 +479,7 @@ pub fn decrypt_and_store_transaction<D: AsRef<Path>, P: consensus::Parameters>(
         let value = output.note.value as i64;
 
         if output.outgoing {
-            let to_str = RecipientAddress::from(output.to).to_string(params);
+            let to_str = RecipientAddress::from(output.to).encode(params);
 
             // Try updating an existing sent note.
             if stmt_update_sent_note.execute(&[

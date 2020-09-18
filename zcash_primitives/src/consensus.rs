@@ -7,6 +7,8 @@ use std::ops::{Add, Sub};
 
 use crate::constants;
 
+/// A wrapper type representing blockchain heights. Safe conversion from
+/// various integer types, as well as addition and subtraction, are provided.
 #[repr(transparent)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct BlockHeight(u32);
@@ -120,26 +122,39 @@ impl Sub for BlockHeight {
 }
 
 /// Zcash consensus parameters.
-pub trait Parameters {
+pub trait Parameters: Clone {
+    /// Returns the activation height for a particular network upgrade,
+    /// if an activation height has been set.
     fn activation_height(&self, nu: NetworkUpgrade) -> Option<BlockHeight>;
 
+    /// Returns the human-readable prefix for Sapling extended full 
+    /// viewing keys for the network to which this Parameters value applies.
     fn hrp_sapling_extended_full_viewing_key(&self) -> &str;
 
+    /// Returns the human-readable prefix for Sapling payment addresses
+    /// viewing keys for the network to which this Parameters value applies.
     fn hrp_sapling_payment_address(&self) -> &str;
 
+    /// Returns the human-readable prefix for transparent pay-to-public-key-hash 
+    /// payment addresses for the network to which this Parameters value applies.
     fn b58_pubkey_address_prefix(&self) -> [u8; 2];
 
+    /// Returns the human-readable prefix for transparent pay-to-script-hash
+    /// payment addresses for the network to which this Parameters value applies.
     fn b58_script_address_prefix(&self) -> [u8; 2];
 
+    /// Determines whether the specified network upgrade is active as of the 
+    /// provided block height on the network to which this Parameters value applies.
     fn is_nu_active(&self, nu: NetworkUpgrade, height: BlockHeight) -> bool {
         self.activation_height(nu).map_or(false, |h| h <= height)
     }
 }
 
 /// Marker struct for the production network.
-pub struct MainNetwork {}
+#[derive(PartialEq, Copy, Clone, Debug)]
+pub struct MainNetwork;
 
-pub const MAIN_NETWORK: MainNetwork = MainNetwork {};
+pub const MAIN_NETWORK: MainNetwork = MainNetwork;
 
 impl Parameters for MainNetwork {
     fn activation_height(&self, nu: NetworkUpgrade) -> Option<BlockHeight> {
@@ -170,9 +185,10 @@ impl Parameters for MainNetwork {
 }
 
 /// Marker struct for the test network.
-pub struct TestNetwork {}
+#[derive(PartialEq, Copy, Clone, Debug)]
+pub struct TestNetwork;
 
-pub const TEST_NETWORK: TestNetwork = TestNetwork {};
+pub const TEST_NETWORK: TestNetwork = TestNetwork;
 
 impl Parameters for TestNetwork {
     fn activation_height(&self, nu: NetworkUpgrade) -> Option<BlockHeight> {
@@ -202,7 +218,7 @@ impl Parameters for TestNetwork {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(PartialEq, Copy, Clone, Debug)]
 pub enum Network {
     MainNetwork,
     TestNetwork,

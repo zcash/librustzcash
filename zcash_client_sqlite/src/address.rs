@@ -29,7 +29,7 @@ impl From<TransparentAddress> for RecipientAddress {
 }
 
 impl RecipientAddress {
-    pub fn from_str<P: consensus::Parameters>(params: &P, s: &str) -> Option<Self> {
+    pub fn decode<P: consensus::Parameters>(params: &P, s: &str) -> Option<Self> {
         if let Ok(Some(pa)) = decode_payment_address(params.hrp_sapling_payment_address(), s) {
             Some(pa.into())
         } else if let Ok(Some(addr)) = decode_transparent_address(
@@ -43,7 +43,7 @@ impl RecipientAddress {
         }
     }
 
-    pub fn to_string<P: consensus::Parameters>(&self, params: &P) -> String {
+    pub fn encode<P: consensus::Parameters>(&self, params: &P) -> String {
         match self {
             RecipientAddress::Shielded(pa) => {
                 encode_payment_address(params.hrp_sapling_payment_address(), pa)
