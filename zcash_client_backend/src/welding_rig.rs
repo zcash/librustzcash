@@ -96,6 +96,7 @@ pub fn scan_block<P: consensus::Parameters>(
 ) -> Vec<WalletTx> {
     let mut wtxs: Vec<WalletTx> = vec![];
     let ivks: Vec<_> = extfvks.iter().map(|extfvk| extfvk.fvk.vk.ivk()).collect();
+    let block_height = block.height();
 
     for tx in block.vtx.into_iter() {
         let num_spends = tx.spends.len();
@@ -156,7 +157,7 @@ pub fn scan_block<P: consensus::Parameters>(
 
                 if let Some(output) = scan_output(
                     params,
-                    block.height.into(),
+                    block_height,
                     to_scan,
                     &ivks,
                     &spent_from_accounts,
