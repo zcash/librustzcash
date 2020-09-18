@@ -110,11 +110,25 @@ impl<E: fmt::Display> fmt::Display for Error<E> {
     }
 }
 
+/// This is the primary trait which must be implemented by an extension type
+/// for that type to be eligible for inclusion in Zcash consensus rules.
 pub trait Extension<C> {
+    /// Extension-specific precondition type. The extension will need to implement 
+    /// [`FromPayload<Error = Self::Error>`] for this type in order for their
+    /// extension to be eligible for integration into consensus rules.
     type P;
+
+    /// Extension-specific witness type. The extension will need to implement 
+    /// [`FromPayload<Error = Self::Error>`] for this type in order for their
+    /// extension to be eligible for integration into consensus rules.
     type W;
+
+    /// Extension-specific error type. This should encompass both parsing and verification errors.
     type Error;
 
+    /// This is the primary method that an extension must implement. Implementations should
+    /// return [`Ok(())`] if verification of the witness succeeds against the supplied
+    /// precondition, and an error in any other case.
     fn verify_inner(
         &self,
         precondition: &Self::P,
@@ -122,6 +136,9 @@ pub trait Extension<C> {
         context: &C,
     ) -> Result<(), Self::Error>;
 
+    /// This is a convenience method intended for use by consensus nodes at the integration
+    /// point to provide easy interoperation with the opaque, cross-extension 
+    /// `Precondition` and `Witness` types.
     fn verify(
         &self,
         precondition: &Precondition,
