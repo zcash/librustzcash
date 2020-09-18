@@ -5,7 +5,7 @@ use zcash_client_backend::encoding::{
     encode_transparent_address,
 };
 use zcash_primitives::{
-    consensus::{self},
+    consensus,
     legacy::TransparentAddress,
     primitives::PaymentAddress,
 };

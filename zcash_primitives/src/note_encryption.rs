@@ -664,11 +664,6 @@ mod tests {
             NetworkUpgrade::{Canopy, Sapling},
             Parameters, TEST_NETWORK, ZIP212_GRACE_PERIOD,
         },
-        //        jubjub::{
-        //            edwards,
-        //            fs::{Fs, FsRepr},
-        //            PrimeOrder, Unknown,
-        //        },
         keys::OutgoingViewingKey,
         primitives::{Diversifier, PaymentAddress, Rseed, ValueCommitment},
         util::generate_random_rseed,

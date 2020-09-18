@@ -291,7 +291,7 @@ mod tests {
     use rand_core::SeedableRng;
     use rand_xorshift::XorShiftRng;
     use zcash_primitives::{
-        constants::{self},
+        constants,
         primitives::{Diversifier, PaymentAddress},
         zip32::ExtendedSpendingKey,
     };

@@ -376,7 +376,7 @@ mod tests {
 
     use zcash_primitives::{
         block::BlockHash,
-        consensus::{self},
+        consensus,
         note_encryption::try_sapling_output_recovery,
         prover::TxProver,
         transaction::{components::Amount, Transaction},

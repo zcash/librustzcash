@@ -176,7 +176,7 @@ mod tests {
     use crate::{
         error::ErrorKind,
         init::{init_accounts_table, init_data_database},
-        tests::{self},
+        tests,
     };
 
     #[test]

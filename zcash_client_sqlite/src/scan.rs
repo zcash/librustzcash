@@ -409,7 +409,7 @@ pub fn decrypt_and_store_transaction<D: AsRef<Path>, P: consensus::Parameters>(
             })
             .optional()?
             .map(|last_height: u32| BlockHeight::from(last_height + 1))
-            .and(params.activation_height(NetworkUpgrade::Sapling))
+            .or_else(|| params.activation_height(NetworkUpgrade::Sapling))
             .ok_or(Error(ErrorKind::SaplingNotActive))?,
     };
 

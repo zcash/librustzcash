@@ -6,7 +6,7 @@ use zcash_client_backend::encoding::encode_extended_full_viewing_key;
 
 use zcash_primitives::{
     block::BlockHash,
-    consensus::{self},
+    consensus,
     zip32::ExtendedFullViewingKey,
 };
 
@@ -261,7 +261,7 @@ mod tests {
     use super::{init_accounts_table, init_blocks_table, init_data_database};
     use crate::{
         query::get_address,
-        tests::{self},
+        tests,
     };
 
     #[test]
