@@ -127,7 +127,7 @@ pub trait Parameters: Clone {
     /// if an activation height has been set.
     fn activation_height(&self, nu: NetworkUpgrade) -> Option<BlockHeight>;
 
-    /// Returns the human-readable prefix for Sapling extended full 
+    /// Returns the human-readable prefix for Sapling extended full
     /// viewing keys for the network to which this Parameters value applies.
     fn hrp_sapling_extended_full_viewing_key(&self) -> &str;
 
@@ -135,7 +135,7 @@ pub trait Parameters: Clone {
     /// viewing keys for the network to which this Parameters value applies.
     fn hrp_sapling_payment_address(&self) -> &str;
 
-    /// Returns the human-readable prefix for transparent pay-to-public-key-hash 
+    /// Returns the human-readable prefix for transparent pay-to-public-key-hash
     /// payment addresses for the network to which this Parameters value applies.
     fn b58_pubkey_address_prefix(&self) -> [u8; 2];
 
@@ -143,7 +143,7 @@ pub trait Parameters: Clone {
     /// payment addresses for the network to which this Parameters value applies.
     fn b58_script_address_prefix(&self) -> [u8; 2];
 
-    /// Determines whether the specified network upgrade is active as of the 
+    /// Determines whether the specified network upgrade is active as of the
     /// provided block height on the network to which this Parameters value applies.
     fn is_nu_active(&self, nu: NetworkUpgrade, height: BlockHeight) -> bool {
         self.activation_height(nu).map_or(false, |h| h <= height)

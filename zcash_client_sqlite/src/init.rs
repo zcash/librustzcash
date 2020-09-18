@@ -4,11 +4,7 @@ use rusqlite::{types::ToSql, Connection, NO_PARAMS};
 use std::path::Path;
 use zcash_client_backend::encoding::encode_extended_full_viewing_key;
 
-use zcash_primitives::{
-    block::BlockHash,
-    consensus,
-    zip32::ExtendedFullViewingKey,
-};
+use zcash_primitives::{block::BlockHash, consensus, zip32::ExtendedFullViewingKey};
 
 use crate::{
     address_from_extfvk,
@@ -259,10 +255,7 @@ mod tests {
     };
 
     use super::{init_accounts_table, init_blocks_table, init_data_database};
-    use crate::{
-        query::get_address,
-        tests,
-    };
+    use crate::{query::get_address, tests};
 
     #[test]
     fn init_accounts_table_only_works_once() {

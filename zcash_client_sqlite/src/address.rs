@@ -4,11 +4,7 @@ use zcash_client_backend::encoding::{
     decode_payment_address, decode_transparent_address, encode_payment_address,
     encode_transparent_address,
 };
-use zcash_primitives::{
-    consensus,
-    legacy::TransparentAddress,
-    primitives::PaymentAddress,
-};
+use zcash_primitives::{consensus, legacy::TransparentAddress, primitives::PaymentAddress};
 
 /// An address that funds can be sent to.
 pub enum RecipientAddress {
