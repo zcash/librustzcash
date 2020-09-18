@@ -160,6 +160,7 @@ impl ToPayload for Precondition {
     }
 }
 
+/// The witness type for the demo extension.
 #[derive(Debug, PartialEq)]
 pub enum Witness {
     Open(open::Witness),
@@ -225,11 +226,26 @@ impl ToPayload for Witness {
     }
 }
 
+/// This trait defines the context information that the demo extension requires
+/// be made available to it by a consensus node integrating this extension.
+///
+/// This context type provides accessors to information relevant to a single
+/// transaction being validated by the extension.
 pub trait Context {
+    /// Predicate used to determine whether this transaction has only TZE
+    /// inputs and outputs. The demo extension does not support verification
+    /// of transactions which have either shielded or transparent inputs and
+    /// outputs.
     fn is_tze_only(&self) -> bool;
+
+    /// List of all TZE outputs in the transaction being validate by the extension.
     fn tx_tze_outputs(&self) -> &[TzeOut];
 }
 
+/// Marker type for the demo extension. 
+///
+/// A value of this type will be used as the receiver for
+/// `zcash_primitives::extensions::transparent::Extension` method invocations.
 pub struct Program;
 
 impl<C: Context> Extension<C> for Program {
@@ -316,13 +332,22 @@ fn hash_1(preimage_1: &[u8; 32], hash_2: &[u8; 32]) -> [u8; 32] {
     hash
 }
 
+/// Wrapper for [`zcash_primitives::transaction::builder::Builder`] that simplifies
+/// constructing transactions that utilize the features of the demo extension.
 pub struct DemoBuilder<B> {
+    /// The wrapped transaction builder.
     pub txn_builder: B,
+
+    /// The assigned identifier for this extension. This is necessary as the author
+    /// of the demo extension will not know ahead of time what identifier will be
+    /// assigned to it at the time of inclusion in the Zcash consensus rules. 
     pub extension_id: u32,
 }
 
+/// Errors that can occur in construction of transactions using `DemoBuilder`.
 #[derive(Debug)]
 pub enum DemoBuildError<E> {
+    /// Wrapper for errors returned from the underlying `Builder`
     BaseBuilderError(E),
     ExpectedOpen,
     ExpectedClose,
