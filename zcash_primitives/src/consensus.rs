@@ -1,48 +1,262 @@
 //! Consensus parameters.
 
+use std::cmp::{Ord, Ordering};
 use std::convert::TryFrom;
 use std::fmt;
+use std::ops::{Add, Sub};
+
+use crate::constants;
+
+/// A wrapper type representing blockchain heights. Safe conversion from
+/// various integer types, as well as addition and subtraction, are provided.
+#[repr(transparent)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct BlockHeight(u32);
+
+pub const H0: BlockHeight = BlockHeight(0);
+
+impl BlockHeight {
+    pub const fn from_u32(v: u32) -> BlockHeight {
+        BlockHeight(v)
+    }
+}
+
+impl fmt::Display for BlockHeight {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt(formatter)
+    }
+}
+
+impl Ord for BlockHeight {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.0.cmp(&other.0)
+    }
+}
+
+impl PartialOrd for BlockHeight {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl From<u32> for BlockHeight {
+    fn from(value: u32) -> Self {
+        BlockHeight(value)
+    }
+}
+
+impl From<u64> for BlockHeight {
+    fn from(value: u64) -> Self {
+        BlockHeight(value as u32)
+    }
+}
+
+impl TryFrom<i32> for BlockHeight {
+    type Error = std::num::TryFromIntError;
+
+    fn try_from(value: i32) -> Result<Self, Self::Error> {
+        u32::try_from(value).map(BlockHeight)
+    }
+}
+
+impl TryFrom<i64> for BlockHeight {
+    type Error = std::num::TryFromIntError;
+
+    fn try_from(value: i64) -> Result<Self, Self::Error> {
+        u32::try_from(value).map(BlockHeight)
+    }
+}
+
+impl From<BlockHeight> for u32 {
+    fn from(value: BlockHeight) -> u32 {
+        value.0
+    }
+}
+
+impl From<BlockHeight> for u64 {
+    fn from(value: BlockHeight) -> u64 {
+        value.0 as u64
+    }
+}
+
+impl From<BlockHeight> for i64 {
+    fn from(value: BlockHeight) -> i64 {
+        value.0 as i64
+    }
+}
+
+impl Add<u32> for BlockHeight {
+    type Output = Self;
+
+    fn add(self, other: u32) -> Self {
+        BlockHeight(self.0 + other)
+    }
+}
+
+impl Add for BlockHeight {
+    type Output = Self;
+
+    fn add(self, other: Self) -> Self {
+        self + other.0
+    }
+}
+
+impl Sub<u32> for BlockHeight {
+    type Output = Self;
+
+    fn sub(self, other: u32) -> Self {
+        if other > self.0 {
+            panic!("Subtraction resulted in negative block height.");
+        }
+
+        BlockHeight(self.0 - other)
+    }
+}
+
+impl Sub for BlockHeight {
+    type Output = Self;
+
+    fn sub(self, other: Self) -> Self {
+        self - other.0
+    }
+}
 
 /// Zcash consensus parameters.
-pub trait Parameters {
-    fn activation_height(nu: NetworkUpgrade) -> Option<u32>;
+pub trait Parameters: Clone {
+    /// Returns the activation height for a particular network upgrade,
+    /// if an activation height has been set.
+    fn activation_height(&self, nu: NetworkUpgrade) -> Option<BlockHeight>;
 
-    fn is_nu_active(nu: NetworkUpgrade, height: u32) -> bool {
-        match Self::activation_height(nu) {
-            Some(h) if h <= height => true,
-            _ => false,
-        }
+    /// Returns the human-readable prefix for Sapling extended full
+    /// viewing keys for the network to which this Parameters value applies.
+    fn hrp_sapling_extended_full_viewing_key(&self) -> &str;
+
+    /// Returns the human-readable prefix for Sapling payment addresses
+    /// viewing keys for the network to which this Parameters value applies.
+    fn hrp_sapling_payment_address(&self) -> &str;
+
+    /// Returns the human-readable prefix for transparent pay-to-public-key-hash
+    /// payment addresses for the network to which this Parameters value applies.
+    fn b58_pubkey_address_prefix(&self) -> [u8; 2];
+
+    /// Returns the human-readable prefix for transparent pay-to-script-hash
+    /// payment addresses for the network to which this Parameters value applies.
+    fn b58_script_address_prefix(&self) -> [u8; 2];
+
+    /// Determines whether the specified network upgrade is active as of the
+    /// provided block height on the network to which this Parameters value applies.
+    fn is_nu_active(&self, nu: NetworkUpgrade, height: BlockHeight) -> bool {
+        self.activation_height(nu).map_or(false, |h| h <= height)
     }
 }
 
 /// Marker struct for the production network.
-#[derive(Clone, Copy, Debug)]
+#[derive(PartialEq, Copy, Clone, Debug)]
 pub struct MainNetwork;
 
+pub const MAIN_NETWORK: MainNetwork = MainNetwork;
+
 impl Parameters for MainNetwork {
-    fn activation_height(nu: NetworkUpgrade) -> Option<u32> {
+    fn activation_height(&self, nu: NetworkUpgrade) -> Option<BlockHeight> {
         match nu {
-            NetworkUpgrade::Overwinter => Some(347_500),
-            NetworkUpgrade::Sapling => Some(419_200),
-            NetworkUpgrade::Blossom => Some(653_600),
-            NetworkUpgrade::Heartwood => Some(903_000),
-            NetworkUpgrade::Canopy => Some(1_046_400),
+            NetworkUpgrade::Overwinter => Some(BlockHeight(347_500)),
+            NetworkUpgrade::Sapling => Some(BlockHeight(419_200)),
+            NetworkUpgrade::Blossom => Some(BlockHeight(653_600)),
+            NetworkUpgrade::Heartwood => Some(BlockHeight(903_000)),
+            NetworkUpgrade::Canopy => Some(BlockHeight(1_046_400)),
         }
+    }
+
+    fn hrp_sapling_extended_full_viewing_key(&self) -> &str {
+        constants::mainnet::HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY
+    }
+
+    fn hrp_sapling_payment_address(&self) -> &str {
+        constants::mainnet::HRP_SAPLING_PAYMENT_ADDRESS
+    }
+
+    fn b58_pubkey_address_prefix(&self) -> [u8; 2] {
+        constants::mainnet::B58_PUBKEY_ADDRESS_PREFIX
+    }
+
+    fn b58_script_address_prefix(&self) -> [u8; 2] {
+        constants::mainnet::B58_SCRIPT_ADDRESS_PREFIX
     }
 }
 
 /// Marker struct for the test network.
-#[derive(Clone, Copy, Debug)]
+#[derive(PartialEq, Copy, Clone, Debug)]
 pub struct TestNetwork;
 
+pub const TEST_NETWORK: TestNetwork = TestNetwork;
+
 impl Parameters for TestNetwork {
-    fn activation_height(nu: NetworkUpgrade) -> Option<u32> {
+    fn activation_height(&self, nu: NetworkUpgrade) -> Option<BlockHeight> {
         match nu {
-            NetworkUpgrade::Overwinter => Some(207_500),
-            NetworkUpgrade::Sapling => Some(280_000),
-            NetworkUpgrade::Blossom => Some(584_000),
-            NetworkUpgrade::Heartwood => Some(903_800),
-            NetworkUpgrade::Canopy => Some(1_028_500),
+            NetworkUpgrade::Overwinter => Some(BlockHeight(207_500)),
+            NetworkUpgrade::Sapling => Some(BlockHeight(280_000)),
+            NetworkUpgrade::Blossom => Some(BlockHeight(584_000)),
+            NetworkUpgrade::Heartwood => Some(BlockHeight(903_800)),
+            NetworkUpgrade::Canopy => Some(BlockHeight(1_028_500)),
+        }
+    }
+
+    fn hrp_sapling_extended_full_viewing_key(&self) -> &str {
+        constants::testnet::HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY
+    }
+
+    fn hrp_sapling_payment_address(&self) -> &str {
+        constants::testnet::HRP_SAPLING_PAYMENT_ADDRESS
+    }
+
+    fn b58_pubkey_address_prefix(&self) -> [u8; 2] {
+        constants::testnet::B58_PUBKEY_ADDRESS_PREFIX
+    }
+
+    fn b58_script_address_prefix(&self) -> [u8; 2] {
+        constants::testnet::B58_SCRIPT_ADDRESS_PREFIX
+    }
+}
+
+#[derive(PartialEq, Copy, Clone, Debug)]
+pub enum Network {
+    MainNetwork,
+    TestNetwork,
+}
+
+impl Parameters for Network {
+    fn activation_height(&self, nu: NetworkUpgrade) -> Option<BlockHeight> {
+        match self {
+            Network::MainNetwork => MAIN_NETWORK.activation_height(nu),
+            Network::TestNetwork => TEST_NETWORK.activation_height(nu),
+        }
+    }
+
+    fn hrp_sapling_extended_full_viewing_key(&self) -> &str {
+        match self {
+            Network::MainNetwork => MAIN_NETWORK.hrp_sapling_extended_full_viewing_key(),
+            Network::TestNetwork => TEST_NETWORK.hrp_sapling_extended_full_viewing_key(),
+        }
+    }
+
+    fn hrp_sapling_payment_address(&self) -> &str {
+        match self {
+            Network::MainNetwork => MAIN_NETWORK.hrp_sapling_payment_address(),
+            Network::TestNetwork => TEST_NETWORK.hrp_sapling_payment_address(),
+        }
+    }
+
+    fn b58_pubkey_address_prefix(&self) -> [u8; 2] {
+        match self {
+            Network::MainNetwork => MAIN_NETWORK.b58_pubkey_address_prefix(),
+            Network::TestNetwork => TEST_NETWORK.b58_pubkey_address_prefix(),
+        }
+    }
+
+    fn b58_script_address_prefix(&self) -> [u8; 2] {
+        match self {
+            Network::MainNetwork => MAIN_NETWORK.b58_script_address_prefix(),
+            Network::TestNetwork => TEST_NETWORK.b58_script_address_prefix(),
         }
     }
 }
@@ -176,9 +390,9 @@ impl BranchId {
     /// the given height.
     ///
     /// This is the branch ID that should be used when creating transactions.
-    pub fn for_height<C: Parameters>(height: u32) -> Self {
+    pub fn for_height<P: Parameters>(parameters: &P, height: BlockHeight) -> Self {
         for nu in UPGRADES_IN_ORDER.iter().rev() {
-            if C::is_nu_active(*nu, height) {
+            if parameters.is_nu_active(*nu, height) {
                 return nu.branch_id();
             }
         }
@@ -192,7 +406,9 @@ impl BranchId {
 mod tests {
     use std::convert::TryFrom;
 
-    use super::{BranchId, MainNetwork, NetworkUpgrade, Parameters, UPGRADES_IN_ORDER};
+    use super::{
+        BlockHeight, BranchId, NetworkUpgrade, Parameters, MAIN_NETWORK, UPGRADES_IN_ORDER,
+    };
 
     #[test]
     fn nu_ordering() {
@@ -200,12 +416,10 @@ mod tests {
             let nu_a = UPGRADES_IN_ORDER[i - 1];
             let nu_b = UPGRADES_IN_ORDER[i];
             match (
-                MainNetwork::activation_height(nu_a),
-                MainNetwork::activation_height(nu_b),
+                MAIN_NETWORK.activation_height(nu_a),
+                MAIN_NETWORK.activation_height(nu_b),
             ) {
-                (Some(a), Some(b)) if a < b => (),
-                (Some(_), None) => (),
-                (None, None) => (),
+                (a, b) if a < b => (),
                 _ => panic!(
                     "{} should not be before {} in UPGRADES_IN_ORDER",
                     nu_a, nu_b
@@ -216,15 +430,9 @@ mod tests {
 
     #[test]
     fn nu_is_active() {
-        assert!(!MainNetwork::is_nu_active(NetworkUpgrade::Overwinter, 0));
-        assert!(!MainNetwork::is_nu_active(
-            NetworkUpgrade::Overwinter,
-            347_499
-        ));
-        assert!(MainNetwork::is_nu_active(
-            NetworkUpgrade::Overwinter,
-            347_500
-        ));
+        assert!(!MAIN_NETWORK.is_nu_active(NetworkUpgrade::Overwinter, BlockHeight(0)));
+        assert!(!MAIN_NETWORK.is_nu_active(NetworkUpgrade::Overwinter, BlockHeight(347_499)));
+        assert!(MAIN_NETWORK.is_nu_active(NetworkUpgrade::Overwinter, BlockHeight(347_500)));
     }
 
     #[test]
@@ -235,25 +443,28 @@ mod tests {
 
     #[test]
     fn branch_id_for_height() {
-        assert_eq!(BranchId::for_height::<MainNetwork>(0), BranchId::Sprout,);
         assert_eq!(
-            BranchId::for_height::<MainNetwork>(419_199),
+            BranchId::for_height(&MAIN_NETWORK, BlockHeight(0)),
+            BranchId::Sprout,
+        );
+        assert_eq!(
+            BranchId::for_height(&MAIN_NETWORK, BlockHeight(419_199)),
             BranchId::Overwinter,
         );
         assert_eq!(
-            BranchId::for_height::<MainNetwork>(419_200),
+            BranchId::for_height(&MAIN_NETWORK, BlockHeight(419_200)),
             BranchId::Sapling,
         );
         assert_eq!(
-            BranchId::for_height::<MainNetwork>(903_000),
+            BranchId::for_height(&MAIN_NETWORK, BlockHeight(903_000)),
             BranchId::Heartwood,
         );
         assert_eq!(
-            BranchId::for_height::<MainNetwork>(1_046_400),
+            BranchId::for_height(&MAIN_NETWORK, BlockHeight(1_046_400)),
             BranchId::Canopy,
         );
         assert_eq!(
-            BranchId::for_height::<MainNetwork>(5_000_000),
+            BranchId::for_height(&MAIN_NETWORK, BlockHeight(5_000_000)),
             BranchId::Canopy,
         );
     }

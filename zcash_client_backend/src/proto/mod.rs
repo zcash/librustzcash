@@ -3,7 +3,11 @@
 use ff::PrimeField;
 use group::GroupEncoding;
 use std::convert::TryInto;
-use zcash_primitives::block::{BlockHash, BlockHeader};
+
+use zcash_primitives::{
+    block::{BlockHash, BlockHeader},
+    consensus::BlockHeight,
+};
 
 pub mod compact_formats;
 
@@ -53,6 +57,15 @@ impl compact_formats::CompactBlock {
         } else {
             BlockHeader::read(&self.header[..]).ok()
         }
+    }
+
+    /// Returns the [`BlockHeight`] for this block.
+    ///
+    /// A convenience method that wraps [`CompactBlock.height`]
+    ///
+    /// [`CompactBlock.height`]: #structfield.height
+    pub fn height(&self) -> BlockHeight {
+        BlockHeight::from(self.height)
     }
 }
 
