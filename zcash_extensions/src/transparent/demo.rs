@@ -28,6 +28,7 @@ use zcash_primitives::{
     transaction::components::{amount::Amount, OutPoint, TzeOut},
 };
 
+/// Types and constants used for Mode 0 (open a channel)
 mod open {
     pub const MODE: u32 = 0;
 
@@ -38,6 +39,7 @@ mod open {
     pub struct Witness(pub [u8; 32]);
 }
 
+/// Types and constants used for Mode 1 (close a channel)
 mod close {
     pub const MODE: u32 = 1;
 
@@ -48,6 +50,7 @@ mod close {
     pub struct Witness(pub [u8; 32]);
 }
 
+/// The precondition type for the demo extension.
 #[derive(Debug, PartialEq)]
 pub enum Precondition {
     Open(open::Precondition),
@@ -55,23 +58,42 @@ pub enum Precondition {
 }
 
 impl Precondition {
+    /// Convenience constructor for opening precondition values.
     pub fn open(hash: [u8; 32]) -> Self {
         Precondition::Open(open::Precondition(hash))
     }
 
+    /// Convenience constructor for closing precondition values.
     pub fn close(hash: [u8; 32]) -> Self {
         Precondition::Close(close::Precondition(hash))
     }
 }
 
+/// Errors that may be produced during parsing and verification of demo preconditions and
+/// witnesses.
 #[derive(Debug, PartialEq)]
 pub enum Error {
+    /// Parse error indicating that the payload of the condition or the witness was
+    /// not 32 bytes.
     IllegalPayloadLength(usize),
+    /// Verification error indicating that the specified mode was not recognized by
+    /// the extension.
     ModeInvalid(u32),
+    /// Verification error indicating that the transaction provided in the verification
+    /// context was missing required TZE inputs or outputs.
     NonTzeTxn,
-    HashMismatch, // include hashes?
+    /// Verification error indicating that the witness being verified did not satisfy the
+    /// precondition under inspection.
+    HashMismatch, 
+    /// Verification error indicating that the mode requested by the witness value did not
+    /// conform to that of the precondition under inspection.
     ModeMismatch,
+    /// Verification error indicating that an `Open`-mode precondition was encountered
+    /// when a `Close` was expected.
     ExpectedClose,
+    /// Verification error indicating that an unexpected number of TZE outputs (more than
+    /// one) was encountered in the transaction under inspection, in violation of 
+    /// the extension's invariants.
     InvalidOutputQty(usize),
 }
 
@@ -315,7 +337,11 @@ pub enum DemoBuildError<E> {
     },
 }
 
+/// Convenience methods for use with [`zcash_primitives::transaction::builder::Builder`]
+/// for constructing transactions that utilize the features of the demo extension.
 impl<'a, B: ExtensionTxBuilder<'a>> DemoBuilder<&mut B> {
+    /// Add a channel-opening precondition to the outputs of the transaction under
+    /// construction.
     pub fn demo_open(
         &mut self,
         value: Amount,
@@ -327,6 +353,8 @@ impl<'a, B: ExtensionTxBuilder<'a>> DemoBuilder<&mut B> {
             .map_err(DemoBuildError::BaseBuilderError)
     }
 
+    /// Add a witness to a previous channel-opening precondition and a new channel-closing
+    /// precondition to the transaction under construction.
     pub fn demo_transfer_to_close(
         &mut self,
         prevout: (OutPoint, TzeOut),
@@ -368,6 +396,7 @@ impl<'a, B: ExtensionTxBuilder<'a>> DemoBuilder<&mut B> {
             .map_err(DemoBuildError::BaseBuilderError)
     }
 
+    /// Add a channel-closing witness to the transaction under construction.
     pub fn demo_close(
         &mut self,
         prevout: (OutPoint, TzeOut),
