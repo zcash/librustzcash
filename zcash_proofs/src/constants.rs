@@ -68,7 +68,7 @@ lazy_static! {
 
 /// Creates the 3-bit window table `[0, 1, ..., 8]` for different magnitudes of a fixed
 /// generator.
-fn generate_circuit_generator(mut gen: jubjub::SubgroupPoint) -> FixedGeneratorOwned {
+pub fn generate_circuit_generator(mut gen: jubjub::SubgroupPoint) -> FixedGeneratorOwned {
     let mut windows = vec![];
 
     for _ in 0..FIXED_BASE_CHUNKS_PER_GENERATOR {
