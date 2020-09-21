@@ -84,7 +84,7 @@ pub fn get_verified_balance<P: AsRef<Path>>(db_data: P, account: u32) -> Result<
         "SELECT SUM(value) FROM received_notes
         INNER JOIN transactions ON transactions.id_tx = received_notes.tx
         WHERE account = ? AND spent IS NULL AND transactions.block <= ?",
-        &[account, anchor_height],
+        &[account, u32::from(anchor_height)],
         |row| row.get(0).or(Ok(0)),
     )?;
 
@@ -176,6 +176,7 @@ mod tests {
     use crate::{
         error::ErrorKind,
         init::{init_accounts_table, init_data_database},
+        tests,
     };
 
     #[test]
@@ -187,7 +188,7 @@ mod tests {
         // Add an account to the wallet
         let extsk = ExtendedSpendingKey::master(&[]);
         let extfvks = [ExtendedFullViewingKey::from(&extsk)];
-        init_accounts_table(&db_data, &extfvks).unwrap();
+        init_accounts_table(&db_data, &tests::network(), &extfvks).unwrap();
 
         // The account should be empty
         assert_eq!(get_balance(db_data, 0).unwrap(), Amount::zero());

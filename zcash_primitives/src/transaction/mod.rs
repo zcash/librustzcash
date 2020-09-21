@@ -7,8 +7,7 @@ use std::fmt;
 use std::io::{self, Read, Write};
 use std::ops::Deref;
 
-use crate::redjubjub::Signature;
-use crate::serialize::Vector;
+use crate::{consensus::BlockHeight, redjubjub::Signature, serialize::Vector};
 
 pub mod builder;
 pub mod components;
@@ -79,7 +78,7 @@ pub struct TransactionData {
     pub tze_inputs: Vec<TzeIn>,
     pub tze_outputs: Vec<TzeOut>,
     pub lock_time: u32,
-    pub expiry_height: u32,
+    pub expiry_height: BlockHeight,
     pub value_balance: Amount,
     pub shielded_spends: Vec<SpendDescription>,
     pub shielded_outputs: Vec<OutputDescription>,
@@ -139,7 +138,7 @@ impl TransactionData {
             tze_inputs: vec![],
             tze_outputs: vec![],
             lock_time: 0,
-            expiry_height: 0,
+            expiry_height: 0u32.into(),
             value_balance: Amount::zero(),
             shielded_spends: vec![],
             shielded_outputs: vec![],
@@ -160,7 +159,7 @@ impl TransactionData {
             tze_inputs: vec![],
             tze_outputs: vec![],
             lock_time: 0,
-            expiry_height: 0,
+            expiry_height: 0u32.into(),
             value_balance: Amount::zero(),
             shielded_spends: vec![],
             shielded_outputs: vec![],
@@ -241,10 +240,10 @@ impl Transaction {
         };
 
         let lock_time = reader.read_u32::<LittleEndian>()?;
-        let expiry_height = if is_overwinter_v3 || is_sapling_v4 || has_tze {
-            reader.read_u32::<LittleEndian>()?
+        let expiry_height: BlockHeight = if is_overwinter_v3 || is_sapling_v4 || has_tze {
+            reader.read_u32::<LittleEndian>()?.into()
         } else {
-            0
+            0u32.into()
         };
 
         let (value_balance, shielded_spends, shielded_outputs) = if is_sapling_v4 || has_tze {
@@ -338,7 +337,7 @@ impl Transaction {
         }
         writer.write_u32::<LittleEndian>(self.lock_time)?;
         if is_overwinter_v3 || is_sapling_v4 || has_tze {
-            writer.write_u32::<LittleEndian>(self.expiry_height)?;
+            writer.write_u32::<LittleEndian>(u32::from(self.expiry_height))?;
         }
 
         if is_sapling_v4 || has_tze {

@@ -84,7 +84,7 @@ pub enum Error {
     NonTzeTxn,
     /// Verification error indicating that the witness being verified did not satisfy the
     /// precondition under inspection.
-    HashMismatch, 
+    HashMismatch,
     /// Verification error indicating that the mode requested by the witness value did not
     /// conform to that of the precondition under inspection.
     ModeMismatch,
@@ -92,7 +92,7 @@ pub enum Error {
     /// when a `Close` was expected.
     ExpectedClose,
     /// Verification error indicating that an unexpected number of TZE outputs (more than
-    /// one) was encountered in the transaction under inspection, in violation of 
+    /// one) was encountered in the transaction under inspection, in violation of
     /// the extension's invariants.
     InvalidOutputQty(usize),
 }
@@ -242,7 +242,7 @@ pub trait Context {
     fn tx_tze_outputs(&self) -> &[TzeOut];
 }
 
-/// Marker type for the demo extension. 
+/// Marker type for the demo extension.
 ///
 /// A value of this type will be used as the receiver for
 /// `zcash_primitives::extensions::transparent::Extension` method invocations.
@@ -340,7 +340,7 @@ pub struct DemoBuilder<B> {
 
     /// The assigned identifier for this extension. This is necessary as the author
     /// of the demo extension will not know ahead of time what identifier will be
-    /// assigned to it at the time of inclusion in the Zcash consensus rules. 
+    /// assigned to it at the time of inclusion in the Zcash consensus rules.
     pub extension_id: u32,
 }
 
@@ -467,7 +467,7 @@ mod tests {
     use zcash_proofs::prover::LocalTxProver;
 
     use zcash_primitives::{
-        consensus::{BranchId, TestNetwork},
+        consensus::{BranchId, H0, TEST_NETWORK},
         extensions::transparent::{self as tze, Extension, FromPayload, ToPayload},
         legacy::TransparentAddress,
         merkle_tree::{CommitmentTree, IncrementalWitness},
@@ -677,7 +677,7 @@ mod tests {
         //
 
         let mut rng = OsRng;
-        let mut builder_a: Builder<'_, TestNetwork, OsRng> = Builder::new_future(0);
+        let mut builder_a = Builder::new_with_rng_future(TEST_NETWORK, H0, rng);
 
         // create some inputs to spend
         let extsk = ExtendedSpendingKey::master(&[]);
@@ -720,7 +720,7 @@ mod tests {
         // Transfer
         //
 
-        let mut builder_b: Builder<'_, TestNetwork, OsRng> = Builder::new_future(0);
+        let mut builder_b = Builder::new_with_rng_future(TEST_NETWORK, H0, rng);
         let mut db_b = DemoBuilder {
             txn_builder: &mut builder_b,
             extension_id: 0,
@@ -739,7 +739,7 @@ mod tests {
         // Closing transaction
         //
 
-        let mut builder_c: Builder<'_, TestNetwork, OsRng> = Builder::new_future(0);
+        let mut builder_c = Builder::new_with_rng_future(TEST_NETWORK, H0, rng);
         let mut db_c = DemoBuilder {
             txn_builder: &mut builder_c,
             extension_id: 0,

@@ -101,7 +101,7 @@ prop_compose! {
             tze_inputs:  if branch_id == BranchId::Future { tze_inputs } else { vec![] },
             tze_outputs: if branch_id == BranchId::Future { tze_outputs } else { vec![] },
             lock_time,
-            expiry_height,
+            expiry_height: expiry_height.into(),
             value_balance,
             shielded_spends: vec![], //FIXME
             shielded_outputs: vec![], //FIXME

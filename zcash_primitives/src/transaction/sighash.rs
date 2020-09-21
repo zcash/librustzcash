@@ -272,7 +272,7 @@ pub fn signature_hash_data<'a>(
                 );
             }
             update_u32!(h, tx.lock_time, tmp);
-            update_u32!(h, tx.expiry_height, tmp);
+            update_u32!(h, tx.expiry_height.into(), tmp);
             if sigversion == SigHashVersion::Sapling || sigversion == SigHashVersion::Future {
                 h.update(&tx.value_balance.to_i64_le_bytes());
             }
