@@ -47,6 +47,10 @@ proptest = "0.10.1"
 transparent-inputs = ["ripemd160", "secp256k1"]
 
 [[bench]]
+name = "note_decryption"
+harness = false
+
+[[bench]]
 name = "pedersen_hash"
 harness = false
 

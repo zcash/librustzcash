@@ -19,7 +19,7 @@ use directories::BaseDirs;
 use std::path::PathBuf;
 
 pub mod circuit;
-mod constants;
+pub mod constants;
 mod hashreader;
 pub mod sapling;
 pub mod sprout;
