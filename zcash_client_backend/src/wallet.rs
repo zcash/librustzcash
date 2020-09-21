@@ -35,7 +35,7 @@ pub struct WalletShieldedSpend {
 pub struct WalletShieldedOutput {
     pub index: usize,
     pub cmu: bls12_381::Scalar,
-    pub epk: jubjub::SubgroupPoint,
+    pub epk: jubjub::ExtendedPoint,
     pub account: usize,
     pub note: Note,
     pub to: PaymentAddress,
