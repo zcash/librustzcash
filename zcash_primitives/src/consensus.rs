@@ -164,7 +164,7 @@ impl Parameters for MainNetwork {
             NetworkUpgrade::Blossom => Some(BlockHeight(653_600)),
             NetworkUpgrade::Heartwood => Some(BlockHeight(903_000)),
             NetworkUpgrade::Canopy => Some(BlockHeight(1_046_400)),
-            NetworkUpgrade::Future => None,
+            NetworkUpgrade::ZFuture => None,
         }
     }
 
@@ -199,7 +199,7 @@ impl Parameters for TestNetwork {
             NetworkUpgrade::Blossom => Some(BlockHeight(584_000)),
             NetworkUpgrade::Heartwood => Some(BlockHeight(903_800)),
             NetworkUpgrade::Canopy => Some(BlockHeight(1_028_500)),
-            NetworkUpgrade::Future => None,
+            NetworkUpgrade::ZFuture => None,
         }
     }
 
@@ -289,12 +289,12 @@ pub enum NetworkUpgrade {
     ///
     /// [Canopy]: https://z.cash/upgrade/canopy/
     Canopy,
-    /// The [FUTURE] network upgrade.
+    /// The [ZFUTURE] network upgrade.
     ///
     /// This upgrade is expected never to activate on mainnet;
     /// it is intended for use in integration testing of functionality
     /// that is a candidate for integration in a future network upgrade.
-    Future,
+    ZFuture,
 }
 
 impl fmt::Display for NetworkUpgrade {
@@ -305,7 +305,7 @@ impl fmt::Display for NetworkUpgrade {
             NetworkUpgrade::Blossom => write!(f, "Blossom"),
             NetworkUpgrade::Heartwood => write!(f, "Heartwood"),
             NetworkUpgrade::Canopy => write!(f, "Canopy"),
-            NetworkUpgrade::Future => write!(f, "FUTURE"),
+            NetworkUpgrade::ZFuture => write!(f, "ZFUTURE"),
         }
     }
 }
@@ -318,7 +318,7 @@ impl NetworkUpgrade {
             NetworkUpgrade::Blossom => BranchId::Blossom,
             NetworkUpgrade::Heartwood => BranchId::Heartwood,
             NetworkUpgrade::Canopy => BranchId::Canopy,
-            NetworkUpgrade::Future => BranchId::Future,
+            NetworkUpgrade::ZFuture => BranchId::ZFuture,
         }
     }
 }
@@ -366,7 +366,7 @@ pub enum BranchId {
     Canopy,
     /// Candidates for future consensus rules; this branch will never
     /// activate on mainnet.
-    Future,
+    ZFuture,
 }
 
 impl TryFrom<u32> for BranchId {
@@ -380,7 +380,7 @@ impl TryFrom<u32> for BranchId {
             0x2bb4_0e60 => Ok(BranchId::Blossom),
             0xf5b9_230b => Ok(BranchId::Heartwood),
             0xe9ff_75a6 => Ok(BranchId::Canopy),
-            0xffff_ffff => Ok(BranchId::Future),
+            0xffff_ffff => Ok(BranchId::ZFuture),
             _ => Err("Unknown consensus branch ID"),
         }
     }
@@ -395,7 +395,7 @@ impl From<BranchId> for u32 {
             BranchId::Blossom => 0x2bb4_0e60,
             BranchId::Heartwood => 0xf5b9_230b,
             BranchId::Canopy => 0xe9ff_75a6,
-            BranchId::Future => 0xffff_ffff,
+            BranchId::ZFuture => 0xffff_ffff,
         }
     }
 }

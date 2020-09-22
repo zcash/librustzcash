@@ -88,7 +88,7 @@ impl<'a> demo::Context for Context<'a> {
     }
 }
 
-/// Identifier for the set of TZEs associated with the FUTURE network upgrade.
+/// Identifier for the set of TZEs associated with the ZFUTURE network upgrade.
 /// This epoch is intended only for use on test networks.
 struct EpochVTest;
 
@@ -116,7 +116,7 @@ impl Epoch for EpochVTest {
 pub fn epoch_for_branch(network_upgrade: NetworkUpgrade) -> Option<Box<dyn Epoch<Error = String>>> {
     // Map from consensus branch IDs to epochs.
     match network_upgrade {
-        NetworkUpgrade::Future => Some(Box::new(EpochVTest)),
+        NetworkUpgrade::ZFuture => Some(Box::new(EpochVTest)),
         _ => None,
     }
 }

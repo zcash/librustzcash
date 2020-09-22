@@ -13,9 +13,8 @@ use super::{
     components::amount::MAX_MONEY,
     components::{Amount, OutPoint, TxIn, TxOut, TzeIn, TzeOut},
     sighash::{signature_hash, SignableInput},
-    Transaction, TransactionData, FUTURE_TX_VERSION, FUTURE_VERSION_GROUP_ID,
-    OVERWINTER_TX_VERSION, OVERWINTER_VERSION_GROUP_ID, SAPLING_TX_VERSION,
-    SAPLING_VERSION_GROUP_ID,
+    Transaction, TransactionData, OVERWINTER_TX_VERSION, OVERWINTER_VERSION_GROUP_ID,
+    SAPLING_TX_VERSION, SAPLING_VERSION_GROUP_ID, ZFUTURE_TX_VERSION, ZFUTURE_VERSION_GROUP_ID,
 };
 
 prop_compose! {
@@ -77,7 +76,7 @@ fn tx_versions(branch_id: BranchId) -> impl Strategy<Value = (u32, u32)> {
     match branch_id {
         BranchId::Sprout => (1..(2 as u32)).prop_map(|i| (i, 0)).boxed(),
         BranchId::Overwinter => Just((OVERWINTER_TX_VERSION, OVERWINTER_VERSION_GROUP_ID)).boxed(),
-        BranchId::Future => Just((FUTURE_TX_VERSION, FUTURE_VERSION_GROUP_ID)).boxed(),
+        BranchId::ZFuture => Just((ZFUTURE_TX_VERSION, ZFUTURE_VERSION_GROUP_ID)).boxed(),
         _otherwise => Just((SAPLING_TX_VERSION, SAPLING_VERSION_GROUP_ID)).boxed(),
     }
 }
@@ -98,8 +97,8 @@ prop_compose! {
             version,
             version_group_id,
             vin, vout,
-            tze_inputs:  if branch_id == BranchId::Future { tze_inputs } else { vec![] },
-            tze_outputs: if branch_id == BranchId::Future { tze_outputs } else { vec![] },
+            tze_inputs:  if branch_id == BranchId::ZFuture { tze_inputs } else { vec![] },
+            tze_outputs: if branch_id == BranchId::ZFuture { tze_outputs } else { vec![] },
             lock_time,
             expiry_height: expiry_height.into(),
             value_balance,
@@ -178,7 +177,7 @@ fn tx_write_rejects_unexpected_binding_sig() {
 
 proptest! {
     #[test]
-    fn test_tze_roundtrip(tx in arb_tx(BranchId::Future)) {
+    fn test_tze_roundtrip(tx in arb_tx(BranchId::ZFuture)) {
         let mut txn_bytes = vec![];
         tx.write(&mut txn_bytes).unwrap();
 

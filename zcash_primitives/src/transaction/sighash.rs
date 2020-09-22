@@ -5,8 +5,8 @@ use group::GroupEncoding;
 
 use super::{
     components::{Amount, TxOut},
-    Transaction, TransactionData, FUTURE_VERSION_GROUP_ID, OVERWINTER_VERSION_GROUP_ID,
-    SAPLING_TX_VERSION, SAPLING_VERSION_GROUP_ID,
+    Transaction, TransactionData, OVERWINTER_VERSION_GROUP_ID, SAPLING_TX_VERSION,
+    SAPLING_VERSION_GROUP_ID, ZFUTURE_VERSION_GROUP_ID,
 };
 use crate::{consensus, extensions::transparent::Precondition, legacy::Script};
 
@@ -51,7 +51,7 @@ enum SigHashVersion {
     Sprout,
     Overwinter,
     Sapling,
-    Future,
+    ZFuture,
 }
 
 impl SigHashVersion {
@@ -60,7 +60,7 @@ impl SigHashVersion {
             match tx.version_group_id {
                 OVERWINTER_VERSION_GROUP_ID => SigHashVersion::Overwinter,
                 SAPLING_VERSION_GROUP_ID => SigHashVersion::Sapling,
-                FUTURE_VERSION_GROUP_ID => SigHashVersion::Future,
+                ZFUTURE_VERSION_GROUP_ID => SigHashVersion::ZFuture,
                 _ => unimplemented!(),
             }
         } else {
@@ -220,7 +220,7 @@ pub fn signature_hash_data<'a>(
 ) -> Vec<u8> {
     let sigversion = SigHashVersion::from_tx(tx);
     match sigversion {
-        SigHashVersion::Overwinter | SigHashVersion::Sapling | SigHashVersion::Future => {
+        SigHashVersion::Overwinter | SigHashVersion::Sapling | SigHashVersion::ZFuture => {
             let mut personal = [0; 16];
             (&mut personal[..12]).copy_from_slice(ZCASH_SIGHASH_PERSONALIZATION_PREFIX);
             (&mut personal[12..])
@@ -258,12 +258,12 @@ pub fn signature_hash_data<'a>(
             } else {
                 h.update(&[0; 32]);
             };
-            if sigversion == SigHashVersion::Future {
+            if sigversion == SigHashVersion::ZFuture {
                 update_hash!(h, !tx.tze_inputs.is_empty(), tze_inputs_hash(tx));
                 update_hash!(h, !tx.tze_outputs.is_empty(), tze_outputs_hash(tx));
             }
             update_hash!(h, !tx.joinsplits.is_empty(), joinsplits_hash(tx));
-            if sigversion == SigHashVersion::Sapling || sigversion == SigHashVersion::Future {
+            if sigversion == SigHashVersion::Sapling || sigversion == SigHashVersion::ZFuture {
                 update_hash!(h, !tx.shielded_spends.is_empty(), shielded_spends_hash(tx));
                 update_hash!(
                     h,
@@ -273,7 +273,7 @@ pub fn signature_hash_data<'a>(
             }
             update_u32!(h, tx.lock_time, tmp);
             update_u32!(h, tx.expiry_height.into(), tmp);
-            if sigversion == SigHashVersion::Sapling || sigversion == SigHashVersion::Future {
+            if sigversion == SigHashVersion::Sapling || sigversion == SigHashVersion::ZFuture {
                 h.update(&tx.value_balance.to_i64_le_bytes());
             }
             update_u32!(h, hash_type, tmp);
@@ -284,7 +284,7 @@ pub fn signature_hash_data<'a>(
                     script_code,
                     value,
                 } => {
-                    let mut data = if sigversion == SigHashVersion::Future {
+                    let mut data = if sigversion == SigHashVersion::ZFuture {
                         ZCASH_TRANSPARENT_SIGNED_INPUT_DOMAIN_SEPARATOR.to_vec()
                     } else {
                         vec![]
@@ -303,7 +303,7 @@ pub fn signature_hash_data<'a>(
                     index,
                     precondition,
                     value,
-                } if sigversion == SigHashVersion::Future => {
+                } if sigversion == SigHashVersion::ZFuture => {
                     let mut data = ZCASH_TZE_SIGNED_INPUT_DOMAIN_SEPARATOR.to_vec();
 
                     tx.tze_inputs[index].prevout.write(&mut data).unwrap();
@@ -316,7 +316,7 @@ pub fn signature_hash_data<'a>(
                 }
 
                 SignableInput::Tze { .. } => {
-                    panic!("A request has been made to sign a TZE input, but the signature hash version is not Future");
+                    panic!("A request has been made to sign a TZE input, but the signature hash version is not ZFuture");
                 }
 
                 _ => (),

@@ -363,7 +363,7 @@ impl<'a, P: consensus::Parameters> Builder<'a, P, OsRng> {
 
     /// Creates a new `Builder` targeted for inclusion in the block with the given height,
     /// using default values for general transaction fields and the default OS random,
-    /// and the `FUTURE_TX_VERSION` and `FUTURE_VERSION_GROUP_ID` version identifiers.
+    /// and the `ZFUTURE_TX_VERSION` and `ZFUTURE_VERSION_GROUP_ID` version identifiers.
     ///
     /// # Default values
     ///
@@ -372,9 +372,9 @@ impl<'a, P: consensus::Parameters> Builder<'a, P, OsRng> {
     ///
     /// The fee will be set to the default fee (0.0001 ZEC).
     ///
-    /// The transaction will be constructed and serialized according to the Future
-    /// network upgrade rules. This is intended only for use in integration testing of
-    /// new features.
+    /// The transaction will be constructed and serialized according to the
+    /// NetworkUpgrade::ZFuture rules. This is intended only for use in
+    /// integration testing of new features.
     pub fn new_future(params: P, height: BlockHeight) -> Self {
         Builder::new_with_rng_future(params, height, OsRng)
     }
@@ -396,7 +396,7 @@ impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng> Builder<'a, P, R> {
 
     /// Creates a new `Builder` targeted for inclusion in the block with the given height,
     /// and randomness source, using default values for general transaction fields
-    /// and the `FUTURE_TX_VERSION` and `FUTURE_VERSION_GROUP_ID` version identifiers.
+    /// and the `ZFUTURE_TX_VERSION` and `ZFUTURE_VERSION_GROUP_ID` version identifiers.
     ///
     /// # Default values
     ///
@@ -405,9 +405,9 @@ impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng> Builder<'a, P, R> {
     ///
     /// The fee will be set to the default fee (0.0001 ZEC).
     ///
-    /// The transaction will be constructed and serialized according to the Future
-    /// network upgrade rules. This is intended only for use in integration testing of
-    /// new features.
+    /// The transaction will be constructed and serialized according to the
+    /// NetworkUpgrade::ZFuture rules. This is intended only for use in
+    /// integration testing of new features.
     pub fn new_with_rng_future(params: P, height: BlockHeight, rng: R) -> Builder<'a, P, R> {
         Self::new_with_mtx(params, height, rng, TransactionData::future())
     }

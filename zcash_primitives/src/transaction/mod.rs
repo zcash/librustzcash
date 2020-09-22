@@ -33,8 +33,8 @@ const SAPLING_TX_VERSION: u32 = 4;
 /// using these constants should be inspected, and use of these constants
 /// should be removed as appropriate in favor of the new consensus
 /// transaction version and group.
-const FUTURE_VERSION_GROUP_ID: u32 = 0xFFFFFFFF;
-const FUTURE_TX_VERSION: u32 = 0x0000FFFF;
+const ZFUTURE_VERSION_GROUP_ID: u32 = 0xFFFFFFFF;
+const ZFUTURE_TX_VERSION: u32 = 0x0000FFFF;
 
 #[derive(Clone, Copy, Debug, PartialOrd, Ord, PartialEq, Eq, Hash)]
 pub struct TxId(pub [u8; 32]);
@@ -152,8 +152,8 @@ impl TransactionData {
     pub fn future() -> Self {
         TransactionData {
             overwintered: true,
-            version: FUTURE_TX_VERSION,
-            version_group_id: FUTURE_VERSION_GROUP_ID,
+            version: ZFUTURE_TX_VERSION,
+            version_group_id: ZFUTURE_VERSION_GROUP_ID,
             vin: vec![],
             vout: vec![],
             tze_inputs: vec![],
@@ -219,8 +219,8 @@ impl Transaction {
             && version_group_id == SAPLING_VERSION_GROUP_ID
             && version == SAPLING_TX_VERSION;
         let has_tze = overwintered
-            && version_group_id == FUTURE_VERSION_GROUP_ID
-            && version == FUTURE_TX_VERSION;
+            && version_group_id == ZFUTURE_VERSION_GROUP_ID
+            && version == ZFUTURE_TX_VERSION;
 
         if overwintered && !(is_overwinter_v3 || is_sapling_v4 || has_tze) {
             return Err(io::Error::new(
@@ -319,8 +319,8 @@ impl Transaction {
             && self.version_group_id == SAPLING_VERSION_GROUP_ID
             && self.version == SAPLING_TX_VERSION;
         let has_tze = self.overwintered
-            && self.version_group_id == FUTURE_VERSION_GROUP_ID
-            && self.version == FUTURE_TX_VERSION;
+            && self.version_group_id == ZFUTURE_VERSION_GROUP_ID
+            && self.version == ZFUTURE_TX_VERSION;
 
         if self.overwintered && !(is_overwinter_v3 || is_sapling_v4 || has_tze) {
             return Err(io::Error::new(
