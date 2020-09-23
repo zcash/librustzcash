@@ -19,6 +19,7 @@
 //! - `tx_c`: `[ TzeIn(tx_b, preimage_2) -> [any output types...] ]`
 
 use std::convert::TryFrom;
+use std::convert::TryInto;
 use std::fmt;
 
 use blake2b_simd::Params;
@@ -128,24 +129,18 @@ impl FromPayload for Precondition {
 
     fn from_payload(mode: u32, payload: &[u8]) -> Result<Self, Self::Error> {
         match mode {
-            open::MODE => {
-                if payload.len() == 32 {
-                    let mut hash = [0; 32];
-                    hash.copy_from_slice(&payload);
-                    Ok(Precondition::Open(open::Precondition(hash)))
-                } else {
-                    Err(Error::IllegalPayloadLength(payload.len()))
-                }
-            }
-            close::MODE => {
-                if payload.len() == 32 {
-                    let mut hash = [0; 32];
-                    hash.copy_from_slice(&payload);
-                    Ok(Precondition::Close(close::Precondition(hash)))
-                } else {
-                    Err(Error::IllegalPayloadLength(payload.len()))
-                }
-            }
+            open::MODE => 
+                payload.try_into()
+                    .map_err(|_| Error::IllegalPayloadLength(payload.len()))
+                    .map(open::Precondition)
+                    .map(Precondition::Open),
+            
+            close::MODE => 
+                payload.try_into()
+                    .map_err(|_| Error::IllegalPayloadLength(payload.len()))
+                    .map(close::Precondition)
+                    .map(Precondition::Close),
+
             _ => Err(Error::ModeInvalid(mode)),
         }
     }
@@ -194,24 +189,18 @@ impl FromPayload for Witness {
 
     fn from_payload(mode: u32, payload: &[u8]) -> Result<Self, Self::Error> {
         match mode {
-            open::MODE => {
-                if payload.len() == 32 {
-                    let mut preimage = [0; 32];
-                    preimage.copy_from_slice(&payload);
-                    Ok(Witness::Open(open::Witness(preimage)))
-                } else {
-                    Err(Error::IllegalPayloadLength(payload.len()))
-                }
-            }
-            close::MODE => {
-                if payload.len() == 32 {
-                    let mut preimage = [0; 32];
-                    preimage.copy_from_slice(&payload);
-                    Ok(Witness::Close(close::Witness(preimage)))
-                } else {
-                    Err(Error::IllegalPayloadLength(payload.len()))
-                }
-            }
+            open::MODE => 
+                payload.try_into()
+                    .map_err(|_| Error::IllegalPayloadLength(payload.len()))
+                    .map(open::Witness)
+                    .map(Witness::Open),
+            
+            close::MODE => 
+                payload.try_into()
+                    .map_err(|_| Error::IllegalPayloadLength(payload.len()))
+                    .map(close::Witness)
+                    .map(Witness::Close),
+            
             _ => Err(Error::ModeInvalid(mode)),
         }
     }
