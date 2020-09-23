@@ -1,7 +1,7 @@
 //! Consensus logic for Transparent Zcash Extensions.
 
 use std::convert::TryFrom;
-use zcash_primitives::consensus::NetworkUpgrade;
+use zcash_primitives::consensus::{BlockHeight, NetworkUpgrade};
 use zcash_primitives::extensions::transparent::{Error, Extension, Precondition, Witness};
 use zcash_primitives::transaction::{components::TzeOut, Transaction};
 
@@ -41,12 +41,12 @@ impl From<ExtensionId> for u32 {
 /// an assigned extension type ID. This type may be modified in the future if
 /// additional context information is required by newly integrated TZEs.
 pub struct Context<'a> {
-    pub height: i32,
+    pub height: BlockHeight,
     pub tx: &'a Transaction,
 }
 
 impl<'a> Context<'a> {
-    pub fn new(height: i32, tx: &'a Transaction) -> Self {
+    pub fn new(height: BlockHeight, tx: &'a Transaction) -> Self {
         Context { height, tx }
     }
 }

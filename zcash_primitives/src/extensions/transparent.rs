@@ -116,12 +116,12 @@ pub trait Extension<C> {
     /// Extension-specific precondition type. The extension will need to implement
     /// [`FromPayload<Error = Self::Error>`] for this type in order for their
     /// extension to be eligible for integration into consensus rules.
-    type P;
+    type Precondition;
 
     /// Extension-specific witness type. The extension will need to implement
     /// [`FromPayload<Error = Self::Error>`] for this type in order for their
     /// extension to be eligible for integration into consensus rules.
-    type W;
+    type Witness;
 
     /// Extension-specific error type. This should encompass both parsing and verification errors.
     type Error;
@@ -131,8 +131,8 @@ pub trait Extension<C> {
     /// precondition, and an error in any other case.
     fn verify_inner(
         &self,
-        precondition: &Self::P,
-        witness: &Self::W,
+        precondition: &Self::Precondition,
+        witness: &Self::Witness,
         context: &C,
     ) -> Result<(), Self::Error>;
 
@@ -146,12 +146,12 @@ pub trait Extension<C> {
         context: &C,
     ) -> Result<(), Self::Error>
     where
-        Self::P: FromPayload<Error = Self::Error>,
-        Self::W: FromPayload<Error = Self::Error>,
+        Self::Precondition: FromPayload<Error = Self::Error>,
+        Self::Witness: FromPayload<Error = Self::Error>,
     {
         self.verify_inner(
-            &Self::P::from_payload(precondition.mode, &precondition.payload)?,
-            &Self::W::from_payload(witness.mode, &witness.payload)?,
+            &Self::Precondition::from_payload(precondition.mode, &precondition.payload)?,
+            &Self::Witness::from_payload(witness.mode, &witness.payload)?,
             &context,
         )
     }

@@ -249,8 +249,8 @@ pub trait Context {
 pub struct Program;
 
 impl<C: Context> Extension<C> for Program {
-    type P = Precondition;
-    type W = Witness;
+    type Precondition = Precondition;
+    type Witness = Witness;
     type Error = Error;
 
     /// Runs the program against the given precondition, witness, and context.
