@@ -2,6 +2,7 @@ use ff::Field;
 use rand_core::OsRng;
 
 use proptest::collection::vec;
+use proptest::sample::select;
 use proptest::prelude::*;
 
 use crate::{
@@ -23,9 +24,19 @@ prop_compose! {
     }
 }
 
-// TODO: actually generate real possible script values?
+const VALID_OPCODES: [u8; 8] = [
+    0x00, // OP_FALSE,
+    0x51, // OP_1,
+    0x52, // OP_2,
+    0x53, // OP_3,
+    0xac, // OP_CHECKSIG,
+    0x63, // OP_IF,
+    0x65, // OP_VERIF,
+    0x6a, // OP_RETURN,
+];
+
 prop_compose! {
-    fn arb_script()(v in vec(any::<u8>(), 1..256)) -> Script {
+    fn arb_script()(v in vec(select(&VALID_OPCODES[..]), 1..256)) -> Script {
         Script(v)
     }
 }
