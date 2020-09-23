@@ -2,8 +2,8 @@ use ff::Field;
 use rand_core::OsRng;
 
 use proptest::collection::vec;
-use proptest::sample::select;
 use proptest::prelude::*;
+use proptest::sample::select;
 
 use crate::{
     consensus::BranchId, constants::SPENDING_KEY_GENERATOR, extensions::transparent as tze,
