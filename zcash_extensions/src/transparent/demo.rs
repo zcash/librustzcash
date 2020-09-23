@@ -394,31 +394,31 @@ impl<'a, B: ExtensionTxBuilder<'a>> DemoBuilder<&mut B> {
             prevout.1.precondition.mode,
             &prevout.1.precondition.payload,
         ) {
-            Ok(Precondition::Open(hash)) => {
-                if hash.0 != h1 {
-                    Err(DemoBuildError::TransferMismatch {
-                        expected: hash.0,
-                        actual: h1,
-                    })?
-                }
+            Err(parse_failure) => Err(DemoBuildError::PrevoutParseFailure(parse_failure)),
+
+            Ok(Precondition::Close(_)) => Err(DemoBuildError::ExpectedOpen),
+
+            Ok(Precondition::Open(hash)) if hash.0 != h1 => Err(DemoBuildError::TransferMismatch {
+                expected: hash.0,
+                actual: h1,
+            }),
+
+            Ok(Precondition::Open(_)) => {
+                self.txn_builder
+                    .add_tze_input(self.extension_id, open::MODE, prevout, move |_| {
+                        Ok(Witness::open(preimage_1))
+                    })
+                    .map_err(DemoBuildError::BaseBuilderError)?;
+
+                self.txn_builder
+                    .add_tze_output(
+                        self.extension_id,
+                        transfer_amount,
+                        &Precondition::close(hash_2),
+                    )
+                    .map_err(DemoBuildError::BaseBuilderError)
             }
-            Ok(Precondition::Close(_)) => Err(DemoBuildError::ExpectedOpen)?,
-            Err(parse_failure) => Err(DemoBuildError::PrevoutParseFailure(parse_failure))?,
         }
-
-        self.txn_builder
-            .add_tze_input(self.extension_id, open::MODE, prevout, move |_| {
-                Ok(Witness::open(preimage_1))
-            })
-            .map_err(DemoBuildError::BaseBuilderError)?;
-
-        self.txn_builder
-            .add_tze_output(
-                self.extension_id,
-                transfer_amount,
-                &Precondition::close(hash_2),
-            )
-            .map_err(DemoBuildError::BaseBuilderError)
     }
 
     /// Add a channel-closing witness to the transaction under construction.
@@ -438,23 +438,24 @@ impl<'a, B: ExtensionTxBuilder<'a>> DemoBuilder<&mut B> {
             prevout.1.precondition.mode,
             &prevout.1.precondition.payload,
         ) {
-            Ok(Precondition::Open(_)) => Err(DemoBuildError::ExpectedClose)?,
-            Ok(Precondition::Close(hash)) => {
-                if hash.0 != hash_2 {
-                    Err(DemoBuildError::CloseMismatch {
-                        expected: hash.0,
-                        actual: hash_2,
-                    })?
-                }
-            }
-            Err(parse_failure) => Err(DemoBuildError::PrevoutParseFailure(parse_failure))?,
-        }
+            Err(parse_failure) => Err(DemoBuildError::PrevoutParseFailure(parse_failure)),
 
-        self.txn_builder
-            .add_tze_input(self.extension_id, close::MODE, prevout, move |_| {
-                Ok(Witness::close(preimage_2))
-            })
-            .map_err(DemoBuildError::BaseBuilderError)
+            Ok(Precondition::Open(_)) => Err(DemoBuildError::ExpectedClose),
+
+            Ok(Precondition::Close(hash)) if hash.0 != hash_2 => {
+                Err(DemoBuildError::CloseMismatch {
+                    expected: hash.0,
+                    actual: hash_2,
+                })
+            }
+
+            Ok(Precondition::Close(_)) => self
+                .txn_builder
+                .add_tze_input(self.extension_id, close::MODE, prevout, move |_| {
+                    Ok(Witness::close(preimage_2))
+                })
+                .map_err(DemoBuildError::BaseBuilderError),
+        }
     }
 }
 
