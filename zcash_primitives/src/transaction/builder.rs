@@ -375,8 +375,8 @@ impl<'a, P: consensus::Parameters> Builder<'a, P, OsRng> {
     /// The transaction will be constructed and serialized according to the
     /// NetworkUpgrade::ZFuture rules. This is intended only for use in
     /// integration testing of new features.
-    pub fn new_future(params: P, height: BlockHeight) -> Self {
-        Builder::new_with_rng_future(params, height, OsRng)
+    pub fn new_zfuture(params: P, height: BlockHeight) -> Self {
+        Builder::new_with_rng_zfuture(params, height, OsRng)
     }
 }
 
@@ -408,8 +408,8 @@ impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng> Builder<'a, P, R> {
     /// The transaction will be constructed and serialized according to the
     /// NetworkUpgrade::ZFuture rules. This is intended only for use in
     /// integration testing of new features.
-    pub fn new_with_rng_future(params: P, height: BlockHeight, rng: R) -> Builder<'a, P, R> {
-        Self::new_with_mtx(params, height, rng, TransactionData::future())
+    pub fn new_with_rng_zfuture(params: P, height: BlockHeight, rng: R) -> Builder<'a, P, R> {
+        Self::new_with_mtx(params, height, rng, TransactionData::zfuture())
     }
 
     /// Common utility function for builder construction.

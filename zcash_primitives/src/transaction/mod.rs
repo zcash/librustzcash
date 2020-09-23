@@ -149,7 +149,7 @@ impl TransactionData {
         }
     }
 
-    pub fn future() -> Self {
+    pub fn zfuture() -> Self {
         TransactionData {
             overwintered: true,
             version: ZFUTURE_TX_VERSION,

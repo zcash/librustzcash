@@ -601,7 +601,7 @@ mod tests {
             precondition: tze::Precondition::from(0, &Precondition::open(hash_1)),
         };
 
-        let mut mtx_a = TransactionData::future();
+        let mut mtx_a = TransactionData::zfuture();
         mtx_a.tze_outputs.push(out_a);
         let tx_a = mtx_a.freeze().unwrap();
 
@@ -617,7 +617,7 @@ mod tests {
             value: Amount::from_u64(1).unwrap(),
             precondition: tze::Precondition::from(0, &Precondition::close(hash_2)),
         };
-        let mut mtx_b = TransactionData::future();
+        let mut mtx_b = TransactionData::zfuture();
         mtx_b.tze_inputs.push(in_b);
         mtx_b.tze_outputs.push(out_b);
         let tx_b = mtx_b.freeze().unwrap();
@@ -631,7 +631,7 @@ mod tests {
             witness: tze::Witness::from(0, &Witness::close(preimage_2)),
         };
 
-        let mut mtx_c = TransactionData::future();
+        let mut mtx_c = TransactionData::zfuture();
         mtx_c.tze_inputs.push(in_c);
         let tx_c = mtx_c.freeze().unwrap();
 
@@ -678,7 +678,7 @@ mod tests {
         //
 
         let mut rng = OsRng;
-        let mut builder_a = Builder::new_with_rng_future(TEST_NETWORK, H0, rng);
+        let mut builder_a = Builder::new_with_rng_zfuture(TEST_NETWORK, H0, rng);
 
         // create some inputs to spend
         let extsk = ExtendedSpendingKey::master(&[]);
@@ -721,7 +721,7 @@ mod tests {
         // Transfer
         //
 
-        let mut builder_b = Builder::new_with_rng_future(TEST_NETWORK, H0, rng);
+        let mut builder_b = Builder::new_with_rng_zfuture(TEST_NETWORK, H0, rng);
         let mut db_b = DemoBuilder {
             txn_builder: &mut builder_b,
             extension_id: 0,
@@ -740,7 +740,7 @@ mod tests {
         // Closing transaction
         //
 
-        let mut builder_c = Builder::new_with_rng_future(TEST_NETWORK, H0, rng);
+        let mut builder_c = Builder::new_with_rng_zfuture(TEST_NETWORK, H0, rng);
         let mut db_c = DemoBuilder {
             txn_builder: &mut builder_c,
             extension_id: 0,
