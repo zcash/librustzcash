@@ -1,14 +1,22 @@
+use std::convert::TryInto;
+
 use blake2b_simd::{Hash as Blake2bHash, Params as Blake2bParams};
 use byteorder::{LittleEndian, WriteBytesExt};
 use ff::PrimeField;
 use group::GroupEncoding;
+
+use crate::{
+    consensus,
+    extensions::transparent::Precondition,
+    legacy::Script,
+    serialize::{CompactSize, Vector},
+};
 
 use super::{
     components::{Amount, TxOut},
     Transaction, TransactionData, OVERWINTER_VERSION_GROUP_ID, SAPLING_TX_VERSION,
     SAPLING_VERSION_GROUP_ID, ZFUTURE_VERSION_GROUP_ID,
 };
-use crate::{consensus, extensions::transparent::Precondition, legacy::Script};
 
 const ZCASH_SIGHASH_PERSONALIZATION_PREFIX: &[u8; 12] = b"ZcashSigHash";
 const ZCASH_PREVOUTS_HASH_PERSONALIZATION: &[u8; 16] = b"ZcashPrevoutHash";
@@ -307,10 +315,10 @@ pub fn signature_hash_data<'a>(
                     let mut data = ZCASH_TZE_SIGNED_INPUT_DOMAIN_SEPARATOR.to_vec();
 
                     tx.tze_inputs[index].prevout.write(&mut data).unwrap();
-                    data.write_u32::<LittleEndian>(precondition.extension_id)
+                    CompactSize::write(&mut data, precondition.extension_id.try_into().unwrap())
                         .unwrap();
-                    data.write_u32::<LittleEndian>(precondition.mode).unwrap();
-                    data.extend(&precondition.payload);
+                    CompactSize::write(&mut data, precondition.mode.try_into().unwrap()).unwrap();
+                    Vector::write(&mut data, &precondition.payload, |w, e| w.write_u8(*e)).unwrap();
                     data.extend_from_slice(&value.to_i64_le_bytes());
                     h.update(&data);
                 }
