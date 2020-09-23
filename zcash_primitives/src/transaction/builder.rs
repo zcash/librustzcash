@@ -788,7 +788,7 @@ impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng> Builder<'a, P, R> {
             None
         };
 
-        // // Create TZE input witnesses
+        // Create TZE input witnesses
         for (i, tze_in) in self.tze_inputs.builders.into_iter().enumerate() {
             // Need to enable witness to commit to the amount.
             // - So hardware wallets "know" the amount without having to be sent all the

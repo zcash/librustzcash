@@ -5,9 +5,8 @@ use std::fmt;
 
 /// Binary parsing capability for TZE preconditions & witnesses.
 ///
-/// Serialization formats interpreted by implementations of this
-/// trait become consensus-critical upon activation of of the
-/// extension that uses them.
+/// Serialization formats interpreted by implementations of this trait become consensus-critical
+/// upon activation of of the extension that uses them.
 pub trait FromPayload: Sized {
     type Error;
 
@@ -17,9 +16,8 @@ pub trait FromPayload: Sized {
 
 /// Binary serialization capability for TZE preconditions & witnesses.
 ///
-/// Serialization formats used by implementations of this
-/// trait become consensus-critical upon activation of of the
-/// extension that uses them.
+/// Serialization formats used by implementations of this trait become consensus-critical upon
+/// activation of of the extension that uses them.
 pub trait ToPayload {
     /// Returns a serialized payload and its corresponding mode.
     fn to_payload(&self) -> (u32, Vec<u8>);
@@ -27,11 +25,10 @@ pub trait ToPayload {
 
 /// A condition that can be used to encumber transparent funds.
 ///
-/// This struct is an intermediate representation between the
-/// serialized binary format which is used inside of a transaction
-/// and extension-specific types. The payload field of this struct
-/// is treated as opaque to all but extension corresponding to the
-/// encapsulated extension_id value.
+/// This struct is an intermediate representation between the serialized binary format which is
+/// used inside of a transaction, and extension-specific types. The payload field of this struct is
+/// treated as opaque to all but the extension corresponding to the encapsulated `extension_id`
+/// value.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Precondition {
     pub extension_id: u32,
@@ -58,14 +55,12 @@ impl Precondition {
     }
 }
 
-/// Data that satisfies the precondition for prior encumbered funds, enabling them to be
-/// spent.
+/// Data that satisfies the precondition for prior encumbered funds, enabling them to be spent.
 ///
-/// This struct is an intermediate representation between the
-/// serialized binary format which is used inside of a transaction
-/// and extension-specific types. The payload field of this struct
-/// is treated as opaque to all but extension corresponding to the
-/// encapsulated extension_id value.
+/// This struct is an intermediate representation between the serialized binary format which is
+/// used inside of a transaction, and extension-specific types. The payload field of this struct is
+/// treated as opaque to all but the extension corresponding to the encapsulated `extension_id`
+/// value.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Witness {
     pub extension_id: u32,
@@ -110,25 +105,25 @@ impl<E: fmt::Display> fmt::Display for Error<E> {
     }
 }
 
-/// This is the primary trait which must be implemented by an extension type
-/// for that type to be eligible for inclusion in Zcash consensus rules.
+/// This is the primary trait which must be implemented by an extension type for that type to be
+/// eligible for inclusion in Zcash consensus rules.
 pub trait Extension<C> {
     /// Extension-specific precondition type. The extension will need to implement
-    /// [`FromPayload<Error = Self::Error>`] for this type in order for their
-    /// extension to be eligible for integration into consensus rules.
+    /// [`FromPayload<Error = Self::Error>`] for this type in order for their extension to be
+    /// eligible for integration into consensus rules.
     type Precondition;
 
-    /// Extension-specific witness type. The extension will need to implement
-    /// [`FromPayload<Error = Self::Error>`] for this type in order for their
-    /// extension to be eligible for integration into consensus rules.
+    /// Extension-specific witness type. The extension will need to implement [`FromPayload<Error =
+    /// Self::Error>`] for this type in order for their extension to be eligible for integration
+    /// into consensus rules.
     type Witness;
 
     /// Extension-specific error type. This should encompass both parsing and verification errors.
     type Error;
 
-    /// This is the primary method that an extension must implement. Implementations should
-    /// return [`Ok(())`] if verification of the witness succeeds against the supplied
-    /// precondition, and an error in any other case.
+    /// This is the primary method that an extension must implement. Implementations should return
+    /// [`Ok(())`] if verification of the witness succeeds against the supplied precondition, and
+    /// an error in any other case.
     fn verify_inner(
         &self,
         precondition: &Self::Precondition,
@@ -136,9 +131,9 @@ pub trait Extension<C> {
         context: &C,
     ) -> Result<(), Self::Error>;
 
-    /// This is a convenience method intended for use by consensus nodes at the integration
-    /// point to provide easy interoperation with the opaque, cross-extension
-    /// `Precondition` and `Witness` types.
+    /// This is a convenience method intended for use by consensus nodes at the integration point
+    /// to provide easy interoperation with the opaque, cross-extension `Precondition` and
+    /// `Witness` types.
     fn verify(
         &self,
         precondition: &Precondition,
@@ -157,6 +152,8 @@ pub trait Extension<C> {
     }
 }
 
+/// An interface for transaction builders which support addition of TZE inputs and outputs.
+///
 /// This extension trait is satisfied by [`transaction::builder::Builder`]. It provides a minimal
 /// contract for interacting with the transaction builder, that extension library authors can use
 /// to add extension-specific builder traits that may be used to interact with the transaction
@@ -169,15 +166,14 @@ pub trait ExtensionTxBuilder<'a> {
     type BuildCtx;
     type BuildError;
 
-    /// Add a TZE input to the transaction under construction by providing a witness
-    /// to a precondition identified by a prior outpoint.
+    /// Adds a TZE input to the transaction by providing a witness to a precondition identified by a
+    /// prior outpoint.
     ///
-    /// The `witness_builder` function allows the transaction builder to provide extra
-    /// contextual information from the transaction under construction to be used
-    /// in the production of this witness (for example, so that the witness may
-    /// internally make commitments based upon this information.) For the standard
-    /// transaction builder, the value provided here is the transaction under
-    /// construction.
+    /// The `witness_builder` function allows the transaction builder to provide extra contextual
+    /// information from the transaction under construction to be used in the production of this
+    /// witness (for example, so that the witness may internally make commitments based upon this
+    /// information.) For the standard transaction builder, the value provided here is the
+    /// transaction under construction.
     fn add_tze_input<WBuilder, W: ToPayload>(
         &mut self,
         extension_id: u32,
@@ -188,12 +184,12 @@ pub trait ExtensionTxBuilder<'a> {
     where
         WBuilder: 'a + (FnOnce(&Self::BuildCtx) -> Result<W, Self::BuildError>);
 
-    /// Add a TZE precondition to the transaction which must be satisfied by a future
-    /// transaction's witness in order to spend the specified amount.
-    fn add_tze_output<P: ToPayload>(
+    /// Adds a TZE precondition to the transaction which must be satisfied by a future transaction's
+    /// witness in order to spend the specified `amount`.
+    fn add_tze_output<Precondition: ToPayload>(
         &mut self,
         extension_id: u32,
         value: Amount,
-        guarded_by: &P,
+        guarded_by: &Precondition,
     ) -> Result<(), Self::BuildError>;
 }

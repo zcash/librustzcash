@@ -60,7 +60,7 @@ pub trait Epoch {
     /// For a specific epoch, if the extension ID and mode of the supplied
     /// witness matches that of the supplied precondition, these values will
     /// be passed to the associated extension for verification, along with
-    /// whatever that extension requires of the provided `Context`.
+    /// whatever that extension requires of the provided [`Context`].
     ///
     /// Successful validation is indicated by the returned Result containing
     /// no errors.
@@ -89,7 +89,7 @@ impl<'a> demo::Context for Context<'a> {
 }
 
 /// Identifier for the set of TZEs associated with the ZFUTURE network upgrade.
-/// This epoch is intended only for use on test networks.
+/// This epoch is intended only for use on private test networks.
 struct EpochVTest;
 
 impl Epoch for EpochVTest {
@@ -108,7 +108,7 @@ impl Epoch for EpochVTest {
         match ext_id {
             ExtensionId::Demo => demo::Program
                 .verify(precondition, witness, ctx)
-                .map_err(|e| Error::ProgramError(format!("Epoch v1 program error: {}", e))),
+                .map_err(|e| Error::ProgramError(format!("Epoch vTest program error: {}", e))),
         }
     }
 }
