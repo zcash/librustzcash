@@ -99,8 +99,8 @@ pub trait Context {
 pub struct Program;
 
 impl<C: Context> Extension<C> for Program {
-    type P = Predicate;
-    type W = Witness;
+    type Precondition = Predicate;
+    type Witness = Witness;
     type Error = &'static str;
 
     /// Runs the program against the given predicate, witness, and context.
@@ -636,7 +636,7 @@ mod tests {
         );
 
         // escrow-tx (lock up 210 zats)
-        let mut mtx_a = TransactionData::future();
+        let mut mtx_a = TransactionData::zfuture();
         mtx_a
             .tze_outputs
             .push(tze_out(210, &Predicate::open(escrow_tx_predicate)));
@@ -644,7 +644,7 @@ mod tests {
         // println!("debug: Escrow transaction: {:?}", tx_a);
 
         // begin - customer-close-tx
-        let mut mtx_b = TransactionData::future();
+        let mut mtx_b = TransactionData::zfuture();
         mtx_b.tze_inputs.push(tze_in(
             tx_a.txid(),
             &Witness::open(cust_close_witness_input),
@@ -663,7 +663,7 @@ mod tests {
         // println!("debug: Customer close transaction: {:?}", tx_b);
 
         // begin - merchant-close-tx
-        let mut mtx_c = TransactionData::future();
+        let mut mtx_c = TransactionData::zfuture();
         mtx_c.tze_inputs.push(tze_in(
             tx_a.txid(),
             &Witness::open(merch_close_witness_input),
@@ -678,7 +678,7 @@ mod tests {
         // println!("debug: Merchant close transaction: {:?}", tx_c);
 
         // begin - customer-close-tx (spending from merchant-close-tx)
-        let mut mtx_d = TransactionData::future();
+        let mut mtx_d = TransactionData::zfuture();
         mtx_d.tze_inputs.push(tze_in(
             tx_c.txid(),
             &Witness::merch_close(cust_close_witness_input2),
@@ -697,7 +697,7 @@ mod tests {
         // println!("debug: Customer close transaction spending from merchant-close tx: {:?}", tx_d);
 
         // begin - customer-close-tx
-        let mut mtx_e = TransactionData::future();
+        let mut mtx_e = TransactionData::zfuture();
         mtx_e.tze_inputs.push(tze_in(
             tx_a.txid(),
             &Witness::open(cust_close_witness_input),
@@ -715,7 +715,7 @@ mod tests {
         let tx_e = mtx_e.freeze().unwrap();
 
         // begin - customer-close-tx (spending from merchant-close-tx)
-        let mut mtx_f = TransactionData::future();
+        let mut mtx_f = TransactionData::zfuture();
         mtx_f.tze_inputs.push(tze_in(
             tx_c.txid(),
             &Witness::merch_close(cust_close_witness_input2),
@@ -733,7 +733,7 @@ mod tests {
         // end - customer-close-tx (spending from merchant-close-tx)
 
         // begin - customer-close-tx (spending from merchant-close-tx)
-        let mut mtx_g = TransactionData::future();
+        let mut mtx_g = TransactionData::zfuture();
         mtx_g.tze_inputs.push(tze_in(
             tx_c.txid(),
             &Witness::merch_close(cust_close_witness_input2),
@@ -913,7 +913,7 @@ mod tests {
         );
 
         // escrow-tx (lock up 210 zats)
-        let mut mtx_a = TransactionData::future();
+        let mut mtx_a = TransactionData::zfuture();
         mtx_a
             .tze_outputs
             .push(tze_out(210, &Predicate::open(escrow_tx_predicate)));
@@ -921,7 +921,7 @@ mod tests {
         // println!("debug: Escrow transaction: {:?}", tx_a);
 
         // begin - merchant-close-tx
-        let mut mtx_b = TransactionData::future();
+        let mut mtx_b = TransactionData::zfuture();
         mtx_b.tze_inputs.push(tze_in(
             tx_a.txid(),
             &Witness::open(merch_close_witness_input),
@@ -935,7 +935,7 @@ mod tests {
         // end - merchant-close-tx
 
         // begin - merchant-close-tx
-        let mut mtx_c = TransactionData::future();
+        let mut mtx_c = TransactionData::zfuture();
         mtx_c.tze_inputs.push(tze_in(
             tx_a.txid(),
             &Witness::open(merch_close_witness_input),
@@ -949,7 +949,7 @@ mod tests {
         // end - merchant-close-tx
 
         // begin - merchant-spending-tx (spending from merchant-close-tx)
-        let mut mtx_d = TransactionData::future();
+        let mut mtx_d = TransactionData::zfuture();
         mtx_d.tze_inputs.push(tze_in(
             tx_c.txid(),
             &Witness::merch_close(merch_close_witness),
@@ -964,7 +964,7 @@ mod tests {
         // println!("debug: Customer close transaction spending from merchant-close tx: {:?}", tx_d);
 
         // begin - merchant-spending-tx (spending from merchant-close-tx)
-        let mut mtx_e = TransactionData::future();
+        let mut mtx_e = TransactionData::zfuture();
         mtx_e.tze_inputs.push(tze_in(
             tx_c.txid(),
             &Witness::merch_close(merch_close_witness),
@@ -1132,7 +1132,7 @@ mod tests {
         let cust_sig = compute_tx_signature(&sk_c, &cust_spend_tx_hash);
         let cust_spend_tx_witness = generate_spend_tx_witness(&_cust_close_addr, &cust_sig);
 
-        let mut mtx_a = TransactionData::future();
+        let mut mtx_a = TransactionData::zfuture();
         mtx_a
             .tze_outputs
             .push(tze_out(210, &Predicate::open(escrow_tx_predicate)));
@@ -1140,7 +1140,7 @@ mod tests {
         // println!("Escrow transaction: {:?}", tx_a);
 
         // construct customer-close-tx
-        let mut mtx_b = TransactionData::future();
+        let mut mtx_b = TransactionData::zfuture();
         mtx_b.tze_inputs.push(tze_in(
             tx_a.txid(),
             &Witness::open(cust_close_witness_input),
@@ -1157,7 +1157,7 @@ mod tests {
 
         let tx_b = mtx_b.freeze().unwrap();
 
-        let mut mtx_c = TransactionData::future();
+        let mut mtx_c = TransactionData::zfuture();
         mtx_c.tze_inputs.push(tze_in(
             tx_b.txid(),
             &Witness::close(merch_revoke_witness_input),
@@ -1170,7 +1170,7 @@ mod tests {
 
         let tx_c = mtx_c.freeze().unwrap();
 
-        let mut mtx_d = TransactionData::future();
+        let mut mtx_d = TransactionData::zfuture();
         mtx_d
             .tze_inputs
             .push(tze_in(tx_b.txid(), &Witness::close(cust_spend_tx_witness)));
@@ -1182,7 +1182,7 @@ mod tests {
 
         let tx_d = mtx_d.freeze().unwrap();
 
-        let mut mtx_e = TransactionData::future();
+        let mut mtx_e = TransactionData::zfuture();
         mtx_e
             .tze_inputs
             .push(tze_in(tx_b.txid(), &Witness::close(cust_spend_tx_witness)));
@@ -1194,7 +1194,7 @@ mod tests {
 
         let tx_e = mtx_e.freeze().unwrap();
 
-        let mut mtx_f = TransactionData::future();
+        let mut mtx_f = TransactionData::zfuture();
         mtx_f
             .tze_inputs
             .push(tze_in(tx_b.txid(), &Witness::close(cust_spend_tx_witness)));

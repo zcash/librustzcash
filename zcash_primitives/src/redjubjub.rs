@@ -36,7 +36,7 @@ pub struct Signature {
 
 pub struct PrivateKey(pub jubjub::Fr);
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct PublicKey(pub ExtendedPoint);
 
 impl Signature {
@@ -158,7 +158,7 @@ pub struct BatchEntry<'a> {
 // TODO: #82: This is a naive implementation currently,
 // and doesn't use multiexp.
 pub fn batch_verify<'a, R: RngCore>(
-    rng: &mut R,
+    mut rng: &mut R,
     batch: &[BatchEntry<'a>],
     p_g: SubgroupPoint,
 ) -> bool {
@@ -179,7 +179,7 @@ pub fn batch_verify<'a, R: RngCore>(
 
         let mut c = h_star(&entry.sig.rbar[..], entry.msg);
 
-        let z = jubjub::Fr::random(rng);
+        let z = jubjub::Fr::random(&mut rng);
 
         s.mul_assign(&z);
         s = s.neg();
@@ -207,22 +207,22 @@ mod tests {
 
     #[test]
     fn test_batch_verify() {
-        let rng = &mut XorShiftRng::from_seed([
+        let mut rng = XorShiftRng::from_seed([
             0x59, 0x62, 0xbe, 0x5d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06,
             0xbc, 0xe5,
         ]);
         let p_g = SPENDING_KEY_GENERATOR;
 
-        let sk1 = PrivateKey(jubjub::Fr::random(rng));
+        let sk1 = PrivateKey(jubjub::Fr::random(&mut rng));
         let vk1 = PublicKey::from_private(&sk1, p_g);
         let msg1 = b"Foo bar";
-        let sig1 = sk1.sign(msg1, rng, p_g);
+        let sig1 = sk1.sign(msg1, &mut rng, p_g);
         assert!(vk1.verify(msg1, &sig1, p_g));
 
-        let sk2 = PrivateKey(jubjub::Fr::random(rng));
+        let sk2 = PrivateKey(jubjub::Fr::random(&mut rng));
         let vk2 = PublicKey::from_private(&sk2, p_g);
         let msg2 = b"Foo bar";
-        let sig2 = sk2.sign(msg2, rng, p_g);
+        let sig2 = sk2.sign(msg2, &mut rng, p_g);
         assert!(vk2.verify(msg2, &sig2, p_g));
 
         let mut batch = vec![
@@ -238,27 +238,33 @@ mod tests {
             },
         ];
 
-        assert!(batch_verify(rng, &batch, p_g));
+        assert!(batch_verify(&mut rng, &batch, p_g));
 
         batch[0].sig = sig2;
 
-        assert!(!batch_verify(rng, &batch, p_g));
+        assert!(!batch_verify(&mut rng, &batch, p_g));
     }
 
     #[test]
     fn cofactor_check() {
-        let rng = &mut XorShiftRng::from_seed([
+        let mut rng = XorShiftRng::from_seed([
             0x59, 0x62, 0xbe, 0x5d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06,
             0xbc, 0xe5,
         ]);
         let zero = jubjub::ExtendedPoint::identity();
         let p_g = SPENDING_KEY_GENERATOR;
 
+        let jubjub_modulus_bytes = [
+            0xb7, 0x2c, 0xf7, 0xd6, 0x5e, 0x0e, 0x97, 0xd0, 0x82, 0x10, 0xc8, 0xcc, 0x93, 0x20,
+            0x68, 0xa6, 0x00, 0x3b, 0x34, 0x01, 0x01, 0x3b, 0x67, 0x06, 0xa9, 0xaf, 0x33, 0x65,
+            0xea, 0xb4, 0x7d, 0x0e,
+        ];
+
         // Get a point of order 8
         let p8 = loop {
-            let r = jubjub::ExtendedPoint::random(rng)
+            let r = jubjub::ExtendedPoint::random(&mut rng)
                 .to_niels()
-                .multiply_bits(&jubjub::Fr::char());
+                .multiply_bits(&jubjub_modulus_bytes);
 
             let r2 = r.double();
             let r4 = r2.double();
@@ -269,12 +275,12 @@ mod tests {
             }
         };
 
-        let sk = PrivateKey(jubjub::Fr::random(rng));
+        let sk = PrivateKey(jubjub::Fr::random(&mut rng));
         let vk = PublicKey::from_private(&sk, p_g);
 
         // TODO: This test will need to change when #77 is fixed
         let msg = b"Foo bar";
-        let sig = sk.sign(msg, rng, p_g);
+        let sig = sk.sign(msg, &mut rng, p_g);
         assert!(vk.verify(msg, &sig, p_g));
 
         let vktorsion = PublicKey(vk.0 + p8);
@@ -283,17 +289,17 @@ mod tests {
 
     #[test]
     fn round_trip_serialization() {
-        let rng = &mut XorShiftRng::from_seed([
+        let mut rng = XorShiftRng::from_seed([
             0x59, 0x62, 0xbe, 0x5d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06,
             0xbc, 0xe5,
         ]);
         let p_g = SPENDING_KEY_GENERATOR;
 
         for _ in 0..1000 {
-            let sk = PrivateKey(jubjub::Fr::random(rng));
+            let sk = PrivateKey(jubjub::Fr::random(&mut rng));
             let vk = PublicKey::from_private(&sk, p_g);
             let msg = b"Foo bar";
-            let sig = sk.sign(msg, rng, p_g);
+            let sig = sk.sign(msg, &mut rng, p_g);
 
             let mut sk_bytes = [0u8; 32];
             let mut vk_bytes = [0u8; 32];
@@ -318,33 +324,33 @@ mod tests {
 
     #[test]
     fn random_signatures() {
-        let rng = &mut XorShiftRng::from_seed([
+        let mut rng = XorShiftRng::from_seed([
             0x59, 0x62, 0xbe, 0x5d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06,
             0xbc, 0xe5,
         ]);
         let p_g = SPENDING_KEY_GENERATOR;
 
         for _ in 0..1000 {
-            let sk = PrivateKey(jubjub::Fr::random(rng));
+            let sk = PrivateKey(jubjub::Fr::random(&mut rng));
             let vk = PublicKey::from_private(&sk, p_g);
 
             let msg1 = b"Foo bar";
             let msg2 = b"Spam eggs";
 
-            let sig1 = sk.sign(msg1, rng, p_g);
-            let sig2 = sk.sign(msg2, rng, p_g);
+            let sig1 = sk.sign(msg1, &mut rng, p_g);
+            let sig2 = sk.sign(msg2, &mut rng, p_g);
 
             assert!(vk.verify(msg1, &sig1, p_g));
             assert!(vk.verify(msg2, &sig2, p_g));
             assert!(!vk.verify(msg1, &sig2, p_g));
             assert!(!vk.verify(msg2, &sig1, p_g));
 
-            let alpha = jubjub::Fr::random(rng);
+            let alpha = jubjub::Fr::random(&mut rng);
             let rsk = sk.randomize(alpha);
             let rvk = vk.randomize(alpha, p_g);
 
-            let sig1 = rsk.sign(msg1, rng, p_g);
-            let sig2 = rsk.sign(msg2, rng, p_g);
+            let sig1 = rsk.sign(msg1, &mut rng, p_g);
+            let sig2 = rsk.sign(msg2, &mut rng, p_g);
 
             assert!(rvk.verify(msg1, &sig1, p_g));
             assert!(rvk.verify(msg2, &sig2, p_g));

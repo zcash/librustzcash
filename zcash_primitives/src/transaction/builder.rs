@@ -9,7 +9,7 @@ use ff::Field;
 use rand::{rngs::OsRng, seq::SliceRandom, CryptoRng, RngCore};
 
 use crate::{
-    consensus,
+    consensus::{self, BlockHeight},
     extensions::transparent::{self as tze, ExtensionTxBuilder, ToPayload},
     keys::OutgoingViewingKey,
     legacy::TransparentAddress,
@@ -51,6 +51,7 @@ pub enum Error {
     InvalidAmount,
     NoChangeAddress,
     SpendProof,
+    TzeWitnessModeMismatch(u32, u32),
 }
 
 impl fmt::Display for Error {
@@ -67,6 +68,8 @@ impl fmt::Display for Error {
             Error::InvalidAmount => write!(f, "Invalid amount"),
             Error::NoChangeAddress => write!(f, "No change address specified or discoverable"),
             Error::SpendProof => write!(f, "Failed to create Sapling spend proof"),
+            Error::TzeWitnessModeMismatch(expected, actual) =>
+                write!(f, "TZE witness builder returned a mode that did not match the mode with which the input was initially constructed: expected = {:?}, actual = {:?}", expected, actual),
         }
     }
 }
@@ -82,7 +85,8 @@ struct SpendDescriptionInfo {
 }
 
 pub struct SaplingOutput {
-    ovk: OutgoingViewingKey,
+    /// `None` represents the `ovk = ⊥` case.
+    ovk: Option<OutgoingViewingKey>,
     to: PaymentAddress,
     note: Note,
     memo: Memo,
@@ -90,9 +94,10 @@ pub struct SaplingOutput {
 
 impl SaplingOutput {
     pub fn new<R: RngCore + CryptoRng, P: consensus::Parameters>(
-        height: u32,
+        params: &P,
+        height: BlockHeight,
         rng: &mut R,
-        ovk: OutgoingViewingKey,
+        ovk: Option<OutgoingViewingKey>,
         to: PaymentAddress,
         value: Amount,
         memo: Option<Memo>,
@@ -105,7 +110,7 @@ impl SaplingOutput {
             return Err(Error::InvalidAmount);
         }
 
-        let rseed = generate_random_rseed::<P, R>(height, rng);
+        let rseed = generate_random_rseed(params, height, rng);
 
         let note = Note {
             g_d,
@@ -128,7 +133,7 @@ impl SaplingOutput {
         ctx: &mut P::SaplingProvingContext,
         rng: &mut R,
     ) -> OutputDescription {
-        let encryptor = SaplingNoteEncryption::new(
+        let mut encryptor = SaplingNoteEncryption::new(
             self.ovk,
             self.note.clone(),
             self.to.clone(),
@@ -265,7 +270,7 @@ impl TransparentInputs {
 
 struct TzeInputInfo<'a, BuildCtx> {
     prevout: TzeOut,
-    builder: Box<dyn FnOnce(&BuildCtx) -> Result<TzeIn, Error> + 'a>,
+    builder: Box<dyn FnOnce(&BuildCtx) -> Result<(u32, Vec<u8>), Error> + 'a>,
 }
 
 struct TzeInputs<'a, BuildCtx> {
@@ -277,28 +282,13 @@ impl<'a, BuildCtx> TzeInputs<'a, BuildCtx> {
         TzeInputs { builders: vec![] }
     }
 
-    fn push<WBuilder, W: ToPayload>(
-        &mut self,
-        extension_id: u32,
-        prevout: (OutPoint, TzeOut),
-        builder: WBuilder,
-    ) where
+    fn push<WBuilder, W: ToPayload>(&mut self, tzeout: TzeOut, builder: WBuilder)
+    where
         WBuilder: 'a + FnOnce(&BuildCtx) -> Result<W, Error>,
     {
-        let (outpoint, tzeout) = prevout;
         self.builders.push(TzeInputInfo {
             prevout: tzeout,
-            builder: Box::new(move |ctx| {
-                let (mode, payload) = builder(&ctx).map(|x| x.to_payload())?;
-                Ok(TzeIn {
-                    prevout: outpoint,
-                    witness: tze::Witness {
-                        extension_id,
-                        mode,
-                        payload,
-                    },
-                })
-            }),
+            builder: Box::new(move |ctx| builder(&ctx).map(|x| x.to_payload())),
         });
     }
 }
@@ -343,8 +333,9 @@ impl TransactionMetadata {
 
 /// Generates a [`Transaction`] from its inputs and outputs.
 pub struct Builder<'a, P: consensus::Parameters, R: RngCore + CryptoRng> {
+    params: P,
     rng: R,
-    height: u32,
+    height: BlockHeight,
     mtx: TransactionData,
     fee: Amount,
     anchor: Option<bls12_381::Scalar>,
@@ -366,20 +357,72 @@ impl<'a, P: consensus::Parameters> Builder<'a, P, OsRng> {
     /// expiry delta (20 blocks).
     ///
     /// The fee will be set to the default fee (0.0001 ZEC).
-    pub fn new(height: u32) -> Self {
-        Builder::new_with_rng(height, OsRng)
+    pub fn new(params: P, height: BlockHeight) -> Self {
+        Builder::new_with_rng(params, height, OsRng)
     }
 
-    pub fn new_future(height: u32) -> Self {
-        Builder::new_with_rng_future(height, OsRng)
+    /// Creates a new `Builder` targeted for inclusion in the block with the given height,
+    /// using default values for general transaction fields and the default OS random,
+    /// and the `ZFUTURE_TX_VERSION` and `ZFUTURE_VERSION_GROUP_ID` version identifiers.
+    ///
+    /// # Default values
+    ///
+    /// The expiry height will be set to the given height plus the default transaction
+    /// expiry delta (20 blocks).
+    ///
+    /// The fee will be set to the default fee (0.0001 ZEC).
+    ///
+    /// The transaction will be constructed and serialized according to the
+    /// NetworkUpgrade::ZFuture rules. This is intended only for use in
+    /// integration testing of new features.
+    pub fn new_zfuture(params: P, height: BlockHeight) -> Self {
+        Builder::new_with_rng_zfuture(params, height, OsRng)
     }
 }
 
 impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng> Builder<'a, P, R> {
-    fn new_with_mtx(height: u32, rng: R, mut mtx: TransactionData) -> Builder<'a, P, R> {
+    /// Creates a new `Builder` targeted for inclusion in the block with the given height
+    /// and randomness source, using default values for general transaction fields.
+    ///
+    /// # Default values
+    ///
+    /// The expiry height will be set to the given height plus the default transaction
+    /// expiry delta (20 blocks).
+    ///
+    /// The fee will be set to the default fee (0.0001 ZEC).
+    pub fn new_with_rng(params: P, height: BlockHeight, rng: R) -> Builder<'a, P, R> {
+        Self::new_with_mtx(params, height, rng, TransactionData::new())
+    }
+
+    /// Creates a new `Builder` targeted for inclusion in the block with the given height,
+    /// and randomness source, using default values for general transaction fields
+    /// and the `ZFUTURE_TX_VERSION` and `ZFUTURE_VERSION_GROUP_ID` version identifiers.
+    ///
+    /// # Default values
+    ///
+    /// The expiry height will be set to the given height plus the default transaction
+    /// expiry delta (20 blocks).
+    ///
+    /// The fee will be set to the default fee (0.0001 ZEC).
+    ///
+    /// The transaction will be constructed and serialized according to the
+    /// NetworkUpgrade::ZFuture rules. This is intended only for use in
+    /// integration testing of new features.
+    pub fn new_with_rng_zfuture(params: P, height: BlockHeight, rng: R) -> Builder<'a, P, R> {
+        Self::new_with_mtx(params, height, rng, TransactionData::zfuture())
+    }
+
+    /// Common utility function for builder construction.
+    fn new_with_mtx(
+        params: P,
+        height: BlockHeight,
+        rng: R,
+        mut mtx: TransactionData,
+    ) -> Builder<'a, P, R> {
         mtx.expiry_height = height + DEFAULT_TX_EXPIRY_DELTA;
 
         Builder {
+            params,
             rng,
             height,
             mtx,
@@ -392,25 +435,6 @@ impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng> Builder<'a, P, R> {
             change_address: None,
             phantom: PhantomData,
         }
-    }
-
-    /// Creates a new `Builder` targeted for inclusion in the block with the given height
-    /// and randomness source, using default values for general transaction fields.
-    ///
-    /// # Default values
-    ///
-    /// The expiry height will be set to the given height plus the default transaction
-    /// expiry delta (20 blocks).
-    ///
-    /// The fee will be set to the default fee (0.0001 ZEC).
-    pub fn new_with_rng(height: u32, rng: R) -> Builder<'a, P, R> {
-        let mtx = TransactionData::new();
-        Self::new_with_mtx(height, rng, mtx)
-    }
-
-    pub fn new_with_rng_future(height: u32, rng: R) -> Builder<'a, P, R> {
-        let mtx = TransactionData::future();
-        Self::new_with_mtx(height, rng, mtx)
     }
 
     /// Adds a Sapling note to be spent in this transaction.
@@ -453,12 +477,20 @@ impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng> Builder<'a, P, R> {
     /// Adds a Sapling address to send funds to.
     pub fn add_sapling_output(
         &mut self,
-        ovk: OutgoingViewingKey,
+        ovk: Option<OutgoingViewingKey>,
         to: PaymentAddress,
         value: Amount,
         memo: Option<Memo>,
     ) -> Result<(), Error> {
-        let output = SaplingOutput::new::<R, P>(self.height, &mut self.rng, ovk, to, value, memo)?;
+        let output = SaplingOutput::new(
+            &self.params,
+            self.height,
+            &mut self.rng,
+            ovk,
+            to,
+            value,
+            memo,
+        )?;
 
         self.mtx.value_balance -= value;
 
@@ -569,7 +601,7 @@ impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng> Builder<'a, P, R> {
                 return Err(Error::NoChangeAddress);
             };
 
-            self.add_sapling_output(change_address.0, change_address.1, change, None)?;
+            self.add_sapling_output(Some(change_address.0), change_address.1, change, None)?;
         }
 
         //
@@ -679,7 +711,7 @@ impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng> Builder<'a, P, R> {
                         }
                     };
 
-                    let rseed = generate_random_rseed::<P, R>(self.height, &mut self.rng);
+                    let rseed = generate_random_rseed(&self.params, self.height, &mut self.rng);
 
                     (
                         payment_address,
@@ -756,8 +788,8 @@ impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng> Builder<'a, P, R> {
             None
         };
 
-        // // Create TZE input witnesses
-        for tze_in in self.tze_inputs.builders {
+        // Create TZE input witnesses
+        for (i, tze_in) in self.tze_inputs.builders.into_iter().enumerate() {
             // Need to enable witness to commit to the amount.
             // - So hardware wallets "know" the amount without having to be sent all the
             //   prior TZE outputs to which this witness gives evidence.
@@ -766,7 +798,13 @@ impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng> Builder<'a, P, R> {
             // (Or make it part of the sighash?)
             // - TODO: Check whether transparent inputs committing to script_pubkey was
             //   only so that hardware wallets "knew" what address was being spent from.
-            self.mtx.tze_inputs.push((tze_in.builder)(&self.mtx)?);
+            let (mode, payload) = (tze_in.builder)(&self.mtx)?;
+            let mut current = self.mtx.tze_inputs.get_mut(i).unwrap();
+            if mode != current.witness.mode {
+                return Err(Error::TzeWitnessModeMismatch(current.witness.mode, mode));
+            }
+
+            current.witness.payload = payload;
         }
 
         // Transparent signatures
@@ -789,13 +827,17 @@ impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng> ExtensionTxBuilder<'a
     fn add_tze_input<WBuilder, W: ToPayload>(
         &mut self,
         extension_id: u32,
-        prevout: (OutPoint, TzeOut),
+        mode: u32,
+        (outpoint, prevout): (OutPoint, TzeOut),
         witness_builder: WBuilder,
     ) -> Result<(), Self::BuildError>
     where
         WBuilder: 'a + (FnOnce(&Self::BuildCtx) -> Result<W, Self::BuildError>),
     {
-        self.tze_inputs.push(extension_id, prevout, witness_builder);
+        self.mtx
+            .tze_inputs
+            .push(TzeIn::new(outpoint, extension_id, mode));
+        self.tze_inputs.push(prevout, witness_builder);
         Ok(())
     }
 
@@ -830,8 +872,7 @@ mod tests {
     use std::marker::PhantomData;
 
     use crate::{
-        consensus,
-        consensus::TestNetwork,
+        consensus::{self, Parameters, H0, TEST_NETWORK},
         legacy::TransparentAddress,
         merkle_tree::{CommitmentTree, IncrementalWitness},
         primitives::Rseed,
@@ -850,26 +891,28 @@ mod tests {
         let ovk = extfvk.fvk.ovk;
         let to = extfvk.default_address().unwrap().1;
 
-        let mut builder = Builder::<TestNetwork, OsRng>::new(0);
+        let mut builder = Builder::new(TEST_NETWORK, H0);
         assert_eq!(
-            builder.add_sapling_output(ovk, to, Amount::from_i64(-1).unwrap(), None),
+            builder.add_sapling_output(Some(ovk), to, Amount::from_i64(-1).unwrap(), None),
             Err(Error::InvalidAmount)
         );
     }
 
     #[test]
     fn binding_sig_absent_if_no_shielded_spend_or_output() {
-        use crate::consensus::{NetworkUpgrade, Parameters};
+        use crate::consensus::NetworkUpgrade;
         use crate::transaction::{
             builder::{self, TransparentInputs},
             TransactionData,
         };
 
-        let sapling_activation_height =
-            TestNetwork::activation_height(NetworkUpgrade::Sapling).unwrap();
+        let sapling_activation_height = TEST_NETWORK
+            .activation_height(NetworkUpgrade::Sapling)
+            .unwrap();
 
         // Create a builder with 0 fee, so we can construct t outputs
-        let mut builder = builder::Builder::<'_, TestNetwork, OsRng> {
+        let mut builder = builder::Builder {
+            params: TEST_NETWORK,
             rng: OsRng,
             height: sapling_activation_height,
             mtx: TransactionData::new(),
@@ -911,7 +954,7 @@ mod tests {
         tree.append(cmu1).unwrap();
         let witness1 = IncrementalWitness::from_tree(&tree);
 
-        let mut builder = Builder::<TestNetwork, OsRng>::new(0);
+        let mut builder = Builder::new(TEST_NETWORK, H0);
 
         // Create a tx with a sapling spend. binding_sig should be present
         builder
@@ -937,7 +980,7 @@ mod tests {
 
     #[test]
     fn fails_on_negative_transparent_output() {
-        let mut builder = Builder::<TestNetwork, OsRng>::new(0);
+        let mut builder = Builder::new(TEST_NETWORK, H0);
         assert_eq!(
             builder.add_transparent_output(
                 &TransparentAddress::PublicKey([0; 20]),
@@ -957,7 +1000,7 @@ mod tests {
         // Fails with no inputs or outputs
         // 0.0001 t-ZEC fee
         {
-            let builder = Builder::<TestNetwork, OsRng>::new(0);
+            let builder = Builder::new(TEST_NETWORK, H0);
             assert_eq!(
                 builder.build(consensus::BranchId::Sapling, &MockTxProver),
                 Err(Error::ChangeIsNegative(Amount::from_i64(-10000).unwrap()))
@@ -965,13 +1008,13 @@ mod tests {
         }
 
         let extfvk = ExtendedFullViewingKey::from(&extsk);
-        let ovk = extfvk.fvk.ovk;
+        let ovk = Some(extfvk.fvk.ovk);
         let to = extfvk.default_address().unwrap().1;
 
         // Fail if there is only a Sapling output
         // 0.0005 z-ZEC out, 0.0001 t-ZEC fee
         {
-            let mut builder = Builder::<TestNetwork, OsRng>::new(0);
+            let mut builder = Builder::new(TEST_NETWORK, H0);
             builder
                 .add_sapling_output(
                     ovk.clone(),
@@ -989,7 +1032,7 @@ mod tests {
         // Fail if there is only a transparent output
         // 0.0005 t-ZEC out, 0.0001 t-ZEC fee
         {
-            let mut builder = Builder::<TestNetwork, OsRng>::new(0);
+            let mut builder = Builder::new(TEST_NETWORK, H0);
             builder
                 .add_transparent_output(
                     &TransparentAddress::PublicKey([0; 20]),
@@ -1013,7 +1056,7 @@ mod tests {
         // Fail if there is insufficient input
         // 0.0003 z-ZEC out, 0.0002 t-ZEC out, 0.0001 t-ZEC fee, 0.00059999 z-ZEC in
         {
-            let mut builder = Builder::<TestNetwork, OsRng>::new(0);
+            let mut builder = Builder::new(TEST_NETWORK, H0);
             builder
                 .add_sapling_spend(
                     extsk.clone(),
@@ -1056,7 +1099,7 @@ mod tests {
         // (Still fails because we are using a MockTxProver which doesn't correctly
         // compute bindingSig.)
         {
-            let mut builder = Builder::<TestNetwork, OsRng>::new(0);
+            let mut builder = Builder::new(TEST_NETWORK, H0);
             builder
                 .add_sapling_spend(
                     extsk.clone(),

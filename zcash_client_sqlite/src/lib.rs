@@ -26,23 +26,13 @@
 
 use rusqlite::{Connection, NO_PARAMS};
 use std::cmp;
+
+use zcash_primitives::{
+    consensus::{self, BlockHeight},
+    zip32::ExtendedFullViewingKey,
+};
+
 use zcash_client_backend::encoding::encode_payment_address;
-use zcash_primitives::zip32::ExtendedFullViewingKey;
-
-#[cfg(feature = "mainnet")]
-use zcash_client_backend::constants::mainnet::{
-    HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY, HRP_SAPLING_PAYMENT_ADDRESS,
-};
-#[cfg(not(feature = "mainnet"))]
-use zcash_client_backend::constants::testnet::{
-    HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY, HRP_SAPLING_PAYMENT_ADDRESS,
-};
-
-#[cfg(feature = "mainnet")]
-pub use zcash_primitives::consensus::MainNetwork as Network;
-
-#[cfg(not(feature = "mainnet"))]
-pub use zcash_primitives::consensus::TestNetwork as Network;
 
 pub mod address;
 pub mod chain;
@@ -54,20 +44,19 @@ pub mod transact;
 
 const ANCHOR_OFFSET: u32 = 10;
 
-#[cfg(feature = "mainnet")]
-const SAPLING_ACTIVATION_HEIGHT: i32 = 419_200;
-
-#[cfg(not(feature = "mainnet"))]
-const SAPLING_ACTIVATION_HEIGHT: i32 = 280_000;
-
-fn address_from_extfvk(extfvk: &ExtendedFullViewingKey) -> String {
+fn address_from_extfvk<P: consensus::Parameters>(
+    params: &P,
+    extfvk: &ExtendedFullViewingKey,
+) -> String {
     let addr = extfvk.default_address().unwrap().1;
-    encode_payment_address(HRP_SAPLING_PAYMENT_ADDRESS, &addr)
+    encode_payment_address(params.hrp_sapling_payment_address(), &addr)
 }
 
 /// Determines the target height for a transaction, and the height from which to
 /// select anchors, based on the current synchronised block chain.
-fn get_target_and_anchor_heights(data: &Connection) -> Result<(u32, u32), error::Error> {
+fn get_target_and_anchor_heights(
+    data: &Connection,
+) -> Result<(BlockHeight, BlockHeight), error::Error> {
     data.query_row_and_then(
         "SELECT MIN(height), MAX(height) FROM blocks",
         NO_PARAMS,
@@ -86,7 +75,10 @@ fn get_target_and_anchor_heights(data: &Connection) -> Result<(u32, u32), error:
                 let anchor_height =
                     cmp::max(target_height.saturating_sub(ANCHOR_OFFSET), min_height);
 
-                Ok((target_height, anchor_height))
+                Ok((
+                    BlockHeight::from(target_height),
+                    BlockHeight::from(anchor_height),
+                ))
             }
         },
     )
@@ -94,18 +86,20 @@ fn get_target_and_anchor_heights(data: &Connection) -> Result<(u32, u32), error:
 
 #[cfg(test)]
 mod tests {
-    use crate::Network;
     use ff::PrimeField;
     use group::GroupEncoding;
     use protobuf::Message;
     use rand_core::{OsRng, RngCore};
     use rusqlite::{types::ToSql, Connection};
     use std::path::Path;
+
     use zcash_client_backend::proto::compact_formats::{
         CompactBlock, CompactOutput, CompactSpend, CompactTx,
     };
+
     use zcash_primitives::{
         block::BlockHash,
+        consensus::{BlockHeight, Network, NetworkUpgrade, Parameters},
         note_encryption::{Memo, SaplingNoteEncryption},
         primitives::{Note, PaymentAddress},
         transaction::components::Amount,
@@ -113,10 +107,34 @@ mod tests {
         zip32::ExtendedFullViewingKey,
     };
 
+    #[cfg(feature = "mainnet")]
+    pub(crate) fn network() -> Network {
+        Network::MainNetwork
+    }
+
+    #[cfg(not(feature = "mainnet"))]
+    pub(crate) fn network() -> Network {
+        Network::TestNetwork
+    }
+
+    #[cfg(feature = "mainnet")]
+    pub(crate) fn sapling_activation_height() -> BlockHeight {
+        Network::MainNetwork
+            .activation_height(NetworkUpgrade::Sapling)
+            .unwrap()
+    }
+
+    #[cfg(not(feature = "mainnet"))]
+    pub(crate) fn sapling_activation_height() -> BlockHeight {
+        Network::TestNetwork
+            .activation_height(NetworkUpgrade::Sapling)
+            .unwrap()
+    }
+
     /// Create a fake CompactBlock at the given height, containing a single output paying
     /// the given address. Returns the CompactBlock and the nullifier for the new note.
     pub(crate) fn fake_compact_block(
-        height: i32,
+        height: BlockHeight,
         prev_hash: BlockHash,
         extfvk: ExtendedFullViewingKey,
         value: Amount,
@@ -125,7 +143,7 @@ mod tests {
 
         // Create a fake Note for the account
         let mut rng = OsRng;
-        let rseed = generate_random_rseed::<Network, OsRng>(height as u32, &mut rng);
+        let rseed = generate_random_rseed(&network(), height, &mut rng);
         let note = Note {
             g_d: to.diversifier().g_d().unwrap(),
             pk_d: to.pk_d().clone(),
@@ -133,7 +151,7 @@ mod tests {
             rseed,
         };
         let encryptor = SaplingNoteEncryption::new(
-            extfvk.fvk.ovk,
+            Some(extfvk.fvk.ovk),
             note.clone(),
             to.clone(),
             Memo::default(),
@@ -154,7 +172,7 @@ mod tests {
         ctx.set_hash(txid);
         ctx.outputs.push(cout);
         let mut cb = CompactBlock::new();
-        cb.set_height(height as u64);
+        cb.set_height(u64::from(height));
         cb.hash.resize(32, 0);
         rng.fill_bytes(&mut cb.hash);
         cb.prevHash.extend_from_slice(&prev_hash.0);
@@ -165,7 +183,7 @@ mod tests {
     /// Create a fake CompactBlock at the given height, spending a single note from the
     /// given address.
     pub(crate) fn fake_compact_block_spending(
-        height: i32,
+        height: BlockHeight,
         prev_hash: BlockHash,
         (nf, in_value): (Vec<u8>, Amount),
         extfvk: ExtendedFullViewingKey,
@@ -173,7 +191,7 @@ mod tests {
         value: Amount,
     ) -> CompactBlock {
         let mut rng = OsRng;
-        let rseed = generate_random_rseed::<Network, OsRng>(height as u32, &mut rng);
+        let rseed = generate_random_rseed(&network(), height, &mut rng);
 
         // Create a fake CompactBlock containing the note
         let mut cspend = CompactSpend::new();
@@ -193,7 +211,7 @@ mod tests {
                 rseed,
             };
             let encryptor = SaplingNoteEncryption::new(
-                extfvk.fvk.ovk,
+                Some(extfvk.fvk.ovk),
                 note.clone(),
                 to,
                 Memo::default(),
@@ -213,7 +231,7 @@ mod tests {
         // Create a fake Note for the change
         ctx.outputs.push({
             let change_addr = extfvk.default_address().unwrap().1;
-            let rseed = generate_random_rseed::<Network, OsRng>(height as u32, &mut rng);
+            let rseed = generate_random_rseed(&network(), height, &mut rng);
             let note = Note {
                 g_d: change_addr.diversifier().g_d().unwrap(),
                 pk_d: change_addr.pk_d().clone(),
@@ -221,7 +239,7 @@ mod tests {
                 rseed,
             };
             let encryptor = SaplingNoteEncryption::new(
-                extfvk.fvk.ovk,
+                Some(extfvk.fvk.ovk),
                 note.clone(),
                 change_addr,
                 Memo::default(),
@@ -239,7 +257,7 @@ mod tests {
         });
 
         let mut cb = CompactBlock::new();
-        cb.set_height(height as u64);
+        cb.set_height(u64::from(height));
         cb.hash.resize(32, 0);
         rng.fill_bytes(&mut cb.hash);
         cb.prevHash.extend_from_slice(&prev_hash.0);
@@ -255,7 +273,7 @@ mod tests {
             .prepare("INSERT INTO compactblocks (height, data) VALUES (?, ?)")
             .unwrap()
             .execute(&[
-                (cb.height as i32).to_sql().unwrap(),
+                u32::from(cb.height()).to_sql().unwrap(),
                 cb_bytes.to_sql().unwrap(),
             ])
             .unwrap();

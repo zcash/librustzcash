@@ -5,6 +5,10 @@ use group::Group;
 use jubjub::SubgroupPoint;
 use lazy_static::lazy_static;
 
+pub mod mainnet;
+pub mod regtest;
+pub mod testnet;
+
 /// First 64 bytes of the BLAKE2s input during group hash.
 /// This is chosen to be some random string that we couldn't have anticipated when we designed
 /// the algorithm, for rigidity purposes.

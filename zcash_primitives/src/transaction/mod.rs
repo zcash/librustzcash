@@ -7,8 +7,7 @@ use std::fmt;
 use std::io::{self, Read, Write};
 use std::ops::Deref;
 
-use crate::redjubjub::Signature;
-use crate::serialize::Vector;
+use crate::{consensus::BlockHeight, redjubjub::Signature, serialize::Vector};
 
 pub mod builder;
 pub mod components;
@@ -27,8 +26,15 @@ const OVERWINTER_VERSION_GROUP_ID: u32 = 0x03C48270;
 const OVERWINTER_TX_VERSION: u32 = 3;
 const SAPLING_VERSION_GROUP_ID: u32 = 0x892F2085;
 const SAPLING_TX_VERSION: u32 = 4;
-const FUTURE_VERSION_GROUP_ID: u32 = 0xFFFFFFFF;
-const FUTURE_TX_VERSION: u32 = 0x0000FFFF;
+
+/// These versions are used exclusively for in-development transaction
+/// serialization, and will never be active under the consensus rules.
+/// When new consensus transaction versions are added, all call sites
+/// using these constants should be inspected, and use of these constants
+/// should be removed as appropriate in favor of the new consensus
+/// transaction version and group.
+const ZFUTURE_VERSION_GROUP_ID: u32 = 0xFFFFFFFF;
+const ZFUTURE_TX_VERSION: u32 = 0x0000FFFF;
 
 #[derive(Clone, Copy, Debug, PartialOrd, Ord, PartialEq, Eq, Hash)]
 pub struct TxId(pub [u8; 32]);
@@ -42,7 +48,7 @@ impl fmt::Display for TxId {
 }
 
 /// A Zcash transaction.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Transaction {
     txid: TxId,
     data: TransactionData,
@@ -62,6 +68,7 @@ impl PartialEq for Transaction {
     }
 }
 
+#[derive(Clone)]
 pub struct TransactionData {
     pub overwintered: bool,
     pub version: u32,
@@ -71,7 +78,7 @@ pub struct TransactionData {
     pub tze_inputs: Vec<TzeIn>,
     pub tze_outputs: Vec<TzeOut>,
     pub lock_time: u32,
-    pub expiry_height: u32,
+    pub expiry_height: BlockHeight,
     pub value_balance: Amount,
     pub shielded_spends: Vec<SpendDescription>,
     pub shielded_outputs: Vec<OutputDescription>,
@@ -131,7 +138,7 @@ impl TransactionData {
             tze_inputs: vec![],
             tze_outputs: vec![],
             lock_time: 0,
-            expiry_height: 0,
+            expiry_height: 0u32.into(),
             value_balance: Amount::zero(),
             shielded_spends: vec![],
             shielded_outputs: vec![],
@@ -142,17 +149,17 @@ impl TransactionData {
         }
     }
 
-    pub fn future() -> Self {
+    pub fn zfuture() -> Self {
         TransactionData {
             overwintered: true,
-            version: FUTURE_TX_VERSION,
-            version_group_id: FUTURE_VERSION_GROUP_ID,
+            version: ZFUTURE_TX_VERSION,
+            version_group_id: ZFUTURE_VERSION_GROUP_ID,
             vin: vec![],
             vout: vec![],
             tze_inputs: vec![],
             tze_outputs: vec![],
             lock_time: 0,
-            expiry_height: 0,
+            expiry_height: 0u32.into(),
             value_balance: Amount::zero(),
             shielded_spends: vec![],
             shielded_outputs: vec![],
@@ -212,8 +219,8 @@ impl Transaction {
             && version_group_id == SAPLING_VERSION_GROUP_ID
             && version == SAPLING_TX_VERSION;
         let has_tze = overwintered
-            && version_group_id == FUTURE_VERSION_GROUP_ID
-            && version == FUTURE_TX_VERSION;
+            && version_group_id == ZFUTURE_VERSION_GROUP_ID
+            && version == ZFUTURE_TX_VERSION;
 
         if overwintered && !(is_overwinter_v3 || is_sapling_v4 || has_tze) {
             return Err(io::Error::new(
@@ -233,10 +240,10 @@ impl Transaction {
         };
 
         let lock_time = reader.read_u32::<LittleEndian>()?;
-        let expiry_height = if is_overwinter_v3 || is_sapling_v4 || has_tze {
-            reader.read_u32::<LittleEndian>()?
+        let expiry_height: BlockHeight = if is_overwinter_v3 || is_sapling_v4 || has_tze {
+            reader.read_u32::<LittleEndian>()?.into()
         } else {
-            0
+            0u32.into()
         };
 
         let (value_balance, shielded_spends, shielded_outputs) = if is_sapling_v4 || has_tze {
@@ -312,8 +319,8 @@ impl Transaction {
             && self.version_group_id == SAPLING_VERSION_GROUP_ID
             && self.version == SAPLING_TX_VERSION;
         let has_tze = self.overwintered
-            && self.version_group_id == FUTURE_VERSION_GROUP_ID
-            && self.version == FUTURE_TX_VERSION;
+            && self.version_group_id == ZFUTURE_VERSION_GROUP_ID
+            && self.version == ZFUTURE_TX_VERSION;
 
         if self.overwintered && !(is_overwinter_v3 || is_sapling_v4 || has_tze) {
             return Err(io::Error::new(
@@ -330,7 +337,7 @@ impl Transaction {
         }
         writer.write_u32::<LittleEndian>(self.lock_time)?;
         if is_overwinter_v3 || is_sapling_v4 || has_tze {
-            writer.write_u32::<LittleEndian>(self.expiry_height)?;
+            writer.write_u32::<LittleEndian>(u32::from(self.expiry_height))?;
         }
 
         if is_sapling_v4 || has_tze {

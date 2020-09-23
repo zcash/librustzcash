@@ -4,7 +4,7 @@ use ff::PrimeField;
 use std::collections::HashSet;
 use subtle::{ConditionallySelectable, ConstantTimeEq, CtOption};
 use zcash_primitives::{
-    consensus,
+    consensus::{self, BlockHeight},
     merkle_tree::{CommitmentTree, IncrementalWitness},
     note_encryption::try_sapling_compact_note_decryption,
     sapling::Node,
@@ -23,7 +23,8 @@ use crate::wallet::{WalletShieldedOutput, WalletShieldedSpend, WalletTx};
 /// The given [`CommitmentTree`] and existing [`IncrementalWitness`]es are incremented
 /// with this output's commitment.
 fn scan_output<P: consensus::Parameters>(
-    height: u32,
+    params: &P,
+    height: BlockHeight,
     (index, output): (usize, CompactOutput),
     ivks: &[jubjub::Fr],
     spent_from_accounts: &HashSet<usize>,
@@ -51,7 +52,7 @@ fn scan_output<P: consensus::Parameters>(
 
     for (account, ivk) in ivks.iter().enumerate() {
         let (note, to) =
-            match try_sapling_compact_note_decryption::<P>(height, ivk, &epk, &cmu, &ct) {
+            match try_sapling_compact_note_decryption(params, height, ivk, &epk, &cmu, &ct) {
                 Some(ret) => ret,
                 None => continue,
             };
@@ -86,6 +87,7 @@ fn scan_output<P: consensus::Parameters>(
 /// The given [`CommitmentTree`] and existing [`IncrementalWitness`]es are
 /// incremented appropriately.
 pub fn scan_block<P: consensus::Parameters>(
+    params: &P,
     block: CompactBlock,
     extfvks: &[ExtendedFullViewingKey],
     nullifiers: &[(&[u8], usize)],
@@ -94,6 +96,7 @@ pub fn scan_block<P: consensus::Parameters>(
 ) -> Vec<WalletTx> {
     let mut wtxs: Vec<WalletTx> = vec![];
     let ivks: Vec<_> = extfvks.iter().map(|extfvk| extfvk.fvk.vk.ivk()).collect();
+    let block_height = block.height();
 
     for tx in block.vtx.into_iter() {
         let num_spends = tx.spends.len();
@@ -152,8 +155,9 @@ pub fn scan_block<P: consensus::Parameters>(
                     .map(|output| &mut output.witness)
                     .collect();
 
-                if let Some(output) = scan_output::<P>(
-                    block.height as u32,
+                if let Some(output) = scan_output(
+                    params,
+                    block_height,
                     to_scan,
                     &ivks,
                     &spent_from_accounts,
@@ -190,7 +194,7 @@ mod tests {
     use group::GroupEncoding;
     use rand_core::{OsRng, RngCore};
     use zcash_primitives::{
-        consensus::TestNetwork,
+        consensus::{BlockHeight, Network},
         constants::SPENDING_KEY_GENERATOR,
         merkle_tree::CommitmentTree,
         note_encryption::{Memo, SaplingNoteEncryption},
@@ -203,14 +207,14 @@ mod tests {
     use super::scan_block;
     use crate::proto::compact_formats::{CompactBlock, CompactOutput, CompactSpend, CompactTx};
 
-    fn random_compact_tx<R: RngCore>(rng: &mut R) -> CompactTx {
+    fn random_compact_tx(mut rng: impl RngCore) -> CompactTx {
         let fake_nf = {
             let mut nf = vec![0; 32];
             rng.fill_bytes(&mut nf);
             nf
         };
         let fake_cmu = {
-            let fake_cmu = bls12_381::Scalar::random(rng);
+            let fake_cmu = bls12_381::Scalar::random(&mut rng);
             fake_cmu.to_repr().as_ref().to_owned()
         };
         let fake_epk = {
@@ -239,7 +243,7 @@ mod tests {
     /// single spend of the given nullifier and a single output paying the given address.
     /// Returns the CompactBlock.
     fn fake_compact_block(
-        height: i32,
+        height: BlockHeight,
         nf: [u8; 32],
         extfvk: ExtendedFullViewingKey,
         value: Amount,
@@ -249,7 +253,7 @@ mod tests {
 
         // Create a fake Note for the account
         let mut rng = OsRng;
-        let rseed = generate_random_rseed::<TestNetwork, OsRng>(height as u32, &mut rng);
+        let rseed = generate_random_rseed(&Network::TestNetwork, height, &mut rng);
         let note = Note {
             g_d: to.diversifier().g_d().unwrap(),
             pk_d: to.pk_d().clone(),
@@ -257,7 +261,7 @@ mod tests {
             rseed,
         };
         let encryptor = SaplingNoteEncryption::new(
-            extfvk.fvk.ovk,
+            Some(extfvk.fvk.ovk),
             note.clone(),
             to.clone(),
             Memo::default(),
@@ -269,7 +273,7 @@ mod tests {
 
         // Create a fake CompactBlock containing the note
         let mut cb = CompactBlock::new();
-        cb.set_height(height as u64);
+        cb.set_height(height.into());
 
         // Add a random Sapling tx before ours
         {
@@ -309,7 +313,7 @@ mod tests {
         let extfvk = ExtendedFullViewingKey::from(&extsk);
 
         let cb = fake_compact_block(
-            1,
+            1u32.into(),
             [0; 32],
             extfvk.clone(),
             Amount::from_u64(5).unwrap(),
@@ -318,7 +322,14 @@ mod tests {
         assert_eq!(cb.vtx.len(), 2);
 
         let mut tree = CommitmentTree::new();
-        let txs = scan_block::<TestNetwork>(cb, &[extfvk], &[], &mut tree, &mut []);
+        let txs = scan_block(
+            &Network::TestNetwork,
+            cb,
+            &[extfvk],
+            &[],
+            &mut tree,
+            &mut [],
+        );
         assert_eq!(txs.len(), 1);
 
         let tx = &txs[0];
@@ -341,7 +352,7 @@ mod tests {
         let extfvk = ExtendedFullViewingKey::from(&extsk);
 
         let cb = fake_compact_block(
-            1,
+            1u32.into(),
             [0; 32],
             extfvk.clone(),
             Amount::from_u64(5).unwrap(),
@@ -350,7 +361,14 @@ mod tests {
         assert_eq!(cb.vtx.len(), 3);
 
         let mut tree = CommitmentTree::new();
-        let txs = scan_block::<TestNetwork>(cb, &[extfvk], &[], &mut tree, &mut []);
+        let txs = scan_block(
+            &Network::TestNetwork,
+            cb,
+            &[extfvk],
+            &[],
+            &mut tree,
+            &mut [],
+        );
         assert_eq!(txs.len(), 1);
 
         let tx = &txs[0];
@@ -374,11 +392,18 @@ mod tests {
         let nf = [7; 32];
         let account = 12;
 
-        let cb = fake_compact_block(1, nf, extfvk, Amount::from_u64(5).unwrap(), false);
+        let cb = fake_compact_block(1u32.into(), nf, extfvk, Amount::from_u64(5).unwrap(), false);
         assert_eq!(cb.vtx.len(), 2);
 
         let mut tree = CommitmentTree::new();
-        let txs = scan_block::<TestNetwork>(cb, &[], &[(&nf, account)], &mut tree, &mut []);
+        let txs = scan_block(
+            &Network::TestNetwork,
+            cb,
+            &[],
+            &[(&nf, account)],
+            &mut tree,
+            &mut [],
+        );
         assert_eq!(txs.len(), 1);
 
         let tx = &txs[0];

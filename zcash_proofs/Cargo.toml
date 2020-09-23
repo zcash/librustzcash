@@ -1,7 +1,7 @@
 [package]
 name = "zcash_proofs"
 description = "Zcash zk-SNARK circuits and proving APIs"
-version = "0.3.0"
+version = "0.4.0"
 authors = [
     "Jack Grigg <jack@z.cash>",
 ]
@@ -15,21 +15,22 @@ edition = "2018"
 all-features = true
 
 [dependencies]
-bellman = { version = "0.7", default-features = false, features = ["groth16"] }
+bellman = { version = "0.8", default-features = false, features = ["groth16"] }
 blake2b_simd = "0.5"
-bls12_381 = "0.2"
+bls12_381 = "0.3.1"
 byteorder = "1"
 directories = { version = "3", optional = true }
-ff = "0.7"
-group = "0.7"
-jubjub = "0.4"
+ff = "0.8"
+group = "0.8"
+jubjub = "0.5.1"
 lazy_static = "1"
 minreq = { version = "2", features = ["https"], optional = true }
 rand_core = "0.5.1"
 wagyu-zcash-parameters = { version = "0.2", optional = true }
-zcash_primitives = { version = "0.3", path = "../zcash_primitives" }
+zcash_primitives = { version = "0.4", path = "../zcash_primitives" }
 
 [dev-dependencies]
+criterion = "0.3"
 rand_xorshift = "0.2"
 
 [features]
@@ -38,6 +39,11 @@ bundled-prover = ["wagyu-zcash-parameters"]
 download-params = ["minreq"]
 local-prover = ["directories"]
 multicore = ["bellman/multicore"]
+
+[[bench]]
+name = "sapling"
+harness = false
+required-features = ["local-prover"]
 
 [[example]]
 name = "get-params-path"

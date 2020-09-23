@@ -3,7 +3,11 @@
 use ff::PrimeField;
 use group::GroupEncoding;
 use std::convert::TryInto;
-use zcash_primitives::block::{BlockHash, BlockHeader};
+
+use zcash_primitives::{
+    block::{BlockHash, BlockHeader},
+    consensus::BlockHeight,
+};
 
 pub mod compact_formats;
 
@@ -54,6 +58,15 @@ impl compact_formats::CompactBlock {
             BlockHeader::read(&self.header[..]).ok()
         }
     }
+
+    /// Returns the [`BlockHeight`] for this block.
+    ///
+    /// A convenience method that wraps [`CompactBlock.height`]
+    ///
+    /// [`CompactBlock.height`]: #structfield.height
+    pub fn height(&self) -> BlockHeight {
+        BlockHeight::from(self.height)
+    }
 }
 
 impl compact_formats::CompactOutput {
@@ -73,8 +86,8 @@ impl compact_formats::CompactOutput {
     /// A convenience method that parses [`CompactOutput.epk`].
     ///
     /// [`CompactOutput.epk`]: #structfield.epk
-    pub fn epk(&self) -> Result<jubjub::SubgroupPoint, ()> {
-        let p = jubjub::SubgroupPoint::from_bytes(&self.epk[..].try_into().map_err(|_| ())?);
+    pub fn epk(&self) -> Result<jubjub::ExtendedPoint, ()> {
+        let p = jubjub::ExtendedPoint::from_bytes(&self.epk[..].try_into().map_err(|_| ())?);
         if p.is_some().into() {
             Ok(p.unwrap())
         } else {

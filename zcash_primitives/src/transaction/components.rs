@@ -56,7 +56,7 @@ impl OutPoint {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct TxIn {
     pub prevout: OutPoint,
     pub script_sig: Script,
@@ -93,7 +93,7 @@ impl TxIn {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct TxOut {
     pub value: Amount,
     pub script_pubkey: Script,
@@ -121,7 +121,7 @@ impl TxOut {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct TzeIn {
     pub prevout: OutPoint,
     pub witness: tze::Witness,
@@ -132,6 +132,16 @@ fn to_io_error(_: std::num::TryFromIntError) -> io::Error {
 }
 
 impl TzeIn {
+    pub fn new(prevout: OutPoint, extension_id: u32, mode: u32) -> Self {
+        TzeIn {
+            prevout,
+            witness: tze::Witness {
+                extension_id,
+                mode,
+                payload: vec![],
+            },
+        }
+    }
     pub fn read<R: Read>(mut reader: &mut R) -> io::Result<Self> {
         let prevout = OutPoint::read(&mut reader)?;
 
@@ -149,22 +159,27 @@ impl TzeIn {
         })
     }
 
-    pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
+    pub fn write_without_witness<W: Write>(&self, mut writer: W) -> io::Result<()> {
         self.prevout.write(&mut writer)?;
 
         CompactSize::write(
             &mut writer,
             usize::try_from(self.witness.extension_id).map_err(|e| to_io_error(e))?,
         )?;
+
         CompactSize::write(
             &mut writer,
             usize::try_from(self.witness.mode).map_err(|e| to_io_error(e))?,
-        )?;
+        )
+    }
+
+    pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
+        self.write_without_witness(&mut writer)?;
         Vector::write(&mut writer, &self.witness.payload, |w, b| w.write_u8(*b))
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct TzeOut {
     pub value: Amount,
     pub precondition: tze::Precondition,
@@ -210,6 +225,7 @@ impl TzeOut {
     }
 }
 
+#[derive(Clone)]
 pub struct SpendDescription {
     pub cv: jubjub::ExtendedPoint,
     pub anchor: bls12_381::Scalar,
@@ -299,6 +315,7 @@ impl SpendDescription {
     }
 }
 
+#[derive(Clone)]
 pub struct OutputDescription {
     pub cv: jubjub::ExtendedPoint,
     pub cmu: bls12_381::Scalar,
@@ -390,6 +407,7 @@ impl OutputDescription {
     }
 }
 
+#[derive(Clone)]
 enum SproutProof {
     Groth([u8; GROTH_PROOF_SIZE]),
     PHGR([u8; PHGR_PROOF_SIZE]),
@@ -404,6 +422,7 @@ impl std::fmt::Debug for SproutProof {
     }
 }
 
+#[derive(Clone)]
 pub struct JSDescription {
     vpub_old: Amount,
     vpub_new: Amount,

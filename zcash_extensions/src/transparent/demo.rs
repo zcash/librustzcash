@@ -19,6 +19,7 @@
 //! - `tx_c`: `[ TzeIn(tx_b, preimage_2) -> [any output types...] ]`
 
 use std::convert::TryFrom;
+use std::convert::TryInto;
 use std::fmt;
 
 use blake2b_simd::Params;
@@ -28,6 +29,7 @@ use zcash_primitives::{
     transaction::components::{amount::Amount, OutPoint, TzeOut},
 };
 
+/// Types and constants used for Mode 0 (open a channel)
 mod open {
     pub const MODE: u32 = 0;
 
@@ -38,6 +40,7 @@ mod open {
     pub struct Witness(pub [u8; 32]);
 }
 
+/// Types and constants used for Mode 1 (close a channel)
 mod close {
     pub const MODE: u32 = 1;
 
@@ -48,6 +51,7 @@ mod close {
     pub struct Witness(pub [u8; 32]);
 }
 
+/// The precondition type for the demo extension.
 #[derive(Debug, PartialEq)]
 pub enum Precondition {
     Open(open::Precondition),
@@ -55,23 +59,42 @@ pub enum Precondition {
 }
 
 impl Precondition {
+    /// Convenience constructor for opening precondition values.
     pub fn open(hash: [u8; 32]) -> Self {
         Precondition::Open(open::Precondition(hash))
     }
 
+    /// Convenience constructor for closing precondition values.
     pub fn close(hash: [u8; 32]) -> Self {
         Precondition::Close(close::Precondition(hash))
     }
 }
 
+/// Errors that may be produced during parsing and verification of demo preconditions and
+/// witnesses.
 #[derive(Debug, PartialEq)]
 pub enum Error {
+    /// Parse error indicating that the payload of the condition or the witness was
+    /// not 32 bytes.
     IllegalPayloadLength(usize),
+    /// Verification error indicating that the specified mode was not recognized by
+    /// the extension.
     ModeInvalid(u32),
+    /// Verification error indicating that the transaction provided in the verification
+    /// context was missing required TZE inputs or outputs.
     NonTzeTxn,
-    HashMismatch, // include hashes?
+    /// Verification error indicating that the witness being verified did not satisfy the
+    /// precondition under inspection.
+    HashMismatch,
+    /// Verification error indicating that the mode requested by the witness value did not
+    /// conform to that of the precondition under inspection.
     ModeMismatch,
+    /// Verification error indicating that an `Open`-mode precondition was encountered
+    /// when a `Close` was expected.
     ExpectedClose,
+    /// Verification error indicating that an unexpected number of TZE outputs (more than
+    /// one) was encountered in the transaction under inspection, in violation of
+    /// the extension's invariants.
     InvalidOutputQty(usize),
 }
 
@@ -106,24 +129,18 @@ impl FromPayload for Precondition {
 
     fn from_payload(mode: u32, payload: &[u8]) -> Result<Self, Self::Error> {
         match mode {
-            open::MODE => {
-                if payload.len() == 32 {
-                    let mut hash = [0; 32];
-                    hash.copy_from_slice(&payload);
-                    Ok(Precondition::Open(open::Precondition(hash)))
-                } else {
-                    Err(Error::IllegalPayloadLength(payload.len()))
-                }
-            }
-            close::MODE => {
-                if payload.len() == 32 {
-                    let mut hash = [0; 32];
-                    hash.copy_from_slice(&payload);
-                    Ok(Precondition::Close(close::Precondition(hash)))
-                } else {
-                    Err(Error::IllegalPayloadLength(payload.len()))
-                }
-            }
+            open::MODE => payload
+                .try_into()
+                .map_err(|_| Error::IllegalPayloadLength(payload.len()))
+                .map(open::Precondition)
+                .map(Precondition::Open),
+
+            close::MODE => payload
+                .try_into()
+                .map_err(|_| Error::IllegalPayloadLength(payload.len()))
+                .map(close::Precondition)
+                .map(Precondition::Close),
+
             _ => Err(Error::ModeInvalid(mode)),
         }
     }
@@ -138,6 +155,7 @@ impl ToPayload for Precondition {
     }
 }
 
+/// The witness type for the demo extension.
 #[derive(Debug, PartialEq)]
 pub enum Witness {
     Open(open::Witness),
@@ -171,24 +189,18 @@ impl FromPayload for Witness {
 
     fn from_payload(mode: u32, payload: &[u8]) -> Result<Self, Self::Error> {
         match mode {
-            open::MODE => {
-                if payload.len() == 32 {
-                    let mut preimage = [0; 32];
-                    preimage.copy_from_slice(&payload);
-                    Ok(Witness::Open(open::Witness(preimage)))
-                } else {
-                    Err(Error::IllegalPayloadLength(payload.len()))
-                }
-            }
-            close::MODE => {
-                if payload.len() == 32 {
-                    let mut preimage = [0; 32];
-                    preimage.copy_from_slice(&payload);
-                    Ok(Witness::Close(close::Witness(preimage)))
-                } else {
-                    Err(Error::IllegalPayloadLength(payload.len()))
-                }
-            }
+            open::MODE => payload
+                .try_into()
+                .map_err(|_| Error::IllegalPayloadLength(payload.len()))
+                .map(open::Witness)
+                .map(Witness::Open),
+
+            close::MODE => payload
+                .try_into()
+                .map_err(|_| Error::IllegalPayloadLength(payload.len()))
+                .map(close::Witness)
+                .map(Witness::Close),
+
             _ => Err(Error::ModeInvalid(mode)),
         }
     }
@@ -203,16 +215,31 @@ impl ToPayload for Witness {
     }
 }
 
+/// This trait defines the context information that the demo extension requires
+/// be made available to it by a consensus node integrating this extension.
+///
+/// This context type provides accessors to information relevant to a single
+/// transaction being validated by the extension.
 pub trait Context {
+    /// Predicate used to determine whether this transaction has only TZE
+    /// inputs and outputs. The demo extension does not support verification
+    /// of transactions which have either shielded or transparent inputs and
+    /// outputs.
     fn is_tze_only(&self) -> bool;
+
+    /// List of all TZE outputs in the transaction being validate by the extension.
     fn tx_tze_outputs(&self) -> &[TzeOut];
 }
 
+/// Marker type for the demo extension.
+///
+/// A value of this type will be used as the receiver for
+/// `zcash_primitives::extensions::transparent::Extension` method invocations.
 pub struct Program;
 
 impl<C: Context> Extension<C> for Program {
-    type P = Precondition;
-    type W = Witness;
+    type Precondition = Precondition;
+    type Witness = Witness;
     type Error = Error;
 
     /// Runs the program against the given precondition, witness, and context.
@@ -280,37 +307,36 @@ impl<C: Context> Extension<C> for Program {
     }
 }
 
-fn builder_hashes(preimage_1: &[u8; 32], preimage_2: &[u8; 32]) -> ([u8; 32], [u8; 32]) {
-    let hash_2 = {
-        let mut hash = [0; 32];
-        hash.copy_from_slice(Params::new().hash_length(32).hash(preimage_2).as_bytes());
-        hash
-    };
-
-    let hash_1 = {
-        let mut hash = [0; 32];
-        hash.copy_from_slice(
-            Params::new()
-                .hash_length(32)
-                .to_state()
-                .update(preimage_1)
-                .update(&hash_2)
-                .finalize()
-                .as_bytes(),
-        );
-        hash
-    };
-
-    (hash_1, hash_2)
+fn hash_1(preimage_1: &[u8; 32], hash_2: &[u8; 32]) -> [u8; 32] {
+    let mut hash = [0; 32];
+    hash.copy_from_slice(
+        Params::new()
+            .hash_length(32)
+            .to_state()
+            .update(preimage_1)
+            .update(hash_2)
+            .finalize()
+            .as_bytes(),
+    );
+    hash
 }
 
+/// Wrapper for [`zcash_primitives::transaction::builder::Builder`] that simplifies
+/// constructing transactions that utilize the features of the demo extension.
 pub struct DemoBuilder<B> {
+    /// The wrapped transaction builder.
     pub txn_builder: B,
+
+    /// The assigned identifier for this extension. This is necessary as the author
+    /// of the demo extension will not know ahead of time what identifier will be
+    /// assigned to it at the time of inclusion in the Zcash consensus rules.
     pub extension_id: u32,
 }
 
+/// Errors that can occur in construction of transactions using `DemoBuilder`.
 #[derive(Debug)]
 pub enum DemoBuildError<E> {
+    /// Wrapper for errors returned from the underlying `Builder`
     BaseBuilderError(E),
     ExpectedOpen,
     ExpectedClose,
@@ -325,62 +351,66 @@ pub enum DemoBuildError<E> {
     },
 }
 
+/// Convenience methods for use with [`zcash_primitives::transaction::builder::Builder`]
+/// for constructing transactions that utilize the features of the demo extension.
 impl<'a, B: ExtensionTxBuilder<'a>> DemoBuilder<&mut B> {
+    /// Add a channel-opening precondition to the outputs of the transaction under
+    /// construction.
     pub fn demo_open(
         &mut self,
         value: Amount,
-        preimage_1: [u8; 32],
-        preimage_2: [u8; 32],
+        hash_1: [u8; 32],
     ) -> Result<(), DemoBuildError<B::BuildError>> {
-        let (hash_1, _) = builder_hashes(&preimage_1, &preimage_2);
-
         // Call through to the generic builder.
         self.txn_builder
             .add_tze_output(self.extension_id, value, &Precondition::open(hash_1))
             .map_err(DemoBuildError::BaseBuilderError)
     }
 
+    /// Add a witness to a previous channel-opening precondition and a new channel-closing
+    /// precondition to the transaction under construction.
     pub fn demo_transfer_to_close(
         &mut self,
         prevout: (OutPoint, TzeOut),
         transfer_amount: Amount,
         preimage_1: [u8; 32],
-        preimage_2: [u8; 32],
+        hash_2: [u8; 32],
     ) -> Result<(), DemoBuildError<B::BuildError>> {
-        let (hash_1, hash_2) = builder_hashes(&preimage_1, &preimage_2);
+        let h1 = hash_1(&preimage_1, &hash_2);
 
         // eagerly validate the relationship between prevout.1 and preimage_1
         match Precondition::from_payload(
             prevout.1.precondition.mode,
             &prevout.1.precondition.payload,
         ) {
-            Ok(Precondition::Open(hash)) => {
-                if hash.0 != hash_1 {
-                    Err(DemoBuildError::TransferMismatch {
-                        expected: hash.0,
-                        actual: hash_1,
-                    })?
-                }
+            Err(parse_failure) => Err(DemoBuildError::PrevoutParseFailure(parse_failure)),
+
+            Ok(Precondition::Close(_)) => Err(DemoBuildError::ExpectedOpen),
+
+            Ok(Precondition::Open(hash)) if hash.0 != h1 => Err(DemoBuildError::TransferMismatch {
+                expected: hash.0,
+                actual: h1,
+            }),
+
+            Ok(Precondition::Open(_)) => {
+                self.txn_builder
+                    .add_tze_input(self.extension_id, open::MODE, prevout, move |_| {
+                        Ok(Witness::open(preimage_1))
+                    })
+                    .map_err(DemoBuildError::BaseBuilderError)?;
+
+                self.txn_builder
+                    .add_tze_output(
+                        self.extension_id,
+                        transfer_amount,
+                        &Precondition::close(hash_2),
+                    )
+                    .map_err(DemoBuildError::BaseBuilderError)
             }
-            Ok(Precondition::Close(_)) => Err(DemoBuildError::ExpectedOpen)?,
-            Err(parse_failure) => Err(DemoBuildError::PrevoutParseFailure(parse_failure))?,
         }
-
-        self.txn_builder
-            .add_tze_input(self.extension_id, prevout, move |_| {
-                Ok(Witness::open(preimage_1))
-            })
-            .map_err(DemoBuildError::BaseBuilderError)?;
-
-        self.txn_builder
-            .add_tze_output(
-                self.extension_id,
-                transfer_amount, // can this be > prevout.1.value?
-                &Precondition::close(hash_2),
-            )
-            .map_err(DemoBuildError::BaseBuilderError)
     }
 
+    /// Add a channel-closing witness to the transaction under construction.
     pub fn demo_close(
         &mut self,
         prevout: (OutPoint, TzeOut),
@@ -397,23 +427,24 @@ impl<'a, B: ExtensionTxBuilder<'a>> DemoBuilder<&mut B> {
             prevout.1.precondition.mode,
             &prevout.1.precondition.payload,
         ) {
-            Ok(Precondition::Open(_)) => Err(DemoBuildError::ExpectedClose)?,
-            Ok(Precondition::Close(hash)) => {
-                if hash.0 != hash_2 {
-                    Err(DemoBuildError::CloseMismatch {
-                        expected: hash.0,
-                        actual: hash_2,
-                    })?
-                }
-            }
-            Err(parse_failure) => Err(DemoBuildError::PrevoutParseFailure(parse_failure))?,
-        }
+            Err(parse_failure) => Err(DemoBuildError::PrevoutParseFailure(parse_failure)),
 
-        self.txn_builder
-            .add_tze_input(self.extension_id, prevout, move |_| {
-                Ok(Witness::close(preimage_2))
-            })
-            .map_err(DemoBuildError::BaseBuilderError)
+            Ok(Precondition::Open(_)) => Err(DemoBuildError::ExpectedClose),
+
+            Ok(Precondition::Close(hash)) if hash.0 != hash_2 => {
+                Err(DemoBuildError::CloseMismatch {
+                    expected: hash.0,
+                    actual: hash_2,
+                })
+            }
+
+            Ok(Precondition::Close(_)) => self
+                .txn_builder
+                .add_tze_input(self.extension_id, close::MODE, prevout, move |_| {
+                    Ok(Witness::close(preimage_2))
+                })
+                .map_err(DemoBuildError::BaseBuilderError),
+        }
     }
 }
 
@@ -426,7 +457,7 @@ mod tests {
     use zcash_proofs::prover::LocalTxProver;
 
     use zcash_primitives::{
-        consensus::{BranchId, TestNetwork},
+        consensus::{BranchId, H0, TEST_NETWORK},
         extensions::transparent::{self as tze, Extension, FromPayload, ToPayload},
         legacy::TransparentAddress,
         merkle_tree::{CommitmentTree, IncrementalWitness},
@@ -440,7 +471,17 @@ mod tests {
         zip32::ExtendedSpendingKey,
     };
 
-    use super::{close, open, Context, DemoBuilder, Precondition, Program, Witness};
+    use super::{close, hash_1, open, Context, DemoBuilder, Precondition, Program, Witness};
+
+    fn demo_hashes(preimage_1: &[u8; 32], preimage_2: &[u8; 32]) -> ([u8; 32], [u8; 32]) {
+        let hash_2 = {
+            let mut hash = [0; 32];
+            hash.copy_from_slice(Params::new().hash_length(32).hash(preimage_2).as_bytes());
+            hash
+        };
+
+        (hash_1(preimage_1, &hash_2), hash_2)
+    }
 
     #[test]
     fn precondition_open_round_trip() {
@@ -549,7 +590,7 @@ mod tests {
             precondition: tze::Precondition::from(0, &Precondition::open(hash_1)),
         };
 
-        let mut mtx_a = TransactionData::future();
+        let mut mtx_a = TransactionData::zfuture();
         mtx_a.tze_outputs.push(out_a);
         let tx_a = mtx_a.freeze().unwrap();
 
@@ -565,7 +606,7 @@ mod tests {
             value: Amount::from_u64(1).unwrap(),
             precondition: tze::Precondition::from(0, &Precondition::close(hash_2)),
         };
-        let mut mtx_b = TransactionData::future();
+        let mut mtx_b = TransactionData::zfuture();
         mtx_b.tze_inputs.push(in_b);
         mtx_b.tze_outputs.push(out_b);
         let tx_b = mtx_b.freeze().unwrap();
@@ -579,7 +620,7 @@ mod tests {
             witness: tze::Witness::from(0, &Witness::close(preimage_2)),
         };
 
-        let mut mtx_c = TransactionData::future();
+        let mut mtx_c = TransactionData::zfuture();
         mtx_c.tze_inputs.push(in_c);
         let tx_c = mtx_c.freeze().unwrap();
 
@@ -598,7 +639,7 @@ mod tests {
 
         // Verify tx_c
         {
-            let ctx = Ctx { tx: &tx_b };
+            let ctx = Ctx { tx: &tx_c };
             assert_eq!(
                 Program.verify(
                     &tx_b.tze_outputs[0].precondition,
@@ -626,7 +667,7 @@ mod tests {
         //
 
         let mut rng = OsRng;
-        let mut builder_a: Builder<'_, TestNetwork, OsRng> = Builder::new_future(0);
+        let mut builder_a = Builder::new_with_rng_zfuture(TEST_NETWORK, H0, rng);
 
         // create some inputs to spend
         let extsk = ExtendedSpendingKey::master(&[]);
@@ -656,7 +697,8 @@ mod tests {
         };
 
         let value = Amount::from_u64(100000).unwrap();
-        db_a.demo_open(value, preimage_1, preimage_2)
+        let (h1, h2) = demo_hashes(&preimage_1, &preimage_2);
+        db_a.demo_open(value, h1)
             .map_err(|e| format!("open failure: {:?}", e))
             .unwrap();
         let (tx_a, _) = builder_a
@@ -668,14 +710,14 @@ mod tests {
         // Transfer
         //
 
-        let mut builder_b: Builder<'_, TestNetwork, OsRng> = Builder::new_future(0);
+        let mut builder_b = Builder::new_with_rng_zfuture(TEST_NETWORK, H0, rng);
         let mut db_b = DemoBuilder {
             txn_builder: &mut builder_b,
             extension_id: 0,
         };
         let prevout_a = (OutPoint::new(tx_a.txid().0, 0), tx_a.tze_outputs[0].clone());
         let value_xfr = Amount::from_u64(90000).unwrap();
-        db_b.demo_transfer_to_close(prevout_a, value_xfr, preimage_1, preimage_2)
+        db_b.demo_transfer_to_close(prevout_a, value_xfr, preimage_1, h2)
             .map_err(|e| format!("transfer failure: {:?}", e))
             .unwrap();
         let (tx_b, _) = builder_b
@@ -687,7 +729,7 @@ mod tests {
         // Closing transaction
         //
 
-        let mut builder_c: Builder<'_, TestNetwork, OsRng> = Builder::new_future(0);
+        let mut builder_c = Builder::new_with_rng_zfuture(TEST_NETWORK, H0, rng);
         let mut db_c = DemoBuilder {
             txn_builder: &mut builder_c,
             extension_id: 0,
@@ -721,7 +763,7 @@ mod tests {
         );
 
         // Verify tx_c
-        let ctx1 = Ctx { tx: &tx_b };
+        let ctx1 = Ctx { tx: &tx_c };
         assert_eq!(
             Program.verify(
                 &tx_b.tze_outputs[0].precondition,
