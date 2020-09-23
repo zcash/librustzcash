@@ -129,17 +129,17 @@ impl FromPayload for Precondition {
 
     fn from_payload(mode: u32, payload: &[u8]) -> Result<Self, Self::Error> {
         match mode {
-            open::MODE => 
-                payload.try_into()
-                    .map_err(|_| Error::IllegalPayloadLength(payload.len()))
-                    .map(open::Precondition)
-                    .map(Precondition::Open),
-            
-            close::MODE => 
-                payload.try_into()
-                    .map_err(|_| Error::IllegalPayloadLength(payload.len()))
-                    .map(close::Precondition)
-                    .map(Precondition::Close),
+            open::MODE => payload
+                .try_into()
+                .map_err(|_| Error::IllegalPayloadLength(payload.len()))
+                .map(open::Precondition)
+                .map(Precondition::Open),
+
+            close::MODE => payload
+                .try_into()
+                .map_err(|_| Error::IllegalPayloadLength(payload.len()))
+                .map(close::Precondition)
+                .map(Precondition::Close),
 
             _ => Err(Error::ModeInvalid(mode)),
         }
@@ -189,18 +189,18 @@ impl FromPayload for Witness {
 
     fn from_payload(mode: u32, payload: &[u8]) -> Result<Self, Self::Error> {
         match mode {
-            open::MODE => 
-                payload.try_into()
-                    .map_err(|_| Error::IllegalPayloadLength(payload.len()))
-                    .map(open::Witness)
-                    .map(Witness::Open),
-            
-            close::MODE => 
-                payload.try_into()
-                    .map_err(|_| Error::IllegalPayloadLength(payload.len()))
-                    .map(close::Witness)
-                    .map(Witness::Close),
-            
+            open::MODE => payload
+                .try_into()
+                .map_err(|_| Error::IllegalPayloadLength(payload.len()))
+                .map(open::Witness)
+                .map(Witness::Open),
+
+            close::MODE => payload
+                .try_into()
+                .map_err(|_| Error::IllegalPayloadLength(payload.len()))
+                .map(close::Witness)
+                .map(Witness::Close),
+
             _ => Err(Error::ModeInvalid(mode)),
         }
     }
