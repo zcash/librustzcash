@@ -6,7 +6,7 @@ use std::fmt;
 use base64;
 
 use nom::{
-    character::complete::char, combinator::complete, multi::separated_list, sequence::preceded,
+    character::complete::char, combinator::all_consuming, multi::separated_list, sequence::preceded,
 };
 
 use zcash_primitives::{consensus, legacy, primitives, transaction::components::Amount};
@@ -281,7 +281,7 @@ impl Zip321Request {
             parse::lead_addr(&params.clone())(uri).map_err(|e| e.to_string())?;
 
         // Parse the remaining parameters as an undifferentiated list
-        let (_, xs) = complete(preceded(
+        let (_, xs) = all_consuming(preceded(
             char('?'),
             separated_list(char('&'), parse::zcashparam(params)),
         ))(rest)
@@ -301,8 +301,9 @@ impl Zip321Request {
                 None => {
                     params_by_index.insert(p.payment_index, vec![p.param]);
                 }
+
                 Some(current) => {
-                    if parse::has_param(&p.param, &current) {
+                    if parse::has_param(&current, &p.param) {
                         return Err(format!(
                             "Found duplicate parameter {:?} at index {}",
                             p.param, p.payment_index
@@ -442,9 +443,9 @@ pub mod parse {
         pub payment_index: usize,
     }
 
-    pub fn has_param(p: &Param, v: &Vec<Param>) -> bool {
+    pub fn has_param(v: &Vec<Param>, p: &Param) -> bool {
         for p0 in v {
-            match (p, p0) {
+            match (p0, p) {
                 (Param::Addr(_), Param::Addr(_)) => return true,
                 (Param::Amount(_), Param::Amount(_)) => return true,
                 (Param::Memo(_), Param::Memo(_)) => return true,
@@ -747,7 +748,6 @@ mod tests {
 
     fn check_roundtrip(req: Zip321Request) {
         if let Some(req_uri) = req.to_uri(&TEST_NETWORK) {
-            println!("{}", req_uri);
             let parsed = Zip321Request::from_uri(&TEST_NETWORK, &req_uri).unwrap();
             assert_eq!(parsed, req);
         } else {
@@ -852,17 +852,32 @@ mod tests {
 
     #[test]
     fn test_zip321_spec_invalid_examples() {
+        // invalid; missing `address=` or `address.0=`
         let invalid_1 = "zcash:?amount=3491405.05201255&address.1=ztestsapling10yy2ex5dcqkclhc7z7yrnjq2z6feyjad56ptwlfgmy77dmaqqrl9gyhprdx59qgmsnyfska2kez&amount.1=5740296.87793245";
         let i1r = Zip321Request::from_uri(&TEST_NETWORK, &invalid_1);
         assert!(i1r.is_err());
 
-        let invalid_2 = "zcash:?address=tmEZhbWHTpdKMw5it8YDspUXSMGQyFwovpU&amount=1&address=ztestsapling10yy2ex5dcqkclhc7z7yrnjq2z6feyjad56ptwlfgmy77dmaqqrl9gyhprdx59qgmsnyfska2kez&amount.1=2";
+        // invalid; missing `address.1=`
+        let invalid_2 = "zcash:?address=tmEZhbWHTpdKMw5it8YDspUXSMGQyFwovpU&amount=1&amount.1=2&address.2=ztestsapling10yy2ex5dcqkclhc7z7yrnjq2z6feyjad56ptwlfgmy77dmaqqrl9gyhprdx59qgmsnyfska2kez";
         let i2r = Zip321Request::from_uri(&TEST_NETWORK, &invalid_2);
         assert!(i2r.is_err());
 
-        let invalid_3 = "zcash:?address.1=tmEZhbWHTpdKMw5it8YDspUXSMGQyFwovpU&amount=1&address.0=ztestsapling10yy2ex5dcqkclhc7z7yrnjq2z6feyjad56ptwlfgmy77dmaqqrl9gyhprdx59qgmsnyfska2kez&amount.1=2";
+        // invalid; `address.0=` and `amount.0=` are not permitted (leading 0s).
+        let invalid_3 = "zcash:?address.0=ztestsapling10yy2ex5dcqkclhc7z7yrnjq2z6feyjad56ptwlfgmy77dmaqqrl9gyhprdx59qgmsnyfska2kez&amount.0=2";
         let i3r = Zip321Request::from_uri(&TEST_NETWORK, &invalid_3);
         assert!(i3r.is_err());
+
+        // invalid; duplicate `amount=` field
+        let invalid_4 =
+            "zcash:?amount=1.234&amount=2.345&address=tmEZhbWHTpdKMw5it8YDspUXSMGQyFwovpU";
+        let i4r = Zip321Request::from_uri(&TEST_NETWORK, &invalid_4);
+        assert!(i4r.is_err());
+
+        // invalid; duplicate `amount.1=` field
+        let invalid_5 =
+            "zcash:?amount.1=1.234&amount.1=2.345&address.1=tmEZhbWHTpdKMw5it8YDspUXSMGQyFwovpU";
+        let i5r = Zip321Request::from_uri(&TEST_NETWORK, &invalid_5);
+        assert!(i5r.is_err());
     }
 
     #[cfg(all(test, feature = "test-dependencies"))]
@@ -908,7 +923,6 @@ mod tests {
         #[test]
         fn prop_zip321_roundtrip_request(mut req in arb_zip321_request()) {
             if let Some(req_uri) = req.to_uri(&TEST_NETWORK) {
-                println!("{}", req_uri);
                 let mut parsed = Zip321Request::from_uri(&TEST_NETWORK, &req_uri).unwrap();
                 assert!(Zip321Request::normalize_and_eq(&TEST_NETWORK, &mut parsed, &mut req));
             } else {
