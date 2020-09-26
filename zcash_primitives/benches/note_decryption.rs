@@ -10,8 +10,9 @@ use zcash_primitives::{
 };
 
 fn bench_note_decryption(c: &mut Criterion) {
+    let params = TestNetwork;
     let mut rng = OsRng;
-    let height = TestNetwork::activation_height(Canopy).unwrap();
+    let height = params.activation_height(Canopy).unwrap();
 
     let valid_ivk = jubjub::Fr::random(&mut rng);
     let invalid_ivk = jubjub::Fr::random(&mut rng);
@@ -22,7 +23,7 @@ fn bench_note_decryption(c: &mut Criterion) {
         let pk_d = diversifier.g_d().unwrap() * valid_ivk;
         let pa = PaymentAddress::from_parts(diversifier, pk_d).unwrap();
 
-        let rseed = generate_random_rseed::<TestNetwork, _>(height, &mut rng);
+        let rseed = generate_random_rseed(&params, height, &mut rng);
 
         // Construct the value commitment for the proof instance
         let value = 100;
@@ -54,7 +55,8 @@ fn bench_note_decryption(c: &mut Criterion) {
 
     group.bench_function("valid", |b| {
         b.iter(|| {
-            try_sapling_note_decryption::<TestNetwork>(
+            try_sapling_note_decryption(
+                &TestNetwork,
                 height,
                 &valid_ivk,
                 &output.ephemeral_key,
@@ -67,7 +69,8 @@ fn bench_note_decryption(c: &mut Criterion) {
 
     group.bench_function("invalid", |b| {
         b.iter(|| {
-            try_sapling_note_decryption::<TestNetwork>(
+            try_sapling_note_decryption(
+                &TestNetwork,
                 height,
                 &invalid_ivk,
                 &output.ephemeral_key,
