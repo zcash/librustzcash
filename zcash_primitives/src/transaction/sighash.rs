@@ -28,8 +28,8 @@ const ZCASH_SHIELDED_OUTPUTS_HASH_PERSONALIZATION: &[u8; 16] = b"ZcashSOutputHas
 const ZCASH_TZE_INPUTS_HASH_PERSONALIZATION: &[u8; 16] = b"Zcash_TzeInsHash";
 const ZCASH_TZE_OUTPUTS_HASH_PERSONALIZATION: &[u8; 16] = b"ZcashTzeOutsHash";
 
-const ZCASH_TZE_SIGNED_INPUT_DOMAIN_SEPARATOR: &[u8; 16] = b"ZcashTZESigInput";
-const ZCASH_TRANSPARENT_SIGNED_INPUT_DOMAIN_SEPARATOR: &[u8; 16] = b"Zcash_TransInput";
+const ZCASH_TZE_SIGNED_INPUT_TAG: &[u8; 1] = &[0x00];
+const ZCASH_TRANSPARENT_SIGNED_INPUT_TAG: &[u8; 1] = &[0x01];
 
 pub const SIGHASH_ALL: u32 = 1;
 const SIGHASH_NONE: u32 = 2;
@@ -293,7 +293,9 @@ pub fn signature_hash_data<'a>(
                     value,
                 } => {
                     let mut data = if sigversion == SigHashVersion::ZFuture {
-                        ZCASH_TRANSPARENT_SIGNED_INPUT_DOMAIN_SEPARATOR.to_vec()
+                        // domain separation here is to avoid collision attacks
+                        // between transparent and TZE inputs.
+                        ZCASH_TRANSPARENT_SIGNED_INPUT_TAG.to_vec()
                     } else {
                         vec![]
                     };
@@ -312,7 +314,9 @@ pub fn signature_hash_data<'a>(
                     precondition,
                     value,
                 } if sigversion == SigHashVersion::ZFuture => {
-                    let mut data = ZCASH_TZE_SIGNED_INPUT_DOMAIN_SEPARATOR.to_vec();
+                    // domain separation here is to avoid collision attacks
+                    // between transparent and TZE inputs.
+                    let mut data = ZCASH_TZE_SIGNED_INPUT_TAG.to_vec();
 
                     tx.tze_inputs[index].prevout.write(&mut data).unwrap();
                     CompactSize::write(&mut data, precondition.extension_id.try_into().unwrap())
