@@ -402,9 +402,15 @@ pub mod render {
 
     pub fn amount_str(amount: Amount) -> Option<String> {
         if amount.is_positive() {
-            let z_coins = i64::from(amount) / COIN;
-            let z_cents = i64::from(amount) % COIN;
-            Some(format!("{}.{:0>8}", z_coins, z_cents))
+            let coins = i64::from(amount) / COIN;
+            let zats = i64::from(amount) % COIN;
+            Some(if zats == 0 {
+                format!("{}", coins)
+            } else {
+                format!("{}.{:0>8}", coins, zats)
+                    .trim_end_matches('0')
+                    .to_string()
+            })
         } else {
             None
         }
