@@ -436,7 +436,6 @@ pub mod render {
 
 pub mod parse {
     use core::fmt::Debug;
-    use std::convert::TryInto;
 
     use nom::{
         bytes::complete::{tag, take_until},
@@ -595,14 +594,9 @@ pub mod parse {
                     .map_err(|e| e.to_string())?;
 
                 let zats: i64 = match decimal_s {
-                    Some(d) => d
-                        .char_indices()
-                        .map(|(i, c)| {
-                            let digit: i64 = c.to_digit(10).unwrap().into();
-                            digit * 10i64.pow((7 - i).try_into().unwrap())
-                        })
-                        .sum::<i64>()
-                        .into(),
+                    Some(d) => format!("{:0<8}", d)
+                        .parse::<i64>()
+                        .map_err(|e| e.to_string())?,
                     None => 0,
                 };
 
@@ -948,7 +942,7 @@ mod tests {
         assert!(i7r.is_err());
 
         // invalid; amount component is MAX_MONEY
-        // 21000000.00000001 = 
+        // 21000000.00000001
         let invalid_8 = "zcash:ztestsapling10yy2ex5dcqkclhc7z7yrnjq2z6feyjad56ptwlfgmy77dmaqqrl9gyhprdx59qgmsnyfska2kez?amount=21000000.00000001";
         let i8r = Zip321Request::from_uri(&TEST_NETWORK, &invalid_8);
         assert!(i8r.is_err());
