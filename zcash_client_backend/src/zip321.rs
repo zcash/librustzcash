@@ -941,6 +941,12 @@ mod tests {
         let i7r = Zip321Request::from_uri(&TEST_NETWORK, &invalid_7);
         assert!(i7r.is_err());
 
+        // invalid; amount component wraps into a valid i64
+        // 18446744073709551624
+        let invalid_7a = "zcash:ztestsapling10yy2ex5dcqkclhc7z7yrnjq2z6feyjad56ptwlfgmy77dmaqqrl9gyhprdx59qgmsnyfska2kez?amount=18446744073709551624";
+        let i7ar = Zip321Request::from_uri(&TEST_NETWORK, &invalid_7a);
+        assert!(i7ar.is_err());
+
         // invalid; amount component is MAX_MONEY
         // 21000000.00000001
         let invalid_8 = "zcash:ztestsapling10yy2ex5dcqkclhc7z7yrnjq2z6feyjad56ptwlfgmy77dmaqqrl9gyhprdx59qgmsnyfska2kez?amount=21000000.00000001";
