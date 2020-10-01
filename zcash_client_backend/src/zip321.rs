@@ -326,7 +326,7 @@ impl Zip321Request {
                 }
 
                 Some(current) => {
-                    if parse::has_param(&current, &p.param) {
+                    if parse::has_duplicate_param(&current, &p.param) {
                         return Err(format!(
                             "Found duplicate parameter {:?} at index {}",
                             p.param, p.payment_index
@@ -469,7 +469,7 @@ pub mod parse {
         pub payment_index: usize,
     }
 
-    pub fn has_param(v: &Vec<Param>, p: &Param) -> bool {
+    pub fn has_duplicate_param(v: &[Param], p: &Param) -> bool {
         for p0 in v {
             match (p0, p) {
                 (Param::Addr(_), Param::Addr(_)) => return true,
@@ -485,10 +485,10 @@ pub mod parse {
         return false;
     }
 
-    pub fn to_payment(v: Vec<Param>, i: usize) -> Result<Zip321Payment, String> {
+    pub fn to_payment(vs: Vec<Param>, i: usize) -> Result<Zip321Payment, String> {
         let mut addr: Option<Address> = None;
-        for p0 in &v {
-            match p0 {
+        for v in &vs {
+            match v {
                 Param::Addr(a) => addr = Some(a.clone()),
                 _otherwise => {}
             }
@@ -503,8 +503,8 @@ pub mod parse {
             other_params: vec![],
         };
 
-        for p0 in v {
-            match p0 {
+        for v in vs {
+            match v {
                 Param::Amount(a) => payment.amount = a.clone(),
                 Param::Memo(m) => {
                     match payment.recipient_address {
@@ -515,7 +515,7 @@ pub mod parse {
 
                 Param::Label(m) => payment.label = Some(m),
                 Param::Message(m) => payment.message = Some(m),
-                Param::Other(n, v) => payment.other_params.push((n, v)),
+                Param::Other(n, m) => payment.other_params.push((n, m)),
                 _otherwise => {}
             }
         }
@@ -553,8 +553,9 @@ pub mod parse {
         }
     }
 
-    /// Extension for the `alphanumeric0` parser which extends that parser with
-    /// the permitted characters identified in
+    /// Extension for the `alphanumeric0` parser which extends that parser
+    /// by also permitting the characters that are members of the `allowed`
+    /// string.
     fn alphanum_or(allowed: String) -> impl (Fn(&str) -> IResult<&str, &str>) {
         move |input| {
             input.split_at_position_complete(|item| {
@@ -886,6 +887,24 @@ mod tests {
             v2r.payments.get(1).map(|p| p.amount),
             Some(Amount::from_u64(78900000).unwrap())
         );
+
+        // valid; amount just less than MAX_MONEY
+        // 20999999.99999999
+        let valid_3 = "zcash:ztestsapling10yy2ex5dcqkclhc7z7yrnjq2z6feyjad56ptwlfgmy77dmaqqrl9gyhprdx59qgmsnyfska2kez?amount=20999999.99999999";
+        let v3r = Zip321Request::from_uri(&TEST_NETWORK, &valid_3).unwrap();
+        assert_eq!(
+            v3r.payments.get(0).map(|p| p.amount),
+            Some(Amount::from_u64(2099999999999999u64).unwrap())
+        );
+
+        // valid; MAX_MONEY
+        // 21000000
+        let valid_4 = "zcash:ztestsapling10yy2ex5dcqkclhc7z7yrnjq2z6feyjad56ptwlfgmy77dmaqqrl9gyhprdx59qgmsnyfska2kez?amount=21000000";
+        let v4r = Zip321Request::from_uri(&TEST_NETWORK, &valid_4).unwrap();
+        assert_eq!(
+            v4r.payments.get(0).map(|p| p.amount),
+            Some(Amount::from_u64(2100000000000000u64).unwrap())
+        );
     }
 
     #[test]
@@ -921,6 +940,23 @@ mod tests {
         let invalid_6 = "zcash:?address=tmEZhbWHTpdKMw5it8YDspUXSMGQyFwovpU&amount=123.456&memo=eyAia2V5IjogIlRoaXMgaXMgYSBKU09OLXN0cnVjdHVyZWQgbWVtby4iIH0&address.1=ztestsapling10yy2ex5dcqkclhc7z7yrnjq2z6feyjad56ptwlfgmy77dmaqqrl9gyhprdx59qgmsnyfska2kez&amount.1=0.789&memo.1=VGhpcyBpcyBhIHVuaWNvZGUgbWVtbyDinKjwn6aE8J-PhvCfjok";
         let i6r = Zip321Request::from_uri(&TEST_NETWORK, &invalid_6);
         assert!(i6r.is_err());
+
+        // invalid; amount component exceeds an i64
+        // 9223372036854775808 = i64::MAX + 1
+        let invalid_7 = "zcash:ztestsapling10yy2ex5dcqkclhc7z7yrnjq2z6feyjad56ptwlfgmy77dmaqqrl9gyhprdx59qgmsnyfska2kez?amount=9223372036854775808";
+        let i7r = Zip321Request::from_uri(&TEST_NETWORK, &invalid_7);
+        assert!(i7r.is_err());
+
+        // invalid; amount component is MAX_MONEY
+        // 21000000.00000001 = 
+        let invalid_8 = "zcash:ztestsapling10yy2ex5dcqkclhc7z7yrnjq2z6feyjad56ptwlfgmy77dmaqqrl9gyhprdx59qgmsnyfska2kez?amount=21000000.00000001";
+        let i8r = Zip321Request::from_uri(&TEST_NETWORK, &invalid_8);
+        assert!(i8r.is_err());
+
+        // invalid; negative amount
+        let invalid_9 = "zcash:ztestsapling10yy2ex5dcqkclhc7z7yrnjq2z6feyjad56ptwlfgmy77dmaqqrl9gyhprdx59qgmsnyfska2kez?amount=-1";
+        let i9r = Zip321Request::from_uri(&TEST_NETWORK, &invalid_9);
+        assert!(i9r.is_err());
     }
 
     #[cfg(all(test, feature = "test-dependencies"))]
