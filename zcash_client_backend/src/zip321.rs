@@ -625,7 +625,7 @@ pub mod parse {
                         value
                     ),
                     AddrParseError::SAddrError(_) => {
-                        format!("Could not interpret {} as a valid sapling address.", value)
+                        format!("Could not interpret {} as a valid Sapling address.", value)
                     }
                 })
                 .and_then(|addr_opt| {
