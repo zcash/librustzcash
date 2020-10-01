@@ -1,8 +1,10 @@
 use core::fmt::Debug;
-use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::fmt;
 use std::str::FromStr;
+
+#[cfg(any(test, feature = "test-dependencies"))]
+use std::cmp::Ordering;
 
 use base64;
 use nom::{
@@ -179,7 +181,8 @@ pub struct Zip321Payment {
 }
 
 impl Zip321Payment {
-    pub fn normalize(&mut self) {
+    #[cfg(any(test, feature = "test-dependencies"))]
+    pub(in crate::zip321) fn normalize(&mut self) {
         self.other_params.sort();
     }
 
@@ -187,7 +190,8 @@ impl Zip321Payment {
     /// string representation given the specified network. This does not perform normalization
     /// internally, so payments must be normalized prior to being passed to the comparison function
     /// returned from this method.
-    pub fn compare_normalized<'a, P: consensus::Parameters>(
+    #[cfg(any(test, feature = "test-dependencies"))]
+    pub(in crate::zip321) fn compare_normalized<'a, P: consensus::Parameters>(
         params: &'a P,
     ) -> impl Fn(&Zip321Payment, &Zip321Payment) -> Ordering + 'a {
         move |a: &Zip321Payment, b: &Zip321Payment| {
@@ -211,7 +215,8 @@ pub struct Zip321Request {
 }
 
 impl Zip321Request {
-    pub fn normalize<P: consensus::Parameters>(&mut self, params: &P) {
+    #[cfg(any(test, feature = "test-dependencies"))]
+    pub(in crate::zip321) fn normalize<P: consensus::Parameters>(&mut self, params: &P) {
         for p in &mut self.payments {
             p.normalize();
         }
@@ -220,7 +225,8 @@ impl Zip321Request {
             .sort_by(Zip321Payment::compare_normalized(params));
     }
 
-    pub fn normalize_and_eq<P: consensus::Parameters>(
+    #[cfg(all(test, feature = "test-dependencies"))]
+    pub(in crate::zip321) fn normalize_and_eq<P: consensus::Parameters>(
         params: &P,
         a: &mut Zip321Request,
         b: &mut Zip321Request,
@@ -941,7 +947,7 @@ mod tests {
         let i7r = Zip321Request::from_uri(&TEST_NETWORK, &invalid_7);
         assert!(i7r.is_err());
 
-        // invalid; amount component wraps into a valid i64
+        // invalid; amount component wraps into a valid small positive i64
         // 18446744073709551624
         let invalid_7a = "zcash:ztestsapling10yy2ex5dcqkclhc7z7yrnjq2z6feyjad56ptwlfgmy77dmaqqrl9gyhprdx59qgmsnyfska2kez?amount=18446744073709551624";
         let i7ar = Zip321Request::from_uri(&TEST_NETWORK, &invalid_7a);
