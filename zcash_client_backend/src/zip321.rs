@@ -1,10 +1,8 @@
 use core::fmt::Debug;
+use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::fmt;
 use std::str::FromStr;
-
-#[cfg(any(test, feature = "test-dependencies"))]
-use std::cmp::Ordering;
 
 use base64;
 use nom::{
@@ -446,7 +444,7 @@ pub mod parse {
     use nom::{
         bytes::complete::{tag, take_until},
         character::complete::{alpha1, char, digit0, digit1, one_of},
-        combinator::{map_res, opt, recognize},
+        combinator::{map_opt, map_res, opt, recognize},
         sequence::{preceded, separated_pair, tuple},
         AsChar, IResult, InputTakeAtPosition,
     };
@@ -578,21 +576,30 @@ pub mod parse {
         alphanum_or("+-".to_string())(input)
     }
 
-    pub fn indexed_name<'a>(input: &'a str) -> IResult<&'a str, (&'a str, Option<&'a str>)> {
+    pub fn indexed_name(input: &str) -> IResult<&str, (&str, Option<&str>)> {
         let paramname = recognize(tuple((alpha1, namechars)));
 
         tuple((
             paramname,
             opt(preceded(
                 char('.'),
-                recognize(tuple((one_of("123456789"), digit0))),
+                recognize(tuple((
+                    one_of("123456789"),
+                    map_opt(digit0, |s: &str| if s.len() > 3 { None } else { Some(s) }),
+                ))),
             )),
         ))(input)
     }
 
     pub fn parse_amount<'a>(input: &'a str) -> IResult<&'a str, Amount> {
         map_res(
-            tuple((digit1, opt(preceded(char('.'), digit1)))),
+            tuple((
+                digit1,
+                opt(preceded(
+                    char('.'),
+                    map_opt(digit0, |s: &str| if s.len() > 8 { None } else { Some(s) }),
+                )),
+            )),
             |(whole_s, decimal_s): (&str, Option<&str>)| {
                 let coins: i64 = whole_s
                     .to_string()
@@ -605,6 +612,13 @@ pub mod parse {
                         .map_err(|e| e.to_string())?,
                     None => 0,
                 };
+
+                if coins > 21000000 {
+                    return Err(format!(
+                        "{} coins exceeds the maximum possible Zcash value.",
+                        coins
+                    ));
+                }
 
                 let amt = coins * COIN + zats;
 
@@ -963,6 +977,12 @@ mod tests {
         let invalid_9 = "zcash:ztestsapling10yy2ex5dcqkclhc7z7yrnjq2z6feyjad56ptwlfgmy77dmaqqrl9gyhprdx59qgmsnyfska2kez?amount=-1";
         let i9r = Zip321Request::from_uri(&TEST_NETWORK, &invalid_9);
         assert!(i9r.is_err());
+
+        // invalid; parameter index too large
+        let invalid_10 =
+            "zcash:?amount.10000=1.23&address.10000=tmEZhbWHTpdKMw5it8YDspUXSMGQyFwovpU";
+        let i10r = Zip321Request::from_uri(&TEST_NETWORK, &invalid_10);
+        assert!(i10r.is_err());
     }
 
     #[cfg(all(test, feature = "test-dependencies"))]
@@ -987,7 +1007,7 @@ mod tests {
 
         #[test]
         fn prop_zip321_roundtrip_str_param(
-            message in any::<String>(), i in proptest::option::of(any::<usize>())) {
+            message in any::<String>(), i in proptest::option::of(0usize..2000)) {
             let fragment = str_param("message", &message, i);
             let (rest, iparam) = zcashparam(&TEST_NETWORK)(&fragment).unwrap();
             assert_eq!(rest, "");
@@ -997,7 +1017,7 @@ mod tests {
 
         #[test]
         fn prop_zip321_roundtrip_memo_param(
-            memo in arb_valid_memo(), i in proptest::option::of(any::<usize>())) {
+            memo in arb_valid_memo(), i in proptest::option::of(0usize..2000)) {
             let fragment = memo_param(&memo, i);
             let (rest, iparam) = zcashparam(&TEST_NETWORK)(&fragment).unwrap();
             assert_eq!(rest, "");
