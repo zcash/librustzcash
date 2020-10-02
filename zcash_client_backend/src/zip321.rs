@@ -2,13 +2,12 @@ use core::fmt::Debug;
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::fmt;
+use std::str::FromStr;
 
 use base64;
-
 use nom::{
     character::complete::char, combinator::all_consuming, multi::separated_list, sequence::preceded,
 };
-
 use zcash_primitives::{consensus, legacy, primitives, transaction::components::Amount};
 
 use crate::encoding::{
@@ -18,8 +17,8 @@ use crate::encoding::{
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum Address {
-    TransparentAddress(legacy::TransparentAddress),
-    SaplingAddress(primitives::PaymentAddress),
+    Transparent(legacy::TransparentAddress),
+    Sapling(primitives::PaymentAddress),
 }
 
 #[derive(Debug)]
@@ -31,12 +30,12 @@ pub enum AddrParseError {
 impl Address {
     pub fn render<P: consensus::Parameters>(&self, params: &P) -> String {
         match self {
-            Address::TransparentAddress(t) => encode_transparent_address(
+            Address::Transparent(t) => encode_transparent_address(
                 &params.b58_pubkey_address_prefix(),
                 &params.b58_script_address_prefix(),
                 &t,
             ),
-            Address::SaplingAddress(s) => {
+            Address::Sapling(s) => {
                 encode_payment_address(&params.hrp_sapling_payment_address(), &s)
             }
         }
@@ -55,11 +54,11 @@ impl Address {
                 &params.b58_script_address_prefix(),
                 addr_str,
             )
-            .map(|t| t.map(Address::TransparentAddress))
+            .map(|t| t.map(Address::Transparent))
             .map_err(AddrParseError::TAddrError);
 
             let s_res = decode_payment_address(&params.hrp_sapling_payment_address(), addr_str)
-                .map(|s| s.map(Address::SaplingAddress))
+                .map(|s| s.map(Address::Sapling))
                 .map_err(AddrParseError::SAddrError);
 
             match t_res {
@@ -70,7 +69,7 @@ impl Address {
     }
 }
 
-pub struct Memo([u8; 512]);
+pub struct RawMemo([u8; 512]);
 
 #[derive(Debug)]
 pub enum MemoError {
@@ -78,19 +77,19 @@ pub enum MemoError {
     LengthExceeded(usize),
 }
 
-impl Memo {
+impl RawMemo {
     // Construct a memo from a vector of bytes.
     pub fn from_str(s: &str) -> Result<Self, MemoError> {
-        Memo::from_vec(s.as_bytes().to_vec())
+        RawMemo::from_bytes(s.as_bytes())
     }
 
-    pub fn from_vec(v: Vec<u8>) -> Result<Self, MemoError> {
+    pub fn from_bytes(v: &[u8]) -> Result<Self, MemoError> {
         if v.len() > 512 {
             Err(MemoError::LengthExceeded(v.len()))
         } else {
             let mut memo: [u8; 512] = [0; 512];
             memo[..v.len()].copy_from_slice(&v);
-            Ok(Memo(memo))
+            Ok(RawMemo(memo))
         }
     }
 
@@ -113,43 +112,67 @@ impl Memo {
     pub fn from_base64(s: &str) -> Result<Self, MemoError> {
         base64::decode_config(s, base64::URL_SAFE_NO_PAD)
             .map_err(MemoError::InvalidBase64)
-            .and_then(Memo::from_vec)
+            .and_then(|b| RawMemo::from_bytes(&b))
     }
 }
 
-impl Debug for Memo {
+impl Debug for RawMemo {
     fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
-        f.debug_struct("Memo")
+        f.debug_struct("RawMemo")
             .field("memo", &format!("{:?}...", &self.0[0..17]))
             .finish()
     }
 }
 
-impl PartialEq for Memo {
+impl PartialEq for RawMemo {
     fn eq(&self, other: &Self) -> bool {
         self.to_base64() == other.to_base64()
     }
 }
 
-impl Eq for Memo {}
+impl FromStr for RawMemo {
+    type Err = MemoError;
 
-impl PartialOrd for Memo {
+    fn from_str(memo: &str) -> Result<Self, Self::Err> {
+        RawMemo::from_str(memo)
+    }
+}
+
+impl Eq for RawMemo {}
+
+impl PartialOrd for RawMemo {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.to_base64().cmp(&other.to_base64()))
     }
 }
 
-impl Ord for Memo {
+impl Ord for RawMemo {
     fn cmp(&self, other: &Self) -> Ordering {
         self.partial_cmp(other).unwrap()
     }
+}
+
+// RawMemo is somewhat duplicative of the `Memo` type
+// in crate::note_encryption but as that's actively being
+// updated at time of this writing, these functions provide
+// shims to ease future use of those
+pub fn memo_from_vec(v: &[u8]) -> Result<RawMemo, MemoError> {
+    RawMemo::from_bytes(v)
+}
+
+pub fn memo_to_base64(memo: &RawMemo) -> String {
+    memo.to_base64()
+}
+
+pub fn memo_from_base64(s: &str) -> Result<RawMemo, MemoError> {
+    RawMemo::from_base64(s)
 }
 
 #[derive(Debug, PartialEq)]
 pub struct Zip321Payment {
     recipient_address: Address,
     amount: Amount,
-    memo: Option<Memo>,
+    memo: Option<RawMemo>,
     label: Option<String>,
     message: Option<String>,
     other_params: Vec<(String, String)>,
@@ -318,8 +341,7 @@ impl Zip321Request {
         // Build the actual payment values from the index.
         let mut payments = vec![];
         for (i, params) in params_by_index {
-            let payment = parse::to_payment(params)
-                .ok_or(format!("Payment {} had no recipient address.", i))?;
+            let payment = parse::to_payment(params, i)?;
             payments.push(payment);
         }
 
@@ -334,7 +356,7 @@ pub mod render {
         consensus, transaction::components::amount::COIN, transaction::components::Amount,
     };
 
-    use super::{Address, Memo};
+    use super::{memo_to_base64, Address, RawMemo};
 
     // The set of ASCII characters which must be percent-encoded according
     // to the definition of ZIP-0321. This is the complement of the subset of
@@ -392,8 +414,8 @@ pub mod render {
         amount_str(amount).map(|s| format!("amount{}={}", param_index(idx), s))
     }
 
-    pub fn memo_param(value: &Memo, idx: Option<usize>) -> String {
-        format!("{}{}={}", "memo", param_index(idx), value.to_base64(),)
+    pub fn memo_param(value: &RawMemo, idx: Option<usize>) -> String {
+        format!("{}{}={}", "memo", param_index(idx), memo_to_base64(value),)
     }
 
     pub fn str_param(label: &str, value: &str, idx: Option<usize>) -> String {
@@ -417,21 +439,19 @@ pub mod parse {
         sequence::{preceded, separated_pair, tuple},
         AsChar, IResult, InputTakeAtPosition,
     };
-
     use percent_encoding::percent_decode;
-
     use zcash_primitives::{
         consensus, transaction::components::amount::COIN, transaction::components::Amount,
     };
 
-    use super::{AddrParseError, Address, Memo, Zip321Payment};
+    use super::{memo_from_base64, AddrParseError, Address, RawMemo, Zip321Payment};
 
     // For purposes of parsing
     #[derive(Debug, PartialEq)]
     pub enum Param {
         Addr(Address),
         Amount(Amount),
-        Memo(Memo),
+        Memo(RawMemo),
         Label(String),
         Message(String),
         Other(String, String),
@@ -459,7 +479,7 @@ pub mod parse {
         return false;
     }
 
-    pub fn to_payment(v: Vec<Param>) -> Option<Zip321Payment> {
+    pub fn to_payment(v: Vec<Param>, i: usize) -> Result<Zip321Payment, String> {
         let mut addr: Option<Address> = None;
         for p0 in &v {
             match p0 {
@@ -469,7 +489,7 @@ pub mod parse {
         }
 
         let mut payment = Zip321Payment {
-            recipient_address: addr?,
+            recipient_address: addr.ok_or(format!("Payment {} had no recipient address.", i))?,
             amount: Amount::zero(),
             memo: None,
             label: None,
@@ -480,7 +500,13 @@ pub mod parse {
         for p0 in v {
             match p0 {
                 Param::Amount(a) => payment.amount = a.clone(),
-                Param::Memo(m) => payment.memo = Some(m),
+                Param::Memo(m) => {
+                    match payment.recipient_address {
+                        Address::Sapling(_) => payment.memo = Some(m),
+                        Address::Transparent(_) => return Err(format!("Payment {} attempted to associate a memo with a transparent recipient address", i)),
+                    }
+                },
+
                 Param::Label(m) => payment.label = Some(m),
                 Param::Message(m) => payment.message = Some(m),
                 Param::Other(n, v) => payment.other_params.push((n, v)),
@@ -488,7 +514,7 @@ pub mod parse {
             }
         }
 
-        return Some(payment);
+        return Ok(payment);
     }
 
     /// Parser that consumes the leading "zcash:[address]" from
@@ -617,7 +643,7 @@ pub mod parse {
                 .map(|s| Param::Message(s.into_owned()))
                 .map_err(|e| e.to_string()),
 
-            "memo" => Memo::from_base64(value)
+            "memo" => memo_from_base64(value)
                 .map(Param::Memo)
                 .map_err(|e| format!("Decoded memo was invalid: {:?}", e)),
 
@@ -653,27 +679,26 @@ pub mod testing {
     use proptest::option;
     use proptest::prelude::*;
     use proptest::strategy::Strategy;
-
     use zcash_primitives::{
         consensus::TEST_NETWORK, keys::testing::arb_shielded_addr,
         legacy::testing::arb_transparent_addr,
         transaction::components::amount::testing::arb_amount,
     };
 
-    use super::{Address, Memo, Zip321Payment, Zip321Request};
+    use super::{memo_from_vec, Address, RawMemo, Zip321Payment, Zip321Request};
 
     pub fn arb_addr() -> impl Strategy<Value = Address> {
         prop_oneof![
-            arb_shielded_addr().prop_map(Address::SaplingAddress),
-            arb_transparent_addr().prop_map(Address::TransparentAddress),
+            arb_shielded_addr().prop_map(Address::Sapling),
+            arb_transparent_addr().prop_map(Address::Transparent),
         ]
     }
 
     pub const VALID_PARAMNAME: &str = "[a-zA-Z][a-zA-Z0-9+-]*";
 
     prop_compose! {
-        pub fn arb_valid_memo()(bytes in vec(any::<u8>(), 0..512)) -> Memo {
-            Memo::from_vec(bytes).unwrap()
+        pub fn arb_valid_memo()(bytes in vec(any::<u8>(), 0..512)) -> RawMemo {
+            memo_from_vec(&bytes).unwrap()
         }
     }
 
@@ -687,10 +712,15 @@ pub mod testing {
             other_params in vec((VALID_PARAMNAME, any::<String>()), 0..3),
             ) -> Zip321Payment {
 
+            let is_sapling = match recipient_address {
+                Address::Transparent(_) => false,
+                Address::Sapling(_) => true,
+            };
+
             Zip321Payment {
                 recipient_address,
                 amount,
-                memo,
+                memo: memo.filter(|_| is_sapling),
                 label,
                 message,
                 other_params,
@@ -726,13 +756,13 @@ mod tests {
         transaction::components::Amount,
     };
 
-    use crate::encoding::decode_payment_address;
-
     use super::{
+        memo_from_base64, memo_to_base64,
         parse::{parse_amount, zcashparam, Param},
         render::amount_str,
-        Address, Memo, Zip321Payment, Zip321Request,
+        Address, RawMemo, Zip321Payment, Zip321Request,
     };
+    use crate::encoding::decode_payment_address;
 
     #[cfg(all(test, feature = "test-dependencies"))]
     use proptest::prelude::*;
@@ -782,7 +812,7 @@ mod tests {
         let expected = Zip321Request {
             payments: vec![
                 Zip321Payment {
-                    recipient_address: Address::SaplingAddress(decode_payment_address(&TEST_NETWORK.hrp_sapling_payment_address(), "ztestsapling1n65uaftvs2g7075q2x2a04shfk066u3lldzxsrprfrqtzxnhc9ps73v4lhx4l9yfxj46sl0q90k").unwrap().unwrap()),
+                    recipient_address: Address::Sapling(decode_payment_address(&TEST_NETWORK.hrp_sapling_payment_address(), "ztestsapling1n65uaftvs2g7075q2x2a04shfk066u3lldzxsrprfrqtzxnhc9ps73v4lhx4l9yfxj46sl0q90k").unwrap().unwrap()),
                     amount: Amount::from_u64(376876902796286).unwrap(),
                     memo: None,
                     label: None,
@@ -800,7 +830,7 @@ mod tests {
         let req = Zip321Request {
             payments: vec![
                 Zip321Payment {
-                    recipient_address: Address::SaplingAddress(decode_payment_address(TEST_NETWORK.hrp_sapling_payment_address(), "ztestsapling1n65uaftvs2g7075q2x2a04shfk066u3lldzxsrprfrqtzxnhc9ps73v4lhx4l9yfxj46sl0q90k").unwrap().unwrap()),
+                    recipient_address: Address::Sapling(decode_payment_address(TEST_NETWORK.hrp_sapling_payment_address(), "ztestsapling1n65uaftvs2g7075q2x2a04shfk066u3lldzxsrprfrqtzxnhc9ps73v4lhx4l9yfxj46sl0q90k").unwrap().unwrap()),
                     amount: Amount::from_u64(0).unwrap(),
                     memo: None,
                     label: None,
@@ -815,17 +845,19 @@ mod tests {
 
     #[test]
     fn test_zip321_memos() {
-        let m_simple = Memo::from_str("This is a simple memo.").unwrap();
-        let m_simple_64 = m_simple.to_base64();
-        assert_eq!(Memo::from_base64(&m_simple_64).unwrap(), m_simple);
+        let m_simple: RawMemo = "This is a simple memo.".parse().unwrap();
+        let m_simple_64 = memo_to_base64(&m_simple);
+        assert_eq!(memo_from_base64(&m_simple_64).unwrap(), m_simple);
 
-        let m_json = Memo::from_str("{ \"key\": \"This is a JSON-structured memo.\" }").unwrap();
-        let m_json_64 = m_json.to_base64();
-        assert_eq!(Memo::from_base64(&m_json_64).unwrap(), m_json);
+        let m_json: RawMemo = "{ \"key\": \"This is a JSON-structured memo.\" }"
+            .parse()
+            .unwrap();
+        let m_json_64 = memo_to_base64(&m_json);
+        assert_eq!(memo_from_base64(&m_json_64).unwrap(), m_json);
 
-        let m_unicode = Memo::from_str("This is a unicode memo ✨🦄🏆🎉").unwrap();
-        let m_unicode_64 = m_unicode.to_base64();
-        assert_eq!(Memo::from_base64(&m_unicode_64).unwrap(), m_unicode);
+        let m_unicode: RawMemo = "This is a unicode memo ✨🦄🏆🎉".parse().unwrap();
+        let m_unicode_64 = memo_to_base64(&m_unicode);
+        assert_eq!(memo_from_base64(&m_unicode_64).unwrap(), m_unicode);
     }
 
     #[test]
@@ -837,7 +869,7 @@ mod tests {
             Some(Amount::from_u64(100000000).unwrap())
         );
 
-        let valid_2 = "zcash:?address=tmEZhbWHTpdKMw5it8YDspUXSMGQyFwovpU&amount=123.456&memo=eyAia2V5IjogIlRoaXMgaXMgYSBKU09OLXN0cnVjdHVyZWQgbWVtby4iIH0&address.1=ztestsapling10yy2ex5dcqkclhc7z7yrnjq2z6feyjad56ptwlfgmy77dmaqqrl9gyhprdx59qgmsnyfska2kez&amount.1=0.789&memo.1=VGhpcyBpcyBhIHVuaWNvZGUgbWVtbyDinKjwn6aE8J-PhvCfjok";
+        let valid_2 = "zcash:?address=tmEZhbWHTpdKMw5it8YDspUXSMGQyFwovpU&amount=123.456&address.1=ztestsapling10yy2ex5dcqkclhc7z7yrnjq2z6feyjad56ptwlfgmy77dmaqqrl9gyhprdx59qgmsnyfska2kez&amount.1=0.789&memo.1=VGhpcyBpcyBhIHVuaWNvZGUgbWVtbyDinKjwn6aE8J-PhvCfjok";
         let mut v2r = Zip321Request::from_uri(&TEST_NETWORK, &valid_2).unwrap();
         v2r.normalize(&TEST_NETWORK);
         assert_eq!(
@@ -878,6 +910,11 @@ mod tests {
             "zcash:?amount.1=1.234&amount.1=2.345&address.1=tmEZhbWHTpdKMw5it8YDspUXSMGQyFwovpU";
         let i5r = Zip321Request::from_uri(&TEST_NETWORK, &invalid_5);
         assert!(i5r.is_err());
+
+        //invalid; memo associated with t-addr
+        let invalid_6 = "zcash:?address=tmEZhbWHTpdKMw5it8YDspUXSMGQyFwovpU&amount=123.456&memo=eyAia2V5IjogIlRoaXMgaXMgYSBKU09OLXN0cnVjdHVyZWQgbWVtby4iIH0&address.1=ztestsapling10yy2ex5dcqkclhc7z7yrnjq2z6feyjad56ptwlfgmy77dmaqqrl9gyhprdx59qgmsnyfska2kez&amount.1=0.789&memo.1=VGhpcyBpcyBhIHVuaWNvZGUgbWVtbyDinKjwn6aE8J-PhvCfjok";
+        let i6r = Zip321Request::from_uri(&TEST_NETWORK, &invalid_6);
+        assert!(i6r.is_err());
     }
 
     #[cfg(all(test, feature = "test-dependencies"))]
