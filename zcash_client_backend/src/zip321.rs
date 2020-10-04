@@ -613,7 +613,7 @@ pub mod parse {
                     None => 0,
                 };
 
-                if coins > 21000000 {
+                if coins >= 21000000 && (coins > 21000000 || zats > 0) {
                     return Err(format!(
                         "{} coins exceeds the maximum possible Zcash value.",
                         coins
