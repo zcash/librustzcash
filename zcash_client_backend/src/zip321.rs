@@ -362,8 +362,8 @@ pub mod render {
 
     use super::{memo_to_base64, Address, RawMemo};
 
-    // The set of ASCII characters which must be percent-encoded according
-    // to the definition of ZIP-0321. This is the complement of the subset of
+    // The set of ASCII characters that must be percent-encoded according
+    // to the definition of ZIP 321. This is the complement of the subset of
     // ASCII characters defined by `qchar`
     //
     //       unreserved      = ALPHA / DIGIT / "-" / "." / "_" / "~"
@@ -527,7 +527,7 @@ pub mod parse {
     }
 
     /// Parser that consumes the leading "zcash:[address]" from
-    /// a zip-0321 URI.
+    /// a ZIP 321 URI.
     pub fn lead_addr<'a, P: consensus::Parameters>(
         params: &'a P,
     ) -> impl Fn(&str) -> IResult<&str, Option<IndexedParam>> + 'a {
