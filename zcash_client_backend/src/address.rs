@@ -1,12 +1,14 @@
 //! Structs for handling supported address types.
 
-use zcash_client_backend::encoding::{
+use zcash_primitives::{consensus, legacy::TransparentAddress, primitives::PaymentAddress};
+
+use crate::encoding::{
     decode_payment_address, decode_transparent_address, encode_payment_address,
     encode_transparent_address,
 };
-use zcash_primitives::{consensus, legacy::TransparentAddress, primitives::PaymentAddress};
 
 /// An address that funds can be sent to.
+#[derive(Debug, PartialEq, Clone)]
 pub enum RecipientAddress {
     Shielded(PaymentAddress),
     Transparent(TransparentAddress),

@@ -6,6 +6,7 @@
 // Catch documentation errors caused by code changes.
 #![deny(intra_doc_link_resolution_failure)]
 
+pub mod address;
 mod decrypt;
 pub mod encoding;
 pub mod keys;
