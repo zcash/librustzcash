@@ -69,7 +69,7 @@ impl Debug for RawMemo {
 
 impl PartialEq for RawMemo {
     fn eq(&self, other: &Self) -> bool {
-        self.to_base64() == other.to_base64()
+        self.0[..] == other.0[..]
     }
 }
 
