@@ -295,7 +295,7 @@ impl TransactionRequest {
     }
 }
 
-pub mod render {
+mod render {
     use percent_encoding::{utf8_percent_encode, AsciiSet, CONTROLS};
 
     use zcash_primitives::{
@@ -380,7 +380,7 @@ pub mod render {
     }
 }
 
-pub mod parse {
+mod parse {
     use core::fmt::Debug;
 
     use nom::{
