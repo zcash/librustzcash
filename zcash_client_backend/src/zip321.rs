@@ -112,7 +112,7 @@ pub fn memo_from_base64(s: &str) -> Result<RawMemo, MemoError> {
 }
 
 #[derive(Debug, PartialEq)]
-pub struct Zip321Payment {
+pub struct Payment {
     recipient_address: RecipientAddress,
     amount: Amount,
     memo: Option<RawMemo>,
@@ -121,7 +121,7 @@ pub struct Zip321Payment {
     other_params: Vec<(String, String)>,
 }
 
-impl Zip321Payment {
+impl Payment {
     #[cfg(any(test, feature = "test-dependencies"))]
     pub(in crate::zip321) fn normalize(&mut self) {
         self.other_params.sort();
@@ -134,8 +134,8 @@ impl Zip321Payment {
     #[cfg(any(test, feature = "test-dependencies"))]
     pub(in crate::zip321) fn compare_normalized<'a, P: consensus::Parameters>(
         params: &'a P,
-    ) -> impl Fn(&Zip321Payment, &Zip321Payment) -> Ordering + 'a {
-        move |a: &Zip321Payment, b: &Zip321Payment| {
+    ) -> impl Fn(&Payment, &Payment) -> Ordering + 'a {
+        move |a: &Payment, b: &Payment| {
             let a_addr = a.recipient_address.encode(params);
             let b_addr = b.recipient_address.encode(params);
 
@@ -151,26 +151,25 @@ impl Zip321Payment {
 }
 
 #[derive(Debug, PartialEq)]
-pub struct Zip321Request {
-    payments: Vec<Zip321Payment>,
+pub struct TransactionRequest {
+    payments: Vec<Payment>,
 }
 
-impl Zip321Request {
+impl TransactionRequest {
     #[cfg(any(test, feature = "test-dependencies"))]
     pub(in crate::zip321) fn normalize<P: consensus::Parameters>(&mut self, params: &P) {
         for p in &mut self.payments {
             p.normalize();
         }
 
-        self.payments
-            .sort_by(Zip321Payment::compare_normalized(params));
+        self.payments.sort_by(Payment::compare_normalized(params));
     }
 
     #[cfg(all(test, feature = "test-dependencies"))]
     pub(in crate::zip321) fn normalize_and_eq<P: consensus::Parameters>(
         params: &P,
-        a: &mut Zip321Request,
-        b: &mut Zip321Request,
+        a: &mut TransactionRequest,
+        b: &mut TransactionRequest,
     ) -> bool {
         a.normalize(params);
         b.normalize(params);
@@ -183,7 +182,7 @@ impl Zip321Request {
     /// Returns None if the payment request is empty.
     pub fn to_uri<P: consensus::Parameters>(&self, params: &P) -> Option<String> {
         fn push_params(
-            payment: &Zip321Payment,
+            payment: &Payment,
             payment_index: Option<usize>,
             query_params: &mut Vec<String>,
         ) {
@@ -292,7 +291,7 @@ impl Zip321Request {
             payments.push(payment);
         }
 
-        Ok(Zip321Request { payments })
+        Ok(TransactionRequest { payments })
     }
 }
 
@@ -398,7 +397,7 @@ pub mod parse {
 
     use crate::address::RecipientAddress;
 
-    use super::{memo_from_base64, RawMemo, Zip321Payment};
+    use super::{memo_from_base64, Payment, RawMemo};
 
     // For purposes of parsing
     #[derive(Debug, PartialEq)]
@@ -433,7 +432,7 @@ pub mod parse {
         return false;
     }
 
-    pub fn to_payment(vs: Vec<Param>, i: usize) -> Result<Zip321Payment, String> {
+    pub fn to_payment(vs: Vec<Param>, i: usize) -> Result<Payment, String> {
         let mut addr: Option<RecipientAddress> = None;
         for v in &vs {
             match v {
@@ -442,7 +441,7 @@ pub mod parse {
             }
         }
 
-        let mut payment = Zip321Payment {
+        let mut payment = Payment {
             recipient_address: addr.ok_or(format!("Payment {} had no recipient address.", i))?,
             amount: Amount::zero(),
             memo: None,
@@ -651,7 +650,7 @@ pub mod testing {
 
     use crate::address::RecipientAddress;
 
-    use super::{memo_from_vec, RawMemo, Zip321Payment, Zip321Request};
+    use super::{memo_from_vec, Payment, RawMemo, TransactionRequest};
 
     pub fn arb_addr() -> impl Strategy<Value = RecipientAddress> {
         prop_oneof![
@@ -676,14 +675,14 @@ pub mod testing {
             message in option::of(any::<String>()),
             label in option::of(any::<String>()),
             other_params in vec((VALID_PARAMNAME, any::<String>()), 0..3),
-            ) -> Zip321Payment {
+            ) -> Payment {
 
             let is_sapling = match recipient_address {
                 RecipientAddress::Transparent(_) => false,
                 RecipientAddress::Shielded(_) => true,
             };
 
-            Zip321Payment {
+            Payment {
                 recipient_address,
                 amount,
                 memo: memo.filter(|_| is_sapling),
@@ -695,8 +694,8 @@ pub mod testing {
     }
 
     prop_compose! {
-        pub fn arb_zip321_request()(payments in vec(arb_zip321_payment(), 1..10)) -> Zip321Request {
-            let mut req = Zip321Request { payments };
+        pub fn arb_zip321_request()(payments in vec(arb_zip321_payment(), 1..10)) -> TransactionRequest {
+            let mut req = TransactionRequest { payments };
             req.normalize(&TEST_NETWORK); // just to make test comparisons easier
             req
         }
@@ -728,7 +727,7 @@ mod tests {
         memo_from_base64, memo_to_base64,
         parse::{parse_amount, zcashparam, Param},
         render::amount_str,
-        RawMemo, Zip321Payment, Zip321Request,
+        Payment, RawMemo, TransactionRequest,
     };
     use crate::encoding::decode_payment_address;
 
@@ -744,9 +743,9 @@ mod tests {
         testing::{arb_addr, arb_addr_str, arb_valid_memo, arb_zip321_request, arb_zip321_uri},
     };
 
-    fn check_roundtrip(req: Zip321Request) {
+    fn check_roundtrip(req: TransactionRequest) {
         if let Some(req_uri) = req.to_uri(&TEST_NETWORK) {
-            let parsed = Zip321Request::from_uri(&TEST_NETWORK, &req_uri).unwrap();
+            let parsed = TransactionRequest::from_uri(&TEST_NETWORK, &req_uri).unwrap();
             assert_eq!(parsed, req);
         } else {
             panic!("Generated invalid payment request: {:?}", req);
@@ -775,11 +774,11 @@ mod tests {
     #[test]
     fn test_zip321_parse_simple() {
         let uri = "zcash:ztestsapling1n65uaftvs2g7075q2x2a04shfk066u3lldzxsrprfrqtzxnhc9ps73v4lhx4l9yfxj46sl0q90k?amount=3768769.02796286&message=";
-        let parse_result = Zip321Request::from_uri(&TEST_NETWORK, &uri).unwrap();
+        let parse_result = TransactionRequest::from_uri(&TEST_NETWORK, &uri).unwrap();
 
-        let expected = Zip321Request {
+        let expected = TransactionRequest {
             payments: vec![
-                Zip321Payment {
+                Payment {
                     recipient_address: RecipientAddress::Shielded(decode_payment_address(&TEST_NETWORK.hrp_sapling_payment_address(), "ztestsapling1n65uaftvs2g7075q2x2a04shfk066u3lldzxsrprfrqtzxnhc9ps73v4lhx4l9yfxj46sl0q90k").unwrap().unwrap()),
                     amount: Amount::from_u64(376876902796286).unwrap(),
                     memo: None,
@@ -795,9 +794,9 @@ mod tests {
 
     #[test]
     fn test_zip321_roundtrip_empty_message() {
-        let req = Zip321Request {
+        let req = TransactionRequest {
             payments: vec![
-                Zip321Payment {
+                Payment {
                     recipient_address: RecipientAddress::Shielded(decode_payment_address(TEST_NETWORK.hrp_sapling_payment_address(), "ztestsapling1n65uaftvs2g7075q2x2a04shfk066u3lldzxsrprfrqtzxnhc9ps73v4lhx4l9yfxj46sl0q90k").unwrap().unwrap()),
                     amount: Amount::from_u64(0).unwrap(),
                     memo: None,
@@ -831,14 +830,14 @@ mod tests {
     #[test]
     fn test_zip321_spec_valid_examples() {
         let valid_1 = "zcash:ztestsapling10yy2ex5dcqkclhc7z7yrnjq2z6feyjad56ptwlfgmy77dmaqqrl9gyhprdx59qgmsnyfska2kez?amount=1&memo=VGhpcyBpcyBhIHNpbXBsZSBtZW1vLg&message=Thank%20you%20for%20your%20purchase";
-        let v1r = Zip321Request::from_uri(&TEST_NETWORK, &valid_1).unwrap();
+        let v1r = TransactionRequest::from_uri(&TEST_NETWORK, &valid_1).unwrap();
         assert_eq!(
             v1r.payments.get(0).map(|p| p.amount),
             Some(Amount::from_u64(100000000).unwrap())
         );
 
         let valid_2 = "zcash:?address=tmEZhbWHTpdKMw5it8YDspUXSMGQyFwovpU&amount=123.456&address.1=ztestsapling10yy2ex5dcqkclhc7z7yrnjq2z6feyjad56ptwlfgmy77dmaqqrl9gyhprdx59qgmsnyfska2kez&amount.1=0.789&memo.1=VGhpcyBpcyBhIHVuaWNvZGUgbWVtbyDinKjwn6aE8J-PhvCfjok";
-        let mut v2r = Zip321Request::from_uri(&TEST_NETWORK, &valid_2).unwrap();
+        let mut v2r = TransactionRequest::from_uri(&TEST_NETWORK, &valid_2).unwrap();
         v2r.normalize(&TEST_NETWORK);
         assert_eq!(
             v2r.payments.get(0).map(|p| p.amount),
@@ -852,7 +851,7 @@ mod tests {
         // valid; amount just less than MAX_MONEY
         // 20999999.99999999
         let valid_3 = "zcash:ztestsapling10yy2ex5dcqkclhc7z7yrnjq2z6feyjad56ptwlfgmy77dmaqqrl9gyhprdx59qgmsnyfska2kez?amount=20999999.99999999";
-        let v3r = Zip321Request::from_uri(&TEST_NETWORK, &valid_3).unwrap();
+        let v3r = TransactionRequest::from_uri(&TEST_NETWORK, &valid_3).unwrap();
         assert_eq!(
             v3r.payments.get(0).map(|p| p.amount),
             Some(Amount::from_u64(2099999999999999u64).unwrap())
@@ -861,7 +860,7 @@ mod tests {
         // valid; MAX_MONEY
         // 21000000
         let valid_4 = "zcash:ztestsapling10yy2ex5dcqkclhc7z7yrnjq2z6feyjad56ptwlfgmy77dmaqqrl9gyhprdx59qgmsnyfska2kez?amount=21000000";
-        let v4r = Zip321Request::from_uri(&TEST_NETWORK, &valid_4).unwrap();
+        let v4r = TransactionRequest::from_uri(&TEST_NETWORK, &valid_4).unwrap();
         assert_eq!(
             v4r.payments.get(0).map(|p| p.amount),
             Some(Amount::from_u64(2100000000000000u64).unwrap())
@@ -872,63 +871,63 @@ mod tests {
     fn test_zip321_spec_invalid_examples() {
         // invalid; missing `address=` or `address.0=`
         let invalid_1 = "zcash:?amount=3491405.05201255&address.1=ztestsapling10yy2ex5dcqkclhc7z7yrnjq2z6feyjad56ptwlfgmy77dmaqqrl9gyhprdx59qgmsnyfska2kez&amount.1=5740296.87793245";
-        let i1r = Zip321Request::from_uri(&TEST_NETWORK, &invalid_1);
+        let i1r = TransactionRequest::from_uri(&TEST_NETWORK, &invalid_1);
         assert!(i1r.is_err());
 
         // invalid; missing `address.1=`
         let invalid_2 = "zcash:?address=tmEZhbWHTpdKMw5it8YDspUXSMGQyFwovpU&amount=1&amount.1=2&address.2=ztestsapling10yy2ex5dcqkclhc7z7yrnjq2z6feyjad56ptwlfgmy77dmaqqrl9gyhprdx59qgmsnyfska2kez";
-        let i2r = Zip321Request::from_uri(&TEST_NETWORK, &invalid_2);
+        let i2r = TransactionRequest::from_uri(&TEST_NETWORK, &invalid_2);
         assert!(i2r.is_err());
 
         // invalid; `address.0=` and `amount.0=` are not permitted (leading 0s).
         let invalid_3 = "zcash:?address.0=ztestsapling10yy2ex5dcqkclhc7z7yrnjq2z6feyjad56ptwlfgmy77dmaqqrl9gyhprdx59qgmsnyfska2kez&amount.0=2";
-        let i3r = Zip321Request::from_uri(&TEST_NETWORK, &invalid_3);
+        let i3r = TransactionRequest::from_uri(&TEST_NETWORK, &invalid_3);
         assert!(i3r.is_err());
 
         // invalid; duplicate `amount=` field
         let invalid_4 =
             "zcash:?amount=1.234&amount=2.345&address=tmEZhbWHTpdKMw5it8YDspUXSMGQyFwovpU";
-        let i4r = Zip321Request::from_uri(&TEST_NETWORK, &invalid_4);
+        let i4r = TransactionRequest::from_uri(&TEST_NETWORK, &invalid_4);
         assert!(i4r.is_err());
 
         // invalid; duplicate `amount.1=` field
         let invalid_5 =
             "zcash:?amount.1=1.234&amount.1=2.345&address.1=tmEZhbWHTpdKMw5it8YDspUXSMGQyFwovpU";
-        let i5r = Zip321Request::from_uri(&TEST_NETWORK, &invalid_5);
+        let i5r = TransactionRequest::from_uri(&TEST_NETWORK, &invalid_5);
         assert!(i5r.is_err());
 
         //invalid; memo associated with t-addr
         let invalid_6 = "zcash:?address=tmEZhbWHTpdKMw5it8YDspUXSMGQyFwovpU&amount=123.456&memo=eyAia2V5IjogIlRoaXMgaXMgYSBKU09OLXN0cnVjdHVyZWQgbWVtby4iIH0&address.1=ztestsapling10yy2ex5dcqkclhc7z7yrnjq2z6feyjad56ptwlfgmy77dmaqqrl9gyhprdx59qgmsnyfska2kez&amount.1=0.789&memo.1=VGhpcyBpcyBhIHVuaWNvZGUgbWVtbyDinKjwn6aE8J-PhvCfjok";
-        let i6r = Zip321Request::from_uri(&TEST_NETWORK, &invalid_6);
+        let i6r = TransactionRequest::from_uri(&TEST_NETWORK, &invalid_6);
         assert!(i6r.is_err());
 
         // invalid; amount component exceeds an i64
         // 9223372036854775808 = i64::MAX + 1
         let invalid_7 = "zcash:ztestsapling10yy2ex5dcqkclhc7z7yrnjq2z6feyjad56ptwlfgmy77dmaqqrl9gyhprdx59qgmsnyfska2kez?amount=9223372036854775808";
-        let i7r = Zip321Request::from_uri(&TEST_NETWORK, &invalid_7);
+        let i7r = TransactionRequest::from_uri(&TEST_NETWORK, &invalid_7);
         assert!(i7r.is_err());
 
         // invalid; amount component wraps into a valid small positive i64
         // 18446744073709551624
         let invalid_7a = "zcash:ztestsapling10yy2ex5dcqkclhc7z7yrnjq2z6feyjad56ptwlfgmy77dmaqqrl9gyhprdx59qgmsnyfska2kez?amount=18446744073709551624";
-        let i7ar = Zip321Request::from_uri(&TEST_NETWORK, &invalid_7a);
+        let i7ar = TransactionRequest::from_uri(&TEST_NETWORK, &invalid_7a);
         assert!(i7ar.is_err());
 
         // invalid; amount component is MAX_MONEY
         // 21000000.00000001
         let invalid_8 = "zcash:ztestsapling10yy2ex5dcqkclhc7z7yrnjq2z6feyjad56ptwlfgmy77dmaqqrl9gyhprdx59qgmsnyfska2kez?amount=21000000.00000001";
-        let i8r = Zip321Request::from_uri(&TEST_NETWORK, &invalid_8);
+        let i8r = TransactionRequest::from_uri(&TEST_NETWORK, &invalid_8);
         assert!(i8r.is_err());
 
         // invalid; negative amount
         let invalid_9 = "zcash:ztestsapling10yy2ex5dcqkclhc7z7yrnjq2z6feyjad56ptwlfgmy77dmaqqrl9gyhprdx59qgmsnyfska2kez?amount=-1";
-        let i9r = Zip321Request::from_uri(&TEST_NETWORK, &invalid_9);
+        let i9r = TransactionRequest::from_uri(&TEST_NETWORK, &invalid_9);
         assert!(i9r.is_err());
 
         // invalid; parameter index too large
         let invalid_10 =
             "zcash:?amount.10000=1.23&address.10000=tmEZhbWHTpdKMw5it8YDspUXSMGQyFwovpU";
-        let i10r = Zip321Request::from_uri(&TEST_NETWORK, &invalid_10);
+        let i10r = TransactionRequest::from_uri(&TEST_NETWORK, &invalid_10);
         assert!(i10r.is_err());
     }
 
@@ -975,8 +974,8 @@ mod tests {
         #[test]
         fn prop_zip321_roundtrip_request(mut req in arb_zip321_request()) {
             if let Some(req_uri) = req.to_uri(&TEST_NETWORK) {
-                let mut parsed = Zip321Request::from_uri(&TEST_NETWORK, &req_uri).unwrap();
-                assert!(Zip321Request::normalize_and_eq(&TEST_NETWORK, &mut parsed, &mut req));
+                let mut parsed = TransactionRequest::from_uri(&TEST_NETWORK, &req_uri).unwrap();
+                assert!(TransactionRequest::normalize_and_eq(&TEST_NETWORK, &mut parsed, &mut req));
             } else {
                 panic!("Generated invalid payment request: {:?}", req);
             }
@@ -984,7 +983,7 @@ mod tests {
 
         #[test]
         fn prop_zip321_roundtrip_uri(uri in arb_zip321_uri()) {
-            let mut parsed = Zip321Request::from_uri(&TEST_NETWORK, &uri).unwrap();
+            let mut parsed = TransactionRequest::from_uri(&TEST_NETWORK, &uri).unwrap();
             parsed.normalize(&TEST_NETWORK);
             let serialized = parsed.to_uri(&TEST_NETWORK);
             assert_eq!(serialized, Some(uri))
