@@ -645,7 +645,7 @@ pub mod testing {
     use zcash_primitives::{
         consensus::TEST_NETWORK, keys::testing::arb_shielded_addr,
         legacy::testing::arb_transparent_addr,
-        transaction::components::amount::testing::arb_amount,
+        transaction::components::amount::testing::arb_nonnegative_amount,
     };
 
     use crate::address::RecipientAddress;
@@ -670,7 +670,7 @@ pub mod testing {
     prop_compose! {
         pub fn arb_zip321_payment()(
             recipient_address in arb_addr(),
-            amount in arb_amount(),
+            amount in arb_nonnegative_amount(),
             memo in option::of(arb_valid_memo()),
             message in option::of(any::<String>()),
             label in option::of(any::<String>()),
@@ -735,7 +735,7 @@ mod tests {
     use proptest::prelude::*;
 
     #[cfg(all(test, feature = "test-dependencies"))]
-    use zcash_primitives::transaction::components::amount::testing::arb_amount;
+    use zcash_primitives::transaction::components::amount::testing::arb_nonnegative_amount;
 
     #[cfg(all(test, feature = "test-dependencies"))]
     use super::{
@@ -946,7 +946,7 @@ mod tests {
         }
 
         #[test]
-        fn prop_zip321_roundtrip_amount(amt in arb_amount()) {
+        fn prop_zip321_roundtrip_amount(amt in arb_nonnegative_amount()) {
             let amt_str = amount_str(amt).unwrap();
             assert_eq!(amt, parse_amount(&amt_str).unwrap().1);
         }
