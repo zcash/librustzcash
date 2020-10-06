@@ -131,7 +131,6 @@ pub mod testing {
 
     prop_compose! {
         pub fn arb_transparent_addr()(v in proptest::array::uniform20(any::<u8>())) -> TransparentAddress {
-            // FIXME: Not a valid address.
             TransparentAddress::PublicKey(v)
         }
     }
