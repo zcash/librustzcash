@@ -221,7 +221,7 @@ impl TransactionRequest {
     pub fn from_uri<P: consensus::Parameters>(params: &P, uri: &str) -> Result<Self, String> {
         // Parse the leading zcash:<address>
         let (rest, primary_addr_param) =
-            parse::lead_addr(&params.clone())(uri).map_err(|e| e.to_string())?;
+            parse::lead_addr(params)(uri).map_err(|e| e.to_string())?;
 
         // Parse the remaining parameters as an undifferentiated list
         let (_, xs) = all_consuming(preceded(
