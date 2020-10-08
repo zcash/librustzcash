@@ -181,66 +181,40 @@ impl TransactionRequest {
     ///
     /// Returns None if the payment request is empty.
     pub fn to_uri<P: consensus::Parameters>(&self, params: &P) -> Option<String> {
-        fn push_params(
-            payment: &Payment,
+        fn payment_params<'a>(
+            payment: &'a Payment,
             payment_index: Option<usize>,
-            query_params: &mut Vec<String>,
-        ) {
-            if let Some(amount_p) = render::amount_param(payment.amount, payment_index) {
-                query_params.push(amount_p);
-            }
-
-            if let Some(memo_p) = payment
-                .memo
-                .as_ref()
-                .map(|m| render::memo_param(&m, payment_index))
-            {
-                query_params.push(memo_p);
-            }
-
-            if let Some(label_p) = payment
-                .label
-                .as_ref()
-                .map(|m| render::str_param("label", &m, payment_index))
-            {
-                query_params.push(label_p);
-            }
-
-            if let Some(message_p) = payment
-                .message
-                .as_ref()
-                .map(|m| render::str_param("message", &m, payment_index))
-            {
-                query_params.push(message_p);
-            }
-
-            for (name, value) in &payment.other_params {
-                query_params.push(render::str_param(&name, &value, payment_index))
-            }
+        ) -> impl IntoIterator<Item = String> + 'a {
+            std::iter::empty()
+                .chain(render::amount_param(payment.amount, payment_index))
+                .chain(payment.memo.as_ref().map(|m| render::memo_param(&m, payment_index)))
+                .chain(payment.label.as_ref().map(|m| render::str_param("label", &m, payment_index)))
+                .chain(payment.message.as_ref().map(|m| render::str_param("message", &m, payment_index)))
+                .chain(payment.other_params.iter().map(move |(name, value)| render::str_param(&name, &value, payment_index)))
         }
 
-        let mut query_params = vec![];
-        if self.payments.len() == 1 {
-            self.payments.get(0).map(|payment| {
-                push_params(payment, None, &mut query_params);
-                format!(
+        match &self.payments[..] {
+            [] => None,
+            [payment] => {
+                let query_params = payment_params(&payment, None).into_iter().collect::<Vec<String>>();
+
+                Some(format!(
                     "zcash:{}?{}",
                     payment.recipient_address.encode(params),
                     query_params.join("&")
-                )
-            })
-        } else {
-            for (i, payment) in (&self.payments).into_iter().enumerate() {
-                query_params.push(render::addr_param(
-                    params,
-                    &payment.recipient_address,
-                    Some(i),
-                ));
-                push_params(payment, Some(i), &mut query_params);
+                ))
             }
+            _ => {
+                let query_params = self.payments.iter().enumerate().flat_map(|(i, payment)| {
+                    let primary_address = payment.recipient_address.clone();
+                    std::iter::empty()
+                        .chain(Some(render::addr_param(params, &primary_address, Some(i))))
+                        .chain(payment_params(&payment, Some(i)))
+                }).collect::<Vec<String>>();
 
-            Some(format!("zcash:?{}", query_params.join("&")))
-        }
+                Some(format!("zcash:?{}", query_params.join("&")))
+            }
+        }     
     }
 
     /// Parse the provided URI to a payment request value.
