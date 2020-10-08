@@ -187,16 +187,38 @@ impl TransactionRequest {
         ) -> impl IntoIterator<Item = String> + 'a {
             std::iter::empty()
                 .chain(render::amount_param(payment.amount, payment_index))
-                .chain(payment.memo.as_ref().map(|m| render::memo_param(&m, payment_index)))
-                .chain(payment.label.as_ref().map(|m| render::str_param("label", &m, payment_index)))
-                .chain(payment.message.as_ref().map(|m| render::str_param("message", &m, payment_index)))
-                .chain(payment.other_params.iter().map(move |(name, value)| render::str_param(&name, &value, payment_index)))
+                .chain(
+                    payment
+                        .memo
+                        .as_ref()
+                        .map(|m| render::memo_param(&m, payment_index)),
+                )
+                .chain(
+                    payment
+                        .label
+                        .as_ref()
+                        .map(|m| render::str_param("label", &m, payment_index)),
+                )
+                .chain(
+                    payment
+                        .message
+                        .as_ref()
+                        .map(|m| render::str_param("message", &m, payment_index)),
+                )
+                .chain(
+                    payment
+                        .other_params
+                        .iter()
+                        .map(move |(name, value)| render::str_param(&name, &value, payment_index)),
+                )
         }
 
         match &self.payments[..] {
             [] => None,
             [payment] => {
-                let query_params = payment_params(&payment, None).into_iter().collect::<Vec<String>>();
+                let query_params = payment_params(&payment, None)
+                    .into_iter()
+                    .collect::<Vec<String>>();
 
                 Some(format!(
                     "zcash:{}?{}",
@@ -205,16 +227,21 @@ impl TransactionRequest {
                 ))
             }
             _ => {
-                let query_params = self.payments.iter().enumerate().flat_map(|(i, payment)| {
-                    let primary_address = payment.recipient_address.clone();
-                    std::iter::empty()
-                        .chain(Some(render::addr_param(params, &primary_address, Some(i))))
-                        .chain(payment_params(&payment, Some(i)))
-                }).collect::<Vec<String>>();
+                let query_params = self
+                    .payments
+                    .iter()
+                    .enumerate()
+                    .flat_map(|(i, payment)| {
+                        let primary_address = payment.recipient_address.clone();
+                        std::iter::empty()
+                            .chain(Some(render::addr_param(params, &primary_address, Some(i))))
+                            .chain(payment_params(&payment, Some(i)))
+                    })
+                    .collect::<Vec<String>>();
 
                 Some(format!("zcash:?{}", query_params.join("&")))
             }
-        }     
+        }
     }
 
     /// Parse the provided URI to a payment request value.
@@ -407,7 +434,7 @@ mod parse {
     pub fn to_payment(vs: Vec<Param>, i: usize) -> Result<Payment, String> {
         let addr = vs.iter().find_map(|v| match v {
             Param::Addr(a) => Some(a.clone()),
-            _otherwise => None
+            _otherwise => None,
         });
 
         let mut payment = Payment {
@@ -588,10 +615,7 @@ mod parse {
         }?;
 
         let payment_index = match iopt {
-            Some(istr) => istr
-                .parse::<usize>()
-                .map(Some)
-                .map_err(|e| e.to_string()),
+            Some(istr) => istr.parse::<usize>().map(Some).map_err(|e| e.to_string()),
             None => Ok(None),
         }?;
 
