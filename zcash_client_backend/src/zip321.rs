@@ -234,7 +234,7 @@ impl TransactionRequest {
         let mut params_by_index: HashMap<usize, Vec<parse::Param>> = HashMap::new();
 
         // Add the primary address, if any, to the index.
-        for p in primary_addr_param {
+        if let Some(p) = primary_addr_param {
             params_by_index.insert(p.payment_index, vec![p.param]);
         }
 
@@ -259,13 +259,11 @@ impl TransactionRequest {
         }
 
         // Build the actual payment values from the index.
-        let mut payments = vec![];
-        for (i, params) in params_by_index {
-            let payment = parse::to_payment(params, i)?;
-            payments.push(payment);
-        }
-
-        Ok(TransactionRequest { payments })
+        params_by_index
+            .into_iter()
+            .map(|(i, params)| parse::to_payment(params, i))
+            .collect::<Result<Vec<_>, _>>()
+            .map(|payments| TransactionRequest { payments })
     }
 }
 
@@ -317,7 +315,7 @@ mod render {
         addr: &RecipientAddress,
         idx: Option<usize>,
     ) -> String {
-        format!("address{}={}", param_index(idx), addr.encode(params),)
+        format!("address{}={}", param_index(idx), addr.encode(params))
     }
 
     pub fn amount_str(amount: Amount) -> Option<String> {
@@ -341,7 +339,7 @@ mod render {
     }
 
     pub fn memo_param(value: &RawMemo, idx: Option<usize>) -> String {
-        format!("{}{}={}", "memo", param_index(idx), memo_to_base64(value),)
+        format!("{}{}={}", "memo", param_index(idx), memo_to_base64(value))
     }
 
     pub fn str_param(label: &str, value: &str, idx: Option<usize>) -> String {
@@ -407,13 +405,10 @@ mod parse {
     }
 
     pub fn to_payment(vs: Vec<Param>, i: usize) -> Result<Payment, String> {
-        let mut addr: Option<RecipientAddress> = None;
-        for v in &vs {
-            match v {
-                Param::Addr(a) => addr = Some(a.clone()),
-                _otherwise => {}
-            }
-        }
+        let addr = vs.iter().find_map(|v| match v {
+            Param::Addr(a) => Some(a.clone()),
+            _otherwise => None
+        });
 
         let mut payment = Payment {
             recipient_address: addr.ok_or(format!("Payment {} had no recipient address.", i))?,
@@ -450,22 +445,20 @@ mod parse {
         params: &'a P,
     ) -> impl Fn(&str) -> IResult<&str, Option<IndexedParam>> + 'a {
         move |input: &str| {
-            let (input, _) = tag("zcash:")(input)?;
-            let (input, addr) = map_opt(take_until("?"), |addr_str| {
+            map_opt(preceded(tag("zcash:"), take_until("?")), |addr_str| {
                 if addr_str == "" {
                     Some(None) // no address is ok, so wrap in `Some`
                 } else {
                     // `decode` returns `None` on error, which we want to
                     // then cause `map_opt` to fail.
-                    RecipientAddress::decode(params, addr_str).map(Some)
+                    RecipientAddress::decode(params, addr_str).map(|a| {
+                        Some(IndexedParam {
+                            param: Param::Addr(a),
+                            payment_index: 0,
+                        })
+                    })
                 }
-            })(input)?;
-            let primary_addr_param = addr.map(|a| IndexedParam {
-                param: Param::Addr(a),
-                payment_index: 0,
-            });
-
-            Ok((input, primary_addr_param))
+            })(input)
         }
     }
 
@@ -485,7 +478,7 @@ mod parse {
     /// Extension for the `alphanumeric0` parser which extends that parser
     /// by also permitting the characters that are members of the `allowed`
     /// string.
-    fn alphanum_or(allowed: String) -> impl (Fn(&str) -> IResult<&str, &str>) {
+    fn alphanum_or(allowed: &str) -> impl (Fn(&str) -> IResult<&str, &str>) + '_ {
         move |input| {
             input.split_at_position_complete(|item| {
                 let c = item.as_char();
@@ -495,11 +488,11 @@ mod parse {
     }
 
     pub fn qchars(input: &str) -> IResult<&str, &str> {
-        alphanum_or("-._~!$'()*+,;:@%".to_string())(input)
+        alphanum_or("-._~!$'()*+,;:@%")(input)
     }
 
     pub fn namechars(input: &str) -> IResult<&str, &str> {
-        alphanum_or("+-".to_string())(input)
+        alphanum_or("+-")(input)
     }
 
     pub fn indexed_name(input: &str) -> IResult<&str, (&str, Option<&str>)> {
@@ -596,7 +589,6 @@ mod parse {
 
         let payment_index = match iopt {
             Some(istr) => istr
-                .to_string()
                 .parse::<usize>()
                 .map(Some)
                 .map_err(|e| e.to_string()),
@@ -843,7 +835,7 @@ mod tests {
 
     #[test]
     fn test_zip321_spec_invalid_examples() {
-        // invalid; missing `address=` or `address.0=`
+        // invalid; missing `address=`
         let invalid_1 = "zcash:?amount=3491405.05201255&address.1=ztestsapling10yy2ex5dcqkclhc7z7yrnjq2z6feyjad56ptwlfgmy77dmaqqrl9gyhprdx59qgmsnyfska2kez&amount.1=5740296.87793245";
         let i1r = TransactionRequest::from_uri(&TEST_NETWORK, &invalid_1);
         assert!(i1r.is_err());
