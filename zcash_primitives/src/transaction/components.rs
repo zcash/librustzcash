@@ -131,7 +131,11 @@ fn to_io_error(_: std::num::TryFromIntError) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, "value out of range")
 }
 
+/// Transaction encoding and decoding functions conforming to ZIP-222
+///
+/// https://zips.z.cash/zip-0222#encoding-in-transactions
 impl TzeIn {
+    /// Convenience constructor
     pub fn new(prevout: OutPoint, extension_id: u32, mode: u32) -> Self {
         TzeIn {
             prevout,
@@ -142,6 +146,11 @@ impl TzeIn {
             },
         }
     }
+
+    /// Read witness metadata & payload 
+    ///
+    /// Used to decode the encoded form used within a serialized
+    /// transaction.
     pub fn read<R: Read>(mut reader: &mut R) -> io::Result<Self> {
         let prevout = OutPoint::read(&mut reader)?;
 
@@ -159,6 +168,10 @@ impl TzeIn {
         })
     }
 
+    /// Write without witness data (for signature hashing)
+    ///
+    /// This is also used as the prefix for the encoded form used
+    /// within a serialized transaction.
     pub fn write_without_witness<W: Write>(&self, mut writer: W) -> io::Result<()> {
         self.prevout.write(&mut writer)?;
 
@@ -173,6 +186,11 @@ impl TzeIn {
         )
     }
 
+    /// Write prevout, extension, and mode followed by witness data.
+    ///
+    /// This calls [`write_without_witness`] to serialize witness metadata,
+    /// then appends the witness bytes themselves. This is the encoded
+    /// form that is used in a serialized transaction.
     pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
         self.write_without_witness(&mut writer)?;
         Vector::write(&mut writer, &self.witness.payload, |w, b| w.write_u8(*b))
