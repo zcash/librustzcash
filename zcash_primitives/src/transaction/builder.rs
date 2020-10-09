@@ -201,9 +201,9 @@ impl TransparentInputs {
             return Err(Error::InvalidAmount);
         }
 
-        // ensure that the ripemd160 digest of the public key associated with the
+        // Ensure that the RIPEMD-160 digest of the public key associated with the
         // provided secret key matches that of the address to which the provided
-        // output may be spent
+        // output may be spent.
         let pubkey = secp256k1::PublicKey::from_secret_key(&self.secp, &sk).serialize();
         match coin.script_pubkey.address() {
             Some(TransparentAddress::PublicKey(hash)) => {
@@ -756,7 +756,7 @@ impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng> Builder<'a, P, R> {
         }
 
         //
-        // Signatures -- all effects must have been applied.
+        // Signatures -- everything but the signatures must already have been added.
         //
 
         let mut sighash = [0u8; 32];

@@ -1,6 +1,6 @@
 [package]
 name = "zcash_extensions"
-description = "TBD"
+description = "Zcash Extension implementations & consensus node integration layer."
 version = "0.0.0"
 authors = ["Jack Grigg <jack@z.cash>", "Kris Nuttycombe <kris@z.cash>"]
 homepage = "https://github.com/zcash/librustzcash"
