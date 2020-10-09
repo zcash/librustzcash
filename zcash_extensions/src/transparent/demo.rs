@@ -132,14 +132,12 @@ impl FromPayload for Precondition {
             open::MODE => payload
                 .try_into()
                 .map_err(|_| Error::IllegalPayloadLength(payload.len()))
-                .map(open::Precondition)
-                .map(Precondition::Open),
+                .map(Precondition::open),
 
             close::MODE => payload
                 .try_into()
                 .map_err(|_| Error::IllegalPayloadLength(payload.len()))
-                .map(close::Precondition)
-                .map(Precondition::Close),
+                .map(Precondition::close),
 
             _ => Err(Error::ModeInvalid(mode)),
         }
@@ -192,14 +190,12 @@ impl FromPayload for Witness {
             open::MODE => payload
                 .try_into()
                 .map_err(|_| Error::IllegalPayloadLength(payload.len()))
-                .map(open::Witness)
-                .map(Witness::Open),
+                .map(Witness::open),
 
             close::MODE => payload
                 .try_into()
                 .map_err(|_| Error::IllegalPayloadLength(payload.len()))
-                .map(close::Witness)
-                .map(Witness::Close),
+                .map(Witness::close),
 
             _ => Err(Error::ModeInvalid(mode)),
         }
@@ -276,10 +272,13 @@ impl<C: Context> Extension<C> for Program {
                         Ok(Precondition::Close(p_close)) => {
                             // Finally, check the precondition:
                             // precondition_open = BLAKE2b_256(witness_open || precondition_close)
-                            let mut h = Params::new().hash_length(32).to_state();
-                            h.update(&w_open.0);
-                            h.update(&p_close.0);
-                            let hash = h.finalize();
+                            let hash = Params::new()
+                                .hash_length(32)
+                                .personal(b"demo_pc_h1_perso")
+                                .to_state()
+                                .update(&w_open.0)
+                                .update(&p_close.0)
+                                .finalize();
                             if hash.as_bytes() == p_open.0 {
                                 Ok(())
                             } else {
@@ -295,7 +294,10 @@ impl<C: Context> Extension<C> for Program {
             (Precondition::Close(p), Witness::Close(w)) => {
                 // In CLOSE mode, we only require that the precondition is satisfied:
                 // precondition_close = BLAKE2b_256(witness_close)
-                let hash = Params::new().hash_length(32).hash(&w.0);
+                let hash = Params::new()
+                    .hash_length(32)
+                    .personal(b"demo_pc_h2_perso")
+                    .hash(&w.0);
                 if hash.as_bytes() == p.0 {
                     Ok(())
                 } else {
@@ -312,6 +314,7 @@ fn hash_1(preimage_1: &[u8; 32], hash_2: &[u8; 32]) -> [u8; 32] {
     hash.copy_from_slice(
         Params::new()
             .hash_length(32)
+            .personal(b"demo_pc_h1_perso")
             .to_state()
             .update(preimage_1)
             .update(hash_2)
@@ -418,7 +421,8 @@ impl<'a, B: ExtensionTxBuilder<'a>> DemoBuilder<&mut B> {
     ) -> Result<(), DemoBuildError<B::BuildError>> {
         let hash_2 = {
             let mut hash = [0; 32];
-            hash.copy_from_slice(Params::new().hash_length(32).hash(&preimage_2).as_bytes());
+            hash.copy_from_slice(Params::new().hash_length(32).personal(b"demo_pc_h2_perso").hash(&preimage_2).as_bytes());
+            
             hash
         };
 
@@ -476,7 +480,7 @@ mod tests {
     fn demo_hashes(preimage_1: &[u8; 32], preimage_2: &[u8; 32]) -> ([u8; 32], [u8; 32]) {
         let hash_2 = {
             let mut hash = [0; 32];
-            hash.copy_from_slice(Params::new().hash_length(32).hash(preimage_2).as_bytes());
+            hash.copy_from_slice(Params::new().hash_length(32).personal(b"demo_pc_h2_perso").hash(preimage_2).as_bytes());
             hash
         };
 
@@ -513,7 +517,7 @@ mod tests {
     fn witness_open_round_trip() {
         let data = vec![7; 32];
         let w = Witness::from_payload(open::MODE, &data).unwrap();
-        assert_eq!(w, Witness::Open(open::Witness([7; 32])));
+        assert_eq!(w, Witness::open([7; 32]));
         assert_eq!(w.to_payload(), (open::MODE, data));
     }
 
@@ -521,7 +525,7 @@ mod tests {
     fn witness_close_round_trip() {
         let data = vec![7; 32];
         let p = Witness::from_payload(close::MODE, &data).unwrap();
-        assert_eq!(p, Witness::Close(close::Witness([7; 32])));
+        assert_eq!(p, Witness::close([7; 32]));
         assert_eq!(p.to_payload(), (close::MODE, data));
     }
 
@@ -563,7 +567,13 @@ mod tests {
 
         let hash_2 = {
             let mut hash = [0; 32];
-            hash.copy_from_slice(Params::new().hash_length(32).hash(&preimage_2).as_bytes());
+            hash.copy_from_slice(
+                Params::new()
+                .hash_length(32)
+                .personal(b"demo_pc_h2_perso")
+                .hash(&preimage_2)
+                .as_bytes()
+            );
             hash
         };
 
@@ -572,6 +582,7 @@ mod tests {
             hash.copy_from_slice(
                 Params::new()
                     .hash_length(32)
+                    .personal(b"demo_pc_h1_perso")
                     .to_state()
                     .update(&preimage_1)
                     .update(&hash_2)
