@@ -149,7 +149,7 @@ impl Sum for Amount {
 
 #[cfg(any(test, feature = "test-dependencies"))]
 pub mod testing {
-    use proptest::prelude::*;
+    use proptest::prelude::prop_compose;
 
     use super::{Amount, MAX_MONEY};
 

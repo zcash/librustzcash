@@ -630,7 +630,7 @@ mod parse {
 pub mod testing {
     use proptest::collection::vec;
     use proptest::option;
-    use proptest::prelude::*;
+    use proptest::prelude::{any, prop_compose, prop_oneof};
     use proptest::strategy::Strategy;
     use zcash_primitives::{
         consensus::TEST_NETWORK, keys::testing::arb_shielded_addr,
@@ -722,7 +722,7 @@ mod tests {
     use crate::encoding::decode_payment_address;
 
     #[cfg(all(test, feature = "test-dependencies"))]
-    use proptest::prelude::*;
+    use proptest::prelude::{any, proptest};
 
     #[cfg(all(test, feature = "test-dependencies"))]
     use zcash_primitives::transaction::components::amount::testing::arb_nonnegative_amount;

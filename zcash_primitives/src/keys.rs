@@ -183,7 +183,7 @@ impl FullViewingKey {
 #[cfg(any(test, feature = "test-dependencies"))]
 pub mod testing {
     use proptest::collection::vec;
-    use proptest::prelude::*;
+    use proptest::prelude::{any, prop_compose};
 
     use crate::{
         primitives::PaymentAddress,

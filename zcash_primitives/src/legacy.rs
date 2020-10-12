@@ -125,7 +125,7 @@ impl TransparentAddress {
 
 #[cfg(any(test, feature = "test-dependencies"))]
 pub mod testing {
-    use proptest::prelude::*;
+    use proptest::prelude::{any, prop_compose};
 
     use super::TransparentAddress;
 
