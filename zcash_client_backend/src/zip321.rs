@@ -21,11 +21,11 @@ pub enum MemoError {
 }
 
 impl RawMemo {
-    // Construct a memo from a vector of bytes.
     pub fn from_str(s: &str) -> Result<Self, MemoError> {
         RawMemo::from_bytes(s.as_bytes())
     }
 
+    // Construct a raw memo from a vector of bytes.
     pub fn from_bytes(v: &[u8]) -> Result<Self, MemoError> {
         if v.len() > 512 {
             Err(MemoError::LengthExceeded(v.len()))
