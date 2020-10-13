@@ -790,14 +790,9 @@ impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng> Builder<'a, P, R> {
 
         // Create TZE input witnesses
         for (i, tze_in) in self.tze_inputs.builders.into_iter().enumerate() {
-            // Need to enable witness to commit to the amount.
-            // - So hardware wallets "know" the amount without having to be sent all the
-            //   prior TZE outputs to which this witness gives evidence.
-            //
-            // The witness is expected to commit to the precommitment internally?
-            // (Or make it part of the sighash?)
-            // - TODO: Check whether transparent inputs committing to script_pubkey was
-            //   only so that hardware wallets "knew" what address was being spent from.
+            // The witness builder function should have cached/closed over whatever data was necessary for the
+            // witness to commit to at the time it was added to the transaction builder; here, it then computes those
+            // commitments.
             let (mode, payload) = (tze_in.builder)(&self.mtx)?;
             let mut current = self.mtx.tze_inputs.get_mut(i).unwrap();
             if mode != current.witness.mode {
