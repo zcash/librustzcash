@@ -421,8 +421,14 @@ impl<'a, B: ExtensionTxBuilder<'a>> DemoBuilder<&mut B> {
     ) -> Result<(), DemoBuildError<B::BuildError>> {
         let hash_2 = {
             let mut hash = [0; 32];
-            hash.copy_from_slice(Params::new().hash_length(32).personal(b"demo_pc_h2_perso").hash(&preimage_2).as_bytes());
-            
+            hash.copy_from_slice(
+                Params::new()
+                    .hash_length(32)
+                    .personal(b"demo_pc_h2_perso")
+                    .hash(&preimage_2)
+                    .as_bytes(),
+            );
+
             hash
         };
 
@@ -480,7 +486,13 @@ mod tests {
     fn demo_hashes(preimage_1: &[u8; 32], preimage_2: &[u8; 32]) -> ([u8; 32], [u8; 32]) {
         let hash_2 = {
             let mut hash = [0; 32];
-            hash.copy_from_slice(Params::new().hash_length(32).personal(b"demo_pc_h2_perso").hash(preimage_2).as_bytes());
+            hash.copy_from_slice(
+                Params::new()
+                    .hash_length(32)
+                    .personal(b"demo_pc_h2_perso")
+                    .hash(preimage_2)
+                    .as_bytes(),
+            );
             hash
         };
 
@@ -569,10 +581,10 @@ mod tests {
             let mut hash = [0; 32];
             hash.copy_from_slice(
                 Params::new()
-                .hash_length(32)
-                .personal(b"demo_pc_h2_perso")
-                .hash(&preimage_2)
-                .as_bytes()
+                    .hash_length(32)
+                    .personal(b"demo_pc_h2_perso")
+                    .hash(&preimage_2)
+                    .as_bytes(),
             );
             hash
         };

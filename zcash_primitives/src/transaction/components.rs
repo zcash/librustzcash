@@ -147,7 +147,7 @@ impl TzeIn {
         }
     }
 
-    /// Read witness metadata & payload 
+    /// Read witness metadata & payload
     ///
     /// Used to decode the encoded form used within a serialized
     /// transaction.
