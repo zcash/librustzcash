@@ -31,10 +31,7 @@ use crate::{
 };
 
 #[cfg(feature = "transparent-inputs")]
-use crate::{
-    legacy::Script,
-    transaction::components::{OutPoint, TxIn},
-};
+use crate::{legacy::Script, transaction::components::TxIn};
 
 const DEFAULT_TX_EXPIRY_DELTA: u32 = 20;
 
@@ -510,7 +507,7 @@ impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng> Builder<'a, P, R> {
     ) -> Result<(), Error> {
         self.transparent_inputs.push(sk, coin)?;
         self.mtx.vin.push(TxIn::new(utxo));
-        Ok(());
+        Ok(())
     }
 
     /// Adds a transparent address to send funds to.
