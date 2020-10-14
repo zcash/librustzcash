@@ -36,7 +36,7 @@ pub struct Signature {
 
 pub struct PrivateKey(pub jubjub::Fr);
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct PublicKey(pub ExtendedPoint);
 
 impl Signature {

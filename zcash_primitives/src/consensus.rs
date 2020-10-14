@@ -1,4 +1,4 @@
-//! Consensus parameters.
+//! Consensus logic and parameters.
 
 use std::cmp::{Ord, Ordering};
 use std::convert::TryFrom;
@@ -164,6 +164,7 @@ impl Parameters for MainNetwork {
             NetworkUpgrade::Blossom => Some(BlockHeight(653_600)),
             NetworkUpgrade::Heartwood => Some(BlockHeight(903_000)),
             NetworkUpgrade::Canopy => Some(BlockHeight(1_046_400)),
+            NetworkUpgrade::ZFuture => None,
         }
     }
 
@@ -198,6 +199,7 @@ impl Parameters for TestNetwork {
             NetworkUpgrade::Blossom => Some(BlockHeight(584_000)),
             NetworkUpgrade::Heartwood => Some(BlockHeight(903_800)),
             NetworkUpgrade::Canopy => Some(BlockHeight(1_028_500)),
+            NetworkUpgrade::ZFuture => None,
         }
     }
 
@@ -287,6 +289,12 @@ pub enum NetworkUpgrade {
     ///
     /// [Canopy]: https://z.cash/upgrade/canopy/
     Canopy,
+    /// The [ZFUTURE] network upgrade.
+    ///
+    /// This upgrade is expected never to activate on mainnet;
+    /// it is intended for use in integration testing of functionality
+    /// that is a candidate for integration in a future network upgrade.
+    ZFuture,
 }
 
 impl fmt::Display for NetworkUpgrade {
@@ -297,6 +305,7 @@ impl fmt::Display for NetworkUpgrade {
             NetworkUpgrade::Blossom => write!(f, "Blossom"),
             NetworkUpgrade::Heartwood => write!(f, "Heartwood"),
             NetworkUpgrade::Canopy => write!(f, "Canopy"),
+            NetworkUpgrade::ZFuture => write!(f, "ZFUTURE"),
         }
     }
 }
@@ -309,6 +318,7 @@ impl NetworkUpgrade {
             NetworkUpgrade::Blossom => BranchId::Blossom,
             NetworkUpgrade::Heartwood => BranchId::Heartwood,
             NetworkUpgrade::Canopy => BranchId::Canopy,
+            NetworkUpgrade::ZFuture => BranchId::ZFuture,
         }
     }
 }
@@ -354,6 +364,9 @@ pub enum BranchId {
     Heartwood,
     /// The consensus rules deployed by [`NetworkUpgrade::Canopy`].
     Canopy,
+    /// Candidates for future consensus rules; this branch will never
+    /// activate on mainnet.
+    ZFuture,
 }
 
 impl TryFrom<u32> for BranchId {
@@ -367,6 +380,7 @@ impl TryFrom<u32> for BranchId {
             0x2bb4_0e60 => Ok(BranchId::Blossom),
             0xf5b9_230b => Ok(BranchId::Heartwood),
             0xe9ff_75a6 => Ok(BranchId::Canopy),
+            0xffff_ffff => Ok(BranchId::ZFuture),
             _ => Err("Unknown consensus branch ID"),
         }
     }
@@ -381,6 +395,7 @@ impl From<BranchId> for u32 {
             BranchId::Blossom => 0x2bb4_0e60,
             BranchId::Heartwood => 0xf5b9_230b,
             BranchId::Canopy => 0xe9ff_75a6,
+            BranchId::ZFuture => 0xffff_ffff,
         }
     }
 }
