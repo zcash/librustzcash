@@ -7,7 +7,7 @@ use protobuf::parse_from_bytes;
 use rusqlite::{types::ToSql, Connection, OptionalExtension, NO_PARAMS};
 
 use zcash_client_backend::{
-    decrypt_transaction, encoding::decode_extended_full_viewing_key,
+    address::RecipientAddress, decrypt_transaction, encoding::decode_extended_full_viewing_key,
     proto::compact_formats::CompactBlock, welding_rig::scan_block,
 };
 use zcash_primitives::{
@@ -17,10 +17,7 @@ use zcash_primitives::{
     transaction::Transaction,
 };
 
-use crate::{
-    address::RecipientAddress,
-    error::{Error, ErrorKind},
-};
+use crate::error::{Error, ErrorKind};
 
 struct CompactBlockRow {
     height: BlockHeight,

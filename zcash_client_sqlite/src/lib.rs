@@ -34,7 +34,6 @@ use zcash_primitives::{
 
 use zcash_client_backend::encoding::encode_payment_address;
 
-pub mod address;
 pub mod chain;
 pub mod error;
 pub mod init;

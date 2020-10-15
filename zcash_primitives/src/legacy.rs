@@ -96,7 +96,7 @@ impl Shl<&[u8]> for Script {
 }
 
 /// A transparent address corresponding to either a public key or a `Script`.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, PartialOrd, Hash, Clone)]
 pub enum TransparentAddress {
     PublicKey([u8; 20]),
     Script([u8; 20]),
@@ -119,6 +119,19 @@ impl TransparentAddress {
                 // P2SH script
                 Script::default() << OpCode::Hash160 << &script_id[..] << OpCode::Equal
             }
+        }
+    }
+}
+
+#[cfg(any(test, feature = "test-dependencies"))]
+pub mod testing {
+    use proptest::prelude::{any, prop_compose};
+
+    use super::TransparentAddress;
+
+    prop_compose! {
+        pub fn arb_transparent_addr()(v in proptest::array::uniform20(any::<u8>())) -> TransparentAddress {
+            TransparentAddress::PublicKey(v)
         }
     }
 }

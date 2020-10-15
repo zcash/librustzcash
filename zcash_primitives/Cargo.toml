@@ -30,6 +30,7 @@ hex = "0.4"
 jubjub = "0.5.1"
 lazy_static = "1"
 log = "0.4"
+proptest = { version = "0.10.1", optional = true }
 rand = "0.7"
 rand_core = "0.5.1"
 ripemd160 = { version = "0.9", optional = true }
@@ -40,11 +41,12 @@ subtle = "2.2.3"
 [dev-dependencies]
 criterion = "0.3"
 hex-literal = "0.2"
-rand_xorshift = "0.2"
 proptest = "0.10.1"
+rand_xorshift = "0.2"
 
 [features]
 transparent-inputs = ["ripemd160", "secp256k1"]
+test-dependencies = ["proptest"]
 
 [[bench]]
 name = "note_decryption"
