@@ -15,7 +15,7 @@ use zcash_primitives::{
 
 use crate::{
     address::RecipientAddress,
-    data_api::{error::Error, DBOps, DBUpdate},
+    data_api::{error::Error, WalletRead, WalletWrite},
     decrypt_transaction,
     wallet::{AccountId, OvkPolicy},
 };
@@ -32,7 +32,7 @@ pub fn decrypt_and_store_transaction<'db, E0, N, E, P, D>(
 where
     E: From<Error<E0, N>>,
     P: consensus::Parameters,
-    &'db D: DBOps<Error = E>,
+    &'db D: WalletRead<Error = E>,
 {
     // Fetch the ExtendedFullViewingKeys we are tracking
     let extfvks = data.get_extended_full_viewing_keys(params)?;
@@ -159,7 +159,7 @@ where
     E0: Into<Error<E, N>>,
     P: consensus::Parameters + Clone,
     R: Copy + Debug,
-    &'db D: DBOps<Error = E0, TxRef = R>,
+    &'db D: WalletRead<Error = E0, TxRef = R>,
 {
     // Check that the ExtendedSpendingKey we have been given corresponds to the
     // ExtendedFullViewingKey for the account we are spending from.

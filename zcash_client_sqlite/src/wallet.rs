@@ -446,7 +446,7 @@ mod tests {
         zip32::{ExtendedFullViewingKey, ExtendedSpendingKey},
     };
 
-    use zcash_client_backend::data_api::DBOps;
+    use zcash_client_backend::data_api::WalletRead;
 
     use crate::{
         tests,

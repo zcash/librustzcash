@@ -9,7 +9,7 @@ use zcash_primitives::{
 use crate::{
     data_api::{
         error::{ChainInvalid, Error},
-        CacheOps, DBOps, DBUpdate,
+        BlockSource, WalletRead, WalletWrite,
     },
     proto::compact_formats::CompactBlock,
     wallet::{AccountId, WalletTx},
@@ -41,12 +41,12 @@ use crate::{
 pub fn validate_combined_chain<'db, E0, N, E, P, C>(
     parameters: &P,
     cache: &C,
-    validate_from: Option<(BlockHeight, BlockHash)>
+    validate_from: Option<(BlockHeight, BlockHash)>,
 ) -> Result<(), E>
 where
     E: From<Error<E0, N>>,
     P: consensus::Parameters,
-    C: CacheOps<Error = E>,
+    C: BlockSource<Error = E>,
 {
     let sapling_activation_height = parameters
         .activation_height(NetworkUpgrade::Sapling)
@@ -56,7 +56,9 @@ where
     // height up to the chain tip, returning the hash of the block found in the cache at the
     // `validate_from` height, which can then be used to verify chain integrity by comparing
     // against the `validate_from` hash.
-    let from_height = validate_from.map(|(height, _)| height).unwrap_or(sapling_activation_height - 1);
+    let from_height = validate_from
+        .map(|(height, _)| height)
+        .unwrap_or(sapling_activation_height - 1);
     let scan_start_hash = cache.validate_chain(from_height, |top_block, next_block| {
         if next_block.height() != top_block.height() - 1 {
             Err(
@@ -137,8 +139,8 @@ pub fn scan_cached_blocks<'db, E, E0, N, P, C, D>(
 ) -> Result<(), E>
 where
     P: consensus::Parameters,
-    C: CacheOps<Error = E>,
-    &'db D: DBOps<Error = E, NoteRef = N>,
+    C: BlockSource<Error = E>,
+    &'db D: WalletRead<Error = E, NoteRef = N>,
     N: Copy + Debug,
     E: From<Error<E0, N>>,
 {

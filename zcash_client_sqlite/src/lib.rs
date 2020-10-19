@@ -44,7 +44,7 @@ use zcash_primitives::{
 
 use zcash_client_backend::{
     address::RecipientAddress,
-    data_api::{error::Error, CacheOps, DBOps, DBUpdate, ShieldedOutput},
+    data_api::{error::Error, BlockSource, ShieldedOutput, WalletRead, WalletWrite},
     encoding::encode_payment_address,
     proto::compact_formats::CompactBlock,
     wallet::{AccountId, SpendableNote, WalletTx},
@@ -74,7 +74,7 @@ impl DataConnection {
     }
 }
 
-impl<'a> DBOps for &'a DataConnection {
+impl<'a> WalletRead for &'a DataConnection {
     type Error = SqliteClientError;
     type NoteRef = NoteId;
     type TxRef = i64;
@@ -266,7 +266,7 @@ pub struct DataConnStmtCache<'a> {
     stmt_update_expired: Statement<'a>,
 }
 
-impl<'a> DBUpdate for DataConnStmtCache<'a> {
+impl<'a> WalletWrite for DataConnStmtCache<'a> {
     type Error = SqliteClientError;
     type TxRef = i64;
     type NoteRef = NoteId;
@@ -544,7 +544,7 @@ impl CacheConnection {
     }
 }
 
-impl CacheOps for CacheConnection {
+impl BlockSource for CacheConnection {
     type Error = SqliteClientError;
 
     fn init_cache(&self) -> Result<(), Self::Error> {

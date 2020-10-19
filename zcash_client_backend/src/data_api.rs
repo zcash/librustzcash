@@ -24,11 +24,11 @@ pub mod chain;
 pub mod error;
 pub mod wallet;
 
-pub trait DBOps {
+pub trait WalletRead {
     type Error;
     type NoteRef: Copy + Debug; // Backend-specific note identifier
     type TxRef: Copy + Debug;
-    type UpdateOps: DBUpdate<Error = Self::Error, NoteRef = Self::NoteRef, TxRef = Self::TxRef>;
+    type UpdateOps: WalletWrite<Error = Self::Error, NoteRef = Self::NoteRef, TxRef = Self::TxRef>;
 
     fn block_height_extrema(&self) -> Result<Option<(BlockHeight, BlockHeight)>, Self::Error>;
 
@@ -54,13 +54,16 @@ pub trait DBOps {
     fn get_block_hash(&self, block_height: BlockHeight) -> Result<Option<BlockHash>, Self::Error>;
 
     fn get_max_height_hash(&self) -> Result<Option<(BlockHeight, BlockHash)>, Self::Error> {
-        self.block_height_extrema().and_then(|extrema_opt| {
-            extrema_opt.map(|(_, max_height)| {
-                self.get_block_hash(max_height).map(|hash_opt|
-                    hash_opt.map(move |hash| (max_height, hash))
-                )
-            }).transpose()
-        }).map(|oo| oo.flatten())
+        self.block_height_extrema()
+            .and_then(|extrema_opt| {
+                extrema_opt
+                    .map(|(_, max_height)| {
+                        self.get_block_hash(max_height)
+                            .map(|hash_opt| hash_opt.map(move |hash| (max_height, hash)))
+                    })
+                    .transpose()
+            })
+            .map(|oo| oo.flatten())
     }
 
     fn get_tx_height(&self, txid: TxId) -> Result<Option<BlockHeight>, Self::Error>;
@@ -120,7 +123,7 @@ pub trait DBOps {
     fn get_update_ops(&self) -> Result<Self::UpdateOps, Self::Error>;
 }
 
-pub trait DBUpdate {
+pub trait WalletWrite {
     type Error;
     type NoteRef: Copy;
     type TxRef: Copy;
@@ -194,7 +197,7 @@ pub trait DBUpdate {
     ) -> Result<(), Self::Error>;
 }
 
-pub trait CacheOps {
+pub trait BlockSource {
     type Error;
 
     fn init_cache(&self) -> Result<(), Self::Error>;

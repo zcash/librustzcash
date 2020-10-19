@@ -137,7 +137,7 @@ mod tests {
     use zcash_proofs::prover::LocalTxProver;
 
     use zcash_client_backend::{
-        data_api::{chain::scan_cached_blocks, wallet::create_spend_to_address, DBOps},
+        data_api::{chain::scan_cached_blocks, wallet::create_spend_to_address, WalletRead},
         wallet::OvkPolicy,
     };
 

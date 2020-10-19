@@ -10,7 +10,7 @@
 //!
 //! use zcash_client_backend::{
 //!     data_api::{
-//!         DBOps,
+//!         WalletRead,
 //!         chain::{
 //!             validate_combined_chain,
 //!             scan_cached_blocks,
@@ -193,7 +193,7 @@ mod tests {
         zip32::{ExtendedFullViewingKey, ExtendedSpendingKey},
     };
 
-    use zcash_client_backend::data_api::DBOps;
+    use zcash_client_backend::data_api::WalletRead;
     use zcash_client_backend::data_api::{
         chain::{scan_cached_blocks, validate_combined_chain},
         error::{ChainInvalid, Error},
@@ -229,7 +229,12 @@ mod tests {
         init_accounts_table(&db_data, &tests::network(), &[extfvk.clone()]).unwrap();
 
         // Empty chain should be valid
-        validate_combined_chain(&tests::network(), &db_cache, (&db_data).get_max_height_hash().unwrap()).unwrap();
+        validate_combined_chain(
+            &tests::network(),
+            &db_cache,
+            (&db_data).get_max_height_hash().unwrap(),
+        )
+        .unwrap();
 
         // Create a fake CompactBlock sending value to the address
         let (cb, _) = fake_compact_block(
@@ -241,13 +246,23 @@ mod tests {
         insert_into_cache(&db_cache, &cb);
 
         // Cache-only chain should be valid
-        validate_combined_chain(&tests::network(), &db_cache, (&db_data).get_max_height_hash().unwrap()).unwrap();
+        validate_combined_chain(
+            &tests::network(),
+            &db_cache,
+            (&db_data).get_max_height_hash().unwrap(),
+        )
+        .unwrap();
 
         // Scan the cache
         scan_cached_blocks(&tests::network(), &db_cache, &db_data, None).unwrap();
 
         // Data-only chain should be valid
-        validate_combined_chain(&tests::network(), &db_cache, (&db_data).get_max_height_hash().unwrap()).unwrap();
+        validate_combined_chain(
+            &tests::network(),
+            &db_cache,
+            (&db_data).get_max_height_hash().unwrap(),
+        )
+        .unwrap();
 
         // Create a second fake CompactBlock sending more value to the address
         let (cb2, _) = fake_compact_block(
@@ -259,13 +274,23 @@ mod tests {
         insert_into_cache(&db_cache, &cb2);
 
         // Data+cache chain should be valid
-        validate_combined_chain(&tests::network(), &db_cache, (&db_data).get_max_height_hash().unwrap()).unwrap();
+        validate_combined_chain(
+            &tests::network(),
+            &db_cache,
+            (&db_data).get_max_height_hash().unwrap(),
+        )
+        .unwrap();
 
         // Scan the cache again
         scan_cached_blocks(&tests::network(), &db_cache, &db_data, None).unwrap();
 
         // Data-only chain should be valid
-        validate_combined_chain(&tests::network(), &db_cache, (&db_data).get_max_height_hash().unwrap()).unwrap();
+        validate_combined_chain(
+            &tests::network(),
+            &db_cache,
+            (&db_data).get_max_height_hash().unwrap(),
+        )
+        .unwrap();
     }
 
     #[test]
@@ -303,7 +328,12 @@ mod tests {
         scan_cached_blocks(&tests::network(), &db_cache, &db_data, None).unwrap();
 
         // Data-only chain should be valid
-        validate_combined_chain(&tests::network(), &db_cache, (&db_data).get_max_height_hash().unwrap()).unwrap();
+        validate_combined_chain(
+            &tests::network(),
+            &db_cache,
+            (&db_data).get_max_height_hash().unwrap(),
+        )
+        .unwrap();
 
         // Create more fake CompactBlocks that don't connect to the scanned ones
         let (cb3, _) = fake_compact_block(
@@ -322,7 +352,13 @@ mod tests {
         insert_into_cache(&db_cache, &cb4);
 
         // Data+cache chain should be invalid at the data/cache boundary
-        match validate_combined_chain(&tests::network(), &db_cache, (&db_data).get_max_height_hash().unwrap()).map_err(|e| e.0) {
+        match validate_combined_chain(
+            &tests::network(),
+            &db_cache,
+            (&db_data).get_max_height_hash().unwrap(),
+        )
+        .map_err(|e| e.0)
+        {
             Err(Error::InvalidChain(upper_bound, _)) => {
                 assert_eq!(upper_bound, sapling_activation_height() + 1)
             }
@@ -365,7 +401,12 @@ mod tests {
         scan_cached_blocks(&tests::network(), &db_cache, &db_data, None).unwrap();
 
         // Data-only chain should be valid
-        validate_combined_chain(&tests::network(), &db_cache, (&db_data).get_max_height_hash().unwrap()).unwrap();
+        validate_combined_chain(
+            &tests::network(),
+            &db_cache,
+            (&db_data).get_max_height_hash().unwrap(),
+        )
+        .unwrap();
 
         // Create more fake CompactBlocks that contain a reorg
         let (cb3, _) = fake_compact_block(
@@ -384,7 +425,13 @@ mod tests {
         insert_into_cache(&db_cache, &cb4);
 
         // Data+cache chain should be invalid inside the cache
-        match validate_combined_chain(&tests::network(), &db_cache, (&db_data).get_max_height_hash().unwrap()).map_err(|e| e.0) {
+        match validate_combined_chain(
+            &tests::network(),
+            &db_cache,
+            (&db_data).get_max_height_hash().unwrap(),
+        )
+        .map_err(|e| e.0)
+        {
             Err(Error::InvalidChain(upper_bound, _)) => {
                 assert_eq!(upper_bound, sapling_activation_height() + 2)
             }
