@@ -53,6 +53,16 @@ pub trait DBOps {
 
     fn get_block_hash(&self, block_height: BlockHeight) -> Result<Option<BlockHash>, Self::Error>;
 
+    fn get_max_height_hash(&self) -> Result<Option<(BlockHeight, BlockHash)>, Self::Error> {
+        self.block_height_extrema().and_then(|extrema_opt| {
+            extrema_opt.map(|(_, max_height)| {
+                self.get_block_hash(max_height).map(|hash_opt|
+                    hash_opt.map(move |hash| (max_height, hash))
+                )
+            }).transpose()
+        }).map(|oo| oo.flatten())
+    }
+
     fn get_tx_height(&self, txid: TxId) -> Result<Option<BlockHeight>, Self::Error>;
 
     fn get_address<P: consensus::Parameters>(
