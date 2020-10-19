@@ -12,12 +12,12 @@ use crate::wallet::AccountId;
 pub enum ChainInvalid {
     PrevHashMismatch,
     /// (expected_height, actual_height)
-    BlockHeightMismatch(BlockHeight),
+    BlockHeightDiscontinuity(BlockHeight),
 }
 
 #[derive(Debug)]
 pub enum Error<DbError, NoteId> {
-    CorruptedData(&'static str),
+    CorruptedData(String),
     IncorrectHRPExtFVK,
     InsufficientBalance(Amount, Amount),
     InvalidChain(BlockHeight, ChainInvalid),
@@ -42,8 +42,11 @@ impl ChainInvalid {
         Error::InvalidChain(at_height, ChainInvalid::PrevHashMismatch)
     }
 
-    pub fn block_height_mismatch<E, N>(at_height: BlockHeight, found: BlockHeight) -> Error<E, N> {
-        Error::InvalidChain(at_height, ChainInvalid::BlockHeightMismatch(found))
+    pub fn block_height_discontinuity<E, N>(
+        at_height: BlockHeight,
+        found: BlockHeight,
+    ) -> Error<E, N> {
+        Error::InvalidChain(at_height, ChainInvalid::BlockHeightDiscontinuity(found))
     }
 }
 

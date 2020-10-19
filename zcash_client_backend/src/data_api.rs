@@ -202,26 +202,14 @@ pub trait BlockSource {
 
     fn init_cache(&self) -> Result<(), Self::Error>;
 
-    // Validate the cached chain by applying a function that checks pairwise constraints
-    // (top_block :: &CompactBlock, next_block :: &CompactBlock) -> Result<(), Self::Error)
-    // beginning with the current maximum height walking backward through the chain, terminating
-    // with the block at `from_height`. Returns the hash of the block at height `from_height`
-    fn validate_chain<F>(
-        &self,
-        from_height: BlockHeight,
-        validate: F,
-    ) -> Result<Option<BlockHash>, Self::Error>
-    where
-        F: Fn(&CompactBlock, &CompactBlock) -> Result<(), Self::Error>;
-
-    fn with_cached_blocks<F>(
+    fn with_blocks<F>(
         &self,
         from_height: BlockHeight,
         limit: Option<u32>,
         with_row: F,
     ) -> Result<(), Self::Error>
     where
-        F: FnMut(BlockHeight, CompactBlock) -> Result<(), Self::Error>;
+        F: FnMut(CompactBlock) -> Result<(), Self::Error>;
 }
 
 pub trait ShieldedOutput {

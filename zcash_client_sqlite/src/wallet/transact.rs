@@ -77,7 +77,7 @@ pub fn select_spendable_notes(
                 let d: Vec<_> = row.get(0)?;
                 if d.len() != 11 {
                     return Err(SqliteClientError(Error::CorruptedData(
-                        "Invalid diversifier length",
+                        "Invalid diversifier length".to_string(),
                     )));
                 }
                 let mut tmp = [0; 11];

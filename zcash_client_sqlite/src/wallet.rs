@@ -139,7 +139,7 @@ pub fn get_balance(data: &DataConnection, account: AccountId) -> Result<Amount, 
     match Amount::from_i64(balance) {
         Ok(amount) if !amount.is_negative() => Ok(amount),
         _ => Err(SqliteClientError(Error::CorruptedData(
-            "Sum of values in received_notes is out of range",
+            "Sum of values in received_notes is out of range".to_string(),
         ))),
     }
 }
@@ -178,7 +178,7 @@ pub fn get_verified_balance(
     match Amount::from_i64(balance) {
         Ok(amount) if !amount.is_negative() => Ok(amount),
         _ => Err(SqliteClientError(Error::CorruptedData(
-            "Sum of values in received_notes is out of range",
+            "Sum of values in received_notes is out of range".to_string(),
         ))),
     }
 }

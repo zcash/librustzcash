@@ -12,7 +12,7 @@
 //!     data_api::{
 //!         WalletRead,
 //!         chain::{
-//!             validate_combined_chain,
+//!             validate_chain,
 //!             scan_cached_blocks,
 //!         },
 //!         error::Error,
@@ -37,7 +37,7 @@
 //! //
 //! // Given that we assume the server always gives us correct-at-the-time blocks, any
 //! // errors are in the blocks we have previously cached or scanned.
-//! if let Err(e) = validate_combined_chain(&network, &db_cache, (&db_data).get_max_height_hash().unwrap()) {
+//! if let Err(e) = validate_chain(&network, &db_cache, (&db_data).get_max_height_hash().unwrap()) {
 //!     match e.0 {
 //!         Error::InvalidChain(upper_bound, _) => {
 //!             // a) Pick a height to rewind to.
@@ -77,12 +77,9 @@ use protobuf::parse_from_bytes;
 
 use rusqlite::types::ToSql;
 
-use zcash_primitives::{block::BlockHash, consensus::BlockHeight};
+use zcash_primitives::consensus::BlockHeight;
 
-use zcash_client_backend::{
-    data_api::error::{ChainInvalid, Error},
-    proto::compact_formats::CompactBlock,
-};
+use zcash_client_backend::{data_api::error::Error, proto::compact_formats::CompactBlock};
 
 use crate::{error::SqliteClientError, CacheConnection};
 
@@ -93,69 +90,14 @@ struct CompactBlockRow {
     data: Vec<u8>,
 }
 
-pub fn validate_chain<F>(
-    conn: &CacheConnection,
-    from_height: BlockHeight,
-    validate: F,
-) -> Result<Option<BlockHash>, SqliteClientError>
-where
-    F: Fn(&CompactBlock, &CompactBlock) -> Result<(), SqliteClientError>,
-{
-    let mut stmt_blocks = conn
-        .0
-        .prepare("SELECT height, data FROM compactblocks WHERE height >= ? ORDER BY height DESC")?;
-
-    let block_rows = stmt_blocks.query_map(&[u32::from(from_height)], |row| {
-        let height: BlockHeight = row.get(0).map(u32::into)?;
-        let data = row.get::<_, Vec<_>>(1)?;
-        Ok(CompactBlockRow { height, data })
-    })?;
-
-    let mut blocks = block_rows.map(|cbr_result| {
-        let cbr = cbr_result.map_err(Error::Database)?;
-        let block: CompactBlock = parse_from_bytes(&cbr.data).map_err(Error::from)?;
-
-        if block.height() == cbr.height {
-            Ok(block)
-        } else {
-            Err(ChainInvalid::block_height_mismatch(
-                cbr.height,
-                block.height(),
-            ))
-        }
-    });
-
-    let mut current_block: CompactBlock = match blocks.next() {
-        Some(Ok(block)) => block,
-        Some(Err(error)) => {
-            return Err(SqliteClientError(error));
-        }
-        None => {
-            // No cached blocks, and we've already validated the blocks we've scanned,
-            // so there's nothing to validate.
-            // TODO: Maybe we still want to check if there are cached blocks that are
-            // at heights we previously scanned? Check scanning flow again.
-            return Ok(None);
-        }
-    };
-
-    for block_result in blocks {
-        let block = block_result?;
-        validate(&current_block, &block)?;
-        current_block = block;
-    }
-
-    Ok(Some(current_block.hash()))
-}
-
-pub fn with_cached_blocks<F>(
+pub fn with_blocks<F>(
     cache: &CacheConnection,
     from_height: BlockHeight,
     limit: Option<u32>,
     mut with_row: F,
 ) -> Result<(), SqliteClientError>
 where
-    F: FnMut(BlockHeight, CompactBlock) -> Result<(), SqliteClientError>,
+    F: FnMut(CompactBlock) -> Result<(), SqliteClientError>,
 {
     // Fetch the CompactBlocks we need to scan
     let mut stmt_blocks = cache.0.prepare(
@@ -175,8 +117,19 @@ where
     )?;
 
     for row_result in rows {
-        let row = row_result?;
-        with_row(row.height, parse_from_bytes(&row.data)?)?;
+        let cbr = row_result?;
+        let block: CompactBlock = parse_from_bytes(&cbr.data)?;
+
+        if block.height() != cbr.height {
+            return Err(Error::CorruptedData(format!(
+                "Block height {} did not match row's height field value {}",
+                block.height(),
+                cbr.height
+            ))
+            .into());
+        }
+
+        with_row(block)?;
     }
 
     Ok(())
@@ -195,7 +148,7 @@ mod tests {
 
     use zcash_client_backend::data_api::WalletRead;
     use zcash_client_backend::data_api::{
-        chain::{scan_cached_blocks, validate_combined_chain},
+        chain::{scan_cached_blocks, validate_chain},
         error::{ChainInvalid, Error},
     };
 
@@ -229,7 +182,7 @@ mod tests {
         init_accounts_table(&db_data, &tests::network(), &[extfvk.clone()]).unwrap();
 
         // Empty chain should be valid
-        validate_combined_chain(
+        validate_chain(
             &tests::network(),
             &db_cache,
             (&db_data).get_max_height_hash().unwrap(),
@@ -246,7 +199,7 @@ mod tests {
         insert_into_cache(&db_cache, &cb);
 
         // Cache-only chain should be valid
-        validate_combined_chain(
+        validate_chain(
             &tests::network(),
             &db_cache,
             (&db_data).get_max_height_hash().unwrap(),
@@ -257,7 +210,7 @@ mod tests {
         scan_cached_blocks(&tests::network(), &db_cache, &db_data, None).unwrap();
 
         // Data-only chain should be valid
-        validate_combined_chain(
+        validate_chain(
             &tests::network(),
             &db_cache,
             (&db_data).get_max_height_hash().unwrap(),
@@ -274,7 +227,7 @@ mod tests {
         insert_into_cache(&db_cache, &cb2);
 
         // Data+cache chain should be valid
-        validate_combined_chain(
+        validate_chain(
             &tests::network(),
             &db_cache,
             (&db_data).get_max_height_hash().unwrap(),
@@ -285,7 +238,7 @@ mod tests {
         scan_cached_blocks(&tests::network(), &db_cache, &db_data, None).unwrap();
 
         // Data-only chain should be valid
-        validate_combined_chain(
+        validate_chain(
             &tests::network(),
             &db_cache,
             (&db_data).get_max_height_hash().unwrap(),
@@ -328,7 +281,7 @@ mod tests {
         scan_cached_blocks(&tests::network(), &db_cache, &db_data, None).unwrap();
 
         // Data-only chain should be valid
-        validate_combined_chain(
+        validate_chain(
             &tests::network(),
             &db_cache,
             (&db_data).get_max_height_hash().unwrap(),
@@ -352,7 +305,7 @@ mod tests {
         insert_into_cache(&db_cache, &cb4);
 
         // Data+cache chain should be invalid at the data/cache boundary
-        match validate_combined_chain(
+        match validate_chain(
             &tests::network(),
             &db_cache,
             (&db_data).get_max_height_hash().unwrap(),
@@ -360,7 +313,7 @@ mod tests {
         .map_err(|e| e.0)
         {
             Err(Error::InvalidChain(upper_bound, _)) => {
-                assert_eq!(upper_bound, sapling_activation_height() + 1)
+                assert_eq!(upper_bound, sapling_activation_height() + 2)
             }
             _ => panic!(),
         }
@@ -401,7 +354,7 @@ mod tests {
         scan_cached_blocks(&tests::network(), &db_cache, &db_data, None).unwrap();
 
         // Data-only chain should be valid
-        validate_combined_chain(
+        validate_chain(
             &tests::network(),
             &db_cache,
             (&db_data).get_max_height_hash().unwrap(),
@@ -425,7 +378,7 @@ mod tests {
         insert_into_cache(&db_cache, &cb4);
 
         // Data+cache chain should be invalid inside the cache
-        match validate_combined_chain(
+        match validate_chain(
             &tests::network(),
             &db_cache,
             (&db_data).get_max_height_hash().unwrap(),
@@ -433,7 +386,7 @@ mod tests {
         .map_err(|e| e.0)
         {
             Err(Error::InvalidChain(upper_bound, _)) => {
-                assert_eq!(upper_bound, sapling_activation_height() + 2)
+                assert_eq!(upper_bound, sapling_activation_height() + 3)
             }
             _ => panic!(),
         }
@@ -543,7 +496,7 @@ mod tests {
             Err(e) => {
                 assert_eq!(
                     e.to_string(),
-                    ChainInvalid::block_height_mismatch::<rusqlite::Error, NoteId>(
+                    ChainInvalid::block_height_discontinuity::<rusqlite::Error, NoteId>(
                         sapling_activation_height() + 1,
                         sapling_activation_height() + 2
                     )

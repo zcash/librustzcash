@@ -38,7 +38,7 @@ use crate::{
 /// - `Err(e)` if there was an error during validation unrelated to chain validity.
 ///
 /// This function does not mutate either of the databases.
-pub fn validate_combined_chain<'db, E0, N, E, P, C>(
+pub fn validate_chain<'db, E0, N, E, P, C>(
     parameters: &P,
     cache: &C,
     validate_from: Option<(BlockHeight, BlockHash)>,
@@ -59,32 +59,26 @@ where
     let from_height = validate_from
         .map(|(height, _)| height)
         .unwrap_or(sapling_activation_height - 1);
-    let scan_start_hash = cache.validate_chain(from_height, |top_block, next_block| {
-        if next_block.height() != top_block.height() - 1 {
-            Err(
-                ChainInvalid::block_height_mismatch(top_block.height() - 1, next_block.height())
-                    .into(),
-            )
-        } else if next_block.hash() != top_block.prev_hash() {
-            Err(ChainInvalid::prev_hash_mismatch(next_block.height()).into())
-        } else {
-            Ok(())
-        }
-    })?;
 
-    match (scan_start_hash, validate_from) {
-        (Some(scan_start_hash), Some((validate_from_height, validate_from_hash))) => {
-            if scan_start_hash == validate_from_hash {
-                Ok(())
-            } else {
-                Err(ChainInvalid::prev_hash_mismatch(validate_from_height).into())
+    let mut prev_height = from_height;
+    let mut prev_hash: Option<BlockHash> = validate_from.map(|(_, hash)| hash);
+
+    cache.with_blocks(from_height, None, move |block| {
+        let current_height = block.height();
+        let result = if current_height != prev_height + 1 {
+            Err(ChainInvalid::block_height_discontinuity(prev_height + 1, current_height).into())
+        } else {
+            match prev_hash {
+                None => Ok(()),
+                Some(h) if h == block.prev_hash() => Ok(()),
+                Some(_) => Err(ChainInvalid::prev_hash_mismatch(current_height).into()),
             }
-        }
-        _ => {
-            // No cached blocks are present, or the max data height is absent, this is fine.
-            Ok(())
-        }
-    }
+        };
+
+        prev_height = current_height;
+        prev_hash = Some(block.hash());
+        result
+    })
 }
 
 /// Scans at most `limit` new blocks added to the cache for any transactions received by
@@ -169,111 +163,110 @@ where
     // Get the nullifiers for the notes we are tracking
     let mut nullifiers = data.get_nullifiers()?;
 
-    cache.with_cached_blocks(
-        last_height,
-        limit,
-        |height: BlockHeight, block: CompactBlock| {
-            // Scanned blocks MUST be height-sequential.
-            if height != (last_height + 1) {
-                return Err(ChainInvalid::block_height_mismatch(last_height + 1, height).into());
-            }
-            last_height = height;
+    cache.with_blocks(last_height, limit, |block: CompactBlock| {
+        let current_height = block.height();
+        // Scanned blocks MUST be height-sequential.
+        if current_height != (last_height + 1) {
+            return Err(
+                ChainInvalid::block_height_discontinuity(last_height + 1, current_height).into(),
+            );
+        }
+        last_height = current_height;
 
-            let block_hash = BlockHash::from_slice(&block.hash);
-            let block_time = block.time;
+        let block_hash = BlockHash::from_slice(&block.hash);
+        let block_time = block.time;
 
-            let txs: Vec<WalletTx> = {
-                let nf_refs: Vec<_> = nullifiers
-                    .iter()
-                    .map(|(nf, acc)| (&nf[..], acc.0 as usize))
-                    .collect();
-                let mut witness_refs: Vec<_> = witnesses.iter_mut().map(|w| &mut w.1).collect();
-                scan_block(
-                    params,
-                    block,
-                    &extfvks[..],
-                    &nf_refs,
-                    &mut tree,
-                    &mut witness_refs[..],
-                )
-            };
+        let txs: Vec<WalletTx> = {
+            let nf_refs: Vec<_> = nullifiers
+                .iter()
+                .map(|(nf, acc)| (&nf[..], acc.0 as usize))
+                .collect();
+            let mut witness_refs: Vec<_> = witnesses.iter_mut().map(|w| &mut w.1).collect();
+            scan_block(
+                params,
+                block,
+                &extfvks[..],
+                &nf_refs,
+                &mut tree,
+                &mut witness_refs[..],
+            )
+        };
 
-            // Enforce that all roots match. This is slow, so only include in debug builds.
-            #[cfg(debug_assertions)]
-            {
-                let cur_root = tree.root();
-                for row in &witnesses {
-                    if row.1.root() != cur_root {
-                        return Err(Error::InvalidWitnessAnchor(row.0, last_height).into());
-                    }
-                }
-                for tx in &txs {
-                    for output in tx.shielded_outputs.iter() {
-                        if output.witness.root() != cur_root {
-                            return Err(Error::InvalidNewWitnessAnchor(
-                                output.index,
-                                tx.txid,
-                                last_height,
-                                output.witness.root(),
-                            )
-                            .into());
-                        }
-                    }
+        // Enforce that all roots match. This is slow, so only include in debug builds.
+        #[cfg(debug_assertions)]
+        {
+            let cur_root = tree.root();
+            for row in &witnesses {
+                if row.1.root() != cur_root {
+                    return Err(Error::InvalidWitnessAnchor(row.0, last_height).into());
                 }
             }
-
-            // database updates for each block are transactional
-            let mut db_update = data.get_update_ops()?;
-            db_update.transactionally(|up| {
-                // Insert the block into the database.
-                up.insert_block(height, block_hash, block_time, &tree)?;
-
-                for tx in txs {
-                    let tx_row = up.put_tx_meta(&tx, height)?;
-
-                    // Mark notes as spent and remove them from the scanning cache
-                    for spend in &tx.shielded_spends {
-                        up.mark_spent(tx_row, &spend.nf)?;
-                    }
-
-                    nullifiers.retain(|(nf, _acc)| {
-                        tx.shielded_spends
-                            .iter()
-                            .find(|spend| &spend.nf == nf)
-                            .is_none()
-                    });
-
-                    for output in tx.shielded_outputs {
-                        let nf = output.note.nf(
-                            &extfvks[output.account].fvk.vk,
-                            output.witness.position() as u64,
-                        );
-
-                        let note_id = up.put_received_note(&output, Some(&nf), tx_row)?;
-
-                        // Save witness for note.
-                        witnesses.push((note_id, output.witness));
-
-                        // Cache nullifier for note (to detect subsequent spends in this scan).
-                        nullifiers.push((nf, AccountId(output.account as u32)));
+            for tx in &txs {
+                for output in tx.shielded_outputs.iter() {
+                    if output.witness.root() != cur_root {
+                        return Err(Error::InvalidNewWitnessAnchor(
+                            output.index,
+                            tx.txid,
+                            last_height,
+                            output.witness.root(),
+                        )
+                        .into());
                     }
                 }
+            }
+        }
 
-                // Insert current witnesses into the database.
-                for (note_id, witness) in witnesses.iter() {
-                    up.insert_witness(*note_id, witness, last_height)?;
+        // database updates for each block are transactional
+        let mut db_update = data.get_update_ops()?;
+        db_update.transactionally(|up| {
+            // Insert the block into the database.
+            up.insert_block(current_height, block_hash, block_time, &tree)?;
+
+            for tx in txs {
+                let tx_row = up.put_tx_meta(&tx, current_height)?;
+
+                // Mark notes as spent and remove them from the scanning cache
+                for spend in &tx.shielded_spends {
+                    up.mark_spent(tx_row, &spend.nf)?;
                 }
 
-                // Prune the stored witnesses (we only expect rollbacks of at most 100 blocks).
-                up.prune_witnesses(last_height - 100)?;
+                nullifiers.retain(|(nf, _acc)| {
+                    tx.shielded_spends
+                        .iter()
+                        .find(|spend| &spend.nf == nf)
+                        .is_none()
+                });
 
-                // Update now-expired transactions that didn't get mined.
-                up.update_expired_notes(last_height)?;
+                for output in tx.shielded_outputs {
+                    let nf = output.note.nf(
+                        &extfvks[output.account].fvk.vk,
+                        output.witness.position() as u64,
+                    );
 
-                Ok(())
-            })
-        },
-    )?;
+                    let note_id = up.put_received_note(&output, Some(&nf), tx_row)?;
+
+                    // Save witness for note.
+                    witnesses.push((note_id, output.witness));
+
+                    // Cache nullifier for note (to detect subsequent spends in this scan).
+                    nullifiers.push((nf, AccountId(output.account as u32)));
+                }
+            }
+
+            // Insert current witnesses into the database.
+            for (note_id, witness) in witnesses.iter() {
+                up.insert_witness(*note_id, witness, last_height)?;
+            }
+
+            // Prune the stored witnesses (we only expect rollbacks of at most 100 blocks).
+            up.prune_witnesses(last_height - 100)?;
+
+            // Update now-expired transactions that didn't get mined.
+            up.update_expired_notes(last_height)?;
+
+            Ok(())
+        })
+    })?;
 
     Ok(())
 }

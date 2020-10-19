@@ -503,7 +503,7 @@ impl<'a> WalletWrite for DataConnStmtCache<'a> {
                 AccountId(output.account as u32),
                 &RecipientAddress::Shielded(output.to.clone()),
                 Amount::from_u64(output.note.value)
-                    .map_err(|_| Error::CorruptedData("Note value invalid."))?,
+                    .map_err(|_| Error::CorruptedData("Note value invalid.".to_string()))?,
                 Some(output.memo.clone()),
             )?
         }
@@ -551,27 +551,16 @@ impl BlockSource for CacheConnection {
         chain::init::init_cache_database(self).map_err(SqliteClientError::from)
     }
 
-    fn validate_chain<F>(
-        &self,
-        from_height: BlockHeight,
-        validate: F,
-    ) -> Result<Option<BlockHash>, Self::Error>
-    where
-        F: Fn(&CompactBlock, &CompactBlock) -> Result<(), Self::Error>,
-    {
-        chain::validate_chain(self, from_height, validate)
-    }
-
-    fn with_cached_blocks<F>(
+    fn with_blocks<F>(
         &self,
         from_height: BlockHeight,
         limit: Option<u32>,
         with_row: F,
     ) -> Result<(), Self::Error>
     where
-        F: FnMut(BlockHeight, CompactBlock) -> Result<(), Self::Error>,
+        F: FnMut(CompactBlock) -> Result<(), Self::Error>,
     {
-        chain::with_cached_blocks(self, from_height, limit, with_row)
+        chain::with_blocks(self, from_height, limit, with_row)
     }
 }
 
