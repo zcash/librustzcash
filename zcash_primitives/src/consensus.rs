@@ -129,6 +129,11 @@ pub trait Parameters: Clone {
     /// if an activation height has been set.
     fn activation_height(&self, nu: NetworkUpgrade) -> Option<BlockHeight>;
 
+    /// The coin type for ZEC, as defined by [SLIP 44].
+    ///
+    /// [SLIP 44]: https://github.com/satoshilabs/slips/blob/master/slip-0044.md
+    fn coin_type(&self) -> u32;
+
     /// Returns the human-readable prefix for Sapling extended full
     /// viewing keys for the network to which this Parameters value applies.
     fn hrp_sapling_extended_full_viewing_key(&self) -> &str;
@@ -170,6 +175,10 @@ impl Parameters for MainNetwork {
         }
     }
 
+    fn coin_type(&self) -> u32 {
+        constants::mainnet::COIN_TYPE
+    }
+
     fn hrp_sapling_extended_full_viewing_key(&self) -> &str {
         constants::mainnet::HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY
     }
@@ -205,6 +214,10 @@ impl Parameters for TestNetwork {
         }
     }
 
+    fn coin_type(&self) -> u32 {
+        constants::testnet::COIN_TYPE
+    }
+
     fn hrp_sapling_extended_full_viewing_key(&self) -> &str {
         constants::testnet::HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY
     }
@@ -233,6 +246,13 @@ impl Parameters for Network {
         match self {
             Network::MainNetwork => MAIN_NETWORK.activation_height(nu),
             Network::TestNetwork => TEST_NETWORK.activation_height(nu),
+        }
+    }
+
+    fn coin_type(&self) -> u32 {
+        match self {
+            Network::MainNetwork => MAIN_NETWORK.coin_type(),
+            Network::TestNetwork => TEST_NETWORK.coin_type(),
         }
     }
 
