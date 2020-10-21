@@ -292,6 +292,10 @@ impl Note {
     }
 
     pub fn generate_or_derive_esk<R: RngCore + CryptoRng>(&self, rng: &mut R) -> jubjub::Fr {
+        self.generate_or_derive_esk_internal(rng)
+    }
+
+    pub(crate) fn generate_or_derive_esk_internal<R: RngCore>(&self, rng: &mut R) -> jubjub::Fr {
         match self.derive_esk() {
             None => {
                 // create random 64 byte buffer
