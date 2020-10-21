@@ -113,14 +113,14 @@ where
 ///     data_api::chain::scan_cached_blocks,
 /// };
 /// use zcash_client_sqlite::{
-///     CacheConnection,
-///     DataConnection,
+///     BlockDB,
+///     WalletDB,
 /// };
 ///
 /// let cache_file = NamedTempFile::new().unwrap();
-/// let cache = CacheConnection::for_path(cache_file).unwrap();
+/// let cache = BlockDB::for_path(cache_file).unwrap();
 /// let data_file = NamedTempFile::new().unwrap();
-/// let data = DataConnection::for_path(data_file).unwrap();
+/// let data = WalletDB::for_path(data_file).unwrap();
 /// scan_cached_blocks(&Network::TestNetwork, &cache, &data, None);
 /// ```
 ///

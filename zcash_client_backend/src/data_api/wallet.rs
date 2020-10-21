@@ -113,7 +113,7 @@ where
 ///     wallet::OvkPolicy,
 /// };
 /// use zcash_client_sqlite::{
-///     DataConnection,
+///     WalletDB,
 /// };
 ///
 /// let tx_prover = match LocalTxProver::with_default_location() {
@@ -128,7 +128,7 @@ where
 /// let to = extsk.default_address().unwrap().1.into();
 ///
 /// let data_file = NamedTempFile::new().unwrap();
-/// let db = DataConnection::for_path(data_file).unwrap();
+/// let db = WalletDB::for_path(data_file).unwrap();
 /// match create_spend_to_address(
 ///     &db,
 ///     &Network::TestNetwork,

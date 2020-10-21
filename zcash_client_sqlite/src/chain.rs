@@ -20,16 +20,16 @@
 //! };
 //!
 //! use zcash_client_sqlite::{
-//!     CacheConnection,
-//!     DataConnection,
+//!     BlockDB,
+//!     WalletDB,
 //!     wallet::{rewind_to_height},
 //! };
 //!
 //! let network = Network::TestNetwork;
 //! let cache_file = NamedTempFile::new().unwrap();
-//! let db_cache = CacheConnection::for_path(cache_file).unwrap();
+//! let db_cache = BlockDB::for_path(cache_file).unwrap();
 //! let data_file = NamedTempFile::new().unwrap();
-//! let db_data = DataConnection::for_path(data_file).unwrap();
+//! let db_data = WalletDB::for_path(data_file).unwrap();
 //!
 //! // 1) Download new CompactBlocks into db_cache.
 //!
@@ -81,7 +81,7 @@ use zcash_primitives::consensus::BlockHeight;
 
 use zcash_client_backend::{data_api::error::Error, proto::compact_formats::CompactBlock};
 
-use crate::{error::SqliteClientError, CacheConnection};
+use crate::{error::SqliteClientError, BlockDB};
 
 pub mod init;
 
@@ -91,7 +91,7 @@ struct CompactBlockRow {
 }
 
 pub fn with_blocks<F>(
-    cache: &CacheConnection,
+    cache: &BlockDB,
     from_height: BlockHeight,
     limit: Option<u32>,
     mut with_row: F,
@@ -163,17 +163,17 @@ mod tests {
             init::{init_accounts_table, init_data_database},
             rewind_to_height,
         },
-        AccountId, CacheConnection, DataConnection, NoteId,
+        AccountId, BlockDB, WalletDB, NoteId,
     };
 
     #[test]
     fn valid_chain_states() {
         let cache_file = NamedTempFile::new().unwrap();
-        let db_cache = CacheConnection(Connection::open(cache_file.path()).unwrap());
+        let db_cache = BlockDB(Connection::open(cache_file.path()).unwrap());
         init_cache_database(&db_cache).unwrap();
 
         let data_file = NamedTempFile::new().unwrap();
-        let db_data = DataConnection(Connection::open(data_file.path()).unwrap());
+        let db_data = WalletDB(Connection::open(data_file.path()).unwrap());
         init_data_database(&db_data).unwrap();
 
         // Add an account to the wallet
@@ -249,11 +249,11 @@ mod tests {
     #[test]
     fn invalid_chain_cache_disconnected() {
         let cache_file = NamedTempFile::new().unwrap();
-        let db_cache = CacheConnection(Connection::open(cache_file.path()).unwrap());
+        let db_cache = BlockDB(Connection::open(cache_file.path()).unwrap());
         init_cache_database(&db_cache).unwrap();
 
         let data_file = NamedTempFile::new().unwrap();
-        let db_data = DataConnection(Connection::open(data_file.path()).unwrap());
+        let db_data = WalletDB(Connection::open(data_file.path()).unwrap());
         init_data_database(&db_data).unwrap();
 
         // Add an account to the wallet
@@ -322,11 +322,11 @@ mod tests {
     #[test]
     fn invalid_chain_cache_reorg() {
         let cache_file = NamedTempFile::new().unwrap();
-        let db_cache = CacheConnection(Connection::open(cache_file.path()).unwrap());
+        let db_cache = BlockDB(Connection::open(cache_file.path()).unwrap());
         init_cache_database(&db_cache).unwrap();
 
         let data_file = NamedTempFile::new().unwrap();
-        let db_data = DataConnection(Connection::open(data_file.path()).unwrap());
+        let db_data = WalletDB(Connection::open(data_file.path()).unwrap());
         init_data_database(&db_data).unwrap();
 
         // Add an account to the wallet
@@ -395,11 +395,11 @@ mod tests {
     #[test]
     fn data_db_rewinding() {
         let cache_file = NamedTempFile::new().unwrap();
-        let db_cache = CacheConnection(Connection::open(cache_file.path()).unwrap());
+        let db_cache = BlockDB(Connection::open(cache_file.path()).unwrap());
         init_cache_database(&db_cache).unwrap();
 
         let data_file = NamedTempFile::new().unwrap();
-        let db_data = DataConnection(Connection::open(data_file.path()).unwrap());
+        let db_data = WalletDB(Connection::open(data_file.path()).unwrap());
         init_data_database(&db_data).unwrap();
 
         // Add an account to the wallet
@@ -453,11 +453,11 @@ mod tests {
     #[test]
     fn scan_cached_blocks_requires_sequential_blocks() {
         let cache_file = NamedTempFile::new().unwrap();
-        let db_cache = CacheConnection(Connection::open(cache_file.path()).unwrap());
+        let db_cache = BlockDB(Connection::open(cache_file.path()).unwrap());
         init_cache_database(&db_cache).unwrap();
 
         let data_file = NamedTempFile::new().unwrap();
-        let db_data = DataConnection(Connection::open(data_file.path()).unwrap());
+        let db_data = WalletDB(Connection::open(data_file.path()).unwrap());
         init_data_database(&db_data).unwrap();
 
         // Add an account to the wallet
@@ -517,11 +517,11 @@ mod tests {
     #[test]
     fn scan_cached_blocks_finds_received_notes() {
         let cache_file = NamedTempFile::new().unwrap();
-        let db_cache = CacheConnection(Connection::open(cache_file.path()).unwrap());
+        let db_cache = BlockDB(Connection::open(cache_file.path()).unwrap());
         init_cache_database(&db_cache).unwrap();
 
         let data_file = NamedTempFile::new().unwrap();
-        let db_data = DataConnection(Connection::open(data_file.path()).unwrap());
+        let db_data = WalletDB(Connection::open(data_file.path()).unwrap());
         init_data_database(&db_data).unwrap();
 
         // Add an account to the wallet
@@ -564,11 +564,11 @@ mod tests {
     #[test]
     fn scan_cached_blocks_finds_change_notes() {
         let cache_file = NamedTempFile::new().unwrap();
-        let db_cache = CacheConnection(Connection::open(cache_file.path()).unwrap());
+        let db_cache = BlockDB(Connection::open(cache_file.path()).unwrap());
         init_cache_database(&db_cache).unwrap();
 
         let data_file = NamedTempFile::new().unwrap();
-        let db_data = DataConnection(Connection::open(data_file.path()).unwrap());
+        let db_data = WalletDB(Connection::open(data_file.path()).unwrap());
         init_data_database(&db_data).unwrap();
 
         // Add an account to the wallet

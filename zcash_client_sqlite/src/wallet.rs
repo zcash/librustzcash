@@ -20,7 +20,7 @@ use zcash_client_backend::{
     },
 };
 
-use crate::{error::SqliteClientError, AccountId, DataConnection, NoteId};
+use crate::{error::SqliteClientError, AccountId, WalletDB, NoteId};
 
 pub mod init;
 pub mod transact;
@@ -36,16 +36,16 @@ pub mod transact;
 /// };
 /// use zcash_client_backend::api::AccountId;
 /// use zcash_client_sqlite::{
-///     DataConnection,
+///     WalletDB,
 ///     wallet::get_address,
 /// };
 ///
 /// let data_file = NamedTempFile::new().unwrap();
-/// let db = DataConnection::for_path(data_file).unwrap();
+/// let db = WalletDB::for_path(data_file).unwrap();
 /// let addr = get_address(&db, &Network::TestNetwork, AccountId(0));
 /// ```
 pub fn get_address<P: consensus::Parameters>(
-    data: &DataConnection,
+    data: &WalletDB,
     params: &P,
     account: AccountId,
 ) -> Result<Option<PaymentAddress>, SqliteClientError> {
@@ -61,7 +61,7 @@ pub fn get_address<P: consensus::Parameters>(
 }
 
 pub fn get_extended_full_viewing_keys<P: consensus::Parameters>(
-    data: &DataConnection,
+    data: &WalletDB,
     params: &P,
 ) -> Result<Vec<ExtendedFullViewingKey>, SqliteClientError> {
     // Fetch the ExtendedFullViewingKeys we are tracking
@@ -87,7 +87,7 @@ pub fn get_extended_full_viewing_keys<P: consensus::Parameters>(
 }
 
 pub fn is_valid_account_extfvk<P: consensus::Parameters>(
-    data: &DataConnection,
+    data: &WalletDB,
     params: &P,
     account: AccountId,
     extfvk: &ExtendedFullViewingKey,
@@ -119,15 +119,15 @@ pub fn is_valid_account_extfvk<P: consensus::Parameters>(
 /// use tempfile::NamedTempFile;
 /// use zcash_client_backend::api::AccountId;
 /// use zcash_client_sqlite::{
-///     DataConnection,
+///     WalletDB,
 ///     wallet::get_balance,
 /// };
 ///
 /// let data_file = NamedTempFile::new().unwrap();
-/// let db = DataConnection::for_path(data_file).unwrap();
+/// let db = WalletDB::for_path(data_file).unwrap();
 /// let addr = get_balance(&db, AccountId(0));
 /// ```
-pub fn get_balance(data: &DataConnection, account: AccountId) -> Result<Amount, SqliteClientError> {
+pub fn get_balance(data: &WalletDB, account: AccountId) -> Result<Amount, SqliteClientError> {
     let balance = data.0.query_row(
         "SELECT SUM(value) FROM received_notes
         INNER JOIN transactions ON transactions.id_tx = received_notes.tx
@@ -154,16 +154,16 @@ pub fn get_balance(data: &DataConnection, account: AccountId) -> Result<Amount, 
 /// use zcash_primitives::consensus::{BlockHeight};
 /// use zcash_client_backend::api::AccountId;
 /// use zcash_client_sqlite::{
-///     DataConnection,
+///     WalletDB,
 ///     wallet::get_verified_balance,
 /// };
 ///
 /// let data_file = NamedTempFile::new().unwrap();
-/// let db = DataConnection::for_path(data_file).unwrap();
+/// let db = WalletDB::for_path(data_file).unwrap();
 /// let addr = get_verified_balance(&db, AccountId(0), BlockHeight::from_u32(0));
 /// ```
 pub fn get_verified_balance(
-    data: &DataConnection,
+    data: &WalletDB,
     account: AccountId,
     anchor_height: BlockHeight,
 ) -> Result<Amount, SqliteClientError> {
@@ -194,16 +194,16 @@ pub fn get_verified_balance(
 /// use tempfile::NamedTempFile;
 /// use zcash_client_sqlite::{
 ///     NoteId,
-///     DataConnection,
+///     WalletDB,
 ///     wallet::get_received_memo_as_utf8,
 /// };
 ///
 /// let data_file = NamedTempFile::new().unwrap();
-/// let db = DataConnection::for_path(data_file).unwrap();
+/// let db = WalletDB::for_path(data_file).unwrap();
 /// let memo = get_received_memo_as_utf8(&db, NoteId(27));
 /// ```
 pub fn get_received_memo_as_utf8(
-    data: &DataConnection,
+    data: &WalletDB,
     id_note: NoteId,
 ) -> Result<Option<String>, SqliteClientError> {
     let memo: Vec<_> = data.0.query_row(
@@ -234,16 +234,16 @@ pub fn get_received_memo_as_utf8(
 /// use tempfile::NamedTempFile;
 /// use zcash_client_sqlite::{
 ///     NoteId,
-///     DataConnection,
+///     WalletDB,
 ///     wallet::get_sent_memo_as_utf8,
 /// };
 ///
 /// let data_file = NamedTempFile::new().unwrap();
-/// let db = DataConnection::for_path(data_file).unwrap();
+/// let db = WalletDB::for_path(data_file).unwrap();
 /// let memo = get_sent_memo_as_utf8(&db, NoteId(12));
 /// ```
 pub fn get_sent_memo_as_utf8(
-    data: &DataConnection,
+    data: &WalletDB,
     id_note: NoteId,
 ) -> Result<Option<String>, SqliteClientError> {
     let memo: Vec<_> = data.0.query_row(
@@ -264,7 +264,7 @@ pub fn get_sent_memo_as_utf8(
 }
 
 pub fn block_height_extrema(
-    conn: &DataConnection,
+    conn: &WalletDB,
 ) -> Result<Option<(BlockHeight, BlockHeight)>, rusqlite::Error> {
     conn.0
         .query_row(
@@ -285,7 +285,7 @@ pub fn block_height_extrema(
 }
 
 pub fn get_tx_height(
-    conn: &DataConnection,
+    conn: &WalletDB,
     txid: TxId,
 ) -> Result<Option<BlockHeight>, rusqlite::Error> {
     conn.0
@@ -298,7 +298,7 @@ pub fn get_tx_height(
 }
 
 pub fn get_block_hash(
-    conn: &DataConnection,
+    conn: &WalletDB,
     block_height: BlockHeight,
 ) -> Result<Option<BlockHash>, rusqlite::Error> {
     conn.0
@@ -318,7 +318,7 @@ pub fn get_block_hash(
 /// If the requested height is greater than or equal to the height of the last scanned
 /// block, this function does nothing.
 pub fn rewind_to_height<P: consensus::Parameters>(
-    conn: &DataConnection,
+    conn: &WalletDB,
     parameters: &P,
     block_height: BlockHeight,
 ) -> Result<(), SqliteClientError> {
@@ -369,7 +369,7 @@ pub fn rewind_to_height<P: consensus::Parameters>(
 }
 
 pub fn get_commitment_tree(
-    data: &DataConnection,
+    data: &WalletDB,
     block_height: BlockHeight,
 ) -> Result<Option<CommitmentTree<Node>>, SqliteClientError> {
     data.0
@@ -392,7 +392,7 @@ pub fn get_commitment_tree(
 }
 
 pub fn get_witnesses(
-    data: &DataConnection,
+    data: &WalletDB,
     block_height: BlockHeight,
 ) -> Result<Vec<(NoteId, IncrementalWitness<Node>)>, SqliteClientError> {
     let mut stmt_fetch_witnesses = data
@@ -416,7 +416,7 @@ pub fn get_witnesses(
 }
 
 pub fn get_nullifiers(
-    data: &DataConnection,
+    data: &WalletDB,
 ) -> Result<Vec<(Vec<u8>, AccountId)>, SqliteClientError> {
     // Get the nullifiers for the notes we are tracking
     let mut stmt_fetch_nullifiers = data
@@ -451,7 +451,7 @@ mod tests {
     use crate::{
         tests,
         wallet::init::{init_accounts_table, init_data_database},
-        AccountId, DataConnection,
+        AccountId, WalletDB,
     };
 
     use super::{get_address, get_balance};
@@ -459,7 +459,7 @@ mod tests {
     #[test]
     fn empty_database_has_no_balance() {
         let data_file = NamedTempFile::new().unwrap();
-        let db_data = DataConnection(Connection::open(data_file.path()).unwrap());
+        let db_data = WalletDB(Connection::open(data_file.path()).unwrap());
         init_data_database(&db_data).unwrap();
 
         // Add an account to the wallet

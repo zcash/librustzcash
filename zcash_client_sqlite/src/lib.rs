@@ -66,15 +66,15 @@ impl fmt::Display for NoteId {
     }
 }
 
-pub struct DataConnection(Connection);
+pub struct WalletDB(Connection);
 
-impl DataConnection {
+impl WalletDB {
     pub fn for_path<P: AsRef<Path>>(path: P) -> Result<Self, rusqlite::Error> {
-        Connection::open(path).map(DataConnection)
+        Connection::open(path).map(WalletDB)
     }
 }
 
-impl<'a> WalletRead for &'a DataConnection {
+impl<'a> WalletRead for &'a WalletDB {
     type Error = SqliteClientError;
     type NoteRef = NoteId;
     type TxRef = i64;
@@ -242,7 +242,7 @@ impl<'a> WalletRead for &'a DataConnection {
 }
 
 pub struct DataConnStmtCache<'a> {
-    conn: &'a DataConnection,
+    conn: &'a WalletDB,
     stmt_insert_block: Statement<'a>,
 
     stmt_insert_tx_meta: Statement<'a>,
@@ -536,15 +536,15 @@ impl<'a> WalletWrite for DataConnStmtCache<'a> {
     }
 }
 
-pub struct CacheConnection(Connection);
+pub struct BlockDB(Connection);
 
-impl CacheConnection {
+impl BlockDB {
     pub fn for_path<P: AsRef<Path>>(path: P) -> Result<Self, rusqlite::Error> {
-        Connection::open(path).map(CacheConnection)
+        Connection::open(path).map(BlockDB)
     }
 }
 
-impl BlockSource for CacheConnection {
+impl BlockSource for BlockDB {
     type Error = SqliteClientError;
 
     fn init_cache(&self) -> Result<(), Self::Error> {
@@ -594,7 +594,7 @@ mod tests {
         zip32::ExtendedFullViewingKey,
     };
 
-    use super::CacheConnection;
+    use super::BlockDB;
 
     #[cfg(feature = "mainnet")]
     pub(crate) fn network() -> Network {
@@ -755,7 +755,7 @@ mod tests {
     }
 
     /// Insert a fake CompactBlock into the cache DB.
-    pub(crate) fn insert_into_cache(db_cache: &CacheConnection, cb: &CompactBlock) {
+    pub(crate) fn insert_into_cache(db_cache: &BlockDB, cb: &CompactBlock) {
         let cb_bytes = cb.write_to_bytes().unwrap();
         db_cache
             .0

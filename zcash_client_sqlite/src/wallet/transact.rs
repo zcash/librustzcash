@@ -17,10 +17,10 @@ use zcash_client_backend::{
     wallet::{AccountId, SpendableNote},
 };
 
-use crate::{error::SqliteClientError, DataConnection};
+use crate::{error::SqliteClientError, WalletDB};
 
 pub fn select_spendable_notes(
-    data: &DataConnection,
+    data: &WalletDB,
     account: AccountId,
     target_value: Amount,
     anchor_height: BlockHeight,
@@ -148,7 +148,7 @@ mod tests {
             get_balance, get_verified_balance,
             init::{init_accounts_table, init_blocks_table, init_data_database},
         },
-        AccountId, CacheConnection, DataConnection,
+        AccountId, BlockDB, WalletDB,
     };
 
     fn test_prover() -> impl TxProver {
@@ -163,7 +163,7 @@ mod tests {
     #[test]
     fn create_to_address_fails_on_incorrect_extsk() {
         let data_file = NamedTempFile::new().unwrap();
-        let db_data = DataConnection(Connection::open(data_file.path()).unwrap());
+        let db_data = WalletDB(Connection::open(data_file.path()).unwrap());
         init_data_database(&db_data).unwrap();
 
         // Add two accounts to the wallet
@@ -211,7 +211,7 @@ mod tests {
     #[test]
     fn create_to_address_fails_with_no_blocks() {
         let data_file = NamedTempFile::new().unwrap();
-        let db_data = DataConnection(Connection::open(data_file.path()).unwrap());
+        let db_data = WalletDB(Connection::open(data_file.path()).unwrap());
         init_data_database(&db_data).unwrap();
 
         // Add an account to the wallet
@@ -240,7 +240,7 @@ mod tests {
     #[test]
     fn create_to_address_fails_on_insufficient_balance() {
         let data_file = NamedTempFile::new().unwrap();
-        let db_data = DataConnection(Connection::open(data_file.path()).unwrap());
+        let db_data = WalletDB(Connection::open(data_file.path()).unwrap());
         init_data_database(&db_data).unwrap();
         init_blocks_table(
             &db_data,
@@ -283,11 +283,11 @@ mod tests {
     #[test]
     fn create_to_address_fails_on_unverified_notes() {
         let cache_file = NamedTempFile::new().unwrap();
-        let db_cache = CacheConnection(Connection::open(cache_file.path()).unwrap());
+        let db_cache = BlockDB(Connection::open(cache_file.path()).unwrap());
         init_cache_database(&db_cache).unwrap();
 
         let data_file = NamedTempFile::new().unwrap();
-        let db_data = DataConnection(Connection::open(data_file.path()).unwrap());
+        let db_data = WalletDB(Connection::open(data_file.path()).unwrap());
         init_data_database(&db_data).unwrap();
 
         // Add an account to the wallet
@@ -413,11 +413,11 @@ mod tests {
     #[test]
     fn create_to_address_fails_on_locked_notes() {
         let cache_file = NamedTempFile::new().unwrap();
-        let db_cache = CacheConnection(Connection::open(cache_file.path()).unwrap());
+        let db_cache = BlockDB(Connection::open(cache_file.path()).unwrap());
         init_cache_database(&db_cache).unwrap();
 
         let data_file = NamedTempFile::new().unwrap();
-        let db_data = DataConnection(Connection::open(data_file.path()).unwrap());
+        let db_data = WalletDB(Connection::open(data_file.path()).unwrap());
         init_data_database(&db_data).unwrap();
 
         // Add an account to the wallet
@@ -533,11 +533,11 @@ mod tests {
     fn ovk_policy_prevents_recovery_from_chain() {
         let network = tests::network();
         let cache_file = NamedTempFile::new().unwrap();
-        let db_cache = CacheConnection(Connection::open(cache_file.path()).unwrap());
+        let db_cache = BlockDB(Connection::open(cache_file.path()).unwrap());
         init_cache_database(&db_cache).unwrap();
 
         let data_file = NamedTempFile::new().unwrap();
-        let db_data = DataConnection(Connection::open(data_file.path()).unwrap());
+        let db_data = WalletDB(Connection::open(data_file.path()).unwrap());
         init_data_database(&db_data).unwrap();
 
         // Add an account to the wallet
