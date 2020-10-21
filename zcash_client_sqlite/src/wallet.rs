@@ -20,7 +20,7 @@ use zcash_client_backend::{
     },
 };
 
-use crate::{error::SqliteClientError, AccountId, WalletDB, NoteId};
+use crate::{error::SqliteClientError, AccountId, NoteId, WalletDB};
 
 pub mod init;
 pub mod transact;
@@ -284,10 +284,7 @@ pub fn block_height_extrema(
         .or(Ok(None))
 }
 
-pub fn get_tx_height(
-    conn: &WalletDB,
-    txid: TxId,
-) -> Result<Option<BlockHeight>, rusqlite::Error> {
+pub fn get_tx_height(conn: &WalletDB, txid: TxId) -> Result<Option<BlockHeight>, rusqlite::Error> {
     conn.0
         .query_row(
             "SELECT block FROM transactions WHERE txid = ?",
@@ -415,9 +412,7 @@ pub fn get_witnesses(
     Ok(res)
 }
 
-pub fn get_nullifiers(
-    data: &WalletDB,
-) -> Result<Vec<(Vec<u8>, AccountId)>, SqliteClientError> {
+pub fn get_nullifiers(data: &WalletDB) -> Result<Vec<(Vec<u8>, AccountId)>, SqliteClientError> {
     // Get the nullifiers for the notes we are tracking
     let mut stmt_fetch_nullifiers = data
         .0

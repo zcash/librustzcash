@@ -163,7 +163,7 @@ mod tests {
             init::{init_accounts_table, init_data_database},
             rewind_to_height,
         },
-        AccountId, BlockDB, WalletDB, NoteId,
+        AccountId, BlockDB, NoteId, WalletDB,
     };
 
     #[test]
