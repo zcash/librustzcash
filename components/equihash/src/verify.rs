@@ -62,6 +62,8 @@ impl Node {
         }
     }
 
+    // Clippy incorrectly interprets the first argument as `self`.
+    #[allow(clippy::wrong_self_convention)]
     fn from_children(a: Node, b: Node, trim: usize) -> Self {
         let hash: Vec<_> = a
             .hash
