@@ -19,7 +19,7 @@ use directories::BaseDirs;
 use std::path::PathBuf;
 
 pub mod circuit;
-mod constants;
+pub mod constants;
 mod hashreader;
 pub mod sapling;
 pub mod sprout;
@@ -135,7 +135,10 @@ pub fn load_parameters(
     )
 }
 
-fn parse_parameters<R: io::Read>(
+/// Parse Bls12 keys from bytes as serialized by [`Parameters::write`].
+///
+/// This function will panic if it encounters unparseable data.
+pub fn parse_parameters<R: io::Read>(
     spend_fs: R,
     output_fs: R,
     sprout_fs: Option<R>,

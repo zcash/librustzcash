@@ -1,0 +1,19 @@
+[package]
+name = "zcash_extensions"
+description = "Zcash Extension implementations & consensus node integration layer."
+version = "0.0.0"
+authors = ["Jack Grigg <jack@z.cash>", "Kris Nuttycombe <kris@z.cash>"]
+homepage = "https://github.com/zcash/librustzcash"
+repository = "https://github.com/zcash/librustzcash"
+license = "MIT OR Apache-2.0"
+edition = "2018"
+
+[dependencies]
+blake2b_simd = "0.5"
+zcash_primitives = { version = "0.4.0", path = "../zcash_primitives" }
+
+[dev-dependencies]
+ff = "0.8"
+jubjub = "0.5.1"
+rand_core = "0.5.1"
+zcash_proofs = { version = "0.4.0", path = "../zcash_proofs" }

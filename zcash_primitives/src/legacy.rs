@@ -26,7 +26,7 @@ enum OpCode {
 }
 
 /// A serialized script, used inside transparent inputs and outputs of a transaction.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct Script(pub Vec<u8>);
 
 impl Script {
@@ -42,18 +42,14 @@ impl Script {
     /// Returns the address that this Script contains, if any.
     pub fn address(&self) -> Option<TransparentAddress> {
         if self.0.len() == 25
-            && self.0[0] == OpCode::Dup as u8
-            && self.0[1] == OpCode::Hash160 as u8
-            && self.0[2] == 0x14
-            && self.0[23] == OpCode::EqualVerify as u8
-            && self.0[24] == OpCode::CheckSig as u8
+            && self.0[0..3] == [OpCode::Dup as u8, OpCode::Hash160 as u8, 0x14]
+            && self.0[23..25] == [OpCode::EqualVerify as u8, OpCode::CheckSig as u8]
         {
             let mut hash = [0; 20];
             hash.copy_from_slice(&self.0[3..23]);
             Some(TransparentAddress::PublicKey(hash))
         } else if self.0.len() == 23
-            && self.0[0] == OpCode::Hash160 as u8
-            && self.0[1] == 0x14
+            && self.0[0..2] == [OpCode::Hash160 as u8, 0x14]
             && self.0[22] == OpCode::Equal as u8
         {
             let mut hash = [0; 20];
@@ -96,7 +92,7 @@ impl Shl<&[u8]> for Script {
 }
 
 /// A transparent address corresponding to either a public key or a `Script`.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, PartialOrd, Hash, Clone)]
 pub enum TransparentAddress {
     PublicKey([u8; 20]),
     Script([u8; 20]),
@@ -119,6 +115,19 @@ impl TransparentAddress {
                 // P2SH script
                 Script::default() << OpCode::Hash160 << &script_id[..] << OpCode::Equal
             }
+        }
+    }
+}
+
+#[cfg(any(test, feature = "test-dependencies"))]
+pub mod testing {
+    use proptest::prelude::{any, prop_compose};
+
+    use super::TransparentAddress;
+
+    prop_compose! {
+        pub fn arb_transparent_addr()(v in proptest::array::uniform20(any::<u8>())) -> TransparentAddress {
+            TransparentAddress::PublicKey(v)
         }
     }
 }

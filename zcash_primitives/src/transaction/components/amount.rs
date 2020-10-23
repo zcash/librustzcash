@@ -1,8 +1,8 @@
 use std::iter::Sum;
 use std::ops::{Add, AddAssign, Sub, SubAssign};
 
-const COIN: i64 = 1_0000_0000;
-const MAX_MONEY: i64 = 21_000_000 * COIN;
+pub const COIN: i64 = 1_0000_0000;
+pub const MAX_MONEY: i64 = 21_000_000 * COIN;
 
 pub const DEFAULT_FEE: Amount = Amount(10000);
 
@@ -17,7 +17,7 @@ pub const DEFAULT_FEE: Amount = Amount(10000);
 /// by the network consensus rules.
 ///
 /// [`Transaction`]: crate::transaction::Transaction
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, PartialOrd, Eq, Ord)]
 pub struct Amount(i64);
 
 impl Amount {
@@ -144,6 +144,19 @@ impl SubAssign<Amount> for Amount {
 impl Sum for Amount {
     fn sum<I: Iterator<Item = Amount>>(iter: I) -> Amount {
         iter.fold(Amount::zero(), Add::add)
+    }
+}
+
+#[cfg(any(test, feature = "test-dependencies"))]
+pub mod testing {
+    use proptest::prelude::prop_compose;
+
+    use super::{Amount, MAX_MONEY};
+
+    prop_compose! {
+        pub fn arb_nonnegative_amount()(amt in 0i64..MAX_MONEY) -> Amount {
+            Amount::from_i64(amt).unwrap()
+        }
     }
 }
 

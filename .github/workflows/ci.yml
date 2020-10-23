@@ -73,17 +73,17 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: build
-          args: --verbose --release --all --tests
+          args: --all-features --verbose --release --all --tests
       - name: Run tests
         uses: actions-rs/cargo@v1
         with:
           command: test
-          args: --verbose --release --all
+          args: --all-features --verbose --release --all
       - name: Run slow tests
         uses: actions-rs/cargo@v1
         with:
           command: test
-          args: --verbose --release --all -- --ignored
+          args: --all-features --verbose --release --all -- --ignored
 
   build:
     name: Build target ${{ matrix.target }}
@@ -145,7 +145,7 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: tarpaulin
-          args: --release --timeout 600 --out Xml
+          args: --all-features --release --timeout 600 --out Xml
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v1.0.3
         with:
