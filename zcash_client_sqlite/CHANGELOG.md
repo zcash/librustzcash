@@ -8,5 +8,5 @@ and this project adheres to Rust's notion of
 ## [0.2.1] - 2020-10-24
 ### Fixed
 - `transact::create_to_address` now correctly reconstructs notes from the data
-  DB after Canopy activation (zcash/librustzcash#311).
-
+  DB after Canopy activation (zcash/librustzcash#311). This is critcal to correct
+  operation of spends after Canopy.

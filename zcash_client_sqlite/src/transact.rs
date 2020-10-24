@@ -228,18 +228,18 @@ pub fn create_to_address<DB: AsRef<Path>, P: consensus::Parameters>(
             let note_value: i64 = row.get(1)?;
 
             let rseed = {
-                let d: Vec<_> = row.get(2)?;
+                let rcm_bytes: Vec<_> = row.get(2)?;
 
                 // We store rcm directly in the data DB, regardless of whether the note
                 // used a v1 or v2 note plaintext, so for the purposes of spending let's
                 // pretend this is a pre-ZIP 212 note.
-                let r = jubjub::Fr::from_repr(
-                    d[..]
+                let rcm = jubjub::Fr::from_repr(
+                    rcm_bytes[..]
                         .try_into()
                         .map_err(|_| Error(ErrorKind::InvalidNote))?,
                 )
                 .ok_or(Error(ErrorKind::InvalidNote))?;
-                Rseed::BeforeZip212(r)
+                Rseed::BeforeZip212(rcm)
             };
 
             let from = extfvk.fvk.vk.to_payment_address(diversifier).unwrap();
