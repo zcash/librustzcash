@@ -36,7 +36,7 @@ pub enum SqliteClientError {
     Io(std::io::Error),
 
     /// A received memo cannot be interpreted as a UTF-8 string.
-    InvalidMemo(std::str::Utf8Error),
+    InvalidMemo(zcash_primitives::memo::Error),
 
     /// Wrapper for errors from zcash_client_backend
     BackendError(data_api::error::Error<NoteId>),
@@ -95,6 +95,12 @@ impl From<bech32::Error> for SqliteClientError {
 impl From<bs58::decode::Error> for SqliteClientError {
     fn from(e: bs58::decode::Error) -> Self {
         SqliteClientError::Base58(e)
+    }
+}
+
+impl From<zcash_primitives::memo::Error> for SqliteClientError {
+    fn from(e: zcash_primitives::memo::Error) -> Self {
+        SqliteClientError::InvalidMemo(e)
     }
 }
 

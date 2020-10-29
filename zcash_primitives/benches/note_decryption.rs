@@ -3,7 +3,7 @@ use ff::Field;
 use rand_core::OsRng;
 use zcash_primitives::{
     consensus::{NetworkUpgrade::Canopy, Parameters, TEST_NETWORK},
-    memo::Memo,
+    memo::MemoBytes,
     note_encryption::{try_sapling_note_decryption, SaplingNoteEncryption},
     primitives::{Diversifier, PaymentAddress, SaplingIvk, ValueCommitment},
     transaction::components::{OutputDescription, GROTH_PROOF_SIZE},
@@ -36,7 +36,7 @@ fn bench_note_decryption(c: &mut Criterion) {
         let note = pa.create_note(value, rseed).unwrap();
         let cmu = note.cmu();
 
-        let mut ne = SaplingNoteEncryption::new(None, note, pa, Memo::default(), &mut rng);
+        let mut ne = SaplingNoteEncryption::new(None, note, pa, MemoBytes::default(), &mut rng);
         let ephemeral_key = ne.epk().clone().into();
         let enc_ciphertext = ne.encrypt_note_plaintext();
         let out_ciphertext = ne.encrypt_outgoing_plaintext(&cv, &cmu);

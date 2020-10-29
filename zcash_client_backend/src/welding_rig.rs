@@ -275,7 +275,7 @@ mod tests {
     use zcash_primitives::{
         consensus::{BlockHeight, Network},
         constants::SPENDING_KEY_GENERATOR,
-        memo::Memo,
+        memo::MemoBytes,
         merkle_tree::CommitmentTree,
         note_encryption::SaplingNoteEncryption,
         primitives::{Note, Nullifier, SaplingIvk},
@@ -345,7 +345,7 @@ mod tests {
             Some(extfvk.fvk.ovk),
             note.clone(),
             to,
-            Memo::default(),
+            MemoBytes::default(),
             &mut rng,
         );
         let cmu = note.cmu().to_repr().as_ref().to_owned();

@@ -7,7 +7,7 @@ use std::fmt::Debug;
 use zcash_primitives::{
     block::BlockHash,
     consensus::BlockHeight,
-    memo::Memo,
+    memo::{Memo, MemoBytes},
     merkle_tree::{CommitmentTree, IncrementalWitness},
     primitives::{Nullifier, PaymentAddress},
     sapling::Node,
@@ -137,11 +137,11 @@ pub trait WalletRead {
         anchor_height: BlockHeight,
     ) -> Result<Amount, Self::Error>;
 
-    /// Returns the memo for a note, if it is known and a valid UTF-8 string.
+    /// Returns the memo for a note.
     ///
-    /// This will return `Ok(None)` if the note identifier does not appear in the
-    /// database as a known note ID.
-    fn get_memo_as_utf8(&self, id_note: Self::NoteRef) -> Result<Option<String>, Self::Error>;
+    /// Implementations of this method must return an error if the note identifier
+    /// does not appear in the backing data store.
+    fn get_memo(&self, id_note: Self::NoteRef) -> Result<Memo, Self::Error>;
 
     /// Returns the note commitment tree at the specified block height.
     fn get_commitment_tree(
@@ -199,7 +199,7 @@ pub struct SentTransaction<'a> {
     pub account: AccountId,
     pub recipient_address: &'a RecipientAddress,
     pub value: Amount,
-    pub memo: Option<Memo>,
+    pub memo: Option<MemoBytes>,
 }
 
 /// This trait encapsulates the write capabilities required to update stored
@@ -259,6 +259,7 @@ pub mod testing {
     use zcash_primitives::{
         block::BlockHash,
         consensus::BlockHeight,
+        memo::Memo,
         merkle_tree::{CommitmentTree, IncrementalWitness},
         primitives::{Nullifier, PaymentAddress},
         sapling::Node,
@@ -342,8 +343,8 @@ pub mod testing {
             Ok(Amount::zero())
         }
 
-        fn get_memo_as_utf8(&self, _id_note: Self::NoteRef) -> Result<Option<String>, Self::Error> {
-            Ok(None)
+        fn get_memo(&self, _id_note: Self::NoteRef) -> Result<Memo, Self::Error> {
+            Ok(Memo::Empty)
         }
 
         fn get_commitment_tree(

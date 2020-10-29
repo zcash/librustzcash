@@ -3,7 +3,7 @@ use std::fmt::Debug;
 
 use zcash_primitives::{
     consensus::{self, BranchId, NetworkUpgrade},
-    memo::Memo,
+    memo::MemoBytes,
     prover::TxProver,
     transaction::{
         builder::Builder,
@@ -155,7 +155,7 @@ pub fn create_spend_to_address<E, N, P, D, R>(
     extsk: &ExtendedSpendingKey,
     to: &RecipientAddress,
     value: Amount,
-    memo: Option<Memo>,
+    memo: Option<MemoBytes>,
     ovk_policy: OvkPolicy,
 ) -> Result<R, E>
 where

@@ -2,7 +2,7 @@
 
 use crate::{
     consensus::{self, BlockHeight, NetworkUpgrade::Canopy, ZIP212_GRACE_PERIOD},
-    memo::Memo,
+    memo::MemoBytes,
     primitives::{Diversifier, Note, PaymentAddress, Rseed, SaplingIvk},
 };
 use blake2b_simd::{Hash as Blake2bHash, Params as Blake2bParams};
@@ -113,7 +113,7 @@ pub fn prf_ock(
 /// use rand_core::OsRng;
 /// use zcash_primitives::{
 ///     keys::{OutgoingViewingKey, prf_expand},
-///     memo::Memo,
+///     memo::MemoBytes,
 ///     note_encryption::SaplingNoteEncryption,
 ///     primitives::{Diversifier, PaymentAddress, Rseed, ValueCommitment},
 /// };
@@ -135,7 +135,7 @@ pub fn prf_ock(
 /// let note = to.create_note(value, Rseed::BeforeZip212(rcm)).unwrap();
 /// let cmu = note.cmu();
 ///
-/// let mut enc = SaplingNoteEncryption::new(ovk, note, to, Memo::default(), &mut rng);
+/// let mut enc = SaplingNoteEncryption::new(ovk, note, to, MemoBytes::default(), &mut rng);
 /// let encCiphertext = enc.encrypt_note_plaintext();
 /// let outCiphertext = enc.encrypt_outgoing_plaintext(&cv.commitment().into(), &cmu);
 /// ```
@@ -144,7 +144,7 @@ pub struct SaplingNoteEncryption<R: RngCore> {
     esk: jubjub::Fr,
     note: Note,
     to: PaymentAddress,
-    memo: Memo,
+    memo: MemoBytes,
     /// `None` represents the `ovk = ⊥` case.
     ovk: Option<OutgoingViewingKey>,
     rng: R,
@@ -159,7 +159,7 @@ impl<R: RngCore + CryptoRng> SaplingNoteEncryption<R> {
         ovk: Option<OutgoingViewingKey>,
         note: Note,
         to: PaymentAddress,
-        memo: Memo,
+        memo: MemoBytes,
         rng: R,
     ) -> Self {
         Self::new_internal(ovk, note, to, memo, rng)
@@ -171,7 +171,7 @@ impl<R: RngCore> SaplingNoteEncryption<R> {
         ovk: Option<OutgoingViewingKey>,
         note: Note,
         to: PaymentAddress,
-        memo: Memo,
+        memo: MemoBytes,
         mut rng: R,
     ) -> Self {
         let esk = note.generate_or_derive_esk_internal(&mut rng);
@@ -222,7 +222,7 @@ impl<R: RngCore> SaplingNoteEncryption<R> {
                 input[20..COMPACT_NOTE_SIZE].copy_from_slice(&rseed);
             }
         }
-        input[COMPACT_NOTE_SIZE..NOTE_PLAINTEXT_SIZE].copy_from_slice(&self.memo.0);
+        input[COMPACT_NOTE_SIZE..NOTE_PLAINTEXT_SIZE].copy_from_slice(self.memo.as_array());
 
         let mut output = [0u8; ENC_CIPHERTEXT_SIZE];
         assert_eq!(
@@ -362,7 +362,7 @@ pub fn try_sapling_note_decryption<P: consensus::Parameters>(
     epk: &jubjub::ExtendedPoint,
     cmu: &bls12_381::Scalar,
     enc_ciphertext: &[u8],
-) -> Option<(Note, PaymentAddress, Memo)> {
+) -> Option<(Note, PaymentAddress, MemoBytes)> {
     assert_eq!(enc_ciphertext.len(), ENC_CIPHERTEXT_SIZE);
 
     let shared_secret = sapling_ka_agree(&ivk.0, &epk);
@@ -384,10 +384,10 @@ pub fn try_sapling_note_decryption<P: consensus::Parameters>(
 
     let (note, to) = parse_note_plaintext_without_memo(params, height, ivk, epk, cmu, &plaintext)?;
 
-    let mut memo = [0u8; 512];
-    memo.copy_from_slice(&plaintext[COMPACT_NOTE_SIZE..NOTE_PLAINTEXT_SIZE]);
+    // Memo is the correct length by definition.
+    let memo = MemoBytes::from_bytes(&plaintext[COMPACT_NOTE_SIZE..NOTE_PLAINTEXT_SIZE]).unwrap();
 
-    Some((note, to, Memo(memo)))
+    Some((note, to, memo))
 }
 
 /// Trial decryption of the compact note plaintext by the recipient for light clients.
@@ -436,7 +436,7 @@ pub fn try_sapling_output_recovery_with_ock<P: consensus::Parameters>(
     epk: &jubjub::ExtendedPoint,
     enc_ciphertext: &[u8],
     out_ciphertext: &[u8],
-) -> Option<(Note, PaymentAddress, Memo)> {
+) -> Option<(Note, PaymentAddress, MemoBytes)> {
     assert_eq!(enc_ciphertext.len(), ENC_CIPHERTEXT_SIZE);
     assert_eq!(out_ciphertext.len(), OUT_CIPHERTEXT_SIZE);
 
@@ -502,8 +502,7 @@ pub fn try_sapling_output_recovery_with_ock<P: consensus::Parameters>(
         Rseed::AfterZip212(r)
     };
 
-    let mut memo = [0u8; 512];
-    memo.copy_from_slice(&plaintext[COMPACT_NOTE_SIZE..NOTE_PLAINTEXT_SIZE]);
+    let memo = MemoBytes::from_bytes(&plaintext[COMPACT_NOTE_SIZE..NOTE_PLAINTEXT_SIZE]).unwrap();
 
     let diversifier = Diversifier(d);
     if (diversifier.g_d()? * esk).to_bytes() != epk.to_bytes() {
@@ -525,7 +524,7 @@ pub fn try_sapling_output_recovery_with_ock<P: consensus::Parameters>(
         }
     }
 
-    Some((note, to, Memo(memo)))
+    Some((note, to, memo))
 }
 
 /// Recovery of the full note plaintext by the sender.
@@ -545,7 +544,7 @@ pub fn try_sapling_output_recovery<P: consensus::Parameters>(
     epk: &jubjub::ExtendedPoint,
     enc_ciphertext: &[u8],
     out_ciphertext: &[u8],
-) -> Option<(Note, PaymentAddress, Memo)> {
+) -> Option<(Note, PaymentAddress, MemoBytes)> {
     try_sapling_output_recovery_with_ock::<P>(
         params,
         height,
@@ -582,7 +581,7 @@ mod tests {
             Parameters, TEST_NETWORK, ZIP212_GRACE_PERIOD,
         },
         keys::OutgoingViewingKey,
-        memo::Memo,
+        memo::MemoBytes,
         primitives::{Diversifier, PaymentAddress, Rseed, SaplingIvk, ValueCommitment},
         util::generate_random_rseed,
     };
@@ -682,7 +681,8 @@ mod tests {
         let cmu = note.cmu();
 
         let ovk = OutgoingViewingKey([0; 32]);
-        let mut ne = SaplingNoteEncryption::new(Some(ovk), note, pa, Memo([0; 512]), &mut rng);
+        let mut ne =
+            SaplingNoteEncryption::new(Some(ovk), note, pa, MemoBytes::default(), &mut rng);
         let epk = ne.epk().clone().into();
         let enc_ciphertext = ne.encrypt_note_plaintext();
         let out_ciphertext = ne.encrypt_outgoing_plaintext(&cv, &cmu);
@@ -1671,7 +1671,7 @@ mod tests {
                 Some((decrypted_note, decrypted_to, decrypted_memo)) => {
                     assert_eq!(decrypted_note, note);
                     assert_eq!(decrypted_to, to);
-                    assert_eq!(&decrypted_memo.0[..], &tv.memo[..]);
+                    assert_eq!(&decrypted_memo.as_array()[..], &tv.memo[..]);
                 }
                 None => panic!("Note decryption failed"),
             }
@@ -1704,7 +1704,7 @@ mod tests {
                 Some((decrypted_note, decrypted_to, decrypted_memo)) => {
                     assert_eq!(decrypted_note, note);
                     assert_eq!(decrypted_to, to);
-                    assert_eq!(&decrypted_memo.0[..], &tv.memo[..]);
+                    assert_eq!(&decrypted_memo.as_array()[..], &tv.memo[..]);
                 }
                 None => panic!("Output recovery failed"),
             }
@@ -1713,7 +1713,13 @@ mod tests {
             // Test encryption
             //
 
-            let mut ne = SaplingNoteEncryption::new(Some(ovk), note, to, Memo(tv.memo), OsRng);
+            let mut ne = SaplingNoteEncryption::new(
+                Some(ovk),
+                note,
+                to,
+                MemoBytes::from_bytes(&tv.memo).unwrap(),
+                OsRng,
+            );
             // Swap in the ephemeral keypair from the test vectors
             ne.esk = esk;
             ne.epk = epk.into_subgroup().unwrap();
