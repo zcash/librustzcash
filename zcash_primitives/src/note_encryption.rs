@@ -408,6 +408,8 @@ fn parse_note_plaintext_without_memo<P: consensus::Parameters>(
     Some((note, to))
 }
 
+#[allow(clippy::if_same_then_else)]
+#[allow(clippy::needless_bool)]
 pub fn plaintext_version_is_valid<P: consensus::Parameters>(
     params: &P,
     height: BlockHeight,
