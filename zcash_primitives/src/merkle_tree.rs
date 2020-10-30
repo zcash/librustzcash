@@ -1034,7 +1034,7 @@ mod tests {
                 if let Some(leaf) = leaf {
                     let path = witness.path().expect("should be able to create a path");
                     let expected = MerklePath::from_slice_with_depth(
-                        &mut hex::decode(paths[paths_i]).unwrap(),
+                        &hex::decode(paths[paths_i]).unwrap(),
                         TESTING_DEPTH,
                     )
                     .unwrap();

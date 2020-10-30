@@ -207,7 +207,7 @@ impl TransparentInputs {
                 use ripemd160::Ripemd160;
                 use sha2::{Digest, Sha256};
 
-                if &hash[..] != &Ripemd160::digest(&Sha256::digest(&pubkey))[..] {
+                if hash[..] != Ripemd160::digest(&Sha256::digest(&pubkey))[..] {
                     return Err(Error::InvalidAddress);
                 }
             }

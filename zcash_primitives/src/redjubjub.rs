@@ -188,7 +188,7 @@ pub fn batch_verify<'a, R: RngCore>(
 
         c.mul_assign(&z);
 
-        acc = acc + r + (&entry.vk.0 * c) + (p_g * s);
+        acc = acc + r + (entry.vk.0 * c) + (p_g * s);
     }
 
     acc.mul_by_cofactor().is_identity().into()
