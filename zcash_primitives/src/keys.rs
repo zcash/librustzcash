@@ -110,8 +110,8 @@ impl Clone for FullViewingKey {
     fn clone(&self) -> Self {
         FullViewingKey {
             vk: ViewingKey {
-                ak: self.vk.ak.clone(),
-                nk: self.vk.nk.clone(),
+                ak: self.vk.ak,
+                nk: self.vk.nk,
             },
             ovk: self.ovk,
         }

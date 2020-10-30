@@ -85,7 +85,7 @@ impl SaplingProvingContext {
         let note = Note {
             value,
             g_d: diversifier.g_d().expect("was a valid diversifier before"),
-            pk_d: payment_address.pk_d().clone(),
+            pk_d: *payment_address.pk_d(),
             rseed,
         };
 
@@ -187,7 +187,7 @@ impl SaplingProvingContext {
         // We now have a full witness for the output proof.
         let instance = Output {
             value_commitment: Some(value_commitment.clone()),
-            payment_address: Some(payment_address.clone()),
+            payment_address: Some(payment_address),
             commitment_randomness: Some(rcm),
             esk: Some(esk),
         };

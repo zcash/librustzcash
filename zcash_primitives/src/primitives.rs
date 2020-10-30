@@ -40,7 +40,7 @@ pub struct ProofGenerationKey {
 impl ProofGenerationKey {
     pub fn to_viewing_key(&self) -> ViewingKey {
         ViewingKey {
-            ak: self.ak.clone(),
+            ak: self.ak,
             nk: constants::PROOF_GENERATION_KEY_GENERATOR * self.nsk,
         }
     }
@@ -182,7 +182,7 @@ impl PaymentAddress {
             value,
             rseed: randomness,
             g_d,
-            pk_d: self.pk_d.clone(),
+            pk_d: self.pk_d,
         })
     }
 }

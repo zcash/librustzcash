@@ -111,7 +111,7 @@ impl SaplingOutput {
 
         let note = Note {
             g_d,
-            pk_d: to.pk_d().clone(),
+            pk_d: *to.pk_d(),
             value: value.into(),
             rseed,
         };
@@ -140,7 +140,7 @@ impl SaplingOutput {
 
         let (zkproof, cv) = prover.output_proof(
             ctx,
-            encryptor.esk().clone(),
+            *encryptor.esk(),
             self.to,
             self.note.rcm(),
             self.note.value,
@@ -590,7 +590,7 @@ impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng> Builder<'a, P, R> {
                     self.spends[0].extsk.expsk.ovk,
                     PaymentAddress::from_parts(
                         self.spends[0].diversifier,
-                        self.spends[0].note.pk_d.clone(),
+                        self.spends[0].note.pk_d,
                     )
                     .ok_or(Error::InvalidAddress)?,
                 )
@@ -703,7 +703,7 @@ impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng> Builder<'a, P, R> {
                     let (pk_d, payment_address) = loop {
                         let dummy_ivk = jubjub::Fr::random(&mut self.rng);
                         let pk_d = g_d * dummy_ivk;
-                        if let Some(addr) = PaymentAddress::from_parts(diversifier, pk_d.clone()) {
+                        if let Some(addr) = PaymentAddress::from_parts(diversifier, pk_d) {
                             break (pk_d, addr);
                         }
                     };
@@ -950,12 +950,7 @@ mod tests {
 
         // Create a tx with a sapling spend. binding_sig should be present
         builder
-            .add_sapling_spend(
-                extsk.clone(),
-                *to.diversifier(),
-                note1.clone(),
-                witness1.path().unwrap(),
-            )
+            .add_sapling_spend(extsk, *to.diversifier(), note1, witness1.path().unwrap())
             .unwrap();
 
         builder
@@ -1008,12 +1003,7 @@ mod tests {
         {
             let mut builder = Builder::new(TEST_NETWORK, H0);
             builder
-                .add_sapling_output(
-                    ovk.clone(),
-                    to.clone(),
-                    Amount::from_u64(50000).unwrap(),
-                    None,
-                )
+                .add_sapling_output(ovk, to.clone(), Amount::from_u64(50000).unwrap(), None)
                 .unwrap();
             assert_eq!(
                 builder.build(consensus::BranchId::Sapling, &MockTxProver),
@@ -1058,12 +1048,7 @@ mod tests {
                 )
                 .unwrap();
             builder
-                .add_sapling_output(
-                    ovk.clone(),
-                    to.clone(),
-                    Amount::from_u64(30000).unwrap(),
-                    None,
-                )
+                .add_sapling_output(ovk, to.clone(), Amount::from_u64(30000).unwrap(), None)
                 .unwrap();
             builder
                 .add_transparent_output(
