@@ -18,6 +18,12 @@ pub struct SaplingVerificationContext {
     cv_sum: jubjub::ExtendedPoint,
 }
 
+impl Default for SaplingVerificationContext {
+    fn default() -> Self {
+        SaplingVerificationContext::new()
+    }
+}
+
 impl SaplingVerificationContext {
     /// Construct a new context to be used with a single transaction.
     pub fn new() -> Self {

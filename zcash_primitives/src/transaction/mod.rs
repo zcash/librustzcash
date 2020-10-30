@@ -126,6 +126,12 @@ impl std::fmt::Debug for TransactionData {
     }
 }
 
+impl Default for TransactionData {
+    fn default() -> Self {
+        TransactionData::new()
+    }
+}
+
 impl TransactionData {
     pub fn new() -> Self {
         TransactionData {

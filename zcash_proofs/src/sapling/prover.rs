@@ -26,6 +26,12 @@ pub struct SaplingProvingContext {
     cv_sum: jubjub::ExtendedPoint,
 }
 
+impl Default for SaplingProvingContext {
+    fn default() -> Self {
+        SaplingProvingContext::new()
+    }
+}
+
 impl SaplingProvingContext {
     /// Construct a new context to be used with a single transaction.
     pub fn new() -> Self {
