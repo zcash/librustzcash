@@ -366,8 +366,7 @@ mod tests {
         assert!(length >= 3);
         let mut tree = initial();
         for i in 2..length {
-            tree.append_leaf(leaf(i + 1).into())
-                .expect("Failed to append");
+            tree.append_leaf(leaf(i + 1)).expect("Failed to append");
         }
 
         tree
@@ -707,7 +706,7 @@ mod tests {
                 let total = add - delete + 2;
 
                 TestResult::from_bool(
-                    if total & total - 1 == 0 {
+                    if total & (total - 1) == 0 {
                         if let EntryLink::Stored(_) = tree.root() { true }
                         else { false }
                     } else if let EntryLink::Generated(_) = tree.root() {
