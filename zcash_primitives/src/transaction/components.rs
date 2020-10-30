@@ -161,8 +161,8 @@ impl TzeIn {
         Ok(TzeIn {
             prevout,
             witness: tze::Witness {
-                extension_id: u32::try_from(extension_id).map_err(|e| to_io_error(e))?,
-                mode: u32::try_from(mode).map_err(|e| to_io_error(e))?,
+                extension_id: u32::try_from(extension_id).map_err(to_io_error)?,
+                mode: u32::try_from(mode).map_err(to_io_error)?,
                 payload,
             },
         })
@@ -177,12 +177,12 @@ impl TzeIn {
 
         CompactSize::write(
             &mut writer,
-            usize::try_from(self.witness.extension_id).map_err(|e| to_io_error(e))?,
+            usize::try_from(self.witness.extension_id).map_err(to_io_error)?,
         )?;
 
         CompactSize::write(
             &mut writer,
-            usize::try_from(self.witness.mode).map_err(|e| to_io_error(e))?,
+            usize::try_from(self.witness.mode).map_err(to_io_error)?,
         )
     }
 
@@ -219,8 +219,8 @@ impl TzeOut {
         Ok(TzeOut {
             value,
             precondition: tze::Precondition {
-                extension_id: u32::try_from(extension_id).map_err(|e| to_io_error(e))?,
-                mode: u32::try_from(mode).map_err(|e| to_io_error(e))?,
+                extension_id: u32::try_from(extension_id).map_err(to_io_error)?,
+                mode: u32::try_from(mode).map_err(to_io_error)?,
                 payload,
             },
         })
@@ -231,11 +231,11 @@ impl TzeOut {
 
         CompactSize::write(
             &mut writer,
-            usize::try_from(self.precondition.extension_id).map_err(|e| to_io_error(e))?,
+            usize::try_from(self.precondition.extension_id).map_err(to_io_error)?,
         )?;
         CompactSize::write(
             &mut writer,
-            usize::try_from(self.precondition.mode).map_err(|e| to_io_error(e))?,
+            usize::try_from(self.precondition.mode).map_err(to_io_error)?,
         )?;
         Vector::write(&mut writer, &self.precondition.payload, |w, b| {
             w.write_u8(*b)
