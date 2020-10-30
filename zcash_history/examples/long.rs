@@ -34,8 +34,8 @@ fn prepare_tree(vec: &Vec<NodeData>) -> Tree {
     loop {
         if peak_pos > vec.len() {
             // left child, -2^h
-            peak_pos = peak_pos - (1 << h);
-            h = h - 1;
+            peak_pos -= 1 << h;
+            h -= 1;
         }
 
         if peak_pos <= vec.len() {
@@ -62,7 +62,7 @@ fn prepare_tree(vec: &Vec<NodeData>) -> Tree {
     while h > 0 {
         let left_pos = peak_pos - (1 << h);
         let right_pos = peak_pos - 1;
-        h = h - 1;
+        h -= 1;
 
         // drafting left child
         draft(&mut extra, vec, left_pos, h);

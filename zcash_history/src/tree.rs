@@ -209,7 +209,7 @@ impl Tree {
 
     fn pop(&mut self) {
         self.stored.remove(&(self.stored_count - 1));
-        self.stored_count = self.stored_count - 1;
+        self.stored_count -= 1;
     }
 
     /// Truncate one leaf from the end of the tree.

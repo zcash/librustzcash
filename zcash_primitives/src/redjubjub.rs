@@ -184,7 +184,7 @@ pub fn batch_verify<'a, R: RngCore>(
         s.mul_assign(&z);
         s = s.neg();
 
-        r = r * z;
+        r *= z;
 
         c.mul_assign(&z);
 
