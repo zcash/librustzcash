@@ -20,7 +20,7 @@ fn draft(into: &mut Vec<(u32, Entry)>, vec: &Vec<NodeData>, peak_pos: usize, h: 
 }
 
 fn prepare_tree(vec: &Vec<NodeData>) -> Tree {
-    assert!(vec.len() > 0);
+    assert!(!vec.is_empty());
 
     // integer log2 of (vec.len()+1), -1
     let mut h = (32 - ((vec.len() + 1) as u32).leading_zeros() - 1) - 1;

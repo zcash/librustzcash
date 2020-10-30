@@ -84,7 +84,7 @@ impl Tree {
     ///
     /// Will panic if `peaks` is empty.
     pub fn new(length: u32, peaks: Vec<(u32, Entry)>, extra: Vec<(u32, Entry)>) -> Self {
-        assert!(peaks.len() > 0);
+        assert!(!peaks.is_empty());
 
         let mut result = Tree::invalid();
 
