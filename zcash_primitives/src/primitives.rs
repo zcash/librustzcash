@@ -143,9 +143,7 @@ impl PaymentAddress {
             Diversifier(tmp)
         };
         // Check that the diversifier is valid
-        if diversifier.g_d().is_none() {
-            return None;
-        }
+        diversifier.g_d()?;
 
         let pk_d = jubjub::SubgroupPoint::from_bytes(bytes[11..43].try_into().unwrap());
         if pk_d.is_some().into() {

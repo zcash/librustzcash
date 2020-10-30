@@ -90,9 +90,8 @@ impl Tree {
 
         result.stored_count = length;
 
-        let mut gen = 0;
         let mut root = EntryLink::Stored(peaks[0].0);
-        for (idx, node) in peaks.into_iter() {
+        for (gen, (idx, node)) in peaks.into_iter().enumerate() {
             result.stored.insert(idx, node);
             if gen != 0 {
                 let next_generated = combine_nodes(
@@ -105,7 +104,6 @@ impl Tree {
                 );
                 root = result.push_generated(next_generated);
             }
-            gen += 1;
         }
 
         for (idx, node) in extra {
@@ -683,9 +681,10 @@ mod tests {
                     if number & (number - 1) == 0 {
                         if let EntryLink::Stored(_) = tree.root() { true }
                         else { false }
+                    } else if let EntryLink::Generated(_) = tree.root() {
+                        true
                     } else {
-                        if let EntryLink::Generated(_) = tree.root() { true }
-                        else { false }
+                        false
                     }
                 )
             }
@@ -711,9 +710,10 @@ mod tests {
                     if total & total - 1 == 0 {
                         if let EntryLink::Stored(_) = tree.root() { true }
                         else { false }
+                    } else if let EntryLink::Generated(_) = tree.root() {
+                        true
                     } else {
-                        if let EntryLink::Generated(_) = tree.root() { true }
-                        else { false }
+                        false
                     }
                 )
             }

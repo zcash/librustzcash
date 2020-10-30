@@ -80,7 +80,7 @@ fn prepare_tree(vec: &[NodeData]) -> Tree {
 }
 
 fn main() {
-    let number = match std::env::args().skip(1).next() {
+    let number = match std::env::args().nth(1) {
         None => {
             eprintln!("writer <number of nodes> [<out_file>]");
             std::process::exit(1);
