@@ -505,7 +505,6 @@ mod tests {
     use super::{CommitmentTree, Hashable, IncrementalWitness, MerklePath, PathFiller};
     use crate::sapling::Node;
 
-    use hex;
     use std::convert::TryInto;
     use std::io::{self, Read, Write};
 

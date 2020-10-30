@@ -1,7 +1,6 @@
 //! Structs and methods for handling Zcash block headers.
 
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
-use hex;
 use sha2::{Digest, Sha256};
 use std::fmt;
 use std::io::{self, Read, Write};
