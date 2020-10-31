@@ -54,6 +54,14 @@ zcash_proofs = { version = "0.9", path = "../zcash_proofs" }
 zcash_primitives = { version = "0.9", path = "../zcash_primitives", features = ["test-dependencies"] }
 zcash_address = { version = "0.2", path = "../components/zcash_address", features = ["test-dependencies"] }
 
+# zec_sqlite_cli dependencies
+anyhow = "1"
+futures-util = "0.3"
+gumdrop = "0.8"
+tls-api-rustls = "0.6"
+tokio = { version = "1.21.0", features = ["fs", "macros", "rt-multi-thread"] }
+tonic = { version = "0.8", features = ["gzip", "tls-webpki-roots"] }
+
 [features]
 mainnet = []
 test-dependencies = [
@@ -62,6 +70,14 @@ test-dependencies = [
 ]
 transparent-inputs = ["hdwallet", "zcash_client_backend/transparent-inputs"]
 unstable = ["zcash_client_backend/unstable"]
+zec_sqlite_cli = [
+    "unstable",
+    "zcash_client_backend/lightwalletd-tonic",
+]
 
 [lib]
 bench = false
+
+[[example]]
+name = "zec_sqlite_cli"
+required-features = ["zec_sqlite_cli"]
