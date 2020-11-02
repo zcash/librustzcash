@@ -137,7 +137,7 @@ pub mod test {
     fn test_pedersen_hash_points() {
         let test_vectors = pedersen_hash_vectors::get_vectors();
 
-        assert!(test_vectors.len() > 0);
+        assert!(!test_vectors.is_empty());
 
         for v in test_vectors.iter() {
             let input_bools: Vec<bool> = v.input_bits.iter().map(|&i| i == 1).collect();

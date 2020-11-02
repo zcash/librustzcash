@@ -326,7 +326,7 @@ impl EdwardsPoint {
             let mut t1 = bls12_381::Scalar::one();
             t1.add_assign(c.get_value().get()?);
 
-            let res = t1.invert().map(|t1| t0 * &t1);
+            let res = t1.invert().map(|t1| t0 * t1);
             if bool::from(res.is_some()) {
                 Ok(res.unwrap())
             } else {
@@ -352,7 +352,7 @@ impl EdwardsPoint {
             let mut t1 = bls12_381::Scalar::one();
             t1.sub_assign(c.get_value().get()?);
 
-            let res = t1.invert().map(|t1| t0 * &t1);
+            let res = t1.invert().map(|t1| t0 * t1);
             if bool::from(res.is_some()) {
                 Ok(res.unwrap())
             } else {
@@ -427,7 +427,7 @@ impl EdwardsPoint {
             let mut t1 = bls12_381::Scalar::one();
             t1.add_assign(c.get_value().get()?);
 
-            let ret = t1.invert().map(|t1| t0 * &t1);
+            let ret = t1.invert().map(|t1| t0 * t1);
             if bool::from(ret.is_some()) {
                 Ok(ret.unwrap())
             } else {
@@ -452,7 +452,7 @@ impl EdwardsPoint {
             let mut t1 = bls12_381::Scalar::one();
             t1.sub_assign(c.get_value().get()?);
 
-            let ret = t1.invert().map(|t1| t0 * &t1);
+            let ret = t1.invert().map(|t1| t0 * t1);
             if bool::from(ret.is_some()) {
                 Ok(ret.unwrap())
             } else {
@@ -489,7 +489,7 @@ impl MontgomeryPoint {
             let mut t0 = *self.x.get_value().get()?;
             t0.mul_assign(MONTGOMERY_SCALE);
 
-            let ret = self.y.get_value().get()?.invert().map(|invy| t0 * &invy);
+            let ret = self.y.get_value().get()?.invert().map(|invy| t0 * invy);
             if bool::from(ret.is_some()) {
                 Ok(ret.unwrap())
             } else {
@@ -511,7 +511,7 @@ impl MontgomeryPoint {
             t0.sub_assign(&bls12_381::Scalar::one());
             t1.add_assign(&bls12_381::Scalar::one());
 
-            let ret = t1.invert().map(|t1| t0 * &t1);
+            let ret = t1.invert().map(|t1| t0 * t1);
             if bool::from(ret.is_some()) {
                 Ok(ret.unwrap())
             } else {
@@ -552,7 +552,7 @@ impl MontgomeryPoint {
             let mut d = *other.x.get_value().get()?;
             d.sub_assign(self.x.get_value().get()?);
 
-            let ret = d.invert().map(|d| n * &d);
+            let ret = d.invert().map(|d| n * d);
             if bool::from(ret.is_some()) {
                 Ok(ret.unwrap())
             } else {

@@ -84,15 +84,14 @@ impl Tree {
     ///
     /// Will panic if `peaks` is empty.
     pub fn new(length: u32, peaks: Vec<(u32, Entry)>, extra: Vec<(u32, Entry)>) -> Self {
-        assert!(peaks.len() > 0);
+        assert!(!peaks.is_empty());
 
         let mut result = Tree::invalid();
 
         result.stored_count = length;
 
-        let mut gen = 0;
         let mut root = EntryLink::Stored(peaks[0].0);
-        for (idx, node) in peaks.into_iter() {
+        for (gen, (idx, node)) in peaks.into_iter().enumerate() {
             result.stored.insert(idx, node);
             if gen != 0 {
                 let next_generated = combine_nodes(
@@ -105,7 +104,6 @@ impl Tree {
                 );
                 root = result.push_generated(next_generated);
             }
-            gen += 1;
         }
 
         for (idx, node) in extra {
@@ -209,7 +207,7 @@ impl Tree {
 
     fn pop(&mut self) {
         self.stored.remove(&(self.stored_count - 1));
-        self.stored_count = self.stored_count - 1;
+        self.stored_count -= 1;
     }
 
     /// Truncate one leaf from the end of the tree.
@@ -368,8 +366,7 @@ mod tests {
         assert!(length >= 3);
         let mut tree = initial();
         for i in 2..length {
-            tree.append_leaf(leaf(i + 1).into())
-                .expect("Failed to append");
+            tree.append_leaf(leaf(i + 1)).expect("Failed to append");
         }
 
         tree
@@ -683,9 +680,10 @@ mod tests {
                     if number & (number - 1) == 0 {
                         if let EntryLink::Stored(_) = tree.root() { true }
                         else { false }
+                    } else if let EntryLink::Generated(_) = tree.root() {
+                        true
                     } else {
-                        if let EntryLink::Generated(_) = tree.root() { true }
-                        else { false }
+                        false
                     }
                 )
             }
@@ -708,12 +706,13 @@ mod tests {
                 let total = add - delete + 2;
 
                 TestResult::from_bool(
-                    if total & total - 1 == 0 {
+                    if total & (total - 1) == 0 {
                         if let EntryLink::Stored(_) = tree.root() { true }
                         else { false }
+                    } else if let EntryLink::Generated(_) = tree.root() {
+                        true
                     } else {
-                        if let EntryLink::Generated(_) = tree.root() { true }
-                        else { false }
+                        false
                     }
                 )
             }

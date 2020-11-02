@@ -226,12 +226,9 @@ fn test_tze_tx_parse() {
     match tx {
         Ok(tx) => assert!(!tx.tze_inputs.is_empty()),
 
-        Err(e) => assert!(
-            false,
-            format!(
-                "An error occurred parsing a serialized TZE transaction: {}",
-                e
-            )
+        Err(e) => panic!(
+            "An error occurred parsing a serialized TZE transaction: {}",
+            e
         ),
     }
 }

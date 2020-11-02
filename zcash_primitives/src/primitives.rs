@@ -40,7 +40,7 @@ pub struct ProofGenerationKey {
 impl ProofGenerationKey {
     pub fn to_viewing_key(&self) -> ViewingKey {
         ViewingKey {
-            ak: self.ak.clone(),
+            ak: self.ak,
             nk: constants::PROOF_GENERATION_KEY_GENERATOR * self.nsk,
         }
     }
@@ -143,9 +143,7 @@ impl PaymentAddress {
             Diversifier(tmp)
         };
         // Check that the diversifier is valid
-        if diversifier.g_d().is_none() {
-            return None;
-        }
+        diversifier.g_d()?;
 
         let pk_d = jubjub::SubgroupPoint::from_bytes(bytes[11..43].try_into().unwrap());
         if pk_d.is_some().into() {
@@ -182,7 +180,7 @@ impl PaymentAddress {
             value,
             rseed: randomness,
             g_d,
-            pk_d: self.pk_d.clone(),
+            pk_d: self.pk_d,
         })
     }
 }

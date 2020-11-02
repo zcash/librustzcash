@@ -18,6 +18,12 @@ pub struct SaplingVerificationContext {
     cv_sum: jubjub::ExtendedPoint,
 }
 
+impl Default for SaplingVerificationContext {
+    fn default() -> Self {
+        SaplingVerificationContext::new()
+    }
+}
+
 impl SaplingVerificationContext {
     /// Construct a new context to be used with a single transaction.
     pub fn new() -> Self {
@@ -137,7 +143,7 @@ impl SaplingVerificationContext {
         binding_sig: Signature,
     ) -> bool {
         // Obtain current cv_sum from the context
-        let mut bvk = PublicKey(self.cv_sum.clone());
+        let mut bvk = PublicKey(self.cv_sum);
 
         // Compute value balance
         let value_balance = match compute_value_balance(value_balance) {

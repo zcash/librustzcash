@@ -258,7 +258,7 @@ fn generate_pedersen_hash_exp_table() -> Vec<Vec<Vec<SubgroupPoint>>> {
                 let mut base = SubgroupPoint::identity();
 
                 for _ in 0..(1 << window) {
-                    table.push(base.clone());
+                    table.push(base);
                     base += g;
                 }
 

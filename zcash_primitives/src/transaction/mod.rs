@@ -1,7 +1,6 @@
 //! Structs and methods for handling Zcash transactions.
 
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
-use hex;
 use sha2::{Digest, Sha256};
 use std::fmt;
 use std::io::{self, Read, Write};
@@ -124,6 +123,12 @@ impl std::fmt::Debug for TransactionData {
             self.joinsplit_pubkey,
             self.binding_sig
         )
+    }
+}
+
+impl Default for TransactionData {
+    fn default() -> Self {
+        TransactionData::new()
     }
 }
 
