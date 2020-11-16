@@ -1,12 +1,16 @@
 //! Structs and methods for handling Zcash transactions.
 
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
-use sha2::{Digest, Sha256};
 use std::fmt;
 use std::io::{self, Read, Write};
 use std::ops::Deref;
 
-use crate::{consensus::BlockHeight, redjubjub::Signature, serialize::Vector};
+use crate::{
+    consensus::BlockHeight,
+    redjubjub::Signature,
+    serialize::Vector,
+    util::sha256d::{HashReader, HashWriter},
+};
 
 pub mod builder;
 pub mod components;
@@ -194,11 +198,9 @@ impl Transaction {
             txid: TxId([0; 32]),
             data,
         };
-        let mut raw = vec![];
-        tx.write(&mut raw)?;
-        tx.txid
-            .0
-            .copy_from_slice(&Sha256::digest(&Sha256::digest(&raw)));
+        let mut writer = HashWriter::default();
+        tx.write(&mut writer)?;
+        tx.txid.0.copy_from_slice(&writer.into_hash());
         Ok(tx)
     }
 
@@ -206,7 +208,9 @@ impl Transaction {
         self.txid
     }
 
-    pub fn read<R: Read>(mut reader: R) -> io::Result<Self> {
+    pub fn read<R: Read>(reader: R) -> io::Result<Self> {
+        let mut reader = HashReader::new(reader);
+
         let header = reader.read_u32::<LittleEndian>()?;
         let overwintered = (header >> 31) == 1;
         let version = header & 0x7FFFFFFF;
@@ -291,23 +295,29 @@ impl Transaction {
             None
         };
 
-        Transaction::from_data(TransactionData {
-            overwintered,
-            version,
-            version_group_id,
-            vin,
-            vout,
-            tze_inputs,
-            tze_outputs,
-            lock_time,
-            expiry_height,
-            value_balance,
-            shielded_spends,
-            shielded_outputs,
-            joinsplits,
-            joinsplit_pubkey,
-            joinsplit_sig,
-            binding_sig,
+        let mut txid = [0; 32];
+        txid.copy_from_slice(&reader.into_hash());
+
+        Ok(Transaction {
+            txid: TxId(txid),
+            data: TransactionData {
+                overwintered,
+                version,
+                version_group_id,
+                vin,
+                vout,
+                tze_inputs,
+                tze_outputs,
+                lock_time,
+                expiry_height,
+                value_balance,
+                shielded_spends,
+                shielded_outputs,
+                joinsplits,
+                joinsplit_pubkey,
+                joinsplit_sig,
+                binding_sig,
+            },
         })
     }
 
