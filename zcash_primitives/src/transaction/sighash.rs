@@ -79,7 +79,7 @@ impl SigHashVersion {
     }
 }
 
-fn prevout_hash(vin: &Vec<TxIn>) -> Blake2bHash {
+fn prevout_hash(vin: &[TxIn]) -> Blake2bHash {
     let mut data = Vec::with_capacity(vin.len() * 36);
     for t_in in vin {
         t_in.prevout.write(&mut data).unwrap();
@@ -90,7 +90,7 @@ fn prevout_hash(vin: &Vec<TxIn>) -> Blake2bHash {
         .hash(&data)
 }
 
-fn sequence_hash(vin: &Vec<TxIn>) -> Blake2bHash {
+fn sequence_hash(vin: &[TxIn]) -> Blake2bHash {
     let mut data = Vec::with_capacity(vin.len() * 4);
     for t_in in vin {
         (&mut data)
@@ -103,7 +103,7 @@ fn sequence_hash(vin: &Vec<TxIn>) -> Blake2bHash {
         .hash(&data)
 }
 
-fn outputs_hash(vout: &Vec<TxOut>) -> Blake2bHash {
+fn outputs_hash(vout: &[TxOut]) -> Blake2bHash {
     let mut data = Vec::with_capacity(vout.len() * (4 + 1));
     for t_out in vout {
         t_out.write(&mut data).unwrap();
@@ -125,7 +125,7 @@ fn single_output_hash(tx_out: &TxOut) -> Blake2bHash {
 
 fn joinsplits_hash(
     txversion: u32,
-    joinsplits: &Vec<JSDescription>,
+    joinsplits: &[JSDescription],
     joinsplit_pubkey: &[u8; 32],
 ) -> Blake2bHash {
     let mut data = Vec::with_capacity(
@@ -146,7 +146,7 @@ fn joinsplits_hash(
         .hash(&data)
 }
 
-fn shielded_spends_hash(shielded_spends: &Vec<SpendDescription>) -> Blake2bHash {
+fn shielded_spends_hash(shielded_spends: &[SpendDescription]) -> Blake2bHash {
     let mut data = Vec::with_capacity(shielded_spends.len() * 384);
     for s_spend in shielded_spends {
         data.extend_from_slice(&s_spend.cv.to_bytes());
@@ -161,7 +161,7 @@ fn shielded_spends_hash(shielded_spends: &Vec<SpendDescription>) -> Blake2bHash 
         .hash(&data)
 }
 
-fn shielded_outputs_hash(shielded_outputs: &Vec<OutputDescription>) -> Blake2bHash {
+fn shielded_outputs_hash(shielded_outputs: &[OutputDescription]) -> Blake2bHash {
     let mut data = Vec::with_capacity(shielded_outputs.len() * 948);
     for s_out in shielded_outputs {
         s_out.write(&mut data).unwrap();
@@ -172,7 +172,7 @@ fn shielded_outputs_hash(shielded_outputs: &Vec<OutputDescription>) -> Blake2bHa
         .hash(&data)
 }
 
-fn tze_inputs_hash(tze_inputs: &Vec<TzeIn>) -> Blake2bHash {
+fn tze_inputs_hash(tze_inputs: &[TzeIn]) -> Blake2bHash {
     let mut data = vec![];
     for tzein in tze_inputs {
         tzein.write_without_witness(&mut data).unwrap();
@@ -183,7 +183,7 @@ fn tze_inputs_hash(tze_inputs: &Vec<TzeIn>) -> Blake2bHash {
         .hash(&data)
 }
 
-fn tze_outputs_hash(tze_outputs: &Vec<TzeOut>) -> Blake2bHash {
+fn tze_outputs_hash(tze_outputs: &[TzeOut]) -> Blake2bHash {
     let mut data = vec![];
     for tzeout in tze_outputs {
         tzeout.write(&mut data).unwrap();
