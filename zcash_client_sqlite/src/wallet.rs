@@ -565,7 +565,9 @@ pub fn put_received_note<'a, P, T: ShieldedOutput>(
         // It isn't there, so insert our note into the database.
         stmts.stmt_insert_received_note.execute_named(&sql_args)?;
 
-        Ok(NoteId::ReceivedNoteId(stmts.wallet_db.conn.last_insert_rowid()))
+        Ok(NoteId::ReceivedNoteId(
+            stmts.wallet_db.conn.last_insert_rowid(),
+        ))
     } else {
         // It was there, so grab its row number.
         stmts

@@ -317,10 +317,7 @@ impl<'a, P: consensus::Parameters> WalletRead for DataConnStmtCache<'a, P> {
         self.wallet_db.get_balance_at(account, anchor_height)
     }
 
-    fn get_memo_as_utf8(
-        &self,
-        id_note: Self::NoteRef,
-    ) -> Result<Option<String>, Self::Error> {
+    fn get_memo_as_utf8(&self, id_note: Self::NoteRef) -> Result<Option<String>, Self::Error> {
         self.wallet_db.get_memo_as_utf8(id_note)
     }
 

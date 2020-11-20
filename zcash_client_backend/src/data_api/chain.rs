@@ -290,6 +290,7 @@ where
 
         let txs: Vec<WalletTx> = {
             let mut witness_refs: Vec<_> = witnesses.iter_mut().map(|w| &mut w.1).collect();
+
             scan_block(
                 params,
                 block,
