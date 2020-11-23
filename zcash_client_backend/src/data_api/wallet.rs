@@ -107,10 +107,9 @@ where
 /// };
 /// use zcash_proofs::prover::LocalTxProver;
 /// use zcash_client_backend::{
-///     api::AccountId,
 ///     keys::spending_key,
 ///     data_api::wallet::create_spend_to_address,
-///     wallet::OvkPolicy,
+///     wallet::{AccountId, OvkPolicy},
 /// };
 /// use zcash_client_sqlite::{
 ///     WalletDB,

@@ -34,7 +34,7 @@ pub mod transact;
 /// use zcash_primitives::{
 ///     consensus::{self, Network},
 /// };
-/// use zcash_client_backend::api::AccountId;
+/// use zcash_client_backend::wallet::AccountId;
 /// use zcash_client_sqlite::{
 ///     WalletDB,
 ///     wallet::get_address,
@@ -117,7 +117,7 @@ pub fn is_valid_account_extfvk<P: consensus::Parameters>(
 ///
 /// ```
 /// use tempfile::NamedTempFile;
-/// use zcash_client_backend::api::AccountId;
+/// use zcash_client_backend::wallet::AccountId;
 /// use zcash_client_sqlite::{
 ///     WalletDB,
 ///     wallet::get_balance,
@@ -152,7 +152,7 @@ pub fn get_balance(data: &WalletDB, account: AccountId) -> Result<Amount, Sqlite
 /// ```
 /// use tempfile::NamedTempFile;
 /// use zcash_primitives::consensus::{BlockHeight};
-/// use zcash_client_backend::api::AccountId;
+/// use zcash_client_backend::wallet::AccountId;
 /// use zcash_client_sqlite::{
 ///     WalletDB,
 ///     wallet::get_verified_balance,
