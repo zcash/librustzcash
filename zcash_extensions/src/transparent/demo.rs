@@ -475,7 +475,10 @@ mod tests {
         sapling::Node,
         transaction::{
             builder::Builder,
-            components::{Amount, OutPoint, TzeIn, TzeOut},
+            components::{
+                amount::{Amount, DEFAULT_FEE},
+                OutPoint, TzeIn, TzeOut,
+            },
             Transaction, TransactionData,
         },
         zip32::ExtendedSpendingKey,
@@ -739,7 +742,7 @@ mod tests {
             extension_id: 0,
         };
         let prevout_a = (OutPoint::new(tx_a.txid().0, 0), tx_a.tze_outputs[0].clone());
-        let value_xfr = Amount::from_u64(90000).unwrap();
+        let value_xfr = value - DEFAULT_FEE;
         db_b.demo_transfer_to_close(prevout_a, value_xfr, preimage_1, h2)
             .map_err(|e| format!("transfer failure: {:?}", e))
             .unwrap();
@@ -765,7 +768,7 @@ mod tests {
         builder_c
             .add_transparent_output(
                 &TransparentAddress::PublicKey([0; 20]),
-                Amount::from_u64(80000).unwrap(),
+                value_xfr - DEFAULT_FEE,
             )
             .unwrap();
 

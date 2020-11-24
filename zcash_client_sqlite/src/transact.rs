@@ -505,7 +505,7 @@ mod tests {
             Ok(_) => panic!("Should have failed"),
             Err(e) => assert_eq!(
                 e.to_string(),
-                "Insufficient balance (have 0, need 10001 including fee)"
+                "Insufficient balance (have 0, need 1001 including fee)"
             ),
         }
     }
@@ -571,7 +571,7 @@ mod tests {
             Ok(_) => panic!("Should have failed"),
             Err(e) => assert_eq!(
                 e.to_string(),
-                "Insufficient balance (have 50000, need 80000 including fee)"
+                "Insufficient balance (have 50000, need 71000 including fee)"
             ),
         }
 
@@ -603,7 +603,7 @@ mod tests {
             Ok(_) => panic!("Should have failed"),
             Err(e) => assert_eq!(
                 e.to_string(),
-                "Insufficient balance (have 50000, need 80000 including fee)"
+                "Insufficient balance (have 50000, need 71000 including fee)"
             ),
         }
 
@@ -690,7 +690,7 @@ mod tests {
             Ok(_) => panic!("Should have failed"),
             Err(e) => assert_eq!(
                 e.to_string(),
-                "Insufficient balance (have 0, need 12000 including fee)"
+                "Insufficient balance (have 0, need 3000 including fee)"
             ),
         }
 
@@ -722,7 +722,7 @@ mod tests {
             Ok(_) => panic!("Should have failed"),
             Err(e) => assert_eq!(
                 e.to_string(),
-                "Insufficient balance (have 0, need 12000 including fee)"
+                "Insufficient balance (have 0, need 3000 including fee)"
             ),
         }
 
