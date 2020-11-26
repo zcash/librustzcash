@@ -3,18 +3,25 @@
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use std::fmt;
 use std::io::{self, Read, Write};
+use std::marker::PhantomData;
 use std::ops::Deref;
 
 use crate::{
-    consensus::BlockHeight,
+    consensus::{BlockHeight, BranchId},
+    legacy::Script,
     redjubjub::Signature,
     serialize::Vector,
     util::sha256d::{HashReader, HashWriter},
 };
 
+#[cfg(feature = "zfuture")]
+use crate::extensions::transparent as tze;
+
+pub mod blake2b_256;
 pub mod builder;
 pub mod components;
 mod sighash;
+mod txid;
 
 #[cfg(test)]
 mod tests;
@@ -241,6 +248,78 @@ impl Default for TransactionData {
     }
 }
 
+#[derive(Clone)]
+pub struct TransparentDigests<A> {
+    pub prevout_digest: A,
+    pub sequence_digest: A,
+    pub outputs_digest: A,
+    pub per_input_digest: Option<A>,
+}
+
+#[derive(Clone)]
+pub struct TzeDigests<A> {
+    pub inputs_digest: A,
+    pub outputs_digest: A,
+    pub per_input_digest: Option<A>,
+}
+
+#[derive(Clone)]
+pub struct TxDigests<A, Purpose> {
+    pub header_digest: A,
+    pub transparent_digests: TransparentDigests<A>,
+    #[cfg(feature = "zfuture")]
+    pub tze_digests: TzeDigests<A>,
+    pub sprout_digest: A,
+    pub sapling_digest: A,
+    _purpose: PhantomData<Purpose>,
+}
+
+pub trait TransactionDigest<A> {
+    type Purpose;
+
+    fn digest_header(
+        &self,
+        version: TxVersion,
+        consensus_branch_id: BranchId,
+        lock_time: u32,
+        expiry_height: BlockHeight,
+    ) -> A;
+
+    fn digest_transparent(&self, vin: &[TxIn], vout: &[TxOut]) -> TransparentDigests<A>;
+
+    #[cfg(feature = "zfuture")]
+    fn digest_tze(&self, tze_inputs: &[TzeIn], tze_outputs: &[TzeOut]) -> TzeDigests<A>;
+
+    fn digest_sprout(&self, joinsplits: &[JSDescription], joinsplit_pubkey: &Option<[u8; 32]>)
+        -> A;
+
+    fn digest_sapling(
+        &self,
+        shielded_spends: &[SpendDescription],
+        shielded_outputs: &[OutputDescription],
+        value_balance: Amount,
+    ) -> A;
+}
+
+pub trait WitnessDigest<A> {
+    fn digest_transparent<'a, I: IntoIterator<Item = &'a Script>>(&self, vin_sig: I) -> A;
+
+    #[cfg(feature = "zfuture")]
+    fn digest_tze<'a, I: IntoIterator<Item = &'a tze::Witness>>(&self, tzein_sig: I) -> A;
+
+    fn digest_sprout(&self, joinsplit_sig: &[u8; 64]) -> A;
+
+    fn digest_sapling<'a, I: IntoIterator<Item = &'a Signature>>(
+        &self,
+        shielded_spends: I,
+        binding_sig: &Signature,
+    ) -> A;
+}
+
+pub enum DigestError {
+    NotSigned,
+}
+
 impl TransactionData {
     pub fn new() -> Self {
         TransactionData {
@@ -285,6 +364,58 @@ impl TransactionData {
 
     pub fn freeze(self) -> io::Result<Transaction> {
         Transaction::from_data(self)
+    }
+
+    pub fn digest<A, D, P>(&self, digester: D, consensus_branch_id: BranchId) -> TxDigests<A, P>
+    where
+        D: TransactionDigest<A, Purpose = P>,
+    {
+        let header_digest = digester.digest_header(
+            self.version,
+            consensus_branch_id,
+            self.lock_time,
+            self.expiry_height,
+        );
+        let transparent_digests = digester.digest_transparent(&self.vin, &self.vout);
+
+        #[cfg(feature = "zfuture")]
+        let tze_digests = digester.digest_tze(&self.tze_inputs, &self.tze_outputs);
+
+        let sprout_digest = digester.digest_sprout(&self.joinsplits, &self.joinsplit_pubkey);
+        let sapling_digest = digester.digest_sapling(
+            &self.shielded_spends,
+            &self.shielded_outputs,
+            self.value_balance,
+        );
+
+        TxDigests {
+            header_digest,
+            transparent_digests,
+            #[cfg(feature = "zfuture")]
+            tze_digests,
+            sprout_digest,
+            sapling_digest,
+            _purpose: PhantomData,
+        }
+    }
+
+    pub fn digest_witness<A, D>(&self, digester: D) -> Result<A, DigestError>
+    where
+        D: WitnessDigest<A>,
+    {
+        let t_hash = digester.digest_transparent(self.vin.iter().map(|txin| &txin.script_sig));
+        #[cfg(feature = "zfuture")]
+        let tze_hash = digester.digest_tze(self.tze_inputs.iter().map(|tzein| &tzein.witness));
+        let sprout_digest =
+            digester.digest_sprout(&self.joinsplit_sig.ok_or(DigestError::NotSigned)?);
+        let sapling_digest = digester.digest_sapling(
+            self.shielded_spends
+                .iter()
+                .flat_map(|spend| &spend.spend_auth_sig),
+            &self.binding_sig.ok_or(DigestError::NotSigned)?,
+        );
+
+        Ok(sapling_digest)
     }
 }
 

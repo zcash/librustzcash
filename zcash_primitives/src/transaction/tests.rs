@@ -7,7 +7,7 @@ use crate::{constants::SPENDING_KEY_GENERATOR, redjubjub::PrivateKey};
 
 use super::{
     components::Amount,
-    sighash::{signature_hash, SignableInput},
+    sighash::{SignatureHash, signature_hash, SignableInput},
     Transaction, TransactionData,
 };
 
@@ -133,7 +133,7 @@ fn zip_0143() {
         };
 
         assert_eq!(
-            signature_hash(&tx, tv.consensus_branch_id, tv.hash_type, signable_input),
+            signature_hash(&tx, tv.consensus_branch_id, tv.hash_type, signable_input).as_ref(),
             tv.sighash
         );
     }
@@ -153,7 +153,7 @@ fn zip_0243() {
         };
 
         assert_eq!(
-            signature_hash(&tx, tv.consensus_branch_id, tv.hash_type, signable_input),
+            signature_hash(&tx, tv.consensus_branch_id, tv.hash_type, signable_input).as_ref(),
             tv.sighash
         );
     }

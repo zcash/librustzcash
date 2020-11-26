@@ -1,12 +1,17 @@
-#[cfg(feature = "zfuture")]
+//#[cfg(feature = "zfuture")]
+//use std::borrow::Borrow;
 use std::convert::TryInto;
+use std::io::Write;
 
 use blake2b_simd::{Hash as Blake2bHash, Params as Blake2bParams};
 use byteorder::{LittleEndian, WriteBytesExt};
 use ff::PrimeField;
 use group::GroupEncoding;
 
-use crate::{consensus, legacy::Script};
+use crate::{
+    consensus::{self, BlockHeight, BranchId},
+    legacy::Script,
+};
 
 #[cfg(feature = "zfuture")]
 use crate::{
@@ -15,20 +20,27 @@ use crate::{
 };
 
 use super::{
+    blake2b_256::HashWriter,
     components::{Amount, JSDescription, OutputDescription, SpendDescription, TxIn, TxOut},
-    Transaction, TransactionData, TxVersion,
+    txid::{
+        has_overwinter_components, has_sapling_components, joinsplits_hash, outputs_hash,
+        prevout_hash, sequence_hash, shielded_outputs_hash, shielded_spends_hash,
+    },
+    Transaction, TransactionData, TransactionDigest, TransparentDigests, TxDigests, TxId,
+    TxVersion,
 };
 
 #[cfg(feature = "zfuture")]
-use super::components::{TzeIn, TzeOut};
+use super::{
+    components::{TzeIn, TzeOut},
+    txid::{has_tze_components, tze_inputs_hash, tze_outputs_hash},
+    TzeDigests,
+};
+
+const ZCASH_TZE_INPUT_HASH_PERSONALIZATION: &[u8; 16] = b"Zcash__TzeInHash";
+const ZCASH_TRANSPARENT_INPUT_HASH_PERSONALIZATION: &[u8; 16] = b"Zcash___TxInHash";
 
 const ZCASH_SIGHASH_PERSONALIZATION_PREFIX: &[u8; 12] = b"ZcashSigHash";
-const ZCASH_PREVOUTS_HASH_PERSONALIZATION: &[u8; 16] = b"ZcashPrevoutHash";
-const ZCASH_SEQUENCE_HASH_PERSONALIZATION: &[u8; 16] = b"ZcashSequencHash";
-const ZCASH_OUTPUTS_HASH_PERSONALIZATION: &[u8; 16] = b"ZcashOutputsHash";
-const ZCASH_JOINSPLITS_HASH_PERSONALIZATION: &[u8; 16] = b"ZcashJSplitsHash";
-const ZCASH_SHIELDED_SPENDS_HASH_PERSONALIZATION: &[u8; 16] = b"ZcashSSpendsHash";
-const ZCASH_SHIELDED_OUTPUTS_HASH_PERSONALIZATION: &[u8; 16] = b"ZcashSOutputHash";
 
 #[cfg(feature = "zfuture")]
 const ZCASH_TZE_INPUTS_HASH_PERSONALIZATION: &[u8; 16] = b"Zcash_TzeInsHash";
@@ -63,143 +75,53 @@ macro_rules! update_hash {
     };
 }
 
-fn has_overwinter_components(version: &TxVersion) -> bool {
-    match version {
-        TxVersion::Sprout(_) => false,
-        _ => true,
-    }
-}
-
-fn has_sapling_components(version: &TxVersion) -> bool {
-    match version {
-        TxVersion::Sprout(_) | TxVersion::Overwinter => false,
-        _ => true,
-    }
-}
-
-#[cfg(feature = "zfuture")]
-fn has_tze_components(version: &TxVersion) -> bool {
-    match version {
-        TxVersion::ZFuture => true,
-        _ => false,
-    }
-}
-
-fn prevout_hash(vin: &[TxIn]) -> Blake2bHash {
-    let mut data = Vec::with_capacity(vin.len() * 36);
-    for t_in in vin {
-        t_in.prevout.write(&mut data).unwrap();
-    }
-    Blake2bParams::new()
-        .hash_length(32)
-        .personal(ZCASH_PREVOUTS_HASH_PERSONALIZATION)
-        .hash(&data)
-}
-
-fn sequence_hash(vin: &[TxIn]) -> Blake2bHash {
-    let mut data = Vec::with_capacity(vin.len() * 4);
-    for t_in in vin {
-        (&mut data)
-            .write_u32::<LittleEndian>(t_in.sequence)
-            .unwrap();
-    }
-    Blake2bParams::new()
-        .hash_length(32)
-        .personal(ZCASH_SEQUENCE_HASH_PERSONALIZATION)
-        .hash(&data)
-}
-
-fn outputs_hash(vout: &[TxOut]) -> Blake2bHash {
-    let mut data = Vec::with_capacity(vout.len() * (4 + 1));
-    for t_out in vout {
-        t_out.write(&mut data).unwrap();
-    }
-    Blake2bParams::new()
-        .hash_length(32)
-        .personal(ZCASH_OUTPUTS_HASH_PERSONALIZATION)
-        .hash(&data)
-}
-
-fn single_output_hash(tx_out: &TxOut) -> Blake2bHash {
-    let mut data = vec![];
-    tx_out.write(&mut data).unwrap();
-    Blake2bParams::new()
-        .hash_length(32)
-        .personal(ZCASH_OUTPUTS_HASH_PERSONALIZATION)
-        .hash(&data)
-}
-
-fn joinsplits_hash(
+// ZIP-0143.10
+// If we are serializing an input (i.e. this is not a JoinSplit signature hash):
+//   a. outpoint (32-byte hash + 4-byte little endian)
+//   b. scriptCode of the input (serialized as scripts inside CTxOuts)
+//   c. value of the output spent by this input (8-byte little endian)
+//   d. nSequence of the input (4-byte little endian)
+fn txin_sig_data(
     txversion: TxVersion,
-    joinsplits: &[JSDescription],
-    joinsplit_pubkey: &[u8; 32],
-) -> Blake2bHash {
-    let mut data = Vec::with_capacity(
-        joinsplits.len()
-            * if txversion.uses_groth_proofs() {
-                1698 // JSDescription with Groth16 proof
-            } else {
-                1802 // JSDescription with PHGR13 proof
-            },
-    );
-    for js in joinsplits {
-        js.write(&mut data).unwrap();
-    }
-    data.extend_from_slice(joinsplit_pubkey);
-    Blake2bParams::new()
-        .hash_length(32)
-        .personal(ZCASH_JOINSPLITS_HASH_PERSONALIZATION)
-        .hash(&data)
-}
+    txin: &TxIn,
+    script_code: &Script,
+    value: Amount,
+) -> Vec<u8> {
+    #[cfg(feature = "zfuture")]
+    let mut data = if has_tze_components(&txversion) {
+        // domain separation here is to avoid collision attacks
+        // between transparent and TZE inputs.
+        ZCASH_TRANSPARENT_SIGNED_INPUT_TAG.to_vec()
+    } else {
+        vec![]
+    };
 
-fn shielded_spends_hash(shielded_spends: &[SpendDescription]) -> Blake2bHash {
-    let mut data = Vec::with_capacity(shielded_spends.len() * 384);
-    for s_spend in shielded_spends {
-        data.extend_from_slice(&s_spend.cv.to_bytes());
-        data.extend_from_slice(s_spend.anchor.to_repr().as_ref());
-        data.extend_from_slice(&s_spend.nullifier.0);
-        s_spend.rk.write(&mut data).unwrap();
-        data.extend_from_slice(&s_spend.zkproof);
-    }
-    Blake2bParams::new()
-        .hash_length(32)
-        .personal(ZCASH_SHIELDED_SPENDS_HASH_PERSONALIZATION)
-        .hash(&data)
-}
+    #[cfg(not(feature = "zfuture"))]
+    let mut data = vec![];
 
-fn shielded_outputs_hash(shielded_outputs: &[OutputDescription]) -> Blake2bHash {
-    let mut data = Vec::with_capacity(shielded_outputs.len() * 948);
-    for s_out in shielded_outputs {
-        s_out.write(&mut data).unwrap();
-    }
-    Blake2bParams::new()
-        .hash_length(32)
-        .personal(ZCASH_SHIELDED_OUTPUTS_HASH_PERSONALIZATION)
-        .hash(&data)
+    txin.prevout.write(&mut data).unwrap();
+    script_code.write(&mut data).unwrap();
+    data.extend_from_slice(&value.to_i64_le_bytes());
+    (&mut data)
+        .write_u32::<LittleEndian>(txin.sequence)
+        .unwrap();
+
+    data
 }
 
 #[cfg(feature = "zfuture")]
-fn tze_inputs_hash(tze_inputs: &[TzeIn]) -> Blake2bHash {
-    let mut data = vec![];
-    for tzein in tze_inputs {
-        tzein.write_without_witness(&mut data).unwrap();
-    }
-    Blake2bParams::new()
-        .hash_length(32)
-        .personal(ZCASH_TZE_INPUTS_HASH_PERSONALIZATION)
-        .hash(&data)
-}
+fn tzein_sig_data(tzein: &TzeIn, precondition: &Precondition, value: Amount) -> Vec<u8> {
+    // domain separation here is to avoid collision attacks
+    // between transparent and TZE inputs.
+    let mut data = ZCASH_TZE_SIGNED_INPUT_TAG.to_vec();
 
-#[cfg(feature = "zfuture")]
-fn tze_outputs_hash(tze_outputs: &[TzeOut]) -> Blake2bHash {
-    let mut data = vec![];
-    for tzeout in tze_outputs {
-        tzeout.write(&mut data).unwrap();
-    }
-    Blake2bParams::new()
-        .hash_length(32)
-        .personal(ZCASH_TZE_OUTPUTS_HASH_PERSONALIZATION)
-        .hash(&data)
+    tzein.prevout.write(&mut data).unwrap();
+    CompactSize::write(&mut data, precondition.extension_id.try_into().unwrap()).unwrap();
+    CompactSize::write(&mut data, precondition.mode.try_into().unwrap()).unwrap();
+    Vector::write(&mut data, &precondition.payload, |w, e| w.write_u8(*e)).unwrap();
+    data.extend_from_slice(&value.to_i64_le_bytes());
+
+    data
 }
 
 pub enum SignableInput<'a> {
@@ -234,14 +156,46 @@ impl<'a> SignableInput<'a> {
             value,
         }
     }
+
+    pub fn signing_data(
+        &self,
+        txversion: TxVersion,
+        vin: &[TxIn],
+        #[cfg(feature = "zfuture")] tze_inputs: &[TzeIn],
+    ) -> Option<Vec<u8>> {
+        match self {
+            SignableInput::Transparent {
+                index,
+                script_code,
+                value,
+                ..
+            } => Some(txin_sig_data(txversion, &vin[*index], script_code, *value)),
+
+            #[cfg(feature = "zfuture")]
+            SignableInput::Tze {
+                index,
+                precondition,
+                value,
+            } if txversion == TxVersion::ZFuture => {
+                Some(tzein_sig_data(&tze_inputs[*index], precondition, *value))
+            }
+
+            #[cfg(feature = "zfuture")]
+            SignableInput::Tze { .. } => {
+                panic!("A request has been made to sign a TZE input, but the signature hash version is not ZFuture");
+            }
+
+            SignableInput::Shielded => None,
+        }
+    }
 }
 
 pub fn signature_hash_data<'a>(
     tx: &TransactionData,
-    consensus_branch_id: consensus::BranchId,
+    consensus_branch_id: BranchId,
     hash_type: u32,
     signable_input: SignableInput<'a>,
-) -> Vec<u8> {
+) -> Blake2bHash {
     if has_overwinter_components(&tx.version) {
         let mut personal = [0; 16];
         (&mut personal[..12]).copy_from_slice(ZCASH_SIGHASH_PERSONALIZATION_PREFIX);
@@ -277,13 +231,14 @@ pub fn signature_hash_data<'a>(
         } else if (hash_type & SIGHASH_MASK) == SIGHASH_SINGLE {
             match signable_input {
                 SignableInput::Transparent { index, .. } if index < tx.vout.len() => {
-                    h.update(single_output_hash(&tx.vout[index]).as_ref())
+                    h.update(outputs_hash(&tx.vout[index..index + 1]).as_ref())
                 }
                 _ => h.update(&[0; 32]),
             };
         } else {
             h.update(&[0; 32]);
         };
+
         #[cfg(feature = "zfuture")]
         if has_tze_components(&tx.version) {
             update_hash!(
@@ -297,11 +252,13 @@ pub fn signature_hash_data<'a>(
                 tze_outputs_hash(&tx.tze_outputs)
             );
         }
+
         update_hash!(
             h,
             !tx.joinsplits.is_empty(),
-            joinsplits_hash(tx.version, &tx.joinsplits, &tx.joinsplit_pubkey.unwrap())
+            joinsplits_hash(&tx.joinsplits, &tx.joinsplit_pubkey.unwrap())
         );
+
         if has_sapling_components(&tx.version) {
             update_hash!(
                 h,
@@ -314,6 +271,7 @@ pub fn signature_hash_data<'a>(
                 shielded_outputs_hash(&tx.shielded_outputs)
             );
         }
+
         update_u32!(h, tx.lock_time, tmp);
         update_u32!(h, tx.expiry_height.into(), tmp);
         if has_sapling_components(&tx.version) {
@@ -321,71 +279,163 @@ pub fn signature_hash_data<'a>(
         }
         update_u32!(h, hash_type, tmp);
 
-        match signable_input {
-            SignableInput::Transparent {
-                index,
-                script_code,
-                value,
-            } => {
-                #[cfg(feature = "zfuture")]
-                let mut data = if has_tze_components(&tx.version) {
-                    // domain separation here is to avoid collision attacks
-                    // between transparent and TZE inputs.
-                    ZCASH_TRANSPARENT_SIGNED_INPUT_TAG.to_vec()
-                } else {
-                    vec![]
-                };
-
-                #[cfg(not(feature = "zfuture"))]
-                let mut data = vec![];
-
-                tx.vin[index].prevout.write(&mut data).unwrap();
-                script_code.write(&mut data).unwrap();
-                data.extend_from_slice(&value.to_i64_le_bytes());
-                (&mut data)
-                    .write_u32::<LittleEndian>(tx.vin[index].sequence)
-                    .unwrap();
+        match signable_input.signing_data(
+            tx.version,
+            &tx.vin,
+            #[cfg(feature = "zfuture")]
+            &tx.tze_inputs,
+        ) {
+            Option::Some(data) => {
                 h.update(&data);
             }
+            Option::None => (),
+        };
 
-            #[cfg(feature = "zfuture")]
-            SignableInput::Tze {
-                index,
-                precondition,
-                value,
-            } if has_tze_components(&tx.version) => {
-                // domain separation here is to avoid collision attacks
-                // between transparent and TZE inputs.
-                let mut data = ZCASH_TZE_SIGNED_INPUT_TAG.to_vec();
-
-                tx.tze_inputs[index].prevout.write(&mut data).unwrap();
-                CompactSize::write(&mut data, precondition.extension_id.try_into().unwrap())
-                    .unwrap();
-                CompactSize::write(&mut data, precondition.mode.try_into().unwrap()).unwrap();
-                Vector::write(&mut data, &precondition.payload, |w, e| w.write_u8(*e)).unwrap();
-                data.extend_from_slice(&value.to_i64_le_bytes());
-                h.update(&data);
-            }
-
-            #[cfg(feature = "zfuture")]
-            SignableInput::Tze { .. } => {
-                panic!("A request has been made to sign a TZE input, but the signature hash version is not ZFuture");
-            }
-
-            _ => (),
-        }
-
-        h.finalize().as_ref().to_vec()
+        h.finalize()
     } else {
         unimplemented!()
     }
 }
 
+pub struct SignatureHash(Blake2bHash);
+
+impl AsRef<[u8]> for SignatureHash {
+    fn as_ref(&self) -> &[u8] {
+        self.0.as_ref()
+    }
+}
+
 pub fn signature_hash<'a>(
     tx: &Transaction,
-    consensus_branch_id: consensus::BranchId,
+    consensus_branch_id: BranchId,
     hash_type: u32,
     signable_input: SignableInput<'a>,
-) -> Vec<u8> {
-    signature_hash_data(tx, consensus_branch_id, hash_type, signable_input)
+) -> SignatureHash {
+    SignatureHash(signature_hash_data(
+        tx,
+        consensus_branch_id,
+        hash_type,
+        signable_input,
+    ))
+}
+
+pub struct SignatureHashDigester<'a> {
+    txid_parts: TxDigests<Blake2bHash, TxId>,
+    txversion: TxVersion,
+    consensus_branch_id: BranchId,
+    hash_type: u32,
+    signable_input: SignableInput<'a>,
+}
+
+impl<'a> TransactionDigest<Blake2bHash> for SignatureHashDigester<'a> {
+    type Purpose = SignatureHash;
+
+    fn digest_header(
+        &self,
+        _version: TxVersion,
+        _consensus_branch_id: BranchId,
+        _lock_time: u32,
+        _expiry_height: BlockHeight,
+    ) -> Blake2bHash {
+        self.txid_parts.header_digest
+    }
+
+    fn digest_transparent(&self, vin: &[TxIn], vout: &[TxOut]) -> TransparentDigests<Blake2bHash> {
+        let flag_anyonecanpay = self.hash_type & SIGHASH_ANYONECANPAY != 0;
+        let flag_single = self.hash_type & SIGHASH_MASK == SIGHASH_SINGLE;
+        let flag_none = self.hash_type & SIGHASH_MASK == SIGHASH_NONE;
+
+        let prevout_digest = if !flag_anyonecanpay {
+            self.txid_parts.transparent_digests.prevout_digest
+        } else {
+            prevout_hash(&[])
+        };
+
+        let sequence_digest = if !flag_anyonecanpay && !flag_single && !flag_none {
+            self.txid_parts.transparent_digests.sequence_digest
+        } else {
+            sequence_hash(&[])
+        };
+
+        let outputs_digest = if !flag_single && !flag_none {
+            self.txid_parts.transparent_digests.outputs_digest
+        } else if flag_single {
+            match self.signable_input {
+                SignableInput::Transparent { index, .. } if index < vout.len() => {
+                    outputs_hash(&[&vout[index]])
+                }
+                _ => outputs_hash::<TxOut>(&[]),
+            }
+        } else {
+            outputs_hash::<TxOut>(&[])
+        };
+
+        let per_input_digest = match self.signable_input {
+            SignableInput::Transparent {
+                index,
+                script_code,
+                value,
+            } => Some({
+                Blake2bParams::new()
+                    .hash_length(32)
+                    .personal(ZCASH_TRANSPARENT_INPUT_HASH_PERSONALIZATION)
+                    .hash(&txin_sig_data(
+                        self.txversion,
+                        &vin[index],
+                        script_code,
+                        value,
+                    ))
+            }),
+
+            _ => None,
+        };
+
+        TransparentDigests {
+            prevout_digest,
+            sequence_digest,
+            outputs_digest,
+            per_input_digest,
+        }
+    }
+
+    #[cfg(feature = "zfuture")]
+    fn digest_tze(&self, tze_inputs: &[TzeIn], _tze_outputs: &[TzeOut]) -> TzeDigests<Blake2bHash> {
+        let per_input_digest = match self.signable_input {
+            SignableInput::Tze {
+                index,
+                precondition,
+                value,
+            } if self.txversion == TxVersion::ZFuture => Some({
+                Blake2bParams::new()
+                    .hash_length(32)
+                    .personal(ZCASH_TZE_INPUT_HASH_PERSONALIZATION)
+                    .hash(&tzein_sig_data(&tze_inputs[index], precondition, value))
+            }),
+
+            _ => None,
+        };
+
+        TzeDigests {
+            inputs_digest: self.txid_parts.tze_digests.inputs_digest,
+            outputs_digest: self.txid_parts.tze_digests.outputs_digest,
+            per_input_digest,
+        }
+    }
+
+    fn digest_sprout(
+        &self,
+        _joinsplits: &[JSDescription],
+        _joinsplit_pubkey: &Option<[u8; 32]>,
+    ) -> Blake2bHash {
+        self.txid_parts.sprout_digest
+    }
+
+    fn digest_sapling(
+        &self,
+        _shielded_spends: &[SpendDescription],
+        _shielded_outputs: &[OutputDescription],
+        _value_balance: Amount,
+    ) -> Blake2bHash {
+        self.txid_parts.sapling_digest
+    }
 }

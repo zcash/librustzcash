@@ -277,7 +277,7 @@ impl TransparentInputs {
                 consensus_branch_id,
                 SIGHASH_ALL,
                 SignableInput::transparent(i, &info.coin.script_pubkey, info.coin.value),
-            ));
+            ).as_ref());
 
             let msg = secp256k1::Message::from_slice(&sighash).expect("32 bytes");
             let sig = self.secp.sign(&msg, &info.sk);
@@ -808,7 +808,7 @@ impl<'a, P: consensus::Parameters, R: RngCore> Builder<'a, P, R> {
             consensus_branch_id,
             SIGHASH_ALL,
             SignableInput::Shielded,
-        ));
+        ).as_ref());
 
         // Create Sapling spendAuth and binding signatures
         for (i, (_, spend)) in spends.into_iter().enumerate() {
