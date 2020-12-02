@@ -92,6 +92,21 @@ impl SigHashVersion {
             SigHashVersion::Sprout
         }
     }
+
+    fn has_sapling_components(&self) -> bool {
+        match self {
+            SigHashVersion::Sprout | SigHashVersion::Overwinter => false,
+            _ => true,
+        }
+    }
+
+    #[cfg(feature = "zfuture")]
+    fn has_tze_components(&self) -> bool {
+        match self {
+            SigHashVersion::ZFuture => true,
+            _ => false,
+        }
+    }
 }
 
 fn prevout_hash(vin: &[TxIn]) -> Blake2bHash {
@@ -303,7 +318,7 @@ pub fn signature_hash_data<'a>(
                 h.update(&[0; 32]);
             };
             #[cfg(feature = "zfuture")]
-            if sigversion == SigHashVersion::ZFuture {
+            if sigversion.has_tze_components() {
                 update_hash!(
                     h,
                     !tx.tze_inputs.is_empty(),
@@ -320,14 +335,7 @@ pub fn signature_hash_data<'a>(
                 !tx.joinsplits.is_empty(),
                 joinsplits_hash(tx.version, &tx.joinsplits, &tx.joinsplit_pubkey.unwrap())
             );
-            if sigversion == SigHashVersion::Sapling || {
-                #[cfg(feature = "zfuture")]
-                {
-                    sigversion == SigHashVersion::ZFuture
-                }
-                #[cfg(not(feature = "zfuture"))]
-                false
-            } {
+            if sigversion.has_sapling_components() {
                 update_hash!(
                     h,
                     !tx.shielded_spends.is_empty(),
@@ -341,14 +349,7 @@ pub fn signature_hash_data<'a>(
             }
             update_u32!(h, tx.lock_time, tmp);
             update_u32!(h, tx.expiry_height.into(), tmp);
-            if sigversion == SigHashVersion::Sapling || {
-                #[cfg(feature = "zfuture")]
-                {
-                    sigversion == SigHashVersion::ZFuture
-                }
-                #[cfg(not(feature = "zfuture"))]
-                false
-            } {
+            if sigversion.has_sapling_components() {
                 h.update(&tx.value_balance.to_i64_le_bytes());
             }
             update_u32!(h, hash_type, tmp);
@@ -360,7 +361,7 @@ pub fn signature_hash_data<'a>(
                     value,
                 } => {
                     #[cfg(feature = "zfuture")]
-                    let mut data = if sigversion == SigHashVersion::ZFuture {
+                    let mut data = if sigversion.has_tze_components() {
                         // domain separation here is to avoid collision attacks
                         // between transparent and TZE inputs.
                         ZCASH_TRANSPARENT_SIGNED_INPUT_TAG.to_vec()
@@ -385,7 +386,7 @@ pub fn signature_hash_data<'a>(
                     index,
                     precondition,
                     value,
-                } if sigversion == SigHashVersion::ZFuture => {
+                } if sigversion.has_tze_components() => {
                     // domain separation here is to avoid collision attacks
                     // between transparent and TZE inputs.
                     let mut data = ZCASH_TZE_SIGNED_INPUT_TAG.to_vec();
