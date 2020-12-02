@@ -314,6 +314,8 @@ pub fn get_block_hash(
 ///
 /// If the requested height is greater than or equal to the height of the last scanned
 /// block, this function does nothing.
+///
+/// This should only be executed inside a transactional context.
 pub fn rewind_to_height<P: consensus::Parameters>(
     conn: &WalletDB,
     parameters: &P,
@@ -338,29 +340,23 @@ pub fn rewind_to_height<P: consensus::Parameters>(
         return Ok(());
     }
 
-    // Start an SQL transaction for rewinding.
-    let tx = conn.0.unchecked_transaction()?;
-
     // Decrement witnesses.
-    tx.execute(
+    conn.0.execute(
         "DELETE FROM sapling_witnesses WHERE block > ?",
         &[u32::from(block_height)],
     )?;
 
     // Un-mine transactions.
-    tx.execute(
+    conn.0.execute(
         "UPDATE transactions SET block = NULL, tx_index = NULL WHERE block > ?",
         &[u32::from(block_height)],
     )?;
 
     // Now that they aren't depended on, delete scanned blocks.
-    tx.execute(
+    conn.0.execute(
         "DELETE FROM blocks WHERE height > ?",
         &[u32::from(block_height)],
     )?;
-
-    // Commit the SQL transaction, rewinding atomically.
-    tx.commit()?;
 
     Ok(())
 }
