@@ -208,7 +208,7 @@ impl<'a> WalletRead for &'a WalletDB {
                         rcm = :rcm,
                         nf = IFNULL(:memo, nf),
                         memo = IFNULL(:nf, memo),
-                        is_change = :is_change
+                        is_change = IFNULL(:is_change, is_change)
                     WHERE tx = :tx AND output_index = :output_index",
                 )?,
                 stmt_select_received_note: self.0.prepare(
