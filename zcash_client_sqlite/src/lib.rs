@@ -206,8 +206,8 @@ impl<'a> WalletRead for &'a WalletDB {
                         diversifier = :diversifier,
                         value = :value,
                         rcm = :rcm,
-                        nf = IFNULL(:memo, nf),
-                        memo = IFNULL(:nf, memo),
+                        nf = IFNULL(:nf, nf),
+                        memo = IFNULL(:memo, memo),
                         is_change = IFNULL(:is_change, is_change)
                     WHERE tx = :tx AND output_index = :output_index",
                 )?,
