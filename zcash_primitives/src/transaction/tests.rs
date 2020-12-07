@@ -84,9 +84,7 @@ proptest! {
 
         let txo = Transaction::read(&txn_bytes[..]).unwrap();
 
-        assert_eq!(tx.overwintered, txo.overwintered);
         assert_eq!(tx.version, txo.version);
-        assert_eq!(tx.version_group_id, txo.version_group_id);
         assert_eq!(tx.vin, txo.vin);
         assert_eq!(tx.vout, txo.vout);
         assert_eq!(tx.tze_inputs, txo.tze_inputs);
