@@ -10,7 +10,6 @@
 pub mod block;
 pub mod consensus;
 pub mod constants;
-pub mod extensions;
 pub mod group_hash;
 pub mod keys;
 pub mod legacy;
@@ -25,6 +24,9 @@ pub mod serialize;
 pub mod transaction;
 pub mod util;
 pub mod zip32;
+
+#[cfg(feature = "zfuture")]
+pub mod extensions;
 
 #[cfg(test)]
 mod test_vectors;

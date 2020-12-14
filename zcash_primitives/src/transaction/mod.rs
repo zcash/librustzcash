@@ -21,9 +21,10 @@ mod tests;
 
 pub use self::sighash::{signature_hash, signature_hash_data, SignableInput, SIGHASH_ALL};
 
-use self::components::{
-    Amount, JSDescription, OutputDescription, SpendDescription, TxIn, TxOut, TzeIn, TzeOut,
-};
+use self::components::{Amount, JSDescription, OutputDescription, SpendDescription, TxIn, TxOut};
+
+#[cfg(feature = "zfuture")]
+use self::components::{TzeIn, TzeOut};
 
 const OVERWINTER_VERSION_GROUP_ID: u32 = 0x03C48270;
 const OVERWINTER_TX_VERSION: u32 = 3;
@@ -36,7 +37,9 @@ const SAPLING_TX_VERSION: u32 = 4;
 /// using these constants should be inspected, and use of these constants
 /// should be removed as appropriate in favor of the new consensus
 /// transaction version and group.
+#[cfg(feature = "zfuture")]
 const ZFUTURE_VERSION_GROUP_ID: u32 = 0xFFFFFFFF;
+#[cfg(feature = "zfuture")]
 const ZFUTURE_TX_VERSION: u32 = 0x0000FFFF;
 
 #[derive(Clone, Copy, Debug, PartialOrd, Ord, PartialEq, Eq, Hash)]
@@ -78,7 +81,9 @@ pub struct TransactionData {
     pub version_group_id: u32,
     pub vin: Vec<TxIn>,
     pub vout: Vec<TxOut>,
+    #[cfg(feature = "zfuture")]
     pub tze_inputs: Vec<TzeIn>,
+    #[cfg(feature = "zfuture")]
     pub tze_outputs: Vec<TzeOut>,
     pub lock_time: u32,
     pub expiry_height: BlockHeight,
@@ -100,9 +105,7 @@ impl std::fmt::Debug for TransactionData {
                 version = {:?},
                 version_group_id = {:?},
                 vin = {:?},
-                vout = {:?},
-                tze_inputs = {:?},
-                tze_outputs = {:?},
+                vout = {:?},{}
                 lock_time = {:?},
                 expiry_height = {:?},
                 value_balance = {:?},
@@ -116,8 +119,19 @@ impl std::fmt::Debug for TransactionData {
             self.version_group_id,
             self.vin,
             self.vout,
-            self.tze_inputs,
-            self.tze_outputs,
+            {
+                #[cfg(feature = "zfuture")]
+                {
+                    format!(
+                        "
+                tze_inputs = {:?},
+                tze_outputs = {:?},",
+                        self.tze_inputs, self.tze_outputs
+                    )
+                }
+                #[cfg(not(feature = "zfuture"))]
+                ""
+            },
             self.lock_time,
             self.expiry_height,
             self.value_balance,
@@ -144,7 +158,9 @@ impl TransactionData {
             version_group_id: SAPLING_VERSION_GROUP_ID,
             vin: vec![],
             vout: vec![],
+            #[cfg(feature = "zfuture")]
             tze_inputs: vec![],
+            #[cfg(feature = "zfuture")]
             tze_outputs: vec![],
             lock_time: 0,
             expiry_height: 0u32.into(),
@@ -158,6 +174,7 @@ impl TransactionData {
         }
     }
 
+    #[cfg(feature = "zfuture")]
     pub fn zfuture() -> Self {
         TransactionData {
             overwintered: true,
@@ -227,9 +244,13 @@ impl Transaction {
         let is_sapling_v4 = overwintered
             && version_group_id == SAPLING_VERSION_GROUP_ID
             && version == SAPLING_TX_VERSION;
+
+        #[cfg(feature = "zfuture")]
         let has_tze = overwintered
             && version_group_id == ZFUTURE_VERSION_GROUP_ID
             && version == ZFUTURE_TX_VERSION;
+        #[cfg(not(feature = "zfuture"))]
+        let has_tze = false;
 
         if overwintered && !(is_overwinter_v3 || is_sapling_v4 || has_tze) {
             return Err(io::Error::new(
@@ -240,6 +261,7 @@ impl Transaction {
 
         let vin = Vector::read(&mut reader, TxIn::read)?;
         let vout = Vector::read(&mut reader, TxOut::read)?;
+        #[cfg(feature = "zfuture")]
         let (tze_inputs, tze_outputs) = if has_tze {
             let wi = Vector::read(&mut reader, TzeIn::read)?;
             let wo = Vector::read(&mut reader, TzeOut::read)?;
@@ -306,7 +328,9 @@ impl Transaction {
                 version_group_id,
                 vin,
                 vout,
+                #[cfg(feature = "zfuture")]
                 tze_inputs,
+                #[cfg(feature = "zfuture")]
                 tze_outputs,
                 lock_time,
                 expiry_height,
@@ -333,9 +357,13 @@ impl Transaction {
         let is_sapling_v4 = self.overwintered
             && self.version_group_id == SAPLING_VERSION_GROUP_ID
             && self.version == SAPLING_TX_VERSION;
+
+        #[cfg(feature = "zfuture")]
         let has_tze = self.overwintered
             && self.version_group_id == ZFUTURE_VERSION_GROUP_ID
             && self.version == ZFUTURE_TX_VERSION;
+        #[cfg(not(feature = "zfuture"))]
+        let has_tze = false;
 
         if self.overwintered && !(is_overwinter_v3 || is_sapling_v4 || has_tze) {
             return Err(io::Error::new(
@@ -346,6 +374,7 @@ impl Transaction {
 
         Vector::write(&mut writer, &self.vin, |w, e| e.write(w))?;
         Vector::write(&mut writer, &self.vout, |w, e| e.write(w))?;
+        #[cfg(feature = "zfuture")]
         if has_tze {
             Vector::write(&mut writer, &self.tze_inputs, |w, e| e.write(w))?;
             Vector::write(&mut writer, &self.tze_outputs, |w, e| e.write(w))?;
@@ -420,5 +449,149 @@ impl Transaction {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(feature = "test-dependencies")]
+pub mod testing {
+    use proptest::collection::vec;
+    use proptest::prelude::*;
+    use proptest::sample::select;
+
+    use crate::{consensus::BranchId, legacy::Script};
+
+    #[cfg(feature = "zfuture")]
+    use crate::extensions::transparent as tze;
+
+    use super::{
+        components::{amount::MAX_MONEY, Amount, OutPoint, TxIn, TxOut},
+        Transaction, TransactionData, OVERWINTER_TX_VERSION, OVERWINTER_VERSION_GROUP_ID,
+        SAPLING_TX_VERSION, SAPLING_VERSION_GROUP_ID,
+    };
+
+    #[cfg(feature = "zfuture")]
+    use super::{
+        components::{TzeIn, TzeOut},
+        ZFUTURE_TX_VERSION, ZFUTURE_VERSION_GROUP_ID,
+    };
+
+    pub const VALID_OPCODES: [u8; 8] = [
+        0x00, // OP_FALSE,
+        0x51, // OP_1,
+        0x52, // OP_2,
+        0x53, // OP_3,
+        0xac, // OP_CHECKSIG,
+        0x63, // OP_IF,
+        0x65, // OP_VERIF,
+        0x6a, // OP_RETURN,
+    ];
+
+    prop_compose! {
+        pub fn arb_outpoint()(hash in prop::array::uniform32(1u8..), n in 1..(100 as u32)) -> OutPoint {
+            OutPoint::new(hash, n)
+        }
+    }
+
+    prop_compose! {
+        pub fn arb_script()(v in vec(select(&VALID_OPCODES[..]), 1..256)) -> Script {
+            Script(v)
+        }
+    }
+
+    prop_compose! {
+        pub fn arb_txin()(prevout in arb_outpoint(), script_sig in arb_script(), sequence in any::<u32>()) -> TxIn {
+            TxIn { prevout, script_sig, sequence }
+        }
+    }
+
+    prop_compose! {
+        pub fn arb_amount()(value in 0..MAX_MONEY) -> Amount {
+            Amount::from_i64(value).unwrap()
+        }
+    }
+
+    prop_compose! {
+        pub fn arb_txout()(value in arb_amount(), script_pubkey in arb_script()) -> TxOut {
+            TxOut { value, script_pubkey }
+        }
+    }
+
+    #[cfg(feature = "zfuture")]
+    prop_compose! {
+        pub fn arb_witness()(extension_id in 0..(100 as u32), mode in (0..100 as u32), payload in vec(any::<u8>(), 32..256))  -> tze::Witness {
+            tze::Witness { extension_id, mode, payload }
+        }
+    }
+
+    #[cfg(feature = "zfuture")]
+    prop_compose! {
+        pub fn arb_tzein()(prevout in arb_outpoint(), witness in arb_witness()) -> TzeIn {
+            TzeIn { prevout, witness }
+        }
+    }
+
+    #[cfg(feature = "zfuture")]
+    prop_compose! {
+        pub fn arb_precondition()(extension_id in 0..(100 as u32), mode in (0..100 as u32), payload in vec(any::<u8>(), 32..256))  -> tze::Precondition {
+            tze::Precondition { extension_id, mode, payload }
+        }
+    }
+
+    #[cfg(feature = "zfuture")]
+    prop_compose! {
+        fn arb_tzeout()(value in arb_amount(), precondition in arb_precondition()) -> TzeOut {
+            TzeOut { value, precondition }
+        }
+    }
+
+    fn tx_versions(branch_id: BranchId) -> impl Strategy<Value = (u32, u32)> {
+        match branch_id {
+            BranchId::Sprout => (1..(2 as u32)).prop_map(|i| (i, 0)).boxed(),
+            BranchId::Overwinter => {
+                Just((OVERWINTER_TX_VERSION, OVERWINTER_VERSION_GROUP_ID)).boxed()
+            }
+            #[cfg(feature = "zfuture")]
+            BranchId::ZFuture => Just((ZFUTURE_TX_VERSION, ZFUTURE_VERSION_GROUP_ID)).boxed(),
+            _otherwise => Just((SAPLING_TX_VERSION, SAPLING_VERSION_GROUP_ID)).boxed(),
+        }
+    }
+
+    #[cfg(feature = "zfuture")]
+    prop_compose! {
+        pub fn arb_txdata(branch_id: BranchId)(
+            (version, version_group_id) in tx_versions(branch_id),
+            vin in vec(arb_txin(), 0..10),
+            vout in vec(arb_txout(), 0..10),
+            tze_inputs in vec(arb_tzein(), 0..10),
+            tze_outputs in vec(arb_tzeout(), 0..10),
+            lock_time in any::<u32>(),
+            expiry_height in any::<u32>(),
+            value_balance in arb_amount(),
+        ) -> TransactionData {
+            TransactionData {
+                overwintered: branch_id != BranchId::Sprout,
+                version,
+                version_group_id,
+                vin, vout,
+                tze_inputs:  if branch_id == BranchId::ZFuture { tze_inputs } else { vec![] },
+                tze_outputs: if branch_id == BranchId::ZFuture { tze_outputs } else { vec![] },
+                lock_time,
+                expiry_height: expiry_height.into(),
+                value_balance,
+                shielded_spends: vec![], //FIXME
+                shielded_outputs: vec![], //FIXME
+                joinsplits: vec![], //FIXME
+                joinsplit_pubkey: None, //FIXME
+                joinsplit_sig: None, //FIXME
+                binding_sig: None, //FIXME
+            }
+        }
+    }
+
+    #[cfg(feature = "zfuture")]
+    prop_compose! {
+        pub fn arb_tx(branch_id: BranchId)(tx_data in arb_txdata(branch_id)) -> Transaction {
+            Transaction::from_data(tx_data).unwrap()
+        }
     }
 }

@@ -1,6 +1,8 @@
 //! Structs for building transactions.
 
+#[cfg(feature = "zfuture")]
 use std::boxed::Box;
+
 use std::error;
 use std::fmt;
 use std::marker::PhantomData;
@@ -10,7 +12,6 @@ use rand::{rngs::OsRng, seq::SliceRandom, CryptoRng, RngCore};
 
 use crate::{
     consensus::{self, BlockHeight},
-    extensions::transparent::{self as tze, ExtensionTxBuilder, ToPayload},
     keys::OutgoingViewingKey,
     legacy::TransparentAddress,
     merkle_tree::MerklePath,
@@ -21,8 +22,7 @@ use crate::{
     sapling::{spend_sig, Node},
     transaction::{
         components::{
-            amount::Amount, amount::DEFAULT_FEE, OutPoint, OutputDescription, SpendDescription,
-            TxOut, TzeIn, TzeOut,
+            amount::Amount, amount::DEFAULT_FEE, OutputDescription, SpendDescription, TxOut,
         },
         signature_hash_data, SignableInput, Transaction, TransactionData, SIGHASH_ALL,
     },
@@ -32,6 +32,15 @@ use crate::{
 
 #[cfg(feature = "transparent-inputs")]
 use crate::{legacy::Script, transaction::components::TxIn};
+
+#[cfg(feature = "zfuture")]
+use crate::{
+    extensions::transparent::{self as tze, ExtensionTxBuilder, ToPayload},
+    transaction::components::{TzeIn, TzeOut},
+};
+
+#[cfg(any(feature = "transparent-inputs", feature = "zfuture"))]
+use crate::transaction::components::OutPoint;
 
 const DEFAULT_TX_EXPIRY_DELTA: u32 = 20;
 
@@ -265,15 +274,18 @@ impl TransparentInputs {
     fn apply_signatures(&self, _: &mut TransactionData, _: consensus::BranchId) {}
 }
 
+#[cfg(feature = "zfuture")]
 struct TzeInputInfo<'a, BuildCtx> {
     prevout: TzeOut,
     builder: Box<dyn FnOnce(&BuildCtx) -> Result<(u32, Vec<u8>), Error> + 'a>,
 }
 
+#[cfg(feature = "zfuture")]
 struct TzeInputs<'a, BuildCtx> {
     builders: Vec<TzeInputInfo<'a, BuildCtx>>,
 }
 
+#[cfg(feature = "zfuture")]
 impl<'a, BuildCtx> TzeInputs<'a, BuildCtx> {
     fn default() -> Self {
         TzeInputs { builders: vec![] }
@@ -339,9 +351,10 @@ pub struct Builder<'a, P: consensus::Parameters, R: RngCore + CryptoRng> {
     spends: Vec<SpendDescriptionInfo>,
     outputs: Vec<SaplingOutput>,
     transparent_inputs: TransparentInputs,
+    #[cfg(feature = "zfuture")]
     tze_inputs: TzeInputs<'a, TransactionData>,
     change_address: Option<(OutgoingViewingKey, PaymentAddress)>,
-    phantom: PhantomData<P>,
+    _phantom: &'a PhantomData<P>,
 }
 
 impl<'a, P: consensus::Parameters> Builder<'a, P, OsRng> {
@@ -372,6 +385,7 @@ impl<'a, P: consensus::Parameters> Builder<'a, P, OsRng> {
     /// The transaction will be constructed and serialized according to the
     /// NetworkUpgrade::ZFuture rules. This is intended only for use in
     /// integration testing of new features.
+    #[cfg(feature = "zfuture")]
     pub fn new_zfuture(params: P, height: BlockHeight) -> Self {
         Builder::new_with_rng_zfuture(params, height, OsRng)
     }
@@ -405,6 +419,7 @@ impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng> Builder<'a, P, R> {
     /// The transaction will be constructed and serialized according to the
     /// NetworkUpgrade::ZFuture rules. This is intended only for use in
     /// integration testing of new features.
+    #[cfg(feature = "zfuture")]
     pub fn new_with_rng_zfuture(params: P, height: BlockHeight, rng: R) -> Builder<'a, P, R> {
         Self::new_with_mtx(params, height, rng, TransactionData::zfuture())
     }
@@ -428,9 +443,10 @@ impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng> Builder<'a, P, R> {
             spends: vec![],
             outputs: vec![],
             transparent_inputs: TransparentInputs::default(),
+            #[cfg(feature = "zfuture")]
             tze_inputs: TzeInputs::default(),
             change_address: None,
-            phantom: PhantomData,
+            _phantom: &PhantomData,
         }
     }
 
@@ -558,7 +574,10 @@ impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng> Builder<'a, P, R> {
 
         // Valid change
         let change = self.mtx.value_balance - self.fee + self.transparent_inputs.value_sum()
-            - self.mtx.vout.iter().map(|vo| vo.value).sum::<Amount>()
+            - self.mtx.vout.iter().map(|vo| vo.value).sum::<Amount>();
+
+        #[cfg(feature = "zfuture")]
+        let change = change
             + self
                 .tze_inputs
                 .builders
@@ -786,6 +805,7 @@ impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng> Builder<'a, P, R> {
         };
 
         // Create TZE input witnesses
+        #[cfg(feature = "zfuture")]
         for (i, tze_in) in self.tze_inputs.builders.into_iter().enumerate() {
             // The witness builder function should have cached/closed over whatever data was necessary for the
             // witness to commit to at the time it was added to the transaction builder; here, it then computes those
@@ -810,6 +830,7 @@ impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng> Builder<'a, P, R> {
     }
 }
 
+#[cfg(feature = "zfuture")]
 impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng> ExtensionTxBuilder<'a>
     for Builder<'a, P, R>
 {
@@ -874,7 +895,10 @@ mod tests {
         zip32::{ExtendedFullViewingKey, ExtendedSpendingKey},
     };
 
-    use super::{Builder, Error, TzeInputs};
+    use super::{Builder, Error};
+
+    #[cfg(feature = "zfuture")]
+    use super::TzeInputs;
 
     #[test]
     fn fails_on_negative_output() {
@@ -913,9 +937,10 @@ mod tests {
             spends: vec![],
             outputs: vec![],
             transparent_inputs: TransparentInputs::default(),
+            #[cfg(feature = "zfuture")]
             tze_inputs: TzeInputs::default(),
             change_address: None,
-            phantom: PhantomData,
+            _phantom: &PhantomData,
         };
 
         // Create a tx with only t output. No binding_sig should be present
