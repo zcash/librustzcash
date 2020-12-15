@@ -19,7 +19,7 @@ impl Iterator for NodeDataIterator {
             Some(leaf(2))
         } else if self.cursor == 3 {
             Some(self.tree.root_node().expect("always exists").data().clone())
-        } else if self.return_stack.len() > 0 {
+        } else if !self.return_stack.is_empty() {
             self.return_stack.pop()
         } else {
             for n_append in self

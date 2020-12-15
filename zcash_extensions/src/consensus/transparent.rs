@@ -1,7 +1,7 @@
 //! Consensus logic for Transparent Zcash Extensions.
 
 use std::convert::TryFrom;
-use zcash_primitives::consensus::{BlockHeight, NetworkUpgrade};
+use zcash_primitives::consensus::{BlockHeight, BranchId};
 use zcash_primitives::extensions::transparent::{Error, Extension, Precondition, Witness};
 use zcash_primitives::transaction::{components::TzeOut, Transaction};
 
@@ -113,10 +113,10 @@ impl Epoch for EpochVTest {
     }
 }
 
-pub fn epoch_for_branch(network_upgrade: NetworkUpgrade) -> Option<Box<dyn Epoch<Error = String>>> {
+pub fn epoch_for_branch(branch_id: BranchId) -> Option<Box<dyn Epoch<Error = String>>> {
     // Map from consensus branch IDs to epochs.
-    match network_upgrade {
-        NetworkUpgrade::ZFuture => Some(Box::new(EpochVTest)),
+    match branch_id {
+        BranchId::ZFuture => Some(Box::new(EpochVTest)),
         _ => None,
     }
 }

@@ -73,7 +73,7 @@ pub fn generate_circuit_generator(mut gen: jubjub::SubgroupPoint) -> FixedGenera
 
     for _ in 0..FIXED_BASE_CHUNKS_PER_GENERATOR {
         let mut coeffs = vec![(Scalar::zero(), Scalar::one())];
-        let mut g = gen.clone();
+        let mut g = gen;
         for _ in 0..7 {
             let g_affine = jubjub::ExtendedPoint::from(g).to_affine();
             coeffs.push((g_affine.get_u(), g_affine.get_v()));
@@ -143,7 +143,7 @@ fn generate_pedersen_circuit_generators() -> Vec<Vec<Vec<(Scalar, Scalar)>>> {
             for _ in 0..PEDERSEN_HASH_CHUNKS_PER_GENERATOR {
                 // Create (x, y) coeffs for this chunk
                 let mut coeffs = vec![];
-                let mut g = gen.clone();
+                let mut g = gen;
 
                 // coeffs = g, g*2, g*3, g*4
                 for _ in 0..4 {

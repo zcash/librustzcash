@@ -4,9 +4,9 @@ use ff::PrimeField;
 use rusqlite::{types::ToSql, Connection, NO_PARAMS};
 use std::convert::TryInto;
 use std::path::Path;
-use zcash_client_backend::encoding::encode_extended_full_viewing_key;
+use zcash_client_backend::{address::RecipientAddress, encoding::encode_extended_full_viewing_key};
 use zcash_primitives::{
-    consensus::{self, NetworkUpgrade},
+    consensus,
     keys::OutgoingViewingKey,
     merkle_tree::{IncrementalWitness, MerklePath},
     note_encryption::Memo,
@@ -21,7 +21,6 @@ use zcash_primitives::{
 };
 
 use crate::{
-    address::RecipientAddress,
     error::{Error, ErrorKind},
     get_target_and_anchor_heights,
 };
@@ -229,21 +228,18 @@ pub fn create_to_address<DB: AsRef<Path>, P: consensus::Parameters>(
             let note_value: i64 = row.get(1)?;
 
             let rseed = {
-                let d: Vec<_> = row.get(2)?;
+                let rcm_bytes: Vec<_> = row.get(2)?;
 
-                if params.is_nu_active(NetworkUpgrade::Canopy, height) {
-                    let mut r = [0u8; 32];
-                    r.copy_from_slice(&d[..]);
-                    Rseed::AfterZip212(r)
-                } else {
-                    let r = jubjub::Fr::from_repr(
-                        d[..]
-                            .try_into()
-                            .map_err(|_| Error(ErrorKind::InvalidNote))?,
-                    )
-                    .ok_or(Error(ErrorKind::InvalidNote))?;
-                    Rseed::BeforeZip212(r)
-                }
+                // We store rcm directly in the data DB, regardless of whether the note
+                // used a v1 or v2 note plaintext, so for the purposes of spending let's
+                // pretend this is a pre-ZIP 212 note.
+                let rcm = jubjub::Fr::from_repr(
+                    rcm_bytes[..]
+                        .try_into()
+                        .map_err(|_| Error(ErrorKind::InvalidNote))?,
+                )
+                .ok_or(Error(ErrorKind::InvalidNote))?;
+                Rseed::BeforeZip212(rcm)
             };
 
             let from = extfvk.fvk.vk.to_payment_address(diversifier).unwrap();
@@ -509,7 +505,7 @@ mod tests {
             Ok(_) => panic!("Should have failed"),
             Err(e) => assert_eq!(
                 e.to_string(),
-                "Insufficient balance (have 0, need 10001 including fee)"
+                "Insufficient balance (have 0, need 1001 including fee)"
             ),
         }
     }
@@ -575,7 +571,7 @@ mod tests {
             Ok(_) => panic!("Should have failed"),
             Err(e) => assert_eq!(
                 e.to_string(),
-                "Insufficient balance (have 50000, need 80000 including fee)"
+                "Insufficient balance (have 50000, need 71000 including fee)"
             ),
         }
 
@@ -607,7 +603,7 @@ mod tests {
             Ok(_) => panic!("Should have failed"),
             Err(e) => assert_eq!(
                 e.to_string(),
-                "Insufficient balance (have 50000, need 80000 including fee)"
+                "Insufficient balance (have 50000, need 71000 including fee)"
             ),
         }
 
@@ -694,7 +690,7 @@ mod tests {
             Ok(_) => panic!("Should have failed"),
             Err(e) => assert_eq!(
                 e.to_string(),
-                "Insufficient balance (have 0, need 12000 including fee)"
+                "Insufficient balance (have 0, need 3000 including fee)"
             ),
         }
 
@@ -726,7 +722,7 @@ mod tests {
             Ok(_) => panic!("Should have failed"),
             Err(e) => assert_eq!(
                 e.to_string(),
-                "Insufficient balance (have 0, need 12000 including fee)"
+                "Insufficient balance (have 0, need 3000 including fee)"
             ),
         }
 

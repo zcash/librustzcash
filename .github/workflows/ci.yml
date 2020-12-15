@@ -3,12 +3,200 @@ name: CI checks
 on: [push, pull_request]
 
 jobs:
-  lint:
-    name: Lint
+  test:
+    name: Test on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macOS-latest]
+
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: 1.44.1
+          override: true
+
+      - name: Fetch path to Zcash parameters
+        working-directory: ./zcash_proofs
+        shell: bash
+        run: echo "ZCASH_PARAMS=$(cargo run --release --example get-params-path --features directories)" >> $GITHUB_ENV
+      - name: Cache Zcash parameters
+        id: cache-params
+        uses: actions/cache@v2
+        with:
+          path: ${{ env.ZCASH_PARAMS }}
+          key: ${{ runner.os }}-params
+      - name: Fetch Zcash parameters
+        if: steps.cache-params.outputs.cache-hit != 'true'
+        working-directory: ./zcash_proofs
+        run: cargo run --release --example download-params --features download-params
+
+      - name: Run tests
+        uses: actions-rs/cargo@v1
+        with:
+          command: test
+          args: --all-features --verbose --release --all
+      - name: Run slow tests
+        uses: actions-rs/cargo@v1
+        with:
+          command: test
+          args: --all-features --verbose --release --all -- --ignored
+
+  build:
+    name: Build target ${{ matrix.target }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        target:
+          - wasm32-unknown-unknown
+          - wasm32-wasi
+
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: 1.44.1
+          override: true
+      - name: Add target
+        run: rustup target add ${{ matrix.target }}
+      - name: cargo fetch
+        uses: actions-rs/cargo@v1
+        with:
+          command: fetch
+      - name: Build zcash_proofs for target
+        working-directory: ./zcash_proofs
+        run: cargo build --verbose --no-default-features --target ${{ matrix.target }}
+      - name: Build zcash_client_backend for target
+        working-directory: ./zcash_client_backend
+        run: cargo build --verbose --no-default-features --target ${{ matrix.target }}
+
+  bitrot:
+    name: Bitrot check
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v1
+      - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: 1.44.1
+          override: true
+      # Build benchmarks to prevent bitrot
+      - name: Build benchmarks
+        uses: actions-rs/cargo@v1
+        with:
+          command: build
+          args: --all --benches
+
+  clippy:
+    name: Clippy (1.44.1)
+    timeout-minutes: 30
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: 1.44.1
+          components: clippy
+          override: true
+      - name: Run clippy
+        uses: actions-rs/clippy-check@v1
+        with:
+          name: Clippy (1.44.1)
+          token: ${{ secrets.GITHUB_TOKEN }}
+          args: --all-features --all-targets -- -D warnings
+
+  clippy-nightly:
+    name: Clippy (nightly)
+    timeout-minutes: 30
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: nightly
+          components: clippy
+          override: true
+      - name: Run Clippy (nightly)
+        uses: actions-rs/clippy-check@v1
+        continue-on-error: true
+        with:
+          name: Clippy (nightly)
+          token: ${{ secrets.GITHUB_TOKEN }}
+          args: --all-features --all-targets -- -W clippy::all
+
+  codecov:
+    name: Code coverage
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v2
+      # Use stable for this to ensure that cargo-tarpaulin can be built.
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          override: true
+      - name: Install cargo-tarpaulin
+        uses: actions-rs/cargo@v1
+        with:
+          command: install
+          args: cargo-tarpaulin
+
+      - name: Fetch path to Zcash parameters
+        working-directory: ./zcash_proofs
+        shell: bash
+        run: echo "ZCASH_PARAMS=$(cargo run --release --example get-params-path --features directories)" >> $GITHUB_ENV
+      - name: Cache Zcash parameters
+        id: cache-params
+        uses: actions/cache@v2
+        with:
+          path: ${{ env.ZCASH_PARAMS }}
+          key: ${{ runner.os }}-params
+      - name: Fetch Zcash parameters
+        if: steps.cache-params.outputs.cache-hit != 'true'
+        working-directory: ./zcash_proofs
+        run: cargo run --release --example download-params --features download-params
+
+      - name: Generate coverage report
+        uses: actions-rs/cargo@v1
+        with:
+          command: tarpaulin
+          args: --all-features --release --timeout 600 --out Xml
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v1
+        with:
+          token: ${{secrets.CODECOV_TOKEN}}
+
+  doc-links:
+    name: Intra-doc links
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: nightly
+          override: true
+      - name: cargo fetch
+        uses: actions-rs/cargo@v1
+        with:
+          command: fetch
+
+      # Ensure intra-documentation links all resolve correctly
+      # Requires #![deny(intra_doc_link_resolution_failure)] in crates.
+      - name: Check intra-doc links
+        uses: actions-rs/cargo@v1
+        with:
+          command: doc
+          args: --all --document-private-items
+
+  fmt:
+    name: Rustfmt
+    timeout-minutes: 30
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
       - uses: actions-rs/toolchain@v1
         with:
           toolchain: 1.44.1
@@ -28,148 +216,4 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: fmt
-          args: --all -- --check --color always
-
-      # Build benchmarks to prevent bitrot
-      - name: Build benchmarks
-        uses: actions-rs/cargo@v1
-        with:
-          command: build
-          args: --all --benches
-
-  test:
-    name: Test on ${{ matrix.os }}
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [ubuntu-latest, windows-latest, macOS-latest]
-
-    steps:
-      - uses: actions/checkout@v1
-      - uses: actions-rs/toolchain@v1
-        with:
-          toolchain: 1.44.1
-          override: true
-
-      - name: Fetch path to Zcash parameters
-        working-directory: ./zcash_proofs
-        run: echo "::set-env name=ZCASH_PARAMS::$(cargo run --release --example get-params-path --features directories)"
-      - name: Cache Zcash parameters
-        id: cache-params
-        uses: actions/cache@v2
-        with:
-          path: ${{ env.ZCASH_PARAMS }}
-          key: ${{ runner.os }}-params
-      - name: Fetch Zcash parameters
-        if: steps.cache-params.outputs.cache-hit != 'true'
-        working-directory: ./zcash_proofs
-        run: cargo run --release --example download-params --features download-params
-
-      - name: cargo fetch
-        uses: actions-rs/cargo@v1
-        with:
-          command: fetch
-      - name: Build tests
-        uses: actions-rs/cargo@v1
-        with:
-          command: build
-          args: --verbose --release --all --tests
-      - name: Run tests
-        uses: actions-rs/cargo@v1
-        with:
-          command: test
-          args: --verbose --release --all
-      - name: Run slow tests
-        uses: actions-rs/cargo@v1
-        with:
-          command: test
-          args: --verbose --release --all -- --ignored
-
-  build:
-    name: Build target ${{ matrix.target }}
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        target:
-          - wasm32-unknown-unknown
-          - wasm32-wasi
-
-    steps:
-      - uses: actions/checkout@v1
-      - uses: actions-rs/toolchain@v1
-        with:
-          toolchain: 1.44.1
-          override: true
-      - name: Add target
-        run: rustup target add ${{ matrix.target }}
-      - name: cargo fetch
-        uses: actions-rs/cargo@v1
-        with:
-          command: fetch
-      - name: Build zcash_proofs for target
-        working-directory: ./zcash_proofs
-        run: cargo build --verbose --no-default-features --target ${{ matrix.target }}
-
-  codecov:
-    name: Code coverage
-    runs-on: ubuntu-latest
-
-    steps:
-      - uses: actions/checkout@v1
-      # Use stable for this to ensure that cargo-tarpaulin can be built.
-      - uses: actions-rs/toolchain@v1
-        with:
-          toolchain: stable
-          override: true
-      - name: Install cargo-tarpaulin
-        uses: actions-rs/cargo@v1
-        with:
-          command: install
-          args: cargo-tarpaulin
-
-      - name: Fetch path to Zcash parameters
-        working-directory: ./zcash_proofs
-        run: echo "::set-env name=ZCASH_PARAMS::$(cargo run --release --example get-params-path --features directories)"
-      - name: Cache Zcash parameters
-        id: cache-params
-        uses: actions/cache@v2
-        with:
-          path: ${{ env.ZCASH_PARAMS }}
-          key: ${{ runner.os }}-params
-      - name: Fetch Zcash parameters
-        if: steps.cache-params.outputs.cache-hit != 'true'
-        working-directory: ./zcash_proofs
-        run: cargo run --release --example download-params --features download-params
-
-      - name: Generate coverage report
-        uses: actions-rs/cargo@v1
-        with:
-          command: tarpaulin
-          args: --release --timeout 600 --out Xml
-      - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v1.0.3
-        with:
-          token: ${{secrets.CODECOV_TOKEN}}
-
-  doc-links:
-    name: Nightly lint
-    runs-on: ubuntu-latest
-
-    steps:
-      - uses: actions/checkout@v1
-      - uses: actions-rs/toolchain@v1
-        with:
-          toolchain: nightly
-          override: true
-      - name: cargo fetch
-        uses: actions-rs/cargo@v1
-        with:
-          command: fetch
-
-      # Ensure intra-documentation links all resolve correctly
-      # Requires #![deny(intra_doc_link_resolution_failure)] in crates.
-      - name: Check intra-doc links
-        uses: actions-rs/cargo@v1
-        with:
-          command: doc
-          args: --all --document-private-items
+          args: --all -- --check

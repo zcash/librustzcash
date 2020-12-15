@@ -505,7 +505,6 @@ mod tests {
     use super::{CommitmentTree, Hashable, IncrementalWitness, MerklePath, PathFiller};
     use crate::sapling::Node;
 
-    use hex;
     use std::convert::TryInto;
     use std::io::{self, Read, Write};
 
@@ -608,11 +607,11 @@ mod tests {
     #[test]
     fn empty_root_test_vectors() {
         let mut tmp = [0u8; 32];
-        for i in 0..HEX_EMPTY_ROOTS.len() {
+        for (i, &expected) in HEX_EMPTY_ROOTS.iter().enumerate() {
             Node::empty_root(i)
                 .write(&mut tmp[..])
                 .expect("length is 32 bytes");
-            assert_eq!(hex::encode(tmp), HEX_EMPTY_ROOTS[i]);
+            assert_eq!(hex::encode(tmp), expected);
         }
     }
 
@@ -633,11 +632,11 @@ mod tests {
     fn empty_commitment_tree_roots() {
         let tree = CommitmentTree::<Node>::new();
         let mut tmp = [0u8; 32];
-        for i in 1..HEX_EMPTY_ROOTS.len() {
+        for (i, &expected) in HEX_EMPTY_ROOTS.iter().enumerate().skip(1) {
             tree.root_inner(i, PathFiller::empty())
                 .write(&mut tmp[..])
                 .expect("length is 32 bytes");
-            assert_eq!(hex::encode(tmp), HEX_EMPTY_ROOTS[i]);
+            assert_eq!(hex::encode(tmp), expected);
         }
     }
 
@@ -1035,7 +1034,7 @@ mod tests {
                 if let Some(leaf) = leaf {
                     let path = witness.path().expect("should be able to create a path");
                     let expected = MerklePath::from_slice_with_depth(
-                        &mut hex::decode(paths[paths_i]).unwrap(),
+                        &hex::decode(paths[paths_i]).unwrap(),
                         TESTING_DEPTH,
                     )
                     .unwrap();

@@ -155,6 +155,7 @@ mod tests {
         }
     }
 
+    #[allow(clippy::useless_vec)]
     #[test]
     fn vector() {
         macro_rules! eval {

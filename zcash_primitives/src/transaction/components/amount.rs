@@ -1,10 +1,10 @@
 use std::iter::Sum;
 use std::ops::{Add, AddAssign, Sub, SubAssign};
 
-const COIN: i64 = 1_0000_0000;
+pub const COIN: i64 = 1_0000_0000;
 pub const MAX_MONEY: i64 = 21_000_000 * COIN;
 
-pub const DEFAULT_FEE: Amount = Amount(10000);
+pub const DEFAULT_FEE: Amount = Amount(1000);
 
 /// A type-safe representation of some quantity of Zcash.
 ///
@@ -17,7 +17,7 @@ pub const DEFAULT_FEE: Amount = Amount(10000);
 /// by the network consensus rules.
 ///
 /// [`Transaction`]: crate::transaction::Transaction
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, PartialOrd, Eq, Ord)]
 pub struct Amount(i64);
 
 impl Amount {
@@ -147,6 +147,19 @@ impl Sum for Amount {
     }
 }
 
+#[cfg(any(test, feature = "test-dependencies"))]
+pub mod testing {
+    use proptest::prelude::prop_compose;
+
+    use super::{Amount, MAX_MONEY};
+
+    prop_compose! {
+        pub fn arb_nonnegative_amount()(amt in 0i64..MAX_MONEY) -> Amount {
+            Amount::from_i64(amt).unwrap()
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{Amount, MAX_MONEY};
@@ -154,52 +167,49 @@ mod tests {
     #[test]
     fn amount_in_range() {
         let zero = b"\x00\x00\x00\x00\x00\x00\x00\x00";
-        assert_eq!(Amount::from_u64_le_bytes(zero.clone()).unwrap(), Amount(0));
+        assert_eq!(Amount::from_u64_le_bytes(*zero).unwrap(), Amount(0));
         assert_eq!(
-            Amount::from_nonnegative_i64_le_bytes(zero.clone()).unwrap(),
+            Amount::from_nonnegative_i64_le_bytes(*zero).unwrap(),
             Amount(0)
         );
-        assert_eq!(Amount::from_i64_le_bytes(zero.clone()).unwrap(), Amount(0));
+        assert_eq!(Amount::from_i64_le_bytes(*zero).unwrap(), Amount(0));
 
         let neg_one = b"\xff\xff\xff\xff\xff\xff\xff\xff";
-        assert!(Amount::from_u64_le_bytes(neg_one.clone()).is_err());
-        assert!(Amount::from_nonnegative_i64_le_bytes(neg_one.clone()).is_err());
-        assert_eq!(
-            Amount::from_i64_le_bytes(neg_one.clone()).unwrap(),
-            Amount(-1)
-        );
+        assert!(Amount::from_u64_le_bytes(*neg_one).is_err());
+        assert!(Amount::from_nonnegative_i64_le_bytes(*neg_one).is_err());
+        assert_eq!(Amount::from_i64_le_bytes(*neg_one).unwrap(), Amount(-1));
 
         let max_money = b"\x00\x40\x07\x5a\xf0\x75\x07\x00";
         assert_eq!(
-            Amount::from_u64_le_bytes(max_money.clone()).unwrap(),
+            Amount::from_u64_le_bytes(*max_money).unwrap(),
             Amount(MAX_MONEY)
         );
         assert_eq!(
-            Amount::from_nonnegative_i64_le_bytes(max_money.clone()).unwrap(),
+            Amount::from_nonnegative_i64_le_bytes(*max_money).unwrap(),
             Amount(MAX_MONEY)
         );
         assert_eq!(
-            Amount::from_i64_le_bytes(max_money.clone()).unwrap(),
+            Amount::from_i64_le_bytes(*max_money).unwrap(),
             Amount(MAX_MONEY)
         );
 
         let max_money_p1 = b"\x01\x40\x07\x5a\xf0\x75\x07\x00";
-        assert!(Amount::from_u64_le_bytes(max_money_p1.clone()).is_err());
-        assert!(Amount::from_nonnegative_i64_le_bytes(max_money_p1.clone()).is_err());
-        assert!(Amount::from_i64_le_bytes(max_money_p1.clone()).is_err());
+        assert!(Amount::from_u64_le_bytes(*max_money_p1).is_err());
+        assert!(Amount::from_nonnegative_i64_le_bytes(*max_money_p1).is_err());
+        assert!(Amount::from_i64_le_bytes(*max_money_p1).is_err());
 
         let neg_max_money = b"\x00\xc0\xf8\xa5\x0f\x8a\xf8\xff";
-        assert!(Amount::from_u64_le_bytes(neg_max_money.clone()).is_err());
-        assert!(Amount::from_nonnegative_i64_le_bytes(neg_max_money.clone()).is_err());
+        assert!(Amount::from_u64_le_bytes(*neg_max_money).is_err());
+        assert!(Amount::from_nonnegative_i64_le_bytes(*neg_max_money).is_err());
         assert_eq!(
-            Amount::from_i64_le_bytes(neg_max_money.clone()).unwrap(),
+            Amount::from_i64_le_bytes(*neg_max_money).unwrap(),
             Amount(-MAX_MONEY)
         );
 
         let neg_max_money_m1 = b"\xff\xbf\xf8\xa5\x0f\x8a\xf8\xff";
-        assert!(Amount::from_u64_le_bytes(neg_max_money_m1.clone()).is_err());
-        assert!(Amount::from_nonnegative_i64_le_bytes(neg_max_money_m1.clone()).is_err());
-        assert!(Amount::from_i64_le_bytes(neg_max_money_m1.clone()).is_err());
+        assert!(Amount::from_u64_le_bytes(*neg_max_money_m1).is_err());
+        assert!(Amount::from_nonnegative_i64_le_bytes(*neg_max_money_m1).is_err());
+        assert!(Amount::from_i64_le_bytes(*neg_max_money_m1).is_err());
     }
 
     #[test]

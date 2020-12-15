@@ -10,7 +10,7 @@ use std::fmt;
 pub trait FromPayload: Sized {
     type Error;
 
-    /// Parses an extension type from a mode and payload.
+    /// Parses an extension-specific witness or precondition from a mode and payload.
     fn from_payload(mode: u32, payload: &[u8]) -> Result<Self, Self::Error>;
 }
 

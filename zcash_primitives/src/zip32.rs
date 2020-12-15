@@ -99,6 +99,12 @@ struct ChainCode([u8; 32]);
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct DiversifierIndex(pub [u8; 11]);
 
+impl Default for DiversifierIndex {
+    fn default() -> Self {
+        DiversifierIndex::new()
+    }
+}
+
 impl DiversifierIndex {
     pub fn new() -> Self {
         DiversifierIndex([0; 11])

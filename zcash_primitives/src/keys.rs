@@ -110,8 +110,8 @@ impl Clone for FullViewingKey {
     fn clone(&self) -> Self {
         FullViewingKey {
             vk: ViewingKey {
-                ak: self.vk.ak.clone(),
-                nk: self.vk.nk.clone(),
+                ak: self.vk.ak,
+                nk: self.vk.nk,
             },
             ovk: self.ovk,
         }
@@ -177,6 +177,30 @@ impl FullViewingKey {
         self.write(&mut result[..])
             .expect("should be able to serialize a FullViewingKey");
         result
+    }
+}
+
+#[cfg(any(test, feature = "test-dependencies"))]
+pub mod testing {
+    use proptest::collection::vec;
+    use proptest::prelude::{any, prop_compose};
+
+    use crate::{
+        primitives::PaymentAddress,
+        zip32::{ExtendedFullViewingKey, ExtendedSpendingKey},
+    };
+
+    prop_compose! {
+        pub fn arb_extended_spending_key()(v in vec(any::<u8>(), 32..252)) -> ExtendedSpendingKey {
+            ExtendedSpendingKey::master(&v)
+        }
+    }
+
+    prop_compose! {
+        pub fn arb_shielded_addr()(extsk in arb_extended_spending_key()) -> PaymentAddress {
+            let extfvk = ExtendedFullViewingKey::from(&extsk);
+            extfvk.default_address().unwrap().1
+        }
     }
 }
 

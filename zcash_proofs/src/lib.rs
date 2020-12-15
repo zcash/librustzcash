@@ -135,7 +135,10 @@ pub fn load_parameters(
     )
 }
 
-fn parse_parameters<R: io::Read>(
+/// Parse Bls12 keys from bytes as serialized by [`Parameters::write`].
+///
+/// This function will panic if it encounters unparseable data.
+pub fn parse_parameters<R: io::Read>(
     spend_fs: R,
     output_fs: R,
     sprout_fs: Option<R>,
@@ -148,7 +151,7 @@ fn parse_parameters<R: io::Read>(
 ) {
     let mut spend_fs = hashreader::HashReader::new(spend_fs);
     let mut output_fs = hashreader::HashReader::new(output_fs);
-    let mut sprout_fs = sprout_fs.map(|fs| hashreader::HashReader::new(fs));
+    let mut sprout_fs = sprout_fs.map(hashreader::HashReader::new);
 
     // Deserialize params
     let spend_params = Parameters::<Bls12>::read(&mut spend_fs, false)

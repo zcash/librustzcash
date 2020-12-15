@@ -26,8 +26,8 @@ const COMPACT_NOTE_SIZE: usize = 1 + // version
 const NOTE_PLAINTEXT_SIZE: usize = COMPACT_NOTE_SIZE + 512;
 const OUT_PLAINTEXT_SIZE: usize = 32 + // pk_d
     32; // esk
-const ENC_CIPHERTEXT_SIZE: usize = NOTE_PLAINTEXT_SIZE + 16;
-const OUT_CIPHERTEXT_SIZE: usize = OUT_PLAINTEXT_SIZE + 16;
+pub const ENC_CIPHERTEXT_SIZE: usize = NOTE_PLAINTEXT_SIZE + 16;
+pub const OUT_CIPHERTEXT_SIZE: usize = OUT_PLAINTEXT_SIZE + 16;
 
 /// Format a byte array as a colon-delimited hex string.
 ///
@@ -408,6 +408,8 @@ fn parse_note_plaintext_without_memo<P: consensus::Parameters>(
     Some((note, to))
 }
 
+#[allow(clippy::if_same_then_else)]
+#[allow(clippy::needless_bool)]
 pub fn plaintext_version_is_valid<P: consensus::Parameters>(
     params: &P,
     height: BlockHeight,

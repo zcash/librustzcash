@@ -1,6 +1,8 @@
 //! Structs for building transactions.
 
+#[cfg(feature = "zfuture")]
 use std::boxed::Box;
+
 use std::error;
 use std::fmt;
 use std::marker::PhantomData;
@@ -10,7 +12,6 @@ use rand::{rngs::OsRng, seq::SliceRandom, CryptoRng, RngCore};
 
 use crate::{
     consensus::{self, BlockHeight},
-    extensions::transparent::{self as tze, ExtensionTxBuilder, ToPayload},
     keys::OutgoingViewingKey,
     legacy::TransparentAddress,
     merkle_tree::MerklePath,
@@ -21,8 +22,7 @@ use crate::{
     sapling::{spend_sig, Node},
     transaction::{
         components::{
-            amount::Amount, amount::DEFAULT_FEE, OutPoint, OutputDescription, SpendDescription,
-            TxOut, TzeIn, TzeOut,
+            amount::Amount, amount::DEFAULT_FEE, OutputDescription, SpendDescription, TxOut,
         },
         signature_hash_data, SignableInput, Transaction, TransactionData, SIGHASH_ALL,
     },
@@ -31,10 +31,16 @@ use crate::{
 };
 
 #[cfg(feature = "transparent-inputs")]
+use crate::{legacy::Script, transaction::components::TxIn};
+
+#[cfg(feature = "zfuture")]
 use crate::{
-    legacy::Script,
-    transaction::components::{OutPoint, TxIn},
+    extensions::transparent::{self as tze, ExtensionTxBuilder, ToPayload},
+    transaction::components::{TzeIn, TzeOut},
 };
+
+#[cfg(any(feature = "transparent-inputs", feature = "zfuture"))]
+use crate::transaction::components::OutPoint;
 
 const DEFAULT_TX_EXPIRY_DELTA: u32 = 20;
 
@@ -114,7 +120,7 @@ impl SaplingOutput {
 
         let note = Note {
             g_d,
-            pk_d: to.pk_d().clone(),
+            pk_d: *to.pk_d(),
             value: value.into(),
             rseed,
         };
@@ -143,7 +149,7 @@ impl SaplingOutput {
 
         let (zkproof, cv) = prover.output_proof(
             ctx,
-            encryptor.esk().clone(),
+            *encryptor.esk(),
             self.to,
             self.note.rcm(),
             self.note.value,
@@ -201,16 +207,16 @@ impl TransparentInputs {
             return Err(Error::InvalidAmount);
         }
 
-        // ensure that the ripemd160 digest of the public key associated with the
+        // Ensure that the RIPEMD-160 digest of the public key associated with the
         // provided secret key matches that of the address to which the provided
-        // output may be spent
+        // output may be spent.
         let pubkey = secp256k1::PublicKey::from_secret_key(&self.secp, &sk).serialize();
         match coin.script_pubkey.address() {
             Some(TransparentAddress::PublicKey(hash)) => {
                 use ripemd160::Ripemd160;
                 use sha2::{Digest, Sha256};
 
-                if &hash[..] != &Ripemd160::digest(&Sha256::digest(&pubkey))[..] {
+                if hash[..] != Ripemd160::digest(&Sha256::digest(&pubkey))[..] {
                     return Err(Error::InvalidAddress);
                 }
             }
@@ -268,15 +274,18 @@ impl TransparentInputs {
     fn apply_signatures(&self, _: &mut TransactionData, _: consensus::BranchId) {}
 }
 
+#[cfg(feature = "zfuture")]
 struct TzeInputInfo<'a, BuildCtx> {
     prevout: TzeOut,
     builder: Box<dyn FnOnce(&BuildCtx) -> Result<(u32, Vec<u8>), Error> + 'a>,
 }
 
+#[cfg(feature = "zfuture")]
 struct TzeInputs<'a, BuildCtx> {
     builders: Vec<TzeInputInfo<'a, BuildCtx>>,
 }
 
+#[cfg(feature = "zfuture")]
 impl<'a, BuildCtx> TzeInputs<'a, BuildCtx> {
     fn default() -> Self {
         TzeInputs { builders: vec![] }
@@ -342,9 +351,10 @@ pub struct Builder<'a, P: consensus::Parameters, R: RngCore + CryptoRng> {
     spends: Vec<SpendDescriptionInfo>,
     outputs: Vec<SaplingOutput>,
     transparent_inputs: TransparentInputs,
+    #[cfg(feature = "zfuture")]
     tze_inputs: TzeInputs<'a, TransactionData>,
     change_address: Option<(OutgoingViewingKey, PaymentAddress)>,
-    phantom: PhantomData<P>,
+    _phantom: &'a PhantomData<P>,
 }
 
 impl<'a, P: consensus::Parameters> Builder<'a, P, OsRng> {
@@ -375,6 +385,7 @@ impl<'a, P: consensus::Parameters> Builder<'a, P, OsRng> {
     /// The transaction will be constructed and serialized according to the
     /// NetworkUpgrade::ZFuture rules. This is intended only for use in
     /// integration testing of new features.
+    #[cfg(feature = "zfuture")]
     pub fn new_zfuture(params: P, height: BlockHeight) -> Self {
         Builder::new_with_rng_zfuture(params, height, OsRng)
     }
@@ -408,6 +419,7 @@ impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng> Builder<'a, P, R> {
     /// The transaction will be constructed and serialized according to the
     /// NetworkUpgrade::ZFuture rules. This is intended only for use in
     /// integration testing of new features.
+    #[cfg(feature = "zfuture")]
     pub fn new_with_rng_zfuture(params: P, height: BlockHeight, rng: R) -> Builder<'a, P, R> {
         Self::new_with_mtx(params, height, rng, TransactionData::zfuture())
     }
@@ -431,9 +443,10 @@ impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng> Builder<'a, P, R> {
             spends: vec![],
             outputs: vec![],
             transparent_inputs: TransparentInputs::default(),
+            #[cfg(feature = "zfuture")]
             tze_inputs: TzeInputs::default(),
             change_address: None,
-            phantom: PhantomData,
+            _phantom: &PhantomData,
         }
     }
 
@@ -510,7 +523,7 @@ impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng> Builder<'a, P, R> {
     ) -> Result<(), Error> {
         self.transparent_inputs.push(sk, coin)?;
         self.mtx.vin.push(TxIn::new(utxo));
-        Ok(());
+        Ok(())
     }
 
     /// Adds a transparent address to send funds to.
@@ -561,7 +574,10 @@ impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng> Builder<'a, P, R> {
 
         // Valid change
         let change = self.mtx.value_balance - self.fee + self.transparent_inputs.value_sum()
-            - self.mtx.vout.iter().map(|vo| vo.value).sum::<Amount>()
+            - self.mtx.vout.iter().map(|vo| vo.value).sum::<Amount>();
+
+        #[cfg(feature = "zfuture")]
+        let change = change
             + self
                 .tze_inputs
                 .builders
@@ -593,7 +609,7 @@ impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng> Builder<'a, P, R> {
                     self.spends[0].extsk.expsk.ovk,
                     PaymentAddress::from_parts(
                         self.spends[0].diversifier,
-                        self.spends[0].note.pk_d.clone(),
+                        self.spends[0].note.pk_d,
                     )
                     .ok_or(Error::InvalidAddress)?,
                 )
@@ -706,7 +722,7 @@ impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng> Builder<'a, P, R> {
                     let (pk_d, payment_address) = loop {
                         let dummy_ivk = jubjub::Fr::random(&mut self.rng);
                         let pk_d = g_d * dummy_ivk;
-                        if let Some(addr) = PaymentAddress::from_parts(diversifier, pk_d.clone()) {
+                        if let Some(addr) = PaymentAddress::from_parts(diversifier, pk_d) {
                             break (pk_d, addr);
                         }
                     };
@@ -756,7 +772,7 @@ impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng> Builder<'a, P, R> {
         }
 
         //
-        // Signatures -- all effects must have been applied.
+        // Signatures -- everything but the signatures must already have been added.
         //
 
         let mut sighash = [0u8; 32];
@@ -789,15 +805,11 @@ impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng> Builder<'a, P, R> {
         };
 
         // Create TZE input witnesses
+        #[cfg(feature = "zfuture")]
         for (i, tze_in) in self.tze_inputs.builders.into_iter().enumerate() {
-            // Need to enable witness to commit to the amount.
-            // - So hardware wallets "know" the amount without having to be sent all the
-            //   prior TZE outputs to which this witness gives evidence.
-            //
-            // The witness is expected to commit to the precommitment internally?
-            // (Or make it part of the sighash?)
-            // - TODO: Check whether transparent inputs committing to script_pubkey was
-            //   only so that hardware wallets "knew" what address was being spent from.
+            // The witness builder function should have cached/closed over whatever data was necessary for the
+            // witness to commit to at the time it was added to the transaction builder; here, it then computes those
+            // commitments.
             let (mode, payload) = (tze_in.builder)(&self.mtx)?;
             let mut current = self.mtx.tze_inputs.get_mut(i).unwrap();
             if mode != current.witness.mode {
@@ -818,6 +830,7 @@ impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng> Builder<'a, P, R> {
     }
 }
 
+#[cfg(feature = "zfuture")]
 impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng> ExtensionTxBuilder<'a>
     for Builder<'a, P, R>
 {
@@ -878,11 +891,14 @@ mod tests {
         primitives::Rseed,
         prover::mock::MockTxProver,
         sapling::Node,
-        transaction::components::Amount,
+        transaction::components::{amount::Amount, amount::DEFAULT_FEE},
         zip32::{ExtendedFullViewingKey, ExtendedSpendingKey},
     };
 
-    use super::{Builder, Error, TzeInputs};
+    use super::{Builder, Error};
+
+    #[cfg(feature = "zfuture")]
+    use super::TzeInputs;
 
     #[test]
     fn fails_on_negative_output() {
@@ -921,9 +937,10 @@ mod tests {
             spends: vec![],
             outputs: vec![],
             transparent_inputs: TransparentInputs::default(),
+            #[cfg(feature = "zfuture")]
             tze_inputs: TzeInputs::default(),
             change_address: None,
-            phantom: PhantomData,
+            _phantom: &PhantomData,
         };
 
         // Create a tx with only t output. No binding_sig should be present
@@ -958,12 +975,7 @@ mod tests {
 
         // Create a tx with a sapling spend. binding_sig should be present
         builder
-            .add_sapling_spend(
-                extsk.clone(),
-                *to.diversifier(),
-                note1.clone(),
-                witness1.path().unwrap(),
-            )
+            .add_sapling_spend(extsk, *to.diversifier(), note1, witness1.path().unwrap())
             .unwrap();
 
         builder
@@ -1003,7 +1015,7 @@ mod tests {
             let builder = Builder::new(TEST_NETWORK, H0);
             assert_eq!(
                 builder.build(consensus::BranchId::Sapling, &MockTxProver),
-                Err(Error::ChangeIsNegative(Amount::from_i64(-10000).unwrap()))
+                Err(Error::ChangeIsNegative(Amount::zero() - DEFAULT_FEE))
             );
         }
 
@@ -1012,25 +1024,22 @@ mod tests {
         let to = extfvk.default_address().unwrap().1;
 
         // Fail if there is only a Sapling output
-        // 0.0005 z-ZEC out, 0.0001 t-ZEC fee
+        // 0.0005 z-ZEC out, 0.00001 t-ZEC fee
         {
             let mut builder = Builder::new(TEST_NETWORK, H0);
             builder
-                .add_sapling_output(
-                    ovk.clone(),
-                    to.clone(),
-                    Amount::from_u64(50000).unwrap(),
-                    None,
-                )
+                .add_sapling_output(ovk, to.clone(), Amount::from_u64(50000).unwrap(), None)
                 .unwrap();
             assert_eq!(
                 builder.build(consensus::BranchId::Sapling, &MockTxProver),
-                Err(Error::ChangeIsNegative(Amount::from_i64(-60000).unwrap()))
+                Err(Error::ChangeIsNegative(
+                    Amount::from_i64(-50000).unwrap() - DEFAULT_FEE
+                ))
             );
         }
 
         // Fail if there is only a transparent output
-        // 0.0005 t-ZEC out, 0.0001 t-ZEC fee
+        // 0.0005 t-ZEC out, 0.00001 t-ZEC fee
         {
             let mut builder = Builder::new(TEST_NETWORK, H0);
             builder
@@ -1041,12 +1050,14 @@ mod tests {
                 .unwrap();
             assert_eq!(
                 builder.build(consensus::BranchId::Sapling, &MockTxProver),
-                Err(Error::ChangeIsNegative(Amount::from_i64(-60000).unwrap()))
+                Err(Error::ChangeIsNegative(
+                    Amount::from_i64(-50000).unwrap() - DEFAULT_FEE
+                ))
             );
         }
 
         let note1 = to
-            .create_note(59999, Rseed::BeforeZip212(jubjub::Fr::random(&mut rng)))
+            .create_note(50999, Rseed::BeforeZip212(jubjub::Fr::random(&mut rng)))
             .unwrap();
         let cmu1 = Node::new(note1.cmu().to_repr());
         let mut tree = CommitmentTree::new();
@@ -1054,7 +1065,7 @@ mod tests {
         let mut witness1 = IncrementalWitness::from_tree(&tree);
 
         // Fail if there is insufficient input
-        // 0.0003 z-ZEC out, 0.0002 t-ZEC out, 0.0001 t-ZEC fee, 0.00059999 z-ZEC in
+        // 0.0003 z-ZEC out, 0.0002 t-ZEC out, 0.00001 t-ZEC fee, 0.00050999 z-ZEC in
         {
             let mut builder = Builder::new(TEST_NETWORK, H0);
             builder
@@ -1066,12 +1077,7 @@ mod tests {
                 )
                 .unwrap();
             builder
-                .add_sapling_output(
-                    ovk.clone(),
-                    to.clone(),
-                    Amount::from_u64(30000).unwrap(),
-                    None,
-                )
+                .add_sapling_output(ovk, to.clone(), Amount::from_u64(30000).unwrap(), None)
                 .unwrap();
             builder
                 .add_transparent_output(

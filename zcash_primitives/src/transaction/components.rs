@@ -5,13 +5,21 @@ use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use ff::PrimeField;
 use group::GroupEncoding;
 
-use std::convert::TryFrom;
 use std::io::{self, Read, Write};
 
-use crate::extensions::transparent as tze;
-use crate::legacy::Script;
-use crate::redjubjub::{PublicKey, Signature};
-use crate::serialize::{CompactSize, Vector};
+#[cfg(feature = "zfuture")]
+use std::convert::TryFrom;
+
+use crate::{
+    legacy::Script,
+    redjubjub::{PublicKey, Signature},
+};
+
+#[cfg(feature = "zfuture")]
+use crate::{
+    extensions::transparent as tze,
+    serialize::{CompactSize, Vector},
+};
 
 pub mod amount;
 pub use self::amount::Amount;
@@ -121,17 +129,24 @@ impl TxOut {
     }
 }
 
+#[cfg(feature = "zfuture")]
+fn to_io_error(_: std::num::TryFromIntError) -> io::Error {
+    io::Error::new(io::ErrorKind::InvalidData, "value out of range")
+}
+
 #[derive(Clone, Debug, PartialEq)]
+#[cfg(feature = "zfuture")]
 pub struct TzeIn {
     pub prevout: OutPoint,
     pub witness: tze::Witness,
 }
 
-fn to_io_error(_: std::num::TryFromIntError) -> io::Error {
-    io::Error::new(io::ErrorKind::InvalidData, "value out of range")
-}
-
+/// Transaction encoding and decoding functions conforming to ZIP-222
+///
+/// https://zips.z.cash/zip-0222#encoding-in-transactions
+#[cfg(feature = "zfuture")]
 impl TzeIn {
+    /// Convenience constructor
     pub fn new(prevout: OutPoint, extension_id: u32, mode: u32) -> Self {
         TzeIn {
             prevout,
@@ -142,6 +157,11 @@ impl TzeIn {
             },
         }
     }
+
+    /// Read witness metadata & payload
+    ///
+    /// Used to decode the encoded form used within a serialized
+    /// transaction.
     pub fn read<R: Read>(mut reader: &mut R) -> io::Result<Self> {
         let prevout = OutPoint::read(&mut reader)?;
 
@@ -152,27 +172,36 @@ impl TzeIn {
         Ok(TzeIn {
             prevout,
             witness: tze::Witness {
-                extension_id: u32::try_from(extension_id).map_err(|e| to_io_error(e))?,
-                mode: u32::try_from(mode).map_err(|e| to_io_error(e))?,
+                extension_id: u32::try_from(extension_id).map_err(to_io_error)?,
+                mode: u32::try_from(mode).map_err(to_io_error)?,
                 payload,
             },
         })
     }
 
+    /// Write without witness data (for signature hashing)
+    ///
+    /// This is also used as the prefix for the encoded form used
+    /// within a serialized transaction.
     pub fn write_without_witness<W: Write>(&self, mut writer: W) -> io::Result<()> {
         self.prevout.write(&mut writer)?;
 
         CompactSize::write(
             &mut writer,
-            usize::try_from(self.witness.extension_id).map_err(|e| to_io_error(e))?,
+            usize::try_from(self.witness.extension_id).map_err(to_io_error)?,
         )?;
 
         CompactSize::write(
             &mut writer,
-            usize::try_from(self.witness.mode).map_err(|e| to_io_error(e))?,
+            usize::try_from(self.witness.mode).map_err(to_io_error)?,
         )
     }
 
+    /// Write prevout, extension, and mode followed by witness data.
+    ///
+    /// This calls [`write_without_witness`] to serialize witness metadata,
+    /// then appends the witness bytes themselves. This is the encoded
+    /// form that is used in a serialized transaction.
     pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
         self.write_without_witness(&mut writer)?;
         Vector::write(&mut writer, &self.witness.payload, |w, b| w.write_u8(*b))
@@ -180,11 +209,13 @@ impl TzeIn {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+#[cfg(feature = "zfuture")]
 pub struct TzeOut {
     pub value: Amount,
     pub precondition: tze::Precondition,
 }
 
+#[cfg(feature = "zfuture")]
 impl TzeOut {
     pub fn read<R: Read>(mut reader: &mut R) -> io::Result<Self> {
         let value = {
@@ -201,8 +232,8 @@ impl TzeOut {
         Ok(TzeOut {
             value,
             precondition: tze::Precondition {
-                extension_id: u32::try_from(extension_id).map_err(|e| to_io_error(e))?,
-                mode: u32::try_from(mode).map_err(|e| to_io_error(e))?,
+                extension_id: u32::try_from(extension_id).map_err(to_io_error)?,
+                mode: u32::try_from(mode).map_err(to_io_error)?,
                 payload,
             },
         })
@@ -213,11 +244,11 @@ impl TzeOut {
 
         CompactSize::write(
             &mut writer,
-            usize::try_from(self.precondition.extension_id).map_err(|e| to_io_error(e))?,
+            usize::try_from(self.precondition.extension_id).map_err(to_io_error)?,
         )?;
         CompactSize::write(
             &mut writer,
-            usize::try_from(self.precondition.mode).map_err(|e| to_io_error(e))?,
+            usize::try_from(self.precondition.mode).map_err(to_io_error)?,
         )?;
         Vector::write(&mut writer, &self.precondition.payload, |w, b| {
             w.write_u8(*b)
