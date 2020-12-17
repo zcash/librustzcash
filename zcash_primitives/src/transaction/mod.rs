@@ -84,8 +84,13 @@ impl TxVersion {
                     "Unknown transaction format",
                 )),
             }
-        } else {
+        } else if version >= 1 {
             Ok(TxVersion::Sprout(version))
+        } else {
+            Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "Unknown transaction format",
+            ))
         }
     }
 

@@ -5,9 +5,6 @@ use proptest::prelude::*;
 
 use crate::{constants::SPENDING_KEY_GENERATOR, redjubjub::PrivateKey};
 
-#[cfg(all(feature = "test-dependencies", feature = "zfuture"))]
-use crate::consensus::BranchId;
-
 use super::{
     components::Amount,
     sighash::{signature_hash, SignableInput},
