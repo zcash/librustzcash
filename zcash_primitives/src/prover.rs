@@ -59,7 +59,7 @@ pub trait TxProver {
     ) -> Result<Signature, ()>;
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-dependencies"))]
 pub mod mock {
     use ff::Field;
     use rand_core::OsRng;
@@ -78,9 +78,8 @@ pub mod mock {
 
     use super::TxProver;
 
-    pub(crate) struct MockTxProver;
+    pub struct MockTxProver;
 
-    #[cfg(test)]
     impl TxProver for MockTxProver {
         type SaplingProvingContext = ();
 
