@@ -1,7 +1,6 @@
 use ff::Field;
 use rand_core::OsRng;
 
-#[cfg(all(feature = "test-dependencies", feature = "zfuture"))]
 use proptest::prelude::*;
 
 use crate::{constants::SPENDING_KEY_GENERATOR, redjubjub::PrivateKey};
@@ -15,8 +14,7 @@ use super::{
     Transaction, TransactionData,
 };
 
-#[cfg(all(feature = "test-dependencies", feature = "zfuture"))]
-use super::testing::arb_tx;
+use super::testing::{arb_branch_id, arb_tx};
 
 #[test]
 fn tx_read_write() {
@@ -75,10 +73,9 @@ fn tx_write_rejects_unexpected_binding_sig() {
     }
 }
 
-#[cfg(all(feature = "zfuture", feature = "test-dependencies"))]
 proptest! {
     #[test]
-    fn test_tze_roundtrip(tx in arb_tx(BranchId::ZFuture)) {
+    fn tx_serialization_roundtrip(tx in arb_branch_id().prop_flat_map(|branch_id| arb_tx(branch_id))) {
         let mut txn_bytes = vec![];
         tx.write(&mut txn_bytes).unwrap();
 
@@ -87,7 +84,9 @@ proptest! {
         assert_eq!(tx.version, txo.version);
         assert_eq!(tx.vin, txo.vin);
         assert_eq!(tx.vout, txo.vout);
+        #[cfg(feature = "zfuture")]
         assert_eq!(tx.tze_inputs, txo.tze_inputs);
+        #[cfg(feature = "zfuture")]
         assert_eq!(tx.tze_outputs, txo.tze_outputs);
         assert_eq!(tx.lock_time, txo.lock_time);
         assert_eq!(tx.value_balance, txo.value_balance);

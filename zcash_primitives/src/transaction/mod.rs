@@ -479,7 +479,7 @@ impl Transaction {
     }
 }
 
-#[cfg(feature = "test-dependencies")]
+#[cfg(any(test, feature = "test-dependencies"))]
 pub mod testing {
     use proptest::collection::vec;
     use proptest::prelude::*;
@@ -567,6 +567,19 @@ pub mod testing {
         }
     }
 
+    pub fn arb_branch_id() -> impl Strategy<Value = BranchId> {
+        select(vec![
+            BranchId::Sprout,
+            BranchId::Overwinter,
+            BranchId::Sapling,
+            BranchId::Blossom,
+            BranchId::Heartwood,
+            BranchId::Canopy,
+            #[cfg(feature = "zfuture")]
+            BranchId::ZFuture
+        ])
+    }
+
     fn tx_versions(branch_id: BranchId) -> impl Strategy<Value = TxVersion> {
         match branch_id {
             BranchId::Sprout => (1..=2u32).prop_map(|i| TxVersion::Sprout(i)).boxed(),
@@ -622,7 +635,10 @@ pub mod testing {
                 vin, vout,
                 lock_time,
                 expiry_height: expiry_height.into(),
-                value_balance,
+                value_balance: match version {
+                    TxVersion::Sprout(_) | TxVersion::Overwinter => Amount::zero(),
+                    _ => value_balance,
+                },
                 shielded_spends: vec![], //FIXME
                 shielded_outputs: vec![], //FIXME
                 joinsplits: vec![], //FIXME
