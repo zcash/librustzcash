@@ -96,13 +96,14 @@ impl TxVersion {
             _ => 1 << 31,
         };
 
-        overwintered | match self {
-            TxVersion::Sprout(v) => *v,
-            TxVersion::Overwinter => OVERWINTER_TX_VERSION,
-            TxVersion::Sapling => SAPLING_TX_VERSION,
-            #[cfg(feature = "zfuture")]
-            TxVersion::ZFuture => ZFUTURE_TX_VERSION,
-        } 
+        overwintered
+            | match self {
+                TxVersion::Sprout(v) => *v,
+                TxVersion::Overwinter => OVERWINTER_TX_VERSION,
+                TxVersion::Sapling => SAPLING_TX_VERSION,
+                #[cfg(feature = "zfuture")]
+                TxVersion::ZFuture => ZFUTURE_TX_VERSION,
+            }
     }
 
     pub fn version_group_id(&self) -> u32 {
@@ -126,14 +127,18 @@ impl TxVersion {
     pub fn has_sprout(&self) -> bool {
         match self {
             TxVersion::Sprout(v) => *v >= 2u32,
-            _ => true,
+            TxVersion::Overwinter | TxVersion::Sapling => true,
+            #[cfg(feature = "zfuture")]
+            TxVersion::ZFuture => true,
         }
     }
 
     pub fn uses_groth_proofs(&self) -> bool {
         match self {
             TxVersion::Sprout(_) | TxVersion::Overwinter => false,
-            _ => true,
+            TxVersion::Sapling => true,
+            #[cfg(feature = "zfuture")]
+            TxVersion::ZFuture => true,
         }
     }
 }
@@ -576,7 +581,7 @@ pub mod testing {
             BranchId::Heartwood,
             BranchId::Canopy,
             #[cfg(feature = "zfuture")]
-            BranchId::ZFuture
+            BranchId::ZFuture,
         ])
     }
 
