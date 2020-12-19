@@ -619,7 +619,10 @@ pub mod testing {
                 tze_outputs: if branch_id == BranchId::ZFuture { tze_outputs } else { vec![] },
                 lock_time,
                 expiry_height: expiry_height.into(),
-                value_balance,
+                value_balance: match version {
+                    TxVersion::Sprout(_) | TxVersion::Overwinter => Amount::zero(),
+                    _ => value_balance,
+                },
                 shielded_spends: vec![], //FIXME
                 shielded_outputs: vec![], //FIXME
                 joinsplits: vec![], //FIXME
