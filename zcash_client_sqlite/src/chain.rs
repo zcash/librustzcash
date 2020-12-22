@@ -1,15 +1,79 @@
 //! Functions for enforcing chain validity and handling chain reorgs.
 use protobuf::Message;
 
-use rusqlite::params;
+use rusqlite::{params};
 
-use zcash_primitives::consensus::BlockHeight;
+use zcash_primitives::{
+    transaction::{components::Amount, TxId},
+    consensus::{self, BlockHeight},
+};
 
-use zcash_client_backend::{data_api::error::Error, proto::compact_formats::CompactBlock};
+use zcash_client_backend::{
+    data_api::error::Error, 
+    proto::compact_formats::CompactBlock,
+    address::RecipientAddress,
+    };
 
 use crate::{error::SqliteClientError, BlockDB};
 
 pub mod init;
+
+
+pub struct UnspentTransactionOutput {
+    pub address: RecipientAddress,
+    pub txid: TxId,
+    pub index: i32, 
+    pub script: Vec<u8>,
+    pub value: Amount,
+    pub height: BlockHeight,
+}
+
+pub fn get_confirmed_utxos_for_address<P: consensus::Parameters>(
+    params: &P,
+    cache: &BlockDB,
+    anchor_height: BlockHeight,
+    address: &str 
+) -> Result<Vec<UnspentTransactionOutput>,SqliteClientError> {
+    let mut stmt_blocks = cache.0.prepare(
+        "SELECT address, txid, idx, script, value_zat, height FROM utxos WHERE address = ? AND height <= ?",
+    )?;
+
+    let rows = stmt_blocks.query_map(
+        params![address, u32::from(anchor_height)],
+        |row| {
+            let addr: String = row.get(0)?;
+            let address = RecipientAddress::decode(params, &addr)
+            .   ok_or(format!(
+                "Could not interpret {} as a valid Zcash address.",
+                addr
+            )).unwrap();
+            let id: Vec<u8> = row.get(1)?; 
+
+            let mut txid = TxId([0u8; 32]);
+            txid.0.copy_from_slice(&id);
+            let index: i32 = row.get(2)?;
+            let script: Vec<u8> = row.get(3)?;
+            let value: i64 = row.get(4)?;
+            let height: u32 = row.get(5)?;
+
+            Ok(UnspentTransactionOutput{
+                address: address,
+                txid: txid,
+                index: index,
+                script: script,
+                value: Amount::from_i64(value).unwrap(),
+                height: BlockHeight::from(height)
+            })
+        },
+    )?;
+
+    let mut utxos = Vec::<UnspentTransactionOutput>::new();
+
+    for utxo in rows {
+        utxos.push(utxo.unwrap())
+    }
+    Ok(utxos)
+}
 
 struct CompactBlockRow {
     height: BlockHeight,
