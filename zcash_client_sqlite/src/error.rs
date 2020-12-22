@@ -3,7 +3,7 @@
 use std::error;
 use std::fmt;
 
-use zcash_client_backend::data_api;
+use zcash_client_backend::{data_api, encoding::TransparentCodecError};
 
 use crate::NoteId;
 
@@ -31,6 +31,9 @@ pub enum SqliteClientError {
 
     /// Base58 decoding error
     Base58(bs58::decode::Error),
+
+    /// Base58 decoding error
+    TransparentAddress(TransparentCodecError),
 
     /// Wrapper for rusqlite errors.
     DbError(rusqlite::Error),
@@ -68,6 +71,7 @@ impl fmt::Display for SqliteClientError {
             SqliteClientError::InvalidNoteId => write!(f, "The note ID associated with an inserted witness must correspond to a received note."),
             SqliteClientError::Bech32(e) => write!(f, "{}", e),
             SqliteClientError::Base58(e) => write!(f, "{}", e),
+            SqliteClientError::TransparentAddress(e) => write!(f, "{}", e),
             SqliteClientError::TableNotEmpty => write!(f, "Table is not empty"),
             SqliteClientError::DbError(e) => write!(f, "{}", e),
             SqliteClientError::Io(e) => write!(f, "{}", e),

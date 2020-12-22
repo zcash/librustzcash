@@ -1,6 +1,14 @@
 //! Helper functions for managing light client key material.
+#![cfg(feature = "transparent-inputs")]
 
-use zcash_primitives::zip32::{ChildIndex, ExtendedSpendingKey};
+use zcash_primitives::{
+    legacy::TransparentAddress,
+    zip32::{ChildIndex, ExtendedSpendingKey},
+};
+
+use secp256k1::{key::PublicKey, Secp256k1};
+
+use sha2::{Digest, Sha256};
 
 /// Derives the ZIP 32 [`ExtendedSpendingKey`] for a given coin type and account from the
 /// given seed.
@@ -31,6 +39,16 @@ pub fn spending_key(seed: &[u8], coin_type: u32, account: u32) -> ExtendedSpendi
             ChildIndex::Hardened(account),
         ],
     )
+}
+
+pub fn derive_transparent_address_from_secret_key(
+    secret_key: secp256k1::key::SecretKey,
+) -> TransparentAddress {
+    let secp = Secp256k1::new();
+    let pk = PublicKey::from_secret_key(&secp, &secret_key);
+    let mut hash160 = ripemd160::Ripemd160::new();
+    hash160.update(Sha256::digest(&pk.serialize()[..].to_vec()));
+    TransparentAddress::PublicKey(*hash160.finalize().as_ref())
 }
 
 #[cfg(test)]

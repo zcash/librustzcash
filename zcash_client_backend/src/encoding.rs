@@ -8,8 +8,10 @@
 use bech32::{self, Error, FromBase32, ToBase32, Variant};
 use bs58::{self, decode::Error as Bs58Error};
 use std::convert::TryInto;
+use std::fmt;
 use std::io::{self, Write};
 use zcash_primitives::{
+    consensus,
     legacy::TransparentAddress,
     sapling::PaymentAddress,
     zip32::{ExtendedFullViewingKey, ExtendedSpendingKey},
@@ -33,6 +35,61 @@ where
             Vec::<u8>::from_base32(&data).map(|data| read(data))
         }
         _ => Ok(None),
+    }
+}
+
+pub trait AddressCodec<P>
+where
+    Self: std::marker::Sized,
+{
+    type Error;
+
+    fn encode(&self, params: &P) -> String;
+    fn decode(params: &P, address: &str) -> Result<Self, Self::Error>;
+}
+
+#[derive(Debug)]
+pub enum TransparentCodecError {
+    UnsupportedAddressType(String),
+    Base58(Bs58Error),
+}
+
+impl fmt::Display for TransparentCodecError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match &self {
+            TransparentCodecError::UnsupportedAddressType(s) => write!(
+                f,
+                "Could not recognize {} as a supported p2sh or p2pkh address.",
+                s
+            ),
+            TransparentCodecError::Base58(e) => write!(f, "{}", e),
+        }
+    }
+}
+
+impl std::error::Error for TransparentCodecError {}
+
+impl<P: consensus::Parameters> AddressCodec<P> for TransparentAddress {
+    type Error = TransparentCodecError;
+
+    fn encode(&self, params: &P) -> String {
+        encode_transparent_address(
+            &params.b58_pubkey_address_prefix(),
+            &params.b58_script_address_prefix(),
+            self,
+        )
+    }
+
+    fn decode(params: &P, address: &str) -> Result<TransparentAddress, TransparentCodecError> {
+        decode_transparent_address(
+            &params.b58_pubkey_address_prefix(),
+            &params.b58_script_address_prefix(),
+            address,
+        )
+        .map_err(TransparentCodecError::Base58)
+        .and_then(|opt| {
+            opt.ok_or_else(|| TransparentCodecError::UnsupportedAddressType(address.to_string()))
+        })
     }
 }
 

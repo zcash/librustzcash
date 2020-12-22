@@ -20,6 +20,12 @@ use crate::{
     wallet::{AccountId, OvkPolicy},
 };
 
+#[cfg(feature = "transparent-inputs")]
+use zcash_primitives::{legacy::Script, transaction::components::TxOut};
+
+#[cfg(feature = "transparent-inputs")]
+use crate::keys::derive_transparent_address_from_secret_key;
+
 pub const ANCHOR_OFFSET: u32 = 10;
 
 /// Scans a [`Transaction`] for any information that can be decrypted by the accounts in
@@ -184,7 +190,8 @@ where
         .and_then(|x| x.ok_or_else(|| Error::ScanRequired.into()))?;
 
     let target_value = value + DEFAULT_FEE;
-    let spendable_notes = wallet_db.select_spendable_notes(account, target_value, anchor_height)?;
+    let spendable_notes =
+        wallet_db.select_spendable_sapling_notes(account, target_value, anchor_height)?;
 
     // Confirm we were able to select sufficient value
     let selected_value = spendable_notes.iter().map(|n| n.note_value).sum();
@@ -254,5 +261,96 @@ where
         recipient_address: to,
         value,
         memo,
+        utxos_spent: vec![],
+    })
+}
+
+#[cfg(feature = "transparent-inputs")]
+pub fn shield_funds<E, N, P, D, R>(
+    wallet_db: &mut D,
+    params: &P,
+    prover: impl TxProver,
+    account: AccountId,
+    sk: &secp256k1::SecretKey,
+    extsk: &ExtendedSpendingKey,
+    memo: &MemoBytes,
+) -> Result<D::TxRef, E>
+where
+    E: From<Error<N>>,
+    P: consensus::Parameters,
+    R: Copy + Debug,
+    D: WalletWrite<Error = E, TxRef = R>,
+{
+    let (latest_scanned_height, latest_anchor) = wallet_db
+        .get_target_and_anchor_heights()
+        .and_then(|x| x.ok_or_else(|| Error::ScanRequired.into()))?;
+
+    // derive the corresponding t-address
+    let taddr = derive_transparent_address_from_secret_key(*sk);
+
+    // derive own shielded address from the provided extended spending key
+    let z_address = extsk.default_address().unwrap().1;
+
+    let exfvk = ExtendedFullViewingKey::from(extsk);
+
+    let ovk = exfvk.fvk.ovk;
+
+    // get UTXOs from DB
+    let utxos = wallet_db.get_spendable_transparent_utxos(&taddr, latest_anchor)?;
+    let total_amount = utxos.iter().map(|utxo| utxo.value).sum::<Amount>();
+
+    let fee = DEFAULT_FEE;
+    if fee >= total_amount {
+        return Err(E::from(Error::InsufficientBalance(total_amount, fee)));
+    }
+
+    let amount_to_shield = total_amount - fee;
+
+    let mut builder = Builder::new(params.clone(), latest_scanned_height);
+
+    for utxo in &utxos {
+        let coin = TxOut {
+            value: utxo.value,
+            script_pubkey: Script {
+                0: utxo.script.clone(),
+            },
+        };
+
+        builder
+            .add_transparent_input(*sk, utxo.outpoint.clone(), coin)
+            .map_err(Error::Builder)?;
+    }
+
+    // there are no sapling notes so we set the change manually
+    builder.send_change_to(ovk, z_address.clone());
+
+    // add the sapling output to shield the funds
+    builder
+        .add_sapling_output(
+            Some(ovk),
+            z_address.clone(),
+            amount_to_shield,
+            Some(memo.clone()),
+        )
+        .map_err(Error::Builder)?;
+
+    let consensus_branch_id = BranchId::for_height(params, latest_anchor);
+
+    let (tx, tx_metadata) = builder
+        .build(consensus_branch_id, &prover)
+        .map_err(Error::Builder)?;
+    let output_index = tx_metadata.output_index(0).expect(
+        "No sapling note was created in autoshielding transaction. This is a programming error.",
+    );
+
+    wallet_db.store_sent_tx(&SentTransaction {
+        tx: &tx,
+        created: time::OffsetDateTime::now_utc(),
+        output_index,
+        account,
+        recipient_address: &RecipientAddress::Shielded(z_address),
+        value: amount_to_shield,
+        memo: Some(memo.clone()),
+        utxos_spent: utxos.iter().map(|utxo| utxo.outpoint.clone()).collect(),
     })
 }

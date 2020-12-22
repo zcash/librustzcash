@@ -7,10 +7,14 @@ use std::fmt::Debug;
 use zcash_primitives::{
     block::BlockHash,
     consensus::BlockHeight,
+    legacy::TransparentAddress,
     memo::{Memo, MemoBytes},
     merkle_tree::{CommitmentTree, IncrementalWitness},
     sapling::{Node, Nullifier, PaymentAddress},
-    transaction::{components::Amount, Transaction, TxId},
+    transaction::{
+        components::{Amount, OutPoint},
+        Transaction, TxId,
+    },
     zip32::ExtendedFullViewingKey,
 };
 
@@ -19,7 +23,7 @@ use crate::{
     data_api::wallet::ANCHOR_OFFSET,
     decrypt::DecryptedOutput,
     proto::compact_formats::CompactBlock,
-    wallet::{AccountId, SpendableNote, WalletTx},
+    wallet::{AccountId, SpendableNote, WalletTransparentOutput, WalletTx},
 };
 
 pub mod chain;
@@ -160,7 +164,7 @@ pub trait WalletRead {
     fn get_nullifiers(&self) -> Result<Vec<(AccountId, Nullifier)>, Self::Error>;
 
     /// Return all spendable notes.
-    fn get_spendable_notes(
+    fn get_spendable_sapling_notes(
         &self,
         account: AccountId,
         anchor_height: BlockHeight,
@@ -168,12 +172,18 @@ pub trait WalletRead {
 
     /// Returns a list of spendable notes sufficient to cover the specified
     /// target value, if possible.
-    fn select_spendable_notes(
+    fn select_spendable_sapling_notes(
         &self,
         account: AccountId,
         target_value: Amount,
         anchor_height: BlockHeight,
     ) -> Result<Vec<SpendableNote>, Self::Error>;
+
+    fn get_spendable_transparent_utxos(
+        &self,
+        address: &TransparentAddress,
+        anchor_height: BlockHeight,
+    ) -> Result<Vec<WalletTransparentOutput>, Self::Error>;
 }
 
 /// The subset of information that is relevant to this wallet that has been
@@ -215,6 +225,7 @@ pub struct SentTransaction<'a> {
     pub recipient_address: &'a RecipientAddress,
     pub value: Amount,
     pub memo: Option<MemoBytes>,
+    pub utxos_spent: Vec<OutPoint>,
 }
 
 /// This trait encapsulates the write capabilities required to update stored
@@ -274,6 +285,7 @@ pub mod testing {
     use zcash_primitives::{
         block::BlockHash,
         consensus::BlockHeight,
+        legacy::TransparentAddress,
         memo::Memo,
         merkle_tree::{CommitmentTree, IncrementalWitness},
         sapling::{Node, Nullifier, PaymentAddress},
@@ -283,7 +295,7 @@ pub mod testing {
 
     use crate::{
         proto::compact_formats::CompactBlock,
-        wallet::{AccountId, SpendableNote},
+        wallet::{AccountId, SpendableNote, WalletTransparentOutput},
     };
 
     use super::{
@@ -380,7 +392,7 @@ pub mod testing {
             Ok(Vec::new())
         }
 
-        fn get_spendable_notes(
+        fn get_spendable_sapling_notes(
             &self,
             _account: AccountId,
             _anchor_height: BlockHeight,
@@ -388,12 +400,20 @@ pub mod testing {
             Ok(Vec::new())
         }
 
-        fn select_spendable_notes(
+        fn select_spendable_sapling_notes(
             &self,
             _account: AccountId,
             _target_value: Amount,
             _anchor_height: BlockHeight,
         ) -> Result<Vec<SpendableNote>, Self::Error> {
+            Ok(Vec::new())
+        }
+
+        fn get_spendable_transparent_utxos(
+            &self,
+            _address: &TransparentAddress,
+            _anchor_height: BlockHeight,
+        ) -> Result<Vec<WalletTransparentOutput>, Self::Error> {
             Ok(Vec::new())
         }
     }

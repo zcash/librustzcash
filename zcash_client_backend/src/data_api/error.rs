@@ -25,6 +25,8 @@ pub enum ChainInvalid {
 #[derive(Debug)]
 pub enum Error<NoteId> {
     /// Unable to create a new spend because the wallet balance is not sufficient.
+    /// The first argument is the amount available, the second is the amount needed
+    /// to construct a valid transaction.
     InsufficientBalance(Amount, Amount),
 
     /// Chain validation detected an error in the block at the specified block height.

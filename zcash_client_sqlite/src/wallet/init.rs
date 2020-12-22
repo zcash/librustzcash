@@ -106,6 +106,21 @@ pub fn init_wallet_db<P>(wdb: &WalletDb<P>) -> Result<(), rusqlite::Error> {
         )",
         NO_PARAMS,
     )?;
+    wdb.conn.execute(
+        "CREATE TABLE IF NOT EXISTS utxos (
+            id_utxo INTEGER PRIMARY KEY,
+            address TEXT NOT NULL, 
+            prevout_txid BLOB NOT NULL, 
+            prevout_idx INTEGER NOT NULL, 
+            script BLOB NOT NULL, 
+            value_zat INTEGER NOT NULL, 
+            height INTEGER NOT NULL,
+            spent_in_tx INTEGER,
+            FOREIGN KEY (spent_in_tx) REFERENCES transactions(id_tx),
+            CONSTRAINT tx_outpoint UNIQUE (prevout_txid, prevout_idx)
+        )",
+        NO_PARAMS,
+    )?;
     Ok(())
 }
 
