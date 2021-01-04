@@ -1,5 +1,4 @@
 use std::borrow::Borrow;
-use std::convert::TryInto;
 use std::io::Write;
 
 use blake2b_simd::{Hash as Blake2bHash, Params as Blake2bParams};
@@ -11,18 +10,17 @@ use crate::{
     consensus::{BlockHeight, BranchId},
     legacy::Script,
     redjubjub::Signature,
-    serialize::{CompactSize, Vector},
 };
 
 use super::{
     blake2b_256::HashWriter,
     components::{Amount, JSDescription, OutputDescription, SpendDescription, TxIn, TxOut},
-    Transaction, TransactionData, TransactionDigest, TransparentDigests, TxDigests, TxId,
+    TransactionDigest, TransparentDigests, TxDigests, TxId,
     TxVersion, WitnessDigest,
 };
 
 #[cfg(feature = "zfuture")]
-use crate::extensions::transparent::{self as tze, Precondition};
+use crate::extensions::transparent::{self as tze};
 
 #[cfg(feature = "zfuture")]
 use super::{
@@ -63,28 +61,6 @@ macro_rules! update_hash {
     };
 }
 
-pub fn has_overwinter_components(version: &TxVersion) -> bool {
-    match version {
-        TxVersion::Sprout(_) => false,
-        _ => true,
-    }
-}
-
-pub fn has_sapling_components(version: &TxVersion) -> bool {
-    match version {
-        TxVersion::Sprout(_) | TxVersion::Overwinter => false,
-        _ => true,
-    }
-}
-
-#[cfg(feature = "zfuture")]
-pub fn has_tze_components(version: &TxVersion) -> bool {
-    match version {
-        TxVersion::ZFuture => true,
-        _ => false,
-    }
-}
-
 fn hash_header_txid_data(
     version: TxVersion,
     consensus_branch_id: BranchId,
@@ -109,67 +85,52 @@ fn hash_header_txid_data(
 /// Hash of the concatenated serialized prevout values
 /// for each TxIn record passed in vin.
 pub(crate) fn prevout_hash(vin: &[TxIn]) -> Blake2bHash {
-    let mut data = Vec::with_capacity(vin.len() * 36);
+    let mut h = HashWriter::new(ZCASH_PREVOUTS_HASH_PERSONALIZATION);
     for t_in in vin {
-        t_in.prevout.write(&mut data).unwrap();
+        t_in.prevout.write(&mut h).unwrap();
     }
-    Blake2bParams::new()
-        .hash_length(32)
-        .personal(ZCASH_PREVOUTS_HASH_PERSONALIZATION)
-        .hash(&data)
+    h.finalize()
 }
 
 /// Hash of the little-endian u32 interpretation of the
 /// `sequence` values for each TxIn record passed in vin.
 pub(crate) fn sequence_hash(vin: &[TxIn]) -> Blake2bHash {
-    let mut data = Vec::with_capacity(vin.len() * 4);
+    let mut h = HashWriter::new(ZCASH_SEQUENCE_HASH_PERSONALIZATION);
     for t_in in vin {
-        (&mut data)
+        (&mut h)
             .write_u32::<LittleEndian>(t_in.sequence)
             .unwrap();
     }
-    Blake2bParams::new()
-        .hash_length(32)
-        .personal(ZCASH_SEQUENCE_HASH_PERSONALIZATION)
-        .hash(&data)
+    h.finalize()
 }
 
 /// Hash of the concatenated serialized values
 /// of the txouts provided, using their default
 /// serialized form.
 pub(crate) fn outputs_hash<T: Borrow<TxOut>>(vout: &[T]) -> Blake2bHash {
-    let mut data = Vec::with_capacity(vout.len() * (4 + 1));
+    let mut h = HashWriter::new(ZCASH_OUTPUTS_HASH_PERSONALIZATION);
     for t_out in vout {
-        t_out.borrow().write(&mut data).unwrap();
+        t_out.borrow().write(&mut h).unwrap();
     }
-    Blake2bParams::new()
-        .hash_length(32)
-        .personal(ZCASH_OUTPUTS_HASH_PERSONALIZATION)
-        .hash(&data)
+    h.finalize()
 }
 
 #[cfg(feature = "zfuture")]
 pub(crate) fn tze_inputs_hash(tze_inputs: &[TzeIn]) -> Blake2bHash {
-    let mut data = vec![];
+    let mut h = HashWriter::new(ZCASH_TZE_INPUTS_HASH_PERSONALIZATION);
     for tzein in tze_inputs {
-        tzein.write_without_witness(&mut data).unwrap();
+        tzein.write_without_witness(&mut h).unwrap();
     }
-    Blake2bParams::new()
-        .hash_length(32)
-        .personal(ZCASH_TZE_INPUTS_HASH_PERSONALIZATION)
-        .hash(&data)
+    h.finalize()
 }
 
 #[cfg(feature = "zfuture")]
 pub(crate) fn tze_outputs_hash(tze_outputs: &[TzeOut]) -> Blake2bHash {
-    let mut data = vec![];
+    let mut h = HashWriter::new(ZCASH_TZE_OUTPUTS_HASH_PERSONALIZATION);
     for tzeout in tze_outputs {
-        tzeout.write(&mut data).unwrap();
+        tzeout.write(&mut h).unwrap();
     }
-    Blake2bParams::new()
-        .hash_length(32)
-        .personal(ZCASH_TZE_OUTPUTS_HASH_PERSONALIZATION)
-        .hash(&data)
+    h.finalize()
 }
 
 // Sequentially append the full serialized value of each JSDescription
@@ -189,18 +150,15 @@ pub(crate) fn joinsplits_hash(
 
 // Write each spend's (cv, anchor, nullifier, rk, zkproof) to the hash.
 pub(crate) fn shielded_spends_hash(shielded_spends: &[SpendDescription]) -> Blake2bHash {
-    let mut data = Vec::with_capacity(shielded_spends.len() * 384);
+    let mut h = HashWriter::new(ZCASH_SHIELDED_SPENDS_HASH_PERSONALIZATION);
     for s_spend in shielded_spends {
-        data.extend_from_slice(&s_spend.cv.to_bytes());
-        data.extend_from_slice(s_spend.anchor.to_repr().as_ref());
-        data.extend_from_slice(&s_spend.nullifier.0);
-        s_spend.rk.write(&mut data).unwrap();
-        data.extend_from_slice(&s_spend.zkproof);
+        h.write(&s_spend.cv.to_bytes()).unwrap();
+        h.write(&s_spend.anchor.to_repr()).unwrap();
+        h.write(&s_spend.nullifier.as_ref()).unwrap();
+        s_spend.rk.write(&mut h).unwrap();
+        h.write(&s_spend.zkproof).unwrap();
     }
-    Blake2bParams::new()
-        .hash_length(32)
-        .personal(ZCASH_SHIELDED_SPENDS_HASH_PERSONALIZATION)
-        .hash(&data)
+    h.finalize()
 }
 
 // Sequentially append the full serialized value of each OutputDescription
@@ -260,7 +218,7 @@ fn hash_sapling_txid_data(
         .personal(ZCASH_SAPLING_HASH_PERSONALIZATION)
         .to_state();
 
-    if has_sapling_components(&txversion) {
+    if txversion.has_sapling() {
         update_hash!(
             h,
             !shielded_spends.is_empty(),
@@ -404,7 +362,7 @@ pub fn to_hash<A>(
     );
 
     #[cfg(feature = "zfuture")]
-    if has_tze_components(&txversion) {
+    if txversion.has_tze() {
         update_hash!(
             h,
             true,

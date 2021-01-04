@@ -147,12 +147,27 @@ impl TxVersion {
         }
     }
 
-    pub fn uses_groth_proofs(&self) -> bool {
+    pub fn has_overwinter(&self) -> bool {
+        match self {
+            TxVersion::Sprout(_) => false,
+            _ => true,
+        }
+    }
+
+    pub fn has_sapling(&self) -> bool {
         match self {
             TxVersion::Sprout(_) | TxVersion::Overwinter => false,
             TxVersion::Sapling => true,
             #[cfg(feature = "zfuture")]
             TxVersion::ZFuture => true,
+        }
+    }
+
+    #[cfg(feature = "zfuture")]
+    pub fn has_tze(&self) -> bool {
+        match self {
+            TxVersion::ZFuture => true,
+            _ => false,
         }
     }
 }
@@ -398,25 +413,6 @@ impl TransactionData {
             _purpose: PhantomData,
         }
     }
-
-    pub fn digest_witness<A, D>(&self, digester: D) -> Result<A, DigestError>
-    where
-        D: WitnessDigest<A>,
-    {
-        let t_hash = digester.digest_transparent(self.vin.iter().map(|txin| &txin.script_sig));
-        #[cfg(feature = "zfuture")]
-        let tze_hash = digester.digest_tze(self.tze_inputs.iter().map(|tzein| &tzein.witness));
-        let sprout_digest =
-            digester.digest_sprout(&self.joinsplit_sig.ok_or(DigestError::NotSigned)?);
-        let sapling_digest = digester.digest_sapling(
-            self.shielded_spends
-                .iter()
-                .flat_map(|spend| &spend.spend_auth_sig),
-            &self.binding_sig.ok_or(DigestError::NotSigned)?,
-        );
-
-        Ok(sapling_digest)
-    }
 }
 
 impl Transaction {
@@ -482,7 +478,7 @@ impl Transaction {
 
         let (joinsplits, joinsplit_pubkey, joinsplit_sig) = if version.has_sprout() {
             let jss = Vector::read(&mut reader, |r| {
-                JSDescription::read(r, version.uses_groth_proofs())
+                JSDescription::read(r, version.has_sapling())
             })?;
             let (pubkey, sig) = if !jss.is_empty() {
                 let mut joinsplit_pubkey = [0; 32];
@@ -619,6 +615,25 @@ impl Transaction {
         }
 
         Ok(())
+    }
+
+    pub fn digest_witness<A, D>(&self, digester: D) -> Result<A, DigestError>
+    where
+        D: WitnessDigest<A>,
+    {
+        let t_hash = digester.digest_transparent(self.data.vin.iter().map(|txin| &txin.script_sig));
+        #[cfg(feature = "zfuture")]
+        let tze_hash = digester.digest_tze(self.data.tze_inputs.iter().map(|tzein| &tzein.witness));
+        let sprout_digest =
+            digester.digest_sprout(&self.data.joinsplit_sig.ok_or(DigestError::NotSigned)?);
+        let sapling_digest = digester.digest_sapling(
+            self.data.shielded_spends
+                .iter()
+                .flat_map(|spend| &spend.spend_auth_sig),
+            &self.binding_sig.ok_or(DigestError::NotSigned)?,
+        );
+
+        Ok(sapling_digest)
     }
 }
 

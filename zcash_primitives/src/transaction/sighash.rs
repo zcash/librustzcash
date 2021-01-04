@@ -1,15 +1,10 @@
-//#[cfg(feature = "zfuture")]
-//use std::borrow::Borrow;
 use std::convert::TryInto;
-use std::io::Write;
 
 use blake2b_simd::{Hash as Blake2bHash, Params as Blake2bParams};
 use byteorder::{LittleEndian, WriteBytesExt};
-use ff::PrimeField;
-use group::GroupEncoding;
 
 use crate::{
-    consensus::{self, BlockHeight, BranchId},
+    consensus::{BlockHeight, BranchId},
     legacy::Script,
 };
 
@@ -20,10 +15,9 @@ use crate::{
 };
 
 use super::{
-    blake2b_256::HashWriter,
     components::{Amount, JSDescription, OutputDescription, SpendDescription, TxIn, TxOut},
     txid::{
-        has_overwinter_components, has_sapling_components, joinsplits_hash, outputs_hash,
+        joinsplits_hash, outputs_hash,
         prevout_hash, sequence_hash, shielded_outputs_hash, shielded_spends_hash,
     },
     Transaction, TransactionData, TransactionDigest, TransparentDigests, TxDigests, TxId,
@@ -33,7 +27,7 @@ use super::{
 #[cfg(feature = "zfuture")]
 use super::{
     components::{TzeIn, TzeOut},
-    txid::{has_tze_components, tze_inputs_hash, tze_outputs_hash},
+    txid::{tze_inputs_hash, tze_outputs_hash},
     TzeDigests,
 };
 
@@ -88,7 +82,7 @@ fn txin_sig_data(
     value: Amount,
 ) -> Vec<u8> {
     #[cfg(feature = "zfuture")]
-    let mut data = if has_tze_components(&txversion) {
+    let mut data = if txversion.has_tze() {
         // domain separation here is to avoid collision attacks
         // between transparent and TZE inputs.
         ZCASH_TRANSPARENT_SIGNED_INPUT_TAG.to_vec()
@@ -194,9 +188,9 @@ pub fn signature_hash_data<'a>(
     tx: &TransactionData,
     consensus_branch_id: BranchId,
     hash_type: u32,
-    signable_input: SignableInput<'a>,
+    signable_input: SignableInput<'a>
 ) -> Blake2bHash {
-    if has_overwinter_components(&tx.version) {
+    if tx.version.has_overwinter() {
         let mut personal = [0; 16];
         (&mut personal[..12]).copy_from_slice(ZCASH_SIGHASH_PERSONALIZATION_PREFIX);
         (&mut personal[12..])
@@ -231,7 +225,7 @@ pub fn signature_hash_data<'a>(
         } else if (hash_type & SIGHASH_MASK) == SIGHASH_SINGLE {
             match signable_input {
                 SignableInput::Transparent { index, .. } if index < tx.vout.len() => {
-                    h.update(outputs_hash(&tx.vout[index..index + 1]).as_ref())
+                    h.update(outputs_hash(&tx.vout[index..=index]).as_ref())
                 }
                 _ => h.update(&[0; 32]),
             };
@@ -240,7 +234,7 @@ pub fn signature_hash_data<'a>(
         };
 
         #[cfg(feature = "zfuture")]
-        if has_tze_components(&tx.version) {
+        if tx.version.has_tze() {
             update_hash!(
                 h,
                 !tx.tze_inputs.is_empty(),
@@ -259,7 +253,7 @@ pub fn signature_hash_data<'a>(
             joinsplits_hash(&tx.joinsplits, &tx.joinsplit_pubkey.unwrap())
         );
 
-        if has_sapling_components(&tx.version) {
+        if tx.version.has_sapling() {
             update_hash!(
                 h,
                 !tx.shielded_spends.is_empty(),
@@ -274,7 +268,7 @@ pub fn signature_hash_data<'a>(
 
         update_u32!(h, tx.lock_time, tmp);
         update_u32!(h, tx.expiry_height.into(), tmp);
-        if has_sapling_components(&tx.version) {
+        if tx.version.has_sapling() {
             h.update(&tx.value_balance.to_i64_le_bytes());
         }
         update_u32!(h, hash_type, tmp);

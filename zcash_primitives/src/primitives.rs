@@ -224,6 +224,12 @@ impl Nullifier {
     }
 }
 
+impl AsRef<[u8]> for Nullifier {
+    fn as_ref(&self) -> &[u8] {
+        &self.0
+    }
+}
+
 impl ConstantTimeEq for Nullifier {
     fn ct_eq(&self, other: &Self) -> Choice {
         self.0.ct_eq(&other.0)
