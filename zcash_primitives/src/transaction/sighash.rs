@@ -17,11 +17,10 @@ use crate::{
 use super::{
     components::{Amount, JSDescription, OutputDescription, SpendDescription, TxIn, TxOut},
     txid::{
-        joinsplits_hash, outputs_hash,
-        prevout_hash, sequence_hash, shielded_outputs_hash, shielded_spends_hash,
+        joinsplits_hash, outputs_hash, prevout_hash, sequence_hash, shielded_outputs_hash,
+        shielded_spends_hash, to_hash, ZCASH_TXID_PERSONALIZATION_PREFIX,
     },
-    Transaction, TransactionData, TransactionDigest, TransparentDigests, TxDigests, TxId,
-    TxVersion,
+    TransactionData, TransactionDigest, TransparentDigests, TxDigests, TxId, TxVersion,
 };
 
 #[cfg(feature = "zfuture")]
@@ -36,10 +35,10 @@ const ZCASH_TRANSPARENT_INPUT_HASH_PERSONALIZATION: &[u8; 16] = b"Zcash___TxInHa
 
 const ZCASH_SIGHASH_PERSONALIZATION_PREFIX: &[u8; 12] = b"ZcashSigHash";
 
-#[cfg(feature = "zfuture")]
-const ZCASH_TZE_INPUTS_HASH_PERSONALIZATION: &[u8; 16] = b"Zcash_TzeInsHash";
-#[cfg(feature = "zfuture")]
-const ZCASH_TZE_OUTPUTS_HASH_PERSONALIZATION: &[u8; 16] = b"ZcashTzeOutsHash";
+// #[cfg(feature = "zfuture")]
+// const ZCASH_TZE_INPUTS_HASH_PERSONALIZATION: &[u8; 16] = b"Zcash_TzeInsHash";
+// #[cfg(feature = "zfuture")]
+// const ZCASH_TZE_OUTPUTS_HASH_PERSONALIZATION: &[u8; 16] = b"ZcashTzeOutsHash";
 
 #[cfg(feature = "zfuture")]
 const ZCASH_TZE_SIGNED_INPUT_TAG: &[u8; 1] = &[0x00];
@@ -184,11 +183,11 @@ impl<'a> SignableInput<'a> {
     }
 }
 
-pub fn signature_hash_data<'a>(
+pub fn legacy_sig_hash<'a>(
     tx: &TransactionData,
     consensus_branch_id: BranchId,
     hash_type: u32,
-    signable_input: SignableInput<'a>
+    signable_input: SignableInput<'a>,
 ) -> Blake2bHash {
     if tx.version.has_overwinter() {
         let mut personal = [0; 16];
@@ -212,7 +211,7 @@ pub fn signature_hash_data<'a>(
         );
         update_hash!(
             h,
-            hash_type & SIGHASH_ANYONECANPAY == 0
+            (hash_type & SIGHASH_ANYONECANPAY) == 0
                 && (hash_type & SIGHASH_MASK) != SIGHASH_SINGLE
                 && (hash_type & SIGHASH_MASK) != SIGHASH_NONE,
             sequence_hash(&tx.vin)
@@ -299,24 +298,46 @@ impl AsRef<[u8]> for SignatureHash {
     }
 }
 
-pub fn signature_hash<'a>(
-    tx: &Transaction,
+pub fn signature_hash<'a, F>(
+    tx: &TransactionData,
     consensus_branch_id: BranchId,
     hash_type: u32,
     signable_input: SignableInput<'a>,
-) -> SignatureHash {
-    SignatureHash(signature_hash_data(
-        tx,
-        consensus_branch_id,
-        hash_type,
-        signable_input,
-    ))
+    txid_digest: &mut F,
+) -> SignatureHash
+where
+    F: FnMut(&TransactionData) -> TxDigests<Blake2bHash, TxId>,
+{
+    // the accepted signature hashes are dependent upon 
+    SignatureHash(match tx.version {
+        TxVersion::Sprout(_)
+        | TxVersion::Overwinter
+        | TxVersion::Sapling => legacy_sig_hash(tx, consensus_branch_id, hash_type, signable_input),
+        #[cfg(feature = "zfuture")]
+        TxVersion::ZFuture => {
+            let txid_parts = txid_digest(tx);
+            let sig_parts = tx.digest(
+                SignatureHashDigester {
+                    txid_parts,
+                    txversion: tx.version,
+                    hash_type,
+                    signable_input,
+                }
+            );
+
+            to_hash(
+                &sig_parts,
+                ZCASH_TXID_PERSONALIZATION_PREFIX,
+                tx.version,
+                consensus_branch_id,
+            )
+        }
+    })
 }
 
 pub struct SignatureHashDigester<'a> {
     txid_parts: TxDigests<Blake2bHash, TxId>,
     txversion: TxVersion,
-    consensus_branch_id: BranchId,
     hash_type: u32,
     signable_input: SignableInput<'a>,
 }
@@ -327,7 +348,6 @@ impl<'a> TransactionDigest<Blake2bHash> for SignatureHashDigester<'a> {
     fn digest_header(
         &self,
         _version: TxVersion,
-        _consensus_branch_id: BranchId,
         _lock_time: u32,
         _expiry_height: BlockHeight,
     ) -> Blake2bHash {
@@ -339,29 +359,29 @@ impl<'a> TransactionDigest<Blake2bHash> for SignatureHashDigester<'a> {
         let flag_single = self.hash_type & SIGHASH_MASK == SIGHASH_SINGLE;
         let flag_none = self.hash_type & SIGHASH_MASK == SIGHASH_NONE;
 
-        let prevout_digest = if !flag_anyonecanpay {
-            self.txid_parts.transparent_digests.prevout_digest
-        } else {
+        let prevout_digest = if flag_anyonecanpay {
             prevout_hash(&[])
-        };
-
-        let sequence_digest = if !flag_anyonecanpay && !flag_single && !flag_none {
-            self.txid_parts.transparent_digests.sequence_digest
         } else {
-            sequence_hash(&[])
+            self.txid_parts.transparent_digests.prevout_digest
         };
 
-        let outputs_digest = if !flag_single && !flag_none {
-            self.txid_parts.transparent_digests.outputs_digest
-        } else if flag_single {
+        let sequence_digest = if flag_anyonecanpay || flag_single || flag_none {
+            sequence_hash(&[])
+        } else {
+            self.txid_parts.transparent_digests.sequence_digest
+        };
+
+        let outputs_digest = if flag_single {
             match self.signable_input {
                 SignableInput::Transparent { index, .. } if index < vout.len() => {
                     outputs_hash(&[&vout[index]])
                 }
                 _ => outputs_hash::<TxOut>(&[]),
             }
-        } else {
+        } else if flag_none {
             outputs_hash::<TxOut>(&[])
+        } else {
+            self.txid_parts.transparent_digests.outputs_digest
         };
 
         let per_input_digest = match self.signable_input {

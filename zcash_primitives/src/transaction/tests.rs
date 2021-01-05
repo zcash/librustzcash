@@ -3,11 +3,15 @@ use rand_core::OsRng;
 
 use proptest::prelude::*;
 
-use crate::{constants::SPENDING_KEY_GENERATOR, redjubjub::PrivateKey};
+use crate::{
+    consensus::BranchId,
+    constants::SPENDING_KEY_GENERATOR, 
+    redjubjub::PrivateKey
+};
 
 use super::{
     components::Amount,
-    sighash::{SignatureHash, signature_hash, SignableInput},
+    sighash::{legacy_sig_hash, SignableInput},
     Transaction, TransactionData,
 };
 
@@ -30,33 +34,33 @@ fn tx_read_write() {
 #[test]
 fn tx_write_rejects_unexpected_joinsplit_pubkey() {
     // Succeeds without a JoinSplit pubkey
-    assert!(TransactionData::new().freeze().is_ok());
+    assert!(TransactionData::new().freeze(BranchId::Canopy).is_ok());
 
     // Fails with an unexpected JoinSplit pubkey
     {
         let mut tx = TransactionData::new();
         tx.joinsplit_pubkey = Some([0; 32]);
-        assert!(tx.freeze().is_err());
+        assert!(tx.freeze(BranchId::Canopy).is_err());
     }
 }
 
 #[test]
 fn tx_write_rejects_unexpected_joinsplit_sig() {
     // Succeeds without a JoinSplit signature
-    assert!(TransactionData::new().freeze().is_ok());
+    assert!(TransactionData::new().freeze(BranchId::Canopy).is_ok());
 
     // Fails with an unexpected JoinSplit signature
     {
         let mut tx = TransactionData::new();
         tx.joinsplit_sig = Some([0; 64]);
-        assert!(tx.freeze().is_err());
+        assert!(tx.freeze(BranchId::Canopy).is_err());
     }
 }
 
 #[test]
 fn tx_write_rejects_unexpected_binding_sig() {
     // Succeeds without a binding signature
-    assert!(TransactionData::new().freeze().is_ok());
+    assert!(TransactionData::new().freeze(BranchId::Canopy).is_ok());
 
     // Fails with an unexpected binding signature
     {
@@ -66,7 +70,7 @@ fn tx_write_rejects_unexpected_binding_sig() {
 
         let mut tx = TransactionData::new();
         tx.binding_sig = Some(sig);
-        assert!(tx.freeze().is_err());
+        assert!(tx.freeze(BranchId::Canopy).is_err());
     }
 }
 
@@ -133,7 +137,7 @@ fn zip_0143() {
         };
 
         assert_eq!(
-            signature_hash(&tx, tv.consensus_branch_id, tv.hash_type, signable_input).as_ref(),
+            legacy_sig_hash(&tx, tv.consensus_branch_id, tv.hash_type, signable_input).as_ref(),
             tv.sighash
         );
     }
@@ -153,7 +157,7 @@ fn zip_0243() {
         };
 
         assert_eq!(
-            signature_hash(&tx, tv.consensus_branch_id, tv.hash_type, signable_input).as_ref(),
+            legacy_sig_hash(&tx, tv.consensus_branch_id, tv.hash_type, signable_input).as_ref(),
             tv.sighash
         );
     }

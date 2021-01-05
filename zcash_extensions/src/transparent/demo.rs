@@ -618,7 +618,7 @@ mod tests {
 
         let mut mtx_a = TransactionData::zfuture();
         mtx_a.tze_outputs.push(out_a);
-        let tx_a = mtx_a.freeze().unwrap();
+        let tx_a = mtx_a.freeze(BranchId::ZFuture).unwrap();
 
         //
         // Transfer
@@ -635,7 +635,7 @@ mod tests {
         let mut mtx_b = TransactionData::zfuture();
         mtx_b.tze_inputs.push(in_b);
         mtx_b.tze_outputs.push(out_b);
-        let tx_b = mtx_b.freeze().unwrap();
+        let tx_b = mtx_b.freeze(BranchId::ZFuture).unwrap();
 
         //
         // Closing transaction
@@ -648,7 +648,7 @@ mod tests {
 
         let mut mtx_c = TransactionData::zfuture();
         mtx_c.tze_inputs.push(in_c);
-        let tx_c = mtx_c.freeze().unwrap();
+        let tx_c = mtx_c.freeze(BranchId::ZFuture).unwrap();
 
         // Verify tx_b
         {

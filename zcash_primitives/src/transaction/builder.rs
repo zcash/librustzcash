@@ -7,6 +7,7 @@ use std::error;
 use std::fmt;
 use std::marker::PhantomData;
 
+use blake2b_simd::Hash as Blake2bHash;
 use ff::Field;
 use rand::{rngs::OsRng, seq::SliceRandom, CryptoRng, RngCore};
 
@@ -24,7 +25,9 @@ use crate::{
         components::{
             amount::Amount, amount::DEFAULT_FEE, OutputDescription, SpendDescription, TxOut,
         },
-        signature_hash_data, SignableInput, Transaction, TransactionData, SIGHASH_ALL,
+        signature_hash,
+        txid::TxIdDigester,
+        SignableInput, Transaction, TransactionData, TxDigests, TxId, SIGHASH_ALL,
     },
     util::generate_random_rseed_internal,
     zip32::ExtendedSpendingKey,
@@ -265,21 +268,24 @@ impl TransparentInputs {
     }
 
     #[cfg(feature = "transparent-inputs")]
-    fn apply_signatures(
+    fn apply_signatures<F>(
         &self,
         mtx: &mut TransactionData,
         consensus_branch_id: consensus::BranchId,
-    ) {
-        let mut sighash = [0u8; 32];
+        txid_parts_cache: &mut F,
+    ) where
+        F: FnMut(&TransactionData) -> TxDigests<Blake2bHash, TxId>,
+    {
         for (i, info) in self.inputs.iter().enumerate() {
-            sighash.copy_from_slice(&signature_hash_data(
+            let sighash = signature_hash(
                 mtx,
                 consensus_branch_id,
                 SIGHASH_ALL,
                 SignableInput::transparent(i, &info.coin.script_pubkey, info.coin.value),
-            ).as_ref());
+                txid_parts_cache,
+            );
 
-            let msg = secp256k1::Message::from_slice(&sighash).expect("32 bytes");
+            let msg = secp256k1::Message::from_slice(sighash.as_ref()).expect("32 bytes");
             let sig = self.secp.sign(&msg, &info.sk);
 
             // Signature has to have "SIGHASH_ALL" appended to it
@@ -292,7 +298,11 @@ impl TransparentInputs {
     }
 
     #[cfg(not(feature = "transparent-inputs"))]
-    fn apply_signatures(&self, _: &mut TransactionData, _: consensus::BranchId) {}
+    fn apply_signatures<F>(&self, _: &mut TransactionData, _: consensus::BranchId, _: &F)
+    where
+        F: FnMut(&TransactionData) -> TxDigests<Blake2bHash, TxId>,
+    {
+    }
 }
 
 #[cfg(feature = "zfuture")]
@@ -801,21 +811,32 @@ impl<'a, P: consensus::Parameters, R: RngCore> Builder<'a, P, R> {
         //
         // Signatures -- everything but the signatures must already have been added.
         //
+        let mut txid_parts: Option<TxDigests<Blake2bHash, TxId>> = None;
+        let mut txid_parts_cache = |mtx: &TransactionData| match &txid_parts {
+            Some(parts) => parts.clone(),
+            None => {
+                txid_parts = Some(mtx.digest(TxIdDigester { consensus_branch_id }));
+                txid_parts.clone().unwrap()
+            },
+        };
 
-        let mut sighash = [0u8; 32];
-        sighash.copy_from_slice(&signature_hash_data(
+        let sighash = signature_hash(
             &self.mtx,
             consensus_branch_id,
             SIGHASH_ALL,
             SignableInput::Shielded,
-        ).as_ref());
+            &mut txid_parts_cache,
+        );
+
+        let mut sighash_bytes = [0u8; 32];
+        sighash_bytes.copy_from_slice(sighash.as_ref());
 
         // Create Sapling spendAuth and binding signatures
         for (i, (_, spend)) in spends.into_iter().enumerate() {
             self.mtx.shielded_spends[i].spend_auth_sig = Some(spend_sig_internal(
                 PrivateKey(spend.extsk.expsk.ask),
                 spend.alpha,
-                &sighash,
+                &sighash_bytes,
                 &mut self.rng,
             ));
         }
@@ -824,7 +845,7 @@ impl<'a, P: consensus::Parameters, R: RngCore> Builder<'a, P, R> {
         self.mtx.binding_sig = if binding_sig_needed {
             Some(
                 prover
-                    .binding_sig(&mut ctx, self.mtx.value_balance, &sighash)
+                    .binding_sig(&mut ctx, self.mtx.value_balance, &sighash_bytes)
                     .map_err(|_| Error::BindingSig)?,
             )
         } else {
@@ -847,11 +868,14 @@ impl<'a, P: consensus::Parameters, R: RngCore> Builder<'a, P, R> {
         }
 
         // Transparent signatures
-        self.transparent_inputs
-            .apply_signatures(&mut self.mtx, consensus_branch_id);
+        self.transparent_inputs.apply_signatures(
+            &mut self.mtx,
+            consensus_branch_id,
+            &mut txid_parts_cache,
+        );
 
         Ok((
-            self.mtx.freeze().expect("Transaction should be complete"),
+            self.mtx.freeze(consensus_branch_id).expect("Transaction should be complete"),
             tx_metadata,
         ))
     }

@@ -15,8 +15,7 @@ use crate::{
 use super::{
     blake2b_256::HashWriter,
     components::{Amount, JSDescription, OutputDescription, SpendDescription, TxIn, TxOut},
-    TransactionDigest, TransparentDigests, TxDigests, TxId,
-    TxVersion, WitnessDigest,
+    TransactionDigest, TransparentDigests, TxDigests, TxId, TxVersion, WitnessDigest,
 };
 
 #[cfg(feature = "zfuture")]
@@ -28,7 +27,7 @@ use super::{
     TzeDigests,
 };
 
-const ZCASH_TXID_PERSONALIZATION_PREFIX: &[u8; 12] = b"ZcashTxIdHsh";
+pub const ZCASH_TXID_PERSONALIZATION_PREFIX: &[u8; 12] = b"ZcashTxIdHsh";
 const ZCASH_HEADERS_HASH_PERSONALIZATION: &[u8; 16] = b"ZcTxHeaders_Hash";
 const ZCASH_TRANSPARENT_HASH_PERSONALIZATION: &[u8; 16] = b"ZcTxTransparHash";
 const ZCASH_TZE_HASH_PERSONALIZATION: &[u8; 16] = b"ZcTxTZE_____Hash";
@@ -44,13 +43,6 @@ const ZCASH_SHIELDED_OUTPUTS_HASH_PERSONALIZATION: &[u8; 16] = b"ZcashSOutputHas
 const ZCASH_TZE_INPUTS_HASH_PERSONALIZATION: &[u8; 16] = b"Zcash_TzeInsHash";
 const ZCASH_TZE_OUTPUTS_HASH_PERSONALIZATION: &[u8; 16] = b"ZcashTzeOutsHash";
 
-macro_rules! update_u32 {
-    ($h:expr, $value:expr, $tmp:expr) => {
-        (&mut $tmp[..4]).write_u32::<LittleEndian>($value).unwrap();
-        $h.update(&$tmp[..4]);
-    };
-}
-
 macro_rules! update_hash {
     ($h:expr, $cond:expr, $value:expr) => {
         if $cond {
@@ -63,27 +55,34 @@ macro_rules! update_hash {
 
 fn hash_header_txid_data(
     version: TxVersion,
+    // we commit to the consensus branch ID with the header
     consensus_branch_id: BranchId,
     lock_time: u32,
     expiry_height: BlockHeight,
 ) -> Blake2bHash {
-    let mut h = Blake2bParams::new()
-        .hash_length(32)
-        .personal(ZCASH_HEADERS_HASH_PERSONALIZATION)
-        .to_state();
+    let mut h = HashWriter::new(ZCASH_HEADERS_HASH_PERSONALIZATION);
 
-    let mut tmp = [0; 8];
-    update_u32!(h, version.header(), tmp);
-    update_u32!(h, version.version_group_id(), tmp);
-    update_u32!(h, consensus_branch_id.into(), tmp);
-    update_u32!(h, lock_time, tmp);
-    update_u32!(h, expiry_height.into(), tmp);
+    (&mut h)
+        .write_u32::<LittleEndian>(version.header())
+        .unwrap();
+    (&mut h)
+        .write_u32::<LittleEndian>(version.version_group_id())
+        .unwrap();
+    (&mut h)
+        .write_u32::<LittleEndian>(consensus_branch_id.into())
+        .unwrap();
+    (&mut h).write_u32::<LittleEndian>(lock_time).unwrap();
+    (&mut h)
+        .write_u32::<LittleEndian>(expiry_height.into())
+        .unwrap();
 
     h.finalize()
 }
 
-/// Hash of the concatenated serialized prevout values
-/// for each TxIn record passed in vin.
+/// Sequentially append the serialized value of each transparent input
+/// to a hash personalized by ZCASH_PREVOUTS_HASH_PERSONALIZATION.
+/// In the case that no inputs are provided, this produces a default
+/// hash from just the personalization string.
 pub(crate) fn prevout_hash(vin: &[TxIn]) -> Blake2bHash {
     let mut h = HashWriter::new(ZCASH_PREVOUTS_HASH_PERSONALIZATION);
     for t_in in vin {
@@ -97,16 +96,15 @@ pub(crate) fn prevout_hash(vin: &[TxIn]) -> Blake2bHash {
 pub(crate) fn sequence_hash(vin: &[TxIn]) -> Blake2bHash {
     let mut h = HashWriter::new(ZCASH_SEQUENCE_HASH_PERSONALIZATION);
     for t_in in vin {
-        (&mut h)
-            .write_u32::<LittleEndian>(t_in.sequence)
-            .unwrap();
+        (&mut h).write_u32::<LittleEndian>(t_in.sequence).unwrap();
     }
     h.finalize()
 }
 
-/// Hash of the concatenated serialized values
-/// of the txouts provided, using their default
-/// serialized form.
+/// Sequentially append the full serialized value of each transparent output
+/// to a hash personalized by ZCASH_OUTPUTS_HASH_PERSONALIZATION.
+/// In the case that no outputs are provided, this produces a default
+/// hash from just the personalization string.
 pub(crate) fn outputs_hash<T: Borrow<TxOut>>(vout: &[T]) -> Blake2bHash {
     let mut h = HashWriter::new(ZCASH_OUTPUTS_HASH_PERSONALIZATION);
     for t_out in vout {
@@ -115,6 +113,10 @@ pub(crate) fn outputs_hash<T: Borrow<TxOut>>(vout: &[T]) -> Blake2bHash {
     h.finalize()
 }
 
+/// Sequentially append the serialized value of each TZE input, excluding
+/// witness data, to a hash personalized by ZCASH_TZE_INPUTS_HASH_PERSONALIZATION.
+/// In the case that no inputs are provided, this produces a default
+/// hash from just the personalization string.
 #[cfg(feature = "zfuture")]
 pub(crate) fn tze_inputs_hash(tze_inputs: &[TzeIn]) -> Blake2bHash {
     let mut h = HashWriter::new(ZCASH_TZE_INPUTS_HASH_PERSONALIZATION);
@@ -124,6 +126,10 @@ pub(crate) fn tze_inputs_hash(tze_inputs: &[TzeIn]) -> Blake2bHash {
     h.finalize()
 }
 
+/// Sequentially append the full serialized value of each TZE output
+/// to a hash personalized by ZCASH_TZE_OUTPUTS_HASH_PERSONALIZATION.
+/// In the case that no outputs are provided, this produces a default
+/// hash from just the personalization string.
 #[cfg(feature = "zfuture")]
 pub(crate) fn tze_outputs_hash(tze_outputs: &[TzeOut]) -> Blake2bHash {
     let mut h = HashWriter::new(ZCASH_TZE_OUTPUTS_HASH_PERSONALIZATION);
@@ -133,9 +139,9 @@ pub(crate) fn tze_outputs_hash(tze_outputs: &[TzeOut]) -> Blake2bHash {
     h.finalize()
 }
 
-// Sequentially append the full serialized value of each JSDescription
-// followed by the `joinsplit_pubkey` value to a hash personalized
-// by ZCASH_JOINSPLITS_HASH_PERSONALIZATION,
+/// Sequentially append the full serialized value of each JSDescription
+/// followed by the `joinsplit_pubkey` value to a hash personalized
+/// by ZCASH_JOINSPLITS_HASH_PERSONALIZATION,
 pub(crate) fn joinsplits_hash(
     joinsplits: &[JSDescription],
     joinsplit_pubkey: &[u8; 32],
@@ -148,7 +154,7 @@ pub(crate) fn joinsplits_hash(
     h.finalize()
 }
 
-// Write each spend's (cv, anchor, nullifier, rk, zkproof) to the hash.
+/// Write each spend's (cv, anchor, nullifier, rk, zkproof) to the hash.
 pub(crate) fn shielded_spends_hash(shielded_spends: &[SpendDescription]) -> Blake2bHash {
     let mut h = HashWriter::new(ZCASH_SHIELDED_SPENDS_HASH_PERSONALIZATION);
     for s_spend in shielded_spends {
@@ -161,8 +167,8 @@ pub(crate) fn shielded_spends_hash(shielded_spends: &[SpendDescription]) -> Blak
     h.finalize()
 }
 
-// Sequentially append the full serialized value of each OutputDescription
-// to a hash personalized by ZCASH_SHIELDED_OUTPUTS_HASH_PERSONALIZATION
+/// Sequentially append the full serialized value of each OutputDescription
+/// to a hash personalized by ZCASH_SHIELDED_OUTPUTS_HASH_PERSONALIZATION
 pub(crate) fn shielded_outputs_hash(shielded_outputs: &[OutputDescription]) -> Blake2bHash {
     let mut h = HashWriter::new(ZCASH_SHIELDED_OUTPUTS_HASH_PERSONALIZATION);
     for s_out in shielded_outputs {
@@ -171,6 +177,8 @@ pub(crate) fn shielded_outputs_hash(shielded_outputs: &[OutputDescription]) -> B
     h.finalize()
 }
 
+/// The txid commits to the hash of all transparent outputs. The
+/// prevout and sequence_hash components of txid
 fn hashes_transparent_txid_data(vin: &[TxIn], vout: &[TxOut]) -> TransparentDigests<Blake2bHash> {
     TransparentDigests {
         prevout_digest: prevout_hash(vin),
@@ -182,6 +190,7 @@ fn hashes_transparent_txid_data(vin: &[TxIn], vout: &[TxOut]) -> TransparentDige
 
 #[cfg(feature = "zfuture")]
 fn hashes_tze_txid_data(tze_inputs: &[TzeIn], tze_outputs: &[TzeOut]) -> TzeDigests<Blake2bHash> {
+    // The txid commits to the hash for all outputs.
     TzeDigests {
         inputs_digest: tze_inputs_hash(tze_inputs),
         outputs_digest: tze_outputs_hash(tze_outputs),
@@ -193,46 +202,33 @@ fn hash_sprout_txid_data(
     joinsplits: &[JSDescription],
     joinsplit_pubkey: &Option<[u8; 32]>,
 ) -> Blake2bHash {
-    let mut h = Blake2bParams::new()
-        .hash_length(32)
-        .personal(ZCASH_SPROUT_HASH_PERSONALIZATION)
-        .to_state();
-
-    update_hash!(
-        h,
-        !joinsplits.is_empty(),
-        joinsplits_hash(joinsplits, &joinsplit_pubkey.unwrap())
-    );
+    let mut h = HashWriter::new(ZCASH_SPROUT_HASH_PERSONALIZATION);
+    if !joinsplits.is_empty() {
+        h.write(joinsplits_hash(joinsplits, &joinsplit_pubkey.unwrap()).as_ref())
+            .unwrap();
+    }
 
     h.finalize()
 }
 
 fn hash_sapling_txid_data(
-    txversion: TxVersion,
     shielded_spends: &[SpendDescription],
     shielded_outputs: &[OutputDescription],
     value_balance: Amount,
 ) -> Blake2bHash {
-    let mut h = Blake2bParams::new()
-        .hash_length(32)
-        .personal(ZCASH_SAPLING_HASH_PERSONALIZATION)
-        .to_state();
+    let mut h = HashWriter::new(ZCASH_SAPLING_HASH_PERSONALIZATION);
 
-    if txversion.has_sapling() {
-        update_hash!(
-            h,
-            !shielded_spends.is_empty(),
-            shielded_spends_hash(shielded_spends)
-        );
-
-        update_hash!(
-            h,
-            !shielded_outputs.is_empty(),
-            shielded_outputs_hash(shielded_outputs)
-        );
-
-        h.update(&value_balance.to_i64_le_bytes());
+    if !shielded_spends.is_empty() {
+        h.write(shielded_spends_hash(shielded_spends).as_ref())
+            .unwrap();
     }
+
+    if !shielded_outputs.is_empty() {
+        h.write(shielded_outputs_hash(shielded_outputs).as_ref())
+            .unwrap();
+    }
+
+    h.write(&value_balance.to_i64_le_bytes()).unwrap();
 
     h.finalize()
 }
@@ -279,8 +275,7 @@ fn combine_tze_digests(personalization: &[u8; 16], d: &TzeDigests<Blake2bHash>) 
 }
 
 pub struct TxIdDigester {
-    txversion: TxVersion,
-    consensus_branch_id: BranchId,
+    pub consensus_branch_id: BranchId
 }
 
 // A TransactionDigest implementation that commits to all of the effecting
@@ -294,11 +289,10 @@ impl TransactionDigest<Blake2bHash> for TxIdDigester {
     fn digest_header(
         &self,
         version: TxVersion,
-        consensus_branch_id: BranchId,
         lock_time: u32,
         expiry_height: BlockHeight,
     ) -> Blake2bHash {
-        hash_header_txid_data(version, consensus_branch_id, lock_time, expiry_height)
+        hash_header_txid_data(version, self.consensus_branch_id, lock_time, expiry_height)
     }
 
     fn digest_transparent(&self, vin: &[TxIn], vout: &[TxOut]) -> TransparentDigests<Blake2bHash> {
@@ -325,7 +319,6 @@ impl TransactionDigest<Blake2bHash> for TxIdDigester {
         value_balance: Amount,
     ) -> Blake2bHash {
         hash_sapling_txid_data(
-            self.txversion,
             shielded_spends,
             shielded_outputs,
             value_balance,

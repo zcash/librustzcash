@@ -26,7 +26,8 @@ mod txid;
 #[cfg(test)]
 mod tests;
 
-pub use self::sighash::{signature_hash, signature_hash_data, SignableInput, SIGHASH_ALL};
+pub use self::sighash::{signature_hash, SignableInput, SIGHASH_ALL};
+pub use self::txid::{TxIdDigester, to_txid};
 
 use self::components::{Amount, JSDescription, OutputDescription, SpendDescription, TxIn, TxOut};
 
@@ -295,7 +296,6 @@ pub trait TransactionDigest<A> {
     fn digest_header(
         &self,
         version: TxVersion,
-        consensus_branch_id: BranchId,
         lock_time: u32,
         expiry_height: BlockHeight,
     ) -> A;
@@ -377,17 +377,16 @@ impl TransactionData {
         }
     }
 
-    pub fn freeze(self) -> io::Result<Transaction> {
-        Transaction::from_data(self)
+    pub fn freeze(self, consensus_branch_id: BranchId) -> io::Result<Transaction> {
+        Transaction::from_data(self, consensus_branch_id)
     }
 
-    pub fn digest<A, D, P>(&self, digester: D, consensus_branch_id: BranchId) -> TxDigests<A, P>
+    pub fn digest<A, D, P>(&self, digester: D) -> TxDigests<A, P>
     where
         D: TransactionDigest<A, Purpose = P>,
     {
         let header_digest = digester.digest_header(
             self.version,
-            consensus_branch_id,
             self.lock_time,
             self.expiry_height,
         );
@@ -416,15 +415,29 @@ impl TransactionData {
 }
 
 impl Transaction {
-    fn from_data(data: TransactionData) -> io::Result<Self> {
-        let mut tx = Transaction {
-            txid: TxId([0; 32]),
-            data,
-        };
-        let mut writer = HashWriter::default();
-        tx.write(&mut writer)?;
-        tx.txid.0.copy_from_slice(&writer.into_hash());
-        Ok(tx)
+    fn from_data(data: TransactionData, consensus_branch_id: BranchId) -> io::Result<Self> {
+        match data.version {
+            TxVersion::Sprout(_) | TxVersion::Overwinter | TxVersion::Sapling => {
+                let mut tx = Transaction {
+                    txid: TxId([0; 32]),
+                    data,
+                };
+                let mut writer = HashWriter::default();
+                tx.write(&mut writer)?;
+                tx.txid.0.copy_from_slice(&writer.into_hash());
+                Ok(tx)
+            }
+            #[cfg(feature = "zfuture")]
+            TxVersion::ZFuture => {
+                let txid = to_txid(
+                    &data.digest(TxIdDigester { consensus_branch_id }),
+                    data.version,
+                    consensus_branch_id
+                );
+
+                Ok(Transaction { txid, data })
+            }
+        }
     }
 
     pub fn txid(&self) -> TxId {
@@ -617,9 +630,10 @@ impl Transaction {
         Ok(())
     }
 
-    pub fn digest_witness<A, D>(&self, digester: D) -> Result<A, DigestError>
+    pub fn digest_witness<A, D, F>(&self, digester: D, combine: F) -> Result<A, DigestError>
     where
         D: WitnessDigest<A>,
+        F: FnOnce(&[A]) -> A,
     {
         let t_hash = digester.digest_transparent(self.data.vin.iter().map(|txin| &txin.script_sig));
         #[cfg(feature = "zfuture")]
@@ -627,13 +641,14 @@ impl Transaction {
         let sprout_digest =
             digester.digest_sprout(&self.data.joinsplit_sig.ok_or(DigestError::NotSigned)?);
         let sapling_digest = digester.digest_sapling(
-            self.data.shielded_spends
+            self.data
+                .shielded_spends
                 .iter()
                 .flat_map(|spend| &spend.spend_auth_sig),
             &self.binding_sig.ok_or(DigestError::NotSigned)?,
         );
 
-        Ok(sapling_digest)
+        Ok(combine(&[t_hash, tze_hash, sprout_digest, sapling_digest]))
     }
 }
 
@@ -812,7 +827,7 @@ pub mod testing {
 
     prop_compose! {
         pub fn arb_tx(branch_id: BranchId)(tx_data in arb_txdata(branch_id)) -> Transaction {
-            Transaction::from_data(tx_data).unwrap()
+            Transaction::from_data(tx_data, branch_id).unwrap()
         }
     }
 }
