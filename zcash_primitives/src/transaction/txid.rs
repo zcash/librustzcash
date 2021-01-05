@@ -1,7 +1,7 @@
 use std::borrow::Borrow;
 use std::io::Write;
 
-use blake2b_simd::{Hash as Blake2bHash, Params as Blake2bParams};
+use blake2b_simd::{Hash as Blake2bHash};
 use byteorder::{LittleEndian, WriteBytesExt};
 use ff::PrimeField;
 use group::GroupEncoding;
@@ -42,16 +42,6 @@ const ZCASH_SHIELDED_SPENDS_HASH_PERSONALIZATION: &[u8; 16] = b"ZcashSSpendsHash
 const ZCASH_SHIELDED_OUTPUTS_HASH_PERSONALIZATION: &[u8; 16] = b"ZcashSOutputHash";
 const ZCASH_TZE_INPUTS_HASH_PERSONALIZATION: &[u8; 16] = b"Zcash_TzeInsHash";
 const ZCASH_TZE_OUTPUTS_HASH_PERSONALIZATION: &[u8; 16] = b"ZcashTzeOutsHash";
-
-macro_rules! update_hash {
-    ($h:expr, $cond:expr, $value:expr) => {
-        if $cond {
-            $h.update(&$value.as_ref());
-        } else {
-            $h.update(&[0; 32]);
-        }
-    };
-}
 
 fn hash_header_txid_data(
     version: TxVersion,
@@ -237,17 +227,14 @@ fn combine_transparent_digests(
     personalization: &[u8; 16],
     d: &TransparentDigests<Blake2bHash>,
 ) -> Blake2bHash {
-    let mut h = Blake2bParams::new()
-        .hash_length(32)
-        .personal(personalization)
-        .to_state();
+    let mut h = HashWriter::new(personalization);
 
-    h.update(d.prevout_digest.as_ref());
-    h.update(d.sequence_digest.as_ref());
-    h.update(d.outputs_digest.as_ref());
+    h.write(d.prevout_digest.as_ref()).unwrap();
+    h.write(d.sequence_digest.as_ref()).unwrap();
+    h.write(d.outputs_digest.as_ref()).unwrap();
     match d.per_input_digest {
         Option::Some(s) => {
-            h.update(s.as_ref());
+            h.write(s.as_ref()).unwrap();
         }
         Option::None => (),
     };
@@ -257,16 +244,13 @@ fn combine_transparent_digests(
 
 #[cfg(feature = "zfuture")]
 fn combine_tze_digests(personalization: &[u8; 16], d: &TzeDigests<Blake2bHash>) -> Blake2bHash {
-    let mut h = Blake2bParams::new()
-        .hash_length(32)
-        .personal(personalization)
-        .to_state();
+    let mut h = HashWriter::new(personalization);
 
-    h.update(d.inputs_digest.as_ref());
-    h.update(d.outputs_digest.as_ref());
+    h.write(d.inputs_digest.as_ref()).unwrap();
+    h.write(d.outputs_digest.as_ref()).unwrap();
     match d.per_input_digest {
         Option::Some(s) => {
-            h.update(s.as_ref());
+            h.write(s.as_ref()).unwrap();
         }
         Option::None => (),
     };
@@ -338,33 +322,25 @@ pub fn to_hash<A>(
         .write_u32::<LittleEndian>(consensus_branch_id.into())
         .unwrap();
 
-    let mut h = Blake2bParams::new()
-        .hash_length(32)
-        .personal(&personal)
-        .to_state();
+    let mut h = HashWriter::new(&personal);
+    h.write(&digests.header_digest.as_ref()).unwrap();
 
-    update_hash!(h, true, digests.header_digest);
-
-    update_hash!(
-        h,
-        true,
-        combine_transparent_digests(
+    h.write(
+        &combine_transparent_digests(
             &ZCASH_TRANSPARENT_HASH_PERSONALIZATION,
             &digests.transparent_digests
-        )
-    );
+        ).as_ref()
+    ).unwrap();
 
     #[cfg(feature = "zfuture")]
     if txversion.has_tze() {
-        update_hash!(
-            h,
-            true,
-            combine_tze_digests(&ZCASH_TZE_HASH_PERSONALIZATION, &digests.tze_digests)
-        );
+        h.write(
+            &combine_tze_digests(&ZCASH_TZE_HASH_PERSONALIZATION, &digests.tze_digests).as_ref()
+        ).unwrap();
     }
 
-    update_hash!(h, true, digests.sprout_digest);
-    update_hash!(h, true, digests.sapling_digest);
+    h.write(digests.sprout_digest.as_ref()).unwrap();
+    h.write(digests.sapling_digest.as_ref()).unwrap();
 
     h.finalize()
 }
@@ -386,8 +362,10 @@ pub fn to_txid(
     TxId(txid_bytes)
 }
 
-struct BlockTxCommitment(Blake2bHash);
-
+/// Digester which constructs a digest of only the witness data.
+/// This does not internally commit to the txid, so if that is 
+/// desired it should be done using the result of this digest
+/// function.
 struct BlockTxCommitmentDigester {}
 
 impl WitnessDigest<Blake2bHash> for BlockTxCommitmentDigester {
@@ -395,13 +373,11 @@ impl WitnessDigest<Blake2bHash> for BlockTxCommitmentDigester {
         &self,
         vin_sig: I,
     ) -> Blake2bHash {
-        let mut h = Blake2bParams::new()
-            .hash_length(32)
-            .personal(ZCASH_TRANSPARENT_HASH_PERSONALIZATION) //FIXME: use different personalization?
-            .to_state();
+        // TODO: different personalization?
+        let mut h = HashWriter::new(ZCASH_TRANSPARENT_HASH_PERSONALIZATION);
 
         for script in vin_sig {
-            h.update(&script.0);
+            h.write(&script.0).unwrap();
         }
 
         h.finalize()
@@ -412,26 +388,20 @@ impl WitnessDigest<Blake2bHash> for BlockTxCommitmentDigester {
         &self,
         tzein_sig: I,
     ) -> Blake2bHash {
-        let mut h = Blake2bParams::new()
-            .hash_length(32)
-            .personal(ZCASH_TZE_HASH_PERSONALIZATION) //FIXME: use different personalization?
-            .to_state();
+        // TODO: different personalization?
+        let mut h = HashWriter::new(ZCASH_TZE_HASH_PERSONALIZATION);
 
         for witness in tzein_sig {
-            h.update(&witness.payload);
+            h.write(&witness.payload).unwrap();
         }
 
         h.finalize()
     }
 
     fn digest_sprout(&self, joinsplit_sig: &[u8; 64]) -> Blake2bHash {
-        let mut h = Blake2bParams::new()
-            .hash_length(32)
-            .personal(ZCASH_SPROUT_HASH_PERSONALIZATION) //FIXME: use different personalization?
-            .to_state();
-
-        h.update(joinsplit_sig);
-
+        // TODO: different personalization?
+        let mut h = HashWriter::new(ZCASH_SPROUT_HASH_PERSONALIZATION);
+        h.write(joinsplit_sig).unwrap();
         h.finalize()
     }
 
@@ -440,19 +410,14 @@ impl WitnessDigest<Blake2bHash> for BlockTxCommitmentDigester {
         shielded_spends: I,
         binding_sig: &Signature,
     ) -> Blake2bHash {
-        let mut h = Blake2bParams::new()
-            .hash_length(32)
-            .personal(ZCASH_SAPLING_HASH_PERSONALIZATION) //FIXME: use different personalization?
-            .to_state();
+        // TODO: different personalization?
+        let mut h = HashWriter::new(ZCASH_SAPLING_HASH_PERSONALIZATION);
 
-        let mut data = Vec::with_capacity(0);
         for spend_auth_sig in shielded_spends {
-            spend_auth_sig.write(&mut data).unwrap();
+            spend_auth_sig.write(&mut h).unwrap();
         }
 
-        binding_sig.write(&mut data).unwrap();
-
-        h.update(&data);
+        binding_sig.write(&mut h).unwrap();
 
         h.finalize()
     }
