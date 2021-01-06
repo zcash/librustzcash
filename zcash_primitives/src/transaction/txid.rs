@@ -31,32 +31,32 @@ use super::{
 pub const ZCASH_TXID_PERSONALIZATION_PREFIX: &[u8; 12] = b"ZcashTxIdHsh";
 
 // TxId level 1 node personalization
-const ZCASH_HEADERS_HASH_PERSONALIZATION: &[u8; 16] = b"ZcTxIdHeaderHash";
-const ZCASH_TRANSPARENT_HASH_PERSONALIZATION: &[u8; 16] = b"ZcTxIdTranspHash";
-const ZCASH_TZE_HASH_PERSONALIZATION: &[u8; 16] = b"ZcTxIdTZE___Hash";
-const ZCASH_SPROUT_HASH_PERSONALIZATION: &[u8; 16] = b"ZcTxIdSproutHash";
-const ZCASH_SAPLING_HASH_PERSONALIZATION: &[u8; 16] = b"ZcTxIdSaplngHash";
+const ZCASH_HEADERS_HASH_PERSONALIZATION: &[u8; 16]                    = b"ZTxIdHeadersHash";
+const ZCASH_TRANSPARENT_HASH_PERSONALIZATION: &[u8; 16]                = b"ZTxIdTranspaHash";
+const ZCASH_TZE_HASH_PERSONALIZATION: &[u8; 16]                        = b"ZTxIdTZE____Hash";
+const ZCASH_SPROUT_HASH_PERSONALIZATION: &[u8; 16]                     = b"ZTxIdSprout_Hash";
+const ZCASH_SAPLING_HASH_PERSONALIZATION: &[u8; 16]                    = b"ZTxIdSaplingHash";
 
 // TxId transparent level 2 node personalization
-const ZCASH_PREVOUTS_HASH_PERSONALIZATION: &[u8; 16] = b"ZcashPrevoutHash";
-const ZCASH_SEQUENCE_HASH_PERSONALIZATION: &[u8; 16] = b"ZcashSequencHash";
-const ZCASH_OUTPUTS_HASH_PERSONALIZATION: &[u8; 16] = b"ZcashOutputsHash";
+const ZCASH_PREVOUTS_HASH_PERSONALIZATION: &[u8; 16]                   = b"ZTxIdPrevoutHash";
+const ZCASH_SEQUENCE_HASH_PERSONALIZATION: &[u8; 16]                   = b"ZTxIdSequencHash";
+const ZCASH_OUTPUTS_HASH_PERSONALIZATION: &[u8; 16]                    = b"ZTxIdOutputsHash";
 
 // TxId tze level 2 node personalization
-const ZCASH_TZE_INPUTS_HASH_PERSONALIZATION: &[u8; 16] = b"Zcash_TzeInsHash";
-const ZCASH_TZE_OUTPUTS_HASH_PERSONALIZATION: &[u8; 16] = b"ZcashTzeOutsHash";
+const ZCASH_TZE_INPUTS_HASH_PERSONALIZATION: &[u8; 16]                 = b"ZTxIdTzeIns_Hash";
+const ZCASH_TZE_OUTPUTS_HASH_PERSONALIZATION: &[u8; 16]                = b"ZTxIdTzeOutsHash";
 
 // TxId sprout level 2 node personalization
-const ZCASH_JOINSPLITS_HASH_PERSONALIZATION: &[u8; 16] = b"ZcashJSplitsHash";
+const ZCASH_JOINSPLITS_HASH_PERSONALIZATION: &[u8; 16]                 = b"ZTxIdJSplitsHash";
 
 // TxId sapling level 2 node personalization
-const ZCASH_SAPLING_SPENDS_COMPACT_HASH_PERSONALIZATION: &[u8; 16] = b"ZcashSSpendCHash";
-const ZCASH_SAPLING_SPENDS_NONCOMPACT_HASH_PERSONALIZATION: &[u8; 16] = b"ZcashSSpendNHash";
-const ZCASH_SAPLING_SPENDS_HASH_PERSONALIZATION: &[u8; 16] = b"ZcashSSpendsHash";
-const ZCASH_SAPLING_OUTPUTS_COMPACT_HASH_PERSONALIZATION: &[u8; 16] = b"ZcashSOutC__Hash";
-const ZCASH_SAPLING_OUTPUTS_MEMOS_HASH_PERSONALIZATION: &[u8; 16] = b"ZcashSOutM__Hash";
-const ZCASH_SAPLING_OUTPUTS_NONCOMPACT_HASH_PERSONALIZATION: &[u8; 16] = b"ZcashSOutNC_Hash";
-const ZCASH_SAPLING_OUTPUTS_HASH_PERSONALIZATION: &[u8; 16] = b"ZcashSOutputHash";
+const ZCASH_SAPLING_SPENDS_COMPACT_HASH_PERSONALIZATION: &[u8; 16]     = b"ZTxIdSSpendCHash";
+const ZCASH_SAPLING_SPENDS_NONCOMPACT_HASH_PERSONALIZATION: &[u8; 16]  = b"ZTxIdSSpendNHash";
+const ZCASH_SAPLING_SPENDS_HASH_PERSONALIZATION: &[u8; 16]             = b"ZTxIdSSpendsHash";
+const ZCASH_SAPLING_OUTPUTS_COMPACT_HASH_PERSONALIZATION: &[u8; 16]    = b"ZTxIdSOutC__Hash";
+const ZCASH_SAPLING_OUTPUTS_MEMOS_HASH_PERSONALIZATION: &[u8; 16]      = b"ZTxIdSOutM__Hash";
+const ZCASH_SAPLING_OUTPUTS_NONCOMPACT_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxIdSOutNC_Hash";
+const ZCASH_SAPLING_OUTPUTS_HASH_PERSONALIZATION: &[u8; 16]            = b"ZTxIdSOutputHash";
 
 fn hash_header_txid_data(
     version: TxVersion,
@@ -149,13 +149,16 @@ pub(crate) fn tze_outputs_hash(tze_outputs: &[TzeOut]) -> Blake2bHash {
 /// by ZCASH_JOINSPLITS_HASH_PERSONALIZATION,
 pub(crate) fn joinsplits_hash(
     joinsplits: &[JSDescription],
-    joinsplit_pubkey: &[u8; 32],
+    joinsplit_pubkey: &Option<[u8; 32]>,
 ) -> Blake2bHash {
     let mut h = HashWriter::new(ZCASH_JOINSPLITS_HASH_PERSONALIZATION);
-    for js in joinsplits {
-        js.write(&mut h).unwrap();
+    // if no joinsplit_pubkey is provided, we'll do nothing.
+    for pk in joinsplit_pubkey {
+        for js in joinsplits {
+            js.write(&mut h).unwrap();
+        }
+        h.write(pk).unwrap();
     }
-    h.write(joinsplit_pubkey).unwrap();
     h.finalize()
 }
 
@@ -238,13 +241,7 @@ fn hash_sprout_txid_data(
     joinsplits: &[JSDescription],
     joinsplit_pubkey: &Option<[u8; 32]>,
 ) -> Blake2bHash {
-    let mut h = HashWriter::new(ZCASH_SPROUT_HASH_PERSONALIZATION);
-    if !joinsplits.is_empty() {
-        h.write(joinsplits_hash(joinsplits, &joinsplit_pubkey.unwrap()).as_bytes())
-            .unwrap();
-    }
-
-    h.finalize()
+    joinsplits_hash(joinsplits, &joinsplit_pubkey)
 }
 
 fn hash_sapling_txid_data(

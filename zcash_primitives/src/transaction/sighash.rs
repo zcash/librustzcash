@@ -249,7 +249,7 @@ pub fn legacy_sig_hash<'a>(
         update_hash!(
             h,
             !tx.joinsplits.is_empty(),
-            joinsplits_hash(&tx.joinsplits, &tx.joinsplit_pubkey.unwrap())
+            joinsplits_hash(&tx.joinsplits, &tx.joinsplit_pubkey)
         );
 
         if tx.version.has_sapling() {
