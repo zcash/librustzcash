@@ -27,7 +27,7 @@ mod txid;
 mod tests;
 
 pub use self::sighash::{signature_hash, SignableInput, SIGHASH_ALL};
-pub use self::txid::{TxIdDigester, to_txid};
+pub use self::txid::{to_txid, TxIdDigester};
 
 use self::components::{Amount, JSDescription, OutputDescription, SpendDescription, TxIn, TxOut};
 
@@ -293,12 +293,7 @@ pub struct TxDigests<A, Purpose> {
 pub trait TransactionDigest<A> {
     type Purpose;
 
-    fn digest_header(
-        &self,
-        version: TxVersion,
-        lock_time: u32,
-        expiry_height: BlockHeight,
-    ) -> A;
+    fn digest_header(&self, version: TxVersion, lock_time: u32, expiry_height: BlockHeight) -> A;
 
     fn digest_transparent(&self, vin: &[TxIn], vout: &[TxOut]) -> TransparentDigests<A>;
 
@@ -385,11 +380,8 @@ impl TransactionData {
     where
         D: TransactionDigest<A, Purpose = P>,
     {
-        let header_digest = digester.digest_header(
-            self.version,
-            self.lock_time,
-            self.expiry_height,
-        );
+        let header_digest =
+            digester.digest_header(self.version, self.lock_time, self.expiry_height);
         let transparent_digests = digester.digest_transparent(&self.vin, &self.vout);
 
         #[cfg(feature = "zfuture")]
@@ -430,9 +422,11 @@ impl Transaction {
             #[cfg(feature = "zfuture")]
             TxVersion::ZFuture => {
                 let txid = to_txid(
-                    &data.digest(TxIdDigester { consensus_branch_id }),
+                    &data.digest(TxIdDigester {
+                        consensus_branch_id,
+                    }),
                     data.version,
-                    consensus_branch_id
+                    consensus_branch_id,
                 );
 
                 Ok(Transaction { txid, data })

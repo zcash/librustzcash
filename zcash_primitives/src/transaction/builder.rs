@@ -815,9 +815,11 @@ impl<'a, P: consensus::Parameters, R: RngCore> Builder<'a, P, R> {
         let mut txid_parts_cache = |mtx: &TransactionData| match &txid_parts {
             Some(parts) => parts.clone(),
             None => {
-                txid_parts = Some(mtx.digest(TxIdDigester { consensus_branch_id }));
+                txid_parts = Some(mtx.digest(TxIdDigester {
+                    consensus_branch_id,
+                }));
                 txid_parts.clone().unwrap()
-            },
+            }
         };
 
         let sighash = signature_hash(
@@ -875,7 +877,9 @@ impl<'a, P: consensus::Parameters, R: RngCore> Builder<'a, P, R> {
         );
 
         Ok((
-            self.mtx.freeze(consensus_branch_id).expect("Transaction should be complete"),
+            self.mtx
+                .freeze(consensus_branch_id)
+                .expect("Transaction should be complete"),
             tx_metadata,
         ))
     }

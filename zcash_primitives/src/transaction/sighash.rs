@@ -308,22 +308,20 @@ pub fn signature_hash<'a, F>(
 where
     F: FnMut(&TransactionData) -> TxDigests<Blake2bHash, TxId>,
 {
-    // the accepted signature hashes are dependent upon 
+    // the accepted signature hashes are dependent upon
     SignatureHash(match tx.version {
-        TxVersion::Sprout(_)
-        | TxVersion::Overwinter
-        | TxVersion::Sapling => legacy_sig_hash(tx, consensus_branch_id, hash_type, signable_input),
+        TxVersion::Sprout(_) | TxVersion::Overwinter | TxVersion::Sapling => {
+            legacy_sig_hash(tx, consensus_branch_id, hash_type, signable_input)
+        }
         #[cfg(feature = "zfuture")]
         TxVersion::ZFuture => {
             let txid_parts = txid_digest(tx);
-            let sig_parts = tx.digest(
-                SignatureHashDigester {
-                    txid_parts,
-                    txversion: tx.version,
-                    hash_type,
-                    signable_input,
-                }
-            );
+            let sig_parts = tx.digest(SignatureHashDigester {
+                txid_parts,
+                txversion: tx.version,
+                hash_type,
+                signable_input,
+            });
 
             to_hash(
                 &sig_parts,
