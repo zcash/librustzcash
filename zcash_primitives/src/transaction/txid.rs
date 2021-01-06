@@ -194,7 +194,7 @@ fn hash_sprout_txid_data(
 ) -> Blake2bHash {
     let mut h = HashWriter::new(ZCASH_SPROUT_HASH_PERSONALIZATION);
     if !joinsplits.is_empty() {
-        h.write(joinsplits_hash(joinsplits, &joinsplit_pubkey.unwrap()).as_ref())
+        h.write(joinsplits_hash(joinsplits, &joinsplit_pubkey.unwrap()).as_bytes())
             .unwrap();
     }
 
@@ -209,12 +209,12 @@ fn hash_sapling_txid_data(
     let mut h = HashWriter::new(ZCASH_SAPLING_HASH_PERSONALIZATION);
 
     if !shielded_spends.is_empty() {
-        h.write(shielded_spends_hash(shielded_spends).as_ref())
+        h.write(shielded_spends_hash(shielded_spends).as_bytes())
             .unwrap();
     }
 
     if !shielded_outputs.is_empty() {
-        h.write(shielded_outputs_hash(shielded_outputs).as_ref())
+        h.write(shielded_outputs_hash(shielded_outputs).as_bytes())
             .unwrap();
     }
 
@@ -229,12 +229,12 @@ fn combine_transparent_digests(
 ) -> Blake2bHash {
     let mut h = HashWriter::new(personalization);
 
-    h.write(d.prevout_digest.as_ref()).unwrap();
-    h.write(d.sequence_digest.as_ref()).unwrap();
-    h.write(d.outputs_digest.as_ref()).unwrap();
+    h.write(d.prevout_digest.as_bytes()).unwrap();
+    h.write(d.sequence_digest.as_bytes()).unwrap();
+    h.write(d.outputs_digest.as_bytes()).unwrap();
     match d.per_input_digest {
         Option::Some(s) => {
-            h.write(s.as_ref()).unwrap();
+            h.write(s.as_bytes()).unwrap();
         }
         Option::None => (),
     };
@@ -246,11 +246,11 @@ fn combine_transparent_digests(
 fn combine_tze_digests(personalization: &[u8; 16], d: &TzeDigests<Blake2bHash>) -> Blake2bHash {
     let mut h = HashWriter::new(personalization);
 
-    h.write(d.inputs_digest.as_ref()).unwrap();
-    h.write(d.outputs_digest.as_ref()).unwrap();
+    h.write(d.inputs_digest.as_bytes()).unwrap();
+    h.write(d.outputs_digest.as_bytes()).unwrap();
     match d.per_input_digest {
         Option::Some(s) => {
-            h.write(s.as_ref()).unwrap();
+            h.write(s.as_bytes()).unwrap();
         }
         Option::None => (),
     };
@@ -323,24 +323,24 @@ pub fn to_hash<A>(
         .unwrap();
 
     let mut h = HashWriter::new(&personal);
-    h.write(&digests.header_digest.as_ref()).unwrap();
+    h.write(&digests.header_digest.as_bytes()).unwrap();
 
     h.write(
         &combine_transparent_digests(
             &ZCASH_TRANSPARENT_HASH_PERSONALIZATION,
             &digests.transparent_digests
-        ).as_ref()
+        ).as_bytes()
     ).unwrap();
 
     #[cfg(feature = "zfuture")]
     if txversion.has_tze() {
         h.write(
-            &combine_tze_digests(&ZCASH_TZE_HASH_PERSONALIZATION, &digests.tze_digests).as_ref()
+            &combine_tze_digests(&ZCASH_TZE_HASH_PERSONALIZATION, &digests.tze_digests).as_bytes()
         ).unwrap();
     }
 
-    h.write(digests.sprout_digest.as_ref()).unwrap();
-    h.write(digests.sapling_digest.as_ref()).unwrap();
+    h.write(digests.sprout_digest.as_bytes()).unwrap();
+    h.write(digests.sapling_digest.as_bytes()).unwrap();
 
     h.finalize()
 }
@@ -358,7 +358,7 @@ pub fn to_txid(
     );
 
     let mut txid_bytes = [0; 32];
-    (&mut txid_bytes).copy_from_slice(txid_digest.as_ref());
+    (&mut txid_bytes).copy_from_slice(txid_digest.as_bytes());
     TxId(txid_bytes)
 }
 

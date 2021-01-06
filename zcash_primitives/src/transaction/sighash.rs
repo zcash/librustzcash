@@ -61,7 +61,7 @@ macro_rules! update_u32 {
 macro_rules! update_hash {
     ($h:expr, $cond:expr, $value:expr) => {
         if $cond {
-            $h.update(&$value.as_ref());
+            $h.update(&$value.as_bytes());
         } else {
             $h.update(&[0; 32]);
         }
@@ -220,11 +220,11 @@ pub fn legacy_sig_hash<'a>(
         if (hash_type & SIGHASH_MASK) != SIGHASH_SINGLE
             && (hash_type & SIGHASH_MASK) != SIGHASH_NONE
         {
-            h.update(outputs_hash(&tx.vout).as_ref());
+            h.update(outputs_hash(&tx.vout).as_bytes());
         } else if (hash_type & SIGHASH_MASK) == SIGHASH_SINGLE {
             match signable_input {
                 SignableInput::Transparent { index, .. } if index < tx.vout.len() => {
-                    h.update(outputs_hash(&tx.vout[index..=index]).as_ref())
+                    h.update(outputs_hash(&tx.vout[index..=index]).as_bytes())
                 }
                 _ => h.update(&[0; 32]),
             };
