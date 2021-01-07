@@ -31,32 +31,39 @@ use super::{
 pub const ZCASH_TXID_PERSONALIZATION_PREFIX: &[u8; 12] = b"ZcashTxIdHsh";
 
 // TxId level 1 node personalization
-const ZCASH_HEADERS_HASH_PERSONALIZATION: &[u8; 16]                    = b"ZTxIdHeadersHash";
-const ZCASH_TRANSPARENT_HASH_PERSONALIZATION: &[u8; 16]                = b"ZTxIdTranspaHash";
-const ZCASH_TZE_HASH_PERSONALIZATION: &[u8; 16]                        = b"ZTxIdTZE____Hash";
-const ZCASH_SPROUT_HASH_PERSONALIZATION: &[u8; 16]                     = b"ZTxIdSprout_Hash";
-const ZCASH_SAPLING_HASH_PERSONALIZATION: &[u8; 16]                    = b"ZTxIdSaplingHash";
+const ZCASH_HEADERS_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxIdHeadersHash";
+const ZCASH_TRANSPARENT_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxIdTranspaHash";
+const ZCASH_TZE_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxIdTZE____Hash";
+const ZCASH_SPROUT_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxIdSprout_Hash";
+const ZCASH_SAPLING_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxIdSaplingHash";
 
 // TxId transparent level 2 node personalization
-const ZCASH_PREVOUTS_HASH_PERSONALIZATION: &[u8; 16]                   = b"ZTxIdPrevoutHash";
-const ZCASH_SEQUENCE_HASH_PERSONALIZATION: &[u8; 16]                   = b"ZTxIdSequencHash";
-const ZCASH_OUTPUTS_HASH_PERSONALIZATION: &[u8; 16]                    = b"ZTxIdOutputsHash";
+const ZCASH_PREVOUTS_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxIdPrevoutHash";
+const ZCASH_SEQUENCE_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxIdSequencHash";
+const ZCASH_OUTPUTS_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxIdOutputsHash";
 
 // TxId tze level 2 node personalization
-const ZCASH_TZE_INPUTS_HASH_PERSONALIZATION: &[u8; 16]                 = b"ZTxIdTzeIns_Hash";
-const ZCASH_TZE_OUTPUTS_HASH_PERSONALIZATION: &[u8; 16]                = b"ZTxIdTzeOutsHash";
+const ZCASH_TZE_INPUTS_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxIdTzeIns_Hash";
+const ZCASH_TZE_OUTPUTS_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxIdTzeOutsHash";
 
 // TxId sprout level 2 node personalization
-const ZCASH_JOINSPLITS_HASH_PERSONALIZATION: &[u8; 16]                 = b"ZTxIdJSplitsHash";
+const ZCASH_JOINSPLITS_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxIdJSplitsHash";
 
 // TxId sapling level 2 node personalization
-const ZCASH_SAPLING_SPENDS_COMPACT_HASH_PERSONALIZATION: &[u8; 16]     = b"ZTxIdSSpendCHash";
-const ZCASH_SAPLING_SPENDS_NONCOMPACT_HASH_PERSONALIZATION: &[u8; 16]  = b"ZTxIdSSpendNHash";
-const ZCASH_SAPLING_SPENDS_HASH_PERSONALIZATION: &[u8; 16]             = b"ZTxIdSSpendsHash";
-const ZCASH_SAPLING_OUTPUTS_COMPACT_HASH_PERSONALIZATION: &[u8; 16]    = b"ZTxIdSOutC__Hash";
-const ZCASH_SAPLING_OUTPUTS_MEMOS_HASH_PERSONALIZATION: &[u8; 16]      = b"ZTxIdSOutM__Hash";
+const ZCASH_SAPLING_SPENDS_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxIdSSpendsHash";
+const ZCASH_SAPLING_SPENDS_COMPACT_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxIdSSpendCHash";
+const ZCASH_SAPLING_SPENDS_NONCOMPACT_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxIdSSpendNHash";
+
+const ZCASH_SAPLING_OUTPUTS_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxIdSOutputHash";
+const ZCASH_SAPLING_OUTPUTS_COMPACT_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxIdSOutC__Hash";
+const ZCASH_SAPLING_OUTPUTS_MEMOS_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxIdSOutM__Hash";
 const ZCASH_SAPLING_OUTPUTS_NONCOMPACT_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxIdSOutNC_Hash";
-const ZCASH_SAPLING_OUTPUTS_HASH_PERSONALIZATION: &[u8; 16]            = b"ZTxIdSOutputHash";
+
+const ZCASH_AUTH_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxAuth_____Hash";
+const ZCASH_TRANSPARENT_SCRIPTS_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxAuthTransHash";
+const ZCASH_TZE_WITNESSES_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxAuthTZE__Hash";
+const ZCASH_SPROUT_SIGS_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxAuthSprouHash";
+const ZCASH_SAPLING_SIGS_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxAuthSapliHash";
 
 fn hash_header_txid_data(
     version: TxVersion,
@@ -404,8 +411,7 @@ impl WitnessDigest<Blake2bHash> for BlockTxCommitmentDigester {
         &self,
         vin_sig: I,
     ) -> Blake2bHash {
-        // TODO: different personalization?
-        let mut h = HashWriter::new(ZCASH_TRANSPARENT_HASH_PERSONALIZATION);
+        let mut h = HashWriter::new(ZCASH_TRANSPARENT_SCRIPTS_HASH_PERSONALIZATION);
 
         for script in vin_sig {
             h.write(&script.0).unwrap();
@@ -419,8 +425,7 @@ impl WitnessDigest<Blake2bHash> for BlockTxCommitmentDigester {
         &self,
         tzein_sig: I,
     ) -> Blake2bHash {
-        // TODO: different personalization?
-        let mut h = HashWriter::new(ZCASH_TZE_HASH_PERSONALIZATION);
+        let mut h = HashWriter::new(ZCASH_TZE_WITNESSES_HASH_PERSONALIZATION);
 
         for witness in tzein_sig {
             h.write(&witness.payload).unwrap();
@@ -429,26 +434,29 @@ impl WitnessDigest<Blake2bHash> for BlockTxCommitmentDigester {
         h.finalize()
     }
 
-    fn digest_sprout(&self, joinsplit_sig: &[u8; 64]) -> Blake2bHash {
-        // TODO: different personalization?
-        let mut h = HashWriter::new(ZCASH_SPROUT_HASH_PERSONALIZATION);
-        h.write(joinsplit_sig).unwrap();
+    fn digest_sprout(&self, joinsplit_sig: &Option<[u8; 64]>) -> Blake2bHash {
+        let mut h = HashWriter::new(ZCASH_SPROUT_SIGS_HASH_PERSONALIZATION);
+        for s in joinsplit_sig {
+            h.write(s).unwrap();
+        }
         h.finalize()
     }
 
     fn digest_sapling<'a, I: IntoIterator<Item = &'a Signature>>(
         &self,
         shielded_spends: I,
-        binding_sig: &Signature,
+        binding_sig: &Option<Signature>,
     ) -> Blake2bHash {
-        // TODO: different personalization?
-        let mut h = HashWriter::new(ZCASH_SAPLING_HASH_PERSONALIZATION);
+        let mut h = HashWriter::new(ZCASH_SAPLING_SIGS_HASH_PERSONALIZATION);
 
-        for spend_auth_sig in shielded_spends {
-            spend_auth_sig.write(&mut h).unwrap();
+        let mut shielded_spends_iter = shielded_spends.into_iter();
+        for s in binding_sig {
+            for spend_auth_sig in &mut shielded_spends_iter {
+                spend_auth_sig.write(&mut h).unwrap();
+            }
+
+            s.write(&mut h).unwrap();
         }
-
-        binding_sig.write(&mut h).unwrap();
 
         h.finalize()
     }

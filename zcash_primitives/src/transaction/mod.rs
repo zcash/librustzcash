@@ -317,12 +317,12 @@ pub trait WitnessDigest<A> {
     #[cfg(feature = "zfuture")]
     fn digest_tze<'a, I: IntoIterator<Item = &'a tze::Witness>>(&self, tzein_sig: I) -> A;
 
-    fn digest_sprout(&self, joinsplit_sig: &[u8; 64]) -> A;
+    fn digest_sprout(&self, joinsplit_sig: &Option<[u8; 64]>) -> A;
 
     fn digest_sapling<'a, I: IntoIterator<Item = &'a Signature>>(
         &self,
         shielded_spends: I,
-        binding_sig: &Signature,
+        binding_sig: &Option<Signature>,
     ) -> A;
 }
 
@@ -632,14 +632,13 @@ impl Transaction {
         let t_hash = digester.digest_transparent(self.data.vin.iter().map(|txin| &txin.script_sig));
         #[cfg(feature = "zfuture")]
         let tze_hash = digester.digest_tze(self.data.tze_inputs.iter().map(|tzein| &tzein.witness));
-        let sprout_digest =
-            digester.digest_sprout(&self.data.joinsplit_sig.ok_or(DigestError::NotSigned)?);
+        let sprout_digest = digester.digest_sprout(&self.data.joinsplit_sig);
         let sapling_digest = digester.digest_sapling(
             self.data
                 .shielded_spends
                 .iter()
                 .flat_map(|spend| &spend.spend_auth_sig),
-            &self.binding_sig.ok_or(DigestError::NotSigned)?,
+            &self.binding_sig,
         );
 
         Ok(combine(&[t_hash, tze_hash, sprout_digest, sapling_digest]))
