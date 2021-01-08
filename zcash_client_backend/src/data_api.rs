@@ -24,14 +24,34 @@ pub mod chain;
 pub mod error;
 pub mod wallet;
 
+/// Read-only operations require for light wallet functions.
+///
+/// This trait defines the read-only portion of the storage
+/// interface atop which higher-level wallet operations are
+/// implemented. It serves to allow wallet functions to be 
+/// abstracted away from any particular data storage substrate.
 pub trait WalletRead {
+    /// The type of errors produced by a wallet backend.
     type Error;
-    type NoteRef: Copy + Debug; // Backend-specific note identifier
-    type TxRef: Copy + Debug;
-    type UpdateOps: WalletWrite<Error = Self::Error, NoteRef = Self::NoteRef, TxRef = Self::TxRef>;
 
+    /// Backend-specific note identifier. 
+    ///
+    /// For example, this might be a database identifier type
+    /// or a UUID.
+    type NoteRef: Copy + Debug; 
+
+    /// Backend-specific transaction identifier. 
+    ///
+    /// For example, this might be a database identifier type
+    /// or a TxId if the backend is able to support that type
+    /// directly.
+    type TxRef: Copy + Debug;
+
+    /// Returns the minimum and maximum block heights for stored blocks.
     fn block_height_extrema(&self) -> Result<Option<(BlockHeight, BlockHeight)>, Self::Error>;
 
+    /// Returns the default target height and anchor height, given the
+    /// range of block heights that the backend knows about. 
     fn get_target_and_anchor_heights(
         &self,
     ) -> Result<Option<(BlockHeight, BlockHeight)>, Self::Error> {
@@ -51,8 +71,11 @@ pub trait WalletRead {
         })
     }
 
+    /// Returns the block hash for the block at the given height
     fn get_block_hash(&self, block_height: BlockHeight) -> Result<Option<BlockHash>, Self::Error>;
 
+    /// Returns the block hash for the block at the maximum height known
+    /// in stored data.
     fn get_max_height_hash(&self) -> Result<Option<(BlockHeight, BlockHash)>, Self::Error> {
         self.block_height_extrema()
             .and_then(|extrema_opt| {
@@ -66,19 +89,26 @@ pub trait WalletRead {
             .map(|oo| oo.flatten())
     }
 
+    /// Returns the block height in which the specified transaction was mined.
     fn get_tx_height(&self, txid: TxId) -> Result<Option<BlockHeight>, Self::Error>;
 
+    /// Returns the payment address for the specified account, if the account
+    /// identifier specified refers to a valid account for this wallet.
     fn get_address<P: consensus::Parameters>(
         &self,
         params: &P,
         account: AccountId,
     ) -> Result<Option<PaymentAddress>, Self::Error>;
 
+    /// Returns all extended full viewing keys known about by this wallet
+    // TODO: Should this also take an AccountId as argument?
     fn get_extended_full_viewing_keys<P: consensus::Parameters>(
         &self,
         params: &P,
     ) -> Result<Vec<ExtendedFullViewingKey>, Self::Error>;
 
+    /// Checks whether the specified extended full viewing key is a valid
+    /// key for the specified account.
     fn is_valid_account_extfvk<P: consensus::Parameters>(
         &self,
         params: &P,
@@ -86,48 +116,61 @@ pub trait WalletRead {
         extfvk: &ExtendedFullViewingKey,
     ) -> Result<bool, Self::Error>;
 
+    /// Returns the wallet balance for the specified account.
+    ///
+    /// This balance amount is the raw balance of all transactions in known
+    /// mined blocks, irrespective of confirmation depth.
+    // TODO: Do we actually need this? You can always get the "verified" 
+    // balance from the current chain tip.
     fn get_balance(&self, account: AccountId) -> Result<Amount, Self::Error>;
 
+    /// Returns the wallet balance for an account as of the specified block
+    /// height. and
+    /// 
+    /// This may be used to obtain a balance that ignores notes that have been
+    /// received so recently that they are not yet deemed spendable.
     fn get_verified_balance(
         &self,
         account: AccountId,
         anchor_height: BlockHeight,
     ) -> Result<Amount, Self::Error>;
 
+    /// Returns the memo for a received note, if it is known and a valid UTF-8 string.
     fn get_received_memo_as_utf8(
         &self,
         id_note: Self::NoteRef,
     ) -> Result<Option<String>, Self::Error>;
 
+    /// Returns the memo for a sent note, if it is known and a valid UTF-8 string.
     fn get_sent_memo_as_utf8(&self, id_note: Self::NoteRef) -> Result<Option<String>, Self::Error>;
 
+    /// Returns the note commitment tree at the specified block height.
     fn get_commitment_tree(
         &self,
         block_height: BlockHeight,
     ) -> Result<Option<CommitmentTree<Node>>, Self::Error>;
 
+    /// Returns the incremental witnesses as of the specified block height.
     fn get_witnesses(
         &self,
         block_height: BlockHeight,
     ) -> Result<Vec<(Self::NoteRef, IncrementalWitness<Node>)>, Self::Error>;
 
+    /// Returns the unspent nullifiers, along with the account identifiers
+    /// with which they are associated.
     fn get_nullifiers(&self) -> Result<Vec<(Vec<u8>, AccountId)>, Self::Error>;
 
+    /// Returns a list of spendable notes sufficient to cover the specified
+    /// target value, if possible. 
     fn select_spendable_notes(
         &self,
         account: AccountId,
         target_value: Amount,
         anchor_height: BlockHeight,
     ) -> Result<Vec<SpendableNote>, Self::Error>;
-
-    fn get_update_ops(&self) -> Result<Self::UpdateOps, Self::Error>;
 }
 
-pub trait WalletWrite {
-    type Error;
-    type NoteRef: Copy;
-    type TxRef: Copy;
-
+pub trait WalletWrite: WalletRead {
     fn transactionally<F, A>(&mut self, f: F) -> Result<A, Self::Error>
     where
         F: FnOnce(&mut Self) -> Result<A, Self::Error>;

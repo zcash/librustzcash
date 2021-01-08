@@ -26,13 +26,13 @@ pub const ANCHOR_OFFSET: u32 = 10;
 /// the wallet, and saves it to the wallet.
 pub fn decrypt_and_store_transaction<'db, E0, N, E, P, D>(
     params: &P,
-    data: &'db D,
+    mut data: &'db D,
     tx: &Transaction,
 ) -> Result<(), E>
 where
     E: From<Error<E0, N>>,
     P: consensus::Parameters,
-    &'db D: WalletRead<Error = E>,
+    &'db D: WalletRead<Error = E> + WalletWrite<Error = E>,
 {
     // Fetch the ExtendedFullViewingKeys we are tracking
     let extfvks = data.get_extended_full_viewing_keys(params)?;
@@ -51,10 +51,8 @@ where
     if outputs.is_empty() {
         Ok(())
     } else {
-        let mut db_update = data.get_update_ops()?;
-
         // Update the database atomically, to ensure the result is internally consistent.
-        db_update.transactionally(|up| {
+        data.transactionally(|up| {
             let tx_ref = up.put_tx_data(tx, None)?;
 
             for output in outputs {
@@ -144,7 +142,7 @@ where
 /// }
 /// ```
 pub fn create_spend_to_address<'db, E0, N, E, P, D, R>(
-    data: &'db D,
+    mut data: &'db D,
     params: &P,
     prover: impl TxProver,
     account: AccountId,
@@ -158,7 +156,7 @@ where
     E0: Into<Error<E, N>>,
     P: consensus::Parameters + Clone,
     R: Copy + Debug,
-    &'db D: WalletRead<Error = E0, TxRef = R>,
+    &'db D: WalletRead<Error = E0, TxRef = R> + WalletWrite<Error = E0, TxRef = R>,
 {
     // Check that the ExtendedSpendingKey we have been given corresponds to the
     // ExtendedFullViewingKey for the account we are spending from.
@@ -234,9 +232,7 @@ where
     };
 
     // Update the database atomically, to ensure the result is internally consistent.
-    let mut db_update = data.get_update_ops().map_err(|e| e.into())?;
-    db_update
-        .transactionally(|up| {
+    data.transactionally(|up| {
             let created = time::OffsetDateTime::now_utc();
             let tx_ref = up.put_tx_data(&tx, Some(created))?;
 

@@ -72,13 +72,86 @@ impl WalletDB {
     pub fn for_path<P: AsRef<Path>>(path: P) -> Result<Self, rusqlite::Error> {
         Connection::open(path).map(WalletDB)
     }
+
+    pub fn get_update_ops<'a>(&'a self) -> Result<DataConnStmtCache<'a>, SqliteClientError> {
+        Ok(
+            DataConnStmtCache {
+                conn: self,
+                stmt_insert_block: self.0.prepare(
+                    "INSERT INTO blocks (height, hash, time, sapling_tree)
+                    VALUES (?, ?, ?, ?)",
+                )?,
+                stmt_insert_tx_meta: self.0.prepare(
+                    "INSERT INTO transactions (txid, block, tx_index)
+                    VALUES (?, ?, ?)",
+                )?,
+                stmt_update_tx_meta: self.0.prepare(
+                    "UPDATE transactions
+                    SET block = ?, tx_index = ? WHERE txid = ?",
+                )?,
+                stmt_insert_tx_data: self.0.prepare(
+                    "INSERT INTO transactions (txid, created, expiry_height, raw)
+                    VALUES (?, ?, ?, ?)",
+                )?,
+                stmt_update_tx_data: self.0.prepare(
+                    "UPDATE transactions
+                    SET expiry_height = ?, raw = ? WHERE txid = ?",
+                )?,
+                stmt_select_tx_ref: self.0.prepare(
+                    "SELECT id_tx FROM transactions WHERE txid = ?",
+                )?,
+                stmt_mark_recived_note_spent: self.0.prepare(
+                    "UPDATE received_notes SET spent = ? WHERE nf = ?"
+                )?,
+                stmt_insert_received_note: self.0.prepare(
+                    "INSERT INTO received_notes (tx, output_index, account, diversifier, value, rcm, memo, nf, is_change)
+                    VALUES (:tx, :output_index, :account, :diversifier, :value, :rcm, :memo, :nf, :is_change)",
+                )?,
+                stmt_update_received_note: self.0.prepare(
+                    "UPDATE received_notes
+                    SET account = :account,
+                        diversifier = :diversifier,
+                        value = :value,
+                        rcm = :rcm,
+                        nf = IFNULL(:nf, nf),
+                        memo = IFNULL(:memo, memo),
+                        is_change = IFNULL(:is_change, is_change)
+                    WHERE tx = :tx AND output_index = :output_index",
+                )?,
+                stmt_select_received_note: self.0.prepare(
+                    "SELECT id_note FROM received_notes WHERE tx = ? AND output_index = ?"
+                )?,
+                stmt_update_sent_note: self.0.prepare(
+                    "UPDATE sent_notes
+                    SET from_account = ?, address = ?, value = ?, memo = ?
+                    WHERE tx = ? AND output_index = ?",
+                )?,
+                stmt_insert_sent_note: self.0.prepare(
+                    "INSERT INTO sent_notes (tx, output_index, from_account, address, value, memo)
+                    VALUES (?, ?, ?, ?, ?, ?)",
+                )?,
+                stmt_insert_witness: self.0.prepare(
+                    "INSERT INTO sapling_witnesses (note, block, witness)
+                    VALUES (?, ?, ?)",
+                )?,
+                stmt_prune_witnesses: self.0.prepare(
+                    "DELETE FROM sapling_witnesses WHERE block < ?"
+                )?,
+                stmt_update_expired: self.0.prepare(
+                    "UPDATE received_notes SET spent = NULL WHERE EXISTS (
+                        SELECT id_tx FROM transactions
+                        WHERE id_tx = received_notes.spent AND block IS NULL AND expiry_height < ?
+                    )",
+                )?,
+            }
+        )
+    }
 }
 
 impl<'a> WalletRead for &'a WalletDB {
     type Error = SqliteClientError;
     type NoteRef = NoteId;
     type TxRef = i64;
-    type UpdateOps = DataConnStmtCache<'a>;
 
     fn block_height_extrema(&self) -> Result<Option<(BlockHeight, BlockHeight)>, Self::Error> {
         wallet::block_height_extrema(self).map_err(SqliteClientError::from)
@@ -165,80 +238,6 @@ impl<'a> WalletRead for &'a WalletDB {
     ) -> Result<Vec<SpendableNote>, Self::Error> {
         wallet::transact::select_spendable_notes(self, account, target_value, anchor_height)
     }
-
-    fn get_update_ops(&self) -> Result<Self::UpdateOps, Self::Error> {
-        Ok(
-            DataConnStmtCache {
-                conn: self,
-                stmt_insert_block: self.0.prepare(
-                    "INSERT INTO blocks (height, hash, time, sapling_tree)
-                    VALUES (?, ?, ?, ?)",
-                )?,
-                stmt_insert_tx_meta: self.0.prepare(
-                    "INSERT INTO transactions (txid, block, tx_index)
-                    VALUES (?, ?, ?)",
-                )?,
-                stmt_update_tx_meta: self.0.prepare(
-                    "UPDATE transactions
-                    SET block = ?, tx_index = ? WHERE txid = ?",
-                )?,
-                stmt_insert_tx_data: self.0.prepare(
-                    "INSERT INTO transactions (txid, created, expiry_height, raw)
-                    VALUES (?, ?, ?, ?)",
-                )?,
-                stmt_update_tx_data: self.0.prepare(
-                    "UPDATE transactions
-                    SET expiry_height = ?, raw = ? WHERE txid = ?",
-                )?,
-                stmt_select_tx_ref: self.0.prepare(
-                    "SELECT id_tx FROM transactions WHERE txid = ?",
-                )?,
-                stmt_mark_recived_note_spent: self.0.prepare(
-                    "UPDATE received_notes SET spent = ? WHERE nf = ?"
-                )?,
-                stmt_insert_received_note: self.0.prepare(
-                    "INSERT INTO received_notes (tx, output_index, account, diversifier, value, rcm, memo, nf, is_change)
-                    VALUES (:tx, :output_index, :account, :diversifier, :value, :rcm, :memo, :nf, :is_change)",
-                )?,
-                stmt_update_received_note: self.0.prepare(
-                    "UPDATE received_notes
-                    SET account = :account,
-                        diversifier = :diversifier,
-                        value = :value,
-                        rcm = :rcm,
-                        nf = IFNULL(:nf, nf),
-                        memo = IFNULL(:memo, memo),
-                        is_change = IFNULL(:is_change, is_change)
-                    WHERE tx = :tx AND output_index = :output_index",
-                )?,
-                stmt_select_received_note: self.0.prepare(
-                    "SELECT id_note FROM received_notes WHERE tx = ? AND output_index = ?"
-                )?,
-                stmt_update_sent_note: self.0.prepare(
-                    "UPDATE sent_notes
-                    SET from_account = ?, address = ?, value = ?, memo = ?
-                    WHERE tx = ? AND output_index = ?",
-                )?,
-                stmt_insert_sent_note: self.0.prepare(
-                    "INSERT INTO sent_notes (tx, output_index, from_account, address, value, memo)
-                    VALUES (?, ?, ?, ?, ?, ?)",
-                )?,
-                stmt_insert_witness: self.0.prepare(
-                    "INSERT INTO sapling_witnesses (note, block, witness)
-                    VALUES (?, ?, ?)",
-                )?,
-                stmt_prune_witnesses: self.0.prepare(
-                    "DELETE FROM sapling_witnesses WHERE block < ?"
-                )?,
-                stmt_update_expired: self.0.prepare(
-                    "UPDATE received_notes SET spent = NULL WHERE EXISTS (
-                        SELECT id_tx FROM transactions
-                        WHERE id_tx = received_notes.spent AND block IS NULL AND expiry_height < ?
-                    )",
-                )?,
-            }
-        )
-    }
 }
 
 pub struct DataConnStmtCache<'a> {
@@ -266,11 +265,99 @@ pub struct DataConnStmtCache<'a> {
     stmt_update_expired: Statement<'a>,
 }
 
-impl<'a> WalletWrite for DataConnStmtCache<'a> {
+impl<'a> WalletRead for DataConnStmtCache<'a> {
     type Error = SqliteClientError;
-    type TxRef = i64;
     type NoteRef = NoteId;
+    type TxRef = i64;
 
+    fn block_height_extrema(&self) -> Result<Option<(BlockHeight, BlockHeight)>, Self::Error> {
+        self.conn.block_height_extrema()
+    }
+
+    fn get_block_hash(&self, block_height: BlockHeight) -> Result<Option<BlockHash>, Self::Error> {
+        self.conn.get_block_hash(block_height)
+    }
+
+    fn get_tx_height(&self, txid: TxId) -> Result<Option<BlockHeight>, Self::Error> {
+        self.conn.get_tx_height(txid)
+    }
+
+    fn get_extended_full_viewing_keys<P: consensus::Parameters>(
+        &self,
+        params: &P,
+    ) -> Result<Vec<ExtendedFullViewingKey>, Self::Error> {
+        self.conn.get_extended_full_viewing_keys(params)
+    }
+
+    fn get_address<P: consensus::Parameters>(
+        &self,
+        params: &P,
+        account: AccountId,
+    ) -> Result<Option<PaymentAddress>, Self::Error> {
+        self.conn.get_address(params, account)
+    }
+
+    fn is_valid_account_extfvk<P: consensus::Parameters>(
+        &self,
+        params: &P,
+        account: AccountId,
+        extfvk: &ExtendedFullViewingKey,
+    ) -> Result<bool, Self::Error> {
+        self.conn.is_valid_account_extfvk(params, account, extfvk)
+    }
+
+    fn get_balance(&self, account: AccountId) -> Result<Amount, Self::Error> {
+        self.conn.get_balance(account)
+    }
+
+    fn get_verified_balance(
+        &self,
+        account: AccountId,
+        anchor_height: BlockHeight,
+    ) -> Result<Amount, Self::Error> {
+        self.conn.get_verified_balance(account, anchor_height)
+    }
+
+    fn get_received_memo_as_utf8(
+        &self,
+        id_note: Self::NoteRef,
+    ) -> Result<Option<String>, Self::Error> {
+        self.conn.get_received_memo_as_utf8(id_note)
+    }
+
+    fn get_sent_memo_as_utf8(&self, id_note: Self::NoteRef) -> Result<Option<String>, Self::Error> {
+        self.conn.get_sent_memo_as_utf8(id_note)
+    }
+
+    fn get_commitment_tree(
+        &self,
+        block_height: BlockHeight,
+    ) -> Result<Option<CommitmentTree<Node>>, Self::Error> {
+        self.conn.get_commitment_tree(block_height)
+    }
+
+    fn get_witnesses(
+        &self,
+        block_height: BlockHeight,
+    ) -> Result<Vec<(Self::NoteRef, IncrementalWitness<Node>)>, Self::Error> {
+        self.conn.get_witnesses(block_height)
+    }
+
+    fn get_nullifiers(&self) -> Result<Vec<(Vec<u8>, AccountId)>, Self::Error> {
+        self.conn.get_nullifiers()
+    }
+
+    fn select_spendable_notes(
+        &self,
+        account: AccountId,
+        target_value: Amount,
+        anchor_height: BlockHeight,
+    ) -> Result<Vec<SpendableNote>, Self::Error> {
+        self.conn.select_spendable_notes(account, target_value, anchor_height)
+    }
+}
+
+impl<'a> WalletWrite for DataConnStmtCache<'a> {
     fn transactionally<F, A>(&mut self, f: F) -> Result<A, Self::Error>
     where
         F: FnOnce(&mut Self) -> Result<A, Self::Error>,

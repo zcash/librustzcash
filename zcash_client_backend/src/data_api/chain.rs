@@ -128,13 +128,13 @@ where
 pub fn scan_cached_blocks<'db, E, E0, N, P, C, D>(
     params: &P,
     cache: &C,
-    data: &'db D,
+    mut data: &'db D,
     limit: Option<u32>,
 ) -> Result<(), E>
 where
     P: consensus::Parameters,
     C: BlockSource<Error = E>,
-    &'db D: WalletRead<Error = E, NoteRef = N>,
+    &'db D: WalletRead<Error = E, NoteRef = N> + WalletWrite<Error = E, NoteRef = N>,
     N: Copy + Debug,
     E: From<Error<E0, N>>,
 {
@@ -217,8 +217,7 @@ where
         }
 
         // database updates for each block are transactional
-        let mut db_update = data.get_update_ops()?;
-        db_update.transactionally(|up| {
+        data.transactionally(|up| {
             // Insert the block into the database.
             up.insert_block(current_height, block_hash, block_time, &tree)?;
 

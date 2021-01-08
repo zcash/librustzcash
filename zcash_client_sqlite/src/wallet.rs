@@ -144,8 +144,9 @@ pub fn get_balance(data: &WalletDB, account: AccountId) -> Result<Amount, Sqlite
     }
 }
 
-/// Returns the verified balance for the account, which ignores notes that have been
-/// received too recently and are not yet deemed spendable.
+/// Returns the verified balance for the account at the specified height, 
+/// This may be used to obtain a balance that ignores notes that have been
+/// received so recently that they are not yet deemed spendable.
 ///
 /// # Examples
 ///
