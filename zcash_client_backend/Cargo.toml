@@ -31,6 +31,7 @@ percent-encoding = "2.1.0"
 protobuf-codegen-pure = "2.15"
 
 [dev-dependencies]
+gumdrop = "0.8"
 rand_core = "0.5.1"
 rand_xorshift = "0.2"
 
