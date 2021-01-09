@@ -170,11 +170,19 @@ pub trait WalletRead {
     ) -> Result<Vec<SpendableNote>, Self::Error>;
 }
 
+/// This trait encapsulate the write capabilities required to update stored
+/// wallet data.
 pub trait WalletWrite: WalletRead {
+    /// Perform one or more write operations of this trait transactionally.
+    /// Implementations of this method must ensure that all mutations to the
+    /// state of the data store made by the provided closure must be performed 
+    /// atomically and modifications to state must be automatically rolled back 
+    /// if the provided closure returns an error.
     fn transactionally<F, A>(&mut self, f: F) -> Result<A, Self::Error>
     where
         F: FnOnce(&mut Self) -> Result<A, Self::Error>;
 
+    /// Add the data for a block to the data store.
     fn insert_block(
         &mut self,
         block_height: BlockHeight,
@@ -183,18 +191,26 @@ pub trait WalletWrite: WalletRead {
         commitment_tree: &CommitmentTree<Node>,
     ) -> Result<(), Self::Error>;
 
+    /// This method assumes that the state of the underlying data store is
+    /// consistent up to a particular block height. Since it is possible that
+    /// a chain reorg might invalidate some stored state, this method must be
+    /// implemented in order to allow users of this API to "reset" the data store
+    /// to correctly represent chainstate as of a specified block height.
     fn rewind_to_height<P: consensus::Parameters>(
         &mut self,
         parameters: &P,
         block_height: BlockHeight,
     ) -> Result<(), Self::Error>;
 
+    /// Add wallet-relevant metadata for a specific transaction to the data
+    /// store.
     fn put_tx_meta(
         &mut self,
         tx: &WalletTx,
         height: BlockHeight,
     ) -> Result<Self::TxRef, Self::Error>;
 
+    /// Add a full transaction to the data store.
     fn put_tx_data(
         &mut self,
         tx: &Transaction,

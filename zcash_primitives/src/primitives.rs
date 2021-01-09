@@ -196,6 +196,9 @@ pub enum Rseed {
     AfterZip212([u8; 32]),
 }
 
+/// Typesafe wrapper for nullifier values.
+pub struct Nullifier(pub [u8; 32]);
+
 #[derive(Clone, Debug)]
 pub struct Note {
     /// The value of the note
