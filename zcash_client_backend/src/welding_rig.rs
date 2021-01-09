@@ -6,6 +6,7 @@ use subtle::{ConditionallySelectable, ConstantTimeEq, CtOption};
 use zcash_primitives::{
     consensus::{self, BlockHeight},
     merkle_tree::{CommitmentTree, IncrementalWitness},
+    primitives::Nullifier,
     note_encryption::try_sapling_compact_note_decryption,
     sapling::Node,
     transaction::TxId,
@@ -13,7 +14,7 @@ use zcash_primitives::{
 };
 
 use crate::proto::compact_formats::{CompactBlock, CompactOutput};
-use crate::wallet::{WalletShieldedOutput, WalletShieldedSpend, WalletTx};
+use crate::wallet::{AccountId, WalletShieldedOutput, WalletShieldedSpend, WalletTx};
 
 /// Scans a [`CompactOutput`] with a set of [`ExtendedFullViewingKey`]s.
 ///
@@ -27,7 +28,7 @@ fn scan_output<P: consensus::Parameters>(
     height: BlockHeight,
     (index, output): (usize, CompactOutput),
     ivks: &[jubjub::Fr],
-    spent_from_accounts: &HashSet<usize>,
+    spent_from_accounts: &HashSet<AccountId>,
     tree: &mut CommitmentTree<Node>,
     existing_witnesses: &mut [&mut IncrementalWitness<Node>],
     block_witnesses: &mut [&mut IncrementalWitness<Node>],
@@ -51,6 +52,7 @@ fn scan_output<P: consensus::Parameters>(
     tree.append(node).unwrap();
 
     for (account, ivk) in ivks.iter().enumerate() {
+        let account = AccountId(account as u32);
         let (note, to) =
             match try_sapling_compact_note_decryption(params, height, ivk, &epk, &cmu, &ct) {
                 Some(ret) => ret,
@@ -90,7 +92,7 @@ pub fn scan_block<P: consensus::Parameters>(
     params: &P,
     block: CompactBlock,
     extfvks: &[ExtendedFullViewingKey],
-    nullifiers: &[(&[u8], usize)],
+    nullifiers: &[(Nullifier, AccountId)],
     tree: &mut CommitmentTree<Node>,
     existing_witnesses: &mut [&mut IncrementalWitness<Node>],
 ) -> Vec<WalletTx> {
@@ -109,18 +111,19 @@ pub fn scan_block<P: consensus::Parameters>(
             .into_iter()
             .enumerate()
             .map(|(index, spend)| {
+                let spend_nf = Nullifier::from_slice(&spend.nf[..]);
                 // Find the first tracked nullifier that matches this spend, and produce
                 // a WalletShieldedSpend if there is a match, in constant time.
                 nullifiers
                     .iter()
-                    .map(|&(nf, account)| CtOption::new(account as u64, nf.ct_eq(&spend.nf[..])))
+                    .map(|&(nf, account)| CtOption::new(account.0 as u64, nf.0.ct_eq(&spend_nf.0)))
                     .fold(CtOption::new(0, 0.into()), |first, next| {
                         CtOption::conditional_select(&next, &first, first.is_some())
                     })
                     .map(|account| WalletShieldedSpend {
                         index,
-                        nf: spend.nf,
-                        account: account as usize,
+                        nf: spend_nf,
+                        account: AccountId(account as u32),
                     })
             })
             .filter(|spend| spend.is_some().into())

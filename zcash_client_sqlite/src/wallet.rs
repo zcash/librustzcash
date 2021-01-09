@@ -7,7 +7,7 @@ use zcash_primitives::{
     consensus::{self, BlockHeight, NetworkUpgrade},
     merkle_tree::{CommitmentTree, IncrementalWitness},
     note_encryption::Memo,
-    primitives::PaymentAddress,
+    primitives::{Nullifier, PaymentAddress},
     sapling::Node,
     transaction::{components::Amount, TxId},
     zip32::ExtendedFullViewingKey,
@@ -409,15 +409,15 @@ pub fn get_witnesses(
     Ok(res)
 }
 
-pub fn get_nullifiers(data: &WalletDB) -> Result<Vec<(Vec<u8>, AccountId)>, SqliteClientError> {
+pub fn get_nullifiers(data: &WalletDB) -> Result<Vec<(Nullifier, AccountId)>, SqliteClientError> {
     // Get the nullifiers for the notes we are tracking
     let mut stmt_fetch_nullifiers = data
         .0
         .prepare("SELECT id_note, nf, account FROM received_notes WHERE spent IS NULL")?;
     let nullifiers = stmt_fetch_nullifiers.query_map(NO_PARAMS, |row| {
-        let nf: Vec<u8> = row.get(1)?;
+        let nf_bytes: Vec<u8> = row.get(1)?;
         let account = AccountId(row.get(2)?);
-        Ok((nf, account))
+        Ok((Nullifier::from_slice(&nf_bytes), account))
     })?;
 
     let mut res = vec![];

@@ -36,7 +36,7 @@ use zcash_primitives::{
     consensus::{self, BlockHeight},
     merkle_tree::{CommitmentTree, IncrementalWitness},
     note_encryption::Memo,
-    primitives::PaymentAddress,
+    primitives::{Nullifier, PaymentAddress},
     sapling::Node,
     transaction::{components::Amount, Transaction, TxId},
     zip32::ExtendedFullViewingKey,
@@ -226,7 +226,7 @@ impl<'a> WalletRead for &'a WalletDB {
         wallet::get_witnesses(self, block_height)
     }
 
-    fn get_nullifiers(&self) -> Result<Vec<(Vec<u8>, AccountId)>, Self::Error> {
+    fn get_nullifiers(&self) -> Result<Vec<(Nullifier, AccountId)>, Self::Error> {
         wallet::get_nullifiers(self)
     }
 
@@ -343,7 +343,7 @@ impl<'a> WalletRead for DataConnStmtCache<'a> {
         self.conn.get_witnesses(block_height)
     }
 
-    fn get_nullifiers(&self) -> Result<Vec<(Vec<u8>, AccountId)>, Self::Error> {
+    fn get_nullifiers(&self) -> Result<Vec<(Nullifier, AccountId)>, Self::Error> {
         self.conn.get_nullifiers()
     }
 
@@ -477,9 +477,9 @@ impl<'a> WalletWrite for DataConnStmtCache<'a> {
         }
     }
 
-    fn mark_spent(&mut self, tx_ref: Self::TxRef, nf: &[u8]) -> Result<(), Self::Error> {
+    fn mark_spent(&mut self, tx_ref: Self::TxRef, nf: &Nullifier) -> Result<(), Self::Error> {
         self.stmt_mark_recived_note_spent
-            .execute(&[tx_ref.to_sql()?, nf.to_sql()?])?;
+            .execute(&[tx_ref.to_sql()?, nf.0.to_sql()?])?;
         Ok(())
     }
 
@@ -489,7 +489,7 @@ impl<'a> WalletWrite for DataConnStmtCache<'a> {
     fn put_received_note<T: ShieldedOutput>(
         &mut self,
         output: &T,
-        nf: Option<&[u8]>,
+        nf_opt: &Option<Nullifier>,
         tx_ref: Self::TxRef,
     ) -> Result<Self::NoteRef, Self::Error> {
         let rcm = output.note().rcm().to_repr();
@@ -501,13 +501,14 @@ impl<'a> WalletWrite for DataConnStmtCache<'a> {
         let is_change = output.is_change();
         let tx = tx_ref;
         let output_index = output.index() as i64;
+        let nf_bytes = nf_opt.map(|nf| nf.0.to_vec());
 
         let sql_args: Vec<(&str, &dyn ToSql)> = vec![
             (&":account", &account),
             (&":diversifier", &diversifier),
             (&":value", &value),
             (&":rcm", &rcm),
-            (&":nf", &nf),
+            (&":nf", &nf_bytes),
             (&":memo", &memo),
             (&":is_change", &is_change),
             (&":tx", &tx),

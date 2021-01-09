@@ -6,7 +6,7 @@ use zcash_primitives::{
     consensus::{self, BlockHeight},
     merkle_tree::{CommitmentTree, IncrementalWitness},
     note_encryption::Memo,
-    primitives::{Note, PaymentAddress},
+    primitives::{Note, PaymentAddress, Nullifier},
     sapling::Node,
     transaction::{components::Amount, Transaction, TxId},
     zip32::ExtendedFullViewingKey,
@@ -158,7 +158,7 @@ pub trait WalletRead {
 
     /// Returns the unspent nullifiers, along with the account identifiers
     /// with which they are associated.
-    fn get_nullifiers(&self) -> Result<Vec<(Vec<u8>, AccountId)>, Self::Error>;
+    fn get_nullifiers(&self) -> Result<Vec<(Nullifier, AccountId)>, Self::Error>;
 
     /// Returns a list of spendable notes sufficient to cover the specified
     /// target value, if possible. 
@@ -210,19 +210,19 @@ pub trait WalletWrite: WalletRead {
         height: BlockHeight,
     ) -> Result<Self::TxRef, Self::Error>;
 
-    /// Add a full transaction to the data store.
+    /// Add a full transaction contents to the data store.
     fn put_tx_data(
         &mut self,
         tx: &Transaction,
         created_at: Option<time::OffsetDateTime>,
     ) -> Result<Self::TxRef, Self::Error>;
 
-    fn mark_spent(&mut self, tx_ref: Self::TxRef, nf: &[u8]) -> Result<(), Self::Error>;
+    fn mark_spent(&mut self, tx_ref: Self::TxRef, nf: &Nullifier) -> Result<(), Self::Error>;
 
     fn put_received_note<T: ShieldedOutput>(
         &mut self,
         output: &T,
-        nf: Option<&[u8]>,
+        nf: &Option<Nullifier>,
         tx_ref: Self::TxRef,
     ) -> Result<Self::NoteRef, Self::Error>;
 
@@ -285,7 +285,7 @@ impl ShieldedOutput for WalletShieldedOutput {
         self.index
     }
     fn account(&self) -> AccountId {
-        AccountId(self.account as u32)
+        self.account
     }
     fn to(&self) -> &PaymentAddress {
         &self.to

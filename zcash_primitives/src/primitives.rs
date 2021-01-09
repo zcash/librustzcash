@@ -197,7 +197,16 @@ pub enum Rseed {
 }
 
 /// Typesafe wrapper for nullifier values.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct Nullifier(pub [u8; 32]);
+
+impl Nullifier {
+    pub fn from_slice(bytes: &[u8]) -> Nullifier {
+        let mut nf = Nullifier([0u8; 32]);
+        nf.0.copy_from_slice(bytes);
+        nf
+    }
+}
 
 #[derive(Clone, Debug)]
 pub struct Note {
@@ -259,12 +268,13 @@ impl Note {
 
     /// Computes the nullifier given the viewing key and
     /// note position
-    pub fn nf(&self, viewing_key: &ViewingKey, position: u64) -> Vec<u8> {
+    pub fn nf(&self, viewing_key: &ViewingKey, position: u64) -> Nullifier {
         // Compute rho = cm + position.G
         let rho = self.cm_full_point()
             + (constants::NULLIFIER_POSITION_GENERATOR * jubjub::Fr::from(position));
 
         // Compute nf = BLAKE2s(nk | rho)
+        Nullifier::from_slice(
         Blake2sParams::new()
             .hash_length(32)
             .personal(constants::PRF_NF_PERSONALIZATION)
@@ -273,7 +283,7 @@ impl Note {
             .update(&rho.to_bytes())
             .finalize()
             .as_bytes()
-            .to_vec()
+        )
     }
 
     /// Computes the note commitment

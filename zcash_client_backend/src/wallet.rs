@@ -4,13 +4,13 @@
 use zcash_primitives::{
     keys::OutgoingViewingKey,
     merkle_tree::IncrementalWitness,
-    primitives::{Diversifier, Note, PaymentAddress, Rseed},
+    primitives::{Diversifier, Note, Nullifier, PaymentAddress, Rseed},
     sapling::Node,
     transaction::{components::Amount, TxId},
 };
 
 /// A type-safe wrapper for account identifiers.
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub struct AccountId(pub u32);
 
 /// A subset of a [`Transaction`] relevant to wallets and light clients.
@@ -30,8 +30,8 @@ pub struct WalletTx {
 /// [`SpendDescription`]: zcash_primitives::transaction::components::SpendDescription
 pub struct WalletShieldedSpend {
     pub index: usize,
-    pub nf: Vec<u8>,
-    pub account: usize,
+    pub nf: Nullifier,
+    pub account: AccountId,
 }
 
 /// A subset of an [`OutputDescription`] relevant to wallets and light clients.
@@ -41,7 +41,7 @@ pub struct WalletShieldedOutput {
     pub index: usize,
     pub cmu: bls12_381::Scalar,
     pub epk: jubjub::ExtendedPoint,
-    pub account: usize,
+    pub account: AccountId,
     pub note: Note,
     pub to: PaymentAddress,
     pub is_change: bool,

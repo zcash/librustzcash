@@ -12,7 +12,7 @@ use crate::{
         BlockSource, WalletRead, WalletWrite,
     },
     proto::compact_formats::CompactBlock,
-    wallet::{AccountId, WalletTx},
+    wallet::{WalletTx},
     welding_rig::scan_block,
 };
 
@@ -177,16 +177,12 @@ where
         let block_time = block.time;
 
         let txs: Vec<WalletTx> = {
-            let nf_refs: Vec<_> = nullifiers
-                .iter()
-                .map(|(nf, acc)| (&nf[..], acc.0 as usize))
-                .collect();
             let mut witness_refs: Vec<_> = witnesses.iter_mut().map(|w| &mut w.1).collect();
             scan_block(
                 params,
                 block,
                 &extfvks[..],
-                &nf_refs,
+                &nullifiers,
                 &mut tree,
                 &mut witness_refs[..],
             )
@@ -229,26 +225,26 @@ where
                     up.mark_spent(tx_row, &spend.nf)?;
                 }
 
+                // remove spent nullifiers from the nullifier set
                 nullifiers.retain(|(nf, _acc)| {
-                    tx.shielded_spends
+                    !tx.shielded_spends
                         .iter()
-                        .find(|spend| &spend.nf == nf)
-                        .is_none()
+                        .any(|spend| &spend.nf == nf)
                 });
 
                 for output in tx.shielded_outputs {
                     let nf = output.note.nf(
-                        &extfvks[output.account].fvk.vk,
+                        &extfvks[output.account.0 as usize].fvk.vk,
                         output.witness.position() as u64,
                     );
 
-                    let note_id = up.put_received_note(&output, Some(&nf), tx_row)?;
+                    let note_id = up.put_received_note(&output, &Some(nf), tx_row)?;
 
                     // Save witness for note.
                     witnesses.push((note_id, output.witness));
 
                     // Cache nullifier for note (to detect subsequent spends in this scan).
-                    nullifiers.push((nf, AccountId(output.account as u32)));
+                    nullifiers.push((nf, output.account));
                 }
             }
 

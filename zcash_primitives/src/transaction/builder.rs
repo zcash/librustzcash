@@ -642,11 +642,10 @@ impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng> Builder<'a, P, R> {
             for (i, (pos, spend)) in spends.iter().enumerate() {
                 let proof_generation_key = spend.extsk.expsk.proof_generation_key();
 
-                let mut nullifier = [0u8; 32];
-                nullifier.copy_from_slice(&spend.note.nf(
+                let nullifier = spend.note.nf(
                     &proof_generation_key.to_viewing_key(),
                     spend.merkle_path.position,
-                ));
+                );
 
                 let (zkproof, cv, rk) = prover
                     .spend_proof(
