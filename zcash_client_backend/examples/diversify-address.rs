@@ -9,19 +9,16 @@ use zcash_primitives::{
 
 fn parse_viewing_key(s: &str) -> Result<(ExtendedFullViewingKey, bool), &'static str> {
     decode_extended_full_viewing_key(mainnet::HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY, s)
-        .map(|res| {
-            res.map(|vk| (vk, true))
-                .ok_or("Invalid mainnet Sapling viewing key")
+        .ok()
+        .flatten()
+        .map(|vk| (vk, true))
+        .or_else(|| {
+            decode_extended_full_viewing_key(testnet::HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY, s)
+                .ok()
+                .flatten()
+                .map(|vk| (vk, false))
         })
-        .or_else(|_| {
-            decode_extended_full_viewing_key(testnet::HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY, s).map(
-                |res| {
-                    res.map(|vk| (vk, false))
-                        .ok_or("Invalid testnet Sapling viewing key")
-                },
-            )
-        })
-        .map_err(|_| "Invalid Sapling viewing key")?
+        .ok_or("Invalid Sapling viewing key")
 }
 
 fn parse_diversifier_index(s: &str) -> Result<DiversifierIndex, &'static str> {
