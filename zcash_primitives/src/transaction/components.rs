@@ -10,9 +10,9 @@ use std::io::{self, Read, Write};
 
 use crate::extensions::transparent as tze;
 use crate::legacy::Script;
+use crate::primitives::Nullifier;
 use crate::redjubjub::{PublicKey, Signature};
 use crate::serialize::{CompactSize, Vector};
-use crate::primitives::Nullifier;
 
 pub mod amount;
 pub use self::amount::Amount;

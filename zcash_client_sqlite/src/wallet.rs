@@ -1,6 +1,7 @@
 //! Functions for querying information in the data database.
 
 use rusqlite::{OptionalExtension, ToSql, NO_PARAMS};
+use std::collections::HashMap;
 
 use zcash_primitives::{
     block::BlockHash,
@@ -63,15 +64,16 @@ pub fn get_address<P: consensus::Parameters>(
 pub fn get_extended_full_viewing_keys<P: consensus::Parameters>(
     data: &WalletDB,
     params: &P,
-) -> Result<Vec<ExtendedFullViewingKey>, SqliteClientError> {
+) -> Result<HashMap<AccountId, ExtendedFullViewingKey>, SqliteClientError> {
     // Fetch the ExtendedFullViewingKeys we are tracking
     let mut stmt_fetch_accounts = data
         .0
-        .prepare("SELECT extfvk FROM accounts ORDER BY account ASC")?;
+        .prepare("SELECT account, extfvk FROM accounts ORDER BY account ASC")?;
 
     let rows = stmt_fetch_accounts
         .query_map(NO_PARAMS, |row| {
-            row.get(0).map(|extfvk: String| {
+            let acct = row.get(0).map(AccountId)?;
+            let extfvk = row.get(1).map(|extfvk: String| {
                 decode_extended_full_viewing_key(
                     params.hrp_sapling_extended_full_viewing_key(),
                     &extfvk,
@@ -79,11 +81,19 @@ pub fn get_extended_full_viewing_keys<P: consensus::Parameters>(
                 .map_err(|e| Error::Bech32(e))
                 .and_then(|k| k.ok_or(Error::IncorrectHRPExtFVK))
                 .map_err(SqliteClientError)
-            })
+            })?;
+
+            Ok((acct, extfvk))
         })
         .map_err(SqliteClientError::from)?;
 
-    rows.collect::<Result<Result<_, _>, _>>()?
+    let mut res: HashMap<AccountId, ExtendedFullViewingKey> = HashMap::new();
+    for row in rows {
+        let (account_id, efvkr) = row?; 
+        res.insert(account_id, efvkr?);
+    }
+
+    Ok(res)
 }
 
 pub fn is_valid_account_extfvk<P: consensus::Parameters>(
@@ -144,7 +154,7 @@ pub fn get_balance(data: &WalletDB, account: AccountId) -> Result<Amount, Sqlite
     }
 }
 
-/// Returns the verified balance for the account at the specified height, 
+/// Returns the verified balance for the account at the specified height,
 /// This may be used to obtain a balance that ignores notes that have been
 /// received so recently that they are not yet deemed spendable.
 ///

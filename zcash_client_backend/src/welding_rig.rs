@@ -6,11 +6,10 @@ use subtle::{ConditionallySelectable, ConstantTimeEq, CtOption};
 use zcash_primitives::{
     consensus::{self, BlockHeight},
     merkle_tree::{CommitmentTree, IncrementalWitness},
-    primitives::Nullifier,
     note_encryption::try_sapling_compact_note_decryption,
+    primitives::Nullifier,
     sapling::Node,
     transaction::TxId,
-    zip32::ExtendedFullViewingKey,
 };
 
 use crate::proto::compact_formats::{CompactBlock, CompactOutput};
@@ -91,13 +90,12 @@ fn scan_output<P: consensus::Parameters>(
 pub fn scan_block<P: consensus::Parameters>(
     params: &P,
     block: CompactBlock,
-    extfvks: &[ExtendedFullViewingKey],
+    ivks: &[jubjub::Fr],
     nullifiers: &[(Nullifier, AccountId)],
     tree: &mut CommitmentTree<Node>,
     existing_witnesses: &mut [&mut IncrementalWitness<Node>],
 ) -> Vec<WalletTx> {
     let mut wtxs: Vec<WalletTx> = vec![];
-    let ivks: Vec<_> = extfvks.iter().map(|extfvk| extfvk.fvk.vk.ivk()).collect();
     let block_height = block.height();
 
     for tx in block.vtx.into_iter() {
@@ -201,13 +199,14 @@ mod tests {
         constants::SPENDING_KEY_GENERATOR,
         merkle_tree::CommitmentTree,
         note_encryption::{Memo, SaplingNoteEncryption},
-        primitives::Note,
+        primitives::{Note, Nullifier},
         transaction::components::Amount,
         util::generate_random_rseed,
         zip32::{ExtendedFullViewingKey, ExtendedSpendingKey},
     };
 
     use super::scan_block;
+    use crate::wallet::AccountId;
     use crate::proto::compact_formats::{CompactBlock, CompactOutput, CompactSpend, CompactTx};
 
     fn random_compact_tx(mut rng: impl RngCore) -> CompactTx {
@@ -247,7 +246,7 @@ mod tests {
     /// Returns the CompactBlock.
     fn fake_compact_block(
         height: BlockHeight,
-        nf: [u8; 32],
+        nf: Nullifier,
         extfvk: ExtendedFullViewingKey,
         value: Amount,
         tx_after: bool,
@@ -286,7 +285,7 @@ mod tests {
         }
 
         let mut cspend = CompactSpend::new();
-        cspend.set_nf(nf.to_vec());
+        cspend.set_nf(nf.0.to_vec());
         let mut cout = CompactOutput::new();
         cout.set_cmu(cmu);
         cout.set_epk(epk);
@@ -317,7 +316,7 @@ mod tests {
 
         let cb = fake_compact_block(
             1u32.into(),
-            [0; 32],
+            Nullifier([0; 32]),
             extfvk.clone(),
             Amount::from_u64(5).unwrap(),
             false,
@@ -328,7 +327,7 @@ mod tests {
         let txs = scan_block(
             &Network::TestNetwork,
             cb,
-            &[extfvk],
+            &[extfvk.fvk.vk.ivk()],
             &[],
             &mut tree,
             &mut [],
@@ -342,7 +341,7 @@ mod tests {
         assert_eq!(tx.shielded_spends.len(), 0);
         assert_eq!(tx.shielded_outputs.len(), 1);
         assert_eq!(tx.shielded_outputs[0].index, 0);
-        assert_eq!(tx.shielded_outputs[0].account, 0);
+        assert_eq!(tx.shielded_outputs[0].account, AccountId(0));
         assert_eq!(tx.shielded_outputs[0].note.value, 5);
 
         // Check that the witness root matches
@@ -356,7 +355,7 @@ mod tests {
 
         let cb = fake_compact_block(
             1u32.into(),
-            [0; 32],
+            Nullifier([0; 32]),
             extfvk.clone(),
             Amount::from_u64(5).unwrap(),
             true,
@@ -367,7 +366,7 @@ mod tests {
         let txs = scan_block(
             &Network::TestNetwork,
             cb,
-            &[extfvk],
+            &[extfvk.fvk.vk.ivk()],
             &[],
             &mut tree,
             &mut [],
@@ -381,7 +380,7 @@ mod tests {
         assert_eq!(tx.shielded_spends.len(), 0);
         assert_eq!(tx.shielded_outputs.len(), 1);
         assert_eq!(tx.shielded_outputs[0].index, 0);
-        assert_eq!(tx.shielded_outputs[0].account, 0);
+        assert_eq!(tx.shielded_outputs[0].account, AccountId(0));
         assert_eq!(tx.shielded_outputs[0].note.value, 5);
 
         // Check that the witness root matches
@@ -392,8 +391,8 @@ mod tests {
     fn scan_block_with_my_spend() {
         let extsk = ExtendedSpendingKey::master(&[]);
         let extfvk = ExtendedFullViewingKey::from(&extsk);
-        let nf = [7; 32];
-        let account = 12;
+        let nf = Nullifier([7; 32]);
+        let account = AccountId(12);
 
         let cb = fake_compact_block(1u32.into(), nf, extfvk, Amount::from_u64(5).unwrap(), false);
         assert_eq!(cb.vtx.len(), 2);
@@ -403,7 +402,7 @@ mod tests {
             &Network::TestNetwork,
             cb,
             &[],
-            &[(&nf, account)],
+            &[(nf.clone(), account)],
             &mut tree,
             &mut [],
         );

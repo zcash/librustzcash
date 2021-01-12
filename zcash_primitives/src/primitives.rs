@@ -206,6 +206,10 @@ impl Nullifier {
         nf.0.copy_from_slice(bytes);
         nf
     }
+
+    pub fn to_vec(&self) -> Vec<u8> {
+        self.0.to_vec()
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -275,14 +279,14 @@ impl Note {
 
         // Compute nf = BLAKE2s(nk | rho)
         Nullifier::from_slice(
-        Blake2sParams::new()
-            .hash_length(32)
-            .personal(constants::PRF_NF_PERSONALIZATION)
-            .to_state()
-            .update(&viewing_key.nk.to_bytes())
-            .update(&rho.to_bytes())
-            .finalize()
-            .as_bytes()
+            Blake2sParams::new()
+                .hash_length(32)
+                .personal(constants::PRF_NF_PERSONALIZATION)
+                .to_state()
+                .update(&viewing_key.nk.to_bytes())
+                .update(&rho.to_bytes())
+                .finalize()
+                .as_bytes(),
         )
     }
 

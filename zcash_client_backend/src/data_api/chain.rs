@@ -9,10 +9,10 @@ use zcash_primitives::{
 use crate::{
     data_api::{
         error::{ChainInvalid, Error},
-        BlockSource, WalletRead, WalletWrite,
+        BlockSource, WalletWrite,
     },
     proto::compact_formats::CompactBlock,
-    wallet::{WalletTx},
+    wallet::WalletTx,
     welding_rig::scan_block,
 };
 
@@ -120,21 +120,21 @@ where
 /// let cache_file = NamedTempFile::new().unwrap();
 /// let cache = BlockDB::for_path(cache_file).unwrap();
 /// let data_file = NamedTempFile::new().unwrap();
-/// let data = WalletDB::for_path(data_file).unwrap();
+/// let data = WalletDB::for_path(data_file).unwrap().get_update_ops().unwrap();
 /// scan_cached_blocks(&Network::TestNetwork, &cache, &data, None);
 /// ```
 ///
 /// [`init_blocks_table`]: crate::init::init_blocks_table
-pub fn scan_cached_blocks<'db, E, E0, N, P, C, D>(
+pub fn scan_cached_blocks<E, E0, N, P, C, D>(
     params: &P,
     cache: &C,
-    mut data: &'db D,
+    data: &mut D,
     limit: Option<u32>,
 ) -> Result<(), E>
 where
     P: consensus::Parameters,
     C: BlockSource<Error = E>,
-    &'db D: WalletRead<Error = E, NoteRef = N> + WalletWrite<Error = E, NoteRef = N>,
+    D: WalletWrite<Error = E, NoteRef = N>,
     N: Copy + Debug,
     E: From<Error<E0, N>>,
 {
@@ -151,6 +151,7 @@ where
 
     // Fetch the ExtendedFullViewingKeys we are tracking
     let extfvks = data.get_extended_full_viewing_keys(params)?;
+    let ivks: Vec<_> = extfvks.values().map(|extfvk| extfvk.fvk.vk.ivk()).collect();
 
     // Get the most recent CommitmentTree
     let mut tree = data
@@ -181,7 +182,7 @@ where
             scan_block(
                 params,
                 block,
-                &extfvks[..],
+                &ivks,
                 &nullifiers,
                 &mut tree,
                 &mut witness_refs[..],
@@ -226,25 +227,27 @@ where
                 }
 
                 // remove spent nullifiers from the nullifier set
-                nullifiers.retain(|(nf, _acc)| {
-                    !tx.shielded_spends
-                        .iter()
-                        .any(|spend| &spend.nf == nf)
-                });
+                nullifiers
+                    .retain(|(nf, _acc)| !tx.shielded_spends.iter().any(|spend| &spend.nf == nf));
 
                 for output in tx.shielded_outputs {
-                    let nf = output.note.nf(
-                        &extfvks[output.account.0 as usize].fvk.vk,
-                        output.witness.position() as u64,
-                    );
+                    match &extfvks.get(&output.account) {
+                        Some(extfvk) => {
+                            let nf = output.note.nf(
+                                &extfvk.fvk.vk,
+                                output.witness.position() as u64,
+                            );
 
-                    let note_id = up.put_received_note(&output, &Some(nf), tx_row)?;
+                            let note_id = up.put_received_note(&output, &Some(nf), tx_row)?;
 
-                    // Save witness for note.
-                    witnesses.push((note_id, output.witness));
+                            // Save witness for note.
+                            witnesses.push((note_id, output.witness));
 
-                    // Cache nullifier for note (to detect subsequent spends in this scan).
-                    nullifiers.push((nf, output.account));
+                            // Cache nullifier for note (to detect subsequent spends in this scan).
+                            nullifiers.push((nf, output.account));
+                        }
+                        None => ()
+                    }
                 }
             }
 

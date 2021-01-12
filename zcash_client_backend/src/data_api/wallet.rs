@@ -32,7 +32,7 @@ pub fn decrypt_and_store_transaction<'db, E0, N, E, P, D>(
 where
     E: From<Error<E0, N>>,
     P: consensus::Parameters,
-    &'db D: WalletRead<Error = E> + WalletWrite<Error = E>,
+    &'db D: WalletWrite<Error = E>,
 {
     // Fetch the ExtendedFullViewingKeys we are tracking
     let extfvks = data.get_extended_full_viewing_keys(params)?;
@@ -125,7 +125,7 @@ where
 /// let to = extsk.default_address().unwrap().1.into();
 ///
 /// let data_file = NamedTempFile::new().unwrap();
-/// let db = WalletDB::for_path(data_file).unwrap();
+/// let db = WalletDB::for_path(data_file).unwrap().get_update_ops().unwrap();
 /// match create_spend_to_address(
 ///     &db,
 ///     &Network::TestNetwork,
@@ -141,8 +141,8 @@ where
 ///     Err(e) => (),
 /// }
 /// ```
-pub fn create_spend_to_address<'db, E0, N, E, P, D, R>(
-    mut data: &'db D,
+pub fn create_spend_to_address<E0, N, E, P, D, R>(
+    data: &mut D,
     params: &P,
     prover: impl TxProver,
     account: AccountId,
@@ -156,7 +156,7 @@ where
     E0: Into<Error<E, N>>,
     P: consensus::Parameters + Clone,
     R: Copy + Debug,
-    &'db D: WalletRead<Error = E0, TxRef = R> + WalletWrite<Error = E0, TxRef = R>,
+    D: WalletWrite<Error = E0, TxRef = R>,
 {
     // Check that the ExtendedSpendingKey we have been given corresponds to the
     // ExtendedFullViewingKey for the account we are spending from.
@@ -233,33 +233,33 @@ where
 
     // Update the database atomically, to ensure the result is internally consistent.
     data.transactionally(|up| {
-            let created = time::OffsetDateTime::now_utc();
-            let tx_ref = up.put_tx_data(&tx, Some(created))?;
+        let created = time::OffsetDateTime::now_utc();
+        let tx_ref = up.put_tx_data(&tx, Some(created))?;
 
-            // Mark notes as spent.
-            //
-            // This locks the notes so they aren't selected again by a subsequent call to
-            // create_spend_to_address() before this transaction has been mined (at which point the notes
-            // get re-marked as spent).
-            //
-            // Assumes that create_spend_to_address() will never be called in parallel, which is a
-            // reasonable assumption for a light client such as a mobile phone.
-            for spend in &tx.shielded_spends {
-                up.mark_spent(tx_ref, &spend.nullifier)?;
-            }
+        // Mark notes as spent.
+        //
+        // This locks the notes so they aren't selected again by a subsequent call to
+        // create_spend_to_address() before this transaction has been mined (at which point the notes
+        // get re-marked as spent).
+        //
+        // Assumes that create_spend_to_address() will never be called in parallel, which is a
+        // reasonable assumption for a light client such as a mobile phone.
+        for spend in &tx.shielded_spends {
+            up.mark_spent(tx_ref, &spend.nullifier)?;
+        }
 
-            up.insert_sent_note(
-                params,
-                tx_ref,
-                output_index as usize,
-                account,
-                to,
-                value,
-                memo,
-            )?;
+        up.insert_sent_note(
+            params,
+            tx_ref,
+            output_index as usize,
+            account,
+            to,
+            value,
+            memo,
+        )?;
 
-            // Return the row number of the transaction, so the caller can fetch it for sending.
-            Ok(tx_ref)
-        })
-        .map_err(|e| e.into())
+        // Return the row number of the transaction, so the caller can fetch it for sending.
+        Ok(tx_ref)
+    })
+    .map_err(|e| e.into())
 }

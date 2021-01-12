@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use zcash_primitives::{
     consensus::{self, BlockHeight},
     note_encryption::{try_sapling_note_decryption, try_sapling_output_recovery, Memo},
@@ -5,6 +7,8 @@ use zcash_primitives::{
     transaction::Transaction,
     zip32::ExtendedFullViewingKey,
 };
+
+use crate::wallet::AccountId;
 
 /// A decrypted shielded output.
 pub struct DecryptedOutput {
@@ -15,7 +19,7 @@ pub struct DecryptedOutput {
     /// The note within the output.
     pub note: Note,
     /// The account that decrypted the note.
-    pub account: usize,
+    pub account: AccountId,
     /// The address the note was sent to.
     pub to: PaymentAddress,
     /// The memo included with the note.
@@ -33,22 +37,19 @@ pub fn decrypt_transaction<P: consensus::Parameters>(
     params: &P,
     height: BlockHeight,
     tx: &Transaction,
-    extfvks: &[ExtendedFullViewingKey],
+    extfvks: &HashMap<AccountId, ExtendedFullViewingKey>,
 ) -> Vec<DecryptedOutput> {
     let mut decrypted = vec![];
 
-    // Cache IncomingViewingKey calculation
-    let vks: Vec<_> = extfvks
-        .iter()
-        .map(|extfvk| (extfvk.fvk.vk.ivk(), extfvk.fvk.ovk))
-        .collect();
+    for (account, extfvk) in extfvks.iter() {
+        let ivk = extfvk.fvk.vk.ivk();
+        let ovk = extfvk.fvk.ovk;
 
-    for (index, output) in tx.shielded_outputs.iter().enumerate() {
-        for (account, (ivk, ovk)) in vks.iter().enumerate() {
+        for (index, output) in tx.shielded_outputs.iter().enumerate() {
             let ((note, to, memo), outgoing) = match try_sapling_note_decryption(
                 params,
                 height,
-                ivk,
+                &ivk,
                 &output.ephemeral_key,
                 &output.cmu,
                 &output.enc_ciphertext,
@@ -57,7 +58,7 @@ pub fn decrypt_transaction<P: consensus::Parameters>(
                 None => match try_sapling_output_recovery(
                     params,
                     height,
-                    ovk,
+                    &ovk,
                     &output.cv,
                     &output.cmu,
                     &output.ephemeral_key,
@@ -71,7 +72,7 @@ pub fn decrypt_transaction<P: consensus::Parameters>(
             decrypted.push(DecryptedOutput {
                 index,
                 note,
-                account,
+                account: *account,
                 to,
                 memo,
                 outgoing,

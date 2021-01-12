@@ -25,6 +25,7 @@
 //! [`init_cache_database`]: crate::init::init_cache_database
 
 use std::fmt;
+use std::collections::HashMap;
 use std::path::Path;
 
 use rusqlite::{types::ToSql, Connection, Statement, NO_PARAMS};
@@ -57,6 +58,8 @@ pub mod chain;
 pub mod error;
 pub mod wallet;
 
+/// A newtype wrapper for sqlite primary key values for the notes
+/// table.
 #[derive(Debug, Copy, Clone)]
 pub struct NoteId(pub i64);
 
@@ -66,13 +69,18 @@ impl fmt::Display for NoteId {
     }
 }
 
+/// A newtype wrapper for the sqlite connection to the wallet database.
 pub struct WalletDB(Connection);
 
 impl WalletDB {
+    /// Construct a connection to the wallet database stored at the specified path.
     pub fn for_path<P: AsRef<Path>>(path: P) -> Result<Self, rusqlite::Error> {
         Connection::open(path).map(WalletDB)
     }
 
+    /// Given a wallet database connection, obtain a handle for the write operations
+    /// for that database. This operation may eagerly initialize and cache sqlite
+    /// prepared statements that are used in write operations.
     pub fn get_update_ops<'a>(&'a self) -> Result<DataConnStmtCache<'a>, SqliteClientError> {
         Ok(
             DataConnStmtCache {
@@ -148,7 +156,7 @@ impl WalletDB {
     }
 }
 
-impl<'a> WalletRead for &'a WalletDB {
+impl WalletRead for WalletDB {
     type Error = SqliteClientError;
     type NoteRef = NoteId;
     type TxRef = i64;
@@ -168,7 +176,7 @@ impl<'a> WalletRead for &'a WalletDB {
     fn get_extended_full_viewing_keys<P: consensus::Parameters>(
         &self,
         params: &P,
-    ) -> Result<Vec<ExtendedFullViewingKey>, Self::Error> {
+    ) -> Result<HashMap<AccountId, ExtendedFullViewingKey>, Self::Error> {
         wallet::get_extended_full_viewing_keys(self, params)
     }
 
@@ -285,7 +293,7 @@ impl<'a> WalletRead for DataConnStmtCache<'a> {
     fn get_extended_full_viewing_keys<P: consensus::Parameters>(
         &self,
         params: &P,
-    ) -> Result<Vec<ExtendedFullViewingKey>, Self::Error> {
+    ) -> Result<HashMap<AccountId, ExtendedFullViewingKey>, Self::Error> {
         self.conn.get_extended_full_viewing_keys(params)
     }
 
@@ -569,7 +577,7 @@ impl<'a> WalletWrite for DataConnStmtCache<'a> {
         tx_ref: Self::TxRef,
     ) -> Result<(), Self::Error> {
         let output_index = output.index as i64;
-        let account = output.account as i64;
+        let account = output.account.0 as i64;
         let value = output.note.value as i64;
         let to_str = encode_payment_address(params.hrp_sapling_payment_address(), &output.to);
 
@@ -588,7 +596,7 @@ impl<'a> WalletWrite for DataConnStmtCache<'a> {
                 params,
                 tx_ref,
                 output.index,
-                AccountId(output.account as u32),
+                output.account,
                 &RecipientAddress::Shielded(output.to.clone()),
                 Amount::from_u64(output.note.value)
                     .map_err(|_| Error::CorruptedData("Note value invalid.".to_string()))?,
@@ -676,7 +684,7 @@ mod tests {
         block::BlockHash,
         consensus::{BlockHeight, Network, NetworkUpgrade, Parameters},
         note_encryption::{Memo, SaplingNoteEncryption},
-        primitives::{Note, PaymentAddress},
+        primitives::{Note, Nullifier, PaymentAddress},
         transaction::components::Amount,
         util::generate_random_rseed,
         zip32::ExtendedFullViewingKey,
@@ -715,7 +723,7 @@ mod tests {
         prev_hash: BlockHash,
         extfvk: ExtendedFullViewingKey,
         value: Amount,
-    ) -> (CompactBlock, Vec<u8>) {
+    ) -> (CompactBlock, Nullifier) {
         let to = extfvk.default_address().unwrap().1;
 
         // Create a fake Note for the account
@@ -762,7 +770,7 @@ mod tests {
     pub(crate) fn fake_compact_block_spending(
         height: BlockHeight,
         prev_hash: BlockHash,
-        (nf, in_value): (Vec<u8>, Amount),
+        (nf, in_value): (Nullifier, Amount),
         extfvk: ExtendedFullViewingKey,
         to: PaymentAddress,
         value: Amount,
@@ -772,7 +780,7 @@ mod tests {
 
         // Create a fake CompactBlock containing the note
         let mut cspend = CompactSpend::new();
-        cspend.set_nf(nf);
+        cspend.set_nf(nf.to_vec());
         let mut ctx = CompactTx::new();
         let mut txid = vec![0; 32];
         rng.fill_bytes(&mut txid);

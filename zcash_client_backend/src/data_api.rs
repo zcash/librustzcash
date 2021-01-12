@@ -1,4 +1,5 @@
 use std::cmp;
+use std::collections::HashMap;
 use std::fmt::Debug;
 
 use zcash_primitives::{
@@ -6,7 +7,7 @@ use zcash_primitives::{
     consensus::{self, BlockHeight},
     merkle_tree::{CommitmentTree, IncrementalWitness},
     note_encryption::Memo,
-    primitives::{Note, PaymentAddress, Nullifier},
+    primitives::{Note, Nullifier, PaymentAddress},
     sapling::Node,
     transaction::{components::Amount, Transaction, TxId},
     zip32::ExtendedFullViewingKey,
@@ -28,19 +29,19 @@ pub mod wallet;
 ///
 /// This trait defines the read-only portion of the storage
 /// interface atop which higher-level wallet operations are
-/// implemented. It serves to allow wallet functions to be 
+/// implemented. It serves to allow wallet functions to be
 /// abstracted away from any particular data storage substrate.
 pub trait WalletRead {
     /// The type of errors produced by a wallet backend.
     type Error;
 
-    /// Backend-specific note identifier. 
+    /// Backend-specific note identifier.
     ///
     /// For example, this might be a database identifier type
     /// or a UUID.
-    type NoteRef: Copy + Debug; 
+    type NoteRef: Copy + Debug;
 
-    /// Backend-specific transaction identifier. 
+    /// Backend-specific transaction identifier.
     ///
     /// For example, this might be a database identifier type
     /// or a TxId if the backend is able to support that type
@@ -51,7 +52,7 @@ pub trait WalletRead {
     fn block_height_extrema(&self) -> Result<Option<(BlockHeight, BlockHeight)>, Self::Error>;
 
     /// Returns the default target height and anchor height, given the
-    /// range of block heights that the backend knows about. 
+    /// range of block heights that the backend knows about.
     fn get_target_and_anchor_heights(
         &self,
     ) -> Result<Option<(BlockHeight, BlockHeight)>, Self::Error> {
@@ -105,10 +106,10 @@ pub trait WalletRead {
     fn get_extended_full_viewing_keys<P: consensus::Parameters>(
         &self,
         params: &P,
-    ) -> Result<Vec<ExtendedFullViewingKey>, Self::Error>;
+    ) -> Result<HashMap<AccountId, ExtendedFullViewingKey>, Self::Error>;
 
-    /// Checks whether the specified extended full viewing key is a valid
-    /// key for the specified account.
+    /// Checks whether the specified extended full viewing key is 
+    /// associated with the account.
     fn is_valid_account_extfvk<P: consensus::Parameters>(
         &self,
         params: &P,
@@ -120,13 +121,13 @@ pub trait WalletRead {
     ///
     /// This balance amount is the raw balance of all transactions in known
     /// mined blocks, irrespective of confirmation depth.
-    // TODO: Do we actually need this? You can always get the "verified" 
+    // TODO: Do we actually need this? You can always get the "verified"
     // balance from the current chain tip.
     fn get_balance(&self, account: AccountId) -> Result<Amount, Self::Error>;
 
     /// Returns the wallet balance for an account as of the specified block
     /// height. and
-    /// 
+    ///
     /// This may be used to obtain a balance that ignores notes that have been
     /// received so recently that they are not yet deemed spendable.
     fn get_verified_balance(
@@ -161,7 +162,7 @@ pub trait WalletRead {
     fn get_nullifiers(&self) -> Result<Vec<(Nullifier, AccountId)>, Self::Error>;
 
     /// Returns a list of spendable notes sufficient to cover the specified
-    /// target value, if possible. 
+    /// target value, if possible.
     fn select_spendable_notes(
         &self,
         account: AccountId,
@@ -175,8 +176,8 @@ pub trait WalletRead {
 pub trait WalletWrite: WalletRead {
     /// Perform one or more write operations of this trait transactionally.
     /// Implementations of this method must ensure that all mutations to the
-    /// state of the data store made by the provided closure must be performed 
-    /// atomically and modifications to state must be automatically rolled back 
+    /// state of the data store made by the provided closure must be performed
+    /// atomically and modifications to state must be automatically rolled back
     /// if the provided closure returns an error.
     fn transactionally<F, A>(&mut self, f: F) -> Result<A, Self::Error>
     where
@@ -217,8 +218,11 @@ pub trait WalletWrite: WalletRead {
         created_at: Option<time::OffsetDateTime>,
     ) -> Result<Self::TxRef, Self::Error>;
 
+    /// Mark the specified transaction as spent and record the nullifier.
     fn mark_spent(&mut self, tx_ref: Self::TxRef, nf: &Nullifier) -> Result<(), Self::Error>;
 
+    /// Record a note as having been received, along with its nullifier and the transaction 
+    /// within which the note was created.
     fn put_received_note<T: ShieldedOutput>(
         &mut self,
         output: &T,
@@ -306,7 +310,7 @@ impl ShieldedOutput for DecryptedOutput {
         self.index
     }
     fn account(&self) -> AccountId {
-        AccountId(self.account as u32)
+        self.account
     }
     fn to(&self) -> &PaymentAddress {
         &self.to

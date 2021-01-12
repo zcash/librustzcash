@@ -137,7 +137,6 @@ where
 
 #[cfg(test)]
 mod tests {
-    use rusqlite::Connection;
     use tempfile::NamedTempFile;
 
     use zcash_primitives::{
@@ -163,17 +162,17 @@ mod tests {
             init::{init_accounts_table, init_data_database},
             rewind_to_height,
         },
-        AccountId, BlockDB, NoteId, WalletDB,
+        AccountId, BlockDB, NoteId, WalletDB
     };
 
     #[test]
     fn valid_chain_states() {
         let cache_file = NamedTempFile::new().unwrap();
-        let db_cache = BlockDB(Connection::open(cache_file.path()).unwrap());
+        let db_cache = BlockDB::for_path(cache_file.path()).unwrap();
         init_cache_database(&db_cache).unwrap();
 
         let data_file = NamedTempFile::new().unwrap();
-        let db_data = WalletDB(Connection::open(data_file.path()).unwrap());
+        let db_data = WalletDB::for_path(data_file.path()).unwrap();
         init_data_database(&db_data).unwrap();
 
         // Add an account to the wallet
@@ -207,7 +206,13 @@ mod tests {
         .unwrap();
 
         // Scan the cache
-        scan_cached_blocks(&tests::network(), &db_cache, &db_data, None).unwrap();
+        let mut db_write = db_data.get_update_ops().unwrap();
+        scan_cached_blocks(
+            &tests::network(), 
+            &db_cache, 
+            &mut db_write, 
+            None
+        ).unwrap();
 
         // Data-only chain should be valid
         validate_chain(
@@ -235,7 +240,7 @@ mod tests {
         .unwrap();
 
         // Scan the cache again
-        scan_cached_blocks(&tests::network(), &db_cache, &db_data, None).unwrap();
+        scan_cached_blocks(&tests::network(), &db_cache, &mut db_write, None).unwrap();
 
         // Data-only chain should be valid
         validate_chain(
@@ -249,11 +254,11 @@ mod tests {
     #[test]
     fn invalid_chain_cache_disconnected() {
         let cache_file = NamedTempFile::new().unwrap();
-        let db_cache = BlockDB(Connection::open(cache_file.path()).unwrap());
+        let db_cache = BlockDB::for_path(cache_file.path()).unwrap();
         init_cache_database(&db_cache).unwrap();
 
         let data_file = NamedTempFile::new().unwrap();
-        let db_data = WalletDB(Connection::open(data_file.path()).unwrap());
+        let db_data = WalletDB::for_path(data_file.path()).unwrap();
         init_data_database(&db_data).unwrap();
 
         // Add an account to the wallet
@@ -278,7 +283,8 @@ mod tests {
         insert_into_cache(&db_cache, &cb2);
 
         // Scan the cache
-        scan_cached_blocks(&tests::network(), &db_cache, &db_data, None).unwrap();
+        let mut db_write = db_data.get_update_ops().unwrap();
+        scan_cached_blocks(&tests::network(), &db_cache, &mut db_write, None).unwrap();
 
         // Data-only chain should be valid
         validate_chain(
@@ -322,11 +328,11 @@ mod tests {
     #[test]
     fn invalid_chain_cache_reorg() {
         let cache_file = NamedTempFile::new().unwrap();
-        let db_cache = BlockDB(Connection::open(cache_file.path()).unwrap());
+        let db_cache = BlockDB::for_path(cache_file.path()).unwrap();
         init_cache_database(&db_cache).unwrap();
 
         let data_file = NamedTempFile::new().unwrap();
-        let db_data = WalletDB(Connection::open(data_file.path()).unwrap());
+        let db_data = WalletDB::for_path(data_file.path()).unwrap();
         init_data_database(&db_data).unwrap();
 
         // Add an account to the wallet
@@ -351,7 +357,8 @@ mod tests {
         insert_into_cache(&db_cache, &cb2);
 
         // Scan the cache
-        scan_cached_blocks(&tests::network(), &db_cache, &db_data, None).unwrap();
+        let mut db_write = db_data.get_update_ops().unwrap();
+        scan_cached_blocks(&tests::network(), &db_cache, &mut db_write, None).unwrap();
 
         // Data-only chain should be valid
         validate_chain(
@@ -395,11 +402,11 @@ mod tests {
     #[test]
     fn data_db_rewinding() {
         let cache_file = NamedTempFile::new().unwrap();
-        let db_cache = BlockDB(Connection::open(cache_file.path()).unwrap());
+        let db_cache = BlockDB::for_path(cache_file.path()).unwrap();
         init_cache_database(&db_cache).unwrap();
 
         let data_file = NamedTempFile::new().unwrap();
-        let db_data = WalletDB(Connection::open(data_file.path()).unwrap());
+        let db_data = WalletDB::for_path(data_file.path()).unwrap();
         init_data_database(&db_data).unwrap();
 
         // Add an account to the wallet
@@ -426,7 +433,8 @@ mod tests {
         insert_into_cache(&db_cache, &cb2);
 
         // Scan the cache
-        scan_cached_blocks(&tests::network(), &db_cache, &db_data, None).unwrap();
+        let mut db_write = db_data.get_update_ops().unwrap();
+        scan_cached_blocks(&tests::network(), &db_cache, &mut db_write, None).unwrap();
 
         // Account balance should reflect both received notes
         assert_eq!(get_balance(&db_data, AccountId(0)).unwrap(), value + value2);
@@ -444,7 +452,7 @@ mod tests {
         assert_eq!(get_balance(&db_data, AccountId(0)).unwrap(), value);
 
         // Scan the cache again
-        scan_cached_blocks(&tests::network(), &db_cache, &db_data, None).unwrap();
+        scan_cached_blocks(&tests::network(), &db_cache, &mut db_write, None).unwrap();
 
         // Account balance should again reflect both received notes
         assert_eq!(get_balance(&db_data, AccountId(0)).unwrap(), value + value2);
@@ -453,11 +461,11 @@ mod tests {
     #[test]
     fn scan_cached_blocks_requires_sequential_blocks() {
         let cache_file = NamedTempFile::new().unwrap();
-        let db_cache = BlockDB(Connection::open(cache_file.path()).unwrap());
+        let db_cache = BlockDB::for_path(cache_file.path()).unwrap();
         init_cache_database(&db_cache).unwrap();
 
         let data_file = NamedTempFile::new().unwrap();
-        let db_data = WalletDB(Connection::open(data_file.path()).unwrap());
+        let db_data = WalletDB::for_path(data_file.path()).unwrap();
         init_data_database(&db_data).unwrap();
 
         // Add an account to the wallet
@@ -474,7 +482,8 @@ mod tests {
             value,
         );
         insert_into_cache(&db_cache, &cb1);
-        scan_cached_blocks(&tests::network(), &db_cache, &db_data, None).unwrap();
+        let mut db_write = db_data.get_update_ops().unwrap();
+        scan_cached_blocks(&tests::network(), &db_cache, &mut db_write, None).unwrap();
         assert_eq!(get_balance(&db_data, AccountId(0)).unwrap(), value);
 
         // We cannot scan a block of height SAPLING_ACTIVATION_HEIGHT + 2 next
@@ -491,7 +500,7 @@ mod tests {
             value,
         );
         insert_into_cache(&db_cache, &cb3);
-        match scan_cached_blocks(&tests::network(), &db_cache, &db_data, None) {
+        match scan_cached_blocks(&tests::network(), &db_cache, &mut db_write, None) {
             Ok(_) => panic!("Should have failed"),
             Err(e) => {
                 assert_eq!(
@@ -507,7 +516,7 @@ mod tests {
 
         // If we add a block of height SAPLING_ACTIVATION_HEIGHT + 1, we can now scan both
         insert_into_cache(&db_cache, &cb2);
-        scan_cached_blocks(&tests::network(), &db_cache, &db_data, None).unwrap();
+        scan_cached_blocks(&tests::network(), &db_cache, &mut db_write, None).unwrap();
         assert_eq!(
             get_balance(&db_data, AccountId(0)).unwrap(),
             Amount::from_u64(150_000).unwrap()
@@ -517,11 +526,11 @@ mod tests {
     #[test]
     fn scan_cached_blocks_finds_received_notes() {
         let cache_file = NamedTempFile::new().unwrap();
-        let db_cache = BlockDB(Connection::open(cache_file.path()).unwrap());
+        let db_cache = BlockDB::for_path(cache_file.path()).unwrap();
         init_cache_database(&db_cache).unwrap();
 
         let data_file = NamedTempFile::new().unwrap();
-        let db_data = WalletDB(Connection::open(data_file.path()).unwrap());
+        let db_data = WalletDB::for_path(data_file.path()).unwrap();
         init_data_database(&db_data).unwrap();
 
         // Add an account to the wallet
@@ -543,7 +552,8 @@ mod tests {
         insert_into_cache(&db_cache, &cb);
 
         // Scan the cache
-        scan_cached_blocks(&tests::network(), &db_cache, &db_data, None).unwrap();
+        let mut db_write = db_data.get_update_ops().unwrap();
+        scan_cached_blocks(&tests::network(), &db_cache, &mut db_write, None).unwrap();
 
         // Account balance should reflect the received note
         assert_eq!(get_balance(&db_data, AccountId(0)).unwrap(), value);
@@ -555,7 +565,7 @@ mod tests {
         insert_into_cache(&db_cache, &cb2);
 
         // Scan the cache again
-        scan_cached_blocks(&tests::network(), &db_cache, &db_data, None).unwrap();
+        scan_cached_blocks(&tests::network(), &db_cache, &mut db_write, None).unwrap();
 
         // Account balance should reflect both received notes
         assert_eq!(get_balance(&db_data, AccountId(0)).unwrap(), value + value2);
@@ -564,11 +574,11 @@ mod tests {
     #[test]
     fn scan_cached_blocks_finds_change_notes() {
         let cache_file = NamedTempFile::new().unwrap();
-        let db_cache = BlockDB(Connection::open(cache_file.path()).unwrap());
+        let db_cache = BlockDB::for_path(cache_file.path()).unwrap();
         init_cache_database(&db_cache).unwrap();
 
         let data_file = NamedTempFile::new().unwrap();
-        let db_data = WalletDB(Connection::open(data_file.path()).unwrap());
+        let db_data = WalletDB::for_path(data_file.path()).unwrap();
         init_data_database(&db_data).unwrap();
 
         // Add an account to the wallet
@@ -590,7 +600,8 @@ mod tests {
         insert_into_cache(&db_cache, &cb);
 
         // Scan the cache
-        scan_cached_blocks(&tests::network(), &db_cache, &db_data, None).unwrap();
+        let mut db_write = db_data.get_update_ops().unwrap();
+        scan_cached_blocks(&tests::network(), &db_cache, &mut db_write, None).unwrap();
 
         // Account balance should reflect the received note
         assert_eq!(get_balance(&db_data, AccountId(0)).unwrap(), value);
@@ -612,7 +623,7 @@ mod tests {
         );
 
         // Scan the cache again
-        scan_cached_blocks(&tests::network(), &db_cache, &db_data, None).unwrap();
+        scan_cached_blocks(&tests::network(), &db_cache, &mut db_write, None).unwrap();
 
         // Account balance should equal the change
         assert_eq!(get_balance(&db_data, AccountId(0)).unwrap(), value - value2);
