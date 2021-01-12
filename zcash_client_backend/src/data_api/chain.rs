@@ -1,3 +1,5 @@
+//! Tools for blockchain validation & scanning
+
 use std::fmt::Debug;
 
 use zcash_primitives::{

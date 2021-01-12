@@ -1,3 +1,5 @@
+//! Interfaces for wallet data persistence & low-level wallet utilities.
+
 use std::cmp;
 use std::collections::HashMap;
 use std::fmt::Debug;

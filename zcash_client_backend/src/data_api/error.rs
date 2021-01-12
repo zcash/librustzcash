@@ -1,3 +1,5 @@
+//! Types for wallet error handling.
+
 use std::error;
 use std::fmt;
 use zcash_primitives::{
@@ -10,30 +12,57 @@ use crate::wallet::AccountId;
 
 #[derive(Debug)]
 pub enum ChainInvalid {
+    /// The hash of the parent block given by a proposed new chain tip does
+    /// not match the hash of the current chain tip.
     PrevHashMismatch,
-    /// (expected_height, actual_height)
+    /// The block height field of the proposed new chain tip is not equal 
+    /// to the height of the previous chain tip + 1. This variant stores
+    /// a copy of the incorrect height value for reporting purposes.
     BlockHeightDiscontinuity(BlockHeight),
 }
 
 #[derive(Debug)]
 pub enum Error<DbError, NoteId> {
+    /// Decoding of a stored value from its serialized form has failed.
     CorruptedData(String),
+    /// Decoding of the extended full viewing key has failed (for the specified network)
     IncorrectHRPExtFVK,
+    /// Unable to create a new spend because the wallet balance is not sufficient.
     InsufficientBalance(Amount, Amount),
+    /// Chain validation detected an error in the block at the specified block height.
     InvalidChain(BlockHeight, ChainInvalid),
+    /// A provided extfvk is not associated with the specified account.
     InvalidExtSK(AccountId),
+    /// A received memo cannot be interpreted as a UTF-8 string.
     InvalidMemo(std::str::Utf8Error),
+    /// The root of an output's witness tree in a newly arrived transaction does not correspond to 
+    /// root of the stored commitment tree at the recorded height.
     InvalidNewWitnessAnchor(usize, TxId, BlockHeight, Node),
+    /// The rcm value for a note cannot be decoded to a valid JubJub point.
     InvalidNote,
+    /// The root of an output's witness tree in a previously stored transaction does not correspond to 
+    /// root of the current commitment tree.
     InvalidWitnessAnchor(NoteId, BlockHeight),
+    /// The wallet must first perform a scan of the blockchain before other
+    /// operations can be performed.
     ScanRequired,
+    /// Illegal attempt to reinitialize an already-initialized wallet database.
+    //TODO: This ought to be moved to the database backend error type.
     TableNotEmpty,
+    /// Bech32 decoding error
     Bech32(bech32::Error),
+    /// Base58 decoding error
     Base58(bs58::decode::Error),
+    /// An error occurred building a new transaction.
     Builder(builder::Error),
+    /// Wrapper for errors from the underlying data store.
     Database(DbError),
+    /// Wrapper for errors from the IO subsystem
     Io(std::io::Error),
+    /// An error occurred decoding a protobuf message.
     Protobuf(protobuf::ProtobufError),
+    /// The wallet attempted a sapling-only operation at a block
+    /// height when Sapling was not yet active.
     SaplingNotActive,
 }
 
