@@ -643,10 +643,6 @@ impl BlockDB {
 impl BlockSource for BlockDB {
     type Error = SqliteClientError;
 
-    fn init_cache(&self) -> Result<(), Self::Error> {
-        chain::init::init_cache_database(self).map_err(SqliteClientError::from)
-    }
-
     fn with_blocks<F>(
         &self,
         from_height: BlockHeight,

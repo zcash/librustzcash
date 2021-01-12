@@ -235,6 +235,7 @@ pub trait WalletWrite: WalletRead {
         tx_ref: Self::TxRef,
     ) -> Result<Self::NoteRef, Self::Error>;
 
+    /// Add the incremental witness for the specified note to the database.
     fn insert_witness(
         &mut self,
         note_id: Self::NoteRef,
@@ -242,10 +243,21 @@ pub trait WalletWrite: WalletRead {
         height: BlockHeight,
     ) -> Result<(), Self::Error>;
 
+    /// Remove all incremental witness data below the specified block height.
+    //  TODO: this is a backend-specific optimization that probably shouldn't be part of
+    //  the public API
     fn prune_witnesses(&mut self, from_height: BlockHeight) -> Result<(), Self::Error>;
 
+    /// Remove the spent marker from any received notes that had been spent in a
+    /// transaction constructed by the wallet, but which transaction had not been mined
+    /// by the specified block height.
+    //  TODO: this is a backend-specific optimization that probably shouldn't be part of
+    //  the public API
     fn update_expired_notes(&mut self, from_height: BlockHeight) -> Result<(), Self::Error>;
 
+    /// Add the decrypted contents of a sent note to the database if it does not exist;
+    /// otherwise, update the note. This is useful in the case of a wallet restore where
+    /// the send of the note is being discovered via trial decryption.
     fn put_sent_note<P: consensus::Parameters>(
         &mut self,
         params: &P,
@@ -253,6 +265,7 @@ pub trait WalletWrite: WalletRead {
         tx_ref: Self::TxRef,
     ) -> Result<(), Self::Error>;
 
+    /// Add the decrypted contents of a sent note to the database.
     fn insert_sent_note<P: consensus::Parameters>(
         &mut self,
         params: &P,
@@ -265,11 +278,13 @@ pub trait WalletWrite: WalletRead {
     ) -> Result<(), Self::Error>;
 }
 
+/// This trait provides sequential access to raw blockchain data via a callback-oriented
+/// API.
 pub trait BlockSource {
     type Error;
 
-    fn init_cache(&self) -> Result<(), Self::Error>;
-
+    /// Scan the specified `limit` number of blocks from the blockchain, starting at
+    /// `from_height`, applying the provided callback to each block.
     fn with_blocks<F>(
         &self,
         from_height: BlockHeight,
@@ -280,6 +295,11 @@ pub trait BlockSource {
         F: FnMut(CompactBlock) -> Result<(), Self::Error>;
 }
 
+/// This trait provides a generalization over shielded output representations 
+/// that allows a wallet to avoid coupling to a specific one.
+// TODO: it'd probably be better not to unify the definitions of 
+// `WalletShieldedOutput` and `DecryptedOutput` via a compositional
+// approach, if possible.
 pub trait ShieldedOutput {
     fn index(&self) -> usize;
     fn account(&self) -> AccountId;
@@ -362,9 +382,6 @@ pub mod testing {
 
     impl BlockSource for MockBlockSource {
         type Error = Error<(), u32>;
-        fn init_cache(&self) -> Result<(), Self::Error> {
-            Ok(())
-        }
 
         fn with_blocks<F>(
             &self,
