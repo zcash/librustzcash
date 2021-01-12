@@ -102,7 +102,6 @@ pub trait WalletRead {
     ) -> Result<Option<PaymentAddress>, Self::Error>;
 
     /// Returns all extended full viewing keys known about by this wallet
-    // TODO: Should this also take an AccountId as argument?
     fn get_extended_full_viewing_keys<P: consensus::Parameters>(
         &self,
         params: &P,
@@ -120,10 +119,16 @@ pub trait WalletRead {
     /// Returns the wallet balance for the specified account.
     ///
     /// This balance amount is the raw balance of all transactions in known
-    /// mined blocks, irrespective of confirmation depth.
-    // TODO: Do we actually need this? You can always get the "verified"
-    // balance from the current chain tip.
-    fn get_balance(&self, account: AccountId) -> Result<Amount, Self::Error>;
+    /// mined blocks, irrespective of confirmation depth. A default implementation
+    /// is provided, but implementations of this trait may override the default
+    /// implementation for efficiency.
+    fn get_balance(&self, account: AccountId) -> Result<Amount, Self::Error> {
+        if let Some((_, tip)) = self.block_height_extrema()? {
+            self.get_verified_balance(account, tip)
+        } else {
+            Ok(Amount::zero())
+        }
+    }
 
     /// Returns the wallet balance for an account as of the specified block
     /// height. and
@@ -162,7 +167,7 @@ pub trait WalletRead {
     fn get_nullifiers(&self) -> Result<Vec<(Nullifier, AccountId)>, Self::Error>;
 
     /// Returns a list of spendable notes sufficient to cover the specified
-    /// target value, if possible.
+    /// target value, if possible. 
     fn select_spendable_notes(
         &self,
         account: AccountId,
@@ -323,5 +328,235 @@ impl ShieldedOutput for DecryptedOutput {
     }
     fn is_change(&self) -> Option<bool> {
         None
+    }
+}
+
+#[cfg(feature = "test-dependencies")]
+pub mod testing {
+    use std::collections::HashMap;
+
+    use zcash_primitives::{
+        block::BlockHash,
+        consensus::{self, BlockHeight},
+        merkle_tree::{CommitmentTree, IncrementalWitness},
+        note_encryption::Memo,
+        primitives::{Nullifier, PaymentAddress},
+        sapling::Node,
+        transaction::{components::Amount, Transaction, TxId},
+        zip32::ExtendedFullViewingKey,
+    };
+
+    use crate::{
+        address::RecipientAddress,
+        decrypt::DecryptedOutput,
+        wallet::{AccountId, SpendableNote, WalletTx},
+        proto::compact_formats::CompactBlock,
+    };
+
+    use super::{
+        error::Error,
+        BlockSource, WalletRead, WalletWrite, ShieldedOutput
+    };
+
+    pub struct MockBlockSource { }
+
+    impl BlockSource for MockBlockSource {
+        type Error = Error<(), u32>;
+        fn init_cache(&self) -> Result<(), Self::Error> {
+            Ok(())
+        }
+
+        fn with_blocks<F>(
+            &self,
+            _from_height: BlockHeight,
+            _limit: Option<u32>,
+            _with_row: F,
+        ) -> Result<(), Self::Error>
+        where
+            F: FnMut(CompactBlock) -> Result<(), Self::Error> {
+            Ok(())
+        }
+    }
+
+    pub struct MockWalletDB {
+    }
+
+    impl WalletRead for MockWalletDB {
+        type Error = Error<(), u32>;
+        type NoteRef = u32;
+        type TxRef = TxId;
+
+        fn block_height_extrema(&self) -> Result<Option<(BlockHeight, BlockHeight)>, Self::Error> {
+            Ok(None)
+        }
+
+        fn get_block_hash(&self, _block_height: BlockHeight) -> Result<Option<BlockHash>, Self::Error> {
+            Ok(None)
+        }
+
+        fn get_tx_height(&self, _txid: TxId) -> Result<Option<BlockHeight>, Self::Error> {
+            Ok(None)
+        }
+
+        fn get_address<P: consensus::Parameters>(
+            &self,
+            _params: &P,
+            _account: AccountId,
+        ) -> Result<Option<PaymentAddress>, Self::Error> {
+            Ok(None)
+        }
+
+        fn get_extended_full_viewing_keys<P: consensus::Parameters>(
+            &self,
+            _params: &P,
+        ) -> Result<HashMap<AccountId, ExtendedFullViewingKey>, Self::Error> {
+            Ok(HashMap::new())
+        }
+
+        fn is_valid_account_extfvk<P: consensus::Parameters>(
+            &self,
+            _params: &P,
+            _account: AccountId,
+            _extfvk: &ExtendedFullViewingKey,
+        ) -> Result<bool, Self::Error> {
+            Ok(false)
+        }
+
+        fn get_verified_balance(
+            &self,
+            _account: AccountId,
+            _anchor_height: BlockHeight,
+        ) -> Result<Amount, Self::Error> {
+            Ok(Amount::zero())
+        }
+
+        fn get_received_memo_as_utf8(&self, _id_note: Self::NoteRef) -> Result<Option<String>, Self::Error> {
+            Ok(None)
+        }
+
+        fn get_sent_memo_as_utf8(&self, _id_note: Self::NoteRef) -> Result<Option<String>, Self::Error> {
+            Ok(None)
+        }
+
+        fn get_commitment_tree(
+            &self,
+            _block_height: BlockHeight,
+        ) -> Result<Option<CommitmentTree<Node>>, Self::Error> {
+            Ok(None)
+        }
+
+        fn get_witnesses(
+            &self,
+            _block_height: BlockHeight,
+        ) -> Result<Vec<(Self::NoteRef, IncrementalWitness<Node>)>, Self::Error> {
+            Ok(Vec::new())
+        }
+
+        fn get_nullifiers(&self) -> Result<Vec<(Nullifier, AccountId)>, Self::Error> {
+            Ok(Vec::new())
+        }
+
+        fn select_spendable_notes(
+            &self,
+            _account: AccountId,
+            _target_value: Amount,
+            _anchor_height: BlockHeight,
+        ) -> Result<Vec<SpendableNote>, Self::Error> {
+            Ok(Vec::new())
+        }
+    }
+
+    impl WalletWrite for MockWalletDB {
+        fn transactionally<F, A>(&mut self, f: F) -> Result<A, Self::Error>
+        where
+            F: FnOnce(&mut Self) -> Result<A, Self::Error> {
+            f(self)
+        }
+
+        fn insert_block(
+            &mut self,
+            _block_height: BlockHeight,
+            _block_hash: BlockHash,
+            _block_time: u32,
+            _commitment_tree: &CommitmentTree<Node>,
+        ) -> Result<(), Self::Error> {
+            Ok(())
+        }
+
+        fn rewind_to_height<P: consensus::Parameters>(
+            &mut self,
+            _parameters: &P,
+            _block_height: BlockHeight,
+        ) -> Result<(), Self::Error> {
+            Ok(())
+        }
+
+        fn put_tx_meta(
+            &mut self,
+            _tx: &WalletTx,
+            _height: BlockHeight,
+        ) -> Result<Self::TxRef, Self::Error> {
+            Ok(TxId([0u8; 32]))
+        }
+
+        fn put_tx_data(
+            &mut self,
+            _tx: &Transaction,
+            _created_at: Option<time::OffsetDateTime>,
+        ) -> Result<Self::TxRef, Self::Error> {
+            Ok(TxId([0u8; 32]))
+        }
+
+        fn mark_spent(&mut self, _tx_ref: Self::TxRef, _nf: &Nullifier) -> Result<(), Self::Error> {
+            Ok(())
+        }
+
+        fn put_received_note<T: ShieldedOutput>(
+            &mut self,
+            _output: &T,
+            _nf: &Option<Nullifier>,
+            _tx_ref: Self::TxRef,
+        ) -> Result<Self::NoteRef, Self::Error> {
+            Ok(0u32)
+        }
+
+        fn insert_witness(
+            &mut self,
+            _note_id: Self::NoteRef,
+            _witness: &IncrementalWitness<Node>,
+            _height: BlockHeight,
+        ) -> Result<(), Self::Error> {
+            Ok(())
+        }
+
+        fn prune_witnesses(&mut self, _from_height: BlockHeight) -> Result<(), Self::Error> {
+            Ok(())
+        }
+
+        fn update_expired_notes(&mut self, _from_height: BlockHeight) -> Result<(), Self::Error> {
+            Ok(())
+        }
+
+        fn put_sent_note<P: consensus::Parameters>(
+            &mut self,
+            _params: &P,
+            _output: &DecryptedOutput,
+            _tx_ref: Self::TxRef,
+        ) -> Result<(), Self::Error> {
+            Ok(())
+        }
+
+        fn insert_sent_note<P: consensus::Parameters>(
+            &mut self,
+            _params: &P,
+            _tx_ref: Self::TxRef,
+            _output_index: usize,
+            _account: AccountId,
+            _to: &RecipientAddress,
+            _value: Amount,
+            _memo: Option<Memo>,
+        ) -> Result<(), Self::Error> {
+            Ok(())
+        }
     }
 }

@@ -10,26 +10,26 @@
 //!
 //! use zcash_client_backend::{
 //!     data_api::{
-//!         WalletRead,
+//!         BlockSource, WalletRead, WalletWrite,
 //!         chain::{
 //!             validate_chain,
 //!             scan_cached_blocks,
 //!         },
 //!         error::Error,
-//!     }
+//!         testing::{MockBlockSource, MockWalletDB}
+//!     },
 //! };
 //!
 //! use zcash_client_sqlite::{
 //!     BlockDB,
 //!     WalletDB,
 //!     wallet::{rewind_to_height},
+//!     wallet::init::{init_data_database},
 //! };
 //!
 //! let network = Network::TestNetwork;
-//! let cache_file = NamedTempFile::new().unwrap();
-//! let db_cache = BlockDB::for_path(cache_file).unwrap();
-//! let data_file = NamedTempFile::new().unwrap();
-//! let db_data = WalletDB::for_path(data_file).unwrap();
+//! let db_cache = MockBlockSource { };
+//! let mut db_data = MockWalletDB { };
 //!
 //! // 1) Download new CompactBlocks into db_cache.
 //!
@@ -37,8 +37,8 @@
 //! //
 //! // Given that we assume the server always gives us correct-at-the-time blocks, any
 //! // errors are in the blocks we have previously cached or scanned.
-//! if let Err(e) = validate_chain(&network, &db_cache, (&db_data).get_max_height_hash().unwrap()) {
-//!     match e.0 {
+//! if let Err(e) = validate_chain(&network, &db_cache, db_data.get_max_height_hash().unwrap()) {
+//!     match e {
 //!         Error::InvalidChain(upper_bound, _) => {
 //!             // a) Pick a height to rewind to.
 //!             //
@@ -48,7 +48,7 @@
 //!             let rewind_height = upper_bound - 10;
 //!
 //!             // b) Rewind scanned block information.
-//!             rewind_to_height(&db_data, &network, rewind_height);
+//!             db_data.rewind_to_height(&network, rewind_height);
 //!
 //!             // c) Delete cached blocks from rewind_height onwards.
 //!             //
@@ -71,7 +71,7 @@
 //! // At this point, the cache and scanned data are locally consistent (though not
 //! // necessarily consistent with the latest chain tip - this would be discovered the
 //! // next time this codepath is executed after new blocks are received).
-//! scan_cached_blocks(&network, &db_cache, &db_data, None);
+//! scan_cached_blocks(&network, &db_cache, &mut db_data, None).unwrap();
 //! ```
 use protobuf::parse_from_bytes;
 
