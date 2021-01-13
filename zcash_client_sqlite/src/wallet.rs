@@ -426,12 +426,8 @@ pub fn get_witnesses<P>(
         })
         .map_err(SqliteClientError::from)?;
 
-    let mut res = vec![];
-    for witness in witnesses {
-        // unwrap database error & IO error from IncrementalWitness::read
-        res.push(witness??);
-    }
-
+    // unwrap database error & IO error from IncrementalWitness::read
+    let res: Vec<_> = witnesses.collect::<Result<Result<_, _>, _>>()??;
     Ok(res)
 }
 
@@ -448,11 +444,7 @@ pub fn get_nullifiers<P>(
         Ok((Nullifier::from_slice(&nf_bytes), account))
     })?;
 
-    let mut res = vec![];
-    for nullifier in nullifiers {
-        // unwrap database error
-        res.push(nullifier?);
-    }
+    let res: Vec<_> = nullifiers.collect::<Result<_, _>>()?;
     Ok(res)
 }
 
