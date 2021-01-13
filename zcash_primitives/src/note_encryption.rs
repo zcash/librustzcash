@@ -237,7 +237,7 @@ pub fn prf_ock(
 /// let encCiphertext = enc.encrypt_note_plaintext();
 /// let outCiphertext = enc.encrypt_outgoing_plaintext(&cv.commitment().into(), &cmu);
 /// ```
-pub struct SaplingNoteEncryption<R: RngCore + CryptoRng> {
+pub struct SaplingNoteEncryption<R: RngCore> {
     epk: jubjub::SubgroupPoint,
     esk: jubjub::Fr,
     note: Note,
@@ -258,9 +258,21 @@ impl<R: RngCore + CryptoRng> SaplingNoteEncryption<R> {
         note: Note,
         to: PaymentAddress,
         memo: Memo,
+        rng: R,
+    ) -> Self {
+        Self::new_internal(ovk, note, to, memo, rng)
+    }
+}
+
+impl<R: RngCore> SaplingNoteEncryption<R> {
+    pub(crate) fn new_internal(
+        ovk: Option<OutgoingViewingKey>,
+        note: Note,
+        to: PaymentAddress,
+        memo: Memo,
         mut rng: R,
     ) -> Self {
-        let esk = note.generate_or_derive_esk(&mut rng);
+        let esk = note.generate_or_derive_esk_internal(&mut rng);
         let epk = note.g_d * esk;
 
         SaplingNoteEncryption {

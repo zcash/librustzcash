@@ -8,6 +8,8 @@ use crate::{
 use ff::Field;
 use rand_core::{CryptoRng, RngCore};
 
+pub(crate) mod sha256d;
+
 pub fn hash_to_scalar(persona: &[u8], a: &[u8], b: &[u8]) -> jubjub::Fr {
     let mut hasher = Params::new().hash_length(64).personal(persona).to_state();
     hasher.update(a);
@@ -17,6 +19,14 @@ pub fn hash_to_scalar(persona: &[u8], a: &[u8], b: &[u8]) -> jubjub::Fr {
 }
 
 pub fn generate_random_rseed<P: consensus::Parameters, R: RngCore + CryptoRng>(
+    params: &P,
+    height: BlockHeight,
+    rng: &mut R,
+) -> Rseed {
+    generate_random_rseed_internal(params, height, rng)
+}
+
+pub(crate) fn generate_random_rseed_internal<P: consensus::Parameters, R: RngCore>(
     params: &P,
     height: BlockHeight,
     rng: &mut R,

@@ -115,6 +115,15 @@ pub fn spend_sig<R: RngCore + CryptoRng>(
     sighash: &[u8; 32],
     rng: &mut R,
 ) -> Signature {
+    spend_sig_internal(ask, ar, sighash, rng)
+}
+
+pub(crate) fn spend_sig_internal<R: RngCore>(
+    ask: PrivateKey,
+    ar: jubjub::Fr,
+    sighash: &[u8; 32],
+    rng: &mut R,
+) -> Signature {
     // We compute `rsk`...
     let rsk = ask.randomize(ar);
 
