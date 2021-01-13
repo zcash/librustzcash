@@ -122,8 +122,9 @@ where
 /// let cache_file = NamedTempFile::new().unwrap();
 /// let cache = BlockDB::for_path(cache_file).unwrap();
 /// let data_file = NamedTempFile::new().unwrap();
-/// let data = WalletDB::for_path(data_file).unwrap().get_update_ops().unwrap();
-/// scan_cached_blocks(&Network::TestNetwork, &cache, &data, None);
+/// let db_read = WalletDB::for_path(data_file, Network::TestNetwork).unwrap();
+/// let mut data = db_read.get_update_ops().unwrap();
+/// scan_cached_blocks(&Network::TestNetwork, &cache, &mut data, None);
 /// ```
 ///
 /// [`init_blocks_table`]: crate::init::init_blocks_table
@@ -152,7 +153,7 @@ where
     })?;
 
     // Fetch the ExtendedFullViewingKeys we are tracking
-    let extfvks = data.get_extended_full_viewing_keys(params)?;
+    let extfvks = data.get_extended_full_viewing_keys()?;
     let ivks: Vec<_> = extfvks.values().map(|extfvk| extfvk.fvk.vk.ivk()).collect();
 
     // Get the most recent CommitmentTree

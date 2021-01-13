@@ -13,14 +13,13 @@ use zcash_primitives::{
 };
 
 use zcash_client_backend::{
-    data_api::error::Error,
     wallet::{AccountId, SpendableNote},
 };
 
 use crate::{error::SqliteClientError, WalletDB};
 
-pub fn select_spendable_notes(
-    data: &WalletDB,
+pub fn select_spendable_notes<P>(
+    wdb: &WalletDB<P>,
     account: AccountId,
     target_value: Amount,
     anchor_height: BlockHeight,
@@ -43,7 +42,7 @@ pub fn select_spendable_notes(
     //    required value, bringing the sum of all selected notes across the threshold.
     //
     // 4) Match the selected notes against the witnesses at the desired height.
-    let mut stmt_select_notes = data.0.prepare(
+    let mut stmt_select_notes = wdb.conn.prepare(
         "WITH selected AS (
             WITH eligible AS (
                 SELECT id_note, diversifier, value, rcm,
@@ -76,9 +75,9 @@ pub fn select_spendable_notes(
             let diversifier = {
                 let d: Vec<_> = row.get(0)?;
                 if d.len() != 11 {
-                    return Err(SqliteClientError(Error::CorruptedData(
+                    return Err(SqliteClientError::CorruptedData(
                         "Invalid diversifier length".to_string(),
-                    )));
+                    ));
                 }
                 let mut tmp = [0; 11];
                 tmp.copy_from_slice(&d);
@@ -96,9 +95,9 @@ pub fn select_spendable_notes(
                 let rcm = jubjub::Fr::from_repr(
                     rcm_bytes[..]
                         .try_into()
-                        .map_err(|_| SqliteClientError(Error::InvalidNote))?,
+                        .map_err(|_| SqliteClientError::InvalidNote)?,
                 )
-                .ok_or(SqliteClientError(Error::InvalidNote))?;
+                .ok_or(SqliteClientError::InvalidNote)?;
                 Rseed::BeforeZip212(rcm)
             };
 
@@ -148,7 +147,7 @@ mod tests {
             get_balance, get_verified_balance,
             init::{init_accounts_table, init_blocks_table, init_data_database},
         },
-        AccountId, BlockDB, WalletDB, DataConnStmtCache
+        AccountId, BlockDB, DataConnStmtCache, WalletDB,
     };
 
     fn test_prover() -> impl TxProver {
@@ -163,7 +162,7 @@ mod tests {
     #[test]
     fn create_to_address_fails_on_incorrect_extsk() {
         let data_file = NamedTempFile::new().unwrap();
-        let db_data = WalletDB(Connection::open(data_file.path()).unwrap());
+        let db_data = WalletDB::for_path(data_file.path(), tests::network()).unwrap();
         init_data_database(&db_data).unwrap();
 
         // Add two accounts to the wallet
@@ -173,7 +172,7 @@ mod tests {
             ExtendedFullViewingKey::from(&extsk0),
             ExtendedFullViewingKey::from(&extsk1),
         ];
-        init_accounts_table(&db_data, &tests::network(), &extfvks).unwrap();
+        init_accounts_table(&db_data, &extfvks).unwrap();
         let to = extsk0.default_address().unwrap().1.into();
 
         // Invalid extsk for the given account should cause an error
@@ -212,20 +211,20 @@ mod tests {
     #[test]
     fn create_to_address_fails_with_no_blocks() {
         let data_file = NamedTempFile::new().unwrap();
-        let db_data = WalletDB(Connection::open(data_file.path()).unwrap());
+        let db_data = WalletDB::for_path(data_file.path(), tests::network()).unwrap();
         init_data_database(&db_data).unwrap();
 
         // Add an account to the wallet
         let extsk = ExtendedSpendingKey::master(&[]);
         let extfvks = [ExtendedFullViewingKey::from(&extsk)];
-        init_accounts_table(&db_data, &tests::network(), &extfvks).unwrap();
+        init_accounts_table(&db_data, &extfvks).unwrap();
         let to = extsk.default_address().unwrap().1.into();
 
         // We cannot do anything if we aren't synchronised
         let mut db_write = db_data.get_update_ops().unwrap();
         match create_spend_to_address(
             &mut db_write,
-            &tests::network(),
+            &tests::network(), 
             test_prover(),
             AccountId(0),
             &extsk,
@@ -242,7 +241,7 @@ mod tests {
     #[test]
     fn create_to_address_fails_on_insufficient_balance() {
         let data_file = NamedTempFile::new().unwrap();
-        let db_data = WalletDB(Connection::open(data_file.path()).unwrap());
+        let db_data = WalletDB::for_path(data_file.path(), tests::network()).unwrap();
         init_data_database(&db_data).unwrap();
         init_blocks_table(
             &db_data,
@@ -256,7 +255,7 @@ mod tests {
         // Add an account to the wallet
         let extsk = ExtendedSpendingKey::master(&[]);
         let extfvks = [ExtendedFullViewingKey::from(&extsk)];
-        init_accounts_table(&db_data, &tests::network(), &extfvks).unwrap();
+        init_accounts_table(&db_data, &extfvks).unwrap();
         let to = extsk.default_address().unwrap().1.into();
 
         // Account balance should be zero
@@ -290,13 +289,13 @@ mod tests {
         init_cache_database(&db_cache).unwrap();
 
         let data_file = NamedTempFile::new().unwrap();
-        let db_data = WalletDB(Connection::open(data_file.path()).unwrap());
+        let db_data = WalletDB::for_path(data_file.path(), tests::network()).unwrap();
         init_data_database(&db_data).unwrap();
 
         // Add an account to the wallet
         let extsk = ExtendedSpendingKey::master(&[]);
         let extfvk = ExtendedFullViewingKey::from(&extsk);
-        init_accounts_table(&db_data, &tests::network(), &[extfvk.clone()]).unwrap();
+        init_accounts_table(&db_data, &[extfvk.clone()]).unwrap();
 
         // Add funds to the wallet in a single note
         let value = Amount::from_u64(50000).unwrap();
@@ -421,13 +420,13 @@ mod tests {
         init_cache_database(&db_cache).unwrap();
 
         let data_file = NamedTempFile::new().unwrap();
-        let db_data = WalletDB(Connection::open(data_file.path()).unwrap());
+        let db_data = WalletDB::for_path(data_file.path(), tests::network()).unwrap();
         init_data_database(&db_data).unwrap();
 
         // Add an account to the wallet
         let extsk = ExtendedSpendingKey::master(&[]);
         let extfvk = ExtendedFullViewingKey::from(&extsk);
-        init_accounts_table(&db_data, &tests::network(), &[extfvk.clone()]).unwrap();
+        init_accounts_table(&db_data, &[extfvk.clone()]).unwrap();
 
         // Add funds to the wallet in a single note
         let value = Amount::from_u64(50000).unwrap();
@@ -542,13 +541,13 @@ mod tests {
         init_cache_database(&db_cache).unwrap();
 
         let data_file = NamedTempFile::new().unwrap();
-        let db_data = WalletDB(Connection::open(data_file.path()).unwrap());
+        let db_data = WalletDB::for_path(data_file.path(), network).unwrap();
         init_data_database(&db_data).unwrap();
 
         // Add an account to the wallet
         let extsk = ExtendedSpendingKey::master(&[]);
         let extfvk = ExtendedFullViewingKey::from(&extsk);
-        init_accounts_table(&db_data, &network, &[extfvk.clone()]).unwrap();
+        init_accounts_table(&db_data, &[extfvk.clone()]).unwrap();
 
         // Add funds to the wallet in a single note
         let value = Amount::from_u64(50000).unwrap();
@@ -567,10 +566,10 @@ mod tests {
         let addr2 = extsk2.default_address().unwrap().1;
         let to = addr2.clone().into();
 
-        let send_and_recover_with_policy = |db_write: &mut DataConnStmtCache<'_>, ovk_policy| {
+        let send_and_recover_with_policy = |db_write: &mut DataConnStmtCache<'_, _>, ovk_policy| {
             let tx_row = create_spend_to_address(
                 db_write,
-                &network,
+                &tests::network(),
                 test_prover(),
                 AccountId(0),
                 &extsk,
@@ -582,8 +581,9 @@ mod tests {
             .unwrap();
 
             // Fetch the transaction from the database
-            let raw_tx: Vec<_> = db_write.conn
-                .0
+            let raw_tx: Vec<_> = db_write
+                .wallet_db
+                .conn
                 .query_row(
                     "SELECT raw FROM transactions
                     WHERE id_tx = ?",
@@ -594,8 +594,9 @@ mod tests {
             let tx = Transaction::read(&raw_tx[..]).unwrap();
 
             // Fetch the output index from the database
-            let output_index: i64 = db_write.conn
-                .0
+            let output_index: i64 = db_write
+                .wallet_db
+                .conn
                 .query_row(
                     "SELECT output_index FROM sent_notes
                     WHERE tx = ?",
@@ -620,7 +621,8 @@ mod tests {
 
         // Send some of the funds to another address, keeping history.
         // The recipient output is decryptable by the sender.
-        let (_, recovered_to, _) = send_and_recover_with_policy(&mut db_write, OvkPolicy::Sender).unwrap();
+        let (_, recovered_to, _) =
+            send_and_recover_with_policy(&mut db_write, OvkPolicy::Sender).unwrap();
         assert_eq!(&recovered_to, &addr2);
 
         // Mine blocks SAPLING_ACTIVATION_HEIGHT + 1 to 22 (that don't send us funds)

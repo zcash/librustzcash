@@ -6,7 +6,7 @@ use std::fmt::Debug;
 
 use zcash_primitives::{
     block::BlockHash,
-    consensus::{self, BlockHeight},
+    consensus::{BlockHeight},
     merkle_tree::{CommitmentTree, IncrementalWitness},
     note_encryption::Memo,
     primitives::{Note, Nullifier, PaymentAddress},
@@ -97,23 +97,20 @@ pub trait WalletRead {
 
     /// Returns the payment address for the specified account, if the account
     /// identifier specified refers to a valid account for this wallet.
-    fn get_address<P: consensus::Parameters>(
+    fn get_address(
         &self,
-        params: &P,
         account: AccountId,
     ) -> Result<Option<PaymentAddress>, Self::Error>;
 
     /// Returns all extended full viewing keys known about by this wallet
-    fn get_extended_full_viewing_keys<P: consensus::Parameters>(
+    fn get_extended_full_viewing_keys(
         &self,
-        params: &P,
     ) -> Result<HashMap<AccountId, ExtendedFullViewingKey>, Self::Error>;
 
     /// Checks whether the specified extended full viewing key is 
     /// associated with the account.
-    fn is_valid_account_extfvk<P: consensus::Parameters>(
+    fn is_valid_account_extfvk(
         &self,
-        params: &P,
         account: AccountId,
         extfvk: &ExtendedFullViewingKey,
     ) -> Result<bool, Self::Error>;
@@ -204,9 +201,8 @@ pub trait WalletWrite: WalletRead {
     /// a chain reorg might invalidate some stored state, this method must be
     /// implemented in order to allow users of this API to "reset" the data store
     /// to correctly represent chainstate as of a specified block height.
-    fn rewind_to_height<P: consensus::Parameters>(
+    fn rewind_to_height(
         &mut self,
-        parameters: &P,
         block_height: BlockHeight,
     ) -> Result<(), Self::Error>;
 
@@ -260,17 +256,15 @@ pub trait WalletWrite: WalletRead {
     /// Add the decrypted contents of a sent note to the database if it does not exist;
     /// otherwise, update the note. This is useful in the case of a wallet restore where
     /// the send of the note is being discovered via trial decryption.
-    fn put_sent_note<P: consensus::Parameters>(
+    fn put_sent_note(
         &mut self,
-        params: &P,
         output: &DecryptedOutput,
         tx_ref: Self::TxRef,
     ) -> Result<(), Self::Error>;
 
     /// Add the decrypted contents of a sent note to the database.
-    fn insert_sent_note<P: consensus::Parameters>(
+    fn insert_sent_note(
         &mut self,
-        params: &P,
         tx_ref: Self::TxRef,
         output_index: usize,
         account: AccountId,
@@ -417,24 +411,21 @@ pub mod testing {
             Ok(None)
         }
 
-        fn get_address<P: consensus::Parameters>(
+        fn get_address(
             &self,
-            _params: &P,
             _account: AccountId,
         ) -> Result<Option<PaymentAddress>, Self::Error> {
             Ok(None)
         }
 
-        fn get_extended_full_viewing_keys<P: consensus::Parameters>(
-            &self,
-            _params: &P,
+        fn get_extended_full_viewing_keys(
+            &self
         ) -> Result<HashMap<AccountId, ExtendedFullViewingKey>, Self::Error> {
             Ok(HashMap::new())
         }
 
-        fn is_valid_account_extfvk<P: consensus::Parameters>(
+        fn is_valid_account_extfvk(
             &self,
-            _params: &P,
             _account: AccountId,
             _extfvk: &ExtendedFullViewingKey,
         ) -> Result<bool, Self::Error> {
@@ -502,9 +493,8 @@ pub mod testing {
             Ok(())
         }
 
-        fn rewind_to_height<P: consensus::Parameters>(
+        fn rewind_to_height(
             &mut self,
-            _parameters: &P,
             _block_height: BlockHeight,
         ) -> Result<(), Self::Error> {
             Ok(())
@@ -556,18 +546,16 @@ pub mod testing {
             Ok(())
         }
 
-        fn put_sent_note<P: consensus::Parameters>(
+        fn put_sent_note(
             &mut self,
-            _params: &P,
             _output: &DecryptedOutput,
             _tx_ref: Self::TxRef,
         ) -> Result<(), Self::Error> {
             Ok(())
         }
 
-        fn insert_sent_note<P: consensus::Parameters>(
+        fn insert_sent_note(
             &mut self,
-            _params: &P,
             _tx_ref: Self::TxRef,
             _output_index: usize,
             _account: AccountId,

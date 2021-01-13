@@ -8,7 +8,7 @@ use zcash_primitives::{
     zip32::ExtendedFullViewingKey,
 };
 
-use zcash_client_backend::{data_api::error::Error, encoding::encode_extended_full_viewing_key};
+use zcash_client_backend::{encoding::encode_extended_full_viewing_key};
 
 use crate::{address_from_extfvk, error::SqliteClientError, WalletDB};
 
@@ -18,17 +18,18 @@ use crate::{address_from_extfvk, error::SqliteClientError, WalletDB};
 ///
 /// ```
 /// use tempfile::NamedTempFile;
+/// use zcash_primitives::consensus::Network;
 /// use zcash_client_sqlite::{
 ///     WalletDB,
 ///     wallet::init::init_data_database,
 /// };
 ///
 /// let data_file = NamedTempFile::new().unwrap();
-/// let db = WalletDB::for_path(data_file.path()).unwrap();
+/// let db = WalletDB::for_path(data_file.path(), Network::TestNetwork).unwrap();
 /// init_data_database(&db).unwrap();
 /// ```
-pub fn init_data_database(db_data: &WalletDB) -> Result<(), rusqlite::Error> {
-    db_data.0.execute(
+pub fn init_data_database<P>(wdb: &WalletDB<P>) -> Result<(), rusqlite::Error> {
+    wdb.conn.execute(
         "CREATE TABLE IF NOT EXISTS accounts (
             account INTEGER PRIMARY KEY,
             extfvk TEXT NOT NULL,
@@ -36,7 +37,7 @@ pub fn init_data_database(db_data: &WalletDB) -> Result<(), rusqlite::Error> {
         )",
         NO_PARAMS,
     )?;
-    db_data.0.execute(
+    wdb.conn.execute(
         "CREATE TABLE IF NOT EXISTS blocks (
             height INTEGER PRIMARY KEY,
             hash BLOB NOT NULL,
@@ -45,7 +46,7 @@ pub fn init_data_database(db_data: &WalletDB) -> Result<(), rusqlite::Error> {
         )",
         NO_PARAMS,
     )?;
-    db_data.0.execute(
+    wdb.conn.execute(
         "CREATE TABLE IF NOT EXISTS transactions (
             id_tx INTEGER PRIMARY KEY,
             txid BLOB NOT NULL UNIQUE,
@@ -58,7 +59,7 @@ pub fn init_data_database(db_data: &WalletDB) -> Result<(), rusqlite::Error> {
         )",
         NO_PARAMS,
     )?;
-    db_data.0.execute(
+    wdb.conn.execute(
         "CREATE TABLE IF NOT EXISTS received_notes (
             id_note INTEGER PRIMARY KEY,
             tx INTEGER NOT NULL,
@@ -78,7 +79,7 @@ pub fn init_data_database(db_data: &WalletDB) -> Result<(), rusqlite::Error> {
         )",
         NO_PARAMS,
     )?;
-    db_data.0.execute(
+    wdb.conn.execute(
         "CREATE TABLE IF NOT EXISTS sapling_witnesses (
             id_witness INTEGER PRIMARY KEY,
             note INTEGER NOT NULL,
@@ -90,7 +91,7 @@ pub fn init_data_database(db_data: &WalletDB) -> Result<(), rusqlite::Error> {
         )",
         NO_PARAMS,
     )?;
-    db_data.0.execute(
+    wdb.conn.execute(
         "CREATE TABLE IF NOT EXISTS sent_notes (
             id_note INTEGER PRIMARY KEY,
             tx INTEGER NOT NULL,
@@ -131,38 +132,37 @@ pub fn init_data_database(db_data: &WalletDB) -> Result<(), rusqlite::Error> {
 /// };
 ///
 /// let data_file = NamedTempFile::new().unwrap();
-/// let db_data = WalletDB::for_path(data_file.path()).unwrap();
+/// let db_data = WalletDB::for_path(data_file.path(), Network::TestNetwork).unwrap();
 /// init_data_database(&db_data).unwrap();
 ///
 /// let extsk = ExtendedSpendingKey::master(&[]);
 /// let extfvks = [ExtendedFullViewingKey::from(&extsk)];
-/// init_accounts_table(&db_data, &Network::TestNetwork, &extfvks).unwrap();
+/// init_accounts_table(&db_data, &extfvks).unwrap();
 /// ```
 ///
 /// [`get_address`]: crate::wallet::get_address
 /// [`scan_cached_blocks`]: crate::scan::scan_cached_blocks
 /// [`create_to_address`]: crate::transact::create_to_address
 pub fn init_accounts_table<P: consensus::Parameters>(
-    data: &WalletDB,
-    params: &P,
+    wdb: &WalletDB<P>,
     extfvks: &[ExtendedFullViewingKey],
 ) -> Result<(), SqliteClientError> {
-    let mut empty_check = data.0.prepare("SELECT * FROM accounts LIMIT 1")?;
+    let mut empty_check = wdb.conn.prepare("SELECT * FROM accounts LIMIT 1")?;
     if empty_check.exists(NO_PARAMS)? {
-        return Err(SqliteClientError(Error::TableNotEmpty));
+        return Err(SqliteClientError::TableNotEmpty);
     }
 
     // Insert accounts atomically
-    data.0.execute("BEGIN IMMEDIATE", NO_PARAMS)?;
+    wdb.conn.execute("BEGIN IMMEDIATE", NO_PARAMS)?;
     for (account, extfvk) in extfvks.iter().enumerate() {
         let extfvk_str = encode_extended_full_viewing_key(
-            params.hrp_sapling_extended_full_viewing_key(),
+            wdb.params.hrp_sapling_extended_full_viewing_key(),
             extfvk,
         );
 
-        let address_str = address_from_extfvk(params, extfvk);
+        let address_str = address_from_extfvk(&wdb.params, extfvk);
 
-        data.0.execute(
+        wdb.conn.execute(
             "INSERT INTO accounts (account, extfvk, address)
             VALUES (?, ?, ?)",
             &[
@@ -172,7 +172,7 @@ pub fn init_accounts_table<P: consensus::Parameters>(
             ],
         )?;
     }
-    data.0.execute("COMMIT", NO_PARAMS)?;
+    wdb.conn.execute("COMMIT", NO_PARAMS)?;
 
     Ok(())
 }
@@ -188,7 +188,7 @@ pub fn init_accounts_table<P: consensus::Parameters>(
 /// use tempfile::NamedTempFile;
 /// use zcash_primitives::{
 ///     block::BlockHash,
-///     consensus::BlockHeight,
+///     consensus::{BlockHeight, Network},
 /// };
 /// use zcash_client_sqlite::{
 ///     WalletDB,
@@ -206,22 +206,22 @@ pub fn init_accounts_table<P: consensus::Parameters>(
 /// let sapling_tree = &[];
 ///
 /// let data_file = NamedTempFile::new().unwrap();
-/// let db = WalletDB::for_path(data_file.path()).unwrap();
+/// let db = WalletDB::for_path(data_file.path(), Network::TestNetwork).unwrap();
 /// init_blocks_table(&db, height, hash, time, sapling_tree);
 /// ```
-pub fn init_blocks_table(
-    data: &WalletDB,
+pub fn init_blocks_table<P>(
+    wdb: &WalletDB<P>,
     height: BlockHeight,
     hash: BlockHash,
     time: u32,
     sapling_tree: &[u8],
 ) -> Result<(), SqliteClientError> {
-    let mut empty_check = data.0.prepare("SELECT * FROM blocks LIMIT 1")?;
+    let mut empty_check = wdb.conn.prepare("SELECT * FROM blocks LIMIT 1")?;
     if empty_check.exists(NO_PARAMS)? {
-        return Err(SqliteClientError(Error::TableNotEmpty));
+        return Err(SqliteClientError::TableNotEmpty);
     }
 
-    data.0.execute(
+    wdb.conn.execute(
         "INSERT INTO blocks (height, hash, time, sapling_tree)
         VALUES (?, ?, ?, ?)",
         &[
@@ -237,7 +237,6 @@ pub fn init_blocks_table(
 
 #[cfg(test)]
 mod tests {
-    use rusqlite::Connection;
     use tempfile::NamedTempFile;
 
     use zcash_primitives::{
@@ -253,28 +252,28 @@ mod tests {
     #[test]
     fn init_accounts_table_only_works_once() {
         let data_file = NamedTempFile::new().unwrap();
-        let db_data = WalletDB(Connection::open(data_file.path()).unwrap());
+        let db_data = WalletDB::for_path(data_file.path(), tests::network()).unwrap();
         init_data_database(&db_data).unwrap();
 
         // We can call the function as many times as we want with no data
-        init_accounts_table(&db_data, &tests::network(), &[]).unwrap();
-        init_accounts_table(&db_data, &tests::network(), &[]).unwrap();
+        init_accounts_table(&db_data, &[]).unwrap();
+        init_accounts_table(&db_data, &[]).unwrap();
 
         // First call with data should initialise the accounts table
         let extfvks = [ExtendedFullViewingKey::from(&ExtendedSpendingKey::master(
             &[],
         ))];
-        init_accounts_table(&db_data, &tests::network(), &extfvks).unwrap();
+        init_accounts_table(&db_data, &extfvks).unwrap();
 
         // Subsequent calls should return an error
-        init_accounts_table(&db_data, &tests::network(), &[]).unwrap_err();
-        init_accounts_table(&db_data, &tests::network(), &extfvks).unwrap_err();
+        init_accounts_table(&db_data, &[]).unwrap_err();
+        init_accounts_table(&db_data, &extfvks).unwrap_err();
     }
 
     #[test]
     fn init_blocks_table_only_works_once() {
         let data_file = NamedTempFile::new().unwrap();
-        let db_data = WalletDB(Connection::open(data_file.path()).unwrap());
+        let db_data = WalletDB::for_path(data_file.path(), tests::network()).unwrap();
         init_data_database(&db_data).unwrap();
 
         // First call with data should initialise the blocks table
@@ -301,16 +300,16 @@ mod tests {
     #[test]
     fn init_accounts_table_stores_correct_address() {
         let data_file = NamedTempFile::new().unwrap();
-        let db_data = WalletDB(Connection::open(data_file.path()).unwrap());
+        let db_data = WalletDB::for_path(data_file.path(), tests::network()).unwrap();
         init_data_database(&db_data).unwrap();
 
         // Add an account to the wallet
         let extsk = ExtendedSpendingKey::master(&[]);
         let extfvks = [ExtendedFullViewingKey::from(&extsk)];
-        init_accounts_table(&db_data, &tests::network(), &extfvks).unwrap();
+        init_accounts_table(&db_data, &extfvks).unwrap();
 
         // The account's address should be in the data DB
-        let pa = get_address(&db_data, &tests::network(), AccountId(0)).unwrap();
+        let pa = get_address(&db_data, AccountId(0)).unwrap();
         assert_eq!(pa.unwrap(), extsk.default_address().unwrap().1);
     }
 }

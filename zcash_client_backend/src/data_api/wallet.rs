@@ -35,7 +35,7 @@ where
     &'db D: WalletWrite<Error = E>,
 {
     // Fetch the ExtendedFullViewingKeys we are tracking
-    let extfvks = data.get_extended_full_viewing_keys(params)?;
+    let extfvks = data.get_extended_full_viewing_keys()?;
 
     // Height is block height for mined transactions, and the "mempool height" (chain height + 1)
     // for mempool transactions.
@@ -57,7 +57,7 @@ where
 
             for output in outputs {
                 if output.outgoing {
-                    up.put_sent_note(params, &output, tx_ref)?;
+                    up.put_sent_note(&output, tx_ref)?;
                 } else {
                     up.put_received_note(&output, &None, tx_ref)?;
                 }
@@ -125,9 +125,10 @@ where
 /// let to = extsk.default_address().unwrap().1.into();
 ///
 /// let data_file = NamedTempFile::new().unwrap();
-/// let db = WalletDB::for_path(data_file).unwrap().get_update_ops().unwrap();
+/// let db_read = WalletDB::for_path(data_file, Network::TestNetwork).unwrap();
+/// let mut db = db_read.get_update_ops().unwrap();
 /// match create_spend_to_address(
-///     &db,
+///     &mut db,
 ///     &Network::TestNetwork,
 ///     tx_prover,
 ///     account,
@@ -162,7 +163,7 @@ where
     // ExtendedFullViewingKey for the account we are spending from.
     let extfvk = ExtendedFullViewingKey::from(extsk);
     if !data
-        .is_valid_account_extfvk(params, account, &extfvk)
+        .is_valid_account_extfvk(account, &extfvk)
         .map_err(|e| e.into())?
     {
         return Err(Error::InvalidExtSK(account));
@@ -249,7 +250,6 @@ where
         }
 
         up.insert_sent_note(
-            params,
             tx_ref,
             output_index as usize,
             account,
