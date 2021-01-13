@@ -179,7 +179,7 @@ pub trait WalletRead {
     ) -> Result<Vec<SpendableNote>, Self::Error>;
 }
 
-/// This trait encapsulate the write capabilities required to update stored
+/// This trait encapsulates the write capabilities required to update stored
 /// wallet data.
 pub trait WalletWrite: WalletRead {
     /// Perform one or more write operations of this trait transactionally.
