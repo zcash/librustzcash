@@ -354,7 +354,7 @@ pub mod testing {
 
     use zcash_primitives::{
         block::BlockHash,
-        consensus::{self, BlockHeight},
+        consensus::{BlockHeight},
         merkle_tree::{CommitmentTree, IncrementalWitness},
         note_encryption::Memo,
         primitives::{Nullifier, PaymentAddress},
@@ -467,6 +467,14 @@ pub mod testing {
         }
 
         fn get_nullifiers(&self) -> Result<Vec<(Nullifier, AccountId)>, Self::Error> {
+            Ok(Vec::new())
+        }
+
+        fn get_spendable_notes(
+            &self,
+            _account: AccountId,
+            _anchor_height: BlockHeight,
+        ) -> Result<Vec<SpendableNote>, Self::Error> {
             Ok(Vec::new())
         }
 
