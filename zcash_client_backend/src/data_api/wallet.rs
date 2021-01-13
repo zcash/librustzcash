@@ -111,6 +111,7 @@ where
 /// };
 /// use zcash_client_sqlite::{
 ///     WalletDB,
+///     wallet::init::init_wallet_db,
 /// };
 ///
 /// let tx_prover = match LocalTxProver::with_default_location() {
@@ -126,6 +127,7 @@ where
 ///
 /// let data_file = NamedTempFile::new().unwrap();
 /// let db_read = WalletDB::for_path(data_file, Network::TestNetwork).unwrap();
+/// init_wallet_db(&db_read).unwrap();
 /// let mut db = db_read.get_update_ops().unwrap();
 /// match create_spend_to_address(
 ///     &mut db,

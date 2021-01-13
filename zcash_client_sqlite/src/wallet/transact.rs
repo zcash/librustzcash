@@ -172,7 +172,7 @@ mod tests {
         tests::{self, fake_compact_block, insert_into_cache, sapling_activation_height},
         wallet::{
             get_balance, get_verified_balance,
-            init::{init_accounts_table, init_blocks_table, init_data_database},
+            init::{init_accounts_table, init_blocks_table, init_wallet_db},
         },
         AccountId, BlockDB, DataConnStmtCache, WalletDB,
     };
@@ -190,7 +190,7 @@ mod tests {
     fn create_to_address_fails_on_incorrect_extsk() {
         let data_file = NamedTempFile::new().unwrap();
         let db_data = WalletDB::for_path(data_file.path(), tests::network()).unwrap();
-        init_data_database(&db_data).unwrap();
+        init_wallet_db(&db_data).unwrap();
 
         // Add two accounts to the wallet
         let extsk0 = ExtendedSpendingKey::master(&[]);
@@ -239,7 +239,7 @@ mod tests {
     fn create_to_address_fails_with_no_blocks() {
         let data_file = NamedTempFile::new().unwrap();
         let db_data = WalletDB::for_path(data_file.path(), tests::network()).unwrap();
-        init_data_database(&db_data).unwrap();
+        init_wallet_db(&db_data).unwrap();
 
         // Add an account to the wallet
         let extsk = ExtendedSpendingKey::master(&[]);
@@ -269,7 +269,7 @@ mod tests {
     fn create_to_address_fails_on_insufficient_balance() {
         let data_file = NamedTempFile::new().unwrap();
         let db_data = WalletDB::for_path(data_file.path(), tests::network()).unwrap();
-        init_data_database(&db_data).unwrap();
+        init_wallet_db(&db_data).unwrap();
         init_blocks_table(
             &db_data,
             BlockHeight::from(1u32),
@@ -317,7 +317,7 @@ mod tests {
 
         let data_file = NamedTempFile::new().unwrap();
         let db_data = WalletDB::for_path(data_file.path(), tests::network()).unwrap();
-        init_data_database(&db_data).unwrap();
+        init_wallet_db(&db_data).unwrap();
 
         // Add an account to the wallet
         let extsk = ExtendedSpendingKey::master(&[]);
@@ -448,7 +448,7 @@ mod tests {
 
         let data_file = NamedTempFile::new().unwrap();
         let db_data = WalletDB::for_path(data_file.path(), tests::network()).unwrap();
-        init_data_database(&db_data).unwrap();
+        init_wallet_db(&db_data).unwrap();
 
         // Add an account to the wallet
         let extsk = ExtendedSpendingKey::master(&[]);
@@ -569,7 +569,7 @@ mod tests {
 
         let data_file = NamedTempFile::new().unwrap();
         let db_data = WalletDB::for_path(data_file.path(), network).unwrap();
-        init_data_database(&db_data).unwrap();
+        init_wallet_db(&db_data).unwrap();
 
         // Add an account to the wallet
         let extsk = ExtendedSpendingKey::master(&[]);

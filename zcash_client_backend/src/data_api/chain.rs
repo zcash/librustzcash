@@ -117,12 +117,14 @@ where
 /// use zcash_client_sqlite::{
 ///     BlockDB,
 ///     WalletDB,
+///     wallet::init::init_wallet_db,
 /// };
 ///
 /// let cache_file = NamedTempFile::new().unwrap();
 /// let cache = BlockDB::for_path(cache_file).unwrap();
 /// let data_file = NamedTempFile::new().unwrap();
 /// let db_read = WalletDB::for_path(data_file, Network::TestNetwork).unwrap();
+/// init_wallet_db(&db_read).unwrap();
 /// let mut data = db_read.get_update_ops().unwrap();
 /// scan_cached_blocks(&Network::TestNetwork, &cache, &mut data, None);
 /// ```

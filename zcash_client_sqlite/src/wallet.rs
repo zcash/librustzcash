@@ -696,7 +696,7 @@ mod tests {
 
     use crate::{
         tests,
-        wallet::init::{init_accounts_table, init_data_database},
+        wallet::init::{init_accounts_table, init_wallet_db},
         AccountId, WalletDB,
     };
 
@@ -706,7 +706,7 @@ mod tests {
     fn empty_database_has_no_balance() {
         let data_file = NamedTempFile::new().unwrap();
         let db_data = WalletDB::for_path(data_file.path(), tests::network()).unwrap();
-        init_data_database(&db_data).unwrap();
+        init_wallet_db(&db_data).unwrap();
 
         // Add an account to the wallet
         let extsk = ExtendedSpendingKey::master(&[]);
