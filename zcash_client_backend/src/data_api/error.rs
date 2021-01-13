@@ -29,13 +29,13 @@ pub enum Error<NoteId> {
     InvalidChain(BlockHeight, ChainInvalid),
     /// A provided extfvk is not associated with the specified account.
     InvalidExtSK(AccountId),
-    /// The root of an output's witness tree in a newly arrived transaction does 
+    /// The root of an output's witness tree in a newly arrived transaction does
     /// not correspond to root of the stored commitment tree at the recorded height.
     ///
     /// The `usize` member of this struct is the index of the shielded output within
     /// the transaction where the witness root does not match.
     InvalidNewWitnessAnchor(usize, TxId, BlockHeight, Node),
-    /// The root of an output's witness tree in a previously stored transaction 
+    /// The root of an output's witness tree in a previously stored transaction
     /// does not correspond to root of the current commitment tree.
     InvalidWitnessAnchor(NoteId, BlockHeight),
     /// The wallet must first perform a scan of the blockchain before other
@@ -55,10 +55,7 @@ impl ChainInvalid {
         Error::InvalidChain(at_height, ChainInvalid::PrevHashMismatch)
     }
 
-    pub fn block_height_discontinuity<N>(
-        at_height: BlockHeight,
-        found: BlockHeight,
-    ) -> Error<N> {
+    pub fn block_height_discontinuity<N>(at_height: BlockHeight, found: BlockHeight) -> Error<N> {
         Error::InvalidChain(at_height, ChainInvalid::BlockHeightDiscontinuity(found))
     }
 }

@@ -358,7 +358,7 @@ pub mod testing {
 
     use zcash_primitives::{
         block::BlockHash,
-        consensus::{BlockHeight},
+        consensus::BlockHeight,
         merkle_tree::{CommitmentTree, IncrementalWitness},
         note_encryption::Memo,
         primitives::{Nullifier, PaymentAddress},
