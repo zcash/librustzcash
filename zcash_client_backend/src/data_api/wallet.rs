@@ -208,8 +208,7 @@ where
 
         let merkle_path = selected.witness.path().expect("the tree is not empty");
 
-        builder
-            .add_sapling_spend(extsk.clone(), selected.diversifier, note, merkle_path)?
+        builder.add_sapling_spend(extsk.clone(), selected.diversifier, note, merkle_path)?
     }
 
     match to {
@@ -246,14 +245,7 @@ where
             up.mark_spent(tx_ref, &spend.nullifier)?;
         }
 
-        up.insert_sent_note(
-            tx_ref,
-            output_index as usize,
-            account,
-            to,
-            value,
-            memo,
-        )?;
+        up.insert_sent_note(tx_ref, output_index as usize, account, to, value, memo)?;
 
         // Return the row number of the transaction, so the caller can fetch it for sending.
         Ok(tx_ref)

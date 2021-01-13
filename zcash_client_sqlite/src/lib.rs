@@ -238,8 +238,7 @@ impl<P: consensus::Parameters> WalletRead for WalletDB<P> {
         account: AccountId,
         anchor_height: BlockHeight,
     ) -> Result<Vec<SpendableNote>, Self::Error> {
-        wallet::transact::get_spendable_notes(self, account, anchor_height)
-            .map_err(Error::Database)
+        wallet::transact::get_spendable_notes(self, account, anchor_height).map_err(Error::Database)
     }
 
     fn select_spendable_notes(
@@ -531,7 +530,7 @@ mod tests {
     use group::GroupEncoding;
     use protobuf::Message;
     use rand_core::{OsRng, RngCore};
-    use rusqlite::{params};
+    use rusqlite::params;
 
     use zcash_client_backend::proto::compact_formats::{
         CompactBlock, CompactOutput, CompactSpend, CompactTx,

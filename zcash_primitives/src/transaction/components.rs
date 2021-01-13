@@ -11,8 +11,8 @@ use std::io::{self, Read, Write};
 use std::convert::TryFrom;
 
 use crate::{
-    primitives::Nullifier,
     legacy::Script,
+    primitives::Nullifier,
     redjubjub::{PublicKey, Signature},
 };
 

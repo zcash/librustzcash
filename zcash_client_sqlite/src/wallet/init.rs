@@ -8,7 +8,7 @@ use zcash_primitives::{
     zip32::ExtendedFullViewingKey,
 };
 
-use zcash_client_backend::{encoding::encode_extended_full_viewing_key};
+use zcash_client_backend::encoding::encode_extended_full_viewing_key;
 
 use crate::{address_from_extfvk, error::SqliteClientError, WalletDB};
 

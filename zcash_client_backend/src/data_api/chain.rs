@@ -236,10 +236,9 @@ where
                 for output in tx.shielded_outputs {
                     match &extfvks.get(&output.account) {
                         Some(extfvk) => {
-                            let nf = output.note.nf(
-                                &extfvk.fvk.vk,
-                                output.witness.position() as u64,
-                            );
+                            let nf = output
+                                .note
+                                .nf(&extfvk.fvk.vk, output.witness.position() as u64);
 
                             let note_id = up.put_received_note(&output, &Some(nf), tx_row)?;
 
@@ -249,7 +248,7 @@ where
                             // Cache nullifier for note (to detect subsequent spends in this scan).
                             nullifiers.push((nf, output.account));
                         }
-                        None => ()
+                        None => (),
                     }
                 }
             }

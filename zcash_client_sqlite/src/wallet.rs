@@ -22,8 +22,8 @@ use zcash_client_backend::{
         decode_extended_full_viewing_key, decode_payment_address, encode_extended_full_viewing_key,
         encode_payment_address,
     },
-    DecryptedOutput,
     wallet::{AccountId, WalletTx},
+    DecryptedOutput,
 };
 
 use crate::{
@@ -458,13 +458,12 @@ pub fn insert_block<'a, P>(
     let mut encoded_tree = Vec::new();
     commitment_tree.write(&mut encoded_tree).unwrap();
 
-    stmts.stmt_insert_block
-        .execute(params![
-            u32::from(block_height),
-            &block_hash.0[..],
-            block_time,
-            encoded_tree
-        ])?;
+    stmts.stmt_insert_block.execute(params![
+        u32::from(block_height),
+        &block_hash.0[..],
+        block_time,
+        encoded_tree
+    ])?;
 
     Ok(())
 }

@@ -12,9 +12,7 @@ use zcash_primitives::{
     transaction::components::Amount,
 };
 
-use zcash_client_backend::{
-    wallet::{AccountId, SpendableNote},
-};
+use zcash_client_backend::wallet::{AccountId, SpendableNote};
 
 use crate::{error::SqliteClientError, WalletDB};
 
@@ -74,7 +72,7 @@ pub fn get_spendable_notes<P>(
             WHERE account = :account 
             AND spent IS NULL 
             AND transactions.block <= :anchor_height
-            AND sapling_witnesses.block = :anchor_height"
+            AND sapling_witnesses.block = :anchor_height",
     )?;
 
     // Select notes
@@ -83,7 +81,7 @@ pub fn get_spendable_notes<P>(
             ":account": &i64::from(account.0),
             ":anchor_height": &u32::from(anchor_height),
         ],
-        to_spendable_note
+        to_spendable_note,
     )?;
 
     notes.collect::<Result<_, _>>()
@@ -142,7 +140,7 @@ pub fn select_spendable_notes<P>(
             ":anchor_height": &u32::from(anchor_height),
             ":target_value": &i64::from(target_value),
         ],
-        to_spendable_note
+        to_spendable_note,
     )?;
 
     notes.collect::<Result<_, _>>()
@@ -253,7 +251,7 @@ mod tests {
         let mut db_write = db_data.get_update_ops().unwrap();
         match create_spend_to_address(
             &mut db_write,
-            &tests::network(), 
+            &tests::network(),
             test_prover(),
             AccountId(0),
             &extsk,

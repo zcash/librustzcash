@@ -45,7 +45,6 @@ use crate::transaction::components::OutPoint;
 #[cfg(any(test, feature = "test-dependencies"))]
 use crate::prover::mock::MockTxProver;
 
-
 const DEFAULT_TX_EXPIRY_DELTA: u32 = 20;
 
 /// If there are any shielded inputs, always have at least two shielded outputs, padding

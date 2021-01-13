@@ -79,13 +79,16 @@
 //! ```
 use protobuf::parse_from_bytes;
 
-use rusqlite::{params};
+use rusqlite::params;
 
 use zcash_primitives::consensus::BlockHeight;
 
 use zcash_client_backend::{data_api::error::Error, proto::compact_formats::CompactBlock};
 
-use crate::{error::{SqliteClientError, db_error}, BlockDB, NoteId};
+use crate::{
+    error::{db_error, SqliteClientError},
+    BlockDB, NoteId,
+};
 
 pub mod init;
 
@@ -104,30 +107,31 @@ where
     F: FnMut(CompactBlock) -> Result<(), Error<SqliteClientError, NoteId>>,
 {
     // Fetch the CompactBlocks we need to scan
-    let mut stmt_blocks = cache.0.prepare(
-        "SELECT height, data FROM compactblocks WHERE height > ? ORDER BY height ASC LIMIT ?",
-    ).map_err(db_error)?;
+    let mut stmt_blocks = cache
+        .0
+        .prepare(
+            "SELECT height, data FROM compactblocks WHERE height > ? ORDER BY height ASC LIMIT ?",
+        )
+        .map_err(db_error)?;
 
-    let rows = stmt_blocks.query_map(
-        params![
-            u32::from(from_height),
-            limit.unwrap_or(u32::max_value()),
-        ],
-        |row| {
-            Ok(CompactBlockRow {
-                height: BlockHeight::from_u32(row.get(0)?),
-                data: row.get(1)?,
-            })
-        },
-    ).map_err(db_error)?;
+    let rows = stmt_blocks
+        .query_map(
+            params![u32::from(from_height), limit.unwrap_or(u32::max_value()),],
+            |row| {
+                Ok(CompactBlockRow {
+                    height: BlockHeight::from_u32(row.get(0)?),
+                    data: row.get(1)?,
+                })
+            },
+        )
+        .map_err(db_error)?;
 
     for row_result in rows {
         let cbr = row_result.map_err(db_error)?;
         let block: CompactBlock = parse_from_bytes(&cbr.data).map_err(Error::from)?;
 
         if block.height() != cbr.height {
-            return Err(
-                Error::Database(SqliteClientError::CorruptedData(format!(
+            return Err(Error::Database(SqliteClientError::CorruptedData(format!(
                 "Block height {} did not match row's height field value {}",
                 block.height(),
                 cbr.height
@@ -388,8 +392,7 @@ mod tests {
             &tests::network(),
             &db_cache,
             (&db_data).get_max_height_hash().unwrap(),
-        )
-        {
+        ) {
             Err(Error::InvalidChain(upper_bound, _)) => {
                 assert_eq!(upper_bound, sapling_activation_height() + 3)
             }

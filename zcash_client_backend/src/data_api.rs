@@ -6,7 +6,7 @@ use std::fmt::Debug;
 
 use zcash_primitives::{
     block::BlockHash,
-    consensus::{BlockHeight},
+    consensus::BlockHeight,
     merkle_tree::{CommitmentTree, IncrementalWitness},
     note_encryption::Memo,
     primitives::{Note, Nullifier, PaymentAddress},
@@ -97,17 +97,14 @@ pub trait WalletRead {
 
     /// Returns the payment address for the specified account, if the account
     /// identifier specified refers to a valid account for this wallet.
-    fn get_address(
-        &self,
-        account: AccountId,
-    ) -> Result<Option<PaymentAddress>, Self::Error>;
+    fn get_address(&self, account: AccountId) -> Result<Option<PaymentAddress>, Self::Error>;
 
     /// Returns all extended full viewing keys known about by this wallet
     fn get_extended_full_viewing_keys(
         &self,
     ) -> Result<HashMap<AccountId, ExtendedFullViewingKey>, Self::Error>;
 
-    /// Checks whether the specified extended full viewing key is 
+    /// Checks whether the specified extended full viewing key is
     /// associated with the account.
     fn is_valid_account_extfvk(
         &self,
@@ -173,7 +170,7 @@ pub trait WalletRead {
     ) -> Result<Vec<SpendableNote>, Self::Error>;
 
     /// Returns a list of spendable notes sufficient to cover the specified
-    /// target value, if possible. 
+    /// target value, if possible.
     fn select_spendable_notes(
         &self,
         account: AccountId,
@@ -208,10 +205,7 @@ pub trait WalletWrite: WalletRead {
     /// a chain reorg might invalidate some stored state, this method must be
     /// implemented in order to allow users of this API to "reset" the data store
     /// to correctly represent chainstate as of a specified block height.
-    fn rewind_to_height(
-        &mut self,
-        block_height: BlockHeight,
-    ) -> Result<(), Self::Error>;
+    fn rewind_to_height(&mut self, block_height: BlockHeight) -> Result<(), Self::Error>;
 
     /// Add wallet-relevant metadata for a specific transaction to the data
     /// store.
@@ -231,7 +225,7 @@ pub trait WalletWrite: WalletRead {
     /// Mark the specified transaction as spent and record the nullifier.
     fn mark_spent(&mut self, tx_ref: Self::TxRef, nf: &Nullifier) -> Result<(), Self::Error>;
 
-    /// Record a note as having been received, along with its nullifier and the transaction 
+    /// Record a note as having been received, along with its nullifier and the transaction
     /// within which the note was created.
     fn put_received_note<T: ShieldedOutput>(
         &mut self,
@@ -298,9 +292,9 @@ pub trait BlockSource {
         F: FnMut(CompactBlock) -> Result<(), Self::Error>;
 }
 
-/// This trait provides a generalization over shielded output representations 
+/// This trait provides a generalization over shielded output representations
 /// that allows a wallet to avoid coupling to a specific one.
-// TODO: it'd probably be better not to unify the definitions of 
+// TODO: it'd probably be better not to unify the definitions of
 // `WalletShieldedOutput` and `DecryptedOutput` via a compositional
 // approach, if possible.
 pub trait ShieldedOutput {
@@ -372,16 +366,13 @@ pub mod testing {
     use crate::{
         address::RecipientAddress,
         decrypt::DecryptedOutput,
-        wallet::{AccountId, SpendableNote, WalletTx},
         proto::compact_formats::CompactBlock,
+        wallet::{AccountId, SpendableNote, WalletTx},
     };
 
-    use super::{
-        error::Error,
-        BlockSource, WalletRead, WalletWrite, ShieldedOutput
-    };
+    use super::{error::Error, BlockSource, ShieldedOutput, WalletRead, WalletWrite};
 
-    pub struct MockBlockSource { }
+    pub struct MockBlockSource {}
 
     impl BlockSource for MockBlockSource {
         type Error = Error<(), u32>;
@@ -393,13 +384,13 @@ pub mod testing {
             _with_row: F,
         ) -> Result<(), Self::Error>
         where
-            F: FnMut(CompactBlock) -> Result<(), Self::Error> {
+            F: FnMut(CompactBlock) -> Result<(), Self::Error>,
+        {
             Ok(())
         }
     }
 
-    pub struct MockWalletDB {
-    }
+    pub struct MockWalletDB {}
 
     impl WalletRead for MockWalletDB {
         type Error = Error<(), u32>;
@@ -410,7 +401,10 @@ pub mod testing {
             Ok(None)
         }
 
-        fn get_block_hash(&self, _block_height: BlockHeight) -> Result<Option<BlockHash>, Self::Error> {
+        fn get_block_hash(
+            &self,
+            _block_height: BlockHeight,
+        ) -> Result<Option<BlockHash>, Self::Error> {
             Ok(None)
         }
 
@@ -418,15 +412,12 @@ pub mod testing {
             Ok(None)
         }
 
-        fn get_address(
-            &self,
-            _account: AccountId,
-        ) -> Result<Option<PaymentAddress>, Self::Error> {
+        fn get_address(&self, _account: AccountId) -> Result<Option<PaymentAddress>, Self::Error> {
             Ok(None)
         }
 
         fn get_extended_full_viewing_keys(
-            &self
+            &self,
         ) -> Result<HashMap<AccountId, ExtendedFullViewingKey>, Self::Error> {
             Ok(HashMap::new())
         }
@@ -447,11 +438,17 @@ pub mod testing {
             Ok(Amount::zero())
         }
 
-        fn get_received_memo_as_utf8(&self, _id_note: Self::NoteRef) -> Result<Option<String>, Self::Error> {
+        fn get_received_memo_as_utf8(
+            &self,
+            _id_note: Self::NoteRef,
+        ) -> Result<Option<String>, Self::Error> {
             Ok(None)
         }
 
-        fn get_sent_memo_as_utf8(&self, _id_note: Self::NoteRef) -> Result<Option<String>, Self::Error> {
+        fn get_sent_memo_as_utf8(
+            &self,
+            _id_note: Self::NoteRef,
+        ) -> Result<Option<String>, Self::Error> {
             Ok(None)
         }
 
@@ -486,7 +483,8 @@ pub mod testing {
     impl WalletWrite for MockWalletDB {
         fn transactionally<F, A>(&mut self, f: F) -> Result<A, Self::Error>
         where
-            F: FnOnce(&mut Self) -> Result<A, Self::Error> {
+            F: FnOnce(&mut Self) -> Result<A, Self::Error>,
+        {
             f(self)
         }
 
@@ -500,10 +498,7 @@ pub mod testing {
             Ok(())
         }
 
-        fn rewind_to_height(
-            &mut self,
-            _block_height: BlockHeight,
-        ) -> Result<(), Self::Error> {
+        fn rewind_to_height(&mut self, _block_height: BlockHeight) -> Result<(), Self::Error> {
             Ok(())
         }
 
