@@ -165,6 +165,13 @@ pub trait WalletRead {
     /// with which they are associated.
     fn get_nullifiers(&self) -> Result<Vec<(Nullifier, AccountId)>, Self::Error>;
 
+    /// Return all spendable notes.
+    fn get_spendable_notes(
+        &self,
+        account: AccountId,
+        anchor_height: BlockHeight,
+    ) -> Result<Vec<SpendableNote>, Self::Error>;
+
     /// Returns a list of spendable notes sufficient to cover the specified
     /// target value, if possible. 
     fn select_spendable_notes(

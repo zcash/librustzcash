@@ -1,6 +1,6 @@
 //! Functions for creating transactions.
 //!
-use rusqlite::named_params;
+use rusqlite::{named_params, Row};
 use std::convert::TryInto;
 
 use ff::PrimeField;
@@ -17,6 +17,77 @@ use zcash_client_backend::{
 };
 
 use crate::{error::SqliteClientError, WalletDB};
+
+fn to_spendable_note(row: &Row) -> Result<SpendableNote, SqliteClientError> {
+    let diversifier = {
+        let d: Vec<_> = row.get(0)?;
+        if d.len() != 11 {
+            return Err(SqliteClientError::CorruptedData(
+                "Invalid diversifier length".to_string(),
+            ));
+        }
+        let mut tmp = [0; 11];
+        tmp.copy_from_slice(&d);
+        Diversifier(tmp)
+    };
+
+    let note_value = Amount::from_i64(row.get(1)?).unwrap();
+
+    let rseed = {
+        let rcm_bytes: Vec<_> = row.get(2)?;
+
+        // We store rcm directly in the data DB, regardless of whether the note
+        // used a v1 or v2 note plaintext, so for the purposes of spending let's
+        // pretend this is a pre-ZIP 212 note.
+        let rcm = jubjub::Fr::from_repr(
+            rcm_bytes[..]
+                .try_into()
+                .map_err(|_| SqliteClientError::InvalidNote)?,
+        )
+        .ok_or(SqliteClientError::InvalidNote)?;
+        Rseed::BeforeZip212(rcm)
+    };
+
+    let witness = {
+        let d: Vec<_> = row.get(3)?;
+        IncrementalWitness::read(&d[..])?
+    };
+
+    Ok(SpendableNote {
+        diversifier,
+        note_value,
+        rseed,
+        witness,
+    })
+}
+
+pub fn get_spendable_notes<P>(
+    wdb: &WalletDB<P>,
+    account: AccountId,
+    anchor_height: BlockHeight,
+) -> Result<Vec<SpendableNote>, SqliteClientError> {
+    let mut stmt_select_notes = wdb.conn.prepare(
+        "SELECT diversifier, value, rcm, witness
+            FROM received_notes
+            INNER JOIN transactions ON transactions.id_tx = received_notes.tx
+            INNER JOIN sapling_witnesses ON sapling_witnesses.note = received_notes.id_note 
+            WHERE account = :account 
+            AND spent IS NULL 
+            AND transactions.block <= :anchor_height
+            AND sapling_witnesses.block = :anchor_height"
+    )?;
+
+    // Select notes
+    let notes = stmt_select_notes.query_and_then_named::<_, SqliteClientError, _>(
+        named_params![
+            ":account": &i64::from(account.0),
+            ":anchor_height": &u32::from(anchor_height),
+        ],
+        to_spendable_note
+    )?;
+
+    notes.collect::<Result<_, _>>()
+}
 
 pub fn select_spendable_notes<P>(
     wdb: &WalletDB<P>,
@@ -71,52 +142,10 @@ pub fn select_spendable_notes<P>(
             ":anchor_height": &u32::from(anchor_height),
             ":target_value": &i64::from(target_value),
         ],
-        |row| {
-            let diversifier = {
-                let d: Vec<_> = row.get(0)?;
-                if d.len() != 11 {
-                    return Err(SqliteClientError::CorruptedData(
-                        "Invalid diversifier length".to_string(),
-                    ));
-                }
-                let mut tmp = [0; 11];
-                tmp.copy_from_slice(&d);
-                Diversifier(tmp)
-            };
-
-            let note_value = Amount::from_i64(row.get(1)?).unwrap();
-
-            let rseed = {
-                let rcm_bytes: Vec<_> = row.get(2)?;
-
-                // We store rcm directly in the data DB, regardless of whether the note
-                // used a v1 or v2 note plaintext, so for the purposes of spending let's
-                // pretend this is a pre-ZIP 212 note.
-                let rcm = jubjub::Fr::from_repr(
-                    rcm_bytes[..]
-                        .try_into()
-                        .map_err(|_| SqliteClientError::InvalidNote)?,
-                )
-                .ok_or(SqliteClientError::InvalidNote)?;
-                Rseed::BeforeZip212(rcm)
-            };
-
-            let witness = {
-                let d: Vec<_> = row.get(3)?;
-                IncrementalWitness::read(&d[..])?
-            };
-
-            Ok(SpendableNote {
-                diversifier,
-                note_value,
-                rseed,
-                witness,
-            })
-        },
+        to_spendable_note
     )?;
 
-    let notes: Vec<SpendableNote> = notes.collect::<Result<_, _>>()?;
-    Ok(notes)
+    notes.collect::<Result<_, _>>()
 }
 
 #[cfg(test)]

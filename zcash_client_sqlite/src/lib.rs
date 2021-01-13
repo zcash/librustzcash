@@ -233,6 +233,15 @@ impl<P: consensus::Parameters> WalletRead for WalletDB<P> {
         wallet::get_nullifiers(self).map_err(Error::Database)
     }
 
+    fn get_spendable_notes(
+        &self,
+        account: AccountId,
+        anchor_height: BlockHeight,
+    ) -> Result<Vec<SpendableNote>, Self::Error> {
+        wallet::transact::get_spendable_notes(self, account, anchor_height)
+            .map_err(Error::Database)
+    }
+
     fn select_spendable_notes(
         &self,
         account: AccountId,
@@ -343,6 +352,14 @@ impl<'a, P: consensus::Parameters> WalletRead for DataConnStmtCache<'a, P> {
 
     fn get_nullifiers(&self) -> Result<Vec<(Nullifier, AccountId)>, Self::Error> {
         self.wallet_db.get_nullifiers()
+    }
+
+    fn get_spendable_notes(
+        &self,
+        account: AccountId,
+        anchor_height: BlockHeight,
+    ) -> Result<Vec<SpendableNote>, Self::Error> {
+        self.wallet_db.get_spendable_notes(account, anchor_height)
     }
 
     fn select_spendable_notes(
