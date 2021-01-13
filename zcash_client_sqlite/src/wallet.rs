@@ -27,7 +27,7 @@ use zcash_client_backend::{
 };
 
 use crate::{
-    error::{db_error, SqliteClientError},
+    error::{SqliteClientError},
     DataConnStmtCache, NoteId, WalletDB,
 };
 
@@ -340,11 +340,11 @@ pub fn get_block_hash<P>(
 pub fn rewind_to_height<P: consensus::Parameters>(
     wdb: &WalletDB<P>,
     block_height: BlockHeight,
-) -> Result<(), Error<SqliteClientError, NoteId>> {
+) -> Result<(), SqliteClientError> {
     let sapling_activation_height = wdb
         .params
         .activation_height(NetworkUpgrade::Sapling)
-        .ok_or(Error::SaplingNotActive)?;
+        .ok_or(SqliteClientError::BackendError(Error::SaplingNotActive))?;
 
     // Recall where we synced up to previously.
     let last_scanned_height = wdb
@@ -353,8 +353,7 @@ pub fn rewind_to_height<P: consensus::Parameters>(
             row.get(0)
                 .map(|h: u32| h.into())
                 .or(Ok(sapling_activation_height - 1))
-        })
-        .map_err(db_error)?;
+        })?;
 
     // nothing to do if we're deleting back down to the max height
     if block_height >= last_scanned_height {
@@ -365,24 +364,21 @@ pub fn rewind_to_height<P: consensus::Parameters>(
             .execute(
                 "DELETE FROM sapling_witnesses WHERE block > ?",
                 &[u32::from(block_height)],
-            )
-            .map_err(db_error)?;
+            )?;
 
         // Un-mine transactions.
         wdb.conn
             .execute(
                 "UPDATE transactions SET block = NULL, tx_index = NULL WHERE block > ?",
                 &[u32::from(block_height)],
-            )
-            .map_err(db_error)?;
+            )?;
 
         // Now that they aren't depended on, delete scanned blocks.
         wdb.conn
             .execute(
                 "DELETE FROM blocks WHERE height > ?",
                 &[u32::from(block_height)],
-            )
-            .map_err(db_error)?;
+            )?;
 
         Ok(())
     }

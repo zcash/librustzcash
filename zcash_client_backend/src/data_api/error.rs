@@ -22,26 +22,27 @@ pub enum ChainInvalid {
 }
 
 #[derive(Debug)]
-pub enum Error<DbError, NoteId> {
+pub enum Error<NoteId> {
     /// Unable to create a new spend because the wallet balance is not sufficient.
     InsufficientBalance(Amount, Amount),
     /// Chain validation detected an error in the block at the specified block height.
     InvalidChain(BlockHeight, ChainInvalid),
     /// A provided extfvk is not associated with the specified account.
     InvalidExtSK(AccountId),
-    /// The root of an output's witness tree in a newly arrived transaction does not correspond to
-    /// root of the stored commitment tree at the recorded height.
+    /// The root of an output's witness tree in a newly arrived transaction does 
+    /// not correspond to root of the stored commitment tree at the recorded height.
+    ///
+    /// The `usize` member of this struct is the index of the shielded output within
+    /// the transaction where the witness root does not match.
     InvalidNewWitnessAnchor(usize, TxId, BlockHeight, Node),
-    /// The root of an output's witness tree in a previously stored transaction does not correspond to
-    /// root of the current commitment tree.
+    /// The root of an output's witness tree in a previously stored transaction 
+    /// does not correspond to root of the current commitment tree.
     InvalidWitnessAnchor(NoteId, BlockHeight),
     /// The wallet must first perform a scan of the blockchain before other
     /// operations can be performed.
     ScanRequired,
     /// An error occurred building a new transaction.
     Builder(builder::Error),
-    /// Wrapper for errors from the underlying data store.
-    Database(DbError),
     /// An error occurred decoding a protobuf message.
     Protobuf(protobuf::ProtobufError),
     /// The wallet attempted a sapling-only operation at a block
@@ -50,19 +51,19 @@ pub enum Error<DbError, NoteId> {
 }
 
 impl ChainInvalid {
-    pub fn prev_hash_mismatch<E, N>(at_height: BlockHeight) -> Error<E, N> {
+    pub fn prev_hash_mismatch<N>(at_height: BlockHeight) -> Error<N> {
         Error::InvalidChain(at_height, ChainInvalid::PrevHashMismatch)
     }
 
-    pub fn block_height_discontinuity<E, N>(
+    pub fn block_height_discontinuity<N>(
         at_height: BlockHeight,
         found: BlockHeight,
-    ) -> Error<E, N> {
+    ) -> Error<N> {
         Error::InvalidChain(at_height, ChainInvalid::BlockHeightDiscontinuity(found))
     }
 }
 
-impl<E: fmt::Display, N: fmt::Display> fmt::Display for Error<E, N> {
+impl<N: fmt::Display> fmt::Display for Error<N> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match &self {
             Error::InsufficientBalance(have, need) => write!(
@@ -88,37 +89,29 @@ impl<E: fmt::Display, N: fmt::Display> fmt::Display for Error<E, N> {
             ),
             Error::ScanRequired => write!(f, "Must scan blocks first"),
             Error::Builder(e) => write!(f, "{:?}", e),
-            Error::Database(e) => write!(f, "{}", e),
             Error::Protobuf(e) => write!(f, "{}", e),
             Error::SaplingNotActive => write!(f, "Could not determine Sapling upgrade activation height."),
         }
     }
 }
 
-impl<E: error::Error + 'static, N: error::Error + 'static> error::Error for Error<E, N> {
+impl<N: error::Error + 'static> error::Error for Error<N> {
     fn source(&self) -> Option<&(dyn error::Error + 'static)> {
         match &self {
             Error::Builder(e) => Some(e),
-            Error::Database(e) => Some(e),
             Error::Protobuf(e) => Some(e),
             _ => None,
         }
     }
 }
 
-impl<E, N> From<builder::Error> for Error<E, N> {
+impl<N> From<builder::Error> for Error<N> {
     fn from(e: builder::Error) -> Self {
         Error::Builder(e)
     }
 }
 
-//impl<E, N> From<std::io::Error> for Error<E, N> {
-//    fn from(e: std::io::Error) -> Self {
-//        Error::Io(e)
-//    }
-//}
-
-impl<E, N> From<protobuf::ProtobufError> for Error<E, N> {
+impl<N> From<protobuf::ProtobufError> for Error<N> {
     fn from(e: protobuf::ProtobufError) -> Self {
         Error::Protobuf(e)
     }

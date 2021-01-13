@@ -40,13 +40,13 @@ use crate::{
 /// - `Err(e)` if there was an error during validation unrelated to chain validity.
 ///
 /// This function does not mutate either of the databases.
-pub fn validate_chain<'db, E0, N, E, P, C>(
+pub fn validate_chain<N, E, P, C>(
     parameters: &P,
     cache: &C,
     validate_from: Option<(BlockHeight, BlockHash)>,
 ) -> Result<(), E>
 where
-    E: From<Error<E0, N>>,
+    E: From<Error<N>>,
     P: consensus::Parameters,
     C: BlockSource<Error = E>,
 {
@@ -68,18 +68,18 @@ where
     cache.with_blocks(from_height, None, move |block| {
         let current_height = block.height();
         let result = if current_height != prev_height + 1 {
-            Err(ChainInvalid::block_height_discontinuity(prev_height + 1, current_height).into())
+            Err(ChainInvalid::block_height_discontinuity(prev_height + 1, current_height))
         } else {
             match prev_hash {
                 None => Ok(()),
                 Some(h) if h == block.prev_hash() => Ok(()),
-                Some(_) => Err(ChainInvalid::prev_hash_mismatch(current_height).into()),
+                Some(_) => Err(ChainInvalid::prev_hash_mismatch(current_height)),
             }
         };
 
         prev_height = current_height;
         prev_hash = Some(block.hash());
-        result
+        result.map_err(E::from)
     })
 }
 
@@ -130,7 +130,7 @@ where
 /// ```
 ///
 /// [`init_blocks_table`]: crate::init::init_blocks_table
-pub fn scan_cached_blocks<E, E0, N, P, C, D>(
+pub fn scan_cached_blocks<E, N, P, C, D>(
     params: &P,
     cache: &C,
     data: &mut D,
@@ -141,7 +141,7 @@ where
     C: BlockSource<Error = E>,
     D: WalletWrite<Error = E, NoteRef = N>,
     N: Copy + Debug,
-    E: From<Error<E0, N>>,
+    E: From<Error<N>>,
 {
     let sapling_activation_height = params
         .activation_height(NetworkUpgrade::Sapling)

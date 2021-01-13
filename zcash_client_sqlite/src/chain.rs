@@ -26,14 +26,18 @@
 //!     wallet::init::{init_wallet_db},
 //! };
 //!
-//! let network = Network::TestNetwork;
-//! let cache_file = NamedTempFile::new().unwrap();
-//! let db_cache = BlockDB::for_path(cache_file).unwrap();
-//! let db_file = NamedTempFile::new().unwrap();
-//! let db_read = WalletDB::for_path(db_file, network).unwrap();
-//! init_wallet_db(&db_read).unwrap();
+//! # use zcash_client_sqlite::NoteId;
+//! # use zcash_client_sqlite::error::SqliteClientError;
 //!
-//! let mut db_data = db_read.get_update_ops().unwrap();
+//! # fn main() -> Result<(), SqliteClientError> {
+//! let network = Network::TestNetwork;
+//! let cache_file = NamedTempFile::new()?;
+//! let db_cache = BlockDB::for_path(cache_file)?;
+//! let db_file = NamedTempFile::new()?;
+//! let db_read = WalletDB::for_path(db_file, network)?;
+//! init_wallet_db(&db_read)?;
+//!
+//! let mut db_data = db_read.get_update_ops()?;
 //!
 //! // 1) Download new CompactBlocks into db_cache.
 //!
@@ -41,15 +45,15 @@
 //! //
 //! // Given that we assume the server always gives us correct-at-the-time blocks, any
 //! // errors are in the blocks we have previously cached or scanned.
-//! if let Err(e) = validate_chain(&network, &db_cache, db_data.get_max_height_hash().unwrap()) {
+//! if let Err(e) = validate_chain(&network, &db_cache, db_data.get_max_height_hash()?) {
 //!     match e {
-//!         Error::InvalidChain(upper_bound, _) => {
+//!         BackendError(Error::InvalidChain(lower_bound, _)) => {
 //!             // a) Pick a height to rewind to.
 //!             //
 //!             // This might be informed by some external chain reorg information, or
 //!             // heuristics such as the platform, available bandwidth, size of recent
 //!             // CompactBlocks, etc.
-//!             let rewind_height = upper_bound - 10;
+//!             let rewind_height = lower_bound - 10;
 //!
 //!             // b) Rewind scanned block information.
 //!             db_data.rewind_to_height(rewind_height);
@@ -64,8 +68,9 @@
 //!             // CompactBlocks, tell it to go back and download from rewind_height
 //!             // onwards.
 //!         }
-//!         _ => {
-//!             // Handle other errors.
+//!         e => {
+//!             // Handle or return other errors.
+//!             return Err(e);
 //!         }
 //!     }
 //! }
@@ -75,7 +80,8 @@
 //! // At this point, the cache and scanned data are locally consistent (though not
 //! // necessarily consistent with the latest chain tip - this would be discovered the
 //! // next time this codepath is executed after new blocks are received).
-//! scan_cached_blocks(&network, &db_cache, &mut db_data, None).unwrap();
+//! scan_cached_blocks(&network, &db_cache, &mut db_data, None)
+//! # }
 //! ```
 use protobuf::parse_from_bytes;
 
@@ -86,8 +92,8 @@ use zcash_primitives::consensus::BlockHeight;
 use zcash_client_backend::{data_api::error::Error, proto::compact_formats::CompactBlock};
 
 use crate::{
-    error::{db_error, SqliteClientError},
-    BlockDB, NoteId,
+    error::{SqliteClientError},
+    BlockDB,
 };
 
 pub mod init;
@@ -102,17 +108,16 @@ pub fn with_blocks<F>(
     from_height: BlockHeight,
     limit: Option<u32>,
     mut with_row: F,
-) -> Result<(), Error<SqliteClientError, NoteId>>
+) -> Result<(), SqliteClientError>
 where
-    F: FnMut(CompactBlock) -> Result<(), Error<SqliteClientError, NoteId>>,
+    F: FnMut(CompactBlock) -> Result<(), SqliteClientError>,
 {
     // Fetch the CompactBlocks we need to scan
     let mut stmt_blocks = cache
         .0
         .prepare(
             "SELECT height, data FROM compactblocks WHERE height > ? ORDER BY height ASC LIMIT ?",
-        )
-        .map_err(db_error)?;
+        )?;
 
     let rows = stmt_blocks
         .query_map(
@@ -123,20 +128,18 @@ where
                     data: row.get(1)?,
                 })
             },
-        )
-        .map_err(db_error)?;
+        )?;
 
     for row_result in rows {
-        let cbr = row_result.map_err(db_error)?;
+        let cbr = row_result?;
         let block: CompactBlock = parse_from_bytes(&cbr.data).map_err(Error::from)?;
 
         if block.height() != cbr.height {
-            return Err(Error::Database(SqliteClientError::CorruptedData(format!(
+            return Err(SqliteClientError::CorruptedData(format!(
                 "Block height {} did not match row's height field value {}",
                 block.height(),
                 cbr.height
-            )))
-            .into());
+            )));
         }
 
         with_row(block)?;
@@ -163,6 +166,7 @@ mod tests {
 
     use crate::{
         chain::init::init_cache_database,
+        error::SqliteClientError,
         tests::{
             self, fake_compact_block, fake_compact_block_spending, insert_into_cache,
             sapling_activation_height,
@@ -321,8 +325,8 @@ mod tests {
             &db_cache,
             (&db_data).get_max_height_hash().unwrap(),
         ) {
-            Err(Error::InvalidChain(upper_bound, _)) => {
-                assert_eq!(upper_bound, sapling_activation_height() + 2)
+            Err(SqliteClientError::BackendError(Error::InvalidChain(lower_bound, _))) => {
+                assert_eq!(lower_bound, sapling_activation_height() + 2)
             }
             _ => panic!(),
         }
@@ -393,8 +397,8 @@ mod tests {
             &db_cache,
             (&db_data).get_max_height_hash().unwrap(),
         ) {
-            Err(Error::InvalidChain(upper_bound, _)) => {
-                assert_eq!(upper_bound, sapling_activation_height() + 3)
+            Err(SqliteClientError::BackendError(Error::InvalidChain(lower_bound, _))) => {
+                assert_eq!(lower_bound, sapling_activation_height() + 3)
             }
             _ => panic!(),
         }
@@ -502,17 +506,17 @@ mod tests {
         );
         insert_into_cache(&db_cache, &cb3);
         match scan_cached_blocks(&tests::network(), &db_cache, &mut db_write, None) {
-            Ok(_) => panic!("Should have failed"),
-            Err(e) => {
+            Err(SqliteClientError::BackendError(e)) => {
                 assert_eq!(
                     e.to_string(),
-                    ChainInvalid::block_height_discontinuity::<rusqlite::Error, NoteId>(
+                    ChainInvalid::block_height_discontinuity::<NoteId>(
                         sapling_activation_height() + 1,
                         sapling_activation_height() + 2
                     )
                     .to_string()
                 );
             }
+            Ok(_) | Err(_) => panic!("Should have failed"),
         }
 
         // If we add a block of height SAPLING_ACTIVATION_HEIGHT + 1, we can now scan both

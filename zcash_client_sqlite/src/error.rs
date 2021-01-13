@@ -1,7 +1,7 @@
 use std::error;
 use std::fmt;
 
-use zcash_client_backend::data_api::error::Error;
+use zcash_client_backend::data_api;
 
 use crate::NoteId;
 
@@ -25,6 +25,8 @@ pub enum SqliteClientError {
     Io(std::io::Error),
     /// A received memo cannot be interpreted as a UTF-8 string.
     InvalidMemo(std::str::Utf8Error),
+    /// Wrapper for errors from zcash_client_backend
+    BackendError(data_api::error::Error<NoteId>),
 }
 
 impl error::Error for SqliteClientError {
@@ -53,6 +55,7 @@ impl fmt::Display for SqliteClientError {
             SqliteClientError::DbError(e) => write!(f, "{}", e),
             SqliteClientError::Io(e) => write!(f, "{}", e),
             SqliteClientError::InvalidMemo(e) => write!(f, "{}", e),
+            SqliteClientError::BackendError(e) => write!(f, "{}", e),
         }
     }
 }
@@ -75,12 +78,16 @@ impl From<bech32::Error> for SqliteClientError {
     }
 }
 
+
 impl From<bs58::decode::Error> for SqliteClientError {
     fn from(e: bs58::decode::Error) -> Self {
         SqliteClientError::Base58(e)
     }
 }
 
-pub fn db_error(r: rusqlite::Error) -> Error<SqliteClientError, NoteId> {
-    Error::Database(SqliteClientError::DbError(r))
+impl From<data_api::error::Error<NoteId>> for SqliteClientError {
+    fn from(e: data_api::error::Error<NoteId>) -> Self {
+        SqliteClientError::BackendError(e)
+    }
 }
+

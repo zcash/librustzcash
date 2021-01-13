@@ -43,14 +43,14 @@ use zcash_primitives::{
 
 use zcash_client_backend::{
     address::RecipientAddress,
-    data_api::{error::Error, BlockSource, ShieldedOutput, WalletRead, WalletWrite},
+    data_api::{BlockSource, ShieldedOutput, WalletRead, WalletWrite},
     encoding::encode_payment_address,
     proto::compact_formats::CompactBlock,
     wallet::{AccountId, SpendableNote, WalletTx},
     DecryptedOutput,
 };
 
-use crate::error::{db_error, SqliteClientError};
+use crate::error::{SqliteClientError};
 
 pub mod chain;
 pub mod error;
@@ -158,30 +158,30 @@ impl<P: consensus::Parameters> WalletDB<P> {
 }
 
 impl<P: consensus::Parameters> WalletRead for WalletDB<P> {
-    type Error = Error<SqliteClientError, NoteId>;
+    type Error = SqliteClientError;
     type NoteRef = NoteId;
     type TxRef = i64;
 
     fn block_height_extrema(&self) -> Result<Option<(BlockHeight, BlockHeight)>, Self::Error> {
-        wallet::block_height_extrema(self).map_err(db_error)
+        wallet::block_height_extrema(self).map_err(SqliteClientError::from)
     }
 
     fn get_block_hash(&self, block_height: BlockHeight) -> Result<Option<BlockHash>, Self::Error> {
-        wallet::get_block_hash(self, block_height).map_err(db_error)
+        wallet::get_block_hash(self, block_height).map_err(SqliteClientError::from)
     }
 
     fn get_tx_height(&self, txid: TxId) -> Result<Option<BlockHeight>, Self::Error> {
-        wallet::get_tx_height(self, txid).map_err(db_error)
+        wallet::get_tx_height(self, txid).map_err(SqliteClientError::from)
     }
 
     fn get_extended_full_viewing_keys(
         &self,
     ) -> Result<HashMap<AccountId, ExtendedFullViewingKey>, Self::Error> {
-        wallet::get_extended_full_viewing_keys(self).map_err(Error::Database)
+        wallet::get_extended_full_viewing_keys(self)
     }
 
     fn get_address(&self, account: AccountId) -> Result<Option<PaymentAddress>, Self::Error> {
-        wallet::get_address(self, account).map_err(Error::Database)
+        wallet::get_address(self, account)
     }
 
     fn is_valid_account_extfvk(
@@ -189,11 +189,11 @@ impl<P: consensus::Parameters> WalletRead for WalletDB<P> {
         account: AccountId,
         extfvk: &ExtendedFullViewingKey,
     ) -> Result<bool, Self::Error> {
-        wallet::is_valid_account_extfvk(self, account, extfvk).map_err(Error::Database)
+        wallet::is_valid_account_extfvk(self, account, extfvk)
     }
 
     fn get_balance(&self, account: AccountId) -> Result<Amount, Self::Error> {
-        wallet::get_balance(self, account).map_err(Error::Database)
+        wallet::get_balance(self, account)
     }
 
     fn get_verified_balance(
@@ -201,36 +201,36 @@ impl<P: consensus::Parameters> WalletRead for WalletDB<P> {
         account: AccountId,
         anchor_height: BlockHeight,
     ) -> Result<Amount, Self::Error> {
-        wallet::get_verified_balance(self, account, anchor_height).map_err(Error::Database)
+        wallet::get_verified_balance(self, account, anchor_height)
     }
 
     fn get_received_memo_as_utf8(
         &self,
         id_note: Self::NoteRef,
     ) -> Result<Option<String>, Self::Error> {
-        wallet::get_received_memo_as_utf8(self, id_note).map_err(Error::Database)
+        wallet::get_received_memo_as_utf8(self, id_note)
     }
 
     fn get_sent_memo_as_utf8(&self, id_note: Self::NoteRef) -> Result<Option<String>, Self::Error> {
-        wallet::get_sent_memo_as_utf8(self, id_note).map_err(Error::Database)
+        wallet::get_sent_memo_as_utf8(self, id_note)
     }
 
     fn get_commitment_tree(
         &self,
         block_height: BlockHeight,
     ) -> Result<Option<CommitmentTree<Node>>, Self::Error> {
-        wallet::get_commitment_tree(self, block_height).map_err(Error::Database)
+        wallet::get_commitment_tree(self, block_height)
     }
 
     fn get_witnesses(
         &self,
         block_height: BlockHeight,
     ) -> Result<Vec<(Self::NoteRef, IncrementalWitness<Node>)>, Self::Error> {
-        wallet::get_witnesses(self, block_height).map_err(Error::Database)
+        wallet::get_witnesses(self, block_height)
     }
 
     fn get_nullifiers(&self) -> Result<Vec<(Nullifier, AccountId)>, Self::Error> {
-        wallet::get_nullifiers(self).map_err(Error::Database)
+        wallet::get_nullifiers(self)
     }
 
     fn get_spendable_notes(
@@ -238,7 +238,7 @@ impl<P: consensus::Parameters> WalletRead for WalletDB<P> {
         account: AccountId,
         anchor_height: BlockHeight,
     ) -> Result<Vec<SpendableNote>, Self::Error> {
-        wallet::transact::get_spendable_notes(self, account, anchor_height).map_err(Error::Database)
+        wallet::transact::get_spendable_notes(self, account, anchor_height)
     }
 
     fn select_spendable_notes(
@@ -248,7 +248,6 @@ impl<P: consensus::Parameters> WalletRead for WalletDB<P> {
         anchor_height: BlockHeight,
     ) -> Result<Vec<SpendableNote>, Self::Error> {
         wallet::transact::select_spendable_notes(self, account, target_value, anchor_height)
-            .map_err(Error::Database)
     }
 }
 
@@ -278,7 +277,7 @@ pub struct DataConnStmtCache<'a, P> {
 }
 
 impl<'a, P: consensus::Parameters> WalletRead for DataConnStmtCache<'a, P> {
-    type Error = Error<SqliteClientError, NoteId>;
+    type Error = SqliteClientError;
     type NoteRef = NoteId;
     type TxRef = i64;
 
@@ -377,16 +376,10 @@ impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
     where
         F: FnOnce(&mut Self) -> Result<A, Self::Error>,
     {
-        self.wallet_db
-            .conn
-            .execute("BEGIN IMMEDIATE", NO_PARAMS)
-            .map_err(db_error)?;
+        self.wallet_db.conn.execute("BEGIN IMMEDIATE", NO_PARAMS)?;
         match f(self) {
             Ok(result) => {
-                self.wallet_db
-                    .conn
-                    .execute("COMMIT", NO_PARAMS)
-                    .map_err(db_error)?;
+                self.wallet_db.conn.execute("COMMIT", NO_PARAMS)?;
                 Ok(result)
             }
             Err(error) => {
@@ -414,7 +407,6 @@ impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
         commitment_tree: &CommitmentTree<Node>,
     ) -> Result<(), Self::Error> {
         wallet::insert_block(self, block_height, block_hash, block_time, commitment_tree)
-            .map_err(Error::Database)
     }
 
     fn rewind_to_height(&mut self, block_height: BlockHeight) -> Result<(), Self::Error> {
@@ -426,7 +418,7 @@ impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
         tx: &WalletTx,
         height: BlockHeight,
     ) -> Result<Self::TxRef, Self::Error> {
-        wallet::put_tx_meta(self, tx, height).map_err(Error::Database)
+        wallet::put_tx_meta(self, tx, height)
     }
 
     fn put_tx_data(
@@ -434,11 +426,11 @@ impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
         tx: &Transaction,
         created_at: Option<time::OffsetDateTime>,
     ) -> Result<Self::TxRef, Self::Error> {
-        wallet::put_tx_data(self, tx, created_at).map_err(Error::Database)
+        wallet::put_tx_data(self, tx, created_at)
     }
 
     fn mark_spent(&mut self, tx_ref: Self::TxRef, nf: &Nullifier) -> Result<(), Self::Error> {
-        wallet::mark_spent(self, tx_ref, nf).map_err(Error::Database)
+        wallet::mark_spent(self, tx_ref, nf)
     }
 
     // Assumptions:
@@ -450,7 +442,7 @@ impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
         nf_opt: &Option<Nullifier>,
         tx_ref: Self::TxRef,
     ) -> Result<Self::NoteRef, Self::Error> {
-        wallet::put_received_note(self, output, nf_opt, tx_ref).map_err(Error::Database)
+        wallet::put_received_note(self, output, nf_opt, tx_ref)
     }
 
     fn insert_witness(
@@ -459,15 +451,15 @@ impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
         witness: &IncrementalWitness<Node>,
         height: BlockHeight,
     ) -> Result<(), Self::Error> {
-        wallet::insert_witness(self, note_id, witness, height).map_err(Error::Database)
+        wallet::insert_witness(self, note_id, witness, height)
     }
 
     fn prune_witnesses(&mut self, below_height: BlockHeight) -> Result<(), Self::Error> {
-        wallet::prune_witnesses(self, below_height).map_err(Error::Database)
+        wallet::prune_witnesses(self, below_height)
     }
 
     fn update_expired_notes(&mut self, height: BlockHeight) -> Result<(), Self::Error> {
-        wallet::update_expired_notes(self, height).map_err(Error::Database)
+        wallet::update_expired_notes(self, height)
     }
 
     fn put_sent_note(
@@ -475,7 +467,7 @@ impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
         output: &DecryptedOutput,
         tx_ref: Self::TxRef,
     ) -> Result<(), Self::Error> {
-        wallet::put_sent_note(self, output, tx_ref).map_err(Error::Database)
+        wallet::put_sent_note(self, output, tx_ref)
     }
 
     fn insert_sent_note(
@@ -488,7 +480,6 @@ impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
         memo: Option<Memo>,
     ) -> Result<(), Self::Error> {
         wallet::insert_sent_note(self, tx_ref, output_index, account, to, value, memo)
-            .map_err(Error::Database)
     }
 }
 
@@ -501,7 +492,7 @@ impl BlockDB {
 }
 
 impl BlockSource for BlockDB {
-    type Error = Error<SqliteClientError, NoteId>;
+    type Error = SqliteClientError;
 
     fn with_blocks<F>(
         &self,

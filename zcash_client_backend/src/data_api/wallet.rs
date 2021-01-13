@@ -24,13 +24,13 @@ pub const ANCHOR_OFFSET: u32 = 10;
 
 /// Scans a [`Transaction`] for any information that can be decrypted by the accounts in
 /// the wallet, and saves it to the wallet.
-pub fn decrypt_and_store_transaction<'db, E0, N, E, P, D>(
+pub fn decrypt_and_store_transaction<'db, N, E, P, D>(
     params: &P,
     mut data: &'db D,
     tx: &Transaction,
 ) -> Result<(), E>
 where
-    E: From<Error<E0, N>>,
+    E: From<Error<N>>,
     P: consensus::Parameters,
     &'db D: WalletWrite<Error = E>,
 {
@@ -144,8 +144,8 @@ where
 ///     Err(e) => (),
 /// }
 /// ```
-pub fn create_spend_to_address<E0, N, E, P, D, R>(
-    data: &mut D,
+pub fn create_spend_to_address<E, N, P, D, R>(
+    wallet_db: &mut D,
     params: &P,
     prover: impl TxProver,
     account: AccountId,
@@ -154,21 +154,18 @@ pub fn create_spend_to_address<E0, N, E, P, D, R>(
     value: Amount,
     memo: Option<Memo>,
     ovk_policy: OvkPolicy,
-) -> Result<R, Error<E, N>>
+) -> Result<R, E>
 where
-    E0: Into<Error<E, N>>,
+    E: From<Error<N>>,
     P: consensus::Parameters + Clone,
     R: Copy + Debug,
-    D: WalletWrite<Error = E0, TxRef = R>,
+    D: WalletWrite<Error = E, TxRef = R>,
 {
     // Check that the ExtendedSpendingKey we have been given corresponds to the
     // ExtendedFullViewingKey for the account we are spending from.
     let extfvk = ExtendedFullViewingKey::from(extsk);
-    if !data
-        .is_valid_account_extfvk(account, &extfvk)
-        .map_err(|e| e.into())?
-    {
-        return Err(Error::InvalidExtSK(account));
+    if !wallet_db.is_valid_account_extfvk(account, &extfvk)? {
+        return Err(E::from(Error::InvalidExtSK(account)));
     }
 
     // Apply the outgoing viewing key policy.
@@ -179,20 +176,18 @@ where
     };
 
     // Target the next block, assuming we are up-to-date.
-    let (height, anchor_height) = data
+    let (height, anchor_height) = wallet_db
         .get_target_and_anchor_heights()
-        .map_err(|e| e.into())
-        .and_then(|x| x.ok_or(Error::ScanRequired))?;
+        .and_then(|x| x.ok_or(Error::ScanRequired.into()))?;
 
     let target_value = value + DEFAULT_FEE;
-    let spendable_notes = data
-        .select_spendable_notes(account, target_value, anchor_height)
-        .map_err(|e| e.into())?;
+    let spendable_notes = wallet_db
+        .select_spendable_notes(account, target_value, anchor_height)?;
 
     // Confirm we were able to select sufficient value
     let selected_value = spendable_notes.iter().map(|n| n.note_value).sum();
     if selected_value < target_value {
-        return Err(Error::InsufficientBalance(selected_value, target_value));
+        return Err(E::from(Error::InsufficientBalance(selected_value, target_value)));
     }
 
     // Create the transaction
@@ -210,19 +205,20 @@ where
 
         let merkle_path = selected.witness.path().expect("the tree is not empty");
 
-        builder.add_sapling_spend(extsk.clone(), selected.diversifier, note, merkle_path)?
+        builder.add_sapling_spend(extsk.clone(), selected.diversifier, note, merkle_path)
+            .map_err(Error::Builder)?
     }
 
     match to {
-        RecipientAddress::Shielded(to) => {
-            builder.add_sapling_output(ovk, to.clone(), value, memo.clone())
-        }
+        RecipientAddress::Shielded(to) => 
+            builder.add_sapling_output(ovk, to.clone(), value, memo.clone()),
 
-        RecipientAddress::Transparent(to) => builder.add_transparent_output(&to, value),
-    }?;
+        RecipientAddress::Transparent(to) => 
+            builder.add_transparent_output(&to, value),
+    }.map_err(Error::Builder)?;
 
     let consensus_branch_id = BranchId::for_height(params, height);
-    let (tx, tx_metadata) = builder.build(consensus_branch_id, &prover)?;
+    let (tx, tx_metadata) = builder.build(consensus_branch_id, &prover).map_err(Error::Builder)?;
 
     // We only called add_sapling_output() once.
     let output_index = match tx_metadata.output_index(0) {
@@ -231,7 +227,7 @@ where
     };
 
     // Update the database atomically, to ensure the result is internally consistent.
-    data.transactionally(|up| {
+    wallet_db.transactionally(|up| {
         let created = time::OffsetDateTime::now_utc();
         let tx_ref = up.put_tx_data(&tx, Some(created))?;
 

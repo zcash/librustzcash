@@ -227,6 +227,10 @@ pub trait WalletWrite: WalletRead {
 
     /// Record a note as having been received, along with its nullifier and the transaction
     /// within which the note was created.
+    ///
+    /// Implementations of this method should be exclusively additive with respect to stored
+    /// data; passing `None` for the nullifier should not be interpreted as deleting nullifier
+    /// information from the underlying store.
     fn put_received_note<T: ShieldedOutput>(
         &mut self,
         output: &T,
@@ -375,7 +379,7 @@ pub mod testing {
     pub struct MockBlockSource {}
 
     impl BlockSource for MockBlockSource {
-        type Error = Error<(), u32>;
+        type Error = Error<u32>;
 
         fn with_blocks<F>(
             &self,
@@ -393,7 +397,7 @@ pub mod testing {
     pub struct MockWalletDB {}
 
     impl WalletRead for MockWalletDB {
-        type Error = Error<(), u32>;
+        type Error = Error<u32>;
         type NoteRef = u32;
         type TxRef = TxId;
 
