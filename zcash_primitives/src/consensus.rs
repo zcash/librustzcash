@@ -140,7 +140,7 @@ pub trait Parameters: Clone {
     /// [SLIP 44]: https://github.com/satoshilabs/slips/blob/master/slip-0044.md
     fn coin_type(&self) -> u32;
 
-    /// Returns the Bech32-encoded human-readable prefix for Sapling extended spending keys
+    /// Returns the human-readable prefix for Bech32-encoded Sapling extended spending keys
     /// the network to which this Parameters value applies.
     ///
     /// Defined in [ZIP 32].
@@ -149,7 +149,7 @@ pub trait Parameters: Clone {
     /// [ZIP 32]: https://github.com/zcash/zips/blob/master/zip-0032.rst
     fn hrp_sapling_extended_spending_key(&self) -> &str;
 
-    /// Returns the Bech32-encoded human-readable prefix for Sapling extended full
+    /// Returns the human-readable prefix for Bech32-encoded Sapling extended full
     /// viewing keys for the network to which this Parameters value applies.
     ///
     /// Defined in [ZIP 32].
@@ -167,14 +167,14 @@ pub trait Parameters: Clone {
     /// [Zcash Protocol Specification]: https://github.com/zcash/zips/blob/master/protocol/protocol.pdf
     fn hrp_sapling_payment_address(&self) -> &str;
 
-    /// Returns the Base58Check-encoded human-readable prefix for transparent
+    /// Returns the human-readable prefix for Base58Check-encoded transparent
     /// pay-to-public-key-hash payment addresses for the network to which this Parameters value
     /// applies.
     ///
     /// [`TransparentAddress::PublicKey`]: zcash_primitives::legacy::TransparentAddress::PublicKey
     fn b58_pubkey_address_prefix(&self) -> [u8; 2];
 
-    /// Returns the Base58Check-encoded human-readable prefix for transparent pay-to-script-hash
+    /// Returns the human-readable prefix for Base58Check-encoded transparent pay-to-script-hash
     /// payment addresses for the network to which this Parameters value applies.
     ///
     /// [`TransparentAddress::Script`]: zcash_primitives::legacy::TransparentAddress::Script
