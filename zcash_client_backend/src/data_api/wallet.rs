@@ -209,8 +209,7 @@ where
         let merkle_path = selected.witness.path().expect("the tree is not empty");
 
         builder
-            .add_sapling_spend(extsk.clone(), selected.diversifier, note, merkle_path)
-            .map_err(Error::Builder)?;
+            .add_sapling_spend(extsk.clone(), selected.diversifier, note, merkle_path)?
     }
 
     match to {
@@ -222,9 +221,7 @@ where
     }?;
 
     let consensus_branch_id = BranchId::for_height(params, height);
-    let (tx, tx_metadata) = builder
-        .build(consensus_branch_id, &prover)
-        .map_err(Error::Builder)?;
+    let (tx, tx_metadata) = builder.build(consensus_branch_id, &prover)?;
 
     // We only called add_sapling_output() once.
     let output_index = match tx_metadata.output_index(0) {
