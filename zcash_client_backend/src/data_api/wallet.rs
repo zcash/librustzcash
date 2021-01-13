@@ -111,9 +111,11 @@ where
 /// };
 /// use zcash_client_sqlite::{
 ///     WalletDB,
+///     error::SqliteClientError,
 ///     wallet::init::init_wallet_db,
 /// };
 ///
+/// # fn main() -> Result<(), SqliteClientError> {
 /// let tx_prover = match LocalTxProver::with_default_location() {
 ///     Some(tx_prover) => tx_prover,
 ///     None => {
@@ -127,9 +129,10 @@ where
 ///
 /// let data_file = NamedTempFile::new().unwrap();
 /// let db_read = WalletDB::for_path(data_file, Network::TestNetwork).unwrap();
-/// init_wallet_db(&db_read).unwrap();
-/// let mut db = db_read.get_update_ops().unwrap();
-/// match create_spend_to_address(
+/// init_wallet_db(&db_read)?;
+/// let mut db = db_read.get_update_ops()?;
+///
+/// create_spend_to_address(
 ///     &mut db,
 ///     &Network::TestNetwork,
 ///     tx_prover,
@@ -139,10 +142,10 @@ where
 ///     Amount::from_u64(1).unwrap(),
 ///     None,
 ///     OvkPolicy::Sender,
-/// ) {
-///     Ok(tx_row) => (),
-///     Err(e) => (),
-/// }
+/// )?;
+///
+/// # Ok(())
+/// # }
 /// ```
 pub fn create_spend_to_address<E, N, P, D, R>(
     wallet_db: &mut D,

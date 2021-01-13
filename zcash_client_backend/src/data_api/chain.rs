@@ -1,4 +1,86 @@
 //! Tools for blockchain validation & scanning
+//!
+//! # Examples
+//!
+//! ```
+//! use tempfile::NamedTempFile;
+//! use zcash_primitives::{
+//!     consensus::{BlockHeight, Network, Parameters}
+//! };
+//!
+//! use zcash_client_backend::{
+//!     data_api::{
+//!         BlockSource, WalletRead, WalletWrite,
+//!         chain::{
+//!             validate_chain,
+//!             scan_cached_blocks,
+//!         },
+//!         error::Error,
+//!     },
+//! };
+//!
+//! use zcash_client_sqlite::{
+//!     BlockDB,
+//!     WalletDB,
+//!     error::SqliteClientError,
+//!     wallet::{rewind_to_height},
+//!     wallet::init::{init_wallet_db},
+//! };
+//!
+//! # fn main() -> Result<(), SqliteClientError> {
+//! let network = Network::TestNetwork;
+//! let cache_file = NamedTempFile::new()?;
+//! let db_cache = BlockDB::for_path(cache_file)?;
+//! let db_file = NamedTempFile::new()?;
+//! let db_read = WalletDB::for_path(db_file, network)?;
+//! init_wallet_db(&db_read)?;
+//!
+//! let mut db_data = db_read.get_update_ops()?;
+//!
+//! // 1) Download new CompactBlocks into db_cache.
+//!
+//! // 2) Run the chain validator on the received blocks.
+//! //
+//! // Given that we assume the server always gives us correct-at-the-time blocks, any
+//! // errors are in the blocks we have previously cached or scanned.
+//! if let Err(e) = validate_chain(&network, &db_cache, db_data.get_max_height_hash()?) {
+//!     match e {
+//!         SqliteClientError::BackendError(Error::InvalidChain(lower_bound, _)) => {
+//!             // a) Pick a height to rewind to.
+//!             //
+//!             // This might be informed by some external chain reorg information, or
+//!             // heuristics such as the platform, available bandwidth, size of recent
+//!             // CompactBlocks, etc.
+//!             let rewind_height = lower_bound - 10;
+//!
+//!             // b) Rewind scanned block information.
+//!             db_data.rewind_to_height(rewind_height);
+//!
+//!             // c) Delete cached blocks from rewind_height onwards.
+//!             //
+//!             // This does imply that assumed-valid blocks will be re-downloaded, but it
+//!             // is also possible that in the intervening time, a chain reorg has
+//!             // occurred that orphaned some of those blocks.
+//!
+//!             // d) If there is some separate thread or service downloading
+//!             // CompactBlocks, tell it to go back and download from rewind_height
+//!             // onwards.
+//!         }
+//!         e => {
+//!             // Handle or return other errors.
+//!             return Err(e);
+//!         }
+//!     }
+//! }
+//!
+//! // 3) Scan (any remaining) cached blocks.
+//! //
+//! // At this point, the cache and scanned data are locally consistent (though not
+//! // necessarily consistent with the latest chain tip - this would be discovered the
+//! // next time this codepath is executed after new blocks are received).
+//! scan_cached_blocks(&network, &db_cache, &mut db_data, None)
+//! # }
+//! ```
 
 use std::fmt::Debug;
 
@@ -117,16 +199,22 @@ where
 /// use zcash_client_sqlite::{
 ///     BlockDB,
 ///     WalletDB,
+///     error::SqliteClientError,
 ///     wallet::init::init_wallet_db,
 /// };
 ///
+/// # fn main() -> Result<(), SqliteClientError> {
 /// let cache_file = NamedTempFile::new().unwrap();
 /// let cache = BlockDB::for_path(cache_file).unwrap();
+///
 /// let data_file = NamedTempFile::new().unwrap();
-/// let db_read = WalletDB::for_path(data_file, Network::TestNetwork).unwrap();
-/// init_wallet_db(&db_read).unwrap();
-/// let mut data = db_read.get_update_ops().unwrap();
-/// scan_cached_blocks(&Network::TestNetwork, &cache, &mut data, None);
+/// let db_read = WalletDB::for_path(data_file, Network::TestNetwork)?;
+/// init_wallet_db(&db_read)?;
+///
+/// let mut data = db_read.get_update_ops()?;
+/// scan_cached_blocks(&Network::TestNetwork, &cache, &mut data, None)?;
+/// # Ok(())
+/// # }
 /// ```
 ///
 /// [`init_blocks_table`]: crate::init::init_blocks_table
