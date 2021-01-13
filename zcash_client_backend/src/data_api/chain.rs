@@ -92,7 +92,7 @@ where
 /// `scan_cached_blocks` and passing `None` for the optional `limit` value.
 ///
 /// This function pays attention only to cached blocks with heights greater than the
-/// highest scanned block in `db_data`. Cached blocks with lower heights are not verified
+/// highest scanned block in `data`. Cached blocks with lower heights are not verified
 /// against previously-scanned blocks. In particular, this function **assumes** that the
 /// caller is handling rollbacks.
 ///
