@@ -559,7 +559,7 @@ pub fn put_received_note<'a, P, T: ShieldedOutput>(
     let output_index = output.index() as i64;
     let nf_bytes = nf_opt.map(|nf| nf.0.to_vec());
 
-    let sql_args: Vec<(&str, &dyn ToSql)> = vec![
+    let sql_args: &[(&str, &dyn ToSql)] = &[
         (&":account", &account),
         (&":diversifier", &diversifier),
         (&":value", &value),
