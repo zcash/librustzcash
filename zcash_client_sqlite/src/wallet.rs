@@ -26,10 +26,7 @@ use zcash_client_backend::{
     DecryptedOutput,
 };
 
-use crate::{
-    error::{SqliteClientError},
-    DataConnStmtCache, NoteId, WalletDB,
-};
+use crate::{error::SqliteClientError, DataConnStmtCache, NoteId, WalletDB};
 
 pub mod init;
 pub mod transact;
@@ -347,38 +344,35 @@ pub fn rewind_to_height<P: consensus::Parameters>(
         .ok_or(SqliteClientError::BackendError(Error::SaplingNotActive))?;
 
     // Recall where we synced up to previously.
-    let last_scanned_height = wdb
-        .conn
-        .query_row("SELECT MAX(height) FROM blocks", NO_PARAMS, |row| {
-            row.get(0)
-                .map(|h: u32| h.into())
-                .or(Ok(sapling_activation_height - 1))
-        })?;
+    let last_scanned_height =
+        wdb.conn
+            .query_row("SELECT MAX(height) FROM blocks", NO_PARAMS, |row| {
+                row.get(0)
+                    .map(|h: u32| h.into())
+                    .or(Ok(sapling_activation_height - 1))
+            })?;
 
     // nothing to do if we're deleting back down to the max height
     if block_height >= last_scanned_height {
         Ok(())
     } else {
         // Decrement witnesses.
-        wdb.conn
-            .execute(
-                "DELETE FROM sapling_witnesses WHERE block > ?",
-                &[u32::from(block_height)],
-            )?;
+        wdb.conn.execute(
+            "DELETE FROM sapling_witnesses WHERE block > ?",
+            &[u32::from(block_height)],
+        )?;
 
         // Un-mine transactions.
-        wdb.conn
-            .execute(
-                "UPDATE transactions SET block = NULL, tx_index = NULL WHERE block > ?",
-                &[u32::from(block_height)],
-            )?;
+        wdb.conn.execute(
+            "UPDATE transactions SET block = NULL, tx_index = NULL WHERE block > ?",
+            &[u32::from(block_height)],
+        )?;
 
         // Now that they aren't depended on, delete scanned blocks.
-        wdb.conn
-            .execute(
-                "DELETE FROM blocks WHERE height > ?",
-                &[u32::from(block_height)],
-            )?;
+        wdb.conn.execute(
+            "DELETE FROM blocks WHERE height > ?",
+            &[u32::from(block_height)],
+        )?;
 
         Ok(())
     }

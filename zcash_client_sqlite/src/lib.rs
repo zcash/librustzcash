@@ -50,7 +50,7 @@ use zcash_client_backend::{
     DecryptedOutput,
 };
 
-use crate::error::{SqliteClientError};
+use crate::error::SqliteClientError;
 
 pub mod chain;
 pub mod error;

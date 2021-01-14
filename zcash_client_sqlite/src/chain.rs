@@ -7,10 +7,7 @@ use zcash_primitives::consensus::BlockHeight;
 
 use zcash_client_backend::{data_api::error::Error, proto::compact_formats::CompactBlock};
 
-use crate::{
-    error::{SqliteClientError},
-    BlockDB,
-};
+use crate::{error::SqliteClientError, BlockDB};
 
 pub mod init;
 
@@ -29,22 +26,19 @@ where
     F: FnMut(CompactBlock) -> Result<(), SqliteClientError>,
 {
     // Fetch the CompactBlocks we need to scan
-    let mut stmt_blocks = cache
-        .0
-        .prepare(
-            "SELECT height, data FROM compactblocks WHERE height > ? ORDER BY height ASC LIMIT ?",
-        )?;
+    let mut stmt_blocks = cache.0.prepare(
+        "SELECT height, data FROM compactblocks WHERE height > ? ORDER BY height ASC LIMIT ?",
+    )?;
 
-    let rows = stmt_blocks
-        .query_map(
-            params![u32::from(from_height), limit.unwrap_or(u32::max_value()),],
-            |row| {
-                Ok(CompactBlockRow {
-                    height: BlockHeight::from_u32(row.get(0)?),
-                    data: row.get(1)?,
-                })
-            },
-        )?;
+    let rows = stmt_blocks.query_map(
+        params![u32::from(from_height), limit.unwrap_or(u32::max_value()),],
+        |row| {
+            Ok(CompactBlockRow {
+                height: BlockHeight::from_u32(row.get(0)?),
+                data: row.get(1)?,
+            })
+        },
+    )?;
 
     for row_result in rows {
         let cbr = row_result?;

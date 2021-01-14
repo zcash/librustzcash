@@ -78,7 +78,6 @@ impl From<bech32::Error> for SqliteClientError {
     }
 }
 
-
 impl From<bs58::decode::Error> for SqliteClientError {
     fn from(e: bs58::decode::Error) -> Self {
         SqliteClientError::Base58(e)
@@ -90,4 +89,3 @@ impl From<data_api::error::Error<NoteId>> for SqliteClientError {
         SqliteClientError::BackendError(e)
     }
 }
-
