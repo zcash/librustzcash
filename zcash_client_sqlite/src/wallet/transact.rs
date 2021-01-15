@@ -171,7 +171,7 @@ mod tests {
         chain::init::init_cache_database,
         tests::{self, fake_compact_block, insert_into_cache, sapling_activation_height},
         wallet::{
-            get_balance, get_verified_balance,
+            get_balance, get_balance_at,
             init::{init_accounts_table, init_blocks_table, init_wallet_db},
         },
         AccountId, BlockDB, DataConnStmtCache, WalletDB,
@@ -340,7 +340,7 @@ mod tests {
         let (_, anchor_height) = (&db_data).get_target_and_anchor_heights().unwrap().unwrap();
         assert_eq!(get_balance(&db_data, AccountId(0)).unwrap(), value);
         assert_eq!(
-            get_verified_balance(&db_data, AccountId(0), anchor_height).unwrap(),
+            get_balance_at(&db_data, AccountId(0), anchor_height).unwrap(),
             value
         );
 
@@ -358,7 +358,7 @@ mod tests {
         let (_, anchor_height2) = (&db_data).get_target_and_anchor_heights().unwrap().unwrap();
         assert_eq!(get_balance(&db_data, AccountId(0)).unwrap(), value + value);
         assert_eq!(
-            get_verified_balance(&db_data, AccountId(0), anchor_height2).unwrap(),
+            get_balance_at(&db_data, AccountId(0), anchor_height2).unwrap(),
             value
         );
 

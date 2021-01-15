@@ -123,7 +123,7 @@ pub trait WalletRead {
     /// implementation for efficiency.
     fn get_balance(&self, account: AccountId) -> Result<Amount, Self::Error> {
         if let Some((_, tip)) = self.block_height_extrema()? {
-            self.get_verified_balance(account, tip)
+            self.get_balance_at(account, tip)
         } else {
             Ok(Amount::zero())
         }
@@ -134,7 +134,7 @@ pub trait WalletRead {
     ///
     /// This may be used to obtain a balance that ignores notes that have been
     /// received so recently that they are not yet deemed spendable.
-    fn get_verified_balance(
+    fn get_balance_at(
         &self,
         account: AccountId,
         anchor_height: BlockHeight,
@@ -210,6 +210,10 @@ pub trait WalletWrite: WalletRead {
     /// a chain reorg might invalidate some stored state, this method must be
     /// implemented in order to allow users of this API to "reset" the data store
     /// to correctly represent chainstate as of a specified block height.
+    ///
+    /// After calling this method, the block at the given height will be the
+    /// most recent block and all other operations will treat this block
+    /// as the chain tip for balance determination purposes.
     fn rewind_to_height(&mut self, block_height: BlockHeight) -> Result<(), Self::Error>;
 
     /// Add wallet-relevant metadata for a specific transaction to the data
@@ -439,7 +443,7 @@ pub mod testing {
             Ok(false)
         }
 
-        fn get_verified_balance(
+        fn get_balance_at(
             &self,
             _account: AccountId,
             _anchor_height: BlockHeight,

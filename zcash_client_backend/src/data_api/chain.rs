@@ -259,7 +259,10 @@ where
 
     // Fetch the ExtendedFullViewingKeys we are tracking
     let extfvks = data.get_extended_full_viewing_keys()?;
-    let ivks: Vec<_> = extfvks.iter().map(|(a, extfvk)| (*a, extfvk.fvk.vk.ivk())).collect();
+    let ivks: Vec<_> = extfvks
+        .iter()
+        .map(|(a, extfvk)| (*a, extfvk.fvk.vk.ivk()))
+        .collect();
 
     // Get the most recent CommitmentTree
     let mut tree = data
@@ -340,17 +343,17 @@ where
 
                 for output in tx.shielded_outputs {
                     if let Some(extfvk) = &extfvks.get(&output.account) {
-                            let nf = output
-                                .note
-                                .nf(&extfvk.fvk.vk, output.witness.position() as u64);
+                        let nf = output
+                            .note
+                            .nf(&extfvk.fvk.vk, output.witness.position() as u64);
 
-                            let note_id = up.put_received_note(&output, &Some(nf), tx_row)?;
+                        let note_id = up.put_received_note(&output, &Some(nf), tx_row)?;
 
-                            // Save witness for note.
-                            witnesses.push((note_id, output.witness));
+                        // Save witness for note.
+                        witnesses.push((note_id, output.witness));
 
-                            // Cache nullifier for note (to detect subsequent spends in this scan).
-                            nullifiers.push((output.account, nf));
+                        // Cache nullifier for note (to detect subsequent spends in this scan).
+                        nullifiers.push((output.account, nf));
                     }
                 }
             }

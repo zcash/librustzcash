@@ -196,12 +196,12 @@ impl<P: consensus::Parameters> WalletRead for WalletDB<P> {
         wallet::get_balance(self, account)
     }
 
-    fn get_verified_balance(
+    fn get_balance_at(
         &self,
         account: AccountId,
         anchor_height: BlockHeight,
     ) -> Result<Amount, Self::Error> {
-        wallet::get_verified_balance(self, account, anchor_height)
+        wallet::get_balance_at(self, account, anchor_height)
     }
 
     fn get_received_memo_as_utf8(
@@ -315,12 +315,12 @@ impl<'a, P: consensus::Parameters> WalletRead for DataConnStmtCache<'a, P> {
         self.wallet_db.get_balance(account)
     }
 
-    fn get_verified_balance(
+    fn get_balance_at(
         &self,
         account: AccountId,
         anchor_height: BlockHeight,
     ) -> Result<Amount, Self::Error> {
-        self.wallet_db.get_verified_balance(account, anchor_height)
+        self.wallet_db.get_balance_at(account, anchor_height)
     }
 
     fn get_received_memo_as_utf8(

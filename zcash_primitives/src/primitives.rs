@@ -4,7 +4,7 @@ use ff::PrimeField;
 use group::{Curve, Group, GroupEncoding};
 use std::array::TryFromSliceError;
 use std::convert::TryInto;
-use subtle::{ConstantTimeEq, Choice};
+use subtle::{Choice, ConstantTimeEq};
 
 use crate::constants;
 
@@ -218,7 +218,6 @@ impl ConstantTimeEq for Nullifier {
     }
 }
 
-
 #[derive(Clone, Debug)]
 pub struct Note {
     /// The value of the note
@@ -294,7 +293,8 @@ impl Note {
                 .update(&rho.to_bytes())
                 .finalize()
                 .as_bytes(),
-        ).unwrap()
+        )
+        .unwrap()
     }
 
     /// Computes the note commitment

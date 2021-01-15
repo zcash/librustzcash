@@ -115,8 +115,8 @@ pub fn scan_block<P: consensus::Parameters>(
                     .iter()
                     .map(|&(account, nf)| CtOption::new(account, nf.ct_eq(&spend_nf)))
                     .fold(
-                        CtOption::new(AccountId::default(), 0.into()), 
-                        |first, next| CtOption::conditional_select(&next, &first, first.is_some())
+                        CtOption::new(AccountId::default(), 0.into()),
+                        |first, next| CtOption::conditional_select(&next, &first, first.is_some()),
                     )
                     .map(|account| WalletShieldedSpend {
                         index,

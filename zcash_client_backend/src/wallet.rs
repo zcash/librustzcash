@@ -1,7 +1,7 @@
 //! Structs representing transaction data scanned from the block chain by a wallet or
 //! light client.
 
-use subtle::{ConditionallySelectable, Choice};
+use subtle::{Choice, ConditionallySelectable};
 
 use zcash_primitives::{
     keys::OutgoingViewingKey,

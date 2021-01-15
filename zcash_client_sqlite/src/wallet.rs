@@ -121,7 +121,7 @@ pub fn is_valid_account_extfvk<P: consensus::Parameters>(
 ///
 /// WARNING: This balance is potentially unreliable, as mined notes may become unmined due
 /// to chain reorgs. You should generally not show this balance to users without some
-/// caveat. Use [`get_verified_balance`] where you need a more reliable indication of the
+/// caveat. Use [`get_balance_at`] where you need a more reliable indication of the
 /// wallet balance.
 ///
 /// # Examples
@@ -168,14 +168,14 @@ pub fn get_balance<P>(wdb: &WalletDB<P>, account: AccountId) -> Result<Amount, S
 /// use zcash_client_backend::wallet::AccountId;
 /// use zcash_client_sqlite::{
 ///     WalletDB,
-///     wallet::get_verified_balance,
+///     wallet::get_balance_at,
 /// };
 ///
 /// let data_file = NamedTempFile::new().unwrap();
 /// let db = WalletDB::for_path(data_file, Network::TestNetwork).unwrap();
-/// let addr = get_verified_balance(&db, AccountId(0), BlockHeight::from_u32(0));
+/// let addr = get_balance_at(&db, AccountId(0), BlockHeight::from_u32(0));
 /// ```
-pub fn get_verified_balance<P>(
+pub fn get_balance_at<P>(
     wdb: &WalletDB<P>,
     account: AccountId,
     anchor_height: BlockHeight,
