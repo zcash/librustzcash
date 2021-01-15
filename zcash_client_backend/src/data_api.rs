@@ -27,7 +27,7 @@ pub mod chain;
 pub mod error;
 pub mod wallet;
 
-/// Read-only operations require for light wallet functions.
+/// Read-only operations required for light wallet functions.
 ///
 /// This trait defines the read-only portion of the storage
 /// interface atop which higher-level wallet operations are
@@ -53,8 +53,10 @@ pub trait WalletRead {
     /// Returns the minimum and maximum block heights for stored blocks.
     fn block_height_extrema(&self) -> Result<Option<(BlockHeight, BlockHeight)>, Self::Error>;
 
-    /// Returns the default target height and anchor height, given the
-    /// range of block heights that the backend knows about.
+    /// Returns the default target height (for the block in which a new
+    /// transaction would be mined) and anchor height (to use for a new
+    /// transaction), given the range of block heights that the backend
+    /// knows about.
     fn get_target_and_anchor_heights(
         &self,
     ) -> Result<Option<(BlockHeight, BlockHeight)>, Self::Error> {
@@ -74,7 +76,7 @@ pub trait WalletRead {
         })
     }
 
-    /// Returns the block hash for the block at the given height
+    /// Returns the block hash for the block at the given height.
     fn get_block_hash(&self, block_height: BlockHeight) -> Result<Option<BlockHash>, Self::Error>;
 
     /// Returns the block hash for the block at the maximum height known
@@ -92,14 +94,15 @@ pub trait WalletRead {
             .map(|oo| oo.flatten())
     }
 
-    /// Returns the block height in which the specified transaction was mined.
+    /// Returns the block height in which the specified transaction was mined,
+    /// or `None` if the transaction is not mined in the main chain.
     fn get_tx_height(&self, txid: TxId) -> Result<Option<BlockHeight>, Self::Error>;
 
     /// Returns the payment address for the specified account, if the account
     /// identifier specified refers to a valid account for this wallet.
     fn get_address(&self, account: AccountId) -> Result<Option<PaymentAddress>, Self::Error>;
 
-    /// Returns all extended full viewing keys known about by this wallet
+    /// Returns all extended full viewing keys known about by this wallet.
     fn get_extended_full_viewing_keys(
         &self,
     ) -> Result<HashMap<AccountId, ExtendedFullViewingKey>, Self::Error>;
@@ -127,7 +130,7 @@ pub trait WalletRead {
     }
 
     /// Returns the wallet balance for an account as of the specified block
-    /// height. and
+    /// height.
     ///
     /// This may be used to obtain a balance that ignores notes that have been
     /// received so recently that they are not yet deemed spendable.
@@ -200,6 +203,8 @@ pub trait WalletWrite: WalletRead {
         commitment_tree: &CommitmentTree<Node>,
     ) -> Result<(), Self::Error>;
 
+    /// Rewinds the wallet database to the specified height.
+    ///
     /// This method assumes that the state of the underlying data store is
     /// consistent up to a particular block height. Since it is possible that
     /// a chain reorg might invalidate some stored state, this method must be

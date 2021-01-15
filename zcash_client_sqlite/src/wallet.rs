@@ -431,7 +431,7 @@ pub fn get_nullifiers<P>(
     let nullifiers = stmt_fetch_nullifiers.query_map(NO_PARAMS, |row| {
         let account = AccountId(row.get(1)?);
         let nf_bytes: Vec<u8> = row.get(2)?;
-        Ok((account, Nullifier::from_slice(&nf_bytes)))
+        Ok((account, Nullifier::from_slice(&nf_bytes).unwrap()))
     })?;
 
     let res: Vec<_> = nullifiers.collect::<Result<_, _>>()?;

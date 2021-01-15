@@ -108,19 +108,20 @@ pub fn scan_block<P: consensus::Parameters>(
             .into_iter()
             .enumerate()
             .map(|(index, spend)| {
-                let spend_nf = Nullifier::from_slice(&spend.nf[..]);
+                let spend_nf = Nullifier::from_slice(&spend.nf[..]).unwrap();
                 // Find the first tracked nullifier that matches this spend, and produce
                 // a WalletShieldedSpend if there is a match, in constant time.
                 nullifiers
                     .iter()
-                    .map(|&(account, nf)| CtOption::new(account.0 as u64, nf.0.ct_eq(&spend_nf.0)))
-                    .fold(CtOption::new(0, 0.into()), |first, next| {
-                        CtOption::conditional_select(&next, &first, first.is_some())
-                    })
+                    .map(|&(account, nf)| CtOption::new(account, nf.ct_eq(&spend_nf)))
+                    .fold(
+                        CtOption::new(AccountId::default(), 0.into()), 
+                        |first, next| CtOption::conditional_select(&next, &first, first.is_some())
+                    )
                     .map(|account| WalletShieldedSpend {
                         index,
                         nf: spend_nf,
-                        account: AccountId(account as u32),
+                        account,
                     })
             })
             .filter(|spend| spend.is_some().into())

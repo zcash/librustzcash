@@ -339,8 +339,7 @@ where
                     .retain(|(_, nf)| !tx.shielded_spends.iter().any(|spend| &spend.nf == nf));
 
                 for output in tx.shielded_outputs {
-                    match &extfvks.get(&output.account) {
-                        Some(extfvk) => {
+                    if let Some(extfvk) = &extfvks.get(&output.account) {
                             let nf = output
                                 .note
                                 .nf(&extfvk.fvk.vk, output.witness.position() as u64);
@@ -352,8 +351,6 @@ where
 
                             // Cache nullifier for note (to detect subsequent spends in this scan).
                             nullifiers.push((output.account, nf));
-                        }
-                        None => (),
                     }
                 }
             }

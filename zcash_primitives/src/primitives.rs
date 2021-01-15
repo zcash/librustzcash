@@ -2,7 +2,9 @@
 
 use ff::PrimeField;
 use group::{Curve, Group, GroupEncoding};
+use std::array::TryFromSliceError;
 use std::convert::TryInto;
+use subtle::{ConstantTimeEq, Choice};
 
 use crate::constants;
 
@@ -201,16 +203,21 @@ pub enum Rseed {
 pub struct Nullifier(pub [u8; 32]);
 
 impl Nullifier {
-    pub fn from_slice(bytes: &[u8]) -> Nullifier {
-        let mut nf = Nullifier([0u8; 32]);
-        nf.0.copy_from_slice(bytes);
-        nf
+    pub fn from_slice(bytes: &[u8]) -> Result<Nullifier, TryFromSliceError> {
+        bytes.try_into().map(Nullifier)
     }
 
     pub fn to_vec(&self) -> Vec<u8> {
         self.0.to_vec()
     }
 }
+
+impl ConstantTimeEq for Nullifier {
+    fn ct_eq(&self, other: &Self) -> Choice {
+        self.0.ct_eq(&other.0)
+    }
+}
+
 
 #[derive(Clone, Debug)]
 pub struct Note {
@@ -287,7 +294,7 @@ impl Note {
                 .update(&rho.to_bytes())
                 .finalize()
                 .as_bytes(),
-        )
+        ).unwrap()
     }
 
     /// Computes the note commitment

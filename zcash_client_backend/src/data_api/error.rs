@@ -27,7 +27,7 @@ pub enum Error<NoteId> {
     InsufficientBalance(Amount, Amount),
     /// Chain validation detected an error in the block at the specified block height.
     InvalidChain(BlockHeight, ChainInvalid),
-    /// A provided extfvk is not associated with the specified account.
+    /// A provided extsk is not associated with the specified account.
     InvalidExtSK(AccountId),
     /// The root of an output's witness tree in a newly arrived transaction does
     /// not correspond to root of the stored commitment tree at the recorded height.
