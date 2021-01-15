@@ -15,7 +15,7 @@ use zcash_primitives::{
 
 use crate::{
     address::RecipientAddress,
-    data_api::{error::Error, WalletRead, WalletWrite},
+    data_api::{error::Error, WalletWrite},
     decrypt_transaction,
     wallet::{AccountId, OvkPolicy},
 };
@@ -26,13 +26,13 @@ pub const ANCHOR_OFFSET: u32 = 10;
 /// the wallet, and saves it to the wallet.
 pub fn decrypt_and_store_transaction<'db, N, E, P, D>(
     params: &P,
-    mut data: &'db D,
+    data: &mut D,
     tx: &Transaction,
 ) -> Result<(), E>
 where
     E: From<Error<N>>,
     P: consensus::Parameters,
-    &'db D: WalletWrite<Error = E>,
+    D: WalletWrite<Error = E>,
 {
     // Fetch the ExtendedFullViewingKeys we are tracking
     let extfvks = data.get_extended_full_viewing_keys()?;
