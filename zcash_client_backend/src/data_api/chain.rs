@@ -259,7 +259,7 @@ where
 
     // Fetch the ExtendedFullViewingKeys we are tracking
     let extfvks = data.get_extended_full_viewing_keys()?;
-    let ivks: Vec<_> = extfvks.values().map(|extfvk| extfvk.fvk.vk.ivk()).collect();
+    let ivks: Vec<_> = extfvks.iter().map(|(a, extfvk)| (*a, extfvk.fvk.vk.ivk())).collect();
 
     // Get the most recent CommitmentTree
     let mut tree = data
@@ -336,7 +336,7 @@ where
 
                 // remove spent nullifiers from the nullifier set
                 nullifiers
-                    .retain(|(nf, _acc)| !tx.shielded_spends.iter().any(|spend| &spend.nf == nf));
+                    .retain(|(_, nf)| !tx.shielded_spends.iter().any(|spend| &spend.nf == nf));
 
                 for output in tx.shielded_outputs {
                     match &extfvks.get(&output.account) {
@@ -351,7 +351,7 @@ where
                             witnesses.push((note_id, output.witness));
 
                             // Cache nullifier for note (to detect subsequent spends in this scan).
-                            nullifiers.push((nf, output.account));
+                            nullifiers.push((output.account, nf));
                         }
                         None => (),
                     }

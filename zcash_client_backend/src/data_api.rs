@@ -160,7 +160,7 @@ pub trait WalletRead {
 
     /// Returns the unspent nullifiers, along with the account identifiers
     /// with which they are associated.
-    fn get_nullifiers(&self) -> Result<Vec<(Nullifier, AccountId)>, Self::Error>;
+    fn get_nullifiers(&self) -> Result<Vec<(AccountId, Nullifier)>, Self::Error>;
 
     /// Return all spendable notes.
     fn get_spendable_notes(
@@ -470,7 +470,7 @@ pub mod testing {
             Ok(Vec::new())
         }
 
-        fn get_nullifiers(&self) -> Result<Vec<(Nullifier, AccountId)>, Self::Error> {
+        fn get_nullifiers(&self) -> Result<Vec<(AccountId, Nullifier)>, Self::Error> {
             Ok(Vec::new())
         }
 

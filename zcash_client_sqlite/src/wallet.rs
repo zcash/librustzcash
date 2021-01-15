@@ -423,15 +423,15 @@ pub fn get_witnesses<P>(
 
 pub fn get_nullifiers<P>(
     wdb: &WalletDB<P>,
-) -> Result<Vec<(Nullifier, AccountId)>, SqliteClientError> {
+) -> Result<Vec<(AccountId, Nullifier)>, SqliteClientError> {
     // Get the nullifiers for the notes we are tracking
     let mut stmt_fetch_nullifiers = wdb
         .conn
-        .prepare("SELECT id_note, nf, account FROM received_notes WHERE spent IS NULL")?;
+        .prepare("SELECT id_note, account, nf FROM received_notes WHERE spent IS NULL")?;
     let nullifiers = stmt_fetch_nullifiers.query_map(NO_PARAMS, |row| {
-        let nf_bytes: Vec<u8> = row.get(1)?;
-        let account = AccountId(row.get(2)?);
-        Ok((Nullifier::from_slice(&nf_bytes), account))
+        let account = AccountId(row.get(1)?);
+        let nf_bytes: Vec<u8> = row.get(2)?;
+        Ok((account, Nullifier::from_slice(&nf_bytes)))
     })?;
 
     let res: Vec<_> = nullifiers.collect::<Result<_, _>>()?;

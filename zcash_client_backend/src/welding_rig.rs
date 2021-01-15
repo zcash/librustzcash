@@ -26,7 +26,7 @@ fn scan_output<P: consensus::Parameters>(
     params: &P,
     height: BlockHeight,
     (index, output): (usize, CompactOutput),
-    ivks: &[jubjub::Fr],
+    ivks: &[(AccountId, jubjub::Fr)],
     spent_from_accounts: &HashSet<AccountId>,
     tree: &mut CommitmentTree<Node>,
     existing_witnesses: &mut [&mut IncrementalWitness<Node>],
@@ -50,8 +50,7 @@ fn scan_output<P: consensus::Parameters>(
     }
     tree.append(node).unwrap();
 
-    for (account, ivk) in ivks.iter().enumerate() {
-        let account = AccountId(account as u32);
+    for (account, ivk) in ivks.iter() {
         let (note, to) =
             match try_sapling_compact_note_decryption(params, height, ivk, &epk, &cmu, &ct) {
                 Some(ret) => ret,
@@ -70,7 +69,7 @@ fn scan_output<P: consensus::Parameters>(
             index,
             cmu,
             epk,
-            account,
+            account: *account,
             note,
             to,
             is_change,
@@ -90,8 +89,8 @@ fn scan_output<P: consensus::Parameters>(
 pub fn scan_block<P: consensus::Parameters>(
     params: &P,
     block: CompactBlock,
-    ivks: &[jubjub::Fr],
-    nullifiers: &[(Nullifier, AccountId)],
+    ivks: &[(AccountId, jubjub::Fr)],
+    nullifiers: &[(AccountId, Nullifier)],
     tree: &mut CommitmentTree<Node>,
     existing_witnesses: &mut [&mut IncrementalWitness<Node>],
 ) -> Vec<WalletTx> {
@@ -114,7 +113,7 @@ pub fn scan_block<P: consensus::Parameters>(
                 // a WalletShieldedSpend if there is a match, in constant time.
                 nullifiers
                     .iter()
-                    .map(|&(nf, account)| CtOption::new(account.0 as u64, nf.0.ct_eq(&spend_nf.0)))
+                    .map(|&(account, nf)| CtOption::new(account.0 as u64, nf.0.ct_eq(&spend_nf.0)))
                     .fold(CtOption::new(0, 0.into()), |first, next| {
                         CtOption::conditional_select(&next, &first, first.is_some())
                     })
@@ -327,7 +326,7 @@ mod tests {
         let txs = scan_block(
             &Network::TestNetwork,
             cb,
-            &[extfvk.fvk.vk.ivk()],
+            &[(AccountId(0), extfvk.fvk.vk.ivk())],
             &[],
             &mut tree,
             &mut [],
@@ -366,7 +365,7 @@ mod tests {
         let txs = scan_block(
             &Network::TestNetwork,
             cb,
-            &[extfvk.fvk.vk.ivk()],
+            &[(AccountId(0), extfvk.fvk.vk.ivk())],
             &[],
             &mut tree,
             &mut [],
@@ -402,7 +401,7 @@ mod tests {
             &Network::TestNetwork,
             cb,
             &[],
-            &[(nf.clone(), account)],
+            &[(account, nf.clone())],
             &mut tree,
             &mut [],
         );

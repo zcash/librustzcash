@@ -115,6 +115,8 @@ where
 ///     wallet::init::init_wallet_db,
 /// };
 ///
+/// # // doctests have a problem with sqlite IO, so we ignore errors
+/// # // generated in this example code as it's not really testing anything
 /// # fn main() {
 /// #   test();
 /// # }
@@ -216,7 +218,7 @@ where
 
         builder
             .add_sapling_spend(extsk.clone(), selected.diversifier, note, merkle_path)
-            .map_err(Error::Builder)?
+            .map_err(Error::Builder)?;
     }
 
     match to {

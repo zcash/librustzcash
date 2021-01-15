@@ -229,7 +229,7 @@ impl<P: consensus::Parameters> WalletRead for WalletDB<P> {
         wallet::get_witnesses(self, block_height)
     }
 
-    fn get_nullifiers(&self) -> Result<Vec<(Nullifier, AccountId)>, Self::Error> {
+    fn get_nullifiers(&self) -> Result<Vec<(AccountId, Nullifier)>, Self::Error> {
         wallet::get_nullifiers(self)
     }
 
@@ -348,7 +348,7 @@ impl<'a, P: consensus::Parameters> WalletRead for DataConnStmtCache<'a, P> {
         self.wallet_db.get_witnesses(block_height)
     }
 
-    fn get_nullifiers(&self) -> Result<Vec<(Nullifier, AccountId)>, Self::Error> {
+    fn get_nullifiers(&self) -> Result<Vec<(AccountId, Nullifier)>, Self::Error> {
         self.wallet_db.get_nullifiers()
     }
 
