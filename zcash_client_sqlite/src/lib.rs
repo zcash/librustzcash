@@ -192,10 +192,6 @@ impl<P: consensus::Parameters> WalletRead for WalletDB<P> {
         wallet::is_valid_account_extfvk(self, account, extfvk)
     }
 
-    fn get_balance(&self, account: AccountId) -> Result<Amount, Self::Error> {
-        wallet::get_balance(self, account)
-    }
-
     fn get_balance_at(
         &self,
         account: AccountId,
@@ -309,10 +305,6 @@ impl<'a, P: consensus::Parameters> WalletRead for DataConnStmtCache<'a, P> {
         extfvk: &ExtendedFullViewingKey,
     ) -> Result<bool, Self::Error> {
         self.wallet_db.is_valid_account_extfvk(account, extfvk)
-    }
-
-    fn get_balance(&self, account: AccountId) -> Result<Amount, Self::Error> {
-        self.wallet_db.get_balance(account)
     }
 
     fn get_balance_at(

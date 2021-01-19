@@ -115,20 +115,6 @@ pub trait WalletRead {
         extfvk: &ExtendedFullViewingKey,
     ) -> Result<bool, Self::Error>;
 
-    /// Returns the wallet balance for the specified account.
-    ///
-    /// This balance amount is the raw balance of all transactions in known
-    /// mined blocks, irrespective of confirmation depth. A default implementation
-    /// is provided, but implementations of this trait may override the default
-    /// implementation for efficiency.
-    fn get_balance(&self, account: AccountId) -> Result<Amount, Self::Error> {
-        if let Some((_, tip)) = self.block_height_extrema()? {
-            self.get_balance_at(account, tip)
-        } else {
-            Ok(Amount::zero())
-        }
-    }
-
     /// Returns the wallet balance for an account as of the specified block
     /// height.
     ///
