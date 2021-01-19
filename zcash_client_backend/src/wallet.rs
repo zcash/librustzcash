@@ -27,7 +27,7 @@ use crate::fees::orchard as orchard_fees;
 use zcash_primitives::legacy::keys::{NonHardenedChildIndex, TransparentKeyScope};
 
 /// A unique identifier for a shielded transaction output
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct NoteId {
     txid: TxId,
     protocol: ShieldedProtocol,

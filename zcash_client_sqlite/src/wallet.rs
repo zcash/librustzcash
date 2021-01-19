@@ -2626,7 +2626,7 @@ pub(crate) fn insert_nullifier_map<N: AsRef<[u8]>>(
 
 /// Returns the row of the `transactions` table corresponding to the transaction in which
 /// this nullifier is revealed, if any.
-pub(crate) fn query_nullifier_map<N: AsRef<[u8]>, S>(
+pub(crate) fn query_nullifier_map<N: AsRef<[u8]>>(
     conn: &rusqlite::Transaction<'_>,
     spend_pool: ShieldedProtocol,
     nf: &N,
@@ -2799,7 +2799,7 @@ mod tests {
                 height_1,
                 &[]
             ).as_deref(),
-            Ok(&[ref ret]) if (ret.outpoint(), ret.txout(), ret.height()) == (utxo.outpoint(), utxo.txout(), height_1)
+            Ok([ret]) if (ret.outpoint(), ret.txout(), ret.height()) == (utxo.outpoint(), utxo.txout(), height_1)
         );
 
         // Change the mined height of the UTXO and upsert; we should get back
@@ -2822,7 +2822,7 @@ mod tests {
             st.wallet()
                 .get_unspent_transparent_outputs(taddr, height_2, &[])
                 .as_deref(),
-            Ok(&[ref ret]) if (ret.outpoint(), ret.txout(), ret.height()) == (utxo.outpoint(), utxo.txout(), height_2)
+            Ok([ret]) if (ret.outpoint(), ret.txout(), ret.height()) == (utxo.outpoint(), utxo.txout(), height_2)
         );
 
         assert_matches!(

@@ -672,8 +672,8 @@ mod parse {
         )(input)
     }
 
-    fn to_indexed_param<'a, P: consensus::Parameters>(
-        params: &'a P,
+    fn to_indexed_param<P: consensus::Parameters>(
+        params: &P,
         ((name, iopt), value): ((&str, Option<&str>), &str),
     ) -> Result<IndexedParam, String> {
         let param = match name {

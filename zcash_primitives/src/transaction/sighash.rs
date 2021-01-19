@@ -76,13 +76,12 @@ pub trait TransparentAuthorizingContext: transparent::Authorization {
 /// set of precomputed hashes produced in the construction of the
 /// transaction ID.
 pub fn signature_hash<
-    'a,
     TA: TransparentAuthorizingContext,
     SA: sapling::bundle::Authorization<SpendProof = GrothProofBytes, OutputProof = GrothProofBytes>,
     A: Authorization<SaplingAuth = SA, TransparentAuth = TA>,
 >(
     tx: &TransactionData<A>,
-    signable_input: &SignableInput<'a>,
+    signable_input: &SignableInput<'_>,
     txid_parts: &TxDigests<Blake2bHash>,
 ) -> SignatureHash {
     SignatureHash(match tx.version {
