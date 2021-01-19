@@ -108,7 +108,9 @@ pub fn scan_block<P: consensus::Parameters>(
             .into_iter()
             .enumerate()
             .map(|(index, spend)| {
-                let spend_nf = Nullifier::from_slice(&spend.nf[..]).unwrap();
+                let spend_nf = spend.nf().expect(
+                    "Could not deserialize nullifier for spend from protobuf representation.",
+                );
                 // Find the first tracked nullifier that matches this spend, and produce
                 // a WalletShieldedSpend if there is a match, in constant time.
                 nullifiers

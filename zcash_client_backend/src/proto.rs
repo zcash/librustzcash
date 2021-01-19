@@ -7,6 +7,7 @@ use std::convert::TryInto;
 use zcash_primitives::{
     block::{BlockHash, BlockHeader},
     consensus::BlockHeight,
+    primitives::Nullifier,
 };
 
 pub mod compact_formats;
@@ -94,5 +95,11 @@ impl compact_formats::CompactOutput {
         } else {
             Err(())
         }
+    }
+}
+
+impl compact_formats::CompactSpend {
+    pub fn nf(&self) -> Result<Nullifier, ()> {
+        Nullifier::from_slice(&self.nf).map_err(|_| ())
     }
 }
