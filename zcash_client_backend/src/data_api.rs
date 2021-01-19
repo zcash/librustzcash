@@ -141,16 +141,10 @@ pub trait WalletRead {
     ///
     /// This will return `Ok(None)` if the note identifier does not appear in the
     /// database as a known note ID.
-    fn get_received_memo_as_utf8(
+    fn get_memo_as_utf8(
         &self,
         id_note: Self::NoteRef,
     ) -> Result<Option<String>, Self::Error>;
-
-    /// Returns the memo for a sent note, if it is known and a valid UTF-8 string.
-    ///
-    /// This will return `Ok(None)` if the note identifier does not appear in the
-    /// database as a known note ID.
-    fn get_sent_memo_as_utf8(&self, id_note: Self::NoteRef) -> Result<Option<String>, Self::Error>;
 
     /// Returns the note commitment tree at the specified block height.
     fn get_commitment_tree(
@@ -459,14 +453,7 @@ pub mod testing {
             Ok(Amount::zero())
         }
 
-        fn get_received_memo_as_utf8(
-            &self,
-            _id_note: Self::NoteRef,
-        ) -> Result<Option<String>, Self::Error> {
-            Ok(None)
-        }
-
-        fn get_sent_memo_as_utf8(
+        fn get_memo_as_utf8(
             &self,
             _id_note: Self::NoteRef,
         ) -> Result<Option<String>, Self::Error> {

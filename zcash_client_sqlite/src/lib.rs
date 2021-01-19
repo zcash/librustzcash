@@ -59,11 +59,17 @@ pub mod wallet;
 /// A newtype wrapper for sqlite primary key values for the notes
 /// table.
 #[derive(Debug, Copy, Clone)]
-pub struct NoteId(pub i64);
+pub enum NoteId {
+    SentNoteId(i64),
+    ReceivedNoteId(i64),
+}
 
 impl fmt::Display for NoteId {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "Note {}", self.0)
+        match self {
+            NoteId::SentNoteId(id) => write!(f, "Sent Note {}", id),
+            NoteId::ReceivedNoteId(id) => write!(f, "Received Note {}", id),
+        }
     }
 }
 
@@ -200,15 +206,11 @@ impl<P: consensus::Parameters> WalletRead for WalletDB<P> {
         wallet::get_balance_at(self, account, anchor_height)
     }
 
-    fn get_received_memo_as_utf8(
-        &self,
-        id_note: Self::NoteRef,
-    ) -> Result<Option<String>, Self::Error> {
-        wallet::get_received_memo_as_utf8(self, id_note)
-    }
-
-    fn get_sent_memo_as_utf8(&self, id_note: Self::NoteRef) -> Result<Option<String>, Self::Error> {
-        wallet::get_sent_memo_as_utf8(self, id_note)
+    fn get_memo_as_utf8(&self, id_note: Self::NoteRef) -> Result<Option<String>, Self::Error> {
+        match id_note {
+            NoteId::SentNoteId(id_note) => wallet::get_sent_memo_as_utf8(self, id_note),
+            NoteId::ReceivedNoteId(id_note) => wallet::get_received_memo_as_utf8(self, id_note),
+        }
     }
 
     fn get_commitment_tree(
@@ -315,15 +317,11 @@ impl<'a, P: consensus::Parameters> WalletRead for DataConnStmtCache<'a, P> {
         self.wallet_db.get_balance_at(account, anchor_height)
     }
 
-    fn get_received_memo_as_utf8(
+    fn get_memo_as_utf8(
         &self,
         id_note: Self::NoteRef,
     ) -> Result<Option<String>, Self::Error> {
-        self.wallet_db.get_received_memo_as_utf8(id_note)
-    }
-
-    fn get_sent_memo_as_utf8(&self, id_note: Self::NoteRef) -> Result<Option<String>, Self::Error> {
-        self.wallet_db.get_sent_memo_as_utf8(id_note)
+        self.wallet_db.get_memo_as_utf8(id_note)
     }
 
     fn get_commitment_tree(
@@ -442,7 +440,11 @@ impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
         witness: &IncrementalWitness<Node>,
         height: BlockHeight,
     ) -> Result<(), Self::Error> {
-        wallet::insert_witness(self, note_id, witness, height)
+        if let NoteId::ReceivedNoteId(rnid) = note_id {
+            wallet::insert_witness(self, rnid, witness, height)
+        } else {
+            Err(SqliteClientError::InvalidNoteId)
+        }
     }
 
     fn prune_witnesses(&mut self, below_height: BlockHeight) -> Result<(), Self::Error> {
