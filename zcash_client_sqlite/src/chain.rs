@@ -1,5 +1,5 @@
 //! Functions for enforcing chain validity and handling chain reorgs.
-use protobuf::parse_from_bytes;
+use protobuf::Message;
 
 use rusqlite::params;
 
@@ -42,7 +42,7 @@ where
 
     for row_result in rows {
         let cbr = row_result?;
-        let block: CompactBlock = parse_from_bytes(&cbr.data).map_err(Error::from)?;
+        let block: CompactBlock = Message::parse_from_bytes(&cbr.data).map_err(Error::from)?;
 
         if block.height() != cbr.height {
             return Err(SqliteClientError::CorruptedData(format!(
