@@ -9,22 +9,31 @@ use crate::NoteId;
 pub enum SqliteClientError {
     /// Decoding of a stored value from its serialized form has failed.
     CorruptedData(String),
+
     /// Decoding of the extended full viewing key has failed (for the specified network)
     IncorrectHRPExtFVK,
+
     /// The rcm value for a note cannot be decoded to a valid JubJub point.
     InvalidNote,
+
     /// Bech32 decoding error
     Bech32(bech32::Error),
+
     /// Base58 decoding error
     Base58(bs58::decode::Error),
+
     /// Illegal attempt to reinitialize an already-initialized wallet database.
     TableNotEmpty,
+
     /// Wrapper for rusqlite errors.
     DbError(rusqlite::Error),
+
     /// Wrapper for errors from the IO subsystem
     Io(std::io::Error),
+
     /// A received memo cannot be interpreted as a UTF-8 string.
     InvalidMemo(std::str::Utf8Error),
+
     /// Wrapper for errors from zcash_client_backend
     BackendError(data_api::error::Error<NoteId>),
 }

@@ -378,9 +378,8 @@ impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
                 match self.wallet_db.conn.execute("ROLLBACK", NO_PARAMS) {
                     Ok(_) => Err(error),
                     Err(e) =>
-                        // REVIEW: If rollback fails, what do we want to do? I think that
-                        // panicking here is probably the right thing to do, because it
-                        // means the database is corrupt?
+                        // Panicking here is probably the right thing to do, because it
+                        // means the database is corrupt.
                         panic!(
                             "Rollback failed with error {} while attempting to recover from error {}; database is likely corrupt.",
                             e,

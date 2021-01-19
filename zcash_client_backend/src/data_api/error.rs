@@ -15,6 +15,7 @@ pub enum ChainInvalid {
     /// The hash of the parent block given by a proposed new chain tip does
     /// not match the hash of the current chain tip.
     PrevHashMismatch,
+
     /// The block height field of the proposed new chain tip is not equal
     /// to the height of the previous chain tip + 1. This variant stores
     /// a copy of the incorrect height value for reporting purposes.
@@ -25,26 +26,34 @@ pub enum ChainInvalid {
 pub enum Error<NoteId> {
     /// Unable to create a new spend because the wallet balance is not sufficient.
     InsufficientBalance(Amount, Amount),
+
     /// Chain validation detected an error in the block at the specified block height.
     InvalidChain(BlockHeight, ChainInvalid),
+
     /// A provided extsk is not associated with the specified account.
     InvalidExtSK(AccountId),
+
     /// The root of an output's witness tree in a newly arrived transaction does
     /// not correspond to root of the stored commitment tree at the recorded height.
     ///
     /// The `usize` member of this struct is the index of the shielded output within
     /// the transaction where the witness root does not match.
     InvalidNewWitnessAnchor(usize, TxId, BlockHeight, Node),
+
     /// The root of an output's witness tree in a previously stored transaction
     /// does not correspond to root of the current commitment tree.
     InvalidWitnessAnchor(NoteId, BlockHeight),
+
     /// The wallet must first perform a scan of the blockchain before other
     /// operations can be performed.
     ScanRequired,
+
     /// An error occurred building a new transaction.
     Builder(builder::Error),
+
     /// An error occurred decoding a protobuf message.
     Protobuf(protobuf::ProtobufError),
+
     /// The wallet attempted a sapling-only operation at a block
     /// height when Sapling was not yet active.
     SaplingNotActive,

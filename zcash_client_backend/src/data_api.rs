@@ -51,12 +51,16 @@ pub trait WalletRead {
     type TxRef: Copy + Debug;
 
     /// Returns the minimum and maximum block heights for stored blocks.
+    ///
+    /// This will return `Ok(None)` if no block data is present in the database.
     fn block_height_extrema(&self) -> Result<Option<(BlockHeight, BlockHeight)>, Self::Error>;
 
     /// Returns the default target height (for the block in which a new
     /// transaction would be mined) and anchor height (to use for a new
     /// transaction), given the range of block heights that the backend
     /// knows about.
+    ///
+    /// This will return `Ok(None)` if no block data is present in the database.
     fn get_target_and_anchor_heights(
         &self,
     ) -> Result<Option<(BlockHeight, BlockHeight)>, Self::Error> {
@@ -76,11 +80,15 @@ pub trait WalletRead {
         })
     }
 
-    /// Returns the block hash for the block at the given height.
+    /// Returns the block hash for the block at the given height, if the
+    /// associated block data is available. Returns `Ok(None)` if the hash
+    /// is not found in the database.
     fn get_block_hash(&self, block_height: BlockHeight) -> Result<Option<BlockHash>, Self::Error>;
 
     /// Returns the block hash for the block at the maximum height known
     /// in stored data.
+    ///
+    /// This will return `Ok(None)` if no block data is present in the database.
     fn get_max_height_hash(&self) -> Result<Option<(BlockHeight, BlockHash)>, Self::Error> {
         self.block_height_extrema()
             .and_then(|extrema_opt| {
@@ -95,11 +103,14 @@ pub trait WalletRead {
     }
 
     /// Returns the block height in which the specified transaction was mined,
-    /// or `None` if the transaction is not mined in the main chain.
+    /// or `Ok(None)` if the transaction is not mined in the main chain.
     fn get_tx_height(&self, txid: TxId) -> Result<Option<BlockHeight>, Self::Error>;
 
     /// Returns the payment address for the specified account, if the account
     /// identifier specified refers to a valid account for this wallet.
+    ///
+    /// This will return `Ok(None)` if the account identifier does not correspond
+    /// to a known account.
     fn get_address(&self, account: AccountId) -> Result<Option<PaymentAddress>, Self::Error>;
 
     /// Returns all extended full viewing keys known about by this wallet.
@@ -127,12 +138,18 @@ pub trait WalletRead {
     ) -> Result<Amount, Self::Error>;
 
     /// Returns the memo for a received note, if it is known and a valid UTF-8 string.
+    ///
+    /// This will return `Ok(None)` if the note identifier does not appear in the
+    /// database as a known note ID.
     fn get_received_memo_as_utf8(
         &self,
         id_note: Self::NoteRef,
     ) -> Result<Option<String>, Self::Error>;
 
     /// Returns the memo for a sent note, if it is known and a valid UTF-8 string.
+    ///
+    /// This will return `Ok(None)` if the note identifier does not appear in the
+    /// database as a known note ID.
     fn get_sent_memo_as_utf8(&self, id_note: Self::NoteRef) -> Result<Option<String>, Self::Error>;
 
     /// Returns the note commitment tree at the specified block height.
@@ -200,6 +217,8 @@ pub trait WalletWrite: WalletRead {
     /// After calling this method, the block at the given height will be the
     /// most recent block and all other operations will treat this block
     /// as the chain tip for balance determination purposes.
+    ///
+    /// There may be restrictions on how far it is possible to rewind.
     fn rewind_to_height(&mut self, block_height: BlockHeight) -> Result<(), Self::Error>;
 
     /// Add wallet-relevant metadata for a specific transaction to the data
@@ -223,9 +242,12 @@ pub trait WalletWrite: WalletRead {
     /// Record a note as having been received, along with its nullifier and the transaction
     /// within which the note was created.
     ///
-    /// Implementations of this method should be exclusively additive with respect to stored
+    /// Implementations of this method must be exclusively additive with respect to stored
     /// data; passing `None` for the nullifier should not be interpreted as deleting nullifier
     /// information from the underlying store.
+    ///
+    /// Implementations of this method must ensure that attempting to record the same note
+    /// with a different nullifier to that already stored will return an error.
     fn put_received_note<T: ShieldedOutput>(
         &mut self,
         output: &T,
@@ -241,7 +263,7 @@ pub trait WalletWrite: WalletRead {
         height: BlockHeight,
     ) -> Result<(), Self::Error>;
 
-    /// Remove all incremental witness data below the specified block height.
+    /// Remove all incremental witness data before the specified block height.
     //  TODO: this is a backend-specific optimization that probably shouldn't be part of
     //  the public API
     fn prune_witnesses(&mut self, from_height: BlockHeight) -> Result<(), Self::Error>;

@@ -208,7 +208,7 @@ where
             .fvk
             .vk
             .to_payment_address(selected.diversifier)
-            .unwrap(); //JUBJUB would have to unexpectedly be the zero point for this to be None
+            .unwrap(); //DiversifyHash would have to unexpectedly return the zero point for this to be None
 
         let note = from
             .create_note(u64::from(selected.note_value), selected.rseed)
