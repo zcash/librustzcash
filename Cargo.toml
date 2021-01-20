@@ -13,3 +13,11 @@ members = [
 lto = true
 panic = 'abort'
 codegen-units = 1
+
+[profile.dev]
+panic = 'abort'
+
+# We would also like tests and benchmarks to run with panic = 'abort', but they don't :-(
+# https://doc.rust-lang.org/cargo/reference/profiles.html#panic
+# https://doc.rust-lang.org/cargo/reference/unstable.html#panic-abort-tests
+# https://github.com/rust-lang/rust/issues/52652#issuecomment-694952684
