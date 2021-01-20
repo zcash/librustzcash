@@ -2,7 +2,9 @@
 
 use ff::PrimeField;
 use group::{Curve, Group, GroupEncoding};
+use std::array::TryFromSliceError;
 use std::convert::TryInto;
+use subtle::{Choice, ConstantTimeEq};
 
 use crate::constants;
 
@@ -196,6 +198,26 @@ pub enum Rseed {
     AfterZip212([u8; 32]),
 }
 
+/// Typesafe wrapper for nullifier values.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct Nullifier(pub [u8; 32]);
+
+impl Nullifier {
+    pub fn from_slice(bytes: &[u8]) -> Result<Nullifier, TryFromSliceError> {
+        bytes.try_into().map(Nullifier)
+    }
+
+    pub fn to_vec(&self) -> Vec<u8> {
+        self.0.to_vec()
+    }
+}
+
+impl ConstantTimeEq for Nullifier {
+    fn ct_eq(&self, other: &Self) -> Choice {
+        self.0.ct_eq(&other.0)
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct Note {
     /// The value of the note
@@ -256,21 +278,23 @@ impl Note {
 
     /// Computes the nullifier given the viewing key and
     /// note position
-    pub fn nf(&self, viewing_key: &ViewingKey, position: u64) -> Vec<u8> {
+    pub fn nf(&self, viewing_key: &ViewingKey, position: u64) -> Nullifier {
         // Compute rho = cm + position.G
         let rho = self.cm_full_point()
             + (constants::NULLIFIER_POSITION_GENERATOR * jubjub::Fr::from(position));
 
         // Compute nf = BLAKE2s(nk | rho)
-        Blake2sParams::new()
-            .hash_length(32)
-            .personal(constants::PRF_NF_PERSONALIZATION)
-            .to_state()
-            .update(&viewing_key.nk.to_bytes())
-            .update(&rho.to_bytes())
-            .finalize()
-            .as_bytes()
-            .to_vec()
+        Nullifier::from_slice(
+            Blake2sParams::new()
+                .hash_length(32)
+                .personal(constants::PRF_NF_PERSONALIZATION)
+                .to_state()
+                .update(&viewing_key.nk.to_bytes())
+                .update(&rho.to_bytes())
+                .finalize()
+                .as_bytes(),
+        )
+        .unwrap()
     }
 
     /// Computes the note commitment

@@ -1,135 +1,100 @@
 use std::error;
 use std::fmt;
-use zcash_primitives::{
-    consensus::BlockHeight,
-    sapling::Node,
-    transaction::{builder, TxId},
-};
+
+use zcash_client_backend::data_api;
+
+use crate::NoteId;
 
 #[derive(Debug)]
-pub enum ErrorKind {
-    CorruptedData(&'static str),
+pub enum SqliteClientError {
+    /// Decoding of a stored value from its serialized form has failed.
+    CorruptedData(String),
+
+    /// Decoding of the extended full viewing key has failed (for the specified network)
     IncorrectHRPExtFVK,
-    InsufficientBalance(u64, u64),
-    InvalidChain(BlockHeight, crate::chain::ChainInvalidCause),
-    InvalidExtSK(u32),
-    InvalidHeight(BlockHeight, BlockHeight),
-    InvalidMemo(std::str::Utf8Error),
-    InvalidNewWitnessAnchor(usize, TxId, BlockHeight, Node),
+
+    /// The rcm value for a note cannot be decoded to a valid JubJub point.
     InvalidNote,
-    InvalidWitnessAnchor(i64, BlockHeight),
-    ScanRequired,
-    TableNotEmpty,
+
+    /// Bech32 decoding error
     Bech32(bech32::Error),
+
+    /// Base58 decoding error
     Base58(bs58::decode::Error),
-    Builder(builder::Error),
-    Database(rusqlite::Error),
+
+    /// Illegal attempt to reinitialize an already-initialized wallet database.
+    TableNotEmpty,
+
+    /// Wrapper for rusqlite errors.
+    DbError(rusqlite::Error),
+
+    /// Wrapper for errors from the IO subsystem
     Io(std::io::Error),
-    Protobuf(protobuf::ProtobufError),
-    SaplingNotActive,
+
+    /// A received memo cannot be interpreted as a UTF-8 string.
+    InvalidMemo(std::str::Utf8Error),
+
+    /// Wrapper for errors from zcash_client_backend
+    BackendError(data_api::error::Error<NoteId>),
 }
 
-#[derive(Debug)]
-pub struct Error(pub(crate) ErrorKind);
-
-impl fmt::Display for Error {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match &self.0 {
-            ErrorKind::CorruptedData(reason) => write!(f, "Data DB is corrupted: {}", reason),
-            ErrorKind::IncorrectHRPExtFVK => write!(f, "Incorrect HRP for extfvk"),
-            ErrorKind::InsufficientBalance(have, need) => write!(
-                f,
-                "Insufficient balance (have {}, need {} including fee)",
-                have, need
-            ),
-            ErrorKind::InvalidChain(upper_bound, cause) => {
-                write!(f, "Invalid chain (upper bound: {}): {:?}", upper_bound, cause)
-            }
-            ErrorKind::InvalidExtSK(account) => {
-                write!(f, "Incorrect ExtendedSpendingKey for account {}", account)
-            }
-            ErrorKind::InvalidHeight(expected, actual) => write!(
-                f,
-                "Expected height of next CompactBlock to be {}, but was {}",
-                expected, actual
-            ),
-            ErrorKind::InvalidMemo(e) => write!(f, "{}", e),
-            ErrorKind::InvalidNewWitnessAnchor(output, txid, last_height, anchor) => write!(
-                f,
-                "New witness for output {} in tx {} has incorrect anchor after scanning block {}: {:?}",
-                output, txid, last_height, anchor,
-            ),
-            ErrorKind::InvalidNote => write!(f, "Invalid note"),
-            ErrorKind::InvalidWitnessAnchor(id_note, last_height) => write!(
-                f,
-                "Witness for note {} has incorrect anchor after scanning block {}",
-                id_note, last_height
-            ),
-            ErrorKind::ScanRequired => write!(f, "Must scan blocks first"),
-            ErrorKind::TableNotEmpty => write!(f, "Table is not empty"),
-            ErrorKind::Bech32(e) => write!(f, "{}", e),
-            ErrorKind::Base58(e) => write!(f, "{}", e),
-            ErrorKind::Builder(e) => write!(f, "{:?}", e),
-            ErrorKind::Database(e) => write!(f, "{}", e),
-            ErrorKind::Io(e) => write!(f, "{}", e),
-            ErrorKind::Protobuf(e) => write!(f, "{}", e),
-            ErrorKind::SaplingNotActive => write!(f, "Sapling activation height not specified for network."),
-        }
-    }
-}
-
-impl error::Error for Error {
+impl error::Error for SqliteClientError {
     fn source(&self) -> Option<&(dyn error::Error + 'static)> {
-        match &self.0 {
-            ErrorKind::InvalidMemo(e) => Some(e),
-            ErrorKind::Bech32(e) => Some(e),
-            ErrorKind::Builder(e) => Some(e),
-            ErrorKind::Database(e) => Some(e),
-            ErrorKind::Io(e) => Some(e),
-            ErrorKind::Protobuf(e) => Some(e),
+        match &self {
+            SqliteClientError::InvalidMemo(e) => Some(e),
+            SqliteClientError::Bech32(e) => Some(e),
+            SqliteClientError::DbError(e) => Some(e),
+            SqliteClientError::Io(e) => Some(e),
             _ => None,
         }
     }
 }
 
-impl From<bech32::Error> for Error {
-    fn from(e: bech32::Error) -> Self {
-        Error(ErrorKind::Bech32(e))
+impl fmt::Display for SqliteClientError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match &self {
+            SqliteClientError::CorruptedData(reason) => {
+                write!(f, "Data DB is corrupted: {}", reason)
+            }
+            SqliteClientError::IncorrectHRPExtFVK => write!(f, "Incorrect HRP for extfvk"),
+            SqliteClientError::InvalidNote => write!(f, "Invalid note"),
+            SqliteClientError::Bech32(e) => write!(f, "{}", e),
+            SqliteClientError::Base58(e) => write!(f, "{}", e),
+            SqliteClientError::TableNotEmpty => write!(f, "Table is not empty"),
+            SqliteClientError::DbError(e) => write!(f, "{}", e),
+            SqliteClientError::Io(e) => write!(f, "{}", e),
+            SqliteClientError::InvalidMemo(e) => write!(f, "{}", e),
+            SqliteClientError::BackendError(e) => write!(f, "{}", e),
+        }
     }
 }
 
-impl From<bs58::decode::Error> for Error {
-    fn from(e: bs58::decode::Error) -> Self {
-        Error(ErrorKind::Base58(e))
-    }
-}
-
-impl From<builder::Error> for Error {
-    fn from(e: builder::Error) -> Self {
-        Error(ErrorKind::Builder(e))
-    }
-}
-
-impl From<rusqlite::Error> for Error {
+impl From<rusqlite::Error> for SqliteClientError {
     fn from(e: rusqlite::Error) -> Self {
-        Error(ErrorKind::Database(e))
+        SqliteClientError::DbError(e)
     }
 }
 
-impl From<std::io::Error> for Error {
+impl From<std::io::Error> for SqliteClientError {
     fn from(e: std::io::Error) -> Self {
-        Error(ErrorKind::Io(e))
+        SqliteClientError::Io(e)
     }
 }
 
-impl From<protobuf::ProtobufError> for Error {
-    fn from(e: protobuf::ProtobufError) -> Self {
-        Error(ErrorKind::Protobuf(e))
+impl From<bech32::Error> for SqliteClientError {
+    fn from(e: bech32::Error) -> Self {
+        SqliteClientError::Bech32(e)
     }
 }
 
-impl Error {
-    pub fn kind(&self) -> &ErrorKind {
-        &self.0
+impl From<bs58::decode::Error> for SqliteClientError {
+    fn from(e: bs58::decode::Error) -> Self {
+        SqliteClientError::Base58(e)
+    }
+}
+
+impl From<data_api::error::Error<NoteId>> for SqliteClientError {
+    fn from(e: data_api::error::Error<NoteId>) -> Self {
+        SqliteClientError::BackendError(e)
     }
 }

@@ -45,7 +45,6 @@ use crate::transaction::components::OutPoint;
 #[cfg(any(test, feature = "test-dependencies"))]
 use crate::prover::mock::MockTxProver;
 
-
 const DEFAULT_TX_EXPIRY_DELTA: u32 = 20;
 
 /// If there are any shielded inputs, always have at least two shielded outputs, padding
@@ -691,11 +690,10 @@ impl<'a, P: consensus::Parameters, R: RngCore> Builder<'a, P, R> {
             for (i, (pos, spend)) in spends.iter().enumerate() {
                 let proof_generation_key = spend.extsk.expsk.proof_generation_key();
 
-                let mut nullifier = [0u8; 32];
-                nullifier.copy_from_slice(&spend.note.nf(
+                let nullifier = spend.note.nf(
                     &proof_generation_key.to_viewing_key(),
                     spend.merkle_path.position,
-                ));
+                );
 
                 let (zkproof, cv, rk) = prover
                     .spend_proof(

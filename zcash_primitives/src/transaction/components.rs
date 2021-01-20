@@ -12,6 +12,7 @@ use std::convert::TryFrom;
 
 use crate::{
     legacy::Script,
+    primitives::Nullifier,
     redjubjub::{PublicKey, Signature},
 };
 
@@ -260,7 +261,7 @@ impl TzeOut {
 pub struct SpendDescription {
     pub cv: jubjub::ExtendedPoint,
     pub anchor: bls12_381::Scalar,
-    pub nullifier: [u8; 32],
+    pub nullifier: Nullifier,
     pub rk: PublicKey,
     pub zkproof: [u8; GROTH_PROOF_SIZE],
     pub spend_auth_sig: Option<Signature>,
@@ -300,8 +301,8 @@ impl SpendDescription {
                 .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "anchor not in field"))?
         };
 
-        let mut nullifier = [0u8; 32];
-        reader.read_exact(&mut nullifier)?;
+        let mut nullifier = Nullifier([0u8; 32]);
+        reader.read_exact(&mut nullifier.0)?;
 
         // Consensus rules (§4.4):
         // - Canonical encoding is enforced here.
@@ -333,7 +334,7 @@ impl SpendDescription {
     pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
         writer.write_all(&self.cv.to_bytes())?;
         writer.write_all(self.anchor.to_repr().as_ref())?;
-        writer.write_all(&self.nullifier)?;
+        writer.write_all(&self.nullifier.0)?;
         self.rk.write(&mut writer)?;
         writer.write_all(&self.zkproof)?;
         match self.spend_auth_sig {

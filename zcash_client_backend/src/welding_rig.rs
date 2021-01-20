@@ -7,13 +7,13 @@ use zcash_primitives::{
     consensus::{self, BlockHeight},
     merkle_tree::{CommitmentTree, IncrementalWitness},
     note_encryption::try_sapling_compact_note_decryption,
+    primitives::Nullifier,
     sapling::Node,
     transaction::TxId,
-    zip32::ExtendedFullViewingKey,
 };
 
 use crate::proto::compact_formats::{CompactBlock, CompactOutput};
-use crate::wallet::{WalletShieldedOutput, WalletShieldedSpend, WalletTx};
+use crate::wallet::{AccountId, WalletShieldedOutput, WalletShieldedSpend, WalletTx};
 
 /// Scans a [`CompactOutput`] with a set of [`ExtendedFullViewingKey`]s.
 ///
@@ -26,8 +26,8 @@ fn scan_output<P: consensus::Parameters>(
     params: &P,
     height: BlockHeight,
     (index, output): (usize, CompactOutput),
-    ivks: &[jubjub::Fr],
-    spent_from_accounts: &HashSet<usize>,
+    ivks: &[(AccountId, jubjub::Fr)],
+    spent_from_accounts: &HashSet<AccountId>,
     tree: &mut CommitmentTree<Node>,
     existing_witnesses: &mut [&mut IncrementalWitness<Node>],
     block_witnesses: &mut [&mut IncrementalWitness<Node>],
@@ -50,7 +50,7 @@ fn scan_output<P: consensus::Parameters>(
     }
     tree.append(node).unwrap();
 
-    for (account, ivk) in ivks.iter().enumerate() {
+    for (account, ivk) in ivks.iter() {
         let (note, to) =
             match try_sapling_compact_note_decryption(params, height, ivk, &epk, &cmu, &ct) {
                 Some(ret) => ret,
@@ -69,7 +69,7 @@ fn scan_output<P: consensus::Parameters>(
             index,
             cmu,
             epk,
-            account,
+            account: *account,
             note,
             to,
             is_change,
@@ -89,13 +89,12 @@ fn scan_output<P: consensus::Parameters>(
 pub fn scan_block<P: consensus::Parameters>(
     params: &P,
     block: CompactBlock,
-    extfvks: &[ExtendedFullViewingKey],
-    nullifiers: &[(&[u8], usize)],
+    ivks: &[(AccountId, jubjub::Fr)],
+    nullifiers: &[(AccountId, Nullifier)],
     tree: &mut CommitmentTree<Node>,
     existing_witnesses: &mut [&mut IncrementalWitness<Node>],
 ) -> Vec<WalletTx> {
     let mut wtxs: Vec<WalletTx> = vec![];
-    let ivks: Vec<_> = extfvks.iter().map(|extfvk| extfvk.fvk.vk.ivk()).collect();
     let block_height = block.height();
 
     for tx in block.vtx.into_iter() {
@@ -109,18 +108,22 @@ pub fn scan_block<P: consensus::Parameters>(
             .into_iter()
             .enumerate()
             .map(|(index, spend)| {
+                let spend_nf = spend.nf().expect(
+                    "Could not deserialize nullifier for spend from protobuf representation.",
+                );
                 // Find the first tracked nullifier that matches this spend, and produce
                 // a WalletShieldedSpend if there is a match, in constant time.
                 nullifiers
                     .iter()
-                    .map(|&(nf, account)| CtOption::new(account as u64, nf.ct_eq(&spend.nf[..])))
-                    .fold(CtOption::new(0, 0.into()), |first, next| {
-                        CtOption::conditional_select(&next, &first, first.is_some())
-                    })
+                    .map(|&(account, nf)| CtOption::new(account, nf.ct_eq(&spend_nf)))
+                    .fold(
+                        CtOption::new(AccountId::default(), 0.into()),
+                        |first, next| CtOption::conditional_select(&next, &first, first.is_some()),
+                    )
                     .map(|account| WalletShieldedSpend {
                         index,
-                        nf: spend.nf,
-                        account: account as usize,
+                        nf: spend_nf,
+                        account,
                     })
             })
             .filter(|spend| spend.is_some().into())
@@ -198,7 +201,7 @@ mod tests {
         constants::SPENDING_KEY_GENERATOR,
         merkle_tree::CommitmentTree,
         note_encryption::{Memo, SaplingNoteEncryption},
-        primitives::Note,
+        primitives::{Note, Nullifier},
         transaction::components::Amount,
         util::generate_random_rseed,
         zip32::{ExtendedFullViewingKey, ExtendedSpendingKey},
@@ -206,6 +209,7 @@ mod tests {
 
     use super::scan_block;
     use crate::proto::compact_formats::{CompactBlock, CompactOutput, CompactSpend, CompactTx};
+    use crate::wallet::AccountId;
 
     fn random_compact_tx(mut rng: impl RngCore) -> CompactTx {
         let fake_nf = {
@@ -244,7 +248,7 @@ mod tests {
     /// Returns the CompactBlock.
     fn fake_compact_block(
         height: BlockHeight,
-        nf: [u8; 32],
+        nf: Nullifier,
         extfvk: ExtendedFullViewingKey,
         value: Amount,
         tx_after: bool,
@@ -283,7 +287,7 @@ mod tests {
         }
 
         let mut cspend = CompactSpend::new();
-        cspend.set_nf(nf.to_vec());
+        cspend.set_nf(nf.0.to_vec());
         let mut cout = CompactOutput::new();
         cout.set_cmu(cmu);
         cout.set_epk(epk);
@@ -314,7 +318,7 @@ mod tests {
 
         let cb = fake_compact_block(
             1u32.into(),
-            [0; 32],
+            Nullifier([0; 32]),
             extfvk.clone(),
             Amount::from_u64(5).unwrap(),
             false,
@@ -325,7 +329,7 @@ mod tests {
         let txs = scan_block(
             &Network::TestNetwork,
             cb,
-            &[extfvk],
+            &[(AccountId(0), extfvk.fvk.vk.ivk())],
             &[],
             &mut tree,
             &mut [],
@@ -339,7 +343,7 @@ mod tests {
         assert_eq!(tx.shielded_spends.len(), 0);
         assert_eq!(tx.shielded_outputs.len(), 1);
         assert_eq!(tx.shielded_outputs[0].index, 0);
-        assert_eq!(tx.shielded_outputs[0].account, 0);
+        assert_eq!(tx.shielded_outputs[0].account, AccountId(0));
         assert_eq!(tx.shielded_outputs[0].note.value, 5);
 
         // Check that the witness root matches
@@ -353,7 +357,7 @@ mod tests {
 
         let cb = fake_compact_block(
             1u32.into(),
-            [0; 32],
+            Nullifier([0; 32]),
             extfvk.clone(),
             Amount::from_u64(5).unwrap(),
             true,
@@ -364,7 +368,7 @@ mod tests {
         let txs = scan_block(
             &Network::TestNetwork,
             cb,
-            &[extfvk],
+            &[(AccountId(0), extfvk.fvk.vk.ivk())],
             &[],
             &mut tree,
             &mut [],
@@ -378,7 +382,7 @@ mod tests {
         assert_eq!(tx.shielded_spends.len(), 0);
         assert_eq!(tx.shielded_outputs.len(), 1);
         assert_eq!(tx.shielded_outputs[0].index, 0);
-        assert_eq!(tx.shielded_outputs[0].account, 0);
+        assert_eq!(tx.shielded_outputs[0].account, AccountId(0));
         assert_eq!(tx.shielded_outputs[0].note.value, 5);
 
         // Check that the witness root matches
@@ -389,8 +393,8 @@ mod tests {
     fn scan_block_with_my_spend() {
         let extsk = ExtendedSpendingKey::master(&[]);
         let extfvk = ExtendedFullViewingKey::from(&extsk);
-        let nf = [7; 32];
-        let account = 12;
+        let nf = Nullifier([7; 32]);
+        let account = AccountId(12);
 
         let cb = fake_compact_block(1u32.into(), nf, extfvk, Amount::from_u64(5).unwrap(), false);
         assert_eq!(cb.vtx.len(), 2);
@@ -400,7 +404,7 @@ mod tests {
             &Network::TestNetwork,
             cb,
             &[],
-            &[(&nf, account)],
+            &[(account, nf.clone())],
             &mut tree,
             &mut [],
         );

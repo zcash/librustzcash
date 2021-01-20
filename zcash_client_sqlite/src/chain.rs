@@ -1,240 +1,59 @@
 //! Functions for enforcing chain validity and handling chain reorgs.
-//!
-//! # Examples
-//!
-//! ```
-//! use rusqlite::Connection;
-//! use zcash_primitives::{
-//!     consensus::{BlockHeight, Network, Parameters}
-//! };
-//!
-//! use zcash_client_sqlite::{
-//!     chain::{rewind_to_height, validate_combined_chain},
-//!     error::ErrorKind,
-//!     scan::scan_cached_blocks,
-//! };
-//!
-//! let network = Network::TestNetwork;
-//! let db_cache = "/path/to/cache.db";
-//! let db_data = "/path/to/data.db";
-//!
-//! // 1) Download new CompactBlocks into db_cache.
-//!
-//! // 2) Run the chain validator on the received blocks.
-//! //
-//! // Given that we assume the server always gives us correct-at-the-time blocks, any
-//! // errors are in the blocks we have previously cached or scanned.
-//! if let Err(e) = validate_combined_chain(network, &db_cache, &db_data) {
-//!     match e.kind() {
-//!         ErrorKind::InvalidChain(upper_bound, _) => {
-//!             // a) Pick a height to rewind to.
-//!             //
-//!             // This might be informed by some external chain reorg information, or
-//!             // heuristics such as the platform, available bandwidth, size of recent
-//!             // CompactBlocks, etc.
-//!             let rewind_height = *upper_bound - 10;
-//!
-//!             // b) Rewind scanned block information.
-//!             rewind_to_height(network, &db_data, rewind_height);
-//!
-//!             // c) Delete cached blocks from rewind_height onwards.
-//!             //
-//!             // This does imply that assumed-valid blocks will be re-downloaded, but it
-//!             // is also possible that in the intervening time, a chain reorg has
-//!             // occurred that orphaned some of those blocks.
-//!
-//!             // d) If there is some separate thread or service downloading
-//!             // CompactBlocks, tell it to go back and download from rewind_height
-//!             // onwards.
-//!         }
-//!         _ => {
-//!             // Handle other errors.
-//!         }
-//!     }
-//! }
-//!
-//! // 3) Scan (any remaining) cached blocks.
-//! //
-//! // At this point, the cache and scanned data are locally consistent (though not
-//! // necessarily consistent with the latest chain tip - this would be discovered the
-//! // next time this codepath is executed after new blocks are received).
-//! scan_cached_blocks(&network, &db_cache, &db_data, None);
-//! ```
+use protobuf::Message;
 
-use protobuf::parse_from_bytes;
-use rusqlite::{Connection, NO_PARAMS};
-use std::path::Path;
+use rusqlite::params;
 
-use zcash_primitives::consensus::{self, BlockHeight, NetworkUpgrade};
+use zcash_primitives::consensus::BlockHeight;
 
-use zcash_client_backend::proto::compact_formats::CompactBlock;
+use zcash_client_backend::{data_api::error::Error, proto::compact_formats::CompactBlock};
 
-use crate::error::{Error, ErrorKind};
+use crate::{error::SqliteClientError, BlockDB};
 
-#[derive(Debug)]
-pub enum ChainInvalidCause {
-    PrevHashMismatch,
-    /// (expected_height, actual_height)
-    HeightMismatch(BlockHeight, BlockHeight),
-}
+pub mod init;
 
 struct CompactBlockRow {
     height: BlockHeight,
     data: Vec<u8>,
 }
 
-/// Checks that the scanned blocks in the data database, when combined with the recent
-/// `CompactBlock`s in the cache database, form a valid chain.
-///
-/// This function is built on the core assumption that the information provided in the
-/// cache database is more likely to be accurate than the previously-scanned information.
-/// This follows from the design (and trust) assumption that the `lightwalletd` server
-/// provides accurate block information as of the time it was requested.
-///
-/// Returns:
-/// - `Ok(())` if the combined chain is valid.
-/// - `Err(ErrorKind::InvalidChain(upper_bound, cause))` if the combined chain is invalid.
-///   `upper_bound` is the height of the highest invalid block (on the assumption that the
-///   highest block in the cache database is correct).
-/// - `Err(e)` if there was an error during validation unrelated to chain validity.
-///
-/// This function does not mutate either of the databases.
-pub fn validate_combined_chain<Params: consensus::Parameters, P: AsRef<Path>, Q: AsRef<Path>>(
-    parameters: Params,
-    db_cache: P,
-    db_data: Q,
-) -> Result<(), Error> {
-    let cache = Connection::open(db_cache)?;
-    let data = Connection::open(db_data)?;
-    let sapling_activation_height = parameters
-        .activation_height(NetworkUpgrade::Sapling)
-        .ok_or(Error(ErrorKind::SaplingNotActive))?;
-
-    // Recall where we synced up to previously.
-    // If we have never synced, use Sapling activation height to select all cached CompactBlocks.
-    let (have_scanned, last_scanned_height) =
-        data.query_row("SELECT MAX(height) FROM blocks", NO_PARAMS, |row| {
-            row.get(0)
-                .map(|h: u32| (true, h.into()))
-                .or(Ok((false, sapling_activation_height - 1)))
-        })?;
-
-    // Fetch the CompactBlocks we need to validate
-    let mut stmt_blocks = cache
-        .prepare("SELECT height, data FROM compactblocks WHERE height > ? ORDER BY height DESC")?;
-    let mut rows = stmt_blocks.query_map(&[u32::from(last_scanned_height)], |row| {
-        Ok(CompactBlockRow {
-            height: row.get(0).map(u32::into)?,
-            data: row.get(1)?,
-        })
-    })?;
-
-    // Take the highest cached block as accurate.
-    let (mut last_height, mut last_prev_hash) = {
-        let assumed_correct = match rows.next() {
-            Some(row) => row?,
-            None => {
-                // No cached blocks, and we've already validated the blocks we've scanned,
-                // so there's nothing to validate.
-                // TODO: Maybe we still want to check if there are cached blocks that are at heights we previously scanned? Check scanning flow again.
-                return Ok(());
-            }
-        };
-        let block: CompactBlock = parse_from_bytes(&assumed_correct.data)?;
-        (block.height(), block.prev_hash())
-    };
-
-    for row in rows {
-        let row = row?;
-
-        // Scanned blocks MUST be height-sequential.
-        if row.height != (last_height - 1) {
-            return Err(Error(ErrorKind::InvalidChain(
-                last_height - 1,
-                ChainInvalidCause::HeightMismatch(last_height - 1, row.height),
-            )));
-        }
-        last_height = row.height;
-
-        let block: CompactBlock = parse_from_bytes(&row.data)?;
-
-        // Cached blocks MUST be hash-chained.
-        if block.hash() != last_prev_hash {
-            return Err(Error(ErrorKind::InvalidChain(
-                last_height,
-                ChainInvalidCause::PrevHashMismatch,
-            )));
-        }
-        last_prev_hash = block.prev_hash();
-    }
-
-    if have_scanned {
-        // Cached blocks MUST hash-chain to the last scanned block.
-        let last_scanned_hash = data.query_row(
-            "SELECT hash FROM blocks WHERE height = ?",
-            &[u32::from(last_scanned_height)],
-            |row| row.get::<_, Vec<_>>(0),
-        )?;
-        if &last_scanned_hash[..] != &last_prev_hash.0[..] {
-            return Err(Error(ErrorKind::InvalidChain(
-                last_scanned_height,
-                ChainInvalidCause::PrevHashMismatch,
-            )));
-        }
-    }
-
-    // All good!
-    Ok(())
-}
-
-/// Rewinds the data database to the given height.
-///
-/// If the requested height is greater than or equal to the height of the last scanned
-/// block, this function does nothing.
-pub fn rewind_to_height<Params: consensus::Parameters, P: AsRef<Path>>(
-    parameters: Params,
-    db_data: P,
-    height: BlockHeight,
-) -> Result<(), Error> {
-    let data = Connection::open(db_data)?;
-    let sapling_activation_height = parameters
-        .activation_height(NetworkUpgrade::Sapling)
-        .ok_or(Error(ErrorKind::SaplingNotActive))?;
-
-    // Recall where we synced up to previously.
-    // If we have never synced, use Sapling activation height.
-    let last_scanned_height =
-        data.query_row("SELECT MAX(height) FROM blocks", NO_PARAMS, |row| {
-            row.get(0)
-                .map(u32::into)
-                .or(Ok(sapling_activation_height - 1))
-        })?;
-
-    if height >= last_scanned_height {
-        // Nothing to do.
-        return Ok(());
-    }
-
-    // Start an SQL transaction for rewinding.
-    data.execute("BEGIN IMMEDIATE", NO_PARAMS)?;
-
-    // Decrement witnesses.
-    data.execute(
-        "DELETE FROM sapling_witnesses WHERE block > ?",
-        &[u32::from(height)],
+pub fn with_blocks<F>(
+    cache: &BlockDB,
+    from_height: BlockHeight,
+    limit: Option<u32>,
+    mut with_row: F,
+) -> Result<(), SqliteClientError>
+where
+    F: FnMut(CompactBlock) -> Result<(), SqliteClientError>,
+{
+    // Fetch the CompactBlocks we need to scan
+    let mut stmt_blocks = cache.0.prepare(
+        "SELECT height, data FROM compactblocks WHERE height > ? ORDER BY height ASC LIMIT ?",
     )?;
 
-    // Un-mine transactions.
-    data.execute(
-        "UPDATE transactions SET block = NULL, tx_index = NULL WHERE block > ?",
-        &[u32::from(height)],
+    let rows = stmt_blocks.query_map(
+        params![u32::from(from_height), limit.unwrap_or(u32::max_value()),],
+        |row| {
+            Ok(CompactBlockRow {
+                height: BlockHeight::from_u32(row.get(0)?),
+                data: row.get(1)?,
+            })
+        },
     )?;
 
-    // Now that they aren't depended on, delete scanned blocks.
-    data.execute("DELETE FROM blocks WHERE height > ?", &[u32::from(height)])?;
+    for row_result in rows {
+        let cbr = row_result?;
+        let block: CompactBlock = Message::parse_from_bytes(&cbr.data).map_err(Error::from)?;
 
-    // Commit the SQL transaction, rewinding atomically.
-    data.execute("COMMIT", NO_PARAMS)?;
+        if block.height() != cbr.height {
+            return Err(SqliteClientError::CorruptedData(format!(
+                "Block height {} did not match row's height field value {}",
+                block.height(),
+                cbr.height
+            )));
+        }
+
+        with_row(block)?;
+    }
 
     Ok(())
 }
@@ -242,39 +61,56 @@ pub fn rewind_to_height<Params: consensus::Parameters, P: AsRef<Path>>(
 #[cfg(test)]
 mod tests {
     use tempfile::NamedTempFile;
+
     use zcash_primitives::{
         block::BlockHash,
         transaction::components::Amount,
         zip32::{ExtendedFullViewingKey, ExtendedSpendingKey},
     };
 
-    use super::{rewind_to_height, validate_combined_chain};
+    use zcash_client_backend::data_api::WalletRead;
+    use zcash_client_backend::data_api::{
+        chain::{scan_cached_blocks, validate_chain},
+        error::{ChainInvalid, Error},
+    };
 
     use crate::{
-        error::ErrorKind,
-        init::{init_accounts_table, init_cache_database, init_data_database},
-        query::get_balance,
-        scan::scan_cached_blocks,
-        tests::{self, fake_compact_block, insert_into_cache, sapling_activation_height},
+        chain::init::init_cache_database,
+        error::SqliteClientError,
+        tests::{
+            self, fake_compact_block, fake_compact_block_spending, insert_into_cache,
+            sapling_activation_height,
+        },
+        wallet::{
+            get_balance,
+            init::{init_accounts_table, init_wallet_db},
+            rewind_to_height,
+        },
+        AccountId, BlockDB, NoteId, WalletDB,
     };
 
     #[test]
     fn valid_chain_states() {
         let cache_file = NamedTempFile::new().unwrap();
-        let db_cache = cache_file.path();
+        let db_cache = BlockDB::for_path(cache_file.path()).unwrap();
         init_cache_database(&db_cache).unwrap();
 
         let data_file = NamedTempFile::new().unwrap();
-        let db_data = data_file.path();
-        init_data_database(&db_data).unwrap();
+        let db_data = WalletDB::for_path(data_file.path(), tests::network()).unwrap();
+        init_wallet_db(&db_data).unwrap();
 
         // Add an account to the wallet
         let extsk = ExtendedSpendingKey::master(&[]);
         let extfvk = ExtendedFullViewingKey::from(&extsk);
-        init_accounts_table(&db_data, &tests::network(), &[extfvk.clone()]).unwrap();
+        init_accounts_table(&db_data, &[extfvk.clone()]).unwrap();
 
         // Empty chain should be valid
-        validate_combined_chain(tests::network(), db_cache, db_data).unwrap();
+        validate_chain(
+            &tests::network(),
+            &db_cache,
+            (&db_data).get_max_height_hash().unwrap(),
+        )
+        .unwrap();
 
         // Create a fake CompactBlock sending value to the address
         let (cb, _) = fake_compact_block(
@@ -283,16 +119,27 @@ mod tests {
             extfvk.clone(),
             Amount::from_u64(5).unwrap(),
         );
-        insert_into_cache(db_cache, &cb);
+        insert_into_cache(&db_cache, &cb);
 
         // Cache-only chain should be valid
-        validate_combined_chain(tests::network(), db_cache, db_data).unwrap();
+        validate_chain(
+            &tests::network(),
+            &db_cache,
+            (&db_data).get_max_height_hash().unwrap(),
+        )
+        .unwrap();
 
         // Scan the cache
-        scan_cached_blocks(&tests::network(), db_cache, db_data, None).unwrap();
+        let mut db_write = db_data.get_update_ops().unwrap();
+        scan_cached_blocks(&tests::network(), &db_cache, &mut db_write, None).unwrap();
 
         // Data-only chain should be valid
-        validate_combined_chain(tests::network(), db_cache, db_data).unwrap();
+        validate_chain(
+            &tests::network(),
+            &db_cache,
+            (&db_data).get_max_height_hash().unwrap(),
+        )
+        .unwrap();
 
         // Create a second fake CompactBlock sending more value to the address
         let (cb2, _) = fake_compact_block(
@@ -301,32 +148,42 @@ mod tests {
             extfvk,
             Amount::from_u64(7).unwrap(),
         );
-        insert_into_cache(db_cache, &cb2);
+        insert_into_cache(&db_cache, &cb2);
 
         // Data+cache chain should be valid
-        validate_combined_chain(tests::network(), db_cache, db_data).unwrap();
+        validate_chain(
+            &tests::network(),
+            &db_cache,
+            (&db_data).get_max_height_hash().unwrap(),
+        )
+        .unwrap();
 
         // Scan the cache again
-        scan_cached_blocks(&tests::network(), db_cache, db_data, None).unwrap();
+        scan_cached_blocks(&tests::network(), &db_cache, &mut db_write, None).unwrap();
 
         // Data-only chain should be valid
-        validate_combined_chain(tests::network(), db_cache, db_data).unwrap();
+        validate_chain(
+            &tests::network(),
+            &db_cache,
+            (&db_data).get_max_height_hash().unwrap(),
+        )
+        .unwrap();
     }
 
     #[test]
     fn invalid_chain_cache_disconnected() {
         let cache_file = NamedTempFile::new().unwrap();
-        let db_cache = cache_file.path();
+        let db_cache = BlockDB::for_path(cache_file.path()).unwrap();
         init_cache_database(&db_cache).unwrap();
 
         let data_file = NamedTempFile::new().unwrap();
-        let db_data = data_file.path();
-        init_data_database(&db_data).unwrap();
+        let db_data = WalletDB::for_path(data_file.path(), tests::network()).unwrap();
+        init_wallet_db(&db_data).unwrap();
 
         // Add an account to the wallet
         let extsk = ExtendedSpendingKey::master(&[]);
         let extfvk = ExtendedFullViewingKey::from(&extsk);
-        init_accounts_table(&db_data, &tests::network(), &[extfvk.clone()]).unwrap();
+        init_accounts_table(&db_data, &[extfvk.clone()]).unwrap();
 
         // Create some fake CompactBlocks
         let (cb, _) = fake_compact_block(
@@ -341,14 +198,20 @@ mod tests {
             extfvk.clone(),
             Amount::from_u64(7).unwrap(),
         );
-        insert_into_cache(db_cache, &cb);
-        insert_into_cache(db_cache, &cb2);
+        insert_into_cache(&db_cache, &cb);
+        insert_into_cache(&db_cache, &cb2);
 
         // Scan the cache
-        scan_cached_blocks(&tests::network(), db_cache, db_data, None).unwrap();
+        let mut db_write = db_data.get_update_ops().unwrap();
+        scan_cached_blocks(&tests::network(), &db_cache, &mut db_write, None).unwrap();
 
         // Data-only chain should be valid
-        validate_combined_chain(tests::network(), db_cache, db_data).unwrap();
+        validate_chain(
+            &tests::network(),
+            &db_cache,
+            (&db_data).get_max_height_hash().unwrap(),
+        )
+        .unwrap();
 
         // Create more fake CompactBlocks that don't connect to the scanned ones
         let (cb3, _) = fake_compact_block(
@@ -363,17 +226,18 @@ mod tests {
             extfvk.clone(),
             Amount::from_u64(3).unwrap(),
         );
-        insert_into_cache(db_cache, &cb3);
-        insert_into_cache(db_cache, &cb4);
+        insert_into_cache(&db_cache, &cb3);
+        insert_into_cache(&db_cache, &cb4);
 
         // Data+cache chain should be invalid at the data/cache boundary
-        match validate_combined_chain(tests::network(), db_cache, db_data) {
-            Err(e) => match e.kind() {
-                ErrorKind::InvalidChain(upper_bound, _) => {
-                    assert_eq!(*upper_bound, sapling_activation_height() + 1)
-                }
-                _ => panic!(),
-            },
+        match validate_chain(
+            &tests::network(),
+            &db_cache,
+            (&db_data).get_max_height_hash().unwrap(),
+        ) {
+            Err(SqliteClientError::BackendError(Error::InvalidChain(lower_bound, _))) => {
+                assert_eq!(lower_bound, sapling_activation_height() + 2)
+            }
             _ => panic!(),
         }
     }
@@ -381,17 +245,17 @@ mod tests {
     #[test]
     fn invalid_chain_cache_reorg() {
         let cache_file = NamedTempFile::new().unwrap();
-        let db_cache = cache_file.path();
+        let db_cache = BlockDB::for_path(cache_file.path()).unwrap();
         init_cache_database(&db_cache).unwrap();
 
         let data_file = NamedTempFile::new().unwrap();
-        let db_data = data_file.path();
-        init_data_database(&db_data).unwrap();
+        let db_data = WalletDB::for_path(data_file.path(), tests::network()).unwrap();
+        init_wallet_db(&db_data).unwrap();
 
         // Add an account to the wallet
         let extsk = ExtendedSpendingKey::master(&[]);
         let extfvk = ExtendedFullViewingKey::from(&extsk);
-        init_accounts_table(&db_data, &tests::network(), &[extfvk.clone()]).unwrap();
+        init_accounts_table(&db_data, &[extfvk.clone()]).unwrap();
 
         // Create some fake CompactBlocks
         let (cb, _) = fake_compact_block(
@@ -406,14 +270,20 @@ mod tests {
             extfvk.clone(),
             Amount::from_u64(7).unwrap(),
         );
-        insert_into_cache(db_cache, &cb);
-        insert_into_cache(db_cache, &cb2);
+        insert_into_cache(&db_cache, &cb);
+        insert_into_cache(&db_cache, &cb2);
 
         // Scan the cache
-        scan_cached_blocks(&tests::network(), db_cache, db_data, None).unwrap();
+        let mut db_write = db_data.get_update_ops().unwrap();
+        scan_cached_blocks(&tests::network(), &db_cache, &mut db_write, None).unwrap();
 
         // Data-only chain should be valid
-        validate_combined_chain(tests::network(), db_cache, db_data).unwrap();
+        validate_chain(
+            &tests::network(),
+            &db_cache,
+            (&db_data).get_max_height_hash().unwrap(),
+        )
+        .unwrap();
 
         // Create more fake CompactBlocks that contain a reorg
         let (cb3, _) = fake_compact_block(
@@ -428,17 +298,18 @@ mod tests {
             extfvk.clone(),
             Amount::from_u64(3).unwrap(),
         );
-        insert_into_cache(db_cache, &cb3);
-        insert_into_cache(db_cache, &cb4);
+        insert_into_cache(&db_cache, &cb3);
+        insert_into_cache(&db_cache, &cb4);
 
         // Data+cache chain should be invalid inside the cache
-        match validate_combined_chain(tests::network(), db_cache, db_data) {
-            Err(e) => match e.kind() {
-                ErrorKind::InvalidChain(upper_bound, _) => {
-                    assert_eq!(*upper_bound, sapling_activation_height() + 2)
-                }
-                _ => panic!(),
-            },
+        match validate_chain(
+            &tests::network(),
+            &db_cache,
+            (&db_data).get_max_height_hash().unwrap(),
+        ) {
+            Err(SqliteClientError::BackendError(Error::InvalidChain(lower_bound, _))) => {
+                assert_eq!(lower_bound, sapling_activation_height() + 3)
+            }
             _ => panic!(),
         }
     }
@@ -446,20 +317,20 @@ mod tests {
     #[test]
     fn data_db_rewinding() {
         let cache_file = NamedTempFile::new().unwrap();
-        let db_cache = cache_file.path();
+        let db_cache = BlockDB::for_path(cache_file.path()).unwrap();
         init_cache_database(&db_cache).unwrap();
 
         let data_file = NamedTempFile::new().unwrap();
-        let db_data = data_file.path();
-        init_data_database(&db_data).unwrap();
+        let db_data = WalletDB::for_path(data_file.path(), tests::network()).unwrap();
+        init_wallet_db(&db_data).unwrap();
 
         // Add an account to the wallet
         let extsk = ExtendedSpendingKey::master(&[]);
         let extfvk = ExtendedFullViewingKey::from(&extsk);
-        init_accounts_table(&db_data, &tests::network(), &[extfvk.clone()]).unwrap();
+        init_accounts_table(&db_data, &[extfvk.clone()]).unwrap();
 
         // Account balance should be zero
-        assert_eq!(get_balance(db_data, 0).unwrap(), Amount::zero());
+        assert_eq!(get_balance(&db_data, AccountId(0)).unwrap(), Amount::zero());
 
         // Create fake CompactBlocks sending value to the address
         let value = Amount::from_u64(5).unwrap();
@@ -470,33 +341,206 @@ mod tests {
             extfvk.clone(),
             value,
         );
+
         let (cb2, _) =
             fake_compact_block(sapling_activation_height() + 1, cb.hash(), extfvk, value2);
-        insert_into_cache(db_cache, &cb);
-        insert_into_cache(db_cache, &cb2);
+        insert_into_cache(&db_cache, &cb);
+        insert_into_cache(&db_cache, &cb2);
 
         // Scan the cache
-        scan_cached_blocks(&tests::network(), db_cache, db_data, None).unwrap();
+        let mut db_write = db_data.get_update_ops().unwrap();
+        scan_cached_blocks(&tests::network(), &db_cache, &mut db_write, None).unwrap();
 
         // Account balance should reflect both received notes
-        assert_eq!(get_balance(db_data, 0).unwrap(), value + value2);
+        assert_eq!(get_balance(&db_data, AccountId(0)).unwrap(), value + value2);
 
         // "Rewind" to height of last scanned block
-        rewind_to_height(tests::network(), db_data, sapling_activation_height() + 1).unwrap();
+        rewind_to_height(&db_data, sapling_activation_height() + 1).unwrap();
 
         // Account balance should be unaltered
-        assert_eq!(get_balance(db_data, 0).unwrap(), value + value2);
+        assert_eq!(get_balance(&db_data, AccountId(0)).unwrap(), value + value2);
 
         // Rewind so that one block is dropped
-        rewind_to_height(tests::network(), db_data, sapling_activation_height()).unwrap();
+        rewind_to_height(&db_data, sapling_activation_height()).unwrap();
 
         // Account balance should only contain the first received note
-        assert_eq!(get_balance(db_data, 0).unwrap(), value);
+        assert_eq!(get_balance(&db_data, AccountId(0)).unwrap(), value);
 
         // Scan the cache again
-        scan_cached_blocks(&tests::network(), db_cache, db_data, None).unwrap();
+        scan_cached_blocks(&tests::network(), &db_cache, &mut db_write, None).unwrap();
 
         // Account balance should again reflect both received notes
-        assert_eq!(get_balance(db_data, 0).unwrap(), value + value2);
+        assert_eq!(get_balance(&db_data, AccountId(0)).unwrap(), value + value2);
+    }
+
+    #[test]
+    fn scan_cached_blocks_requires_sequential_blocks() {
+        let cache_file = NamedTempFile::new().unwrap();
+        let db_cache = BlockDB::for_path(cache_file.path()).unwrap();
+        init_cache_database(&db_cache).unwrap();
+
+        let data_file = NamedTempFile::new().unwrap();
+        let db_data = WalletDB::for_path(data_file.path(), tests::network()).unwrap();
+        init_wallet_db(&db_data).unwrap();
+
+        // Add an account to the wallet
+        let extsk = ExtendedSpendingKey::master(&[]);
+        let extfvk = ExtendedFullViewingKey::from(&extsk);
+        init_accounts_table(&db_data, &[extfvk.clone()]).unwrap();
+
+        // Create a block with height SAPLING_ACTIVATION_HEIGHT
+        let value = Amount::from_u64(50000).unwrap();
+        let (cb1, _) = fake_compact_block(
+            sapling_activation_height(),
+            BlockHash([0; 32]),
+            extfvk.clone(),
+            value,
+        );
+        insert_into_cache(&db_cache, &cb1);
+        let mut db_write = db_data.get_update_ops().unwrap();
+        scan_cached_blocks(&tests::network(), &db_cache, &mut db_write, None).unwrap();
+        assert_eq!(get_balance(&db_data, AccountId(0)).unwrap(), value);
+
+        // We cannot scan a block of height SAPLING_ACTIVATION_HEIGHT + 2 next
+        let (cb2, _) = fake_compact_block(
+            sapling_activation_height() + 1,
+            cb1.hash(),
+            extfvk.clone(),
+            value,
+        );
+        let (cb3, _) = fake_compact_block(
+            sapling_activation_height() + 2,
+            cb2.hash(),
+            extfvk.clone(),
+            value,
+        );
+        insert_into_cache(&db_cache, &cb3);
+        match scan_cached_blocks(&tests::network(), &db_cache, &mut db_write, None) {
+            Err(SqliteClientError::BackendError(e)) => {
+                assert_eq!(
+                    e.to_string(),
+                    ChainInvalid::block_height_discontinuity::<NoteId>(
+                        sapling_activation_height() + 1,
+                        sapling_activation_height() + 2
+                    )
+                    .to_string()
+                );
+            }
+            Ok(_) | Err(_) => panic!("Should have failed"),
+        }
+
+        // If we add a block of height SAPLING_ACTIVATION_HEIGHT + 1, we can now scan both
+        insert_into_cache(&db_cache, &cb2);
+        scan_cached_blocks(&tests::network(), &db_cache, &mut db_write, None).unwrap();
+        assert_eq!(
+            get_balance(&db_data, AccountId(0)).unwrap(),
+            Amount::from_u64(150_000).unwrap()
+        );
+    }
+
+    #[test]
+    fn scan_cached_blocks_finds_received_notes() {
+        let cache_file = NamedTempFile::new().unwrap();
+        let db_cache = BlockDB::for_path(cache_file.path()).unwrap();
+        init_cache_database(&db_cache).unwrap();
+
+        let data_file = NamedTempFile::new().unwrap();
+        let db_data = WalletDB::for_path(data_file.path(), tests::network()).unwrap();
+        init_wallet_db(&db_data).unwrap();
+
+        // Add an account to the wallet
+        let extsk = ExtendedSpendingKey::master(&[]);
+        let extfvk = ExtendedFullViewingKey::from(&extsk);
+        init_accounts_table(&db_data, &[extfvk.clone()]).unwrap();
+
+        // Account balance should be zero
+        assert_eq!(get_balance(&db_data, AccountId(0)).unwrap(), Amount::zero());
+
+        // Create a fake CompactBlock sending value to the address
+        let value = Amount::from_u64(5).unwrap();
+        let (cb, _) = fake_compact_block(
+            sapling_activation_height(),
+            BlockHash([0; 32]),
+            extfvk.clone(),
+            value,
+        );
+        insert_into_cache(&db_cache, &cb);
+
+        // Scan the cache
+        let mut db_write = db_data.get_update_ops().unwrap();
+        scan_cached_blocks(&tests::network(), &db_cache, &mut db_write, None).unwrap();
+
+        // Account balance should reflect the received note
+        assert_eq!(get_balance(&db_data, AccountId(0)).unwrap(), value);
+
+        // Create a second fake CompactBlock sending more value to the address
+        let value2 = Amount::from_u64(7).unwrap();
+        let (cb2, _) =
+            fake_compact_block(sapling_activation_height() + 1, cb.hash(), extfvk, value2);
+        insert_into_cache(&db_cache, &cb2);
+
+        // Scan the cache again
+        scan_cached_blocks(&tests::network(), &db_cache, &mut db_write, None).unwrap();
+
+        // Account balance should reflect both received notes
+        assert_eq!(get_balance(&db_data, AccountId(0)).unwrap(), value + value2);
+    }
+
+    #[test]
+    fn scan_cached_blocks_finds_change_notes() {
+        let cache_file = NamedTempFile::new().unwrap();
+        let db_cache = BlockDB::for_path(cache_file.path()).unwrap();
+        init_cache_database(&db_cache).unwrap();
+
+        let data_file = NamedTempFile::new().unwrap();
+        let db_data = WalletDB::for_path(data_file.path(), tests::network()).unwrap();
+        init_wallet_db(&db_data).unwrap();
+
+        // Add an account to the wallet
+        let extsk = ExtendedSpendingKey::master(&[]);
+        let extfvk = ExtendedFullViewingKey::from(&extsk);
+        init_accounts_table(&db_data, &[extfvk.clone()]).unwrap();
+
+        // Account balance should be zero
+        assert_eq!(get_balance(&db_data, AccountId(0)).unwrap(), Amount::zero());
+
+        // Create a fake CompactBlock sending value to the address
+        let value = Amount::from_u64(5).unwrap();
+        let (cb, nf) = fake_compact_block(
+            sapling_activation_height(),
+            BlockHash([0; 32]),
+            extfvk.clone(),
+            value,
+        );
+        insert_into_cache(&db_cache, &cb);
+
+        // Scan the cache
+        let mut db_write = db_data.get_update_ops().unwrap();
+        scan_cached_blocks(&tests::network(), &db_cache, &mut db_write, None).unwrap();
+
+        // Account balance should reflect the received note
+        assert_eq!(get_balance(&db_data, AccountId(0)).unwrap(), value);
+
+        // Create a second fake CompactBlock spending value from the address
+        let extsk2 = ExtendedSpendingKey::master(&[0]);
+        let to2 = extsk2.default_address().unwrap().1;
+        let value2 = Amount::from_u64(2).unwrap();
+        insert_into_cache(
+            &db_cache,
+            &fake_compact_block_spending(
+                sapling_activation_height() + 1,
+                cb.hash(),
+                (nf, value),
+                extfvk,
+                to2,
+                value2,
+            ),
+        );
+
+        // Scan the cache again
+        scan_cached_blocks(&tests::network(), &db_cache, &mut db_write, None).unwrap();
+
+        // Account balance should equal the change
+        assert_eq!(get_balance(&db_data, AccountId(0)).unwrap(), value - value2);
     }
 }

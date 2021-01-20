@@ -17,7 +17,7 @@ bs58 = { version = "0.3", features = ["check"] }
 ff = "0.8"
 group = "0.8"
 jubjub = "0.5.1"
-protobuf = "2.15"
+protobuf = "2.20"
 rand_core = "0.5.1"
 rusqlite = { version = "0.24", features = ["bundled", "time"] }
 time = "0.2"
@@ -31,3 +31,4 @@ zcash_proofs = { version = "0.4", path = "../zcash_proofs" }
 
 [features]
 mainnet = []
+test-dependencies = ["zcash_client_backend/test-dependencies"]
