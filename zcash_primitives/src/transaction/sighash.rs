@@ -17,8 +17,8 @@ use crate::{
 use super::{
     components::{Amount, JSDescription, OutputDescription, SpendDescription, TxIn, TxOut},
     txid::{
-        joinsplits_hash, outputs_hash, prevout_hash, sequence_hash, shielded_outputs_hash,
-        shielded_spends_hash, to_hash, ZCASH_TXID_PERSONALIZATION_PREFIX,
+        outputs_hash, prevout_hash, sequence_hash, shielded_outputs_hash, shielded_spends_hash,
+        to_hash, ZCASH_TXID_PERSONALIZATION_PREFIX,
     },
     TransactionData, TransactionDigest, TransparentDigests, TxDigests, TxId, TxVersion,
 };
@@ -115,6 +115,29 @@ fn tzein_sig_data(tzein: &TzeIn, precondition: &Precondition, value: Amount) -> 
     data.extend_from_slice(&value.to_i64_le_bytes());
 
     data
+}
+
+fn legacy_joinsplits_hash(
+    txversion: u32,
+    joinsplits: &[JSDescription],
+    joinsplit_pubkey: &[u8; 32],
+) -> Blake2bHash {
+    let mut data = Vec::with_capacity(
+        joinsplits.len()
+            * if txversion < SAPLING_TX_VERSION {
+                1802 // JSDescription with PHGR13 proof
+            } else {
+                1698 // JSDescription with Groth16 proof
+            },
+    );
+    for js in joinsplits {
+        js.write(&mut data).unwrap();
+    }
+    data.extend_from_slice(joinsplit_pubkey);
+    Blake2bParams::new()
+        .hash_length(32)
+        .personal(ZCASH_JOINSPLITS_HASH_PERSONALIZATION)
+        .hash(&data)
 }
 
 pub enum SignableInput<'a> {
@@ -232,24 +255,10 @@ pub fn legacy_sig_hash<'a>(
             h.update(&[0; 32]);
         };
 
-        #[cfg(feature = "zfuture")]
-        if tx.version.has_tze() {
-            update_hash!(
-                h,
-                !tx.tze_inputs.is_empty(),
-                tze_inputs_hash(&tx.tze_inputs)
-            );
-            update_hash!(
-                h,
-                !tx.tze_outputs.is_empty(),
-                tze_outputs_hash(&tx.tze_outputs)
-            );
-        }
-
         update_hash!(
             h,
             !tx.joinsplits.is_empty(),
-            joinsplits_hash(&tx.joinsplits, &tx.joinsplit_pubkey)
+            legacy_joinsplits_hash(&tx.joinsplits, &tx.joinsplit_pubkey)
         );
 
         if tx.version.has_sapling() {
@@ -382,31 +391,28 @@ impl<'a> TransactionDigest<Blake2bHash> for SignatureHashDigester<'a> {
             self.txid_parts.transparent_digests.outputs_digest
         };
 
+        let per_input_hasher = Blake2bParams::new()
+            .hash_length(32)
+            .personal(ZCASH_TRANSPARENT_INPUT_HASH_PERSONALIZATION);
         let per_input_digest = match self.signable_input {
             SignableInput::Transparent {
                 index,
                 script_code,
                 value,
-            } => Some({
-                Blake2bParams::new()
-                    .hash_length(32)
-                    .personal(ZCASH_TRANSPARENT_INPUT_HASH_PERSONALIZATION)
-                    .hash(&txin_sig_data(
-                        self.txversion,
-                        &vin[index],
-                        script_code,
-                        value,
-                    ))
-            }),
+            } => per_input_hasher.hash(&txin_sig_data(
+                self.txversion,
+                &vin[index],
+                script_code,
+                value,
+            )),
 
-            _ => None,
+            _ => per_input_hasher.finalize(),
         };
 
         TransparentDigests {
             prevout_digest,
             sequence_digest,
             outputs_digest,
-            per_input_digest,
         }
     }
 

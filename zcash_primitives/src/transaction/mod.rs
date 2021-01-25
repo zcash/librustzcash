@@ -317,13 +317,21 @@ pub trait WitnessDigest<A> {
     #[cfg(feature = "zfuture")]
     fn digest_tze<'a, I: IntoIterator<Item = &'a tze::Witness>>(&self, tzein_sig: I) -> A;
 
-    fn digest_sprout(&self, joinsplit_sig: &Option<[u8; 64]>) -> A;
-
-    fn digest_sapling<'a, I: IntoIterator<Item = &'a Signature>>(
+    fn digest_sprout<'a, I: IntoIterator<Item = &'a SproutProof>>(
         &self,
-        shielded_spends: I,
-        binding_sig: &Option<Signature>,
+        sprout_proofs: I,
+        joinsplit_sig: &Option<[u8; 64]>,
     ) -> A;
+
+    fn digest_sapling<'a, S>(
+        &self,
+        shielded_spend_proofs_sigs: S,
+        shielded_outputs_proofs: O,
+        binding_sig: &Option<Signature>,
+    ) -> A
+    where
+        S: IntoIterator<Item = &'a (&[u8], Signature)>,
+        O: IntoIterator<Item = &'a (&[u8])>;
 }
 
 pub enum DigestError {

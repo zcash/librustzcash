@@ -28,7 +28,7 @@ use super::{
 };
 
 /// TxId tree root personalization
-pub const ZCASH_TXID_PERSONALIZATION_PREFIX: &[u8; 12] = b"ZcashTxIdHsh";
+pub const ZCASH_TXID_PERSONALIZATION_PREFIX: &[u8; 12] = b"ZcashTxHash_";
 
 // TxId level 1 node personalization
 const ZCASH_HEADERS_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxIdHeadersHash";
@@ -151,24 +151,6 @@ pub(crate) fn tze_outputs_hash(tze_outputs: &[TzeOut]) -> Blake2bHash {
     h.finalize()
 }
 
-/// Sequentially append the full serialized value of each JSDescription
-/// followed by the `joinsplit_pubkey` value to a hash personalized
-/// by ZCASH_JOINSPLITS_HASH_PERSONALIZATION,
-pub(crate) fn joinsplits_hash(
-    joinsplits: &[JSDescription],
-    joinsplit_pubkey: &Option<[u8; 32]>,
-) -> Blake2bHash {
-    let mut h = HashWriter::new(ZCASH_JOINSPLITS_HASH_PERSONALIZATION);
-    // if no joinsplit_pubkey is provided, we'll do nothing.
-    for pk in joinsplit_pubkey {
-        for js in joinsplits {
-            js.write(&mut h).unwrap();
-        }
-        h.write(pk).unwrap();
-    }
-    h.finalize()
-}
-
 /// Write disjoint parts of each spend  to a pair of hashes:
 /// * [nullifier*] - personalized with ZCASH_SAPLING_SPENDS_COMPACT_HASH_PERSONALIZATION
 /// * [(cv, anchor, rk, zkproof)*] - personalized with ZCASH_SAPLING_SPENDS_NONCOMPACT_HASH_PERSONALIZATION
@@ -248,7 +230,24 @@ fn hash_sprout_txid_data(
     joinsplits: &[JSDescription],
     joinsplit_pubkey: &Option<[u8; 32]>,
 ) -> Blake2bHash {
-    joinsplits_hash(joinsplits, &joinsplit_pubkey)
+    let mut h = HashWriter::new(ZCASH_JOINSPLITS_HASH_PERSONALIZATION);
+    for js in joinsplits {
+        h.write_all(&js.vpub_old.to_i64_le_bytes()).unwrap();
+        h.write_all(&js.vpub_new.to_i64_le_bytes()).unwrap();
+        h.write_all(&js.anchor).unwrap();
+        h.write_all(&js.nullifiers[0]).unwrap();
+        h.write_all(&js.nullifiers[1]).unwrap();
+        h.write_all(&js.commitments[0]).unwrap();
+        h.write_all(&js.commitments[1]).unwrap();
+        h.write_all(&js.ephemeral_key).unwrap();
+        h.write_all(&js.random_seed).unwrap();
+        h.write_all(&js.macs[0]).unwrap();
+        h.write_all(&js.macs[1]).unwrap();
+
+        h.write_all(&js.ciphertexts[0]).unwrap();
+        h.write_all(&js.ciphertexts[1]).unwrap();
+    }
+    h.finalize()
 }
 
 fn hash_sapling_txid_data(
