@@ -20,7 +20,9 @@ use crate::extensions::transparent as tze;
 pub mod blake2b_256;
 pub mod builder;
 pub mod components;
-mod sighash;
+pub mod sighash;
+mod sighash_v4;
+mod sighash_v5;
 mod txid;
 
 #[cfg(test)]
@@ -29,7 +31,9 @@ mod tests;
 pub use self::sighash::{signature_hash, SignableInput, SIGHASH_ALL};
 pub use self::txid::{to_txid, TxIdDigester};
 
-use self::components::{Amount, JSDescription, OutputDescription, SpendDescription, TxIn, TxOut};
+use self::components::{
+    Amount, JSDescription, OutputDescription, SpendDescription, SproutProof, TxIn, TxOut,
+};
 
 #[cfg(feature = "zfuture")]
 use self::components::{TzeIn, TzeOut};
@@ -290,7 +294,7 @@ pub struct TxDigests<A, Purpose> {
     _purpose: PhantomData<Purpose>,
 }
 
-pub trait TransactionDigest<A> {
+pub(crate) trait TransactionDigest<A> {
     type Purpose;
 
     fn digest_header(&self, version: TxVersion, lock_time: u32, expiry_height: BlockHeight) -> A;
@@ -311,7 +315,7 @@ pub trait TransactionDigest<A> {
     ) -> A;
 }
 
-pub trait WitnessDigest<A> {
+pub(crate) trait AuthDigest<A> {
     fn digest_transparent<'a, I: IntoIterator<Item = &'a Script>>(&self, vin_sig: I) -> A;
 
     #[cfg(feature = "zfuture")]
@@ -320,18 +324,19 @@ pub trait WitnessDigest<A> {
     fn digest_sprout<'a, I: IntoIterator<Item = &'a SproutProof>>(
         &self,
         sprout_proofs: I,
+        joinsplit_pubkey: &Option<[u8; 32]>,
         joinsplit_sig: &Option<[u8; 64]>,
     ) -> A;
 
-    fn digest_sapling<'a, S>(
+    fn digest_sapling<'a, S, O>(
         &self,
         shielded_spend_proofs_sigs: S,
         shielded_outputs_proofs: O,
         binding_sig: &Option<Signature>,
     ) -> A
     where
-        S: IntoIterator<Item = &'a (&[u8], Signature)>,
-        O: IntoIterator<Item = &'a (&[u8])>;
+        S: IntoIterator<Item = (&'a [u8], &'a Option<Signature>)>,
+        O: IntoIterator<Item = &'a [u8]>;
 }
 
 pub enum DigestError {
@@ -384,7 +389,7 @@ impl TransactionData {
         Transaction::from_data(self, consensus_branch_id)
     }
 
-    pub fn digest<A, D, P>(&self, digester: D) -> TxDigests<A, P>
+    pub(crate) fn digest<A, D, P>(&self, digester: D) -> TxDigests<A, P>
     where
         D: TransactionDigest<A, Purpose = P>,
     {
@@ -632,20 +637,28 @@ impl Transaction {
         Ok(())
     }
 
-    pub fn digest_witness<A, D, F>(&self, digester: D, combine: F) -> Result<A, DigestError>
+    pub(crate) fn digest_auth_data<A, D, F>(&self, digester: D, combine: F) -> Result<A, DigestError>
     where
-        D: WitnessDigest<A>,
+        D: AuthDigest<A>,
         F: FnOnce(&[A]) -> A,
     {
         let t_hash = digester.digest_transparent(self.data.vin.iter().map(|txin| &txin.script_sig));
         #[cfg(feature = "zfuture")]
         let tze_hash = digester.digest_tze(self.data.tze_inputs.iter().map(|tzein| &tzein.witness));
-        let sprout_digest = digester.digest_sprout(&self.data.joinsplit_sig);
+        let sprout_digest = digester.digest_sprout(
+            self.data.joinsplits.iter().map(|js| &js.proof),
+            &self.data.joinsplit_pubkey,
+            &self.data.joinsplit_sig,
+        );
         let sapling_digest = digester.digest_sapling(
             self.data
                 .shielded_spends
                 .iter()
-                .flat_map(|spend| &spend.spend_auth_sig),
+                .map(|spend| (&spend.zkproof[..], &spend.spend_auth_sig)),
+            self.data
+                .shielded_outputs
+                .iter()
+                .map(|out| &out.zkproof[..]),
             &self.binding_sig,
         );
 

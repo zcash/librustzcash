@@ -11,7 +11,8 @@ use crate::{
 
 use super::{
     components::Amount,
-    sighash::{legacy_sig_hash, SignableInput},
+    sighash::{SignableInput},
+    sighash_v4::{v4_signature_hash},
     Transaction, TransactionData,
 };
 
@@ -137,7 +138,7 @@ fn zip_0143() {
         };
 
         assert_eq!(
-            legacy_sig_hash(&tx, tv.consensus_branch_id, tv.hash_type, signable_input).as_ref(),
+            v4_signature_hash(&tx, tv.consensus_branch_id, tv.hash_type, signable_input).as_ref(),
             tv.sighash
         );
     }
@@ -157,7 +158,7 @@ fn zip_0243() {
         };
 
         assert_eq!(
-            legacy_sig_hash(&tx, tv.consensus_branch_id, tv.hash_type, signable_input).as_ref(),
+            v4_signature_hash(&tx, tv.consensus_branch_id, tv.hash_type, signable_input).as_ref(),
             tv.sighash
         );
     }
