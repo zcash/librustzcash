@@ -26,8 +26,10 @@ use super::{
     TzeDigests,
 };
 
-const ZCASH_TZE_INPUT_HASH_PERSONALIZATION: &[u8; 16] = b"Zcash__TzeInHash";
 const ZCASH_TRANSPARENT_INPUT_HASH_PERSONALIZATION: &[u8; 16] = b"Zcash___TxInHash";
+
+#[cfg(feature = "zfuture")]
+const ZCASH_TZE_INPUT_HASH_PERSONALIZATION: &[u8; 16] = b"Zcash__TzeInHash";
 
 pub struct SignatureHashDigester<'a> {
     pub txid_parts: TxDigests<Blake2bHash, TxId>,
