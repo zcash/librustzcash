@@ -14,7 +14,7 @@ edition = "2018"
 [dependencies]
 bech32 = "0.7"
 bls12_381 = "0.3.1"
-bs58 = { version = "0.3", features = ["check"] }
+bs58 = { version = "0.4", features = ["check"] }
 base64 = "0.13"
 ff = "0.8"
 group = "0.8"
