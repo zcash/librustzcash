@@ -1,5 +1,6 @@
 //! Structs and methods for handling Zcash transactions.
 
+use blake2b_simd::Hash as Blake2bHash;
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use std::fmt;
 use std::io::{self, Read, Write};
@@ -23,13 +24,13 @@ pub mod components;
 pub mod sighash;
 mod sighash_v4;
 mod sighash_v5;
-mod txid;
+pub mod txid;
 
 #[cfg(test)]
 mod tests;
 
 pub use self::sighash::{signature_hash, SignableInput, SIGHASH_ALL};
-pub use self::txid::{to_txid, TxIdDigester};
+pub use self::txid::{to_auth_commitment, to_txid, BlockTxCommitmentDigester, TxIdDigester};
 
 use self::components::{
     Amount, JSDescription, OutputDescription, SpendDescription, SproutProof, TxIn, TxOut,
@@ -637,7 +638,7 @@ impl Transaction {
         Ok(())
     }
 
-    pub(crate) fn digest_auth_data<A, D, F>(&self, digester: D, combine: F) -> Result<A, DigestError>
+    fn digest_auth_data<A, D, F>(&self, digester: D, combine: F) -> Result<A, DigestError>
     where
         D: AuthDigest<A>,
         F: FnOnce(&[A]) -> A,
@@ -663,6 +664,16 @@ impl Transaction {
         );
 
         Ok(combine(&[t_hash, tze_hash, sprout_digest, sapling_digest]))
+    }
+
+    // TODO: should this be moved to `from_data` and stored?
+    pub fn auth_commitment(
+        &self,
+        consensus_branch_id: BranchId,
+    ) -> Result<Blake2bHash, DigestError> {
+        self.digest_auth_data(BlockTxCommitmentDigester {}, |xs| {
+            to_auth_commitment::<Blake2bHash>(xs, consensus_branch_id)
+        })
     }
 }
 

@@ -6,11 +6,8 @@ use crate::{consensus::BranchId, legacy::Script};
 use crate::extensions::transparent::Precondition;
 
 use super::{
-    components::Amount,
-    sighash_v4::v4_signature_hash,
-    sighash_v5::SignatureHashDigester,
-    txid::{to_hash, ZCASH_TXID_PERSONALIZATION_PREFIX},
-    TransactionData, TxDigests, TxId, TxVersion,
+    components::Amount, sighash_v4::v4_signature_hash, sighash_v5::SignatureHashDigester,
+    txid::to_hash, TransactionData, TxDigests, TxId, TxVersion,
 };
 
 pub const SIGHASH_ALL: u32 = 1;
@@ -86,12 +83,7 @@ where
                 signable_input,
             });
 
-            to_hash(
-                &sig_parts,
-                ZCASH_TXID_PERSONALIZATION_PREFIX,
-                tx.version,
-                consensus_branch_id,
-            )
+            to_hash(&sig_parts, tx.version, consensus_branch_id)
         }
     })
 }

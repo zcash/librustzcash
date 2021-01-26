@@ -17,7 +17,7 @@ use super::{
     components::{
         Amount, JSDescription, OutputDescription, SpendDescription, SproutProof, TxIn, TxOut,
     },
-    TransactionDigest, TransparentDigests, TxDigests, TxId, TxVersion, AuthDigest,
+    AuthDigest, TransactionDigest, TransparentDigests, TxDigests, TxId, TxVersion,
 };
 
 #[cfg(feature = "zfuture")]
@@ -30,7 +30,7 @@ use super::{
 };
 
 /// TxId tree root personalization
-pub const ZCASH_TXID_PERSONALIZATION_PREFIX: &[u8; 12] = b"ZcashTxHash_";
+const ZCASH_TX_PERSONALIZATION_PREFIX: &[u8; 12] = b"ZcashTxHash_";
 
 // TxId level 1 node personalization
 const ZCASH_HEADERS_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxIdHeadersHash";
@@ -58,7 +58,7 @@ const ZCASH_SAPLING_OUTPUTS_COMPACT_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxIdSOu
 const ZCASH_SAPLING_OUTPUTS_MEMOS_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxIdSOutM__Hash";
 const ZCASH_SAPLING_OUTPUTS_NONCOMPACT_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxIdSOutNC_Hash";
 
-const ZCASH_AUTH_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxAuth_____Hash";
+const ZCASH_AUTH_PERSONALIZATION_PREFIX: &[u8; 12] = b"ZTxAuth_Hash";
 const ZCASH_TRANSPARENT_SCRIPTS_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxAuthTransHash";
 const ZCASH_TZE_WITNESSES_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxAuthTZE__Hash";
 const ZCASH_SPROUT_SIGS_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxAuthSprouHash";
@@ -349,12 +349,11 @@ impl TransactionDigest<Blake2bHash> for TxIdDigester {
 
 pub fn to_hash<A>(
     digests: &TxDigests<Blake2bHash, A>,
-    hash_personalization_prefix: &[u8; 12],
     txversion: TxVersion,
     consensus_branch_id: BranchId,
 ) -> Blake2bHash {
     let mut personal = [0; 16];
-    (&mut personal[..12]).copy_from_slice(hash_personalization_prefix);
+    (&mut personal[..12]).copy_from_slice(ZCASH_TX_PERSONALIZATION_PREFIX);
     (&mut personal[12..])
         .write_u32::<LittleEndian>(consensus_branch_id.into())
         .unwrap();
@@ -382,12 +381,7 @@ pub fn to_txid(
     txversion: TxVersion,
     consensus_branch_id: BranchId,
 ) -> TxId {
-    let txid_digest = to_hash(
-        digests,
-        &ZCASH_TXID_PERSONALIZATION_PREFIX,
-        txversion,
-        consensus_branch_id,
-    );
+    let txid_digest = to_hash(digests, txversion, consensus_branch_id);
 
     let mut txid_bytes = [0; 32];
     (&mut txid_bytes).copy_from_slice(txid_digest.as_bytes());
@@ -398,7 +392,7 @@ pub fn to_txid(
 /// This does not internally commit to the txid, so if that is
 /// desired it should be done using the result of this digest
 /// function.
-struct BlockTxCommitmentDigester {}
+pub struct BlockTxCommitmentDigester {}
 
 impl AuthDigest<Blake2bHash> for BlockTxCommitmentDigester {
     fn digest_transparent<'a, I: IntoIterator<Item = &'a Script>>(
@@ -481,4 +475,22 @@ impl AuthDigest<Blake2bHash> for BlockTxCommitmentDigester {
 
         h.finalize()
     }
+}
+
+pub fn to_auth_commitment<A>(
+    digests: &[Blake2bHash],
+    consensus_branch_id: BranchId,
+) -> Blake2bHash {
+    let mut personal = [0; 16];
+    (&mut personal[..12]).copy_from_slice(ZCASH_AUTH_PERSONALIZATION_PREFIX);
+    (&mut personal[12..])
+        .write_u32::<LittleEndian>(consensus_branch_id.into())
+        .unwrap();
+
+    let mut h = HashWriter::new(&personal);
+    for digest in digests {
+        h.write(digest.as_bytes()).unwrap();
+    }
+
+    h.finalize()
 }
