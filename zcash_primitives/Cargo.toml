@@ -15,7 +15,7 @@ edition = "2018"
 all-features = true
 
 [dependencies]
-aes = "0.5"
+aes = "0.6"
 bitvec = "0.18"
 blake2b_simd = "0.5"
 blake2s_simd = "0.5"
@@ -24,7 +24,7 @@ byteorder = "1"
 crypto_api_chachapoly = "0.4"
 equihash = { version = "0.1", path = "../components/equihash" }
 ff = "0.8"
-fpe = "0.3"
+fpe = "0.4"
 group = "0.8"
 hex = "0.4"
 jubjub = "0.5.1"
