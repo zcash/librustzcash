@@ -429,10 +429,7 @@ impl ExtendedFullViewingKey {
     }
 
     pub fn address(&self, j: DiversifierIndex) -> Result<(DiversifierIndex, PaymentAddress), ()> {
-        let (j, d_j) = match self.dk.diversifier(j) {
-            Ok(ret) => ret,
-            Err(()) => return Err(()),
-        };
+        let (j, d_j) = self.dk.diversifier(j)?;
         match self.fvk.vk.to_payment_address(d_j) {
             Some(addr) => Ok((j, addr)),
             None => Err(()),

@@ -123,10 +123,7 @@ impl SaplingOutput {
         value: Amount,
         memo: Option<Memo>,
     ) -> Result<Self, Error> {
-        let g_d = match to.g_d() {
-            Some(g_d) => g_d,
-            None => return Err(Error::InvalidAddress),
-        };
+        let g_d = to.g_d().ok_or(Error::InvalidAddress)?;
         if value.is_negative() {
             return Err(Error::InvalidAmount);
         }
