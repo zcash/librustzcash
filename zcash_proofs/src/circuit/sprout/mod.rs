@@ -78,7 +78,7 @@ impl<Scalar: PrimeField> Circuit<Scalar> for JoinSplit {
         let mut rhs = vpub_new.lc();
 
         // Witness rt (merkle tree root)
-        let rt = witness_u256(cs.namespace(|| "rt"), self.rt.as_ref().map(|v| &v[..])).unwrap();
+        let rt = witness_u256(cs.namespace(|| "rt"), self.rt.as_ref().map(|v| &v[..]))?;
 
         // Witness h_sig
         let h_sig = witness_u256(
@@ -88,7 +88,7 @@ impl<Scalar: PrimeField> Circuit<Scalar> for JoinSplit {
         .unwrap();
 
         // Witness phi
-        let phi = witness_u252(cs.namespace(|| "phi"), self.phi.as_ref().map(|v| &v[..])).unwrap();
+        let phi = witness_u252(cs.namespace(|| "phi"), self.phi.as_ref().map(|v| &v[..]))?;
 
         let mut input_notes = vec![];
         let mut lhs_total = self.vpub_old;
