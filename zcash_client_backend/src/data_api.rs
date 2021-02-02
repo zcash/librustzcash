@@ -137,7 +137,7 @@ pub trait WalletRead {
         anchor_height: BlockHeight,
     ) -> Result<Amount, Self::Error>;
 
-    /// Returns the memo for a received note, if it is known and a valid UTF-8 string.
+    /// Returns the memo for a note, if it is known and a valid UTF-8 string.
     ///
     /// This will return `Ok(None)` if the note identifier does not appear in the
     /// database as a known note ID.
