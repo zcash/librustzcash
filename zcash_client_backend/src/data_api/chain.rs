@@ -347,10 +347,10 @@ where
                             .note
                             .nf(&extfvk.fvk.vk, output.witness.position() as u64);
 
-                        let note_id = up.put_received_note(&output, &Some(nf), tx_row)?;
+                        let received_note_id = up.put_received_note(&output, &Some(nf), tx_row)?;
 
                         // Save witness for note.
-                        witnesses.push((note_id, output.witness));
+                        witnesses.push((received_note_id, output.witness));
 
                         // Cache nullifier for note (to detect subsequent spends in this scan).
                         nullifiers.push((output.account, nf));
@@ -359,8 +359,8 @@ where
             }
 
             // Insert current witnesses into the database.
-            for (note_id, witness) in witnesses.iter() {
-                up.insert_witness(*note_id, witness, last_height)?;
+            for (received_note_id, witness) in witnesses.iter() {
+                up.insert_witness(*received_note_id, witness, last_height)?;
             }
 
             // Prune the stored witnesses (we only expect rollbacks of at most 100 blocks).

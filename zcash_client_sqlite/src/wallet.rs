@@ -214,16 +214,16 @@ pub fn get_balance_at<P>(
 ///
 /// let data_file = NamedTempFile::new().unwrap();
 /// let db = WalletDB::for_path(data_file, Network::TestNetwork).unwrap();
-/// let memo = get_received_memo_as_utf8(&db, NoteId(27));
+/// let memo = get_received_memo_as_utf8(&db, 27);
 /// ```
 pub fn get_received_memo_as_utf8<P>(
     wdb: &WalletDB<P>,
-    id_note: NoteId,
+    id_note: i64,
 ) -> Result<Option<String>, SqliteClientError> {
     let memo: Vec<_> = wdb.conn.query_row(
         "SELECT memo FROM received_notes
         WHERE id_note = ?",
-        &[id_note.0],
+        &[id_note],
         |row| row.get(0),
     )?;
 
@@ -255,16 +255,16 @@ pub fn get_received_memo_as_utf8<P>(
 ///
 /// let data_file = NamedTempFile::new().unwrap();
 /// let db = WalletDB::for_path(data_file, Network::TestNetwork).unwrap();
-/// let memo = get_sent_memo_as_utf8(&db, NoteId(12));
+/// let memo = get_sent_memo_as_utf8(&db, 12);
 /// ```
 pub fn get_sent_memo_as_utf8<P>(
     wdb: &WalletDB<P>,
-    id_note: NoteId,
+    id_note: i64,
 ) -> Result<Option<String>, SqliteClientError> {
     let memo: Vec<_> = wdb.conn.query_row(
         "SELECT memo FROM sent_notes
         WHERE id_note = ?",
-        &[id_note.0],
+        &[id_note],
         |row| row.get(0),
     )?;
 
@@ -410,7 +410,7 @@ pub fn get_witnesses<P>(
         .prepare("SELECT note, witness FROM sapling_witnesses WHERE block = ?")?;
     let witnesses = stmt_fetch_witnesses
         .query_map(&[u32::from(block_height)], |row| {
-            let id_note = NoteId(row.get(0)?);
+            let id_note = NoteId::ReceivedNoteId(row.get(0)?);
             let wdb: Vec<u8> = row.get(1)?;
             Ok(IncrementalWitness::read(&wdb[..]).map(|witness| (id_note, witness)))
         })
@@ -565,13 +565,13 @@ pub fn put_received_note<'a, P, T: ShieldedOutput>(
         // It isn't there, so insert our note into the database.
         stmts.stmt_insert_received_note.execute_named(&sql_args)?;
 
-        Ok(NoteId(stmts.wallet_db.conn.last_insert_rowid()))
+        Ok(NoteId::ReceivedNoteId(stmts.wallet_db.conn.last_insert_rowid()))
     } else {
         // It was there, so grab its row number.
         stmts
             .stmt_select_received_note
             .query_row(params![tx_ref, (output.index() as i64)], |row| {
-                row.get(0).map(NoteId)
+                row.get(0).map(NoteId::ReceivedNoteId)
             })
             .map_err(SqliteClientError::from)
     }
@@ -579,7 +579,7 @@ pub fn put_received_note<'a, P, T: ShieldedOutput>(
 
 pub fn insert_witness<'a, P>(
     stmts: &mut DataConnStmtCache<'a, P>,
-    note_id: NoteId,
+    note_id: i64,
     witness: &IncrementalWitness<Node>,
     height: BlockHeight,
 ) -> Result<(), SqliteClientError> {
@@ -588,7 +588,7 @@ pub fn insert_witness<'a, P>(
 
     stmts
         .stmt_insert_witness
-        .execute(params![note_id.0, u32::from(height), encoded])?;
+        .execute(params![note_id, u32::from(height), encoded])?;
 
     Ok(())
 }
