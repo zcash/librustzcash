@@ -88,7 +88,7 @@ impl<P: consensus::Parameters> WalletDB<P> {
     /// Given a wallet database connection, obtain a handle for the write operations
     /// for that database. This operation may eagerly initialize and cache sqlite
     /// prepared statements that are used in write operations.
-    pub fn get_update_ops<'a>(&'a self) -> Result<DataConnStmtCache<'a, P>, SqliteClientError> {
+    pub fn get_update_ops(&self) -> Result<DataConnStmtCache<'_, P>, SqliteClientError> {
         Ok(
             DataConnStmtCache {
                 wallet_db: self,
@@ -220,6 +220,7 @@ impl<P: consensus::Parameters> WalletRead for WalletDB<P> {
         wallet::get_commitment_tree(self, block_height)
     }
 
+    #[allow(clippy::type_complexity)]
     fn get_witnesses(
         &self,
         block_height: BlockHeight,
@@ -317,10 +318,7 @@ impl<'a, P: consensus::Parameters> WalletRead for DataConnStmtCache<'a, P> {
         self.wallet_db.get_balance_at(account, anchor_height)
     }
 
-    fn get_memo_as_utf8(
-        &self,
-        id_note: Self::NoteRef,
-    ) -> Result<Option<String>, Self::Error> {
+    fn get_memo_as_utf8(&self, id_note: Self::NoteRef) -> Result<Option<String>, Self::Error> {
         self.wallet_db.get_memo_as_utf8(id_note)
     }
 
@@ -331,6 +329,7 @@ impl<'a, P: consensus::Parameters> WalletRead for DataConnStmtCache<'a, P> {
         self.wallet_db.get_commitment_tree(block_height)
     }
 
+    #[allow(clippy::type_complexity)]
     fn get_witnesses(
         &self,
         block_height: BlockHeight,
@@ -571,14 +570,14 @@ mod tests {
         let rseed = generate_random_rseed(&network(), height, &mut rng);
         let note = Note {
             g_d: to.diversifier().g_d().unwrap(),
-            pk_d: to.pk_d().clone(),
+            pk_d: *to.pk_d(),
             value: value.into(),
             rseed,
         };
         let encryptor = SaplingNoteEncryption::new(
             Some(extfvk.fvk.ovk),
             note.clone(),
-            to.clone(),
+            to,
             Memo::default(),
             &mut rng,
         );
@@ -631,7 +630,7 @@ mod tests {
         ctx.outputs.push({
             let note = Note {
                 g_d: to.diversifier().g_d().unwrap(),
-                pk_d: to.pk_d().clone(),
+                pk_d: *to.pk_d(),
                 value: value.into(),
                 rseed,
             };
@@ -659,7 +658,7 @@ mod tests {
             let rseed = generate_random_rseed(&network(), height, &mut rng);
             let note = Note {
                 g_d: change_addr.diversifier().g_d().unwrap(),
-                pk_d: change_addr.pk_d().clone(),
+                pk_d: *change_addr.pk_d(),
                 value: (in_value - value).into(),
                 rseed,
             };

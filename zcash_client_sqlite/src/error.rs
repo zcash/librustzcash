@@ -16,7 +16,7 @@ pub enum SqliteClientError {
     /// The rcm value for a note cannot be decoded to a valid JubJub point.
     InvalidNote,
 
-    /// The note id associated with a witness being stored corresponds to a 
+    /// The note id associated with a witness being stored corresponds to a
     /// sent note, not a received note.
     InvalidNoteId,
 

@@ -3,6 +3,7 @@ use bellman::gadgets::sha256::sha256_block_no_padding;
 use bellman::{ConstraintSystem, SynthesisError};
 use ff::PrimeField;
 
+#[allow(clippy::many_single_char_names)]
 fn prf<Scalar, CS>(
     cs: CS,
     a: bool,

@@ -632,6 +632,7 @@ mod test {
     use bellman::gadgets::boolean::{AllocatedBit, Boolean};
 
     #[test]
+    #[allow(clippy::many_single_char_names)]
     fn test_into_edwards() {
         let mut rng = XorShiftRng::from_seed([
             0x59, 0x62, 0xbe, 0x3d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06,
@@ -680,7 +681,7 @@ mod test {
             let p = jubjub::ExtendedPoint::random(&mut rng);
 
             let mut cs = TestConstraintSystem::new();
-            let q = EdwardsPoint::witness(&mut cs, Some(p.clone())).unwrap();
+            let q = EdwardsPoint::witness(&mut cs, Some(p)).unwrap();
 
             let p = p.to_affine();
 
@@ -744,7 +745,7 @@ mod test {
                     AllocatedBit::alloc(cs.namespace(|| format!("scalar bit {}", i)), Some(b))
                         .unwrap()
                 })
-                .map(|v| Boolean::from(v))
+                .map(Boolean::from)
                 .collect::<Vec<_>>();
 
             let q = fixed_base_multiplication(
@@ -795,7 +796,7 @@ mod test {
                     AllocatedBit::alloc(cs.namespace(|| format!("scalar bit {}", i)), Some(b))
                         .unwrap()
                 })
-                .map(|v| Boolean::from(v))
+                .map(Boolean::from)
                 .collect::<Vec<_>>();
 
             let q = p.mul(cs.namespace(|| "scalar mul"), &s_bits).unwrap();
@@ -1080,7 +1081,7 @@ mod test {
 
         // generator for the prime subgroup
         let g_prime = g * largest_small_subgroup_order;
-        check_small_order_from_p(g_prime.clone(), false);
+        check_small_order_from_p(g_prime, false);
         let prime_subgroup_order_minus_1 = prime_subgroup_order - jubjub::Fr::one();
 
         let should_not_be_zero = g_prime * prime_subgroup_order_minus_1;
@@ -1093,7 +1094,7 @@ mod test {
         // generator for the small order subgroup
         let g_small = g * prime_subgroup_order_minus_1;
         let g_small = g_small + g;
-        check_small_order_from_p(g_small.clone(), true);
+        check_small_order_from_p(g_small, true);
 
         // g_small does have order 8
         let largest_small_subgroup_order_minus_1 = largest_small_subgroup_order - jubjub::Fr::one();

@@ -90,6 +90,7 @@ pub fn generate_circuit_generator(mut gen: jubjub::SubgroupPoint) -> FixedGenera
 
 /// Returns the coordinates of this point's Montgomery curve representation, or `None` if
 /// it is the point at infinity.
+#[allow(clippy::many_single_char_names)]
 pub(crate) fn to_montgomery_coords(g: ExtendedPoint) -> Option<(Scalar, Scalar)> {
     let g = g.to_affine();
     let (x, y) = (g.get_u(), g.get_v());

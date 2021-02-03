@@ -1,3 +1,4 @@
+#![allow(clippy::assertions_on_constants)]
 //! Implementation of [group hashing into Jubjub][grouphash].
 //!
 //! [grouphash]: https://zips.z.cash/protocol/protocol.pdf#concretegrouphashjubjub

@@ -24,7 +24,7 @@ pub const ANCHOR_OFFSET: u32 = 10;
 
 /// Scans a [`Transaction`] for any information that can be decrypted by the accounts in
 /// the wallet, and saves it to the wallet.
-pub fn decrypt_and_store_transaction<'db, N, E, P, D>(
+pub fn decrypt_and_store_transaction<N, E, P, D>(
     params: &P,
     data: &mut D,
     tx: &Transaction,
@@ -44,8 +44,8 @@ where
         .or(data
             .block_height_extrema()?
             .map(|(_, max_height)| max_height + 1))
-        .or(params.activation_height(NetworkUpgrade::Sapling))
-        .ok_or(Error::SaplingNotActive.into())?;
+        .or_else(|| params.activation_height(NetworkUpgrade::Sapling))
+        .ok_or(Error::SaplingNotActive)?;
 
     let outputs = decrypt_transaction(params, height, tx, &extfvks);
     if outputs.is_empty() {
@@ -68,6 +68,7 @@ where
     }
 }
 
+#[allow(clippy::needless_doctest_main)]
 /// Creates a transaction paying the specified address from the given account.
 ///
 /// Returns the row index of the newly-created transaction in the `transactions` table
@@ -153,6 +154,7 @@ where
 /// # Ok(())
 /// # }
 /// ```
+#[allow(clippy::too_many_arguments)]
 pub fn create_spend_to_address<E, N, P, D, R>(
     wallet_db: &mut D,
     params: &P,
@@ -187,7 +189,7 @@ where
     // Target the next block, assuming we are up-to-date.
     let (height, anchor_height) = wallet_db
         .get_target_and_anchor_heights()
-        .and_then(|x| x.ok_or(Error::ScanRequired.into()))?;
+        .and_then(|x| x.ok_or_else(|| Error::ScanRequired.into()))?;
 
     let target_value = value + DEFAULT_FEE;
     let spendable_notes = wallet_db.select_spendable_notes(account, target_value, anchor_height)?;
@@ -242,27 +244,25 @@ where
     };
 
     // Update the database atomically, to ensure the result is internally consistent.
-    wallet_db
-        .transactionally(|up| {
-            let created = time::OffsetDateTime::now_utc();
-            let tx_ref = up.put_tx_data(&tx, Some(created))?;
+    wallet_db.transactionally(|up| {
+        let created = time::OffsetDateTime::now_utc();
+        let tx_ref = up.put_tx_data(&tx, Some(created))?;
 
-            // Mark notes as spent.
-            //
-            // This locks the notes so they aren't selected again by a subsequent call to
-            // create_spend_to_address() before this transaction has been mined (at which point the notes
-            // get re-marked as spent).
-            //
-            // Assumes that create_spend_to_address() will never be called in parallel, which is a
-            // reasonable assumption for a light client such as a mobile phone.
-            for spend in &tx.shielded_spends {
-                up.mark_spent(tx_ref, &spend.nullifier)?;
-            }
+        // Mark notes as spent.
+        //
+        // This locks the notes so they aren't selected again by a subsequent call to
+        // create_spend_to_address() before this transaction has been mined (at which point the notes
+        // get re-marked as spent).
+        //
+        // Assumes that create_spend_to_address() will never be called in parallel, which is a
+        // reasonable assumption for a light client such as a mobile phone.
+        for spend in &tx.shielded_spends {
+            up.mark_spent(tx_ref, &spend.nullifier)?;
+        }
 
-            up.insert_sent_note(tx_ref, output_index as usize, account, to, value, memo)?;
+        up.insert_sent_note(tx_ref, output_index as usize, account, to, value, memo)?;
 
-            // Return the row number of the transaction, so the caller can fetch it for sending.
-            Ok(tx_ref)
-        })
-        .map_err(|e| e.into())
+        // Return the row number of the transaction, so the caller can fetch it for sending.
+        Ok(tx_ref)
+    })
 }

@@ -709,12 +709,7 @@ mod tests {
         let witness1 = IncrementalWitness::from_tree(&tree);
 
         builder_a
-            .add_sapling_spend(
-                extsk.clone(),
-                *to.diversifier(),
-                note1.clone(),
-                witness1.path().unwrap(),
-            )
+            .add_sapling_spend(extsk, *to.diversifier(), note1, witness1.path().unwrap())
             .unwrap();
 
         let mut db_a = DemoBuilder {

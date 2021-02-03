@@ -57,6 +57,7 @@ pub struct CommitmentTree<Node: Hashable> {
 
 impl<Node: Hashable> CommitmentTree<Node> {
     /// Creates an empty tree.
+    #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
         CommitmentTree {
             left: None,
@@ -66,6 +67,7 @@ impl<Node: Hashable> CommitmentTree<Node> {
     }
 
     /// Reads a `CommitmentTree` from its serialized form.
+    #[allow(clippy::redundant_closure)]
     pub fn read<R: Read>(mut reader: R) -> io::Result<Self> {
         let left = Optional::read(&mut reader, |r| Node::read(r))?;
         let right = Optional::read(&mut reader, |r| Node::read(r))?;
@@ -237,6 +239,7 @@ impl<Node: Hashable> IncrementalWitness<Node> {
     }
 
     /// Reads an `IncrementalWitness` from its serialized form.
+    #[allow(clippy::redundant_closure)]
     pub fn read<R: Read>(mut reader: R) -> io::Result<Self> {
         let tree = CommitmentTree::read(&mut reader)?;
         let filled = Vector::read(&mut reader, |r| Node::read(r))?;

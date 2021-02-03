@@ -223,7 +223,7 @@ mod tests {
         let (cb4, _) = fake_compact_block(
             sapling_activation_height() + 3,
             cb3.hash(),
-            extfvk.clone(),
+            extfvk,
             Amount::from_u64(3).unwrap(),
         );
         insert_into_cache(&db_cache, &cb3);
@@ -295,7 +295,7 @@ mod tests {
         let (cb4, _) = fake_compact_block(
             sapling_activation_height() + 3,
             BlockHash([1; 32]),
-            extfvk.clone(),
+            extfvk,
             Amount::from_u64(3).unwrap(),
         );
         insert_into_cache(&db_cache, &cb3);
@@ -408,12 +408,8 @@ mod tests {
             extfvk.clone(),
             value,
         );
-        let (cb3, _) = fake_compact_block(
-            sapling_activation_height() + 2,
-            cb2.hash(),
-            extfvk.clone(),
-            value,
-        );
+        let (cb3, _) =
+            fake_compact_block(sapling_activation_height() + 2, cb2.hash(), extfvk, value);
         insert_into_cache(&db_cache, &cb3);
         match scan_cached_blocks(&tests::network(), &db_cache, &mut db_write, None) {
             Err(SqliteClientError::BackendError(e)) => {

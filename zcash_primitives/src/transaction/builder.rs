@@ -296,6 +296,7 @@ impl TransparentInputs {
 }
 
 #[cfg(feature = "zfuture")]
+#[allow(clippy::type_complexity)]
 struct TzeInputInfo<'a, BuildCtx> {
     prevout: TzeOut,
     builder: Box<dyn FnOnce(&BuildCtx) -> Result<(u32, Vec<u8>), Error> + 'a>,

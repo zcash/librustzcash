@@ -45,12 +45,11 @@ impl LocalTxProver {
     /// This function will panic if the paths do not point to valid parameter files with
     /// the expected hashes.
     pub fn new(spend_path: &Path, output_path: &Path) -> Self {
-        let (spend_params, spend_vk, output_params, _, _) =
-            load_parameters(spend_path, output_path, None);
+        let p = load_parameters(spend_path, output_path, None);
         LocalTxProver {
-            spend_params,
-            spend_vk,
-            output_params,
+            spend_params: p.spend_params,
+            spend_vk: p.spend_vk,
+            output_params: p.output_params,
         }
     }
 
@@ -70,13 +69,12 @@ impl LocalTxProver {
     /// This function will panic if the byte arrays do not contain valid parameters with
     /// the expected hashes.
     pub fn from_bytes(spend_param_bytes: &[u8], output_param_bytes: &[u8]) -> Self {
-        let (spend_params, spend_vk, output_params, _, _) =
-            parse_parameters(spend_param_bytes, output_param_bytes, None);
+        let p = parse_parameters(spend_param_bytes, output_param_bytes, None);
 
         LocalTxProver {
-            spend_params,
-            spend_vk,
-            output_params,
+            spend_params: p.spend_params,
+            spend_vk: p.spend_vk,
+            output_params: p.output_params,
         }
     }
 
@@ -128,13 +126,12 @@ impl LocalTxProver {
     #[cfg_attr(docsrs, doc(cfg(feature = "bundled-prover")))]
     pub fn bundled() -> Self {
         let (spend_buf, output_buf) = wagyu_zcash_parameters::load_sapling_parameters();
-        let (spend_params, spend_vk, output_params, _, _) =
-            parse_parameters(&spend_buf[..], &output_buf[..], None);
+        let p = parse_parameters(&spend_buf[..], &output_buf[..], None);
 
         LocalTxProver {
-            spend_params,
-            spend_vk,
-            output_params,
+            spend_params: p.spend_params,
+            spend_vk: p.spend_vk,
+            output_params: p.output_params,
         }
     }
 }

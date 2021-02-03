@@ -15,6 +15,7 @@ const GROTH_PROOF_SIZE: usize = 48 // π_A
 pub const WITNESS_PATH_SIZE: usize = 1 + 33 * TREE_DEPTH + 8;
 
 /// Sprout JoinSplit proof generation.
+#[allow(clippy::too_many_arguments)]
 pub fn create_proof(
     phi: [u8; 32],
     rt: [u8; 32],
@@ -133,6 +134,7 @@ pub fn create_proof(
 }
 
 /// Sprout JoinSplit proof verification.
+#[allow(clippy::too_many_arguments)]
 pub fn verify_proof(
     proof: &[u8; GROTH_PROOF_SIZE],
     rt: &[u8; 32],

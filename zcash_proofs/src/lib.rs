@@ -65,10 +65,9 @@ pub fn default_params_folder() -> Option<PathBuf> {
 #[cfg_attr(docsrs, doc(cfg(feature = "download-params")))]
 pub fn download_parameters() -> Result<(), minreq::Error> {
     // Ensure that the default Zcash parameters location exists.
-    let params_dir = default_params_folder().ok_or(io::Error::new(
-        io::ErrorKind::Other,
-        "Could not load default params folder",
-    ))?;
+    let params_dir = default_params_folder().ok_or_else(|| {
+        io::Error::new(io::ErrorKind::Other, "Could not load default params folder")
+    })?;
     std::fs::create_dir_all(&params_dir)?;
 
     let fetch_params = |name: &str, expected_hash: &str| -> Result<(), minreq::Error> {
@@ -111,17 +110,19 @@ pub fn download_parameters() -> Result<(), minreq::Error> {
     Ok(())
 }
 
+pub struct ZcashParameters {
+    pub spend_params: Parameters<Bls12>,
+    pub spend_vk: PreparedVerifyingKey<Bls12>,
+    pub output_params: Parameters<Bls12>,
+    pub output_vk: PreparedVerifyingKey<Bls12>,
+    pub sprout_vk: Option<PreparedVerifyingKey<Bls12>>,
+}
+
 pub fn load_parameters(
     spend_path: &Path,
     output_path: &Path,
     sprout_path: Option<&Path>,
-) -> (
-    Parameters<Bls12>,
-    PreparedVerifyingKey<Bls12>,
-    Parameters<Bls12>,
-    PreparedVerifyingKey<Bls12>,
-    Option<PreparedVerifyingKey<Bls12>>,
-) {
+) -> ZcashParameters {
     // Load from each of the paths
     let spend_fs = File::open(spend_path).expect("couldn't load Sapling spend parameters file");
     let output_fs = File::open(output_path).expect("couldn't load Sapling output parameters file");
@@ -142,13 +143,7 @@ pub fn parse_parameters<R: io::Read>(
     spend_fs: R,
     output_fs: R,
     sprout_fs: Option<R>,
-) -> (
-    Parameters<Bls12>,
-    PreparedVerifyingKey<Bls12>,
-    Parameters<Bls12>,
-    PreparedVerifyingKey<Bls12>,
-    Option<PreparedVerifyingKey<Bls12>>,
-) {
+) -> ZcashParameters {
     let mut spend_fs = hashreader::HashReader::new(spend_fs);
     let mut output_fs = hashreader::HashReader::new(output_fs);
     let mut sprout_fs = sprout_fs.map(hashreader::HashReader::new);
@@ -201,5 +196,11 @@ pub fn parse_parameters<R: io::Read>(
     let output_vk = prepare_verifying_key(&output_params.vk);
     let sprout_vk = sprout_vk.map(|vk| prepare_verifying_key(&vk));
 
-    (spend_params, spend_vk, output_params, output_vk, sprout_vk)
+    ZcashParameters {
+        spend_params,
+        spend_vk,
+        output_params,
+        output_vk,
+        sprout_vk,
+    }
 }

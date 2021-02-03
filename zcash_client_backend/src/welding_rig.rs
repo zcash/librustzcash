@@ -22,6 +22,7 @@ use crate::wallet::{AccountId, WalletShieldedOutput, WalletShieldedSpend, Wallet
 ///
 /// The given [`CommitmentTree`] and existing [`IncrementalWitness`]es are incremented
 /// with this output's commitment.
+#[allow(clippy::too_many_arguments)]
 fn scan_output<P: consensus::Parameters>(
     params: &P,
     height: BlockHeight,
@@ -260,14 +261,14 @@ mod tests {
         let rseed = generate_random_rseed(&Network::TestNetwork, height, &mut rng);
         let note = Note {
             g_d: to.diversifier().g_d().unwrap(),
-            pk_d: to.pk_d().clone(),
+            pk_d: *to.pk_d(),
             value: value.into(),
             rseed,
         };
         let encryptor = SaplingNoteEncryption::new(
             Some(extfvk.fvk.ovk),
             note.clone(),
-            to.clone(),
+            to,
             Memo::default(),
             &mut rng,
         );
@@ -404,7 +405,7 @@ mod tests {
             &Network::TestNetwork,
             cb,
             &[],
-            &[(account, nf.clone())],
+            &[(account, nf)],
             &mut tree,
             &mut [],
         );

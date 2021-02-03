@@ -1,3 +1,4 @@
+#![allow(clippy::needless_doctest_main)]
 //! Tools for blockchain validation & scanning
 //!
 //! # Examples
@@ -174,6 +175,7 @@ where
     })
 }
 
+#[allow(clippy::needless_doctest_main)]
 /// Scans at most `limit` new blocks added to the cache for any transactions received by
 /// the tracked accounts.
 ///
@@ -267,7 +269,7 @@ where
     // Get the most recent CommitmentTree
     let mut tree = data
         .get_commitment_tree(last_height)
-        .map(|t| t.unwrap_or(CommitmentTree::new()))?;
+        .map(|t| t.unwrap_or_else(CommitmentTree::new))?;
 
     // Get most recent incremental witnesses for the notes we are tracking
     let mut witnesses = data.get_witnesses(last_height)?;

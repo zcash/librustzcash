@@ -635,6 +635,7 @@ pub fn try_sapling_output_recovery_with_ock<P: consensus::Parameters>(
 /// `PaymentAddress` to which the note was sent.
 ///
 /// Implements section 4.17.3 of the Zcash Protocol Specification.
+#[allow(clippy::too_many_arguments)]
 pub fn try_sapling_output_recovery<P: consensus::Parameters>(
     params: &P,
     height: BlockHeight,

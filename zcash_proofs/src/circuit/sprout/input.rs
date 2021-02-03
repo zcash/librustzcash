@@ -13,6 +13,7 @@ pub struct InputNote {
 }
 
 impl InputNote {
+    #[allow(clippy::too_many_arguments)]
     pub fn compute<Scalar, CS>(
         mut cs: CS,
         a_sk: Option<SpendingKey>,
