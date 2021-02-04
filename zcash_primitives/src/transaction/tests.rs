@@ -72,7 +72,7 @@ fn tx_write_rejects_unexpected_binding_sig() {
 
 proptest! {
     #[test]
-    fn tx_serialization_roundtrip(tx in arb_branch_id().prop_flat_map(|branch_id| arb_tx(branch_id))) {
+    fn tx_serialization_roundtrip(tx in arb_branch_id().prop_flat_map(arb_tx)) {
         let mut txn_bytes = vec![];
         tx.write(&mut txn_bytes).unwrap();
 

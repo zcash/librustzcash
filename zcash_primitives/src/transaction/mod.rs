@@ -594,7 +594,7 @@ pub mod testing {
 
     fn tx_versions(branch_id: BranchId) -> impl Strategy<Value = TxVersion> {
         match branch_id {
-            BranchId::Sprout => (1..=2u32).prop_map(|i| TxVersion::Sprout(i)).boxed(),
+            BranchId::Sprout => (1..=2u32).prop_map(TxVersion::Sprout).boxed(),
             BranchId::Overwinter => Just(TxVersion::Overwinter).boxed(),
             #[cfg(feature = "zfuture")]
             BranchId::ZFuture => Just(TxVersion::ZFuture).boxed(),
