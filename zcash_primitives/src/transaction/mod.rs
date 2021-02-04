@@ -53,6 +53,103 @@ impl fmt::Display for TxId {
     }
 }
 
+/// The set of defined transaction format versions.
+///
+/// This is serialized in the first four or eight bytes of the transaction format, and
+/// represents valid combinations of the `(overwintered, version, version_group_id)`
+/// transaction fields. Note that this is not dependent on epoch, only on transaction encoding.
+/// For example, if a particular epoch defines a new transaction version but also allows the
+/// previous version, then only the new version would be added to this enum.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TxVersion {
+    Sprout(u32),
+    Overwinter,
+    Sapling,
+    #[cfg(feature = "zfuture")]
+    ZFuture,
+}
+
+impl TxVersion {
+    pub fn read<R: Read>(mut reader: R) -> io::Result<Self> {
+        let header = reader.read_u32::<LittleEndian>()?;
+        let overwintered = (header >> 31) == 1;
+        let version = header & 0x7FFFFFFF;
+
+        if overwintered {
+            match (version, reader.read_u32::<LittleEndian>()?) {
+                (OVERWINTER_TX_VERSION, OVERWINTER_VERSION_GROUP_ID) => Ok(TxVersion::Overwinter),
+                (SAPLING_TX_VERSION, SAPLING_VERSION_GROUP_ID) => Ok(TxVersion::Sapling),
+                #[cfg(feature = "zfuture")]
+                (ZFUTURE_TX_VERSION, ZFUTURE_VERSION_GROUP_ID) => Ok(TxVersion::ZFuture),
+                _ => Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "Unknown transaction format",
+                )),
+            }
+        } else if version >= 1 {
+            Ok(TxVersion::Sprout(version))
+        } else {
+            Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "Unknown transaction format",
+            ))
+        }
+    }
+
+    pub fn header(&self) -> u32 {
+        // After Sprout, the overwintered bit is always set.
+        let overwintered = match self {
+            TxVersion::Sprout(_) => 0,
+            _ => 1 << 31,
+        };
+
+        overwintered
+            | match self {
+                TxVersion::Sprout(v) => *v,
+                TxVersion::Overwinter => OVERWINTER_TX_VERSION,
+                TxVersion::Sapling => SAPLING_TX_VERSION,
+                #[cfg(feature = "zfuture")]
+                TxVersion::ZFuture => ZFUTURE_TX_VERSION,
+            }
+    }
+
+    pub fn version_group_id(&self) -> u32 {
+        match self {
+            TxVersion::Sprout(_) => 0,
+            TxVersion::Overwinter => OVERWINTER_VERSION_GROUP_ID,
+            TxVersion::Sapling => SAPLING_VERSION_GROUP_ID,
+            #[cfg(feature = "zfuture")]
+            TxVersion::ZFuture => ZFUTURE_VERSION_GROUP_ID,
+        }
+    }
+
+    pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
+        writer.write_u32::<LittleEndian>(self.header())?;
+        match self {
+            TxVersion::Sprout(_) => Ok(()),
+            _ => writer.write_u32::<LittleEndian>(self.version_group_id()),
+        }
+    }
+
+    pub fn has_sprout(&self) -> bool {
+        match self {
+            TxVersion::Sprout(v) => *v >= 2u32,
+            TxVersion::Overwinter | TxVersion::Sapling => true,
+            #[cfg(feature = "zfuture")]
+            TxVersion::ZFuture => true,
+        }
+    }
+
+    pub fn uses_groth_proofs(&self) -> bool {
+        match self {
+            TxVersion::Sprout(_) | TxVersion::Overwinter => false,
+            TxVersion::Sapling => true,
+            #[cfg(feature = "zfuture")]
+            TxVersion::ZFuture => true,
+        }
+    }
+}
+
 /// A Zcash transaction.
 #[derive(Debug, Clone)]
 pub struct Transaction {
@@ -76,9 +173,7 @@ impl PartialEq for Transaction {
 
 #[derive(Clone)]
 pub struct TransactionData {
-    pub overwintered: bool,
-    pub version: u32,
-    pub version_group_id: u32,
+    pub version: TxVersion,
     pub vin: Vec<TxIn>,
     pub vout: Vec<TxOut>,
     #[cfg(feature = "zfuture")]
@@ -101,9 +196,7 @@ impl std::fmt::Debug for TransactionData {
         write!(
             f,
             "TransactionData(
-                overwintered = {:?},
                 version = {:?},
-                version_group_id = {:?},
                 vin = {:?},
                 vout = {:?},{}
                 lock_time = {:?},
@@ -114,9 +207,7 @@ impl std::fmt::Debug for TransactionData {
                 joinsplits = {:?},
                 joinsplit_pubkey = {:?},
                 binding_sig = {:?})",
-            self.overwintered,
             self.version,
-            self.version_group_id,
             self.vin,
             self.vout,
             {
@@ -153,9 +244,7 @@ impl Default for TransactionData {
 impl TransactionData {
     pub fn new() -> Self {
         TransactionData {
-            overwintered: true,
-            version: SAPLING_TX_VERSION,
-            version_group_id: SAPLING_VERSION_GROUP_ID,
+            version: TxVersion::Sapling,
             vin: vec![],
             vout: vec![],
             #[cfg(feature = "zfuture")]
@@ -177,9 +266,7 @@ impl TransactionData {
     #[cfg(feature = "zfuture")]
     pub fn zfuture() -> Self {
         TransactionData {
-            overwintered: true,
-            version: ZFUTURE_TX_VERSION,
-            version_group_id: ZFUTURE_VERSION_GROUP_ID,
+            version: TxVersion::ZFuture,
             vin: vec![],
             vout: vec![],
             tze_inputs: vec![],
@@ -194,14 +281,6 @@ impl TransactionData {
             joinsplit_sig: None,
             binding_sig: None,
         }
-    }
-
-    fn header(&self) -> u32 {
-        let mut header = self.version;
-        if self.overwintered {
-            header |= 1 << 31;
-        }
-        header
     }
 
     pub fn freeze(self) -> io::Result<Transaction> {
@@ -228,39 +307,18 @@ impl Transaction {
     pub fn read<R: Read>(reader: R) -> io::Result<Self> {
         let mut reader = HashReader::new(reader);
 
-        let header = reader.read_u32::<LittleEndian>()?;
-        let overwintered = (header >> 31) == 1;
-        let version = header & 0x7FFFFFFF;
-
-        let version_group_id = if overwintered {
-            reader.read_u32::<LittleEndian>()?
-        } else {
-            0
-        };
-
-        let is_overwinter_v3 = overwintered
-            && version_group_id == OVERWINTER_VERSION_GROUP_ID
-            && version == OVERWINTER_TX_VERSION;
-        let is_sapling_v4 = overwintered
-            && version_group_id == SAPLING_VERSION_GROUP_ID
-            && version == SAPLING_TX_VERSION;
+        let version = TxVersion::read(&mut reader)?;
+        let is_overwinter_v3 = version == TxVersion::Overwinter;
+        let is_sapling_v4 = version == TxVersion::Sapling;
 
         #[cfg(feature = "zfuture")]
-        let has_tze = overwintered
-            && version_group_id == ZFUTURE_VERSION_GROUP_ID
-            && version == ZFUTURE_TX_VERSION;
+        let has_tze = version == TxVersion::ZFuture;
         #[cfg(not(feature = "zfuture"))]
         let has_tze = false;
 
-        if overwintered && !(is_overwinter_v3 || is_sapling_v4 || has_tze) {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "Unknown transaction format",
-            ));
-        }
-
         let vin = Vector::read(&mut reader, TxIn::read)?;
         let vout = Vector::read(&mut reader, TxOut::read)?;
+
         #[cfg(feature = "zfuture")]
         let (tze_inputs, tze_outputs) = if has_tze {
             let wi = Vector::read(&mut reader, TzeIn::read)?;
@@ -291,9 +349,9 @@ impl Transaction {
             (Amount::zero(), vec![], vec![])
         };
 
-        let (joinsplits, joinsplit_pubkey, joinsplit_sig) = if version >= 2 {
+        let (joinsplits, joinsplit_pubkey, joinsplit_sig) = if version.has_sprout() {
             let jss = Vector::read(&mut reader, |r| {
-                JSDescription::read(r, overwintered && version >= SAPLING_TX_VERSION)
+                JSDescription::read(r, version.uses_groth_proofs())
             })?;
             let (pubkey, sig) = if !jss.is_empty() {
                 let mut joinsplit_pubkey = [0; 32];
@@ -323,9 +381,7 @@ impl Transaction {
         Ok(Transaction {
             txid: TxId(txid),
             data: TransactionData {
-                overwintered,
                 version,
-                version_group_id,
                 vin,
                 vout,
                 #[cfg(feature = "zfuture")]
@@ -346,31 +402,14 @@ impl Transaction {
     }
 
     pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
-        writer.write_u32::<LittleEndian>(self.header())?;
-        if self.overwintered {
-            writer.write_u32::<LittleEndian>(self.version_group_id)?;
-        }
+        self.version.write(&mut writer)?;
 
-        let is_overwinter_v3 = self.overwintered
-            && self.version_group_id == OVERWINTER_VERSION_GROUP_ID
-            && self.version == OVERWINTER_TX_VERSION;
-        let is_sapling_v4 = self.overwintered
-            && self.version_group_id == SAPLING_VERSION_GROUP_ID
-            && self.version == SAPLING_TX_VERSION;
-
+        let is_overwinter_v3 = self.version == TxVersion::Overwinter;
+        let is_sapling_v4 = self.version == TxVersion::Sapling;
         #[cfg(feature = "zfuture")]
-        let has_tze = self.overwintered
-            && self.version_group_id == ZFUTURE_VERSION_GROUP_ID
-            && self.version == ZFUTURE_TX_VERSION;
+        let has_tze = self.version == TxVersion::ZFuture;
         #[cfg(not(feature = "zfuture"))]
         let has_tze = false;
-
-        if self.overwintered && !(is_overwinter_v3 || is_sapling_v4 || has_tze) {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "Unknown transaction format",
-            ));
-        }
 
         Vector::write(&mut writer, &self.vin, |w, e| e.write(w))?;
         Vector::write(&mut writer, &self.vout, |w, e| e.write(w))?;
@@ -390,7 +429,7 @@ impl Transaction {
             Vector::write(&mut writer, &self.shielded_outputs, |w, e| e.write(w))?;
         }
 
-        if self.version >= 2 {
+        if self.version.has_sprout() {
             Vector::write(&mut writer, &self.joinsplits, |w, e| e.write(w))?;
             if !self.joinsplits.is_empty() {
                 match self.joinsplit_pubkey {
@@ -414,7 +453,7 @@ impl Transaction {
             }
         }
 
-        if self.version < 2 || self.joinsplits.is_empty() {
+        if !self.version.has_sprout() || self.joinsplits.is_empty() {
             if self.joinsplit_pubkey.is_some() {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidInput,
@@ -452,7 +491,7 @@ impl Transaction {
     }
 }
 
-#[cfg(feature = "test-dependencies")]
+#[cfg(any(test, feature = "test-dependencies"))]
 pub mod testing {
     use proptest::collection::vec;
     use proptest::prelude::*;
@@ -465,15 +504,11 @@ pub mod testing {
 
     use super::{
         components::{amount::MAX_MONEY, Amount, OutPoint, TxIn, TxOut},
-        Transaction, TransactionData, OVERWINTER_TX_VERSION, OVERWINTER_VERSION_GROUP_ID,
-        SAPLING_TX_VERSION, SAPLING_VERSION_GROUP_ID,
+        Transaction, TransactionData, TxVersion,
     };
 
     #[cfg(feature = "zfuture")]
-    use super::{
-        components::{TzeIn, TzeOut},
-        ZFUTURE_TX_VERSION, ZFUTURE_VERSION_GROUP_ID,
-    };
+    use super::components::{TzeIn, TzeOut};
 
     pub const VALID_OPCODES: [u8; 8] = [
         0x00, // OP_FALSE,
@@ -487,7 +522,7 @@ pub mod testing {
     ];
 
     prop_compose! {
-        pub fn arb_outpoint()(hash in prop::array::uniform32(1u8..), n in 1..(100 as u32)) -> OutPoint {
+        pub fn arb_outpoint()(hash in prop::array::uniform32(1u8..), n in 1..100u32) -> OutPoint {
             OutPoint::new(hash, n)
         }
     }
@@ -518,7 +553,7 @@ pub mod testing {
 
     #[cfg(feature = "zfuture")]
     prop_compose! {
-        pub fn arb_witness()(extension_id in 0..(100 as u32), mode in (0..100 as u32), payload in vec(any::<u8>(), 32..256))  -> tze::Witness {
+        pub fn arb_witness()(extension_id in 0..100u32, mode in 0..100u32, payload in vec(any::<u8>(), 32..256))  -> tze::Witness {
             tze::Witness { extension_id, mode, payload }
         }
     }
@@ -532,7 +567,7 @@ pub mod testing {
 
     #[cfg(feature = "zfuture")]
     prop_compose! {
-        pub fn arb_precondition()(extension_id in 0..(100 as u32), mode in (0..100 as u32), payload in vec(any::<u8>(), 32..256))  -> tze::Precondition {
+        pub fn arb_precondition()(extension_id in 0..100u32, mode in 0..100u32, payload in vec(any::<u8>(), 32..256))  -> tze::Precondition {
             tze::Precondition { extension_id, mode, payload }
         }
     }
@@ -544,22 +579,33 @@ pub mod testing {
         }
     }
 
-    fn tx_versions(branch_id: BranchId) -> impl Strategy<Value = (u32, u32)> {
-        match branch_id {
-            BranchId::Sprout => (1..(2 as u32)).prop_map(|i| (i, 0)).boxed(),
-            BranchId::Overwinter => {
-                Just((OVERWINTER_TX_VERSION, OVERWINTER_VERSION_GROUP_ID)).boxed()
-            }
+    pub fn arb_branch_id() -> impl Strategy<Value = BranchId> {
+        select(vec![
+            BranchId::Sprout,
+            BranchId::Overwinter,
+            BranchId::Sapling,
+            BranchId::Blossom,
+            BranchId::Heartwood,
+            BranchId::Canopy,
             #[cfg(feature = "zfuture")]
-            BranchId::ZFuture => Just((ZFUTURE_TX_VERSION, ZFUTURE_VERSION_GROUP_ID)).boxed(),
-            _otherwise => Just((SAPLING_TX_VERSION, SAPLING_VERSION_GROUP_ID)).boxed(),
+            BranchId::ZFuture,
+        ])
+    }
+
+    fn tx_versions(branch_id: BranchId) -> impl Strategy<Value = TxVersion> {
+        match branch_id {
+            BranchId::Sprout => (1..=2u32).prop_map(TxVersion::Sprout).boxed(),
+            BranchId::Overwinter => Just(TxVersion::Overwinter).boxed(),
+            #[cfg(feature = "zfuture")]
+            BranchId::ZFuture => Just(TxVersion::ZFuture).boxed(),
+            _otherwise => Just(TxVersion::Sapling).boxed(),
         }
     }
 
     #[cfg(feature = "zfuture")]
     prop_compose! {
         pub fn arb_txdata(branch_id: BranchId)(
-            (version, version_group_id) in tx_versions(branch_id),
+            version in tx_versions(branch_id),
             vin in vec(arb_txin(), 0..10),
             vout in vec(arb_txout(), 0..10),
             tze_inputs in vec(arb_tzein(), 0..10),
@@ -569,15 +615,16 @@ pub mod testing {
             value_balance in arb_amount(),
         ) -> TransactionData {
             TransactionData {
-                overwintered: branch_id != BranchId::Sprout,
                 version,
-                version_group_id,
                 vin, vout,
                 tze_inputs:  if branch_id == BranchId::ZFuture { tze_inputs } else { vec![] },
                 tze_outputs: if branch_id == BranchId::ZFuture { tze_outputs } else { vec![] },
                 lock_time,
                 expiry_height: expiry_height.into(),
-                value_balance,
+                value_balance: match version {
+                    TxVersion::Sprout(_) | TxVersion::Overwinter => Amount::zero(),
+                    _ => value_balance,
+                },
                 shielded_spends: vec![], //FIXME
                 shielded_outputs: vec![], //FIXME
                 joinsplits: vec![], //FIXME
@@ -588,7 +635,35 @@ pub mod testing {
         }
     }
 
-    #[cfg(feature = "zfuture")]
+    #[cfg(not(feature = "zfuture"))]
+    prop_compose! {
+        pub fn arb_txdata(branch_id: BranchId)(
+            version in tx_versions(branch_id),
+            vin in vec(arb_txin(), 0..10),
+            vout in vec(arb_txout(), 0..10),
+            lock_time in any::<u32>(),
+            expiry_height in any::<u32>(),
+            value_balance in arb_amount(),
+        ) -> TransactionData {
+            TransactionData {
+                version,
+                vin, vout,
+                lock_time,
+                expiry_height: expiry_height.into(),
+                value_balance: match version {
+                    TxVersion::Sprout(_) | TxVersion::Overwinter => Amount::zero(),
+                    _ => value_balance,
+                },
+                shielded_spends: vec![], //FIXME
+                shielded_outputs: vec![], //FIXME
+                joinsplits: vec![], //FIXME
+                joinsplit_pubkey: None, //FIXME
+                joinsplit_sig: None, //FIXME
+                binding_sig: None, //FIXME
+            }
+        }
+    }
+
     prop_compose! {
         pub fn arb_tx(branch_id: BranchId)(tx_data in arb_txdata(branch_id)) -> Transaction {
             Transaction::from_data(tx_data).unwrap()

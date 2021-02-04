@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 23a823e9da7e6ae62a79153ab97362dd9d81b8d9eafc396c87870dfa8aa7354c # shrinks to tx = Transaction { txid: TxId([67, 236, 122, 87, 159, 85, 97, 164, 42, 126, 150, 55, 173, 65, 86, 103, 39, 53, 166, 88, 190, 39, 82, 24, 24, 1, 247, 35, 186, 51, 22, 210]), data: TransactionData(                 version = Sprout(1),                 vin = [],                 vout = [],                 lock_time = 0,                 expiry_height = BlockHeight(0),                 value_balance = Amount(1),                 shielded_spends = [],                 shielded_outputs = [],                 joinsplits = [],                 joinsplit_pubkey = None,                 binding_sig = None) }
