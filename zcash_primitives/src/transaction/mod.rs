@@ -57,7 +57,9 @@ impl fmt::Display for TxId {
 ///
 /// This is serialized in the first four or eight bytes of the transaction format, and
 /// represents valid combinations of the `(overwintered, version, version_group_id)`
-/// transaction fields.
+/// transaction fields. Note that this is not dependent on epoch, only on transaction encoding.
+/// For example, if a particular epoch defines a new transaction version but also allows the
+/// previous version, then only the new version would be added to this enum.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TxVersion {
     Sprout(u32),
