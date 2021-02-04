@@ -347,9 +347,8 @@ fn test_sprout_constraints() {
     fn get_u256<R: ReadBytesExt>(mut reader: R) -> [u8; 32] {
         let mut result = [0u8; 32];
 
-        #[allow(clippy::needless_range_loop)]
-        for i in 0..32 {
-            result[i] = reader.read_u8().unwrap();
+        for b in &mut result {
+            *b = reader.read_u8().unwrap();
         }
 
         result
@@ -375,9 +374,8 @@ fn test_sprout_constraints() {
                 auth_path[i] = Some((sibling, false));
             }
             let mut position = test_vector.read_u64::<LittleEndian>().unwrap();
-            #[allow(clippy::needless_range_loop)]
-            for i in 0..TREE_DEPTH {
-                if let Some(p) = auth_path[i].as_mut() {
+            for sibling in &mut auth_path {
+                if let Some(p) = sibling {
                     p.1 = (position & 1) == 1;
                 }
 
