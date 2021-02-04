@@ -22,6 +22,7 @@ pub trait TxProver {
     /// the context for later use.
     ///
     /// [`SpendDescription`]: crate::transaction::components::SpendDescription
+    #[allow(clippy::too_many_arguments)]
     fn spend_proof(
         &self,
         ctx: &mut Self::SaplingProvingContext,

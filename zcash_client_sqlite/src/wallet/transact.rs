@@ -416,12 +416,8 @@ mod tests {
         }
 
         // Mine block 11 so that the second note becomes verified
-        let (cb, _) = fake_compact_block(
-            sapling_activation_height() + 10,
-            cb.hash(),
-            extfvk.clone(),
-            value,
-        );
+        let (cb, _) =
+            fake_compact_block(sapling_activation_height() + 10, cb.hash(), extfvk, value);
         insert_into_cache(&db_cache, &cb);
         scan_cached_blocks(&tests::network(), &db_cache, &mut db_write, None).unwrap();
 
@@ -460,7 +456,7 @@ mod tests {
         let (cb, _) = fake_compact_block(
             sapling_activation_height(),
             BlockHash([0; 32]),
-            extfvk.clone(),
+            extfvk,
             value,
         );
         insert_into_cache(&db_cache, &cb);

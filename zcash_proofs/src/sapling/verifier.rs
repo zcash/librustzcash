@@ -34,6 +34,7 @@ impl SaplingVerificationContext {
 
     /// Perform consensus checks on a Sapling SpendDescription, while
     /// accumulating its value commitment inside the context for later use.
+    #[allow(clippy::too_many_arguments)]
     pub fn check_spend(
         &mut self,
         cv: jubjub::ExtendedPoint,

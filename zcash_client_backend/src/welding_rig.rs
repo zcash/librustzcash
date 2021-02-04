@@ -22,6 +22,7 @@ use crate::wallet::{AccountId, WalletShieldedOutput, WalletShieldedSpend, Wallet
 ///
 /// The given [`CommitmentTree`] and existing [`IncrementalWitness`]es are incremented
 /// with this output's commitment.
+#[allow(clippy::too_many_arguments)]
 fn scan_output<P: consensus::Parameters>(
     params: &P,
     height: BlockHeight,
@@ -260,14 +261,14 @@ mod tests {
         let rseed = generate_random_rseed(&Network::TestNetwork, height, &mut rng);
         let note = Note {
             g_d: to.diversifier().g_d().unwrap(),
-            pk_d: to.pk_d().clone(),
+            pk_d: *to.pk_d(),
             value: value.into(),
             rseed,
         };
         let encryptor = SaplingNoteEncryption::new(
             Some(extfvk.fvk.ovk),
             note.clone(),
-            to.clone(),
+            to,
             Memo::default(),
             &mut rng,
         );
@@ -325,7 +326,7 @@ mod tests {
         );
         assert_eq!(cb.vtx.len(), 2);
 
-        let mut tree = CommitmentTree::new();
+        let mut tree = CommitmentTree::empty();
         let txs = scan_block(
             &Network::TestNetwork,
             cb,
@@ -364,7 +365,7 @@ mod tests {
         );
         assert_eq!(cb.vtx.len(), 3);
 
-        let mut tree = CommitmentTree::new();
+        let mut tree = CommitmentTree::empty();
         let txs = scan_block(
             &Network::TestNetwork,
             cb,
@@ -399,12 +400,12 @@ mod tests {
         let cb = fake_compact_block(1u32.into(), nf, extfvk, Amount::from_u64(5).unwrap(), false);
         assert_eq!(cb.vtx.len(), 2);
 
-        let mut tree = CommitmentTree::new();
+        let mut tree = CommitmentTree::empty();
         let txs = scan_block(
             &Network::TestNetwork,
             cb,
             &[],
-            &[(account, nf.clone())],
+            &[(account, nf)],
             &mut tree,
             &mut [],
         );

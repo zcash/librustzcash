@@ -1042,7 +1042,7 @@ mod tests {
             match xfvk.dk.diversifier(di) {
                 Ok((l, d)) if l == di => assert_eq!(d.0, tv.d0.unwrap()),
                 Ok((_, _)) => assert!(tv.d0.is_none()),
-                Err(_) => panic!(),
+                Err(()) => panic!(),
             }
 
             // d1
@@ -1050,7 +1050,7 @@ mod tests {
             match xfvk.dk.diversifier(di) {
                 Ok((l, d)) if l == di => assert_eq!(d.0, tv.d1.unwrap()),
                 Ok((_, _)) => assert!(tv.d1.is_none()),
-                Err(_) => panic!(),
+                Err(()) => panic!(),
             }
 
             // d2
@@ -1058,7 +1058,7 @@ mod tests {
             match xfvk.dk.diversifier(di) {
                 Ok((l, d)) if l == di => assert_eq!(d.0, tv.d2.unwrap()),
                 Ok((_, _)) => assert!(tv.d2.is_none()),
-                Err(_) => panic!(),
+                Err(()) => panic!(),
             }
 
             // dmax

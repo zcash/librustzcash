@@ -4,7 +4,6 @@ use std::collections::HashMap;
 use std::fmt;
 use std::str::FromStr;
 
-use base64;
 use nom::{
     character::complete::char, combinator::all_consuming, multi::separated_list, sequence::preceded,
 };
@@ -21,10 +20,6 @@ pub enum MemoError {
 }
 
 impl RawMemo {
-    pub fn from_str(s: &str) -> Result<Self, MemoError> {
-        RawMemo::from_bytes(s.as_bytes())
-    }
-
     // Construct a raw memo from a vector of bytes.
     pub fn from_bytes(v: &[u8]) -> Result<Self, MemoError> {
         if v.len() > 512 {
@@ -77,7 +72,7 @@ impl FromStr for RawMemo {
     type Err = MemoError;
 
     fn from_str(memo: &str) -> Result<Self, Self::Err> {
-        RawMemo::from_str(memo)
+        RawMemo::from_bytes(memo.as_bytes())
     }
 }
 
@@ -403,7 +398,7 @@ mod parse {
     pub enum Param {
         Addr(RecipientAddress),
         Amount(Amount),
-        Memo(RawMemo),
+        Memo(Box<RawMemo>),
         Label(String),
         Message(String),
         Other(String, String),
@@ -428,7 +423,7 @@ mod parse {
             }
         }
 
-        return false;
+        false
     }
 
     pub fn to_payment(vs: Vec<Param>, i: usize) -> Result<Payment, String> {
@@ -448,10 +443,10 @@ mod parse {
 
         for v in vs {
             match v {
-                Param::Amount(a) => payment.amount = a.clone(),
+                Param::Amount(a) => payment.amount = a,
                 Param::Memo(m) => {
                     match payment.recipient_address {
-                        RecipientAddress::Shielded(_) => payment.memo = Some(m),
+                        RecipientAddress::Shielded(_) => payment.memo = Some(*m),
                         RecipientAddress::Transparent(_) => return Err(format!("Payment {} attempted to associate a memo with a transparent recipient address", i)),
                     }
                 },
@@ -463,7 +458,7 @@ mod parse {
             }
         }
 
-        return Ok(payment);
+        Ok(payment)
     }
 
     /// Parser that consumes the leading "zcash:[address]" from
@@ -601,7 +596,7 @@ mod parse {
                 .map_err(|e| e.to_string()),
 
             "memo" => memo_from_base64(value)
-                .map(Param::Memo)
+                .map(|m| Param::Memo(Box::new(m)))
                 .map_err(|e| format!("Decoded memo was invalid: {:?}", e)),
 
             other if other.starts_with("req-") => {
@@ -957,7 +952,7 @@ mod tests {
             let fragment = memo_param(&memo, i);
             let (rest, iparam) = zcashparam(&TEST_NETWORK)(&fragment).unwrap();
             assert_eq!(rest, "");
-            assert_eq!(iparam.param, Param::Memo(memo));
+            assert_eq!(iparam.param, Param::Memo(Box::new(memo)));
             assert_eq!(iparam.payment_index, i.unwrap_or(0));
         }
 

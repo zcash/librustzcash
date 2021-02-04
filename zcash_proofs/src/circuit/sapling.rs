@@ -534,12 +534,9 @@ fn test_input_circuit_with_bls12_381() {
             randomness: jubjub::Fr::random(&mut rng),
         };
 
-        let nsk = jubjub::Fr::random(&mut rng);
-        let ak = jubjub::SubgroupPoint::random(&mut rng);
-
         let proof_generation_key = ProofGenerationKey {
-            ak: ak.clone(),
-            nsk: nsk.clone(),
+            ak: jubjub::SubgroupPoint::random(&mut rng),
+            nsk: jubjub::Fr::random(&mut rng),
         };
 
         let viewing_key = proof_generation_key.to_viewing_key();
@@ -571,14 +568,14 @@ fn test_input_circuit_with_bls12_381() {
                 jubjub::ExtendedPoint::from(value_commitment.commitment()).to_affine();
             let note = Note {
                 value: value_commitment.value,
-                g_d: g_d.clone(),
-                pk_d: payment_address.pk_d().clone(),
-                rseed: Rseed::BeforeZip212(commitment_randomness.clone()),
+                g_d,
+                pk_d: *payment_address.pk_d(),
+                rseed: Rseed::BeforeZip212(commitment_randomness),
             };
 
             let mut position = 0u64;
             let cmu = note.cmu();
-            let mut cur = cmu.clone();
+            let mut cur = cmu;
 
             for (i, val) in auth_path.clone().into_iter().enumerate() {
                 let (uncle, b) = val.unwrap();
@@ -706,12 +703,9 @@ fn test_input_circuit_with_bls12_381_external_test_vectors() {
             randomness: jubjub::Fr::from_str(&(1000 * (i + 1)).to_string()).unwrap(),
         };
 
-        let nsk = jubjub::Fr::random(&mut rng);
-        let ak = jubjub::SubgroupPoint::random(&mut rng);
-
         let proof_generation_key = ProofGenerationKey {
-            ak: ak.clone(),
-            nsk: nsk.clone(),
+            ak: jubjub::SubgroupPoint::random(&mut rng),
+            nsk: jubjub::Fr::random(&mut rng),
         };
 
         let viewing_key = proof_generation_key.to_viewing_key();
@@ -751,14 +745,14 @@ fn test_input_circuit_with_bls12_381_external_test_vectors() {
             );
             let note = Note {
                 value: value_commitment.value,
-                g_d: g_d.clone(),
-                pk_d: payment_address.pk_d().clone(),
-                rseed: Rseed::BeforeZip212(commitment_randomness.clone()),
+                g_d,
+                pk_d: *payment_address.pk_d(),
+                rseed: Rseed::BeforeZip212(commitment_randomness),
             };
 
             let mut position = 0u64;
             let cmu = note.cmu();
-            let mut cur = cmu.clone();
+            let mut cur = cmu;
 
             for (i, val) in auth_path.clone().into_iter().enumerate() {
                 let (uncle, b) = val.unwrap();
@@ -858,10 +852,7 @@ fn test_output_circuit_with_bls12_381() {
         let nsk = jubjub::Fr::random(&mut rng);
         let ak = jubjub::SubgroupPoint::random(&mut rng);
 
-        let proof_generation_key = ProofGenerationKey {
-            ak: ak.clone(),
-            nsk: nsk.clone(),
-        };
+        let proof_generation_key = ProofGenerationKey { ak, nsk };
 
         let viewing_key = proof_generation_key.to_viewing_key();
 
@@ -890,7 +881,7 @@ fn test_output_circuit_with_bls12_381() {
                 value_commitment: Some(value_commitment.clone()),
                 payment_address: Some(payment_address.clone()),
                 commitment_randomness: Some(commitment_randomness),
-                esk: Some(esk.clone()),
+                esk: Some(esk),
             };
 
             instance.synthesize(&mut cs).unwrap();

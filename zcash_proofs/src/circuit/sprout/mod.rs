@@ -347,14 +347,14 @@ fn test_sprout_constraints() {
     fn get_u256<R: ReadBytesExt>(mut reader: R) -> [u8; 32] {
         let mut result = [0u8; 32];
 
-        for i in 0..32 {
-            result[i] = reader.read_u8().unwrap();
+        for b in &mut result {
+            *b = reader.read_u8().unwrap();
         }
 
         result
     }
 
-    while test_vector.len() != 0 {
+    while !test_vector.is_empty() {
         let mut cs = TestConstraintSystem::<Scalar>::new();
 
         let phi = Some(get_u256(&mut test_vector));
@@ -374,8 +374,10 @@ fn test_sprout_constraints() {
                 auth_path[i] = Some((sibling, false));
             }
             let mut position = test_vector.read_u64::<LittleEndian>().unwrap();
-            for i in 0..TREE_DEPTH {
-                auth_path[i].as_mut().map(|p| p.1 = (position & 1) == 1);
+            for sibling in &mut auth_path {
+                if let Some(p) = sibling {
+                    p.1 = (position & 1) == 1;
+                }
 
                 position >>= 1;
             }

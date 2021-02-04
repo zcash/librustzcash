@@ -11,6 +11,7 @@ use blake2s_simd::Params;
 /// Produces a random point in the Jubjub curve.
 /// The point is guaranteed to be prime order
 /// and not the identity.
+#[allow(clippy::assertions_on_constants)]
 pub fn group_hash(tag: &[u8], personalization: &[u8]) -> Option<jubjub::SubgroupPoint> {
     assert_eq!(personalization.len(), 8);
 

@@ -39,12 +39,9 @@ fn criterion_benchmark(c: &mut Criterion) {
             randomness: jubjub::Fr::random(&mut rng),
         };
 
-        let nsk = jubjub::Fr::random(&mut rng);
-        let ak = jubjub::SubgroupPoint::random(&mut rng);
-
         let proof_generation_key = ProofGenerationKey {
-            ak: ak.clone(),
-            nsk: nsk.clone(),
+            ak: jubjub::SubgroupPoint::random(&mut rng),
+            nsk: jubjub::Fr::random(&mut rng),
         };
 
         let viewing_key = proof_generation_key.to_viewing_key();

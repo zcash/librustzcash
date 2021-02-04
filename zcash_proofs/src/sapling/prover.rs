@@ -44,6 +44,7 @@ impl SaplingProvingContext {
     /// Create the value commitment, re-randomized key, and proof for a Sapling
     /// SpendDescription, while accumulating its value commitment randomness
     /// inside the context for later use.
+    #[allow(clippy::too_many_arguments)]
     pub fn spend_proof(
         &mut self,
         proof_generation_key: ProofGenerationKey,

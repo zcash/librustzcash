@@ -296,6 +296,7 @@ impl TransparentInputs {
 }
 
 #[cfg(feature = "zfuture")]
+#[allow(clippy::type_complexity)]
 struct TzeInputInfo<'a, BuildCtx> {
     prevout: TzeOut,
     builder: Box<dyn FnOnce(&BuildCtx) -> Result<(u32, Vec<u8>), Error> + 'a>,
@@ -1043,7 +1044,7 @@ mod tests {
             .create_note(50000, Rseed::BeforeZip212(jubjub::Fr::random(&mut rng)))
             .unwrap();
         let cmu1 = Node::new(note1.cmu().to_repr());
-        let mut tree = CommitmentTree::new();
+        let mut tree = CommitmentTree::empty();
         tree.append(cmu1).unwrap();
         let witness1 = IncrementalWitness::from_tree(&tree);
 
@@ -1136,7 +1137,7 @@ mod tests {
             .create_note(50999, Rseed::BeforeZip212(jubjub::Fr::random(&mut rng)))
             .unwrap();
         let cmu1 = Node::new(note1.cmu().to_repr());
-        let mut tree = CommitmentTree::new();
+        let mut tree = CommitmentTree::empty();
         tree.append(cmu1).unwrap();
         let mut witness1 = IncrementalWitness::from_tree(&tree);
 

@@ -57,7 +57,7 @@ pub struct CommitmentTree<Node: Hashable> {
 
 impl<Node: Hashable> CommitmentTree<Node> {
     /// Creates an empty tree.
-    pub fn new() -> Self {
+    pub fn empty() -> Self {
         CommitmentTree {
             left: None,
             right: None,
@@ -66,6 +66,7 @@ impl<Node: Hashable> CommitmentTree<Node> {
     }
 
     /// Reads a `CommitmentTree` from its serialized form.
+    #[allow(clippy::redundant_closure)]
     pub fn read<R: Read>(mut reader: R) -> io::Result<Self> {
         let left = Optional::read(&mut reader, |r| Node::read(r))?;
         let right = Optional::read(&mut reader, |r| Node::read(r))?;
@@ -203,7 +204,7 @@ impl<Node: Hashable> CommitmentTree<Node> {
 ///
 /// let mut rng = OsRng;
 ///
-/// let mut tree = CommitmentTree::<Node>::new();
+/// let mut tree = CommitmentTree::<Node>::empty();
 ///
 /// tree.append(Node::new(bls12_381::Scalar::random(&mut rng).to_repr()));
 /// tree.append(Node::new(bls12_381::Scalar::random(&mut rng).to_repr()));
@@ -237,6 +238,7 @@ impl<Node: Hashable> IncrementalWitness<Node> {
     }
 
     /// Reads an `IncrementalWitness` from its serialized form.
+    #[allow(clippy::redundant_closure)]
     pub fn read<R: Read>(mut reader: R) -> io::Result<Self> {
         let tree = CommitmentTree::read(&mut reader)?;
         let filled = Vector::read(&mut reader, |r| Node::read(r))?;
@@ -348,7 +350,7 @@ impl<Node: Hashable> IncrementalWitness<Node> {
             if self.cursor_depth == 0 {
                 self.filled.push(node);
             } else {
-                let mut cursor = CommitmentTree::new();
+                let mut cursor = CommitmentTree::empty();
                 cursor
                     .append_inner(node, depth)
                     .expect("cursor should not be full");
@@ -550,7 +552,7 @@ mod tests {
 
     impl TestCommitmentTree {
         fn new() -> Self {
-            TestCommitmentTree(CommitmentTree::new())
+            TestCommitmentTree(CommitmentTree::empty())
         }
 
         pub fn read<R: Read>(reader: R) -> io::Result<Self> {
@@ -618,7 +620,7 @@ mod tests {
     #[test]
     fn sapling_empty_root() {
         let mut tmp = [0u8; 32];
-        CommitmentTree::<Node>::new()
+        CommitmentTree::<Node>::empty()
             .root()
             .write(&mut tmp[..])
             .expect("length is 32 bytes");
@@ -630,7 +632,7 @@ mod tests {
 
     #[test]
     fn empty_commitment_tree_roots() {
-        let tree = CommitmentTree::<Node>::new();
+        let tree = CommitmentTree::<Node>::empty();
         let mut tmp = [0u8; 32];
         for (i, &expected) in HEX_EMPTY_ROOTS.iter().enumerate().skip(1) {
             tree.root_inner(i, PathFiller::empty())

@@ -702,19 +702,14 @@ mod tests {
             .create_note(110000, Rseed::BeforeZip212(jubjub::Fr::random(&mut rng)))
             .unwrap();
         let cm1 = Node::new(note1.cmu().to_repr());
-        let mut tree = CommitmentTree::new();
+        let mut tree = CommitmentTree::empty();
         // fake that the note appears in some previous
         // shielded output
         tree.append(cm1).unwrap();
         let witness1 = IncrementalWitness::from_tree(&tree);
 
         builder_a
-            .add_sapling_spend(
-                extsk.clone(),
-                *to.diversifier(),
-                note1.clone(),
-                witness1.path().unwrap(),
-            )
+            .add_sapling_spend(extsk, *to.diversifier(), note1, witness1.path().unwrap())
             .unwrap();
 
         let mut db_a = DemoBuilder {
