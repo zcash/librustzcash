@@ -269,7 +269,7 @@ where
     // Get the most recent CommitmentTree
     let mut tree = data
         .get_commitment_tree(last_height)
-        .map(|t| t.unwrap_or_else(CommitmentTree::new))?;
+        .map(|t| t.unwrap_or_else(CommitmentTree::empty))?;
 
     // Get most recent incremental witnesses for the notes we are tracking
     let mut witnesses = data.get_witnesses(last_height)?;

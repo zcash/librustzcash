@@ -326,7 +326,7 @@ mod tests {
         );
         assert_eq!(cb.vtx.len(), 2);
 
-        let mut tree = CommitmentTree::new();
+        let mut tree = CommitmentTree::empty();
         let txs = scan_block(
             &Network::TestNetwork,
             cb,
@@ -365,7 +365,7 @@ mod tests {
         );
         assert_eq!(cb.vtx.len(), 3);
 
-        let mut tree = CommitmentTree::new();
+        let mut tree = CommitmentTree::empty();
         let txs = scan_block(
             &Network::TestNetwork,
             cb,
@@ -400,7 +400,7 @@ mod tests {
         let cb = fake_compact_block(1u32.into(), nf, extfvk, Amount::from_u64(5).unwrap(), false);
         assert_eq!(cb.vtx.len(), 2);
 
-        let mut tree = CommitmentTree::new();
+        let mut tree = CommitmentTree::empty();
         let txs = scan_block(
             &Network::TestNetwork,
             cb,

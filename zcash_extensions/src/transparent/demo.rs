@@ -702,7 +702,7 @@ mod tests {
             .create_note(110000, Rseed::BeforeZip212(jubjub::Fr::random(&mut rng)))
             .unwrap();
         let cm1 = Node::new(note1.cmu().to_repr());
-        let mut tree = CommitmentTree::new();
+        let mut tree = CommitmentTree::empty();
         // fake that the note appears in some previous
         // shielded output
         tree.append(cm1).unwrap();
