@@ -623,6 +623,7 @@ mod parse {
 
 #[cfg(feature = "test-dependencies")]
 pub mod testing {
+    use proptest::collection::btree_map;
     use proptest::collection::vec;
     use proptest::option;
     use proptest::prelude::{any, prop_compose, prop_oneof};
@@ -659,7 +660,8 @@ pub mod testing {
             memo in option::of(arb_valid_memo()),
             message in option::of(any::<String>()),
             label in option::of(any::<String>()),
-            other_params in vec((VALID_PARAMNAME, any::<String>()), 0..3),
+            // prevent duplicates by generating a set rather than a vec
+            other_params in btree_map(VALID_PARAMNAME, any::<String>(), 0..3),
             ) -> Payment {
 
             let is_sapling = match recipient_address {
@@ -673,7 +675,7 @@ pub mod testing {
                 memo: memo.filter(|_| is_sapling),
                 label,
                 message,
-                other_params,
+                other_params: other_params.into_iter().collect(),
             }
         }
     }
