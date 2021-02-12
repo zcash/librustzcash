@@ -412,6 +412,7 @@ pub mod testing {
             Ok(Vec::new())
         }
 
+        #[cfg(feature = "transparent-inputs")]
         fn get_spendable_transparent_utxos(
             &self,
             _address: &TransparentAddress,
