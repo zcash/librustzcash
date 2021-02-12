@@ -7,7 +7,6 @@ use std::fmt::Debug;
 use zcash_primitives::{
     block::BlockHash,
     consensus::BlockHeight,
-    legacy::TransparentAddress,
     memo::{Memo, MemoBytes},
     merkle_tree::{CommitmentTree, IncrementalWitness},
     sapling::{Node, Nullifier, PaymentAddress},
@@ -23,8 +22,11 @@ use crate::{
     data_api::wallet::ANCHOR_OFFSET,
     decrypt::DecryptedOutput,
     proto::compact_formats::CompactBlock,
-    wallet::{AccountId, SpendableNote, WalletTransparentOutput, WalletTx},
+    wallet::{AccountId, SpendableNote, WalletTx},
 };
+
+#[cfg(feature = "transparent-inputs")]
+use {crate::wallet::WalletTransparentOutput, zcash_primitives::legacy::TransparentAddress};
 
 pub mod chain;
 pub mod error;
@@ -179,6 +181,7 @@ pub trait WalletRead {
         anchor_height: BlockHeight,
     ) -> Result<Vec<SpendableNote>, Self::Error>;
 
+    #[cfg(feature = "transparent-inputs")]
     fn get_spendable_transparent_utxos(
         &self,
         address: &TransparentAddress,

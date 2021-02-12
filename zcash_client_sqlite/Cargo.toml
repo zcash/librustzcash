@@ -32,4 +32,5 @@ zcash_proofs = { version = "0.5", path = "../zcash_proofs" }
 
 [features]
 mainnet = []
+transparent-inputs = []
 test-dependencies = ["zcash_client_backend/test-dependencies"]
