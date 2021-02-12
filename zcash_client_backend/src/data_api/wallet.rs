@@ -191,7 +191,7 @@ where
 
     let target_value = value + DEFAULT_FEE;
     let spendable_notes =
-        wallet_db.select_spendable_sapling_notes(account, target_value, anchor_height)?;
+        wallet_db.select_unspent_sapling_notes(account, target_value, anchor_height)?;
 
     // Confirm we were able to select sufficient value
     let selected_value = spendable_notes.iter().map(|n| n.note_value).sum();
@@ -296,7 +296,7 @@ where
     let ovk = exfvk.fvk.ovk;
 
     // get UTXOs from DB
-    let utxos = wallet_db.get_spendable_transparent_utxos(&taddr, latest_anchor)?;
+    let utxos = wallet_db.get_unspent_transparent_utxos(&taddr, latest_anchor)?;
     let total_amount = utxos.iter().map(|utxo| utxo.value).sum::<Amount>();
 
     let fee = DEFAULT_FEE;

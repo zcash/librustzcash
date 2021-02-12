@@ -75,6 +75,7 @@ pub fn derive_secret_key_from_seed<P: consensus::Parameters>(
 }
 
 #[cfg(feature = "transparent-inputs")]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Wif(pub String);
 
 #[cfg(feature = "transparent-inputs")]
@@ -94,7 +95,7 @@ impl Wif {
 }
 
 #[cfg(feature = "transparent-inputs")]
-impl TryInto<SecretKey> for Wif {
+impl<'a> TryInto<SecretKey> for &'a Wif {
     type Error = Bs58Error;
 
     fn try_into(self) -> Result<SecretKey, Self::Error> {
@@ -153,7 +154,7 @@ mod tests {
     #[test]
     fn sk_wif_to_taddr() {
         let sk_wif = Wif("L4BvDC33yLjMRxipZvdiUmdYeRfZmR8viziwsVwe72zJdGbiJPv2".to_string());
-        let sk: SecretKey = sk_wif.try_into().expect("invalid wif");
+        let sk: SecretKey = (&sk_wif).try_into().expect("invalid wif");
         let taddr = derive_transparent_address_from_secret_key(sk);
         assert_eq!(
             taddr.encode(&MAIN_NETWORK),

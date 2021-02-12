@@ -59,7 +59,7 @@ fn to_spendable_note(row: &Row) -> Result<SpendableNote, SqliteClientError> {
     })
 }
 
-pub fn get_spendable_sapling_notes<P>(
+pub fn get_unspent_sapling_notes<P>(
     wdb: &WalletDb<P>,
     account: AccountId,
     anchor_height: BlockHeight,
@@ -87,7 +87,7 @@ pub fn get_spendable_sapling_notes<P>(
     notes.collect::<Result<_, _>>()
 }
 
-pub fn select_spendable_sapling_notes<P>(
+pub fn select_unspent_sapling_notes<P>(
     wdb: &WalletDb<P>,
     account: AccountId,
     target_value: Amount,
