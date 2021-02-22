@@ -6,7 +6,27 @@ and this library adheres to Rust's notion of
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
-TBD
+This release contains a major refactor of the APIs to leverage the new Data
+Access API in the `zcash_client_backend` crate. API names are almost all the
+same as before, but have been reorganized.
+
+### Added
+- `zcash_client_sqlite::BlockDB`, a read-only wrapper for the SQLite connection
+  to the block cache database.
+- `zcash_client_sqlite::WalletDB`, a read-only wrapper for the SQLite connection
+  to the wallet database.
+- `zcash_client_sqlite::DataConnStmtCache`, a read-write wrapper for the SQLite
+  connection to the wallet database. Returned by `WalletDB::get_update_ops`.
+- `zcash_client_sqlite::NoteId`
+
+### Changed
+- APIs now take `&BlockDB` and `&WalletDB<P>` arguments, instead of paths to the
+  block cache and wallet databases.
+- The library no longer uses the `mainnet` feature flag to specify the network
+  type. APIs now take a `P: zcash_primitives::consensus::Parameters` variable.
+
+### Removed
+- `zcash_client_sqlite::address` module (moved to `zcash_client_backend`).
 
 ## [0.2.1] - 2020-10-24
 ### Fixed

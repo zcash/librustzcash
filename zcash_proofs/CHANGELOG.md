@@ -6,7 +6,26 @@ and this library adheres to Rust's notion of
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
-TBD
+### Added
+- `zcash_proofs::ZcashParameters`
+- `zcash_proofs::parse_parameters`
+- `zcash_proofs::prover::LocalProver::from_bytes`
+- The `zcash_proofs::constants` module, containing constants and helpers used by
+  the `zcash_proofs::circuit::ecc::fixed_base_multiplication` gadget:
+  - The `FixedGeneratorOwned` type alias.
+  - `generate_circuit_generator`
+  - The six Zcash fixed generators:
+    - `PROOF_GENERATION_KEY_GENERATOR`
+    - `NOTE_COMMITMENT_RANDOMNESS_GENERATOR`
+    - `NULLIFIER_POSITION_GENERATOR`
+    - `VALUE_COMMITMENT_VALUE_GENERATOR`
+    - `VALUE_COMMITMENT_RANDOMNESS_GENERATOR`
+    - `SPENDING_KEY_GENERATOR`
+- `zcash_proofs::sapling::SaplingProvingContext: Default`
+- `zcash_proofs::sapling::SaplingVerificationContext: Default`
+
+### Changed
+- `zcash_proofs::load_parameters` now returns `ZcashParameters`.
 
 ## [0.4.0] - 2020-09-09
 ### Changed
