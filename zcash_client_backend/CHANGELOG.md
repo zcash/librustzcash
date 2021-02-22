@@ -6,7 +6,37 @@ and this library adheres to Rust's notion of
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
-TBD
+### Added
+- `zcash_client_backend::address::RecipientAddress`
+- `zcash_client_backend::data_api` module, containing the Data Access API.
+- `zcash_client_backend::wallet`:
+  - `AccountId`
+  - `SpendableNote`
+  - `OvkPolicy`
+- First alpha of TZE support, behind the `zfuture` feature flag.
+
+### Changed
+- `epk` fields and return values were changed from a `jubjub::SubgroupPoint` to
+  a `jubjub::ExtendedPoint`, to match the change to the `zcash_primitives`
+  decryption APIs:
+  - `zcash_client_backend::proto::compact_formats::CompactOutput::epk()`
+  - The `epk` field of `zcash_client_backend::wallet::WalletShieldedOutput`.
+- `zcash_client_backend::decrypt::decrypt_transaction` now takes a variable with
+  type `P: zcash_primitives::consensus::Parameters`.
+- `zcash_client_backend::wallet`:
+  - The `nf` property of `WalletShieldedSpend` now has the type `Nullifier`.
+  - The `account` property of `WalletShieldedSpend` and `WalletShieldedOutput`
+    now has the type `AccountId`.
+- `zcash_client_backend::welding_rig`:
+  - `scan_block` now takes `&[(AccountId, IncomingViewingKey)]`, instead of a
+    slice of extended full viewing keys with implicit account IDs.
+  - The `nullifiers` argument to `scan_block` now has the type
+    `&[(AccountId, Nullifier)]`.
+
+### Removed
+- `zcash_client_backend::constants` module (its sub-modules have been moved into
+  `zcash_primitives::constants`, and more generally replaced by the new methods
+  on the `zcash_primitives::consensus::Parameters` trait).
 
 ## [0.4.0] - 2020-09-09
 ### Changed
