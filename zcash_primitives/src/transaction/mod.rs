@@ -295,25 +295,24 @@ pub struct TxDigests<A, Purpose> {
     _purpose: PhantomData<Purpose>,
 }
 
-pub(crate) trait TransactionDigest<A> {
+pub(crate) trait TransactionDigest<H, T, TZE, SP, SA> {
     type Purpose;
 
-    fn digest_header(&self, version: TxVersion, lock_time: u32, expiry_height: BlockHeight) -> A;
+    fn digest_header(&self, version: TxVersion, lock_time: u32, expiry_height: BlockHeight) -> H;
 
-    fn digest_transparent(&self, vin: &[TxIn], vout: &[TxOut]) -> TransparentDigests<A>;
+    fn digest_transparent(&self, vin: &[TxIn], vout: &[TxOut]) -> T;
 
     #[cfg(feature = "zfuture")]
-    fn digest_tze(&self, tze_inputs: &[TzeIn], tze_outputs: &[TzeOut]) -> TzeDigests<A>;
+    fn digest_tze(&self, tze_inputs: &[TzeIn], tze_outputs: &[TzeOut]) -> TZE;
 
-    fn digest_sprout(&self, joinsplits: &[JSDescription], joinsplit_pubkey: &Option<[u8; 32]>)
-        -> A;
+    fn digest_sprout(&self, joinsplits: &[JSDescription], joinsplit_pubkey: &Option<[u8; 32]>) -> SP;
 
     fn digest_sapling(
         &self,
         shielded_spends: &[SpendDescription],
         shielded_outputs: &[OutputDescription],
         value_balance: Amount,
-    ) -> A;
+    ) -> SA;
 }
 
 pub(crate) trait AuthDigest<A> {
@@ -392,7 +391,7 @@ impl TransactionData {
 
     pub(crate) fn digest<A, D, P>(&self, digester: D) -> TxDigests<A, P>
     where
-        D: TransactionDigest<A, Purpose = P>,
+        D: TransactionDigest<A, TransparentDigests<A>, TzeDigests<A>, A, A, Purpose = P>,
     {
         let header_digest =
             digester.digest_header(self.version, self.lock_time, self.expiry_height);

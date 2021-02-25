@@ -38,7 +38,7 @@ pub struct SignatureHashDigester<'a> {
     pub signable_input: SignableInput<'a>,
 }
 
-impl<'a> TransactionDigest<Blake2bHash> for SignatureHashDigester<'a> {
+impl<'a> TransactionDigest<Blake2bHash, TransparentDigests<Blake2bHash>, TzeDigests<Blake2bHash>, Blake2bHash, Blake2bHash> for SignatureHashDigester<'a> {
     type Purpose = SignatureHash;
 
     fn digest_header(

@@ -308,7 +308,7 @@ pub struct TxIdDigester {
 //
 // This expects and relies upon the existence of canonical encodings for
 // each effecting component of a transaction.
-impl TransactionDigest<Blake2bHash> for TxIdDigester {
+impl TransactionDigest<Blake2bHash, TransparentDigests<Blake2bHash>, TzeDigests<Blake2bHash>, Blake2bHash, Blake2bHash> for TxIdDigester {
     type Purpose = TxId;
 
     fn digest_header(
