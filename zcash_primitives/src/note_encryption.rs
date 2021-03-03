@@ -2,7 +2,7 @@
 
 use crate::{
     consensus::{self, BlockHeight, NetworkUpgrade::Canopy, ZIP212_GRACE_PERIOD},
-    primitives::{Diversifier, Note, PaymentAddress, Rseed},
+    primitives::{Diversifier, Note, PaymentAddress, Rseed, SaplingIvk},
 };
 use blake2b_simd::{Hash as Blake2bHash, Params as Blake2bParams};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
@@ -375,7 +375,7 @@ impl<R: RngCore> SaplingNoteEncryption<R> {
 fn parse_note_plaintext_without_memo<P: consensus::Parameters>(
     params: &P,
     height: BlockHeight,
-    ivk: &jubjub::Fr,
+    ivk: &SaplingIvk,
     epk: &jubjub::ExtendedPoint,
     cmu: &bls12_381::Scalar,
     plaintext: &[u8],
@@ -402,7 +402,7 @@ fn parse_note_plaintext_without_memo<P: consensus::Parameters>(
     };
 
     let diversifier = Diversifier(d);
-    let pk_d = diversifier.g_d()? * ivk;
+    let pk_d = diversifier.g_d()? * ivk.0;
 
     let to = PaymentAddress::from_parts(diversifier, pk_d)?;
     let note = to.create_note(v, rseed).unwrap();
@@ -458,14 +458,14 @@ pub fn plaintext_version_is_valid<P: consensus::Parameters>(
 pub fn try_sapling_note_decryption<P: consensus::Parameters>(
     params: &P,
     height: BlockHeight,
-    ivk: &jubjub::Fr,
+    ivk: &SaplingIvk,
     epk: &jubjub::ExtendedPoint,
     cmu: &bls12_381::Scalar,
     enc_ciphertext: &[u8],
 ) -> Option<(Note, PaymentAddress, Memo)> {
     assert_eq!(enc_ciphertext.len(), ENC_CIPHERTEXT_SIZE);
 
-    let shared_secret = sapling_ka_agree(ivk, &epk);
+    let shared_secret = sapling_ka_agree(&ivk.0, &epk);
     let key = kdf_sapling(shared_secret, &epk);
 
     let mut plaintext = [0; ENC_CIPHERTEXT_SIZE];
@@ -502,14 +502,14 @@ pub fn try_sapling_note_decryption<P: consensus::Parameters>(
 pub fn try_sapling_compact_note_decryption<P: consensus::Parameters>(
     params: &P,
     height: BlockHeight,
-    ivk: &jubjub::Fr,
+    ivk: &SaplingIvk,
     epk: &jubjub::ExtendedPoint,
     cmu: &bls12_381::Scalar,
     enc_ciphertext: &[u8],
 ) -> Option<(Note, PaymentAddress)> {
     assert_eq!(enc_ciphertext.len(), COMPACT_NOTE_SIZE);
 
-    let shared_secret = sapling_ka_agree(ivk, epk);
+    let shared_secret = sapling_ka_agree(&ivk.0, epk);
     let key = kdf_sapling(shared_secret, &epk);
 
     // Start from block 1 to skip over Poly1305 keying output
@@ -683,7 +683,7 @@ mod tests {
             Parameters, TEST_NETWORK, ZIP212_GRACE_PERIOD,
         },
         keys::OutgoingViewingKey,
-        primitives::{Diversifier, PaymentAddress, Rseed, ValueCommitment},
+        primitives::{Diversifier, PaymentAddress, Rseed, SaplingIvk, ValueCommitment},
         util::generate_random_rseed,
     };
 
@@ -809,17 +809,17 @@ mod tests {
     ) -> (
         OutgoingViewingKey,
         OutgoingCipherKey,
-        jubjub::Fr,
+        SaplingIvk,
         jubjub::ExtendedPoint,
         bls12_381::Scalar,
         jubjub::ExtendedPoint,
         [u8; ENC_CIPHERTEXT_SIZE],
         [u8; OUT_CIPHERTEXT_SIZE],
     ) {
-        let ivk = jubjub::Fr::random(&mut rng);
+        let ivk = SaplingIvk(jubjub::Fr::random(&mut rng));
 
-        let (ovk, ock, ivk, cv, cmu, epk, enc_ciphertext, out_ciphertext) =
-            random_enc_ciphertext_with(height, ivk, rng);
+        let (ovk, ock, cv, cmu, epk, enc_ciphertext, out_ciphertext) =
+            random_enc_ciphertext_with(height, &ivk, rng);
 
         assert!(try_sapling_note_decryption(
             &TEST_NETWORK,
@@ -869,12 +869,11 @@ mod tests {
 
     fn random_enc_ciphertext_with<R: RngCore + CryptoRng>(
         height: BlockHeight,
-        ivk: jubjub::Fr,
+        ivk: &SaplingIvk,
         mut rng: &mut R,
     ) -> (
         OutgoingViewingKey,
         OutgoingCipherKey,
-        jubjub::Fr,
         jubjub::ExtendedPoint,
         bls12_381::Scalar,
         jubjub::ExtendedPoint,
@@ -882,7 +881,7 @@ mod tests {
         [u8; OUT_CIPHERTEXT_SIZE],
     ) {
         let diversifier = Diversifier([0; 11]);
-        let pk_d = diversifier.g_d().unwrap() * ivk;
+        let pk_d = diversifier.g_d().unwrap() * ivk.0;
         let pa = PaymentAddress::from_parts_unchecked(diversifier, pk_d);
 
         // Construct the value commitment for the proof instance
@@ -905,7 +904,7 @@ mod tests {
         let out_ciphertext = ne.encrypt_outgoing_plaintext(&cv, &cmu);
         let ock = prf_ock(&ovk, &cv, &cmu, &epk);
 
-        (ovk, ock, ivk, cv, cmu, epk, enc_ciphertext, out_ciphertext)
+        (ovk, ock, cv, cmu, epk, enc_ciphertext, out_ciphertext)
     }
 
     fn reencrypt_enc_ciphertext(
@@ -1006,7 +1005,7 @@ mod tests {
                 try_sapling_note_decryption(
                     &TEST_NETWORK,
                     height,
-                    &jubjub::Fr::random(&mut rng),
+                    &SaplingIvk(jubjub::Fr::random(&mut rng)),
                     &epk,
                     &cmu,
                     &enc_ciphertext
@@ -1217,7 +1216,7 @@ mod tests {
                 try_sapling_compact_note_decryption(
                     &TEST_NETWORK,
                     height,
-                    &jubjub::Fr::random(&mut rng),
+                    &SaplingIvk(jubjub::Fr::random(&mut rng)),
                     &epk,
                     &cmu,
                     &enc_ciphertext[..COMPACT_NOTE_SIZE]
@@ -1792,9 +1791,9 @@ mod tests {
         ];
 
         for &height in heights.iter() {
-            let ivk = jubjub::Fr::zero();
-            let (ovk, ock, _, cv, cmu, epk, enc_ciphertext, out_ciphertext) =
-                random_enc_ciphertext_with(height, ivk, &mut rng);
+            let ivk = SaplingIvk(jubjub::Fr::zero());
+            let (ovk, ock, cv, cmu, epk, enc_ciphertext, out_ciphertext) =
+                random_enc_ciphertext_with(height, &ivk, &mut rng);
 
             assert_eq!(
                 try_sapling_output_recovery(
@@ -1853,7 +1852,7 @@ mod tests {
             // Load the test vector components
             //
 
-            let ivk = read_jubjub_scalar!(tv.ivk);
+            let ivk = SaplingIvk(read_jubjub_scalar!(tv.ivk));
             let pk_d = read_point!(tv.default_pk_d).into_subgroup().unwrap();
             let rcm = read_jubjub_scalar!(tv.rcm);
             let cv = read_point!(tv.cv);

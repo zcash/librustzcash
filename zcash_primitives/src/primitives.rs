@@ -59,7 +59,7 @@ impl ViewingKey {
         self.ak + constants::SPENDING_KEY_GENERATOR * ar
     }
 
-    pub fn ivk(&self) -> jubjub::Fr {
+    pub fn ivk(&self) -> SaplingIvk {
         let mut h = [0; 32];
         h.copy_from_slice(
             Blake2sParams::new()
@@ -75,15 +75,27 @@ impl ViewingKey {
         // Drop the most significant five bits, so it can be interpreted as a scalar.
         h[31] &= 0b0000_0111;
 
-        jubjub::Fr::from_repr(h).expect("should be a valid scalar")
+        SaplingIvk(jubjub::Fr::from_repr(h).expect("should be a valid scalar"))
     }
 
     pub fn to_payment_address(&self, diversifier: Diversifier) -> Option<PaymentAddress> {
+        self.ivk().to_payment_address(diversifier)
+    }
+}
+
+pub struct SaplingIvk(pub jubjub::Fr);
+
+impl SaplingIvk {
+    pub fn to_payment_address(&self, diversifier: Diversifier) -> Option<PaymentAddress> {
         diversifier.g_d().and_then(|g_d| {
-            let pk_d = g_d * self.ivk();
+            let pk_d = g_d * self.0;
 
             PaymentAddress::from_parts(diversifier, pk_d)
         })
+    }
+
+    pub fn to_repr(&self) -> [u8; 32] {
+        self.0.to_repr()
     }
 }
 

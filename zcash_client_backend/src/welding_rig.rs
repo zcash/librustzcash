@@ -7,7 +7,7 @@ use zcash_primitives::{
     consensus::{self, BlockHeight},
     merkle_tree::{CommitmentTree, IncrementalWitness},
     note_encryption::try_sapling_compact_note_decryption,
-    primitives::Nullifier,
+    primitives::{Nullifier, SaplingIvk},
     sapling::Node,
     transaction::TxId,
 };
@@ -27,7 +27,7 @@ fn scan_output<P: consensus::Parameters>(
     params: &P,
     height: BlockHeight,
     (index, output): (usize, CompactOutput),
-    ivks: &[(AccountId, jubjub::Fr)],
+    ivks: &[(AccountId, SaplingIvk)],
     spent_from_accounts: &HashSet<AccountId>,
     tree: &mut CommitmentTree<Node>,
     existing_witnesses: &mut [&mut IncrementalWitness<Node>],
@@ -53,7 +53,7 @@ fn scan_output<P: consensus::Parameters>(
 
     for (account, ivk) in ivks.iter() {
         let (note, to) =
-            match try_sapling_compact_note_decryption(params, height, ivk, &epk, &cmu, &ct) {
+            match try_sapling_compact_note_decryption(params, height, &ivk, &epk, &cmu, &ct) {
                 Some(ret) => ret,
                 None => continue,
             };
@@ -90,7 +90,7 @@ fn scan_output<P: consensus::Parameters>(
 pub fn scan_block<P: consensus::Parameters>(
     params: &P,
     block: CompactBlock,
-    ivks: &[(AccountId, jubjub::Fr)],
+    ivks: &[(AccountId, SaplingIvk)],
     nullifiers: &[(AccountId, Nullifier)],
     tree: &mut CommitmentTree<Node>,
     existing_witnesses: &mut [&mut IncrementalWitness<Node>],
@@ -163,7 +163,7 @@ pub fn scan_block<P: consensus::Parameters>(
                     params,
                     block_height,
                     to_scan,
-                    &ivks,
+                    ivks,
                     &spent_from_accounts,
                     tree,
                     existing_witnesses,
