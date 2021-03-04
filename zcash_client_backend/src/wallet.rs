@@ -4,9 +4,10 @@
 use subtle::{Choice, ConditionallySelectable};
 
 use zcash_primitives::{
-    keys::OutgoingViewingKey,
     merkle_tree::IncrementalWitness,
-    sapling::{Diversifier, Node, Note, Nullifier, PaymentAddress, Rseed},
+    sapling::{
+        keys::OutgoingViewingKey, Diversifier, Node, Note, Nullifier, PaymentAddress, Rseed,
+    },
     transaction::{components::Amount, TxId},
 };
 

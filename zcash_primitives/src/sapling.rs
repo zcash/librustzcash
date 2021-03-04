@@ -1,6 +1,7 @@
 //! Structs and constants specific to the Sapling shielded pool.
 
 pub mod group_hash;
+pub mod keys;
 pub mod pedersen_hash;
 pub mod prover;
 pub mod redjubjub;
@@ -20,12 +21,12 @@ use subtle::{Choice, ConstantTimeEq};
 
 use crate::{
     constants::{self, SPENDING_KEY_GENERATOR},
-    keys::prf_expand,
     merkle_tree::Hashable,
 };
 
 use self::{
     group_hash::group_hash,
+    keys::prf_expand,
     pedersen_hash::{pedersen_hash, Personalization},
     redjubjub::{PrivateKey, PublicKey, Signature},
 };

@@ -14,7 +14,7 @@ use crate::{
 };
 use std::io::{self, Read, Write};
 
-use crate::keys::{
+use crate::sapling::keys::{
     prf_expand, prf_expand_vec, ExpandedSpendingKey, FullViewingKey, OutgoingViewingKey,
 };
 

@@ -12,18 +12,18 @@ use rand::{rngs::OsRng, seq::SliceRandom, CryptoRng, RngCore};
 
 use crate::{
     consensus::{self, BlockHeight},
-    keys::OutgoingViewingKey,
     legacy::TransparentAddress,
     memo::MemoBytes,
     merkle_tree::MerklePath,
     note_encryption::SaplingNoteEncryption,
     sapling::{
-        prover::TxProver, redjubjub::PrivateKey, spend_sig_internal,
+        keys::OutgoingViewingKey, prover::TxProver, redjubjub::PrivateKey, spend_sig_internal,
         util::generate_random_rseed_internal, Diversifier, Node, Note, PaymentAddress,
     },
     transaction::{
         components::{
-            amount::Amount, amount::DEFAULT_FEE, OutputDescription, SpendDescription, TxOut,
+            amount::{Amount, DEFAULT_FEE},
+            OutputDescription, SpendDescription, TxOut,
         },
         signature_hash_data, SignableInput, Transaction, TransactionData, SIGHASH_ALL,
     },
