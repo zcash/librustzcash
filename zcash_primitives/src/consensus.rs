@@ -352,7 +352,7 @@ pub enum NetworkUpgrade {
     ///
     /// [Canopy]: https://z.cash/upgrade/canopy/
     Canopy,
-    /// The [ZFUTURE] network upgrade.
+    /// The ZFUTURE network upgrade.
     ///
     /// This upgrade is expected never to activate on mainnet;
     /// it is intended for use in integration testing of functionality
