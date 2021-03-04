@@ -17,7 +17,6 @@ pub mod merkle_tree;
 pub mod note_encryption;
 pub mod pedersen_hash;
 pub mod primitives;
-pub mod prover;
 pub mod sapling;
 pub mod serialize;
 pub mod transaction;

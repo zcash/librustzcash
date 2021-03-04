@@ -4,7 +4,7 @@ use std::fmt::Debug;
 use zcash_primitives::{
     consensus::{self, BranchId, NetworkUpgrade},
     memo::MemoBytes,
-    prover::TxProver,
+    sapling::prover::TxProver,
     transaction::{
         builder::Builder,
         components::{amount::DEFAULT_FEE, Amount},

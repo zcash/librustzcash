@@ -18,8 +18,7 @@ use crate::{
     merkle_tree::MerklePath,
     note_encryption::SaplingNoteEncryption,
     primitives::{Diversifier, Note, PaymentAddress},
-    prover::TxProver,
-    sapling::{redjubjub::PrivateKey, spend_sig_internal, Node},
+    sapling::{prover::TxProver, redjubjub::PrivateKey, spend_sig_internal, Node},
     transaction::{
         components::{
             amount::Amount, amount::DEFAULT_FEE, OutputDescription, SpendDescription, TxOut,
@@ -43,7 +42,7 @@ use crate::{
 };
 
 #[cfg(any(test, feature = "test-dependencies"))]
-use crate::prover::mock::MockTxProver;
+use crate::sapling::prover::mock::MockTxProver;
 
 const DEFAULT_TX_EXPIRY_DELTA: u32 = 20;
 
@@ -966,8 +965,7 @@ mod tests {
         legacy::TransparentAddress,
         merkle_tree::{CommitmentTree, IncrementalWitness},
         primitives::Rseed,
-        prover::mock::MockTxProver,
-        sapling::Node,
+        sapling::{prover::mock::MockTxProver, Node},
         transaction::components::{amount::Amount, amount::DEFAULT_FEE},
         zip32::{ExtendedFullViewingKey, ExtendedSpendingKey},
     };

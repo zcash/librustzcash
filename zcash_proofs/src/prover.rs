@@ -6,8 +6,8 @@ use std::path::Path;
 use zcash_primitives::{
     merkle_tree::MerklePath,
     primitives::{Diversifier, PaymentAddress, ProofGenerationKey, Rseed},
-    prover::TxProver,
     sapling::{
+        prover::TxProver,
         redjubjub::{PublicKey, Signature},
         Node,
     },

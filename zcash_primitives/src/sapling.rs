@@ -1,6 +1,7 @@
 //! Structs and constants specific to the Sapling shielded pool.
 
 pub mod group_hash;
+pub mod prover;
 pub mod redjubjub;
 
 use crate::{
