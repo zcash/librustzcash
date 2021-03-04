@@ -10,7 +10,7 @@ use std::ops::AddAssign;
 
 use crate::{
     constants::{PROOF_GENERATION_KEY_GENERATOR, SPENDING_KEY_GENERATOR},
-    primitives::{Diversifier, PaymentAddress, ViewingKey},
+    sapling::{Diversifier, PaymentAddress, ViewingKey},
 };
 use std::io::{self, Read, Write};
 

@@ -95,7 +95,7 @@ use zcash_primitives::{
     block::BlockHash,
     consensus::{self, BlockHeight, NetworkUpgrade},
     merkle_tree::CommitmentTree,
-    primitives::Nullifier,
+    sapling::Nullifier,
     zip32::ExtendedFullViewingKey,
 };
 

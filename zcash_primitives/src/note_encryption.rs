@@ -3,7 +3,7 @@
 use crate::{
     consensus::{self, BlockHeight, NetworkUpgrade::Canopy, ZIP212_GRACE_PERIOD},
     memo::MemoBytes,
-    primitives::{Diversifier, Note, PaymentAddress, Rseed, SaplingIvk},
+    sapling::{Diversifier, Note, PaymentAddress, Rseed, SaplingIvk},
 };
 use blake2b_simd::{Hash as Blake2bHash, Params as Blake2bParams};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
@@ -115,7 +115,7 @@ pub fn prf_ock(
 ///     keys::{OutgoingViewingKey, prf_expand},
 ///     memo::MemoBytes,
 ///     note_encryption::SaplingNoteEncryption,
-///     primitives::{Diversifier, PaymentAddress, Rseed, ValueCommitment},
+///     sapling::{Diversifier, PaymentAddress, Rseed, ValueCommitment},
 /// };
 ///
 /// let mut rng = OsRng;
@@ -582,8 +582,8 @@ mod tests {
         },
         keys::OutgoingViewingKey,
         memo::MemoBytes,
-        primitives::{Diversifier, PaymentAddress, Rseed, SaplingIvk, ValueCommitment},
         sapling::util::generate_random_rseed,
+        sapling::{Diversifier, PaymentAddress, Rseed, SaplingIvk, ValueCommitment},
     };
 
     fn random_enc_ciphertext<R: RngCore + CryptoRng>(

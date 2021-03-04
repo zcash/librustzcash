@@ -17,8 +17,7 @@ use zcash_primitives::{
     consensus::{self, BlockHeight, NetworkUpgrade},
     memo::{Memo, MemoBytes},
     merkle_tree::{CommitmentTree, IncrementalWitness},
-    primitives::{Note, Nullifier, PaymentAddress},
-    sapling::Node,
+    sapling::{Node, Note, Nullifier, PaymentAddress},
     transaction::{components::Amount, Transaction, TxId},
     zip32::ExtendedFullViewingKey,
 };

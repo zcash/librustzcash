@@ -1,7 +1,5 @@
 //! Abstractions over the proving system and parameters.
 
-use crate::primitives::{Diversifier, PaymentAddress, ProofGenerationKey, Rseed};
-
 use crate::{
     merkle_tree::MerklePath,
     sapling::{
@@ -10,6 +8,8 @@ use crate::{
     },
     transaction::components::{Amount, GROTH_PROOF_SIZE},
 };
+
+use super::{Diversifier, PaymentAddress, ProofGenerationKey, Rseed};
 
 /// Interface for creating zero-knowledge proofs for shielded transactions.
 pub trait TxProver {
@@ -69,14 +69,10 @@ pub mod mock {
 
     use crate::{
         constants::SPENDING_KEY_GENERATOR,
-        primitives::{Diversifier, PaymentAddress, ProofGenerationKey, Rseed, ValueCommitment},
-    };
-
-    use crate::{
         merkle_tree::MerklePath,
         sapling::{
             redjubjub::{PublicKey, Signature},
-            Node,
+            Diversifier, Node, PaymentAddress, ProofGenerationKey, Rseed, ValueCommitment,
         },
         transaction::components::{Amount, GROTH_PROOF_SIZE},
     };

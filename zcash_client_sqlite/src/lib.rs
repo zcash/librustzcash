@@ -43,8 +43,7 @@ use zcash_primitives::{
     consensus::{self, BlockHeight},
     memo::Memo,
     merkle_tree::{CommitmentTree, IncrementalWitness},
-    primitives::{Nullifier, PaymentAddress},
-    sapling::Node,
+    sapling::{Node, Nullifier, PaymentAddress},
     transaction::{components::Amount, TxId},
     zip32::ExtendedFullViewingKey,
 };
@@ -565,8 +564,7 @@ mod tests {
         consensus::{BlockHeight, Network, NetworkUpgrade, Parameters},
         memo::MemoBytes,
         note_encryption::SaplingNoteEncryption,
-        primitives::{Note, Nullifier, PaymentAddress},
-        sapling::util::generate_random_rseed,
+        sapling::{util::generate_random_rseed, Note, Nullifier, PaymentAddress},
         transaction::components::Amount,
         zip32::ExtendedFullViewingKey,
     };

@@ -5,8 +5,9 @@ use zcash_primitives::{
     consensus::{NetworkUpgrade::Canopy, Parameters, TEST_NETWORK},
     memo::MemoBytes,
     note_encryption::{try_sapling_note_decryption, SaplingNoteEncryption},
-    primitives::{Diversifier, PaymentAddress, SaplingIvk, ValueCommitment},
-    sapling::util::generate_random_rseed,
+    sapling::{
+        util::generate_random_rseed, Diversifier, PaymentAddress, SaplingIvk, ValueCommitment,
+    },
     transaction::components::{OutputDescription, GROTH_PROOF_SIZE},
 };
 

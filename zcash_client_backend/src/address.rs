@@ -1,6 +1,6 @@
 //! Structs for handling supported address types.
 
-use zcash_primitives::{consensus, legacy::TransparentAddress, primitives::PaymentAddress};
+use zcash_primitives::{consensus, legacy::TransparentAddress, sapling::PaymentAddress};
 
 use crate::encoding::{
     decode_payment_address, decode_transparent_address, encode_payment_address,

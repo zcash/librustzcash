@@ -1,12 +1,10 @@
 use blake2b_simd::Params;
-
-use crate::{
-    consensus::{self, BlockHeight, NetworkUpgrade},
-    primitives::Rseed,
-};
-
 use ff::Field;
 use rand_core::{CryptoRng, RngCore};
+
+use crate::consensus::{self, BlockHeight, NetworkUpgrade};
+
+use super::Rseed;
 
 pub fn hash_to_scalar(persona: &[u8], a: &[u8], b: &[u8]) -> jubjub::Fr {
     let mut hasher = Params::new().hash_length(64).personal(persona).to_state();

@@ -11,7 +11,7 @@ use std::convert::TryInto;
 use std::io::{self, Write};
 use zcash_primitives::{
     legacy::TransparentAddress,
-    primitives::PaymentAddress,
+    sapling::PaymentAddress,
     zip32::{ExtendedFullViewingKey, ExtendedSpendingKey},
 };
 
@@ -114,7 +114,7 @@ pub fn decode_extended_full_viewing_key(
 /// };
 /// use zcash_primitives::{
 ///     constants::testnet::HRP_SAPLING_PAYMENT_ADDRESS,
-///     primitives::{Diversifier, PaymentAddress},
+///     sapling::{Diversifier, PaymentAddress},
 /// };
 ///
 /// let rng = &mut XorShiftRng::from_seed([
@@ -302,7 +302,7 @@ mod tests {
     use rand_xorshift::XorShiftRng;
     use zcash_primitives::{
         constants,
-        primitives::{Diversifier, PaymentAddress},
+        sapling::{Diversifier, PaymentAddress},
         zip32::ExtendedSpendingKey,
     };
 

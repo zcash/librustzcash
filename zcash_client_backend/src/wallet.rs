@@ -6,8 +6,7 @@ use subtle::{Choice, ConditionallySelectable};
 use zcash_primitives::{
     keys::OutgoingViewingKey,
     merkle_tree::IncrementalWitness,
-    primitives::{Diversifier, Note, Nullifier, PaymentAddress, Rseed},
-    sapling::Node,
+    sapling::{Diversifier, Node, Note, Nullifier, PaymentAddress, Rseed},
     transaction::{components::Amount, TxId},
 };
 

@@ -471,8 +471,8 @@ mod tests {
         extensions::transparent::{self as tze, Extension, FromPayload, ToPayload},
         legacy::TransparentAddress,
         merkle_tree::{CommitmentTree, IncrementalWitness},
-        primitives::Rseed,
         sapling::Node,
+        sapling::Rseed,
         transaction::{
             builder::Builder,
             components::{

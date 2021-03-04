@@ -17,10 +17,9 @@ use crate::{
     memo::MemoBytes,
     merkle_tree::MerklePath,
     note_encryption::SaplingNoteEncryption,
-    primitives::{Diversifier, Note, PaymentAddress},
     sapling::{
         prover::TxProver, redjubjub::PrivateKey, spend_sig_internal,
-        util::generate_random_rseed_internal, Node,
+        util::generate_random_rseed_internal, Diversifier, Node, Note, PaymentAddress,
     },
     transaction::{
         components::{
@@ -966,8 +965,7 @@ mod tests {
         consensus::{self, Parameters, H0, TEST_NETWORK},
         legacy::TransparentAddress,
         merkle_tree::{CommitmentTree, IncrementalWitness},
-        primitives::Rseed,
-        sapling::{prover::mock::MockTxProver, Node},
+        sapling::{prover::mock::MockTxProver, Node, Rseed},
         transaction::components::{amount::Amount, amount::DEFAULT_FEE},
         zip32::{ExtendedFullViewingKey, ExtendedSpendingKey},
     };

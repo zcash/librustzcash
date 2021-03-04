@@ -6,7 +6,7 @@
 
 use crate::{
     constants::{PROOF_GENERATION_KEY_GENERATOR, SPENDING_KEY_GENERATOR},
-    primitives::{ProofGenerationKey, ViewingKey},
+    sapling::{ProofGenerationKey, ViewingKey},
 };
 use blake2b_simd::{Hash as Blake2bHash, Params as Blake2bParams};
 use ff::PrimeField;
@@ -186,7 +186,7 @@ pub mod testing {
     use proptest::prelude::{any, prop_compose};
 
     use crate::{
-        primitives::PaymentAddress,
+        sapling::PaymentAddress,
         zip32::{ExtendedFullViewingKey, ExtendedSpendingKey},
     };
 

@@ -10,9 +10,10 @@ use std::ops::{AddAssign, Neg};
 use zcash_primitives::{
     constants::{SPENDING_KEY_GENERATOR, VALUE_COMMITMENT_RANDOMNESS_GENERATOR},
     merkle_tree::MerklePath,
-    primitives::{Diversifier, Note, PaymentAddress, ProofGenerationKey, Rseed, ValueCommitment},
-    sapling::redjubjub::{PrivateKey, PublicKey, Signature},
-    sapling::Node,
+    sapling::{
+        redjubjub::{PrivateKey, PublicKey, Signature},
+        Diversifier, Node, Note, PaymentAddress, ProofGenerationKey, Rseed, ValueCommitment,
+    },
     transaction::components::Amount,
 };
 

@@ -8,7 +8,7 @@ use ff::PrimeField;
 use zcash_primitives::{
     consensus::BlockHeight,
     merkle_tree::IncrementalWitness,
-    primitives::{Diversifier, Rseed},
+    sapling::{Diversifier, Rseed},
     transaction::components::Amount,
 };
 
