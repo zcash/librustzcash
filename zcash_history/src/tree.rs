@@ -648,7 +648,7 @@ mod tests {
                     tree.truncate_leaf().expect("Failed to truncate");
                 }
 
-                TestResult::from_bool(if let EntryLink::Stored(2) = tree.root() { true } else { false })
+                TestResult::from_bool(matches!(tree.root(), EntryLink::Stored(2)))
             }
         }
 
@@ -678,12 +678,9 @@ mod tests {
 
                 TestResult::from_bool(
                     if number & (number - 1) == 0 {
-                        if let EntryLink::Stored(_) = tree.root() { true }
-                        else { false }
-                    } else if let EntryLink::Generated(_) = tree.root() {
-                        true
+                        matches!(tree.root(), EntryLink::Stored(_))
                     } else {
-                        false
+                        matches!(tree.root(), EntryLink::Generated(_))
                     }
                 )
             }
@@ -707,12 +704,9 @@ mod tests {
 
                 TestResult::from_bool(
                     if total & (total - 1) == 0 {
-                        if let EntryLink::Stored(_) = tree.root() { true }
-                        else { false }
-                    } else if let EntryLink::Generated(_) = tree.root() {
-                        true
+                        matches!(tree.root(), EntryLink::Stored(_))
                     } else {
-                        false
+                        matches!(tree.root(), EntryLink::Generated(_))
                     }
                 )
             }

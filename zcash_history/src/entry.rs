@@ -34,11 +34,7 @@ impl Entry {
 
     /// Is this node a leaf.
     pub fn leaf(&self) -> bool {
-        if let EntryKind::Leaf = self.kind {
-            true
-        } else {
-            false
-        }
+        matches!(self.kind, EntryKind::Leaf)
     }
 
     /// Left child
