@@ -10,7 +10,7 @@ use crate::constants;
 
 use crate::sapling::group_hash::group_hash;
 
-use crate::pedersen_hash::{pedersen_hash, Personalization};
+use crate::sapling::pedersen_hash::{pedersen_hash, Personalization};
 
 use byteorder::{LittleEndian, WriteBytesExt};
 

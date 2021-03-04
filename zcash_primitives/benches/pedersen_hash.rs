@@ -1,6 +1,6 @@
 use criterion::{criterion_group, criterion_main, Criterion};
 use rand_core::{OsRng, RngCore};
-use zcash_primitives::pedersen_hash::{pedersen_hash, Personalization};
+use zcash_primitives::sapling::pedersen_hash::{pedersen_hash, Personalization};
 
 fn bench_pedersen_hash(c: &mut Criterion) {
     let rng = &mut OsRng;

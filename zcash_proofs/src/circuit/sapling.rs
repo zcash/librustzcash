@@ -517,8 +517,8 @@ fn test_input_circuit_with_bls12_381() {
     use rand_core::{RngCore, SeedableRng};
     use rand_xorshift::XorShiftRng;
     use zcash_primitives::{
-        pedersen_hash,
         primitives::{Diversifier, Note, ProofGenerationKey, Rseed},
+        sapling::pedersen_hash,
     };
 
     let mut rng = XorShiftRng::from_seed([
@@ -660,8 +660,8 @@ fn test_input_circuit_with_bls12_381_external_test_vectors() {
     use rand_core::{RngCore, SeedableRng};
     use rand_xorshift::XorShiftRng;
     use zcash_primitives::{
-        pedersen_hash,
         primitives::{Diversifier, Note, ProofGenerationKey, Rseed},
+        sapling::pedersen_hash,
     };
 
     let mut rng = XorShiftRng::from_seed([
