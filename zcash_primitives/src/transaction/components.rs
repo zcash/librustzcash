@@ -442,7 +442,7 @@ impl OutputDescription {
 }
 
 #[derive(Clone)]
-enum SproutProof {
+pub(crate) enum SproutProof {
     Groth([u8; GROTH_PROOF_SIZE]),
     PHGR([u8; PHGR_PROOF_SIZE]),
 }
@@ -458,16 +458,16 @@ impl std::fmt::Debug for SproutProof {
 
 #[derive(Clone)]
 pub struct JSDescription {
-    vpub_old: Amount,
-    vpub_new: Amount,
-    anchor: [u8; 32],
-    nullifiers: [[u8; 32]; ZC_NUM_JS_INPUTS],
-    commitments: [[u8; 32]; ZC_NUM_JS_OUTPUTS],
-    ephemeral_key: [u8; 32],
-    random_seed: [u8; 32],
-    macs: [[u8; 32]; ZC_NUM_JS_INPUTS],
-    proof: SproutProof,
-    ciphertexts: [[u8; 601]; ZC_NUM_JS_OUTPUTS],
+    pub(crate) vpub_old: Amount,
+    pub(crate) vpub_new: Amount,
+    pub(crate) anchor: [u8; 32],
+    pub(crate) nullifiers: [[u8; 32]; ZC_NUM_JS_INPUTS],
+    pub(crate) commitments: [[u8; 32]; ZC_NUM_JS_OUTPUTS],
+    pub(crate) ephemeral_key: [u8; 32],
+    pub(crate) random_seed: [u8; 32],
+    pub(crate) macs: [[u8; 32]; ZC_NUM_JS_INPUTS],
+    pub(crate) proof: SproutProof,
+    pub(crate) ciphertexts: [[u8; 601]; ZC_NUM_JS_OUTPUTS],
 }
 
 impl std::fmt::Debug for JSDescription {
