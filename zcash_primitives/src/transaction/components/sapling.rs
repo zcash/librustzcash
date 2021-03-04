@@ -5,7 +5,7 @@ use std::io::{self, Read, Write};
 
 use crate::{
     primitives::Nullifier,
-    redjubjub::{PublicKey, Signature},
+    sapling::redjubjub::{PublicKey, Signature},
 };
 
 use super::GROTH_PROOF_SIZE;

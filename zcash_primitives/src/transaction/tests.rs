@@ -3,7 +3,7 @@ use rand_core::OsRng;
 
 use proptest::prelude::*;
 
-use crate::{constants::SPENDING_KEY_GENERATOR, redjubjub::PrivateKey};
+use crate::{constants::SPENDING_KEY_GENERATOR, sapling::redjubjub::PrivateKey};
 
 use super::{
     components::Amount,

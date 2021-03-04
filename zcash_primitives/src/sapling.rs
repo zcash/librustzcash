@@ -1,6 +1,7 @@
 //! Structs and constants specific to the Sapling shielded pool.
 
 pub mod group_hash;
+pub mod redjubjub;
 
 use crate::{
     constants::SPENDING_KEY_GENERATOR,
@@ -14,8 +15,8 @@ use lazy_static::lazy_static;
 use rand_core::{CryptoRng, RngCore};
 use std::io::{self, Read, Write};
 
+use self::redjubjub::{PrivateKey, PublicKey, Signature};
 use crate::merkle_tree::Hashable;
-use crate::redjubjub::{PrivateKey, PublicKey, Signature};
 
 pub const SAPLING_COMMITMENT_TREE_DEPTH: usize = 32;
 

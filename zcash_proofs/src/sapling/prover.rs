@@ -11,7 +11,7 @@ use zcash_primitives::{
     constants::{SPENDING_KEY_GENERATOR, VALUE_COMMITMENT_RANDOMNESS_GENERATOR},
     merkle_tree::MerklePath,
     primitives::{Diversifier, Note, PaymentAddress, ProofGenerationKey, Rseed, ValueCommitment},
-    redjubjub::{PrivateKey, PublicKey, Signature},
+    sapling::redjubjub::{PrivateKey, PublicKey, Signature},
     sapling::Node,
     transaction::components::Amount,
 };

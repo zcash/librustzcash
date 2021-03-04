@@ -7,7 +7,7 @@ use std::ops::Deref;
 
 use crate::{
     consensus::BlockHeight,
-    redjubjub::Signature,
+    sapling::redjubjub::Signature,
     serialize::Vector,
     util::sha256d::{HashReader, HashWriter},
 };

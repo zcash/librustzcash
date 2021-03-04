@@ -7,8 +7,10 @@ use zcash_primitives::{
     merkle_tree::MerklePath,
     primitives::{Diversifier, PaymentAddress, ProofGenerationKey, Rseed},
     prover::TxProver,
-    redjubjub::{PublicKey, Signature},
-    sapling::Node,
+    sapling::{
+        redjubjub::{PublicKey, Signature},
+        Node,
+    },
     transaction::components::{Amount, GROTH_PROOF_SIZE},
 };
 

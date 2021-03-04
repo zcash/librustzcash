@@ -19,8 +19,7 @@ use crate::{
     note_encryption::SaplingNoteEncryption,
     primitives::{Diversifier, Note, PaymentAddress},
     prover::TxProver,
-    redjubjub::PrivateKey,
-    sapling::{spend_sig_internal, Node},
+    sapling::{redjubjub::PrivateKey, spend_sig_internal, Node},
     transaction::{
         components::{
             amount::Amount, amount::DEFAULT_FEE, OutputDescription, SpendDescription, TxOut,

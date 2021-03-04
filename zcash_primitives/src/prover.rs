@@ -4,8 +4,10 @@ use crate::primitives::{Diversifier, PaymentAddress, ProofGenerationKey, Rseed};
 
 use crate::{
     merkle_tree::MerklePath,
-    redjubjub::{PublicKey, Signature},
-    sapling::Node,
+    sapling::{
+        redjubjub::{PublicKey, Signature},
+        Node,
+    },
     transaction::components::{Amount, GROTH_PROOF_SIZE},
 };
 
@@ -72,8 +74,10 @@ pub mod mock {
 
     use crate::{
         merkle_tree::MerklePath,
-        redjubjub::{PublicKey, Signature},
-        sapling::Node,
+        sapling::{
+            redjubjub::{PublicKey, Signature},
+            Node,
+        },
         transaction::components::{Amount, GROTH_PROOF_SIZE},
     };
 
