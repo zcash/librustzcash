@@ -73,6 +73,7 @@ and this library adheres to Rust's notion of
   - `zcash_primitives::zip32::DiversifierIndex: Default`
 
 ### Changed
+- MSRV is now 1.47.0.
 - Trial decryption using the APIs in `zcash_primitives::note_encryption` is now
   over 60% faster at detecting which notes are relevant.
   - Part of this improvement was achieved by changing the APIs to take `epk` as
