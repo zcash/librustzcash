@@ -6,8 +6,10 @@ use subtle::{ConditionallySelectable, ConstantTimeEq, CtOption};
 use zcash_primitives::{
     consensus::{self, BlockHeight},
     merkle_tree::{CommitmentTree, IncrementalWitness},
-    note_encryption::try_sapling_compact_note_decryption,
-    sapling::{Node, Note, Nullifier, PaymentAddress, SaplingIvk},
+    sapling::{
+        note_encryption::try_sapling_compact_note_decryption, Node, Note, Nullifier,
+        PaymentAddress, SaplingIvk,
+    },
     transaction::TxId,
     zip32::ExtendedFullViewingKey,
 };
@@ -305,8 +307,10 @@ mod tests {
         constants::SPENDING_KEY_GENERATOR,
         memo::MemoBytes,
         merkle_tree::CommitmentTree,
-        note_encryption::SaplingNoteEncryption,
-        sapling::{util::generate_random_rseed, Note, Nullifier, SaplingIvk},
+        sapling::{
+            note_encryption::SaplingNoteEncryption, util::generate_random_rseed, Note, Nullifier,
+            SaplingIvk,
+        },
         transaction::components::Amount,
         zip32::{ExtendedFullViewingKey, ExtendedSpendingKey},
     };

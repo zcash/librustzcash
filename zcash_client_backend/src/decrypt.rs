@@ -3,8 +3,10 @@ use std::collections::HashMap;
 use zcash_primitives::{
     consensus::{self, BlockHeight},
     memo::MemoBytes,
-    note_encryption::{try_sapling_note_decryption, try_sapling_output_recovery},
-    sapling::{Note, PaymentAddress},
+    sapling::{
+        note_encryption::{try_sapling_note_decryption, try_sapling_output_recovery},
+        Note, PaymentAddress,
+    },
     transaction::Transaction,
     zip32::ExtendedFullViewingKey,
 };

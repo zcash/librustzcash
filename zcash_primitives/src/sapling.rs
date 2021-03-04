@@ -2,6 +2,7 @@
 
 pub mod group_hash;
 pub mod keys;
+pub mod note_encryption;
 pub mod pedersen_hash;
 pub mod prover;
 pub mod redjubjub;

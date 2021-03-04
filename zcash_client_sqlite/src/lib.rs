@@ -563,8 +563,10 @@ mod tests {
         block::BlockHash,
         consensus::{BlockHeight, Network, NetworkUpgrade, Parameters},
         memo::MemoBytes,
-        note_encryption::SaplingNoteEncryption,
-        sapling::{util::generate_random_rseed, Note, Nullifier, PaymentAddress},
+        sapling::{
+            note_encryption::SaplingNoteEncryption, util::generate_random_rseed, Note, Nullifier,
+            PaymentAddress,
+        },
         transaction::components::Amount,
         zip32::ExtendedFullViewingKey,
     };

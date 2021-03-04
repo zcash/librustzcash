@@ -155,8 +155,7 @@ mod tests {
         block::BlockHash,
         consensus::BlockHeight,
         legacy::TransparentAddress,
-        note_encryption::try_sapling_output_recovery,
-        sapling::prover::TxProver,
+        sapling::{note_encryption::try_sapling_output_recovery, prover::TxProver},
         transaction::{components::Amount, Transaction},
         zip32::{ExtendedFullViewingKey, ExtendedSpendingKey},
     };

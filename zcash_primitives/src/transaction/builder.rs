@@ -15,10 +15,10 @@ use crate::{
     legacy::TransparentAddress,
     memo::MemoBytes,
     merkle_tree::MerklePath,
-    note_encryption::SaplingNoteEncryption,
     sapling::{
-        keys::OutgoingViewingKey, prover::TxProver, redjubjub::PrivateKey, spend_sig_internal,
-        util::generate_random_rseed_internal, Diversifier, Node, Note, PaymentAddress,
+        keys::OutgoingViewingKey, note_encryption::SaplingNoteEncryption, prover::TxProver,
+        redjubjub::PrivateKey, spend_sig_internal, util::generate_random_rseed_internal,
+        Diversifier, Node, Note, PaymentAddress,
     },
     transaction::{
         components::{
