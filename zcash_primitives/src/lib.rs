@@ -10,7 +10,6 @@
 pub mod block;
 pub mod consensus;
 pub mod constants;
-pub mod group_hash;
 pub mod keys;
 pub mod legacy;
 pub mod memo;

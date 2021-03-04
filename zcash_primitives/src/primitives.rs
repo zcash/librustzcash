@@ -8,7 +8,7 @@ use subtle::{Choice, ConstantTimeEq};
 
 use crate::constants;
 
-use crate::group_hash::group_hash;
+use crate::sapling::group_hash::group_hash;
 
 use crate::pedersen_hash::{pedersen_hash, Personalization};
 

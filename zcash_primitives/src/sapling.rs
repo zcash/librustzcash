@@ -1,5 +1,7 @@
 //! Structs and constants specific to the Sapling shielded pool.
 
+pub mod group_hash;
+
 use crate::{
     constants::SPENDING_KEY_GENERATOR,
     pedersen_hash::{pedersen_hash, Personalization},
