@@ -26,7 +26,7 @@ use blake2b_simd::Params;
 
 use zcash_primitives::{
     extensions::transparent::{Extension, ExtensionTxBuilder, FromPayload, ToPayload},
-    transaction::components::{amount::Amount, OutPoint, TzeOut},
+    transaction::components::{amount::Amount, TzeOut, TzeOutPoint},
 };
 
 /// Types and constants used for Mode 0 (open a channel)
@@ -374,7 +374,7 @@ impl<'a, B: ExtensionTxBuilder<'a>> DemoBuilder<&mut B> {
     /// precondition to the transaction under construction.
     pub fn demo_transfer_to_close(
         &mut self,
-        prevout: (OutPoint, TzeOut),
+        prevout: (TzeOutPoint, TzeOut),
         transfer_amount: Amount,
         preimage_1: [u8; 32],
         hash_2: [u8; 32],
@@ -416,7 +416,7 @@ impl<'a, B: ExtensionTxBuilder<'a>> DemoBuilder<&mut B> {
     /// Add a channel-closing witness to the transaction under construction.
     pub fn demo_close(
         &mut self,
-        prevout: (OutPoint, TzeOut),
+        prevout: (TzeOutPoint, TzeOut),
         preimage_2: [u8; 32],
     ) -> Result<(), DemoBuildError<B::BuildError>> {
         let hash_2 = {
@@ -477,7 +477,7 @@ mod tests {
             builder::Builder,
             components::{
                 amount::{Amount, DEFAULT_FEE},
-                OutPoint, TzeIn, TzeOut,
+                TzeIn, TzeOut, TzeOutPoint,
             },
             Transaction, TransactionData,
         },
@@ -625,7 +625,7 @@ mod tests {
         //
 
         let in_b = TzeIn {
-            prevout: OutPoint::new(tx_a.txid().0, 0),
+            prevout: TzeOutPoint::new(tx_a.txid().0, 0),
             witness: tze::Witness::from(0, &Witness::open(preimage_1)),
         };
         let out_b = TzeOut {
@@ -642,7 +642,7 @@ mod tests {
         //
 
         let in_c = TzeIn {
-            prevout: OutPoint::new(tx_b.txid().0, 0),
+            prevout: TzeOutPoint::new(tx_b.txid().0, 0),
             witness: tze::Witness::from(0, &Witness::close(preimage_2)),
         };
 
@@ -736,7 +736,10 @@ mod tests {
             txn_builder: &mut builder_b,
             extension_id: 0,
         };
-        let prevout_a = (OutPoint::new(tx_a.txid().0, 0), tx_a.tze_outputs[0].clone());
+        let prevout_a = (
+            TzeOutPoint::new(tx_a.txid().0, 0),
+            tx_a.tze_outputs[0].clone(),
+        );
         let value_xfr = value - DEFAULT_FEE;
         db_b.demo_transfer_to_close(prevout_a, value_xfr, preimage_1, h2)
             .map_err(|e| format!("transfer failure: {:?}", e))
@@ -755,7 +758,10 @@ mod tests {
             txn_builder: &mut builder_c,
             extension_id: 0,
         };
-        let prevout_b = (OutPoint::new(tx_a.txid().0, 0), tx_b.tze_outputs[0].clone());
+        let prevout_b = (
+            TzeOutPoint::new(tx_a.txid().0, 0),
+            tx_b.tze_outputs[0].clone(),
+        );
         db_c.demo_close(prevout_b, preimage_2)
             .map_err(|e| format!("close failure: {:?}", e))
             .unwrap();

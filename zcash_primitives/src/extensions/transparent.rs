@@ -1,6 +1,6 @@
 //! Core traits and structs for Transparent Zcash Extensions.
 
-use crate::transaction::components::{Amount, OutPoint, TzeOut};
+use crate::transaction::components::{Amount, TzeOut, TzeOutPoint};
 use std::fmt;
 
 /// Binary parsing capability for TZE preconditions & witnesses.
@@ -178,7 +178,7 @@ pub trait ExtensionTxBuilder<'a> {
         &mut self,
         extension_id: u32,
         mode: u32,
-        prevout: (OutPoint, TzeOut),
+        prevout: (TzeOutPoint, TzeOut),
         witness_builder: WBuilder,
     ) -> Result<(), Self::BuildError>
     where
