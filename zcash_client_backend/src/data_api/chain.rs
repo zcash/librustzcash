@@ -194,7 +194,7 @@ where
 /// [`init_blocks_table`] before this function.
 ///
 /// Scanned blocks are required to be height-sequential. If a block is missing from the
-/// cache, an error will be returned with kind [`ChainInvalid::HeightMismatch`].
+/// cache, an error will be returned with kind [`ChainInvalid::BlockHeightDiscontinuity`].
 ///
 /// # Examples
 ///

@@ -203,6 +203,8 @@ impl TzeIn {
     /// This calls [`write_without_witness`] to serialize witness metadata,
     /// then appends the witness bytes themselves. This is the encoded
     /// form that is used in a serialized transaction.
+    ///
+    /// [`write_without_witness`]: TzeIn::write_without_witness
     pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
         self.write_without_witness(&mut writer)?;
         Vector::write(&mut writer, &self.witness.payload, |w, b| w.write_u8(*b))
