@@ -112,7 +112,7 @@ pub fn init_wallet_db<P>(wdb: &WalletDB<P>) -> Result<(), rusqlite::Error> {
 /// Initialises the data database with the given [`ExtendedFullViewingKey`]s.
 ///
 /// The [`ExtendedFullViewingKey`]s are stored internally and used by other APIs such as
-/// [`get_address`], [`scan_cached_blocks`], and [`create_to_address`]. `extfvks` **MUST**
+/// [`get_address`], [`scan_cached_blocks`], and [`create_spend_to_address`]. `extfvks` **MUST**
 /// be arranged in account-order; that is, the [`ExtendedFullViewingKey`] for ZIP 32
 /// account `i` **MUST** be at `extfvks[i]`.
 ///
@@ -141,8 +141,8 @@ pub fn init_wallet_db<P>(wdb: &WalletDB<P>) -> Result<(), rusqlite::Error> {
 /// ```
 ///
 /// [`get_address`]: crate::wallet::get_address
-/// [`scan_cached_blocks`]: crate::scan::scan_cached_blocks
-/// [`create_to_address`]: crate::transact::create_to_address
+/// [`scan_cached_blocks`]: zcash_client_backend::data_api::chain::scan_cached_blocks
+/// [`create_spend_to_address`]: zcash_client_backend::data_api::wallet::create_spend_to_address
 pub fn init_accounts_table<P: consensus::Parameters>(
     wdb: &WalletDB<P>,
     extfvks: &[ExtendedFullViewingKey],

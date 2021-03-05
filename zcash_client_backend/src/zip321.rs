@@ -5,7 +5,8 @@ use std::fmt;
 use std::str::FromStr;
 
 use nom::{
-    character::complete::char, combinator::all_consuming, multi::separated_list, sequence::preceded,
+    character::complete::char, combinator::all_consuming, multi::separated_list0,
+    sequence::preceded,
 };
 use zcash_primitives::{consensus, transaction::components::Amount};
 
@@ -248,7 +249,7 @@ impl TransactionRequest {
         // Parse the remaining parameters as an undifferentiated list
         let (_, xs) = all_consuming(preceded(
             char('?'),
-            separated_list(char('&'), parse::zcashparam(params)),
+            separated_list0(char('&'), parse::zcashparam(params)),
         ))(rest)
         .map_err(|e| e.to_string())?;
 

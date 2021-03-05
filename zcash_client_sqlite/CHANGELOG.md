@@ -20,6 +20,7 @@ same as before, but have been reorganized.
 - `zcash_client_sqlite::NoteId`
 
 ### Changed
+- MSRV is now 1.47.0.
 - APIs now take `&BlockDB` and `&WalletDB<P>` arguments, instead of paths to the
   block cache and wallet databases.
 - The library no longer uses the `mainnet` feature flag to specify the network

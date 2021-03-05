@@ -22,6 +22,8 @@ use crate::wallet::{AccountId, WalletShieldedOutput, WalletShieldedSpend, Wallet
 ///
 /// The given [`CommitmentTree`] and existing [`IncrementalWitness`]es are incremented
 /// with this output's commitment.
+///
+/// [`ExtendedFullViewingKey`]: zcash_primitives::zip32::ExtendedFullViewingKey
 #[allow(clippy::too_many_arguments)]
 fn scan_output<P: consensus::Parameters>(
     params: &P,
@@ -87,6 +89,8 @@ fn scan_output<P: consensus::Parameters>(
 ///
 /// The given [`CommitmentTree`] and existing [`IncrementalWitness`]es are
 /// incremented appropriately.
+///
+/// [`ExtendedFullViewingKey`]: zcash_primitives::zip32::ExtendedFullViewingKey
 pub fn scan_block<P: consensus::Parameters>(
     params: &P,
     block: CompactBlock,

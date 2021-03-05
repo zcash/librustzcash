@@ -25,6 +25,7 @@ and this library adheres to Rust's notion of
 - `zcash_proofs::sapling::SaplingVerificationContext: Default`
 
 ### Changed
+- MSRV is now 1.47.0.
 - `zcash_proofs::load_parameters` now returns `ZcashParameters`.
 
 ## [0.4.0] - 2020-09-09

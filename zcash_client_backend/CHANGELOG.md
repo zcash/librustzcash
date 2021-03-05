@@ -16,6 +16,7 @@ and this library adheres to Rust's notion of
 - First alpha of TZE support, behind the `zfuture` feature flag.
 
 ### Changed
+- MSRV is now 1.47.0.
 - `epk` fields and return values were changed from a `jubjub::SubgroupPoint` to
   a `jubjub::ExtendedPoint`, to match the change to the `zcash_primitives`
   decryption APIs:

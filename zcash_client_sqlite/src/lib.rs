@@ -22,7 +22,7 @@
 //! default, the light client is configured for use with the Zcash testnet.
 //!
 //! [`CompactBlock`]: zcash_client_backend::proto::compact_formats::CompactBlock
-//! [`init_cache_database`]: crate::init::init_cache_database
+//! [`init_cache_database`]: crate::chain::init::init_cache_database
 
 use std::collections::HashMap;
 use std::fmt;
