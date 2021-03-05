@@ -8,8 +8,6 @@ use crate::{
 use ff::Field;
 use rand_core::{CryptoRng, RngCore};
 
-pub(crate) mod sha256d;
-
 pub fn hash_to_scalar(persona: &[u8], a: &[u8], b: &[u8]) -> jubjub::Fr {
     let mut hasher = Params::new().hash_length(64).personal(persona).to_state();
     hasher.update(a);

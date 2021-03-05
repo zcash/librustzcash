@@ -583,7 +583,7 @@ mod tests {
         keys::OutgoingViewingKey,
         memo::MemoBytes,
         primitives::{Diversifier, PaymentAddress, Rseed, SaplingIvk, ValueCommitment},
-        util::generate_random_rseed,
+        sapling::util::generate_random_rseed,
     };
 
     fn random_enc_ciphertext<R: RngCore + CryptoRng>(

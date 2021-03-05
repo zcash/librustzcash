@@ -3,12 +3,8 @@
 pub mod group_hash;
 pub mod prover;
 pub mod redjubjub;
+pub mod util;
 
-use crate::{
-    constants::SPENDING_KEY_GENERATOR,
-    pedersen_hash::{pedersen_hash, Personalization},
-    primitives::Note,
-};
 use bitvec::{order::Lsb0, view::AsBits};
 use ff::PrimeField;
 use group::{Curve, GroupEncoding};
@@ -16,8 +12,14 @@ use lazy_static::lazy_static;
 use rand_core::{CryptoRng, RngCore};
 use std::io::{self, Read, Write};
 
+use crate::{
+    constants::SPENDING_KEY_GENERATOR,
+    merkle_tree::Hashable,
+    pedersen_hash::{pedersen_hash, Personalization},
+    primitives::Note,
+};
+
 use self::redjubjub::{PrivateKey, PublicKey, Signature};
-use crate::merkle_tree::Hashable;
 
 pub const SAPLING_COMMITMENT_TREE_DEPTH: usize = 32;
 

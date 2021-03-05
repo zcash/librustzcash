@@ -566,8 +566,8 @@ mod tests {
         memo::MemoBytes,
         note_encryption::SaplingNoteEncryption,
         primitives::{Note, Nullifier, PaymentAddress},
+        sapling::util::generate_random_rseed,
         transaction::components::Amount,
-        util::generate_random_rseed,
         zip32::ExtendedFullViewingKey,
     };
 

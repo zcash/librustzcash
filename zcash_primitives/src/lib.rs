@@ -20,7 +20,6 @@ pub mod primitives;
 pub mod sapling;
 pub mod serialize;
 pub mod transaction;
-pub mod util;
 pub mod zip32;
 
 #[cfg(feature = "zfuture")]

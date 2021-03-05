@@ -308,8 +308,8 @@ mod tests {
         merkle_tree::CommitmentTree,
         note_encryption::SaplingNoteEncryption,
         primitives::{Note, Nullifier, SaplingIvk},
+        sapling::util::generate_random_rseed,
         transaction::components::Amount,
-        util::generate_random_rseed,
         zip32::{ExtendedFullViewingKey, ExtendedSpendingKey},
     };
 

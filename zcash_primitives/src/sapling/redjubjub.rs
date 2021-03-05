@@ -10,7 +10,7 @@ use rand_core::RngCore;
 use std::io::{self, Read, Write};
 use std::ops::{AddAssign, MulAssign, Neg};
 
-use crate::util::hash_to_scalar;
+use super::util::hash_to_scalar;
 
 fn read_scalar<R: Read>(mut reader: R) -> io::Result<jubjub::Fr> {
     let mut s_repr = [0u8; 32];

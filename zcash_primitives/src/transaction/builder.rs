@@ -18,14 +18,16 @@ use crate::{
     merkle_tree::MerklePath,
     note_encryption::SaplingNoteEncryption,
     primitives::{Diversifier, Note, PaymentAddress},
-    sapling::{prover::TxProver, redjubjub::PrivateKey, spend_sig_internal, Node},
+    sapling::{
+        prover::TxProver, redjubjub::PrivateKey, spend_sig_internal,
+        util::generate_random_rseed_internal, Node,
+    },
     transaction::{
         components::{
             amount::Amount, amount::DEFAULT_FEE, OutputDescription, SpendDescription, TxOut,
         },
         signature_hash_data, SignableInput, Transaction, TransactionData, SIGHASH_ALL,
     },
-    util::generate_random_rseed_internal,
     zip32::ExtendedSpendingKey,
 };
 
