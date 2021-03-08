@@ -1,6 +1,8 @@
+mod convert;
 mod encoding;
 mod kind;
 
+pub use convert::{FromAddress, UnsupportedAddress};
 pub use encoding::ParseError;
 
 /// A Zcash address.
@@ -12,7 +14,7 @@ pub struct ZcashAddress {
 
 /// The Zcash network for which an address is encoded.
 #[derive(Debug, PartialEq)]
-enum Network {
+pub enum Network {
     /// Zcash Mainnet.
     Main,
     /// Zcash Testnet.
