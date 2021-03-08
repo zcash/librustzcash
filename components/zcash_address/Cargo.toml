@@ -12,3 +12,5 @@ license = "MIT OR Apache-2.0"
 edition = "2018"
 
 [dependencies]
+bech32 = "0.8"
+bs58 = { version = "0.4", features = ["check"] }
