@@ -7,7 +7,7 @@ use zcash_primitives::{
     consensus::{self, BlockHeight},
     merkle_tree::{CommitmentTree, IncrementalWitness},
     note_encryption::try_sapling_compact_note_decryption,
-    primitives::{Nullifier, SaplingIvk},
+    primitives::{Nullifier, ViewingKey},
     sapling::Node,
     transaction::TxId,
 };
@@ -29,7 +29,7 @@ fn scan_output<P: consensus::Parameters>(
     params: &P,
     height: BlockHeight,
     (index, output): (usize, CompactOutput),
-    ivks: &[(AccountId, SaplingIvk)],
+    vks: &[(AccountId, &ViewingKey)],
     spent_from_accounts: &HashSet<AccountId>,
     tree: &mut CommitmentTree<Node>,
     existing_witnesses: &mut [&mut IncrementalWitness<Node>],
@@ -53,7 +53,8 @@ fn scan_output<P: consensus::Parameters>(
     }
     tree.append(node).unwrap();
 
-    for (account, ivk) in ivks.iter() {
+    for (account, vk) in vks.iter() {
+        let ivk = vk.ivk();
         let (note, to) =
             match try_sapling_compact_note_decryption(params, height, &ivk, &epk, &cmu, &ct) {
                 Some(ret) => ret,
@@ -68,6 +69,9 @@ fn scan_output<P: consensus::Parameters>(
         // - Notes sent from one account to itself.
         let is_change = spent_from_accounts.contains(&account);
 
+        let witness = IncrementalWitness::from_tree(tree);
+        let nf = note.nf(&vk, witness.position() as u64);
+
         return Some(WalletShieldedOutput {
             index,
             cmu,
@@ -76,16 +80,17 @@ fn scan_output<P: consensus::Parameters>(
             note,
             to,
             is_change,
-            witness: IncrementalWitness::from_tree(tree),
+            witness,
+            nf: Some(nf),
         });
     }
     None
 }
 
-/// Scans a [`CompactBlock`] with a set of [`ExtendedFullViewingKey`]s.
+/// Scans a [`CompactBlock`] with a set of [`ViewingKey`]s.
 ///
 /// Returns a vector of [`WalletTx`]s belonging to any of the given
-/// [`ExtendedFullViewingKey`]s, and the corresponding new [`IncrementalWitness`]es.
+/// [`ViewingKey`]s.
 ///
 /// The given [`CommitmentTree`] and existing [`IncrementalWitness`]es are
 /// incremented appropriately.
@@ -94,7 +99,7 @@ fn scan_output<P: consensus::Parameters>(
 pub fn scan_block<P: consensus::Parameters>(
     params: &P,
     block: CompactBlock,
-    ivks: &[(AccountId, SaplingIvk)],
+    vks: &[(AccountId, &ViewingKey)],
     nullifiers: &[(AccountId, Nullifier)],
     tree: &mut CommitmentTree<Node>,
     existing_witnesses: &mut [&mut IncrementalWitness<Node>],
@@ -167,7 +172,7 @@ pub fn scan_block<P: consensus::Parameters>(
                     params,
                     block_height,
                     to_scan,
-                    ivks,
+                    vks,
                     &spent_from_accounts,
                     tree,
                     existing_witnesses,
@@ -334,7 +339,7 @@ mod tests {
         let txs = scan_block(
             &Network::TestNetwork,
             cb,
-            &[(AccountId(0), extfvk.fvk.vk.ivk())],
+            &[(AccountId(0), &extfvk.fvk.vk)],
             &[],
             &mut tree,
             &mut [],
@@ -373,7 +378,7 @@ mod tests {
         let txs = scan_block(
             &Network::TestNetwork,
             cb,
-            &[(AccountId(0), extfvk.fvk.vk.ivk())],
+            &[(AccountId(0), &extfvk.fvk.vk)],
             &[],
             &mut tree,
             &mut [],

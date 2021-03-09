@@ -60,6 +60,7 @@ pub struct WalletShieldedOutput {
     pub to: PaymentAddress,
     pub is_change: bool,
     pub witness: IncrementalWitness<Node>,
+    pub nf: Option<Nullifier>,
 }
 
 pub struct SpendableNote {

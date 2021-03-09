@@ -177,6 +177,33 @@ pub trait WalletRead {
     ) -> Result<Vec<SpendableNote>, Self::Error>;
 }
 
+// /// The subset of information that is relevant to this wallet that has been
+// /// decrypted and extracted from a [CompactBlock].
+// pub struct PrunedBlock {
+//     block_height: BlockHeight,
+//     block_hash: BlockHash,
+//     block_time: u32,
+//     commitment_tree: &CommitmentTree<Node>,
+//     transactions: &Vec<ChainTx>,
+// }
+//
+// pub struct BlockInserted {
+//     witnesses: Vec<(Self::NoteRef, IncrementalWitness<Node>)>
+// }
+//
+//
+//
+//
+// pub trait WalletWrite2: WalletRead {
+//     fn insert_pruned_block(
+//         &mut self,
+//         block: &PrunedBlock
+//     ) -> Result<BlockInserted, Self::Error>;
+//
+//
+//
+// }
+
 /// This trait encapsulates the write capabilities required to update stored
 /// wallet data.
 pub trait WalletWrite: WalletRead {
@@ -243,7 +270,6 @@ pub trait WalletWrite: WalletRead {
     fn put_received_note<T: ShieldedOutput>(
         &mut self,
         output: &T,
-        nf: &Option<Nullifier>,
         tx_ref: Self::TxRef,
     ) -> Result<Self::NoteRef, Self::Error>;
 
@@ -317,6 +343,7 @@ pub trait ShieldedOutput {
     fn note(&self) -> &Note;
     fn memo(&self) -> Option<&Memo>;
     fn is_change(&self) -> Option<bool>;
+    fn nullifier(&self) -> Option<Nullifier>;
 }
 
 impl ShieldedOutput for WalletShieldedOutput {
@@ -338,6 +365,10 @@ impl ShieldedOutput for WalletShieldedOutput {
     fn is_change(&self) -> Option<bool> {
         Some(self.is_change)
     }
+
+    fn nullifier(&self) -> Option<Nullifier> {
+        self.nf.clone()
+    }
 }
 
 impl ShieldedOutput for DecryptedOutput {
@@ -357,6 +388,9 @@ impl ShieldedOutput for DecryptedOutput {
         Some(&self.memo)
     }
     fn is_change(&self) -> Option<bool> {
+        None
+    }
+    fn nullifier(&self) -> Option<Nullifier> {
         None
     }
 }
@@ -537,7 +571,6 @@ pub mod testing {
         fn put_received_note<T: ShieldedOutput>(
             &mut self,
             _output: &T,
-            _nf: &Option<Nullifier>,
             _tx_ref: Self::TxRef,
         ) -> Result<Self::NoteRef, Self::Error> {
             Ok(0u32)

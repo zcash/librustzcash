@@ -59,7 +59,7 @@ where
                 if output.outgoing {
                     up.put_sent_note(&output, tx_ref)?;
                 } else {
-                    up.put_received_note(&output, &None, tx_ref)?;
+                    up.put_received_note(&output, tx_ref)?;
                 }
             }
 

@@ -95,6 +95,7 @@ use zcash_primitives::{
     block::BlockHash,
     consensus::{self, BlockHeight, NetworkUpgrade},
     merkle_tree::CommitmentTree,
+    primitives::Nullifier,
 };
 
 use crate::{
@@ -261,9 +262,9 @@ where
 
     // Fetch the ExtendedFullViewingKeys we are tracking
     let extfvks = data.get_extended_full_viewing_keys()?;
-    let ivks: Vec<_> = extfvks
+    let vks: Vec<_> = extfvks
         .iter()
-        .map(|(a, extfvk)| (*a, extfvk.fvk.vk.ivk()))
+        .map(|(a, extfvk)| (*a, &extfvk.fvk.vk))
         .collect();
 
     // Get the most recent CommitmentTree
@@ -296,7 +297,7 @@ where
             scan_block(
                 params,
                 block,
-                &ivks,
+                &vks,
                 &nullifiers,
                 &mut tree,
                 &mut witness_refs[..],
@@ -332,7 +333,7 @@ where
             // Insert the block into the database.
             up.insert_block(current_height, block_hash, block_time, &tree)?;
 
-            for tx in txs {
+            for tx in &txs {
                 let tx_row = up.put_tx_meta(&tx, current_height)?;
 
                 // Mark notes as spent and remove them from the scanning cache
@@ -340,24 +341,11 @@ where
                     up.mark_spent(tx_row, &spend.nf)?;
                 }
 
-                // remove spent nullifiers from the nullifier set
-                nullifiers
-                    .retain(|(_, nf)| !tx.shielded_spends.iter().any(|spend| &spend.nf == nf));
+                for output in &tx.shielded_outputs {
+                    let received_note_id = up.put_received_note(output, tx_row)?;
 
-                for output in tx.shielded_outputs {
-                    if let Some(extfvk) = &extfvks.get(&output.account) {
-                        let nf = output
-                            .note
-                            .nf(&extfvk.fvk.vk, output.witness.position() as u64);
-
-                        let received_note_id = up.put_received_note(&output, &Some(nf), tx_row)?;
-
-                        // Save witness for note.
-                        witnesses.push((received_note_id, output.witness));
-
-                        // Cache nullifier for note (to detect subsequent spends in this scan).
-                        nullifiers.push((output.account, nf));
-                    }
+                    // Save witness for note.
+                    witnesses.push((received_note_id, output.witness.clone()));
                 }
             }
 
@@ -373,7 +361,20 @@ where
             up.update_expired_notes(last_height)?;
 
             Ok(())
-        })
+        })?;
+
+        let spent_nf: Vec<Nullifier> = txs
+            .iter()
+            .flat_map(|tx| tx.shielded_spends.iter().map(|spend| spend.nf))
+            .collect();
+        nullifiers.retain(|(_, nf)| !spent_nf.contains(nf));
+        nullifiers.extend(txs.iter().flat_map(|tx| {
+            tx.shielded_outputs
+                .iter()
+                .flat_map(|out| out.nf.map(|nf| (out.account, nf)))
+        }));
+
+        Ok(())
     })?;
 
     Ok(())

@@ -427,10 +427,9 @@ impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
     fn put_received_note<T: ShieldedOutput>(
         &mut self,
         output: &T,
-        nf_opt: &Option<Nullifier>,
         tx_ref: Self::TxRef,
     ) -> Result<Self::NoteRef, Self::Error> {
-        wallet::put_received_note(self, output, nf_opt, tx_ref)
+        wallet::put_received_note(self, output, tx_ref)
     }
 
     fn insert_witness(

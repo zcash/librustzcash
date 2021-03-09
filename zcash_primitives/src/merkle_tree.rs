@@ -3,7 +3,6 @@
 use byteorder::{LittleEndian, ReadBytesExt};
 use std::collections::VecDeque;
 use std::io::{self, Read, Write};
-use std::iter;
 
 use crate::sapling::SAPLING_COMMITMENT_TREE_DEPTH;
 use crate::serialize::{Optional, Vector};
@@ -274,17 +273,9 @@ impl<Node: Hashable> IncrementalWitness<Node> {
             .as_ref()
             .map(|c| c.root_inner(self.cursor_depth, PathFiller::empty()));
 
-        let queue = if let Some(node) = cursor_root {
-            self.filled
-                .iter()
-                .cloned()
-                .chain(iter::once(node))
-                .collect()
-        } else {
-            self.filled.iter().cloned().collect()
-        };
-
-        PathFiller { queue }
+        PathFiller {
+            queue: self.filled.iter().cloned().chain(cursor_root).collect(),
+        }
     }
 
     /// Finds the next "depth" of an unfilled subtree.

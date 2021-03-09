@@ -534,7 +534,6 @@ pub fn mark_spent<'a, P>(
 pub fn put_received_note<'a, P, T: ShieldedOutput>(
     stmts: &mut DataConnStmtCache<'a, P>,
     output: &T,
-    nf_opt: &Option<Nullifier>,
     tx_ref: i64,
 ) -> Result<NoteId, SqliteClientError> {
     let rcm = output.note().rcm().to_repr();
@@ -546,7 +545,7 @@ pub fn put_received_note<'a, P, T: ShieldedOutput>(
     let is_change = output.is_change();
     let tx = tx_ref;
     let output_index = output.index() as i64;
-    let nf_bytes = nf_opt.map(|nf| nf.0.to_vec());
+    let nf_bytes = output.nullifier().map(|nf| nf.0.to_vec());
 
     let sql_args: &[(&str, &dyn ToSql)] = &[
         (&":account", &account),
