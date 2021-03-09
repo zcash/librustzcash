@@ -57,9 +57,12 @@ impl FromStr for ZcashAddress {
                         // - Zcash HRPs always start with a 'z'.
                         // - Zcash shielded addresses with diversification have data of
                         //   length 43, but if we added the simple form of detection keys
-                        //   the data would have length 75.
+                        //   the data would have length 75. Alternatively if we switch from a
+                        //   11-byte diversifier to two field elements, that would be 64 bytes.
                         return Err(
-                            if hrp.starts_with('z') && (data.len() == 43 || data.len() == 75) {
+                            if hrp.starts_with('z')
+                                && (data.len() == 43 || data.len() == 64 || data.len() == 75)
+                            {
                                 ParseError::MaybeZcash
                             } else {
                                 ParseError::NotZcash
