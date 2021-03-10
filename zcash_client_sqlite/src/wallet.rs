@@ -644,7 +644,7 @@ pub fn put_sent_note<'a, P: consensus::Parameters>(
             &RecipientAddress::Shielded(output.to.clone()),
             Amount::from_u64(output.note.value)
                 .map_err(|_| SqliteClientError::CorruptedData("Note value invalid.".to_string()))?,
-            Some(output.memo.clone()),
+            &Some(output.memo.clone()),
         )?
     }
 
@@ -658,7 +658,7 @@ pub fn insert_sent_note<'a, P: consensus::Parameters>(
     account: AccountId,
     to: &RecipientAddress,
     value: Amount,
-    memo: Option<Memo>,
+    memo: &Option<Memo>,
 ) -> Result<(), SqliteClientError> {
     let to_str = to.encode(&stmts.wallet_db.params);
     let ivalue: i64 = value.into();
@@ -668,7 +668,7 @@ pub fn insert_sent_note<'a, P: consensus::Parameters>(
         account.0,
         to_str,
         ivalue,
-        memo.map(|m| m.as_bytes().to_vec()),
+        memo.as_ref().map(|m| m.as_bytes().to_vec()),
     ])?;
 
     Ok(())

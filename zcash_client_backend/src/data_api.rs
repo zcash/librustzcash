@@ -177,32 +177,30 @@ pub trait WalletRead {
     ) -> Result<Vec<SpendableNote>, Self::Error>;
 }
 
-// /// The subset of information that is relevant to this wallet that has been
-// /// decrypted and extracted from a [CompactBlock].
-// pub struct PrunedBlock {
-//     block_height: BlockHeight,
-//     block_hash: BlockHash,
-//     block_time: u32,
-//     commitment_tree: &CommitmentTree<Node>,
-//     transactions: &Vec<ChainTx>,
-// }
-//
-// pub struct BlockInserted {
-//     witnesses: Vec<(Self::NoteRef, IncrementalWitness<Node>)>
-// }
-//
-//
-//
-//
-// pub trait WalletWrite2: WalletRead {
-//     fn insert_pruned_block(
-//         &mut self,
-//         block: &PrunedBlock
-//     ) -> Result<BlockInserted, Self::Error>;
-//
-//
-//
-// }
+/// The subset of information that is relevant to this wallet that has been
+/// decrypted and extracted from a [CompactBlock].
+pub struct PrunedBlock<'a> {
+    pub block_height: BlockHeight,
+    pub block_hash: BlockHash,
+    pub block_time: u32,
+    pub commitment_tree: &'a CommitmentTree<Node>,
+    pub transactions: &'a Vec<WalletTx>,
+}
+
+pub struct ReceivedTransaction<'a> {
+    pub tx: &'a Transaction,
+    pub outputs: &'a Vec<DecryptedOutput>,
+}
+
+pub struct SentTransaction<'a> {
+    pub tx: &'a Transaction,
+    pub created: time::OffsetDateTime,
+    pub output_index: usize,
+    pub account: AccountId,
+    pub recipient_address: &'a RecipientAddress,
+    pub value: Amount,
+    pub memo: Option<Memo>,
+}
 
 /// This trait encapsulates the write capabilities required to update stored
 /// wallet data.
@@ -216,14 +214,18 @@ pub trait WalletWrite: WalletRead {
     where
         F: FnOnce(&mut Self) -> Result<A, Self::Error>;
 
-    /// Add the data for a block to the data store.
-    fn insert_block(
+    fn insert_pruned_block(
         &mut self,
-        block_height: BlockHeight,
-        block_hash: BlockHash,
-        block_time: u32,
-        commitment_tree: &CommitmentTree<Node>,
-    ) -> Result<(), Self::Error>;
+        block: &PrunedBlock,
+        updated_witnesses: &[(Self::NoteRef, IncrementalWitness<Node>)],
+    ) -> Result<Vec<(Self::NoteRef, IncrementalWitness<Node>)>, Self::Error>;
+
+    fn store_received_tx(
+        &mut self,
+        received_tx: &ReceivedTransaction,
+    ) -> Result<Self::TxRef, Self::Error>;
+
+    fn store_sent_tx(&mut self, sent_tx: &SentTransaction) -> Result<Self::TxRef, Self::Error>;
 
     /// Rewinds the wallet database to the specified height.
     ///
@@ -240,46 +242,8 @@ pub trait WalletWrite: WalletRead {
     /// There may be restrictions on how far it is possible to rewind.
     fn rewind_to_height(&mut self, block_height: BlockHeight) -> Result<(), Self::Error>;
 
-    /// Add wallet-relevant metadata for a specific transaction to the data
-    /// store.
-    fn put_tx_meta(
-        &mut self,
-        tx: &WalletTx,
-        height: BlockHeight,
-    ) -> Result<Self::TxRef, Self::Error>;
-
-    /// Add a full transaction contents to the data store.
-    fn put_tx_data(
-        &mut self,
-        tx: &Transaction,
-        created_at: Option<time::OffsetDateTime>,
-    ) -> Result<Self::TxRef, Self::Error>;
-
     /// Mark the specified transaction as spent and record the nullifier.
     fn mark_spent(&mut self, tx_ref: Self::TxRef, nf: &Nullifier) -> Result<(), Self::Error>;
-
-    /// Record a note as having been received, along with its nullifier and the transaction
-    /// within which the note was created.
-    ///
-    /// Implementations of this method must be exclusively additive with respect to stored
-    /// data; passing `None` for the nullifier should not be interpreted as deleting nullifier
-    /// information from the underlying store.
-    ///
-    /// Implementations of this method must ensure that attempting to record the same note
-    /// with a different nullifier to that already stored will return an error.
-    fn put_received_note<T: ShieldedOutput>(
-        &mut self,
-        output: &T,
-        tx_ref: Self::TxRef,
-    ) -> Result<Self::NoteRef, Self::Error>;
-
-    /// Add the incremental witness for the specified note to the database.
-    fn insert_witness(
-        &mut self,
-        note_id: Self::NoteRef,
-        witness: &IncrementalWitness<Node>,
-        height: BlockHeight,
-    ) -> Result<(), Self::Error>;
 
     /// Remove all incremental witness data before the specified block height.
     //  TODO: this is a backend-specific optimization that probably shouldn't be part of
@@ -292,26 +256,6 @@ pub trait WalletWrite: WalletRead {
     //  TODO: this is a backend-specific optimization that probably shouldn't be part of
     //  the public API
     fn update_expired_notes(&mut self, from_height: BlockHeight) -> Result<(), Self::Error>;
-
-    /// Add the decrypted contents of a sent note to the database if it does not exist;
-    /// otherwise, update the note. This is useful in the case of a wallet restore where
-    /// the send of the note is being discovered via trial decryption.
-    fn put_sent_note(
-        &mut self,
-        output: &DecryptedOutput,
-        tx_ref: Self::TxRef,
-    ) -> Result<(), Self::Error>;
-
-    /// Add the decrypted contents of a sent note to the database.
-    fn insert_sent_note(
-        &mut self,
-        tx_ref: Self::TxRef,
-        output_index: usize,
-        account: AccountId,
-        to: &RecipientAddress,
-        value: Amount,
-        memo: Option<Memo>,
-    ) -> Result<(), Self::Error>;
 }
 
 /// This trait provides sequential access to raw blockchain data via a callback-oriented
@@ -403,21 +347,21 @@ pub mod testing {
         block::BlockHash,
         consensus::BlockHeight,
         merkle_tree::{CommitmentTree, IncrementalWitness},
-        note_encryption::Memo,
         primitives::{Nullifier, PaymentAddress},
         sapling::Node,
-        transaction::{components::Amount, Transaction, TxId},
+        transaction::{components::Amount, TxId},
         zip32::ExtendedFullViewingKey,
     };
 
     use crate::{
-        address::RecipientAddress,
-        decrypt::DecryptedOutput,
         proto::compact_formats::CompactBlock,
-        wallet::{AccountId, SpendableNote, WalletTx},
+        wallet::{AccountId, SpendableNote},
     };
 
-    use super::{error::Error, BlockSource, ShieldedOutput, WalletRead, WalletWrite};
+    use super::{
+        error::Error, BlockSource, PrunedBlock, ReceivedTransaction, SentTransaction, WalletRead,
+        WalletWrite,
+    };
 
     pub struct MockBlockSource {}
 
@@ -534,54 +478,33 @@ pub mod testing {
             f(self)
         }
 
-        fn insert_block(
+        fn insert_pruned_block(
             &mut self,
-            _block_height: BlockHeight,
-            _block_hash: BlockHash,
-            _block_time: u32,
-            _commitment_tree: &CommitmentTree<Node>,
-        ) -> Result<(), Self::Error> {
-            Ok(())
+            _block: &PrunedBlock,
+            _updated_witnesses: &[(Self::NoteRef, IncrementalWitness<Node>)],
+        ) -> Result<Vec<(Self::NoteRef, IncrementalWitness<Node>)>, Self::Error> {
+            Ok(vec![])
+        }
+
+        fn store_received_tx(
+            &mut self,
+            _received_tx: &ReceivedTransaction,
+        ) -> Result<Self::TxRef, Self::Error> {
+            Ok(TxId([0u8; 32]))
+        }
+
+        fn store_sent_tx(
+            &mut self,
+            _sent_tx: &SentTransaction,
+        ) -> Result<Self::TxRef, Self::Error> {
+            Ok(TxId([0u8; 32]))
         }
 
         fn rewind_to_height(&mut self, _block_height: BlockHeight) -> Result<(), Self::Error> {
             Ok(())
         }
 
-        fn put_tx_meta(
-            &mut self,
-            _tx: &WalletTx,
-            _height: BlockHeight,
-        ) -> Result<Self::TxRef, Self::Error> {
-            Ok(TxId([0u8; 32]))
-        }
-
-        fn put_tx_data(
-            &mut self,
-            _tx: &Transaction,
-            _created_at: Option<time::OffsetDateTime>,
-        ) -> Result<Self::TxRef, Self::Error> {
-            Ok(TxId([0u8; 32]))
-        }
-
         fn mark_spent(&mut self, _tx_ref: Self::TxRef, _nf: &Nullifier) -> Result<(), Self::Error> {
-            Ok(())
-        }
-
-        fn put_received_note<T: ShieldedOutput>(
-            &mut self,
-            _output: &T,
-            _tx_ref: Self::TxRef,
-        ) -> Result<Self::NoteRef, Self::Error> {
-            Ok(0u32)
-        }
-
-        fn insert_witness(
-            &mut self,
-            _note_id: Self::NoteRef,
-            _witness: &IncrementalWitness<Node>,
-            _height: BlockHeight,
-        ) -> Result<(), Self::Error> {
             Ok(())
         }
 
@@ -590,26 +513,6 @@ pub mod testing {
         }
 
         fn update_expired_notes(&mut self, _from_height: BlockHeight) -> Result<(), Self::Error> {
-            Ok(())
-        }
-
-        fn put_sent_note(
-            &mut self,
-            _output: &DecryptedOutput,
-            _tx_ref: Self::TxRef,
-        ) -> Result<(), Self::Error> {
-            Ok(())
-        }
-
-        fn insert_sent_note(
-            &mut self,
-            _tx_ref: Self::TxRef,
-            _output_index: usize,
-            _account: AccountId,
-            _to: &RecipientAddress,
-            _value: Amount,
-            _memo: Option<Memo>,
-        ) -> Result<(), Self::Error> {
             Ok(())
         }
     }

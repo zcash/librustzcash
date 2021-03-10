@@ -101,7 +101,7 @@ use zcash_primitives::{
 use crate::{
     data_api::{
         error::{ChainInvalid, Error},
-        BlockSource, WalletWrite,
+        BlockSource, PrunedBlock, WalletWrite,
     },
     proto::compact_formats::CompactBlock,
     wallet::WalletTx,
@@ -280,13 +280,13 @@ where
 
     cache.with_blocks(last_height, limit, |block: CompactBlock| {
         let current_height = block.height();
+
         // Scanned blocks MUST be height-sequential.
         if current_height != (last_height + 1) {
             return Err(
                 ChainInvalid::block_height_discontinuity(last_height + 1, current_height).into(),
             );
         }
-        last_height = current_height;
 
         let block_hash = BlockHash::from_slice(&block.hash);
         let block_time = block.time;
@@ -310,7 +310,7 @@ where
             let cur_root = tree.root();
             for row in &witnesses {
                 if row.1.root() != cur_root {
-                    return Err(Error::InvalidWitnessAnchor(row.0, last_height).into());
+                    return Err(Error::InvalidWitnessAnchor(row.0, current_height).into());
                 }
             }
             for tx in &txs {
@@ -319,7 +319,7 @@ where
                         return Err(Error::InvalidNewWitnessAnchor(
                             output.index,
                             tx.txid,
-                            last_height,
+                            current_height,
                             output.witness.root(),
                         )
                         .into());
@@ -328,40 +328,22 @@ where
             }
         }
 
-        // database updates for each block are transactional
-        data.transactionally(|up| {
-            // Insert the block into the database.
-            up.insert_block(current_height, block_hash, block_time, &tree)?;
+        let new_witnesses = data.insert_pruned_block(
+            &(PrunedBlock {
+                block_height: current_height,
+                block_hash,
+                block_time,
+                commitment_tree: &tree,
+                transactions: &txs,
+            }),
+            &witnesses,
+        )?;
 
-            for tx in &txs {
-                let tx_row = up.put_tx_meta(&tx, current_height)?;
+        // Prune the stored witnesses (we only expect rollbacks of at most 100 blocks).
+        data.prune_witnesses(current_height - 100)?;
 
-                // Mark notes as spent and remove them from the scanning cache
-                for spend in &tx.shielded_spends {
-                    up.mark_spent(tx_row, &spend.nf)?;
-                }
-
-                for output in &tx.shielded_outputs {
-                    let received_note_id = up.put_received_note(output, tx_row)?;
-
-                    // Save witness for note.
-                    witnesses.push((received_note_id, output.witness.clone()));
-                }
-            }
-
-            // Insert current witnesses into the database.
-            for (received_note_id, witness) in witnesses.iter() {
-                up.insert_witness(*received_note_id, witness, last_height)?;
-            }
-
-            // Prune the stored witnesses (we only expect rollbacks of at most 100 blocks).
-            up.prune_witnesses(last_height - 100)?;
-
-            // Update now-expired transactions that didn't get mined.
-            up.update_expired_notes(last_height)?;
-
-            Ok(())
-        })?;
+        // Update now-expired transactions that didn't get mined.
+        data.update_expired_notes(current_height)?;
 
         let spent_nf: Vec<Nullifier> = txs
             .iter()
@@ -373,6 +355,10 @@ where
                 .iter()
                 .flat_map(|out| out.nf.map(|nf| (out.account, nf)))
         }));
+
+        witnesses.extend(new_witnesses);
+
+        last_height = current_height;
 
         Ok(())
     })?;

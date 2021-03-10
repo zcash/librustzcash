@@ -34,20 +34,19 @@ use zcash_primitives::{
     block::BlockHash,
     consensus::{self, BlockHeight},
     merkle_tree::{CommitmentTree, IncrementalWitness},
-    note_encryption::Memo,
     primitives::{Nullifier, PaymentAddress},
     sapling::Node,
-    transaction::{components::Amount, Transaction, TxId},
+    transaction::{components::Amount, TxId},
     zip32::ExtendedFullViewingKey,
 };
 
 use zcash_client_backend::{
-    address::RecipientAddress,
-    data_api::{BlockSource, ShieldedOutput, WalletRead, WalletWrite},
+    data_api::{
+        BlockSource, PrunedBlock, ReceivedTransaction, SentTransaction, WalletRead, WalletWrite,
+    },
     encoding::encode_payment_address,
     proto::compact_formats::CompactBlock,
-    wallet::{AccountId, SpendableNote, WalletTx},
-    DecryptedOutput,
+    wallet::{AccountId, SpendableNote},
 };
 
 use crate::error::SqliteClientError;
@@ -387,62 +386,108 @@ impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
         }
     }
 
-    fn insert_block(
+    fn insert_pruned_block(
         &mut self,
-        block_height: BlockHeight,
-        block_hash: BlockHash,
-        block_time: u32,
-        commitment_tree: &CommitmentTree<Node>,
-    ) -> Result<(), Self::Error> {
-        wallet::insert_block(self, block_height, block_hash, block_time, commitment_tree)
+        block: &PrunedBlock,
+        updated_witnesses: &[(Self::NoteRef, IncrementalWitness<Node>)],
+    ) -> Result<Vec<(Self::NoteRef, IncrementalWitness<Node>)>, Self::Error> {
+        // database updates for each block are transactional
+        self.transactionally(|up| {
+            // Insert the block into the database.
+            wallet::insert_block(
+                up,
+                block.block_height,
+                block.block_hash,
+                block.block_time,
+                &block.commitment_tree,
+            )?;
+
+            let mut new_witnesses = vec![];
+            for tx in block.transactions {
+                let tx_row = wallet::put_tx_meta(up, &tx, block.block_height)?;
+
+                // Mark notes as spent and remove them from the scanning cache
+                for spend in &tx.shielded_spends {
+                    wallet::mark_spent(up, tx_row, &spend.nf)?;
+                }
+
+                for output in &tx.shielded_outputs {
+                    let received_note_id = wallet::put_received_note(up, output, tx_row)?;
+
+                    // Save witness for note.
+                    new_witnesses.push((received_note_id, output.witness.clone()));
+                }
+            }
+
+            // Insert current new_witnesses into the database.
+            for (received_note_id, witness) in updated_witnesses.iter().chain(new_witnesses.iter())
+            {
+                if let NoteId::ReceivedNoteId(rnid) = *received_note_id {
+                    wallet::insert_witness(up, rnid, witness, block.block_height)?;
+                }
+            }
+
+            Ok(new_witnesses)
+        })
+    }
+
+    fn store_received_tx(
+        &mut self,
+        received_tx: &ReceivedTransaction,
+    ) -> Result<Self::TxRef, Self::Error> {
+        self.transactionally(|up| {
+            let tx_ref = wallet::put_tx_data(up, received_tx.tx, None)?;
+
+            for output in received_tx.outputs {
+                if output.outgoing {
+                    wallet::put_sent_note(up, output, tx_ref)?;
+                } else {
+                    wallet::put_received_note(up, output, tx_ref)?;
+                }
+            }
+
+            Ok(tx_ref)
+        })
+    }
+
+    fn store_sent_tx(&mut self, sent_tx: &SentTransaction) -> Result<Self::TxRef, Self::Error> {
+        // Update the database atomically, to ensure the result is internally consistent.
+        self.transactionally(|up| {
+            let tx_ref = wallet::put_tx_data(up, &sent_tx.tx, Some(sent_tx.created))?;
+
+            // Mark notes as spent.
+            //
+            // This locks the notes so they aren't selected again by a subsequent call to
+            // create_spend_to_address() before this transaction has been mined (at which point the notes
+            // get re-marked as spent).
+            //
+            // Assumes that create_spend_to_address() will never be called in parallel, which is a
+            // reasonable assumption for a light client such as a mobile phone.
+            for spend in &sent_tx.tx.shielded_spends {
+                wallet::mark_spent(up, tx_ref, &spend.nullifier)?;
+            }
+
+            wallet::insert_sent_note(
+                up,
+                tx_ref,
+                sent_tx.output_index,
+                sent_tx.account,
+                sent_tx.recipient_address,
+                sent_tx.value,
+                &sent_tx.memo,
+            )?;
+
+            // Return the row number of the transaction, so the caller can fetch it for sending.
+            Ok(tx_ref)
+        })
     }
 
     fn rewind_to_height(&mut self, block_height: BlockHeight) -> Result<(), Self::Error> {
         wallet::rewind_to_height(self.wallet_db, block_height)
     }
 
-    fn put_tx_meta(
-        &mut self,
-        tx: &WalletTx,
-        height: BlockHeight,
-    ) -> Result<Self::TxRef, Self::Error> {
-        wallet::put_tx_meta(self, tx, height)
-    }
-
-    fn put_tx_data(
-        &mut self,
-        tx: &Transaction,
-        created_at: Option<time::OffsetDateTime>,
-    ) -> Result<Self::TxRef, Self::Error> {
-        wallet::put_tx_data(self, tx, created_at)
-    }
-
     fn mark_spent(&mut self, tx_ref: Self::TxRef, nf: &Nullifier) -> Result<(), Self::Error> {
         wallet::mark_spent(self, tx_ref, nf)
-    }
-
-    // Assumptions:
-    // - A transaction will not contain more than 2^63 shielded outputs.
-    // - A note value will never exceed 2^63 zatoshis.
-    fn put_received_note<T: ShieldedOutput>(
-        &mut self,
-        output: &T,
-        tx_ref: Self::TxRef,
-    ) -> Result<Self::NoteRef, Self::Error> {
-        wallet::put_received_note(self, output, tx_ref)
-    }
-
-    fn insert_witness(
-        &mut self,
-        note_id: Self::NoteRef,
-        witness: &IncrementalWitness<Node>,
-        height: BlockHeight,
-    ) -> Result<(), Self::Error> {
-        if let NoteId::ReceivedNoteId(rnid) = note_id {
-            wallet::insert_witness(self, rnid, witness, height)
-        } else {
-            Err(SqliteClientError::InvalidNoteId)
-        }
     }
 
     fn prune_witnesses(&mut self, below_height: BlockHeight) -> Result<(), Self::Error> {
@@ -451,26 +496,6 @@ impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
 
     fn update_expired_notes(&mut self, height: BlockHeight) -> Result<(), Self::Error> {
         wallet::update_expired_notes(self, height)
-    }
-
-    fn put_sent_note(
-        &mut self,
-        output: &DecryptedOutput,
-        tx_ref: Self::TxRef,
-    ) -> Result<(), Self::Error> {
-        wallet::put_sent_note(self, output, tx_ref)
-    }
-
-    fn insert_sent_note(
-        &mut self,
-        tx_ref: Self::TxRef,
-        output_index: usize,
-        account: AccountId,
-        to: &RecipientAddress,
-        value: Amount,
-        memo: Option<Memo>,
-    ) -> Result<(), Self::Error> {
-        wallet::insert_sent_note(self, tx_ref, output_index, account, to, value, memo)
     }
 }
 

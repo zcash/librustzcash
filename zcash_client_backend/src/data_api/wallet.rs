@@ -15,7 +15,7 @@ use zcash_primitives::{
 
 use crate::{
     address::RecipientAddress,
-    data_api::{error::Error, WalletWrite},
+    data_api::{error::Error, ReceivedTransaction, SentTransaction, WalletWrite},
     decrypt_transaction,
     wallet::{AccountId, OvkPolicy},
 };
@@ -51,20 +51,12 @@ where
     if outputs.is_empty() {
         Ok(())
     } else {
-        // Update the database atomically, to ensure the result is internally consistent.
-        data.transactionally(|up| {
-            let tx_ref = up.put_tx_data(tx, None)?;
+        data.store_received_tx(&ReceivedTransaction {
+            tx,
+            outputs: &outputs,
+        })?;
 
-            for output in outputs {
-                if output.outgoing {
-                    up.put_sent_note(&output, tx_ref)?;
-                } else {
-                    up.put_received_note(&output, tx_ref)?;
-                }
-            }
-
-            Ok(())
-        })
+        Ok(())
     }
 }
 
@@ -243,26 +235,13 @@ where
         None => panic!("Output 0 should exist in the transaction"),
     };
 
-    // Update the database atomically, to ensure the result is internally consistent.
-    wallet_db.transactionally(|up| {
-        let created = time::OffsetDateTime::now_utc();
-        let tx_ref = up.put_tx_data(&tx, Some(created))?;
-
-        // Mark notes as spent.
-        //
-        // This locks the notes so they aren't selected again by a subsequent call to
-        // create_spend_to_address() before this transaction has been mined (at which point the notes
-        // get re-marked as spent).
-        //
-        // Assumes that create_spend_to_address() will never be called in parallel, which is a
-        // reasonable assumption for a light client such as a mobile phone.
-        for spend in &tx.shielded_spends {
-            up.mark_spent(tx_ref, &spend.nullifier)?;
-        }
-
-        up.insert_sent_note(tx_ref, output_index as usize, account, to, value, memo)?;
-
-        // Return the row number of the transaction, so the caller can fetch it for sending.
-        Ok(tx_ref)
+    wallet_db.store_sent_tx(&SentTransaction {
+        tx: &tx,
+        created: time::OffsetDateTime::now_utc(),
+        output_index: output_index as usize,
+        account,
+        recipient_address: to,
+        value,
+        memo,
     })
 }
