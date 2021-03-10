@@ -359,10 +359,10 @@ impl<'a, P: consensus::Parameters> WalletRead for DataConnStmtCache<'a, P> {
     }
 }
 
-impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
-    fn transactionally<F, A>(&mut self, f: F) -> Result<A, Self::Error>
+impl<'a, P: consensus::Parameters> DataConnStmtCache<'a, P> {
+    fn transactionally<F, A>(&mut self, f: F) -> Result<A, SqliteClientError>
     where
-        F: FnOnce(&mut Self) -> Result<A, Self::Error>,
+        F: FnOnce(&mut Self) -> Result<A, SqliteClientError>,
     {
         self.wallet_db.conn.execute("BEGIN IMMEDIATE", NO_PARAMS)?;
         match f(self) {
@@ -385,7 +385,9 @@ impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
             }
         }
     }
+}
 
+impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
     fn insert_pruned_block(
         &mut self,
         block: &PrunedBlock,
@@ -426,6 +428,12 @@ impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
                     wallet::insert_witness(up, rnid, witness, block.block_height)?;
                 }
             }
+
+            // Prune the stored witnesses (we only expect rollbacks of at most 100 blocks).
+            wallet::prune_witnesses(up, block.block_height - 100)?;
+
+            // Update now-expired transactions that didn't get mined.
+            wallet::update_expired_notes(up, block.block_height)?;
 
             Ok(new_witnesses)
         })
@@ -484,18 +492,6 @@ impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
 
     fn rewind_to_height(&mut self, block_height: BlockHeight) -> Result<(), Self::Error> {
         wallet::rewind_to_height(self.wallet_db, block_height)
-    }
-
-    fn mark_spent(&mut self, tx_ref: Self::TxRef, nf: &Nullifier) -> Result<(), Self::Error> {
-        wallet::mark_spent(self, tx_ref, nf)
-    }
-
-    fn prune_witnesses(&mut self, below_height: BlockHeight) -> Result<(), Self::Error> {
-        wallet::prune_witnesses(self, below_height)
-    }
-
-    fn update_expired_notes(&mut self, height: BlockHeight) -> Result<(), Self::Error> {
-        wallet::update_expired_notes(self, height)
     }
 }
 

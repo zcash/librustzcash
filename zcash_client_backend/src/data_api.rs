@@ -205,15 +205,6 @@ pub struct SentTransaction<'a> {
 /// This trait encapsulates the write capabilities required to update stored
 /// wallet data.
 pub trait WalletWrite: WalletRead {
-    /// Perform one or more write operations of this trait transactionally.
-    /// Implementations of this method must ensure that all mutations to the
-    /// state of the data store made by the provided closure must be performed
-    /// atomically and modifications to state must be automatically rolled back
-    /// if the provided closure returns an error.
-    fn transactionally<F, A>(&mut self, f: F) -> Result<A, Self::Error>
-    where
-        F: FnOnce(&mut Self) -> Result<A, Self::Error>;
-
     fn insert_pruned_block(
         &mut self,
         block: &PrunedBlock,
@@ -241,21 +232,6 @@ pub trait WalletWrite: WalletRead {
     ///
     /// There may be restrictions on how far it is possible to rewind.
     fn rewind_to_height(&mut self, block_height: BlockHeight) -> Result<(), Self::Error>;
-
-    /// Mark the specified transaction as spent and record the nullifier.
-    fn mark_spent(&mut self, tx_ref: Self::TxRef, nf: &Nullifier) -> Result<(), Self::Error>;
-
-    /// Remove all incremental witness data before the specified block height.
-    //  TODO: this is a backend-specific optimization that probably shouldn't be part of
-    //  the public API
-    fn prune_witnesses(&mut self, from_height: BlockHeight) -> Result<(), Self::Error>;
-
-    /// Remove the spent marker from any received notes that had been spent in a
-    /// transaction constructed by the wallet, but which transaction had not been mined
-    /// by the specified block height.
-    //  TODO: this is a backend-specific optimization that probably shouldn't be part of
-    //  the public API
-    fn update_expired_notes(&mut self, from_height: BlockHeight) -> Result<(), Self::Error>;
 }
 
 /// This trait provides sequential access to raw blockchain data via a callback-oriented
@@ -471,13 +447,6 @@ pub mod testing {
     }
 
     impl WalletWrite for MockWalletDB {
-        fn transactionally<F, A>(&mut self, f: F) -> Result<A, Self::Error>
-        where
-            F: FnOnce(&mut Self) -> Result<A, Self::Error>,
-        {
-            f(self)
-        }
-
         fn insert_pruned_block(
             &mut self,
             _block: &PrunedBlock,
@@ -501,18 +470,6 @@ pub mod testing {
         }
 
         fn rewind_to_height(&mut self, _block_height: BlockHeight) -> Result<(), Self::Error> {
-            Ok(())
-        }
-
-        fn mark_spent(&mut self, _tx_ref: Self::TxRef, _nf: &Nullifier) -> Result<(), Self::Error> {
-            Ok(())
-        }
-
-        fn prune_witnesses(&mut self, _from_height: BlockHeight) -> Result<(), Self::Error> {
-            Ok(())
-        }
-
-        fn update_expired_notes(&mut self, _from_height: BlockHeight) -> Result<(), Self::Error> {
             Ok(())
         }
     }

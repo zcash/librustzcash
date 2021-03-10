@@ -339,12 +339,6 @@ where
             &witnesses,
         )?;
 
-        // Prune the stored witnesses (we only expect rollbacks of at most 100 blocks).
-        data.prune_witnesses(current_height - 100)?;
-
-        // Update now-expired transactions that didn't get mined.
-        data.update_expired_notes(current_height)?;
-
         let spent_nf: Vec<Nullifier> = txs
             .iter()
             .flat_map(|tx| tx.shielded_spends.iter().map(|spend| spend.nf))
