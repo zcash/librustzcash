@@ -291,7 +291,7 @@ where
         let block_hash = BlockHash::from_slice(&block.hash);
         let block_time = block.time;
 
-        let txs: Vec<WalletTx> = {
+        let txs: Vec<WalletTx<Nullifier>> = {
             let mut witness_refs: Vec<_> = witnesses.iter_mut().map(|w| &mut w.1).collect();
 
             scan_block(
@@ -344,11 +344,10 @@ where
             .flat_map(|tx| tx.shielded_spends.iter().map(|spend| spend.nf))
             .collect();
         nullifiers.retain(|(_, nf)| !spent_nf.contains(nf));
-        nullifiers.extend(txs.iter().flat_map(|tx| {
-            tx.shielded_outputs
-                .iter()
-                .flat_map(|out| out.nf.map(|nf| (out.account, nf)))
-        }));
+        nullifiers.extend(
+            txs.iter()
+                .flat_map(|tx| tx.shielded_outputs.iter().map(|out| (out.account, out.nf))),
+        );
 
         witnesses.extend(new_witnesses);
 

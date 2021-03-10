@@ -30,13 +30,13 @@ impl ConditionallySelectable for AccountId {
 /// A subset of a [`Transaction`] relevant to wallets and light clients.
 ///
 /// [`Transaction`]: zcash_primitives::transaction::Transaction
-pub struct WalletTx {
+pub struct WalletTx<N> {
     pub txid: TxId,
     pub index: usize,
     pub num_spends: usize,
     pub num_outputs: usize,
     pub shielded_spends: Vec<WalletShieldedSpend>,
-    pub shielded_outputs: Vec<WalletShieldedOutput>,
+    pub shielded_outputs: Vec<WalletShieldedOutput<N>>,
 }
 
 /// A subset of a [`SpendDescription`] relevant to wallets and light clients.
@@ -51,7 +51,7 @@ pub struct WalletShieldedSpend {
 /// A subset of an [`OutputDescription`] relevant to wallets and light clients.
 ///
 /// [`OutputDescription`]: zcash_primitives::transaction::components::OutputDescription
-pub struct WalletShieldedOutput {
+pub struct WalletShieldedOutput<N> {
     pub index: usize,
     pub cmu: bls12_381::Scalar,
     pub epk: jubjub::ExtendedPoint,
@@ -60,7 +60,7 @@ pub struct WalletShieldedOutput {
     pub to: PaymentAddress,
     pub is_change: bool,
     pub witness: IncrementalWitness<Node>,
-    pub nf: Option<Nullifier>,
+    pub nf: N,
 }
 
 pub struct SpendableNote {

@@ -388,6 +388,7 @@ impl<'a, P: consensus::Parameters> DataConnStmtCache<'a, P> {
 }
 
 impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
+    #[allow(clippy::type_complexity)]
     fn insert_pruned_block(
         &mut self,
         block: &PrunedBlock,

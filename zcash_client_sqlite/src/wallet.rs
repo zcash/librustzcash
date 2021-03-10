@@ -9,7 +9,7 @@ use zcash_primitives::{
     consensus::{self, BlockHeight, NetworkUpgrade},
     merkle_tree::{CommitmentTree, IncrementalWitness},
     note_encryption::Memo,
-    primitives::{Nullifier, PaymentAddress},
+    primitives::{Note, Nullifier, PaymentAddress},
     sapling::Node,
     transaction::{components::Amount, Transaction, TxId},
     zip32::ExtendedFullViewingKey,
@@ -17,12 +17,12 @@ use zcash_primitives::{
 
 use zcash_client_backend::{
     address::RecipientAddress,
-    data_api::{error::Error, ShieldedOutput},
+    data_api::error::Error,
     encoding::{
         decode_extended_full_viewing_key, decode_payment_address, encode_extended_full_viewing_key,
         encode_payment_address,
     },
-    wallet::{AccountId, WalletTx},
+    wallet::{AccountId, WalletShieldedOutput, WalletTx},
     DecryptedOutput,
 };
 
@@ -30,6 +30,70 @@ use crate::{error::SqliteClientError, DataConnStmtCache, NoteId, WalletDB};
 
 pub mod init;
 pub mod transact;
+
+/// This trait provides a generalization over shielded output representations
+/// that allows a wallet to avoid coupling to a specific one.
+// TODO: it'd probably be better not to unify the definitions of
+// `WalletShieldedOutput` and `DecryptedOutput` via a compositional
+// approach, if possible.
+pub trait ShieldedOutput {
+    fn index(&self) -> usize;
+    fn account(&self) -> AccountId;
+    fn to(&self) -> &PaymentAddress;
+    fn note(&self) -> &Note;
+    fn memo(&self) -> Option<&Memo>;
+    fn is_change(&self) -> Option<bool>;
+    fn nullifier(&self) -> Option<Nullifier>;
+}
+
+impl ShieldedOutput for WalletShieldedOutput<Nullifier> {
+    fn index(&self) -> usize {
+        self.index
+    }
+    fn account(&self) -> AccountId {
+        self.account
+    }
+    fn to(&self) -> &PaymentAddress {
+        &self.to
+    }
+    fn note(&self) -> &Note {
+        &self.note
+    }
+    fn memo(&self) -> Option<&Memo> {
+        None
+    }
+    fn is_change(&self) -> Option<bool> {
+        Some(self.is_change)
+    }
+
+    fn nullifier(&self) -> Option<Nullifier> {
+        Some(self.nf)
+    }
+}
+
+impl ShieldedOutput for DecryptedOutput {
+    fn index(&self) -> usize {
+        self.index
+    }
+    fn account(&self) -> AccountId {
+        self.account
+    }
+    fn to(&self) -> &PaymentAddress {
+        &self.to
+    }
+    fn note(&self) -> &Note {
+        &self.note
+    }
+    fn memo(&self) -> Option<&Memo> {
+        Some(&self.memo)
+    }
+    fn is_change(&self) -> Option<bool> {
+        None
+    }
+    fn nullifier(&self) -> Option<Nullifier> {
+        None
+    }
+}
 
 /// Returns the address for the account.
 ///
@@ -458,9 +522,9 @@ pub fn insert_block<'a, P>(
     Ok(())
 }
 
-pub fn put_tx_meta<'a, P>(
+pub fn put_tx_meta<'a, P, N>(
     stmts: &mut DataConnStmtCache<'a, P>,
-    tx: &WalletTx,
+    tx: &WalletTx<N>,
     height: BlockHeight,
 ) -> Result<i64, SqliteClientError> {
     let txid = tx.txid.0.to_vec();

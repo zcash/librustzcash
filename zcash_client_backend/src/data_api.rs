@@ -9,7 +9,7 @@ use zcash_primitives::{
     consensus::BlockHeight,
     merkle_tree::{CommitmentTree, IncrementalWitness},
     note_encryption::Memo,
-    primitives::{Note, Nullifier, PaymentAddress},
+    primitives::{Nullifier, PaymentAddress},
     sapling::Node,
     transaction::{components::Amount, Transaction, TxId},
     zip32::ExtendedFullViewingKey,
@@ -20,7 +20,7 @@ use crate::{
     data_api::wallet::ANCHOR_OFFSET,
     decrypt::DecryptedOutput,
     proto::compact_formats::CompactBlock,
-    wallet::{AccountId, SpendableNote, WalletShieldedOutput, WalletTx},
+    wallet::{AccountId, SpendableNote, WalletTx},
 };
 
 pub mod chain;
@@ -184,7 +184,7 @@ pub struct PrunedBlock<'a> {
     pub block_hash: BlockHash,
     pub block_time: u32,
     pub commitment_tree: &'a CommitmentTree<Node>,
-    pub transactions: &'a Vec<WalletTx>,
+    pub transactions: &'a Vec<WalletTx<Nullifier>>,
 }
 
 pub struct ReceivedTransaction<'a> {
@@ -205,6 +205,7 @@ pub struct SentTransaction<'a> {
 /// This trait encapsulates the write capabilities required to update stored
 /// wallet data.
 pub trait WalletWrite: WalletRead {
+    #[allow(clippy::type_complexity)]
     fn insert_pruned_block(
         &mut self,
         block: &PrunedBlock,
@@ -249,70 +250,6 @@ pub trait BlockSource {
     ) -> Result<(), Self::Error>
     where
         F: FnMut(CompactBlock) -> Result<(), Self::Error>;
-}
-
-/// This trait provides a generalization over shielded output representations
-/// that allows a wallet to avoid coupling to a specific one.
-// TODO: it'd probably be better not to unify the definitions of
-// `WalletShieldedOutput` and `DecryptedOutput` via a compositional
-// approach, if possible.
-pub trait ShieldedOutput {
-    fn index(&self) -> usize;
-    fn account(&self) -> AccountId;
-    fn to(&self) -> &PaymentAddress;
-    fn note(&self) -> &Note;
-    fn memo(&self) -> Option<&Memo>;
-    fn is_change(&self) -> Option<bool>;
-    fn nullifier(&self) -> Option<Nullifier>;
-}
-
-impl ShieldedOutput for WalletShieldedOutput {
-    fn index(&self) -> usize {
-        self.index
-    }
-    fn account(&self) -> AccountId {
-        self.account
-    }
-    fn to(&self) -> &PaymentAddress {
-        &self.to
-    }
-    fn note(&self) -> &Note {
-        &self.note
-    }
-    fn memo(&self) -> Option<&Memo> {
-        None
-    }
-    fn is_change(&self) -> Option<bool> {
-        Some(self.is_change)
-    }
-
-    fn nullifier(&self) -> Option<Nullifier> {
-        self.nf.clone()
-    }
-}
-
-impl ShieldedOutput for DecryptedOutput {
-    fn index(&self) -> usize {
-        self.index
-    }
-    fn account(&self) -> AccountId {
-        self.account
-    }
-    fn to(&self) -> &PaymentAddress {
-        &self.to
-    }
-    fn note(&self) -> &Note {
-        &self.note
-    }
-    fn memo(&self) -> Option<&Memo> {
-        Some(&self.memo)
-    }
-    fn is_change(&self) -> Option<bool> {
-        None
-    }
-    fn nullifier(&self) -> Option<Nullifier> {
-        None
-    }
 }
 
 #[cfg(feature = "test-dependencies")]
@@ -447,6 +384,7 @@ pub mod testing {
     }
 
     impl WalletWrite for MockWalletDB {
+        #[allow(clippy::type_complexity)]
         fn insert_pruned_block(
             &mut self,
             _block: &PrunedBlock,
