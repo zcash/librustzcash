@@ -206,7 +206,7 @@ pub struct SentTransaction<'a> {
 /// wallet data.
 pub trait WalletWrite: WalletRead {
     #[allow(clippy::type_complexity)]
-    fn insert_pruned_block(
+    fn advance_by_block(
         &mut self,
         block: &PrunedBlock,
         updated_witnesses: &[(Self::NoteRef, IncrementalWitness<Node>)],
@@ -385,7 +385,7 @@ pub mod testing {
 
     impl WalletWrite for MockWalletDB {
         #[allow(clippy::type_complexity)]
-        fn insert_pruned_block(
+        fn advance_by_block(
             &mut self,
             _block: &PrunedBlock,
             _updated_witnesses: &[(Self::NoteRef, IncrementalWitness<Node>)],

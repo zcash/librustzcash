@@ -96,6 +96,7 @@ use zcash_primitives::{
     consensus::{self, BlockHeight, NetworkUpgrade},
     merkle_tree::CommitmentTree,
     primitives::Nullifier,
+    zip32::ExtendedFullViewingKey,
 };
 
 use crate::{
@@ -104,7 +105,7 @@ use crate::{
         BlockSource, PrunedBlock, WalletWrite,
     },
     proto::compact_formats::CompactBlock,
-    wallet::WalletTx,
+    wallet::{AccountId, WalletTx},
     welding_rig::scan_block,
 };
 
@@ -262,10 +263,7 @@ where
 
     // Fetch the ExtendedFullViewingKeys we are tracking
     let extfvks = data.get_extended_full_viewing_keys()?;
-    let vks: Vec<_> = extfvks
-        .iter()
-        .map(|(a, extfvk)| (*a, &extfvk.fvk.vk))
-        .collect();
+    let extfvks: Vec<(&AccountId, &ExtendedFullViewingKey)> = extfvks.iter().collect();
 
     // Get the most recent CommitmentTree
     let mut tree = data
@@ -297,7 +295,7 @@ where
             scan_block(
                 params,
                 block,
-                &vks,
+                &extfvks,
                 &nullifiers,
                 &mut tree,
                 &mut witness_refs[..],
@@ -328,7 +326,7 @@ where
             }
         }
 
-        let new_witnesses = data.insert_pruned_block(
+        let new_witnesses = data.advance_by_block(
             &(PrunedBlock {
                 block_height: current_height,
                 block_hash,

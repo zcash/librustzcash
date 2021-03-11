@@ -389,7 +389,7 @@ impl<'a, P: consensus::Parameters> DataConnStmtCache<'a, P> {
 
 impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
     #[allow(clippy::type_complexity)]
-    fn insert_pruned_block(
+    fn advance_by_block(
         &mut self,
         block: &PrunedBlock,
         updated_witnesses: &[(Self::NoteRef, IncrementalWitness<Node>)],
@@ -427,6 +427,8 @@ impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
             {
                 if let NoteId::ReceivedNoteId(rnid) = *received_note_id {
                     wallet::insert_witness(up, rnid, witness, block.block_height)?;
+                } else {
+                    return Err(SqliteClientError::InvalidNoteId);
                 }
             }
 

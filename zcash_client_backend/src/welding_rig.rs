@@ -7,9 +7,10 @@ use zcash_primitives::{
     consensus::{self, BlockHeight},
     merkle_tree::{CommitmentTree, IncrementalWitness},
     note_encryption::try_sapling_compact_note_decryption,
-    primitives::{Note, Nullifier, PaymentAddress, SaplingIvk, ViewingKey},
+    primitives::{Note, Nullifier, PaymentAddress, SaplingIvk},
     sapling::Node,
     transaction::TxId,
+    zip32::ExtendedFullViewingKey,
 };
 
 use crate::proto::compact_formats::{CompactBlock, CompactOutput};
@@ -22,14 +23,12 @@ use crate::wallet::{AccountId, WalletShieldedOutput, WalletShieldedSpend, Wallet
 ///
 /// The given [`CommitmentTree`] and existing [`IncrementalWitness`]es are incremented
 /// with this output's commitment.
-///
-/// [`ExtendedFullViewingKey`]: zcash_primitives::zip32::ExtendedFullViewingKey
 #[allow(clippy::too_many_arguments)]
 fn scan_output<P: consensus::Parameters, K: ScanningKey>(
     params: &P,
     height: BlockHeight,
     (index, output): (usize, CompactOutput),
-    vks: &[(AccountId, &K)],
+    vks: &[(&AccountId, &K)],
     spent_from_accounts: &HashSet<AccountId>,
     tree: &mut CommitmentTree<Node>,
     existing_witnesses: &mut [&mut IncrementalWitness<Node>],
@@ -74,7 +73,7 @@ fn scan_output<P: consensus::Parameters, K: ScanningKey>(
             index,
             cmu,
             epk,
-            account: *account,
+            account: **account,
             note,
             to,
             is_change,
@@ -86,6 +85,8 @@ fn scan_output<P: consensus::Parameters, K: ScanningKey>(
     None
 }
 
+/// A key that can be used to perform trial decryption and nullifier
+/// computation for a Sapling [`ShieldedOutput`]
 pub trait ScanningKey {
     type Nf;
 
@@ -101,7 +102,7 @@ pub trait ScanningKey {
     fn nf(&self, note: &Note, witness: &IncrementalWitness<Node>) -> Self::Nf;
 }
 
-impl ScanningKey for ViewingKey {
+impl ScanningKey for ExtendedFullViewingKey {
     type Nf = Nullifier;
 
     fn try_decryption<P: consensus::Parameters>(
@@ -112,11 +113,11 @@ impl ScanningKey for ViewingKey {
         cmu: &bls12_381::Scalar,
         ct: &[u8],
     ) -> Option<(Note, PaymentAddress)> {
-        try_sapling_compact_note_decryption(params, height, &self.ivk(), &epk, &cmu, &ct)
+        try_sapling_compact_note_decryption(params, height, &self.fvk.vk.ivk(), &epk, &cmu, &ct)
     }
 
     fn nf(&self, note: &Note, witness: &IncrementalWitness<Node>) -> Self::Nf {
-        note.nf(self, witness.position() as u64)
+        note.nf(&self.fvk.vk, witness.position() as u64)
     }
 }
 
@@ -137,7 +138,7 @@ impl ScanningKey for SaplingIvk {
     fn nf(&self, _note: &Note, _witness: &IncrementalWitness<Node>) {}
 }
 
-/// Scans a [`CompactBlock`] with a set of [`ScanningKeys`]s.
+/// Scans a [`CompactBlock`] with a set of [`ScanningKey`]s.
 ///
 /// Returns a vector of [`WalletTx`]s belonging to any of the given
 /// [`ScanningKey`]s. If scanning with a full viewing key, the nullifiers
@@ -148,7 +149,7 @@ impl ScanningKey for SaplingIvk {
 pub fn scan_block<P: consensus::Parameters, K: ScanningKey>(
     params: &P,
     block: CompactBlock,
-    vks: &[(AccountId, &K)],
+    vks: &[(&AccountId, &K)],
     nullifiers: &[(AccountId, Nullifier)],
     tree: &mut CommitmentTree<Node>,
     existing_witnesses: &mut [&mut IncrementalWitness<Node>],
@@ -388,7 +389,7 @@ mod tests {
         let txs = scan_block(
             &Network::TestNetwork,
             cb,
-            &[(AccountId(0), &extfvk.fvk.vk)],
+            &[(&AccountId(0), &extfvk)],
             &[],
             &mut tree,
             &mut [],
@@ -427,7 +428,7 @@ mod tests {
         let txs = scan_block(
             &Network::TestNetwork,
             cb,
-            &[(AccountId(0), &extfvk.fvk.vk)],
+            &[(&AccountId(0), &extfvk)],
             &[],
             &mut tree,
             &mut [],
@@ -457,7 +458,7 @@ mod tests {
 
         let cb = fake_compact_block(1u32.into(), nf, extfvk, Amount::from_u64(5).unwrap(), false);
         assert_eq!(cb.vtx.len(), 2);
-        let vks: Vec<(AccountId, &SaplingIvk)> = vec![];
+        let vks: Vec<(&AccountId, &SaplingIvk)> = vec![];
 
         let mut tree = CommitmentTree::empty();
         let txs = scan_block(
