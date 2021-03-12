@@ -33,6 +33,7 @@ impl Error for ParseError {}
 impl FromStr for ZcashAddress {
     type Err = ParseError;
 
+    /// Attempts to parse the given string as a Zcash address.
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         // Remove leading and trailing whitespace, to handle copy-paste errors.
         let s = s.trim();
