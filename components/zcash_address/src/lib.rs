@@ -70,4 +70,14 @@ impl ZcashAddress {
     pub fn try_from_encoded(s: &str) -> Result<Self, ParseError> {
         s.parse()
     }
+
+    pub fn convert<T: FromAddress>(self) -> Result<T, UnsupportedAddress> {
+        match self.kind {
+            AddressKind::Sprout(data) => T::from_sprout(self.net, data),
+            AddressKind::Sapling(data) => T::from_sapling(self.net, data),
+            AddressKind::Orchard(data) => T::from_orchard(self.net, data),
+            AddressKind::P2pkh(data) => T::from_transparent_p2pkh(self.net, data),
+            AddressKind::P2sh(data) => T::from_transparent_p2sh(self.net, data),
+        }
+    }
 }

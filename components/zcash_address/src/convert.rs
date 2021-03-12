@@ -1,6 +1,6 @@
 use std::{error::Error, fmt};
 
-use crate::{kind::*, AddressKind, Network, ZcashAddress};
+use crate::{kind::*, Network};
 
 /// An address type is not supported for conversion.
 #[derive(Debug)]
@@ -14,19 +14,9 @@ impl fmt::Display for UnsupportedAddress {
 
 impl Error for UnsupportedAddress {}
 
-impl ZcashAddress {
-    pub fn convert<T: FromAddress>(self) -> Result<T, UnsupportedAddress> {
-        match self.kind {
-            AddressKind::Sprout(data) => T::from_sprout(self.net, data),
-            AddressKind::Sapling(data) => T::from_sapling(self.net, data),
-            AddressKind::Orchard(data) => T::from_orchard(self.net, data),
-            AddressKind::P2pkh(data) => T::from_transparent_p2pkh(self.net, data),
-            AddressKind::P2sh(data) => T::from_transparent_p2sh(self.net, data),
-        }
-    }
-}
-
 /// A helper trait for converting a [`ZcashAddress`] into another type.
+///
+/// [`ZcashAddress`]: crate::ZcashAddress
 ///
 /// # Examples
 ///
