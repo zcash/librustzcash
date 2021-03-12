@@ -71,6 +71,18 @@ impl ZcashAddress {
         s.parse()
     }
 
+    /// Converts this address into another type.
+    ///
+    /// `convert` can convert into any type that implements the [`FromAddress`] trait.
+    /// This enables `ZcashAddress` to be used as a common parsing and serialization
+    /// interface for Zcash addresses, while delegating operations on those addresses
+    /// (such as constructing transactions) to downstream crates.
+    ///
+    /// If you want to get the encoded string for this address, use the [`Display`]
+    /// implementation instead via [`address.to_string()`].
+    ///
+    /// [`Display`]: std::fmt::Display
+    /// [`address.to_string()`]: std::string::ToString
     pub fn convert<T: FromAddress>(self) -> Result<T, UnsupportedAddress> {
         match self.kind {
             AddressKind::Sprout(data) => T::from_sprout(self.net, data),
