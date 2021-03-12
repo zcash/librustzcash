@@ -2,7 +2,7 @@ mod convert;
 mod encoding;
 mod kind;
 
-pub use convert::{FromAddress, UnsupportedAddress};
+pub use convert::{FromAddress, ToAddress, UnsupportedAddress};
 pub use encoding::ParseError;
 
 /// A Zcash address.

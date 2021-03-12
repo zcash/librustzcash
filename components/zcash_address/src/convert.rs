@@ -1,6 +1,6 @@
 use std::{error::Error, fmt};
 
-use crate::{kind::*, Network};
+use crate::{kind::*, AddressKind, Network, ZcashAddress};
 
 /// An address type is not supported for conversion.
 #[derive(Debug)]
@@ -73,4 +73,103 @@ pub trait FromAddress: Sized {
         let _ = (net, data);
         Err(UnsupportedAddress("transparent P2SH"))
     }
+}
+
+/// A helper trait for converting another type into a [`ZcashAddress`].
+///
+/// This trait is sealed and cannot be implemented for types outside this crate. Its
+/// purpose is to move these conversion functions out of the main `ZcashAddress` API
+/// documentation, as they are only required when creating addresses (rather than when
+/// parsing addresses, which is a more common occurrence).
+///
+/// [`ZcashAddress`]: crate::ZcashAddress
+///
+/// # Examples
+///
+/// ```
+/// use zcash_address::{ToAddress, Network, ZcashAddress};
+///
+/// #[derive(Debug)]
+/// struct MySapling([u8; 43]);
+///
+/// impl MySapling {
+///     /// Encodes this Sapling address for the given network.
+///     fn encode(&self, net: Network) -> ZcashAddress {
+///         ZcashAddress::from_sapling(net, self.0)
+///     }
+/// }
+///
+/// let addr = MySapling([0; 43]);
+/// let encoded = addr.encode(Network::Main);
+/// assert_eq!(
+///     encoded.to_string(),
+///     "zs1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqpq6d8g",
+/// );
+/// ```
+pub trait ToAddress: private::Sealed {
+    fn from_sprout(net: Network, data: sprout::Data) -> Self;
+
+    fn from_sapling(net: Network, data: sapling::Data) -> Self;
+
+    fn from_orchard(net: Network, data: orchard::Data) -> Self;
+
+    fn from_transparent_p2pkh(net: Network, data: p2pkh::Data) -> Self;
+
+    fn from_transparent_p2sh(net: Network, data: p2sh::Data) -> Self;
+}
+
+impl ToAddress for ZcashAddress {
+    fn from_sprout(net: Network, data: sprout::Data) -> Self {
+        ZcashAddress {
+            net: if let Network::Regtest = net {
+                Network::Test
+            } else {
+                net
+            },
+            kind: AddressKind::Sprout(data),
+        }
+    }
+
+    fn from_sapling(net: Network, data: sapling::Data) -> Self {
+        ZcashAddress {
+            net,
+            kind: AddressKind::Sapling(data),
+        }
+    }
+
+    fn from_orchard(net: Network, data: orchard::Data) -> Self {
+        ZcashAddress {
+            net,
+            kind: AddressKind::Orchard(data),
+        }
+    }
+
+    fn from_transparent_p2pkh(net: Network, data: p2pkh::Data) -> Self {
+        ZcashAddress {
+            net: if let Network::Regtest = net {
+                Network::Test
+            } else {
+                net
+            },
+            kind: AddressKind::P2pkh(data),
+        }
+    }
+
+    fn from_transparent_p2sh(net: Network, data: p2sh::Data) -> Self {
+        ZcashAddress {
+            net: if let Network::Regtest = net {
+                Network::Test
+            } else {
+                net
+            },
+            kind: AddressKind::P2sh(data),
+        }
+    }
+}
+
+mod private {
+    use crate::ZcashAddress;
+
+    pub trait Sealed {}
+    impl Sealed for ZcashAddress {}
 }
