@@ -6,14 +6,14 @@ pub use convert::{FromAddress, UnsupportedAddress};
 pub use encoding::ParseError;
 
 /// A Zcash address.
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct ZcashAddress {
     net: Network,
     kind: AddressKind,
 }
 
 /// The Zcash network for which an address is encoded.
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Network {
     /// Zcash Mainnet.
     Main,
@@ -27,7 +27,7 @@ pub enum Network {
 }
 
 /// Known kinds of Zcash addresses.
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 enum AddressKind {
     Sprout(kind::sprout::Data),
     Sapling(kind::sapling::Data),
