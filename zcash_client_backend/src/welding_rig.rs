@@ -16,10 +16,10 @@ use zcash_primitives::{
 use crate::proto::compact_formats::{CompactBlock, CompactOutput};
 use crate::wallet::{AccountId, WalletShieldedOutput, WalletShieldedSpend, WalletTx};
 
-/// Scans a [`CompactOutput`] with a set of [`ExtendedFullViewingKey`]s.
+/// Scans a [`CompactOutput`] with a set of [`ScanningKey`]s.
 ///
 /// Returns a [`WalletShieldedOutput`] and corresponding [`IncrementalWitness`] if this
-/// output belongs to any of the given [`ExtendedFullViewingKey`]s.
+/// output belongs to any of the given [`ScanningKey`]s.
 ///
 /// The given [`CommitmentTree`] and existing [`IncrementalWitness`]es are incremented
 /// with this output's commitment.
@@ -86,7 +86,9 @@ fn scan_output<P: consensus::Parameters, K: ScanningKey>(
 }
 
 /// A key that can be used to perform trial decryption and nullifier
-/// computation for a Sapling [`ShieldedOutput`]
+/// computation for a Sapling [`CompactOutput`]
+///
+/// [`CompactOutput`]: crate::proto::compact_formats::CompactOutput
 pub trait ScanningKey {
     type Nf;
 
@@ -146,6 +148,20 @@ impl ScanningKey for SaplingIvk {
 ///
 /// The given [`CommitmentTree`] and existing [`IncrementalWitness`]es are
 /// incremented appropriately.
+///
+/// The implementation of [`ScanningKey`] may either support or omit the computation of
+/// the nullifiers for received notes; the implementation for [`ExtendedFullViewingKey`]
+/// will derive the nullifiers for received notes and return them as part of the resulting
+/// [`WalletShieldedOutput`]s, whereas since the implementation for [`SaplingIvk`] cannot 
+/// do so and it will return the unit value in those outputs instead.
+///
+/// [`ExtendedFullViewingKey`]: zcash_primitives::zip32::ExtendedFullViewingKey
+/// [`SaplingIvk`]: zcash_primitives::SaplingIvk
+/// [`CompactBlock`]: crate::proto::compact_formats::CompactBlock
+/// [`ScanningKey`]: self::ScanningKey
+/// [`CommitmentTree`]: zcash_primitives::merkle_tree::CommitmentTree
+/// [`IncrementalWitness`]: zcash_primitives::merkle_tree::IncrementalWitness
+/// [`WalletShieldedOutput`]: crate::wallet::WalletShieldedOutput
 pub fn scan_block<P: consensus::Parameters, K: ScanningKey>(
     params: &P,
     block: CompactBlock,
