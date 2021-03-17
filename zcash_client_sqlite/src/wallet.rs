@@ -9,7 +9,7 @@ use zcash_primitives::{
     consensus::{self, BlockHeight, NetworkUpgrade},
     merkle_tree::{CommitmentTree, IncrementalWitness},
     note_encryption::Memo,
-    primitives::{Nullifier, PaymentAddress},
+    primitives::{Note, Nullifier, PaymentAddress},
     sapling::Node,
     transaction::{components::Amount, Transaction, TxId},
     zip32::ExtendedFullViewingKey,
@@ -17,12 +17,12 @@ use zcash_primitives::{
 
 use zcash_client_backend::{
     address::RecipientAddress,
-    data_api::{error::Error, ShieldedOutput},
+    data_api::error::Error,
     encoding::{
         decode_extended_full_viewing_key, decode_payment_address, encode_extended_full_viewing_key,
         encode_payment_address,
     },
-    wallet::{AccountId, WalletTx},
+    wallet::{AccountId, WalletShieldedOutput, WalletTx},
     DecryptedOutput,
 };
 
@@ -30,6 +30,70 @@ use crate::{error::SqliteClientError, DataConnStmtCache, NoteId, WalletDB};
 
 pub mod init;
 pub mod transact;
+
+/// This trait provides a generalization over shielded output representations
+/// that allows a wallet to avoid coupling to a specific one.
+// TODO: it'd probably be better not to unify the definitions of
+// `WalletShieldedOutput` and `DecryptedOutput` via a compositional
+// approach, if possible.
+pub trait ShieldedOutput {
+    fn index(&self) -> usize;
+    fn account(&self) -> AccountId;
+    fn to(&self) -> &PaymentAddress;
+    fn note(&self) -> &Note;
+    fn memo(&self) -> Option<&Memo>;
+    fn is_change(&self) -> Option<bool>;
+    fn nullifier(&self) -> Option<Nullifier>;
+}
+
+impl ShieldedOutput for WalletShieldedOutput<Nullifier> {
+    fn index(&self) -> usize {
+        self.index
+    }
+    fn account(&self) -> AccountId {
+        self.account
+    }
+    fn to(&self) -> &PaymentAddress {
+        &self.to
+    }
+    fn note(&self) -> &Note {
+        &self.note
+    }
+    fn memo(&self) -> Option<&Memo> {
+        None
+    }
+    fn is_change(&self) -> Option<bool> {
+        Some(self.is_change)
+    }
+
+    fn nullifier(&self) -> Option<Nullifier> {
+        Some(self.nf)
+    }
+}
+
+impl ShieldedOutput for DecryptedOutput {
+    fn index(&self) -> usize {
+        self.index
+    }
+    fn account(&self) -> AccountId {
+        self.account
+    }
+    fn to(&self) -> &PaymentAddress {
+        &self.to
+    }
+    fn note(&self) -> &Note {
+        &self.note
+    }
+    fn memo(&self) -> Option<&Memo> {
+        Some(&self.memo)
+    }
+    fn is_change(&self) -> Option<bool> {
+        None
+    }
+    fn nullifier(&self) -> Option<Nullifier> {
+        None
+    }
+}
 
 /// Returns the address for the account.
 ///
@@ -458,9 +522,9 @@ pub fn insert_block<'a, P>(
     Ok(())
 }
 
-pub fn put_tx_meta<'a, P>(
+pub fn put_tx_meta<'a, P, N>(
     stmts: &mut DataConnStmtCache<'a, P>,
-    tx: &WalletTx,
+    tx: &WalletTx<N>,
     height: BlockHeight,
 ) -> Result<i64, SqliteClientError> {
     let txid = tx.txid.0.to_vec();
@@ -534,7 +598,6 @@ pub fn mark_spent<'a, P>(
 pub fn put_received_note<'a, P, T: ShieldedOutput>(
     stmts: &mut DataConnStmtCache<'a, P>,
     output: &T,
-    nf_opt: &Option<Nullifier>,
     tx_ref: i64,
 ) -> Result<NoteId, SqliteClientError> {
     let rcm = output.note().rcm().to_repr();
@@ -546,7 +609,7 @@ pub fn put_received_note<'a, P, T: ShieldedOutput>(
     let is_change = output.is_change();
     let tx = tx_ref;
     let output_index = output.index() as i64;
-    let nf_bytes = nf_opt.map(|nf| nf.0.to_vec());
+    let nf_bytes = output.nullifier().map(|nf| nf.0.to_vec());
 
     let sql_args: &[(&str, &dyn ToSql)] = &[
         (&":account", &account),
@@ -645,7 +708,7 @@ pub fn put_sent_note<'a, P: consensus::Parameters>(
             &RecipientAddress::Shielded(output.to.clone()),
             Amount::from_u64(output.note.value)
                 .map_err(|_| SqliteClientError::CorruptedData("Note value invalid.".to_string()))?,
-            Some(output.memo.clone()),
+            &Some(output.memo.clone()),
         )?
     }
 
@@ -659,7 +722,7 @@ pub fn insert_sent_note<'a, P: consensus::Parameters>(
     account: AccountId,
     to: &RecipientAddress,
     value: Amount,
-    memo: Option<Memo>,
+    memo: &Option<Memo>,
 ) -> Result<(), SqliteClientError> {
     let to_str = to.encode(&stmts.wallet_db.params);
     let ivalue: i64 = value.into();
@@ -669,7 +732,7 @@ pub fn insert_sent_note<'a, P: consensus::Parameters>(
         account.0,
         to_str,
         ivalue,
-        memo.map(|m| m.as_bytes().to_vec()),
+        memo.as_ref().map(|m| m.as_bytes().to_vec()),
     ])?;
 
     Ok(())

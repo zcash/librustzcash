@@ -95,15 +95,17 @@ use zcash_primitives::{
     block::BlockHash,
     consensus::{self, BlockHeight, NetworkUpgrade},
     merkle_tree::CommitmentTree,
+    primitives::Nullifier,
+    zip32::ExtendedFullViewingKey,
 };
 
 use crate::{
     data_api::{
         error::{ChainInvalid, Error},
-        BlockSource, WalletWrite,
+        BlockSource, PrunedBlock, WalletWrite,
     },
     proto::compact_formats::CompactBlock,
-    wallet::WalletTx,
+    wallet::{AccountId, WalletTx},
     welding_rig::scan_block,
 };
 
@@ -261,10 +263,7 @@ where
 
     // Fetch the ExtendedFullViewingKeys we are tracking
     let extfvks = data.get_extended_full_viewing_keys()?;
-    let ivks: Vec<_> = extfvks
-        .iter()
-        .map(|(a, extfvk)| (*a, extfvk.fvk.vk.ivk()))
-        .collect();
+    let extfvks: Vec<(&AccountId, &ExtendedFullViewingKey)> = extfvks.iter().collect();
 
     // Get the most recent CommitmentTree
     let mut tree = data
@@ -279,24 +278,24 @@ where
 
     cache.with_blocks(last_height, limit, |block: CompactBlock| {
         let current_height = block.height();
+
         // Scanned blocks MUST be height-sequential.
         if current_height != (last_height + 1) {
             return Err(
                 ChainInvalid::block_height_discontinuity(last_height + 1, current_height).into(),
             );
         }
-        last_height = current_height;
 
         let block_hash = BlockHash::from_slice(&block.hash);
         let block_time = block.time;
 
-        let txs: Vec<WalletTx> = {
+        let txs: Vec<WalletTx<Nullifier>> = {
             let mut witness_refs: Vec<_> = witnesses.iter_mut().map(|w| &mut w.1).collect();
 
             scan_block(
                 params,
                 block,
-                &ivks,
+                &extfvks,
                 &nullifiers,
                 &mut tree,
                 &mut witness_refs[..],
@@ -309,7 +308,7 @@ where
             let cur_root = tree.root();
             for row in &witnesses {
                 if row.1.root() != cur_root {
-                    return Err(Error::InvalidWitnessAnchor(row.0, last_height).into());
+                    return Err(Error::InvalidWitnessAnchor(row.0, current_height).into());
                 }
             }
             for tx in &txs {
@@ -318,7 +317,7 @@ where
                         return Err(Error::InvalidNewWitnessAnchor(
                             output.index,
                             tx.txid,
-                            last_height,
+                            current_height,
                             output.witness.root(),
                         )
                         .into());
@@ -327,53 +326,32 @@ where
             }
         }
 
-        // database updates for each block are transactional
-        data.transactionally(|up| {
-            // Insert the block into the database.
-            up.insert_block(current_height, block_hash, block_time, &tree)?;
+        let new_witnesses = data.advance_by_block(
+            &(PrunedBlock {
+                block_height: current_height,
+                block_hash,
+                block_time,
+                commitment_tree: &tree,
+                transactions: &txs,
+            }),
+            &witnesses,
+        )?;
 
-            for tx in txs {
-                let tx_row = up.put_tx_meta(&tx, current_height)?;
+        let spent_nf: Vec<Nullifier> = txs
+            .iter()
+            .flat_map(|tx| tx.shielded_spends.iter().map(|spend| spend.nf))
+            .collect();
+        nullifiers.retain(|(_, nf)| !spent_nf.contains(nf));
+        nullifiers.extend(
+            txs.iter()
+                .flat_map(|tx| tx.shielded_outputs.iter().map(|out| (out.account, out.nf))),
+        );
 
-                // Mark notes as spent and remove them from the scanning cache
-                for spend in &tx.shielded_spends {
-                    up.mark_spent(tx_row, &spend.nf)?;
-                }
+        witnesses.extend(new_witnesses);
 
-                // remove spent nullifiers from the nullifier set
-                nullifiers
-                    .retain(|(_, nf)| !tx.shielded_spends.iter().any(|spend| &spend.nf == nf));
+        last_height = current_height;
 
-                for output in tx.shielded_outputs {
-                    if let Some(extfvk) = &extfvks.get(&output.account) {
-                        let nf = output
-                            .note
-                            .nf(&extfvk.fvk.vk, output.witness.position() as u64);
-
-                        let received_note_id = up.put_received_note(&output, &Some(nf), tx_row)?;
-
-                        // Save witness for note.
-                        witnesses.push((received_note_id, output.witness));
-
-                        // Cache nullifier for note (to detect subsequent spends in this scan).
-                        nullifiers.push((output.account, nf));
-                    }
-                }
-            }
-
-            // Insert current witnesses into the database.
-            for (received_note_id, witness) in witnesses.iter() {
-                up.insert_witness(*received_note_id, witness, last_height)?;
-            }
-
-            // Prune the stored witnesses (we only expect rollbacks of at most 100 blocks).
-            up.prune_witnesses(last_height - 100)?;
-
-            // Update now-expired transactions that didn't get mined.
-            up.update_expired_notes(last_height)?;
-
-            Ok(())
-        })
+        Ok(())
     })?;
 
     Ok(())
