@@ -486,7 +486,7 @@ impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
                 sent_tx.account,
                 sent_tx.recipient_address,
                 sent_tx.value,
-                &sent_tx.memo,
+                sent_tx.memo.as_ref(),
             )?;
 
             // Return the row number of the transaction, so the caller can fetch it for sending.

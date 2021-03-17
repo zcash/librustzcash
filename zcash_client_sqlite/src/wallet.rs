@@ -261,7 +261,7 @@ pub fn get_balance_at<P>(
     }
 }
 
-/// Returns the memo for a received note, if it is known and a valid UTF-8 string.
+/// Returns the memo for a received note.
 ///
 /// The note is identified by its row index in the `received_notes` table within the wdb
 /// database.
@@ -294,7 +294,7 @@ pub fn get_received_memo<P>(wdb: &WalletDB<P>, id_note: i64) -> Result<Memo, Sql
         .map_err(SqliteClientError::from)
 }
 
-/// Returns the memo for a sent note, if it is known and a valid UTF-8 string.
+/// Returns the memo for a sent note.
 ///
 /// The note is identified by its row index in the `sent_notes` table within the wdb
 /// database.
@@ -693,7 +693,7 @@ pub fn put_sent_note<'a, P: consensus::Parameters>(
             &RecipientAddress::Shielded(output.to.clone()),
             Amount::from_u64(output.note.value)
                 .map_err(|_| SqliteClientError::CorruptedData("Note value invalid.".to_string()))?,
-            &Some(output.memo.clone()),
+            Some(&output.memo),
         )?
     }
 
@@ -707,7 +707,7 @@ pub fn insert_sent_note<'a, P: consensus::Parameters>(
     account: AccountId,
     to: &RecipientAddress,
     value: Amount,
-    memo: &Option<MemoBytes>,
+    memo: Option<&MemoBytes>,
 ) -> Result<(), SqliteClientError> {
     let to_str = to.encode(&stmts.wallet_db.params);
     let ivalue: i64 = value.into();
@@ -717,7 +717,7 @@ pub fn insert_sent_note<'a, P: consensus::Parameters>(
         account.0,
         to_str,
         ivalue,
-        memo.as_ref().map(|m| m.as_slice().to_vec()),
+        memo.map(|m| m.as_slice().to_vec()),
     ])?;
 
     Ok(())
