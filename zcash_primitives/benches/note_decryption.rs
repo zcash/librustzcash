@@ -36,7 +36,7 @@ fn bench_note_decryption(c: &mut Criterion) {
         let note = pa.create_note(value, rseed).unwrap();
         let cmu = note.cmu();
 
-        let mut ne = SaplingNoteEncryption::new(None, note, pa, MemoBytes::default(), &mut rng);
+        let mut ne = SaplingNoteEncryption::new(None, note, pa, MemoBytes::empty(), &mut rng);
         let ephemeral_key = ne.epk().clone().into();
         let enc_ciphertext = ne.encrypt_note_plaintext();
         let out_ciphertext = ne.encrypt_outgoing_plaintext(&cv, &cmu);

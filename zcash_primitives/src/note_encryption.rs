@@ -135,7 +135,7 @@ pub fn prf_ock(
 /// let note = to.create_note(value, Rseed::BeforeZip212(rcm)).unwrap();
 /// let cmu = note.cmu();
 ///
-/// let mut enc = SaplingNoteEncryption::new(ovk, note, to, MemoBytes::default(), &mut rng);
+/// let mut enc = SaplingNoteEncryption::new(ovk, note, to, MemoBytes::empty(), &mut rng);
 /// let encCiphertext = enc.encrypt_note_plaintext();
 /// let outCiphertext = enc.encrypt_outgoing_plaintext(&cv.commitment().into(), &cmu);
 /// ```
@@ -681,8 +681,7 @@ mod tests {
         let cmu = note.cmu();
 
         let ovk = OutgoingViewingKey([0; 32]);
-        let mut ne =
-            SaplingNoteEncryption::new(Some(ovk), note, pa, MemoBytes::default(), &mut rng);
+        let mut ne = SaplingNoteEncryption::new(Some(ovk), note, pa, MemoBytes::empty(), &mut rng);
         let epk = ne.epk().clone().into();
         let enc_ciphertext = ne.encrypt_note_plaintext();
         let out_ciphertext = ne.encrypt_outgoing_plaintext(&cv, &cmu);

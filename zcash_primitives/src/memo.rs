@@ -58,14 +58,6 @@ impl fmt::Debug for MemoBytes {
     }
 }
 
-impl Default for MemoBytes {
-    fn default() -> Self {
-        let mut bytes = [0u8; 512];
-        bytes[0] = 0xF6;
-        MemoBytes(Box::new(bytes))
-    }
-}
-
 impl PartialEq for MemoBytes {
     fn eq(&self, rhs: &MemoBytes) -> bool {
         self.0[..] == rhs.0[..]
@@ -87,10 +79,22 @@ impl Ord for MemoBytes {
 }
 
 impl MemoBytes {
-    /// Creates a `MemoBytes` from a slice.
+    /// Creates a `MemoBytes` indicating that no memo is present.
+    pub fn empty() -> Self {
+        let mut bytes = [0u8; 512];
+        bytes[0] = 0xF6;
+        MemoBytes(Box::new(bytes))
+    }
+
+    /// Creates a `MemoBytes` from a slice, exactly as provided.
     ///
     /// Returns an error if the provided slice is longer than 512 bytes. Slices shorter
     /// than 512 bytes are padded with null bytes.
+    ///
+    /// Note that passing an empty slice to this API (or an all-zeroes slice) will result
+    /// in a memo representing an empty string. What you almost certainly want in this
+    /// case is [`MemoBytes::empty`], which uses a specific encoding to indicate that no
+    /// memo is present.
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, Error> {
         if bytes.len() > 512 {
             return Err(Error::TooLong(bytes.len()));
@@ -220,7 +224,7 @@ impl From<&Memo> for MemoBytes {
     /// Serializes the `Memo` per ZIP 302.
     fn from(memo: &Memo) -> Self {
         match memo {
-            Memo::Empty => MemoBytes::default(),
+            Memo::Empty => MemoBytes::empty(),
             Memo::Text(s) => {
                 let mut bytes = [0u8; 512];
                 let s_bytes = s.0.as_bytes();

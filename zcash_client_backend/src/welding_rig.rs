@@ -345,7 +345,7 @@ mod tests {
             Some(extfvk.fvk.ovk),
             note.clone(),
             to,
-            MemoBytes::default(),
+            MemoBytes::empty(),
             &mut rng,
         );
         let cmu = note.cmu().to_repr().as_ref().to_owned();

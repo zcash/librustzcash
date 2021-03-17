@@ -142,7 +142,7 @@ impl SaplingOutput {
             ovk,
             to,
             note,
-            memo: memo.unwrap_or_default(),
+            memo: memo.unwrap_or_else(MemoBytes::empty),
         })
     }
 
