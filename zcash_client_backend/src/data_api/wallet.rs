@@ -205,7 +205,7 @@ where
             .unwrap(); //DiversifyHash would have to unexpectedly return the zero point for this to be None
 
         let note = from
-            .create_note(u64::from(selected.note_value), selected.rseed)
+            .create_note(selected.note_value.into(), selected.rseed)
             .unwrap();
 
         let merkle_path = selected.witness.path().expect("the tree is not empty");

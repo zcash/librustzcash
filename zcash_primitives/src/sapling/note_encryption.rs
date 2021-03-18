@@ -4,13 +4,14 @@ use crate::{
     consensus::{self, BlockHeight, NetworkUpgrade::Canopy, ZIP212_GRACE_PERIOD},
     memo::MemoBytes,
     sapling::{Diversifier, Note, PaymentAddress, Rseed, SaplingIvk},
+    transaction::components::amount::Amount,
 };
 use blake2b_simd::{Hash as Blake2bHash, Params as Blake2bParams};
-use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+use byteorder::{LittleEndian, WriteBytesExt};
 use crypto_api_chachapoly::{ChaCha20Ietf, ChachaPolyIetf};
 use ff::PrimeField;
 use group::{cofactor::CofactorGroup, GroupEncoding};
-use rand_core::{CryptoRng, RngCore};
+use rand_core::RngCore;
 use std::convert::TryInto;
 
 use crate::sapling::keys::OutgoingViewingKey;
@@ -112,10 +113,11 @@ pub fn prf_ock(
 /// use ff::Field;
 /// use rand_core::OsRng;
 /// use zcash_primitives::{
+///     consensus::TestNetwork,
 ///     memo::MemoBytes,
-///     note_encryption::SaplingNoteEncryption,
 ///     sapling::{
 ///         keys::{OutgoingViewingKey, prf_expand},
+///         note_encryption::sapling_note_encryption,
 ///         Diversifier, PaymentAddress, Rseed, ValueCommitment
 ///     },
 /// };
@@ -137,86 +139,208 @@ pub fn prf_ock(
 /// let note = to.create_note(value, Rseed::BeforeZip212(rcm)).unwrap();
 /// let cmu = note.cmu();
 ///
-/// let mut enc = SaplingNoteEncryption::new(ovk, note, to, MemoBytes::empty(), &mut rng);
+/// let mut enc = sapling_note_encryption::<_, TestNetwork>(ovk, note, to, MemoBytes::empty(), &mut rng);
 /// let encCiphertext = enc.encrypt_note_plaintext();
-/// let outCiphertext = enc.encrypt_outgoing_plaintext(&cv.commitment().into(), &cmu);
+/// let outCiphertext = enc.encrypt_outgoing_plaintext(&cv.commitment().into(), &cmu, &mut rng);
 /// ```
-pub struct SaplingNoteEncryption<R: RngCore> {
-    epk: jubjub::SubgroupPoint,
-    esk: jubjub::Fr,
-    note: Note,
-    to: PaymentAddress,
-    memo: MemoBytes,
+pub struct NoteEncryption<D: Domain> {
+    epk: D::EphemeralPublicKey,
+    esk: D::EphemeralSecretKey,
+    note: D::Note,
+    to: D::Recipient,
+    memo: D::Memo,
     /// `None` represents the `ovk = ⊥` case.
-    ovk: Option<OutgoingViewingKey>,
-    rng: R,
+    ovk: Option<D::OutgoingViewingKey>,
 }
 
-impl<R: RngCore + CryptoRng> SaplingNoteEncryption<R> {
-    /// Creates a new encryption context for the given note.
+//FIXME: use constant-time checks for equality
+#[derive(Eq, PartialEq)]
+pub struct EphemeralKeyBytes([u8; 32]);
+
+impl From<[u8; 32]> for EphemeralKeyBytes {
+    fn from(value: [u8; 32]) -> EphemeralKeyBytes {
+        EphemeralKeyBytes(value)
+    }
+}
+
+pub struct NotePlaintextBytes([u8; NOTE_PLAINTEXT_SIZE]);
+pub struct OutPlaintextBytes([u8; OUT_PLAINTEXT_SIZE]);
+
+#[derive(Copy, Clone, PartialEq, Eq)]
+pub enum EpkValidity {
+    Valid,
+    Invalid,
+}
+
+pub trait Domain {
+    type EphemeralSecretKey;
+    type EphemeralPublicKey;
+    type SharedSecret;
+    type SymmetricKey: AsRef<[u8]>;
+    type Note;
+    type Recipient;
+    type DiversifiedTransmissionKey;
+    type IncomingViewingKey;
+    type OutgoingViewingKey;
+    type ValueCommitment;
+    type NoteCommitment;
+    type ExtractedCommitment: Eq;
+    type Memo;
+
+    fn derive_esk(note: &Self::Note) -> Option<Self::EphemeralSecretKey>;
+
+    fn get_pk_d(note: &Self::Note) -> Self::DiversifiedTransmissionKey;
+
+    fn ka_derive_public(
+        note: &Self::Note,
+        esk: &Self::EphemeralSecretKey,
+    ) -> Self::EphemeralPublicKey;
+
+    fn ka_agree_enc(
+        esk: &Self::EphemeralSecretKey,
+        pk_d: &Self::DiversifiedTransmissionKey,
+    ) -> Self::SharedSecret;
+
+    fn ka_agree_dec(
+        ivk: &Self::IncomingViewingKey,
+        epk: &Self::EphemeralPublicKey,
+    ) -> Self::SharedSecret;
+
+    fn kdf(secret: Self::SharedSecret, epk: &Self::EphemeralPublicKey) -> Self::SymmetricKey;
+
+    // for right now, we just need `recipient` to get `d`; in the future when we
+    // can get that from a Sapling note, the recipient parameter will be able
+    // to be removed.
+    fn to_note_plaintext_bytes(
+        note: &Self::Note,
+        recipient: &Self::Recipient,
+        memo: &Self::Memo,
+    ) -> NotePlaintextBytes;
+
+    fn get_ock(
+        ovk: &Self::OutgoingViewingKey,
+        cv: &Self::ValueCommitment,
+        cm: &Self::NoteCommitment,
+        epk: &Self::EphemeralPublicKey,
+    ) -> OutgoingCipherKey;
+
+    fn to_outgoing_plaintext_bytes(
+        note: &Self::Note,
+        esk: &Self::EphemeralSecretKey,
+    ) -> OutPlaintextBytes;
+
+    fn to_epk_bytes(epk: &Self::EphemeralPublicKey) -> EphemeralKeyBytes;
+
+    fn check_epk_bytes<F: Fn(&Self::EphemeralSecretKey) -> EpkValidity>(
+        note: &Self::Note,
+        check: F,
+    ) -> EpkValidity;
+
+    fn extract_note_commitment(note: &Self::Note) -> Self::ExtractedCommitment;
+
+    fn parse_note_plaintext_without_memo(
+        &self,
+        ivk: &Self::IncomingViewingKey,
+        plaintext: &[u8],
+    ) -> Option<(Self::Note, Self::Recipient)>;
+
+    // &self is passed here in anticipation of future changes
+    // to memo handling where the memos may no longer be
+    // part of the note plaintext.
+    fn extract_memo(&self, plaintext: &[u8]) -> Self::Memo;
+}
+
+pub trait ShieldedOutput<'a, D: Domain> {
+    fn ivk(&'a self) -> &'a D::IncomingViewingKey;
+    fn epk(&'a self) -> &'a D::EphemeralPublicKey;
+    fn cmstar(&'a self) -> &'a D::ExtractedCommitment;
+}
+
+pub struct SaplingDomain<P: consensus::Parameters> {
+    params: P,
+    height: BlockHeight,
+}
+
+impl<P: consensus::Parameters> Domain for SaplingDomain<P> {
+    type EphemeralSecretKey = jubjub::Scalar;
+    type EphemeralPublicKey = jubjub::ExtendedPoint;
+    type SharedSecret = jubjub::SubgroupPoint;
+    type SymmetricKey = Blake2bHash;
+    type Note = Note;
+    type Recipient = PaymentAddress;
+    type DiversifiedTransmissionKey = jubjub::SubgroupPoint;
+    type IncomingViewingKey = SaplingIvk;
+    type OutgoingViewingKey = OutgoingViewingKey;
+    type ValueCommitment = jubjub::ExtendedPoint;
+    type NoteCommitment = bls12_381::Scalar;
+    type ExtractedCommitment = [u8; 32];
+    type Memo = MemoBytes;
+
+    fn derive_esk(note: &Self::Note) -> Option<Self::EphemeralSecretKey> {
+        note.derive_esk()
+    }
+
+    fn get_pk_d(note: &Self::Note) -> Self::DiversifiedTransmissionKey {
+        note.pk_d
+    }
+
+    fn ka_derive_public(
+        note: &Self::Note,
+        esk: &Self::EphemeralSecretKey,
+    ) -> Self::EphemeralPublicKey {
+        // epk is an element of jubjub's prime-order subgroup,
+        // but Self::EphemeralPublicKey is a full group element
+        // for efficency of encryption. The conversion here is fine
+        // because the output of this function is only used for
+        // encoding and the byte encoding is unaffected by the conversion.
+        (note.g_d * esk).into()
+    }
+
+    fn ka_agree_enc(
+        esk: &Self::EphemeralSecretKey,
+        pk_d: &Self::DiversifiedTransmissionKey,
+    ) -> Self::SharedSecret {
+        sapling_ka_agree(esk, pk_d.into())
+    }
+
+    fn ka_agree_dec(
+        ivk: &Self::IncomingViewingKey,
+        epk: &Self::EphemeralPublicKey,
+    ) -> Self::SharedSecret {
+        sapling_ka_agree(&ivk.0, epk)
+    }
+
+    /// Sapling KDF for note encryption.
     ///
-    /// Setting `ovk` to `None` represents the `ovk = ⊥` case, where the note cannot be
-    /// recovered by the sender.
-    pub fn new(
-        ovk: Option<OutgoingViewingKey>,
-        note: Note,
-        to: PaymentAddress,
-        memo: MemoBytes,
-        rng: R,
-    ) -> Self {
-        Self::new_internal(ovk, note, to, memo, rng)
-    }
-}
-
-impl<R: RngCore> SaplingNoteEncryption<R> {
-    pub(crate) fn new_internal(
-        ovk: Option<OutgoingViewingKey>,
-        note: Note,
-        to: PaymentAddress,
-        memo: MemoBytes,
-        mut rng: R,
-    ) -> Self {
-        let esk = note.generate_or_derive_esk_internal(&mut rng);
-        let epk = note.g_d * esk;
-
-        SaplingNoteEncryption {
-            epk,
-            esk,
-            note,
-            to,
-            memo,
-            ovk,
-            rng,
-        }
+    /// Implements section 5.4.4.4 of the Zcash Protocol Specification.
+    fn kdf(dhsecret: jubjub::SubgroupPoint, epk: &jubjub::ExtendedPoint) -> Blake2bHash {
+        Blake2bParams::new()
+            .hash_length(32)
+            .personal(KDF_SAPLING_PERSONALIZATION)
+            .to_state()
+            .update(&dhsecret.to_bytes())
+            .update(&epk.to_bytes())
+            .finalize()
     }
 
-    /// Exposes the ephemeral secret key being used to encrypt this note.
-    pub fn esk(&self) -> &jubjub::Fr {
-        &self.esk
-    }
-
-    /// Exposes the ephemeral public key being used to encrypt this note.
-    pub fn epk(&self) -> &jubjub::SubgroupPoint {
-        &self.epk
-    }
-
-    /// Generates `encCiphertext` for this note.
-    pub fn encrypt_note_plaintext(&self) -> [u8; ENC_CIPHERTEXT_SIZE] {
-        let shared_secret = sapling_ka_agree(&self.esk, self.to.pk_d().into());
-        let key = kdf_sapling(shared_secret, &self.epk.into());
-
+    fn to_note_plaintext_bytes(
+        note: &Self::Note,
+        to: &Self::Recipient,
+        memo: &Self::Memo,
+    ) -> NotePlaintextBytes {
         // Note plaintext encoding is defined in section 5.5 of the Zcash Protocol
         // Specification.
         let mut input = [0; NOTE_PLAINTEXT_SIZE];
-        input[0] = match self.note.rseed {
+        input[0] = match note.rseed {
             Rseed::BeforeZip212(_) => 1,
             Rseed::AfterZip212(_) => 2,
         };
-        input[1..12].copy_from_slice(&self.to.diversifier().0);
+        input[1..12].copy_from_slice(&to.diversifier().0);
         (&mut input[12..20])
-            .write_u64::<LittleEndian>(self.note.value)
+            .write_u64::<LittleEndian>(note.value)
             .unwrap();
-        match self.note.rseed {
+
+        match note.rseed {
             Rseed::BeforeZip212(rcm) => {
                 input[20..COMPACT_NOTE_SIZE].copy_from_slice(rcm.to_repr().as_ref());
             }
@@ -224,12 +348,151 @@ impl<R: RngCore> SaplingNoteEncryption<R> {
                 input[20..COMPACT_NOTE_SIZE].copy_from_slice(&rseed);
             }
         }
-        input[COMPACT_NOTE_SIZE..NOTE_PLAINTEXT_SIZE].copy_from_slice(self.memo.as_array());
+
+        input[COMPACT_NOTE_SIZE..NOTE_PLAINTEXT_SIZE].copy_from_slice(&memo.as_array()[..]);
+
+        NotePlaintextBytes(input)
+    }
+
+    fn get_ock(
+        ovk: &Self::OutgoingViewingKey,
+        cv: &Self::ValueCommitment,
+        cmu: &Self::NoteCommitment,
+        epk: &Self::EphemeralPublicKey,
+    ) -> OutgoingCipherKey {
+        prf_ock(ovk, &cv, &cmu, epk)
+    }
+
+    fn to_outgoing_plaintext_bytes(
+        note: &Self::Note,
+        esk: &Self::EphemeralSecretKey,
+    ) -> OutPlaintextBytes {
+        let mut input = [0u8; OUT_PLAINTEXT_SIZE];
+        input[0..32].copy_from_slice(&note.pk_d.to_bytes());
+        input[32..OUT_PLAINTEXT_SIZE].copy_from_slice(esk.to_repr().as_ref());
+
+        OutPlaintextBytes(input)
+    }
+
+    fn to_epk_bytes(epk: &Self::EphemeralPublicKey) -> EphemeralKeyBytes {
+        EphemeralKeyBytes(epk.to_bytes())
+    }
+
+    fn check_epk_bytes<F: FnOnce(&Self::EphemeralSecretKey) -> EpkValidity>(
+        note: &Note,
+        check: F,
+    ) -> EpkValidity {
+        if let Some(derived_esk) = note.derive_esk() {
+            check(&derived_esk)
+        } else {
+            // Before ZIP 212
+            EpkValidity::Valid
+        }
+    }
+
+    fn parse_note_plaintext_without_memo(
+        &self,
+        ivk: &Self::IncomingViewingKey,
+        plaintext: &[u8],
+    ) -> Option<(Self::Note, Self::Recipient)> {
+        assert!(plaintext.len() >= COMPACT_NOTE_SIZE);
+
+        // Check note plaintext version
+        if !plaintext_version_is_valid(&self.params, self.height, plaintext[0]) {
+            return None;
+        }
+
+        // The unwraps below are guaranteed to succeed by the assertion above
+        let diversifier = Diversifier(plaintext[1..12].try_into().unwrap());
+        let value = Amount::from_u64_le_bytes(plaintext[12..20].try_into().unwrap()).ok()?;
+        let r: [u8; 32] = plaintext[20..COMPACT_NOTE_SIZE].try_into().unwrap();
+
+        let rseed = if plaintext[0] == 0x01 {
+            let rcm = jubjub::Fr::from_repr(r)?;
+            Rseed::BeforeZip212(rcm)
+        } else {
+            Rseed::AfterZip212(r)
+        };
+
+        let pk_d = diversifier.g_d()? * ivk.0;
+
+        let to = PaymentAddress::from_parts(diversifier, pk_d)?;
+        let note = to.create_note(value.into(), rseed)?;
+        Some((note, to))
+    }
+
+    fn extract_note_commitment(note: &Self::Note) -> Self::ExtractedCommitment {
+        note.cmu().to_bytes()
+    }
+
+    fn extract_memo(&self, plaintext: &[u8]) -> Self::Memo {
+        MemoBytes::from_bytes(&plaintext[COMPACT_NOTE_SIZE..NOTE_PLAINTEXT_SIZE]).unwrap()
+    }
+}
+
+/// Creates a new encryption context for the given note.
+///
+/// Setting `ovk` to `None` represents the `ovk = ⊥` case, where the note cannot be
+/// recovered by the sender.
+pub fn sapling_note_encryption<R: RngCore, P: consensus::Parameters>(
+    ovk: Option<OutgoingViewingKey>,
+    note: Note,
+    to: PaymentAddress,
+    memo: MemoBytes,
+    rng: &mut R,
+) -> NoteEncryption<SaplingDomain<P>> {
+    let esk = note.generate_or_derive_esk_internal(rng);
+
+    NoteEncryption {
+        epk: SaplingDomain::<P>::ka_derive_public(&note, &esk),
+        esk,
+        note,
+        to,
+        memo,
+        ovk,
+    }
+}
+
+impl<D: Domain> NoteEncryption<D> {
+    pub fn new_internal(
+        ovk: Option<D::OutgoingViewingKey>,
+        note: D::Note,
+        to: D::Recipient,
+        memo: D::Memo,
+    ) -> Self {
+        let esk = D::derive_esk(&note).expect("ZIP 212 is active.");
+
+        NoteEncryption {
+            epk: D::ka_derive_public(&note, &esk),
+            esk,
+            note,
+            to,
+            memo,
+            ovk,
+        }
+    }
+
+    /// Exposes the ephemeral secret key being used to encrypt this note.
+    pub fn esk(&self) -> &D::EphemeralSecretKey {
+        &self.esk
+    }
+
+    /// Exposes the ephemeral public key being used to encrypt this note.
+    pub fn epk(&self) -> &D::EphemeralPublicKey {
+        &self.epk
+    }
+
+    /// Generates `encCiphertext` for this note.
+    pub fn encrypt_note_plaintext(&self) -> [u8; ENC_CIPHERTEXT_SIZE] {
+        let pk_d = D::get_pk_d(&self.note);
+        let shared_secret = D::ka_agree_enc(&self.esk, &pk_d);
+        let key = D::kdf(shared_secret, &self.epk);
+        let input = D::to_note_plaintext_bytes(&self.note, &self.to, &self.memo);
 
         let mut output = [0u8; ENC_CIPHERTEXT_SIZE];
         assert_eq!(
             ChachaPolyIetf::aead_cipher()
-                .seal_to(&mut output, &input, &[], &key.as_bytes(), &[0u8; 12])
+                .seal_to(&mut output, &input.0, &[], key.as_ref(), &[0u8; 12])
                 .unwrap(),
             ENC_CIPHERTEXT_SIZE
         );
@@ -238,17 +501,15 @@ impl<R: RngCore> SaplingNoteEncryption<R> {
     }
 
     /// Generates `outCiphertext` for this note.
-    pub fn encrypt_outgoing_plaintext(
+    pub fn encrypt_outgoing_plaintext<R: RngCore>(
         &mut self,
-        cv: &jubjub::ExtendedPoint,
-        cmu: &bls12_381::Scalar,
+        cv: &D::ValueCommitment,
+        cm: &D::NoteCommitment,
+        rng: &mut R,
     ) -> [u8; OUT_CIPHERTEXT_SIZE] {
         let (ock, input) = if let Some(ovk) = &self.ovk {
-            let ock = prf_ock(ovk, &cv, &cmu, &self.epk.into());
-
-            let mut input = [0u8; OUT_PLAINTEXT_SIZE];
-            input[0..32].copy_from_slice(&self.note.pk_d.to_bytes());
-            input[32..OUT_PLAINTEXT_SIZE].copy_from_slice(self.esk.to_repr().as_ref());
+            let ock = D::get_ock(ovk, &cv, &cm, &self.epk);
+            let input = D::to_outgoing_plaintext_bytes(&self.note, &self.esk);
 
             (ock, input)
         } else {
@@ -256,72 +517,22 @@ impl<R: RngCore> SaplingNoteEncryption<R> {
             let mut ock = OutgoingCipherKey([0; 32]);
             let mut input = [0u8; OUT_PLAINTEXT_SIZE];
 
-            self.rng.fill_bytes(&mut ock.0);
-            self.rng.fill_bytes(&mut input);
+            rng.fill_bytes(&mut ock.0);
+            rng.fill_bytes(&mut input);
 
-            (ock, input)
+            (ock, OutPlaintextBytes(input))
         };
 
         let mut output = [0u8; OUT_CIPHERTEXT_SIZE];
         assert_eq!(
             ChachaPolyIetf::aead_cipher()
-                .seal_to(&mut output, &input, &[], ock.as_ref(), &[0u8; 12])
+                .seal_to(&mut output, &input.0, &[], ock.as_ref(), &[0u8; 12])
                 .unwrap(),
             OUT_CIPHERTEXT_SIZE
         );
 
         output
     }
-}
-
-fn parse_note_plaintext_without_memo<P: consensus::Parameters>(
-    params: &P,
-    height: BlockHeight,
-    ivk: &SaplingIvk,
-    epk: &jubjub::ExtendedPoint,
-    cmu: &bls12_381::Scalar,
-    plaintext: &[u8],
-) -> Option<(Note, PaymentAddress)> {
-    // Check note plaintext version
-    if !plaintext_version_is_valid(params, height, plaintext[0]) {
-        return None;
-    }
-
-    let mut d = [0u8; 11];
-    d.copy_from_slice(&plaintext[1..12]);
-
-    let v = (&plaintext[12..20]).read_u64::<LittleEndian>().ok()?;
-
-    let r: [u8; 32] = plaintext[20..COMPACT_NOTE_SIZE]
-        .try_into()
-        .expect("slice is the correct length");
-
-    let rseed = if plaintext[0] == 0x01 {
-        let rcm = jubjub::Fr::from_repr(r)?;
-        Rseed::BeforeZip212(rcm)
-    } else {
-        Rseed::AfterZip212(r)
-    };
-
-    let diversifier = Diversifier(d);
-    let pk_d = diversifier.g_d()? * ivk.0;
-
-    let to = PaymentAddress::from_parts(diversifier, pk_d)?;
-    let note = to.create_note(v, rseed).unwrap();
-
-    if note.cmu() != *cmu {
-        // Published commitment doesn't match calculated commitment
-        return None;
-    }
-
-    if let Some(derived_esk) = note.derive_esk() {
-        // This enforces that epk is a jubjub::SubgroupPoint.
-        if (note.g_d * derived_esk).to_bytes() != epk.to_bytes() {
-            return None;
-        }
-    }
-
-    Some((note, to))
 }
 
 #[allow(clippy::if_same_then_else)]
@@ -357,18 +568,18 @@ pub fn plaintext_version_is_valid<P: consensus::Parameters>(
 /// `PaymentAddress` to which the note was sent.
 ///
 /// Implements section 4.17.2 of the Zcash Protocol Specification.
-pub fn try_sapling_note_decryption<P: consensus::Parameters>(
-    params: &P,
-    height: BlockHeight,
-    ivk: &SaplingIvk,
-    epk: &jubjub::ExtendedPoint,
-    cmu: &bls12_381::Scalar,
+pub fn try_note_decryption<D: Domain>(
+    domain: &D,
+    //output: &ShieldedOutput<D>,
+    ivk: &D::IncomingViewingKey,
+    epk: &D::EphemeralPublicKey,
+    cmstar: &D::ExtractedCommitment,
     enc_ciphertext: &[u8],
-) -> Option<(Note, PaymentAddress, MemoBytes)> {
+) -> Option<(D::Note, D::Recipient, D::Memo)> {
     assert_eq!(enc_ciphertext.len(), ENC_CIPHERTEXT_SIZE);
 
-    let shared_secret = sapling_ka_agree(&ivk.0, &epk);
-    let key = kdf_sapling(shared_secret, &epk);
+    let shared_secret = D::ka_agree_dec(ivk, epk);
+    let key = D::kdf(shared_secret, epk);
 
     let mut plaintext = [0; ENC_CIPHERTEXT_SIZE];
     assert_eq!(
@@ -377,19 +588,62 @@ pub fn try_sapling_note_decryption<P: consensus::Parameters>(
                 &mut plaintext,
                 &enc_ciphertext,
                 &[],
-                key.as_bytes(),
+                key.as_ref(),
                 &[0u8; 12]
             )
             .ok()?,
         NOTE_PLAINTEXT_SIZE
     );
 
-    let (note, to) = parse_note_plaintext_without_memo(params, height, ivk, epk, cmu, &plaintext)?;
-
-    // Memo is the correct length by definition.
-    let memo = MemoBytes::from_bytes(&plaintext[COMPACT_NOTE_SIZE..NOTE_PLAINTEXT_SIZE]).unwrap();
+    let (note, to) = parse_note_plaintext_without_memo(domain, ivk, epk, cmstar, &plaintext)?;
+    let memo = domain.extract_memo(&plaintext);
 
     Some((note, to, memo))
+}
+
+fn parse_note_plaintext_without_memo<D: Domain>(
+    domain: &D,
+    ivk: &D::IncomingViewingKey,
+    epk: &D::EphemeralPublicKey,
+    cmstar: &D::ExtractedCommitment,
+    plaintext: &[u8],
+) -> Option<(D::Note, D::Recipient)> {
+    let (note, to) = domain.parse_note_plaintext_without_memo(ivk, &plaintext)?;
+
+    if &D::extract_note_commitment(&note) != cmstar {
+        // Published commitment doesn't match calculated commitment
+        return None;
+    } else {
+        let epk_bytes = D::to_epk_bytes(epk);
+        let validity = D::check_epk_bytes(&note, |derived_esk| {
+            if D::to_epk_bytes(&D::ka_derive_public(&note, &derived_esk)) == epk_bytes {
+                EpkValidity::Valid
+            } else {
+                EpkValidity::Invalid
+            }
+        });
+
+        if validity != EpkValidity::Valid {
+            return None;
+        }
+    }
+
+    Some((note, to))
+}
+
+pub fn try_sapling_note_decryption<P: consensus::Parameters>(
+    params: &P,
+    height: BlockHeight,
+    ivk: &SaplingIvk,
+    epk: &jubjub::ExtendedPoint,
+    cmu: &bls12_381::Scalar,
+    enc_ciphertext: &[u8],
+) -> Option<(Note, PaymentAddress, MemoBytes)> {
+    let domain = SaplingDomain {
+        params: params.clone(),
+        height,
+    };
+    try_note_decryption(&domain, ivk, epk, &cmu.to_bytes(), enc_ciphertext)
 }
 
 /// Trial decryption of the compact note plaintext by the recipient for light clients.
@@ -401,6 +655,26 @@ pub fn try_sapling_note_decryption<P: consensus::Parameters>(
 /// Implements the procedure specified in [`ZIP 307`].
 ///
 /// [`ZIP 307`]: https://zips.z.cash/zip-0307
+pub fn try_compact_note_decryption<D: Domain>(
+    domain: &D,
+    ivk: &D::IncomingViewingKey,
+    epk: &D::EphemeralPublicKey,
+    cmstar: &D::ExtractedCommitment,
+    enc_ciphertext: &[u8],
+) -> Option<(D::Note, D::Recipient)> {
+    assert_eq!(enc_ciphertext.len(), COMPACT_NOTE_SIZE);
+
+    let shared_secret = D::ka_agree_dec(&ivk, epk);
+    let key = D::kdf(shared_secret, &epk);
+
+    // Start from block 1 to skip over Poly1305 keying output
+    let mut plaintext = [0; COMPACT_NOTE_SIZE];
+    plaintext.copy_from_slice(&enc_ciphertext);
+    ChaCha20Ietf::xor(key.as_ref(), &[0u8; 12], 1, &mut plaintext);
+
+    parse_note_plaintext_without_memo(domain, ivk, epk, cmstar, &plaintext)
+}
+
 pub fn try_sapling_compact_note_decryption<P: consensus::Parameters>(
     params: &P,
     height: BlockHeight,
@@ -409,17 +683,12 @@ pub fn try_sapling_compact_note_decryption<P: consensus::Parameters>(
     cmu: &bls12_381::Scalar,
     enc_ciphertext: &[u8],
 ) -> Option<(Note, PaymentAddress)> {
-    assert_eq!(enc_ciphertext.len(), COMPACT_NOTE_SIZE);
+    let domain = SaplingDomain {
+        params: params.clone(),
+        height,
+    };
 
-    let shared_secret = sapling_ka_agree(&ivk.0, epk);
-    let key = kdf_sapling(shared_secret, &epk);
-
-    // Start from block 1 to skip over Poly1305 keying output
-    let mut plaintext = [0; COMPACT_NOTE_SIZE];
-    plaintext.copy_from_slice(&enc_ciphertext);
-    ChaCha20Ietf::xor(key.as_bytes(), &[0u8; 12], 1, &mut plaintext);
-
-    parse_note_plaintext_without_memo(params, height, ivk, epk, cmu, &plaintext)
+    try_compact_note_decryption(&domain, ivk, epk, &cmu.to_bytes(), enc_ciphertext)
 }
 
 /// Recovery of the full note plaintext by the sender.
@@ -491,7 +760,7 @@ pub fn try_sapling_output_recovery_with_ock<P: consensus::Parameters>(
     let mut d = [0u8; 11];
     d.copy_from_slice(&plaintext[1..12]);
 
-    let v = (&plaintext[12..20]).read_u64::<LittleEndian>().ok()?;
+    let v = Amount::from_u64_le_bytes(plaintext[12..20].try_into().unwrap()).ok()?;
 
     let r: [u8; 32] = plaintext[20..COMPACT_NOTE_SIZE]
         .try_into()
@@ -513,7 +782,7 @@ pub fn try_sapling_output_recovery_with_ock<P: consensus::Parameters>(
     }
 
     let to = PaymentAddress::from_parts(diversifier, pk_d)?;
-    let note = to.create_note(v, rseed).unwrap();
+    let note = to.create_note(v.into(), rseed).unwrap();
 
     if note.cmu() != *cmu {
         // Published commitment doesn't match calculated commitment
@@ -569,9 +838,9 @@ mod tests {
     use std::convert::TryInto;
 
     use super::{
-        kdf_sapling, prf_ock, sapling_ka_agree, try_sapling_compact_note_decryption,
-        try_sapling_note_decryption, try_sapling_output_recovery,
-        try_sapling_output_recovery_with_ock, OutgoingCipherKey, SaplingNoteEncryption,
+        kdf_sapling, prf_ock, sapling_ka_agree, sapling_note_encryption,
+        try_sapling_compact_note_decryption, try_sapling_note_decryption,
+        try_sapling_output_recovery, try_sapling_output_recovery_with_ock, OutgoingCipherKey,
         COMPACT_NOTE_SIZE, ENC_CIPHERTEXT_SIZE, NOTE_PLAINTEXT_SIZE, OUT_CIPHERTEXT_SIZE,
         OUT_PLAINTEXT_SIZE,
     };
@@ -580,7 +849,7 @@ mod tests {
         consensus::{
             BlockHeight,
             NetworkUpgrade::{Canopy, Sapling},
-            Parameters, TEST_NETWORK, ZIP212_GRACE_PERIOD,
+            Parameters, TestNetwork, TEST_NETWORK, ZIP212_GRACE_PERIOD,
         },
         memo::MemoBytes,
         sapling::util::generate_random_rseed,
@@ -588,6 +857,7 @@ mod tests {
             keys::OutgoingViewingKey, Diversifier, PaymentAddress, Rseed, SaplingIvk,
             ValueCommitment,
         },
+        transaction::components::amount::Amount,
     };
 
     fn random_enc_ciphertext<R: RngCore + CryptoRng>(
@@ -672,23 +942,29 @@ mod tests {
         let pa = PaymentAddress::from_parts_unchecked(diversifier, pk_d);
 
         // Construct the value commitment for the proof instance
-        let value = 100;
+        let value = Amount::from_u64(100).unwrap();
         let value_commitment = ValueCommitment {
-            value,
+            value: value.into(),
             randomness: jubjub::Fr::random(&mut rng),
         };
         let cv = value_commitment.commitment().into();
 
         let rseed = generate_random_rseed(&TEST_NETWORK, height, &mut rng);
 
-        let note = pa.create_note(value, rseed).unwrap();
+        let note = pa.create_note(value.into(), rseed).unwrap();
         let cmu = note.cmu();
 
         let ovk = OutgoingViewingKey([0; 32]);
-        let mut ne = SaplingNoteEncryption::new(Some(ovk), note, pa, MemoBytes::empty(), &mut rng);
-        let epk = ne.epk().clone().into();
+        let mut ne = sapling_note_encryption::<_, TestNetwork>(
+            Some(ovk),
+            note,
+            pa,
+            MemoBytes::empty(),
+            &mut rng,
+        );
+        let epk = *ne.epk();
         let enc_ciphertext = ne.encrypt_note_plaintext();
-        let out_ciphertext = ne.encrypt_outgoing_plaintext(&cv, &cmu);
+        let out_ciphertext = ne.encrypt_outgoing_plaintext(&cv, &cmu, &mut rng);
         let ock = prf_ock(&ovk, &cv, &cmu, &epk);
 
         (ovk, ock, cv, cmu, epk, enc_ciphertext, out_ciphertext)
@@ -1716,19 +1992,22 @@ mod tests {
             // Test encryption
             //
 
-            let mut ne = SaplingNoteEncryption::new(
+            let mut ne = sapling_note_encryption::<_, TestNetwork>(
                 Some(ovk),
                 note,
                 to,
                 MemoBytes::from_bytes(&tv.memo).unwrap(),
-                OsRng,
+                &mut OsRng,
             );
             // Swap in the ephemeral keypair from the test vectors
             ne.esk = esk;
-            ne.epk = epk.into_subgroup().unwrap();
+            ne.epk = epk;
 
-            assert_eq!(&ne.encrypt_note_plaintext()[..], &tv.c_enc[..]);
-            assert_eq!(&ne.encrypt_outgoing_plaintext(&cv, &cmu)[..], &tv.c_out[..]);
+            assert_eq!(&ne.encrypt_note_plaintext().as_ref()[..], &tv.c_enc[..]);
+            assert_eq!(
+                &ne.encrypt_outgoing_plaintext(&cv, &cmu, &mut OsRng)[..],
+                &tv.c_out[..]
+            );
         }
     }
 }

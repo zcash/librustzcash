@@ -16,7 +16,7 @@ use crate::{
     memo::MemoBytes,
     merkle_tree::MerklePath,
     sapling::{
-        keys::OutgoingViewingKey, note_encryption::SaplingNoteEncryption, prover::TxProver,
+        keys::OutgoingViewingKey, note_encryption::sapling_note_encryption, prover::TxProver,
         redjubjub::PrivateKey, spend_sig_internal, util::generate_random_rseed_internal,
         Diversifier, Node, Note, PaymentAddress,
     },
@@ -93,16 +93,17 @@ struct SpendDescriptionInfo {
     merkle_path: MerklePath<Node>,
 }
 
-pub struct SaplingOutput {
+pub struct SaplingOutput<P: consensus::Parameters> {
     /// `None` represents the `ovk = ⊥` case.
     ovk: Option<OutgoingViewingKey>,
     to: PaymentAddress,
     note: Note,
     memo: MemoBytes,
+    _params: PhantomData<P>,
 }
 
-impl SaplingOutput {
-    pub fn new<R: RngCore + CryptoRng, P: consensus::Parameters>(
+impl<P: consensus::Parameters> SaplingOutput<P> {
+    pub fn new<R: RngCore + CryptoRng>(
         params: &P,
         height: BlockHeight,
         rng: &mut R,
@@ -114,7 +115,7 @@ impl SaplingOutput {
         Self::new_internal(params, height, rng, ovk, to, value, memo)
     }
 
-    fn new_internal<R: RngCore, P: consensus::Parameters>(
+    fn new_internal<R: RngCore>(
         params: &P,
         height: BlockHeight,
         rng: &mut R,
@@ -142,25 +143,26 @@ impl SaplingOutput {
             to,
             note,
             memo: memo.unwrap_or_else(MemoBytes::empty),
+            _params: PhantomData::default(),
         })
     }
 
-    pub fn build<P: TxProver, R: RngCore + CryptoRng>(
+    pub fn build<Pr: TxProver, R: RngCore + CryptoRng>(
         self,
-        prover: &P,
-        ctx: &mut P::SaplingProvingContext,
+        prover: &Pr,
+        ctx: &mut Pr::SaplingProvingContext,
         rng: &mut R,
     ) -> OutputDescription {
         self.build_internal(prover, ctx, rng)
     }
 
-    fn build_internal<P: TxProver, R: RngCore>(
+    fn build_internal<Pr: TxProver, R: RngCore>(
         self,
-        prover: &P,
-        ctx: &mut P::SaplingProvingContext,
+        prover: &Pr,
+        ctx: &mut Pr::SaplingProvingContext,
         rng: &mut R,
     ) -> OutputDescription {
-        let mut encryptor = SaplingNoteEncryption::new_internal(
+        let mut encryptor = sapling_note_encryption::<R, P>(
             self.ovk,
             self.note.clone(),
             self.to.clone(),
@@ -179,9 +181,9 @@ impl SaplingOutput {
         let cmu = self.note.cmu();
 
         let enc_ciphertext = encryptor.encrypt_note_plaintext();
-        let out_ciphertext = encryptor.encrypt_outgoing_plaintext(&cv, &cmu);
+        let out_ciphertext = encryptor.encrypt_outgoing_plaintext(&cv, &cmu, rng);
 
-        let ephemeral_key = encryptor.epk().clone().into();
+        let ephemeral_key = *encryptor.epk();
 
         OutputDescription {
             cv,
@@ -371,7 +373,7 @@ pub struct Builder<'a, P: consensus::Parameters, R: RngCore> {
     fee: Amount,
     anchor: Option<bls12_381::Scalar>,
     spends: Vec<SpendDescriptionInfo>,
-    outputs: Vec<SaplingOutput>,
+    outputs: Vec<SaplingOutput<P>>,
     transparent_inputs: TransparentInputs,
     #[cfg(feature = "zfuture")]
     tze_inputs: TzeInputs<'a, TransactionData>,
