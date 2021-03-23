@@ -45,7 +45,7 @@ pub struct NotePlaintextBytes(pub [u8; NOTE_PLAINTEXT_SIZE]);
 pub struct OutPlaintextBytes(pub [u8; OUT_PLAINTEXT_SIZE]);
 
 #[derive(Copy, Clone, PartialEq, Eq)]
-pub enum EpkValidity {
+pub enum NoteValidity {
     Valid,
     Invalid,
 }
@@ -109,16 +109,24 @@ pub trait Domain {
 
     fn to_epk_bytes(epk: &Self::EphemeralPublicKey) -> EphemeralKeyBytes;
 
-    fn check_epk_bytes<F: Fn(&Self::EphemeralSecretKey) -> EpkValidity>(
+    fn check_epk_bytes<F: Fn(&Self::EphemeralSecretKey) -> NoteValidity>(
         note: &Self::Note,
         check: F,
-    ) -> EpkValidity;
+    ) -> NoteValidity;
 
     fn extract_note_commitment(note: &Self::Note) -> Self::ExtractedCommitment;
 
-    fn parse_note_plaintext_without_memo(
+    fn parse_note_plaintext_without_memo_ivk(
         &self,
         ivk: &Self::IncomingViewingKey,
+        plaintext: &[u8],
+    ) -> Option<(Self::Note, Self::Recipient)>;
+
+    fn parse_note_plaintext_without_memo_ovk(
+        &self,
+        pk_d: &Self::DiversifiedTransmissionKey,
+        esk: &Self::EphemeralSecretKey,
+        epk: &Self::EphemeralPublicKey,
         plaintext: &[u8],
     ) -> Option<(Self::Note, Self::Recipient)>;
 
@@ -126,6 +134,12 @@ pub trait Domain {
     // to memo handling where the memos may no longer be
     // part of the note plaintext.
     fn extract_memo(&self, plaintext: &[u8]) -> Self::Memo;
+
+    fn extract_pk_d(
+        out_plaintext: &[u8; OUT_CIPHERTEXT_SIZE],
+    ) -> Option<Self::DiversifiedTransmissionKey>;
+
+    fn extract_esk(out_plaintext: &[u8; OUT_CIPHERTEXT_SIZE]) -> Option<Self::EphemeralSecretKey>;
 }
 
 pub trait ShieldedOutput<'a, D: Domain> {
@@ -320,40 +334,47 @@ pub fn try_note_decryption<D: Domain>(
         NOTE_PLAINTEXT_SIZE
     );
 
-    let (note, to) = parse_note_plaintext_without_memo(domain, ivk, epk, cmstar, &plaintext)?;
+    let (note, to) = parse_note_plaintext_without_memo_ivk(domain, ivk, epk, cmstar, &plaintext)?;
     let memo = domain.extract_memo(&plaintext);
 
     Some((note, to, memo))
 }
 
-fn parse_note_plaintext_without_memo<D: Domain>(
+fn parse_note_plaintext_without_memo_ivk<D: Domain>(
     domain: &D,
     ivk: &D::IncomingViewingKey,
     epk: &D::EphemeralPublicKey,
     cmstar: &D::ExtractedCommitment,
     plaintext: &[u8],
 ) -> Option<(D::Note, D::Recipient)> {
-    let (note, to) = domain.parse_note_plaintext_without_memo(ivk, &plaintext)?;
+    let (note, to) = domain.parse_note_plaintext_without_memo_ivk(ivk, &plaintext)?;
 
+    let validity = check_note_validity::<D>(&note, epk, cmstar);
+    if validity == NoteValidity::Valid {
+        Some((note, to))
+    } else {
+        None
+    }
+}
+
+fn check_note_validity<D: Domain>(
+    note: &D::Note,
+    epk: &D::EphemeralPublicKey,
+    cmstar: &D::ExtractedCommitment,
+) -> NoteValidity {
     if &D::extract_note_commitment(&note) != cmstar {
         // Published commitment doesn't match calculated commitment
-        return None;
+        NoteValidity::Invalid
     } else {
         let epk_bytes = D::to_epk_bytes(epk);
-        let validity = D::check_epk_bytes(&note, |derived_esk| {
+        D::check_epk_bytes(&note, |derived_esk| {
             if D::to_epk_bytes(&D::ka_derive_public(&note, &derived_esk)) == epk_bytes {
-                EpkValidity::Valid
+                NoteValidity::Valid
             } else {
-                EpkValidity::Invalid
+                NoteValidity::Invalid
             }
-        });
-
-        if validity != EpkValidity::Valid {
-            return None;
-        }
+        })
     }
-
-    Some((note, to))
 }
 
 /// Trial decryption of the compact note plaintext by the recipient for light clients.
@@ -382,5 +403,63 @@ pub fn try_compact_note_decryption<D: Domain>(
     plaintext.copy_from_slice(&enc_ciphertext);
     ChaCha20Ietf::xor(key.as_ref(), &[0u8; 12], 1, &mut plaintext);
 
-    parse_note_plaintext_without_memo(domain, ivk, epk, cmstar, &plaintext)
+    parse_note_plaintext_without_memo_ivk(domain, ivk, epk, cmstar, &plaintext)
+}
+
+/// Recovery of the full note plaintext by the sender.
+///
+/// Attempts to decrypt and validate the given `enc_ciphertext` using the given `ock`.
+/// If successful, the corresponding Sapling note and memo are returned, along with the
+/// `PaymentAddress` to which the note was sent.
+///
+/// Implements part of section 4.17.3 of the Zcash Protocol Specification.
+/// For decryption using a Full Viewing Key see [`try_sapling_output_recovery`].
+pub fn try_output_recovery_with_ock<D: Domain>(
+    domain: &D,
+    ock: &OutgoingCipherKey,
+    cmstar: &D::ExtractedCommitment,
+    epk: &D::EphemeralPublicKey,
+    enc_ciphertext: &[u8],
+    out_ciphertext: &[u8],
+) -> Option<(D::Note, D::Recipient, D::Memo)> {
+    assert_eq!(enc_ciphertext.len(), ENC_CIPHERTEXT_SIZE);
+    assert_eq!(out_ciphertext.len(), OUT_CIPHERTEXT_SIZE);
+
+    let mut op = [0; OUT_CIPHERTEXT_SIZE];
+    assert_eq!(
+        ChachaPolyIetf::aead_cipher()
+            .open_to(&mut op, &out_ciphertext, &[], ock.as_ref(), &[0u8; 12])
+            .ok()?,
+        OUT_PLAINTEXT_SIZE
+    );
+
+    let pk_d = D::extract_pk_d(&op)?;
+    let esk = D::extract_esk(&op)?;
+
+    let shared_secret = D::ka_agree_enc(&esk, &pk_d);
+    let key = D::kdf(shared_secret, &epk);
+
+    let mut plaintext = [0; ENC_CIPHERTEXT_SIZE];
+    assert_eq!(
+        ChachaPolyIetf::aead_cipher()
+            .open_to(
+                &mut plaintext,
+                &enc_ciphertext,
+                &[],
+                key.as_ref(),
+                &[0u8; 12]
+            )
+            .ok()?,
+        NOTE_PLAINTEXT_SIZE
+    );
+
+    let (note, to) = domain.parse_note_plaintext_without_memo_ovk(&pk_d, &esk, &epk, &plaintext)?;
+    let memo = domain.extract_memo(&plaintext);
+
+    let validity = check_note_validity::<D>(&note, epk, cmstar);
+    if validity == NoteValidity::Valid {
+        Some((note, to, memo))
+    } else {
+        None
+    }
 }

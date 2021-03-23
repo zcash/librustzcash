@@ -1,16 +1,16 @@
 //! Implementation of in-band secret distribution for Zcash transactions.
 use blake2b_simd::{Hash as Blake2bHash, Params as Blake2bParams};
 use byteorder::{LittleEndian, WriteBytesExt};
-use crypto_api_chachapoly::ChachaPolyIetf;
 use ff::PrimeField;
 use group::{cofactor::CofactorGroup, GroupEncoding};
 use rand_core::RngCore;
 use std::convert::TryInto;
 
 use zcash_note_encryption::{
-    try_compact_note_decryption, try_note_decryption, Domain, EphemeralKeyBytes, EpkValidity,
-    NoteEncryption, NotePlaintextBytes, OutPlaintextBytes, OutgoingCipherKey, COMPACT_NOTE_SIZE,
-    ENC_CIPHERTEXT_SIZE, NOTE_PLAINTEXT_SIZE, OUT_CIPHERTEXT_SIZE, OUT_PLAINTEXT_SIZE,
+    try_compact_note_decryption, try_note_decryption, try_output_recovery_with_ock, Domain,
+    EphemeralKeyBytes, NoteEncryption, NotePlaintextBytes, NoteValidity, OutPlaintextBytes,
+    OutgoingCipherKey, COMPACT_NOTE_SIZE, NOTE_PLAINTEXT_SIZE, OUT_CIPHERTEXT_SIZE,
+    OUT_PLAINTEXT_SIZE,
 };
 
 use crate::{
@@ -73,6 +73,40 @@ pub fn prf_ock(
     )
 }
 
+fn sapling_parse_note_plaintext_without_memo<F, P: consensus::Parameters>(
+    domain: &SaplingDomain<P>,
+    plaintext: &[u8],
+    get_validated_pk_d: F,
+) -> Option<(Note, PaymentAddress)>
+where
+    F: FnOnce(&Diversifier) -> Option<jubjub::SubgroupPoint>,
+{
+    assert!(plaintext.len() >= COMPACT_NOTE_SIZE);
+
+    // Check note plaintext version
+    if !plaintext_version_is_valid(&domain.params, domain.height, plaintext[0]) {
+        return None;
+    }
+
+    // The unwraps below are guaranteed to succeed by the assertion above
+    let diversifier = Diversifier(plaintext[1..12].try_into().unwrap());
+    let value = Amount::from_u64_le_bytes(plaintext[12..20].try_into().unwrap()).ok()?;
+    let r: [u8; 32] = plaintext[20..COMPACT_NOTE_SIZE].try_into().unwrap();
+
+    let rseed = if plaintext[0] == 0x01 {
+        let rcm = jubjub::Fr::from_repr(r)?;
+        Rseed::BeforeZip212(rcm)
+    } else {
+        Rseed::AfterZip212(r)
+    };
+
+    let pk_d = get_validated_pk_d(&diversifier)?;
+
+    let to = PaymentAddress::from_parts(diversifier, pk_d)?;
+    let note = to.create_note(value.into(), rseed)?;
+    Some((note, to))
+}
+
 pub struct SaplingDomain<P: consensus::Parameters> {
     params: P,
     height: BlockHeight,
@@ -131,13 +165,7 @@ impl<P: consensus::Parameters> Domain for SaplingDomain<P> {
     ///
     /// Implements section 5.4.4.4 of the Zcash Protocol Specification.
     fn kdf(dhsecret: jubjub::SubgroupPoint, epk: &jubjub::ExtendedPoint) -> Blake2bHash {
-        Blake2bParams::new()
-            .hash_length(32)
-            .personal(KDF_SAPLING_PERSONALIZATION)
-            .to_state()
-            .update(&dhsecret.to_bytes())
-            .update(&epk.to_bytes())
-            .finalize()
+        kdf_sapling(dhsecret, epk)
     }
 
     fn to_note_plaintext_bytes(
@@ -195,51 +223,66 @@ impl<P: consensus::Parameters> Domain for SaplingDomain<P> {
         EphemeralKeyBytes(epk.to_bytes())
     }
 
-    fn check_epk_bytes<F: FnOnce(&Self::EphemeralSecretKey) -> EpkValidity>(
+    fn check_epk_bytes<F: FnOnce(&Self::EphemeralSecretKey) -> NoteValidity>(
         note: &Note,
         check: F,
-    ) -> EpkValidity {
+    ) -> NoteValidity {
         if let Some(derived_esk) = note.derive_esk() {
             check(&derived_esk)
         } else {
             // Before ZIP 212
-            EpkValidity::Valid
+            NoteValidity::Valid
         }
     }
 
-    fn parse_note_plaintext_without_memo(
+    fn parse_note_plaintext_without_memo_ivk(
         &self,
         ivk: &Self::IncomingViewingKey,
         plaintext: &[u8],
     ) -> Option<(Self::Note, Self::Recipient)> {
-        assert!(plaintext.len() >= COMPACT_NOTE_SIZE);
+        sapling_parse_note_plaintext_without_memo(&self, plaintext, |diversifier| {
+            Some(diversifier.g_d()? * ivk.0)
+        })
+    }
 
-        // Check note plaintext version
-        if !plaintext_version_is_valid(&self.params, self.height, plaintext[0]) {
-            return None;
-        }
-
-        // The unwraps below are guaranteed to succeed by the assertion above
-        let diversifier = Diversifier(plaintext[1..12].try_into().unwrap());
-        let value = Amount::from_u64_le_bytes(plaintext[12..20].try_into().unwrap()).ok()?;
-        let r: [u8; 32] = plaintext[20..COMPACT_NOTE_SIZE].try_into().unwrap();
-
-        let rseed = if plaintext[0] == 0x01 {
-            let rcm = jubjub::Fr::from_repr(r)?;
-            Rseed::BeforeZip212(rcm)
-        } else {
-            Rseed::AfterZip212(r)
-        };
-
-        let pk_d = diversifier.g_d()? * ivk.0;
-
-        let to = PaymentAddress::from_parts(diversifier, pk_d)?;
-        let note = to.create_note(value.into(), rseed)?;
-        Some((note, to))
+    fn parse_note_plaintext_without_memo_ovk(
+        &self,
+        pk_d: &Self::DiversifiedTransmissionKey,
+        esk: &Self::EphemeralSecretKey,
+        epk: &Self::EphemeralPublicKey,
+        plaintext: &[u8],
+    ) -> Option<(Self::Note, Self::Recipient)> {
+        sapling_parse_note_plaintext_without_memo(&self, plaintext, |diversifier| {
+            if (diversifier.g_d()? * esk).to_bytes() == epk.to_bytes() {
+                Some(*pk_d)
+            } else {
+                None
+            }
+        })
     }
 
     fn extract_note_commitment(note: &Self::Note) -> Self::ExtractedCommitment {
         note.cmu().to_bytes()
+    }
+
+    fn extract_pk_d(op: &[u8; OUT_CIPHERTEXT_SIZE]) -> Option<Self::DiversifiedTransmissionKey> {
+        let pk_d = jubjub::SubgroupPoint::from_bytes(
+            op[0..32].try_into().expect("slice is the correct length"),
+        );
+
+        if pk_d.is_none().into() {
+            None
+        } else {
+            Some(pk_d.unwrap())
+        }
+    }
+
+    fn extract_esk(op: &[u8; OUT_CIPHERTEXT_SIZE]) -> Option<Self::EphemeralSecretKey> {
+        jubjub::Fr::from_repr(
+            op[32..OUT_PLAINTEXT_SIZE]
+                .try_into()
+                .expect("slice is the correct length"),
+        )
     }
 
     fn extract_memo(&self, plaintext: &[u8]) -> Self::Memo {
@@ -336,94 +379,19 @@ pub fn try_sapling_output_recovery_with_ock<P: consensus::Parameters>(
     enc_ciphertext: &[u8],
     out_ciphertext: &[u8],
 ) -> Option<(Note, PaymentAddress, MemoBytes)> {
-    assert_eq!(enc_ciphertext.len(), ENC_CIPHERTEXT_SIZE);
-    assert_eq!(out_ciphertext.len(), OUT_CIPHERTEXT_SIZE);
-
-    let mut op = [0; OUT_CIPHERTEXT_SIZE];
-    assert_eq!(
-        ChachaPolyIetf::aead_cipher()
-            .open_to(&mut op, &out_ciphertext, &[], ock.as_ref(), &[0u8; 12])
-            .ok()?,
-        OUT_PLAINTEXT_SIZE
-    );
-
-    let pk_d = {
-        let pk_d = jubjub::SubgroupPoint::from_bytes(
-            op[0..32].try_into().expect("slice is the correct length"),
-        );
-        if pk_d.is_none().into() {
-            return None;
-        }
-        pk_d.unwrap()
+    let domain = SaplingDomain {
+        params: params.clone(),
+        height,
     };
 
-    let esk = jubjub::Fr::from_repr(
-        op[32..OUT_PLAINTEXT_SIZE]
-            .try_into()
-            .expect("slice is the correct length"),
-    )?;
-
-    let shared_secret = sapling_ka_agree(&esk, &pk_d.into());
-    let key = kdf_sapling(shared_secret, &epk);
-
-    let mut plaintext = [0; ENC_CIPHERTEXT_SIZE];
-    assert_eq!(
-        ChachaPolyIetf::aead_cipher()
-            .open_to(
-                &mut plaintext,
-                &enc_ciphertext,
-                &[],
-                key.as_bytes(),
-                &[0u8; 12]
-            )
-            .ok()?,
-        NOTE_PLAINTEXT_SIZE
-    );
-
-    // Check note plaintext version
-    if !plaintext_version_is_valid(params, height, plaintext[0]) {
-        return None;
-    }
-
-    let mut d = [0u8; 11];
-    d.copy_from_slice(&plaintext[1..12]);
-
-    let v = Amount::from_u64_le_bytes(plaintext[12..20].try_into().unwrap()).ok()?;
-
-    let r: [u8; 32] = plaintext[20..COMPACT_NOTE_SIZE]
-        .try_into()
-        .expect("slice is the correct length");
-
-    let rseed = if plaintext[0] == 0x01 {
-        let rcm = jubjub::Fr::from_repr(r)?;
-        Rseed::BeforeZip212(rcm)
-    } else {
-        Rseed::AfterZip212(r)
-    };
-
-    let memo = MemoBytes::from_bytes(&plaintext[COMPACT_NOTE_SIZE..NOTE_PLAINTEXT_SIZE]).unwrap();
-
-    let diversifier = Diversifier(d);
-    if (diversifier.g_d()? * esk).to_bytes() != epk.to_bytes() {
-        // Published epk doesn't match calculated epk
-        return None;
-    }
-
-    let to = PaymentAddress::from_parts(diversifier, pk_d)?;
-    let note = to.create_note(v.into(), rseed).unwrap();
-
-    if note.cmu() != *cmu {
-        // Published commitment doesn't match calculated commitment
-        return None;
-    }
-
-    if let Some(derived_esk) = note.derive_esk() {
-        if derived_esk != esk {
-            return None;
-        }
-    }
-
-    Some((note, to, memo))
+    try_output_recovery_with_ock(
+        &domain,
+        ock,
+        &cmu.to_bytes(),
+        epk,
+        enc_ciphertext,
+        out_ciphertext,
+    )
 }
 
 /// Recovery of the full note plaintext by the sender.
@@ -464,14 +432,16 @@ mod tests {
     use rand_core::OsRng;
     use rand_core::{CryptoRng, RngCore};
     use std::convert::TryInto;
-    use zcash_note_encryption::NoteEncryption;
+
+    use zcash_note_encryption::{
+        NoteEncryption, OutgoingCipherKey, COMPACT_NOTE_SIZE, ENC_CIPHERTEXT_SIZE,
+        NOTE_PLAINTEXT_SIZE, OUT_CIPHERTEXT_SIZE, OUT_PLAINTEXT_SIZE,
+    };
 
     use super::{
         kdf_sapling, prf_ock, sapling_ka_agree, sapling_note_encryption,
         try_sapling_compact_note_decryption, try_sapling_note_decryption,
-        try_sapling_output_recovery, try_sapling_output_recovery_with_ock, OutgoingCipherKey,
-        SaplingDomain, COMPACT_NOTE_SIZE, ENC_CIPHERTEXT_SIZE, NOTE_PLAINTEXT_SIZE,
-        OUT_CIPHERTEXT_SIZE, OUT_PLAINTEXT_SIZE,
+        try_sapling_output_recovery, try_sapling_output_recovery_with_ock, SaplingDomain,
     };
 
     use crate::{
