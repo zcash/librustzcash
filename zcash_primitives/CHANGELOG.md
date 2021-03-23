@@ -30,8 +30,8 @@ and this library adheres to Rust's notion of
       the existence of null-padding for shorter memos. `MemoBytes` is guaranteed
       to be round-trip encodable (modulo null padding).
     - `Memo`, an enum that implements the memo field format defined in
-      [ZIP 302](https://zips.z.cash/zip-0302) (excluding structured memos for
-      the moment). It can be converted to and from `MemoBytes`.
+      [ZIP 302](https://zips.z.cash/zip-0302). It can be converted to and from
+      `MemoBytes`.
   - `zcash_primitives::primitives::Nullifier` struct.
   - `zcash_primitives::transaction`:
     - `TxVersion` enum, representing the set of valid transaction format
