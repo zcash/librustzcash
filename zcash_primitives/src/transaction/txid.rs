@@ -15,7 +15,7 @@ use crate::{
 use super::{
     blake2b_256::HashWriter,
     components::{
-        Amount, JSDescription, OutputDescription, SpendDescription, SproutProof, TxIn, TxOut,
+        Amount, OutputDescription, SpendDescription, TxIn, TxOut,
     },
     AuthDigest, TransactionDigest, TransparentDigests, TxDigests, TxId, TxVersion,
 };
@@ -36,7 +36,6 @@ const ZCASH_TX_PERSONALIZATION_PREFIX: &[u8; 12] = b"ZcashTxHash_";
 const ZCASH_HEADERS_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxIdHeadersHash";
 const ZCASH_TRANSPARENT_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxIdTranspaHash";
 const ZCASH_TZE_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxIdTZE____Hash";
-const ZCASH_JOINSPLITS_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxIdJSplitsHash";
 const ZCASH_SAPLING_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxIdSaplingHash";
 
 // TxId transparent level 2 node personalization
@@ -61,7 +60,6 @@ const ZCASH_SAPLING_OUTPUTS_NONCOMPACT_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxId
 const ZCASH_AUTH_PERSONALIZATION_PREFIX: &[u8; 12] = b"ZTxAuthHash_";
 const ZCASH_TRANSPARENT_SCRIPTS_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxAuthTransHash";
 const ZCASH_TZE_WITNESSES_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxAuthTZE__Hash";
-const ZCASH_SPROUT_SIGS_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxAuthSprouHash";
 const ZCASH_SAPLING_SIGS_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxAuthSapliHash";
 
 fn hash_header_txid_data(
@@ -224,27 +222,6 @@ fn hashes_tze_txid_data(tze_inputs: &[TzeIn], tze_outputs: &[TzeOut]) -> TzeDige
     }
 }
 
-fn hash_sprout_txid_data(joinsplits: &[JSDescription]) -> Blake2bHash {
-    let mut h = HashWriter::new(ZCASH_JOINSPLITS_HASH_PERSONALIZATION);
-    for js in joinsplits {
-        h.write_all(&js.vpub_old.to_i64_le_bytes()).unwrap();
-        h.write_all(&js.vpub_new.to_i64_le_bytes()).unwrap();
-        h.write_all(&js.anchor).unwrap();
-        h.write_all(&js.nullifiers[0]).unwrap();
-        h.write_all(&js.nullifiers[1]).unwrap();
-        h.write_all(&js.commitments[0]).unwrap();
-        h.write_all(&js.commitments[1]).unwrap();
-        h.write_all(&js.ephemeral_key).unwrap();
-        h.write_all(&js.random_seed).unwrap();
-        h.write_all(&js.macs[0]).unwrap();
-        h.write_all(&js.macs[1]).unwrap();
-
-        h.write_all(&js.ciphertexts[0]).unwrap();
-        h.write_all(&js.ciphertexts[1]).unwrap();
-    }
-    h.finalize()
-}
-
 fn hash_sapling_txid_data(
     shielded_spends: &[SpendDescription],
     shielded_outputs: &[OutputDescription],
@@ -329,14 +306,6 @@ impl TransactionDigest<Blake2bHash, TransparentDigests<Blake2bHash>, TzeDigests<
         hashes_tze_txid_data(tze_inputs, tze_outputs)
     }
 
-    fn digest_sprout(
-        &self,
-        joinsplits: &[JSDescription],
-        _joinsplit_pubkey: &Option<[u8; 32]>,
-    ) -> Blake2bHash {
-        hash_sprout_txid_data(joinsplits)
-    }
-
     fn digest_sapling(
         &self,
         shielded_spends: &[SpendDescription],
@@ -370,7 +339,6 @@ pub fn to_hash<A>(
             .unwrap();
     }
 
-    h.write(digests.sprout_digest.as_bytes()).unwrap();
     h.write(digests.sapling_digest.as_bytes()).unwrap();
 
     h.finalize()
@@ -419,28 +387,6 @@ impl AuthDigest<Blake2bHash> for BlockTxCommitmentDigester {
             h.write(&witness.payload).unwrap();
         }
 
-        h.finalize()
-    }
-
-    fn digest_sprout<'a, I: IntoIterator<Item = &'a SproutProof>>(
-        &self,
-        sprout_proofs: I,
-        joinsplit_pubkey: &Option<[u8; 32]>,
-        joinsplit_sig: &Option<[u8; 64]>,
-    ) -> Blake2bHash {
-        let mut h = HashWriter::new(ZCASH_SPROUT_SIGS_HASH_PERSONALIZATION);
-        for p in sprout_proofs {
-            match &p {
-                SproutProof::Groth(p) => h.write_all(p).unwrap(),
-                SproutProof::PHGR(p) => h.write_all(p).unwrap(),
-            }
-        }
-        for k in joinsplit_pubkey {
-            h.write(k).unwrap();
-        }
-        for s in joinsplit_sig {
-            h.write(s).unwrap();
-        }
         h.finalize()
     }
 

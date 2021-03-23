@@ -33,7 +33,7 @@ pub use self::sighash::{signature_hash, SignableInput, SIGHASH_ALL};
 pub use self::txid::{to_auth_commitment, to_txid, BlockTxCommitmentDigester, TxIdDigester};
 
 use self::components::{
-    Amount, JSDescription, OutputDescription, SpendDescription, SproutProof, TxIn, TxOut,
+    Amount, JSDescription, OutputDescription, SpendDescription, TxIn, TxOut,
 };
 
 #[cfg(feature = "zfuture")]
@@ -290,7 +290,6 @@ pub struct TxDigests<A, Purpose> {
     pub transparent_digests: TransparentDigests<A>,
     #[cfg(feature = "zfuture")]
     pub tze_digests: TzeDigests<A>,
-    pub sprout_digest: A,
     pub sapling_digest: A,
     _purpose: PhantomData<Purpose>,
 }
@@ -305,8 +304,6 @@ pub(crate) trait TransactionDigest<H, T, TZE, SP, SA> {
     #[cfg(feature = "zfuture")]
     fn digest_tze(&self, tze_inputs: &[TzeIn], tze_outputs: &[TzeOut]) -> TZE;
 
-    fn digest_sprout(&self, joinsplits: &[JSDescription], joinsplit_pubkey: &Option<[u8; 32]>) -> SP;
-
     fn digest_sapling(
         &self,
         shielded_spends: &[SpendDescription],
@@ -320,13 +317,6 @@ pub(crate) trait AuthDigest<A> {
 
     #[cfg(feature = "zfuture")]
     fn digest_tze<'a, I: IntoIterator<Item = &'a tze::Witness>>(&self, tzein_sig: I) -> A;
-
-    fn digest_sprout<'a, I: IntoIterator<Item = &'a SproutProof>>(
-        &self,
-        sprout_proofs: I,
-        joinsplit_pubkey: &Option<[u8; 32]>,
-        joinsplit_sig: &Option<[u8; 64]>,
-    ) -> A;
 
     fn digest_sapling<'a, S, O>(
         &self,
@@ -400,7 +390,6 @@ impl TransactionData {
         #[cfg(feature = "zfuture")]
         let tze_digests = digester.digest_tze(&self.tze_inputs, &self.tze_outputs);
 
-        let sprout_digest = digester.digest_sprout(&self.joinsplits, &self.joinsplit_pubkey);
         let sapling_digest = digester.digest_sapling(
             &self.shielded_spends,
             &self.shielded_outputs,
@@ -412,7 +401,6 @@ impl TransactionData {
             transparent_digests,
             #[cfg(feature = "zfuture")]
             tze_digests,
-            sprout_digest,
             sapling_digest,
             _purpose: PhantomData,
         }
@@ -645,11 +633,6 @@ impl Transaction {
         let t_hash = digester.digest_transparent(self.data.vin.iter().map(|txin| &txin.script_sig));
         #[cfg(feature = "zfuture")]
         let tze_hash = digester.digest_tze(self.data.tze_inputs.iter().map(|tzein| &tzein.witness));
-        let sprout_digest = digester.digest_sprout(
-            self.data.joinsplits.iter().map(|js| &js.proof),
-            &self.data.joinsplit_pubkey,
-            &self.data.joinsplit_sig,
-        );
         let sapling_digest = digester.digest_sapling(
             self.data
                 .shielded_spends
@@ -662,7 +645,7 @@ impl Transaction {
             &self.binding_sig,
         );
 
-        Ok(combine(&[t_hash, tze_hash, sprout_digest, sapling_digest]))
+        Ok(combine(&[t_hash, tze_hash, sapling_digest]))
     }
 
     // TODO: should this be moved to `from_data` and stored?

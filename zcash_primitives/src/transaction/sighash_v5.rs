@@ -11,7 +11,7 @@ use crate::serialize::{CompactSize, Vector};
 
 use super::{
     blake2b_256::HashWriter,
-    components::{Amount, JSDescription, OutputDescription, SpendDescription, TxIn, TxOut},
+    components::{Amount, OutputDescription, SpendDescription, TxIn, TxOut},
     sighash::{
         SignableInput, SignatureHash, SIGHASH_ANYONECANPAY, SIGHASH_MASK, SIGHASH_NONE,
         SIGHASH_SINGLE,
@@ -139,14 +139,6 @@ impl<'a> TransactionDigest<Blake2bHash, TransparentDigests<Blake2bHash>, TzeDige
             outputs_digest: self.txid_parts.tze_digests.outputs_digest,
             per_input_digest: Some(per_input_digest),
         }
-    }
-
-    fn digest_sprout(
-        &self,
-        _joinsplits: &[JSDescription],
-        _joinsplit_pubkey: &Option<[u8; 32]>,
-    ) -> Blake2bHash {
-        self.txid_parts.sprout_digest
     }
 
     fn digest_sapling(
