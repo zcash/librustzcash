@@ -25,6 +25,13 @@ and this library adheres to Rust's notion of
       - `b58_script_address_prefix`
     - The `Network` enum, which enables code to be generic over the network type
       at runtime.
+  - `zcash_primitives::memo`:
+    - `MemoBytes`, a minimal wrapper around the memo bytes, that only imposes
+      the existence of null-padding for shorter memos. `MemoBytes` is guaranteed
+      to be round-trip encodable (modulo null padding).
+    - `Memo`, an enum that implements the memo field format defined in
+      [ZIP 302](https://zips.z.cash/zip-0302). It can be converted to and from
+      `MemoBytes`.
   - `zcash_primitives::primitives::Nullifier` struct.
   - `zcash_primitives::transaction`:
     - `TxVersion` enum, representing the set of valid transaction format
@@ -90,6 +97,12 @@ and this library adheres to Rust's notion of
     `&self`.
 - `zcash_primitives::merkle_tree::CommitmentTree::new` has been renamed to
   `CommitmentTree::empty`.
+- `zcash_primitives::note_encryption`:
+  - `SaplingNoteEncryption::new` now takes `MemoBytes`.
+  - The following APIs now return `MemoBytes`:
+    - `try_sapling_note_decryption`
+    - `try_sapling_output_recovery`
+    - `try_sapling_output_recovery_with_ock`
 - `zcash_primitives::primitives::Note::nf` now returns `Nullifier`.
 - `zcash_primitives::transaction`:
   - The `overwintered`, `version`, and `version_group_id` properties of the
@@ -101,6 +114,12 @@ and this library adheres to Rust's notion of
     `Nullifier`.
   - `signature_hash` and `signature_hash_data` now take a `SignableInput`
     argument instead of a `transparent_input` argument.
+  - `builder::SaplingOutput::new` and `builder::Builder::add_sapling_output` now
+    take `Option<MemoBytes>`.
+
+### Removed
+- `zcash_primitives::note_encryption::Memo` (replaced by
+  `zcash_primitives::memo::{Memo, MemoBytes}`).
 
 ## [0.4.0] - 2020-09-09
 ### Added

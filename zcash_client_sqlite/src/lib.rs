@@ -33,6 +33,7 @@ use rusqlite::{Connection, Statement, NO_PARAMS};
 use zcash_primitives::{
     block::BlockHash,
     consensus::{self, BlockHeight},
+    memo::Memo,
     merkle_tree::{CommitmentTree, IncrementalWitness},
     primitives::{Nullifier, PaymentAddress},
     sapling::Node,
@@ -205,10 +206,10 @@ impl<P: consensus::Parameters> WalletRead for WalletDB<P> {
         wallet::get_balance_at(self, account, anchor_height)
     }
 
-    fn get_memo_as_utf8(&self, id_note: Self::NoteRef) -> Result<Option<String>, Self::Error> {
+    fn get_memo(&self, id_note: Self::NoteRef) -> Result<Memo, Self::Error> {
         match id_note {
-            NoteId::SentNoteId(id_note) => wallet::get_sent_memo_as_utf8(self, id_note),
-            NoteId::ReceivedNoteId(id_note) => wallet::get_received_memo_as_utf8(self, id_note),
+            NoteId::SentNoteId(id_note) => wallet::get_sent_memo(self, id_note),
+            NoteId::ReceivedNoteId(id_note) => wallet::get_received_memo(self, id_note),
         }
     }
 
@@ -317,8 +318,8 @@ impl<'a, P: consensus::Parameters> WalletRead for DataConnStmtCache<'a, P> {
         self.wallet_db.get_balance_at(account, anchor_height)
     }
 
-    fn get_memo_as_utf8(&self, id_note: Self::NoteRef) -> Result<Option<String>, Self::Error> {
-        self.wallet_db.get_memo_as_utf8(id_note)
+    fn get_memo(&self, id_note: Self::NoteRef) -> Result<Memo, Self::Error> {
+        self.wallet_db.get_memo(id_note)
     }
 
     fn get_commitment_tree(
@@ -485,7 +486,7 @@ impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
                 sent_tx.account,
                 sent_tx.recipient_address,
                 sent_tx.value,
-                &sent_tx.memo,
+                sent_tx.memo.as_ref(),
             )?;
 
             // Return the row number of the transaction, so the caller can fetch it for sending.
@@ -545,7 +546,8 @@ mod tests {
     use zcash_primitives::{
         block::BlockHash,
         consensus::{BlockHeight, Network, NetworkUpgrade, Parameters},
-        note_encryption::{Memo, SaplingNoteEncryption},
+        memo::MemoBytes,
+        note_encryption::SaplingNoteEncryption,
         primitives::{Note, Nullifier, PaymentAddress},
         transaction::components::Amount,
         util::generate_random_rseed,
@@ -601,7 +603,7 @@ mod tests {
             Some(extfvk.fvk.ovk),
             note.clone(),
             to,
-            Memo::default(),
+            MemoBytes::empty(),
             &mut rng,
         );
         let cmu = note.cmu().to_repr().as_ref().to_vec();
@@ -661,7 +663,7 @@ mod tests {
                 Some(extfvk.fvk.ovk),
                 note.clone(),
                 to,
-                Memo::default(),
+                MemoBytes::empty(),
                 &mut rng,
             );
             let cmu = note.cmu().to_repr().as_ref().to_vec();
@@ -689,7 +691,7 @@ mod tests {
                 Some(extfvk.fvk.ovk),
                 note.clone(),
                 change_addr,
-                Memo::default(),
+                MemoBytes::empty(),
                 &mut rng,
             );
             let cmu = note.cmu().to_repr().as_ref().to_vec();

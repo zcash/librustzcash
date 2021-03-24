@@ -2,7 +2,8 @@ use std::collections::HashMap;
 
 use zcash_primitives::{
     consensus::{self, BlockHeight},
-    note_encryption::{try_sapling_note_decryption, try_sapling_output_recovery, Memo},
+    memo::MemoBytes,
+    note_encryption::{try_sapling_note_decryption, try_sapling_output_recovery},
     primitives::{Note, PaymentAddress},
     transaction::Transaction,
     zip32::ExtendedFullViewingKey,
@@ -22,8 +23,8 @@ pub struct DecryptedOutput {
     pub account: AccountId,
     /// The address the note was sent to.
     pub to: PaymentAddress,
-    /// The memo included with the note.
-    pub memo: Memo,
+    /// The memo bytes included with the note.
+    pub memo: MemoBytes,
     /// True if this output was recovered using an [`OutgoingViewingKey`], meaning that
     /// this is a logical output of the transaction.
     ///

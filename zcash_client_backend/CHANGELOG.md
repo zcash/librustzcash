@@ -22,8 +22,10 @@ and this library adheres to Rust's notion of
   decryption APIs:
   - `zcash_client_backend::proto::compact_formats::CompactOutput::epk()`
   - The `epk` field of `zcash_client_backend::wallet::WalletShieldedOutput`.
-- `zcash_client_backend::decrypt::decrypt_transaction` now takes a variable with
-  type `P: zcash_primitives::consensus::Parameters`.
+- `zcash_client_backend::decrypt`:
+  - `decrypt_transaction` now takes a variable with type
+    `P: zcash_primitives::consensus::Parameters`.
+  - The `memo` field of `DecryptedOutput` now has type `MemoBytes`.
 - `zcash_client_backend::wallet`:
   - The `nf` property of `WalletShieldedSpend` now has the type `Nullifier`.
   - The `account` property of `WalletShieldedSpend` and `WalletShieldedOutput`

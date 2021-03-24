@@ -14,8 +14,9 @@ use crate::{
     consensus::{self, BlockHeight},
     keys::OutgoingViewingKey,
     legacy::TransparentAddress,
+    memo::MemoBytes,
     merkle_tree::MerklePath,
-    note_encryption::{Memo, SaplingNoteEncryption},
+    note_encryption::SaplingNoteEncryption,
     primitives::{Diversifier, Note, PaymentAddress},
     prover::TxProver,
     redjubjub::PrivateKey,
@@ -98,7 +99,7 @@ pub struct SaplingOutput {
     ovk: Option<OutgoingViewingKey>,
     to: PaymentAddress,
     note: Note,
-    memo: Memo,
+    memo: MemoBytes,
 }
 
 impl SaplingOutput {
@@ -109,7 +110,7 @@ impl SaplingOutput {
         ovk: Option<OutgoingViewingKey>,
         to: PaymentAddress,
         value: Amount,
-        memo: Option<Memo>,
+        memo: Option<MemoBytes>,
     ) -> Result<Self, Error> {
         Self::new_internal(params, height, rng, ovk, to, value, memo)
     }
@@ -121,7 +122,7 @@ impl SaplingOutput {
         ovk: Option<OutgoingViewingKey>,
         to: PaymentAddress,
         value: Amount,
-        memo: Option<Memo>,
+        memo: Option<MemoBytes>,
     ) -> Result<Self, Error> {
         let g_d = to.g_d().ok_or(Error::InvalidAddress)?;
         if value.is_negative() {
@@ -141,7 +142,7 @@ impl SaplingOutput {
             ovk,
             to,
             note,
-            memo: memo.unwrap_or_default(),
+            memo: memo.unwrap_or_else(MemoBytes::empty),
         })
     }
 
@@ -520,7 +521,7 @@ impl<'a, P: consensus::Parameters, R: RngCore> Builder<'a, P, R> {
         ovk: Option<OutgoingViewingKey>,
         to: PaymentAddress,
         value: Amount,
-        memo: Option<Memo>,
+        memo: Option<MemoBytes>,
     ) -> Result<(), Error> {
         let output = SaplingOutput::new_internal(
             &self.params,

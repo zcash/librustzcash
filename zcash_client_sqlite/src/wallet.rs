@@ -3,12 +3,13 @@
 use ff::PrimeField;
 use rusqlite::{params, OptionalExtension, ToSql, NO_PARAMS};
 use std::collections::HashMap;
+use std::convert::TryFrom;
 
 use zcash_primitives::{
     block::BlockHash,
     consensus::{self, BlockHeight, NetworkUpgrade},
+    memo::{Memo, MemoBytes},
     merkle_tree::{CommitmentTree, IncrementalWitness},
-    note_encryption::Memo,
     primitives::{Note, Nullifier, PaymentAddress},
     sapling::Node,
     transaction::{components::Amount, Transaction, TxId},
@@ -41,7 +42,7 @@ pub trait ShieldedOutput {
     fn account(&self) -> AccountId;
     fn to(&self) -> &PaymentAddress;
     fn note(&self) -> &Note;
-    fn memo(&self) -> Option<&Memo>;
+    fn memo(&self) -> Option<&MemoBytes>;
     fn is_change(&self) -> Option<bool>;
     fn nullifier(&self) -> Option<Nullifier>;
 }
@@ -59,7 +60,7 @@ impl ShieldedOutput for WalletShieldedOutput<Nullifier> {
     fn note(&self) -> &Note {
         &self.note
     }
-    fn memo(&self) -> Option<&Memo> {
+    fn memo(&self) -> Option<&MemoBytes> {
         None
     }
     fn is_change(&self) -> Option<bool> {
@@ -84,7 +85,7 @@ impl ShieldedOutput for DecryptedOutput {
     fn note(&self) -> &Note {
         &self.note
     }
-    fn memo(&self) -> Option<&Memo> {
+    fn memo(&self) -> Option<&MemoBytes> {
         Some(&self.memo)
     }
     fn is_change(&self) -> Option<bool> {
@@ -260,7 +261,7 @@ pub fn get_balance_at<P>(
     }
 }
 
-/// Returns the memo for a received note, if it is known and a valid UTF-8 string.
+/// Returns the memo for a received note.
 ///
 /// The note is identified by its row index in the `received_notes` table within the wdb
 /// database.
@@ -273,35 +274,27 @@ pub fn get_balance_at<P>(
 /// use zcash_client_sqlite::{
 ///     NoteId,
 ///     WalletDB,
-///     wallet::get_received_memo_as_utf8,
+///     wallet::get_received_memo,
 /// };
 ///
 /// let data_file = NamedTempFile::new().unwrap();
 /// let db = WalletDB::for_path(data_file, Network::TestNetwork).unwrap();
-/// let memo = get_received_memo_as_utf8(&db, 27);
+/// let memo = get_received_memo(&db, 27);
 /// ```
-pub fn get_received_memo_as_utf8<P>(
-    wdb: &WalletDB<P>,
-    id_note: i64,
-) -> Result<Option<String>, SqliteClientError> {
-    let memo: Vec<_> = wdb.conn.query_row(
+pub fn get_received_memo<P>(wdb: &WalletDB<P>, id_note: i64) -> Result<Memo, SqliteClientError> {
+    let memo_bytes: Vec<_> = wdb.conn.query_row(
         "SELECT memo FROM received_notes
         WHERE id_note = ?",
         &[id_note],
         |row| row.get(0),
     )?;
 
-    match Memo::from_bytes(&memo) {
-        Some(memo) => match memo.to_utf8() {
-            Some(Ok(res)) => Ok(Some(res)),
-            Some(Err(e)) => Err(SqliteClientError::InvalidMemo(e)),
-            None => Ok(None),
-        },
-        None => Ok(None),
-    }
+    MemoBytes::from_bytes(&memo_bytes)
+        .and_then(Memo::try_from)
+        .map_err(SqliteClientError::from)
 }
 
-/// Returns the memo for a sent note, if it is known and a valid UTF-8 string.
+/// Returns the memo for a sent note.
 ///
 /// The note is identified by its row index in the `sent_notes` table within the wdb
 /// database.
@@ -314,32 +307,24 @@ pub fn get_received_memo_as_utf8<P>(
 /// use zcash_client_sqlite::{
 ///     NoteId,
 ///     WalletDB,
-///     wallet::get_sent_memo_as_utf8,
+///     wallet::get_sent_memo,
 /// };
 ///
 /// let data_file = NamedTempFile::new().unwrap();
 /// let db = WalletDB::for_path(data_file, Network::TestNetwork).unwrap();
-/// let memo = get_sent_memo_as_utf8(&db, 12);
+/// let memo = get_sent_memo(&db, 12);
 /// ```
-pub fn get_sent_memo_as_utf8<P>(
-    wdb: &WalletDB<P>,
-    id_note: i64,
-) -> Result<Option<String>, SqliteClientError> {
-    let memo: Vec<_> = wdb.conn.query_row(
+pub fn get_sent_memo<P>(wdb: &WalletDB<P>, id_note: i64) -> Result<Memo, SqliteClientError> {
+    let memo_bytes: Vec<_> = wdb.conn.query_row(
         "SELECT memo FROM sent_notes
         WHERE id_note = ?",
         &[id_note],
         |row| row.get(0),
     )?;
 
-    match Memo::from_bytes(&memo) {
-        Some(memo) => match memo.to_utf8() {
-            Some(Ok(res)) => Ok(Some(res)),
-            Some(Err(e)) => Err(SqliteClientError::InvalidMemo(e)),
-            None => Ok(None),
-        },
-        None => Ok(None),
-    }
+    MemoBytes::from_bytes(&memo_bytes)
+        .and_then(Memo::try_from)
+        .map_err(SqliteClientError::from)
 }
 
 pub fn block_height_extrema<P>(
@@ -605,7 +590,7 @@ pub fn put_received_note<'a, P, T: ShieldedOutput>(
     let diversifier = output.to().diversifier().0.to_vec();
     let value = output.note().value as i64;
     let rcm = rcm.as_ref();
-    let memo = output.memo().map(|m| m.as_bytes());
+    let memo = output.memo().map(|m| m.as_slice());
     let is_change = output.is_change();
     let tx = tx_ref;
     let output_index = output.index() as i64;
@@ -694,7 +679,7 @@ pub fn put_sent_note<'a, P: consensus::Parameters>(
         account,
         to_str,
         value,
-        &output.memo.as_bytes(),
+        &output.memo.as_slice(),
         tx_ref,
         output_index
     ])? == 0
@@ -708,7 +693,7 @@ pub fn put_sent_note<'a, P: consensus::Parameters>(
             &RecipientAddress::Shielded(output.to.clone()),
             Amount::from_u64(output.note.value)
                 .map_err(|_| SqliteClientError::CorruptedData("Note value invalid.".to_string()))?,
-            &Some(output.memo.clone()),
+            Some(&output.memo),
         )?
     }
 
@@ -722,7 +707,7 @@ pub fn insert_sent_note<'a, P: consensus::Parameters>(
     account: AccountId,
     to: &RecipientAddress,
     value: Amount,
-    memo: &Option<Memo>,
+    memo: Option<&MemoBytes>,
 ) -> Result<(), SqliteClientError> {
     let to_str = to.encode(&stmts.wallet_db.params);
     let ivalue: i64 = value.into();
@@ -732,7 +717,7 @@ pub fn insert_sent_note<'a, P: consensus::Parameters>(
         account.0,
         to_str,
         ivalue,
-        memo.as_ref().map(|m| m.as_bytes().to_vec()),
+        memo.map(|m| m.as_slice().to_vec()),
     ])?;
 
     Ok(())

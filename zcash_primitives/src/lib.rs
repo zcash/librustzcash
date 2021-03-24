@@ -13,6 +13,7 @@ pub mod constants;
 pub mod group_hash;
 pub mod keys;
 pub mod legacy;
+pub mod memo;
 pub mod merkle_tree;
 pub mod note_encryption;
 pub mod pedersen_hash;
