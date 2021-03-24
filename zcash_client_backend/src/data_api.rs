@@ -195,6 +195,12 @@ pub struct ReceivedTransaction<'a> {
 pub struct SentTransaction<'a> {
     pub tx: &'a Transaction,
     pub created: time::OffsetDateTime,
+    /// The index within the transaction that contains the recipient output.
+    ///
+    /// - If `recipient_address` is a Sapling address, this is an index into the Sapling
+    ///   outputs of the transaction.
+    /// - If `recipient_address` is a transparent address, this is an index into the
+    ///   transparent outputs of the transaction.
     pub output_index: usize,
     pub account: AccountId,
     pub recipient_address: &'a RecipientAddress,

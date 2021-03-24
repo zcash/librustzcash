@@ -229,10 +229,16 @@ where
         .build(consensus_branch_id, &prover)
         .map_err(Error::Builder)?;
 
-    // We only called add_sapling_output() once.
-    let output_index = match tx_metadata.output_index(0) {
-        Some(idx) => idx as i64,
-        None => panic!("Output 0 should exist in the transaction"),
+    let output_index = match to {
+        // Sapling outputs are shuffled, so we need to look up where the output ended up.
+        RecipientAddress::Shielded(_) => match tx_metadata.output_index(0) {
+            Some(idx) => idx as i64,
+            None => panic!("Output 0 should exist in the transaction"),
+        },
+        // This function only spends shielded notes, so there will only ever be a single
+        // transparent output in this case (and even if there were more, we don't shuffle
+        // the transparent outputs).
+        RecipientAddress::Transparent(_) => 0,
     };
 
     wallet_db.store_sent_tx(&SentTransaction {
