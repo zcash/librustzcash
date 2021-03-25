@@ -29,6 +29,13 @@ same as before, but have been reorganized.
 ### Removed
 - `zcash_client_sqlite::address` module (moved to `zcash_client_backend`).
 
+### Fixed
+- Shielded transactions created by the wallet that have no change output (fully
+  spending their input notes) are now correctly detected as mined when scanning
+  compact blocks.
+- Unshielding transactions created by the wallet (with a transparent recipient
+  address) that have no change output no longer cause a panic.
+
 ## [0.2.1] - 2020-10-24
 ### Fixed
 - `transact::create_to_address` now correctly reconstructs notes from the data
