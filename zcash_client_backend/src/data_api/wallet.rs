@@ -232,7 +232,7 @@ where
     let output_index = match to {
         // Sapling outputs are shuffled, so we need to look up where the output ended up.
         RecipientAddress::Shielded(_) => match tx_metadata.output_index(0) {
-            Some(idx) => idx as i64,
+            Some(idx) => idx,
             None => panic!("Output 0 should exist in the transaction"),
         },
         // This function only spends shielded notes, so there will only ever be a single
@@ -244,7 +244,7 @@ where
     wallet_db.store_sent_tx(&SentTransaction {
         tx: &tx,
         created: time::OffsetDateTime::now_utc(),
-        output_index: output_index as usize,
+        output_index,
         account,
         recipient_address: to,
         value,
