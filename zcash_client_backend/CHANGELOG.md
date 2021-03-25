@@ -13,6 +13,11 @@ and this library adheres to Rust's notion of
   - `AccountId`
   - `SpendableNote`
   - `OvkPolicy`
+- `zcash_client_backend::welding_rig::ScanningKey` trait, representing a key
+  which can be used for trial decryption of outputs, and optionally nullifier
+  computation. This trait is implemented for
+  `zcash_primitives::zip32:ExtendedFullViewingKey` and
+  `zcash_primitives::primitives::SaplingIvk`.
 - First alpha of TZE support, behind the `zfuture` feature flag.
 
 ### Changed
