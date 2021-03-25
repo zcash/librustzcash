@@ -462,7 +462,7 @@ mod parse {
         Ok(payment)
     }
 
-    /// Parser that consumes the leading "zcash:[address]" from
+    /// Parser that consumes the leading "zcash:\[address\]" from
     /// a ZIP 321 URI.
     pub fn lead_addr<'a, P: consensus::Parameters>(
         params: &'a P,

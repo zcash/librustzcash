@@ -152,11 +152,11 @@ impl ScanningKey for SaplingIvk {
 /// The implementation of [`ScanningKey`] may either support or omit the computation of
 /// the nullifiers for received notes; the implementation for [`ExtendedFullViewingKey`]
 /// will derive the nullifiers for received notes and return them as part of the resulting
-/// [`WalletShieldedOutput`]s, whereas since the implementation for [`SaplingIvk`] cannot
-/// do so and it will return the unit value in those outputs instead.
+/// [`WalletShieldedOutput`]s, whereas the implementation for [`SaplingIvk`] cannot
+/// do so and will return the unit value in those outputs instead.
 ///
 /// [`ExtendedFullViewingKey`]: zcash_primitives::zip32::ExtendedFullViewingKey
-/// [`SaplingIvk`]: zcash_primitives::SaplingIvk
+/// [`SaplingIvk`]: zcash_primitives::primitives::SaplingIvk
 /// [`CompactBlock`]: crate::proto::compact_formats::CompactBlock
 /// [`ScanningKey`]: self::ScanningKey
 /// [`CommitmentTree`]: zcash_primitives::merkle_tree::CommitmentTree

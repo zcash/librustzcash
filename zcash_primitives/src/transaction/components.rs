@@ -142,9 +142,9 @@ pub struct TzeIn {
     pub witness: tze::Witness,
 }
 
-/// Transaction encoding and decoding functions conforming to ZIP-222
+/// Transaction encoding and decoding functions conforming to [ZIP 222].
 ///
-/// https://zips.z.cash/zip-0222#encoding-in-transactions
+/// [ZIP 222]: https://zips.z.cash/zip-0222#encoding-in-transactions
 #[cfg(feature = "zfuture")]
 impl TzeIn {
     /// Convenience constructor
