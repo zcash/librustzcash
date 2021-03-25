@@ -235,10 +235,15 @@ where
             Some(idx) => idx,
             None => panic!("Output 0 should exist in the transaction"),
         },
-        // This function only spends shielded notes, so there will only ever be a single
-        // transparent output in this case (and even if there were more, we don't shuffle
-        // the transparent outputs).
-        RecipientAddress::Transparent(_) => 0,
+        RecipientAddress::Transparent(addr) => {
+            let script = addr.script();
+            tx.vout
+                .iter()
+                .enumerate()
+                .find(|(_, tx_out)| tx_out.script_pubkey == script)
+                .map(|(index, _)| index)
+                .expect("we sent to this address")
+        }
     };
 
     wallet_db.store_sent_tx(&SentTransaction {
