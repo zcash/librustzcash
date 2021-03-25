@@ -708,6 +708,14 @@ pub fn put_sent_note<'a, P: consensus::Parameters>(
     Ok(())
 }
 
+/// Inserts a sent note into the wallet database.
+///
+/// `output_index` is the index within the transaction that contains the recipient output:
+///
+/// - If `to` is a Sapling address, this is an index into the Sapling outputs of the
+///   transaction.
+/// - If `to` is a transparent address, this is an index into the transparent outputs of
+///   the transaction.
 pub fn insert_sent_note<'a, P: consensus::Parameters>(
     stmts: &mut DataConnStmtCache<'a, P>,
     tx_ref: i64,

@@ -229,16 +229,27 @@ where
         .build(consensus_branch_id, &prover)
         .map_err(Error::Builder)?;
 
-    // We only called add_sapling_output() once.
-    let output_index = match tx_metadata.output_index(0) {
-        Some(idx) => idx as i64,
-        None => panic!("Output 0 should exist in the transaction"),
+    let output_index = match to {
+        // Sapling outputs are shuffled, so we need to look up where the output ended up.
+        RecipientAddress::Shielded(_) => match tx_metadata.output_index(0) {
+            Some(idx) => idx,
+            None => panic!("Output 0 should exist in the transaction"),
+        },
+        RecipientAddress::Transparent(addr) => {
+            let script = addr.script();
+            tx.vout
+                .iter()
+                .enumerate()
+                .find(|(_, tx_out)| tx_out.script_pubkey == script)
+                .map(|(index, _)| index)
+                .expect("we sent to this address")
+        }
     };
 
     wallet_db.store_sent_tx(&SentTransaction {
         tx: &tx,
         created: time::OffsetDateTime::now_utc(),
-        output_index: output_index as usize,
+        output_index,
         account,
         recipient_address: to,
         value,
