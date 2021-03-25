@@ -38,7 +38,7 @@ and this library adheres to Rust's notion of
       versions.
     - `SignableInput` enum, encapsulating per-input data used when
       creating transaction signatures.
-  - `zcash_primitives::primitives::SaplingIvk` wrapper was added for `jubjub::Fr`
+  - `zcash_primitives::primitives::SaplingIvk`, a newtype wrapper around `jubjub::Fr`
     values that are semantically Sapling incoming viewing keys.
 - Test helpers, behind the `test-dependencies` feature flag:
   - `zcash_primitives::prover::mock::MockTxProver`, for building transactions in

@@ -31,7 +31,7 @@ and this library adheres to Rust's notion of
   - The `account` property of `WalletShieldedSpend` and `WalletShieldedOutput`
     now has the type `AccountId`.
 - `zcash_client_backend::welding_rig`:
-  - `scan_block` now takes `&[(AccountId, SaplingIvk)]`, instead of a
+  - `scan_block` now takes `&[(AccountId, K: ScanningKey)]`, instead of a
     slice of extended full viewing keys with implicit account IDs.
   - The `nullifiers` argument to `scan_block` now has the type
     `&[(AccountId, Nullifier)]`.
