@@ -29,23 +29,11 @@ pub enum MemoError {
     MemoBytesError(memo::Error),
 }
 
-/// Convert a [`MemoBytes`] value to a ZIP 321 compatible base64-encoded string.
+/// Converts a [`MemoBytes`] value to a ZIP 321 compatible base64-encoded string.
 ///
 /// [`MemoBytes`]: zcash_primitives::memo::MemoBytes
 pub fn memo_to_base64(memo: &MemoBytes) -> String {
-    // strip trailing zero bytes.
-    let mut last_nonzero = -1;
-    for i in (0..(memo.as_array().len())).rev() {
-        if memo.as_array()[i] != 0x0 {
-            last_nonzero = i as i64;
-            break;
-        }
-    }
-
-    base64::encode_config(
-        &memo.as_array()[..((last_nonzero + 1) as usize)],
-        base64::URL_SAFE_NO_PAD,
-    )
+    base64::encode_config(memo.as_slice(), base64::URL_SAFE_NO_PAD)
 }
 
 /// Parse a [`MemoBytes`] value from a ZIP 321 compatible base64-encoded string.
@@ -299,7 +287,7 @@ mod render {
         .add(b'|')
         .add(b'}');
 
-    /// Convert a parameter index value to the String representation
+    /// Converts a parameter index value to the `String` representation
     /// that must be appended to a parameter name when constructing a ZIP 321 URI.
     pub fn param_index(idx: Option<usize>) -> String {
         match idx {
@@ -318,7 +306,7 @@ mod render {
         format!("address{}={}", param_index(idx), addr.encode(params))
     }
 
-    /// Convert an [`Amount`] value to a correctly formatted decimal ZEC
+    /// Converts an [`Amount`] value to a correctly formatted decimal ZEC
     /// value for inclusion in a ZIP 321 URI.
     pub fn amount_str(amount: Amount) -> Option<String> {
         if amount.is_positive() {
@@ -342,7 +330,7 @@ mod render {
         amount_str(amount).map(|s| format!("amount{}={}", param_index(idx), s))
     }
 
-    /// Constructs an "memo" key/value pair containing the base64URI-encoded memo
+    /// Constructs a "memo" key/value pair containing the base64URI-encoded memo
     /// at the specified parameter index.
     pub fn memo_param(value: &MemoBytes, idx: Option<usize>) -> String {
         format!("{}{}={}", "memo", param_index(idx), memo_to_base64(value))
@@ -418,7 +406,7 @@ mod parse {
         false
     }
 
-    /// Convert an vector of [`Param`] values to a [`Payment`].
+    /// Converts an vector of [`Param`] values to a [`Payment`].
     ///
     /// This function performs checks to ensure that the resulting [`Payment`] is structurally
     /// valid; for example, a request for memo contents may not be associated with a
@@ -458,7 +446,7 @@ mod parse {
         Ok(payment)
     }
 
-    /// Parser that consumes the leading "zcash:\[address\]" from a ZIP 321 URI.
+    /// Parses and consumes the leading "zcash:\[address\]" from a ZIP 321 URI.
     pub fn lead_addr<'a, P: consensus::Parameters>(
         params: &'a P,
     ) -> impl Fn(&str) -> IResult<&str, Option<IndexedParam>> + 'a {
@@ -504,17 +492,17 @@ mod parse {
         }
     }
 
-    /// Parser for valid characters which may appear in parameter values
+    /// Parses valid characters which may appear in parameter values.
     pub fn qchars(input: &str) -> IResult<&str, &str> {
         alphanum_or("-._~!$'()*+,;:@%")(input)
     }
 
-    /// Parser for valid characters that may appear in parameter names
+    /// Parses valid characters that may appear in parameter names.
     pub fn namechars(input: &str) -> IResult<&str, &str> {
         alphanum_or("+-")(input)
     }
 
-    /// Parser for a parameter name and its associated index.
+    /// Parses a parameter name and its associated index.
     pub fn indexed_name(input: &str) -> IResult<&str, (&str, Option<&str>)> {
         let paramname = recognize(tuple((alpha1, namechars)));
 
@@ -530,7 +518,7 @@ mod parse {
         ))(input)
     }
 
-    /// Parser for a value in decimal ZEC.
+    /// Parses a value in decimal ZEC.
     pub fn parse_amount<'a>(input: &'a str) -> IResult<&'a str, Amount> {
         map_res(
             tuple((
