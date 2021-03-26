@@ -16,6 +16,12 @@ struct CompactBlockRow {
     data: Vec<u8>,
 }
 
+/// Implements a traversal of `limit` blocks of the block cache database.
+///
+/// Starting at `from_height`, the `with_row` callback is invoked
+/// with each block retrieved from the backing store. If the `limit`
+/// value provided is `None`, all blocks are traversed up to the
+/// maximum height.
 pub fn with_blocks<F>(
     cache: &BlockDB,
     from_height: BlockHeight,

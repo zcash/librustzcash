@@ -1,4 +1,11 @@
 //! Functions for querying information in the wdb database.
+//!
+//! These functions should generally not be used directly; instead,
+//! their functionality is available via the [`WalletRead`] and
+//! [`WalletWrite`] traits.
+//!
+//! [`WalletRead`]: zcash_client_backend::data_api::WalletRead
+//! [`WalletWrite`]: zcash_client_backend::data_api::WalletWrite
 
 use ff::PrimeField;
 use rusqlite::{params, OptionalExtension, ToSql, NO_PARAMS};
@@ -32,11 +39,7 @@ use crate::{error::SqliteClientError, DataConnStmtCache, NoteId, WalletDB};
 pub mod init;
 pub mod transact;
 
-/// This trait provides a generalization over shielded output representations
-/// that allows a wallet to avoid coupling to a specific one.
-// TODO: it'd probably be better not to unify the definitions of
-// `WalletShieldedOutput` and `DecryptedOutput` via a compositional
-// approach, if possible.
+/// This trait provides a generalization over shielded output representations.
 pub trait ShieldedOutput {
     fn index(&self) -> usize;
     fn account(&self) -> AccountId;
@@ -130,6 +133,9 @@ pub fn get_address<P: consensus::Parameters>(
         .map_err(SqliteClientError::Bech32)
 }
 
+/// Returns the [`ExtendedFullViewingKey`]s for the wallet.
+///
+/// [`ExtendedFullViewingKey`]: zcash_primitives::zip32::ExtendedFullViewingKey
 pub fn get_extended_full_viewing_keys<P: consensus::Parameters>(
     wdb: &WalletDB<P>,
 ) -> Result<HashMap<AccountId, ExtendedFullViewingKey>, SqliteClientError> {
@@ -163,6 +169,10 @@ pub fn get_extended_full_viewing_keys<P: consensus::Parameters>(
     Ok(res)
 }
 
+/// Checks whether the specified [`ExtendedFullViewingKey`] is valid and corresponds to the
+/// specified account.
+///
+/// [`ExtendedFullViewingKey`]: zcash_primitives::zip32::ExtendedFullViewingKey
 pub fn is_valid_account_extfvk<P: consensus::Parameters>(
     wdb: &WalletDB<P>,
     account: AccountId,
@@ -327,6 +337,22 @@ pub fn get_sent_memo<P>(wdb: &WalletDB<P>, id_note: i64) -> Result<Memo, SqliteC
         .map_err(SqliteClientError::from)
 }
 
+/// Returns the minimum and maximum heights for blocks stored in the wallet database.
+///
+/// # Examples
+///
+/// ```
+/// use tempfile::NamedTempFile;
+/// use zcash_primitives::consensus::Network;
+/// use zcash_client_sqlite::{
+///     WalletDB,
+///     wallet::block_height_extrema,
+/// };
+///
+/// let data_file = NamedTempFile::new().unwrap();
+/// let db = WalletDB::for_path(data_file, Network::TestNetwork).unwrap();
+/// let bounds = block_height_extrema(&db);
+/// ```
 pub fn block_height_extrema<P>(
     wdb: &WalletDB<P>,
 ) -> Result<Option<(BlockHeight, BlockHeight)>, rusqlite::Error> {
@@ -348,6 +374,24 @@ pub fn block_height_extrema<P>(
         .or(Ok(None))
 }
 
+/// Returns the block height at which the specified transaction was mined,
+/// if any.
+///
+/// # Examples
+///
+/// ```
+/// use tempfile::NamedTempFile;
+/// use zcash_primitives::consensus::Network;
+/// use zcash_primitives::transaction::TxId;
+/// use zcash_client_sqlite::{
+///     WalletDB,
+///     wallet::get_tx_height,
+/// };
+///
+/// let data_file = NamedTempFile::new().unwrap();
+/// let db = WalletDB::for_path(data_file, Network::TestNetwork).unwrap();
+/// let height = get_tx_height(&db, TxId([0u8; 32]));
+/// ```
 pub fn get_tx_height<P>(
     wdb: &WalletDB<P>,
     txid: TxId,
@@ -361,6 +405,23 @@ pub fn get_tx_height<P>(
         .optional()
 }
 
+/// Returns the block hash for the block at the specified height,
+/// if any.
+///
+/// # Examples
+///
+/// ```
+/// use tempfile::NamedTempFile;
+/// use zcash_primitives::consensus::{H0, Network};
+/// use zcash_client_sqlite::{
+///     WalletDB,
+///     wallet::get_block_hash,
+/// };
+///
+/// let data_file = NamedTempFile::new().unwrap();
+/// let db = WalletDB::for_path(data_file, Network::TestNetwork).unwrap();
+/// let hash = get_block_hash(&db, H0);
+/// ```
 pub fn get_block_hash<P>(
     wdb: &WalletDB<P>,
     block_height: BlockHeight,
@@ -427,6 +488,23 @@ pub fn rewind_to_height<P: consensus::Parameters>(
     }
 }
 
+/// Returns the commitment tree for the block at the specified height,
+/// if any.
+///
+/// # Examples
+///
+/// ```
+/// use tempfile::NamedTempFile;
+/// use zcash_primitives::consensus::{Network, H0};
+/// use zcash_client_sqlite::{
+///     WalletDB,
+///     wallet::get_commitment_tree,
+/// };
+///
+/// let data_file = NamedTempFile::new().unwrap();
+/// let db = WalletDB::for_path(data_file, Network::TestNetwork).unwrap();
+/// let tree = get_commitment_tree(&db, H0);
+/// ```
 pub fn get_commitment_tree<P>(
     wdb: &WalletDB<P>,
     block_height: BlockHeight,
@@ -450,6 +528,23 @@ pub fn get_commitment_tree<P>(
         .map_err(SqliteClientError::from)
 }
 
+/// Returns the incremental witnesses for the block at the specified height,
+/// if any.
+///
+/// # Examples
+///
+/// ```
+/// use tempfile::NamedTempFile;
+/// use zcash_primitives::consensus::{Network, H0};
+/// use zcash_client_sqlite::{
+///     WalletDB,
+///     wallet::get_witnesses,
+/// };
+///
+/// let data_file = NamedTempFile::new().unwrap();
+/// let db = WalletDB::for_path(data_file, Network::TestNetwork).unwrap();
+/// let witnesses = get_witnesses(&db, H0);
+/// ```
 pub fn get_witnesses<P>(
     wdb: &WalletDB<P>,
     block_height: BlockHeight,
@@ -494,6 +589,7 @@ pub fn get_nullifiers<P>(
     Ok(res)
 }
 
+/// Insert the information about a scanned block into the database.
 pub fn insert_block<'a, P>(
     stmts: &mut DataConnStmtCache<'a, P>,
     block_height: BlockHeight,
@@ -514,6 +610,8 @@ pub fn insert_block<'a, P>(
     Ok(())
 }
 
+/// Insert information about a mined transaction that was observed to
+/// contain a note related to this wallet into the database.
 pub fn put_tx_meta<'a, P, N>(
     stmts: &mut DataConnStmtCache<'a, P>,
     tx: &WalletTx<N>,
@@ -540,6 +638,7 @@ pub fn put_tx_meta<'a, P, N>(
     }
 }
 
+/// Insert full transaction data into the database.
 pub fn put_tx_data<'a, P>(
     stmts: &mut DataConnStmtCache<'a, P>,
     tx: &Transaction,
@@ -573,6 +672,11 @@ pub fn put_tx_data<'a, P>(
     }
 }
 
+/// Mark a given nullifier as having been revealed in the construction
+/// of the specified transaction.
+///
+/// Marking a note spent in this fashion does NOT imply that the
+/// spending transaction has been mined.
 pub fn mark_spent<'a, P>(
     stmts: &mut DataConnStmtCache<'a, P>,
     tx_ref: i64,
@@ -584,6 +688,7 @@ pub fn mark_spent<'a, P>(
     Ok(())
 }
 
+/// Record the specified shielded output as having been received.
 // Assumptions:
 // - A transaction will not contain more than 2^63 shielded outputs.
 // - A note value will never exceed 2^63 zatoshis.
@@ -634,6 +739,8 @@ pub fn put_received_note<'a, P, T: ShieldedOutput>(
     }
 }
 
+/// Record the incremental witness for the specified note,
+/// as of the given block height.
 pub fn insert_witness<'a, P>(
     stmts: &mut DataConnStmtCache<'a, P>,
     note_id: i64,
@@ -650,6 +757,7 @@ pub fn insert_witness<'a, P>(
     Ok(())
 }
 
+/// Remove old incremental witnesses up to the given block height.
 pub fn prune_witnesses<'a, P>(
     stmts: &mut DataConnStmtCache<'a, P>,
     below_height: BlockHeight,
@@ -660,6 +768,8 @@ pub fn prune_witnesses<'a, P>(
     Ok(())
 }
 
+/// Mark notes that have not been mined in transactions
+/// as expired, up to the given block height.
 pub fn update_expired_notes<'a, P>(
     stmts: &mut DataConnStmtCache<'a, P>,
     height: BlockHeight,
@@ -668,6 +778,7 @@ pub fn update_expired_notes<'a, P>(
     Ok(())
 }
 
+/// Record information about a note that your wallet created.
 pub fn put_sent_note<'a, P: consensus::Parameters>(
     stmts: &mut DataConnStmtCache<'a, P>,
     output: &DecryptedOutput,

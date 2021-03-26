@@ -1,7 +1,9 @@
 //! *An SQLite-based Zcash light client.*
 //!
-//! `zcash_client_backend` contains a set of APIs that collectively implement an
-//! SQLite-based light client for the Zcash network.
+//! `zcash_client_sqlite` contains complete SQLite-based implementations of the [`WalletRead`],
+//! [`WalletWrite`], and [`BlockSource`] traits from the [`zcash_client_backend`] crate. In
+//! combination with [`zcash_client_backend`], it provides a full implementation of a SQLite-backed
+//! client for the Zcash network.
 //!
 //! # Design
 //!
@@ -21,6 +23,9 @@
 //! The `mainnet` feature configures the light client for use with the Zcash mainnet. By
 //! default, the light client is configured for use with the Zcash testnet.
 //!
+//! [`WalletRead`]: zcash_client_backend::data_api::WalletRead
+//! [`WalletWrite`]: zcash_client_backend::data_api::WalletWrite
+//! [`BlockSource`]: zcash_client_backend::data_api::BlockSource
 //! [`CompactBlock`]: zcash_client_backend::proto::compact_formats::CompactBlock
 //! [`init_cache_database`]: crate::chain::init::init_cache_database
 
@@ -73,7 +78,7 @@ impl fmt::Display for NoteId {
     }
 }
 
-/// A wrapper for the sqlite connection to the wallet database.
+/// A wrapper for the SQLite connection to the wallet database.
 pub struct WalletDB<P> {
     conn: Connection,
     params: P,
@@ -250,6 +255,13 @@ impl<P: consensus::Parameters> WalletRead for WalletDB<P> {
     }
 }
 
+/// The primary type used to implement [`WalletWrite`] for the SQLite database.
+///
+/// A data structure that stores the SQLite prepared statements that are
+/// required for the implementation of [`WalletWrite`] against the backing
+/// store.
+///
+/// [`WalletWrite`]: zcash_client_backend::data_api::WalletWrite
 pub struct DataConnStmtCache<'a, P> {
     wallet_db: &'a WalletDB<P>,
     stmt_insert_block: Statement<'a>,
@@ -499,9 +511,11 @@ impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
     }
 }
 
+/// A wrapper for the SQLite connection to the block cache database.
 pub struct BlockDB(Connection);
 
 impl BlockDB {
+    /// Construct a connection to the wallet database stored at the specified path.
     pub fn for_path<P: AsRef<Path>>(path: P) -> Result<Self, rusqlite::Error> {
         Connection::open(path).map(BlockDB)
     }
