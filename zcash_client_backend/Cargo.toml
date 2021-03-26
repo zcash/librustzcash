@@ -37,7 +37,7 @@ gumdrop = "0.8"
 rand_core = "0.5.1"
 rand_xorshift = "0.2"
 tempfile = "3.1.0"
-zcash_client_sqlite = { version = "0.2", path = "../zcash_client_sqlite" }
+zcash_client_sqlite = { version = "0.3", path = "../zcash_client_sqlite" }
 zcash_proofs = { version = "0.5", path = "../zcash_proofs" }
 
 [features]

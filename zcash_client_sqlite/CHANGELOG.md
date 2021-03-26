@@ -6,6 +6,8 @@ and this library adheres to Rust's notion of
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+
+## [0.3.0] - 2021-03-26
 This release contains a major refactor of the APIs to leverage the new Data
 Access API in the `zcash_client_backend` crate. API names are almost all the
 same as before, but have been reorganized.
