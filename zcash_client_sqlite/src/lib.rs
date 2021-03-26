@@ -515,7 +515,7 @@ impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
 pub struct BlockDB(Connection);
 
 impl BlockDB {
-    /// Construct a connection to the wallet database stored at the specified path.
+    /// Opens a connection to the wallet database stored at the specified path.
     pub fn for_path<P: AsRef<Path>>(path: P) -> Result<Self, rusqlite::Error> {
         Connection::open(path).map(BlockDB)
     }

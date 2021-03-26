@@ -589,7 +589,7 @@ pub fn get_nullifiers<P>(
     Ok(res)
 }
 
-/// Insert the information about a scanned block into the database.
+/// Inserts information about a scanned block into the database.
 pub fn insert_block<'a, P>(
     stmts: &mut DataConnStmtCache<'a, P>,
     block_height: BlockHeight,
@@ -610,7 +610,7 @@ pub fn insert_block<'a, P>(
     Ok(())
 }
 
-/// Insert information about a mined transaction that was observed to
+/// Inserts information about a mined transaction that was observed to
 /// contain a note related to this wallet into the database.
 pub fn put_tx_meta<'a, P, N>(
     stmts: &mut DataConnStmtCache<'a, P>,
@@ -638,7 +638,7 @@ pub fn put_tx_meta<'a, P, N>(
     }
 }
 
-/// Insert full transaction data into the database.
+/// Inserts full transaction data into the database.
 pub fn put_tx_data<'a, P>(
     stmts: &mut DataConnStmtCache<'a, P>,
     tx: &Transaction,
@@ -672,7 +672,7 @@ pub fn put_tx_data<'a, P>(
     }
 }
 
-/// Mark a given nullifier as having been revealed in the construction
+/// Marks a given nullifier as having been revealed in the construction
 /// of the specified transaction.
 ///
 /// Marking a note spent in this fashion does NOT imply that the
@@ -688,7 +688,7 @@ pub fn mark_spent<'a, P>(
     Ok(())
 }
 
-/// Record the specified shielded output as having been received.
+/// Records the specified shielded output as having been received.
 // Assumptions:
 // - A transaction will not contain more than 2^63 shielded outputs.
 // - A note value will never exceed 2^63 zatoshis.
@@ -739,7 +739,7 @@ pub fn put_received_note<'a, P, T: ShieldedOutput>(
     }
 }
 
-/// Record the incremental witness for the specified note,
+/// Records the incremental witness for the specified note,
 /// as of the given block height.
 pub fn insert_witness<'a, P>(
     stmts: &mut DataConnStmtCache<'a, P>,
@@ -757,7 +757,7 @@ pub fn insert_witness<'a, P>(
     Ok(())
 }
 
-/// Remove old incremental witnesses up to the given block height.
+/// Removes old incremental witnesses up to the given block height.
 pub fn prune_witnesses<'a, P>(
     stmts: &mut DataConnStmtCache<'a, P>,
     below_height: BlockHeight,
@@ -768,7 +768,7 @@ pub fn prune_witnesses<'a, P>(
     Ok(())
 }
 
-/// Mark notes that have not been mined in transactions
+/// Marks notes that have not been mined in transactions
 /// as expired, up to the given block height.
 pub fn update_expired_notes<'a, P>(
     stmts: &mut DataConnStmtCache<'a, P>,
@@ -778,7 +778,7 @@ pub fn update_expired_notes<'a, P>(
     Ok(())
 }
 
-/// Record information about a note that your wallet created.
+/// Records information about a note that your wallet created.
 pub fn put_sent_note<'a, P: consensus::Parameters>(
     stmts: &mut DataConnStmtCache<'a, P>,
     output: &DecryptedOutput,
