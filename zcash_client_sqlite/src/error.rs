@@ -1,3 +1,5 @@
+//! Error types for problems that may arise when reading or storing wallet data to SQLite.
+
 use std::error;
 use std::fmt;
 
@@ -5,6 +7,7 @@ use zcash_client_backend::data_api;
 
 use crate::NoteId;
 
+/// The primary error type for the SQLite wallet backend.
 #[derive(Debug)]
 pub enum SqliteClientError {
     /// Decoding of a stored value from its serialized form has failed.
