@@ -687,7 +687,7 @@ mod tests {
         let (cb, _) = fake_compact_block(
             sapling_activation_height(),
             BlockHash([0; 32]),
-            extfvk.clone(),
+            extfvk,
             value,
         );
         insert_into_cache(&db_cache, &cb);

@@ -49,7 +49,7 @@ use crate::prover::mock::MockTxProver;
 const DEFAULT_TX_EXPIRY_DELTA: u32 = 20;
 
 /// If there are any shielded inputs, always have at least two shielded outputs, padding
-/// with dummy outputs if necessary. See https://github.com/zcash/zcash/issues/3615
+/// with dummy outputs if necessary. See <https://github.com/zcash/zcash/issues/3615>.
 const MIN_SHIELDED_OUTPUTS: usize = 2;
 
 #[derive(Debug, PartialEq)]

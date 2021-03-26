@@ -17,6 +17,7 @@ use zcash_primitives::zip32::{ChildIndex, ExtendedSpendingKey};
 ///
 /// let extsk = spending_key(&[0; 32][..], COIN_TYPE, 0);
 /// ```
+/// [`ExtendedSpendingKey`]: zcash_primitives::zip32::ExtendedSpendingKey
 pub fn spending_key(seed: &[u8], coin_type: u32, account: u32) -> ExtendedSpendingKey {
     if seed.len() < 32 {
         panic!("ZIP 32 seeds MUST be at least 32 bytes");

@@ -9,8 +9,8 @@ use std::str;
 
 /// Format a byte array as a colon-delimited hex string.
 ///
-/// Source: https://github.com/tendermint/signatory
-/// License: MIT / Apache 2.0
+/// - Source: <https://github.com/tendermint/signatory>
+/// - License: MIT / Apache 2.0
 fn fmt_colon_delimited_hex<B>(f: &mut fmt::Formatter<'_>, bytes: B) -> fmt::Result
 where
     B: AsRef<[u8]>,

@@ -192,8 +192,9 @@ where
 /// caller is handling rollbacks.
 ///
 /// For brand-new light client databases, this function starts scanning from the Sapling
-/// activation height. This height can be fast-forwarded to a more recent block by calling
-/// [`init_blocks_table`] before this function.
+/// activation height. This height can be fast-forwarded to a more recent block by
+/// initializing the client database with a starting block (for example, calling
+/// `init_blocks_table` before this function if using `zcash_client_sqlite`).
 ///
 /// Scanned blocks are required to be height-sequential. If a block is missing from the
 /// cache, an error will be returned with kind [`ChainInvalid::BlockHeightDiscontinuity`].
@@ -235,8 +236,6 @@ where
 /// # Ok(())
 /// # }
 /// ```
-///
-/// [`init_blocks_table`]: crate::init::init_blocks_table
 pub fn scan_cached_blocks<E, N, P, C, D>(
     params: &P,
     cache: &C,

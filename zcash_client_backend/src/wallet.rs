@@ -63,6 +63,8 @@ pub struct WalletShieldedOutput<N> {
     pub nf: N,
 }
 
+/// Information about a note that is tracked by the wallet that is available for spending,
+/// with sufficient information for use in note selection.
 pub struct SpendableNote {
     pub diversifier: Diversifier,
     pub note_value: Amount,

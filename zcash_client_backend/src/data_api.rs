@@ -187,11 +187,21 @@ pub struct PrunedBlock<'a> {
     pub transactions: &'a Vec<WalletTx<Nullifier>>,
 }
 
+/// A transaction that was detected during scanning of the blockchain,
+/// including its decrypted Sapling outputs.
+///
+/// The purpose of this struct is to permit atomic updates of the
+/// wallet database when transactions are successfully decrypted.
 pub struct ReceivedTransaction<'a> {
     pub tx: &'a Transaction,
     pub outputs: &'a Vec<DecryptedOutput>,
 }
 
+/// A transaction that was constructed and sent by the wallet.
+///
+/// The purpose of this struct is to permit atomic updates of the
+/// wallet database when transactions are created and submitted
+/// to the network.
 pub struct SentTransaction<'a> {
     pub tx: &'a Transaction,
     pub created: time::OffsetDateTime,

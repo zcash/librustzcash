@@ -64,25 +64,16 @@ macro_rules! update_hash {
 }
 
 fn has_overwinter_components(version: &TxVersion) -> bool {
-    match version {
-        TxVersion::Sprout(_) => false,
-        _ => true,
-    }
+    !matches!(version, TxVersion::Sprout(_))
 }
 
 fn has_sapling_components(version: &TxVersion) -> bool {
-    match version {
-        TxVersion::Sprout(_) | TxVersion::Overwinter => false,
-        _ => true,
-    }
+    !matches!(version, TxVersion::Sprout(_) | TxVersion::Overwinter)
 }
 
 #[cfg(feature = "zfuture")]
 fn has_tze_components(version: &TxVersion) -> bool {
-    match version {
-        TxVersion::ZFuture => true,
-        _ => false,
-    }
+    matches!(version, TxVersion::ZFuture)
 }
 
 fn prevout_hash(vin: &[TxIn]) -> Blake2bHash {
