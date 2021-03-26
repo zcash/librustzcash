@@ -477,14 +477,13 @@ pub fn get_nullifiers<P>(
     wdb: &WalletDB<P>,
 ) -> Result<Vec<(AccountId, Nullifier)>, SqliteClientError> {
     // Get the nullifiers for the notes we are tracking
-    let mut stmt_fetch_nullifiers = wdb
-        .conn
-        .prepare(
-            "SELECT rn.id_note, rn.account, rn.nf, tx.block as block
+    let mut stmt_fetch_nullifiers = wdb.conn.prepare(
+        "SELECT rn.id_note, rn.account, rn.nf, tx.block as block
             FROM received_notes rn
             LEFT OUTER JOIN transactions tx
             ON tx.id_tx = rn.spent
-            WHERE block IS NULL")?;
+            WHERE block IS NULL",
+    )?;
     let nullifiers = stmt_fetch_nullifiers.query_map(NO_PARAMS, |row| {
         let account = AccountId(row.get(1)?);
         let nf_bytes: Vec<u8> = row.get(2)?;
