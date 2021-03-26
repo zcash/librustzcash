@@ -1,123 +1,75 @@
+//! Reference implementation of the ZIP-321 standard for payment requests.
+//!
+//! This module provides data structures, parsing, and rendering functions
+//! for interpreting and producing valid ZIP 321 URIs.
+//!
+//! The specification for ZIP 321 URIs may be found at <https://zips.z.cash/zip-0321>
 use core::fmt::Debug;
-use std::cmp::Ordering;
 use std::collections::HashMap;
-use std::fmt;
-use std::str::FromStr;
 
 use nom::{
     character::complete::char, combinator::all_consuming, multi::separated_list0,
     sequence::preceded,
 };
-use zcash_primitives::{consensus, transaction::components::Amount};
+use zcash_primitives::{
+    consensus,
+    memo::{self, MemoBytes},
+    transaction::components::Amount,
+};
+
+#[cfg(any(test, feature = "test-dependencies"))]
+use std::cmp::Ordering;
 
 use crate::address::RecipientAddress;
 
-pub struct RawMemo([u8; 512]);
-
+/// Errors that may be produced in decoding of memos.
 #[derive(Debug)]
 pub enum MemoError {
     InvalidBase64(base64::DecodeError),
-    LengthExceeded(usize),
+    MemoBytesError(memo::Error),
 }
 
-impl RawMemo {
-    // Construct a raw memo from a vector of bytes.
-    pub fn from_bytes(v: &[u8]) -> Result<Self, MemoError> {
-        if v.len() > 512 {
-            Err(MemoError::LengthExceeded(v.len()))
-        } else {
-            let mut memo: [u8; 512] = [0; 512];
-            memo[..v.len()].copy_from_slice(&v);
-            Ok(RawMemo(memo))
-        }
-    }
-
-    pub fn to_base64(&self) -> String {
-        // strip trailing zero bytes.
-        let mut last_nonzero = -1;
-        for i in (0..(self.0.len())).rev() {
-            if self.0[i] != 0x0 {
-                last_nonzero = i as i64;
-                break;
-            }
-        }
-
-        base64::encode_config(
-            &self.0[..((last_nonzero + 1) as usize)],
-            base64::URL_SAFE_NO_PAD,
-        )
-    }
-
-    pub fn from_base64(s: &str) -> Result<Self, MemoError> {
-        base64::decode_config(s, base64::URL_SAFE_NO_PAD)
-            .map_err(MemoError::InvalidBase64)
-            .and_then(|b| RawMemo::from_bytes(&b))
-    }
+/// Converts a [`MemoBytes`] value to a ZIP 321 compatible base64-encoded string.
+///
+/// [`MemoBytes`]: zcash_primitives::memo::MemoBytes
+pub fn memo_to_base64(memo: &MemoBytes) -> String {
+    base64::encode_config(memo.as_slice(), base64::URL_SAFE_NO_PAD)
 }
 
-impl Debug for RawMemo {
-    fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
-        f.debug_struct("RawMemo")
-            .field("memo", &format!("{:?}...", &self.0[0..17]))
-            .finish()
-    }
+/// Parse a [`MemoBytes`] value from a ZIP 321 compatible base64-encoded string.
+///
+/// [`MemoBytes`]: zcash_primitives::memo::MemoBytes
+pub fn memo_from_base64(s: &str) -> Result<MemoBytes, MemoError> {
+    base64::decode_config(s, base64::URL_SAFE_NO_PAD)
+        .map_err(MemoError::InvalidBase64)
+        .and_then(|b| MemoBytes::from_bytes(&b).map_err(MemoError::MemoBytesError))
 }
 
-impl PartialEq for RawMemo {
-    fn eq(&self, other: &Self) -> bool {
-        self.0[..] == other.0[..]
-    }
-}
-
-impl FromStr for RawMemo {
-    type Err = MemoError;
-
-    fn from_str(memo: &str) -> Result<Self, Self::Err> {
-        RawMemo::from_bytes(memo.as_bytes())
-    }
-}
-
-impl Eq for RawMemo {}
-
-impl PartialOrd for RawMemo {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.to_base64().cmp(&other.to_base64()))
-    }
-}
-
-impl Ord for RawMemo {
-    fn cmp(&self, other: &Self) -> Ordering {
-        self.partial_cmp(other).unwrap()
-    }
-}
-
-// RawMemo is somewhat duplicative of the `Memo` type
-// in crate::note_encryption but as that's actively being
-// updated at time of this writing, these functions provide
-// shims to ease future use of those
-pub fn memo_from_vec(v: &[u8]) -> Result<RawMemo, MemoError> {
-    RawMemo::from_bytes(v)
-}
-
-pub fn memo_to_base64(memo: &RawMemo) -> String {
-    memo.to_base64()
-}
-
-pub fn memo_from_base64(s: &str) -> Result<RawMemo, MemoError> {
-    RawMemo::from_base64(s)
-}
-
+/// A single payment being requested.
 #[derive(Debug, PartialEq)]
 pub struct Payment {
-    recipient_address: RecipientAddress,
-    amount: Amount,
-    memo: Option<RawMemo>,
-    label: Option<String>,
-    message: Option<String>,
-    other_params: Vec<(String, String)>,
+    /// The payment address to which the payment should be sent.
+    pub recipient_address: RecipientAddress,
+    /// The amount of the payment that is being requested.
+    pub amount: Amount,
+    /// A memo that, if included, must be provided with the payment.
+    /// If a memo is present and [`recipient_address`] is not a shielded
+    /// address, the wallet should report an error.
+    ///
+    /// [`recipient_address`]: #structfield.recipient_address
+    pub memo: Option<MemoBytes>,
+    /// A human-readable label for this payment within the larger structure
+    /// of the transaction request.
+    pub label: Option<String>,
+    /// A human-readable message to be displayed to the user describing the
+    /// purpose of this payment.
+    pub message: Option<String>,
+    /// A list of other arbitrary key/value pairs associated with this payment.
+    pub other_params: Vec<(String, String)>,
 }
 
 impl Payment {
+    /// A utility for use in tests to help check round-trip serialization properties.
     #[cfg(any(test, feature = "test-dependencies"))]
     pub(in crate::zip321) fn normalize(&mut self) {
         self.other_params.sort();
@@ -146,12 +98,19 @@ impl Payment {
     }
 }
 
+/// A ZIP321 transaction request.
+///
+/// A ZIP 321 request may include one or more such requests for payment.
+/// When constructing a transaction in response to such a request,
+/// a separate output should be added to the transaction for each
+/// payment value in the request.
 #[derive(Debug, PartialEq)]
 pub struct TransactionRequest {
     payments: Vec<Payment>,
 }
 
 impl TransactionRequest {
+    /// A utility for use in tests to help check round-trip serialization properties.
     #[cfg(any(test, feature = "test-dependencies"))]
     pub(in crate::zip321) fn normalize<P: consensus::Parameters>(&mut self, params: &P) {
         for p in &mut self.payments {
@@ -161,6 +120,8 @@ impl TransactionRequest {
         self.payments.sort_by(Payment::compare_normalized(params));
     }
 
+    /// A utility for use in tests to help check round-trip serialization properties.
+    /// by comparing a two transaction requests for equality after normalization.
     #[cfg(all(test, feature = "test-dependencies"))]
     pub(in crate::zip321) fn normalize_and_eq<P: consensus::Parameters>(
         params: &P,
@@ -297,15 +258,15 @@ mod render {
         consensus, transaction::components::amount::COIN, transaction::components::Amount,
     };
 
-    use super::{memo_to_base64, RawMemo, RecipientAddress};
+    use super::{memo_to_base64, MemoBytes, RecipientAddress};
 
-    // The set of ASCII characters that must be percent-encoded according
-    // to the definition of ZIP 321. This is the complement of the subset of
-    // ASCII characters defined by `qchar`
-    //
-    //       unreserved      = ALPHA / DIGIT / "-" / "." / "_" / "~"
-    //       allowed-delims  = "!" / "$" / "'" / "(" / ")" / "*" / "+" / "," / ";"
-    //       qchar           = unreserved / pct-encoded / allowed-delims / ":" / "@"
+    /// The set of ASCII characters that must be percent-encoded according
+    /// to the definition of ZIP 321. This is the complement of the subset of
+    /// ASCII characters defined by `qchar`
+    ///
+    //      unreserved      = ALPHA / DIGIT / "-" / "." / "_" / "~"
+    //      allowed-delims  = "!" / "$" / "'" / "(" / ")" / "*" / "+" / "," / ";"
+    //      qchar           = unreserved / pct-encoded / allowed-delims / ":" / "@"
     pub const QCHAR_ENCODE: &AsciiSet = &CONTROLS
         .add(b' ')
         .add(b'"')
@@ -326,6 +287,8 @@ mod render {
         .add(b'|')
         .add(b'}');
 
+    /// Converts a parameter index value to the `String` representation
+    /// that must be appended to a parameter name when constructing a ZIP 321 URI.
     pub fn param_index(idx: Option<usize>) -> String {
         match idx {
             Some(i) if i > 0 => format!(".{}", i),
@@ -333,6 +296,8 @@ mod render {
         }
     }
 
+    /// Constructs an "address" key/value pair containing the encoded recipient address
+    /// at the specified parameter index.
     pub fn addr_param<P: consensus::Parameters>(
         params: &P,
         addr: &RecipientAddress,
@@ -341,6 +306,8 @@ mod render {
         format!("address{}={}", param_index(idx), addr.encode(params))
     }
 
+    /// Converts an [`Amount`] value to a correctly formatted decimal ZEC
+    /// value for inclusion in a ZIP 321 URI.
     pub fn amount_str(amount: Amount) -> Option<String> {
         if amount.is_positive() {
             let coins = i64::from(amount) / COIN;
@@ -357,14 +324,20 @@ mod render {
         }
     }
 
+    /// Constructs an "amount" key/value pair containing the encoded ZEC amount
+    /// at the specified parameter index.
     pub fn amount_param(amount: Amount, idx: Option<usize>) -> Option<String> {
         amount_str(amount).map(|s| format!("amount{}={}", param_index(idx), s))
     }
 
-    pub fn memo_param(value: &RawMemo, idx: Option<usize>) -> String {
+    /// Constructs a "memo" key/value pair containing the base64URI-encoded memo
+    /// at the specified parameter index.
+    pub fn memo_param(value: &MemoBytes, idx: Option<usize>) -> String {
         format!("{}{}={}", "memo", param_index(idx), memo_to_base64(value))
     }
 
+    /// Utility function for an arbitrary string key/value pair for inclusion in
+    /// a ZIP 321 URI at the specified parameter index.
     pub fn str_param(label: &str, value: &str, idx: Option<usize>) -> String {
         format!(
             "{}{}={}",
@@ -392,25 +365,31 @@ mod parse {
 
     use crate::address::RecipientAddress;
 
-    use super::{memo_from_base64, Payment, RawMemo};
+    use super::{memo_from_base64, MemoBytes, Payment};
 
-    // For purposes of parsing
+    /// A data type that defines the possible parameter types which may occur within a
+    /// ZIP 321 URI.
     #[derive(Debug, PartialEq)]
     pub enum Param {
         Addr(RecipientAddress),
         Amount(Amount),
-        Memo(Box<RawMemo>),
+        Memo(MemoBytes),
         Label(String),
         Message(String),
         Other(String, String),
     }
 
+    /// A [`Param`] value with its associated index.
     #[derive(Debug)]
     pub struct IndexedParam {
         pub param: Param,
         pub payment_index: usize,
     }
 
+    /// Utility function for determining parameter uniqueness.
+    ///
+    /// Utility function for determining whether a newly parsed param is a duplicate
+    /// of a previous parameter.
     pub fn has_duplicate_param(v: &[Param], p: &Param) -> bool {
         for p0 in v {
             match (p0, p) {
@@ -427,6 +406,11 @@ mod parse {
         false
     }
 
+    /// Converts an vector of [`Param`] values to a [`Payment`].
+    ///
+    /// This function performs checks to ensure that the resulting [`Payment`] is structurally
+    /// valid; for example, a request for memo contents may not be associated with a
+    /// transparent payment address.
     pub fn to_payment(vs: Vec<Param>, i: usize) -> Result<Payment, String> {
         let addr = vs.iter().find_map(|v| match v {
             Param::Addr(a) => Some(a.clone()),
@@ -447,7 +431,7 @@ mod parse {
                 Param::Amount(a) => payment.amount = a,
                 Param::Memo(m) => {
                     match payment.recipient_address {
-                        RecipientAddress::Shielded(_) => payment.memo = Some(*m),
+                        RecipientAddress::Shielded(_) => payment.memo = Some(m),
                         RecipientAddress::Transparent(_) => return Err(format!("Payment {} attempted to associate a memo with a transparent recipient address", i)),
                     }
                 },
@@ -462,8 +446,7 @@ mod parse {
         Ok(payment)
     }
 
-    /// Parser that consumes the leading "zcash:\[address\]" from
-    /// a ZIP 321 URI.
+    /// Parses and consumes the leading "zcash:\[address\]" from a ZIP 321 URI.
     pub fn lead_addr<'a, P: consensus::Parameters>(
         params: &'a P,
     ) -> impl Fn(&str) -> IResult<&str, Option<IndexedParam>> + 'a {
@@ -485,8 +468,7 @@ mod parse {
         }
     }
 
-    /// The primary parser for <name>=<value> query-string
-    /// parameter pair.
+    /// The primary parser for <name>=<value> query-string parameter pair.
     pub fn zcashparam<'a, P: consensus::Parameters>(
         params: &'a P,
     ) -> impl Fn(&str) -> IResult<&str, IndexedParam> + 'a {
@@ -510,14 +492,17 @@ mod parse {
         }
     }
 
+    /// Parses valid characters which may appear in parameter values.
     pub fn qchars(input: &str) -> IResult<&str, &str> {
         alphanum_or("-._~!$'()*+,;:@%")(input)
     }
 
+    /// Parses valid characters that may appear in parameter names.
     pub fn namechars(input: &str) -> IResult<&str, &str> {
         alphanum_or("+-")(input)
     }
 
+    /// Parses a parameter name and its associated index.
     pub fn indexed_name(input: &str) -> IResult<&str, (&str, Option<&str>)> {
         let paramname = recognize(tuple((alpha1, namechars)));
 
@@ -533,6 +518,7 @@ mod parse {
         ))(input)
     }
 
+    /// Parses a value in decimal ZEC.
     pub fn parse_amount<'a>(input: &'a str) -> IResult<&'a str, Amount> {
         map_res(
             tuple((
@@ -597,7 +583,7 @@ mod parse {
                 .map_err(|e| e.to_string()),
 
             "memo" => memo_from_base64(value)
-                .map(|m| Param::Memo(Box::new(m)))
+                .map(|m| Param::Memo(m))
                 .map_err(|e| format!("Decoded memo was invalid: {:?}", e)),
 
             other if other.starts_with("req-") => {
@@ -637,7 +623,7 @@ pub mod testing {
 
     use crate::address::RecipientAddress;
 
-    use super::{memo_from_vec, Payment, RawMemo, TransactionRequest};
+    use super::{MemoBytes, Payment, TransactionRequest};
 
     pub fn arb_addr() -> impl Strategy<Value = RecipientAddress> {
         prop_oneof![
@@ -649,8 +635,8 @@ pub mod testing {
     pub const VALID_PARAMNAME: &str = "[a-zA-Z][a-zA-Z0-9+-]*";
 
     prop_compose! {
-        pub fn arb_valid_memo()(bytes in vec(any::<u8>(), 0..512)) -> RawMemo {
-            memo_from_vec(&bytes).unwrap()
+        pub fn arb_valid_memo()(bytes in vec(any::<u8>(), 0..512)) -> MemoBytes {
+            MemoBytes::from_bytes(&bytes).unwrap()
         }
     }
 
@@ -704,8 +690,10 @@ pub mod testing {
 
 #[cfg(test)]
 mod tests {
+    use std::str::FromStr;
     use zcash_primitives::{
         consensus::{Parameters, TEST_NETWORK},
+        memo::Memo,
         transaction::components::Amount,
     };
 
@@ -715,7 +703,7 @@ mod tests {
         memo_from_base64, memo_to_base64,
         parse::{parse_amount, zcashparam, Param},
         render::amount_str,
-        Payment, RawMemo, TransactionRequest,
+        MemoBytes, Payment, TransactionRequest,
     };
     use crate::encoding::decode_payment_address;
 
@@ -800,17 +788,19 @@ mod tests {
 
     #[test]
     fn test_zip321_memos() {
-        let m_simple: RawMemo = "This is a simple memo.".parse().unwrap();
+        let m_simple: MemoBytes = Memo::from_str("This is a simple memo.").unwrap().into();
         let m_simple_64 = memo_to_base64(&m_simple);
         assert_eq!(memo_from_base64(&m_simple_64).unwrap(), m_simple);
 
-        let m_json: RawMemo = "{ \"key\": \"This is a JSON-structured memo.\" }"
-            .parse()
-            .unwrap();
+        let m_json: MemoBytes = Memo::from_str("{ \"key\": \"This is a JSON-structured memo.\" }")
+            .unwrap()
+            .into();
         let m_json_64 = memo_to_base64(&m_json);
         assert_eq!(memo_from_base64(&m_json_64).unwrap(), m_json);
 
-        let m_unicode: RawMemo = "This is a unicode memo ✨🦄🏆🎉".parse().unwrap();
+        let m_unicode: MemoBytes = Memo::from_str("This is a unicode memo ✨🦄🏆🎉")
+            .unwrap()
+            .into();
         let m_unicode_64 = memo_to_base64(&m_unicode);
         assert_eq!(memo_from_base64(&m_unicode_64).unwrap(), m_unicode);
     }
@@ -955,7 +945,7 @@ mod tests {
             let fragment = memo_param(&memo, i);
             let (rest, iparam) = zcashparam(&TEST_NETWORK)(&fragment).unwrap();
             assert_eq!(rest, "");
-            assert_eq!(iparam.param, Param::Memo(Box::new(memo)));
+            assert_eq!(iparam.param, Param::Memo(memo));
             assert_eq!(iparam.payment_index, i.unwrap_or(0));
         }
 
