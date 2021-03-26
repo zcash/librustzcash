@@ -138,14 +138,12 @@ impl Tree {
     pub fn append_leaf(&mut self, new_leaf: NodeData) -> Result<Vec<EntryLink>, Error> {
         let root = self.root;
         let new_leaf_link = self.push(new_leaf.into());
-        let mut appended = Vec::new();
-        appended.push(new_leaf_link);
+        let mut appended = vec![new_leaf_link];
 
         let mut peaks = Vec::new();
         self.get_peaks(root, &mut peaks)?;
 
-        let mut merge_stack = Vec::new();
-        merge_stack.push(new_leaf_link);
+        let mut merge_stack = vec![new_leaf_link];
 
         // Scan the peaks right-to-left, merging together equal-sized adjacent
         // complete subtrees. After this, merge_stack only contains peaks of

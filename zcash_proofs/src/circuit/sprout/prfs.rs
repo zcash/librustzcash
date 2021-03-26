@@ -20,11 +20,12 @@ where
     assert_eq!(x.len(), 252);
     assert_eq!(y.len(), 256);
 
-    let mut image = vec![];
-    image.push(Boolean::constant(a));
-    image.push(Boolean::constant(b));
-    image.push(Boolean::constant(c));
-    image.push(Boolean::constant(d));
+    let mut image = vec![
+        Boolean::constant(a),
+        Boolean::constant(b),
+        Boolean::constant(c),
+        Boolean::constant(d),
+    ];
     image.extend(x.iter().cloned());
     image.extend(y.iter().cloned());
 
