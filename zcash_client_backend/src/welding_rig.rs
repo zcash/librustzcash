@@ -23,6 +23,8 @@ use crate::wallet::{AccountId, WalletShieldedOutput, WalletShieldedSpend, Wallet
 ///
 /// The given [`CommitmentTree`] and existing [`IncrementalWitness`]es are incremented
 /// with this output's commitment.
+///
+/// [`ScanningKey`]: zcash_client_backend::welding_rig::ScanningKey
 #[allow(clippy::too_many_arguments)]
 fn scan_output<P: consensus::Parameters, K: ScanningKey>(
     params: &P,
@@ -88,10 +90,23 @@ fn scan_output<P: consensus::Parameters, K: ScanningKey>(
 /// A key that can be used to perform trial decryption and nullifier
 /// computation for a Sapling [`CompactOutput`]
 ///
+/// The purpose of this trait is to enable [`scan_block`]
+/// and related methods to be used with either incoming viewing keys
+/// or full viewing keys, with the data returned from trial decryption
+/// being dependent upon the type of key used. In the case that an
+/// incoming viewing key is used, only the note and payment address
+/// will be returned; in the case of a full viewing key, the
+/// nullifier for the note can also be obtained.
+///
 /// [`CompactOutput`]: crate::proto::compact_formats::CompactOutput
+/// [`scan_block`]: crate::welding_rig::scan_block
 pub trait ScanningKey {
+    /// The type of nullifier extracted when a note is successfully
+    /// obtained by trial decryption.
     type Nf;
 
+    /// Attempt to decrypt a Sapling note and payment address
+    /// from the specified ciphertext using this scanning key.
     fn try_decryption<P: consensus::Parameters>(
         &self,
         params: &P,
@@ -101,9 +116,17 @@ pub trait ScanningKey {
         ct: &[u8],
     ) -> Option<(Note, PaymentAddress)>;
 
+    /// Produce the nullifier for the specified note and witness, if possible.
+    /// IVK-based implementations of this trait cannot successfully derive
+    /// nullifiers, in which case `Self::Nf` should be set to the unit type
+    /// and this function is a no-op.
     fn nf(&self, note: &Note, witness: &IncrementalWitness<Node>) -> Self::Nf;
 }
 
+/// The [`ScanningKey`] implementation for [`ExtendedFullViewingKey`]s.
+/// Nullifiers may be derived when scanning with these keys.
+///
+/// [`ExtendedFullViewingKey`]: zcash_primitives::zip32::ExtendedFullViewingKey
 impl ScanningKey for ExtendedFullViewingKey {
     type Nf = Nullifier;
 
@@ -123,6 +146,10 @@ impl ScanningKey for ExtendedFullViewingKey {
     }
 }
 
+/// The [`ScanningKey`] implementation for [`SaplingIvk`]s.
+/// Nullifiers cannot be derived when scanning with these keys.
+///
+/// [`SaplingIvk`]: zcash_primitives::primitives::SaplingIvk
 impl ScanningKey for SaplingIvk {
     type Nf = ();
 
@@ -158,10 +185,11 @@ impl ScanningKey for SaplingIvk {
 /// [`ExtendedFullViewingKey`]: zcash_primitives::zip32::ExtendedFullViewingKey
 /// [`SaplingIvk`]: zcash_primitives::primitives::SaplingIvk
 /// [`CompactBlock`]: crate::proto::compact_formats::CompactBlock
-/// [`ScanningKey`]: self::ScanningKey
+/// [`ScanningKey`]: zcash_client_backend::welding_rig::ScanningKey
 /// [`CommitmentTree`]: zcash_primitives::merkle_tree::CommitmentTree
 /// [`IncrementalWitness`]: zcash_primitives::merkle_tree::IncrementalWitness
 /// [`WalletShieldedOutput`]: crate::wallet::WalletShieldedOutput
+/// [`WalletTx`]: crate::wallet::WalletTx
 pub fn scan_block<P: consensus::Parameters, K: ScanningKey>(
     params: &P,
     block: CompactBlock,
