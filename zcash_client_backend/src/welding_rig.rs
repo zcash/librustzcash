@@ -24,7 +24,7 @@ use crate::wallet::{AccountId, WalletShieldedOutput, WalletShieldedSpend, Wallet
 /// The given [`CommitmentTree`] and existing [`IncrementalWitness`]es are incremented
 /// with this output's commitment.
 ///
-/// [`ScanningKey`]: zcash_client_backend::welding_rig::ScanningKey
+/// [`ScanningKey`]: crate::welding_rig::ScanningKey
 #[allow(clippy::too_many_arguments)]
 fn scan_output<P: consensus::Parameters, K: ScanningKey>(
     params: &P,
@@ -105,7 +105,7 @@ pub trait ScanningKey {
     /// obtained by trial decryption.
     type Nf;
 
-    /// Attempt to decrypt a Sapling note and payment address
+    /// Attempts to decrypt a Sapling note and payment address
     /// from the specified ciphertext using this scanning key.
     fn try_decryption<P: consensus::Parameters>(
         &self,
@@ -116,7 +116,8 @@ pub trait ScanningKey {
         ct: &[u8],
     ) -> Option<(Note, PaymentAddress)>;
 
-    /// Produce the nullifier for the specified note and witness, if possible.
+    /// Produces the nullifier for the specified note and witness, if possible.
+    ///
     /// IVK-based implementations of this trait cannot successfully derive
     /// nullifiers, in which case `Self::Nf` should be set to the unit type
     /// and this function is a no-op.
@@ -185,7 +186,7 @@ impl ScanningKey for SaplingIvk {
 /// [`ExtendedFullViewingKey`]: zcash_primitives::zip32::ExtendedFullViewingKey
 /// [`SaplingIvk`]: zcash_primitives::primitives::SaplingIvk
 /// [`CompactBlock`]: crate::proto::compact_formats::CompactBlock
-/// [`ScanningKey`]: zcash_client_backend::welding_rig::ScanningKey
+/// [`ScanningKey`]: crate::welding_rig::ScanningKey
 /// [`CommitmentTree`]: zcash_primitives::merkle_tree::CommitmentTree
 /// [`IncrementalWitness`]: zcash_primitives::merkle_tree::IncrementalWitness
 /// [`WalletShieldedOutput`]: crate::wallet::WalletShieldedOutput
