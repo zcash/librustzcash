@@ -29,6 +29,9 @@
 //! [`CompactBlock`]: zcash_client_backend::proto::compact_formats::CompactBlock
 //! [`init_cache_database`]: crate::chain::init::init_cache_database
 
+// Catch documentation errors caused by code changes.
+#![deny(broken_intra_doc_links)]
+
 use std::collections::HashMap;
 use std::fmt;
 use std::path::Path;

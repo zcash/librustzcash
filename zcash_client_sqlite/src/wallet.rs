@@ -758,8 +758,8 @@ pub fn insert_witness<'a, P>(
 }
 
 /// Removes old incremental witnesses up to the given block height.
-pub fn prune_witnesses<'a, P>(
-    stmts: &mut DataConnStmtCache<'a, P>,
+pub fn prune_witnesses<P>(
+    stmts: &mut DataConnStmtCache<'_, P>,
     below_height: BlockHeight,
 ) -> Result<(), SqliteClientError> {
     stmts
@@ -770,8 +770,8 @@ pub fn prune_witnesses<'a, P>(
 
 /// Marks notes that have not been mined in transactions
 /// as expired, up to the given block height.
-pub fn update_expired_notes<'a, P>(
-    stmts: &mut DataConnStmtCache<'a, P>,
+pub fn update_expired_notes<P>(
+    stmts: &mut DataConnStmtCache<'_, P>,
     height: BlockHeight,
 ) -> Result<(), SqliteClientError> {
     stmts.stmt_update_expired.execute(&[u32::from(height)])?;

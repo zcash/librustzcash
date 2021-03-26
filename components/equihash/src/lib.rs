@@ -17,6 +17,9 @@
 //! [Section 7.6.1: Equihash.]: https://zips.z.cash/protocol/protocol.pdf#equihash
 //! [BK16]: https://www.internetsociety.org/sites/default/files/blogs-media/equihash-asymmetric-proof-of-work-based-generalized-birthday-problem.pdf
 
+// Catch documentation errors caused by code changes.
+#![deny(broken_intra_doc_links)]
+
 mod verify;
 
 #[cfg(test)]

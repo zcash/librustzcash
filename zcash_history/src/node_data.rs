@@ -155,8 +155,10 @@ impl NodeData {
 
     /// Read from the byte representation.
     pub fn read<R: std::io::Read>(consensus_branch_id: u32, r: &mut R) -> std::io::Result<Self> {
-        let mut data = Self::default();
-        data.consensus_branch_id = consensus_branch_id;
+        let mut data = NodeData {
+            consensus_branch_id,
+            ..Default::default()
+        };
         r.read_exact(&mut data.subtree_commitment)?;
         data.start_time = r.read_u32::<LittleEndian>()?;
         data.end_time = r.read_u32::<LittleEndian>()?;
