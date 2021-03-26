@@ -67,6 +67,8 @@ pub struct Payment {
     /// A memo that, if included, must be provided with the payment.
     /// If a memo is present and [`recipient_address`] is not a shielded
     /// address, the wallet should report an error.
+    ///
+    /// [`recipient_address`]: #structfield.recipient_address
     pub memo: Option<MemoBytes>,
     /// A human-readable label for this payment within the larger structure
     /// of the transaction request.
