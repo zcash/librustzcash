@@ -78,7 +78,7 @@ impl Vector {
         F: Fn(&mut W, &E) -> io::Result<()>,
     {
         CompactSize::write(&mut writer, vec.len())?;
-        vec.iter().map(|e| func(&mut writer, e)).collect()
+        vec.iter().try_for_each(|e| func(&mut writer, e))
     }
 }
 

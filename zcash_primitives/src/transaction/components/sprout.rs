@@ -90,14 +90,12 @@ impl JsDescription {
         let mut nullifiers = [[0u8; 32]; ZC_NUM_JS_INPUTS];
         nullifiers
             .iter_mut()
-            .map(|nf| reader.read_exact(nf))
-            .collect::<io::Result<()>>()?;
+            .try_for_each(|nf| reader.read_exact(nf))?;
 
         let mut commitments = [[0u8; 32]; ZC_NUM_JS_OUTPUTS];
         commitments
             .iter_mut()
-            .map(|cm| reader.read_exact(cm))
-            .collect::<io::Result<()>>()?;
+            .try_for_each(|cm| reader.read_exact(cm))?;
 
         // Consensus rule (§4.3): Canonical encoding is enforced by
         // ZCNoteDecryption::decrypt() in zcashd
@@ -108,9 +106,7 @@ impl JsDescription {
         reader.read_exact(&mut random_seed)?;
 
         let mut macs = [[0u8; 32]; ZC_NUM_JS_INPUTS];
-        macs.iter_mut()
-            .map(|mac| reader.read_exact(mac))
-            .collect::<io::Result<()>>()?;
+        macs.iter_mut().try_for_each(|mac| reader.read_exact(mac))?;
 
         let proof = if use_groth {
             // Consensus rules (§4.3):
@@ -131,8 +127,7 @@ impl JsDescription {
         let mut ciphertexts = [[0u8; 601]; ZC_NUM_JS_OUTPUTS];
         ciphertexts
             .iter_mut()
-            .map(|ct| reader.read_exact(ct))
-            .collect::<io::Result<()>>()?;
+            .try_for_each(|ct| reader.read_exact(ct))?;
 
         Ok(JsDescription {
             vpub_old,
