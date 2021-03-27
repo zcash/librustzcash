@@ -309,9 +309,9 @@ pub mod testing {
         }
     }
 
-    pub struct MockWalletDB {}
+    pub struct MockWalletDb {}
 
-    impl WalletRead for MockWalletDB {
+    impl WalletRead for MockWalletDb {
         type Error = Error<u32>;
         type NoteRef = u32;
         type TxRef = TxId;
@@ -398,7 +398,7 @@ pub mod testing {
         }
     }
 
-    impl WalletWrite for MockWalletDB {
+    impl WalletWrite for MockWalletDb {
         #[allow(clippy::type_complexity)]
         fn advance_by_block(
             &mut self,

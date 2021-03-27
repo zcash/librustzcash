@@ -14,7 +14,7 @@ use zcash_primitives::{
 
 use zcash_client_backend::wallet::{AccountId, SpendableNote};
 
-use crate::{error::SqliteClientError, WalletDB};
+use crate::{error::SqliteClientError, WalletDb};
 
 fn to_spendable_note(row: &Row) -> Result<SpendableNote, SqliteClientError> {
     let diversifier = {
@@ -60,7 +60,7 @@ fn to_spendable_note(row: &Row) -> Result<SpendableNote, SqliteClientError> {
 }
 
 pub fn get_spendable_notes<P>(
-    wdb: &WalletDB<P>,
+    wdb: &WalletDb<P>,
     account: AccountId,
     anchor_height: BlockHeight,
 ) -> Result<Vec<SpendableNote>, SqliteClientError> {
@@ -88,7 +88,7 @@ pub fn get_spendable_notes<P>(
 }
 
 pub fn select_spendable_notes<P>(
-    wdb: &WalletDB<P>,
+    wdb: &WalletDb<P>,
     account: AccountId,
     target_value: Amount,
     anchor_height: BlockHeight,
@@ -175,7 +175,7 @@ mod tests {
             get_balance, get_balance_at,
             init::{init_accounts_table, init_blocks_table, init_wallet_db},
         },
-        AccountId, BlockDB, DataConnStmtCache, WalletDB,
+        AccountId, BlockDb, DataConnStmtCache, WalletDb,
     };
 
     fn test_prover() -> impl TxProver {
@@ -190,7 +190,7 @@ mod tests {
     #[test]
     fn create_to_address_fails_on_incorrect_extsk() {
         let data_file = NamedTempFile::new().unwrap();
-        let db_data = WalletDB::for_path(data_file.path(), tests::network()).unwrap();
+        let db_data = WalletDb::for_path(data_file.path(), tests::network()).unwrap();
         init_wallet_db(&db_data).unwrap();
 
         // Add two accounts to the wallet
@@ -239,7 +239,7 @@ mod tests {
     #[test]
     fn create_to_address_fails_with_no_blocks() {
         let data_file = NamedTempFile::new().unwrap();
-        let db_data = WalletDB::for_path(data_file.path(), tests::network()).unwrap();
+        let db_data = WalletDb::for_path(data_file.path(), tests::network()).unwrap();
         init_wallet_db(&db_data).unwrap();
 
         // Add an account to the wallet
@@ -269,7 +269,7 @@ mod tests {
     #[test]
     fn create_to_address_fails_on_insufficient_balance() {
         let data_file = NamedTempFile::new().unwrap();
-        let db_data = WalletDB::for_path(data_file.path(), tests::network()).unwrap();
+        let db_data = WalletDb::for_path(data_file.path(), tests::network()).unwrap();
         init_wallet_db(&db_data).unwrap();
         init_blocks_table(
             &db_data,
@@ -313,11 +313,11 @@ mod tests {
     #[test]
     fn create_to_address_fails_on_unverified_notes() {
         let cache_file = NamedTempFile::new().unwrap();
-        let db_cache = BlockDB(Connection::open(cache_file.path()).unwrap());
+        let db_cache = BlockDb(Connection::open(cache_file.path()).unwrap());
         init_cache_database(&db_cache).unwrap();
 
         let data_file = NamedTempFile::new().unwrap();
-        let db_data = WalletDB::for_path(data_file.path(), tests::network()).unwrap();
+        let db_data = WalletDb::for_path(data_file.path(), tests::network()).unwrap();
         init_wallet_db(&db_data).unwrap();
 
         // Add an account to the wallet
@@ -440,11 +440,11 @@ mod tests {
     #[test]
     fn create_to_address_fails_on_locked_notes() {
         let cache_file = NamedTempFile::new().unwrap();
-        let db_cache = BlockDB(Connection::open(cache_file.path()).unwrap());
+        let db_cache = BlockDb(Connection::open(cache_file.path()).unwrap());
         init_cache_database(&db_cache).unwrap();
 
         let data_file = NamedTempFile::new().unwrap();
-        let db_data = WalletDB::for_path(data_file.path(), tests::network()).unwrap();
+        let db_data = WalletDb::for_path(data_file.path(), tests::network()).unwrap();
         init_wallet_db(&db_data).unwrap();
 
         // Add an account to the wallet
@@ -561,11 +561,11 @@ mod tests {
     fn ovk_policy_prevents_recovery_from_chain() {
         let network = tests::network();
         let cache_file = NamedTempFile::new().unwrap();
-        let db_cache = BlockDB(Connection::open(cache_file.path()).unwrap());
+        let db_cache = BlockDb(Connection::open(cache_file.path()).unwrap());
         init_cache_database(&db_cache).unwrap();
 
         let data_file = NamedTempFile::new().unwrap();
-        let db_data = WalletDB::for_path(data_file.path(), network).unwrap();
+        let db_data = WalletDb::for_path(data_file.path(), network).unwrap();
         init_wallet_db(&db_data).unwrap();
 
         // Add an account to the wallet
@@ -670,11 +670,11 @@ mod tests {
     #[test]
     fn create_to_address_succeeds_to_t_addr_zero_change() {
         let cache_file = NamedTempFile::new().unwrap();
-        let db_cache = BlockDB(Connection::open(cache_file.path()).unwrap());
+        let db_cache = BlockDb(Connection::open(cache_file.path()).unwrap());
         init_cache_database(&db_cache).unwrap();
 
         let data_file = NamedTempFile::new().unwrap();
-        let db_data = WalletDB::for_path(data_file.path(), tests::network()).unwrap();
+        let db_data = WalletDb::for_path(data_file.path(), tests::network()).unwrap();
         init_wallet_db(&db_data).unwrap();
 
         // Add an account to the wallet

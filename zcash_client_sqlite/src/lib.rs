@@ -81,15 +81,15 @@ impl fmt::Display for NoteId {
 }
 
 /// A wrapper for the SQLite connection to the wallet database.
-pub struct WalletDB<P> {
+pub struct WalletDb<P> {
     conn: Connection,
     params: P,
 }
 
-impl<P: consensus::Parameters> WalletDB<P> {
+impl<P: consensus::Parameters> WalletDb<P> {
     /// Construct a connection to the wallet database stored at the specified path.
     pub fn for_path<F: AsRef<Path>>(path: F, params: P) -> Result<Self, rusqlite::Error> {
-        Connection::open(path).map(move |conn| WalletDB { conn, params })
+        Connection::open(path).map(move |conn| WalletDb { conn, params })
     }
 
     /// Given a wallet database connection, obtain a handle for the write operations
@@ -170,7 +170,7 @@ impl<P: consensus::Parameters> WalletDB<P> {
     }
 }
 
-impl<P: consensus::Parameters> WalletRead for WalletDB<P> {
+impl<P: consensus::Parameters> WalletRead for WalletDb<P> {
     type Error = SqliteClientError;
     type NoteRef = NoteId;
     type TxRef = i64;
@@ -265,7 +265,7 @@ impl<P: consensus::Parameters> WalletRead for WalletDB<P> {
 ///
 /// [`WalletWrite`]: zcash_client_backend::data_api::WalletWrite
 pub struct DataConnStmtCache<'a, P> {
-    wallet_db: &'a WalletDB<P>,
+    wallet_db: &'a WalletDb<P>,
     stmt_insert_block: Statement<'a>,
 
     stmt_insert_tx_meta: Statement<'a>,
@@ -514,16 +514,16 @@ impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
 }
 
 /// A wrapper for the SQLite connection to the block cache database.
-pub struct BlockDB(Connection);
+pub struct BlockDb(Connection);
 
-impl BlockDB {
+impl BlockDb {
     /// Opens a connection to the wallet database stored at the specified path.
     pub fn for_path<P: AsRef<Path>>(path: P) -> Result<Self, rusqlite::Error> {
-        Connection::open(path).map(BlockDB)
+        Connection::open(path).map(BlockDb)
     }
 }
 
-impl BlockSource for BlockDB {
+impl BlockSource for BlockDb {
     type Error = SqliteClientError;
 
     fn with_blocks<F>(
@@ -569,7 +569,7 @@ mod tests {
         zip32::ExtendedFullViewingKey,
     };
 
-    use super::BlockDB;
+    use super::BlockDb;
 
     #[cfg(feature = "mainnet")]
     pub(crate) fn network() -> Network {
@@ -730,7 +730,7 @@ mod tests {
     }
 
     /// Insert a fake CompactBlock into the cache DB.
-    pub(crate) fn insert_into_cache(db_cache: &BlockDB, cb: &CompactBlock) {
+    pub(crate) fn insert_into_cache(db_cache: &BlockDb, cb: &CompactBlock) {
         let cb_bytes = cb.write_to_bytes().unwrap();
         db_cache
             .0

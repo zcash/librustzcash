@@ -33,7 +33,7 @@ use zcash_client_backend::{
     DecryptedOutput,
 };
 
-use crate::{error::SqliteClientError, DataConnStmtCache, NoteId, WalletDB};
+use crate::{error::SqliteClientError, DataConnStmtCache, NoteId, WalletDb};
 
 pub mod init;
 pub mod transact;
@@ -109,16 +109,16 @@ impl ShieldedOutput for DecryptedOutput {
 /// };
 /// use zcash_client_backend::wallet::AccountId;
 /// use zcash_client_sqlite::{
-///     WalletDB,
+///     WalletDb,
 ///     wallet::get_address,
 /// };
 ///
 /// let data_file = NamedTempFile::new().unwrap();
-/// let db = WalletDB::for_path(data_file, Network::TestNetwork).unwrap();
+/// let db = WalletDb::for_path(data_file, Network::TestNetwork).unwrap();
 /// let addr = get_address(&db, AccountId(0));
 /// ```
 pub fn get_address<P: consensus::Parameters>(
-    wdb: &WalletDB<P>,
+    wdb: &WalletDb<P>,
     account: AccountId,
 ) -> Result<Option<PaymentAddress>, SqliteClientError> {
     let addr: String = wdb.conn.query_row(
@@ -136,7 +136,7 @@ pub fn get_address<P: consensus::Parameters>(
 ///
 /// [`ExtendedFullViewingKey`]: zcash_primitives::zip32::ExtendedFullViewingKey
 pub fn get_extended_full_viewing_keys<P: consensus::Parameters>(
-    wdb: &WalletDB<P>,
+    wdb: &WalletDb<P>,
 ) -> Result<HashMap<AccountId, ExtendedFullViewingKey>, SqliteClientError> {
     // Fetch the ExtendedFullViewingKeys we are tracking
     let mut stmt_fetch_accounts = wdb
@@ -152,7 +152,7 @@ pub fn get_extended_full_viewing_keys<P: consensus::Parameters>(
                     &extfvk,
                 )
                 .map_err(SqliteClientError::Bech32)
-                .and_then(|k| k.ok_or(SqliteClientError::IncorrectHRPExtFVK))
+                .and_then(|k| k.ok_or(SqliteClientError::IncorrectHrpExtFvk))
             })?;
 
             Ok((acct, extfvk))
@@ -173,7 +173,7 @@ pub fn get_extended_full_viewing_keys<P: consensus::Parameters>(
 ///
 /// [`ExtendedFullViewingKey`]: zcash_primitives::zip32::ExtendedFullViewingKey
 pub fn is_valid_account_extfvk<P: consensus::Parameters>(
-    wdb: &WalletDB<P>,
+    wdb: &WalletDb<P>,
     account: AccountId,
     extfvk: &ExtendedFullViewingKey,
 ) -> Result<bool, SqliteClientError> {
@@ -205,15 +205,15 @@ pub fn is_valid_account_extfvk<P: consensus::Parameters>(
 /// use zcash_primitives::consensus::Network;
 /// use zcash_client_backend::wallet::AccountId;
 /// use zcash_client_sqlite::{
-///     WalletDB,
+///     WalletDb,
 ///     wallet::get_balance,
 /// };
 ///
 /// let data_file = NamedTempFile::new().unwrap();
-/// let db = WalletDB::for_path(data_file, Network::TestNetwork).unwrap();
+/// let db = WalletDb::for_path(data_file, Network::TestNetwork).unwrap();
 /// let addr = get_balance(&db, AccountId(0));
 /// ```
-pub fn get_balance<P>(wdb: &WalletDB<P>, account: AccountId) -> Result<Amount, SqliteClientError> {
+pub fn get_balance<P>(wdb: &WalletDb<P>, account: AccountId) -> Result<Amount, SqliteClientError> {
     let balance = wdb.conn.query_row(
         "SELECT SUM(value) FROM received_notes
         INNER JOIN transactions ON transactions.id_tx = received_notes.tx
@@ -241,16 +241,16 @@ pub fn get_balance<P>(wdb: &WalletDB<P>, account: AccountId) -> Result<Amount, S
 /// use zcash_primitives::consensus::{BlockHeight, Network};
 /// use zcash_client_backend::wallet::AccountId;
 /// use zcash_client_sqlite::{
-///     WalletDB,
+///     WalletDb,
 ///     wallet::get_balance_at,
 /// };
 ///
 /// let data_file = NamedTempFile::new().unwrap();
-/// let db = WalletDB::for_path(data_file, Network::TestNetwork).unwrap();
+/// let db = WalletDb::for_path(data_file, Network::TestNetwork).unwrap();
 /// let addr = get_balance_at(&db, AccountId(0), BlockHeight::from_u32(0));
 /// ```
 pub fn get_balance_at<P>(
-    wdb: &WalletDB<P>,
+    wdb: &WalletDb<P>,
     account: AccountId,
     anchor_height: BlockHeight,
 ) -> Result<Amount, SqliteClientError> {
@@ -282,15 +282,15 @@ pub fn get_balance_at<P>(
 /// use zcash_primitives::consensus::Network;
 /// use zcash_client_sqlite::{
 ///     NoteId,
-///     WalletDB,
+///     WalletDb,
 ///     wallet::get_received_memo,
 /// };
 ///
 /// let data_file = NamedTempFile::new().unwrap();
-/// let db = WalletDB::for_path(data_file, Network::TestNetwork).unwrap();
+/// let db = WalletDb::for_path(data_file, Network::TestNetwork).unwrap();
 /// let memo = get_received_memo(&db, 27);
 /// ```
-pub fn get_received_memo<P>(wdb: &WalletDB<P>, id_note: i64) -> Result<Memo, SqliteClientError> {
+pub fn get_received_memo<P>(wdb: &WalletDb<P>, id_note: i64) -> Result<Memo, SqliteClientError> {
     let memo_bytes: Vec<_> = wdb.conn.query_row(
         "SELECT memo FROM received_notes
         WHERE id_note = ?",
@@ -315,15 +315,15 @@ pub fn get_received_memo<P>(wdb: &WalletDB<P>, id_note: i64) -> Result<Memo, Sql
 /// use zcash_primitives::consensus::Network;
 /// use zcash_client_sqlite::{
 ///     NoteId,
-///     WalletDB,
+///     WalletDb,
 ///     wallet::get_sent_memo,
 /// };
 ///
 /// let data_file = NamedTempFile::new().unwrap();
-/// let db = WalletDB::for_path(data_file, Network::TestNetwork).unwrap();
+/// let db = WalletDb::for_path(data_file, Network::TestNetwork).unwrap();
 /// let memo = get_sent_memo(&db, 12);
 /// ```
-pub fn get_sent_memo<P>(wdb: &WalletDB<P>, id_note: i64) -> Result<Memo, SqliteClientError> {
+pub fn get_sent_memo<P>(wdb: &WalletDb<P>, id_note: i64) -> Result<Memo, SqliteClientError> {
     let memo_bytes: Vec<_> = wdb.conn.query_row(
         "SELECT memo FROM sent_notes
         WHERE id_note = ?",
@@ -344,16 +344,16 @@ pub fn get_sent_memo<P>(wdb: &WalletDB<P>, id_note: i64) -> Result<Memo, SqliteC
 /// use tempfile::NamedTempFile;
 /// use zcash_primitives::consensus::Network;
 /// use zcash_client_sqlite::{
-///     WalletDB,
+///     WalletDb,
 ///     wallet::block_height_extrema,
 /// };
 ///
 /// let data_file = NamedTempFile::new().unwrap();
-/// let db = WalletDB::for_path(data_file, Network::TestNetwork).unwrap();
+/// let db = WalletDb::for_path(data_file, Network::TestNetwork).unwrap();
 /// let bounds = block_height_extrema(&db);
 /// ```
 pub fn block_height_extrema<P>(
-    wdb: &WalletDB<P>,
+    wdb: &WalletDb<P>,
 ) -> Result<Option<(BlockHeight, BlockHeight)>, rusqlite::Error> {
     wdb.conn
         .query_row(
@@ -383,16 +383,16 @@ pub fn block_height_extrema<P>(
 /// use zcash_primitives::consensus::Network;
 /// use zcash_primitives::transaction::TxId;
 /// use zcash_client_sqlite::{
-///     WalletDB,
+///     WalletDb,
 ///     wallet::get_tx_height,
 /// };
 ///
 /// let data_file = NamedTempFile::new().unwrap();
-/// let db = WalletDB::for_path(data_file, Network::TestNetwork).unwrap();
+/// let db = WalletDb::for_path(data_file, Network::TestNetwork).unwrap();
 /// let height = get_tx_height(&db, TxId([0u8; 32]));
 /// ```
 pub fn get_tx_height<P>(
-    wdb: &WalletDB<P>,
+    wdb: &WalletDb<P>,
     txid: TxId,
 ) -> Result<Option<BlockHeight>, rusqlite::Error> {
     wdb.conn
@@ -413,16 +413,16 @@ pub fn get_tx_height<P>(
 /// use tempfile::NamedTempFile;
 /// use zcash_primitives::consensus::{H0, Network};
 /// use zcash_client_sqlite::{
-///     WalletDB,
+///     WalletDb,
 ///     wallet::get_block_hash,
 /// };
 ///
 /// let data_file = NamedTempFile::new().unwrap();
-/// let db = WalletDB::for_path(data_file, Network::TestNetwork).unwrap();
+/// let db = WalletDb::for_path(data_file, Network::TestNetwork).unwrap();
 /// let hash = get_block_hash(&db, H0);
 /// ```
 pub fn get_block_hash<P>(
-    wdb: &WalletDB<P>,
+    wdb: &WalletDb<P>,
     block_height: BlockHeight,
 ) -> Result<Option<BlockHash>, rusqlite::Error> {
     wdb.conn
@@ -444,7 +444,7 @@ pub fn get_block_hash<P>(
 ///
 /// This should only be executed inside a transactional context.
 pub fn rewind_to_height<P: consensus::Parameters>(
-    wdb: &WalletDB<P>,
+    wdb: &WalletDb<P>,
     block_height: BlockHeight,
 ) -> Result<(), SqliteClientError> {
     let sapling_activation_height = wdb
@@ -496,16 +496,16 @@ pub fn rewind_to_height<P: consensus::Parameters>(
 /// use tempfile::NamedTempFile;
 /// use zcash_primitives::consensus::{Network, H0};
 /// use zcash_client_sqlite::{
-///     WalletDB,
+///     WalletDb,
 ///     wallet::get_commitment_tree,
 /// };
 ///
 /// let data_file = NamedTempFile::new().unwrap();
-/// let db = WalletDB::for_path(data_file, Network::TestNetwork).unwrap();
+/// let db = WalletDb::for_path(data_file, Network::TestNetwork).unwrap();
 /// let tree = get_commitment_tree(&db, H0);
 /// ```
 pub fn get_commitment_tree<P>(
-    wdb: &WalletDB<P>,
+    wdb: &WalletDb<P>,
     block_height: BlockHeight,
 ) -> Result<Option<CommitmentTree<Node>>, SqliteClientError> {
     wdb.conn
@@ -536,16 +536,16 @@ pub fn get_commitment_tree<P>(
 /// use tempfile::NamedTempFile;
 /// use zcash_primitives::consensus::{Network, H0};
 /// use zcash_client_sqlite::{
-///     WalletDB,
+///     WalletDb,
 ///     wallet::get_witnesses,
 /// };
 ///
 /// let data_file = NamedTempFile::new().unwrap();
-/// let db = WalletDB::for_path(data_file, Network::TestNetwork).unwrap();
+/// let db = WalletDb::for_path(data_file, Network::TestNetwork).unwrap();
 /// let witnesses = get_witnesses(&db, H0);
 /// ```
 pub fn get_witnesses<P>(
-    wdb: &WalletDB<P>,
+    wdb: &WalletDb<P>,
     block_height: BlockHeight,
 ) -> Result<Vec<(NoteId, IncrementalWitness<Node>)>, SqliteClientError> {
     let mut stmt_fetch_witnesses = wdb
@@ -568,7 +568,7 @@ pub fn get_witnesses<P>(
 /// that have not yet been confirmed as a consequence of the spending
 /// transaction being included in a block.
 pub fn get_nullifiers<P>(
-    wdb: &WalletDB<P>,
+    wdb: &WalletDb<P>,
 ) -> Result<Vec<(AccountId, Nullifier)>, SqliteClientError> {
     // Get the nullifiers for the notes we are tracking
     let mut stmt_fetch_nullifiers = wdb.conn.prepare(
@@ -862,7 +862,7 @@ mod tests {
     use crate::{
         tests,
         wallet::init::{init_accounts_table, init_wallet_db},
-        AccountId, WalletDB,
+        AccountId, WalletDb,
     };
 
     use super::{get_address, get_balance};
@@ -870,7 +870,7 @@ mod tests {
     #[test]
     fn empty_database_has_no_balance() {
         let data_file = NamedTempFile::new().unwrap();
-        let db_data = WalletDB::for_path(data_file.path(), tests::network()).unwrap();
+        let db_data = WalletDb::for_path(data_file.path(), tests::network()).unwrap();
         init_wallet_db(&db_data).unwrap();
 
         // Add an account to the wallet

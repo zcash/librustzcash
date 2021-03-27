@@ -13,20 +13,20 @@ const ZC_NUM_JS_OUTPUTS: usize = 2;
 #[derive(Clone)]
 pub(crate) enum SproutProof {
     Groth([u8; GROTH_PROOF_SIZE]),
-    PHGR([u8; PHGR_PROOF_SIZE]),
+    Phgr([u8; PHGR_PROOF_SIZE]),
 }
 
 impl std::fmt::Debug for SproutProof {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
         match self {
             SproutProof::Groth(_) => write!(f, "SproutProof::Groth"),
-            SproutProof::PHGR(_) => write!(f, "SproutProof::PHGR"),
+            SproutProof::Phgr(_) => write!(f, "SproutProof::PHGR"),
         }
     }
 }
 
 #[derive(Clone)]
-pub struct JSDescription {
+pub struct JsDescription {
     pub(crate) vpub_old: Amount,
     pub(crate) vpub_new: Amount,
     pub(crate) anchor: [u8; 32],
@@ -39,7 +39,7 @@ pub struct JSDescription {
     pub(crate) ciphertexts: [[u8; 601]; ZC_NUM_JS_OUTPUTS],
 }
 
-impl std::fmt::Debug for JSDescription {
+impl std::fmt::Debug for JsDescription {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
         write!(
             f,
@@ -63,7 +63,7 @@ impl std::fmt::Debug for JSDescription {
     }
 }
 
-impl JSDescription {
+impl JsDescription {
     pub fn read<R: Read>(mut reader: R, use_groth: bool) -> io::Result<Self> {
         // Consensus rule (§4.3): Canonical encoding is enforced here
         let vpub_old = {
@@ -125,7 +125,7 @@ impl JSDescription {
             // - Proof validity is enforced by JSDescription::Verify() in zcashd
             let mut proof = [0u8; PHGR_PROOF_SIZE];
             reader.read_exact(&mut proof)?;
-            SproutProof::PHGR(proof)
+            SproutProof::Phgr(proof)
         };
 
         let mut ciphertexts = [[0u8; 601]; ZC_NUM_JS_OUTPUTS];
@@ -134,7 +134,7 @@ impl JSDescription {
             .map(|ct| reader.read_exact(ct))
             .collect::<io::Result<()>>()?;
 
-        Ok(JSDescription {
+        Ok(JsDescription {
             vpub_old,
             vpub_new,
             anchor,
@@ -163,7 +163,7 @@ impl JSDescription {
 
         match &self.proof {
             SproutProof::Groth(p) => writer.write_all(p)?,
-            SproutProof::PHGR(p) => writer.write_all(p)?,
+            SproutProof::Phgr(p) => writer.write_all(p)?,
         }
 
         writer.write_all(&self.ciphertexts[0])?;

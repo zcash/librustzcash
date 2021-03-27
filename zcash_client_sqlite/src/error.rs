@@ -14,7 +14,7 @@ pub enum SqliteClientError {
     CorruptedData(String),
 
     /// Decoding of the extended full viewing key has failed (for the specified network)
-    IncorrectHRPExtFVK,
+    IncorrectHrpExtFvk,
 
     /// The rcm value for a note cannot be decoded to a valid JubJub point.
     InvalidNote,
@@ -63,7 +63,7 @@ impl fmt::Display for SqliteClientError {
             SqliteClientError::CorruptedData(reason) => {
                 write!(f, "Data DB is corrupted: {}", reason)
             }
-            SqliteClientError::IncorrectHRPExtFVK => write!(f, "Incorrect HRP for extfvk"),
+            SqliteClientError::IncorrectHrpExtFvk => write!(f, "Incorrect HRP for extfvk"),
             SqliteClientError::InvalidNote => write!(f, "Invalid note"),
             SqliteClientError::InvalidNoteId => write!(f, "The note ID associated with an inserted witness must correspond to a received note."),
             SqliteClientError::Bech32(e) => write!(f, "{}", e),

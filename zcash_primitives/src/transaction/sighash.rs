@@ -15,7 +15,7 @@ use crate::{
 };
 
 use super::{
-    components::{Amount, JSDescription, OutputDescription, SpendDescription, TxIn, TxOut},
+    components::{Amount, JsDescription, OutputDescription, SpendDescription, TxIn, TxOut},
     Transaction, TransactionData, TxVersion,
 };
 
@@ -122,7 +122,7 @@ fn single_output_hash(tx_out: &TxOut) -> Blake2bHash {
 
 fn joinsplits_hash(
     txversion: TxVersion,
-    joinsplits: &[JSDescription],
+    joinsplits: &[JsDescription],
     joinsplit_pubkey: &[u8; 32],
 ) -> Blake2bHash {
     let mut data = Vec::with_capacity(
