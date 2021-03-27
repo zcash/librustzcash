@@ -1,6 +1,5 @@
-//! Functions for scanning the chain and extracting relevant information.
+use std::convert::TryFrom;
 use std::fmt::Debug;
-
 use zcash_primitives::{
     consensus::{self, BranchId, NetworkUpgrade},
     memo::MemoBytes,
@@ -40,6 +39,8 @@ where
     P: consensus::Parameters,
     D: WalletWrite<Error = E>,
 {
+    debug!("decrypt_and_store: {:?}", tx);
+
     // Fetch the ExtendedFullViewingKeys we are tracking
     let extfvks = data.get_extended_full_viewing_keys()?;
 
@@ -54,16 +55,32 @@ where
         .ok_or(Error::SaplingNotActive)?;
 
     let outputs = decrypt_transaction(params, height, tx, &extfvks);
-    if outputs.is_empty() {
-        Ok(())
-    } else {
+    if !outputs.is_empty() {
         data.store_received_tx(&ReceivedTransaction {
             tx,
             outputs: &outputs,
         })?;
-
-        Ok(())
     }
+
+    // store z->t transactions in the same way the would be stored by create_spend_to_address
+    if !tx.vout.is_empty() {
+        // TODO: clarify with Kris the simplest way to determine account and iterate over outputs
+        // i.e. there are probably edge cases where we need to combine vouts into one "sent" transaction for the total value
+        data.store_sent_tx(&SentTransaction {
+            tx: &tx,
+            created: time::OffsetDateTime::now_utc(),
+            output_index: usize::try_from(0).unwrap(),
+            account: AccountId(0),
+            recipient_address: &RecipientAddress::Transparent(
+                tx.vout[0].script_pubkey.address().unwrap(),
+            ),
+            value: tx.vout[0].value,
+            memo: None,
+            utxos_spent: vec![],
+        })?;
+    }
+
+    Ok(())
 }
 
 #[allow(clippy::needless_doctest_main)]
@@ -224,12 +241,22 @@ where
 
     match to {
         RecipientAddress::Shielded(to) => {
-            builder.add_sapling_output(ovk, to.clone(), value, memo.clone())
+            memo.clone().ok_or(Error::MemoRequired).and_then(|memo| {
+                builder
+                    .add_sapling_output(ovk, to.clone(), value, memo)
+                    .map_err(Error::Builder)
+            })
         }
-
-        RecipientAddress::Transparent(to) => builder.add_transparent_output(&to, value),
-    }
-    .map_err(Error::Builder)?;
+        RecipientAddress::Transparent(to) => {
+            if memo.is_some() {
+                Err(Error::MemoForbidden)
+            } else {
+                builder
+                    .add_transparent_output(&to, value)
+                    .map_err(Error::Builder)
+            }
+        }
+    }?;
 
     let consensus_branch_id = BranchId::for_height(params, height);
     let (tx, tx_metadata) = builder
@@ -329,12 +356,7 @@ where
 
     // add the sapling output to shield the funds
     builder
-        .add_sapling_output(
-            Some(ovk),
-            z_address.clone(),
-            amount_to_shield,
-            Some(memo.clone()),
-        )
+        .add_sapling_output(Some(ovk), z_address.clone(), amount_to_shield, memo.clone())
         .map_err(Error::Builder)?;
 
     let consensus_branch_id = BranchId::for_height(params, latest_anchor);

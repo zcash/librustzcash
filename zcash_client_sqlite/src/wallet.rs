@@ -605,11 +605,13 @@ pub fn get_unspent_transparent_utxos<P: consensus::Parameters>(
     anchor_height: BlockHeight,
 ) -> Result<Vec<WalletTransparentOutput>, SqliteClientError> {
     let mut stmt_blocks = wdb.conn.prepare(
-        "SELECT address, prevout_txid, prevout_idx, script, value_zat, height 
-         FROM utxos 
-         WHERE address = ? 
-         AND height <= ?
-         AND spent_in_tx IS NULL",
+        "SELECT u.address, u.prevout_txid, u.prevout_idx, u.script, u.value_zat, u.height, tx.block as block
+         FROM utxos u
+         LEFT OUTER JOIN transactions tx
+         ON tx.id_tx = u.spent_in_tx
+         WHERE u.address = ?
+         AND u.height <= ?
+         AND block IS NULL",
     )?;
 
     let addr_str = address.encode(&wdb.params);
@@ -787,6 +789,22 @@ pub fn put_received_transparent_utxo<'a, P: consensus::Parameters>(
         .execute_named(&sql_args)?;
 
     Ok(UtxoId(stmts.wallet_db.conn.last_insert_rowid()))
+}
+
+#[cfg(feature = "transparent-inputs")]
+pub fn delete_utxos_above<'a, P: consensus::Parameters>(
+    stmts: &mut DataConnStmtCache<'a, P>,
+    taddr: &TransparentAddress,
+    height: BlockHeight,
+) -> Result<usize, SqliteClientError> {
+    let sql_args: &[(&str, &dyn ToSql)] = &[
+        (&":address", &taddr.encode(&stmts.wallet_db.params)),
+        (&":above_height", &u32::from(height)),
+    ];
+
+    let rows = stmts.stmt_delete_utxos.execute_named(&sql_args)?;
+
+    Ok(rows)
 }
 
 // Assumptions:

@@ -8,6 +8,9 @@
 // Temporary until we have addressed all Result<T, ()> cases.
 #![allow(clippy::result_unit_err)]
 
+#[macro_use]
+extern crate log;
+
 pub mod address;
 pub mod data_api;
 mod decrypt;

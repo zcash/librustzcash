@@ -59,6 +59,12 @@ pub enum Error<NoteId> {
     /// The wallet attempted a sapling-only operation at a block
     /// height when Sapling was not yet active.
     SaplingNotActive,
+
+    /// A memo is required when constructing a Sapling output
+    MemoRequired,
+
+    /// It is forbidden to provide a memo when constructing a transparent output.
+    MemoForbidden,
 }
 
 impl ChainInvalid {
@@ -99,6 +105,8 @@ impl<N: fmt::Display> fmt::Display for Error<N> {
             Error::Builder(e) => write!(f, "{:?}", e),
             Error::Protobuf(e) => write!(f, "{}", e),
             Error::SaplingNotActive => write!(f, "Could not determine Sapling upgrade activation height."),
+            Error::MemoRequired => write!(f, "A memo is required when sending to a Sapling address."),
+            Error::MemoForbidden => write!(f, "It is not possible to send a memo to a transparent address."),
         }
     }
 }

@@ -149,6 +149,10 @@ impl<P: consensus::Parameters> WalletDb<P> {
                     "INSERT INTO utxos (address, prevout_txid, prevout_idx, script, value_zat, height)
                     VALUES (:address, :prevout_txid, :prevout_idx, :script, :value_zat, :height)"
                 )?,
+                #[cfg(feature = "transparent-inputs")]
+                stmt_delete_utxos: self.conn.prepare(
+                    "DELETE FROM utxos WHERE address = :address AND height > :above_height"
+                )?,
                 stmt_insert_received_note: self.conn.prepare(
                     "INSERT INTO received_notes (tx, output_index, account, diversifier, value, rcm, memo, nf, is_change)
                     VALUES (:tx, :output_index, :account, :diversifier, :value, :rcm, :memo, :nf, :is_change)",
@@ -313,6 +317,8 @@ pub struct DataConnStmtCache<'a, P> {
 
     #[cfg(feature = "transparent-inputs")]
     stmt_insert_received_transparent_utxo: Statement<'a>,
+    #[cfg(feature = "transparent-inputs")]
+    stmt_delete_utxos: Statement<'a>,
     stmt_insert_received_note: Statement<'a>,
     stmt_update_received_note: Statement<'a>,
     stmt_select_received_note: Statement<'a>,

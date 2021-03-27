@@ -22,6 +22,7 @@ group = "0.8"
 hex = "0.4"
 hdwallet = { version = "0.3.0", optional = true }
 jubjub = "0.5.1"
+log = "0.4"
 nom = "6.1"
 percent-encoding = "2.1.0"
 proptest = { version = "0.10.1", optional = true }
@@ -29,7 +30,7 @@ protobuf = "2.20"
 rand_core = "0.5.1"
 ripemd160 = { version = "0.9.1", optional = true }
 secp256k1 = { version = "0.19", optional = true }
-sha2 = "0.9"
+sha2 = { version = "0.9", optional = true }
 subtle = "2.2.3"
 time = "0.2"
 zcash_note_encryption = { version = "0.0", path = "../components/zcash_note_encryption" }
@@ -47,8 +48,8 @@ zcash_client_sqlite = { version = "0.3", path = "../zcash_client_sqlite" }
 zcash_proofs = { version = "0.5", path = "../zcash_proofs" }
 
 [features]
-transparent-inputs = ["ripemd160", "secp256k1"]
-test-dependencies = ["proptest", "zcash_primitives/test-dependencies", "hdwallet"]
+transparent-inputs = ["ripemd160", "hdwallet", "sha2", "secp256k1"]
+test-dependencies = ["proptest", "zcash_primitives/test-dependencies", "hdwallet", "sha2"]
 
 [badges]
 maintenance = { status = "actively-developed" }
