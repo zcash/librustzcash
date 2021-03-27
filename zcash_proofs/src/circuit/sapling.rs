@@ -7,7 +7,9 @@ use bellman::{Circuit, ConstraintSystem, SynthesisError};
 
 use zcash_primitives::constants;
 
-use zcash_primitives::primitives::{PaymentAddress, ProofGenerationKey, ValueCommitment};
+use zcash_primitives::sapling::{
+    PaymentAddress, ProofGenerationKey, ValueCommitment, SAPLING_COMMITMENT_TREE_DEPTH,
+};
 
 use super::ecc;
 use super::pedersen_hash;
@@ -22,7 +24,7 @@ use bellman::gadgets::multipack;
 use bellman::gadgets::num;
 use bellman::gadgets::Assignment;
 
-pub const TREE_DEPTH: usize = zcash_primitives::sapling::SAPLING_COMMITMENT_TREE_DEPTH;
+pub const TREE_DEPTH: usize = SAPLING_COMMITMENT_TREE_DEPTH;
 
 /// This is an instance of the `Spend` circuit.
 pub struct Spend {
@@ -516,10 +518,7 @@ fn test_input_circuit_with_bls12_381() {
     use group::Group;
     use rand_core::{RngCore, SeedableRng};
     use rand_xorshift::XorShiftRng;
-    use zcash_primitives::{
-        pedersen_hash,
-        primitives::{Diversifier, Note, ProofGenerationKey, Rseed},
-    };
+    use zcash_primitives::sapling::{pedersen_hash, Diversifier, Note, ProofGenerationKey, Rseed};
 
     let mut rng = XorShiftRng::from_seed([
         0x58, 0x62, 0xbe, 0x3d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06, 0xbc,
@@ -659,10 +658,7 @@ fn test_input_circuit_with_bls12_381_external_test_vectors() {
     use group::Group;
     use rand_core::{RngCore, SeedableRng};
     use rand_xorshift::XorShiftRng;
-    use zcash_primitives::{
-        pedersen_hash,
-        primitives::{Diversifier, Note, ProofGenerationKey, Rseed},
-    };
+    use zcash_primitives::sapling::{pedersen_hash, Diversifier, Note, ProofGenerationKey, Rseed};
 
     let mut rng = XorShiftRng::from_seed([
         0x59, 0x62, 0xbe, 0x3d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06, 0xbc,
@@ -836,7 +832,7 @@ fn test_output_circuit_with_bls12_381() {
     use group::Group;
     use rand_core::{RngCore, SeedableRng};
     use rand_xorshift::XorShiftRng;
-    use zcash_primitives::primitives::{Diversifier, ProofGenerationKey, Rseed};
+    use zcash_primitives::sapling::{Diversifier, ProofGenerationKey, Rseed};
 
     let mut rng = XorShiftRng::from_seed([
         0x58, 0x62, 0xbe, 0x3d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06, 0xbc,

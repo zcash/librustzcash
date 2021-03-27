@@ -3,7 +3,7 @@
 use crate::{
     consensus::{self, BlockHeight, NetworkUpgrade::Canopy, ZIP212_GRACE_PERIOD},
     memo::MemoBytes,
-    primitives::{Diversifier, Note, PaymentAddress, Rseed, SaplingIvk},
+    sapling::{Diversifier, Note, PaymentAddress, Rseed, SaplingIvk},
 };
 use blake2b_simd::{Hash as Blake2bHash, Params as Blake2bParams};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
@@ -13,7 +13,7 @@ use group::{cofactor::CofactorGroup, GroupEncoding};
 use rand_core::{CryptoRng, RngCore};
 use std::convert::TryInto;
 
-use crate::keys::OutgoingViewingKey;
+use crate::sapling::keys::OutgoingViewingKey;
 
 pub const KDF_SAPLING_PERSONALIZATION: &[u8; 16] = b"Zcash_SaplingKDF";
 pub const PRF_OCK_PERSONALIZATION: &[u8; 16] = b"Zcash_Derive_ock";
@@ -112,10 +112,12 @@ pub fn prf_ock(
 /// use ff::Field;
 /// use rand_core::OsRng;
 /// use zcash_primitives::{
-///     keys::{OutgoingViewingKey, prf_expand},
 ///     memo::MemoBytes,
 ///     note_encryption::SaplingNoteEncryption,
-///     primitives::{Diversifier, PaymentAddress, Rseed, ValueCommitment},
+///     sapling::{
+///         keys::{OutgoingViewingKey, prf_expand},
+///         Diversifier, PaymentAddress, Rseed, ValueCommitment
+///     },
 /// };
 ///
 /// let mut rng = OsRng;
@@ -580,10 +582,12 @@ mod tests {
             NetworkUpgrade::{Canopy, Sapling},
             Parameters, TEST_NETWORK, ZIP212_GRACE_PERIOD,
         },
-        keys::OutgoingViewingKey,
         memo::MemoBytes,
-        primitives::{Diversifier, PaymentAddress, Rseed, SaplingIvk, ValueCommitment},
-        util::generate_random_rseed,
+        sapling::util::generate_random_rseed,
+        sapling::{
+            keys::OutgoingViewingKey, Diversifier, PaymentAddress, Rseed, SaplingIvk,
+            ValueCommitment,
+        },
     };
 
     fn random_enc_ciphertext<R: RngCore + CryptoRng>(

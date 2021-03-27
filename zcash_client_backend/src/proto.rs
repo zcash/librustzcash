@@ -7,7 +7,7 @@ use std::convert::TryInto;
 use zcash_primitives::{
     block::{BlockHash, BlockHeader},
     consensus::BlockHeight,
-    primitives::Nullifier,
+    sapling::Nullifier,
 };
 
 pub mod compact_formats;

@@ -4,7 +4,7 @@ use zcash_primitives::{
     consensus::{self, BlockHeight},
     memo::MemoBytes,
     note_encryption::{try_sapling_note_decryption, try_sapling_output_recovery},
-    primitives::{Note, PaymentAddress},
+    sapling::{Note, PaymentAddress},
     transaction::Transaction,
     zip32::ExtendedFullViewingKey,
 };
@@ -28,7 +28,7 @@ pub struct DecryptedOutput {
     /// True if this output was recovered using an [`OutgoingViewingKey`], meaning that
     /// this is a logical output of the transaction.
     ///
-    /// [`OutgoingViewingKey`]: zcash_primitives::keys::OutgoingViewingKey
+    /// [`OutgoingViewingKey`]: zcash_primitives::sapling::keys::OutgoingViewingKey
     pub outgoing: bool,
 }
 

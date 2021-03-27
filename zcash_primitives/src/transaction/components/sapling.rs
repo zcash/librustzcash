@@ -3,9 +3,9 @@ use group::GroupEncoding;
 
 use std::io::{self, Read, Write};
 
-use crate::{
-    primitives::Nullifier,
+use crate::sapling::{
     redjubjub::{PublicKey, Signature},
+    Nullifier,
 };
 
 use super::GROTH_PROOF_SIZE;

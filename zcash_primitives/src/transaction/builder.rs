@@ -12,22 +12,21 @@ use rand::{rngs::OsRng, seq::SliceRandom, CryptoRng, RngCore};
 
 use crate::{
     consensus::{self, BlockHeight},
-    keys::OutgoingViewingKey,
     legacy::TransparentAddress,
     memo::MemoBytes,
     merkle_tree::MerklePath,
     note_encryption::SaplingNoteEncryption,
-    primitives::{Diversifier, Note, PaymentAddress},
-    prover::TxProver,
-    redjubjub::PrivateKey,
-    sapling::{spend_sig_internal, Node},
+    sapling::{
+        keys::OutgoingViewingKey, prover::TxProver, redjubjub::PrivateKey, spend_sig_internal,
+        util::generate_random_rseed_internal, Diversifier, Node, Note, PaymentAddress,
+    },
     transaction::{
         components::{
-            amount::Amount, amount::DEFAULT_FEE, OutputDescription, SpendDescription, TxOut,
+            amount::{Amount, DEFAULT_FEE},
+            OutputDescription, SpendDescription, TxOut,
         },
         signature_hash_data, SignableInput, Transaction, TransactionData, SIGHASH_ALL,
     },
-    util::generate_random_rseed_internal,
     zip32::ExtendedSpendingKey,
 };
 
@@ -44,7 +43,7 @@ use crate::{
 };
 
 #[cfg(any(test, feature = "test-dependencies"))]
-use crate::prover::mock::MockTxProver;
+use crate::sapling::prover::mock::MockTxProver;
 
 const DEFAULT_TX_EXPIRY_DELTA: u32 = 20;
 
@@ -966,9 +965,7 @@ mod tests {
         consensus::{self, Parameters, H0, TEST_NETWORK},
         legacy::TransparentAddress,
         merkle_tree::{CommitmentTree, IncrementalWitness},
-        primitives::Rseed,
-        prover::mock::MockTxProver,
-        sapling::Node,
+        sapling::{prover::mock::MockTxProver, Node, Rseed},
         transaction::components::{amount::Amount, amount::DEFAULT_FEE},
         zip32::{ExtendedFullViewingKey, ExtendedSpendingKey},
     };

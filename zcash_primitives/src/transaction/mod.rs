@@ -5,16 +5,14 @@ use std::fmt;
 use std::io::{self, Read, Write};
 use std::ops::Deref;
 
-use crate::{
-    consensus::BlockHeight,
-    redjubjub::Signature,
-    serialize::Vector,
-    util::sha256d::{HashReader, HashWriter},
-};
+use crate::{consensus::BlockHeight, sapling::redjubjub::Signature, serialize::Vector};
+
+use self::util::sha256d::{HashReader, HashWriter};
 
 pub mod builder;
 pub mod components;
 mod sighash;
+pub mod util;
 
 #[cfg(test)]
 mod tests;

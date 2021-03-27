@@ -9,8 +9,7 @@ use zcash_primitives::{
     consensus::BlockHeight,
     memo::{Memo, MemoBytes},
     merkle_tree::{CommitmentTree, IncrementalWitness},
-    primitives::{Nullifier, PaymentAddress},
-    sapling::Node,
+    sapling::{Node, Nullifier, PaymentAddress},
     transaction::{components::Amount, Transaction, TxId},
     zip32::ExtendedFullViewingKey,
 };
@@ -277,8 +276,7 @@ pub mod testing {
         consensus::BlockHeight,
         memo::Memo,
         merkle_tree::{CommitmentTree, IncrementalWitness},
-        primitives::{Nullifier, PaymentAddress},
-        sapling::Node,
+        sapling::{Node, Nullifier, PaymentAddress},
         transaction::{components::Amount, TxId},
         zip32::ExtendedFullViewingKey,
     };

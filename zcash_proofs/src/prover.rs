@@ -5,10 +5,11 @@ use bls12_381::Bls12;
 use std::path::Path;
 use zcash_primitives::{
     merkle_tree::MerklePath,
-    primitives::{Diversifier, PaymentAddress, ProofGenerationKey, Rseed},
-    prover::TxProver,
-    redjubjub::{PublicKey, Signature},
-    sapling::Node,
+    sapling::{
+        prover::TxProver,
+        redjubjub::{PublicKey, Signature},
+        Diversifier, Node, PaymentAddress, ProofGenerationKey, Rseed,
+    },
     transaction::components::{Amount, GROTH_PROOF_SIZE},
 };
 

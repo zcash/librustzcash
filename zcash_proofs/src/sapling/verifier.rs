@@ -6,7 +6,7 @@ use bls12_381::Bls12;
 use group::{Curve, GroupEncoding};
 use zcash_primitives::{
     constants::{SPENDING_KEY_GENERATOR, VALUE_COMMITMENT_RANDOMNESS_GENERATOR},
-    redjubjub::{PublicKey, Signature},
+    sapling::redjubjub::{PublicKey, Signature},
     transaction::components::Amount,
 };
 

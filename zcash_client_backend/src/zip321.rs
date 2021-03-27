@@ -619,8 +619,8 @@ pub mod testing {
     use proptest::prelude::{any, prop_compose, prop_oneof};
     use proptest::strategy::Strategy;
     use zcash_primitives::{
-        consensus::TEST_NETWORK, keys::testing::arb_shielded_addr,
-        legacy::testing::arb_transparent_addr,
+        consensus::TEST_NETWORK, legacy::testing::arb_transparent_addr,
+        sapling::keys::testing::arb_shielded_addr,
         transaction::components::amount::testing::arb_nonnegative_amount,
     };
 

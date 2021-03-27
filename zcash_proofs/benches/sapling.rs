@@ -8,7 +8,7 @@ use ff::Field;
 use group::Group;
 use rand_core::{RngCore, SeedableRng};
 use rand_xorshift::XorShiftRng;
-use zcash_primitives::primitives::{Diversifier, ProofGenerationKey, ValueCommitment};
+use zcash_primitives::sapling::{Diversifier, ProofGenerationKey, ValueCommitment};
 use zcash_proofs::circuit::sapling::Spend;
 
 const TREE_DEPTH: usize = 32;

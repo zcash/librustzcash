@@ -7,8 +7,7 @@ use zcash_primitives::{
     consensus::{self, BlockHeight},
     merkle_tree::{CommitmentTree, IncrementalWitness},
     note_encryption::try_sapling_compact_note_decryption,
-    primitives::{Note, Nullifier, PaymentAddress, SaplingIvk},
-    sapling::Node,
+    sapling::{Node, Note, Nullifier, PaymentAddress, SaplingIvk},
     transaction::TxId,
     zip32::ExtendedFullViewingKey,
 };
@@ -150,7 +149,7 @@ impl ScanningKey for ExtendedFullViewingKey {
 /// The [`ScanningKey`] implementation for [`SaplingIvk`]s.
 /// Nullifiers cannot be derived when scanning with these keys.
 ///
-/// [`SaplingIvk`]: zcash_primitives::primitives::SaplingIvk
+/// [`SaplingIvk`]: zcash_primitives::sapling::SaplingIvk
 impl ScanningKey for SaplingIvk {
     type Nf = ();
 
@@ -184,7 +183,7 @@ impl ScanningKey for SaplingIvk {
 /// do so and will return the unit value in those outputs instead.
 ///
 /// [`ExtendedFullViewingKey`]: zcash_primitives::zip32::ExtendedFullViewingKey
-/// [`SaplingIvk`]: zcash_primitives::primitives::SaplingIvk
+/// [`SaplingIvk`]: zcash_primitives::sapling::SaplingIvk
 /// [`CompactBlock`]: crate::proto::compact_formats::CompactBlock
 /// [`ScanningKey`]: crate::welding_rig::ScanningKey
 /// [`CommitmentTree`]: zcash_primitives::merkle_tree::CommitmentTree
@@ -307,9 +306,8 @@ mod tests {
         memo::MemoBytes,
         merkle_tree::CommitmentTree,
         note_encryption::SaplingNoteEncryption,
-        primitives::{Note, Nullifier, SaplingIvk},
+        sapling::{util::generate_random_rseed, Note, Nullifier, SaplingIvk},
         transaction::components::Amount,
-        util::generate_random_rseed,
         zip32::{ExtendedFullViewingKey, ExtendedSpendingKey},
     };
 

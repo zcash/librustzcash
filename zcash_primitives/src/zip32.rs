@@ -10,11 +10,11 @@ use std::ops::AddAssign;
 
 use crate::{
     constants::{PROOF_GENERATION_KEY_GENERATOR, SPENDING_KEY_GENERATOR},
-    primitives::{Diversifier, PaymentAddress, ViewingKey},
+    sapling::{Diversifier, PaymentAddress, ViewingKey},
 };
 use std::io::{self, Read, Write};
 
-use crate::keys::{
+use crate::sapling::keys::{
     prf_expand, prf_expand_vec, ExpandedSpendingKey, FullViewingKey, OutgoingViewingKey,
 };
 

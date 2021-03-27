@@ -8,7 +8,7 @@ use ff::PrimeField;
 use zcash_primitives::{
     consensus::BlockHeight,
     merkle_tree::IncrementalWitness,
-    primitives::{Diversifier, Rseed},
+    sapling::{Diversifier, Rseed},
     transaction::components::Amount,
 };
 
@@ -156,7 +156,7 @@ mod tests {
         consensus::BlockHeight,
         legacy::TransparentAddress,
         note_encryption::try_sapling_output_recovery,
-        prover::TxProver,
+        sapling::prover::TxProver,
         transaction::{components::Amount, Transaction},
         zip32::{ExtendedFullViewingKey, ExtendedSpendingKey},
     };
