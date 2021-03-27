@@ -32,16 +32,16 @@ use crate::{
 };
 
 #[cfg(feature = "transparent-inputs")]
-use crate::{legacy::Script, transaction::components::TxIn};
+use crate::{
+    legacy::Script,
+    transaction::components::{OutPoint, TxIn},
+};
 
 #[cfg(feature = "zfuture")]
 use crate::{
     extensions::transparent::{self as tze, ExtensionTxBuilder, ToPayload},
-    transaction::components::{TzeIn, TzeOut},
+    transaction::components::{TzeIn, TzeOut, TzeOutPoint},
 };
-
-#[cfg(any(feature = "transparent-inputs", feature = "zfuture"))]
-use crate::transaction::components::OutPoint;
 
 #[cfg(any(test, feature = "test-dependencies"))]
 use crate::prover::mock::MockTxProver;
@@ -869,7 +869,7 @@ impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng> ExtensionTxBuilder<'a
         &mut self,
         extension_id: u32,
         mode: u32,
-        (outpoint, prevout): (OutPoint, TzeOut),
+        (outpoint, prevout): (TzeOutPoint, TzeOut),
         witness_builder: WBuilder,
     ) -> Result<(), Self::BuildError>
     where
