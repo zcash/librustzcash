@@ -149,7 +149,7 @@ impl ScanningKey for ExtendedFullViewingKey {
 /// The [`ScanningKey`] implementation for [`SaplingIvk`]s.
 /// Nullifiers cannot be derived when scanning with these keys.
 ///
-/// [`SaplingIvk`]: zcash_primitives::primitives::SaplingIvk
+/// [`SaplingIvk`]: zcash_primitives::sapling::SaplingIvk
 impl ScanningKey for SaplingIvk {
     type Nf = ();
 
@@ -183,7 +183,7 @@ impl ScanningKey for SaplingIvk {
 /// do so and will return the unit value in those outputs instead.
 ///
 /// [`ExtendedFullViewingKey`]: zcash_primitives::zip32::ExtendedFullViewingKey
-/// [`SaplingIvk`]: zcash_primitives::primitives::SaplingIvk
+/// [`SaplingIvk`]: zcash_primitives::sapling::SaplingIvk
 /// [`CompactBlock`]: crate::proto::compact_formats::CompactBlock
 /// [`ScanningKey`]: crate::welding_rig::ScanningKey
 /// [`CommitmentTree`]: zcash_primitives::merkle_tree::CommitmentTree

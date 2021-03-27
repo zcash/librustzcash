@@ -28,7 +28,7 @@ pub struct DecryptedOutput {
     /// True if this output was recovered using an [`OutgoingViewingKey`], meaning that
     /// this is a logical output of the transaction.
     ///
-    /// [`OutgoingViewingKey`]: zcash_primitives::keys::OutgoingViewingKey
+    /// [`OutgoingViewingKey`]: zcash_primitives::sapling::keys::OutgoingViewingKey
     pub outgoing: bool,
 }
 

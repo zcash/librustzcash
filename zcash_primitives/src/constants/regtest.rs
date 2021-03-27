@@ -29,7 +29,7 @@ pub const HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY: &str = "zxviewregtestsapling";
 ///
 /// It is defined in [the `zcashd` codebase].
 ///
-/// [`PaymentAddress`]: crate::primitives::PaymentAddress
+/// [`PaymentAddress`]: crate::sapling::PaymentAddress
 /// [the `zcashd` codebase]: <https://github.com/zcash/zcash/blob/128d863fb8be39ee294fda397c1ce3ba3b889cb2/src/chainparams.cpp#L493>
 pub const HRP_SAPLING_PAYMENT_ADDRESS: &str = "zregtestsapling";
 

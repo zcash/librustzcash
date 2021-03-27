@@ -25,7 +25,7 @@ pub const HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY: &str = "zxviews";
 ///
 /// Defined in section 5.6.4 of the [Zcash Protocol Specification].
 ///
-/// [`PaymentAddress`]: crate::primitives::PaymentAddress
+/// [`PaymentAddress`]: crate::sapling::PaymentAddress
 /// [Zcash Protocol Specification]: https://github.com/zcash/zips/blob/master/protocol/protocol.pdf
 pub const HRP_SAPLING_PAYMENT_ADDRESS: &str = "zs";
 

@@ -133,7 +133,7 @@ pub fn decode_extended_full_viewing_key(
 ///     "ztestsapling1qqqqqqqqqqqqqqqqqqcguyvaw2vjk4sdyeg0lc970u659lvhqq7t0np6hlup5lusxle75ss7jnk",
 /// );
 /// ```
-/// [`PaymentAddress`]: zcash_primitives::primitives::PaymentAddress
+/// [`PaymentAddress`]: zcash_primitives::sapling::PaymentAddress
 pub fn encode_payment_address(hrp: &str, addr: &PaymentAddress) -> String {
     bech32_encode(hrp, |w| w.write_all(&addr.to_bytes()))
 }
@@ -152,7 +152,7 @@ pub fn encode_payment_address(hrp: &str, addr: &PaymentAddress) -> String {
 /// };
 /// use zcash_primitives::{
 ///     constants::testnet::HRP_SAPLING_PAYMENT_ADDRESS,
-///     primitives::{Diversifier, PaymentAddress},
+///     sapling::{Diversifier, PaymentAddress},
 /// };
 ///
 /// let rng = &mut XorShiftRng::from_seed([
@@ -174,7 +174,7 @@ pub fn encode_payment_address(hrp: &str, addr: &PaymentAddress) -> String {
 ///     Ok(Some(pa)),
 /// );
 /// ```
-/// [`PaymentAddress`]: zcash_primitives::primitives::PaymentAddress
+/// [`PaymentAddress`]: zcash_primitives::sapling::PaymentAddress
 pub fn decode_payment_address(hrp: &str, s: &str) -> Result<Option<PaymentAddress>, Error> {
     bech32_decode(hrp, s, |data| {
         if data.len() != 43 {
