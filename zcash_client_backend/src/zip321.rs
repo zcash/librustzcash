@@ -80,9 +80,9 @@ impl Payment {
     /// internally, so payments must be normalized prior to being passed to the comparison function
     /// returned from this method.
     #[cfg(any(test, feature = "test-dependencies"))]
-    pub(in crate::zip321) fn compare_normalized<'a, P: consensus::Parameters>(
-        params: &'a P,
-    ) -> impl Fn(&Payment, &Payment) -> Ordering + 'a {
+    pub(in crate::zip321) fn compare_normalized<P: consensus::Parameters>(
+        params: &P,
+    ) -> impl Fn(&Payment, &Payment) -> Ordering + '_ {
         move |a: &Payment, b: &Payment| {
             let a_addr = a.recipient_address.encode(params);
             let b_addr = b.recipient_address.encode(params);

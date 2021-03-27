@@ -41,7 +41,7 @@ impl Amount {
     ///
     /// Returns an error if the amount is outside the range `{0..MAX_MONEY}`.
     pub fn from_nonnegative_i64(amount: i64) -> Result<Self, ()> {
-        if 0 <= amount && amount <= MAX_MONEY {
+        if (0..=MAX_MONEY).contains(&amount) {
             Ok(Amount(amount))
         } else {
             Err(())
