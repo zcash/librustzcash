@@ -89,7 +89,7 @@ pub trait Domain {
     // for right now, we just need `recipient` to get `d`; in the future when we
     // can get that from a Sapling note, the recipient parameter will be able
     // to be removed.
-    fn to_note_plaintext_bytes(
+    fn note_plaintext_bytes(
         note: &Self::Note,
         recipient: &Self::Recipient,
         memo: &Self::Memo,
@@ -102,12 +102,12 @@ pub trait Domain {
         epk: &Self::EphemeralPublicKey,
     ) -> OutgoingCipherKey;
 
-    fn to_outgoing_plaintext_bytes(
+    fn outgoing_plaintext_bytes(
         note: &Self::Note,
         esk: &Self::EphemeralSecretKey,
     ) -> OutPlaintextBytes;
 
-    fn to_epk_bytes(epk: &Self::EphemeralPublicKey) -> EphemeralKeyBytes;
+    fn epk_bytes(epk: &Self::EphemeralPublicKey) -> EphemeralKeyBytes;
 
     fn check_epk_bytes<F: Fn(&Self::EphemeralSecretKey) -> NoteValidity>(
         note: &Self::Note,
@@ -252,7 +252,7 @@ impl<D: Domain> NoteEncryption<D> {
         let pk_d = D::get_pk_d(&self.note);
         let shared_secret = D::ka_agree_enc(&self.esk, &pk_d);
         let key = D::kdf(shared_secret, &self.epk);
-        let input = D::to_note_plaintext_bytes(&self.note, &self.to, &self.memo);
+        let input = D::note_plaintext_bytes(&self.note, &self.to, &self.memo);
 
         let mut output = [0u8; ENC_CIPHERTEXT_SIZE];
         assert_eq!(
@@ -274,7 +274,7 @@ impl<D: Domain> NoteEncryption<D> {
     ) -> [u8; OUT_CIPHERTEXT_SIZE] {
         let (ock, input) = if let Some(ovk) = &self.ovk {
             let ock = D::get_ock(ovk, &cv, &cm, &self.epk);
-            let input = D::to_outgoing_plaintext_bytes(&self.note, &self.esk);
+            let input = D::outgoing_plaintext_bytes(&self.note, &self.esk);
 
             (ock, input)
         } else {
@@ -366,9 +366,9 @@ fn check_note_validity<D: Domain>(
         // Published commitment doesn't match calculated commitment
         NoteValidity::Invalid
     } else {
-        let epk_bytes = D::to_epk_bytes(epk);
+        let epk_bytes = D::epk_bytes(epk);
         D::check_epk_bytes(&note, |derived_esk| {
-            if D::to_epk_bytes(&D::ka_derive_public(&note, &derived_esk)) == epk_bytes {
+            if D::epk_bytes(&D::ka_derive_public(&note, &derived_esk)) == epk_bytes {
                 NoteValidity::Valid
             } else {
                 NoteValidity::Invalid

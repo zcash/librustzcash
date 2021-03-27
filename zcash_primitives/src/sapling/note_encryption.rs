@@ -168,7 +168,7 @@ impl<P: consensus::Parameters> Domain for SaplingDomain<P> {
         kdf_sapling(dhsecret, epk)
     }
 
-    fn to_note_plaintext_bytes(
+    fn note_plaintext_bytes(
         note: &Self::Note,
         to: &Self::Recipient,
         memo: &Self::Memo,
@@ -208,7 +208,7 @@ impl<P: consensus::Parameters> Domain for SaplingDomain<P> {
         prf_ock(ovk, &cv, &cmu, epk)
     }
 
-    fn to_outgoing_plaintext_bytes(
+    fn outgoing_plaintext_bytes(
         note: &Self::Note,
         esk: &Self::EphemeralSecretKey,
     ) -> OutPlaintextBytes {
@@ -219,7 +219,7 @@ impl<P: consensus::Parameters> Domain for SaplingDomain<P> {
         OutPlaintextBytes(input)
     }
 
-    fn to_epk_bytes(epk: &Self::EphemeralPublicKey) -> EphemeralKeyBytes {
+    fn epk_bytes(epk: &Self::EphemeralPublicKey) -> EphemeralKeyBytes {
         EphemeralKeyBytes(epk.to_bytes())
     }
 
