@@ -168,9 +168,10 @@ pub trait ShieldedOutput<'a, D: Domain> {
 /// use rand_core::OsRng;
 /// use zcash_primitives::{
 ///     consensus::TestNetwork,
+///     memo::MemoBytes,
 ///     sapling::{
 ///         keys::{OutgoingViewingKey, prf_expand},
-///         note_encryption::{Memo, sapling_note_encryption},
+///         note_encryption::{sapling_note_encryption},
 ///         Diversifier, PaymentAddress, Rseed, ValueCommitment
 ///     },
 /// };
@@ -192,7 +193,7 @@ pub trait ShieldedOutput<'a, D: Domain> {
 /// let note = to.create_note(value, Rseed::BeforeZip212(rcm)).unwrap();
 /// let cmu = note.cmu();
 ///
-/// let mut enc = sapling_note_encryption::<_, TestNetwork>(ovk, note, to, Memo::default(), &mut rng);
+/// let mut enc = sapling_note_encryption::<_, TestNetwork>(ovk, note, to, MemoBytes::empty(), &mut rng);
 /// let encCiphertext = enc.encrypt_note_plaintext();
 /// let outCiphertext = enc.encrypt_outgoing_plaintext(&cv.commitment().into(), &cmu, &mut rng);
 /// ```
