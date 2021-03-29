@@ -30,7 +30,6 @@ use zcash_client_backend::{
     data_api::error::Error,
     encoding::{
         decode_extended_full_viewing_key, decode_payment_address, encode_extended_full_viewing_key,
-        encode_payment_address,
     },
     wallet::{AccountId, WalletShieldedOutput, WalletTx},
     DecryptedOutput,
@@ -899,38 +898,26 @@ pub fn update_expired_notes<P>(
 /// Records information about a note that your wallet created.
 pub fn put_sent_note<'a, P: consensus::Parameters>(
     stmts: &mut DataConnStmtCache<'a, P>,
-    output: &DecryptedOutput,
     tx_ref: i64,
+    output_index: usize,
+    account: AccountId,
+    to: RecipientAddress,
+    value: Amount,
+    memo: Option<&MemoBytes>,
 ) -> Result<(), SqliteClientError> {
-    let output_index = output.index as i64;
-    let account = output.account.0 as i64;
-    let value = output.note.value as i64;
-    let to_str = encode_payment_address(
-        stmts.wallet_db.params.hrp_sapling_payment_address(),
-        &output.to,
-    );
-
+    let ivalue: i64 = value.into();
     // Try updating an existing sent note.
     if stmts.stmt_update_sent_note.execute(params![
-        account,
-        to_str,
-        value,
-        &output.memo.as_slice(),
+        account.0 as i64,
+        to.encode(&stmts.wallet_db.params),
+        ivalue,
+        &memo.map(|m| m.as_slice()),
         tx_ref,
-        output_index
+        output_index as i64
     ])? == 0
     {
         // It isn't there, so insert.
-        insert_sent_note(
-            stmts,
-            tx_ref,
-            output.index,
-            output.account,
-            &RecipientAddress::Shielded(output.to.clone()),
-            Amount::from_u64(output.note.value)
-                .map_err(|_| SqliteClientError::CorruptedData("Note value invalid.".to_string()))?,
-            Some(&output.memo),
-        )?
+        insert_sent_note(stmts, tx_ref, output_index, account, &to, value, memo)?
     }
 
     Ok(())
