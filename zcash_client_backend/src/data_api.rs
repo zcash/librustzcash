@@ -206,7 +206,6 @@ pub struct PrunedBlock<'a> {
 /// wallet database when transactions are successfully decrypted.
 pub struct DecryptedTransaction<'a> {
     pub tx: &'a Transaction,
-    pub account_id: AccountId,
     pub sapling_outputs: &'a Vec<DecryptedOutput>,
 }
 

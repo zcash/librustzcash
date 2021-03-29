@@ -58,7 +58,6 @@ where
     if !(sapling_outputs.is_empty() && tx.vout.is_empty()) {
         data.store_decrypted_tx(&DecryptedTransaction {
             tx,
-            account_id: AccountId(0), //FIXME
             sapling_outputs: &sapling_outputs,
         })?;
     }
