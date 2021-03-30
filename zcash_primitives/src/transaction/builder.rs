@@ -7,13 +7,16 @@ use std::sync::mpsc::Sender;
 
 use rand::{rngs::OsRng, CryptoRng, RngCore};
 
+use orchard::bundle::{self as orchard};
+
 use crate::{
     consensus::{self, BlockHeight, BranchId},
     legacy::TransparentAddress,
     memo::MemoBytes,
     merkle_tree::MerklePath,
     sapling::{
-        keys::OutgoingViewingKey, prover::TxProver, Diversifier, Node, Note, PaymentAddress,
+        keys::OutgoingViewingKey, prover::TxProver, redjubjub, Diversifier, Node, Note,
+        PaymentAddress,
     },
     transaction::{
         components::{
@@ -21,7 +24,8 @@ use crate::{
             sapling::builder::{self as sapling, SaplingBuilder, SaplingMetadata},
             transparent::builder::{self as transparent, TransparentBuilder},
         },
-        signature_hash_data, SignableInput, Transaction, TransactionData, TxVersion, SIGHASH_ALL,
+        signature_hash_data, Authorized, SignableInput, Transaction, TransactionData, TxVersion,
+        Unauthorized, SIGHASH_ALL,
     },
     zip32::ExtendedSpendingKey,
 };
@@ -30,13 +34,16 @@ use crate::{
 use std::marker::PhantomData;
 
 #[cfg(feature = "transparent-inputs")]
-use crate::transaction::components::{OutPoint, TxOut};
+use crate::{
+    legacy::Script,
+    transaction::components::{OutPoint, TxOut},
+};
 
 #[cfg(feature = "zfuture")]
 use crate::{
     extensions::transparent::{ExtensionTxBuilder, ToPayload},
     transaction::components::{
-        tze::builder::{self as tzebuilder, TzeBuilder},
+        tze::builder::{self as tzebuilder, TzeBuilder, WitnessData},
         TzeOut, TzeOutPoint,
     },
 };
@@ -119,7 +126,7 @@ pub struct Builder<'a, P: consensus::Parameters, R: RngCore> {
     sapling_builder: SaplingBuilder<P>,
     change_address: Option<ChangeAddress>,
     #[cfg(feature = "zfuture")]
-    tze_builder: TzeBuilder<'a, TransactionData>,
+    tze_builder: TzeBuilder<'a, TransactionData<Unauthorized>>,
     #[cfg(not(feature = "zfuture"))]
     tze_builder: PhantomData<&'a ()>,
     progress_notifier: Option<Sender<Progress>>,
@@ -333,7 +340,7 @@ impl<'a, P: consensus::Parameters, R: RngCore> Builder<'a, P, R> {
         #[cfg(feature = "zfuture")]
         let (tze_inputs, tze_outputs) = self.tze_builder.build();
 
-        let mut mtx = TransactionData {
+        let unauthed_tx = TransactionData {
             version,
             vin,
             vout,
@@ -350,6 +357,7 @@ impl<'a, P: consensus::Parameters, R: RngCore> Builder<'a, P, R> {
             joinsplit_pubkey: None,
             joinsplit_sig: None,
             binding_sig: None,
+            orchard_bundle: None,
         };
 
         //
@@ -358,49 +366,97 @@ impl<'a, P: consensus::Parameters, R: RngCore> Builder<'a, P, R> {
 
         let mut sighash = [0u8; 32];
         sighash.copy_from_slice(&signature_hash_data(
-            &mtx,
+            &unauthed_tx,
             consensus_branch_id,
             SIGHASH_ALL,
             SignableInput::Shielded,
         ));
 
-        let (sapling_spend_auth_sigs, sapling_binding_sig) = self
+        #[cfg(feature = "transparent-inputs")]
+        let transparent_sigs = self
+            .transparent_builder
+            .create_signatures(&unauthed_tx, consensus_branch_id);
+
+        let sapling_sigs = self
             .sapling_builder
             .create_signatures(prover, &mut ctx, &mut self.rng, &sighash, &tx_metadata)
             .map_err(Error::SaplingBuild)?;
 
-        for (i, spend_auth_sig) in sapling_spend_auth_sigs.into_iter().enumerate() {
-            mtx.shielded_spends[i].spend_auth_sig = spend_auth_sig;
-        }
-        mtx.binding_sig = sapling_binding_sig;
-
         #[cfg(feature = "zfuture")]
-        {
-            // Create TZE input witnesses
-            let tze_payloads = self
-                .tze_builder
-                .create_witnesses(&mtx)
-                .map_err(Error::TzeBuild)?;
-            for (i, payload) in tze_payloads.into_iter().enumerate() {
-                mtx.tze_inputs[i].witness.payload = payload;
-            }
-        }
+        let tze_witnesses = Some(
+            self.tze_builder
+                .create_witnesses(&unauthed_tx)
+                .map_err(Error::TzeBuild)?,
+        );
 
+        let authorized_tx = Self::apply_authorization(
+            unauthed_tx,
+            #[cfg(feature = "transparent-inputs")]
+            Some(transparent_sigs),
+            sapling_sigs,
+            None,
+            #[cfg(feature = "zfuture")]
+            tze_witnesses,
+        );
+
+        Ok((
+            authorized_tx
+                .freeze(consensus_branch_id)
+                .expect("Transaction should be complete"),
+            tx_metadata,
+        ))
+    }
+
+    pub fn apply_authorization(
+        mut mtx: TransactionData<Unauthorized>,
+        #[cfg(feature = "transparent-inputs")] transparent_sigs: Option<Vec<Script>>,
+        sapling_sigs: Option<(Vec<redjubjub::Signature>, redjubjub::Signature)>,
+        _orchard_auth: Option<(
+            Vec<<orchard::Authorized as orchard::Authorization>::SpendAuth>,
+            orchard::Authorized,
+        )>,
+        #[cfg(feature = "zfuture")] tze_witnesses: Option<Vec<WitnessData>>,
+    ) -> TransactionData<Authorized> {
         #[cfg(feature = "transparent-inputs")]
-        {
-            let script_sigs = self
-                .transparent_builder
-                .create_signatures(&mtx, consensus_branch_id);
-
+        if let Some(script_sigs) = transparent_sigs {
             for (i, sig) in script_sigs.into_iter().enumerate() {
                 mtx.vin[i].script_sig = sig;
             }
         }
 
-        Ok((
-            mtx.freeze().expect("Transaction should be complete"),
-            tx_metadata,
-        ))
+        if let Some((sapling_spend_auth_sigs, sapling_binding_sig)) = sapling_sigs {
+            for (i, spend_auth_sig) in sapling_spend_auth_sigs.into_iter().enumerate() {
+                mtx.shielded_spends[i].spend_auth_sig = Some(spend_auth_sig);
+            }
+            mtx.binding_sig = Some(sapling_binding_sig);
+        }
+
+        #[cfg(feature = "zfuture")]
+        if let Some(tze_witnesses) = tze_witnesses {
+            for (i, payload) in tze_witnesses.into_iter().enumerate() {
+                mtx.tze_inputs[i].witness.payload = payload.0;
+            }
+        }
+
+        TransactionData {
+            version: mtx.version,
+            vin: mtx.vin,
+            vout: mtx.vout,
+            #[cfg(feature = "zfuture")]
+            tze_inputs: mtx.tze_inputs,
+            #[cfg(feature = "zfuture")]
+            tze_outputs: mtx.tze_outputs,
+            lock_time: mtx.lock_time,
+            expiry_height: mtx.expiry_height,
+            value_balance: mtx.value_balance,
+            shielded_spends: mtx.shielded_spends,
+            shielded_outputs: mtx.shielded_outputs,
+            joinsplits: mtx.joinsplits,
+            joinsplit_pubkey: mtx.joinsplit_pubkey,
+            joinsplit_sig: mtx.joinsplit_sig,
+            binding_sig: mtx.binding_sig,
+            orchard_bundle: None,
+        }
     }
 }
 
@@ -408,7 +464,7 @@ impl<'a, P: consensus::Parameters, R: RngCore> Builder<'a, P, R> {
 impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng> ExtensionTxBuilder<'a>
     for Builder<'a, P, R>
 {
-    type BuildCtx = TransactionData;
+    type BuildCtx = TransactionData<Unauthorized>;
     type BuildError = tzebuilder::Error;
 
     fn add_tze_input<WBuilder, W: ToPayload>(

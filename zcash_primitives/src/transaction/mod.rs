@@ -5,28 +5,30 @@ use std::fmt;
 use std::io::{self, Read, Write};
 use std::ops::Deref;
 
+use orchard;
+
 use crate::{
     consensus::{BlockHeight, BranchId},
     sapling::redjubjub::Signature,
     serialize::Vector,
 };
 
-use self::util::sha256d::{HashReader, HashWriter};
+use self::{
+    components::{Amount, JsDescription, OutputDescription, SpendDescription, TxIn, TxOut},
+    sighash::{signature_hash_data, SignableInput, SIGHASH_ALL},
+    util::sha256d::{HashReader, HashWriter},
+};
+
+#[cfg(feature = "zfuture")]
+use self::components::{TzeIn, TzeOut};
 
 pub mod builder;
 pub mod components;
-mod sighash;
+pub mod sighash;
 pub mod util;
 
 #[cfg(test)]
 mod tests;
-
-pub use self::sighash::{signature_hash, signature_hash_data, SignableInput, SIGHASH_ALL};
-
-use self::components::{Amount, JsDescription, OutputDescription, SpendDescription, TxIn, TxOut};
-
-#[cfg(feature = "zfuture")]
-use self::components::{TzeIn, TzeOut};
 
 const OVERWINTER_VERSION_GROUP_ID: u32 = 0x03C48270;
 const OVERWINTER_TX_VERSION: u32 = 3;
@@ -188,17 +190,34 @@ impl TxVersion {
     }
 }
 
+/// Authorization state for a bundle of transaction data.
+pub trait Authorization {
+    type OrchardAuth: orchard::bundle::Authorization;
+}
+
+pub struct Authorized;
+
+impl Authorization for Authorized {
+    type OrchardAuth = orchard::bundle::Authorized;
+}
+
+pub struct Unauthorized;
+
+impl Authorization for Unauthorized {
+    type OrchardAuth = orchard::builder::Unauthorized;
+}
+
 /// A Zcash transaction.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct Transaction {
     txid: TxId,
-    data: TransactionData,
+    data: TransactionData<Authorized>,
 }
 
 impl Deref for Transaction {
-    type Target = TransactionData;
+    type Target = TransactionData<Authorized>;
 
-    fn deref(&self) -> &TransactionData {
+    fn deref(&self) -> &TransactionData<Authorized> {
         &self.data
     }
 }
@@ -209,8 +228,7 @@ impl PartialEq for Transaction {
     }
 }
 
-#[derive(Clone)]
-pub struct TransactionData {
+pub struct TransactionData<A: Authorization> {
     pub version: TxVersion,
     pub vin: Vec<TxIn>,
     pub vout: Vec<TxOut>,
@@ -227,9 +245,10 @@ pub struct TransactionData {
     pub joinsplit_pubkey: Option<[u8; 32]>,
     pub joinsplit_sig: Option<[u8; 64]>,
     pub binding_sig: Option<Signature>,
+    pub orchard_bundle: Option<orchard::Bundle<A::OrchardAuth, Amount>>,
 }
 
-impl std::fmt::Debug for TransactionData {
+impl<A: Authorization> std::fmt::Debug for TransactionData<A> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
         write!(
             f,
@@ -273,13 +292,13 @@ impl std::fmt::Debug for TransactionData {
     }
 }
 
-impl Default for TransactionData {
+impl Default for TransactionData<Unauthorized> {
     fn default() -> Self {
         TransactionData::new()
     }
 }
 
-impl TransactionData {
+impl TransactionData<Unauthorized> {
     pub fn new() -> Self {
         TransactionData {
             version: TxVersion::Sapling,
@@ -298,6 +317,7 @@ impl TransactionData {
             joinsplit_pubkey: None,
             joinsplit_sig: None,
             binding_sig: None,
+            orchard_bundle: None,
         }
     }
 
@@ -318,16 +338,19 @@ impl TransactionData {
             joinsplit_pubkey: None,
             joinsplit_sig: None,
             binding_sig: None,
+            orchard_bundle: None,
         }
     }
+}
 
-    pub fn freeze(self) -> io::Result<Transaction> {
+impl TransactionData<Authorized> {
+    pub fn freeze(self, _consensus_branch_id: BranchId) -> io::Result<Transaction> {
         Transaction::from_data(self)
     }
 }
 
 impl Transaction {
-    fn from_data(data: TransactionData) -> io::Result<Self> {
+    fn from_data(data: TransactionData<Authorized>) -> io::Result<Self> {
         let mut tx = Transaction {
             txid: TxId([0; 32]),
             data,
@@ -435,6 +458,7 @@ impl Transaction {
                 joinsplit_pubkey,
                 joinsplit_sig,
                 binding_sig,
+                orchard_bundle: None,
             },
         })
     }
@@ -444,6 +468,7 @@ impl Transaction {
 
         let is_overwinter_v3 = self.version == TxVersion::Overwinter;
         let is_sapling_v4 = self.version == TxVersion::Sapling;
+
         #[cfg(feature = "zfuture")]
         let has_tze = self.version == TxVersion::ZFuture;
         #[cfg(not(feature = "zfuture"))]
@@ -542,7 +567,7 @@ pub mod testing {
 
     use super::{
         components::{amount::MAX_MONEY, Amount, OutPoint, TxIn, TxOut},
-        Transaction, TransactionData, TxId, TxVersion,
+        Authorized, Transaction, TransactionData, TxId, TxVersion,
     };
 
     #[cfg(feature = "zfuture")]
@@ -662,7 +687,7 @@ pub mod testing {
             lock_time in any::<u32>(),
             expiry_height in any::<u32>(),
             value_balance in arb_amount(),
-        ) -> TransactionData {
+        ) -> TransactionData<Authorized> {
             TransactionData {
                 version,
                 vin, vout,
@@ -680,6 +705,7 @@ pub mod testing {
                 joinsplit_pubkey: None, //FIXME
                 joinsplit_sig: None, //FIXME
                 binding_sig: None, //FIXME
+                orchard_bundle: None, //FIXME
             }
         }
     }
@@ -693,7 +719,7 @@ pub mod testing {
             lock_time in any::<u32>(),
             expiry_height in any::<u32>(),
             value_balance in arb_amount(),
-        ) -> TransactionData {
+        ) -> TransactionData<Authorized> {
             TransactionData {
                 version,
                 vin, vout,
@@ -709,6 +735,7 @@ pub mod testing {
                 joinsplit_pubkey: None, //FIXME
                 joinsplit_sig: None, //FIXME
                 binding_sig: None, //FIXME
+                orchard_bundle: None, //FIXME
             }
         }
     }

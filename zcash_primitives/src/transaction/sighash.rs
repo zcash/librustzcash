@@ -16,7 +16,7 @@ use crate::{
 
 use super::{
     components::{Amount, JsDescription, OutputDescription, SpendDescription, TxIn, TxOut},
-    Transaction, TransactionData, TxVersion,
+    Authorization, Transaction, TransactionData, TxVersion,
 };
 
 #[cfg(feature = "zfuture")]
@@ -227,8 +227,8 @@ impl<'a> SignableInput<'a> {
     }
 }
 
-pub fn signature_hash_data(
-    tx: &TransactionData,
+pub fn signature_hash_data<A: Authorization>(
+    tx: &TransactionData<A>,
     consensus_branch_id: consensus::BranchId,
     hash_type: u32,
     signable_input: SignableInput<'_>,

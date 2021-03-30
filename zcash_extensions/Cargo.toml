@@ -17,3 +17,8 @@ ff = "0.9"
 jubjub = "0.6"
 rand_core = "0.6"
 zcash_proofs = { version = "0.5", path = "../zcash_proofs" }
+orchard = { git = "https://github.com/zcash/orchard", branch = "main" }
+
+[features]
+transparent-inputs = []
+

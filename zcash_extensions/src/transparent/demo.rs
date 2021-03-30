@@ -467,7 +467,7 @@ mod tests {
     use zcash_proofs::prover::LocalTxProver;
 
     use zcash_primitives::{
-        consensus::{BlockHeight, NetworkUpgrade, Parameters},
+        consensus::{BlockHeight, BranchId, NetworkUpgrade, Parameters},
         constants,
         extensions::transparent::{self as tze, Extension, FromPayload, ToPayload},
         legacy::TransparentAddress,
@@ -480,7 +480,7 @@ mod tests {
                 amount::{Amount, DEFAULT_FEE},
                 TzeIn, TzeOut, TzeOutPoint,
             },
-            Transaction, TransactionData,
+            Transaction, TransactionData, Unauthorized,
         },
         zip32::ExtendedSpendingKey,
     };
@@ -609,6 +609,7 @@ mod tests {
                 && self.tx.shielded_spends.is_empty()
                 && self.tx.shielded_outputs.is_empty()
                 && self.tx.joinsplits.is_empty()
+                && self.tx.orchard_bundle.is_none()
         }
 
         fn tx_tze_outputs(&self) -> &[TzeOut] {
@@ -657,9 +658,22 @@ mod tests {
             precondition: tze::Precondition::from(0, &Precondition::open(hash_1)),
         };
 
+        fn auth_and_freeze(tx: TransactionData<Unauthorized>) -> Transaction {
+            Builder::<FutureNetwork, OsRng>::apply_authorization(
+                tx,
+                #[cfg(feature = "transparent-inputs")]
+                None,
+                None,
+                None,
+                None,
+            )
+            .freeze(BranchId::ZFuture)
+            .unwrap()
+        }
+
         let mut mtx_a = TransactionData::zfuture();
         mtx_a.tze_outputs.push(out_a);
-        let tx_a = mtx_a.freeze().unwrap();
+        let tx_a = auth_and_freeze(mtx_a);
 
         //
         // Transfer
@@ -676,7 +690,7 @@ mod tests {
         let mut mtx_b = TransactionData::zfuture();
         mtx_b.tze_inputs.push(in_b);
         mtx_b.tze_outputs.push(out_b);
-        let tx_b = mtx_b.freeze().unwrap();
+        let tx_b = auth_and_freeze(mtx_b);
 
         //
         // Closing transaction
@@ -689,7 +703,7 @@ mod tests {
 
         let mut mtx_c = TransactionData::zfuture();
         mtx_c.tze_inputs.push(in_c);
-        let tx_c = mtx_c.freeze().unwrap();
+        let tx_c = auth_and_freeze(mtx_c);
 
         // Verify tx_b
         {

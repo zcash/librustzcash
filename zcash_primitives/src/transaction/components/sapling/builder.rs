@@ -501,8 +501,9 @@ impl<P: consensus::Parameters> SaplingBuilder<P> {
         rng: &mut R,
         sighash_bytes: &[u8; 32],
         tx_metadata: &SaplingMetadata,
-    ) -> Result<(Vec<Option<Signature>>, Option<Signature>), Error> {
-        // Create Sapling spendAuth and binding signatures
+    ) -> Result<Option<(Vec<Signature>, Signature)>, Error> {
+        // Create Sapling spendAuth signatures. These must be properly ordered with respect to the
+        // shuffle that is described by tx_metadata.
         let mut spend_sigs = vec![None; self.spends.len()];
         for (i, spend) in self.spends.into_iter().enumerate() {
             spend_sigs[tx_metadata.spend_indices[i]] = Some(spend_sig_internal(
@@ -513,18 +514,19 @@ impl<P: consensus::Parameters> SaplingBuilder<P> {
             ));
         }
 
-        // Add a binding signature if needed
-        let binding_sig =
-            if tx_metadata.spend_indices.is_empty() && tx_metadata.output_indices.is_empty() {
-                None
-            } else {
-                Some(
-                    prover
-                        .binding_sig(ctx, self.value_balance, &sighash_bytes)
-                        .map_err(|_| Error::BindingSig)?,
-                )
-            };
+        if tx_metadata.spend_indices.is_empty() && tx_metadata.output_indices.is_empty() {
+            Ok(None)
+        } else {
+            let spend_sigs = spend_sigs
+                .into_iter()
+                .collect::<Option<Vec<Signature>>>()
+                .unwrap_or_default();
 
-        Ok((spend_sigs, binding_sig))
+            let binding_sig = prover
+                .binding_sig(ctx, self.value_balance, &sighash_bytes)
+                .map_err(|_| Error::BindingSig)?;
+
+            Ok(Some((spend_sigs, binding_sig)))
+        }
     }
 }

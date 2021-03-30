@@ -1,17 +1,40 @@
 use ff::Field;
 use rand_core::OsRng;
+use std::io;
 
 use proptest::prelude::*;
 
-use crate::{constants::SPENDING_KEY_GENERATOR, sapling::redjubjub::PrivateKey};
+use crate::{
+    consensus::{BranchId, TestNetwork},
+    constants::SPENDING_KEY_GENERATOR,
+    sapling::redjubjub::PrivateKey,
+};
 
 use super::{
+    builder::Builder,
     components::Amount,
     sighash::{signature_hash, SignableInput},
-    Transaction, TransactionData,
+    Transaction, TransactionData, Unauthorized,
 };
 
 use super::testing::{arb_branch_id, arb_tx};
+
+fn auth_and_freeze(
+    txdata: TransactionData<Unauthorized>,
+    branch_id: BranchId,
+) -> io::Result<Transaction> {
+    Builder::<TestNetwork, OsRng>::apply_authorization(
+        txdata,
+        #[cfg(feature = "transparent-inputs")]
+        None,
+        None,
+        #[cfg(any(feature = "nu5", feature = "zfuture"))]
+        None,
+        #[cfg(feature = "zfuture")]
+        None,
+    )
+    .freeze(branch_id)
+}
 
 #[test]
 fn tx_read_write() {
@@ -30,33 +53,33 @@ fn tx_read_write() {
 #[test]
 fn tx_write_rejects_unexpected_joinsplit_pubkey() {
     // Succeeds without a JoinSplit pubkey
-    assert!(TransactionData::new().freeze().is_ok());
+    assert!(auth_and_freeze(TransactionData::new(), BranchId::Canopy).is_ok());
 
     // Fails with an unexpected JoinSplit pubkey
     {
         let mut tx = TransactionData::new();
         tx.joinsplit_pubkey = Some([0; 32]);
-        assert!(tx.freeze().is_err());
+        assert!(auth_and_freeze(tx, BranchId::Canopy).is_err());
     }
 }
 
 #[test]
 fn tx_write_rejects_unexpected_joinsplit_sig() {
     // Succeeds without a JoinSplit signature
-    assert!(TransactionData::new().freeze().is_ok());
+    assert!(auth_and_freeze(TransactionData::new(), BranchId::Canopy).is_ok());
 
     // Fails with an unexpected JoinSplit signature
     {
         let mut tx = TransactionData::new();
         tx.joinsplit_sig = Some([0; 64]);
-        assert!(tx.freeze().is_err());
+        assert!(auth_and_freeze(tx, BranchId::Canopy).is_err());
     }
 }
 
 #[test]
 fn tx_write_rejects_unexpected_binding_sig() {
     // Succeeds without a binding signature
-    assert!(TransactionData::new().freeze().is_ok());
+    assert!(auth_and_freeze(TransactionData::new(), BranchId::Canopy).is_ok());
 
     // Fails with an unexpected binding signature
     {
@@ -66,7 +89,7 @@ fn tx_write_rejects_unexpected_binding_sig() {
 
         let mut tx = TransactionData::new();
         tx.binding_sig = Some(sig);
-        assert!(tx.freeze().is_err());
+        assert!(auth_and_freeze(tx, BranchId::Canopy).is_err());
     }
 }
 

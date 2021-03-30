@@ -424,7 +424,7 @@ pub const ZIP212_GRACE_PERIOD: u32 = 32256;
 ///
 /// See [ZIP 200](https://zips.z.cash/zip-0200) for more details.
 ///
-/// [`signature_hash`]: crate::transaction::signature_hash
+/// [`signature_hash`]: crate::transaction::sighash::signature_hash
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum BranchId {
     /// The consensus rules at the launch of Zcash.

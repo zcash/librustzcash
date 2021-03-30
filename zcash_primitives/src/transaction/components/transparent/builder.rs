@@ -13,7 +13,7 @@ use crate::{
     legacy::Script,
     transaction::{
         components::OutPoint, sighash::signature_hash_data, SignableInput, TransactionData,
-        SIGHASH_ALL,
+        Unauthorized, SIGHASH_ALL,
     },
 };
 
@@ -145,7 +145,7 @@ impl TransparentBuilder {
     #[cfg(feature = "transparent-inputs")]
     pub fn create_signatures(
         self,
-        mtx: &TransactionData,
+        mtx: &TransactionData<Unauthorized>,
         consensus_branch_id: consensus::BranchId,
     ) -> Vec<Script> {
         self.inputs

@@ -36,6 +36,8 @@ pub struct TzeBuilder<'a, BuildCtx> {
     tze_outputs: Vec<TzeOut>,
 }
 
+pub struct WitnessData(pub Vec<u8>);
+
 impl<'a, BuildCtx> TzeBuilder<'a, BuildCtx> {
     pub fn empty() -> Self {
         TzeBuilder {
@@ -101,7 +103,7 @@ impl<'a, BuildCtx> TzeBuilder<'a, BuildCtx> {
         (self.tze_inputs.clone(), self.tze_outputs.clone())
     }
 
-    pub fn create_witnesses(self, mtx: &BuildCtx) -> Result<Vec<Vec<u8>>, Error> {
+    pub fn create_witnesses(self, mtx: &BuildCtx) -> Result<Vec<WitnessData>, Error> {
         // Create TZE input witnesses
         let payloads = self
             .signers
@@ -117,7 +119,7 @@ impl<'a, BuildCtx> TzeBuilder<'a, BuildCtx> {
                     return Err(Error::WitnessModeMismatch(input_mode, mode));
                 }
 
-                Ok(payload)
+                Ok(WitnessData(payload))
             })
             .collect::<Result<Vec<_>, Error>>()?;
 

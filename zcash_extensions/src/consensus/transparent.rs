@@ -81,6 +81,7 @@ impl<'a> demo::Context for Context<'a> {
             && self.tx.shielded_spends.is_empty()
             && self.tx.shielded_outputs.is_empty()
             && self.tx.joinsplits.is_empty()
+            && self.tx.orchard_bundle.is_none()
     }
 
     fn tx_tze_outputs(&self) -> &[TzeOut] {
