@@ -128,7 +128,7 @@ where
 /// };
 ///
 /// let account = AccountId(0);
-/// let extsk = spending_key(&[0; 32][..], COIN_TYPE, account.0);
+/// let extsk = spending_key(&[0; 32][..], COIN_TYPE, account);
 /// let to = extsk.default_address().unwrap().1.into();
 ///
 /// let data_file = NamedTempFile::new().unwrap();
@@ -297,7 +297,7 @@ where
         .and_then(|x| x.ok_or_else(|| Error::ScanRequired.into()))?;
 
     // derive the corresponding t-address
-    let taddr = derive_transparent_address_from_secret_key(*sk);
+    let taddr = derive_transparent_address_from_secret_key(sk);
 
     // derive own shielded address from the provided extended spending key
     let z_address = extsk.default_address().unwrap().1;

@@ -37,7 +37,6 @@ use zcash_client_backend::{
 
 use crate::{error::SqliteClientError, DataConnStmtCache, NoteId, WalletDb};
 
-#[cfg(feature = "transparent-inputs")]
 use {
     crate::UtxoId,
     zcash_client_backend::{encoding::AddressCodec, wallet::WalletTransparentOutput},
@@ -597,7 +596,6 @@ pub fn get_nullifiers<P>(
     Ok(res)
 }
 
-#[cfg(feature = "transparent-inputs")]
 pub fn get_unspent_transparent_utxos<P: consensus::Parameters>(
     wdb: &WalletDb<P>,
     address: &TransparentAddress,
@@ -769,7 +767,6 @@ pub fn mark_transparent_utxo_spent<'a, P>(
     Ok(())
 }
 
-#[cfg(feature = "transparent-inputs")]
 pub fn put_received_transparent_utxo<'a, P: consensus::Parameters>(
     stmts: &mut DataConnStmtCache<'a, P>,
     output: &WalletTransparentOutput,
@@ -790,7 +787,6 @@ pub fn put_received_transparent_utxo<'a, P: consensus::Parameters>(
     Ok(UtxoId(stmts.wallet_db.conn.last_insert_rowid()))
 }
 
-#[cfg(feature = "transparent-inputs")]
 pub fn delete_utxos_above<'a, P: consensus::Parameters>(
     stmts: &mut DataConnStmtCache<'a, P>,
     taddr: &TransparentAddress,
@@ -957,18 +953,11 @@ pub fn insert_sent_note<'a, P: consensus::Parameters>(
 mod tests {
     use tempfile::NamedTempFile;
 
-    use zcash_primitives::{
-        transaction::components::Amount,
-        zip32::{ExtendedFullViewingKey, ExtendedSpendingKey},
-    };
+    use zcash_primitives::transaction::components::Amount;
 
     use zcash_client_backend::data_api::WalletRead;
 
-    use crate::{
-        tests,
-        wallet::init::{init_accounts_table, init_wallet_db},
-        AccountId, WalletDb,
-    };
+    use crate::{tests, wallet::init::init_wallet_db, AccountId, WalletDb};
 
     use super::{get_address, get_balance};
 
@@ -979,9 +968,7 @@ mod tests {
         init_wallet_db(&db_data).unwrap();
 
         // Add an account to the wallet
-        let extsk = ExtendedSpendingKey::master(&[]);
-        let extfvks = [ExtendedFullViewingKey::from(&extsk)];
-        init_accounts_table(&db_data, &extfvks).unwrap();
+        tests::init_test_accounts_table(&db_data);
 
         // The account should be empty
         assert_eq!(get_balance(&db_data, AccountId(0)).unwrap(), Amount::zero());

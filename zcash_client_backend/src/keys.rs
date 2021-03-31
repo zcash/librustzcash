@@ -24,12 +24,15 @@ use {
 ///
 /// ```
 /// use zcash_primitives::{constants::testnet::COIN_TYPE};
-/// use zcash_client_backend::{keys::spending_key};
+/// use zcash_client_backend::{
+///     keys::spending_key,
+///     wallet::AccountId,
+/// };
 ///
-/// let extsk = spending_key(&[0; 32][..], COIN_TYPE, 0);
+/// let extsk = spending_key(&[0; 32][..], COIN_TYPE, AccountId(0));
 /// ```
 /// [`ExtendedSpendingKey`]: zcash_primitives::zip32::ExtendedSpendingKey
-pub fn spending_key(seed: &[u8], coin_type: u32, account: u32) -> ExtendedSpendingKey {
+pub fn spending_key(seed: &[u8], coin_type: u32, account: AccountId) -> ExtendedSpendingKey {
     if seed.len() < 32 {
         panic!("ZIP 32 seeds MUST be at least 32 bytes");
     }
@@ -39,26 +42,26 @@ pub fn spending_key(seed: &[u8], coin_type: u32, account: u32) -> ExtendedSpendi
         &[
             ChildIndex::Hardened(32),
             ChildIndex::Hardened(coin_type),
-            ChildIndex::Hardened(account),
+            ChildIndex::Hardened(account.0),
         ],
     )
 }
 
 #[cfg(feature = "transparent-inputs")]
 pub fn derive_transparent_address_from_secret_key(
-    secret_key: secp256k1::key::SecretKey,
+    secret_key: &secp256k1::key::SecretKey,
 ) -> TransparentAddress {
     let secp = Secp256k1::new();
-    let pk = PublicKey::from_secret_key(&secp, &secret_key);
-    derive_transparent_address_from_public_key(pk)
+    let pk = PublicKey::from_secret_key(&secp, secret_key);
+    derive_transparent_address_from_public_key(&pk)
 }
 
 #[cfg(feature = "transparent-inputs")]
 pub fn derive_transparent_address_from_public_key(
-    public_key: secp256k1::key::PublicKey,
+    public_key: &secp256k1::key::PublicKey,
 ) -> TransparentAddress {
     let mut hash160 = ripemd160::Ripemd160::new();
-    hash160.update(Sha256::digest(&public_key.serialize()[..].to_vec()));
+    hash160.update(Sha256::digest(&public_key.serialize()));
     TransparentAddress::PublicKey(*hash160.finalize().as_ref())
 }
 
@@ -160,7 +163,7 @@ mod tests {
     #[test]
     #[should_panic]
     fn spending_key_panics_on_short_seed() {
-        let _ = spending_key(&[0; 31][..], 0, 0);
+        let _ = spending_key(&[0; 31][..], 0, AccountId(0));
     }
 
     #[cfg(feature = "transparent-inputs")]
@@ -178,7 +181,7 @@ mod tests {
     #[test]
     fn sk_to_taddr() {
         let sk = derive_secret_key_from_seed(&MAIN_NETWORK, &seed(), AccountId(0), 0).unwrap();
-        let taddr = derive_transparent_address_from_secret_key(sk).encode(&MAIN_NETWORK);
+        let taddr = derive_transparent_address_from_secret_key(&sk).encode(&MAIN_NETWORK);
         assert_eq!(taddr, "t1PKtYdJJHhc3Pxowmznkg7vdTwnhEsCvR4".to_string());
     }
 
@@ -187,7 +190,7 @@ mod tests {
     fn sk_wif_to_taddr() {
         let sk_wif = Wif("L4BvDC33yLjMRxipZvdiUmdYeRfZmR8viziwsVwe72zJdGbiJPv2".to_string());
         let sk: SecretKey = (&sk_wif).try_into().expect("invalid wif");
-        let taddr = derive_transparent_address_from_secret_key(sk).encode(&MAIN_NETWORK);
+        let taddr = derive_transparent_address_from_secret_key(&sk).encode(&MAIN_NETWORK);
         assert_eq!(taddr, "t1PKtYdJJHhc3Pxowmznkg7vdTwnhEsCvR4".to_string());
     }
 
@@ -206,7 +209,7 @@ mod tests {
     #[test]
     fn pk_to_taddr() {
         let pk = derive_public_key_from_seed(&MAIN_NETWORK, &seed(), AccountId(0), 0).unwrap();
-        let taddr = derive_transparent_address_from_public_key(pk).encode(&MAIN_NETWORK);
+        let taddr = derive_transparent_address_from_public_key(&pk).encode(&MAIN_NETWORK);
         assert_eq!(taddr, "t1PKtYdJJHhc3Pxowmznkg7vdTwnhEsCvR4".to_string());
     }
 }
