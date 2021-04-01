@@ -5,11 +5,9 @@ use std::boxed::Box;
 
 use std::error;
 use std::fmt;
-use std::marker::PhantomData;
 use std::sync::mpsc::Sender;
 
-use ff::Field;
-use rand::{rngs::OsRng, seq::SliceRandom, CryptoRng, RngCore};
+use rand::{rngs::OsRng, CryptoRng, RngCore};
 
 use crate::{
     consensus::{self, BlockHeight},
@@ -17,24 +15,21 @@ use crate::{
     memo::MemoBytes,
     merkle_tree::MerklePath,
     sapling::{
-        keys::OutgoingViewingKey,
-        note_encryption::sapling_note_encryption,
-        prover::TxProver,
-        redjubjub::{PrivateKey, Signature},
-        spend_sig_internal,
-        util::generate_random_rseed_internal,
-        Diversifier, Node, Note, PaymentAddress,
+        keys::OutgoingViewingKey, prover::TxProver, Diversifier, Node, Note, PaymentAddress,
     },
     transaction::{
         components::{
             amount::{Amount, DEFAULT_FEE},
+            sapling::builder::{self as sapling, SaplingBuilder, SaplingMetadata},
             transparent::builder::{self as transparent, TransparentBuilder},
-            OutputDescription, SpendDescription,
         },
         signature_hash_data, SignableInput, Transaction, TransactionData, TxVersion, SIGHASH_ALL,
     },
     zip32::ExtendedSpendingKey,
 };
+
+#[cfg(not(feature = "zfuture"))]
+use std::marker::PhantomData;
 
 #[cfg(feature = "transparent-inputs")]
 use crate::transaction::components::{OutPoint, TxOut};
@@ -50,156 +45,35 @@ use crate::sapling::prover::mock::MockTxProver;
 
 const DEFAULT_TX_EXPIRY_DELTA: u32 = 20;
 
-/// If there are any shielded inputs, always have at least two shielded outputs, padding
-/// with dummy outputs if necessary. See <https://github.com/zcash/zcash/issues/3615>.
-const MIN_SHIELDED_OUTPUTS: usize = 2;
-
 #[derive(Debug, PartialEq)]
 pub enum Error {
-    AnchorMismatch,
-    BindingSig,
     ChangeIsNegative(Amount),
     InvalidAddress,
     InvalidAmount,
     NoChangeAddress,
-    SpendProof,
     TzeWitnessModeMismatch(u32, u32),
     TransparentBuildError(transparent::Error),
+    SaplingBuildError(sapling::Error),
 }
 
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Error::AnchorMismatch => {
-                write!(f, "Anchor mismatch (anchors for all spends must be equal)")
-            }
-            Error::BindingSig => write!(f, "Failed to create bindingSig"),
             Error::ChangeIsNegative(amount) => {
                 write!(f, "Change is negative ({:?} zatoshis)", amount)
             }
             Error::InvalidAddress => write!(f, "Invalid address"),
             Error::InvalidAmount => write!(f, "Invalid amount"),
             Error::NoChangeAddress => write!(f, "No change address specified or discoverable"),
-            Error::SpendProof => write!(f, "Failed to create Sapling spend proof"),
             Error::TzeWitnessModeMismatch(expected, actual) =>
                 write!(f, "TZE witness builder returned a mode that did not match the mode with which the input was initially constructed: expected = {:?}, actual = {:?}", expected, actual),
             Error::TransparentBuildError(err) => err.fmt(f),
+            Error::SaplingBuildError(err) => err.fmt(f),
         }
     }
 }
 
 impl error::Error for Error {}
-
-struct SpendDescriptionInfo {
-    extsk: ExtendedSpendingKey,
-    diversifier: Diversifier,
-    note: Note,
-    alpha: jubjub::Fr,
-    merkle_path: MerklePath<Node>,
-}
-
-#[derive(Clone)]
-pub struct SaplingOutput<P: consensus::Parameters> {
-    /// `None` represents the `ovk = ⊥` case.
-    ovk: Option<OutgoingViewingKey>,
-    to: PaymentAddress,
-    note: Note,
-    memo: MemoBytes,
-    _params: PhantomData<P>,
-}
-
-impl<P: consensus::Parameters> SaplingOutput<P> {
-    pub fn new<R: RngCore + CryptoRng>(
-        params: &P,
-        target_height: BlockHeight,
-        rng: &mut R,
-        ovk: Option<OutgoingViewingKey>,
-        to: PaymentAddress,
-        value: Amount,
-        memo: Option<MemoBytes>,
-    ) -> Result<Self, Error> {
-        Self::new_internal(params, target_height, rng, ovk, to, value, memo)
-    }
-
-    fn new_internal<R: RngCore>(
-        params: &P,
-        target_height: BlockHeight,
-        rng: &mut R,
-        ovk: Option<OutgoingViewingKey>,
-        to: PaymentAddress,
-        value: Amount,
-        memo: Option<MemoBytes>,
-    ) -> Result<Self, Error> {
-        let g_d = to.g_d().ok_or(Error::InvalidAddress)?;
-        if value.is_negative() {
-            return Err(Error::InvalidAmount);
-        }
-
-        let rseed = generate_random_rseed_internal(params, target_height, rng);
-
-        let note = Note {
-            g_d,
-            pk_d: *to.pk_d(),
-            value: value.into(),
-            rseed,
-        };
-
-        Ok(SaplingOutput {
-            ovk,
-            to,
-            note,
-            memo: memo.unwrap_or_else(MemoBytes::empty),
-            _params: PhantomData::default(),
-        })
-    }
-
-    pub fn build<Pr: TxProver, R: RngCore + CryptoRng>(
-        self,
-        prover: &Pr,
-        ctx: &mut Pr::SaplingProvingContext,
-        rng: &mut R,
-    ) -> OutputDescription {
-        self.build_internal(prover, ctx, rng)
-    }
-
-    fn build_internal<Pr: TxProver, R: RngCore>(
-        self,
-        prover: &Pr,
-        ctx: &mut Pr::SaplingProvingContext,
-        rng: &mut R,
-    ) -> OutputDescription {
-        let encryptor = sapling_note_encryption::<R, P>(
-            self.ovk,
-            self.note.clone(),
-            self.to.clone(),
-            self.memo,
-            rng,
-        );
-
-        let (zkproof, cv) = prover.output_proof(
-            ctx,
-            *encryptor.esk(),
-            self.to,
-            self.note.rcm(),
-            self.note.value,
-        );
-
-        let cmu = self.note.cmu();
-
-        let enc_ciphertext = encryptor.encrypt_note_plaintext();
-        let out_ciphertext = encryptor.encrypt_outgoing_plaintext(&cv, &cmu, rng);
-        let ephemeral_key = *encryptor.epk();
-
-        OutputDescription {
-            cv,
-            cmu,
-            ephemeral_key,
-            enc_ciphertext,
-            out_ciphertext,
-            zkproof,
-        }
-    }
-}
 
 #[cfg(feature = "zfuture")]
 #[allow(clippy::type_complexity)]
@@ -306,44 +180,6 @@ impl<'a, BuildCtx> TzeBuilder<'a, BuildCtx> {
     }
 }
 
-/// Metadata about a transaction created by a [`Builder`].
-#[derive(Debug, PartialEq)]
-pub struct SaplingMetadata {
-    spend_indices: Vec<usize>,
-    output_indices: Vec<usize>,
-}
-
-impl SaplingMetadata {
-    fn new() -> Self {
-        SaplingMetadata {
-            spend_indices: vec![],
-            output_indices: vec![],
-        }
-    }
-
-    /// Returns the index within the transaction of the [`SpendDescription`] corresponding
-    /// to the `n`-th call to [`Builder::add_sapling_spend`].
-    ///
-    /// Note positions are randomized when building transactions for indistinguishability.
-    /// This means that the transaction consumer cannot assume that e.g. the first spend
-    /// they added (via the first call to [`Builder::add_sapling_spend`]) is the first
-    /// [`SpendDescription`] in the transaction.
-    pub fn spend_index(&self, n: usize) -> Option<usize> {
-        self.spend_indices.get(n).copied()
-    }
-
-    /// Returns the index within the transaction of the [`OutputDescription`] corresponding
-    /// to the `n`-th call to [`Builder::add_sapling_output`].
-    ///
-    /// Note positions are randomized when building transactions for indistinguishability.
-    /// This means that the transaction consumer cannot assume that e.g. the first output
-    /// they added (via the first call to [`Builder::add_sapling_output`]) is the first
-    /// [`OutputDescription`] in the transaction.
-    pub fn output_index(&self, n: usize) -> Option<usize> {
-        self.output_indices.get(n).copied()
-    }
-}
-
 /// Reports on the progress made by the builder towards building a transaction.
 pub struct Progress {
     /// The number of steps completed.
@@ -370,311 +206,6 @@ impl Progress {
     /// Note that each step may not be of the same complexity/duration.
     pub fn end(&self) -> Option<u32> {
         self.end
-    }
-}
-
-pub struct SaplingBuilder<P: consensus::Parameters> {
-    anchor: Option<bls12_381::Scalar>,
-    value_balance: Amount,
-    spends: Vec<SpendDescriptionInfo>,
-    outputs: Vec<SaplingOutput<P>>,
-    change_address: Option<(OutgoingViewingKey, PaymentAddress)>,
-}
-
-impl<P: consensus::Parameters> SaplingBuilder<P> {
-    fn new() -> Self {
-        SaplingBuilder {
-            anchor: None,
-            value_balance: Amount::zero(),
-            spends: vec![],
-            outputs: vec![],
-            change_address: None,
-        }
-    }
-
-    pub fn value_balance(&self) -> Amount {
-        self.value_balance
-    }
-
-    /// Adds a Sapling note to be spent in this transaction.
-    ///
-    /// Returns an error if the given Merkle path does not have the same anchor as the
-    /// paths for previous Sapling notes.
-    fn add_spend<R: RngCore>(
-        &mut self,
-        mut rng: R,
-        extsk: ExtendedSpendingKey,
-        diversifier: Diversifier,
-        note: Note,
-        merkle_path: MerklePath<Node>,
-    ) -> Result<(), Error> {
-        // Consistency check: all anchors must equal the first one
-        let cmu = Node::new(note.cmu().into());
-        if let Some(anchor) = self.anchor {
-            let path_root: bls12_381::Scalar = merkle_path.root(cmu).into();
-            if path_root != anchor {
-                return Err(Error::AnchorMismatch);
-            }
-        } else {
-            self.anchor = Some(merkle_path.root(cmu).into())
-        }
-
-        let alpha = jubjub::Fr::random(&mut rng);
-
-        self.value_balance += Amount::from_u64(note.value).map_err(|_| Error::InvalidAmount)?;
-
-        self.spends.push(SpendDescriptionInfo {
-            extsk,
-            diversifier,
-            note,
-            alpha,
-            merkle_path,
-        });
-
-        Ok(())
-    }
-
-    /// Adds a Sapling address to send funds to.
-    #[allow(clippy::too_many_arguments)]
-    pub fn add_output<R: RngCore>(
-        &mut self,
-        mut rng: R,
-        params: &P,
-        target_height: BlockHeight,
-        ovk: Option<OutgoingViewingKey>,
-        to: PaymentAddress,
-        value: Amount,
-        memo: Option<MemoBytes>,
-    ) -> Result<(), Error> {
-        let output =
-            SaplingOutput::new_internal(params, target_height, &mut rng, ovk, to, value, memo)?;
-
-        self.value_balance -= value;
-
-        self.outputs.push(output);
-
-        Ok(())
-    }
-
-    /// Sets the Sapling address to which any change will be sent.
-    ///
-    /// By default, change is sent to the Sapling address corresponding to the first note
-    /// being spent (i.e. the first call to [`Builder::add_sapling_spend`]).
-    pub fn send_change_to(&mut self, ovk: OutgoingViewingKey, to: PaymentAddress) {
-        self.change_address = Some((ovk, to));
-    }
-
-    /// Send change to the specified change address. If no change address
-    /// was set, send change to the first Sapling address given as input.
-    pub fn get_change_address(&self) -> Result<(OutgoingViewingKey, PaymentAddress), Error> {
-        if let Some(change_address) = &self.change_address {
-            Ok(change_address.clone())
-        } else if !self.spends.is_empty() {
-            PaymentAddress::from_parts(self.spends[0].diversifier, self.spends[0].note.pk_d)
-                .map(|addr| (self.spends[0].extsk.expsk.ovk, addr))
-                .ok_or(Error::InvalidAddress)
-        } else {
-            Err(Error::NoChangeAddress)
-        }
-    }
-
-    pub fn build<Pr: TxProver, R: RngCore>(
-        &self,
-        params: &P,
-        prover: &Pr,
-        ctx: &mut Pr::SaplingProvingContext,
-        mut rng: R,
-        target_height: BlockHeight,
-    ) -> Result<
-        (
-            Vec<SpendDescription>,
-            Vec<OutputDescription>,
-            SaplingMetadata,
-        ),
-        Error,
-    > {
-        // Record initial positions of spends and outputs
-        let mut indexed_spends: Vec<_> = self.spends.iter().enumerate().collect();
-        let mut indexed_outputs: Vec<_> = self
-            .outputs
-            .iter()
-            .enumerate()
-            .map(|(i, o)| Some((i, o)))
-            .collect();
-
-        // Set up the transaction metadata that will be used to record how
-        // inputs and outputs are shuffled.
-        let mut tx_metadata = SaplingMetadata::new();
-        tx_metadata.spend_indices.resize(indexed_spends.len(), 0);
-        tx_metadata.output_indices.resize(indexed_outputs.len(), 0);
-
-        // Pad Sapling outputs
-        if !indexed_spends.is_empty() {
-            while indexed_outputs.len() < MIN_SHIELDED_OUTPUTS {
-                indexed_outputs.push(None);
-            }
-        }
-
-        // Randomize order of inputs and outputs
-        indexed_spends.shuffle(&mut rng);
-        indexed_outputs.shuffle(&mut rng);
-
-        // Create Sapling SpendDescriptions
-        let spend_descs = if !indexed_spends.is_empty() {
-            let anchor = self
-                .anchor
-                .expect("Sapling anchor must be set if Sapling spends are present.");
-
-            indexed_spends
-                .iter()
-                .enumerate()
-                .map(|(i, (pos, spend))| {
-                    let proof_generation_key = spend.extsk.expsk.proof_generation_key();
-
-                    let nullifier = spend.note.nf(
-                        &proof_generation_key.to_viewing_key(),
-                        spend.merkle_path.position,
-                    );
-
-                    let (zkproof, cv, rk) = prover
-                        .spend_proof(
-                            ctx,
-                            proof_generation_key,
-                            spend.diversifier,
-                            spend.note.rseed,
-                            spend.alpha,
-                            spend.note.value,
-                            anchor,
-                            spend.merkle_path.clone(),
-                        )
-                        .map_err(|_| Error::SpendProof)?;
-
-                    // Record the post-randomized spend location
-                    tx_metadata.spend_indices[*pos] = i;
-
-                    Ok(SpendDescription {
-                        cv,
-                        anchor,
-                        nullifier,
-                        rk,
-                        zkproof,
-                        spend_auth_sig: None,
-                    })
-                })
-                .collect::<Result<Vec<_>, Error>>()?
-        } else {
-            vec![]
-        };
-
-        // Create Sapling OutputDescriptions
-        let output_descs = indexed_outputs
-            .into_iter()
-            .enumerate()
-            .map(|(i, output)| {
-                if let Some((pos, output)) = output {
-                    // Record the post-randomized output location
-                    tx_metadata.output_indices[pos] = i;
-
-                    output.clone().build_internal(prover, ctx, &mut rng)
-                } else {
-                    // This is a dummy output
-                    let (dummy_to, dummy_note) = {
-                        let (diversifier, g_d) = {
-                            let mut diversifier;
-                            let g_d;
-                            loop {
-                                let mut d = [0; 11];
-                                rng.fill_bytes(&mut d);
-                                diversifier = Diversifier(d);
-                                if let Some(val) = diversifier.g_d() {
-                                    g_d = val;
-                                    break;
-                                }
-                            }
-                            (diversifier, g_d)
-                        };
-
-                        let (pk_d, payment_address) = loop {
-                            let dummy_ivk = jubjub::Fr::random(&mut rng);
-                            let pk_d = g_d * dummy_ivk;
-                            if let Some(addr) = PaymentAddress::from_parts(diversifier, pk_d) {
-                                break (pk_d, addr);
-                            }
-                        };
-
-                        let rseed = generate_random_rseed_internal(params, target_height, &mut rng);
-
-                        (
-                            payment_address,
-                            Note {
-                                g_d,
-                                pk_d,
-                                rseed,
-                                value: 0,
-                            },
-                        )
-                    };
-
-                    let esk = dummy_note.generate_or_derive_esk_internal(&mut rng);
-                    let epk = dummy_note.g_d * esk;
-
-                    let (zkproof, cv) =
-                        prover.output_proof(ctx, esk, dummy_to, dummy_note.rcm(), dummy_note.value);
-
-                    let cmu = dummy_note.cmu();
-
-                    let mut enc_ciphertext = [0u8; 580];
-                    let mut out_ciphertext = [0u8; 80];
-                    rng.fill_bytes(&mut enc_ciphertext[..]);
-                    rng.fill_bytes(&mut out_ciphertext[..]);
-
-                    OutputDescription {
-                        cv,
-                        cmu,
-                        ephemeral_key: epk.into(),
-                        enc_ciphertext,
-                        out_ciphertext,
-                        zkproof,
-                    }
-                }
-            })
-            .collect();
-
-        Ok((spend_descs, output_descs, tx_metadata))
-    }
-
-    fn create_signatures<Pr: TxProver, R: RngCore>(
-        self,
-        prover: &Pr,
-        ctx: &mut Pr::SaplingProvingContext,
-        rng: &mut R,
-        sighash_bytes: &[u8; 32],
-        tx_metadata: &SaplingMetadata,
-    ) -> Result<(Vec<Option<Signature>>, Option<Signature>), Error> {
-        // Create Sapling spendAuth and binding signatures
-        let mut spend_sigs = vec![None; self.spends.len()];
-        for (i, spend) in self.spends.into_iter().enumerate() {
-            spend_sigs[tx_metadata.spend_indices[i]] = Some(spend_sig_internal(
-                PrivateKey(spend.extsk.expsk.ask),
-                spend.alpha,
-                sighash_bytes,
-                rng,
-            ));
-        }
-
-        // Add a binding signature if needed
-        let binding_sig =
-            if tx_metadata.spend_indices.is_empty() && tx_metadata.output_indices.is_empty() {
-                None
-            } else {
-                Some(
-                    prover
-                        .binding_sig(ctx, self.value_balance, &sighash_bytes)
-                        .map_err(|_| Error::BindingSig)?,
-                )
-            };
-
-        Ok((spend_sigs, binding_sig))
     }
 }
 
@@ -737,7 +268,7 @@ impl<'a, P: consensus::Parameters, R: RngCore> Builder<'a, P, R> {
             expiry_height: target_height + DEFAULT_TX_EXPIRY_DELTA,
             fee: DEFAULT_FEE,
             transparent_builder: TransparentBuilder::empty(),
-            sapling_builder: SaplingBuilder::new(),
+            sapling_builder: SaplingBuilder::empty(),
             #[cfg(feature = "zfuture")]
             tze_builder: TzeBuilder::new(),
             #[cfg(not(feature = "zfuture"))]
@@ -759,6 +290,7 @@ impl<'a, P: consensus::Parameters, R: RngCore> Builder<'a, P, R> {
     ) -> Result<(), Error> {
         self.sapling_builder
             .add_spend(&mut self.rng, extsk, diversifier, note, merkle_path)
+            .map_err(Error::SaplingBuildError)
     }
 
     /// Adds a Sapling address to send funds to.
@@ -769,15 +301,17 @@ impl<'a, P: consensus::Parameters, R: RngCore> Builder<'a, P, R> {
         value: Amount,
         memo: Option<MemoBytes>,
     ) -> Result<(), Error> {
-        self.sapling_builder.add_output(
-            &mut self.rng,
-            &self.params,
-            self.target_height,
-            ovk,
-            to,
-            value,
-            memo,
-        )
+        self.sapling_builder
+            .add_output(
+                &mut self.rng,
+                &self.params,
+                self.target_height,
+                ovk,
+                to,
+                value,
+                memo,
+            )
+            .map_err(Error::SaplingBuildError)
     }
 
     /// Adds a transparent coin to be spent in this transaction.
@@ -866,20 +400,26 @@ impl<'a, P: consensus::Parameters, R: RngCore> Builder<'a, P, R> {
         //
 
         if change.is_positive() {
-            let change_address = self.sapling_builder.get_change_address()?;
+            let change_address = self
+                .sapling_builder
+                .get_change_address()
+                .map_err(Error::SaplingBuildError)?;
             self.add_sapling_output(Some(change_address.0), change_address.1, change, None)?;
         }
 
         let (vin, vout) = self.transparent_builder.build();
 
         let mut ctx = prover.new_sapling_proving_context();
-        let (spend_descs, output_descs, tx_metadata) = self.sapling_builder.build(
-            &self.params,
-            prover,
-            &mut ctx,
-            &mut self.rng,
-            self.target_height,
-        )?;
+        let (spend_descs, output_descs, tx_metadata) = self
+            .sapling_builder
+            .build(
+                &self.params,
+                prover,
+                &mut ctx,
+                &mut self.rng,
+                self.target_height,
+            )
+            .map_err(Error::SaplingBuildError)?;
 
         #[cfg(feature = "zfuture")]
         let (tze_inputs, tze_outputs) = self.tze_builder.build();
@@ -894,7 +434,7 @@ impl<'a, P: consensus::Parameters, R: RngCore> Builder<'a, P, R> {
             tze_outputs,
             lock_time: 0,
             expiry_height: self.expiry_height,
-            value_balance: self.sapling_builder.value_balance,
+            value_balance: self.sapling_builder.value_balance(),
             shielded_spends: spend_descs,
             shielded_outputs: output_descs,
             joinsplits: vec![],
@@ -917,7 +457,8 @@ impl<'a, P: consensus::Parameters, R: RngCore> Builder<'a, P, R> {
 
         let (sapling_spend_auth_sigs, sapling_binding_sig) = self
             .sapling_builder
-            .create_signatures(prover, &mut ctx, &mut self.rng, &sighash, &tx_metadata)?;
+            .create_signatures(prover, &mut ctx, &mut self.rng, &sighash, &tx_metadata)
+            .map_err(Error::SaplingBuildError)?;
 
         for (i, spend_auth_sig) in sapling_spend_auth_sigs.into_iter().enumerate() {
             mtx.shielded_spends[i].spend_auth_sig = spend_auth_sig;
@@ -1047,7 +588,9 @@ mod tests {
         sapling::{prover::mock::MockTxProver, Node, Rseed},
         transaction::{
             components::{
-                amount::Amount, amount::DEFAULT_FEE, transparent::builder as transparent,
+                amount::{Amount, DEFAULT_FEE},
+                sapling::builder::{self as sapling},
+                transparent::builder::{self as transparent},
             },
             TxVersion,
         },
@@ -1055,6 +598,9 @@ mod tests {
     };
 
     use super::{Builder, Error, SaplingBuilder, DEFAULT_TX_EXPIRY_DELTA};
+
+    #[cfg(not(feature = "zfuture"))]
+    use std::marker::PhantomData;
 
     #[cfg(feature = "zfuture")]
     use super::TzeBuilder;
@@ -1069,7 +615,7 @@ mod tests {
         let mut builder = Builder::new(TEST_NETWORK, H0);
         assert_eq!(
             builder.add_sapling_output(Some(ovk), to, Amount::from_i64(-1).unwrap(), None),
-            Err(Error::InvalidAmount)
+            Err(Error::SaplingBuildError(sapling::Error::InvalidAmount))
         );
     }
 
@@ -1090,9 +636,11 @@ mod tests {
             expiry_height: sapling_activation_height + DEFAULT_TX_EXPIRY_DELTA,
             fee: Amount::zero(),
             transparent_builder: TransparentBuilder::empty(),
-            sapling_builder: SaplingBuilder::new(),
+            sapling_builder: SaplingBuilder::empty(),
             #[cfg(feature = "zfuture")]
             tze_builder: TzeBuilder::new(),
+            #[cfg(not(feature = "zfuture"))]
+            tze_builder: PhantomData,
             progress_notifier: None,
         };
 
@@ -1147,7 +695,7 @@ mod tests {
                 consensus::BranchId::Sapling,
                 &MockTxProver
             ),
-            Err(Error::BindingSig)
+            Err(Error::SaplingBuildError(sapling::Error::BindingSig))
         );
     }
 
@@ -1313,7 +861,7 @@ mod tests {
                     consensus::BranchId::Sapling,
                     &MockTxProver
                 ),
-                Err(Error::BindingSig)
+                Err(Error::SaplingBuildError(sapling::Error::BindingSig))
             )
         }
     }

@@ -18,6 +18,8 @@ use zcash_note_encryption::COMPACT_NOTE_SIZE;
 
 use super::GROTH_PROOF_SIZE;
 
+pub mod builder;
+
 #[derive(Clone)]
 pub struct SpendDescription {
     pub cv: jubjub::ExtendedPoint,
