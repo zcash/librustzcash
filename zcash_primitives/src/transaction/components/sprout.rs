@@ -13,14 +13,15 @@ const ZC_NUM_JS_OUTPUTS: usize = 2;
 #[derive(Clone)]
 pub(crate) enum SproutProof {
     Groth([u8; GROTH_PROOF_SIZE]),
-    Phgr([u8; PHGR_PROOF_SIZE]),
+    #[allow(clippy::upper_case_acronyms)]
+    PHGR([u8; PHGR_PROOF_SIZE]),
 }
 
 impl std::fmt::Debug for SproutProof {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
         match self {
             SproutProof::Groth(_) => write!(f, "SproutProof::Groth"),
-            SproutProof::Phgr(_) => write!(f, "SproutProof::PHGR"),
+            SproutProof::PHGR(_) => write!(f, "SproutProof::PHGR"),
         }
     }
 }
@@ -121,7 +122,7 @@ impl JsDescription {
             // - Proof validity is enforced by JSDescription::Verify() in zcashd
             let mut proof = [0u8; PHGR_PROOF_SIZE];
             reader.read_exact(&mut proof)?;
-            SproutProof::Phgr(proof)
+            SproutProof::PHGR(proof)
         };
 
         let mut ciphertexts = [[0u8; 601]; ZC_NUM_JS_OUTPUTS];
@@ -158,7 +159,7 @@ impl JsDescription {
 
         match &self.proof {
             SproutProof::Groth(p) => writer.write_all(p)?,
-            SproutProof::Phgr(p) => writer.write_all(p)?,
+            SproutProof::PHGR(p) => writer.write_all(p)?,
         }
 
         writer.write_all(&self.ciphertexts[0])?;
