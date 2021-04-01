@@ -90,7 +90,7 @@ pub fn create_proof(
                 position >>= 1;
             }
 
-            inputs.push(JSInput {
+            inputs.push(JsInput {
                 value,
                 a_sk,
                 rho,
@@ -106,7 +106,7 @@ pub fn create_proof(
     let mut outputs = Vec::with_capacity(2);
     {
         let mut handle_output = |a_pk, value, r| {
-            outputs.push(JSOutput {
+            outputs.push(JsOutput {
                 value: Some(value),
                 a_pk: Some(PayingKey(a_pk)),
                 r: Some(CommitmentRandomness(r)),

@@ -13,6 +13,7 @@ const ZC_NUM_JS_OUTPUTS: usize = 2;
 #[derive(Clone)]
 pub(crate) enum SproutProof {
     Groth([u8; GROTH_PROOF_SIZE]),
+    #[allow(clippy::upper_case_acronyms)]
     PHGR([u8; PHGR_PROOF_SIZE]),
 }
 
@@ -26,7 +27,7 @@ impl std::fmt::Debug for SproutProof {
 }
 
 #[derive(Clone)]
-pub struct JSDescription {
+pub struct JsDescription {
     pub(crate) vpub_old: Amount,
     pub(crate) vpub_new: Amount,
     pub(crate) anchor: [u8; 32],
@@ -39,7 +40,7 @@ pub struct JSDescription {
     pub(crate) ciphertexts: [[u8; 601]; ZC_NUM_JS_OUTPUTS],
 }
 
-impl std::fmt::Debug for JSDescription {
+impl std::fmt::Debug for JsDescription {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
         write!(
             f,
@@ -63,7 +64,7 @@ impl std::fmt::Debug for JSDescription {
     }
 }
 
-impl JSDescription {
+impl JsDescription {
     pub fn read<R: Read>(mut reader: R, use_groth: bool) -> io::Result<Self> {
         // Consensus rule (§4.3): Canonical encoding is enforced here
         let vpub_old = {
@@ -90,14 +91,12 @@ impl JSDescription {
         let mut nullifiers = [[0u8; 32]; ZC_NUM_JS_INPUTS];
         nullifiers
             .iter_mut()
-            .map(|nf| reader.read_exact(nf))
-            .collect::<io::Result<()>>()?;
+            .try_for_each(|nf| reader.read_exact(nf))?;
 
         let mut commitments = [[0u8; 32]; ZC_NUM_JS_OUTPUTS];
         commitments
             .iter_mut()
-            .map(|cm| reader.read_exact(cm))
-            .collect::<io::Result<()>>()?;
+            .try_for_each(|cm| reader.read_exact(cm))?;
 
         // Consensus rule (§4.3): Canonical encoding is enforced by
         // ZCNoteDecryption::decrypt() in zcashd
@@ -108,9 +107,7 @@ impl JSDescription {
         reader.read_exact(&mut random_seed)?;
 
         let mut macs = [[0u8; 32]; ZC_NUM_JS_INPUTS];
-        macs.iter_mut()
-            .map(|mac| reader.read_exact(mac))
-            .collect::<io::Result<()>>()?;
+        macs.iter_mut().try_for_each(|mac| reader.read_exact(mac))?;
 
         let proof = if use_groth {
             // Consensus rules (§4.3):
@@ -131,10 +128,9 @@ impl JSDescription {
         let mut ciphertexts = [[0u8; 601]; ZC_NUM_JS_OUTPUTS];
         ciphertexts
             .iter_mut()
-            .map(|ct| reader.read_exact(ct))
-            .collect::<io::Result<()>>()?;
+            .try_for_each(|ct| reader.read_exact(ct))?;
 
-        Ok(JSDescription {
+        Ok(JsDescription {
             vpub_old,
             vpub_new,
             anchor,

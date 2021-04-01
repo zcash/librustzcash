@@ -2,7 +2,7 @@
 
 use rusqlite::NO_PARAMS;
 
-use crate::BlockDB;
+use crate::BlockDb;
 
 /// Sets up the internal structure of the cache database.
 ///
@@ -11,15 +11,15 @@ use crate::BlockDB;
 /// ```
 /// use tempfile::NamedTempFile;
 /// use zcash_client_sqlite::{
-///     BlockDB,
+///     BlockDb,
 ///     chain::init::init_cache_database,
 /// };
 ///
 /// let cache_file = NamedTempFile::new().unwrap();
-/// let db = BlockDB::for_path(cache_file.path()).unwrap();
+/// let db = BlockDb::for_path(cache_file.path()).unwrap();
 /// init_cache_database(&db).unwrap();
 /// ```
-pub fn init_cache_database(db_cache: &BlockDB) -> Result<(), rusqlite::Error> {
+pub fn init_cache_database(db_cache: &BlockDb) -> Result<(), rusqlite::Error> {
     db_cache.0.execute(
         "CREATE TABLE IF NOT EXISTS compactblocks (
             height INTEGER PRIMARY KEY,

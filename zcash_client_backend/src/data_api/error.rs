@@ -31,7 +31,7 @@ pub enum Error<NoteId> {
     InvalidChain(BlockHeight, ChainInvalid),
 
     /// A provided extsk is not associated with the specified account.
-    InvalidExtSK(AccountId),
+    InvalidExtSk(AccountId),
 
     /// The root of an output's witness tree in a newly arrived transaction does
     /// not correspond to root of the stored commitment tree at the recorded height.
@@ -80,7 +80,7 @@ impl<N: fmt::Display> fmt::Display for Error<N> {
             Error::InvalidChain(upper_bound, cause) => {
                 write!(f, "Invalid chain (upper bound: {}): {:?}", u32::from(*upper_bound), cause)
             }
-            Error::InvalidExtSK(account) => {
+            Error::InvalidExtSk(account) => {
                 write!(f, "Incorrect ExtendedSpendingKey for account {}", account.0)
             }
             Error::InvalidNewWitnessAnchor(output, txid, last_height, anchor) => write!(

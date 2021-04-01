@@ -19,7 +19,7 @@ mod tests;
 
 pub use self::sighash::{signature_hash, signature_hash_data, SignableInput, SIGHASH_ALL};
 
-use self::components::{Amount, JSDescription, OutputDescription, SpendDescription, TxIn, TxOut};
+use self::components::{Amount, JsDescription, OutputDescription, SpendDescription, TxIn, TxOut};
 
 #[cfg(feature = "zfuture")]
 use self::components::{TzeIn, TzeOut};
@@ -183,7 +183,7 @@ pub struct TransactionData {
     pub value_balance: Amount,
     pub shielded_spends: Vec<SpendDescription>,
     pub shielded_outputs: Vec<OutputDescription>,
-    pub joinsplits: Vec<JSDescription>,
+    pub joinsplits: Vec<JsDescription>,
     pub joinsplit_pubkey: Option<[u8; 32]>,
     pub joinsplit_sig: Option<[u8; 64]>,
     pub binding_sig: Option<Signature>,
@@ -349,7 +349,7 @@ impl Transaction {
 
         let (joinsplits, joinsplit_pubkey, joinsplit_sig) = if version.has_sprout() {
             let jss = Vector::read(&mut reader, |r| {
-                JSDescription::read(r, version.uses_groth_proofs())
+                JsDescription::read(r, version.uses_groth_proofs())
             })?;
             let (pubkey, sig) = if !jss.is_empty() {
                 let mut joinsplit_pubkey = [0; 32];

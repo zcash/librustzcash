@@ -103,7 +103,7 @@ where
 ///     wallet::{AccountId, OvkPolicy},
 /// };
 /// use zcash_client_sqlite::{
-///     WalletDB,
+///     WalletDb,
 ///     error::SqliteClientError,
 ///     wallet::init::init_wallet_db,
 /// };
@@ -127,7 +127,7 @@ where
 /// let to = extsk.default_address().unwrap().1.into();
 ///
 /// let data_file = NamedTempFile::new().unwrap();
-/// let db_read = WalletDB::for_path(data_file, Network::TestNetwork).unwrap();
+/// let db_read = WalletDb::for_path(data_file, Network::TestNetwork).unwrap();
 /// init_wallet_db(&db_read)?;
 /// let mut db = db_read.get_update_ops()?;
 ///
@@ -168,7 +168,7 @@ where
     // ExtendedFullViewingKey for the account we are spending from.
     let extfvk = ExtendedFullViewingKey::from(extsk);
     if !wallet_db.is_valid_account_extfvk(account, &extfvk)? {
-        return Err(E::from(Error::InvalidExtSK(account)));
+        return Err(E::from(Error::InvalidExtSk(account)));
     }
 
     // Apply the outgoing viewing key policy.

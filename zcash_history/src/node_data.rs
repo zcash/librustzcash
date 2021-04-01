@@ -207,8 +207,10 @@ impl NodeData {
 #[cfg(test)]
 impl quickcheck::Arbitrary for NodeData {
     fn arbitrary<G: quickcheck::Gen>(gen: &mut G) -> Self {
-        let mut node_data = NodeData::default();
-        node_data.consensus_branch_id = 0;
+        let mut node_data = NodeData {
+            consensus_branch_id: 0,
+            ..Default::default()
+        };
         gen.fill_bytes(&mut node_data.subtree_commitment[..]);
         node_data.start_time = gen.next_u32();
         node_data.end_time = gen.next_u32();

@@ -10,7 +10,7 @@ use zcash_primitives::{
 
 use zcash_client_backend::encoding::encode_extended_full_viewing_key;
 
-use crate::{address_from_extfvk, error::SqliteClientError, WalletDB};
+use crate::{address_from_extfvk, error::SqliteClientError, WalletDb};
 
 /// Sets up the internal structure of the data database.
 ///
@@ -20,15 +20,15 @@ use crate::{address_from_extfvk, error::SqliteClientError, WalletDB};
 /// use tempfile::NamedTempFile;
 /// use zcash_primitives::consensus::Network;
 /// use zcash_client_sqlite::{
-///     WalletDB,
+///     WalletDb,
 ///     wallet::init::init_wallet_db,
 /// };
 ///
 /// let data_file = NamedTempFile::new().unwrap();
-/// let db = WalletDB::for_path(data_file.path(), Network::TestNetwork).unwrap();
+/// let db = WalletDb::for_path(data_file.path(), Network::TestNetwork).unwrap();
 /// init_wallet_db(&db).unwrap();
 /// ```
-pub fn init_wallet_db<P>(wdb: &WalletDB<P>) -> Result<(), rusqlite::Error> {
+pub fn init_wallet_db<P>(wdb: &WalletDb<P>) -> Result<(), rusqlite::Error> {
     wdb.conn.execute(
         "CREATE TABLE IF NOT EXISTS accounts (
             account INTEGER PRIMARY KEY,
@@ -127,12 +127,12 @@ pub fn init_wallet_db<P>(wdb: &WalletDB<P>) -> Result<(), rusqlite::Error> {
 /// };
 ///
 /// use zcash_client_sqlite::{
-///     WalletDB,
+///     WalletDb,
 ///     wallet::init::{init_accounts_table, init_wallet_db}
 /// };
 ///
 /// let data_file = NamedTempFile::new().unwrap();
-/// let db_data = WalletDB::for_path(data_file.path(), Network::TestNetwork).unwrap();
+/// let db_data = WalletDb::for_path(data_file.path(), Network::TestNetwork).unwrap();
 /// init_wallet_db(&db_data).unwrap();
 ///
 /// let extsk = ExtendedSpendingKey::master(&[]);
@@ -144,7 +144,7 @@ pub fn init_wallet_db<P>(wdb: &WalletDB<P>) -> Result<(), rusqlite::Error> {
 /// [`scan_cached_blocks`]: zcash_client_backend::data_api::chain::scan_cached_blocks
 /// [`create_spend_to_address`]: zcash_client_backend::data_api::wallet::create_spend_to_address
 pub fn init_accounts_table<P: consensus::Parameters>(
-    wdb: &WalletDB<P>,
+    wdb: &WalletDb<P>,
     extfvks: &[ExtendedFullViewingKey],
 ) -> Result<(), SqliteClientError> {
     let mut empty_check = wdb.conn.prepare("SELECT * FROM accounts LIMIT 1")?;
@@ -191,7 +191,7 @@ pub fn init_accounts_table<P: consensus::Parameters>(
 ///     consensus::{BlockHeight, Network},
 /// };
 /// use zcash_client_sqlite::{
-///     WalletDB,
+///     WalletDb,
 ///     wallet::init::init_blocks_table,
 /// };
 ///
@@ -206,11 +206,11 @@ pub fn init_accounts_table<P: consensus::Parameters>(
 /// let sapling_tree = &[];
 ///
 /// let data_file = NamedTempFile::new().unwrap();
-/// let db = WalletDB::for_path(data_file.path(), Network::TestNetwork).unwrap();
+/// let db = WalletDb::for_path(data_file.path(), Network::TestNetwork).unwrap();
 /// init_blocks_table(&db, height, hash, time, sapling_tree);
 /// ```
 pub fn init_blocks_table<P>(
-    wdb: &WalletDB<P>,
+    wdb: &WalletDb<P>,
     height: BlockHeight,
     hash: BlockHash,
     time: u32,
@@ -245,14 +245,14 @@ mod tests {
         zip32::{ExtendedFullViewingKey, ExtendedSpendingKey},
     };
 
-    use crate::{tests, wallet::get_address, AccountId, WalletDB};
+    use crate::{tests, wallet::get_address, AccountId, WalletDb};
 
     use super::{init_accounts_table, init_blocks_table, init_wallet_db};
 
     #[test]
     fn init_accounts_table_only_works_once() {
         let data_file = NamedTempFile::new().unwrap();
-        let db_data = WalletDB::for_path(data_file.path(), tests::network()).unwrap();
+        let db_data = WalletDb::for_path(data_file.path(), tests::network()).unwrap();
         init_wallet_db(&db_data).unwrap();
 
         // We can call the function as many times as we want with no data
@@ -273,7 +273,7 @@ mod tests {
     #[test]
     fn init_blocks_table_only_works_once() {
         let data_file = NamedTempFile::new().unwrap();
-        let db_data = WalletDB::for_path(data_file.path(), tests::network()).unwrap();
+        let db_data = WalletDb::for_path(data_file.path(), tests::network()).unwrap();
         init_wallet_db(&db_data).unwrap();
 
         // First call with data should initialise the blocks table
@@ -300,7 +300,7 @@ mod tests {
     #[test]
     fn init_accounts_table_stores_correct_address() {
         let data_file = NamedTempFile::new().unwrap();
-        let db_data = WalletDB::for_path(data_file.path(), tests::network()).unwrap();
+        let db_data = WalletDb::for_path(data_file.path(), tests::network()).unwrap();
         init_wallet_db(&db_data).unwrap();
 
         // Add an account to the wallet

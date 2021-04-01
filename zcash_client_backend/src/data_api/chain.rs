@@ -21,8 +21,8 @@
 //! };
 //!
 //! use zcash_client_sqlite::{
-//!     BlockDB,
-//!     WalletDB,
+//!     BlockDb,
+//!     WalletDb,
 //!     error::SqliteClientError,
 //!     wallet::{rewind_to_height},
 //!     wallet::init::{init_wallet_db},
@@ -37,9 +37,9 @@
 //! # fn test() -> Result<(), SqliteClientError> {
 //! let network = Network::TestNetwork;
 //! let cache_file = NamedTempFile::new()?;
-//! let db_cache = BlockDB::for_path(cache_file)?;
+//! let db_cache = BlockDb::for_path(cache_file)?;
 //! let db_file = NamedTempFile::new()?;
-//! let db_read = WalletDB::for_path(db_file, network)?;
+//! let db_read = WalletDb::for_path(db_file, network)?;
 //! init_wallet_db(&db_read)?;
 //!
 //! let mut db_data = db_read.get_update_ops()?;
@@ -211,8 +211,8 @@ where
 ///     data_api::chain::scan_cached_blocks,
 /// };
 /// use zcash_client_sqlite::{
-///     BlockDB,
-///     WalletDB,
+///     BlockDb,
+///     WalletDb,
 ///     error::SqliteClientError,
 ///     wallet::init::init_wallet_db,
 /// };
@@ -225,10 +225,10 @@ where
 /// #
 /// # fn test() -> Result<(), SqliteClientError> {
 /// let cache_file = NamedTempFile::new().unwrap();
-/// let cache = BlockDB::for_path(cache_file).unwrap();
+/// let cache = BlockDb::for_path(cache_file).unwrap();
 ///
 /// let data_file = NamedTempFile::new().unwrap();
-/// let db_read = WalletDB::for_path(data_file, Network::TestNetwork)?;
+/// let db_read = WalletDb::for_path(data_file, Network::TestNetwork)?;
 /// init_wallet_db(&db_read)?;
 ///
 /// let mut data = db_read.get_update_ops()?;

@@ -15,7 +15,7 @@ use crate::{
 };
 
 use super::{
-    components::{Amount, JSDescription, OutputDescription, SpendDescription, TxIn, TxOut},
+    components::{Amount, JsDescription, OutputDescription, SpendDescription, TxIn, TxOut},
     Transaction, TransactionData, TxVersion,
 };
 
@@ -122,7 +122,7 @@ fn single_output_hash(tx_out: &TxOut) -> Blake2bHash {
 
 fn joinsplits_hash(
     txversion: TxVersion,
-    joinsplits: &[JSDescription],
+    joinsplits: &[JsDescription],
     joinsplit_pubkey: &[u8; 32],
 ) -> Blake2bHash {
     let mut data = Vec::with_capacity(
@@ -227,11 +227,11 @@ impl<'a> SignableInput<'a> {
     }
 }
 
-pub fn signature_hash_data<'a>(
+pub fn signature_hash_data(
     tx: &TransactionData,
     consensus_branch_id: consensus::BranchId,
     hash_type: u32,
-    signable_input: SignableInput<'a>,
+    signable_input: SignableInput<'_>,
 ) -> Vec<u8> {
     if has_overwinter_components(&tx.version) {
         let mut personal = [0; 16];
@@ -372,11 +372,11 @@ pub fn signature_hash_data<'a>(
     }
 }
 
-pub fn signature_hash<'a>(
+pub fn signature_hash(
     tx: &Transaction,
     consensus_branch_id: consensus::BranchId,
     hash_type: u32,
-    signable_input: SignableInput<'a>,
+    signable_input: SignableInput<'_>,
 ) -> Vec<u8> {
     signature_hash_data(tx, consensus_branch_id, hash_type, signable_input)
 }

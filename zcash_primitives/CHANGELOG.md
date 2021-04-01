@@ -17,6 +17,8 @@ and this library adheres to Rust's notion of
   - `zcash_primitives::prover`
   - `zcash_primitives::redjubjub`
   - `zcash_primitives::util::{hash_to_scalar, generate_random_rseed}`
+- Renamed `zcash_primitives::transaction::components::JSDescription` to
+  `JsDescription` (matching Rust naming conventions).
 
 ## [0.5.0] - 2021-03-26
 ### Added

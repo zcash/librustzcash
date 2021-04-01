@@ -651,7 +651,7 @@ mod tests {
         }
 
         fn leaf_count(number: u32) -> TestResult {
-            if number > 1024 * 1024 || number < 3 {
+            if !(3..=1024 * 1024).contains(&number) {
                 TestResult::discard()
             } else {
                 let mut tree = initial();
@@ -666,7 +666,7 @@ mod tests {
         }
 
         fn parity(number: u32) -> TestResult {
-            if number > 2048 * 2048 || number < 3 {
+            if !(3..=2048 * 2048).contains(&number) {
                 TestResult::discard()
             } else {
                 let mut tree = initial();

@@ -8,7 +8,7 @@ pub mod tze;
 pub use self::{
     amount::Amount,
     sapling::{OutputDescription, SpendDescription},
-    sprout::JSDescription,
+    sprout::JsDescription,
     transparent::{OutPoint, TxIn, TxOut},
 };
 
