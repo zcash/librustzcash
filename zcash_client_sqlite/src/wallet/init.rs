@@ -2,13 +2,9 @@
 
 use rusqlite::{types::ToSql, NO_PARAMS};
 
-use zcash_primitives::{
-    block::BlockHash,
-    consensus::{self, BlockHeight},
-    zip32::ExtendedFullViewingKey,
-};
+use zcash_primitives::{block::BlockHash, consensus::{self, BlockHeight}, legacy::TransparentAddress, zip32::ExtendedFullViewingKey};
 
-use zcash_client_backend::encoding::encode_extended_full_viewing_key;
+use zcash_client_backend::encoding::{encode_extended_full_viewing_key, AddressCodec};
 
 use crate::{address_from_extfvk, error::SqliteClientError, WalletDb};
 
@@ -161,6 +157,7 @@ pub fn init_wallet_db<P>(wdb: &WalletDb<P>) -> Result<(), rusqlite::Error> {
 pub fn init_accounts_table<P: consensus::Parameters>(
     wdb: &WalletDb<P>,
     extfvks: &[ExtendedFullViewingKey],
+    taddrs: &Vec<TransparentAddress>,
 ) -> Result<(), SqliteClientError> {
     let mut empty_check = wdb.conn.prepare("SELECT * FROM accounts LIMIT 1")?;
     if empty_check.exists(NO_PARAMS)? {
@@ -169,21 +166,23 @@ pub fn init_accounts_table<P: consensus::Parameters>(
 
     // Insert accounts atomically
     wdb.conn.execute("BEGIN IMMEDIATE", NO_PARAMS)?;
-    for (account, extfvk) in extfvks.iter().enumerate() {
+    for (account, (extfvk, taddr)) in extfvks.iter().zip(taddrs.iter()).enumerate() {
         let extfvk_str = encode_extended_full_viewing_key(
             wdb.params.hrp_sapling_extended_full_viewing_key(),
             extfvk,
         );
 
         let address_str = address_from_extfvk(&wdb.params, extfvk);
+        let taddress_str: String = taddr.encode(&wdb.params);
 
         wdb.conn.execute(
-            "INSERT INTO accounts (account, extfvk, address)
-            VALUES (?, ?, ?)",
+            "INSERT INTO accounts (account, extfvk, address, transparent_address)
+            VALUES (?, ?, ?, ?)",
             &[
                 (account as u32).to_sql()?,
                 extfvk_str.to_sql()?,
                 address_str.to_sql()?,
+                taddress_str.to_sql()?,
             ],
         )?;
     }
