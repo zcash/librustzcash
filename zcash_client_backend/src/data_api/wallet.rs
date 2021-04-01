@@ -8,7 +8,7 @@ use zcash_primitives::{
     transaction::{
         builder::Builder,
         components::{amount::DEFAULT_FEE, Amount},
-        Transaction,
+        Transaction, TxVersion,
     },
     zip32::{ExtendedFullViewingKey, ExtendedSpendingKey},
 };
@@ -230,7 +230,7 @@ where
 
     let consensus_branch_id = BranchId::for_height(params, height);
     let (tx, tx_metadata) = builder
-        .build(consensus_branch_id, &prover)
+        .build(TxVersion::Sapling, consensus_branch_id, &prover)
         .map_err(Error::Builder)?;
 
     let output_index = match to {

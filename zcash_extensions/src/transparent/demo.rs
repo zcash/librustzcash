@@ -479,7 +479,7 @@ mod tests {
                 amount::{Amount, DEFAULT_FEE},
                 TzeIn, TzeOut, TzeOutPoint,
             },
-            Transaction, TransactionData,
+            Transaction, TransactionData, TxVersion,
         },
         zip32::ExtendedSpendingKey,
     };
@@ -693,7 +693,7 @@ mod tests {
         //
 
         let mut rng = OsRng;
-        let mut builder_a = Builder::new_with_rng_zfuture(TEST_NETWORK, H0, rng);
+        let mut builder_a = Builder::new(TEST_NETWORK, H0);
 
         // create some inputs to spend
         let extsk = ExtendedSpendingKey::master(&[]);
@@ -723,7 +723,7 @@ mod tests {
             .map_err(|e| format!("open failure: {:?}", e))
             .unwrap();
         let (tx_a, _) = builder_a
-            .build(BranchId::Canopy, &prover)
+            .build(TxVersion::ZFuture, BranchId::ZFuture, &prover)
             .map_err(|e| format!("build failure: {:?}", e))
             .unwrap();
 
@@ -731,7 +731,7 @@ mod tests {
         // Transfer
         //
 
-        let mut builder_b = Builder::new_with_rng_zfuture(TEST_NETWORK, H0, rng);
+        let mut builder_b = Builder::new(TEST_NETWORK, H0);
         let mut db_b = DemoBuilder {
             txn_builder: &mut builder_b,
             extension_id: 0,
@@ -745,7 +745,7 @@ mod tests {
             .map_err(|e| format!("transfer failure: {:?}", e))
             .unwrap();
         let (tx_b, _) = builder_b
-            .build(BranchId::Canopy, &prover)
+            .build(TxVersion::ZFuture, BranchId::ZFuture, &prover)
             .map_err(|e| format!("build failure: {:?}", e))
             .unwrap();
 
@@ -753,7 +753,7 @@ mod tests {
         // Closing transaction
         //
 
-        let mut builder_c = Builder::new_with_rng_zfuture(TEST_NETWORK, H0, rng);
+        let mut builder_c = Builder::new(TEST_NETWORK, H0);
         let mut db_c = DemoBuilder {
             txn_builder: &mut builder_c,
             extension_id: 0,
@@ -774,7 +774,7 @@ mod tests {
             .unwrap();
 
         let (tx_c, _) = builder_c
-            .build(BranchId::Canopy, &prover)
+            .build(TxVersion::ZFuture, BranchId::ZFuture, &prover)
             .map_err(|e| format!("build failure: {:?}", e))
             .unwrap();
 
