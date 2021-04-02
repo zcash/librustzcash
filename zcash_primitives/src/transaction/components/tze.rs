@@ -15,6 +15,8 @@ use crate::{
 
 use super::amount::Amount;
 
+pub mod builder;
+
 fn to_io_error(_: std::num::TryFromIntError) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, "value out of range")
 }

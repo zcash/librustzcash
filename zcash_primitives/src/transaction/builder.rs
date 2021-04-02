@@ -1,8 +1,5 @@
 //! Structs for building transactions.
 
-#[cfg(feature = "zfuture")]
-use std::boxed::Box;
-
 use std::error;
 use std::fmt;
 use std::sync::mpsc::Sender;
@@ -36,8 +33,11 @@ use crate::transaction::components::{OutPoint, TxOut};
 
 #[cfg(feature = "zfuture")]
 use crate::{
-    extensions::transparent::{self as tze, ExtensionTxBuilder, ToPayload},
-    transaction::components::{TzeIn, TzeOut, TzeOutPoint},
+    extensions::transparent::{ExtensionTxBuilder, ToPayload},
+    transaction::components::{
+        tze::builder::{self as tzebuilder, TzeBuilder},
+        TzeOut, TzeOutPoint,
+    },
 };
 
 #[cfg(any(test, feature = "test-dependencies"))]
@@ -48,12 +48,12 @@ const DEFAULT_TX_EXPIRY_DELTA: u32 = 20;
 #[derive(Debug, PartialEq)]
 pub enum Error {
     ChangeIsNegative(Amount),
-    InvalidAddress,
     InvalidAmount,
     NoChangeAddress,
-    TzeWitnessModeMismatch(u32, u32),
     TransparentBuildError(transparent::Error),
     SaplingBuildError(sapling::Error),
+    #[cfg(feature = "zfuture")]
+    TzeBuildError(tzebuilder::Error),
 }
 
 impl fmt::Display for Error {
@@ -62,123 +62,17 @@ impl fmt::Display for Error {
             Error::ChangeIsNegative(amount) => {
                 write!(f, "Change is negative ({:?} zatoshis)", amount)
             }
-            Error::InvalidAddress => write!(f, "Invalid address"),
             Error::InvalidAmount => write!(f, "Invalid amount"),
             Error::NoChangeAddress => write!(f, "No change address specified or discoverable"),
-            Error::TzeWitnessModeMismatch(expected, actual) =>
-                write!(f, "TZE witness builder returned a mode that did not match the mode with which the input was initially constructed: expected = {:?}, actual = {:?}", expected, actual),
             Error::TransparentBuildError(err) => err.fmt(f),
             Error::SaplingBuildError(err) => err.fmt(f),
+            #[cfg(feature = "zfuture")]
+            Error::TzeBuildError(err) => err.fmt(f),
         }
     }
 }
 
 impl error::Error for Error {}
-
-#[cfg(feature = "zfuture")]
-#[allow(clippy::type_complexity)]
-struct TzeSigner<'a, BuildCtx> {
-    prevout: TzeOut,
-    builder: Box<dyn FnOnce(&BuildCtx) -> Result<(u32, Vec<u8>), Error> + 'a>,
-}
-
-#[cfg(feature = "zfuture")]
-struct TzeBuilder<'a, BuildCtx> {
-    signers: Vec<TzeSigner<'a, BuildCtx>>,
-    tze_inputs: Vec<TzeIn>,
-    tze_outputs: Vec<TzeOut>,
-}
-
-#[cfg(feature = "zfuture")]
-impl<'a, BuildCtx> TzeBuilder<'a, BuildCtx> {
-    fn new() -> Self {
-        TzeBuilder {
-            signers: vec![],
-            tze_inputs: vec![],
-            tze_outputs: vec![],
-        }
-    }
-
-    fn add_input<WBuilder, W: ToPayload>(
-        &mut self,
-        extension_id: u32,
-        mode: u32,
-        (outpoint, prevout): (TzeOutPoint, TzeOut),
-        witness_builder: WBuilder,
-    ) where
-        WBuilder: 'a + FnOnce(&BuildCtx) -> Result<W, Error>,
-    {
-        self.tze_inputs
-            .push(TzeIn::new(outpoint, extension_id, mode));
-        self.signers.push(TzeSigner {
-            prevout,
-            builder: Box::new(move |ctx| witness_builder(&ctx).map(|x| x.to_payload())),
-        });
-    }
-
-    fn add_output<G: ToPayload>(
-        &mut self,
-        extension_id: u32,
-        value: Amount,
-        guarded_by: &G,
-    ) -> Result<(), Error> {
-        if value.is_negative() {
-            return Err(Error::InvalidAmount);
-        }
-
-        let (mode, payload) = guarded_by.to_payload();
-        self.tze_outputs.push(TzeOut {
-            value,
-            precondition: tze::Precondition {
-                extension_id,
-                mode,
-                payload,
-            },
-        });
-
-        Ok(())
-    }
-
-    fn value_balance(&self) -> Option<Amount> {
-        self.signers
-            .iter()
-            .map(|s| s.prevout.value)
-            .sum::<Option<Amount>>()?
-            - self
-                .tze_outputs
-                .iter()
-                .map(|tzo| tzo.value)
-                .sum::<Option<Amount>>()?
-    }
-
-    fn build(&self) -> (Vec<TzeIn>, Vec<TzeOut>) {
-        (self.tze_inputs.clone(), self.tze_outputs.clone())
-    }
-
-    fn create_signatures(self, mtx: &BuildCtx) -> Result<Vec<Vec<u8>>, Error> {
-        // Create TZE input witnesses
-        let tzein = self.tze_inputs;
-        let payloads = self
-            .signers
-            .into_iter()
-            .enumerate()
-            .map(|(i, tze_in)| {
-                // The witness builder function should have cached/closed over whatever data was
-                // necessary for the witness to commit to at the time it was added to the
-                // transaction builder; here, it then computes those commitments.
-                let (mode, payload) = (tze_in.builder)(&mtx)?;
-                let input_mode = tzein[i].witness.mode;
-                if mode != input_mode {
-                    return Err(Error::TzeWitnessModeMismatch(input_mode, mode));
-                }
-
-                Ok(payload)
-            })
-            .collect::<Result<Vec<_>, Error>>()?;
-
-        Ok(payloads)
-    }
-}
 
 /// Reports on the progress made by the builder towards building a transaction.
 pub struct Progress {
@@ -270,7 +164,7 @@ impl<'a, P: consensus::Parameters, R: RngCore> Builder<'a, P, R> {
             transparent_builder: TransparentBuilder::empty(),
             sapling_builder: SaplingBuilder::empty(),
             #[cfg(feature = "zfuture")]
-            tze_builder: TzeBuilder::new(),
+            tze_builder: TzeBuilder::empty(),
             #[cfg(not(feature = "zfuture"))]
             tze_builder: PhantomData,
             progress_notifier: None,
@@ -468,7 +362,10 @@ impl<'a, P: consensus::Parameters, R: RngCore> Builder<'a, P, R> {
         #[cfg(feature = "zfuture")]
         {
             // Create TZE input witnesses
-            let tze_payloads = self.tze_builder.create_signatures(&mtx)?;
+            let tze_payloads = self
+                .tze_builder
+                .create_signatures(&mtx)
+                .map_err(Error::TzeBuildError)?;
             for (i, payload) in tze_payloads.into_iter().enumerate() {
                 mtx.tze_inputs[i].witness.payload = payload;
             }
@@ -497,7 +394,7 @@ impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng> ExtensionTxBuilder<'a
     for Builder<'a, P, R>
 {
     type BuildCtx = TransactionData;
-    type BuildError = Error;
+    type BuildError = tzebuilder::Error;
 
     fn add_tze_input<WBuilder, W: ToPayload>(
         &mut self,
@@ -507,7 +404,7 @@ impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng> ExtensionTxBuilder<'a
         witness_builder: WBuilder,
     ) -> Result<(), Self::BuildError>
     where
-        WBuilder: 'a + (FnOnce(&Self::BuildCtx) -> Result<W, Self::BuildError>),
+        WBuilder: 'a + (FnOnce(&Self::BuildCtx) -> Result<W, tzebuilder::Error>),
     {
         self.tze_builder
             .add_input(extension_id, mode, prevout, witness_builder);
@@ -638,7 +535,7 @@ mod tests {
             transparent_builder: TransparentBuilder::empty(),
             sapling_builder: SaplingBuilder::empty(),
             #[cfg(feature = "zfuture")]
-            tze_builder: TzeBuilder::new(),
+            tze_builder: TzeBuilder::empty(),
             #[cfg(not(feature = "zfuture"))]
             tze_builder: PhantomData,
             progress_notifier: None,
