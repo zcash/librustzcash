@@ -205,7 +205,7 @@ impl<P: consensus::Parameters> Domain for SaplingDomain<P> {
         cmu: &Self::NoteCommitment,
         epk: &Self::EphemeralPublicKey,
     ) -> OutgoingCipherKey {
-        prf_ock(ovk, &cv, &cmu, epk)
+        prf_ock(ovk, cv, cmu, epk)
     }
 
     fn outgoing_plaintext_bytes(

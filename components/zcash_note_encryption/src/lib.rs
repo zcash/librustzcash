@@ -350,8 +350,7 @@ fn parse_note_plaintext_without_memo_ivk<D: Domain>(
 ) -> Option<(D::Note, D::Recipient)> {
     let (note, to) = domain.parse_note_plaintext_without_memo_ivk(ivk, &plaintext)?;
 
-    let validity = check_note_validity::<D>(&note, epk, cmstar);
-    if validity == NoteValidity::Valid {
+    if let NoteValidity::Valid = check_note_validity::<D>(&note, epk, cmstar) {
         Some((note, to))
     } else {
         None
@@ -457,8 +456,7 @@ pub fn try_output_recovery_with_ock<D: Domain>(
     let (note, to) = domain.parse_note_plaintext_without_memo_ovk(&pk_d, &esk, &epk, &plaintext)?;
     let memo = domain.extract_memo(&plaintext);
 
-    let validity = check_note_validity::<D>(&note, epk, cmstar);
-    if validity == NoteValidity::Valid {
+    if let NoteValidity::Valid = check_note_validity::<D>(&note, epk, cmstar) {
         Some((note, to, memo))
     } else {
         None
