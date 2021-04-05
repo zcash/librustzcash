@@ -2,15 +2,16 @@
 
 use ff::PrimeField;
 use std::collections::HashSet;
+use std::convert::TryFrom;
 use subtle::{ConditionallySelectable, ConstantTimeEq, CtOption};
 use zcash_primitives::{
     consensus::{self, BlockHeight},
     merkle_tree::{CommitmentTree, IncrementalWitness},
     sapling::{
-        note_encryption::try_sapling_compact_note_decryption, Node, Note, Nullifier,
-        PaymentAddress, SaplingIvk,
+        note_encryption::{try_sapling_compact_note_decryption, SaplingShieldedOutput},
+        Node, Note, Nullifier, PaymentAddress, SaplingIvk,
     },
-    transaction::TxId,
+    transaction::{components::sapling::CompactOutputDescription, TxId},
     zip32::ExtendedFullViewingKey,
 };
 
@@ -38,12 +39,10 @@ fn scan_output<P: consensus::Parameters, K: ScanningKey>(
     block_witnesses: &mut [&mut IncrementalWitness<Node>],
     new_witnesses: &mut [&mut IncrementalWitness<Node>],
 ) -> Option<WalletShieldedOutput<K::Nf>> {
-    let cmu = output.cmu().ok()?;
-    let epk = output.epk().ok()?;
-    let ct = output.ciphertext;
+    let output = CompactOutputDescription::try_from(output).ok()?;
 
     // Increment tree and witnesses
-    let node = Node::new(cmu.to_repr());
+    let node = Node::new(output.cmu.to_repr());
     for witness in existing_witnesses {
         witness.append(node).unwrap();
     }
@@ -56,7 +55,7 @@ fn scan_output<P: consensus::Parameters, K: ScanningKey>(
     tree.append(node).unwrap();
 
     for (account, vk) in vks.iter() {
-        let (note, to) = match vk.try_decryption(params, height, &epk, &cmu, &ct) {
+        let (note, to) = match vk.try_decryption(params, height, &output) {
             Some(ret) => ret,
             None => continue,
         };
@@ -74,8 +73,8 @@ fn scan_output<P: consensus::Parameters, K: ScanningKey>(
 
         return Some(WalletShieldedOutput {
             index,
-            cmu,
-            epk,
+            cmu: output.cmu,
+            epk: output.epk,
             account: **account,
             note,
             to,
@@ -108,13 +107,11 @@ pub trait ScanningKey {
 
     /// Attempts to decrypt a Sapling note and payment address
     /// from the specified ciphertext using this scanning key.
-    fn try_decryption<P: consensus::Parameters>(
+    fn try_decryption<P: consensus::Parameters, Output: SaplingShieldedOutput<P>>(
         &self,
         params: &P,
         height: BlockHeight,
-        epk: &jubjub::ExtendedPoint,
-        cmu: &bls12_381::Scalar,
-        ct: &[u8],
+        output: &Output,
     ) -> Option<(Note, PaymentAddress)>;
 
     /// Produces the nullifier for the specified note and witness, if possible.
@@ -132,15 +129,13 @@ pub trait ScanningKey {
 impl ScanningKey for ExtendedFullViewingKey {
     type Nf = Nullifier;
 
-    fn try_decryption<P: consensus::Parameters>(
+    fn try_decryption<P: consensus::Parameters, Output: SaplingShieldedOutput<P>>(
         &self,
         params: &P,
         height: BlockHeight,
-        epk: &jubjub::ExtendedPoint,
-        cmu: &bls12_381::Scalar,
-        ct: &[u8],
+        output: &Output,
     ) -> Option<(Note, PaymentAddress)> {
-        try_sapling_compact_note_decryption(params, height, &self.fvk.vk.ivk(), &epk, &cmu, &ct)
+        try_sapling_compact_note_decryption(params, height, &self.fvk.vk.ivk(), output)
     }
 
     fn nf(&self, note: &Note, witness: &IncrementalWitness<Node>) -> Self::Nf {
@@ -155,15 +150,13 @@ impl ScanningKey for ExtendedFullViewingKey {
 impl ScanningKey for SaplingIvk {
     type Nf = ();
 
-    fn try_decryption<P: consensus::Parameters>(
+    fn try_decryption<P: consensus::Parameters, Output: SaplingShieldedOutput<P>>(
         &self,
         params: &P,
         height: BlockHeight,
-        epk: &jubjub::ExtendedPoint,
-        cmu: &bls12_381::Scalar,
-        ct: &[u8],
+        output: &Output,
     ) -> Option<(Note, PaymentAddress)> {
-        try_sapling_compact_note_decryption(params, height, self, &epk, &cmu, &ct)
+        try_sapling_compact_note_decryption(params, height, self, output)
     }
 
     fn nf(&self, _note: &Note, _witness: &IncrementalWitness<Node>) {}

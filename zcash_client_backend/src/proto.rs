@@ -2,13 +2,16 @@
 
 use ff::PrimeField;
 use group::GroupEncoding;
-use std::convert::TryInto;
+use std::convert::{TryFrom, TryInto};
 
 use zcash_primitives::{
     block::{BlockHash, BlockHeader},
     consensus::BlockHeight,
     sapling::Nullifier,
+    transaction::components::sapling::{CompactOutputDescription, OutputDescription},
 };
+
+use zcash_note_encryption::COMPACT_NOTE_SIZE;
 
 pub mod compact_formats;
 
@@ -95,6 +98,28 @@ impl compact_formats::CompactOutput {
         } else {
             Err(())
         }
+    }
+}
+
+impl From<OutputDescription> for compact_formats::CompactOutput {
+    fn from(out: OutputDescription) -> compact_formats::CompactOutput {
+        let mut result = compact_formats::CompactOutput::new();
+        result.set_cmu(out.cmu.to_repr().to_vec());
+        result.set_epk(out.ephemeral_key.to_bytes().to_vec());
+        result.set_ciphertext(out.enc_ciphertext[..COMPACT_NOTE_SIZE].to_vec());
+        result
+    }
+}
+
+impl TryFrom<compact_formats::CompactOutput> for CompactOutputDescription {
+    type Error = ();
+
+    fn try_from(value: compact_formats::CompactOutput) -> Result<Self, Self::Error> {
+        Ok(CompactOutputDescription {
+            cmu: value.cmu()?,
+            epk: value.epk()?,
+            enc_ciphertext: value.ciphertext,
+        })
     }
 }
 

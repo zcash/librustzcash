@@ -635,9 +635,7 @@ mod tests {
                 sapling_activation_height(),
                 &extfvk.fvk.ovk,
                 &output.cv,
-                &output.cmu,
-                &output.ephemeral_key,
-                &output.enc_ciphertext,
+                output,
                 &output.out_ciphertext,
             )
         };

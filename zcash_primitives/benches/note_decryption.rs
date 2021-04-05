@@ -57,30 +57,11 @@ fn bench_note_decryption(c: &mut Criterion) {
     let mut group = c.benchmark_group("Sapling note decryption");
 
     group.bench_function("valid", |b| {
-        b.iter(|| {
-            try_sapling_note_decryption(
-                &TEST_NETWORK,
-                height,
-                &valid_ivk,
-                &output.ephemeral_key,
-                &output.cmu,
-                &output.enc_ciphertext,
-            )
-            .unwrap()
-        })
+        b.iter(|| try_sapling_note_decryption(&TEST_NETWORK, height, &valid_ivk, &output).unwrap())
     });
 
     group.bench_function("invalid", |b| {
-        b.iter(|| {
-            try_sapling_note_decryption(
-                &TEST_NETWORK,
-                height,
-                &invalid_ivk,
-                &output.ephemeral_key,
-                &output.cmu,
-                &output.enc_ciphertext,
-            )
-        })
+        b.iter(|| try_sapling_note_decryption(&TEST_NETWORK, height, &invalid_ivk, &output))
     });
 }
 

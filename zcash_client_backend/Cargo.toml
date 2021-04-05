@@ -22,13 +22,14 @@ group = "0.8"
 hex = "0.4"
 jubjub = "0.5.1"
 nom = "6.1"
+percent-encoding = "2.1.0"
+proptest = { version = "0.10.1", optional = true }
 protobuf = "2.20"
 rand_core = "0.5.1"
 subtle = "2.2.3"
 time = "0.2"
+zcash_note_encryption = { version = "0.0", path = "../components/zcash_note_encryption" }
 zcash_primitives = { version = "0.5", path = "../zcash_primitives" }
-proptest = { version = "0.10.1", optional = true }
-percent-encoding = "2.1.0"
 
 [build-dependencies]
 protobuf-codegen-pure = "2.20"
