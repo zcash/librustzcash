@@ -9,12 +9,14 @@ use orchard;
 
 use crate::{
     consensus::{BlockHeight, BranchId},
-    sapling::redjubjub::Signature,
+    sapling::redjubjub,
     serialize::Vector,
 };
 
 use self::{
-    components::{Amount, JsDescription, OutputDescription, SpendDescription, TxIn, TxOut},
+    components::{
+        sapling, Amount, JsDescription, OutputDescription, SpendDescription, TxIn, TxOut,
+    },
     sighash::{signature_hash_data, SignableInput, SIGHASH_ALL},
     util::sha256d::{HashReader, HashWriter},
 };
@@ -167,7 +169,7 @@ impl TxVersion {
         }
     }
 
-    pub fn uses_groth_proofs(&self) -> bool {
+    pub fn has_sapling(&self) -> bool {
         match self {
             TxVersion::Sprout(_) | TxVersion::Overwinter => false,
             TxVersion::Sapling => true,
@@ -192,18 +194,21 @@ impl TxVersion {
 
 /// Authorization state for a bundle of transaction data.
 pub trait Authorization {
+    type SaplingAuth: sapling::Authorization;
     type OrchardAuth: orchard::bundle::Authorization;
 }
 
 pub struct Authorized;
 
 impl Authorization for Authorized {
+    type SaplingAuth = sapling::Authorized;
     type OrchardAuth = orchard::bundle::Authorized;
 }
 
 pub struct Unauthorized;
 
 impl Authorization for Unauthorized {
+    type SaplingAuth = sapling::Unauthorized;
     type OrchardAuth = orchard::builder::Unauthorized;
 }
 
@@ -238,13 +243,10 @@ pub struct TransactionData<A: Authorization> {
     pub tze_outputs: Vec<TzeOut>,
     pub lock_time: u32,
     pub expiry_height: BlockHeight,
-    pub value_balance: Amount,
-    pub shielded_spends: Vec<SpendDescription>,
-    pub shielded_outputs: Vec<OutputDescription>,
     pub joinsplits: Vec<JsDescription>,
     pub joinsplit_pubkey: Option<[u8; 32]>,
     pub joinsplit_sig: Option<[u8; 64]>,
-    pub binding_sig: Option<Signature>,
+    pub sapling_bundle: Option<sapling::Bundle<A::SaplingAuth>>,
     pub orchard_bundle: Option<orchard::Bundle<A::OrchardAuth, Amount>>,
 }
 
@@ -282,19 +284,33 @@ impl<A: Authorization> std::fmt::Debug for TransactionData<A> {
             },
             self.lock_time,
             self.expiry_height,
-            self.value_balance,
-            self.shielded_spends,
-            self.shielded_outputs,
+            self.sapling_bundle
+                .as_ref()
+                .map_or(Amount::zero(), |b| b.value_balance),
+            self.sapling_bundle
+                .as_ref()
+                .map_or(&vec![], |b| &b.shielded_spends),
+            self.sapling_bundle
+                .as_ref()
+                .map_or(&vec![], |b| &b.shielded_outputs),
             self.joinsplits,
             self.joinsplit_pubkey,
-            self.binding_sig
+            self.sapling_bundle.as_ref().map(|b| &b.authorization)
         )
+    }
+}
+
+impl<A: Authorization> TransactionData<A> {
+    pub fn sapling_value_balance(&self) -> Amount {
+        self.sapling_bundle
+            .as_ref()
+            .map_or(Amount::zero(), |b| b.value_balance)
     }
 }
 
 impl Default for TransactionData<Unauthorized> {
     fn default() -> Self {
-        TransactionData::new()
+        Self::new()
     }
 }
 
@@ -310,13 +326,10 @@ impl TransactionData<Unauthorized> {
             tze_outputs: vec![],
             lock_time: 0,
             expiry_height: 0u32.into(),
-            value_balance: Amount::zero(),
-            shielded_spends: vec![],
-            shielded_outputs: vec![],
             joinsplits: vec![],
             joinsplit_pubkey: None,
             joinsplit_sig: None,
-            binding_sig: None,
+            sapling_bundle: None,
             orchard_bundle: None,
         }
     }
@@ -331,13 +344,10 @@ impl TransactionData<Unauthorized> {
             tze_outputs: vec![],
             lock_time: 0,
             expiry_height: 0u32.into(),
-            value_balance: Amount::zero(),
-            shielded_spends: vec![],
-            shielded_outputs: vec![],
             joinsplits: vec![],
             joinsplit_pubkey: None,
             joinsplit_sig: None,
-            binding_sig: None,
+            sapling_bundle: None,
             orchard_bundle: None,
         }
     }
@@ -363,6 +373,13 @@ impl Transaction {
 
     pub fn txid(&self) -> TxId {
         self.txid
+    }
+
+    fn read_amount<R: Read>(mut reader: R) -> io::Result<Amount> {
+        let mut tmp = [0; 8];
+        reader.read_exact(&mut tmp)?;
+        Amount::from_i64_le_bytes(tmp)
+            .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "valueBalance out of range"))
     }
 
     pub fn read<R: Read>(reader: R) -> io::Result<Self> {
@@ -396,15 +413,14 @@ impl Transaction {
             0u32.into()
         };
 
-        let (value_balance, shielded_spends, shielded_outputs) = if is_sapling_v4 || has_tze {
-            let vb = {
-                let mut tmp = [0; 8];
-                reader.read_exact(&mut tmp)?;
-                Amount::from_i64_le_bytes(tmp)
-            }
-            .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "valueBalance out of range"))?;
-            let ss = Vector::read(&mut reader, SpendDescription::read)?;
-            let so = Vector::read(&mut reader, OutputDescription::read)?;
+        let (value_balance, shielded_spends, shielded_outputs) = if version.has_sapling() {
+            let vb = Self::read_amount(&mut reader)?;
+            #[allow(clippy::redundant_closure)]
+            let ss: Vec<SpendDescription<sapling::Authorized>> =
+                Vector::read(&mut reader, |r| SpendDescription::read(r))?;
+            #[allow(clippy::redundant_closure)]
+            let so: Vec<OutputDescription<sapling::Authorized>> =
+                Vector::read(&mut reader, |r| OutputDescription::read(r))?;
             (vb, ss, so)
         } else {
             (Amount::zero(), vec![], vec![])
@@ -412,7 +428,7 @@ impl Transaction {
 
         let (joinsplits, joinsplit_pubkey, joinsplit_sig) = if version.has_sprout() {
             let jss = Vector::read(&mut reader, |r| {
-                JsDescription::read(r, version.uses_groth_proofs())
+                JsDescription::read(r, version.has_sapling())
             })?;
             let (pubkey, sig) = if !jss.is_empty() {
                 let mut joinsplit_pubkey = [0; 32];
@@ -431,7 +447,7 @@ impl Transaction {
         let binding_sig = if (is_sapling_v4 || has_tze)
             && !(shielded_spends.is_empty() && shielded_outputs.is_empty())
         {
-            Some(Signature::read(&mut reader)?)
+            Some(redjubjub::Signature::read(&mut reader)?)
         } else {
             None
         };
@@ -451,13 +467,15 @@ impl Transaction {
                 tze_outputs,
                 lock_time,
                 expiry_height,
-                value_balance,
-                shielded_spends,
-                shielded_outputs,
                 joinsplits,
                 joinsplit_pubkey,
                 joinsplit_sig,
-                binding_sig,
+                sapling_bundle: binding_sig.map(|binding_sig| sapling::Bundle {
+                    value_balance,
+                    shielded_spends,
+                    shielded_outputs,
+                    authorization: sapling::Authorized { binding_sig },
+                }),
                 orchard_bundle: None,
             },
         })
@@ -486,10 +504,28 @@ impl Transaction {
             writer.write_u32::<LittleEndian>(u32::from(self.expiry_height))?;
         }
 
-        if is_sapling_v4 || has_tze {
-            writer.write_all(&self.value_balance.to_i64_le_bytes())?;
-            Vector::write(&mut writer, &self.shielded_spends, |w, e| e.write(w))?;
-            Vector::write(&mut writer, &self.shielded_outputs, |w, e| e.write(w))?;
+        if self.version.has_sapling() {
+            writer.write_all(
+                &self
+                    .sapling_bundle
+                    .as_ref()
+                    .map_or(Amount::zero(), |b| b.value_balance)
+                    .to_i64_le_bytes(),
+            )?;
+            Vector::write(
+                &mut writer,
+                self.sapling_bundle
+                    .as_ref()
+                    .map_or(&[], |b| &b.shielded_spends),
+                |w, e| e.write(w),
+            )?;
+            Vector::write(
+                &mut writer,
+                self.sapling_bundle
+                    .as_ref()
+                    .map_or(&[], |b| &b.shielded_outputs),
+                |w, e| e.write(w),
+            )?;
         }
 
         if self.version.has_sprout() {
@@ -531,19 +567,16 @@ impl Transaction {
             }
         }
 
-        if (is_sapling_v4 || has_tze)
-            && !(self.shielded_spends.is_empty() && self.shielded_outputs.is_empty())
-        {
-            match self.binding_sig {
-                Some(sig) => sig.write(&mut writer)?,
-                None => {
-                    return Err(io::Error::new(
-                        io::ErrorKind::InvalidInput,
-                        "Missing binding signature",
-                    ));
-                }
+        if self.version.has_sapling() {
+            if let Some(bundle) = self.sapling_bundle.as_ref() {
+                bundle.authorization.binding_sig.write(&mut writer)?;
+            } else {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "Missing binding signature",
+                ));
             }
-        } else if self.binding_sig.is_some() {
+        } else {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 "Binding signature should not be present",
@@ -686,7 +719,6 @@ pub mod testing {
             tze_outputs in vec(arb_tzeout(), 0..10),
             lock_time in any::<u32>(),
             expiry_height in any::<u32>(),
-            value_balance in arb_amount(),
         ) -> TransactionData<Authorized> {
             TransactionData {
                 version,
@@ -695,16 +727,10 @@ pub mod testing {
                 tze_outputs: if branch_id == BranchId::ZFuture { tze_outputs } else { vec![] },
                 lock_time,
                 expiry_height: expiry_height.into(),
-                value_balance: match version {
-                    TxVersion::Sprout(_) | TxVersion::Overwinter => Amount::zero(),
-                    _ => value_balance,
-                },
-                shielded_spends: vec![], //FIXME
-                shielded_outputs: vec![], //FIXME
                 joinsplits: vec![], //FIXME
                 joinsplit_pubkey: None, //FIXME
                 joinsplit_sig: None, //FIXME
-                binding_sig: None, //FIXME
+                sapling_bundle: None, //FIXME
                 orchard_bundle: None, //FIXME
             }
         }
@@ -718,23 +744,16 @@ pub mod testing {
             vout in vec(arb_txout(), 0..10),
             lock_time in any::<u32>(),
             expiry_height in any::<u32>(),
-            value_balance in arb_amount(),
         ) -> TransactionData<Authorized> {
             TransactionData {
                 version,
                 vin, vout,
                 lock_time,
                 expiry_height: expiry_height.into(),
-                value_balance: match version {
-                    TxVersion::Sprout(_) | TxVersion::Overwinter => Amount::zero(),
-                    _ => value_balance,
-                },
-                shielded_spends: vec![], //FIXME
-                shielded_outputs: vec![], //FIXME
                 joinsplits: vec![], //FIXME
                 joinsplit_pubkey: None, //FIXME
                 joinsplit_sig: None, //FIXME
-                binding_sig: None, //FIXME
+                sapling_bundle: None, //FIXME
                 orchard_bundle: None, //FIXME
             }
         }

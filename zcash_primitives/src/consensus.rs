@@ -554,6 +554,10 @@ impl BranchId {
                 .map(|lower| (lower, None)),
         }
     }
+
+    pub fn sprout_uses_groth_proofs(&self) -> bool {
+        !matches!(self, BranchId::Sprout | BranchId::Overwinter)
+    }
 }
 
 #[cfg(any(test, feature = "test-dependencies"))]

@@ -1,40 +1,12 @@
-use ff::Field;
-use rand_core::OsRng;
-use std::io;
-
 use proptest::prelude::*;
 
-use crate::{
-    consensus::{BranchId, TestNetwork},
-    constants::SPENDING_KEY_GENERATOR,
-    sapling::redjubjub::PrivateKey,
-};
-
 use super::{
-    builder::Builder,
     components::Amount,
     sighash::{signature_hash, SignableInput},
-    Transaction, TransactionData, Unauthorized,
+    Transaction,
 };
 
 use super::testing::{arb_branch_id, arb_tx};
-
-fn auth_and_freeze(
-    txdata: TransactionData<Unauthorized>,
-    branch_id: BranchId,
-) -> io::Result<Transaction> {
-    Builder::<TestNetwork, OsRng>::apply_authorization(
-        txdata,
-        #[cfg(feature = "transparent-inputs")]
-        None,
-        None,
-        #[cfg(any(feature = "nu5", feature = "zfuture"))]
-        None,
-        #[cfg(feature = "zfuture")]
-        None,
-    )
-    .freeze(branch_id)
-}
 
 #[test]
 fn tx_read_write() {
@@ -48,49 +20,6 @@ fn tx_read_write() {
     let mut encoded = Vec::with_capacity(data.len());
     tx.write(&mut encoded).unwrap();
     assert_eq!(&data[..], &encoded[..]);
-}
-
-#[test]
-fn tx_write_rejects_unexpected_joinsplit_pubkey() {
-    // Succeeds without a JoinSplit pubkey
-    assert!(auth_and_freeze(TransactionData::new(), BranchId::Canopy).is_ok());
-
-    // Fails with an unexpected JoinSplit pubkey
-    {
-        let mut tx = TransactionData::new();
-        tx.joinsplit_pubkey = Some([0; 32]);
-        assert!(auth_and_freeze(tx, BranchId::Canopy).is_err());
-    }
-}
-
-#[test]
-fn tx_write_rejects_unexpected_joinsplit_sig() {
-    // Succeeds without a JoinSplit signature
-    assert!(auth_and_freeze(TransactionData::new(), BranchId::Canopy).is_ok());
-
-    // Fails with an unexpected JoinSplit signature
-    {
-        let mut tx = TransactionData::new();
-        tx.joinsplit_sig = Some([0; 64]);
-        assert!(auth_and_freeze(tx, BranchId::Canopy).is_err());
-    }
-}
-
-#[test]
-fn tx_write_rejects_unexpected_binding_sig() {
-    // Succeeds without a binding signature
-    assert!(auth_and_freeze(TransactionData::new(), BranchId::Canopy).is_ok());
-
-    // Fails with an unexpected binding signature
-    {
-        let mut rng = OsRng;
-        let sk = PrivateKey(jubjub::Fr::random(&mut rng));
-        let sig = sk.sign(b"Foo bar", &mut rng, SPENDING_KEY_GENERATOR);
-
-        let mut tx = TransactionData::new();
-        tx.binding_sig = Some(sig);
-        assert!(auth_and_freeze(tx, BranchId::Canopy).is_err());
-    }
 }
 
 proptest! {
@@ -109,7 +38,7 @@ proptest! {
         #[cfg(feature = "zfuture")]
         assert_eq!(tx.tze_outputs, txo.tze_outputs);
         assert_eq!(tx.lock_time, txo.lock_time);
-        assert_eq!(tx.value_balance, txo.value_balance);
+        assert_eq!(tx.sapling_value_balance(), txo.sapling_value_balance());
     }
 }
 
@@ -156,7 +85,7 @@ fn zip_0143() {
         };
 
         assert_eq!(
-            signature_hash(&tx, tv.consensus_branch_id, tv.hash_type, signable_input),
+            signature_hash(&tx, tv.consensus_branch_id, tv.hash_type, signable_input).as_ref(),
             tv.sighash
         );
     }
@@ -176,7 +105,7 @@ fn zip_0243() {
         };
 
         assert_eq!(
-            signature_hash(&tx, tv.consensus_branch_id, tv.hash_type, signable_input),
+            signature_hash(&tx, tv.consensus_branch_id, tv.hash_type, signable_input).as_ref(),
             tv.sighash
         );
     }

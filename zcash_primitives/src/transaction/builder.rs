@@ -3,6 +3,7 @@
 use core::array;
 use std::error;
 use std::fmt;
+use std::io;
 use std::sync::mpsc::Sender;
 
 use rand::{rngs::OsRng, CryptoRng, RngCore};
@@ -21,11 +22,14 @@ use crate::{
     transaction::{
         components::{
             amount::{Amount, DEFAULT_FEE},
-            sapling::builder::{self as sapling, SaplingBuilder, SaplingMetadata},
-            transparent::builder::{self as transparent, TransparentBuilder},
+            sapling::{
+                self,
+                builder::{SaplingBuilder, SaplingMetadata},
+            },
+            transparent::{self, builder::TransparentBuilder, TxIn},
         },
-        signature_hash_data, Authorized, SignableInput, Transaction, TransactionData, TxVersion,
-        Unauthorized, SIGHASH_ALL,
+        signature_hash_data, SignableInput, Transaction, TransactionData, TxVersion, Unauthorized,
+        SIGHASH_ALL,
     },
     zip32::ExtendedSpendingKey,
 };
@@ -34,17 +38,14 @@ use crate::{
 use std::marker::PhantomData;
 
 #[cfg(feature = "transparent-inputs")]
-use crate::{
-    legacy::Script,
-    transaction::components::{OutPoint, TxOut},
-};
+use crate::{legacy::Script, transaction::components::transparent::TxOut};
 
 #[cfg(feature = "zfuture")]
 use crate::{
     extensions::transparent::{ExtensionTxBuilder, ToPayload},
     transaction::components::{
-        tze::builder::{self as tzebuilder, TzeBuilder, WitnessData},
-        TzeOut, TzeOutPoint,
+        tze::builder::{TzeBuilder, WitnessData},
+        tze::{self, TzeIn, TzeOut, TzeOutPoint},
     },
 };
 
@@ -58,10 +59,10 @@ pub enum Error {
     ChangeIsNegative(Amount),
     InvalidAmount,
     NoChangeAddress,
-    TransparentBuild(transparent::Error),
-    SaplingBuild(sapling::Error),
+    TransparentBuild(transparent::builder::Error),
+    SaplingBuild(sapling::builder::Error),
     #[cfg(feature = "zfuture")]
-    TzeBuild(tzebuilder::Error),
+    TzeBuild(tze::builder::Error),
 }
 
 impl fmt::Display for Error {
@@ -175,7 +176,7 @@ impl<'a, P: consensus::Parameters, R: RngCore> Builder<'a, P, R> {
             expiry_height: target_height + DEFAULT_TX_EXPIRY_DELTA,
             fee: DEFAULT_FEE,
             transparent_builder: TransparentBuilder::empty(),
-            sapling_builder: SaplingBuilder::empty(params, target_height),
+            sapling_builder: SaplingBuilder::new(params, target_height),
             change_address: None,
             #[cfg(feature = "zfuture")]
             tze_builder: TzeBuilder::empty(),
@@ -220,7 +221,7 @@ impl<'a, P: consensus::Parameters, R: RngCore> Builder<'a, P, R> {
     pub fn add_transparent_input(
         &mut self,
         sk: secp256k1::SecretKey,
-        utxo: OutPoint,
+        utxo: transparent::OutPoint,
         coin: TxOut,
     ) -> Result<(), Error> {
         self.transparent_builder
@@ -326,7 +327,7 @@ impl<'a, P: consensus::Parameters, R: RngCore> Builder<'a, P, R> {
         let (vin, vout) = self.transparent_builder.build();
 
         let mut ctx = prover.new_sapling_proving_context();
-        let (spend_descs, output_descs, tx_metadata) = self
+        let (sapling_bundle, tx_metadata) = self
             .sapling_builder
             .build(
                 prover,
@@ -350,13 +351,10 @@ impl<'a, P: consensus::Parameters, R: RngCore> Builder<'a, P, R> {
             tze_outputs,
             lock_time: 0,
             expiry_height: self.expiry_height,
-            value_balance: self.sapling_builder.value_balance(),
-            shielded_spends: spend_descs,
-            shielded_outputs: output_descs,
             joinsplits: vec![],
             joinsplit_pubkey: None,
             joinsplit_sig: None,
-            binding_sig: None,
+            sapling_bundle,
             orchard_bundle: None,
         };
 
@@ -373,9 +371,10 @@ impl<'a, P: consensus::Parameters, R: RngCore> Builder<'a, P, R> {
         ));
 
         #[cfg(feature = "transparent-inputs")]
-        let transparent_sigs = self
-            .transparent_builder
-            .create_signatures(&unauthed_tx, consensus_branch_id);
+        let transparent_sigs = Some(
+            self.transparent_builder
+                .create_signatures(&unauthed_tx, consensus_branch_id),
+        );
 
         let sapling_sigs = self
             .sapling_builder
@@ -389,26 +388,25 @@ impl<'a, P: consensus::Parameters, R: RngCore> Builder<'a, P, R> {
                 .map_err(Error::TzeBuild)?,
         );
 
-        let authorized_tx = Self::apply_authorization(
-            unauthed_tx,
-            #[cfg(feature = "transparent-inputs")]
-            Some(transparent_sigs),
-            sapling_sigs,
-            None,
-            #[cfg(feature = "zfuture")]
-            tze_witnesses,
-        );
-
         Ok((
-            authorized_tx
-                .freeze(consensus_branch_id)
-                .expect("Transaction should be complete"),
+            Self::apply_signatures(
+                consensus_branch_id,
+                unauthed_tx,
+                #[cfg(feature = "transparent-inputs")]
+                transparent_sigs,
+                sapling_sigs,
+                None,
+                #[cfg(feature = "zfuture")]
+                tze_witnesses,
+            )
+            .expect("An IO error occurred applying signatures."),
             tx_metadata,
         ))
     }
 
-    pub fn apply_authorization(
-        mut mtx: TransactionData<Unauthorized>,
+    pub fn apply_signatures(
+        consensus_branch_id: consensus::BranchId,
+        unauthed_tx: TransactionData<Unauthorized>,
         #[cfg(feature = "transparent-inputs")] transparent_sigs: Option<Vec<Script>>,
         sapling_sigs: Option<(Vec<redjubjub::Signature>, redjubjub::Signature)>,
         _orchard_auth: Option<(
@@ -416,46 +414,59 @@ impl<'a, P: consensus::Parameters, R: RngCore> Builder<'a, P, R> {
             orchard::Authorized,
         )>,
         #[cfg(feature = "zfuture")] tze_witnesses: Option<Vec<WitnessData>>,
-    ) -> TransactionData<Authorized> {
-        #[cfg(feature = "transparent-inputs")]
-        if let Some(script_sigs) = transparent_sigs {
-            for (i, sig) in script_sigs.into_iter().enumerate() {
-                mtx.vin[i].script_sig = sig;
+    ) -> io::Result<Transaction> {
+        let signed_sapling_bundle = match (unauthed_tx.sapling_bundle, sapling_sigs) {
+            (Some(bundle), Some((spend_sigs, binding_sig))) => {
+                Some(bundle.apply_signatures(spend_sigs, binding_sig))
             }
-        }
-
-        if let Some((sapling_spend_auth_sigs, sapling_binding_sig)) = sapling_sigs {
-            for (i, spend_auth_sig) in sapling_spend_auth_sigs.into_iter().enumerate() {
-                mtx.shielded_spends[i].spend_auth_sig = Some(spend_auth_sig);
+            (None, None) => None,
+            _ => {
+                panic!("Mismatch between sapling bundle and signatures.");
             }
-            mtx.binding_sig = Some(sapling_binding_sig);
-        }
+        };
 
-        #[cfg(feature = "zfuture")]
-        if let Some(tze_witnesses) = tze_witnesses {
-            for (i, payload) in tze_witnesses.into_iter().enumerate() {
-                mtx.tze_inputs[i].witness.payload = payload.0;
-            }
-        }
-
-        TransactionData {
-            version: mtx.version,
-            vin: mtx.vin,
-            vout: mtx.vout,
+        let mut authorized_tx = TransactionData {
+            version: unauthed_tx.version,
+            vin: unauthed_tx.vin,
+            vout: unauthed_tx.vout,
             #[cfg(feature = "zfuture")]
-            tze_inputs: mtx.tze_inputs,
+            tze_inputs: unauthed_tx.tze_inputs,
             #[cfg(feature = "zfuture")]
-            tze_outputs: mtx.tze_outputs,
-            lock_time: mtx.lock_time,
-            expiry_height: mtx.expiry_height,
-            value_balance: mtx.value_balance,
-            shielded_spends: mtx.shielded_spends,
-            shielded_outputs: mtx.shielded_outputs,
-            joinsplits: mtx.joinsplits,
-            joinsplit_pubkey: mtx.joinsplit_pubkey,
-            joinsplit_sig: mtx.joinsplit_sig,
-            binding_sig: mtx.binding_sig,
+            tze_outputs: unauthed_tx.tze_outputs,
+            lock_time: unauthed_tx.lock_time,
+            expiry_height: unauthed_tx.expiry_height,
+            joinsplits: unauthed_tx.joinsplits,
+            joinsplit_pubkey: unauthed_tx.joinsplit_pubkey,
+            joinsplit_sig: unauthed_tx.joinsplit_sig,
+            sapling_bundle: signed_sapling_bundle,
             orchard_bundle: None,
+        };
+
+        #[cfg(feature = "transparent-inputs")]
+        Self::apply_transparent_sigs(&mut authorized_tx.vin, transparent_sigs);
+        #[cfg(feature = "zfuture")]
+        Self::apply_tze_sigs(&mut authorized_tx.tze_inputs, tze_witnesses);
+
+        authorized_tx.freeze(consensus_branch_id)
+    }
+
+    #[cfg(feature = "transparent-inputs")]
+    pub fn apply_transparent_sigs(vin: &mut [TxIn], transparent_sigs: Option<Vec<Script>>) {
+        if let Some(script_sigs) = transparent_sigs {
+            assert!(vin.len() == script_sigs.len());
+            for (i, sig) in script_sigs.into_iter().enumerate() {
+                vin[i].script_sig = sig;
+            }
+        }
+    }
+
+    #[cfg(feature = "zfuture")]
+    pub fn apply_tze_sigs(vtzein: &mut [TzeIn], tze_witnesses: Option<Vec<WitnessData>>) {
+        if let Some(tze_witnesses) = tze_witnesses {
+            assert!(vtzein.len() == tze_witnesses.len());
+            for (i, payload) in tze_witnesses.into_iter().enumerate() {
+                vtzein[i].witness.payload = payload.0;
+            }
         }
     }
 }
@@ -465,7 +476,7 @@ impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng> ExtensionTxBuilder<'a
     for Builder<'a, P, R>
 {
     type BuildCtx = TransactionData<Unauthorized>;
-    type BuildError = tzebuilder::Error;
+    type BuildError = tze::builder::Error;
 
     fn add_tze_input<WBuilder, W: ToPayload>(
         &mut self,
@@ -475,7 +486,7 @@ impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng> ExtensionTxBuilder<'a
         witness_builder: WBuilder,
     ) -> Result<(), Self::BuildError>
     where
-        WBuilder: 'a + (FnOnce(&Self::BuildCtx) -> Result<W, tzebuilder::Error>),
+        WBuilder: 'a + (FnOnce(&Self::BuildCtx) -> Result<W, tze::builder::Error>),
     {
         self.tze_builder
             .add_input(extension_id, mode, prevout, witness_builder);
@@ -552,7 +563,7 @@ mod tests {
         sapling::{prover::mock::MockTxProver, Node, Rseed},
         transaction::components::{
             amount::{Amount, DEFAULT_FEE},
-            sapling::builder::{self as sapling},
+            sapling::builder::{self as build_s},
             transparent::builder::{self as transparent},
         },
         zip32::{ExtendedFullViewingKey, ExtendedSpendingKey},
@@ -580,7 +591,7 @@ mod tests {
         let mut builder = Builder::new(TEST_NETWORK, sapling_activation_height);
         assert_eq!(
             builder.add_sapling_output(Some(ovk), to, Amount::from_i64(-1).unwrap(), None),
-            Err(Error::SaplingBuild(sapling::Error::InvalidAmount))
+            Err(Error::SaplingBuild(build_s::Error::InvalidAmount))
         );
     }
 
@@ -601,7 +612,7 @@ mod tests {
             expiry_height: sapling_activation_height + DEFAULT_TX_EXPIRY_DELTA,
             fee: Amount::zero(),
             transparent_builder: TransparentBuilder::empty(),
-            sapling_builder: SaplingBuilder::empty(TEST_NETWORK, sapling_activation_height),
+            sapling_builder: SaplingBuilder::new(TEST_NETWORK, sapling_activation_height),
             change_address: None,
             #[cfg(feature = "zfuture")]
             tze_builder: TzeBuilder::empty(),
@@ -617,7 +628,7 @@ mod tests {
 
         let (tx, _) = builder.build(&MockTxProver).unwrap();
         // No binding signature, because only t input and outputs
-        assert!(tx.binding_sig.is_none());
+        assert!(tx.sapling_bundle.is_none());
     }
 
     #[test]
@@ -654,7 +665,7 @@ mod tests {
         // that a binding signature was attempted
         assert_eq!(
             builder.build(&MockTxProver),
-            Err(Error::SaplingBuild(sapling::Error::BindingSig))
+            Err(Error::SaplingBuild(build_s::Error::BindingSig))
         );
     }
 
@@ -804,7 +815,7 @@ mod tests {
                 .unwrap();
             assert_eq!(
                 builder.build(&MockTxProver),
-                Err(Error::SaplingBuild(sapling::Error::BindingSig))
+                Err(Error::SaplingBuild(build_s::Error::BindingSig))
             )
         }
     }

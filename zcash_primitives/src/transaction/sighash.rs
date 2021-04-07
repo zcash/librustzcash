@@ -6,7 +6,10 @@ use byteorder::{LittleEndian, WriteBytesExt};
 use ff::PrimeField;
 use group::GroupEncoding;
 
-use crate::{consensus, legacy::Script};
+use crate::{
+    consensus::{self, BranchId},
+    legacy::Script,
+};
 
 #[cfg(feature = "zfuture")]
 use crate::{
@@ -15,7 +18,10 @@ use crate::{
 };
 
 use super::{
-    components::{Amount, JsDescription, OutputDescription, SpendDescription, TxIn, TxOut},
+    components::{
+        sapling::{self, GrothProofBytes},
+        Amount, JsDescription, OutputDescription, SpendDescription, TxIn, TxOut,
+    },
     Authorization, Transaction, TransactionData, TxVersion,
 };
 
@@ -65,10 +71,6 @@ macro_rules! update_hash {
 
 fn has_overwinter_components(version: &TxVersion) -> bool {
     !matches!(version, TxVersion::Sprout(_))
-}
-
-fn has_sapling_components(version: &TxVersion) -> bool {
-    !matches!(version, TxVersion::Sprout(_) | TxVersion::Overwinter)
 }
 
 #[cfg(feature = "zfuture")]
@@ -121,13 +123,13 @@ fn single_output_hash(tx_out: &TxOut) -> Blake2bHash {
 }
 
 fn joinsplits_hash(
-    txversion: TxVersion,
+    consensus_branch_id: BranchId,
     joinsplits: &[JsDescription],
     joinsplit_pubkey: &[u8; 32],
 ) -> Blake2bHash {
     let mut data = Vec::with_capacity(
         joinsplits.len()
-            * if txversion.uses_groth_proofs() {
+            * if consensus_branch_id.sprout_uses_groth_proofs() {
                 1698 // JSDescription with Groth16 proof
             } else {
                 1802 // JSDescription with PHGR13 proof
@@ -143,7 +145,9 @@ fn joinsplits_hash(
         .hash(&data)
 }
 
-fn shielded_spends_hash(shielded_spends: &[SpendDescription]) -> Blake2bHash {
+fn shielded_spends_hash<A: sapling::Authorization<Proof = GrothProofBytes>>(
+    shielded_spends: &[SpendDescription<A>],
+) -> Blake2bHash {
     let mut data = Vec::with_capacity(shielded_spends.len() * 384);
     for s_spend in shielded_spends {
         data.extend_from_slice(&s_spend.cv.to_bytes());
@@ -158,7 +162,9 @@ fn shielded_spends_hash(shielded_spends: &[SpendDescription]) -> Blake2bHash {
         .hash(&data)
 }
 
-fn shielded_outputs_hash(shielded_outputs: &[OutputDescription]) -> Blake2bHash {
+fn shielded_outputs_hash<A: sapling::Authorization<Proof = GrothProofBytes>>(
+    shielded_outputs: &[OutputDescription<A>],
+) -> Blake2bHash {
     let mut data = Vec::with_capacity(shielded_outputs.len() * 948);
     for s_out in shielded_outputs {
         s_out.write(&mut data).unwrap();
@@ -227,7 +233,10 @@ impl<'a> SignableInput<'a> {
     }
 }
 
-pub fn signature_hash_data<A: Authorization>(
+pub fn signature_hash_data<
+    SA: sapling::Authorization<Proof = GrothProofBytes>,
+    A: Authorization<SaplingAuth = SA>,
+>(
     tx: &TransactionData<A>,
     consensus_branch_id: consensus::BranchId,
     hash_type: u32,
@@ -291,24 +300,44 @@ pub fn signature_hash_data<A: Authorization>(
         update_hash!(
             h,
             !tx.joinsplits.is_empty(),
-            joinsplits_hash(tx.version, &tx.joinsplits, &tx.joinsplit_pubkey.unwrap())
+            joinsplits_hash(
+                consensus_branch_id, 
+                &tx.joinsplits, 
+                &tx.joinsplit_pubkey.unwrap()
+            )
         );
-        if has_sapling_components(&tx.version) {
+        if tx.version.has_sapling() {
             update_hash!(
                 h,
-                !tx.shielded_spends.is_empty(),
-                shielded_spends_hash(&tx.shielded_spends)
+                !tx.sapling_bundle
+                    .as_ref()
+                    .map_or(true, |b| b.shielded_spends.is_empty()),
+                shielded_spends_hash(
+                    tx.sapling_bundle
+                        .as_ref()
+                        .unwrap()
+                        .shielded_spends
+                        .as_slice()
+                )
             );
             update_hash!(
                 h,
-                !tx.shielded_outputs.is_empty(),
-                shielded_outputs_hash(&tx.shielded_outputs)
+                !tx.sapling_bundle
+                    .as_ref()
+                    .map_or(true, |b| b.shielded_outputs.is_empty()),
+                shielded_outputs_hash(
+                    tx.sapling_bundle
+                        .as_ref()
+                        .unwrap()
+                        .shielded_outputs
+                        .as_slice()
+                )
             );
         }
         update_u32!(h, tx.lock_time, tmp);
         update_u32!(h, tx.expiry_height.into(), tmp);
-        if has_sapling_components(&tx.version) {
-            h.update(&tx.value_balance.to_i64_le_bytes());
+        if tx.version.has_sapling() {
+            h.update(&tx.sapling_value_balance().to_i64_le_bytes());
         }
         update_u32!(h, hash_type, tmp);
 

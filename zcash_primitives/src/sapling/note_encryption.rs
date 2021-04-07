@@ -17,7 +17,10 @@ use crate::{
     consensus::{self, BlockHeight, NetworkUpgrade::Canopy, ZIP212_GRACE_PERIOD},
     memo::MemoBytes,
     sapling::{keys::OutgoingViewingKey, Diversifier, Note, PaymentAddress, Rseed, SaplingIvk},
-    transaction::components::{amount::Amount, sapling::OutputDescription},
+    transaction::components::{
+        amount::Amount,
+        sapling::{self, OutputDescription},
+    },
 };
 
 pub const KDF_SAPLING_PERSONALIZATION: &[u8; 16] = b"Zcash_SaplingKDF";
@@ -383,7 +386,7 @@ pub fn try_sapling_output_recovery_with_ock<P: consensus::Parameters>(
     params: &P,
     height: BlockHeight,
     ock: &OutgoingCipherKey,
-    output: &OutputDescription,
+    output: &OutputDescription<sapling::Authorized>,
 ) -> Option<(Note, PaymentAddress, MemoBytes)> {
     let domain = SaplingDomain {
         params: params.clone(),
@@ -405,7 +408,7 @@ pub fn try_sapling_output_recovery<P: consensus::Parameters>(
     params: &P,
     height: BlockHeight,
     ovk: &OutgoingViewingKey,
-    output: &OutputDescription,
+    output: &OutputDescription<sapling::Authorized>,
 ) -> Option<(Note, PaymentAddress, MemoBytes)> {
     let domain = SaplingDomain {
         params: params.clone(),
@@ -450,7 +453,7 @@ mod tests {
         },
         transaction::components::{
             amount::Amount,
-            sapling::{CompactOutputDescription, OutputDescription},
+            sapling::{self, CompactOutputDescription, OutputDescription},
             GROTH_PROOF_SIZE,
         },
     };
@@ -462,7 +465,7 @@ mod tests {
         OutgoingViewingKey,
         OutgoingCipherKey,
         SaplingIvk,
-        OutputDescription,
+        OutputDescription<sapling::Authorized>,
     ) {
         let ivk = SaplingIvk(jubjub::Fr::random(&mut rng));
 
@@ -492,7 +495,11 @@ mod tests {
         height: BlockHeight,
         ivk: &SaplingIvk,
         mut rng: &mut R,
-    ) -> (OutgoingViewingKey, OutgoingCipherKey, OutputDescription) {
+    ) -> (
+        OutgoingViewingKey,
+        OutgoingCipherKey,
+        OutputDescription<sapling::Authorized>,
+    ) {
         let diversifier = Diversifier([0; 11]);
         let pk_d = diversifier.g_d().unwrap() * ivk.0;
         let pa = PaymentAddress::from_parts_unchecked(diversifier, pk_d);

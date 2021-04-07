@@ -1,11 +1,10 @@
 //! Types and functions for building Sapling transaction components.
 
 use std::fmt;
-use std::marker::PhantomData;
 use std::sync::mpsc::Sender;
 
 use ff::Field;
-use rand::{seq::SliceRandom, CryptoRng, RngCore};
+use rand::{seq::SliceRandom, RngCore};
 
 use crate::{
     consensus::{self, BlockHeight},
@@ -22,7 +21,10 @@ use crate::{
     },
     transaction::{
         builder::Progress,
-        components::{amount::Amount, OutputDescription, SpendDescription},
+        components::{
+            amount::Amount,
+            sapling::{Bundle, OutputDescription, SpendDescription, Unauthorized},
+        },
     },
     zip32::ExtendedSpendingKey,
 };
@@ -63,32 +65,19 @@ struct SpendDescriptionInfo {
 }
 
 #[derive(Clone)]
-pub struct SaplingOutput<P: consensus::Parameters> {
+struct SaplingOutput {
     /// `None` represents the `ovk = ⊥` case.
     ovk: Option<OutgoingViewingKey>,
     to: PaymentAddress,
     note: Note,
     memo: MemoBytes,
-    _params: PhantomData<P>,
 }
 
-impl<P: consensus::Parameters> SaplingOutput<P> {
-    pub fn new<R: RngCore + CryptoRng>(
+impl SaplingOutput {
+    fn new_internal<P: consensus::Parameters, R: RngCore>(
         params: &P,
-        target_height: BlockHeight,
         rng: &mut R,
-        ovk: Option<OutgoingViewingKey>,
-        to: PaymentAddress,
-        value: Amount,
-        memo: Option<MemoBytes>,
-    ) -> Result<Self, Error> {
-        Self::new_internal(params, target_height, rng, ovk, to, value, memo)
-    }
-
-    fn new_internal<R: RngCore>(
-        params: &P,
         target_height: BlockHeight,
-        rng: &mut R,
         ovk: Option<OutgoingViewingKey>,
         to: PaymentAddress,
         value: Amount,
@@ -113,25 +102,15 @@ impl<P: consensus::Parameters> SaplingOutput<P> {
             to,
             note,
             memo: memo.unwrap_or_else(MemoBytes::empty),
-            _params: PhantomData::default(),
         })
     }
 
-    pub fn build<Pr: TxProver, R: RngCore + CryptoRng>(
+    fn build<P: consensus::Parameters, Pr: TxProver, R: RngCore>(
         self,
         prover: &Pr,
         ctx: &mut Pr::SaplingProvingContext,
         rng: &mut R,
-    ) -> OutputDescription {
-        self.build_internal(prover, ctx, rng)
-    }
-
-    fn build_internal<Pr: TxProver, R: RngCore>(
-        self,
-        prover: &Pr,
-        ctx: &mut Pr::SaplingProvingContext,
-        rng: &mut R,
-    ) -> OutputDescription {
+    ) -> OutputDescription<Unauthorized> {
         let encryptor = sapling_note_encryption::<R, P>(
             self.ovk,
             self.note.clone(),
@@ -204,17 +183,17 @@ impl SaplingMetadata {
     }
 }
 
-pub struct SaplingBuilder<P: consensus::Parameters> {
+pub struct SaplingBuilder<P> {
     params: P,
     anchor: Option<bls12_381::Scalar>,
     target_height: BlockHeight,
     value_balance: Amount,
     spends: Vec<SpendDescriptionInfo>,
-    outputs: Vec<SaplingOutput<P>>,
+    outputs: Vec<SaplingOutput>,
 }
 
 impl<P: consensus::Parameters> SaplingBuilder<P> {
-    pub fn empty(params: P, target_height: BlockHeight) -> Self {
+    pub fn new(params: P, target_height: BlockHeight) -> Self {
         SaplingBuilder {
             params,
             anchor: None,
@@ -280,8 +259,8 @@ impl<P: consensus::Parameters> SaplingBuilder<P> {
     ) -> Result<(), Error> {
         let output = SaplingOutput::new_internal(
             &self.params,
-            self.target_height,
             &mut rng,
+            self.target_height,
             ovk,
             to,
             value,
@@ -311,14 +290,7 @@ impl<P: consensus::Parameters> SaplingBuilder<P> {
         mut rng: R,
         target_height: BlockHeight,
         progress_notifier: Option<&Sender<Progress>>,
-    ) -> Result<
-        (
-            Vec<SpendDescription>,
-            Vec<OutputDescription>,
-            SaplingMetadata,
-        ),
-        Error,
-    > {
+    ) -> Result<(Option<Bundle<Unauthorized>>, SaplingMetadata), Error> {
         // Record initial positions of spends and outputs
         let mut indexed_spends: Vec<_> = self.spends.iter().enumerate().collect();
         let mut indexed_outputs: Vec<_> = self
@@ -350,7 +322,7 @@ impl<P: consensus::Parameters> SaplingBuilder<P> {
         let mut progress = 0u32;
 
         // Create Sapling SpendDescriptions
-        let spend_descs = if !indexed_spends.is_empty() {
+        let shielded_spends: Vec<SpendDescription<Unauthorized>> = if !indexed_spends.is_empty() {
             let anchor = self
                 .anchor
                 .expect("Sapling anchor must be set if Sapling spends are present.");
@@ -397,7 +369,7 @@ impl<P: consensus::Parameters> SaplingBuilder<P> {
                         nullifier,
                         rk,
                         zkproof,
-                        spend_auth_sig: None,
+                        spend_auth_sig: (),
                     })
                 })
                 .collect::<Result<Vec<_>, Error>>()?
@@ -406,7 +378,7 @@ impl<P: consensus::Parameters> SaplingBuilder<P> {
         };
 
         // Create Sapling OutputDescriptions
-        let output_descs = indexed_outputs
+        let shielded_outputs: Vec<OutputDescription<Unauthorized>> = indexed_outputs
             .into_iter()
             .enumerate()
             .map(|(i, output)| {
@@ -414,7 +386,7 @@ impl<P: consensus::Parameters> SaplingBuilder<P> {
                     // Record the post-randomized output location
                     tx_metadata.output_indices[pos] = i;
 
-                    output.clone().build_internal(prover, ctx, &mut rng)
+                    output.clone().build::<P, _, _>(prover, ctx, &mut rng)
                 } else {
                     // This is a dummy output
                     let (dummy_to, dummy_note) = {
@@ -491,7 +463,18 @@ impl<P: consensus::Parameters> SaplingBuilder<P> {
             })
             .collect();
 
-        Ok((spend_descs, output_descs, tx_metadata))
+        let bundle = if shielded_spends.is_empty() && shielded_outputs.is_empty() {
+            None
+        } else {
+            Some(Bundle {
+                shielded_spends,
+                shielded_outputs,
+                value_balance: self.value_balance,
+                authorization: Unauthorized,
+            })
+        };
+
+        Ok((bundle, tx_metadata))
     }
 
     pub fn create_signatures<Pr: TxProver, R: RngCore>(
@@ -523,10 +506,91 @@ impl<P: consensus::Parameters> SaplingBuilder<P> {
                 .unwrap_or_default();
 
             let binding_sig = prover
-                .binding_sig(ctx, self.value_balance, &sighash_bytes)
+                .binding_sig(ctx, self.value_balance, sighash_bytes)
                 .map_err(|_| Error::BindingSig)?;
 
             Ok(Some((spend_sigs, binding_sig)))
+        }
+    }
+}
+
+#[cfg(any(test, feature = "test-dependencies"))]
+pub mod testing {
+    use proptest::collection::vec;
+    use proptest::prelude::*;
+    use rand::{rngs::StdRng, SeedableRng};
+
+    use crate::{
+        consensus::{
+            testing::{arb_branch_id, arb_height},
+            TEST_NETWORK,
+        },
+        merkle_tree::{testing::arb_commitment_tree, IncrementalWitness},
+        sapling::{
+            prover::{mock::MockTxProver, TxProver},
+            testing::{arb_node, arb_note, arb_positive_note_value},
+            Diversifier,
+        },
+        transaction::components::{
+            amount::MAX_MONEY,
+            sapling::{Authorized, Bundle},
+        },
+        zip32::testing::arb_extended_spending_key,
+    };
+
+    use super::SaplingBuilder;
+
+    prop_compose! {
+        fn arb_bundle()(n_notes in 1..30usize)(
+            extsk in arb_extended_spending_key(),
+            spendable_notes in vec(
+                arb_positive_note_value(MAX_MONEY as u64 / 10000).prop_flat_map(arb_note),
+                n_notes
+            ),
+            commitment_trees in vec(
+                arb_commitment_tree(n_notes, arb_node()).prop_map(
+                    |t| IncrementalWitness::from_tree(&t).path().unwrap()
+                ),
+                n_notes
+            ),
+            diversifiers in vec(prop::array::uniform11(any::<u8>()).prop_map(Diversifier), n_notes),
+            target_height in arb_branch_id().prop_flat_map(|b| arb_height(b, &TEST_NETWORK)),
+            rng_seed in prop::array::uniform32(any::<u8>()),
+            fake_sighash_bytes in prop::array::uniform32(any::<u8>()),
+        ) -> Bundle<Authorized> {
+            let mut builder = SaplingBuilder::new(TEST_NETWORK, target_height.unwrap());
+            let mut rng = StdRng::from_seed(rng_seed);
+
+            for ((note, path), diversifier) in spendable_notes.into_iter().zip(commitment_trees.into_iter()).zip(diversifiers.into_iter()) {
+                builder.add_spend(
+                    &mut rng,
+                    extsk.clone(),
+                    diversifier,
+                    note,
+                    path
+                ).unwrap();
+            }
+
+            let prover = MockTxProver;
+            let mut ctx = prover.new_sapling_proving_context();
+
+            let (bundle, meta) = builder.build(
+                &prover,
+                &mut ctx,
+                &mut rng,
+                target_height.unwrap(),
+                None
+            ).unwrap();
+
+            let (spend_auth_sigs, binding_sig) = builder.create_signatures(
+                &prover,
+                &mut ctx,
+                &mut rng,
+                &fake_sighash_bytes,
+                &meta
+            ).unwrap().unwrap();
+
+            bundle.unwrap().apply_signatures(spend_auth_sigs, binding_sig)
         }
     }
 }

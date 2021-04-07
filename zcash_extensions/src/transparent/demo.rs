@@ -472,8 +472,7 @@ mod tests {
         extensions::transparent::{self as tze, Extension, FromPayload, ToPayload},
         legacy::TransparentAddress,
         merkle_tree::{CommitmentTree, IncrementalWitness},
-        sapling::Node,
-        sapling::Rseed,
+        sapling::{Node, Rseed},
         transaction::{
             builder::Builder,
             components::{
@@ -606,8 +605,7 @@ mod tests {
         fn is_tze_only(&self) -> bool {
             self.tx.vin.is_empty()
                 && self.tx.vout.is_empty()
-                && self.tx.shielded_spends.is_empty()
-                && self.tx.shielded_outputs.is_empty()
+                && self.tx.sapling_bundle.is_none()
                 && self.tx.joinsplits.is_empty()
                 && self.tx.orchard_bundle.is_none()
         }
@@ -659,7 +657,8 @@ mod tests {
         };
 
         fn auth_and_freeze(tx: TransactionData<Unauthorized>) -> Transaction {
-            Builder::<FutureNetwork, OsRng>::apply_authorization(
+            Builder::<FutureNetwork, OsRng>::apply_signatures(
+                BranchId::ZFuture,
                 tx,
                 #[cfg(feature = "transparent-inputs")]
                 None,
@@ -667,7 +666,6 @@ mod tests {
                 None,
                 None,
             )
-            .freeze(BranchId::ZFuture)
             .unwrap()
         }
 
