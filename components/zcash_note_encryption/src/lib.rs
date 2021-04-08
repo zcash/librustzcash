@@ -9,7 +9,7 @@ use rand_core::RngCore;
 pub const COMPACT_NOTE_SIZE: usize = 1 + // version
     11 + // diversifier
     8  + // value
-    32; // rcv
+    32; // rseed (or rcm prior to ZIP 212)
 pub const NOTE_PLAINTEXT_SIZE: usize = COMPACT_NOTE_SIZE + 512;
 pub const OUT_PLAINTEXT_SIZE: usize = 32 + // pk_d
     32; // esk
