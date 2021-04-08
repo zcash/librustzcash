@@ -4,6 +4,7 @@ description = "APIs for creating shielded Zcash light clients"
 version = "0.5.0"
 authors = [
     "Jack Grigg <jack@z.cash>",
+    "Kris Nuttycombe <kris@electriccoin.co>"
 ]
 homepage = "https://github.com/zcash/librustzcash"
 repository = "https://github.com/zcash/librustzcash"
