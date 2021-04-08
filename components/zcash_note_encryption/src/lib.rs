@@ -268,7 +268,7 @@ impl<D: Domain> NoteEncryption<D> {
 
     /// Generates `outCiphertext` for this note.
     pub fn encrypt_outgoing_plaintext<R: RngCore>(
-        &mut self,
+        &self,
         cv: &D::ValueCommitment,
         cm: &D::NoteCommitment,
         rng: &mut R,

@@ -162,7 +162,7 @@ impl<P: consensus::Parameters> SaplingOutput<P> {
         ctx: &mut Pr::SaplingProvingContext,
         rng: &mut R,
     ) -> OutputDescription {
-        let mut encryptor = sapling_note_encryption::<R, P>(
+        let encryptor = sapling_note_encryption::<R, P>(
             self.ovk,
             self.note.clone(),
             self.to.clone(),

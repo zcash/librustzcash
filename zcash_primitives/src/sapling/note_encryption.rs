@@ -554,7 +554,7 @@ mod tests {
         let cmu = note.cmu();
 
         let ovk = OutgoingViewingKey([0; 32]);
-        let mut ne = sapling_note_encryption::<_, TestNetwork>(
+        let ne = sapling_note_encryption::<_, TestNetwork>(
             Some(ovk),
             note,
             pa,
@@ -1591,7 +1591,7 @@ mod tests {
             // Test encryption
             //
 
-            let mut ne = NoteEncryption::<SaplingDomain<TestNetwork>>::new_with_esk(
+            let ne = NoteEncryption::<SaplingDomain<TestNetwork>>::new_with_esk(
                 esk,
                 Some(ovk),
                 note,
@@ -1599,7 +1599,7 @@ mod tests {
                 MemoBytes::from_bytes(&tv.memo).unwrap(),
             );
 
-            assert_eq!(&ne.encrypt_note_plaintext().as_ref()[..], &tv.c_enc[..]);
+            assert_eq!(ne.encrypt_note_plaintext().as_ref(), &tv.c_enc[..]);
             assert_eq!(
                 &ne.encrypt_outgoing_plaintext(&cv, &cmu, &mut OsRng)[..],
                 &tv.c_out[..]

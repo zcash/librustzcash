@@ -5,7 +5,7 @@ use zcash_primitives::{
     consensus::{NetworkUpgrade::Canopy, Parameters, TestNetwork, TEST_NETWORK},
     memo::MemoBytes,
     sapling::{
-        note_encryption::{sapling_note_encryption, try_sapling_note_decryption, Memo},
+        note_encryption::{sapling_note_encryption, try_sapling_note_decryption},
         util::generate_random_rseed,
         Diversifier, PaymentAddress, SaplingIvk, ValueCommitment,
     },
@@ -38,7 +38,7 @@ fn bench_note_decryption(c: &mut Criterion) {
         let note = pa.create_note(value, rseed).unwrap();
         let cmu = note.cmu();
 
-        let mut ne =
+        let ne =
             sapling_note_encryption::<_, TestNetwork>(None, note, pa, MemoBytes::empty(), &mut rng);
         let ephemeral_key = *ne.epk();
         let enc_ciphertext = ne.encrypt_note_plaintext();
