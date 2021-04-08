@@ -79,7 +79,7 @@ impl<'a> demo::Context for Context<'a> {
         self.tx.vin.is_empty()
             && self.tx.vout.is_empty()
             && self.tx.sapling_bundle.is_none()
-            && self.tx.joinsplits.is_empty()
+            && self.tx.sprout_bundle.is_none()
             && self.tx.orchard_bundle.is_none()
     }
 

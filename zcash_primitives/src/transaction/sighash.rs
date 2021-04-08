@@ -299,12 +299,17 @@ pub fn signature_hash_data<
         }
         update_hash!(
             h,
-            !tx.joinsplits.is_empty(),
-            joinsplits_hash(
-                consensus_branch_id, 
-                &tx.joinsplits, 
-                &tx.joinsplit_pubkey.unwrap()
-            )
+            !tx.sprout_bundle
+                .as_ref()
+                .map_or(true, |b| b.joinsplits.is_empty()),
+            {
+                let bundle = tx.sprout_bundle.as_ref().unwrap();
+                joinsplits_hash(
+                    consensus_branch_id,
+                    &bundle.joinsplits,
+                    &bundle.joinsplit_pubkey,
+                )
+            }
         );
         if tx.version.has_sapling() {
             update_hash!(

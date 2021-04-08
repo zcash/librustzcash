@@ -10,6 +10,13 @@ const PHGR_PROOF_SIZE: usize = 33 + 33 + 65 + 33 + 33 + 33 + 33 + 33;
 const ZC_NUM_JS_INPUTS: usize = 2;
 const ZC_NUM_JS_OUTPUTS: usize = 2;
 
+#[derive(Debug)]
+pub struct Bundle {
+    pub joinsplits: Vec<JsDescription>,
+    pub joinsplit_pubkey: [u8; 32],
+    pub joinsplit_sig: [u8; 64],
+}
+
 #[derive(Clone)]
 pub(crate) enum SproutProof {
     Groth([u8; GROTH_PROOF_SIZE]),

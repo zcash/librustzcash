@@ -351,9 +351,7 @@ impl<'a, P: consensus::Parameters, R: RngCore> Builder<'a, P, R> {
             tze_outputs,
             lock_time: 0,
             expiry_height: self.expiry_height,
-            joinsplits: vec![],
-            joinsplit_pubkey: None,
-            joinsplit_sig: None,
+            sprout_bundle: None,
             sapling_bundle,
             orchard_bundle: None,
         };
@@ -435,9 +433,7 @@ impl<'a, P: consensus::Parameters, R: RngCore> Builder<'a, P, R> {
             tze_outputs: unauthed_tx.tze_outputs,
             lock_time: unauthed_tx.lock_time,
             expiry_height: unauthed_tx.expiry_height,
-            joinsplits: unauthed_tx.joinsplits,
-            joinsplit_pubkey: unauthed_tx.joinsplit_pubkey,
-            joinsplit_sig: unauthed_tx.joinsplit_sig,
+            sprout_bundle: unauthed_tx.sprout_bundle,
             sapling_bundle: signed_sapling_bundle,
             orchard_bundle: None,
         };

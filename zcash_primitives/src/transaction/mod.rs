@@ -15,7 +15,10 @@ use crate::{
 
 use self::{
     components::{
-        sapling, Amount, JsDescription, OutputDescription, SpendDescription, TxIn, TxOut,
+        amount::Amount,
+        sapling::{self, OutputDescription, SpendDescription},
+        sprout::{self, JsDescription},
+        transparent::{TxIn, TxOut},
     },
     sighash::{signature_hash_data, SignableInput, SIGHASH_ALL},
     util::sha256d::{HashReader, HashWriter},
@@ -243,9 +246,7 @@ pub struct TransactionData<A: Authorization> {
     pub tze_outputs: Vec<TzeOut>,
     pub lock_time: u32,
     pub expiry_height: BlockHeight,
-    pub joinsplits: Vec<JsDescription>,
-    pub joinsplit_pubkey: Option<[u8; 32]>,
-    pub joinsplit_sig: Option<[u8; 64]>,
+    pub sprout_bundle: Option<sprout::Bundle>,
     pub sapling_bundle: Option<sapling::Bundle<A::SaplingAuth>>,
     pub orchard_bundle: Option<orchard::Bundle<A::OrchardAuth, Amount>>,
 }
@@ -293,8 +294,10 @@ impl<A: Authorization> std::fmt::Debug for TransactionData<A> {
             self.sapling_bundle
                 .as_ref()
                 .map_or(&vec![], |b| &b.shielded_outputs),
-            self.joinsplits,
-            self.joinsplit_pubkey,
+            self.sprout_bundle
+                .as_ref()
+                .map_or(&vec![], |b| &b.joinsplits),
+            self.sprout_bundle.as_ref().map(|b| &b.joinsplit_pubkey),
             self.sapling_bundle.as_ref().map(|b| &b.authorization)
         )
     }
@@ -326,9 +329,7 @@ impl TransactionData<Unauthorized> {
             tze_outputs: vec![],
             lock_time: 0,
             expiry_height: 0u32.into(),
-            joinsplits: vec![],
-            joinsplit_pubkey: None,
-            joinsplit_sig: None,
+            sprout_bundle: None,
             sapling_bundle: None,
             orchard_bundle: None,
         }
@@ -344,9 +345,7 @@ impl TransactionData<Unauthorized> {
             tze_outputs: vec![],
             lock_time: 0,
             expiry_height: 0u32.into(),
-            joinsplits: vec![],
-            joinsplit_pubkey: None,
-            joinsplit_sig: None,
+            sprout_bundle: None,
             sapling_bundle: None,
             orchard_bundle: None,
         }
@@ -426,22 +425,25 @@ impl Transaction {
             (Amount::zero(), vec![], vec![])
         };
 
-        let (joinsplits, joinsplit_pubkey, joinsplit_sig) = if version.has_sprout() {
-            let jss = Vector::read(&mut reader, |r| {
+        let sprout_bundle = if version.has_sprout() {
+            let joinsplits = Vector::read(&mut reader, |r| {
                 JsDescription::read(r, version.has_sapling())
             })?;
-            let (pubkey, sig) = if !jss.is_empty() {
-                let mut joinsplit_pubkey = [0; 32];
-                let mut joinsplit_sig = [0; 64];
-                reader.read_exact(&mut joinsplit_pubkey)?;
-                reader.read_exact(&mut joinsplit_sig)?;
-                (Some(joinsplit_pubkey), Some(joinsplit_sig))
+
+            if !joinsplits.is_empty() {
+                let mut bundle = sprout::Bundle {
+                    joinsplits,
+                    joinsplit_pubkey: [0; 32],
+                    joinsplit_sig: [0; 64],
+                };
+                reader.read_exact(&mut bundle.joinsplit_pubkey)?;
+                reader.read_exact(&mut bundle.joinsplit_sig)?;
+                Some(bundle)
             } else {
-                (None, None)
-            };
-            (jss, pubkey, sig)
+                None
+            }
         } else {
-            (vec![], None, None)
+            None
         };
 
         let binding_sig = if (is_sapling_v4 || has_tze)
@@ -467,9 +469,7 @@ impl Transaction {
                 tze_outputs,
                 lock_time,
                 expiry_height,
-                joinsplits,
-                joinsplit_pubkey,
-                joinsplit_sig,
+                sprout_bundle,
                 sapling_bundle: binding_sig.map(|binding_sig| sapling::Bundle {
                     value_balance,
                     shielded_spends,
@@ -529,41 +529,16 @@ impl Transaction {
         }
 
         if self.version.has_sprout() {
-            Vector::write(&mut writer, &self.joinsplits, |w, e| e.write(w))?;
-            if !self.joinsplits.is_empty() {
-                match self.joinsplit_pubkey {
-                    Some(pubkey) => writer.write_all(&pubkey)?,
-                    None => {
-                        return Err(io::Error::new(
-                            io::ErrorKind::InvalidInput,
-                            "Missing JoinSplit pubkey",
-                        ));
-                    }
-                }
-                match self.joinsplit_sig {
-                    Some(sig) => writer.write_all(&sig)?,
-                    None => {
-                        return Err(io::Error::new(
-                            io::ErrorKind::InvalidInput,
-                            "Missing JoinSplit signature",
-                        ));
-                    }
-                }
-            }
-        }
-
-        if !self.version.has_sprout() || self.joinsplits.is_empty() {
-            if self.joinsplit_pubkey.is_some() {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidInput,
-                    "JoinSplit pubkey should not be present",
-                ));
-            }
-            if self.joinsplit_sig.is_some() {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidInput,
-                    "JoinSplit signature should not be present",
-                ));
+            Vector::write(
+                &mut writer,
+                self.sprout_bundle
+                    .as_ref()
+                    .map_or(&vec![], |b| &b.joinsplits),
+                |w, e| e.write(w),
+            )?;
+            for bundle in &self.sprout_bundle {
+                writer.write_all(&bundle.joinsplit_pubkey)?;
+                writer.write_all(&bundle.joinsplit_sig)?;
             }
         }
 
@@ -577,10 +552,12 @@ impl Transaction {
                 ));
             }
         } else {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "Binding signature should not be present",
-            ));
+            if self.sapling_bundle.is_some() {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "Binding signature should not be present",
+                ));
+            }
         }
 
         Ok(())
@@ -727,9 +704,7 @@ pub mod testing {
                 tze_outputs: if branch_id == BranchId::ZFuture { tze_outputs } else { vec![] },
                 lock_time,
                 expiry_height: expiry_height.into(),
-                joinsplits: vec![], //FIXME
-                joinsplit_pubkey: None, //FIXME
-                joinsplit_sig: None, //FIXME
+                sprout_bundle: None,
                 sapling_bundle: None, //FIXME
                 orchard_bundle: None, //FIXME
             }
@@ -750,9 +725,7 @@ pub mod testing {
                 vin, vout,
                 lock_time,
                 expiry_height: expiry_height.into(),
-                joinsplits: vec![], //FIXME
-                joinsplit_pubkey: None, //FIXME
-                joinsplit_sig: None, //FIXME
+                sprout_bundle: None,
                 sapling_bundle: None, //FIXME
                 orchard_bundle: None, //FIXME
             }
