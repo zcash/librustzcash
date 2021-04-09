@@ -587,15 +587,17 @@ impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
                 wallet::mark_transparent_utxo_spent(up, tx_ref, &utxo_outpoint)?;
             }
 
-            wallet::insert_sent_note(
-                up,
-                tx_ref,
-                sent_tx.output_index,
-                sent_tx.account,
-                sent_tx.recipient_address,
-                sent_tx.value,
-                sent_tx.memo.as_ref(),
-            )?;
+            for output in &sent_tx.outputs {
+                wallet::insert_sent_note(
+                    up,
+                    tx_ref,
+                    output.output_index,
+                    sent_tx.account,
+                    output.recipient_address,
+                    output.value,
+                    output.memo.as_ref(),
+                )?;
+            }
 
             // Return the row number of the transaction, so the caller can fetch it for sending.
             Ok(tx_ref)

@@ -163,7 +163,7 @@ pub fn init_wallet_db<P>(wdb: &WalletDb<P>) -> Result<(), rusqlite::Error> {
 /// let tsk = derive_secret_key_from_seed(&Network::TestNetwork, &seed, account, 0).unwrap();
 /// let extfvk = ExtendedFullViewingKey::from(&extsk);
 /// let taddr = derive_transparent_address_from_secret_key(&tsk);
-/// init_accounts_table(&db_data, &[&extfvk], &[&taddr]).unwrap();
+/// init_accounts_table(&db_data, &[extfvk], &[taddr]).unwrap();
 /// ```
 ///
 /// [`get_address`]: crate::wallet::get_address

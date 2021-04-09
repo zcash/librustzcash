@@ -217,6 +217,12 @@ pub struct DecryptedTransaction<'a> {
 pub struct SentTransaction<'a> {
     pub tx: &'a Transaction,
     pub created: time::OffsetDateTime,
+    pub account: AccountId,
+    pub outputs: Vec<SentTransactionOutput<'a>>,
+    pub utxos_spent: Vec<OutPoint>,
+}
+
+pub struct SentTransactionOutput<'a> {
     /// The index within the transaction that contains the recipient output.
     ///
     /// - If `recipient_address` is a Sapling address, this is an index into the Sapling
@@ -224,11 +230,9 @@ pub struct SentTransaction<'a> {
     /// - If `recipient_address` is a transparent address, this is an index into the
     ///   transparent outputs of the transaction.
     pub output_index: usize,
-    pub account: AccountId,
     pub recipient_address: &'a RecipientAddress,
     pub value: Amount,
     pub memo: Option<MemoBytes>,
-    pub utxos_spent: Vec<OutPoint>,
 }
 
 /// This trait encapsulates the write capabilities required to update stored

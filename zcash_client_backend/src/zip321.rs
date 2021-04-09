@@ -106,7 +106,7 @@ impl Payment {
 /// payment value in the request.
 #[derive(Debug, PartialEq)]
 pub struct TransactionRequest {
-    payments: Vec<Payment>,
+    pub payments: Vec<Payment>,
 }
 
 impl TransactionRequest {

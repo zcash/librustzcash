@@ -13,9 +13,12 @@ use zcash_primitives::{
 
 use crate::{
     address::RecipientAddress,
-    data_api::{error::Error, DecryptedTransaction, SentTransaction, WalletWrite},
+    data_api::{
+        error::Error, DecryptedTransaction, SentTransaction, SentTransactionOutput, WalletWrite,
+    },
     decrypt_transaction,
     wallet::{AccountId, OvkPolicy},
+    zip321::{Payment, TransactionRequest},
 };
 
 #[cfg(feature = "transparent-inputs")]
@@ -159,8 +162,37 @@ pub fn create_spend_to_address<E, N, P, D, R>(
     account: AccountId,
     extsk: &ExtendedSpendingKey,
     to: &RecipientAddress,
-    value: Amount,
+    amount: Amount,
     memo: Option<MemoBytes>,
+    ovk_policy: OvkPolicy,
+) -> Result<R, E>
+where
+    E: From<Error<N>>,
+    P: consensus::Parameters + Clone,
+    R: Copy + Debug,
+    D: WalletWrite<Error = E, TxRef = R>,
+{
+    let req = TransactionRequest {
+        payments: vec![Payment {
+            recipient_address: to.clone(),
+            amount,
+            memo,
+            label: None,
+            message: None,
+            other_params: vec![],
+        }],
+    };
+
+    spend(wallet_db, params, prover, account, extsk, &req, ovk_policy)
+}
+
+pub fn spend<E, N, P, D, R>(
+    wallet_db: &mut D,
+    params: &P,
+    prover: impl TxProver,
+    account: AccountId,
+    extsk: &ExtendedSpendingKey,
+    request: &TransactionRequest,
     ovk_policy: OvkPolicy,
 ) -> Result<R, E>
 where
@@ -188,7 +220,7 @@ where
         .get_target_and_anchor_heights()
         .and_then(|x| x.ok_or_else(|| Error::ScanRequired.into()))?;
 
-    let target_value = value + DEFAULT_FEE;
+    let target_value = request.payments.iter().map(|p| p.amount).sum::<Amount>() + DEFAULT_FEE;
     let spendable_notes =
         wallet_db.select_unspent_sapling_notes(account, target_value, anchor_height)?;
 
@@ -202,6 +234,7 @@ where
     }
 
     // Create the transaction
+    let consensus_branch_id = BranchId::for_height(params, height);
     let mut builder = Builder::new(params.clone(), height);
     for selected in spendable_notes {
         let from = extfvk
@@ -221,55 +254,61 @@ where
             .map_err(Error::Builder)?;
     }
 
-    match to {
-        RecipientAddress::Shielded(to) => {
-            memo.clone().ok_or(Error::MemoRequired).and_then(|memo| {
-                builder
-                    .add_sapling_output(ovk, to.clone(), value, memo)
-                    .map_err(Error::Builder)
-            })
-        }
-        RecipientAddress::Transparent(to) => {
-            if memo.is_some() {
-                Err(Error::MemoForbidden)
-            } else {
-                builder
-                    .add_transparent_output(&to, value)
-                    .map_err(Error::Builder)
+    for payment in &request.payments {
+        match &payment.recipient_address {
+            RecipientAddress::Shielded(to) => builder
+                .add_sapling_output(
+                    ovk,
+                    to.clone(),
+                    payment.amount,
+                    payment.memo.clone().unwrap_or_else(MemoBytes::empty),
+                )
+                .map_err(Error::Builder),
+            RecipientAddress::Transparent(to) => {
+                if payment.memo.is_some() {
+                    Err(Error::MemoForbidden)
+                } else {
+                    builder
+                        .add_transparent_output(&to, payment.amount)
+                        .map_err(Error::Builder)
+                }
             }
-        }
-    }?;
+        }?
+    }
 
-    let consensus_branch_id = BranchId::for_height(params, height);
     let (tx, tx_metadata) = builder
         .build(consensus_branch_id, &prover)
         .map_err(Error::Builder)?;
 
-    let output_index = match to {
-        // Sapling outputs are shuffled, so we need to look up where the output ended up.
-        RecipientAddress::Shielded(_) => match tx_metadata.output_index(0) {
-            Some(idx) => idx,
-            None => panic!("Output 0 should exist in the transaction"),
-        },
-        RecipientAddress::Transparent(addr) => {
-            let script = addr.script();
-            tx.vout
-                .iter()
-                .enumerate()
-                .find(|(_, tx_out)| tx_out.script_pubkey == script)
-                .map(|(index, _)| index)
-                .expect("we sent to this address")
+    let sent_outputs = request.payments.iter().enumerate().map(|(i, payment)| {
+        let idx = match &payment.recipient_address {
+            // Sapling outputs are shuffled, so we need to look up where the output ended up.
+            RecipientAddress::Shielded(_) =>
+                tx_metadata.output_index(i).expect("An output should exist in the transaction for each shielded payment."),
+            RecipientAddress::Transparent(addr) => {
+                let script = addr.script();
+                tx.vout
+                    .iter()
+                    .enumerate()
+                    .find(|(_, tx_out)| tx_out.script_pubkey == script)
+                    .map(|(index, _)| index)
+                    .expect("An output should exist in the transaction for each transparent payment.")
+            }
+        };
+
+        SentTransactionOutput {
+            output_index: idx,
+            recipient_address: &payment.recipient_address,
+            value: payment.amount,
+            memo: payment.memo.clone()
         }
-    };
+    }).collect();
 
     wallet_db.store_sent_tx(&SentTransaction {
         tx: &tx,
         created: time::OffsetDateTime::now_utc(),
-        output_index,
+        outputs: sent_outputs,
         account,
-        recipient_address: to,
-        value,
-        memo,
         utxos_spent: vec![],
     })
 }
@@ -353,11 +392,13 @@ where
     wallet_db.store_sent_tx(&SentTransaction {
         tx: &tx,
         created: time::OffsetDateTime::now_utc(),
-        output_index,
         account,
-        recipient_address: &RecipientAddress::Shielded(z_address),
-        value: amount_to_shield,
-        memo: Some(memo.clone()),
+        outputs: vec![SentTransactionOutput {
+            output_index,
+            recipient_address: &RecipientAddress::Shielded(z_address),
+            value: amount_to_shield,
+            memo: Some(memo.clone()),
+        }],
         utxos_spent: utxos.iter().map(|utxo| utxo.outpoint.clone()).collect(),
     })
 }
