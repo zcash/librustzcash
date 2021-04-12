@@ -14,8 +14,9 @@ pub const COMPACT_NOTE_SIZE: usize = 1 + // version
 pub const NOTE_PLAINTEXT_SIZE: usize = COMPACT_NOTE_SIZE + 512;
 pub const OUT_PLAINTEXT_SIZE: usize = 32 + // pk_d
     32; // esk
-pub const ENC_CIPHERTEXT_SIZE: usize = NOTE_PLAINTEXT_SIZE + 16;
-pub const OUT_CIPHERTEXT_SIZE: usize = OUT_PLAINTEXT_SIZE + 16;
+pub const AEAD_TAG_SIZE: usize = 16;
+pub const ENC_CIPHERTEXT_SIZE: usize = NOTE_PLAINTEXT_SIZE + AEAD_TAG_SIZE;
+pub const OUT_CIPHERTEXT_SIZE: usize = OUT_PLAINTEXT_SIZE + AEAD_TAG_SIZE;
 
 /// A symmetric key that can be used to recover a single Sapling or Orchard output.
 pub struct OutgoingCipherKey(pub [u8; 32]);
@@ -159,7 +160,8 @@ pub trait ShieldedOutput<'a, D: Domain> {
 /// enforces that fresh ephemeral keys are used for every note, and that the ciphertexts are
 /// consistent with each other.
 ///
-/// Implements section 4.17.1 of the Zcash Protocol Specification.
+/// Implements section 4.19 of the Zcash Protocol Specification.
+/// <https://zips.z.cash/protocol/nu5.pdf#saplingandorchardinband>
 /// NB: the example code is only covering the pre-Canopy case.
 ///
 /// # Examples
@@ -248,7 +250,7 @@ impl<D: Domain> NoteEncryption<D> {
         &self.esk
     }
 
-    /// Exposes the ephemeral public key being used to encrypt this note.
+    /// Exposes the encoding of the ephemeral public key being used to encrypt this note.
     pub fn epk(&self) -> &D::EphemeralPublicKey {
         &self.epk
     }
