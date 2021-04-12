@@ -5,6 +5,7 @@
 
 use crypto_api_chachapoly::{ChaCha20Ietf, ChachaPolyIetf};
 use rand_core::RngCore;
+use subtle::{ConstantTimeEq, Choice};
 
 pub const COMPACT_NOTE_SIZE: usize = 1 + // version
     11 + // diversifier
@@ -31,13 +32,17 @@ impl AsRef<[u8]> for OutgoingCipherKey {
     }
 }
 
-//FIXME: use constant-time checks for equality
-#[derive(Eq, PartialEq)]
 pub struct EphemeralKeyBytes(pub [u8; 32]);
 
 impl From<[u8; 32]> for EphemeralKeyBytes {
     fn from(value: [u8; 32]) -> EphemeralKeyBytes {
         EphemeralKeyBytes(value)
+    }
+}
+
+impl ConstantTimeEq for EphemeralKeyBytes {
+    fn ct_eq(&self, other: &Self) -> Choice {
+        self.0.ct_eq(&other.0)
     }
 }
 
@@ -368,7 +373,7 @@ fn check_note_validity<D: Domain>(
     } else {
         let epk_bytes = D::epk_bytes(epk);
         D::check_epk_bytes(&note, |derived_esk| {
-            if D::epk_bytes(&D::ka_derive_public(&note, &derived_esk)) == epk_bytes {
+            if D::epk_bytes(&D::ka_derive_public(&note, &derived_esk)).ct_eq(&epk_bytes).into() {
                 NoteValidity::Valid
             } else {
                 NoteValidity::Invalid
