@@ -166,8 +166,8 @@ pub trait ShieldedOutput<D: Domain> {
 /// enforces that fresh ephemeral keys are used for every note, and that the ciphertexts are
 /// consistent with each other.
 ///
-/// Implements section 4.19 of the Zcash Protocol Specification.
-/// <https://zips.z.cash/protocol/nu5.pdf#saplingandorchardinband>
+/// Implements section 4.19 of the
+/// [Zcash Protocol Specification](https://zips.z.cash/protocol/nu5.pdf#saplingandorchardinband)
 /// NB: the example code is only covering the pre-Canopy case.
 ///
 /// # Examples
@@ -180,11 +180,12 @@ pub trait ShieldedOutput<D: Domain> {
 /// use ff::Field;
 /// use rand_core::OsRng;
 /// use zcash_primitives::{
-///     consensus::TestNetwork,
+///     consensus::{TEST_NETWORK, TestNetwork, NetworkUpgrade, Parameters},
 ///     memo::MemoBytes,
 ///     sapling::{
 ///         keys::{OutgoingViewingKey, prf_expand},
-///         note_encryption::{sapling_note_encryption},
+///         note_encryption::sapling_note_encryption,
+///         util::generate_random_rseed,
 ///         Diversifier, PaymentAddress, Rseed, ValueCommitment
 ///     },
 /// };
@@ -202,8 +203,9 @@ pub trait ShieldedOutput<D: Domain> {
 ///     value,
 ///     randomness: rcv.clone(),
 /// };
-/// let rcm = jubjub::Fr::random(&mut rng);
-/// let note = to.create_note(value, Rseed::BeforeZip212(rcm)).unwrap();
+/// let height = TEST_NETWORK.activation_height(NetworkUpgrade::Canopy).unwrap();
+/// let rseed = generate_random_rseed(&TEST_NETWORK, height, &mut rng);
+/// let note = to.create_note(value, rseed).unwrap();
 /// let cmu = note.cmu();
 ///
 /// let mut enc = sapling_note_encryption::<_, TestNetwork>(ovk, note, to, MemoBytes::empty(), &mut rng);
@@ -322,7 +324,8 @@ impl<D: Domain> NoteEncryption<D> {
 /// If successful, the corresponding Sapling note and memo are returned, along with the
 /// `PaymentAddress` to which the note was sent.
 ///
-/// Implements section 4.17.2 of the Zcash Protocol Specification.
+/// Implements section 4.19.2 of the
+/// [Zcash Protocol Specification](https://zips.z.cash/protocol/nu5.pdf#decryptivk)
 pub fn try_note_decryption<D: Domain, Output: ShieldedOutput<D>>(
     domain: &D,
     ivk: &D::IncomingViewingKey,
@@ -431,7 +434,8 @@ pub fn try_compact_note_decryption<D: Domain, Output: ShieldedOutput<D>>(
 /// If successful, the corresponding Sapling note and memo are returned, along with the
 /// `PaymentAddress` to which the note was sent.
 ///
-/// Implements part of section 4.17.3 of the Zcash Protocol Specification.
+/// Implements part of section 4.19.3 of the
+/// [Zcash Protocol Specification](https://zips.z.cash/protocol/nu5.pdf#decryptovk)
 /// For decryption using a Full Viewing Key see [`try_sapling_output_recovery`].
 pub fn try_output_recovery_with_ock<D: Domain, Output: ShieldedOutput<D>>(
     domain: &D,
