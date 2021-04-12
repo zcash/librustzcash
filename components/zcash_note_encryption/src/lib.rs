@@ -35,6 +35,12 @@ impl AsRef<[u8]> for OutgoingCipherKey {
 
 pub struct EphemeralKeyBytes(pub [u8; 32]);
 
+impl AsRef<[u8]> for EphemeralKeyBytes {
+    fn as_ref(&self) -> &[u8] {
+        &self.0
+    }
+}
+
 impl From<[u8; 32]> for EphemeralKeyBytes {
     fn from(value: [u8; 32]) -> EphemeralKeyBytes {
         EphemeralKeyBytes(value)
@@ -90,7 +96,7 @@ pub trait Domain {
         epk: &Self::EphemeralPublicKey,
     ) -> Self::SharedSecret;
 
-    fn kdf(secret: Self::SharedSecret, epk: &Self::EphemeralPublicKey) -> Self::SymmetricKey;
+    fn kdf(secret: Self::SharedSecret, ephemeral_key: &EphemeralKeyBytes) -> Self::SymmetricKey;
 
     // for right now, we just need `recipient` to get `d`; in the future when we
     // can get that from a Sapling note, the recipient parameter will be able
@@ -101,11 +107,11 @@ pub trait Domain {
         memo: &Self::Memo,
     ) -> NotePlaintextBytes;
 
-    fn get_ock(
+    fn derive_ock(
         ovk: &Self::OutgoingViewingKey,
         cv: &Self::ValueCommitment,
         cm: &Self::NoteCommitment,
-        epk: &Self::EphemeralPublicKey,
+        ephemeral_key: &EphemeralKeyBytes,
     ) -> OutgoingCipherKey;
 
     fn outgoing_plaintext_bytes(
@@ -227,7 +233,9 @@ impl<D: Domain> NoteEncryption<D> {
         Self::new_with_esk(esk, ovk, note, to, memo)
     }
 
-    /// For use only with Sapling.
+    /// For use only with Sapling. This method is preserved in order that test code
+    /// be able to generate pre-ZIP-212 ciphertexts so that tests can continue to
+    /// cover pre-ZIP-212 transaction decryption.
     pub fn new_with_esk(
         esk: D::EphemeralSecretKey,
         ovk: Option<D::OutgoingViewingKey>,
@@ -259,7 +267,7 @@ impl<D: Domain> NoteEncryption<D> {
     pub fn encrypt_note_plaintext(&self) -> [u8; ENC_CIPHERTEXT_SIZE] {
         let pk_d = D::get_pk_d(&self.note);
         let shared_secret = D::ka_agree_enc(&self.esk, &pk_d);
-        let key = D::kdf(shared_secret, &self.epk);
+        let key = D::kdf(shared_secret, &D::epk_bytes(&self.epk));
         let input = D::note_plaintext_bytes(&self.note, &self.to, &self.memo);
 
         let mut output = [0u8; ENC_CIPHERTEXT_SIZE];
@@ -281,7 +289,7 @@ impl<D: Domain> NoteEncryption<D> {
         rng: &mut R,
     ) -> [u8; OUT_CIPHERTEXT_SIZE] {
         let (ock, input) = if let Some(ovk) = &self.ovk {
-            let ock = D::get_ock(ovk, &cv, &cm, &self.epk);
+            let ock = D::derive_ock(ovk, &cv, &cm, &D::epk_bytes(&self.epk));
             let input = D::outgoing_plaintext_bytes(&self.note, &self.esk);
 
             (ock, input)
@@ -323,7 +331,7 @@ pub fn try_note_decryption<D: Domain, Output: ShieldedOutput<D>>(
     assert_eq!(output.enc_ciphertext().len(), ENC_CIPHERTEXT_SIZE);
 
     let shared_secret = D::ka_agree_dec(ivk, output.epk());
-    let key = D::kdf(shared_secret, output.epk());
+    let key = D::kdf(shared_secret, &D::epk_bytes(output.epk()));
 
     let mut plaintext = [0; ENC_CIPHERTEXT_SIZE];
     assert_eq!(
@@ -407,7 +415,7 @@ pub fn try_compact_note_decryption<D: Domain, Output: ShieldedOutput<D>>(
     assert_eq!(output.enc_ciphertext().len(), COMPACT_NOTE_SIZE);
 
     let shared_secret = D::ka_agree_dec(&ivk, output.epk());
-    let key = D::kdf(shared_secret, output.epk());
+    let key = D::kdf(shared_secret, &D::epk_bytes(output.epk()));
 
     // Start from block 1 to skip over Poly1305 keying output
     let mut plaintext = [0; COMPACT_NOTE_SIZE];
@@ -446,7 +454,7 @@ pub fn try_output_recovery_with_ock<D: Domain, Output: ShieldedOutput<D>>(
     let esk = D::extract_esk(&op)?;
 
     let shared_secret = D::ka_agree_enc(&esk, &pk_d);
-    let key = D::kdf(shared_secret, output.epk());
+    let key = D::kdf(shared_secret, &D::epk_bytes(output.epk()));
 
     let mut plaintext = [0; ENC_CIPHERTEXT_SIZE];
     assert_eq!(

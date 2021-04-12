@@ -182,7 +182,6 @@ impl<P: consensus::Parameters> SaplingOutput<P> {
 
         let enc_ciphertext = encryptor.encrypt_note_plaintext();
         let out_ciphertext = encryptor.encrypt_outgoing_plaintext(&cv, &cmu, rng);
-
         let ephemeral_key = *encryptor.epk();
 
         OutputDescription {

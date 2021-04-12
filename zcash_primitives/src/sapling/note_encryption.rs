@@ -38,13 +38,13 @@ pub fn sapling_ka_agree(esk: &jubjub::Fr, pk_d: &jubjub::ExtendedPoint) -> jubju
 /// Sapling KDF for note encryption.
 ///
 /// Implements section 5.4.4.4 of the Zcash Protocol Specification.
-fn kdf_sapling(dhsecret: jubjub::SubgroupPoint, epk: &jubjub::ExtendedPoint) -> Blake2bHash {
+fn kdf_sapling(dhsecret: jubjub::SubgroupPoint, ephemeral_key: &EphemeralKeyBytes) -> Blake2bHash {
     Blake2bParams::new()
         .hash_length(32)
         .personal(KDF_SAPLING_PERSONALIZATION)
         .to_state()
         .update(&dhsecret.to_bytes())
-        .update(&epk.to_bytes())
+        .update(ephemeral_key.as_ref())
         .finalize()
 }
 
@@ -55,7 +55,7 @@ pub fn prf_ock(
     ovk: &OutgoingViewingKey,
     cv: &jubjub::ExtendedPoint,
     cmu: &bls12_381::Scalar,
-    epk: &jubjub::ExtendedPoint,
+    ephemeral_key: &EphemeralKeyBytes,
 ) -> OutgoingCipherKey {
     OutgoingCipherKey(
         Blake2bParams::new()
@@ -65,12 +65,16 @@ pub fn prf_ock(
             .update(&ovk.0)
             .update(&cv.to_bytes())
             .update(&cmu.to_repr())
-            .update(&epk.to_bytes())
+            .update(ephemeral_key.as_ref())
             .finalize()
             .as_bytes()
             .try_into()
             .unwrap(),
     )
+}
+
+fn epk_bytes(epk: &jubjub::ExtendedPoint) -> EphemeralKeyBytes {
+    EphemeralKeyBytes(epk.to_bytes())
 }
 
 fn sapling_parse_note_plaintext_without_memo<F, P: consensus::Parameters>(
@@ -164,7 +168,7 @@ impl<P: consensus::Parameters> Domain for SaplingDomain<P> {
     /// Sapling KDF for note encryption.
     ///
     /// Implements section 5.4.4.4 of the Zcash Protocol Specification.
-    fn kdf(dhsecret: jubjub::SubgroupPoint, epk: &jubjub::ExtendedPoint) -> Blake2bHash {
+    fn kdf(dhsecret: jubjub::SubgroupPoint, epk: &EphemeralKeyBytes) -> Blake2bHash {
         kdf_sapling(dhsecret, epk)
     }
 
@@ -199,11 +203,11 @@ impl<P: consensus::Parameters> Domain for SaplingDomain<P> {
         NotePlaintextBytes(input)
     }
 
-    fn get_ock(
+    fn derive_ock(
         ovk: &Self::OutgoingViewingKey,
         cv: &Self::ValueCommitment,
         cmu: &Self::NoteCommitment,
-        epk: &Self::EphemeralPublicKey,
+        epk: &EphemeralKeyBytes,
     ) -> OutgoingCipherKey {
         prf_ock(ovk, cv, cmu, epk)
     }
@@ -220,7 +224,7 @@ impl<P: consensus::Parameters> Domain for SaplingDomain<P> {
     }
 
     fn epk_bytes(epk: &Self::EphemeralPublicKey) -> EphemeralKeyBytes {
-        EphemeralKeyBytes(epk.to_bytes())
+        epk_bytes(epk)
     }
 
     fn check_epk_bytes<F: FnOnce(&Self::EphemeralSecretKey) -> NoteValidity>(
@@ -412,7 +416,12 @@ pub fn try_sapling_output_recovery<P: consensus::Parameters, Output: SaplingShie
     try_sapling_output_recovery_with_ock(
         params,
         height,
-        &prf_ock(&ovk, &cv, output.cmu(), output.epk()),
+        &prf_ock(
+            &ovk,
+            &cv,
+            output.cmu(),
+            &SaplingDomain::<P>::epk_bytes(output.epk()),
+        ),
         output,
         out_ciphertext,
     )
@@ -434,7 +443,7 @@ mod tests {
     };
 
     use super::{
-        kdf_sapling, prf_ock, sapling_ka_agree, sapling_note_encryption,
+        epk_bytes, kdf_sapling, prf_ock, sapling_ka_agree, sapling_note_encryption,
         try_sapling_compact_note_decryption, try_sapling_note_decryption,
         try_sapling_output_recovery, try_sapling_output_recovery_with_ock, SaplingDomain,
     };
@@ -533,13 +542,13 @@ mod tests {
             MemoBytes::empty(),
             &mut rng,
         );
-        let ephemeral_key = *ne.epk();
-        let ock = prf_ock(&ovk, &cv, &cmu, &ephemeral_key);
+        let epk = *ne.epk();
+        let ock = prf_ock(&ovk, &cv, &cmu, &epk_bytes(&epk));
 
         let output = OutputDescription {
             cv,
             cmu,
-            ephemeral_key,
+            ephemeral_key: epk,
             enc_ciphertext: ne.encrypt_note_plaintext(),
             out_ciphertext: ne.encrypt_outgoing_plaintext(&cv, &cmu, &mut rng),
             zkproof: [0u8; GROTH_PROOF_SIZE],
@@ -557,7 +566,7 @@ mod tests {
         out_ciphertext: &[u8; OUT_CIPHERTEXT_SIZE],
         modify_plaintext: impl Fn(&mut [u8; NOTE_PLAINTEXT_SIZE]),
     ) {
-        let ock = prf_ock(&ovk, &cv, &cmu, &epk);
+        let ock = prf_ock(&ovk, &cv, &cmu, &epk_bytes(epk));
 
         let mut op = [0; OUT_CIPHERTEXT_SIZE];
         assert_eq!(
@@ -572,7 +581,7 @@ mod tests {
         let esk = jubjub::Fr::from_repr(op[32..OUT_PLAINTEXT_SIZE].try_into().unwrap()).unwrap();
 
         let shared_secret = sapling_ka_agree(&esk, &pk_d.into());
-        let key = kdf_sapling(shared_secret, &epk);
+        let key = kdf_sapling(shared_secret, &epk_bytes(&epk));
 
         let mut plaintext = {
             let mut buf = [0; ENC_CIPHERTEXT_SIZE];
@@ -1403,11 +1412,11 @@ mod tests {
             let shared_secret = sapling_ka_agree(&esk, &pk_d.into());
             assert_eq!(shared_secret.to_bytes(), tv.shared_secret);
 
-            let k_enc = kdf_sapling(shared_secret, &epk);
+            let k_enc = kdf_sapling(shared_secret, &epk_bytes(&epk));
             assert_eq!(k_enc.as_bytes(), tv.k_enc);
 
             let ovk = OutgoingViewingKey(tv.ovk);
-            let ock = prf_ock(&ovk, &cv, &cmu, &epk);
+            let ock = prf_ock(&ovk, &cv, &cmu, &epk_bytes(&epk));
             assert_eq!(ock.as_ref(), tv.ock);
 
             let to = PaymentAddress::from_parts(Diversifier(tv.default_d), pk_d).unwrap();
