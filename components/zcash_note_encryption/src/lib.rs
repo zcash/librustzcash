@@ -458,6 +458,9 @@ pub fn try_output_recovery_with_ock<D: Domain, Output: ShieldedOutput<D>>(
     let esk = D::extract_esk(&op)?;
 
     let shared_secret = D::ka_agree_enc(&esk, &pk_d);
+    // The small-order point check at the point of output parsing rejects
+    // non-canonical encodings, so reencoding here for the KDF should
+    // be okay.
     let key = D::kdf(shared_secret, &D::epk_bytes(output.epk()));
 
     let mut plaintext = [0; ENC_CIPHERTEXT_SIZE];
