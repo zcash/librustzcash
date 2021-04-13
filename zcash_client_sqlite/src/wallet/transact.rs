@@ -634,9 +634,7 @@ mod tests {
                 &network,
                 sapling_activation_height(),
                 &extfvk.fvk.ovk,
-                &output.cv,
                 output,
-                &output.out_ciphertext,
             )
         };
 

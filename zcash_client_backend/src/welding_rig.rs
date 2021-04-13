@@ -4,11 +4,12 @@ use ff::PrimeField;
 use std::collections::HashSet;
 use std::convert::TryFrom;
 use subtle::{ConditionallySelectable, ConstantTimeEq, CtOption};
+use zcash_note_encryption::ShieldedOutput;
 use zcash_primitives::{
     consensus::{self, BlockHeight},
     merkle_tree::{CommitmentTree, IncrementalWitness},
     sapling::{
-        note_encryption::{try_sapling_compact_note_decryption, SaplingShieldedOutput},
+        note_encryption::{try_sapling_compact_note_decryption, SaplingDomain},
         Node, Note, Nullifier, PaymentAddress, SaplingIvk,
     },
     transaction::{components::sapling::CompactOutputDescription, TxId},
@@ -107,7 +108,7 @@ pub trait ScanningKey {
 
     /// Attempts to decrypt a Sapling note and payment address
     /// from the specified ciphertext using this scanning key.
-    fn try_decryption<P: consensus::Parameters, Output: SaplingShieldedOutput<P>>(
+    fn try_decryption<P: consensus::Parameters, Output: ShieldedOutput<SaplingDomain<P>>>(
         &self,
         params: &P,
         height: BlockHeight,
@@ -129,7 +130,7 @@ pub trait ScanningKey {
 impl ScanningKey for ExtendedFullViewingKey {
     type Nf = Nullifier;
 
-    fn try_decryption<P: consensus::Parameters, Output: SaplingShieldedOutput<P>>(
+    fn try_decryption<P: consensus::Parameters, Output: ShieldedOutput<SaplingDomain<P>>>(
         &self,
         params: &P,
         height: BlockHeight,
@@ -150,7 +151,7 @@ impl ScanningKey for ExtendedFullViewingKey {
 impl ScanningKey for SaplingIvk {
     type Nf = ();
 
-    fn try_decryption<P: consensus::Parameters, Output: SaplingShieldedOutput<P>>(
+    fn try_decryption<P: consensus::Parameters, Output: ShieldedOutput<SaplingDomain<P>>>(
         &self,
         params: &P,
         height: BlockHeight,

@@ -17,7 +17,10 @@ use crate::{
     consensus::{self, BlockHeight, NetworkUpgrade::Canopy, ZIP212_GRACE_PERIOD},
     memo::MemoBytes,
     sapling::{keys::OutgoingViewingKey, Diversifier, Note, PaymentAddress, Rseed, SaplingIvk},
-    transaction::components::amount::Amount,
+    transaction::components::{
+        amount::Amount,
+        sapling::OutputDescription
+    }
 };
 
 pub const KDF_SAPLING_PERSONALIZATION: &[u8; 16] = b"Zcash_SaplingKDF";
@@ -294,12 +297,6 @@ impl<P: consensus::Parameters> Domain for SaplingDomain<P> {
     }
 }
 
-pub trait SaplingShieldedOutput<P: consensus::Parameters>:
-    ShieldedOutput<SaplingDomain<P>>
-{
-    fn cmu(&self) -> &bls12_381::Scalar;
-}
-
 /// Creates a new encryption context for the given note.
 ///
 /// Setting `ovk` to `None` represents the `ovk = ⊥` case, where the note cannot be
@@ -341,7 +338,7 @@ pub fn plaintext_version_is_valid<P: consensus::Parameters>(
     }
 }
 
-pub fn try_sapling_note_decryption<P: consensus::Parameters, Output: SaplingShieldedOutput<P>>(
+pub fn try_sapling_note_decryption<P: consensus::Parameters, Output: ShieldedOutput<SaplingDomain<P>>>(
     params: &P,
     height: BlockHeight,
     ivk: &SaplingIvk,
@@ -356,7 +353,7 @@ pub fn try_sapling_note_decryption<P: consensus::Parameters, Output: SaplingShie
 
 pub fn try_sapling_compact_note_decryption<
     P: consensus::Parameters,
-    Output: SaplingShieldedOutput<P>,
+    Output: ShieldedOutput<SaplingDomain<P>>,
 >(
     params: &P,
     height: BlockHeight,
@@ -377,24 +374,22 @@ pub fn try_sapling_compact_note_decryption<
 /// If successful, the corresponding Sapling note and memo are returned, along with the
 /// `PaymentAddress` to which the note was sent.
 ///
-/// Implements part of section 4.17.3 of the Zcash Protocol Specification.
+/// Implements part of section 4.19.3 of the Zcash Protocol Specification.
 /// For decryption using a Full Viewing Key see [`try_sapling_output_recovery`].
 pub fn try_sapling_output_recovery_with_ock<
     P: consensus::Parameters,
-    Output: SaplingShieldedOutput<P>,
 >(
     params: &P,
     height: BlockHeight,
     ock: &OutgoingCipherKey,
-    output: &Output,
-    out_ciphertext: &[u8],
+    output: &OutputDescription,
 ) -> Option<(Note, PaymentAddress, MemoBytes)> {
     let domain = SaplingDomain {
         params: params.clone(),
         height,
     };
 
-    try_output_recovery_with_ock(&domain, ock, output, out_ciphertext)
+    try_output_recovery_with_ock(&domain, ock, output, &output.out_ciphertext)
 }
 
 /// Recovery of the full note plaintext by the sender.
@@ -403,27 +398,24 @@ pub fn try_sapling_output_recovery_with_ock<
 /// If successful, the corresponding Sapling note and memo are returned, along with the
 /// `PaymentAddress` to which the note was sent.
 ///
-/// Implements section 4.17.3 of the Zcash Protocol Specification.
+/// Implements section 4.19.3 of the Zcash Protocol Specification.
 #[allow(clippy::too_many_arguments)]
-pub fn try_sapling_output_recovery<P: consensus::Parameters, Output: SaplingShieldedOutput<P>>(
+pub fn try_sapling_output_recovery<P: consensus::Parameters>(
     params: &P,
     height: BlockHeight,
     ovk: &OutgoingViewingKey,
-    cv: &jubjub::ExtendedPoint,
-    output: &Output,
-    out_ciphertext: &[u8],
+    output: &OutputDescription,
 ) -> Option<(Note, PaymentAddress, MemoBytes)> {
     try_sapling_output_recovery_with_ock(
         params,
         height,
         &prf_ock(
             &ovk,
-            &cv,
-            output.cmu(),
-            &SaplingDomain::<P>::epk_bytes(output.epk()),
+            &output.cv,
+            &output.cmu,
+            &epk_bytes(&output.ephemeral_key),
         ),
         output,
-        out_ciphertext,
     )
 }
 
@@ -493,9 +485,7 @@ mod tests {
             &TEST_NETWORK,
             height,
             &ovk,
-            &output.cv,
             &output,
-            &output.out_ciphertext,
         );
 
         let ock_output_recovery = try_sapling_output_recovery_with_ock(
@@ -503,7 +493,6 @@ mod tests {
             height,
             &ock,
             &output,
-            &output.out_ciphertext,
         );
         assert!(ovk_output_recovery.is_some());
         assert!(ock_output_recovery.is_some());
@@ -993,9 +982,7 @@ mod tests {
                     &TEST_NETWORK,
                     height,
                     &ovk,
-                    &output.cv,
                     &output,
-                    &output.out_ciphertext
                 ),
                 None
             );
@@ -1019,7 +1006,6 @@ mod tests {
                     height,
                     &OutgoingCipherKey([0u8; 32]),
                     &output,
-                    &output.out_ciphertext
                 ),
                 None
             );
@@ -1035,16 +1021,16 @@ mod tests {
         ];
 
         for &height in heights.iter() {
-            let (ovk, _, _, output) = random_enc_ciphertext(height, &mut rng);
+            let (ovk, _, _, mut output) = random_enc_ciphertext(height, &mut rng);
+            output.cv = jubjub::ExtendedPoint::random(&mut rng);
+
 
             assert_eq!(
                 try_sapling_output_recovery(
                     &TEST_NETWORK,
                     height,
                     &ovk,
-                    &jubjub::ExtendedPoint::random(&mut rng),
                     &output,
-                    &output.out_ciphertext
                 ),
                 None
             );
@@ -1068,9 +1054,7 @@ mod tests {
                     &TEST_NETWORK,
                     height,
                     &ovk,
-                    &output.cv,
                     &output,
-                    &output.out_ciphertext
                 ),
                 None
             );
@@ -1081,7 +1065,6 @@ mod tests {
                     height,
                     &ock,
                     &output,
-                    &output.out_ciphertext
                 ),
                 None
             );
@@ -1105,9 +1088,7 @@ mod tests {
                     &TEST_NETWORK,
                     height,
                     &ovk,
-                    &output.cv,
                     &output,
-                    &output.out_ciphertext
                 ),
                 None
             );
@@ -1118,7 +1099,6 @@ mod tests {
                     height,
                     &ock,
                     &output,
-                    &output.out_ciphertext
                 ),
                 None
             );
@@ -1142,9 +1122,7 @@ mod tests {
                     &TEST_NETWORK,
                     height,
                     &ovk,
-                    &output.cv,
                     &output,
-                    &output.out_ciphertext
                 ),
                 None
             );
@@ -1154,7 +1132,6 @@ mod tests {
                     height,
                     &ock,
                     &output,
-                    &output.out_ciphertext
                 ),
                 None
             );
@@ -1178,9 +1155,7 @@ mod tests {
                     &TEST_NETWORK,
                     height,
                     &ovk,
-                    &output.cv,
                     &output,
-                    &output.out_ciphertext
                 ),
                 None
             );
@@ -1190,7 +1165,6 @@ mod tests {
                     height,
                     &ock,
                     &output,
-                    &output.out_ciphertext
                 ),
                 None
             );
@@ -1225,9 +1199,7 @@ mod tests {
                     &TEST_NETWORK,
                     height,
                     &ovk,
-                    &output.cv,
                     &output,
-                    &output.out_ciphertext
                 ),
                 None
             );
@@ -1237,7 +1209,6 @@ mod tests {
                     height,
                     &ock,
                     &output,
-                    &output.out_ciphertext
                 ),
                 None
             );
@@ -1269,9 +1240,7 @@ mod tests {
                     &TEST_NETWORK,
                     height,
                     &ovk,
-                    &output.cv,
                     &output,
-                    &output.out_ciphertext
                 ),
                 None
             );
@@ -1281,7 +1250,6 @@ mod tests {
                     height,
                     &ock,
                     &output,
-                    &output.out_ciphertext
                 ),
                 None
             );
@@ -1313,9 +1281,7 @@ mod tests {
                     &TEST_NETWORK,
                     height,
                     &ovk,
-                    &output.cv,
                     &output,
-                    &output.out_ciphertext
                 ),
                 None
             );
@@ -1325,7 +1291,6 @@ mod tests {
                     height,
                     &ock,
                     &output,
-                    &output.out_ciphertext
                 ),
                 None
             );
@@ -1349,9 +1314,7 @@ mod tests {
                     &TEST_NETWORK,
                     height,
                     &ovk,
-                    &output.cv,
                     &output,
-                    &output.out_ciphertext
                 ),
                 None
             );
@@ -1361,7 +1324,6 @@ mod tests {
                     height,
                     &ock,
                     &output,
-                    &output.out_ciphertext
                 ),
                 None
             );
@@ -1463,9 +1425,7 @@ mod tests {
                 &TEST_NETWORK,
                 height,
                 &ovk,
-                &output.cv,
                 &output,
-                &output.out_ciphertext,
             ) {
                 Some((decrypted_note, decrypted_to, decrypted_memo)) => {
                     assert_eq!(decrypted_note, note);

@@ -56,9 +56,7 @@ pub fn decrypt_transaction<P: consensus::Parameters>(
                         params,
                         height,
                         &ovk,
-                        &output.cv,
                         output,
-                        &output.out_ciphertext,
                     ) {
                         Some(ret) => (ret, true),
                         None => continue,

@@ -8,7 +8,7 @@ use zcash_note_encryption::ShieldedOutput;
 use crate::{
     consensus,
     sapling::{
-        note_encryption::{SaplingDomain, SaplingShieldedOutput},
+        note_encryption::{SaplingDomain},
         redjubjub::{PublicKey, Signature},
         Nullifier,
     },
@@ -132,12 +132,6 @@ impl<P: consensus::Parameters> ShieldedOutput<SaplingDomain<P>> for OutputDescri
     }
 }
 
-impl<P: consensus::Parameters> SaplingShieldedOutput<P> for OutputDescription {
-    fn cmu(&self) -> &bls12_381::Scalar {
-        &self.cmu
-    }
-}
-
 impl std::fmt::Debug for OutputDescription {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
         write!(
@@ -247,11 +241,5 @@ impl<P: consensus::Parameters> ShieldedOutput<SaplingDomain<P>> for CompactOutpu
 
     fn enc_ciphertext(&self) -> &[u8] {
         &self.enc_ciphertext
-    }
-}
-
-impl<P: consensus::Parameters> SaplingShieldedOutput<P> for CompactOutputDescription {
-    fn cmu(&self) -> &bls12_381::Scalar {
-        &self.cmu
     }
 }
