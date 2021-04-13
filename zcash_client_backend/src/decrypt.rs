@@ -52,12 +52,7 @@ pub fn decrypt_transaction<P: consensus::Parameters>(
             let ((note, to, memo), outgoing) =
                 match try_sapling_note_decryption(params, height, &ivk, output) {
                     Some(ret) => (ret, false),
-                    None => match try_sapling_output_recovery(
-                        params,
-                        height,
-                        &ovk,
-                        output,
-                    ) {
+                    None => match try_sapling_output_recovery(params, height, &ovk, output) {
                         Some(ret) => (ret, true),
                         None => continue,
                     },

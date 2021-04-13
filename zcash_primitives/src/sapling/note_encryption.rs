@@ -17,10 +17,7 @@ use crate::{
     consensus::{self, BlockHeight, NetworkUpgrade::Canopy, ZIP212_GRACE_PERIOD},
     memo::MemoBytes,
     sapling::{keys::OutgoingViewingKey, Diversifier, Note, PaymentAddress, Rseed, SaplingIvk},
-    transaction::components::{
-        amount::Amount,
-        sapling::OutputDescription
-    }
+    transaction::components::{amount::Amount, sapling::OutputDescription},
 };
 
 pub const KDF_SAPLING_PERSONALIZATION: &[u8; 16] = b"Zcash_SaplingKDF";
@@ -338,7 +335,10 @@ pub fn plaintext_version_is_valid<P: consensus::Parameters>(
     }
 }
 
-pub fn try_sapling_note_decryption<P: consensus::Parameters, Output: ShieldedOutput<SaplingDomain<P>>>(
+pub fn try_sapling_note_decryption<
+    P: consensus::Parameters,
+    Output: ShieldedOutput<SaplingDomain<P>>,
+>(
     params: &P,
     height: BlockHeight,
     ivk: &SaplingIvk,
@@ -376,9 +376,7 @@ pub fn try_sapling_compact_note_decryption<
 ///
 /// Implements part of section 4.19.3 of the Zcash Protocol Specification.
 /// For decryption using a Full Viewing Key see [`try_sapling_output_recovery`].
-pub fn try_sapling_output_recovery_with_ock<
-    P: consensus::Parameters,
->(
+pub fn try_sapling_output_recovery_with_ock<P: consensus::Parameters>(
     params: &P,
     height: BlockHeight,
     ock: &OutgoingCipherKey,
@@ -481,19 +479,10 @@ mod tests {
         )
         .is_some());
 
-        let ovk_output_recovery = try_sapling_output_recovery(
-            &TEST_NETWORK,
-            height,
-            &ovk,
-            &output,
-        );
+        let ovk_output_recovery = try_sapling_output_recovery(&TEST_NETWORK, height, &ovk, &output);
 
-        let ock_output_recovery = try_sapling_output_recovery_with_ock(
-            &TEST_NETWORK,
-            height,
-            &ock,
-            &output,
-        );
+        let ock_output_recovery =
+            try_sapling_output_recovery_with_ock(&TEST_NETWORK, height, &ock, &output);
         assert!(ovk_output_recovery.is_some());
         assert!(ock_output_recovery.is_some());
         assert_eq!(ovk_output_recovery, ock_output_recovery);
@@ -978,12 +967,7 @@ mod tests {
 
             ovk.0[0] ^= 0xff;
             assert_eq!(
-                try_sapling_output_recovery(
-                    &TEST_NETWORK,
-                    height,
-                    &ovk,
-                    &output,
-                ),
+                try_sapling_output_recovery(&TEST_NETWORK, height, &ovk, &output,),
                 None
             );
         }
@@ -1024,14 +1008,8 @@ mod tests {
             let (ovk, _, _, mut output) = random_enc_ciphertext(height, &mut rng);
             output.cv = jubjub::ExtendedPoint::random(&mut rng);
 
-
             assert_eq!(
-                try_sapling_output_recovery(
-                    &TEST_NETWORK,
-                    height,
-                    &ovk,
-                    &output,
-                ),
+                try_sapling_output_recovery(&TEST_NETWORK, height, &ovk, &output,),
                 None
             );
         }
@@ -1050,22 +1028,12 @@ mod tests {
             output.cmu = bls12_381::Scalar::random(&mut rng);
 
             assert_eq!(
-                try_sapling_output_recovery(
-                    &TEST_NETWORK,
-                    height,
-                    &ovk,
-                    &output,
-                ),
+                try_sapling_output_recovery(&TEST_NETWORK, height, &ovk, &output,),
                 None
             );
 
             assert_eq!(
-                try_sapling_output_recovery_with_ock(
-                    &TEST_NETWORK,
-                    height,
-                    &ock,
-                    &output,
-                ),
+                try_sapling_output_recovery_with_ock(&TEST_NETWORK, height, &ock, &output,),
                 None
             );
         }
@@ -1084,22 +1052,12 @@ mod tests {
             output.ephemeral_key = jubjub::ExtendedPoint::random(&mut rng);
 
             assert_eq!(
-                try_sapling_output_recovery(
-                    &TEST_NETWORK,
-                    height,
-                    &ovk,
-                    &output,
-                ),
+                try_sapling_output_recovery(&TEST_NETWORK, height, &ovk, &output,),
                 None
             );
 
             assert_eq!(
-                try_sapling_output_recovery_with_ock(
-                    &TEST_NETWORK,
-                    height,
-                    &ock,
-                    &output,
-                ),
+                try_sapling_output_recovery_with_ock(&TEST_NETWORK, height, &ock, &output,),
                 None
             );
         }
@@ -1118,21 +1076,11 @@ mod tests {
 
             output.enc_ciphertext[ENC_CIPHERTEXT_SIZE - 1] ^= 0xff;
             assert_eq!(
-                try_sapling_output_recovery(
-                    &TEST_NETWORK,
-                    height,
-                    &ovk,
-                    &output,
-                ),
+                try_sapling_output_recovery(&TEST_NETWORK, height, &ovk, &output,),
                 None
             );
             assert_eq!(
-                try_sapling_output_recovery_with_ock(
-                    &TEST_NETWORK,
-                    height,
-                    &ock,
-                    &output,
-                ),
+                try_sapling_output_recovery_with_ock(&TEST_NETWORK, height, &ock, &output,),
                 None
             );
         }
@@ -1151,21 +1099,11 @@ mod tests {
 
             output.out_ciphertext[OUT_CIPHERTEXT_SIZE - 1] ^= 0xff;
             assert_eq!(
-                try_sapling_output_recovery(
-                    &TEST_NETWORK,
-                    height,
-                    &ovk,
-                    &output,
-                ),
+                try_sapling_output_recovery(&TEST_NETWORK, height, &ovk, &output,),
                 None
             );
             assert_eq!(
-                try_sapling_output_recovery_with_ock(
-                    &TEST_NETWORK,
-                    height,
-                    &ock,
-                    &output,
-                ),
+                try_sapling_output_recovery_with_ock(&TEST_NETWORK, height, &ock, &output,),
                 None
             );
         }
@@ -1195,21 +1133,11 @@ mod tests {
                 |pt| pt[0] = leadbyte,
             );
             assert_eq!(
-                try_sapling_output_recovery(
-                    &TEST_NETWORK,
-                    height,
-                    &ovk,
-                    &output,
-                ),
+                try_sapling_output_recovery(&TEST_NETWORK, height, &ovk, &output,),
                 None
             );
             assert_eq!(
-                try_sapling_output_recovery_with_ock(
-                    &TEST_NETWORK,
-                    height,
-                    &ock,
-                    &output,
-                ),
+                try_sapling_output_recovery_with_ock(&TEST_NETWORK, height, &ock, &output,),
                 None
             );
         }
@@ -1236,21 +1164,11 @@ mod tests {
                 |pt| pt[1..12].copy_from_slice(&find_invalid_diversifier().0),
             );
             assert_eq!(
-                try_sapling_output_recovery(
-                    &TEST_NETWORK,
-                    height,
-                    &ovk,
-                    &output,
-                ),
+                try_sapling_output_recovery(&TEST_NETWORK, height, &ovk, &output,),
                 None
             );
             assert_eq!(
-                try_sapling_output_recovery_with_ock(
-                    &TEST_NETWORK,
-                    height,
-                    &ock,
-                    &output,
-                ),
+                try_sapling_output_recovery_with_ock(&TEST_NETWORK, height, &ock, &output,),
                 None
             );
         }
@@ -1277,21 +1195,11 @@ mod tests {
                 |pt| pt[1..12].copy_from_slice(&find_valid_diversifier().0),
             );
             assert_eq!(
-                try_sapling_output_recovery(
-                    &TEST_NETWORK,
-                    height,
-                    &ovk,
-                    &output,
-                ),
+                try_sapling_output_recovery(&TEST_NETWORK, height, &ovk, &output,),
                 None
             );
             assert_eq!(
-                try_sapling_output_recovery_with_ock(
-                    &TEST_NETWORK,
-                    height,
-                    &ock,
-                    &output,
-                ),
+                try_sapling_output_recovery_with_ock(&TEST_NETWORK, height, &ock, &output,),
                 None
             );
         }
@@ -1310,21 +1218,11 @@ mod tests {
             let (ovk, ock, output) = random_enc_ciphertext_with(height, &ivk, &mut rng);
 
             assert_eq!(
-                try_sapling_output_recovery(
-                    &TEST_NETWORK,
-                    height,
-                    &ovk,
-                    &output,
-                ),
+                try_sapling_output_recovery(&TEST_NETWORK, height, &ovk, &output,),
                 None
             );
             assert_eq!(
-                try_sapling_output_recovery_with_ock(
-                    &TEST_NETWORK,
-                    height,
-                    &ock,
-                    &output,
-                ),
+                try_sapling_output_recovery_with_ock(&TEST_NETWORK, height, &ock, &output,),
                 None
             );
         }
@@ -1421,12 +1319,7 @@ mod tests {
                 None => panic!("Compact note decryption failed"),
             }
 
-            match try_sapling_output_recovery(
-                &TEST_NETWORK,
-                height,
-                &ovk,
-                &output,
-            ) {
+            match try_sapling_output_recovery(&TEST_NETWORK, height, &ovk, &output) {
                 Some((decrypted_note, decrypted_to, decrypted_memo)) => {
                     assert_eq!(decrypted_note, note);
                     assert_eq!(decrypted_to, to);

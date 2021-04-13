@@ -8,7 +8,7 @@ use zcash_note_encryption::ShieldedOutput;
 use crate::{
     consensus,
     sapling::{
-        note_encryption::{SaplingDomain},
+        note_encryption::SaplingDomain,
         redjubjub::{PublicKey, Signature},
         Nullifier,
     },
