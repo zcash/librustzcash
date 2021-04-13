@@ -4,7 +4,7 @@ use std::fmt;
 
 use crate::{
     legacy::TransparentAddress,
-    transaction::components::{amount::Amount, TxIn, TxOut},
+    transaction::components::{amount::Amount, transparent, TxIn, TxOut},
 };
 
 #[cfg(feature = "transparent-inputs")]
@@ -128,18 +128,25 @@ impl TransparentBuilder {
                 .sum::<Option<Amount>>()?
     }
 
-    pub fn build(&self) -> (Vec<TxIn>, Vec<TxOut>) {
+    pub fn build(&self) -> Option<transparent::Bundle<transparent::Unauthorized>> {
         #[cfg(feature = "transparent-inputs")]
-        let vin = self
+        let vin: Vec<TxIn<transparent::Unauthorized>> = self
             .inputs
             .iter()
             .map(|i| TxIn::new(i.utxo.clone()))
             .collect();
 
         #[cfg(not(feature = "transparent-inputs"))]
-        let vin = vec![];
+        let vin: Vec<TxIn<transparent::Unauthorized>> = vec![];
 
-        (vin, self.vout.clone())
+        if vin.is_empty() && self.vout.is_empty() {
+            None
+        } else {
+            Some(transparent::Bundle {
+                vin,
+                vout: self.vout.clone(),
+            })
+        }
     }
 
     #[cfg(feature = "transparent-inputs")]
@@ -147,29 +154,40 @@ impl TransparentBuilder {
         self,
         mtx: &TransactionData<Unauthorized>,
         consensus_branch_id: consensus::BranchId,
-    ) -> Vec<Script> {
-        self.inputs
-            .iter()
-            .enumerate()
-            .map(|(i, info)| {
-                let mut sighash = [0u8; 32];
-                sighash.copy_from_slice(&signature_hash_data(
-                    mtx,
-                    consensus_branch_id,
-                    SIGHASH_ALL,
-                    SignableInput::transparent(i, &info.coin.script_pubkey, info.coin.value),
-                ));
+    ) -> Option<Vec<Script>> {
+        if self.inputs.is_empty() && self.vout.is_empty() {
+            None
+        } else {
+            Some(
+                self.inputs
+                    .iter()
+                    .enumerate()
+                    .map(|(i, info)| {
+                        let mut sighash = [0u8; 32];
+                        sighash.copy_from_slice(&signature_hash_data(
+                            mtx,
+                            consensus_branch_id,
+                            SIGHASH_ALL,
+                            SignableInput::transparent(
+                                i,
+                                &info.coin.script_pubkey,
+                                info.coin.value,
+                            ),
+                        ));
 
-                let msg = secp256k1::Message::from_slice(sighash.as_ref()).expect("32 bytes");
-                let sig = self.secp.sign(&msg, &info.sk);
+                        let msg =
+                            secp256k1::Message::from_slice(sighash.as_ref()).expect("32 bytes");
+                        let sig = self.secp.sign(&msg, &info.sk);
 
-                // Signature has to have "SIGHASH_ALL" appended to it
-                let mut sig_bytes: Vec<u8> = sig.serialize_der()[..].to_vec();
-                sig_bytes.extend(&[SIGHASH_ALL as u8]);
+                        // Signature has to have "SIGHASH_ALL" appended to it
+                        let mut sig_bytes: Vec<u8> = sig.serialize_der()[..].to_vec();
+                        sig_bytes.extend(&[SIGHASH_ALL as u8]);
 
-                // P2PKH scriptSig
-                Script::default() << &sig_bytes[..] << &info.pubkey[..]
-            })
-            .collect()
+                        // P2PKH scriptSig
+                        Script::default() << &sig_bytes[..] << &info.pubkey[..]
+                    })
+                    .collect(),
+            )
+        }
     }
 }

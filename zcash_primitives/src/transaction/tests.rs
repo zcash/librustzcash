@@ -31,13 +31,12 @@ proptest! {
         let txo = Transaction::read(&txn_bytes[..]).unwrap();
 
         assert_eq!(tx.version, txo.version);
-        assert_eq!(tx.vin, txo.vin);
-        assert_eq!(tx.vout, txo.vout);
         #[cfg(feature = "zfuture")]
         assert_eq!(tx.tze_inputs, txo.tze_inputs);
         #[cfg(feature = "zfuture")]
         assert_eq!(tx.tze_outputs, txo.tze_outputs);
         assert_eq!(tx.lock_time, txo.lock_time);
+        assert_eq!(tx.transparent_bundle, txo.transparent_bundle);
         assert_eq!(tx.sapling_value_balance(), txo.sapling_value_balance());
     }
 }

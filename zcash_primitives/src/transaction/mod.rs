@@ -10,7 +10,7 @@ use orchard;
 use crate::{
     consensus::{BlockHeight, BranchId},
     sapling::redjubjub,
-    serialize::Vector,
+    serialize::{CompactSize, Vector},
 };
 
 use self::{
@@ -18,7 +18,7 @@ use self::{
         amount::Amount,
         sapling::{self, OutputDescription, SpendDescription},
         sprout::{self, JsDescription},
-        transparent::{TxIn, TxOut},
+        transparent::{self, TxIn, TxOut},
     },
     sighash::{signature_hash_data, SignableInput, SIGHASH_ALL},
     util::sha256d::{HashReader, HashWriter},
@@ -197,6 +197,7 @@ impl TxVersion {
 
 /// Authorization state for a bundle of transaction data.
 pub trait Authorization {
+    type TransparentAuth: transparent::Authorization;
     type SaplingAuth: sapling::Authorization;
     type OrchardAuth: orchard::bundle::Authorization;
 }
@@ -204,6 +205,7 @@ pub trait Authorization {
 pub struct Authorized;
 
 impl Authorization for Authorized {
+    type TransparentAuth = transparent::Authorized;
     type SaplingAuth = sapling::Authorized;
     type OrchardAuth = orchard::bundle::Authorized;
 }
@@ -211,6 +213,7 @@ impl Authorization for Authorized {
 pub struct Unauthorized;
 
 impl Authorization for Unauthorized {
+    type TransparentAuth = transparent::Unauthorized;
     type SaplingAuth = sapling::Unauthorized;
     type OrchardAuth = orchard::builder::Unauthorized;
 }
@@ -236,16 +239,24 @@ impl PartialEq for Transaction {
     }
 }
 
+impl Transaction {
+    pub fn sapling_value_balance(&self) -> Amount {
+        self.data
+            .sapling_bundle
+            .as_ref()
+            .map_or(Amount::zero(), |b| b.value_balance)
+    }
+}
+
 pub struct TransactionData<A: Authorization> {
     pub version: TxVersion,
-    pub vin: Vec<TxIn>,
-    pub vout: Vec<TxOut>,
     #[cfg(feature = "zfuture")]
     pub tze_inputs: Vec<TzeIn>,
     #[cfg(feature = "zfuture")]
     pub tze_outputs: Vec<TzeOut>,
     pub lock_time: u32,
     pub expiry_height: BlockHeight,
+    pub transparent_bundle: Option<transparent::Bundle<A::TransparentAuth>>,
     pub sprout_bundle: Option<sprout::Bundle>,
     pub sapling_bundle: Option<sapling::Bundle<A::SaplingAuth>>,
     pub orchard_bundle: Option<orchard::Bundle<A::OrchardAuth, Amount>>,
@@ -268,8 +279,10 @@ impl<A: Authorization> std::fmt::Debug for TransactionData<A> {
                 joinsplit_pubkey = {:?},
                 binding_sig = {:?})",
             self.version,
-            self.vin,
-            self.vout,
+            self.transparent_bundle.as_ref().map_or(&vec![], |b| &b.vin),
+            self.transparent_bundle
+                .as_ref()
+                .map_or(&vec![], |b| &b.vout),
             {
                 #[cfg(feature = "zfuture")]
                 {
@@ -321,14 +334,13 @@ impl TransactionData<Unauthorized> {
     pub fn new() -> Self {
         TransactionData {
             version: TxVersion::Sapling,
-            vin: vec![],
-            vout: vec![],
             #[cfg(feature = "zfuture")]
             tze_inputs: vec![],
             #[cfg(feature = "zfuture")]
             tze_outputs: vec![],
             lock_time: 0,
             expiry_height: 0u32.into(),
+            transparent_bundle: None,
             sprout_bundle: None,
             sapling_bundle: None,
             orchard_bundle: None,
@@ -339,12 +351,11 @@ impl TransactionData<Unauthorized> {
     pub fn zfuture() -> Self {
         TransactionData {
             version: TxVersion::ZFuture,
-            vin: vec![],
-            vout: vec![],
             tze_inputs: vec![],
             tze_outputs: vec![],
             lock_time: 0,
             expiry_height: 0u32.into(),
+            transparent_bundle: None,
             sprout_bundle: None,
             sapling_bundle: None,
             orchard_bundle: None,
@@ -374,13 +385,6 @@ impl Transaction {
         self.txid
     }
 
-    fn read_amount<R: Read>(mut reader: R) -> io::Result<Amount> {
-        let mut tmp = [0; 8];
-        reader.read_exact(&mut tmp)?;
-        Amount::from_i64_le_bytes(tmp)
-            .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "valueBalance out of range"))
-    }
-
     pub fn read<R: Read>(reader: R) -> io::Result<Self> {
         let mut reader = HashReader::new(reader);
 
@@ -393,8 +397,7 @@ impl Transaction {
         #[cfg(not(feature = "zfuture"))]
         let has_tze = false;
 
-        let vin = Vector::read(&mut reader, TxIn::read)?;
-        let vout = Vector::read(&mut reader, TxOut::read)?;
+        let transparent_bundle = Self::read_transparent(&mut reader)?;
 
         #[cfg(feature = "zfuture")]
         let (tze_inputs, tze_outputs) = if has_tze {
@@ -461,14 +464,13 @@ impl Transaction {
             txid: TxId(txid),
             data: TransactionData {
                 version,
-                vin,
-                vout,
                 #[cfg(feature = "zfuture")]
                 tze_inputs,
                 #[cfg(feature = "zfuture")]
                 tze_outputs,
                 lock_time,
                 expiry_height,
+                transparent_bundle,
                 sprout_bundle,
                 sapling_bundle: binding_sig.map(|binding_sig| sapling::Bundle {
                     value_balance,
@@ -479,6 +481,25 @@ impl Transaction {
                 orchard_bundle: None,
             },
         })
+    }
+
+    fn read_transparent<R: Read>(
+        mut reader: R,
+    ) -> io::Result<Option<transparent::Bundle<transparent::Authorized>>> {
+        let vin = Vector::read(&mut reader, TxIn::read)?;
+        let vout = Vector::read(&mut reader, TxOut::read)?;
+        Ok(if vin.is_empty() && vout.is_empty() {
+            None
+        } else {
+            Some(transparent::Bundle { vin, vout })
+        })
+    }
+
+    fn read_amount<R: Read>(mut reader: R) -> io::Result<Amount> {
+        let mut tmp = [0; 8];
+        reader.read_exact(&mut tmp)?;
+        Amount::from_i64_le_bytes(tmp)
+            .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "valueBalance out of range"))
     }
 
     pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
@@ -492,8 +513,8 @@ impl Transaction {
         #[cfg(not(feature = "zfuture"))]
         let has_tze = false;
 
-        Vector::write(&mut writer, &self.vin, |w, e| e.write(w))?;
-        Vector::write(&mut writer, &self.vout, |w, e| e.write(w))?;
+        self.write_transparent(&mut writer)?;
+
         #[cfg(feature = "zfuture")]
         if has_tze {
             Vector::write(&mut writer, &self.tze_inputs, |w, e| e.write(w))?;
@@ -526,14 +547,17 @@ impl Transaction {
                     .map_or(&[], |b| &b.shielded_outputs),
                 |w, e| e.write(w),
             )?;
+        } else if self.sapling_bundle.is_some() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "Sapling components may not be present if Sapling is not active.",
+            ));
         }
 
         if self.version.has_sprout() {
             Vector::write(
                 &mut writer,
-                self.sprout_bundle
-                    .as_ref()
-                    .map_or(&vec![], |b| &b.joinsplits),
+                self.sprout_bundle.as_ref().map_or(&[], |b| &b.joinsplits),
                 |w, e| e.write(w),
             )?;
             for bundle in &self.sprout_bundle {
@@ -545,21 +569,28 @@ impl Transaction {
         if self.version.has_sapling() {
             if let Some(bundle) = self.sapling_bundle.as_ref() {
                 bundle.authorization.binding_sig.write(&mut writer)?;
-            } else {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidInput,
-                    "Missing binding signature",
-                ));
             }
-        } else {
-            if self.sapling_bundle.is_some() {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidInput,
-                    "Binding signature should not be present",
-                ));
-            }
+        } else if self.sapling_bundle.is_some() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "Binding signature should not be present",
+            ));
         }
 
+        Ok(())
+    }
+
+    pub fn write_transparent<W: Write>(&self, mut writer: W) -> io::Result<()> {
+        match &self.transparent_bundle {
+            Some(bundle) => {
+                Vector::write(&mut writer, &bundle.vin, |w, e| e.write(w))?;
+                Vector::write(&mut writer, &bundle.vout, |w, e| e.write(w))?;
+            }
+            None => {
+                CompactSize::write(&mut writer, 0)?;
+                CompactSize::write(&mut writer, 0)?;
+            }
+        }
         Ok(())
     }
 }
@@ -570,62 +601,23 @@ pub mod testing {
     use proptest::prelude::*;
     use proptest::sample::select;
 
-    use crate::{consensus::BranchId, legacy::Script};
+    use crate::consensus::BranchId;
 
     #[cfg(feature = "zfuture")]
     use crate::extensions::transparent as tze;
 
     use super::{
-        components::{amount::MAX_MONEY, Amount, OutPoint, TxIn, TxOut},
+        components::{
+            amount::testing::arb_nonnegative_amount, transparent::testing as transparent,
+        },
         Authorized, Transaction, TransactionData, TxId, TxVersion,
     };
 
     #[cfg(feature = "zfuture")]
     use super::components::{TzeIn, TzeOut, TzeOutPoint};
 
-    pub const VALID_OPCODES: [u8; 8] = [
-        0x00, // OP_FALSE,
-        0x51, // OP_1,
-        0x52, // OP_2,
-        0x53, // OP_3,
-        0xac, // OP_CHECKSIG,
-        0x63, // OP_IF,
-        0x65, // OP_VERIF,
-        0x6a, // OP_RETURN,
-    ];
-
     pub fn arb_txid() -> impl Strategy<Value = TxId> {
         prop::array::uniform32(any::<u8>()).prop_map(TxId::from_bytes)
-    }
-
-    prop_compose! {
-        pub fn arb_outpoint()(hash in prop::array::uniform32(1u8..), n in 1..100u32) -> OutPoint {
-            OutPoint::new(hash, n)
-        }
-    }
-
-    prop_compose! {
-        pub fn arb_script()(v in vec(select(&VALID_OPCODES[..]), 1..256)) -> Script {
-            Script(v)
-        }
-    }
-
-    prop_compose! {
-        pub fn arb_txin()(prevout in arb_outpoint(), script_sig in arb_script(), sequence in any::<u32>()) -> TxIn {
-            TxIn { prevout, script_sig, sequence }
-        }
-    }
-
-    prop_compose! {
-        pub fn arb_amount()(value in 0..MAX_MONEY) -> Amount {
-            Amount::from_i64(value).unwrap()
-        }
-    }
-
-    prop_compose! {
-        pub fn arb_txout()(value in arb_amount(), script_pubkey in arb_script()) -> TxOut {
-            TxOut { value, script_pubkey }
-        }
     }
 
     #[cfg(feature = "zfuture")]
@@ -658,7 +650,7 @@ pub mod testing {
 
     #[cfg(feature = "zfuture")]
     prop_compose! {
-        fn arb_tzeout()(value in arb_amount(), precondition in arb_precondition()) -> TzeOut {
+        fn arb_tzeout()(value in arb_nonnegative_amount(), precondition in arb_precondition()) -> TzeOut {
             TzeOut { value, precondition }
         }
     }
@@ -690,8 +682,7 @@ pub mod testing {
     prop_compose! {
         pub fn arb_txdata(branch_id: BranchId)(
             version in tx_versions(branch_id),
-            vin in vec(arb_txin(), 0..10),
-            vout in vec(arb_txout(), 0..10),
+            transparent_bundle in transparent::arb_bundle(),
             tze_inputs in vec(arb_tzein(), 0..10),
             tze_outputs in vec(arb_tzeout(), 0..10),
             lock_time in any::<u32>(),
@@ -699,11 +690,11 @@ pub mod testing {
         ) -> TransactionData<Authorized> {
             TransactionData {
                 version,
-                vin, vout,
                 tze_inputs:  if branch_id == BranchId::ZFuture { tze_inputs } else { vec![] },
                 tze_outputs: if branch_id == BranchId::ZFuture { tze_outputs } else { vec![] },
                 lock_time,
                 expiry_height: expiry_height.into(),
+                transparent_bundle,
                 sprout_bundle: None,
                 sapling_bundle: None, //FIXME
                 orchard_bundle: None, //FIXME
@@ -715,16 +706,15 @@ pub mod testing {
     prop_compose! {
         pub fn arb_txdata(branch_id: BranchId)(
             version in tx_versions(branch_id),
-            vin in vec(arb_txin(), 0..10),
-            vout in vec(arb_txout(), 0..10),
+            transparent_bundle in transparent::arb_bundle(),
             lock_time in any::<u32>(),
             expiry_height in any::<u32>(),
         ) -> TransactionData<Authorized> {
             TransactionData {
                 version,
-                vin, vout,
                 lock_time,
                 expiry_height: expiry_height.into(),
+                transparent_bundle,
                 sprout_bundle: None,
                 sapling_bundle: None, //FIXME
                 orchard_bundle: None, //FIXME

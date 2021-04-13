@@ -19,8 +19,10 @@ use crate::{
 
 use super::{
     components::{
-        sapling::{self, GrothProofBytes},
-        Amount, JsDescription, OutputDescription, SpendDescription, TxIn, TxOut,
+        amount::Amount,
+        sapling::{self, GrothProofBytes, OutputDescription, SpendDescription},
+        sprout::JsDescription,
+        transparent::{self, TxIn, TxOut},
     },
     Authorization, Transaction, TransactionData, TxVersion,
 };
@@ -78,7 +80,7 @@ fn has_tze_components(version: &TxVersion) -> bool {
     matches!(version, TxVersion::ZFuture)
 }
 
-fn prevout_hash(vin: &[TxIn]) -> Blake2bHash {
+fn prevout_hash<TA: transparent::Authorization>(vin: &[TxIn<TA>]) -> Blake2bHash {
     let mut data = Vec::with_capacity(vin.len() * 36);
     for t_in in vin {
         t_in.prevout.write(&mut data).unwrap();
@@ -89,7 +91,7 @@ fn prevout_hash(vin: &[TxIn]) -> Blake2bHash {
         .hash(&data)
 }
 
-fn sequence_hash(vin: &[TxIn]) -> Blake2bHash {
+fn sequence_hash<TA: transparent::Authorization>(vin: &[TxIn<TA>]) -> Blake2bHash {
     let mut data = Vec::with_capacity(vin.len() * 4);
     for t_in in vin {
         (&mut data)
@@ -234,8 +236,9 @@ impl<'a> SignableInput<'a> {
 }
 
 pub fn signature_hash_data<
+    TA: transparent::Authorization,
     SA: sapling::Authorization<Proof = GrothProofBytes>,
-    A: Authorization<SaplingAuth = SA>,
+    A: Authorization<SaplingAuth = SA, TransparentAuth = TA>,
 >(
     tx: &TransactionData<A>,
     consensus_branch_id: consensus::BranchId,
@@ -260,24 +263,39 @@ pub fn signature_hash_data<
         update_hash!(
             h,
             hash_type & SIGHASH_ANYONECANPAY == 0,
-            prevout_hash(&tx.vin)
+            prevout_hash(
+                tx.transparent_bundle
+                    .as_ref()
+                    .map_or(&[], |b| b.vin.as_slice())
+            )
         );
         update_hash!(
             h,
             hash_type & SIGHASH_ANYONECANPAY == 0
                 && (hash_type & SIGHASH_MASK) != SIGHASH_SINGLE
                 && (hash_type & SIGHASH_MASK) != SIGHASH_NONE,
-            sequence_hash(&tx.vin)
+            sequence_hash(
+                tx.transparent_bundle
+                    .as_ref()
+                    .map_or(&[], |b| b.vin.as_slice())
+            )
         );
 
         if (hash_type & SIGHASH_MASK) != SIGHASH_SINGLE
             && (hash_type & SIGHASH_MASK) != SIGHASH_NONE
         {
-            h.update(outputs_hash(&tx.vout).as_ref());
+            h.update(
+                outputs_hash(
+                    tx.transparent_bundle
+                        .as_ref()
+                        .map_or(&[], |b| b.vout.as_slice()),
+                )
+                .as_bytes(),
+            );
         } else if (hash_type & SIGHASH_MASK) == SIGHASH_SINGLE {
-            match signable_input {
-                SignableInput::Transparent { index, .. } if index < tx.vout.len() => {
-                    h.update(single_output_hash(&tx.vout[index]).as_ref())
+            match (tx.transparent_bundle.as_ref(), &signable_input) {
+                (Some(b), SignableInput::Transparent { index, .. }) if *index < b.vout.len() => {
+                    h.update(single_output_hash(&b.vout[*index]).as_bytes())
                 }
                 _ => h.update(&[0; 32]),
             };
@@ -352,52 +370,54 @@ pub fn signature_hash_data<
                 script_code,
                 value,
             } => {
-                #[cfg(feature = "zfuture")]
-                let mut data = if has_tze_components(&tx.version) {
-                    // domain separation here is to avoid collision attacks
-                    // between transparent and TZE inputs.
-                    ZCASH_TRANSPARENT_SIGNED_INPUT_TAG.to_vec()
+                if let Some(bundle) = tx.transparent_bundle.as_ref() {
+                    #[cfg(feature = "zfuture")]
+                    let mut data = if has_tze_components(&tx.version) {
+                        // domain separation here is to avoid collision attacks
+                        // between transparent and TZE inputs.
+                        ZCASH_TRANSPARENT_SIGNED_INPUT_TAG.to_vec()
+                    } else {
+                        vec![]
+                    };
+
+                    #[cfg(not(feature = "zfuture"))]
+                    let mut data = vec![];
+
+                    bundle.vin[index].prevout.write(&mut data).unwrap();
+                    script_code.write(&mut data).unwrap();
+                    data.extend_from_slice(&value.to_i64_le_bytes());
+                    (&mut data)
+                        .write_u32::<LittleEndian>(bundle.vin[index].sequence)
+                        .unwrap();
+                    h.update(&data);
                 } else {
-                    vec![]
-                };
-
-                #[cfg(not(feature = "zfuture"))]
-                let mut data = vec![];
-
-                tx.vin[index].prevout.write(&mut data).unwrap();
-                script_code.write(&mut data).unwrap();
-                data.extend_from_slice(&value.to_i64_le_bytes());
-                (&mut data)
-                    .write_u32::<LittleEndian>(tx.vin[index].sequence)
-                    .unwrap();
-                h.update(&data);
+                    panic!(
+                        "A request has been made to sign a transparent input, but none are present."
+                    );
+                }
             }
-
             #[cfg(feature = "zfuture")]
             SignableInput::Tze {
                 index,
                 precondition,
                 value,
-            } if has_tze_components(&tx.version) => {
-                // domain separation here is to avoid collision attacks
-                // between transparent and TZE inputs.
-                let mut data = ZCASH_TZE_SIGNED_INPUT_TAG.to_vec();
+            } => {
+                if has_tze_components(&tx.version) {
+                    // domain separation here is to avoid collision attacks
+                    // between transparent and TZE inputs.
+                    let mut data = ZCASH_TZE_SIGNED_INPUT_TAG.to_vec();
 
-                tx.tze_inputs[index].prevout.write(&mut data).unwrap();
-                CompactSize::write(&mut data, precondition.extension_id.try_into().unwrap())
-                    .unwrap();
-                CompactSize::write(&mut data, precondition.mode.try_into().unwrap()).unwrap();
-                Vector::write(&mut data, &precondition.payload, |w, e| w.write_u8(*e)).unwrap();
-                data.extend_from_slice(&value.to_i64_le_bytes());
-                h.update(&data);
+                    tx.tze_inputs[index].prevout.write(&mut data).unwrap();
+                    CompactSize::write(&mut data, precondition.extension_id.try_into().unwrap())
+                        .unwrap();
+                    CompactSize::write(&mut data, precondition.mode.try_into().unwrap()).unwrap();
+                    Vector::write(&mut data, &precondition.payload, |w, e| w.write_u8(*e)).unwrap();
+                    data.extend_from_slice(&value.to_i64_le_bytes());
+                    h.update(&data);
+                }
             }
 
-            #[cfg(feature = "zfuture")]
-            SignableInput::Tze { .. } => {
-                panic!("A request has been made to sign a TZE input, but the signature hash version is not ZFuture");
-            }
-
-            _ => (),
+            SignableInput::Shielded => (),
         }
 
         h.finalize().as_ref().to_vec()

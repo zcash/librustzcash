@@ -103,26 +103,31 @@ impl<'a, BuildCtx> TzeBuilder<'a, BuildCtx> {
         (self.tze_inputs.clone(), self.tze_outputs.clone())
     }
 
-    pub fn create_witnesses(self, mtx: &BuildCtx) -> Result<Vec<WitnessData>, Error> {
-        // Create TZE input witnesses
-        let payloads = self
-            .signers
-            .into_iter()
-            .zip(self.tze_inputs.into_iter())
-            .map(|(signer, tzein)| {
-                // The witness builder function should have cached/closed over whatever data was
-                // necessary for the witness to commit to at the time it was added to the
-                // transaction builder; here, it then computes those commitments.
-                let (mode, payload) = (signer.builder)(&mtx)?;
-                let input_mode = tzein.witness.mode;
-                if mode != input_mode {
-                    return Err(Error::WitnessModeMismatch(input_mode, mode));
-                }
+    pub fn create_witnesses(self, mtx: &BuildCtx) -> Result<Option<Vec<WitnessData>>, Error> {
+        if self.tze_inputs.is_empty() {
+            Ok(None)
+        } else {
+            // Create TZE input witnesses
+            let payloads = self
+                .signers
+                .into_iter()
+                .zip(self.tze_inputs.into_iter())
+                .into_iter()
+                .map(|(signer, tzein)| {
+                    // The witness builder function should have cached/closed over whatever data was
+                    // necessary for the witness to commit to at the time it was added to the
+                    // transaction builder; here, it then computes those commitments.
+                    let (mode, payload) = (signer.builder)(&mtx)?;
+                    let input_mode = tzein.witness.mode;
+                    if mode != input_mode {
+                        return Err(Error::WitnessModeMismatch(input_mode, mode));
+                    }
 
-                Ok(WitnessData(payload))
-            })
-            .collect::<Result<Vec<_>, Error>>()?;
+                    Ok(WitnessData(payload))
+                })
+                .collect::<Result<Vec<_>, Error>>()?;
 
-        Ok(payloads)
+            Ok(Some(payloads))
+        }
     }
 }
