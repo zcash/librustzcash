@@ -98,7 +98,7 @@ pub fn init_wallet_db<P>(wdb: &WalletDb<P>) -> Result<(), rusqlite::Error> {
             id_note INTEGER PRIMARY KEY,
             tx INTEGER NOT NULL,
             output_index INTEGER NOT NULL,
-            from_account INTEGER NOT NULL,
+            from_account INTEGER,
             address TEXT NOT NULL,
             value INTEGER NOT NULL,
             memo BLOB,

@@ -197,6 +197,13 @@ pub fn encode_payment_address(hrp: &str, addr: &PaymentAddress) -> String {
     bech32_encode(hrp, |w| w.write_all(&addr.to_bytes()))
 }
 
+pub fn encode_payment_address_p<P: consensus::Parameters>(
+    params: &P,
+    addr: &PaymentAddress,
+) -> String {
+    encode_payment_address(params.hrp_sapling_payment_address(), addr)
+}
+
 /// Decodes a [`PaymentAddress`] from a Bech32-encoded string.
 ///
 /// # Examples
@@ -298,6 +305,17 @@ pub fn encode_transparent_address(
         }
     };
     bs58::encode(decoded).with_check().into_string()
+}
+
+pub fn encode_transparent_address_p<P: consensus::Parameters>(
+    params: &P,
+    addr: &TransparentAddress,
+) -> String {
+    encode_transparent_address(
+        &params.b58_pubkey_address_prefix(),
+        &params.b58_script_address_prefix(),
+        addr,
+    )
 }
 
 /// Decodes a [`TransparentAddress`] from a Base58Check-encoded string.

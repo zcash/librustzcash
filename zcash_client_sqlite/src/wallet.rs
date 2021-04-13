@@ -26,16 +26,16 @@ use zcash_primitives::{
 };
 
 use zcash_client_backend::{
-    address::RecipientAddress,
     data_api::error::Error,
     encoding::{
         decode_extended_full_viewing_key, decode_payment_address, encode_extended_full_viewing_key,
+        encode_payment_address_p, encode_transparent_address_p,
     },
     wallet::{AccountId, WalletShieldedOutput, WalletTx},
     DecryptedOutput,
 };
 
-use crate::{error::SqliteClientError, DataConnStmtCache, NoteId, WalletDb};
+use crate::{error::SqliteClientError, DataConnStmtCache, NoteId, WalletDb, PRUNING_HEIGHT};
 
 use {
     crate::UtxoId,
@@ -311,6 +311,17 @@ pub fn get_received_memo<P>(wdb: &WalletDb<P>, id_note: i64) -> Result<Memo, Sql
         .map_err(SqliteClientError::from)
 }
 
+pub fn get_transaction<P>(wdb: &WalletDb<P>, id_tx: i64) -> Result<Transaction, SqliteClientError> {
+    let tx_bytes: Vec<_> = wdb.conn.query_row(
+        "SELECT raw FROM transactions
+        WHERE id_tx = ?",
+        &[id_tx],
+        |row| row.get(0),
+    )?;
+
+    Transaction::read(&tx_bytes[..]).map_err(SqliteClientError::from)
+}
+
 /// Returns the memo for a sent note.
 ///
 /// The note is identified by its row index in the `sent_notes` table within the wdb
@@ -445,6 +456,22 @@ pub fn get_block_hash<P>(
         .optional()
 }
 
+/// Gets the height to which the database must be rewound if any rewind greater than the pruning
+/// height is attempted.
+pub fn get_rewind_height<P>(wdb: &WalletDb<P>) -> Result<Option<BlockHeight>, SqliteClientError> {
+    wdb.conn
+        .query_row(
+            "SELECT MIN(tx.block) 
+             FROM received_notes n
+             JOIN transactions tx ON tx.id_tx = n.tx
+             WHERE n.spent IS NULL",
+            NO_PARAMS,
+            |row| row.get(0).map(|h: u32| h.into()),
+        )
+        .optional()
+        .map_err(SqliteClientError::from)
+}
+
 /// Rewinds the database to the given height.
 ///
 /// If the requested height is greater than or equal to the height of the last scanned
@@ -469,30 +496,46 @@ pub fn rewind_to_height<P: consensus::Parameters>(
                     .or(Ok(sapling_activation_height - 1))
             })?;
 
-    // nothing to do if we're deleting back down to the max height
-    if block_height >= last_scanned_height {
-        Ok(())
+    let rewind_height = if block_height >= (last_scanned_height - PRUNING_HEIGHT) {
+        Some(block_height)
     } else {
-        // Decrement witnesses.
-        wdb.conn.execute(
-            "DELETE FROM sapling_witnesses WHERE block > ?",
-            &[u32::from(block_height)],
-        )?;
+        match get_rewind_height(&wdb)? {
+            Some(h) => {
+                if block_height > h {
+                    return Err(SqliteClientError::RequestedRewindInvalid(h));
+                } else {
+                    Some(block_height)
+                }
+            }
+            None => Some(block_height),
+        }
+    };
 
-        // Un-mine transactions.
-        wdb.conn.execute(
-            "UPDATE transactions SET block = NULL, tx_index = NULL WHERE block > ?",
-            &[u32::from(block_height)],
-        )?;
+    // nothing to do if we're deleting back down to the max height
 
-        // Now that they aren't depended on, delete scanned blocks.
-        wdb.conn.execute(
-            "DELETE FROM blocks WHERE height > ?",
-            &[u32::from(block_height)],
-        )?;
+    if let Some(block_height) = rewind_height {
+        if block_height < last_scanned_height {
+            // Decrement witnesses.
+            wdb.conn.execute(
+                "DELETE FROM sapling_witnesses WHERE block > ?",
+                &[u32::from(block_height)],
+            )?;
 
-        Ok(())
+            // Un-mine transactions.
+            wdb.conn.execute(
+                "UPDATE transactions SET block = NULL, tx_index = NULL WHERE block > ?",
+                &[u32::from(block_height)],
+            )?;
+
+            // Now that they aren't depended on, delete scanned blocks.
+            wdb.conn.execute(
+                "DELETE FROM blocks WHERE height > ?",
+                &[u32::from(block_height)],
+            )?;
+        }
     }
+
+    Ok(())
 }
 
 /// Returns the commitment tree for the block at the specified height,
@@ -897,7 +940,7 @@ pub fn put_sent_note<'a, P: consensus::Parameters>(
     tx_ref: i64,
     output_index: usize,
     account: AccountId,
-    to: RecipientAddress,
+    to: &PaymentAddress,
     value: Amount,
     memo: Option<&MemoBytes>,
 ) -> Result<(), SqliteClientError> {
@@ -905,7 +948,7 @@ pub fn put_sent_note<'a, P: consensus::Parameters>(
     // Try updating an existing sent note.
     if stmts.stmt_update_sent_note.execute(params![
         account.0 as i64,
-        to.encode(&stmts.wallet_db.params),
+        encode_payment_address_p(&stmts.wallet_db.params, &to),
         ivalue,
         &memo.map(|m| m.as_slice()),
         tx_ref,
@@ -914,6 +957,31 @@ pub fn put_sent_note<'a, P: consensus::Parameters>(
     {
         // It isn't there, so insert.
         insert_sent_note(stmts, tx_ref, output_index, account, &to, value, memo)?
+    }
+
+    Ok(())
+}
+
+pub fn put_sent_utxo<'a, P: consensus::Parameters>(
+    stmts: &mut DataConnStmtCache<'a, P>,
+    tx_ref: i64,
+    output_index: usize,
+    to: &TransparentAddress,
+    value: Amount,
+) -> Result<(), SqliteClientError> {
+    let ivalue: i64 = value.into();
+    // Try updating an existing sent note.
+    if stmts.stmt_update_sent_note.execute(params![
+        (None::<i64>),
+        encode_transparent_address_p(&stmts.wallet_db.params, &to),
+        ivalue,
+        (None::<&[u8]>),
+        tx_ref,
+        output_index as i64
+    ])? == 0
+    {
+        // It isn't there, so insert.
+        insert_sent_utxo(stmts, tx_ref, output_index, &to, value)?
     }
 
     Ok(())
@@ -932,11 +1000,11 @@ pub fn insert_sent_note<'a, P: consensus::Parameters>(
     tx_ref: i64,
     output_index: usize,
     account: AccountId,
-    to: &RecipientAddress,
+    to: &PaymentAddress,
     value: Amount,
     memo: Option<&MemoBytes>,
 ) -> Result<(), SqliteClientError> {
-    let to_str = to.encode(&stmts.wallet_db.params);
+    let to_str = encode_payment_address_p(&stmts.wallet_db.params, to);
     let ivalue: i64 = value.into();
     stmts.stmt_insert_sent_note.execute(params![
         tx_ref,
@@ -949,6 +1017,28 @@ pub fn insert_sent_note<'a, P: consensus::Parameters>(
 
     Ok(())
 }
+
+pub fn insert_sent_utxo<'a, P: consensus::Parameters>(
+    stmts: &mut DataConnStmtCache<'a, P>,
+    tx_ref: i64,
+    output_index: usize,
+    to: &TransparentAddress,
+    value: Amount,
+) -> Result<(), SqliteClientError> {
+    let to_str = encode_transparent_address_p(&stmts.wallet_db.params, to);
+    let ivalue: i64 = value.into();
+    stmts.stmt_insert_sent_note.execute(params![
+        tx_ref,
+        (output_index as i64),
+        (None::<i64>),
+        to_str,
+        ivalue,
+        (None::<&[u8]>)
+    ])?;
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use tempfile::NamedTempFile;

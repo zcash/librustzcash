@@ -44,7 +44,7 @@ use zcash_primitives::{
     memo::Memo,
     merkle_tree::{CommitmentTree, IncrementalWitness},
     sapling::{Node, Nullifier, PaymentAddress},
-    transaction::{components::Amount, TxId},
+    transaction::{components::Amount, Transaction, TxId},
     zip32::ExtendedFullViewingKey,
 };
 
@@ -68,6 +68,8 @@ use {
 pub mod chain;
 pub mod error;
 pub mod wallet;
+
+pub const PRUNING_HEIGHT: u32 = 100;
 
 /// A newtype wrapper for sqlite primary key values for the notes
 /// table.
@@ -238,6 +240,10 @@ impl<P: consensus::Parameters> WalletRead for WalletDb<P> {
         wallet::get_balance_at(&self, account, anchor_height)
     }
 
+    fn get_transaction(&self, id_tx: i64) -> Result<Transaction, Self::Error> {
+        wallet::get_transaction(&self, id_tx)
+    }
+
     fn get_memo(&self, id_note: Self::NoteRef) -> Result<Memo, Self::Error> {
         match id_note {
             NoteId::SentNoteId(id_note) => wallet::get_sent_memo(self, id_note),
@@ -366,6 +372,10 @@ impl<'a, P: consensus::Parameters> WalletRead for DataConnStmtCache<'a, P> {
         anchor_height: BlockHeight,
     ) -> Result<Amount, Self::Error> {
         self.wallet_db.get_balance_at(account, anchor_height)
+    }
+
+    fn get_transaction(&self, id_tx: i64) -> Result<Transaction, Self::Error> {
+        self.wallet_db.get_transaction(id_tx)
     }
 
     fn get_memo(&self, id_note: Self::NoteRef) -> Result<Memo, Self::Error> {
@@ -497,7 +507,7 @@ impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
             }
 
             // Prune the stored witnesses (we only expect rollbacks of at most 100 blocks).
-            wallet::prune_witnesses(up, block.block_height - 100)?;
+            wallet::prune_witnesses(up, block.block_height - PRUNING_HEIGHT)?;
 
             // Update now-expired transactions that didn't get mined.
             wallet::update_expired_notes(up, block.block_height)?;
@@ -509,6 +519,7 @@ impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
     fn store_decrypted_tx(
         &mut self,
         d_tx: &DecryptedTransaction,
+        nullifiers: &[(AccountId, Nullifier)],
     ) -> Result<Self::TxRef, Self::Error> {
         self.transactionally(|up| {
             let tx_ref = wallet::put_tx_data(up, d_tx.tx, None)?;
@@ -521,7 +532,7 @@ impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
                         tx_ref,
                         output.index,
                         output.account,
-                        RecipientAddress::Shielded(output.to.clone()),
+                        &output.to,
                         Amount::from_u64(output.note.value)
                             .map_err(|_| SqliteClientError::CorruptedData("Note value invalid.".to_string()))?,
                         Some(&output.memo),
@@ -541,22 +552,22 @@ impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
                 }
             }
 
-            // store received z->t transactions in the same way they would be stored by
-            // create_spend_to_address If there are any of our shielded inputs, we interpret this
-            // as our z->t tx and store the vouts as our sent notes.
-            // FIXME this is a weird heuristic that is bound to trip us up somewhere.
-            if d_tx.sapling_outputs.iter().any(|output| !output.outgoing) {
-                if let Some(account_id) = spending_account_id {
-                    for (i, txout) in d_tx.tx.vout.iter().enumerate() {
-                        // FIXME: We shouldn't be confusing notes and transparent outputs.
-                        wallet::put_sent_note(
+            // if we have some transparent outputs yet no shielded outputs, then this is t2t and we
+            // can safely ignore it otherwise, this is z2t and it might have originated from our
+            // wallet
+            if !d_tx.tx.vout.is_empty() {
+                // store received z->t transactions in the same way they would be stored by
+                // create_spend_to_address If there are any of our shielded inputs, we interpret this
+                // as our z->t tx and store the vouts as our sent notes.
+                // FIXME this is a weird heuristic that is bound to trip us up somewhere.
+                if d_tx.tx.shielded_spends.iter().any(|input| nullifiers.iter().any(|(_, n)| *n == input.nullifier)) {
+                    for (output_index, txout) in d_tx.tx.vout.iter().enumerate() {
+                        wallet::put_sent_utxo(
                             up,
                             tx_ref,
-                            i,
-                            account_id,
-                            RecipientAddress::Transparent(txout.script_pubkey.address().unwrap()),
+                            output_index,
+                            &txout.script_pubkey.address().unwrap(),
                             txout.value,
-                            None,
                         )?;
                     }
                 }
@@ -588,15 +599,24 @@ impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
             }
 
             for output in &sent_tx.outputs {
-                wallet::insert_sent_note(
-                    up,
-                    tx_ref,
-                    output.output_index,
-                    sent_tx.account,
-                    output.recipient_address,
-                    output.value,
-                    output.memo.as_ref(),
-                )?;
+                match output.recipient_address {
+                    RecipientAddress::Shielded(addr) => wallet::insert_sent_note(
+                        up,
+                        tx_ref,
+                        output.output_index,
+                        sent_tx.account,
+                        &addr,
+                        output.value,
+                        output.memo.as_ref(),
+                    )?,
+                    RecipientAddress::Transparent(addr) => wallet::insert_sent_utxo(
+                        up,
+                        tx_ref,
+                        output.output_index,
+                        &addr,
+                        output.value,
+                    )?,
+                }
             }
 
             // Return the row number of the transaction, so the caller can fetch it for sending.
