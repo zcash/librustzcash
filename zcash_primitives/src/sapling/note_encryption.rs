@@ -265,8 +265,8 @@ impl<P: consensus::Parameters> Domain for SaplingDomain<P> {
         })
     }
 
-    fn extract_note_commitment(note: &Self::Note) -> Self::ExtractedCommitment {
-        note.cmu().to_bytes()
+    fn note_commitment(note: &Self::Note) -> Self::NoteCommitment {
+        note.cmu()
     }
 
     fn extract_pk_d(op: &[u8; OUT_CIPHERTEXT_SIZE]) -> Option<Self::DiversifiedTransmissionKey> {

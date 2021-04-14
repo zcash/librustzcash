@@ -5,6 +5,7 @@
 
 use crypto_api_chachapoly::{ChaCha20Ietf, ChachaPolyIetf};
 use rand_core::RngCore;
+use std::convert::TryFrom;
 use subtle::{Choice, ConstantTimeEq};
 
 pub const COMPACT_NOTE_SIZE: usize = 1 + // version
@@ -74,7 +75,7 @@ pub trait Domain {
     type OutgoingViewingKey;
     type ValueCommitment;
     type NoteCommitment;
-    type ExtractedCommitment: Eq;
+    type ExtractedCommitment: Eq + TryFrom<Self::NoteCommitment>;
     type Memo;
 
     fn derive_esk(note: &Self::Note) -> Option<Self::EphemeralSecretKey>;
@@ -126,7 +127,7 @@ pub trait Domain {
         check: F,
     ) -> NoteValidity;
 
-    fn extract_note_commitment(note: &Self::Note) -> Self::ExtractedCommitment;
+    fn note_commitment(note: &Self::Note) -> Self::NoteCommitment;
 
     fn parse_note_plaintext_without_memo_ivk(
         &self,
@@ -383,10 +384,9 @@ fn check_note_validity<D: Domain>(
     epk: &D::EphemeralPublicKey,
     cmstar: &D::ExtractedCommitment,
 ) -> NoteValidity {
-    if &D::extract_note_commitment(&note) != cmstar {
-        // Published commitment doesn't match calculated commitment
-        NoteValidity::Invalid
-    } else {
+    if D::ExtractedCommitment::try_from(D::note_commitment(&note))
+        .map_or(false, |cs| &cs == cmstar)
+    {
         let epk_bytes = D::epk_bytes(epk);
         D::check_epk_bytes(&note, |derived_esk| {
             if D::epk_bytes(&D::ka_derive_public(&note, &derived_esk))
@@ -398,6 +398,9 @@ fn check_note_validity<D: Domain>(
                 NoteValidity::Invalid
             }
         })
+    } else {
+        // Published commitment doesn't match calculated commitment
+        NoteValidity::Invalid
     }
 }
 
