@@ -270,6 +270,10 @@ impl<P: consensus::Parameters> WalletRead for WalletDb<P> {
         wallet::get_nullifiers(&self)
     }
 
+    fn get_all_nullifiers(&self) -> Result<Vec<(AccountId, Nullifier)>, Self::Error> {
+        wallet::get_all_nullifiers(&self)
+    }
+
     fn get_unspent_sapling_notes(
         &self,
         account: AccountId,
@@ -399,6 +403,10 @@ impl<'a, P: consensus::Parameters> WalletRead for DataConnStmtCache<'a, P> {
 
     fn get_nullifiers(&self) -> Result<Vec<(AccountId, Nullifier)>, Self::Error> {
         self.wallet_db.get_nullifiers()
+    }
+
+    fn get_all_nullifiers(&self) -> Result<Vec<(AccountId, Nullifier)>, Self::Error> {
+        self.wallet_db.get_all_nullifiers()
     }
 
     fn get_unspent_sapling_notes(
@@ -560,7 +568,7 @@ impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
                 // create_spend_to_address If there are any of our shielded inputs, we interpret this
                 // as our z->t tx and store the vouts as our sent notes.
                 // FIXME this is a weird heuristic that is bound to trip us up somewhere.
-                if d_tx.tx.shielded_spends.iter().any(|input| nullifiers.iter().any(|(_, n)| *n == input.nullifier)) {
+                if d_tx.tx.shielded_spends.iter().any(|input| nullifiers.iter().any(|(_, n)| { *n == input.nullifier } )) {
                     for (output_index, txout) in d_tx.tx.vout.iter().enumerate() {
                         wallet::put_sent_utxo(
                             up,
@@ -572,7 +580,6 @@ impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
                     }
                 }
             }
-
             Ok(tx_ref)
         })
     }

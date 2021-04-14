@@ -639,6 +639,24 @@ pub fn get_nullifiers<P>(
     Ok(res)
 }
 
+pub fn get_all_nullifiers<P>(
+    wdb: &WalletDb<P>,
+) -> Result<Vec<(AccountId, Nullifier)>, SqliteClientError> {
+    // Get the nullifiers for the notes we are tracking
+    let mut stmt_fetch_nullifiers = wdb.conn.prepare(
+        "SELECT rn.id_note, rn.account, rn.nf
+            FROM received_notes rn",
+    )?;
+    let nullifiers = stmt_fetch_nullifiers.query_map(NO_PARAMS, |row| {
+        let account = AccountId(row.get(1)?);
+        let nf_bytes: Vec<u8> = row.get(2)?;
+        Ok((account, Nullifier::from_slice(&nf_bytes).unwrap()))
+    })?;
+
+    let res: Vec<_> = nullifiers.collect::<Result<_, _>>()?;
+    Ok(res)
+}
+
 pub fn get_unspent_transparent_utxos<P: consensus::Parameters>(
     wdb: &WalletDb<P>,
     address: &TransparentAddress,
@@ -972,7 +990,7 @@ pub fn put_sent_utxo<'a, P: consensus::Parameters>(
     let ivalue: i64 = value.into();
     // Try updating an existing sent note.
     if stmts.stmt_update_sent_note.execute(params![
-        (None::<i64>),
+        0,
         encode_transparent_address_p(&stmts.wallet_db.params, &to),
         ivalue,
         (None::<&[u8]>),
