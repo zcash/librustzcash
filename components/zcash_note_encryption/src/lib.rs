@@ -74,8 +74,8 @@ pub trait Domain {
     type IncomingViewingKey;
     type OutgoingViewingKey;
     type ValueCommitment;
-    type NoteCommitment;
-    type ExtractedCommitment: Eq + TryFrom<Self::NoteCommitment>;
+    type ExtractedCommitment;
+    type ExtractedCommitmentBytes: Eq + TryFrom<Self::ExtractedCommitment>;
     type Memo;
 
     fn derive_esk(note: &Self::Note) -> Option<Self::EphemeralSecretKey>;
@@ -111,7 +111,7 @@ pub trait Domain {
     fn derive_ock(
         ovk: &Self::OutgoingViewingKey,
         cv: &Self::ValueCommitment,
-        cm: &Self::NoteCommitment,
+        cmstar: &Self::ExtractedCommitment,
         ephemeral_key: &EphemeralKeyBytes,
     ) -> OutgoingCipherKey;
 
@@ -127,7 +127,7 @@ pub trait Domain {
         check: F,
     ) -> NoteValidity;
 
-    fn note_commitment(note: &Self::Note) -> Self::NoteCommitment;
+    fn cmstar(note: &Self::Note) -> Self::ExtractedCommitment;
 
     fn parse_note_plaintext_without_memo_ivk(
         &self,
@@ -157,7 +157,7 @@ pub trait Domain {
 
 pub trait ShieldedOutput<D: Domain> {
     fn epk(&self) -> &D::EphemeralPublicKey;
-    fn cmstar(&self) -> D::ExtractedCommitment;
+    fn cmstar_bytes(&self) -> D::ExtractedCommitmentBytes;
     fn enc_ciphertext(&self) -> &[u8];
 }
 
@@ -288,11 +288,11 @@ impl<D: Domain> NoteEncryption<D> {
     pub fn encrypt_outgoing_plaintext<R: RngCore>(
         &self,
         cv: &D::ValueCommitment,
-        cm: &D::NoteCommitment,
+        cmstar: &D::ExtractedCommitment,
         rng: &mut R,
     ) -> [u8; OUT_CIPHERTEXT_SIZE] {
         let (ock, input) = if let Some(ovk) = &self.ovk {
-            let ock = D::derive_ock(ovk, &cv, &cm, &D::epk_bytes(&self.epk));
+            let ock = D::derive_ock(ovk, &cv, &cmstar, &D::epk_bytes(&self.epk));
             let input = D::outgoing_plaintext_bytes(&self.note, &self.esk);
 
             (ock, input)
@@ -355,7 +355,7 @@ pub fn try_note_decryption<D: Domain, Output: ShieldedOutput<D>>(
         domain,
         ivk,
         output.epk(),
-        &output.cmstar(),
+        &output.cmstar_bytes(),
         &plaintext,
     )?;
     let memo = domain.extract_memo(&plaintext);
@@ -367,12 +367,12 @@ fn parse_note_plaintext_without_memo_ivk<D: Domain>(
     domain: &D,
     ivk: &D::IncomingViewingKey,
     epk: &D::EphemeralPublicKey,
-    cmstar: &D::ExtractedCommitment,
+    cmstar_bytes: &D::ExtractedCommitmentBytes,
     plaintext: &[u8],
 ) -> Option<(D::Note, D::Recipient)> {
     let (note, to) = domain.parse_note_plaintext_without_memo_ivk(ivk, &plaintext)?;
 
-    if let NoteValidity::Valid = check_note_validity::<D>(&note, epk, cmstar) {
+    if let NoteValidity::Valid = check_note_validity::<D>(&note, epk, cmstar_bytes) {
         Some((note, to))
     } else {
         None
@@ -382,10 +382,10 @@ fn parse_note_plaintext_without_memo_ivk<D: Domain>(
 fn check_note_validity<D: Domain>(
     note: &D::Note,
     epk: &D::EphemeralPublicKey,
-    cmstar: &D::ExtractedCommitment,
+    cmstar_bytes: &D::ExtractedCommitmentBytes,
 ) -> NoteValidity {
-    if D::ExtractedCommitment::try_from(D::note_commitment(&note))
-        .map_or(false, |cs| &cs == cmstar)
+    if D::ExtractedCommitmentBytes::try_from(D::cmstar(&note))
+        .map_or(false, |cs| &cs == cmstar_bytes)
     {
         let epk_bytes = D::epk_bytes(epk);
         D::check_epk_bytes(&note, |derived_esk| {
@@ -428,7 +428,7 @@ pub fn try_compact_note_decryption<D: Domain, Output: ShieldedOutput<D>>(
     plaintext.copy_from_slice(output.enc_ciphertext());
     ChaCha20Ietf::xor(key.as_ref(), &[0u8; 12], 1, &mut plaintext);
 
-    parse_note_plaintext_without_memo_ivk(domain, ivk, output.epk(), &output.cmstar(), &plaintext)
+    parse_note_plaintext_without_memo_ivk(domain, ivk, output.epk(), &output.cmstar_bytes(), &plaintext)
 }
 
 /// Recovery of the full note plaintext by the sender.
@@ -484,7 +484,7 @@ pub fn try_output_recovery_with_ock<D: Domain, Output: ShieldedOutput<D>>(
         domain.parse_note_plaintext_without_memo_ovk(&pk_d, &esk, output.epk(), &plaintext)?;
     let memo = domain.extract_memo(&plaintext);
 
-    if let NoteValidity::Valid = check_note_validity::<D>(&note, output.epk(), &output.cmstar()) {
+    if let NoteValidity::Valid = check_note_validity::<D>(&note, output.epk(), &output.cmstar_bytes()) {
         Some((note, to, memo))
     } else {
         None

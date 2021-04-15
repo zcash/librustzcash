@@ -123,7 +123,7 @@ impl<P: consensus::Parameters> ShieldedOutput<SaplingDomain<P>> for OutputDescri
         &self.ephemeral_key
     }
 
-    fn cmstar(&self) -> [u8; 32] {
+    fn cmstar_bytes(&self) -> [u8; 32] {
         self.cmu.to_repr()
     }
 
@@ -235,7 +235,7 @@ impl<P: consensus::Parameters> ShieldedOutput<SaplingDomain<P>> for CompactOutpu
         &self.epk
     }
 
-    fn cmstar(&self) -> [u8; 32] {
+    fn cmstar_bytes(&self) -> [u8; 32] {
         self.cmu.to_repr()
     }
 

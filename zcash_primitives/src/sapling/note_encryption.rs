@@ -127,8 +127,8 @@ impl<P: consensus::Parameters> Domain for SaplingDomain<P> {
     type IncomingViewingKey = SaplingIvk;
     type OutgoingViewingKey = OutgoingViewingKey;
     type ValueCommitment = jubjub::ExtendedPoint;
-    type NoteCommitment = bls12_381::Scalar;
-    type ExtractedCommitment = [u8; 32];
+    type ExtractedCommitment = bls12_381::Scalar;
+    type ExtractedCommitmentBytes = [u8; 32];
     type Memo = MemoBytes;
 
     fn derive_esk(note: &Self::Note) -> Option<Self::EphemeralSecretKey> {
@@ -206,7 +206,7 @@ impl<P: consensus::Parameters> Domain for SaplingDomain<P> {
     fn derive_ock(
         ovk: &Self::OutgoingViewingKey,
         cv: &Self::ValueCommitment,
-        cmu: &Self::NoteCommitment,
+        cmu: &Self::ExtractedCommitment,
         epk: &EphemeralKeyBytes,
     ) -> OutgoingCipherKey {
         prf_ock(ovk, cv, cmu, epk)
@@ -265,7 +265,7 @@ impl<P: consensus::Parameters> Domain for SaplingDomain<P> {
         })
     }
 
-    fn note_commitment(note: &Self::Note) -> Self::NoteCommitment {
+    fn cmstar(note: &Self::Note) -> Self::ExtractedCommitment {
         note.cmu()
     }
 
