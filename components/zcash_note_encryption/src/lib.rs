@@ -169,7 +169,7 @@ pub trait ShieldedOutput<D: Domain> {
 ///
 /// Implements section 4.19 of the
 /// [Zcash Protocol Specification](https://zips.z.cash/protocol/nu5.pdf#saplingandorchardinband)
-/// NB: the example code is only covering the pre-Canopy case.
+/// NB: the example code is only covering the post-Canopy case.
 ///
 /// # Examples
 ///
