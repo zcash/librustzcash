@@ -1,6 +1,3 @@
-#[cfg(feature = "zfuture")]
-use std::convert::TryInto;
-
 use blake2b_simd::{Hash as Blake2bHash, Params as Blake2bParams};
 use byteorder::{LittleEndian, WriteBytesExt};
 use ff::PrimeField;
@@ -12,10 +9,7 @@ use crate::{
 };
 
 #[cfg(feature = "zfuture")]
-use crate::{
-    extensions::transparent::Precondition,
-    serialize::{CompactSize, Vector},
-};
+use crate::extensions::transparent::Precondition;
 
 use super::{
     components::{
@@ -27,9 +21,6 @@ use super::{
     Authorization, Transaction, TransactionData, TxVersion,
 };
 
-#[cfg(feature = "zfuture")]
-use super::components::{TzeIn, TzeOut};
-
 const ZCASH_SIGHASH_PERSONALIZATION_PREFIX: &[u8; 12] = b"ZcashSigHash";
 const ZCASH_PREVOUTS_HASH_PERSONALIZATION: &[u8; 16] = b"ZcashPrevoutHash";
 const ZCASH_SEQUENCE_HASH_PERSONALIZATION: &[u8; 16] = b"ZcashSequencHash";
@@ -37,16 +28,6 @@ const ZCASH_OUTPUTS_HASH_PERSONALIZATION: &[u8; 16] = b"ZcashOutputsHash";
 const ZCASH_JOINSPLITS_HASH_PERSONALIZATION: &[u8; 16] = b"ZcashJSplitsHash";
 const ZCASH_SHIELDED_SPENDS_HASH_PERSONALIZATION: &[u8; 16] = b"ZcashSSpendsHash";
 const ZCASH_SHIELDED_OUTPUTS_HASH_PERSONALIZATION: &[u8; 16] = b"ZcashSOutputHash";
-
-#[cfg(feature = "zfuture")]
-const ZCASH_TZE_INPUTS_HASH_PERSONALIZATION: &[u8; 16] = b"Zcash_TzeInsHash";
-#[cfg(feature = "zfuture")]
-const ZCASH_TZE_OUTPUTS_HASH_PERSONALIZATION: &[u8; 16] = b"ZcashTzeOutsHash";
-
-#[cfg(feature = "zfuture")]
-const ZCASH_TZE_SIGNED_INPUT_TAG: &[u8; 1] = &[0x00];
-#[cfg(feature = "zfuture")]
-const ZCASH_TRANSPARENT_SIGNED_INPUT_TAG: &[u8; 1] = &[0x01];
 
 pub const SIGHASH_ALL: u32 = 1;
 const SIGHASH_NONE: u32 = 2;
@@ -73,11 +54,6 @@ macro_rules! update_hash {
 
 fn has_overwinter_components(version: &TxVersion) -> bool {
     !matches!(version, TxVersion::Sprout(_))
-}
-
-#[cfg(feature = "zfuture")]
-fn has_tze_components(version: &TxVersion) -> bool {
-    matches!(version, TxVersion::ZFuture)
 }
 
 fn prevout_hash<TA: transparent::Authorization>(vin: &[TxIn<TA>]) -> Blake2bHash {
@@ -174,30 +150,6 @@ fn shielded_outputs_hash<A: sapling::Authorization<Proof = GrothProofBytes>>(
     Blake2bParams::new()
         .hash_length(32)
         .personal(ZCASH_SHIELDED_OUTPUTS_HASH_PERSONALIZATION)
-        .hash(&data)
-}
-
-#[cfg(feature = "zfuture")]
-fn tze_inputs_hash(tze_inputs: &[TzeIn]) -> Blake2bHash {
-    let mut data = vec![];
-    for tzein in tze_inputs {
-        tzein.write_without_witness(&mut data).unwrap();
-    }
-    Blake2bParams::new()
-        .hash_length(32)
-        .personal(ZCASH_TZE_INPUTS_HASH_PERSONALIZATION)
-        .hash(&data)
-}
-
-#[cfg(feature = "zfuture")]
-fn tze_outputs_hash(tze_outputs: &[TzeOut]) -> Blake2bHash {
-    let mut data = vec![];
-    for tzeout in tze_outputs {
-        tzeout.write(&mut data).unwrap();
-    }
-    Blake2bParams::new()
-        .hash_length(32)
-        .personal(ZCASH_TZE_OUTPUTS_HASH_PERSONALIZATION)
         .hash(&data)
 }
 
@@ -302,19 +254,6 @@ pub fn signature_hash_data<
         } else {
             h.update(&[0; 32]);
         };
-        #[cfg(feature = "zfuture")]
-        if has_tze_components(&tx.version) {
-            update_hash!(
-                h,
-                !tx.tze_inputs.is_empty(),
-                tze_inputs_hash(&tx.tze_inputs)
-            );
-            update_hash!(
-                h,
-                !tx.tze_outputs.is_empty(),
-                tze_outputs_hash(&tx.tze_outputs)
-            );
-        }
         update_hash!(
             h,
             !tx.sprout_bundle
@@ -371,16 +310,6 @@ pub fn signature_hash_data<
                 value,
             } => {
                 if let Some(bundle) = tx.transparent_bundle.as_ref() {
-                    #[cfg(feature = "zfuture")]
-                    let mut data = if has_tze_components(&tx.version) {
-                        // domain separation here is to avoid collision attacks
-                        // between transparent and TZE inputs.
-                        ZCASH_TRANSPARENT_SIGNED_INPUT_TAG.to_vec()
-                    } else {
-                        vec![]
-                    };
-
-                    #[cfg(not(feature = "zfuture"))]
                     let mut data = vec![];
 
                     bundle.vin[index].prevout.write(&mut data).unwrap();
@@ -397,24 +326,8 @@ pub fn signature_hash_data<
                 }
             }
             #[cfg(feature = "zfuture")]
-            SignableInput::Tze {
-                index,
-                precondition,
-                value,
-            } => {
-                if has_tze_components(&tx.version) {
-                    // domain separation here is to avoid collision attacks
-                    // between transparent and TZE inputs.
-                    let mut data = ZCASH_TZE_SIGNED_INPUT_TAG.to_vec();
-
-                    tx.tze_inputs[index].prevout.write(&mut data).unwrap();
-                    CompactSize::write(&mut data, precondition.extension_id.try_into().unwrap())
-                        .unwrap();
-                    CompactSize::write(&mut data, precondition.mode.try_into().unwrap()).unwrap();
-                    Vector::write(&mut data, &precondition.payload, |w, e| w.write_u8(*e)).unwrap();
-                    data.extend_from_slice(&value.to_i64_le_bytes());
-                    h.update(&data);
-                }
+            SignableInput::Tze { .. } => {
+                panic!("A request has been made to sign a TZE input in a V4 transaction.");
             }
 
             SignableInput::Shielded => (),

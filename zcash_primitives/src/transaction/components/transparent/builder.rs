@@ -4,7 +4,10 @@ use std::fmt;
 
 use crate::{
     legacy::TransparentAddress,
-    transaction::components::{amount::Amount, transparent, TxIn, TxOut},
+    transaction::components::{
+        amount::Amount,
+        transparent::{self, TxIn, TxOut},
+    },
 };
 
 #[cfg(feature = "transparent-inputs")]

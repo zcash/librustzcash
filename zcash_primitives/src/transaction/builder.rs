@@ -1,12 +1,11 @@
 //! Structs for building transactions.
 
-use core::array;
+use rand::{rngs::OsRng, CryptoRng, RngCore};
+use std::array;
 use std::error;
 use std::fmt;
 use std::io;
 use std::sync::mpsc::Sender;
-
-use rand::{rngs::OsRng, CryptoRng, RngCore};
 
 use orchard::bundle::{self as orchard};
 
@@ -42,10 +41,10 @@ use crate::{legacy::Script, transaction::components::transparent::TxOut};
 
 #[cfg(feature = "zfuture")]
 use crate::{
-    extensions::transparent::{ExtensionTxBuilder, ToPayload},
+    extensions::transparent::{AuthData, ExtensionTxBuilder, ToPayload},
     transaction::components::{
-        tze::builder::{TzeBuilder, WitnessData},
-        tze::{self, TzeIn, TzeOut, TzeOutPoint},
+        tze::builder::TzeBuilder,
+        tze::{self, TzeOut},
     },
 };
 
@@ -339,20 +338,18 @@ impl<'a, P: consensus::Parameters, R: RngCore> Builder<'a, P, R> {
             .map_err(Error::SaplingBuild)?;
 
         #[cfg(feature = "zfuture")]
-        let (tze_inputs, tze_outputs) = self.tze_builder.build();
+        let tze_bundle = self.tze_builder.build();
 
         let unauthed_tx = TransactionData {
             version,
-            #[cfg(feature = "zfuture")]
-            tze_inputs,
-            #[cfg(feature = "zfuture")]
-            tze_outputs,
             lock_time: 0,
             expiry_height: self.expiry_height,
             transparent_bundle,
             sprout_bundle: None,
             sapling_bundle,
             orchard_bundle: None,
+            #[cfg(feature = "zfuture")]
+            tze_bundle,
         };
 
         //
@@ -399,7 +396,7 @@ impl<'a, P: consensus::Parameters, R: RngCore> Builder<'a, P, R> {
         ))
     }
 
-    pub fn apply_signatures(
+    fn apply_signatures(
         consensus_branch_id: consensus::BranchId,
         unauthed_tx: TransactionData<Unauthorized>,
         #[cfg(feature = "transparent-inputs")] transparent_sigs: Option<Vec<Script>>,
@@ -408,7 +405,7 @@ impl<'a, P: consensus::Parameters, R: RngCore> Builder<'a, P, R> {
             Vec<<orchard::Authorized as orchard::Authorization>::SpendAuth>,
             orchard::Authorized,
         )>,
-        #[cfg(feature = "zfuture")] tze_witnesses: Option<Vec<WitnessData>>,
+        #[cfg(feature = "zfuture")] tze_witnesses: Option<Vec<AuthData>>,
     ) -> io::Result<Transaction> {
         #[cfg(feature = "transparent-inputs")]
         let transparent_bundle = match (unauthed_tx.transparent_bundle, transparent_sigs) {
@@ -438,34 +435,30 @@ impl<'a, P: consensus::Parameters, R: RngCore> Builder<'a, P, R> {
             }
         };
 
-        let mut authorized_tx = TransactionData {
+        #[cfg(feature = "zfuture")]
+        let signed_tze_bundle = match (unauthed_tx.tze_bundle, tze_witnesses) {
+            (Some(bundle), Some(witness_payloads)) => {
+                Some(bundle.apply_signatures(witness_payloads))
+            }
+            (None, None) => None,
+            _ => {
+                panic!("Mismatch between TZE bundle and witnesses.")
+            }
+        };
+
+        let authorized_tx = TransactionData {
             version: unauthed_tx.version,
-            #[cfg(feature = "zfuture")]
-            tze_inputs: unauthed_tx.tze_inputs,
-            #[cfg(feature = "zfuture")]
-            tze_outputs: unauthed_tx.tze_outputs,
             lock_time: unauthed_tx.lock_time,
             expiry_height: unauthed_tx.expiry_height,
             transparent_bundle,
             sprout_bundle: unauthed_tx.sprout_bundle,
             sapling_bundle: signed_sapling_bundle,
             orchard_bundle: None,
+            #[cfg(feature = "zfuture")]
+            tze_bundle: signed_tze_bundle,
         };
 
-        #[cfg(feature = "zfuture")]
-        Self::apply_tze_sigs(&mut authorized_tx.tze_inputs, tze_witnesses);
-
         authorized_tx.freeze(consensus_branch_id)
-    }
-
-    #[cfg(feature = "zfuture")]
-    pub fn apply_tze_sigs(vtzein: &mut [TzeIn], tze_witnesses: Option<Vec<WitnessData>>) {
-        if let Some(tze_witnesses) = tze_witnesses {
-            assert!(vtzein.len() == tze_witnesses.len());
-            for (i, payload) in tze_witnesses.into_iter().enumerate() {
-                vtzein[i].witness.payload = payload.0;
-            }
-        }
     }
 }
 
@@ -480,7 +473,7 @@ impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng> ExtensionTxBuilder<'a
         &mut self,
         extension_id: u32,
         mode: u32,
-        prevout: (TzeOutPoint, TzeOut),
+        prevout: (tze::OutPoint, TzeOut),
         witness_builder: WBuilder,
     ) -> Result<(), Self::BuildError>
     where
@@ -516,31 +509,6 @@ impl<'a, P: consensus::Parameters, R: RngCore> Builder<'a, P, R> {
     ///
     /// WARNING: DO NOT USE IN PRODUCTION
     pub fn test_only_new_with_rng(params: P, height: BlockHeight, rng: R) -> Builder<'a, P, R> {
-        Self::new_internal(params, height, rng)
-    }
-
-    /// Creates a new `Builder` targeted for inclusion in the block with the given height,
-    /// and randomness source, using default values for general transaction fields
-    /// and the `ZFUTURE_TX_VERSION` and `ZFUTURE_VERSION_GROUP_ID` version identifiers.
-    ///
-    /// # Default values
-    ///
-    /// The expiry height will be set to the given height plus the default transaction
-    /// expiry delta (20 blocks).
-    ///
-    /// The fee will be set to the default fee (0.0001 ZEC).
-    ///
-    /// The transaction will be constructed and serialized according to the
-    /// NetworkUpgrade::ZFuture rules. This is intended only for use in
-    /// integration testing of new features.
-    ///
-    /// WARNING: DO NOT USE IN PRODUCTION
-    #[cfg(feature = "zfuture")]
-    pub fn test_only_new_with_rng_zfuture(
-        params: P,
-        height: BlockHeight,
-        rng: R,
-    ) -> Builder<'a, P, R> {
         Self::new_internal(params, height, rng)
     }
 

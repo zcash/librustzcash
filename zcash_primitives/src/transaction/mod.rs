@@ -25,7 +25,7 @@ use self::{
 };
 
 #[cfg(feature = "zfuture")]
-use self::components::{TzeIn, TzeOut};
+use self::components::tze;
 
 pub mod builder;
 pub mod components;
@@ -39,6 +39,9 @@ const OVERWINTER_VERSION_GROUP_ID: u32 = 0x03C48270;
 const OVERWINTER_TX_VERSION: u32 = 3;
 const SAPLING_VERSION_GROUP_ID: u32 = 0x892F2085;
 const SAPLING_TX_VERSION: u32 = 4;
+
+const V5_TX_VERSION: u32 = 5;
+const V5_VERSION_GROUP_ID: u32 = 0x26A7270A;
 
 /// These versions are used exclusively for in-development transaction
 /// serialization, and will never be active under the consensus rules.
@@ -97,6 +100,7 @@ pub enum TxVersion {
     Sprout(u32),
     Overwinter,
     Sapling,
+    ZcashTxV5,
     #[cfg(feature = "zfuture")]
     ZFuture,
 }
@@ -140,6 +144,7 @@ impl TxVersion {
                 TxVersion::Sprout(v) => *v,
                 TxVersion::Overwinter => OVERWINTER_TX_VERSION,
                 TxVersion::Sapling => SAPLING_TX_VERSION,
+                TxVersion::ZcashTxV5 => V5_TX_VERSION,
                 #[cfg(feature = "zfuture")]
                 TxVersion::ZFuture => ZFUTURE_TX_VERSION,
             }
@@ -150,6 +155,7 @@ impl TxVersion {
             TxVersion::Sprout(_) => 0,
             TxVersion::Overwinter => OVERWINTER_VERSION_GROUP_ID,
             TxVersion::Sapling => SAPLING_VERSION_GROUP_ID,
+            TxVersion::ZcashTxV5 => V5_VERSION_GROUP_ID,
             #[cfg(feature = "zfuture")]
             TxVersion::ZFuture => ZFUTURE_VERSION_GROUP_ID,
         }
@@ -167,6 +173,7 @@ impl TxVersion {
         match self {
             TxVersion::Sprout(v) => *v >= 2u32,
             TxVersion::Overwinter | TxVersion::Sapling => true,
+            TxVersion::ZcashTxV5 => false,
             #[cfg(feature = "zfuture")]
             TxVersion::ZFuture => true,
         }
@@ -176,6 +183,7 @@ impl TxVersion {
         match self {
             TxVersion::Sprout(_) | TxVersion::Overwinter => false,
             TxVersion::Sapling => true,
+            TxVersion::ZcashTxV5 => true,
             #[cfg(feature = "zfuture")]
             TxVersion::ZFuture => true,
         }
@@ -200,6 +208,9 @@ pub trait Authorization {
     type TransparentAuth: transparent::Authorization;
     type SaplingAuth: sapling::Authorization;
     type OrchardAuth: orchard::bundle::Authorization;
+
+    #[cfg(feature = "zfuture")]
+    type TzeAuth: tze::Authorization;
 }
 
 pub struct Authorized;
@@ -208,6 +219,9 @@ impl Authorization for Authorized {
     type TransparentAuth = transparent::Authorized;
     type SaplingAuth = sapling::Authorized;
     type OrchardAuth = orchard::bundle::Authorized;
+
+    #[cfg(feature = "zfuture")]
+    type TzeAuth = tze::Authorized;
 }
 
 pub struct Unauthorized;
@@ -216,6 +230,9 @@ impl Authorization for Unauthorized {
     type TransparentAuth = transparent::Unauthorized;
     type SaplingAuth = sapling::Unauthorized;
     type OrchardAuth = orchard::builder::Unauthorized;
+
+    #[cfg(feature = "zfuture")]
+    type TzeAuth = tze::Unauthorized;
 }
 
 /// A Zcash transaction.
@@ -239,27 +256,16 @@ impl PartialEq for Transaction {
     }
 }
 
-impl Transaction {
-    pub fn sapling_value_balance(&self) -> Amount {
-        self.data
-            .sapling_bundle
-            .as_ref()
-            .map_or(Amount::zero(), |b| b.value_balance)
-    }
-}
-
 pub struct TransactionData<A: Authorization> {
     pub version: TxVersion,
-    #[cfg(feature = "zfuture")]
-    pub tze_inputs: Vec<TzeIn>,
-    #[cfg(feature = "zfuture")]
-    pub tze_outputs: Vec<TzeOut>,
     pub lock_time: u32,
     pub expiry_height: BlockHeight,
     pub transparent_bundle: Option<transparent::Bundle<A::TransparentAuth>>,
     pub sprout_bundle: Option<sprout::Bundle>,
     pub sapling_bundle: Option<sapling::Bundle<A::SaplingAuth>>,
-    pub orchard_bundle: Option<orchard::Bundle<A::OrchardAuth, Amount>>,
+    pub orchard_bundle: Option<orchard::bundle::Bundle<A::OrchardAuth, Amount>>,
+    #[cfg(feature = "zfuture")]
+    pub tze_bundle: Option<tze::Bundle<A::TzeAuth>>,
 }
 
 impl<A: Authorization> std::fmt::Debug for TransactionData<A> {
@@ -268,50 +274,59 @@ impl<A: Authorization> std::fmt::Debug for TransactionData<A> {
             f,
             "TransactionData(
                 version = {:?},
-                vin = {:?},
-                vout = {:?},{}
                 lock_time = {:?},
                 expiry_height = {:?},
+                {}{}{}{}",
+            self.version,
+            self.lock_time,
+            self.expiry_height,
+            if let Some(b) = &self.transparent_bundle {
+                format!(
+                    "
+                vin = {:?},
+                vout = {:?},",
+                    b.vin, b.vout
+                )
+            } else {
+                "".to_string()
+            },
+            if let Some(b) = &self.sprout_bundle {
+                format!(
+                    "
+                joinsplits = {:?},
+                joinsplit_pubkey = {:?},",
+                    b.joinsplits, b.joinsplit_pubkey
+                )
+            } else {
+                "".to_string()
+            },
+            if let Some(b) = &self.sapling_bundle {
+                format!(
+                    "
                 value_balance = {:?},
                 shielded_spends = {:?},
                 shielded_outputs = {:?},
-                joinsplits = {:?},
-                joinsplit_pubkey = {:?},
-                binding_sig = {:?})",
-            self.version,
-            self.transparent_bundle.as_ref().map_or(&vec![], |b| &b.vin),
-            self.transparent_bundle
-                .as_ref()
-                .map_or(&vec![], |b| &b.vout),
+                binding_sig = {:?},",
+                    b.value_balance, b.shielded_spends, b.shielded_outputs, b.authorization
+                )
+            } else {
+                "".to_string()
+            },
             {
                 #[cfg(feature = "zfuture")]
-                {
+                if let Some(b) = &self.tze_bundle {
                     format!(
                         "
                 tze_inputs = {:?},
                 tze_outputs = {:?},",
-                        self.tze_inputs, self.tze_outputs
+                        b.vin, b.vout
                     )
+                } else {
+                    "".to_string()
                 }
                 #[cfg(not(feature = "zfuture"))]
                 ""
-            },
-            self.lock_time,
-            self.expiry_height,
-            self.sapling_bundle
-                .as_ref()
-                .map_or(Amount::zero(), |b| b.value_balance),
-            self.sapling_bundle
-                .as_ref()
-                .map_or(&vec![], |b| &b.shielded_spends),
-            self.sapling_bundle
-                .as_ref()
-                .map_or(&vec![], |b| &b.shielded_outputs),
-            self.sprout_bundle
-                .as_ref()
-                .map_or(&vec![], |b| &b.joinsplits),
-            self.sprout_bundle.as_ref().map(|b| &b.joinsplit_pubkey),
-            self.sapling_bundle.as_ref().map(|b| &b.authorization)
+            }
         )
     }
 }
@@ -334,16 +349,14 @@ impl TransactionData<Unauthorized> {
     pub fn new() -> Self {
         TransactionData {
             version: TxVersion::Sapling,
-            #[cfg(feature = "zfuture")]
-            tze_inputs: vec![],
-            #[cfg(feature = "zfuture")]
-            tze_outputs: vec![],
             lock_time: 0,
             expiry_height: 0u32.into(),
             transparent_bundle: None,
             sprout_bundle: None,
             sapling_bundle: None,
             orchard_bundle: None,
+            #[cfg(feature = "zfuture")]
+            tze_bundle: None,
         }
     }
 
@@ -351,26 +364,28 @@ impl TransactionData<Unauthorized> {
     pub fn zfuture() -> Self {
         TransactionData {
             version: TxVersion::ZFuture,
-            tze_inputs: vec![],
-            tze_outputs: vec![],
             lock_time: 0,
             expiry_height: 0u32.into(),
             transparent_bundle: None,
             sprout_bundle: None,
             sapling_bundle: None,
             orchard_bundle: None,
+            tze_bundle: None,
         }
     }
 }
 
 impl TransactionData<Authorized> {
-    pub fn freeze(self, _consensus_branch_id: BranchId) -> io::Result<Transaction> {
-        Transaction::from_data(self)
+    pub fn freeze(self, consensus_branch_id: BranchId) -> io::Result<Transaction> {
+        Transaction::from_data(self, consensus_branch_id)
     }
 }
 
 impl Transaction {
-    fn from_data(data: TransactionData<Authorized>) -> io::Result<Self> {
+    fn from_data(
+        data: TransactionData<Authorized>,
+        _consensus_branch_id: BranchId,
+    ) -> io::Result<Self> {
         let mut tx = Transaction {
             txid: TxId([0; 32]),
             data,
@@ -392,24 +407,10 @@ impl Transaction {
         let is_overwinter_v3 = version == TxVersion::Overwinter;
         let is_sapling_v4 = version == TxVersion::Sapling;
 
-        #[cfg(feature = "zfuture")]
-        let has_tze = version == TxVersion::ZFuture;
-        #[cfg(not(feature = "zfuture"))]
-        let has_tze = false;
-
         let transparent_bundle = Self::read_transparent(&mut reader)?;
 
-        #[cfg(feature = "zfuture")]
-        let (tze_inputs, tze_outputs) = if has_tze {
-            let wi = Vector::read(&mut reader, TzeIn::read)?;
-            let wo = Vector::read(&mut reader, TzeOut::read)?;
-            (wi, wo)
-        } else {
-            (vec![], vec![])
-        };
-
         let lock_time = reader.read_u32::<LittleEndian>()?;
-        let expiry_height: BlockHeight = if is_overwinter_v3 || is_sapling_v4 || has_tze {
+        let expiry_height: BlockHeight = if is_overwinter_v3 || is_sapling_v4 {
             reader.read_u32::<LittleEndian>()?.into()
         } else {
             0u32.into()
@@ -449,13 +450,12 @@ impl Transaction {
             None
         };
 
-        let binding_sig = if (is_sapling_v4 || has_tze)
-            && !(shielded_spends.is_empty() && shielded_outputs.is_empty())
-        {
-            Some(redjubjub::Signature::read(&mut reader)?)
-        } else {
-            None
-        };
+        let binding_sig =
+            if is_sapling_v4 && !(shielded_spends.is_empty() && shielded_outputs.is_empty()) {
+                Some(redjubjub::Signature::read(&mut reader)?)
+            } else {
+                None
+            };
 
         let mut txid = [0; 32];
         txid.copy_from_slice(&reader.into_hash());
@@ -464,10 +464,6 @@ impl Transaction {
             txid: TxId(txid),
             data: TransactionData {
                 version,
-                #[cfg(feature = "zfuture")]
-                tze_inputs,
-                #[cfg(feature = "zfuture")]
-                tze_outputs,
                 lock_time,
                 expiry_height,
                 transparent_bundle,
@@ -479,6 +475,8 @@ impl Transaction {
                     authorization: sapling::Authorized { binding_sig },
                 }),
                 orchard_bundle: None,
+                #[cfg(feature = "zfuture")]
+                tze_bundle: None,
             },
         })
     }
@@ -508,20 +506,10 @@ impl Transaction {
         let is_overwinter_v3 = self.version == TxVersion::Overwinter;
         let is_sapling_v4 = self.version == TxVersion::Sapling;
 
-        #[cfg(feature = "zfuture")]
-        let has_tze = self.version == TxVersion::ZFuture;
-        #[cfg(not(feature = "zfuture"))]
-        let has_tze = false;
-
         self.write_transparent(&mut writer)?;
 
-        #[cfg(feature = "zfuture")]
-        if has_tze {
-            Vector::write(&mut writer, &self.tze_inputs, |w, e| e.write(w))?;
-            Vector::write(&mut writer, &self.tze_outputs, |w, e| e.write(w))?;
-        }
         writer.write_u32::<LittleEndian>(self.lock_time)?;
-        if is_overwinter_v3 || is_sapling_v4 || has_tze {
+        if is_overwinter_v3 || is_sapling_v4 {
             writer.write_u32::<LittleEndian>(u32::from(self.expiry_height))?;
         }
 
@@ -555,14 +543,12 @@ impl Transaction {
         }
 
         if self.version.has_sprout() {
-            Vector::write(
-                &mut writer,
-                self.sprout_bundle.as_ref().map_or(&[], |b| &b.joinsplits),
-                |w, e| e.write(w),
-            )?;
-            for bundle in &self.sprout_bundle {
+            if let Some(bundle) = self.sprout_bundle.as_ref() {
+                Vector::write(&mut writer, &bundle.joinsplits, |w, e| e.write(w))?;
                 writer.write_all(&bundle.joinsplit_pubkey)?;
                 writer.write_all(&bundle.joinsplit_sig)?;
+            } else {
+                CompactSize::write(&mut writer, 0)?;
             }
         }
 
@@ -573,7 +559,7 @@ impl Transaction {
         } else if self.sapling_bundle.is_some() {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
-                "Binding signature should not be present",
+                "Sapling components may not be present if Sapling is not active.",
             ));
         }
 
@@ -581,78 +567,45 @@ impl Transaction {
     }
 
     pub fn write_transparent<W: Write>(&self, mut writer: W) -> io::Result<()> {
-        match &self.transparent_bundle {
-            Some(bundle) => {
-                Vector::write(&mut writer, &bundle.vin, |w, e| e.write(w))?;
-                Vector::write(&mut writer, &bundle.vout, |w, e| e.write(w))?;
-            }
-            None => {
-                CompactSize::write(&mut writer, 0)?;
-                CompactSize::write(&mut writer, 0)?;
-            }
+        if let Some(bundle) = &self.transparent_bundle {
+            Vector::write(&mut writer, &bundle.vin, |w, e| e.write(w))?;
+            Vector::write(&mut writer, &bundle.vout, |w, e| e.write(w))?;
+        } else {
+            CompactSize::write(&mut writer, 0)?;
+            CompactSize::write(&mut writer, 0)?;
         }
+
+        Ok(())
+    }
+
+    #[cfg(feature = "zfuture")]
+    pub fn write_tze<W: Write>(&self, mut writer: W) -> io::Result<()> {
+        if let Some(bundle) = &self.tze_bundle {
+            Vector::write(&mut writer, &bundle.vin, |w, e| e.write(w))?;
+            Vector::write(&mut writer, &bundle.vout, |w, e| e.write(w))?;
+        } else {
+            CompactSize::write(&mut writer, 0)?;
+            CompactSize::write(&mut writer, 0)?;
+        }
+
         Ok(())
     }
 }
 
 #[cfg(any(test, feature = "test-dependencies"))]
 pub mod testing {
-    use proptest::collection::vec;
     use proptest::prelude::*;
     use proptest::sample::select;
 
     use crate::consensus::BranchId;
 
-    #[cfg(feature = "zfuture")]
-    use crate::extensions::transparent as tze;
-
     use super::{
-        components::{
-            amount::testing::arb_nonnegative_amount, transparent::testing as transparent,
-        },
-        Authorized, Transaction, TransactionData, TxId, TxVersion,
+        components::transparent::testing as transparent, Authorized, Transaction, TransactionData,
+        TxId, TxVersion,
     };
-
-    #[cfg(feature = "zfuture")]
-    use super::components::{TzeIn, TzeOut, TzeOutPoint};
 
     pub fn arb_txid() -> impl Strategy<Value = TxId> {
         prop::array::uniform32(any::<u8>()).prop_map(TxId::from_bytes)
-    }
-
-    #[cfg(feature = "zfuture")]
-    prop_compose! {
-        pub fn arb_tzeoutpoint()(txid in arb_txid(), n in 1..100u32) -> TzeOutPoint {
-            TzeOutPoint::new(txid, n)
-        }
-    }
-
-    #[cfg(feature = "zfuture")]
-    prop_compose! {
-        pub fn arb_witness()(extension_id in 0..100u32, mode in 0..100u32, payload in vec(any::<u8>(), 32..256))  -> tze::Witness {
-            tze::Witness { extension_id, mode, payload }
-        }
-    }
-
-    #[cfg(feature = "zfuture")]
-    prop_compose! {
-        pub fn arb_tzein()(prevout in arb_tzeoutpoint(), witness in arb_witness()) -> TzeIn {
-            TzeIn { prevout, witness }
-        }
-    }
-
-    #[cfg(feature = "zfuture")]
-    prop_compose! {
-        pub fn arb_precondition()(extension_id in 0..100u32, mode in 0..100u32, payload in vec(any::<u8>(), 32..256))  -> tze::Precondition {
-            tze::Precondition { extension_id, mode, payload }
-        }
-    }
-
-    #[cfg(feature = "zfuture")]
-    prop_compose! {
-        fn arb_tzeout()(value in arb_nonnegative_amount(), precondition in arb_precondition()) -> TzeOut {
-            TzeOut { value, precondition }
-        }
     }
 
     pub fn arb_branch_id() -> impl Strategy<Value = BranchId> {
@@ -668,47 +621,23 @@ pub mod testing {
         ])
     }
 
-    fn tx_versions(branch_id: BranchId) -> impl Strategy<Value = TxVersion> {
+    pub fn arb_tx_version(branch_id: BranchId) -> impl Strategy<Value = TxVersion> {
         match branch_id {
             BranchId::Sprout => (1..=2u32).prop_map(TxVersion::Sprout).boxed(),
             BranchId::Overwinter => Just(TxVersion::Overwinter).boxed(),
-            #[cfg(feature = "zfuture")]
-            BranchId::ZFuture => Just(TxVersion::ZFuture).boxed(),
+            //#[cfg(feature = "zfuture")]
+            //BranchId::ZFuture => Just(TxVersion::ZFuture).boxed(),
             _otherwise => Just(TxVersion::Sapling).boxed(),
-        }
-    }
-
-    #[cfg(feature = "zfuture")]
-    prop_compose! {
-        pub fn arb_txdata(branch_id: BranchId)(
-            version in tx_versions(branch_id),
-            transparent_bundle in transparent::arb_bundle(),
-            tze_inputs in vec(arb_tzein(), 0..10),
-            tze_outputs in vec(arb_tzeout(), 0..10),
-            lock_time in any::<u32>(),
-            expiry_height in any::<u32>(),
-        ) -> TransactionData<Authorized> {
-            TransactionData {
-                version,
-                tze_inputs:  if branch_id == BranchId::ZFuture { tze_inputs } else { vec![] },
-                tze_outputs: if branch_id == BranchId::ZFuture { tze_outputs } else { vec![] },
-                lock_time,
-                expiry_height: expiry_height.into(),
-                transparent_bundle,
-                sprout_bundle: None,
-                sapling_bundle: None, //FIXME
-                orchard_bundle: None, //FIXME
-            }
         }
     }
 
     #[cfg(not(feature = "zfuture"))]
     prop_compose! {
         pub fn arb_txdata(branch_id: BranchId)(
-            version in tx_versions(branch_id),
-            transparent_bundle in transparent::arb_bundle(),
+            version in arb_tx_version(branch_id),
             lock_time in any::<u32>(),
             expiry_height in any::<u32>(),
+            transparent_bundle in transparent::arb_bundle(),
         ) -> TransactionData<Authorized> {
             TransactionData {
                 version,
@@ -722,9 +651,31 @@ pub mod testing {
         }
     }
 
+    #[cfg(feature = "zfuture")]
+    prop_compose! {
+        pub fn arb_txdata(branch_id: BranchId)(
+            version in arb_tx_version(branch_id),
+            lock_time in any::<u32>(),
+            expiry_height in any::<u32>(),
+            transparent_bundle in transparent::arb_bundle(),
+            //tze_bundle in tze::arb_bundle(branch_id),
+        ) -> TransactionData<Authorized> {
+            TransactionData {
+                version,
+                lock_time,
+                expiry_height: expiry_height.into(),
+                transparent_bundle,
+                sprout_bundle: None,
+                sapling_bundle: None, //FIXME
+                orchard_bundle: None, //FIXME
+                tze_bundle: None
+            }
+        }
+    }
+
     prop_compose! {
         pub fn arb_tx(branch_id: BranchId)(tx_data in arb_txdata(branch_id)) -> Transaction {
-            Transaction::from_data(tx_data).unwrap()
+            Transaction::from_data(tx_data, branch_id).unwrap()
         }
     }
 }

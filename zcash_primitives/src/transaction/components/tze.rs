@@ -3,9 +3,9 @@
 
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 
-use std::io::{self, Read, Write};
-
 use std::convert::TryFrom;
+use std::fmt::Debug;
+use std::io::{self, Read, Write};
 
 use crate::{
     extensions::transparent as tze,
@@ -21,21 +21,67 @@ fn to_io_error(_: std::num::TryFromIntError) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, "value out of range")
 }
 
+pub trait Authorization: Debug {
+    type Witness: Debug + Clone + PartialEq;
+}
+
+#[derive(Debug, Copy, Clone, PartialEq)]
+pub struct Unauthorized;
+
+impl Authorization for Unauthorized {
+    type Witness = ();
+}
+
+#[derive(Debug, Copy, Clone, PartialEq)]
+pub struct Authorized;
+
+impl Authorization for Authorized {
+    type Witness = tze::AuthData;
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Bundle<A: Authorization> {
+    pub vin: Vec<TzeIn<A>>,
+    pub vout: Vec<TzeOut>,
+}
+
+impl Bundle<Unauthorized> {
+    pub fn apply_signatures(self, witnesses: Vec<tze::AuthData>) -> Bundle<Authorized> {
+        assert!(self.vin.len() == witnesses.len());
+        Bundle {
+            vin: self
+                .vin
+                .into_iter()
+                .zip(witnesses.into_iter())
+                .map(|(tzein, payload)| TzeIn {
+                    prevout: tzein.prevout,
+                    witness: tze::Witness {
+                        extension_id: tzein.witness.extension_id,
+                        mode: tzein.witness.mode,
+                        payload,
+                    },
+                })
+                .collect(),
+            vout: self.vout,
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
-pub struct TzeOutPoint {
+pub struct OutPoint {
     txid: TxId,
     n: u32,
 }
 
-impl TzeOutPoint {
+impl OutPoint {
     pub fn new(txid: TxId, n: u32) -> Self {
-        TzeOutPoint { txid, n }
+        OutPoint { txid, n }
     }
 
     pub fn read<R: Read>(mut reader: R) -> io::Result<Self> {
         let txid = TxId::read(&mut reader)?;
         let n = reader.read_u32::<LittleEndian>()?;
-        Ok(TzeOutPoint { txid, n })
+        Ok(OutPoint { txid, n })
     }
 
     pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
@@ -53,48 +99,12 @@ impl TzeOutPoint {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct TzeIn {
-    pub prevout: TzeOutPoint,
-    pub witness: tze::Witness,
+pub struct TzeIn<A: Authorization> {
+    pub prevout: OutPoint,
+    pub witness: tze::Witness<A::Witness>,
 }
 
-/// Transaction encoding and decoding functions conforming to [ZIP 222].
-///
-/// [ZIP 222]: https://zips.z.cash/zip-0222#encoding-in-transactions
-impl TzeIn {
-    /// Convenience constructor
-    pub fn new(prevout: TzeOutPoint, extension_id: u32, mode: u32) -> Self {
-        TzeIn {
-            prevout,
-            witness: tze::Witness {
-                extension_id,
-                mode,
-                payload: vec![],
-            },
-        }
-    }
-
-    /// Read witness metadata & payload
-    ///
-    /// Used to decode the encoded form used within a serialized
-    /// transaction.
-    pub fn read<R: Read>(mut reader: &mut R) -> io::Result<Self> {
-        let prevout = TzeOutPoint::read(&mut reader)?;
-
-        let extension_id = CompactSize::read(&mut reader)?;
-        let mode = CompactSize::read(&mut reader)?;
-        let payload = Vector::read(&mut reader, |r| r.read_u8())?;
-
-        Ok(TzeIn {
-            prevout,
-            witness: tze::Witness {
-                extension_id: u32::try_from(extension_id).map_err(to_io_error)?,
-                mode: u32::try_from(mode).map_err(to_io_error)?,
-                payload,
-            },
-        })
-    }
-
+impl<A: Authorization> TzeIn<A> {
     /// Write without witness data (for signature hashing)
     ///
     /// This is also used as the prefix for the encoded form used
@@ -112,6 +122,46 @@ impl TzeIn {
             usize::try_from(self.witness.mode).map_err(to_io_error)?,
         )
     }
+}
+
+/// Transaction encoding and decoding functions conforming to [ZIP 222].
+///
+/// [ZIP 222]: https://zips.z.cash/zip-0222#encoding-in-transactions
+impl TzeIn<Unauthorized> {
+    /// Convenience constructor
+    pub fn new(prevout: OutPoint, extension_id: u32, mode: u32) -> Self {
+        TzeIn {
+            prevout,
+            witness: tze::Witness {
+                extension_id,
+                mode,
+                payload: (),
+            },
+        }
+    }
+}
+
+impl TzeIn<Authorized> {
+    /// Read witness metadata & payload
+    ///
+    /// Used to decode the encoded form used within a serialized
+    /// transaction.
+    pub fn read<R: Read>(mut reader: &mut R) -> io::Result<Self> {
+        let prevout = OutPoint::read(&mut reader)?;
+
+        let extension_id = CompactSize::read(&mut reader)?;
+        let mode = CompactSize::read(&mut reader)?;
+        let payload = Vector::read(&mut reader, |r| r.read_u8())?;
+
+        Ok(TzeIn {
+            prevout,
+            witness: tze::Witness {
+                extension_id: u32::try_from(extension_id).map_err(to_io_error)?,
+                mode: u32::try_from(mode).map_err(to_io_error)?,
+                payload: tze::AuthData(payload),
+            },
+        })
+    }
 
     /// Write prevout, extension, and mode followed by witness data.
     ///
@@ -122,7 +172,7 @@ impl TzeIn {
     /// [`write_without_witness`]: TzeIn::write_without_witness
     pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
         self.write_without_witness(&mut writer)?;
-        Vector::write(&mut writer, &self.witness.payload, |w, b| w.write_u8(*b))
+        Vector::write(&mut writer, &self.witness.payload.0, |w, b| w.write_u8(*b))
     }
 }
 
@@ -169,5 +219,63 @@ impl TzeOut {
         Vector::write(&mut writer, &self.precondition.payload, |w, b| {
             w.write_u8(*b)
         })
+    }
+}
+
+#[cfg(any(test, feature = "test-dependencies"))]
+pub mod testing {
+    use proptest::collection::vec;
+    use proptest::prelude::*;
+
+    use crate::{
+        consensus::BranchId,
+        extensions::transparent::{AuthData, Precondition, Witness},
+        transaction::components::amount::testing::arb_nonnegative_amount,
+        transaction::testing::arb_txid,
+    };
+
+    use super::{Authorized, Bundle, OutPoint, TzeIn, TzeOut};
+
+    prop_compose! {
+        pub fn arb_outpoint()(txid in arb_txid(), n in 1..100u32) -> OutPoint {
+            OutPoint::new(txid, n)
+        }
+    }
+
+    prop_compose! {
+        pub fn arb_witness()(extension_id in 0..100u32, mode in 0..100u32, payload in vec(any::<u8>(), 32..256).prop_map(AuthData))  -> Witness<AuthData> {
+            Witness { extension_id, mode, payload }
+        }
+    }
+
+    prop_compose! {
+        pub fn arb_tzein()(prevout in arb_outpoint(), witness in arb_witness()) -> TzeIn<Authorized> {
+            TzeIn { prevout, witness }
+        }
+    }
+
+    prop_compose! {
+        pub fn arb_precondition()(extension_id in 0..100u32, mode in 0..100u32, payload in vec(any::<u8>(), 32..256))  -> Precondition {
+            Precondition { extension_id, mode, payload }
+        }
+    }
+
+    prop_compose! {
+        pub fn arb_tzeout()(value in arb_nonnegative_amount(), precondition in arb_precondition()) -> TzeOut {
+            TzeOut { value, precondition }
+        }
+    }
+
+    prop_compose! {
+        pub fn arb_bundle(branch_id: BranchId)(
+            vin in vec(arb_tzein(), 0..10),
+            vout in vec(arb_tzeout(), 0..10),
+        ) -> Option<Bundle<Authorized>> {
+            if branch_id != BranchId::ZFuture || (vin.is_empty() && vout.is_empty()) {
+                None
+            } else {
+                Some(Bundle { vin, vout })
+            }
+        }
     }
 }

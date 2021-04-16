@@ -5,7 +5,10 @@ use std::fmt;
 
 use crate::{
     extensions::transparent::{self as tze, ToPayload},
-    transaction::components::{amount::Amount, TzeIn, TzeOut, TzeOutPoint},
+    transaction::components::{
+        amount::Amount,
+        tze::{Bundle, OutPoint, TzeIn, TzeOut, Unauthorized},
+    },
 };
 
 #[derive(Debug, PartialEq)]
@@ -32,18 +35,16 @@ struct TzeSigner<'a, BuildCtx> {
 
 pub struct TzeBuilder<'a, BuildCtx> {
     signers: Vec<TzeSigner<'a, BuildCtx>>,
-    tze_inputs: Vec<TzeIn>,
-    tze_outputs: Vec<TzeOut>,
+    vin: Vec<TzeIn<Unauthorized>>,
+    vout: Vec<TzeOut>,
 }
-
-pub struct WitnessData(pub Vec<u8>);
 
 impl<'a, BuildCtx> TzeBuilder<'a, BuildCtx> {
     pub fn empty() -> Self {
         TzeBuilder {
             signers: vec![],
-            tze_inputs: vec![],
-            tze_outputs: vec![],
+            vin: vec![],
+            vout: vec![],
         }
     }
 
@@ -51,13 +52,12 @@ impl<'a, BuildCtx> TzeBuilder<'a, BuildCtx> {
         &mut self,
         extension_id: u32,
         mode: u32,
-        (outpoint, prevout): (TzeOutPoint, TzeOut),
+        (outpoint, prevout): (OutPoint, TzeOut),
         witness_builder: WBuilder,
     ) where
         WBuilder: 'a + FnOnce(&BuildCtx) -> Result<W, Error>,
     {
-        self.tze_inputs
-            .push(TzeIn::new(outpoint, extension_id, mode));
+        self.vin.push(TzeIn::new(outpoint, extension_id, mode));
         self.signers.push(TzeSigner {
             prevout,
             builder: Box::new(move |ctx| witness_builder(&ctx).map(|x| x.to_payload())),
@@ -75,7 +75,7 @@ impl<'a, BuildCtx> TzeBuilder<'a, BuildCtx> {
         }
 
         let (mode, payload) = guarded_by.to_payload();
-        self.tze_outputs.push(TzeOut {
+        self.vout.push(TzeOut {
             value,
             precondition: tze::Precondition {
                 extension_id,
@@ -93,25 +93,33 @@ impl<'a, BuildCtx> TzeBuilder<'a, BuildCtx> {
             .map(|s| s.prevout.value)
             .sum::<Option<Amount>>()?
             - self
-                .tze_outputs
+                .vout
                 .iter()
                 .map(|tzo| tzo.value)
                 .sum::<Option<Amount>>()?
     }
 
-    pub fn build(&self) -> (Vec<TzeIn>, Vec<TzeOut>) {
-        (self.tze_inputs.clone(), self.tze_outputs.clone())
+    pub fn build(&self) -> Option<Bundle<Unauthorized>> {
+        if self.vin.is_empty() && self.vout.is_empty() {
+            None
+        } else {
+            Some(Bundle {
+                vin: self.vin.clone(),
+                vout: self.vout.clone(),
+            })
+        }
     }
 
-    pub fn create_witnesses(self, mtx: &BuildCtx) -> Result<Option<Vec<WitnessData>>, Error> {
-        if self.tze_inputs.is_empty() {
+    pub fn create_witnesses(self, mtx: &BuildCtx) -> Result<Option<Vec<tze::AuthData>>, Error> {
+        // Create TZE input witnesses
+        if self.vin.is_empty() && self.vout.is_empty() {
             Ok(None)
         } else {
             // Create TZE input witnesses
             let payloads = self
                 .signers
                 .into_iter()
-                .zip(self.tze_inputs.into_iter())
+                .zip(self.vin.into_iter())
                 .into_iter()
                 .map(|(signer, tzein)| {
                     // The witness builder function should have cached/closed over whatever data was
@@ -123,7 +131,7 @@ impl<'a, BuildCtx> TzeBuilder<'a, BuildCtx> {
                         return Err(Error::WitnessModeMismatch(input_mode, mode));
                     }
 
-                    Ok(WitnessData(payload))
+                    Ok(tze::AuthData(payload))
                 })
                 .collect::<Result<Vec<_>, Error>>()?;
 
