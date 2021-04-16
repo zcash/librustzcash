@@ -428,7 +428,13 @@ pub fn try_compact_note_decryption<D: Domain, Output: ShieldedOutput<D>>(
     plaintext.copy_from_slice(output.enc_ciphertext());
     ChaCha20Ietf::xor(key.as_ref(), &[0u8; 12], 1, &mut plaintext);
 
-    parse_note_plaintext_without_memo_ivk(domain, ivk, output.epk(), &output.cmstar_bytes(), &plaintext)
+    parse_note_plaintext_without_memo_ivk(
+        domain,
+        ivk,
+        output.epk(),
+        &output.cmstar_bytes(),
+        &plaintext,
+    )
 }
 
 /// Recovery of the full note plaintext by the sender.
@@ -484,7 +490,9 @@ pub fn try_output_recovery_with_ock<D: Domain, Output: ShieldedOutput<D>>(
         domain.parse_note_plaintext_without_memo_ovk(&pk_d, &esk, output.epk(), &plaintext)?;
     let memo = domain.extract_memo(&plaintext);
 
-    if let NoteValidity::Valid = check_note_validity::<D>(&note, output.epk(), &output.cmstar_bytes()) {
+    if let NoteValidity::Valid =
+        check_note_validity::<D>(&note, output.epk(), &output.cmstar_bytes())
+    {
         Some((note, to, memo))
     } else {
         None

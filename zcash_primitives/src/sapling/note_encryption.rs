@@ -118,7 +118,7 @@ pub struct SaplingDomain<P: consensus::Parameters> {
 
 impl<P: consensus::Parameters> Domain for SaplingDomain<P> {
     type EphemeralSecretKey = jubjub::Scalar;
-    // It is acceptable for this to be a point because we enforce by consensus that 
+    // It is acceptable for this to be a point because we enforce by consensus that
     // points must not be small-order, and all points with non-canonical serialization
     // are small-order.
     type EphemeralPublicKey = jubjub::ExtendedPoint;
