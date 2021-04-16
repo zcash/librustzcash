@@ -3,8 +3,10 @@ use std::collections::HashMap;
 use zcash_primitives::{
     consensus::{self, BlockHeight},
     memo::MemoBytes,
-    note_encryption::{try_sapling_note_decryption, try_sapling_output_recovery},
-    sapling::{Note, PaymentAddress},
+    sapling::{
+        note_encryption::{try_sapling_note_decryption, try_sapling_output_recovery},
+        Note, PaymentAddress,
+    },
     transaction::Transaction,
     zip32::ExtendedFullViewingKey,
 };
@@ -47,29 +49,14 @@ pub fn decrypt_transaction<P: consensus::Parameters>(
         let ovk = extfvk.fvk.ovk;
 
         for (index, output) in tx.shielded_outputs.iter().enumerate() {
-            let ((note, to, memo), outgoing) = match try_sapling_note_decryption(
-                params,
-                height,
-                &ivk,
-                &output.ephemeral_key,
-                &output.cmu,
-                &output.enc_ciphertext,
-            ) {
-                Some(ret) => (ret, false),
-                None => match try_sapling_output_recovery(
-                    params,
-                    height,
-                    &ovk,
-                    &output.cv,
-                    &output.cmu,
-                    &output.ephemeral_key,
-                    &output.enc_ciphertext,
-                    &output.out_ciphertext,
-                ) {
-                    Some(ret) => (ret, true),
-                    None => continue,
-                },
-            };
+            let ((note, to, memo), outgoing) =
+                match try_sapling_note_decryption(params, height, &ivk, output) {
+                    Some(ret) => (ret, false),
+                    None => match try_sapling_output_recovery(params, height, &ovk, output) {
+                        Some(ret) => (ret, true),
+                        None => continue,
+                    },
+                };
             decrypted.push(DecryptedOutput {
                 index,
                 note,

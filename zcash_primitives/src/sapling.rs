@@ -2,6 +2,7 @@
 
 pub mod group_hash;
 pub mod keys;
+pub mod note_encryption;
 pub mod pedersen_hash;
 pub mod prover;
 pub mod redjubjub;
@@ -325,10 +326,10 @@ impl PaymentAddress {
         self.diversifier.g_d()
     }
 
-    pub fn create_note(&self, value: u64, randomness: Rseed) -> Option<Note> {
+    pub fn create_note(&self, value: u64, rseed: Rseed) -> Option<Note> {
         self.g_d().map(|g_d| Note {
             value,
-            rseed: randomness,
+            rseed,
             g_d,
             pk_d: self.pk_d,
         })

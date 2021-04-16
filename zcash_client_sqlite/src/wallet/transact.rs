@@ -155,8 +155,7 @@ mod tests {
         block::BlockHash,
         consensus::BlockHeight,
         legacy::TransparentAddress,
-        note_encryption::try_sapling_output_recovery,
-        sapling::prover::TxProver,
+        sapling::{note_encryption::try_sapling_output_recovery, prover::TxProver},
         transaction::{components::Amount, Transaction},
         zip32::{ExtendedFullViewingKey, ExtendedSpendingKey},
     };
@@ -635,11 +634,7 @@ mod tests {
                 &network,
                 sapling_activation_height(),
                 &extfvk.fvk.ovk,
-                &output.cv,
-                &output.cmu,
-                &output.ephemeral_key,
-                &output.enc_ciphertext,
-                &output.out_ciphertext,
+                output,
             )
         };
 

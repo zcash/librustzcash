@@ -3,10 +3,18 @@ use group::GroupEncoding;
 
 use std::io::{self, Read, Write};
 
-use crate::sapling::{
-    redjubjub::{PublicKey, Signature},
-    Nullifier,
+use zcash_note_encryption::ShieldedOutput;
+
+use crate::{
+    consensus,
+    sapling::{
+        note_encryption::SaplingDomain,
+        redjubjub::{PublicKey, Signature},
+        Nullifier,
+    },
 };
+
+use zcash_note_encryption::COMPACT_NOTE_SIZE;
 
 use super::GROTH_PROOF_SIZE;
 
@@ -110,6 +118,20 @@ pub struct OutputDescription {
     pub zkproof: [u8; GROTH_PROOF_SIZE],
 }
 
+impl<P: consensus::Parameters> ShieldedOutput<SaplingDomain<P>> for OutputDescription {
+    fn epk(&self) -> &jubjub::ExtendedPoint {
+        &self.ephemeral_key
+    }
+
+    fn cmstar_bytes(&self) -> [u8; 32] {
+        self.cmu.to_repr()
+    }
+
+    fn enc_ciphertext(&self) -> &[u8] {
+        &self.enc_ciphertext
+    }
+}
+
 impl std::fmt::Debug for OutputDescription {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
         write!(
@@ -189,5 +211,35 @@ impl OutputDescription {
         writer.write_all(&self.enc_ciphertext)?;
         writer.write_all(&self.out_ciphertext)?;
         writer.write_all(&self.zkproof)
+    }
+}
+
+pub struct CompactOutputDescription {
+    pub epk: jubjub::ExtendedPoint,
+    pub cmu: bls12_381::Scalar,
+    pub enc_ciphertext: Vec<u8>,
+}
+
+impl From<OutputDescription> for CompactOutputDescription {
+    fn from(out: OutputDescription) -> CompactOutputDescription {
+        CompactOutputDescription {
+            epk: out.ephemeral_key,
+            cmu: out.cmu,
+            enc_ciphertext: out.enc_ciphertext[..COMPACT_NOTE_SIZE].to_vec(),
+        }
+    }
+}
+
+impl<P: consensus::Parameters> ShieldedOutput<SaplingDomain<P>> for CompactOutputDescription {
+    fn epk(&self) -> &jubjub::ExtendedPoint {
+        &self.epk
+    }
+
+    fn cmstar_bytes(&self) -> [u8; 32] {
+        self.cmu.to_repr()
+    }
+
+    fn enc_ciphertext(&self) -> &[u8] {
+        &self.enc_ciphertext
     }
 }

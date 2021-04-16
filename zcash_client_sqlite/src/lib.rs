@@ -563,8 +563,10 @@ mod tests {
         block::BlockHash,
         consensus::{BlockHeight, Network, NetworkUpgrade, Parameters},
         memo::MemoBytes,
-        note_encryption::SaplingNoteEncryption,
-        sapling::{util::generate_random_rseed, Note, Nullifier, PaymentAddress},
+        sapling::{
+            note_encryption::sapling_note_encryption, util::generate_random_rseed, Note, Nullifier,
+            PaymentAddress,
+        },
         transaction::components::Amount,
         zip32::ExtendedFullViewingKey,
     };
@@ -614,7 +616,7 @@ mod tests {
             value: value.into(),
             rseed,
         };
-        let encryptor = SaplingNoteEncryption::new(
+        let encryptor = sapling_note_encryption::<_, Network>(
             Some(extfvk.fvk.ovk),
             note.clone(),
             to,
@@ -629,7 +631,7 @@ mod tests {
         let mut cout = CompactOutput::new();
         cout.set_cmu(cmu);
         cout.set_epk(epk);
-        cout.set_ciphertext(enc_ciphertext[..52].to_vec());
+        cout.set_ciphertext(enc_ciphertext.as_ref()[..52].to_vec());
         let mut ctx = CompactTx::new();
         let mut txid = vec![0; 32];
         rng.fill_bytes(&mut txid);
@@ -674,7 +676,7 @@ mod tests {
                 value: value.into(),
                 rseed,
             };
-            let encryptor = SaplingNoteEncryption::new(
+            let encryptor = sapling_note_encryption::<_, Network>(
                 Some(extfvk.fvk.ovk),
                 note.clone(),
                 to,
@@ -688,7 +690,7 @@ mod tests {
             let mut cout = CompactOutput::new();
             cout.set_cmu(cmu);
             cout.set_epk(epk);
-            cout.set_ciphertext(enc_ciphertext[..52].to_vec());
+            cout.set_ciphertext(enc_ciphertext.as_ref()[..52].to_vec());
             cout
         });
 
@@ -702,7 +704,7 @@ mod tests {
                 value: (in_value - value).into(),
                 rseed,
             };
-            let encryptor = SaplingNoteEncryption::new(
+            let encryptor = sapling_note_encryption::<_, Network>(
                 Some(extfvk.fvk.ovk),
                 note.clone(),
                 change_addr,
@@ -716,7 +718,7 @@ mod tests {
             let mut cout = CompactOutput::new();
             cout.set_cmu(cmu);
             cout.set_epk(epk);
-            cout.set_ciphertext(enc_ciphertext[..52].to_vec());
+            cout.set_ciphertext(enc_ciphertext.as_ref()[..52].to_vec());
             cout
         });
 

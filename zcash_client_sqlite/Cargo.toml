@@ -4,6 +4,7 @@ description = "An SQLite-based Zcash light client"
 version = "0.3.0"
 authors = [
     "Jack Grigg <jack@z.cash>",
+    "Kris Nuttycombe <kris@electriccoin.co>"
 ]
 homepage = "https://github.com/zcash/librustzcash"
 repository = "https://github.com/zcash/librustzcash"

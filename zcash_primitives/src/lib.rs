@@ -15,7 +15,6 @@ pub mod constants;
 pub mod legacy;
 pub mod memo;
 pub mod merkle_tree;
-pub mod note_encryption;
 pub mod sapling;
 pub mod serialize;
 pub mod transaction;

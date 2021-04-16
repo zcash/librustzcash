@@ -2,11 +2,12 @@ use criterion::{criterion_group, criterion_main, Criterion};
 use ff::Field;
 use rand_core::OsRng;
 use zcash_primitives::{
-    consensus::{NetworkUpgrade::Canopy, Parameters, TEST_NETWORK},
+    consensus::{NetworkUpgrade::Canopy, Parameters, TestNetwork, TEST_NETWORK},
     memo::MemoBytes,
-    note_encryption::{try_sapling_note_decryption, SaplingNoteEncryption},
     sapling::{
-        util::generate_random_rseed, Diversifier, PaymentAddress, SaplingIvk, ValueCommitment,
+        note_encryption::{sapling_note_encryption, try_sapling_note_decryption},
+        util::generate_random_rseed,
+        Diversifier, PaymentAddress, SaplingIvk, ValueCommitment,
     },
     transaction::components::{OutputDescription, GROTH_PROOF_SIZE},
 };
@@ -37,10 +38,11 @@ fn bench_note_decryption(c: &mut Criterion) {
         let note = pa.create_note(value, rseed).unwrap();
         let cmu = note.cmu();
 
-        let mut ne = SaplingNoteEncryption::new(None, note, pa, MemoBytes::empty(), &mut rng);
-        let ephemeral_key = ne.epk().clone().into();
+        let ne =
+            sapling_note_encryption::<_, TestNetwork>(None, note, pa, MemoBytes::empty(), &mut rng);
+        let ephemeral_key = *ne.epk();
         let enc_ciphertext = ne.encrypt_note_plaintext();
-        let out_ciphertext = ne.encrypt_outgoing_plaintext(&cv, &cmu);
+        let out_ciphertext = ne.encrypt_outgoing_plaintext(&cv, &cmu, &mut rng);
 
         OutputDescription {
             cv,
@@ -55,30 +57,11 @@ fn bench_note_decryption(c: &mut Criterion) {
     let mut group = c.benchmark_group("Sapling note decryption");
 
     group.bench_function("valid", |b| {
-        b.iter(|| {
-            try_sapling_note_decryption(
-                &TEST_NETWORK,
-                height,
-                &valid_ivk,
-                &output.ephemeral_key,
-                &output.cmu,
-                &output.enc_ciphertext,
-            )
-            .unwrap()
-        })
+        b.iter(|| try_sapling_note_decryption(&TEST_NETWORK, height, &valid_ivk, &output).unwrap())
     });
 
     group.bench_function("invalid", |b| {
-        b.iter(|| {
-            try_sapling_note_decryption(
-                &TEST_NETWORK,
-                height,
-                &invalid_ivk,
-                &output.ephemeral_key,
-                &output.cmu,
-                &output.enc_ciphertext,
-            )
-        })
+        b.iter(|| try_sapling_note_decryption(&TEST_NETWORK, height, &invalid_ivk, &output))
     });
 }
 

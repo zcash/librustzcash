@@ -4,6 +4,7 @@ description = "TBD"
 version = "0.0.0"
 authors = [
     "Jack Grigg <jack@electriccoin.co>",
+    "Kris Nuttycombe <kris@electriccoin.co>"
 ]
 homepage = "https://github.com/zcash/librustzcash"
 repository = "https://github.com/zcash/librustzcash"
@@ -11,3 +12,14 @@ license = "MIT OR Apache-2.0"
 edition = "2018"
 
 [dependencies]
+blake2b_simd = "0.5"
+byteorder = "1"
+crypto_api_chachapoly = "0.4"
+ff = "0.8"
+group = "0.8"
+rand_core = "0.5.1"
+subtle = "2.2.3"
+
+[dev-dependencies]
+zcash_primitives = { version = "0.5", path = "../../zcash_primitives" }
+jubjub = "0.5.1"
