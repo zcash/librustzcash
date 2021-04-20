@@ -568,15 +568,23 @@ impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
                 // create_spend_to_address If there are any of our shielded inputs, we interpret this
                 // as our z->t tx and store the vouts as our sent notes.
                 // FIXME this is a weird heuristic that is bound to trip us up somewhere.
-                if d_tx.tx.shielded_spends.iter().any(|input| nullifiers.iter().any(|(_, n)| { *n == input.nullifier } )) {
-                    for (output_index, txout) in d_tx.tx.vout.iter().enumerate() {
-                        wallet::put_sent_utxo(
-                            up,
-                            tx_ref,
-                            output_index,
-                            &txout.script_pubkey.address().unwrap(),
-                            txout.value,
-                        )?;
+
+                // d_tx.tx.shielded_spends.iter().find(|input| nullifiers.iter().any(|(_, n)| { *n == input.nullifier } )) {
+                    
+                match nullifiers.iter().find(|(_, n)| d_tx.tx.shielded_spends.iter().any(|input| *n == input.nullifier )) {
+                    Some(tx_input) => {
+                        for (output_index, txout) in d_tx.tx.vout.iter().enumerate() {
+                            wallet::put_sent_utxo(
+                                up,
+                                tx_ref,
+                                output_index,
+                                tx_input.0,
+                                &txout.script_pubkey.address().unwrap(),
+                                txout.value,
+                            )?;
+                        }
+                    },
+                    None => {
                     }
                 }
             }
@@ -620,6 +628,7 @@ impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
                         up,
                         tx_ref,
                         output.output_index,
+                        sent_tx.account,
                         &addr,
                         output.value,
                     )?,

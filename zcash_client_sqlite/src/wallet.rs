@@ -532,6 +532,38 @@ pub fn rewind_to_height<P: consensus::Parameters>(
                 "DELETE FROM blocks WHERE height > ?",
                 &[u32::from(block_height)],
             )?;
+
+            // Rewind received notes
+            wdb.conn.execute(
+                "DELETE FROM received_notes
+                    WHERE id_note IN (
+                        SELECT rn.id_note
+                        FROM received_notes rn
+                        LEFT OUTER JOIN transactions tx
+                        ON tx.id_tx = rn.tx
+                        WHERE tx.block > ?
+                    );",
+                &[u32::from(block_height)],
+            )?;
+
+            // Rewind sent notes
+            wdb.conn.execute(
+                "DELETE FROM sent_notes
+                    WHERE id_note IN (
+                        SELECT sn.id_note
+                        FROM sent_notes sn
+                        LEFT OUTER JOIN transactions tx
+                        ON tx.id_tx = sn.tx
+                        WHERE tx.block > ?
+                    );",
+                &[u32::from(block_height)],
+            )?;          
+            
+            // Rewind utxos
+            wdb.conn.execute(
+                "DELETE FROM utxos WHERE height > ?",
+                &[u32::from(block_height)],
+            )?;      
         }
     }
 
@@ -984,13 +1016,14 @@ pub fn put_sent_utxo<'a, P: consensus::Parameters>(
     stmts: &mut DataConnStmtCache<'a, P>,
     tx_ref: i64,
     output_index: usize,
+    account: AccountId,
     to: &TransparentAddress,
     value: Amount,
 ) -> Result<(), SqliteClientError> {
     let ivalue: i64 = value.into();
     // Try updating an existing sent note.
     if stmts.stmt_update_sent_note.execute(params![
-        0,
+        account.0 as i64,
         encode_transparent_address_p(&stmts.wallet_db.params, &to),
         ivalue,
         (None::<&[u8]>),
@@ -999,7 +1032,7 @@ pub fn put_sent_utxo<'a, P: consensus::Parameters>(
     ])? == 0
     {
         // It isn't there, so insert.
-        insert_sent_utxo(stmts, tx_ref, output_index, &to, value)?
+        insert_sent_utxo(stmts, tx_ref, output_index, account, &to, value)?
     }
 
     Ok(())
@@ -1040,6 +1073,7 @@ pub fn insert_sent_utxo<'a, P: consensus::Parameters>(
     stmts: &mut DataConnStmtCache<'a, P>,
     tx_ref: i64,
     output_index: usize,
+    account: AccountId,
     to: &TransparentAddress,
     value: Amount,
 ) -> Result<(), SqliteClientError> {
@@ -1048,7 +1082,7 @@ pub fn insert_sent_utxo<'a, P: consensus::Parameters>(
     stmts.stmt_insert_sent_note.execute(params![
         tx_ref,
         (output_index as i64),
-        (None::<i64>),
+        account.0,
         to_str,
         ivalue,
         (None::<&[u8]>)
