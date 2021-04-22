@@ -466,9 +466,11 @@ pub fn get_rewind_height<P>(wdb: &WalletDb<P>) -> Result<Option<BlockHeight>, Sq
              JOIN transactions tx ON tx.id_tx = n.tx
              WHERE n.spent IS NULL",
             NO_PARAMS,
-            |row| row.get(0).map(|h: u32| h.into()),
+            |row| {
+                row.get(0)
+                    .map(|maybe_height: Option<u32>| maybe_height.map(|height| height.into()))
+            },
         )
-        .optional()
         .map_err(SqliteClientError::from)
 }
 
@@ -557,13 +559,13 @@ pub fn rewind_to_height<P: consensus::Parameters>(
                         WHERE tx.block > ?
                     );",
                 &[u32::from(block_height)],
-            )?;          
-            
+            )?;
+
             // Rewind utxos
             wdb.conn.execute(
                 "DELETE FROM utxos WHERE height > ?",
                 &[u32::from(block_height)],
-            )?;      
+            )?;
         }
     }
 
