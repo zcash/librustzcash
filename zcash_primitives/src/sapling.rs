@@ -470,9 +470,7 @@ impl Note {
 
     pub(crate) fn generate_or_derive_esk_internal<R: RngCore>(&self, rng: &mut R) -> jubjub::Fr {
         match self.derive_esk() {
-            None => {
-                jubjub::Fr::random(rng)
-            }
+            None => jubjub::Fr::random(rng),
             Some(esk) => esk,
         }
     }
