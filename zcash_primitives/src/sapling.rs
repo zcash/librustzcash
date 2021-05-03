@@ -11,7 +11,7 @@ pub mod util;
 use bitvec::{order::Lsb0, view::AsBits};
 use blake2s_simd::Params as Blake2sParams;
 use byteorder::{LittleEndian, WriteBytesExt};
-use ff::PrimeField;
+use ff::{Field, PrimeField};
 use group::{Curve, Group, GroupEncoding};
 use lazy_static::lazy_static;
 use rand_core::{CryptoRng, RngCore};
@@ -471,12 +471,7 @@ impl Note {
     pub(crate) fn generate_or_derive_esk_internal<R: RngCore>(&self, rng: &mut R) -> jubjub::Fr {
         match self.derive_esk() {
             None => {
-                // create random 64 byte buffer
-                let mut buffer = [0u8; 64];
-                rng.fill_bytes(&mut buffer);
-
-                // reduce to uniform value
-                jubjub::Fr::from_bytes_wide(&buffer)
+                jubjub::Fr::random(rng)
             }
             Some(esk) => esk,
         }
