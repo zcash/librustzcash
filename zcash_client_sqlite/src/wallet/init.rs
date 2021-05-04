@@ -212,7 +212,9 @@ pub fn init_accounts_table<P: consensus::Parameters>(
 pub fn drop_accounts_table<P: consensus::Parameters>(
     wdb: &WalletDb<P>,
 ) -> Result<(), SqliteClientError> {
-    wdb.conn.execute( "DROP TABLE accounts;", NO_PARAMS, )?;
+    wdb.conn.execute_batch( 
+        "PRAGMA foreign_keys = OFF; DROP TABLE accounts; PRAGMA foreign_keys = ON;" 
+    )?;
 
     Ok(())
 }
