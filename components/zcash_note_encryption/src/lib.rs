@@ -445,7 +445,6 @@ pub fn try_compact_note_decryption<D: Domain, Output: ShieldedOutput<D>>(
 ///
 /// Implements part of section 4.19.3 of the
 /// [Zcash Protocol Specification](https://zips.z.cash/protocol/nu5.pdf#decryptovk)
-/// For decryption using a Full Viewing Key see [`try_sapling_output_recovery`].
 pub fn try_output_recovery_with_ock<D: Domain, Output: ShieldedOutput<D>>(
     domain: &D,
     ock: &OutgoingCipherKey,
