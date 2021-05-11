@@ -412,14 +412,14 @@ pub mod testing {
             &mut self,
             _received_tx: &ReceivedTransaction,
         ) -> Result<Self::TxRef, Self::Error> {
-            Ok(TxId([0u8; 32]))
+            Ok(TxId::from_bytes([0u8; 32]))
         }
 
         fn store_sent_tx(
             &mut self,
             _sent_tx: &SentTransaction,
         ) -> Result<Self::TxRef, Self::Error> {
-            Ok(TxId([0u8; 32]))
+            Ok(TxId::from_bytes([0u8; 32]))
         }
 
         fn rewind_to_height(&mut self, _block_height: BlockHeight) -> Result<(), Self::Error> {

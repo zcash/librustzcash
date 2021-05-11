@@ -389,7 +389,7 @@ pub fn block_height_extrema<P>(
 ///
 /// let data_file = NamedTempFile::new().unwrap();
 /// let db = WalletDb::for_path(data_file, Network::TestNetwork).unwrap();
-/// let height = get_tx_height(&db, TxId([0u8; 32]));
+/// let height = get_tx_height(&db, TxId::from_bytes([0u8; 32]));
 /// ```
 pub fn get_tx_height<P>(
     wdb: &WalletDb<P>,
@@ -398,7 +398,7 @@ pub fn get_tx_height<P>(
     wdb.conn
         .query_row(
             "SELECT block FROM transactions WHERE txid = ?",
-            &[txid.0.to_vec()],
+            &[txid.as_ref().to_vec()],
             |row| row.get(0).map(u32::into),
         )
         .optional()
@@ -616,7 +616,7 @@ pub fn put_tx_meta<'a, P, N>(
     tx: &WalletTx<N>,
     height: BlockHeight,
 ) -> Result<i64, SqliteClientError> {
-    let txid = tx.txid.0.to_vec();
+    let txid = tx.txid.as_ref().to_vec();
     if stmts
         .stmt_update_tx_meta
         .execute(params![u32::from(height), (tx.index as i64), txid])?
@@ -643,7 +643,7 @@ pub fn put_tx_data<'a, P>(
     tx: &Transaction,
     created_at: Option<time::OffsetDateTime>,
 ) -> Result<i64, SqliteClientError> {
-    let txid = tx.txid().0.to_vec();
+    let txid = tx.txid().as_ref().to_vec();
 
     let mut raw_tx = vec![];
     tx.write(&mut raw_tx)?;
