@@ -740,7 +740,7 @@ mod tests {
             TzeOutPoint::new(tx_a.txid().0, 0),
             tx_a.tze_outputs[0].clone(),
         );
-        let value_xfr = value - DEFAULT_FEE;
+        let value_xfr = (value - DEFAULT_FEE).unwrap();
         db_b.demo_transfer_to_close(prevout_a, value_xfr, preimage_1, h2)
             .map_err(|e| format!("transfer failure: {:?}", e))
             .unwrap();
@@ -769,7 +769,7 @@ mod tests {
         builder_c
             .add_transparent_output(
                 &TransparentAddress::PublicKey([0; 20]),
-                value_xfr - DEFAULT_FEE,
+                (value_xfr - DEFAULT_FEE).unwrap(),
             )
             .unwrap();
 

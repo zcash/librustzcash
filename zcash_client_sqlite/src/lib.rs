@@ -701,7 +701,7 @@ mod tests {
             let note = Note {
                 g_d: change_addr.diversifier().g_d().unwrap(),
                 pk_d: *change_addr.pk_d(),
-                value: (in_value - value).into(),
+                value: (in_value - value).unwrap().into(),
                 rseed,
             };
             let encryptor = sapling_note_encryption::<_, Network>(
