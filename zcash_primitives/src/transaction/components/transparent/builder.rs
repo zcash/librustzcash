@@ -15,7 +15,7 @@ use crate::{
     consensus::{self},
     legacy::Script,
     transaction::{
-        components::OutPoint, sighash::signature_hash_data, SignableInput, TransactionData,
+        components::OutPoint, sighash_v4::signature_hash_data, SignableInput, TransactionData,
         Unauthorized, SIGHASH_ALL,
     },
 };

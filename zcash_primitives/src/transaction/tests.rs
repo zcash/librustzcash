@@ -2,7 +2,7 @@ use proptest::prelude::*;
 
 use super::{
     components::Amount,
-    sighash::{signature_hash, SignableInput},
+    sighash_v4::{signature_hash, SignableInput},
     Transaction,
 };
 

@@ -18,7 +18,7 @@ use self::{
         sprout::{self, JsDescription},
         transparent::{self, TxIn, TxOut},
     },
-    sighash::{signature_hash_data, SignableInput, SIGHASH_ALL},
+    sighash_v4::{signature_hash_data, SignableInput, SIGHASH_ALL},
     util::sha256d::{HashReader, HashWriter},
 };
 
@@ -27,7 +27,7 @@ use self::components::tze;
 
 pub mod builder;
 pub mod components;
-pub mod sighash;
+pub mod sighash_v4;
 pub mod util;
 
 #[cfg(test)]
