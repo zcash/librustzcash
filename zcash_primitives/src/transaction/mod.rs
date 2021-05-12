@@ -590,6 +590,82 @@ impl Transaction {
     }
 }
 
+#[derive(Clone)]
+pub struct TransparentDigests<A> {
+    pub prevout_digest: A,
+    pub sequence_digest: A,
+    pub outputs_digest: A,
+    pub per_input_digest: Option<A>,
+}
+
+#[derive(Clone)]
+pub struct TzeDigests<A> {
+    pub inputs_digest: A,
+    pub outputs_digest: A,
+    pub per_input_digest: Option<A>,
+}
+
+#[derive(Clone)]
+pub struct TxDigests<A> {
+    pub header_digest: A,
+    pub transparent_digests: Option<TransparentDigests<A>>,
+    pub sapling_digest: A,
+    pub orchard_digest: A,
+    #[cfg(feature = "zfuture")]
+    pub tze_digests: Option<TzeDigests<A>>,
+}
+
+pub(crate) trait TransactionDigest<A: Authorization> {
+    type HeaderDigest;
+    type TransparentDigest;
+    type SaplingDigest;
+    type OrchardDigest;
+
+    #[cfg(feature = "zfuture")]
+    type TzeDigest;
+
+    type Digest;
+
+    fn digest_header(
+        &self,
+        version: TxVersion,
+        consensus_branch_id: BranchId,
+        lock_time: u32,
+        expiry_height: BlockHeight,
+    ) -> Self::HeaderDigest;
+
+    fn digest_transparent(
+        &self,
+        transparent_bundle: Option<&transparent::Bundle<A::TransparentAuth>>,
+    ) -> Self::TransparentDigest;
+
+    fn digest_sapling(
+        &self,
+        sapling_bundle: Option<&sapling::Bundle<A::SaplingAuth>>,
+    ) -> Self::SaplingDigest;
+
+    fn digest_orchard(
+        &self,
+        orchard_bundle: Option<&orchard::Bundle<A::OrchardAuth, Amount>>,
+    ) -> Self::OrchardDigest;
+
+    #[cfg(feature = "zfuture")]
+    fn digest_tze(&self, tze_bundle: Option<&tze::Bundle<A::TzeAuth>>) -> Self::TzeDigest;
+
+    fn combine(
+        &self,
+        header_digest: Self::HeaderDigest,
+        transparent_digest: Self::TransparentDigest,
+        sapling_digest: Self::SaplingDigest,
+        orchard_digest: Self::OrchardDigest,
+        #[cfg(feature = "zfuture")] tze_digest: Self::TzeDigest,
+    ) -> Self::Digest;
+}
+
+pub enum DigestError {
+    NotSigned,
+}
+
 #[cfg(any(test, feature = "test-dependencies"))]
 pub mod testing {
     use proptest::prelude::*;
