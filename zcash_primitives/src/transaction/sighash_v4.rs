@@ -3,22 +3,16 @@ use byteorder::{LittleEndian, WriteBytesExt};
 use ff::PrimeField;
 use group::GroupEncoding;
 
-use crate::{
-    consensus::{self, BranchId},
-    legacy::Script,
-};
-
-#[cfg(feature = "zfuture")]
-use crate::extensions::transparent::Precondition;
+use crate::consensus::BranchId;
 
 use super::{
     components::{
-        amount::Amount,
         sapling::{self, GrothProofBytes, OutputDescription, SpendDescription},
         sprout::JsDescription,
         transparent::{self, TxIn, TxOut},
     },
-    Authorization, Transaction, TransactionData, TxVersion,
+    sighash::{SignableInput, SIGHASH_ANYONECANPAY, SIGHASH_MASK, SIGHASH_NONE, SIGHASH_SINGLE},
+    Authorization, TransactionData,
 };
 
 const ZCASH_SIGHASH_PERSONALIZATION_PREFIX: &[u8; 12] = b"ZcashSigHash";
@@ -28,12 +22,6 @@ const ZCASH_OUTPUTS_HASH_PERSONALIZATION: &[u8; 16] = b"ZcashOutputsHash";
 const ZCASH_JOINSPLITS_HASH_PERSONALIZATION: &[u8; 16] = b"ZcashJSplitsHash";
 const ZCASH_SHIELDED_SPENDS_HASH_PERSONALIZATION: &[u8; 16] = b"ZcashSSpendsHash";
 const ZCASH_SHIELDED_OUTPUTS_HASH_PERSONALIZATION: &[u8; 16] = b"ZcashSOutputHash";
-
-pub const SIGHASH_ALL: u32 = 1;
-const SIGHASH_NONE: u32 = 2;
-const SIGHASH_SINGLE: u32 = 3;
-const SIGHASH_MASK: u32 = 0x1f;
-const SIGHASH_ANYONECANPAY: u32 = 0x80;
 
 macro_rules! update_u32 {
     ($h:expr, $value:expr, $tmp:expr) => {
@@ -50,10 +38,6 @@ macro_rules! update_hash {
             $h.update(&[0; 32]);
         }
     };
-}
-
-fn has_overwinter_components(version: &TxVersion) -> bool {
-    !matches!(version, TxVersion::Sprout(_))
 }
 
 fn prevout_hash<TA: transparent::Authorization>(vin: &[TxIn<TA>]) -> Blake2bHash {
@@ -110,7 +94,7 @@ fn joinsplits_hash(
             * if consensus_branch_id.sprout_uses_groth_proofs() {
                 1698 // JSDescription with Groth16 proof
             } else {
-                1802 // JSDescription with PHGR13 proof
+                1802 // JsDescription with PHGR13 proof
             },
     );
     for js in joinsplits {
@@ -130,7 +114,7 @@ fn shielded_spends_hash<A: sapling::Authorization<Proof = GrothProofBytes>>(
     for s_spend in shielded_spends {
         data.extend_from_slice(&s_spend.cv.to_bytes());
         data.extend_from_slice(s_spend.anchor.to_repr().as_ref());
-        data.extend_from_slice(&s_spend.nullifier.0);
+        data.extend_from_slice(&s_spend.nullifier.as_ref());
         s_spend.rk.write(&mut data).unwrap();
         data.extend_from_slice(&s_spend.zkproof);
     }
@@ -153,55 +137,19 @@ fn shielded_outputs_hash<A: sapling::Authorization<Proof = GrothProofBytes>>(
         .hash(&data)
 }
 
-pub enum SignableInput<'a> {
-    Shielded,
-    Transparent {
-        index: usize,
-        script_code: &'a Script,
-        value: Amount,
-    },
-    #[cfg(feature = "zfuture")]
-    Tze {
-        index: usize,
-        precondition: &'a Precondition,
-        value: Amount,
-    },
-}
-
-impl<'a> SignableInput<'a> {
-    pub fn transparent(index: usize, script_code: &'a Script, value: Amount) -> Self {
-        SignableInput::Transparent {
-            index,
-            script_code,
-            value,
-        }
-    }
-
-    #[cfg(feature = "zfuture")]
-    pub fn tze(index: usize, precondition: &'a Precondition, value: Amount) -> Self {
-        SignableInput::Tze {
-            index,
-            precondition,
-            value,
-        }
-    }
-}
-
-pub fn signature_hash_data<
-    TA: transparent::Authorization,
+pub fn v4_signature_hash<
     SA: sapling::Authorization<Proof = GrothProofBytes>,
-    A: Authorization<SaplingAuth = SA, TransparentAuth = TA>,
+    A: Authorization<SaplingAuth = SA>,
 >(
     tx: &TransactionData<A>,
-    consensus_branch_id: consensus::BranchId,
-    hash_type: u32,
     signable_input: SignableInput<'_>,
-) -> Vec<u8> {
-    if has_overwinter_components(&tx.version) {
+    hash_type: u32,
+) -> Blake2bHash {
+    if tx.version.has_overwinter() {
         let mut personal = [0; 16];
         (&mut personal[..12]).copy_from_slice(ZCASH_SIGHASH_PERSONALIZATION_PREFIX);
         (&mut personal[12..])
-            .write_u32::<LittleEndian>(consensus_branch_id.into())
+            .write_u32::<LittleEndian>(tx.consensus_branch_id.into())
             .unwrap();
 
         let mut h = Blake2bParams::new()
@@ -223,7 +171,7 @@ pub fn signature_hash_data<
         );
         update_hash!(
             h,
-            hash_type & SIGHASH_ANYONECANPAY == 0
+            (hash_type & SIGHASH_ANYONECANPAY) == 0
                 && (hash_type & SIGHASH_MASK) != SIGHASH_SINGLE
                 && (hash_type & SIGHASH_MASK) != SIGHASH_NONE,
             sequence_hash(
@@ -246,14 +194,15 @@ pub fn signature_hash_data<
             );
         } else if (hash_type & SIGHASH_MASK) == SIGHASH_SINGLE {
             match (tx.transparent_bundle.as_ref(), &signable_input) {
-                (Some(b), SignableInput::Transparent { index, .. }) if *index < b.vout.len() => {
-                    h.update(single_output_hash(&b.vout[*index]).as_bytes())
+                (Some(b), SignableInput::Transparent(input)) if input.index() < b.vout.len() => {
+                    h.update(single_output_hash(&b.vout[input.index()]).as_bytes())
                 }
                 _ => h.update(&[0; 32]),
             };
         } else {
             h.update(&[0; 32]);
         };
+
         update_hash!(
             h,
             !tx.sprout_bundle
@@ -262,38 +211,27 @@ pub fn signature_hash_data<
             {
                 let bundle = tx.sprout_bundle.as_ref().unwrap();
                 joinsplits_hash(
-                    consensus_branch_id,
+                    tx.consensus_branch_id,
                     &bundle.joinsplits,
                     &bundle.joinsplit_pubkey,
                 )
             }
         );
+
         if tx.version.has_sapling() {
             update_hash!(
                 h,
                 !tx.sapling_bundle
                     .as_ref()
                     .map_or(true, |b| b.shielded_spends.is_empty()),
-                shielded_spends_hash(
-                    tx.sapling_bundle
-                        .as_ref()
-                        .unwrap()
-                        .shielded_spends
-                        .as_slice()
-                )
+                shielded_spends_hash(&tx.sapling_bundle.as_ref().unwrap().shielded_spends)
             );
             update_hash!(
                 h,
                 !tx.sapling_bundle
                     .as_ref()
                     .map_or(true, |b| b.shielded_outputs.is_empty()),
-                shielded_outputs_hash(
-                    tx.sapling_bundle
-                        .as_ref()
-                        .unwrap()
-                        .shielded_outputs
-                        .as_slice()
-                )
+                shielded_outputs_hash(&tx.sapling_bundle.as_ref().unwrap().shielded_outputs)
             );
         }
         update_u32!(h, tx.lock_time, tmp);
@@ -304,19 +242,15 @@ pub fn signature_hash_data<
         update_u32!(h, hash_type, tmp);
 
         match signable_input {
-            SignableInput::Transparent {
-                index,
-                script_code,
-                value,
-            } => {
+            SignableInput::Shielded => (),
+            SignableInput::Transparent(input) => {
                 if let Some(bundle) = tx.transparent_bundle.as_ref() {
                     let mut data = vec![];
-
-                    bundle.vin[index].prevout.write(&mut data).unwrap();
-                    script_code.write(&mut data).unwrap();
-                    data.extend_from_slice(&value.to_i64_le_bytes());
+                    bundle.vin[input.index()].prevout.write(&mut data).unwrap();
+                    input.script_code().write(&mut data).unwrap();
+                    data.extend_from_slice(&input.value().to_i64_le_bytes());
                     (&mut data)
-                        .write_u32::<LittleEndian>(bundle.vin[index].sequence)
+                        .write_u32::<LittleEndian>(bundle.vin[input.index()].sequence)
                         .unwrap();
                     h.update(&data);
                 } else {
@@ -325,25 +259,15 @@ pub fn signature_hash_data<
                     );
                 }
             }
-            #[cfg(feature = "zfuture")]
-            SignableInput::Tze { .. } => {
-                panic!("A request has been made to sign a TZE input in a V4 transaction.");
-            }
 
-            SignableInput::Shielded => (),
+            #[cfg(feature = "zfuture")]
+            SignableInput::Tze(_) => {
+                panic!("A request has been made to sign a TZE input, but the transaction version is not ZFuture");
+            }
         }
 
-        h.finalize().as_ref().to_vec()
+        h.finalize()
     } else {
-        unimplemented!()
+        panic!("Signature hashing for pre-overwinter transactions is not supported.")
     }
-}
-
-pub fn signature_hash(
-    tx: &Transaction,
-    consensus_branch_id: consensus::BranchId,
-    hash_type: u32,
-    signable_input: SignableInput<'_>,
-) -> Vec<u8> {
-    signature_hash_data(tx, consensus_branch_id, hash_type, signable_input)
 }

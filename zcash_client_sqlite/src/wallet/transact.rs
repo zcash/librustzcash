@@ -68,9 +68,9 @@ pub fn get_spendable_notes<P>(
         "SELECT diversifier, value, rcm, witness
             FROM received_notes
             INNER JOIN transactions ON transactions.id_tx = received_notes.tx
-            INNER JOIN sapling_witnesses ON sapling_witnesses.note = received_notes.id_note 
-            WHERE account = :account 
-            AND spent IS NULL 
+            INNER JOIN sapling_witnesses ON sapling_witnesses.note = received_notes.id_note
+            WHERE account = :account
+            AND spent IS NULL
             AND transactions.block <= :anchor_height
             AND sapling_witnesses.block = :anchor_height",
     )?;
@@ -153,7 +153,7 @@ mod tests {
 
     use zcash_primitives::{
         block::BlockHash,
-        consensus::BlockHeight,
+        consensus::{BlockHeight, BranchId},
         legacy::TransparentAddress,
         sapling::{note_encryption::try_sapling_output_recovery, prover::TxProver},
         transaction::{components::Amount, Transaction},
@@ -617,7 +617,7 @@ mod tests {
                     |row| row.get(0),
                 )
                 .unwrap();
-            let tx = Transaction::read(&raw_tx[..]).unwrap();
+            let tx = Transaction::read(&raw_tx[..], BranchId::Canopy).unwrap();
 
             // Fetch the output index from the database
             let output_index: i64 = db_write
@@ -632,7 +632,7 @@ mod tests {
                 .unwrap();
 
             let output =
-                &tx.sapling_bundle.as_ref().unwrap().shielded_outputs[output_index as usize];
+                &tx.sapling_bundle().as_ref().unwrap().shielded_outputs[output_index as usize];
 
             try_sapling_output_recovery(
                 &network,

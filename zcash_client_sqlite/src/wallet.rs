@@ -650,14 +650,14 @@ pub fn put_tx_data<'a, P>(
 
     if stmts
         .stmt_update_tx_data
-        .execute(params![u32::from(tx.expiry_height), raw_tx, txid,])?
+        .execute(params![u32::from(tx.expiry_height()), raw_tx, txid,])?
         == 0
     {
         // It isn't there, so insert our transaction into the database.
         stmts.stmt_insert_tx_data.execute(params![
             txid,
             created_at,
-            u32::from(tx.expiry_height),
+            u32::from(tx.expiry_height()),
             raw_tx
         ])?;
 

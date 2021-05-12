@@ -78,14 +78,14 @@ pub trait Epoch {
 /// by the context.
 impl<'a> demo::Context for Context<'a> {
     fn is_tze_only(&self) -> bool {
-        self.tx.transparent_bundle.is_none()
-            && self.tx.sapling_bundle.is_none()
-            && self.tx.sprout_bundle.is_none()
-            && self.tx.orchard_bundle.is_none()
+        self.tx.transparent_bundle().is_none()
+            && self.tx.sapling_bundle().is_none()
+            && self.tx.sprout_bundle().is_none()
+            && self.tx.orchard_bundle().is_none()
     }
 
     fn tx_tze_outputs(&self) -> &[TzeOut] {
-        if let Some(bundle) = &self.tx.tze_bundle {
+        if let Some(bundle) = &self.tx.tze_bundle() {
             &bundle.vout
         } else {
             &[]

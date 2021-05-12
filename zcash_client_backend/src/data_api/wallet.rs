@@ -238,8 +238,7 @@ where
         },
         RecipientAddress::Transparent(addr) => {
             let script = addr.script();
-            tx.transparent_bundle
-                .as_ref()
+            tx.transparent_bundle()
                 .and_then(|b| {
                     b.vout
                         .iter()

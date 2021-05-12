@@ -27,8 +27,9 @@ use crate::{
             },
             transparent::{self, builder::TransparentBuilder},
         },
-        signature_hash_data, SignableInput, Transaction, TransactionData, TxVersion, Unauthorized,
-        SIGHASH_ALL,
+        sighash::{SignableInput, SIGHASH_ALL},
+        sighash_v4::v4_signature_hash,
+        Transaction, TransactionData, TxVersion, Unauthorized,
     },
     zip32::ExtendedSpendingKey,
 };
@@ -342,6 +343,7 @@ impl<'a, P: consensus::Parameters, R: RngCore> Builder<'a, P, R> {
 
         let unauthed_tx = TransactionData {
             version,
+            consensus_branch_id,
             lock_time: 0,
             expiry_height: self.expiry_height,
             transparent_bundle,
@@ -357,17 +359,12 @@ impl<'a, P: consensus::Parameters, R: RngCore> Builder<'a, P, R> {
         //
 
         let mut sighash = [0u8; 32];
-        sighash.copy_from_slice(&signature_hash_data(
-            &unauthed_tx,
-            consensus_branch_id,
-            SIGHASH_ALL,
-            SignableInput::Shielded,
-        ));
+        sighash.copy_from_slice(
+            &v4_signature_hash(&unauthed_tx, SignableInput::Shielded, SIGHASH_ALL).as_ref(),
+        );
 
         #[cfg(feature = "transparent-inputs")]
-        let transparent_sigs = self
-            .transparent_builder
-            .create_signatures(&unauthed_tx, consensus_branch_id);
+        let transparent_sigs = self.transparent_builder.create_signatures(&unauthed_tx);
 
         let sapling_sigs = self
             .sapling_builder
@@ -382,7 +379,6 @@ impl<'a, P: consensus::Parameters, R: RngCore> Builder<'a, P, R> {
 
         Ok((
             Self::apply_signatures(
-                consensus_branch_id,
                 unauthed_tx,
                 #[cfg(feature = "transparent-inputs")]
                 transparent_sigs,
@@ -397,7 +393,6 @@ impl<'a, P: consensus::Parameters, R: RngCore> Builder<'a, P, R> {
     }
 
     fn apply_signatures(
-        consensus_branch_id: consensus::BranchId,
         unauthed_tx: TransactionData<Unauthorized>,
         #[cfg(feature = "transparent-inputs")] transparent_sigs: Option<Vec<Script>>,
         sapling_sigs: Option<(Vec<redjubjub::Signature>, redjubjub::Signature)>,
@@ -448,6 +443,7 @@ impl<'a, P: consensus::Parameters, R: RngCore> Builder<'a, P, R> {
 
         let authorized_tx = TransactionData {
             version: unauthed_tx.version,
+            consensus_branch_id: unauthed_tx.consensus_branch_id,
             lock_time: unauthed_tx.lock_time,
             expiry_height: unauthed_tx.expiry_height,
             transparent_bundle,
@@ -458,7 +454,7 @@ impl<'a, P: consensus::Parameters, R: RngCore> Builder<'a, P, R> {
             tze_bundle: signed_tze_bundle,
         };
 
-        authorized_tx.freeze(consensus_branch_id)
+        authorized_tx.freeze()
     }
 }
 

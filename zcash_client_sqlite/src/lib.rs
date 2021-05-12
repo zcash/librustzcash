@@ -489,7 +489,7 @@ impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
             //
             // Assumes that create_spend_to_address() will never be called in parallel, which is a
             // reasonable assumption for a light client such as a mobile phone.
-            if let Some(bundle) = sent_tx.tx.sapling_bundle.as_ref() {
+            if let Some(bundle) = sent_tx.tx.sapling_bundle().as_ref() {
                 for spend in &bundle.shielded_spends {
                     wallet::mark_spent(up, tx_ref, &spend.nullifier)?;
                 }

@@ -12,11 +12,12 @@ use crate::{
 
 #[cfg(feature = "transparent-inputs")]
 use crate::{
-    consensus::{self},
     legacy::Script,
     transaction::{
-        components::OutPoint, sighash_v4::signature_hash_data, SignableInput, TransactionData,
-        Unauthorized, SIGHASH_ALL,
+        components::OutPoint,
+        sighash::{SignableInput, SIGHASH_ALL},
+        sighash_v4::v4_signature_hash,
+        TransactionData, Unauthorized,
     },
 };
 
@@ -153,11 +154,7 @@ impl TransparentBuilder {
     }
 
     #[cfg(feature = "transparent-inputs")]
-    pub fn create_signatures(
-        self,
-        mtx: &TransactionData<Unauthorized>,
-        consensus_branch_id: consensus::BranchId,
-    ) -> Option<Vec<Script>> {
+    pub fn create_signatures(self, mtx: &TransactionData<Unauthorized>) -> Option<Vec<Script>> {
         if self.inputs.is_empty() && self.vout.is_empty() {
             None
         } else {
@@ -167,16 +164,18 @@ impl TransparentBuilder {
                     .enumerate()
                     .map(|(i, info)| {
                         let mut sighash = [0u8; 32];
-                        sighash.copy_from_slice(&signature_hash_data(
-                            mtx,
-                            consensus_branch_id,
-                            SIGHASH_ALL,
-                            SignableInput::transparent(
-                                i,
-                                &info.coin.script_pubkey,
-                                info.coin.value,
-                            ),
-                        ));
+                        sighash.copy_from_slice(
+                            &v4_signature_hash(
+                                mtx,
+                                SignableInput::transparent(
+                                    i,
+                                    &info.coin.script_pubkey,
+                                    info.coin.value,
+                                ),
+                                SIGHASH_ALL,
+                            )
+                            .as_ref(),
+                        );
 
                         let msg =
                             secp256k1::Message::from_slice(sighash.as_ref()).expect("32 bytes");

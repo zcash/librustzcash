@@ -1,4 +1,14 @@
 //! Structs and methods for handling Zcash transactions.
+pub mod builder;
+pub mod components;
+pub mod sighash;
+pub mod sighash_v4;
+pub mod sighash_v5;
+pub mod txid;
+pub mod util;
+
+#[cfg(test)]
+mod tests;
 
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use std::fmt;
@@ -18,20 +28,11 @@ use self::{
         sprout::{self, JsDescription},
         transparent::{self, TxIn, TxOut},
     },
-    sighash_v4::{signature_hash_data, SignableInput, SIGHASH_ALL},
     util::sha256d::{HashReader, HashWriter},
 };
 
 #[cfg(feature = "zfuture")]
 use self::components::tze;
-
-pub mod builder;
-pub mod components;
-pub mod sighash_v4;
-pub mod util;
-
-#[cfg(test)]
-mod tests;
 
 const OVERWINTER_VERSION_GROUP_ID: u32 = 0x03C48270;
 const OVERWINTER_TX_VERSION: u32 = 3;
@@ -113,6 +114,7 @@ impl TxVersion {
             match (version, reader.read_u32::<LittleEndian>()?) {
                 (OVERWINTER_TX_VERSION, OVERWINTER_VERSION_GROUP_ID) => Ok(TxVersion::Overwinter),
                 (SAPLING_TX_VERSION, SAPLING_VERSION_GROUP_ID) => Ok(TxVersion::Sapling),
+                (V5_TX_VERSION, V5_VERSION_GROUP_ID) => Ok(TxVersion::ZcashTxV5),
                 #[cfg(feature = "zfuture")]
                 (ZFUTURE_TX_VERSION, ZFUTURE_VERSION_GROUP_ID) => Ok(TxVersion::ZFuture),
                 _ => Err(io::Error::new(
@@ -177,6 +179,10 @@ impl TxVersion {
         }
     }
 
+    pub fn has_overwinter(&self) -> bool {
+        !matches!(self, TxVersion::Sprout(_))
+    }
+
     pub fn has_sapling(&self) -> bool {
         match self {
             TxVersion::Sprout(_) | TxVersion::Overwinter => false,
@@ -185,6 +191,20 @@ impl TxVersion {
             #[cfg(feature = "zfuture")]
             TxVersion::ZFuture => true,
         }
+    }
+
+    pub fn has_orchard(&self) -> bool {
+        match self {
+            TxVersion::Sprout(_) | TxVersion::Overwinter | TxVersion::Sapling => false,
+            TxVersion::ZcashTxV5 => true,
+            #[cfg(feature = "zfuture")]
+            TxVersion::ZFuture => true,
+        }
+    }
+
+    #[cfg(feature = "zfuture")]
+    pub fn has_tze(&self) -> bool {
+        matches!(self, TxVersion::ZFuture)
     }
 
     pub fn suggested_for_branch(consensus_branch_id: BranchId) -> Self {
@@ -255,15 +275,93 @@ impl PartialEq for Transaction {
 }
 
 pub struct TransactionData<A: Authorization> {
-    pub version: TxVersion,
-    pub lock_time: u32,
-    pub expiry_height: BlockHeight,
-    pub transparent_bundle: Option<transparent::Bundle<A::TransparentAuth>>,
-    pub sprout_bundle: Option<sprout::Bundle>,
-    pub sapling_bundle: Option<sapling::Bundle<A::SaplingAuth>>,
-    pub orchard_bundle: Option<orchard::bundle::Bundle<A::OrchardAuth, Amount>>,
+    version: TxVersion,
+    consensus_branch_id: BranchId,
+    lock_time: u32,
+    expiry_height: BlockHeight,
+    transparent_bundle: Option<transparent::Bundle<A::TransparentAuth>>,
+    sprout_bundle: Option<sprout::Bundle>,
+    sapling_bundle: Option<sapling::Bundle<A::SaplingAuth>>,
+    orchard_bundle: Option<orchard::bundle::Bundle<A::OrchardAuth, Amount>>,
     #[cfg(feature = "zfuture")]
-    pub tze_bundle: Option<tze::Bundle<A::TzeAuth>>,
+    tze_bundle: Option<tze::Bundle<A::TzeAuth>>,
+}
+
+impl<A: Authorization> TransactionData<A> {
+    #[allow(clippy::too_many_arguments)]
+    pub fn from_parts(
+        version: TxVersion,
+        consensus_branch_id: BranchId,
+        lock_time: u32,
+        expiry_height: BlockHeight,
+        transparent_bundle: Option<transparent::Bundle<A::TransparentAuth>>,
+        sprout_bundle: Option<sprout::Bundle>,
+        sapling_bundle: Option<sapling::Bundle<A::SaplingAuth>>,
+        orchard_bundle: Option<orchard::Bundle<A::OrchardAuth, Amount>>,
+        #[cfg(feature = "zfuture")] tze_bundle: Option<tze::Bundle<A::TzeAuth>>,
+    ) -> Self {
+        TransactionData {
+            version,
+            consensus_branch_id,
+            lock_time,
+            expiry_height,
+            transparent_bundle,
+            sprout_bundle,
+            sapling_bundle,
+            orchard_bundle,
+            #[cfg(feature = "zfuture")]
+            tze_bundle,
+        }
+    }
+
+    pub fn version(&self) -> TxVersion {
+        self.version
+    }
+
+    pub fn consensus_branch_id(&self) -> BranchId {
+        self.consensus_branch_id
+    }
+
+    pub fn expiry_height(&self) -> BlockHeight {
+        self.expiry_height
+    }
+
+    pub fn transparent_bundle(&self) -> Option<&transparent::Bundle<A::TransparentAuth>> {
+        self.transparent_bundle.as_ref()
+    }
+
+    pub fn sprout_bundle(&self) -> Option<&sprout::Bundle> {
+        self.sprout_bundle.as_ref()
+    }
+
+    pub fn sapling_bundle(&self) -> Option<&sapling::Bundle<A::SaplingAuth>> {
+        self.sapling_bundle.as_ref()
+    }
+
+    pub fn orchard_bundle(&self) -> Option<&orchard::Bundle<A::OrchardAuth, Amount>> {
+        self.orchard_bundle.as_ref()
+    }
+
+    #[cfg(feature = "zfuture")]
+    pub fn tze_bundle(&self) -> Option<&tze::Bundle<A::TzeAuth>> {
+        self.tze_bundle.as_ref()
+    }
+
+    pub fn digest<D: TransactionDigest<A>>(&self, digester: D) -> D::Digest {
+        digester.combine(
+            digester.digest_header(
+                self.version,
+                self.consensus_branch_id,
+                self.lock_time,
+                self.expiry_height,
+            ),
+            digester.digest_transparent(self.transparent_bundle.as_ref()),
+            digester.digest_sapling(self.sapling_bundle.as_ref()),
+            digester.digest_orchard(self.orchard_bundle.as_ref()),
+            #[cfg(feature = "zfuture")]
+            digester.digest_tze(self.tze_bundle.as_ref()),
+        )
+    }
 }
 
 impl<A: Authorization> std::fmt::Debug for TransactionData<A> {
@@ -272,17 +370,25 @@ impl<A: Authorization> std::fmt::Debug for TransactionData<A> {
             f,
             "TransactionData(
                 version = {:?},
+                consensus_branch_id = {:?},
                 lock_time = {:?},
                 expiry_height = {:?},
-                {}{}{}{}",
+                transparent_fields = {{{}}}
+                sprout = {{{}}},
+                sapling = {{{}}},
+                orchard = {{{}}},
+                tze = {{{}}}
+            )",
             self.version,
+            self.consensus_branch_id,
             self.lock_time,
             self.expiry_height,
             if let Some(b) = &self.transparent_bundle {
                 format!(
                     "
-                vin = {:?},
-                vout = {:?},",
+                    vin = {:?},
+                    vout = {:?},
+                    ",
                     b.vin, b.vout
                 )
             } else {
@@ -291,8 +397,9 @@ impl<A: Authorization> std::fmt::Debug for TransactionData<A> {
             if let Some(b) = &self.sprout_bundle {
                 format!(
                     "
-                joinsplits = {:?},
-                joinsplit_pubkey = {:?},",
+                    joinsplits = {:?},
+                    joinsplit_pubkey = {:?},
+                    ",
                     b.joinsplits, b.joinsplit_pubkey
                 )
             } else {
@@ -301,11 +408,24 @@ impl<A: Authorization> std::fmt::Debug for TransactionData<A> {
             if let Some(b) = &self.sapling_bundle {
                 format!(
                     "
-                value_balance = {:?},
-                shielded_spends = {:?},
-                shielded_outputs = {:?},
-                binding_sig = {:?},",
+                    value_balance = {:?},
+                    shielded_spends = {:?},
+                    shielded_outputs = {:?},
+                    binding_sig = {:?},
+                    ",
                     b.value_balance, b.shielded_spends, b.shielded_outputs, b.authorization
+                )
+            } else {
+                "".to_string()
+            },
+            if let Some(b) = &self.orchard_bundle {
+                format!(
+                    "
+                    value_balance = {:?},
+                    actions = {:?},
+                    ",
+                    b.value_balance(),
+                    b.actions().len()
                 )
             } else {
                 "".to_string()
@@ -315,8 +435,9 @@ impl<A: Authorization> std::fmt::Debug for TransactionData<A> {
                 if let Some(b) = &self.tze_bundle {
                     format!(
                         "
-                tze_inputs = {:?},
-                tze_outputs = {:?},",
+                    tze_inputs = {:?},
+                    tze_outputs = {:?},
+                    ",
                         b.vin, b.vout
                     )
                 } else {
@@ -337,53 +458,14 @@ impl<A: Authorization> TransactionData<A> {
     }
 }
 
-impl Default for TransactionData<Unauthorized> {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl TransactionData<Unauthorized> {
-    pub fn new() -> Self {
-        TransactionData {
-            version: TxVersion::Sapling,
-            lock_time: 0,
-            expiry_height: 0u32.into(),
-            transparent_bundle: None,
-            sprout_bundle: None,
-            sapling_bundle: None,
-            orchard_bundle: None,
-            #[cfg(feature = "zfuture")]
-            tze_bundle: None,
-        }
-    }
-
-    #[cfg(feature = "zfuture")]
-    pub fn zfuture() -> Self {
-        TransactionData {
-            version: TxVersion::ZFuture,
-            lock_time: 0,
-            expiry_height: 0u32.into(),
-            transparent_bundle: None,
-            sprout_bundle: None,
-            sapling_bundle: None,
-            orchard_bundle: None,
-            tze_bundle: None,
-        }
-    }
-}
-
 impl TransactionData<Authorized> {
-    pub fn freeze(self, consensus_branch_id: BranchId) -> io::Result<Transaction> {
-        Transaction::from_data(self, consensus_branch_id)
+    pub fn freeze(self) -> io::Result<Transaction> {
+        Transaction::from_data(self)
     }
 }
 
 impl Transaction {
-    fn from_data(
-        data: TransactionData<Authorized>,
-        _consensus_branch_id: BranchId,
-    ) -> io::Result<Self> {
+    fn from_data(data: TransactionData<Authorized>) -> io::Result<Self> {
         let mut tx = Transaction {
             txid: TxId([0; 32]),
             data,
@@ -398,7 +480,8 @@ impl Transaction {
         self.txid
     }
 
-    pub fn read<R: Read>(reader: R) -> io::Result<Self> {
+    #[allow(clippy::redundant_closure)]
+    pub fn read<R: Read>(reader: R, consensus_branch_id: BranchId) -> io::Result<Self> {
         let mut reader = HashReader::new(reader);
 
         let version = TxVersion::read(&mut reader)?;
@@ -462,6 +545,7 @@ impl Transaction {
             txid: TxId(txid),
             data: TransactionData {
                 version,
+                consensus_branch_id,
                 lock_time,
                 expiry_height,
                 transparent_bundle,
@@ -615,7 +699,7 @@ pub struct TxDigests<A> {
     pub tze_digests: Option<TzeDigests<A>>,
 }
 
-pub(crate) trait TransactionDigest<A: Authorization> {
+pub trait TransactionDigest<A: Authorization> {
     type HeaderDigest;
     type TransparentDigest;
     type SaplingDigest;
@@ -707,14 +791,15 @@ pub mod testing {
 
     #[cfg(not(feature = "zfuture"))]
     prop_compose! {
-        pub fn arb_txdata(branch_id: BranchId)(
-            version in arb_tx_version(branch_id),
+        pub fn arb_txdata(consensus_branch_id: BranchId)(
+            version in arb_tx_version(consensus_branch_id),
             lock_time in any::<u32>(),
             expiry_height in any::<u32>(),
             transparent_bundle in transparent::arb_bundle(),
         ) -> TransactionData<Authorized> {
             TransactionData {
                 version,
+                consensus_branch_id,
                 lock_time,
                 expiry_height: expiry_height.into(),
                 transparent_bundle,
@@ -727,8 +812,8 @@ pub mod testing {
 
     #[cfg(feature = "zfuture")]
     prop_compose! {
-        pub fn arb_txdata(branch_id: BranchId)(
-            version in arb_tx_version(branch_id),
+        pub fn arb_txdata(consensus_branch_id: BranchId)(
+            version in arb_tx_version(consensus_branch_id),
             lock_time in any::<u32>(),
             expiry_height in any::<u32>(),
             transparent_bundle in transparent::arb_bundle(),
@@ -736,6 +821,7 @@ pub mod testing {
         ) -> TransactionData<Authorized> {
             TransactionData {
                 version,
+                consensus_branch_id,
                 lock_time,
                 expiry_height: expiry_height.into(),
                 transparent_bundle,
@@ -749,7 +835,7 @@ pub mod testing {
 
     prop_compose! {
         pub fn arb_tx(branch_id: BranchId)(tx_data in arb_txdata(branch_id)) -> Transaction {
-            Transaction::from_data(tx_data, branch_id).unwrap()
+            Transaction::from_data(tx_data).unwrap()
         }
     }
 }
