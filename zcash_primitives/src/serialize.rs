@@ -70,6 +70,13 @@ impl Vector {
         F: Fn(&mut R) -> io::Result<E>,
     {
         let count = CompactSize::read(&mut reader)?;
+        Self::read_count(reader, count, func)
+    }
+
+    pub fn read_count<R: Read, E, F>(mut reader: R, count: usize, func: F) -> io::Result<Vec<E>>
+    where
+        F: Fn(&mut R) -> io::Result<E>,
+    {
         (0..count).map(|_| func(&mut reader)).collect()
     }
 
@@ -79,6 +86,17 @@ impl Vector {
     {
         CompactSize::write(&mut writer, vec.len())?;
         vec.iter().try_for_each(|e| func(&mut writer, e))
+    }
+
+    pub fn write_items<W: Write, E, I: IntoIterator<Item = E>, F>(
+        mut writer: W,
+        vec: I,
+        func: F,
+    ) -> io::Result<()>
+    where
+        F: Fn(&mut W, &E) -> io::Result<()>,
+    {
+        vec.into_iter().try_for_each(|e| func(&mut writer, &e))
     }
 }
 
