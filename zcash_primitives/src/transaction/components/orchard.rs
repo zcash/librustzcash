@@ -179,3 +179,39 @@ pub fn write_flags<W: Write>(mut writer: W, flags: &Flags) -> io::Result<()> {
 pub fn write_anchor<W: Write>(mut writer: W, anchor: &Anchor) -> io::Result<()> {
     writer.write_all(&anchor.0)
 }
+
+#[cfg(any(test, feature = "test-dependencies"))]
+pub mod testing {
+    use proptest::prelude::*;
+
+    use orchard::bundle::{
+        testing::{self as t_orch},
+        Authorized, Bundle,
+    };
+
+    use crate::transaction::{
+        components::amount::{testing::arb_amount, Amount},
+        TxVersion,
+    };
+
+    prop_compose! {
+        pub fn arb_bundle()(
+            orchard_value_balance in arb_amount(),
+            bundle in t_orch::arb_bundle()
+        ) -> Bundle<Authorized, Amount> {
+            // overwrite the value balance, as we can't guarantee that the
+            // value doesn't exceed the MAX_MONEY bounds.
+            bundle.try_map_value_balance::<_, (), _>(|_| Ok(orchard_value_balance)).unwrap()
+        }
+    }
+
+    pub fn arb_bundle_for_version(
+        v: TxVersion,
+    ) -> impl Strategy<Value = Option<Bundle<Authorized, Amount>>> {
+        if v.has_orchard() {
+            Strategy::boxed(prop::option::of(arb_bundle()))
+        } else {
+            Strategy::boxed(Just(None))
+        }
+    }
+}

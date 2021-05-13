@@ -446,7 +446,10 @@ pub mod testing {
             redjubjub::{PrivateKey, PublicKey},
             Nullifier,
         },
-        transaction::components::{amount::testing::arb_amount, GROTH_PROOF_SIZE},
+        transaction::{
+            components::{amount::testing::arb_amount, GROTH_PROOF_SIZE},
+            TxVersion,
+        },
     };
 
     use super::{Authorized, Bundle, OutputDescription, SpendDescription};
@@ -524,12 +527,12 @@ pub mod testing {
             rng_seed in prop::array::uniform32(prop::num::u8::ANY),
             fake_bvk_bytes in prop::array::uniform32(prop::num::u8::ANY),
         ) -> Option<Bundle<Authorized>> {
-            let mut rng = StdRng::from_seed(rng_seed);
-            let bsk = PrivateKey(jubjub::Fr::random(&mut rng));
-
             if shielded_spends.is_empty() && shielded_outputs.is_empty() {
                 None
             } else {
+                let mut rng = StdRng::from_seed(rng_seed);
+                let bsk = PrivateKey(jubjub::Fr::random(&mut rng));
+
                 Some(
                     Bundle {
                         shielded_spends,
@@ -539,6 +542,16 @@ pub mod testing {
                     }
                 )
             }
+        }
+    }
+
+    pub fn arb_bundle_for_version(
+        v: TxVersion,
+    ) -> impl Strategy<Value = Option<Bundle<Authorized>>> {
+        if v.has_sapling() {
+            Strategy::boxed(arb_bundle())
+        } else {
+            Strategy::boxed(Just(None))
         }
     }
 }

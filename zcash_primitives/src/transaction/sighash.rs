@@ -128,7 +128,7 @@ pub fn signature_hash<
             v4_signature_hash(tx, signable_input, hash_type)
         }
 
-        TxVersion::ZcashTxV5 => v5_signature_hash(tx, txid_parts, signable_input, hash_type),
+        TxVersion::Zip225 => v5_signature_hash(tx, txid_parts, signable_input, hash_type),
 
         #[cfg(feature = "zfuture")]
         TxVersion::ZFuture => v5_signature_hash(tx, txid_parts, signable_input, hash_type),
