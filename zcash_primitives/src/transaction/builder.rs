@@ -1,13 +1,15 @@
 //! Structs for building transactions.
 
-use rand::{rngs::OsRng, CryptoRng, RngCore};
 use std::array;
 use std::error;
 use std::fmt;
 use std::io;
 use std::sync::mpsc::Sender;
 
-use orchard::bundle::{self as orchard};
+#[cfg(not(feature = "zfuture"))]
+use std::marker::PhantomData;
+
+use rand::{rngs::OsRng, CryptoRng, RngCore};
 
 use crate::{
     consensus::{self, BlockHeight, BranchId},
@@ -27,15 +29,12 @@ use crate::{
             },
             transparent::{self, builder::TransparentBuilder},
         },
-        sighash::{SignableInput, SIGHASH_ALL},
-        sighash_v4::v4_signature_hash,
+        sighash::{signature_hash, SignableInput, SIGHASH_ALL},
+        txid::TxIdDigester,
         Transaction, TransactionData, TxVersion, Unauthorized,
     },
     zip32::ExtendedSpendingKey,
 };
-
-#[cfg(not(feature = "zfuture"))]
-use std::marker::PhantomData;
 
 #[cfg(feature = "transparent-inputs")]
 use crate::{legacy::Script, transaction::components::transparent::TxOut};
@@ -280,11 +279,6 @@ impl<'a, P: consensus::Parameters, R: RngCore> Builder<'a, P, R> {
     ///
     /// Upon success, returns a tuple containing the final transaction, and the
     /// [`SaplingMetadata`] generated during the build process.
-    ///
-    /// `consensus_branch_id` must be valid for the block height that this transaction is
-    /// targeting. An invalid `consensus_branch_id` will *not* result in an error from
-    /// this function, and instead will generate a transaction that will be rejected by
-    /// the network.
     pub fn build(
         mut self,
         prover: &impl TxProver,
@@ -343,7 +337,7 @@ impl<'a, P: consensus::Parameters, R: RngCore> Builder<'a, P, R> {
 
         let unauthed_tx = TransactionData {
             version,
-            consensus_branch_id,
+            consensus_branch_id: BranchId::for_height(&self.params, self.target_height),
             lock_time: 0,
             expiry_height: self.expiry_height,
             transparent_bundle,
@@ -357,18 +351,32 @@ impl<'a, P: consensus::Parameters, R: RngCore> Builder<'a, P, R> {
         //
         // Signatures -- everything but the signatures must already have been added.
         //
-
-        let mut sighash = [0u8; 32];
-        sighash.copy_from_slice(
-            &v4_signature_hash(&unauthed_tx, SignableInput::Shielded, SIGHASH_ALL).as_ref(),
-        );
+        let txid_parts = unauthed_tx.digest(TxIdDigester);
 
         #[cfg(feature = "transparent-inputs")]
-        let transparent_sigs = self.transparent_builder.create_signatures(&unauthed_tx);
+        let transparent_sigs = self
+            .transparent_builder
+            .create_signatures(&unauthed_tx, &txid_parts);
+
+        // the commitment being signed is shared across all Sapling inputs; once
+        // V4 transactions are deprecated this should just be the txid, but
+        // for now we need to continue to compute it here.
+        let shielded_sig_commitment = signature_hash(
+            &unauthed_tx,
+            SignableInput::Shielded,
+            &txid_parts,
+            SIGHASH_ALL,
+        );
 
         let sapling_sigs = self
             .sapling_builder
-            .create_signatures(prover, &mut ctx, &mut self.rng, &sighash, &tx_metadata)
+            .create_signatures(
+                prover,
+                &mut ctx,
+                &mut self.rng,
+                shielded_sig_commitment.as_ref(),
+                &tx_metadata,
+            )
             .map_err(Error::SaplingBuild)?;
 
         #[cfg(feature = "zfuture")]
@@ -380,10 +388,9 @@ impl<'a, P: consensus::Parameters, R: RngCore> Builder<'a, P, R> {
         Ok((
             Self::apply_signatures(
                 unauthed_tx,
+                sapling_sigs,
                 #[cfg(feature = "transparent-inputs")]
                 transparent_sigs,
-                sapling_sigs,
-                None,
                 #[cfg(feature = "zfuture")]
                 tze_witnesses,
             )
@@ -392,26 +399,18 @@ impl<'a, P: consensus::Parameters, R: RngCore> Builder<'a, P, R> {
         ))
     }
 
-    fn apply_signatures(
+    pub fn apply_signatures(
         unauthed_tx: TransactionData<Unauthorized>,
-        #[cfg(feature = "transparent-inputs")] transparent_sigs: Option<Vec<Script>>,
         sapling_sigs: Option<(Vec<redjubjub::Signature>, redjubjub::Signature)>,
-        _orchard_auth: Option<(
-            Vec<<orchard::Authorized as orchard::Authorization>::SpendAuth>,
-            orchard::Authorized,
-        )>,
+        #[cfg(feature = "transparent-inputs")] transparent_sigs: Option<Vec<Script>>,
         #[cfg(feature = "zfuture")] tze_witnesses: Option<Vec<AuthData>>,
     ) -> io::Result<Transaction> {
         #[cfg(feature = "transparent-inputs")]
         let transparent_bundle = match (unauthed_tx.transparent_bundle, transparent_sigs) {
             (Some(bundle), Some(script_sigs)) => Some(bundle.apply_signatures(script_sigs)),
             (None, None) => None,
-            (b, s) => {
-                panic!(
-                    "Mismatch between transparent bundle ({}) and signatures ({}).",
-                    b.is_some(),
-                    s.is_some()
-                );
+            _ => {
+                panic!("Mismatch between transparent bundle and signatures.");
             }
         };
 
@@ -526,18 +525,18 @@ mod tests {
         transaction::components::{
             amount::{Amount, DEFAULT_FEE},
             sapling::builder::{self as build_s},
-            transparent::builder::{self as transparent},
+            transparent::builder::{self as build_t},
         },
         zip32::{ExtendedFullViewingKey, ExtendedSpendingKey},
     };
 
     use super::{Builder, Error, SaplingBuilder, DEFAULT_TX_EXPIRY_DELTA};
 
-    #[cfg(not(feature = "zfuture"))]
-    use std::marker::PhantomData;
-
     #[cfg(feature = "zfuture")]
     use super::TzeBuilder;
+
+    #[cfg(not(feature = "zfuture"))]
+    use std::marker::PhantomData;
 
     #[test]
     fn fails_on_negative_output() {
@@ -642,7 +641,7 @@ mod tests {
                 &TransparentAddress::PublicKey([0; 20]),
                 Amount::from_i64(-1).unwrap(),
             ),
-            Err(Error::TransparentBuild(transparent::Error::InvalidAmount))
+            Err(Error::TransparentBuild(build_t::Error::InvalidAmount))
         );
     }
 

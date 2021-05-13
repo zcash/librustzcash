@@ -85,7 +85,7 @@ impl<'a> demo::Context for Context<'a> {
     }
 
     fn tx_tze_outputs(&self) -> &[TzeOut] {
-        if let Some(bundle) = &self.tx.tze_bundle() {
+        if let Some(bundle) = self.tx.tze_bundle() {
             &bundle.vout
         } else {
             &[]

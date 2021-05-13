@@ -44,7 +44,7 @@ pub fn decrypt_transaction<P: consensus::Parameters>(
 ) -> Vec<DecryptedOutput> {
     let mut decrypted = vec![];
 
-    if let Some(bundle) = tx.sapling_bundle().as_ref() {
+    if let Some(bundle) = tx.sapling_bundle() {
         for (account, extfvk) in extfvks.iter() {
             let ivk = extfvk.fvk.vk.ivk();
             let ovk = extfvk.fvk.ovk;

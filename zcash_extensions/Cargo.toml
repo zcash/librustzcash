@@ -10,7 +10,7 @@ edition = "2018"
 
 [dependencies]
 blake2b_simd = "0.5"
-zcash_primitives = { version = "0.5", path = "../zcash_primitives", features = ["zfuture"] }
+zcash_primitives = { version = "0.5", path = "../zcash_primitives", features = ["zfuture", "test-dependencies"] }
 
 [dev-dependencies]
 ff = "0.10"

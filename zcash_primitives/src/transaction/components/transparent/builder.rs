@@ -2,6 +2,9 @@
 
 use std::fmt;
 
+#[cfg(feature = "transparent-inputs")]
+use blake2b_simd::Hash as Blake2bHash;
+
 use crate::{
     legacy::TransparentAddress,
     transaction::components::{
@@ -15,9 +18,8 @@ use crate::{
     legacy::Script,
     transaction::{
         components::OutPoint,
-        sighash::{SignableInput, SIGHASH_ALL},
-        sighash_v4::v4_signature_hash,
-        TransactionData, Unauthorized,
+        sighash::{signature_hash, SignableInput, SIGHASH_ALL},
+        TransactionData, TxDigests, Unauthorized,
     },
 };
 
@@ -154,7 +156,11 @@ impl TransparentBuilder {
     }
 
     #[cfg(feature = "transparent-inputs")]
-    pub fn create_signatures(self, mtx: &TransactionData<Unauthorized>) -> Option<Vec<Script>> {
+    pub fn create_signatures(
+        self,
+        mtx: &TransactionData<Unauthorized>,
+        txid_parts_cache: &TxDigests<Blake2bHash>,
+    ) -> Option<Vec<Script>> {
         if self.inputs.is_empty() && self.vout.is_empty() {
             None
         } else {
@@ -163,18 +169,15 @@ impl TransparentBuilder {
                     .iter()
                     .enumerate()
                     .map(|(i, info)| {
-                        let mut sighash = [0u8; 32];
-                        sighash.copy_from_slice(
-                            &v4_signature_hash(
-                                mtx,
-                                SignableInput::transparent(
-                                    i,
-                                    &info.coin.script_pubkey,
-                                    info.coin.value,
-                                ),
-                                SIGHASH_ALL,
-                            )
-                            .as_ref(),
+                        let sighash = signature_hash(
+                            mtx,
+                            SignableInput::transparent(
+                                i,
+                                &info.coin.script_pubkey,
+                                info.coin.value,
+                            ),
+                            txid_parts_cache,
+                            SIGHASH_ALL,
                         );
 
                         let msg =
