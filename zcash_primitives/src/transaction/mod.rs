@@ -608,14 +608,14 @@ impl Transaction {
                 self.sapling_bundle
                     .as_ref()
                     .map_or(&[], |b| &b.shielded_spends),
-                |w, e| e.write(w),
+                |w, e| e.write_v4(w),
             )?;
             Vector::write(
                 &mut writer,
                 self.sapling_bundle
                     .as_ref()
                     .map_or(&[], |b| &b.shielded_outputs),
-                |w, e| e.write(w),
+                |w, e| e.write_v4(w),
             )?;
         } else if self.sapling_bundle.is_some() {
             return Err(io::Error::new(
