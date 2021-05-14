@@ -143,10 +143,10 @@ pub trait WalletRead {
     ) -> Result<Amount, Self::Error>;
 
     /// Returns the memo for a note.
-    ///
-    /// Implementations of this method must return an error if the note identifier
-    /// does not appear in the backing data store.
     fn get_memo(&self, id_note: Self::NoteRef) -> Result<Memo, Self::Error>;
+
+    /// Returns a transaction.
+    fn get_transaction(&self, id_tx: Self::TxRef) -> Result<Transaction, Self::Error>;
 
     /// Returns the note commitment tree at the specified block height.
     fn get_commitment_tree(
@@ -164,6 +164,8 @@ pub trait WalletRead {
     /// Returns the unspent nullifiers, along with the account identifiers
     /// with which they are associated.
     fn get_nullifiers(&self) -> Result<Vec<(AccountId, Nullifier)>, Self::Error>;
+
+    fn get_all_nullifiers(&self) -> Result<Vec<(AccountId, Nullifier)>, Self::Error>;
 
     /// Return all unspent notes.
     fn get_unspent_sapling_notes(
@@ -248,6 +250,7 @@ pub trait WalletWrite: WalletRead {
     fn store_decrypted_tx(
         &mut self,
         received_tx: &DecryptedTransaction,
+        nullifiers: &[(AccountId, Nullifier)],
     ) -> Result<Self::TxRef, Self::Error>;
 
     fn store_sent_tx(&mut self, sent_tx: &SentTransaction) -> Result<Self::TxRef, Self::Error>;
@@ -296,7 +299,7 @@ pub mod testing {
         memo::Memo,
         merkle_tree::{CommitmentTree, IncrementalWitness},
         sapling::{Node, Nullifier, PaymentAddress},
-        transaction::{components::Amount, TxId},
+        transaction::{components::Amount, Transaction, TxId},
         zip32::ExtendedFullViewingKey,
     };
 
@@ -380,6 +383,10 @@ pub mod testing {
             Ok(Memo::Empty)
         }
 
+        fn get_transaction(&self, _id_tx: Self::TxRef) -> Result<Transaction, Self::Error> {
+            Err(Error::ScanRequired) // wrong error but we'll fix it later.
+        }
+
         fn get_commitment_tree(
             &self,
             _block_height: BlockHeight,
@@ -439,6 +446,7 @@ pub mod testing {
         fn store_decrypted_tx(
             &mut self,
             _received_tx: &DecryptedTransaction,
+            _nullifiers: &[(AccountId, Nullifier)],
         ) -> Result<Self::TxRef, Self::Error> {
             Ok(TxId([0u8; 32]))
         }
