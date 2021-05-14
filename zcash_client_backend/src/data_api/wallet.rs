@@ -57,7 +57,7 @@ where
         .ok_or(Error::SaplingNotActive)?;
 
     let sapling_outputs = decrypt_transaction(params, height, tx, &extfvks);
-    
+
     if !(sapling_outputs.is_empty() && tx.vout.is_empty()) {
         let nullifiers = data.get_all_nullifiers()?;
         data.store_decrypted_tx(

@@ -569,22 +569,18 @@ impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
                 // as our z->t tx and store the vouts as our sent notes.
                 // FIXME this is a weird heuristic that is bound to trip us up somewhere.
 
-                // d_tx.tx.shielded_spends.iter().find(|input| nullifiers.iter().any(|(_, n)| { *n == input.nullifier } )) {
-                    
-                match nullifiers.iter().find(|(_, n)| d_tx.tx.shielded_spends.iter().any(|input| *n == input.nullifier )) {
-                    Some(tx_input) => {
-                        for (output_index, txout) in d_tx.tx.vout.iter().enumerate() {
-                            wallet::put_sent_utxo(
-                                up,
-                                tx_ref,
-                                output_index,
-                                tx_input.0,
-                                &txout.script_pubkey.address().unwrap(),
-                                txout.value,
-                            )?;
-                        }
-                    },
-                    None => {
+                if let Some((account_id, _)) = nullifiers.iter().find(|(_, nf)|
+                    d_tx.tx.shielded_spends.iter().any(|input| *nf == input.nullifier)
+                ) {
+                    for (output_index, txout) in d_tx.tx.vout.iter().enumerate() {
+                        wallet::put_sent_utxo(
+                            up,
+                            tx_ref,
+                            output_index,
+                            *account_id,
+                            &txout.script_pubkey.address().unwrap(),
+                            txout.value,
+                        )?;
                     }
                 }
             }
