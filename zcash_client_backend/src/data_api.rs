@@ -406,6 +406,10 @@ pub mod testing {
             Ok(Vec::new())
         }
 
+        fn get_all_nullifiers(&self) -> Result<Vec<(AccountId, Nullifier)>, Self::Error> {
+            Ok(Vec::new())
+        }
+
         fn get_unspent_sapling_notes(
             &self,
             _account: AccountId,
