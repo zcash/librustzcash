@@ -1,8 +1,17 @@
 use blake2b_simd::{Params as Blake2bParams, OUTBYTES};
 use std::cmp::min;
 
-pub const H_PERS_PREFIX: &[u8; 14] = b"UA_F4Jumble_H_";
-pub const G_PERS_PREFIX: &[u8; 14] = b"UA_F4Jumble_G_";
+macro_rules! H_PERS {
+    ( $i:expr ) => {
+        [85, 65, 95, 70, 52, 74, 117, 109, 98, 108, 101, 95, 72, 95, $i, 0]
+    }
+}
+
+macro_rules! G_PERS {
+    ( $i:expr, $j:expr ) => {
+        [85, 65, 95, 70, 52, 74, 117, 109, 98, 108, 101, 95, 71, 95, $i, $j]
+    }
+}
 
 struct Hashes {
     l_l: usize,
@@ -17,35 +26,26 @@ impl Hashes {
     }
 
     fn h(&self, i: u8, u: &[u8]) -> Vec<u8> {
-        let mut personal = [0u8; 16];
-        (&mut personal[..14]).copy_from_slice(H_PERS_PREFIX);
-        (&mut personal[14..]).copy_from_slice(&[i, 0]);
-
         Blake2bParams::new()
             .hash_length(self.l_l)
-            .personal(&personal)
+            .personal(&H_PERS!(i))
             .hash(&u)
             .as_ref()
             .to_vec()
     }
 
     fn g(&self, i: u8, u: &[u8]) -> Vec<u8> {
-        let mut result = Vec::with_capacity(self.l_r);
-        for j in 0..ceildiv(self.l_r, OUTBYTES) {
-            let mut personal = [0u8; 16];
-            (&mut personal[..14]).copy_from_slice(G_PERS_PREFIX);
-            (&mut personal[14..]).copy_from_slice(&[i, j as u8]);
-
-            result.extend(
-                Blake2bParams::new()
-                    .hash_length(OUTBYTES)
-                    .personal(&personal)
-                    .hash(u)
-                    .as_ref(),
-            );
-        }
-
-        result.into_iter().take(self.l_r).collect()
+        (0..ceildiv(self.l_r, OUTBYTES)).flat_map(|j| {
+            Blake2bParams::new()
+                .hash_length(OUTBYTES)
+                .personal(&G_PERS!(i, j as u8))
+                .hash(u)
+                .as_ref()
+                .to_vec()
+                .into_iter()
+        })
+        .take(self.l_r)
+        .collect()
     }
 }
 
@@ -103,6 +103,16 @@ mod tests {
     use proptest::prelude::*;
 
     use super::{f4jumble, f4jumble_inv};
+    
+    #[test]
+    fn h_pers() {
+        assert_eq!(&H_PERS!(7), b"UA_F4Jumble_H_\x07\x00");
+    }
+    
+    #[test]
+    fn g_pers() {
+        assert_eq!(&G_PERS!(7, 13), b"UA_F4Jumble_G_\x07\x0d");
+    }
 
     proptest! {
         #[test]
