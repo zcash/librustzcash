@@ -101,7 +101,7 @@ mod tests {
     use proptest::collection::vec;
     use proptest::prelude::*;
 
-    use super::{f4jumble, f4jumble_inv};
+    use super::{f4jumble, f4jumble_inv, VALID_LENGTH};
     
     #[test]
     fn h_pers() {
@@ -115,7 +115,7 @@ mod tests {
 
     proptest! {
         #[test]
-        fn f4jumble_roundtrip(msg in vec(any::<u8>(), 48..=16448)) {
+        fn f4jumble_roundtrip(msg in vec(any::<u8>(), VALID_LENGTH)) {
             let jumbled = f4jumble(&msg).unwrap();
             let jumbled_len = jumbled.len();
             prop_assert_eq!(
