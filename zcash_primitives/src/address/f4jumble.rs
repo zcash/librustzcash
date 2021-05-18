@@ -1,5 +1,8 @@
 use blake2b_simd::{Params as Blake2bParams, OUTBYTES};
 use std::cmp::min;
+use std::ops::RangeInclusive;
+
+const VALID_LENGTH: RangeInclusive<usize> = 48..=16448;
 
 macro_rules! H_PERS {
     ( $i:expr ) => {
@@ -58,40 +61,36 @@ fn ceildiv(num: usize, den: usize) -> usize {
 }
 
 #[allow(clippy::many_single_char_names)]
-pub fn f4jumble(mut a: Vec<u8>) -> Option<Vec<u8>> {
-    if a.len() >= 48 && a.len() <= 16448 {
-        Some({
-            let hashes = Hashes::new(a.len());
-            let b = a.split_off(hashes.l_l);
+pub fn f4jumble(a: &[u8]) -> Option<Vec<u8>> {
+    if VALID_LENGTH.contains(&a.len()) {
+        let hashes = Hashes::new(a.len());
+        let (a, b) = a.split_at(hashes.l_l);
 
-            let x = xor(&b, &hashes.g(0, &a));
-            let y = xor(&a, &hashes.h(0, &x));
-            let d = xor(&x, &hashes.g(1, &y));
-            let mut c = xor(&y, &hashes.h(1, &d));
+        let x = xor(b, &hashes.g(0, a));
+        let y = xor(a, &hashes.h(0, &x));
+        let d = xor(&x, &hashes.g(1, &y));
+        let mut c = xor(&y, &hashes.h(1, &d));
 
-            c.extend(d);
-            c
-        })
+        c.extend(d);
+        Some(c)
     } else {
         None
     }
 }
 
 #[allow(clippy::many_single_char_names)]
-pub fn f4jumble_inv(mut c: Vec<u8>) -> Option<Vec<u8>> {
-    if c.len() >= 48 && c.len() <= 16448 {
-        Some({
-            let hashes = Hashes::new(c.len());
-            let d = c.split_off(hashes.l_l);
+pub fn f4jumble_inv(c: &[u8]) -> Option<Vec<u8>> {
+    if VALID_LENGTH.contains(&c.len()) {
+        let hashes = Hashes::new(c.len());
+        let (c, d) = c.split_at(hashes.l_l);
 
-            let y = xor(&c, &hashes.h(1, &d));
-            let x = xor(&d, &hashes.g(1, &y));
-            let mut a = xor(&y, &hashes.h(0, &x));
-            let b = xor(&x, &hashes.g(0, &a));
+        let y = xor(c, &hashes.h(1, d));
+        let x = xor(d, &hashes.g(1, &y));
+        let mut a = xor(&y, &hashes.h(0, &x));
+        let b = xor(&x, &hashes.g(0, &a));
 
-            a.extend(b);
-            a
-        })
+        a.extend(b);
+        Some(a)
     } else {
         None
     }
@@ -116,8 +115,8 @@ mod tests {
 
     proptest! {
         #[test]
-        fn f4jumble_roundtrip(msg in vec(any::<u8>(), 48..16448)) {
-            let jumbled = f4jumble(msg.clone()).unwrap();
+        fn f4jumble_roundtrip(msg in vec(any::<u8>(), 48..=16448)) {
+            let jumbled = f4jumble(&msg).unwrap();
             let jumbled_len = jumbled.len();
             prop_assert_eq!(
                 msg.len(), jumbled_len,
@@ -125,7 +124,7 @@ mod tests {
                 jumbled_len, msg.len()
             );
 
-            let unjumbled = f4jumble_inv(jumbled).unwrap();
+            let unjumbled = f4jumble_inv(&jumbled).unwrap();
             prop_assert_eq!(
                 jumbled_len, unjumbled.len(),
                 "Unjumbled length {} was not equal to jumbled length {}",
