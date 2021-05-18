@@ -85,7 +85,7 @@ proptest! {
 }
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(20))]
+    #![proptest_config(ProptestConfig::with_cases(10))]
     #[test]
     fn tx_serialization_roundtrip_canopy(tx in arb_tx(BranchId::Canopy)) {
         check_roundtrip(BranchId::Canopy, tx)?;
@@ -93,7 +93,7 @@ proptest! {
 }
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(20))]
+    #![proptest_config(ProptestConfig::with_cases(10))]
     #[test]
     fn tx_serialization_roundtrip_nu5(tx in arb_tx(BranchId::Nu5)) {
         check_roundtrip(BranchId::Nu5, tx)?;
