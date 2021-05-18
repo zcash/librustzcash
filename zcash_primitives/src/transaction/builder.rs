@@ -364,11 +364,11 @@ impl TransactionMetadata {
     }
 }
 
-/// Reports on the progress made by the builder towards building the transaction.
-/// `cur` is the number of steps completed, and `end` is the total number of steps
-/// expected. Note that each step may not be of the same complexity/duration
+/// Reports on the progress made by the builder towards building a transaction.
 pub struct Progress {
+    /// The number of steps completed.
     cur: u32,
+    /// The expected total number of steps (as of this progress update), if known.
     end: Option<u32>,
 }
 
@@ -377,12 +377,17 @@ impl Progress {
         Self { cur, end }
     }
 
-    /// Returns the amount of progress made so far building the Tx
+    /// Returns the number of steps completed so far while building the transaction.
+    ///
+    /// Note that each step may not be of the same complexity/duration.
     pub fn cur(&self) -> u32 {
         self.cur
     }
 
-    /// Returns the total expected number of steps before this Tx is ready
+    /// Returns the total expected number of steps before this transaction will be ready,
+    /// or `None` if the end is unknown as of this progress update.
+    ///
+    /// Note that each step may not be of the same complexity/duration.
     pub fn end(&self) -> Option<u32> {
         self.end
     }
