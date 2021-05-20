@@ -59,9 +59,9 @@ pub trait FromAddress: Sized {
         Err(UnsupportedAddress("Sapling"))
     }
 
-    fn from_orchard(net: Network, data: orchard::Data) -> Result<Self, UnsupportedAddress> {
+    fn from_unified(net: Network, data: unified::Data) -> Result<Self, UnsupportedAddress> {
         let _ = (net, data);
-        Err(UnsupportedAddress("Orchard"))
+        Err(UnsupportedAddress("Unified"))
     }
 
     fn from_transparent_p2pkh(net: Network, data: p2pkh::Data) -> Result<Self, UnsupportedAddress> {
@@ -111,7 +111,7 @@ pub trait ToAddress: private::Sealed {
 
     fn from_sapling(net: Network, data: sapling::Data) -> Self;
 
-    fn from_orchard(net: Network, data: orchard::Data) -> Self;
+    fn from_unified(net: Network, data: unified::Data) -> Self;
 
     fn from_transparent_p2pkh(net: Network, data: p2pkh::Data) -> Self;
 
@@ -137,10 +137,10 @@ impl ToAddress for ZcashAddress {
         }
     }
 
-    fn from_orchard(net: Network, data: orchard::Data) -> Self {
+    fn from_unified(net: Network, data: unified::Data) -> Self {
         ZcashAddress {
             net,
-            kind: AddressKind::Orchard(data),
+            kind: AddressKind::Unified(data),
         }
     }
 

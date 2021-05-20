@@ -9,8 +9,6 @@ use crate::{kind::*, AddressKind, Network, ZcashAddress};
 pub enum ParseError {
     /// The string is an invalid encoding.
     InvalidEncoding,
-    /// The string might be an unknown Zcash address from the future.
-    MaybeZcash,
     /// The string is not a Zcash address.
     NotZcash,
 }
@@ -19,10 +17,6 @@ impl fmt::Display for ParseError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             ParseError::InvalidEncoding => write!(f, "Invalid encoding"),
-            ParseError::MaybeZcash => write!(
-                f,
-                "This might be a Zcash address from the future that we don't know about"
-            ),
             ParseError::NotZcash => write!(f, "Not a Zcash address"),
         }
     }
@@ -40,49 +34,47 @@ impl FromStr for ZcashAddress {
 
         // Most Zcash addresses use Bech32, so try that first.
         match bech32::decode(s) {
-            // Zcash addresses only use the original Bech32 variant, since the data
-            // corresponding to a particular HRP always has a fixed length.
-            Ok((_, _, Variant::Bech32m)) => return Err(ParseError::NotZcash),
+            Ok((hrp, data, Variant::Bech32m)) => {
+                // If we reached this point, the encoding is supposed to be valid Bech32m.
+                let data =
+                    Vec::<u8>::from_base32(&data).map_err(|_| ParseError::InvalidEncoding)?;
+
+                let net = match hrp.as_str() {
+                    unified::MAINNET => Network::Main,
+                    unified::TESTNET => Network::Test,
+                    unified::REGTEST => Network::Regtest,
+                    // We will not define new Bech32m address encodings.
+                    _ => {
+                        return Err(ParseError::NotZcash);
+                    }
+                };
+
+                return data[..]
+                    .try_into()
+                    .map(AddressKind::Unified)
+                    .map_err(|_| ParseError::InvalidEncoding)
+                    .map(|kind| ZcashAddress { net, kind });
+            }
             Ok((hrp, data, Variant::Bech32)) => {
                 // If we reached this point, the encoding is supposed to be valid Bech32.
                 let data =
                     Vec::<u8>::from_base32(&data).map_err(|_| ParseError::InvalidEncoding)?;
 
                 let net = match hrp.as_str() {
-                    sapling::MAINNET | orchard::MAINNET => Network::Main,
-                    sapling::TESTNET | orchard::TESTNET => Network::Test,
-                    sapling::REGTEST | orchard::REGTEST => Network::Regtest,
+                    sapling::MAINNET => Network::Main,
+                    sapling::TESTNET => Network::Test,
+                    sapling::REGTEST => Network::Regtest,
+                    // We will not define new Bech32 address encodings.
                     _ => {
-                        // Use some heuristics to try and guess whether this might be a Zcash
-                        // address from the future:
-                        // - Zcash HRPs always start with a 'z'.
-                        // - Zcash shielded addresses with diversification have data of
-                        //   length 43, but if we added the simple form of detection keys
-                        //   the data would have length 75. Alternatively if we switch from a
-                        //   11-byte diversifier to two field elements, that would be 64 bytes.
-                        return Err(
-                            if hrp.starts_with('z')
-                                && (data.len() == 43 || data.len() == 64 || data.len() == 75)
-                            {
-                                ParseError::MaybeZcash
-                            } else {
-                                ParseError::NotZcash
-                            },
-                        );
+                        return Err(ParseError::NotZcash);
                     }
                 };
 
-                return match hrp.as_str() {
-                    sapling::MAINNET | sapling::TESTNET | sapling::REGTEST => {
-                        data[..].try_into().map(AddressKind::Sapling)
-                    }
-                    orchard::MAINNET | orchard::TESTNET | orchard::REGTEST => {
-                        data[..].try_into().map(AddressKind::Orchard)
-                    }
-                    _ => unreachable!(),
-                }
-                .map_err(|_| ParseError::InvalidEncoding)
-                .map(|kind| ZcashAddress { net, kind });
+                return data[..]
+                    .try_into()
+                    .map(AddressKind::Sapling)
+                    .map_err(|_| ParseError::InvalidEncoding)
+                    .map(|kind| ZcashAddress { net, kind });
             }
             Err(_) => (),
         }
@@ -111,6 +103,10 @@ impl FromStr for ZcashAddress {
         // If it's not valid Bech32 or Base58Check, it's not a Zcash address.
         Err(ParseError::NotZcash)
     }
+}
+
+fn encode_bech32m(hrp: &str, data: &[u8]) -> String {
+    bech32::encode(hrp, data.to_base32(), Variant::Bech32m).expect("hrp is invalid")
 }
 
 fn encode_bech32(hrp: &str, data: &[u8]) -> String {
@@ -143,11 +139,11 @@ impl fmt::Display for ZcashAddress {
                 },
                 &data,
             ),
-            AddressKind::Orchard(data) => encode_bech32(
+            AddressKind::Unified(data) => encode_bech32m(
                 match self.net {
-                    Network::Main => orchard::MAINNET,
-                    Network::Test => orchard::TESTNET,
-                    Network::Regtest => orchard::REGTEST,
+                    Network::Main => unified::MAINNET,
+                    Network::Test => unified::TESTNET,
+                    Network::Regtest => unified::REGTEST,
                 },
                 &data,
             ),
@@ -219,46 +215,27 @@ mod tests {
     }
 
     #[test]
-    fn orchard() {
+    fn unified() {
         encoding(
             "zo1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq58lk79",
             ZcashAddress {
                 net: Network::Main,
-                kind: AddressKind::Orchard([0; 43]),
+                kind: AddressKind::Unified([0; 43]),
             },
         );
         encoding(
             "ztestorchard1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqcrmt3p",
             ZcashAddress {
                 net: Network::Test,
-                kind: AddressKind::Orchard([0; 43]),
+                kind: AddressKind::Unified([0; 43]),
             },
         );
         encoding(
             "zregtestorchard1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq88jxqx",
             ZcashAddress {
                 net: Network::Regtest,
-                kind: AddressKind::Orchard([0; 43]),
+                kind: AddressKind::Unified([0; 43]),
             },
-        );
-    }
-
-    #[test]
-    fn maybe_zcash() {
-        assert_eq!(
-            "zmaybe1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqql7xs38"
-                .parse::<ZcashAddress>(),
-            Err(ParseError::MaybeZcash),
-        );
-        assert_eq!(
-            "zpossibly1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq559klt"
-                .parse::<ZcashAddress>(),
-            Err(ParseError::MaybeZcash),
-        );
-        assert_eq!(
-            "nope1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqg8f5j9"
-                .parse::<ZcashAddress>(),
-            Err(ParseError::NotZcash),
         );
     }
 

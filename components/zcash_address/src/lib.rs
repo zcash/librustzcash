@@ -31,7 +31,7 @@ pub enum Network {
 enum AddressKind {
     Sprout(kind::sprout::Data),
     Sapling(kind::sapling::Data),
-    Orchard(kind::orchard::Data),
+    Unified(kind::unified::Data),
     P2pkh(kind::p2pkh::Data),
     P2sh(kind::p2sh::Data),
 }
@@ -46,17 +46,11 @@ impl ZcashAddress {
     ///
     /// # Errors
     ///
-    /// In most cases, [`ParseError::NotZcash`] will be returned on failure. The two
-    /// exceptions are:
-    ///
     /// - If the parser can detect that the string _must_ contain an address encoding used
     ///   by Zcash, [`ParseError::InvalidEncoding`] will be returned if any subsequent
     ///   part of that encoding is invalid.
     ///
-    /// - [`ParseError::MaybeZcash`] will be returned if the string is Bech32-encoded data
-    ///   that satisfies some heuristics for probable future Zcash address formats (such
-    ///   as beginning with a `z`). This can either be treated as an indication that this
-    ///   library dependency should be updated, or mapped to [`ParseError::NotZcash`].
+    /// - In all other cases, [`ParseError::NotZcash`] will be returned on failure.
     ///
     /// # Examples
     ///
@@ -87,7 +81,7 @@ impl ZcashAddress {
         match self.kind {
             AddressKind::Sprout(data) => T::from_sprout(self.net, data),
             AddressKind::Sapling(data) => T::from_sapling(self.net, data),
-            AddressKind::Orchard(data) => T::from_orchard(self.net, data),
+            AddressKind::Unified(data) => T::from_unified(self.net, data),
             AddressKind::P2pkh(data) => T::from_transparent_p2pkh(self.net, data),
             AddressKind::P2sh(data) => T::from_transparent_p2sh(self.net, data),
         }
