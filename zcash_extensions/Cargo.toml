@@ -13,7 +13,7 @@ blake2b_simd = "0.5"
 zcash_primitives = { version = "0.5", path = "../zcash_primitives", features = ["zfuture"] }
 
 [dev-dependencies]
-ff = "0.8"
-jubjub = "0.5.1"
-rand_core = "0.5.1"
+ff = "0.9"
+jubjub = "0.6"
+rand_core = "0.6"
 zcash_proofs = { version = "0.5", path = "../zcash_proofs" }

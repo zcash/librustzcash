@@ -15,18 +15,17 @@ edition = "2018"
 [dependencies]
 bech32 = "0.8"
 bs58 = { version = "0.4", features = ["check"] }
-ff = "0.8"
-group = "0.8"
-jubjub = "0.5.1"
+ff = "0.9"
+group = "0.9"
+jubjub = "0.6"
 protobuf = "2.20"
-rand_core = "0.5.1"
+rand_core = "0.6"
 rusqlite = { version = "0.24", features = ["bundled", "time"] }
 time = "0.2"
 zcash_client_backend = { version = "0.5", path = "../zcash_client_backend" }
 zcash_primitives = { version = "0.5", path = "../zcash_primitives" }
 
 [dev-dependencies]
-rand_core = "0.5.1"
 tempfile = "3"
 zcash_proofs = { version = "0.5", path = "../zcash_proofs" }
 
