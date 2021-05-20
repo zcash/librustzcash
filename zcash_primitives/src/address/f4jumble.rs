@@ -148,6 +148,8 @@ mod tests {
         for v in test_vectors() {
             let jumbled = f4jumble(&v.normal).unwrap();
             assert_eq!(jumbled, v.jumbled);
+            let unjumbled = f4jumble_inv(&v.jumbled).unwrap();
+            assert_eq!(unjumbled, v.normal);
         }
     }
 }
