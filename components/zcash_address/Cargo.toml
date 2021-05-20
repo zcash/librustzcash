@@ -13,4 +13,8 @@ edition = "2018"
 
 [dependencies]
 bech32 = "0.8"
+blake2b_simd = "0.5"
 bs58 = { version = "0.4", features = ["check"] }
+
+[dev-dependencies]
+proptest = "0.10.1"

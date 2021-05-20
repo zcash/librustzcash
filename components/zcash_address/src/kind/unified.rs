@@ -1,3 +1,5 @@
+mod f4jumble;
+
 /// The HRP for a Bech32m-encoded mainnet Unified Address.
 ///
 /// Defined in [ZIP 316][zip-0316].
