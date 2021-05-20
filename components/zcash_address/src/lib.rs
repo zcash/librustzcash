@@ -4,9 +4,10 @@ mod kind;
 
 pub use convert::{FromAddress, ToAddress, UnsupportedAddress};
 pub use encoding::ParseError;
+pub use kind::unified;
 
 /// A Zcash address.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct ZcashAddress {
     net: Network,
     kind: AddressKind,
@@ -27,11 +28,11 @@ pub enum Network {
 }
 
 /// Known kinds of Zcash addresses.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 enum AddressKind {
     Sprout(kind::sprout::Data),
     Sapling(kind::sapling::Data),
-    Unified(kind::unified::Data),
+    Unified(unified::Address),
     P2pkh(kind::p2pkh::Data),
     P2sh(kind::p2sh::Data),
 }

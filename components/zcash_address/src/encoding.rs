@@ -122,14 +122,14 @@ fn encode_b58(prefix: [u8; 2], data: &[u8]) -> String {
 
 impl fmt::Display for ZcashAddress {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let encoded = match self.kind {
+        let encoded = match &self.kind {
             AddressKind::Sprout(data) => encode_b58(
                 if let Network::Main = self.net {
                     sprout::MAINNET
                 } else {
                     sprout::TESTNET
                 },
-                &data,
+                data,
             ),
             AddressKind::Sapling(data) => encode_bech32(
                 match self.net {
@@ -137,7 +137,7 @@ impl fmt::Display for ZcashAddress {
                     Network::Test => sapling::TESTNET,
                     Network::Regtest => sapling::REGTEST,
                 },
-                &data,
+                data,
             ),
             AddressKind::Unified(data) => encode_bech32m(
                 match self.net {
@@ -145,7 +145,7 @@ impl fmt::Display for ZcashAddress {
                     Network::Test => unified::TESTNET,
                     Network::Regtest => unified::REGTEST,
                 },
-                &data,
+                &data.to_bytes(),
             ),
             AddressKind::P2pkh(data) => encode_b58(
                 if let Network::Main = self.net {
@@ -153,7 +153,7 @@ impl fmt::Display for ZcashAddress {
                 } else {
                     p2pkh::TESTNET
                 },
-                &data,
+                data,
             ),
             AddressKind::P2sh(data) => encode_b58(
                 if let Network::Main = self.net {
@@ -161,7 +161,7 @@ impl fmt::Display for ZcashAddress {
                 } else {
                     p2sh::TESTNET
                 },
-                &data,
+                data,
             ),
         };
         write!(f, "{}", encoded)
@@ -171,6 +171,7 @@ impl fmt::Display for ZcashAddress {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::kind::unified;
 
     fn encoding(encoded: &str, decoded: ZcashAddress) {
         assert_eq!(decoded.to_string(), encoded);
@@ -217,24 +218,26 @@ mod tests {
     #[test]
     fn unified() {
         encoding(
-            "zo1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq58lk79",
+            "u1cd8yzk5mdn4n9r8c24tp8j8e9ethw3rr7ker5zhew3kycyyxggdzfkcq5f9yf2jv8m5ar8krncsntlfpx3p4azvwrkp8z74t3vu4kqq2",
             ZcashAddress {
                 net: Network::Main,
-                kind: AddressKind::Unified([0; 43]),
+                kind: AddressKind::Unified(unified::Address(vec![unified::Receiver::Sapling(
+                    [0; 43],
+                )])),
             },
         );
         encoding(
-            "ztestorchard1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqcrmt3p",
+            "utest1cd8yzk5mdn4n9r8c24tp8j8e9ethw3rr7ker5zhew3kycyyxggdzfkcq5f9yf2jv8m5ar8krncsntlfpx3p4azvwrkp8z74t3vptphj8",
             ZcashAddress {
                 net: Network::Test,
-                kind: AddressKind::Unified([0; 43]),
+                kind: AddressKind::Unified(unified::Address(vec![unified::Receiver::Sapling([0; 43])])),
             },
         );
         encoding(
-            "zregtestorchard1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq88jxqx",
+            "uregtest1cd8yzk5mdn4n9r8c24tp8j8e9ethw3rr7ker5zhew3kycyyxggdzfkcq5f9yf2jv8m5ar8krncsntlfpx3p4azvwrkp8z74t3vsnt5j0",
             ZcashAddress {
                 net: Network::Regtest,
-                kind: AddressKind::Unified([0; 43]),
+                kind: AddressKind::Unified(unified::Address(vec![unified::Receiver::Sapling([0; 43])])),
             },
         );
     }

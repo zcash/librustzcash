@@ -1,4 +1,4 @@
-pub(crate) mod unified;
+pub mod unified;
 
 pub(crate) mod sapling;
 pub(crate) mod sprout;
