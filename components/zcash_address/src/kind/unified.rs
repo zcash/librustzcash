@@ -139,3 +139,58 @@ impl Address {
             .collect()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::convert::TryFrom;
+
+    use proptest::{
+        array::{uniform11, uniform20, uniform32},
+        prelude::*,
+    };
+
+    use super::{Address, Receiver};
+
+    prop_compose! {
+        fn uniform43()(a in uniform11(0u8..), b in uniform32(0u8..)) -> [u8; 43] {
+            let mut c = [0; 43];
+            c[..11].copy_from_slice(&a);
+            c[11..].copy_from_slice(&b);
+            c
+        }
+    }
+
+    fn arb_shielded_receiver() -> BoxedStrategy<Receiver> {
+        prop_oneof![
+            uniform43().prop_map(Receiver::Sapling),
+            uniform43().prop_map(Receiver::Orchard),
+        ]
+        .boxed()
+    }
+
+    fn arb_transparent_receiver() -> BoxedStrategy<Receiver> {
+        prop_oneof![
+            uniform20(0u8..).prop_map(Receiver::P2pkh),
+            uniform20(0u8..).prop_map(Receiver::P2sh),
+        ]
+        .boxed()
+    }
+
+    prop_compose! {
+        fn arb_unified_address()(
+            shielded in prop::collection::hash_set(arb_shielded_receiver(), 1..2),
+            transparent in prop::option::of(arb_transparent_receiver()),
+        ) -> Address {
+            Address(shielded.into_iter().chain(transparent).collect())
+        }
+    }
+
+    proptest! {
+        #[test]
+        fn ua_roundtrip(ua in arb_unified_address()) {
+            let bytes = ua.to_bytes();
+            let decoded = Address::try_from(&bytes[..]);
+            prop_assert_eq!(decoded, Ok(ua));
+        }
+    }
+}
