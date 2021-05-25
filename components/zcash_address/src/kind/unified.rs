@@ -120,23 +120,23 @@ impl TryFrom<&[u8]> for Address {
 impl Address {
     /// Returns the raw encoding of this Unified Address.
     pub(crate) fn to_bytes(&self) -> Vec<u8> {
-        self.0
+        let encoded: Vec<_> = self
+            .0
             .iter()
             .flat_map(|receiver| {
                 let addr = receiver.addr();
                 // Holds by construction.
                 assert!(addr.len() < 256);
 
-                let encoded: Vec<_> = iter::empty()
+                iter::empty()
                     .chain(Some(receiver.typecode()))
                     .chain(Some(addr.len() as u8))
                     .chain(addr.into_iter().cloned())
-                    .chain(iter::repeat(0).take(PADDING_LEN))
-                    .collect();
-
-                f4jumble::f4jumble(&encoded).unwrap()
             })
-            .collect()
+            .chain(iter::repeat(0).take(PADDING_LEN))
+            .collect();
+
+        f4jumble::f4jumble(&encoded).unwrap()
     }
 }
 
