@@ -6,6 +6,7 @@ use std::boxed::Box;
 use std::error;
 use std::fmt;
 use std::marker::PhantomData;
+use std::sync::mpsc::Sender;
 
 use ff::Field;
 use rand::{rngs::OsRng, seq::SliceRandom, CryptoRng, RngCore};
@@ -363,6 +364,35 @@ impl TransactionMetadata {
     }
 }
 
+/// Reports on the progress made by the builder towards building a transaction.
+pub struct Progress {
+    /// The number of steps completed.
+    cur: u32,
+    /// The expected total number of steps (as of this progress update), if known.
+    end: Option<u32>,
+}
+
+impl Progress {
+    fn new(cur: u32, end: Option<u32>) -> Self {
+        Self { cur, end }
+    }
+
+    /// Returns the number of steps completed so far while building the transaction.
+    ///
+    /// Note that each step may not be of the same complexity/duration.
+    pub fn cur(&self) -> u32 {
+        self.cur
+    }
+
+    /// Returns the total expected number of steps before this transaction will be ready,
+    /// or `None` if the end is unknown as of this progress update.
+    ///
+    /// Note that each step may not be of the same complexity/duration.
+    pub fn end(&self) -> Option<u32> {
+        self.end
+    }
+}
+
 /// Generates a [`Transaction`] from its inputs and outputs.
 pub struct Builder<'a, P: consensus::Parameters, R: RngCore> {
     params: P,
@@ -590,9 +620,32 @@ impl<'a, P: consensus::Parameters, R: RngCore> Builder<'a, P, R> {
     /// this function, and instead will generate a transaction that will be rejected by
     /// the network.
     pub fn build(
+        self,
+        consensus_branch_id: consensus::BranchId,
+        prover: &impl TxProver,
+    ) -> Result<(Transaction, TransactionMetadata), Error> {
+        self.build_with_progress_notifier(consensus_branch_id, prover, None)
+    }
+
+    /// Builds a transaction from the configured spends and outputs.
+    ///
+    /// Upon success, returns a tuple containing the final transaction, and the
+    /// [`TransactionMetadata`] generated during the build process.
+    ///
+    /// `consensus_branch_id` must be valid for the block height that this transaction is
+    /// targeting. An invalid `consensus_branch_id` will *not* result in an error from
+    /// this function, and instead will generate a transaction that will be rejected by
+    /// the network.
+    ///
+    /// `progress_notifier` sets the notifier channel, where progress of building the transaction is sent.
+    /// It sends an update after every Spend or Output is computed, and the `u32` sent represents
+    /// the total steps completed so far. It will eventually send number of spends + outputs.
+    /// If there's an error building the transaction, the channel is closed.
+    pub fn build_with_progress_notifier(
         mut self,
         consensus_branch_id: consensus::BranchId,
         prover: &impl TxProver,
+        progress_notifier: Option<Sender<Progress>>,
     ) -> Result<(Transaction, TransactionMetadata), Error> {
         let mut tx_metadata = TransactionMetadata::new();
 
@@ -682,6 +735,10 @@ impl<'a, P: consensus::Parameters, R: RngCore> Builder<'a, P, R> {
         // Record if we'll need a binding signature
         let binding_sig_needed = !spends.is_empty() || !outputs.is_empty();
 
+        // Keep track of the total number of steps computed
+        let total_progress = spends.len() as u32 + outputs.len() as u32;
+        let mut progress = 0u32;
+
         // Create Sapling SpendDescriptions
         if !spends.is_empty() {
             let anchor = self.anchor.expect("anchor was set if spends were added");
@@ -715,6 +772,12 @@ impl<'a, P: consensus::Parameters, R: RngCore> Builder<'a, P, R> {
                     zkproof,
                     spend_auth_sig: None,
                 });
+
+                // Update progress and send a notification on the channel
+                progress += 1;
+                progress_notifier
+                    .as_ref()
+                    .map(|tx| tx.send(Progress::new(progress, Some(total_progress))));
 
                 // Record the post-randomized spend location
                 tx_metadata.spend_indices[*pos] = i;
@@ -795,6 +858,12 @@ impl<'a, P: consensus::Parameters, R: RngCore> Builder<'a, P, R> {
                     zkproof,
                 }
             };
+
+            // Update progress and send a notification on the channel
+            progress += 1;
+            progress_notifier
+                .as_ref()
+                .map(|tx| tx.send(Progress::new(progress, Some(total_progress))));
 
             self.mtx.shielded_outputs.push(output_desc);
         }
