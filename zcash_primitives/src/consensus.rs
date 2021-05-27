@@ -512,7 +512,12 @@ impl BranchId {
 
     /// Returns the range of heights for the consensus epoch associated with this branch id.
     ///
-    /// The return type of this value is slightly more precise than [`Self::height_range`].
+    /// The return type of this value is slightly more precise than [`Self::height_range`]:
+    /// - `Some((x, Some(y)))` means that the consensus rules corresponding to this branch id 
+    ///   are in effect for the range `x..y`
+    /// - `Some((x, None))` means that the consensus rules corresponding to this branch id are 
+    ///   in effect for the range `x..`
+    /// - `None` means that the consensus rules corresponding to this branch id are never in effect.
     pub fn height_bounds<P: Parameters>(
         &self,
         params: &P,

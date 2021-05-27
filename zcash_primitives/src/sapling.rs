@@ -526,7 +526,7 @@ pub mod testing {
     use super::{Node, Note, NoteValue, PaymentAddress, Rseed};
 
     prop_compose! {
-        pub fn arb_note_value()(value in 0u64..MAX_MONEY as u64) -> NoteValue {
+        pub fn arb_note_value()(value in 0u64..=MAX_MONEY as u64) -> NoteValue {
             NoteValue::try_from(value).unwrap()
         }
     }
@@ -534,7 +534,7 @@ pub mod testing {
     prop_compose! {
         /// The
         pub fn arb_positive_note_value(bound: u64)(
-            value in 1u64..(min(bound, MAX_MONEY as u64))
+            value in 1u64..=(min(bound, MAX_MONEY as u64))
         ) -> NoteValue {
             NoteValue::try_from(value).unwrap()
         }
