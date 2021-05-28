@@ -7,10 +7,10 @@ use rand_core::RngCore;
 use std::convert::TryInto;
 
 use zcash_note_encryption::{
-    try_compact_note_decryption, try_note_decryption, try_output_recovery_with_ock, Domain,
-    EphemeralKeyBytes, NoteEncryption, NotePlaintextBytes, NoteValidity, OutPlaintextBytes,
-    OutgoingCipherKey, ShieldedOutput, COMPACT_NOTE_SIZE, NOTE_PLAINTEXT_SIZE, OUT_CIPHERTEXT_SIZE,
-    OUT_PLAINTEXT_SIZE,
+    try_compact_note_decryption, try_note_decryption, try_output_recovery_with_ock,
+    try_output_recovery_with_ovk, Domain, EphemeralKeyBytes, NoteEncryption, NotePlaintextBytes,
+    NoteValidity, OutPlaintextBytes, OutgoingCipherKey, ShieldedOutput, COMPACT_NOTE_SIZE,
+    NOTE_PLAINTEXT_SIZE, OUT_CIPHERTEXT_SIZE, OUT_PLAINTEXT_SIZE,
 };
 
 use crate::{
@@ -407,17 +407,12 @@ pub fn try_sapling_output_recovery<P: consensus::Parameters>(
     ovk: &OutgoingViewingKey,
     output: &OutputDescription,
 ) -> Option<(Note, PaymentAddress, MemoBytes)> {
-    try_sapling_output_recovery_with_ock(
-        params,
+    let domain = SaplingDomain {
+        params: params.clone(),
         height,
-        &prf_ock(
-            &ovk,
-            &output.cv,
-            &output.cmu.to_repr(),
-            &epk_bytes(&output.ephemeral_key),
-        ),
-        output,
-    )
+    };
+
+    try_output_recovery_with_ovk(&domain, ovk, output, &output.cv, &output.out_ciphertext)
 }
 
 #[cfg(test)]
