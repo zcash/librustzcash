@@ -64,7 +64,7 @@ pub enum NoteValidity {
 }
 
 pub trait Domain {
-    type EphemeralSecretKey;
+    type EphemeralSecretKey: ConstantTimeEq;
     type EphemeralPublicKey;
     type SharedSecret;
     type SymmetricKey: AsRef<[u8]>;
@@ -489,6 +489,14 @@ pub fn try_output_recovery_with_ock<D: Domain, Output: ShieldedOutput<D>>(
     let (note, to) =
         domain.parse_note_plaintext_without_memo_ovk(&pk_d, &esk, output.epk(), &plaintext)?;
     let memo = domain.extract_memo(&plaintext);
+
+    // ZIP 212: Check that the esk provided to this function is consistent with the esk we
+    // can derive from the note.
+    if let Some(derived_esk) = D::derive_esk(&note) {
+        if (!derived_esk.ct_eq(&esk)).into() {
+            return None;
+        }
+    }
 
     if let NoteValidity::Valid =
         check_note_validity::<D>(&note, output.epk(), &output.cmstar_bytes())
