@@ -148,10 +148,10 @@ pub trait Domain {
     fn extract_memo(&self, plaintext: &[u8]) -> Self::Memo;
 
     fn extract_pk_d(
-        out_plaintext: &[u8; OUT_CIPHERTEXT_SIZE],
+        out_plaintext: &[u8; OUT_PLAINTEXT_SIZE],
     ) -> Option<Self::DiversifiedTransmissionKey>;
 
-    fn extract_esk(out_plaintext: &[u8; OUT_CIPHERTEXT_SIZE]) -> Option<Self::EphemeralSecretKey>;
+    fn extract_esk(out_plaintext: &[u8; OUT_PLAINTEXT_SIZE]) -> Option<Self::EphemeralSecretKey>;
 }
 
 pub trait ShieldedOutput<D: Domain> {
@@ -477,7 +477,7 @@ pub fn try_output_recovery_with_ock<D: Domain, Output: ShieldedOutput<D>>(
     assert_eq!(output.enc_ciphertext().len(), ENC_CIPHERTEXT_SIZE);
     assert_eq!(out_ciphertext.len(), OUT_CIPHERTEXT_SIZE);
 
-    let mut op = [0; OUT_CIPHERTEXT_SIZE];
+    let mut op = [0; OUT_PLAINTEXT_SIZE];
     assert_eq!(
         ChachaPolyIetf::aead_cipher()
             .open_to(&mut op, &out_ciphertext, &[], ock.as_ref(), &[0u8; 12])
