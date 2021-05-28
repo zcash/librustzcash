@@ -321,11 +321,11 @@ impl<D: Domain> NoteEncryption<D> {
 /// Trial decryption of the full note plaintext by the recipient.
 ///
 /// Attempts to decrypt and validate the given `enc_ciphertext` using the given `ivk`.
-/// If successful, the corresponding Sapling note and memo are returned, along with the
-/// `PaymentAddress` to which the note was sent.
+/// If successful, the corresponding note and memo are returned, along with the address to
+/// which the note was sent.
 ///
 /// Implements section 4.19.2 of the
-/// [Zcash Protocol Specification](https://zips.z.cash/protocol/nu5.pdf#decryptivk)
+/// [Zcash Protocol Specification](https://zips.z.cash/protocol/nu5.pdf#decryptivk).
 pub fn try_note_decryption<D: Domain, Output: ShieldedOutput<D>>(
     domain: &D,
     ivk: &D::IncomingViewingKey,
@@ -404,8 +404,8 @@ fn check_note_validity<D: Domain>(
 /// Trial decryption of the compact note plaintext by the recipient for light clients.
 ///
 /// Attempts to decrypt and validate the first 52 bytes of `enc_ciphertext` using the
-/// given `ivk`. If successful, the corresponding Sapling note is returned, along with the
-/// `PaymentAddress` to which the note was sent.
+/// given `ivk`. If successful, the corresponding note is returned, along with the address
+/// to which the note was sent.
 ///
 /// Implements the procedure specified in [`ZIP 307`].
 ///
@@ -462,12 +462,12 @@ pub fn try_output_recovery_with_ovk<D: Domain, Output: ShieldedOutput<D>>(
 /// Recovery of the full note plaintext by the sender.
 ///
 /// Attempts to decrypt and validate the given `enc_ciphertext` using the given `ock`.
-/// If successful, the corresponding Sapling note and memo are returned, along with the
-/// `PaymentAddress` to which the note was sent.
+/// If successful, the corresponding note and memo are returned, along with the address to
+/// which the note was sent.
 ///
 /// Implements part of section 4.19.3 of the
-/// [Zcash Protocol Specification](https://zips.z.cash/protocol/nu5.pdf#decryptovk)
-/// For decryption using a Full Viewing Key see [`try_sapling_output_recovery`].
+/// [Zcash Protocol Specification](https://zips.z.cash/protocol/nu5.pdf#decryptovk).
+/// For decryption using a Full Viewing Key see [`try_output_recovery_with_ovk`].
 pub fn try_output_recovery_with_ock<D: Domain, Output: ShieldedOutput<D>>(
     domain: &D,
     ock: &OutgoingCipherKey,
