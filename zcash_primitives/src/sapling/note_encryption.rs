@@ -10,7 +10,7 @@ use zcash_note_encryption::{
     try_compact_note_decryption, try_note_decryption, try_output_recovery_with_ock,
     try_output_recovery_with_ovk, Domain, EphemeralKeyBytes, NoteEncryption, NotePlaintextBytes,
     NoteValidity, OutPlaintextBytes, OutgoingCipherKey, ShieldedOutput, COMPACT_NOTE_SIZE,
-    NOTE_PLAINTEXT_SIZE, OUT_CIPHERTEXT_SIZE, OUT_PLAINTEXT_SIZE,
+    NOTE_PLAINTEXT_SIZE, OUT_PLAINTEXT_SIZE,
 };
 
 use crate::{
@@ -272,7 +272,7 @@ impl<P: consensus::Parameters> Domain for SaplingDomain<P> {
         note.cmu()
     }
 
-    fn extract_pk_d(op: &[u8; OUT_CIPHERTEXT_SIZE]) -> Option<Self::DiversifiedTransmissionKey> {
+    fn extract_pk_d(op: &[u8; OUT_PLAINTEXT_SIZE]) -> Option<Self::DiversifiedTransmissionKey> {
         let pk_d = jubjub::SubgroupPoint::from_bytes(
             op[0..32].try_into().expect("slice is the correct length"),
         );
@@ -284,7 +284,7 @@ impl<P: consensus::Parameters> Domain for SaplingDomain<P> {
         }
     }
 
-    fn extract_esk(op: &[u8; OUT_CIPHERTEXT_SIZE]) -> Option<Self::EphemeralSecretKey> {
+    fn extract_esk(op: &[u8; OUT_PLAINTEXT_SIZE]) -> Option<Self::EphemeralSecretKey> {
         jubjub::Fr::from_repr(
             op[32..OUT_PLAINTEXT_SIZE]
                 .try_into()
