@@ -5,7 +5,6 @@
 
 use crypto_api_chachapoly::{ChaCha20Ietf, ChachaPolyIetf};
 use rand_core::RngCore;
-use std::convert::TryFrom;
 use subtle::{Choice, ConstantTimeEq};
 
 pub const COMPACT_NOTE_SIZE: usize = 1 + // version
@@ -75,7 +74,7 @@ pub trait Domain {
     type OutgoingViewingKey;
     type ValueCommitment;
     type ExtractedCommitment;
-    type ExtractedCommitmentBytes: Eq + TryFrom<Self::ExtractedCommitment>;
+    type ExtractedCommitmentBytes: Eq + for<'a> From<&'a Self::ExtractedCommitment>;
     type Memo;
 
     fn derive_esk(note: &Self::Note) -> Option<Self::EphemeralSecretKey>;
@@ -384,9 +383,7 @@ fn check_note_validity<D: Domain>(
     epk: &D::EphemeralPublicKey,
     cmstar_bytes: &D::ExtractedCommitmentBytes,
 ) -> NoteValidity {
-    if D::ExtractedCommitmentBytes::try_from(D::cmstar(&note))
-        .map_or(false, |cs| &cs == cmstar_bytes)
-    {
+    if &D::ExtractedCommitmentBytes::from(&D::cmstar(&note)) == cmstar_bytes {
         let epk_bytes = D::epk_bytes(epk);
         D::check_epk_bytes(&note, |derived_esk| {
             if D::epk_bytes(&D::ka_derive_public(&note, &derived_esk))
