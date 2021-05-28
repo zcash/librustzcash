@@ -54,7 +54,7 @@ fn kdf_sapling(dhsecret: jubjub::SubgroupPoint, ephemeral_key: &EphemeralKeyByte
 pub fn prf_ock(
     ovk: &OutgoingViewingKey,
     cv: &jubjub::ExtendedPoint,
-    cmu: &bls12_381::Scalar,
+    cmu_bytes: &[u8; 32],
     ephemeral_key: &EphemeralKeyBytes,
 ) -> OutgoingCipherKey {
     OutgoingCipherKey(
@@ -64,7 +64,7 @@ pub fn prf_ock(
             .to_state()
             .update(&ovk.0)
             .update(&cv.to_bytes())
-            .update(&cmu.to_repr())
+            .update(cmu_bytes)
             .update(ephemeral_key.as_ref())
             .finalize()
             .as_bytes()
@@ -209,10 +209,10 @@ impl<P: consensus::Parameters> Domain for SaplingDomain<P> {
     fn derive_ock(
         ovk: &Self::OutgoingViewingKey,
         cv: &Self::ValueCommitment,
-        cmu: &Self::ExtractedCommitment,
+        cmu_bytes: &Self::ExtractedCommitmentBytes,
         epk: &EphemeralKeyBytes,
     ) -> OutgoingCipherKey {
-        prf_ock(ovk, cv, cmu, epk)
+        prf_ock(ovk, cv, cmu_bytes, epk)
     }
 
     fn outgoing_plaintext_bytes(
@@ -413,7 +413,7 @@ pub fn try_sapling_output_recovery<P: consensus::Parameters>(
         &prf_ock(
             &ovk,
             &output.cv,
-            &output.cmu,
+            &output.cmu.to_repr(),
             &epk_bytes(&output.ephemeral_key),
         ),
         output,
@@ -524,7 +524,7 @@ mod tests {
             &mut rng,
         );
         let epk = *ne.epk();
-        let ock = prf_ock(&ovk, &cv, &cmu, &epk_bytes(&epk));
+        let ock = prf_ock(&ovk, &cv, &cmu.to_repr(), &epk_bytes(&epk));
 
         let output = OutputDescription {
             cv,
@@ -547,7 +547,7 @@ mod tests {
         out_ciphertext: &[u8; OUT_CIPHERTEXT_SIZE],
         modify_plaintext: impl Fn(&mut [u8; NOTE_PLAINTEXT_SIZE]),
     ) {
-        let ock = prf_ock(&ovk, &cv, &cmu, &epk_bytes(epk));
+        let ock = prf_ock(&ovk, &cv, &cmu.to_repr(), &epk_bytes(epk));
 
         let mut op = [0; OUT_CIPHERTEXT_SIZE];
         assert_eq!(
@@ -1279,7 +1279,7 @@ mod tests {
             assert_eq!(k_enc.as_bytes(), tv.k_enc);
 
             let ovk = OutgoingViewingKey(tv.ovk);
-            let ock = prf_ock(&ovk, &cv, &cmu, &epk_bytes(&epk));
+            let ock = prf_ock(&ovk, &cv, &cmu.to_repr(), &epk_bytes(&epk));
             assert_eq!(ock.as_ref(), tv.ock);
 
             let to = PaymentAddress::from_parts(Diversifier(tv.default_d), pk_d).unwrap();
