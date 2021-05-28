@@ -110,7 +110,7 @@ pub trait Domain {
     fn derive_ock(
         ovk: &Self::OutgoingViewingKey,
         cv: &Self::ValueCommitment,
-        cmstar: &Self::ExtractedCommitment,
+        cmstar_bytes: &Self::ExtractedCommitmentBytes,
         ephemeral_key: &EphemeralKeyBytes,
     ) -> OutgoingCipherKey;
 
@@ -291,7 +291,7 @@ impl<D: Domain> NoteEncryption<D> {
         rng: &mut R,
     ) -> [u8; OUT_CIPHERTEXT_SIZE] {
         let (ock, input) = if let Some(ovk) = &self.ovk {
-            let ock = D::derive_ock(ovk, &cv, &cmstar, &D::epk_bytes(&self.epk));
+            let ock = D::derive_ock(ovk, &cv, &cmstar.into(), &D::epk_bytes(&self.epk));
             let input = D::outgoing_plaintext_bytes(&self.note, &self.esk);
 
             (ock, input)
