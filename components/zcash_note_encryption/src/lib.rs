@@ -436,6 +436,31 @@ pub fn try_compact_note_decryption<D: Domain, Output: ShieldedOutput<D>>(
 
 /// Recovery of the full note plaintext by the sender.
 ///
+/// Attempts to decrypt and validate the given `enc_ciphertext` using the given `ovk`.
+/// If successful, the corresponding note and memo are returned, along with the address to
+/// which the note was sent.
+///
+/// Implements [Zcash Protocol Specification section 4.19.3][decryptovk].
+///
+/// [decryptovk]: https://zips.z.cash/protocol/nu5.pdf#decryptovk
+pub fn try_output_recovery_with_ovk<D: Domain, Output: ShieldedOutput<D>>(
+    domain: &D,
+    ovk: &D::OutgoingViewingKey,
+    output: &Output,
+    cv: &D::ValueCommitment,
+    out_ciphertext: &[u8],
+) -> Option<(D::Note, D::Recipient, D::Memo)> {
+    let ock = D::derive_ock(
+        ovk,
+        &cv,
+        &output.cmstar_bytes(),
+        &D::epk_bytes(&output.epk()),
+    );
+    try_output_recovery_with_ock(domain, &ock, output, out_ciphertext)
+}
+
+/// Recovery of the full note plaintext by the sender.
+///
 /// Attempts to decrypt and validate the given `enc_ciphertext` using the given `ock`.
 /// If successful, the corresponding Sapling note and memo are returned, along with the
 /// `PaymentAddress` to which the note was sent.
