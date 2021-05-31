@@ -6,6 +6,11 @@ and this library adheres to Rust's notion of
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+### Added
+- `zcash_primitives::transaction::Builder::with_progress_notifier`, for setting
+  a notification channel on which transaction build progress updates will be
+  sent.
+
 ### Changed
 - MSRV is now 1.51.0.
 - The following modules and helpers have been moved into
