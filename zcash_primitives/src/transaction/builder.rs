@@ -83,7 +83,7 @@ pub struct Progress {
 }
 
 impl Progress {
-    fn new(cur: u32, end: Option<u32>) -> Self {
+    pub fn new(cur: u32, end: Option<u32>) -> Self {
         Self { cur, end }
     }
 
@@ -312,6 +312,7 @@ impl<'a, P: consensus::Parameters, R: RngCore> Builder<'a, P, R> {
                 &mut ctx,
                 &mut self.rng,
                 self.target_height,
+                self.progress_notifier.as_ref(),
             )
             .map_err(Error::SaplingBuildError)?;
 

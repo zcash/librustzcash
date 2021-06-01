@@ -2,6 +2,7 @@
 
 use std::fmt;
 use std::marker::PhantomData;
+use std::sync::mpsc::Sender;
 
 use ff::Field;
 use rand::{seq::SliceRandom, CryptoRng, RngCore};
@@ -19,7 +20,10 @@ use crate::{
         util::generate_random_rseed_internal,
         Diversifier, Node, Note, PaymentAddress,
     },
-    transaction::components::{amount::Amount, OutputDescription, SpendDescription},
+    transaction::{
+        builder::Progress,
+        components::{amount::Amount, OutputDescription, SpendDescription},
+    },
     zip32::ExtendedSpendingKey,
 };
 
@@ -314,6 +318,7 @@ impl<P: consensus::Parameters> SaplingBuilder<P> {
         ctx: &mut Pr::SaplingProvingContext,
         mut rng: R,
         target_height: BlockHeight,
+        progress_notifier: Option<&Sender<Progress>>,
     ) -> Result<
         (
             Vec<SpendDescription>,
@@ -348,6 +353,10 @@ impl<P: consensus::Parameters> SaplingBuilder<P> {
         indexed_spends.shuffle(&mut rng);
         indexed_outputs.shuffle(&mut rng);
 
+        // Keep track of the total number of steps computed
+        let total_progress = indexed_spends.len() as u32 + indexed_outputs.len() as u32;
+        let mut progress = 0u32;
+
         // Create Sapling SpendDescriptions
         let spend_descs = if !indexed_spends.is_empty() {
             let anchor = self
@@ -380,6 +389,15 @@ impl<P: consensus::Parameters> SaplingBuilder<P> {
 
                     // Record the post-randomized spend location
                     tx_metadata.spend_indices[*pos] = i;
+
+                    // Update progress and send a notification on the channel
+                    progress += 1;
+                    if let Some(sender) = progress_notifier {
+                        // If the send fails, we should ignore the error, not crash.
+                        sender
+                            .send(Progress::new(progress, Some(total_progress)))
+                            .unwrap_or(());
+                    }
 
                     Ok(SpendDescription {
                         cv,
@@ -456,6 +474,15 @@ impl<P: consensus::Parameters> SaplingBuilder<P> {
                     let mut out_ciphertext = [0u8; 80];
                     rng.fill_bytes(&mut enc_ciphertext[..]);
                     rng.fill_bytes(&mut out_ciphertext[..]);
+
+                    // Update progress and send a notification on the channel
+                    progress += 1;
+                    if let Some(sender) = progress_notifier {
+                        // If the send fails, we should ignore the error, not crash.
+                        sender
+                            .send(Progress::new(progress, Some(total_progress)))
+                            .unwrap_or(());
+                    }
 
                     OutputDescription {
                         cv,
