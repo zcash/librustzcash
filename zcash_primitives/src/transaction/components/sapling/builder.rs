@@ -208,20 +208,20 @@ impl SaplingMetadata {
 
 pub struct SaplingBuilder<P: consensus::Parameters> {
     anchor: Option<bls12_381::Scalar>,
+    target_height: BlockHeight,
     value_balance: Amount,
     spends: Vec<SpendDescriptionInfo>,
     outputs: Vec<SaplingOutput<P>>,
-    change_address: Option<(OutgoingViewingKey, PaymentAddress)>,
 }
 
 impl<P: consensus::Parameters> SaplingBuilder<P> {
-    pub fn empty() -> Self {
+    pub fn empty(target_height: BlockHeight) -> Self {
         SaplingBuilder {
             anchor: None,
+            target_height,
             value_balance: Amount::zero(),
             spends: vec![],
             outputs: vec![],
-            change_address: None,
         }
     }
 
@@ -273,14 +273,13 @@ impl<P: consensus::Parameters> SaplingBuilder<P> {
         &mut self,
         mut rng: R,
         params: &P,
-        target_height: BlockHeight,
         ovk: Option<OutgoingViewingKey>,
         to: PaymentAddress,
         value: Amount,
         memo: Option<MemoBytes>,
     ) -> Result<(), Error> {
         let output =
-            SaplingOutput::new_internal(params, target_height, &mut rng, ovk, to, value, memo)?;
+            SaplingOutput::new_internal(params, self.target_height, &mut rng, ovk, to, value, memo)?;
 
         self.value_balance -= value;
 
@@ -289,20 +288,10 @@ impl<P: consensus::Parameters> SaplingBuilder<P> {
         Ok(())
     }
 
-    /// Sets the Sapling address to which any change will be sent.
-    ///
-    /// By default, change is sent to the Sapling address corresponding to the first note
-    /// being spent (i.e. the first call to [`Builder::add_sapling_spend`]).
-    pub fn send_change_to(&mut self, ovk: OutgoingViewingKey, to: PaymentAddress) {
-        self.change_address = Some((ovk, to));
-    }
-
     /// Send change to the specified change address. If no change address
     /// was set, send change to the first Sapling address given as input.
-    pub fn get_change_address(&self) -> Result<(OutgoingViewingKey, PaymentAddress), Error> {
-        if let Some(change_address) = &self.change_address {
-            Ok(change_address.clone())
-        } else if !self.spends.is_empty() {
+    pub fn get_candidate_change_address(&self) -> Result<(OutgoingViewingKey, PaymentAddress), Error> {
+        if !self.spends.is_empty() {
             PaymentAddress::from_parts(self.spends[0].diversifier, self.spends[0].note.pk_d)
                 .map(|addr| (self.spends[0].extsk.expsk.ovk, addr))
                 .ok_or(Error::InvalidAddress)

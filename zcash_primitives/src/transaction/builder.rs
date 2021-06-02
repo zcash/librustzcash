@@ -103,6 +103,10 @@ impl Progress {
     }
 }
 
+enum ChangeAddress {
+    SaplingChangeAddress(OutgoingViewingKey, PaymentAddress)
+}
+
 /// Generates a [`Transaction`] from its inputs and outputs.
 pub struct Builder<'a, P: consensus::Parameters, R: RngCore> {
     params: P,
@@ -112,6 +116,7 @@ pub struct Builder<'a, P: consensus::Parameters, R: RngCore> {
     fee: Amount,
     transparent_builder: TransparentBuilder,
     sapling_builder: SaplingBuilder<P>,
+    change_address: Option<ChangeAddress>,
     #[cfg(feature = "zfuture")]
     tze_builder: TzeBuilder<'a, TransactionData>,
     #[cfg(not(feature = "zfuture"))]
@@ -162,7 +167,8 @@ impl<'a, P: consensus::Parameters, R: RngCore> Builder<'a, P, R> {
             expiry_height: target_height + DEFAULT_TX_EXPIRY_DELTA,
             fee: DEFAULT_FEE,
             transparent_builder: TransparentBuilder::empty(),
-            sapling_builder: SaplingBuilder::empty(),
+            sapling_builder: SaplingBuilder::empty(target_height),
+            change_address: None,
             #[cfg(feature = "zfuture")]
             tze_builder: TzeBuilder::empty(),
             #[cfg(not(feature = "zfuture"))]
@@ -199,7 +205,6 @@ impl<'a, P: consensus::Parameters, R: RngCore> Builder<'a, P, R> {
             .add_output(
                 &mut self.rng,
                 &self.params,
-                self.target_height,
                 ovk,
                 to,
                 value,
@@ -238,7 +243,7 @@ impl<'a, P: consensus::Parameters, R: RngCore> Builder<'a, P, R> {
     /// By default, change is sent to the Sapling address corresponding to the first note
     /// being spent (i.e. the first call to [`Builder::add_sapling_spend`]).
     pub fn send_change_to(&mut self, ovk: OutgoingViewingKey, to: PaymentAddress) {
-        self.sapling_builder.send_change_to(ovk, to)
+        self.change_address = Some(ChangeAddress::SaplingChangeAddress(ovk, to))
     }
 
     /// Sets the notifier channel, where progress of building the transaction is sent.
@@ -294,11 +299,15 @@ impl<'a, P: consensus::Parameters, R: RngCore> Builder<'a, P, R> {
         //
 
         if change.is_positive() {
-            let change_address = self
-                .sapling_builder
-                .get_change_address()
-                .map_err(Error::SaplingBuildError)?;
-            self.add_sapling_output(Some(change_address.0), change_address.1, change, None)?;
+            match self.change_address.take() {
+                Some(ChangeAddress::SaplingChangeAddress(ovk, addr)) => {
+                    self.add_sapling_output(Some(ovk), addr, change, None)?;
+                }
+                None => {
+                    let (ovk, addr) = self.sapling_builder.get_candidate_change_address().map_err(Error::SaplingBuildError)?;
+                    self.add_sapling_output(Some(ovk), addr, change, None)?;
+                }
+            }
         }
 
         let (vin, vout) = self.transparent_builder.build();
@@ -534,7 +543,8 @@ mod tests {
             expiry_height: sapling_activation_height + DEFAULT_TX_EXPIRY_DELTA,
             fee: Amount::zero(),
             transparent_builder: TransparentBuilder::empty(),
-            sapling_builder: SaplingBuilder::empty(),
+            sapling_builder: SaplingBuilder::empty(sapling_activation_height),
+            change_address: None,
             #[cfg(feature = "zfuture")]
             tze_builder: TzeBuilder::empty(),
             #[cfg(not(feature = "zfuture"))]
