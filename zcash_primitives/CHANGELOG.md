@@ -6,6 +6,16 @@ and this library adheres to Rust's notion of
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+### Added
+- `zcash_primitives::transaction::Builder::with_progress_notifier`, for setting
+  a notification channel on which transaction build progress updates will be
+  sent.
+- `zcash_primitives::transaction::Txid::{read, write, from_bytes}`
+- `zcash_primitives::sapling::NoteValue` a typesafe wrapper for Sapling note values.
+- `zcash_primitives::consensus::BranchId::{height_range, height_bounds}` functions 
+  to provide range values for branch active heights.
+- `zcash_primitives::consensus::NetworkUpgrade::Nu5` value representing the Nu5 upgrade.
+- `zcash_primitives::consensus::BranchId::Nu5` value representing the Nu5 consensus branch.
 ### Changed
 - MSRV is now 1.51.0.
 - The following modules and helpers have been moved into
@@ -19,6 +29,13 @@ and this library adheres to Rust's notion of
   - `zcash_primitives::util::{hash_to_scalar, generate_random_rseed}`
 - Renamed `zcash_primitives::transaction::components::JSDescription` to
   `JsDescription` (matching Rust naming conventions).
+- `zcash_primitives::transaction::TxId` contents is now private.
+- Renamed `zcash_primitives::transaction::components::tze::hash` to
+  `zcash_primitives::transaction::components::tze::txid`
+- `zcash_primitives::transaction::components::tze::TzeOutPoint` constructor
+  now taxes a TxId rather than a raw byte array.
+- `zcash_primitives::transaction::components::Amount` addition, subtraction,
+  and summation now return `Option` rather than panicing on overflow.
 
 ## [0.5.0] - 2021-03-26
 ### Added

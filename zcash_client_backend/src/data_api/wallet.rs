@@ -183,11 +183,15 @@ where
         .get_target_and_anchor_heights()
         .and_then(|x| x.ok_or_else(|| Error::ScanRequired.into()))?;
 
-    let target_value = value + DEFAULT_FEE;
+    let target_value = (value + DEFAULT_FEE).ok_or_else(|| E::from(Error::InvalidAmount))?;
     let spendable_notes = wallet_db.select_spendable_notes(account, target_value, anchor_height)?;
 
     // Confirm we were able to select sufficient value
-    let selected_value = spendable_notes.iter().map(|n| n.note_value).sum();
+    let selected_value = spendable_notes
+        .iter()
+        .map(|n| n.note_value)
+        .sum::<Option<_>>()
+        .ok_or_else(|| E::from(Error::InvalidAmount))?;
     if selected_value < target_value {
         return Err(E::from(Error::InsufficientBalance(
             selected_value,

@@ -251,18 +251,18 @@ impl TransparentInputs {
         Ok(())
     }
 
-    fn value_sum(&self) -> Amount {
+    fn value_sum(&self) -> Option<Amount> {
         #[cfg(feature = "transparent-inputs")]
         {
             self.inputs
                 .iter()
                 .map(|input| input.coin.value)
-                .sum::<Amount>()
+                .sum::<Option<Amount>>()
         }
 
         #[cfg(not(feature = "transparent-inputs"))]
         {
-            Amount::zero()
+            Some(Amount::zero())
         }
     }
 
@@ -407,6 +407,7 @@ pub struct Builder<'a, P: consensus::Parameters, R: RngCore> {
     #[cfg(feature = "zfuture")]
     tze_inputs: TzeInputs<'a, TransactionData>,
     change_address: Option<(OutgoingViewingKey, PaymentAddress)>,
+    progress_notifier: Option<Sender<Progress>>,
     _phantom: &'a PhantomData<P>,
 }
 
@@ -504,6 +505,7 @@ impl<'a, P: consensus::Parameters, R: RngCore> Builder<'a, P, R> {
             #[cfg(feature = "zfuture")]
             tze_inputs: TzeInputs::default(),
             change_address: None,
+            progress_notifier: None,
             _phantom: &PhantomData,
         }
     }
@@ -610,21 +612,14 @@ impl<'a, P: consensus::Parameters, R: RngCore> Builder<'a, P, R> {
         self.change_address = Some((ovk, to));
     }
 
-    /// Builds a transaction from the configured spends and outputs.
+    /// Sets the notifier channel, where progress of building the transaction is sent.
     ///
-    /// Upon success, returns a tuple containing the final transaction, and the
-    /// [`TransactionMetadata`] generated during the build process.
-    ///
-    /// `consensus_branch_id` must be valid for the block height that this transaction is
-    /// targeting. An invalid `consensus_branch_id` will *not* result in an error from
-    /// this function, and instead will generate a transaction that will be rejected by
-    /// the network.
-    pub fn build(
-        self,
-        consensus_branch_id: consensus::BranchId,
-        prover: &impl TxProver,
-    ) -> Result<(Transaction, TransactionMetadata), Error> {
-        self.build_with_progress_notifier(consensus_branch_id, prover, None)
+    /// An update is sent after every Spend or Output is computed, and the `u32` sent
+    /// represents the total steps completed so far. It will eventually send number of
+    /// spends + outputs. If there's an error building the transaction, the channel is
+    /// closed.
+    pub fn with_progress_notifier(&mut self, progress_notifier: Sender<Progress>) {
+        self.progress_notifier = Some(progress_notifier);
     }
 
     /// Builds a transaction from the configured spends and outputs.
@@ -636,16 +631,10 @@ impl<'a, P: consensus::Parameters, R: RngCore> Builder<'a, P, R> {
     /// targeting. An invalid `consensus_branch_id` will *not* result in an error from
     /// this function, and instead will generate a transaction that will be rejected by
     /// the network.
-    ///
-    /// `progress_notifier` sets the notifier channel, where progress of building the transaction is sent.
-    /// It sends an update after every Spend or Output is computed, and the `u32` sent represents
-    /// the total steps completed so far. It will eventually send number of spends + outputs.
-    /// If there's an error building the transaction, the channel is closed.
-    pub fn build_with_progress_notifier(
+    pub fn build(
         mut self,
         consensus_branch_id: consensus::BranchId,
         prover: &impl TxProver,
-        progress_notifier: Option<Sender<Progress>>,
     ) -> Result<(Transaction, TransactionMetadata), Error> {
         let mut tx_metadata = TransactionMetadata::new();
 
@@ -654,8 +643,18 @@ impl<'a, P: consensus::Parameters, R: RngCore> Builder<'a, P, R> {
         //
 
         // Valid change
-        let change = self.mtx.value_balance - self.fee + self.transparent_inputs.value_sum()
-            - self.mtx.vout.iter().map(|vo| vo.value).sum::<Amount>();
+        let change = self.mtx.value_balance - self.fee
+            + self
+                .transparent_inputs
+                .value_sum()
+                .ok_or(Error::InvalidAmount)?
+            - self
+                .mtx
+                .vout
+                .iter()
+                .map(|vo| vo.value)
+                .sum::<Option<Amount>>()
+                .ok_or(Error::InvalidAmount)?;
 
         #[cfg(feature = "zfuture")]
         let change = change
@@ -664,13 +663,17 @@ impl<'a, P: consensus::Parameters, R: RngCore> Builder<'a, P, R> {
                 .builders
                 .iter()
                 .map(|ein| ein.prevout.value)
-                .sum::<Amount>()
+                .sum::<Option<Amount>>()
+                .ok_or(Error::InvalidAmount)?
             - self
                 .mtx
                 .tze_outputs
                 .iter()
                 .map(|tzo| tzo.value)
-                .sum::<Amount>();
+                .sum::<Option<Amount>>()
+                .ok_or(Error::InvalidAmount)?;
+
+        let change = change.ok_or(Error::InvalidAmount)?;
 
         if change.is_negative() {
             return Err(Error::ChangeIsNegative(change));
@@ -775,7 +778,7 @@ impl<'a, P: consensus::Parameters, R: RngCore> Builder<'a, P, R> {
 
                 // Update progress and send a notification on the channel
                 progress += 1;
-                progress_notifier
+                self.progress_notifier
                     .as_ref()
                     .map(|tx| tx.send(Progress::new(progress, Some(total_progress))));
 
@@ -861,7 +864,7 @@ impl<'a, P: consensus::Parameters, R: RngCore> Builder<'a, P, R> {
 
             // Update progress and send a notification on the channel
             progress += 1;
-            progress_notifier
+            self.progress_notifier
                 .as_ref()
                 .map(|tx| tx.send(Progress::new(progress, Some(total_progress))));
 
@@ -1085,6 +1088,7 @@ mod tests {
             #[cfg(feature = "zfuture")]
             tze_inputs: TzeInputs::default(),
             change_address: None,
+            progress_notifier: None,
             _phantom: &PhantomData,
         };
 
@@ -1160,7 +1164,9 @@ mod tests {
             let builder = Builder::new(TEST_NETWORK, H0);
             assert_eq!(
                 builder.build(consensus::BranchId::Sapling, &MockTxProver),
-                Err(Error::ChangeIsNegative(Amount::zero() - DEFAULT_FEE))
+                Err(Error::ChangeIsNegative(
+                    (Amount::zero() - DEFAULT_FEE).unwrap()
+                ))
             );
         }
 
@@ -1178,7 +1184,7 @@ mod tests {
             assert_eq!(
                 builder.build(consensus::BranchId::Sapling, &MockTxProver),
                 Err(Error::ChangeIsNegative(
-                    Amount::from_i64(-50000).unwrap() - DEFAULT_FEE
+                    (Amount::from_i64(-50000).unwrap() - DEFAULT_FEE).unwrap()
                 ))
             );
         }
@@ -1196,7 +1202,7 @@ mod tests {
             assert_eq!(
                 builder.build(consensus::BranchId::Sapling, &MockTxProver),
                 Err(Error::ChangeIsNegative(
-                    Amount::from_i64(-50000).unwrap() - DEFAULT_FEE
+                    (Amount::from_i64(-50000).unwrap() - DEFAULT_FEE).unwrap()
                 ))
             );
         }

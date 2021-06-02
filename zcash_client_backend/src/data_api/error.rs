@@ -24,6 +24,9 @@ pub enum ChainInvalid {
 
 #[derive(Debug)]
 pub enum Error<NoteId> {
+    /// The amount specified exceeds the allowed range.
+    InvalidAmount,
+
     /// Unable to create a new spend because the wallet balance is not sufficient.
     InsufficientBalance(Amount, Amount),
 
@@ -72,6 +75,10 @@ impl ChainInvalid {
 impl<N: fmt::Display> fmt::Display for Error<N> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match &self {
+            Error::InvalidAmount => write!(
+                f,
+                "The value lies outside the valid range of Zcash amounts."
+            ),
             Error::InsufficientBalance(have, need) => write!(
                 f,
                 "Insufficient balance (have {}, need {} including fee)",

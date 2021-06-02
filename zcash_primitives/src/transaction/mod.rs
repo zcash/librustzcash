@@ -41,13 +41,36 @@ const ZFUTURE_VERSION_GROUP_ID: u32 = 0xFFFFFFFF;
 const ZFUTURE_TX_VERSION: u32 = 0x0000FFFF;
 
 #[derive(Clone, Copy, Debug, PartialOrd, Ord, PartialEq, Eq, Hash)]
-pub struct TxId(pub [u8; 32]);
+pub struct TxId([u8; 32]);
 
 impl fmt::Display for TxId {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut data = self.0;
         data.reverse();
         formatter.write_str(&hex::encode(data))
+    }
+}
+
+impl AsRef<[u8; 32]> for TxId {
+    fn as_ref(&self) -> &[u8; 32] {
+        &self.0
+    }
+}
+
+impl TxId {
+    pub fn from_bytes(bytes: [u8; 32]) -> Self {
+        TxId(bytes)
+    }
+
+    pub fn read<R: Read>(mut reader: R) -> io::Result<Self> {
+        let mut hash = [0u8; 32];
+        reader.read_exact(&mut hash)?;
+        Ok(TxId::from_bytes(hash))
+    }
+
+    pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
+        writer.write_all(&self.0)?;
+        Ok(())
     }
 }
 
@@ -502,7 +525,7 @@ pub mod testing {
 
     use super::{
         components::{amount::MAX_MONEY, Amount, OutPoint, TxIn, TxOut},
-        Transaction, TransactionData, TxVersion,
+        Transaction, TransactionData, TxId, TxVersion,
     };
 
     #[cfg(feature = "zfuture")]
@@ -518,6 +541,10 @@ pub mod testing {
         0x65, // OP_VERIF,
         0x6a, // OP_RETURN,
     ];
+
+    pub fn arb_txid() -> impl Strategy<Value = TxId> {
+        prop::array::uniform32(any::<u8>()).prop_map(TxId::from_bytes)
+    }
 
     prop_compose! {
         pub fn arb_outpoint()(hash in prop::array::uniform32(1u8..), n in 1..100u32) -> OutPoint {
@@ -551,8 +578,8 @@ pub mod testing {
 
     #[cfg(feature = "zfuture")]
     prop_compose! {
-        pub fn arb_tzeoutpoint()(hash in prop::array::uniform32(1u8..), n in 1..100u32) -> TzeOutPoint {
-            TzeOutPoint::new(hash, n)
+        pub fn arb_tzeoutpoint()(txid in arb_txid(), n in 1..100u32) -> TzeOutPoint {
+            TzeOutPoint::new(txid, n)
         }
     }
 
