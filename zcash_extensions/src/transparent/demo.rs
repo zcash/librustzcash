@@ -467,7 +467,7 @@ mod tests {
     use zcash_proofs::prover::LocalTxProver;
 
     use zcash_primitives::{
-        consensus::{BranchId, H0, TEST_NETWORK},
+        consensus::{H0, TEST_NETWORK},
         extensions::transparent::{self as tze, Extension, FromPayload, ToPayload},
         legacy::TransparentAddress,
         merkle_tree::{CommitmentTree, IncrementalWitness},
@@ -479,7 +479,7 @@ mod tests {
                 amount::{Amount, DEFAULT_FEE},
                 TzeIn, TzeOut, TzeOutPoint,
             },
-            Transaction, TransactionData, TxVersion,
+            Transaction, TransactionData,
         },
         zip32::ExtendedSpendingKey,
     };
@@ -723,7 +723,7 @@ mod tests {
             .map_err(|e| format!("open failure: {:?}", e))
             .unwrap();
         let (tx_a, _) = builder_a
-            .build(TxVersion::ZFuture, BranchId::ZFuture, &prover)
+            .build(&prover)
             .map_err(|e| format!("build failure: {:?}", e))
             .unwrap();
 
@@ -745,7 +745,7 @@ mod tests {
             .map_err(|e| format!("transfer failure: {:?}", e))
             .unwrap();
         let (tx_b, _) = builder_b
-            .build(TxVersion::ZFuture, BranchId::ZFuture, &prover)
+            .build(&prover)
             .map_err(|e| format!("build failure: {:?}", e))
             .unwrap();
 
@@ -774,7 +774,7 @@ mod tests {
             .unwrap();
 
         let (tx_c, _) = builder_c
-            .build(TxVersion::ZFuture, BranchId::ZFuture, &prover)
+            .build(&prover)
             .map_err(|e| format!("build failure: {:?}", e))
             .unwrap();
 

@@ -1,5 +1,6 @@
 //! Structs for building transactions.
 
+use core::array;
 use std::error;
 use std::fmt;
 use std::sync::mpsc::Sender;
@@ -7,7 +8,7 @@ use std::sync::mpsc::Sender;
 use rand::{rngs::OsRng, CryptoRng, RngCore};
 
 use crate::{
-    consensus::{self, BlockHeight},
+    consensus::{self, BlockHeight, BranchId},
     legacy::TransparentAddress,
     memo::MemoBytes,
     merkle_tree::MerklePath,
@@ -104,7 +105,7 @@ impl Progress {
 }
 
 enum ChangeAddress {
-    SaplingChangeAddress(OutgoingViewingKey, PaymentAddress)
+    SaplingChangeAddress(OutgoingViewingKey, PaymentAddress),
 }
 
 /// Generates a [`Transaction`] from its inputs and outputs.
@@ -202,14 +203,7 @@ impl<'a, P: consensus::Parameters, R: RngCore> Builder<'a, P, R> {
         memo: Option<MemoBytes>,
     ) -> Result<(), Error> {
         self.sapling_builder
-            .add_output(
-                &mut self.rng,
-                &self.params,
-                ovk,
-                to,
-                value,
-                memo,
-            )
+            .add_output(&mut self.rng, &self.params, ovk, to, value, memo)
             .map_err(Error::SaplingBuildError)
     }
 
@@ -256,6 +250,23 @@ impl<'a, P: consensus::Parameters, R: RngCore> Builder<'a, P, R> {
         self.progress_notifier = Some(progress_notifier);
     }
 
+    pub fn value_balance(&self) -> Result<Amount, Error> {
+        let value_balances = [
+            self.transparent_builder
+                .value_balance()
+                .ok_or(Error::InvalidAmount)?,
+            self.sapling_builder.value_balance(),
+            #[cfg(feature = "zfuture")]
+            self.tze_builder
+                .value_balance()
+                .ok_or(Error::InvalidAmount)?,
+        ];
+
+        array::IntoIter::new(value_balances)
+            .sum::<Option<_>>()
+            .ok_or(Error::InvalidAmount)
+    }
+
     /// Builds a transaction from the configured spends and outputs.
     ///
     /// Upon success, returns a tuple containing the final transaction, and the
@@ -267,28 +278,19 @@ impl<'a, P: consensus::Parameters, R: RngCore> Builder<'a, P, R> {
     /// the network.
     pub fn build(
         mut self,
-        version: TxVersion,
-        consensus_branch_id: consensus::BranchId,
         prover: &impl TxProver,
     ) -> Result<(Transaction, SaplingMetadata), Error> {
+        let consensus_branch_id = BranchId::for_height(&self.params, self.target_height);
+
+        // determine transaction version
+        let version = TxVersion::suggested_for_branch(consensus_branch_id);
+
         //
         // Consistency checks
         //
 
         // Valid change
-        let change = self
-            .transparent_builder
-            .value_balance()
-            .and_then(|ta| ta + self.sapling_builder.value_balance())
-            .and_then(|b| b - self.fee)
-            .ok_or(Error::InvalidAmount)?;
-
-        #[cfg(feature = "zfuture")]
-        let change = self
-            .tze_builder
-            .value_balance()
-            .and_then(|b| change + b)
-            .ok_or(Error::InvalidAmount)?;
+        let change = (self.value_balance()? - self.fee).ok_or(Error::InvalidAmount)?;
 
         if change.is_negative() {
             return Err(Error::ChangeIsNegative(change));
@@ -304,7 +306,10 @@ impl<'a, P: consensus::Parameters, R: RngCore> Builder<'a, P, R> {
                     self.add_sapling_output(Some(ovk), addr, change, None)?;
                 }
                 None => {
-                    let (ovk, addr) = self.sapling_builder.get_candidate_change_address().map_err(Error::SaplingBuildError)?;
+                    let (ovk, addr) = self
+                        .sapling_builder
+                        .get_candidate_change_address()
+                        .map_err(Error::SaplingBuildError)?;
                     self.add_sapling_output(Some(ovk), addr, change, None)?;
                 }
             }
@@ -474,12 +479,8 @@ impl<'a, P: consensus::Parameters, R: RngCore> Builder<'a, P, R> {
         Self::new_internal(params, height, rng)
     }
 
-    pub fn mock_build(
-        self,
-        version: TxVersion,
-        consensus_branch_id: consensus::BranchId,
-    ) -> Result<(Transaction, SaplingMetadata), Error> {
-        self.build(version, consensus_branch_id, &MockTxProver)
+    pub fn mock_build(self) -> Result<(Transaction, SaplingMetadata), Error> {
+        self.build(&MockTxProver)
     }
 }
 
@@ -489,17 +490,14 @@ mod tests {
     use rand_core::OsRng;
 
     use crate::{
-        consensus::{self, Parameters, H0, TEST_NETWORK},
+        consensus::{Parameters, H0, TEST_NETWORK},
         legacy::TransparentAddress,
         merkle_tree::{CommitmentTree, IncrementalWitness},
         sapling::{prover::mock::MockTxProver, Node, Rseed},
-        transaction::{
-            components::{
-                amount::{Amount, DEFAULT_FEE},
-                sapling::builder::{self as sapling},
-                transparent::builder::{self as transparent},
-            },
-            TxVersion,
+        transaction::components::{
+            amount::{Amount, DEFAULT_FEE},
+            sapling::builder::{self as sapling},
+            transparent::builder::{self as transparent},
         },
         zip32::{ExtendedFullViewingKey, ExtendedSpendingKey},
     };
@@ -557,13 +555,7 @@ mod tests {
             .add_transparent_output(&TransparentAddress::PublicKey([0; 20]), Amount::zero())
             .unwrap();
 
-        let (tx, _) = builder
-            .build(
-                TxVersion::Sapling,
-                consensus::BranchId::Sapling,
-                &MockTxProver,
-            )
-            .unwrap();
+        let (tx, _) = builder.build(&MockTxProver).unwrap();
         // No binding signature, because only t input and outputs
         assert!(tx.binding_sig.is_none());
     }
@@ -598,11 +590,7 @@ mod tests {
         // Expect a binding signature error, because our inputs aren't valid, but this shows
         // that a binding signature was attempted
         assert_eq!(
-            builder.build(
-                TxVersion::Sapling,
-                consensus::BranchId::Sapling,
-                &MockTxProver
-            ),
+            builder.build(&MockTxProver),
             Err(Error::SaplingBuildError(sapling::Error::BindingSig))
         );
     }
@@ -633,11 +621,7 @@ mod tests {
         {
             let builder = Builder::new(TEST_NETWORK, H0);
             assert_eq!(
-                builder.build(
-                    TxVersion::Sapling,
-                    consensus::BranchId::Sapling,
-                    &MockTxProver
-                ),
+                builder.build(&MockTxProver),
                 Err(Error::ChangeIsNegative(
                     (Amount::zero() - DEFAULT_FEE).unwrap()
                 ))
@@ -656,11 +640,7 @@ mod tests {
                 .add_sapling_output(ovk, to.clone(), Amount::from_u64(50000).unwrap(), None)
                 .unwrap();
             assert_eq!(
-                builder.build(
-                    TxVersion::Sapling,
-                    consensus::BranchId::Sapling,
-                    &MockTxProver
-                ),
+                builder.build(&MockTxProver),
                 Err(Error::ChangeIsNegative(
                     (Amount::from_i64(-50000).unwrap() - DEFAULT_FEE).unwrap()
                 ))
@@ -678,11 +658,7 @@ mod tests {
                 )
                 .unwrap();
             assert_eq!(
-                builder.build(
-                    TxVersion::Sapling,
-                    consensus::BranchId::Sapling,
-                    &MockTxProver
-                ),
+                builder.build(&MockTxProver),
                 Err(Error::ChangeIsNegative(
                     (Amount::from_i64(-50000).unwrap() - DEFAULT_FEE).unwrap()
                 ))
@@ -719,11 +695,7 @@ mod tests {
                 )
                 .unwrap();
             assert_eq!(
-                builder.build(
-                    TxVersion::Sapling,
-                    consensus::BranchId::Sapling,
-                    &MockTxProver
-                ),
+                builder.build(&MockTxProver),
                 Err(Error::ChangeIsNegative(Amount::from_i64(-1).unwrap()))
             );
         }
@@ -764,11 +736,7 @@ mod tests {
                 )
                 .unwrap();
             assert_eq!(
-                builder.build(
-                    TxVersion::Sapling,
-                    consensus::BranchId::Sapling,
-                    &MockTxProver
-                ),
+                builder.build(&MockTxProver),
                 Err(Error::SaplingBuildError(sapling::Error::BindingSig))
             )
         }

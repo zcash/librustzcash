@@ -278,8 +278,15 @@ impl<P: consensus::Parameters> SaplingBuilder<P> {
         value: Amount,
         memo: Option<MemoBytes>,
     ) -> Result<(), Error> {
-        let output =
-            SaplingOutput::new_internal(params, self.target_height, &mut rng, ovk, to, value, memo)?;
+        let output = SaplingOutput::new_internal(
+            params,
+            self.target_height,
+            &mut rng,
+            ovk,
+            to,
+            value,
+            memo,
+        )?;
 
         self.value_balance -= value;
 
@@ -290,7 +297,9 @@ impl<P: consensus::Parameters> SaplingBuilder<P> {
 
     /// Send change to the specified change address. If no change address
     /// was set, send change to the first Sapling address given as input.
-    pub fn get_candidate_change_address(&self) -> Result<(OutgoingViewingKey, PaymentAddress), Error> {
+    pub fn get_candidate_change_address(
+        &self,
+    ) -> Result<(OutgoingViewingKey, PaymentAddress), Error> {
         if !self.spends.is_empty() {
             PaymentAddress::from_parts(self.spends[0].diversifier, self.spends[0].note.pk_d)
                 .map(|addr| (self.spends[0].extsk.expsk.ovk, addr))

@@ -1,6 +1,6 @@
 use std::convert::TryFrom;
 use std::iter::Sum;
-use std::ops::{Add, AddAssign, Sub, SubAssign};
+use std::ops::{Add, AddAssign, Neg, Sub, SubAssign};
 
 pub const COIN: i64 = 1_0000_0000;
 pub const MAX_MONEY: i64 = 21_000_000 * COIN;
@@ -169,6 +169,14 @@ impl SubAssign<Amount> for Amount {
 impl Sum<Amount> for Option<Amount> {
     fn sum<I: Iterator<Item = Amount>>(iter: I) -> Self {
         iter.fold(Some(Amount::zero()), |acc, a| acc? + a)
+    }
+}
+
+impl Neg for Amount {
+    type Output = Self;
+
+    fn neg(self) -> Self {
+        Amount(-self.0)
     }
 }
 
