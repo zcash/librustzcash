@@ -162,13 +162,13 @@ impl<'a, P: consensus::Parameters, R: RngCore> Builder<'a, P, R> {
     /// OF BUILDERS WITH NON-CryptoRng RNGs
     fn new_internal(params: P, target_height: BlockHeight, rng: R) -> Builder<'a, P, R> {
         Builder {
-            params,
+            params: params.clone(),
             rng,
             target_height,
             expiry_height: target_height + DEFAULT_TX_EXPIRY_DELTA,
             fee: DEFAULT_FEE,
             transparent_builder: TransparentBuilder::empty(),
-            sapling_builder: SaplingBuilder::empty(target_height),
+            sapling_builder: SaplingBuilder::empty(params, target_height),
             change_address: None,
             #[cfg(feature = "zfuture")]
             tze_builder: TzeBuilder::empty(),
@@ -203,7 +203,7 @@ impl<'a, P: consensus::Parameters, R: RngCore> Builder<'a, P, R> {
         memo: Option<MemoBytes>,
     ) -> Result<(), Error> {
         self.sapling_builder
-            .add_output(&mut self.rng, &self.params, ovk, to, value, memo)
+            .add_output(&mut self.rng, ovk, to, value, memo)
             .map_err(Error::SaplingBuild)
     }
 
@@ -321,7 +321,6 @@ impl<'a, P: consensus::Parameters, R: RngCore> Builder<'a, P, R> {
         let (spend_descs, output_descs, tx_metadata) = self
             .sapling_builder
             .build(
-                &self.params,
                 prover,
                 &mut ctx,
                 &mut self.rng,
@@ -541,7 +540,7 @@ mod tests {
             expiry_height: sapling_activation_height + DEFAULT_TX_EXPIRY_DELTA,
             fee: Amount::zero(),
             transparent_builder: TransparentBuilder::empty(),
-            sapling_builder: SaplingBuilder::empty(sapling_activation_height),
+            sapling_builder: SaplingBuilder::empty(TEST_NETWORK, sapling_activation_height),
             change_address: None,
             #[cfg(feature = "zfuture")]
             tze_builder: TzeBuilder::empty(),

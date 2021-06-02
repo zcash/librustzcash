@@ -205,6 +205,7 @@ impl SaplingMetadata {
 }
 
 pub struct SaplingBuilder<P: consensus::Parameters> {
+    params: P,
     anchor: Option<bls12_381::Scalar>,
     target_height: BlockHeight,
     value_balance: Amount,
@@ -213,8 +214,9 @@ pub struct SaplingBuilder<P: consensus::Parameters> {
 }
 
 impl<P: consensus::Parameters> SaplingBuilder<P> {
-    pub fn empty(target_height: BlockHeight) -> Self {
+    pub fn empty(params: P, target_height: BlockHeight) -> Self {
         SaplingBuilder {
+            params,
             anchor: None,
             target_height,
             value_balance: Amount::zero(),
@@ -270,14 +272,13 @@ impl<P: consensus::Parameters> SaplingBuilder<P> {
     pub fn add_output<R: RngCore>(
         &mut self,
         mut rng: R,
-        params: &P,
         ovk: Option<OutgoingViewingKey>,
         to: PaymentAddress,
         value: Amount,
         memo: Option<MemoBytes>,
     ) -> Result<(), Error> {
         let output = SaplingOutput::new_internal(
-            params,
+            &self.params,
             self.target_height,
             &mut rng,
             ovk,
@@ -304,7 +305,6 @@ impl<P: consensus::Parameters> SaplingBuilder<P> {
 
     pub fn build<Pr: TxProver, R: RngCore>(
         &self,
-        params: &P,
         prover: &Pr,
         ctx: &mut Pr::SaplingProvingContext,
         mut rng: R,
@@ -440,7 +440,7 @@ impl<P: consensus::Parameters> SaplingBuilder<P> {
                             }
                         };
 
-                        let rseed = generate_random_rseed_internal(params, target_height, &mut rng);
+                        let rseed = generate_random_rseed_internal(&self.params, target_height, &mut rng);
 
                         (
                             payment_address,
