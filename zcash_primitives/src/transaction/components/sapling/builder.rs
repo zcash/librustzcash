@@ -225,6 +225,7 @@ impl<P: consensus::Parameters> SaplingBuilder<P> {
         }
     }
 
+    /// Returns the net value represented by the spends and outputs added to this builder.
     pub fn value_balance(&self) -> Amount {
         self.value_balance
     }
