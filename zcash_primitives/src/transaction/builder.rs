@@ -51,10 +51,10 @@ pub enum Error {
     ChangeIsNegative(Amount),
     InvalidAmount,
     NoChangeAddress,
-    TransparentBuildError(transparent::Error),
-    SaplingBuildError(sapling::Error),
+    TransparentBuild(transparent::Error),
+    SaplingBuild(sapling::Error),
     #[cfg(feature = "zfuture")]
-    TzeBuildError(tzebuilder::Error),
+    TzeBuild(tzebuilder::Error),
 }
 
 impl fmt::Display for Error {
@@ -65,10 +65,10 @@ impl fmt::Display for Error {
             }
             Error::InvalidAmount => write!(f, "Invalid amount"),
             Error::NoChangeAddress => write!(f, "No change address specified or discoverable"),
-            Error::TransparentBuildError(err) => err.fmt(f),
-            Error::SaplingBuildError(err) => err.fmt(f),
+            Error::TransparentBuild(err) => err.fmt(f),
+            Error::SaplingBuild(err) => err.fmt(f),
             #[cfg(feature = "zfuture")]
-            Error::TzeBuildError(err) => err.fmt(f),
+            Error::TzeBuild(err) => err.fmt(f),
         }
     }
 }
@@ -191,7 +191,7 @@ impl<'a, P: consensus::Parameters, R: RngCore> Builder<'a, P, R> {
     ) -> Result<(), Error> {
         self.sapling_builder
             .add_spend(&mut self.rng, extsk, diversifier, note, merkle_path)
-            .map_err(Error::SaplingBuildError)
+            .map_err(Error::SaplingBuild)
     }
 
     /// Adds a Sapling address to send funds to.
@@ -204,7 +204,7 @@ impl<'a, P: consensus::Parameters, R: RngCore> Builder<'a, P, R> {
     ) -> Result<(), Error> {
         self.sapling_builder
             .add_output(&mut self.rng, &self.params, ovk, to, value, memo)
-            .map_err(Error::SaplingBuildError)
+            .map_err(Error::SaplingBuild)
     }
 
     /// Adds a transparent coin to be spent in this transaction.
@@ -218,7 +218,7 @@ impl<'a, P: consensus::Parameters, R: RngCore> Builder<'a, P, R> {
     ) -> Result<(), Error> {
         self.transparent_builder
             .add_input(sk, utxo, coin)
-            .map_err(Error::TransparentBuildError)
+            .map_err(Error::TransparentBuild)
     }
 
     /// Adds a transparent address to send funds to.
@@ -229,7 +229,7 @@ impl<'a, P: consensus::Parameters, R: RngCore> Builder<'a, P, R> {
     ) -> Result<(), Error> {
         self.transparent_builder
             .add_output(to, value)
-            .map_err(Error::TransparentBuildError)
+            .map_err(Error::TransparentBuild)
     }
 
     /// Sets the Sapling address to which any change will be sent.
@@ -309,7 +309,7 @@ impl<'a, P: consensus::Parameters, R: RngCore> Builder<'a, P, R> {
                     let (ovk, addr) = self
                         .sapling_builder
                         .get_candidate_change_address()
-                        .map_err(Error::SaplingBuildError)?;
+                        .ok_or(Error::NoChangeAddress)?;
                     self.add_sapling_output(Some(ovk), addr, change, None)?;
                 }
             }
@@ -328,7 +328,7 @@ impl<'a, P: consensus::Parameters, R: RngCore> Builder<'a, P, R> {
                 self.target_height,
                 self.progress_notifier.as_ref(),
             )
-            .map_err(Error::SaplingBuildError)?;
+            .map_err(Error::SaplingBuild)?;
 
         #[cfg(feature = "zfuture")]
         let (tze_inputs, tze_outputs) = self.tze_builder.build();
@@ -367,7 +367,7 @@ impl<'a, P: consensus::Parameters, R: RngCore> Builder<'a, P, R> {
         let (sapling_spend_auth_sigs, sapling_binding_sig) = self
             .sapling_builder
             .create_signatures(prover, &mut ctx, &mut self.rng, &sighash, &tx_metadata)
-            .map_err(Error::SaplingBuildError)?;
+            .map_err(Error::SaplingBuild)?;
 
         for (i, spend_auth_sig) in sapling_spend_auth_sigs.into_iter().enumerate() {
             mtx.shielded_spends[i].spend_auth_sig = spend_auth_sig;
@@ -379,8 +379,8 @@ impl<'a, P: consensus::Parameters, R: RngCore> Builder<'a, P, R> {
             // Create TZE input witnesses
             let tze_payloads = self
                 .tze_builder
-                .create_signatures(&mtx)
-                .map_err(Error::TzeBuildError)?;
+                .create_witnesses(&mtx)
+                .map_err(Error::TzeBuild)?;
             for (i, payload) in tze_payloads.into_iter().enumerate() {
                 mtx.tze_inputs[i].witness.payload = payload;
             }
@@ -520,7 +520,7 @@ mod tests {
         let mut builder = Builder::new(TEST_NETWORK, H0);
         assert_eq!(
             builder.add_sapling_output(Some(ovk), to, Amount::from_i64(-1).unwrap(), None),
-            Err(Error::SaplingBuildError(sapling::Error::InvalidAmount))
+            Err(Error::SaplingBuild(sapling::Error::InvalidAmount))
         );
     }
 
@@ -591,7 +591,7 @@ mod tests {
         // that a binding signature was attempted
         assert_eq!(
             builder.build(&MockTxProver),
-            Err(Error::SaplingBuildError(sapling::Error::BindingSig))
+            Err(Error::SaplingBuild(sapling::Error::BindingSig))
         );
     }
 
@@ -603,7 +603,7 @@ mod tests {
                 &TransparentAddress::PublicKey([0; 20]),
                 Amount::from_i64(-1).unwrap(),
             ),
-            Err(Error::TransparentBuildError(
+            Err(Error::TransparentBuild(
                 transparent::Error::InvalidAmount
             ))
         );
@@ -737,7 +737,7 @@ mod tests {
                 .unwrap();
             assert_eq!(
                 builder.build(&MockTxProver),
-                Err(Error::SaplingBuildError(sapling::Error::BindingSig))
+                Err(Error::SaplingBuild(sapling::Error::BindingSig))
             )
         }
     }

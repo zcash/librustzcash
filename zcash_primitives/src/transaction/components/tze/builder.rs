@@ -101,19 +101,18 @@ impl<'a, BuildCtx> TzeBuilder<'a, BuildCtx> {
         (self.tze_inputs.clone(), self.tze_outputs.clone())
     }
 
-    pub fn create_signatures(self, mtx: &BuildCtx) -> Result<Vec<Vec<u8>>, Error> {
+    pub fn create_witnesses(self, mtx: &BuildCtx) -> Result<Vec<Vec<u8>>, Error> {
         // Create TZE input witnesses
-        let tzein = self.tze_inputs;
         let payloads = self
             .signers
             .into_iter()
-            .enumerate()
-            .map(|(i, tze_in)| {
+            .zip(self.tze_inputs.into_iter())
+            .map(|(signer, tzein)| {
                 // The witness builder function should have cached/closed over whatever data was
                 // necessary for the witness to commit to at the time it was added to the
                 // transaction builder; here, it then computes those commitments.
-                let (mode, payload) = (tze_in.builder)(&mtx)?;
-                let input_mode = tzein[i].witness.mode;
+                let (mode, payload) = (signer.builder)(&mtx)?;
+                let input_mode = tzein.witness.mode;
                 if mode != input_mode {
                     return Err(Error::WitnessModeMismatch(input_mode, mode));
                 }

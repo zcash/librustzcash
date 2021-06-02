@@ -36,7 +36,6 @@ pub enum Error {
     InvalidAmount,
     InvalidAddress,
     AnchorMismatch,
-    NoChangeAddress,
     SpendProof,
     BindingSig,
 }
@@ -50,7 +49,6 @@ impl fmt::Display for Error {
             Error::BindingSig => write!(f, "Failed to create bindingSig"),
             Error::InvalidAddress => write!(f, "Invalid address"),
             Error::InvalidAmount => write!(f, "Invalid amount"),
-            Error::NoChangeAddress => write!(f, "No change address specified or discoverable"),
             Error::SpendProof => write!(f, "Failed to create Sapling spend proof"),
         }
     }
@@ -297,16 +295,11 @@ impl<P: consensus::Parameters> SaplingBuilder<P> {
 
     /// Send change to the specified change address. If no change address
     /// was set, send change to the first Sapling address given as input.
-    pub fn get_candidate_change_address(
-        &self,
-    ) -> Result<(OutgoingViewingKey, PaymentAddress), Error> {
-        if !self.spends.is_empty() {
-            PaymentAddress::from_parts(self.spends[0].diversifier, self.spends[0].note.pk_d)
-                .map(|addr| (self.spends[0].extsk.expsk.ovk, addr))
-                .ok_or(Error::InvalidAddress)
-        } else {
-            Err(Error::NoChangeAddress)
-        }
+    pub fn get_candidate_change_address(&self) -> Option<(OutgoingViewingKey, PaymentAddress)> {
+        self.spends.first().and_then(|spend| {
+            PaymentAddress::from_parts(spend.diversifier, spend.note.pk_d)
+                .map(|addr| (spend.extsk.expsk.ovk, addr))
+        })
     }
 
     pub fn build<Pr: TxProver, R: RngCore>(
