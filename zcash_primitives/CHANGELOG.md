@@ -16,12 +16,11 @@ and this library adheres to Rust's notion of
   to provide range values for branch active heights.
 - `zcash_primitives::consensus::NetworkUpgrade::Nu5` value representing the Nu5 upgrade.
 - `zcash_primitives::consensus::BranchId::Nu5` value representing the Nu5 consensus branch.
-- `zcash_primitives::transaction::components::sapling::builder` builder for Sapling 
-  transaction components
-- `zcash_primitives::transaction::components::transparent::builder` builder for transparent 
-  transaction components
-- `zcash_primitives::transaction::components::tze::builder` builder for TZE 
-  transaction components
+- New modules under `zcash_primitives::transaction::components` for building parts of
+  transactions:
+  - `sapling::builder` for Sapling transaction components.
+  - `transparent::builder` for transparent transaction components.
+  - `tze::builder` for TZE transaction components.
 
 ### Changed
 - MSRV is now 1.51.0.
@@ -43,17 +42,12 @@ and this library adheres to Rust's notion of
   now taxes a TxId rather than a raw byte array.
 - `zcash_primitives::transaction::components::Amount` addition, subtraction,
   and summation now return `Option` rather than panicing on overflow.
-- `zcash_primitives::transaction::builder::Error` has been modified to
-  wrap the error types produced by its child builders.
-- `zcash_primitives::transaction::builder::Builder` now delegates to the
-  newly created child builder components.
-- `zcash_primitives::transaction::builder::Builder::build` now takes the 
-  version of the transaction being constructed as an argument. Instead of
-  constructing an empty transaction and mutating that transaction through
-  a series of build steps, the individual component builders construct
-  parts of the transaction independently and then these parts are brought
-  together to construct a new `TransactionData` value prior to the generation 
-  of signatures.
+- `zcash_primitives::transaction::builder`:
+  - `Error` has been modified to wrap the error types produced by its child
+    builders.
+  - `Builder::build` no longer takes a consensus branch ID parameter. The
+    builder now selects the correct consensus branch ID for the given target
+    height.
 
 ## [0.5.0] - 2021-03-26
 ### Added
