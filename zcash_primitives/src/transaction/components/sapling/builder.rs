@@ -33,11 +33,11 @@ const MIN_SHIELDED_OUTPUTS: usize = 2;
 
 #[derive(Debug, PartialEq)]
 pub enum Error {
-    InvalidAmount,
-    InvalidAddress,
     AnchorMismatch,
-    SpendProof,
     BindingSig,
+    InvalidAddress,
+    InvalidAmount,
+    SpendProof,
 }
 
 impl fmt::Display for Error {
