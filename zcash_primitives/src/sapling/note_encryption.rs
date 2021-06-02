@@ -7,10 +7,10 @@ use rand_core::RngCore;
 use std::convert::TryInto;
 
 use zcash_note_encryption::{
-    try_compact_note_decryption, try_note_decryption, try_output_recovery_with_ock, Domain,
-    EphemeralKeyBytes, NoteEncryption, NotePlaintextBytes, NoteValidity, OutPlaintextBytes,
-    OutgoingCipherKey, ShieldedOutput, COMPACT_NOTE_SIZE, NOTE_PLAINTEXT_SIZE, OUT_CIPHERTEXT_SIZE,
-    OUT_PLAINTEXT_SIZE,
+    try_compact_note_decryption, try_note_decryption, try_output_recovery_with_ock,
+    try_output_recovery_with_ovk, Domain, EphemeralKeyBytes, NoteEncryption, NotePlaintextBytes,
+    NoteValidity, OutPlaintextBytes, OutgoingCipherKey, ShieldedOutput, COMPACT_NOTE_SIZE,
+    NOTE_PLAINTEXT_SIZE, OUT_PLAINTEXT_SIZE,
 };
 
 use crate::{
@@ -54,7 +54,7 @@ fn kdf_sapling(dhsecret: jubjub::SubgroupPoint, ephemeral_key: &EphemeralKeyByte
 pub fn prf_ock(
     ovk: &OutgoingViewingKey,
     cv: &jubjub::ExtendedPoint,
-    cmu: &bls12_381::Scalar,
+    cmu_bytes: &[u8; 32],
     ephemeral_key: &EphemeralKeyBytes,
 ) -> OutgoingCipherKey {
     OutgoingCipherKey(
@@ -64,7 +64,7 @@ pub fn prf_ock(
             .to_state()
             .update(&ovk.0)
             .update(&cv.to_bytes())
-            .update(&cmu.to_repr())
+            .update(cmu_bytes)
             .update(ephemeral_key.as_ref())
             .finalize()
             .as_bytes()
@@ -209,10 +209,10 @@ impl<P: consensus::Parameters> Domain for SaplingDomain<P> {
     fn derive_ock(
         ovk: &Self::OutgoingViewingKey,
         cv: &Self::ValueCommitment,
-        cmu: &Self::ExtractedCommitment,
+        cmu_bytes: &Self::ExtractedCommitmentBytes,
         epk: &EphemeralKeyBytes,
     ) -> OutgoingCipherKey {
-        prf_ock(ovk, cv, cmu, epk)
+        prf_ock(ovk, cv, cmu_bytes, epk)
     }
 
     fn outgoing_plaintext_bytes(
@@ -272,7 +272,7 @@ impl<P: consensus::Parameters> Domain for SaplingDomain<P> {
         note.cmu()
     }
 
-    fn extract_pk_d(op: &[u8; OUT_CIPHERTEXT_SIZE]) -> Option<Self::DiversifiedTransmissionKey> {
+    fn extract_pk_d(op: &[u8; OUT_PLAINTEXT_SIZE]) -> Option<Self::DiversifiedTransmissionKey> {
         let pk_d = jubjub::SubgroupPoint::from_bytes(
             op[0..32].try_into().expect("slice is the correct length"),
         );
@@ -284,7 +284,7 @@ impl<P: consensus::Parameters> Domain for SaplingDomain<P> {
         }
     }
 
-    fn extract_esk(op: &[u8; OUT_CIPHERTEXT_SIZE]) -> Option<Self::EphemeralSecretKey> {
+    fn extract_esk(op: &[u8; OUT_PLAINTEXT_SIZE]) -> Option<Self::EphemeralSecretKey> {
         jubjub::Fr::from_repr(
             op[32..OUT_PLAINTEXT_SIZE]
                 .try_into()
@@ -407,17 +407,12 @@ pub fn try_sapling_output_recovery<P: consensus::Parameters>(
     ovk: &OutgoingViewingKey,
     output: &OutputDescription,
 ) -> Option<(Note, PaymentAddress, MemoBytes)> {
-    try_sapling_output_recovery_with_ock(
-        params,
+    let domain = SaplingDomain {
+        params: params.clone(),
         height,
-        &prf_ock(
-            &ovk,
-            &output.cv,
-            &output.cmu,
-            &epk_bytes(&output.ephemeral_key),
-        ),
-        output,
-    )
+    };
+
+    try_output_recovery_with_ovk(&domain, ovk, output, &output.cv, &output.out_ciphertext)
 }
 
 #[cfg(test)]
@@ -524,7 +519,7 @@ mod tests {
             &mut rng,
         );
         let epk = *ne.epk();
-        let ock = prf_ock(&ovk, &cv, &cmu, &epk_bytes(&epk));
+        let ock = prf_ock(&ovk, &cv, &cmu.to_repr(), &epk_bytes(&epk));
 
         let output = OutputDescription {
             cv,
@@ -547,7 +542,7 @@ mod tests {
         out_ciphertext: &[u8; OUT_CIPHERTEXT_SIZE],
         modify_plaintext: impl Fn(&mut [u8; NOTE_PLAINTEXT_SIZE]),
     ) {
-        let ock = prf_ock(&ovk, &cv, &cmu, &epk_bytes(epk));
+        let ock = prf_ock(&ovk, &cv, &cmu.to_repr(), &epk_bytes(epk));
 
         let mut op = [0; OUT_CIPHERTEXT_SIZE];
         assert_eq!(
@@ -1279,7 +1274,7 @@ mod tests {
             assert_eq!(k_enc.as_bytes(), tv.k_enc);
 
             let ovk = OutgoingViewingKey(tv.ovk);
-            let ock = prf_ock(&ovk, &cv, &cmu, &epk_bytes(&epk));
+            let ock = prf_ock(&ovk, &cv, &cmu.to_repr(), &epk_bytes(&epk));
             assert_eq!(ock.as_ref(), tv.ock);
 
             let to = PaymentAddress::from_parts(Diversifier(tv.default_d), pk_d).unwrap();
