@@ -356,7 +356,10 @@ mod tests {
 
         // Verified balance does not include the second note
         let (_, anchor_height2) = (&db_data).get_target_and_anchor_heights().unwrap().unwrap();
-        assert_eq!(get_balance(&db_data, AccountId(0)).unwrap(), value + value);
+        assert_eq!(
+            get_balance(&db_data, AccountId(0)).unwrap(),
+            (value + value).unwrap()
+        );
         assert_eq!(
             get_balance_at(&db_data, AccountId(0), anchor_height2).unwrap(),
             value

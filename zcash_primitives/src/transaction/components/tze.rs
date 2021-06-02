@@ -10,6 +10,7 @@ use std::convert::TryFrom;
 use crate::{
     extensions::transparent as tze,
     serialize::{CompactSize, Vector},
+    transaction::TxId,
 };
 
 use super::amount::Amount;
@@ -20,24 +21,23 @@ fn to_io_error(_: std::num::TryFromIntError) -> io::Error {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct TzeOutPoint {
-    hash: [u8; 32],
+    txid: TxId,
     n: u32,
 }
 
 impl TzeOutPoint {
-    pub fn new(hash: [u8; 32], n: u32) -> Self {
-        TzeOutPoint { hash, n }
+    pub fn new(txid: TxId, n: u32) -> Self {
+        TzeOutPoint { txid, n }
     }
 
     pub fn read<R: Read>(mut reader: R) -> io::Result<Self> {
-        let mut hash = [0u8; 32];
-        reader.read_exact(&mut hash)?;
+        let txid = TxId::read(&mut reader)?;
         let n = reader.read_u32::<LittleEndian>()?;
-        Ok(TzeOutPoint { hash, n })
+        Ok(TzeOutPoint { txid, n })
     }
 
     pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
-        writer.write_all(&self.hash)?;
+        self.txid.write(&mut writer)?;
         writer.write_u32::<LittleEndian>(self.n)
     }
 
@@ -45,8 +45,8 @@ impl TzeOutPoint {
         self.n
     }
 
-    pub fn hash(&self) -> &[u8; 32] {
-        &self.hash
+    pub fn txid(&self) -> &TxId {
+        &self.txid
     }
 }
 

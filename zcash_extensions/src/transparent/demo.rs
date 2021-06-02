@@ -625,7 +625,7 @@ mod tests {
         //
 
         let in_b = TzeIn {
-            prevout: TzeOutPoint::new(tx_a.txid().0, 0),
+            prevout: TzeOutPoint::new(tx_a.txid(), 0),
             witness: tze::Witness::from(0, &Witness::open(preimage_1)),
         };
         let out_b = TzeOut {
@@ -642,7 +642,7 @@ mod tests {
         //
 
         let in_c = TzeIn {
-            prevout: TzeOutPoint::new(tx_b.txid().0, 0),
+            prevout: TzeOutPoint::new(tx_b.txid(), 0),
             witness: tze::Witness::from(0, &Witness::close(preimage_2)),
         };
 
@@ -737,10 +737,10 @@ mod tests {
             extension_id: 0,
         };
         let prevout_a = (
-            TzeOutPoint::new(tx_a.txid().0, 0),
+            TzeOutPoint::new(tx_a.txid(), 0),
             tx_a.tze_outputs[0].clone(),
         );
-        let value_xfr = value - DEFAULT_FEE;
+        let value_xfr = (value - DEFAULT_FEE).unwrap();
         db_b.demo_transfer_to_close(prevout_a, value_xfr, preimage_1, h2)
             .map_err(|e| format!("transfer failure: {:?}", e))
             .unwrap();
@@ -759,7 +759,7 @@ mod tests {
             extension_id: 0,
         };
         let prevout_b = (
-            TzeOutPoint::new(tx_a.txid().0, 0),
+            TzeOutPoint::new(tx_a.txid(), 0),
             tx_b.tze_outputs[0].clone(),
         );
         db_c.demo_close(prevout_b, preimage_2)
@@ -769,7 +769,7 @@ mod tests {
         builder_c
             .add_transparent_output(
                 &TransparentAddress::PublicKey([0; 20]),
-                value_xfr - DEFAULT_FEE,
+                (value_xfr - DEFAULT_FEE).unwrap(),
             )
             .unwrap();
 

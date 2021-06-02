@@ -358,13 +358,19 @@ mod tests {
         scan_cached_blocks(&tests::network(), &db_cache, &mut db_write, None).unwrap();
 
         // Account balance should reflect both received notes
-        assert_eq!(get_balance(&db_data, AccountId(0)).unwrap(), value + value2);
+        assert_eq!(
+            get_balance(&db_data, AccountId(0)).unwrap(),
+            (value + value2).unwrap()
+        );
 
         // "Rewind" to height of last scanned block
         rewind_to_height(&db_data, sapling_activation_height() + 1).unwrap();
 
         // Account balance should be unaltered
-        assert_eq!(get_balance(&db_data, AccountId(0)).unwrap(), value + value2);
+        assert_eq!(
+            get_balance(&db_data, AccountId(0)).unwrap(),
+            (value + value2).unwrap()
+        );
 
         // Rewind so that one block is dropped
         rewind_to_height(&db_data, sapling_activation_height()).unwrap();
@@ -376,7 +382,10 @@ mod tests {
         scan_cached_blocks(&tests::network(), &db_cache, &mut db_write, None).unwrap();
 
         // Account balance should again reflect both received notes
-        assert_eq!(get_balance(&db_data, AccountId(0)).unwrap(), value + value2);
+        assert_eq!(
+            get_balance(&db_data, AccountId(0)).unwrap(),
+            (value + value2).unwrap()
+        );
     }
 
     #[test]
@@ -485,7 +494,10 @@ mod tests {
         scan_cached_blocks(&tests::network(), &db_cache, &mut db_write, None).unwrap();
 
         // Account balance should reflect both received notes
-        assert_eq!(get_balance(&db_data, AccountId(0)).unwrap(), value + value2);
+        assert_eq!(
+            get_balance(&db_data, AccountId(0)).unwrap(),
+            (value + value2).unwrap()
+        );
     }
 
     #[test]
@@ -543,6 +555,9 @@ mod tests {
         scan_cached_blocks(&tests::network(), &db_cache, &mut db_write, None).unwrap();
 
         // Account balance should equal the change
-        assert_eq!(get_balance(&db_data, AccountId(0)).unwrap(), value - value2);
+        assert_eq!(
+            get_balance(&db_data, AccountId(0)).unwrap(),
+            (value - value2).unwrap()
+        );
     }
 }

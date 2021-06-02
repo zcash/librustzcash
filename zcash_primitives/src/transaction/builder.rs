@@ -251,18 +251,18 @@ impl TransparentInputs {
         Ok(())
     }
 
-    fn value_sum(&self) -> Amount {
+    fn value_sum(&self) -> Option<Amount> {
         #[cfg(feature = "transparent-inputs")]
         {
             self.inputs
                 .iter()
                 .map(|input| input.coin.value)
-                .sum::<Amount>()
+                .sum::<Option<Amount>>()
         }
 
         #[cfg(not(feature = "transparent-inputs"))]
         {
-            Amount::zero()
+            Some(Amount::zero())
         }
     }
 
@@ -643,8 +643,18 @@ impl<'a, P: consensus::Parameters, R: RngCore> Builder<'a, P, R> {
         //
 
         // Valid change
-        let change = self.mtx.value_balance - self.fee + self.transparent_inputs.value_sum()
-            - self.mtx.vout.iter().map(|vo| vo.value).sum::<Amount>();
+        let change = self.mtx.value_balance - self.fee
+            + self
+                .transparent_inputs
+                .value_sum()
+                .ok_or(Error::InvalidAmount)?
+            - self
+                .mtx
+                .vout
+                .iter()
+                .map(|vo| vo.value)
+                .sum::<Option<Amount>>()
+                .ok_or(Error::InvalidAmount)?;
 
         #[cfg(feature = "zfuture")]
         let change = change
@@ -653,13 +663,17 @@ impl<'a, P: consensus::Parameters, R: RngCore> Builder<'a, P, R> {
                 .builders
                 .iter()
                 .map(|ein| ein.prevout.value)
-                .sum::<Amount>()
+                .sum::<Option<Amount>>()
+                .ok_or(Error::InvalidAmount)?
             - self
                 .mtx
                 .tze_outputs
                 .iter()
                 .map(|tzo| tzo.value)
-                .sum::<Amount>();
+                .sum::<Option<Amount>>()
+                .ok_or(Error::InvalidAmount)?;
+
+        let change = change.ok_or(Error::InvalidAmount)?;
 
         if change.is_negative() {
             return Err(Error::ChangeIsNegative(change));
@@ -1150,7 +1164,9 @@ mod tests {
             let builder = Builder::new(TEST_NETWORK, H0);
             assert_eq!(
                 builder.build(consensus::BranchId::Sapling, &MockTxProver),
-                Err(Error::ChangeIsNegative(Amount::zero() - DEFAULT_FEE))
+                Err(Error::ChangeIsNegative(
+                    (Amount::zero() - DEFAULT_FEE).unwrap()
+                ))
             );
         }
 
@@ -1168,7 +1184,7 @@ mod tests {
             assert_eq!(
                 builder.build(consensus::BranchId::Sapling, &MockTxProver),
                 Err(Error::ChangeIsNegative(
-                    Amount::from_i64(-50000).unwrap() - DEFAULT_FEE
+                    (Amount::from_i64(-50000).unwrap() - DEFAULT_FEE).unwrap()
                 ))
             );
         }
@@ -1186,7 +1202,7 @@ mod tests {
             assert_eq!(
                 builder.build(consensus::BranchId::Sapling, &MockTxProver),
                 Err(Error::ChangeIsNegative(
-                    Amount::from_i64(-50000).unwrap() - DEFAULT_FEE
+                    (Amount::from_i64(-50000).unwrap() - DEFAULT_FEE).unwrap()
                 ))
             );
         }

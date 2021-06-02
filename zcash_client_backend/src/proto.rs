@@ -8,7 +8,10 @@ use zcash_primitives::{
     block::{BlockHash, BlockHeader},
     consensus::BlockHeight,
     sapling::Nullifier,
-    transaction::components::sapling::{CompactOutputDescription, OutputDescription},
+    transaction::{
+        components::sapling::{CompactOutputDescription, OutputDescription},
+        TxId,
+    },
 };
 
 use zcash_note_encryption::COMPACT_NOTE_SIZE;
@@ -71,6 +74,15 @@ impl compact_formats::CompactBlock {
         } else {
             BlockHeader::read(&self.header[..]).ok()
         }
+    }
+}
+
+impl compact_formats::CompactTx {
+    /// Returns the transaction Id
+    pub fn txid(&self) -> TxId {
+        let mut hash = [0u8; 32];
+        hash.copy_from_slice(&self.hash);
+        TxId::from_bytes(hash)
     }
 }
 

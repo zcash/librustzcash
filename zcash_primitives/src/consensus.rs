@@ -3,7 +3,7 @@
 use std::cmp::{Ord, Ordering};
 use std::convert::TryFrom;
 use std::fmt;
-use std::ops::{Add, Sub};
+use std::ops::{Add, Bound, RangeBounds, Sub};
 
 use crate::constants;
 
@@ -195,6 +195,7 @@ impl Parameters for MainNetwork {
             NetworkUpgrade::Blossom => Some(BlockHeight(653_600)),
             NetworkUpgrade::Heartwood => Some(BlockHeight(903_000)),
             NetworkUpgrade::Canopy => Some(BlockHeight(1_046_400)),
+            NetworkUpgrade::Nu5 => None,
             #[cfg(feature = "zfuture")]
             NetworkUpgrade::ZFuture => None,
         }
@@ -239,6 +240,7 @@ impl Parameters for TestNetwork {
             NetworkUpgrade::Blossom => Some(BlockHeight(584_000)),
             NetworkUpgrade::Heartwood => Some(BlockHeight(903_800)),
             NetworkUpgrade::Canopy => Some(BlockHeight(1_028_500)),
+            NetworkUpgrade::Nu5 => None,
             #[cfg(feature = "zfuture")]
             NetworkUpgrade::ZFuture => None,
         }
@@ -352,6 +354,10 @@ pub enum NetworkUpgrade {
     ///
     /// [Canopy]: https://z.cash/upgrade/canopy/
     Canopy,
+    /// The [Nu5] network upgrade.
+    ///
+    /// [Nu5]: https://z.cash/upgrade/nu5/
+    Nu5,
     /// The ZFUTURE network upgrade.
     ///
     /// This upgrade is expected never to activate on mainnet;
@@ -369,6 +375,7 @@ impl fmt::Display for NetworkUpgrade {
             NetworkUpgrade::Blossom => write!(f, "Blossom"),
             NetworkUpgrade::Heartwood => write!(f, "Heartwood"),
             NetworkUpgrade::Canopy => write!(f, "Canopy"),
+            NetworkUpgrade::Nu5 => write!(f, "Nu5"),
             #[cfg(feature = "zfuture")]
             NetworkUpgrade::ZFuture => write!(f, "ZFUTURE"),
         }
@@ -383,6 +390,7 @@ impl NetworkUpgrade {
             NetworkUpgrade::Blossom => BranchId::Blossom,
             NetworkUpgrade::Heartwood => BranchId::Heartwood,
             NetworkUpgrade::Canopy => BranchId::Canopy,
+            NetworkUpgrade::Nu5 => BranchId::Nu5,
             #[cfg(feature = "zfuture")]
             NetworkUpgrade::ZFuture => BranchId::ZFuture,
         }
@@ -399,6 +407,7 @@ const UPGRADES_IN_ORDER: &[NetworkUpgrade] = &[
     NetworkUpgrade::Blossom,
     NetworkUpgrade::Heartwood,
     NetworkUpgrade::Canopy,
+    NetworkUpgrade::Nu5,
 ];
 
 pub const ZIP212_GRACE_PERIOD: u32 = 32256;
@@ -430,6 +439,8 @@ pub enum BranchId {
     Heartwood,
     /// The consensus rules deployed by [`NetworkUpgrade::Canopy`].
     Canopy,
+    /// The consensus rules deployed by [`NetworkUpgrade::Nu5`].
+    Nu5,
     /// Candidates for future consensus rules; this branch will never
     /// activate on mainnet.
     #[cfg(feature = "zfuture")]
@@ -447,6 +458,7 @@ impl TryFrom<u32> for BranchId {
             0x2bb4_0e60 => Ok(BranchId::Blossom),
             0xf5b9_230b => Ok(BranchId::Heartwood),
             0xe9ff_75a6 => Ok(BranchId::Canopy),
+            0xf919_a198 => Ok(BranchId::Nu5),
             #[cfg(feature = "zfuture")]
             0xffff_ffff => Ok(BranchId::ZFuture),
             _ => Err("Unknown consensus branch ID"),
@@ -463,6 +475,7 @@ impl From<BranchId> for u32 {
             BranchId::Blossom => 0x2bb4_0e60,
             BranchId::Heartwood => 0xf5b9_230b,
             BranchId::Canopy => 0xe9ff_75a6,
+            BranchId::Nu5 => 0xf919_a198,
             #[cfg(feature = "zfuture")]
             BranchId::ZFuture => 0xffff_ffff,
         }
@@ -484,6 +497,99 @@ impl BranchId {
         // Sprout rules apply before any network upgrade
         BranchId::Sprout
     }
+
+    /// Returns the range of heights for the consensus epoch associated with this branch id.
+    ///
+    /// The resulting tuple implements the [`RangeBounds<BlockHeight>`] trait.
+    pub fn height_range<P: Parameters>(&self, params: &P) -> Option<impl RangeBounds<BlockHeight>> {
+        self.height_bounds(params).map(|(lower, upper)| {
+            (
+                Bound::Included(lower),
+                upper.map_or(Bound::Unbounded, Bound::Excluded),
+            )
+        })
+    }
+
+    /// Returns the range of heights for the consensus epoch associated with this branch id.
+    ///
+    /// The return type of this value is slightly more precise than [`Self::height_range`]:
+    /// - `Some((x, Some(y)))` means that the consensus rules corresponding to this branch id
+    ///   are in effect for the range `x..y`
+    /// - `Some((x, None))` means that the consensus rules corresponding to this branch id are
+    ///   in effect for the range `x..`
+    /// - `None` means that the consensus rules corresponding to this branch id are never in effect.
+    pub fn height_bounds<P: Parameters>(
+        &self,
+        params: &P,
+    ) -> Option<(BlockHeight, Option<BlockHeight>)> {
+        match self {
+            BranchId::Sprout => params
+                .activation_height(NetworkUpgrade::Overwinter)
+                .map(|upper| (BlockHeight(0), Some(upper))),
+            BranchId::Overwinter => params
+                .activation_height(NetworkUpgrade::Overwinter)
+                .map(|lower| (lower, params.activation_height(NetworkUpgrade::Sapling))),
+            BranchId::Sapling => params
+                .activation_height(NetworkUpgrade::Sapling)
+                .map(|lower| (lower, params.activation_height(NetworkUpgrade::Blossom))),
+            BranchId::Blossom => params
+                .activation_height(NetworkUpgrade::Blossom)
+                .map(|lower| (lower, params.activation_height(NetworkUpgrade::Heartwood))),
+            BranchId::Heartwood => params
+                .activation_height(NetworkUpgrade::Heartwood)
+                .map(|lower| (lower, params.activation_height(NetworkUpgrade::Canopy))),
+            BranchId::Canopy => params
+                .activation_height(NetworkUpgrade::Canopy)
+                .map(|lower| (lower, params.activation_height(NetworkUpgrade::Nu5))),
+            BranchId::Nu5 => params.activation_height(NetworkUpgrade::Nu5).map(|lower| {
+                #[cfg(feature = "zfuture")]
+                let upper = params.activation_height(NetworkUpgrade::ZFuture);
+                #[cfg(not(feature = "zfuture"))]
+                let upper = None;
+                (lower, upper)
+            }),
+            #[cfg(feature = "zfuture")]
+            BranchId::ZFuture => params
+                .activation_height(NetworkUpgrade::ZFuture)
+                .map(|lower| (lower, None)),
+        }
+    }
+}
+
+#[cfg(any(test, feature = "test-dependencies"))]
+pub mod testing {
+    use proptest::sample::select;
+    use proptest::strategy::{Just, Strategy};
+
+    use super::{BlockHeight, BranchId, Parameters};
+
+    pub fn arb_branch_id() -> impl Strategy<Value = BranchId> {
+        select(vec![
+            BranchId::Sprout,
+            BranchId::Overwinter,
+            BranchId::Sapling,
+            BranchId::Blossom,
+            BranchId::Heartwood,
+            BranchId::Canopy,
+            BranchId::Nu5,
+            #[cfg(feature = "zfuture")]
+            BranchId::ZFuture,
+        ])
+    }
+
+    pub fn arb_height<P: Parameters>(
+        branch_id: BranchId,
+        params: &P,
+    ) -> impl Strategy<Value = Option<BlockHeight>> {
+        branch_id
+            .height_bounds(params)
+            .map_or(Strategy::boxed(Just(None)), |(lower, upper)| {
+                Strategy::boxed(
+                    (lower.0..upper.map_or(std::u32::MAX, |u| u.0))
+                        .prop_map(|h| Some(BlockHeight(h))),
+                )
+            })
+    }
 }
 
 #[cfg(test)]
@@ -503,7 +609,9 @@ mod tests {
                 MAIN_NETWORK.activation_height(nu_a),
                 MAIN_NETWORK.activation_height(nu_b),
             ) {
-                (a, b) if a < b => (),
+                (Some(a), Some(b)) if a < b => (),
+                (Some(_), None) => (),
+                (None, None) => (),
                 _ => panic!(
                     "{} should not be before {} in UPGRADES_IN_ORDER",
                     nu_a, nu_b
