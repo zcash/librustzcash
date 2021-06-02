@@ -250,7 +250,8 @@ impl<'a, P: consensus::Parameters, R: RngCore> Builder<'a, P, R> {
         self.progress_notifier = Some(progress_notifier);
     }
 
-    pub fn value_balance(&self) -> Result<Amount, Error> {
+    /// Returns the sum of the transparent, Sapling, and TZE value balances.
+    fn value_balance(&self) -> Result<Amount, Error> {
         let value_balances = [
             self.transparent_builder
                 .value_balance()
@@ -602,9 +603,7 @@ mod tests {
                 &TransparentAddress::PublicKey([0; 20]),
                 Amount::from_i64(-1).unwrap(),
             ),
-            Err(Error::TransparentBuild(
-                transparent::Error::InvalidAmount
-            ))
+            Err(Error::TransparentBuild(transparent::Error::InvalidAmount))
         );
     }
 

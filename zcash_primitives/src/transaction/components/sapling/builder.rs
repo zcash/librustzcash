@@ -166,7 +166,7 @@ impl<P: consensus::Parameters> SaplingOutput<P> {
     }
 }
 
-/// Metadata about a transaction created by a [`Builder`].
+/// Metadata about a transaction created by a [`SaplingBuilder`].
 #[derive(Debug, PartialEq)]
 pub struct SaplingMetadata {
     spend_indices: Vec<usize>,
@@ -182,22 +182,22 @@ impl SaplingMetadata {
     }
 
     /// Returns the index within the transaction of the [`SpendDescription`] corresponding
-    /// to the `n`-th call to [`Builder::add_sapling_spend`].
+    /// to the `n`-th call to [`SaplingBuilder::add_spend`].
     ///
     /// Note positions are randomized when building transactions for indistinguishability.
     /// This means that the transaction consumer cannot assume that e.g. the first spend
-    /// they added (via the first call to [`Builder::add_sapling_spend`]) is the first
+    /// they added (via the first call to [`SaplingBuilder::add_spend`]) is the first
     /// [`SpendDescription`] in the transaction.
     pub fn spend_index(&self, n: usize) -> Option<usize> {
         self.spend_indices.get(n).copied()
     }
 
     /// Returns the index within the transaction of the [`OutputDescription`] corresponding
-    /// to the `n`-th call to [`Builder::add_sapling_output`].
+    /// to the `n`-th call to [`SaplingBuilder::add_output`].
     ///
     /// Note positions are randomized when building transactions for indistinguishability.
     /// This means that the transaction consumer cannot assume that e.g. the first output
-    /// they added (via the first call to [`Builder::add_sapling_output`]) is the first
+    /// they added (via the first call to [`SaplingBuilder::add_output`]) is the first
     /// [`OutputDescription`] in the transaction.
     pub fn output_index(&self, n: usize) -> Option<usize> {
         self.output_indices.get(n).copied()
@@ -440,7 +440,8 @@ impl<P: consensus::Parameters> SaplingBuilder<P> {
                             }
                         };
 
-                        let rseed = generate_random_rseed_internal(&self.params, target_height, &mut rng);
+                        let rseed =
+                            generate_random_rseed_internal(&self.params, target_height, &mut rng);
 
                         (
                             payment_address,
