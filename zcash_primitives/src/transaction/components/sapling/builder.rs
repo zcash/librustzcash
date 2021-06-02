@@ -409,7 +409,7 @@ impl<P: consensus::Parameters> SaplingBuilder<P> {
             .into_iter()
             .enumerate()
             .map(|(i, output)| {
-                if let Some((pos, output)) = output {
+                let result = if let Some((pos, output)) = output {
                     // Record the post-randomized output location
                     tx_metadata.output_indices[pos] = i;
 
@@ -467,15 +467,6 @@ impl<P: consensus::Parameters> SaplingBuilder<P> {
                     rng.fill_bytes(&mut enc_ciphertext[..]);
                     rng.fill_bytes(&mut out_ciphertext[..]);
 
-                    // Update progress and send a notification on the channel
-                    progress += 1;
-                    if let Some(sender) = progress_notifier {
-                        // If the send fails, we should ignore the error, not crash.
-                        sender
-                            .send(Progress::new(progress, Some(total_progress)))
-                            .unwrap_or(());
-                    }
-
                     OutputDescription {
                         cv,
                         cmu,
@@ -484,7 +475,18 @@ impl<P: consensus::Parameters> SaplingBuilder<P> {
                         out_ciphertext,
                         zkproof,
                     }
+                };
+
+                // Update progress and send a notification on the channel
+                progress += 1;
+                if let Some(sender) = progress_notifier {
+                    // If the send fails, we should ignore the error, not crash.
+                    sender
+                        .send(Progress::new(progress, Some(total_progress)))
+                        .unwrap_or(());
                 }
+
+                result
             })
             .collect();
 
