@@ -9,7 +9,7 @@ use crate::{
     legacy::TransparentAddress,
     transaction::components::{
         amount::Amount,
-        transparent::{self, TxIn, TxOut},
+        transparent::{self, Authorization, Authorized, Bundle, TxIn, TxOut},
     },
 };
 
@@ -17,9 +17,10 @@ use crate::{
 use crate::{
     legacy::Script,
     transaction::{
+        self as tx,
         components::OutPoint,
         sighash::{signature_hash, SignableInput, SIGHASH_ALL},
-        TransactionData, TxDigests, Unauthorized,
+        TransactionData, TxDigests,
     },
 };
 
@@ -39,6 +40,7 @@ impl fmt::Display for Error {
 }
 
 #[cfg(feature = "transparent-inputs")]
+#[derive(Debug, Clone)]
 struct TransparentInputInfo {
     sk: secp256k1::SecretKey,
     pubkey: [u8; secp256k1::constants::PUBLIC_KEY_SIZE],
@@ -52,6 +54,18 @@ pub struct TransparentBuilder {
     #[cfg(feature = "transparent-inputs")]
     inputs: Vec<TransparentInputInfo>,
     vout: Vec<TxOut>,
+}
+
+#[derive(Debug, Clone)]
+pub struct Unauthorized {
+    #[cfg(feature = "transparent-inputs")]
+    secp: secp256k1::Secp256k1<secp256k1::SignOnly>,
+    #[cfg(feature = "transparent-inputs")]
+    inputs: Vec<TransparentInputInfo>,
+}
+
+impl Authorization for Unauthorized {
+    type ScriptSig = ();
 }
 
 impl TransparentBuilder {
@@ -134,65 +148,94 @@ impl TransparentBuilder {
                 .sum::<Option<Amount>>()?
     }
 
-    pub fn build(&self) -> Option<transparent::Bundle<transparent::Unauthorized>> {
+    pub fn build(self) -> Option<transparent::Bundle<Unauthorized>> {
         #[cfg(feature = "transparent-inputs")]
-        let vin: Vec<TxIn<transparent::Unauthorized>> = self
+        let vin: Vec<TxIn<Unauthorized>> = self
             .inputs
             .iter()
             .map(|i| TxIn::new(i.utxo.clone()))
             .collect();
 
         #[cfg(not(feature = "transparent-inputs"))]
-        let vin: Vec<TxIn<transparent::Unauthorized>> = vec![];
+        let vin: Vec<TxIn<Unauthorized>> = vec![];
 
         if vin.is_empty() && self.vout.is_empty() {
             None
         } else {
             Some(transparent::Bundle {
                 vin,
-                vout: self.vout.clone(),
+                vout: self.vout,
+                authorization: Unauthorized {
+                    #[cfg(feature = "transparent-inputs")]
+                    secp: self.secp,
+                    #[cfg(feature = "transparent-inputs")]
+                    inputs: self.inputs,
+                },
             })
         }
     }
+}
 
+impl TxIn<Unauthorized> {
     #[cfg(feature = "transparent-inputs")]
-    pub fn create_signatures(
+    #[cfg_attr(docsrs, doc(cfg(feature = "transparent-inputs")))]
+    pub fn new(prevout: OutPoint) -> Self {
+        TxIn {
+            prevout,
+            script_sig: (),
+            sequence: std::u32::MAX,
+        }
+    }
+}
+
+impl Bundle<Unauthorized> {
+    pub fn apply_signatures(
         self,
-        mtx: &TransactionData<Unauthorized>,
-        txid_parts_cache: &TxDigests<Blake2bHash>,
-    ) -> Option<Vec<Script>> {
-        if self.inputs.is_empty() && self.vout.is_empty() {
-            None
-        } else {
-            Some(
-                self.inputs
-                    .iter()
-                    .enumerate()
-                    .map(|(i, info)| {
-                        let sighash = signature_hash(
-                            mtx,
-                            SignableInput::transparent(
-                                i,
-                                &info.coin.script_pubkey,
-                                info.coin.value,
-                            ),
-                            txid_parts_cache,
-                            SIGHASH_ALL,
-                        );
+        #[cfg(feature = "transparent-inputs")] mtx: &TransactionData<tx::Unauthorized>,
+        #[cfg(feature = "transparent-inputs")] txid_parts_cache: &TxDigests<Blake2bHash>,
+    ) -> Bundle<Authorized> {
+        #[cfg(feature = "transparent-inputs")]
+        let script_sigs: Vec<Script> = self
+            .authorization
+            .inputs
+            .iter()
+            .enumerate()
+            .map(|(i, info)| {
+                let sighash = signature_hash(
+                    mtx,
+                    SignableInput::transparent(i, &info.coin.script_pubkey, info.coin.value),
+                    txid_parts_cache,
+                    SIGHASH_ALL,
+                );
 
-                        let msg =
-                            secp256k1::Message::from_slice(sighash.as_ref()).expect("32 bytes");
-                        let sig = self.secp.sign(&msg, &info.sk);
+                let msg = secp256k1::Message::from_slice(sighash.as_ref()).expect("32 bytes");
+                let sig = self.authorization.secp.sign(&msg, &info.sk);
 
-                        // Signature has to have "SIGHASH_ALL" appended to it
-                        let mut sig_bytes: Vec<u8> = sig.serialize_der()[..].to_vec();
-                        sig_bytes.extend(&[SIGHASH_ALL as u8]);
+                // Signature has to have "SIGHASH_ALL" appended to it
+                let mut sig_bytes: Vec<u8> = sig.serialize_der()[..].to_vec();
+                sig_bytes.extend(&[SIGHASH_ALL as u8]);
 
-                        // P2PKH scriptSig
-                        Script::default() << &sig_bytes[..] << &info.pubkey[..]
-                    })
-                    .collect(),
-            )
+                // P2PKH scriptSig
+                Script::default() << &sig_bytes[..] << &info.pubkey[..]
+            })
+            .collect();
+
+        #[cfg(not(feature = "transparent-inputs"))]
+        let script_sigs = vec![];
+
+        transparent::Bundle {
+            vin: self
+                .vin
+                .into_iter()
+                .zip(script_sigs.into_iter())
+                .map(|(txin, sig)| TxIn {
+                    prevout: txin.prevout,
+                    script_sig: sig,
+                    sequence: txin.sequence,
+                })
+                .collect(),
+            vout: self.vout,
+            authorization: Authorized,
         }
     }
 }

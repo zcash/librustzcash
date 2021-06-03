@@ -256,7 +256,7 @@ impl Authorization for Authorized {
 pub struct Unauthorized;
 
 impl Authorization for Unauthorized {
-    type TransparentAuth = transparent::Unauthorized;
+    type TransparentAuth = transparent::builder::Unauthorized;
     type SaplingAuth = sapling::Unauthorized;
     type OrchardAuth = orchard::builder::Unauthorized;
 
@@ -617,7 +617,11 @@ impl Transaction {
         Ok(if vin.is_empty() && vout.is_empty() {
             None
         } else {
-            Some(transparent::Bundle { vin, vout })
+            Some(transparent::Bundle {
+                vin,
+                vout,
+                authorization: transparent::Authorized,
+            })
         })
     }
 

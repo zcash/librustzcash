@@ -37,7 +37,7 @@ use crate::{
 };
 
 #[cfg(feature = "transparent-inputs")]
-use crate::{legacy::Script, transaction::components::transparent::TxOut};
+use crate::transaction::components::transparent::TxOut;
 
 #[cfg(feature = "zfuture")]
 use crate::{
@@ -353,10 +353,14 @@ impl<'a, P: consensus::Parameters, R: RngCore> Builder<'a, P, R> {
         //
         let txid_parts = unauthed_tx.digest(TxIdDigester);
 
-        #[cfg(feature = "transparent-inputs")]
-        let transparent_sigs = self
-            .transparent_builder
-            .create_signatures(&unauthed_tx, &txid_parts);
+        let transparent_bundle = unauthed_tx.transparent_bundle.clone().map(|b| {
+            b.apply_signatures(
+                #[cfg(feature = "transparent-inputs")]
+                &unauthed_tx,
+                #[cfg(feature = "transparent-inputs")]
+                &txid_parts,
+            )
+        });
 
         // the commitment being signed is shared across all Sapling inputs; once
         // V4 transactions are deprecated this should just be the txid, but
@@ -389,8 +393,7 @@ impl<'a, P: consensus::Parameters, R: RngCore> Builder<'a, P, R> {
             Self::apply_signatures(
                 unauthed_tx,
                 sapling_sigs,
-                #[cfg(feature = "transparent-inputs")]
-                transparent_sigs,
+                transparent_bundle,
                 #[cfg(feature = "zfuture")]
                 tze_witnesses,
             )
@@ -402,23 +405,9 @@ impl<'a, P: consensus::Parameters, R: RngCore> Builder<'a, P, R> {
     pub fn apply_signatures(
         unauthed_tx: TransactionData<Unauthorized>,
         sapling_sigs: Option<(Vec<redjubjub::Signature>, redjubjub::Signature)>,
-        #[cfg(feature = "transparent-inputs")] transparent_sigs: Option<Vec<Script>>,
+        transparent_bundle: Option<transparent::Bundle<transparent::Authorized>>,
         #[cfg(feature = "zfuture")] tze_witnesses: Option<Vec<AuthData>>,
     ) -> io::Result<Transaction> {
-        #[cfg(feature = "transparent-inputs")]
-        let transparent_bundle = match (unauthed_tx.transparent_bundle, transparent_sigs) {
-            (Some(bundle), Some(script_sigs)) => Some(bundle.apply_signatures(script_sigs)),
-            (None, None) => None,
-            _ => {
-                panic!("Mismatch between transparent bundle and signatures.");
-            }
-        };
-
-        #[cfg(not(feature = "transparent-inputs"))]
-        let transparent_bundle = unauthed_tx
-            .transparent_bundle
-            .map(|b| b.apply_signatures(vec![]));
-
         let signed_sapling_bundle = match (unauthed_tx.sapling_bundle, sapling_sigs) {
             (Some(bundle), Some((spend_sigs, binding_sig))) => {
                 Some(bundle.apply_signatures(spend_sigs, binding_sig))

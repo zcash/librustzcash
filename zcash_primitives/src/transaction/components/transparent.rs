@@ -16,13 +16,6 @@ pub trait Authorization: Debug {
 }
 
 #[derive(Debug, Copy, Clone, PartialEq)]
-pub struct Unauthorized;
-
-impl Authorization for Unauthorized {
-    type ScriptSig = ();
-}
-
-#[derive(Debug, Copy, Clone, PartialEq)]
 pub struct Authorized;
 
 impl Authorization for Authorized {
@@ -33,25 +26,7 @@ impl Authorization for Authorized {
 pub struct Bundle<A: Authorization> {
     pub vin: Vec<TxIn<A>>,
     pub vout: Vec<TxOut>,
-}
-
-impl Bundle<Unauthorized> {
-    pub fn apply_signatures(self, script_sigs: Vec<Script>) -> Bundle<Authorized> {
-        assert!(self.vin.len() == script_sigs.len());
-        Bundle {
-            vin: self
-                .vin
-                .into_iter()
-                .zip(script_sigs.into_iter())
-                .map(|(txin, sig)| TxIn {
-                    prevout: txin.prevout,
-                    script_sig: sig,
-                    sequence: txin.sequence,
-                })
-                .collect(),
-            vout: self.vout,
-        }
-    }
+    pub authorization: A,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -91,18 +66,6 @@ pub struct TxIn<A: Authorization> {
     pub prevout: OutPoint,
     pub script_sig: A::ScriptSig,
     pub sequence: u32,
-}
-
-impl TxIn<Unauthorized> {
-    #[cfg(feature = "transparent-inputs")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "transparent-inputs")))]
-    pub fn new(prevout: OutPoint) -> Self {
-        TxIn {
-            prevout,
-            script_sig: (),
-            sequence: std::u32::MAX,
-        }
-    }
 }
 
 impl TxIn<Authorized> {
@@ -210,7 +173,7 @@ pub mod testing {
             if vin.is_empty() && vout.is_empty() {
                 None
             } else {
-                Some(Bundle { vin, vout })
+                Some(Bundle { vin, vout, authorization: Authorized })
             }
         }
     }
