@@ -490,7 +490,7 @@ mod tests {
     use rand_core::OsRng;
 
     use crate::{
-        consensus::{Parameters, H0, TEST_NETWORK},
+        consensus::{NetworkUpgrade, Parameters, TEST_NETWORK},
         legacy::TransparentAddress,
         merkle_tree::{CommitmentTree, IncrementalWitness},
         sapling::{prover::mock::MockTxProver, Node, Rseed},
@@ -517,7 +517,11 @@ mod tests {
         let ovk = extfvk.fvk.ovk;
         let to = extfvk.default_address().unwrap().1;
 
-        let mut builder = Builder::new(TEST_NETWORK, H0);
+        let sapling_activation_height = TEST_NETWORK
+            .activation_height(NetworkUpgrade::Sapling)
+            .unwrap();
+
+        let mut builder = Builder::new(TEST_NETWORK, sapling_activation_height);
         assert_eq!(
             builder.add_sapling_output(Some(ovk), to, Amount::from_i64(-1).unwrap(), None),
             Err(Error::SaplingBuild(sapling::Error::InvalidAmount))
@@ -576,7 +580,10 @@ mod tests {
         tree.append(cmu1).unwrap();
         let witness1 = IncrementalWitness::from_tree(&tree);
 
-        let mut builder = Builder::new(TEST_NETWORK, H0);
+        let tx_height = TEST_NETWORK
+            .activation_height(NetworkUpgrade::Sapling)
+            .unwrap();
+        let mut builder = Builder::new(TEST_NETWORK, tx_height);
 
         // Create a tx with a sapling spend. binding_sig should be present
         builder
@@ -597,7 +604,10 @@ mod tests {
 
     #[test]
     fn fails_on_negative_transparent_output() {
-        let mut builder = Builder::new(TEST_NETWORK, H0);
+        let tx_height = TEST_NETWORK
+            .activation_height(NetworkUpgrade::Sapling)
+            .unwrap();
+        let mut builder = Builder::new(TEST_NETWORK, tx_height);
         assert_eq!(
             builder.add_transparent_output(
                 &TransparentAddress::PublicKey([0; 20]),
@@ -613,11 +623,14 @@ mod tests {
 
         // Just use the master key as the ExtendedSpendingKey for this test
         let extsk = ExtendedSpendingKey::master(&[]);
+        let tx_height = TEST_NETWORK
+            .activation_height(NetworkUpgrade::Sapling)
+            .unwrap();
 
         // Fails with no inputs or outputs
         // 0.0001 t-ZEC fee
         {
-            let builder = Builder::new(TEST_NETWORK, H0);
+            let builder = Builder::new(TEST_NETWORK, tx_height);
             assert_eq!(
                 builder.build(&MockTxProver),
                 Err(Error::ChangeIsNegative(
@@ -633,7 +646,7 @@ mod tests {
         // Fail if there is only a Sapling output
         // 0.0005 z-ZEC out, 0.00001 t-ZEC fee
         {
-            let mut builder = Builder::new(TEST_NETWORK, H0);
+            let mut builder = Builder::new(TEST_NETWORK, tx_height);
             builder
                 .add_sapling_output(ovk, to.clone(), Amount::from_u64(50000).unwrap(), None)
                 .unwrap();
@@ -648,7 +661,7 @@ mod tests {
         // Fail if there is only a transparent output
         // 0.0005 t-ZEC out, 0.00001 t-ZEC fee
         {
-            let mut builder = Builder::new(TEST_NETWORK, H0);
+            let mut builder = Builder::new(TEST_NETWORK, tx_height);
             builder
                 .add_transparent_output(
                     &TransparentAddress::PublicKey([0; 20]),
@@ -674,7 +687,7 @@ mod tests {
         // Fail if there is insufficient input
         // 0.0003 z-ZEC out, 0.0002 t-ZEC out, 0.00001 t-ZEC fee, 0.00050999 z-ZEC in
         {
-            let mut builder = Builder::new(TEST_NETWORK, H0);
+            let mut builder = Builder::new(TEST_NETWORK, tx_height);
             builder
                 .add_sapling_spend(
                     extsk.clone(),
@@ -712,7 +725,7 @@ mod tests {
         // (Still fails because we are using a MockTxProver which doesn't correctly
         // compute bindingSig.)
         {
-            let mut builder = Builder::new(TEST_NETWORK, H0);
+            let mut builder = Builder::new(TEST_NETWORK, tx_height);
             builder
                 .add_sapling_spend(
                     extsk.clone(),
