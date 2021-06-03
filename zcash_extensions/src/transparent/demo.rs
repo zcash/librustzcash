@@ -467,7 +467,8 @@ mod tests {
     use zcash_proofs::prover::LocalTxProver;
 
     use zcash_primitives::{
-        consensus::{H0, TEST_NETWORK},
+        consensus::{BlockHeight, NetworkUpgrade, Parameters},
+        constants,
         extensions::transparent::{self as tze, Extension, FromPayload, ToPayload},
         legacy::TransparentAddress,
         merkle_tree::{CommitmentTree, IncrementalWitness},
@@ -486,6 +487,46 @@ mod tests {
 
     use super::{close, hash_1, open, Context, DemoBuilder, Precondition, Program, Witness};
 
+    #[derive(PartialEq, Copy, Clone, Debug)]
+    struct FutureNetwork;
+
+    impl Parameters for FutureNetwork {
+        fn activation_height(&self, nu: NetworkUpgrade) -> Option<BlockHeight> {
+            match nu {
+                NetworkUpgrade::Overwinter => Some(BlockHeight::from_u32(207_500)),
+                NetworkUpgrade::Sapling => Some(BlockHeight::from_u32(280_000)),
+                NetworkUpgrade::Blossom => Some(BlockHeight::from_u32(584_000)),
+                NetworkUpgrade::Heartwood => Some(BlockHeight::from_u32(903_800)),
+                NetworkUpgrade::Canopy => Some(BlockHeight::from_u32(1_028_500)),
+                NetworkUpgrade::Nu5 => Some(BlockHeight::from_u32(1_200_000)),
+                NetworkUpgrade::ZFuture => Some(BlockHeight::from_u32(1_400_000)),
+            }
+        }
+
+        fn coin_type(&self) -> u32 {
+            constants::testnet::COIN_TYPE
+        }
+
+        fn hrp_sapling_extended_spending_key(&self) -> &str {
+            constants::testnet::HRP_SAPLING_EXTENDED_SPENDING_KEY
+        }
+
+        fn hrp_sapling_extended_full_viewing_key(&self) -> &str {
+            constants::testnet::HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY
+        }
+
+        fn hrp_sapling_payment_address(&self) -> &str {
+            constants::testnet::HRP_SAPLING_PAYMENT_ADDRESS
+        }
+
+        fn b58_pubkey_address_prefix(&self) -> [u8; 2] {
+            constants::testnet::B58_PUBKEY_ADDRESS_PREFIX
+        }
+
+        fn b58_script_address_prefix(&self) -> [u8; 2] {
+            constants::testnet::B58_SCRIPT_ADDRESS_PREFIX
+        }
+    }
     fn demo_hashes(preimage_1: &[u8; 32], preimage_2: &[u8; 32]) -> ([u8; 32], [u8; 32]) {
         let hash_2 = {
             let mut hash = [0; 32];
@@ -682,6 +723,10 @@ mod tests {
         let preimage_1 = [1; 32];
         let preimage_2 = [2; 32];
 
+        let tx_height = FutureNetwork
+            .activation_height(NetworkUpgrade::ZFuture)
+            .unwrap();
+
         // Only run the test if we have the prover parameters.
         let prover = match LocalTxProver::with_default_location() {
             Some(prover) => prover,
@@ -693,7 +738,7 @@ mod tests {
         //
 
         let mut rng = OsRng;
-        let mut builder_a = Builder::new(TEST_NETWORK, H0);
+        let mut builder_a = Builder::new(FutureNetwork, tx_height);
 
         // create some inputs to spend
         let extsk = ExtendedSpendingKey::master(&[]);
@@ -731,7 +776,7 @@ mod tests {
         // Transfer
         //
 
-        let mut builder_b = Builder::new(TEST_NETWORK, H0);
+        let mut builder_b = Builder::new(FutureNetwork, tx_height + 1);
         let mut db_b = DemoBuilder {
             txn_builder: &mut builder_b,
             extension_id: 0,
@@ -753,7 +798,7 @@ mod tests {
         // Closing transaction
         //
 
-        let mut builder_c = Builder::new(TEST_NETWORK, H0);
+        let mut builder_c = Builder::new(FutureNetwork, tx_height + 2);
         let mut db_c = DemoBuilder {
             txn_builder: &mut builder_c,
             extension_id: 0,

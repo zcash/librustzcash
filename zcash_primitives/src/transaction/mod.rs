@@ -181,7 +181,7 @@ impl TxVersion {
             BranchId::Sapling | BranchId::Blossom | BranchId::Heartwood | BranchId::Canopy => {
                 TxVersion::Sapling
             }
-            BranchId::Nu5 => unimplemented!(),
+            BranchId::Nu5 => TxVersion::Sapling, //TEMPORARY WORKAROUND
             #[cfg(feature = "zfuture")]
             BranchId::ZFuture => TxVersion::ZFuture,
         }
