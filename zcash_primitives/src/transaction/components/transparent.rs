@@ -8,6 +8,8 @@ use crate::legacy::Script;
 
 use super::amount::Amount;
 
+pub mod builder;
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct OutPoint {
     hash: [u8; 32],

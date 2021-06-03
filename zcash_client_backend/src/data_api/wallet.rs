@@ -2,7 +2,7 @@
 use std::fmt::Debug;
 
 use zcash_primitives::{
-    consensus::{self, BranchId, NetworkUpgrade},
+    consensus::{self, NetworkUpgrade},
     memo::MemoBytes,
     sapling::prover::TxProver,
     transaction::{
@@ -228,10 +228,7 @@ where
     }
     .map_err(Error::Builder)?;
 
-    let consensus_branch_id = BranchId::for_height(params, height);
-    let (tx, tx_metadata) = builder
-        .build(consensus_branch_id, &prover)
-        .map_err(Error::Builder)?;
+    let (tx, tx_metadata) = builder.build(&prover).map_err(Error::Builder)?;
 
     let output_index = match to {
         // Sapling outputs are shuffled, so we need to look up where the output ended up.

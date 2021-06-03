@@ -5,7 +5,11 @@ use std::fmt;
 use std::io::{self, Read, Write};
 use std::ops::Deref;
 
-use crate::{consensus::BlockHeight, sapling::redjubjub::Signature, serialize::Vector};
+use crate::{
+    consensus::{BlockHeight, BranchId},
+    sapling::redjubjub::Signature,
+    serialize::Vector,
+};
 
 use self::util::sha256d::{HashReader, HashWriter};
 
@@ -167,6 +171,19 @@ impl TxVersion {
             TxVersion::Sapling => true,
             #[cfg(feature = "zfuture")]
             TxVersion::ZFuture => true,
+        }
+    }
+
+    pub fn suggested_for_branch(consensus_branch_id: BranchId) -> Self {
+        match consensus_branch_id {
+            BranchId::Sprout => TxVersion::Sprout(2),
+            BranchId::Overwinter => TxVersion::Overwinter,
+            BranchId::Sapling | BranchId::Blossom | BranchId::Heartwood | BranchId::Canopy => {
+                TxVersion::Sapling
+            }
+            BranchId::Nu5 => TxVersion::Sapling, //TEMPORARY WORKAROUND
+            #[cfg(feature = "zfuture")]
+            BranchId::ZFuture => TxVersion::ZFuture,
         }
     }
 }
