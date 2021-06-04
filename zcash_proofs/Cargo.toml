@@ -15,7 +15,7 @@ edition = "2018"
 all-features = true
 
 [dependencies]
-bellman = { version = "0.9", default-features = false, features = ["groth16"] }
+bellman = { version = "0.10", default-features = false, features = ["groth16"] }
 blake2b_simd = "0.5"
 bls12_381 = "0.5"
 byteorder = "1"
