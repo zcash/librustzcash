@@ -374,9 +374,9 @@ impl<'a, P: consensus::Parameters, R: RngCore> Builder<'a, P, R> {
         // for now we need to continue to compute it here.
         let shielded_sig_commitment = signature_hash(
             &unauthed_tx,
+            SIGHASH_ALL,
             &SignableInput::Shielded,
             &txid_parts,
-            SIGHASH_ALL,
         );
 
         let (sapling_bundle, tx_metadata) = match unauthed_tx

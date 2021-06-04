@@ -628,7 +628,7 @@ mod tests {
         }
 
         fn tx_tze_outputs(&self) -> &[TzeOut] {
-            match self.tx.tze_bundle().as_ref() {
+            match self.tx.tze_bundle() {
                 Some(b) => &b.vout,
                 None => &[],
             }
@@ -764,8 +764,8 @@ mod tests {
             let ctx = Ctx { tx: &tx_b };
             assert_eq!(
                 Program.verify(
-                    &tx_a.tze_bundle().as_ref().unwrap().vout[0].precondition,
-                    &tx_b.tze_bundle().as_ref().unwrap().vin[0].witness,
+                    &tx_a.tze_bundle().unwrap().vout[0].precondition,
+                    &tx_b.tze_bundle().unwrap().vin[0].witness,
                     &ctx
                 ),
                 Ok(())
@@ -777,8 +777,8 @@ mod tests {
             let ctx = Ctx { tx: &tx_c };
             assert_eq!(
                 Program.verify(
-                    &tx_b.tze_bundle().as_ref().unwrap().vout[0].precondition,
-                    &tx_c.tze_bundle().as_ref().unwrap().vin[0].witness,
+                    &tx_b.tze_bundle().unwrap().vout[0].precondition,
+                    &tx_c.tze_bundle().unwrap().vin[0].witness,
                     &ctx
                 ),
                 Ok(())

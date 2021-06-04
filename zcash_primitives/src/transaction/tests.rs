@@ -129,7 +129,7 @@ fn zip_0143() {
         };
 
         assert_eq!(
-            v4_signature_hash(tx.deref(), &signable_input, tv.hash_type).as_ref(),
+            v4_signature_hash(tx.deref(), tv.hash_type, &signable_input).as_ref(),
             tv.sighash
         );
     }
@@ -149,7 +149,7 @@ fn zip_0243() {
         };
 
         assert_eq!(
-            v4_signature_hash(tx.deref(), &signable_input, tv.hash_type).as_ref(),
+            v4_signature_hash(tx.deref(), tv.hash_type, &signable_input).as_ref(),
             tv.sighash
         );
     }
@@ -172,19 +172,19 @@ fn zip_0244() {
                 );
 
                 assert_eq!(
-                    v5_signature_hash(tx.deref(), &txid_parts, &signable_input, SIGHASH_ALL)
+                    v5_signature_hash(tx.deref(), SIGHASH_ALL, &signable_input, &txid_parts)
                         .as_ref(),
                     &tv.sighash_all
                 );
 
                 assert_eq!(
-                    v5_signature_hash(tx.deref(), &txid_parts, &signable_input, SIGHASH_NONE)
+                    v5_signature_hash(tx.deref(), SIGHASH_NONE, &signable_input, &txid_parts)
                         .as_ref(),
                     &tv.sighash_none.unwrap()
                 );
 
                 assert_eq!(
-                    v5_signature_hash(tx.deref(), &txid_parts, &signable_input, SIGHASH_SINGLE)
+                    v5_signature_hash(tx.deref(), SIGHASH_SINGLE, &signable_input, &txid_parts)
                         .as_ref(),
                     &tv.sighash_single.unwrap()
                 );
@@ -192,9 +192,9 @@ fn zip_0244() {
                 assert_eq!(
                     v5_signature_hash(
                         tx.deref(),
-                        &txid_parts,
+                        SIGHASH_ALL | SIGHASH_ANYONECANPAY,
                         &signable_input,
-                        SIGHASH_ALL | SIGHASH_ANYONECANPAY
+                        &txid_parts,
                     )
                     .as_ref(),
                     &tv.sighash_all_anyone.unwrap()
@@ -203,9 +203,9 @@ fn zip_0244() {
                 assert_eq!(
                     v5_signature_hash(
                         tx.deref(),
-                        &txid_parts,
+                        SIGHASH_NONE | SIGHASH_ANYONECANPAY,
                         &signable_input,
-                        SIGHASH_NONE | SIGHASH_ANYONECANPAY
+                        &txid_parts,
                     )
                     .as_ref(),
                     &tv.sighash_none_anyone.unwrap()
@@ -214,9 +214,9 @@ fn zip_0244() {
                 assert_eq!(
                     v5_signature_hash(
                         tx.deref(),
-                        &txid_parts,
+                        SIGHASH_SINGLE | SIGHASH_ANYONECANPAY,
                         &signable_input,
-                        SIGHASH_SINGLE | SIGHASH_ANYONECANPAY
+                        &txid_parts,
                     )
                     .as_ref(),
                     &tv.sighash_single_anyone.unwrap()
@@ -226,7 +226,7 @@ fn zip_0244() {
                 let signable_input = SignableInput::Shielded;
 
                 assert_eq!(
-                    v5_signature_hash(tx.deref(), &txid_parts, &signable_input, SIGHASH_ALL)
+                    v5_signature_hash(tx.deref(), SIGHASH_ALL, &signable_input, &txid_parts)
                         .as_ref(),
                     tv.sighash_all
                 );

@@ -119,18 +119,18 @@ pub fn signature_hash<
     A: Authorization<SaplingAuth = SA>,
 >(
     tx: &TransactionData<A>,
+    hash_type: u32,
     signable_input: &SignableInput<'a>,
     txid_parts: &TxDigests<Blake2bHash>,
-    hash_type: u32,
 ) -> SignatureHash {
     SignatureHash(match tx.version {
         TxVersion::Sprout(_) | TxVersion::Overwinter | TxVersion::Sapling => {
-            v4_signature_hash(tx, signable_input, hash_type)
+            v4_signature_hash(tx, hash_type, signable_input)
         }
 
-        TxVersion::Zip225 => v5_signature_hash(tx, txid_parts, signable_input, hash_type),
+        TxVersion::Zip225 => v5_signature_hash(tx, hash_type, signable_input, txid_parts),
 
         #[cfg(feature = "zfuture")]
-        TxVersion::ZFuture => v5_signature_hash(tx, txid_parts, signable_input, hash_type),
+        TxVersion::ZFuture => v5_signature_hash(tx, hash_type, signable_input, txid_parts),
     })
 }

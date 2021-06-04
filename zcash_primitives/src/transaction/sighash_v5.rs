@@ -119,9 +119,9 @@ fn tze_input_sigdigests<A: tze::Authorization>(
 
 pub fn v5_signature_hash<A: Authorization>(
     tx: &TransactionData<A>,
-    txid_parts: &TxDigests<Blake2bHash>,
-    signable_input: &SignableInput<'_>,
     hash_type: u32,
+    signable_input: &SignableInput<'_>,
+    txid_parts: &TxDigests<Blake2bHash>,
 ) -> Blake2bHash {
     match signable_input {
         SignableInput::Shielded => to_hash(

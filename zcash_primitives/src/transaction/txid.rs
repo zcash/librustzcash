@@ -145,19 +145,19 @@ pub(crate) fn hash_tze_outputs(tze_outputs: &[TzeOut]) -> Blake2bHash {
 pub(crate) fn hash_sapling_spends<A: sapling::Authorization>(
     shielded_spends: &[SpendDescription<A>],
 ) -> Blake2bHash {
-    let mut ch = hasher(ZCASH_SAPLING_SPENDS_COMPACT_HASH_PERSONALIZATION);
-    let mut nh = hasher(ZCASH_SAPLING_SPENDS_NONCOMPACT_HASH_PERSONALIZATION);
-    for s_spend in shielded_spends {
-        // we build the hash of nullifiers separately for compact blocks.
-        ch.write_all(&s_spend.nullifier.as_ref()).unwrap();
-
-        nh.write_all(&s_spend.cv.to_bytes()).unwrap();
-        nh.write_all(&s_spend.anchor.to_repr()).unwrap();
-        s_spend.rk.write(&mut nh).unwrap();
-    }
-
     let mut h = hasher(ZCASH_SAPLING_SPENDS_HASH_PERSONALIZATION);
     if !shielded_spends.is_empty() {
+        let mut ch = hasher(ZCASH_SAPLING_SPENDS_COMPACT_HASH_PERSONALIZATION);
+        let mut nh = hasher(ZCASH_SAPLING_SPENDS_NONCOMPACT_HASH_PERSONALIZATION);
+        for s_spend in shielded_spends {
+            // we build the hash of nullifiers separately for compact blocks.
+            ch.write_all(&s_spend.nullifier.as_ref()).unwrap();
+
+            nh.write_all(&s_spend.cv.to_bytes()).unwrap();
+            nh.write_all(&s_spend.anchor.to_repr()).unwrap();
+            s_spend.rk.write(&mut nh).unwrap();
+        }
+
         let compact_digest = ch.finalize();
         h.write_all(&compact_digest.as_bytes()).unwrap();
         let noncompact_digest = nh.finalize();
@@ -173,23 +173,23 @@ pub(crate) fn hash_sapling_spends<A: sapling::Authorization>(
 ///
 /// Then, hash these together personalized with ZCASH_SAPLING_OUTPUTS_HASH_PERSONALIZATION
 pub(crate) fn hash_sapling_outputs<A>(shielded_outputs: &[OutputDescription<A>]) -> Blake2bHash {
-    let mut ch = hasher(ZCASH_SAPLING_OUTPUTS_COMPACT_HASH_PERSONALIZATION);
-    let mut mh = hasher(ZCASH_SAPLING_OUTPUTS_MEMOS_HASH_PERSONALIZATION);
-    let mut nh = hasher(ZCASH_SAPLING_OUTPUTS_NONCOMPACT_HASH_PERSONALIZATION);
-    for s_out in shielded_outputs {
-        ch.write_all(&s_out.cmu.to_repr().as_ref()).unwrap();
-        ch.write_all(&s_out.ephemeral_key.to_bytes()).unwrap();
-        ch.write_all(&s_out.enc_ciphertext[..52]).unwrap();
-
-        mh.write_all(&s_out.enc_ciphertext[52..564]).unwrap();
-
-        nh.write_all(&s_out.cv.to_bytes()).unwrap();
-        nh.write_all(&s_out.enc_ciphertext[564..]).unwrap();
-        nh.write_all(&s_out.out_ciphertext).unwrap();
-    }
-
     let mut h = hasher(ZCASH_SAPLING_OUTPUTS_HASH_PERSONALIZATION);
     if !shielded_outputs.is_empty() {
+        let mut ch = hasher(ZCASH_SAPLING_OUTPUTS_COMPACT_HASH_PERSONALIZATION);
+        let mut mh = hasher(ZCASH_SAPLING_OUTPUTS_MEMOS_HASH_PERSONALIZATION);
+        let mut nh = hasher(ZCASH_SAPLING_OUTPUTS_NONCOMPACT_HASH_PERSONALIZATION);
+        for s_out in shielded_outputs {
+            ch.write_all(&s_out.cmu.to_repr().as_ref()).unwrap();
+            ch.write_all(&s_out.ephemeral_key.to_bytes()).unwrap();
+            ch.write_all(&s_out.enc_ciphertext[..52]).unwrap();
+
+            mh.write_all(&s_out.enc_ciphertext[52..564]).unwrap();
+
+            nh.write_all(&s_out.cv.to_bytes()).unwrap();
+            nh.write_all(&s_out.enc_ciphertext[564..]).unwrap();
+            nh.write_all(&s_out.out_ciphertext).unwrap();
+        }
+
         h.write_all(&ch.finalize().as_bytes()).unwrap();
         h.write_all(&mh.finalize().as_bytes()).unwrap();
         h.write_all(&nh.finalize().as_bytes()).unwrap();
@@ -229,19 +229,13 @@ fn hash_header_txid_data(
 ) -> Blake2bHash {
     let mut h = hasher(ZCASH_HEADERS_HASH_PERSONALIZATION);
 
-    (&mut h)
-        .write_u32::<LittleEndian>(version.header())
+    h.write_u32::<LittleEndian>(version.header()).unwrap();
+    h.write_u32::<LittleEndian>(version.version_group_id())
         .unwrap();
-    (&mut h)
-        .write_u32::<LittleEndian>(version.version_group_id())
+    h.write_u32::<LittleEndian>(consensus_branch_id.into())
         .unwrap();
-    (&mut h)
-        .write_u32::<LittleEndian>(consensus_branch_id.into())
-        .unwrap();
-    (&mut h).write_u32::<LittleEndian>(lock_time).unwrap();
-    (&mut h)
-        .write_u32::<LittleEndian>(expiry_height.into())
-        .unwrap();
+    h.write_u32::<LittleEndian>(lock_time).unwrap();
+    h.write_u32::<LittleEndian>(expiry_height.into()).unwrap();
 
     h.finalize()
 }

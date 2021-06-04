@@ -140,8 +140,8 @@ pub fn v4_signature_hash<
     A: Authorization<SaplingAuth = SA>,
 >(
     tx: &TransactionData<A>,
-    signable_input: &SignableInput<'_>,
     hash_type: u32,
+    signable_input: &SignableInput<'_>,
 ) -> Blake2bHash {
     if tx.version.has_overwinter() {
         let mut personal = [0; 16];

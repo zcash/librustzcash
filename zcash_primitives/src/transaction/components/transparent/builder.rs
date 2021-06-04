@@ -203,9 +203,9 @@ impl Bundle<Unauthorized> {
             .map(|(i, info)| {
                 let sighash = signature_hash(
                     mtx,
+                    SIGHASH_ALL,
                     &SignableInput::transparent(i, &info.coin.script_pubkey, info.coin.value),
                     txid_parts_cache,
-                    SIGHASH_ALL,
                 );
 
                 let msg = secp256k1::Message::from_slice(sighash.as_ref()).expect("32 bytes");
