@@ -157,8 +157,12 @@ pub(crate) fn hash_sapling_spends<A: sapling::Authorization>(
     }
 
     let mut h = hasher(ZCASH_SAPLING_SPENDS_HASH_PERSONALIZATION);
-    h.write_all(&ch.finalize().as_bytes()).unwrap();
-    h.write_all(&nh.finalize().as_bytes()).unwrap();
+    if !shielded_spends.is_empty() {
+        let compact_digest = ch.finalize();
+        h.write_all(&compact_digest.as_bytes()).unwrap();
+        let noncompact_digest = nh.finalize();
+        h.write_all(&noncompact_digest.as_bytes()).unwrap();
+    }
     h.finalize()
 }
 
@@ -185,9 +189,11 @@ pub(crate) fn hash_sapling_outputs<A>(shielded_outputs: &[OutputDescription<A>])
     }
 
     let mut h = hasher(ZCASH_SAPLING_OUTPUTS_HASH_PERSONALIZATION);
-    h.write_all(&ch.finalize().as_bytes()).unwrap();
-    h.write_all(&mh.finalize().as_bytes()).unwrap();
-    h.write_all(&nh.finalize().as_bytes()).unwrap();
+    if !shielded_outputs.is_empty() {
+        h.write_all(&ch.finalize().as_bytes()).unwrap();
+        h.write_all(&mh.finalize().as_bytes()).unwrap();
+        h.write_all(&nh.finalize().as_bytes()).unwrap();
+    }
     h.finalize()
 }
 
@@ -258,18 +264,16 @@ fn hash_sapling_txid_data<A: sapling::Authorization>(
 ) -> Blake2bHash {
     let mut h = hasher(ZCASH_SAPLING_HASH_PERSONALIZATION);
     if let Some(bundle) = sapling_bundle {
-        if !bundle.shielded_spends.is_empty() {
+        if !(bundle.shielded_spends.is_empty() && bundle.shielded_outputs.is_empty()) {
             h.write_all(hash_sapling_spends(&bundle.shielded_spends).as_bytes())
                 .unwrap();
-        }
 
-        if !bundle.shielded_outputs.is_empty() {
             h.write_all(hash_sapling_outputs(&bundle.shielded_outputs).as_bytes())
                 .unwrap();
-        }
 
-        h.write_all(&bundle.value_balance.to_i64_le_bytes())
-            .unwrap();
+            h.write_all(&bundle.value_balance.to_i64_le_bytes())
+                .unwrap();
+        }
     }
     h.finalize()
 }

@@ -162,9 +162,9 @@ fn zip_0243() {
 fn zip_0244() {
     for tv in self::data::zip_0244::make_test_vectors() {
         let tx = Transaction::read(&tv.tx[..], BranchId::Nu5).unwrap();
-        let txid_parts = tx.deref().digest(TxIdDigester);
         assert_eq!(tx.txid.as_ref(), &tv.txid);
 
+        let txid_parts = tx.deref().digest(TxIdDigester);
         match tv.transparent_input {
             Some(n) => {
                 let script = Script(tv.script_code.unwrap());
