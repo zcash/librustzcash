@@ -24,6 +24,9 @@ use bellman::gadgets::multipack;
 use bellman::gadgets::num;
 use bellman::gadgets::Assignment;
 
+#[cfg(test)]
+use ff::PrimeFieldBits;
+
 pub const TREE_DEPTH: usize = SAPLING_COMMITMENT_TREE_DEPTH;
 
 /// This is an instance of the `Spend` circuit.
