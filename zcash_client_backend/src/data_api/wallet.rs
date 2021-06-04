@@ -238,10 +238,14 @@ where
         },
         RecipientAddress::Transparent(addr) => {
             let script = addr.script();
-            tx.vout
-                .iter()
-                .enumerate()
-                .find(|(_, tx_out)| tx_out.script_pubkey == script)
+            tx.transparent_bundle
+                .as_ref()
+                .and_then(|b| {
+                    b.vout
+                        .iter()
+                        .enumerate()
+                        .find(|(_, tx_out)| tx_out.script_pubkey == script)
+                })
                 .map(|(index, _)| index)
                 .expect("we sent to this address")
         }

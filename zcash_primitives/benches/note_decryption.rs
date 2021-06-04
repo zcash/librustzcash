@@ -9,7 +9,10 @@ use zcash_primitives::{
         util::generate_random_rseed,
         Diversifier, PaymentAddress, SaplingIvk, ValueCommitment,
     },
-    transaction::components::{OutputDescription, GROTH_PROOF_SIZE},
+    transaction::components::{
+        sapling::{Authorized, OutputDescription},
+        GROTH_PROOF_SIZE,
+    },
 };
 
 fn bench_note_decryption(c: &mut Criterion) {
@@ -20,7 +23,7 @@ fn bench_note_decryption(c: &mut Criterion) {
     let invalid_ivk = SaplingIvk(jubjub::Fr::random(&mut rng));
 
     // Construct a fake Sapling output as if we had just deserialized a transaction.
-    let output = {
+    let output: OutputDescription<Authorized> = {
         let diversifier = Diversifier([0; 11]);
         let pk_d = diversifier.g_d().unwrap() * valid_ivk.0;
         let pa = PaymentAddress::from_parts(diversifier, pk_d).unwrap();

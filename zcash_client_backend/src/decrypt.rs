@@ -44,27 +44,30 @@ pub fn decrypt_transaction<P: consensus::Parameters>(
 ) -> Vec<DecryptedOutput> {
     let mut decrypted = vec![];
 
-    for (account, extfvk) in extfvks.iter() {
-        let ivk = extfvk.fvk.vk.ivk();
-        let ovk = extfvk.fvk.ovk;
+    if let Some(bundle) = tx.sapling_bundle.as_ref() {
+        for (account, extfvk) in extfvks.iter() {
+            let ivk = extfvk.fvk.vk.ivk();
+            let ovk = extfvk.fvk.ovk;
 
-        for (index, output) in tx.shielded_outputs.iter().enumerate() {
-            let ((note, to, memo), outgoing) =
-                match try_sapling_note_decryption(params, height, &ivk, output) {
-                    Some(ret) => (ret, false),
-                    None => match try_sapling_output_recovery(params, height, &ovk, output) {
-                        Some(ret) => (ret, true),
-                        None => continue,
-                    },
-                };
-            decrypted.push(DecryptedOutput {
-                index,
-                note,
-                account: *account,
-                to,
-                memo,
-                outgoing,
-            })
+            for (index, output) in bundle.shielded_outputs.iter().enumerate() {
+                let ((note, to, memo), outgoing) =
+                    match try_sapling_note_decryption(params, height, &ivk, output) {
+                        Some(ret) => (ret, false),
+                        None => match try_sapling_output_recovery(params, height, &ovk, output) {
+                            Some(ret) => (ret, true),
+                            None => continue,
+                        },
+                    };
+
+                decrypted.push(DecryptedOutput {
+                    index,
+                    note,
+                    account: *account,
+                    to,
+                    memo,
+                    outgoing,
+                })
+            }
         }
     }
 

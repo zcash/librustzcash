@@ -9,7 +9,7 @@ use zcash_primitives::{
     consensus::BlockHeight,
     sapling::Nullifier,
     transaction::{
-        components::sapling::{CompactOutputDescription, OutputDescription},
+        components::sapling::{self, CompactOutputDescription, OutputDescription},
         TxId,
     },
 };
@@ -113,8 +113,8 @@ impl compact_formats::CompactOutput {
     }
 }
 
-impl From<OutputDescription> for compact_formats::CompactOutput {
-    fn from(out: OutputDescription) -> compact_formats::CompactOutput {
+impl<A: sapling::Authorization> From<OutputDescription<A>> for compact_formats::CompactOutput {
+    fn from(out: OutputDescription<A>) -> compact_formats::CompactOutput {
         let mut result = compact_formats::CompactOutput::new();
         result.set_cmu(out.cmu.to_repr().to_vec());
         result.set_epk(out.ephemeral_key.to_bytes().to_vec());

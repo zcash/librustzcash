@@ -47,7 +47,7 @@ impl<Node: Hashable> PathFiller<Node> {
 ///
 /// The depth of the Merkle tree is fixed at 32, equal to the depth of the Sapling
 /// commitment tree.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct CommitmentTree<Node: Hashable> {
     left: Option<Node>,
     right: Option<Node>,
@@ -1055,5 +1055,27 @@ mod tests {
         for (witness, _) in witnesses.as_mut_slice() {
             assert!(witness.append(node).is_err());
         }
+    }
+}
+
+#[cfg(any(test, feature = "test-dependencies"))]
+pub mod testing {
+    use core::fmt::Debug;
+    use proptest::collection::vec;
+    use proptest::prelude::*;
+
+    use super::{CommitmentTree, Hashable};
+
+    pub fn arb_commitment_tree<Node: Hashable + Debug, T: Strategy<Value = Node>>(
+        min_size: usize,
+        arb_node: T,
+    ) -> impl Strategy<Value = CommitmentTree<Node>> {
+        vec(arb_node, min_size..(min_size + 100)).prop_map(|v| {
+            let mut tree = CommitmentTree::empty();
+            for node in v.into_iter() {
+                tree.append(node).unwrap();
+            }
+            tree
+        })
     }
 }

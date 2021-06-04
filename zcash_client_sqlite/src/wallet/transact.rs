@@ -631,7 +631,8 @@ mod tests {
                 )
                 .unwrap();
 
-            let output = &tx.shielded_outputs[output_index as usize];
+            let output =
+                &tx.sapling_bundle.as_ref().unwrap().shielded_outputs[output_index as usize];
 
             try_sapling_output_recovery(
                 &network,
