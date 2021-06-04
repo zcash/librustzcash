@@ -1,7 +1,7 @@
 use bellman::gadgets::boolean::Boolean;
 use bellman::gadgets::sha256::sha256;
 use bellman::{ConstraintSystem, SynthesisError};
-use ff::PrimeField;
+use group::ff::PrimeField;
 
 pub fn note_comm<Scalar, CS>(
     cs: CS,

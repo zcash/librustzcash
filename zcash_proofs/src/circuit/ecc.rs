@@ -620,8 +620,10 @@ impl MontgomeryPoint {
 #[cfg(test)]
 mod test {
     use bellman::ConstraintSystem;
-    use ff::{Field, PrimeField, PrimeFieldBits};
-    use group::{Curve, Group};
+    use group::{
+        ff::{Field, PrimeField, PrimeFieldBits},
+        Curve, Group,
+    };
     use rand_core::{RngCore, SeedableRng};
     use rand_xorshift::XorShiftRng;
 

@@ -1,7 +1,7 @@
 use bellman::gadgets::boolean::{AllocatedBit, Boolean};
 use bellman::gadgets::sha256::sha256_block_no_padding;
 use bellman::{ConstraintSystem, SynthesisError};
-use ff::PrimeField;
+use group::ff::PrimeField;
 
 use super::commitment::note_comm;
 use super::prfs::*;
