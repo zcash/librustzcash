@@ -23,7 +23,10 @@ use crate::{
         builder::Progress,
         components::{
             amount::Amount,
-            sapling::{Bundle, OutputDescription, SpendDescription, Unauthorized},
+            sapling::{
+                Authorization, Authorized, Bundle, GrothProofBytes, OutputDescription,
+                SpendDescription,
+            },
         },
     },
     zip32::ExtendedSpendingKey,
@@ -56,6 +59,7 @@ impl fmt::Display for Error {
     }
 }
 
+#[derive(Clone)]
 struct SpendDescriptionInfo {
     extsk: ExtendedSpendingKey,
     diversifier: Diversifier,
@@ -110,7 +114,7 @@ impl SaplingOutput {
         prover: &Pr,
         ctx: &mut Pr::SaplingProvingContext,
         rng: &mut R,
-    ) -> OutputDescription<Unauthorized> {
+    ) -> OutputDescription<GrothProofBytes> {
         let encryptor = sapling_note_encryption::<R, P>(
             self.ovk,
             self.note.clone(),
@@ -146,7 +150,7 @@ impl SaplingOutput {
 }
 
 /// Metadata about a transaction created by a [`SaplingBuilder`].
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct SaplingMetadata {
     spend_indices: Vec<usize>,
     output_indices: Vec<usize>,
@@ -190,6 +194,23 @@ pub struct SaplingBuilder<P> {
     value_balance: Amount,
     spends: Vec<SpendDescriptionInfo>,
     outputs: Vec<SaplingOutput>,
+}
+
+#[derive(Clone)]
+pub struct Unauthorized {
+    spends: Vec<SpendDescriptionInfo>,
+    tx_metadata: SaplingMetadata,
+}
+
+impl std::fmt::Debug for Unauthorized {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
+        write!(f, "Unauthorized")
+    }
+}
+
+impl Authorization for Unauthorized {
+    type Proof = GrothProofBytes;
+    type AuthSig = ();
 }
 
 impl<P: consensus::Parameters> SaplingBuilder<P> {
@@ -284,13 +305,13 @@ impl<P: consensus::Parameters> SaplingBuilder<P> {
     }
 
     pub fn build<Pr: TxProver, R: RngCore>(
-        &self,
+        self,
         prover: &Pr,
         ctx: &mut Pr::SaplingProvingContext,
         mut rng: R,
         target_height: BlockHeight,
         progress_notifier: Option<&Sender<Progress>>,
-    ) -> Result<(Option<Bundle<Unauthorized>>, SaplingMetadata), Error> {
+    ) -> Result<Option<Bundle<Unauthorized>>, Error> {
         // Record initial positions of spends and outputs
         let mut indexed_spends: Vec<_> = self.spends.iter().enumerate().collect();
         let mut indexed_outputs: Vec<_> = self
@@ -378,7 +399,7 @@ impl<P: consensus::Parameters> SaplingBuilder<P> {
         };
 
         // Create Sapling OutputDescriptions
-        let shielded_outputs: Vec<OutputDescription<Unauthorized>> = indexed_outputs
+        let shielded_outputs: Vec<OutputDescription<GrothProofBytes>> = indexed_outputs
             .into_iter()
             .enumerate()
             .map(|(i, output)| {
@@ -404,7 +425,6 @@ impl<P: consensus::Parameters> SaplingBuilder<P> {
                             }
                             (diversifier, g_d)
                         };
-
                         let (pk_d, payment_address) = loop {
                             let dummy_ivk = jubjub::Fr::random(&mut rng);
                             let pk_d = g_d * dummy_ivk;
@@ -470,26 +490,43 @@ impl<P: consensus::Parameters> SaplingBuilder<P> {
                 shielded_spends,
                 shielded_outputs,
                 value_balance: self.value_balance,
-                authorization: Unauthorized,
+                authorization: Unauthorized {
+                    spends: self.spends,
+                    tx_metadata,
+                },
             })
         };
 
-        Ok((bundle, tx_metadata))
+        Ok(bundle)
     }
+}
 
-    pub fn create_signatures<Pr: TxProver, R: RngCore>(
+impl SpendDescription<Unauthorized> {
+    pub fn apply_signature(&self, spend_auth_sig: Signature) -> SpendDescription<Authorized> {
+        SpendDescription {
+            cv: self.cv,
+            anchor: self.anchor,
+            nullifier: self.nullifier,
+            rk: self.rk.clone(),
+            zkproof: self.zkproof,
+            spend_auth_sig,
+        }
+    }
+}
+
+impl Bundle<Unauthorized> {
+    pub fn apply_signatures<Pr: TxProver, R: RngCore>(
         self,
         prover: &Pr,
         ctx: &mut Pr::SaplingProvingContext,
         rng: &mut R,
         sighash_bytes: &[u8; 32],
-        tx_metadata: &SaplingMetadata,
-    ) -> Result<Option<(Vec<Signature>, Signature)>, Error> {
+    ) -> Result<(Bundle<Authorized>, SaplingMetadata), Error> {
         // Create Sapling spendAuth signatures. These must be properly ordered with respect to the
         // shuffle that is described by tx_metadata.
-        let mut spend_sigs = vec![None; self.spends.len()];
-        for (i, spend) in self.spends.into_iter().enumerate() {
-            spend_sigs[tx_metadata.spend_indices[i]] = Some(spend_sig_internal(
+        let mut spend_sigs = vec![None; self.authorization.spends.len()];
+        for (i, spend) in self.authorization.spends.into_iter().enumerate() {
+            spend_sigs[self.authorization.tx_metadata.spend_indices[i]] = Some(spend_sig_internal(
                 PrivateKey(spend.extsk.expsk.ask),
                 spend.alpha,
                 sighash_bytes,
@@ -497,20 +534,29 @@ impl<P: consensus::Parameters> SaplingBuilder<P> {
             ));
         }
 
-        if tx_metadata.spend_indices.is_empty() && tx_metadata.output_indices.is_empty() {
-            Ok(None)
-        } else {
-            let spend_sigs = spend_sigs
-                .into_iter()
-                .collect::<Option<Vec<Signature>>>()
-                .unwrap_or_default();
+        let spend_sigs = spend_sigs
+            .into_iter()
+            .collect::<Option<Vec<Signature>>>()
+            .unwrap_or_default();
 
-            let binding_sig = prover
-                .binding_sig(ctx, self.value_balance, sighash_bytes)
-                .map_err(|_| Error::BindingSig)?;
+        let binding_sig = prover
+            .binding_sig(ctx, self.value_balance, sighash_bytes)
+            .map_err(|_| Error::BindingSig)?;
 
-            Ok(Some((spend_sigs, binding_sig)))
-        }
+        Ok((
+            Bundle {
+                shielded_spends: self
+                    .shielded_spends
+                    .iter()
+                    .zip(spend_sigs.iter())
+                    .map(|(spend, sig)| spend.apply_signature(*sig))
+                    .collect(),
+                shielded_outputs: self.shielded_outputs,
+                value_balance: self.value_balance,
+                authorization: Authorized { binding_sig },
+            },
+            self.authorization.tx_metadata,
+        ))
     }
 }
 
@@ -574,23 +620,22 @@ pub mod testing {
             let prover = MockTxProver;
             let mut ctx = prover.new_sapling_proving_context();
 
-            let (bundle, meta) = builder.build(
+            let bundle = builder.build(
                 &prover,
                 &mut ctx,
                 &mut rng,
                 target_height.unwrap(),
                 None
-            ).unwrap();
+            ).unwrap().unwrap();
 
-            let (spend_auth_sigs, binding_sig) = builder.create_signatures(
+            let (bundle, _) = bundle.apply_signatures(
                 &prover,
                 &mut ctx,
                 &mut rng,
                 &fake_sighash_bytes,
-                &meta
-            ).unwrap().unwrap();
+            ).unwrap();
 
-            bundle.unwrap().apply_signatures(spend_auth_sigs, binding_sig)
+            bundle
         }
     }
 }

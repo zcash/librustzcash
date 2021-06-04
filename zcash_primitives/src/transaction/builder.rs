@@ -3,7 +3,6 @@
 use std::array;
 use std::error;
 use std::fmt;
-use std::io;
 use std::sync::mpsc::Sender;
 
 #[cfg(not(feature = "zfuture"))]
@@ -17,8 +16,7 @@ use crate::{
     memo::MemoBytes,
     merkle_tree::MerklePath,
     sapling::{
-        keys::OutgoingViewingKey, prover::TxProver, redjubjub, Diversifier, Node, Note,
-        PaymentAddress,
+        keys::OutgoingViewingKey, prover::TxProver, Diversifier, Node, Note, PaymentAddress,
     },
     transaction::{
         components::{
@@ -320,13 +318,14 @@ impl<'a, P: consensus::Parameters, R: RngCore> Builder<'a, P, R> {
 
         let transparent_bundle = self.transparent_builder.build();
 
+        let mut rng = self.rng;
         let mut ctx = prover.new_sapling_proving_context();
-        let (sapling_bundle, tx_metadata) = self
+        let sapling_bundle = self
             .sapling_builder
             .build(
                 prover,
                 &mut ctx,
-                &mut self.rng,
+                &mut rng,
                 self.target_height,
                 self.progress_notifier.as_ref(),
             )
@@ -335,7 +334,7 @@ impl<'a, P: consensus::Parameters, R: RngCore> Builder<'a, P, R> {
         #[cfg(feature = "zfuture")]
         let (tze_bundle, tze_signers) = self.tze_builder.build();
 
-        let unauthed_tx = TransactionData {
+        let unauthed_tx: TransactionData<Unauthorized> = TransactionData {
             version,
             consensus_branch_id: BranchId::for_height(&self.params, self.target_height),
             lock_time: 0,
@@ -362,6 +361,14 @@ impl<'a, P: consensus::Parameters, R: RngCore> Builder<'a, P, R> {
             )
         });
 
+        #[cfg(feature = "zfuture")]
+        let tze_bundle = unauthed_tx
+            .tze_bundle
+            .clone()
+            .map(|b| b.into_authorized(&unauthed_tx, tze_signers))
+            .transpose()
+            .map_err(Error::TzeBuild)?;
+
         // the commitment being signed is shared across all Sapling inputs; once
         // V4 transactions are deprecated this should just be the txid, but
         // for now we need to continue to compute it here.
@@ -372,52 +379,16 @@ impl<'a, P: consensus::Parameters, R: RngCore> Builder<'a, P, R> {
             SIGHASH_ALL,
         );
 
-        let sapling_sigs = self
-            .sapling_builder
-            .create_signatures(
-                prover,
-                &mut ctx,
-                &mut self.rng,
-                shielded_sig_commitment.as_ref(),
-                &tx_metadata,
-            )
-            .map_err(Error::SaplingBuild)?;
-
-        #[cfg(feature = "zfuture")]
-        let tze_bundle = unauthed_tx
-            .tze_bundle
-            .clone()
-            .map(|b| b.into_authorized(&unauthed_tx, tze_signers))
+        let (sapling_bundle, tx_metadata) = match unauthed_tx
+            .sapling_bundle
+            .map(|b| {
+                b.apply_signatures(prover, &mut ctx, &mut rng, shielded_sig_commitment.as_ref())
+            })
             .transpose()
-            .map_err(Error::TzeBuild)?;
-
-        Ok((
-            Self::apply_signatures(
-                unauthed_tx,
-                sapling_sigs,
-                transparent_bundle,
-                #[cfg(feature = "zfuture")]
-                tze_bundle,
-            )
-            .expect("An IO error occurred applying signatures."),
-            tx_metadata,
-        ))
-    }
-
-    pub fn apply_signatures(
-        unauthed_tx: TransactionData<Unauthorized>,
-        sapling_sigs: Option<(Vec<redjubjub::Signature>, redjubjub::Signature)>,
-        transparent_bundle: Option<transparent::Bundle<transparent::Authorized>>,
-        #[cfg(feature = "zfuture")] tze_bundle: Option<tze::Bundle<tze::Authorized>>,
-    ) -> io::Result<Transaction> {
-        let signed_sapling_bundle = match (unauthed_tx.sapling_bundle, sapling_sigs) {
-            (Some(bundle), Some((spend_sigs, binding_sig))) => {
-                Some(bundle.apply_signatures(spend_sigs, binding_sig))
-            }
-            (None, None) => None,
-            _ => {
-                panic!("Mismatch between sapling bundle and signatures.");
-            }
+            .map_err(Error::SaplingBuild)?
+        {
+            Some((bundle, meta)) => (Some(bundle), meta),
+            None => (None, SaplingMetadata::empty()),
         };
 
         let authorized_tx = TransactionData {
@@ -427,13 +398,15 @@ impl<'a, P: consensus::Parameters, R: RngCore> Builder<'a, P, R> {
             expiry_height: unauthed_tx.expiry_height,
             transparent_bundle,
             sprout_bundle: unauthed_tx.sprout_bundle,
-            sapling_bundle: signed_sapling_bundle,
+            sapling_bundle,
             orchard_bundle: None,
             #[cfg(feature = "zfuture")]
             tze_bundle,
         };
 
-        authorized_tx.freeze()
+        // The unwrap() here is safe because the txid hashing
+        // of freeze() should be infalliable.
+        Ok((authorized_tx.freeze().unwrap(), tx_metadata))
     }
 }
 

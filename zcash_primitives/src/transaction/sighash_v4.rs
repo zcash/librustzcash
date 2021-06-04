@@ -124,9 +124,7 @@ fn shielded_spends_hash<A: sapling::Authorization<Proof = GrothProofBytes>>(
         .hash(&data)
 }
 
-fn shielded_outputs_hash<A: sapling::Authorization<Proof = GrothProofBytes>>(
-    shielded_outputs: &[OutputDescription<A>],
-) -> Blake2bHash {
+fn shielded_outputs_hash(shielded_outputs: &[OutputDescription<GrothProofBytes>]) -> Blake2bHash {
     let mut data = Vec::with_capacity(shielded_outputs.len() * 948);
     for s_out in shielded_outputs {
         s_out.write_v4(&mut data).unwrap();

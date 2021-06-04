@@ -168,9 +168,7 @@ pub(crate) fn hash_sapling_spends<A: sapling::Authorization>(
 /// * [(cv, enc_ciphertext[564..], out_ciphertext, zkproof)*] personalized with ZCASH_SAPLING_OUTPUTS_NONCOMPACT_HASH_PERSONALIZATION
 ///
 /// Then, hash these together personalized with ZCASH_SAPLING_OUTPUTS_HASH_PERSONALIZATION
-pub(crate) fn hash_sapling_outputs<A: sapling::Authorization>(
-    shielded_outputs: &[OutputDescription<A>],
-) -> Blake2bHash {
+pub(crate) fn hash_sapling_outputs<A>(shielded_outputs: &[OutputDescription<A>]) -> Blake2bHash {
     let mut ch = hasher(ZCASH_SAPLING_OUTPUTS_COMPACT_HASH_PERSONALIZATION);
     let mut mh = hasher(ZCASH_SAPLING_OUTPUTS_MEMOS_HASH_PERSONALIZATION);
     let mut nh = hasher(ZCASH_SAPLING_OUTPUTS_NONCOMPACT_HASH_PERSONALIZATION);

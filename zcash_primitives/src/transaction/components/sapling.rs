@@ -33,14 +33,6 @@ impl Authorization for Unproven {
     type AuthSig = ();
 }
 
-#[derive(Debug, Copy, Clone, PartialEq)]
-pub struct Unauthorized;
-
-impl Authorization for Unauthorized {
-    type Proof = GrothProofBytes;
-    type AuthSig = ();
-}
-
 #[derive(Debug, Copy, Clone)]
 pub struct Authorized {
     pub binding_sig: redjubjub::Signature,
@@ -54,34 +46,9 @@ impl Authorization for Authorized {
 #[derive(Debug, Clone)]
 pub struct Bundle<A: Authorization> {
     pub shielded_spends: Vec<SpendDescription<A>>,
-    pub shielded_outputs: Vec<OutputDescription<A>>,
+    pub shielded_outputs: Vec<OutputDescription<A::Proof>>,
     pub value_balance: Amount,
     pub authorization: A,
-}
-
-impl Bundle<Unauthorized> {
-    pub fn apply_signatures(
-        self,
-        spend_auth_sigs: Vec<Signature>,
-        binding_sig: Signature,
-    ) -> Bundle<Authorized> {
-        assert!(self.shielded_spends.len() == spend_auth_sigs.len());
-        Bundle {
-            shielded_spends: self
-                .shielded_spends
-                .iter()
-                .zip(spend_auth_sigs.iter())
-                .map(|(spend, sig)| spend.apply_signature(*sig))
-                .collect(),
-            shielded_outputs: self
-                .shielded_outputs
-                .into_iter()
-                .map(|o| o.into_authorized())
-                .collect(), //TODO, is there a zero-cost way to do this?
-            value_balance: self.value_balance,
-            authorization: Authorized { binding_sig },
-        }
-    }
 }
 
 #[derive(Clone)]
@@ -92,19 +59,6 @@ pub struct SpendDescription<A: Authorization> {
     pub rk: PublicKey,
     pub zkproof: A::Proof,
     pub spend_auth_sig: A::AuthSig,
-}
-
-impl SpendDescription<Unauthorized> {
-    pub fn apply_signature(&self, spend_auth_sig: Signature) -> SpendDescription<Authorized> {
-        SpendDescription {
-            cv: self.cv,
-            anchor: self.anchor,
-            nullifier: self.nullifier,
-            rk: self.rk.clone(),
-            zkproof: self.zkproof,
-            spend_auth_sig,
-        }
-    }
 }
 
 impl<A: Authorization> std::fmt::Debug for SpendDescription<A> {
@@ -256,18 +210,16 @@ impl SpendDescriptionV5 {
 }
 
 #[derive(Clone)]
-pub struct OutputDescription<A: Authorization> {
+pub struct OutputDescription<Proof> {
     pub cv: jubjub::ExtendedPoint,
     pub cmu: bls12_381::Scalar,
     pub ephemeral_key: jubjub::ExtendedPoint,
     pub enc_ciphertext: [u8; 580],
     pub out_ciphertext: [u8; 80],
-    pub zkproof: A::Proof,
+    pub zkproof: Proof,
 }
 
-impl<P: consensus::Parameters, A: Authorization> ShieldedOutput<SaplingDomain<P>>
-    for OutputDescription<A>
-{
+impl<P: consensus::Parameters, A> ShieldedOutput<SaplingDomain<P>> for OutputDescription<A> {
     fn epk(&self) -> &jubjub::ExtendedPoint {
         &self.ephemeral_key
     }
@@ -281,7 +233,7 @@ impl<P: consensus::Parameters, A: Authorization> ShieldedOutput<SaplingDomain<P>
     }
 }
 
-impl<A: Authorization> std::fmt::Debug for OutputDescription<A> {
+impl<A> std::fmt::Debug for OutputDescription<A> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
         write!(
             f,
@@ -291,7 +243,7 @@ impl<A: Authorization> std::fmt::Debug for OutputDescription<A> {
     }
 }
 
-impl OutputDescription<Authorized> {
+impl OutputDescription<GrothProofBytes> {
     pub fn read<R: Read>(mut reader: &mut R) -> io::Result<Self> {
         // Consensus rules (§4.5):
         // - Canonical encoding is enforced here.
@@ -323,9 +275,7 @@ impl OutputDescription<Authorized> {
             zkproof,
         })
     }
-}
 
-impl<A: Authorization<Proof = GrothProofBytes>> OutputDescription<A> {
     pub fn write_v4<W: Write>(&self, mut writer: W) -> io::Result<()> {
         writer.write_all(&self.cv.to_bytes())?;
         writer.write_all(self.cmu.to_repr().as_ref())?;
@@ -376,7 +326,7 @@ impl OutputDescriptionV5 {
     pub fn into_output_description(
         self,
         zkproof: GrothProofBytes,
-    ) -> OutputDescription<Authorized> {
+    ) -> OutputDescription<GrothProofBytes> {
         OutputDescription {
             cv: self.cv,
             cmu: self.cmu,
@@ -388,26 +338,13 @@ impl OutputDescriptionV5 {
     }
 }
 
-impl OutputDescription<Unauthorized> {
-    pub fn into_authorized(self) -> OutputDescription<Authorized> {
-        OutputDescription {
-            cv: self.cv,
-            cmu: self.cmu,
-            ephemeral_key: self.ephemeral_key,
-            enc_ciphertext: self.enc_ciphertext,
-            out_ciphertext: self.out_ciphertext,
-            zkproof: self.zkproof,
-        }
-    }
-}
-
 pub struct CompactOutputDescription {
     pub epk: jubjub::ExtendedPoint,
     pub cmu: bls12_381::Scalar,
     pub enc_ciphertext: Vec<u8>,
 }
 
-impl<A: Authorization> From<OutputDescription<A>> for CompactOutputDescription {
+impl<A> From<OutputDescription<A>> for CompactOutputDescription {
     fn from(out: OutputDescription<A>) -> CompactOutputDescription {
         CompactOutputDescription {
             epk: out.ephemeral_key,
@@ -452,7 +389,7 @@ pub mod testing {
         },
     };
 
-    use super::{Authorized, Bundle, OutputDescription, SpendDescription};
+    use super::{Authorized, Bundle, GrothProofBytes, OutputDescription, SpendDescription};
 
     prop_compose! {
         /// produce a spend description with invalid data (useful only for serialization
@@ -507,7 +444,7 @@ pub mod testing {
                 .prop_map(|v| <[u8;80]>::try_from(v.as_slice()).unwrap()),
             zkproof in vec(any::<u8>(), GROTH_PROOF_SIZE)
                 .prop_map(|v| <[u8;GROTH_PROOF_SIZE]>::try_from(v.as_slice()).unwrap()),
-        ) -> OutputDescription<Authorized> {
+        ) -> OutputDescription<GrothProofBytes> {
             OutputDescription {
                 cv,
                 cmu,

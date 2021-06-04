@@ -386,7 +386,7 @@ pub fn try_sapling_output_recovery_with_ock<P: consensus::Parameters>(
     params: &P,
     height: BlockHeight,
     ock: &OutgoingCipherKey,
-    output: &OutputDescription<sapling::Authorized>,
+    output: &OutputDescription<sapling::GrothProofBytes>,
 ) -> Option<(Note, PaymentAddress, MemoBytes)> {
     let domain = SaplingDomain {
         params: params.clone(),
@@ -408,7 +408,7 @@ pub fn try_sapling_output_recovery<P: consensus::Parameters>(
     params: &P,
     height: BlockHeight,
     ovk: &OutgoingViewingKey,
-    output: &OutputDescription<sapling::Authorized>,
+    output: &OutputDescription<sapling::GrothProofBytes>,
 ) -> Option<(Note, PaymentAddress, MemoBytes)> {
     let domain = SaplingDomain {
         params: params.clone(),
@@ -465,7 +465,7 @@ mod tests {
         OutgoingViewingKey,
         OutgoingCipherKey,
         SaplingIvk,
-        OutputDescription<sapling::Authorized>,
+        OutputDescription<sapling::GrothProofBytes>,
     ) {
         let ivk = SaplingIvk(jubjub::Fr::random(&mut rng));
 
@@ -498,7 +498,7 @@ mod tests {
     ) -> (
         OutgoingViewingKey,
         OutgoingCipherKey,
-        OutputDescription<sapling::Authorized>,
+        OutputDescription<sapling::GrothProofBytes>,
     ) {
         let diversifier = Diversifier([0; 11]);
         let pk_d = diversifier.g_d().unwrap() * ivk.0;

@@ -257,7 +257,7 @@ pub struct Unauthorized;
 
 impl Authorization for Unauthorized {
     type TransparentAuth = transparent::builder::Unauthorized;
-    type SaplingAuth = sapling::Unauthorized;
+    type SaplingAuth = sapling::builder::Unauthorized;
     type OrchardAuth = orchard::builder::Unauthorized;
 
     #[cfg(feature = "zfuture")]
@@ -547,7 +547,7 @@ impl Transaction {
             let ss: Vec<SpendDescription<sapling::Authorized>> =
                 Vector::read(&mut reader, |r| SpendDescription::read(r))?;
             #[allow(clippy::redundant_closure)]
-            let so: Vec<OutputDescription<sapling::Authorized>> =
+            let so: Vec<OutputDescription<sapling::GrothProofBytes>> =
                 Vector::read(&mut reader, |r| OutputDescription::read(r))?;
             (vb, ss, so)
         } else {
