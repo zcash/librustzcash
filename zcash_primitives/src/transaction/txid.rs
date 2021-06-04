@@ -138,8 +138,8 @@ pub(crate) fn hash_tze_outputs(tze_outputs: &[TzeOut]) -> Blake2bHash {
 }
 
 /// Write disjoint parts of each Sapling shielded spend to a pair of hashes:
-/// * [nullifier*] - personalized with ZCASH_SAPLING_SPENDS_COMPACT_HASH_PERSONALIZATION
-/// * [(cv, anchor, rk, zkproof)*] - personalized with ZCASH_SAPLING_SPENDS_NONCOMPACT_HASH_PERSONALIZATION
+/// * \[nullifier*\] - personalized with ZCASH_SAPLING_SPENDS_COMPACT_HASH_PERSONALIZATION
+/// * \[(cv, anchor, rk, zkproof)*\] - personalized with ZCASH_SAPLING_SPENDS_NONCOMPACT_HASH_PERSONALIZATION
 ///
 /// Then, hash these together personalized by ZCASH_SAPLING_SPENDS_HASH_PERSONALIZATION
 pub(crate) fn hash_sapling_spends<A: sapling::Authorization>(
@@ -167,9 +167,9 @@ pub(crate) fn hash_sapling_spends<A: sapling::Authorization>(
 }
 
 /// Write disjoint parts of each Sapling shielded output as 3 separate hashes:
-/// * [(cmu, epk, enc_ciphertext[..52])*] personalized with ZCASH_SAPLING_OUTPUTS_COMPACT_HASH_PERSONALIZATION
-/// * [enc_ciphertext[52..564]*] (memo ciphertexts) personalized with ZCASH_SAPLING_OUTPUTS_MEMOS_HASH_PERSONALIZATION
-/// * [(cv, enc_ciphertext[564..], out_ciphertext, zkproof)*] personalized with ZCASH_SAPLING_OUTPUTS_NONCOMPACT_HASH_PERSONALIZATION
+/// * \[(cmu, epk, enc_ciphertext\[..52\])*\] personalized with ZCASH_SAPLING_OUTPUTS_COMPACT_HASH_PERSONALIZATION
+/// * \[enc_ciphertext\[52..564\]*\] (memo ciphertexts) personalized with ZCASH_SAPLING_OUTPUTS_MEMOS_HASH_PERSONALIZATION
+/// * \[(cv, enc_ciphertext\[564..\], out_ciphertext, zkproof)*\] personalized with ZCASH_SAPLING_OUTPUTS_NONCOMPACT_HASH_PERSONALIZATION
 ///
 /// Then, hash these together personalized with ZCASH_SAPLING_OUTPUTS_HASH_PERSONALIZATION
 pub(crate) fn hash_sapling_outputs<A>(shielded_outputs: &[OutputDescription<A>]) -> Blake2bHash {
@@ -273,11 +273,11 @@ fn hash_sapling_txid_data<A: sapling::Authorization>(
 }
 
 /// Write disjoint parts of each Orchard shielded action as 3 separate hashes:
-/// * [(nullifier, cmx, ephemeral_key, enc_ciphertext[..52])*] personalized
+/// * \[(nullifier, cmx, ephemeral_key, enc_ciphertext\[..52\])*\] personalized
 ///   with ZCASH_ORCHARD_ACTIONS_COMPACT_HASH_PERSONALIZATION
-/// * [enc_ciphertext[52..564]*] (memo ciphertexts) personalized
+/// * \[enc_ciphertext\[52..564\]*\] (memo ciphertexts) personalized
 ///   with ZCASH_ORCHARD_ACTIONS_MEMOS_HASH_PERSONALIZATION
-/// * [(cv, rk, enc_ciphertext[564..], out_ciphertext)*] personalized
+/// * \[(cv, rk, enc_ciphertext\[564..\], out_ciphertext)*\] personalized
 ///   with ZCASH_ORCHARD_ACTIONS_NONCOMPACT_HASH_PERSONALIZATION
 ///
 /// Then, hash these together along with (flags, value_balance_orchard, anchor_orchard),
