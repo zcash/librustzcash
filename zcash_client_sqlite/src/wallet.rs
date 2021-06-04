@@ -7,7 +7,7 @@
 //! [`WalletRead`]: zcash_client_backend::data_api::WalletRead
 //! [`WalletWrite`]: zcash_client_backend::data_api::WalletWrite
 
-use ff::PrimeField;
+use group::ff::PrimeField;
 use rusqlite::{OptionalExtension, ToSql, NO_PARAMS};
 use std::collections::HashMap;
 use std::convert::TryFrom;

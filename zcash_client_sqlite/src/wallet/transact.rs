@@ -2,7 +2,7 @@
 //!
 use rusqlite::{named_params, Row};
 
-use ff::PrimeField;
+use group::ff::PrimeField;
 
 use zcash_primitives::{
     consensus::BlockHeight,

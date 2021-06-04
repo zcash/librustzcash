@@ -887,8 +887,7 @@ impl BlockSource for FsBlockDb {
 #[cfg(test)]
 #[allow(deprecated)]
 mod tests {
-    use ff::PrimeField;
-    use group::GroupEncoding;
+    use group::{ff::PrimeField, GroupEncoding};
     use protobuf::Message;
     use rand_core::{OsRng, RngCore};
     use rusqlite::params;
