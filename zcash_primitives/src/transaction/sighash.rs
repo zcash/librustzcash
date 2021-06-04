@@ -119,7 +119,7 @@ pub fn signature_hash<
     A: Authorization<SaplingAuth = SA>,
 >(
     tx: &TransactionData<A>,
-    signable_input: SignableInput<'a>,
+    signable_input: &SignableInput<'a>,
     txid_parts: &TxDigests<Blake2bHash>,
     hash_type: u32,
 ) -> SignatureHash {

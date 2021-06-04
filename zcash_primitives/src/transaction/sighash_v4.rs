@@ -140,7 +140,7 @@ pub fn v4_signature_hash<
     A: Authorization<SaplingAuth = SA>,
 >(
     tx: &TransactionData<A>,
-    signable_input: SignableInput<'_>,
+    signable_input: &SignableInput<'_>,
     hash_type: u32,
 ) -> Blake2bHash {
     if tx.version.has_overwinter() {
@@ -191,7 +191,7 @@ pub fn v4_signature_hash<
                 .as_bytes(),
             );
         } else if (hash_type & SIGHASH_MASK) == SIGHASH_SINGLE {
-            match (tx.transparent_bundle.as_ref(), &signable_input) {
+            match (tx.transparent_bundle.as_ref(), signable_input) {
                 (Some(b), SignableInput::Transparent(input)) if input.index() < b.vout.len() => {
                     h.update(single_output_hash(&b.vout[input.index()]).as_bytes())
                 }

@@ -120,7 +120,7 @@ fn tze_input_sigdigests<A: tze::Authorization>(
 pub fn v5_signature_hash<A: Authorization>(
     tx: &TransactionData<A>,
     txid_parts: &TxDigests<Blake2bHash>,
-    signable_input: SignableInput<'_>,
+    signable_input: &SignableInput<'_>,
     hash_type: u32,
 ) -> Blake2bHash {
     match signable_input {
@@ -146,7 +146,7 @@ pub fn v5_signature_hash<A: Authorization>(
                     txid_parts.header_digest,
                     Some(&transparent_input_sigdigests(
                         bundle,
-                        &input,
+                        input,
                         txid_digests,
                         hash_type,
                     )),
@@ -172,7 +172,7 @@ pub fn v5_signature_hash<A: Authorization>(
                     txid_parts.sapling_digest,
                     txid_parts.orchard_digest,
                     #[cfg(feature = "zfuture")]
-                    Some(&tze_input_sigdigests(bundle, &input, txid_digests)),
+                    Some(&tze_input_sigdigests(bundle, input, txid_digests)),
                 )
             } else {
                 panic!("It is not possible to sign a tze input with missing bundle data.")

@@ -2,10 +2,18 @@ use std::ops::Deref;
 
 use proptest::prelude::*;
 
-use crate::consensus::BranchId;
+use crate::{
+    consensus::BranchId,
+    legacy::Script
+};
 
 use super::{
-    components::Amount, sighash::SignableInput, sighash_v4::v4_signature_hash, testing::arb_tx,
+    components::Amount,
+    sighash::{SignableInput, SIGHASH_ALL, SIGHASH_ANYONECANPAY, SIGHASH_NONE, SIGHASH_SINGLE},
+    txid::TxIdDigester,
+    sighash_v4::v4_signature_hash,
+    sighash_v5::v5_signature_hash,
+    testing::arb_tx,
     Transaction,
 };
 
@@ -124,7 +132,7 @@ fn zip_0143() {
         };
 
         assert_eq!(
-            v4_signature_hash(tx.deref(), signable_input, tv.hash_type).as_ref(),
+            v4_signature_hash(tx.deref(), &signable_input, tv.hash_type).as_ref(),
             tv.sighash
         );
     }
@@ -144,8 +152,86 @@ fn zip_0243() {
         };
 
         assert_eq!(
-            v4_signature_hash(tx.deref(), signable_input, tv.hash_type).as_ref(),
+            v4_signature_hash(tx.deref(), &signable_input, tv.hash_type).as_ref(),
             tv.sighash
         );
+    }
+}
+
+#[test]
+fn zip_0244() {
+    for tv in self::data::zip_0244::make_test_vectors() {
+        let tx = Transaction::read(&tv.tx[..], BranchId::Nu5).unwrap();
+        let txid_parts = tx.deref().digest(TxIdDigester);
+        assert_eq!(tx.txid.as_ref(), &tv.txid);
+
+        match tv.transparent_input {
+            Some(n) => {
+                let script = Script(tv.script_code.unwrap());
+                let signable_input = SignableInput::transparent(
+                    n as usize,
+                    &script,
+                    Amount::from_nonnegative_i64(tv.amount.unwrap()).unwrap(),
+                );
+
+                assert_eq!(
+                    v5_signature_hash(tx.deref(), &txid_parts, &signable_input, SIGHASH_ALL).as_ref(),
+                    &tv.sighash_all
+                );
+
+                assert_eq!(
+                    v5_signature_hash(tx.deref(), &txid_parts, &signable_input, SIGHASH_NONE)
+                        .as_ref(),
+                    &tv.sighash_none.unwrap()
+                );
+
+                assert_eq!(
+                    v5_signature_hash(tx.deref(), &txid_parts, &signable_input, SIGHASH_SINGLE)
+                        .as_ref(),
+                    &tv.sighash_single.unwrap()
+                );
+
+                assert_eq!(
+                    v5_signature_hash(
+                        tx.deref(),
+                        &txid_parts,
+                        &signable_input,
+                        SIGHASH_ALL | SIGHASH_ANYONECANPAY
+                    )
+                    .as_ref(),
+                    &tv.sighash_all_anyone.unwrap()
+                );
+
+                assert_eq!(
+                    v5_signature_hash(
+                        tx.deref(),
+                        &txid_parts,
+                        &signable_input,
+                        SIGHASH_NONE | SIGHASH_ANYONECANPAY
+                    )
+                    .as_ref(),
+                    &tv.sighash_none_anyone.unwrap()
+                );
+
+                assert_eq!(
+                    v5_signature_hash(
+                        tx.deref(),
+                        &txid_parts,
+                        &signable_input,
+                        SIGHASH_SINGLE | SIGHASH_ANYONECANPAY
+                    )
+                    .as_ref(),
+                    &tv.sighash_single_anyone.unwrap()
+                );
+            }
+            _ => {
+                let signable_input = SignableInput::Shielded;
+
+                assert_eq!(
+                    v5_signature_hash(tx.deref(), &txid_parts, &signable_input, SIGHASH_ALL).as_ref(),
+                    tv.sighash_all
+                );
+            }
+        };
     }
 }

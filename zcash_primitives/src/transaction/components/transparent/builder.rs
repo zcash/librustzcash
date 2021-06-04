@@ -203,7 +203,7 @@ impl Bundle<Unauthorized> {
             .map(|(i, info)| {
                 let sighash = signature_hash(
                     mtx,
-                    SignableInput::transparent(i, &info.coin.script_pubkey, info.coin.value),
+                    &SignableInput::transparent(i, &info.coin.script_pubkey, info.coin.value),
                     txid_parts_cache,
                     SIGHASH_ALL,
                 );
