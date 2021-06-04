@@ -2,18 +2,15 @@ use std::ops::Deref;
 
 use proptest::prelude::*;
 
-use crate::{
-    consensus::BranchId,
-    legacy::Script
-};
+use crate::{consensus::BranchId, legacy::Script};
 
 use super::{
     components::Amount,
     sighash::{SignableInput, SIGHASH_ALL, SIGHASH_ANYONECANPAY, SIGHASH_NONE, SIGHASH_SINGLE},
-    txid::TxIdDigester,
     sighash_v4::v4_signature_hash,
     sighash_v5::v5_signature_hash,
     testing::arb_tx,
+    txid::TxIdDigester,
     Transaction,
 };
 
@@ -175,7 +172,8 @@ fn zip_0244() {
                 );
 
                 assert_eq!(
-                    v5_signature_hash(tx.deref(), &txid_parts, &signable_input, SIGHASH_ALL).as_ref(),
+                    v5_signature_hash(tx.deref(), &txid_parts, &signable_input, SIGHASH_ALL)
+                        .as_ref(),
                     &tv.sighash_all
                 );
 
@@ -228,7 +226,8 @@ fn zip_0244() {
                 let signable_input = SignableInput::Shielded;
 
                 assert_eq!(
-                    v5_signature_hash(tx.deref(), &txid_parts, &signable_input, SIGHASH_ALL).as_ref(),
+                    v5_signature_hash(tx.deref(), &txid_parts, &signable_input, SIGHASH_ALL)
+                        .as_ref(),
                     tv.sighash_all
                 );
             }

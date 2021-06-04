@@ -25,7 +25,7 @@ use orchard::{self, primitives::redpallas};
 use crate::{
     consensus::{BlockHeight, BranchId},
     sapling::redjubjub,
-    serialize::{CompactSize, Vector},
+    serialize::{Array, CompactSize, Vector},
 };
 
 use self::{
@@ -681,9 +681,9 @@ impl Transaction {
         mut reader: R,
     ) -> io::Result<Option<sapling::Bundle<sapling::Authorized>>> {
         let n_spends = CompactSize::read(&mut reader)?;
-        let sd_v5s = Vector::read_count(&mut reader, n_spends, SpendDescriptionV5::read)?;
+        let sd_v5s = Array::read(&mut reader, n_spends, SpendDescriptionV5::read)?;
         let n_outputs = CompactSize::read(&mut reader)?;
-        let od_v5s = Vector::read_count(&mut reader, n_outputs, OutputDescriptionV5::read)?;
+        let od_v5s = Array::read(&mut reader, n_outputs, OutputDescriptionV5::read)?;
         let value_balance = if n_spends > 0 || n_outputs > 0 {
             Self::read_amount(&mut reader)?
         } else {
@@ -696,13 +696,11 @@ impl Transaction {
             None
         };
 
-        let v_spend_proofs =
-            Vector::read_count(&mut reader, n_spends, |r| sapling::read_zkproof(r))?;
-        let v_spend_auth_sigs = Vector::read_count(&mut reader, n_spends, |r| {
+        let v_spend_proofs = Array::read(&mut reader, n_spends, |r| sapling::read_zkproof(r))?;
+        let v_spend_auth_sigs = Array::read(&mut reader, n_spends, |r| {
             SpendDescription::read_spend_auth_sig(r)
         })?;
-        let v_output_proofs =
-            Vector::read_count(&mut reader, n_outputs, |r| sapling::read_zkproof(r))?;
+        let v_output_proofs = Array::read(&mut reader, n_outputs, |r| sapling::read_zkproof(r))?;
 
         let binding_sig = if n_spends > 0 || n_outputs > 0 {
             Some(redjubjub::Signature::read(&mut reader)?)
@@ -744,7 +742,7 @@ impl Transaction {
         if n_actions == 0 {
             Ok(None)
         } else {
-            let actions_without_auth = Vector::read_count(&mut reader, n_actions, |r| {
+            let actions_without_auth = Array::read(&mut reader, n_actions, |r| {
                 orchard_serialization::read_action_without_auth(r)
             })?;
             let flags = orchard_serialization::read_flags(&mut reader)?;
@@ -753,7 +751,7 @@ impl Transaction {
             let proof_size = CompactSize::read(&mut reader)?;
             let mut proof_bytes = vec![0u8; proof_size];
             reader.read_exact(&mut proof_bytes)?;
-            let spend_sigs = Vector::read_count(&mut reader, n_actions, |r| {
+            let spend_sigs = Array::read(&mut reader, n_actions, |r| {
                 orchard_serialization::read_signature::<_, redpallas::SpendAuth>(r)
             })?;
             let binding_signature =
@@ -915,12 +913,12 @@ impl Transaction {
     pub fn write_v5_sapling<W: Write>(&self, mut writer: W) -> io::Result<()> {
         if let Some(bundle) = &self.sapling_bundle {
             CompactSize::write(&mut writer, bundle.shielded_spends.len())?;
-            Vector::write_items(&mut writer, &bundle.shielded_spends, |w, e| {
+            Array::write(&mut writer, &bundle.shielded_spends, |w, e| {
                 e.write_v5_without_witness_data(w)
             })?;
 
             CompactSize::write(&mut writer, bundle.shielded_outputs.len())?;
-            Vector::write_items(&mut writer, &bundle.shielded_outputs, |w, e| {
+            Array::write(&mut writer, &bundle.shielded_outputs, |w, e| {
                 e.write_v5_without_proof(w)
             })?;
 
@@ -931,18 +929,18 @@ impl Transaction {
                 writer.write_all(bundle.shielded_spends[0].anchor.to_repr().as_ref())?;
             }
 
-            Vector::write_items(
+            Array::write(
                 &mut writer,
                 bundle.shielded_spends.iter().map(|s| s.zkproof),
                 |w, e| w.write_all(e),
             )?;
-            Vector::write_items(
+            Array::write(
                 &mut writer,
                 bundle.shielded_spends.iter().map(|s| s.spend_auth_sig),
                 |w, e| e.write(w),
             )?;
 
-            Vector::write_items(
+            Array::write(
                 &mut writer,
                 bundle.shielded_outputs.iter().map(|s| s.zkproof),
                 |w, e| w.write_all(e),
@@ -962,7 +960,7 @@ impl Transaction {
     pub fn write_v5_orchard<W: Write>(&self, mut writer: W) -> io::Result<()> {
         if let Some(bundle) = &self.orchard_bundle {
             CompactSize::write(&mut writer, bundle.actions().len())?;
-            Vector::write_items(&mut writer, bundle.actions().iter(), |w, a| {
+            Array::write(&mut writer, bundle.actions().iter(), |w, a| {
                 orchard_serialization::write_action_without_auth(w, a)
             })?;
 
@@ -973,7 +971,7 @@ impl Transaction {
                 let proof_bytes: &[u8] = bundle.authorization().proof().as_ref();
                 CompactSize::write(&mut writer, proof_bytes.len())?;
                 writer.write_all(&proof_bytes)?;
-                Vector::write_items(
+                Array::write(
                     &mut writer,
                     bundle.actions().iter().map(|a| a.authorization()),
                     |w, auth| w.write_all(&<[u8; 64]>::from(*auth)),
