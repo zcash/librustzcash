@@ -20,7 +20,6 @@ bls12_381 = "0.7"
 bs58 = { version = "0.4", features = ["check"] }
 byteorder = { version = "1", optional = true }
 crossbeam-channel = "0.5"
-ff = "0.12"
 group = "0.12"
 hex = "0.4"
 hdwallet = { version = "0.3.1", optional = true }

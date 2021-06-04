@@ -1,8 +1,9 @@
 //! Tools for scanning a compact representation of the Zcash block chain.
 
-use ff::PrimeField;
 use std::collections::{HashMap, HashSet};
 use std::convert::TryFrom;
+
+use group::ff::PrimeField;
 use subtle::{ConditionallySelectable, ConstantTimeEq, CtOption};
 use zcash_note_encryption::batch;
 use zcash_primitives::{
@@ -411,8 +412,10 @@ pub(crate) fn scan_block_with_runner<
 
 #[cfg(test)]
 mod tests {
-    use ff::{Field, PrimeField};
-    use group::GroupEncoding;
+    use group::{
+        ff::{Field, PrimeField},
+        GroupEncoding,
+    };
     use rand_core::{OsRng, RngCore};
     use zcash_primitives::{
         consensus::{BlockHeight, Network},
