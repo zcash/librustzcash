@@ -495,7 +495,7 @@ mod tests {
             builder::Builder,
             components::{
                 amount::{Amount, DEFAULT_FEE},
-                tze::{Bundle, OutPoint, TzeIn, TzeOut},
+                tze::{Authorized, Bundle, OutPoint, TzeIn, TzeOut},
             },
             Transaction, TransactionData, TxVersion,
         },
@@ -695,6 +695,7 @@ mod tests {
             Some(Bundle {
                 vin: vec![],
                 vout: vec![out_a],
+                authorization: Authorized,
             }),
         )
         .freeze()
@@ -725,6 +726,7 @@ mod tests {
             Some(Bundle {
                 vin: vec![in_b],
                 vout: vec![out_b],
+                authorization: Authorized,
             }),
         )
         .freeze()
@@ -751,6 +753,7 @@ mod tests {
             Some(Bundle {
                 vin: vec![in_c],
                 vout: vec![],
+                authorization: Authorized,
             }),
         )
         .freeze()

@@ -26,13 +26,6 @@ pub trait Authorization: Debug {
 }
 
 #[derive(Debug, Copy, Clone, PartialEq)]
-pub struct Unauthorized;
-
-impl Authorization for Unauthorized {
-    type Witness = ();
-}
-
-#[derive(Debug, Copy, Clone, PartialEq)]
 pub struct Authorized;
 
 impl Authorization for Authorized {
@@ -41,30 +34,9 @@ impl Authorization for Authorized {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Bundle<A: Authorization> {
-    pub vin: Vec<TzeIn<A>>,
+    pub vin: Vec<TzeIn<A::Witness>>,
     pub vout: Vec<TzeOut>,
-}
-
-impl Bundle<Unauthorized> {
-    pub fn apply_signatures(self, witnesses: Vec<tze::AuthData>) -> Bundle<Authorized> {
-        assert!(self.vin.len() == witnesses.len());
-        Bundle {
-            vin: self
-                .vin
-                .into_iter()
-                .zip(witnesses.into_iter())
-                .map(|(tzein, payload)| TzeIn {
-                    prevout: tzein.prevout,
-                    witness: tze::Witness {
-                        extension_id: tzein.witness.extension_id,
-                        mode: tzein.witness.mode,
-                        payload,
-                    },
-                })
-                .collect(),
-            vout: self.vout,
-        }
-    }
+    pub authorization: A,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -99,12 +71,12 @@ impl OutPoint {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct TzeIn<A: Authorization> {
+pub struct TzeIn<Payload> {
     pub prevout: OutPoint,
-    pub witness: tze::Witness<A::Witness>,
+    pub witness: tze::Witness<Payload>,
 }
 
-impl<A: Authorization> TzeIn<A> {
+impl<Payload> TzeIn<Payload> {
     /// Write without witness data (for signature hashing)
     ///
     /// This is also used as the prefix for the encoded form used
@@ -127,7 +99,7 @@ impl<A: Authorization> TzeIn<A> {
 /// Transaction encoding and decoding functions conforming to [ZIP 222].
 ///
 /// [ZIP 222]: https://zips.z.cash/zip-0222#encoding-in-transactions
-impl TzeIn<Unauthorized> {
+impl TzeIn<()> {
     /// Convenience constructor
     pub fn new(prevout: OutPoint, extension_id: u32, mode: u32) -> Self {
         TzeIn {
@@ -141,7 +113,7 @@ impl TzeIn<Unauthorized> {
     }
 }
 
-impl TzeIn<Authorized> {
+impl TzeIn<<Authorized as Authorization>::Witness> {
     /// Read witness metadata & payload
     ///
     /// Used to decode the encoded form used within a serialized
@@ -249,7 +221,7 @@ pub mod testing {
     }
 
     prop_compose! {
-        pub fn arb_tzein()(prevout in arb_outpoint(), witness in arb_witness()) -> TzeIn<Authorized> {
+        pub fn arb_tzein()(prevout in arb_outpoint(), witness in arb_witness()) -> TzeIn<AuthData> {
             TzeIn { prevout, witness }
         }
     }
@@ -274,7 +246,7 @@ pub mod testing {
             if branch_id != BranchId::ZFuture || (vin.is_empty() && vout.is_empty()) {
                 None
             } else {
-                Some(Bundle { vin, vout })
+                Some(Bundle { vin, vout, authorization: Authorized })
             }
         }
     }

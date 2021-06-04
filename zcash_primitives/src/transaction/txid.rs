@@ -116,7 +116,7 @@ pub(crate) fn transparent_outputs_hash<T: Borrow<TxOut>>(vout: &[T]) -> Blake2bH
 /// In the case that no inputs are provided, this produces a default
 /// hash from just the personalization string.
 #[cfg(feature = "zfuture")]
-pub(crate) fn hash_tze_inputs<A: tze::Authorization>(tze_inputs: &[TzeIn<A>]) -> Blake2bHash {
+pub(crate) fn hash_tze_inputs<A>(tze_inputs: &[TzeIn<A>]) -> Blake2bHash {
     let mut h = hasher(ZCASH_TZE_INPUTS_HASH_PERSONALIZATION);
     for tzein in tze_inputs {
         tzein.write_without_witness(&mut h).unwrap();

@@ -261,7 +261,7 @@ impl Authorization for Unauthorized {
     type OrchardAuth = orchard::builder::Unauthorized;
 
     #[cfg(feature = "zfuture")]
-    type TzeAuth = tze::Unauthorized;
+    type TzeAuth = tze::builder::Unauthorized;
 }
 
 /// A Zcash transaction.
@@ -795,7 +795,11 @@ impl Transaction {
         Ok(if vin.is_empty() && vout.is_empty() {
             None
         } else {
-            Some(tze::Bundle { vin, vout })
+            Some(tze::Bundle {
+                vin,
+                vout,
+                authorization: tze::Authorized,
+            })
         })
     }
 

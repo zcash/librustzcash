@@ -41,7 +41,7 @@ use crate::transaction::components::transparent::TxOut;
 
 #[cfg(feature = "zfuture")]
 use crate::{
-    extensions::transparent::{AuthData, ExtensionTxBuilder, ToPayload},
+    extensions::transparent::{ExtensionTxBuilder, ToPayload},
     transaction::components::{
         tze::builder::TzeBuilder,
         tze::{self, TzeOut},
@@ -333,7 +333,7 @@ impl<'a, P: consensus::Parameters, R: RngCore> Builder<'a, P, R> {
             .map_err(Error::SaplingBuild)?;
 
         #[cfg(feature = "zfuture")]
-        let tze_bundle = self.tze_builder.build();
+        let (tze_bundle, tze_signers) = self.tze_builder.build();
 
         let unauthed_tx = TransactionData {
             version,
@@ -384,9 +384,11 @@ impl<'a, P: consensus::Parameters, R: RngCore> Builder<'a, P, R> {
             .map_err(Error::SaplingBuild)?;
 
         #[cfg(feature = "zfuture")]
-        let tze_witnesses = self
-            .tze_builder
-            .create_witnesses(&unauthed_tx)
+        let tze_bundle = unauthed_tx
+            .tze_bundle
+            .clone()
+            .map(|b| b.into_authorized(&unauthed_tx, tze_signers))
+            .transpose()
             .map_err(Error::TzeBuild)?;
 
         Ok((
@@ -395,7 +397,7 @@ impl<'a, P: consensus::Parameters, R: RngCore> Builder<'a, P, R> {
                 sapling_sigs,
                 transparent_bundle,
                 #[cfg(feature = "zfuture")]
-                tze_witnesses,
+                tze_bundle,
             )
             .expect("An IO error occurred applying signatures."),
             tx_metadata,
@@ -406,7 +408,7 @@ impl<'a, P: consensus::Parameters, R: RngCore> Builder<'a, P, R> {
         unauthed_tx: TransactionData<Unauthorized>,
         sapling_sigs: Option<(Vec<redjubjub::Signature>, redjubjub::Signature)>,
         transparent_bundle: Option<transparent::Bundle<transparent::Authorized>>,
-        #[cfg(feature = "zfuture")] tze_witnesses: Option<Vec<AuthData>>,
+        #[cfg(feature = "zfuture")] tze_bundle: Option<tze::Bundle<tze::Authorized>>,
     ) -> io::Result<Transaction> {
         let signed_sapling_bundle = match (unauthed_tx.sapling_bundle, sapling_sigs) {
             (Some(bundle), Some((spend_sigs, binding_sig))) => {
@@ -415,17 +417,6 @@ impl<'a, P: consensus::Parameters, R: RngCore> Builder<'a, P, R> {
             (None, None) => None,
             _ => {
                 panic!("Mismatch between sapling bundle and signatures.");
-            }
-        };
-
-        #[cfg(feature = "zfuture")]
-        let signed_tze_bundle = match (unauthed_tx.tze_bundle, tze_witnesses) {
-            (Some(bundle), Some(witness_payloads)) => {
-                Some(bundle.apply_signatures(witness_payloads))
-            }
-            (None, None) => None,
-            _ => {
-                panic!("Mismatch between TZE bundle and witnesses.")
             }
         };
 
@@ -439,7 +430,7 @@ impl<'a, P: consensus::Parameters, R: RngCore> Builder<'a, P, R> {
             sapling_bundle: signed_sapling_bundle,
             orchard_bundle: None,
             #[cfg(feature = "zfuture")]
-            tze_bundle: signed_tze_bundle,
+            tze_bundle,
         };
 
         authorized_tx.freeze()
