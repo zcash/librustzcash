@@ -129,7 +129,7 @@ pub fn read_point<R: Read>(mut reader: R, field: &str) -> io::Result<jubjub::Ext
     if point.is_none().into() {
         Err(io::Error::new(
             io::ErrorKind::InvalidInput,
-            "invalid ".to_owned() + field,
+            format!("invalid {}", field),
         ))
     } else {
         Ok(point.unwrap())
@@ -138,13 +138,13 @@ pub fn read_point<R: Read>(mut reader: R, field: &str) -> io::Result<jubjub::Ext
 
 /// Consensus rules (§7.3) & (§7.4):
 /// - Canonical encoding is enforced here
-pub fn read_scalar<R: Read>(mut reader: R, field: &str) -> io::Result<bls12_381::Scalar> {
+pub fn read_base<R: Read>(mut reader: R, field: &str) -> io::Result<bls12_381::Scalar> {
     let mut f = [0u8; 32];
     reader.read_exact(&mut f)?;
     bls12_381::Scalar::from_repr(f).ok_or_else(|| {
         io::Error::new(
             io::ErrorKind::InvalidInput,
-            field.to_owned() + " not in field",
+            format!("{} not in field", field),
         )
     })
 }
@@ -190,7 +190,7 @@ impl SpendDescription<Authorized> {
         let cv = read_point(&mut reader, "cv")?;
         // Consensus rules (§7.3) & (§7.4):
         // - Canonical encoding is enforced here
-        let anchor = read_scalar(&mut reader, "anchor")?;
+        let anchor = read_base(&mut reader, "anchor")?;
         let nullifier = Self::read_nullifier(&mut reader)?;
         let rk = Self::read_rk(&mut reader)?;
         let zkproof = read_zkproof(&mut reader)?;
