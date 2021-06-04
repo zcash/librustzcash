@@ -175,7 +175,7 @@ pub mod testing {
     ];
 
     prop_compose! {
-        pub fn arb_outpoint()(hash in prop::array::uniform32(1u8..), n in 1..100u32) -> OutPoint {
+        pub fn arb_outpoint()(hash in prop::array::uniform32(0u8..), n in 0..100u32) -> OutPoint {
             OutPoint::new(hash, n)
         }
     }

@@ -237,7 +237,7 @@ pub mod testing {
     use super::{Authorized, Bundle, OutPoint, TzeIn, TzeOut};
 
     prop_compose! {
-        pub fn arb_outpoint()(txid in arb_txid(), n in 1..100u32) -> OutPoint {
+        pub fn arb_outpoint()(txid in arb_txid(), n in 0..100u32) -> OutPoint {
             OutPoint::new(txid, n)
         }
     }
