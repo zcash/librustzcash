@@ -371,7 +371,7 @@ impl<P: consensus::Parameters> ShieldedOutput<SaplingDomain<P>> for CompactOutpu
 #[cfg(any(test, feature = "test-dependencies"))]
 pub mod testing {
     use ff::Field;
-    use group::GroupEncoding;
+    use group::Group;
     use proptest::collection::vec;
     use proptest::prelude::*;
     use rand::{rngs::StdRng, SeedableRng};
@@ -392,13 +392,18 @@ pub mod testing {
     use super::{Authorized, Bundle, GrothProofBytes, OutputDescription, SpendDescription};
 
     prop_compose! {
+        fn arb_extended_point()(rng_seed in prop::array::uniform32(any::<u8>())) -> jubjub::ExtendedPoint {
+            let mut rng = StdRng::from_seed(rng_seed);
+            let scalar = jubjub::Scalar::random(&mut rng);
+            jubjub::ExtendedPoint::generator() * scalar
+        }
+    }
+
+    prop_compose! {
         /// produce a spend description with invalid data (useful only for serialization
         /// roundtrip testing).
         fn arb_spend_description()(
-            cv in prop::array::uniform32(any::<u8>())
-                .prop_map(|v| jubjub::ExtendedPoint::from_bytes(&v))
-                .prop_filter("Must generate valid extended points.", |v| v.is_some().unwrap_u8() == 1)
-                .prop_map(|v| v.unwrap()),
+            cv in arb_extended_point(),
             anchor in vec(any::<u8>(), 64)
                 .prop_map(|v| <[u8;64]>::try_from(v.as_slice()).unwrap())
                 .prop_map(|v| bls12_381::Scalar::from_bytes_wide(&v)),
@@ -427,19 +432,13 @@ pub mod testing {
         /// produce an output description with invalid data (useful only for serialization
         /// roundtrip testing).
         pub fn arb_output_description()(
-            cv in prop::array::uniform32(any::<u8>())
-                .prop_map(|v| jubjub::ExtendedPoint::from_bytes(&v))
-                .prop_filter("Must generate valid extended points.", |v| v.is_some().unwrap_u8() == 1)
-                .prop_map(|v| v.unwrap()),
+            cv in arb_extended_point(),
             cmu in vec(any::<u8>(), 64)
                 .prop_map(|v| <[u8;64]>::try_from(v.as_slice()).unwrap())
                 .prop_map(|v| bls12_381::Scalar::from_bytes_wide(&v)),
             enc_ciphertext in vec(any::<u8>(), 580)
                 .prop_map(|v| <[u8;580]>::try_from(v.as_slice()).unwrap()),
-            ephemeral_key in prop::array::uniform32(any::<u8>())
-                .prop_map(|v| jubjub::ExtendedPoint::from_bytes(&v))
-                .prop_filter("Must generate valid extended points.", |v| v.is_some().unwrap_u8() == 1)
-                .prop_map(|v| v.unwrap()),
+            ephemeral_key in arb_extended_point(),
             out_ciphertext in vec(any::<u8>(), 80)
                 .prop_map(|v| <[u8;80]>::try_from(v.as_slice()).unwrap()),
             zkproof in vec(any::<u8>(), GROTH_PROOF_SIZE)
