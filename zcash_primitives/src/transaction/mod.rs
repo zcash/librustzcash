@@ -950,24 +950,22 @@ impl Transaction {
                 orchard_serialization::write_action_without_auth(w, a)
             })?;
 
-            if !bundle.actions().is_empty() {
-                orchard_serialization::write_flags(&mut writer, &bundle.flags())?;
-                writer.write_all(&bundle.value_balance().to_i64_le_bytes())?;
-                orchard_serialization::write_anchor(&mut writer, bundle.anchor())?;
-                Vector::write(
-                    &mut writer,
-                    bundle.authorization().proof().as_ref(),
-                    |w, b| w.write_u8(*b),
-                )?;
-                Array::write(
-                    &mut writer,
-                    bundle.actions().iter().map(|a| a.authorization()),
-                    |w, auth| w.write_all(&<[u8; 64]>::from(*auth)),
-                )?;
-                writer.write_all(&<[u8; 64]>::from(
-                    bundle.authorization().binding_signature(),
-                ))?;
-            }
+            orchard_serialization::write_flags(&mut writer, &bundle.flags())?;
+            writer.write_all(&bundle.value_balance().to_i64_le_bytes())?;
+            orchard_serialization::write_anchor(&mut writer, bundle.anchor())?;
+            Vector::write(
+                &mut writer,
+                bundle.authorization().proof().as_ref(),
+                |w, b| w.write_u8(*b),
+            )?;
+            Array::write(
+                &mut writer,
+                bundle.actions().iter().map(|a| a.authorization()),
+                |w, auth| w.write_all(&<[u8; 64]>::from(*auth)),
+            )?;
+            writer.write_all(&<[u8; 64]>::from(
+                bundle.authorization().binding_signature(),
+            ))?;
         } else {
             CompactSize::write(&mut writer, 0)?;
         }
@@ -1013,8 +1011,8 @@ pub struct TzeDigests<A> {
 pub struct TxDigests<A> {
     pub header_digest: A,
     pub transparent_digests: Option<TransparentDigests<A>>,
-    pub sapling_digest: A,
-    pub orchard_digest: A,
+    pub sapling_digest: Option<A>,
+    pub orchard_digest: Option<A>,
     #[cfg(feature = "zfuture")]
     pub tze_digests: Option<TzeDigests<A>>,
 }
