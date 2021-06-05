@@ -680,10 +680,10 @@ impl Transaction {
     fn read_v5_sapling<R: Read>(
         mut reader: R,
     ) -> io::Result<Option<sapling::Bundle<sapling::Authorized>>> {
-        let n_spends = CompactSize::read(&mut reader)?;
-        let sd_v5s = Array::read(&mut reader, n_spends, SpendDescriptionV5::read)?;
-        let n_outputs = CompactSize::read(&mut reader)?;
-        let od_v5s = Array::read(&mut reader, n_outputs, OutputDescriptionV5::read)?;
+        let sd_v5s = Vector::read(&mut reader, SpendDescriptionV5::read)?;
+        let od_v5s = Vector::read(&mut reader, OutputDescriptionV5::read)?;
+        let n_spends = sd_v5s.len();
+        let n_outputs = od_v5s.len();
         let value_balance = if n_spends > 0 || n_outputs > 0 {
             Self::read_amount(&mut reader)?
         } else {
@@ -738,33 +738,22 @@ impl Transaction {
     fn read_v5_orchard<R: Read>(
         mut reader: R,
     ) -> io::Result<Option<orchard::Bundle<orchard::bundle::Authorized, Amount>>> {
-        let n_actions = CompactSize::read(&mut reader)?;
-        if n_actions == 0 {
+        let actions_without_auth = Vector::read(&mut reader, |r| {
+            orchard_serialization::read_action_without_auth(r)
+        })?;
+        if actions_without_auth.is_empty() {
             Ok(None)
         } else {
-            let actions_without_auth = Array::read(&mut reader, n_actions, |r| {
-                orchard_serialization::read_action_without_auth(r)
-            })?;
+            let n_actions = actions_without_auth.len();
             let flags = orchard_serialization::read_flags(&mut reader)?;
             let value_balance = Self::read_amount(&mut reader)?;
             let anchor = orchard_serialization::read_anchor(&mut reader)?;
-            let proof_size = CompactSize::read(&mut reader)?;
-            let mut proof_bytes = vec![0u8; proof_size];
-            reader.read_exact(&mut proof_bytes)?;
+            let proof_bytes = Vector::read(&mut reader, |r| r.read_u8())?;
             let spend_sigs = Array::read(&mut reader, n_actions, |r| {
                 orchard_serialization::read_signature::<_, redpallas::SpendAuth>(r)
             })?;
             let binding_signature =
-                orchard_serialization::read_signature::<_, redpallas::Binding>(&mut reader)
-                    .map_err(|e| {
-                        io::Error::new(
-                            io::ErrorKind::InvalidInput,
-                            format!(
-                                "An error occurred deserializing the Orchard binding signature: {}",
-                                e
-                            ),
-                        )
-                    })?;
+                orchard_serialization::read_signature::<_, redpallas::Binding>(&mut reader)?;
 
             let actions = NonEmpty::from_vec(
                 actions_without_auth
@@ -912,13 +901,11 @@ impl Transaction {
 
     pub fn write_v5_sapling<W: Write>(&self, mut writer: W) -> io::Result<()> {
         if let Some(bundle) = &self.sapling_bundle {
-            CompactSize::write(&mut writer, bundle.shielded_spends.len())?;
-            Array::write(&mut writer, &bundle.shielded_spends, |w, e| {
+            Vector::write(&mut writer, &bundle.shielded_spends, |w, e| {
                 e.write_v5_without_witness_data(w)
             })?;
 
-            CompactSize::write(&mut writer, bundle.shielded_outputs.len())?;
-            Array::write(&mut writer, &bundle.shielded_outputs, |w, e| {
+            Vector::write(&mut writer, &bundle.shielded_outputs, |w, e| {
                 e.write_v5_without_proof(w)
             })?;
 
@@ -959,8 +946,7 @@ impl Transaction {
 
     pub fn write_v5_orchard<W: Write>(&self, mut writer: W) -> io::Result<()> {
         if let Some(bundle) = &self.orchard_bundle {
-            CompactSize::write(&mut writer, bundle.actions().len())?;
-            Array::write(&mut writer, bundle.actions().iter(), |w, a| {
+            Vector::write_nonempty(&mut writer, bundle.actions(), |w, a| {
                 orchard_serialization::write_action_without_auth(w, a)
             })?;
 
@@ -968,9 +954,11 @@ impl Transaction {
                 orchard_serialization::write_flags(&mut writer, &bundle.flags())?;
                 writer.write_all(&bundle.value_balance().to_i64_le_bytes())?;
                 orchard_serialization::write_anchor(&mut writer, bundle.anchor())?;
-                let proof_bytes: &[u8] = bundle.authorization().proof().as_ref();
-                CompactSize::write(&mut writer, proof_bytes.len())?;
-                writer.write_all(&proof_bytes)?;
+                Vector::write(
+                    &mut writer,
+                    bundle.authorization().proof().as_ref(),
+                    |w, b| w.write_u8(*b),
+                )?;
                 Array::write(
                     &mut writer,
                     bundle.actions().iter().map(|a| a.authorization()),

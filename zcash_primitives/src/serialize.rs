@@ -1,4 +1,5 @@
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+use nonempty::NonEmpty;
 use std::io::{self, Read, Write};
 
 const MAX_SIZE: usize = 0x02000000;
@@ -74,6 +75,18 @@ impl Vector {
     }
 
     pub fn write<W: Write, E, F>(mut writer: W, vec: &[E], func: F) -> io::Result<()>
+    where
+        F: Fn(&mut W, &E) -> io::Result<()>,
+    {
+        CompactSize::write(&mut writer, vec.len())?;
+        vec.iter().try_for_each(|e| func(&mut writer, e))
+    }
+
+    pub fn write_nonempty<W: Write, E, F>(
+        mut writer: W,
+        vec: &NonEmpty<E>,
+        func: F,
+    ) -> io::Result<()>
     where
         F: Fn(&mut W, &E) -> io::Result<()>,
     {
