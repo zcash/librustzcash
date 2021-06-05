@@ -28,10 +28,10 @@ fn tx_read_write() {
     assert_eq!(&data[..], &encoded[..]);
 }
 
-fn check_roundtrip(branch_id: BranchId, tx: Transaction) -> Result<(), TestCaseError> {
+fn check_roundtrip(tx: Transaction) -> Result<(), TestCaseError> {
     let mut txn_bytes = vec![];
     tx.write(&mut txn_bytes).unwrap();
-    let txo = Transaction::read(&txn_bytes[..], branch_id).unwrap();
+    let txo = Transaction::read(&txn_bytes[..], tx.consensus_branch_id).unwrap();
 
     prop_assert_eq!(tx.version, txo.version);
     #[cfg(feature = "zfuture")]
@@ -53,7 +53,7 @@ proptest! {
     #[test]
     #[ignore]
     fn tx_serialization_roundtrip_sprout(tx in arb_tx(BranchId::Sprout)) {
-        check_roundtrip(BranchId::Sprout, tx)?;
+        check_roundtrip(tx)?;
     }
 }
 
@@ -61,7 +61,7 @@ proptest! {
     #[test]
     #[ignore]
     fn tx_serialization_roundtrip_overwinter(tx in arb_tx(BranchId::Overwinter)) {
-        check_roundtrip(BranchId::Overwinter, tx)?;
+        check_roundtrip(tx)?;
     }
 }
 
@@ -69,7 +69,7 @@ proptest! {
     #[test]
     #[ignore]
     fn tx_serialization_roundtrip_sapling(tx in arb_tx(BranchId::Sapling)) {
-        check_roundtrip(BranchId::Sapling, tx)?;
+        check_roundtrip(tx)?;
     }
 }
 
@@ -77,7 +77,7 @@ proptest! {
     #[test]
     #[ignore]
     fn tx_serialization_roundtrip_blossom(tx in arb_tx(BranchId::Blossom)) {
-        check_roundtrip(BranchId::Blossom, tx)?;
+        check_roundtrip(tx)?;
     }
 }
 
@@ -85,7 +85,7 @@ proptest! {
     #[test]
     #[ignore]
     fn tx_serialization_roundtrip_heartwood(tx in arb_tx(BranchId::Heartwood)) {
-        check_roundtrip(BranchId::Heartwood, tx)?;
+        check_roundtrip(tx)?;
     }
 }
 
@@ -93,7 +93,7 @@ proptest! {
     #![proptest_config(ProptestConfig::with_cases(10))]
     #[test]
     fn tx_serialization_roundtrip_canopy(tx in arb_tx(BranchId::Canopy)) {
-        check_roundtrip(BranchId::Canopy, tx)?;
+        check_roundtrip(tx)?;
     }
 }
 
@@ -101,7 +101,7 @@ proptest! {
     #![proptest_config(ProptestConfig::with_cases(10))]
     #[test]
     fn tx_serialization_roundtrip_nu5(tx in arb_tx(BranchId::Nu5)) {
-        check_roundtrip(BranchId::Nu5, tx)?;
+        check_roundtrip(tx)?;
     }
 }
 
@@ -110,7 +110,7 @@ proptest! {
     #[test]
     #[ignore]
     fn tx_serialization_roundtrip_future(tx in arb_tx(BranchId::ZFuture)) {
-        check_roundtrip(BranchId::ZFuture, tx)?;
+        check_roundtrip(tx)?;
     }
 }
 

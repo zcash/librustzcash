@@ -490,9 +490,7 @@ impl<P: consensus::Parameters> SaplingBuilder<P> {
                 shielded_spends,
                 shielded_outputs,
                 value_balance: self.value_balance,
-                authorization: Unauthorized {
-                    tx_metadata,
-                },
+                authorization: Unauthorized { tx_metadata },
             })
         };
 
@@ -530,14 +528,14 @@ impl Bundle<Unauthorized> {
                 shielded_spends: self
                     .shielded_spends
                     .iter()
-                    .map(|spend| spend.apply_signature(
-                        spend_sig_internal(
+                    .map(|spend| {
+                        spend.apply_signature(spend_sig_internal(
                             PrivateKey(spend.spend_auth_sig.extsk.expsk.ask),
                             spend.spend_auth_sig.alpha,
                             sighash_bytes,
                             rng,
-                        )
-                    ))
+                        ))
+                    })
                     .collect(),
                 shielded_outputs: self.shielded_outputs,
                 value_balance: self.value_balance,
