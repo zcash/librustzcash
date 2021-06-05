@@ -518,6 +518,9 @@ impl TransactionDigest<Authorized> for BlockTxCommitmentDigester {
         if let Some(bundle) = sapling_bundle {
             for spend in &bundle.shielded_spends {
                 h.write_all(&spend.zkproof).unwrap();
+            }
+
+            for spend in &bundle.shielded_spends {
                 spend.spend_auth_sig.write(&mut h).unwrap();
             }
 
