@@ -744,25 +744,25 @@ impl Transaction {
         if actions_without_auth.is_empty() {
             Ok(None)
         } else {
-            let n_actions = actions_without_auth.len();
             let flags = orchard_serialization::read_flags(&mut reader)?;
             let value_balance = Self::read_amount(&mut reader)?;
             let anchor = orchard_serialization::read_anchor(&mut reader)?;
             let proof_bytes = Vector::read(&mut reader, |r| r.read_u8())?;
-            let spend_sigs = Array::read(&mut reader, n_actions, |r| {
-                orchard_serialization::read_signature::<_, redpallas::SpendAuth>(r)
-            })?;
-            let binding_signature =
-                orchard_serialization::read_signature::<_, redpallas::Binding>(&mut reader)?;
-
             let actions = NonEmpty::from_vec(
                 actions_without_auth
                     .into_iter()
-                    .zip(spend_sigs.into_iter())
-                    .map(|(act, sig)| act.map(|_| sig))
-                    .collect(),
+                    .map(|act| {
+                        act.try_map(|_| {
+                            orchard_serialization::read_signature::<_, redpallas::SpendAuth>(
+                                &mut reader,
+                            )
+                        })
+                    })
+                    .collect::<Result<Vec<_>, _>>()?,
             )
             .expect("A nonzero number of actions was read from the transaction data.");
+            let binding_signature =
+                orchard_serialization::read_signature::<_, redpallas::Binding>(&mut reader)?;
 
             let authorization = orchard::bundle::Authorized::from_parts(
                 orchard::Proof::new(proof_bytes),
