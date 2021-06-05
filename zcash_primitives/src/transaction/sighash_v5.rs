@@ -156,7 +156,7 @@ pub fn v5_signature_hash<A: Authorization>(
                     txid_parts.tze_digests.as_ref(),
                 )
             } else {
-                panic!("It is not possible to sign a transparent input with missing bundle data.")
+                panic!("Transaction has no transparent inputs to sign.")
             }
         }
         #[cfg(feature = "zfuture")]
@@ -175,7 +175,7 @@ pub fn v5_signature_hash<A: Authorization>(
                     Some(&tze_input_sigdigests(bundle, input, txid_digests)),
                 )
             } else {
-                panic!("It is not possible to sign a tze input with missing bundle data.")
+                panic!("Transaction has no TZE inputs to sign.")
             }
         }
     }
