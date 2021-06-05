@@ -59,8 +59,8 @@ impl fmt::Display for Error {
     }
 }
 
-#[derive(Clone)]
-struct SpendDescriptionInfo {
+#[derive(Debug, Clone)]
+pub struct SpendDescriptionInfo {
     extsk: ExtendedSpendingKey,
     diversifier: Diversifier,
     note: Note,
@@ -198,7 +198,6 @@ pub struct SaplingBuilder<P> {
 
 #[derive(Clone)]
 pub struct Unauthorized {
-    spends: Vec<SpendDescriptionInfo>,
     tx_metadata: SaplingMetadata,
 }
 
@@ -210,7 +209,7 @@ impl std::fmt::Debug for Unauthorized {
 
 impl Authorization for Unauthorized {
     type Proof = GrothProofBytes;
-    type AuthSig = ();
+    type AuthSig = SpendDescriptionInfo;
 }
 
 impl<P: consensus::Parameters> SaplingBuilder<P> {
@@ -313,7 +312,8 @@ impl<P: consensus::Parameters> SaplingBuilder<P> {
         progress_notifier: Option<&Sender<Progress>>,
     ) -> Result<Option<Bundle<Unauthorized>>, Error> {
         // Record initial positions of spends and outputs
-        let mut indexed_spends: Vec<_> = self.spends.iter().enumerate().collect();
+        let params = self.params;
+        let mut indexed_spends: Vec<_> = self.spends.into_iter().enumerate().collect();
         let mut indexed_outputs: Vec<_> = self
             .outputs
             .iter()
@@ -349,7 +349,7 @@ impl<P: consensus::Parameters> SaplingBuilder<P> {
                 .expect("Sapling anchor must be set if Sapling spends are present.");
 
             indexed_spends
-                .iter()
+                .into_iter()
                 .enumerate()
                 .map(|(i, (pos, spend))| {
                     let proof_generation_key = spend.extsk.expsk.proof_generation_key();
@@ -373,7 +373,7 @@ impl<P: consensus::Parameters> SaplingBuilder<P> {
                         .map_err(|_| Error::SpendProof)?;
 
                     // Record the post-randomized spend location
-                    tx_metadata.spend_indices[*pos] = i;
+                    tx_metadata.spend_indices[pos] = i;
 
                     // Update progress and send a notification on the channel
                     progress += 1;
@@ -390,7 +390,7 @@ impl<P: consensus::Parameters> SaplingBuilder<P> {
                         nullifier,
                         rk,
                         zkproof,
-                        spend_auth_sig: (),
+                        spend_auth_sig: spend,
                     })
                 })
                 .collect::<Result<Vec<_>, Error>>()?
@@ -434,7 +434,7 @@ impl<P: consensus::Parameters> SaplingBuilder<P> {
                         };
 
                         let rseed =
-                            generate_random_rseed_internal(&self.params, target_height, &mut rng);
+                            generate_random_rseed_internal(&params, target_height, &mut rng);
 
                         (
                             payment_address,
@@ -491,7 +491,6 @@ impl<P: consensus::Parameters> SaplingBuilder<P> {
                 shielded_outputs,
                 value_balance: self.value_balance,
                 authorization: Unauthorized {
-                    spends: self.spends,
                     tx_metadata,
                 },
             })
@@ -522,23 +521,6 @@ impl Bundle<Unauthorized> {
         rng: &mut R,
         sighash_bytes: &[u8; 32],
     ) -> Result<(Bundle<Authorized>, SaplingMetadata), Error> {
-        // Create Sapling spendAuth signatures. These must be properly ordered with respect to the
-        // shuffle that is described by tx_metadata.
-        let mut spend_sigs = vec![None; self.authorization.spends.len()];
-        for (i, spend) in self.authorization.spends.into_iter().enumerate() {
-            spend_sigs[self.authorization.tx_metadata.spend_indices[i]] = Some(spend_sig_internal(
-                PrivateKey(spend.extsk.expsk.ask),
-                spend.alpha,
-                sighash_bytes,
-                rng,
-            ));
-        }
-
-        let spend_sigs = spend_sigs
-            .into_iter()
-            .collect::<Option<Vec<Signature>>>()
-            .unwrap_or_default();
-
         let binding_sig = prover
             .binding_sig(ctx, self.value_balance, sighash_bytes)
             .map_err(|_| Error::BindingSig)?;
@@ -548,8 +530,14 @@ impl Bundle<Unauthorized> {
                 shielded_spends: self
                     .shielded_spends
                     .iter()
-                    .zip(spend_sigs.iter())
-                    .map(|(spend, sig)| spend.apply_signature(*sig))
+                    .map(|spend| spend.apply_signature(
+                        spend_sig_internal(
+                            PrivateKey(spend.spend_auth_sig.extsk.expsk.ask),
+                            spend.spend_auth_sig.alpha,
+                            sighash_bytes,
+                            rng,
+                        )
+                    ))
                     .collect(),
                 shielded_outputs: self.shielded_outputs,
                 value_balance: self.value_balance,
