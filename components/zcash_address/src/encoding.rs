@@ -32,7 +32,7 @@ impl FromStr for ZcashAddress {
         // Remove leading and trailing whitespace, to handle copy-paste errors.
         let s = s.trim();
 
-        // Most Zcash addresses use Bech32, so try that first.
+        // Most Zcash addresses use Bech32 or Bech32m, so try those first.
         match bech32::decode(s) {
             Ok((hrp, data, Variant::Bech32m)) => {
                 // If we reached this point, the encoding is supposed to be valid Bech32m.
@@ -114,10 +114,10 @@ fn encode_bech32(hrp: &str, data: &[u8]) -> String {
 }
 
 fn encode_b58(prefix: [u8; 2], data: &[u8]) -> String {
-    let mut decoded = Vec::with_capacity(2 + data.len());
-    decoded.extend_from_slice(&prefix);
-    decoded.extend_from_slice(data);
-    bs58::encode(decoded).with_check().into_string()
+    let mut bytes = Vec::with_capacity(2 + data.len());
+    bytes.extend_from_slice(&prefix);
+    bytes.extend_from_slice(data);
+    bs58::encode(bytes).with_check().into_string()
 }
 
 impl fmt::Display for ZcashAddress {
@@ -218,9 +218,7 @@ mod tests {
             "u1cd8yzk5mdn4n9r8c24tp8j8e9ethw3rr7ker5zhew3kycyyxggdzfkcq5f9yf2jv8m5ar8krncsntlfpx3p4azvwrkp8z74t3vu4kqq2",
             ZcashAddress {
                 net: Network::Main,
-                kind: AddressKind::Unified(unified::Address(vec![unified::Receiver::Sapling(
-                    [0; 43],
-                )])),
+                kind: AddressKind::Unified(unified::Address(vec![unified::Receiver::Sapling([0; 43])])),
             },
         );
         encoding(

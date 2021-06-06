@@ -107,7 +107,7 @@ impl TryFrom<&[u8]> for Address {
                 [typecode, length, data @ ..] if data.len() >= *length as usize => {
                     let (addr, rest) = data.split_at(*length as usize);
                     *encoded = rest;
-                    Some((*typecode, addr).try_into())
+                    Some(Receiver::try_from((*typecode, addr)))
                 }
                 // The encoding is truncated.
                 _ => Some(Err(ParseError::InvalidEncoding)),
