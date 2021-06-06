@@ -7,6 +7,9 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 ### Added
+- `zcash_primitives::sapling::redjubjub::PublicKey::verify_with_zip216`, for
+  controlling how RedJubjub signatures are validated. `PublicKey::verify` has
+  been altered to always use post-ZIP 216 validation rules.
 - `zcash_primitives::transaction::Builder::with_progress_notifier`, for setting
   a notification channel on which transaction build progress updates will be
   sent.
