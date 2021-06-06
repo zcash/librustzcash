@@ -1,0 +1,20 @@
+[package]
+name = "zcash_address"
+description = "Zcash address parsing and serialization"
+version = "0.0.0"
+authors = [
+    "Jack Grigg <jack@electriccoin.co>",
+]
+homepage = "https://github.com/zcash/librustzcash"
+repository = "https://github.com/zcash/librustzcash"
+readme = "README.md"
+license = "MIT OR Apache-2.0"
+edition = "2018"
+
+[dependencies]
+bech32 = "0.8"
+blake2b_simd = "0.5"
+bs58 = { version = "0.4", features = ["check"] }
+
+[dev-dependencies]
+proptest = "0.10.1"

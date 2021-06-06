@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "components/equihash",
+    "components/zcash_address",
     "components/zcash_note_encryption",
     "zcash_client_backend",
     "zcash_client_sqlite",

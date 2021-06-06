@@ -9,7 +9,6 @@
 // Temporary until we have addressed all Result<T, ()> cases.
 #![allow(clippy::result_unit_err)]
 
-pub mod address;
 pub mod block;
 pub mod consensus;
 pub mod constants;
