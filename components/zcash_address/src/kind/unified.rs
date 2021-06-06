@@ -131,7 +131,7 @@ impl Address {
                 iter::empty()
                     .chain(Some(receiver.typecode()))
                     .chain(Some(addr.len() as u8))
-                    .chain(addr.into_iter().cloned())
+                    .chain(addr.iter().cloned())
             })
             .chain(iter::repeat(0).take(PADDING_LEN))
             .collect();
