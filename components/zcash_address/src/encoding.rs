@@ -124,10 +124,9 @@ impl fmt::Display for ZcashAddress {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let encoded = match &self.kind {
             AddressKind::Sprout(data) => encode_b58(
-                if let Network::Main = self.net {
-                    sprout::MAINNET
-                } else {
-                    sprout::TESTNET
+                match self.net {
+                    Network::Main => sprout::MAINNET,
+                    Network::Test | Network::Regtest => sprout::TESTNET,
                 },
                 data,
             ),
@@ -148,18 +147,16 @@ impl fmt::Display for ZcashAddress {
                 &data.to_bytes(),
             ),
             AddressKind::P2pkh(data) => encode_b58(
-                if let Network::Main = self.net {
-                    p2pkh::MAINNET
-                } else {
-                    p2pkh::TESTNET
+                match self.net {
+                    Network::Main => p2pkh::MAINNET,
+                    Network::Test | Network::Regtest => p2pkh::TESTNET,
                 },
                 data,
             ),
             AddressKind::P2sh(data) => encode_b58(
-                if let Network::Main = self.net {
-                    p2sh::MAINNET
-                } else {
-                    p2sh::TESTNET
+                match self.net {
+                    Network::Main => p2sh::MAINNET,
+                    Network::Test | Network::Regtest => p2sh::TESTNET,
                 },
                 data,
             ),
