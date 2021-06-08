@@ -8,10 +8,16 @@ and this library adheres to Rust's notion of
 ## [Unreleased]
 ### Changed
 - MSRV is now 1.51.0.
+- `zcash_proofs::sapling::SaplingVerificationContext::new` now takes a
+  `zip216_enabled` boolean; this is used to control how RedJubjub signatures are
+  validated.
 - Renamed the following in `zcash_proofs::circuit::sprout` to use lower-case
   abbreviations (matching Rust naming conventions):
   - `JSInput` to `JsInput`
   - `JSOutput` to `JsOutput`
+
+### Removed
+- `zcash_proofs::sapling::SaplingVerificationContext: Default`
 
 ## [0.5.0] - 2021-03-26
 ### Added
