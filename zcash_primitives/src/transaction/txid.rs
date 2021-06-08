@@ -504,7 +504,7 @@ impl TransactionDigest<Authorized> for BlockTxCommitmentDigester {
         let mut h = hasher(ZCASH_TRANSPARENT_SCRIPTS_HASH_PERSONALIZATION);
         if let Some(bundle) = transparent_bundle {
             for txin in &bundle.vin {
-                h.write_all(&txin.script_sig.0).unwrap();
+                txin.script_sig.write(&mut h).unwrap();
             }
         }
         h.finalize()
