@@ -225,7 +225,7 @@ impl TxVersion {
             BranchId::Sapling | BranchId::Blossom | BranchId::Heartwood | BranchId::Canopy => {
                 TxVersion::Sapling
             }
-            BranchId::Nu5 => TxVersion::Zip225, //TEMPORARY WORKAROUND
+            BranchId::Nu5 => TxVersion::Zip225,
             #[cfg(feature = "zfuture")]
             BranchId::ZFuture => TxVersion::ZFuture,
         }
@@ -862,7 +862,7 @@ impl Transaction {
         if self.orchard_bundle.is_some() {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
-                "Orchard components may not be present when serializing to the V4 transaction format."
+                "Orchard components cannot be present when serializing to the V4 transaction format."
             ));
         }
 
@@ -882,6 +882,12 @@ impl Transaction {
     }
 
     pub fn write_v5<W: Write>(&self, mut writer: W) -> io::Result<()> {
+        if self.sprout_bundle.is_some() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "Sprout components cannot be present when serializing to the V5 transaction format.",
+            ));
+        }
         self.write_v5_header(&mut writer)?;
         self.write_transparent(&mut writer)?;
         self.write_v5_sapling(&mut writer)?;
@@ -933,7 +939,7 @@ impl Transaction {
                 |w, e| w.write_all(e),
             )?;
 
-            if !bundle.shielded_spends.is_empty() || !bundle.shielded_outputs.is_empty() {
+            if !(bundle.shielded_spends.is_empty() && bundle.shielded_outputs.is_empty()) {
                 bundle.authorization.binding_sig.write(&mut writer)?;
             }
         } else {
