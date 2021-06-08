@@ -1,13 +1,14 @@
 //! Structs for building transactions.
 
-use rand::{rngs::OsRng, CryptoRng, RngCore};
 use std::array;
 use std::error;
 use std::fmt;
-use std::io;
 use std::sync::mpsc::Sender;
 
-use orchard::bundle::{self as orchard};
+#[cfg(not(feature = "zfuture"))]
+use std::marker::PhantomData;
+
+use rand::{rngs::OsRng, CryptoRng, RngCore};
 
 use crate::{
     consensus::{self, BlockHeight, BranchId},
@@ -15,8 +16,7 @@ use crate::{
     memo::MemoBytes,
     merkle_tree::MerklePath,
     sapling::{
-        keys::OutgoingViewingKey, prover::TxProver, redjubjub, Diversifier, Node, Note,
-        PaymentAddress,
+        keys::OutgoingViewingKey, prover::TxProver, Diversifier, Node, Note, PaymentAddress,
     },
     transaction::{
         components::{
@@ -27,21 +27,19 @@ use crate::{
             },
             transparent::{self, builder::TransparentBuilder},
         },
-        signature_hash_data, SignableInput, Transaction, TransactionData, TxVersion, Unauthorized,
-        SIGHASH_ALL,
+        sighash::{signature_hash, SignableInput, SIGHASH_ALL},
+        txid::TxIdDigester,
+        Transaction, TransactionData, TxVersion, Unauthorized,
     },
     zip32::ExtendedSpendingKey,
 };
 
-#[cfg(not(feature = "zfuture"))]
-use std::marker::PhantomData;
-
 #[cfg(feature = "transparent-inputs")]
-use crate::{legacy::Script, transaction::components::transparent::TxOut};
+use crate::transaction::components::transparent::TxOut;
 
 #[cfg(feature = "zfuture")]
 use crate::{
-    extensions::transparent::{AuthData, ExtensionTxBuilder, ToPayload},
+    extensions::transparent::{ExtensionTxBuilder, ToPayload},
     transaction::components::{
         tze::builder::TzeBuilder,
         tze::{self, TzeOut},
@@ -279,11 +277,6 @@ impl<'a, P: consensus::Parameters, R: RngCore> Builder<'a, P, R> {
     ///
     /// Upon success, returns a tuple containing the final transaction, and the
     /// [`SaplingMetadata`] generated during the build process.
-    ///
-    /// `consensus_branch_id` must be valid for the block height that this transaction is
-    /// targeting. An invalid `consensus_branch_id` will *not* result in an error from
-    /// this function, and instead will generate a transaction that will be rejected by
-    /// the network.
     pub fn build(
         mut self,
         prover: &impl TxProver,
@@ -325,23 +318,25 @@ impl<'a, P: consensus::Parameters, R: RngCore> Builder<'a, P, R> {
 
         let transparent_bundle = self.transparent_builder.build();
 
+        let mut rng = self.rng;
         let mut ctx = prover.new_sapling_proving_context();
-        let (sapling_bundle, tx_metadata) = self
+        let sapling_bundle = self
             .sapling_builder
             .build(
                 prover,
                 &mut ctx,
-                &mut self.rng,
+                &mut rng,
                 self.target_height,
                 self.progress_notifier.as_ref(),
             )
             .map_err(Error::SaplingBuild)?;
 
         #[cfg(feature = "zfuture")]
-        let tze_bundle = self.tze_builder.build();
+        let (tze_bundle, tze_signers) = self.tze_builder.build();
 
-        let unauthed_tx = TransactionData {
+        let unauthed_tx: TransactionData<Unauthorized> = TransactionData {
             version,
+            consensus_branch_id: BranchId::for_height(&self.params, self.target_height),
             lock_time: 0,
             expiry_height: self.expiry_height,
             transparent_bundle,
@@ -355,110 +350,63 @@ impl<'a, P: consensus::Parameters, R: RngCore> Builder<'a, P, R> {
         //
         // Signatures -- everything but the signatures must already have been added.
         //
+        let txid_parts = unauthed_tx.digest(TxIdDigester);
 
-        let mut sighash = [0u8; 32];
-        sighash.copy_from_slice(&signature_hash_data(
-            &unauthed_tx,
-            consensus_branch_id,
-            SIGHASH_ALL,
-            SignableInput::Shielded,
-        ));
-
-        #[cfg(feature = "transparent-inputs")]
-        let transparent_sigs = self
-            .transparent_builder
-            .create_signatures(&unauthed_tx, consensus_branch_id);
-
-        let sapling_sigs = self
-            .sapling_builder
-            .create_signatures(prover, &mut ctx, &mut self.rng, &sighash, &tx_metadata)
-            .map_err(Error::SaplingBuild)?;
+        let transparent_bundle = unauthed_tx.transparent_bundle.clone().map(|b| {
+            b.apply_signatures(
+                #[cfg(feature = "transparent-inputs")]
+                &unauthed_tx,
+                #[cfg(feature = "transparent-inputs")]
+                &txid_parts,
+            )
+        });
 
         #[cfg(feature = "zfuture")]
-        let tze_witnesses = self
-            .tze_builder
-            .create_witnesses(&unauthed_tx)
+        let tze_bundle = unauthed_tx
+            .tze_bundle
+            .clone()
+            .map(|b| b.into_authorized(&unauthed_tx, tze_signers))
+            .transpose()
             .map_err(Error::TzeBuild)?;
 
-        Ok((
-            Self::apply_signatures(
-                consensus_branch_id,
-                unauthed_tx,
-                #[cfg(feature = "transparent-inputs")]
-                transparent_sigs,
-                sapling_sigs,
-                None,
-                #[cfg(feature = "zfuture")]
-                tze_witnesses,
-            )
-            .expect("An IO error occurred applying signatures."),
-            tx_metadata,
-        ))
-    }
+        // the commitment being signed is shared across all Sapling inputs; once
+        // V4 transactions are deprecated this should just be the txid, but
+        // for now we need to continue to compute it here.
+        let shielded_sig_commitment = signature_hash(
+            &unauthed_tx,
+            SIGHASH_ALL,
+            &SignableInput::Shielded,
+            &txid_parts,
+        );
 
-    fn apply_signatures(
-        consensus_branch_id: consensus::BranchId,
-        unauthed_tx: TransactionData<Unauthorized>,
-        #[cfg(feature = "transparent-inputs")] transparent_sigs: Option<Vec<Script>>,
-        sapling_sigs: Option<(Vec<redjubjub::Signature>, redjubjub::Signature)>,
-        _orchard_auth: Option<(
-            Vec<<orchard::Authorized as orchard::Authorization>::SpendAuth>,
-            orchard::Authorized,
-        )>,
-        #[cfg(feature = "zfuture")] tze_witnesses: Option<Vec<AuthData>>,
-    ) -> io::Result<Transaction> {
-        #[cfg(feature = "transparent-inputs")]
-        let transparent_bundle = match (unauthed_tx.transparent_bundle, transparent_sigs) {
-            (Some(bundle), Some(script_sigs)) => Some(bundle.apply_signatures(script_sigs)),
-            (None, None) => None,
-            (b, s) => {
-                panic!(
-                    "Mismatch between transparent bundle ({}) and signatures ({}).",
-                    b.is_some(),
-                    s.is_some()
-                );
-            }
-        };
-
-        #[cfg(not(feature = "transparent-inputs"))]
-        let transparent_bundle = unauthed_tx
-            .transparent_bundle
-            .map(|b| b.apply_signatures(vec![]));
-
-        let signed_sapling_bundle = match (unauthed_tx.sapling_bundle, sapling_sigs) {
-            (Some(bundle), Some((spend_sigs, binding_sig))) => {
-                Some(bundle.apply_signatures(spend_sigs, binding_sig))
-            }
-            (None, None) => None,
-            _ => {
-                panic!("Mismatch between sapling bundle and signatures.");
-            }
-        };
-
-        #[cfg(feature = "zfuture")]
-        let signed_tze_bundle = match (unauthed_tx.tze_bundle, tze_witnesses) {
-            (Some(bundle), Some(witness_payloads)) => {
-                Some(bundle.apply_signatures(witness_payloads))
-            }
-            (None, None) => None,
-            _ => {
-                panic!("Mismatch between TZE bundle and witnesses.")
-            }
+        let (sapling_bundle, tx_metadata) = match unauthed_tx
+            .sapling_bundle
+            .map(|b| {
+                b.apply_signatures(prover, &mut ctx, &mut rng, shielded_sig_commitment.as_ref())
+            })
+            .transpose()
+            .map_err(Error::SaplingBuild)?
+        {
+            Some((bundle, meta)) => (Some(bundle), meta),
+            None => (None, SaplingMetadata::empty()),
         };
 
         let authorized_tx = TransactionData {
             version: unauthed_tx.version,
+            consensus_branch_id: unauthed_tx.consensus_branch_id,
             lock_time: unauthed_tx.lock_time,
             expiry_height: unauthed_tx.expiry_height,
             transparent_bundle,
             sprout_bundle: unauthed_tx.sprout_bundle,
-            sapling_bundle: signed_sapling_bundle,
+            sapling_bundle,
             orchard_bundle: None,
             #[cfg(feature = "zfuture")]
-            tze_bundle: signed_tze_bundle,
+            tze_bundle,
         };
 
-        authorized_tx.freeze(consensus_branch_id)
+        // The unwrap() here is safe because the txid hashing
+        // of freeze() should be infalliable.
+        Ok((authorized_tx.freeze().unwrap(), tx_metadata))
     }
 }
 
@@ -530,18 +478,18 @@ mod tests {
         transaction::components::{
             amount::{Amount, DEFAULT_FEE},
             sapling::builder::{self as build_s},
-            transparent::builder::{self as transparent},
+            transparent::builder::{self as build_t},
         },
         zip32::{ExtendedFullViewingKey, ExtendedSpendingKey},
     };
 
     use super::{Builder, Error, SaplingBuilder, DEFAULT_TX_EXPIRY_DELTA};
 
-    #[cfg(not(feature = "zfuture"))]
-    use std::marker::PhantomData;
-
     #[cfg(feature = "zfuture")]
     use super::TzeBuilder;
+
+    #[cfg(not(feature = "zfuture"))]
+    use std::marker::PhantomData;
 
     #[test]
     fn fails_on_negative_output() {
@@ -646,7 +594,7 @@ mod tests {
                 &TransparentAddress::PublicKey([0; 20]),
                 Amount::from_i64(-1).unwrap(),
             ),
-            Err(Error::TransparentBuild(transparent::Error::InvalidAmount))
+            Err(Error::TransparentBuild(build_t::Error::InvalidAmount))
         );
     }
 

@@ -2,6 +2,8 @@ use std::convert::TryFrom;
 use std::iter::Sum;
 use std::ops::{Add, AddAssign, Neg, Sub, SubAssign};
 
+use orchard::value as orchard;
+
 pub const COIN: i64 = 1_0000_0000;
 pub const MAX_MONEY: i64 = 21_000_000 * COIN;
 
@@ -177,6 +179,14 @@ impl Neg for Amount {
 
     fn neg(self) -> Self {
         Amount(-self.0)
+    }
+}
+
+impl TryFrom<orchard::ValueSum> for Amount {
+    type Error = ();
+
+    fn try_from(v: orchard::ValueSum) -> Result<Amount, Self::Error> {
+        i64::try_from(v).map_err(|_| ()).and_then(Amount::try_from)
     }
 }
 

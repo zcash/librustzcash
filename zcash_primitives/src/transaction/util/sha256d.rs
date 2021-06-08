@@ -16,6 +16,10 @@ impl<R: Read> HashReader<R> {
         }
     }
 
+    pub fn into_base_reader(self) -> R {
+        self.reader
+    }
+
     /// Destroy this reader and return the hash of what was read.
     pub fn into_hash(self) -> Output<Sha256> {
         Sha256::digest(&self.hasher.finalize())

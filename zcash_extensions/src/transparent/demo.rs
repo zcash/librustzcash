@@ -495,7 +495,7 @@ mod tests {
             builder::Builder,
             components::{
                 amount::{Amount, DEFAULT_FEE},
-                tze::{Bundle, OutPoint, TzeIn, TzeOut},
+                tze::{Authorized, Bundle, OutPoint, TzeIn, TzeOut},
             },
             Transaction, TransactionData, TxVersion,
         },
@@ -621,14 +621,14 @@ mod tests {
     /// by the context.
     impl<'a> Context for Ctx<'a> {
         fn is_tze_only(&self) -> bool {
-            self.tx.transparent_bundle.is_none()
-                && self.tx.sprout_bundle.is_none()
-                && self.tx.sapling_bundle.is_none()
-                && self.tx.orchard_bundle.is_none()
+            self.tx.transparent_bundle().is_none()
+                && self.tx.sapling_bundle().is_none()
+                && self.tx.sprout_bundle().is_none()
+                && self.tx.orchard_bundle().is_none()
         }
 
         fn tx_tze_outputs(&self) -> &[TzeOut] {
-            match &self.tx.tze_bundle {
+            match self.tx.tze_bundle() {
                 Some(b) => &b.vout,
                 None => &[],
             }
@@ -683,20 +683,22 @@ mod tests {
             precondition: tze::Precondition::from(0, &Precondition::open(hash_1)),
         };
 
-        let tx_a = TransactionData {
-            version: TxVersion::ZFuture,
-            lock_time: 0,
-            expiry_height: 0u32.into(),
-            transparent_bundle: None,
-            sprout_bundle: None,
-            sapling_bundle: None,
-            orchard_bundle: None,
-            tze_bundle: Some(Bundle {
+        let tx_a = TransactionData::from_parts(
+            TxVersion::ZFuture,
+            BranchId::ZFuture,
+            0,
+            0u32.into(),
+            None,
+            None,
+            None,
+            None,
+            Some(Bundle {
                 vin: vec![],
                 vout: vec![out_a],
+                authorization: Authorized,
             }),
-        }
-        .freeze(BranchId::ZFuture)
+        )
+        .freeze()
         .unwrap();
 
         //
@@ -712,20 +714,22 @@ mod tests {
             precondition: tze::Precondition::from(0, &Precondition::close(hash_2)),
         };
 
-        let tx_b = TransactionData {
-            version: TxVersion::ZFuture,
-            lock_time: 0,
-            expiry_height: 0u32.into(),
-            transparent_bundle: None,
-            sprout_bundle: None,
-            sapling_bundle: None,
-            orchard_bundle: None,
-            tze_bundle: Some(Bundle {
+        let tx_b = TransactionData::from_parts(
+            TxVersion::ZFuture,
+            BranchId::ZFuture,
+            0,
+            0u32.into(),
+            None,
+            None,
+            None,
+            None,
+            Some(Bundle {
                 vin: vec![in_b],
                 vout: vec![out_b],
+                authorization: Authorized,
             }),
-        }
-        .freeze(BranchId::ZFuture)
+        )
+        .freeze()
         .unwrap();
 
         //
@@ -737,20 +741,22 @@ mod tests {
             witness: tze::Witness::from(0, &Witness::close(preimage_2)),
         };
 
-        let tx_c = TransactionData {
-            version: TxVersion::ZFuture,
-            lock_time: 0,
-            expiry_height: 0u32.into(),
-            transparent_bundle: None,
-            sprout_bundle: None,
-            sapling_bundle: None,
-            orchard_bundle: None,
-            tze_bundle: Some(Bundle {
+        let tx_c = TransactionData::from_parts(
+            TxVersion::ZFuture,
+            BranchId::ZFuture,
+            0,
+            0u32.into(),
+            None,
+            None,
+            None,
+            None,
+            Some(Bundle {
                 vin: vec![in_c],
                 vout: vec![],
+                authorization: Authorized,
             }),
-        }
-        .freeze(BranchId::ZFuture)
+        )
+        .freeze()
         .unwrap();
 
         // Verify tx_b
@@ -758,8 +764,8 @@ mod tests {
             let ctx = Ctx { tx: &tx_b };
             assert_eq!(
                 Program.verify(
-                    &tx_a.tze_bundle.as_ref().unwrap().vout[0].precondition,
-                    &tx_b.tze_bundle.as_ref().unwrap().vin[0].witness,
+                    &tx_a.tze_bundle().unwrap().vout[0].precondition,
+                    &tx_b.tze_bundle().unwrap().vin[0].witness,
                     &ctx
                 ),
                 Ok(())
@@ -771,8 +777,8 @@ mod tests {
             let ctx = Ctx { tx: &tx_c };
             assert_eq!(
                 Program.verify(
-                    &tx_b.tze_bundle.as_ref().unwrap().vout[0].precondition,
-                    &tx_c.tze_bundle.as_ref().unwrap().vin[0].witness,
+                    &tx_b.tze_bundle().unwrap().vout[0].precondition,
+                    &tx_c.tze_bundle().unwrap().vin[0].witness,
                     &ctx
                 ),
                 Ok(())
@@ -830,7 +836,7 @@ mod tests {
             .build(&prover)
             .map_err(|e| format!("build failure: {:?}", e))
             .unwrap();
-        let tze_a = tx_a.tze_bundle.as_ref().unwrap();
+        let tze_a = tx_a.tze_bundle().unwrap();
 
         //
         // Transfer
@@ -848,7 +854,7 @@ mod tests {
             .build(&prover)
             .map_err(|e| format!("build failure: {:?}", e))
             .unwrap();
-        let tze_b = tx_b.tze_bundle.as_ref().unwrap();
+        let tze_b = tx_b.tze_bundle().unwrap();
 
         //
         // Closing transaction
@@ -873,7 +879,7 @@ mod tests {
             .build(&prover)
             .map_err(|e| format!("build failure: {:?}", e))
             .unwrap();
-        let tze_c = tx_c.tze_bundle.as_ref().unwrap();
+        let tze_c = tx_c.tze_bundle().unwrap();
 
         // Verify tx_b
         let ctx0 = Ctx { tx: &tx_b };

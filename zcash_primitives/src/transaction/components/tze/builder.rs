@@ -5,9 +5,12 @@ use std::fmt;
 
 use crate::{
     extensions::transparent::{self as tze, ToPayload},
-    transaction::components::{
-        amount::Amount,
-        tze::{Bundle, OutPoint, TzeIn, TzeOut, Unauthorized},
+    transaction::{
+        self as tx,
+        components::{
+            amount::Amount,
+            tze::{Authorization, Authorized, Bundle, OutPoint, TzeIn, TzeOut},
+        },
     },
 };
 
@@ -28,15 +31,22 @@ impl fmt::Display for Error {
 }
 
 #[allow(clippy::type_complexity)]
-struct TzeSigner<'a, BuildCtx> {
+pub struct TzeSigner<'a, BuildCtx> {
     prevout: TzeOut,
     builder: Box<dyn FnOnce(&BuildCtx) -> Result<(u32, Vec<u8>), Error> + 'a>,
 }
 
 pub struct TzeBuilder<'a, BuildCtx> {
     signers: Vec<TzeSigner<'a, BuildCtx>>,
-    vin: Vec<TzeIn<Unauthorized>>,
+    vin: Vec<TzeIn<()>>,
     vout: Vec<TzeOut>,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq)]
+pub struct Unauthorized;
+
+impl Authorization for Unauthorized {
+    type Witness = ();
 }
 
 impl<'a, BuildCtx> TzeBuilder<'a, BuildCtx> {
@@ -99,43 +109,63 @@ impl<'a, BuildCtx> TzeBuilder<'a, BuildCtx> {
                 .sum::<Option<Amount>>()?
     }
 
-    pub fn build(&self) -> Option<Bundle<Unauthorized>> {
+    pub fn build(self) -> (Option<Bundle<Unauthorized>>, Vec<TzeSigner<'a, BuildCtx>>) {
         if self.vin.is_empty() && self.vout.is_empty() {
-            None
+            (None, vec![])
         } else {
-            Some(Bundle {
-                vin: self.vin.clone(),
-                vout: self.vout.clone(),
-            })
+            (
+                Some(Bundle {
+                    vin: self.vin.clone(),
+                    vout: self.vout.clone(),
+                    authorization: Unauthorized,
+                }),
+                self.signers,
+            )
         }
     }
+}
 
-    pub fn create_witnesses(self, mtx: &BuildCtx) -> Result<Option<Vec<tze::AuthData>>, Error> {
+impl Bundle<Unauthorized> {
+    pub fn into_authorized(
+        self,
+        unauthed_tx: &tx::TransactionData<tx::Unauthorized>,
+        signers: Vec<TzeSigner<'_, tx::TransactionData<tx::Unauthorized>>>,
+    ) -> Result<Bundle<Authorized>, Error> {
         // Create TZE input witnesses
-        if self.vin.is_empty() && self.vout.is_empty() {
-            Ok(None)
-        } else {
-            // Create TZE input witnesses
-            let payloads = self
-                .signers
-                .into_iter()
-                .zip(self.vin.into_iter())
-                .into_iter()
-                .map(|(signer, tzein)| {
-                    // The witness builder function should have cached/closed over whatever data was
-                    // necessary for the witness to commit to at the time it was added to the
-                    // transaction builder; here, it then computes those commitments.
-                    let (mode, payload) = (signer.builder)(&mtx)?;
-                    let input_mode = tzein.witness.mode;
-                    if mode != input_mode {
-                        return Err(Error::WitnessModeMismatch(input_mode, mode));
-                    }
+        let payloads = signers
+            .into_iter()
+            .zip(self.vin.iter())
+            .into_iter()
+            .map(|(signer, tzein)| {
+                // The witness builder function should have cached/closed over whatever data was
+                // necessary for the witness to commit to at the time it was added to the
+                // transaction builder; here, it then computes those commitments.
+                let (mode, payload) = (signer.builder)(unauthed_tx)?;
+                let input_mode = tzein.witness.mode;
+                if mode != input_mode {
+                    return Err(Error::WitnessModeMismatch(input_mode, mode));
+                }
 
-                    Ok(tze::AuthData(payload))
+                Ok(tze::AuthData(payload))
+            })
+            .collect::<Result<Vec<_>, Error>>()?;
+
+        Ok(Bundle {
+            vin: self
+                .vin
+                .into_iter()
+                .zip(payloads.into_iter())
+                .map(|(tzein, payload)| TzeIn {
+                    prevout: tzein.prevout,
+                    witness: tze::Witness {
+                        extension_id: tzein.witness.extension_id,
+                        mode: tzein.witness.mode,
+                        payload,
+                    },
                 })
-                .collect::<Result<Vec<_>, Error>>()?;
-
-            Ok(Some(payloads))
-        }
+                .collect(),
+            vout: self.vout,
+            authorization: Authorized,
+        })
     }
 }
