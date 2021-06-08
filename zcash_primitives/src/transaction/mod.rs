@@ -13,14 +13,11 @@ mod tests;
 use blake2b_simd::Hash as Blake2bHash;
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use ff::PrimeField;
-use nonempty::NonEmpty;
 use std::convert::TryFrom;
 use std::fmt;
 use std::fmt::Debug;
 use std::io::{self, Read, Write};
 use std::ops::Deref;
-
-use orchard::{self, primitives::redpallas};
 
 use crate::{
     consensus::{BlockHeight, BranchId},
@@ -637,7 +634,7 @@ impl Transaction {
             Self::read_v5_header_fragment(&mut reader)?;
         let transparent_bundle = Self::read_transparent(&mut reader)?;
         let sapling_bundle = Self::read_v5_sapling(&mut reader)?;
-        let orchard_bundle = Self::read_v5_orchard(&mut reader)?;
+        let orchard_bundle = orchard_serialization::read_v5_bundle(&mut reader)?;
 
         #[cfg(feature = "zfuture")]
         let tze_bundle = if version.has_tze() {
@@ -733,50 +730,6 @@ impl Transaction {
             shielded_outputs,
             authorization: sapling::Authorized { binding_sig },
         }))
-    }
-
-    fn read_v5_orchard<R: Read>(
-        mut reader: R,
-    ) -> io::Result<Option<orchard::Bundle<orchard::bundle::Authorized, Amount>>> {
-        let actions_without_auth = Vector::read(&mut reader, |r| {
-            orchard_serialization::read_action_without_auth(r)
-        })?;
-        if actions_without_auth.is_empty() {
-            Ok(None)
-        } else {
-            let flags = orchard_serialization::read_flags(&mut reader)?;
-            let value_balance = Self::read_amount(&mut reader)?;
-            let anchor = orchard_serialization::read_anchor(&mut reader)?;
-            let proof_bytes = Vector::read(&mut reader, |r| r.read_u8())?;
-            let actions = NonEmpty::from_vec(
-                actions_without_auth
-                    .into_iter()
-                    .map(|act| {
-                        act.try_map(|_| {
-                            orchard_serialization::read_signature::<_, redpallas::SpendAuth>(
-                                &mut reader,
-                            )
-                        })
-                    })
-                    .collect::<Result<Vec<_>, _>>()?,
-            )
-            .expect("A nonzero number of actions was read from the transaction data.");
-            let binding_signature =
-                orchard_serialization::read_signature::<_, redpallas::Binding>(&mut reader)?;
-
-            let authorization = orchard::bundle::Authorized::from_parts(
-                orchard::Proof::new(proof_bytes),
-                binding_signature,
-            );
-
-            Ok(Some(orchard::Bundle::from_parts(
-                actions,
-                flags,
-                value_balance,
-                anchor,
-                authorization,
-            )))
-        }
     }
 
     #[cfg(feature = "zfuture")]
@@ -891,7 +844,7 @@ impl Transaction {
         self.write_v5_header(&mut writer)?;
         self.write_transparent(&mut writer)?;
         self.write_v5_sapling(&mut writer)?;
-        self.write_v5_orchard(&mut writer)?;
+        orchard_serialization::write_v5_bundle(self.orchard_bundle.as_ref(), &mut writer)?;
         #[cfg(feature = "zfuture")]
         self.write_tze(&mut writer)?;
         Ok(())
@@ -944,35 +897,6 @@ impl Transaction {
             }
         } else {
             CompactSize::write(&mut writer, 0)?;
-            CompactSize::write(&mut writer, 0)?;
-        }
-
-        Ok(())
-    }
-
-    pub fn write_v5_orchard<W: Write>(&self, mut writer: W) -> io::Result<()> {
-        if let Some(bundle) = &self.orchard_bundle {
-            Vector::write_nonempty(&mut writer, bundle.actions(), |w, a| {
-                orchard_serialization::write_action_without_auth(w, a)
-            })?;
-
-            orchard_serialization::write_flags(&mut writer, &bundle.flags())?;
-            writer.write_all(&bundle.value_balance().to_i64_le_bytes())?;
-            orchard_serialization::write_anchor(&mut writer, bundle.anchor())?;
-            Vector::write(
-                &mut writer,
-                bundle.authorization().proof().as_ref(),
-                |w, b| w.write_u8(*b),
-            )?;
-            Array::write(
-                &mut writer,
-                bundle.actions().iter().map(|a| a.authorization()),
-                |w, auth| w.write_all(&<[u8; 64]>::from(*auth)),
-            )?;
-            writer.write_all(&<[u8; 64]>::from(
-                bundle.authorization().binding_signature(),
-            ))?;
-        } else {
             CompactSize::write(&mut writer, 0)?;
         }
 
