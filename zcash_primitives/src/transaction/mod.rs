@@ -993,8 +993,8 @@ impl Transaction {
     }
 
     // TODO: should this be moved to `from_data` and stored?
-    pub fn auth_commitment(&self) -> Result<Blake2bHash, DigestError> {
-        Ok(self.data.digest(BlockTxCommitmentDigester))
+    pub fn auth_commitment(&self) -> Blake2bHash {
+        self.data.digest(BlockTxCommitmentDigester)
     }
 }
 

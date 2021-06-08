@@ -160,6 +160,7 @@ fn zip_0244() {
     for tv in self::data::zip_0244::make_test_vectors() {
         let tx = Transaction::read(&tv.tx[..], BranchId::Nu5).unwrap();
         assert_eq!(tx.txid.as_ref(), &tv.txid);
+        assert_eq!(tx.auth_commitment().as_ref(), &tv.auth_digest);
 
         let txid_parts = tx.deref().digest(TxIdDigester);
         match tv.transparent_input {
