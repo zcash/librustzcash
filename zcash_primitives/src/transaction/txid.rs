@@ -572,13 +572,7 @@ impl TransactionDigest<Authorized> for BlockTxCommitmentDigester {
         orchard_digest: Self::OrchardDigest,
         #[cfg(feature = "zfuture")] tze_digest: Self::TzeDigest,
     ) -> Self::Digest {
-        let digests = [
-            transparent_digest,
-            sapling_digest,
-            orchard_digest,
-            #[cfg(feature = "zfuture")]
-            tze_digest,
-        ];
+        let digests = [transparent_digest, sapling_digest, orchard_digest];
 
         let mut personal = [0; 16];
         (&mut personal[..12]).copy_from_slice(ZCASH_AUTH_PERSONALIZATION_PREFIX);
@@ -589,6 +583,11 @@ impl TransactionDigest<Authorized> for BlockTxCommitmentDigester {
         let mut h = hasher(&personal);
         for digest in &digests {
             h.write_all(digest.as_bytes()).unwrap();
+        }
+
+        #[cfg(feature = "zfuture")]
+        if TxVersion::suggested_for_branch(consensus_branch_id).has_tze() {
+            h.write_all(tze_digest.as_bytes()).unwrap();
         }
 
         h.finalize()
