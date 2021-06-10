@@ -121,6 +121,8 @@ pub trait Domain {
 
     fn epk_bytes(epk: &Self::EphemeralPublicKey) -> EphemeralKeyBytes;
 
+    fn epk(ephemeral_key: &EphemeralKeyBytes) -> Option<Self::EphemeralPublicKey>;
+
     fn check_epk_bytes<F: Fn(&Self::EphemeralSecretKey) -> NoteValidity>(
         note: &Self::Note,
         check: F,
@@ -138,7 +140,7 @@ pub trait Domain {
         &self,
         pk_d: &Self::DiversifiedTransmissionKey,
         esk: &Self::EphemeralSecretKey,
-        epk: &Self::EphemeralPublicKey,
+        ephemeral_key: &EphemeralKeyBytes,
         plaintext: &[u8],
     ) -> Option<(Self::Note, Self::Recipient)>;
 
@@ -155,7 +157,7 @@ pub trait Domain {
 }
 
 pub trait ShieldedOutput<D: Domain> {
-    fn epk(&self) -> &D::EphemeralPublicKey;
+    fn ephemeral_key(&self) -> EphemeralKeyBytes;
     fn cmstar_bytes(&self) -> D::ExtractedCommitmentBytes;
     fn enc_ciphertext(&self) -> &[u8];
 }
@@ -332,9 +334,11 @@ pub fn try_note_decryption<D: Domain, Output: ShieldedOutput<D>>(
     output: &Output,
 ) -> Option<(D::Note, D::Recipient, D::Memo)> {
     assert_eq!(output.enc_ciphertext().len(), ENC_CIPHERTEXT_SIZE);
+    let ephemeral_key = output.ephemeral_key();
 
-    let shared_secret = D::ka_agree_dec(ivk, output.epk());
-    let key = D::kdf(shared_secret, &D::epk_bytes(output.epk()));
+    let epk = D::epk(&ephemeral_key)?;
+    let shared_secret = D::ka_agree_dec(ivk, &epk);
+    let key = D::kdf(shared_secret, &ephemeral_key);
 
     let mut plaintext = [0; ENC_CIPHERTEXT_SIZE];
     assert_eq!(
@@ -353,7 +357,7 @@ pub fn try_note_decryption<D: Domain, Output: ShieldedOutput<D>>(
     let (note, to) = parse_note_plaintext_without_memo_ivk(
         domain,
         ivk,
-        output.epk(),
+        &ephemeral_key,
         &output.cmstar_bytes(),
         &plaintext,
     )?;
@@ -365,13 +369,13 @@ pub fn try_note_decryption<D: Domain, Output: ShieldedOutput<D>>(
 fn parse_note_plaintext_without_memo_ivk<D: Domain>(
     domain: &D,
     ivk: &D::IncomingViewingKey,
-    epk: &D::EphemeralPublicKey,
+    ephemeral_key: &EphemeralKeyBytes,
     cmstar_bytes: &D::ExtractedCommitmentBytes,
     plaintext: &[u8],
 ) -> Option<(D::Note, D::Recipient)> {
     let (note, to) = domain.parse_note_plaintext_without_memo_ivk(ivk, &plaintext)?;
 
-    if let NoteValidity::Valid = check_note_validity::<D>(&note, epk, cmstar_bytes) {
+    if let NoteValidity::Valid = check_note_validity::<D>(&note, ephemeral_key, cmstar_bytes) {
         Some((note, to))
     } else {
         None
@@ -380,14 +384,13 @@ fn parse_note_plaintext_without_memo_ivk<D: Domain>(
 
 fn check_note_validity<D: Domain>(
     note: &D::Note,
-    epk: &D::EphemeralPublicKey,
+    ephemeral_key: &EphemeralKeyBytes,
     cmstar_bytes: &D::ExtractedCommitmentBytes,
 ) -> NoteValidity {
     if &D::ExtractedCommitmentBytes::from(&D::cmstar(&note)) == cmstar_bytes {
-        let epk_bytes = D::epk_bytes(epk);
         D::check_epk_bytes(&note, |derived_esk| {
             if D::epk_bytes(&D::ka_derive_public(&note, &derived_esk))
-                .ct_eq(&epk_bytes)
+                .ct_eq(&ephemeral_key)
                 .into()
             {
                 NoteValidity::Valid
@@ -416,9 +419,11 @@ pub fn try_compact_note_decryption<D: Domain, Output: ShieldedOutput<D>>(
     output: &Output,
 ) -> Option<(D::Note, D::Recipient)> {
     assert_eq!(output.enc_ciphertext().len(), COMPACT_NOTE_SIZE);
+    let ephemeral_key = output.ephemeral_key();
 
-    let shared_secret = D::ka_agree_dec(&ivk, output.epk());
-    let key = D::kdf(shared_secret, &D::epk_bytes(output.epk()));
+    let epk = D::epk(&ephemeral_key)?;
+    let shared_secret = D::ka_agree_dec(&ivk, &epk);
+    let key = D::kdf(shared_secret, &ephemeral_key);
 
     // Start from block 1 to skip over Poly1305 keying output
     let mut plaintext = [0; COMPACT_NOTE_SIZE];
@@ -428,7 +433,7 @@ pub fn try_compact_note_decryption<D: Domain, Output: ShieldedOutput<D>>(
     parse_note_plaintext_without_memo_ivk(
         domain,
         ivk,
-        output.epk(),
+        &ephemeral_key,
         &output.cmstar_bytes(),
         &plaintext,
     )
@@ -450,12 +455,7 @@ pub fn try_output_recovery_with_ovk<D: Domain, Output: ShieldedOutput<D>>(
     cv: &D::ValueCommitment,
     out_ciphertext: &[u8],
 ) -> Option<(D::Note, D::Recipient, D::Memo)> {
-    let ock = D::derive_ock(
-        ovk,
-        &cv,
-        &output.cmstar_bytes(),
-        &D::epk_bytes(&output.epk()),
-    );
+    let ock = D::derive_ock(ovk, &cv, &output.cmstar_bytes(), &output.ephemeral_key());
     try_output_recovery_with_ock(domain, &ock, output, out_ciphertext)
 }
 
@@ -488,11 +488,12 @@ pub fn try_output_recovery_with_ock<D: Domain, Output: ShieldedOutput<D>>(
     let pk_d = D::extract_pk_d(&op)?;
     let esk = D::extract_esk(&op)?;
 
+    let ephemeral_key = output.ephemeral_key();
     let shared_secret = D::ka_agree_enc(&esk, &pk_d);
     // The small-order point check at the point of output parsing rejects
     // non-canonical encodings, so reencoding here for the KDF should
     // be okay.
-    let key = D::kdf(shared_secret, &D::epk_bytes(output.epk()));
+    let key = D::kdf(shared_secret, &ephemeral_key);
 
     let mut plaintext = [0; ENC_CIPHERTEXT_SIZE];
     assert_eq!(
@@ -509,7 +510,7 @@ pub fn try_output_recovery_with_ock<D: Domain, Output: ShieldedOutput<D>>(
     );
 
     let (note, to) =
-        domain.parse_note_plaintext_without_memo_ovk(&pk_d, &esk, output.epk(), &plaintext)?;
+        domain.parse_note_plaintext_without_memo_ovk(&pk_d, &esk, &ephemeral_key, &plaintext)?;
     let memo = domain.extract_memo(&plaintext);
 
     // ZIP 212: Check that the esk provided to this function is consistent with the esk we
@@ -521,7 +522,7 @@ pub fn try_output_recovery_with_ock<D: Domain, Output: ShieldedOutput<D>>(
     }
 
     if let NoteValidity::Valid =
-        check_note_validity::<D>(&note, output.epk(), &output.cmstar_bytes())
+        check_note_validity::<D>(&note, &ephemeral_key, &output.cmstar_bytes())
     {
         Some((note, to, memo))
     } else {

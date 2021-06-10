@@ -233,6 +233,13 @@ impl<P: consensus::Parameters> Domain for SaplingDomain<P> {
         epk_bytes(epk)
     }
 
+    fn epk(ephemeral_key: &EphemeralKeyBytes) -> Option<Self::EphemeralPublicKey> {
+        // ZIP 216: We unconditionally reject non-canonical encodings, because these have
+        // always been rejected by consensus (due to small-order checks).
+        // https://zips.z.cash/zip-0216#specification
+        jubjub::ExtendedPoint::from_bytes(&ephemeral_key.0).into()
+    }
+
     fn check_epk_bytes<F: FnOnce(&Self::EphemeralSecretKey) -> NoteValidity>(
         note: &Note,
         check: F,
@@ -259,11 +266,11 @@ impl<P: consensus::Parameters> Domain for SaplingDomain<P> {
         &self,
         pk_d: &Self::DiversifiedTransmissionKey,
         esk: &Self::EphemeralSecretKey,
-        epk: &Self::EphemeralPublicKey,
+        ephemeral_key: &EphemeralKeyBytes,
         plaintext: &[u8],
     ) -> Option<(Self::Note, Self::Recipient)> {
         sapling_parse_note_plaintext_without_memo(&self, plaintext, |diversifier| {
-            if (diversifier.g_d()? * esk).to_bytes() == epk.to_bytes() {
+            if (diversifier.g_d()? * esk).to_bytes() == ephemeral_key.0 {
                 Some(*pk_d)
             } else {
                 None
