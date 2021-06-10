@@ -3,7 +3,7 @@ use group::GroupEncoding;
 
 use std::io::{self, Read, Write};
 
-use zcash_note_encryption::ShieldedOutput;
+use zcash_note_encryption::{EphemeralKeyBytes, ShieldedOutput, COMPACT_NOTE_SIZE};
 
 use crate::{
     consensus,
@@ -13,8 +13,6 @@ use crate::{
         Nullifier,
     },
 };
-
-use zcash_note_encryption::COMPACT_NOTE_SIZE;
 
 use super::GROTH_PROOF_SIZE;
 
@@ -218,8 +216,8 @@ pub struct OutputDescription {
 }
 
 impl<P: consensus::Parameters> ShieldedOutput<SaplingDomain<P>> for OutputDescription {
-    fn epk(&self) -> &jubjub::ExtendedPoint {
-        &self.ephemeral_key
+    fn ephemeral_key(&self) -> EphemeralKeyBytes {
+        EphemeralKeyBytes(self.ephemeral_key.to_bytes())
     }
 
     fn cmstar_bytes(&self) -> [u8; 32] {
@@ -360,8 +358,8 @@ impl From<OutputDescription> for CompactOutputDescription {
 }
 
 impl<P: consensus::Parameters> ShieldedOutput<SaplingDomain<P>> for CompactOutputDescription {
-    fn epk(&self) -> &jubjub::ExtendedPoint {
-        &self.epk
+    fn ephemeral_key(&self) -> EphemeralKeyBytes {
+        EphemeralKeyBytes(self.epk.to_bytes())
     }
 
     fn cmstar_bytes(&self) -> [u8; 32] {
