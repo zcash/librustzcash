@@ -10,6 +10,7 @@ and this library adheres to Rust's notion of
 - Support for multiple history tree versions:
   - `zcash_history::Version` trait.
   - `zcash_history::V1`, marking the original history tree version.
+  - `zcash_history::V2`, marking the history tree version from NU5.
 - `zcash_history::Entry::new_leaf`
 
 ### Changed

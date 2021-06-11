@@ -4,7 +4,7 @@ use std::io;
 use blake2::Params as Blake2Params;
 use byteorder::{ByteOrder, LittleEndian};
 
-use crate::{NodeData, MAX_NODE_DATA_SIZE};
+use crate::{node_data, NodeData, MAX_NODE_DATA_SIZE};
 
 fn blake2b_personal(personalization: &[u8], input: &[u8]) -> [u8; 32] {
     let hash_result = Blake2Params::new()
@@ -135,6 +135,43 @@ impl Version for V1 {
 
     fn read<R: io::Read>(consensus_branch_id: u32, r: &mut R) -> io::Result<Self::NodeData> {
         NodeData::read(consensus_branch_id, r)
+    }
+
+    fn write<W: io::Write>(data: &Self::NodeData, w: &mut W) -> io::Result<()> {
+        data.write(w)
+    }
+}
+
+/// Version 2 of the Zcash chain history tree.
+///
+/// This version is used from the NU5 epoch.
+pub enum V2 {}
+
+impl Version for V2 {
+    type NodeData = node_data::V2;
+
+    fn consensus_branch_id(data: &Self::NodeData) -> u32 {
+        data.v1.consensus_branch_id
+    }
+
+    fn start_height(data: &Self::NodeData) -> u64 {
+        data.v1.start_height
+    }
+
+    fn end_height(data: &Self::NodeData) -> u64 {
+        data.v1.end_height
+    }
+
+    fn combine_inner(
+        subtree_commitment: [u8; 32],
+        left: &Self::NodeData,
+        right: &Self::NodeData,
+    ) -> Self::NodeData {
+        node_data::V2::combine_inner(subtree_commitment, left, right)
+    }
+
+    fn read<R: io::Read>(consensus_branch_id: u32, r: &mut R) -> io::Result<Self::NodeData> {
+        node_data::V2::read(consensus_branch_id, r)
     }
 
     fn write<W: io::Write>(data: &Self::NodeData, w: &mut W) -> io::Result<()> {
