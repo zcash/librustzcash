@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::{Entry, EntryKind, EntryLink, Error, NodeData};
+use crate::{Entry, EntryKind, EntryLink, Error, Version};
 
 /// Represents partially loaded tree.
 ///
@@ -13,11 +13,11 @@ use crate::{Entry, EntryKind, EntryLink, Error, NodeData};
 /// Intended use of this `Tree` is to instantiate it based on partially loaded data (see example
 /// how to pick right nodes from the array representation of MMR Tree), perform several operations
 /// (append-s/delete-s) and then drop it.
-pub struct Tree {
-    stored: HashMap<u32, Entry>,
+pub struct Tree<V: Version> {
+    stored: HashMap<u32, Entry<V>>,
 
     // This can grow indefinitely if `Tree` is misused as a self-contained data structure
-    generated: Vec<Entry>,
+    generated: Vec<Entry<V>>,
 
     // number of persistent(!) tree entries
     stored_count: u32,
@@ -25,9 +25,9 @@ pub struct Tree {
     root: EntryLink,
 }
 
-impl Tree {
+impl<V: Version> Tree<V> {
     /// Resolve link originated from this tree
-    pub fn resolve_link(&self, link: EntryLink) -> Result<IndexedNode, Error> {
+    pub fn resolve_link(&self, link: EntryLink) -> Result<IndexedNode<V>, Error> {
         match link {
             EntryLink::Generated(index) => self.generated.get(index as usize),
             EntryLink::Stored(index) => self.stored.get(&index),
@@ -36,14 +36,14 @@ impl Tree {
         .ok_or(Error::ExpectedInMemory(link))
     }
 
-    fn push(&mut self, data: Entry) -> EntryLink {
+    fn push(&mut self, data: Entry<V>) -> EntryLink {
         let idx = self.stored_count;
         self.stored_count += 1;
         self.stored.insert(idx, data);
         EntryLink::Stored(idx)
     }
 
-    fn push_generated(&mut self, data: Entry) -> EntryLink {
+    fn push_generated(&mut self, data: Entry<V>) -> EntryLink {
         self.generated.push(data);
         EntryLink::Generated(self.generated.len() as u32 - 1)
     }
@@ -51,7 +51,7 @@ impl Tree {
     /// Populate tree with plain list of the leaves/nodes. For now, only for tests,
     /// since this `Tree` structure is for partially loaded tree (but it might change)
     #[cfg(test)]
-    pub fn populate(loaded: Vec<Entry>, root: EntryLink) -> Self {
+    pub fn populate(loaded: Vec<Entry<V>>, root: EntryLink) -> Self {
         let mut result = Tree::invalid();
         result.stored_count = loaded.len() as u32;
         for (idx, item) in loaded.into_iter().enumerate() {
@@ -83,7 +83,7 @@ impl Tree {
     /// # Panics
     ///
     /// Will panic if `peaks` is empty.
-    pub fn new(length: u32, peaks: Vec<(u32, Entry)>, extra: Vec<(u32, Entry)>) -> Self {
+    pub fn new(length: u32, peaks: Vec<(u32, Entry<V>)>, extra: Vec<(u32, Entry<V>)>) -> Self {
         assert!(!peaks.is_empty());
 
         let mut result = Tree::invalid();
@@ -135,9 +135,9 @@ impl Tree {
     /// Returns links to actual nodes that has to be persisted as the result of the append.
     /// If completed without error, at least one link to the appended
     /// node (with metadata provided in `new_leaf`) will be returned.
-    pub fn append_leaf(&mut self, new_leaf: NodeData) -> Result<Vec<EntryLink>, Error> {
+    pub fn append_leaf(&mut self, new_leaf: V::NodeData) -> Result<Vec<EntryLink>, Error> {
         let root = self.root;
-        let new_leaf_link = self.push(new_leaf.into());
+        let new_leaf_link = self.push(Entry::new_leaf(new_leaf));
         let mut appended = vec![new_leaf_link];
 
         let mut peaks = Vec::new();
@@ -274,7 +274,7 @@ impl Tree {
     }
 
     /// Reference to the root node.
-    pub fn root_node(&self) -> Result<IndexedNode, Error> {
+    pub fn root_node(&self) -> Result<IndexedNode<V>, Error> {
         self.resolve_link(self.root)
     }
 
@@ -286,12 +286,12 @@ impl Tree {
 
 /// Reference to the node with link attached.
 #[derive(Debug)]
-pub struct IndexedNode<'a> {
-    node: &'a Entry,
+pub struct IndexedNode<'a, V: Version> {
+    node: &'a Entry<V>,
     link: EntryLink,
 }
 
-impl<'a> IndexedNode<'a> {
+impl<'a, V: Version> IndexedNode<'a, V> {
     fn left(&self) -> Result<EntryLink, Error> {
         self.node.left().map_err(|e| e.augment(self.link))
     }
@@ -301,12 +301,12 @@ impl<'a> IndexedNode<'a> {
     }
 
     /// Reference to the entry struct.
-    pub fn node(&self) -> &Entry {
+    pub fn node(&self) -> &Entry<V> {
         self.node
     }
 
     /// Reference to the entry metadata.
-    pub fn data(&self) -> &NodeData {
+    pub fn data(&self) -> &V::NodeData {
         &self.node.data
     }
 
@@ -316,17 +316,19 @@ impl<'a> IndexedNode<'a> {
     }
 }
 
-fn combine_nodes<'a>(left: IndexedNode<'a>, right: IndexedNode<'a>) -> Entry {
+fn combine_nodes<'a, V: Version>(left: IndexedNode<'a, V>, right: IndexedNode<'a, V>) -> Entry<V> {
     Entry {
         kind: EntryKind::Node(left.link, right.link),
-        data: NodeData::combine(&left.node.data, &right.node.data),
+        data: V::combine(&left.node.data, &right.node.data),
     }
 }
 
 #[cfg(test)]
 mod tests {
 
-    use super::{Entry, EntryKind, EntryLink, NodeData, Tree};
+    use super::{Entry, EntryKind, EntryLink, Tree};
+    use crate::{NodeData, V1};
+
     use assert_matches::assert_matches;
     use quickcheck::{quickcheck, TestResult};
 
@@ -347,9 +349,9 @@ mod tests {
         }
     }
 
-    fn initial() -> Tree {
-        let node1: Entry = leaf(1).into();
-        let node2: Entry = leaf(2).into();
+    fn initial() -> Tree<V1> {
+        let node1 = Entry::new_leaf(leaf(1));
+        let node2 = Entry::new_leaf(leaf(2));
 
         let node3 = Entry {
             data: NodeData::combine(&node1.data, &node2.data),
@@ -360,7 +362,7 @@ mod tests {
     }
 
     // returns tree with specified number of leafs and it's root
-    fn generated(length: u32) -> Tree {
+    fn generated(length: u32) -> Tree<V1> {
         assert!(length >= 3);
         let mut tree = initial();
         for i in 2..length {

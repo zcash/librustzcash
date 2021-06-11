@@ -1,12 +1,12 @@
-use zcash_history::{Entry, EntryLink, NodeData, Tree};
+use zcash_history::{Entry, EntryLink, NodeData, Tree, V1};
 
 #[path = "lib/shared.rs"]
 mod share;
 
-fn draft(into: &mut Vec<(u32, Entry)>, vec: &[NodeData], peak_pos: usize, h: u32) {
+fn draft(into: &mut Vec<(u32, Entry<V1>)>, vec: &[NodeData], peak_pos: usize, h: u32) {
     let node_data = vec[peak_pos - 1].clone();
-    let peak: Entry = match h {
-        0 => node_data.into(),
+    let peak = match h {
+        0 => Entry::new_leaf(node_data),
         _ => Entry::new(
             node_data,
             EntryLink::Stored((peak_pos - (1 << h) - 1) as u32),
@@ -19,7 +19,7 @@ fn draft(into: &mut Vec<(u32, Entry)>, vec: &[NodeData], peak_pos: usize, h: u32
     into.push(((peak_pos - 1) as u32, peak));
 }
 
-fn prepare_tree(vec: &[NodeData]) -> Tree {
+fn prepare_tree(vec: &[NodeData]) -> Tree<V1> {
     assert!(!vec.is_empty());
 
     // integer log2 of (vec.len()+1), -1
