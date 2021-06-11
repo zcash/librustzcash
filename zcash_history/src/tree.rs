@@ -327,34 +327,39 @@ fn combine_nodes<'a, V: Version>(left: IndexedNode<'a, V>, right: IndexedNode<'a
 mod tests {
 
     use super::{Entry, EntryKind, EntryLink, Tree};
-    use crate::{NodeData, V1};
+    use crate::{node_data, NodeData, Version, V2};
 
     use assert_matches::assert_matches;
     use quickcheck::{quickcheck, TestResult};
 
-    fn leaf(height: u32) -> NodeData {
-        NodeData {
-            consensus_branch_id: 1,
-            subtree_commitment: [0u8; 32],
-            start_time: 0,
-            end_time: 0,
-            start_target: 0,
-            end_target: 0,
-            start_sapling_root: [0u8; 32],
-            end_sapling_root: [0u8; 32],
-            subtree_total_work: 0.into(),
-            start_height: height as u64,
-            end_height: height as u64,
-            sapling_tx: 7,
+    fn leaf(height: u32) -> node_data::V2 {
+        node_data::V2 {
+            v1: NodeData {
+                consensus_branch_id: 1,
+                subtree_commitment: [0u8; 32],
+                start_time: 0,
+                end_time: 0,
+                start_target: 0,
+                end_target: 0,
+                start_sapling_root: [0u8; 32],
+                end_sapling_root: [0u8; 32],
+                subtree_total_work: 0.into(),
+                start_height: height as u64,
+                end_height: height as u64,
+                sapling_tx: 7,
+            },
+            start_orchard_root: [0u8; 32],
+            end_orchard_root: [0u8; 32],
+            orchard_tx: 42,
         }
     }
 
-    fn initial() -> Tree<V1> {
+    fn initial() -> Tree<V2> {
         let node1 = Entry::new_leaf(leaf(1));
         let node2 = Entry::new_leaf(leaf(2));
 
         let node3 = Entry {
-            data: NodeData::combine(&node1.data, &node2.data),
+            data: V2::combine(&node1.data, &node2.data),
             kind: EntryKind::Leaf,
         };
 
@@ -362,7 +367,7 @@ mod tests {
     }
 
     // returns tree with specified number of leafs and it's root
-    fn generated(length: u32) -> Tree<V1> {
+    fn generated(length: u32) -> Tree<V2> {
         assert!(length >= 3);
         let mut tree = initial();
         for i in 2..length {
@@ -393,7 +398,7 @@ mod tests {
         //
         // so only (3) is added as real leaf
         // while new root, (4g) is generated one
-        assert_eq!(new_root.data.end_height, 3);
+        assert_eq!(new_root.data.v1.end_height, 3);
         assert_eq!(appended.len(), 1);
 
         // ** APPEND 4 **
@@ -417,7 +422,7 @@ mod tests {
         //
         // so (4), (5), (6) are added as real leaves
         // and new root, (6) is stored one
-        assert_eq!(new_root.data.end_height, 4);
+        assert_eq!(new_root.data.v1.end_height, 4);
         assert_eq!(appended.len(), 3);
         assert_matches!(tree.root(), EntryLink::Stored(6));
 
@@ -444,7 +449,7 @@ mod tests {
         //
         // so (7) is added as real leaf
         // and new root, (8g) is generated one
-        assert_eq!(new_root.data.end_height, 5);
+        assert_eq!(new_root.data.v1.end_height, 5);
         assert_eq!(appended.len(), 1);
         assert_matches!(tree.root(), EntryLink::Generated(_));
         tree.for_children(tree.root(), |l, r| {
@@ -476,7 +481,7 @@ mod tests {
         //
         // so (7) is added as real leaf
         // and new root, (10g) is generated one
-        assert_eq!(new_root.data.end_height, 6);
+        assert_eq!(new_root.data.v1.end_height, 6);
         assert_eq!(appended.len(), 2);
         assert_matches!(tree.root(), EntryLink::Generated(_));
         tree.for_children(tree.root(), |l, r| {
@@ -511,7 +516,7 @@ mod tests {
         //
         // so (10) is added as real leaf
         // and new root, (12g) is generated one
-        assert_eq!(new_root.data.end_height, 7);
+        assert_eq!(new_root.data.v1.end_height, 7);
         assert_eq!(appended.len(), 1);
         assert_matches!(tree.root(), EntryLink::Generated(_));
         tree.for_children(tree.root(), |l, r| {
