@@ -182,6 +182,12 @@ impl Neg for Amount {
     }
 }
 
+impl From<Amount> for orchard::ValueSum {
+    fn from(v: Amount) -> Self {
+        orchard::ValueSum::from_raw(v.0)
+    }
+}
+
 impl TryFrom<orchard::ValueSum> for Amount {
     type Error = ();
 
