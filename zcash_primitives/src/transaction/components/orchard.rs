@@ -156,9 +156,14 @@ pub fn read_flags<R: Read>(mut reader: R) -> io::Result<Flags> {
 }
 
 pub fn read_anchor<R: Read>(mut reader: R) -> io::Result<Anchor> {
-    let mut anchor = Anchor([0u8; 32]);
-    reader.read_exact(&mut anchor.0)?;
-    Ok(anchor)
+    let mut bytes = [0u8; 32];
+    reader.read_exact(&mut bytes)?;
+    Anchor::from_bytes(bytes).ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "invalid Orchard anchor".to_owned(),
+        )
+    })
 }
 
 pub fn read_signature<R: Read, T: SigType>(mut reader: R) -> io::Result<Signature<T>> {
@@ -252,7 +257,7 @@ pub fn write_flags<W: Write>(mut writer: W, flags: &Flags) -> io::Result<()> {
 }
 
 pub fn write_anchor<W: Write>(mut writer: W, anchor: &Anchor) -> io::Result<()> {
-    writer.write_all(&anchor.0)
+    writer.write_all(&anchor.to_bytes())
 }
 
 #[cfg(any(test, feature = "test-dependencies"))]
