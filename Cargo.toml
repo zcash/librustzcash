@@ -24,5 +24,5 @@ nom = { git = "https://github.com/myrrlyn/nom.git", rev = "d6b81f5303b0a347726e1
 
 # In development.
 halo2 = { git = "https://github.com/zcash/halo2.git", rev = "236115917df9db45282fec24d1e1e36f275f71ab" }
-orchard = { git = "https://github.com/zcash/orchard.git", rev = "37b1b7f357cd34d93f9c55bb96efd05ab4e84408" }
+orchard = { git = "https://github.com/nuttycom/orchard.git", branch = "incremental_merkle_tree" }
 zcash_note_encryption = { path = "components/zcash_note_encryption" }

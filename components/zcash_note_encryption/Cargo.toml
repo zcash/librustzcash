@@ -19,7 +19,3 @@ ff = "0.10"
 group = "0.10"
 rand_core = "0.6"
 subtle = "2.2.3"
-
-[dev-dependencies]
-zcash_primitives = { version = "0.5", path = "../../zcash_primitives" }
-jubjub = "0.7"
