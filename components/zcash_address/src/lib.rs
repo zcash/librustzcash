@@ -2,6 +2,9 @@ mod convert;
 mod encoding;
 mod kind;
 
+#[cfg(test)]
+mod test_vectors;
+
 pub use convert::{FromAddress, ToAddress, UnsupportedAddress};
 pub use encoding::ParseError;
 pub use kind::unified;
