@@ -24,6 +24,7 @@ pub const FLAGS_EXPECTED_UNSET: u8 = !(FLAG_SPENDS_ENABLED | FLAG_OUTPUTS_ENABLE
 pub fn read_v5_bundle<R: Read>(
     mut reader: R,
 ) -> io::Result<Option<orchard::Bundle<Authorized, Amount>>> {
+    #[allow(clippy::redundant_closure)]
     let actions_without_auth = Vector::read(&mut reader, |r| read_action_without_auth(r))?;
     if actions_without_auth.is_empty() {
         Ok(None)

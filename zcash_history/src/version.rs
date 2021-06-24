@@ -80,6 +80,7 @@ pub trait Version {
     fn write<W: io::Write>(data: &Self::NodeData, w: &mut W) -> io::Result<()>;
 
     /// Converts to byte representation.
+    #[allow(clippy::wrong_self_convention)]
     fn to_bytes(data: &Self::NodeData) -> Vec<u8> {
         let mut buf = [0u8; MAX_NODE_DATA_SIZE];
         let pos = {
