@@ -276,9 +276,9 @@ pub mod testing {
     };
 
     prop_compose! {
-        pub fn arb_bundle()(
+        pub fn arb_bundle(n_actions: usize)(
             orchard_value_balance in arb_amount(),
-            bundle in t_orch::arb_bundle()
+            bundle in t_orch::arb_bundle(n_actions)
         ) -> Bundle<Authorized, Amount> {
             // overwrite the value balance, as we can't guarantee that the
             // value doesn't exceed the MAX_MONEY bounds.
@@ -290,7 +290,7 @@ pub mod testing {
         v: TxVersion,
     ) -> impl Strategy<Value = Option<Bundle<Authorized, Amount>>> {
         if v.has_orchard() {
-            Strategy::boxed(prop::option::of(arb_bundle()))
+            Strategy::boxed((1usize..100).prop_flat_map(|n| prop::option::of(arb_bundle(n))))
         } else {
             Strategy::boxed(Just(None))
         }
