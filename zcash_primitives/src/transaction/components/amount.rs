@@ -118,6 +118,12 @@ impl From<Amount> for i64 {
     }
 }
 
+impl From<&Amount> for i64 {
+    fn from(amount: &Amount) -> i64 {
+        amount.0
+    }
+}
+
 impl From<Amount> for u64 {
     fn from(amount: Amount) -> u64 {
         amount.0 as u64

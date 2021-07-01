@@ -255,7 +255,7 @@ pub struct Unauthorized;
 impl Authorization for Unauthorized {
     type TransparentAuth = transparent::builder::Unauthorized;
     type SaplingAuth = sapling::builder::Unauthorized;
-    type OrchardAuth = orchard::builder::Unauthorized;
+    type OrchardAuth = orchard_serialization::Unauthorized;
 
     #[cfg(feature = "zfuture")]
     type TzeAuth = tze::builder::Unauthorized;
