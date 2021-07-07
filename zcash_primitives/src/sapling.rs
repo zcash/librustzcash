@@ -13,6 +13,7 @@ use blake2s_simd::Params as Blake2sParams;
 use byteorder::{LittleEndian, WriteBytesExt};
 use ff::{Field, PrimeField};
 use group::{Curve, Group, GroupEncoding};
+use incrementalmerkletree::{self, Altitude};
 use lazy_static::lazy_static;
 use rand_core::{CryptoRng, RngCore};
 use std::array::TryFromSliceError;
@@ -34,6 +35,7 @@ use self::{
 };
 
 pub const SAPLING_COMMITMENT_TREE_DEPTH: usize = 32;
+pub const SAPLING_COMMITMENT_TREE_DEPTH_U8: u8 = 32;
 
 /// Compute a parent node in the Sapling commitment tree given its two children.
 pub fn merkle_hash(depth: usize, lhs: &[u8; 32], rhs: &[u8; 32]) -> [u8; 32] {
@@ -106,6 +108,36 @@ impl Hashable for Node {
 
     fn empty_root(depth: usize) -> Self {
         EMPTY_ROOTS[depth]
+    }
+}
+
+impl incrementalmerkletree::Hashable for Node {
+    fn empty_leaf() -> Self {
+        Node {
+            repr: Note::uncommitted().to_repr(),
+        }
+    }
+
+    fn combine(altitude: Altitude, lhs: &Self, rhs: &Self) -> Self {
+        Node {
+            repr: merkle_hash(altitude.into(), &lhs.repr, &rhs.repr),
+        }
+    }
+
+    fn empty_root(altitude: Altitude) -> Self {
+        EMPTY_ROOTS[<usize>::from(altitude)]
+    }
+}
+
+impl crate::merkle_tree::incremental::HashSer for Node {
+    fn read<R: Read>(mut reader: R) -> io::Result<Self> {
+        let mut repr = [0u8; 32];
+        reader.read_exact(&mut repr)?;
+        Ok(Node::new(repr))
+    }
+
+    fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
+        writer.write_all(self.repr.as_ref())
     }
 }
 

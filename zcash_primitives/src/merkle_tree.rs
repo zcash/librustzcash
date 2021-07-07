@@ -1,11 +1,15 @@
 //! Implementation of a Merkle tree of commitments used to prove the existence of notes.
 
 use byteorder::{LittleEndian, ReadBytesExt};
+use incrementalmerkletree::bridgetree;
 use std::collections::VecDeque;
 use std::io::{self, Read, Write};
 
 use crate::sapling::SAPLING_COMMITMENT_TREE_DEPTH;
+use crate::sapling::SAPLING_COMMITMENT_TREE_DEPTH_U8;
 use crate::serialize::{Optional, Vector};
+
+pub mod incremental;
 
 /// A hashable node within a Merkle tree.
 pub trait Hashable: Clone + Copy {
@@ -48,13 +52,13 @@ impl<Node: Hashable> PathFiller<Node> {
 /// The depth of the Merkle tree is fixed at 32, equal to the depth of the Sapling
 /// commitment tree.
 #[derive(Clone, Debug)]
-pub struct CommitmentTree<Node: Hashable> {
-    left: Option<Node>,
-    right: Option<Node>,
-    parents: Vec<Option<Node>>,
+pub struct CommitmentTree<Node> {
+    pub(crate) left: Option<Node>,
+    pub(crate) right: Option<Node>,
+    pub(crate) parents: Vec<Option<Node>>,
 }
 
-impl<Node: Hashable> CommitmentTree<Node> {
+impl<Node> CommitmentTree<Node> {
     /// Creates an empty tree.
     pub fn empty() -> Self {
         CommitmentTree {
@@ -64,6 +68,59 @@ impl<Node: Hashable> CommitmentTree<Node> {
         }
     }
 
+    pub fn to_frontier(&self) -> bridgetree::Frontier<Node, SAPLING_COMMITMENT_TREE_DEPTH_U8>
+    where
+        Node: incrementalmerkletree::Hashable + Clone,
+    {
+        if self.size() == 0 {
+            bridgetree::Frontier::empty()
+        } else {
+            let leaf = match (self.left.as_ref(), self.right.as_ref()) {
+                (Some(a), None) => bridgetree::Leaf::Left(a.clone()),
+                (Some(a), Some(b)) => bridgetree::Leaf::Right(a.clone(), b.clone()),
+                _ => unreachable!(),
+            };
+
+            let ommers = self
+                .parents
+                .iter()
+                .filter_map(|v| v.as_ref())
+                .cloned()
+                .collect();
+
+            // If a frontier cannot be successfully constructed from the
+            // parts of a commitment tree, it is a programming error.
+            bridgetree::Frontier::from_parts((self.size() - 1).into(), leaf, ommers)
+                .expect("Frontier should be constructable from CommitmentTree.")
+        }
+    }
+
+    /// Returns the number of leaf nodes in the tree.
+    pub fn size(&self) -> usize {
+        self.parents.iter().enumerate().fold(
+            match (self.left.as_ref(), self.right.as_ref()) {
+                (None, None) => 0,
+                (Some(_), None) => 1,
+                (Some(_), Some(_)) => 2,
+                (None, Some(_)) => unreachable!(),
+            },
+            |acc, (i, p)| {
+                // Treat occupation of parents array as a binary number
+                // (right-shifted by 1)
+                acc + if p.is_some() { 1 << (i + 1) } else { 0 }
+            },
+        )
+    }
+
+    fn is_complete(&self, depth: usize) -> bool {
+        self.left.is_some()
+            && self.right.is_some()
+            && self.parents.len() == depth - 1
+            && self.parents.iter().all(|p| p.is_some())
+    }
+}
+
+impl<Node: Hashable> CommitmentTree<Node> {
     /// Reads a `CommitmentTree` from its serialized form.
     #[allow(clippy::redundant_closure)]
     pub fn read<R: Read>(mut reader: R) -> io::Result<Self> {
@@ -85,30 +142,6 @@ impl<Node: Hashable> CommitmentTree<Node> {
         Vector::write(&mut writer, &self.parents, |w, e| {
             Optional::write(w, e, |w, n| n.write(w))
         })
-    }
-
-    /// Returns the number of leaf nodes in the tree.
-    pub fn size(&self) -> usize {
-        self.parents.iter().enumerate().fold(
-            match (self.left, self.right) {
-                (None, None) => 0,
-                (Some(_), None) => 1,
-                (Some(_), Some(_)) => 2,
-                (None, Some(_)) => unreachable!(),
-            },
-            |acc, (i, p)| {
-                // Treat occupation of parents array as a binary number
-                // (right-shifted by 1)
-                acc + if p.is_some() { 1 << (i + 1) } else { 0 }
-            },
-        )
-    }
-
-    fn is_complete(&self, depth: usize) -> bool {
-        self.left.is_some()
-            && self.right.is_some()
-            && self.parents.len() == depth - 1
-            && self.parents.iter().all(|p| p.is_some())
     }
 
     /// Adds a leaf node to the tree.
