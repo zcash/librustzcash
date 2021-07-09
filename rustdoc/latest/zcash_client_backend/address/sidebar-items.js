@@ -1,0 +1,1 @@
+initSidebarItems({"enum":[["RecipientAddress","An address that funds can be sent to."]]});

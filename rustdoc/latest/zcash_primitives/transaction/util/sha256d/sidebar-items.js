@@ -1,0 +1,1 @@
+initSidebarItems({"struct":[["HashReader","Abstraction over a reader which SHA-256d-hashes the data being read."],["HashWriter","Abstraction over a writer which SHA-256d-hashes the data being read."]]});

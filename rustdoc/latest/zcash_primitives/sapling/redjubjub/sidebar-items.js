@@ -1,0 +1,1 @@
+initSidebarItems({"fn":[["batch_verify",""]],"struct":[["BatchEntry",""],["PrivateKey",""],["PublicKey",""],["Signature",""]]});

@@ -1,0 +1,1 @@
+initSidebarItems({"constant":[["PRF_EXPAND_PERSONALIZATION",""]],"fn":[["prf_expand","PRF^expand(sk, t) := BLAKE2b-512(“Zcash_ExpandSeed”, sk || t)"],["prf_expand_vec",""]],"mod":[["testing",""]],"struct":[["ExpandedSpendingKey","A Sapling expanded spending key"],["FullViewingKey","A Sapling full viewing key"],["OutgoingViewingKey","An outgoing viewing key"]]});

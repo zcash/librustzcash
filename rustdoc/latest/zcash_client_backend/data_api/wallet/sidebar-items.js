@@ -1,0 +1,1 @@
+initSidebarItems({"constant":[["ANCHOR_OFFSET",""]],"fn":[["create_spend_to_address","Creates a transaction paying the specified address from the given account."],["decrypt_and_store_transaction","Scans a [`Transaction`] for any information that can be decrypted by the accounts in the wallet, and saves it to the wallet."]]});

@@ -1,0 +1,1 @@
+initSidebarItems({"constant":[["GROTH_PROOF_SIZE",""]],"mod":[["amount",""],["orchard",""],["sapling",""],["sprout","Structs representing the components within Zcash transactions."],["transparent","Structs representing the components within Zcash transactions."],["tze","Structs representing the TZE components within Zcash transactions."]]});

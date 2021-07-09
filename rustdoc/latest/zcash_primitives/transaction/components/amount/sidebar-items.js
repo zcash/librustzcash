@@ -1,0 +1,1 @@
+initSidebarItems({"constant":[["COIN",""],["DEFAULT_FEE",""],["MAX_MONEY",""]],"mod":[["testing",""]],"struct":[["Amount","A type-safe representation of some quantity of Zcash."]]});

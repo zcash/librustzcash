@@ -1,0 +1,1 @@
+initSidebarItems({"mod":[["ecc","Gadgets implementing Jubjub elliptic curve operations."],["pedersen_hash","Gadget for Zcash’s Pedersen hash."],["sapling","The Sapling circuits."],["sprout","The “hybrid Sprout” circuit."]]});

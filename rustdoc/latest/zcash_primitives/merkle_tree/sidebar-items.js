@@ -1,0 +1,1 @@
+initSidebarItems({"mod":[["testing",""]],"struct":[["CommitmentTree","A Merkle tree of note commitments."],["IncrementalWitness","An updatable witness to a path from a position in a particular [`CommitmentTree`]."],["MerklePath","A path from a position in a particular commitment tree to the root of that tree."]],"trait":[["Hashable","A hashable node within a Merkle tree."]]});

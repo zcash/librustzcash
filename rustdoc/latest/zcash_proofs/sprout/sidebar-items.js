@@ -1,0 +1,1 @@
+initSidebarItems({"constant":[["WITNESS_PATH_SIZE",""]],"fn":[["create_proof","Sprout JoinSplit proof generation."],["verify_proof","Sprout JoinSplit proof verification."]]});

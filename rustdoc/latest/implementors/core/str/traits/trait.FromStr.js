@@ -1,0 +1,4 @@
+(function() {var implementors = {};
+implementors["zcash_address"] = [{"text":"impl <a class=\"trait\" href=\"https://doc.rust-lang.org/nightly/core/str/traits/trait.FromStr.html\" title=\"trait core::str::traits::FromStr\">FromStr</a> for <a class=\"struct\" href=\"zcash_address/struct.ZcashAddress.html\" title=\"struct zcash_address::ZcashAddress\">ZcashAddress</a>","synthetic":false,"types":["zcash_address::ZcashAddress"]}];
+implementors["zcash_primitives"] = [{"text":"impl <a class=\"trait\" href=\"https://doc.rust-lang.org/nightly/core/str/traits/trait.FromStr.html\" title=\"trait core::str::traits::FromStr\">FromStr</a> for <a class=\"enum\" href=\"zcash_primitives/memo/enum.Memo.html\" title=\"enum zcash_primitives::memo::Memo\">Memo</a>","synthetic":false,"types":["zcash_primitives::memo::Memo"]}];
+if (window.register_implementors) {window.register_implementors(implementors);} else {window.pending_implementors = implementors;}})()

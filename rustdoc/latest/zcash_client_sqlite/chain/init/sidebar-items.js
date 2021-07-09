@@ -1,0 +1,1 @@
+initSidebarItems({"fn":[["init_cache_database","Sets up the internal structure of the cache database."]]});

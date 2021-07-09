@@ -1,0 +1,1 @@
+initSidebarItems({"fn":[["scan_cached_blocks","Scans at most `limit` new blocks added to the cache for any transactions received by the tracked accounts."],["validate_chain","Checks that the scanned blocks in the data database, when combined with the recent `CompactBlock`s in the cache database, form a valid chain."]]});

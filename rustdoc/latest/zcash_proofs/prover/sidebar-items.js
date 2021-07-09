@@ -1,0 +1,1 @@
+initSidebarItems({"struct":[["LocalTxProver","An implementation of [`TxProver`] using Sapling Spend and Output parameters from locally-accessible paths."]]});
