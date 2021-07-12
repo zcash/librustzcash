@@ -145,7 +145,7 @@ impl Error for ParseError {}
 /// > When derived on enums, variants are ordered by their top-to-bottom discriminant
 /// > order.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub(crate) enum Receiver {
+pub enum Receiver {
     Orchard([u8; 43]),
     Sapling(kind::sapling::Data),
     P2pkh(kind::p2pkh::Data),
@@ -287,6 +287,23 @@ impl Address {
 
         f4jumble::f4jumble(&encoded).unwrap()
     }
+
+    /// Returns the receivers contained within this address, sorted in preference order.
+    pub fn receivers(&self) -> Vec<Receiver> {
+        let mut receivers = self.0.clone();
+        // Unstable sorting is fine, because all receivers are guaranteed by construction
+        // to have distinct typecodes.
+        receivers.sort_unstable_by_key(|r| r.typecode());
+        receivers
+    }
+
+    /// Returns the receivers contained within this address, in the order they were
+    /// parsed from the string encoding.
+    ///
+    /// This API is for advanced usage; in most cases you should use `Address::receivers`.
+    pub fn receivers_as_parsed(&self) -> &[Receiver] {
+        &self.0
+    }
 }
 
 #[cfg(test)]
@@ -382,5 +399,33 @@ mod tests {
             Address::try_from(&encoded[..]),
             Err(ParseError::InvalidEncoding)
         );
+    }
+
+    #[test]
+    fn receivers_are_sorted() {
+        // Construct a UA with receivers in an unsorted order.
+        let ua = Address(vec![
+            Receiver::P2pkh([0; 20]),
+            Receiver::Orchard([0; 43]),
+            Receiver::Unknown {
+                typecode: 0xff,
+                data: vec![],
+            },
+            Receiver::Sapling([0; 43]),
+        ]);
+
+        // `Address::receivers` sorts the receivers in priority order.
+        assert_eq!(
+            ua.receivers(),
+            vec![
+                Receiver::Orchard([0; 43]),
+                Receiver::Sapling([0; 43]),
+                Receiver::P2pkh([0; 20]),
+                Receiver::Unknown {
+                    typecode: 0xff,
+                    data: vec![],
+                },
+            ]
+        )
     }
 }
