@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::convert::{TryFrom, TryInto};
 use std::error::Error;
 use std::fmt;
@@ -59,17 +60,38 @@ impl From<Typecode> for u8 {
     }
 }
 
+impl Typecode {
+    fn is_shielded(&self) -> bool {
+        match self {
+            Typecode::P2pkh | Typecode::P2sh => false,
+            // Assume that unknown typecodes are shielded, because they might be.
+            _ => true,
+        }
+    }
+}
+
 /// An error while attempting to parse a string as a Zcash address.
 #[derive(Debug, PartialEq)]
 pub enum ParseError {
+    /// The unified address contains both P2PKH and P2SH receivers.
+    BothP2phkAndP2sh,
+    /// The unified address contains a duplicated typecode.
+    DuplicateTypecode(Typecode),
     /// The string is an invalid encoding.
     InvalidEncoding,
+    /// The unified address only contains transparent receivers.
+    OnlyTransparent,
 }
 
 impl fmt::Display for ParseError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            ParseError::BothP2phkAndP2sh => write!(f, "UA contains both P2PKH and P2SH receivers"),
+            ParseError::DuplicateTypecode(typecode) => {
+                write!(f, "Duplicate typecode {}", u8::from(*typecode))
+            }
             ParseError::InvalidEncoding => write!(f, "Invalid encoding"),
+            ParseError::OnlyTransparent => write!(f, "UA only contains transparent receivers"),
         }
     }
 }
@@ -165,7 +187,28 @@ impl TryFrom<&[u8]> for Address {
                 _ => Some(Err(ParseError::InvalidEncoding)),
             })
             .collect::<Result<_, _>>()
-            .map(Address)
+            .and_then(|receivers: Vec<Receiver>| {
+                let mut typecodes = HashSet::with_capacity(receivers.len());
+                for receiver in &receivers {
+                    let t = receiver.typecode();
+                    if typecodes.contains(&t) {
+                        return Err(ParseError::DuplicateTypecode(t));
+                    } else if (t == Typecode::P2pkh && typecodes.contains(&Typecode::P2sh))
+                        || (t == Typecode::P2sh && typecodes.contains(&Typecode::P2pkh))
+                    {
+                        return Err(ParseError::BothP2phkAndP2sh);
+                    } else {
+                        typecodes.insert(t);
+                    }
+                }
+
+                if !typecodes.iter().any(|t| t.is_shielded()) {
+                    Err(ParseError::OnlyTransparent)
+                } else {
+                    // All checks pass!
+                    Ok(Address(receivers))
+                }
+            })
     }
 }
 
@@ -201,7 +244,7 @@ mod tests {
         prelude::*,
     };
 
-    use super::{Address, Receiver};
+    use super::{Address, ParseError, Receiver, Typecode};
 
     prop_compose! {
         fn uniform43()(a in uniform11(0u8..), b in uniform32(0u8..)) -> [u8; 43] {
@@ -244,5 +287,46 @@ mod tests {
             let decoded = Address::try_from(&bytes[..]);
             prop_assert_eq!(decoded, Ok(ua));
         }
+    }
+
+    #[test]
+    fn duplicate_typecode() {
+        // Construct and serialize an invalid UA.
+        let ua = Address(vec![Receiver::Sapling([1; 43]), Receiver::Sapling([2; 43])]);
+        let encoded = ua.to_bytes();
+        assert_eq!(
+            Address::try_from(&encoded[..]),
+            Err(ParseError::DuplicateTypecode(Typecode::Sapling))
+        );
+    }
+
+    #[test]
+    fn p2pkh_and_p2sh() {
+        // Construct and serialize an invalid UA.
+        let ua = Address(vec![Receiver::P2pkh([0; 20]), Receiver::P2sh([0; 20])]);
+        let encoded = ua.to_bytes();
+        assert_eq!(
+            Address::try_from(&encoded[..]),
+            Err(ParseError::BothP2phkAndP2sh)
+        );
+    }
+
+    #[test]
+    fn only_transparent() {
+        // Encoding of `Address(vec![Receiver::P2pkh([0; 20])])`.
+        let encoded = vec![
+            0x3b, 0x3d, 0xe6, 0xb3, 0xed, 0xaa, 0x0a, 0x36, 0x12, 0xbc, 0x8d, 0x2b, 0x1a, 0xaa,
+            0x27, 0x7e, 0x45, 0xc0, 0xc2, 0x0e, 0xf9, 0x6f, 0x24, 0x9b, 0x79, 0x0a, 0x68, 0x76,
+            0xa8, 0x4c, 0x3f, 0xf0, 0x1f, 0x39, 0x97, 0xbd, 0x15, 0x0d,
+        ];
+
+        // We can't actually exercise this error, because at present the only transparent
+        // receivers we can use are P2PKH and P2SH (which cannot be used together), and
+        // with only one of them we don't have sufficient data for F4Jumble (so we hit a
+        // different error).
+        assert_eq!(
+            Address::try_from(&encoded[..]),
+            Err(ParseError::InvalidEncoding)
+        );
     }
 }
