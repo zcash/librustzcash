@@ -1,7 +1,9 @@
 use std::convert::{TryFrom, TryInto};
+use std::error::Error;
+use std::fmt;
 use std::iter;
 
-use crate::{kind, ParseError};
+use crate::kind;
 
 mod f4jumble;
 
@@ -56,6 +58,23 @@ impl From<Typecode> for u8 {
         }
     }
 }
+
+/// An error while attempting to parse a string as a Zcash address.
+#[derive(Debug, PartialEq)]
+pub enum ParseError {
+    /// The string is an invalid encoding.
+    InvalidEncoding,
+}
+
+impl fmt::Display for ParseError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ParseError::InvalidEncoding => write!(f, "Invalid encoding"),
+        }
+    }
+}
+
+impl Error for ParseError {}
 
 /// The set of known Receivers for Unified Addresses.
 ///

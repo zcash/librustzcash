@@ -13,6 +13,14 @@ pub enum ParseError {
     NotZcash,
 }
 
+impl From<unified::ParseError> for ParseError {
+    fn from(e: unified::ParseError) -> Self {
+        match e {
+            unified::ParseError::InvalidEncoding => Self::InvalidEncoding,
+        }
+    }
+}
+
 impl fmt::Display for ParseError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
