@@ -11,6 +11,17 @@ pub enum ParseError {
     InvalidEncoding,
     /// The string is not a Zcash address.
     NotZcash,
+    /// Errors specific to unified addresses.
+    Unified(unified::ParseError),
+}
+
+impl From<unified::ParseError> for ParseError {
+    fn from(e: unified::ParseError) -> Self {
+        match e {
+            unified::ParseError::InvalidEncoding => Self::InvalidEncoding,
+            _ => Self::Unified(e),
+        }
+    }
 }
 
 impl fmt::Display for ParseError {
@@ -18,6 +29,7 @@ impl fmt::Display for ParseError {
         match self {
             ParseError::InvalidEncoding => write!(f, "Invalid encoding"),
             ParseError::NotZcash => write!(f, "Not a Zcash address"),
+            ParseError::Unified(e) => e.fmt(f),
         }
     }
 }
