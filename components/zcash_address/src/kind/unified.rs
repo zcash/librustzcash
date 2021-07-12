@@ -1,3 +1,4 @@
+use std::cmp;
 use std::collections::HashSet;
 use std::convert::{TryFrom, TryInto};
 use std::error::Error;
@@ -34,6 +35,44 @@ pub enum Typecode {
     Sapling,
     Orchard,
     Unknown(u8),
+}
+
+impl Ord for Typecode {
+    fn cmp(&self, other: &Self) -> cmp::Ordering {
+        match (self, other) {
+            // Trivial equality checks.
+            (Self::Orchard, Self::Orchard)
+            | (Self::Sapling, Self::Sapling)
+            | (Self::P2sh, Self::P2sh)
+            | (Self::P2pkh, Self::P2pkh) => cmp::Ordering::Equal,
+
+            // We don't know for certain the preference order of unknown receivers, but it
+            // is likely that the higher typecode has higher preference. The exact order
+            // doesn't really matter, as unknown receivers have lower preference than
+            // known receivers.
+            (Self::Unknown(a), Self::Unknown(b)) => b.cmp(a),
+
+            // For the remaining cases, we rely on `match` always choosing the first arm
+            // with a matching pattern. Patterns below are listed in priority order:
+            (Self::Orchard, _) => cmp::Ordering::Less,
+            (_, Self::Orchard) => cmp::Ordering::Greater,
+
+            (Self::Sapling, _) => cmp::Ordering::Less,
+            (_, Self::Sapling) => cmp::Ordering::Greater,
+
+            (Self::P2sh, _) => cmp::Ordering::Less,
+            (_, Self::P2sh) => cmp::Ordering::Greater,
+
+            (Self::P2pkh, _) => cmp::Ordering::Less,
+            (_, Self::P2pkh) => cmp::Ordering::Greater,
+        }
+    }
+}
+
+impl PartialOrd for Typecode {
+    fn partial_cmp(&self, other: &Self) -> Option<cmp::Ordering> {
+        Some(self.cmp(other))
+    }
 }
 
 impl From<u8> for Typecode {
@@ -105,13 +144,28 @@ impl Error for ParseError {}
 ///
 /// > When derived on enums, variants are ordered by their top-to-bottom discriminant
 /// > order.
-#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum Receiver {
     Orchard([u8; 43]),
     Sapling(kind::sapling::Data),
     P2pkh(kind::p2pkh::Data),
     P2sh(kind::p2sh::Data),
     Unknown { typecode: u8, data: Vec<u8> },
+}
+
+impl cmp::Ord for Receiver {
+    fn cmp(&self, other: &Self) -> cmp::Ordering {
+        match self.typecode().cmp(&other.typecode()) {
+            cmp::Ordering::Equal => self.addr().cmp(other.addr()),
+            res => res,
+        }
+    }
+}
+
+impl cmp::PartialOrd for Receiver {
+    fn partial_cmp(&self, other: &Self) -> Option<cmp::Ordering> {
+        Some(self.cmp(other))
+    }
 }
 
 impl TryFrom<(u8, &[u8])> for Receiver {
