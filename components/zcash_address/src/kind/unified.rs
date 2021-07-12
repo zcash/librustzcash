@@ -100,11 +100,13 @@ impl From<Typecode> for u8 {
 }
 
 impl Typecode {
-    fn is_shielded(&self) -> bool {
+    fn is_transparent(&self) -> bool {
         match self {
-            Typecode::P2pkh | Typecode::P2sh => false,
-            // Assume that unknown typecodes are shielded, because they might be.
-            _ => true,
+            Typecode::P2pkh | Typecode::P2sh => true,
+            // Unknown typecodes are treated as not transparent for the purpose of
+            // disallowing only-transparent UAs, which can be represented with existing
+            // address encodings.
+            _ => false,
         }
     }
 }
@@ -263,7 +265,7 @@ impl TryFrom<Vec<Receiver>> for Address {
             }
         }
 
-        if !typecodes.iter().any(|t| t.is_shielded()) {
+        if typecodes.iter().all(|t| t.is_transparent()) {
             Err(ParseError::OnlyTransparent)
         } else {
             // All checks pass!
