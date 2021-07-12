@@ -24,6 +24,39 @@ pub(crate) const REGTEST: &str = "uregtest";
 
 const PADDING_LEN: usize = 16;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Typecode {
+    P2pkh,
+    P2sh,
+    Sapling,
+    Orchard,
+    Unknown(u8),
+}
+
+impl From<u8> for Typecode {
+    fn from(typecode: u8) -> Self {
+        match typecode {
+            0x00 => Typecode::P2pkh,
+            0x01 => Typecode::P2sh,
+            0x02 => Typecode::Sapling,
+            0x03 => Typecode::Orchard,
+            _ => Typecode::Unknown(typecode),
+        }
+    }
+}
+
+impl From<Typecode> for u8 {
+    fn from(t: Typecode) -> Self {
+        match t {
+            Typecode::P2pkh => 0x00,
+            Typecode::P2sh => 0x01,
+            Typecode::Sapling => 0x02,
+            Typecode::Orchard => 0x03,
+            Typecode::Unknown(typecode) => typecode,
+        }
+    }
+}
+
 /// The set of known Receivers for Unified Addresses.
 ///
 /// This enum is an internal-only type, and is maintained in preference order, so that the
@@ -44,12 +77,12 @@ impl TryFrom<(u8, &[u8])> for Receiver {
     type Error = ParseError;
 
     fn try_from((typecode, addr): (u8, &[u8])) -> Result<Self, Self::Error> {
-        match typecode {
-            0x00 => addr.try_into().map(Receiver::P2pkh),
-            0x01 => addr.try_into().map(Receiver::P2sh),
-            0x02 => addr.try_into().map(Receiver::Sapling),
-            0x03 => addr.try_into().map(Receiver::Orchard),
-            _ => Ok(Receiver::Unknown {
+        match typecode.into() {
+            Typecode::P2pkh => addr.try_into().map(Receiver::P2pkh),
+            Typecode::P2sh => addr.try_into().map(Receiver::P2sh),
+            Typecode::Sapling => addr.try_into().map(Receiver::Sapling),
+            Typecode::Orchard => addr.try_into().map(Receiver::Orchard),
+            Typecode::Unknown(_) => Ok(Receiver::Unknown {
                 typecode,
                 data: addr.to_vec(),
             }),
@@ -59,13 +92,13 @@ impl TryFrom<(u8, &[u8])> for Receiver {
 }
 
 impl Receiver {
-    fn typecode(&self) -> u8 {
+    fn typecode(&self) -> Typecode {
         match self {
-            Receiver::P2pkh(_) => 0x00,
-            Receiver::P2sh(_) => 0x01,
-            Receiver::Sapling(_) => 0x02,
-            Receiver::Orchard(_) => 0x03,
-            Receiver::Unknown { typecode, .. } => *typecode,
+            Receiver::P2pkh(_) => Typecode::P2pkh,
+            Receiver::P2sh(_) => Typecode::P2sh,
+            Receiver::Sapling(_) => Typecode::Sapling,
+            Receiver::Orchard(_) => Typecode::Orchard,
+            Receiver::Unknown { typecode, .. } => Typecode::Unknown(*typecode),
         }
     }
 
@@ -129,7 +162,7 @@ impl Address {
                 assert!(addr.len() < 256);
 
                 iter::empty()
-                    .chain(Some(receiver.typecode()))
+                    .chain(Some(receiver.typecode().into()))
                     .chain(Some(addr.len() as u8))
                     .chain(addr.iter().cloned())
             })
