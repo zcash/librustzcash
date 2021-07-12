@@ -101,13 +101,9 @@ impl From<Typecode> for u8 {
 
 impl Typecode {
     fn is_transparent(&self) -> bool {
-        match self {
-            Typecode::P2pkh | Typecode::P2sh => true,
-            // Unknown typecodes are treated as not transparent for the purpose of
-            // disallowing only-transparent UAs, which can be represented with existing
-            // address encodings.
-            _ => false,
-        }
+        // Unknown typecodes are treated as not transparent for the purpose of disallowing
+        // only-transparent UAs, which can be represented with existing address encodings.
+        matches!(self, Typecode::P2pkh | Typecode::P2sh)
     }
 }
 
