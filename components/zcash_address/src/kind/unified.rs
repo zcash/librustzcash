@@ -140,12 +140,6 @@ impl fmt::Display for ParseError {
 impl Error for ParseError {}
 
 /// The set of known Receivers for Unified Addresses.
-///
-/// This enum is an internal-only type, and is maintained in preference order, so that the
-/// derived [`PartialOrd`] will sort receivers correctly. From its documentation:
-///
-/// > When derived on enums, variants are ordered by their top-to-bottom discriminant
-/// > order.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Receiver {
     Orchard([u8; 43]),
