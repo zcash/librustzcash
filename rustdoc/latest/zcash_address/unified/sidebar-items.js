@@ -1,1 +1,1 @@
-initSidebarItems({"struct":[["Address","A Unified Address."]]});
+initSidebarItems({"enum":[["ParseError","An error while attempting to parse a string as a Zcash address."],["Receiver","The set of known Receivers for Unified Addresses."],["Typecode",""]],"struct":[["Address","A Unified Address."]]});
