@@ -241,28 +241,34 @@ impl TryFrom<&[u8]> for Address {
                 _ => Some(Err(ParseError::InvalidEncoding)),
             })
             .collect::<Result<_, _>>()
-            .and_then(|receivers: Vec<Receiver>| {
-                let mut typecodes = HashSet::with_capacity(receivers.len());
-                for receiver in &receivers {
-                    let t = receiver.typecode();
-                    if typecodes.contains(&t) {
-                        return Err(ParseError::DuplicateTypecode(t));
-                    } else if (t == Typecode::P2pkh && typecodes.contains(&Typecode::P2sh))
-                        || (t == Typecode::P2sh && typecodes.contains(&Typecode::P2pkh))
-                    {
-                        return Err(ParseError::BothP2phkAndP2sh);
-                    } else {
-                        typecodes.insert(t);
-                    }
-                }
+            .and_then(|receivers: Vec<Receiver>| receivers.try_into())
+    }
+}
 
-                if !typecodes.iter().any(|t| t.is_shielded()) {
-                    Err(ParseError::OnlyTransparent)
-                } else {
-                    // All checks pass!
-                    Ok(Address(receivers))
-                }
-            })
+impl TryFrom<Vec<Receiver>> for Address {
+    type Error = ParseError;
+
+    fn try_from(receivers: Vec<Receiver>) -> Result<Self, Self::Error> {
+        let mut typecodes = HashSet::with_capacity(receivers.len());
+        for receiver in &receivers {
+            let t = receiver.typecode();
+            if typecodes.contains(&t) {
+                return Err(ParseError::DuplicateTypecode(t));
+            } else if (t == Typecode::P2pkh && typecodes.contains(&Typecode::P2sh))
+                || (t == Typecode::P2sh && typecodes.contains(&Typecode::P2pkh))
+            {
+                return Err(ParseError::BothP2phkAndP2sh);
+            } else {
+                typecodes.insert(t);
+            }
+        }
+
+        if !typecodes.iter().any(|t| t.is_shielded()) {
+            Err(ParseError::OnlyTransparent)
+        } else {
+            // All checks pass!
+            Ok(Address(receivers))
+        }
     }
 }
 
