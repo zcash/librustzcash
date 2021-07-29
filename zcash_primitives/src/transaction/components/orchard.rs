@@ -151,17 +151,7 @@ pub fn read_action_without_auth<R: Read>(mut reader: R) -> io::Result<Action<()>
 pub fn read_flags<R: Read>(mut reader: R) -> io::Result<Flags> {
     let mut byte = [0u8; 1];
     reader.read_exact(&mut byte)?;
-    if byte[0] & FLAGS_EXPECTED_UNSET == 0 {
-        Ok(Flags::from_parts(
-            byte[0] & FLAG_SPENDS_ENABLED != 0,
-            byte[0] & FLAG_OUTPUTS_ENABLED != 0,
-        ))
-    } else {
-        Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "Unexpected bits set in Orchard flags value.",
-        ))
-    }
+    Flags::from_byte(byte[0])
 }
 
 pub fn read_anchor<R: Read>(mut reader: R) -> io::Result<Anchor> {
@@ -191,7 +181,7 @@ pub fn write_v5_bundle<W: Write>(
             write_action_without_auth(w, a)
         })?;
 
-        write_flags(&mut writer, &bundle.flags())?;
+        writer.write_all(&[bundle.flags().to_byte()])?;
         writer.write_all(&bundle.value_balance().to_i64_le_bytes())?;
         writer.write_all(&bundle.anchor().to_bytes())?;
         Vector::write(
@@ -252,17 +242,6 @@ pub fn write_action_without_auth<W: Write>(
     write_cmx(&mut writer, &act.cmx())?;
     write_note_ciphertext(&mut writer, &act.encrypted_note())?;
     Ok(())
-}
-
-pub fn write_flags<W: Write>(mut writer: W, flags: &Flags) -> io::Result<()> {
-    let mut byte = 0u8;
-    if flags.spends_enabled() {
-        byte |= FLAG_SPENDS_ENABLED;
-    }
-    if flags.outputs_enabled() {
-        byte |= FLAG_OUTPUTS_ENABLED;
-    }
-    writer.write_all(&[byte])
 }
 
 #[cfg(any(test, feature = "test-dependencies"))]
