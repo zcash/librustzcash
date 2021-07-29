@@ -13,7 +13,6 @@ use crate::consensus::{BlockHeight, BranchId};
 use super::{
     components::{
         amount::Amount,
-        orchard as ser_orch,
         sapling::{self, OutputDescription, SpendDescription},
         transparent::{self, TxIn, TxOut},
     },
@@ -33,7 +32,6 @@ const ZCASH_TX_PERSONALIZATION_PREFIX: &[u8; 12] = b"ZcashTxHash_";
 const ZCASH_HEADERS_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxIdHeadersHash";
 const ZCASH_TRANSPARENT_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxIdTranspaHash";
 const ZCASH_SAPLING_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxIdSaplingHash";
-const ZCASH_ORCHARD_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxIdOrchardHash";
 #[cfg(feature = "zfuture")]
 const ZCASH_TZE_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxIdTZE____Hash";
 
@@ -58,14 +56,9 @@ const ZCASH_SAPLING_OUTPUTS_COMPACT_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxIdSOu
 const ZCASH_SAPLING_OUTPUTS_MEMOS_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxIdSOutM__Hash";
 const ZCASH_SAPLING_OUTPUTS_NONCOMPACT_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxIdSOutN__Hash";
 
-const ZCASH_ORCHARD_ACTIONS_COMPACT_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxIdOrcActCHash";
-const ZCASH_ORCHARD_ACTIONS_MEMOS_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxIdOrcActMHash";
-const ZCASH_ORCHARD_ACTIONS_NONCOMPACT_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxIdOrcActNHash";
-
 const ZCASH_AUTH_PERSONALIZATION_PREFIX: &[u8; 12] = b"ZTxAuthHash_";
 const ZCASH_TRANSPARENT_SCRIPTS_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxAuthTransHash";
 const ZCASH_SAPLING_SIGS_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxAuthSapliHash";
-const ZCASH_ORCHARD_SIGS_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxAuthOrchaHash";
 #[cfg(feature = "zfuture")]
 const ZCASH_TZE_WITNESSES_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxAuthTZE__Hash";
 
@@ -272,56 +265,6 @@ fn hash_sapling_txid_empty() -> Blake2bHash {
     hasher(ZCASH_SAPLING_HASH_PERSONALIZATION).finalize()
 }
 
-/// Write disjoint parts of each Orchard shielded action as 3 separate hashes:
-/// * \[(nullifier, cmx, ephemeral_key, enc_ciphertext\[..52\])*\] personalized
-///   with ZCASH_ORCHARD_ACTIONS_COMPACT_HASH_PERSONALIZATION
-/// * \[enc_ciphertext\[52..564\]*\] (memo ciphertexts) personalized
-///   with ZCASH_ORCHARD_ACTIONS_MEMOS_HASH_PERSONALIZATION
-/// * \[(cv, rk, enc_ciphertext\[564..\], out_ciphertext)*\] personalized
-///   with ZCASH_ORCHARD_ACTIONS_NONCOMPACT_HASH_PERSONALIZATION
-///
-/// Then, hash these together along with (flags, value_balance_orchard, anchor_orchard),
-/// personalized with ZCASH_ORCHARD_ACTIONS_HASH_PERSONALIZATION
-fn hash_orchard_txid_data<A: orchard::Authorization>(
-    bundle: &orchard::Bundle<A, Amount>,
-) -> Blake2bHash {
-    let mut h = hasher(ZCASH_ORCHARD_HASH_PERSONALIZATION);
-    let mut ch = hasher(ZCASH_ORCHARD_ACTIONS_COMPACT_HASH_PERSONALIZATION);
-    let mut mh = hasher(ZCASH_ORCHARD_ACTIONS_MEMOS_HASH_PERSONALIZATION);
-    let mut nh = hasher(ZCASH_ORCHARD_ACTIONS_NONCOMPACT_HASH_PERSONALIZATION);
-
-    for action in bundle.actions().iter() {
-        ch.write_all(&action.nullifier().to_bytes()).unwrap();
-        ch.write_all(&action.cmx().to_bytes()).unwrap();
-        ch.write_all(&action.encrypted_note().epk_bytes).unwrap();
-        ch.write_all(&action.encrypted_note().enc_ciphertext[..52])
-            .unwrap();
-
-        mh.write_all(&action.encrypted_note().enc_ciphertext[52..564])
-            .unwrap();
-
-        nh.write_all(&action.cv_net().to_bytes()).unwrap();
-        nh.write_all(&<[u8; 32]>::from(action.rk())).unwrap();
-        nh.write_all(&action.encrypted_note().enc_ciphertext[564..])
-            .unwrap();
-        nh.write_all(&action.encrypted_note().out_ciphertext)
-            .unwrap();
-    }
-
-    h.write_all(&ch.finalize().as_bytes()).unwrap();
-    h.write_all(&mh.finalize().as_bytes()).unwrap();
-    h.write_all(&nh.finalize().as_bytes()).unwrap();
-    ser_orch::write_flags(&mut h, bundle.flags()).unwrap();
-    h.write_all(&bundle.value_balance().to_i64_le_bytes())
-        .unwrap();
-    ser_orch::write_anchor(&mut h, bundle.anchor()).unwrap();
-    h.finalize()
-}
-
-fn hash_orchard_txid_empty() -> Blake2bHash {
-    hasher(ZCASH_ORCHARD_HASH_PERSONALIZATION).finalize()
-}
-
 #[cfg(feature = "zfuture")]
 fn hash_tze_txid_data(tze_digests: Option<&TzeDigests<Blake2bHash>>) -> Blake2bHash {
     let mut h = hasher(ZCASH_TZE_HASH_PERSONALIZATION);
@@ -381,7 +324,7 @@ impl<A: Authorization> TransactionDigest<A> for TxIdDigester {
         &self,
         orchard_bundle: Option<&orchard::Bundle<A::OrchardAuth, Amount>>,
     ) -> Self::OrchardDigest {
-        orchard_bundle.map(hash_orchard_txid_data)
+        orchard_bundle.map(|b| b.commitment().0)
     }
 
     #[cfg(feature = "zfuture")]
@@ -435,7 +378,7 @@ pub(crate) fn to_hash(
     .unwrap();
     h.write_all(
         orchard_digest
-            .unwrap_or_else(hash_orchard_txid_empty)
+            .unwrap_or_else(orchard::commitments::hash_bundle_txid_empty)
             .as_bytes(),
     )
     .unwrap();
@@ -537,20 +480,9 @@ impl TransactionDigest<Authorized> for BlockTxCommitmentDigester {
         &self,
         orchard_bundle: Option<&orchard::Bundle<orchard::Authorized, Amount>>,
     ) -> Self::OrchardDigest {
-        let mut h = hasher(ZCASH_ORCHARD_SIGS_HASH_PERSONALIZATION);
-        if let Some(bundle) = orchard_bundle {
-            h.write_all(bundle.authorization().proof().as_ref())
-                .unwrap();
-            for action in bundle.actions().iter() {
-                h.write_all(&<[u8; 64]>::from(action.authorization()))
-                    .unwrap();
-            }
-            h.write_all(&<[u8; 64]>::from(
-                bundle.authorization().binding_signature(),
-            ))
-            .unwrap();
-        }
-        h.finalize()
+        orchard_bundle.map_or_else(orchard::commitments::hash_bundle_auth_empty, |b| {
+            b.authorizing_commitment().0
+        })
     }
 
     #[cfg(feature = "zfuture")]
