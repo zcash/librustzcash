@@ -367,7 +367,7 @@
                     }
                 };
 
-                <span class="kw">return</span> <span class="ident">data</span>[..]
+                <span class="kw">return</span> (<span class="ident">hrp</span>.<span class="ident">as_str</span>(), <span class="kw-2">&amp;</span><span class="ident">data</span>[..])
                     .<span class="ident">try_into</span>()
                     .<span class="ident">map</span>(<span class="ident">AddressKind::Unified</span>)
                     .<span class="ident">map_err</span>(<span class="op">|</span><span class="kw">_</span><span class="op">|</span> <span class="ident">ParseError::InvalidEncoding</span>)
@@ -456,14 +456,14 @@
                 },
                 <span class="ident">data</span>,
             ),
-            <span class="ident">AddressKind::Unified</span>(<span class="ident">data</span>) <span class="op">=</span><span class="op">&gt;</span> <span class="ident">encode_bech32m</span>(
-                <span class="kw">match</span> <span class="self">self</span>.<span class="ident">net</span> {
+            <span class="ident">AddressKind::Unified</span>(<span class="ident">data</span>) <span class="op">=</span><span class="op">&gt;</span> {
+                <span class="kw">let</span> <span class="ident">hrp</span> <span class="op">=</span> <span class="kw">match</span> <span class="self">self</span>.<span class="ident">net</span> {
                     <span class="ident">Network::Main</span> <span class="op">=</span><span class="op">&gt;</span> <span class="ident">unified::MAINNET</span>,
                     <span class="ident">Network::Test</span> <span class="op">=</span><span class="op">&gt;</span> <span class="ident">unified::TESTNET</span>,
                     <span class="ident">Network::Regtest</span> <span class="op">=</span><span class="op">&gt;</span> <span class="ident">unified::REGTEST</span>,
-                },
-                <span class="kw-2">&amp;</span><span class="ident">data</span>.<span class="ident">to_bytes</span>(),
-            ),
+                };
+                <span class="ident">encode_bech32m</span>(<span class="ident">hrp</span>, <span class="kw-2">&amp;</span><span class="ident">data</span>.<span class="ident">to_bytes</span>(<span class="ident">hrp</span>))
+            }
             <span class="ident">AddressKind::P2pkh</span>(<span class="ident">data</span>) <span class="op">=</span><span class="op">&gt;</span> <span class="ident">encode_b58</span>(
                 <span class="kw">match</span> <span class="self">self</span>.<span class="ident">net</span> {
                     <span class="ident">Network::Main</span> <span class="op">=</span><span class="op">&gt;</span> <span class="ident">p2pkh::MAINNET</span>,
@@ -533,21 +533,21 @@
     <span class="attribute">#[<span class="ident">test</span>]</span>
     <span class="kw">fn</span> <span class="ident">unified</span>() {
         <span class="ident">encoding</span>(
-            <span class="string">&quot;u1cd8yzk5mdn4n9r8c24tp8j8e9ethw3rr7ker5zhew3kycyyxggdzfkcq5f9yf2jv8m5ar8krncsntlfpx3p4azvwrkp8z74t3vu4kqq2&quot;</span>,
+            <span class="string">&quot;u175h4qsgd8gujkevz283ka89ul6r2kr25xvachlt5w5srewdwcjacdtm3ku06jazzwk2klezj3kfy2jc9p65l5fgvjhekmnd4myk2m7xn&quot;</span>,
             <span class="ident">ZcashAddress</span> {
                 <span class="ident">net</span>: <span class="ident">Network::Main</span>,
                 <span class="ident">kind</span>: <span class="ident">AddressKind::Unified</span>(<span class="ident">unified::Address</span>(<span class="macro">vec!</span>[<span class="ident">unified::Receiver::Sapling</span>([<span class="number">0</span>; <span class="number">43</span>])])),
             },
         );
         <span class="ident">encoding</span>(
-            <span class="string">&quot;utest1cd8yzk5mdn4n9r8c24tp8j8e9ethw3rr7ker5zhew3kycyyxggdzfkcq5f9yf2jv8m5ar8krncsntlfpx3p4azvwrkp8z74t3vptphj8&quot;</span>,
+            <span class="string">&quot;utest193cmy6pcjrw6cg8rqcxgq6z2095a2mc0hqu0g0gvnlf83em0szx23qtv9722s6qkssz80try4tynp73u9gee3zskye0ztzdz0snrxw7n&quot;</span>,
             <span class="ident">ZcashAddress</span> {
                 <span class="ident">net</span>: <span class="ident">Network::Test</span>,
                 <span class="ident">kind</span>: <span class="ident">AddressKind::Unified</span>(<span class="ident">unified::Address</span>(<span class="macro">vec!</span>[<span class="ident">unified::Receiver::Sapling</span>([<span class="number">0</span>; <span class="number">43</span>])])),
             },
         );
         <span class="ident">encoding</span>(
-            <span class="string">&quot;uregtest1cd8yzk5mdn4n9r8c24tp8j8e9ethw3rr7ker5zhew3kycyyxggdzfkcq5f9yf2jv8m5ar8krncsntlfpx3p4azvwrkp8z74t3vsnt5j0&quot;</span>,
+            <span class="string">&quot;uregtest1dl4mka5saz8xwnf0pttr637jx6su0nejfhzcz3metcmqyzdgktsmm09ese6ew794xqcyp6476nuspvdvx2xk6gn2euvu7fdmrvwl87zx&quot;</span>,
             <span class="ident">ZcashAddress</span> {
                 <span class="ident">net</span>: <span class="ident">Network::Regtest</span>,
                 <span class="ident">kind</span>: <span class="ident">AddressKind::Unified</span>(<span class="ident">unified::Address</span>(<span class="macro">vec!</span>[<span class="ident">unified::Receiver::Sapling</span>([<span class="number">0</span>; <span class="number">43</span>])])),
