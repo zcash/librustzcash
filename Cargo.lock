@@ -3090,6 +3090,7 @@ version = "0.13.0"
 dependencies = [
  "aes",
  "assert_matches",
+ "base64",
  "bellman",
  "bip0039",
  "bitvec",

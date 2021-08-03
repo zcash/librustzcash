@@ -63,6 +63,9 @@ hdwallet = { workspace = true, optional = true }
 #   - `SecretKey` and `PublicKey` types exposed
 secp256k1 = { workspace = true, optional = true }
 
+# - ZIP 304
+base64.workspace = true
+
 # - ZIP 339
 bip0039 = { version = "0.10", features = ["std", "all-languages"] }
 
