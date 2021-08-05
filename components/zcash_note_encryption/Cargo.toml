@@ -23,3 +23,6 @@ subtle = "2.2.3"
 [dev-dependencies]
 zcash_primitives = { version = "0.5", path = "../../zcash_primitives" }
 jubjub = "0.7"
+
+[lib]
+bench = false

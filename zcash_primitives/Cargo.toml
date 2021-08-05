@@ -50,10 +50,16 @@ proptest = "1.0.0"
 rand_xorshift = "0.3"
 orchard = { version = "0.0", features = ["test-dependencies"] }
 
+[target.'cfg(unix)'.dev-dependencies]
+pprof = { version = "0.4.2", features = ["criterion", "flamegraph"] }
+
 [features]
 transparent-inputs = ["ripemd160", "secp256k1"]
 test-dependencies = ["proptest"]
 zfuture = []
+
+[lib]
+bench = false
 
 [[bench]]
 name = "note_decryption"

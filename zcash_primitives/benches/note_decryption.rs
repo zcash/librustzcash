@@ -5,15 +5,21 @@ use zcash_primitives::{
     consensus::{NetworkUpgrade::Canopy, Parameters, TestNetwork, TEST_NETWORK},
     memo::MemoBytes,
     sapling::{
-        note_encryption::{sapling_note_encryption, try_sapling_note_decryption},
+        note_encryption::{
+            sapling_note_encryption, try_sapling_compact_note_decryption,
+            try_sapling_note_decryption,
+        },
         util::generate_random_rseed,
         Diversifier, PaymentAddress, SaplingIvk, ValueCommitment,
     },
     transaction::components::{
-        sapling::{GrothProofBytes, OutputDescription},
+        sapling::{CompactOutputDescription, GrothProofBytes, OutputDescription},
         GROTH_PROOF_SIZE,
     },
 };
+
+#[cfg(unix)]
+use pprof::criterion::{Output, PProfProfiler};
 
 fn bench_note_decryption(c: &mut Criterion) {
     let mut rng = OsRng;
@@ -57,7 +63,7 @@ fn bench_note_decryption(c: &mut Criterion) {
         }
     };
 
-    let mut group = c.benchmark_group("Sapling note decryption");
+    let mut group = c.benchmark_group("sapling-note-decryption");
 
     group.bench_function("valid", |b| {
         b.iter(|| try_sapling_note_decryption(&TEST_NETWORK, height, &valid_ivk, &output).unwrap())
@@ -66,7 +72,29 @@ fn bench_note_decryption(c: &mut Criterion) {
     group.bench_function("invalid", |b| {
         b.iter(|| try_sapling_note_decryption(&TEST_NETWORK, height, &invalid_ivk, &output))
     });
+
+    let compact = CompactOutputDescription::from(output);
+
+    group.bench_function("compact-valid", |b| {
+        b.iter(|| {
+            try_sapling_compact_note_decryption(&TEST_NETWORK, height, &valid_ivk, &compact)
+                .unwrap()
+        })
+    });
+
+    group.bench_function("compact-invalid", |b| {
+        b.iter(|| {
+            try_sapling_compact_note_decryption(&TEST_NETWORK, height, &invalid_ivk, &compact)
+        })
+    });
 }
 
+#[cfg(unix)]
+criterion_group! {
+    name = benches;
+    config = Criterion::default().with_profiler(PProfProfiler::new(100, Output::Flamegraph(None)));
+    targets = bench_note_decryption
+}
+#[cfg(not(unix))]
 criterion_group!(benches, bench_note_decryption);
 criterion_main!(benches);
