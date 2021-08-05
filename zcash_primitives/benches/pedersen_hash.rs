@@ -23,6 +23,6 @@ criterion_group! {
     config = Criterion::default().with_profiler(PProfProfiler::new(100, Output::Flamegraph(None)));
     targets = bench_pedersen_hash
 }
-#[cfg(windows)]
+#[cfg(not(unix))]
 criterion_group!(benches, bench_pedersen_hash);
 criterion_main!(benches);

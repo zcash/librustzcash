@@ -95,6 +95,6 @@ criterion_group! {
     config = Criterion::default().with_profiler(PProfProfiler::new(100, Output::Flamegraph(None)));
     targets = bench_note_decryption
 }
-#[cfg(windows)]
+#[cfg(not(unix))]
 criterion_group!(benches, bench_note_decryption);
 criterion_main!(benches);
