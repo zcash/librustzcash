@@ -18,3 +18,6 @@ bs58 = { version = "0.4", features = ["check"] }
 
 [dev-dependencies]
 proptest = "0.10.1"
+
+[lib]
+bench = false

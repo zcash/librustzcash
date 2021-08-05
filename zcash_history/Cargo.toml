@@ -15,3 +15,6 @@ quickcheck = "0.9"
 bigint = "4"
 byteorder = "1"
 blake2 = { package = "blake2b_simd", version = "0.5" }
+
+[lib]
+bench = false

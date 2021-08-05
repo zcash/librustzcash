@@ -44,5 +44,8 @@ zcash_proofs = { version = "0.5", path = "../zcash_proofs" }
 [features]
 test-dependencies = ["proptest", "zcash_primitives/test-dependencies"]
 
+[lib]
+bench = false
+
 [badges]
 maintenance = { status = "actively-developed" }

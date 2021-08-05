@@ -11,3 +11,6 @@ edition = "2018"
 [dependencies]
 blake2b_simd = "0.5"
 byteorder = "1"
+
+[lib]
+bench = false
