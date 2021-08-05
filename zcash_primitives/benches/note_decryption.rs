@@ -63,7 +63,7 @@ fn bench_note_decryption(c: &mut Criterion) {
         }
     };
 
-    let mut group = c.benchmark_group("Sapling note decryption");
+    let mut group = c.benchmark_group("sapling-note-decryption");
 
     group.bench_function("valid", |b| {
         b.iter(|| try_sapling_note_decryption(&TEST_NETWORK, height, &valid_ivk, &output).unwrap())

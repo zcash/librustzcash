@@ -12,7 +12,7 @@ fn bench_pedersen_hash(c: &mut Criterion) {
         .collect::<Vec<_>>();
     let personalization = Personalization::MerkleTree(31);
 
-    c.bench_function("Pedersen hash", |b| {
+    c.bench_function("pedersen-hash", |b| {
         b.iter(|| pedersen_hash(personalization, bits.clone()))
     });
 }
