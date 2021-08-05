@@ -18,6 +18,9 @@ use zcash_primitives::{
     },
 };
 
+#[cfg(unix)]
+use pprof::criterion::{Output, PProfProfiler};
+
 fn bench_note_decryption(c: &mut Criterion) {
     let mut rng = OsRng;
     let height = TEST_NETWORK.activation_height(Canopy).unwrap();
@@ -86,5 +89,12 @@ fn bench_note_decryption(c: &mut Criterion) {
     });
 }
 
+#[cfg(unix)]
+criterion_group! {
+    name = benches;
+    config = Criterion::default().with_profiler(PProfProfiler::new(100, Output::Flamegraph(None)));
+    targets = bench_note_decryption
+}
+#[cfg(windows)]
 criterion_group!(benches, bench_note_decryption);
 criterion_main!(benches);
