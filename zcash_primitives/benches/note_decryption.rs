@@ -5,12 +5,15 @@ use zcash_primitives::{
     consensus::{NetworkUpgrade::Canopy, Parameters, TestNetwork, TEST_NETWORK},
     memo::MemoBytes,
     sapling::{
-        note_encryption::{sapling_note_encryption, try_sapling_note_decryption},
+        note_encryption::{
+            sapling_note_encryption, try_sapling_compact_note_decryption,
+            try_sapling_note_decryption,
+        },
         util::generate_random_rseed,
         Diversifier, PaymentAddress, SaplingIvk, ValueCommitment,
     },
     transaction::components::{
-        sapling::{GrothProofBytes, OutputDescription},
+        sapling::{CompactOutputDescription, GrothProofBytes, OutputDescription},
         GROTH_PROOF_SIZE,
     },
 };
@@ -65,6 +68,21 @@ fn bench_note_decryption(c: &mut Criterion) {
 
     group.bench_function("invalid", |b| {
         b.iter(|| try_sapling_note_decryption(&TEST_NETWORK, height, &invalid_ivk, &output))
+    });
+
+    let compact = CompactOutputDescription::from(output);
+
+    group.bench_function("compact-valid", |b| {
+        b.iter(|| {
+            try_sapling_compact_note_decryption(&TEST_NETWORK, height, &valid_ivk, &compact)
+                .unwrap()
+        })
+    });
+
+    group.bench_function("compact-invalid", |b| {
+        b.iter(|| {
+            try_sapling_compact_note_decryption(&TEST_NETWORK, height, &invalid_ivk, &compact)
+        })
     });
 }
 
