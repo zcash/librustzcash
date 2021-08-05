@@ -51,6 +51,9 @@ transparent-inputs = ["ripemd160", "secp256k1"]
 test-dependencies = ["proptest"]
 zfuture = []
 
+[lib]
+bench = false
+
 [[bench]]
 name = "note_decryption"
 harness = false

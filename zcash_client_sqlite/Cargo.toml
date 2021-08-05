@@ -33,3 +33,6 @@ zcash_proofs = { version = "0.5", path = "../zcash_proofs" }
 [features]
 mainnet = []
 test-dependencies = ["zcash_client_backend/test-dependencies"]
+
+[lib]
+bench = false

@@ -40,6 +40,9 @@ download-params = ["minreq"]
 local-prover = ["directories"]
 multicore = ["bellman/multicore"]
 
+[lib]
+bench = false
+
 [[bench]]
 name = "sapling"
 harness = false
