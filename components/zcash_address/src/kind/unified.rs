@@ -6,6 +6,7 @@ use std::fmt;
 use zcash_encoding::CompactSize;
 
 pub(crate) mod address;
+pub(crate) mod ivk;
 
 pub use address::Address;
 
