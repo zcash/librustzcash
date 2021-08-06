@@ -436,8 +436,8 @@ mod tests {
     use std::convert::TryInto;
 
     use zcash_note_encryption::{
-        NoteEncryption, OutgoingCipherKey, ENC_CIPHERTEXT_SIZE, NOTE_PLAINTEXT_SIZE,
-        OUT_CIPHERTEXT_SIZE, OUT_PLAINTEXT_SIZE,
+        EphemeralKeyBytes, NoteEncryption, OutgoingCipherKey, ENC_CIPHERTEXT_SIZE,
+        NOTE_PLAINTEXT_SIZE, OUT_CIPHERTEXT_SIZE, OUT_PLAINTEXT_SIZE,
     };
 
     use super::{
@@ -538,7 +538,7 @@ mod tests {
         let output = OutputDescription {
             cv,
             cmu,
-            ephemeral_key: epk,
+            ephemeral_key: epk.to_bytes(),
             enc_ciphertext: ne.encrypt_note_plaintext(),
             out_ciphertext: ne.encrypt_outgoing_plaintext(&cv, &cmu, &mut rng),
             zkproof: [0u8; GROTH_PROOF_SIZE],
@@ -551,12 +551,17 @@ mod tests {
         ovk: &OutgoingViewingKey,
         cv: &jubjub::ExtendedPoint,
         cmu: &bls12_381::Scalar,
-        epk: &jubjub::ExtendedPoint,
+        ephemeral_key: &[u8; 32],
         enc_ciphertext: &mut [u8; ENC_CIPHERTEXT_SIZE],
         out_ciphertext: &[u8; OUT_CIPHERTEXT_SIZE],
         modify_plaintext: impl Fn(&mut [u8; NOTE_PLAINTEXT_SIZE]),
     ) {
-        let ock = prf_ock(&ovk, &cv, &cmu.to_repr(), &epk_bytes(epk));
+        let ock = prf_ock(
+            &ovk,
+            &cv,
+            &cmu.to_repr(),
+            &EphemeralKeyBytes(*ephemeral_key),
+        );
 
         let mut op = [0; OUT_CIPHERTEXT_SIZE];
         assert_eq!(
@@ -571,7 +576,7 @@ mod tests {
         let esk = jubjub::Fr::from_repr(op[32..OUT_PLAINTEXT_SIZE].try_into().unwrap()).unwrap();
 
         let shared_secret = sapling_ka_agree(&esk, &pk_d.into());
-        let key = kdf_sapling(shared_secret, &epk_bytes(&epk));
+        let key = kdf_sapling(shared_secret, &EphemeralKeyBytes(*ephemeral_key));
 
         let mut plaintext = {
             let mut buf = [0; ENC_CIPHERTEXT_SIZE];
@@ -664,7 +669,7 @@ mod tests {
         for &height in heights.iter() {
             let (_, _, ivk, mut output) = random_enc_ciphertext(height, &mut rng);
 
-            output.ephemeral_key = jubjub::ExtendedPoint::random(&mut rng);
+            output.ephemeral_key = jubjub::ExtendedPoint::random(&mut rng).to_bytes();
 
             assert_eq!(
                 try_sapling_note_decryption(&TEST_NETWORK, height, &ivk, &output,),
@@ -829,7 +834,7 @@ mod tests {
 
         for &height in heights.iter() {
             let (_, _, ivk, mut output) = random_enc_ciphertext(height, &mut rng);
-            output.ephemeral_key = jubjub::ExtendedPoint::random(&mut rng);
+            output.ephemeral_key = jubjub::ExtendedPoint::random(&mut rng).to_bytes();
 
             assert_eq!(
                 try_sapling_compact_note_decryption(
@@ -1061,7 +1066,7 @@ mod tests {
 
         for &height in heights.iter() {
             let (ovk, ock, _, mut output) = random_enc_ciphertext(height, &mut rng);
-            output.ephemeral_key = jubjub::ExtendedPoint::random(&mut rng);
+            output.ephemeral_key = jubjub::ExtendedPoint::random(&mut rng).to_bytes();
 
             assert_eq!(
                 try_sapling_output_recovery(&TEST_NETWORK, height, &ovk, &output,),
@@ -1275,7 +1280,7 @@ mod tests {
             let cv = read_point!(tv.cv);
             let cmu = read_bls12_381_scalar!(tv.cmu);
             let esk = read_jubjub_scalar!(tv.esk);
-            let epk = read_point!(tv.epk);
+            let ephemeral_key = EphemeralKeyBytes(tv.epk);
 
             //
             // Test the individual components
@@ -1284,11 +1289,11 @@ mod tests {
             let shared_secret = sapling_ka_agree(&esk, &pk_d.into());
             assert_eq!(shared_secret.to_bytes(), tv.shared_secret);
 
-            let k_enc = kdf_sapling(shared_secret, &epk_bytes(&epk));
+            let k_enc = kdf_sapling(shared_secret, &ephemeral_key);
             assert_eq!(k_enc.as_bytes(), tv.k_enc);
 
             let ovk = OutgoingViewingKey(tv.ovk);
-            let ock = prf_ock(&ovk, &cv, &cmu.to_repr(), &epk_bytes(&epk));
+            let ock = prf_ock(&ovk, &cv, &cmu.to_repr(), &ephemeral_key);
             assert_eq!(ock.as_ref(), tv.ock);
 
             let to = PaymentAddress::from_parts(Diversifier(tv.default_d), pk_d).unwrap();
@@ -1298,7 +1303,7 @@ mod tests {
             let output = OutputDescription {
                 cv,
                 cmu,
-                ephemeral_key: epk,
+                ephemeral_key: ephemeral_key.0,
                 enc_ciphertext: tv.c_enc,
                 out_ciphertext: tv.c_out,
                 zkproof: [0u8; GROTH_PROOF_SIZE],

@@ -1,5 +1,6 @@
 use criterion::{criterion_group, criterion_main, Criterion};
 use ff::Field;
+use group::GroupEncoding;
 use rand_core::OsRng;
 use zcash_primitives::{
     consensus::{NetworkUpgrade::Canopy, Parameters, TestNetwork, TEST_NETWORK},
@@ -49,7 +50,7 @@ fn bench_note_decryption(c: &mut Criterion) {
 
         let ne =
             sapling_note_encryption::<_, TestNetwork>(None, note, pa, MemoBytes::empty(), &mut rng);
-        let ephemeral_key = *ne.epk();
+        let ephemeral_key = ne.epk().to_bytes();
         let enc_ciphertext = ne.encrypt_note_plaintext();
         let out_ciphertext = ne.encrypt_outgoing_plaintext(&cv, &cmu, &mut rng);
 

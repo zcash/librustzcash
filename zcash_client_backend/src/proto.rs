@@ -1,7 +1,6 @@
 //! Generated code for handling light client protobuf structs.
 
 use ff::PrimeField;
-use group::GroupEncoding;
 use std::convert::{TryFrom, TryInto};
 
 use zcash_primitives::{
@@ -103,13 +102,8 @@ impl compact_formats::CompactOutput {
     /// A convenience method that parses [`CompactOutput.epk`].
     ///
     /// [`CompactOutput.epk`]: #structfield.epk
-    pub fn epk(&self) -> Result<jubjub::ExtendedPoint, ()> {
-        let p = jubjub::ExtendedPoint::from_bytes(&self.epk[..].try_into().map_err(|_| ())?);
-        if p.is_some().into() {
-            Ok(p.unwrap())
-        } else {
-            Err(())
-        }
+    pub fn ephemeral_key(&self) -> Result<[u8; 32], ()> {
+        self.epk[..].try_into().map_err(|_| ())
     }
 }
 
@@ -117,7 +111,7 @@ impl<A: sapling::Authorization> From<OutputDescription<A>> for compact_formats::
     fn from(out: OutputDescription<A>) -> compact_formats::CompactOutput {
         let mut result = compact_formats::CompactOutput::new();
         result.set_cmu(out.cmu.to_repr().to_vec());
-        result.set_epk(out.ephemeral_key.to_bytes().to_vec());
+        result.set_epk(out.ephemeral_key.to_vec());
         result.set_ciphertext(out.enc_ciphertext[..COMPACT_NOTE_SIZE].to_vec());
         result
     }
@@ -129,7 +123,7 @@ impl TryFrom<compact_formats::CompactOutput> for CompactOutputDescription {
     fn try_from(value: compact_formats::CompactOutput) -> Result<Self, Self::Error> {
         Ok(CompactOutputDescription {
             cmu: value.cmu()?,
-            epk: value.epk()?,
+            ephemeral_key: value.ephemeral_key()?,
             enc_ciphertext: value.ciphertext,
         })
     }

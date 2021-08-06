@@ -54,7 +54,7 @@ pub struct WalletShieldedSpend {
 pub struct WalletShieldedOutput<N> {
     pub index: usize,
     pub cmu: bls12_381::Scalar,
-    pub epk: jubjub::ExtendedPoint,
+    pub ephemeral_key: [u8; 32],
     pub account: AccountId,
     pub note: Note,
     pub to: PaymentAddress,
