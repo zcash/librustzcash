@@ -19,6 +19,7 @@ pub mod sapling;
 pub mod serialize;
 pub mod transaction;
 pub mod zip32;
+pub mod zip339;
 
 #[cfg(feature = "zfuture")]
 pub mod extensions;
