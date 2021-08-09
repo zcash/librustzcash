@@ -13,7 +13,7 @@ use zcash_primitives::{
     },
 };
 
-use zcash_note_encryption::COMPACT_NOTE_SIZE;
+use zcash_note_encryption::{EphemeralKeyBytes, COMPACT_NOTE_SIZE};
 
 pub mod compact_formats;
 
@@ -102,8 +102,11 @@ impl compact_formats::CompactOutput {
     /// A convenience method that parses [`CompactOutput.epk`].
     ///
     /// [`CompactOutput.epk`]: #structfield.epk
-    pub fn ephemeral_key(&self) -> Result<[u8; 32], ()> {
-        self.epk[..].try_into().map_err(|_| ())
+    pub fn ephemeral_key(&self) -> Result<EphemeralKeyBytes, ()> {
+        self.epk[..]
+            .try_into()
+            .map(EphemeralKeyBytes)
+            .map_err(|_| ())
     }
 }
 
@@ -111,7 +114,7 @@ impl<A: sapling::Authorization> From<OutputDescription<A>> for compact_formats::
     fn from(out: OutputDescription<A>) -> compact_formats::CompactOutput {
         let mut result = compact_formats::CompactOutput::new();
         result.set_cmu(out.cmu.to_repr().to_vec());
-        result.set_epk(out.ephemeral_key.to_vec());
+        result.set_epk(out.ephemeral_key.as_ref().to_vec());
         result.set_ciphertext(out.enc_ciphertext[..COMPACT_NOTE_SIZE].to_vec());
         result
     }

@@ -142,7 +142,7 @@ impl SaplingOutput {
         OutputDescription {
             cv,
             cmu,
-            ephemeral_key: epk.to_bytes(),
+            ephemeral_key: epk.to_bytes().into(),
             enc_ciphertext,
             out_ciphertext,
             zkproof,
@@ -464,7 +464,7 @@ impl<P: consensus::Parameters> SaplingBuilder<P> {
                     OutputDescription {
                         cv,
                         cmu,
-                        ephemeral_key: epk.to_bytes(),
+                        ephemeral_key: epk.to_bytes().into(),
                         enc_ciphertext,
                         out_ciphertext,
                         zkproof,

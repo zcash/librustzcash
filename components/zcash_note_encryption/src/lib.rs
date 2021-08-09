@@ -33,6 +33,7 @@ impl AsRef<[u8]> for OutgoingCipherKey {
     }
 }
 
+#[derive(Clone, Debug)]
 pub struct EphemeralKeyBytes(pub [u8; 32]);
 
 impl AsRef<[u8]> for EphemeralKeyBytes {

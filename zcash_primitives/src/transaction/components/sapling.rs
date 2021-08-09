@@ -213,7 +213,7 @@ impl SpendDescriptionV5 {
 pub struct OutputDescription<Proof> {
     pub cv: jubjub::ExtendedPoint,
     pub cmu: bls12_381::Scalar,
-    pub ephemeral_key: [u8; 32],
+    pub ephemeral_key: EphemeralKeyBytes,
     pub enc_ciphertext: [u8; 580],
     pub out_ciphertext: [u8; 80],
     pub zkproof: Proof,
@@ -221,7 +221,7 @@ pub struct OutputDescription<Proof> {
 
 impl<P: consensus::Parameters, A> ShieldedOutput<SaplingDomain<P>> for OutputDescription<A> {
     fn ephemeral_key(&self) -> EphemeralKeyBytes {
-        EphemeralKeyBytes(self.ephemeral_key)
+        self.ephemeral_key.clone()
     }
 
     fn cmstar_bytes(&self) -> [u8; 32] {
@@ -257,8 +257,8 @@ impl OutputDescription<GrothProofBytes> {
         // Consensus rules (§4.5):
         // - Canonical encoding is enforced in librustzcash_sapling_check_output by zcashd
         // - "Not small order" is enforced in SaplingVerificationContext::check_output()
-        let mut ephemeral_key = [0u8; 32];
-        reader.read_exact(&mut ephemeral_key)?;
+        let mut ephemeral_key = EphemeralKeyBytes([0u8; 32]);
+        reader.read_exact(&mut ephemeral_key.0)?;
 
         let mut enc_ciphertext = [0u8; 580];
         let mut out_ciphertext = [0u8; 80];
@@ -280,7 +280,7 @@ impl OutputDescription<GrothProofBytes> {
     pub fn write_v4<W: Write>(&self, mut writer: W) -> io::Result<()> {
         writer.write_all(&self.cv.to_bytes())?;
         writer.write_all(self.cmu.to_repr().as_ref())?;
-        writer.write_all(&self.ephemeral_key)?;
+        writer.write_all(self.ephemeral_key.as_ref())?;
         writer.write_all(&self.enc_ciphertext)?;
         writer.write_all(&self.out_ciphertext)?;
         writer.write_all(&self.zkproof)
@@ -289,7 +289,7 @@ impl OutputDescription<GrothProofBytes> {
     pub fn write_v5_without_proof<W: Write>(&self, mut writer: W) -> io::Result<()> {
         writer.write_all(&self.cv.to_bytes())?;
         writer.write_all(self.cmu.to_repr().as_ref())?;
-        writer.write_all(&self.ephemeral_key)?;
+        writer.write_all(self.ephemeral_key.as_ref())?;
         writer.write_all(&self.enc_ciphertext)?;
         writer.write_all(&self.out_ciphertext)
     }
@@ -299,7 +299,7 @@ impl OutputDescription<GrothProofBytes> {
 pub struct OutputDescriptionV5 {
     pub cv: jubjub::ExtendedPoint,
     pub cmu: bls12_381::Scalar,
-    pub ephemeral_key: [u8; 32],
+    pub ephemeral_key: EphemeralKeyBytes,
     pub enc_ciphertext: [u8; 580],
     pub out_ciphertext: [u8; 80],
 }
@@ -312,8 +312,8 @@ impl OutputDescriptionV5 {
         // Consensus rules (§4.5):
         // - Canonical encoding is enforced in librustzcash_sapling_check_output by zcashd
         // - "Not small order" is enforced in SaplingVerificationContext::check_output()
-        let mut ephemeral_key = [0u8; 32];
-        reader.read_exact(&mut ephemeral_key)?;
+        let mut ephemeral_key = EphemeralKeyBytes([0u8; 32]);
+        reader.read_exact(&mut ephemeral_key.0)?;
 
         let mut enc_ciphertext = [0u8; 580];
         let mut out_ciphertext = [0u8; 80];
@@ -345,7 +345,7 @@ impl OutputDescriptionV5 {
 }
 
 pub struct CompactOutputDescription {
-    pub ephemeral_key: [u8; 32],
+    pub ephemeral_key: EphemeralKeyBytes,
     pub cmu: bls12_381::Scalar,
     pub enc_ciphertext: Vec<u8>,
 }
@@ -362,7 +362,7 @@ impl<A> From<OutputDescription<A>> for CompactOutputDescription {
 
 impl<P: consensus::Parameters> ShieldedOutput<SaplingDomain<P>> for CompactOutputDescription {
     fn ephemeral_key(&self) -> EphemeralKeyBytes {
-        EphemeralKeyBytes(self.ephemeral_key)
+        self.ephemeral_key.clone()
     }
 
     fn cmstar_bytes(&self) -> [u8; 32] {
@@ -453,7 +453,7 @@ pub mod testing {
             OutputDescription {
                 cv,
                 cmu,
-                ephemeral_key: epk.to_bytes(),
+                ephemeral_key: epk.to_bytes().into(),
                 enc_ciphertext,
                 out_ciphertext,
                 zkproof,

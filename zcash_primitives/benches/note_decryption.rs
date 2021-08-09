@@ -50,7 +50,7 @@ fn bench_note_decryption(c: &mut Criterion) {
 
         let ne =
             sapling_note_encryption::<_, TestNetwork>(None, note, pa, MemoBytes::empty(), &mut rng);
-        let ephemeral_key = ne.epk().to_bytes();
+        let ephemeral_key = ne.epk().to_bytes().into();
         let enc_ciphertext = ne.encrypt_note_plaintext();
         let out_ciphertext = ne.encrypt_outgoing_plaintext(&cv, &cmu, &mut rng);
 
