@@ -93,6 +93,10 @@ and this library adheres to Rust's notion of
 - Generators for property testing have been moved out of the main transaction
   module such that they are now colocated in the modules with the types
   that they generate.
+- The `ephemeral_key` field of `OutputDescription` has had its type changed from
+  `jubjub::ExtendedPoint` to `zcash_note_encryption::EphemeralKeyBytes`.
+- The `epk: jubjub::ExtendedPoint` field of `CompactOutputDescription ` has been
+  replaced by `ephemeral_key: zcash_note_encryption::EphemeralKeyBytes`.
 
 ## [0.5.0] - 2021-03-26
 ### Added
