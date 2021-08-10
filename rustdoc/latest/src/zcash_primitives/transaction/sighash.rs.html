@@ -135,7 +135,7 @@
 <span id="135">135</span>
 <span id="136">136</span>
 </pre><pre class="rust">
-<span class="kw">use</span> <span class="kw">crate</span><span class="ident">::legacy::Script</span>;
+<span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::legacy::Script</span>;
 <span class="kw">use</span> <span class="ident">blake2b_simd::Hash</span> <span class="kw">as</span> <span class="ident">Blake2bHash</span>;
 <span class="kw">use</span> <span class="ident">std::convert::TryInto</span>;
 
@@ -150,7 +150,7 @@
 };
 
 <span class="attribute">#[<span class="ident">cfg</span>(<span class="ident">feature</span> <span class="op">=</span> <span class="string">&quot;zfuture&quot;</span>)]</span>
-<span class="kw">use</span> <span class="kw">crate</span><span class="ident">::extensions::transparent::Precondition</span>;
+<span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::extensions::transparent::Precondition</span>;
 
 <span class="kw">pub</span> <span class="kw">const</span> <span class="ident">SIGHASH_ALL</span>: <span class="ident">u32</span> <span class="op">=</span> <span class="number">1</span>;
 <span class="kw">pub</span> <span class="kw">const</span> <span class="ident">SIGHASH_NONE</span>: <span class="ident">u32</span> <span class="op">=</span> <span class="number">2</span>;

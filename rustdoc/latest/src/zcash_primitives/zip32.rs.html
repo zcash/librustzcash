@@ -1101,7 +1101,7 @@
 };
 <span class="kw">use</span> <span class="ident">std::io</span>::{<span class="self">self</span>, <span class="ident">Read</span>, <span class="ident">Write</span>};
 
-<span class="kw">use</span> <span class="kw">crate</span><span class="ident">::sapling::keys</span>::{
+<span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::sapling::keys</span>::{
     <span class="ident">prf_expand</span>, <span class="ident">prf_expand_vec</span>, <span class="ident">ExpandedSpendingKey</span>, <span class="ident">FullViewingKey</span>, <span class="ident">OutgoingViewingKey</span>,
 };
 
@@ -2163,7 +2163,7 @@
 <span class="kw">pub</span> <span class="kw">mod</span> <span class="ident">testing</span> {
     <span class="kw">use</span> <span class="ident">proptest::prelude</span>::<span class="kw-2">*</span>;
 
-    <span class="kw">use</span> <span class="kw">super</span><span class="ident">::ExtendedSpendingKey</span>;
+    <span class="kw">use</span> <span class="ident"><span class="kw">super</span>::ExtendedSpendingKey</span>;
 
     <span class="macro">prop_compose!</span> {
         <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">arb_extended_spending_key</span>()(<span class="ident">seed</span> <span class="kw">in</span> <span class="ident">prop::array::uniform32</span>(<span class="ident">prop::num::u8::ANY</span>)) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">ExtendedSpendingKey</span> {

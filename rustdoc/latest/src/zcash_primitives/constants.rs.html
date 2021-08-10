@@ -721,7 +721,7 @@
     <span class="kw">use</span> <span class="ident">jubjub::SubgroupPoint</span>;
 
     <span class="kw">use</span> <span class="kw">super</span>::<span class="kw-2">*</span>;
-    <span class="kw">use</span> <span class="kw">crate</span><span class="ident">::sapling::group_hash::group_hash</span>;
+    <span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::sapling::group_hash::group_hash</span>;
 
     <span class="kw">fn</span> <span class="ident">find_group_hash</span>(<span class="ident">m</span>: <span class="kw-2">&amp;</span>[<span class="ident">u8</span>], <span class="ident">personalization</span>: <span class="kw-2">&amp;</span>[<span class="ident">u8</span>; <span class="number">8</span>]) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">SubgroupPoint</span> {
         <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">tag</span> <span class="op">=</span> <span class="ident">m</span>.<span class="ident">to_vec</span>();

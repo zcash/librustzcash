@@ -209,7 +209,7 @@
 <span class="kw">use</span> <span class="ident">std::io</span>::{<span class="self">self</span>, <span class="ident">Read</span>, <span class="ident">Write</span>};
 <span class="kw">use</span> <span class="ident">std::ops::Shl</span>;
 
-<span class="kw">use</span> <span class="kw">crate</span><span class="ident">::serialize::Vector</span>;
+<span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::serialize::Vector</span>;
 
 <span class="doccomment">/// Minimal subset of script opcodes.</span>
 <span class="kw">enum</span> <span class="ident">OpCode</span> {
@@ -328,7 +328,7 @@
 <span class="kw">pub</span> <span class="kw">mod</span> <span class="ident">testing</span> {
     <span class="kw">use</span> <span class="ident">proptest::prelude</span>::{<span class="ident">any</span>, <span class="ident">prop_compose</span>};
 
-    <span class="kw">use</span> <span class="kw">super</span><span class="ident">::TransparentAddress</span>;
+    <span class="kw">use</span> <span class="ident"><span class="kw">super</span>::TransparentAddress</span>;
 
     <span class="macro">prop_compose!</span> {
         <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">arb_transparent_addr</span>()(<span class="ident">v</span> <span class="kw">in</span> <span class="ident">proptest::array::uniform20</span>(<span class="ident">any</span>::<span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span>())) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">TransparentAddress</span> {

@@ -304,13 +304,13 @@
 </pre><pre class="rust">
 <span class="doccomment">//! Gadget for Zcash&#39;s Pedersen hash.</span>
 
-<span class="kw">use</span> <span class="kw">super</span><span class="ident">::ecc</span>::{<span class="ident">EdwardsPoint</span>, <span class="ident">MontgomeryPoint</span>};
+<span class="kw">use</span> <span class="ident"><span class="kw">super</span>::ecc</span>::{<span class="ident">EdwardsPoint</span>, <span class="ident">MontgomeryPoint</span>};
 <span class="kw">use</span> <span class="ident">bellman::gadgets::boolean::Boolean</span>;
 <span class="kw">use</span> <span class="ident">bellman::gadgets::lookup</span>::<span class="kw-2">*</span>;
 <span class="kw">use</span> <span class="ident">bellman</span>::{<span class="ident">ConstraintSystem</span>, <span class="ident">SynthesisError</span>};
 <span class="kw">pub</span> <span class="kw">use</span> <span class="ident">zcash_primitives::sapling::pedersen_hash::Personalization</span>;
 
-<span class="kw">use</span> <span class="kw">crate</span><span class="ident">::constants::PEDERSEN_CIRCUIT_GENERATORS</span>;
+<span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::constants::PEDERSEN_CIRCUIT_GENERATORS</span>;
 
 <span class="kw">fn</span> <span class="ident">get_constant_bools</span>(<span class="ident">person</span>: <span class="kw-2">&amp;</span><span class="ident">Personalization</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">Boolean</span><span class="op">&gt;</span> {
     <span class="ident">person</span>

@@ -1129,7 +1129,7 @@
 
 <span class="kw">use</span> <span class="ident">group::Curve</span>;
 
-<span class="kw">use</span> <span class="kw">crate</span><span class="ident">::constants</span>::{<span class="ident">FixedGenerator</span>, <span class="ident">EDWARDS_D</span>, <span class="ident">MONTGOMERY_A</span>, <span class="ident">MONTGOMERY_SCALE</span>};
+<span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::constants</span>::{<span class="ident">FixedGenerator</span>, <span class="ident">EDWARDS_D</span>, <span class="ident">MONTGOMERY_A</span>, <span class="ident">MONTGOMERY_SCALE</span>};
 
 <span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Clone</span>)]</span>
 <span class="kw">pub</span> <span class="kw">struct</span> <span class="ident">EdwardsPoint</span> {
@@ -1254,7 +1254,7 @@
         <span class="comment">// Allocate v</span>
         <span class="kw">let</span> <span class="ident">v</span> <span class="op">=</span> <span class="ident">AllocatedNum::alloc</span>(<span class="ident">cs</span>.<span class="ident">namespace</span>(<span class="op">|</span><span class="op">|</span> <span class="string">&quot;v&quot;</span>), <span class="op">|</span><span class="op">|</span> <span class="prelude-val">Ok</span>(<span class="ident">p</span>.<span class="ident">get</span>()<span class="question-mark">?</span>.<span class="ident">get_v</span>()))<span class="question-mark">?</span>;
 
-        <span class="self">Self</span><span class="ident">::interpret</span>(<span class="ident">cs</span>.<span class="ident">namespace</span>(<span class="op">|</span><span class="op">|</span> <span class="string">&quot;point interpretation&quot;</span>), <span class="kw-2">&amp;</span><span class="ident">u</span>, <span class="kw-2">&amp;</span><span class="ident">v</span>)
+        <span class="ident"><span class="self">Self</span>::interpret</span>(<span class="ident">cs</span>.<span class="ident">namespace</span>(<span class="op">|</span><span class="op">|</span> <span class="string">&quot;point interpretation&quot;</span>), <span class="kw-2">&amp;</span><span class="ident">u</span>, <span class="kw-2">&amp;</span><span class="ident">v</span>)
     }
 
     <span class="doccomment">/// Returns `self` if condition is true, and the neutral</span>
@@ -1743,7 +1743,7 @@
     <span class="kw">use</span> <span class="ident">bellman::gadgets::test</span>::<span class="kw-2">*</span>;
 
     <span class="kw">use</span> <span class="kw">super</span>::{<span class="ident">fixed_base_multiplication</span>, <span class="ident">AllocatedNum</span>, <span class="ident">EdwardsPoint</span>, <span class="ident">MontgomeryPoint</span>};
-    <span class="kw">use</span> <span class="kw">crate</span><span class="ident">::constants</span>::{<span class="ident">to_montgomery_coords</span>, <span class="ident">NOTE_COMMITMENT_RANDOMNESS_GENERATOR</span>};
+    <span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::constants</span>::{<span class="ident">to_montgomery_coords</span>, <span class="ident">NOTE_COMMITMENT_RANDOMNESS_GENERATOR</span>};
     <span class="kw">use</span> <span class="ident">bellman::gadgets::boolean</span>::{<span class="ident">AllocatedBit</span>, <span class="ident">Boolean</span>};
 
     <span class="attribute">#[<span class="ident">test</span>]</span>

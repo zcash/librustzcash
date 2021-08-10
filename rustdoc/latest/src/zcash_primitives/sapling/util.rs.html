@@ -40,9 +40,9 @@
 <span class="kw">use</span> <span class="ident">ff::Field</span>;
 <span class="kw">use</span> <span class="ident">rand_core</span>::{<span class="ident">CryptoRng</span>, <span class="ident">RngCore</span>};
 
-<span class="kw">use</span> <span class="kw">crate</span><span class="ident">::consensus</span>::{<span class="self">self</span>, <span class="ident">BlockHeight</span>, <span class="ident">NetworkUpgrade</span>};
+<span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::consensus</span>::{<span class="self">self</span>, <span class="ident">BlockHeight</span>, <span class="ident">NetworkUpgrade</span>};
 
-<span class="kw">use</span> <span class="kw">super</span><span class="ident">::Rseed</span>;
+<span class="kw">use</span> <span class="ident"><span class="kw">super</span>::Rseed</span>;
 
 <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">hash_to_scalar</span>(<span class="ident">persona</span>: <span class="kw-2">&amp;</span>[<span class="ident">u8</span>], <span class="ident">a</span>: <span class="kw-2">&amp;</span>[<span class="ident">u8</span>], <span class="ident">b</span>: <span class="kw-2">&amp;</span>[<span class="ident">u8</span>]) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">jubjub::Fr</span> {
     <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">hasher</span> <span class="op">=</span> <span class="ident">Params::new</span>().<span class="ident">hash_length</span>(<span class="number">64</span>).<span class="ident">personal</span>(<span class="ident">persona</span>).<span class="ident">to_state</span>();

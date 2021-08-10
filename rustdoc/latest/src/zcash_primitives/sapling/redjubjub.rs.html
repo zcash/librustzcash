@@ -384,7 +384,7 @@
 <span class="kw">use</span> <span class="ident">std::io</span>::{<span class="self">self</span>, <span class="ident">Read</span>, <span class="ident">Write</span>};
 <span class="kw">use</span> <span class="ident">std::ops</span>::{<span class="ident">AddAssign</span>, <span class="ident">MulAssign</span>, <span class="ident">Neg</span>};
 
-<span class="kw">use</span> <span class="kw">super</span><span class="ident">::util::hash_to_scalar</span>;
+<span class="kw">use</span> <span class="ident"><span class="kw">super</span>::util::hash_to_scalar</span>;
 
 <span class="kw">fn</span> <span class="ident">read_scalar</span><span class="op">&lt;</span><span class="ident">R</span>: <span class="ident">Read</span><span class="op">&gt;</span>(<span class="kw-2">mut</span> <span class="ident">reader</span>: <span class="ident">R</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">io::Result</span><span class="op">&lt;</span><span class="ident">jubjub::Fr</span><span class="op">&gt;</span> {
     <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">s_repr</span> <span class="op">=</span> [<span class="number">0u8</span>; <span class="number">32</span>];
@@ -589,7 +589,7 @@
     <span class="kw">use</span> <span class="ident">rand_xorshift::XorShiftRng</span>;
 
     <span class="kw">use</span> <span class="kw">super</span>::<span class="kw-2">*</span>;
-    <span class="kw">use</span> <span class="kw">crate</span><span class="ident">::constants::SPENDING_KEY_GENERATOR</span>;
+    <span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::constants::SPENDING_KEY_GENERATOR</span>;
 
     <span class="attribute">#[<span class="ident">test</span>]</span>
     <span class="kw">fn</span> <span class="ident">test_batch_verify</span>() {

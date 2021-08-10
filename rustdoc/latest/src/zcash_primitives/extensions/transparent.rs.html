@@ -206,7 +206,7 @@
 
 <span class="kw">use</span> <span class="ident">std::fmt</span>;
 
-<span class="kw">use</span> <span class="kw">crate</span><span class="ident">::transaction::components</span>::{
+<span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::transaction::components</span>::{
     <span class="ident">tze</span>::{<span class="self">self</span>, <span class="ident">TzeOut</span>},
     <span class="ident">Amount</span>,
 };
@@ -223,7 +223,7 @@
     <span class="kw">type</span> <span class="ident">Error</span>;
 
     <span class="doccomment">/// Parses an extension-specific witness or precondition from a mode and payload.</span>
-    <span class="kw">fn</span> <span class="ident">from_payload</span>(<span class="ident">mode</span>: <span class="ident">u32</span>, <span class="ident">payload</span>: <span class="kw-2">&amp;</span>[<span class="ident">u8</span>]) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="self">Self</span>, <span class="self">Self</span><span class="ident">::Error</span><span class="op">&gt;</span>;
+    <span class="kw">fn</span> <span class="ident">from_payload</span>(<span class="ident">mode</span>: <span class="ident">u32</span>, <span class="ident">payload</span>: <span class="kw-2">&amp;</span>[<span class="ident">u8</span>]) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="self">Self</span>, <span class="ident"><span class="self">Self</span>::Error</span><span class="op">&gt;</span>;
 }
 
 <span class="doccomment">/// Binary serialization capability for TZE preconditions &amp; witnesses.</span>
@@ -338,10 +338,10 @@
     <span class="doccomment">/// an error in any other case.</span>
     <span class="kw">fn</span> <span class="ident">verify_inner</span>(
         <span class="kw-2">&amp;</span><span class="self">self</span>,
-        <span class="ident">precondition</span>: <span class="kw-2">&amp;</span><span class="self">Self</span><span class="ident">::Precondition</span>,
-        <span class="ident">witness</span>: <span class="kw-2">&amp;</span><span class="self">Self</span><span class="ident">::Witness</span>,
+        <span class="ident">precondition</span>: <span class="kw-2">&amp;</span><span class="ident"><span class="self">Self</span>::Precondition</span>,
+        <span class="ident">witness</span>: <span class="kw-2">&amp;</span><span class="ident"><span class="self">Self</span>::Witness</span>,
         <span class="ident">context</span>: <span class="kw-2">&amp;</span><span class="ident">C</span>,
-    ) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="self">Self</span><span class="ident">::Error</span><span class="op">&gt;</span>;
+    ) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident"><span class="self">Self</span>::Error</span><span class="op">&gt;</span>;
 
     <span class="doccomment">/// This is a convenience method intended for use by consensus nodes at the integration point</span>
     <span class="doccomment">/// to provide easy interoperation with the opaque, cross-extension `Precondition` and</span>
@@ -351,14 +351,14 @@
         <span class="ident">precondition</span>: <span class="kw-2">&amp;</span><span class="ident">Precondition</span>,
         <span class="ident">witness</span>: <span class="kw-2">&amp;</span><span class="ident">Witness</span><span class="op">&lt;</span><span class="ident">AuthData</span><span class="op">&gt;</span>,
         <span class="ident">context</span>: <span class="kw-2">&amp;</span><span class="ident">C</span>,
-    ) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="self">Self</span><span class="ident">::Error</span><span class="op">&gt;</span>
+    ) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident"><span class="self">Self</span>::Error</span><span class="op">&gt;</span>
     <span class="kw">where</span>
-        <span class="self">Self</span><span class="ident">::Precondition</span>: <span class="ident">FromPayload</span><span class="op">&lt;</span><span class="ident">Error</span> <span class="op">=</span> <span class="self">Self</span><span class="ident">::Error</span><span class="op">&gt;</span>,
-        <span class="self">Self</span><span class="ident">::Witness</span>: <span class="ident">FromPayload</span><span class="op">&lt;</span><span class="ident">Error</span> <span class="op">=</span> <span class="self">Self</span><span class="ident">::Error</span><span class="op">&gt;</span>,
+        <span class="ident"><span class="self">Self</span>::Precondition</span>: <span class="ident">FromPayload</span><span class="op">&lt;</span><span class="ident">Error</span> <span class="op">=</span> <span class="ident"><span class="self">Self</span>::Error</span><span class="op">&gt;</span>,
+        <span class="ident"><span class="self">Self</span>::Witness</span>: <span class="ident">FromPayload</span><span class="op">&lt;</span><span class="ident">Error</span> <span class="op">=</span> <span class="ident"><span class="self">Self</span>::Error</span><span class="op">&gt;</span>,
     {
         <span class="self">self</span>.<span class="ident">verify_inner</span>(
-            <span class="kw-2">&amp;</span><span class="self">Self</span><span class="ident">::Precondition::from_payload</span>(<span class="ident">precondition</span>.<span class="ident">mode</span>, <span class="kw-2">&amp;</span><span class="ident">precondition</span>.<span class="ident">payload</span>)<span class="question-mark">?</span>,
-            <span class="kw-2">&amp;</span><span class="self">Self</span><span class="ident">::Witness::from_payload</span>(<span class="ident">witness</span>.<span class="ident">mode</span>, <span class="kw-2">&amp;</span><span class="ident">witness</span>.<span class="ident">payload</span>.<span class="number">0</span>)<span class="question-mark">?</span>,
+            <span class="kw-2">&amp;</span><span class="ident"><span class="self">Self</span>::Precondition::from_payload</span>(<span class="ident">precondition</span>.<span class="ident">mode</span>, <span class="kw-2">&amp;</span><span class="ident">precondition</span>.<span class="ident">payload</span>)<span class="question-mark">?</span>,
+            <span class="kw-2">&amp;</span><span class="ident"><span class="self">Self</span>::Witness::from_payload</span>(<span class="ident">witness</span>.<span class="ident">mode</span>, <span class="kw-2">&amp;</span><span class="ident">witness</span>.<span class="ident">payload</span>.<span class="number">0</span>)<span class="question-mark">?</span>,
             <span class="kw-2">&amp;</span><span class="ident">context</span>,
         )
     }
@@ -392,9 +392,9 @@
         <span class="ident">mode</span>: <span class="ident">u32</span>,
         <span class="ident">prevout</span>: (<span class="ident">tze::OutPoint</span>, <span class="ident">TzeOut</span>),
         <span class="ident">witness_builder</span>: <span class="ident">WBuilder</span>,
-    ) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="self">Self</span><span class="ident">::BuildError</span><span class="op">&gt;</span>
+    ) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident"><span class="self">Self</span>::BuildError</span><span class="op">&gt;</span>
     <span class="kw">where</span>
-        <span class="ident">WBuilder</span>: <span class="lifetime">&#39;a</span> <span class="op">+</span> (<span class="ident">FnOnce</span>(<span class="kw-2">&amp;</span><span class="self">Self</span><span class="ident">::BuildCtx</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">W</span>, <span class="self">Self</span><span class="ident">::BuildError</span><span class="op">&gt;</span>);
+        <span class="ident">WBuilder</span>: <span class="lifetime">&#39;a</span> <span class="op">+</span> (<span class="ident">FnOnce</span>(<span class="kw-2">&amp;</span><span class="ident"><span class="self">Self</span>::BuildCtx</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">W</span>, <span class="ident"><span class="self">Self</span>::BuildError</span><span class="op">&gt;</span>);
 
     <span class="doccomment">/// Adds a TZE precondition to the transaction which must be satisfied by a future transaction&#39;s</span>
     <span class="doccomment">/// witness in order to spend the specified `amount`.</span>
@@ -403,7 +403,7 @@
         <span class="ident">extension_id</span>: <span class="ident">u32</span>,
         <span class="ident">value</span>: <span class="ident">Amount</span>,
         <span class="ident">guarded_by</span>: <span class="kw-2">&amp;</span><span class="ident">Precondition</span>,
-    ) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="self">Self</span><span class="ident">::BuildError</span><span class="op">&gt;</span>;
+    ) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident"><span class="self">Self</span>::BuildError</span><span class="op">&gt;</span>;
 }
 </pre></div>
 </section><section id="search" class="content hidden"></section><div id="rustdoc-vars" data-root-path="../../../" data-current-crate="zcash_primitives" data-search-index-js="../../../search-index.js" data-search-js="../../../search.js"></div>

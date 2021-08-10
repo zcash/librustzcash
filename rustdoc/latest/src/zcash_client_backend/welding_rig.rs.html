@@ -545,8 +545,8 @@
     <span class="ident">zip32::ExtendedFullViewingKey</span>,
 };
 
-<span class="kw">use</span> <span class="kw">crate</span><span class="ident">::proto::compact_formats</span>::{<span class="ident">CompactBlock</span>, <span class="ident">CompactOutput</span>};
-<span class="kw">use</span> <span class="kw">crate</span><span class="ident">::wallet</span>::{<span class="ident">AccountId</span>, <span class="ident">WalletShieldedOutput</span>, <span class="ident">WalletShieldedSpend</span>, <span class="ident">WalletTx</span>};
+<span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::proto::compact_formats</span>::{<span class="ident">CompactBlock</span>, <span class="ident">CompactOutput</span>};
+<span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::wallet</span>::{<span class="ident">AccountId</span>, <span class="ident">WalletShieldedOutput</span>, <span class="ident">WalletShieldedSpend</span>, <span class="ident">WalletTx</span>};
 
 <span class="doccomment">/// Scans a [`CompactOutput`] with a set of [`ScanningKey`]s.</span>
 <span class="doccomment">///</span>
@@ -605,7 +605,7 @@
         <span class="kw">return</span> <span class="prelude-val">Some</span>(<span class="ident">WalletShieldedOutput</span> {
             <span class="ident">index</span>,
             <span class="ident">cmu</span>: <span class="ident">output</span>.<span class="ident">cmu</span>,
-            <span class="ident">epk</span>: <span class="ident">output</span>.<span class="ident">epk</span>,
+            <span class="ident">ephemeral_key</span>: <span class="ident">output</span>.<span class="ident">ephemeral_key</span>,
             <span class="ident">account</span>: <span class="kw-2">*</span><span class="kw-2">*</span><span class="ident">account</span>,
             <span class="ident">note</span>,
             <span class="ident">to</span>,
@@ -650,7 +650,7 @@
     <span class="doccomment">/// IVK-based implementations of this trait cannot successfully derive</span>
     <span class="doccomment">/// nullifiers, in which case `Self::Nf` should be set to the unit type</span>
     <span class="doccomment">/// and this function is a no-op.</span>
-    <span class="kw">fn</span> <span class="ident">nf</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">note</span>: <span class="kw-2">&amp;</span><span class="ident">Note</span>, <span class="ident">witness</span>: <span class="kw-2">&amp;</span><span class="ident">IncrementalWitness</span><span class="op">&lt;</span><span class="ident">Node</span><span class="op">&gt;</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="self">Self</span><span class="ident">::Nf</span>;
+    <span class="kw">fn</span> <span class="ident">nf</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">note</span>: <span class="kw-2">&amp;</span><span class="ident">Note</span>, <span class="ident">witness</span>: <span class="kw-2">&amp;</span><span class="ident">IncrementalWitness</span><span class="op">&lt;</span><span class="ident">Node</span><span class="op">&gt;</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident"><span class="self">Self</span>::Nf</span>;
 }
 
 <span class="doccomment">/// The [`ScanningKey`] implementation for [`ExtendedFullViewingKey`]s.</span>
@@ -669,7 +669,7 @@
         <span class="ident">try_sapling_compact_note_decryption</span>(<span class="ident">params</span>, <span class="ident">height</span>, <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">fvk</span>.<span class="ident">vk</span>.<span class="ident">ivk</span>(), <span class="ident">output</span>)
     }
 
-    <span class="kw">fn</span> <span class="ident">nf</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">note</span>: <span class="kw-2">&amp;</span><span class="ident">Note</span>, <span class="ident">witness</span>: <span class="kw-2">&amp;</span><span class="ident">IncrementalWitness</span><span class="op">&lt;</span><span class="ident">Node</span><span class="op">&gt;</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="self">Self</span><span class="ident">::Nf</span> {
+    <span class="kw">fn</span> <span class="ident">nf</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">note</span>: <span class="kw-2">&amp;</span><span class="ident">Note</span>, <span class="ident">witness</span>: <span class="kw-2">&amp;</span><span class="ident">IncrementalWitness</span><span class="op">&lt;</span><span class="ident">Node</span><span class="op">&gt;</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident"><span class="self">Self</span>::Nf</span> {
         <span class="ident">note</span>.<span class="ident">nf</span>(<span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">fvk</span>.<span class="ident">vk</span>, <span class="ident">witness</span>.<span class="ident">position</span>() <span class="kw">as</span> <span class="ident">u64</span>)
     }
 }
@@ -840,9 +840,9 @@
         <span class="ident">zip32</span>::{<span class="ident">ExtendedFullViewingKey</span>, <span class="ident">ExtendedSpendingKey</span>},
     };
 
-    <span class="kw">use</span> <span class="kw">super</span><span class="ident">::scan_block</span>;
-    <span class="kw">use</span> <span class="kw">crate</span><span class="ident">::proto::compact_formats</span>::{<span class="ident">CompactBlock</span>, <span class="ident">CompactOutput</span>, <span class="ident">CompactSpend</span>, <span class="ident">CompactTx</span>};
-    <span class="kw">use</span> <span class="kw">crate</span><span class="ident">::wallet::AccountId</span>;
+    <span class="kw">use</span> <span class="ident"><span class="kw">super</span>::scan_block</span>;
+    <span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::proto::compact_formats</span>::{<span class="ident">CompactBlock</span>, <span class="ident">CompactOutput</span>, <span class="ident">CompactSpend</span>, <span class="ident">CompactTx</span>};
+    <span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::wallet::AccountId</span>;
 
     <span class="kw">fn</span> <span class="ident">random_compact_tx</span>(<span class="kw-2">mut</span> <span class="ident">rng</span>: <span class="kw">impl</span> <span class="ident">RngCore</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">CompactTx</span> {
         <span class="kw">let</span> <span class="ident">fake_nf</span> <span class="op">=</span> {

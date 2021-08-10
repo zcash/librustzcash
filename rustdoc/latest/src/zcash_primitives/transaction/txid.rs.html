@@ -536,7 +536,7 @@
 <span class="kw">use</span> <span class="ident">group::GroupEncoding</span>;
 <span class="kw">use</span> <span class="ident">orchard::bundle</span>::{<span class="self">self</span> <span class="kw">as</span> <span class="ident">orchard</span>};
 
-<span class="kw">use</span> <span class="kw">crate</span><span class="ident">::consensus</span>::{<span class="ident">BlockHeight</span>, <span class="ident">BranchId</span>};
+<span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::consensus</span>::{<span class="ident">BlockHeight</span>, <span class="ident">BranchId</span>};
 
 <span class="kw">use</span> <span class="kw">super</span>::{
     <span class="ident">components</span>::{
@@ -701,7 +701,7 @@
         <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">nh</span> <span class="op">=</span> <span class="ident">hasher</span>(<span class="ident">ZCASH_SAPLING_OUTPUTS_NONCOMPACT_HASH_PERSONALIZATION</span>);
         <span class="kw">for</span> <span class="ident">s_out</span> <span class="kw">in</span> <span class="ident">shielded_outputs</span> {
             <span class="ident">ch</span>.<span class="ident">write_all</span>(<span class="kw-2">&amp;</span><span class="ident">s_out</span>.<span class="ident">cmu</span>.<span class="ident">to_repr</span>().<span class="ident">as_ref</span>()).<span class="ident">unwrap</span>();
-            <span class="ident">ch</span>.<span class="ident">write_all</span>(<span class="kw-2">&amp;</span><span class="ident">s_out</span>.<span class="ident">ephemeral_key</span>.<span class="ident">to_bytes</span>()).<span class="ident">unwrap</span>();
+            <span class="ident">ch</span>.<span class="ident">write_all</span>(<span class="ident">s_out</span>.<span class="ident">ephemeral_key</span>.<span class="ident">as_ref</span>()).<span class="ident">unwrap</span>();
             <span class="ident">ch</span>.<span class="ident">write_all</span>(<span class="kw-2">&amp;</span><span class="ident">s_out</span>.<span class="ident">enc_ciphertext</span>[..<span class="number">52</span>]).<span class="ident">unwrap</span>();
 
             <span class="ident">mh</span>.<span class="ident">write_all</span>(<span class="kw-2">&amp;</span><span class="ident">s_out</span>.<span class="ident">enc_ciphertext</span>[<span class="number">52</span>..<span class="number">564</span>]).<span class="ident">unwrap</span>();
@@ -830,44 +830,44 @@
         <span class="ident">consensus_branch_id</span>: <span class="ident">BranchId</span>,
         <span class="ident">lock_time</span>: <span class="ident">u32</span>,
         <span class="ident">expiry_height</span>: <span class="ident">BlockHeight</span>,
-    ) <span class="op">-</span><span class="op">&gt;</span> <span class="self">Self</span><span class="ident">::HeaderDigest</span> {
+    ) <span class="op">-</span><span class="op">&gt;</span> <span class="ident"><span class="self">Self</span>::HeaderDigest</span> {
         <span class="ident">hash_header_txid_data</span>(<span class="ident">version</span>, <span class="ident">consensus_branch_id</span>, <span class="ident">lock_time</span>, <span class="ident">expiry_height</span>)
     }
 
     <span class="kw">fn</span> <span class="ident">digest_transparent</span>(
         <span class="kw-2">&amp;</span><span class="self">self</span>,
         <span class="ident">transparent_bundle</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="kw-2">&amp;</span><span class="ident">transparent::Bundle</span><span class="op">&lt;</span><span class="ident">A::TransparentAuth</span><span class="op">&gt;</span><span class="op">&gt;</span>,
-    ) <span class="op">-</span><span class="op">&gt;</span> <span class="self">Self</span><span class="ident">::TransparentDigest</span> {
+    ) <span class="op">-</span><span class="op">&gt;</span> <span class="ident"><span class="self">Self</span>::TransparentDigest</span> {
         <span class="ident">transparent_bundle</span>.<span class="ident">map</span>(<span class="ident">transparent_digests</span>)
     }
 
     <span class="kw">fn</span> <span class="ident">digest_sapling</span>(
         <span class="kw-2">&amp;</span><span class="self">self</span>,
         <span class="ident">sapling_bundle</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="kw-2">&amp;</span><span class="ident">sapling::Bundle</span><span class="op">&lt;</span><span class="ident">A::SaplingAuth</span><span class="op">&gt;</span><span class="op">&gt;</span>,
-    ) <span class="op">-</span><span class="op">&gt;</span> <span class="self">Self</span><span class="ident">::SaplingDigest</span> {
+    ) <span class="op">-</span><span class="op">&gt;</span> <span class="ident"><span class="self">Self</span>::SaplingDigest</span> {
         <span class="ident">sapling_bundle</span>.<span class="ident">map</span>(<span class="ident">hash_sapling_txid_data</span>)
     }
 
     <span class="kw">fn</span> <span class="ident">digest_orchard</span>(
         <span class="kw-2">&amp;</span><span class="self">self</span>,
         <span class="ident">orchard_bundle</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="kw-2">&amp;</span><span class="ident">orchard::Bundle</span><span class="op">&lt;</span><span class="ident">A::OrchardAuth</span>, <span class="ident">Amount</span><span class="op">&gt;</span><span class="op">&gt;</span>,
-    ) <span class="op">-</span><span class="op">&gt;</span> <span class="self">Self</span><span class="ident">::OrchardDigest</span> {
+    ) <span class="op">-</span><span class="op">&gt;</span> <span class="ident"><span class="self">Self</span>::OrchardDigest</span> {
         <span class="ident">orchard_bundle</span>.<span class="ident">map</span>(<span class="op">|</span><span class="ident">b</span><span class="op">|</span> <span class="ident">b</span>.<span class="ident">commitment</span>().<span class="number">0</span>)
     }
 
     <span class="attribute">#[<span class="ident">cfg</span>(<span class="ident">feature</span> <span class="op">=</span> <span class="string">&quot;zfuture&quot;</span>)]</span>
-    <span class="kw">fn</span> <span class="ident">digest_tze</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">tze_bundle</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="kw-2">&amp;</span><span class="ident">tze::Bundle</span><span class="op">&lt;</span><span class="ident">A::TzeAuth</span><span class="op">&gt;</span><span class="op">&gt;</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="self">Self</span><span class="ident">::TzeDigest</span> {
+    <span class="kw">fn</span> <span class="ident">digest_tze</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">tze_bundle</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="kw-2">&amp;</span><span class="ident">tze::Bundle</span><span class="op">&lt;</span><span class="ident">A::TzeAuth</span><span class="op">&gt;</span><span class="op">&gt;</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident"><span class="self">Self</span>::TzeDigest</span> {
         <span class="ident">tze_bundle</span>.<span class="ident">map</span>(<span class="ident">tze_digests</span>)
     }
 
     <span class="kw">fn</span> <span class="ident">combine</span>(
         <span class="kw-2">&amp;</span><span class="self">self</span>,
-        <span class="ident">header_digest</span>: <span class="self">Self</span><span class="ident">::HeaderDigest</span>,
-        <span class="ident">transparent_digests</span>: <span class="self">Self</span><span class="ident">::TransparentDigest</span>,
-        <span class="ident">sapling_digest</span>: <span class="self">Self</span><span class="ident">::SaplingDigest</span>,
-        <span class="ident">orchard_digest</span>: <span class="self">Self</span><span class="ident">::OrchardDigest</span>,
-        <span class="attribute">#[<span class="ident">cfg</span>(<span class="ident">feature</span> <span class="op">=</span> <span class="string">&quot;zfuture&quot;</span>)]</span> <span class="ident">tze_digests</span>: <span class="self">Self</span><span class="ident">::TzeDigest</span>,
-    ) <span class="op">-</span><span class="op">&gt;</span> <span class="self">Self</span><span class="ident">::Digest</span> {
+        <span class="ident">header_digest</span>: <span class="ident"><span class="self">Self</span>::HeaderDigest</span>,
+        <span class="ident">transparent_digests</span>: <span class="ident"><span class="self">Self</span>::TransparentDigest</span>,
+        <span class="ident">sapling_digest</span>: <span class="ident"><span class="self">Self</span>::SaplingDigest</span>,
+        <span class="ident">orchard_digest</span>: <span class="ident"><span class="self">Self</span>::OrchardDigest</span>,
+        <span class="attribute">#[<span class="ident">cfg</span>(<span class="ident">feature</span> <span class="op">=</span> <span class="string">&quot;zfuture&quot;</span>)]</span> <span class="ident">tze_digests</span>: <span class="ident"><span class="self">Self</span>::TzeDigest</span>,
+    ) <span class="op">-</span><span class="op">&gt;</span> <span class="ident"><span class="self">Self</span>::Digest</span> {
         <span class="ident">TxDigests</span> {
             <span class="ident">header_digest</span>,
             <span class="ident">transparent_digests</span>,
@@ -964,7 +964,7 @@
         <span class="ident">consensus_branch_id</span>: <span class="ident">BranchId</span>,
         <span class="ident">_lock_time</span>: <span class="ident">u32</span>,
         <span class="ident">_expiry_height</span>: <span class="ident">BlockHeight</span>,
-    ) <span class="op">-</span><span class="op">&gt;</span> <span class="self">Self</span><span class="ident">::HeaderDigest</span> {
+    ) <span class="op">-</span><span class="op">&gt;</span> <span class="ident"><span class="self">Self</span>::HeaderDigest</span> {
         <span class="ident">consensus_branch_id</span>
     }
 
@@ -1007,7 +1007,7 @@
     <span class="kw">fn</span> <span class="ident">digest_orchard</span>(
         <span class="kw-2">&amp;</span><span class="self">self</span>,
         <span class="ident">orchard_bundle</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="kw-2">&amp;</span><span class="ident">orchard::Bundle</span><span class="op">&lt;</span><span class="ident">orchard::Authorized</span>, <span class="ident">Amount</span><span class="op">&gt;</span><span class="op">&gt;</span>,
-    ) <span class="op">-</span><span class="op">&gt;</span> <span class="self">Self</span><span class="ident">::OrchardDigest</span> {
+    ) <span class="op">-</span><span class="op">&gt;</span> <span class="ident"><span class="self">Self</span>::OrchardDigest</span> {
         <span class="ident">orchard_bundle</span>.<span class="ident">map_or_else</span>(<span class="ident">orchard::commitments::hash_bundle_auth_empty</span>, <span class="op">|</span><span class="ident">b</span><span class="op">|</span> {
             <span class="ident">b</span>.<span class="ident">authorizing_commitment</span>().<span class="number">0</span>
         })
@@ -1026,12 +1026,12 @@
 
     <span class="kw">fn</span> <span class="ident">combine</span>(
         <span class="kw-2">&amp;</span><span class="self">self</span>,
-        <span class="ident">consensus_branch_id</span>: <span class="self">Self</span><span class="ident">::HeaderDigest</span>,
-        <span class="ident">transparent_digest</span>: <span class="self">Self</span><span class="ident">::TransparentDigest</span>,
-        <span class="ident">sapling_digest</span>: <span class="self">Self</span><span class="ident">::SaplingDigest</span>,
-        <span class="ident">orchard_digest</span>: <span class="self">Self</span><span class="ident">::OrchardDigest</span>,
-        <span class="attribute">#[<span class="ident">cfg</span>(<span class="ident">feature</span> <span class="op">=</span> <span class="string">&quot;zfuture&quot;</span>)]</span> <span class="ident">tze_digest</span>: <span class="self">Self</span><span class="ident">::TzeDigest</span>,
-    ) <span class="op">-</span><span class="op">&gt;</span> <span class="self">Self</span><span class="ident">::Digest</span> {
+        <span class="ident">consensus_branch_id</span>: <span class="ident"><span class="self">Self</span>::HeaderDigest</span>,
+        <span class="ident">transparent_digest</span>: <span class="ident"><span class="self">Self</span>::TransparentDigest</span>,
+        <span class="ident">sapling_digest</span>: <span class="ident"><span class="self">Self</span>::SaplingDigest</span>,
+        <span class="ident">orchard_digest</span>: <span class="ident"><span class="self">Self</span>::OrchardDigest</span>,
+        <span class="attribute">#[<span class="ident">cfg</span>(<span class="ident">feature</span> <span class="op">=</span> <span class="string">&quot;zfuture&quot;</span>)]</span> <span class="ident">tze_digest</span>: <span class="ident"><span class="self">Self</span>::TzeDigest</span>,
+    ) <span class="op">-</span><span class="op">&gt;</span> <span class="ident"><span class="self">Self</span>::Digest</span> {
         <span class="kw">let</span> <span class="ident">digests</span> <span class="op">=</span> [<span class="ident">transparent_digest</span>, <span class="ident">sapling_digest</span>, <span class="ident">orchard_digest</span>];
 
         <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">personal</span> <span class="op">=</span> [<span class="number">0</span>; <span class="number">16</span>];

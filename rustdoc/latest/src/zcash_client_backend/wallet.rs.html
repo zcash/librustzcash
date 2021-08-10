@@ -99,12 +99,14 @@
 <span id="99"> 99</span>
 <span id="100">100</span>
 <span id="101">101</span>
+<span id="102">102</span>
 </pre><pre class="rust">
 <span class="doccomment">//! Structs representing transaction data scanned from the block chain by a wallet or</span>
 <span class="doccomment">//! light client.</span>
 
 <span class="kw">use</span> <span class="ident">subtle</span>::{<span class="ident">Choice</span>, <span class="ident">ConditionallySelectable</span>};
 
+<span class="kw">use</span> <span class="ident">zcash_note_encryption::EphemeralKeyBytes</span>;
 <span class="kw">use</span> <span class="ident">zcash_primitives</span>::{
     <span class="ident">merkle_tree::IncrementalWitness</span>,
     <span class="ident">sapling</span>::{
@@ -156,7 +158,7 @@
 <span class="kw">pub</span> <span class="kw">struct</span> <span class="ident">WalletShieldedOutput</span><span class="op">&lt;</span><span class="ident">N</span><span class="op">&gt;</span> {
     <span class="kw">pub</span> <span class="ident">index</span>: <span class="ident">usize</span>,
     <span class="kw">pub</span> <span class="ident">cmu</span>: <span class="ident">bls12_381::Scalar</span>,
-    <span class="kw">pub</span> <span class="ident">epk</span>: <span class="ident">jubjub::ExtendedPoint</span>,
+    <span class="kw">pub</span> <span class="ident">ephemeral_key</span>: <span class="ident">EphemeralKeyBytes</span>,
     <span class="kw">pub</span> <span class="ident">account</span>: <span class="ident">AccountId</span>,
     <span class="kw">pub</span> <span class="ident">note</span>: <span class="ident">Note</span>,
     <span class="kw">pub</span> <span class="ident">to</span>: <span class="ident">PaymentAddress</span>,

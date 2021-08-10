@@ -260,7 +260,7 @@
 <span class="kw">use</span> <span class="ident">std::io</span>::{<span class="self">self</span>, <span class="ident">Read</span>, <span class="ident">Write</span>};
 <span class="kw">use</span> <span class="ident">std::ops::Deref</span>;
 
-<span class="kw">use</span> <span class="kw">crate</span><span class="ident">::serialize::Vector</span>;
+<span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::serialize::Vector</span>;
 
 <span class="kw">pub</span> <span class="kw">use</span> <span class="ident">equihash</span>;
 
@@ -388,7 +388,7 @@
 
 <span class="attribute">#[<span class="ident">cfg</span>(<span class="ident">test</span>)]</span>
 <span class="kw">mod</span> <span class="ident">tests</span> {
-    <span class="kw">use</span> <span class="kw">super</span><span class="ident">::BlockHeader</span>;
+    <span class="kw">use</span> <span class="ident"><span class="kw">super</span>::BlockHeader</span>;
 
     <span class="kw">const</span> <span class="ident">HEADER_MAINNET_415000</span>: [<span class="ident">u8</span>; <span class="number">1487</span>] <span class="op">=</span> [
         <span class="number">0x04</span>, <span class="number">0x00</span>, <span class="number">0x00</span>, <span class="number">0x00</span>, <span class="number">0x52</span>, <span class="number">0x74</span>, <span class="number">0xb4</span>, <span class="number">0x3b</span>, <span class="number">0x9e</span>, <span class="number">0x4a</span>, <span class="number">0xd8</span>, <span class="number">0xf4</span>, <span class="number">0x3e</span>, <span class="number">0x93</span>, <span class="number">0xf7</span>,

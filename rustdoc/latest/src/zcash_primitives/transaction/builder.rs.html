@@ -772,7 +772,7 @@
 };
 
 <span class="attribute">#[<span class="ident">cfg</span>(<span class="ident">feature</span> <span class="op">=</span> <span class="string">&quot;transparent-inputs&quot;</span>)]</span>
-<span class="kw">use</span> <span class="kw">crate</span><span class="ident">::transaction::components::transparent::TxOut</span>;
+<span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::transaction::components::transparent::TxOut</span>;
 
 <span class="attribute">#[<span class="ident">cfg</span>(<span class="ident">feature</span> <span class="op">=</span> <span class="string">&quot;zfuture&quot;</span>)]</span>
 <span class="kw">use</span> <span class="kw">crate</span>::{
@@ -784,7 +784,7 @@
 };
 
 <span class="attribute">#[<span class="ident">cfg</span>(<span class="ident">any</span>(<span class="ident">test</span>, <span class="ident">feature</span> <span class="op">=</span> <span class="string">&quot;test-dependencies&quot;</span>))]</span>
-<span class="kw">use</span> <span class="kw">crate</span><span class="ident">::sapling::prover::mock::MockTxProver</span>;
+<span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::sapling::prover::mock::MockTxProver</span>;
 
 <span class="kw">const</span> <span class="ident">DEFAULT_TX_EXPIRY_DELTA</span>: <span class="ident">u32</span> <span class="op">=</span> <span class="number">20</span>;
 
@@ -893,7 +893,7 @@
     <span class="doccomment">///</span>
     <span class="doccomment">/// The fee will be set to the default fee (0.0001 ZEC).</span>
     <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">new_with_rng</span>(<span class="ident">params</span>: <span class="ident">P</span>, <span class="ident">target_height</span>: <span class="ident">BlockHeight</span>, <span class="ident">rng</span>: <span class="ident">R</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">Builder</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">P</span>, <span class="ident">R</span><span class="op">&gt;</span> {
-        <span class="self">Self</span><span class="ident">::new_internal</span>(<span class="ident">params</span>, <span class="ident">target_height</span>, <span class="ident">rng</span>)
+        <span class="ident"><span class="self">Self</span>::new_internal</span>(<span class="ident">params</span>, <span class="ident">target_height</span>, <span class="ident">rng</span>)
     }
 }
 
@@ -1160,9 +1160,9 @@
         <span class="ident">mode</span>: <span class="ident">u32</span>,
         <span class="ident">prevout</span>: (<span class="ident">tze::OutPoint</span>, <span class="ident">TzeOut</span>),
         <span class="ident">witness_builder</span>: <span class="ident">WBuilder</span>,
-    ) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="self">Self</span><span class="ident">::BuildError</span><span class="op">&gt;</span>
+    ) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident"><span class="self">Self</span>::BuildError</span><span class="op">&gt;</span>
     <span class="kw">where</span>
-        <span class="ident">WBuilder</span>: <span class="lifetime">&#39;a</span> <span class="op">+</span> (<span class="ident">FnOnce</span>(<span class="kw-2">&amp;</span><span class="self">Self</span><span class="ident">::BuildCtx</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">W</span>, <span class="ident">tze::builder::Error</span><span class="op">&gt;</span>),
+        <span class="ident">WBuilder</span>: <span class="lifetime">&#39;a</span> <span class="op">+</span> (<span class="ident">FnOnce</span>(<span class="kw-2">&amp;</span><span class="ident"><span class="self">Self</span>::BuildCtx</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">W</span>, <span class="ident">tze::builder::Error</span><span class="op">&gt;</span>),
     {
         <span class="self">self</span>.<span class="ident">tze_builder</span>
             .<span class="ident">add_input</span>(<span class="ident">extension_id</span>, <span class="ident">mode</span>, <span class="ident">prevout</span>, <span class="ident">witness_builder</span>);
@@ -1175,7 +1175,7 @@
         <span class="ident">extension_id</span>: <span class="ident">u32</span>,
         <span class="ident">value</span>: <span class="ident">Amount</span>,
         <span class="ident">guarded_by</span>: <span class="kw-2">&amp;</span><span class="ident">G</span>,
-    ) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="self">Self</span><span class="ident">::BuildError</span><span class="op">&gt;</span> {
+    ) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident"><span class="self">Self</span>::BuildError</span><span class="op">&gt;</span> {
         <span class="self">self</span>.<span class="ident">tze_builder</span>.<span class="ident">add_output</span>(<span class="ident">extension_id</span>, <span class="ident">value</span>, <span class="ident">guarded_by</span>)
     }
 }
@@ -1194,7 +1194,7 @@
     <span class="doccomment">///</span>
     <span class="doccomment">/// WARNING: DO NOT USE IN PRODUCTION</span>
     <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">test_only_new_with_rng</span>(<span class="ident">params</span>: <span class="ident">P</span>, <span class="ident">height</span>: <span class="ident">BlockHeight</span>, <span class="ident">rng</span>: <span class="ident">R</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">Builder</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">P</span>, <span class="ident">R</span><span class="op">&gt;</span> {
-        <span class="self">Self</span><span class="ident">::new_internal</span>(<span class="ident">params</span>, <span class="ident">height</span>, <span class="ident">rng</span>)
+        <span class="ident"><span class="self">Self</span>::new_internal</span>(<span class="ident">params</span>, <span class="ident">height</span>, <span class="ident">rng</span>)
     }
 
     <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">mock_build</span>(<span class="self">self</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span>(<span class="ident">Transaction</span>, <span class="ident">SaplingMetadata</span>), <span class="ident">Error</span><span class="op">&gt;</span> {
@@ -1223,7 +1223,7 @@
     <span class="kw">use</span> <span class="kw">super</span>::{<span class="ident">Builder</span>, <span class="ident">Error</span>, <span class="ident">SaplingBuilder</span>, <span class="ident">DEFAULT_TX_EXPIRY_DELTA</span>};
 
     <span class="attribute">#[<span class="ident">cfg</span>(<span class="ident">feature</span> <span class="op">=</span> <span class="string">&quot;zfuture&quot;</span>)]</span>
-    <span class="kw">use</span> <span class="kw">super</span><span class="ident">::TzeBuilder</span>;
+    <span class="kw">use</span> <span class="ident"><span class="kw">super</span>::TzeBuilder</span>;
 
     <span class="attribute">#[<span class="ident">cfg</span>(<span class="ident">not</span>(<span class="ident">feature</span> <span class="op">=</span> <span class="string">&quot;zfuture&quot;</span>))]</span>
     <span class="kw">use</span> <span class="ident">std::marker::PhantomData</span>;
@@ -1248,8 +1248,8 @@
 
     <span class="attribute">#[<span class="ident">test</span>]</span>
     <span class="kw">fn</span> <span class="ident">binding_sig_absent_if_no_shielded_spend_or_output</span>() {
-        <span class="kw">use</span> <span class="kw">crate</span><span class="ident">::consensus::NetworkUpgrade</span>;
-        <span class="kw">use</span> <span class="kw">crate</span><span class="ident">::transaction::builder</span>::{<span class="self">self</span>, <span class="ident">TransparentBuilder</span>};
+        <span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::consensus::NetworkUpgrade</span>;
+        <span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::transaction::builder</span>::{<span class="self">self</span>, <span class="ident">TransparentBuilder</span>};
 
         <span class="kw">let</span> <span class="ident">sapling_activation_height</span> <span class="op">=</span> <span class="ident">TEST_NETWORK</span>
             .<span class="ident">activation_height</span>(<span class="ident">NetworkUpgrade::Sapling</span>)

@@ -274,8 +274,8 @@
     <span class="ident">transaction::components::Amount</span>,
 };
 
-<span class="kw">use</span> <span class="kw">super</span><span class="ident">::compute_value_balance</span>;
-<span class="kw">use</span> <span class="kw">crate</span><span class="ident">::circuit::sapling</span>::{<span class="ident">Output</span>, <span class="ident">Spend</span>};
+<span class="kw">use</span> <span class="ident"><span class="kw">super</span>::compute_value_balance</span>;
+<span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::circuit::sapling</span>::{<span class="ident">Output</span>, <span class="ident">Spend</span>};
 
 <span class="doccomment">/// A context object for creating the Sapling components of a Zcash transaction.</span>
 <span class="kw">pub</span> <span class="kw">struct</span> <span class="ident">SaplingProvingContext</span> {

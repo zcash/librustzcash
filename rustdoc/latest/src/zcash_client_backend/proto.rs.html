@@ -137,14 +137,10 @@
 <span id="137">137</span>
 <span id="138">138</span>
 <span id="139">139</span>
-<span id="140">140</span>
-<span id="141">141</span>
-<span id="142">142</span>
 </pre><pre class="rust">
 <span class="doccomment">//! Generated code for handling light client protobuf structs.</span>
 
 <span class="kw">use</span> <span class="ident">ff::PrimeField</span>;
-<span class="kw">use</span> <span class="ident">group::GroupEncoding</span>;
 <span class="kw">use</span> <span class="ident">std::convert</span>::{<span class="ident">TryFrom</span>, <span class="ident">TryInto</span>};
 
 <span class="kw">use</span> <span class="ident">zcash_primitives</span>::{
@@ -157,7 +153,7 @@
     },
 };
 
-<span class="kw">use</span> <span class="ident">zcash_note_encryption::COMPACT_NOTE_SIZE</span>;
+<span class="kw">use</span> <span class="ident">zcash_note_encryption</span>::{<span class="ident">EphemeralKeyBytes</span>, <span class="ident">COMPACT_NOTE_SIZE</span>};
 
 <span class="kw">pub</span> <span class="kw">mod</span> <span class="ident">compact_formats</span>;
 
@@ -246,13 +242,11 @@
     <span class="doccomment">/// A convenience method that parses [`CompactOutput.epk`].</span>
     <span class="doccomment">///</span>
     <span class="doccomment">/// [`CompactOutput.epk`]: #structfield.epk</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">epk</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">jubjub::ExtendedPoint</span>, ()<span class="op">&gt;</span> {
-        <span class="kw">let</span> <span class="ident">p</span> <span class="op">=</span> <span class="ident">jubjub::ExtendedPoint::from_bytes</span>(<span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">epk</span>[..].<span class="ident">try_into</span>().<span class="ident">map_err</span>(<span class="op">|</span><span class="kw">_</span><span class="op">|</span> ())<span class="question-mark">?</span>);
-        <span class="kw">if</span> <span class="ident">p</span>.<span class="ident">is_some</span>().<span class="ident">into</span>() {
-            <span class="prelude-val">Ok</span>(<span class="ident">p</span>.<span class="ident">unwrap</span>())
-        } <span class="kw">else</span> {
-            <span class="prelude-val">Err</span>(())
-        }
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">ephemeral_key</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">EphemeralKeyBytes</span>, ()<span class="op">&gt;</span> {
+        <span class="self">self</span>.<span class="ident">epk</span>[..]
+            .<span class="ident">try_into</span>()
+            .<span class="ident">map</span>(<span class="ident">EphemeralKeyBytes</span>)
+            .<span class="ident">map_err</span>(<span class="op">|</span><span class="kw">_</span><span class="op">|</span> ())
     }
 }
 
@@ -260,7 +254,7 @@
     <span class="kw">fn</span> <span class="ident">from</span>(<span class="ident">out</span>: <span class="ident">OutputDescription</span><span class="op">&lt;</span><span class="ident">A</span><span class="op">&gt;</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">compact_formats::CompactOutput</span> {
         <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">result</span> <span class="op">=</span> <span class="ident">compact_formats::CompactOutput::new</span>();
         <span class="ident">result</span>.<span class="ident">set_cmu</span>(<span class="ident">out</span>.<span class="ident">cmu</span>.<span class="ident">to_repr</span>().<span class="ident">to_vec</span>());
-        <span class="ident">result</span>.<span class="ident">set_epk</span>(<span class="ident">out</span>.<span class="ident">ephemeral_key</span>.<span class="ident">to_bytes</span>().<span class="ident">to_vec</span>());
+        <span class="ident">result</span>.<span class="ident">set_epk</span>(<span class="ident">out</span>.<span class="ident">ephemeral_key</span>.<span class="ident">as_ref</span>().<span class="ident">to_vec</span>());
         <span class="ident">result</span>.<span class="ident">set_ciphertext</span>(<span class="ident">out</span>.<span class="ident">enc_ciphertext</span>[..<span class="ident">COMPACT_NOTE_SIZE</span>].<span class="ident">to_vec</span>());
         <span class="ident">result</span>
     }
@@ -269,10 +263,10 @@
 <span class="kw">impl</span> <span class="ident">TryFrom</span><span class="op">&lt;</span><span class="ident">compact_formats::CompactOutput</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">CompactOutputDescription</span> {
     <span class="kw">type</span> <span class="ident">Error</span> <span class="op">=</span> ();
 
-    <span class="kw">fn</span> <span class="ident">try_from</span>(<span class="ident">value</span>: <span class="ident">compact_formats::CompactOutput</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="self">Self</span>, <span class="self">Self</span><span class="ident">::Error</span><span class="op">&gt;</span> {
+    <span class="kw">fn</span> <span class="ident">try_from</span>(<span class="ident">value</span>: <span class="ident">compact_formats::CompactOutput</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="self">Self</span>, <span class="ident"><span class="self">Self</span>::Error</span><span class="op">&gt;</span> {
         <span class="prelude-val">Ok</span>(<span class="ident">CompactOutputDescription</span> {
             <span class="ident">cmu</span>: <span class="ident">value</span>.<span class="ident">cmu</span>()<span class="question-mark">?</span>,
-            <span class="ident">epk</span>: <span class="ident">value</span>.<span class="ident">epk</span>()<span class="question-mark">?</span>,
+            <span class="ident">ephemeral_key</span>: <span class="ident">value</span>.<span class="ident">ephemeral_key</span>()<span class="question-mark">?</span>,
             <span class="ident">enc_ciphertext</span>: <span class="ident">value</span>.<span class="ident">ciphertext</span>,
         })
     }

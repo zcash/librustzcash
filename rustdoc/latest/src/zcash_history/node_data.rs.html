@@ -256,7 +256,7 @@
 <span class="kw">use</span> <span class="ident">bigint::U256</span>;
 <span class="kw">use</span> <span class="ident">byteorder</span>::{<span class="ident">LittleEndian</span>, <span class="ident">ReadBytesExt</span>, <span class="ident">WriteBytesExt</span>};
 
-<span class="kw">use</span> <span class="kw">crate</span><span class="ident">::Version</span>;
+<span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::Version</span>;
 
 <span class="doccomment">/// Maximum serialized size of the node metadata.</span>
 <span class="kw">pub</span> <span class="kw">const</span> <span class="ident">MAX_NODE_DATA_SIZE</span>: <span class="ident">usize</span> <span class="op">=</span> <span class="number">32</span> <span class="op">+</span> <span class="comment">// subtree commitment</span>
@@ -309,7 +309,7 @@
 <span class="kw">impl</span> <span class="ident">NodeData</span> {
     <span class="doccomment">/// Combine two nodes metadata.</span>
     <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">combine</span>(<span class="ident">left</span>: <span class="kw-2">&amp;</span><span class="ident">NodeData</span>, <span class="ident">right</span>: <span class="kw-2">&amp;</span><span class="ident">NodeData</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">NodeData</span> {
-        <span class="kw">crate</span><span class="ident">::V1::combine</span>(<span class="ident">left</span>, <span class="ident">right</span>)
+        <span class="ident"><span class="kw">crate</span>::V1::combine</span>(<span class="ident">left</span>, <span class="ident">right</span>)
     }
 
     <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">combine_inner</span>(
@@ -377,9 +377,9 @@
         <span class="self">self</span>.<span class="ident">subtree_total_work</span>.<span class="ident">to_little_endian</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">work_buf</span>[..]);
         <span class="ident">w</span>.<span class="ident">write_all</span>(<span class="kw-2">&amp;</span><span class="ident">work_buf</span>)<span class="question-mark">?</span>;
 
-        <span class="self">Self</span><span class="ident">::write_compact</span>(<span class="ident">w</span>, <span class="self">self</span>.<span class="ident">start_height</span>)<span class="question-mark">?</span>;
-        <span class="self">Self</span><span class="ident">::write_compact</span>(<span class="ident">w</span>, <span class="self">self</span>.<span class="ident">end_height</span>)<span class="question-mark">?</span>;
-        <span class="self">Self</span><span class="ident">::write_compact</span>(<span class="ident">w</span>, <span class="self">self</span>.<span class="ident">sapling_tx</span>)<span class="question-mark">?</span>;
+        <span class="ident"><span class="self">Self</span>::write_compact</span>(<span class="ident">w</span>, <span class="self">self</span>.<span class="ident">start_height</span>)<span class="question-mark">?</span>;
+        <span class="ident"><span class="self">Self</span>::write_compact</span>(<span class="ident">w</span>, <span class="self">self</span>.<span class="ident">end_height</span>)<span class="question-mark">?</span>;
+        <span class="ident"><span class="self">Self</span>::write_compact</span>(<span class="ident">w</span>, <span class="self">self</span>.<span class="ident">sapling_tx</span>)<span class="question-mark">?</span>;
         <span class="prelude-val">Ok</span>(())
     }
 
@@ -401,26 +401,26 @@
         <span class="ident">r</span>.<span class="ident">read_exact</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">work_buf</span>)<span class="question-mark">?</span>;
         <span class="ident">data</span>.<span class="ident">subtree_total_work</span> <span class="op">=</span> <span class="ident">U256::from_little_endian</span>(<span class="kw-2">&amp;</span><span class="ident">work_buf</span>);
 
-        <span class="ident">data</span>.<span class="ident">start_height</span> <span class="op">=</span> <span class="self">Self</span><span class="ident">::read_compact</span>(<span class="ident">r</span>)<span class="question-mark">?</span>;
-        <span class="ident">data</span>.<span class="ident">end_height</span> <span class="op">=</span> <span class="self">Self</span><span class="ident">::read_compact</span>(<span class="ident">r</span>)<span class="question-mark">?</span>;
-        <span class="ident">data</span>.<span class="ident">sapling_tx</span> <span class="op">=</span> <span class="self">Self</span><span class="ident">::read_compact</span>(<span class="ident">r</span>)<span class="question-mark">?</span>;
+        <span class="ident">data</span>.<span class="ident">start_height</span> <span class="op">=</span> <span class="ident"><span class="self">Self</span>::read_compact</span>(<span class="ident">r</span>)<span class="question-mark">?</span>;
+        <span class="ident">data</span>.<span class="ident">end_height</span> <span class="op">=</span> <span class="ident"><span class="self">Self</span>::read_compact</span>(<span class="ident">r</span>)<span class="question-mark">?</span>;
+        <span class="ident">data</span>.<span class="ident">sapling_tx</span> <span class="op">=</span> <span class="ident"><span class="self">Self</span>::read_compact</span>(<span class="ident">r</span>)<span class="question-mark">?</span>;
 
         <span class="prelude-val">Ok</span>(<span class="ident">data</span>)
     }
 
     <span class="doccomment">/// Convert to byte representation.</span>
     <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">to_bytes</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span> {
-        <span class="kw">crate</span><span class="ident">::V1::to_bytes</span>(<span class="self">self</span>)
+        <span class="ident"><span class="kw">crate</span>::V1::to_bytes</span>(<span class="self">self</span>)
     }
 
     <span class="doccomment">/// Convert from byte representation.</span>
     <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">from_bytes</span><span class="op">&lt;</span><span class="ident">T</span>: <span class="ident">AsRef</span><span class="op">&lt;</span>[<span class="ident">u8</span>]<span class="op">&gt;</span><span class="op">&gt;</span>(<span class="ident">consensus_branch_id</span>: <span class="ident">u32</span>, <span class="ident">buf</span>: <span class="ident">T</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">std::io::Result</span><span class="op">&lt;</span><span class="self">Self</span><span class="op">&gt;</span> {
-        <span class="kw">crate</span><span class="ident">::V1::from_bytes</span>(<span class="ident">consensus_branch_id</span>, <span class="ident">buf</span>)
+        <span class="ident"><span class="kw">crate</span>::V1::from_bytes</span>(<span class="ident">consensus_branch_id</span>, <span class="ident">buf</span>)
     }
 
     <span class="doccomment">/// Hash node metadata</span>
     <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">hash</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) <span class="op">-</span><span class="op">&gt;</span> [<span class="ident">u8</span>; <span class="number">32</span>] {
-        <span class="kw">crate</span><span class="ident">::V1::hash</span>(<span class="self">self</span>)
+        <span class="ident"><span class="kw">crate</span>::V1::hash</span>(<span class="self">self</span>)
     }
 }
 
@@ -498,7 +498,7 @@
 
 <span class="attribute">#[<span class="ident">cfg</span>(<span class="ident">test</span>)]</span>
 <span class="kw">mod</span> <span class="ident">tests</span> {
-    <span class="kw">use</span> <span class="kw">super</span><span class="ident">::NodeData</span>;
+    <span class="kw">use</span> <span class="ident"><span class="kw">super</span>::NodeData</span>;
     <span class="kw">use</span> <span class="ident">quickcheck</span>::{<span class="ident">quickcheck</span>, <span class="ident">TestResult</span>};
 
     <span class="macro">quickcheck!</span> {

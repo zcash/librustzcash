@@ -43,8 +43,8 @@
 <span class="kw">mod</span> <span class="ident">prover</span>;
 <span class="kw">mod</span> <span class="ident">verifier</span>;
 
-<span class="kw">pub</span> <span class="kw">use</span> <span class="self">self</span><span class="ident">::prover::SaplingProvingContext</span>;
-<span class="kw">pub</span> <span class="kw">use</span> <span class="self">self</span><span class="ident">::verifier::SaplingVerificationContext</span>;
+<span class="kw">pub</span> <span class="kw">use</span> <span class="ident"><span class="self">self</span>::prover::SaplingProvingContext</span>;
+<span class="kw">pub</span> <span class="kw">use</span> <span class="ident"><span class="self">self</span>::verifier::SaplingVerificationContext</span>;
 
 <span class="comment">// This function computes `value` in the exponent of the value commitment base</span>
 <span class="kw">fn</span> <span class="ident">compute_value_balance</span>(<span class="ident">value</span>: <span class="ident">Amount</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">jubjub::ExtendedPoint</span><span class="op">&gt;</span> {

@@ -186,7 +186,7 @@
 <span class="kw">use</span> <span class="ident">blake2b_simd</span>::{<span class="ident">Hash</span> <span class="kw">as</span> <span class="ident">Blake2bHash</span>, <span class="ident">Params</span>, <span class="ident">State</span>};
 <span class="kw">use</span> <span class="ident">byteorder</span>::{<span class="ident">LittleEndian</span>, <span class="ident">WriteBytesExt</span>};
 
-<span class="kw">use</span> <span class="kw">crate</span><span class="ident">::transaction</span>::{
+<span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::transaction</span>::{
     <span class="ident">components::transparent</span>::{<span class="self">self</span>, <span class="ident">TxOut</span>},
     <span class="ident">sighash</span>::{
         <span class="ident">SignableInput</span>, <span class="ident">TransparentInput</span>, <span class="ident">SIGHASH_ANYONECANPAY</span>, <span class="ident">SIGHASH_MASK</span>, <span class="ident">SIGHASH_NONE</span>,
