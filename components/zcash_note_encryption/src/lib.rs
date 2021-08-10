@@ -138,6 +138,22 @@ pub trait Domain {
 
     fn epk(ephemeral_key: &EphemeralKeyBytes) -> Option<Self::EphemeralPublicKey>;
 
+    /// Computes `Self::epk` on a batch of ephemeral keys.
+    ///
+    /// This is useful for protocols where the underlying curve requires an inversion to
+    /// parse an encoded point.
+    ///
+    /// For usability, this returns tuples of the ephemeral keys and the result of parsing
+    /// them.
+    fn batch_epk(
+        ephemeral_keys: impl Iterator<Item = EphemeralKeyBytes>,
+    ) -> Vec<(Option<Self::EphemeralPublicKey>, EphemeralKeyBytes)> {
+        // Default implementation: do the non-batched thing.
+        ephemeral_keys
+            .map(|ephemeral_key| (Self::epk(&ephemeral_key), ephemeral_key))
+            .collect()
+    }
+
     fn check_epk_bytes<F: Fn(&Self::EphemeralSecretKey) -> NoteValidity>(
         note: &Self::Note,
         check: F,
