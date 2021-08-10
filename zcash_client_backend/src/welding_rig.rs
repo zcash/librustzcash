@@ -76,7 +76,7 @@ fn scan_output<P: consensus::Parameters, K: ScanningKey>(
         return Some(WalletShieldedOutput {
             index,
             cmu: output.cmu,
-            epk: output.epk,
+            ephemeral_key: output.ephemeral_key,
             account: **account,
             note,
             to,

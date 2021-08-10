@@ -8,6 +8,12 @@ and this library adheres to Rust's notion of
 ## [Unreleased]
 ### Changed
 - MSRV is now 1.51.0.
+- `epk: jubjub::ExtendedPoint` has been replaced by
+  `ephemeral_key: zcash_note_encryption::EphemeralKeyBytes` in various places:
+  - `zcash_client_backend::wallet::WalletShieldedOutput`: the `epk` field has
+    been replaced by `ephemeral_key`.
+  - `zcash_client_backend::proto::compact_formats::CompactOutput`: the `epk`
+    method has been replaced by `ephemeral_key`.
 - Renamed the following in `zcash_client_backend::data_api` to use lower-case
   abbreviations (matching Rust naming conventions):
   - `error::Error::InvalidExtSK` to `Error::InvalidExtSk`

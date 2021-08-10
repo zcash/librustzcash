@@ -3,6 +3,7 @@
 
 use subtle::{Choice, ConditionallySelectable};
 
+use zcash_note_encryption::EphemeralKeyBytes;
 use zcash_primitives::{
     merkle_tree::IncrementalWitness,
     sapling::{
@@ -54,7 +55,7 @@ pub struct WalletShieldedSpend {
 pub struct WalletShieldedOutput<N> {
     pub index: usize,
     pub cmu: bls12_381::Scalar,
-    pub epk: jubjub::ExtendedPoint,
+    pub ephemeral_key: EphemeralKeyBytes,
     pub account: AccountId,
     pub note: Note,
     pub to: PaymentAddress,

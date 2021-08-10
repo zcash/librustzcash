@@ -4,6 +4,7 @@ use std::fmt;
 use std::sync::mpsc::Sender;
 
 use ff::Field;
+use group::GroupEncoding;
 use rand::{seq::SliceRandom, RngCore};
 
 use crate::{
@@ -136,12 +137,12 @@ impl SaplingOutput {
         let enc_ciphertext = encryptor.encrypt_note_plaintext();
         let out_ciphertext = encryptor.encrypt_outgoing_plaintext(&cv, &cmu, rng);
 
-        let ephemeral_key = *encryptor.epk();
+        let epk = *encryptor.epk();
 
         OutputDescription {
             cv,
             cmu,
-            ephemeral_key,
+            ephemeral_key: epk.to_bytes().into(),
             enc_ciphertext,
             out_ciphertext,
             zkproof,
@@ -463,7 +464,7 @@ impl<P: consensus::Parameters> SaplingBuilder<P> {
                     OutputDescription {
                         cv,
                         cmu,
-                        ephemeral_key: epk.into(),
+                        ephemeral_key: epk.to_bytes().into(),
                         enc_ciphertext,
                         out_ciphertext,
                         zkproof,
