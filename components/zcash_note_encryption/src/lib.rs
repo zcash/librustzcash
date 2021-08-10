@@ -7,6 +7,8 @@ use crypto_api_chachapoly::{ChaCha20Ietf, ChachaPolyIetf};
 use rand_core::RngCore;
 use subtle::{Choice, ConstantTimeEq};
 
+pub mod batch;
+
 pub const COMPACT_NOTE_SIZE: usize = 1 + // version
     11 + // diversifier
     8  + // value
@@ -99,6 +101,19 @@ pub trait Domain {
 
     fn kdf(secret: Self::SharedSecret, ephemeral_key: &EphemeralKeyBytes) -> Self::SymmetricKey;
 
+    /// Computes `Self::kdf` on a batch of items.
+    ///
+    /// For each item in the batch, if the shared secret is `None`, this returns `None` at
+    /// that position.
+    fn batch_kdf<'a>(
+        items: impl Iterator<Item = (Option<Self::SharedSecret>, &'a EphemeralKeyBytes)>,
+    ) -> Vec<Option<Self::SymmetricKey>> {
+        // Default implementation: do the non-batched thing.
+        items
+            .map(|(secret, ephemeral_key)| secret.map(|secret| Self::kdf(secret, ephemeral_key)))
+            .collect()
+    }
+
     // for right now, we just need `recipient` to get `d`; in the future when we
     // can get that from a Sapling note, the recipient parameter will be able
     // to be removed.
@@ -123,6 +138,22 @@ pub trait Domain {
     fn epk_bytes(epk: &Self::EphemeralPublicKey) -> EphemeralKeyBytes;
 
     fn epk(ephemeral_key: &EphemeralKeyBytes) -> Option<Self::EphemeralPublicKey>;
+
+    /// Computes `Self::epk` on a batch of ephemeral keys.
+    ///
+    /// This is useful for protocols where the underlying curve requires an inversion to
+    /// parse an encoded point.
+    ///
+    /// For usability, this returns tuples of the ephemeral keys and the result of parsing
+    /// them.
+    fn batch_epk(
+        ephemeral_keys: impl Iterator<Item = EphemeralKeyBytes>,
+    ) -> Vec<(Option<Self::EphemeralPublicKey>, EphemeralKeyBytes)> {
+        // Default implementation: do the non-batched thing.
+        ephemeral_keys
+            .map(|ephemeral_key| (Self::epk(&ephemeral_key), ephemeral_key))
+            .collect()
+    }
 
     fn check_epk_bytes<F: Fn(&Self::EphemeralSecretKey) -> NoteValidity>(
         note: &Self::Note,
@@ -334,13 +365,23 @@ pub fn try_note_decryption<D: Domain, Output: ShieldedOutput<D>>(
     ivk: &D::IncomingViewingKey,
     output: &Output,
 ) -> Option<(D::Note, D::Recipient, D::Memo)> {
-    assert_eq!(output.enc_ciphertext().len(), ENC_CIPHERTEXT_SIZE);
     let ephemeral_key = output.ephemeral_key();
 
     let epk = D::epk(&ephemeral_key)?;
     let shared_secret = D::ka_agree_dec(ivk, &epk);
     let key = D::kdf(shared_secret, &ephemeral_key);
 
+    try_note_decryption_inner(domain, ivk, &ephemeral_key, output, key)
+}
+
+fn try_note_decryption_inner<D: Domain, Output: ShieldedOutput<D>>(
+    domain: &D,
+    ivk: &D::IncomingViewingKey,
+    ephemeral_key: &EphemeralKeyBytes,
+    output: &Output,
+    key: D::SymmetricKey,
+) -> Option<(D::Note, D::Recipient, D::Memo)> {
+    assert_eq!(output.enc_ciphertext().len(), ENC_CIPHERTEXT_SIZE);
     let mut plaintext = [0; ENC_CIPHERTEXT_SIZE];
     assert_eq!(
         ChachaPolyIetf::aead_cipher()
@@ -358,7 +399,7 @@ pub fn try_note_decryption<D: Domain, Output: ShieldedOutput<D>>(
     let (note, to) = parse_note_plaintext_without_memo_ivk(
         domain,
         ivk,
-        &ephemeral_key,
+        ephemeral_key,
         &output.cmstar_bytes(),
         &plaintext,
     )?;
@@ -419,12 +460,23 @@ pub fn try_compact_note_decryption<D: Domain, Output: ShieldedOutput<D>>(
     ivk: &D::IncomingViewingKey,
     output: &Output,
 ) -> Option<(D::Note, D::Recipient)> {
-    assert_eq!(output.enc_ciphertext().len(), COMPACT_NOTE_SIZE);
     let ephemeral_key = output.ephemeral_key();
 
     let epk = D::epk(&ephemeral_key)?;
     let shared_secret = D::ka_agree_dec(&ivk, &epk);
     let key = D::kdf(shared_secret, &ephemeral_key);
+
+    try_compact_note_decryption_inner(domain, ivk, &ephemeral_key, output, key)
+}
+
+fn try_compact_note_decryption_inner<D: Domain, Output: ShieldedOutput<D>>(
+    domain: &D,
+    ivk: &D::IncomingViewingKey,
+    ephemeral_key: &EphemeralKeyBytes,
+    output: &Output,
+    key: D::SymmetricKey,
+) -> Option<(D::Note, D::Recipient)> {
+    assert_eq!(output.enc_ciphertext().len(), COMPACT_NOTE_SIZE);
 
     // Start from block 1 to skip over Poly1305 keying output
     let mut plaintext = [0; COMPACT_NOTE_SIZE];
@@ -434,7 +486,7 @@ pub fn try_compact_note_decryption<D: Domain, Output: ShieldedOutput<D>>(
     parse_note_plaintext_without_memo_ivk(
         domain,
         ivk,
-        &ephemeral_key,
+        ephemeral_key,
         &output.cmstar_bytes(),
         &plaintext,
     )

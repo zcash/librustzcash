@@ -1,14 +1,17 @@
-use criterion::{criterion_group, criterion_main, Criterion};
+use std::iter;
+
+use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use ff::Field;
 use group::GroupEncoding;
 use rand_core::OsRng;
+use zcash_note_encryption::batch;
 use zcash_primitives::{
     consensus::{NetworkUpgrade::Canopy, Parameters, TestNetwork, TEST_NETWORK},
     memo::MemoBytes,
     sapling::{
         note_encryption::{
             sapling_note_encryption, try_sapling_compact_note_decryption,
-            try_sapling_note_decryption,
+            try_sapling_note_decryption, SaplingDomain,
         },
         util::generate_random_rseed,
         Diversifier, PaymentAddress, SaplingIvk, ValueCommitment,
@@ -64,30 +67,77 @@ fn bench_note_decryption(c: &mut Criterion) {
         }
     };
 
-    let mut group = c.benchmark_group("sapling-note-decryption");
+    {
+        let mut group = c.benchmark_group("sapling-note-decryption");
+        group.throughput(Throughput::Elements(1));
 
-    group.bench_function("valid", |b| {
-        b.iter(|| try_sapling_note_decryption(&TEST_NETWORK, height, &valid_ivk, &output).unwrap())
-    });
+        group.bench_function("valid", |b| {
+            b.iter(|| {
+                try_sapling_note_decryption(&TEST_NETWORK, height, &valid_ivk, &output).unwrap()
+            })
+        });
 
-    group.bench_function("invalid", |b| {
-        b.iter(|| try_sapling_note_decryption(&TEST_NETWORK, height, &invalid_ivk, &output))
-    });
+        group.bench_function("invalid", |b| {
+            b.iter(|| try_sapling_note_decryption(&TEST_NETWORK, height, &invalid_ivk, &output))
+        });
 
-    let compact = CompactOutputDescription::from(output);
+        let compact = CompactOutputDescription::from(output.clone());
 
-    group.bench_function("compact-valid", |b| {
-        b.iter(|| {
-            try_sapling_compact_note_decryption(&TEST_NETWORK, height, &valid_ivk, &compact)
-                .unwrap()
-        })
-    });
+        group.bench_function("compact-valid", |b| {
+            b.iter(|| {
+                try_sapling_compact_note_decryption(&TEST_NETWORK, height, &valid_ivk, &compact)
+                    .unwrap()
+            })
+        });
 
-    group.bench_function("compact-invalid", |b| {
-        b.iter(|| {
-            try_sapling_compact_note_decryption(&TEST_NETWORK, height, &invalid_ivk, &compact)
-        })
-    });
+        group.bench_function("compact-invalid", |b| {
+            b.iter(|| {
+                try_sapling_compact_note_decryption(&TEST_NETWORK, height, &invalid_ivk, &compact)
+            })
+        });
+    }
+
+    {
+        let valid_ivks = vec![valid_ivk];
+        let invalid_ivks = vec![invalid_ivk];
+
+        // We benchmark with one IVK so the overall batch size is equal to the number of
+        // outputs.
+        let size = 10;
+        let outputs: Vec<_> = iter::repeat(output)
+            .take(size)
+            .map(|output| {
+                (
+                    SaplingDomain::for_height(TEST_NETWORK.clone(), height),
+                    output,
+                )
+            })
+            .collect();
+
+        let mut group = c.benchmark_group("sapling-batch-note-decryption");
+        group.throughput(Throughput::Elements(size as u64));
+
+        group.bench_function(BenchmarkId::new("valid", size), |b| {
+            b.iter(|| batch::try_note_decryption(&valid_ivks, &outputs))
+        });
+
+        group.bench_function(BenchmarkId::new("invalid", size), |b| {
+            b.iter(|| batch::try_note_decryption(&invalid_ivks, &outputs))
+        });
+
+        let compact: Vec<_> = outputs
+            .into_iter()
+            .map(|(domain, output)| (domain, CompactOutputDescription::from(output.clone())))
+            .collect();
+
+        group.bench_function(BenchmarkId::new("compact-valid", size), |b| {
+            b.iter(|| batch::try_compact_note_decryption(&valid_ivks, &compact))
+        });
+
+        group.bench_function(BenchmarkId::new("compact-invalid", size), |b| {
+            b.iter(|| batch::try_compact_note_decryption(&invalid_ivks, &compact))
+        });
+    }
 }
 
 #[cfg(unix)]

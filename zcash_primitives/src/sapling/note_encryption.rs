@@ -3,6 +3,7 @@ use blake2b_simd::{Hash as Blake2bHash, Params as Blake2bParams};
 use byteorder::{LittleEndian, WriteBytesExt};
 use ff::PrimeField;
 use group::{cofactor::CofactorGroup, GroupEncoding};
+use jubjub::{AffinePoint, ExtendedPoint};
 use rand_core::RngCore;
 use std::convert::TryInto;
 
@@ -119,6 +120,12 @@ pub struct SaplingDomain<P: consensus::Parameters> {
     height: BlockHeight,
 }
 
+impl<P: consensus::Parameters> SaplingDomain<P> {
+    pub fn for_height(params: P, height: BlockHeight) -> Self {
+        Self { params, height }
+    }
+}
+
 impl<P: consensus::Parameters> Domain for SaplingDomain<P> {
     type EphemeralSecretKey = jubjub::Scalar;
     // It is acceptable for this to be a point because we enforce by consensus that
@@ -176,6 +183,37 @@ impl<P: consensus::Parameters> Domain for SaplingDomain<P> {
     /// Implements section 5.4.4.4 of the Zcash Protocol Specification.
     fn kdf(dhsecret: jubjub::SubgroupPoint, epk: &EphemeralKeyBytes) -> Blake2bHash {
         kdf_sapling(dhsecret, epk)
+    }
+
+    fn batch_kdf<'a>(
+        items: impl Iterator<Item = (Option<Self::SharedSecret>, &'a EphemeralKeyBytes)>,
+    ) -> Vec<Option<Self::SymmetricKey>> {
+        let (shared_secrets, ephemeral_keys): (Vec<_>, Vec<_>) = items.unzip();
+
+        let secrets: Vec<_> = shared_secrets
+            .iter()
+            .filter_map(|s| s.map(ExtendedPoint::from))
+            .collect();
+        let mut secrets_affine = vec![AffinePoint::identity(); shared_secrets.len()];
+        group::Curve::batch_normalize(&secrets, &mut secrets_affine);
+
+        let mut secrets_affine = secrets_affine.into_iter();
+        shared_secrets
+            .into_iter()
+            .map(|s| s.and_then(|_| secrets_affine.next()))
+            .zip(ephemeral_keys.into_iter())
+            .map(|(secret, ephemeral_key)| {
+                secret.map(|dhsecret| {
+                    Blake2bParams::new()
+                        .hash_length(32)
+                        .personal(KDF_SAPLING_PERSONALIZATION)
+                        .to_state()
+                        .update(&dhsecret.to_bytes())
+                        .update(ephemeral_key.as_ref())
+                        .finalize()
+                })
+            })
+            .collect()
     }
 
     fn note_plaintext_bytes(
@@ -238,6 +276,19 @@ impl<P: consensus::Parameters> Domain for SaplingDomain<P> {
         // always been rejected by consensus (due to small-order checks).
         // https://zips.z.cash/zip-0216#specification
         jubjub::ExtendedPoint::from_bytes(&ephemeral_key.0).into()
+    }
+
+    fn batch_epk(
+        ephemeral_keys: impl Iterator<Item = EphemeralKeyBytes>,
+    ) -> Vec<(Option<Self::EphemeralPublicKey>, EphemeralKeyBytes)> {
+        let ephemeral_keys: Vec<_> = ephemeral_keys.collect();
+        let epks = jubjub::AffinePoint::batch_from_bytes(ephemeral_keys.iter().map(|b| b.0));
+        epks.into_iter()
+            .zip(ephemeral_keys.into_iter())
+            .map(|(epk, ephemeral_key)| {
+                (epk.map(jubjub::ExtendedPoint::from).into(), ephemeral_key)
+            })
+            .collect()
     }
 
     fn check_epk_bytes<F: FnOnce(&Self::EphemeralSecretKey) -> NoteValidity>(
@@ -436,7 +487,7 @@ mod tests {
     use std::convert::TryInto;
 
     use zcash_note_encryption::{
-        EphemeralKeyBytes, NoteEncryption, OutgoingCipherKey, ENC_CIPHERTEXT_SIZE,
+        batch, EphemeralKeyBytes, NoteEncryption, OutgoingCipherKey, ENC_CIPHERTEXT_SIZE,
         NOTE_PLAINTEXT_SIZE, OUT_CIPHERTEXT_SIZE, OUT_PLAINTEXT_SIZE,
     };
 
@@ -1340,6 +1391,37 @@ mod tests {
                 None => panic!("Output recovery failed"),
             }
 
+            match &batch::try_note_decryption(
+                &[ivk.clone()],
+                &[(
+                    SaplingDomain::for_height(TEST_NETWORK, height),
+                    output.clone(),
+                )],
+            )[..]
+            {
+                [Some((decrypted_note, decrypted_to, decrypted_memo))] => {
+                    assert_eq!(decrypted_note, &note);
+                    assert_eq!(decrypted_to, &to);
+                    assert_eq!(&decrypted_memo.as_array()[..], &tv.memo[..]);
+                }
+                _ => panic!("Note decryption failed"),
+            }
+
+            match &batch::try_compact_note_decryption(
+                &[ivk.clone()],
+                &[(
+                    SaplingDomain::for_height(TEST_NETWORK, height),
+                    CompactOutputDescription::from(output.clone()),
+                )],
+            )[..]
+            {
+                [Some((decrypted_note, decrypted_to))] => {
+                    assert_eq!(decrypted_note, &note);
+                    assert_eq!(decrypted_to, &to);
+                }
+                _ => panic!("Note decryption failed"),
+            }
+
             //
             // Test encryption
             //
@@ -1356,6 +1438,43 @@ mod tests {
             assert_eq!(
                 &ne.encrypt_outgoing_plaintext(&cv, &cmu, &mut OsRng)[..],
                 &tv.c_out[..]
+            );
+        }
+    }
+
+    #[test]
+    fn batching() {
+        let mut rng = OsRng;
+        let height = TEST_NETWORK.activation_height(Canopy).unwrap();
+
+        // Test batch trial-decryption with multiple IVKs and outputs.
+        let invalid_ivk = SaplingIvk(jubjub::Fr::random(rng));
+        let valid_ivk = SaplingIvk(jubjub::Fr::random(rng));
+        let outputs: Vec<_> = (0..10)
+            .map(|_| {
+                (
+                    SaplingDomain::for_height(TEST_NETWORK, height),
+                    random_enc_ciphertext_with(height, &valid_ivk, &mut rng).2,
+                )
+            })
+            .collect();
+
+        let res = batch::try_note_decryption(&[invalid_ivk.clone(), valid_ivk.clone()], &outputs);
+        assert_eq!(res.len(), 20);
+        // The batched trial decryptions with invalid_ivk failed.
+        assert_eq!(&res[..10], &vec![None; 10][..]);
+        for (result, (_, output)) in res[10..].iter().zip(outputs.iter()) {
+            // Confirm that the outputs should indeed have failed with invalid_ivk
+            assert_eq!(
+                try_sapling_note_decryption(&TEST_NETWORK, height, &invalid_ivk, output),
+                None
+            );
+
+            // Confirm the successful batched trial decryptions gave the same result.
+            assert!(result.is_some());
+            assert_eq!(
+                result,
+                &try_sapling_note_decryption(&TEST_NETWORK, height, &valid_ivk, output)
             );
         }
     }
