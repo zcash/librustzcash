@@ -278,6 +278,19 @@ impl<P: consensus::Parameters> Domain for SaplingDomain<P> {
         jubjub::ExtendedPoint::from_bytes(&ephemeral_key.0).into()
     }
 
+    fn batch_epk(
+        ephemeral_keys: impl Iterator<Item = EphemeralKeyBytes>,
+    ) -> Vec<(Option<Self::EphemeralPublicKey>, EphemeralKeyBytes)> {
+        let ephemeral_keys: Vec<_> = ephemeral_keys.collect();
+        let epks = jubjub::AffinePoint::batch_from_bytes(ephemeral_keys.iter().map(|b| b.0));
+        epks.into_iter()
+            .zip(ephemeral_keys.into_iter())
+            .map(|(epk, ephemeral_key)| {
+                (epk.map(jubjub::ExtendedPoint::from).into(), ephemeral_key)
+            })
+            .collect()
+    }
+
     fn check_epk_bytes<F: FnOnce(&Self::EphemeralSecretKey) -> NoteValidity>(
         note: &Note,
         check: F,
