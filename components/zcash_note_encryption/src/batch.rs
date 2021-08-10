@@ -35,18 +35,15 @@ fn batch_note_decryption<D: Domain, Output: ShieldedOutput<D>, F, FR>(
 where
     F: Fn(&D, &D::IncomingViewingKey, &EphemeralKeyBytes, &Output, D::SymmetricKey) -> Option<FR>,
 {
-    // Fetch the ephemeral keys for each output.
-    let ephemeral_keys: Vec<_> = outputs
-        .iter()
-        .map(|(_, output)| output.ephemeral_key())
-        .collect();
+    // Fetch the ephemeral keys for each output and batch-parse them.
+    let ephemeral_keys = D::batch_epk(outputs.iter().map(|(_, output)| output.ephemeral_key()));
 
     // Derive the shared secrets for all combinations of (ivk, output).
-    // None of this work can benefit from batching.
+    // The scalar multiplications cannot benefit from batching.
     let items = ivks.iter().flat_map(|ivk| {
-        ephemeral_keys.iter().map(move |ephemeral_key| {
+        ephemeral_keys.iter().map(move |(epk, ephemeral_key)| {
             (
-                D::epk(ephemeral_key).map(|epk| D::ka_agree_dec(ivk, &epk)),
+                epk.as_ref().map(|epk| D::ka_agree_dec(ivk, epk)),
                 ephemeral_key,
             )
         })
@@ -64,7 +61,7 @@ where
                 .zip(outputs.iter())
         })
         .zip(keys)
-        .map(|(((ivk, ephemeral_key), (domain, output)), key)| {
+        .map(|(((ivk, (_, ephemeral_key)), (domain, output)), key)| {
             // The `and_then` propagates any potential rejection from `D::epk`.
             key.and_then(|key| decrypt_inner(domain, ivk, ephemeral_key, output, key))
         })
