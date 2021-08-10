@@ -1446,11 +1446,23 @@ mod tests {
             })
             .collect();
 
-        let res = batch::try_note_decryption(&[invalid_ivk, valid_ivk], &outputs);
+        let res = batch::try_note_decryption(&[invalid_ivk.clone(), valid_ivk.clone()], &outputs);
         assert_eq!(res.len(), 20);
+        // The batched trial decryptions with invalid_ivk failed.
         assert_eq!(&res[..10], &vec![None; 10][..]);
-        for result in &res[10..] {
+        for (result, (_, output)) in res[10..].iter().zip(outputs.iter()) {
+            // Confirm that the outputs should indeed have failed with invalid_ivk
+            assert_eq!(
+                try_sapling_note_decryption(&TEST_NETWORK, height, &invalid_ivk, output),
+                None
+            );
+
+            // Confirm the successful batched trial decryptions gave the same result.
             assert!(result.is_some());
+            assert_eq!(
+                result,
+                &try_sapling_note_decryption(&TEST_NETWORK, height, &valid_ivk, output)
+            );
         }
     }
 }
