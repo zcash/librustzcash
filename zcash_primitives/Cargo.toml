@@ -18,6 +18,7 @@ all-features = true
 [dependencies]
 aes = "0.6"
 bitvec = "0.22"
+bip0039 = { version = "0.8.0", features = ["std", "all-languages"] }
 blake2b_simd = "0.5"
 blake2s_simd = "0.5"
 bls12_381 = "0.5"
