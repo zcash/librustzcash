@@ -14,20 +14,20 @@ edition = "2018"
 
 [dependencies]
 bech32 = "0.8"
-bls12_381 = "0.3.1"
+bls12_381 = "0.5"
 bs58 = { version = "0.4", features = ["check"] }
 base64 = "0.13"
-ff = "0.8"
-group = "0.8"
+ff = "0.10"
+group = "0.10"
 hex = "0.4"
 hdwallet = { version = "0.3.0", optional = true }
-jubjub = "0.5.1"
+jubjub = "0.7"
 log = "0.4"
 nom = "6.1"
 percent-encoding = "2.1.0"
-proptest = { version = "0.10.1", optional = true }
+proptest = { version = "1.0.0", optional = true }
 protobuf = "2.20"
-rand_core = "0.5.1"
+rand_core = "0.6"
 ripemd160 = { version = "0.9.1", optional = true }
 secp256k1 = { version = "0.19", optional = true }
 sha2 = { version = "0.9", optional = true }
@@ -41,8 +41,7 @@ protobuf-codegen-pure = "2.20"
 
 [dev-dependencies]
 gumdrop = "0.8"
-rand_core = "0.5.1"
-rand_xorshift = "0.2"
+rand_xorshift = "0.3"
 tempfile = "3.1.0"
 zcash_client_sqlite = { version = "0.3", path = "../zcash_client_sqlite" }
 zcash_proofs = { version = "0.5", path = "../zcash_proofs" }
@@ -50,6 +49,9 @@ zcash_proofs = { version = "0.5", path = "../zcash_proofs" }
 [features]
 transparent-inputs = ["ripemd160", "hdwallet", "sha2", "secp256k1"]
 test-dependencies = ["proptest", "zcash_primitives/test-dependencies", "hdwallet", "sha2"]
+
+[lib]
+bench = false
 
 [badges]
 maintenance = { status = "actively-developed" }

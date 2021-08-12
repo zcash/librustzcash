@@ -24,6 +24,9 @@ use bellman::gadgets::multipack;
 use bellman::gadgets::num;
 use bellman::gadgets::Assignment;
 
+#[cfg(test)]
+use ff::PrimeFieldBits;
+
 pub const TREE_DEPTH: usize = SAPLING_COMMITMENT_TREE_DEPTH;
 
 /// This is an instance of the `Spend` circuit.
@@ -591,10 +594,14 @@ fn test_input_circuit_with_bls12_381() {
 
                 cur = jubjub::ExtendedPoint::from(pedersen_hash::pedersen_hash(
                     pedersen_hash::Personalization::MerkleTree(i),
-                    lhs.into_iter()
+                    lhs.iter()
+                        .by_val()
                         .take(bls12_381::Scalar::NUM_BITS as usize)
-                        .chain(rhs.into_iter().take(bls12_381::Scalar::NUM_BITS as usize))
-                        .cloned(),
+                        .chain(
+                            rhs.iter()
+                                .by_val()
+                                .take(bls12_381::Scalar::NUM_BITS as usize),
+                        ),
                 ))
                 .to_affine()
                 .get_u();
@@ -765,10 +772,14 @@ fn test_input_circuit_with_bls12_381_external_test_vectors() {
 
                 cur = jubjub::ExtendedPoint::from(pedersen_hash::pedersen_hash(
                     pedersen_hash::Personalization::MerkleTree(i),
-                    lhs.into_iter()
+                    lhs.iter()
+                        .by_val()
                         .take(bls12_381::Scalar::NUM_BITS as usize)
-                        .chain(rhs.into_iter().take(bls12_381::Scalar::NUM_BITS as usize))
-                        .cloned(),
+                        .chain(
+                            rhs.iter()
+                                .by_val()
+                                .take(bls12_381::Scalar::NUM_BITS as usize),
+                        ),
                 ))
                 .to_affine()
                 .get_u();

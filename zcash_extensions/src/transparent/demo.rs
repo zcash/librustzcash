@@ -21,12 +21,16 @@
 use std::convert::TryFrom;
 use std::convert::TryInto;
 use std::fmt;
+use std::ops::{Deref, DerefMut};
 
 use blake2b_simd::Params;
 
 use zcash_primitives::{
     extensions::transparent::{Extension, ExtensionTxBuilder, FromPayload, ToPayload},
-    transaction::components::{amount::Amount, TzeOut, TzeOutPoint},
+    transaction::components::{
+        amount::Amount,
+        tze::{OutPoint, TzeOut},
+    },
 };
 
 /// Types and constants used for Mode 0 (open a channel)
@@ -336,6 +340,20 @@ pub struct DemoBuilder<B> {
     pub extension_id: u32,
 }
 
+impl<B> Deref for DemoBuilder<B> {
+    type Target = B;
+
+    fn deref(&self) -> &Self::Target {
+        &self.txn_builder
+    }
+}
+
+impl<B> DerefMut for DemoBuilder<B> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.txn_builder
+    }
+}
+
 /// Errors that can occur in construction of transactions using `DemoBuilder`.
 #[derive(Debug)]
 pub enum DemoBuildError<E> {
@@ -356,7 +374,7 @@ pub enum DemoBuildError<E> {
 
 /// Convenience methods for use with [`zcash_primitives::transaction::builder::Builder`]
 /// for constructing transactions that utilize the features of the demo extension.
-impl<'a, B: ExtensionTxBuilder<'a>> DemoBuilder<&mut B> {
+impl<'a, B: ExtensionTxBuilder<'a>> DemoBuilder<B> {
     /// Add a channel-opening precondition to the outputs of the transaction under
     /// construction.
     pub fn demo_open(
@@ -374,7 +392,7 @@ impl<'a, B: ExtensionTxBuilder<'a>> DemoBuilder<&mut B> {
     /// precondition to the transaction under construction.
     pub fn demo_transfer_to_close(
         &mut self,
-        prevout: (TzeOutPoint, TzeOut),
+        prevout: (OutPoint, TzeOut),
         transfer_amount: Amount,
         preimage_1: [u8; 32],
         hash_2: [u8; 32],
@@ -416,7 +434,7 @@ impl<'a, B: ExtensionTxBuilder<'a>> DemoBuilder<&mut B> {
     /// Add a channel-closing witness to the transaction under construction.
     pub fn demo_close(
         &mut self,
-        prevout: (TzeOutPoint, TzeOut),
+        prevout: (OutPoint, TzeOut),
         preimage_2: [u8; 32],
     ) -> Result<(), DemoBuildError<B::BuildError>> {
         let hash_2 = {
@@ -467,25 +485,65 @@ mod tests {
     use zcash_proofs::prover::LocalTxProver;
 
     use zcash_primitives::{
-        consensus::{BranchId, H0, TEST_NETWORK},
+        consensus::{BlockHeight, BranchId, NetworkUpgrade, Parameters},
+        constants,
         extensions::transparent::{self as tze, Extension, FromPayload, ToPayload},
         legacy::TransparentAddress,
         merkle_tree::{CommitmentTree, IncrementalWitness},
-        sapling::Node,
-        sapling::Rseed,
+        sapling::{Node, Rseed},
         transaction::{
             builder::Builder,
             components::{
                 amount::{Amount, DEFAULT_FEE},
-                TzeIn, TzeOut, TzeOutPoint,
+                tze::{Authorized, Bundle, OutPoint, TzeIn, TzeOut},
             },
-            Transaction, TransactionData,
+            Transaction, TransactionData, TxVersion,
         },
         zip32::ExtendedSpendingKey,
     };
 
     use super::{close, hash_1, open, Context, DemoBuilder, Precondition, Program, Witness};
 
+    #[derive(PartialEq, Copy, Clone, Debug)]
+    struct FutureNetwork;
+
+    impl Parameters for FutureNetwork {
+        fn activation_height(&self, nu: NetworkUpgrade) -> Option<BlockHeight> {
+            match nu {
+                NetworkUpgrade::Overwinter => Some(BlockHeight::from_u32(207_500)),
+                NetworkUpgrade::Sapling => Some(BlockHeight::from_u32(280_000)),
+                NetworkUpgrade::Blossom => Some(BlockHeight::from_u32(584_000)),
+                NetworkUpgrade::Heartwood => Some(BlockHeight::from_u32(903_800)),
+                NetworkUpgrade::Canopy => Some(BlockHeight::from_u32(1_028_500)),
+                NetworkUpgrade::Nu5 => Some(BlockHeight::from_u32(1_200_000)),
+                NetworkUpgrade::ZFuture => Some(BlockHeight::from_u32(1_400_000)),
+            }
+        }
+
+        fn coin_type(&self) -> u32 {
+            constants::testnet::COIN_TYPE
+        }
+
+        fn hrp_sapling_extended_spending_key(&self) -> &str {
+            constants::testnet::HRP_SAPLING_EXTENDED_SPENDING_KEY
+        }
+
+        fn hrp_sapling_extended_full_viewing_key(&self) -> &str {
+            constants::testnet::HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY
+        }
+
+        fn hrp_sapling_payment_address(&self) -> &str {
+            constants::testnet::HRP_SAPLING_PAYMENT_ADDRESS
+        }
+
+        fn b58_pubkey_address_prefix(&self) -> [u8; 2] {
+            constants::testnet::B58_PUBKEY_ADDRESS_PREFIX
+        }
+
+        fn b58_script_address_prefix(&self) -> [u8; 2] {
+            constants::testnet::B58_SCRIPT_ADDRESS_PREFIX
+        }
+    }
     fn demo_hashes(preimage_1: &[u8; 32], preimage_2: &[u8; 32]) -> ([u8; 32], [u8; 32]) {
         let hash_2 = {
             let mut hash = [0; 32];
@@ -563,15 +621,24 @@ mod tests {
     /// by the context.
     impl<'a> Context for Ctx<'a> {
         fn is_tze_only(&self) -> bool {
-            self.tx.vin.is_empty()
-                && self.tx.vout.is_empty()
-                && self.tx.shielded_spends.is_empty()
-                && self.tx.shielded_outputs.is_empty()
-                && self.tx.joinsplits.is_empty()
+            self.tx.transparent_bundle().is_none()
+                && self.tx.sapling_bundle().is_none()
+                && self.tx.sprout_bundle().is_none()
+                && self.tx.orchard_bundle().is_none()
         }
 
         fn tx_tze_outputs(&self) -> &[TzeOut] {
-            &self.tx.tze_outputs
+            match self.tx.tze_bundle() {
+                Some(b) => &b.vout,
+                None => &[],
+            }
+        }
+    }
+
+    fn demo_builder<'a>(height: BlockHeight) -> DemoBuilder<Builder<'a, FutureNetwork, OsRng>> {
+        DemoBuilder {
+            txn_builder: Builder::new(FutureNetwork, height),
+            extension_id: 0,
         }
     }
 
@@ -616,47 +683,89 @@ mod tests {
             precondition: tze::Precondition::from(0, &Precondition::open(hash_1)),
         };
 
-        let mut mtx_a = TransactionData::zfuture();
-        mtx_a.tze_outputs.push(out_a);
-        let tx_a = mtx_a.freeze().unwrap();
+        let tx_a = TransactionData::from_parts(
+            TxVersion::ZFuture,
+            BranchId::ZFuture,
+            0,
+            0u32.into(),
+            None,
+            None,
+            None,
+            None,
+            Some(Bundle {
+                vin: vec![],
+                vout: vec![out_a],
+                authorization: Authorized,
+            }),
+        )
+        .freeze()
+        .unwrap();
 
         //
         // Transfer
         //
 
         let in_b = TzeIn {
-            prevout: TzeOutPoint::new(tx_a.txid().0, 0),
+            prevout: OutPoint::new(tx_a.txid(), 0),
             witness: tze::Witness::from(0, &Witness::open(preimage_1)),
         };
         let out_b = TzeOut {
             value: Amount::from_u64(1).unwrap(),
             precondition: tze::Precondition::from(0, &Precondition::close(hash_2)),
         };
-        let mut mtx_b = TransactionData::zfuture();
-        mtx_b.tze_inputs.push(in_b);
-        mtx_b.tze_outputs.push(out_b);
-        let tx_b = mtx_b.freeze().unwrap();
+
+        let tx_b = TransactionData::from_parts(
+            TxVersion::ZFuture,
+            BranchId::ZFuture,
+            0,
+            0u32.into(),
+            None,
+            None,
+            None,
+            None,
+            Some(Bundle {
+                vin: vec![in_b],
+                vout: vec![out_b],
+                authorization: Authorized,
+            }),
+        )
+        .freeze()
+        .unwrap();
 
         //
         // Closing transaction
         //
 
         let in_c = TzeIn {
-            prevout: TzeOutPoint::new(tx_b.txid().0, 0),
+            prevout: OutPoint::new(tx_b.txid(), 0),
             witness: tze::Witness::from(0, &Witness::close(preimage_2)),
         };
 
-        let mut mtx_c = TransactionData::zfuture();
-        mtx_c.tze_inputs.push(in_c);
-        let tx_c = mtx_c.freeze().unwrap();
+        let tx_c = TransactionData::from_parts(
+            TxVersion::ZFuture,
+            BranchId::ZFuture,
+            0,
+            0u32.into(),
+            None,
+            None,
+            None,
+            None,
+            Some(Bundle {
+                vin: vec![in_c],
+                vout: vec![],
+                authorization: Authorized,
+            }),
+        )
+        .freeze()
+        .unwrap();
 
         // Verify tx_b
         {
             let ctx = Ctx { tx: &tx_b };
             assert_eq!(
                 Program.verify(
-                    &tx_a.tze_outputs[0].precondition,
-                    &tx_b.tze_inputs[0].witness,
+                    &tx_a.tze_bundle().unwrap().vout[0].precondition,
+                    &tx_b.tze_bundle().unwrap().vin[0].witness,
                     &ctx
                 ),
                 Ok(())
@@ -668,8 +777,8 @@ mod tests {
             let ctx = Ctx { tx: &tx_c };
             assert_eq!(
                 Program.verify(
-                    &tx_b.tze_outputs[0].precondition,
-                    &tx_c.tze_inputs[0].witness,
+                    &tx_b.tze_bundle().unwrap().vout[0].precondition,
+                    &tx_c.tze_bundle().unwrap().vin[0].witness,
                     &ctx
                 ),
                 Ok(())
@@ -682,6 +791,10 @@ mod tests {
         let preimage_1 = [1; 32];
         let preimage_2 = [2; 32];
 
+        let tx_height = FutureNetwork
+            .activation_height(NetworkUpgrade::ZFuture)
+            .unwrap();
+
         // Only run the test if we have the prover parameters.
         let prover = match LocalTxProver::with_default_location() {
             Some(prover) => prover,
@@ -693,7 +806,6 @@ mod tests {
         //
 
         let mut rng = OsRng;
-        let mut builder_a = Builder::new_with_rng_zfuture(TEST_NETWORK, H0, rng);
 
         // create some inputs to spend
         let extsk = ExtendedSpendingKey::master(&[]);
@@ -708,95 +820,78 @@ mod tests {
         tree.append(cm1).unwrap();
         let witness1 = IncrementalWitness::from_tree(&tree);
 
+        let mut builder_a = demo_builder(tx_height);
         builder_a
             .add_sapling_spend(extsk, *to.diversifier(), note1, witness1.path().unwrap())
             .unwrap();
 
-        let mut db_a = DemoBuilder {
-            txn_builder: &mut builder_a,
-            extension_id: 0,
-        };
-
         let value = Amount::from_u64(100000).unwrap();
         let (h1, h2) = demo_hashes(&preimage_1, &preimage_2);
-        db_a.demo_open(value, h1)
+        builder_a
+            .demo_open(value, h1)
             .map_err(|e| format!("open failure: {:?}", e))
             .unwrap();
         let (tx_a, _) = builder_a
-            .build(BranchId::Canopy, &prover)
+            .txn_builder
+            .build(&prover)
             .map_err(|e| format!("build failure: {:?}", e))
             .unwrap();
+        let tze_a = tx_a.tze_bundle().unwrap();
 
         //
         // Transfer
         //
 
-        let mut builder_b = Builder::new_with_rng_zfuture(TEST_NETWORK, H0, rng);
-        let mut db_b = DemoBuilder {
-            txn_builder: &mut builder_b,
-            extension_id: 0,
-        };
-        let prevout_a = (
-            TzeOutPoint::new(tx_a.txid().0, 0),
-            tx_a.tze_outputs[0].clone(),
-        );
-        let value_xfr = value - DEFAULT_FEE;
-        db_b.demo_transfer_to_close(prevout_a, value_xfr, preimage_1, h2)
+        let mut builder_b = demo_builder(tx_height + 1);
+        let prevout_a = (OutPoint::new(tx_a.txid(), 0), tze_a.vout[0].clone());
+        let value_xfr = (value - DEFAULT_FEE).unwrap();
+        builder_b
+            .demo_transfer_to_close(prevout_a, value_xfr, preimage_1, h2)
             .map_err(|e| format!("transfer failure: {:?}", e))
             .unwrap();
         let (tx_b, _) = builder_b
-            .build(BranchId::Canopy, &prover)
+            .txn_builder
+            .build(&prover)
             .map_err(|e| format!("build failure: {:?}", e))
             .unwrap();
+        let tze_b = tx_b.tze_bundle().unwrap();
 
         //
         // Closing transaction
         //
 
-        let mut builder_c = Builder::new_with_rng_zfuture(TEST_NETWORK, H0, rng);
-        let mut db_c = DemoBuilder {
-            txn_builder: &mut builder_c,
-            extension_id: 0,
-        };
-        let prevout_b = (
-            TzeOutPoint::new(tx_a.txid().0, 0),
-            tx_b.tze_outputs[0].clone(),
-        );
-        db_c.demo_close(prevout_b, preimage_2)
+        let mut builder_c = demo_builder(tx_height + 2);
+        let prevout_b = (OutPoint::new(tx_a.txid(), 0), tze_b.vout[0].clone());
+        builder_c
+            .demo_close(prevout_b, preimage_2)
             .map_err(|e| format!("close failure: {:?}", e))
             .unwrap();
 
         builder_c
             .add_transparent_output(
                 &TransparentAddress::PublicKey([0; 20]),
-                value_xfr - DEFAULT_FEE,
+                (value_xfr - DEFAULT_FEE).unwrap(),
             )
             .unwrap();
 
         let (tx_c, _) = builder_c
-            .build(BranchId::Canopy, &prover)
+            .txn_builder
+            .build(&prover)
             .map_err(|e| format!("build failure: {:?}", e))
             .unwrap();
+        let tze_c = tx_c.tze_bundle().unwrap();
 
         // Verify tx_b
         let ctx0 = Ctx { tx: &tx_b };
         assert_eq!(
-            Program.verify(
-                &tx_a.tze_outputs[0].precondition,
-                &tx_b.tze_inputs[0].witness,
-                &ctx0
-            ),
+            Program.verify(&tze_a.vout[0].precondition, &tze_b.vin[0].witness, &ctx0),
             Ok(())
         );
 
         // Verify tx_c
         let ctx1 = Ctx { tx: &tx_c };
         assert_eq!(
-            Program.verify(
-                &tx_b.tze_outputs[0].precondition,
-                &tx_c.tze_inputs[0].witness,
-                &ctx1
-            ),
+            Program.verify(&tze_b.vout[0].precondition, &tze_c.vin[0].witness, &ctx1),
             Ok(())
         );
     }

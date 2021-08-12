@@ -1,6 +1,6 @@
 use std::fmt::Debug;
 use zcash_primitives::{
-    consensus::{self, BranchId, NetworkUpgrade},
+    consensus::{self, NetworkUpgrade},
     memo::MemoBytes,
     sapling::prover::TxProver,
     transaction::{
@@ -58,7 +58,7 @@ where
 
     let sapling_outputs = decrypt_transaction(params, height, tx, &extfvks);
 
-    if !(sapling_outputs.is_empty() && tx.vout.is_empty()) {
+    if !(sapling_outputs.is_empty() && tx.transparent_bundle().iter().all(|b| b.vout.is_empty())) {
         let nullifiers = data.get_all_nullifiers()?;
         data.store_decrypted_tx(
             &DecryptedTransaction {
@@ -224,12 +224,22 @@ where
         .get_target_and_anchor_heights()
         .and_then(|x| x.ok_or_else(|| Error::ScanRequired.into()))?;
 
-    let target_value = request.payments.iter().map(|p| p.amount).sum::<Amount>() + DEFAULT_FEE;
+    let value = request
+        .payments
+        .iter()
+        .map(|p| p.amount)
+        .sum::<Option<Amount>>()
+        .ok_or_else(|| E::from(Error::InvalidAmount))?;
+    let target_value = (value + DEFAULT_FEE).ok_or_else(|| E::from(Error::InvalidAmount))?;
     let spendable_notes =
         wallet_db.select_unspent_sapling_notes(account, target_value, anchor_height)?;
 
     // Confirm we were able to select sufficient value
-    let selected_value = spendable_notes.iter().map(|n| n.note_value).sum();
+    let selected_value = spendable_notes
+        .iter()
+        .map(|n| n.note_value)
+        .sum::<Option<_>>()
+        .ok_or_else(|| E::from(Error::InvalidAmount))?;
     if selected_value < target_value {
         return Err(E::from(Error::InsufficientBalance(
             selected_value,
@@ -238,7 +248,6 @@ where
     }
 
     // Create the transaction
-    let consensus_branch_id = BranchId::for_height(params, height);
     let mut builder = Builder::new(params.clone(), height);
     for selected in spendable_notes {
         let from = extfvk
@@ -280,9 +289,7 @@ where
         }?
     }
 
-    let (tx, tx_metadata) = builder
-        .build(consensus_branch_id, &prover)
-        .map_err(Error::Builder)?;
+    let (tx, tx_metadata) = builder.build(&prover).map_err(Error::Builder)?;
 
     let sent_outputs = request.payments.iter().enumerate().map(|(i, payment)| {
         let idx = match &payment.recipient_address {
@@ -291,10 +298,13 @@ where
                 tx_metadata.output_index(i).expect("An output should exist in the transaction for each shielded payment."),
             RecipientAddress::Transparent(addr) => {
                 let script = addr.script();
-                tx.vout
-                    .iter()
-                    .enumerate()
-                    .find(|(_, tx_out)| tx_out.script_pubkey == script)
+                tx.transparent_bundle()
+                    .and_then(|b| {
+                        b.vout
+                            .iter()
+                            .enumerate()
+                            .find(|(_, tx_out)| tx_out.script_pubkey == script)
+                    })
                     .map(|(index, _)| index)
                     .expect("An output should exist in the transaction for each transparent payment.")
             }
@@ -351,14 +361,18 @@ where
 
     // get UTXOs from DB
     let utxos = wallet_db.get_unspent_transparent_utxos(&taddr, latest_anchor - confirmations)?;
-    let total_amount = utxos.iter().map(|utxo| utxo.value).sum::<Amount>();
+    let total_amount = utxos
+        .iter()
+        .map(|utxo| utxo.value)
+        .sum::<Option<Amount>>()
+        .ok_or_else(|| E::from(Error::InvalidAmount))?;
 
     let fee = DEFAULT_FEE;
     if fee >= total_amount {
         return Err(E::from(Error::InsufficientBalance(total_amount, fee)));
     }
 
-    let amount_to_shield = total_amount - fee;
+    let amount_to_shield = (total_amount - fee).ok_or_else(|| E::from(Error::InvalidAmount))?;
 
     let mut builder = Builder::new(params.clone(), latest_scanned_height);
 
@@ -384,11 +398,7 @@ where
         .add_sapling_output(Some(ovk), z_address.clone(), amount_to_shield, memo.clone())
         .map_err(Error::Builder)?;
 
-    let consensus_branch_id = BranchId::for_height(params, latest_anchor);
-
-    let (tx, tx_metadata) = builder
-        .build(consensus_branch_id, &prover)
-        .map_err(Error::Builder)?;
+    let (tx, tx_metadata) = builder.build(&prover).map_err(Error::Builder)?;
     let output_index = tx_metadata.output_index(0).expect(
         "No sapling note was created in autoshielding transaction. This is a programming error.",
     );

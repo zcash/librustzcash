@@ -8,6 +8,7 @@ use crate::encoding::{
 };
 
 /// An address that funds can be sent to.
+// TODO: rename to ParsedAddress
 #[derive(Debug, PartialEq, Clone)]
 pub enum RecipientAddress {
     Shielded(PaymentAddress),

@@ -1,17 +1,19 @@
 //! Generated code for handling light client protobuf structs.
 
 use ff::PrimeField;
-use group::GroupEncoding;
 use std::convert::{TryFrom, TryInto};
 
 use zcash_primitives::{
     block::{BlockHash, BlockHeader},
     consensus::BlockHeight,
     sapling::Nullifier,
-    transaction::components::sapling::{CompactOutputDescription, OutputDescription},
+    transaction::{
+        components::sapling::{self, CompactOutputDescription, OutputDescription},
+        TxId,
+    },
 };
 
-use zcash_note_encryption::COMPACT_NOTE_SIZE;
+use zcash_note_encryption::{EphemeralKeyBytes, COMPACT_NOTE_SIZE};
 
 pub mod compact_formats;
 
@@ -74,6 +76,15 @@ impl compact_formats::CompactBlock {
     }
 }
 
+impl compact_formats::CompactTx {
+    /// Returns the transaction Id
+    pub fn txid(&self) -> TxId {
+        let mut hash = [0u8; 32];
+        hash.copy_from_slice(&self.hash);
+        TxId::from_bytes(hash)
+    }
+}
+
 impl compact_formats::CompactOutput {
     /// Returns the note commitment for this output.
     ///
@@ -91,21 +102,19 @@ impl compact_formats::CompactOutput {
     /// A convenience method that parses [`CompactOutput.epk`].
     ///
     /// [`CompactOutput.epk`]: #structfield.epk
-    pub fn epk(&self) -> Result<jubjub::ExtendedPoint, ()> {
-        let p = jubjub::ExtendedPoint::from_bytes(&self.epk[..].try_into().map_err(|_| ())?);
-        if p.is_some().into() {
-            Ok(p.unwrap())
-        } else {
-            Err(())
-        }
+    pub fn ephemeral_key(&self) -> Result<EphemeralKeyBytes, ()> {
+        self.epk[..]
+            .try_into()
+            .map(EphemeralKeyBytes)
+            .map_err(|_| ())
     }
 }
 
-impl From<OutputDescription> for compact_formats::CompactOutput {
-    fn from(out: OutputDescription) -> compact_formats::CompactOutput {
+impl<A: sapling::Authorization> From<OutputDescription<A>> for compact_formats::CompactOutput {
+    fn from(out: OutputDescription<A>) -> compact_formats::CompactOutput {
         let mut result = compact_formats::CompactOutput::new();
         result.set_cmu(out.cmu.to_repr().to_vec());
-        result.set_epk(out.ephemeral_key.to_bytes().to_vec());
+        result.set_epk(out.ephemeral_key.as_ref().to_vec());
         result.set_ciphertext(out.enc_ciphertext[..COMPACT_NOTE_SIZE].to_vec());
         result
     }
@@ -117,7 +126,7 @@ impl TryFrom<compact_formats::CompactOutput> for CompactOutputDescription {
     fn try_from(value: compact_formats::CompactOutput) -> Result<Self, Self::Error> {
         Ok(CompactOutputDescription {
             cmu: value.cmu()?,
-            epk: value.epk()?,
+            ephemeral_key: value.ephemeral_key()?,
             enc_ciphertext: value.ciphertext,
         })
     }

@@ -563,16 +563,18 @@ impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
             // if we have some transparent outputs yet no shielded outputs, then this is t2t and we
             // can safely ignore it otherwise, this is z2t and it might have originated from our
             // wallet
-            if !d_tx.tx.vout.is_empty() {
+            if !d_tx.tx.transparent_bundle().iter().any(|b| b.vout.is_empty()) {
                 // store received z->t transactions in the same way they would be stored by
                 // create_spend_to_address If there are any of our shielded inputs, we interpret this
                 // as our z->t tx and store the vouts as our sent notes.
                 // FIXME this is a weird heuristic that is bound to trip us up somewhere.
 
-                if let Some((account_id, _)) = nullifiers.iter().find(|(_, nf)|
-                    d_tx.tx.shielded_spends.iter().any(|input| *nf == input.nullifier)
+                if let Some((account_id, _)) = nullifiers.iter().find(
+                    |(_, nf)|
+                        d_tx.tx.sapling_bundle().iter().flat_map(|b| b.shielded_spends.iter())
+                        .any(|input| *nf == input.nullifier)
                 ) {
-                    for (output_index, txout) in d_tx.tx.vout.iter().enumerate() {
+                    for (output_index, txout) in d_tx.tx.transparent_bundle().iter().flat_map(|b| b.vout.iter()).enumerate() {
                         wallet::put_sent_utxo(
                             up,
                             tx_ref,
@@ -601,8 +603,10 @@ impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
             //
             // Assumes that create_spend_to_address() will never be called in parallel, which is a
             // reasonable assumption for a light client such as a mobile phone.
-            for spend in &sent_tx.tx.shielded_spends {
-                wallet::mark_sapling_note_spent(up, tx_ref, &spend.nullifier)?;
+            if let Some(bundle) = sent_tx.tx.sapling_bundle() {
+                for spend in &bundle.shielded_spends {
+                    wallet::mark_sapling_note_spent(up, tx_ref, &spend.nullifier)?;
+                }
             }
 
             for utxo_outpoint in &sent_tx.utxos_spent {
@@ -855,7 +859,7 @@ mod tests {
             let note = Note {
                 g_d: change_addr.diversifier().g_d().unwrap(),
                 pk_d: *change_addr.pk_d(),
-                value: (in_value - value).into(),
+                value: (in_value - value).unwrap().into(),
                 rseed,
             };
             let encryptor = sapling_note_encryption::<_, Network>(

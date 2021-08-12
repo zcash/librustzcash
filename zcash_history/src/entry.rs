@@ -1,22 +1,30 @@
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 
-use crate::{EntryKind, EntryLink, Error, NodeData, MAX_NODE_DATA_SIZE};
+use crate::{EntryKind, EntryLink, Error, Version, MAX_NODE_DATA_SIZE};
 
 /// Max serialized length of entry data.
 pub const MAX_ENTRY_SIZE: usize = MAX_NODE_DATA_SIZE + 9;
 
 /// MMR Entry.
 #[derive(Debug)]
-pub struct Entry {
+pub struct Entry<V: Version> {
     pub(crate) kind: EntryKind,
-    pub(crate) data: NodeData,
+    pub(crate) data: V::NodeData,
 }
 
-impl Entry {
+impl<V: Version> Entry<V> {
     /// New entry of type node.
-    pub fn new(data: NodeData, left: EntryLink, right: EntryLink) -> Self {
+    pub fn new(data: V::NodeData, left: EntryLink, right: EntryLink) -> Self {
         Entry {
             kind: EntryKind::Node(left, right),
+            data,
+        }
+    }
+
+    /// Creates a new leaf.
+    pub fn new_leaf(data: V::NodeData) -> Self {
+        Entry {
+            kind: EntryKind::Leaf,
             data,
         }
     }
@@ -29,7 +37,7 @@ impl Entry {
 
     /// Number of leaves under this node.
     pub fn leaf_count(&self) -> u64 {
-        self.data.end_height - (self.data.start_height - 1)
+        V::end_height(&self.data) - (V::start_height(&self.data) - 1)
     }
 
     /// Is this node a leaf.
@@ -67,7 +75,7 @@ impl Entry {
             }
         };
 
-        let data = NodeData::read(consensus_branch_id, r)?;
+        let data = V::read(consensus_branch_id, r)?;
 
         Ok(Entry { kind, data })
     }
@@ -88,7 +96,7 @@ impl Entry {
             }
         }
 
-        self.data.write(w)?;
+        V::write(&self.data, w)?;
 
         Ok(())
     }
@@ -100,16 +108,7 @@ impl Entry {
     }
 }
 
-impl From<NodeData> for Entry {
-    fn from(s: NodeData) -> Self {
-        Entry {
-            kind: EntryKind::Leaf,
-            data: s,
-        }
-    }
-}
-
-impl std::fmt::Display for Entry {
+impl<V: Version> std::fmt::Display for Entry<V> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self.kind {
             EntryKind::Node(l, r) => write!(f, "node({}, {}, ..)", l, r),

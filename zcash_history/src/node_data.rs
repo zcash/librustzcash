@@ -1,6 +1,7 @@
 use bigint::U256;
-use blake2::Params as Blake2Params;
-use byteorder::{ByteOrder, LittleEndian, ReadBytesExt, WriteBytesExt};
+use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+
+use crate::Version;
 
 /// Maximum serialized size of the node metadata.
 pub const MAX_NODE_DATA_SIZE: usize = 32 + // subtree commitment
@@ -13,10 +14,13 @@ pub const MAX_NODE_DATA_SIZE: usize = 32 + // subtree commitment
     32 + // subtree total work
     9 +  // start height (compact uint)
     9 +  // end height (compact uint)
-    9; // Sapling tx count (compact uint)
-       // = total of 171
+    9 + // Sapling tx count (compact uint)
+    32 + // start Orchard tree root
+    32 + // end Orchard tree root
+    9; // Orchard tx count (compact uint)
+       // = total of 244
 
-/// Node metadata.
+/// V1 node metadata.
 #[repr(C)]
 #[derive(Debug, Clone, Default)]
 #[cfg_attr(test, derive(PartialEq))]
@@ -47,49 +51,20 @@ pub struct NodeData {
     pub sapling_tx: u64,
 }
 
-fn blake2b_personal(personalization: &[u8], input: &[u8]) -> [u8; 32] {
-    let hash_result = Blake2Params::new()
-        .hash_length(32)
-        .personal(personalization)
-        .to_state()
-        .update(input)
-        .finalize();
-    let mut result = [0u8; 32];
-    result.copy_from_slice(hash_result.as_bytes());
-    result
-}
-
-fn personalization(branch_id: u32) -> [u8; 16] {
-    let mut result = [0u8; 16];
-    result[..12].copy_from_slice(b"ZcashHistory");
-    LittleEndian::write_u32(&mut result[12..], branch_id);
-    result
-}
-
 impl NodeData {
     /// Combine two nodes metadata.
     pub fn combine(left: &NodeData, right: &NodeData) -> NodeData {
-        assert_eq!(left.consensus_branch_id, right.consensus_branch_id);
+        crate::V1::combine(left, right)
+    }
 
-        let mut hash_buf = [0u8; MAX_NODE_DATA_SIZE * 2];
-        let size = {
-            let mut cursor = ::std::io::Cursor::new(&mut hash_buf[..]);
-            left.write(&mut cursor)
-                .expect("Writing to memory buf with enough length cannot fail; qed");
-            right
-                .write(&mut cursor)
-                .expect("Writing to memory buf with enough length cannot fail; qed");
-            cursor.position() as usize
-        };
-
-        let hash = blake2b_personal(
-            &personalization(left.consensus_branch_id),
-            &hash_buf[..size],
-        );
-
+    pub(crate) fn combine_inner(
+        subtree_commitment: [u8; 32],
+        left: &NodeData,
+        right: &NodeData,
+    ) -> NodeData {
         NodeData {
             consensus_branch_id: left.consensus_branch_id,
-            subtree_commitment: hash,
+            subtree_commitment,
             start_time: left.start_time,
             end_time: right.end_time,
             start_target: left.start_target,
@@ -180,27 +155,64 @@ impl NodeData {
 
     /// Convert to byte representation.
     pub fn to_bytes(&self) -> Vec<u8> {
-        let mut buf = [0u8; MAX_NODE_DATA_SIZE];
-        let pos = {
-            let mut cursor = std::io::Cursor::new(&mut buf[..]);
-            self.write(&mut cursor).expect("Cursor cannot fail");
-            cursor.position() as usize
-        };
-
-        buf[0..pos].to_vec()
+        crate::V1::to_bytes(self)
     }
 
     /// Convert from byte representation.
     pub fn from_bytes<T: AsRef<[u8]>>(consensus_branch_id: u32, buf: T) -> std::io::Result<Self> {
-        let mut cursor = std::io::Cursor::new(buf);
-        Self::read(consensus_branch_id, &mut cursor)
+        crate::V1::from_bytes(consensus_branch_id, buf)
     }
 
     /// Hash node metadata
     pub fn hash(&self) -> [u8; 32] {
-        let bytes = self.to_bytes();
+        crate::V1::hash(self)
+    }
+}
 
-        blake2b_personal(&personalization(self.consensus_branch_id), &bytes)
+/// V2 node metadata.
+#[derive(Debug, Clone, Default)]
+#[cfg_attr(test, derive(PartialEq))]
+pub struct V2 {
+    /// The V1 node data retained in V2.
+    pub v1: NodeData,
+    /// Start Orchard tree root.
+    pub start_orchard_root: [u8; 32],
+    /// End Orchard tree root.
+    pub end_orchard_root: [u8; 32],
+    /// Number of Orchard transactions.
+    pub orchard_tx: u64,
+}
+
+impl V2 {
+    pub(crate) fn combine_inner(subtree_commitment: [u8; 32], left: &V2, right: &V2) -> V2 {
+        V2 {
+            v1: NodeData::combine_inner(subtree_commitment, &left.v1, &right.v1),
+            start_orchard_root: left.start_orchard_root,
+            end_orchard_root: right.end_orchard_root,
+            orchard_tx: left.orchard_tx + right.orchard_tx,
+        }
+    }
+
+    /// Write to the byte representation.
+    pub fn write<W: std::io::Write>(&self, w: &mut W) -> std::io::Result<()> {
+        self.v1.write(w)?;
+        w.write_all(&self.start_orchard_root)?;
+        w.write_all(&self.end_orchard_root)?;
+        NodeData::write_compact(w, self.orchard_tx)?;
+        Ok(())
+    }
+
+    /// Read from the byte representation.
+    pub fn read<R: std::io::Read>(consensus_branch_id: u32, r: &mut R) -> std::io::Result<Self> {
+        let mut data = V2 {
+            v1: NodeData::read(consensus_branch_id, r)?,
+            ..Default::default()
+        };
+        r.read_exact(&mut data.start_orchard_root)?;
+        r.read_exact(&mut data.end_orchard_root)?;
+        data.orchard_tx = NodeData::read_compact(r)?;
+
+        Ok(data)
     }
 }
 

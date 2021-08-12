@@ -5,7 +5,7 @@
 
 use ff::{Field, PrimeField};
 use group::GroupEncoding;
-use jubjub::{ExtendedPoint, SubgroupPoint};
+use jubjub::{AffinePoint, ExtendedPoint, SubgroupPoint};
 use rand_core::RngCore;
 use std::io::{self, Read, Write};
 use std::ops::{AddAssign, MulAssign, Neg};
@@ -123,13 +123,27 @@ impl PublicKey {
     }
 
     pub fn verify(&self, msg: &[u8], sig: &Signature, p_g: SubgroupPoint) -> bool {
+        self.verify_with_zip216(msg, sig, p_g, true)
+    }
+
+    pub fn verify_with_zip216(
+        &self,
+        msg: &[u8],
+        sig: &Signature,
+        p_g: SubgroupPoint,
+        zip216_enabled: bool,
+    ) -> bool {
         // c = H*(Rbar || M)
         let c = h_star(&sig.rbar[..], msg);
 
         // Signature checks:
         // R != invalid
         let r = {
-            let r = ExtendedPoint::from_bytes(&sig.rbar);
+            let r = if zip216_enabled {
+                ExtendedPoint::from_bytes(&sig.rbar)
+            } else {
+                AffinePoint::from_bytes_pre_zip216_compatibility(sig.rbar).map(|p| p.to_extended())
+            };
             if r.is_none().into() {
                 return false;
             }

@@ -6,6 +6,50 @@ and this library adheres to Rust's notion of
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+### Added
+- `zcash_primitives::sapling::redjubjub::PublicKey::verify_with_zip216`, for
+  controlling how RedJubjub signatures are validated. `PublicKey::verify` has
+  been altered to always use post-ZIP 216 validation rules.
+- `zcash_primitives::transaction::Builder::with_progress_notifier`, for setting
+  a notification channel on which transaction build progress updates will be
+  sent.
+- `zcash_primitives::transaction::Txid::{read, write, from_bytes}`
+- `zcash_primitives::sapling::NoteValue` a typesafe wrapper for Sapling note values.
+- `zcash_primitives::consensus::BranchId::{height_range, height_bounds}` functions
+  to provide range values for branch active heights.
+- `zcash_primitives::consensus::NetworkUpgrade::Nu5` value representing the Nu5 upgrade.
+- `zcash_primitives::consensus::BranchId::Nu5` value representing the Nu5 consensus branch.
+- New modules under `zcash_primitives::transaction::components` for building parts of
+  transactions:
+  - `sapling::builder` for Sapling transaction components.
+  - `transparent::builder` for transparent transaction components.
+  - `tze::builder` for TZE transaction components.
+  - `orchard` parsing and serialization for Orchard transaction components.
+- `zcash_primitives::transaction::Authorization` a trait representing a type-level
+  record of authorization types that correspond to signatures, witnesses, and
+  proofs for each Zcash sub-protocol (transparent, Sprout, Sapling, TZE, and
+  Orchard). This type makes it possible to encode a type-safe state machine
+  for the application of authorizing data to a transaction; implementations of
+  this trait represent different states of the authorization process.
+- New bundle types under the `zcash_primitives::transaction` submodules, one for 
+  each Zcash sub-protocol. These are now used instead of bare fields 
+  within the `TransactionData` type.
+  - `components::sapling::Bundle` bundle of
+    Sapling transaction elements. This new struct is parameterized by a
+    type bounded on a newly added `sapling::Authorization` trait which
+    is used to enable static reasoning about the state of Sapling proofs and
+    authorizing data, as described above.
+  - `components::transparent::Bundle` bundle of
+    transparent transaction elements. This new struct is parameterized by a
+    type bounded on a newly added `transparent::Authorization` trait which
+    is used to enable static reasoning about the state of transparent witness
+    data, as described above.
+  - `components::tze::Bundle` bundle of TZE
+    transaction elements. This new struct is parameterized by a
+    type bounded on a newly added `tze::Authorization` trait which
+    is used to enable static reasoning about the state of TZE witness
+    data, as described above.
+
 ### Changed
 - MSRV is now 1.51.0.
 - The following modules and helpers have been moved into
@@ -19,6 +63,40 @@ and this library adheres to Rust's notion of
   - `zcash_primitives::util::{hash_to_scalar, generate_random_rseed}`
 - Renamed `zcash_primitives::transaction::components::JSDescription` to
   `JsDescription` (matching Rust naming conventions).
+- `zcash_primitives::transaction::TxId` contents is now private.
+- Renamed `zcash_primitives::transaction::components::tze::hash` to
+  `zcash_primitives::transaction::components::tze::txid`
+- `zcash_primitives::transaction::components::tze::TzeOutPoint` constructor
+  now taxes a TxId rather than a raw byte array.
+- `zcash_primitives::transaction::components::Amount` addition, subtraction,
+  and summation now return `Option` rather than panicing on overflow.
+- `zcash_primitives::transaction::builder`:
+  - `Error` has been modified to wrap the error types produced by its child
+    builders.
+  - `Builder::build` no longer takes a consensus branch ID parameter. The
+    builder now selects the correct consensus branch ID for the given target
+    height.
+- The `zcash_primitives::transaction::TransactionData` struct has been modified
+  such that it now contains common header information, and then contains
+  a separate `Bundle` value for each sub-protocol (transparent, Sprout, Sapling,
+  and TZE) and an Orchard bundle value has been added. `TransactionData` is now
+  parameterized by a type bounded on the newly added
+  `zcash_primitives::transaction::Authorization` trait. This bound has been
+  propagated to the individual transaction builders, such that the authorization
+  state of a transaction is clearly represented in the type and the presence
+  or absence of witness and/or proof data is statically known, instead of being only
+  determined at runtime via the presence or absence of `Option`al values.
+- `zcash_primitives::transaction::components::sapling` parsing and serialization
+  have been adapted for use with the new `sapling::Bundle` type.
+- `zcash_primitives::transaction::Transaction` parsing and serialization
+  have been adapted for use with the new `TransactionData` organization.
+- Generators for property testing have been moved out of the main transaction
+  module such that they are now colocated in the modules with the types
+  that they generate.
+- The `ephemeral_key` field of `OutputDescription` has had its type changed from
+  `jubjub::ExtendedPoint` to `zcash_note_encryption::EphemeralKeyBytes`.
+- The `epk: jubjub::ExtendedPoint` field of `CompactOutputDescription ` has been
+  replaced by `ephemeral_key: zcash_note_encryption::EphemeralKeyBytes`.
 
 ## [0.5.0] - 2021-03-26
 ### Added
@@ -121,7 +199,7 @@ and this library adheres to Rust's notion of
     - `try_sapling_output_recovery`
     - `try_sapling_output_recovery_with_ock`
 - `zcash_primitives::primitives::SaplingIvk` is now used where functions
-  previously used undistinguished `jubjub::Fr` values; this affects Sapling 
+  previously used undistinguished `jubjub::Fr` values; this affects Sapling
   note decryption and handling of IVKs by the wallet backend code.
 - `zcash_primitives::primitives::ViewingKey::ivk` now returns `SaplingIvk`
 - `zcash_primitives::primitives::Note::nf` now returns `Nullifier`.

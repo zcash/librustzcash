@@ -12,7 +12,7 @@ use zcash_primitives::{
         note_encryption::{try_sapling_compact_note_decryption, SaplingDomain},
         Node, Note, Nullifier, PaymentAddress, SaplingIvk,
     },
-    transaction::{components::sapling::CompactOutputDescription, TxId},
+    transaction::components::sapling::CompactOutputDescription,
     zip32::ExtendedFullViewingKey,
 };
 
@@ -32,7 +32,8 @@ use crate::wallet::{AccountId, WalletShieldedOutput, WalletShieldedSpend, Wallet
 fn scan_output<P: consensus::Parameters, K: ScanningKey>(
     params: &P,
     height: BlockHeight,
-    (index, output): (usize, CompactOutput),
+    index: usize,
+    output: CompactOutput,
     vks: &[(&AccountId, &K)],
     spent_from_accounts: &HashSet<AccountId>,
     tree: &mut CommitmentTree<Node>,
@@ -75,7 +76,7 @@ fn scan_output<P: consensus::Parameters, K: ScanningKey>(
         return Some(WalletShieldedOutput {
             index,
             cmu: output.cmu,
-            epk: output.epk,
+            ephemeral_key: output.ephemeral_key,
             account: **account,
             note,
             to,
@@ -198,6 +199,8 @@ pub fn scan_block<P: consensus::Parameters, K: ScanningKey>(
     let block_height = block.height();
 
     for tx in block.vtx.into_iter() {
+        let txid = tx.txid();
+        let index = tx.index as usize;
         let num_spends = tx.spends.len();
         let num_outputs = tx.outputs.len();
 
@@ -249,7 +252,7 @@ pub fn scan_block<P: consensus::Parameters, K: ScanningKey>(
                 })
                 .collect();
 
-            for to_scan in tx.outputs.into_iter().enumerate() {
+            for (idx, c_out) in tx.outputs.into_iter().enumerate() {
                 // Grab mutable references to new witnesses from previous outputs
                 // in this transaction so that we can update them. Scoped so we
                 // don't hold mutable references to shielded_outputs for too long.
@@ -261,7 +264,8 @@ pub fn scan_block<P: consensus::Parameters, K: ScanningKey>(
                 if let Some(output) = scan_output(
                     params,
                     block_height,
-                    to_scan,
+                    idx,
+                    c_out,
                     vks,
                     &spent_from_accounts,
                     tree,
@@ -275,11 +279,9 @@ pub fn scan_block<P: consensus::Parameters, K: ScanningKey>(
         }
 
         if !(shielded_spends.is_empty() && shielded_outputs.is_empty()) {
-            let mut txid = TxId([0u8; 32]);
-            txid.0.copy_from_slice(&tx.hash);
             wtxs.push(WalletTx {
                 txid,
-                index: tx.index as usize,
+                index,
                 num_spends,
                 num_outputs,
                 shielded_spends,

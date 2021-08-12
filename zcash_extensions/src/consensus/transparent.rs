@@ -2,8 +2,10 @@
 
 use std::convert::TryFrom;
 use zcash_primitives::consensus::{BlockHeight, BranchId};
-use zcash_primitives::extensions::transparent::{Error, Extension, Precondition, Witness};
-use zcash_primitives::transaction::{components::TzeOut, Transaction};
+use zcash_primitives::extensions::transparent::{
+    AuthData, Error, Extension, Precondition, Witness,
+};
+use zcash_primitives::transaction::{components::tze::TzeOut, Transaction};
 
 use crate::transparent::demo;
 
@@ -67,7 +69,7 @@ pub trait Epoch {
     fn verify<'a>(
         &self,
         precondition: &Precondition,
-        witness: &Witness,
+        witness: &Witness<AuthData>,
         ctx: &Context<'a>,
     ) -> Result<(), Error<Self::Error>>;
 }
@@ -76,15 +78,18 @@ pub trait Epoch {
 /// by the context.
 impl<'a> demo::Context for Context<'a> {
     fn is_tze_only(&self) -> bool {
-        self.tx.vin.is_empty()
-            && self.tx.vout.is_empty()
-            && self.tx.shielded_spends.is_empty()
-            && self.tx.shielded_outputs.is_empty()
-            && self.tx.joinsplits.is_empty()
+        self.tx.transparent_bundle().is_none()
+            && self.tx.sapling_bundle().is_none()
+            && self.tx.sprout_bundle().is_none()
+            && self.tx.orchard_bundle().is_none()
     }
 
     fn tx_tze_outputs(&self) -> &[TzeOut] {
-        &self.tx.tze_outputs
+        if let Some(bundle) = self.tx.tze_bundle() {
+            &bundle.vout
+        } else {
+            &[]
+        }
     }
 }
 
@@ -98,7 +103,7 @@ impl Epoch for EpochVTest {
     fn verify<'a>(
         &self,
         precondition: &Precondition,
-        witness: &Witness,
+        witness: &Witness<AuthData>,
         ctx: &Context<'a>,
     ) -> Result<(), Error<Self::Error>> {
         let ext_id = ExtensionId::try_from(precondition.extension_id)

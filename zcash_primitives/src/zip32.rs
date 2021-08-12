@@ -1071,3 +1071,16 @@ mod tests {
         }
     }
 }
+
+#[cfg(any(test, feature = "test-dependencies"))]
+pub mod testing {
+    use proptest::prelude::*;
+
+    use super::ExtendedSpendingKey;
+
+    prop_compose! {
+        pub fn arb_extended_spending_key()(seed in prop::array::uniform32(prop::num::u8::ANY)) -> ExtendedSpendingKey {
+            ExtendedSpendingKey::master(&seed)
+        }
+    }
+}

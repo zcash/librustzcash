@@ -14,7 +14,7 @@ use std::convert::TryFrom;
 
 use zcash_primitives::{
     block::BlockHash,
-    consensus::{self, BlockHeight, NetworkUpgrade},
+    consensus::{self, BlockHeight, BranchId, NetworkUpgrade, Parameters},
     memo::{Memo, MemoBytes},
     merkle_tree::{CommitmentTree, IncrementalWitness},
     sapling::{Node, Note, Nullifier, PaymentAddress},
@@ -311,15 +311,25 @@ pub fn get_received_memo<P>(wdb: &WalletDb<P>, id_note: i64) -> Result<Memo, Sql
         .map_err(SqliteClientError::from)
 }
 
-pub fn get_transaction<P>(wdb: &WalletDb<P>, id_tx: i64) -> Result<Transaction, SqliteClientError> {
-    let tx_bytes: Vec<_> = wdb.conn.query_row(
-        "SELECT raw FROM transactions
+pub fn get_transaction<P: Parameters>(
+    wdb: &WalletDb<P>,
+    id_tx: i64,
+) -> Result<Transaction, SqliteClientError> {
+    let (tx_bytes, block_height): (Vec<_>, BlockHeight) = wdb.conn.query_row(
+        "SELECT raw, block FROM transactions
         WHERE id_tx = ?",
         &[id_tx],
-        |row| row.get(0),
+        |row| {
+            let h: u32 = row.get(1)?;
+            Ok((row.get(0)?, BlockHeight::from(h)))
+        },
     )?;
 
-    Transaction::read(&tx_bytes[..]).map_err(SqliteClientError::from)
+    Transaction::read(
+        &tx_bytes[..],
+        BranchId::for_height(&wdb.params, block_height),
+    )
+    .map_err(SqliteClientError::from)
 }
 
 /// Returns the memo for a sent note.
@@ -408,7 +418,7 @@ pub fn block_height_extrema<P>(
 ///
 /// let data_file = NamedTempFile::new().unwrap();
 /// let db = WalletDb::for_path(data_file, Network::TestNetwork).unwrap();
-/// let height = get_tx_height(&db, TxId([0u8; 32]));
+/// let height = get_tx_height(&db, TxId::from_bytes([0u8; 32]));
 /// ```
 pub fn get_tx_height<P>(
     wdb: &WalletDb<P>,
@@ -417,7 +427,7 @@ pub fn get_tx_height<P>(
     wdb.conn
         .query_row(
             "SELECT block FROM transactions WHERE txid = ?",
-            &[txid.0.to_vec()],
+            &[txid.as_ref().to_vec()],
             |row| row.get(0).map(u32::into),
         )
         .optional()
@@ -772,7 +782,7 @@ pub fn put_tx_meta<'a, P, N>(
     tx: &WalletTx<N>,
     height: BlockHeight,
 ) -> Result<i64, SqliteClientError> {
-    let txid = tx.txid.0.to_vec();
+    let txid = tx.txid.as_ref().to_vec();
     if stmts
         .stmt_update_tx_meta
         .execute(params![u32::from(height), (tx.index as i64), txid])?
@@ -799,21 +809,21 @@ pub fn put_tx_data<'a, P>(
     tx: &Transaction,
     created_at: Option<time::OffsetDateTime>,
 ) -> Result<i64, SqliteClientError> {
-    let txid = tx.txid().0.to_vec();
+    let txid = tx.txid().as_ref().to_vec();
 
     let mut raw_tx = vec![];
     tx.write(&mut raw_tx)?;
 
     if stmts
         .stmt_update_tx_data
-        .execute(params![u32::from(tx.expiry_height), raw_tx, txid,])?
+        .execute(params![u32::from(tx.expiry_height()), raw_tx, txid,])?
         == 0
     {
         // It isn't there, so insert our transaction into the database.
         stmts.stmt_insert_tx_data.execute(params![
             txid,
             created_at,
-            u32::from(tx.expiry_height),
+            u32::from(tx.expiry_height()),
             raw_tx
         ])?;
 

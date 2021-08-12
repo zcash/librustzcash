@@ -620,7 +620,7 @@ impl MontgomeryPoint {
 #[cfg(test)]
 mod test {
     use bellman::ConstraintSystem;
-    use ff::{Field, PrimeField};
+    use ff::{Field, PrimeField, PrimeFieldBits};
     use group::{Curve, Group};
     use rand_core::{RngCore, SeedableRng};
     use rand_xorshift::XorShiftRng;
@@ -737,9 +737,9 @@ mod test {
 
             let s_bits = s
                 .to_le_bits()
-                .into_iter()
+                .iter()
+                .by_val()
                 .take(jubjub::Fr::NUM_BITS as usize)
-                .cloned()
                 .enumerate()
                 .map(|(i, b)| {
                     AllocatedBit::alloc(cs.namespace(|| format!("scalar bit {}", i)), Some(b))
@@ -788,9 +788,9 @@ mod test {
 
             let s_bits = s
                 .to_le_bits()
-                .into_iter()
+                .iter()
+                .by_val()
                 .take(jubjub::Fr::NUM_BITS as usize)
-                .cloned()
                 .enumerate()
                 .map(|(i, b)| {
                     AllocatedBit::alloc(cs.namespace(|| format!("scalar bit {}", i)), Some(b))

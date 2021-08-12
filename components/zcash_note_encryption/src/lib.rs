@@ -5,8 +5,9 @@
 
 use crypto_api_chachapoly::{ChaCha20Ietf, ChachaPolyIetf};
 use rand_core::RngCore;
-use std::convert::TryFrom;
 use subtle::{Choice, ConstantTimeEq};
+
+pub mod batch;
 
 pub const COMPACT_NOTE_SIZE: usize = 1 + // version
     11 + // diversifier
@@ -34,6 +35,7 @@ impl AsRef<[u8]> for OutgoingCipherKey {
     }
 }
 
+#[derive(Clone, Debug)]
 pub struct EphemeralKeyBytes(pub [u8; 32]);
 
 impl AsRef<[u8]> for EphemeralKeyBytes {
@@ -64,7 +66,7 @@ pub enum NoteValidity {
 }
 
 pub trait Domain {
-    type EphemeralSecretKey;
+    type EphemeralSecretKey: ConstantTimeEq;
     type EphemeralPublicKey;
     type SharedSecret;
     type SymmetricKey: AsRef<[u8]>;
@@ -75,7 +77,7 @@ pub trait Domain {
     type OutgoingViewingKey;
     type ValueCommitment;
     type ExtractedCommitment;
-    type ExtractedCommitmentBytes: Eq + TryFrom<Self::ExtractedCommitment>;
+    type ExtractedCommitmentBytes: Eq + for<'a> From<&'a Self::ExtractedCommitment>;
     type Memo;
 
     fn derive_esk(note: &Self::Note) -> Option<Self::EphemeralSecretKey>;
@@ -99,6 +101,19 @@ pub trait Domain {
 
     fn kdf(secret: Self::SharedSecret, ephemeral_key: &EphemeralKeyBytes) -> Self::SymmetricKey;
 
+    /// Computes `Self::kdf` on a batch of items.
+    ///
+    /// For each item in the batch, if the shared secret is `None`, this returns `None` at
+    /// that position.
+    fn batch_kdf<'a>(
+        items: impl Iterator<Item = (Option<Self::SharedSecret>, &'a EphemeralKeyBytes)>,
+    ) -> Vec<Option<Self::SymmetricKey>> {
+        // Default implementation: do the non-batched thing.
+        items
+            .map(|(secret, ephemeral_key)| secret.map(|secret| Self::kdf(secret, ephemeral_key)))
+            .collect()
+    }
+
     // for right now, we just need `recipient` to get `d`; in the future when we
     // can get that from a Sapling note, the recipient parameter will be able
     // to be removed.
@@ -111,7 +126,7 @@ pub trait Domain {
     fn derive_ock(
         ovk: &Self::OutgoingViewingKey,
         cv: &Self::ValueCommitment,
-        cmstar: &Self::ExtractedCommitment,
+        cmstar_bytes: &Self::ExtractedCommitmentBytes,
         ephemeral_key: &EphemeralKeyBytes,
     ) -> OutgoingCipherKey;
 
@@ -121,6 +136,24 @@ pub trait Domain {
     ) -> OutPlaintextBytes;
 
     fn epk_bytes(epk: &Self::EphemeralPublicKey) -> EphemeralKeyBytes;
+
+    fn epk(ephemeral_key: &EphemeralKeyBytes) -> Option<Self::EphemeralPublicKey>;
+
+    /// Computes `Self::epk` on a batch of ephemeral keys.
+    ///
+    /// This is useful for protocols where the underlying curve requires an inversion to
+    /// parse an encoded point.
+    ///
+    /// For usability, this returns tuples of the ephemeral keys and the result of parsing
+    /// them.
+    fn batch_epk(
+        ephemeral_keys: impl Iterator<Item = EphemeralKeyBytes>,
+    ) -> Vec<(Option<Self::EphemeralPublicKey>, EphemeralKeyBytes)> {
+        // Default implementation: do the non-batched thing.
+        ephemeral_keys
+            .map(|ephemeral_key| (Self::epk(&ephemeral_key), ephemeral_key))
+            .collect()
+    }
 
     fn check_epk_bytes<F: Fn(&Self::EphemeralSecretKey) -> NoteValidity>(
         note: &Self::Note,
@@ -139,7 +172,7 @@ pub trait Domain {
         &self,
         pk_d: &Self::DiversifiedTransmissionKey,
         esk: &Self::EphemeralSecretKey,
-        epk: &Self::EphemeralPublicKey,
+        ephemeral_key: &EphemeralKeyBytes,
         plaintext: &[u8],
     ) -> Option<(Self::Note, Self::Recipient)>;
 
@@ -149,14 +182,14 @@ pub trait Domain {
     fn extract_memo(&self, plaintext: &[u8]) -> Self::Memo;
 
     fn extract_pk_d(
-        out_plaintext: &[u8; OUT_CIPHERTEXT_SIZE],
+        out_plaintext: &[u8; OUT_PLAINTEXT_SIZE],
     ) -> Option<Self::DiversifiedTransmissionKey>;
 
-    fn extract_esk(out_plaintext: &[u8; OUT_CIPHERTEXT_SIZE]) -> Option<Self::EphemeralSecretKey>;
+    fn extract_esk(out_plaintext: &[u8; OUT_PLAINTEXT_SIZE]) -> Option<Self::EphemeralSecretKey>;
 }
 
 pub trait ShieldedOutput<D: Domain> {
-    fn epk(&self) -> &D::EphemeralPublicKey;
+    fn ephemeral_key(&self) -> EphemeralKeyBytes;
     fn cmstar_bytes(&self) -> D::ExtractedCommitmentBytes;
     fn enc_ciphertext(&self) -> &[u8];
 }
@@ -292,7 +325,7 @@ impl<D: Domain> NoteEncryption<D> {
         rng: &mut R,
     ) -> [u8; OUT_CIPHERTEXT_SIZE] {
         let (ock, input) = if let Some(ovk) = &self.ovk {
-            let ock = D::derive_ock(ovk, &cv, &cmstar, &D::epk_bytes(&self.epk));
+            let ock = D::derive_ock(ovk, &cv, &cmstar.into(), &D::epk_bytes(&self.epk));
             let input = D::outgoing_plaintext_bytes(&self.note, &self.esk);
 
             (ock, input)
@@ -322,21 +355,33 @@ impl<D: Domain> NoteEncryption<D> {
 /// Trial decryption of the full note plaintext by the recipient.
 ///
 /// Attempts to decrypt and validate the given `enc_ciphertext` using the given `ivk`.
-/// If successful, the corresponding Sapling note and memo are returned, along with the
-/// `PaymentAddress` to which the note was sent.
+/// If successful, the corresponding note and memo are returned, along with the address to
+/// which the note was sent.
 ///
 /// Implements section 4.19.2 of the
-/// [Zcash Protocol Specification](https://zips.z.cash/protocol/nu5.pdf#decryptivk)
+/// [Zcash Protocol Specification](https://zips.z.cash/protocol/nu5.pdf#decryptivk).
 pub fn try_note_decryption<D: Domain, Output: ShieldedOutput<D>>(
     domain: &D,
     ivk: &D::IncomingViewingKey,
     output: &Output,
 ) -> Option<(D::Note, D::Recipient, D::Memo)> {
+    let ephemeral_key = output.ephemeral_key();
+
+    let epk = D::epk(&ephemeral_key)?;
+    let shared_secret = D::ka_agree_dec(ivk, &epk);
+    let key = D::kdf(shared_secret, &ephemeral_key);
+
+    try_note_decryption_inner(domain, ivk, &ephemeral_key, output, key)
+}
+
+fn try_note_decryption_inner<D: Domain, Output: ShieldedOutput<D>>(
+    domain: &D,
+    ivk: &D::IncomingViewingKey,
+    ephemeral_key: &EphemeralKeyBytes,
+    output: &Output,
+    key: D::SymmetricKey,
+) -> Option<(D::Note, D::Recipient, D::Memo)> {
     assert_eq!(output.enc_ciphertext().len(), ENC_CIPHERTEXT_SIZE);
-
-    let shared_secret = D::ka_agree_dec(ivk, output.epk());
-    let key = D::kdf(shared_secret, &D::epk_bytes(output.epk()));
-
     let mut plaintext = [0; ENC_CIPHERTEXT_SIZE];
     assert_eq!(
         ChachaPolyIetf::aead_cipher()
@@ -354,7 +399,7 @@ pub fn try_note_decryption<D: Domain, Output: ShieldedOutput<D>>(
     let (note, to) = parse_note_plaintext_without_memo_ivk(
         domain,
         ivk,
-        output.epk(),
+        ephemeral_key,
         &output.cmstar_bytes(),
         &plaintext,
     )?;
@@ -366,13 +411,13 @@ pub fn try_note_decryption<D: Domain, Output: ShieldedOutput<D>>(
 fn parse_note_plaintext_without_memo_ivk<D: Domain>(
     domain: &D,
     ivk: &D::IncomingViewingKey,
-    epk: &D::EphemeralPublicKey,
+    ephemeral_key: &EphemeralKeyBytes,
     cmstar_bytes: &D::ExtractedCommitmentBytes,
     plaintext: &[u8],
 ) -> Option<(D::Note, D::Recipient)> {
     let (note, to) = domain.parse_note_plaintext_without_memo_ivk(ivk, &plaintext)?;
 
-    if let NoteValidity::Valid = check_note_validity::<D>(&note, epk, cmstar_bytes) {
+    if let NoteValidity::Valid = check_note_validity::<D>(&note, ephemeral_key, cmstar_bytes) {
         Some((note, to))
     } else {
         None
@@ -381,16 +426,13 @@ fn parse_note_plaintext_without_memo_ivk<D: Domain>(
 
 fn check_note_validity<D: Domain>(
     note: &D::Note,
-    epk: &D::EphemeralPublicKey,
+    ephemeral_key: &EphemeralKeyBytes,
     cmstar_bytes: &D::ExtractedCommitmentBytes,
 ) -> NoteValidity {
-    if D::ExtractedCommitmentBytes::try_from(D::cmstar(&note))
-        .map_or(false, |cs| &cs == cmstar_bytes)
-    {
-        let epk_bytes = D::epk_bytes(epk);
+    if &D::ExtractedCommitmentBytes::from(&D::cmstar(&note)) == cmstar_bytes {
         D::check_epk_bytes(&note, |derived_esk| {
             if D::epk_bytes(&D::ka_derive_public(&note, &derived_esk))
-                .ct_eq(&epk_bytes)
+                .ct_eq(&ephemeral_key)
                 .into()
             {
                 NoteValidity::Valid
@@ -407,8 +449,8 @@ fn check_note_validity<D: Domain>(
 /// Trial decryption of the compact note plaintext by the recipient for light clients.
 ///
 /// Attempts to decrypt and validate the first 52 bytes of `enc_ciphertext` using the
-/// given `ivk`. If successful, the corresponding Sapling note is returned, along with the
-/// `PaymentAddress` to which the note was sent.
+/// given `ivk`. If successful, the corresponding note is returned, along with the address
+/// to which the note was sent.
 ///
 /// Implements the procedure specified in [`ZIP 307`].
 ///
@@ -418,10 +460,23 @@ pub fn try_compact_note_decryption<D: Domain, Output: ShieldedOutput<D>>(
     ivk: &D::IncomingViewingKey,
     output: &Output,
 ) -> Option<(D::Note, D::Recipient)> {
-    assert_eq!(output.enc_ciphertext().len(), COMPACT_NOTE_SIZE);
+    let ephemeral_key = output.ephemeral_key();
 
-    let shared_secret = D::ka_agree_dec(&ivk, output.epk());
-    let key = D::kdf(shared_secret, &D::epk_bytes(output.epk()));
+    let epk = D::epk(&ephemeral_key)?;
+    let shared_secret = D::ka_agree_dec(&ivk, &epk);
+    let key = D::kdf(shared_secret, &ephemeral_key);
+
+    try_compact_note_decryption_inner(domain, ivk, &ephemeral_key, output, key)
+}
+
+fn try_compact_note_decryption_inner<D: Domain, Output: ShieldedOutput<D>>(
+    domain: &D,
+    ivk: &D::IncomingViewingKey,
+    ephemeral_key: &EphemeralKeyBytes,
+    output: &Output,
+    key: D::SymmetricKey,
+) -> Option<(D::Note, D::Recipient)> {
+    assert_eq!(output.enc_ciphertext().len(), COMPACT_NOTE_SIZE);
 
     // Start from block 1 to skip over Poly1305 keying output
     let mut plaintext = [0; COMPACT_NOTE_SIZE];
@@ -431,7 +486,7 @@ pub fn try_compact_note_decryption<D: Domain, Output: ShieldedOutput<D>>(
     parse_note_plaintext_without_memo_ivk(
         domain,
         ivk,
-        output.epk(),
+        ephemeral_key,
         &output.cmstar_bytes(),
         &plaintext,
     )
@@ -439,13 +494,33 @@ pub fn try_compact_note_decryption<D: Domain, Output: ShieldedOutput<D>>(
 
 /// Recovery of the full note plaintext by the sender.
 ///
+/// Attempts to decrypt and validate the given `enc_ciphertext` using the given `ovk`.
+/// If successful, the corresponding note and memo are returned, along with the address to
+/// which the note was sent.
+///
+/// Implements [Zcash Protocol Specification section 4.19.3][decryptovk].
+///
+/// [decryptovk]: https://zips.z.cash/protocol/nu5.pdf#decryptovk
+pub fn try_output_recovery_with_ovk<D: Domain, Output: ShieldedOutput<D>>(
+    domain: &D,
+    ovk: &D::OutgoingViewingKey,
+    output: &Output,
+    cv: &D::ValueCommitment,
+    out_ciphertext: &[u8],
+) -> Option<(D::Note, D::Recipient, D::Memo)> {
+    let ock = D::derive_ock(ovk, &cv, &output.cmstar_bytes(), &output.ephemeral_key());
+    try_output_recovery_with_ock(domain, &ock, output, out_ciphertext)
+}
+
+/// Recovery of the full note plaintext by the sender.
+///
 /// Attempts to decrypt and validate the given `enc_ciphertext` using the given `ock`.
-/// If successful, the corresponding Sapling note and memo are returned, along with the
-/// `PaymentAddress` to which the note was sent.
+/// If successful, the corresponding note and memo are returned, along with the address to
+/// which the note was sent.
 ///
 /// Implements part of section 4.19.3 of the
-/// [Zcash Protocol Specification](https://zips.z.cash/protocol/nu5.pdf#decryptovk)
-/// For decryption using a Full Viewing Key see [`try_sapling_output_recovery`].
+/// [Zcash Protocol Specification](https://zips.z.cash/protocol/nu5.pdf#decryptovk).
+/// For decryption using a Full Viewing Key see [`try_output_recovery_with_ovk`].
 pub fn try_output_recovery_with_ock<D: Domain, Output: ShieldedOutput<D>>(
     domain: &D,
     ock: &OutgoingCipherKey,
@@ -455,7 +530,7 @@ pub fn try_output_recovery_with_ock<D: Domain, Output: ShieldedOutput<D>>(
     assert_eq!(output.enc_ciphertext().len(), ENC_CIPHERTEXT_SIZE);
     assert_eq!(out_ciphertext.len(), OUT_CIPHERTEXT_SIZE);
 
-    let mut op = [0; OUT_CIPHERTEXT_SIZE];
+    let mut op = [0; OUT_PLAINTEXT_SIZE];
     assert_eq!(
         ChachaPolyIetf::aead_cipher()
             .open_to(&mut op, &out_ciphertext, &[], ock.as_ref(), &[0u8; 12])
@@ -466,11 +541,12 @@ pub fn try_output_recovery_with_ock<D: Domain, Output: ShieldedOutput<D>>(
     let pk_d = D::extract_pk_d(&op)?;
     let esk = D::extract_esk(&op)?;
 
+    let ephemeral_key = output.ephemeral_key();
     let shared_secret = D::ka_agree_enc(&esk, &pk_d);
     // The small-order point check at the point of output parsing rejects
     // non-canonical encodings, so reencoding here for the KDF should
     // be okay.
-    let key = D::kdf(shared_secret, &D::epk_bytes(output.epk()));
+    let key = D::kdf(shared_secret, &ephemeral_key);
 
     let mut plaintext = [0; ENC_CIPHERTEXT_SIZE];
     assert_eq!(
@@ -487,11 +563,19 @@ pub fn try_output_recovery_with_ock<D: Domain, Output: ShieldedOutput<D>>(
     );
 
     let (note, to) =
-        domain.parse_note_plaintext_without_memo_ovk(&pk_d, &esk, output.epk(), &plaintext)?;
+        domain.parse_note_plaintext_without_memo_ovk(&pk_d, &esk, &ephemeral_key, &plaintext)?;
     let memo = domain.extract_memo(&plaintext);
 
+    // ZIP 212: Check that the esk provided to this function is consistent with the esk we
+    // can derive from the note.
+    if let Some(derived_esk) = D::derive_esk(&note) {
+        if (!derived_esk.ct_eq(&esk)).into() {
+            return None;
+        }
+    }
+
     if let NoteValidity::Valid =
-        check_note_validity::<D>(&note, output.epk(), &output.cmstar_bytes())
+        check_note_validity::<D>(&note, &ephemeral_key, &output.cmstar_bytes())
     {
         Some((note, to, memo))
     } else {

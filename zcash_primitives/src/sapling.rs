@@ -11,18 +11,19 @@ pub mod util;
 use bitvec::{order::Lsb0, view::AsBits};
 use blake2s_simd::Params as Blake2sParams;
 use byteorder::{LittleEndian, WriteBytesExt};
-use ff::PrimeField;
+use ff::{Field, PrimeField};
 use group::{Curve, Group, GroupEncoding};
 use lazy_static::lazy_static;
 use rand_core::{CryptoRng, RngCore};
 use std::array::TryFromSliceError;
-use std::convert::TryInto;
+use std::convert::{TryFrom, TryInto};
 use std::io::{self, Read, Write};
 use subtle::{Choice, ConstantTimeEq};
 
 use crate::{
     constants::{self, SPENDING_KEY_GENERATOR},
     merkle_tree::Hashable,
+    transaction::components::amount::MAX_MONEY,
 };
 
 use self::{
@@ -360,10 +361,36 @@ impl Nullifier {
         self.0.to_vec()
     }
 }
+impl AsRef<[u8]> for Nullifier {
+    fn as_ref(&self) -> &[u8] {
+        &self.0
+    }
+}
 
 impl ConstantTimeEq for Nullifier {
     fn ct_eq(&self, other: &Self) -> Choice {
         self.0.ct_eq(&other.0)
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct NoteValue(u64);
+
+impl TryFrom<u64> for NoteValue {
+    type Error = ();
+
+    fn try_from(value: u64) -> Result<Self, Self::Error> {
+        if value <= MAX_MONEY as u64 {
+            Ok(NoteValue(value))
+        } else {
+            Err(())
+        }
+    }
+}
+
+impl From<NoteValue> for u64 {
+    fn from(value: NoteValue) -> u64 {
+        value.0
     }
 }
 
@@ -470,14 +497,7 @@ impl Note {
 
     pub(crate) fn generate_or_derive_esk_internal<R: RngCore>(&self, rng: &mut R) -> jubjub::Fr {
         match self.derive_esk() {
-            None => {
-                // create random 64 byte buffer
-                let mut buffer = [0u8; 64];
-                rng.fill_bytes(&mut buffer);
-
-                // reduce to uniform value
-                jubjub::Fr::from_bytes_wide(&buffer)
-            }
+            None => jubjub::Fr::random(rng),
             Some(esk) => esk,
         }
     }
@@ -489,6 +509,61 @@ impl Note {
             Rseed::AfterZip212(rseed) => Some(jubjub::Fr::from_bytes_wide(
                 prf_expand(&rseed, &[0x05]).as_array(),
             )),
+        }
+    }
+}
+
+#[cfg(any(test, feature = "test-dependencies"))]
+pub mod testing {
+    use proptest::prelude::*;
+    use std::cmp::min;
+    use std::convert::TryFrom;
+
+    use crate::{
+        transaction::components::amount::MAX_MONEY, zip32::testing::arb_extended_spending_key,
+    };
+
+    use super::{Node, Note, NoteValue, PaymentAddress, Rseed};
+
+    prop_compose! {
+        pub fn arb_note_value()(value in 0u64..=MAX_MONEY as u64) -> NoteValue {
+            NoteValue::try_from(value).unwrap()
+        }
+    }
+
+    prop_compose! {
+        /// The
+        pub fn arb_positive_note_value(bound: u64)(
+            value in 1u64..=(min(bound, MAX_MONEY as u64))
+        ) -> NoteValue {
+            NoteValue::try_from(value).unwrap()
+        }
+    }
+
+    pub fn arb_payment_address() -> impl Strategy<Value = PaymentAddress> {
+        arb_extended_spending_key()
+            .prop_map(|sk| sk.default_address().map(|(_, a)| a))
+            .prop_filter("A valid payment address is required.", |r| r.is_ok())
+            .prop_map(|r| r.unwrap())
+    }
+
+    prop_compose! {
+        pub fn arb_node()(value in prop::array::uniform32(prop::num::u8::ANY)) -> Node {
+            Node::new(value)
+        }
+    }
+
+    prop_compose! {
+        pub fn arb_note(value: NoteValue)(
+            addr in arb_payment_address(),
+            rseed in prop::array::uniform32(prop::num::u8::ANY).prop_map(Rseed::AfterZip212)
+        ) -> Note {
+            Note {
+                value: value.into(),
+                g_d: addr.g_d().unwrap(), // this unwrap is safe because arb_payment_address always generates an address witha valid g_d
+                pk_d: *addr.pk_d(),
+                rseed
+            }
         }
     }
 }

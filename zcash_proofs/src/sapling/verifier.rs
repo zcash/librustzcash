@@ -16,19 +16,15 @@ use super::compute_value_balance;
 pub struct SaplingVerificationContext {
     // (sum of the Spend value commitments) - (sum of the Output value commitments)
     cv_sum: jubjub::ExtendedPoint,
-}
-
-impl Default for SaplingVerificationContext {
-    fn default() -> Self {
-        SaplingVerificationContext::new()
-    }
+    zip216_enabled: bool,
 }
 
 impl SaplingVerificationContext {
     /// Construct a new context to be used with a single transaction.
-    pub fn new() -> Self {
+    pub fn new(zip216_enabled: bool) -> Self {
         SaplingVerificationContext {
             cv_sum: jubjub::ExtendedPoint::identity(),
+            zip216_enabled,
         }
     }
 
@@ -62,7 +58,12 @@ impl SaplingVerificationContext {
         (&mut data_to_be_signed[32..64]).copy_from_slice(&sighash_value[..]);
 
         // Verify the spend_auth_sig
-        if !rk.verify(&data_to_be_signed, &spend_auth_sig, SPENDING_KEY_GENERATOR) {
+        if !rk.verify_with_zip216(
+            &data_to_be_signed,
+            &spend_auth_sig,
+            SPENDING_KEY_GENERATOR,
+            self.zip216_enabled,
+        ) {
             return false;
         }
 
@@ -161,10 +162,11 @@ impl SaplingVerificationContext {
         (&mut data_to_be_signed[32..64]).copy_from_slice(&sighash_value[..]);
 
         // Verify the binding_sig
-        bvk.verify(
+        bvk.verify_with_zip216(
             &data_to_be_signed,
             &binding_sig,
             VALUE_COMMITMENT_RANDOMNESS_GENERATOR,
+            self.zip216_enabled,
         )
     }
 }
