@@ -1,0 +1,1 @@
+initSidebarItems({"enum":[["Count","Determines the words count that will be present in a [`Mnemonic`] phrase."],["Error","The BIP-0039 error."],["Language","Language to be used for the mnemonic phrase."]],"struct":[["Mnemonic","A mnemonic representation."]]});
