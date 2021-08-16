@@ -23,7 +23,7 @@ use subtle::{Choice, ConstantTimeEq};
 
 use crate::{
     constants::{self, SPENDING_KEY_GENERATOR},
-    merkle_tree::Hashable,
+    merkle_tree::{Hashable, HashSer},
     transaction::components::amount::MAX_MONEY,
 };
 
@@ -83,34 +83,6 @@ impl Node {
     }
 }
 
-impl Hashable for Node {
-    fn read<R: Read>(mut reader: R) -> io::Result<Self> {
-        let mut repr = [0u8; 32];
-        reader.read_exact(&mut repr)?;
-        Ok(Node::new(repr))
-    }
-
-    fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
-        writer.write_all(self.repr.as_ref())
-    }
-
-    fn combine(depth: usize, lhs: &Self, rhs: &Self) -> Self {
-        Node {
-            repr: merkle_hash(depth, &lhs.repr, &rhs.repr),
-        }
-    }
-
-    fn blank() -> Self {
-        Node {
-            repr: Note::uncommitted().to_repr(),
-        }
-    }
-
-    fn empty_root(depth: usize) -> Self {
-        EMPTY_ROOTS[depth]
-    }
-}
-
 impl incrementalmerkletree::Hashable for Node {
     fn empty_leaf() -> Self {
         Node {
@@ -129,7 +101,7 @@ impl incrementalmerkletree::Hashable for Node {
     }
 }
 
-impl crate::merkle_tree::incremental::HashSer for Node {
+impl HashSer for Node {
     fn read<R: Read>(mut reader: R) -> io::Result<Self> {
         let mut repr = [0u8; 32];
         reader.read_exact(&mut repr)?;

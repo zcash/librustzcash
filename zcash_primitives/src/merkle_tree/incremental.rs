@@ -13,21 +13,10 @@ use incrementalmerkletree::{
 };
 use orchard::tree::MerkleCrhOrchardOutput;
 
-use super::CommitmentTree;
+use super::{CommitmentTree, HashSer};
 use crate::serialize::{Optional, Vector};
 
 pub const SER_V1: u8 = 1;
-
-/// A hashable node within a Merkle tree.
-pub trait HashSer {
-    /// Parses a node from the given byte source.
-    fn read<R: Read>(reader: R) -> io::Result<Self>
-    where
-        Self: Sized;
-
-    /// Serializes this node.
-    fn write<W: Write>(&self, writer: W) -> io::Result<()>;
-}
 
 pub fn read_frontier_v0<H: Hashable + super::Hashable, R: Read>(
     mut reader: R,
