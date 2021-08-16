@@ -65,11 +65,11 @@ pub fn write_nonempty_frontier_v1<H: HashSer, W: Write>(
     match frontier.leaf() {
         Leaf::Left(a) => {
             a.write(&mut writer)?;
-            Optional::write(&mut writer, &None, |w, n: &H| n.write(w))?;
+            Optional::write(&mut writer, None, |w, n: &H| n.write(w))?;
         }
         Leaf::Right(a, b) => {
             a.write(&mut writer)?;
-            Optional::write(&mut writer, &Some(b), |w, n| n.write(w))?;
+            Optional::write(&mut writer, Some(b), |w, n| n.write(w))?;
         }
     }
     Vector::write(&mut writer, &frontier.ommers(), |w, e| e.write(w))?;
@@ -164,8 +164,8 @@ pub fn write_bridge_v1<H: HashSer, W: Write>(
 ) -> io::Result<()> {
     Optional::write(
         &mut writer,
-        &bridge.prior_position().map(<u64>::from),
-        |w, n| w.write_u64::<LittleEndian>(*n),
+        bridge.prior_position().map(<u64>::from),
+        |w, n| w.write_u64::<LittleEndian>(n),
     )?;
     Vector::write(
         &mut writer,

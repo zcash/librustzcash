@@ -122,11 +122,11 @@ pub struct Optional;
 impl Optional {
     pub fn read<R: Read, T, F>(mut reader: R, func: F) -> io::Result<Option<T>>
     where
-        F: Fn(&mut R) -> io::Result<T>,
+        F: Fn(R) -> io::Result<T>,
     {
         match reader.read_u8()? {
             0 => Ok(None),
-            1 => Ok(Some(func(&mut reader)?)),
+            1 => Ok(Some(func(reader)?)),
             _ => Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 "non-canonical Option<T>",
@@ -134,15 +134,15 @@ impl Optional {
         }
     }
 
-    pub fn write<W: Write, T, F>(mut writer: W, val: &Option<T>, func: F) -> io::Result<()>
+    pub fn write<W: Write, T, F>(mut writer: W, val: Option<T>, func: F) -> io::Result<()>
     where
-        F: Fn(&mut W, &T) -> io::Result<()>,
+        F: Fn(W, T) -> io::Result<()>,
     {
         match val {
             None => writer.write_u8(0),
             Some(e) => {
                 writer.write_u8(1)?;
-                func(&mut writer, e)
+                func(writer, e)
             }
         }
     }
@@ -226,7 +226,7 @@ mod tests {
         macro_rules! eval {
             ($value:expr, $expected:expr, $write:expr, $read:expr) => {
                 let mut data = vec![];
-                Optional::write(&mut data, &$value, $write).unwrap();
+                Optional::write(&mut data, $value, $write).unwrap();
                 assert_eq!(&data[..], &$expected[..]);
                 match Optional::read(&data[..], $read) {
                     Ok(v) => assert_eq!(v, $value),
@@ -237,7 +237,8 @@ mod tests {
 
         macro_rules! eval_u8 {
             ($value:expr, $expected:expr) => {
-                eval!($value, $expected, |w, e| w.write_u8(*e), |r| r.read_u8())
+                eval!($value, $expected, |w, e| w.write_u8(e), |mut r| r
+                    .read_u8())
             };
         }
 
@@ -246,7 +247,7 @@ mod tests {
                 eval!(
                     $value,
                     $expected,
-                    |w, v| Vector::write(w, v, |w, e| w.write_u8(*e)),
+                    |w, v| Vector::write(w, &v, |w, e| w.write_u8(*e)),
                     |r| Vector::read(r, |r| r.read_u8())
                 )
             };

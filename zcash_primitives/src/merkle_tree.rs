@@ -137,10 +137,10 @@ impl<Node: Hashable> CommitmentTree<Node> {
 
     /// Serializes this tree as an array of bytes.
     pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
-        Optional::write(&mut writer, &self.left, |w, n| n.write(w))?;
-        Optional::write(&mut writer, &self.right, |w, n| n.write(w))?;
+        Optional::write(&mut writer, self.left, |w, n| n.write(w))?;
+        Optional::write(&mut writer, self.right, |w, n| n.write(w))?;
         Vector::write(&mut writer, &self.parents, |w, e| {
-            Optional::write(w, e, |w, n| n.write(w))
+            Optional::write(w, *e, |w, n| n.write(w))
         })
     }
 
@@ -292,7 +292,7 @@ impl<Node: Hashable> IncrementalWitness<Node> {
     pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
         self.tree.write(&mut writer)?;
         Vector::write(&mut writer, &self.filled, |w, n| n.write(w))?;
-        Optional::write(&mut writer, &self.cursor, |w, t| t.write(w))
+        Optional::write(&mut writer, self.cursor.as_ref(), |w, t| t.write(w))
     }
 
     /// Returns the position of the witnessed leaf node in the commitment tree.
