@@ -40,7 +40,10 @@ pub trait HashSer {
     fn write<W: Write>(&self, writer: W) -> io::Result<()>;
 }
 
-impl<T> Hashable for T where T: incrementalmerkletree::Hashable + HashSer + Copy {
+impl<T> Hashable for T
+where
+    T: incrementalmerkletree::Hashable + HashSer + Copy,
+{
     /// Parses a node from the given byte source.
     fn read<R: Read>(reader: R) -> io::Result<Self> {
         <Self as HashSer>::read(reader)
@@ -66,7 +69,6 @@ impl<T> Hashable for T where T: incrementalmerkletree::Hashable + HashSer + Copy
         <Self as incrementalmerkletree::Hashable>::empty_root(Altitude::from(alt as u8))
     }
 }
-
 
 struct PathFiller<Node: Hashable> {
     queue: VecDeque<Node>,

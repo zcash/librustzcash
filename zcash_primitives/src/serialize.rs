@@ -237,8 +237,7 @@ mod tests {
 
         macro_rules! eval_u8 {
             ($value:expr, $expected:expr) => {
-                eval!($value, $expected, |w, e| w.write_u8(e), |mut r| r
-                    .read_u8())
+                eval!($value, $expected, |w, e| w.write_u8(e), |mut r| r.read_u8())
             };
         }
 

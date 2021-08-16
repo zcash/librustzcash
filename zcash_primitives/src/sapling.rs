@@ -23,7 +23,7 @@ use subtle::{Choice, ConstantTimeEq};
 
 use crate::{
     constants::{self, SPENDING_KEY_GENERATOR},
-    merkle_tree::{Hashable, HashSer},
+    merkle_tree::{HashSer, Hashable},
     transaction::components::amount::MAX_MONEY,
 };
 
