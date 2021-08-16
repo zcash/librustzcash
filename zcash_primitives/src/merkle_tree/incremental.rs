@@ -81,9 +81,7 @@ pub fn write_nonempty_frontier_v1<H: HashSer, W: Write>(
 pub fn read_nonempty_frontier_v1<H: HashSer + Clone, R: Read>(
     mut reader: R,
 ) -> io::Result<NonEmptyFrontier<H>> {
-    let position = reader
-        .read_u64::<LittleEndian>()
-        .map(|v| <Position>::from(v as usize))?;
+    let position = read_position(&mut reader)?;
     let left = H::read(&mut reader)?;
     let right = Optional::read(&mut reader, |r| H::read(r))?;
 
@@ -102,36 +100,22 @@ pub fn read_nonempty_frontier_v1<H: HashSer + Clone, R: Read>(
 }
 
 pub fn write_frontier_v1<H: HashSer, W: Write>(
-    mut writer: W,
+    writer: W,
     frontier: &Frontier<H, 32>,
 ) -> io::Result<()> {
-    match frontier.value() {
-        None => {
-            writer.write_u8(0)?;
-        }
-        Some(f) => {
-            writer.write_u8(1)?;
-            write_nonempty_frontier_v1(&mut writer, f)?;
-        }
-    }
-
-    Ok(())
+    Optional::write(writer, frontier.value(), write_nonempty_frontier_v1)
 }
 
 #[allow(clippy::redundant_closure)]
-pub fn read_frontier_v1<H: HashSer + Clone, R: Read>(mut reader: R) -> io::Result<Frontier<H, 32>> {
-    let is_empty = reader.read_u8()? == 0;
-    if is_empty {
-        Ok(Frontier::empty())
-    } else {
-        read_nonempty_frontier_v1(reader).and_then(|f| {
-            Frontier::try_from(f).map_err(|err| {
-                io::Error::new(
-                    io::ErrorKind::InvalidInput,
-                    format!("Parsing resulted in an invalid Merkle frontier: {:?}", err),
-                )
-            })
-        })
+pub fn read_frontier_v1<H: HashSer + Clone, R: Read>(reader: R) -> io::Result<Frontier<H, 32>> {
+    match Optional::read(reader, read_nonempty_frontier_v1)? {
+        None => Ok(Frontier::empty()),
+        Some(f) => Frontier::try_from(f).map_err(|err| {
+            io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!("Parsing resulted in an invalid Merkle frontier: {:?}", err),
+            )
+        }),
     }
 }
 
@@ -141,8 +125,7 @@ pub fn write_auth_fragment_v1<H: HashSer, W: Write>(
 ) -> io::Result<()> {
     writer.write_u64::<LittleEndian>(<u64>::from(fragment.position()))?;
     writer.write_u64::<LittleEndian>(fragment.altitudes_observed() as u64)?;
-    Vector::write(&mut writer, fragment.values(), |w, a| a.write(w))?;
-    Ok(())
+    Vector::write(&mut writer, fragment.values(), |w, a| a.write(w))
 }
 
 pub fn read_position<R: Read>(mut reader: R) -> io::Result<Position> {
@@ -180,9 +163,8 @@ pub fn write_bridge_v1<H: HashSer, W: Write>(
     Ok(())
 }
 
-#[allow(clippy::redundant_closure)]
 pub fn read_bridge_v1<H: HashSer + Clone, R: Read>(mut reader: R) -> io::Result<MerkleBridge<H>> {
-    let prior_position = Optional::read(&mut reader, |r| read_position(r))?;
+    let prior_position = Optional::read(&mut reader, read_position)?;
     let auth_fragments = Vector::read(&mut reader, |r| {
         Ok((
             r.read_u64::<LittleEndian>()? as usize,
