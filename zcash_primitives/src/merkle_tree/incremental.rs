@@ -72,7 +72,7 @@ pub fn read_nonempty_frontier_v1<H: HashSer + Clone, R: Read>(
 ) -> io::Result<NonEmptyFrontier<H>> {
     let position = read_position(&mut reader)?;
     let left = H::read(&mut reader)?;
-    let right = Optional::read(&mut reader, |r| H::read(r))?;
+    let right = Optional::read(&mut reader, H::read)?;
 
     let leaf = right.map_or_else(
         || Leaf::Left(left.clone()),

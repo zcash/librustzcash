@@ -3,6 +3,7 @@
 use byteorder::{LittleEndian, ReadBytesExt};
 use incrementalmerkletree::{self, bridgetree, Altitude};
 use std::collections::VecDeque;
+use std::convert::TryFrom;
 use std::io::{self, Read, Write};
 
 use crate::sapling::SAPLING_COMMITMENT_TREE_DEPTH;
@@ -56,7 +57,13 @@ where
 
     /// Returns the parent node within the tree of the two given nodes.
     fn combine(alt: usize, lhs: &Self, rhs: &Self) -> Self {
-        <Self as incrementalmerkletree::Hashable>::combine(Altitude::from(alt as u8), lhs, rhs)
+        <Self as incrementalmerkletree::Hashable>::combine(
+            Altitude::from(
+                u8::try_from(alt).expect("Tree heights greater than 255 are unsupported."),
+            ),
+            lhs,
+            rhs,
+        )
     }
 
     /// Returns a blank leaf node.
@@ -66,7 +73,9 @@ where
 
     /// Returns the empty root for the given depth.
     fn empty_root(alt: usize) -> Self {
-        <Self as incrementalmerkletree::Hashable>::empty_root(Altitude::from(alt as u8))
+        <Self as incrementalmerkletree::Hashable>::empty_root(Altitude::from(
+            u8::try_from(alt).expect("Tree heights greater than 255 are unsupported."),
+        ))
     }
 }
 
@@ -163,11 +172,10 @@ impl<Node> CommitmentTree<Node> {
 
 impl<Node: Hashable> CommitmentTree<Node> {
     /// Reads a `CommitmentTree` from its serialized form.
-    #[allow(clippy::redundant_closure)]
     pub fn read<R: Read>(mut reader: R) -> io::Result<Self> {
-        let left = Optional::read(&mut reader, |r| Node::read(r))?;
-        let right = Optional::read(&mut reader, |r| Node::read(r))?;
-        let parents = Vector::read(&mut reader, |r| Optional::read(r, |r| Node::read(r)))?;
+        let left = Optional::read(&mut reader, Node::read)?;
+        let right = Optional::read(&mut reader, Node::read)?;
+        let parents = Vector::read(&mut reader, |r| Optional::read(r, Node::read))?;
 
         Ok(CommitmentTree {
             left,
@@ -315,7 +323,7 @@ impl<Node: Hashable> IncrementalWitness<Node> {
     pub fn read<R: Read>(mut reader: R) -> io::Result<Self> {
         let tree = CommitmentTree::read(&mut reader)?;
         let filled = Vector::read(&mut reader, |r| Node::read(r))?;
-        let cursor = Optional::read(&mut reader, |r| CommitmentTree::read(r))?;
+        let cursor = Optional::read(&mut reader, CommitmentTree::read)?;
 
         let mut witness = IncrementalWitness {
             tree,
