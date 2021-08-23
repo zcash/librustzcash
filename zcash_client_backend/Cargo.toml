@@ -23,7 +23,7 @@ hex = "0.4"
 hdwallet = { version = "=0.3.0", optional = true }
 log = "0.4"
 jubjub = "0.7"
-nom = "6.1"
+nom = "7"
 percent-encoding = "2.1.0"
 proptest = { version = "1.0.0", optional = true }
 protobuf = "~2.27.1" # MSRV 1.52.1
