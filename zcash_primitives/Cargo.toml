@@ -16,7 +16,7 @@ edition = "2018"
 all-features = true
 
 [dependencies]
-aes = "0.6"
+aes = "0.7"
 bitvec = "0.22"
 bip0039 = { version = "0.8.0", features = ["std", "all-languages"] }
 blake2b_simd = "0.5"
@@ -26,7 +26,7 @@ byteorder = "1"
 crypto_api_chachapoly = "0.4"
 equihash = { version = "0.1", path = "../components/equihash" }
 ff = "0.10"
-fpe = "0.4"
+fpe = "0.5"
 group = "0.10"
 hex = "0.4"
 incrementalmerkletree = "0.1"
