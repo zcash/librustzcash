@@ -19,7 +19,6 @@ use zcash_primitives::{
 
 use crate::{
     address::RecipientAddress,
-    data_api::wallet::ANCHOR_OFFSET,
     decrypt::DecryptedOutput,
     proto::compact_formats::CompactBlock,
     wallet::{AccountId, SpendableNote, WalletTx},
@@ -68,6 +67,7 @@ pub trait WalletRead {
     /// This will return `Ok(None)` if no block data is present in the database.
     fn get_target_and_anchor_heights(
         &self,
+        min_confirmations: u32,
     ) -> Result<Option<(BlockHeight, BlockHeight)>, Self::Error> {
         self.block_height_extrema().map(|heights| {
             heights.map(|(min_height, max_height)| {
@@ -76,7 +76,7 @@ pub trait WalletRead {
                 // Select an anchor ANCHOR_OFFSET back from the target block,
                 // unless that would be before the earliest block we have.
                 let anchor_height = BlockHeight::from(cmp::max(
-                    u32::from(target_height).saturating_sub(ANCHOR_OFFSET),
+                    u32::from(target_height).saturating_sub(min_confirmations),
                     u32::from(min_height),
                 ));
 

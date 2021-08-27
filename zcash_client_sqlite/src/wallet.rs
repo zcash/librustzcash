@@ -1128,7 +1128,7 @@ mod tests {
         assert_eq!(get_balance(&db_data, AccountId(0)).unwrap(), Amount::zero());
 
         // We can't get an anchor height, as we have not scanned any blocks.
-        assert_eq!((&db_data).get_target_and_anchor_heights().unwrap(), None);
+        assert_eq!((&db_data).get_target_and_anchor_heights(10).unwrap(), None);
 
         // An invalid account has zero balance
         assert!(get_address(&db_data, AccountId(1)).is_err());

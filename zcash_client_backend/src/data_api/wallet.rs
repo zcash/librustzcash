@@ -27,8 +27,6 @@ use zcash_primitives::{legacy::Script, transaction::components::TxOut};
 #[cfg(feature = "transparent-inputs")]
 use crate::keys::derive_transparent_address_from_secret_key;
 
-pub const ANCHOR_OFFSET: u32 = 10;
-
 /// Scans a [`Transaction`] for any information that can be decrypted by the accounts in
 /// the wallet, and saves it to the wallet.
 pub fn decrypt_and_store_transaction<N, E, P, D>(
@@ -169,6 +167,7 @@ pub fn create_spend_to_address<E, N, P, D, R>(
     amount: Amount,
     memo: Option<MemoBytes>,
     ovk_policy: OvkPolicy,
+    min_confirmations: u32,
 ) -> Result<R, E>
 where
     E: From<Error<N>>,
@@ -187,7 +186,16 @@ where
         }],
     };
 
-    spend(wallet_db, params, prover, account, extsk, &req, ovk_policy)
+    spend(
+        wallet_db,
+        params,
+        prover,
+        account,
+        extsk,
+        &req,
+        ovk_policy,
+        min_confirmations,
+    )
 }
 
 pub fn spend<E, N, P, D, R>(
@@ -198,6 +206,7 @@ pub fn spend<E, N, P, D, R>(
     extsk: &ExtendedSpendingKey,
     request: &TransactionRequest,
     ovk_policy: OvkPolicy,
+    min_confirmations: u32,
 ) -> Result<R, E>
 where
     E: From<Error<N>>,
@@ -221,7 +230,7 @@ where
 
     // Target the next block, assuming we are up-to-date.
     let (height, anchor_height) = wallet_db
-        .get_target_and_anchor_heights()
+        .get_target_and_anchor_heights(min_confirmations)
         .and_then(|x| x.ok_or_else(|| Error::ScanRequired.into()))?;
 
     let value = request
@@ -337,7 +346,7 @@ pub fn shield_funds<E, N, P, D, R>(
     sk: &secp256k1::SecretKey,
     extsk: &ExtendedSpendingKey,
     memo: &MemoBytes,
-    confirmations: u32,
+    min_confirmations: u32,
 ) -> Result<D::TxRef, E>
 where
     E: From<Error<N>>,
@@ -346,7 +355,7 @@ where
     D: WalletWrite<Error = E, TxRef = R>,
 {
     let (latest_scanned_height, latest_anchor) = wallet_db
-        .get_target_and_anchor_heights()
+        .get_target_and_anchor_heights(min_confirmations)
         .and_then(|x| x.ok_or_else(|| Error::ScanRequired.into()))?;
 
     // derive the corresponding t-address
@@ -360,7 +369,7 @@ where
     let ovk = exfvk.fvk.ovk;
 
     // get UTXOs from DB
-    let utxos = wallet_db.get_unspent_transparent_utxos(&taddr, latest_anchor - confirmations)?;
+    let utxos = wallet_db.get_unspent_transparent_utxos(&taddr, latest_anchor)?;
     let total_amount = utxos
         .iter()
         .map(|utxo| utxo.value)

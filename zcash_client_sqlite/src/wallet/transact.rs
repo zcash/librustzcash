@@ -222,6 +222,7 @@ mod tests {
             Amount::from_u64(1).unwrap(),
             None,
             OvkPolicy::Sender,
+            10,
         ) {
             Ok(_) => panic!("Should have failed"),
             Err(e) => assert_eq!(e.to_string(), "Incorrect ExtendedSpendingKey for account 0"),
@@ -237,6 +238,7 @@ mod tests {
             Amount::from_u64(1).unwrap(),
             None,
             OvkPolicy::Sender,
+            10,
         ) {
             Ok(_) => panic!("Should have failed"),
             Err(e) => assert_eq!(e.to_string(), "Incorrect ExtendedSpendingKey for account 1"),
@@ -268,6 +270,7 @@ mod tests {
             Amount::from_u64(1).unwrap(),
             None,
             OvkPolicy::Sender,
+            10,
         ) {
             Ok(_) => panic!("Should have failed"),
             Err(e) => assert_eq!(e.to_string(), "Must scan blocks first"),
@@ -310,6 +313,7 @@ mod tests {
             Amount::from_u64(1).unwrap(),
             None,
             OvkPolicy::Sender,
+            10,
         ) {
             Ok(_) => panic!("Should have failed"),
             Err(e) => assert_eq!(
@@ -348,7 +352,10 @@ mod tests {
         scan_cached_blocks(&tests::network(), &db_cache, &mut db_write, None).unwrap();
 
         // Verified balance matches total balance
-        let (_, anchor_height) = (&db_data).get_target_and_anchor_heights().unwrap().unwrap();
+        let (_, anchor_height) = (&db_data)
+            .get_target_and_anchor_heights(10)
+            .unwrap()
+            .unwrap();
         assert_eq!(get_balance(&db_data, AccountId(0)).unwrap(), value);
         assert_eq!(
             get_balance_at(&db_data, AccountId(0), anchor_height).unwrap(),
@@ -366,7 +373,10 @@ mod tests {
         scan_cached_blocks(&tests::network(), &db_cache, &mut db_write, None).unwrap();
 
         // Verified balance does not include the second note
-        let (_, anchor_height2) = (&db_data).get_target_and_anchor_heights().unwrap().unwrap();
+        let (_, anchor_height2) = (&db_data)
+            .get_target_and_anchor_heights(10)
+            .unwrap()
+            .unwrap();
         assert_eq!(
             get_balance(&db_data, AccountId(0)).unwrap(),
             (value + value).unwrap()
@@ -389,6 +399,7 @@ mod tests {
             Amount::from_u64(70000).unwrap(),
             None,
             OvkPolicy::Sender,
+            10,
         ) {
             Ok(_) => panic!("Should have failed"),
             Err(e) => assert_eq!(
@@ -421,6 +432,7 @@ mod tests {
             Amount::from_u64(70000).unwrap(),
             None,
             OvkPolicy::Sender,
+            10,
         ) {
             Ok(_) => panic!("Should have failed"),
             Err(e) => assert_eq!(
@@ -446,6 +458,7 @@ mod tests {
             Amount::from_u64(70000).unwrap(),
             None,
             OvkPolicy::Sender,
+            10,
         )
         .unwrap();
     }
@@ -492,6 +505,7 @@ mod tests {
             Amount::from_u64(15000).unwrap(),
             None,
             OvkPolicy::Sender,
+            10,
         )
         .unwrap();
 
@@ -506,6 +520,7 @@ mod tests {
             Amount::from_u64(2000).unwrap(),
             None,
             OvkPolicy::Sender,
+            10,
         ) {
             Ok(_) => panic!("Should have failed"),
             Err(e) => assert_eq!(
@@ -538,6 +553,7 @@ mod tests {
             Amount::from_u64(2000).unwrap(),
             None,
             OvkPolicy::Sender,
+            10,
         ) {
             Ok(_) => panic!("Should have failed"),
             Err(e) => assert_eq!(
@@ -567,6 +583,7 @@ mod tests {
             Amount::from_u64(2000).unwrap(),
             None,
             OvkPolicy::Sender,
+            10,
         )
         .unwrap();
     }
@@ -616,6 +633,7 @@ mod tests {
                 Amount::from_u64(15000).unwrap(),
                 None,
                 ovk_policy,
+                10,
             )
             .unwrap();
 
@@ -707,7 +725,10 @@ mod tests {
         scan_cached_blocks(&tests::network(), &db_cache, &mut db_write, None).unwrap();
 
         // Verified balance matches total balance
-        let (_, anchor_height) = (&db_data).get_target_and_anchor_heights().unwrap().unwrap();
+        let (_, anchor_height) = (&db_data)
+            .get_target_and_anchor_heights(10)
+            .unwrap()
+            .unwrap();
         assert_eq!(get_balance(&db_data, AccountId(0)).unwrap(), value);
         assert_eq!(
             get_balance_at(&db_data, AccountId(0), anchor_height).unwrap(),
@@ -725,6 +746,7 @@ mod tests {
             Amount::from_u64(50000).unwrap(),
             None,
             OvkPolicy::Sender,
+            10,
         )
         .unwrap();
     }
