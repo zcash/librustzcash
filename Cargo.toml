@@ -17,14 +17,10 @@ panic = 'abort'
 codegen-units = 1
 
 [patch.crates-io]
-# To resolve the funty mess. Removing this probably blocks on a nom 7 release.
-# - https://github.com/Geal/nom/issues/1302
-# - https://github.com/Geal/nom/pull/1304
-nom = { git = "https://github.com/myrrlyn/nom.git", rev = "d6b81f5303b0a347726e1f3f428751f376e7b771" }
-
 # In development.
 halo2 = { git = "https://github.com/zcash/halo2.git", rev = "27c4187673a9c6ade13fbdbd4f20955530c22d7f" }
-orchard = { git = "https://github.com/zcash/orchard.git", rev = "8454f86d423edbf0b53a1d5d32df1c691f8b7188" }
+orchard = { git = "https://github.com/zcash/orchard.git", rev = "d0baa18fc6105df4a7847de2b6dc50c5919b3123" }
+incrementalmerkletree = { git = "https://github.com/zcash/incrementalmerkletree.git", rev = "b7bd6246122a6e9ace8edb51553fbf5228906cbb" }
 zcash_note_encryption = { path = "components/zcash_note_encryption" }
 
 # Unreleased

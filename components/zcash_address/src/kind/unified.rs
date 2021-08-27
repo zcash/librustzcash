@@ -217,7 +217,7 @@ impl TryFrom<(&str, &[u8])> for Address {
         let mut expected_padding = [0; PADDING_LEN];
         expected_padding[0..hrp.len()].copy_from_slice(hrp.as_bytes());
         let encoded = match encoded.split_at(encoded.len() - PADDING_LEN) {
-            (encoded, tail) if tail == &expected_padding => Ok(encoded),
+            (encoded, tail) if tail == expected_padding => Ok(encoded),
             _ => Err(ParseError::InvalidEncoding),
         }?;
 
