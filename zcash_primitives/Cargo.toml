@@ -23,7 +23,7 @@ blake2b_simd = "0.5"
 blake2s_simd = "0.5"
 bls12_381 = "0.5"
 byteorder = "1"
-crypto_api_chachapoly = "0.4"
+chacha20poly1305 = "0.9"
 equihash = { version = "0.1", path = "../components/equihash" }
 ff = "0.10"
 fpe = "0.5"
