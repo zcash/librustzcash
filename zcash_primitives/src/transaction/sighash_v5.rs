@@ -19,10 +19,10 @@ use crate::transaction::{
 use std::convert::TryInto;
 
 #[cfg(feature = "zfuture")]
-use crate::{
-    serialize::{CompactSize, Vector},
-    transaction::{components::tze, sighash::TzeInput, TzeDigests},
-};
+use zcash_encoding::{CompactSize, Vector};
+
+#[cfg(feature = "zfuture")]
+use crate::transaction::{components::tze, sighash::TzeInput, TzeDigests};
 
 const ZCASH_TRANSPARENT_INPUT_HASH_PERSONALIZATION: &[u8; 16] = b"Zcash___TxInHash";
 

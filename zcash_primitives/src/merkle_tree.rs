@@ -5,10 +5,9 @@ use incrementalmerkletree::{self, bridgetree, Altitude};
 use std::collections::VecDeque;
 use std::convert::TryFrom;
 use std::io::{self, Read, Write};
+use zcash_encoding::{Optional, Vector};
 
-use crate::sapling::SAPLING_COMMITMENT_TREE_DEPTH;
-use crate::sapling::SAPLING_COMMITMENT_TREE_DEPTH_U8;
-use crate::serialize::{Optional, Vector};
+use crate::sapling::{SAPLING_COMMITMENT_TREE_DEPTH, SAPLING_COMMITMENT_TREE_DEPTH_U8};
 
 pub mod incremental;
 

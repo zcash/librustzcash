@@ -16,7 +16,6 @@ pub mod legacy;
 pub mod memo;
 pub mod merkle_tree;
 pub mod sapling;
-pub mod serialize;
 pub mod transaction;
 pub mod zip32;
 pub mod zip339;

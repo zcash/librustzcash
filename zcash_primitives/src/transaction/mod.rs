@@ -18,11 +18,11 @@ use std::fmt;
 use std::fmt::Debug;
 use std::io::{self, Read, Write};
 use std::ops::Deref;
+use zcash_encoding::{Array, CompactSize, Vector};
 
 use crate::{
     consensus::{BlockHeight, BranchId},
     sapling::redjubjub,
-    serialize::{Array, CompactSize, Vector},
 };
 
 use self::{

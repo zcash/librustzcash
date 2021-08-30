@@ -6,12 +6,9 @@ use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use std::convert::TryFrom;
 use std::fmt::Debug;
 use std::io::{self, Read, Write};
+use zcash_encoding::{CompactSize, Vector};
 
-use crate::{
-    extensions::transparent as tze,
-    serialize::{CompactSize, Vector},
-    transaction::TxId,
-};
+use crate::{extensions::transparent as tze, transaction::TxId};
 
 use super::amount::Amount;
 
