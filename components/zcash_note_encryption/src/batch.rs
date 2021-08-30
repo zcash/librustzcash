@@ -10,6 +10,7 @@ use crate::{
 /// Trial decryption of a batch of notes with a set of recipients.
 ///
 /// This is the batched version of [`zcash_note_encryption::try_note_decryption`].
+#[allow(clippy::type_complexity)]
 pub fn try_note_decryption<D: Domain, Output: ShieldedOutput<D>>(
     ivks: &[D::IncomingViewingKey],
     outputs: &[(D, Output)],
