@@ -10,9 +10,10 @@
 
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use nonempty::NonEmpty;
+use std::convert::TryFrom;
 use std::io::{self, Read, Write};
 
-const MAX_SIZE: usize = 0x02000000;
+const MAX_SIZE: u64 = 0x02000000;
 
 /// Namespace for functions for compact encoding of integers.
 ///
@@ -22,17 +23,17 @@ pub struct CompactSize;
 
 impl CompactSize {
     /// Reads an integer encoded in compact form.
-    pub fn read<R: Read>(mut reader: R) -> io::Result<usize> {
+    pub fn read<R: Read>(mut reader: R) -> io::Result<u64> {
         let flag = reader.read_u8()?;
-        match if flag < 253 {
-            Ok(flag as usize)
+        let result = if flag < 253 {
+            Ok(flag as u64)
         } else if flag == 253 {
             match reader.read_u16::<LittleEndian>()? {
                 n if n < 253 => Err(io::Error::new(
                     io::ErrorKind::InvalidInput,
                     "non-canonical CompactSize",
                 )),
-                n => Ok(n as usize),
+                n => Ok(n as u64),
             }
         } else if flag == 254 {
             match reader.read_u32::<LittleEndian>()? {
@@ -40,7 +41,7 @@ impl CompactSize {
                     io::ErrorKind::InvalidInput,
                     "non-canonical CompactSize",
                 )),
-                n => Ok(n as usize),
+                n => Ok(n as u64),
             }
         } else {
             match reader.read_u64::<LittleEndian>()? {
@@ -48,15 +49,29 @@ impl CompactSize {
                     io::ErrorKind::InvalidInput,
                     "non-canonical CompactSize",
                 )),
-                n => Ok(n as usize),
+                n => Ok(n),
             }
-        }? {
+        }?;
+
+        match result {
             s if s > MAX_SIZE => Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 "CompactSize too large",
             )),
             s => Ok(s),
         }
+    }
+
+    /// Reads an integer encoded in contact form and performs checked conversion
+    /// to the target type.
+    pub fn read_t<R: Read, T: TryFrom<u64>>(mut reader: R) -> io::Result<T> {
+        let n = Self::read(&mut reader)?;
+        <T>::try_from(n).map_err(|_| {
+            io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "CompactSize value exceeds range of target type.",
+            )
+        })
     }
 
     /// Writes the provided `usize` value to the provided Writer in compact form.
@@ -92,7 +107,7 @@ impl Vector {
     where
         F: Fn(&mut R) -> io::Result<E>,
     {
-        let count = CompactSize::read(&mut reader)?;
+        let count: usize = CompactSize::read_t(&mut reader)?;
         Array::read(reader, count, func)
     }
 
@@ -193,34 +208,38 @@ impl Optional {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::convert::{TryFrom, TryInto};
+    use std::fmt::Debug;
 
     #[test]
     fn compact_size() {
-        macro_rules! eval {
-            ($value:expr, $expected:expr) => {
-                let mut data = vec![];
-                CompactSize::write(&mut data, $value).unwrap();
-                assert_eq!(&data[..], &$expected[..]);
-                match CompactSize::read(&data[..]) {
-                    Ok(n) => assert_eq!(n, $value),
-                    Err(e) => panic!("Unexpected error: {:?}", e),
-                }
-            };
+        fn eval<T: TryFrom<u64> + TryInto<usize> + Eq + Debug + Copy>(value: T, expected: &[u8])
+        where
+            <T as TryInto<usize>>::Error: Debug,
+        {
+            let mut data = vec![];
+            CompactSize::write(&mut data, value.try_into().unwrap()).unwrap();
+            assert_eq!(&data[..], expected);
+            let result: io::Result<T> = CompactSize::read_t(&data[..]);
+            match result {
+                Ok(n) => assert_eq!(n, value),
+                Err(e) => panic!("Unexpected error: {:?}", e),
+            }
         }
 
-        eval!(0, [0]);
-        eval!(1, [1]);
-        eval!(252, [252]);
-        eval!(253, [253, 253, 0]);
-        eval!(254, [253, 254, 0]);
-        eval!(255, [253, 255, 0]);
-        eval!(256, [253, 0, 1]);
-        eval!(256, [253, 0, 1]);
-        eval!(65535, [253, 255, 255]);
-        eval!(65536, [254, 0, 0, 1, 0]);
-        eval!(65537, [254, 1, 0, 1, 0]);
+        eval(0, &[0]);
+        eval(1, &[1]);
+        eval(252, &[252]);
+        eval(253, &[253, 253, 0]);
+        eval(254, &[253, 254, 0]);
+        eval(255, &[253, 255, 0]);
+        eval(256, &[253, 0, 1]);
+        eval(256, &[253, 0, 1]);
+        eval(65535, &[253, 255, 255]);
+        eval(65536, &[254, 0, 0, 1, 0]);
+        eval(65537, &[254, 1, 0, 1, 0]);
 
-        eval!(33554432, [254, 0, 0, 0, 2]);
+        eval(33554432, &[254, 0, 0, 0, 2]);
 
         {
             let value = 33554433;
