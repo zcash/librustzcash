@@ -332,6 +332,9 @@ impl Address {
 }
 
 #[cfg(test)]
+pub(crate) mod test_vectors;
+
+#[cfg(test)]
 mod tests {
     use assert_matches::assert_matches;
     use std::convert::TryFrom;

@@ -5,12 +5,12 @@ use std::ops::RangeInclusive;
 #[cfg(test)]
 mod test_vectors;
 
-const VALID_LENGTH: RangeInclusive<usize> = 48..=16448;
+const VALID_LENGTH: RangeInclusive<usize> = 48..=4194368;
 
 macro_rules! H_PERS {
     ( $i:expr ) => {
         [
-            85, 65, 95, 70, 52, 74, 117, 109, 98, 108, 101, 95, 72, 95, $i, 0,
+            85, 65, 95, 70, 52, 74, 117, 109, 98, 108, 101, 95, 72, $i, 0, 0,
         ]
     };
 }
@@ -18,7 +18,22 @@ macro_rules! H_PERS {
 macro_rules! G_PERS {
     ( $i:expr, $j:expr ) => {
         [
-            85, 65, 95, 70, 52, 74, 117, 109, 98, 108, 101, 95, 71, 95, $i, $j,
+            85,
+            65,
+            95,
+            70,
+            52,
+            74,
+            117,
+            109,
+            98,
+            108,
+            101,
+            95,
+            71,
+            $i,
+            $j as u8,
+            ($j >> 8) as u8,
         ]
     };
 }
@@ -49,7 +64,7 @@ impl Hashes {
             .flat_map(|j| {
                 Blake2bParams::new()
                     .hash_length(OUTBYTES)
-                    .personal(&G_PERS!(i, j as u8))
+                    .personal(&G_PERS!(i, j as u16))
                     .hash(u)
                     .as_ref()
                     .to_vec()
@@ -113,15 +128,17 @@ mod tests {
 
     #[test]
     fn h_pers() {
-        assert_eq!(&H_PERS!(7), b"UA_F4Jumble_H_\x07\x00");
+        assert_eq!(&H_PERS!(7), b"UA_F4Jumble_H\x07\x00\x00");
     }
 
     #[test]
     fn g_pers() {
-        assert_eq!(&G_PERS!(7, 13), b"UA_F4Jumble_G_\x07\x0d");
+        assert_eq!(&G_PERS!(7, 13), b"UA_F4Jumble_G\x07\x0d\x00");
     }
 
     proptest! {
+        #![proptest_config(ProptestConfig::with_cases(5))]
+
         #[test]
         fn f4jumble_roundtrip(msg in vec(any::<u8>(), VALID_LENGTH)) {
             let jumbled = f4jumble(&msg).unwrap();
