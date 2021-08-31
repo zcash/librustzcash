@@ -164,8 +164,6 @@ jobs:
           args: --all-features --release --timeout 600 --out Xml
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v2.0.3
-        with:
-          token: ${{secrets.CODECOV_TOKEN}}
 
   doc-links:
     name: Intra-doc links
