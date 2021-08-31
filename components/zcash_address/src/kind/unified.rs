@@ -3,7 +3,8 @@ use std::collections::HashSet;
 use std::convert::{TryFrom, TryInto};
 use std::error::Error;
 use std::fmt;
-use std::iter;
+use std::io::{Read, Write};
+use zcash_encoding::CompactSize;
 
 use crate::kind;
 
@@ -34,7 +35,7 @@ pub enum Typecode {
     P2sh,
     Sapling,
     Orchard,
-    Unknown(u8),
+    Unknown(u64),
 }
 
 impl Ord for Typecode {
@@ -75,8 +76,8 @@ impl PartialOrd for Typecode {
     }
 }
 
-impl From<u8> for Typecode {
-    fn from(typecode: u8) -> Self {
+impl From<u64> for Typecode {
+    fn from(typecode: u64) -> Self {
         match typecode {
             0x00 => Typecode::P2pkh,
             0x01 => Typecode::P2sh,
@@ -87,7 +88,7 @@ impl From<u8> for Typecode {
     }
 }
 
-impl From<Typecode> for u8 {
+impl From<Typecode> for u64 {
     fn from(t: Typecode) -> Self {
         match t {
             Typecode::P2pkh => 0x00,
@@ -115,7 +116,7 @@ pub enum ParseError {
     /// The unified address contains a duplicated typecode.
     DuplicateTypecode(Typecode),
     /// The string is an invalid encoding.
-    InvalidEncoding,
+    InvalidEncoding(String),
     /// The unified address only contains transparent receivers.
     OnlyTransparent,
 }
@@ -125,9 +126,9 @@ impl fmt::Display for ParseError {
         match self {
             ParseError::BothP2phkAndP2sh => write!(f, "UA contains both P2PKH and P2SH receivers"),
             ParseError::DuplicateTypecode(typecode) => {
-                write!(f, "Duplicate typecode {}", u8::from(*typecode))
+                write!(f, "Duplicate typecode {}", u64::from(*typecode))
             }
-            ParseError::InvalidEncoding => write!(f, "Invalid encoding"),
+            ParseError::InvalidEncoding(msg) => write!(f, "Invalid encoding: {}", msg),
             ParseError::OnlyTransparent => write!(f, "UA only contains transparent receivers"),
         }
     }
@@ -142,7 +143,7 @@ pub enum Receiver {
     Sapling(kind::sapling::Data),
     P2pkh(kind::p2pkh::Data),
     P2sh(kind::p2sh::Data),
-    Unknown { typecode: u8, data: Vec<u8> },
+    Unknown { typecode: u64, data: Vec<u8> },
 }
 
 impl cmp::Ord for Receiver {
@@ -160,10 +161,10 @@ impl cmp::PartialOrd for Receiver {
     }
 }
 
-impl TryFrom<(u8, &[u8])> for Receiver {
+impl TryFrom<(u64, &[u8])> for Receiver {
     type Error = ParseError;
 
-    fn try_from((typecode, addr): (u8, &[u8])) -> Result<Self, Self::Error> {
+    fn try_from((typecode, addr): (u64, &[u8])) -> Result<Self, Self::Error> {
         match typecode.into() {
             Typecode::P2pkh => addr.try_into().map(Receiver::P2pkh),
             Typecode::P2sh => addr.try_into().map(Receiver::P2sh),
@@ -174,7 +175,9 @@ impl TryFrom<(u8, &[u8])> for Receiver {
                 data: addr.to_vec(),
             }),
         }
-        .map_err(|_| ParseError::InvalidEncoding)
+        .map_err(|e| {
+            ParseError::InvalidEncoding(format!("Invalid address for typecode {}: {}", typecode, e))
+        })
     }
 }
 
@@ -208,37 +211,54 @@ impl TryFrom<(&str, &[u8])> for Address {
     type Error = ParseError;
 
     fn try_from((hrp, buf): (&str, &[u8])) -> Result<Self, Self::Error> {
-        let encoded = f4jumble::f4jumble_inv(buf).ok_or(ParseError::InvalidEncoding)?;
+        fn read_receiver<R: Read>(mut cursor: R) -> Result<Receiver, ParseError> {
+            let typecode = CompactSize::read(&mut cursor).map_err(|e| {
+                ParseError::InvalidEncoding(format!(
+                    "Failed to deserialize CompactSize-encoded typecode {}",
+                    e
+                ))
+            })?;
+            let length = CompactSize::read(&mut cursor).map_err(|e| {
+                ParseError::InvalidEncoding(format!(
+                    "Failed to deserialize CompactSize-encoded length {}",
+                    e
+                ))
+            })?;
+            let mut addr_buf = vec![0; length];
+            cursor.read_exact(&mut addr_buf).map_err(|e| {
+                ParseError::InvalidEncoding(format!(
+                    "Error reading {} bytes of address data: {}",
+                    length, e
+                ))
+            })?;
+
+            Receiver::try_from((typecode, &addr_buf[..]))
+        }
+
+        let encoded = f4jumble::f4jumble_inv(buf)
+            .ok_or_else(|| ParseError::InvalidEncoding("F4Jumble decoding failed".to_owned()))?;
 
         // Validate and strip trailing padding bytes.
         if hrp.len() > 16 {
-            return Err(ParseError::InvalidEncoding);
+            return Err(ParseError::InvalidEncoding(
+                "Invalid human-readable part".to_owned(),
+            ));
         }
         let mut expected_padding = [0; PADDING_LEN];
         expected_padding[0..hrp.len()].copy_from_slice(hrp.as_bytes());
         let encoded = match encoded.split_at(encoded.len() - PADDING_LEN) {
             (encoded, tail) if tail == expected_padding => Ok(encoded),
-            _ => Err(ParseError::InvalidEncoding),
+            _ => Err(ParseError::InvalidEncoding(
+                "Invalid padding bytes".to_owned(),
+            )),
         }?;
 
-        iter::repeat(())
-            .scan(encoded, |encoded, _| match encoded {
-                // Base case: we've parsed the full encoding.
-                [] => None,
-                // The raw encoding of a Unified Address is a concatenation of:
-                // - typecode: byte
-                // - length: byte
-                // - addr: byte[length]
-                [typecode, length, data @ ..] if data.len() >= *length as usize => {
-                    let (addr, rest) = data.split_at(*length as usize);
-                    *encoded = rest;
-                    Some(Receiver::try_from((*typecode, addr)))
-                }
-                // The encoding is truncated.
-                _ => Some(Err(ParseError::InvalidEncoding)),
-            })
-            .collect::<Result<_, _>>()
-            .and_then(|receivers: Vec<Receiver>| receivers.try_into())
+        let mut cursor = std::io::Cursor::new(encoded);
+        let mut result = vec![];
+        while cursor.position() < encoded.len().try_into().unwrap() {
+            result.push(read_receiver(&mut cursor)?);
+        }
+        result.try_into()
     }
 }
 
@@ -272,26 +292,25 @@ impl TryFrom<Vec<Receiver>> for Address {
 impl Address {
     /// Returns the raw encoding of this Unified Address.
     pub(crate) fn to_bytes(&self, hrp: &str) -> Vec<u8> {
-        assert!(hrp.len() <= 16);
+        assert!(hrp.len() <= PADDING_LEN);
 
-        let encoded: Vec<_> = self
-            .0
-            .iter()
-            .flat_map(|receiver| {
-                let addr = receiver.addr();
-                // Holds by construction.
-                assert!(addr.len() < 256);
+        let mut writer = std::io::Cursor::new(Vec::new());
+        for receiver in &self.0 {
+            let addr = receiver.addr();
+            CompactSize::write(
+                &mut writer,
+                <u64>::from(receiver.typecode()).try_into().unwrap(),
+            )
+            .unwrap();
+            CompactSize::write(&mut writer, addr.len()).unwrap();
+            writer.write_all(addr).unwrap();
+        }
 
-                iter::empty()
-                    .chain(Some(receiver.typecode().into()))
-                    .chain(Some(addr.len() as u8))
-                    .chain(addr.iter().cloned())
-            })
-            .chain(hrp.as_bytes().iter().cloned())
-            .chain(iter::repeat(0).take(PADDING_LEN - hrp.len()))
-            .collect();
+        let mut padding = [0u8; PADDING_LEN];
+        padding[0..hrp.len()].copy_from_slice(&hrp.as_bytes());
+        writer.write_all(&padding).unwrap();
 
-        f4jumble::f4jumble(&encoded).unwrap()
+        f4jumble::f4jumble(&writer.into_inner()).unwrap()
     }
 
     /// Returns the receivers contained within this address, sorted in preference order.
@@ -314,6 +333,7 @@ impl Address {
 
 #[cfg(test)]
 mod tests {
+    use assert_matches::assert_matches;
     use std::convert::TryFrom;
 
     use proptest::{
@@ -383,7 +403,9 @@ mod tests {
         ];
         assert_eq!(
             Address::try_from((MAINNET, &invalid_padding[..])),
-            Err(ParseError::InvalidEncoding)
+            Err(ParseError::InvalidEncoding(
+                "Invalid padding bytes".to_owned()
+            ))
         );
 
         // Short padding (padded to 15 bytes instead of 16)
@@ -396,7 +418,9 @@ mod tests {
         ];
         assert_eq!(
             Address::try_from((MAINNET, &truncated_padding[..])),
-            Err(ParseError::InvalidEncoding)
+            Err(ParseError::InvalidEncoding(
+                "Invalid padding bytes".to_owned()
+            ))
         );
     }
 
@@ -417,9 +441,9 @@ mod tests {
             0xb2, 0x63, 0x80, 0xbb, 0xdc, 0x12, 0x08, 0x48, 0x28, 0x8f, 0x1c, 0x9e, 0xc3, 0x42,
             0xc6, 0x5e, 0x68, 0xa2, 0x78, 0x6c, 0x9e,
         ];
-        assert_eq!(
+        assert_matches!(
             Address::try_from((MAINNET, &truncated_sapling_data[..])),
-            Err(ParseError::InvalidEncoding)
+            Err(ParseError::InvalidEncoding(_))
         );
 
         // - Truncated after the typecode of the Sapling receiver.
@@ -430,9 +454,9 @@ mod tests {
             0x4c, 0xdf, 0x36, 0xa1, 0xac, 0x82, 0x57, 0xed, 0x0c, 0x98, 0x49, 0x8f, 0x49, 0x7e,
             0xe6, 0x70, 0x36, 0x5b, 0x7b, 0x9e,
         ];
-        assert_eq!(
+        assert_matches!(
             Address::try_from((MAINNET, &truncated_after_sapling_typecode[..])),
-            Err(ParseError::InvalidEncoding)
+            Err(ParseError::InvalidEncoding(_))
         );
     }
 
@@ -471,9 +495,9 @@ mod tests {
         // receivers we can use are P2PKH and P2SH (which cannot be used together), and
         // with only one of them we don't have sufficient data for F4Jumble (so we hit a
         // different error).
-        assert_eq!(
+        assert_matches!(
             Address::try_from((MAINNET, &encoded[..])),
-            Err(ParseError::InvalidEncoding)
+            Err(ParseError::InvalidEncoding(_))
         );
     }
 

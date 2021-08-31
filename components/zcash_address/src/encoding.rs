@@ -18,7 +18,7 @@ pub enum ParseError {
 impl From<unified::ParseError> for ParseError {
     fn from(e: unified::ParseError) -> Self {
         match e {
-            unified::ParseError::InvalidEncoding => Self::InvalidEncoding,
+            unified::ParseError::InvalidEncoding(_) => Self::InvalidEncoding,
             _ => Self::Unified(e),
         }
     }
