@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use std::convert::{TryFrom, TryInto};
 use std::error::Error;
 use std::fmt;
-use std::io::{Read, Write};
+use std::io::Write;
 use zcash_encoding::CompactSize;
 
 use crate::kind;
@@ -211,7 +211,7 @@ impl TryFrom<(&str, &[u8])> for Address {
     type Error = ParseError;
 
     fn try_from((hrp, buf): (&str, &[u8])) -> Result<Self, Self::Error> {
-        fn read_receiver<R: Read>(mut cursor: R) -> Result<Receiver, ParseError> {
+        fn read_receiver(mut cursor: &mut std::io::Cursor<&[u8]>) -> Result<Receiver, ParseError> {
             let typecode = CompactSize::read(&mut cursor).map_err(|e| {
                 ParseError::InvalidEncoding(format!(
                     "Failed to deserialize CompactSize-encoded typecode {}",
@@ -224,15 +224,25 @@ impl TryFrom<(&str, &[u8])> for Address {
                     e
                 ))
             })?;
-            let mut addr_buf = vec![0; length];
-            cursor.read_exact(&mut addr_buf).map_err(|e| {
+            let addr_end = cursor.position().checked_add(length).ok_or_else(|| {
                 ParseError::InvalidEncoding(format!(
-                    "Error reading {} bytes of address data: {}",
-                    length, e
+                    "Length value {} caused an overflow error",
+                    length
                 ))
             })?;
-
-            Receiver::try_from((typecode, &addr_buf[..]))
+            let buf = cursor.get_ref();
+            if (buf.len() as u64) < addr_end {
+                return Err(ParseError::InvalidEncoding(format!(
+                    "Truncated: unable to read {} bytes of address data",
+                    length
+                )));
+            }
+            let result = Receiver::try_from((
+                typecode,
+                &buf[cursor.position() as usize..addr_end as usize],
+            ));
+            cursor.set_position(addr_end);
+            result
         }
 
         let encoded = f4jumble::f4jumble_inv(buf)
