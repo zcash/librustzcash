@@ -49,6 +49,8 @@ and this library adheres to Rust's notion of
     type bounded on a newly added `tze::Authorization` trait which
     is used to enable static reasoning about the state of TZE witness
     data, as described above.
+- `zcash_primitives::serialize` has been factored out as a new `zcash_encoding`
+  crate, which can be found in the `components` directory.
 
 ### Changed
 - MSRV is now 1.51.0.

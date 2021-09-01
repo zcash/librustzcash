@@ -11,10 +11,10 @@ use orchard::{
     value::ValueCommitment,
     Anchor,
 };
+use zcash_encoding::{Array, CompactSize, Vector};
 
 use super::Amount;
-use crate::serialize::{Array, CompactSize};
-use crate::{serialize::Vector, transaction::Transaction};
+use crate::transaction::Transaction;
 
 pub const FLAG_SPENDS_ENABLED: u8 = 0b0000_0001;
 pub const FLAG_OUTPUTS_ENABLED: u8 = 0b0000_0010;

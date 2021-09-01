@@ -1355,7 +1355,7 @@ mod tests {
             let output = OutputDescription {
                 cv,
                 cmu,
-                ephemeral_key: ephemeral_key,
+                ephemeral_key,
                 enc_ciphertext: tv.c_enc,
                 out_ciphertext: tv.c_out,
                 zkproof: [0u8; GROTH_PROOF_SIZE],

@@ -12,9 +12,9 @@ use incrementalmerkletree::{
     Hashable, Position,
 };
 use orchard::tree::MerkleCrhOrchardOutput;
+use zcash_encoding::{Optional, Vector};
 
 use super::{CommitmentTree, HashSer};
-use crate::serialize::{Optional, Vector};
 
 pub const SER_V1: u8 = 1;
 

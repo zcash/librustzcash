@@ -1,13 +1,28 @@
+//! *Zcash binary encodings.*
+//!
+//! `zcash_encoding` is a library that provides common encoding and decoding operations
+//! for stable binary encodings used throughout the Zcash ecosystem.
+
+// Catch documentation errors caused by code changes.
+#![deny(broken_intra_doc_links)]
+#![deny(missing_docs)]
+#![deny(unsafe_code)]
+
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use nonempty::NonEmpty;
 use std::io::{self, Read, Write};
 
 const MAX_SIZE: usize = 0x02000000;
 
-pub(crate) struct CompactSize;
+/// Namespace for functions for compact encoding of integers.
+///
+/// This codec requires integers to be in the range `0x0..=0x02000000`, for compatibility
+/// with Zcash consensus rules.
+pub struct CompactSize;
 
 impl CompactSize {
-    pub(crate) fn read<R: Read>(mut reader: R) -> io::Result<usize> {
+    /// Reads an integer encoded in compact form.
+    pub fn read<R: Read>(mut reader: R) -> io::Result<usize> {
         let flag = reader.read_u8()?;
         match if flag < 253 {
             Ok(flag as usize)
@@ -44,7 +59,8 @@ impl CompactSize {
         }
     }
 
-    pub(crate) fn write<W: Write>(mut writer: W, size: usize) -> io::Result<()> {
+    /// Writes the provided `usize` value to the provided Writer in compact form.
+    pub fn write<W: Write>(mut writer: W, size: usize) -> io::Result<()> {
         match size {
             s if s < 253 => writer.write_u8(s as u8),
             s if s <= 0xFFFF => {
@@ -63,9 +79,15 @@ impl CompactSize {
     }
 }
 
+/// Namespace for functions that perform encoding of vectors.
+///
+/// The length of a vector is restricted to at most `0x02000000`, for compatibility with
+/// the Zcash consensus rules.
 pub struct Vector;
 
 impl Vector {
+    /// Reads a vector, assuming the encoding written by [`Vector::write`], using the provided
+    /// function to decode each element of the vector.
     pub fn read<R: Read, E, F>(mut reader: R, func: F) -> io::Result<Vec<E>>
     where
         F: Fn(&mut R) -> io::Result<E>,
@@ -74,6 +96,9 @@ impl Vector {
         Array::read(reader, count, func)
     }
 
+    /// Writes a slice of values by writing [`CompactSize`]-encoded integer specifying the length of
+    /// the slice to the stream, followed by the encoding of each element of the slice as performed
+    /// by the provided function.
     pub fn write<W: Write, E, F>(mut writer: W, vec: &[E], func: F) -> io::Result<()>
     where
         F: Fn(&mut W, &E) -> io::Result<()>,
@@ -82,6 +107,8 @@ impl Vector {
         vec.iter().try_for_each(|e| func(&mut writer, e))
     }
 
+    /// Writes a NonEmpty container of values to the stream using the same encoding as
+    /// `[Vector::write]`
     pub fn write_nonempty<W: Write, E, F>(
         mut writer: W,
         vec: &NonEmpty<E>,
@@ -95,9 +122,16 @@ impl Vector {
     }
 }
 
+/// Namespace for functions that perform encoding of array contents.
+///
+/// This is similar to the [`Vector`] encoding except that no length information is
+/// written as part of the encoding, so length must be statically known or obtained from
+/// other parts of the input stream.
 pub struct Array;
 
 impl Array {
+    /// Reads a vector, assuming the encoding written by [`Array::write`], using the provided
+    /// function to decode each element of the vector.
     pub fn read<R: Read, E, F>(mut reader: R, count: usize, func: F) -> io::Result<Vec<E>>
     where
         F: Fn(&mut R) -> io::Result<E>,
@@ -105,6 +139,8 @@ impl Array {
         (0..count).map(|_| func(&mut reader)).collect()
     }
 
+    /// Writes an iterator full of values to a stream by sequentially
+    /// encoding each element using the provided function.
     pub fn write<W: Write, E, I: IntoIterator<Item = E>, F>(
         mut writer: W,
         vec: I,
@@ -117,9 +153,12 @@ impl Array {
     }
 }
 
+/// Namespace for functions that perform encoding of [`Option`] values.
 pub struct Optional;
 
 impl Optional {
+    /// Reads an optional value, assuming the encoding written by [`Optional::write`], using the
+    /// provided function to decode the contained element if present.
     pub fn read<R: Read, T, F>(mut reader: R, func: F) -> io::Result<Option<T>>
     where
         F: Fn(R) -> io::Result<T>,
@@ -134,6 +173,9 @@ impl Optional {
         }
     }
 
+    /// Writes an optional value to a stream by writing a flag byte with a value of 0 if no value
+    /// is present, or 1 if there is a value, followed by the encoding of the contents of the
+    /// option as performed by the provided function.
     pub fn write<W: Write, T, F>(mut writer: W, val: Option<T>, func: F) -> io::Result<()>
     where
         F: Fn(W, T) -> io::Result<()>,
