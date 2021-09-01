@@ -1,7 +1,7 @@
 # zcash_encodings
 
-Zcash-related types that require stable binary encodings for use throughout the 
-Zcash ecosystem.
+This library provides common encoding and decoding operations for stable binary
+encodings used throughout the Zcash ecosystem.
 
 ## License
 
