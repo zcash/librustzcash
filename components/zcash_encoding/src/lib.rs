@@ -14,12 +14,14 @@ use std::io::{self, Read, Write};
 
 const MAX_SIZE: usize = 0x02000000;
 
-/// Namespace for functions for compact encoding of integers in the range
-/// 0x0..=0x02000000
+/// Namespace for functions for compact encoding of integers.
+///
+/// This codec requires integers to be in the range `0x0..=0x02000000`, for compatibility
+/// with Zcash consensus rules.
 pub struct CompactSize;
 
 impl CompactSize {
-    /// Read an integer encoded in compact form.
+    /// Reads an integer encoded in compact form.
     pub fn read<R: Read>(mut reader: R) -> io::Result<usize> {
         let flag = reader.read_u8()?;
         match if flag < 253 {
@@ -77,9 +79,10 @@ impl CompactSize {
     }
 }
 
-/// Namespace for functions that perform encoding of vectors that represent a vector as a
-/// CompactSize-encoded integer specifying the length of the vector, followed by the encoding of
-/// each element of the vector.
+/// Namespace for functions that perform encoding of vectors.
+///
+/// The length of a vector is restricted to at most `0x02000000`, for compatibility with
+/// the Zcash consensus rules.
 pub struct Vector;
 
 impl Vector {
@@ -93,7 +96,7 @@ impl Vector {
         Array::read(reader, count, func)
     }
 
-    /// Writes a slice of values by writing CompactSize-encoded integer specifying the length of
+    /// Writes a slice of values by writing [`CompactSize`]-encoded integer specifying the length of
     /// the slice to the stream, followed by the encoding of each element of the slice as performed
     /// by the provided function.
     pub fn write<W: Write, E, F>(mut writer: W, vec: &[E], func: F) -> io::Result<()>
@@ -119,9 +122,11 @@ impl Vector {
     }
 }
 
-/// Namespace for functions that perform encoding of array contents.  This is similar to the
-/// [`Vector`] encoding except that no length information is written as part of the encoding, so
-/// length must be statically known or obtained from other parts of the input stream.
+/// Namespace for functions that perform encoding of array contents.
+///
+/// This is similar to the [`Vector`] encoding except that no length information is
+/// written as part of the encoding, so length must be statically known or obtained from
+/// other parts of the input stream.
 pub struct Array;
 
 impl Array {
