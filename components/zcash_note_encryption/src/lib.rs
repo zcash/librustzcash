@@ -3,6 +3,11 @@
 //! functionality that is shared between the Sapling and Orchard
 //! protocols.
 
+// Catch documentation errors caused by code changes.
+#![deny(broken_intra_doc_links)]
+#![deny(unsafe_code)]
+// TODO: #![deny(missing_docs)]
+
 use std::convert::TryInto;
 
 use chacha20::{
@@ -13,6 +18,7 @@ use chacha20poly1305::{
     aead::{AeadInPlace, NewAead},
     ChaCha20Poly1305,
 };
+
 use rand_core::RngCore;
 use subtle::{Choice, ConstantTimeEq};
 
