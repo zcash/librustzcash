@@ -598,10 +598,21 @@
 <span id="598">598</span>
 <span id="599">599</span>
 <span id="600">600</span>
+<span id="601">601</span>
+<span id="602">602</span>
+<span id="603">603</span>
+<span id="604">604</span>
+<span id="605">605</span>
+<span id="606">606</span>
 </pre><pre class="rust"><code><span class="doccomment">//! Implementation of in-band secret distribution abstractions</span>
 <span class="doccomment">//! for Zcash transactions. The implementations here provide</span>
 <span class="doccomment">//! functionality that is shared between the Sapling and Orchard</span>
 <span class="doccomment">//! protocols.</span>
+
+<span class="comment">// Catch documentation errors caused by code changes.</span>
+<span class="attribute">#![<span class="ident">deny</span>(<span class="ident">broken_intra_doc_links</span>)]</span>
+<span class="attribute">#![<span class="ident">deny</span>(<span class="ident">unsafe_code</span>)]</span>
+<span class="comment">// TODO: #![deny(missing_docs)]</span>
 
 <span class="kw">use</span> <span class="ident">std::convert::TryInto</span>;
 
@@ -613,6 +624,7 @@
     <span class="ident">aead</span>::{<span class="ident">AeadInPlace</span>, <span class="ident">NewAead</span>},
     <span class="ident">ChaCha20Poly1305</span>,
 };
+
 <span class="kw">use</span> <span class="ident">rand_core::RngCore</span>;
 <span class="kw">use</span> <span class="ident">subtle</span>::{<span class="ident">Choice</span>, <span class="ident">ConstantTimeEq</span>};
 
