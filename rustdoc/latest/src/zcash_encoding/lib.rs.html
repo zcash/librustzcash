@@ -306,6 +306,25 @@
 <span id="306">306</span>
 <span id="307">307</span>
 <span id="308">308</span>
+<span id="309">309</span>
+<span id="310">310</span>
+<span id="311">311</span>
+<span id="312">312</span>
+<span id="313">313</span>
+<span id="314">314</span>
+<span id="315">315</span>
+<span id="316">316</span>
+<span id="317">317</span>
+<span id="318">318</span>
+<span id="319">319</span>
+<span id="320">320</span>
+<span id="321">321</span>
+<span id="322">322</span>
+<span id="323">323</span>
+<span id="324">324</span>
+<span id="325">325</span>
+<span id="326">326</span>
+<span id="327">327</span>
 </pre><pre class="rust"><code><span class="doccomment">//! *Zcash binary encodings.*</span>
 <span class="doccomment">//!</span>
 <span class="doccomment">//! `zcash_encoding` is a library that provides common encoding and decoding operations</span>
@@ -318,9 +337,10 @@
 
 <span class="kw">use</span> <span class="ident">byteorder</span>::{<span class="ident">LittleEndian</span>, <span class="ident">ReadBytesExt</span>, <span class="ident">WriteBytesExt</span>};
 <span class="kw">use</span> <span class="ident">nonempty::NonEmpty</span>;
+<span class="kw">use</span> <span class="ident">std::convert::TryFrom</span>;
 <span class="kw">use</span> <span class="ident">std::io</span>::{<span class="self">self</span>, <span class="ident">Read</span>, <span class="ident">Write</span>};
 
-<span class="kw">const</span> <span class="ident">MAX_SIZE</span>: <span class="ident">usize</span> <span class="op">=</span> <span class="number">0x02000000</span>;
+<span class="kw">const</span> <span class="ident">MAX_SIZE</span>: <span class="ident">u64</span> <span class="op">=</span> <span class="number">0x02000000</span>;
 
 <span class="doccomment">/// Namespace for functions for compact encoding of integers.</span>
 <span class="doccomment">///</span>
@@ -330,17 +350,17 @@
 
 <span class="kw">impl</span> <span class="ident">CompactSize</span> {
     <span class="doccomment">/// Reads an integer encoded in compact form.</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">read</span><span class="op">&lt;</span><span class="ident">R</span>: <span class="ident">Read</span><span class="op">&gt;</span>(<span class="kw-2">mut</span> <span class="ident">reader</span>: <span class="ident">R</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">io::Result</span><span class="op">&lt;</span><span class="ident">usize</span><span class="op">&gt;</span> {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">read</span><span class="op">&lt;</span><span class="ident">R</span>: <span class="ident">Read</span><span class="op">&gt;</span>(<span class="kw-2">mut</span> <span class="ident">reader</span>: <span class="ident">R</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">io::Result</span><span class="op">&lt;</span><span class="ident">u64</span><span class="op">&gt;</span> {
         <span class="kw">let</span> <span class="ident">flag</span> <span class="op">=</span> <span class="ident">reader</span>.<span class="ident">read_u8</span>()<span class="question-mark">?</span>;
-        <span class="kw">match</span> <span class="kw">if</span> <span class="ident">flag</span> <span class="op">&lt;</span> <span class="number">253</span> {
-            <span class="prelude-val">Ok</span>(<span class="ident">flag</span> <span class="kw">as</span> <span class="ident">usize</span>)
+        <span class="kw">let</span> <span class="ident">result</span> <span class="op">=</span> <span class="kw">if</span> <span class="ident">flag</span> <span class="op">&lt;</span> <span class="number">253</span> {
+            <span class="prelude-val">Ok</span>(<span class="ident">flag</span> <span class="kw">as</span> <span class="ident">u64</span>)
         } <span class="kw">else</span> <span class="kw">if</span> <span class="ident">flag</span> <span class="op">=</span><span class="op">=</span> <span class="number">253</span> {
             <span class="kw">match</span> <span class="ident">reader</span>.<span class="ident">read_u16</span>::<span class="op">&lt;</span><span class="ident">LittleEndian</span><span class="op">&gt;</span>()<span class="question-mark">?</span> {
                 <span class="ident">n</span> <span class="kw">if</span> <span class="ident">n</span> <span class="op">&lt;</span> <span class="number">253</span> <span class="op">=</span><span class="op">&gt;</span> <span class="prelude-val">Err</span>(<span class="ident">io::Error::new</span>(
                     <span class="ident">io::ErrorKind::InvalidInput</span>,
                     <span class="string">&quot;non-canonical CompactSize&quot;</span>,
                 )),
-                <span class="ident">n</span> <span class="op">=</span><span class="op">&gt;</span> <span class="prelude-val">Ok</span>(<span class="ident">n</span> <span class="kw">as</span> <span class="ident">usize</span>),
+                <span class="ident">n</span> <span class="op">=</span><span class="op">&gt;</span> <span class="prelude-val">Ok</span>(<span class="ident">n</span> <span class="kw">as</span> <span class="ident">u64</span>),
             }
         } <span class="kw">else</span> <span class="kw">if</span> <span class="ident">flag</span> <span class="op">=</span><span class="op">=</span> <span class="number">254</span> {
             <span class="kw">match</span> <span class="ident">reader</span>.<span class="ident">read_u32</span>::<span class="op">&lt;</span><span class="ident">LittleEndian</span><span class="op">&gt;</span>()<span class="question-mark">?</span> {
@@ -348,7 +368,7 @@
                     <span class="ident">io::ErrorKind::InvalidInput</span>,
                     <span class="string">&quot;non-canonical CompactSize&quot;</span>,
                 )),
-                <span class="ident">n</span> <span class="op">=</span><span class="op">&gt;</span> <span class="prelude-val">Ok</span>(<span class="ident">n</span> <span class="kw">as</span> <span class="ident">usize</span>),
+                <span class="ident">n</span> <span class="op">=</span><span class="op">&gt;</span> <span class="prelude-val">Ok</span>(<span class="ident">n</span> <span class="kw">as</span> <span class="ident">u64</span>),
             }
         } <span class="kw">else</span> {
             <span class="kw">match</span> <span class="ident">reader</span>.<span class="ident">read_u64</span>::<span class="op">&lt;</span><span class="ident">LittleEndian</span><span class="op">&gt;</span>()<span class="question-mark">?</span> {
@@ -356,15 +376,29 @@
                     <span class="ident">io::ErrorKind::InvalidInput</span>,
                     <span class="string">&quot;non-canonical CompactSize&quot;</span>,
                 )),
-                <span class="ident">n</span> <span class="op">=</span><span class="op">&gt;</span> <span class="prelude-val">Ok</span>(<span class="ident">n</span> <span class="kw">as</span> <span class="ident">usize</span>),
+                <span class="ident">n</span> <span class="op">=</span><span class="op">&gt;</span> <span class="prelude-val">Ok</span>(<span class="ident">n</span>),
             }
-        }<span class="question-mark">?</span> {
+        }<span class="question-mark">?</span>;
+
+        <span class="kw">match</span> <span class="ident">result</span> {
             <span class="ident">s</span> <span class="kw">if</span> <span class="ident">s</span> <span class="op">&gt;</span> <span class="ident">MAX_SIZE</span> <span class="op">=</span><span class="op">&gt;</span> <span class="prelude-val">Err</span>(<span class="ident">io::Error::new</span>(
                 <span class="ident">io::ErrorKind::InvalidInput</span>,
                 <span class="string">&quot;CompactSize too large&quot;</span>,
             )),
             <span class="ident">s</span> <span class="op">=</span><span class="op">&gt;</span> <span class="prelude-val">Ok</span>(<span class="ident">s</span>),
         }
+    }
+
+    <span class="doccomment">/// Reads an integer encoded in contact form and performs checked conversion</span>
+    <span class="doccomment">/// to the target type.</span>
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">read_t</span><span class="op">&lt;</span><span class="ident">R</span>: <span class="ident">Read</span>, <span class="ident">T</span>: <span class="ident">TryFrom</span><span class="op">&lt;</span><span class="ident">u64</span><span class="op">&gt;</span><span class="op">&gt;</span>(<span class="kw-2">mut</span> <span class="ident">reader</span>: <span class="ident">R</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">io::Result</span><span class="op">&lt;</span><span class="ident">T</span><span class="op">&gt;</span> {
+        <span class="kw">let</span> <span class="ident">n</span> <span class="op">=</span> <span class="ident"><span class="self">Self</span>::read</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">reader</span>)<span class="question-mark">?</span>;
+        <span class="op">&lt;</span><span class="ident">T</span><span class="op">&gt;</span><span class="ident">::try_from</span>(<span class="ident">n</span>).<span class="ident">map_err</span>(<span class="op">|</span><span class="kw">_</span><span class="op">|</span> {
+            <span class="ident">io::Error::new</span>(
+                <span class="ident">io::ErrorKind::InvalidInput</span>,
+                <span class="string">&quot;CompactSize value exceeds range of target type.&quot;</span>,
+            )
+        })
     }
 
     <span class="doccomment">/// Writes the provided `usize` value to the provided Writer in compact form.</span>
@@ -400,7 +434,7 @@
     <span class="kw">where</span>
         <span class="ident">F</span>: <span class="ident">Fn</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">R</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">io::Result</span><span class="op">&lt;</span><span class="ident">E</span><span class="op">&gt;</span>,
     {
-        <span class="kw">let</span> <span class="ident">count</span> <span class="op">=</span> <span class="ident">CompactSize::read</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">reader</span>)<span class="question-mark">?</span>;
+        <span class="kw">let</span> <span class="ident">count</span>: <span class="ident">usize</span> <span class="op">=</span> <span class="ident">CompactSize::read_t</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">reader</span>)<span class="question-mark">?</span>;
         <span class="ident">Array::read</span>(<span class="ident">reader</span>, <span class="ident">count</span>, <span class="ident">func</span>)
     }
 
@@ -501,34 +535,38 @@
 <span class="attribute">#[<span class="ident">cfg</span>(<span class="ident">test</span>)]</span>
 <span class="kw">mod</span> <span class="ident">tests</span> {
     <span class="kw">use</span> <span class="kw">super</span>::<span class="kw-2">*</span>;
+    <span class="kw">use</span> <span class="ident">std::convert</span>::{<span class="ident">TryFrom</span>, <span class="ident">TryInto</span>};
+    <span class="kw">use</span> <span class="ident">std::fmt::Debug</span>;
 
     <span class="attribute">#[<span class="ident">test</span>]</span>
     <span class="kw">fn</span> <span class="ident">compact_size</span>() {
-        <span class="macro">macro_rules!</span> <span class="ident">eval</span> {
-            (<span class="macro-nonterminal">$</span><span class="macro-nonterminal">value</span>:<span class="ident">expr</span>, <span class="macro-nonterminal">$</span><span class="macro-nonterminal">expected</span>:<span class="ident">expr</span>) <span class="op">=</span><span class="op">&gt;</span> {
-                <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">data</span> <span class="op">=</span> <span class="macro">vec!</span>[];
-                <span class="ident">CompactSize::write</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">data</span>, <span class="macro-nonterminal">$</span><span class="macro-nonterminal">value</span>).<span class="ident">unwrap</span>();
-                <span class="macro">assert_eq!</span>(<span class="kw-2">&amp;</span><span class="ident">data</span>[..], <span class="kw-2">&amp;</span><span class="macro-nonterminal">$</span><span class="macro-nonterminal">expected</span>[..]);
-                <span class="kw">match</span> <span class="ident">CompactSize::read</span>(<span class="kw-2">&amp;</span><span class="ident">data</span>[..]) {
-                    <span class="prelude-val">Ok</span>(<span class="ident">n</span>) <span class="op">=</span><span class="op">&gt;</span> <span class="macro">assert_eq!</span>(<span class="ident">n</span>, <span class="macro-nonterminal">$</span><span class="macro-nonterminal">value</span>),
-                    <span class="prelude-val">Err</span>(<span class="ident">e</span>) <span class="op">=</span><span class="op">&gt;</span> <span class="macro">panic!</span>(<span class="string">&quot;Unexpected error: {:?}&quot;</span>, <span class="ident">e</span>),
-                }
-            };
+        <span class="kw">fn</span> <span class="ident">eval</span><span class="op">&lt;</span><span class="ident">T</span>: <span class="ident">TryFrom</span><span class="op">&lt;</span><span class="ident">u64</span><span class="op">&gt;</span> <span class="op">+</span> <span class="ident">TryInto</span><span class="op">&lt;</span><span class="ident">usize</span><span class="op">&gt;</span> <span class="op">+</span> <span class="ident">Eq</span> <span class="op">+</span> <span class="ident">Debug</span> <span class="op">+</span> <span class="ident">Copy</span><span class="op">&gt;</span>(<span class="ident">value</span>: <span class="ident">T</span>, <span class="ident">expected</span>: <span class="kw-2">&amp;</span>[<span class="ident">u8</span>])
+        <span class="kw">where</span>
+            <span class="op">&lt;</span><span class="ident">T</span> <span class="kw">as</span> <span class="ident">TryInto</span><span class="op">&lt;</span><span class="ident">usize</span><span class="op">&gt;</span><span class="op">&gt;</span><span class="ident">::Error</span>: <span class="ident">Debug</span>,
+        {
+            <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">data</span> <span class="op">=</span> <span class="macro">vec!</span>[];
+            <span class="ident">CompactSize::write</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">data</span>, <span class="ident">value</span>.<span class="ident">try_into</span>().<span class="ident">unwrap</span>()).<span class="ident">unwrap</span>();
+            <span class="macro">assert_eq!</span>(<span class="kw-2">&amp;</span><span class="ident">data</span>[..], <span class="ident">expected</span>);
+            <span class="kw">let</span> <span class="ident">result</span>: <span class="ident">io::Result</span><span class="op">&lt;</span><span class="ident">T</span><span class="op">&gt;</span> <span class="op">=</span> <span class="ident">CompactSize::read_t</span>(<span class="kw-2">&amp;</span><span class="ident">data</span>[..]);
+            <span class="kw">match</span> <span class="ident">result</span> {
+                <span class="prelude-val">Ok</span>(<span class="ident">n</span>) <span class="op">=</span><span class="op">&gt;</span> <span class="macro">assert_eq!</span>(<span class="ident">n</span>, <span class="ident">value</span>),
+                <span class="prelude-val">Err</span>(<span class="ident">e</span>) <span class="op">=</span><span class="op">&gt;</span> <span class="macro">panic!</span>(<span class="string">&quot;Unexpected error: {:?}&quot;</span>, <span class="ident">e</span>),
+            }
         }
 
-        <span class="macro">eval!</span>(<span class="number">0</span>, [<span class="number">0</span>]);
-        <span class="macro">eval!</span>(<span class="number">1</span>, [<span class="number">1</span>]);
-        <span class="macro">eval!</span>(<span class="number">252</span>, [<span class="number">252</span>]);
-        <span class="macro">eval!</span>(<span class="number">253</span>, [<span class="number">253</span>, <span class="number">253</span>, <span class="number">0</span>]);
-        <span class="macro">eval!</span>(<span class="number">254</span>, [<span class="number">253</span>, <span class="number">254</span>, <span class="number">0</span>]);
-        <span class="macro">eval!</span>(<span class="number">255</span>, [<span class="number">253</span>, <span class="number">255</span>, <span class="number">0</span>]);
-        <span class="macro">eval!</span>(<span class="number">256</span>, [<span class="number">253</span>, <span class="number">0</span>, <span class="number">1</span>]);
-        <span class="macro">eval!</span>(<span class="number">256</span>, [<span class="number">253</span>, <span class="number">0</span>, <span class="number">1</span>]);
-        <span class="macro">eval!</span>(<span class="number">65535</span>, [<span class="number">253</span>, <span class="number">255</span>, <span class="number">255</span>]);
-        <span class="macro">eval!</span>(<span class="number">65536</span>, [<span class="number">254</span>, <span class="number">0</span>, <span class="number">0</span>, <span class="number">1</span>, <span class="number">0</span>]);
-        <span class="macro">eval!</span>(<span class="number">65537</span>, [<span class="number">254</span>, <span class="number">1</span>, <span class="number">0</span>, <span class="number">1</span>, <span class="number">0</span>]);
+        <span class="ident">eval</span>(<span class="number">0</span>, <span class="kw-2">&amp;</span>[<span class="number">0</span>]);
+        <span class="ident">eval</span>(<span class="number">1</span>, <span class="kw-2">&amp;</span>[<span class="number">1</span>]);
+        <span class="ident">eval</span>(<span class="number">252</span>, <span class="kw-2">&amp;</span>[<span class="number">252</span>]);
+        <span class="ident">eval</span>(<span class="number">253</span>, <span class="kw-2">&amp;</span>[<span class="number">253</span>, <span class="number">253</span>, <span class="number">0</span>]);
+        <span class="ident">eval</span>(<span class="number">254</span>, <span class="kw-2">&amp;</span>[<span class="number">253</span>, <span class="number">254</span>, <span class="number">0</span>]);
+        <span class="ident">eval</span>(<span class="number">255</span>, <span class="kw-2">&amp;</span>[<span class="number">253</span>, <span class="number">255</span>, <span class="number">0</span>]);
+        <span class="ident">eval</span>(<span class="number">256</span>, <span class="kw-2">&amp;</span>[<span class="number">253</span>, <span class="number">0</span>, <span class="number">1</span>]);
+        <span class="ident">eval</span>(<span class="number">256</span>, <span class="kw-2">&amp;</span>[<span class="number">253</span>, <span class="number">0</span>, <span class="number">1</span>]);
+        <span class="ident">eval</span>(<span class="number">65535</span>, <span class="kw-2">&amp;</span>[<span class="number">253</span>, <span class="number">255</span>, <span class="number">255</span>]);
+        <span class="ident">eval</span>(<span class="number">65536</span>, <span class="kw-2">&amp;</span>[<span class="number">254</span>, <span class="number">0</span>, <span class="number">0</span>, <span class="number">1</span>, <span class="number">0</span>]);
+        <span class="ident">eval</span>(<span class="number">65537</span>, <span class="kw-2">&amp;</span>[<span class="number">254</span>, <span class="number">1</span>, <span class="number">0</span>, <span class="number">1</span>, <span class="number">0</span>]);
 
-        <span class="macro">eval!</span>(<span class="number">33554432</span>, [<span class="number">254</span>, <span class="number">0</span>, <span class="number">0</span>, <span class="number">0</span>, <span class="number">2</span>]);
+        <span class="ident">eval</span>(<span class="number">33554432</span>, <span class="kw-2">&amp;</span>[<span class="number">254</span>, <span class="number">0</span>, <span class="number">0</span>, <span class="number">0</span>, <span class="number">2</span>]);
 
         {
             <span class="kw">let</span> <span class="ident">value</span> <span class="op">=</span> <span class="number">33554433</span>;

@@ -366,15 +366,15 @@
     <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">read</span><span class="op">&lt;</span><span class="ident">R</span>: <span class="ident">Read</span><span class="op">&gt;</span>(<span class="kw-2">mut</span> <span class="ident">reader</span>: <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">R</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">io::Result</span><span class="op">&lt;</span><span class="self">Self</span><span class="op">&gt;</span> {
         <span class="kw">let</span> <span class="ident">prevout</span> <span class="op">=</span> <span class="ident">OutPoint::read</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">reader</span>)<span class="question-mark">?</span>;
 
-        <span class="kw">let</span> <span class="ident">extension_id</span> <span class="op">=</span> <span class="ident">CompactSize::read</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">reader</span>)<span class="question-mark">?</span>;
-        <span class="kw">let</span> <span class="ident">mode</span> <span class="op">=</span> <span class="ident">CompactSize::read</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">reader</span>)<span class="question-mark">?</span>;
+        <span class="kw">let</span> <span class="ident">extension_id</span> <span class="op">=</span> <span class="ident">CompactSize::read_t</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">reader</span>)<span class="question-mark">?</span>;
+        <span class="kw">let</span> <span class="ident">mode</span> <span class="op">=</span> <span class="ident">CompactSize::read_t</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">reader</span>)<span class="question-mark">?</span>;
         <span class="kw">let</span> <span class="ident">payload</span> <span class="op">=</span> <span class="ident">Vector::read</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">reader</span>, <span class="op">|</span><span class="ident">r</span><span class="op">|</span> <span class="ident">r</span>.<span class="ident">read_u8</span>())<span class="question-mark">?</span>;
 
         <span class="prelude-val">Ok</span>(<span class="ident">TzeIn</span> {
             <span class="ident">prevout</span>,
             <span class="ident">witness</span>: <span class="ident">tze::Witness</span> {
-                <span class="ident">extension_id</span>: <span class="ident">u32::try_from</span>(<span class="ident">extension_id</span>).<span class="ident">map_err</span>(<span class="ident">to_io_error</span>)<span class="question-mark">?</span>,
-                <span class="ident">mode</span>: <span class="ident">u32::try_from</span>(<span class="ident">mode</span>).<span class="ident">map_err</span>(<span class="ident">to_io_error</span>)<span class="question-mark">?</span>,
+                <span class="ident">extension_id</span>,
+                <span class="ident">mode</span>,
                 <span class="ident">payload</span>: <span class="ident">tze::AuthData</span>(<span class="ident">payload</span>),
             },
         })
@@ -408,15 +408,15 @@
         }
         .<span class="ident">map_err</span>(<span class="op">|</span><span class="kw">_</span><span class="op">|</span> <span class="ident">io::Error::new</span>(<span class="ident">io::ErrorKind::InvalidData</span>, <span class="string">&quot;value out of range&quot;</span>))<span class="question-mark">?</span>;
 
-        <span class="kw">let</span> <span class="ident">extension_id</span> <span class="op">=</span> <span class="ident">CompactSize::read</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">reader</span>)<span class="question-mark">?</span>;
-        <span class="kw">let</span> <span class="ident">mode</span> <span class="op">=</span> <span class="ident">CompactSize::read</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">reader</span>)<span class="question-mark">?</span>;
+        <span class="kw">let</span> <span class="ident">extension_id</span> <span class="op">=</span> <span class="ident">CompactSize::read_t</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">reader</span>)<span class="question-mark">?</span>;
+        <span class="kw">let</span> <span class="ident">mode</span> <span class="op">=</span> <span class="ident">CompactSize::read_t</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">reader</span>)<span class="question-mark">?</span>;
         <span class="kw">let</span> <span class="ident">payload</span> <span class="op">=</span> <span class="ident">Vector::read</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">reader</span>, <span class="op">|</span><span class="ident">r</span><span class="op">|</span> <span class="ident">r</span>.<span class="ident">read_u8</span>())<span class="question-mark">?</span>;
 
         <span class="prelude-val">Ok</span>(<span class="ident">TzeOut</span> {
             <span class="ident">value</span>,
             <span class="ident">precondition</span>: <span class="ident">tze::Precondition</span> {
-                <span class="ident">extension_id</span>: <span class="ident">u32::try_from</span>(<span class="ident">extension_id</span>).<span class="ident">map_err</span>(<span class="ident">to_io_error</span>)<span class="question-mark">?</span>,
-                <span class="ident">mode</span>: <span class="ident">u32::try_from</span>(<span class="ident">mode</span>).<span class="ident">map_err</span>(<span class="ident">to_io_error</span>)<span class="question-mark">?</span>,
+                <span class="ident">extension_id</span>,
+                <span class="ident">mode</span>,
                 <span class="ident">payload</span>,
             },
         })
