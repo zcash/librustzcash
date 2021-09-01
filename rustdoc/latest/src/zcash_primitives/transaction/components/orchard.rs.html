@@ -292,10 +292,10 @@
     <span class="ident">value::ValueCommitment</span>,
     <span class="ident">Anchor</span>,
 };
+<span class="kw">use</span> <span class="ident">zcash_encoding</span>::{<span class="ident">Array</span>, <span class="ident">CompactSize</span>, <span class="ident">Vector</span>};
 
 <span class="kw">use</span> <span class="ident"><span class="kw">super</span>::Amount</span>;
-<span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::serialize</span>::{<span class="ident">Array</span>, <span class="ident">CompactSize</span>};
-<span class="kw">use</span> <span class="kw">crate</span>::{<span class="ident">serialize::Vector</span>, <span class="ident">transaction::Transaction</span>};
+<span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::transaction::Transaction</span>;
 
 <span class="kw">pub</span> <span class="kw">const</span> <span class="ident">FLAG_SPENDS_ENABLED</span>: <span class="ident">u8</span> <span class="op">=</span> <span class="number">0b0000_0001</span>;
 <span class="kw">pub</span> <span class="kw">const</span> <span class="ident">FLAG_OUTPUTS_ENABLED</span>: <span class="ident">u8</span> <span class="op">=</span> <span class="number">0b0000_0010</span>;

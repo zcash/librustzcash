@@ -1,0 +1,1 @@
+initSidebarItems({"struct":[["Array","Namespace for functions that perform encoding of array contents."],["CompactSize","Namespace for functions for compact encoding of integers."],["Optional","Namespace for functions that perform encoding of [`Option`] values."],["Vector","Namespace for functions that perform encoding of vectors."]]});

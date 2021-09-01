@@ -1111,11 +1111,11 @@
 <span class="kw">use</span> <span class="ident">std::fmt::Debug</span>;
 <span class="kw">use</span> <span class="ident">std::io</span>::{<span class="self">self</span>, <span class="ident">Read</span>, <span class="ident">Write</span>};
 <span class="kw">use</span> <span class="ident">std::ops::Deref</span>;
+<span class="kw">use</span> <span class="ident">zcash_encoding</span>::{<span class="ident">Array</span>, <span class="ident">CompactSize</span>, <span class="ident">Vector</span>};
 
 <span class="kw">use</span> <span class="kw">crate</span>::{
     <span class="ident">consensus</span>::{<span class="ident">BlockHeight</span>, <span class="ident">BranchId</span>},
     <span class="ident">sapling::redjubjub</span>,
-    <span class="ident">serialize</span>::{<span class="ident">Array</span>, <span class="ident">CompactSize</span>, <span class="ident">Vector</span>},
 };
 
 <span class="kw">use</span> <span class="self">self</span>::{

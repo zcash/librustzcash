@@ -67,6 +67,7 @@
 <span id="67">67</span>
 <span id="68">68</span>
 <span id="69">69</span>
+<span id="70">70</span>
 </pre><pre class="rust"><code><span class="doccomment">//! APIs for batch trial decryption.</span>
 
 <span class="kw">use</span> <span class="ident">std::iter</span>;
@@ -79,6 +80,7 @@
 <span class="doccomment">/// Trial decryption of a batch of notes with a set of recipients.</span>
 <span class="doccomment">///</span>
 <span class="doccomment">/// This is the batched version of [`zcash_note_encryption::try_note_decryption`].</span>
+<span class="attribute">#[<span class="ident">allow</span>(<span class="ident">clippy::type_complexity</span>)]</span>
 <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">try_note_decryption</span><span class="op">&lt;</span><span class="ident">D</span>: <span class="ident">Domain</span>, <span class="ident">Output</span>: <span class="ident">ShieldedOutput</span><span class="op">&lt;</span><span class="ident">D</span><span class="op">&gt;</span><span class="op">&gt;</span>(
     <span class="ident">ivks</span>: <span class="kw-2">&amp;</span>[<span class="ident">D::IncomingViewingKey</span>],
     <span class="ident">outputs</span>: <span class="kw-2">&amp;</span>[(<span class="ident">D</span>, <span class="ident">Output</span>)],

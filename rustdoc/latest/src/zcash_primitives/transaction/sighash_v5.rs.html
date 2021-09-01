@@ -201,10 +201,10 @@
 <span class="kw">use</span> <span class="ident">std::convert::TryInto</span>;
 
 <span class="attribute">#[<span class="ident">cfg</span>(<span class="ident">feature</span> <span class="op">=</span> <span class="string">&quot;zfuture&quot;</span>)]</span>
-<span class="kw">use</span> <span class="kw">crate</span>::{
-    <span class="ident">serialize</span>::{<span class="ident">CompactSize</span>, <span class="ident">Vector</span>},
-    <span class="ident">transaction</span>::{<span class="ident">components::tze</span>, <span class="ident">sighash::TzeInput</span>, <span class="ident">TzeDigests</span>},
-};
+<span class="kw">use</span> <span class="ident">zcash_encoding</span>::{<span class="ident">CompactSize</span>, <span class="ident">Vector</span>};
+
+<span class="attribute">#[<span class="ident">cfg</span>(<span class="ident">feature</span> <span class="op">=</span> <span class="string">&quot;zfuture&quot;</span>)]</span>
+<span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::transaction</span>::{<span class="ident">components::tze</span>, <span class="ident">sighash::TzeInput</span>, <span class="ident">TzeDigests</span>};
 
 <span class="kw">const</span> <span class="ident">ZCASH_TRANSPARENT_INPUT_HASH_PERSONALIZATION</span>: <span class="kw-2">&amp;</span>[<span class="ident">u8</span>; <span class="number">16</span>] <span class="op">=</span> <span class="string">b&quot;Zcash___TxInHash&quot;</span>;
 
