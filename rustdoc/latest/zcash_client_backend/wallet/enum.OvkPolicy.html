@@ -9,7 +9,7 @@ viewing key, refer to <a href="https://zips.z.cash/zip-0310">ZIP 310</a>.</p>
 </div></details><h2 id="variants" class="variants small-section-header">Variants<a href="#variants" class="anchor"></a></h2><div id="variant.Sender" class="variant small-section-header"><a href="#variant.Sender" class="anchor field"></a><code>Sender</code></div><div class="docblock"><p>Use the outgoing viewing key from the sender’s <a href="../../zcash_primitives/zip32/struct.ExtendedFullViewingKey.html"><code>ExtendedFullViewingKey</code></a>.</p>
 <p>Transaction outputs will be decryptable by the sender, in addition to the
 recipients.</p>
-</div><div id="variant.Custom" class="variant small-section-header"><a href="#variant.Custom" class="anchor field"></a><code>Custom</code></div><div class="docblock"><p>Use a custom outgoing viewing key. This might for instance be derived from a
+</div><div id="variant.Custom" class="variant small-section-header"><a href="#variant.Custom" class="anchor field"></a><code>Custom(<a class="struct" href="../../zcash_primitives/sapling/keys/struct.OutgoingViewingKey.html" title="struct zcash_primitives::sapling::keys::OutgoingViewingKey">OutgoingViewingKey</a>)</code></div><div class="docblock"><p>Use a custom outgoing viewing key. This might for instance be derived from a
 separate seed than the wallet’s spending keys.</p>
 <p>Transaction outputs will be decryptable by the recipients, and whoever controls
 the provided outgoing viewing key.</p>
