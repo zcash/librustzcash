@@ -268,6 +268,7 @@ impl TryFrom<(&str, &[u8])> for Address {
         while cursor.position() < encoded.len().try_into().unwrap() {
             result.push(read_receiver(&mut cursor)?);
         }
+        assert_eq!(cursor.position(), encoded.len().try_into().unwrap());
         result.try_into()
     }
 }
