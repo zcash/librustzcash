@@ -190,20 +190,44 @@ where
         wallet_db,
         params,
         prover,
-        account,
         extsk,
+        account,
         &req,
         ovk_policy,
         min_confirmations,
     )
 }
 
+/// Constructs a transaction that sends funds as specified by the `request` argument
+/// and stores it to the wallet's "sent transactions" data store, and returns the
+/// identifier for the transaction.
+///
+/// This procedure uses the wallet's underlying note selection algorithm to choose
+/// inputs of sufficient value to satisfy the request, if possible.
+///
+/// Parameters:
+/// * `wallet_db`: A read/write reference to the wallet database
+/// * `params`: Consensus parameters
+/// * `prover`: The TxProver to use in constructing the shielded transaction.
+/// * `extsk`: The extended spending key that controls the funds that will be spent
+///   in the resulting transaction.
+/// * `account`: The ZIP32 account identifier associated with the extended spending
+///   key that controls the funds to be used in creating this transaction.  This ]
+///   procedure will return an error if this does not correctly correspond to `extsk`.
+/// * `request`: The ZIP-321 payment request specifying the recipients and amounts
+///   for the transaction.
+/// * `ovk_policy`: The policy to use for constructing outgoing viewing keys that
+///   can allow the sender to view the resulting notes on the blockchain.
+/// * `min_confirmations`: The minimum number of confirmations that a previously
+///   received note must have in the blockchain in order to be considered for being
+///   spent.
+#[allow(clippy::too_many_arguments)]
 pub fn spend<E, N, P, D, R>(
     wallet_db: &mut D,
     params: &P,
     prover: impl TxProver,
-    account: AccountId,
     extsk: &ExtendedSpendingKey,
+    account: AccountId,
     request: &TransactionRequest,
     ovk_policy: OvkPolicy,
     min_confirmations: u32,
@@ -241,7 +265,7 @@ where
         .ok_or_else(|| E::from(Error::InvalidAmount))?;
     let target_value = (value + DEFAULT_FEE).ok_or_else(|| E::from(Error::InvalidAmount))?;
     let spendable_notes =
-        wallet_db.select_unspent_sapling_notes(account, target_value, anchor_height)?;
+        wallet_db.select_spendable_sapling_notes(account, target_value, anchor_height)?;
 
     // Confirm we were able to select sufficient value
     let selected_value = spendable_notes
@@ -336,15 +360,37 @@ where
     })
 }
 
+/// Constructs a transaction that consumes available transparent UTXOs belonging to
+/// the specified secret key, and sends them to the default address for the provided Sapling
+/// extended full viewing key.
+///
+/// This procedure will not attempt to shield transparent funds if the total amount being shielded
+/// is less than the default fee to send the transaction. Fees will be paid only from the transparent
+/// UTXOs being consumed.
+///
+/// Parameters:
+/// * `wallet_db`: A read/write reference to the wallet database
+/// * `params`: Consensus parameters
+/// * `prover`: The TxProver to use in constructing the shielded transaction.
+/// * `sk`: The secp256k1 secret key that will be used to detect and spend transparent
+///   UTXOs.
+/// * `extfvk`: The extended full viewing key that will be used to produce the
+///   Sapling address to which funds will be sent.
+/// * `account`: The ZIP32 account identifier associated with the the extended
+///   full viewing key. This procedure will return an error if this does not correctly
+///   correspond to `extfvk`.
+/// * `min_confirmations`: The minimum number of confirmations that a previously
+///   received UTXO must have in the blockchain in order to be considered for being
+///   spent.
 #[cfg(feature = "transparent-inputs")]
 #[allow(clippy::too_many_arguments)]
-pub fn shield_funds<E, N, P, D, R>(
+pub fn shield_transparent_funds<E, N, P, D, R>(
     wallet_db: &mut D,
     params: &P,
     prover: impl TxProver,
-    account: AccountId,
     sk: &secp256k1::SecretKey,
-    extsk: &ExtendedSpendingKey,
+    extfvk: &ExtendedFullViewingKey,
+    account: AccountId,
     memo: &MemoBytes,
     min_confirmations: u32,
 ) -> Result<D::TxRef, E>
@@ -354,6 +400,12 @@ where
     R: Copy + Debug,
     D: WalletWrite<Error = E, TxRef = R>,
 {
+    // Check that the ExtendedSpendingKey we have been given corresponds to the
+    // ExtendedFullViewingKey for the account we are spending from.
+    if !wallet_db.is_valid_account_extfvk(account, &extfvk)? {
+        return Err(E::from(Error::InvalidExtSk(account)));
+    }
+
     let (latest_scanned_height, latest_anchor) = wallet_db
         .get_target_and_anchor_heights(min_confirmations)
         .and_then(|x| x.ok_or_else(|| Error::ScanRequired.into()))?;
@@ -362,14 +414,11 @@ where
     let taddr = derive_transparent_address_from_secret_key(sk);
 
     // derive own shielded address from the provided extended spending key
-    let z_address = extsk.default_address().unwrap().1;
-
-    let exfvk = ExtendedFullViewingKey::from(extsk);
-
-    let ovk = exfvk.fvk.ovk;
+    let z_address = extfvk.default_address().unwrap().1;
+    let ovk = extfvk.fvk.ovk;
 
     // get UTXOs from DB
-    let utxos = wallet_db.get_unspent_transparent_utxos(&taddr, latest_anchor)?;
+    let utxos = wallet_db.get_unspent_transparent_outputs(&taddr, latest_anchor)?;
     let total_amount = utxos
         .iter()
         .map(|utxo| utxo.value)

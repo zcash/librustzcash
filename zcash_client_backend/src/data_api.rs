@@ -33,10 +33,9 @@ pub mod wallet;
 
 /// Read-only operations required for light wallet functions.
 ///
-/// This trait defines the read-only portion of the storage
-/// interface atop which higher-level wallet operations are
-/// implemented. It serves to allow wallet functions to be
-/// abstracted away from any particular data storage substrate.
+/// This trait defines the read-only portion of the storage interface atop which
+/// higher-level wallet operations are implemented. It serves to allow wallet functions to
+/// be abstracted away from any particular data storage substrate.
 pub trait WalletRead {
     /// The type of errors produced by a wallet backend.
     type Error;
@@ -143,6 +142,9 @@ pub trait WalletRead {
     ) -> Result<Amount, Self::Error>;
 
     /// Returns the memo for a note.
+    ///
+    /// Implementations of this method must return an error if the note identifier
+    /// does not appear in the backing data store.
     fn get_memo(&self, id_note: Self::NoteRef) -> Result<Memo, Self::Error>;
 
     /// Returns a transaction.
@@ -165,18 +167,20 @@ pub trait WalletRead {
     /// with which they are associated.
     fn get_nullifiers(&self) -> Result<Vec<(AccountId, Nullifier)>, Self::Error>;
 
+    /// Returns all nullifiers (including those for notes that have been previously spent), along
+    /// with the account identifiers with which they are associated.
     fn get_all_nullifiers(&self) -> Result<Vec<(AccountId, Nullifier)>, Self::Error>;
 
-    /// Return all unspent notes.
-    fn get_unspent_sapling_notes(
+    /// Return all unspent Sapling notes.
+    fn get_spendable_sapling_notes(
         &self,
         account: AccountId,
         anchor_height: BlockHeight,
     ) -> Result<Vec<SpendableNote>, Self::Error>;
 
-    /// Returns a list of unspent notes sufficient to cover the specified
+    /// Returns a list of spendable Sapling notes sufficient to cover the specified
     /// target value, if possible.
-    fn select_unspent_sapling_notes(
+    fn select_spendable_sapling_notes(
         &self,
         account: AccountId,
         target_value: Amount,
@@ -184,10 +188,12 @@ pub trait WalletRead {
     ) -> Result<Vec<SpendableNote>, Self::Error>;
 
     #[cfg(feature = "transparent-inputs")]
-    fn get_unspent_transparent_utxos(
+    /// Returns a list of unspent transparent UTXOs that appear in the chain at heights up to and
+    /// including `max_height`.
+    fn get_unspent_transparent_outputs(
         &self,
         address: &TransparentAddress,
-        anchor_height: BlockHeight,
+        max_height: BlockHeight,
     ) -> Result<Vec<WalletTransparentOutput>, Self::Error>;
 }
 
@@ -410,7 +416,7 @@ pub mod testing {
             Ok(Vec::new())
         }
 
-        fn get_unspent_sapling_notes(
+        fn get_spendable_sapling_notes(
             &self,
             _account: AccountId,
             _anchor_height: BlockHeight,
@@ -418,7 +424,7 @@ pub mod testing {
             Ok(Vec::new())
         }
 
-        fn select_unspent_sapling_notes(
+        fn select_spendable_sapling_notes(
             &self,
             _account: AccountId,
             _target_value: Amount,
@@ -428,7 +434,7 @@ pub mod testing {
         }
 
         #[cfg(feature = "transparent-inputs")]
-        fn get_unspent_transparent_utxos(
+        fn get_unspent_transparent_outputs(
             &self,
             _address: &TransparentAddress,
             _anchor_height: BlockHeight,

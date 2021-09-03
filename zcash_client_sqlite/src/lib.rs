@@ -274,29 +274,34 @@ impl<P: consensus::Parameters> WalletRead for WalletDb<P> {
         wallet::get_all_nullifiers(&self)
     }
 
-    fn get_unspent_sapling_notes(
+    fn get_spendable_sapling_notes(
         &self,
         account: AccountId,
         anchor_height: BlockHeight,
     ) -> Result<Vec<SpendableNote>, Self::Error> {
-        wallet::transact::get_unspent_sapling_notes(&self, account, anchor_height)
+        wallet::transact::get_spendable_sapling_notes(&self, account, anchor_height)
     }
 
-    fn select_unspent_sapling_notes(
+    fn select_spendable_sapling_notes(
         &self,
         account: AccountId,
         target_value: Amount,
         anchor_height: BlockHeight,
     ) -> Result<Vec<SpendableNote>, Self::Error> {
-        wallet::transact::select_unspent_sapling_notes(&self, account, target_value, anchor_height)
+        wallet::transact::select_spendable_sapling_notes(
+            &self,
+            account,
+            target_value,
+            anchor_height,
+        )
     }
 
-    fn get_unspent_transparent_utxos(
+    fn get_unspent_transparent_outputs(
         &self,
         address: &TransparentAddress,
-        anchor_height: BlockHeight,
+        max_height: BlockHeight,
     ) -> Result<Vec<WalletTransparentOutput>, Self::Error> {
-        wallet::get_unspent_transparent_utxos(&self, address, anchor_height)
+        wallet::get_unspent_transparent_outputs(&self, address, max_height)
     }
 }
 
@@ -409,32 +414,32 @@ impl<'a, P: consensus::Parameters> WalletRead for DataConnStmtCache<'a, P> {
         self.wallet_db.get_all_nullifiers()
     }
 
-    fn get_unspent_sapling_notes(
+    fn get_spendable_sapling_notes(
         &self,
         account: AccountId,
         anchor_height: BlockHeight,
     ) -> Result<Vec<SpendableNote>, Self::Error> {
         self.wallet_db
-            .get_unspent_sapling_notes(account, anchor_height)
+            .get_spendable_sapling_notes(account, anchor_height)
     }
 
-    fn select_unspent_sapling_notes(
+    fn select_spendable_sapling_notes(
         &self,
         account: AccountId,
         target_value: Amount,
         anchor_height: BlockHeight,
     ) -> Result<Vec<SpendableNote>, Self::Error> {
         self.wallet_db
-            .select_unspent_sapling_notes(account, target_value, anchor_height)
+            .select_spendable_sapling_notes(account, target_value, anchor_height)
     }
 
-    fn get_unspent_transparent_utxos(
+    fn get_unspent_transparent_outputs(
         &self,
         address: &TransparentAddress,
-        anchor_height: BlockHeight,
+        max_height: BlockHeight,
     ) -> Result<Vec<WalletTransparentOutput>, Self::Error> {
         self.wallet_db
-            .get_unspent_transparent_utxos(address, anchor_height)
+            .get_unspent_transparent_outputs(address, max_height)
     }
 }
 

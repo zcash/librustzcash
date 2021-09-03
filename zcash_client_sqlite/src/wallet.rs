@@ -701,10 +701,10 @@ pub fn get_all_nullifiers<P>(
     Ok(res)
 }
 
-pub fn get_unspent_transparent_utxos<P: consensus::Parameters>(
+pub fn get_unspent_transparent_outputs<P: consensus::Parameters>(
     wdb: &WalletDb<P>,
     address: &TransparentAddress,
-    anchor_height: BlockHeight,
+    max_height: BlockHeight,
 ) -> Result<Vec<WalletTransparentOutput>, SqliteClientError> {
     let mut stmt_blocks = wdb.conn.prepare(
         "SELECT u.address, u.prevout_txid, u.prevout_idx, u.script, u.value_zat, u.height, tx.block as block
@@ -718,7 +718,7 @@ pub fn get_unspent_transparent_utxos<P: consensus::Parameters>(
 
     let addr_str = address.encode(&wdb.params);
 
-    let rows = stmt_blocks.query_map(params![addr_str, u32::from(anchor_height)], |row| {
+    let rows = stmt_blocks.query_map(params![addr_str, u32::from(max_height)], |row| {
         let addr: String = row.get(0)?;
         let address = TransparentAddress::decode(&wdb.params, &addr).map_err(|e| {
             rusqlite::Error::FromSqlConversionFailure(
