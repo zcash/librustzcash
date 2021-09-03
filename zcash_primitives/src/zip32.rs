@@ -140,6 +140,26 @@ impl DiversifierKey {
         DiversifierKey(dk)
     }
 
+    fn try_diversifier_internal(ff: &FF1<Aes256>, j: DiversifierIndex) -> Option<Diversifier> {
+        // Generate d_j
+        let enc = ff
+            .encrypt(&[], &BinaryNumeralString::from_bytes_le(&j.0[..]))
+            .unwrap();
+        let mut d_j = [0; 11];
+        d_j.copy_from_slice(&enc.to_bytes_le());
+        let diversifier = Diversifier(d_j);
+
+        // Return (j, d_j) if valid, else increment j and try again
+        diversifier.g_d().map(|_| diversifier)
+    }
+
+    /// Attempts to produce a diversifier at the given index. Returns None
+    /// if the index does not produce a valid diversifier.
+    pub fn try_diversifier(&self, j: DiversifierIndex) -> Option<Diversifier> {
+        let ff = FF1::<Aes256>::new(&self.0, 2).unwrap();
+        Self::try_diversifier_internal(&ff, j)
+    }
+
     /// Returns the first index starting from j that generates a valid
     /// diversifier, along with the corresponding diversifier. Returns
     /// an error if the diversifier space is exhausted.
@@ -149,17 +169,8 @@ impl DiversifierKey {
     ) -> Result<(DiversifierIndex, Diversifier), ()> {
         let ff = FF1::<Aes256>::new(&self.0, 2).unwrap();
         loop {
-            // Generate d_j
-            let enc = ff
-                .encrypt(&[], &BinaryNumeralString::from_bytes_le(&j.0[..]))
-                .unwrap();
-            let mut d_j = [0; 11];
-            d_j.copy_from_slice(&enc.to_bytes_le());
-            let d_j = Diversifier(d_j);
-
-            // Return (j, d_j) if valid, else increment j and try again
-            match d_j.g_d() {
-                Some(_) => return Ok((j, d_j)),
+            match Self::try_diversifier_internal(&ff, j) {
+                Some(d_j) => return Ok((j, d_j)),
                 None => {
                     if j.increment().is_err() {
                         return Err(());
