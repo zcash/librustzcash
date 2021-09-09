@@ -157,7 +157,7 @@ pub fn read_flags<R: Read>(mut reader: R) -> io::Result<Flags> {
 pub fn read_anchor<R: Read>(mut reader: R) -> io::Result<Anchor> {
     let mut bytes = [0u8; 32];
     reader.read_exact(&mut bytes)?;
-    Anchor::from_bytes(bytes).ok_or_else(|| {
+    Option::from(Anchor::from_bytes(bytes)).ok_or_else(|| {
         io::Error::new(
             io::ErrorKind::InvalidInput,
             "invalid Orchard anchor".to_owned(),

@@ -8,6 +8,7 @@ and this library adheres to Rust's notion of
 ## [Unreleased]
 ### Changed
 - MSRV is now 1.51.0.
+- Bumped dependencies to `ff 0.11`, `group 0.11`, `jubjub 0.8`.
 - Renamed the following to use lower-case abbreviations (matching Rust
   naming conventions):
   - `zcash_client_sqlite::BlockDB` to `BlockDb`

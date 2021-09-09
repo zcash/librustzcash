@@ -8,6 +8,8 @@ and this library adheres to Rust's notion of
 ## [Unreleased]
 ### Changed
 - MSRV is now 1.51.0.
+- Bumped dependencies to `ff 0.11`, `group 0.11`, `bellman 0.11`,
+  `bls12_381 0.6`, `jubjub 0.8`.
 - `zcash_proofs::sapling::SaplingVerificationContext::new` now takes a
   `zip216_enabled` boolean; this is used to control how RedJubjub signatures are
   validated.
