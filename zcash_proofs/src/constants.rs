@@ -109,7 +109,7 @@ pub(crate) fn to_montgomery_coords(g: ExtendedPoint) -> Option<(Scalar, Scalar)>
         //
         // We have that y != 1 above. If x = 0, the only
         // solutions for y are 1 (contradiction) or -1.
-        if x.is_zero() {
+        if x.is_zero_vartime() {
             // (0, -1) is the point of order two which is not
             // the neutral element, so we map it to (0, 0) which is
             // the only affine point of order 2.
@@ -169,23 +169,20 @@ fn generate_pedersen_circuit_generators() -> Vec<Vec<Vec<(Scalar, Scalar)>>> {
 
 #[cfg(test)]
 mod tests {
-    use ff::PrimeField;
-
     use super::*;
 
     #[test]
     fn edwards_d() {
         // d = -(10240/10241)
         assert_eq!(
-            -Scalar::from_str("10240").unwrap()
-                * Scalar::from_str("10241").unwrap().invert().unwrap(),
+            -Scalar::from(10240) * Scalar::from(10241).invert().unwrap(),
             EDWARDS_D
         );
     }
 
     #[test]
     fn montgomery_a() {
-        assert_eq!(Scalar::from_str("40962").unwrap(), MONTGOMERY_A);
+        assert_eq!(Scalar::from(40962), MONTGOMERY_A);
     }
 
     #[test]

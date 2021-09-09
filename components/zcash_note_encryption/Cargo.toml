@@ -15,11 +15,14 @@ edition = "2018"
 blake2b_simd = "0.5"
 byteorder = "1"
 crypto_api_chachapoly = "0.4"
-ff = "0.10"
-group = "0.10"
+ff = "0.11"
+group = "0.11"
 rand_core = "0.6"
 subtle = "2.2.3"
 
 [dev-dependencies]
 zcash_primitives = { version = "0.5", path = "../../zcash_primitives" }
-jubjub = "0.7"
+jubjub = "0.8"
+
+[lib]
+bench = false

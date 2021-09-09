@@ -110,7 +110,8 @@ impl Hashable for Node {
 
 impl From<Node> for bls12_381::Scalar {
     fn from(node: Node) -> Self {
-        bls12_381::Scalar::from_repr(node.repr).expect("Tree nodes should be in the prime field")
+        // Tree nodes should be in the prime field.
+        bls12_381::Scalar::from_repr(node.repr).unwrap()
     }
 }
 
@@ -211,7 +212,7 @@ impl ViewingKey {
         // Drop the most significant five bits, so it can be interpreted as a scalar.
         h[31] &= 0b0000_0111;
 
-        SaplingIvk(jubjub::Fr::from_repr(h).expect("should be a valid scalar"))
+        SaplingIvk(jubjub::Fr::from_repr(h).unwrap())
     }
 
     pub fn to_payment_address(&self, diversifier: Diversifier) -> Option<PaymentAddress> {

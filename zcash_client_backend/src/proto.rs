@@ -83,7 +83,7 @@ impl compact_formats::CompactOutput {
     pub fn cmu(&self) -> Result<bls12_381::Scalar, ()> {
         let mut repr = [0; 32];
         repr.as_mut().copy_from_slice(&self.cmu[..]);
-        bls12_381::Scalar::from_repr(repr).ok_or(())
+        Option::from(bls12_381::Scalar::from_repr(repr)).ok_or(())
     }
 
     /// Returns the ephemeral public key for this output.

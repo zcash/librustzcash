@@ -72,12 +72,12 @@ impl ExpandedSpendingKey {
     pub fn read<R: Read>(mut reader: R) -> io::Result<Self> {
         let mut ask_repr = [0u8; 32];
         reader.read_exact(ask_repr.as_mut())?;
-        let ask = jubjub::Fr::from_repr(ask_repr)
+        let ask = Option::from(jubjub::Fr::from_repr(ask_repr))
             .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "ask not in field"))?;
 
         let mut nsk_repr = [0u8; 32];
         reader.read_exact(nsk_repr.as_mut())?;
-        let nsk = jubjub::Fr::from_repr(nsk_repr)
+        let nsk = Option::from(jubjub::Fr::from_repr(nsk_repr))
             .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "nsk not in field"))?;
 
         let mut ovk = [0u8; 32];

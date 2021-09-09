@@ -37,11 +37,11 @@ fn to_spendable_note(row: &Row) -> Result<SpendableNote, SqliteClientError> {
         // We store rcm directly in the data DB, regardless of whether the note
         // used a v1 or v2 note plaintext, so for the purposes of spending let's
         // pretend this is a pre-ZIP 212 note.
-        let rcm = jubjub::Fr::from_repr(
+        let rcm = Option::from(jubjub::Fr::from_repr(
             rcm_bytes[..]
                 .try_into()
                 .map_err(|_| SqliteClientError::InvalidNote)?,
-        )
+        ))
         .ok_or(SqliteClientError::InvalidNote)?;
         Rseed::BeforeZip212(rcm)
     };

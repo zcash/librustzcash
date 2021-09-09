@@ -464,7 +464,7 @@ impl Circuit<bls12_381::Scalar> for Output {
             // Witness the sign bit
             let sign_bit = boolean::Boolean::from(boolean::AllocatedBit::alloc(
                 cs.namespace(|| "pk_d bit of u"),
-                pk_d.map(|e| e.get_u().is_odd()),
+                pk_d.map(|e| e.get_u().is_odd().into()),
             )?);
 
             // Extend the note with pk_d representation
@@ -703,7 +703,7 @@ fn test_input_circuit_with_bls12_381_external_test_vectors() {
     for i in 0..10 {
         let value_commitment = ValueCommitment {
             value: i,
-            randomness: jubjub::Fr::from_str(&(1000 * (i + 1)).to_string()).unwrap(),
+            randomness: jubjub::Fr::from(1000 * (i + 1)),
         };
 
         let proof_generation_key = ProofGenerationKey {
@@ -740,11 +740,11 @@ fn test_input_circuit_with_bls12_381_external_test_vectors() {
                 jubjub::ExtendedPoint::from(value_commitment.commitment()).to_affine();
             assert_eq!(
                 expected_value_commitment.get_u(),
-                bls12_381::Scalar::from_str(&expected_commitment_us[i as usize]).unwrap()
+                bls12_381::Scalar::from_str_vartime(&expected_commitment_us[i as usize]).unwrap()
             );
             assert_eq!(
                 expected_value_commitment.get_v(),
-                bls12_381::Scalar::from_str(&expected_commitment_vs[i as usize]).unwrap()
+                bls12_381::Scalar::from_str_vartime(&expected_commitment_vs[i as usize]).unwrap()
             );
             let note = Note {
                 value: value_commitment.value,

@@ -122,7 +122,7 @@ impl SpendDescription {
         let anchor = {
             let mut f = [0u8; 32];
             reader.read_exact(&mut f)?;
-            bls12_381::Scalar::from_repr(f)
+            Option::from(bls12_381::Scalar::from_repr(f))
                 .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "anchor not in field"))?
         };
 
@@ -259,7 +259,7 @@ impl OutputDescription {
         let cmu = {
             let mut f = [0u8; 32];
             reader.read_exact(&mut f)?;
-            bls12_381::Scalar::from_repr(f)
+            Option::from(bls12_381::Scalar::from_repr(f))
                 .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "cmu not in field"))?
         };
 
