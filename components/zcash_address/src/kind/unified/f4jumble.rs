@@ -32,7 +32,7 @@ macro_rules! G_PERS {
             95,
             71,
             $i,
-            $j as u8,
+            ($j & 0xFF) as u8,
             ($j >> 8) as u8,
         ]
     };
@@ -134,6 +134,7 @@ mod tests {
     #[test]
     fn g_pers() {
         assert_eq!(&G_PERS!(7, 13), b"UA_F4Jumble_G\x07\x0d\x00");
+        assert_eq!(&G_PERS!(7, 65535), b"UA_F4Jumble_G\x07\xff\xff");
     }
 
     proptest! {
