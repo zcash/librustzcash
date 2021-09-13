@@ -102,7 +102,7 @@ where
     let r: [u8; 32] = plaintext[20..COMPACT_NOTE_SIZE].try_into().unwrap();
 
     let rseed = if plaintext[0] == 0x01 {
-        let rcm = jubjub::Fr::from_repr(r)?;
+        let rcm = Option::from(jubjub::Fr::from_repr(r))?;
         Rseed::BeforeZip212(rcm)
     } else {
         Rseed::AfterZip212(r)
@@ -351,6 +351,7 @@ impl<P: consensus::Parameters> Domain for SaplingDomain<P> {
                 .try_into()
                 .expect("slice is the correct length"),
         )
+        .into()
     }
 
     fn extract_memo(&self, plaintext: &[u8]) -> Self::Memo {

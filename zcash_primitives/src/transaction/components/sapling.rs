@@ -95,7 +95,7 @@ pub fn read_point<R: Read>(mut reader: R, field: &str) -> io::Result<jubjub::Ext
 pub fn read_base<R: Read>(mut reader: R, field: &str) -> io::Result<bls12_381::Scalar> {
     let mut f = [0u8; 32];
     reader.read_exact(&mut f)?;
-    bls12_381::Scalar::from_repr(f).ok_or_else(|| {
+    Option::from(bls12_381::Scalar::from_repr(f)).ok_or_else(|| {
         io::Error::new(
             io::ErrorKind::InvalidInput,
             format!("{} not in field", field),

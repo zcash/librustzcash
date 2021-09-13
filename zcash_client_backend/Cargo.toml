@@ -14,13 +14,13 @@ edition = "2018"
 
 [dependencies]
 bech32 = "0.8"
-bls12_381 = "0.5"
+bls12_381 = "0.6"
 bs58 = { version = "0.4", features = ["check"] }
 base64 = "0.13"
-ff = "0.10"
-group = "0.10"
+ff = "0.11"
+group = "0.11"
 hex = "0.4"
-jubjub = "0.7"
+jubjub = "0.8"
 nom = "7"
 percent-encoding = "2.1.0"
 proptest = { version = "1.0.0", optional = true }

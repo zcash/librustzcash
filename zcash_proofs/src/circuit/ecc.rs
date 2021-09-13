@@ -1043,35 +1043,32 @@ mod test {
             assert!(p.assert_not_small_order(&mut cs).is_err() == is_small_order);
         };
 
-        let check_small_order_from_strs = |u, v| {
-            let (u, v) = (
-                bls12_381::Scalar::from_str(u).unwrap(),
-                bls12_381::Scalar::from_str(v).unwrap(),
-            );
+        let check_small_order_from_u64s = |u, v| {
+            let (u, v) = (bls12_381::Scalar::from(u), bls12_381::Scalar::from(v));
             let p = jubjub::AffinePoint::from_raw_unchecked(u, v);
 
             check_small_order_from_p(p.into(), true);
         };
 
         // zero has low order
-        check_small_order_from_strs("0", "1");
+        check_small_order_from_u64s(0, 1);
 
         // prime subgroup order
-        let prime_subgroup_order = jubjub::Fr::from_str(
+        let prime_subgroup_order = jubjub::Fr::from_str_vartime(
             "6554484396890773809930967563523245729705921265872317281365359162392183254199",
         )
         .unwrap();
-        let largest_small_subgroup_order = jubjub::Fr::from_str("8").unwrap();
+        let largest_small_subgroup_order = jubjub::Fr::from(8);
 
         let (zero_u, zero_v) = (bls12_381::Scalar::zero(), bls12_381::Scalar::one());
 
         // generator for jubjub
         let (u, v) = (
-            bls12_381::Scalar::from_str(
+            bls12_381::Scalar::from_str_vartime(
                 "11076627216317271660298050606127911965867021807910416450833192264015104452986",
             )
             .unwrap(),
-            bls12_381::Scalar::from_str(
+            bls12_381::Scalar::from_str_vartime(
                 "44412834903739585386157632289020980010620626017712148233229312325549216099227",
             )
             .unwrap(),
