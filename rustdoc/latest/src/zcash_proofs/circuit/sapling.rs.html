@@ -1403,7 +1403,7 @@
             <span class="comment">// Witness the sign bit</span>
             <span class="kw">let</span> <span class="ident">sign_bit</span> <span class="op">=</span> <span class="ident">boolean::Boolean::from</span>(<span class="ident">boolean::AllocatedBit::alloc</span>(
                 <span class="ident">cs</span>.<span class="ident">namespace</span>(<span class="op">|</span><span class="op">|</span> <span class="string">&quot;pk_d bit of u&quot;</span>),
-                <span class="ident">pk_d</span>.<span class="ident">map</span>(<span class="op">|</span><span class="ident">e</span><span class="op">|</span> <span class="ident">e</span>.<span class="ident">get_u</span>().<span class="ident">is_odd</span>()),
+                <span class="ident">pk_d</span>.<span class="ident">map</span>(<span class="op">|</span><span class="ident">e</span><span class="op">|</span> <span class="ident">e</span>.<span class="ident">get_u</span>().<span class="ident">is_odd</span>().<span class="ident">into</span>()),
             )<span class="question-mark">?</span>);
 
             <span class="comment">// Extend the note with pk_d representation</span>
@@ -1642,7 +1642,7 @@
     <span class="kw">for</span> <span class="ident">i</span> <span class="kw">in</span> <span class="number">0</span>..<span class="number">10</span> {
         <span class="kw">let</span> <span class="ident">value_commitment</span> <span class="op">=</span> <span class="ident">ValueCommitment</span> {
             <span class="ident">value</span>: <span class="ident">i</span>,
-            <span class="ident">randomness</span>: <span class="ident">jubjub::Fr::from_str</span>(<span class="kw-2">&amp;</span>(<span class="number">1000</span> <span class="op">*</span> (<span class="ident">i</span> <span class="op">+</span> <span class="number">1</span>)).<span class="ident">to_string</span>()).<span class="ident">unwrap</span>(),
+            <span class="ident">randomness</span>: <span class="ident">jubjub::Fr::from</span>(<span class="number">1000</span> <span class="op">*</span> (<span class="ident">i</span> <span class="op">+</span> <span class="number">1</span>)),
         };
 
         <span class="kw">let</span> <span class="ident">proof_generation_key</span> <span class="op">=</span> <span class="ident">ProofGenerationKey</span> {
@@ -1679,11 +1679,11 @@
                 <span class="ident">jubjub::ExtendedPoint::from</span>(<span class="ident">value_commitment</span>.<span class="ident">commitment</span>()).<span class="ident">to_affine</span>();
             <span class="macro">assert_eq!</span>(
                 <span class="ident">expected_value_commitment</span>.<span class="ident">get_u</span>(),
-                <span class="ident">bls12_381::Scalar::from_str</span>(<span class="kw-2">&amp;</span><span class="ident">expected_commitment_us</span>[<span class="ident">i</span> <span class="kw">as</span> <span class="ident">usize</span>]).<span class="ident">unwrap</span>()
+                <span class="ident">bls12_381::Scalar::from_str_vartime</span>(<span class="kw-2">&amp;</span><span class="ident">expected_commitment_us</span>[<span class="ident">i</span> <span class="kw">as</span> <span class="ident">usize</span>]).<span class="ident">unwrap</span>()
             );
             <span class="macro">assert_eq!</span>(
                 <span class="ident">expected_value_commitment</span>.<span class="ident">get_v</span>(),
-                <span class="ident">bls12_381::Scalar::from_str</span>(<span class="kw-2">&amp;</span><span class="ident">expected_commitment_vs</span>[<span class="ident">i</span> <span class="kw">as</span> <span class="ident">usize</span>]).<span class="ident">unwrap</span>()
+                <span class="ident">bls12_381::Scalar::from_str_vartime</span>(<span class="kw-2">&amp;</span><span class="ident">expected_commitment_vs</span>[<span class="ident">i</span> <span class="kw">as</span> <span class="ident">usize</span>]).<span class="ident">unwrap</span>()
             );
             <span class="kw">let</span> <span class="ident">note</span> <span class="op">=</span> <span class="ident">Note</span> {
                 <span class="ident">value</span>: <span class="ident">value_commitment</span>.<span class="ident">value</span>,

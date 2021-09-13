@@ -194,9 +194,6 @@
 <span id="194">194</span>
 <span id="195">195</span>
 <span id="196">196</span>
-<span id="197">197</span>
-<span id="198">198</span>
-<span id="199">199</span>
 </pre><pre class="rust"><code><span class="doccomment">//! Various constants used for the Zcash proofs.</span>
 
 <span class="kw">use</span> <span class="ident">bls12_381::Scalar</span>;
@@ -308,7 +305,7 @@
         <span class="comment">//</span>
         <span class="comment">// We have that y != 1 above. If x = 0, the only</span>
         <span class="comment">// solutions for y are 1 (contradiction) or -1.</span>
-        <span class="kw">if</span> <span class="ident">x</span>.<span class="ident">is_zero</span>() {
+        <span class="kw">if</span> <span class="ident">x</span>.<span class="ident">is_zero_vartime</span>() {
             <span class="comment">// (0, -1) is the point of order two which is not</span>
             <span class="comment">// the neutral element, so we map it to (0, 0) which is</span>
             <span class="comment">// the only affine point of order 2.</span>
@@ -368,23 +365,20 @@
 
 <span class="attribute">#[<span class="ident">cfg</span>(<span class="ident">test</span>)]</span>
 <span class="kw">mod</span> <span class="ident">tests</span> {
-    <span class="kw">use</span> <span class="ident">ff::PrimeField</span>;
-
     <span class="kw">use</span> <span class="kw">super</span>::<span class="kw-2">*</span>;
 
     <span class="attribute">#[<span class="ident">test</span>]</span>
     <span class="kw">fn</span> <span class="ident">edwards_d</span>() {
         <span class="comment">// d = -(10240/10241)</span>
         <span class="macro">assert_eq!</span>(
-            <span class="op">-</span><span class="ident">Scalar::from_str</span>(<span class="string">&quot;10240&quot;</span>).<span class="ident">unwrap</span>()
-                <span class="op">*</span> <span class="ident">Scalar::from_str</span>(<span class="string">&quot;10241&quot;</span>).<span class="ident">unwrap</span>().<span class="ident">invert</span>().<span class="ident">unwrap</span>(),
+            <span class="op">-</span><span class="ident">Scalar::from</span>(<span class="number">10240</span>) <span class="op">*</span> <span class="ident">Scalar::from</span>(<span class="number">10241</span>).<span class="ident">invert</span>().<span class="ident">unwrap</span>(),
             <span class="ident">EDWARDS_D</span>
         );
     }
 
     <span class="attribute">#[<span class="ident">test</span>]</span>
     <span class="kw">fn</span> <span class="ident">montgomery_a</span>() {
-        <span class="macro">assert_eq!</span>(<span class="ident">Scalar::from_str</span>(<span class="string">&quot;40962&quot;</span>).<span class="ident">unwrap</span>(), <span class="ident">MONTGOMERY_A</span>);
+        <span class="macro">assert_eq!</span>(<span class="ident">Scalar::from</span>(<span class="number">40962</span>), <span class="ident">MONTGOMERY_A</span>);
     }
 
     <span class="attribute">#[<span class="ident">test</span>]</span>

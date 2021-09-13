@@ -595,11 +595,11 @@
 
             <span class="macro">assert_eq!</span>(
                 <span class="ident">res</span>.<span class="ident">get_u</span>().<span class="ident">get_value</span>().<span class="ident">unwrap</span>(),
-                <span class="ident">bls12_381::Scalar::from_str</span>(<span class="ident">expected_us</span>[<span class="ident">length</span> <span class="op">-</span> <span class="number">300</span>]).<span class="ident">unwrap</span>()
+                <span class="ident">bls12_381::Scalar::from_str_vartime</span>(<span class="ident">expected_us</span>[<span class="ident">length</span> <span class="op">-</span> <span class="number">300</span>]).<span class="ident">unwrap</span>()
             );
             <span class="macro">assert_eq!</span>(
                 <span class="ident">res</span>.<span class="ident">get_v</span>().<span class="ident">get_value</span>().<span class="ident">unwrap</span>(),
-                <span class="ident">bls12_381::Scalar::from_str</span>(<span class="ident">expected_vs</span>[<span class="ident">length</span> <span class="op">-</span> <span class="number">300</span>]).<span class="ident">unwrap</span>()
+                <span class="ident">bls12_381::Scalar::from_str_vartime</span>(<span class="ident">expected_vs</span>[<span class="ident">length</span> <span class="op">-</span> <span class="number">300</span>]).<span class="ident">unwrap</span>()
             );
         }
     }
