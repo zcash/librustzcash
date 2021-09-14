@@ -4,6 +4,8 @@ use std::ops::RangeInclusive;
 
 #[cfg(test)]
 mod test_vectors;
+#[cfg(test)]
+mod test_vectors_long;
 
 const VALID_LENGTH: RangeInclusive<usize> = 48..=4194368;
 
@@ -121,10 +123,13 @@ pub fn f4jumble_inv(c: &[u8]) -> Option<Vec<u8>> {
 
 #[cfg(test)]
 mod tests {
+    use blake2b_simd::blake2b;
     use proptest::collection::vec;
     use proptest::prelude::*;
 
-    use super::{f4jumble, f4jumble_inv, test_vectors::test_vectors, VALID_LENGTH};
+    use super::{
+        f4jumble, f4jumble_inv, test_vectors::test_vectors, test_vectors_long, VALID_LENGTH,
+    };
 
     #[test]
     fn h_pers() {
@@ -168,6 +173,17 @@ mod tests {
             assert_eq!(jumbled, v.jumbled);
             let unjumbled = f4jumble_inv(&v.jumbled).unwrap();
             assert_eq!(unjumbled, v.normal);
+        }
+    }
+
+    #[test]
+    fn f4jumble_check_vectors_long() {
+        for v in test_vectors_long::TEST_VECTORS {
+            let normal: Vec<u8> = (0..v.length).map(|i| i as u8).collect();
+            let jumbled = f4jumble(&normal).unwrap();
+            assert_eq!(blake2b(&jumbled).as_bytes(), v.jumbled_hash);
+            let unjumbled = f4jumble_inv(&jumbled).unwrap();
+            assert_eq!(unjumbled, normal);
         }
     }
 }
