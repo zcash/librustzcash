@@ -35,7 +35,7 @@ pub enum Typecode {
     P2sh,
     Sapling,
     Orchard,
-    Unknown(u64),
+    Unknown(u32),
 }
 
 impl Ord for Typecode {
@@ -76,19 +76,25 @@ impl PartialOrd for Typecode {
     }
 }
 
-impl From<u64> for Typecode {
-    fn from(typecode: u64) -> Self {
-        match typecode {
-            0x00 => Typecode::P2pkh,
-            0x01 => Typecode::P2sh,
-            0x02 => Typecode::Sapling,
-            0x03 => Typecode::Orchard,
-            _ => Typecode::Unknown(typecode),
+impl TryFrom<u32> for Typecode {
+    type Error = ParseError;
+
+    fn try_from(typecode: u32) -> Result<Self, Self::Error> {
+        if typecode < 0x02000000 {
+            Ok(match typecode {
+                0x00 => Typecode::P2pkh,
+                0x01 => Typecode::P2sh,
+                0x02 => Typecode::Sapling,
+                0x03 => Typecode::Orchard,
+                _ => Typecode::Unknown(typecode),
+            })
+        } else {
+            Err(ParseError::InvalidTypecodeValue(typecode as u64))
         }
     }
 }
 
-impl From<Typecode> for u64 {
+impl From<Typecode> for u32 {
     fn from(t: Typecode) -> Self {
         match t {
             Typecode::P2pkh => 0x00,
@@ -115,6 +121,8 @@ pub enum ParseError {
     BothP2phkAndP2sh,
     /// The unified address contains a duplicated typecode.
     DuplicateTypecode(Typecode),
+    /// The parsed typecode exceeds the maximum allowed CompactSize value.
+    InvalidTypecodeValue(u64),
     /// The string is an invalid encoding.
     InvalidEncoding(String),
     /// The unified address only contains transparent receivers.
@@ -125,9 +133,8 @@ impl fmt::Display for ParseError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             ParseError::BothP2phkAndP2sh => write!(f, "UA contains both P2PKH and P2SH receivers"),
-            ParseError::DuplicateTypecode(typecode) => {
-                write!(f, "Duplicate typecode {}", u64::from(*typecode))
-            }
+            ParseError::DuplicateTypecode(c) => write!(f, "Duplicate typecode {}", u32::from(*c)),
+            ParseError::InvalidTypecodeValue(v) => write!(f, "Typecode value out of range {}", v),
             ParseError::InvalidEncoding(msg) => write!(f, "Invalid encoding: {}", msg),
             ParseError::OnlyTransparent => write!(f, "UA only contains transparent receivers"),
         }
@@ -143,7 +150,7 @@ pub enum Receiver {
     Sapling(kind::sapling::Data),
     P2pkh(kind::p2pkh::Data),
     P2sh(kind::p2sh::Data),
-    Unknown { typecode: u64, data: Vec<u8> },
+    Unknown { typecode: u32, data: Vec<u8> },
 }
 
 impl cmp::Ord for Receiver {
@@ -161,11 +168,11 @@ impl cmp::PartialOrd for Receiver {
     }
 }
 
-impl TryFrom<(u64, &[u8])> for Receiver {
+impl TryFrom<(u32, &[u8])> for Receiver {
     type Error = ParseError;
 
-    fn try_from((typecode, addr): (u64, &[u8])) -> Result<Self, Self::Error> {
-        match typecode.into() {
+    fn try_from((typecode, addr): (u32, &[u8])) -> Result<Self, Self::Error> {
+        match typecode.try_into()? {
             Typecode::P2pkh => addr.try_into().map(Receiver::P2pkh),
             Typecode::P2sh => addr.try_into().map(Receiver::P2sh),
             Typecode::Sapling => addr.try_into().map(Receiver::Sapling),
@@ -212,12 +219,14 @@ impl TryFrom<(&str, &[u8])> for Address {
 
     fn try_from((hrp, buf): (&str, &[u8])) -> Result<Self, Self::Error> {
         fn read_receiver(mut cursor: &mut std::io::Cursor<&[u8]>) -> Result<Receiver, ParseError> {
-            let typecode = CompactSize::read(&mut cursor).map_err(|e| {
-                ParseError::InvalidEncoding(format!(
-                    "Failed to deserialize CompactSize-encoded typecode {}",
-                    e
-                ))
-            })?;
+            let typecode = CompactSize::read(&mut cursor)
+                .map_err(|e| {
+                    ParseError::InvalidEncoding(format!(
+                        "Failed to deserialize CompactSize-encoded typecode {}",
+                        e
+                    ))
+                })
+                .and_then(|v| u32::try_from(v).map_err(|_| ParseError::InvalidTypecodeValue(v)))?;
             let length = CompactSize::read(&mut cursor).map_err(|e| {
                 ParseError::InvalidEncoding(format!(
                     "Failed to deserialize CompactSize-encoded length {}",
@@ -310,7 +319,7 @@ impl Address {
             let addr = receiver.addr();
             CompactSize::write(
                 &mut writer,
-                <u64>::from(receiver.typecode()).try_into().unwrap(),
+                <u32>::from(receiver.typecode()).try_into().unwrap(),
             )
             .unwrap();
             CompactSize::write(&mut writer, addr.len()).unwrap();
