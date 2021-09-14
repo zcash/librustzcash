@@ -51,6 +51,8 @@ and this library adheres to Rust's notion of
     data, as described above.
 - `zcash_primitives::serialize` has been factored out as a new `zcash_encoding`
   crate, which can be found in the `components` directory.
+- `zcash_primitives::transaction::components::Amount` now implements
+  `memuse::DynamicUsage`, to enable `orchard::Bundle<_, Amount>::dynamic_usage`.
 
 ### Changed
 - MSRV is now 1.51.0.
