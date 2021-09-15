@@ -4,13 +4,15 @@ use std::ops::RangeInclusive;
 
 #[cfg(test)]
 mod test_vectors;
+#[cfg(test)]
+mod test_vectors_long;
 
-const VALID_LENGTH: RangeInclusive<usize> = 48..=16448;
+const VALID_LENGTH: RangeInclusive<usize> = 48..=4194368;
 
 macro_rules! H_PERS {
     ( $i:expr ) => {
         [
-            85, 65, 95, 70, 52, 74, 117, 109, 98, 108, 101, 95, 72, 95, $i, 0,
+            85, 65, 95, 70, 52, 74, 117, 109, 98, 108, 101, 95, 72, $i, 0, 0,
         ]
     };
 }
@@ -18,7 +20,22 @@ macro_rules! H_PERS {
 macro_rules! G_PERS {
     ( $i:expr, $j:expr ) => {
         [
-            85, 65, 95, 70, 52, 74, 117, 109, 98, 108, 101, 95, 71, 95, $i, $j,
+            85,
+            65,
+            95,
+            70,
+            52,
+            74,
+            117,
+            109,
+            98,
+            108,
+            101,
+            95,
+            71,
+            $i,
+            ($j & 0xFF) as u8,
+            ($j >> 8) as u8,
         ]
     };
 }
@@ -49,7 +66,7 @@ impl Hashes {
             .flat_map(|j| {
                 Blake2bParams::new()
                     .hash_length(OUTBYTES)
-                    .personal(&G_PERS!(i, j as u8))
+                    .personal(&G_PERS!(i, j as u16))
                     .hash(u)
                     .as_ref()
                     .to_vec()
@@ -106,22 +123,28 @@ pub fn f4jumble_inv(c: &[u8]) -> Option<Vec<u8>> {
 
 #[cfg(test)]
 mod tests {
+    use blake2b_simd::blake2b;
     use proptest::collection::vec;
     use proptest::prelude::*;
 
-    use super::{f4jumble, f4jumble_inv, test_vectors::test_vectors, VALID_LENGTH};
+    use super::{
+        f4jumble, f4jumble_inv, test_vectors::test_vectors, test_vectors_long, VALID_LENGTH,
+    };
 
     #[test]
     fn h_pers() {
-        assert_eq!(&H_PERS!(7), b"UA_F4Jumble_H_\x07\x00");
+        assert_eq!(&H_PERS!(7), b"UA_F4Jumble_H\x07\x00\x00");
     }
 
     #[test]
     fn g_pers() {
-        assert_eq!(&G_PERS!(7, 13), b"UA_F4Jumble_G_\x07\x0d");
+        assert_eq!(&G_PERS!(7, 13), b"UA_F4Jumble_G\x07\x0d\x00");
+        assert_eq!(&G_PERS!(7, 65535), b"UA_F4Jumble_G\x07\xff\xff");
     }
 
     proptest! {
+        #![proptest_config(ProptestConfig::with_cases(5))]
+
         #[test]
         fn f4jumble_roundtrip(msg in vec(any::<u8>(), VALID_LENGTH)) {
             let jumbled = f4jumble(&msg).unwrap();
@@ -150,6 +173,17 @@ mod tests {
             assert_eq!(jumbled, v.jumbled);
             let unjumbled = f4jumble_inv(&v.jumbled).unwrap();
             assert_eq!(unjumbled, v.normal);
+        }
+    }
+
+    #[test]
+    fn f4jumble_check_vectors_long() {
+        for v in test_vectors_long::TEST_VECTORS {
+            let normal: Vec<u8> = (0..v.length).map(|i| i as u8).collect();
+            let jumbled = f4jumble(&normal).unwrap();
+            assert_eq!(blake2b(&jumbled).as_bytes(), v.jumbled_hash);
+            let unjumbled = f4jumble_inv(&jumbled).unwrap();
+            assert_eq!(unjumbled, normal);
         }
     }
 }

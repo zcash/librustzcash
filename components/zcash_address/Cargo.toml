@@ -15,8 +15,10 @@ edition = "2018"
 bech32 = "0.8"
 blake2b_simd = "0.5"
 bs58 = { version = "0.4", features = ["check"] }
+zcash_encoding = { version = "0.0", path = "../zcash_encoding" }
 
 [dev-dependencies]
+assert_matches = "1.3.0"
 proptest = "1"
 
 [lib]

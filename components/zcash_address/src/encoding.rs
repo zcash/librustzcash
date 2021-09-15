@@ -18,7 +18,7 @@ pub enum ParseError {
 impl From<unified::ParseError> for ParseError {
     fn from(e: unified::ParseError) -> Self {
         match e {
-            unified::ParseError::InvalidEncoding => Self::InvalidEncoding,
+            unified::ParseError::InvalidEncoding(_) => Self::InvalidEncoding,
             _ => Self::Unified(e),
         }
     }
@@ -227,21 +227,21 @@ mod tests {
     #[test]
     fn unified() {
         encoding(
-            "u175h4qsgd8gujkevz283ka89ul6r2kr25xvachlt5w5srewdwcjacdtm3ku06jazzwk2klezj3kfy2jc9p65l5fgvjhekmnd4myk2m7xn",
+            "u1qpatys4zruk99pg59gcscrt7y6akvl9vrhcfyhm9yxvxz7h87q6n8cgrzzpe9zru68uq39uhmlpp5uefxu0su5uqyqfe5zp3tycn0ecl",
             ZcashAddress {
                 net: Network::Main,
                 kind: AddressKind::Unified(unified::Address(vec![unified::Receiver::Sapling([0; 43])])),
             },
         );
         encoding(
-            "utest193cmy6pcjrw6cg8rqcxgq6z2095a2mc0hqu0g0gvnlf83em0szx23qtv9722s6qkssz80try4tynp73u9gee3zskye0ztzdz0snrxw7n",
+            "utest10c5kutapazdnf8ztl3pu43nkfsjx89fy3uuff8tsmxm6s86j37pe7uz94z5jhkl49pqe8yz75rlsaygexk6jpaxwx0esjr8wm5ut7d5s",
             ZcashAddress {
                 net: Network::Test,
                 kind: AddressKind::Unified(unified::Address(vec![unified::Receiver::Sapling([0; 43])])),
             },
         );
         encoding(
-            "uregtest1dl4mka5saz8xwnf0pttr637jx6su0nejfhzcz3metcmqyzdgktsmm09ese6ew794xqcyp6476nuspvdvx2xk6gn2euvu7fdmrvwl87zx",
+            "uregtest15xk7vj4grjkay6mnfl93dhsflc2yeunhxwdh38rul0rq3dfhzzxgm5szjuvtqdha4t4p2q02ks0jgzrhjkrav70z9xlvq0plpcjkd5z3",
             ZcashAddress {
                 net: Network::Regtest,
                 kind: AddressKind::Unified(unified::Address(vec![unified::Receiver::Sapling([0; 43])])),
