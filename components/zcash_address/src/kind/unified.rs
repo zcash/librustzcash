@@ -80,16 +80,13 @@ impl TryFrom<u32> for Typecode {
     type Error = ParseError;
 
     fn try_from(typecode: u32) -> Result<Self, Self::Error> {
-        if typecode < 0x02000000 {
-            Ok(match typecode {
-                0x00 => Typecode::P2pkh,
-                0x01 => Typecode::P2sh,
-                0x02 => Typecode::Sapling,
-                0x03 => Typecode::Orchard,
-                _ => Typecode::Unknown(typecode),
-            })
-        } else {
-            Err(ParseError::InvalidTypecodeValue(typecode as u64))
+        match typecode {
+            0x00 => Ok(Typecode::P2pkh),
+            0x01 => Ok(Typecode::P2sh),
+            0x02 => Ok(Typecode::Sapling),
+            0x03 => Ok(Typecode::Orchard),
+            0x04..=0x02000000 => Ok(Typecode::Unknown(typecode)),
+            0x02000001..=u32::MAX => Err(ParseError::InvalidTypecodeValue(typecode as u64)),
         }
     }
 }
@@ -220,13 +217,13 @@ impl TryFrom<(&str, &[u8])> for Address {
     fn try_from((hrp, buf): (&str, &[u8])) -> Result<Self, Self::Error> {
         fn read_receiver(mut cursor: &mut std::io::Cursor<&[u8]>) -> Result<Receiver, ParseError> {
             let typecode = CompactSize::read(&mut cursor)
+                .map(|v| u32::try_from(v).expect("CompactSize::read enforces MAX_SIZE limit"))
                 .map_err(|e| {
                     ParseError::InvalidEncoding(format!(
                         "Failed to deserialize CompactSize-encoded typecode {}",
                         e
                     ))
-                })
-                .and_then(|v| u32::try_from(v).map_err(|_| ParseError::InvalidTypecodeValue(v)))?;
+                })?;
             let length = CompactSize::read(&mut cursor).map_err(|e| {
                 ParseError::InvalidEncoding(format!(
                     "Failed to deserialize CompactSize-encoded length {}",
