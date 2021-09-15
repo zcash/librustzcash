@@ -323,7 +323,7 @@
 <span class="kw">impl</span> <span class="ident">From</span><span class="op">&lt;</span><span class="ident">unified::ParseError</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">ParseError</span> {
     <span class="kw">fn</span> <span class="ident">from</span>(<span class="ident">e</span>: <span class="ident">unified::ParseError</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="self">Self</span> {
         <span class="kw">match</span> <span class="ident">e</span> {
-            <span class="ident">unified::ParseError::InvalidEncoding</span> <span class="op">=</span><span class="op">&gt;</span> <span class="ident"><span class="self">Self</span>::InvalidEncoding</span>,
+            <span class="ident">unified::ParseError::InvalidEncoding</span>(<span class="kw">_</span>) <span class="op">=</span><span class="op">&gt;</span> <span class="ident"><span class="self">Self</span>::InvalidEncoding</span>,
             <span class="kw">_</span> <span class="op">=</span><span class="op">&gt;</span> <span class="ident"><span class="self">Self</span>::Unified</span>(<span class="ident">e</span>),
         }
     }
@@ -532,21 +532,21 @@
     <span class="attribute">#[<span class="ident">test</span>]</span>
     <span class="kw">fn</span> <span class="ident">unified</span>() {
         <span class="ident">encoding</span>(
-            <span class="string">&quot;u175h4qsgd8gujkevz283ka89ul6r2kr25xvachlt5w5srewdwcjacdtm3ku06jazzwk2klezj3kfy2jc9p65l5fgvjhekmnd4myk2m7xn&quot;</span>,
+            <span class="string">&quot;u1qpatys4zruk99pg59gcscrt7y6akvl9vrhcfyhm9yxvxz7h87q6n8cgrzzpe9zru68uq39uhmlpp5uefxu0su5uqyqfe5zp3tycn0ecl&quot;</span>,
             <span class="ident">ZcashAddress</span> {
                 <span class="ident">net</span>: <span class="ident">Network::Main</span>,
                 <span class="ident">kind</span>: <span class="ident">AddressKind::Unified</span>(<span class="ident">unified::Address</span>(<span class="macro">vec!</span>[<span class="ident">unified::Receiver::Sapling</span>([<span class="number">0</span>; <span class="number">43</span>])])),
             },
         );
         <span class="ident">encoding</span>(
-            <span class="string">&quot;utest193cmy6pcjrw6cg8rqcxgq6z2095a2mc0hqu0g0gvnlf83em0szx23qtv9722s6qkssz80try4tynp73u9gee3zskye0ztzdz0snrxw7n&quot;</span>,
+            <span class="string">&quot;utest10c5kutapazdnf8ztl3pu43nkfsjx89fy3uuff8tsmxm6s86j37pe7uz94z5jhkl49pqe8yz75rlsaygexk6jpaxwx0esjr8wm5ut7d5s&quot;</span>,
             <span class="ident">ZcashAddress</span> {
                 <span class="ident">net</span>: <span class="ident">Network::Test</span>,
                 <span class="ident">kind</span>: <span class="ident">AddressKind::Unified</span>(<span class="ident">unified::Address</span>(<span class="macro">vec!</span>[<span class="ident">unified::Receiver::Sapling</span>([<span class="number">0</span>; <span class="number">43</span>])])),
             },
         );
         <span class="ident">encoding</span>(
-            <span class="string">&quot;uregtest1dl4mka5saz8xwnf0pttr637jx6su0nejfhzcz3metcmqyzdgktsmm09ese6ew794xqcyp6476nuspvdvx2xk6gn2euvu7fdmrvwl87zx&quot;</span>,
+            <span class="string">&quot;uregtest15xk7vj4grjkay6mnfl93dhsflc2yeunhxwdh38rul0rq3dfhzzxgm5szjuvtqdha4t4p2q02ks0jgzrhjkrav70z9xlvq0plpcjkd5z3&quot;</span>,
             <span class="ident">ZcashAddress</span> {
                 <span class="ident">net</span>: <span class="ident">Network::Regtest</span>,
                 <span class="ident">kind</span>: <span class="ident">AddressKind::Unified</span>(<span class="ident">unified::Address</span>(<span class="macro">vec!</span>[<span class="ident">unified::Receiver::Sapling</span>([<span class="number">0</span>; <span class="number">43</span>])])),
