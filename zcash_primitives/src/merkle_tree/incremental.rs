@@ -11,7 +11,7 @@ use incrementalmerkletree::{
     },
     Hashable, Position,
 };
-use orchard::tree::MerkleCrhOrchardOutput;
+use orchard::tree::MerkleHashOrchard;
 use zcash_encoding::{Optional, Vector};
 
 use super::{CommitmentTree, HashSer};
@@ -26,7 +26,7 @@ pub fn read_frontier_v0<H: Hashable + super::Hashable, R: Read>(
     Ok(tree.to_frontier())
 }
 
-impl HashSer for MerkleCrhOrchardOutput {
+impl HashSer for MerkleHashOrchard {
     fn read<R: Read>(mut reader: R) -> io::Result<Self>
     where
         Self: Sized,
