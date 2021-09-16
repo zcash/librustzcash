@@ -323,7 +323,7 @@
     },
     <span class="ident">Hashable</span>, <span class="ident">Position</span>,
 };
-<span class="kw">use</span> <span class="ident">orchard::tree::MerkleCrhOrchardOutput</span>;
+<span class="kw">use</span> <span class="ident">orchard::tree::MerkleHashOrchard</span>;
 <span class="kw">use</span> <span class="ident">zcash_encoding</span>::{<span class="ident">Optional</span>, <span class="ident">Vector</span>};
 
 <span class="kw">use</span> <span class="kw">super</span>::{<span class="ident">CommitmentTree</span>, <span class="ident">HashSer</span>};
@@ -338,7 +338,7 @@
     <span class="prelude-val">Ok</span>(<span class="ident">tree</span>.<span class="ident">to_frontier</span>())
 }
 
-<span class="kw">impl</span> <span class="ident">HashSer</span> <span class="kw">for</span> <span class="ident">MerkleCrhOrchardOutput</span> {
+<span class="kw">impl</span> <span class="ident">HashSer</span> <span class="kw">for</span> <span class="ident">MerkleHashOrchard</span> {
     <span class="kw">fn</span> <span class="ident">read</span><span class="op">&lt;</span><span class="ident">R</span>: <span class="ident">Read</span><span class="op">&gt;</span>(<span class="kw-2">mut</span> <span class="ident">reader</span>: <span class="ident">R</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">io::Result</span><span class="op">&lt;</span><span class="self">Self</span><span class="op">&gt;</span>
     <span class="kw">where</span>
         <span class="self">Self</span>: <span class="ident">Sized</span>,
