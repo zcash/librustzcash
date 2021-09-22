@@ -5,6 +5,7 @@ version = "0.0.0"
 authors = [
     "Jack Grigg <jack@electriccoin.co>",
     "Kris Nuttycombe <kris@electriccoin.co>",
+    "Daira Hopwood <daira@electriccoin.co>",
 ]
 homepage = "https://github.com/zcash/librustzcash"
 repository = "https://github.com/zcash/librustzcash"
