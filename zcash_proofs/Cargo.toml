@@ -19,7 +19,7 @@ bellman = { version = "0.11.1", default-features = false, features = ["groth16"]
 blake2b_simd = "0.5"
 bls12_381 = "0.6"
 byteorder = "1"
-directories = { version = "3", optional = true }
+directories = { version = "4", optional = true }
 ff = "0.11"
 group = "0.11"
 jubjub = "0.8"

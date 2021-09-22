@@ -20,8 +20,8 @@ codegen-units = 1
 
 [patch.crates-io]
 # In development.
-halo2 = { git = "https://github.com/zcash/halo2.git", rev = "26047eaf323929935fd1e6aa3ae100b1113706e0" }
-orchard = { git = "https://github.com/zcash/orchard.git", rev = "f8280c98a3d0e41b8ff5b7f615802bd197f781e1" }
+halo2 = { git = "https://github.com/zcash/halo2.git", rev = "a7cd600eb60b1528159b92af5e426adcc615de1a" }
+orchard = { git = "https://github.com/zcash/orchard.git", rev = "8779ce8f1a638ebbc9b229d4eff3a29ef4de7ac0" }
 incrementalmerkletree = { git = "https://github.com/zcash/incrementalmerkletree.git", rev = "b7bd6246122a6e9ace8edb51553fbf5228906cbb" }
 zcash_encoding = { path = "components/zcash_encoding" }
 zcash_note_encryption = { path = "components/zcash_note_encryption" }
