@@ -15,6 +15,7 @@ edition = "2018"
 bech32 = "0.8"
 blake2b_simd = "0.5"
 bs58 = { version = "0.4", features = ["check"] }
+f4jumble = { version = "0.0", path = "../f4jumble" }
 zcash_encoding = { version = "0.0", path = "../zcash_encoding" }
 
 [dev-dependencies]
