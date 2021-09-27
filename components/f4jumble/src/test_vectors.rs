@@ -1,9 +1,18 @@
+#[cfg(feature="std")]
+extern crate std;
+#[cfg(feature="std")]
+use std::vec;
+#[cfg(feature="std")]
+use std::vec::Vec;
+
+#[cfg(feature="std")]
 pub(crate) struct TestVector {
     pub(crate) normal: Vec<u8>,
     pub(crate) jumbled: Vec<u8>,
 }
 
 // From https://github.com/zcash-hackworks/zcash-test-vectors/blob/master/f4jumble.py
+#[cfg(feature="std")]
 pub(crate) fn test_vectors() -> Vec<TestVector> {
     vec![
         TestVector {

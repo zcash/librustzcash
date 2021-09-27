@@ -1,8 +1,15 @@
+#![no_std]
+
 use blake2b_simd::{Params as Blake2bParams, OUTBYTES};
 use core::cmp::min;
 use core::ops::RangeInclusive;
 use core::result::Result;
 use const_format::formatcp;
+
+#[cfg(feature="std")]
+extern crate std;
+#[cfg(feature="std")]
+use std::vec::Vec;
 
 #[cfg(test)]
 mod test_vectors;
@@ -147,6 +154,8 @@ mod tests {
     use blake2b_simd::blake2b;
     use proptest::collection::vec;
     use proptest::prelude::*;
+    use std::format;
+    use std::vec::Vec;
 
     use super::{
         f4jumble, f4jumble_inv, test_vectors::test_vectors, test_vectors_long, VALID_LENGTH,
