@@ -17,7 +17,7 @@ mod test_vectors;
 mod test_vectors_long;
 
 pub const VALID_LENGTH: RangeInclusive<usize> = 48..=4194368;
-const INVALID_LENGTH_ERROR_MESSAGE: &'static str = formatcp!(
+const INVALID_LENGTH_ERROR_MESSAGE: &str = formatcp!(
     "Message length must be in interval ({}..={})",
     *VALID_LENGTH.start(),
     *VALID_LENGTH.end()
