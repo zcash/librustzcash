@@ -15,7 +15,6 @@ edition = "2018"
 
 [dependencies]
 blake2b_simd = "0.5"
-const_format = "0.2.21"
 
 [dev-dependencies]
 proptest = "1"

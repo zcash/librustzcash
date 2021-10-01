@@ -1,7 +1,7 @@
 #![no_std]
 
 use blake2b_simd::{Params as Blake2bParams, OUTBYTES};
-use const_format::formatcp;
+
 use core::cmp::min;
 use core::ops::RangeInclusive;
 use core::result::Result;
@@ -27,7 +27,12 @@ pub enum Error {
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::InvalidLength => [...],
+            Self::InvalidLength => write!(
+                f,
+                "Message length must be in interval ({}..={})",
+                *VALID_LENGTH.start(),
+                *VALID_LENGTH.end()
+            ),
         }
     }
 }
@@ -122,21 +127,21 @@ fn ceildiv(num: usize, den: usize) -> usize {
     (num + den - 1) / den
 }
 
-pub fn f4jumble_mut(message: &mut [u8]) -> Result<(), &str> {
+pub fn f4jumble_mut(message: &mut [u8]) -> Result<(), Error> {
     if VALID_LENGTH.contains(&message.len()) {
         State::new(message).apply_f4jumble();
         Ok(())
     } else {
-        Err(INVALID_LENGTH_ERROR_MESSAGE)
+        Err(Error::InvalidLength)
     }
 }
 
-pub fn f4jumble_inv_mut(message: &mut [u8]) -> Result<(), &str> {
+pub fn f4jumble_inv_mut(message: &mut [u8]) -> Result<(), Error> {
     if VALID_LENGTH.contains(&message.len()) {
         State::new(message).apply_f4jumble_inv();
         Ok(())
     } else {
-        Err(INVALID_LENGTH_ERROR_MESSAGE)
+        Err(Error::InvalidLength)
     }
 }
 
