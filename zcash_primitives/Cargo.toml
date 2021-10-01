@@ -59,7 +59,7 @@ pprof = { version = "0.5", features = ["criterion", "flamegraph"] }
 
 [features]
 transparent-inputs = ["ripemd160", "secp256k1"]
-test-dependencies = ["proptest"]
+test-dependencies = ["proptest", "orchard/test-dependencies"]
 zfuture = []
 
 [lib]

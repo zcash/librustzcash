@@ -48,7 +48,7 @@ zcash_proofs = { version = "0.5", path = "../zcash_proofs" }
 
 [features]
 transparent-inputs = ["ripemd160", "hdwallet", "sha2", "secp256k1"]
-test-dependencies = ["proptest", "zcash_primitives/test-dependencies", "hdwallet", "sha2"]
+test-dependencies = ["proptest", "zcash_primitives/test-dependencies"]
 
 [lib]
 bench = false
