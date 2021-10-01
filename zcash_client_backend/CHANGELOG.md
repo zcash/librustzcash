@@ -21,7 +21,13 @@ and this library adheres to Rust's notion of
   - `testing::MockWalletDB` to `testing::MockWalletDb`
 - Account identifier variables that were previously typed as `u32` have
   been updated to use a bespoke `AccountId` type in several places.
-
+- A new error constructor SqliteClientError::TransparentAddress has been added 
+  to support handling of errors in transparent address decoding.
+- The `Builder::add_sapling_output` method now takes its `MemoBytes` argument
+  as a required field rather than an optional one. If the empty memo is desired, use
+  MemoBytes::from(Memo::Empty) explicitly.
+- The `SaplingBuiilder::add_output` method has now similarly been changed to take
+  its `MemoBytes` argument as a required field.
 ## [0.5.0] - 2021-03-26
 ### Added
 - `zcash_client_backend::address::RecipientAddress`

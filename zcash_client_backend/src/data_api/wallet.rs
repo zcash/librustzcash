@@ -431,7 +431,6 @@ where
 
     let mut builder = Builder::new(params.clone(), latest_scanned_height);
 
-    #[cfg(feature = "transparent-inputs")]
     for utxo in &utxos {
         builder
             .add_transparent_input(*sk, utxo.outpoint.clone(), utxo.txout.clone())

@@ -197,6 +197,9 @@ pub fn encode_payment_address(hrp: &str, addr: &PaymentAddress) -> String {
     bech32_encode(hrp, |w| w.write_all(&addr.to_bytes()))
 }
 
+/// Writes a [`PaymentAddress`] as a Bech32-encoded string
+/// using the human-readable prefix values defined in the specified
+/// network parameters.
 pub fn encode_payment_address_p<P: consensus::Parameters>(
     params: &P,
     addr: &PaymentAddress,
@@ -307,6 +310,9 @@ pub fn encode_transparent_address(
     bs58::encode(decoded).with_check().into_string()
 }
 
+/// Writes a [`TransparentAddress`] as a Base58Check-encoded string.
+/// using the human-readable prefix values defined in the specified
+/// network parameters.
 pub fn encode_transparent_address_p<P: consensus::Parameters>(
     params: &P,
     addr: &TransparentAddress,

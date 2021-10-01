@@ -69,7 +69,10 @@ pub mod chain;
 pub mod error;
 pub mod wallet;
 
-pub const PRUNING_HEIGHT: u32 = 100;
+/// The maximum number of blocks the wallet is allowed to rewind. This is
+/// consistent with the bound in zcashd, and allows block data deeper than
+/// this delta from the chain tip to be pruned.
+pub(crate) const PRUNING_HEIGHT: u32 = 100;
 
 /// A newtype wrapper for sqlite primary key values for the notes
 /// table.
