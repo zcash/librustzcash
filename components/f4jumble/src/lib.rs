@@ -102,8 +102,8 @@ impl<'a> State<'a> {
 
 // xor bytes of the `source` to bytes of the `target`
 fn xor(target: &mut [u8], source: &[u8]) {
-    for i in 0..min(source.len(), target.len()) {
-        target[i] ^= source[i];
+    for (source, target) in source.iter().zip(target.iter_mut()) {
+        *target ^= source;
     }
 }
 
