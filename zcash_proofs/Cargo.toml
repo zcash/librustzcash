@@ -15,14 +15,14 @@ edition = "2018"
 all-features = true
 
 [dependencies]
-bellman = { version = "0.10", default-features = false, features = ["groth16"] }
+bellman = { version = "0.11.1", default-features = false, features = ["groth16"] }
 blake2b_simd = "0.5"
-bls12_381 = "0.5"
+bls12_381 = "0.6"
 byteorder = "1"
-directories = { version = "3", optional = true }
-ff = "0.10"
-group = "0.10"
-jubjub = "0.7"
+directories = { version = "4", optional = true }
+ff = "0.11"
+group = "0.11"
+jubjub = "0.8"
 lazy_static = "1"
 minreq = { version = "2", features = ["https"], optional = true }
 rand_core = "0.6"

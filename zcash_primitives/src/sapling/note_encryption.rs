@@ -102,7 +102,7 @@ where
     let r: [u8; 32] = plaintext[20..COMPACT_NOTE_SIZE].try_into().unwrap();
 
     let rseed = if plaintext[0] == 0x01 {
-        let rcm = jubjub::Fr::from_repr(r)?;
+        let rcm = Option::from(jubjub::Fr::from_repr(r))?;
         Rseed::BeforeZip212(rcm)
     } else {
         Rseed::AfterZip212(r)
@@ -351,6 +351,7 @@ impl<P: consensus::Parameters> Domain for SaplingDomain<P> {
                 .try_into()
                 .expect("slice is the correct length"),
         )
+        .into()
     }
 
     fn extract_memo(&self, plaintext: &[u8]) -> Self::Memo {
@@ -478,7 +479,10 @@ pub fn try_sapling_output_recovery<P: consensus::Parameters>(
 
 #[cfg(test)]
 mod tests {
-    use crypto_api_chachapoly::ChachaPolyIetf;
+    use chacha20poly1305::{
+        aead::{AeadInPlace, NewAead},
+        ChaCha20Poly1305,
+    };
     use ff::{Field, PrimeField};
     use group::Group;
     use group::{cofactor::CofactorGroup, GroupEncoding};
@@ -609,13 +613,17 @@ mod tests {
     ) {
         let ock = prf_ock(&ovk, &cv, &cmu.to_repr(), ephemeral_key);
 
-        let mut op = [0; OUT_CIPHERTEXT_SIZE];
-        assert_eq!(
-            ChachaPolyIetf::aead_cipher()
-                .open_to(&mut op, out_ciphertext, &[], ock.as_ref(), &[0u8; 12])
-                .unwrap(),
-            OUT_PLAINTEXT_SIZE
-        );
+        let mut op = [0; OUT_PLAINTEXT_SIZE];
+        op.copy_from_slice(&out_ciphertext[..OUT_PLAINTEXT_SIZE]);
+
+        ChaCha20Poly1305::new(ock.as_ref().into())
+            .decrypt_in_place_detached(
+                [0u8; 12][..].into(),
+                &[],
+                &mut op,
+                out_ciphertext[OUT_PLAINTEXT_SIZE..].into(),
+            )
+            .unwrap();
 
         let pk_d = jubjub::SubgroupPoint::from_bytes(&op[0..32].try_into().unwrap()).unwrap();
 
@@ -624,27 +632,26 @@ mod tests {
         let shared_secret = sapling_ka_agree(&esk, &pk_d.into());
         let key = kdf_sapling(shared_secret, ephemeral_key);
 
-        let mut plaintext = {
-            let mut buf = [0; ENC_CIPHERTEXT_SIZE];
-            assert_eq!(
-                ChachaPolyIetf::aead_cipher()
-                    .open_to(&mut buf, enc_ciphertext, &[], key.as_bytes(), &[0u8; 12])
-                    .unwrap(),
-                NOTE_PLAINTEXT_SIZE
-            );
-            let mut pt = [0; NOTE_PLAINTEXT_SIZE];
-            pt.copy_from_slice(&buf[..NOTE_PLAINTEXT_SIZE]);
-            pt
-        };
+        let mut plaintext = [0; NOTE_PLAINTEXT_SIZE];
+        plaintext.copy_from_slice(&enc_ciphertext[..NOTE_PLAINTEXT_SIZE]);
+
+        ChaCha20Poly1305::new(key.as_bytes().into())
+            .decrypt_in_place_detached(
+                [0u8; 12][..].into(),
+                &[],
+                &mut plaintext,
+                enc_ciphertext[NOTE_PLAINTEXT_SIZE..].into(),
+            )
+            .unwrap();
 
         modify_plaintext(&mut plaintext);
 
-        assert_eq!(
-            ChachaPolyIetf::aead_cipher()
-                .seal_to(enc_ciphertext, &plaintext, &[], &key.as_bytes(), &[0u8; 12])
-                .unwrap(),
-            ENC_CIPHERTEXT_SIZE
-        );
+        let tag = ChaCha20Poly1305::new(key.as_ref().into())
+            .encrypt_in_place_detached([0u8; 12][..].into(), &[], &mut plaintext)
+            .unwrap();
+
+        enc_ciphertext[..NOTE_PLAINTEXT_SIZE].copy_from_slice(&plaintext);
+        enc_ciphertext[NOTE_PLAINTEXT_SIZE..].copy_from_slice(&tag);
     }
 
     fn find_invalid_diversifier() -> Diversifier {
@@ -1349,7 +1356,7 @@ mod tests {
             let output = OutputDescription {
                 cv,
                 cmu,
-                ephemeral_key: ephemeral_key,
+                ephemeral_key,
                 enc_ciphertext: tv.c_enc,
                 out_ciphertext: tv.c_out,
                 zkproof: [0u8; GROTH_PROOF_SIZE],

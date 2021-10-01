@@ -292,11 +292,11 @@ mod test {
 
             assert_eq!(
                 res.get_u().get_value().unwrap(),
-                bls12_381::Scalar::from_str(expected_us[length - 300]).unwrap()
+                bls12_381::Scalar::from_str_vartime(expected_us[length - 300]).unwrap()
             );
             assert_eq!(
                 res.get_v().get_value().unwrap(),
-                bls12_381::Scalar::from_str(expected_vs[length - 300]).unwrap()
+                bls12_381::Scalar::from_str_vartime(expected_vs[length - 300]).unwrap()
             );
         }
     }

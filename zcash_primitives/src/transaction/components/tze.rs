@@ -2,18 +2,14 @@
 #![cfg(feature = "zfuture")]
 
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
-
 use std::convert::TryFrom;
 use std::fmt::Debug;
 use std::io::{self, Read, Write};
 
-use crate::{
-    extensions::transparent as tze,
-    serialize::{CompactSize, Vector},
-    transaction::TxId,
-};
+use zcash_encoding::{CompactSize, Vector};
 
 use super::amount::Amount;
+use crate::{extensions::transparent as tze, transaction::TxId};
 
 pub mod builder;
 
@@ -121,15 +117,15 @@ impl TzeIn<<Authorized as Authorization>::Witness> {
     pub fn read<R: Read>(mut reader: &mut R) -> io::Result<Self> {
         let prevout = OutPoint::read(&mut reader)?;
 
-        let extension_id = CompactSize::read(&mut reader)?;
-        let mode = CompactSize::read(&mut reader)?;
+        let extension_id = CompactSize::read_t(&mut reader)?;
+        let mode = CompactSize::read_t(&mut reader)?;
         let payload = Vector::read(&mut reader, |r| r.read_u8())?;
 
         Ok(TzeIn {
             prevout,
             witness: tze::Witness {
-                extension_id: u32::try_from(extension_id).map_err(to_io_error)?,
-                mode: u32::try_from(mode).map_err(to_io_error)?,
+                extension_id,
+                mode,
                 payload: tze::AuthData(payload),
             },
         })
@@ -163,15 +159,15 @@ impl TzeOut {
         }
         .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "value out of range"))?;
 
-        let extension_id = CompactSize::read(&mut reader)?;
-        let mode = CompactSize::read(&mut reader)?;
+        let extension_id = CompactSize::read_t(&mut reader)?;
+        let mode = CompactSize::read_t(&mut reader)?;
         let payload = Vector::read(&mut reader, |r| r.read_u8())?;
 
         Ok(TzeOut {
             value,
             precondition: tze::Precondition {
-                extension_id: u32::try_from(extension_id).map_err(to_io_error)?,
-                mode: u32::try_from(mode).map_err(to_io_error)?,
+                extension_id,
+                mode,
                 payload,
             },
         })

@@ -16,7 +16,7 @@ fn read_scalar<R: Read>(mut reader: R) -> io::Result<jubjub::Fr> {
     let mut s_repr = [0u8; 32];
     reader.read_exact(s_repr.as_mut())?;
 
-    jubjub::Fr::from_repr(s_repr)
+    Option::from(jubjub::Fr::from_repr(s_repr))
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "scalar is not in field"))
 }
 

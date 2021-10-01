@@ -3,7 +3,22 @@
 //! functionality that is shared between the Sapling and Orchard
 //! protocols.
 
-use crypto_api_chachapoly::{ChaCha20Ietf, ChachaPolyIetf};
+// Catch documentation errors caused by code changes.
+#![deny(broken_intra_doc_links)]
+#![deny(unsafe_code)]
+// TODO: #![deny(missing_docs)]
+
+use std::convert::TryInto;
+
+use chacha20::{
+    cipher::{NewCipher, StreamCipher, StreamCipherSeek},
+    ChaCha20,
+};
+use chacha20poly1305::{
+    aead::{AeadInPlace, NewAead},
+    ChaCha20Poly1305,
+};
+
 use rand_core::RngCore;
 use subtle::{Choice, ConstantTimeEq};
 
@@ -307,12 +322,15 @@ impl<D: Domain> NoteEncryption<D> {
         let input = D::note_plaintext_bytes(&self.note, &self.to, &self.memo);
 
         let mut output = [0u8; ENC_CIPHERTEXT_SIZE];
-        assert_eq!(
-            ChachaPolyIetf::aead_cipher()
-                .seal_to(&mut output, &input.0, &[], key.as_ref(), &[0u8; 12])
-                .unwrap(),
-            ENC_CIPHERTEXT_SIZE
-        );
+        output[..NOTE_PLAINTEXT_SIZE].copy_from_slice(&input.0);
+        let tag = ChaCha20Poly1305::new(key.as_ref().into())
+            .encrypt_in_place_detached(
+                [0u8; 12][..].into(),
+                &[],
+                &mut output[..NOTE_PLAINTEXT_SIZE],
+            )
+            .unwrap();
+        output[NOTE_PLAINTEXT_SIZE..].copy_from_slice(&tag);
 
         output
     }
@@ -341,12 +359,11 @@ impl<D: Domain> NoteEncryption<D> {
         };
 
         let mut output = [0u8; OUT_CIPHERTEXT_SIZE];
-        assert_eq!(
-            ChachaPolyIetf::aead_cipher()
-                .seal_to(&mut output, &input.0, &[], ock.as_ref(), &[0u8; 12])
-                .unwrap(),
-            OUT_CIPHERTEXT_SIZE
-        );
+        output[..OUT_PLAINTEXT_SIZE].copy_from_slice(&input.0);
+        let tag = ChaCha20Poly1305::new(ock.as_ref().into())
+            .encrypt_in_place_detached([0u8; 12][..].into(), &[], &mut output[..OUT_PLAINTEXT_SIZE])
+            .unwrap();
+        output[OUT_PLAINTEXT_SIZE..].copy_from_slice(&tag);
 
         output
     }
@@ -381,20 +398,20 @@ fn try_note_decryption_inner<D: Domain, Output: ShieldedOutput<D>>(
     output: &Output,
     key: D::SymmetricKey,
 ) -> Option<(D::Note, D::Recipient, D::Memo)> {
-    assert_eq!(output.enc_ciphertext().len(), ENC_CIPHERTEXT_SIZE);
-    let mut plaintext = [0; ENC_CIPHERTEXT_SIZE];
-    assert_eq!(
-        ChachaPolyIetf::aead_cipher()
-            .open_to(
-                &mut plaintext,
-                output.enc_ciphertext(),
-                &[],
-                key.as_ref(),
-                &[0u8; 12]
-            )
-            .ok()?,
-        NOTE_PLAINTEXT_SIZE
-    );
+    let enc_ciphertext = output.enc_ciphertext();
+    assert_eq!(enc_ciphertext.len(), ENC_CIPHERTEXT_SIZE);
+
+    let mut plaintext: [u8; NOTE_PLAINTEXT_SIZE] =
+        enc_ciphertext[..NOTE_PLAINTEXT_SIZE].try_into().unwrap();
+
+    ChaCha20Poly1305::new(key.as_ref().into())
+        .decrypt_in_place_detached(
+            [0u8; 12][..].into(),
+            &[],
+            &mut plaintext,
+            enc_ciphertext[NOTE_PLAINTEXT_SIZE..].into(),
+        )
+        .ok()?;
 
     let (note, to) = parse_note_plaintext_without_memo_ivk(
         domain,
@@ -481,7 +498,9 @@ fn try_compact_note_decryption_inner<D: Domain, Output: ShieldedOutput<D>>(
     // Start from block 1 to skip over Poly1305 keying output
     let mut plaintext = [0; COMPACT_NOTE_SIZE];
     plaintext.copy_from_slice(output.enc_ciphertext());
-    ChaCha20Ietf::xor(key.as_ref(), &[0u8; 12], 1, &mut plaintext);
+    let mut keystream = ChaCha20::new(key.as_ref().into(), [0u8; 12][..].into());
+    keystream.seek(64);
+    keystream.apply_keystream(&mut plaintext);
 
     parse_note_plaintext_without_memo_ivk(
         domain,
@@ -527,16 +546,21 @@ pub fn try_output_recovery_with_ock<D: Domain, Output: ShieldedOutput<D>>(
     output: &Output,
     out_ciphertext: &[u8],
 ) -> Option<(D::Note, D::Recipient, D::Memo)> {
-    assert_eq!(output.enc_ciphertext().len(), ENC_CIPHERTEXT_SIZE);
+    let enc_ciphertext = output.enc_ciphertext();
+    assert_eq!(enc_ciphertext.len(), ENC_CIPHERTEXT_SIZE);
     assert_eq!(out_ciphertext.len(), OUT_CIPHERTEXT_SIZE);
 
     let mut op = [0; OUT_PLAINTEXT_SIZE];
-    assert_eq!(
-        ChachaPolyIetf::aead_cipher()
-            .open_to(&mut op, &out_ciphertext, &[], ock.as_ref(), &[0u8; 12])
-            .ok()?,
-        OUT_PLAINTEXT_SIZE
-    );
+    op.copy_from_slice(&out_ciphertext[..OUT_PLAINTEXT_SIZE]);
+
+    ChaCha20Poly1305::new(ock.as_ref().into())
+        .decrypt_in_place_detached(
+            [0u8; 12][..].into(),
+            &[],
+            &mut op,
+            out_ciphertext[OUT_PLAINTEXT_SIZE..].into(),
+        )
+        .ok()?;
 
     let pk_d = D::extract_pk_d(&op)?;
     let esk = D::extract_esk(&op)?;
@@ -548,19 +572,17 @@ pub fn try_output_recovery_with_ock<D: Domain, Output: ShieldedOutput<D>>(
     // be okay.
     let key = D::kdf(shared_secret, &ephemeral_key);
 
-    let mut plaintext = [0; ENC_CIPHERTEXT_SIZE];
-    assert_eq!(
-        ChachaPolyIetf::aead_cipher()
-            .open_to(
-                &mut plaintext,
-                output.enc_ciphertext(),
-                &[],
-                key.as_ref(),
-                &[0u8; 12]
-            )
-            .ok()?,
-        NOTE_PLAINTEXT_SIZE
-    );
+    let mut plaintext = [0; NOTE_PLAINTEXT_SIZE];
+    plaintext.copy_from_slice(&enc_ciphertext[..NOTE_PLAINTEXT_SIZE]);
+
+    ChaCha20Poly1305::new(key.as_ref().into())
+        .decrypt_in_place_detached(
+            [0u8; 12][..].into(),
+            &[],
+            &mut plaintext,
+            enc_ciphertext[NOTE_PLAINTEXT_SIZE..].into(),
+        )
+        .ok()?;
 
     let (note, to) =
         domain.parse_note_plaintext_without_memo_ovk(&pk_d, &esk, &ephemeral_key, &plaintext)?;

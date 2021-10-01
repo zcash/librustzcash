@@ -11,10 +11,10 @@ use orchard::{
     value::ValueCommitment,
     Anchor,
 };
+use zcash_encoding::{Array, CompactSize, Vector};
 
 use super::Amount;
-use crate::serialize::{Array, CompactSize};
-use crate::{serialize::Vector, transaction::Transaction};
+use crate::transaction::Transaction;
 
 pub const FLAG_SPENDS_ENABLED: u8 = 0b0000_0001;
 pub const FLAG_OUTPUTS_ENABLED: u8 = 0b0000_0010;
@@ -157,7 +157,7 @@ pub fn read_flags<R: Read>(mut reader: R) -> io::Result<Flags> {
 pub fn read_anchor<R: Read>(mut reader: R) -> io::Result<Anchor> {
     let mut bytes = [0u8; 32];
     reader.read_exact(&mut bytes)?;
-    Anchor::from_bytes(bytes).ok_or_else(|| {
+    Option::from(Anchor::from_bytes(bytes)).ok_or_else(|| {
         io::Error::new(
             io::ErrorKind::InvalidInput,
             "invalid Orchard anchor".to_owned(),

@@ -1,7 +1,9 @@
 [workspace]
 members = [
     "components/equihash",
+    "components/f4jumble",
     "components/zcash_address",
+    "components/zcash_encoding",
     "components/zcash_note_encryption",
     "zcash_client_backend",
     "zcash_client_sqlite",
@@ -18,10 +20,7 @@ codegen-units = 1
 
 [patch.crates-io]
 # In development.
-halo2 = { git = "https://github.com/zcash/halo2.git", rev = "27c4187673a9c6ade13fbdbd4f20955530c22d7f" }
-orchard = { git = "https://github.com/zcash/orchard.git", rev = "d0baa18fc6105df4a7847de2b6dc50c5919b3123" }
+orchard = { git = "https://github.com/zcash/orchard.git", rev = "2c8241f25b943aa05203eacf9905db117c69bd29" }
 incrementalmerkletree = { git = "https://github.com/zcash/incrementalmerkletree.git", rev = "b7bd6246122a6e9ace8edb51553fbf5228906cbb" }
+zcash_encoding = { path = "components/zcash_encoding" }
 zcash_note_encryption = { path = "components/zcash_note_encryption" }
-
-# Unreleased
-jubjub = { git = "https://github.com/zkcrypto/jubjub.git", rev = "96ab4162b83303378eae32a326b54d88b75bffc2" }

@@ -49,9 +49,14 @@ and this library adheres to Rust's notion of
     type bounded on a newly added `tze::Authorization` trait which
     is used to enable static reasoning about the state of TZE witness
     data, as described above.
+- `zcash_primitives::serialize` has been factored out as a new `zcash_encoding`
+  crate, which can be found in the `components` directory.
+- `zcash_primitives::transaction::components::Amount` now implements
+  `memuse::DynamicUsage`, to enable `orchard::Bundle<_, Amount>::dynamic_usage`.
 
 ### Changed
 - MSRV is now 1.51.0.
+- Bumped dependencies to `ff 0.11`, `group 0.11`, `bls12_381 0.6`, `jubjub 0.8`.
 - The following modules and helpers have been moved into
   `zcash_primitives::sapling`:
   - `zcash_primitives::group_hash`

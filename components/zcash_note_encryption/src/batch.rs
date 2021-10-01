@@ -9,7 +9,8 @@ use crate::{
 
 /// Trial decryption of a batch of notes with a set of recipients.
 ///
-/// This is the batched version of [`zcash_note_encryption::try_note_decryption`].
+/// This is the batched version of [`crate::try_note_decryption`].
+#[allow(clippy::type_complexity)]
 pub fn try_note_decryption<D: Domain, Output: ShieldedOutput<D>>(
     ivks: &[D::IncomingViewingKey],
     outputs: &[(D, Output)],
@@ -19,7 +20,7 @@ pub fn try_note_decryption<D: Domain, Output: ShieldedOutput<D>>(
 
 /// Trial decryption of a batch of notes for light clients with a set of recipients.
 ///
-/// This is the batched version of [`zcash_note_encryption::try_compact_note_decryption`].
+/// This is the batched version of [`crate::try_compact_note_decryption`].
 pub fn try_compact_note_decryption<D: Domain, Output: ShieldedOutput<D>>(
     ivks: &[D::IncomingViewingKey],
     outputs: &[(D, Output)],
