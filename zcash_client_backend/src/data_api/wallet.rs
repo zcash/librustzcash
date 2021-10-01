@@ -22,9 +22,6 @@ use crate::{
 };
 
 #[cfg(feature = "transparent-inputs")]
-use zcash_primitives::{legacy::Script, transaction::components::TxOut};
-
-#[cfg(feature = "transparent-inputs")]
 use crate::keys::derive_transparent_address_from_secret_key;
 
 /// Scans a [`Transaction`] for any information that can be decrypted by the accounts in
@@ -421,7 +418,7 @@ where
     let utxos = wallet_db.get_unspent_transparent_outputs(&taddr, latest_anchor)?;
     let total_amount = utxos
         .iter()
-        .map(|utxo| utxo.value)
+        .map(|utxo| utxo.txout.value)
         .sum::<Option<Amount>>()
         .ok_or_else(|| E::from(Error::InvalidAmount))?;
 
@@ -436,15 +433,8 @@ where
 
     #[cfg(feature = "transparent-inputs")]
     for utxo in &utxos {
-        let coin = TxOut {
-            value: utxo.value,
-            script_pubkey: Script {
-                0: utxo.script.clone(),
-            },
-        };
-
         builder
-            .add_transparent_input(*sk, utxo.outpoint.clone(), coin)
+            .add_transparent_input(*sk, utxo.outpoint.clone(), utxo.txout.clone())
             .map_err(Error::Builder)?;
     }
 

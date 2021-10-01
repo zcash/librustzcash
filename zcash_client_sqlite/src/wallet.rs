@@ -40,7 +40,10 @@ use crate::{error::SqliteClientError, DataConnStmtCache, NoteId, WalletDb, PRUNI
 use {
     crate::UtxoId,
     zcash_client_backend::{encoding::AddressCodec, wallet::WalletTransparentOutput},
-    zcash_primitives::legacy::TransparentAddress,
+    zcash_primitives::{
+        legacy::{Script, TransparentAddress},
+        transaction::components::TxOut,
+    },
 };
 
 pub mod init;
@@ -707,7 +710,7 @@ pub fn get_unspent_transparent_outputs<P: consensus::Parameters>(
     max_height: BlockHeight,
 ) -> Result<Vec<WalletTransparentOutput>, SqliteClientError> {
     let mut stmt_blocks = wdb.conn.prepare(
-        "SELECT u.address, u.prevout_txid, u.prevout_idx, u.script, u.value_zat, u.height, tx.block as block
+        "SELECT u.prevout_txid, u.prevout_idx, u.script, u.value_zat, u.height, tx.block as block
          FROM utxos u
          LEFT OUTER JOIN transactions tx
          ON tx.id_tx = u.spent_in_tx
@@ -719,29 +722,21 @@ pub fn get_unspent_transparent_outputs<P: consensus::Parameters>(
     let addr_str = address.encode(&wdb.params);
 
     let rows = stmt_blocks.query_map(params![addr_str, u32::from(max_height)], |row| {
-        let addr: String = row.get(0)?;
-        let address = TransparentAddress::decode(&wdb.params, &addr).map_err(|e| {
-            rusqlite::Error::FromSqlConversionFailure(
-                addr.len(),
-                rusqlite::types::Type::Text,
-                Box::new(e),
-            )
-        })?;
-
-        let id: Vec<u8> = row.get(1)?;
+        let id: Vec<u8> = row.get(0)?;
 
         let mut txid_bytes = [0u8; 32];
         txid_bytes.copy_from_slice(&id);
-        let index: i32 = row.get(2)?;
-        let script: Vec<u8> = row.get(3)?;
-        let value: i64 = row.get(4)?;
-        let height: u32 = row.get(5)?;
+        let index: i32 = row.get(1)?;
+        let script_pubkey = Script(row.get(2)?);
+        let value = Amount::from_i64(row.get(3)?).unwrap();
+        let height: u32 = row.get(4)?;
 
         Ok(WalletTransparentOutput {
-            address,
             outpoint: OutPoint::new(txid_bytes, index as u32),
-            script,
-            value: Amount::from_i64(value).unwrap(),
+            txout: TxOut {
+                value,
+                script_pubkey,
+            },
             height: BlockHeight::from(height),
         })
     })?;
@@ -877,11 +872,14 @@ pub fn put_received_transparent_utxo<'a, P: consensus::Parameters>(
     output: &WalletTransparentOutput,
 ) -> Result<UtxoId, SqliteClientError> {
     let sql_args: &[(&str, &dyn ToSql)] = &[
-        (&":address", &output.address.encode(&stmts.wallet_db.params)),
+        (
+            &":address",
+            &output.address().encode(&stmts.wallet_db.params),
+        ),
         (&":prevout_txid", &output.outpoint.hash().to_vec()),
         (&":prevout_idx", &output.outpoint.n()),
-        (&":script", &output.script),
-        (&":value_zat", &i64::from(output.value)),
+        (&":script", &output.txout.script_pubkey.0),
+        (&":value_zat", &i64::from(output.txout.value)),
         (&":height", &u32::from(output.height)),
     ];
 

@@ -14,7 +14,9 @@ use zcash_primitives::{
 
 #[cfg(feature = "transparent-inputs")]
 use zcash_primitives::{
-    consensus::BlockHeight, legacy::TransparentAddress, transaction::components::OutPoint,
+    consensus::BlockHeight,
+    legacy::TransparentAddress,
+    transaction::components::{OutPoint, TxOut},
 };
 
 /// A type-safe wrapper for account identifiers.
@@ -47,11 +49,16 @@ pub struct WalletTx<N> {
 
 #[cfg(feature = "transparent-inputs")]
 pub struct WalletTransparentOutput {
-    pub address: TransparentAddress,
     pub outpoint: OutPoint,
-    pub script: Vec<u8>,
-    pub value: Amount,
+    pub txout: TxOut,
     pub height: BlockHeight,
+}
+
+#[cfg(feature = "transparent-inputs")]
+impl WalletTransparentOutput {
+    pub fn address(&self) -> TransparentAddress {
+        self.txout.script_pubkey.address().unwrap()
+    }
 }
 
 /// A subset of a [`SpendDescription`] relevant to wallets and light clients.

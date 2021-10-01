@@ -19,6 +19,8 @@ and this library adheres to Rust's notion of
   abbreviations (matching Rust naming conventions):
   - `error::Error::InvalidExtSK` to `Error::InvalidExtSk`
   - `testing::MockWalletDB` to `testing::MockWalletDb`
+- Account identifier variables that were previously typed as `u32` have
+  been updated to use a bespoke `AccountId` type in several places.
 
 ## [0.5.0] - 2021-03-26
 ### Added
