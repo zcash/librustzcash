@@ -22,11 +22,12 @@ use std::cmp::Ordering;
 
 use crate::address::RecipientAddress;
 
-/// Errors that may be produced in decoding of memos.
+/// Errors that may be produced in decoding of payment requests.
 #[derive(Debug)]
-pub enum MemoError {
+pub enum Zip321Error {
     InvalidBase64(base64::DecodeError),
     MemoBytesError(memo::Error),
+    TooManyPayments(usize),
 }
 
 /// Converts a [`MemoBytes`] value to a ZIP 321 compatible base64-encoded string.
@@ -39,10 +40,10 @@ pub fn memo_to_base64(memo: &MemoBytes) -> String {
 /// Parse a [`MemoBytes`] value from a ZIP 321 compatible base64-encoded string.
 ///
 /// [`MemoBytes`]: zcash_primitives::memo::MemoBytes
-pub fn memo_from_base64(s: &str) -> Result<MemoBytes, MemoError> {
+pub fn memo_from_base64(s: &str) -> Result<MemoBytes, Zip321Error> {
     base64::decode_config(s, base64::URL_SAFE_NO_PAD)
-        .map_err(MemoError::InvalidBase64)
-        .and_then(|b| MemoBytes::from_bytes(&b).map_err(MemoError::MemoBytesError))
+        .map_err(Zip321Error::InvalidBase64)
+        .and_then(|b| MemoBytes::from_bytes(&b).map_err(Zip321Error::MemoBytesError))
 }
 
 /// A single payment being requested.
@@ -106,10 +107,24 @@ impl Payment {
 /// payment value in the request.
 #[derive(Debug, PartialEq)]
 pub struct TransactionRequest {
-    pub payments: Vec<Payment>,
+    payments: Vec<Payment>,
 }
 
 impl TransactionRequest {
+    /// Constructs a new transaction request that obeys the ZIP-321 invariants
+    pub fn new(payments: Vec<Payment>) -> Result<TransactionRequest, Zip321Error> {
+        if payments.len() > 2109 {
+            Err(Zip321Error::TooManyPayments(payments.len()))
+        } else {
+            Ok(TransactionRequest { payments })
+        }
+    }
+
+    /// Returns the slice of payments that make up this request.
+    pub fn payments(&self) -> &[Payment] {
+        &self.payments[..]
+    }
+
     /// A utility for use in tests to help check round-trip serialization properties.
     #[cfg(any(test, feature = "test-dependencies"))]
     pub(in crate::zip321) fn normalize<P: consensus::Parameters>(&mut self, params: &P) {

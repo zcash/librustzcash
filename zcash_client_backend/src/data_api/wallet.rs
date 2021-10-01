@@ -172,16 +172,15 @@ where
     R: Copy + Debug,
     D: WalletWrite<Error = E, TxRef = R>,
 {
-    let req = TransactionRequest {
-        payments: vec![Payment {
-            recipient_address: to.clone(),
-            amount,
-            memo,
-            label: None,
-            message: None,
-            other_params: vec![],
-        }],
-    };
+    let req = TransactionRequest::new(vec![Payment {
+        recipient_address: to.clone(),
+        amount,
+        memo,
+        label: None,
+        message: None,
+        other_params: vec![],
+    }])
+    .unwrap();
 
     spend(
         wallet_db,
@@ -255,7 +254,7 @@ where
         .and_then(|x| x.ok_or_else(|| Error::ScanRequired.into()))?;
 
     let value = request
-        .payments
+        .payments()
         .iter()
         .map(|p| p.amount)
         .sum::<Option<Amount>>()
@@ -297,7 +296,7 @@ where
             .map_err(Error::Builder)?;
     }
 
-    for payment in &request.payments {
+    for payment in request.payments() {
         match &payment.recipient_address {
             RecipientAddress::Shielded(to) => builder
                 .add_sapling_output(
@@ -321,7 +320,7 @@ where
 
     let (tx, tx_metadata) = builder.build(&prover).map_err(Error::Builder)?;
 
-    let sent_outputs = request.payments.iter().enumerate().map(|(i, payment)| {
+    let sent_outputs = request.payments().iter().enumerate().map(|(i, payment)| {
         let idx = match &payment.recipient_address {
             // Sapling outputs are shuffled, so we need to look up where the output ended up.
             RecipientAddress::Shielded(_) =>
