@@ -17,12 +17,23 @@ mod test_vectors;
 mod test_vectors_long;
 
 pub const VALID_LENGTH: RangeInclusive<usize> = 48..=4194368;
-const INVALID_LENGTH_ERROR_MESSAGE: &str = formatcp!(
-    "Message length must be in interval ({}..={})",
-    *VALID_LENGTH.start(),
-    *VALID_LENGTH.end()
-);
-//more andvanced formatcp! only in nightly Rust
+use core::fmt;
+
+#[derive(Debug)]
+pub enum Error {
+    InvalidLength,
+}
+
+impl fmt::Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::InvalidLength => [...],
+        }
+    }
+}
+
+#[cfg(feature = "std")]
+impl std::error::Error for Error {}
 
 macro_rules! H_PERS {
     ( $i:expr ) => {
