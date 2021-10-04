@@ -148,6 +148,7 @@ where
 ///     Amount::from_u64(1).unwrap(),
 ///     None,
 ///     OvkPolicy::Sender,
+///     10
 /// )?;
 ///
 /// # Ok(())
