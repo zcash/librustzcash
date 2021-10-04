@@ -153,7 +153,7 @@ mod tests {
 
     use zcash_primitives::{
         block::BlockHash,
-        consensus::{BlockHeight, BranchId},
+        consensus::{BlockHeight, BranchId, Parameters},
         legacy::TransparentAddress,
         sapling::{note_encryption::try_sapling_output_recovery, prover::TxProver},
         transaction::{components::Amount, Transaction},
@@ -164,16 +164,18 @@ mod tests {
 
     use zcash_client_backend::{
         data_api::{chain::scan_cached_blocks, wallet::create_spend_to_address, WalletRead},
-        keys::derive_transparent_address_from_secret_key,
+        keys::{spending_key, UnifiedFullViewingKey},
         wallet::OvkPolicy,
+    };
+
+    #[cfg(feature = "transparent-inputs")]
+    use zcash_client_backend::keys::{
+        derive_secret_key_from_seed, derive_transparent_address_from_secret_key,
     };
 
     use crate::{
         chain::init::init_cache_database,
-        tests::{
-            self, derive_test_keys_from_seed, fake_compact_block, insert_into_cache,
-            sapling_activation_height,
-        },
+        tests::{self, fake_compact_block, insert_into_cache, network, sapling_activation_height},
         wallet::{
             get_balance, get_balance_at,
             init::{init_accounts_table, init_blocks_table, init_wallet_db},
@@ -197,17 +199,39 @@ mod tests {
         init_wallet_db(&db_data).unwrap();
 
         // Add two accounts to the wallet
-        let (extsk0, tsk0) = derive_test_keys_from_seed(&[0u8; 32], AccountId(0));
-        let (extsk1, tsk1) = derive_test_keys_from_seed(&[1u8; 32], AccountId(1));
-        let extfvks = [
-            ExtendedFullViewingKey::from(&extsk0),
-            ExtendedFullViewingKey::from(&extsk1),
+        let extsk0 = spending_key(&[0u8; 32], network().coin_type(), AccountId(0));
+        let extsk1 = spending_key(&[1u8; 32], network().coin_type(), AccountId(1));
+        let extfvk0 = ExtendedFullViewingKey::from(&extsk0);
+        let extfvk1 = ExtendedFullViewingKey::from(&extsk1);
+
+        #[cfg(feature = "transparent-inputs")]
+        let ufvks = {
+            let tsk0 =
+                derive_secret_key_from_seed(&network(), &[0u8; 32], AccountId(0), 0).unwrap();
+            let tsk1 =
+                derive_secret_key_from_seed(&network(), &[1u8; 32], AccountId(1), 0).unwrap();
+            [
+                UnifiedFullViewingKey::new(
+                    AccountId(0),
+                    Some(derive_transparent_address_from_secret_key(&tsk0)),
+                    Some(extfvk0),
+                )
+                .unwrap(),
+                UnifiedFullViewingKey::new(
+                    AccountId(1),
+                    Some(derive_transparent_address_from_secret_key(&tsk1)),
+                    Some(extfvk1),
+                )
+                .unwrap(),
+            ]
+        };
+        #[cfg(not(feature = "transparent-inputs"))]
+        let ufvks = [
+            UnifiedFullViewingKey::new(AccountId(0), None, Some(extfvk0)).unwrap(),
+            UnifiedFullViewingKey::new(AccountId(1), None, Some(extfvk1)).unwrap(),
         ];
-        let taddrs = [
-            derive_transparent_address_from_secret_key(&tsk0),
-            derive_transparent_address_from_secret_key(&tsk1),
-        ];
-        init_accounts_table(&db_data, &extfvks, &taddrs).unwrap();
+
+        init_accounts_table(&db_data, &ufvks).unwrap();
         let to = extsk0.default_address().unwrap().1.into();
 
         // Invalid extsk for the given account should cause an error
@@ -252,10 +276,10 @@ mod tests {
         init_wallet_db(&db_data).unwrap();
 
         // Add an account to the wallet
-        let (extsk, tsk) = derive_test_keys_from_seed(&[0u8; 32], AccountId(0));
+        let extsk = spending_key(&[0u8; 32], network().coin_type(), AccountId(0));
         let extfvk = ExtendedFullViewingKey::from(&extsk);
-        let taddr = derive_transparent_address_from_secret_key(&tsk);
-        init_accounts_table(&db_data, &[extfvk], &[taddr]).unwrap();
+        let ufvk = UnifiedFullViewingKey::new(AccountId(0), None, Some(extfvk)).unwrap();
+        init_accounts_table(&db_data, &[ufvk]).unwrap();
         let to = extsk.default_address().unwrap().1.into();
 
         // We cannot do anything if we aren't synchronised
@@ -292,10 +316,10 @@ mod tests {
         .unwrap();
 
         // Add an account to the wallet
-        let (extsk, tsk) = derive_test_keys_from_seed(&[0u8; 32], AccountId(0));
+        let extsk = spending_key(&[0u8; 32], network().coin_type(), AccountId(0));
         let extfvk = ExtendedFullViewingKey::from(&extsk);
-        let taddr = derive_transparent_address_from_secret_key(&tsk);
-        init_accounts_table(&db_data, &[extfvk], &[taddr]).unwrap();
+        let ufvk = UnifiedFullViewingKey::new(AccountId(0), None, Some(extfvk)).unwrap();
+        init_accounts_table(&db_data, &[ufvk]).unwrap();
         let to = extsk.default_address().unwrap().1.into();
 
         // Account balance should be zero
@@ -334,10 +358,10 @@ mod tests {
         init_wallet_db(&db_data).unwrap();
 
         // Add an account to the wallet
-        let (extsk, tsk) = derive_test_keys_from_seed(&[0u8; 32], AccountId(0));
+        let extsk = spending_key(&[0u8; 32], network().coin_type(), AccountId(0));
         let extfvk = ExtendedFullViewingKey::from(&extsk);
-        let taddr = derive_transparent_address_from_secret_key(&tsk);
-        init_accounts_table(&db_data, &[extfvk.clone()], &[taddr]).unwrap();
+        let ufvk = UnifiedFullViewingKey::new(AccountId(0), None, Some(extfvk.clone())).unwrap();
+        init_accounts_table(&db_data, &[ufvk]).unwrap();
 
         // Add funds to the wallet in a single note
         let value = Amount::from_u64(50000).unwrap();
@@ -474,10 +498,10 @@ mod tests {
         init_wallet_db(&db_data).unwrap();
 
         // Add an account to the wallet
-        let (extsk, tsk) = derive_test_keys_from_seed(&[0u8; 32], AccountId(0));
+        let extsk = spending_key(&[0u8; 32], network().coin_type(), AccountId(0));
         let extfvk = ExtendedFullViewingKey::from(&extsk);
-        let taddr = derive_transparent_address_from_secret_key(&tsk);
-        init_accounts_table(&db_data, &[extfvk.clone()], &[taddr]).unwrap();
+        let ufvk = UnifiedFullViewingKey::new(AccountId(0), None, Some(extfvk.clone())).unwrap();
+        init_accounts_table(&db_data, &[ufvk]).unwrap();
 
         // Add funds to the wallet in a single note
         let value = Amount::from_u64(50000).unwrap();
@@ -600,10 +624,10 @@ mod tests {
         init_wallet_db(&db_data).unwrap();
 
         // Add an account to the wallet
-        let (extsk, tsk) = derive_test_keys_from_seed(&[0u8; 32], AccountId(0));
+        let extsk = spending_key(&[0u8; 32], network.coin_type(), AccountId(0));
         let extfvk = ExtendedFullViewingKey::from(&extsk);
-        let taddr = derive_transparent_address_from_secret_key(&tsk);
-        init_accounts_table(&db_data, &[extfvk.clone()], &[taddr]).unwrap();
+        let ufvk = UnifiedFullViewingKey::new(AccountId(0), None, Some(extfvk.clone())).unwrap();
+        init_accounts_table(&db_data, &[ufvk]).unwrap();
 
         // Add funds to the wallet in a single note
         let value = Amount::from_u64(50000).unwrap();
@@ -707,10 +731,10 @@ mod tests {
         init_wallet_db(&db_data).unwrap();
 
         // Add an account to the wallet
-        let (extsk, tsk) = derive_test_keys_from_seed(&[0u8; 32], AccountId(0));
+        let extsk = spending_key(&[0u8; 32], network().coin_type(), AccountId(0));
         let extfvk = ExtendedFullViewingKey::from(&extsk);
-        let taddr = derive_transparent_address_from_secret_key(&tsk);
-        init_accounts_table(&db_data, &[extfvk.clone()], &[taddr]).unwrap();
+        let ufvk = UnifiedFullViewingKey::new(AccountId(0), None, Some(extfvk.clone())).unwrap();
+        init_accounts_table(&db_data, &[ufvk]).unwrap();
 
         // Add funds to the wallet in a single note
         let value = Amount::from_u64(51000).unwrap();

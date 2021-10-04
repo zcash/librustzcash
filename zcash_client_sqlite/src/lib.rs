@@ -60,6 +60,7 @@ use zcash_client_backend::{
 
 use crate::error::SqliteClientError;
 
+#[cfg(feature = "transparent-inputs")]
 use {
     zcash_client_backend::wallet::WalletTransparentOutput,
     zcash_primitives::legacy::TransparentAddress,
@@ -148,6 +149,7 @@ impl<P: consensus::Parameters> WalletDb<P> {
                     WHERE prevout_txid = :prevout_txid
                     AND prevout_idx = :prevout_idx"
                 )?,
+                #[cfg(feature = "transparent-inputs")]
                 stmt_insert_received_transparent_utxo: self.conn.prepare(
                     "INSERT INTO utxos (address, prevout_txid, prevout_idx, script, value_zat, height)
                     VALUES (:address, :prevout_txid, :prevout_idx, :script, :value_zat, :height)"
@@ -299,6 +301,7 @@ impl<P: consensus::Parameters> WalletRead for WalletDb<P> {
         )
     }
 
+    #[cfg(feature = "transparent-inputs")]
     fn get_unspent_transparent_outputs(
         &self,
         address: &TransparentAddress,
@@ -329,6 +332,7 @@ pub struct DataConnStmtCache<'a, P> {
     stmt_mark_sapling_note_spent: Statement<'a>,
     stmt_mark_transparent_utxo_spent: Statement<'a>,
 
+    #[cfg(feature = "transparent-inputs")]
     stmt_insert_received_transparent_utxo: Statement<'a>,
     stmt_delete_utxos: Statement<'a>,
     stmt_insert_received_note: Statement<'a>,
@@ -436,6 +440,7 @@ impl<'a, P: consensus::Parameters> WalletRead for DataConnStmtCache<'a, P> {
             .select_spendable_sapling_notes(account, target_value, anchor_height)
     }
 
+    #[cfg(feature = "transparent-inputs")]
     fn get_unspent_transparent_outputs(
         &self,
         address: &TransparentAddress,
@@ -694,13 +699,15 @@ mod tests {
     use protobuf::Message;
     use rand_core::{OsRng, RngCore};
     use rusqlite::params;
-    use secp256k1::key::SecretKey;
 
     use zcash_client_backend::{
-        keys::{
-            derive_secret_key_from_seed, derive_transparent_address_from_secret_key, spending_key,
-        },
+        keys::{spending_key, UnifiedFullViewingKey},
         proto::compact_formats::{CompactBlock, CompactOutput, CompactSpend, CompactTx},
+    };
+
+    #[cfg(feature = "transparent-inputs")]
+    use zcash_client_backend::keys::{
+        derive_secret_key_from_seed, derive_transparent_address_from_secret_key,
     };
 
     use zcash_primitives::{
@@ -713,7 +720,7 @@ mod tests {
             PaymentAddress,
         },
         transaction::components::Amount,
-        zip32::{ExtendedFullViewingKey, ExtendedSpendingKey},
+        zip32::ExtendedFullViewingKey,
     };
 
     use crate::{wallet::init::init_accounts_table, AccountId, WalletDb};
@@ -744,22 +751,26 @@ mod tests {
             .unwrap()
     }
 
-    pub(crate) fn derive_test_keys_from_seed(
-        seed: &[u8],
-        account: AccountId,
-    ) -> (ExtendedSpendingKey, SecretKey) {
-        let extsk = spending_key(seed, network().coin_type(), account);
-        let tsk = derive_secret_key_from_seed(&network(), seed, account, 0).unwrap();
-        (extsk, tsk)
-    }
-
     pub(crate) fn init_test_accounts_table(
         db_data: &WalletDb<Network>,
-    ) -> (ExtendedFullViewingKey, TransparentAddress) {
-        let (extsk, tsk) = derive_test_keys_from_seed(&[0u8; 32], AccountId(0));
+    ) -> (ExtendedFullViewingKey, Option<TransparentAddress>) {
+        let seed = [0u8; 32];
+
+        let extsk = spending_key(&seed, network().coin_type(), AccountId(0));
         let extfvk = ExtendedFullViewingKey::from(&extsk);
-        let taddr = derive_transparent_address_from_secret_key(&tsk);
-        init_accounts_table(db_data, &[extfvk.clone()], &[taddr.clone()]).unwrap();
+
+        #[cfg(feature = "transparent-inputs")]
+        let taddr = {
+            let tsk = derive_secret_key_from_seed(&network(), &seed, AccountId(0), 0).unwrap();
+            Some(derive_transparent_address_from_secret_key(&tsk))
+        };
+
+        #[cfg(not(feature = "transparent-inputs"))]
+        let taddr = None;
+
+        let ufvk =
+            UnifiedFullViewingKey::new(AccountId(0), taddr.clone(), Some(extfvk.clone())).unwrap();
+        init_accounts_table(db_data, &[ufvk]).unwrap();
         (extfvk, taddr)
     }
 

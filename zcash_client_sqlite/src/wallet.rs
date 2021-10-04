@@ -37,13 +37,13 @@ use zcash_client_backend::{
 
 use crate::{error::SqliteClientError, DataConnStmtCache, NoteId, WalletDb, PRUNING_HEIGHT};
 
+use {zcash_client_backend::encoding::AddressCodec, zcash_primitives::legacy::TransparentAddress};
+
+#[cfg(feature = "transparent-inputs")]
 use {
     crate::UtxoId,
-    zcash_client_backend::{encoding::AddressCodec, wallet::WalletTransparentOutput},
-    zcash_primitives::{
-        legacy::{Script, TransparentAddress},
-        transaction::components::TxOut,
-    },
+    zcash_client_backend::wallet::WalletTransparentOutput,
+    zcash_primitives::{legacy::Script, transaction::components::TxOut},
 };
 
 pub mod init;
@@ -704,6 +704,7 @@ pub fn get_all_nullifiers<P>(
     Ok(res)
 }
 
+#[cfg(feature = "transparent-inputs")]
 pub fn get_unspent_transparent_outputs<P: consensus::Parameters>(
     wdb: &WalletDb<P>,
     address: &TransparentAddress,
@@ -867,6 +868,7 @@ pub fn mark_transparent_utxo_spent<'a, P>(
     Ok(())
 }
 
+#[cfg(feature = "transparent-inputs")]
 pub fn put_received_transparent_utxo<'a, P: consensus::Parameters>(
     stmts: &mut DataConnStmtCache<'a, P>,
     output: &WalletTransparentOutput,

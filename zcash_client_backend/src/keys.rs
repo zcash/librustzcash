@@ -2,15 +2,18 @@
 
 use zcash_primitives::zip32::{ChildIndex, ExtendedSpendingKey};
 
+use crate::wallet::AccountId;
+
+use zcash_primitives::{legacy::TransparentAddress, zip32::ExtendedFullViewingKey};
+
 #[cfg(feature = "transparent-inputs")]
 use {
-    crate::wallet::AccountId,
     bs58::{self, decode::Error as Bs58Error},
     hdwallet::{ExtendedPrivKey, ExtendedPubKey, KeyIndex},
     secp256k1::{key::PublicKey, key::SecretKey, Secp256k1},
     sha2::{Digest, Sha256},
     std::convert::TryInto,
-    zcash_primitives::{consensus, legacy::TransparentAddress},
+    zcash_primitives::consensus,
 };
 
 /// Derives the ZIP 32 [`ExtendedSpendingKey`] for a given coin type and account from the
@@ -138,9 +141,57 @@ impl<'a> TryInto<SecretKey> for &'a Wif {
     }
 }
 
+/// A set of viewing keys that are all associated with a single
+/// ZIP-0032 account identifier.
+#[derive(Clone, Debug)]
+pub struct UnifiedFullViewingKey {
+    account: AccountId,
+    transparent: Option<TransparentAddress>,
+    sapling: Option<ExtendedFullViewingKey>,
+}
+
+impl UnifiedFullViewingKey {
+    /// Construct a new unified full viewing key, if the required components are present.
+    pub fn new(
+        account: AccountId,
+        transparent: Option<TransparentAddress>,
+        sapling: Option<ExtendedFullViewingKey>,
+    ) -> Option<UnifiedFullViewingKey> {
+        if sapling.is_none() {
+            None
+        } else {
+            Some(UnifiedFullViewingKey {
+                account,
+                transparent,
+                sapling,
+            })
+        }
+    }
+
+    /// Returns the ZIP32 account identifier to which all component
+    /// keys are related.
+    pub fn account(&self) -> AccountId {
+        self.account
+    }
+
+    /// Returns the transparent component of the unified key.
+    // TODO: make this the pubkey rather than the address to
+    // permit child derivation
+    pub fn transparent(&self) -> Option<&TransparentAddress> {
+        self.transparent.as_ref()
+    }
+
+    /// Returns the Sapling extended full viewing key component of this
+    /// unified key.
+    pub fn sapling(&self) -> Option<&ExtendedFullViewingKey> {
+        self.sapling.as_ref()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::spending_key;
+    use crate::wallet::AccountId;
 
     #[cfg(feature = "transparent-inputs")]
     use {
@@ -149,12 +200,13 @@ mod tests {
             derive_transparent_address_from_public_key, derive_transparent_address_from_secret_key,
             Wif,
         },
-        crate::{encoding::AddressCodec, wallet::AccountId},
+        crate::encoding::AddressCodec,
         secp256k1::key::SecretKey,
         std::convert::TryInto,
         zcash_primitives::consensus::MAIN_NETWORK,
     };
 
+    #[cfg(feature = "transparent-inputs")]
     fn seed() -> Vec<u8> {
         let seed_hex = "6ef5f84def6f4b9d38f466586a8380a38593bd47c8cda77f091856176da47f26b5bd1c8d097486e5635df5a66e820d28e1d73346f499801c86228d43f390304f";
         hex::decode(&seed_hex).unwrap()

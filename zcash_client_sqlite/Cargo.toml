@@ -23,8 +23,8 @@ rand_core = "0.6"
 rusqlite = { version = "0.24", features = ["bundled", "time"] }
 secp256k1 = { version = "0.20" }
 time = "0.2"
-zcash_client_backend = { version = "0.5", path = "../zcash_client_backend", features = ["transparent-inputs"] }
-zcash_primitives = { version = "0.5", path = "../zcash_primitives", features = ["transparent-inputs"] }
+zcash_client_backend = { version = "0.5", path = "../zcash_client_backend"}
+zcash_primitives = { version = "0.5", path = "../zcash_primitives"}
 
 [dev-dependencies]
 tempfile = "3"
@@ -33,6 +33,7 @@ zcash_proofs = { version = "0.5", path = "../zcash_proofs" }
 [features]
 mainnet = []
 test-dependencies = ["zcash_client_backend/test-dependencies"]
+transparent-inputs = ["zcash_client_backend/transparent-inputs", "zcash_primitives/transparent-inputs"]
 
 [lib]
 bench = false
