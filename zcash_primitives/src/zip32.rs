@@ -149,7 +149,6 @@ impl DiversifierKey {
         d_j.copy_from_slice(&enc.to_bytes_le());
         let diversifier = Diversifier(d_j);
 
-        // Return (j, d_j) if valid, else increment j and try again
         diversifier.g_d().map(|_| diversifier)
     }
 

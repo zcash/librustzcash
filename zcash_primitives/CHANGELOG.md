@@ -69,7 +69,7 @@ and this library adheres to Rust's notion of
   searches the diversifier index space until it obtains a valid diversifier,
   and returns the address corresponding to that diversifier, whereas `address`
   just attempts to create an address corresponding to the diversifier derived
-  from the provided diversifier index and returns `None` if the provide index
+  from the provided diversifier index and returns `None` if the provided index
   does not produce a valid diversifier.
 
 ### Changed
