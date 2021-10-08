@@ -167,18 +167,9 @@ pub fn f4jumble_inv(message: &[u8]) -> Option<Vec<u8>> {
     }
 }
 
-#[cfg(feature = "std")]
 #[cfg(test)]
-mod tests {
-    use blake2b_simd::blake2b;
-    use proptest::collection::vec;
-    use proptest::prelude::*;
-    use std::format;
-    use std::vec::Vec;
-
-    use super::{
-        f4jumble, f4jumble_inv, test_vectors::test_vectors, test_vectors_long, VALID_LENGTH,
-    };
+mod common_tests {
+    use super::{f4jumble_inv_mut, f4jumble_mut, test_vectors};
 
     #[test]
     fn h_pers() {
@@ -190,6 +181,31 @@ mod tests {
         assert_eq!(&G_PERS!(7, 13), b"UA_F4Jumble_G\x07\x0d\x00");
         assert_eq!(&G_PERS!(7, 65535), b"UA_F4Jumble_G\x07\xff\xff");
     }
+
+    #[test]
+    fn f4jumble_check_vectors_mut() {
+        let mut cache: [u8; test_vectors::MAX_VECTOR_LENGTH] = [0; test_vectors::MAX_VECTOR_LENGTH];
+        for v in test_vectors::TEST_VECTORS {
+            let mut data = &mut cache[..v.normal.len()];
+            data.clone_from_slice(&v.normal);
+            f4jumble_mut(&mut data).unwrap();
+            assert_eq!(data, v.jumbled);
+            f4jumble_inv_mut(&mut data).unwrap();
+            assert_eq!(data, v.normal);
+        }
+    }
+}
+
+#[cfg(feature = "std")]
+#[cfg(test)]
+mod std_tests {
+    use blake2b_simd::blake2b;
+    use proptest::collection::vec;
+    use proptest::prelude::*;
+    use std::format;
+    use std::vec::Vec;
+
+    use super::{f4jumble, f4jumble_inv, test_vectors, test_vectors_long, VALID_LENGTH};
 
     proptest! {
         #![proptest_config(ProptestConfig::with_cases(5))]
@@ -217,7 +233,7 @@ mod tests {
 
     #[test]
     fn f4jumble_check_vectors() {
-        for v in test_vectors() {
+        for v in test_vectors::TEST_VECTORS {
             let jumbled = f4jumble(&v.normal).unwrap();
             assert_eq!(jumbled, v.jumbled);
             let unjumbled = f4jumble_inv(&v.jumbled).unwrap();
