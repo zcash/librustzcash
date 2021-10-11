@@ -536,6 +536,32 @@ mod tests {
     }
 
     #[test]
+    fn diversifier() {
+        let dk = DiversifierKey([0; 32]);
+        let j_0 = DiversifierIndex::new();
+        let j_1 = DiversifierIndex([1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+        let j_2 = DiversifierIndex([2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+        let j_3 = DiversifierIndex([3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+        // Computed using this Rust implementation
+        let d_0 = [220, 231, 126, 188, 236, 10, 38, 175, 214, 153, 140];
+        let d_3 = [60, 253, 170, 8, 171, 147, 220, 31, 3, 144, 34];
+
+        // j = 0
+        let d_j = dk.diversifier(j_0).unwrap();
+        assert_eq!(d_j.0, d_0);
+
+        // j = 1
+        assert_eq!(dk.diversifier(j_1), None);
+
+        // j = 2
+        assert_eq!(dk.diversifier(j_2), None);
+
+        // j = 3
+        let d_j = dk.diversifier(j_3).unwrap();
+        assert_eq!(d_j.0, d_3);
+    }
+
+    #[test]
     fn find_diversifier() {
         let dk = DiversifierKey([0; 32]);
         let j_0 = DiversifierIndex::new();
