@@ -594,6 +594,23 @@ mod tests {
     }
 
     #[test]
+    fn address() {
+        let seed = [0; 32];
+        let xsk_m = ExtendedSpendingKey::master(&seed);
+        let xfvk_m = ExtendedFullViewingKey::from(&xsk_m);
+        let j_0 = DiversifierIndex::new();
+        let addr_m = xfvk_m.address(j_0).unwrap();
+        assert_eq!(
+            addr_m.diversifier().0,
+            // Computed using this Rust implementation
+            [59, 246, 250, 31, 131, 191, 69, 99, 200, 167, 19]
+        );
+
+        let j_1 = DiversifierIndex([1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+        assert_eq!(xfvk_m.address(j_1), None);
+    }
+
+    #[test]
     fn default_address() {
         let seed = [0; 32];
         let xsk_m = ExtendedSpendingKey::master(&seed);
