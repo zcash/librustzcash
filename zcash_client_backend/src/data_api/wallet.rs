@@ -124,7 +124,7 @@ where
 ///
 /// let account = AccountId(0);
 /// let extsk = spending_key(&[0; 32][..], COIN_TYPE, account.0);
-/// let to = extsk.default_address().unwrap().1.into();
+/// let to = extsk.default_address().1.into();
 ///
 /// let data_file = NamedTempFile::new().unwrap();
 /// let db_read = WalletDb::for_path(data_file, Network::TestNetwork).unwrap();
