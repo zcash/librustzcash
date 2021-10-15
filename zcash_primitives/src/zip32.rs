@@ -353,9 +353,7 @@ impl ExtendedSpendingKey {
     }
 
     /// Returns the address with the lowest valid diversifier index, along with
-    /// the diversifier index that generated that address. Returns `None` with
-    /// negligible frequency; a `None` result here indicates that no valid
-    /// addresses could be generated.
+    /// the diversifier index that generated that address.
     pub fn default_address(&self) -> (DiversifierIndex, PaymentAddress) {
         ExtendedFullViewingKey::from(self).default_address()
     }
