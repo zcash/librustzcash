@@ -150,18 +150,18 @@
 <span class="kw">impl</span> <span class="ident">TryFrom</span><span class="op">&lt;</span><span class="ident">u32</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">ExtensionId</span> {
     <span class="kw">type</span> <span class="ident">Error</span> <span class="op">=</span> <span class="ident">InvalidExtId</span>;
 
-    <span class="kw">fn</span> <span class="ident">try_from</span>(<span class="ident">t</span>: <span class="ident">u32</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="self">Self</span>, <span class="ident"><span class="self">Self</span>::Error</span><span class="op">&gt;</span> {
+    <span class="kw">fn</span> <span class="ident">try_from</span>(<span class="ident">t</span>: <span class="ident">u32</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="self">Self</span>, <span class="ident"><span class="self">Self</span>::Error</span><span class="op">&gt;</span> {
         <span class="kw">match</span> <span class="ident">t</span> {
-            <span class="ident">EXTENSION_DEMO</span> <span class="op">=</span><span class="op">&gt;</span> <span class="prelude-val">Ok</span>(<span class="ident">ExtensionId::Demo</span>),
-            <span class="ident">n</span> <span class="op">=</span><span class="op">&gt;</span> <span class="prelude-val">Err</span>(<span class="ident">InvalidExtId</span>(<span class="ident">n</span>)),
+            <span class="ident">EXTENSION_DEMO</span> =&gt; <span class="prelude-val">Ok</span>(<span class="ident">ExtensionId::Demo</span>),
+            <span class="ident">n</span> =&gt; <span class="prelude-val">Err</span>(<span class="ident">InvalidExtId</span>(<span class="ident">n</span>)),
         }
     }
 }
 
 <span class="kw">impl</span> <span class="ident">From</span><span class="op">&lt;</span><span class="ident">ExtensionId</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">u32</span> {
-    <span class="kw">fn</span> <span class="ident">from</span>(<span class="ident">type_id</span>: <span class="ident">ExtensionId</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">u32</span> {
+    <span class="kw">fn</span> <span class="ident">from</span>(<span class="ident">type_id</span>: <span class="ident">ExtensionId</span>) -&gt; <span class="ident">u32</span> {
         <span class="kw">match</span> <span class="ident">type_id</span> {
-            <span class="ident">ExtensionId::Demo</span> <span class="op">=</span><span class="op">&gt;</span> <span class="ident">EXTENSION_DEMO</span>,
+            <span class="ident">ExtensionId::Demo</span> =&gt; <span class="ident">EXTENSION_DEMO</span>,
         }
     }
 }
@@ -175,7 +175,7 @@
 }
 
 <span class="kw">impl</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> <span class="ident">Context</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">new</span>(<span class="ident">height</span>: <span class="ident">BlockHeight</span>, <span class="ident">tx</span>: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a</span> <span class="ident">Transaction</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="self">Self</span> {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">new</span>(<span class="ident">height</span>: <span class="ident">BlockHeight</span>, <span class="ident">tx</span>: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a</span> <span class="ident">Transaction</span>) -&gt; <span class="self">Self</span> {
         <span class="ident">Context</span> { <span class="ident">height</span>, <span class="ident">tx</span> }
     }
 }
@@ -198,20 +198,20 @@
         <span class="ident">precondition</span>: <span class="kw-2">&amp;</span><span class="ident">Precondition</span>,
         <span class="ident">witness</span>: <span class="kw-2">&amp;</span><span class="ident">Witness</span><span class="op">&lt;</span><span class="ident">AuthData</span><span class="op">&gt;</span>,
         <span class="ident">ctx</span>: <span class="kw-2">&amp;</span><span class="ident">Context</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span>,
-    ) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident">Error</span><span class="op">&lt;</span><span class="ident"><span class="self">Self</span>::Error</span><span class="op">&gt;</span><span class="op">&gt;</span>;
+    ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident">Error</span><span class="op">&lt;</span><span class="ident"><span class="self">Self</span>::Error</span><span class="op">&gt;</span><span class="op">&gt;</span>;
 }
 
 <span class="doccomment">/// Implementation of required operations for the demo extension, as satisfied</span>
 <span class="doccomment">/// by the context.</span>
 <span class="kw">impl</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> <span class="ident">demo::Context</span> <span class="kw">for</span> <span class="ident">Context</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-    <span class="kw">fn</span> <span class="ident">is_tze_only</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">bool</span> {
+    <span class="kw">fn</span> <span class="ident">is_tze_only</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">bool</span> {
         <span class="self">self</span>.<span class="ident">tx</span>.<span class="ident">transparent_bundle</span>().<span class="ident">is_none</span>()
             <span class="op">&amp;&amp;</span> <span class="self">self</span>.<span class="ident">tx</span>.<span class="ident">sapling_bundle</span>().<span class="ident">is_none</span>()
             <span class="op">&amp;&amp;</span> <span class="self">self</span>.<span class="ident">tx</span>.<span class="ident">sprout_bundle</span>().<span class="ident">is_none</span>()
             <span class="op">&amp;&amp;</span> <span class="self">self</span>.<span class="ident">tx</span>.<span class="ident">orchard_bundle</span>().<span class="ident">is_none</span>()
     }
 
-    <span class="kw">fn</span> <span class="ident">tx_tze_outputs</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="kw-2">&amp;</span>[<span class="ident">TzeOut</span>] {
+    <span class="kw">fn</span> <span class="ident">tx_tze_outputs</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>[<span class="ident">TzeOut</span>] {
         <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">bundle</span>) <span class="op">=</span> <span class="self">self</span>.<span class="ident">tx</span>.<span class="ident">tze_bundle</span>() {
             <span class="kw-2">&amp;</span><span class="ident">bundle</span>.<span class="ident">vout</span>
         } <span class="kw">else</span> {
@@ -232,24 +232,24 @@
         <span class="ident">precondition</span>: <span class="kw-2">&amp;</span><span class="ident">Precondition</span>,
         <span class="ident">witness</span>: <span class="kw-2">&amp;</span><span class="ident">Witness</span><span class="op">&lt;</span><span class="ident">AuthData</span><span class="op">&gt;</span>,
         <span class="ident">ctx</span>: <span class="kw-2">&amp;</span><span class="ident">Context</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span>,
-    ) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident">Error</span><span class="op">&lt;</span><span class="ident"><span class="self">Self</span>::Error</span><span class="op">&gt;</span><span class="op">&gt;</span> {
+    ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident">Error</span><span class="op">&lt;</span><span class="ident"><span class="self">Self</span>::Error</span><span class="op">&gt;</span><span class="op">&gt;</span> {
         <span class="kw">let</span> <span class="ident">ext_id</span> <span class="op">=</span> <span class="ident">ExtensionId::try_from</span>(<span class="ident">precondition</span>.<span class="ident">extension_id</span>)
             .<span class="ident">map_err</span>(<span class="op">|</span><span class="ident">InvalidExtId</span>(<span class="ident">id</span>)<span class="op">|</span> <span class="ident">Error::InvalidExtensionId</span>(<span class="ident">id</span>))<span class="question-mark">?</span>;
 
         <span class="comment">// This epoch recognizes the following set of extensions:</span>
         <span class="kw">match</span> <span class="ident">ext_id</span> {
-            <span class="ident">ExtensionId::Demo</span> <span class="op">=</span><span class="op">&gt;</span> <span class="ident">demo::Program</span>
+            <span class="ident">ExtensionId::Demo</span> =&gt; <span class="ident">demo::Program</span>
                 .<span class="ident">verify</span>(<span class="ident">precondition</span>, <span class="ident">witness</span>, <span class="ident">ctx</span>)
                 .<span class="ident">map_err</span>(<span class="op">|</span><span class="ident">e</span><span class="op">|</span> <span class="ident">Error::ProgramError</span>(<span class="macro">format!</span>(<span class="string">&quot;Epoch vTest program error: {}&quot;</span>, <span class="ident">e</span>))),
         }
     }
 }
 
-<span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">epoch_for_branch</span>(<span class="ident">branch_id</span>: <span class="ident">BranchId</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">Box</span><span class="op">&lt;</span><span class="kw">dyn</span> <span class="ident">Epoch</span><span class="op">&lt;</span><span class="ident">Error</span> <span class="op">=</span> <span class="ident">String</span><span class="op">&gt;</span><span class="op">&gt;</span><span class="op">&gt;</span> {
+<span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">epoch_for_branch</span>(<span class="ident">branch_id</span>: <span class="ident">BranchId</span>) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">Box</span><span class="op">&lt;</span><span class="kw">dyn</span> <span class="ident">Epoch</span><span class="op">&lt;</span><span class="ident">Error</span> <span class="op">=</span> <span class="ident">String</span><span class="op">&gt;</span><span class="op">&gt;</span><span class="op">&gt;</span> {
     <span class="comment">// Map from consensus branch IDs to epochs.</span>
     <span class="kw">match</span> <span class="ident">branch_id</span> {
-        <span class="ident">BranchId::ZFuture</span> <span class="op">=</span><span class="op">&gt;</span> <span class="prelude-val">Some</span>(<span class="ident">Box::new</span>(<span class="ident">EpochVTest</span>)),
-        <span class="kw">_</span> <span class="op">=</span><span class="op">&gt;</span> <span class="prelude-val">None</span>,
+        <span class="ident">BranchId::ZFuture</span> =&gt; <span class="prelude-val">Some</span>(<span class="ident">Box::new</span>(<span class="ident">EpochVTest</span>)),
+        <span class="kw">_</span> =&gt; <span class="prelude-val">None</span>,
     }
 }
 </code></pre></div>

@@ -552,38 +552,38 @@
 }
 
 <span class="kw">impl</span> <span class="ident">Params</span> {
-    <span class="kw">fn</span> <span class="ident">new</span>(<span class="ident">n</span>: <span class="ident">u32</span>, <span class="ident">k</span>: <span class="ident">u32</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="self">Self</span>, <span class="ident">Error</span><span class="op">&gt;</span> {
+    <span class="kw">fn</span> <span class="ident">new</span>(<span class="ident">n</span>: <span class="ident">u32</span>, <span class="ident">k</span>: <span class="ident">u32</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="self">Self</span>, <span class="ident">Error</span><span class="op">&gt;</span> {
         <span class="comment">// We place the following requirements on the parameters:</span>
         <span class="comment">// - n is a multiple of 8, so the hash output has an exact byte length.</span>
         <span class="comment">// - k &gt;= 3 so the encoded solutions have an exact byte length.</span>
         <span class="comment">// - k &lt; n, so the collision bit length is at least 1.</span>
         <span class="comment">// - n is a multiple of k + 1, so we have an integer collision bit length.</span>
-        <span class="kw">if</span> (<span class="ident">n</span> <span class="op">%</span> <span class="number">8</span> <span class="op">=</span><span class="op">=</span> <span class="number">0</span>) <span class="op">&amp;&amp;</span> (<span class="ident">k</span> <span class="op">&gt;</span><span class="op">=</span> <span class="number">3</span>) <span class="op">&amp;&amp;</span> (<span class="ident">k</span> <span class="op">&lt;</span> <span class="ident">n</span>) <span class="op">&amp;&amp;</span> (<span class="ident">n</span> <span class="op">%</span> (<span class="ident">k</span> <span class="op">+</span> <span class="number">1</span>) <span class="op">=</span><span class="op">=</span> <span class="number">0</span>) {
+        <span class="kw">if</span> (<span class="ident">n</span> <span class="op">%</span> <span class="number">8</span> <span class="op">==</span> <span class="number">0</span>) <span class="op">&amp;&amp;</span> (<span class="ident">k</span> <span class="op">&gt;</span><span class="op">=</span> <span class="number">3</span>) <span class="op">&amp;&amp;</span> (<span class="ident">k</span> <span class="op">&lt;</span> <span class="ident">n</span>) <span class="op">&amp;&amp;</span> (<span class="ident">n</span> <span class="op">%</span> (<span class="ident">k</span> <span class="op">+</span> <span class="number">1</span>) <span class="op">==</span> <span class="number">0</span>) {
             <span class="prelude-val">Ok</span>(<span class="ident">Params</span> { <span class="ident">n</span>, <span class="ident">k</span> })
         } <span class="kw">else</span> {
             <span class="prelude-val">Err</span>(<span class="ident">Error</span>(<span class="ident">Kind::InvalidParams</span>))
         }
     }
-    <span class="kw">fn</span> <span class="ident">indices_per_hash_output</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">u32</span> {
+    <span class="kw">fn</span> <span class="ident">indices_per_hash_output</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">u32</span> {
         <span class="number">512</span> <span class="op">/</span> <span class="self">self</span>.<span class="ident">n</span>
     }
-    <span class="kw">fn</span> <span class="ident">hash_output</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">u8</span> {
+    <span class="kw">fn</span> <span class="ident">hash_output</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">u8</span> {
         (<span class="self">self</span>.<span class="ident">indices_per_hash_output</span>() <span class="op">*</span> <span class="self">self</span>.<span class="ident">n</span> <span class="op">/</span> <span class="number">8</span>) <span class="kw">as</span> <span class="ident">u8</span>
     }
-    <span class="kw">fn</span> <span class="ident">collision_bit_length</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">usize</span> {
+    <span class="kw">fn</span> <span class="ident">collision_bit_length</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">usize</span> {
         (<span class="self">self</span>.<span class="ident">n</span> <span class="op">/</span> (<span class="self">self</span>.<span class="ident">k</span> <span class="op">+</span> <span class="number">1</span>)) <span class="kw">as</span> <span class="ident">usize</span>
     }
-    <span class="kw">fn</span> <span class="ident">collision_byte_length</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">usize</span> {
+    <span class="kw">fn</span> <span class="ident">collision_byte_length</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">usize</span> {
         (<span class="self">self</span>.<span class="ident">collision_bit_length</span>() <span class="op">+</span> <span class="number">7</span>) <span class="op">/</span> <span class="number">8</span>
     }
     <span class="attribute">#[<span class="ident">cfg</span>(<span class="ident">test</span>)]</span>
-    <span class="kw">fn</span> <span class="ident">hash_length</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">usize</span> {
+    <span class="kw">fn</span> <span class="ident">hash_length</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">usize</span> {
         ((<span class="self">self</span>.<span class="ident">k</span> <span class="kw">as</span> <span class="ident">usize</span>) <span class="op">+</span> <span class="number">1</span>) <span class="op">*</span> <span class="self">self</span>.<span class="ident">collision_byte_length</span>()
     }
 }
 
 <span class="kw">impl</span> <span class="ident">Node</span> {
-    <span class="kw">fn</span> <span class="ident">new</span>(<span class="ident">p</span>: <span class="kw-2">&amp;</span><span class="ident">Params</span>, <span class="ident">state</span>: <span class="kw-2">&amp;</span><span class="ident">Blake2bState</span>, <span class="ident">i</span>: <span class="ident">u32</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="self">Self</span> {
+    <span class="kw">fn</span> <span class="ident">new</span>(<span class="ident">p</span>: <span class="kw-2">&amp;</span><span class="ident">Params</span>, <span class="ident">state</span>: <span class="kw-2">&amp;</span><span class="ident">Blake2bState</span>, <span class="ident">i</span>: <span class="ident">u32</span>) -&gt; <span class="self">Self</span> {
         <span class="kw">let</span> <span class="ident">hash</span> <span class="op">=</span> <span class="ident">generate_hash</span>(<span class="ident">state</span>, <span class="ident">i</span> <span class="op">/</span> <span class="ident">p</span>.<span class="ident">indices_per_hash_output</span>());
         <span class="kw">let</span> <span class="ident">start</span> <span class="op">=</span> ((<span class="ident">i</span> <span class="op">%</span> <span class="ident">p</span>.<span class="ident">indices_per_hash_output</span>()) <span class="op">*</span> <span class="ident">p</span>.<span class="ident">n</span> <span class="op">/</span> <span class="number">8</span>) <span class="kw">as</span> <span class="ident">usize</span>;
         <span class="kw">let</span> <span class="ident">end</span> <span class="op">=</span> <span class="ident">start</span> <span class="op">+</span> (<span class="ident">p</span>.<span class="ident">n</span> <span class="kw">as</span> <span class="ident">usize</span>) <span class="op">/</span> <span class="number">8</span>;
@@ -595,7 +595,7 @@
 
     <span class="comment">// Clippy incorrectly interprets the first argument as `self`.</span>
     <span class="attribute">#[<span class="ident">allow</span>(<span class="ident">clippy::wrong_self_convention</span>)]</span>
-    <span class="kw">fn</span> <span class="ident">from_children</span>(<span class="ident">a</span>: <span class="ident">Node</span>, <span class="ident">b</span>: <span class="ident">Node</span>, <span class="ident">trim</span>: <span class="ident">usize</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="self">Self</span> {
+    <span class="kw">fn</span> <span class="ident">from_children</span>(<span class="ident">a</span>: <span class="ident">Node</span>, <span class="ident">b</span>: <span class="ident">Node</span>, <span class="ident">trim</span>: <span class="ident">usize</span>) -&gt; <span class="self">Self</span> {
         <span class="kw">let</span> <span class="ident">hash</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="kw">_</span><span class="op">&gt;</span> <span class="op">=</span> <span class="ident">a</span>
             .<span class="ident">hash</span>
             .<span class="ident">iter</span>()
@@ -616,7 +616,7 @@
     }
 
     <span class="attribute">#[<span class="ident">cfg</span>(<span class="ident">test</span>)]</span>
-    <span class="kw">fn</span> <span class="ident">from_children_ref</span>(<span class="ident">a</span>: <span class="kw-2">&amp;</span><span class="ident">Node</span>, <span class="ident">b</span>: <span class="kw-2">&amp;</span><span class="ident">Node</span>, <span class="ident">trim</span>: <span class="ident">usize</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="self">Self</span> {
+    <span class="kw">fn</span> <span class="ident">from_children_ref</span>(<span class="ident">a</span>: <span class="kw-2">&amp;</span><span class="ident">Node</span>, <span class="ident">b</span>: <span class="kw-2">&amp;</span><span class="ident">Node</span>, <span class="ident">trim</span>: <span class="ident">usize</span>) -&gt; <span class="self">Self</span> {
         <span class="kw">let</span> <span class="ident">hash</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="kw">_</span><span class="op">&gt;</span> <span class="op">=</span> <span class="ident">a</span>
             .<span class="ident">hash</span>
             .<span class="ident">iter</span>()
@@ -635,14 +635,14 @@
         <span class="ident">Node</span> { <span class="ident">hash</span>, <span class="ident">indices</span> }
     }
 
-    <span class="kw">fn</span> <span class="ident">indices_before</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">other</span>: <span class="kw-2">&amp;</span><span class="ident">Node</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">bool</span> {
+    <span class="kw">fn</span> <span class="ident">indices_before</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">other</span>: <span class="kw-2">&amp;</span><span class="ident">Node</span>) -&gt; <span class="ident">bool</span> {
         <span class="comment">// Indices are serialized in big-endian so that integer</span>
         <span class="comment">// comparison is equivalent to array comparison</span>
         <span class="self">self</span>.<span class="ident">indices</span>[<span class="number">0</span>] <span class="op">&lt;</span> <span class="ident">other</span>.<span class="ident">indices</span>[<span class="number">0</span>]
     }
 
-    <span class="kw">fn</span> <span class="ident">is_zero</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">len</span>: <span class="ident">usize</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">bool</span> {
-        <span class="self">self</span>.<span class="ident">hash</span>.<span class="ident">iter</span>().<span class="ident">take</span>(<span class="ident">len</span>).<span class="ident">all</span>(<span class="op">|</span><span class="ident">v</span><span class="op">|</span> <span class="kw-2">*</span><span class="ident">v</span> <span class="op">=</span><span class="op">=</span> <span class="number">0</span>)
+    <span class="kw">fn</span> <span class="ident">is_zero</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">len</span>: <span class="ident">usize</span>) -&gt; <span class="ident">bool</span> {
+        <span class="self">self</span>.<span class="ident">hash</span>.<span class="ident">iter</span>().<span class="ident">take</span>(<span class="ident">len</span>).<span class="ident">all</span>(<span class="op">|</span><span class="ident">v</span><span class="op">|</span> <span class="kw-2">*</span><span class="ident">v</span> <span class="op">==</span> <span class="number">0</span>)
     }
 }
 
@@ -651,7 +651,7 @@
 <span class="kw">pub</span> <span class="kw">struct</span> <span class="ident">Error</span>(<span class="ident">Kind</span>);
 
 <span class="kw">impl</span> <span class="ident">fmt::Display</span> <span class="kw">for</span> <span class="ident">Error</span> {
-    <span class="kw">fn</span> <span class="ident">fmt</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">f</span>: <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">fmt::Formatter</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">fmt::Result</span> {
+    <span class="kw">fn</span> <span class="ident">fmt</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">f</span>: <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">fmt::Formatter</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span>) -&gt; <span class="ident">fmt::Result</span> {
         <span class="macro">write!</span>(<span class="ident">f</span>, <span class="string">&quot;Invalid solution: {}&quot;</span>, <span class="self">self</span>.<span class="number">0</span>)
     }
 }
@@ -668,18 +668,18 @@
 }
 
 <span class="kw">impl</span> <span class="ident">fmt::Display</span> <span class="kw">for</span> <span class="ident">Kind</span> {
-    <span class="kw">fn</span> <span class="ident">fmt</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">f</span>: <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">fmt::Formatter</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">fmt::Result</span> {
+    <span class="kw">fn</span> <span class="ident">fmt</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">f</span>: <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">fmt::Formatter</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span>) -&gt; <span class="ident">fmt::Result</span> {
         <span class="kw">match</span> <span class="self">self</span> {
-            <span class="ident">Kind::InvalidParams</span> <span class="op">=</span><span class="op">&gt;</span> <span class="ident">f</span>.<span class="ident">write_str</span>(<span class="string">&quot;invalid parameters&quot;</span>),
-            <span class="ident">Kind::Collision</span> <span class="op">=</span><span class="op">&gt;</span> <span class="ident">f</span>.<span class="ident">write_str</span>(<span class="string">&quot;invalid collision length between StepRows&quot;</span>),
-            <span class="ident">Kind::OutOfOrder</span> <span class="op">=</span><span class="op">&gt;</span> <span class="ident">f</span>.<span class="ident">write_str</span>(<span class="string">&quot;Index tree incorrectly ordered&quot;</span>),
-            <span class="ident">Kind::DuplicateIdxs</span> <span class="op">=</span><span class="op">&gt;</span> <span class="ident">f</span>.<span class="ident">write_str</span>(<span class="string">&quot;duplicate indices&quot;</span>),
-            <span class="ident">Kind::NonZeroRootHash</span> <span class="op">=</span><span class="op">&gt;</span> <span class="ident">f</span>.<span class="ident">write_str</span>(<span class="string">&quot;root hash of tree is non-zero&quot;</span>),
+            <span class="ident">Kind::InvalidParams</span> =&gt; <span class="ident">f</span>.<span class="ident">write_str</span>(<span class="string">&quot;invalid parameters&quot;</span>),
+            <span class="ident">Kind::Collision</span> =&gt; <span class="ident">f</span>.<span class="ident">write_str</span>(<span class="string">&quot;invalid collision length between StepRows&quot;</span>),
+            <span class="ident">Kind::OutOfOrder</span> =&gt; <span class="ident">f</span>.<span class="ident">write_str</span>(<span class="string">&quot;Index tree incorrectly ordered&quot;</span>),
+            <span class="ident">Kind::DuplicateIdxs</span> =&gt; <span class="ident">f</span>.<span class="ident">write_str</span>(<span class="string">&quot;duplicate indices&quot;</span>),
+            <span class="ident">Kind::NonZeroRootHash</span> =&gt; <span class="ident">f</span>.<span class="ident">write_str</span>(<span class="string">&quot;root hash of tree is non-zero&quot;</span>),
         }
     }
 }
 
-<span class="kw">fn</span> <span class="ident">initialise_state</span>(<span class="ident">n</span>: <span class="ident">u32</span>, <span class="ident">k</span>: <span class="ident">u32</span>, <span class="ident">digest_len</span>: <span class="ident">u8</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">Blake2bState</span> {
+<span class="kw">fn</span> <span class="ident">initialise_state</span>(<span class="ident">n</span>: <span class="ident">u32</span>, <span class="ident">k</span>: <span class="ident">u32</span>, <span class="ident">digest_len</span>: <span class="ident">u8</span>) -&gt; <span class="ident">Blake2bState</span> {
     <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">personalization</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span> <span class="op">=</span> <span class="ident">Vec::from</span>(<span class="string">&quot;ZcashPoW&quot;</span>);
     <span class="ident">personalization</span>.<span class="ident">write_u32</span>::<span class="op">&lt;</span><span class="ident">LittleEndian</span><span class="op">&gt;</span>(<span class="ident">n</span>).<span class="ident">unwrap</span>();
     <span class="ident">personalization</span>.<span class="ident">write_u32</span>::<span class="op">&lt;</span><span class="ident">LittleEndian</span><span class="op">&gt;</span>(<span class="ident">k</span>).<span class="ident">unwrap</span>();
@@ -690,7 +690,7 @@
         .<span class="ident">to_state</span>()
 }
 
-<span class="kw">fn</span> <span class="ident">generate_hash</span>(<span class="ident">base_state</span>: <span class="kw-2">&amp;</span><span class="ident">Blake2bState</span>, <span class="ident">i</span>: <span class="ident">u32</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">Blake2bHash</span> {
+<span class="kw">fn</span> <span class="ident">generate_hash</span>(<span class="ident">base_state</span>: <span class="kw-2">&amp;</span><span class="ident">Blake2bState</span>, <span class="ident">i</span>: <span class="ident">u32</span>) -&gt; <span class="ident">Blake2bHash</span> {
     <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">lei</span> <span class="op">=</span> [<span class="number">0u8</span>; <span class="number">4</span>];
     (<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">lei</span>[..]).<span class="ident">write_u32</span>::<span class="op">&lt;</span><span class="ident">LittleEndian</span><span class="op">&gt;</span>(<span class="ident">i</span>).<span class="ident">unwrap</span>();
 
@@ -699,7 +699,7 @@
     <span class="ident">state</span>.<span class="ident">finalize</span>()
 }
 
-<span class="kw">fn</span> <span class="ident">expand_array</span>(<span class="ident">vin</span>: <span class="kw-2">&amp;</span>[<span class="ident">u8</span>], <span class="ident">bit_len</span>: <span class="ident">usize</span>, <span class="ident">byte_pad</span>: <span class="ident">usize</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span> {
+<span class="kw">fn</span> <span class="ident">expand_array</span>(<span class="ident">vin</span>: <span class="kw-2">&amp;</span>[<span class="ident">u8</span>], <span class="ident">bit_len</span>: <span class="ident">usize</span>, <span class="ident">byte_pad</span>: <span class="ident">usize</span>) -&gt; <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span> {
     <span class="macro">assert!</span>(<span class="ident">bit_len</span> <span class="op">&gt;</span><span class="op">=</span> <span class="number">8</span>);
     <span class="macro">assert!</span>(<span class="number">8</span> <span class="op">*</span> <span class="ident">size_of</span>::<span class="op">&lt;</span><span class="ident">u32</span><span class="op">&gt;</span>() <span class="op">&gt;</span><span class="op">=</span> <span class="number">7</span> <span class="op">+</span> <span class="ident">bit_len</span>);
 
@@ -707,7 +707,7 @@
     <span class="kw">let</span> <span class="ident">out_len</span> <span class="op">=</span> <span class="number">8</span> <span class="op">*</span> <span class="ident">out_width</span> <span class="op">*</span> <span class="ident">vin</span>.<span class="ident">len</span>() <span class="op">/</span> <span class="ident">bit_len</span>;
 
     <span class="comment">// Shortcut for parameters where expansion is a no-op</span>
-    <span class="kw">if</span> <span class="ident">out_len</span> <span class="op">=</span><span class="op">=</span> <span class="ident">vin</span>.<span class="ident">len</span>() {
+    <span class="kw">if</span> <span class="ident">out_len</span> <span class="op">==</span> <span class="ident">vin</span>.<span class="ident">len</span>() {
         <span class="kw">return</span> <span class="ident">vin</span>.<span class="ident">to_vec</span>();
     }
 
@@ -744,7 +744,7 @@
     <span class="ident">vout</span>
 }
 
-<span class="kw">fn</span> <span class="ident">indices_from_minimal</span>(<span class="ident">p</span>: <span class="ident">Params</span>, <span class="ident">minimal</span>: <span class="kw-2">&amp;</span>[<span class="ident">u8</span>]) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u32</span><span class="op">&gt;</span>, <span class="ident">Error</span><span class="op">&gt;</span> {
+<span class="kw">fn</span> <span class="ident">indices_from_minimal</span>(<span class="ident">p</span>: <span class="ident">Params</span>, <span class="ident">minimal</span>: <span class="kw-2">&amp;</span>[<span class="ident">u8</span>]) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u32</span><span class="op">&gt;</span>, <span class="ident">Error</span><span class="op">&gt;</span> {
     <span class="kw">let</span> <span class="ident">c_bit_len</span> <span class="op">=</span> <span class="ident">p</span>.<span class="ident">collision_bit_length</span>();
     <span class="comment">// Division is exact because k &gt;= 3.</span>
     <span class="kw">if</span> <span class="ident">minimal</span>.<span class="ident">len</span>() <span class="op">!</span><span class="op">=</span> ((<span class="number">1</span> <span class="op">&lt;</span><span class="op">&lt;</span> <span class="ident">p</span>.<span class="ident">k</span>) <span class="op">*</span> (<span class="ident">c_bit_len</span> <span class="op">+</span> <span class="number">1</span>)) <span class="op">/</span> <span class="number">8</span> {
@@ -767,18 +767,18 @@
     <span class="prelude-val">Ok</span>(<span class="ident">ret</span>)
 }
 
-<span class="kw">fn</span> <span class="ident">has_collision</span>(<span class="ident">a</span>: <span class="kw-2">&amp;</span><span class="ident">Node</span>, <span class="ident">b</span>: <span class="kw-2">&amp;</span><span class="ident">Node</span>, <span class="ident">len</span>: <span class="ident">usize</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">bool</span> {
+<span class="kw">fn</span> <span class="ident">has_collision</span>(<span class="ident">a</span>: <span class="kw-2">&amp;</span><span class="ident">Node</span>, <span class="ident">b</span>: <span class="kw-2">&amp;</span><span class="ident">Node</span>, <span class="ident">len</span>: <span class="ident">usize</span>) -&gt; <span class="ident">bool</span> {
     <span class="ident">a</span>.<span class="ident">hash</span>
         .<span class="ident">iter</span>()
         .<span class="ident">zip</span>(<span class="ident">b</span>.<span class="ident">hash</span>.<span class="ident">iter</span>())
         .<span class="ident">take</span>(<span class="ident">len</span>)
-        .<span class="ident">all</span>(<span class="op">|</span>(<span class="ident">a</span>, <span class="ident">b</span>)<span class="op">|</span> <span class="ident">a</span> <span class="op">=</span><span class="op">=</span> <span class="ident">b</span>)
+        .<span class="ident">all</span>(<span class="op">|</span>(<span class="ident">a</span>, <span class="ident">b</span>)<span class="op">|</span> <span class="ident">a</span> <span class="op">==</span> <span class="ident">b</span>)
 }
 
-<span class="kw">fn</span> <span class="ident">distinct_indices</span>(<span class="ident">a</span>: <span class="kw-2">&amp;</span><span class="ident">Node</span>, <span class="ident">b</span>: <span class="kw-2">&amp;</span><span class="ident">Node</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">bool</span> {
+<span class="kw">fn</span> <span class="ident">distinct_indices</span>(<span class="ident">a</span>: <span class="kw-2">&amp;</span><span class="ident">Node</span>, <span class="ident">b</span>: <span class="kw-2">&amp;</span><span class="ident">Node</span>) -&gt; <span class="ident">bool</span> {
     <span class="kw">for</span> <span class="ident">i</span> <span class="kw">in</span> <span class="kw-2">&amp;</span>(<span class="ident">a</span>.<span class="ident">indices</span>) {
         <span class="kw">for</span> <span class="ident">j</span> <span class="kw">in</span> <span class="kw-2">&amp;</span>(<span class="ident">b</span>.<span class="ident">indices</span>) {
-            <span class="kw">if</span> <span class="ident">i</span> <span class="op">=</span><span class="op">=</span> <span class="ident">j</span> {
+            <span class="kw">if</span> <span class="ident">i</span> <span class="op">==</span> <span class="ident">j</span> {
                 <span class="kw">return</span> <span class="bool-val">false</span>;
             }
         }
@@ -786,7 +786,7 @@
     <span class="bool-val">true</span>
 }
 
-<span class="kw">fn</span> <span class="ident">validate_subtrees</span>(<span class="ident">p</span>: <span class="kw-2">&amp;</span><span class="ident">Params</span>, <span class="ident">a</span>: <span class="kw-2">&amp;</span><span class="ident">Node</span>, <span class="ident">b</span>: <span class="kw-2">&amp;</span><span class="ident">Node</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident">Kind</span><span class="op">&gt;</span> {
+<span class="kw">fn</span> <span class="ident">validate_subtrees</span>(<span class="ident">p</span>: <span class="kw-2">&amp;</span><span class="ident">Params</span>, <span class="ident">a</span>: <span class="kw-2">&amp;</span><span class="ident">Node</span>, <span class="ident">b</span>: <span class="kw-2">&amp;</span><span class="ident">Node</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident">Kind</span><span class="op">&gt;</span> {
     <span class="kw">if</span> <span class="op">!</span><span class="ident">has_collision</span>(<span class="ident">a</span>, <span class="ident">b</span>, <span class="ident">p</span>.<span class="ident">collision_byte_length</span>()) {
         <span class="prelude-val">Err</span>(<span class="ident">Kind::Collision</span>)
     } <span class="kw">else</span> <span class="kw">if</span> <span class="ident">b</span>.<span class="ident">indices_before</span>(<span class="ident">a</span>) {
@@ -804,7 +804,7 @@
     <span class="ident">input</span>: <span class="kw-2">&amp;</span>[<span class="ident">u8</span>],
     <span class="ident">nonce</span>: <span class="kw-2">&amp;</span>[<span class="ident">u8</span>],
     <span class="ident">indices</span>: <span class="kw-2">&amp;</span>[<span class="ident">u32</span>],
-) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident">Error</span><span class="op">&gt;</span> {
+) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident">Error</span><span class="op">&gt;</span> {
     <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">state</span> <span class="op">=</span> <span class="ident">initialise_state</span>(<span class="ident">p</span>.<span class="ident">n</span>, <span class="ident">p</span>.<span class="ident">k</span>, <span class="ident">p</span>.<span class="ident">hash_output</span>());
     <span class="ident">state</span>.<span class="ident">update</span>(<span class="ident">input</span>);
     <span class="ident">state</span>.<span class="ident">update</span>(<span class="ident">nonce</span>);
@@ -827,7 +827,7 @@
         <span class="ident">hash_len</span> <span class="op">-</span><span class="op">=</span> <span class="ident">p</span>.<span class="ident">collision_byte_length</span>();
     }
 
-    <span class="macro">assert!</span>(<span class="ident">rows</span>.<span class="ident">len</span>() <span class="op">=</span><span class="op">=</span> <span class="number">1</span>);
+    <span class="macro">assert!</span>(<span class="ident">rows</span>.<span class="ident">len</span>() <span class="op">==</span> <span class="number">1</span>);
 
     <span class="kw">if</span> <span class="ident">rows</span>[<span class="number">0</span>].<span class="ident">is_zero</span>(<span class="ident">hash_len</span>) {
         <span class="prelude-val">Ok</span>(())
@@ -836,7 +836,7 @@
     }
 }
 
-<span class="kw">fn</span> <span class="ident">tree_validator</span>(<span class="ident">p</span>: <span class="kw-2">&amp;</span><span class="ident">Params</span>, <span class="ident">state</span>: <span class="kw-2">&amp;</span><span class="ident">Blake2bState</span>, <span class="ident">indices</span>: <span class="kw-2">&amp;</span>[<span class="ident">u32</span>]) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Node</span>, <span class="ident">Error</span><span class="op">&gt;</span> {
+<span class="kw">fn</span> <span class="ident">tree_validator</span>(<span class="ident">p</span>: <span class="kw-2">&amp;</span><span class="ident">Params</span>, <span class="ident">state</span>: <span class="kw-2">&amp;</span><span class="ident">Blake2bState</span>, <span class="ident">indices</span>: <span class="kw-2">&amp;</span>[<span class="ident">u32</span>]) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Node</span>, <span class="ident">Error</span><span class="op">&gt;</span> {
     <span class="kw">if</span> <span class="ident">indices</span>.<span class="ident">len</span>() <span class="op">&gt;</span> <span class="number">1</span> {
         <span class="kw">let</span> <span class="ident">end</span> <span class="op">=</span> <span class="ident">indices</span>.<span class="ident">len</span>();
         <span class="kw">let</span> <span class="ident">mid</span> <span class="op">=</span> <span class="ident">end</span> <span class="op">/</span> <span class="number">2</span>;
@@ -854,7 +854,7 @@
     <span class="ident">input</span>: <span class="kw-2">&amp;</span>[<span class="ident">u8</span>],
     <span class="ident">nonce</span>: <span class="kw-2">&amp;</span>[<span class="ident">u8</span>],
     <span class="ident">indices</span>: <span class="kw-2">&amp;</span>[<span class="ident">u32</span>],
-) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident">Error</span><span class="op">&gt;</span> {
+) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident">Error</span><span class="op">&gt;</span> {
     <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">state</span> <span class="op">=</span> <span class="ident">initialise_state</span>(<span class="ident">p</span>.<span class="ident">n</span>, <span class="ident">p</span>.<span class="ident">k</span>, <span class="ident">p</span>.<span class="ident">hash_output</span>());
     <span class="ident">state</span>.<span class="ident">update</span>(<span class="ident">input</span>);
     <span class="ident">state</span>.<span class="ident">update</span>(<span class="ident">nonce</span>);
@@ -877,7 +877,7 @@
     <span class="ident">input</span>: <span class="kw-2">&amp;</span>[<span class="ident">u8</span>],
     <span class="ident">nonce</span>: <span class="kw-2">&amp;</span>[<span class="ident">u8</span>],
     <span class="ident">soln</span>: <span class="kw-2">&amp;</span>[<span class="ident">u8</span>],
-) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident">Error</span><span class="op">&gt;</span> {
+) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident">Error</span><span class="op">&gt;</span> {
     <span class="kw">let</span> <span class="ident">p</span> <span class="op">=</span> <span class="ident">Params::new</span>(<span class="ident">n</span>, <span class="ident">k</span>)<span class="question-mark">?</span>;
     <span class="kw">let</span> <span class="ident">indices</span> <span class="op">=</span> <span class="ident">indices_from_minimal</span>(<span class="ident">p</span>, <span class="ident">soln</span>)<span class="question-mark">?</span>;
 

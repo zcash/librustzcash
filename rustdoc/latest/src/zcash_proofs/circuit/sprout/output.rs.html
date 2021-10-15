@@ -65,7 +65,7 @@
         <span class="ident">phi</span>: <span class="kw-2">&amp;</span>[<span class="ident">Boolean</span>],
         <span class="ident">h_sig</span>: <span class="kw-2">&amp;</span>[<span class="ident">Boolean</span>],
         <span class="ident">nonce</span>: <span class="ident">bool</span>,
-    ) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="self">Self</span>, <span class="ident">SynthesisError</span><span class="op">&gt;</span>
+    ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="self">Self</span>, <span class="ident">SynthesisError</span><span class="op">&gt;</span>
     <span class="kw">where</span>
         <span class="ident">Scalar</span>: <span class="ident">PrimeField</span>,
         <span class="ident">CS</span>: <span class="ident">ConstraintSystem</span><span class="op">&lt;</span><span class="ident">Scalar</span><span class="op">&gt;</span>,

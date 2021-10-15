@@ -1518,7 +1518,7 @@
 <span class="doccomment">/// Sapling key agreement for note encryption.</span>
 <span class="doccomment">///</span>
 <span class="doccomment">/// Implements section 5.4.4.3 of the Zcash Protocol Specification.</span>
-<span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">sapling_ka_agree</span>(<span class="ident">esk</span>: <span class="kw-2">&amp;</span><span class="ident">jubjub::Fr</span>, <span class="ident">pk_d</span>: <span class="kw-2">&amp;</span><span class="ident">jubjub::ExtendedPoint</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">jubjub::SubgroupPoint</span> {
+<span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">sapling_ka_agree</span>(<span class="ident">esk</span>: <span class="kw-2">&amp;</span><span class="ident">jubjub::Fr</span>, <span class="ident">pk_d</span>: <span class="kw-2">&amp;</span><span class="ident">jubjub::ExtendedPoint</span>) -&gt; <span class="ident">jubjub::SubgroupPoint</span> {
     <span class="comment">// [8 esk] pk_d</span>
     <span class="comment">// &lt;ExtendedPoint as CofactorGroup&gt;::clear_cofactor is implemented using</span>
     <span class="comment">// ExtendedPoint::mul_by_cofactor in the jubjub crate.</span>
@@ -1530,7 +1530,7 @@
 <span class="doccomment">/// Sapling KDF for note encryption.</span>
 <span class="doccomment">///</span>
 <span class="doccomment">/// Implements section 5.4.4.4 of the Zcash Protocol Specification.</span>
-<span class="kw">fn</span> <span class="ident">kdf_sapling</span>(<span class="ident">dhsecret</span>: <span class="ident">jubjub::SubgroupPoint</span>, <span class="ident">ephemeral_key</span>: <span class="kw-2">&amp;</span><span class="ident">EphemeralKeyBytes</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">Blake2bHash</span> {
+<span class="kw">fn</span> <span class="ident">kdf_sapling</span>(<span class="ident">dhsecret</span>: <span class="ident">jubjub::SubgroupPoint</span>, <span class="ident">ephemeral_key</span>: <span class="kw-2">&amp;</span><span class="ident">EphemeralKeyBytes</span>) -&gt; <span class="ident">Blake2bHash</span> {
     <span class="ident">Blake2bParams::new</span>()
         .<span class="ident">hash_length</span>(<span class="number">32</span>)
         .<span class="ident">personal</span>(<span class="ident">KDF_SAPLING_PERSONALIZATION</span>)
@@ -1548,7 +1548,7 @@
     <span class="ident">cv</span>: <span class="kw-2">&amp;</span><span class="ident">jubjub::ExtendedPoint</span>,
     <span class="ident">cmu_bytes</span>: <span class="kw-2">&amp;</span>[<span class="ident">u8</span>; <span class="number">32</span>],
     <span class="ident">ephemeral_key</span>: <span class="kw-2">&amp;</span><span class="ident">EphemeralKeyBytes</span>,
-) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">OutgoingCipherKey</span> {
+) -&gt; <span class="ident">OutgoingCipherKey</span> {
     <span class="ident">OutgoingCipherKey</span>(
         <span class="ident">Blake2bParams::new</span>()
             .<span class="ident">hash_length</span>(<span class="number">32</span>)
@@ -1565,7 +1565,7 @@
     )
 }
 
-<span class="kw">fn</span> <span class="ident">epk_bytes</span>(<span class="ident">epk</span>: <span class="kw-2">&amp;</span><span class="ident">jubjub::ExtendedPoint</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">EphemeralKeyBytes</span> {
+<span class="kw">fn</span> <span class="ident">epk_bytes</span>(<span class="ident">epk</span>: <span class="kw-2">&amp;</span><span class="ident">jubjub::ExtendedPoint</span>) -&gt; <span class="ident">EphemeralKeyBytes</span> {
     <span class="ident">EphemeralKeyBytes</span>(<span class="ident">epk</span>.<span class="ident">to_bytes</span>())
 }
 
@@ -1573,9 +1573,9 @@
     <span class="ident">domain</span>: <span class="kw-2">&amp;</span><span class="ident">SaplingDomain</span><span class="op">&lt;</span><span class="ident">P</span><span class="op">&gt;</span>,
     <span class="ident">plaintext</span>: <span class="kw-2">&amp;</span>[<span class="ident">u8</span>],
     <span class="ident">get_validated_pk_d</span>: <span class="ident">F</span>,
-) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Option</span><span class="op">&lt;</span>(<span class="ident">Note</span>, <span class="ident">PaymentAddress</span>)<span class="op">&gt;</span>
+) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span>(<span class="ident">Note</span>, <span class="ident">PaymentAddress</span>)<span class="op">&gt;</span>
 <span class="kw">where</span>
-    <span class="ident">F</span>: <span class="ident">FnOnce</span>(<span class="kw-2">&amp;</span><span class="ident">Diversifier</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">jubjub::SubgroupPoint</span><span class="op">&gt;</span>,
+    <span class="ident">F</span>: <span class="ident">FnOnce</span>(<span class="kw-2">&amp;</span><span class="ident">Diversifier</span>) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">jubjub::SubgroupPoint</span><span class="op">&gt;</span>,
 {
     <span class="macro">assert!</span>(<span class="ident">plaintext</span>.<span class="ident">len</span>() <span class="op">&gt;</span><span class="op">=</span> <span class="ident">COMPACT_NOTE_SIZE</span>);
 
@@ -1589,7 +1589,7 @@
     <span class="kw">let</span> <span class="ident">value</span> <span class="op">=</span> <span class="ident">Amount::from_u64_le_bytes</span>(<span class="ident">plaintext</span>[<span class="number">12</span>..<span class="number">20</span>].<span class="ident">try_into</span>().<span class="ident">unwrap</span>()).<span class="ident">ok</span>()<span class="question-mark">?</span>;
     <span class="kw">let</span> <span class="ident">r</span>: [<span class="ident">u8</span>; <span class="number">32</span>] <span class="op">=</span> <span class="ident">plaintext</span>[<span class="number">20</span>..<span class="ident">COMPACT_NOTE_SIZE</span>].<span class="ident">try_into</span>().<span class="ident">unwrap</span>();
 
-    <span class="kw">let</span> <span class="ident">rseed</span> <span class="op">=</span> <span class="kw">if</span> <span class="ident">plaintext</span>[<span class="number">0</span>] <span class="op">=</span><span class="op">=</span> <span class="number">0x01</span> {
+    <span class="kw">let</span> <span class="ident">rseed</span> <span class="op">=</span> <span class="kw">if</span> <span class="ident">plaintext</span>[<span class="number">0</span>] <span class="op">==</span> <span class="number">0x01</span> {
         <span class="kw">let</span> <span class="ident">rcm</span> <span class="op">=</span> <span class="ident">Option::from</span>(<span class="ident">jubjub::Fr::from_repr</span>(<span class="ident">r</span>))<span class="question-mark">?</span>;
         <span class="ident">Rseed::BeforeZip212</span>(<span class="ident">rcm</span>)
     } <span class="kw">else</span> {
@@ -1609,7 +1609,7 @@
 }
 
 <span class="kw">impl</span><span class="op">&lt;</span><span class="ident">P</span>: <span class="ident">consensus::Parameters</span><span class="op">&gt;</span> <span class="ident">SaplingDomain</span><span class="op">&lt;</span><span class="ident">P</span><span class="op">&gt;</span> {
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">for_height</span>(<span class="ident">params</span>: <span class="ident">P</span>, <span class="ident">height</span>: <span class="ident">BlockHeight</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="self">Self</span> {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">for_height</span>(<span class="ident">params</span>: <span class="ident">P</span>, <span class="ident">height</span>: <span class="ident">BlockHeight</span>) -&gt; <span class="self">Self</span> {
         <span class="self">Self</span> { <span class="ident">params</span>, <span class="ident">height</span> }
     }
 }
@@ -1632,18 +1632,18 @@
     <span class="kw">type</span> <span class="ident">ExtractedCommitmentBytes</span> <span class="op">=</span> [<span class="ident">u8</span>; <span class="number">32</span>];
     <span class="kw">type</span> <span class="ident">Memo</span> <span class="op">=</span> <span class="ident">MemoBytes</span>;
 
-    <span class="kw">fn</span> <span class="ident">derive_esk</span>(<span class="ident">note</span>: <span class="kw-2">&amp;</span><span class="ident"><span class="self">Self</span>::Note</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident"><span class="self">Self</span>::EphemeralSecretKey</span><span class="op">&gt;</span> {
+    <span class="kw">fn</span> <span class="ident">derive_esk</span>(<span class="ident">note</span>: <span class="kw-2">&amp;</span><span class="ident"><span class="self">Self</span>::Note</span>) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident"><span class="self">Self</span>::EphemeralSecretKey</span><span class="op">&gt;</span> {
         <span class="ident">note</span>.<span class="ident">derive_esk</span>()
     }
 
-    <span class="kw">fn</span> <span class="ident">get_pk_d</span>(<span class="ident">note</span>: <span class="kw-2">&amp;</span><span class="ident"><span class="self">Self</span>::Note</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident"><span class="self">Self</span>::DiversifiedTransmissionKey</span> {
+    <span class="kw">fn</span> <span class="ident">get_pk_d</span>(<span class="ident">note</span>: <span class="kw-2">&amp;</span><span class="ident"><span class="self">Self</span>::Note</span>) -&gt; <span class="ident"><span class="self">Self</span>::DiversifiedTransmissionKey</span> {
         <span class="ident">note</span>.<span class="ident">pk_d</span>
     }
 
     <span class="kw">fn</span> <span class="ident">ka_derive_public</span>(
         <span class="ident">note</span>: <span class="kw-2">&amp;</span><span class="ident"><span class="self">Self</span>::Note</span>,
         <span class="ident">esk</span>: <span class="kw-2">&amp;</span><span class="ident"><span class="self">Self</span>::EphemeralSecretKey</span>,
-    ) <span class="op">-</span><span class="op">&gt;</span> <span class="ident"><span class="self">Self</span>::EphemeralPublicKey</span> {
+    ) -&gt; <span class="ident"><span class="self">Self</span>::EphemeralPublicKey</span> {
         <span class="comment">// epk is an element of jubjub&#39;s prime-order subgroup,</span>
         <span class="comment">// but Self::EphemeralPublicKey is a full group element</span>
         <span class="comment">// for efficency of encryption. The conversion here is fine</span>
@@ -1655,27 +1655,27 @@
     <span class="kw">fn</span> <span class="ident">ka_agree_enc</span>(
         <span class="ident">esk</span>: <span class="kw-2">&amp;</span><span class="ident"><span class="self">Self</span>::EphemeralSecretKey</span>,
         <span class="ident">pk_d</span>: <span class="kw-2">&amp;</span><span class="ident"><span class="self">Self</span>::DiversifiedTransmissionKey</span>,
-    ) <span class="op">-</span><span class="op">&gt;</span> <span class="ident"><span class="self">Self</span>::SharedSecret</span> {
+    ) -&gt; <span class="ident"><span class="self">Self</span>::SharedSecret</span> {
         <span class="ident">sapling_ka_agree</span>(<span class="ident">esk</span>, <span class="ident">pk_d</span>.<span class="ident">into</span>())
     }
 
     <span class="kw">fn</span> <span class="ident">ka_agree_dec</span>(
         <span class="ident">ivk</span>: <span class="kw-2">&amp;</span><span class="ident"><span class="self">Self</span>::IncomingViewingKey</span>,
         <span class="ident">epk</span>: <span class="kw-2">&amp;</span><span class="ident"><span class="self">Self</span>::EphemeralPublicKey</span>,
-    ) <span class="op">-</span><span class="op">&gt;</span> <span class="ident"><span class="self">Self</span>::SharedSecret</span> {
+    ) -&gt; <span class="ident"><span class="self">Self</span>::SharedSecret</span> {
         <span class="ident">sapling_ka_agree</span>(<span class="kw-2">&amp;</span><span class="ident">ivk</span>.<span class="number">0</span>, <span class="ident">epk</span>)
     }
 
     <span class="doccomment">/// Sapling KDF for note encryption.</span>
     <span class="doccomment">///</span>
     <span class="doccomment">/// Implements section 5.4.4.4 of the Zcash Protocol Specification.</span>
-    <span class="kw">fn</span> <span class="ident">kdf</span>(<span class="ident">dhsecret</span>: <span class="ident">jubjub::SubgroupPoint</span>, <span class="ident">epk</span>: <span class="kw-2">&amp;</span><span class="ident">EphemeralKeyBytes</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">Blake2bHash</span> {
+    <span class="kw">fn</span> <span class="ident">kdf</span>(<span class="ident">dhsecret</span>: <span class="ident">jubjub::SubgroupPoint</span>, <span class="ident">epk</span>: <span class="kw-2">&amp;</span><span class="ident">EphemeralKeyBytes</span>) -&gt; <span class="ident">Blake2bHash</span> {
         <span class="ident">kdf_sapling</span>(<span class="ident">dhsecret</span>, <span class="ident">epk</span>)
     }
 
     <span class="kw">fn</span> <span class="ident">batch_kdf</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span>(
         <span class="ident">items</span>: <span class="kw">impl</span> <span class="ident">Iterator</span><span class="op">&lt;</span><span class="ident">Item</span> <span class="op">=</span> (<span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident"><span class="self">Self</span>::SharedSecret</span><span class="op">&gt;</span>, <span class="kw-2">&amp;</span><span class="lifetime">&#39;a</span> <span class="ident">EphemeralKeyBytes</span>)<span class="op">&gt;</span>,
-    ) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">Vec</span><span class="op">&lt;</span><span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident"><span class="self">Self</span>::SymmetricKey</span><span class="op">&gt;</span><span class="op">&gt;</span> {
+    ) -&gt; <span class="ident">Vec</span><span class="op">&lt;</span><span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident"><span class="self">Self</span>::SymmetricKey</span><span class="op">&gt;</span><span class="op">&gt;</span> {
         <span class="kw">let</span> (<span class="ident">shared_secrets</span>, <span class="ident">ephemeral_keys</span>): (<span class="ident">Vec</span><span class="op">&lt;</span><span class="kw">_</span><span class="op">&gt;</span>, <span class="ident">Vec</span><span class="op">&lt;</span><span class="kw">_</span><span class="op">&gt;</span>) <span class="op">=</span> <span class="ident">items</span>.<span class="ident">unzip</span>();
 
         <span class="kw">let</span> <span class="ident">secrets</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="kw">_</span><span class="op">&gt;</span> <span class="op">=</span> <span class="ident">shared_secrets</span>
@@ -1708,13 +1708,13 @@
         <span class="ident">note</span>: <span class="kw-2">&amp;</span><span class="ident"><span class="self">Self</span>::Note</span>,
         <span class="ident">to</span>: <span class="kw-2">&amp;</span><span class="ident"><span class="self">Self</span>::Recipient</span>,
         <span class="ident">memo</span>: <span class="kw-2">&amp;</span><span class="ident"><span class="self">Self</span>::Memo</span>,
-    ) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">NotePlaintextBytes</span> {
+    ) -&gt; <span class="ident">NotePlaintextBytes</span> {
         <span class="comment">// Note plaintext encoding is defined in section 5.5 of the Zcash Protocol</span>
         <span class="comment">// Specification.</span>
         <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">input</span> <span class="op">=</span> [<span class="number">0</span>; <span class="ident">NOTE_PLAINTEXT_SIZE</span>];
         <span class="ident">input</span>[<span class="number">0</span>] <span class="op">=</span> <span class="kw">match</span> <span class="ident">note</span>.<span class="ident">rseed</span> {
-            <span class="ident">Rseed::BeforeZip212</span>(<span class="kw">_</span>) <span class="op">=</span><span class="op">&gt;</span> <span class="number">1</span>,
-            <span class="ident">Rseed::AfterZip212</span>(<span class="kw">_</span>) <span class="op">=</span><span class="op">&gt;</span> <span class="number">2</span>,
+            <span class="ident">Rseed::BeforeZip212</span>(<span class="kw">_</span>) =&gt; <span class="number">1</span>,
+            <span class="ident">Rseed::AfterZip212</span>(<span class="kw">_</span>) =&gt; <span class="number">2</span>,
         };
         <span class="ident">input</span>[<span class="number">1</span>..<span class="number">12</span>].<span class="ident">copy_from_slice</span>(<span class="kw-2">&amp;</span><span class="ident">to</span>.<span class="ident">diversifier</span>().<span class="number">0</span>);
         (<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">input</span>[<span class="number">12</span>..<span class="number">20</span>])
@@ -1722,10 +1722,10 @@
             .<span class="ident">unwrap</span>();
 
         <span class="kw">match</span> <span class="ident">note</span>.<span class="ident">rseed</span> {
-            <span class="ident">Rseed::BeforeZip212</span>(<span class="ident">rcm</span>) <span class="op">=</span><span class="op">&gt;</span> {
+            <span class="ident">Rseed::BeforeZip212</span>(<span class="ident">rcm</span>) =&gt; {
                 <span class="ident">input</span>[<span class="number">20</span>..<span class="ident">COMPACT_NOTE_SIZE</span>].<span class="ident">copy_from_slice</span>(<span class="ident">rcm</span>.<span class="ident">to_repr</span>().<span class="ident">as_ref</span>());
             }
-            <span class="ident">Rseed::AfterZip212</span>(<span class="ident">rseed</span>) <span class="op">=</span><span class="op">&gt;</span> {
+            <span class="ident">Rseed::AfterZip212</span>(<span class="ident">rseed</span>) =&gt; {
                 <span class="ident">input</span>[<span class="number">20</span>..<span class="ident">COMPACT_NOTE_SIZE</span>].<span class="ident">copy_from_slice</span>(<span class="kw-2">&amp;</span><span class="ident">rseed</span>);
             }
         }
@@ -1740,14 +1740,14 @@
         <span class="ident">cv</span>: <span class="kw-2">&amp;</span><span class="ident"><span class="self">Self</span>::ValueCommitment</span>,
         <span class="ident">cmu_bytes</span>: <span class="kw-2">&amp;</span><span class="ident"><span class="self">Self</span>::ExtractedCommitmentBytes</span>,
         <span class="ident">epk</span>: <span class="kw-2">&amp;</span><span class="ident">EphemeralKeyBytes</span>,
-    ) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">OutgoingCipherKey</span> {
+    ) -&gt; <span class="ident">OutgoingCipherKey</span> {
         <span class="ident">prf_ock</span>(<span class="ident">ovk</span>, <span class="ident">cv</span>, <span class="ident">cmu_bytes</span>, <span class="ident">epk</span>)
     }
 
     <span class="kw">fn</span> <span class="ident">outgoing_plaintext_bytes</span>(
         <span class="ident">note</span>: <span class="kw-2">&amp;</span><span class="ident"><span class="self">Self</span>::Note</span>,
         <span class="ident">esk</span>: <span class="kw-2">&amp;</span><span class="ident"><span class="self">Self</span>::EphemeralSecretKey</span>,
-    ) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">OutPlaintextBytes</span> {
+    ) -&gt; <span class="ident">OutPlaintextBytes</span> {
         <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">input</span> <span class="op">=</span> [<span class="number">0u8</span>; <span class="ident">OUT_PLAINTEXT_SIZE</span>];
         <span class="ident">input</span>[<span class="number">0</span>..<span class="number">32</span>].<span class="ident">copy_from_slice</span>(<span class="kw-2">&amp;</span><span class="ident">note</span>.<span class="ident">pk_d</span>.<span class="ident">to_bytes</span>());
         <span class="ident">input</span>[<span class="number">32</span>..<span class="ident">OUT_PLAINTEXT_SIZE</span>].<span class="ident">copy_from_slice</span>(<span class="ident">esk</span>.<span class="ident">to_repr</span>().<span class="ident">as_ref</span>());
@@ -1755,11 +1755,11 @@
         <span class="ident">OutPlaintextBytes</span>(<span class="ident">input</span>)
     }
 
-    <span class="kw">fn</span> <span class="ident">epk_bytes</span>(<span class="ident">epk</span>: <span class="kw-2">&amp;</span><span class="ident"><span class="self">Self</span>::EphemeralPublicKey</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">EphemeralKeyBytes</span> {
+    <span class="kw">fn</span> <span class="ident">epk_bytes</span>(<span class="ident">epk</span>: <span class="kw-2">&amp;</span><span class="ident"><span class="self">Self</span>::EphemeralPublicKey</span>) -&gt; <span class="ident">EphemeralKeyBytes</span> {
         <span class="ident">epk_bytes</span>(<span class="ident">epk</span>)
     }
 
-    <span class="kw">fn</span> <span class="ident">epk</span>(<span class="ident">ephemeral_key</span>: <span class="kw-2">&amp;</span><span class="ident">EphemeralKeyBytes</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident"><span class="self">Self</span>::EphemeralPublicKey</span><span class="op">&gt;</span> {
+    <span class="kw">fn</span> <span class="ident">epk</span>(<span class="ident">ephemeral_key</span>: <span class="kw-2">&amp;</span><span class="ident">EphemeralKeyBytes</span>) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident"><span class="self">Self</span>::EphemeralPublicKey</span><span class="op">&gt;</span> {
         <span class="comment">// ZIP 216: We unconditionally reject non-canonical encodings, because these have</span>
         <span class="comment">// always been rejected by consensus (due to small-order checks).</span>
         <span class="comment">// https://zips.z.cash/zip-0216#specification</span>
@@ -1768,7 +1768,7 @@
 
     <span class="kw">fn</span> <span class="ident">batch_epk</span>(
         <span class="ident">ephemeral_keys</span>: <span class="kw">impl</span> <span class="ident">Iterator</span><span class="op">&lt;</span><span class="ident">Item</span> <span class="op">=</span> <span class="ident">EphemeralKeyBytes</span><span class="op">&gt;</span>,
-    ) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">Vec</span><span class="op">&lt;</span>(<span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident"><span class="self">Self</span>::EphemeralPublicKey</span><span class="op">&gt;</span>, <span class="ident">EphemeralKeyBytes</span>)<span class="op">&gt;</span> {
+    ) -&gt; <span class="ident">Vec</span><span class="op">&lt;</span>(<span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident"><span class="self">Self</span>::EphemeralPublicKey</span><span class="op">&gt;</span>, <span class="ident">EphemeralKeyBytes</span>)<span class="op">&gt;</span> {
         <span class="kw">let</span> <span class="ident">ephemeral_keys</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="kw">_</span><span class="op">&gt;</span> <span class="op">=</span> <span class="ident">ephemeral_keys</span>.<span class="ident">collect</span>();
         <span class="kw">let</span> <span class="ident">epks</span> <span class="op">=</span> <span class="ident">jubjub::AffinePoint::batch_from_bytes</span>(<span class="ident">ephemeral_keys</span>.<span class="ident">iter</span>().<span class="ident">map</span>(<span class="op">|</span><span class="ident">b</span><span class="op">|</span> <span class="ident">b</span>.<span class="number">0</span>));
         <span class="ident">epks</span>.<span class="ident">into_iter</span>()
@@ -1779,10 +1779,10 @@
             .<span class="ident">collect</span>()
     }
 
-    <span class="kw">fn</span> <span class="ident">check_epk_bytes</span><span class="op">&lt;</span><span class="ident">F</span>: <span class="ident">FnOnce</span>(<span class="kw-2">&amp;</span><span class="ident"><span class="self">Self</span>::EphemeralSecretKey</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">NoteValidity</span><span class="op">&gt;</span>(
+    <span class="kw">fn</span> <span class="ident">check_epk_bytes</span><span class="op">&lt;</span><span class="ident">F</span>: <span class="ident">FnOnce</span>(<span class="kw-2">&amp;</span><span class="ident"><span class="self">Self</span>::EphemeralSecretKey</span>) -&gt; <span class="ident">NoteValidity</span><span class="op">&gt;</span>(
         <span class="ident">note</span>: <span class="kw-2">&amp;</span><span class="ident">Note</span>,
         <span class="ident">check</span>: <span class="ident">F</span>,
-    ) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">NoteValidity</span> {
+    ) -&gt; <span class="ident">NoteValidity</span> {
         <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">derived_esk</span>) <span class="op">=</span> <span class="ident">note</span>.<span class="ident">derive_esk</span>() {
             <span class="ident">check</span>(<span class="kw-2">&amp;</span><span class="ident">derived_esk</span>)
         } <span class="kw">else</span> {
@@ -1795,7 +1795,7 @@
         <span class="kw-2">&amp;</span><span class="self">self</span>,
         <span class="ident">ivk</span>: <span class="kw-2">&amp;</span><span class="ident"><span class="self">Self</span>::IncomingViewingKey</span>,
         <span class="ident">plaintext</span>: <span class="kw-2">&amp;</span>[<span class="ident">u8</span>],
-    ) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Option</span><span class="op">&lt;</span>(<span class="ident"><span class="self">Self</span>::Note</span>, <span class="ident"><span class="self">Self</span>::Recipient</span>)<span class="op">&gt;</span> {
+    ) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span>(<span class="ident"><span class="self">Self</span>::Note</span>, <span class="ident"><span class="self">Self</span>::Recipient</span>)<span class="op">&gt;</span> {
         <span class="ident">sapling_parse_note_plaintext_without_memo</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">plaintext</span>, <span class="op">|</span><span class="ident">diversifier</span><span class="op">|</span> {
             <span class="prelude-val">Some</span>(<span class="ident">diversifier</span>.<span class="ident">g_d</span>()<span class="question-mark">?</span> <span class="op">*</span> <span class="ident">ivk</span>.<span class="number">0</span>)
         })
@@ -1807,9 +1807,9 @@
         <span class="ident">esk</span>: <span class="kw-2">&amp;</span><span class="ident"><span class="self">Self</span>::EphemeralSecretKey</span>,
         <span class="ident">ephemeral_key</span>: <span class="kw-2">&amp;</span><span class="ident">EphemeralKeyBytes</span>,
         <span class="ident">plaintext</span>: <span class="kw-2">&amp;</span>[<span class="ident">u8</span>],
-    ) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Option</span><span class="op">&lt;</span>(<span class="ident"><span class="self">Self</span>::Note</span>, <span class="ident"><span class="self">Self</span>::Recipient</span>)<span class="op">&gt;</span> {
+    ) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span>(<span class="ident"><span class="self">Self</span>::Note</span>, <span class="ident"><span class="self">Self</span>::Recipient</span>)<span class="op">&gt;</span> {
         <span class="ident">sapling_parse_note_plaintext_without_memo</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">plaintext</span>, <span class="op">|</span><span class="ident">diversifier</span><span class="op">|</span> {
-            <span class="kw">if</span> (<span class="ident">diversifier</span>.<span class="ident">g_d</span>()<span class="question-mark">?</span> <span class="op">*</span> <span class="ident">esk</span>).<span class="ident">to_bytes</span>() <span class="op">=</span><span class="op">=</span> <span class="ident">ephemeral_key</span>.<span class="number">0</span> {
+            <span class="kw">if</span> (<span class="ident">diversifier</span>.<span class="ident">g_d</span>()<span class="question-mark">?</span> <span class="op">*</span> <span class="ident">esk</span>).<span class="ident">to_bytes</span>() <span class="op">==</span> <span class="ident">ephemeral_key</span>.<span class="number">0</span> {
                 <span class="prelude-val">Some</span>(<span class="kw-2">*</span><span class="ident">pk_d</span>)
             } <span class="kw">else</span> {
                 <span class="prelude-val">None</span>
@@ -1817,11 +1817,11 @@
         })
     }
 
-    <span class="kw">fn</span> <span class="ident">cmstar</span>(<span class="ident">note</span>: <span class="kw-2">&amp;</span><span class="ident"><span class="self">Self</span>::Note</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident"><span class="self">Self</span>::ExtractedCommitment</span> {
+    <span class="kw">fn</span> <span class="ident">cmstar</span>(<span class="ident">note</span>: <span class="kw-2">&amp;</span><span class="ident"><span class="self">Self</span>::Note</span>) -&gt; <span class="ident"><span class="self">Self</span>::ExtractedCommitment</span> {
         <span class="ident">note</span>.<span class="ident">cmu</span>()
     }
 
-    <span class="kw">fn</span> <span class="ident">extract_pk_d</span>(<span class="ident">op</span>: <span class="kw-2">&amp;</span>[<span class="ident">u8</span>; <span class="ident">OUT_PLAINTEXT_SIZE</span>]) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident"><span class="self">Self</span>::DiversifiedTransmissionKey</span><span class="op">&gt;</span> {
+    <span class="kw">fn</span> <span class="ident">extract_pk_d</span>(<span class="ident">op</span>: <span class="kw-2">&amp;</span>[<span class="ident">u8</span>; <span class="ident">OUT_PLAINTEXT_SIZE</span>]) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident"><span class="self">Self</span>::DiversifiedTransmissionKey</span><span class="op">&gt;</span> {
         <span class="kw">let</span> <span class="ident">pk_d</span> <span class="op">=</span> <span class="ident">jubjub::SubgroupPoint::from_bytes</span>(
             <span class="ident">op</span>[<span class="number">0</span>..<span class="number">32</span>].<span class="ident">try_into</span>().<span class="ident">expect</span>(<span class="string">&quot;slice is the correct length&quot;</span>),
         );
@@ -1833,7 +1833,7 @@
         }
     }
 
-    <span class="kw">fn</span> <span class="ident">extract_esk</span>(<span class="ident">op</span>: <span class="kw-2">&amp;</span>[<span class="ident">u8</span>; <span class="ident">OUT_PLAINTEXT_SIZE</span>]) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident"><span class="self">Self</span>::EphemeralSecretKey</span><span class="op">&gt;</span> {
+    <span class="kw">fn</span> <span class="ident">extract_esk</span>(<span class="ident">op</span>: <span class="kw-2">&amp;</span>[<span class="ident">u8</span>; <span class="ident">OUT_PLAINTEXT_SIZE</span>]) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident"><span class="self">Self</span>::EphemeralSecretKey</span><span class="op">&gt;</span> {
         <span class="ident">jubjub::Fr::from_repr</span>(
             <span class="ident">op</span>[<span class="number">32</span>..<span class="ident">OUT_PLAINTEXT_SIZE</span>]
                 .<span class="ident">try_into</span>()
@@ -1842,7 +1842,7 @@
         .<span class="ident">into</span>()
     }
 
-    <span class="kw">fn</span> <span class="ident">extract_memo</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">plaintext</span>: <span class="kw-2">&amp;</span>[<span class="ident">u8</span>]) <span class="op">-</span><span class="op">&gt;</span> <span class="ident"><span class="self">Self</span>::Memo</span> {
+    <span class="kw">fn</span> <span class="ident">extract_memo</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">plaintext</span>: <span class="kw-2">&amp;</span>[<span class="ident">u8</span>]) -&gt; <span class="ident"><span class="self">Self</span>::Memo</span> {
         <span class="ident">MemoBytes::from_bytes</span>(<span class="kw-2">&amp;</span><span class="ident">plaintext</span>[<span class="ident">COMPACT_NOTE_SIZE</span>..<span class="ident">NOTE_PLAINTEXT_SIZE</span>]).<span class="ident">unwrap</span>()
     }
 }
@@ -1857,7 +1857,7 @@
     <span class="ident">to</span>: <span class="ident">PaymentAddress</span>,
     <span class="ident">memo</span>: <span class="ident">MemoBytes</span>,
     <span class="ident">rng</span>: <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">R</span>,
-) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">NoteEncryption</span><span class="op">&lt;</span><span class="ident">SaplingDomain</span><span class="op">&lt;</span><span class="ident">P</span><span class="op">&gt;</span><span class="op">&gt;</span> {
+) -&gt; <span class="ident">NoteEncryption</span><span class="op">&lt;</span><span class="ident">SaplingDomain</span><span class="op">&lt;</span><span class="ident">P</span><span class="op">&gt;</span><span class="op">&gt;</span> {
     <span class="kw">let</span> <span class="ident">esk</span> <span class="op">=</span> <span class="ident">note</span>.<span class="ident">generate_or_derive_esk_internal</span>(<span class="ident">rng</span>);
     <span class="ident">NoteEncryption::new_with_esk</span>(<span class="ident">esk</span>, <span class="ident">ovk</span>, <span class="ident">note</span>, <span class="ident">to</span>, <span class="ident">memo</span>)
 }
@@ -1868,7 +1868,7 @@
     <span class="ident">params</span>: <span class="kw-2">&amp;</span><span class="ident">P</span>,
     <span class="ident">height</span>: <span class="ident">BlockHeight</span>,
     <span class="ident">leadbyte</span>: <span class="ident">u8</span>,
-) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">bool</span> {
+) -&gt; <span class="ident">bool</span> {
     <span class="kw">if</span> <span class="ident">params</span>.<span class="ident">is_nu_active</span>(<span class="ident">Canopy</span>, <span class="ident">height</span>) {
         <span class="kw">let</span> <span class="ident">grace_period_end_height</span> <span class="op">=</span>
             <span class="ident">params</span>.<span class="ident">activation_height</span>(<span class="ident">Canopy</span>).<span class="ident">unwrap</span>() <span class="op">+</span> <span class="ident">ZIP212_GRACE_PERIOD</span>;
@@ -1884,7 +1884,7 @@
         }
     } <span class="kw">else</span> {
         <span class="comment">// return false if non-0x01 received when Canopy is not active</span>
-        <span class="ident">leadbyte</span> <span class="op">=</span><span class="op">=</span> <span class="number">0x01</span>
+        <span class="ident">leadbyte</span> <span class="op">==</span> <span class="number">0x01</span>
     }
 }
 
@@ -1896,7 +1896,7 @@
     <span class="ident">height</span>: <span class="ident">BlockHeight</span>,
     <span class="ident">ivk</span>: <span class="kw-2">&amp;</span><span class="ident">SaplingIvk</span>,
     <span class="ident">output</span>: <span class="kw-2">&amp;</span><span class="ident">Output</span>,
-) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Option</span><span class="op">&lt;</span>(<span class="ident">Note</span>, <span class="ident">PaymentAddress</span>, <span class="ident">MemoBytes</span>)<span class="op">&gt;</span> {
+) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span>(<span class="ident">Note</span>, <span class="ident">PaymentAddress</span>, <span class="ident">MemoBytes</span>)<span class="op">&gt;</span> {
     <span class="kw">let</span> <span class="ident">domain</span> <span class="op">=</span> <span class="ident">SaplingDomain</span> {
         <span class="ident">params</span>: <span class="ident">params</span>.<span class="ident">clone</span>(),
         <span class="ident">height</span>,
@@ -1912,7 +1912,7 @@
     <span class="ident">height</span>: <span class="ident">BlockHeight</span>,
     <span class="ident">ivk</span>: <span class="kw-2">&amp;</span><span class="ident">SaplingIvk</span>,
     <span class="ident">output</span>: <span class="kw-2">&amp;</span><span class="ident">Output</span>,
-) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Option</span><span class="op">&lt;</span>(<span class="ident">Note</span>, <span class="ident">PaymentAddress</span>)<span class="op">&gt;</span> {
+) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span>(<span class="ident">Note</span>, <span class="ident">PaymentAddress</span>)<span class="op">&gt;</span> {
     <span class="kw">let</span> <span class="ident">domain</span> <span class="op">=</span> <span class="ident">SaplingDomain</span> {
         <span class="ident">params</span>: <span class="ident">params</span>.<span class="ident">clone</span>(),
         <span class="ident">height</span>,
@@ -1934,7 +1934,7 @@
     <span class="ident">height</span>: <span class="ident">BlockHeight</span>,
     <span class="ident">ock</span>: <span class="kw-2">&amp;</span><span class="ident">OutgoingCipherKey</span>,
     <span class="ident">output</span>: <span class="kw-2">&amp;</span><span class="ident">OutputDescription</span><span class="op">&lt;</span><span class="ident">sapling::GrothProofBytes</span><span class="op">&gt;</span>,
-) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Option</span><span class="op">&lt;</span>(<span class="ident">Note</span>, <span class="ident">PaymentAddress</span>, <span class="ident">MemoBytes</span>)<span class="op">&gt;</span> {
+) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span>(<span class="ident">Note</span>, <span class="ident">PaymentAddress</span>, <span class="ident">MemoBytes</span>)<span class="op">&gt;</span> {
     <span class="kw">let</span> <span class="ident">domain</span> <span class="op">=</span> <span class="ident">SaplingDomain</span> {
         <span class="ident">params</span>: <span class="ident">params</span>.<span class="ident">clone</span>(),
         <span class="ident">height</span>,
@@ -1956,7 +1956,7 @@
     <span class="ident">height</span>: <span class="ident">BlockHeight</span>,
     <span class="ident">ovk</span>: <span class="kw-2">&amp;</span><span class="ident">OutgoingViewingKey</span>,
     <span class="ident">output</span>: <span class="kw-2">&amp;</span><span class="ident">OutputDescription</span><span class="op">&lt;</span><span class="ident">sapling::GrothProofBytes</span><span class="op">&gt;</span>,
-) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Option</span><span class="op">&lt;</span>(<span class="ident">Note</span>, <span class="ident">PaymentAddress</span>, <span class="ident">MemoBytes</span>)<span class="op">&gt;</span> {
+) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span>(<span class="ident">Note</span>, <span class="ident">PaymentAddress</span>, <span class="ident">MemoBytes</span>)<span class="op">&gt;</span> {
     <span class="kw">let</span> <span class="ident">domain</span> <span class="op">=</span> <span class="ident">SaplingDomain</span> {
         <span class="ident">params</span>: <span class="ident">params</span>.<span class="ident">clone</span>(),
         <span class="ident">height</span>,
@@ -2011,7 +2011,7 @@
     <span class="kw">fn</span> <span class="ident">random_enc_ciphertext</span><span class="op">&lt;</span><span class="ident">R</span>: <span class="ident">RngCore</span> <span class="op">+</span> <span class="ident">CryptoRng</span><span class="op">&gt;</span>(
         <span class="ident">height</span>: <span class="ident">BlockHeight</span>,
         <span class="kw-2">mut</span> <span class="ident">rng</span>: <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">R</span>,
-    ) <span class="op">-</span><span class="op">&gt;</span> (
+    ) -&gt; (
         <span class="ident">OutgoingViewingKey</span>,
         <span class="ident">OutgoingCipherKey</span>,
         <span class="ident">SaplingIvk</span>,
@@ -2045,7 +2045,7 @@
         <span class="ident">height</span>: <span class="ident">BlockHeight</span>,
         <span class="ident">ivk</span>: <span class="kw-2">&amp;</span><span class="ident">SaplingIvk</span>,
         <span class="kw-2">mut</span> <span class="ident">rng</span>: <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">R</span>,
-    ) <span class="op">-</span><span class="op">&gt;</span> (
+    ) -&gt; (
         <span class="ident">OutgoingViewingKey</span>,
         <span class="ident">OutgoingCipherKey</span>,
         <span class="ident">OutputDescription</span><span class="op">&lt;</span><span class="ident">sapling::GrothProofBytes</span><span class="op">&gt;</span>,
@@ -2142,7 +2142,7 @@
         <span class="ident">enc_ciphertext</span>[<span class="ident">NOTE_PLAINTEXT_SIZE</span>..].<span class="ident">copy_from_slice</span>(<span class="kw-2">&amp;</span><span class="ident">tag</span>);
     }
 
-    <span class="kw">fn</span> <span class="ident">find_invalid_diversifier</span>() <span class="op">-</span><span class="op">&gt;</span> <span class="ident">Diversifier</span> {
+    <span class="kw">fn</span> <span class="ident">find_invalid_diversifier</span>() -&gt; <span class="ident">Diversifier</span> {
         <span class="comment">// Find an invalid diversifier</span>
         <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">d</span> <span class="op">=</span> <span class="ident">Diversifier</span>([<span class="number">0</span>; <span class="number">11</span>]);
         <span class="kw">loop</span> {
@@ -2159,7 +2159,7 @@
         <span class="ident">d</span>
     }
 
-    <span class="kw">fn</span> <span class="ident">find_valid_diversifier</span>() <span class="op">-</span><span class="op">&gt;</span> <span class="ident">Diversifier</span> {
+    <span class="kw">fn</span> <span class="ident">find_valid_diversifier</span>() -&gt; <span class="ident">Diversifier</span> {
         <span class="comment">// Find a different valid diversifier</span>
         <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">d</span> <span class="op">=</span> <span class="ident">Diversifier</span>([<span class="number">0</span>; <span class="number">11</span>]);
         <span class="kw">loop</span> {
@@ -2791,19 +2791,19 @@
         <span class="kw">let</span> <span class="ident">test_vectors</span> <span class="op">=</span> <span class="ident"><span class="kw">crate</span>::test_vectors::note_encryption::make_test_vectors</span>();
 
         <span class="macro">macro_rules!</span> <span class="ident">read_bls12_381_scalar</span> {
-            (<span class="macro-nonterminal">$</span><span class="macro-nonterminal">field</span>:<span class="ident">expr</span>) <span class="op">=</span><span class="op">&gt;</span> {{
+            (<span class="macro-nonterminal">$</span><span class="macro-nonterminal">field</span>:<span class="ident">expr</span>) =&gt; {{
                 <span class="ident">bls12_381::Scalar::from_repr</span>(<span class="macro-nonterminal">$</span><span class="macro-nonterminal">field</span>[..].<span class="ident">try_into</span>().<span class="ident">unwrap</span>()).<span class="ident">unwrap</span>()
             }};
         }
 
         <span class="macro">macro_rules!</span> <span class="ident">read_jubjub_scalar</span> {
-            (<span class="macro-nonterminal">$</span><span class="macro-nonterminal">field</span>:<span class="ident">expr</span>) <span class="op">=</span><span class="op">&gt;</span> {{
+            (<span class="macro-nonterminal">$</span><span class="macro-nonterminal">field</span>:<span class="ident">expr</span>) =&gt; {{
                 <span class="ident">jubjub::Fr::from_repr</span>(<span class="macro-nonterminal">$</span><span class="macro-nonterminal">field</span>[..].<span class="ident">try_into</span>().<span class="ident">unwrap</span>()).<span class="ident">unwrap</span>()
             }};
         }
 
         <span class="macro">macro_rules!</span> <span class="ident">read_point</span> {
-            (<span class="macro-nonterminal">$</span><span class="macro-nonterminal">field</span>:<span class="ident">expr</span>) <span class="op">=</span><span class="op">&gt;</span> {
+            (<span class="macro-nonterminal">$</span><span class="macro-nonterminal">field</span>:<span class="ident">expr</span>) =&gt; {
                 <span class="ident">jubjub::ExtendedPoint::from_bytes</span>(<span class="kw-2">&amp;</span><span class="macro-nonterminal">$</span><span class="macro-nonterminal">field</span>).<span class="ident">unwrap</span>()
             };
         }
@@ -2856,12 +2856,12 @@
             <span class="comment">//</span>
 
             <span class="kw">match</span> <span class="ident">try_sapling_note_decryption</span>(<span class="kw-2">&amp;</span><span class="ident">TEST_NETWORK</span>, <span class="ident">height</span>, <span class="kw-2">&amp;</span><span class="ident">ivk</span>, <span class="kw-2">&amp;</span><span class="ident">output</span>) {
-                <span class="prelude-val">Some</span>((<span class="ident">decrypted_note</span>, <span class="ident">decrypted_to</span>, <span class="ident">decrypted_memo</span>)) <span class="op">=</span><span class="op">&gt;</span> {
+                <span class="prelude-val">Some</span>((<span class="ident">decrypted_note</span>, <span class="ident">decrypted_to</span>, <span class="ident">decrypted_memo</span>)) =&gt; {
                     <span class="macro">assert_eq!</span>(<span class="ident">decrypted_note</span>, <span class="ident">note</span>);
                     <span class="macro">assert_eq!</span>(<span class="ident">decrypted_to</span>, <span class="ident">to</span>);
                     <span class="macro">assert_eq!</span>(<span class="kw-2">&amp;</span><span class="ident">decrypted_memo</span>.<span class="ident">as_array</span>()[..], <span class="kw-2">&amp;</span><span class="ident">tv</span>.<span class="ident">memo</span>[..]);
                 }
-                <span class="prelude-val">None</span> <span class="op">=</span><span class="op">&gt;</span> <span class="macro">panic!</span>(<span class="string">&quot;Note decryption failed&quot;</span>),
+                <span class="prelude-val">None</span> =&gt; <span class="macro">panic!</span>(<span class="string">&quot;Note decryption failed&quot;</span>),
             }
 
             <span class="kw">match</span> <span class="ident">try_sapling_compact_note_decryption</span>(
@@ -2870,20 +2870,20 @@
                 <span class="kw-2">&amp;</span><span class="ident">ivk</span>,
                 <span class="kw-2">&amp;</span><span class="ident">CompactOutputDescription::from</span>(<span class="ident">output</span>.<span class="ident">clone</span>()),
             ) {
-                <span class="prelude-val">Some</span>((<span class="ident">decrypted_note</span>, <span class="ident">decrypted_to</span>)) <span class="op">=</span><span class="op">&gt;</span> {
+                <span class="prelude-val">Some</span>((<span class="ident">decrypted_note</span>, <span class="ident">decrypted_to</span>)) =&gt; {
                     <span class="macro">assert_eq!</span>(<span class="ident">decrypted_note</span>, <span class="ident">note</span>);
                     <span class="macro">assert_eq!</span>(<span class="ident">decrypted_to</span>, <span class="ident">to</span>);
                 }
-                <span class="prelude-val">None</span> <span class="op">=</span><span class="op">&gt;</span> <span class="macro">panic!</span>(<span class="string">&quot;Compact note decryption failed&quot;</span>),
+                <span class="prelude-val">None</span> =&gt; <span class="macro">panic!</span>(<span class="string">&quot;Compact note decryption failed&quot;</span>),
             }
 
             <span class="kw">match</span> <span class="ident">try_sapling_output_recovery</span>(<span class="kw-2">&amp;</span><span class="ident">TEST_NETWORK</span>, <span class="ident">height</span>, <span class="kw-2">&amp;</span><span class="ident">ovk</span>, <span class="kw-2">&amp;</span><span class="ident">output</span>) {
-                <span class="prelude-val">Some</span>((<span class="ident">decrypted_note</span>, <span class="ident">decrypted_to</span>, <span class="ident">decrypted_memo</span>)) <span class="op">=</span><span class="op">&gt;</span> {
+                <span class="prelude-val">Some</span>((<span class="ident">decrypted_note</span>, <span class="ident">decrypted_to</span>, <span class="ident">decrypted_memo</span>)) =&gt; {
                     <span class="macro">assert_eq!</span>(<span class="ident">decrypted_note</span>, <span class="ident">note</span>);
                     <span class="macro">assert_eq!</span>(<span class="ident">decrypted_to</span>, <span class="ident">to</span>);
                     <span class="macro">assert_eq!</span>(<span class="kw-2">&amp;</span><span class="ident">decrypted_memo</span>.<span class="ident">as_array</span>()[..], <span class="kw-2">&amp;</span><span class="ident">tv</span>.<span class="ident">memo</span>[..]);
                 }
-                <span class="prelude-val">None</span> <span class="op">=</span><span class="op">&gt;</span> <span class="macro">panic!</span>(<span class="string">&quot;Output recovery failed&quot;</span>),
+                <span class="prelude-val">None</span> =&gt; <span class="macro">panic!</span>(<span class="string">&quot;Output recovery failed&quot;</span>),
             }
 
             <span class="kw">match</span> <span class="kw-2">&amp;</span><span class="ident">batch::try_note_decryption</span>(
@@ -2894,12 +2894,12 @@
                 )],
             )[..]
             {
-                [<span class="prelude-val">Some</span>((<span class="ident">decrypted_note</span>, <span class="ident">decrypted_to</span>, <span class="ident">decrypted_memo</span>))] <span class="op">=</span><span class="op">&gt;</span> {
+                [<span class="prelude-val">Some</span>((<span class="ident">decrypted_note</span>, <span class="ident">decrypted_to</span>, <span class="ident">decrypted_memo</span>))] =&gt; {
                     <span class="macro">assert_eq!</span>(<span class="ident">decrypted_note</span>, <span class="kw-2">&amp;</span><span class="ident">note</span>);
                     <span class="macro">assert_eq!</span>(<span class="ident">decrypted_to</span>, <span class="kw-2">&amp;</span><span class="ident">to</span>);
                     <span class="macro">assert_eq!</span>(<span class="kw-2">&amp;</span><span class="ident">decrypted_memo</span>.<span class="ident">as_array</span>()[..], <span class="kw-2">&amp;</span><span class="ident">tv</span>.<span class="ident">memo</span>[..]);
                 }
-                <span class="kw">_</span> <span class="op">=</span><span class="op">&gt;</span> <span class="macro">panic!</span>(<span class="string">&quot;Note decryption failed&quot;</span>),
+                <span class="kw">_</span> =&gt; <span class="macro">panic!</span>(<span class="string">&quot;Note decryption failed&quot;</span>),
             }
 
             <span class="kw">match</span> <span class="kw-2">&amp;</span><span class="ident">batch::try_compact_note_decryption</span>(
@@ -2910,11 +2910,11 @@
                 )],
             )[..]
             {
-                [<span class="prelude-val">Some</span>((<span class="ident">decrypted_note</span>, <span class="ident">decrypted_to</span>))] <span class="op">=</span><span class="op">&gt;</span> {
+                [<span class="prelude-val">Some</span>((<span class="ident">decrypted_note</span>, <span class="ident">decrypted_to</span>))] =&gt; {
                     <span class="macro">assert_eq!</span>(<span class="ident">decrypted_note</span>, <span class="kw-2">&amp;</span><span class="ident">note</span>);
                     <span class="macro">assert_eq!</span>(<span class="ident">decrypted_to</span>, <span class="kw-2">&amp;</span><span class="ident">to</span>);
                 }
-                <span class="kw">_</span> <span class="op">=</span><span class="op">&gt;</span> <span class="macro">panic!</span>(<span class="string">&quot;Note decryption failed&quot;</span>),
+                <span class="kw">_</span> =&gt; <span class="macro">panic!</span>(<span class="string">&quot;Note decryption failed&quot;</span>),
             }
 
             <span class="comment">//</span>

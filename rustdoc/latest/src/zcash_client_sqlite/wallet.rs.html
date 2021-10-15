@@ -931,60 +931,60 @@
 
 <span class="doccomment">/// This trait provides a generalization over shielded output representations.</span>
 <span class="kw">pub</span> <span class="kw">trait</span> <span class="ident">ShieldedOutput</span> {
-    <span class="kw">fn</span> <span class="ident">index</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">usize</span>;
-    <span class="kw">fn</span> <span class="ident">account</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">AccountId</span>;
-    <span class="kw">fn</span> <span class="ident">to</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="kw-2">&amp;</span><span class="ident">PaymentAddress</span>;
-    <span class="kw">fn</span> <span class="ident">note</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="kw-2">&amp;</span><span class="ident">Note</span>;
-    <span class="kw">fn</span> <span class="ident">memo</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="kw-2">&amp;</span><span class="ident">MemoBytes</span><span class="op">&gt;</span>;
-    <span class="kw">fn</span> <span class="ident">is_change</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">bool</span><span class="op">&gt;</span>;
-    <span class="kw">fn</span> <span class="ident">nullifier</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">Nullifier</span><span class="op">&gt;</span>;
+    <span class="kw">fn</span> <span class="ident">index</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">usize</span>;
+    <span class="kw">fn</span> <span class="ident">account</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">AccountId</span>;
+    <span class="kw">fn</span> <span class="ident">to</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span><span class="ident">PaymentAddress</span>;
+    <span class="kw">fn</span> <span class="ident">note</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span><span class="ident">Note</span>;
+    <span class="kw">fn</span> <span class="ident">memo</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="kw-2">&amp;</span><span class="ident">MemoBytes</span><span class="op">&gt;</span>;
+    <span class="kw">fn</span> <span class="ident">is_change</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">bool</span><span class="op">&gt;</span>;
+    <span class="kw">fn</span> <span class="ident">nullifier</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">Nullifier</span><span class="op">&gt;</span>;
 }
 
 <span class="kw">impl</span> <span class="ident">ShieldedOutput</span> <span class="kw">for</span> <span class="ident">WalletShieldedOutput</span><span class="op">&lt;</span><span class="ident">Nullifier</span><span class="op">&gt;</span> {
-    <span class="kw">fn</span> <span class="ident">index</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">usize</span> {
+    <span class="kw">fn</span> <span class="ident">index</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">usize</span> {
         <span class="self">self</span>.<span class="ident">index</span>
     }
-    <span class="kw">fn</span> <span class="ident">account</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">AccountId</span> {
+    <span class="kw">fn</span> <span class="ident">account</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">AccountId</span> {
         <span class="self">self</span>.<span class="ident">account</span>
     }
-    <span class="kw">fn</span> <span class="ident">to</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="kw-2">&amp;</span><span class="ident">PaymentAddress</span> {
+    <span class="kw">fn</span> <span class="ident">to</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span><span class="ident">PaymentAddress</span> {
         <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">to</span>
     }
-    <span class="kw">fn</span> <span class="ident">note</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="kw-2">&amp;</span><span class="ident">Note</span> {
+    <span class="kw">fn</span> <span class="ident">note</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span><span class="ident">Note</span> {
         <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">note</span>
     }
-    <span class="kw">fn</span> <span class="ident">memo</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="kw-2">&amp;</span><span class="ident">MemoBytes</span><span class="op">&gt;</span> {
+    <span class="kw">fn</span> <span class="ident">memo</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="kw-2">&amp;</span><span class="ident">MemoBytes</span><span class="op">&gt;</span> {
         <span class="prelude-val">None</span>
     }
-    <span class="kw">fn</span> <span class="ident">is_change</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">bool</span><span class="op">&gt;</span> {
+    <span class="kw">fn</span> <span class="ident">is_change</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">bool</span><span class="op">&gt;</span> {
         <span class="prelude-val">Some</span>(<span class="self">self</span>.<span class="ident">is_change</span>)
     }
 
-    <span class="kw">fn</span> <span class="ident">nullifier</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">Nullifier</span><span class="op">&gt;</span> {
+    <span class="kw">fn</span> <span class="ident">nullifier</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">Nullifier</span><span class="op">&gt;</span> {
         <span class="prelude-val">Some</span>(<span class="self">self</span>.<span class="ident">nf</span>)
     }
 }
 
 <span class="kw">impl</span> <span class="ident">ShieldedOutput</span> <span class="kw">for</span> <span class="ident">DecryptedOutput</span> {
-    <span class="kw">fn</span> <span class="ident">index</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">usize</span> {
+    <span class="kw">fn</span> <span class="ident">index</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">usize</span> {
         <span class="self">self</span>.<span class="ident">index</span>
     }
-    <span class="kw">fn</span> <span class="ident">account</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">AccountId</span> {
+    <span class="kw">fn</span> <span class="ident">account</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">AccountId</span> {
         <span class="self">self</span>.<span class="ident">account</span>
     }
-    <span class="kw">fn</span> <span class="ident">to</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="kw-2">&amp;</span><span class="ident">PaymentAddress</span> {
+    <span class="kw">fn</span> <span class="ident">to</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span><span class="ident">PaymentAddress</span> {
         <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">to</span>
     }
-    <span class="kw">fn</span> <span class="ident">note</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="kw-2">&amp;</span><span class="ident">Note</span> {
+    <span class="kw">fn</span> <span class="ident">note</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span><span class="ident">Note</span> {
         <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">note</span>
     }
-    <span class="kw">fn</span> <span class="ident">memo</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="kw-2">&amp;</span><span class="ident">MemoBytes</span><span class="op">&gt;</span> {
+    <span class="kw">fn</span> <span class="ident">memo</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="kw-2">&amp;</span><span class="ident">MemoBytes</span><span class="op">&gt;</span> {
         <span class="prelude-val">Some</span>(<span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">memo</span>)
     }
-    <span class="kw">fn</span> <span class="ident">is_change</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">bool</span><span class="op">&gt;</span> {
+    <span class="kw">fn</span> <span class="ident">is_change</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">bool</span><span class="op">&gt;</span> {
         <span class="prelude-val">None</span>
     }
-    <span class="kw">fn</span> <span class="ident">nullifier</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">Nullifier</span><span class="op">&gt;</span> {
+    <span class="kw">fn</span> <span class="ident">nullifier</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">Nullifier</span><span class="op">&gt;</span> {
         <span class="prelude-val">None</span>
     }
 }
@@ -1011,7 +1011,7 @@
 <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">get_address</span><span class="op">&lt;</span><span class="ident">P</span>: <span class="ident">consensus::Parameters</span><span class="op">&gt;</span>(
     <span class="ident">wdb</span>: <span class="kw-2">&amp;</span><span class="ident">WalletDb</span><span class="op">&lt;</span><span class="ident">P</span><span class="op">&gt;</span>,
     <span class="ident">account</span>: <span class="ident">AccountId</span>,
-) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">PaymentAddress</span><span class="op">&gt;</span>, <span class="ident">SqliteClientError</span><span class="op">&gt;</span> {
+) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">PaymentAddress</span><span class="op">&gt;</span>, <span class="ident">SqliteClientError</span><span class="op">&gt;</span> {
     <span class="kw">let</span> <span class="ident">addr</span>: <span class="ident">String</span> <span class="op">=</span> <span class="ident">wdb</span>.<span class="ident">conn</span>.<span class="ident">query_row</span>(
         <span class="string">&quot;SELECT address FROM accounts
         WHERE account = ?&quot;</span>,
@@ -1028,7 +1028,7 @@
 <span class="doccomment">/// [`ExtendedFullViewingKey`]: zcash_primitives::zip32::ExtendedFullViewingKey</span>
 <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">get_extended_full_viewing_keys</span><span class="op">&lt;</span><span class="ident">P</span>: <span class="ident">consensus::Parameters</span><span class="op">&gt;</span>(
     <span class="ident">wdb</span>: <span class="kw-2">&amp;</span><span class="ident">WalletDb</span><span class="op">&lt;</span><span class="ident">P</span><span class="op">&gt;</span>,
-) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">HashMap</span><span class="op">&lt;</span><span class="ident">AccountId</span>, <span class="ident">ExtendedFullViewingKey</span><span class="op">&gt;</span>, <span class="ident">SqliteClientError</span><span class="op">&gt;</span> {
+) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">HashMap</span><span class="op">&lt;</span><span class="ident">AccountId</span>, <span class="ident">ExtendedFullViewingKey</span><span class="op">&gt;</span>, <span class="ident">SqliteClientError</span><span class="op">&gt;</span> {
     <span class="comment">// Fetch the ExtendedFullViewingKeys we are tracking</span>
     <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">stmt_fetch_accounts</span> <span class="op">=</span> <span class="ident">wdb</span>
         .<span class="ident">conn</span>
@@ -1067,7 +1067,7 @@
     <span class="ident">wdb</span>: <span class="kw-2">&amp;</span><span class="ident">WalletDb</span><span class="op">&lt;</span><span class="ident">P</span><span class="op">&gt;</span>,
     <span class="ident">account</span>: <span class="ident">AccountId</span>,
     <span class="ident">extfvk</span>: <span class="kw-2">&amp;</span><span class="ident">ExtendedFullViewingKey</span>,
-) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">bool</span>, <span class="ident">SqliteClientError</span><span class="op">&gt;</span> {
+) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">bool</span>, <span class="ident">SqliteClientError</span><span class="op">&gt;</span> {
     <span class="ident">wdb</span>.<span class="ident">conn</span>
         .<span class="ident">prepare</span>(<span class="string">&quot;SELECT * FROM accounts WHERE account = ? AND extfvk = ?&quot;</span>)<span class="question-mark">?</span>
         .<span class="ident">exists</span>(<span class="kw-2">&amp;</span>[
@@ -1104,7 +1104,7 @@
 <span class="doccomment">/// let db = WalletDb::for_path(data_file, Network::TestNetwork).unwrap();</span>
 <span class="doccomment">/// let addr = get_balance(&amp;db, AccountId(0));</span>
 <span class="doccomment">/// ```</span>
-<span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">get_balance</span><span class="op">&lt;</span><span class="ident">P</span><span class="op">&gt;</span>(<span class="ident">wdb</span>: <span class="kw-2">&amp;</span><span class="ident">WalletDb</span><span class="op">&lt;</span><span class="ident">P</span><span class="op">&gt;</span>, <span class="ident">account</span>: <span class="ident">AccountId</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Amount</span>, <span class="ident">SqliteClientError</span><span class="op">&gt;</span> {
+<span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">get_balance</span><span class="op">&lt;</span><span class="ident">P</span><span class="op">&gt;</span>(<span class="ident">wdb</span>: <span class="kw-2">&amp;</span><span class="ident">WalletDb</span><span class="op">&lt;</span><span class="ident">P</span><span class="op">&gt;</span>, <span class="ident">account</span>: <span class="ident">AccountId</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Amount</span>, <span class="ident">SqliteClientError</span><span class="op">&gt;</span> {
     <span class="kw">let</span> <span class="ident">balance</span> <span class="op">=</span> <span class="ident">wdb</span>.<span class="ident">conn</span>.<span class="ident">query_row</span>(
         <span class="string">&quot;SELECT SUM(value) FROM received_notes
         INNER JOIN transactions ON transactions.id_tx = received_notes.tx
@@ -1114,8 +1114,8 @@
     )<span class="question-mark">?</span>;
 
     <span class="kw">match</span> <span class="ident">Amount::from_i64</span>(<span class="ident">balance</span>) {
-        <span class="prelude-val">Ok</span>(<span class="ident">amount</span>) <span class="kw">if</span> <span class="op">!</span><span class="ident">amount</span>.<span class="ident">is_negative</span>() <span class="op">=</span><span class="op">&gt;</span> <span class="prelude-val">Ok</span>(<span class="ident">amount</span>),
-        <span class="kw">_</span> <span class="op">=</span><span class="op">&gt;</span> <span class="prelude-val">Err</span>(<span class="ident">SqliteClientError::CorruptedData</span>(
+        <span class="prelude-val">Ok</span>(<span class="ident">amount</span>) <span class="kw">if</span> <span class="op">!</span><span class="ident">amount</span>.<span class="ident">is_negative</span>() =&gt; <span class="prelude-val">Ok</span>(<span class="ident">amount</span>),
+        <span class="kw">_</span> =&gt; <span class="prelude-val">Err</span>(<span class="ident">SqliteClientError::CorruptedData</span>(
             <span class="string">&quot;Sum of values in received_notes is out of range&quot;</span>.<span class="ident">to_string</span>(),
         )),
     }
@@ -1144,7 +1144,7 @@
     <span class="ident">wdb</span>: <span class="kw-2">&amp;</span><span class="ident">WalletDb</span><span class="op">&lt;</span><span class="ident">P</span><span class="op">&gt;</span>,
     <span class="ident">account</span>: <span class="ident">AccountId</span>,
     <span class="ident">anchor_height</span>: <span class="ident">BlockHeight</span>,
-) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Amount</span>, <span class="ident">SqliteClientError</span><span class="op">&gt;</span> {
+) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Amount</span>, <span class="ident">SqliteClientError</span><span class="op">&gt;</span> {
     <span class="kw">let</span> <span class="ident">balance</span> <span class="op">=</span> <span class="ident">wdb</span>.<span class="ident">conn</span>.<span class="ident">query_row</span>(
         <span class="string">&quot;SELECT SUM(value) FROM received_notes
         INNER JOIN transactions ON transactions.id_tx = received_notes.tx
@@ -1154,8 +1154,8 @@
     )<span class="question-mark">?</span>;
 
     <span class="kw">match</span> <span class="ident">Amount::from_i64</span>(<span class="ident">balance</span>) {
-        <span class="prelude-val">Ok</span>(<span class="ident">amount</span>) <span class="kw">if</span> <span class="op">!</span><span class="ident">amount</span>.<span class="ident">is_negative</span>() <span class="op">=</span><span class="op">&gt;</span> <span class="prelude-val">Ok</span>(<span class="ident">amount</span>),
-        <span class="kw">_</span> <span class="op">=</span><span class="op">&gt;</span> <span class="prelude-val">Err</span>(<span class="ident">SqliteClientError::CorruptedData</span>(
+        <span class="prelude-val">Ok</span>(<span class="ident">amount</span>) <span class="kw">if</span> <span class="op">!</span><span class="ident">amount</span>.<span class="ident">is_negative</span>() =&gt; <span class="prelude-val">Ok</span>(<span class="ident">amount</span>),
+        <span class="kw">_</span> =&gt; <span class="prelude-val">Err</span>(<span class="ident">SqliteClientError::CorruptedData</span>(
             <span class="string">&quot;Sum of values in received_notes is out of range&quot;</span>.<span class="ident">to_string</span>(),
         )),
     }
@@ -1181,7 +1181,7 @@
 <span class="doccomment">/// let db = WalletDb::for_path(data_file, Network::TestNetwork).unwrap();</span>
 <span class="doccomment">/// let memo = get_received_memo(&amp;db, 27);</span>
 <span class="doccomment">/// ```</span>
-<span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">get_received_memo</span><span class="op">&lt;</span><span class="ident">P</span><span class="op">&gt;</span>(<span class="ident">wdb</span>: <span class="kw-2">&amp;</span><span class="ident">WalletDb</span><span class="op">&lt;</span><span class="ident">P</span><span class="op">&gt;</span>, <span class="ident">id_note</span>: <span class="ident">i64</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Memo</span>, <span class="ident">SqliteClientError</span><span class="op">&gt;</span> {
+<span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">get_received_memo</span><span class="op">&lt;</span><span class="ident">P</span><span class="op">&gt;</span>(<span class="ident">wdb</span>: <span class="kw-2">&amp;</span><span class="ident">WalletDb</span><span class="op">&lt;</span><span class="ident">P</span><span class="op">&gt;</span>, <span class="ident">id_note</span>: <span class="ident">i64</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Memo</span>, <span class="ident">SqliteClientError</span><span class="op">&gt;</span> {
     <span class="kw">let</span> <span class="ident">memo_bytes</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="kw">_</span><span class="op">&gt;</span> <span class="op">=</span> <span class="ident">wdb</span>.<span class="ident">conn</span>.<span class="ident">query_row</span>(
         <span class="string">&quot;SELECT memo FROM received_notes
         WHERE id_note = ?&quot;</span>,
@@ -1214,7 +1214,7 @@
 <span class="doccomment">/// let db = WalletDb::for_path(data_file, Network::TestNetwork).unwrap();</span>
 <span class="doccomment">/// let memo = get_sent_memo(&amp;db, 12);</span>
 <span class="doccomment">/// ```</span>
-<span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">get_sent_memo</span><span class="op">&lt;</span><span class="ident">P</span><span class="op">&gt;</span>(<span class="ident">wdb</span>: <span class="kw-2">&amp;</span><span class="ident">WalletDb</span><span class="op">&lt;</span><span class="ident">P</span><span class="op">&gt;</span>, <span class="ident">id_note</span>: <span class="ident">i64</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Memo</span>, <span class="ident">SqliteClientError</span><span class="op">&gt;</span> {
+<span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">get_sent_memo</span><span class="op">&lt;</span><span class="ident">P</span><span class="op">&gt;</span>(<span class="ident">wdb</span>: <span class="kw-2">&amp;</span><span class="ident">WalletDb</span><span class="op">&lt;</span><span class="ident">P</span><span class="op">&gt;</span>, <span class="ident">id_note</span>: <span class="ident">i64</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Memo</span>, <span class="ident">SqliteClientError</span><span class="op">&gt;</span> {
     <span class="kw">let</span> <span class="ident">memo_bytes</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="kw">_</span><span class="op">&gt;</span> <span class="op">=</span> <span class="ident">wdb</span>.<span class="ident">conn</span>.<span class="ident">query_row</span>(
         <span class="string">&quot;SELECT memo FROM sent_notes
         WHERE id_note = ?&quot;</span>,
@@ -1245,7 +1245,7 @@
 <span class="doccomment">/// ```</span>
 <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">block_height_extrema</span><span class="op">&lt;</span><span class="ident">P</span><span class="op">&gt;</span>(
     <span class="ident">wdb</span>: <span class="kw-2">&amp;</span><span class="ident">WalletDb</span><span class="op">&lt;</span><span class="ident">P</span><span class="op">&gt;</span>,
-) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="prelude-ty">Option</span><span class="op">&lt;</span>(<span class="ident">BlockHeight</span>, <span class="ident">BlockHeight</span>)<span class="op">&gt;</span>, <span class="ident">rusqlite::Error</span><span class="op">&gt;</span> {
+) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="prelude-ty">Option</span><span class="op">&lt;</span>(<span class="ident">BlockHeight</span>, <span class="ident">BlockHeight</span>)<span class="op">&gt;</span>, <span class="ident">rusqlite::Error</span><span class="op">&gt;</span> {
     <span class="ident">wdb</span>.<span class="ident">conn</span>
         .<span class="ident">query_row</span>(
             <span class="string">&quot;SELECT MIN(height), MAX(height) FROM blocks&quot;</span>,
@@ -1285,7 +1285,7 @@
 <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">get_tx_height</span><span class="op">&lt;</span><span class="ident">P</span><span class="op">&gt;</span>(
     <span class="ident">wdb</span>: <span class="kw-2">&amp;</span><span class="ident">WalletDb</span><span class="op">&lt;</span><span class="ident">P</span><span class="op">&gt;</span>,
     <span class="ident">txid</span>: <span class="ident">TxId</span>,
-) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">BlockHeight</span><span class="op">&gt;</span>, <span class="ident">rusqlite::Error</span><span class="op">&gt;</span> {
+) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">BlockHeight</span><span class="op">&gt;</span>, <span class="ident">rusqlite::Error</span><span class="op">&gt;</span> {
     <span class="ident">wdb</span>.<span class="ident">conn</span>
         .<span class="ident">query_row</span>(
             <span class="string">&quot;SELECT block FROM transactions WHERE txid = ?&quot;</span>,
@@ -1315,7 +1315,7 @@
 <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">get_block_hash</span><span class="op">&lt;</span><span class="ident">P</span><span class="op">&gt;</span>(
     <span class="ident">wdb</span>: <span class="kw-2">&amp;</span><span class="ident">WalletDb</span><span class="op">&lt;</span><span class="ident">P</span><span class="op">&gt;</span>,
     <span class="ident">block_height</span>: <span class="ident">BlockHeight</span>,
-) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">BlockHash</span><span class="op">&gt;</span>, <span class="ident">rusqlite::Error</span><span class="op">&gt;</span> {
+) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">BlockHash</span><span class="op">&gt;</span>, <span class="ident">rusqlite::Error</span><span class="op">&gt;</span> {
     <span class="ident">wdb</span>.<span class="ident">conn</span>
         .<span class="ident">query_row</span>(
             <span class="string">&quot;SELECT hash FROM blocks WHERE height = ?&quot;</span>,
@@ -1337,7 +1337,7 @@
 <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">rewind_to_height</span><span class="op">&lt;</span><span class="ident">P</span>: <span class="ident">consensus::Parameters</span><span class="op">&gt;</span>(
     <span class="ident">wdb</span>: <span class="kw-2">&amp;</span><span class="ident">WalletDb</span><span class="op">&lt;</span><span class="ident">P</span><span class="op">&gt;</span>,
     <span class="ident">block_height</span>: <span class="ident">BlockHeight</span>,
-) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident">SqliteClientError</span><span class="op">&gt;</span> {
+) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident">SqliteClientError</span><span class="op">&gt;</span> {
     <span class="kw">let</span> <span class="ident">sapling_activation_height</span> <span class="op">=</span> <span class="ident">wdb</span>
         .<span class="ident">params</span>
         .<span class="ident">activation_height</span>(<span class="ident">NetworkUpgrade::Sapling</span>)
@@ -1398,7 +1398,7 @@
 <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">get_commitment_tree</span><span class="op">&lt;</span><span class="ident">P</span><span class="op">&gt;</span>(
     <span class="ident">wdb</span>: <span class="kw-2">&amp;</span><span class="ident">WalletDb</span><span class="op">&lt;</span><span class="ident">P</span><span class="op">&gt;</span>,
     <span class="ident">block_height</span>: <span class="ident">BlockHeight</span>,
-) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">CommitmentTree</span><span class="op">&lt;</span><span class="ident">Node</span><span class="op">&gt;</span><span class="op">&gt;</span>, <span class="ident">SqliteClientError</span><span class="op">&gt;</span> {
+) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">CommitmentTree</span><span class="op">&lt;</span><span class="ident">Node</span><span class="op">&gt;</span><span class="op">&gt;</span>, <span class="ident">SqliteClientError</span><span class="op">&gt;</span> {
     <span class="ident">wdb</span>.<span class="ident">conn</span>
         .<span class="ident">query_row_and_then</span>(
             <span class="string">&quot;SELECT sapling_tree FROM blocks WHERE height = ?&quot;</span>,
@@ -1438,7 +1438,7 @@
 <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">get_witnesses</span><span class="op">&lt;</span><span class="ident">P</span><span class="op">&gt;</span>(
     <span class="ident">wdb</span>: <span class="kw-2">&amp;</span><span class="ident">WalletDb</span><span class="op">&lt;</span><span class="ident">P</span><span class="op">&gt;</span>,
     <span class="ident">block_height</span>: <span class="ident">BlockHeight</span>,
-) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span>(<span class="ident">NoteId</span>, <span class="ident">IncrementalWitness</span><span class="op">&lt;</span><span class="ident">Node</span><span class="op">&gt;</span>)<span class="op">&gt;</span>, <span class="ident">SqliteClientError</span><span class="op">&gt;</span> {
+) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span>(<span class="ident">NoteId</span>, <span class="ident">IncrementalWitness</span><span class="op">&lt;</span><span class="ident">Node</span><span class="op">&gt;</span>)<span class="op">&gt;</span>, <span class="ident">SqliteClientError</span><span class="op">&gt;</span> {
     <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">stmt_fetch_witnesses</span> <span class="op">=</span> <span class="ident">wdb</span>
         .<span class="ident">conn</span>
         .<span class="ident">prepare</span>(<span class="string">&quot;SELECT note, witness FROM sapling_witnesses WHERE block = ?&quot;</span>)<span class="question-mark">?</span>;
@@ -1460,7 +1460,7 @@
 <span class="doccomment">/// transaction being included in a block.</span>
 <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">get_nullifiers</span><span class="op">&lt;</span><span class="ident">P</span><span class="op">&gt;</span>(
     <span class="ident">wdb</span>: <span class="kw-2">&amp;</span><span class="ident">WalletDb</span><span class="op">&lt;</span><span class="ident">P</span><span class="op">&gt;</span>,
-) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span>(<span class="ident">AccountId</span>, <span class="ident">Nullifier</span>)<span class="op">&gt;</span>, <span class="ident">SqliteClientError</span><span class="op">&gt;</span> {
+) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span>(<span class="ident">AccountId</span>, <span class="ident">Nullifier</span>)<span class="op">&gt;</span>, <span class="ident">SqliteClientError</span><span class="op">&gt;</span> {
     <span class="comment">// Get the nullifiers for the notes we are tracking</span>
     <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">stmt_fetch_nullifiers</span> <span class="op">=</span> <span class="ident">wdb</span>.<span class="ident">conn</span>.<span class="ident">prepare</span>(
         <span class="string">&quot;SELECT rn.id_note, rn.account, rn.nf, tx.block as block
@@ -1486,7 +1486,7 @@
     <span class="ident">block_hash</span>: <span class="ident">BlockHash</span>,
     <span class="ident">block_time</span>: <span class="ident">u32</span>,
     <span class="ident">commitment_tree</span>: <span class="kw-2">&amp;</span><span class="ident">CommitmentTree</span><span class="op">&lt;</span><span class="ident">Node</span><span class="op">&gt;</span>,
-) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident">SqliteClientError</span><span class="op">&gt;</span> {
+) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident">SqliteClientError</span><span class="op">&gt;</span> {
     <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">encoded_tree</span> <span class="op">=</span> <span class="ident">Vec::new</span>();
     <span class="ident">commitment_tree</span>.<span class="ident">write</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">encoded_tree</span>).<span class="ident">unwrap</span>();
 
@@ -1506,12 +1506,12 @@
     <span class="ident">stmts</span>: <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">DataConnStmtCache</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">P</span><span class="op">&gt;</span>,
     <span class="ident">tx</span>: <span class="kw-2">&amp;</span><span class="ident">WalletTx</span><span class="op">&lt;</span><span class="ident">N</span><span class="op">&gt;</span>,
     <span class="ident">height</span>: <span class="ident">BlockHeight</span>,
-) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">i64</span>, <span class="ident">SqliteClientError</span><span class="op">&gt;</span> {
+) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">i64</span>, <span class="ident">SqliteClientError</span><span class="op">&gt;</span> {
     <span class="kw">let</span> <span class="ident">txid</span> <span class="op">=</span> <span class="ident">tx</span>.<span class="ident">txid</span>.<span class="ident">as_ref</span>().<span class="ident">to_vec</span>();
     <span class="kw">if</span> <span class="ident">stmts</span>
         .<span class="ident">stmt_update_tx_meta</span>
         .<span class="ident">execute</span>(<span class="macro">params!</span>[<span class="ident">u32::from</span>(<span class="ident">height</span>), (<span class="ident">tx</span>.<span class="ident">index</span> <span class="kw">as</span> <span class="ident">i64</span>), <span class="ident">txid</span>])<span class="question-mark">?</span>
-        <span class="op">=</span><span class="op">=</span> <span class="number">0</span>
+        <span class="op">==</span> <span class="number">0</span>
     {
         <span class="comment">// It isn&#39;t there, so insert our transaction into the database.</span>
         <span class="ident">stmts</span>
@@ -1533,7 +1533,7 @@
     <span class="ident">stmts</span>: <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">DataConnStmtCache</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">P</span><span class="op">&gt;</span>,
     <span class="ident">tx</span>: <span class="kw-2">&amp;</span><span class="ident">Transaction</span>,
     <span class="ident">created_at</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">time::OffsetDateTime</span><span class="op">&gt;</span>,
-) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">i64</span>, <span class="ident">SqliteClientError</span><span class="op">&gt;</span> {
+) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">i64</span>, <span class="ident">SqliteClientError</span><span class="op">&gt;</span> {
     <span class="kw">let</span> <span class="ident">txid</span> <span class="op">=</span> <span class="ident">tx</span>.<span class="ident">txid</span>().<span class="ident">as_ref</span>().<span class="ident">to_vec</span>();
 
     <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">raw_tx</span> <span class="op">=</span> <span class="macro">vec!</span>[];
@@ -1542,7 +1542,7 @@
     <span class="kw">if</span> <span class="ident">stmts</span>
         .<span class="ident">stmt_update_tx_data</span>
         .<span class="ident">execute</span>(<span class="macro">params!</span>[<span class="ident">u32::from</span>(<span class="ident">tx</span>.<span class="ident">expiry_height</span>()), <span class="ident">raw_tx</span>, <span class="ident">txid</span>,])<span class="question-mark">?</span>
-        <span class="op">=</span><span class="op">=</span> <span class="number">0</span>
+        <span class="op">==</span> <span class="number">0</span>
     {
         <span class="comment">// It isn&#39;t there, so insert our transaction into the database.</span>
         <span class="ident">stmts</span>.<span class="ident">stmt_insert_tx_data</span>.<span class="ident">execute</span>(<span class="macro">params!</span>[
@@ -1571,7 +1571,7 @@
     <span class="ident">stmts</span>: <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">DataConnStmtCache</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">P</span><span class="op">&gt;</span>,
     <span class="ident">tx_ref</span>: <span class="ident">i64</span>,
     <span class="ident">nf</span>: <span class="kw-2">&amp;</span><span class="ident">Nullifier</span>,
-) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident">SqliteClientError</span><span class="op">&gt;</span> {
+) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident">SqliteClientError</span><span class="op">&gt;</span> {
     <span class="ident">stmts</span>
         .<span class="ident">stmt_mark_recived_note_spent</span>
         .<span class="ident">execute</span>(<span class="kw-2">&amp;</span>[<span class="ident">tx_ref</span>.<span class="ident">to_sql</span>()<span class="question-mark">?</span>, <span class="ident">nf</span>.<span class="number">0</span>.<span class="ident">to_sql</span>()<span class="question-mark">?</span>])<span class="question-mark">?</span>;
@@ -1586,7 +1586,7 @@
     <span class="ident">stmts</span>: <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">DataConnStmtCache</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">P</span><span class="op">&gt;</span>,
     <span class="ident">output</span>: <span class="kw-2">&amp;</span><span class="ident">T</span>,
     <span class="ident">tx_ref</span>: <span class="ident">i64</span>,
-) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">NoteId</span>, <span class="ident">SqliteClientError</span><span class="op">&gt;</span> {
+) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">NoteId</span>, <span class="ident">SqliteClientError</span><span class="op">&gt;</span> {
     <span class="kw">let</span> <span class="ident">rcm</span> <span class="op">=</span> <span class="ident">output</span>.<span class="ident">note</span>().<span class="ident">rcm</span>().<span class="ident">to_repr</span>();
     <span class="kw">let</span> <span class="ident">account</span> <span class="op">=</span> <span class="ident">output</span>.<span class="ident">account</span>().<span class="number">0</span> <span class="kw">as</span> <span class="ident">i64</span>;
     <span class="kw">let</span> <span class="ident">diversifier</span> <span class="op">=</span> <span class="ident">output</span>.<span class="ident">to</span>().<span class="ident">diversifier</span>().<span class="number">0</span>.<span class="ident">to_vec</span>();
@@ -1611,7 +1611,7 @@
     ];
 
     <span class="comment">// First try updating an existing received note into the database.</span>
-    <span class="kw">if</span> <span class="ident">stmts</span>.<span class="ident">stmt_update_received_note</span>.<span class="ident">execute_named</span>(<span class="kw-2">&amp;</span><span class="ident">sql_args</span>)<span class="question-mark">?</span> <span class="op">=</span><span class="op">=</span> <span class="number">0</span> {
+    <span class="kw">if</span> <span class="ident">stmts</span>.<span class="ident">stmt_update_received_note</span>.<span class="ident">execute_named</span>(<span class="kw-2">&amp;</span><span class="ident">sql_args</span>)<span class="question-mark">?</span> <span class="op">==</span> <span class="number">0</span> {
         <span class="comment">// It isn&#39;t there, so insert our note into the database.</span>
         <span class="ident">stmts</span>.<span class="ident">stmt_insert_received_note</span>.<span class="ident">execute_named</span>(<span class="kw-2">&amp;</span><span class="ident">sql_args</span>)<span class="question-mark">?</span>;
 
@@ -1636,7 +1636,7 @@
     <span class="ident">note_id</span>: <span class="ident">i64</span>,
     <span class="ident">witness</span>: <span class="kw-2">&amp;</span><span class="ident">IncrementalWitness</span><span class="op">&lt;</span><span class="ident">Node</span><span class="op">&gt;</span>,
     <span class="ident">height</span>: <span class="ident">BlockHeight</span>,
-) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident">SqliteClientError</span><span class="op">&gt;</span> {
+) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident">SqliteClientError</span><span class="op">&gt;</span> {
     <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">encoded</span> <span class="op">=</span> <span class="ident">Vec::new</span>();
     <span class="ident">witness</span>.<span class="ident">write</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">encoded</span>).<span class="ident">unwrap</span>();
 
@@ -1651,7 +1651,7 @@
 <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">prune_witnesses</span><span class="op">&lt;</span><span class="ident">P</span><span class="op">&gt;</span>(
     <span class="ident">stmts</span>: <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">DataConnStmtCache</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span>, <span class="ident">P</span><span class="op">&gt;</span>,
     <span class="ident">below_height</span>: <span class="ident">BlockHeight</span>,
-) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident">SqliteClientError</span><span class="op">&gt;</span> {
+) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident">SqliteClientError</span><span class="op">&gt;</span> {
     <span class="ident">stmts</span>
         .<span class="ident">stmt_prune_witnesses</span>
         .<span class="ident">execute</span>(<span class="kw-2">&amp;</span>[<span class="ident">u32::from</span>(<span class="ident">below_height</span>)])<span class="question-mark">?</span>;
@@ -1663,7 +1663,7 @@
 <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">update_expired_notes</span><span class="op">&lt;</span><span class="ident">P</span><span class="op">&gt;</span>(
     <span class="ident">stmts</span>: <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">DataConnStmtCache</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span>, <span class="ident">P</span><span class="op">&gt;</span>,
     <span class="ident">height</span>: <span class="ident">BlockHeight</span>,
-) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident">SqliteClientError</span><span class="op">&gt;</span> {
+) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident">SqliteClientError</span><span class="op">&gt;</span> {
     <span class="ident">stmts</span>.<span class="ident">stmt_update_expired</span>.<span class="ident">execute</span>(<span class="kw-2">&amp;</span>[<span class="ident">u32::from</span>(<span class="ident">height</span>)])<span class="question-mark">?</span>;
     <span class="prelude-val">Ok</span>(())
 }
@@ -1673,7 +1673,7 @@
     <span class="ident">stmts</span>: <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">DataConnStmtCache</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">P</span><span class="op">&gt;</span>,
     <span class="ident">output</span>: <span class="kw-2">&amp;</span><span class="ident">DecryptedOutput</span>,
     <span class="ident">tx_ref</span>: <span class="ident">i64</span>,
-) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident">SqliteClientError</span><span class="op">&gt;</span> {
+) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident">SqliteClientError</span><span class="op">&gt;</span> {
     <span class="kw">let</span> <span class="ident">output_index</span> <span class="op">=</span> <span class="ident">output</span>.<span class="ident">index</span> <span class="kw">as</span> <span class="ident">i64</span>;
     <span class="kw">let</span> <span class="ident">account</span> <span class="op">=</span> <span class="ident">output</span>.<span class="ident">account</span>.<span class="number">0</span> <span class="kw">as</span> <span class="ident">i64</span>;
     <span class="kw">let</span> <span class="ident">value</span> <span class="op">=</span> <span class="ident">output</span>.<span class="ident">note</span>.<span class="ident">value</span> <span class="kw">as</span> <span class="ident">i64</span>;
@@ -1690,7 +1690,7 @@
         <span class="kw-2">&amp;</span><span class="ident">output</span>.<span class="ident">memo</span>.<span class="ident">as_slice</span>(),
         <span class="ident">tx_ref</span>,
         <span class="ident">output_index</span>
-    ])<span class="question-mark">?</span> <span class="op">=</span><span class="op">=</span> <span class="number">0</span>
+    ])<span class="question-mark">?</span> <span class="op">==</span> <span class="number">0</span>
     {
         <span class="comment">// It isn&#39;t there, so insert.</span>
         <span class="ident">insert_sent_note</span>(
@@ -1724,7 +1724,7 @@
     <span class="ident">to</span>: <span class="kw-2">&amp;</span><span class="ident">RecipientAddress</span>,
     <span class="ident">value</span>: <span class="ident">Amount</span>,
     <span class="ident">memo</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="kw-2">&amp;</span><span class="ident">MemoBytes</span><span class="op">&gt;</span>,
-) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident">SqliteClientError</span><span class="op">&gt;</span> {
+) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident">SqliteClientError</span><span class="op">&gt;</span> {
     <span class="kw">let</span> <span class="ident">to_str</span> <span class="op">=</span> <span class="ident">to</span>.<span class="ident">encode</span>(<span class="kw-2">&amp;</span><span class="ident">stmts</span>.<span class="ident">wallet_db</span>.<span class="ident">params</span>);
     <span class="kw">let</span> <span class="ident">ivalue</span>: <span class="ident">i64</span> <span class="op">=</span> <span class="ident">value</span>.<span class="ident">into</span>();
     <span class="ident">stmts</span>.<span class="ident">stmt_insert_sent_note</span>.<span class="ident">execute</span>(<span class="macro">params!</span>[

@@ -116,7 +116,7 @@
     <span class="ident">height</span>: <span class="ident">BlockHeight</span>,
     <span class="ident">tx</span>: <span class="kw-2">&amp;</span><span class="ident">Transaction</span>,
     <span class="ident">extfvks</span>: <span class="kw-2">&amp;</span><span class="ident">HashMap</span><span class="op">&lt;</span><span class="ident">AccountId</span>, <span class="ident">ExtendedFullViewingKey</span><span class="op">&gt;</span>,
-) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">DecryptedOutput</span><span class="op">&gt;</span> {
+) -&gt; <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">DecryptedOutput</span><span class="op">&gt;</span> {
     <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">decrypted</span> <span class="op">=</span> <span class="macro">vec!</span>[];
 
     <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">bundle</span>) <span class="op">=</span> <span class="ident">tx</span>.<span class="ident">sapling_bundle</span>() {
@@ -127,10 +127,10 @@
             <span class="kw">for</span> (<span class="ident">index</span>, <span class="ident">output</span>) <span class="kw">in</span> <span class="ident">bundle</span>.<span class="ident">shielded_outputs</span>.<span class="ident">iter</span>().<span class="ident">enumerate</span>() {
                 <span class="kw">let</span> ((<span class="ident">note</span>, <span class="ident">to</span>, <span class="ident">memo</span>), <span class="ident">outgoing</span>) <span class="op">=</span>
                     <span class="kw">match</span> <span class="ident">try_sapling_note_decryption</span>(<span class="ident">params</span>, <span class="ident">height</span>, <span class="kw-2">&amp;</span><span class="ident">ivk</span>, <span class="ident">output</span>) {
-                        <span class="prelude-val">Some</span>(<span class="ident">ret</span>) <span class="op">=</span><span class="op">&gt;</span> (<span class="ident">ret</span>, <span class="bool-val">false</span>),
-                        <span class="prelude-val">None</span> <span class="op">=</span><span class="op">&gt;</span> <span class="kw">match</span> <span class="ident">try_sapling_output_recovery</span>(<span class="ident">params</span>, <span class="ident">height</span>, <span class="kw-2">&amp;</span><span class="ident">ovk</span>, <span class="ident">output</span>) {
-                            <span class="prelude-val">Some</span>(<span class="ident">ret</span>) <span class="op">=</span><span class="op">&gt;</span> (<span class="ident">ret</span>, <span class="bool-val">true</span>),
-                            <span class="prelude-val">None</span> <span class="op">=</span><span class="op">&gt;</span> <span class="kw">continue</span>,
+                        <span class="prelude-val">Some</span>(<span class="ident">ret</span>) =&gt; (<span class="ident">ret</span>, <span class="bool-val">false</span>),
+                        <span class="prelude-val">None</span> =&gt; <span class="kw">match</span> <span class="ident">try_sapling_output_recovery</span>(<span class="ident">params</span>, <span class="ident">height</span>, <span class="kw-2">&amp;</span><span class="ident">ovk</span>, <span class="ident">output</span>) {
+                            <span class="prelude-val">Some</span>(<span class="ident">ret</span>) =&gt; (<span class="ident">ret</span>, <span class="bool-val">true</span>),
+                            <span class="prelude-val">None</span> =&gt; <span class="kw">continue</span>,
                         },
                     };
 

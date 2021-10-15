@@ -569,9 +569,6 @@
 <span id="569">569</span>
 <span id="570">570</span>
 <span id="571">571</span>
-<span id="572">572</span>
-<span id="573">573</span>
-<span id="574">574</span>
 </pre><pre class="rust"><code><span class="doccomment">//! Structs and constants specific to the Sapling shielded pool.</span>
 
 <span class="kw">pub</span> <span class="kw">mod</span> <span class="ident">group_hash</span>;
@@ -612,7 +609,7 @@
 <span class="kw">pub</span> <span class="kw">const</span> <span class="ident">SAPLING_COMMITMENT_TREE_DEPTH_U8</span>: <span class="ident">u8</span> <span class="op">=</span> <span class="number">32</span>;
 
 <span class="doccomment">/// Compute a parent node in the Sapling commitment tree given its two children.</span>
-<span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">merkle_hash</span>(<span class="ident">depth</span>: <span class="ident">usize</span>, <span class="ident">lhs</span>: <span class="kw-2">&amp;</span>[<span class="ident">u8</span>; <span class="number">32</span>], <span class="ident">rhs</span>: <span class="kw-2">&amp;</span>[<span class="ident">u8</span>; <span class="number">32</span>]) <span class="op">-</span><span class="op">&gt;</span> [<span class="ident">u8</span>; <span class="number">32</span>] {
+<span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">merkle_hash</span>(<span class="ident">depth</span>: <span class="ident">usize</span>, <span class="ident">lhs</span>: <span class="kw-2">&amp;</span>[<span class="ident">u8</span>; <span class="number">32</span>], <span class="ident">rhs</span>: <span class="kw-2">&amp;</span>[<span class="ident">u8</span>; <span class="number">32</span>]) -&gt; [<span class="ident">u8</span>; <span class="number">32</span>] {
     <span class="kw">let</span> <span class="ident">lhs</span> <span class="op">=</span> {
         <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">tmp</span> <span class="op">=</span> [<span class="bool-val">false</span>; <span class="number">256</span>];
         <span class="kw">for</span> (<span class="ident">a</span>, <span class="ident">b</span>) <span class="kw">in</span> <span class="ident">tmp</span>.<span class="ident">iter_mut</span>().<span class="ident">zip</span>(<span class="ident">lhs</span>.<span class="ident">as_bits</span>::<span class="op">&lt;</span><span class="ident">Lsb0</span><span class="op">&gt;</span>()) {
@@ -652,43 +649,43 @@
 }
 
 <span class="kw">impl</span> <span class="ident">Node</span> {
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">new</span>(<span class="ident">repr</span>: [<span class="ident">u8</span>; <span class="number">32</span>]) <span class="op">-</span><span class="op">&gt;</span> <span class="self">Self</span> {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">new</span>(<span class="ident">repr</span>: [<span class="ident">u8</span>; <span class="number">32</span>]) -&gt; <span class="self">Self</span> {
         <span class="ident">Node</span> { <span class="ident">repr</span> }
     }
 }
 
 <span class="kw">impl</span> <span class="ident">incrementalmerkletree::Hashable</span> <span class="kw">for</span> <span class="ident">Node</span> {
-    <span class="kw">fn</span> <span class="ident">empty_leaf</span>() <span class="op">-</span><span class="op">&gt;</span> <span class="self">Self</span> {
+    <span class="kw">fn</span> <span class="ident">empty_leaf</span>() -&gt; <span class="self">Self</span> {
         <span class="ident">Node</span> {
             <span class="ident">repr</span>: <span class="ident">Note::uncommitted</span>().<span class="ident">to_repr</span>(),
         }
     }
 
-    <span class="kw">fn</span> <span class="ident">combine</span>(<span class="ident">altitude</span>: <span class="ident">Altitude</span>, <span class="ident">lhs</span>: <span class="kw-2">&amp;</span><span class="self">Self</span>, <span class="ident">rhs</span>: <span class="kw-2">&amp;</span><span class="self">Self</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="self">Self</span> {
+    <span class="kw">fn</span> <span class="ident">combine</span>(<span class="ident">altitude</span>: <span class="ident">Altitude</span>, <span class="ident">lhs</span>: <span class="kw-2">&amp;</span><span class="self">Self</span>, <span class="ident">rhs</span>: <span class="kw-2">&amp;</span><span class="self">Self</span>) -&gt; <span class="self">Self</span> {
         <span class="ident">Node</span> {
             <span class="ident">repr</span>: <span class="ident">merkle_hash</span>(<span class="ident">altitude</span>.<span class="ident">into</span>(), <span class="kw-2">&amp;</span><span class="ident">lhs</span>.<span class="ident">repr</span>, <span class="kw-2">&amp;</span><span class="ident">rhs</span>.<span class="ident">repr</span>),
         }
     }
 
-    <span class="kw">fn</span> <span class="ident">empty_root</span>(<span class="ident">altitude</span>: <span class="ident">Altitude</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="self">Self</span> {
+    <span class="kw">fn</span> <span class="ident">empty_root</span>(<span class="ident">altitude</span>: <span class="ident">Altitude</span>) -&gt; <span class="self">Self</span> {
         <span class="ident">EMPTY_ROOTS</span>[<span class="op">&lt;</span><span class="ident">usize</span><span class="op">&gt;</span><span class="ident">::from</span>(<span class="ident">altitude</span>)]
     }
 }
 
 <span class="kw">impl</span> <span class="ident">HashSer</span> <span class="kw">for</span> <span class="ident">Node</span> {
-    <span class="kw">fn</span> <span class="ident">read</span><span class="op">&lt;</span><span class="ident">R</span>: <span class="ident">Read</span><span class="op">&gt;</span>(<span class="kw-2">mut</span> <span class="ident">reader</span>: <span class="ident">R</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">io::Result</span><span class="op">&lt;</span><span class="self">Self</span><span class="op">&gt;</span> {
+    <span class="kw">fn</span> <span class="ident">read</span><span class="op">&lt;</span><span class="ident">R</span>: <span class="ident">Read</span><span class="op">&gt;</span>(<span class="kw-2">mut</span> <span class="ident">reader</span>: <span class="ident">R</span>) -&gt; <span class="ident">io::Result</span><span class="op">&lt;</span><span class="self">Self</span><span class="op">&gt;</span> {
         <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">repr</span> <span class="op">=</span> [<span class="number">0u8</span>; <span class="number">32</span>];
         <span class="ident">reader</span>.<span class="ident">read_exact</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">repr</span>)<span class="question-mark">?</span>;
         <span class="prelude-val">Ok</span>(<span class="ident">Node::new</span>(<span class="ident">repr</span>))
     }
 
-    <span class="kw">fn</span> <span class="ident">write</span><span class="op">&lt;</span><span class="ident">W</span>: <span class="ident">Write</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="kw-2">mut</span> <span class="ident">writer</span>: <span class="ident">W</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">io::Result</span><span class="op">&lt;</span>()<span class="op">&gt;</span> {
+    <span class="kw">fn</span> <span class="ident">write</span><span class="op">&lt;</span><span class="ident">W</span>: <span class="ident">Write</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="kw-2">mut</span> <span class="ident">writer</span>: <span class="ident">W</span>) -&gt; <span class="ident">io::Result</span><span class="op">&lt;</span>()<span class="op">&gt;</span> {
         <span class="ident">writer</span>.<span class="ident">write_all</span>(<span class="self">self</span>.<span class="ident">repr</span>.<span class="ident">as_ref</span>())
     }
 }
 
 <span class="kw">impl</span> <span class="ident">From</span><span class="op">&lt;</span><span class="ident">Node</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">bls12_381::Scalar</span> {
-    <span class="kw">fn</span> <span class="ident">from</span>(<span class="ident">node</span>: <span class="ident">Node</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="self">Self</span> {
+    <span class="kw">fn</span> <span class="ident">from</span>(<span class="ident">node</span>: <span class="ident">Node</span>) -&gt; <span class="self">Self</span> {
         <span class="comment">// Tree nodes should be in the prime field.</span>
         <span class="ident">bls12_381::Scalar::from_repr</span>(<span class="ident">node</span>.<span class="ident">repr</span>).<span class="ident">unwrap</span>()
     }
@@ -711,7 +708,7 @@
     <span class="ident">ar</span>: <span class="ident">jubjub::Fr</span>,
     <span class="ident">sighash</span>: <span class="kw-2">&amp;</span>[<span class="ident">u8</span>; <span class="number">32</span>],
     <span class="ident">rng</span>: <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">R</span>,
-) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">Signature</span> {
+) -&gt; <span class="ident">Signature</span> {
     <span class="ident">spend_sig_internal</span>(<span class="ident">ask</span>, <span class="ident">ar</span>, <span class="ident">sighash</span>, <span class="ident">rng</span>)
 }
 
@@ -720,7 +717,7 @@
     <span class="ident">ar</span>: <span class="ident">jubjub::Fr</span>,
     <span class="ident">sighash</span>: <span class="kw-2">&amp;</span>[<span class="ident">u8</span>; <span class="number">32</span>],
     <span class="ident">rng</span>: <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">R</span>,
-) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">Signature</span> {
+) -&gt; <span class="ident">Signature</span> {
     <span class="comment">// We compute `rsk`...</span>
     <span class="kw">let</span> <span class="ident">rsk</span> <span class="op">=</span> <span class="ident">ask</span>.<span class="ident">randomize</span>(<span class="ident">ar</span>);
 
@@ -743,7 +740,7 @@
 }
 
 <span class="kw">impl</span> <span class="ident">ValueCommitment</span> {
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">commitment</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">jubjub::SubgroupPoint</span> {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">commitment</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">jubjub::SubgroupPoint</span> {
         (<span class="ident">constants::VALUE_COMMITMENT_VALUE_GENERATOR</span> <span class="op">*</span> <span class="ident">jubjub::Fr::from</span>(<span class="self">self</span>.<span class="ident">value</span>))
             <span class="op">+</span> (<span class="ident">constants::VALUE_COMMITMENT_RANDOMNESS_GENERATOR</span> <span class="op">*</span> <span class="self">self</span>.<span class="ident">randomness</span>)
     }
@@ -756,7 +753,7 @@
 }
 
 <span class="kw">impl</span> <span class="ident">ProofGenerationKey</span> {
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">to_viewing_key</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">ViewingKey</span> {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">to_viewing_key</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">ViewingKey</span> {
         <span class="ident">ViewingKey</span> {
             <span class="ident">ak</span>: <span class="self">self</span>.<span class="ident">ak</span>,
             <span class="ident">nk</span>: <span class="ident">constants::PROOF_GENERATION_KEY_GENERATOR</span> <span class="op">*</span> <span class="self">self</span>.<span class="ident">nsk</span>,
@@ -771,11 +768,11 @@
 }
 
 <span class="kw">impl</span> <span class="ident">ViewingKey</span> {
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">rk</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">ar</span>: <span class="ident">jubjub::Fr</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">jubjub::SubgroupPoint</span> {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">rk</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">ar</span>: <span class="ident">jubjub::Fr</span>) -&gt; <span class="ident">jubjub::SubgroupPoint</span> {
         <span class="self">self</span>.<span class="ident">ak</span> <span class="op">+</span> <span class="ident">constants::SPENDING_KEY_GENERATOR</span> <span class="op">*</span> <span class="ident">ar</span>
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">ivk</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">SaplingIvk</span> {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">ivk</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">SaplingIvk</span> {
         <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">h</span> <span class="op">=</span> [<span class="number">0</span>; <span class="number">32</span>];
         <span class="ident">h</span>.<span class="ident">copy_from_slice</span>(
             <span class="ident">Blake2sParams::new</span>()
@@ -794,7 +791,7 @@
         <span class="ident">SaplingIvk</span>(<span class="ident">jubjub::Fr::from_repr</span>(<span class="ident">h</span>).<span class="ident">unwrap</span>())
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">to_payment_address</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">diversifier</span>: <span class="ident">Diversifier</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">PaymentAddress</span><span class="op">&gt;</span> {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">to_payment_address</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">diversifier</span>: <span class="ident">Diversifier</span>) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">PaymentAddress</span><span class="op">&gt;</span> {
         <span class="self">self</span>.<span class="ident">ivk</span>().<span class="ident">to_payment_address</span>(<span class="ident">diversifier</span>)
     }
 }
@@ -803,7 +800,7 @@
 <span class="kw">pub</span> <span class="kw">struct</span> <span class="ident">SaplingIvk</span>(<span class="kw">pub</span> <span class="ident">jubjub::Fr</span>);
 
 <span class="kw">impl</span> <span class="ident">SaplingIvk</span> {
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">to_payment_address</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">diversifier</span>: <span class="ident">Diversifier</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">PaymentAddress</span><span class="op">&gt;</span> {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">to_payment_address</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">diversifier</span>: <span class="ident">Diversifier</span>) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">PaymentAddress</span><span class="op">&gt;</span> {
         <span class="ident">diversifier</span>.<span class="ident">g_d</span>().<span class="ident">and_then</span>(<span class="op">|</span><span class="ident">g_d</span><span class="op">|</span> {
             <span class="kw">let</span> <span class="ident">pk_d</span> <span class="op">=</span> <span class="ident">g_d</span> <span class="op">*</span> <span class="self">self</span>.<span class="number">0</span>;
 
@@ -811,7 +808,7 @@
         })
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">to_repr</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) <span class="op">-</span><span class="op">&gt;</span> [<span class="ident">u8</span>; <span class="number">32</span>] {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">to_repr</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; [<span class="ident">u8</span>; <span class="number">32</span>] {
         <span class="self">self</span>.<span class="number">0</span>.<span class="ident">to_repr</span>()
     }
 }
@@ -820,7 +817,7 @@
 <span class="kw">pub</span> <span class="kw">struct</span> <span class="ident">Diversifier</span>(<span class="kw">pub</span> [<span class="ident">u8</span>; <span class="number">11</span>]);
 
 <span class="kw">impl</span> <span class="ident">Diversifier</span> {
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">g_d</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">jubjub::SubgroupPoint</span><span class="op">&gt;</span> {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">g_d</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">jubjub::SubgroupPoint</span><span class="op">&gt;</span> {
         <span class="ident">group_hash</span>(<span class="kw-2">&amp;</span><span class="self">self</span>.<span class="number">0</span>, <span class="ident">constants::KEY_DIVERSIFICATION_PERSONALIZATION</span>)
     }
 }
@@ -838,8 +835,8 @@
 }
 
 <span class="kw">impl</span> <span class="ident">PartialEq</span> <span class="kw">for</span> <span class="ident">PaymentAddress</span> {
-    <span class="kw">fn</span> <span class="ident">eq</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">other</span>: <span class="kw-2">&amp;</span><span class="self">Self</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">bool</span> {
-        <span class="self">self</span>.<span class="ident">pk_d</span> <span class="op">=</span><span class="op">=</span> <span class="ident">other</span>.<span class="ident">pk_d</span> <span class="op">&amp;&amp;</span> <span class="self">self</span>.<span class="ident">diversifier</span> <span class="op">=</span><span class="op">=</span> <span class="ident">other</span>.<span class="ident">diversifier</span>
+    <span class="kw">fn</span> <span class="ident">eq</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">other</span>: <span class="kw-2">&amp;</span><span class="self">Self</span>) -&gt; <span class="ident">bool</span> {
+        <span class="self">self</span>.<span class="ident">pk_d</span> <span class="op">==</span> <span class="ident">other</span>.<span class="ident">pk_d</span> <span class="op">&amp;&amp;</span> <span class="self">self</span>.<span class="ident">diversifier</span> <span class="op">==</span> <span class="ident">other</span>.<span class="ident">diversifier</span>
     }
 }
 
@@ -847,7 +844,7 @@
     <span class="doccomment">/// Constructs a PaymentAddress from a diversifier and a Jubjub point.</span>
     <span class="doccomment">///</span>
     <span class="doccomment">/// Returns None if `pk_d` is the identity.</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">from_parts</span>(<span class="ident">diversifier</span>: <span class="ident">Diversifier</span>, <span class="ident">pk_d</span>: <span class="ident">jubjub::SubgroupPoint</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="self">Self</span><span class="op">&gt;</span> {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">from_parts</span>(<span class="ident">diversifier</span>: <span class="ident">Diversifier</span>, <span class="ident">pk_d</span>: <span class="ident">jubjub::SubgroupPoint</span>) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="self">Self</span><span class="op">&gt;</span> {
         <span class="kw">if</span> <span class="ident">pk_d</span>.<span class="ident">is_identity</span>().<span class="ident">into</span>() {
             <span class="prelude-val">None</span>
         } <span class="kw">else</span> {
@@ -862,12 +859,12 @@
     <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">from_parts_unchecked</span>(
         <span class="ident">diversifier</span>: <span class="ident">Diversifier</span>,
         <span class="ident">pk_d</span>: <span class="ident">jubjub::SubgroupPoint</span>,
-    ) <span class="op">-</span><span class="op">&gt;</span> <span class="self">Self</span> {
+    ) -&gt; <span class="self">Self</span> {
         <span class="ident">PaymentAddress</span> { <span class="ident">pk_d</span>, <span class="ident">diversifier</span> }
     }
 
     <span class="doccomment">/// Parses a PaymentAddress from bytes.</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">from_bytes</span>(<span class="ident">bytes</span>: <span class="kw-2">&amp;</span>[<span class="ident">u8</span>; <span class="number">43</span>]) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="self">Self</span><span class="op">&gt;</span> {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">from_bytes</span>(<span class="ident">bytes</span>: <span class="kw-2">&amp;</span>[<span class="ident">u8</span>; <span class="number">43</span>]) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="self">Self</span><span class="op">&gt;</span> {
         <span class="kw">let</span> <span class="ident">diversifier</span> <span class="op">=</span> {
             <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">tmp</span> <span class="op">=</span> [<span class="number">0</span>; <span class="number">11</span>];
             <span class="ident">tmp</span>.<span class="ident">copy_from_slice</span>(<span class="kw-2">&amp;</span><span class="ident">bytes</span>[<span class="number">0</span>..<span class="number">11</span>]);
@@ -885,7 +882,7 @@
     }
 
     <span class="doccomment">/// Returns the byte encoding of this `PaymentAddress`.</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">to_bytes</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) <span class="op">-</span><span class="op">&gt;</span> [<span class="ident">u8</span>; <span class="number">43</span>] {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">to_bytes</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; [<span class="ident">u8</span>; <span class="number">43</span>] {
         <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">bytes</span> <span class="op">=</span> [<span class="number">0</span>; <span class="number">43</span>];
         <span class="ident">bytes</span>[<span class="number">0</span>..<span class="number">11</span>].<span class="ident">copy_from_slice</span>(<span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">diversifier</span>.<span class="number">0</span>);
         <span class="ident">bytes</span>[<span class="number">11</span>..].<span class="ident">copy_from_slice</span>(<span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">pk_d</span>.<span class="ident">to_bytes</span>());
@@ -893,20 +890,20 @@
     }
 
     <span class="doccomment">/// Returns the [`Diversifier`] for this `PaymentAddress`.</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">diversifier</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="kw-2">&amp;</span><span class="ident">Diversifier</span> {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">diversifier</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span><span class="ident">Diversifier</span> {
         <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">diversifier</span>
     }
 
     <span class="doccomment">/// Returns `pk_d` for this `PaymentAddress`.</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">pk_d</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="kw-2">&amp;</span><span class="ident">jubjub::SubgroupPoint</span> {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">pk_d</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span><span class="ident">jubjub::SubgroupPoint</span> {
         <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">pk_d</span>
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">g_d</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">jubjub::SubgroupPoint</span><span class="op">&gt;</span> {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">g_d</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">jubjub::SubgroupPoint</span><span class="op">&gt;</span> {
         <span class="self">self</span>.<span class="ident">diversifier</span>.<span class="ident">g_d</span>()
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">create_note</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">value</span>: <span class="ident">u64</span>, <span class="ident">rseed</span>: <span class="ident">Rseed</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">Note</span><span class="op">&gt;</span> {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">create_note</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">value</span>: <span class="ident">u64</span>, <span class="ident">rseed</span>: <span class="ident">Rseed</span>) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">Note</span><span class="op">&gt;</span> {
         <span class="self">self</span>.<span class="ident">g_d</span>().<span class="ident">map</span>(<span class="op">|</span><span class="ident">g_d</span><span class="op">|</span> <span class="ident">Note</span> {
             <span class="ident">value</span>,
             <span class="ident">rseed</span>,
@@ -932,22 +929,22 @@
 <span class="kw">pub</span> <span class="kw">struct</span> <span class="ident">Nullifier</span>(<span class="kw">pub</span> [<span class="ident">u8</span>; <span class="number">32</span>]);
 
 <span class="kw">impl</span> <span class="ident">Nullifier</span> {
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">from_slice</span>(<span class="ident">bytes</span>: <span class="kw-2">&amp;</span>[<span class="ident">u8</span>]) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Nullifier</span>, <span class="ident">TryFromSliceError</span><span class="op">&gt;</span> {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">from_slice</span>(<span class="ident">bytes</span>: <span class="kw-2">&amp;</span>[<span class="ident">u8</span>]) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Nullifier</span>, <span class="ident">TryFromSliceError</span><span class="op">&gt;</span> {
         <span class="ident">bytes</span>.<span class="ident">try_into</span>().<span class="ident">map</span>(<span class="ident">Nullifier</span>)
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">to_vec</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span> {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">to_vec</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span> {
         <span class="self">self</span>.<span class="number">0</span>.<span class="ident">to_vec</span>()
     }
 }
 <span class="kw">impl</span> <span class="ident">AsRef</span><span class="op">&lt;</span>[<span class="ident">u8</span>]<span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">Nullifier</span> {
-    <span class="kw">fn</span> <span class="ident">as_ref</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="kw-2">&amp;</span>[<span class="ident">u8</span>] {
+    <span class="kw">fn</span> <span class="ident">as_ref</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>[<span class="ident">u8</span>] {
         <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="number">0</span>
     }
 }
 
 <span class="kw">impl</span> <span class="ident">ConstantTimeEq</span> <span class="kw">for</span> <span class="ident">Nullifier</span> {
-    <span class="kw">fn</span> <span class="ident">ct_eq</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">other</span>: <span class="kw-2">&amp;</span><span class="self">Self</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">Choice</span> {
+    <span class="kw">fn</span> <span class="ident">ct_eq</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">other</span>: <span class="kw-2">&amp;</span><span class="self">Self</span>) -&gt; <span class="ident">Choice</span> {
         <span class="self">self</span>.<span class="number">0</span>.<span class="ident">ct_eq</span>(<span class="kw-2">&amp;</span><span class="ident">other</span>.<span class="number">0</span>)
     }
 }
@@ -958,7 +955,7 @@
 <span class="kw">impl</span> <span class="ident">TryFrom</span><span class="op">&lt;</span><span class="ident">u64</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">NoteValue</span> {
     <span class="kw">type</span> <span class="ident">Error</span> <span class="op">=</span> ();
 
-    <span class="kw">fn</span> <span class="ident">try_from</span>(<span class="ident">value</span>: <span class="ident">u64</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="self">Self</span>, <span class="ident"><span class="self">Self</span>::Error</span><span class="op">&gt;</span> {
+    <span class="kw">fn</span> <span class="ident">try_from</span>(<span class="ident">value</span>: <span class="ident">u64</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="self">Self</span>, <span class="ident"><span class="self">Self</span>::Error</span><span class="op">&gt;</span> {
         <span class="kw">if</span> <span class="ident">value</span> <span class="op">&lt;</span><span class="op">=</span> <span class="ident">MAX_MONEY</span> <span class="kw">as</span> <span class="ident">u64</span> {
             <span class="prelude-val">Ok</span>(<span class="ident">NoteValue</span>(<span class="ident">value</span>))
         } <span class="kw">else</span> {
@@ -968,7 +965,7 @@
 }
 
 <span class="kw">impl</span> <span class="ident">From</span><span class="op">&lt;</span><span class="ident">NoteValue</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">u64</span> {
-    <span class="kw">fn</span> <span class="ident">from</span>(<span class="ident">value</span>: <span class="ident">NoteValue</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">u64</span> {
+    <span class="kw">fn</span> <span class="ident">from</span>(<span class="ident">value</span>: <span class="ident">NoteValue</span>) -&gt; <span class="ident">u64</span> {
         <span class="ident">value</span>.<span class="number">0</span>
     }
 }
@@ -986,23 +983,23 @@
 }
 
 <span class="kw">impl</span> <span class="ident">PartialEq</span> <span class="kw">for</span> <span class="ident">Note</span> {
-    <span class="kw">fn</span> <span class="ident">eq</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">other</span>: <span class="kw-2">&amp;</span><span class="self">Self</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">bool</span> {
-        <span class="self">self</span>.<span class="ident">value</span> <span class="op">=</span><span class="op">=</span> <span class="ident">other</span>.<span class="ident">value</span>
-            <span class="op">&amp;&amp;</span> <span class="self">self</span>.<span class="ident">g_d</span> <span class="op">=</span><span class="op">=</span> <span class="ident">other</span>.<span class="ident">g_d</span>
-            <span class="op">&amp;&amp;</span> <span class="self">self</span>.<span class="ident">pk_d</span> <span class="op">=</span><span class="op">=</span> <span class="ident">other</span>.<span class="ident">pk_d</span>
-            <span class="op">&amp;&amp;</span> <span class="self">self</span>.<span class="ident">rcm</span>() <span class="op">=</span><span class="op">=</span> <span class="ident">other</span>.<span class="ident">rcm</span>()
+    <span class="kw">fn</span> <span class="ident">eq</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">other</span>: <span class="kw-2">&amp;</span><span class="self">Self</span>) -&gt; <span class="ident">bool</span> {
+        <span class="self">self</span>.<span class="ident">value</span> <span class="op">==</span> <span class="ident">other</span>.<span class="ident">value</span>
+            <span class="op">&amp;&amp;</span> <span class="self">self</span>.<span class="ident">g_d</span> <span class="op">==</span> <span class="ident">other</span>.<span class="ident">g_d</span>
+            <span class="op">&amp;&amp;</span> <span class="self">self</span>.<span class="ident">pk_d</span> <span class="op">==</span> <span class="ident">other</span>.<span class="ident">pk_d</span>
+            <span class="op">&amp;&amp;</span> <span class="self">self</span>.<span class="ident">rcm</span>() <span class="op">==</span> <span class="ident">other</span>.<span class="ident">rcm</span>()
     }
 }
 
 <span class="kw">impl</span> <span class="ident">Note</span> {
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">uncommitted</span>() <span class="op">-</span><span class="op">&gt;</span> <span class="ident">bls12_381::Scalar</span> {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">uncommitted</span>() -&gt; <span class="ident">bls12_381::Scalar</span> {
         <span class="comment">// The smallest u-coordinate that is not on the curve</span>
         <span class="comment">// is one.</span>
         <span class="ident">bls12_381::Scalar::one</span>()
     }
 
     <span class="doccomment">/// Computes the note commitment, returning the full point.</span>
-    <span class="kw">fn</span> <span class="ident">cm_full_point</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">jubjub::SubgroupPoint</span> {
+    <span class="kw">fn</span> <span class="ident">cm_full_point</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">jubjub::SubgroupPoint</span> {
         <span class="comment">// Calculate the note contents, as bytes</span>
         <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">note_contents</span> <span class="op">=</span> <span class="macro">vec!</span>[];
 
@@ -1024,7 +1021,7 @@
             <span class="ident">Personalization::NoteCommitment</span>,
             <span class="ident">note_contents</span>
                 .<span class="ident">into_iter</span>()
-                .<span class="ident">flat_map</span>(<span class="op">|</span><span class="ident">byte</span><span class="op">|</span> (<span class="number">0</span>..<span class="number">8</span>).<span class="ident">map</span>(<span class="kw">move</span> <span class="op">|</span><span class="ident">i</span><span class="op">|</span> ((<span class="ident">byte</span> <span class="op">&gt;</span><span class="op">&gt;</span> <span class="ident">i</span>) <span class="op">&amp;</span> <span class="number">1</span>) <span class="op">=</span><span class="op">=</span> <span class="number">1</span>)),
+                .<span class="ident">flat_map</span>(<span class="op">|</span><span class="ident">byte</span><span class="op">|</span> (<span class="number">0</span>..<span class="number">8</span>).<span class="ident">map</span>(<span class="kw">move</span> <span class="op">|</span><span class="ident">i</span><span class="op">|</span> ((<span class="ident">byte</span> <span class="op">&gt;</span><span class="op">&gt;</span> <span class="ident">i</span>) <span class="op">&amp;</span> <span class="number">1</span>) <span class="op">==</span> <span class="number">1</span>)),
         );
 
         <span class="comment">// Compute final commitment</span>
@@ -1033,7 +1030,7 @@
 
     <span class="doccomment">/// Computes the nullifier given the viewing key and</span>
     <span class="doccomment">/// note position</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">nf</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">viewing_key</span>: <span class="kw-2">&amp;</span><span class="ident">ViewingKey</span>, <span class="ident">position</span>: <span class="ident">u64</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">Nullifier</span> {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">nf</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">viewing_key</span>: <span class="kw-2">&amp;</span><span class="ident">ViewingKey</span>, <span class="ident">position</span>: <span class="ident">u64</span>) -&gt; <span class="ident">Nullifier</span> {
         <span class="comment">// Compute rho = cm + position.G</span>
         <span class="kw">let</span> <span class="ident">rho</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">cm_full_point</span>()
             <span class="op">+</span> (<span class="ident">constants::NULLIFIER_POSITION_GENERATOR</span> <span class="op">*</span> <span class="ident">jubjub::Fr::from</span>(<span class="ident">position</span>));
@@ -1053,7 +1050,7 @@
     }
 
     <span class="doccomment">/// Computes the note commitment</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">cmu</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">bls12_381::Scalar</span> {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">cmu</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">bls12_381::Scalar</span> {
         <span class="comment">// The commitment is in the prime order subgroup, so mapping the</span>
         <span class="comment">// commitment to the u-coordinate is an injective encoding.</span>
         <span class="ident">jubjub::ExtendedPoint::from</span>(<span class="self">self</span>.<span class="ident">cm_full_point</span>())
@@ -1061,31 +1058,31 @@
             .<span class="ident">get_u</span>()
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">rcm</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">jubjub::Fr</span> {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">rcm</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">jubjub::Fr</span> {
         <span class="kw">match</span> <span class="self">self</span>.<span class="ident">rseed</span> {
-            <span class="ident">Rseed::BeforeZip212</span>(<span class="ident">rcm</span>) <span class="op">=</span><span class="op">&gt;</span> <span class="ident">rcm</span>,
-            <span class="ident">Rseed::AfterZip212</span>(<span class="ident">rseed</span>) <span class="op">=</span><span class="op">&gt;</span> {
+            <span class="ident">Rseed::BeforeZip212</span>(<span class="ident">rcm</span>) =&gt; <span class="ident">rcm</span>,
+            <span class="ident">Rseed::AfterZip212</span>(<span class="ident">rseed</span>) =&gt; {
                 <span class="ident">jubjub::Fr::from_bytes_wide</span>(<span class="ident">prf_expand</span>(<span class="kw-2">&amp;</span><span class="ident">rseed</span>, <span class="kw-2">&amp;</span>[<span class="number">0x04</span>]).<span class="ident">as_array</span>())
             }
         }
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">generate_or_derive_esk</span><span class="op">&lt;</span><span class="ident">R</span>: <span class="ident">RngCore</span> <span class="op">+</span> <span class="ident">CryptoRng</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">rng</span>: <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">R</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">jubjub::Fr</span> {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">generate_or_derive_esk</span><span class="op">&lt;</span><span class="ident">R</span>: <span class="ident">RngCore</span> <span class="op">+</span> <span class="ident">CryptoRng</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">rng</span>: <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">R</span>) -&gt; <span class="ident">jubjub::Fr</span> {
         <span class="self">self</span>.<span class="ident">generate_or_derive_esk_internal</span>(<span class="ident">rng</span>)
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">generate_or_derive_esk_internal</span><span class="op">&lt;</span><span class="ident">R</span>: <span class="ident">RngCore</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">rng</span>: <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">R</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">jubjub::Fr</span> {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">generate_or_derive_esk_internal</span><span class="op">&lt;</span><span class="ident">R</span>: <span class="ident">RngCore</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">rng</span>: <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">R</span>) -&gt; <span class="ident">jubjub::Fr</span> {
         <span class="kw">match</span> <span class="self">self</span>.<span class="ident">derive_esk</span>() {
-            <span class="prelude-val">None</span> <span class="op">=</span><span class="op">&gt;</span> <span class="ident">jubjub::Fr::random</span>(<span class="ident">rng</span>),
-            <span class="prelude-val">Some</span>(<span class="ident">esk</span>) <span class="op">=</span><span class="op">&gt;</span> <span class="ident">esk</span>,
+            <span class="prelude-val">None</span> =&gt; <span class="ident">jubjub::Fr::random</span>(<span class="ident">rng</span>),
+            <span class="prelude-val">Some</span>(<span class="ident">esk</span>) =&gt; <span class="ident">esk</span>,
         }
     }
 
     <span class="doccomment">/// Returns the derived `esk` if this note was created after ZIP 212 activated.</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">derive_esk</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">jubjub::Fr</span><span class="op">&gt;</span> {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">derive_esk</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">jubjub::Fr</span><span class="op">&gt;</span> {
         <span class="kw">match</span> <span class="self">self</span>.<span class="ident">rseed</span> {
-            <span class="ident">Rseed::BeforeZip212</span>(<span class="kw">_</span>) <span class="op">=</span><span class="op">&gt;</span> <span class="prelude-val">None</span>,
-            <span class="ident">Rseed::AfterZip212</span>(<span class="ident">rseed</span>) <span class="op">=</span><span class="op">&gt;</span> <span class="prelude-val">Some</span>(<span class="ident">jubjub::Fr::from_bytes_wide</span>(
+            <span class="ident">Rseed::BeforeZip212</span>(<span class="kw">_</span>) =&gt; <span class="prelude-val">None</span>,
+            <span class="ident">Rseed::AfterZip212</span>(<span class="ident">rseed</span>) =&gt; <span class="prelude-val">Some</span>(<span class="ident">jubjub::Fr::from_bytes_wide</span>(
                 <span class="ident">prf_expand</span>(<span class="kw-2">&amp;</span><span class="ident">rseed</span>, <span class="kw-2">&amp;</span>[<span class="number">0x05</span>]).<span class="ident">as_array</span>(),
             )),
         }
@@ -1105,7 +1102,7 @@
     <span class="kw">use</span> <span class="kw">super</span>::{<span class="ident">Node</span>, <span class="ident">Note</span>, <span class="ident">NoteValue</span>, <span class="ident">PaymentAddress</span>, <span class="ident">Rseed</span>};
 
     <span class="macro">prop_compose!</span> {
-        <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">arb_note_value</span>()(<span class="ident">value</span> <span class="kw">in</span> <span class="number">0u64</span>..<span class="op">=</span><span class="ident">MAX_MONEY</span> <span class="kw">as</span> <span class="ident">u64</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">NoteValue</span> {
+        <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">arb_note_value</span>()(<span class="ident">value</span> <span class="kw">in</span> <span class="number">0u64</span>..<span class="op">=</span><span class="ident">MAX_MONEY</span> <span class="kw">as</span> <span class="ident">u64</span>) -&gt; <span class="ident">NoteValue</span> {
             <span class="ident">NoteValue::try_from</span>(<span class="ident">value</span>).<span class="ident">unwrap</span>()
         }
     }
@@ -1114,20 +1111,17 @@
         <span class="doccomment">/// The</span>
         <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">arb_positive_note_value</span>(<span class="ident">bound</span>: <span class="ident">u64</span>)(
             <span class="ident">value</span> <span class="kw">in</span> <span class="number">1u64</span>..<span class="op">=</span>(<span class="ident">min</span>(<span class="ident">bound</span>, <span class="ident">MAX_MONEY</span> <span class="kw">as</span> <span class="ident">u64</span>))
-        ) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">NoteValue</span> {
+        ) -&gt; <span class="ident">NoteValue</span> {
             <span class="ident">NoteValue::try_from</span>(<span class="ident">value</span>).<span class="ident">unwrap</span>()
         }
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">arb_payment_address</span>() <span class="op">-</span><span class="op">&gt;</span> <span class="kw">impl</span> <span class="ident">Strategy</span><span class="op">&lt;</span><span class="ident">Value</span> <span class="op">=</span> <span class="ident">PaymentAddress</span><span class="op">&gt;</span> {
-        <span class="ident">arb_extended_spending_key</span>()
-            .<span class="ident">prop_map</span>(<span class="op">|</span><span class="ident">sk</span><span class="op">|</span> <span class="ident">sk</span>.<span class="ident">default_address</span>().<span class="ident">map</span>(<span class="op">|</span>(<span class="kw">_</span>, <span class="ident">a</span>)<span class="op">|</span> <span class="ident">a</span>))
-            .<span class="ident">prop_filter</span>(<span class="string">&quot;A valid payment address is required.&quot;</span>, <span class="op">|</span><span class="ident">r</span><span class="op">|</span> <span class="ident">r</span>.<span class="ident">is_ok</span>())
-            .<span class="ident">prop_map</span>(<span class="op">|</span><span class="ident">r</span><span class="op">|</span> <span class="ident">r</span>.<span class="ident">unwrap</span>())
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">arb_payment_address</span>() -&gt; <span class="kw">impl</span> <span class="ident">Strategy</span><span class="op">&lt;</span><span class="ident">Value</span> <span class="op">=</span> <span class="ident">PaymentAddress</span><span class="op">&gt;</span> {
+        <span class="ident">arb_extended_spending_key</span>().<span class="ident">prop_map</span>(<span class="op">|</span><span class="ident">sk</span><span class="op">|</span> <span class="ident">sk</span>.<span class="ident">default_address</span>().<span class="number">1</span>)
     }
 
     <span class="macro">prop_compose!</span> {
-        <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">arb_node</span>()(<span class="ident">value</span> <span class="kw">in</span> <span class="ident">prop::array::uniform32</span>(<span class="ident">prop::num::u8::ANY</span>)) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">Node</span> {
+        <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">arb_node</span>()(<span class="ident">value</span> <span class="kw">in</span> <span class="ident">prop::array::uniform32</span>(<span class="ident">prop::num::u8::ANY</span>)) -&gt; <span class="ident">Node</span> {
             <span class="ident">Node::new</span>(<span class="ident">value</span>)
         }
     }
@@ -1136,7 +1130,7 @@
         <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">arb_note</span>(<span class="ident">value</span>: <span class="ident">NoteValue</span>)(
             <span class="ident">addr</span> <span class="kw">in</span> <span class="ident">arb_payment_address</span>(),
             <span class="ident">rseed</span> <span class="kw">in</span> <span class="ident">prop::array::uniform32</span>(<span class="ident">prop::num::u8::ANY</span>).<span class="ident">prop_map</span>(<span class="ident">Rseed::AfterZip212</span>)
-        ) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">Note</span> {
+        ) -&gt; <span class="ident">Note</span> {
             <span class="ident">Note</span> {
                 <span class="ident">value</span>: <span class="ident">value</span>.<span class="ident">into</span>(),
                 <span class="ident">g_d</span>: <span class="ident">addr</span>.<span class="ident">g_d</span>().<span class="ident">unwrap</span>(), <span class="comment">// this unwrap is safe because arb_payment_address always generates an address witha valid g_d</span>

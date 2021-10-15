@@ -1139,7 +1139,7 @@
     <span class="kw-2">mut</span> <span class="ident">cs</span>: <span class="ident">CS</span>,
     <span class="ident">base</span>: <span class="ident">FixedGenerator</span>,
     <span class="ident">by</span>: <span class="kw-2">&amp;</span>[<span class="ident">Boolean</span>],
-) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">EdwardsPoint</span>, <span class="ident">SynthesisError</span><span class="op">&gt;</span>
+) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">EdwardsPoint</span>, <span class="ident">SynthesisError</span><span class="op">&gt;</span>
 <span class="kw">where</span>
     <span class="ident">CS</span>: <span class="ident">ConstraintSystem</span><span class="op">&lt;</span><span class="ident">bls12_381::Scalar</span><span class="op">&gt;</span>,
 {
@@ -1184,15 +1184,15 @@
 }
 
 <span class="kw">impl</span> <span class="ident">EdwardsPoint</span> {
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">get_u</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="kw-2">&amp;</span><span class="ident">AllocatedNum</span><span class="op">&lt;</span><span class="ident">bls12_381::Scalar</span><span class="op">&gt;</span> {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">get_u</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span><span class="ident">AllocatedNum</span><span class="op">&lt;</span><span class="ident">bls12_381::Scalar</span><span class="op">&gt;</span> {
         <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">u</span>
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">get_v</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="kw-2">&amp;</span><span class="ident">AllocatedNum</span><span class="op">&lt;</span><span class="ident">bls12_381::Scalar</span><span class="op">&gt;</span> {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">get_v</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span><span class="ident">AllocatedNum</span><span class="op">&lt;</span><span class="ident">bls12_381::Scalar</span><span class="op">&gt;</span> {
         <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">v</span>
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">assert_not_small_order</span><span class="op">&lt;</span><span class="ident">CS</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="kw-2">mut</span> <span class="ident">cs</span>: <span class="ident">CS</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident">SynthesisError</span><span class="op">&gt;</span>
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">assert_not_small_order</span><span class="op">&lt;</span><span class="ident">CS</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="kw-2">mut</span> <span class="ident">cs</span>: <span class="ident">CS</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident">SynthesisError</span><span class="op">&gt;</span>
     <span class="kw">where</span>
         <span class="ident">CS</span>: <span class="ident">ConstraintSystem</span><span class="op">&lt;</span><span class="ident">bls12_381::Scalar</span><span class="op">&gt;</span>,
     {
@@ -1209,7 +1209,7 @@
         <span class="prelude-val">Ok</span>(())
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">inputize</span><span class="op">&lt;</span><span class="ident">CS</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="kw-2">mut</span> <span class="ident">cs</span>: <span class="ident">CS</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident">SynthesisError</span><span class="op">&gt;</span>
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">inputize</span><span class="op">&lt;</span><span class="ident">CS</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="kw-2">mut</span> <span class="ident">cs</span>: <span class="ident">CS</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident">SynthesisError</span><span class="op">&gt;</span>
     <span class="kw">where</span>
         <span class="ident">CS</span>: <span class="ident">ConstraintSystem</span><span class="op">&lt;</span><span class="ident">bls12_381::Scalar</span><span class="op">&gt;</span>,
     {
@@ -1220,7 +1220,7 @@
     }
 
     <span class="doccomment">/// This converts the point into a representation.</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">repr</span><span class="op">&lt;</span><span class="ident">CS</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="kw-2">mut</span> <span class="ident">cs</span>: <span class="ident">CS</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">Boolean</span><span class="op">&gt;</span>, <span class="ident">SynthesisError</span><span class="op">&gt;</span>
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">repr</span><span class="op">&lt;</span><span class="ident">CS</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="kw-2">mut</span> <span class="ident">cs</span>: <span class="ident">CS</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">Boolean</span><span class="op">&gt;</span>, <span class="ident">SynthesisError</span><span class="op">&gt;</span>
     <span class="kw">where</span>
         <span class="ident">CS</span>: <span class="ident">ConstraintSystem</span><span class="op">&lt;</span><span class="ident">bls12_381::Scalar</span><span class="op">&gt;</span>,
     {
@@ -1238,7 +1238,7 @@
 
     <span class="doccomment">/// This &#39;witnesses&#39; a point inside the constraint system.</span>
     <span class="doccomment">/// It guarantees the point is on the curve.</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">witness</span><span class="op">&lt;</span><span class="ident">CS</span><span class="op">&gt;</span>(<span class="kw-2">mut</span> <span class="ident">cs</span>: <span class="ident">CS</span>, <span class="ident">p</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">jubjub::ExtendedPoint</span><span class="op">&gt;</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="self">Self</span>, <span class="ident">SynthesisError</span><span class="op">&gt;</span>
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">witness</span><span class="op">&lt;</span><span class="ident">CS</span><span class="op">&gt;</span>(<span class="kw-2">mut</span> <span class="ident">cs</span>: <span class="ident">CS</span>, <span class="ident">p</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">jubjub::ExtendedPoint</span><span class="op">&gt;</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="self">Self</span>, <span class="ident">SynthesisError</span><span class="op">&gt;</span>
     <span class="kw">where</span>
         <span class="ident">CS</span>: <span class="ident">ConstraintSystem</span><span class="op">&lt;</span><span class="ident">bls12_381::Scalar</span><span class="op">&gt;</span>,
     {
@@ -1259,7 +1259,7 @@
         <span class="kw-2">&amp;</span><span class="self">self</span>,
         <span class="kw-2">mut</span> <span class="ident">cs</span>: <span class="ident">CS</span>,
         <span class="ident">condition</span>: <span class="kw-2">&amp;</span><span class="ident">Boolean</span>,
-    ) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="self">Self</span>, <span class="ident">SynthesisError</span><span class="op">&gt;</span>
+    ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="self">Self</span>, <span class="ident">SynthesisError</span><span class="op">&gt;</span>
     <span class="kw">where</span>
         <span class="ident">CS</span>: <span class="ident">ConstraintSystem</span><span class="op">&lt;</span><span class="ident">bls12_381::Scalar</span><span class="op">&gt;</span>,
     {
@@ -1311,7 +1311,7 @@
     <span class="doccomment">/// Performs a scalar multiplication of this twisted Edwards</span>
     <span class="doccomment">/// point by a scalar represented as a sequence of booleans</span>
     <span class="doccomment">/// in little-endian bit order.</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">mul</span><span class="op">&lt;</span><span class="ident">CS</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="kw-2">mut</span> <span class="ident">cs</span>: <span class="ident">CS</span>, <span class="ident">by</span>: <span class="kw-2">&amp;</span>[<span class="ident">Boolean</span>]) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="self">Self</span>, <span class="ident">SynthesisError</span><span class="op">&gt;</span>
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">mul</span><span class="op">&lt;</span><span class="ident">CS</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="kw-2">mut</span> <span class="ident">cs</span>: <span class="ident">CS</span>, <span class="ident">by</span>: <span class="kw-2">&amp;</span>[<span class="ident">Boolean</span>]) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="self">Self</span>, <span class="ident">SynthesisError</span><span class="op">&gt;</span>
     <span class="kw">where</span>
         <span class="ident">CS</span>: <span class="ident">ConstraintSystem</span><span class="op">&lt;</span><span class="ident">bls12_381::Scalar</span><span class="op">&gt;</span>,
     {
@@ -1362,7 +1362,7 @@
         <span class="kw-2">mut</span> <span class="ident">cs</span>: <span class="ident">CS</span>,
         <span class="ident">u</span>: <span class="kw-2">&amp;</span><span class="ident">AllocatedNum</span><span class="op">&lt;</span><span class="ident">bls12_381::Scalar</span><span class="op">&gt;</span>,
         <span class="ident">v</span>: <span class="kw-2">&amp;</span><span class="ident">AllocatedNum</span><span class="op">&lt;</span><span class="ident">bls12_381::Scalar</span><span class="op">&gt;</span>,
-    ) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="self">Self</span>, <span class="ident">SynthesisError</span><span class="op">&gt;</span>
+    ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="self">Self</span>, <span class="ident">SynthesisError</span><span class="op">&gt;</span>
     <span class="kw">where</span>
         <span class="ident">CS</span>: <span class="ident">ConstraintSystem</span><span class="op">&lt;</span><span class="ident">bls12_381::Scalar</span><span class="op">&gt;</span>,
     {
@@ -1386,7 +1386,7 @@
         })
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">double</span><span class="op">&lt;</span><span class="ident">CS</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="kw-2">mut</span> <span class="ident">cs</span>: <span class="ident">CS</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="self">Self</span>, <span class="ident">SynthesisError</span><span class="op">&gt;</span>
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">double</span><span class="op">&lt;</span><span class="ident">CS</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="kw-2">mut</span> <span class="ident">cs</span>: <span class="ident">CS</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="self">Self</span>, <span class="ident">SynthesisError</span><span class="op">&gt;</span>
     <span class="kw">where</span>
         <span class="ident">CS</span>: <span class="ident">ConstraintSystem</span><span class="op">&lt;</span><span class="ident">bls12_381::Scalar</span><span class="op">&gt;</span>,
     {
@@ -1482,7 +1482,7 @@
     }
 
     <span class="doccomment">/// Perform addition between any two points</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">add</span><span class="op">&lt;</span><span class="ident">CS</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="kw-2">mut</span> <span class="ident">cs</span>: <span class="ident">CS</span>, <span class="ident">other</span>: <span class="kw-2">&amp;</span><span class="self">Self</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="self">Self</span>, <span class="ident">SynthesisError</span><span class="op">&gt;</span>
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">add</span><span class="op">&lt;</span><span class="ident">CS</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="kw-2">mut</span> <span class="ident">cs</span>: <span class="ident">CS</span>, <span class="ident">other</span>: <span class="kw-2">&amp;</span><span class="self">Self</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="self">Self</span>, <span class="ident">SynthesisError</span><span class="op">&gt;</span>
     <span class="kw">where</span>
         <span class="ident">CS</span>: <span class="ident">ConstraintSystem</span><span class="op">&lt;</span><span class="ident">bls12_381::Scalar</span><span class="op">&gt;</span>,
     {
@@ -1591,7 +1591,7 @@
     <span class="doccomment">/// Converts an element in the prime order subgroup into</span>
     <span class="doccomment">/// a point in the birationally equivalent twisted</span>
     <span class="doccomment">/// Edwards curve.</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">into_edwards</span><span class="op">&lt;</span><span class="ident">CS</span><span class="op">&gt;</span>(<span class="self">self</span>, <span class="kw-2">mut</span> <span class="ident">cs</span>: <span class="ident">CS</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">EdwardsPoint</span>, <span class="ident">SynthesisError</span><span class="op">&gt;</span>
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">into_edwards</span><span class="op">&lt;</span><span class="ident">CS</span><span class="op">&gt;</span>(<span class="self">self</span>, <span class="kw-2">mut</span> <span class="ident">cs</span>: <span class="ident">CS</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">EdwardsPoint</span>, <span class="ident">SynthesisError</span><span class="op">&gt;</span>
     <span class="kw">where</span>
         <span class="ident">CS</span>: <span class="ident">ConstraintSystem</span><span class="op">&lt;</span><span class="ident">bls12_381::Scalar</span><span class="op">&gt;</span>,
     {
@@ -1645,13 +1645,13 @@
     <span class="doccomment">/// in Montgomery, does not check that it&#39;s</span>
     <span class="doccomment">/// on the curve. Useful for constants and</span>
     <span class="doccomment">/// window table lookups.</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">interpret_unchecked</span>(<span class="ident">x</span>: <span class="ident">Num</span><span class="op">&lt;</span><span class="ident">bls12_381::Scalar</span><span class="op">&gt;</span>, <span class="ident">y</span>: <span class="ident">Num</span><span class="op">&lt;</span><span class="ident">bls12_381::Scalar</span><span class="op">&gt;</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="self">Self</span> {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">interpret_unchecked</span>(<span class="ident">x</span>: <span class="ident">Num</span><span class="op">&lt;</span><span class="ident">bls12_381::Scalar</span><span class="op">&gt;</span>, <span class="ident">y</span>: <span class="ident">Num</span><span class="op">&lt;</span><span class="ident">bls12_381::Scalar</span><span class="op">&gt;</span>) -&gt; <span class="self">Self</span> {
         <span class="ident">MontgomeryPoint</span> { <span class="ident">x</span>, <span class="ident">y</span> }
     }
 
     <span class="doccomment">/// Performs an affine point addition, not defined for</span>
     <span class="doccomment">/// points with the same x-coordinate.</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">add</span><span class="op">&lt;</span><span class="ident">CS</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="kw-2">mut</span> <span class="ident">cs</span>: <span class="ident">CS</span>, <span class="ident">other</span>: <span class="kw-2">&amp;</span><span class="self">Self</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="self">Self</span>, <span class="ident">SynthesisError</span><span class="op">&gt;</span>
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">add</span><span class="op">&lt;</span><span class="ident">CS</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="kw-2">mut</span> <span class="ident">cs</span>: <span class="ident">CS</span>, <span class="ident">other</span>: <span class="kw-2">&amp;</span><span class="self">Self</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="self">Self</span>, <span class="ident">SynthesisError</span><span class="op">&gt;</span>
     <span class="kw">where</span>
         <span class="ident">CS</span>: <span class="ident">ConstraintSystem</span><span class="op">&lt;</span><span class="ident">bls12_381::Scalar</span><span class="op">&gt;</span>,
     {
@@ -1766,8 +1766,8 @@
             <span class="kw">let</span> <span class="ident">q</span> <span class="op">=</span> <span class="ident">p</span>.<span class="ident">into_edwards</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">cs</span>).<span class="ident">unwrap</span>();
 
             <span class="macro">assert!</span>(<span class="ident">cs</span>.<span class="ident">is_satisfied</span>());
-            <span class="macro">assert!</span>(<span class="ident">q</span>.<span class="ident">u</span>.<span class="ident">get_value</span>().<span class="ident">unwrap</span>() <span class="op">=</span><span class="op">=</span> <span class="ident">u</span>);
-            <span class="macro">assert!</span>(<span class="ident">q</span>.<span class="ident">v</span>.<span class="ident">get_value</span>().<span class="ident">unwrap</span>() <span class="op">=</span><span class="op">=</span> <span class="ident">v</span>);
+            <span class="macro">assert!</span>(<span class="ident">q</span>.<span class="ident">u</span>.<span class="ident">get_value</span>().<span class="ident">unwrap</span>() <span class="op">==</span> <span class="ident">u</span>);
+            <span class="macro">assert!</span>(<span class="ident">q</span>.<span class="ident">v</span>.<span class="ident">get_value</span>().<span class="ident">unwrap</span>() <span class="op">==</span> <span class="ident">v</span>);
 
             <span class="ident">cs</span>.<span class="ident">set</span>(<span class="string">&quot;u/num&quot;</span>, <span class="ident">bls12_381::Scalar::random</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">rng</span>));
             <span class="macro">assert_eq!</span>(<span class="ident">cs</span>.<span class="ident">which_is_unsatisfied</span>().<span class="ident">unwrap</span>(), <span class="string">&quot;u computation&quot;</span>);
@@ -2029,8 +2029,8 @@
 
             <span class="macro">assert!</span>(<span class="ident">cs</span>.<span class="ident">is_satisfied</span>());
 
-            <span class="macro">assert!</span>(<span class="ident">p3</span>.<span class="ident">u</span>.<span class="ident">get_value</span>().<span class="ident">unwrap</span>() <span class="op">=</span><span class="op">=</span> <span class="ident">u2</span>);
-            <span class="macro">assert!</span>(<span class="ident">p3</span>.<span class="ident">v</span>.<span class="ident">get_value</span>().<span class="ident">unwrap</span>() <span class="op">=</span><span class="op">=</span> <span class="ident">v2</span>);
+            <span class="macro">assert!</span>(<span class="ident">p3</span>.<span class="ident">u</span>.<span class="ident">get_value</span>().<span class="ident">unwrap</span>() <span class="op">==</span> <span class="ident">u2</span>);
+            <span class="macro">assert!</span>(<span class="ident">p3</span>.<span class="ident">v</span>.<span class="ident">get_value</span>().<span class="ident">unwrap</span>() <span class="op">==</span> <span class="ident">v2</span>);
 
             <span class="kw">let</span> <span class="ident">uppercase_u</span> <span class="op">=</span> <span class="ident">cs</span>.<span class="ident">get</span>(<span class="string">&quot;addition/U/num&quot;</span>);
             <span class="ident">cs</span>.<span class="ident">set</span>(<span class="string">&quot;addition/U/num&quot;</span>, <span class="ident">bls12_381::Scalar::random</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">rng</span>));
@@ -2083,8 +2083,8 @@
 
             <span class="macro">assert!</span>(<span class="ident">cs</span>.<span class="ident">is_satisfied</span>());
 
-            <span class="macro">assert!</span>(<span class="ident">p2</span>.<span class="ident">u</span>.<span class="ident">get_value</span>().<span class="ident">unwrap</span>() <span class="op">=</span><span class="op">=</span> <span class="ident">u1</span>);
-            <span class="macro">assert!</span>(<span class="ident">p2</span>.<span class="ident">v</span>.<span class="ident">get_value</span>().<span class="ident">unwrap</span>() <span class="op">=</span><span class="op">=</span> <span class="ident">v1</span>);
+            <span class="macro">assert!</span>(<span class="ident">p2</span>.<span class="ident">u</span>.<span class="ident">get_value</span>().<span class="ident">unwrap</span>() <span class="op">==</span> <span class="ident">u1</span>);
+            <span class="macro">assert!</span>(<span class="ident">p2</span>.<span class="ident">v</span>.<span class="ident">get_value</span>().<span class="ident">unwrap</span>() <span class="op">==</span> <span class="ident">v1</span>);
         }
     }
 
@@ -2126,8 +2126,8 @@
 
             <span class="macro">assert!</span>(<span class="ident">cs</span>.<span class="ident">is_satisfied</span>());
 
-            <span class="macro">assert!</span>(<span class="ident">p3</span>.<span class="ident">x</span>.<span class="ident">get_value</span>().<span class="ident">unwrap</span>() <span class="op">=</span><span class="op">=</span> <span class="ident">x2</span>);
-            <span class="macro">assert!</span>(<span class="ident">p3</span>.<span class="ident">y</span>.<span class="ident">get_value</span>().<span class="ident">unwrap</span>() <span class="op">=</span><span class="op">=</span> <span class="ident">y2</span>);
+            <span class="macro">assert!</span>(<span class="ident">p3</span>.<span class="ident">x</span>.<span class="ident">get_value</span>().<span class="ident">unwrap</span>() <span class="op">==</span> <span class="ident">x2</span>);
+            <span class="macro">assert!</span>(<span class="ident">p3</span>.<span class="ident">y</span>.<span class="ident">get_value</span>().<span class="ident">unwrap</span>() <span class="op">==</span> <span class="ident">y2</span>);
 
             <span class="ident">cs</span>.<span class="ident">set</span>(<span class="string">&quot;addition/yprime/num&quot;</span>, <span class="ident">bls12_381::Scalar::random</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">rng</span>));
             <span class="macro">assert_eq!</span>(<span class="ident">cs</span>.<span class="ident">which_is_unsatisfied</span>(), <span class="prelude-val">Some</span>(<span class="string">&quot;addition/evaluate yprime&quot;</span>));
@@ -2151,7 +2151,7 @@
 
             <span class="kw">let</span> <span class="ident">p</span> <span class="op">=</span> <span class="ident">EdwardsPoint::witness</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">cs</span>, <span class="prelude-val">Some</span>(<span class="ident">p</span>)).<span class="ident">unwrap</span>();
             <span class="macro">assert!</span>(<span class="ident">cs</span>.<span class="ident">is_satisfied</span>());
-            <span class="macro">assert!</span>(<span class="ident">p</span>.<span class="ident">assert_not_small_order</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">cs</span>).<span class="ident">is_err</span>() <span class="op">=</span><span class="op">=</span> <span class="ident">is_small_order</span>);
+            <span class="macro">assert!</span>(<span class="ident">p</span>.<span class="ident">assert_not_small_order</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">cs</span>).<span class="ident">is_err</span>() <span class="op">==</span> <span class="ident">is_small_order</span>);
         };
 
         <span class="kw">let</span> <span class="ident">check_small_order_from_u64s</span> <span class="op">=</span> <span class="op">|</span><span class="ident">u</span>, <span class="ident">v</span><span class="op">|</span> {

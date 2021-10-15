@@ -295,14 +295,14 @@
 <span class="kw">const</span> <span class="ident">ZCASH_SHIELDED_OUTPUTS_HASH_PERSONALIZATION</span>: <span class="kw-2">&amp;</span>[<span class="ident">u8</span>; <span class="number">16</span>] <span class="op">=</span> <span class="string">b&quot;ZcashSOutputHash&quot;</span>;
 
 <span class="macro">macro_rules!</span> <span class="ident">update_u32</span> {
-    (<span class="macro-nonterminal">$</span><span class="macro-nonterminal">h</span>:<span class="ident">expr</span>, <span class="macro-nonterminal">$</span><span class="macro-nonterminal">value</span>:<span class="ident">expr</span>, <span class="macro-nonterminal">$</span><span class="macro-nonterminal">tmp</span>:<span class="ident">expr</span>) <span class="op">=</span><span class="op">&gt;</span> {
+    (<span class="macro-nonterminal">$</span><span class="macro-nonterminal">h</span>:<span class="ident">expr</span>, <span class="macro-nonterminal">$</span><span class="macro-nonterminal">value</span>:<span class="ident">expr</span>, <span class="macro-nonterminal">$</span><span class="macro-nonterminal">tmp</span>:<span class="ident">expr</span>) =&gt; {
         (<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="macro-nonterminal">$</span><span class="macro-nonterminal">tmp</span>[..<span class="number">4</span>]).<span class="ident">write_u32</span>::<span class="op">&lt;</span><span class="ident">LittleEndian</span><span class="op">&gt;</span>(<span class="macro-nonterminal">$</span><span class="macro-nonterminal">value</span>).<span class="ident">unwrap</span>();
         <span class="macro-nonterminal">$</span><span class="macro-nonterminal">h</span>.<span class="ident">update</span>(<span class="kw-2">&amp;</span><span class="macro-nonterminal">$</span><span class="macro-nonterminal">tmp</span>[..<span class="number">4</span>]);
     };
 }
 
 <span class="macro">macro_rules!</span> <span class="ident">update_hash</span> {
-    (<span class="macro-nonterminal">$</span><span class="macro-nonterminal">h</span>:<span class="ident">expr</span>, <span class="macro-nonterminal">$</span><span class="macro-nonterminal">cond</span>:<span class="ident">expr</span>, <span class="macro-nonterminal">$</span><span class="macro-nonterminal">value</span>:<span class="ident">expr</span>) <span class="op">=</span><span class="op">&gt;</span> {
+    (<span class="macro-nonterminal">$</span><span class="macro-nonterminal">h</span>:<span class="ident">expr</span>, <span class="macro-nonterminal">$</span><span class="macro-nonterminal">cond</span>:<span class="ident">expr</span>, <span class="macro-nonterminal">$</span><span class="macro-nonterminal">value</span>:<span class="ident">expr</span>) =&gt; {
         <span class="kw">if</span> <span class="macro-nonterminal">$</span><span class="macro-nonterminal">cond</span> {
             <span class="macro-nonterminal">$</span><span class="macro-nonterminal">h</span>.<span class="ident">update</span>(<span class="kw-2">&amp;</span><span class="macro-nonterminal">$</span><span class="macro-nonterminal">value</span>.<span class="ident">as_ref</span>());
         } <span class="kw">else</span> {
@@ -311,7 +311,7 @@
     };
 }
 
-<span class="kw">fn</span> <span class="ident">prevout_hash</span><span class="op">&lt;</span><span class="ident">TA</span>: <span class="ident">transparent::Authorization</span><span class="op">&gt;</span>(<span class="ident">vin</span>: <span class="kw-2">&amp;</span>[<span class="ident">TxIn</span><span class="op">&lt;</span><span class="ident">TA</span><span class="op">&gt;</span>]) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">Blake2bHash</span> {
+<span class="kw">fn</span> <span class="ident">prevout_hash</span><span class="op">&lt;</span><span class="ident">TA</span>: <span class="ident">transparent::Authorization</span><span class="op">&gt;</span>(<span class="ident">vin</span>: <span class="kw-2">&amp;</span>[<span class="ident">TxIn</span><span class="op">&lt;</span><span class="ident">TA</span><span class="op">&gt;</span>]) -&gt; <span class="ident">Blake2bHash</span> {
     <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">data</span> <span class="op">=</span> <span class="ident">Vec::with_capacity</span>(<span class="ident">vin</span>.<span class="ident">len</span>() <span class="op">*</span> <span class="number">36</span>);
     <span class="kw">for</span> <span class="ident">t_in</span> <span class="kw">in</span> <span class="ident">vin</span> {
         <span class="ident">t_in</span>.<span class="ident">prevout</span>.<span class="ident">write</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">data</span>).<span class="ident">unwrap</span>();
@@ -322,7 +322,7 @@
         .<span class="ident">hash</span>(<span class="kw-2">&amp;</span><span class="ident">data</span>)
 }
 
-<span class="kw">fn</span> <span class="ident">sequence_hash</span><span class="op">&lt;</span><span class="ident">TA</span>: <span class="ident">transparent::Authorization</span><span class="op">&gt;</span>(<span class="ident">vin</span>: <span class="kw-2">&amp;</span>[<span class="ident">TxIn</span><span class="op">&lt;</span><span class="ident">TA</span><span class="op">&gt;</span>]) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">Blake2bHash</span> {
+<span class="kw">fn</span> <span class="ident">sequence_hash</span><span class="op">&lt;</span><span class="ident">TA</span>: <span class="ident">transparent::Authorization</span><span class="op">&gt;</span>(<span class="ident">vin</span>: <span class="kw-2">&amp;</span>[<span class="ident">TxIn</span><span class="op">&lt;</span><span class="ident">TA</span><span class="op">&gt;</span>]) -&gt; <span class="ident">Blake2bHash</span> {
     <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">data</span> <span class="op">=</span> <span class="ident">Vec::with_capacity</span>(<span class="ident">vin</span>.<span class="ident">len</span>() <span class="op">*</span> <span class="number">4</span>);
     <span class="kw">for</span> <span class="ident">t_in</span> <span class="kw">in</span> <span class="ident">vin</span> {
         (<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">data</span>)
@@ -335,7 +335,7 @@
         .<span class="ident">hash</span>(<span class="kw-2">&amp;</span><span class="ident">data</span>)
 }
 
-<span class="kw">fn</span> <span class="ident">outputs_hash</span>(<span class="ident">vout</span>: <span class="kw-2">&amp;</span>[<span class="ident">TxOut</span>]) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">Blake2bHash</span> {
+<span class="kw">fn</span> <span class="ident">outputs_hash</span>(<span class="ident">vout</span>: <span class="kw-2">&amp;</span>[<span class="ident">TxOut</span>]) -&gt; <span class="ident">Blake2bHash</span> {
     <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">data</span> <span class="op">=</span> <span class="ident">Vec::with_capacity</span>(<span class="ident">vout</span>.<span class="ident">len</span>() <span class="op">*</span> (<span class="number">4</span> <span class="op">+</span> <span class="number">1</span>));
     <span class="kw">for</span> <span class="ident">t_out</span> <span class="kw">in</span> <span class="ident">vout</span> {
         <span class="ident">t_out</span>.<span class="ident">write</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">data</span>).<span class="ident">unwrap</span>();
@@ -346,7 +346,7 @@
         .<span class="ident">hash</span>(<span class="kw-2">&amp;</span><span class="ident">data</span>)
 }
 
-<span class="kw">fn</span> <span class="ident">single_output_hash</span>(<span class="ident">tx_out</span>: <span class="kw-2">&amp;</span><span class="ident">TxOut</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">Blake2bHash</span> {
+<span class="kw">fn</span> <span class="ident">single_output_hash</span>(<span class="ident">tx_out</span>: <span class="kw-2">&amp;</span><span class="ident">TxOut</span>) -&gt; <span class="ident">Blake2bHash</span> {
     <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">data</span> <span class="op">=</span> <span class="macro">vec!</span>[];
     <span class="ident">tx_out</span>.<span class="ident">write</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">data</span>).<span class="ident">unwrap</span>();
     <span class="ident">Blake2bParams::new</span>()
@@ -359,7 +359,7 @@
     <span class="ident">consensus_branch_id</span>: <span class="ident">BranchId</span>,
     <span class="ident">joinsplits</span>: <span class="kw-2">&amp;</span>[<span class="ident">JsDescription</span>],
     <span class="ident">joinsplit_pubkey</span>: <span class="kw-2">&amp;</span>[<span class="ident">u8</span>; <span class="number">32</span>],
-) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">Blake2bHash</span> {
+) -&gt; <span class="ident">Blake2bHash</span> {
     <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">data</span> <span class="op">=</span> <span class="ident">Vec::with_capacity</span>(
         <span class="ident">joinsplits</span>.<span class="ident">len</span>()
             <span class="op">*</span> <span class="kw">if</span> <span class="ident">consensus_branch_id</span>.<span class="ident">sprout_uses_groth_proofs</span>() {
@@ -380,7 +380,7 @@
 
 <span class="kw">fn</span> <span class="ident">shielded_spends_hash</span><span class="op">&lt;</span><span class="ident">A</span>: <span class="ident">sapling::Authorization</span><span class="op">&lt;</span><span class="ident">Proof</span> <span class="op">=</span> <span class="ident">GrothProofBytes</span><span class="op">&gt;</span><span class="op">&gt;</span>(
     <span class="ident">shielded_spends</span>: <span class="kw-2">&amp;</span>[<span class="ident">SpendDescription</span><span class="op">&lt;</span><span class="ident">A</span><span class="op">&gt;</span>],
-) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">Blake2bHash</span> {
+) -&gt; <span class="ident">Blake2bHash</span> {
     <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">data</span> <span class="op">=</span> <span class="ident">Vec::with_capacity</span>(<span class="ident">shielded_spends</span>.<span class="ident">len</span>() <span class="op">*</span> <span class="number">384</span>);
     <span class="kw">for</span> <span class="ident">s_spend</span> <span class="kw">in</span> <span class="ident">shielded_spends</span> {
         <span class="ident">data</span>.<span class="ident">extend_from_slice</span>(<span class="kw-2">&amp;</span><span class="ident">s_spend</span>.<span class="ident">cv</span>.<span class="ident">to_bytes</span>());
@@ -395,7 +395,7 @@
         .<span class="ident">hash</span>(<span class="kw-2">&amp;</span><span class="ident">data</span>)
 }
 
-<span class="kw">fn</span> <span class="ident">shielded_outputs_hash</span>(<span class="ident">shielded_outputs</span>: <span class="kw-2">&amp;</span>[<span class="ident">OutputDescription</span><span class="op">&lt;</span><span class="ident">GrothProofBytes</span><span class="op">&gt;</span>]) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">Blake2bHash</span> {
+<span class="kw">fn</span> <span class="ident">shielded_outputs_hash</span>(<span class="ident">shielded_outputs</span>: <span class="kw-2">&amp;</span>[<span class="ident">OutputDescription</span><span class="op">&lt;</span><span class="ident">GrothProofBytes</span><span class="op">&gt;</span>]) -&gt; <span class="ident">Blake2bHash</span> {
     <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">data</span> <span class="op">=</span> <span class="ident">Vec::with_capacity</span>(<span class="ident">shielded_outputs</span>.<span class="ident">len</span>() <span class="op">*</span> <span class="number">948</span>);
     <span class="kw">for</span> <span class="ident">s_out</span> <span class="kw">in</span> <span class="ident">shielded_outputs</span> {
         <span class="ident">s_out</span>.<span class="ident">write_v4</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">data</span>).<span class="ident">unwrap</span>();
@@ -413,7 +413,7 @@
     <span class="ident">tx</span>: <span class="kw-2">&amp;</span><span class="ident">TransactionData</span><span class="op">&lt;</span><span class="ident">A</span><span class="op">&gt;</span>,
     <span class="ident">hash_type</span>: <span class="ident">u32</span>,
     <span class="ident">signable_input</span>: <span class="kw-2">&amp;</span><span class="ident">SignableInput</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span>,
-) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">Blake2bHash</span> {
+) -&gt; <span class="ident">Blake2bHash</span> {
     <span class="kw">if</span> <span class="ident">tx</span>.<span class="ident">version</span>.<span class="ident">has_overwinter</span>() {
         <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">personal</span> <span class="op">=</span> [<span class="number">0</span>; <span class="number">16</span>];
         (<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">personal</span>[..<span class="number">12</span>]).<span class="ident">copy_from_slice</span>(<span class="ident">ZCASH_SIGHASH_PERSONALIZATION_PREFIX</span>);
@@ -431,7 +431,7 @@
         <span class="macro">update_u32!</span>(<span class="ident">h</span>, <span class="ident">tx</span>.<span class="ident">version</span>.<span class="ident">version_group_id</span>(), <span class="ident">tmp</span>);
         <span class="macro">update_hash!</span>(
             <span class="ident">h</span>,
-            <span class="ident">hash_type</span> <span class="op">&amp;</span> <span class="ident">SIGHASH_ANYONECANPAY</span> <span class="op">=</span><span class="op">=</span> <span class="number">0</span>,
+            <span class="ident">hash_type</span> <span class="op">&amp;</span> <span class="ident">SIGHASH_ANYONECANPAY</span> <span class="op">==</span> <span class="number">0</span>,
             <span class="ident">prevout_hash</span>(
                 <span class="ident">tx</span>.<span class="ident">transparent_bundle</span>
                     .<span class="ident">as_ref</span>()
@@ -440,7 +440,7 @@
         );
         <span class="macro">update_hash!</span>(
             <span class="ident">h</span>,
-            (<span class="ident">hash_type</span> <span class="op">&amp;</span> <span class="ident">SIGHASH_ANYONECANPAY</span>) <span class="op">=</span><span class="op">=</span> <span class="number">0</span>
+            (<span class="ident">hash_type</span> <span class="op">&amp;</span> <span class="ident">SIGHASH_ANYONECANPAY</span>) <span class="op">==</span> <span class="number">0</span>
                 <span class="op">&amp;&amp;</span> (<span class="ident">hash_type</span> <span class="op">&amp;</span> <span class="ident">SIGHASH_MASK</span>) <span class="op">!</span><span class="op">=</span> <span class="ident">SIGHASH_SINGLE</span>
                 <span class="op">&amp;&amp;</span> (<span class="ident">hash_type</span> <span class="op">&amp;</span> <span class="ident">SIGHASH_MASK</span>) <span class="op">!</span><span class="op">=</span> <span class="ident">SIGHASH_NONE</span>,
             <span class="ident">sequence_hash</span>(
@@ -461,12 +461,12 @@
                 )
                 .<span class="ident">as_bytes</span>(),
             );
-        } <span class="kw">else</span> <span class="kw">if</span> (<span class="ident">hash_type</span> <span class="op">&amp;</span> <span class="ident">SIGHASH_MASK</span>) <span class="op">=</span><span class="op">=</span> <span class="ident">SIGHASH_SINGLE</span> {
+        } <span class="kw">else</span> <span class="kw">if</span> (<span class="ident">hash_type</span> <span class="op">&amp;</span> <span class="ident">SIGHASH_MASK</span>) <span class="op">==</span> <span class="ident">SIGHASH_SINGLE</span> {
             <span class="kw">match</span> (<span class="ident">tx</span>.<span class="ident">transparent_bundle</span>.<span class="ident">as_ref</span>(), <span class="ident">signable_input</span>) {
-                (<span class="prelude-val">Some</span>(<span class="ident">b</span>), <span class="ident">SignableInput::Transparent</span>(<span class="ident">input</span>)) <span class="kw">if</span> <span class="ident">input</span>.<span class="ident">index</span>() <span class="op">&lt;</span> <span class="ident">b</span>.<span class="ident">vout</span>.<span class="ident">len</span>() <span class="op">=</span><span class="op">&gt;</span> {
+                (<span class="prelude-val">Some</span>(<span class="ident">b</span>), <span class="ident">SignableInput::Transparent</span>(<span class="ident">input</span>)) <span class="kw">if</span> <span class="ident">input</span>.<span class="ident">index</span>() <span class="op">&lt;</span> <span class="ident">b</span>.<span class="ident">vout</span>.<span class="ident">len</span>() =&gt; {
                     <span class="ident">h</span>.<span class="ident">update</span>(<span class="ident">single_output_hash</span>(<span class="kw-2">&amp;</span><span class="ident">b</span>.<span class="ident">vout</span>[<span class="ident">input</span>.<span class="ident">index</span>()]).<span class="ident">as_bytes</span>())
                 }
-                <span class="kw">_</span> <span class="op">=</span><span class="op">&gt;</span> <span class="ident">h</span>.<span class="ident">update</span>(<span class="kw-2">&amp;</span>[<span class="number">0</span>; <span class="number">32</span>]),
+                <span class="kw">_</span> =&gt; <span class="ident">h</span>.<span class="ident">update</span>(<span class="kw-2">&amp;</span>[<span class="number">0</span>; <span class="number">32</span>]),
             };
         } <span class="kw">else</span> {
             <span class="ident">h</span>.<span class="ident">update</span>(<span class="kw-2">&amp;</span>[<span class="number">0</span>; <span class="number">32</span>]);
@@ -511,8 +511,8 @@
         <span class="macro">update_u32!</span>(<span class="ident">h</span>, <span class="ident">hash_type</span>, <span class="ident">tmp</span>);
 
         <span class="kw">match</span> <span class="ident">signable_input</span> {
-            <span class="ident">SignableInput::Shielded</span> <span class="op">=</span><span class="op">&gt;</span> (),
-            <span class="ident">SignableInput::Transparent</span>(<span class="ident">input</span>) <span class="op">=</span><span class="op">&gt;</span> {
+            <span class="ident">SignableInput::Shielded</span> =&gt; (),
+            <span class="ident">SignableInput::Transparent</span>(<span class="ident">input</span>) =&gt; {
                 <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">bundle</span>) <span class="op">=</span> <span class="ident">tx</span>.<span class="ident">transparent_bundle</span>.<span class="ident">as_ref</span>() {
                     <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">data</span> <span class="op">=</span> <span class="macro">vec!</span>[];
                     <span class="ident">bundle</span>.<span class="ident">vin</span>[<span class="ident">input</span>.<span class="ident">index</span>()].<span class="ident">prevout</span>.<span class="ident">write</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">data</span>).<span class="ident">unwrap</span>();
@@ -530,7 +530,7 @@
             }
 
             <span class="attribute">#[<span class="ident">cfg</span>(<span class="ident">feature</span> <span class="op">=</span> <span class="string">&quot;zfuture&quot;</span>)]</span>
-            <span class="ident">SignableInput::Tze</span>(<span class="kw">_</span>) <span class="op">=</span><span class="op">&gt;</span> {
+            <span class="ident">SignableInput::Tze</span>(<span class="kw">_</span>) =&gt; {
                 <span class="macro">panic!</span>(<span class="string">&quot;A request has been made to sign a TZE input, but the transaction version is not ZFuture&quot;</span>);
             }
         }

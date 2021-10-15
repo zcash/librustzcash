@@ -733,7 +733,7 @@
 
 <span class="kw">use</span> <span class="kw">crate</span>::{<span class="ident">error::SqliteClientError</span>, <span class="ident">WalletDb</span>};
 
-<span class="kw">fn</span> <span class="ident">to_spendable_note</span>(<span class="ident">row</span>: <span class="kw-2">&amp;</span><span class="ident">Row</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">SpendableNote</span>, <span class="ident">SqliteClientError</span><span class="op">&gt;</span> {
+<span class="kw">fn</span> <span class="ident">to_spendable_note</span>(<span class="ident">row</span>: <span class="kw-2">&amp;</span><span class="ident">Row</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">SpendableNote</span>, <span class="ident">SqliteClientError</span><span class="op">&gt;</span> {
     <span class="kw">let</span> <span class="ident">diversifier</span> <span class="op">=</span> {
         <span class="kw">let</span> <span class="ident">d</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="kw">_</span><span class="op">&gt;</span> <span class="op">=</span> <span class="ident">row</span>.<span class="ident">get</span>(<span class="number">0</span>)<span class="question-mark">?</span>;
         <span class="kw">if</span> <span class="ident">d</span>.<span class="ident">len</span>() <span class="op">!</span><span class="op">=</span> <span class="number">11</span> {
@@ -780,7 +780,7 @@
     <span class="ident">wdb</span>: <span class="kw-2">&amp;</span><span class="ident">WalletDb</span><span class="op">&lt;</span><span class="ident">P</span><span class="op">&gt;</span>,
     <span class="ident">account</span>: <span class="ident">AccountId</span>,
     <span class="ident">anchor_height</span>: <span class="ident">BlockHeight</span>,
-) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">SpendableNote</span><span class="op">&gt;</span>, <span class="ident">SqliteClientError</span><span class="op">&gt;</span> {
+) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">SpendableNote</span><span class="op">&gt;</span>, <span class="ident">SqliteClientError</span><span class="op">&gt;</span> {
     <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">stmt_select_notes</span> <span class="op">=</span> <span class="ident">wdb</span>.<span class="ident">conn</span>.<span class="ident">prepare</span>(
         <span class="string">&quot;SELECT diversifier, value, rcm, witness
             FROM received_notes
@@ -809,7 +809,7 @@
     <span class="ident">account</span>: <span class="ident">AccountId</span>,
     <span class="ident">target_value</span>: <span class="ident">Amount</span>,
     <span class="ident">anchor_height</span>: <span class="ident">BlockHeight</span>,
-) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">SpendableNote</span><span class="op">&gt;</span>, <span class="ident">SqliteClientError</span><span class="op">&gt;</span> {
+) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">SpendableNote</span><span class="op">&gt;</span>, <span class="ident">SqliteClientError</span><span class="op">&gt;</span> {
     <span class="comment">// The goal of this SQL statement is to select the oldest notes until the required</span>
     <span class="comment">// value has been reached, and then fetch the witnesses at the desired height for the</span>
     <span class="comment">// selected notes. This is achieved in several steps:</span>
@@ -894,10 +894,10 @@
         <span class="ident">AccountId</span>, <span class="ident">BlockDb</span>, <span class="ident">DataConnStmtCache</span>, <span class="ident">WalletDb</span>,
     };
 
-    <span class="kw">fn</span> <span class="ident">test_prover</span>() <span class="op">-</span><span class="op">&gt;</span> <span class="kw">impl</span> <span class="ident">TxProver</span> {
+    <span class="kw">fn</span> <span class="ident">test_prover</span>() -&gt; <span class="kw">impl</span> <span class="ident">TxProver</span> {
         <span class="kw">match</span> <span class="ident">LocalTxProver::with_default_location</span>() {
-            <span class="prelude-val">Some</span>(<span class="ident">tx_prover</span>) <span class="op">=</span><span class="op">&gt;</span> <span class="ident">tx_prover</span>,
-            <span class="prelude-val">None</span> <span class="op">=</span><span class="op">&gt;</span> {
+            <span class="prelude-val">Some</span>(<span class="ident">tx_prover</span>) =&gt; <span class="ident">tx_prover</span>,
+            <span class="prelude-val">None</span> =&gt; {
                 <span class="macro">panic!</span>(<span class="string">&quot;Cannot locate the Zcash parameters. Please run zcash-fetch-params or fetch-params.sh to download the parameters, and then re-run the tests.&quot;</span>);
             }
         }
@@ -917,7 +917,7 @@
             <span class="ident">ExtendedFullViewingKey::from</span>(<span class="kw-2">&amp;</span><span class="ident">extsk1</span>),
         ];
         <span class="ident">init_accounts_table</span>(<span class="kw-2">&amp;</span><span class="ident">db_data</span>, <span class="kw-2">&amp;</span><span class="ident">extfvks</span>).<span class="ident">unwrap</span>();
-        <span class="kw">let</span> <span class="ident">to</span> <span class="op">=</span> <span class="ident">extsk0</span>.<span class="ident">default_address</span>().<span class="ident">unwrap</span>().<span class="number">1</span>.<span class="ident">into</span>();
+        <span class="kw">let</span> <span class="ident">to</span> <span class="op">=</span> <span class="ident">extsk0</span>.<span class="ident">default_address</span>().<span class="number">1</span>.<span class="ident">into</span>();
 
         <span class="comment">// Invalid extsk for the given account should cause an error</span>
         <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">db_write</span> <span class="op">=</span> <span class="ident">db_data</span>.<span class="ident">get_update_ops</span>().<span class="ident">unwrap</span>();
@@ -932,8 +932,8 @@
             <span class="prelude-val">None</span>,
             <span class="ident">OvkPolicy::Sender</span>,
         ) {
-            <span class="prelude-val">Ok</span>(<span class="kw">_</span>) <span class="op">=</span><span class="op">&gt;</span> <span class="macro">panic!</span>(<span class="string">&quot;Should have failed&quot;</span>),
-            <span class="prelude-val">Err</span>(<span class="ident">e</span>) <span class="op">=</span><span class="op">&gt;</span> <span class="macro">assert_eq!</span>(<span class="ident">e</span>.<span class="ident">to_string</span>(), <span class="string">&quot;Incorrect ExtendedSpendingKey for account 0&quot;</span>),
+            <span class="prelude-val">Ok</span>(<span class="kw">_</span>) =&gt; <span class="macro">panic!</span>(<span class="string">&quot;Should have failed&quot;</span>),
+            <span class="prelude-val">Err</span>(<span class="ident">e</span>) =&gt; <span class="macro">assert_eq!</span>(<span class="ident">e</span>.<span class="ident">to_string</span>(), <span class="string">&quot;Incorrect ExtendedSpendingKey for account 0&quot;</span>),
         }
 
         <span class="kw">match</span> <span class="ident">create_spend_to_address</span>(
@@ -947,8 +947,8 @@
             <span class="prelude-val">None</span>,
             <span class="ident">OvkPolicy::Sender</span>,
         ) {
-            <span class="prelude-val">Ok</span>(<span class="kw">_</span>) <span class="op">=</span><span class="op">&gt;</span> <span class="macro">panic!</span>(<span class="string">&quot;Should have failed&quot;</span>),
-            <span class="prelude-val">Err</span>(<span class="ident">e</span>) <span class="op">=</span><span class="op">&gt;</span> <span class="macro">assert_eq!</span>(<span class="ident">e</span>.<span class="ident">to_string</span>(), <span class="string">&quot;Incorrect ExtendedSpendingKey for account 1&quot;</span>),
+            <span class="prelude-val">Ok</span>(<span class="kw">_</span>) =&gt; <span class="macro">panic!</span>(<span class="string">&quot;Should have failed&quot;</span>),
+            <span class="prelude-val">Err</span>(<span class="ident">e</span>) =&gt; <span class="macro">assert_eq!</span>(<span class="ident">e</span>.<span class="ident">to_string</span>(), <span class="string">&quot;Incorrect ExtendedSpendingKey for account 1&quot;</span>),
         }
     }
 
@@ -962,7 +962,7 @@
         <span class="kw">let</span> <span class="ident">extsk</span> <span class="op">=</span> <span class="ident">ExtendedSpendingKey::master</span>(<span class="kw-2">&amp;</span>[]);
         <span class="kw">let</span> <span class="ident">extfvks</span> <span class="op">=</span> [<span class="ident">ExtendedFullViewingKey::from</span>(<span class="kw-2">&amp;</span><span class="ident">extsk</span>)];
         <span class="ident">init_accounts_table</span>(<span class="kw-2">&amp;</span><span class="ident">db_data</span>, <span class="kw-2">&amp;</span><span class="ident">extfvks</span>).<span class="ident">unwrap</span>();
-        <span class="kw">let</span> <span class="ident">to</span> <span class="op">=</span> <span class="ident">extsk</span>.<span class="ident">default_address</span>().<span class="ident">unwrap</span>().<span class="number">1</span>.<span class="ident">into</span>();
+        <span class="kw">let</span> <span class="ident">to</span> <span class="op">=</span> <span class="ident">extsk</span>.<span class="ident">default_address</span>().<span class="number">1</span>.<span class="ident">into</span>();
 
         <span class="comment">// We cannot do anything if we aren&#39;t synchronised</span>
         <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">db_write</span> <span class="op">=</span> <span class="ident">db_data</span>.<span class="ident">get_update_ops</span>().<span class="ident">unwrap</span>();
@@ -977,8 +977,8 @@
             <span class="prelude-val">None</span>,
             <span class="ident">OvkPolicy::Sender</span>,
         ) {
-            <span class="prelude-val">Ok</span>(<span class="kw">_</span>) <span class="op">=</span><span class="op">&gt;</span> <span class="macro">panic!</span>(<span class="string">&quot;Should have failed&quot;</span>),
-            <span class="prelude-val">Err</span>(<span class="ident">e</span>) <span class="op">=</span><span class="op">&gt;</span> <span class="macro">assert_eq!</span>(<span class="ident">e</span>.<span class="ident">to_string</span>(), <span class="string">&quot;Must scan blocks first&quot;</span>),
+            <span class="prelude-val">Ok</span>(<span class="kw">_</span>) =&gt; <span class="macro">panic!</span>(<span class="string">&quot;Should have failed&quot;</span>),
+            <span class="prelude-val">Err</span>(<span class="ident">e</span>) =&gt; <span class="macro">assert_eq!</span>(<span class="ident">e</span>.<span class="ident">to_string</span>(), <span class="string">&quot;Must scan blocks first&quot;</span>),
         }
     }
 
@@ -1000,7 +1000,7 @@
         <span class="kw">let</span> <span class="ident">extsk</span> <span class="op">=</span> <span class="ident">ExtendedSpendingKey::master</span>(<span class="kw-2">&amp;</span>[]);
         <span class="kw">let</span> <span class="ident">extfvks</span> <span class="op">=</span> [<span class="ident">ExtendedFullViewingKey::from</span>(<span class="kw-2">&amp;</span><span class="ident">extsk</span>)];
         <span class="ident">init_accounts_table</span>(<span class="kw-2">&amp;</span><span class="ident">db_data</span>, <span class="kw-2">&amp;</span><span class="ident">extfvks</span>).<span class="ident">unwrap</span>();
-        <span class="kw">let</span> <span class="ident">to</span> <span class="op">=</span> <span class="ident">extsk</span>.<span class="ident">default_address</span>().<span class="ident">unwrap</span>().<span class="number">1</span>.<span class="ident">into</span>();
+        <span class="kw">let</span> <span class="ident">to</span> <span class="op">=</span> <span class="ident">extsk</span>.<span class="ident">default_address</span>().<span class="number">1</span>.<span class="ident">into</span>();
 
         <span class="comment">// Account balance should be zero</span>
         <span class="macro">assert_eq!</span>(<span class="ident">get_balance</span>(<span class="kw-2">&amp;</span><span class="ident">db_data</span>, <span class="ident">AccountId</span>(<span class="number">0</span>)).<span class="ident">unwrap</span>(), <span class="ident">Amount::zero</span>());
@@ -1018,8 +1018,8 @@
             <span class="prelude-val">None</span>,
             <span class="ident">OvkPolicy::Sender</span>,
         ) {
-            <span class="prelude-val">Ok</span>(<span class="kw">_</span>) <span class="op">=</span><span class="op">&gt;</span> <span class="macro">panic!</span>(<span class="string">&quot;Should have failed&quot;</span>),
-            <span class="prelude-val">Err</span>(<span class="ident">e</span>) <span class="op">=</span><span class="op">&gt;</span> <span class="macro">assert_eq!</span>(
+            <span class="prelude-val">Ok</span>(<span class="kw">_</span>) =&gt; <span class="macro">panic!</span>(<span class="string">&quot;Should have failed&quot;</span>),
+            <span class="prelude-val">Err</span>(<span class="ident">e</span>) =&gt; <span class="macro">assert_eq!</span>(
                 <span class="ident">e</span>.<span class="ident">to_string</span>(),
                 <span class="string">&quot;Insufficient balance (have 0, need 1001 including fee)&quot;</span>
             ),
@@ -1084,7 +1084,7 @@
 
         <span class="comment">// Spend fails because there are insufficient verified notes</span>
         <span class="kw">let</span> <span class="ident">extsk2</span> <span class="op">=</span> <span class="ident">ExtendedSpendingKey::master</span>(<span class="kw-2">&amp;</span>[]);
-        <span class="kw">let</span> <span class="ident">to</span> <span class="op">=</span> <span class="ident">extsk2</span>.<span class="ident">default_address</span>().<span class="ident">unwrap</span>().<span class="number">1</span>.<span class="ident">into</span>();
+        <span class="kw">let</span> <span class="ident">to</span> <span class="op">=</span> <span class="ident">extsk2</span>.<span class="ident">default_address</span>().<span class="number">1</span>.<span class="ident">into</span>();
         <span class="kw">match</span> <span class="ident">create_spend_to_address</span>(
             <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">db_write</span>,
             <span class="kw-2">&amp;</span><span class="ident">tests::network</span>(),
@@ -1096,8 +1096,8 @@
             <span class="prelude-val">None</span>,
             <span class="ident">OvkPolicy::Sender</span>,
         ) {
-            <span class="prelude-val">Ok</span>(<span class="kw">_</span>) <span class="op">=</span><span class="op">&gt;</span> <span class="macro">panic!</span>(<span class="string">&quot;Should have failed&quot;</span>),
-            <span class="prelude-val">Err</span>(<span class="ident">e</span>) <span class="op">=</span><span class="op">&gt;</span> <span class="macro">assert_eq!</span>(
+            <span class="prelude-val">Ok</span>(<span class="kw">_</span>) =&gt; <span class="macro">panic!</span>(<span class="string">&quot;Should have failed&quot;</span>),
+            <span class="prelude-val">Err</span>(<span class="ident">e</span>) =&gt; <span class="macro">assert_eq!</span>(
                 <span class="ident">e</span>.<span class="ident">to_string</span>(),
                 <span class="string">&quot;Insufficient balance (have 50000, need 71000 including fee)&quot;</span>
             ),
@@ -1128,8 +1128,8 @@
             <span class="prelude-val">None</span>,
             <span class="ident">OvkPolicy::Sender</span>,
         ) {
-            <span class="prelude-val">Ok</span>(<span class="kw">_</span>) <span class="op">=</span><span class="op">&gt;</span> <span class="macro">panic!</span>(<span class="string">&quot;Should have failed&quot;</span>),
-            <span class="prelude-val">Err</span>(<span class="ident">e</span>) <span class="op">=</span><span class="op">&gt;</span> <span class="macro">assert_eq!</span>(
+            <span class="prelude-val">Ok</span>(<span class="kw">_</span>) =&gt; <span class="macro">panic!</span>(<span class="string">&quot;Should have failed&quot;</span>),
+            <span class="prelude-val">Err</span>(<span class="ident">e</span>) =&gt; <span class="macro">assert_eq!</span>(
                 <span class="ident">e</span>.<span class="ident">to_string</span>(),
                 <span class="string">&quot;Insufficient balance (have 50000, need 71000 including fee)&quot;</span>
             ),
@@ -1186,7 +1186,7 @@
 
         <span class="comment">// Send some of the funds to another address</span>
         <span class="kw">let</span> <span class="ident">extsk2</span> <span class="op">=</span> <span class="ident">ExtendedSpendingKey::master</span>(<span class="kw-2">&amp;</span>[]);
-        <span class="kw">let</span> <span class="ident">to</span> <span class="op">=</span> <span class="ident">extsk2</span>.<span class="ident">default_address</span>().<span class="ident">unwrap</span>().<span class="number">1</span>.<span class="ident">into</span>();
+        <span class="kw">let</span> <span class="ident">to</span> <span class="op">=</span> <span class="ident">extsk2</span>.<span class="ident">default_address</span>().<span class="number">1</span>.<span class="ident">into</span>();
         <span class="ident">create_spend_to_address</span>(
             <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">db_write</span>,
             <span class="kw-2">&amp;</span><span class="ident">tests::network</span>(),
@@ -1212,8 +1212,8 @@
             <span class="prelude-val">None</span>,
             <span class="ident">OvkPolicy::Sender</span>,
         ) {
-            <span class="prelude-val">Ok</span>(<span class="kw">_</span>) <span class="op">=</span><span class="op">&gt;</span> <span class="macro">panic!</span>(<span class="string">&quot;Should have failed&quot;</span>),
-            <span class="prelude-val">Err</span>(<span class="ident">e</span>) <span class="op">=</span><span class="op">&gt;</span> <span class="macro">assert_eq!</span>(
+            <span class="prelude-val">Ok</span>(<span class="kw">_</span>) =&gt; <span class="macro">panic!</span>(<span class="string">&quot;Should have failed&quot;</span>),
+            <span class="prelude-val">Err</span>(<span class="ident">e</span>) =&gt; <span class="macro">assert_eq!</span>(
                 <span class="ident">e</span>.<span class="ident">to_string</span>(),
                 <span class="string">&quot;Insufficient balance (have 0, need 3000 including fee)&quot;</span>
             ),
@@ -1244,8 +1244,8 @@
             <span class="prelude-val">None</span>,
             <span class="ident">OvkPolicy::Sender</span>,
         ) {
-            <span class="prelude-val">Ok</span>(<span class="kw">_</span>) <span class="op">=</span><span class="op">&gt;</span> <span class="macro">panic!</span>(<span class="string">&quot;Should have failed&quot;</span>),
-            <span class="prelude-val">Err</span>(<span class="ident">e</span>) <span class="op">=</span><span class="op">&gt;</span> <span class="macro">assert_eq!</span>(
+            <span class="prelude-val">Ok</span>(<span class="kw">_</span>) =&gt; <span class="macro">panic!</span>(<span class="string">&quot;Should have failed&quot;</span>),
+            <span class="prelude-val">Err</span>(<span class="ident">e</span>) =&gt; <span class="macro">assert_eq!</span>(
                 <span class="ident">e</span>.<span class="ident">to_string</span>(),
                 <span class="string">&quot;Insufficient balance (have 0, need 3000 including fee)&quot;</span>
             ),
@@ -1306,7 +1306,7 @@
         <span class="macro">assert_eq!</span>(<span class="ident">get_balance</span>(<span class="kw-2">&amp;</span><span class="ident">db_data</span>, <span class="ident">AccountId</span>(<span class="number">0</span>)).<span class="ident">unwrap</span>(), <span class="ident">value</span>);
 
         <span class="kw">let</span> <span class="ident">extsk2</span> <span class="op">=</span> <span class="ident">ExtendedSpendingKey::master</span>(<span class="kw-2">&amp;</span>[]);
-        <span class="kw">let</span> <span class="ident">addr2</span> <span class="op">=</span> <span class="ident">extsk2</span>.<span class="ident">default_address</span>().<span class="ident">unwrap</span>().<span class="number">1</span>;
+        <span class="kw">let</span> <span class="ident">addr2</span> <span class="op">=</span> <span class="ident">extsk2</span>.<span class="ident">default_address</span>().<span class="number">1</span>;
         <span class="kw">let</span> <span class="ident">to</span> <span class="op">=</span> <span class="ident">addr2</span>.<span class="ident">clone</span>().<span class="ident">into</span>();
 
         <span class="kw">let</span> <span class="ident">send_and_recover_with_policy</span> <span class="op">=</span> <span class="op">|</span><span class="ident">db_write</span>: <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">DataConnStmtCache</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span>, <span class="kw">_</span><span class="op">&gt;</span>, <span class="ident">ovk_policy</span><span class="op">|</span> {

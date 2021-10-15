@@ -55,11 +55,11 @@
 <span class="doccomment">/// The point is guaranteed to be prime order</span>
 <span class="doccomment">/// and not the identity.</span>
 <span class="attribute">#[<span class="ident">allow</span>(<span class="ident">clippy::assertions_on_constants</span>)]</span>
-<span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">group_hash</span>(<span class="ident">tag</span>: <span class="kw-2">&amp;</span>[<span class="ident">u8</span>], <span class="ident">personalization</span>: <span class="kw-2">&amp;</span>[<span class="ident">u8</span>]) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">jubjub::SubgroupPoint</span><span class="op">&gt;</span> {
+<span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">group_hash</span>(<span class="ident">tag</span>: <span class="kw-2">&amp;</span>[<span class="ident">u8</span>], <span class="ident">personalization</span>: <span class="kw-2">&amp;</span>[<span class="ident">u8</span>]) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">jubjub::SubgroupPoint</span><span class="op">&gt;</span> {
     <span class="macro">assert_eq!</span>(<span class="ident">personalization</span>.<span class="ident">len</span>(), <span class="number">8</span>);
 
     <span class="comment">// Check to see that scalar field is 255 bits</span>
-    <span class="macro">assert!</span>(<span class="ident">bls12_381::Scalar::NUM_BITS</span> <span class="op">=</span><span class="op">=</span> <span class="number">255</span>);
+    <span class="macro">assert!</span>(<span class="ident">bls12_381::Scalar::NUM_BITS</span> <span class="op">==</span> <span class="number">255</span>);
 
     <span class="kw">let</span> <span class="ident">h</span> <span class="op">=</span> <span class="ident">Params::new</span>()
         .<span class="ident">hash_length</span>(<span class="number">32</span>)

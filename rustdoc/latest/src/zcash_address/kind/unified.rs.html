@@ -586,39 +586,39 @@
 }
 
 <span class="kw">impl</span> <span class="ident">Ord</span> <span class="kw">for</span> <span class="ident">Typecode</span> {
-    <span class="kw">fn</span> <span class="ident">cmp</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">other</span>: <span class="kw-2">&amp;</span><span class="self">Self</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">cmp::Ordering</span> {
+    <span class="kw">fn</span> <span class="ident">cmp</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">other</span>: <span class="kw-2">&amp;</span><span class="self">Self</span>) -&gt; <span class="ident">cmp::Ordering</span> {
         <span class="kw">match</span> (<span class="self">self</span>, <span class="ident">other</span>) {
             <span class="comment">// Trivial equality checks.</span>
             (<span class="ident"><span class="self">Self</span>::Orchard</span>, <span class="ident"><span class="self">Self</span>::Orchard</span>)
             <span class="op">|</span> (<span class="ident"><span class="self">Self</span>::Sapling</span>, <span class="ident"><span class="self">Self</span>::Sapling</span>)
             <span class="op">|</span> (<span class="ident"><span class="self">Self</span>::P2sh</span>, <span class="ident"><span class="self">Self</span>::P2sh</span>)
-            <span class="op">|</span> (<span class="ident"><span class="self">Self</span>::P2pkh</span>, <span class="ident"><span class="self">Self</span>::P2pkh</span>) <span class="op">=</span><span class="op">&gt;</span> <span class="ident">cmp::Ordering::Equal</span>,
+            <span class="op">|</span> (<span class="ident"><span class="self">Self</span>::P2pkh</span>, <span class="ident"><span class="self">Self</span>::P2pkh</span>) =&gt; <span class="ident">cmp::Ordering::Equal</span>,
 
             <span class="comment">// We don&#39;t know for certain the preference order of unknown receivers, but it</span>
             <span class="comment">// is likely that the higher typecode has higher preference. The exact order</span>
             <span class="comment">// doesn&#39;t really matter, as unknown receivers have lower preference than</span>
             <span class="comment">// known receivers.</span>
-            (<span class="ident"><span class="self">Self</span>::Unknown</span>(<span class="ident">a</span>), <span class="ident"><span class="self">Self</span>::Unknown</span>(<span class="ident">b</span>)) <span class="op">=</span><span class="op">&gt;</span> <span class="ident">b</span>.<span class="ident">cmp</span>(<span class="ident">a</span>),
+            (<span class="ident"><span class="self">Self</span>::Unknown</span>(<span class="ident">a</span>), <span class="ident"><span class="self">Self</span>::Unknown</span>(<span class="ident">b</span>)) =&gt; <span class="ident">b</span>.<span class="ident">cmp</span>(<span class="ident">a</span>),
 
             <span class="comment">// For the remaining cases, we rely on `match` always choosing the first arm</span>
             <span class="comment">// with a matching pattern. Patterns below are listed in priority order:</span>
-            (<span class="ident"><span class="self">Self</span>::Orchard</span>, <span class="kw">_</span>) <span class="op">=</span><span class="op">&gt;</span> <span class="ident">cmp::Ordering::Less</span>,
-            (<span class="kw">_</span>, <span class="ident"><span class="self">Self</span>::Orchard</span>) <span class="op">=</span><span class="op">&gt;</span> <span class="ident">cmp::Ordering::Greater</span>,
+            (<span class="ident"><span class="self">Self</span>::Orchard</span>, <span class="kw">_</span>) =&gt; <span class="ident">cmp::Ordering::Less</span>,
+            (<span class="kw">_</span>, <span class="ident"><span class="self">Self</span>::Orchard</span>) =&gt; <span class="ident">cmp::Ordering::Greater</span>,
 
-            (<span class="ident"><span class="self">Self</span>::Sapling</span>, <span class="kw">_</span>) <span class="op">=</span><span class="op">&gt;</span> <span class="ident">cmp::Ordering::Less</span>,
-            (<span class="kw">_</span>, <span class="ident"><span class="self">Self</span>::Sapling</span>) <span class="op">=</span><span class="op">&gt;</span> <span class="ident">cmp::Ordering::Greater</span>,
+            (<span class="ident"><span class="self">Self</span>::Sapling</span>, <span class="kw">_</span>) =&gt; <span class="ident">cmp::Ordering::Less</span>,
+            (<span class="kw">_</span>, <span class="ident"><span class="self">Self</span>::Sapling</span>) =&gt; <span class="ident">cmp::Ordering::Greater</span>,
 
-            (<span class="ident"><span class="self">Self</span>::P2sh</span>, <span class="kw">_</span>) <span class="op">=</span><span class="op">&gt;</span> <span class="ident">cmp::Ordering::Less</span>,
-            (<span class="kw">_</span>, <span class="ident"><span class="self">Self</span>::P2sh</span>) <span class="op">=</span><span class="op">&gt;</span> <span class="ident">cmp::Ordering::Greater</span>,
+            (<span class="ident"><span class="self">Self</span>::P2sh</span>, <span class="kw">_</span>) =&gt; <span class="ident">cmp::Ordering::Less</span>,
+            (<span class="kw">_</span>, <span class="ident"><span class="self">Self</span>::P2sh</span>) =&gt; <span class="ident">cmp::Ordering::Greater</span>,
 
-            (<span class="ident"><span class="self">Self</span>::P2pkh</span>, <span class="kw">_</span>) <span class="op">=</span><span class="op">&gt;</span> <span class="ident">cmp::Ordering::Less</span>,
-            (<span class="kw">_</span>, <span class="ident"><span class="self">Self</span>::P2pkh</span>) <span class="op">=</span><span class="op">&gt;</span> <span class="ident">cmp::Ordering::Greater</span>,
+            (<span class="ident"><span class="self">Self</span>::P2pkh</span>, <span class="kw">_</span>) =&gt; <span class="ident">cmp::Ordering::Less</span>,
+            (<span class="kw">_</span>, <span class="ident"><span class="self">Self</span>::P2pkh</span>) =&gt; <span class="ident">cmp::Ordering::Greater</span>,
         }
     }
 }
 
 <span class="kw">impl</span> <span class="ident">PartialOrd</span> <span class="kw">for</span> <span class="ident">Typecode</span> {
-    <span class="kw">fn</span> <span class="ident">partial_cmp</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">other</span>: <span class="kw-2">&amp;</span><span class="self">Self</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">cmp::Ordering</span><span class="op">&gt;</span> {
+    <span class="kw">fn</span> <span class="ident">partial_cmp</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">other</span>: <span class="kw-2">&amp;</span><span class="self">Self</span>) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">cmp::Ordering</span><span class="op">&gt;</span> {
         <span class="prelude-val">Some</span>(<span class="self">self</span>.<span class="ident">cmp</span>(<span class="ident">other</span>))
     }
 }
@@ -626,32 +626,32 @@
 <span class="kw">impl</span> <span class="ident">TryFrom</span><span class="op">&lt;</span><span class="ident">u32</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">Typecode</span> {
     <span class="kw">type</span> <span class="ident">Error</span> <span class="op">=</span> <span class="ident">ParseError</span>;
 
-    <span class="kw">fn</span> <span class="ident">try_from</span>(<span class="ident">typecode</span>: <span class="ident">u32</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="self">Self</span>, <span class="ident"><span class="self">Self</span>::Error</span><span class="op">&gt;</span> {
+    <span class="kw">fn</span> <span class="ident">try_from</span>(<span class="ident">typecode</span>: <span class="ident">u32</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="self">Self</span>, <span class="ident"><span class="self">Self</span>::Error</span><span class="op">&gt;</span> {
         <span class="kw">match</span> <span class="ident">typecode</span> {
-            <span class="number">0x00</span> <span class="op">=</span><span class="op">&gt;</span> <span class="prelude-val">Ok</span>(<span class="ident">Typecode::P2pkh</span>),
-            <span class="number">0x01</span> <span class="op">=</span><span class="op">&gt;</span> <span class="prelude-val">Ok</span>(<span class="ident">Typecode::P2sh</span>),
-            <span class="number">0x02</span> <span class="op">=</span><span class="op">&gt;</span> <span class="prelude-val">Ok</span>(<span class="ident">Typecode::Sapling</span>),
-            <span class="number">0x03</span> <span class="op">=</span><span class="op">&gt;</span> <span class="prelude-val">Ok</span>(<span class="ident">Typecode::Orchard</span>),
-            <span class="number">0x04</span>..<span class="op">=</span><span class="number">0x02000000</span> <span class="op">=</span><span class="op">&gt;</span> <span class="prelude-val">Ok</span>(<span class="ident">Typecode::Unknown</span>(<span class="ident">typecode</span>)),
-            <span class="number">0x02000001</span>..<span class="op">=</span><span class="ident">u32::MAX</span> <span class="op">=</span><span class="op">&gt;</span> <span class="prelude-val">Err</span>(<span class="ident">ParseError::InvalidTypecodeValue</span>(<span class="ident">typecode</span> <span class="kw">as</span> <span class="ident">u64</span>)),
+            <span class="number">0x00</span> =&gt; <span class="prelude-val">Ok</span>(<span class="ident">Typecode::P2pkh</span>),
+            <span class="number">0x01</span> =&gt; <span class="prelude-val">Ok</span>(<span class="ident">Typecode::P2sh</span>),
+            <span class="number">0x02</span> =&gt; <span class="prelude-val">Ok</span>(<span class="ident">Typecode::Sapling</span>),
+            <span class="number">0x03</span> =&gt; <span class="prelude-val">Ok</span>(<span class="ident">Typecode::Orchard</span>),
+            <span class="number">0x04</span>..<span class="op">=</span><span class="number">0x02000000</span> =&gt; <span class="prelude-val">Ok</span>(<span class="ident">Typecode::Unknown</span>(<span class="ident">typecode</span>)),
+            <span class="number">0x02000001</span>..<span class="op">=</span><span class="ident">u32::MAX</span> =&gt; <span class="prelude-val">Err</span>(<span class="ident">ParseError::InvalidTypecodeValue</span>(<span class="ident">typecode</span> <span class="kw">as</span> <span class="ident">u64</span>)),
         }
     }
 }
 
 <span class="kw">impl</span> <span class="ident">From</span><span class="op">&lt;</span><span class="ident">Typecode</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">u32</span> {
-    <span class="kw">fn</span> <span class="ident">from</span>(<span class="ident">t</span>: <span class="ident">Typecode</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="self">Self</span> {
+    <span class="kw">fn</span> <span class="ident">from</span>(<span class="ident">t</span>: <span class="ident">Typecode</span>) -&gt; <span class="self">Self</span> {
         <span class="kw">match</span> <span class="ident">t</span> {
-            <span class="ident">Typecode::P2pkh</span> <span class="op">=</span><span class="op">&gt;</span> <span class="number">0x00</span>,
-            <span class="ident">Typecode::P2sh</span> <span class="op">=</span><span class="op">&gt;</span> <span class="number">0x01</span>,
-            <span class="ident">Typecode::Sapling</span> <span class="op">=</span><span class="op">&gt;</span> <span class="number">0x02</span>,
-            <span class="ident">Typecode::Orchard</span> <span class="op">=</span><span class="op">&gt;</span> <span class="number">0x03</span>,
-            <span class="ident">Typecode::Unknown</span>(<span class="ident">typecode</span>) <span class="op">=</span><span class="op">&gt;</span> <span class="ident">typecode</span>,
+            <span class="ident">Typecode::P2pkh</span> =&gt; <span class="number">0x00</span>,
+            <span class="ident">Typecode::P2sh</span> =&gt; <span class="number">0x01</span>,
+            <span class="ident">Typecode::Sapling</span> =&gt; <span class="number">0x02</span>,
+            <span class="ident">Typecode::Orchard</span> =&gt; <span class="number">0x03</span>,
+            <span class="ident">Typecode::Unknown</span>(<span class="ident">typecode</span>) =&gt; <span class="ident">typecode</span>,
         }
     }
 }
 
 <span class="kw">impl</span> <span class="ident">Typecode</span> {
-    <span class="kw">fn</span> <span class="ident">is_transparent</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">bool</span> {
+    <span class="kw">fn</span> <span class="ident">is_transparent</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">bool</span> {
         <span class="comment">// Unknown typecodes are treated as not transparent for the purpose of disallowing</span>
         <span class="comment">// only-transparent UAs, which can be represented with existing address encodings.</span>
         <span class="macro">matches!</span>(<span class="self">self</span>, <span class="ident">Typecode::P2pkh</span> <span class="op">|</span> <span class="ident">Typecode::P2sh</span>)
@@ -674,13 +674,13 @@
 }
 
 <span class="kw">impl</span> <span class="ident">fmt::Display</span> <span class="kw">for</span> <span class="ident">ParseError</span> {
-    <span class="kw">fn</span> <span class="ident">fmt</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">f</span>: <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">fmt::Formatter</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">fmt::Result</span> {
+    <span class="kw">fn</span> <span class="ident">fmt</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">f</span>: <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">fmt::Formatter</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span>) -&gt; <span class="ident">fmt::Result</span> {
         <span class="kw">match</span> <span class="self">self</span> {
-            <span class="ident">ParseError::BothP2phkAndP2sh</span> <span class="op">=</span><span class="op">&gt;</span> <span class="macro">write!</span>(<span class="ident">f</span>, <span class="string">&quot;UA contains both P2PKH and P2SH receivers&quot;</span>),
-            <span class="ident">ParseError::DuplicateTypecode</span>(<span class="ident">c</span>) <span class="op">=</span><span class="op">&gt;</span> <span class="macro">write!</span>(<span class="ident">f</span>, <span class="string">&quot;Duplicate typecode {}&quot;</span>, <span class="ident">u32::from</span>(<span class="kw-2">*</span><span class="ident">c</span>)),
-            <span class="ident">ParseError::InvalidTypecodeValue</span>(<span class="ident">v</span>) <span class="op">=</span><span class="op">&gt;</span> <span class="macro">write!</span>(<span class="ident">f</span>, <span class="string">&quot;Typecode value out of range {}&quot;</span>, <span class="ident">v</span>),
-            <span class="ident">ParseError::InvalidEncoding</span>(<span class="ident">msg</span>) <span class="op">=</span><span class="op">&gt;</span> <span class="macro">write!</span>(<span class="ident">f</span>, <span class="string">&quot;Invalid encoding: {}&quot;</span>, <span class="ident">msg</span>),
-            <span class="ident">ParseError::OnlyTransparent</span> <span class="op">=</span><span class="op">&gt;</span> <span class="macro">write!</span>(<span class="ident">f</span>, <span class="string">&quot;UA only contains transparent receivers&quot;</span>),
+            <span class="ident">ParseError::BothP2phkAndP2sh</span> =&gt; <span class="macro">write!</span>(<span class="ident">f</span>, <span class="string">&quot;UA contains both P2PKH and P2SH receivers&quot;</span>),
+            <span class="ident">ParseError::DuplicateTypecode</span>(<span class="ident">c</span>) =&gt; <span class="macro">write!</span>(<span class="ident">f</span>, <span class="string">&quot;Duplicate typecode {}&quot;</span>, <span class="ident">u32::from</span>(<span class="kw-2">*</span><span class="ident">c</span>)),
+            <span class="ident">ParseError::InvalidTypecodeValue</span>(<span class="ident">v</span>) =&gt; <span class="macro">write!</span>(<span class="ident">f</span>, <span class="string">&quot;Typecode value out of range {}&quot;</span>, <span class="ident">v</span>),
+            <span class="ident">ParseError::InvalidEncoding</span>(<span class="ident">msg</span>) =&gt; <span class="macro">write!</span>(<span class="ident">f</span>, <span class="string">&quot;Invalid encoding: {}&quot;</span>, <span class="ident">msg</span>),
+            <span class="ident">ParseError::OnlyTransparent</span> =&gt; <span class="macro">write!</span>(<span class="ident">f</span>, <span class="string">&quot;UA only contains transparent receivers&quot;</span>),
         }
     }
 }
@@ -698,16 +698,16 @@
 }
 
 <span class="kw">impl</span> <span class="ident">cmp::Ord</span> <span class="kw">for</span> <span class="ident">Receiver</span> {
-    <span class="kw">fn</span> <span class="ident">cmp</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">other</span>: <span class="kw-2">&amp;</span><span class="self">Self</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">cmp::Ordering</span> {
+    <span class="kw">fn</span> <span class="ident">cmp</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">other</span>: <span class="kw-2">&amp;</span><span class="self">Self</span>) -&gt; <span class="ident">cmp::Ordering</span> {
         <span class="kw">match</span> <span class="self">self</span>.<span class="ident">typecode</span>().<span class="ident">cmp</span>(<span class="kw-2">&amp;</span><span class="ident">other</span>.<span class="ident">typecode</span>()) {
-            <span class="ident">cmp::Ordering::Equal</span> <span class="op">=</span><span class="op">&gt;</span> <span class="self">self</span>.<span class="ident">addr</span>().<span class="ident">cmp</span>(<span class="ident">other</span>.<span class="ident">addr</span>()),
-            <span class="ident">res</span> <span class="op">=</span><span class="op">&gt;</span> <span class="ident">res</span>,
+            <span class="ident">cmp::Ordering::Equal</span> =&gt; <span class="self">self</span>.<span class="ident">addr</span>().<span class="ident">cmp</span>(<span class="ident">other</span>.<span class="ident">addr</span>()),
+            <span class="ident">res</span> =&gt; <span class="ident">res</span>,
         }
     }
 }
 
 <span class="kw">impl</span> <span class="ident">cmp::PartialOrd</span> <span class="kw">for</span> <span class="ident">Receiver</span> {
-    <span class="kw">fn</span> <span class="ident">partial_cmp</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">other</span>: <span class="kw-2">&amp;</span><span class="self">Self</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">cmp::Ordering</span><span class="op">&gt;</span> {
+    <span class="kw">fn</span> <span class="ident">partial_cmp</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">other</span>: <span class="kw-2">&amp;</span><span class="self">Self</span>) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">cmp::Ordering</span><span class="op">&gt;</span> {
         <span class="prelude-val">Some</span>(<span class="self">self</span>.<span class="ident">cmp</span>(<span class="ident">other</span>))
     }
 }
@@ -715,13 +715,13 @@
 <span class="kw">impl</span> <span class="ident">TryFrom</span><span class="op">&lt;</span>(<span class="ident">u32</span>, <span class="kw-2">&amp;</span>[<span class="ident">u8</span>])<span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">Receiver</span> {
     <span class="kw">type</span> <span class="ident">Error</span> <span class="op">=</span> <span class="ident">ParseError</span>;
 
-    <span class="kw">fn</span> <span class="ident">try_from</span>((<span class="ident">typecode</span>, <span class="ident">addr</span>): (<span class="ident">u32</span>, <span class="kw-2">&amp;</span>[<span class="ident">u8</span>])) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="self">Self</span>, <span class="ident"><span class="self">Self</span>::Error</span><span class="op">&gt;</span> {
+    <span class="kw">fn</span> <span class="ident">try_from</span>((<span class="ident">typecode</span>, <span class="ident">addr</span>): (<span class="ident">u32</span>, <span class="kw-2">&amp;</span>[<span class="ident">u8</span>])) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="self">Self</span>, <span class="ident"><span class="self">Self</span>::Error</span><span class="op">&gt;</span> {
         <span class="kw">match</span> <span class="ident">typecode</span>.<span class="ident">try_into</span>()<span class="question-mark">?</span> {
-            <span class="ident">Typecode::P2pkh</span> <span class="op">=</span><span class="op">&gt;</span> <span class="ident">addr</span>.<span class="ident">try_into</span>().<span class="ident">map</span>(<span class="ident">Receiver::P2pkh</span>),
-            <span class="ident">Typecode::P2sh</span> <span class="op">=</span><span class="op">&gt;</span> <span class="ident">addr</span>.<span class="ident">try_into</span>().<span class="ident">map</span>(<span class="ident">Receiver::P2sh</span>),
-            <span class="ident">Typecode::Sapling</span> <span class="op">=</span><span class="op">&gt;</span> <span class="ident">addr</span>.<span class="ident">try_into</span>().<span class="ident">map</span>(<span class="ident">Receiver::Sapling</span>),
-            <span class="ident">Typecode::Orchard</span> <span class="op">=</span><span class="op">&gt;</span> <span class="ident">addr</span>.<span class="ident">try_into</span>().<span class="ident">map</span>(<span class="ident">Receiver::Orchard</span>),
-            <span class="ident">Typecode::Unknown</span>(<span class="kw">_</span>) <span class="op">=</span><span class="op">&gt;</span> <span class="prelude-val">Ok</span>(<span class="ident">Receiver::Unknown</span> {
+            <span class="ident">Typecode::P2pkh</span> =&gt; <span class="ident">addr</span>.<span class="ident">try_into</span>().<span class="ident">map</span>(<span class="ident">Receiver::P2pkh</span>),
+            <span class="ident">Typecode::P2sh</span> =&gt; <span class="ident">addr</span>.<span class="ident">try_into</span>().<span class="ident">map</span>(<span class="ident">Receiver::P2sh</span>),
+            <span class="ident">Typecode::Sapling</span> =&gt; <span class="ident">addr</span>.<span class="ident">try_into</span>().<span class="ident">map</span>(<span class="ident">Receiver::Sapling</span>),
+            <span class="ident">Typecode::Orchard</span> =&gt; <span class="ident">addr</span>.<span class="ident">try_into</span>().<span class="ident">map</span>(<span class="ident">Receiver::Orchard</span>),
+            <span class="ident">Typecode::Unknown</span>(<span class="kw">_</span>) =&gt; <span class="prelude-val">Ok</span>(<span class="ident">Receiver::Unknown</span> {
                 <span class="ident">typecode</span>,
                 <span class="ident">data</span>: <span class="ident">addr</span>.<span class="ident">to_vec</span>(),
             }),
@@ -733,23 +733,23 @@
 }
 
 <span class="kw">impl</span> <span class="ident">Receiver</span> {
-    <span class="kw">fn</span> <span class="ident">typecode</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">Typecode</span> {
+    <span class="kw">fn</span> <span class="ident">typecode</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">Typecode</span> {
         <span class="kw">match</span> <span class="self">self</span> {
-            <span class="ident">Receiver::P2pkh</span>(<span class="kw">_</span>) <span class="op">=</span><span class="op">&gt;</span> <span class="ident">Typecode::P2pkh</span>,
-            <span class="ident">Receiver::P2sh</span>(<span class="kw">_</span>) <span class="op">=</span><span class="op">&gt;</span> <span class="ident">Typecode::P2sh</span>,
-            <span class="ident">Receiver::Sapling</span>(<span class="kw">_</span>) <span class="op">=</span><span class="op">&gt;</span> <span class="ident">Typecode::Sapling</span>,
-            <span class="ident">Receiver::Orchard</span>(<span class="kw">_</span>) <span class="op">=</span><span class="op">&gt;</span> <span class="ident">Typecode::Orchard</span>,
-            <span class="ident">Receiver::Unknown</span> { <span class="ident">typecode</span>, .. } <span class="op">=</span><span class="op">&gt;</span> <span class="ident">Typecode::Unknown</span>(<span class="kw-2">*</span><span class="ident">typecode</span>),
+            <span class="ident">Receiver::P2pkh</span>(<span class="kw">_</span>) =&gt; <span class="ident">Typecode::P2pkh</span>,
+            <span class="ident">Receiver::P2sh</span>(<span class="kw">_</span>) =&gt; <span class="ident">Typecode::P2sh</span>,
+            <span class="ident">Receiver::Sapling</span>(<span class="kw">_</span>) =&gt; <span class="ident">Typecode::Sapling</span>,
+            <span class="ident">Receiver::Orchard</span>(<span class="kw">_</span>) =&gt; <span class="ident">Typecode::Orchard</span>,
+            <span class="ident">Receiver::Unknown</span> { <span class="ident">typecode</span>, .. } =&gt; <span class="ident">Typecode::Unknown</span>(<span class="kw-2">*</span><span class="ident">typecode</span>),
         }
     }
 
-    <span class="kw">fn</span> <span class="ident">addr</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="kw-2">&amp;</span>[<span class="ident">u8</span>] {
+    <span class="kw">fn</span> <span class="ident">addr</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>[<span class="ident">u8</span>] {
         <span class="kw">match</span> <span class="self">self</span> {
-            <span class="ident">Receiver::P2pkh</span>(<span class="ident">data</span>) <span class="op">=</span><span class="op">&gt;</span> <span class="ident">data</span>,
-            <span class="ident">Receiver::P2sh</span>(<span class="ident">data</span>) <span class="op">=</span><span class="op">&gt;</span> <span class="ident">data</span>,
-            <span class="ident">Receiver::Sapling</span>(<span class="ident">data</span>) <span class="op">=</span><span class="op">&gt;</span> <span class="ident">data</span>,
-            <span class="ident">Receiver::Orchard</span>(<span class="ident">data</span>) <span class="op">=</span><span class="op">&gt;</span> <span class="ident">data</span>,
-            <span class="ident">Receiver::Unknown</span> { <span class="ident">data</span>, .. } <span class="op">=</span><span class="op">&gt;</span> <span class="ident">data</span>,
+            <span class="ident">Receiver::P2pkh</span>(<span class="ident">data</span>) =&gt; <span class="ident">data</span>,
+            <span class="ident">Receiver::P2sh</span>(<span class="ident">data</span>) =&gt; <span class="ident">data</span>,
+            <span class="ident">Receiver::Sapling</span>(<span class="ident">data</span>) =&gt; <span class="ident">data</span>,
+            <span class="ident">Receiver::Orchard</span>(<span class="ident">data</span>) =&gt; <span class="ident">data</span>,
+            <span class="ident">Receiver::Unknown</span> { <span class="ident">data</span>, .. } =&gt; <span class="ident">data</span>,
         }
     }
 }
@@ -761,8 +761,8 @@
 <span class="kw">impl</span> <span class="ident">TryFrom</span><span class="op">&lt;</span>(<span class="kw-2">&amp;</span><span class="ident">str</span>, <span class="kw-2">&amp;</span>[<span class="ident">u8</span>])<span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">Address</span> {
     <span class="kw">type</span> <span class="ident">Error</span> <span class="op">=</span> <span class="ident">ParseError</span>;
 
-    <span class="kw">fn</span> <span class="ident">try_from</span>((<span class="ident">hrp</span>, <span class="ident">buf</span>): (<span class="kw-2">&amp;</span><span class="ident">str</span>, <span class="kw-2">&amp;</span>[<span class="ident">u8</span>])) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="self">Self</span>, <span class="ident"><span class="self">Self</span>::Error</span><span class="op">&gt;</span> {
-        <span class="kw">fn</span> <span class="ident">read_receiver</span>(<span class="kw-2">mut</span> <span class="ident">cursor</span>: <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">std::io::Cursor</span><span class="op">&lt;</span><span class="kw-2">&amp;</span>[<span class="ident">u8</span>]<span class="op">&gt;</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Receiver</span>, <span class="ident">ParseError</span><span class="op">&gt;</span> {
+    <span class="kw">fn</span> <span class="ident">try_from</span>((<span class="ident">hrp</span>, <span class="ident">buf</span>): (<span class="kw-2">&amp;</span><span class="ident">str</span>, <span class="kw-2">&amp;</span>[<span class="ident">u8</span>])) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="self">Self</span>, <span class="ident"><span class="self">Self</span>::Error</span><span class="op">&gt;</span> {
+        <span class="kw">fn</span> <span class="ident">read_receiver</span>(<span class="kw-2">mut</span> <span class="ident">cursor</span>: <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">std::io::Cursor</span><span class="op">&lt;</span><span class="kw-2">&amp;</span>[<span class="ident">u8</span>]<span class="op">&gt;</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Receiver</span>, <span class="ident">ParseError</span><span class="op">&gt;</span> {
             <span class="kw">let</span> <span class="ident">typecode</span> <span class="op">=</span> <span class="ident">CompactSize::read</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">cursor</span>)
                 .<span class="ident">map</span>(<span class="op">|</span><span class="ident">v</span><span class="op">|</span> <span class="ident">u32::try_from</span>(<span class="ident">v</span>).<span class="ident">expect</span>(<span class="string">&quot;CompactSize::read enforces MAX_SIZE limit&quot;</span>))
                 .<span class="ident">map_err</span>(<span class="op">|</span><span class="ident">e</span><span class="op">|</span> {
@@ -810,8 +810,8 @@
         <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">expected_padding</span> <span class="op">=</span> [<span class="number">0</span>; <span class="ident">PADDING_LEN</span>];
         <span class="ident">expected_padding</span>[<span class="number">0</span>..<span class="ident">hrp</span>.<span class="ident">len</span>()].<span class="ident">copy_from_slice</span>(<span class="ident">hrp</span>.<span class="ident">as_bytes</span>());
         <span class="kw">let</span> <span class="ident">encoded</span> <span class="op">=</span> <span class="kw">match</span> <span class="ident">encoded</span>.<span class="ident">split_at</span>(<span class="ident">encoded</span>.<span class="ident">len</span>() <span class="op">-</span> <span class="ident">PADDING_LEN</span>) {
-            (<span class="ident">encoded</span>, <span class="ident">tail</span>) <span class="kw">if</span> <span class="ident">tail</span> <span class="op">=</span><span class="op">=</span> <span class="ident">expected_padding</span> <span class="op">=</span><span class="op">&gt;</span> <span class="prelude-val">Ok</span>(<span class="ident">encoded</span>),
-            <span class="kw">_</span> <span class="op">=</span><span class="op">&gt;</span> <span class="prelude-val">Err</span>(<span class="ident">ParseError::InvalidEncoding</span>(
+            (<span class="ident">encoded</span>, <span class="ident">tail</span>) <span class="kw">if</span> <span class="ident">tail</span> <span class="op">==</span> <span class="ident">expected_padding</span> =&gt; <span class="prelude-val">Ok</span>(<span class="ident">encoded</span>),
+            <span class="kw">_</span> =&gt; <span class="prelude-val">Err</span>(<span class="ident">ParseError::InvalidEncoding</span>(
                 <span class="string">&quot;Invalid padding bytes&quot;</span>.<span class="ident">to_owned</span>(),
             )),
         }<span class="question-mark">?</span>;
@@ -829,14 +829,14 @@
 <span class="kw">impl</span> <span class="ident">TryFrom</span><span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">Receiver</span><span class="op">&gt;</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">Address</span> {
     <span class="kw">type</span> <span class="ident">Error</span> <span class="op">=</span> <span class="ident">ParseError</span>;
 
-    <span class="kw">fn</span> <span class="ident">try_from</span>(<span class="ident">receivers</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">Receiver</span><span class="op">&gt;</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="self">Self</span>, <span class="ident"><span class="self">Self</span>::Error</span><span class="op">&gt;</span> {
+    <span class="kw">fn</span> <span class="ident">try_from</span>(<span class="ident">receivers</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">Receiver</span><span class="op">&gt;</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="self">Self</span>, <span class="ident"><span class="self">Self</span>::Error</span><span class="op">&gt;</span> {
         <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">typecodes</span> <span class="op">=</span> <span class="ident">HashSet::with_capacity</span>(<span class="ident">receivers</span>.<span class="ident">len</span>());
         <span class="kw">for</span> <span class="ident">receiver</span> <span class="kw">in</span> <span class="kw-2">&amp;</span><span class="ident">receivers</span> {
             <span class="kw">let</span> <span class="ident">t</span> <span class="op">=</span> <span class="ident">receiver</span>.<span class="ident">typecode</span>();
             <span class="kw">if</span> <span class="ident">typecodes</span>.<span class="ident">contains</span>(<span class="kw-2">&amp;</span><span class="ident">t</span>) {
                 <span class="kw">return</span> <span class="prelude-val">Err</span>(<span class="ident">ParseError::DuplicateTypecode</span>(<span class="ident">t</span>));
-            } <span class="kw">else</span> <span class="kw">if</span> (<span class="ident">t</span> <span class="op">=</span><span class="op">=</span> <span class="ident">Typecode::P2pkh</span> <span class="op">&amp;&amp;</span> <span class="ident">typecodes</span>.<span class="ident">contains</span>(<span class="kw-2">&amp;</span><span class="ident">Typecode::P2sh</span>))
-                <span class="op">|</span><span class="op">|</span> (<span class="ident">t</span> <span class="op">=</span><span class="op">=</span> <span class="ident">Typecode::P2sh</span> <span class="op">&amp;&amp;</span> <span class="ident">typecodes</span>.<span class="ident">contains</span>(<span class="kw-2">&amp;</span><span class="ident">Typecode::P2pkh</span>))
+            } <span class="kw">else</span> <span class="kw">if</span> (<span class="ident">t</span> <span class="op">==</span> <span class="ident">Typecode::P2pkh</span> <span class="op">&amp;&amp;</span> <span class="ident">typecodes</span>.<span class="ident">contains</span>(<span class="kw-2">&amp;</span><span class="ident">Typecode::P2sh</span>))
+                <span class="op">|</span><span class="op">|</span> (<span class="ident">t</span> <span class="op">==</span> <span class="ident">Typecode::P2sh</span> <span class="op">&amp;&amp;</span> <span class="ident">typecodes</span>.<span class="ident">contains</span>(<span class="kw-2">&amp;</span><span class="ident">Typecode::P2pkh</span>))
             {
                 <span class="kw">return</span> <span class="prelude-val">Err</span>(<span class="ident">ParseError::BothP2phkAndP2sh</span>);
             } <span class="kw">else</span> {
@@ -855,7 +855,7 @@
 
 <span class="kw">impl</span> <span class="ident">Address</span> {
     <span class="doccomment">/// Returns the raw encoding of this Unified Address.</span>
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">to_bytes</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">hrp</span>: <span class="kw-2">&amp;</span><span class="ident">str</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span> {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">to_bytes</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">hrp</span>: <span class="kw-2">&amp;</span><span class="ident">str</span>) -&gt; <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span> {
         <span class="macro">assert!</span>(<span class="ident">hrp</span>.<span class="ident">len</span>() <span class="op">&lt;</span><span class="op">=</span> <span class="ident">PADDING_LEN</span>);
 
         <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">writer</span> <span class="op">=</span> <span class="ident">std::io::Cursor::new</span>(<span class="ident">Vec::new</span>());
@@ -878,7 +878,7 @@
     }
 
     <span class="doccomment">/// Returns the receivers contained within this address, sorted in preference order.</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">receivers</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">Receiver</span><span class="op">&gt;</span> {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">receivers</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">Receiver</span><span class="op">&gt;</span> {
         <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">receivers</span> <span class="op">=</span> <span class="self">self</span>.<span class="number">0</span>.<span class="ident">clone</span>();
         <span class="comment">// Unstable sorting is fine, because all receivers are guaranteed by construction</span>
         <span class="comment">// to have distinct typecodes.</span>
@@ -890,7 +890,7 @@
     <span class="doccomment">/// parsed from the string encoding.</span>
     <span class="doccomment">///</span>
     <span class="doccomment">/// This API is for advanced usage; in most cases you should use `Address::receivers`.</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">receivers_as_parsed</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="kw-2">&amp;</span>[<span class="ident">Receiver</span>] {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">receivers_as_parsed</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>[<span class="ident">Receiver</span>] {
         <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="number">0</span>
     }
 }
@@ -911,7 +911,7 @@
     <span class="kw">use</span> <span class="kw">super</span>::{<span class="ident">Address</span>, <span class="ident">ParseError</span>, <span class="ident">Receiver</span>, <span class="ident">Typecode</span>, <span class="ident">MAINNET</span>, <span class="ident">REGTEST</span>, <span class="ident">TESTNET</span>};
 
     <span class="macro">prop_compose!</span> {
-        <span class="kw">fn</span> <span class="ident">uniform43</span>()(<span class="ident">a</span> <span class="kw">in</span> <span class="ident">uniform11</span>(<span class="number">0u8</span>..), <span class="ident">b</span> <span class="kw">in</span> <span class="ident">uniform32</span>(<span class="number">0u8</span>..)) <span class="op">-</span><span class="op">&gt;</span> [<span class="ident">u8</span>; <span class="number">43</span>] {
+        <span class="kw">fn</span> <span class="ident">uniform43</span>()(<span class="ident">a</span> <span class="kw">in</span> <span class="ident">uniform11</span>(<span class="number">0u8</span>..), <span class="ident">b</span> <span class="kw">in</span> <span class="ident">uniform32</span>(<span class="number">0u8</span>..)) -&gt; [<span class="ident">u8</span>; <span class="number">43</span>] {
             <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">c</span> <span class="op">=</span> [<span class="number">0</span>; <span class="number">43</span>];
             <span class="ident">c</span>[..<span class="number">11</span>].<span class="ident">copy_from_slice</span>(<span class="kw-2">&amp;</span><span class="ident">a</span>);
             <span class="ident">c</span>[<span class="number">11</span>..].<span class="ident">copy_from_slice</span>(<span class="kw-2">&amp;</span><span class="ident">b</span>);
@@ -919,7 +919,7 @@
         }
     }
 
-    <span class="kw">fn</span> <span class="ident">arb_shielded_receiver</span>() <span class="op">-</span><span class="op">&gt;</span> <span class="ident">BoxedStrategy</span><span class="op">&lt;</span><span class="ident">Receiver</span><span class="op">&gt;</span> {
+    <span class="kw">fn</span> <span class="ident">arb_shielded_receiver</span>() -&gt; <span class="ident">BoxedStrategy</span><span class="op">&lt;</span><span class="ident">Receiver</span><span class="op">&gt;</span> {
         <span class="macro">prop_oneof!</span>[
             <span class="ident">uniform43</span>().<span class="ident">prop_map</span>(<span class="ident">Receiver::Sapling</span>),
             <span class="ident">uniform43</span>().<span class="ident">prop_map</span>(<span class="ident">Receiver::Orchard</span>),
@@ -927,7 +927,7 @@
         .<span class="ident">boxed</span>()
     }
 
-    <span class="kw">fn</span> <span class="ident">arb_transparent_receiver</span>() <span class="op">-</span><span class="op">&gt;</span> <span class="ident">BoxedStrategy</span><span class="op">&lt;</span><span class="ident">Receiver</span><span class="op">&gt;</span> {
+    <span class="kw">fn</span> <span class="ident">arb_transparent_receiver</span>() -&gt; <span class="ident">BoxedStrategy</span><span class="op">&lt;</span><span class="ident">Receiver</span><span class="op">&gt;</span> {
         <span class="macro">prop_oneof!</span>[
             <span class="ident">uniform20</span>(<span class="number">0u8</span>..).<span class="ident">prop_map</span>(<span class="ident">Receiver::P2pkh</span>),
             <span class="ident">uniform20</span>(<span class="number">0u8</span>..).<span class="ident">prop_map</span>(<span class="ident">Receiver::P2sh</span>),
@@ -939,7 +939,7 @@
         <span class="kw">fn</span> <span class="ident">arb_unified_address</span>()(
             <span class="ident">shielded</span> <span class="kw">in</span> <span class="ident">prop::collection::hash_set</span>(<span class="ident">arb_shielded_receiver</span>(), <span class="number">1</span>..<span class="number">2</span>),
             <span class="ident">transparent</span> <span class="kw">in</span> <span class="ident">prop::option::of</span>(<span class="ident">arb_transparent_receiver</span>()),
-        ) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">Address</span> {
+        ) -&gt; <span class="ident">Address</span> {
             <span class="ident">Address</span>(<span class="ident">shielded</span>.<span class="ident">into_iter</span>().<span class="ident">chain</span>(<span class="ident">transparent</span>).<span class="ident">collect</span>())
         }
     }

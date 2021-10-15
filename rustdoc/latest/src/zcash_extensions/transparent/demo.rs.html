@@ -962,12 +962,12 @@
 
 <span class="kw">impl</span> <span class="ident">Precondition</span> {
     <span class="doccomment">/// Convenience constructor for opening precondition values.</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">open</span>(<span class="ident">hash</span>: [<span class="ident">u8</span>; <span class="number">32</span>]) <span class="op">-</span><span class="op">&gt;</span> <span class="self">Self</span> {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">open</span>(<span class="ident">hash</span>: [<span class="ident">u8</span>; <span class="number">32</span>]) -&gt; <span class="self">Self</span> {
         <span class="ident">Precondition::Open</span>(<span class="ident">open::Precondition</span>(<span class="ident">hash</span>))
     }
 
     <span class="doccomment">/// Convenience constructor for closing precondition values.</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">close</span>(<span class="ident">hash</span>: [<span class="ident">u8</span>; <span class="number">32</span>]) <span class="op">-</span><span class="op">&gt;</span> <span class="self">Self</span> {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">close</span>(<span class="ident">hash</span>: [<span class="ident">u8</span>; <span class="number">32</span>]) -&gt; <span class="self">Self</span> {
         <span class="ident">Precondition::Close</span>(<span class="ident">close::Precondition</span>(<span class="ident">hash</span>))
     }
 }
@@ -1001,15 +1001,15 @@
 }
 
 <span class="kw">impl</span> <span class="ident">fmt::Display</span> <span class="kw">for</span> <span class="ident">Error</span> {
-    <span class="kw">fn</span> <span class="ident">fmt</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">f</span>: <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">fmt::Formatter</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">fmt::Result</span> {
+    <span class="kw">fn</span> <span class="ident">fmt</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">f</span>: <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">fmt::Formatter</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span>) -&gt; <span class="ident">fmt::Result</span> {
         <span class="kw">match</span> <span class="self">self</span> {
-            <span class="ident">Error::IllegalPayloadLength</span>(<span class="ident">sz</span>) <span class="op">=</span><span class="op">&gt;</span> <span class="macro">write!</span>(<span class="ident">f</span>, <span class="string">&quot;Illegal payload length for demo: {}&quot;</span>, <span class="ident">sz</span>),
-            <span class="ident">Error::ModeInvalid</span>(<span class="ident">m</span>) <span class="op">=</span><span class="op">&gt;</span> <span class="macro">write!</span>(<span class="ident">f</span>, <span class="string">&quot;Invalid TZE mode for demo program: {}&quot;</span>, <span class="ident">m</span>),
-            <span class="ident">Error::NonTzeTxn</span> <span class="op">=</span><span class="op">&gt;</span> <span class="macro">write!</span>(<span class="ident">f</span>, <span class="string">&quot;Transaction has non-TZE inputs.&quot;</span>),
-            <span class="ident">Error::HashMismatch</span> <span class="op">=</span><span class="op">&gt;</span> <span class="macro">write!</span>(<span class="ident">f</span>, <span class="string">&quot;Hash mismatch&quot;</span>),
-            <span class="ident">Error::ModeMismatch</span> <span class="op">=</span><span class="op">&gt;</span> <span class="macro">write!</span>(<span class="ident">f</span>, <span class="string">&quot;Extension operation mode mismatch.&quot;</span>),
-            <span class="ident">Error::ExpectedClose</span> <span class="op">=</span><span class="op">&gt;</span> <span class="macro">write!</span>(<span class="ident">f</span>, <span class="string">&quot;Got open, expected close.&quot;</span>),
-            <span class="ident">Error::InvalidOutputQty</span>(<span class="ident">qty</span>) <span class="op">=</span><span class="op">&gt;</span> <span class="macro">write!</span>(<span class="ident">f</span>, <span class="string">&quot;Incorrect number of outputs: {}&quot;</span>, <span class="ident">qty</span>),
+            <span class="ident">Error::IllegalPayloadLength</span>(<span class="ident">sz</span>) =&gt; <span class="macro">write!</span>(<span class="ident">f</span>, <span class="string">&quot;Illegal payload length for demo: {}&quot;</span>, <span class="ident">sz</span>),
+            <span class="ident">Error::ModeInvalid</span>(<span class="ident">m</span>) =&gt; <span class="macro">write!</span>(<span class="ident">f</span>, <span class="string">&quot;Invalid TZE mode for demo program: {}&quot;</span>, <span class="ident">m</span>),
+            <span class="ident">Error::NonTzeTxn</span> =&gt; <span class="macro">write!</span>(<span class="ident">f</span>, <span class="string">&quot;Transaction has non-TZE inputs.&quot;</span>),
+            <span class="ident">Error::HashMismatch</span> =&gt; <span class="macro">write!</span>(<span class="ident">f</span>, <span class="string">&quot;Hash mismatch&quot;</span>),
+            <span class="ident">Error::ModeMismatch</span> =&gt; <span class="macro">write!</span>(<span class="ident">f</span>, <span class="string">&quot;Extension operation mode mismatch.&quot;</span>),
+            <span class="ident">Error::ExpectedClose</span> =&gt; <span class="macro">write!</span>(<span class="ident">f</span>, <span class="string">&quot;Got open, expected close.&quot;</span>),
+            <span class="ident">Error::InvalidOutputQty</span>(<span class="ident">qty</span>) =&gt; <span class="macro">write!</span>(<span class="ident">f</span>, <span class="string">&quot;Incorrect number of outputs: {}&quot;</span>, <span class="ident">qty</span>),
         }
     }
 }
@@ -1017,11 +1017,11 @@
 <span class="kw">impl</span> <span class="ident">TryFrom</span><span class="op">&lt;</span>(<span class="ident">u32</span>, <span class="ident">Precondition</span>)<span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">Precondition</span> {
     <span class="kw">type</span> <span class="ident">Error</span> <span class="op">=</span> <span class="ident">Error</span>;
 
-    <span class="kw">fn</span> <span class="ident">try_from</span>(<span class="ident">from</span>: (<span class="ident">u32</span>, <span class="self">Self</span>)) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="self">Self</span>, <span class="ident"><span class="self">Self</span>::Error</span><span class="op">&gt;</span> {
+    <span class="kw">fn</span> <span class="ident">try_from</span>(<span class="ident">from</span>: (<span class="ident">u32</span>, <span class="self">Self</span>)) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="self">Self</span>, <span class="ident"><span class="self">Self</span>::Error</span><span class="op">&gt;</span> {
         <span class="kw">match</span> <span class="ident">from</span> {
-            (<span class="ident">open::MODE</span>, <span class="ident">Precondition::Open</span>(<span class="ident">p</span>)) <span class="op">=</span><span class="op">&gt;</span> <span class="prelude-val">Ok</span>(<span class="ident">Precondition::Open</span>(<span class="ident">p</span>)),
-            (<span class="ident">close::MODE</span>, <span class="ident">Precondition::Close</span>(<span class="ident">p</span>)) <span class="op">=</span><span class="op">&gt;</span> <span class="prelude-val">Ok</span>(<span class="ident">Precondition::Close</span>(<span class="ident">p</span>)),
-            <span class="kw">_</span> <span class="op">=</span><span class="op">&gt;</span> <span class="prelude-val">Err</span>(<span class="ident">Error::ModeInvalid</span>(<span class="ident">from</span>.<span class="number">0</span>)),
+            (<span class="ident">open::MODE</span>, <span class="ident">Precondition::Open</span>(<span class="ident">p</span>)) =&gt; <span class="prelude-val">Ok</span>(<span class="ident">Precondition::Open</span>(<span class="ident">p</span>)),
+            (<span class="ident">close::MODE</span>, <span class="ident">Precondition::Close</span>(<span class="ident">p</span>)) =&gt; <span class="prelude-val">Ok</span>(<span class="ident">Precondition::Close</span>(<span class="ident">p</span>)),
+            <span class="kw">_</span> =&gt; <span class="prelude-val">Err</span>(<span class="ident">Error::ModeInvalid</span>(<span class="ident">from</span>.<span class="number">0</span>)),
         }
     }
 }
@@ -1029,28 +1029,28 @@
 <span class="kw">impl</span> <span class="ident">FromPayload</span> <span class="kw">for</span> <span class="ident">Precondition</span> {
     <span class="kw">type</span> <span class="ident">Error</span> <span class="op">=</span> <span class="ident">Error</span>;
 
-    <span class="kw">fn</span> <span class="ident">from_payload</span>(<span class="ident">mode</span>: <span class="ident">u32</span>, <span class="ident">payload</span>: <span class="kw-2">&amp;</span>[<span class="ident">u8</span>]) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="self">Self</span>, <span class="ident"><span class="self">Self</span>::Error</span><span class="op">&gt;</span> {
+    <span class="kw">fn</span> <span class="ident">from_payload</span>(<span class="ident">mode</span>: <span class="ident">u32</span>, <span class="ident">payload</span>: <span class="kw-2">&amp;</span>[<span class="ident">u8</span>]) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="self">Self</span>, <span class="ident"><span class="self">Self</span>::Error</span><span class="op">&gt;</span> {
         <span class="kw">match</span> <span class="ident">mode</span> {
-            <span class="ident">open::MODE</span> <span class="op">=</span><span class="op">&gt;</span> <span class="ident">payload</span>
+            <span class="ident">open::MODE</span> =&gt; <span class="ident">payload</span>
                 .<span class="ident">try_into</span>()
                 .<span class="ident">map_err</span>(<span class="op">|</span><span class="kw">_</span><span class="op">|</span> <span class="ident">Error::IllegalPayloadLength</span>(<span class="ident">payload</span>.<span class="ident">len</span>()))
                 .<span class="ident">map</span>(<span class="ident">Precondition::open</span>),
 
-            <span class="ident">close::MODE</span> <span class="op">=</span><span class="op">&gt;</span> <span class="ident">payload</span>
+            <span class="ident">close::MODE</span> =&gt; <span class="ident">payload</span>
                 .<span class="ident">try_into</span>()
                 .<span class="ident">map_err</span>(<span class="op">|</span><span class="kw">_</span><span class="op">|</span> <span class="ident">Error::IllegalPayloadLength</span>(<span class="ident">payload</span>.<span class="ident">len</span>()))
                 .<span class="ident">map</span>(<span class="ident">Precondition::close</span>),
 
-            <span class="kw">_</span> <span class="op">=</span><span class="op">&gt;</span> <span class="prelude-val">Err</span>(<span class="ident">Error::ModeInvalid</span>(<span class="ident">mode</span>)),
+            <span class="kw">_</span> =&gt; <span class="prelude-val">Err</span>(<span class="ident">Error::ModeInvalid</span>(<span class="ident">mode</span>)),
         }
     }
 }
 
 <span class="kw">impl</span> <span class="ident">ToPayload</span> <span class="kw">for</span> <span class="ident">Precondition</span> {
-    <span class="kw">fn</span> <span class="ident">to_payload</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) <span class="op">-</span><span class="op">&gt;</span> (<span class="ident">u32</span>, <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span>) {
+    <span class="kw">fn</span> <span class="ident">to_payload</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; (<span class="ident">u32</span>, <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span>) {
         <span class="kw">match</span> <span class="self">self</span> {
-            <span class="ident">Precondition::Open</span>(<span class="ident">p</span>) <span class="op">=</span><span class="op">&gt;</span> (<span class="ident">open::MODE</span>, <span class="ident">p</span>.<span class="number">0</span>.<span class="ident">to_vec</span>()),
-            <span class="ident">Precondition::Close</span>(<span class="ident">p</span>) <span class="op">=</span><span class="op">&gt;</span> (<span class="ident">close::MODE</span>, <span class="ident">p</span>.<span class="number">0</span>.<span class="ident">to_vec</span>()),
+            <span class="ident">Precondition::Open</span>(<span class="ident">p</span>) =&gt; (<span class="ident">open::MODE</span>, <span class="ident">p</span>.<span class="number">0</span>.<span class="ident">to_vec</span>()),
+            <span class="ident">Precondition::Close</span>(<span class="ident">p</span>) =&gt; (<span class="ident">close::MODE</span>, <span class="ident">p</span>.<span class="number">0</span>.<span class="ident">to_vec</span>()),
         }
     }
 }
@@ -1063,11 +1063,11 @@
 }
 
 <span class="kw">impl</span> <span class="ident">Witness</span> {
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">open</span>(<span class="ident">preimage</span>: [<span class="ident">u8</span>; <span class="number">32</span>]) <span class="op">-</span><span class="op">&gt;</span> <span class="self">Self</span> {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">open</span>(<span class="ident">preimage</span>: [<span class="ident">u8</span>; <span class="number">32</span>]) -&gt; <span class="self">Self</span> {
         <span class="ident">Witness::Open</span>(<span class="ident">open::Witness</span>(<span class="ident">preimage</span>))
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">close</span>(<span class="ident">preimage</span>: [<span class="ident">u8</span>; <span class="number">32</span>]) <span class="op">-</span><span class="op">&gt;</span> <span class="self">Self</span> {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">close</span>(<span class="ident">preimage</span>: [<span class="ident">u8</span>; <span class="number">32</span>]) -&gt; <span class="self">Self</span> {
         <span class="ident">Witness::Close</span>(<span class="ident">close::Witness</span>(<span class="ident">preimage</span>))
     }
 }
@@ -1075,11 +1075,11 @@
 <span class="kw">impl</span> <span class="ident">TryFrom</span><span class="op">&lt;</span>(<span class="ident">u32</span>, <span class="ident">Witness</span>)<span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">Witness</span> {
     <span class="kw">type</span> <span class="ident">Error</span> <span class="op">=</span> <span class="ident">Error</span>;
 
-    <span class="kw">fn</span> <span class="ident">try_from</span>(<span class="ident">from</span>: (<span class="ident">u32</span>, <span class="self">Self</span>)) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="self">Self</span>, <span class="ident"><span class="self">Self</span>::Error</span><span class="op">&gt;</span> {
+    <span class="kw">fn</span> <span class="ident">try_from</span>(<span class="ident">from</span>: (<span class="ident">u32</span>, <span class="self">Self</span>)) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="self">Self</span>, <span class="ident"><span class="self">Self</span>::Error</span><span class="op">&gt;</span> {
         <span class="kw">match</span> <span class="ident">from</span> {
-            (<span class="ident">open::MODE</span>, <span class="ident">Witness::Open</span>(<span class="ident">p</span>)) <span class="op">=</span><span class="op">&gt;</span> <span class="prelude-val">Ok</span>(<span class="ident">Witness::Open</span>(<span class="ident">p</span>)),
-            (<span class="ident">close::MODE</span>, <span class="ident">Witness::Close</span>(<span class="ident">p</span>)) <span class="op">=</span><span class="op">&gt;</span> <span class="prelude-val">Ok</span>(<span class="ident">Witness::Close</span>(<span class="ident">p</span>)),
-            <span class="kw">_</span> <span class="op">=</span><span class="op">&gt;</span> <span class="prelude-val">Err</span>(<span class="ident">Error::ModeInvalid</span>(<span class="ident">from</span>.<span class="number">0</span>)),
+            (<span class="ident">open::MODE</span>, <span class="ident">Witness::Open</span>(<span class="ident">p</span>)) =&gt; <span class="prelude-val">Ok</span>(<span class="ident">Witness::Open</span>(<span class="ident">p</span>)),
+            (<span class="ident">close::MODE</span>, <span class="ident">Witness::Close</span>(<span class="ident">p</span>)) =&gt; <span class="prelude-val">Ok</span>(<span class="ident">Witness::Close</span>(<span class="ident">p</span>)),
+            <span class="kw">_</span> =&gt; <span class="prelude-val">Err</span>(<span class="ident">Error::ModeInvalid</span>(<span class="ident">from</span>.<span class="number">0</span>)),
         }
     }
 }
@@ -1087,28 +1087,28 @@
 <span class="kw">impl</span> <span class="ident">FromPayload</span> <span class="kw">for</span> <span class="ident">Witness</span> {
     <span class="kw">type</span> <span class="ident">Error</span> <span class="op">=</span> <span class="ident">Error</span>;
 
-    <span class="kw">fn</span> <span class="ident">from_payload</span>(<span class="ident">mode</span>: <span class="ident">u32</span>, <span class="ident">payload</span>: <span class="kw-2">&amp;</span>[<span class="ident">u8</span>]) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="self">Self</span>, <span class="ident"><span class="self">Self</span>::Error</span><span class="op">&gt;</span> {
+    <span class="kw">fn</span> <span class="ident">from_payload</span>(<span class="ident">mode</span>: <span class="ident">u32</span>, <span class="ident">payload</span>: <span class="kw-2">&amp;</span>[<span class="ident">u8</span>]) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="self">Self</span>, <span class="ident"><span class="self">Self</span>::Error</span><span class="op">&gt;</span> {
         <span class="kw">match</span> <span class="ident">mode</span> {
-            <span class="ident">open::MODE</span> <span class="op">=</span><span class="op">&gt;</span> <span class="ident">payload</span>
+            <span class="ident">open::MODE</span> =&gt; <span class="ident">payload</span>
                 .<span class="ident">try_into</span>()
                 .<span class="ident">map_err</span>(<span class="op">|</span><span class="kw">_</span><span class="op">|</span> <span class="ident">Error::IllegalPayloadLength</span>(<span class="ident">payload</span>.<span class="ident">len</span>()))
                 .<span class="ident">map</span>(<span class="ident">Witness::open</span>),
 
-            <span class="ident">close::MODE</span> <span class="op">=</span><span class="op">&gt;</span> <span class="ident">payload</span>
+            <span class="ident">close::MODE</span> =&gt; <span class="ident">payload</span>
                 .<span class="ident">try_into</span>()
                 .<span class="ident">map_err</span>(<span class="op">|</span><span class="kw">_</span><span class="op">|</span> <span class="ident">Error::IllegalPayloadLength</span>(<span class="ident">payload</span>.<span class="ident">len</span>()))
                 .<span class="ident">map</span>(<span class="ident">Witness::close</span>),
 
-            <span class="kw">_</span> <span class="op">=</span><span class="op">&gt;</span> <span class="prelude-val">Err</span>(<span class="ident">Error::ModeInvalid</span>(<span class="ident">mode</span>)),
+            <span class="kw">_</span> =&gt; <span class="prelude-val">Err</span>(<span class="ident">Error::ModeInvalid</span>(<span class="ident">mode</span>)),
         }
     }
 }
 
 <span class="kw">impl</span> <span class="ident">ToPayload</span> <span class="kw">for</span> <span class="ident">Witness</span> {
-    <span class="kw">fn</span> <span class="ident">to_payload</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) <span class="op">-</span><span class="op">&gt;</span> (<span class="ident">u32</span>, <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span>) {
+    <span class="kw">fn</span> <span class="ident">to_payload</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; (<span class="ident">u32</span>, <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span>) {
         <span class="kw">match</span> <span class="self">self</span> {
-            <span class="ident">Witness::Open</span>(<span class="ident">w</span>) <span class="op">=</span><span class="op">&gt;</span> (<span class="ident">open::MODE</span>, <span class="ident">w</span>.<span class="number">0</span>.<span class="ident">to_vec</span>()),
-            <span class="ident">Witness::Close</span>(<span class="ident">w</span>) <span class="op">=</span><span class="op">&gt;</span> (<span class="ident">close::MODE</span>, <span class="ident">w</span>.<span class="number">0</span>.<span class="ident">to_vec</span>()),
+            <span class="ident">Witness::Open</span>(<span class="ident">w</span>) =&gt; (<span class="ident">open::MODE</span>, <span class="ident">w</span>.<span class="number">0</span>.<span class="ident">to_vec</span>()),
+            <span class="ident">Witness::Close</span>(<span class="ident">w</span>) =&gt; (<span class="ident">close::MODE</span>, <span class="ident">w</span>.<span class="number">0</span>.<span class="ident">to_vec</span>()),
         }
     }
 }
@@ -1123,10 +1123,10 @@
     <span class="doccomment">/// inputs and outputs. The demo extension does not support verification</span>
     <span class="doccomment">/// of transactions which have either shielded or transparent inputs and</span>
     <span class="doccomment">/// outputs.</span>
-    <span class="kw">fn</span> <span class="ident">is_tze_only</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">bool</span>;
+    <span class="kw">fn</span> <span class="ident">is_tze_only</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">bool</span>;
 
     <span class="doccomment">/// List of all TZE outputs in the transaction being validate by the extension.</span>
-    <span class="kw">fn</span> <span class="ident">tx_tze_outputs</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="kw-2">&amp;</span>[<span class="ident">TzeOut</span>];
+    <span class="kw">fn</span> <span class="ident">tx_tze_outputs</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>[<span class="ident">TzeOut</span>];
 }
 
 <span class="doccomment">/// Marker type for the demo extension.</span>
@@ -1150,11 +1150,11 @@
         <span class="ident">precondition</span>: <span class="kw-2">&amp;</span><span class="ident">Precondition</span>,
         <span class="ident">witness</span>: <span class="kw-2">&amp;</span><span class="ident">Witness</span>,
         <span class="ident">context</span>: <span class="kw-2">&amp;</span><span class="ident">C</span>,
-    ) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident">Error</span><span class="op">&gt;</span> {
+    ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident">Error</span><span class="op">&gt;</span> {
         <span class="comment">// This match statement is selecting the mode that the program is operating in,</span>
         <span class="comment">// based on the enums defined in the parser.</span>
         <span class="kw">match</span> (<span class="ident">precondition</span>, <span class="ident">witness</span>) {
-            (<span class="ident">Precondition::Open</span>(<span class="ident">p_open</span>), <span class="ident">Witness::Open</span>(<span class="ident">w_open</span>)) <span class="op">=</span><span class="op">&gt;</span> {
+            (<span class="ident">Precondition::Open</span>(<span class="ident">p_open</span>), <span class="ident">Witness::Open</span>(<span class="ident">w_open</span>)) =&gt; {
                 <span class="comment">// In OPEN mode, we enforce that the transaction must only contain inputs</span>
                 <span class="comment">// and outputs from this program. The consensus rules enforce that if a</span>
                 <span class="comment">// transaction contains both TZE inputs and TZE outputs, they must all be</span>
@@ -1167,11 +1167,11 @@
                 <span class="comment">// Next, check that there is only a single TZE output of the correct type.</span>
                 <span class="kw">let</span> <span class="ident">outputs</span> <span class="op">=</span> <span class="ident">context</span>.<span class="ident">tx_tze_outputs</span>();
                 <span class="kw">match</span> <span class="ident">outputs</span> {
-                    [<span class="ident">tze_out</span>] <span class="op">=</span><span class="op">&gt;</span> <span class="kw">match</span> <span class="ident">Precondition::from_payload</span>(
+                    [<span class="ident">tze_out</span>] =&gt; <span class="kw">match</span> <span class="ident">Precondition::from_payload</span>(
                         <span class="ident">tze_out</span>.<span class="ident">precondition</span>.<span class="ident">mode</span>,
                         <span class="kw-2">&amp;</span><span class="ident">tze_out</span>.<span class="ident">precondition</span>.<span class="ident">payload</span>,
                     ) {
-                        <span class="prelude-val">Ok</span>(<span class="ident">Precondition::Close</span>(<span class="ident">p_close</span>)) <span class="op">=</span><span class="op">&gt;</span> {
+                        <span class="prelude-val">Ok</span>(<span class="ident">Precondition::Close</span>(<span class="ident">p_close</span>)) =&gt; {
                             <span class="comment">// Finally, check the precondition:</span>
                             <span class="comment">// precondition_open = BLAKE2b_256(witness_open || precondition_close)</span>
                             <span class="kw">let</span> <span class="ident">hash</span> <span class="op">=</span> <span class="ident">Params::new</span>()
@@ -1181,37 +1181,37 @@
                                 .<span class="ident">update</span>(<span class="kw-2">&amp;</span><span class="ident">w_open</span>.<span class="number">0</span>)
                                 .<span class="ident">update</span>(<span class="kw-2">&amp;</span><span class="ident">p_close</span>.<span class="number">0</span>)
                                 .<span class="ident">finalize</span>();
-                            <span class="kw">if</span> <span class="ident">hash</span>.<span class="ident">as_bytes</span>() <span class="op">=</span><span class="op">=</span> <span class="ident">p_open</span>.<span class="number">0</span> {
+                            <span class="kw">if</span> <span class="ident">hash</span>.<span class="ident">as_bytes</span>() <span class="op">==</span> <span class="ident">p_open</span>.<span class="number">0</span> {
                                 <span class="prelude-val">Ok</span>(())
                             } <span class="kw">else</span> {
                                 <span class="prelude-val">Err</span>(<span class="ident">Error::HashMismatch</span>)
                             }
                         }
-                        <span class="prelude-val">Ok</span>(<span class="ident">Precondition::Open</span>(<span class="kw">_</span>)) <span class="op">=</span><span class="op">&gt;</span> <span class="prelude-val">Err</span>(<span class="ident">Error::ExpectedClose</span>),
-                        <span class="prelude-val">Err</span>(<span class="ident">e</span>) <span class="op">=</span><span class="op">&gt;</span> <span class="prelude-val">Err</span>(<span class="ident">e</span>),
+                        <span class="prelude-val">Ok</span>(<span class="ident">Precondition::Open</span>(<span class="kw">_</span>)) =&gt; <span class="prelude-val">Err</span>(<span class="ident">Error::ExpectedClose</span>),
+                        <span class="prelude-val">Err</span>(<span class="ident">e</span>) =&gt; <span class="prelude-val">Err</span>(<span class="ident">e</span>),
                     },
-                    <span class="kw">_</span> <span class="op">=</span><span class="op">&gt;</span> <span class="prelude-val">Err</span>(<span class="ident">Error::InvalidOutputQty</span>(<span class="ident">outputs</span>.<span class="ident">len</span>())),
+                    <span class="kw">_</span> =&gt; <span class="prelude-val">Err</span>(<span class="ident">Error::InvalidOutputQty</span>(<span class="ident">outputs</span>.<span class="ident">len</span>())),
                 }
             }
-            (<span class="ident">Precondition::Close</span>(<span class="ident">p</span>), <span class="ident">Witness::Close</span>(<span class="ident">w</span>)) <span class="op">=</span><span class="op">&gt;</span> {
+            (<span class="ident">Precondition::Close</span>(<span class="ident">p</span>), <span class="ident">Witness::Close</span>(<span class="ident">w</span>)) =&gt; {
                 <span class="comment">// In CLOSE mode, we only require that the precondition is satisfied:</span>
                 <span class="comment">// precondition_close = BLAKE2b_256(witness_close)</span>
                 <span class="kw">let</span> <span class="ident">hash</span> <span class="op">=</span> <span class="ident">Params::new</span>()
                     .<span class="ident">hash_length</span>(<span class="number">32</span>)
                     .<span class="ident">personal</span>(<span class="string">b&quot;demo_pc_h2_perso&quot;</span>)
                     .<span class="ident">hash</span>(<span class="kw-2">&amp;</span><span class="ident">w</span>.<span class="number">0</span>);
-                <span class="kw">if</span> <span class="ident">hash</span>.<span class="ident">as_bytes</span>() <span class="op">=</span><span class="op">=</span> <span class="ident">p</span>.<span class="number">0</span> {
+                <span class="kw">if</span> <span class="ident">hash</span>.<span class="ident">as_bytes</span>() <span class="op">==</span> <span class="ident">p</span>.<span class="number">0</span> {
                     <span class="prelude-val">Ok</span>(())
                 } <span class="kw">else</span> {
                     <span class="prelude-val">Err</span>(<span class="ident">Error::HashMismatch</span>)
                 }
             }
-            <span class="kw">_</span> <span class="op">=</span><span class="op">&gt;</span> <span class="prelude-val">Err</span>(<span class="ident">Error::ModeMismatch</span>),
+            <span class="kw">_</span> =&gt; <span class="prelude-val">Err</span>(<span class="ident">Error::ModeMismatch</span>),
         }
     }
 }
 
-<span class="kw">fn</span> <span class="ident">hash_1</span>(<span class="ident">preimage_1</span>: <span class="kw-2">&amp;</span>[<span class="ident">u8</span>; <span class="number">32</span>], <span class="ident">hash_2</span>: <span class="kw-2">&amp;</span>[<span class="ident">u8</span>; <span class="number">32</span>]) <span class="op">-</span><span class="op">&gt;</span> [<span class="ident">u8</span>; <span class="number">32</span>] {
+<span class="kw">fn</span> <span class="ident">hash_1</span>(<span class="ident">preimage_1</span>: <span class="kw-2">&amp;</span>[<span class="ident">u8</span>; <span class="number">32</span>], <span class="ident">hash_2</span>: <span class="kw-2">&amp;</span>[<span class="ident">u8</span>; <span class="number">32</span>]) -&gt; [<span class="ident">u8</span>; <span class="number">32</span>] {
     <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">hash</span> <span class="op">=</span> [<span class="number">0</span>; <span class="number">32</span>];
     <span class="ident">hash</span>.<span class="ident">copy_from_slice</span>(
         <span class="ident">Params::new</span>()
@@ -1241,13 +1241,13 @@
 <span class="kw">impl</span><span class="op">&lt;</span><span class="ident">B</span><span class="op">&gt;</span> <span class="ident">Deref</span> <span class="kw">for</span> <span class="ident">DemoBuilder</span><span class="op">&lt;</span><span class="ident">B</span><span class="op">&gt;</span> {
     <span class="kw">type</span> <span class="ident">Target</span> <span class="op">=</span> <span class="ident">B</span>;
 
-    <span class="kw">fn</span> <span class="ident">deref</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="kw-2">&amp;</span><span class="ident"><span class="self">Self</span>::Target</span> {
+    <span class="kw">fn</span> <span class="ident">deref</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span><span class="ident"><span class="self">Self</span>::Target</span> {
         <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">txn_builder</span>
     }
 }
 
 <span class="kw">impl</span><span class="op">&lt;</span><span class="ident">B</span><span class="op">&gt;</span> <span class="ident">DerefMut</span> <span class="kw">for</span> <span class="ident">DemoBuilder</span><span class="op">&lt;</span><span class="ident">B</span><span class="op">&gt;</span> {
-    <span class="kw">fn</span> <span class="ident">deref_mut</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident"><span class="self">Self</span>::Target</span> {
+    <span class="kw">fn</span> <span class="ident">deref_mut</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident"><span class="self">Self</span>::Target</span> {
         <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>.<span class="ident">txn_builder</span>
     }
 }
@@ -1279,7 +1279,7 @@
         <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>,
         <span class="ident">value</span>: <span class="ident">Amount</span>,
         <span class="ident">hash_1</span>: [<span class="ident">u8</span>; <span class="number">32</span>],
-    ) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident">DemoBuildError</span><span class="op">&lt;</span><span class="ident">B::BuildError</span><span class="op">&gt;</span><span class="op">&gt;</span> {
+    ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident">DemoBuildError</span><span class="op">&lt;</span><span class="ident">B::BuildError</span><span class="op">&gt;</span><span class="op">&gt;</span> {
         <span class="comment">// Call through to the generic builder.</span>
         <span class="self">self</span>.<span class="ident">txn_builder</span>
             .<span class="ident">add_tze_output</span>(<span class="self">self</span>.<span class="ident">extension_id</span>, <span class="ident">value</span>, <span class="kw-2">&amp;</span><span class="ident">Precondition::open</span>(<span class="ident">hash_1</span>))
@@ -1294,7 +1294,7 @@
         <span class="ident">transfer_amount</span>: <span class="ident">Amount</span>,
         <span class="ident">preimage_1</span>: [<span class="ident">u8</span>; <span class="number">32</span>],
         <span class="ident">hash_2</span>: [<span class="ident">u8</span>; <span class="number">32</span>],
-    ) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident">DemoBuildError</span><span class="op">&lt;</span><span class="ident">B::BuildError</span><span class="op">&gt;</span><span class="op">&gt;</span> {
+    ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident">DemoBuildError</span><span class="op">&lt;</span><span class="ident">B::BuildError</span><span class="op">&gt;</span><span class="op">&gt;</span> {
         <span class="kw">let</span> <span class="ident">h1</span> <span class="op">=</span> <span class="ident">hash_1</span>(<span class="kw-2">&amp;</span><span class="ident">preimage_1</span>, <span class="kw-2">&amp;</span><span class="ident">hash_2</span>);
 
         <span class="comment">// eagerly validate the relationship between prevout.1 and preimage_1</span>
@@ -1302,16 +1302,16 @@
             <span class="ident">prevout</span>.<span class="number">1</span>.<span class="ident">precondition</span>.<span class="ident">mode</span>,
             <span class="kw-2">&amp;</span><span class="ident">prevout</span>.<span class="number">1</span>.<span class="ident">precondition</span>.<span class="ident">payload</span>,
         ) {
-            <span class="prelude-val">Err</span>(<span class="ident">parse_failure</span>) <span class="op">=</span><span class="op">&gt;</span> <span class="prelude-val">Err</span>(<span class="ident">DemoBuildError::PrevoutParseFailure</span>(<span class="ident">parse_failure</span>)),
+            <span class="prelude-val">Err</span>(<span class="ident">parse_failure</span>) =&gt; <span class="prelude-val">Err</span>(<span class="ident">DemoBuildError::PrevoutParseFailure</span>(<span class="ident">parse_failure</span>)),
 
-            <span class="prelude-val">Ok</span>(<span class="ident">Precondition::Close</span>(<span class="kw">_</span>)) <span class="op">=</span><span class="op">&gt;</span> <span class="prelude-val">Err</span>(<span class="ident">DemoBuildError::ExpectedOpen</span>),
+            <span class="prelude-val">Ok</span>(<span class="ident">Precondition::Close</span>(<span class="kw">_</span>)) =&gt; <span class="prelude-val">Err</span>(<span class="ident">DemoBuildError::ExpectedOpen</span>),
 
-            <span class="prelude-val">Ok</span>(<span class="ident">Precondition::Open</span>(<span class="ident">hash</span>)) <span class="kw">if</span> <span class="ident">hash</span>.<span class="number">0</span> <span class="op">!</span><span class="op">=</span> <span class="ident">h1</span> <span class="op">=</span><span class="op">&gt;</span> <span class="prelude-val">Err</span>(<span class="ident">DemoBuildError::TransferMismatch</span> {
+            <span class="prelude-val">Ok</span>(<span class="ident">Precondition::Open</span>(<span class="ident">hash</span>)) <span class="kw">if</span> <span class="ident">hash</span>.<span class="number">0</span> <span class="op">!</span><span class="op">=</span> <span class="ident">h1</span> =&gt; <span class="prelude-val">Err</span>(<span class="ident">DemoBuildError::TransferMismatch</span> {
                 <span class="ident">expected</span>: <span class="ident">hash</span>.<span class="number">0</span>,
                 <span class="ident">actual</span>: <span class="ident">h1</span>,
             }),
 
-            <span class="prelude-val">Ok</span>(<span class="ident">Precondition::Open</span>(<span class="kw">_</span>)) <span class="op">=</span><span class="op">&gt;</span> {
+            <span class="prelude-val">Ok</span>(<span class="ident">Precondition::Open</span>(<span class="kw">_</span>)) =&gt; {
                 <span class="self">self</span>.<span class="ident">txn_builder</span>
                     .<span class="ident">add_tze_input</span>(<span class="self">self</span>.<span class="ident">extension_id</span>, <span class="ident">open::MODE</span>, <span class="ident">prevout</span>, <span class="kw">move</span> <span class="op">|</span><span class="kw">_</span><span class="op">|</span> {
                         <span class="prelude-val">Ok</span>(<span class="ident">Witness::open</span>(<span class="ident">preimage_1</span>))
@@ -1334,7 +1334,7 @@
         <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>,
         <span class="ident">prevout</span>: (<span class="ident">OutPoint</span>, <span class="ident">TzeOut</span>),
         <span class="ident">preimage_2</span>: [<span class="ident">u8</span>; <span class="number">32</span>],
-    ) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident">DemoBuildError</span><span class="op">&lt;</span><span class="ident">B::BuildError</span><span class="op">&gt;</span><span class="op">&gt;</span> {
+    ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident">DemoBuildError</span><span class="op">&lt;</span><span class="ident">B::BuildError</span><span class="op">&gt;</span><span class="op">&gt;</span> {
         <span class="kw">let</span> <span class="ident">hash_2</span> <span class="op">=</span> {
             <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">hash</span> <span class="op">=</span> [<span class="number">0</span>; <span class="number">32</span>];
             <span class="ident">hash</span>.<span class="ident">copy_from_slice</span>(
@@ -1353,18 +1353,18 @@
             <span class="ident">prevout</span>.<span class="number">1</span>.<span class="ident">precondition</span>.<span class="ident">mode</span>,
             <span class="kw-2">&amp;</span><span class="ident">prevout</span>.<span class="number">1</span>.<span class="ident">precondition</span>.<span class="ident">payload</span>,
         ) {
-            <span class="prelude-val">Err</span>(<span class="ident">parse_failure</span>) <span class="op">=</span><span class="op">&gt;</span> <span class="prelude-val">Err</span>(<span class="ident">DemoBuildError::PrevoutParseFailure</span>(<span class="ident">parse_failure</span>)),
+            <span class="prelude-val">Err</span>(<span class="ident">parse_failure</span>) =&gt; <span class="prelude-val">Err</span>(<span class="ident">DemoBuildError::PrevoutParseFailure</span>(<span class="ident">parse_failure</span>)),
 
-            <span class="prelude-val">Ok</span>(<span class="ident">Precondition::Open</span>(<span class="kw">_</span>)) <span class="op">=</span><span class="op">&gt;</span> <span class="prelude-val">Err</span>(<span class="ident">DemoBuildError::ExpectedClose</span>),
+            <span class="prelude-val">Ok</span>(<span class="ident">Precondition::Open</span>(<span class="kw">_</span>)) =&gt; <span class="prelude-val">Err</span>(<span class="ident">DemoBuildError::ExpectedClose</span>),
 
-            <span class="prelude-val">Ok</span>(<span class="ident">Precondition::Close</span>(<span class="ident">hash</span>)) <span class="kw">if</span> <span class="ident">hash</span>.<span class="number">0</span> <span class="op">!</span><span class="op">=</span> <span class="ident">hash_2</span> <span class="op">=</span><span class="op">&gt;</span> {
+            <span class="prelude-val">Ok</span>(<span class="ident">Precondition::Close</span>(<span class="ident">hash</span>)) <span class="kw">if</span> <span class="ident">hash</span>.<span class="number">0</span> <span class="op">!</span><span class="op">=</span> <span class="ident">hash_2</span> =&gt; {
                 <span class="prelude-val">Err</span>(<span class="ident">DemoBuildError::CloseMismatch</span> {
                     <span class="ident">expected</span>: <span class="ident">hash</span>.<span class="number">0</span>,
                     <span class="ident">actual</span>: <span class="ident">hash_2</span>,
                 })
             }
 
-            <span class="prelude-val">Ok</span>(<span class="ident">Precondition::Close</span>(<span class="kw">_</span>)) <span class="op">=</span><span class="op">&gt;</span> <span class="self">self</span>
+            <span class="prelude-val">Ok</span>(<span class="ident">Precondition::Close</span>(<span class="kw">_</span>)) =&gt; <span class="self">self</span>
                 .<span class="ident">txn_builder</span>
                 .<span class="ident">add_tze_input</span>(<span class="self">self</span>.<span class="ident">extension_id</span>, <span class="ident">close::MODE</span>, <span class="ident">prevout</span>, <span class="kw">move</span> <span class="op">|</span><span class="kw">_</span><span class="op">|</span> {
                     <span class="prelude-val">Ok</span>(<span class="ident">Witness::close</span>(<span class="ident">preimage_2</span>))
@@ -1406,43 +1406,43 @@
     <span class="kw">struct</span> <span class="ident">FutureNetwork</span>;
 
     <span class="kw">impl</span> <span class="ident">Parameters</span> <span class="kw">for</span> <span class="ident">FutureNetwork</span> {
-        <span class="kw">fn</span> <span class="ident">activation_height</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">nu</span>: <span class="ident">NetworkUpgrade</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">BlockHeight</span><span class="op">&gt;</span> {
+        <span class="kw">fn</span> <span class="ident">activation_height</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">nu</span>: <span class="ident">NetworkUpgrade</span>) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">BlockHeight</span><span class="op">&gt;</span> {
             <span class="kw">match</span> <span class="ident">nu</span> {
-                <span class="ident">NetworkUpgrade::Overwinter</span> <span class="op">=</span><span class="op">&gt;</span> <span class="prelude-val">Some</span>(<span class="ident">BlockHeight::from_u32</span>(<span class="number">207_500</span>)),
-                <span class="ident">NetworkUpgrade::Sapling</span> <span class="op">=</span><span class="op">&gt;</span> <span class="prelude-val">Some</span>(<span class="ident">BlockHeight::from_u32</span>(<span class="number">280_000</span>)),
-                <span class="ident">NetworkUpgrade::Blossom</span> <span class="op">=</span><span class="op">&gt;</span> <span class="prelude-val">Some</span>(<span class="ident">BlockHeight::from_u32</span>(<span class="number">584_000</span>)),
-                <span class="ident">NetworkUpgrade::Heartwood</span> <span class="op">=</span><span class="op">&gt;</span> <span class="prelude-val">Some</span>(<span class="ident">BlockHeight::from_u32</span>(<span class="number">903_800</span>)),
-                <span class="ident">NetworkUpgrade::Canopy</span> <span class="op">=</span><span class="op">&gt;</span> <span class="prelude-val">Some</span>(<span class="ident">BlockHeight::from_u32</span>(<span class="number">1_028_500</span>)),
-                <span class="ident">NetworkUpgrade::Nu5</span> <span class="op">=</span><span class="op">&gt;</span> <span class="prelude-val">Some</span>(<span class="ident">BlockHeight::from_u32</span>(<span class="number">1_200_000</span>)),
-                <span class="ident">NetworkUpgrade::ZFuture</span> <span class="op">=</span><span class="op">&gt;</span> <span class="prelude-val">Some</span>(<span class="ident">BlockHeight::from_u32</span>(<span class="number">1_400_000</span>)),
+                <span class="ident">NetworkUpgrade::Overwinter</span> =&gt; <span class="prelude-val">Some</span>(<span class="ident">BlockHeight::from_u32</span>(<span class="number">207_500</span>)),
+                <span class="ident">NetworkUpgrade::Sapling</span> =&gt; <span class="prelude-val">Some</span>(<span class="ident">BlockHeight::from_u32</span>(<span class="number">280_000</span>)),
+                <span class="ident">NetworkUpgrade::Blossom</span> =&gt; <span class="prelude-val">Some</span>(<span class="ident">BlockHeight::from_u32</span>(<span class="number">584_000</span>)),
+                <span class="ident">NetworkUpgrade::Heartwood</span> =&gt; <span class="prelude-val">Some</span>(<span class="ident">BlockHeight::from_u32</span>(<span class="number">903_800</span>)),
+                <span class="ident">NetworkUpgrade::Canopy</span> =&gt; <span class="prelude-val">Some</span>(<span class="ident">BlockHeight::from_u32</span>(<span class="number">1_028_500</span>)),
+                <span class="ident">NetworkUpgrade::Nu5</span> =&gt; <span class="prelude-val">Some</span>(<span class="ident">BlockHeight::from_u32</span>(<span class="number">1_200_000</span>)),
+                <span class="ident">NetworkUpgrade::ZFuture</span> =&gt; <span class="prelude-val">Some</span>(<span class="ident">BlockHeight::from_u32</span>(<span class="number">1_400_000</span>)),
             }
         }
 
-        <span class="kw">fn</span> <span class="ident">coin_type</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">u32</span> {
+        <span class="kw">fn</span> <span class="ident">coin_type</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">u32</span> {
             <span class="ident">constants::testnet::COIN_TYPE</span>
         }
 
-        <span class="kw">fn</span> <span class="ident">hrp_sapling_extended_spending_key</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="kw-2">&amp;</span><span class="ident">str</span> {
+        <span class="kw">fn</span> <span class="ident">hrp_sapling_extended_spending_key</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span><span class="ident">str</span> {
             <span class="ident">constants::testnet::HRP_SAPLING_EXTENDED_SPENDING_KEY</span>
         }
 
-        <span class="kw">fn</span> <span class="ident">hrp_sapling_extended_full_viewing_key</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="kw-2">&amp;</span><span class="ident">str</span> {
+        <span class="kw">fn</span> <span class="ident">hrp_sapling_extended_full_viewing_key</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span><span class="ident">str</span> {
             <span class="ident">constants::testnet::HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY</span>
         }
 
-        <span class="kw">fn</span> <span class="ident">hrp_sapling_payment_address</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="kw-2">&amp;</span><span class="ident">str</span> {
+        <span class="kw">fn</span> <span class="ident">hrp_sapling_payment_address</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span><span class="ident">str</span> {
             <span class="ident">constants::testnet::HRP_SAPLING_PAYMENT_ADDRESS</span>
         }
 
-        <span class="kw">fn</span> <span class="ident">b58_pubkey_address_prefix</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) <span class="op">-</span><span class="op">&gt;</span> [<span class="ident">u8</span>; <span class="number">2</span>] {
+        <span class="kw">fn</span> <span class="ident">b58_pubkey_address_prefix</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; [<span class="ident">u8</span>; <span class="number">2</span>] {
             <span class="ident">constants::testnet::B58_PUBKEY_ADDRESS_PREFIX</span>
         }
 
-        <span class="kw">fn</span> <span class="ident">b58_script_address_prefix</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) <span class="op">-</span><span class="op">&gt;</span> [<span class="ident">u8</span>; <span class="number">2</span>] {
+        <span class="kw">fn</span> <span class="ident">b58_script_address_prefix</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; [<span class="ident">u8</span>; <span class="number">2</span>] {
             <span class="ident">constants::testnet::B58_SCRIPT_ADDRESS_PREFIX</span>
         }
     }
-    <span class="kw">fn</span> <span class="ident">demo_hashes</span>(<span class="ident">preimage_1</span>: <span class="kw-2">&amp;</span>[<span class="ident">u8</span>; <span class="number">32</span>], <span class="ident">preimage_2</span>: <span class="kw-2">&amp;</span>[<span class="ident">u8</span>; <span class="number">32</span>]) <span class="op">-</span><span class="op">&gt;</span> ([<span class="ident">u8</span>; <span class="number">32</span>], [<span class="ident">u8</span>; <span class="number">32</span>]) {
+    <span class="kw">fn</span> <span class="ident">demo_hashes</span>(<span class="ident">preimage_1</span>: <span class="kw-2">&amp;</span>[<span class="ident">u8</span>; <span class="number">32</span>], <span class="ident">preimage_2</span>: <span class="kw-2">&amp;</span>[<span class="ident">u8</span>; <span class="number">32</span>]) -&gt; ([<span class="ident">u8</span>; <span class="number">32</span>], [<span class="ident">u8</span>; <span class="number">32</span>]) {
         <span class="kw">let</span> <span class="ident">hash_2</span> <span class="op">=</span> {
             <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">hash</span> <span class="op">=</span> [<span class="number">0</span>; <span class="number">32</span>];
             <span class="ident">hash</span>.<span class="ident">copy_from_slice</span>(
@@ -1518,22 +1518,22 @@
     <span class="doccomment">/// Implementation of required operations for the demo extension, as satisfied</span>
     <span class="doccomment">/// by the context.</span>
     <span class="kw">impl</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> <span class="ident">Context</span> <span class="kw">for</span> <span class="ident">Ctx</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-        <span class="kw">fn</span> <span class="ident">is_tze_only</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">bool</span> {
+        <span class="kw">fn</span> <span class="ident">is_tze_only</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">bool</span> {
             <span class="self">self</span>.<span class="ident">tx</span>.<span class="ident">transparent_bundle</span>().<span class="ident">is_none</span>()
                 <span class="op">&amp;&amp;</span> <span class="self">self</span>.<span class="ident">tx</span>.<span class="ident">sapling_bundle</span>().<span class="ident">is_none</span>()
                 <span class="op">&amp;&amp;</span> <span class="self">self</span>.<span class="ident">tx</span>.<span class="ident">sprout_bundle</span>().<span class="ident">is_none</span>()
                 <span class="op">&amp;&amp;</span> <span class="self">self</span>.<span class="ident">tx</span>.<span class="ident">orchard_bundle</span>().<span class="ident">is_none</span>()
         }
 
-        <span class="kw">fn</span> <span class="ident">tx_tze_outputs</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="kw-2">&amp;</span>[<span class="ident">TzeOut</span>] {
+        <span class="kw">fn</span> <span class="ident">tx_tze_outputs</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>[<span class="ident">TzeOut</span>] {
             <span class="kw">match</span> <span class="self">self</span>.<span class="ident">tx</span>.<span class="ident">tze_bundle</span>() {
-                <span class="prelude-val">Some</span>(<span class="ident">b</span>) <span class="op">=</span><span class="op">&gt;</span> <span class="kw-2">&amp;</span><span class="ident">b</span>.<span class="ident">vout</span>,
-                <span class="prelude-val">None</span> <span class="op">=</span><span class="op">&gt;</span> <span class="kw-2">&amp;</span>[],
+                <span class="prelude-val">Some</span>(<span class="ident">b</span>) =&gt; <span class="kw-2">&amp;</span><span class="ident">b</span>.<span class="ident">vout</span>,
+                <span class="prelude-val">None</span> =&gt; <span class="kw-2">&amp;</span>[],
             }
         }
     }
 
-    <span class="kw">fn</span> <span class="ident">demo_builder</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span>(<span class="ident">height</span>: <span class="ident">BlockHeight</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">DemoBuilder</span><span class="op">&lt;</span><span class="ident">Builder</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">FutureNetwork</span>, <span class="ident">OsRng</span><span class="op">&gt;</span><span class="op">&gt;</span> {
+    <span class="kw">fn</span> <span class="ident">demo_builder</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span>(<span class="ident">height</span>: <span class="ident">BlockHeight</span>) -&gt; <span class="ident">DemoBuilder</span><span class="op">&lt;</span><span class="ident">Builder</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">FutureNetwork</span>, <span class="ident">OsRng</span><span class="op">&gt;</span><span class="op">&gt;</span> {
         <span class="ident">DemoBuilder</span> {
             <span class="ident">txn_builder</span>: <span class="ident">Builder::new</span>(<span class="ident">FutureNetwork</span>, <span class="ident">height</span>),
             <span class="ident">extension_id</span>: <span class="number">0</span>,
@@ -1695,8 +1695,8 @@
 
         <span class="comment">// Only run the test if we have the prover parameters.</span>
         <span class="kw">let</span> <span class="ident">prover</span> <span class="op">=</span> <span class="kw">match</span> <span class="ident">LocalTxProver::with_default_location</span>() {
-            <span class="prelude-val">Some</span>(<span class="ident">prover</span>) <span class="op">=</span><span class="op">&gt;</span> <span class="ident">prover</span>,
-            <span class="prelude-val">None</span> <span class="op">=</span><span class="op">&gt;</span> <span class="kw">return</span>,
+            <span class="prelude-val">Some</span>(<span class="ident">prover</span>) =&gt; <span class="ident">prover</span>,
+            <span class="prelude-val">None</span> =&gt; <span class="kw">return</span>,
         };
 
         <span class="comment">//</span>
@@ -1707,7 +1707,7 @@
 
         <span class="comment">// create some inputs to spend</span>
         <span class="kw">let</span> <span class="ident">extsk</span> <span class="op">=</span> <span class="ident">ExtendedSpendingKey::master</span>(<span class="kw-2">&amp;</span>[]);
-        <span class="kw">let</span> <span class="ident">to</span> <span class="op">=</span> <span class="ident">extsk</span>.<span class="ident">default_address</span>().<span class="ident">unwrap</span>().<span class="number">1</span>;
+        <span class="kw">let</span> <span class="ident">to</span> <span class="op">=</span> <span class="ident">extsk</span>.<span class="ident">default_address</span>().<span class="number">1</span>;
         <span class="kw">let</span> <span class="ident">note1</span> <span class="op">=</span> <span class="ident">to</span>
             .<span class="ident">create_note</span>(<span class="number">110000</span>, <span class="ident">Rseed::BeforeZip212</span>(<span class="ident">jubjub::Fr::random</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">rng</span>)))
             .<span class="ident">unwrap</span>();

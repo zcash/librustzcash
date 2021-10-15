@@ -194,69 +194,69 @@
 }
 
 <span class="kw">impl</span> <span class="ident">ChainInvalid</span> {
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">prev_hash_mismatch</span><span class="op">&lt;</span><span class="ident">N</span><span class="op">&gt;</span>(<span class="ident">at_height</span>: <span class="ident">BlockHeight</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">Error</span><span class="op">&lt;</span><span class="ident">N</span><span class="op">&gt;</span> {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">prev_hash_mismatch</span><span class="op">&lt;</span><span class="ident">N</span><span class="op">&gt;</span>(<span class="ident">at_height</span>: <span class="ident">BlockHeight</span>) -&gt; <span class="ident">Error</span><span class="op">&lt;</span><span class="ident">N</span><span class="op">&gt;</span> {
         <span class="ident">Error::InvalidChain</span>(<span class="ident">at_height</span>, <span class="ident">ChainInvalid::PrevHashMismatch</span>)
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">block_height_discontinuity</span><span class="op">&lt;</span><span class="ident">N</span><span class="op">&gt;</span>(<span class="ident">at_height</span>: <span class="ident">BlockHeight</span>, <span class="ident">found</span>: <span class="ident">BlockHeight</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">Error</span><span class="op">&lt;</span><span class="ident">N</span><span class="op">&gt;</span> {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">block_height_discontinuity</span><span class="op">&lt;</span><span class="ident">N</span><span class="op">&gt;</span>(<span class="ident">at_height</span>: <span class="ident">BlockHeight</span>, <span class="ident">found</span>: <span class="ident">BlockHeight</span>) -&gt; <span class="ident">Error</span><span class="op">&lt;</span><span class="ident">N</span><span class="op">&gt;</span> {
         <span class="ident">Error::InvalidChain</span>(<span class="ident">at_height</span>, <span class="ident">ChainInvalid::BlockHeightDiscontinuity</span>(<span class="ident">found</span>))
     }
 }
 
 <span class="kw">impl</span><span class="op">&lt;</span><span class="ident">N</span>: <span class="ident">fmt::Display</span><span class="op">&gt;</span> <span class="ident">fmt::Display</span> <span class="kw">for</span> <span class="ident">Error</span><span class="op">&lt;</span><span class="ident">N</span><span class="op">&gt;</span> {
-    <span class="kw">fn</span> <span class="ident">fmt</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">f</span>: <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">fmt::Formatter</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">fmt::Result</span> {
+    <span class="kw">fn</span> <span class="ident">fmt</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">f</span>: <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">fmt::Formatter</span>) -&gt; <span class="ident">fmt::Result</span> {
         <span class="kw">match</span> <span class="kw-2">&amp;</span><span class="self">self</span> {
-            <span class="ident">Error::InvalidAmount</span> <span class="op">=</span><span class="op">&gt;</span> <span class="macro">write!</span>(
+            <span class="ident">Error::InvalidAmount</span> =&gt; <span class="macro">write!</span>(
                 <span class="ident">f</span>,
                 <span class="string">&quot;The value lies outside the valid range of Zcash amounts.&quot;</span>
             ),
-            <span class="ident">Error::InsufficientBalance</span>(<span class="ident">have</span>, <span class="ident">need</span>) <span class="op">=</span><span class="op">&gt;</span> <span class="macro">write!</span>(
+            <span class="ident">Error::InsufficientBalance</span>(<span class="ident">have</span>, <span class="ident">need</span>) =&gt; <span class="macro">write!</span>(
                 <span class="ident">f</span>,
                 <span class="string">&quot;Insufficient balance (have {}, need {} including fee)&quot;</span>,
                 <span class="ident">i64::from</span>(<span class="kw-2">*</span><span class="ident">have</span>), <span class="ident">i64::from</span>(<span class="kw-2">*</span><span class="ident">need</span>)
             ),
-            <span class="ident">Error::InvalidChain</span>(<span class="ident">upper_bound</span>, <span class="ident">cause</span>) <span class="op">=</span><span class="op">&gt;</span> {
+            <span class="ident">Error::InvalidChain</span>(<span class="ident">upper_bound</span>, <span class="ident">cause</span>) =&gt; {
                 <span class="macro">write!</span>(<span class="ident">f</span>, <span class="string">&quot;Invalid chain (upper bound: {}): {:?}&quot;</span>, <span class="ident">u32::from</span>(<span class="kw-2">*</span><span class="ident">upper_bound</span>), <span class="ident">cause</span>)
             }
-            <span class="ident">Error::InvalidExtSk</span>(<span class="ident">account</span>) <span class="op">=</span><span class="op">&gt;</span> {
+            <span class="ident">Error::InvalidExtSk</span>(<span class="ident">account</span>) =&gt; {
                 <span class="macro">write!</span>(<span class="ident">f</span>, <span class="string">&quot;Incorrect ExtendedSpendingKey for account {}&quot;</span>, <span class="ident">account</span>.<span class="number">0</span>)
             }
-            <span class="ident">Error::InvalidNewWitnessAnchor</span>(<span class="ident">output</span>, <span class="ident">txid</span>, <span class="ident">last_height</span>, <span class="ident">anchor</span>) <span class="op">=</span><span class="op">&gt;</span> <span class="macro">write!</span>(
+            <span class="ident">Error::InvalidNewWitnessAnchor</span>(<span class="ident">output</span>, <span class="ident">txid</span>, <span class="ident">last_height</span>, <span class="ident">anchor</span>) =&gt; <span class="macro">write!</span>(
                 <span class="ident">f</span>,
                 <span class="string">&quot;New witness for output {} in tx {} has incorrect anchor after scanning block {}: {:?}&quot;</span>,
                 <span class="ident">output</span>, <span class="ident">txid</span>, <span class="ident">last_height</span>, <span class="ident">anchor</span>,
             ),
-            <span class="ident">Error::InvalidWitnessAnchor</span>(<span class="ident">id_note</span>, <span class="ident">last_height</span>) <span class="op">=</span><span class="op">&gt;</span> <span class="macro">write!</span>(
+            <span class="ident">Error::InvalidWitnessAnchor</span>(<span class="ident">id_note</span>, <span class="ident">last_height</span>) =&gt; <span class="macro">write!</span>(
                 <span class="ident">f</span>,
                 <span class="string">&quot;Witness for note {} has incorrect anchor after scanning block {}&quot;</span>,
                 <span class="ident">id_note</span>, <span class="ident">last_height</span>
             ),
-            <span class="ident">Error::ScanRequired</span> <span class="op">=</span><span class="op">&gt;</span> <span class="macro">write!</span>(<span class="ident">f</span>, <span class="string">&quot;Must scan blocks first&quot;</span>),
-            <span class="ident">Error::Builder</span>(<span class="ident">e</span>) <span class="op">=</span><span class="op">&gt;</span> <span class="macro">write!</span>(<span class="ident">f</span>, <span class="string">&quot;{:?}&quot;</span>, <span class="ident">e</span>),
-            <span class="ident">Error::Protobuf</span>(<span class="ident">e</span>) <span class="op">=</span><span class="op">&gt;</span> <span class="macro">write!</span>(<span class="ident">f</span>, <span class="string">&quot;{}&quot;</span>, <span class="ident">e</span>),
-            <span class="ident">Error::SaplingNotActive</span> <span class="op">=</span><span class="op">&gt;</span> <span class="macro">write!</span>(<span class="ident">f</span>, <span class="string">&quot;Could not determine Sapling upgrade activation height.&quot;</span>),
+            <span class="ident">Error::ScanRequired</span> =&gt; <span class="macro">write!</span>(<span class="ident">f</span>, <span class="string">&quot;Must scan blocks first&quot;</span>),
+            <span class="ident">Error::Builder</span>(<span class="ident">e</span>) =&gt; <span class="macro">write!</span>(<span class="ident">f</span>, <span class="string">&quot;{:?}&quot;</span>, <span class="ident">e</span>),
+            <span class="ident">Error::Protobuf</span>(<span class="ident">e</span>) =&gt; <span class="macro">write!</span>(<span class="ident">f</span>, <span class="string">&quot;{}&quot;</span>, <span class="ident">e</span>),
+            <span class="ident">Error::SaplingNotActive</span> =&gt; <span class="macro">write!</span>(<span class="ident">f</span>, <span class="string">&quot;Could not determine Sapling upgrade activation height.&quot;</span>),
         }
     }
 }
 
 <span class="kw">impl</span><span class="op">&lt;</span><span class="ident">N</span>: <span class="ident">error::Error</span> <span class="op">+</span> <span class="lifetime">&#39;static</span><span class="op">&gt;</span> <span class="ident">error::Error</span> <span class="kw">for</span> <span class="ident">Error</span><span class="op">&lt;</span><span class="ident">N</span><span class="op">&gt;</span> {
-    <span class="kw">fn</span> <span class="ident">source</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="kw-2">&amp;</span>(<span class="kw">dyn</span> <span class="ident">error::Error</span> <span class="op">+</span> <span class="lifetime">&#39;static</span>)<span class="op">&gt;</span> {
+    <span class="kw">fn</span> <span class="ident">source</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="kw-2">&amp;</span>(<span class="kw">dyn</span> <span class="ident">error::Error</span> <span class="op">+</span> <span class="lifetime">&#39;static</span>)<span class="op">&gt;</span> {
         <span class="kw">match</span> <span class="kw-2">&amp;</span><span class="self">self</span> {
-            <span class="ident">Error::Builder</span>(<span class="ident">e</span>) <span class="op">=</span><span class="op">&gt;</span> <span class="prelude-val">Some</span>(<span class="ident">e</span>),
-            <span class="ident">Error::Protobuf</span>(<span class="ident">e</span>) <span class="op">=</span><span class="op">&gt;</span> <span class="prelude-val">Some</span>(<span class="ident">e</span>),
-            <span class="kw">_</span> <span class="op">=</span><span class="op">&gt;</span> <span class="prelude-val">None</span>,
+            <span class="ident">Error::Builder</span>(<span class="ident">e</span>) =&gt; <span class="prelude-val">Some</span>(<span class="ident">e</span>),
+            <span class="ident">Error::Protobuf</span>(<span class="ident">e</span>) =&gt; <span class="prelude-val">Some</span>(<span class="ident">e</span>),
+            <span class="kw">_</span> =&gt; <span class="prelude-val">None</span>,
         }
     }
 }
 
 <span class="kw">impl</span><span class="op">&lt;</span><span class="ident">N</span><span class="op">&gt;</span> <span class="ident">From</span><span class="op">&lt;</span><span class="ident">builder::Error</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">Error</span><span class="op">&lt;</span><span class="ident">N</span><span class="op">&gt;</span> {
-    <span class="kw">fn</span> <span class="ident">from</span>(<span class="ident">e</span>: <span class="ident">builder::Error</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="self">Self</span> {
+    <span class="kw">fn</span> <span class="ident">from</span>(<span class="ident">e</span>: <span class="ident">builder::Error</span>) -&gt; <span class="self">Self</span> {
         <span class="ident">Error::Builder</span>(<span class="ident">e</span>)
     }
 }
 
 <span class="kw">impl</span><span class="op">&lt;</span><span class="ident">N</span><span class="op">&gt;</span> <span class="ident">From</span><span class="op">&lt;</span><span class="ident">protobuf::ProtobufError</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">Error</span><span class="op">&lt;</span><span class="ident">N</span><span class="op">&gt;</span> {
-    <span class="kw">fn</span> <span class="ident">from</span>(<span class="ident">e</span>: <span class="ident">protobuf::ProtobufError</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="self">Self</span> {
+    <span class="kw">fn</span> <span class="ident">from</span>(<span class="ident">e</span>: <span class="ident">protobuf::ProtobufError</span>) -&gt; <span class="self">Self</span> {
         <span class="ident">Error::Protobuf</span>(<span class="ident">e</span>)
     }
 }

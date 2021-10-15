@@ -110,11 +110,11 @@
 }
 
 <span class="kw">impl</span> <span class="ident">std::fmt::Display</span> <span class="kw">for</span> <span class="ident">Error</span> {
-    <span class="kw">fn</span> <span class="ident">fmt</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">f</span>: <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">std::fmt::Formatter</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">std::fmt::Result</span> {
+    <span class="kw">fn</span> <span class="ident">fmt</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">f</span>: <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">std::fmt::Formatter</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span>) -&gt; <span class="ident">std::fmt::Result</span> {
         <span class="kw">match</span> <span class="kw-2">*</span><span class="self">self</span> {
-            <span class="ident"><span class="self">Self</span>::ExpectedInMemory</span>(<span class="ident">l</span>) <span class="op">=</span><span class="op">&gt;</span> <span class="macro">write!</span>(<span class="ident">f</span>, <span class="string">&quot;Node/leaf expected to be in memory: {}&quot;</span>, <span class="ident">l</span>),
-            <span class="ident"><span class="self">Self</span>::ExpectedNode</span>(<span class="prelude-val">None</span>) <span class="op">=</span><span class="op">&gt;</span> <span class="macro">write!</span>(<span class="ident">f</span>, <span class="string">&quot;Node expected&quot;</span>),
-            <span class="ident"><span class="self">Self</span>::ExpectedNode</span>(<span class="prelude-val">Some</span>(<span class="ident">l</span>)) <span class="op">=</span><span class="op">&gt;</span> <span class="macro">write!</span>(<span class="ident">f</span>, <span class="string">&quot;Node expected, not leaf: {}&quot;</span>, <span class="ident">l</span>),
+            <span class="ident"><span class="self">Self</span>::ExpectedInMemory</span>(<span class="ident">l</span>) =&gt; <span class="macro">write!</span>(<span class="ident">f</span>, <span class="string">&quot;Node/leaf expected to be in memory: {}&quot;</span>, <span class="ident">l</span>),
+            <span class="ident"><span class="self">Self</span>::ExpectedNode</span>(<span class="prelude-val">None</span>) =&gt; <span class="macro">write!</span>(<span class="ident">f</span>, <span class="string">&quot;Node expected&quot;</span>),
+            <span class="ident"><span class="self">Self</span>::ExpectedNode</span>(<span class="prelude-val">Some</span>(<span class="ident">l</span>)) =&gt; <span class="macro">write!</span>(<span class="ident">f</span>, <span class="string">&quot;Node expected, not leaf: {}&quot;</span>, <span class="ident">l</span>),
         }
     }
 }
@@ -130,10 +130,10 @@
 }
 
 <span class="kw">impl</span> <span class="ident">std::fmt::Display</span> <span class="kw">for</span> <span class="ident">EntryLink</span> {
-    <span class="kw">fn</span> <span class="ident">fmt</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">f</span>: <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">std::fmt::Formatter</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">std::fmt::Result</span> {
+    <span class="kw">fn</span> <span class="ident">fmt</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">f</span>: <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">std::fmt::Formatter</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span>) -&gt; <span class="ident">std::fmt::Result</span> {
         <span class="kw">match</span> <span class="kw-2">*</span><span class="self">self</span> {
-            <span class="ident"><span class="self">Self</span>::Stored</span>(<span class="ident">v</span>) <span class="op">=</span><span class="op">&gt;</span> <span class="macro">write!</span>(<span class="ident">f</span>, <span class="string">&quot;stored({})&quot;</span>, <span class="ident">v</span>),
-            <span class="ident"><span class="self">Self</span>::Generated</span>(<span class="ident">v</span>) <span class="op">=</span><span class="op">&gt;</span> <span class="macro">write!</span>(<span class="ident">f</span>, <span class="string">&quot;generated({})&quot;</span>, <span class="ident">v</span>),
+            <span class="ident"><span class="self">Self</span>::Stored</span>(<span class="ident">v</span>) =&gt; <span class="macro">write!</span>(<span class="ident">f</span>, <span class="string">&quot;stored({})&quot;</span>, <span class="ident">v</span>),
+            <span class="ident"><span class="self">Self</span>::Generated</span>(<span class="ident">v</span>) =&gt; <span class="macro">write!</span>(<span class="ident">f</span>, <span class="string">&quot;generated({})&quot;</span>, <span class="ident">v</span>),
         }
     }
 }
@@ -150,19 +150,19 @@
 
 <span class="kw">impl</span> <span class="ident">Error</span> {
     <span class="doccomment">/// Entry expected to be a node (specifying for which link this is not true).</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">link_node_expected</span>(<span class="ident">link</span>: <span class="ident">EntryLink</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="self">Self</span> {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">link_node_expected</span>(<span class="ident">link</span>: <span class="ident">EntryLink</span>) -&gt; <span class="self">Self</span> {
         <span class="ident"><span class="self">Self</span>::ExpectedNode</span>(<span class="prelude-val">Some</span>(<span class="ident">link</span>))
     }
 
     <span class="doccomment">/// Some entry is expected to be node</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">node_expected</span>() <span class="op">-</span><span class="op">&gt;</span> <span class="self">Self</span> {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">node_expected</span>() -&gt; <span class="self">Self</span> {
         <span class="ident"><span class="self">Self</span>::ExpectedNode</span>(<span class="prelude-val">None</span>)
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">augment</span>(<span class="self">self</span>, <span class="ident">link</span>: <span class="ident">EntryLink</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="self">Self</span> {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">augment</span>(<span class="self">self</span>, <span class="ident">link</span>: <span class="ident">EntryLink</span>) -&gt; <span class="self">Self</span> {
         <span class="kw">match</span> <span class="self">self</span> {
-            <span class="ident">Error::ExpectedNode</span>(<span class="kw">_</span>) <span class="op">=</span><span class="op">&gt;</span> <span class="ident">Error::ExpectedNode</span>(<span class="prelude-val">Some</span>(<span class="ident">link</span>)),
-            <span class="ident">val</span> <span class="op">=</span><span class="op">&gt;</span> <span class="ident">val</span>,
+            <span class="ident">Error::ExpectedNode</span>(<span class="kw">_</span>) =&gt; <span class="ident">Error::ExpectedNode</span>(<span class="prelude-val">Some</span>(<span class="ident">link</span>)),
+            <span class="ident">val</span> =&gt; <span class="ident">val</span>,
         }
     }
 }

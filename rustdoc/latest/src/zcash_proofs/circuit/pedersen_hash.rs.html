@@ -311,7 +311,7 @@
 
 <span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::constants::PEDERSEN_CIRCUIT_GENERATORS</span>;
 
-<span class="kw">fn</span> <span class="ident">get_constant_bools</span>(<span class="ident">person</span>: <span class="kw-2">&amp;</span><span class="ident">Personalization</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">Boolean</span><span class="op">&gt;</span> {
+<span class="kw">fn</span> <span class="ident">get_constant_bools</span>(<span class="ident">person</span>: <span class="kw-2">&amp;</span><span class="ident">Personalization</span>) -&gt; <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">Boolean</span><span class="op">&gt;</span> {
     <span class="ident">person</span>
         .<span class="ident">get_bits</span>()
         .<span class="ident">into_iter</span>()
@@ -323,7 +323,7 @@
     <span class="kw-2">mut</span> <span class="ident">cs</span>: <span class="ident">CS</span>,
     <span class="ident">personalization</span>: <span class="ident">Personalization</span>,
     <span class="ident">bits</span>: <span class="kw-2">&amp;</span>[<span class="ident">Boolean</span>],
-) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">EdwardsPoint</span>, <span class="ident">SynthesisError</span><span class="op">&gt;</span>
+) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">EdwardsPoint</span>, <span class="ident">SynthesisError</span><span class="op">&gt;</span>
 <span class="kw">where</span>
     <span class="ident">CS</span>: <span class="ident">ConstraintSystem</span><span class="op">&lt;</span><span class="ident">bls12_381::Scalar</span><span class="op">&gt;</span>,
 {
@@ -354,10 +354,10 @@
             <span class="kw">let</span> <span class="ident">tmp</span> <span class="op">=</span> <span class="ident">MontgomeryPoint::interpret_unchecked</span>(<span class="ident">tmp</span>.<span class="number">0</span>, <span class="ident">tmp</span>.<span class="number">1</span>);
 
             <span class="kw">match</span> <span class="ident">segment_result</span> {
-                <span class="prelude-val">None</span> <span class="op">=</span><span class="op">&gt;</span> {
+                <span class="prelude-val">None</span> =&gt; {
                     <span class="ident">segment_result</span> <span class="op">=</span> <span class="prelude-val">Some</span>(<span class="ident">tmp</span>);
                 }
-                <span class="prelude-val">Some</span>(<span class="kw-2">ref</span> <span class="kw-2">mut</span> <span class="ident">segment_result</span>) <span class="op">=</span><span class="op">&gt;</span> {
+                <span class="prelude-val">Some</span>(<span class="kw-2">ref</span> <span class="kw-2">mut</span> <span class="ident">segment_result</span>) =&gt; {
                     <span class="kw-2">*</span><span class="ident">segment_result</span> <span class="op">=</span> <span class="ident">tmp</span>.<span class="ident">add</span>(
                         <span class="ident">cs</span>.<span class="ident">namespace</span>(<span class="op">|</span><span class="op">|</span> {
                             <span class="macro">format!</span>(<span class="string">&quot;addition of segment {}, window {}&quot;</span>, <span class="ident">segment_i</span>, <span class="ident">window_i</span>)
@@ -388,13 +388,13 @@
         )<span class="question-mark">?</span>;
 
         <span class="kw">match</span> <span class="ident">edwards_result</span> {
-            <span class="prelude-val">Some</span>(<span class="kw-2">ref</span> <span class="kw-2">mut</span> <span class="ident">edwards_result</span>) <span class="op">=</span><span class="op">&gt;</span> {
+            <span class="prelude-val">Some</span>(<span class="kw-2">ref</span> <span class="kw-2">mut</span> <span class="ident">edwards_result</span>) =&gt; {
                 <span class="kw-2">*</span><span class="ident">edwards_result</span> <span class="op">=</span> <span class="ident">segment_result</span>.<span class="ident">add</span>(
                     <span class="ident">cs</span>.<span class="ident">namespace</span>(<span class="op">|</span><span class="op">|</span> <span class="macro">format!</span>(<span class="string">&quot;addition of segment {} to accumulator&quot;</span>, <span class="ident">segment_i</span>)),
                     <span class="ident">edwards_result</span>,
                 )<span class="question-mark">?</span>;
             }
-            <span class="prelude-val">None</span> <span class="op">=</span><span class="op">&gt;</span> {
+            <span class="prelude-val">None</span> =&gt; {
                 <span class="ident">edwards_result</span> <span class="op">=</span> <span class="prelude-val">Some</span>(<span class="ident">segment_result</span>);
             }
         }
@@ -417,11 +417,11 @@
     <span class="kw">use</span> <span class="ident">zcash_primitives::sapling::pedersen_hash</span>;
 
     <span class="doccomment">/// Predict the number of constraints of a Pedersen hash</span>
-    <span class="kw">fn</span> <span class="ident">ph_num_constraints</span>(<span class="ident">input_bits</span>: <span class="ident">usize</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">usize</span> {
+    <span class="kw">fn</span> <span class="ident">ph_num_constraints</span>(<span class="ident">input_bits</span>: <span class="ident">usize</span>) -&gt; <span class="ident">usize</span> {
         <span class="comment">// Account for the 6 personalization bits.</span>
         <span class="kw">let</span> <span class="ident">personalized_bits</span> <span class="op">=</span> <span class="number">6</span> <span class="op">+</span> <span class="ident">input_bits</span>;
         <span class="comment">// Constant booleans in the personalization and padding don&#39;t need lookup &quot;precomp&quot; constraints.</span>
-        <span class="kw">let</span> <span class="ident">precomputed_booleans</span> <span class="op">=</span> <span class="number">2</span> <span class="op">+</span> (<span class="ident">personalized_bits</span> <span class="op">%</span> <span class="number">3</span> <span class="op">=</span><span class="op">=</span> <span class="number">1</span>) <span class="kw">as</span> <span class="ident">usize</span>;
+        <span class="kw">let</span> <span class="ident">precomputed_booleans</span> <span class="op">=</span> <span class="number">2</span> <span class="op">+</span> (<span class="ident">personalized_bits</span> <span class="op">%</span> <span class="number">3</span> <span class="op">==</span> <span class="number">1</span>) <span class="kw">as</span> <span class="ident">usize</span>;
 
         <span class="comment">// Count chunks and segments with ceiling division</span>
         <span class="kw">let</span> <span class="ident">chunks</span> <span class="op">=</span> (<span class="ident">personalized_bits</span> <span class="op">+</span> <span class="number">3</span> <span class="op">-</span> <span class="number">1</span>) <span class="op">/</span> <span class="number">3</span>;
@@ -489,10 +489,10 @@
             <span class="kw">let</span> <span class="ident">ph_constraints</span> <span class="op">=</span> <span class="ident">ph_num_constraints</span>(<span class="ident">n_bits</span>);
             <span class="macro">assert_eq!</span>(<span class="ident">cs</span>.<span class="ident">num_constraints</span>(), <span class="ident">bitness_constraints</span> <span class="op">+</span> <span class="ident">ph_constraints</span>);
             <span class="comment">// The actual usages</span>
-            <span class="kw">if</span> <span class="ident">n_bits</span> <span class="op">=</span><span class="op">=</span> <span class="ident">leaves_len</span> {
+            <span class="kw">if</span> <span class="ident">n_bits</span> <span class="op">==</span> <span class="ident">leaves_len</span> {
                 <span class="macro">assert_eq!</span>(<span class="ident">cs</span>.<span class="ident">num_constraints</span>(), <span class="ident">leaves_len</span> <span class="op">+</span> <span class="number">867</span>)
             };
-            <span class="kw">if</span> <span class="ident">n_bits</span> <span class="op">=</span><span class="op">=</span> <span class="ident">note_len</span> {
+            <span class="kw">if</span> <span class="ident">n_bits</span> <span class="op">==</span> <span class="ident">note_len</span> {
                 <span class="macro">assert_eq!</span>(<span class="ident">cs</span>.<span class="ident">num_constraints</span>(), <span class="ident">note_len</span> <span class="op">+</span> <span class="number">982</span>)
             };
         }

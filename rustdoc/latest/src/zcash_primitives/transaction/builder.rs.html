@@ -799,17 +799,17 @@
 }
 
 <span class="kw">impl</span> <span class="ident">fmt::Display</span> <span class="kw">for</span> <span class="ident">Error</span> {
-    <span class="kw">fn</span> <span class="ident">fmt</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">f</span>: <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">fmt::Formatter</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">fmt::Result</span> {
+    <span class="kw">fn</span> <span class="ident">fmt</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">f</span>: <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">fmt::Formatter</span>) -&gt; <span class="ident">fmt::Result</span> {
         <span class="kw">match</span> <span class="self">self</span> {
-            <span class="ident">Error::ChangeIsNegative</span>(<span class="ident">amount</span>) <span class="op">=</span><span class="op">&gt;</span> {
+            <span class="ident">Error::ChangeIsNegative</span>(<span class="ident">amount</span>) =&gt; {
                 <span class="macro">write!</span>(<span class="ident">f</span>, <span class="string">&quot;Change is negative ({:?} zatoshis)&quot;</span>, <span class="ident">amount</span>)
             }
-            <span class="ident">Error::InvalidAmount</span> <span class="op">=</span><span class="op">&gt;</span> <span class="macro">write!</span>(<span class="ident">f</span>, <span class="string">&quot;Invalid amount&quot;</span>),
-            <span class="ident">Error::NoChangeAddress</span> <span class="op">=</span><span class="op">&gt;</span> <span class="macro">write!</span>(<span class="ident">f</span>, <span class="string">&quot;No change address specified or discoverable&quot;</span>),
-            <span class="ident">Error::TransparentBuild</span>(<span class="ident">err</span>) <span class="op">=</span><span class="op">&gt;</span> <span class="ident">err</span>.<span class="ident">fmt</span>(<span class="ident">f</span>),
-            <span class="ident">Error::SaplingBuild</span>(<span class="ident">err</span>) <span class="op">=</span><span class="op">&gt;</span> <span class="ident">err</span>.<span class="ident">fmt</span>(<span class="ident">f</span>),
+            <span class="ident">Error::InvalidAmount</span> =&gt; <span class="macro">write!</span>(<span class="ident">f</span>, <span class="string">&quot;Invalid amount&quot;</span>),
+            <span class="ident">Error::NoChangeAddress</span> =&gt; <span class="macro">write!</span>(<span class="ident">f</span>, <span class="string">&quot;No change address specified or discoverable&quot;</span>),
+            <span class="ident">Error::TransparentBuild</span>(<span class="ident">err</span>) =&gt; <span class="ident">err</span>.<span class="ident">fmt</span>(<span class="ident">f</span>),
+            <span class="ident">Error::SaplingBuild</span>(<span class="ident">err</span>) =&gt; <span class="ident">err</span>.<span class="ident">fmt</span>(<span class="ident">f</span>),
             <span class="attribute">#[<span class="ident">cfg</span>(<span class="ident">feature</span> <span class="op">=</span> <span class="string">&quot;zfuture&quot;</span>)]</span>
-            <span class="ident">Error::TzeBuild</span>(<span class="ident">err</span>) <span class="op">=</span><span class="op">&gt;</span> <span class="ident">err</span>.<span class="ident">fmt</span>(<span class="ident">f</span>),
+            <span class="ident">Error::TzeBuild</span>(<span class="ident">err</span>) =&gt; <span class="ident">err</span>.<span class="ident">fmt</span>(<span class="ident">f</span>),
         }
     }
 }
@@ -825,14 +825,14 @@
 }
 
 <span class="kw">impl</span> <span class="ident">Progress</span> {
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">new</span>(<span class="ident">cur</span>: <span class="ident">u32</span>, <span class="ident">end</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">u32</span><span class="op">&gt;</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="self">Self</span> {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">new</span>(<span class="ident">cur</span>: <span class="ident">u32</span>, <span class="ident">end</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">u32</span><span class="op">&gt;</span>) -&gt; <span class="self">Self</span> {
         <span class="self">Self</span> { <span class="ident">cur</span>, <span class="ident">end</span> }
     }
 
     <span class="doccomment">/// Returns the number of steps completed so far while building the transaction.</span>
     <span class="doccomment">///</span>
     <span class="doccomment">/// Note that each step may not be of the same complexity/duration.</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">cur</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">u32</span> {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">cur</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">u32</span> {
         <span class="self">self</span>.<span class="ident">cur</span>
     }
 
@@ -840,7 +840,7 @@
     <span class="doccomment">/// or `None` if the end is unknown as of this progress update.</span>
     <span class="doccomment">///</span>
     <span class="doccomment">/// Note that each step may not be of the same complexity/duration.</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">end</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">u32</span><span class="op">&gt;</span> {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">end</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">u32</span><span class="op">&gt;</span> {
         <span class="self">self</span>.<span class="ident">end</span>
     }
 }
@@ -876,7 +876,7 @@
     <span class="doccomment">/// expiry delta (20 blocks).</span>
     <span class="doccomment">///</span>
     <span class="doccomment">/// The fee will be set to the default fee (0.0001 ZEC).</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">new</span>(<span class="ident">params</span>: <span class="ident">P</span>, <span class="ident">target_height</span>: <span class="ident">BlockHeight</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="self">Self</span> {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">new</span>(<span class="ident">params</span>: <span class="ident">P</span>, <span class="ident">target_height</span>: <span class="ident">BlockHeight</span>) -&gt; <span class="self">Self</span> {
         <span class="ident">Builder::new_with_rng</span>(<span class="ident">params</span>, <span class="ident">target_height</span>, <span class="ident">OsRng</span>)
     }
 }
@@ -891,7 +891,7 @@
     <span class="doccomment">/// expiry delta (20 blocks).</span>
     <span class="doccomment">///</span>
     <span class="doccomment">/// The fee will be set to the default fee (0.0001 ZEC).</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">new_with_rng</span>(<span class="ident">params</span>: <span class="ident">P</span>, <span class="ident">target_height</span>: <span class="ident">BlockHeight</span>, <span class="ident">rng</span>: <span class="ident">R</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">Builder</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">P</span>, <span class="ident">R</span><span class="op">&gt;</span> {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">new_with_rng</span>(<span class="ident">params</span>: <span class="ident">P</span>, <span class="ident">target_height</span>: <span class="ident">BlockHeight</span>, <span class="ident">rng</span>: <span class="ident">R</span>) -&gt; <span class="ident">Builder</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">P</span>, <span class="ident">R</span><span class="op">&gt;</span> {
         <span class="ident"><span class="self">Self</span>::new_internal</span>(<span class="ident">params</span>, <span class="ident">target_height</span>, <span class="ident">rng</span>)
     }
 }
@@ -901,7 +901,7 @@
     <span class="doccomment">///</span>
     <span class="doccomment">/// WARNING: THIS MUST REMAIN PRIVATE AS IT ALLOWS CONSTRUCTION</span>
     <span class="doccomment">/// OF BUILDERS WITH NON-CryptoRng RNGs</span>
-    <span class="kw">fn</span> <span class="ident">new_internal</span>(<span class="ident">params</span>: <span class="ident">P</span>, <span class="ident">target_height</span>: <span class="ident">BlockHeight</span>, <span class="ident">rng</span>: <span class="ident">R</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">Builder</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">P</span>, <span class="ident">R</span><span class="op">&gt;</span> {
+    <span class="kw">fn</span> <span class="ident">new_internal</span>(<span class="ident">params</span>: <span class="ident">P</span>, <span class="ident">target_height</span>: <span class="ident">BlockHeight</span>, <span class="ident">rng</span>: <span class="ident">R</span>) -&gt; <span class="ident">Builder</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">P</span>, <span class="ident">R</span><span class="op">&gt;</span> {
         <span class="ident">Builder</span> {
             <span class="ident">params</span>: <span class="ident">params</span>.<span class="ident">clone</span>(),
             <span class="ident">rng</span>,
@@ -929,7 +929,7 @@
         <span class="ident">diversifier</span>: <span class="ident">Diversifier</span>,
         <span class="ident">note</span>: <span class="ident">Note</span>,
         <span class="ident">merkle_path</span>: <span class="ident">MerklePath</span><span class="op">&lt;</span><span class="ident">Node</span><span class="op">&gt;</span>,
-    ) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident">Error</span><span class="op">&gt;</span> {
+    ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident">Error</span><span class="op">&gt;</span> {
         <span class="self">self</span>.<span class="ident">sapling_builder</span>
             .<span class="ident">add_spend</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>.<span class="ident">rng</span>, <span class="ident">extsk</span>, <span class="ident">diversifier</span>, <span class="ident">note</span>, <span class="ident">merkle_path</span>)
             .<span class="ident">map_err</span>(<span class="ident">Error::SaplingBuild</span>)
@@ -942,7 +942,7 @@
         <span class="ident">to</span>: <span class="ident">PaymentAddress</span>,
         <span class="ident">value</span>: <span class="ident">Amount</span>,
         <span class="ident">memo</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">MemoBytes</span><span class="op">&gt;</span>,
-    ) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident">Error</span><span class="op">&gt;</span> {
+    ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident">Error</span><span class="op">&gt;</span> {
         <span class="self">self</span>.<span class="ident">sapling_builder</span>
             .<span class="ident">add_output</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>.<span class="ident">rng</span>, <span class="ident">ovk</span>, <span class="ident">to</span>, <span class="ident">value</span>, <span class="ident">memo</span>)
             .<span class="ident">map_err</span>(<span class="ident">Error::SaplingBuild</span>)
@@ -956,7 +956,7 @@
         <span class="ident">sk</span>: <span class="ident">secp256k1::SecretKey</span>,
         <span class="ident">utxo</span>: <span class="ident">transparent::OutPoint</span>,
         <span class="ident">coin</span>: <span class="ident">TxOut</span>,
-    ) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident">Error</span><span class="op">&gt;</span> {
+    ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident">Error</span><span class="op">&gt;</span> {
         <span class="self">self</span>.<span class="ident">transparent_builder</span>
             .<span class="ident">add_input</span>(<span class="ident">sk</span>, <span class="ident">utxo</span>, <span class="ident">coin</span>)
             .<span class="ident">map_err</span>(<span class="ident">Error::TransparentBuild</span>)
@@ -967,7 +967,7 @@
         <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>,
         <span class="ident">to</span>: <span class="kw-2">&amp;</span><span class="ident">TransparentAddress</span>,
         <span class="ident">value</span>: <span class="ident">Amount</span>,
-    ) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident">Error</span><span class="op">&gt;</span> {
+    ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident">Error</span><span class="op">&gt;</span> {
         <span class="self">self</span>.<span class="ident">transparent_builder</span>
             .<span class="ident">add_output</span>(<span class="ident">to</span>, <span class="ident">value</span>)
             .<span class="ident">map_err</span>(<span class="ident">Error::TransparentBuild</span>)
@@ -992,7 +992,7 @@
     }
 
     <span class="doccomment">/// Returns the sum of the transparent, Sapling, and TZE value balances.</span>
-    <span class="kw">fn</span> <span class="ident">value_balance</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Amount</span>, <span class="ident">Error</span><span class="op">&gt;</span> {
+    <span class="kw">fn</span> <span class="ident">value_balance</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Amount</span>, <span class="ident">Error</span><span class="op">&gt;</span> {
         <span class="kw">let</span> <span class="ident">value_balances</span> <span class="op">=</span> [
             <span class="self">self</span>.<span class="ident">transparent_builder</span>
                 .<span class="ident">value_balance</span>()
@@ -1016,7 +1016,7 @@
     <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">build</span>(
         <span class="kw-2">mut</span> <span class="self">self</span>,
         <span class="ident">prover</span>: <span class="kw-2">&amp;</span><span class="kw">impl</span> <span class="ident">TxProver</span>,
-    ) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span>(<span class="ident">Transaction</span>, <span class="ident">SaplingMetadata</span>), <span class="ident">Error</span><span class="op">&gt;</span> {
+    ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span>(<span class="ident">Transaction</span>, <span class="ident">SaplingMetadata</span>), <span class="ident">Error</span><span class="op">&gt;</span> {
         <span class="kw">let</span> <span class="ident">consensus_branch_id</span> <span class="op">=</span> <span class="ident">BranchId::for_height</span>(<span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">params</span>, <span class="self">self</span>.<span class="ident">target_height</span>);
 
         <span class="comment">// determine transaction version</span>
@@ -1039,10 +1039,10 @@
 
         <span class="kw">if</span> <span class="ident">change</span>.<span class="ident">is_positive</span>() {
             <span class="kw">match</span> <span class="self">self</span>.<span class="ident">change_address</span>.<span class="ident">take</span>() {
-                <span class="prelude-val">Some</span>(<span class="ident">ChangeAddress::SaplingChangeAddress</span>(<span class="ident">ovk</span>, <span class="ident">addr</span>)) <span class="op">=</span><span class="op">&gt;</span> {
+                <span class="prelude-val">Some</span>(<span class="ident">ChangeAddress::SaplingChangeAddress</span>(<span class="ident">ovk</span>, <span class="ident">addr</span>)) =&gt; {
                     <span class="self">self</span>.<span class="ident">add_sapling_output</span>(<span class="prelude-val">Some</span>(<span class="ident">ovk</span>), <span class="ident">addr</span>, <span class="ident">change</span>, <span class="prelude-val">None</span>)<span class="question-mark">?</span>;
                 }
-                <span class="prelude-val">None</span> <span class="op">=</span><span class="op">&gt;</span> {
+                <span class="prelude-val">None</span> =&gt; {
                     <span class="kw">let</span> (<span class="ident">ovk</span>, <span class="ident">addr</span>) <span class="op">=</span> <span class="self">self</span>
                         .<span class="ident">sapling_builder</span>
                         .<span class="ident">get_candidate_change_address</span>()
@@ -1123,8 +1123,8 @@
             .<span class="ident">transpose</span>()
             .<span class="ident">map_err</span>(<span class="ident">Error::SaplingBuild</span>)<span class="question-mark">?</span>
         {
-            <span class="prelude-val">Some</span>((<span class="ident">bundle</span>, <span class="ident">meta</span>)) <span class="op">=</span><span class="op">&gt;</span> (<span class="prelude-val">Some</span>(<span class="ident">bundle</span>), <span class="ident">meta</span>),
-            <span class="prelude-val">None</span> <span class="op">=</span><span class="op">&gt;</span> (<span class="prelude-val">None</span>, <span class="ident">SaplingMetadata::empty</span>()),
+            <span class="prelude-val">Some</span>((<span class="ident">bundle</span>, <span class="ident">meta</span>)) =&gt; (<span class="prelude-val">Some</span>(<span class="ident">bundle</span>), <span class="ident">meta</span>),
+            <span class="prelude-val">None</span> =&gt; (<span class="prelude-val">None</span>, <span class="ident">SaplingMetadata::empty</span>()),
         };
 
         <span class="kw">let</span> <span class="ident">authorized_tx</span> <span class="op">=</span> <span class="ident">TransactionData</span> {
@@ -1159,9 +1159,9 @@
         <span class="ident">mode</span>: <span class="ident">u32</span>,
         <span class="ident">prevout</span>: (<span class="ident">tze::OutPoint</span>, <span class="ident">TzeOut</span>),
         <span class="ident">witness_builder</span>: <span class="ident">WBuilder</span>,
-    ) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident"><span class="self">Self</span>::BuildError</span><span class="op">&gt;</span>
+    ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident"><span class="self">Self</span>::BuildError</span><span class="op">&gt;</span>
     <span class="kw">where</span>
-        <span class="ident">WBuilder</span>: <span class="lifetime">&#39;a</span> <span class="op">+</span> (<span class="ident">FnOnce</span>(<span class="kw-2">&amp;</span><span class="ident"><span class="self">Self</span>::BuildCtx</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">W</span>, <span class="ident">tze::builder::Error</span><span class="op">&gt;</span>),
+        <span class="ident">WBuilder</span>: <span class="lifetime">&#39;a</span> <span class="op">+</span> (<span class="ident">FnOnce</span>(<span class="kw-2">&amp;</span><span class="ident"><span class="self">Self</span>::BuildCtx</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">W</span>, <span class="ident">tze::builder::Error</span><span class="op">&gt;</span>),
     {
         <span class="self">self</span>.<span class="ident">tze_builder</span>
             .<span class="ident">add_input</span>(<span class="ident">extension_id</span>, <span class="ident">mode</span>, <span class="ident">prevout</span>, <span class="ident">witness_builder</span>);
@@ -1174,7 +1174,7 @@
         <span class="ident">extension_id</span>: <span class="ident">u32</span>,
         <span class="ident">value</span>: <span class="ident">Amount</span>,
         <span class="ident">guarded_by</span>: <span class="kw-2">&amp;</span><span class="ident">G</span>,
-    ) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident"><span class="self">Self</span>::BuildError</span><span class="op">&gt;</span> {
+    ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident"><span class="self">Self</span>::BuildError</span><span class="op">&gt;</span> {
         <span class="self">self</span>.<span class="ident">tze_builder</span>.<span class="ident">add_output</span>(<span class="ident">extension_id</span>, <span class="ident">value</span>, <span class="ident">guarded_by</span>)
     }
 }
@@ -1192,11 +1192,11 @@
     <span class="doccomment">/// The fee will be set to the default fee (0.0001 ZEC).</span>
     <span class="doccomment">///</span>
     <span class="doccomment">/// WARNING: DO NOT USE IN PRODUCTION</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">test_only_new_with_rng</span>(<span class="ident">params</span>: <span class="ident">P</span>, <span class="ident">height</span>: <span class="ident">BlockHeight</span>, <span class="ident">rng</span>: <span class="ident">R</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">Builder</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">P</span>, <span class="ident">R</span><span class="op">&gt;</span> {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">test_only_new_with_rng</span>(<span class="ident">params</span>: <span class="ident">P</span>, <span class="ident">height</span>: <span class="ident">BlockHeight</span>, <span class="ident">rng</span>: <span class="ident">R</span>) -&gt; <span class="ident">Builder</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">P</span>, <span class="ident">R</span><span class="op">&gt;</span> {
         <span class="ident"><span class="self">Self</span>::new_internal</span>(<span class="ident">params</span>, <span class="ident">height</span>, <span class="ident">rng</span>)
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">mock_build</span>(<span class="self">self</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span>(<span class="ident">Transaction</span>, <span class="ident">SaplingMetadata</span>), <span class="ident">Error</span><span class="op">&gt;</span> {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">mock_build</span>(<span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span>(<span class="ident">Transaction</span>, <span class="ident">SaplingMetadata</span>), <span class="ident">Error</span><span class="op">&gt;</span> {
         <span class="self">self</span>.<span class="ident">build</span>(<span class="kw-2">&amp;</span><span class="ident">MockTxProver</span>)
     }
 }
@@ -1232,7 +1232,7 @@
         <span class="kw">let</span> <span class="ident">extsk</span> <span class="op">=</span> <span class="ident">ExtendedSpendingKey::master</span>(<span class="kw-2">&amp;</span>[]);
         <span class="kw">let</span> <span class="ident">extfvk</span> <span class="op">=</span> <span class="ident">ExtendedFullViewingKey::from</span>(<span class="kw-2">&amp;</span><span class="ident">extsk</span>);
         <span class="kw">let</span> <span class="ident">ovk</span> <span class="op">=</span> <span class="ident">extfvk</span>.<span class="ident">fvk</span>.<span class="ident">ovk</span>;
-        <span class="kw">let</span> <span class="ident">to</span> <span class="op">=</span> <span class="ident">extfvk</span>.<span class="ident">default_address</span>().<span class="ident">unwrap</span>().<span class="number">1</span>;
+        <span class="kw">let</span> <span class="ident">to</span> <span class="op">=</span> <span class="ident">extfvk</span>.<span class="ident">default_address</span>().<span class="number">1</span>;
 
         <span class="kw">let</span> <span class="ident">sapling_activation_height</span> <span class="op">=</span> <span class="ident">TEST_NETWORK</span>
             .<span class="ident">activation_height</span>(<span class="ident">NetworkUpgrade::Sapling</span>)
@@ -1285,7 +1285,7 @@
     <span class="kw">fn</span> <span class="ident">binding_sig_present_if_shielded_spend</span>() {
         <span class="kw">let</span> <span class="ident">extsk</span> <span class="op">=</span> <span class="ident">ExtendedSpendingKey::master</span>(<span class="kw-2">&amp;</span>[]);
         <span class="kw">let</span> <span class="ident">extfvk</span> <span class="op">=</span> <span class="ident">ExtendedFullViewingKey::from</span>(<span class="kw-2">&amp;</span><span class="ident">extsk</span>);
-        <span class="kw">let</span> <span class="ident">to</span> <span class="op">=</span> <span class="ident">extfvk</span>.<span class="ident">default_address</span>().<span class="ident">unwrap</span>().<span class="number">1</span>;
+        <span class="kw">let</span> <span class="ident">to</span> <span class="op">=</span> <span class="ident">extfvk</span>.<span class="ident">default_address</span>().<span class="number">1</span>;
 
         <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">rng</span> <span class="op">=</span> <span class="ident">OsRng</span>;
 
@@ -1358,7 +1358,7 @@
 
         <span class="kw">let</span> <span class="ident">extfvk</span> <span class="op">=</span> <span class="ident">ExtendedFullViewingKey::from</span>(<span class="kw-2">&amp;</span><span class="ident">extsk</span>);
         <span class="kw">let</span> <span class="ident">ovk</span> <span class="op">=</span> <span class="prelude-val">Some</span>(<span class="ident">extfvk</span>.<span class="ident">fvk</span>.<span class="ident">ovk</span>);
-        <span class="kw">let</span> <span class="ident">to</span> <span class="op">=</span> <span class="ident">extfvk</span>.<span class="ident">default_address</span>().<span class="ident">unwrap</span>().<span class="number">1</span>;
+        <span class="kw">let</span> <span class="ident">to</span> <span class="op">=</span> <span class="ident">extfvk</span>.<span class="ident">default_address</span>().<span class="number">1</span>;
 
         <span class="comment">// Fail if there is only a Sapling output</span>
         <span class="comment">// 0.0005 z-ZEC out, 0.00001 t-ZEC fee</span>

@@ -192,10 +192,10 @@
 }
 
 <span class="kw">impl</span> <span class="ident">fmt::Display</span> <span class="kw">for</span> <span class="ident">Error</span> {
-    <span class="kw">fn</span> <span class="ident">fmt</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">f</span>: <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">fmt::Formatter</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">fmt::Result</span> {
+    <span class="kw">fn</span> <span class="ident">fmt</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">f</span>: <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">fmt::Formatter</span>) -&gt; <span class="ident">fmt::Result</span> {
         <span class="kw">match</span> <span class="self">self</span> {
-            <span class="ident">Error::InvalidAmount</span> <span class="op">=</span><span class="op">&gt;</span> <span class="macro">write!</span>(<span class="ident">f</span>, <span class="string">&quot;Invalid amount&quot;</span>),
-            <span class="ident">Error::WitnessModeMismatch</span>(<span class="ident">expected</span>, <span class="ident">actual</span>) <span class="op">=</span><span class="op">&gt;</span>
+            <span class="ident">Error::InvalidAmount</span> =&gt; <span class="macro">write!</span>(<span class="ident">f</span>, <span class="string">&quot;Invalid amount&quot;</span>),
+            <span class="ident">Error::WitnessModeMismatch</span>(<span class="ident">expected</span>, <span class="ident">actual</span>) =&gt;
                 <span class="macro">write!</span>(<span class="ident">f</span>, <span class="string">&quot;TZE witness builder returned a mode that did not match the mode with which the input was initially constructed: expected = {:?}, actual = {:?}&quot;</span>, <span class="ident">expected</span>, <span class="ident">actual</span>),
         }
     }
@@ -204,7 +204,7 @@
 <span class="attribute">#[<span class="ident">allow</span>(<span class="ident">clippy::type_complexity</span>)]</span>
 <span class="kw">pub</span> <span class="kw">struct</span> <span class="ident">TzeSigner</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">BuildCtx</span><span class="op">&gt;</span> {
     <span class="ident">prevout</span>: <span class="ident">TzeOut</span>,
-    <span class="ident">builder</span>: <span class="ident">Box</span><span class="op">&lt;</span><span class="kw">dyn</span> <span class="ident">FnOnce</span>(<span class="kw-2">&amp;</span><span class="ident">BuildCtx</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span>(<span class="ident">u32</span>, <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span>), <span class="ident">Error</span><span class="op">&gt;</span> <span class="op">+</span> <span class="lifetime">&#39;a</span><span class="op">&gt;</span>,
+    <span class="ident">builder</span>: <span class="ident">Box</span><span class="op">&lt;</span><span class="kw">dyn</span> <span class="ident">FnOnce</span>(<span class="kw-2">&amp;</span><span class="ident">BuildCtx</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span>(<span class="ident">u32</span>, <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span>), <span class="ident">Error</span><span class="op">&gt;</span> <span class="op">+</span> <span class="lifetime">&#39;a</span><span class="op">&gt;</span>,
 }
 
 <span class="kw">pub</span> <span class="kw">struct</span> <span class="ident">TzeBuilder</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">BuildCtx</span><span class="op">&gt;</span> {
@@ -221,7 +221,7 @@
 }
 
 <span class="kw">impl</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">BuildCtx</span><span class="op">&gt;</span> <span class="ident">TzeBuilder</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">BuildCtx</span><span class="op">&gt;</span> {
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">empty</span>() <span class="op">-</span><span class="op">&gt;</span> <span class="self">Self</span> {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">empty</span>() -&gt; <span class="self">Self</span> {
         <span class="ident">TzeBuilder</span> {
             <span class="ident">signers</span>: <span class="macro">vec!</span>[],
             <span class="ident">vin</span>: <span class="macro">vec!</span>[],
@@ -236,7 +236,7 @@
         (<span class="ident">outpoint</span>, <span class="ident">prevout</span>): (<span class="ident">OutPoint</span>, <span class="ident">TzeOut</span>),
         <span class="ident">witness_builder</span>: <span class="ident">WBuilder</span>,
     ) <span class="kw">where</span>
-        <span class="ident">WBuilder</span>: <span class="lifetime">&#39;a</span> <span class="op">+</span> <span class="ident">FnOnce</span>(<span class="kw-2">&amp;</span><span class="ident">BuildCtx</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">W</span>, <span class="ident">Error</span><span class="op">&gt;</span>,
+        <span class="ident">WBuilder</span>: <span class="lifetime">&#39;a</span> <span class="op">+</span> <span class="ident">FnOnce</span>(<span class="kw-2">&amp;</span><span class="ident">BuildCtx</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">W</span>, <span class="ident">Error</span><span class="op">&gt;</span>,
     {
         <span class="self">self</span>.<span class="ident">vin</span>.<span class="ident">push</span>(<span class="ident">TzeIn::new</span>(<span class="ident">outpoint</span>, <span class="ident">extension_id</span>, <span class="ident">mode</span>));
         <span class="self">self</span>.<span class="ident">signers</span>.<span class="ident">push</span>(<span class="ident">TzeSigner</span> {
@@ -250,7 +250,7 @@
         <span class="ident">extension_id</span>: <span class="ident">u32</span>,
         <span class="ident">value</span>: <span class="ident">Amount</span>,
         <span class="ident">guarded_by</span>: <span class="kw-2">&amp;</span><span class="ident">G</span>,
-    ) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident">Error</span><span class="op">&gt;</span> {
+    ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident">Error</span><span class="op">&gt;</span> {
         <span class="kw">if</span> <span class="ident">value</span>.<span class="ident">is_negative</span>() {
             <span class="kw">return</span> <span class="prelude-val">Err</span>(<span class="ident">Error::InvalidAmount</span>);
         }
@@ -268,7 +268,7 @@
         <span class="prelude-val">Ok</span>(())
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">value_balance</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">Amount</span><span class="op">&gt;</span> {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">value_balance</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">Amount</span><span class="op">&gt;</span> {
         <span class="self">self</span>.<span class="ident">signers</span>
             .<span class="ident">iter</span>()
             .<span class="ident">map</span>(<span class="op">|</span><span class="ident">s</span><span class="op">|</span> <span class="ident">s</span>.<span class="ident">prevout</span>.<span class="ident">value</span>)
@@ -280,7 +280,7 @@
                 .<span class="ident">sum</span>::<span class="op">&lt;</span><span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">Amount</span><span class="op">&gt;</span><span class="op">&gt;</span>()<span class="question-mark">?</span>
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">build</span>(<span class="self">self</span>) <span class="op">-</span><span class="op">&gt;</span> (<span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">Bundle</span><span class="op">&lt;</span><span class="ident">Unauthorized</span><span class="op">&gt;</span><span class="op">&gt;</span>, <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">TzeSigner</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">BuildCtx</span><span class="op">&gt;</span><span class="op">&gt;</span>) {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">build</span>(<span class="self">self</span>) -&gt; (<span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">Bundle</span><span class="op">&lt;</span><span class="ident">Unauthorized</span><span class="op">&gt;</span><span class="op">&gt;</span>, <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">TzeSigner</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">BuildCtx</span><span class="op">&gt;</span><span class="op">&gt;</span>) {
         <span class="kw">if</span> <span class="self">self</span>.<span class="ident">vin</span>.<span class="ident">is_empty</span>() <span class="op">&amp;&amp;</span> <span class="self">self</span>.<span class="ident">vout</span>.<span class="ident">is_empty</span>() {
             (<span class="prelude-val">None</span>, <span class="macro">vec!</span>[])
         } <span class="kw">else</span> {
@@ -301,7 +301,7 @@
         <span class="self">self</span>,
         <span class="ident">unauthed_tx</span>: <span class="kw-2">&amp;</span><span class="ident">tx::TransactionData</span><span class="op">&lt;</span><span class="ident">tx::Unauthorized</span><span class="op">&gt;</span>,
         <span class="ident">signers</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">TzeSigner</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span>, <span class="ident">tx::TransactionData</span><span class="op">&lt;</span><span class="ident">tx::Unauthorized</span><span class="op">&gt;</span><span class="op">&gt;</span><span class="op">&gt;</span>,
-    ) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Bundle</span><span class="op">&lt;</span><span class="ident">Authorized</span><span class="op">&gt;</span>, <span class="ident">Error</span><span class="op">&gt;</span> {
+    ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Bundle</span><span class="op">&lt;</span><span class="ident">Authorized</span><span class="op">&gt;</span>, <span class="ident">Error</span><span class="op">&gt;</span> {
         <span class="comment">// Create TZE input witnesses</span>
         <span class="kw">let</span> <span class="ident">payloads</span> <span class="op">=</span> <span class="ident">signers</span>
             .<span class="ident">into_iter</span>()

@@ -63,7 +63,7 @@
 <span class="doccomment">/// let extsk = spending_key(&amp;[0; 32][..], COIN_TYPE, 0);</span>
 <span class="doccomment">/// ```</span>
 <span class="doccomment">/// [`ExtendedSpendingKey`]: zcash_primitives::zip32::ExtendedSpendingKey</span>
-<span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">spending_key</span>(<span class="ident">seed</span>: <span class="kw-2">&amp;</span>[<span class="ident">u8</span>], <span class="ident">coin_type</span>: <span class="ident">u32</span>, <span class="ident">account</span>: <span class="ident">u32</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">ExtendedSpendingKey</span> {
+<span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">spending_key</span>(<span class="ident">seed</span>: <span class="kw-2">&amp;</span>[<span class="ident">u8</span>], <span class="ident">coin_type</span>: <span class="ident">u32</span>, <span class="ident">account</span>: <span class="ident">u32</span>) -&gt; <span class="ident">ExtendedSpendingKey</span> {
     <span class="kw">if</span> <span class="ident">seed</span>.<span class="ident">len</span>() <span class="op">&lt;</span> <span class="number">32</span> {
         <span class="macro">panic!</span>(<span class="string">&quot;ZIP 32 seeds MUST be at least 32 bytes&quot;</span>);
     }

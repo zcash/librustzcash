@@ -290,7 +290,7 @@
     <span class="ident">params</span>: <span class="kw-2">&amp;</span><span class="ident">P</span>,
     <span class="ident">data</span>: <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">D</span>,
     <span class="ident">tx</span>: <span class="kw-2">&amp;</span><span class="ident">Transaction</span>,
-) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident">E</span><span class="op">&gt;</span>
+) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident">E</span><span class="op">&gt;</span>
 <span class="kw">where</span>
     <span class="ident">E</span>: <span class="ident">From</span><span class="op">&lt;</span><span class="ident">Error</span><span class="op">&lt;</span><span class="ident">N</span><span class="op">&gt;</span><span class="op">&gt;</span>,
     <span class="ident">P</span>: <span class="ident">consensus::Parameters</span>,
@@ -386,7 +386,7 @@
 <span class="doccomment">///</span>
 <span class="doccomment">/// let account = AccountId(0);</span>
 <span class="doccomment">/// let extsk = spending_key(&amp;[0; 32][..], COIN_TYPE, account.0);</span>
-<span class="doccomment">/// let to = extsk.default_address().unwrap().1.into();</span>
+<span class="doccomment">/// let to = extsk.default_address().1.into();</span>
 <span class="doccomment">///</span>
 <span class="doccomment">/// let data_file = NamedTempFile::new().unwrap();</span>
 <span class="doccomment">/// let db_read = WalletDb::for_path(data_file, Network::TestNetwork).unwrap();</span>
@@ -419,7 +419,7 @@
     <span class="ident">value</span>: <span class="ident">Amount</span>,
     <span class="ident">memo</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">MemoBytes</span><span class="op">&gt;</span>,
     <span class="ident">ovk_policy</span>: <span class="ident">OvkPolicy</span>,
-) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">R</span>, <span class="ident">E</span><span class="op">&gt;</span>
+) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">R</span>, <span class="ident">E</span><span class="op">&gt;</span>
 <span class="kw">where</span>
     <span class="ident">E</span>: <span class="ident">From</span><span class="op">&lt;</span><span class="ident">Error</span><span class="op">&lt;</span><span class="ident">N</span><span class="op">&gt;</span><span class="op">&gt;</span>,
     <span class="ident">P</span>: <span class="ident">consensus::Parameters</span> <span class="op">+</span> <span class="ident">Clone</span>,
@@ -435,9 +435,9 @@
 
     <span class="comment">// Apply the outgoing viewing key policy.</span>
     <span class="kw">let</span> <span class="ident">ovk</span> <span class="op">=</span> <span class="kw">match</span> <span class="ident">ovk_policy</span> {
-        <span class="ident">OvkPolicy::Sender</span> <span class="op">=</span><span class="op">&gt;</span> <span class="prelude-val">Some</span>(<span class="ident">extfvk</span>.<span class="ident">fvk</span>.<span class="ident">ovk</span>),
-        <span class="ident">OvkPolicy::Custom</span>(<span class="ident">ovk</span>) <span class="op">=</span><span class="op">&gt;</span> <span class="prelude-val">Some</span>(<span class="ident">ovk</span>),
-        <span class="ident">OvkPolicy::Discard</span> <span class="op">=</span><span class="op">&gt;</span> <span class="prelude-val">None</span>,
+        <span class="ident">OvkPolicy::Sender</span> =&gt; <span class="prelude-val">Some</span>(<span class="ident">extfvk</span>.<span class="ident">fvk</span>.<span class="ident">ovk</span>),
+        <span class="ident">OvkPolicy::Custom</span>(<span class="ident">ovk</span>) =&gt; <span class="prelude-val">Some</span>(<span class="ident">ovk</span>),
+        <span class="ident">OvkPolicy::Discard</span> =&gt; <span class="prelude-val">None</span>,
     };
 
     <span class="comment">// Target the next block, assuming we are up-to-date.</span>
@@ -482,11 +482,11 @@
     }
 
     <span class="kw">match</span> <span class="ident">to</span> {
-        <span class="ident">RecipientAddress::Shielded</span>(<span class="ident">to</span>) <span class="op">=</span><span class="op">&gt;</span> {
+        <span class="ident">RecipientAddress::Shielded</span>(<span class="ident">to</span>) =&gt; {
             <span class="ident">builder</span>.<span class="ident">add_sapling_output</span>(<span class="ident">ovk</span>, <span class="ident">to</span>.<span class="ident">clone</span>(), <span class="ident">value</span>, <span class="ident">memo</span>.<span class="ident">clone</span>())
         }
 
-        <span class="ident">RecipientAddress::Transparent</span>(<span class="ident">to</span>) <span class="op">=</span><span class="op">&gt;</span> <span class="ident">builder</span>.<span class="ident">add_transparent_output</span>(<span class="kw-2">&amp;</span><span class="ident">to</span>, <span class="ident">value</span>),
+        <span class="ident">RecipientAddress::Transparent</span>(<span class="ident">to</span>) =&gt; <span class="ident">builder</span>.<span class="ident">add_transparent_output</span>(<span class="kw-2">&amp;</span><span class="ident">to</span>, <span class="ident">value</span>),
     }
     .<span class="ident">map_err</span>(<span class="ident">Error::Builder</span>)<span class="question-mark">?</span>;
 
@@ -494,18 +494,18 @@
 
     <span class="kw">let</span> <span class="ident">output_index</span> <span class="op">=</span> <span class="kw">match</span> <span class="ident">to</span> {
         <span class="comment">// Sapling outputs are shuffled, so we need to look up where the output ended up.</span>
-        <span class="ident">RecipientAddress::Shielded</span>(<span class="kw">_</span>) <span class="op">=</span><span class="op">&gt;</span> <span class="kw">match</span> <span class="ident">tx_metadata</span>.<span class="ident">output_index</span>(<span class="number">0</span>) {
-            <span class="prelude-val">Some</span>(<span class="ident">idx</span>) <span class="op">=</span><span class="op">&gt;</span> <span class="ident">idx</span>,
-            <span class="prelude-val">None</span> <span class="op">=</span><span class="op">&gt;</span> <span class="macro">panic!</span>(<span class="string">&quot;Output 0 should exist in the transaction&quot;</span>),
+        <span class="ident">RecipientAddress::Shielded</span>(<span class="kw">_</span>) =&gt; <span class="kw">match</span> <span class="ident">tx_metadata</span>.<span class="ident">output_index</span>(<span class="number">0</span>) {
+            <span class="prelude-val">Some</span>(<span class="ident">idx</span>) =&gt; <span class="ident">idx</span>,
+            <span class="prelude-val">None</span> =&gt; <span class="macro">panic!</span>(<span class="string">&quot;Output 0 should exist in the transaction&quot;</span>),
         },
-        <span class="ident">RecipientAddress::Transparent</span>(<span class="ident">addr</span>) <span class="op">=</span><span class="op">&gt;</span> {
+        <span class="ident">RecipientAddress::Transparent</span>(<span class="ident">addr</span>) =&gt; {
             <span class="kw">let</span> <span class="ident">script</span> <span class="op">=</span> <span class="ident">addr</span>.<span class="ident">script</span>();
             <span class="ident">tx</span>.<span class="ident">transparent_bundle</span>()
                 .<span class="ident">and_then</span>(<span class="op">|</span><span class="ident">b</span><span class="op">|</span> {
                     <span class="ident">b</span>.<span class="ident">vout</span>
                         .<span class="ident">iter</span>()
                         .<span class="ident">enumerate</span>()
-                        .<span class="ident">find</span>(<span class="op">|</span>(<span class="kw">_</span>, <span class="ident">tx_out</span>)<span class="op">|</span> <span class="ident">tx_out</span>.<span class="ident">script_pubkey</span> <span class="op">=</span><span class="op">=</span> <span class="ident">script</span>)
+                        .<span class="ident">find</span>(<span class="op">|</span>(<span class="kw">_</span>, <span class="ident">tx_out</span>)<span class="op">|</span> <span class="ident">tx_out</span>.<span class="ident">script_pubkey</span> <span class="op">==</span> <span class="ident">script</span>)
                 })
                 .<span class="ident">map</span>(<span class="op">|</span>(<span class="ident">index</span>, <span class="kw">_</span>)<span class="op">|</span> <span class="ident">index</span>)
                 .<span class="ident">expect</span>(<span class="string">&quot;we sent to this address&quot;</span>)

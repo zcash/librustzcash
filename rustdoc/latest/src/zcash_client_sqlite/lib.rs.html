@@ -818,10 +818,10 @@
 }
 
 <span class="kw">impl</span> <span class="ident">fmt::Display</span> <span class="kw">for</span> <span class="ident">NoteId</span> {
-    <span class="kw">fn</span> <span class="ident">fmt</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">f</span>: <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">fmt::Formatter</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">fmt::Result</span> {
+    <span class="kw">fn</span> <span class="ident">fmt</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">f</span>: <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">fmt::Formatter</span>) -&gt; <span class="ident">fmt::Result</span> {
         <span class="kw">match</span> <span class="self">self</span> {
-            <span class="ident">NoteId::SentNoteId</span>(<span class="ident">id</span>) <span class="op">=</span><span class="op">&gt;</span> <span class="macro">write!</span>(<span class="ident">f</span>, <span class="string">&quot;Sent Note {}&quot;</span>, <span class="ident">id</span>),
-            <span class="ident">NoteId::ReceivedNoteId</span>(<span class="ident">id</span>) <span class="op">=</span><span class="op">&gt;</span> <span class="macro">write!</span>(<span class="ident">f</span>, <span class="string">&quot;Received Note {}&quot;</span>, <span class="ident">id</span>),
+            <span class="ident">NoteId::SentNoteId</span>(<span class="ident">id</span>) =&gt; <span class="macro">write!</span>(<span class="ident">f</span>, <span class="string">&quot;Sent Note {}&quot;</span>, <span class="ident">id</span>),
+            <span class="ident">NoteId::ReceivedNoteId</span>(<span class="ident">id</span>) =&gt; <span class="macro">write!</span>(<span class="ident">f</span>, <span class="string">&quot;Received Note {}&quot;</span>, <span class="ident">id</span>),
         }
     }
 }
@@ -834,14 +834,14 @@
 
 <span class="kw">impl</span><span class="op">&lt;</span><span class="ident">P</span>: <span class="ident">consensus::Parameters</span><span class="op">&gt;</span> <span class="ident">WalletDb</span><span class="op">&lt;</span><span class="ident">P</span><span class="op">&gt;</span> {
     <span class="doccomment">/// Construct a connection to the wallet database stored at the specified path.</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">for_path</span><span class="op">&lt;</span><span class="ident">F</span>: <span class="ident">AsRef</span><span class="op">&lt;</span><span class="ident">Path</span><span class="op">&gt;</span><span class="op">&gt;</span>(<span class="ident">path</span>: <span class="ident">F</span>, <span class="ident">params</span>: <span class="ident">P</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="self">Self</span>, <span class="ident">rusqlite::Error</span><span class="op">&gt;</span> {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">for_path</span><span class="op">&lt;</span><span class="ident">F</span>: <span class="ident">AsRef</span><span class="op">&lt;</span><span class="ident">Path</span><span class="op">&gt;</span><span class="op">&gt;</span>(<span class="ident">path</span>: <span class="ident">F</span>, <span class="ident">params</span>: <span class="ident">P</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="self">Self</span>, <span class="ident">rusqlite::Error</span><span class="op">&gt;</span> {
         <span class="ident">Connection::open</span>(<span class="ident">path</span>).<span class="ident">map</span>(<span class="kw">move</span> <span class="op">|</span><span class="ident">conn</span><span class="op">|</span> <span class="ident">WalletDb</span> { <span class="ident">conn</span>, <span class="ident">params</span> })
     }
 
     <span class="doccomment">/// Given a wallet database connection, obtain a handle for the write operations</span>
     <span class="doccomment">/// for that database. This operation may eagerly initialize and cache sqlite</span>
     <span class="doccomment">/// prepared statements that are used in write operations.</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">get_update_ops</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">DataConnStmtCache</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span>, <span class="ident">P</span><span class="op">&gt;</span>, <span class="ident">SqliteClientError</span><span class="op">&gt;</span> {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">get_update_ops</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">DataConnStmtCache</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span>, <span class="ident">P</span><span class="op">&gt;</span>, <span class="ident">SqliteClientError</span><span class="op">&gt;</span> {
         <span class="prelude-val">Ok</span>(
             <span class="ident">DataConnStmtCache</span> {
                 <span class="ident">wallet_db</span>: <span class="self">self</span>,
@@ -921,25 +921,25 @@
     <span class="kw">type</span> <span class="ident">NoteRef</span> <span class="op">=</span> <span class="ident">NoteId</span>;
     <span class="kw">type</span> <span class="ident">TxRef</span> <span class="op">=</span> <span class="ident">i64</span>;
 
-    <span class="kw">fn</span> <span class="ident">block_height_extrema</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="prelude-ty">Option</span><span class="op">&lt;</span>(<span class="ident">BlockHeight</span>, <span class="ident">BlockHeight</span>)<span class="op">&gt;</span>, <span class="ident"><span class="self">Self</span>::Error</span><span class="op">&gt;</span> {
+    <span class="kw">fn</span> <span class="ident">block_height_extrema</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="prelude-ty">Option</span><span class="op">&lt;</span>(<span class="ident">BlockHeight</span>, <span class="ident">BlockHeight</span>)<span class="op">&gt;</span>, <span class="ident"><span class="self">Self</span>::Error</span><span class="op">&gt;</span> {
         <span class="ident">wallet::block_height_extrema</span>(<span class="self">self</span>).<span class="ident">map_err</span>(<span class="ident">SqliteClientError::from</span>)
     }
 
-    <span class="kw">fn</span> <span class="ident">get_block_hash</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">block_height</span>: <span class="ident">BlockHeight</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">BlockHash</span><span class="op">&gt;</span>, <span class="ident"><span class="self">Self</span>::Error</span><span class="op">&gt;</span> {
+    <span class="kw">fn</span> <span class="ident">get_block_hash</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">block_height</span>: <span class="ident">BlockHeight</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">BlockHash</span><span class="op">&gt;</span>, <span class="ident"><span class="self">Self</span>::Error</span><span class="op">&gt;</span> {
         <span class="ident">wallet::get_block_hash</span>(<span class="self">self</span>, <span class="ident">block_height</span>).<span class="ident">map_err</span>(<span class="ident">SqliteClientError::from</span>)
     }
 
-    <span class="kw">fn</span> <span class="ident">get_tx_height</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">txid</span>: <span class="ident">TxId</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">BlockHeight</span><span class="op">&gt;</span>, <span class="ident"><span class="self">Self</span>::Error</span><span class="op">&gt;</span> {
+    <span class="kw">fn</span> <span class="ident">get_tx_height</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">txid</span>: <span class="ident">TxId</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">BlockHeight</span><span class="op">&gt;</span>, <span class="ident"><span class="self">Self</span>::Error</span><span class="op">&gt;</span> {
         <span class="ident">wallet::get_tx_height</span>(<span class="self">self</span>, <span class="ident">txid</span>).<span class="ident">map_err</span>(<span class="ident">SqliteClientError::from</span>)
     }
 
     <span class="kw">fn</span> <span class="ident">get_extended_full_viewing_keys</span>(
         <span class="kw-2">&amp;</span><span class="self">self</span>,
-    ) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">HashMap</span><span class="op">&lt;</span><span class="ident">AccountId</span>, <span class="ident">ExtendedFullViewingKey</span><span class="op">&gt;</span>, <span class="ident"><span class="self">Self</span>::Error</span><span class="op">&gt;</span> {
+    ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">HashMap</span><span class="op">&lt;</span><span class="ident">AccountId</span>, <span class="ident">ExtendedFullViewingKey</span><span class="op">&gt;</span>, <span class="ident"><span class="self">Self</span>::Error</span><span class="op">&gt;</span> {
         <span class="ident">wallet::get_extended_full_viewing_keys</span>(<span class="self">self</span>)
     }
 
-    <span class="kw">fn</span> <span class="ident">get_address</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">account</span>: <span class="ident">AccountId</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">PaymentAddress</span><span class="op">&gt;</span>, <span class="ident"><span class="self">Self</span>::Error</span><span class="op">&gt;</span> {
+    <span class="kw">fn</span> <span class="ident">get_address</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">account</span>: <span class="ident">AccountId</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">PaymentAddress</span><span class="op">&gt;</span>, <span class="ident"><span class="self">Self</span>::Error</span><span class="op">&gt;</span> {
         <span class="ident">wallet::get_address</span>(<span class="self">self</span>, <span class="ident">account</span>)
     }
 
@@ -947,7 +947,7 @@
         <span class="kw-2">&amp;</span><span class="self">self</span>,
         <span class="ident">account</span>: <span class="ident">AccountId</span>,
         <span class="ident">extfvk</span>: <span class="kw-2">&amp;</span><span class="ident">ExtendedFullViewingKey</span>,
-    ) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">bool</span>, <span class="ident"><span class="self">Self</span>::Error</span><span class="op">&gt;</span> {
+    ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">bool</span>, <span class="ident"><span class="self">Self</span>::Error</span><span class="op">&gt;</span> {
         <span class="ident">wallet::is_valid_account_extfvk</span>(<span class="self">self</span>, <span class="ident">account</span>, <span class="ident">extfvk</span>)
     }
 
@@ -955,21 +955,21 @@
         <span class="kw-2">&amp;</span><span class="self">self</span>,
         <span class="ident">account</span>: <span class="ident">AccountId</span>,
         <span class="ident">anchor_height</span>: <span class="ident">BlockHeight</span>,
-    ) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Amount</span>, <span class="ident"><span class="self">Self</span>::Error</span><span class="op">&gt;</span> {
+    ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Amount</span>, <span class="ident"><span class="self">Self</span>::Error</span><span class="op">&gt;</span> {
         <span class="ident">wallet::get_balance_at</span>(<span class="self">self</span>, <span class="ident">account</span>, <span class="ident">anchor_height</span>)
     }
 
-    <span class="kw">fn</span> <span class="ident">get_memo</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">id_note</span>: <span class="ident"><span class="self">Self</span>::NoteRef</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Memo</span>, <span class="ident"><span class="self">Self</span>::Error</span><span class="op">&gt;</span> {
+    <span class="kw">fn</span> <span class="ident">get_memo</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">id_note</span>: <span class="ident"><span class="self">Self</span>::NoteRef</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Memo</span>, <span class="ident"><span class="self">Self</span>::Error</span><span class="op">&gt;</span> {
         <span class="kw">match</span> <span class="ident">id_note</span> {
-            <span class="ident">NoteId::SentNoteId</span>(<span class="ident">id_note</span>) <span class="op">=</span><span class="op">&gt;</span> <span class="ident">wallet::get_sent_memo</span>(<span class="self">self</span>, <span class="ident">id_note</span>),
-            <span class="ident">NoteId::ReceivedNoteId</span>(<span class="ident">id_note</span>) <span class="op">=</span><span class="op">&gt;</span> <span class="ident">wallet::get_received_memo</span>(<span class="self">self</span>, <span class="ident">id_note</span>),
+            <span class="ident">NoteId::SentNoteId</span>(<span class="ident">id_note</span>) =&gt; <span class="ident">wallet::get_sent_memo</span>(<span class="self">self</span>, <span class="ident">id_note</span>),
+            <span class="ident">NoteId::ReceivedNoteId</span>(<span class="ident">id_note</span>) =&gt; <span class="ident">wallet::get_received_memo</span>(<span class="self">self</span>, <span class="ident">id_note</span>),
         }
     }
 
     <span class="kw">fn</span> <span class="ident">get_commitment_tree</span>(
         <span class="kw-2">&amp;</span><span class="self">self</span>,
         <span class="ident">block_height</span>: <span class="ident">BlockHeight</span>,
-    ) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">CommitmentTree</span><span class="op">&lt;</span><span class="ident">Node</span><span class="op">&gt;</span><span class="op">&gt;</span>, <span class="ident"><span class="self">Self</span>::Error</span><span class="op">&gt;</span> {
+    ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">CommitmentTree</span><span class="op">&lt;</span><span class="ident">Node</span><span class="op">&gt;</span><span class="op">&gt;</span>, <span class="ident"><span class="self">Self</span>::Error</span><span class="op">&gt;</span> {
         <span class="ident">wallet::get_commitment_tree</span>(<span class="self">self</span>, <span class="ident">block_height</span>)
     }
 
@@ -977,11 +977,11 @@
     <span class="kw">fn</span> <span class="ident">get_witnesses</span>(
         <span class="kw-2">&amp;</span><span class="self">self</span>,
         <span class="ident">block_height</span>: <span class="ident">BlockHeight</span>,
-    ) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span>(<span class="ident"><span class="self">Self</span>::NoteRef</span>, <span class="ident">IncrementalWitness</span><span class="op">&lt;</span><span class="ident">Node</span><span class="op">&gt;</span>)<span class="op">&gt;</span>, <span class="ident"><span class="self">Self</span>::Error</span><span class="op">&gt;</span> {
+    ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span>(<span class="ident"><span class="self">Self</span>::NoteRef</span>, <span class="ident">IncrementalWitness</span><span class="op">&lt;</span><span class="ident">Node</span><span class="op">&gt;</span>)<span class="op">&gt;</span>, <span class="ident"><span class="self">Self</span>::Error</span><span class="op">&gt;</span> {
         <span class="ident">wallet::get_witnesses</span>(<span class="self">self</span>, <span class="ident">block_height</span>)
     }
 
-    <span class="kw">fn</span> <span class="ident">get_nullifiers</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span>(<span class="ident">AccountId</span>, <span class="ident">Nullifier</span>)<span class="op">&gt;</span>, <span class="ident"><span class="self">Self</span>::Error</span><span class="op">&gt;</span> {
+    <span class="kw">fn</span> <span class="ident">get_nullifiers</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span>(<span class="ident">AccountId</span>, <span class="ident">Nullifier</span>)<span class="op">&gt;</span>, <span class="ident"><span class="self">Self</span>::Error</span><span class="op">&gt;</span> {
         <span class="ident">wallet::get_nullifiers</span>(<span class="self">self</span>)
     }
 
@@ -989,7 +989,7 @@
         <span class="kw-2">&amp;</span><span class="self">self</span>,
         <span class="ident">account</span>: <span class="ident">AccountId</span>,
         <span class="ident">anchor_height</span>: <span class="ident">BlockHeight</span>,
-    ) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">SpendableNote</span><span class="op">&gt;</span>, <span class="ident"><span class="self">Self</span>::Error</span><span class="op">&gt;</span> {
+    ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">SpendableNote</span><span class="op">&gt;</span>, <span class="ident"><span class="self">Self</span>::Error</span><span class="op">&gt;</span> {
         <span class="ident">wallet::transact::get_spendable_notes</span>(<span class="self">self</span>, <span class="ident">account</span>, <span class="ident">anchor_height</span>)
     }
 
@@ -998,7 +998,7 @@
         <span class="ident">account</span>: <span class="ident">AccountId</span>,
         <span class="ident">target_value</span>: <span class="ident">Amount</span>,
         <span class="ident">anchor_height</span>: <span class="ident">BlockHeight</span>,
-    ) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">SpendableNote</span><span class="op">&gt;</span>, <span class="ident"><span class="self">Self</span>::Error</span><span class="op">&gt;</span> {
+    ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">SpendableNote</span><span class="op">&gt;</span>, <span class="ident"><span class="self">Self</span>::Error</span><span class="op">&gt;</span> {
         <span class="ident">wallet::transact::select_spendable_notes</span>(<span class="self">self</span>, <span class="ident">account</span>, <span class="ident">target_value</span>, <span class="ident">anchor_height</span>)
     }
 }
@@ -1040,25 +1040,25 @@
     <span class="kw">type</span> <span class="ident">NoteRef</span> <span class="op">=</span> <span class="ident">NoteId</span>;
     <span class="kw">type</span> <span class="ident">TxRef</span> <span class="op">=</span> <span class="ident">i64</span>;
 
-    <span class="kw">fn</span> <span class="ident">block_height_extrema</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="prelude-ty">Option</span><span class="op">&lt;</span>(<span class="ident">BlockHeight</span>, <span class="ident">BlockHeight</span>)<span class="op">&gt;</span>, <span class="ident"><span class="self">Self</span>::Error</span><span class="op">&gt;</span> {
+    <span class="kw">fn</span> <span class="ident">block_height_extrema</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="prelude-ty">Option</span><span class="op">&lt;</span>(<span class="ident">BlockHeight</span>, <span class="ident">BlockHeight</span>)<span class="op">&gt;</span>, <span class="ident"><span class="self">Self</span>::Error</span><span class="op">&gt;</span> {
         <span class="self">self</span>.<span class="ident">wallet_db</span>.<span class="ident">block_height_extrema</span>()
     }
 
-    <span class="kw">fn</span> <span class="ident">get_block_hash</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">block_height</span>: <span class="ident">BlockHeight</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">BlockHash</span><span class="op">&gt;</span>, <span class="ident"><span class="self">Self</span>::Error</span><span class="op">&gt;</span> {
+    <span class="kw">fn</span> <span class="ident">get_block_hash</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">block_height</span>: <span class="ident">BlockHeight</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">BlockHash</span><span class="op">&gt;</span>, <span class="ident"><span class="self">Self</span>::Error</span><span class="op">&gt;</span> {
         <span class="self">self</span>.<span class="ident">wallet_db</span>.<span class="ident">get_block_hash</span>(<span class="ident">block_height</span>)
     }
 
-    <span class="kw">fn</span> <span class="ident">get_tx_height</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">txid</span>: <span class="ident">TxId</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">BlockHeight</span><span class="op">&gt;</span>, <span class="ident"><span class="self">Self</span>::Error</span><span class="op">&gt;</span> {
+    <span class="kw">fn</span> <span class="ident">get_tx_height</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">txid</span>: <span class="ident">TxId</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">BlockHeight</span><span class="op">&gt;</span>, <span class="ident"><span class="self">Self</span>::Error</span><span class="op">&gt;</span> {
         <span class="self">self</span>.<span class="ident">wallet_db</span>.<span class="ident">get_tx_height</span>(<span class="ident">txid</span>)
     }
 
     <span class="kw">fn</span> <span class="ident">get_extended_full_viewing_keys</span>(
         <span class="kw-2">&amp;</span><span class="self">self</span>,
-    ) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">HashMap</span><span class="op">&lt;</span><span class="ident">AccountId</span>, <span class="ident">ExtendedFullViewingKey</span><span class="op">&gt;</span>, <span class="ident"><span class="self">Self</span>::Error</span><span class="op">&gt;</span> {
+    ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">HashMap</span><span class="op">&lt;</span><span class="ident">AccountId</span>, <span class="ident">ExtendedFullViewingKey</span><span class="op">&gt;</span>, <span class="ident"><span class="self">Self</span>::Error</span><span class="op">&gt;</span> {
         <span class="self">self</span>.<span class="ident">wallet_db</span>.<span class="ident">get_extended_full_viewing_keys</span>()
     }
 
-    <span class="kw">fn</span> <span class="ident">get_address</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">account</span>: <span class="ident">AccountId</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">PaymentAddress</span><span class="op">&gt;</span>, <span class="ident"><span class="self">Self</span>::Error</span><span class="op">&gt;</span> {
+    <span class="kw">fn</span> <span class="ident">get_address</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">account</span>: <span class="ident">AccountId</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">PaymentAddress</span><span class="op">&gt;</span>, <span class="ident"><span class="self">Self</span>::Error</span><span class="op">&gt;</span> {
         <span class="self">self</span>.<span class="ident">wallet_db</span>.<span class="ident">get_address</span>(<span class="ident">account</span>)
     }
 
@@ -1066,7 +1066,7 @@
         <span class="kw-2">&amp;</span><span class="self">self</span>,
         <span class="ident">account</span>: <span class="ident">AccountId</span>,
         <span class="ident">extfvk</span>: <span class="kw-2">&amp;</span><span class="ident">ExtendedFullViewingKey</span>,
-    ) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">bool</span>, <span class="ident"><span class="self">Self</span>::Error</span><span class="op">&gt;</span> {
+    ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">bool</span>, <span class="ident"><span class="self">Self</span>::Error</span><span class="op">&gt;</span> {
         <span class="self">self</span>.<span class="ident">wallet_db</span>.<span class="ident">is_valid_account_extfvk</span>(<span class="ident">account</span>, <span class="ident">extfvk</span>)
     }
 
@@ -1074,18 +1074,18 @@
         <span class="kw-2">&amp;</span><span class="self">self</span>,
         <span class="ident">account</span>: <span class="ident">AccountId</span>,
         <span class="ident">anchor_height</span>: <span class="ident">BlockHeight</span>,
-    ) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Amount</span>, <span class="ident"><span class="self">Self</span>::Error</span><span class="op">&gt;</span> {
+    ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Amount</span>, <span class="ident"><span class="self">Self</span>::Error</span><span class="op">&gt;</span> {
         <span class="self">self</span>.<span class="ident">wallet_db</span>.<span class="ident">get_balance_at</span>(<span class="ident">account</span>, <span class="ident">anchor_height</span>)
     }
 
-    <span class="kw">fn</span> <span class="ident">get_memo</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">id_note</span>: <span class="ident"><span class="self">Self</span>::NoteRef</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Memo</span>, <span class="ident"><span class="self">Self</span>::Error</span><span class="op">&gt;</span> {
+    <span class="kw">fn</span> <span class="ident">get_memo</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">id_note</span>: <span class="ident"><span class="self">Self</span>::NoteRef</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Memo</span>, <span class="ident"><span class="self">Self</span>::Error</span><span class="op">&gt;</span> {
         <span class="self">self</span>.<span class="ident">wallet_db</span>.<span class="ident">get_memo</span>(<span class="ident">id_note</span>)
     }
 
     <span class="kw">fn</span> <span class="ident">get_commitment_tree</span>(
         <span class="kw-2">&amp;</span><span class="self">self</span>,
         <span class="ident">block_height</span>: <span class="ident">BlockHeight</span>,
-    ) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">CommitmentTree</span><span class="op">&lt;</span><span class="ident">Node</span><span class="op">&gt;</span><span class="op">&gt;</span>, <span class="ident"><span class="self">Self</span>::Error</span><span class="op">&gt;</span> {
+    ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">CommitmentTree</span><span class="op">&lt;</span><span class="ident">Node</span><span class="op">&gt;</span><span class="op">&gt;</span>, <span class="ident"><span class="self">Self</span>::Error</span><span class="op">&gt;</span> {
         <span class="self">self</span>.<span class="ident">wallet_db</span>.<span class="ident">get_commitment_tree</span>(<span class="ident">block_height</span>)
     }
 
@@ -1093,11 +1093,11 @@
     <span class="kw">fn</span> <span class="ident">get_witnesses</span>(
         <span class="kw-2">&amp;</span><span class="self">self</span>,
         <span class="ident">block_height</span>: <span class="ident">BlockHeight</span>,
-    ) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span>(<span class="ident"><span class="self">Self</span>::NoteRef</span>, <span class="ident">IncrementalWitness</span><span class="op">&lt;</span><span class="ident">Node</span><span class="op">&gt;</span>)<span class="op">&gt;</span>, <span class="ident"><span class="self">Self</span>::Error</span><span class="op">&gt;</span> {
+    ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span>(<span class="ident"><span class="self">Self</span>::NoteRef</span>, <span class="ident">IncrementalWitness</span><span class="op">&lt;</span><span class="ident">Node</span><span class="op">&gt;</span>)<span class="op">&gt;</span>, <span class="ident"><span class="self">Self</span>::Error</span><span class="op">&gt;</span> {
         <span class="self">self</span>.<span class="ident">wallet_db</span>.<span class="ident">get_witnesses</span>(<span class="ident">block_height</span>)
     }
 
-    <span class="kw">fn</span> <span class="ident">get_nullifiers</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span>(<span class="ident">AccountId</span>, <span class="ident">Nullifier</span>)<span class="op">&gt;</span>, <span class="ident"><span class="self">Self</span>::Error</span><span class="op">&gt;</span> {
+    <span class="kw">fn</span> <span class="ident">get_nullifiers</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span>(<span class="ident">AccountId</span>, <span class="ident">Nullifier</span>)<span class="op">&gt;</span>, <span class="ident"><span class="self">Self</span>::Error</span><span class="op">&gt;</span> {
         <span class="self">self</span>.<span class="ident">wallet_db</span>.<span class="ident">get_nullifiers</span>()
     }
 
@@ -1105,7 +1105,7 @@
         <span class="kw-2">&amp;</span><span class="self">self</span>,
         <span class="ident">account</span>: <span class="ident">AccountId</span>,
         <span class="ident">anchor_height</span>: <span class="ident">BlockHeight</span>,
-    ) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">SpendableNote</span><span class="op">&gt;</span>, <span class="ident"><span class="self">Self</span>::Error</span><span class="op">&gt;</span> {
+    ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">SpendableNote</span><span class="op">&gt;</span>, <span class="ident"><span class="self">Self</span>::Error</span><span class="op">&gt;</span> {
         <span class="self">self</span>.<span class="ident">wallet_db</span>.<span class="ident">get_spendable_notes</span>(<span class="ident">account</span>, <span class="ident">anchor_height</span>)
     }
 
@@ -1114,27 +1114,27 @@
         <span class="ident">account</span>: <span class="ident">AccountId</span>,
         <span class="ident">target_value</span>: <span class="ident">Amount</span>,
         <span class="ident">anchor_height</span>: <span class="ident">BlockHeight</span>,
-    ) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">SpendableNote</span><span class="op">&gt;</span>, <span class="ident"><span class="self">Self</span>::Error</span><span class="op">&gt;</span> {
+    ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">SpendableNote</span><span class="op">&gt;</span>, <span class="ident"><span class="self">Self</span>::Error</span><span class="op">&gt;</span> {
         <span class="self">self</span>.<span class="ident">wallet_db</span>
             .<span class="ident">select_spendable_notes</span>(<span class="ident">account</span>, <span class="ident">target_value</span>, <span class="ident">anchor_height</span>)
     }
 }
 
 <span class="kw">impl</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">P</span>: <span class="ident">consensus::Parameters</span><span class="op">&gt;</span> <span class="ident">DataConnStmtCache</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">P</span><span class="op">&gt;</span> {
-    <span class="kw">fn</span> <span class="ident">transactionally</span><span class="op">&lt;</span><span class="ident">F</span>, <span class="ident">A</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>, <span class="ident">f</span>: <span class="ident">F</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">A</span>, <span class="ident">SqliteClientError</span><span class="op">&gt;</span>
+    <span class="kw">fn</span> <span class="ident">transactionally</span><span class="op">&lt;</span><span class="ident">F</span>, <span class="ident">A</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>, <span class="ident">f</span>: <span class="ident">F</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">A</span>, <span class="ident">SqliteClientError</span><span class="op">&gt;</span>
     <span class="kw">where</span>
-        <span class="ident">F</span>: <span class="ident">FnOnce</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">Self</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">A</span>, <span class="ident">SqliteClientError</span><span class="op">&gt;</span>,
+        <span class="ident">F</span>: <span class="ident">FnOnce</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">Self</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">A</span>, <span class="ident">SqliteClientError</span><span class="op">&gt;</span>,
     {
         <span class="self">self</span>.<span class="ident">wallet_db</span>.<span class="ident">conn</span>.<span class="ident">execute</span>(<span class="string">&quot;BEGIN IMMEDIATE&quot;</span>, <span class="ident">NO_PARAMS</span>)<span class="question-mark">?</span>;
         <span class="kw">match</span> <span class="ident">f</span>(<span class="self">self</span>) {
-            <span class="prelude-val">Ok</span>(<span class="ident">result</span>) <span class="op">=</span><span class="op">&gt;</span> {
+            <span class="prelude-val">Ok</span>(<span class="ident">result</span>) =&gt; {
                 <span class="self">self</span>.<span class="ident">wallet_db</span>.<span class="ident">conn</span>.<span class="ident">execute</span>(<span class="string">&quot;COMMIT&quot;</span>, <span class="ident">NO_PARAMS</span>)<span class="question-mark">?</span>;
                 <span class="prelude-val">Ok</span>(<span class="ident">result</span>)
             }
-            <span class="prelude-val">Err</span>(<span class="ident">error</span>) <span class="op">=</span><span class="op">&gt;</span> {
+            <span class="prelude-val">Err</span>(<span class="ident">error</span>) =&gt; {
                 <span class="kw">match</span> <span class="self">self</span>.<span class="ident">wallet_db</span>.<span class="ident">conn</span>.<span class="ident">execute</span>(<span class="string">&quot;ROLLBACK&quot;</span>, <span class="ident">NO_PARAMS</span>) {
-                    <span class="prelude-val">Ok</span>(<span class="kw">_</span>) <span class="op">=</span><span class="op">&gt;</span> <span class="prelude-val">Err</span>(<span class="ident">error</span>),
-                    <span class="prelude-val">Err</span>(<span class="ident">e</span>) <span class="op">=</span><span class="op">&gt;</span>
+                    <span class="prelude-val">Ok</span>(<span class="kw">_</span>) =&gt; <span class="prelude-val">Err</span>(<span class="ident">error</span>),
+                    <span class="prelude-val">Err</span>(<span class="ident">e</span>) =&gt;
                         <span class="comment">// Panicking here is probably the right thing to do, because it</span>
                         <span class="comment">// means the database is corrupt.</span>
                         <span class="macro">panic!</span>(
@@ -1154,7 +1154,7 @@
         <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>,
         <span class="ident">block</span>: <span class="kw-2">&amp;</span><span class="ident">PrunedBlock</span>,
         <span class="ident">updated_witnesses</span>: <span class="kw-2">&amp;</span>[(<span class="ident"><span class="self">Self</span>::NoteRef</span>, <span class="ident">IncrementalWitness</span><span class="op">&lt;</span><span class="ident">Node</span><span class="op">&gt;</span>)],
-    ) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span>(<span class="ident"><span class="self">Self</span>::NoteRef</span>, <span class="ident">IncrementalWitness</span><span class="op">&lt;</span><span class="ident">Node</span><span class="op">&gt;</span>)<span class="op">&gt;</span>, <span class="ident"><span class="self">Self</span>::Error</span><span class="op">&gt;</span> {
+    ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span>(<span class="ident"><span class="self">Self</span>::NoteRef</span>, <span class="ident">IncrementalWitness</span><span class="op">&lt;</span><span class="ident">Node</span><span class="op">&gt;</span>)<span class="op">&gt;</span>, <span class="ident"><span class="self">Self</span>::Error</span><span class="op">&gt;</span> {
         <span class="comment">// database updates for each block are transactional</span>
         <span class="self">self</span>.<span class="ident">transactionally</span>(<span class="op">|</span><span class="ident">up</span><span class="op">|</span> {
             <span class="comment">// Insert the block into the database.</span>
@@ -1206,7 +1206,7 @@
     <span class="kw">fn</span> <span class="ident">store_received_tx</span>(
         <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>,
         <span class="ident">received_tx</span>: <span class="kw-2">&amp;</span><span class="ident">ReceivedTransaction</span>,
-    ) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident"><span class="self">Self</span>::TxRef</span>, <span class="ident"><span class="self">Self</span>::Error</span><span class="op">&gt;</span> {
+    ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident"><span class="self">Self</span>::TxRef</span>, <span class="ident"><span class="self">Self</span>::Error</span><span class="op">&gt;</span> {
         <span class="self">self</span>.<span class="ident">transactionally</span>(<span class="op">|</span><span class="ident">up</span><span class="op">|</span> {
             <span class="kw">let</span> <span class="ident">tx_ref</span> <span class="op">=</span> <span class="ident">wallet::put_tx_data</span>(<span class="ident">up</span>, <span class="ident">received_tx</span>.<span class="ident">tx</span>, <span class="prelude-val">None</span>)<span class="question-mark">?</span>;
 
@@ -1222,7 +1222,7 @@
         })
     }
 
-    <span class="kw">fn</span> <span class="ident">store_sent_tx</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>, <span class="ident">sent_tx</span>: <span class="kw-2">&amp;</span><span class="ident">SentTransaction</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident"><span class="self">Self</span>::TxRef</span>, <span class="ident"><span class="self">Self</span>::Error</span><span class="op">&gt;</span> {
+    <span class="kw">fn</span> <span class="ident">store_sent_tx</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>, <span class="ident">sent_tx</span>: <span class="kw-2">&amp;</span><span class="ident">SentTransaction</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident"><span class="self">Self</span>::TxRef</span>, <span class="ident"><span class="self">Self</span>::Error</span><span class="op">&gt;</span> {
         <span class="comment">// Update the database atomically, to ensure the result is internally consistent.</span>
         <span class="self">self</span>.<span class="ident">transactionally</span>(<span class="op">|</span><span class="ident">up</span><span class="op">|</span> {
             <span class="kw">let</span> <span class="ident">tx_ref</span> <span class="op">=</span> <span class="ident">wallet::put_tx_data</span>(<span class="ident">up</span>, <span class="kw-2">&amp;</span><span class="ident">sent_tx</span>.<span class="ident">tx</span>, <span class="prelude-val">Some</span>(<span class="ident">sent_tx</span>.<span class="ident">created</span>))<span class="question-mark">?</span>;
@@ -1256,7 +1256,7 @@
         })
     }
 
-    <span class="kw">fn</span> <span class="ident">rewind_to_height</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>, <span class="ident">block_height</span>: <span class="ident">BlockHeight</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident"><span class="self">Self</span>::Error</span><span class="op">&gt;</span> {
+    <span class="kw">fn</span> <span class="ident">rewind_to_height</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>, <span class="ident">block_height</span>: <span class="ident">BlockHeight</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident"><span class="self">Self</span>::Error</span><span class="op">&gt;</span> {
         <span class="ident">wallet::rewind_to_height</span>(<span class="self">self</span>.<span class="ident">wallet_db</span>, <span class="ident">block_height</span>)
     }
 }
@@ -1266,7 +1266,7 @@
 
 <span class="kw">impl</span> <span class="ident">BlockDb</span> {
     <span class="doccomment">/// Opens a connection to the wallet database stored at the specified path.</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">for_path</span><span class="op">&lt;</span><span class="ident">P</span>: <span class="ident">AsRef</span><span class="op">&lt;</span><span class="ident">Path</span><span class="op">&gt;</span><span class="op">&gt;</span>(<span class="ident">path</span>: <span class="ident">P</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="self">Self</span>, <span class="ident">rusqlite::Error</span><span class="op">&gt;</span> {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">for_path</span><span class="op">&lt;</span><span class="ident">P</span>: <span class="ident">AsRef</span><span class="op">&lt;</span><span class="ident">Path</span><span class="op">&gt;</span><span class="op">&gt;</span>(<span class="ident">path</span>: <span class="ident">P</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="self">Self</span>, <span class="ident">rusqlite::Error</span><span class="op">&gt;</span> {
         <span class="ident">Connection::open</span>(<span class="ident">path</span>).<span class="ident">map</span>(<span class="ident">BlockDb</span>)
     }
 }
@@ -1279,9 +1279,9 @@
         <span class="ident">from_height</span>: <span class="ident">BlockHeight</span>,
         <span class="ident">limit</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">u32</span><span class="op">&gt;</span>,
         <span class="ident">with_row</span>: <span class="ident">F</span>,
-    ) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident"><span class="self">Self</span>::Error</span><span class="op">&gt;</span>
+    ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident"><span class="self">Self</span>::Error</span><span class="op">&gt;</span>
     <span class="kw">where</span>
-        <span class="ident">F</span>: <span class="ident">FnMut</span>(<span class="ident">CompactBlock</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident"><span class="self">Self</span>::Error</span><span class="op">&gt;</span>,
+        <span class="ident">F</span>: <span class="ident">FnMut</span>(<span class="ident">CompactBlock</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident"><span class="self">Self</span>::Error</span><span class="op">&gt;</span>,
     {
         <span class="ident">chain::with_blocks</span>(<span class="self">self</span>, <span class="ident">from_height</span>, <span class="ident">limit</span>, <span class="ident">with_row</span>)
     }
@@ -1290,8 +1290,8 @@
 <span class="kw">fn</span> <span class="ident">address_from_extfvk</span><span class="op">&lt;</span><span class="ident">P</span>: <span class="ident">consensus::Parameters</span><span class="op">&gt;</span>(
     <span class="ident">params</span>: <span class="kw-2">&amp;</span><span class="ident">P</span>,
     <span class="ident">extfvk</span>: <span class="kw-2">&amp;</span><span class="ident">ExtendedFullViewingKey</span>,
-) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">String</span> {
-    <span class="kw">let</span> <span class="ident">addr</span> <span class="op">=</span> <span class="ident">extfvk</span>.<span class="ident">default_address</span>().<span class="ident">unwrap</span>().<span class="number">1</span>;
+) -&gt; <span class="ident">String</span> {
+    <span class="kw">let</span> <span class="ident">addr</span> <span class="op">=</span> <span class="ident">extfvk</span>.<span class="ident">default_address</span>().<span class="number">1</span>;
     <span class="ident">encode_payment_address</span>(<span class="ident">params</span>.<span class="ident">hrp_sapling_payment_address</span>(), <span class="kw-2">&amp;</span><span class="ident">addr</span>)
 }
 
@@ -1322,24 +1322,24 @@
     <span class="kw">use</span> <span class="ident"><span class="kw">super</span>::BlockDb</span>;
 
     <span class="attribute">#[<span class="ident">cfg</span>(<span class="ident">feature</span> <span class="op">=</span> <span class="string">&quot;mainnet&quot;</span>)]</span>
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">network</span>() <span class="op">-</span><span class="op">&gt;</span> <span class="ident">Network</span> {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">network</span>() -&gt; <span class="ident">Network</span> {
         <span class="ident">Network::MainNetwork</span>
     }
 
     <span class="attribute">#[<span class="ident">cfg</span>(<span class="ident">not</span>(<span class="ident">feature</span> <span class="op">=</span> <span class="string">&quot;mainnet&quot;</span>))]</span>
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">network</span>() <span class="op">-</span><span class="op">&gt;</span> <span class="ident">Network</span> {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">network</span>() -&gt; <span class="ident">Network</span> {
         <span class="ident">Network::TestNetwork</span>
     }
 
     <span class="attribute">#[<span class="ident">cfg</span>(<span class="ident">feature</span> <span class="op">=</span> <span class="string">&quot;mainnet&quot;</span>)]</span>
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">sapling_activation_height</span>() <span class="op">-</span><span class="op">&gt;</span> <span class="ident">BlockHeight</span> {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">sapling_activation_height</span>() -&gt; <span class="ident">BlockHeight</span> {
         <span class="ident">Network::MainNetwork</span>
             .<span class="ident">activation_height</span>(<span class="ident">NetworkUpgrade::Sapling</span>)
             .<span class="ident">unwrap</span>()
     }
 
     <span class="attribute">#[<span class="ident">cfg</span>(<span class="ident">not</span>(<span class="ident">feature</span> <span class="op">=</span> <span class="string">&quot;mainnet&quot;</span>))]</span>
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">sapling_activation_height</span>() <span class="op">-</span><span class="op">&gt;</span> <span class="ident">BlockHeight</span> {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">sapling_activation_height</span>() -&gt; <span class="ident">BlockHeight</span> {
         <span class="ident">Network::TestNetwork</span>
             .<span class="ident">activation_height</span>(<span class="ident">NetworkUpgrade::Sapling</span>)
             .<span class="ident">unwrap</span>()
@@ -1352,8 +1352,8 @@
         <span class="ident">prev_hash</span>: <span class="ident">BlockHash</span>,
         <span class="ident">extfvk</span>: <span class="ident">ExtendedFullViewingKey</span>,
         <span class="ident">value</span>: <span class="ident">Amount</span>,
-    ) <span class="op">-</span><span class="op">&gt;</span> (<span class="ident">CompactBlock</span>, <span class="ident">Nullifier</span>) {
-        <span class="kw">let</span> <span class="ident">to</span> <span class="op">=</span> <span class="ident">extfvk</span>.<span class="ident">default_address</span>().<span class="ident">unwrap</span>().<span class="number">1</span>;
+    ) -&gt; (<span class="ident">CompactBlock</span>, <span class="ident">Nullifier</span>) {
+        <span class="kw">let</span> <span class="ident">to</span> <span class="op">=</span> <span class="ident">extfvk</span>.<span class="ident">default_address</span>().<span class="number">1</span>;
 
         <span class="comment">// Create a fake Note for the account</span>
         <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">rng</span> <span class="op">=</span> <span class="ident">OsRng</span>;
@@ -1403,7 +1403,7 @@
         <span class="ident">extfvk</span>: <span class="ident">ExtendedFullViewingKey</span>,
         <span class="ident">to</span>: <span class="ident">PaymentAddress</span>,
         <span class="ident">value</span>: <span class="ident">Amount</span>,
-    ) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">CompactBlock</span> {
+    ) -&gt; <span class="ident">CompactBlock</span> {
         <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">rng</span> <span class="op">=</span> <span class="ident">OsRng</span>;
         <span class="kw">let</span> <span class="ident">rseed</span> <span class="op">=</span> <span class="ident">generate_random_rseed</span>(<span class="kw-2">&amp;</span><span class="ident">network</span>(), <span class="ident">height</span>, <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">rng</span>);
 
@@ -1444,7 +1444,7 @@
 
         <span class="comment">// Create a fake Note for the change</span>
         <span class="ident">ctx</span>.<span class="ident">outputs</span>.<span class="ident">push</span>({
-            <span class="kw">let</span> <span class="ident">change_addr</span> <span class="op">=</span> <span class="ident">extfvk</span>.<span class="ident">default_address</span>().<span class="ident">unwrap</span>().<span class="number">1</span>;
+            <span class="kw">let</span> <span class="ident">change_addr</span> <span class="op">=</span> <span class="ident">extfvk</span>.<span class="ident">default_address</span>().<span class="number">1</span>;
             <span class="kw">let</span> <span class="ident">rseed</span> <span class="op">=</span> <span class="ident">generate_random_rseed</span>(<span class="kw-2">&amp;</span><span class="ident">network</span>(), <span class="ident">height</span>, <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">rng</span>);
             <span class="kw">let</span> <span class="ident">note</span> <span class="op">=</span> <span class="ident">Note</span> {
                 <span class="ident">g_d</span>: <span class="ident">change_addr</span>.<span class="ident">diversifier</span>().<span class="ident">g_d</span>().<span class="ident">unwrap</span>(),

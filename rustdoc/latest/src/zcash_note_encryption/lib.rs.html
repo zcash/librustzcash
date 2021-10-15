@@ -645,13 +645,13 @@
 <span class="kw">pub</span> <span class="kw">struct</span> <span class="ident">OutgoingCipherKey</span>(<span class="kw">pub</span> [<span class="ident">u8</span>; <span class="number">32</span>]);
 
 <span class="kw">impl</span> <span class="ident">From</span><span class="op">&lt;</span>[<span class="ident">u8</span>; <span class="number">32</span>]<span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">OutgoingCipherKey</span> {
-    <span class="kw">fn</span> <span class="ident">from</span>(<span class="ident">ock</span>: [<span class="ident">u8</span>; <span class="number">32</span>]) <span class="op">-</span><span class="op">&gt;</span> <span class="self">Self</span> {
+    <span class="kw">fn</span> <span class="ident">from</span>(<span class="ident">ock</span>: [<span class="ident">u8</span>; <span class="number">32</span>]) -&gt; <span class="self">Self</span> {
         <span class="ident">OutgoingCipherKey</span>(<span class="ident">ock</span>)
     }
 }
 
 <span class="kw">impl</span> <span class="ident">AsRef</span><span class="op">&lt;</span>[<span class="ident">u8</span>]<span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">OutgoingCipherKey</span> {
-    <span class="kw">fn</span> <span class="ident">as_ref</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="kw-2">&amp;</span>[<span class="ident">u8</span>] {
+    <span class="kw">fn</span> <span class="ident">as_ref</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>[<span class="ident">u8</span>] {
         <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="number">0</span>
     }
 }
@@ -660,19 +660,19 @@
 <span class="kw">pub</span> <span class="kw">struct</span> <span class="ident">EphemeralKeyBytes</span>(<span class="kw">pub</span> [<span class="ident">u8</span>; <span class="number">32</span>]);
 
 <span class="kw">impl</span> <span class="ident">AsRef</span><span class="op">&lt;</span>[<span class="ident">u8</span>]<span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">EphemeralKeyBytes</span> {
-    <span class="kw">fn</span> <span class="ident">as_ref</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="kw-2">&amp;</span>[<span class="ident">u8</span>] {
+    <span class="kw">fn</span> <span class="ident">as_ref</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>[<span class="ident">u8</span>] {
         <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="number">0</span>
     }
 }
 
 <span class="kw">impl</span> <span class="ident">From</span><span class="op">&lt;</span>[<span class="ident">u8</span>; <span class="number">32</span>]<span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">EphemeralKeyBytes</span> {
-    <span class="kw">fn</span> <span class="ident">from</span>(<span class="ident">value</span>: [<span class="ident">u8</span>; <span class="number">32</span>]) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">EphemeralKeyBytes</span> {
+    <span class="kw">fn</span> <span class="ident">from</span>(<span class="ident">value</span>: [<span class="ident">u8</span>; <span class="number">32</span>]) -&gt; <span class="ident">EphemeralKeyBytes</span> {
         <span class="ident">EphemeralKeyBytes</span>(<span class="ident">value</span>)
     }
 }
 
 <span class="kw">impl</span> <span class="ident">ConstantTimeEq</span> <span class="kw">for</span> <span class="ident">EphemeralKeyBytes</span> {
-    <span class="kw">fn</span> <span class="ident">ct_eq</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">other</span>: <span class="kw-2">&amp;</span><span class="self">Self</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">Choice</span> {
+    <span class="kw">fn</span> <span class="ident">ct_eq</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">other</span>: <span class="kw-2">&amp;</span><span class="self">Self</span>) -&gt; <span class="ident">Choice</span> {
         <span class="self">self</span>.<span class="number">0</span>.<span class="ident">ct_eq</span>(<span class="kw-2">&amp;</span><span class="ident">other</span>.<span class="number">0</span>)
     }
 }
@@ -701,26 +701,26 @@
     <span class="kw">type</span> <span class="ident">ExtractedCommitmentBytes</span>: <span class="ident">Eq</span> <span class="op">+</span> <span class="kw">for</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> <span class="ident">From</span><span class="op">&lt;</span><span class="kw-2">&amp;</span><span class="lifetime">&#39;a</span> <span class="ident"><span class="self">Self</span>::ExtractedCommitment</span><span class="op">&gt;</span>;
     <span class="kw">type</span> <span class="ident">Memo</span>;
 
-    <span class="kw">fn</span> <span class="ident">derive_esk</span>(<span class="ident">note</span>: <span class="kw-2">&amp;</span><span class="ident"><span class="self">Self</span>::Note</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident"><span class="self">Self</span>::EphemeralSecretKey</span><span class="op">&gt;</span>;
+    <span class="kw">fn</span> <span class="ident">derive_esk</span>(<span class="ident">note</span>: <span class="kw-2">&amp;</span><span class="ident"><span class="self">Self</span>::Note</span>) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident"><span class="self">Self</span>::EphemeralSecretKey</span><span class="op">&gt;</span>;
 
-    <span class="kw">fn</span> <span class="ident">get_pk_d</span>(<span class="ident">note</span>: <span class="kw-2">&amp;</span><span class="ident"><span class="self">Self</span>::Note</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident"><span class="self">Self</span>::DiversifiedTransmissionKey</span>;
+    <span class="kw">fn</span> <span class="ident">get_pk_d</span>(<span class="ident">note</span>: <span class="kw-2">&amp;</span><span class="ident"><span class="self">Self</span>::Note</span>) -&gt; <span class="ident"><span class="self">Self</span>::DiversifiedTransmissionKey</span>;
 
     <span class="kw">fn</span> <span class="ident">ka_derive_public</span>(
         <span class="ident">note</span>: <span class="kw-2">&amp;</span><span class="ident"><span class="self">Self</span>::Note</span>,
         <span class="ident">esk</span>: <span class="kw-2">&amp;</span><span class="ident"><span class="self">Self</span>::EphemeralSecretKey</span>,
-    ) <span class="op">-</span><span class="op">&gt;</span> <span class="ident"><span class="self">Self</span>::EphemeralPublicKey</span>;
+    ) -&gt; <span class="ident"><span class="self">Self</span>::EphemeralPublicKey</span>;
 
     <span class="kw">fn</span> <span class="ident">ka_agree_enc</span>(
         <span class="ident">esk</span>: <span class="kw-2">&amp;</span><span class="ident"><span class="self">Self</span>::EphemeralSecretKey</span>,
         <span class="ident">pk_d</span>: <span class="kw-2">&amp;</span><span class="ident"><span class="self">Self</span>::DiversifiedTransmissionKey</span>,
-    ) <span class="op">-</span><span class="op">&gt;</span> <span class="ident"><span class="self">Self</span>::SharedSecret</span>;
+    ) -&gt; <span class="ident"><span class="self">Self</span>::SharedSecret</span>;
 
     <span class="kw">fn</span> <span class="ident">ka_agree_dec</span>(
         <span class="ident">ivk</span>: <span class="kw-2">&amp;</span><span class="ident"><span class="self">Self</span>::IncomingViewingKey</span>,
         <span class="ident">epk</span>: <span class="kw-2">&amp;</span><span class="ident"><span class="self">Self</span>::EphemeralPublicKey</span>,
-    ) <span class="op">-</span><span class="op">&gt;</span> <span class="ident"><span class="self">Self</span>::SharedSecret</span>;
+    ) -&gt; <span class="ident"><span class="self">Self</span>::SharedSecret</span>;
 
-    <span class="kw">fn</span> <span class="ident">kdf</span>(<span class="ident">secret</span>: <span class="ident"><span class="self">Self</span>::SharedSecret</span>, <span class="ident">ephemeral_key</span>: <span class="kw-2">&amp;</span><span class="ident">EphemeralKeyBytes</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident"><span class="self">Self</span>::SymmetricKey</span>;
+    <span class="kw">fn</span> <span class="ident">kdf</span>(<span class="ident">secret</span>: <span class="ident"><span class="self">Self</span>::SharedSecret</span>, <span class="ident">ephemeral_key</span>: <span class="kw-2">&amp;</span><span class="ident">EphemeralKeyBytes</span>) -&gt; <span class="ident"><span class="self">Self</span>::SymmetricKey</span>;
 
     <span class="doccomment">/// Computes `Self::kdf` on a batch of items.</span>
     <span class="doccomment">///</span>
@@ -728,7 +728,7 @@
     <span class="doccomment">/// that position.</span>
     <span class="kw">fn</span> <span class="ident">batch_kdf</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span>(
         <span class="ident">items</span>: <span class="kw">impl</span> <span class="ident">Iterator</span><span class="op">&lt;</span><span class="ident">Item</span> <span class="op">=</span> (<span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident"><span class="self">Self</span>::SharedSecret</span><span class="op">&gt;</span>, <span class="kw-2">&amp;</span><span class="lifetime">&#39;a</span> <span class="ident">EphemeralKeyBytes</span>)<span class="op">&gt;</span>,
-    ) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">Vec</span><span class="op">&lt;</span><span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident"><span class="self">Self</span>::SymmetricKey</span><span class="op">&gt;</span><span class="op">&gt;</span> {
+    ) -&gt; <span class="ident">Vec</span><span class="op">&lt;</span><span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident"><span class="self">Self</span>::SymmetricKey</span><span class="op">&gt;</span><span class="op">&gt;</span> {
         <span class="comment">// Default implementation: do the non-batched thing.</span>
         <span class="ident">items</span>
             .<span class="ident">map</span>(<span class="op">|</span>(<span class="ident">secret</span>, <span class="ident">ephemeral_key</span>)<span class="op">|</span> <span class="ident">secret</span>.<span class="ident">map</span>(<span class="op">|</span><span class="ident">secret</span><span class="op">|</span> <span class="ident"><span class="self">Self</span>::kdf</span>(<span class="ident">secret</span>, <span class="ident">ephemeral_key</span>)))
@@ -742,23 +742,23 @@
         <span class="ident">note</span>: <span class="kw-2">&amp;</span><span class="ident"><span class="self">Self</span>::Note</span>,
         <span class="ident">recipient</span>: <span class="kw-2">&amp;</span><span class="ident"><span class="self">Self</span>::Recipient</span>,
         <span class="ident">memo</span>: <span class="kw-2">&amp;</span><span class="ident"><span class="self">Self</span>::Memo</span>,
-    ) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">NotePlaintextBytes</span>;
+    ) -&gt; <span class="ident">NotePlaintextBytes</span>;
 
     <span class="kw">fn</span> <span class="ident">derive_ock</span>(
         <span class="ident">ovk</span>: <span class="kw-2">&amp;</span><span class="ident"><span class="self">Self</span>::OutgoingViewingKey</span>,
         <span class="ident">cv</span>: <span class="kw-2">&amp;</span><span class="ident"><span class="self">Self</span>::ValueCommitment</span>,
         <span class="ident">cmstar_bytes</span>: <span class="kw-2">&amp;</span><span class="ident"><span class="self">Self</span>::ExtractedCommitmentBytes</span>,
         <span class="ident">ephemeral_key</span>: <span class="kw-2">&amp;</span><span class="ident">EphemeralKeyBytes</span>,
-    ) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">OutgoingCipherKey</span>;
+    ) -&gt; <span class="ident">OutgoingCipherKey</span>;
 
     <span class="kw">fn</span> <span class="ident">outgoing_plaintext_bytes</span>(
         <span class="ident">note</span>: <span class="kw-2">&amp;</span><span class="ident"><span class="self">Self</span>::Note</span>,
         <span class="ident">esk</span>: <span class="kw-2">&amp;</span><span class="ident"><span class="self">Self</span>::EphemeralSecretKey</span>,
-    ) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">OutPlaintextBytes</span>;
+    ) -&gt; <span class="ident">OutPlaintextBytes</span>;
 
-    <span class="kw">fn</span> <span class="ident">epk_bytes</span>(<span class="ident">epk</span>: <span class="kw-2">&amp;</span><span class="ident"><span class="self">Self</span>::EphemeralPublicKey</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">EphemeralKeyBytes</span>;
+    <span class="kw">fn</span> <span class="ident">epk_bytes</span>(<span class="ident">epk</span>: <span class="kw-2">&amp;</span><span class="ident"><span class="self">Self</span>::EphemeralPublicKey</span>) -&gt; <span class="ident">EphemeralKeyBytes</span>;
 
-    <span class="kw">fn</span> <span class="ident">epk</span>(<span class="ident">ephemeral_key</span>: <span class="kw-2">&amp;</span><span class="ident">EphemeralKeyBytes</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident"><span class="self">Self</span>::EphemeralPublicKey</span><span class="op">&gt;</span>;
+    <span class="kw">fn</span> <span class="ident">epk</span>(<span class="ident">ephemeral_key</span>: <span class="kw-2">&amp;</span><span class="ident">EphemeralKeyBytes</span>) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident"><span class="self">Self</span>::EphemeralPublicKey</span><span class="op">&gt;</span>;
 
     <span class="doccomment">/// Computes `Self::epk` on a batch of ephemeral keys.</span>
     <span class="doccomment">///</span>
@@ -769,25 +769,25 @@
     <span class="doccomment">/// them.</span>
     <span class="kw">fn</span> <span class="ident">batch_epk</span>(
         <span class="ident">ephemeral_keys</span>: <span class="kw">impl</span> <span class="ident">Iterator</span><span class="op">&lt;</span><span class="ident">Item</span> <span class="op">=</span> <span class="ident">EphemeralKeyBytes</span><span class="op">&gt;</span>,
-    ) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">Vec</span><span class="op">&lt;</span>(<span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident"><span class="self">Self</span>::EphemeralPublicKey</span><span class="op">&gt;</span>, <span class="ident">EphemeralKeyBytes</span>)<span class="op">&gt;</span> {
+    ) -&gt; <span class="ident">Vec</span><span class="op">&lt;</span>(<span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident"><span class="self">Self</span>::EphemeralPublicKey</span><span class="op">&gt;</span>, <span class="ident">EphemeralKeyBytes</span>)<span class="op">&gt;</span> {
         <span class="comment">// Default implementation: do the non-batched thing.</span>
         <span class="ident">ephemeral_keys</span>
             .<span class="ident">map</span>(<span class="op">|</span><span class="ident">ephemeral_key</span><span class="op">|</span> (<span class="ident"><span class="self">Self</span>::epk</span>(<span class="kw-2">&amp;</span><span class="ident">ephemeral_key</span>), <span class="ident">ephemeral_key</span>))
             .<span class="ident">collect</span>()
     }
 
-    <span class="kw">fn</span> <span class="ident">check_epk_bytes</span><span class="op">&lt;</span><span class="ident">F</span>: <span class="ident">Fn</span>(<span class="kw-2">&amp;</span><span class="ident"><span class="self">Self</span>::EphemeralSecretKey</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">NoteValidity</span><span class="op">&gt;</span>(
+    <span class="kw">fn</span> <span class="ident">check_epk_bytes</span><span class="op">&lt;</span><span class="ident">F</span>: <span class="ident">Fn</span>(<span class="kw-2">&amp;</span><span class="ident"><span class="self">Self</span>::EphemeralSecretKey</span>) -&gt; <span class="ident">NoteValidity</span><span class="op">&gt;</span>(
         <span class="ident">note</span>: <span class="kw-2">&amp;</span><span class="ident"><span class="self">Self</span>::Note</span>,
         <span class="ident">check</span>: <span class="ident">F</span>,
-    ) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">NoteValidity</span>;
+    ) -&gt; <span class="ident">NoteValidity</span>;
 
-    <span class="kw">fn</span> <span class="ident">cmstar</span>(<span class="ident">note</span>: <span class="kw-2">&amp;</span><span class="ident"><span class="self">Self</span>::Note</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident"><span class="self">Self</span>::ExtractedCommitment</span>;
+    <span class="kw">fn</span> <span class="ident">cmstar</span>(<span class="ident">note</span>: <span class="kw-2">&amp;</span><span class="ident"><span class="self">Self</span>::Note</span>) -&gt; <span class="ident"><span class="self">Self</span>::ExtractedCommitment</span>;
 
     <span class="kw">fn</span> <span class="ident">parse_note_plaintext_without_memo_ivk</span>(
         <span class="kw-2">&amp;</span><span class="self">self</span>,
         <span class="ident">ivk</span>: <span class="kw-2">&amp;</span><span class="ident"><span class="self">Self</span>::IncomingViewingKey</span>,
         <span class="ident">plaintext</span>: <span class="kw-2">&amp;</span>[<span class="ident">u8</span>],
-    ) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Option</span><span class="op">&lt;</span>(<span class="ident"><span class="self">Self</span>::Note</span>, <span class="ident"><span class="self">Self</span>::Recipient</span>)<span class="op">&gt;</span>;
+    ) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span>(<span class="ident"><span class="self">Self</span>::Note</span>, <span class="ident"><span class="self">Self</span>::Recipient</span>)<span class="op">&gt;</span>;
 
     <span class="kw">fn</span> <span class="ident">parse_note_plaintext_without_memo_ovk</span>(
         <span class="kw-2">&amp;</span><span class="self">self</span>,
@@ -795,24 +795,24 @@
         <span class="ident">esk</span>: <span class="kw-2">&amp;</span><span class="ident"><span class="self">Self</span>::EphemeralSecretKey</span>,
         <span class="ident">ephemeral_key</span>: <span class="kw-2">&amp;</span><span class="ident">EphemeralKeyBytes</span>,
         <span class="ident">plaintext</span>: <span class="kw-2">&amp;</span>[<span class="ident">u8</span>],
-    ) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Option</span><span class="op">&lt;</span>(<span class="ident"><span class="self">Self</span>::Note</span>, <span class="ident"><span class="self">Self</span>::Recipient</span>)<span class="op">&gt;</span>;
+    ) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span>(<span class="ident"><span class="self">Self</span>::Note</span>, <span class="ident"><span class="self">Self</span>::Recipient</span>)<span class="op">&gt;</span>;
 
     <span class="comment">// &amp;self is passed here in anticipation of future changes</span>
     <span class="comment">// to memo handling where the memos may no longer be</span>
     <span class="comment">// part of the note plaintext.</span>
-    <span class="kw">fn</span> <span class="ident">extract_memo</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">plaintext</span>: <span class="kw-2">&amp;</span>[<span class="ident">u8</span>]) <span class="op">-</span><span class="op">&gt;</span> <span class="ident"><span class="self">Self</span>::Memo</span>;
+    <span class="kw">fn</span> <span class="ident">extract_memo</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">plaintext</span>: <span class="kw-2">&amp;</span>[<span class="ident">u8</span>]) -&gt; <span class="ident"><span class="self">Self</span>::Memo</span>;
 
     <span class="kw">fn</span> <span class="ident">extract_pk_d</span>(
         <span class="ident">out_plaintext</span>: <span class="kw-2">&amp;</span>[<span class="ident">u8</span>; <span class="ident">OUT_PLAINTEXT_SIZE</span>],
-    ) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident"><span class="self">Self</span>::DiversifiedTransmissionKey</span><span class="op">&gt;</span>;
+    ) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident"><span class="self">Self</span>::DiversifiedTransmissionKey</span><span class="op">&gt;</span>;
 
-    <span class="kw">fn</span> <span class="ident">extract_esk</span>(<span class="ident">out_plaintext</span>: <span class="kw-2">&amp;</span>[<span class="ident">u8</span>; <span class="ident">OUT_PLAINTEXT_SIZE</span>]) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident"><span class="self">Self</span>::EphemeralSecretKey</span><span class="op">&gt;</span>;
+    <span class="kw">fn</span> <span class="ident">extract_esk</span>(<span class="ident">out_plaintext</span>: <span class="kw-2">&amp;</span>[<span class="ident">u8</span>; <span class="ident">OUT_PLAINTEXT_SIZE</span>]) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident"><span class="self">Self</span>::EphemeralSecretKey</span><span class="op">&gt;</span>;
 }
 
 <span class="kw">pub</span> <span class="kw">trait</span> <span class="ident">ShieldedOutput</span><span class="op">&lt;</span><span class="ident">D</span>: <span class="ident">Domain</span><span class="op">&gt;</span> {
-    <span class="kw">fn</span> <span class="ident">ephemeral_key</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">EphemeralKeyBytes</span>;
-    <span class="kw">fn</span> <span class="ident">cmstar_bytes</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">D::ExtractedCommitmentBytes</span>;
-    <span class="kw">fn</span> <span class="ident">enc_ciphertext</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="kw-2">&amp;</span>[<span class="ident">u8</span>];
+    <span class="kw">fn</span> <span class="ident">ephemeral_key</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">EphemeralKeyBytes</span>;
+    <span class="kw">fn</span> <span class="ident">cmstar_bytes</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">D::ExtractedCommitmentBytes</span>;
+    <span class="kw">fn</span> <span class="ident">enc_ciphertext</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>[<span class="ident">u8</span>];
 }
 
 <span class="doccomment">/// A struct containing context required for encrypting Sapling and Orchard notes.</span>
@@ -885,7 +885,7 @@
         <span class="ident">note</span>: <span class="ident">D::Note</span>,
         <span class="ident">to</span>: <span class="ident">D::Recipient</span>,
         <span class="ident">memo</span>: <span class="ident">D::Memo</span>,
-    ) <span class="op">-</span><span class="op">&gt;</span> <span class="self">Self</span> {
+    ) -&gt; <span class="self">Self</span> {
         <span class="kw">let</span> <span class="ident">esk</span> <span class="op">=</span> <span class="ident">D::derive_esk</span>(<span class="kw-2">&amp;</span><span class="ident">note</span>).<span class="ident">expect</span>(<span class="string">&quot;ZIP 212 is active.&quot;</span>);
         <span class="ident"><span class="self">Self</span>::new_with_esk</span>(<span class="ident">esk</span>, <span class="ident">ovk</span>, <span class="ident">note</span>, <span class="ident">to</span>, <span class="ident">memo</span>)
     }
@@ -899,7 +899,7 @@
         <span class="ident">note</span>: <span class="ident">D::Note</span>,
         <span class="ident">to</span>: <span class="ident">D::Recipient</span>,
         <span class="ident">memo</span>: <span class="ident">D::Memo</span>,
-    ) <span class="op">-</span><span class="op">&gt;</span> <span class="self">Self</span> {
+    ) -&gt; <span class="self">Self</span> {
         <span class="ident">NoteEncryption</span> {
             <span class="ident">epk</span>: <span class="ident">D::ka_derive_public</span>(<span class="kw-2">&amp;</span><span class="ident">note</span>, <span class="kw-2">&amp;</span><span class="ident">esk</span>),
             <span class="ident">esk</span>,
@@ -911,17 +911,17 @@
     }
 
     <span class="doccomment">/// Exposes the ephemeral secret key being used to encrypt this note.</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">esk</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="kw-2">&amp;</span><span class="ident">D::EphemeralSecretKey</span> {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">esk</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span><span class="ident">D::EphemeralSecretKey</span> {
         <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">esk</span>
     }
 
     <span class="doccomment">/// Exposes the encoding of the ephemeral public key being used to encrypt this note.</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">epk</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="kw-2">&amp;</span><span class="ident">D::EphemeralPublicKey</span> {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">epk</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span><span class="ident">D::EphemeralPublicKey</span> {
         <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">epk</span>
     }
 
     <span class="doccomment">/// Generates `encCiphertext` for this note.</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">encrypt_note_plaintext</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) <span class="op">-</span><span class="op">&gt;</span> [<span class="ident">u8</span>; <span class="ident">ENC_CIPHERTEXT_SIZE</span>] {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">encrypt_note_plaintext</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; [<span class="ident">u8</span>; <span class="ident">ENC_CIPHERTEXT_SIZE</span>] {
         <span class="kw">let</span> <span class="ident">pk_d</span> <span class="op">=</span> <span class="ident">D::get_pk_d</span>(<span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">note</span>);
         <span class="kw">let</span> <span class="ident">shared_secret</span> <span class="op">=</span> <span class="ident">D::ka_agree_enc</span>(<span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">esk</span>, <span class="kw-2">&amp;</span><span class="ident">pk_d</span>);
         <span class="kw">let</span> <span class="ident">key</span> <span class="op">=</span> <span class="ident">D::kdf</span>(<span class="ident">shared_secret</span>, <span class="kw-2">&amp;</span><span class="ident">D::epk_bytes</span>(<span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">epk</span>));
@@ -947,7 +947,7 @@
         <span class="ident">cv</span>: <span class="kw-2">&amp;</span><span class="ident">D::ValueCommitment</span>,
         <span class="ident">cmstar</span>: <span class="kw-2">&amp;</span><span class="ident">D::ExtractedCommitment</span>,
         <span class="ident">rng</span>: <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">R</span>,
-    ) <span class="op">-</span><span class="op">&gt;</span> [<span class="ident">u8</span>; <span class="ident">OUT_CIPHERTEXT_SIZE</span>] {
+    ) -&gt; [<span class="ident">u8</span>; <span class="ident">OUT_CIPHERTEXT_SIZE</span>] {
         <span class="kw">let</span> (<span class="ident">ock</span>, <span class="ident">input</span>) <span class="op">=</span> <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">ovk</span>) <span class="op">=</span> <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">ovk</span> {
             <span class="kw">let</span> <span class="ident">ock</span> <span class="op">=</span> <span class="ident">D::derive_ock</span>(<span class="ident">ovk</span>, <span class="kw-2">&amp;</span><span class="ident">cv</span>, <span class="kw-2">&amp;</span><span class="ident">cmstar</span>.<span class="ident">into</span>(), <span class="kw-2">&amp;</span><span class="ident">D::epk_bytes</span>(<span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">epk</span>));
             <span class="kw">let</span> <span class="ident">input</span> <span class="op">=</span> <span class="ident">D::outgoing_plaintext_bytes</span>(<span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">note</span>, <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">esk</span>);
@@ -987,7 +987,7 @@
     <span class="ident">domain</span>: <span class="kw-2">&amp;</span><span class="ident">D</span>,
     <span class="ident">ivk</span>: <span class="kw-2">&amp;</span><span class="ident">D::IncomingViewingKey</span>,
     <span class="ident">output</span>: <span class="kw-2">&amp;</span><span class="ident">Output</span>,
-) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Option</span><span class="op">&lt;</span>(<span class="ident">D::Note</span>, <span class="ident">D::Recipient</span>, <span class="ident">D::Memo</span>)<span class="op">&gt;</span> {
+) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span>(<span class="ident">D::Note</span>, <span class="ident">D::Recipient</span>, <span class="ident">D::Memo</span>)<span class="op">&gt;</span> {
     <span class="kw">let</span> <span class="ident">ephemeral_key</span> <span class="op">=</span> <span class="ident">output</span>.<span class="ident">ephemeral_key</span>();
 
     <span class="kw">let</span> <span class="ident">epk</span> <span class="op">=</span> <span class="ident">D::epk</span>(<span class="kw-2">&amp;</span><span class="ident">ephemeral_key</span>)<span class="question-mark">?</span>;
@@ -1003,7 +1003,7 @@
     <span class="ident">ephemeral_key</span>: <span class="kw-2">&amp;</span><span class="ident">EphemeralKeyBytes</span>,
     <span class="ident">output</span>: <span class="kw-2">&amp;</span><span class="ident">Output</span>,
     <span class="ident">key</span>: <span class="ident">D::SymmetricKey</span>,
-) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Option</span><span class="op">&lt;</span>(<span class="ident">D::Note</span>, <span class="ident">D::Recipient</span>, <span class="ident">D::Memo</span>)<span class="op">&gt;</span> {
+) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span>(<span class="ident">D::Note</span>, <span class="ident">D::Recipient</span>, <span class="ident">D::Memo</span>)<span class="op">&gt;</span> {
     <span class="kw">let</span> <span class="ident">enc_ciphertext</span> <span class="op">=</span> <span class="ident">output</span>.<span class="ident">enc_ciphertext</span>();
     <span class="macro">assert_eq!</span>(<span class="ident">enc_ciphertext</span>.<span class="ident">len</span>(), <span class="ident">ENC_CIPHERTEXT_SIZE</span>);
 
@@ -1037,7 +1037,7 @@
     <span class="ident">ephemeral_key</span>: <span class="kw-2">&amp;</span><span class="ident">EphemeralKeyBytes</span>,
     <span class="ident">cmstar_bytes</span>: <span class="kw-2">&amp;</span><span class="ident">D::ExtractedCommitmentBytes</span>,
     <span class="ident">plaintext</span>: <span class="kw-2">&amp;</span>[<span class="ident">u8</span>],
-) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Option</span><span class="op">&lt;</span>(<span class="ident">D::Note</span>, <span class="ident">D::Recipient</span>)<span class="op">&gt;</span> {
+) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span>(<span class="ident">D::Note</span>, <span class="ident">D::Recipient</span>)<span class="op">&gt;</span> {
     <span class="kw">let</span> (<span class="ident">note</span>, <span class="ident">to</span>) <span class="op">=</span> <span class="ident">domain</span>.<span class="ident">parse_note_plaintext_without_memo_ivk</span>(<span class="ident">ivk</span>, <span class="kw-2">&amp;</span><span class="ident">plaintext</span>)<span class="question-mark">?</span>;
 
     <span class="kw">if</span> <span class="kw">let</span> <span class="ident">NoteValidity::Valid</span> <span class="op">=</span> <span class="ident">check_note_validity</span>::<span class="op">&lt;</span><span class="ident">D</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="ident">note</span>, <span class="ident">ephemeral_key</span>, <span class="ident">cmstar_bytes</span>) {
@@ -1051,8 +1051,8 @@
     <span class="ident">note</span>: <span class="kw-2">&amp;</span><span class="ident">D::Note</span>,
     <span class="ident">ephemeral_key</span>: <span class="kw-2">&amp;</span><span class="ident">EphemeralKeyBytes</span>,
     <span class="ident">cmstar_bytes</span>: <span class="kw-2">&amp;</span><span class="ident">D::ExtractedCommitmentBytes</span>,
-) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">NoteValidity</span> {
-    <span class="kw">if</span> <span class="kw-2">&amp;</span><span class="ident">D::ExtractedCommitmentBytes::from</span>(<span class="kw-2">&amp;</span><span class="ident">D::cmstar</span>(<span class="kw-2">&amp;</span><span class="ident">note</span>)) <span class="op">=</span><span class="op">=</span> <span class="ident">cmstar_bytes</span> {
+) -&gt; <span class="ident">NoteValidity</span> {
+    <span class="kw">if</span> <span class="kw-2">&amp;</span><span class="ident">D::ExtractedCommitmentBytes::from</span>(<span class="kw-2">&amp;</span><span class="ident">D::cmstar</span>(<span class="kw-2">&amp;</span><span class="ident">note</span>)) <span class="op">==</span> <span class="ident">cmstar_bytes</span> {
         <span class="ident">D::check_epk_bytes</span>(<span class="kw-2">&amp;</span><span class="ident">note</span>, <span class="op">|</span><span class="ident">derived_esk</span><span class="op">|</span> {
             <span class="kw">if</span> <span class="ident">D::epk_bytes</span>(<span class="kw-2">&amp;</span><span class="ident">D::ka_derive_public</span>(<span class="kw-2">&amp;</span><span class="ident">note</span>, <span class="kw-2">&amp;</span><span class="ident">derived_esk</span>))
                 .<span class="ident">ct_eq</span>(<span class="kw-2">&amp;</span><span class="ident">ephemeral_key</span>)
@@ -1082,7 +1082,7 @@
     <span class="ident">domain</span>: <span class="kw-2">&amp;</span><span class="ident">D</span>,
     <span class="ident">ivk</span>: <span class="kw-2">&amp;</span><span class="ident">D::IncomingViewingKey</span>,
     <span class="ident">output</span>: <span class="kw-2">&amp;</span><span class="ident">Output</span>,
-) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Option</span><span class="op">&lt;</span>(<span class="ident">D::Note</span>, <span class="ident">D::Recipient</span>)<span class="op">&gt;</span> {
+) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span>(<span class="ident">D::Note</span>, <span class="ident">D::Recipient</span>)<span class="op">&gt;</span> {
     <span class="kw">let</span> <span class="ident">ephemeral_key</span> <span class="op">=</span> <span class="ident">output</span>.<span class="ident">ephemeral_key</span>();
 
     <span class="kw">let</span> <span class="ident">epk</span> <span class="op">=</span> <span class="ident">D::epk</span>(<span class="kw-2">&amp;</span><span class="ident">ephemeral_key</span>)<span class="question-mark">?</span>;
@@ -1098,7 +1098,7 @@
     <span class="ident">ephemeral_key</span>: <span class="kw-2">&amp;</span><span class="ident">EphemeralKeyBytes</span>,
     <span class="ident">output</span>: <span class="kw-2">&amp;</span><span class="ident">Output</span>,
     <span class="ident">key</span>: <span class="ident">D::SymmetricKey</span>,
-) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Option</span><span class="op">&lt;</span>(<span class="ident">D::Note</span>, <span class="ident">D::Recipient</span>)<span class="op">&gt;</span> {
+) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span>(<span class="ident">D::Note</span>, <span class="ident">D::Recipient</span>)<span class="op">&gt;</span> {
     <span class="macro">assert_eq!</span>(<span class="ident">output</span>.<span class="ident">enc_ciphertext</span>().<span class="ident">len</span>(), <span class="ident">COMPACT_NOTE_SIZE</span>);
 
     <span class="comment">// Start from block 1 to skip over Poly1305 keying output</span>
@@ -1132,7 +1132,7 @@
     <span class="ident">output</span>: <span class="kw-2">&amp;</span><span class="ident">Output</span>,
     <span class="ident">cv</span>: <span class="kw-2">&amp;</span><span class="ident">D::ValueCommitment</span>,
     <span class="ident">out_ciphertext</span>: <span class="kw-2">&amp;</span>[<span class="ident">u8</span>],
-) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Option</span><span class="op">&lt;</span>(<span class="ident">D::Note</span>, <span class="ident">D::Recipient</span>, <span class="ident">D::Memo</span>)<span class="op">&gt;</span> {
+) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span>(<span class="ident">D::Note</span>, <span class="ident">D::Recipient</span>, <span class="ident">D::Memo</span>)<span class="op">&gt;</span> {
     <span class="kw">let</span> <span class="ident">ock</span> <span class="op">=</span> <span class="ident">D::derive_ock</span>(<span class="ident">ovk</span>, <span class="kw-2">&amp;</span><span class="ident">cv</span>, <span class="kw-2">&amp;</span><span class="ident">output</span>.<span class="ident">cmstar_bytes</span>(), <span class="kw-2">&amp;</span><span class="ident">output</span>.<span class="ident">ephemeral_key</span>());
     <span class="ident">try_output_recovery_with_ock</span>(<span class="ident">domain</span>, <span class="kw-2">&amp;</span><span class="ident">ock</span>, <span class="ident">output</span>, <span class="ident">out_ciphertext</span>)
 }
@@ -1151,7 +1151,7 @@
     <span class="ident">ock</span>: <span class="kw-2">&amp;</span><span class="ident">OutgoingCipherKey</span>,
     <span class="ident">output</span>: <span class="kw-2">&amp;</span><span class="ident">Output</span>,
     <span class="ident">out_ciphertext</span>: <span class="kw-2">&amp;</span>[<span class="ident">u8</span>],
-) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Option</span><span class="op">&lt;</span>(<span class="ident">D::Note</span>, <span class="ident">D::Recipient</span>, <span class="ident">D::Memo</span>)<span class="op">&gt;</span> {
+) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span>(<span class="ident">D::Note</span>, <span class="ident">D::Recipient</span>, <span class="ident">D::Memo</span>)<span class="op">&gt;</span> {
     <span class="kw">let</span> <span class="ident">enc_ciphertext</span> <span class="op">=</span> <span class="ident">output</span>.<span class="ident">enc_ciphertext</span>();
     <span class="macro">assert_eq!</span>(<span class="ident">enc_ciphertext</span>.<span class="ident">len</span>(), <span class="ident">ENC_CIPHERTEXT_SIZE</span>);
     <span class="macro">assert_eq!</span>(<span class="ident">out_ciphertext</span>.<span class="ident">len</span>(), <span class="ident">OUT_CIPHERTEXT_SIZE</span>);

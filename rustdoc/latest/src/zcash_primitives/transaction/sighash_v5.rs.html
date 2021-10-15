@@ -211,7 +211,7 @@
 <span class="attribute">#[<span class="ident">cfg</span>(<span class="ident">feature</span> <span class="op">=</span> <span class="string">&quot;zfuture&quot;</span>)]</span>
 <span class="kw">const</span> <span class="ident">ZCASH_TZE_INPUT_HASH_PERSONALIZATION</span>: <span class="kw-2">&amp;</span>[<span class="ident">u8</span>; <span class="number">16</span>] <span class="op">=</span> <span class="string">b&quot;Zcash__TzeInHash&quot;</span>;
 
-<span class="kw">fn</span> <span class="ident">hasher</span>(<span class="ident">personal</span>: <span class="kw-2">&amp;</span>[<span class="ident">u8</span>; <span class="number">16</span>]) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">State</span> {
+<span class="kw">fn</span> <span class="ident">hasher</span>(<span class="ident">personal</span>: <span class="kw-2">&amp;</span>[<span class="ident">u8</span>; <span class="number">16</span>]) -&gt; <span class="ident">State</span> {
     <span class="ident">Params::new</span>().<span class="ident">hash_length</span>(<span class="number">32</span>).<span class="ident">personal</span>(<span class="ident">personal</span>).<span class="ident">to_state</span>()
 }
 
@@ -220,10 +220,10 @@
     <span class="ident">input</span>: <span class="kw-2">&amp;</span><span class="ident">TransparentInput</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span>,
     <span class="ident">txid_digests</span>: <span class="kw-2">&amp;</span><span class="ident">TransparentDigests</span><span class="op">&lt;</span><span class="ident">Blake2bHash</span><span class="op">&gt;</span>,
     <span class="ident">hash_type</span>: <span class="ident">u32</span>,
-) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">TransparentDigests</span><span class="op">&lt;</span><span class="ident">Blake2bHash</span><span class="op">&gt;</span> {
+) -&gt; <span class="ident">TransparentDigests</span><span class="op">&lt;</span><span class="ident">Blake2bHash</span><span class="op">&gt;</span> {
     <span class="kw">let</span> <span class="ident">flag_anyonecanpay</span> <span class="op">=</span> <span class="ident">hash_type</span> <span class="op">&amp;</span> <span class="ident">SIGHASH_ANYONECANPAY</span> <span class="op">!</span><span class="op">=</span> <span class="number">0</span>;
-    <span class="kw">let</span> <span class="ident">flag_single</span> <span class="op">=</span> <span class="ident">hash_type</span> <span class="op">&amp;</span> <span class="ident">SIGHASH_MASK</span> <span class="op">=</span><span class="op">=</span> <span class="ident">SIGHASH_SINGLE</span>;
-    <span class="kw">let</span> <span class="ident">flag_none</span> <span class="op">=</span> <span class="ident">hash_type</span> <span class="op">&amp;</span> <span class="ident">SIGHASH_MASK</span> <span class="op">=</span><span class="op">=</span> <span class="ident">SIGHASH_NONE</span>;
+    <span class="kw">let</span> <span class="ident">flag_single</span> <span class="op">=</span> <span class="ident">hash_type</span> <span class="op">&amp;</span> <span class="ident">SIGHASH_MASK</span> <span class="op">==</span> <span class="ident">SIGHASH_SINGLE</span>;
+    <span class="kw">let</span> <span class="ident">flag_none</span> <span class="op">=</span> <span class="ident">hash_type</span> <span class="op">&amp;</span> <span class="ident">SIGHASH_MASK</span> <span class="op">==</span> <span class="ident">SIGHASH_NONE</span>;
 
     <span class="kw">let</span> <span class="ident">prevout_digest</span> <span class="op">=</span> <span class="kw">if</span> <span class="ident">flag_anyonecanpay</span> {
         <span class="ident">transparent_prevout_hash</span>::<span class="op">&lt;</span><span class="ident">A</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span>[])
@@ -275,7 +275,7 @@
     <span class="ident">bundle</span>: <span class="kw-2">&amp;</span><span class="ident">tze::Bundle</span><span class="op">&lt;</span><span class="ident">A</span><span class="op">&gt;</span>,
     <span class="ident">input</span>: <span class="kw-2">&amp;</span><span class="ident">TzeInput</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span>,
     <span class="ident">txid_digests</span>: <span class="kw-2">&amp;</span><span class="ident">TzeDigests</span><span class="op">&lt;</span><span class="ident">Blake2bHash</span><span class="op">&gt;</span>,
-) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">TzeDigests</span><span class="op">&lt;</span><span class="ident">Blake2bHash</span><span class="op">&gt;</span> {
+) -&gt; <span class="ident">TzeDigests</span><span class="op">&lt;</span><span class="ident">Blake2bHash</span><span class="op">&gt;</span> {
     <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">ch</span> <span class="op">=</span> <span class="ident">hasher</span>(<span class="ident">ZCASH_TZE_INPUT_HASH_PERSONALIZATION</span>);
     <span class="kw">let</span> <span class="ident">tzein</span> <span class="op">=</span> <span class="kw-2">&amp;</span><span class="ident">bundle</span>.<span class="ident">vin</span>[<span class="ident">input</span>.<span class="ident">index</span>()];
     <span class="ident">tzein</span>.<span class="ident">prevout</span>.<span class="ident">write</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">ch</span>).<span class="ident">unwrap</span>();
@@ -304,9 +304,9 @@
     <span class="ident">hash_type</span>: <span class="ident">u32</span>,
     <span class="ident">signable_input</span>: <span class="kw-2">&amp;</span><span class="ident">SignableInput</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span>,
     <span class="ident">txid_parts</span>: <span class="kw-2">&amp;</span><span class="ident">TxDigests</span><span class="op">&lt;</span><span class="ident">Blake2bHash</span><span class="op">&gt;</span>,
-) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">Blake2bHash</span> {
+) -&gt; <span class="ident">Blake2bHash</span> {
     <span class="kw">match</span> <span class="ident">signable_input</span> {
-        <span class="ident">SignableInput::Shielded</span> <span class="op">=</span><span class="op">&gt;</span> <span class="ident">to_hash</span>(
+        <span class="ident">SignableInput::Shielded</span> =&gt; <span class="ident">to_hash</span>(
             <span class="ident">tx</span>.<span class="ident">version</span>,
             <span class="ident">tx</span>.<span class="ident">consensus_branch_id</span>,
             <span class="ident">txid_parts</span>.<span class="ident">header_digest</span>,
@@ -316,7 +316,7 @@
             <span class="attribute">#[<span class="ident">cfg</span>(<span class="ident">feature</span> <span class="op">=</span> <span class="string">&quot;zfuture&quot;</span>)]</span>
             <span class="ident">txid_parts</span>.<span class="ident">tze_digests</span>.<span class="ident">as_ref</span>(),
         ),
-        <span class="ident">SignableInput::Transparent</span>(<span class="ident">input</span>) <span class="op">=</span><span class="op">&gt;</span> {
+        <span class="ident">SignableInput::Transparent</span>(<span class="ident">input</span>) =&gt; {
             <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>((<span class="ident">bundle</span>, <span class="ident">txid_digests</span>)) <span class="op">=</span> <span class="ident">tx</span>
                 .<span class="ident">transparent_bundle</span>
                 .<span class="ident">as_ref</span>()
@@ -342,7 +342,7 @@
             }
         }
         <span class="attribute">#[<span class="ident">cfg</span>(<span class="ident">feature</span> <span class="op">=</span> <span class="string">&quot;zfuture&quot;</span>)]</span>
-        <span class="ident">SignableInput::Tze</span>(<span class="ident">input</span>) <span class="op">=</span><span class="op">&gt;</span> {
+        <span class="ident">SignableInput::Tze</span>(<span class="ident">input</span>) =&gt; {
             <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>((<span class="ident">bundle</span>, <span class="ident">txid_digests</span>)) <span class="op">=</span>
                 <span class="ident">tx</span>.<span class="ident">tze_bundle</span>.<span class="ident">as_ref</span>().<span class="ident">zip</span>(<span class="ident">txid_parts</span>.<span class="ident">tze_digests</span>.<span class="ident">as_ref</span>())
             {

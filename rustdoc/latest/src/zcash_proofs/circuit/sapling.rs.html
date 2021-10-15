@@ -1014,7 +1014,7 @@
 <span class="kw">fn</span> <span class="ident">expose_value_commitment</span><span class="op">&lt;</span><span class="ident">CS</span><span class="op">&gt;</span>(
     <span class="kw-2">mut</span> <span class="ident">cs</span>: <span class="ident">CS</span>,
     <span class="ident">value_commitment</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">ValueCommitment</span><span class="op">&gt;</span>,
-) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">boolean::Boolean</span><span class="op">&gt;</span>, <span class="ident">SynthesisError</span><span class="op">&gt;</span>
+) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">boolean::Boolean</span><span class="op">&gt;</span>, <span class="ident">SynthesisError</span><span class="op">&gt;</span>
 <span class="kw">where</span>
     <span class="ident">CS</span>: <span class="ident">ConstraintSystem</span><span class="op">&lt;</span><span class="ident">bls12_381::Scalar</span><span class="op">&gt;</span>,
 {
@@ -1059,7 +1059,7 @@
     <span class="kw">fn</span> <span class="ident">synthesize</span><span class="op">&lt;</span><span class="ident">CS</span>: <span class="ident">ConstraintSystem</span><span class="op">&lt;</span><span class="ident">bls12_381::Scalar</span><span class="op">&gt;</span><span class="op">&gt;</span>(
         <span class="self">self</span>,
         <span class="ident">cs</span>: <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">CS</span>,
-    ) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident">SynthesisError</span><span class="op">&gt;</span> {
+    ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident">SynthesisError</span><span class="op">&gt;</span> {
         <span class="comment">// Prover witnesses ak (ensures that it&#39;s on the curve)</span>
         <span class="kw">let</span> <span class="ident">ak</span> <span class="op">=</span> <span class="ident">ecc::EdwardsPoint::witness</span>(
             <span class="ident">cs</span>.<span class="ident">namespace</span>(<span class="op">|</span><span class="op">|</span> <span class="string">&quot;ak&quot;</span>),
@@ -1335,7 +1335,7 @@
     <span class="kw">fn</span> <span class="ident">synthesize</span><span class="op">&lt;</span><span class="ident">CS</span>: <span class="ident">ConstraintSystem</span><span class="op">&lt;</span><span class="ident">bls12_381::Scalar</span><span class="op">&gt;</span><span class="op">&gt;</span>(
         <span class="self">self</span>,
         <span class="ident">cs</span>: <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">CS</span>,
-    ) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident">SynthesisError</span><span class="op">&gt;</span> {
+    ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident">SynthesisError</span><span class="op">&gt;</span> {
         <span class="comment">// Let&#39;s start to construct our note, which contains</span>
         <span class="comment">// value (big endian)</span>
         <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">note_contents</span> <span class="op">=</span> <span class="macro">vec!</span>[];

@@ -264,7 +264,7 @@
 
 <span class="doccomment">/// Creates the 3-bit window table `[0, 1, ..., 8]` for different magnitudes of a fixed</span>
 <span class="doccomment">/// generator.</span>
-<span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">generate_circuit_generator</span>(<span class="kw-2">mut</span> <span class="ident">gen</span>: <span class="ident">jubjub::SubgroupPoint</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">FixedGeneratorOwned</span> {
+<span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">generate_circuit_generator</span>(<span class="kw-2">mut</span> <span class="ident">gen</span>: <span class="ident">jubjub::SubgroupPoint</span>) -&gt; <span class="ident">FixedGeneratorOwned</span> {
     <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">windows</span> <span class="op">=</span> <span class="macro">vec!</span>[];
 
     <span class="kw">for</span> <span class="kw">_</span> <span class="kw">in</span> <span class="number">0</span>..<span class="ident">FIXED_BASE_CHUNKS_PER_GENERATOR</span> {
@@ -287,11 +287,11 @@
 <span class="doccomment">/// Returns the coordinates of this point&#39;s Montgomery curve representation, or `None` if</span>
 <span class="doccomment">/// it is the point at infinity.</span>
 <span class="attribute">#[<span class="ident">allow</span>(<span class="ident">clippy::many_single_char_names</span>)]</span>
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">to_montgomery_coords</span>(<span class="ident">g</span>: <span class="ident">ExtendedPoint</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Option</span><span class="op">&lt;</span>(<span class="ident">Scalar</span>, <span class="ident">Scalar</span>)<span class="op">&gt;</span> {
+<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">to_montgomery_coords</span>(<span class="ident">g</span>: <span class="ident">ExtendedPoint</span>) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span>(<span class="ident">Scalar</span>, <span class="ident">Scalar</span>)<span class="op">&gt;</span> {
     <span class="kw">let</span> <span class="ident">g</span> <span class="op">=</span> <span class="ident">g</span>.<span class="ident">to_affine</span>();
     <span class="kw">let</span> (<span class="ident">x</span>, <span class="ident">y</span>) <span class="op">=</span> (<span class="ident">g</span>.<span class="ident">get_u</span>(), <span class="ident">g</span>.<span class="ident">get_v</span>());
 
-    <span class="kw">if</span> <span class="ident">y</span> <span class="op">=</span><span class="op">=</span> <span class="ident">Scalar::one</span>() {
+    <span class="kw">if</span> <span class="ident">y</span> <span class="op">==</span> <span class="ident">Scalar::one</span>() {
         <span class="comment">// The only solution for y = 1 is x = 0. (0, 1) is the neutral element, so we map</span>
         <span class="comment">// this to the point at infinity.</span>
         <span class="prelude-val">None</span>
@@ -329,7 +329,7 @@
 
 <span class="doccomment">/// Creates the 2-bit window table lookups for each 4-bit &quot;chunk&quot; in each segment of the</span>
 <span class="doccomment">/// Pedersen hash.</span>
-<span class="kw">fn</span> <span class="ident">generate_pedersen_circuit_generators</span>() <span class="op">-</span><span class="op">&gt;</span> <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span>(<span class="ident">Scalar</span>, <span class="ident">Scalar</span>)<span class="op">&gt;</span><span class="op">&gt;</span><span class="op">&gt;</span> {
+<span class="kw">fn</span> <span class="ident">generate_pedersen_circuit_generators</span>() -&gt; <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span>(<span class="ident">Scalar</span>, <span class="ident">Scalar</span>)<span class="op">&gt;</span><span class="op">&gt;</span><span class="op">&gt;</span> {
     <span class="comment">// Process each segment</span>
     <span class="ident">PEDERSEN_HASH_GENERATORS</span>
         .<span class="ident">iter</span>()

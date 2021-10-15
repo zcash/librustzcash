@@ -561,7 +561,7 @@
 }
 
 <span class="kw">impl</span><span class="op">&lt;</span><span class="ident">A</span>: <span class="ident">Authorization</span><span class="op">&gt;</span> <span class="ident">std::fmt::Debug</span> <span class="kw">for</span> <span class="ident">SpendDescription</span><span class="op">&lt;</span><span class="ident">A</span><span class="op">&gt;</span> {
-    <span class="kw">fn</span> <span class="ident">fmt</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">f</span>: <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">std::fmt::Formatter</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident">std::fmt::Error</span><span class="op">&gt;</span> {
+    <span class="kw">fn</span> <span class="ident">fmt</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">f</span>: <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">std::fmt::Formatter</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident">std::fmt::Error</span><span class="op">&gt;</span> {
         <span class="macro">write!</span>(
             <span class="ident">f</span>,
             <span class="string">&quot;SpendDescription(cv = {:?}, anchor = {:?}, nullifier = {:?}, rk = {:?}, spend_auth_sig = {:?})&quot;</span>,
@@ -574,7 +574,7 @@
 <span class="doccomment">/// - Canonical encoding is enforced here.</span>
 <span class="doccomment">/// - &quot;Not small order&quot; is enforced in SaplingVerificationContext::(check_spend()/check_output())</span>
 <span class="doccomment">///   (located in zcash_proofs::sapling::verifier).</span>
-<span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">read_point</span><span class="op">&lt;</span><span class="ident">R</span>: <span class="ident">Read</span><span class="op">&gt;</span>(<span class="kw-2">mut</span> <span class="ident">reader</span>: <span class="ident">R</span>, <span class="ident">field</span>: <span class="kw-2">&amp;</span><span class="ident">str</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">io::Result</span><span class="op">&lt;</span><span class="ident">jubjub::ExtendedPoint</span><span class="op">&gt;</span> {
+<span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">read_point</span><span class="op">&lt;</span><span class="ident">R</span>: <span class="ident">Read</span><span class="op">&gt;</span>(<span class="kw-2">mut</span> <span class="ident">reader</span>: <span class="ident">R</span>, <span class="ident">field</span>: <span class="kw-2">&amp;</span><span class="ident">str</span>) -&gt; <span class="ident">io::Result</span><span class="op">&lt;</span><span class="ident">jubjub::ExtendedPoint</span><span class="op">&gt;</span> {
     <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">bytes</span> <span class="op">=</span> [<span class="number">0u8</span>; <span class="number">32</span>];
     <span class="ident">reader</span>.<span class="ident">read_exact</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">bytes</span>)<span class="question-mark">?</span>;
     <span class="kw">let</span> <span class="ident">point</span> <span class="op">=</span> <span class="ident">jubjub::ExtendedPoint::from_bytes</span>(<span class="kw-2">&amp;</span><span class="ident">bytes</span>);
@@ -591,7 +591,7 @@
 
 <span class="doccomment">/// Consensus rules (§7.3) &amp; (§7.4):</span>
 <span class="doccomment">/// - Canonical encoding is enforced here</span>
-<span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">read_base</span><span class="op">&lt;</span><span class="ident">R</span>: <span class="ident">Read</span><span class="op">&gt;</span>(<span class="kw-2">mut</span> <span class="ident">reader</span>: <span class="ident">R</span>, <span class="ident">field</span>: <span class="kw-2">&amp;</span><span class="ident">str</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">io::Result</span><span class="op">&lt;</span><span class="ident">bls12_381::Scalar</span><span class="op">&gt;</span> {
+<span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">read_base</span><span class="op">&lt;</span><span class="ident">R</span>: <span class="ident">Read</span><span class="op">&gt;</span>(<span class="kw-2">mut</span> <span class="ident">reader</span>: <span class="ident">R</span>, <span class="ident">field</span>: <span class="kw-2">&amp;</span><span class="ident">str</span>) -&gt; <span class="ident">io::Result</span><span class="op">&lt;</span><span class="ident">bls12_381::Scalar</span><span class="op">&gt;</span> {
     <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">f</span> <span class="op">=</span> [<span class="number">0u8</span>; <span class="number">32</span>];
     <span class="ident">reader</span>.<span class="ident">read_exact</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">f</span>)<span class="question-mark">?</span>;
     <span class="ident">Option::from</span>(<span class="ident">bls12_381::Scalar::from_repr</span>(<span class="ident">f</span>)).<span class="ident">ok_or_else</span>(<span class="op">|</span><span class="op">|</span> {
@@ -608,14 +608,14 @@
 <span class="doccomment">///   bellman::groth16::Proof.</span>
 <span class="doccomment">/// - Proof validity is enforced in SaplingVerificationContext::check_spend()</span>
 <span class="doccomment">///   and SaplingVerificationContext::check_output()</span>
-<span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">read_zkproof</span><span class="op">&lt;</span><span class="ident">R</span>: <span class="ident">Read</span><span class="op">&gt;</span>(<span class="kw-2">mut</span> <span class="ident">reader</span>: <span class="ident">R</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">io::Result</span><span class="op">&lt;</span><span class="ident">GrothProofBytes</span><span class="op">&gt;</span> {
+<span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">read_zkproof</span><span class="op">&lt;</span><span class="ident">R</span>: <span class="ident">Read</span><span class="op">&gt;</span>(<span class="kw-2">mut</span> <span class="ident">reader</span>: <span class="ident">R</span>) -&gt; <span class="ident">io::Result</span><span class="op">&lt;</span><span class="ident">GrothProofBytes</span><span class="op">&gt;</span> {
     <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">zkproof</span> <span class="op">=</span> [<span class="number">0u8</span>; <span class="ident">GROTH_PROOF_SIZE</span>];
     <span class="ident">reader</span>.<span class="ident">read_exact</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">zkproof</span>)<span class="question-mark">?</span>;
     <span class="prelude-val">Ok</span>(<span class="ident">zkproof</span>)
 }
 
 <span class="kw">impl</span> <span class="ident">SpendDescription</span><span class="op">&lt;</span><span class="ident">Authorized</span><span class="op">&gt;</span> {
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">read_nullifier</span><span class="op">&lt;</span><span class="ident">R</span>: <span class="ident">Read</span><span class="op">&gt;</span>(<span class="kw-2">mut</span> <span class="ident">reader</span>: <span class="ident">R</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">io::Result</span><span class="op">&lt;</span><span class="ident">Nullifier</span><span class="op">&gt;</span> {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">read_nullifier</span><span class="op">&lt;</span><span class="ident">R</span>: <span class="ident">Read</span><span class="op">&gt;</span>(<span class="kw-2">mut</span> <span class="ident">reader</span>: <span class="ident">R</span>) -&gt; <span class="ident">io::Result</span><span class="op">&lt;</span><span class="ident">Nullifier</span><span class="op">&gt;</span> {
         <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">nullifier</span> <span class="op">=</span> <span class="ident">Nullifier</span>([<span class="number">0u8</span>; <span class="number">32</span>]);
         <span class="ident">reader</span>.<span class="ident">read_exact</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">nullifier</span>.<span class="number">0</span>)<span class="question-mark">?</span>;
         <span class="prelude-val">Ok</span>(<span class="ident">nullifier</span>)
@@ -624,18 +624,18 @@
     <span class="doccomment">/// Consensus rules (§4.4):</span>
     <span class="doccomment">/// - Canonical encoding is enforced here.</span>
     <span class="doccomment">/// - &quot;Not small order&quot; is enforced in SaplingVerificationContext::check_spend()</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">read_rk</span><span class="op">&lt;</span><span class="ident">R</span>: <span class="ident">Read</span><span class="op">&gt;</span>(<span class="kw-2">mut</span> <span class="ident">reader</span>: <span class="ident">R</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">io::Result</span><span class="op">&lt;</span><span class="ident">PublicKey</span><span class="op">&gt;</span> {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">read_rk</span><span class="op">&lt;</span><span class="ident">R</span>: <span class="ident">Read</span><span class="op">&gt;</span>(<span class="kw-2">mut</span> <span class="ident">reader</span>: <span class="ident">R</span>) -&gt; <span class="ident">io::Result</span><span class="op">&lt;</span><span class="ident">PublicKey</span><span class="op">&gt;</span> {
         <span class="ident">PublicKey::read</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">reader</span>)
     }
 
     <span class="doccomment">/// Consensus rules (§4.4):</span>
     <span class="doccomment">/// - Canonical encoding is enforced here.</span>
     <span class="doccomment">/// - Signature validity is enforced in SaplingVerificationContext::check_spend()</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">read_spend_auth_sig</span><span class="op">&lt;</span><span class="ident">R</span>: <span class="ident">Read</span><span class="op">&gt;</span>(<span class="kw-2">mut</span> <span class="ident">reader</span>: <span class="ident">R</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">io::Result</span><span class="op">&lt;</span><span class="ident">Signature</span><span class="op">&gt;</span> {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">read_spend_auth_sig</span><span class="op">&lt;</span><span class="ident">R</span>: <span class="ident">Read</span><span class="op">&gt;</span>(<span class="kw-2">mut</span> <span class="ident">reader</span>: <span class="ident">R</span>) -&gt; <span class="ident">io::Result</span><span class="op">&lt;</span><span class="ident">Signature</span><span class="op">&gt;</span> {
         <span class="ident">Signature::read</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">reader</span>)
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">read</span><span class="op">&lt;</span><span class="ident">R</span>: <span class="ident">Read</span><span class="op">&gt;</span>(<span class="kw-2">mut</span> <span class="ident">reader</span>: <span class="ident">R</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">io::Result</span><span class="op">&lt;</span><span class="self">Self</span><span class="op">&gt;</span> {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">read</span><span class="op">&lt;</span><span class="ident">R</span>: <span class="ident">Read</span><span class="op">&gt;</span>(<span class="kw-2">mut</span> <span class="ident">reader</span>: <span class="ident">R</span>) -&gt; <span class="ident">io::Result</span><span class="op">&lt;</span><span class="self">Self</span><span class="op">&gt;</span> {
         <span class="comment">// Consensus rules (§4.4) &amp; (§4.5):</span>
         <span class="comment">// - Canonical encoding is enforced here.</span>
         <span class="comment">// - &quot;Not small order&quot; is enforced in SaplingVerificationContext::(check_spend()/check_output())</span>
@@ -659,7 +659,7 @@
         })
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">write_v4</span><span class="op">&lt;</span><span class="ident">W</span>: <span class="ident">Write</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="kw-2">mut</span> <span class="ident">writer</span>: <span class="ident">W</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">io::Result</span><span class="op">&lt;</span>()<span class="op">&gt;</span> {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">write_v4</span><span class="op">&lt;</span><span class="ident">W</span>: <span class="ident">Write</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="kw-2">mut</span> <span class="ident">writer</span>: <span class="ident">W</span>) -&gt; <span class="ident">io::Result</span><span class="op">&lt;</span>()<span class="op">&gt;</span> {
         <span class="ident">writer</span>.<span class="ident">write_all</span>(<span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">cv</span>.<span class="ident">to_bytes</span>())<span class="question-mark">?</span>;
         <span class="ident">writer</span>.<span class="ident">write_all</span>(<span class="self">self</span>.<span class="ident">anchor</span>.<span class="ident">to_repr</span>().<span class="ident">as_ref</span>())<span class="question-mark">?</span>;
         <span class="ident">writer</span>.<span class="ident">write_all</span>(<span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">nullifier</span>.<span class="number">0</span>)<span class="question-mark">?</span>;
@@ -668,7 +668,7 @@
         <span class="self">self</span>.<span class="ident">spend_auth_sig</span>.<span class="ident">write</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">writer</span>)
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">write_v5_without_witness_data</span><span class="op">&lt;</span><span class="ident">W</span>: <span class="ident">Write</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="kw-2">mut</span> <span class="ident">writer</span>: <span class="ident">W</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">io::Result</span><span class="op">&lt;</span>()<span class="op">&gt;</span> {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">write_v5_without_witness_data</span><span class="op">&lt;</span><span class="ident">W</span>: <span class="ident">Write</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="kw-2">mut</span> <span class="ident">writer</span>: <span class="ident">W</span>) -&gt; <span class="ident">io::Result</span><span class="op">&lt;</span>()<span class="op">&gt;</span> {
         <span class="ident">writer</span>.<span class="ident">write_all</span>(<span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">cv</span>.<span class="ident">to_bytes</span>())<span class="question-mark">?</span>;
         <span class="ident">writer</span>.<span class="ident">write_all</span>(<span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">nullifier</span>.<span class="number">0</span>)<span class="question-mark">?</span>;
         <span class="self">self</span>.<span class="ident">rk</span>.<span class="ident">write</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">writer</span>)
@@ -683,7 +683,7 @@
 }
 
 <span class="kw">impl</span> <span class="ident">SpendDescriptionV5</span> {
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">read</span><span class="op">&lt;</span><span class="ident">R</span>: <span class="ident">Read</span><span class="op">&gt;</span>(<span class="kw-2">mut</span> <span class="ident">reader</span>: <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">R</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">io::Result</span><span class="op">&lt;</span><span class="self">Self</span><span class="op">&gt;</span> {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">read</span><span class="op">&lt;</span><span class="ident">R</span>: <span class="ident">Read</span><span class="op">&gt;</span>(<span class="kw-2">mut</span> <span class="ident">reader</span>: <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">R</span>) -&gt; <span class="ident">io::Result</span><span class="op">&lt;</span><span class="self">Self</span><span class="op">&gt;</span> {
         <span class="kw">let</span> <span class="ident">cv</span> <span class="op">=</span> <span class="ident">read_point</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">reader</span>, <span class="string">&quot;cv&quot;</span>)<span class="question-mark">?</span>;
         <span class="kw">let</span> <span class="ident">nullifier</span> <span class="op">=</span> <span class="ident">SpendDescription::read_nullifier</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">reader</span>)<span class="question-mark">?</span>;
         <span class="kw">let</span> <span class="ident">rk</span> <span class="op">=</span> <span class="ident">SpendDescription::read_rk</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">reader</span>)<span class="question-mark">?</span>;
@@ -696,7 +696,7 @@
         <span class="ident">anchor</span>: <span class="ident">bls12_381::Scalar</span>,
         <span class="ident">zkproof</span>: <span class="ident">GrothProofBytes</span>,
         <span class="ident">spend_auth_sig</span>: <span class="ident">Signature</span>,
-    ) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">SpendDescription</span><span class="op">&lt;</span><span class="ident">Authorized</span><span class="op">&gt;</span> {
+    ) -&gt; <span class="ident">SpendDescription</span><span class="op">&lt;</span><span class="ident">Authorized</span><span class="op">&gt;</span> {
         <span class="ident">SpendDescription</span> {
             <span class="ident">cv</span>: <span class="self">self</span>.<span class="ident">cv</span>,
             <span class="ident">anchor</span>,
@@ -719,21 +719,21 @@
 }
 
 <span class="kw">impl</span><span class="op">&lt;</span><span class="ident">P</span>: <span class="ident">consensus::Parameters</span>, <span class="ident">A</span><span class="op">&gt;</span> <span class="ident">ShieldedOutput</span><span class="op">&lt;</span><span class="ident">SaplingDomain</span><span class="op">&lt;</span><span class="ident">P</span><span class="op">&gt;</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">OutputDescription</span><span class="op">&lt;</span><span class="ident">A</span><span class="op">&gt;</span> {
-    <span class="kw">fn</span> <span class="ident">ephemeral_key</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">EphemeralKeyBytes</span> {
+    <span class="kw">fn</span> <span class="ident">ephemeral_key</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">EphemeralKeyBytes</span> {
         <span class="self">self</span>.<span class="ident">ephemeral_key</span>.<span class="ident">clone</span>()
     }
 
-    <span class="kw">fn</span> <span class="ident">cmstar_bytes</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) <span class="op">-</span><span class="op">&gt;</span> [<span class="ident">u8</span>; <span class="number">32</span>] {
+    <span class="kw">fn</span> <span class="ident">cmstar_bytes</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; [<span class="ident">u8</span>; <span class="number">32</span>] {
         <span class="self">self</span>.<span class="ident">cmu</span>.<span class="ident">to_repr</span>()
     }
 
-    <span class="kw">fn</span> <span class="ident">enc_ciphertext</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="kw-2">&amp;</span>[<span class="ident">u8</span>] {
+    <span class="kw">fn</span> <span class="ident">enc_ciphertext</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>[<span class="ident">u8</span>] {
         <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">enc_ciphertext</span>
     }
 }
 
 <span class="kw">impl</span><span class="op">&lt;</span><span class="ident">A</span><span class="op">&gt;</span> <span class="ident">std::fmt::Debug</span> <span class="kw">for</span> <span class="ident">OutputDescription</span><span class="op">&lt;</span><span class="ident">A</span><span class="op">&gt;</span> {
-    <span class="kw">fn</span> <span class="ident">fmt</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">f</span>: <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">std::fmt::Formatter</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident">std::fmt::Error</span><span class="op">&gt;</span> {
+    <span class="kw">fn</span> <span class="ident">fmt</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">f</span>: <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">std::fmt::Formatter</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident">std::fmt::Error</span><span class="op">&gt;</span> {
         <span class="macro">write!</span>(
             <span class="ident">f</span>,
             <span class="string">&quot;OutputDescription(cv = {:?}, cmu = {:?}, ephemeral_key = {:?})&quot;</span>,
@@ -743,7 +743,7 @@
 }
 
 <span class="kw">impl</span> <span class="ident">OutputDescription</span><span class="op">&lt;</span><span class="ident">GrothProofBytes</span><span class="op">&gt;</span> {
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">read</span><span class="op">&lt;</span><span class="ident">R</span>: <span class="ident">Read</span><span class="op">&gt;</span>(<span class="kw-2">mut</span> <span class="ident">reader</span>: <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">R</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">io::Result</span><span class="op">&lt;</span><span class="self">Self</span><span class="op">&gt;</span> {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">read</span><span class="op">&lt;</span><span class="ident">R</span>: <span class="ident">Read</span><span class="op">&gt;</span>(<span class="kw-2">mut</span> <span class="ident">reader</span>: <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">R</span>) -&gt; <span class="ident">io::Result</span><span class="op">&lt;</span><span class="self">Self</span><span class="op">&gt;</span> {
         <span class="comment">// Consensus rules (§4.5):</span>
         <span class="comment">// - Canonical encoding is enforced here.</span>
         <span class="comment">// - &quot;Not small order&quot; is enforced in SaplingVerificationContext::check_output()</span>
@@ -776,7 +776,7 @@
         })
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">write_v4</span><span class="op">&lt;</span><span class="ident">W</span>: <span class="ident">Write</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="kw-2">mut</span> <span class="ident">writer</span>: <span class="ident">W</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">io::Result</span><span class="op">&lt;</span>()<span class="op">&gt;</span> {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">write_v4</span><span class="op">&lt;</span><span class="ident">W</span>: <span class="ident">Write</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="kw-2">mut</span> <span class="ident">writer</span>: <span class="ident">W</span>) -&gt; <span class="ident">io::Result</span><span class="op">&lt;</span>()<span class="op">&gt;</span> {
         <span class="ident">writer</span>.<span class="ident">write_all</span>(<span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">cv</span>.<span class="ident">to_bytes</span>())<span class="question-mark">?</span>;
         <span class="ident">writer</span>.<span class="ident">write_all</span>(<span class="self">self</span>.<span class="ident">cmu</span>.<span class="ident">to_repr</span>().<span class="ident">as_ref</span>())<span class="question-mark">?</span>;
         <span class="ident">writer</span>.<span class="ident">write_all</span>(<span class="self">self</span>.<span class="ident">ephemeral_key</span>.<span class="ident">as_ref</span>())<span class="question-mark">?</span>;
@@ -785,7 +785,7 @@
         <span class="ident">writer</span>.<span class="ident">write_all</span>(<span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">zkproof</span>)
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">write_v5_without_proof</span><span class="op">&lt;</span><span class="ident">W</span>: <span class="ident">Write</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="kw-2">mut</span> <span class="ident">writer</span>: <span class="ident">W</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">io::Result</span><span class="op">&lt;</span>()<span class="op">&gt;</span> {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">write_v5_without_proof</span><span class="op">&lt;</span><span class="ident">W</span>: <span class="ident">Write</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="kw-2">mut</span> <span class="ident">writer</span>: <span class="ident">W</span>) -&gt; <span class="ident">io::Result</span><span class="op">&lt;</span>()<span class="op">&gt;</span> {
         <span class="ident">writer</span>.<span class="ident">write_all</span>(<span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">cv</span>.<span class="ident">to_bytes</span>())<span class="question-mark">?</span>;
         <span class="ident">writer</span>.<span class="ident">write_all</span>(<span class="self">self</span>.<span class="ident">cmu</span>.<span class="ident">to_repr</span>().<span class="ident">as_ref</span>())<span class="question-mark">?</span>;
         <span class="ident">writer</span>.<span class="ident">write_all</span>(<span class="self">self</span>.<span class="ident">ephemeral_key</span>.<span class="ident">as_ref</span>())<span class="question-mark">?</span>;
@@ -804,7 +804,7 @@
 }
 
 <span class="kw">impl</span> <span class="ident">OutputDescriptionV5</span> {
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">read</span><span class="op">&lt;</span><span class="ident">R</span>: <span class="ident">Read</span><span class="op">&gt;</span>(<span class="kw-2">mut</span> <span class="ident">reader</span>: <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">R</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">io::Result</span><span class="op">&lt;</span><span class="self">Self</span><span class="op">&gt;</span> {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">read</span><span class="op">&lt;</span><span class="ident">R</span>: <span class="ident">Read</span><span class="op">&gt;</span>(<span class="kw-2">mut</span> <span class="ident">reader</span>: <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">R</span>) -&gt; <span class="ident">io::Result</span><span class="op">&lt;</span><span class="self">Self</span><span class="op">&gt;</span> {
         <span class="kw">let</span> <span class="ident">cv</span> <span class="op">=</span> <span class="ident">read_point</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">reader</span>, <span class="string">&quot;cv&quot;</span>)<span class="question-mark">?</span>;
         <span class="kw">let</span> <span class="ident">cmu</span> <span class="op">=</span> <span class="ident">read_base</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">reader</span>, <span class="string">&quot;cmu&quot;</span>)<span class="question-mark">?</span>;
 
@@ -831,7 +831,7 @@
     <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">into_output_description</span>(
         <span class="self">self</span>,
         <span class="ident">zkproof</span>: <span class="ident">GrothProofBytes</span>,
-    ) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">OutputDescription</span><span class="op">&lt;</span><span class="ident">GrothProofBytes</span><span class="op">&gt;</span> {
+    ) -&gt; <span class="ident">OutputDescription</span><span class="op">&lt;</span><span class="ident">GrothProofBytes</span><span class="op">&gt;</span> {
         <span class="ident">OutputDescription</span> {
             <span class="ident">cv</span>: <span class="self">self</span>.<span class="ident">cv</span>,
             <span class="ident">cmu</span>: <span class="self">self</span>.<span class="ident">cmu</span>,
@@ -850,7 +850,7 @@
 }
 
 <span class="kw">impl</span><span class="op">&lt;</span><span class="ident">A</span><span class="op">&gt;</span> <span class="ident">From</span><span class="op">&lt;</span><span class="ident">OutputDescription</span><span class="op">&lt;</span><span class="ident">A</span><span class="op">&gt;</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">CompactOutputDescription</span> {
-    <span class="kw">fn</span> <span class="ident">from</span>(<span class="ident">out</span>: <span class="ident">OutputDescription</span><span class="op">&lt;</span><span class="ident">A</span><span class="op">&gt;</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">CompactOutputDescription</span> {
+    <span class="kw">fn</span> <span class="ident">from</span>(<span class="ident">out</span>: <span class="ident">OutputDescription</span><span class="op">&lt;</span><span class="ident">A</span><span class="op">&gt;</span>) -&gt; <span class="ident">CompactOutputDescription</span> {
         <span class="ident">CompactOutputDescription</span> {
             <span class="ident">ephemeral_key</span>: <span class="ident">out</span>.<span class="ident">ephemeral_key</span>,
             <span class="ident">cmu</span>: <span class="ident">out</span>.<span class="ident">cmu</span>,
@@ -860,15 +860,15 @@
 }
 
 <span class="kw">impl</span><span class="op">&lt;</span><span class="ident">P</span>: <span class="ident">consensus::Parameters</span><span class="op">&gt;</span> <span class="ident">ShieldedOutput</span><span class="op">&lt;</span><span class="ident">SaplingDomain</span><span class="op">&lt;</span><span class="ident">P</span><span class="op">&gt;</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">CompactOutputDescription</span> {
-    <span class="kw">fn</span> <span class="ident">ephemeral_key</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">EphemeralKeyBytes</span> {
+    <span class="kw">fn</span> <span class="ident">ephemeral_key</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">EphemeralKeyBytes</span> {
         <span class="self">self</span>.<span class="ident">ephemeral_key</span>.<span class="ident">clone</span>()
     }
 
-    <span class="kw">fn</span> <span class="ident">cmstar_bytes</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) <span class="op">-</span><span class="op">&gt;</span> [<span class="ident">u8</span>; <span class="number">32</span>] {
+    <span class="kw">fn</span> <span class="ident">cmstar_bytes</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; [<span class="ident">u8</span>; <span class="number">32</span>] {
         <span class="self">self</span>.<span class="ident">cmu</span>.<span class="ident">to_repr</span>()
     }
 
-    <span class="kw">fn</span> <span class="ident">enc_ciphertext</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="kw-2">&amp;</span>[<span class="ident">u8</span>] {
+    <span class="kw">fn</span> <span class="ident">enc_ciphertext</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>[<span class="ident">u8</span>] {
         <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">enc_ciphertext</span>
     }
 }
@@ -897,7 +897,7 @@
     <span class="kw">use</span> <span class="kw">super</span>::{<span class="ident">Authorized</span>, <span class="ident">Bundle</span>, <span class="ident">GrothProofBytes</span>, <span class="ident">OutputDescription</span>, <span class="ident">SpendDescription</span>};
 
     <span class="macro">prop_compose!</span> {
-        <span class="kw">fn</span> <span class="ident">arb_extended_point</span>()(<span class="ident">rng_seed</span> <span class="kw">in</span> <span class="ident">prop::array::uniform32</span>(<span class="ident">any</span>::<span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span>())) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">jubjub::ExtendedPoint</span> {
+        <span class="kw">fn</span> <span class="ident">arb_extended_point</span>()(<span class="ident">rng_seed</span> <span class="kw">in</span> <span class="ident">prop::array::uniform32</span>(<span class="ident">any</span>::<span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span>())) -&gt; <span class="ident">jubjub::ExtendedPoint</span> {
             <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">rng</span> <span class="op">=</span> <span class="ident">StdRng::from_seed</span>(<span class="ident">rng_seed</span>);
             <span class="kw">let</span> <span class="ident">scalar</span> <span class="op">=</span> <span class="ident">jubjub::Scalar::random</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">rng</span>);
             <span class="ident">jubjub::ExtendedPoint::generator</span>() <span class="op">*</span> <span class="ident">scalar</span>
@@ -918,7 +918,7 @@
                 .<span class="ident">prop_map</span>(<span class="op">|</span><span class="ident">v</span><span class="op">|</span> <span class="op">&lt;</span>[<span class="ident">u8</span>;<span class="ident">GROTH_PROOF_SIZE</span>]<span class="op">&gt;</span><span class="ident">::try_from</span>(<span class="ident">v</span>.<span class="ident">as_slice</span>()).<span class="ident">unwrap</span>()),
             <span class="ident">rng_seed</span> <span class="kw">in</span> <span class="ident">prop::array::uniform32</span>(<span class="ident">prop::num::u8::ANY</span>),
             <span class="ident">fake_sighash_bytes</span> <span class="kw">in</span> <span class="ident">prop::array::uniform32</span>(<span class="ident">prop::num::u8::ANY</span>),
-        ) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">SpendDescription</span><span class="op">&lt;</span><span class="ident">Authorized</span><span class="op">&gt;</span> {
+        ) -&gt; <span class="ident">SpendDescription</span><span class="op">&lt;</span><span class="ident">Authorized</span><span class="op">&gt;</span> {
             <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">rng</span> <span class="op">=</span> <span class="ident">StdRng::from_seed</span>(<span class="ident">rng_seed</span>);
             <span class="kw">let</span> <span class="ident">sk1</span> <span class="op">=</span> <span class="ident">PrivateKey</span>(<span class="ident">jubjub::Fr::random</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">rng</span>));
             <span class="kw">let</span> <span class="ident">rk</span> <span class="op">=</span> <span class="ident">PublicKey::from_private</span>(<span class="kw-2">&amp;</span><span class="ident">sk1</span>, <span class="ident">SPENDING_KEY_GENERATOR</span>);
@@ -948,7 +948,7 @@
                 .<span class="ident">prop_map</span>(<span class="op">|</span><span class="ident">v</span><span class="op">|</span> <span class="op">&lt;</span>[<span class="ident">u8</span>;<span class="number">80</span>]<span class="op">&gt;</span><span class="ident">::try_from</span>(<span class="ident">v</span>.<span class="ident">as_slice</span>()).<span class="ident">unwrap</span>()),
             <span class="ident">zkproof</span> <span class="kw">in</span> <span class="ident">vec</span>(<span class="ident">any</span>::<span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span>(), <span class="ident">GROTH_PROOF_SIZE</span>)
                 .<span class="ident">prop_map</span>(<span class="op">|</span><span class="ident">v</span><span class="op">|</span> <span class="op">&lt;</span>[<span class="ident">u8</span>;<span class="ident">GROTH_PROOF_SIZE</span>]<span class="op">&gt;</span><span class="ident">::try_from</span>(<span class="ident">v</span>.<span class="ident">as_slice</span>()).<span class="ident">unwrap</span>()),
-        ) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">OutputDescription</span><span class="op">&lt;</span><span class="ident">GrothProofBytes</span><span class="op">&gt;</span> {
+        ) -&gt; <span class="ident">OutputDescription</span><span class="op">&lt;</span><span class="ident">GrothProofBytes</span><span class="op">&gt;</span> {
             <span class="ident">OutputDescription</span> {
                 <span class="ident">cv</span>,
                 <span class="ident">cmu</span>,
@@ -967,7 +967,7 @@
             <span class="ident">value_balance</span> <span class="kw">in</span> <span class="ident">arb_amount</span>(),
             <span class="ident">rng_seed</span> <span class="kw">in</span> <span class="ident">prop::array::uniform32</span>(<span class="ident">prop::num::u8::ANY</span>),
             <span class="ident">fake_bvk_bytes</span> <span class="kw">in</span> <span class="ident">prop::array::uniform32</span>(<span class="ident">prop::num::u8::ANY</span>),
-        ) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">Bundle</span><span class="op">&lt;</span><span class="ident">Authorized</span><span class="op">&gt;</span><span class="op">&gt;</span> {
+        ) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">Bundle</span><span class="op">&lt;</span><span class="ident">Authorized</span><span class="op">&gt;</span><span class="op">&gt;</span> {
             <span class="kw">if</span> <span class="ident">shielded_spends</span>.<span class="ident">is_empty</span>() <span class="op">&amp;&amp;</span> <span class="ident">shielded_outputs</span>.<span class="ident">is_empty</span>() {
                 <span class="prelude-val">None</span>
             } <span class="kw">else</span> {
@@ -988,7 +988,7 @@
 
     <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">arb_bundle_for_version</span>(
         <span class="ident">v</span>: <span class="ident">TxVersion</span>,
-    ) <span class="op">-</span><span class="op">&gt;</span> <span class="kw">impl</span> <span class="ident">Strategy</span><span class="op">&lt;</span><span class="ident">Value</span> <span class="op">=</span> <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">Bundle</span><span class="op">&lt;</span><span class="ident">Authorized</span><span class="op">&gt;</span><span class="op">&gt;</span><span class="op">&gt;</span> {
+    ) -&gt; <span class="kw">impl</span> <span class="ident">Strategy</span><span class="op">&lt;</span><span class="ident">Value</span> <span class="op">=</span> <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">Bundle</span><span class="op">&lt;</span><span class="ident">Authorized</span><span class="op">&gt;</span><span class="op">&gt;</span><span class="op">&gt;</span> {
         <span class="kw">if</span> <span class="ident">v</span>.<span class="ident">has_sapling</span>() {
             <span class="ident">Strategy::boxed</span>(<span class="ident">arb_bundle</span>())
         } <span class="kw">else</span> {

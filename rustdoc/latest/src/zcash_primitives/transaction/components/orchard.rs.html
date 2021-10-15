@@ -312,7 +312,7 @@
 <span class="doccomment">/// Reads an [`orchard::Bundle`] from a v5 transaction format.</span>
 <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">read_v5_bundle</span><span class="op">&lt;</span><span class="ident">R</span>: <span class="ident">Read</span><span class="op">&gt;</span>(
     <span class="kw-2">mut</span> <span class="ident">reader</span>: <span class="ident">R</span>,
-) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">io::Result</span><span class="op">&lt;</span><span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">orchard::Bundle</span><span class="op">&lt;</span><span class="ident">Authorized</span>, <span class="ident">Amount</span><span class="op">&gt;</span><span class="op">&gt;</span><span class="op">&gt;</span> {
+) -&gt; <span class="ident">io::Result</span><span class="op">&lt;</span><span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">orchard::Bundle</span><span class="op">&lt;</span><span class="ident">Authorized</span>, <span class="ident">Amount</span><span class="op">&gt;</span><span class="op">&gt;</span><span class="op">&gt;</span> {
     <span class="attribute">#[<span class="ident">allow</span>(<span class="ident">clippy::redundant_closure</span>)]</span>
     <span class="kw">let</span> <span class="ident">actions_without_auth</span> <span class="op">=</span> <span class="ident">Vector::read</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">reader</span>, <span class="op">|</span><span class="ident">r</span><span class="op">|</span> <span class="ident">read_action_without_auth</span>(<span class="ident">r</span>))<span class="question-mark">?</span>;
     <span class="kw">if</span> <span class="ident">actions_without_auth</span>.<span class="ident">is_empty</span>() {
@@ -346,7 +346,7 @@
     }
 }
 
-<span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">read_value_commitment</span><span class="op">&lt;</span><span class="ident">R</span>: <span class="ident">Read</span><span class="op">&gt;</span>(<span class="kw-2">mut</span> <span class="ident">reader</span>: <span class="ident">R</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">io::Result</span><span class="op">&lt;</span><span class="ident">ValueCommitment</span><span class="op">&gt;</span> {
+<span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">read_value_commitment</span><span class="op">&lt;</span><span class="ident">R</span>: <span class="ident">Read</span><span class="op">&gt;</span>(<span class="kw-2">mut</span> <span class="ident">reader</span>: <span class="ident">R</span>) -&gt; <span class="ident">io::Result</span><span class="op">&lt;</span><span class="ident">ValueCommitment</span><span class="op">&gt;</span> {
     <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">bytes</span> <span class="op">=</span> [<span class="number">0u8</span>; <span class="number">32</span>];
     <span class="ident">reader</span>.<span class="ident">read_exact</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">bytes</span>)<span class="question-mark">?</span>;
     <span class="kw">let</span> <span class="ident">cv</span> <span class="op">=</span> <span class="ident">ValueCommitment::from_bytes</span>(<span class="kw-2">&amp;</span><span class="ident">bytes</span>);
@@ -361,7 +361,7 @@
     }
 }
 
-<span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">read_nullifier</span><span class="op">&lt;</span><span class="ident">R</span>: <span class="ident">Read</span><span class="op">&gt;</span>(<span class="kw-2">mut</span> <span class="ident">reader</span>: <span class="ident">R</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">io::Result</span><span class="op">&lt;</span><span class="ident">Nullifier</span><span class="op">&gt;</span> {
+<span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">read_nullifier</span><span class="op">&lt;</span><span class="ident">R</span>: <span class="ident">Read</span><span class="op">&gt;</span>(<span class="kw-2">mut</span> <span class="ident">reader</span>: <span class="ident">R</span>) -&gt; <span class="ident">io::Result</span><span class="op">&lt;</span><span class="ident">Nullifier</span><span class="op">&gt;</span> {
     <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">bytes</span> <span class="op">=</span> [<span class="number">0u8</span>; <span class="number">32</span>];
     <span class="ident">reader</span>.<span class="ident">read_exact</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">bytes</span>)<span class="question-mark">?</span>;
     <span class="kw">let</span> <span class="ident">nullifier_ctopt</span> <span class="op">=</span> <span class="ident">Nullifier::from_bytes</span>(<span class="kw-2">&amp;</span><span class="ident">bytes</span>);
@@ -375,7 +375,7 @@
     }
 }
 
-<span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">read_verification_key</span><span class="op">&lt;</span><span class="ident">R</span>: <span class="ident">Read</span><span class="op">&gt;</span>(<span class="kw-2">mut</span> <span class="ident">reader</span>: <span class="ident">R</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">io::Result</span><span class="op">&lt;</span><span class="ident">VerificationKey</span><span class="op">&lt;</span><span class="ident">SpendAuth</span><span class="op">&gt;</span><span class="op">&gt;</span> {
+<span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">read_verification_key</span><span class="op">&lt;</span><span class="ident">R</span>: <span class="ident">Read</span><span class="op">&gt;</span>(<span class="kw-2">mut</span> <span class="ident">reader</span>: <span class="ident">R</span>) -&gt; <span class="ident">io::Result</span><span class="op">&lt;</span><span class="ident">VerificationKey</span><span class="op">&lt;</span><span class="ident">SpendAuth</span><span class="op">&gt;</span><span class="op">&gt;</span> {
     <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">bytes</span> <span class="op">=</span> [<span class="number">0u8</span>; <span class="number">32</span>];
     <span class="ident">reader</span>.<span class="ident">read_exact</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">bytes</span>)<span class="question-mark">?</span>;
     <span class="ident">VerificationKey::try_from</span>(<span class="ident">bytes</span>).<span class="ident">map_err</span>(<span class="op">|</span><span class="kw">_</span><span class="op">|</span> {
@@ -386,7 +386,7 @@
     })
 }
 
-<span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">read_cmx</span><span class="op">&lt;</span><span class="ident">R</span>: <span class="ident">Read</span><span class="op">&gt;</span>(<span class="kw-2">mut</span> <span class="ident">reader</span>: <span class="ident">R</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">io::Result</span><span class="op">&lt;</span><span class="ident">ExtractedNoteCommitment</span><span class="op">&gt;</span> {
+<span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">read_cmx</span><span class="op">&lt;</span><span class="ident">R</span>: <span class="ident">Read</span><span class="op">&gt;</span>(<span class="kw-2">mut</span> <span class="ident">reader</span>: <span class="ident">R</span>) -&gt; <span class="ident">io::Result</span><span class="op">&lt;</span><span class="ident">ExtractedNoteCommitment</span><span class="op">&gt;</span> {
     <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">bytes</span> <span class="op">=</span> [<span class="number">0u8</span>; <span class="number">32</span>];
     <span class="ident">reader</span>.<span class="ident">read_exact</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">bytes</span>)<span class="question-mark">?</span>;
     <span class="kw">let</span> <span class="ident">cmx</span> <span class="op">=</span> <span class="ident">ExtractedNoteCommitment::from_bytes</span>(<span class="kw-2">&amp;</span><span class="ident">bytes</span>);
@@ -398,7 +398,7 @@
     })
 }
 
-<span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">read_note_ciphertext</span><span class="op">&lt;</span><span class="ident">R</span>: <span class="ident">Read</span><span class="op">&gt;</span>(<span class="kw-2">mut</span> <span class="ident">reader</span>: <span class="ident">R</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">io::Result</span><span class="op">&lt;</span><span class="ident">TransmittedNoteCiphertext</span><span class="op">&gt;</span> {
+<span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">read_note_ciphertext</span><span class="op">&lt;</span><span class="ident">R</span>: <span class="ident">Read</span><span class="op">&gt;</span>(<span class="kw-2">mut</span> <span class="ident">reader</span>: <span class="ident">R</span>) -&gt; <span class="ident">io::Result</span><span class="op">&lt;</span><span class="ident">TransmittedNoteCiphertext</span><span class="op">&gt;</span> {
     <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">tnc</span> <span class="op">=</span> <span class="ident">TransmittedNoteCiphertext</span> {
         <span class="ident">epk_bytes</span>: [<span class="number">0u8</span>; <span class="number">32</span>],
         <span class="ident">enc_ciphertext</span>: [<span class="number">0u8</span>; <span class="number">580</span>],
@@ -412,7 +412,7 @@
     <span class="prelude-val">Ok</span>(<span class="ident">tnc</span>)
 }
 
-<span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">read_action_without_auth</span><span class="op">&lt;</span><span class="ident">R</span>: <span class="ident">Read</span><span class="op">&gt;</span>(<span class="kw-2">mut</span> <span class="ident">reader</span>: <span class="ident">R</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">io::Result</span><span class="op">&lt;</span><span class="ident">Action</span><span class="op">&lt;</span>()<span class="op">&gt;</span><span class="op">&gt;</span> {
+<span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">read_action_without_auth</span><span class="op">&lt;</span><span class="ident">R</span>: <span class="ident">Read</span><span class="op">&gt;</span>(<span class="kw-2">mut</span> <span class="ident">reader</span>: <span class="ident">R</span>) -&gt; <span class="ident">io::Result</span><span class="op">&lt;</span><span class="ident">Action</span><span class="op">&lt;</span>()<span class="op">&gt;</span><span class="op">&gt;</span> {
     <span class="kw">let</span> <span class="ident">cv_net</span> <span class="op">=</span> <span class="ident">read_value_commitment</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">reader</span>)<span class="question-mark">?</span>;
     <span class="kw">let</span> <span class="ident">nf_old</span> <span class="op">=</span> <span class="ident">read_nullifier</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">reader</span>)<span class="question-mark">?</span>;
     <span class="kw">let</span> <span class="ident">rk</span> <span class="op">=</span> <span class="ident">read_verification_key</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">reader</span>)<span class="question-mark">?</span>;
@@ -429,13 +429,13 @@
     ))
 }
 
-<span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">read_flags</span><span class="op">&lt;</span><span class="ident">R</span>: <span class="ident">Read</span><span class="op">&gt;</span>(<span class="kw-2">mut</span> <span class="ident">reader</span>: <span class="ident">R</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">io::Result</span><span class="op">&lt;</span><span class="ident">Flags</span><span class="op">&gt;</span> {
+<span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">read_flags</span><span class="op">&lt;</span><span class="ident">R</span>: <span class="ident">Read</span><span class="op">&gt;</span>(<span class="kw-2">mut</span> <span class="ident">reader</span>: <span class="ident">R</span>) -&gt; <span class="ident">io::Result</span><span class="op">&lt;</span><span class="ident">Flags</span><span class="op">&gt;</span> {
     <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">byte</span> <span class="op">=</span> [<span class="number">0u8</span>; <span class="number">1</span>];
     <span class="ident">reader</span>.<span class="ident">read_exact</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">byte</span>)<span class="question-mark">?</span>;
     <span class="ident">Flags::from_byte</span>(<span class="ident">byte</span>[<span class="number">0</span>])
 }
 
-<span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">read_anchor</span><span class="op">&lt;</span><span class="ident">R</span>: <span class="ident">Read</span><span class="op">&gt;</span>(<span class="kw-2">mut</span> <span class="ident">reader</span>: <span class="ident">R</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">io::Result</span><span class="op">&lt;</span><span class="ident">Anchor</span><span class="op">&gt;</span> {
+<span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">read_anchor</span><span class="op">&lt;</span><span class="ident">R</span>: <span class="ident">Read</span><span class="op">&gt;</span>(<span class="kw-2">mut</span> <span class="ident">reader</span>: <span class="ident">R</span>) -&gt; <span class="ident">io::Result</span><span class="op">&lt;</span><span class="ident">Anchor</span><span class="op">&gt;</span> {
     <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">bytes</span> <span class="op">=</span> [<span class="number">0u8</span>; <span class="number">32</span>];
     <span class="ident">reader</span>.<span class="ident">read_exact</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">bytes</span>)<span class="question-mark">?</span>;
     <span class="ident">Option::from</span>(<span class="ident">Anchor::from_bytes</span>(<span class="ident">bytes</span>)).<span class="ident">ok_or_else</span>(<span class="op">|</span><span class="op">|</span> {
@@ -446,7 +446,7 @@
     })
 }
 
-<span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">read_signature</span><span class="op">&lt;</span><span class="ident">R</span>: <span class="ident">Read</span>, <span class="ident">T</span>: <span class="ident">SigType</span><span class="op">&gt;</span>(<span class="kw-2">mut</span> <span class="ident">reader</span>: <span class="ident">R</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">io::Result</span><span class="op">&lt;</span><span class="ident">Signature</span><span class="op">&lt;</span><span class="ident">T</span><span class="op">&gt;</span><span class="op">&gt;</span> {
+<span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">read_signature</span><span class="op">&lt;</span><span class="ident">R</span>: <span class="ident">Read</span>, <span class="ident">T</span>: <span class="ident">SigType</span><span class="op">&gt;</span>(<span class="kw-2">mut</span> <span class="ident">reader</span>: <span class="ident">R</span>) -&gt; <span class="ident">io::Result</span><span class="op">&lt;</span><span class="ident">Signature</span><span class="op">&lt;</span><span class="ident">T</span><span class="op">&gt;</span><span class="op">&gt;</span> {
     <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">bytes</span> <span class="op">=</span> [<span class="number">0u8</span>; <span class="number">64</span>];
     <span class="ident">reader</span>.<span class="ident">read_exact</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">bytes</span>)<span class="question-mark">?</span>;
     <span class="prelude-val">Ok</span>(<span class="ident">Signature::from</span>(<span class="ident">bytes</span>))
@@ -456,7 +456,7 @@
 <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">write_v5_bundle</span><span class="op">&lt;</span><span class="ident">W</span>: <span class="ident">Write</span><span class="op">&gt;</span>(
     <span class="ident">bundle</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="kw-2">&amp;</span><span class="ident">orchard::Bundle</span><span class="op">&lt;</span><span class="ident">Authorized</span>, <span class="ident">Amount</span><span class="op">&gt;</span><span class="op">&gt;</span>,
     <span class="kw-2">mut</span> <span class="ident">writer</span>: <span class="ident">W</span>,
-) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">io::Result</span><span class="op">&lt;</span>()<span class="op">&gt;</span> {
+) -&gt; <span class="ident">io::Result</span><span class="op">&lt;</span>()<span class="op">&gt;</span> {
     <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">bundle</span>) <span class="op">=</span> <span class="kw-2">&amp;</span><span class="ident">bundle</span> {
         <span class="ident">Vector::write_nonempty</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">writer</span>, <span class="ident">bundle</span>.<span class="ident">actions</span>(), <span class="op">|</span><span class="ident">w</span>, <span class="ident">a</span><span class="op">|</span> {
             <span class="ident">write_action_without_auth</span>(<span class="ident">w</span>, <span class="ident">a</span>)
@@ -485,29 +485,29 @@
     <span class="prelude-val">Ok</span>(())
 }
 
-<span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">write_value_commitment</span><span class="op">&lt;</span><span class="ident">W</span>: <span class="ident">Write</span><span class="op">&gt;</span>(<span class="kw-2">mut</span> <span class="ident">writer</span>: <span class="ident">W</span>, <span class="ident">cv</span>: <span class="kw-2">&amp;</span><span class="ident">ValueCommitment</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">io::Result</span><span class="op">&lt;</span>()<span class="op">&gt;</span> {
+<span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">write_value_commitment</span><span class="op">&lt;</span><span class="ident">W</span>: <span class="ident">Write</span><span class="op">&gt;</span>(<span class="kw-2">mut</span> <span class="ident">writer</span>: <span class="ident">W</span>, <span class="ident">cv</span>: <span class="kw-2">&amp;</span><span class="ident">ValueCommitment</span>) -&gt; <span class="ident">io::Result</span><span class="op">&lt;</span>()<span class="op">&gt;</span> {
     <span class="ident">writer</span>.<span class="ident">write_all</span>(<span class="kw-2">&amp;</span><span class="ident">cv</span>.<span class="ident">to_bytes</span>())
 }
 
-<span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">write_nullifier</span><span class="op">&lt;</span><span class="ident">W</span>: <span class="ident">Write</span><span class="op">&gt;</span>(<span class="kw-2">mut</span> <span class="ident">writer</span>: <span class="ident">W</span>, <span class="ident">nf</span>: <span class="kw-2">&amp;</span><span class="ident">Nullifier</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">io::Result</span><span class="op">&lt;</span>()<span class="op">&gt;</span> {
+<span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">write_nullifier</span><span class="op">&lt;</span><span class="ident">W</span>: <span class="ident">Write</span><span class="op">&gt;</span>(<span class="kw-2">mut</span> <span class="ident">writer</span>: <span class="ident">W</span>, <span class="ident">nf</span>: <span class="kw-2">&amp;</span><span class="ident">Nullifier</span>) -&gt; <span class="ident">io::Result</span><span class="op">&lt;</span>()<span class="op">&gt;</span> {
     <span class="ident">writer</span>.<span class="ident">write_all</span>(<span class="kw-2">&amp;</span><span class="ident">nf</span>.<span class="ident">to_bytes</span>())
 }
 
 <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">write_verification_key</span><span class="op">&lt;</span><span class="ident">W</span>: <span class="ident">Write</span><span class="op">&gt;</span>(
     <span class="kw-2">mut</span> <span class="ident">writer</span>: <span class="ident">W</span>,
     <span class="ident">rk</span>: <span class="kw-2">&amp;</span><span class="ident">redpallas::VerificationKey</span><span class="op">&lt;</span><span class="ident">SpendAuth</span><span class="op">&gt;</span>,
-) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">io::Result</span><span class="op">&lt;</span>()<span class="op">&gt;</span> {
+) -&gt; <span class="ident">io::Result</span><span class="op">&lt;</span>()<span class="op">&gt;</span> {
     <span class="ident">writer</span>.<span class="ident">write_all</span>(<span class="kw-2">&amp;</span><span class="op">&lt;</span>[<span class="ident">u8</span>; <span class="number">32</span>]<span class="op">&gt;</span><span class="ident">::from</span>(<span class="ident">rk</span>))
 }
 
-<span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">write_cmx</span><span class="op">&lt;</span><span class="ident">W</span>: <span class="ident">Write</span><span class="op">&gt;</span>(<span class="kw-2">mut</span> <span class="ident">writer</span>: <span class="ident">W</span>, <span class="ident">cmx</span>: <span class="kw-2">&amp;</span><span class="ident">ExtractedNoteCommitment</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">io::Result</span><span class="op">&lt;</span>()<span class="op">&gt;</span> {
+<span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">write_cmx</span><span class="op">&lt;</span><span class="ident">W</span>: <span class="ident">Write</span><span class="op">&gt;</span>(<span class="kw-2">mut</span> <span class="ident">writer</span>: <span class="ident">W</span>, <span class="ident">cmx</span>: <span class="kw-2">&amp;</span><span class="ident">ExtractedNoteCommitment</span>) -&gt; <span class="ident">io::Result</span><span class="op">&lt;</span>()<span class="op">&gt;</span> {
     <span class="ident">writer</span>.<span class="ident">write_all</span>(<span class="kw-2">&amp;</span><span class="ident">cmx</span>.<span class="ident">to_bytes</span>())
 }
 
 <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">write_note_ciphertext</span><span class="op">&lt;</span><span class="ident">W</span>: <span class="ident">Write</span><span class="op">&gt;</span>(
     <span class="kw-2">mut</span> <span class="ident">writer</span>: <span class="ident">W</span>,
     <span class="ident">nc</span>: <span class="kw-2">&amp;</span><span class="ident">TransmittedNoteCiphertext</span>,
-) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">io::Result</span><span class="op">&lt;</span>()<span class="op">&gt;</span> {
+) -&gt; <span class="ident">io::Result</span><span class="op">&lt;</span>()<span class="op">&gt;</span> {
     <span class="ident">writer</span>.<span class="ident">write_all</span>(<span class="kw-2">&amp;</span><span class="ident">nc</span>.<span class="ident">epk_bytes</span>)<span class="question-mark">?</span>;
     <span class="ident">writer</span>.<span class="ident">write_all</span>(<span class="kw-2">&amp;</span><span class="ident">nc</span>.<span class="ident">enc_ciphertext</span>)<span class="question-mark">?</span>;
     <span class="ident">writer</span>.<span class="ident">write_all</span>(<span class="kw-2">&amp;</span><span class="ident">nc</span>.<span class="ident">out_ciphertext</span>)
@@ -516,7 +516,7 @@
 <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">write_action_without_auth</span><span class="op">&lt;</span><span class="ident">W</span>: <span class="ident">Write</span><span class="op">&gt;</span>(
     <span class="kw-2">mut</span> <span class="ident">writer</span>: <span class="ident">W</span>,
     <span class="ident">act</span>: <span class="kw-2">&amp;</span><span class="ident">Action</span><span class="op">&lt;</span><span class="op">&lt;</span><span class="ident">Authorized</span> <span class="kw">as</span> <span class="ident">Authorization</span><span class="op">&gt;</span><span class="ident">::SpendAuth</span><span class="op">&gt;</span>,
-) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">io::Result</span><span class="op">&lt;</span>()<span class="op">&gt;</span> {
+) -&gt; <span class="ident">io::Result</span><span class="op">&lt;</span>()<span class="op">&gt;</span> {
     <span class="ident">write_value_commitment</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">writer</span>, <span class="kw-2">&amp;</span><span class="ident">act</span>.<span class="ident">cv_net</span>())<span class="question-mark">?</span>;
     <span class="ident">write_nullifier</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">writer</span>, <span class="kw-2">&amp;</span><span class="ident">act</span>.<span class="ident">nullifier</span>())<span class="question-mark">?</span>;
     <span class="ident">write_verification_key</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">writer</span>, <span class="kw-2">&amp;</span><span class="ident">act</span>.<span class="ident">rk</span>())<span class="question-mark">?</span>;
@@ -543,7 +543,7 @@
         <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">arb_bundle</span>(<span class="ident">n_actions</span>: <span class="ident">usize</span>)(
             <span class="ident">orchard_value_balance</span> <span class="kw">in</span> <span class="ident">arb_amount</span>(),
             <span class="ident">bundle</span> <span class="kw">in</span> <span class="ident">t_orch::arb_bundle</span>(<span class="ident">n_actions</span>)
-        ) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">Bundle</span><span class="op">&lt;</span><span class="ident">Authorized</span>, <span class="ident">Amount</span><span class="op">&gt;</span> {
+        ) -&gt; <span class="ident">Bundle</span><span class="op">&lt;</span><span class="ident">Authorized</span>, <span class="ident">Amount</span><span class="op">&gt;</span> {
             <span class="comment">// overwrite the value balance, as we can&#39;t guarantee that the</span>
             <span class="comment">// value doesn&#39;t exceed the MAX_MONEY bounds.</span>
             <span class="ident">bundle</span>.<span class="ident">try_map_value_balance</span>::<span class="op">&lt;</span><span class="kw">_</span>, (), <span class="kw">_</span><span class="op">&gt;</span>(<span class="op">|</span><span class="kw">_</span><span class="op">|</span> <span class="prelude-val">Ok</span>(<span class="ident">orchard_value_balance</span>)).<span class="ident">unwrap</span>()
@@ -552,7 +552,7 @@
 
     <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">arb_bundle_for_version</span>(
         <span class="ident">v</span>: <span class="ident">TxVersion</span>,
-    ) <span class="op">-</span><span class="op">&gt;</span> <span class="kw">impl</span> <span class="ident">Strategy</span><span class="op">&lt;</span><span class="ident">Value</span> <span class="op">=</span> <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">Bundle</span><span class="op">&lt;</span><span class="ident">Authorized</span>, <span class="ident">Amount</span><span class="op">&gt;</span><span class="op">&gt;</span><span class="op">&gt;</span> {
+    ) -&gt; <span class="kw">impl</span> <span class="ident">Strategy</span><span class="op">&lt;</span><span class="ident">Value</span> <span class="op">=</span> <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">Bundle</span><span class="op">&lt;</span><span class="ident">Authorized</span>, <span class="ident">Amount</span><span class="op">&gt;</span><span class="op">&gt;</span><span class="op">&gt;</span> {
         <span class="kw">if</span> <span class="ident">v</span>.<span class="ident">has_orchard</span>() {
             <span class="ident">Strategy::boxed</span>((<span class="number">1usize</span>..<span class="number">100</span>).<span class="ident">prop_flat_map</span>(<span class="op">|</span><span class="ident">n</span><span class="op">|</span> <span class="ident">prop::option::of</span>(<span class="ident">arb_bundle</span>(<span class="ident">n</span>))))
         } <span class="kw">else</span> {

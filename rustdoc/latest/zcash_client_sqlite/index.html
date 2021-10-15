@@ -3,7 +3,7 @@
 <a href="../zcash_client_backend/data_api/trait.WalletWrite.html"><code>WalletWrite</code></a>, and <a href="../zcash_client_backend/data_api/trait.BlockSource.html"><code>BlockSource</code></a> traits from the <a href="../zcash_client_backend/index.html" title="zcash_client_backend"><code>zcash_client_backend</code></a> crate. In
 combination with <a href="../zcash_client_backend/index.html" title="zcash_client_backend"><code>zcash_client_backend</code></a>, it provides a full implementation of a SQLite-backed
 client for the Zcash network.</p>
-<h1 id="design" class="section-header"><a href="#design">Design</a></h1>
+<h2 id="design" class="section-header"><a href="#design">Design</a></h2>
 <p>The light client is built around two SQLite databases:</p>
 <ul>
 <li>
@@ -18,20 +18,20 @@ the light client APIs, and <strong>assumed to be read-only outside these APIs</s
 the database directly in order to extract information for display to users.</p>
 </li>
 </ul>
-<h1 id="features" class="section-header"><a href="#features">Features</a></h1>
+<h2 id="features" class="section-header"><a href="#features">Features</a></h2>
 <p>The <code>mainnet</code> feature configures the light client for use with the Zcash mainnet. By
 default, the light client is configured for use with the Zcash testnet.</p>
 </div></details><h2 id="modules" class="section-header"><a href="#modules">Modules</a></h2>
-<div class="item-table"><div class="item-left module-item"><a class="mod" href="chain/index.html" title="zcash_client_sqlite::chain mod">chain</a></div><div class="item-right docblock-short"><p>Functions for enforcing chain validity and handling chain reorgs.</p>
-</div><div class="item-left module-item"><a class="mod" href="error/index.html" title="zcash_client_sqlite::error mod">error</a></div><div class="item-right docblock-short"><p>Error types for problems that may arise when reading or storing wallet data to SQLite.</p>
-</div><div class="item-left module-item"><a class="mod" href="wallet/index.html" title="zcash_client_sqlite::wallet mod">wallet</a></div><div class="item-right docblock-short"><p>Functions for querying information in the wdb database.</p>
-</div></div><h2 id="structs" class="section-header"><a href="#structs">Structs</a></h2>
-<div class="item-table"><div class="item-left module-item"><a class="struct" href="struct.BlockDb.html" title="zcash_client_sqlite::BlockDb struct">BlockDb</a></div><div class="item-right docblock-short"><p>A wrapper for the SQLite connection to the block cache database.</p>
-</div><div class="item-left module-item"><a class="struct" href="struct.DataConnStmtCache.html" title="zcash_client_sqlite::DataConnStmtCache struct">DataConnStmtCache</a></div><div class="item-right docblock-short"><p>The primary type used to implement <a href="../zcash_client_backend/data_api/trait.WalletWrite.html"><code>WalletWrite</code></a> for the SQLite database.</p>
-</div><div class="item-left module-item"><a class="struct" href="struct.WalletDb.html" title="zcash_client_sqlite::WalletDb struct">WalletDb</a></div><div class="item-right docblock-short"><p>A wrapper for the SQLite connection to the wallet database.</p>
-</div></div><h2 id="enums" class="section-header"><a href="#enums">Enums</a></h2>
-<div class="item-table"><div class="item-left module-item"><a class="enum" href="enum.NoteId.html" title="zcash_client_sqlite::NoteId enum">NoteId</a></div><div class="item-right docblock-short"><p>A newtype wrapper for sqlite primary key values for the notes
+<div class="item-table"><div class="item-row"><div class="item-left module-item"><a class="mod" href="chain/index.html" title="zcash_client_sqlite::chain mod">chain</a></div><div class="item-right docblock-short"><p>Functions for enforcing chain validity and handling chain reorgs.</p>
+</div></div><div class="item-row"><div class="item-left module-item"><a class="mod" href="error/index.html" title="zcash_client_sqlite::error mod">error</a></div><div class="item-right docblock-short"><p>Error types for problems that may arise when reading or storing wallet data to SQLite.</p>
+</div></div><div class="item-row"><div class="item-left module-item"><a class="mod" href="wallet/index.html" title="zcash_client_sqlite::wallet mod">wallet</a></div><div class="item-right docblock-short"><p>Functions for querying information in the wdb database.</p>
+</div></div></div><h2 id="structs" class="section-header"><a href="#structs">Structs</a></h2>
+<div class="item-table"><div class="item-row"><div class="item-left module-item"><a class="struct" href="struct.BlockDb.html" title="zcash_client_sqlite::BlockDb struct">BlockDb</a></div><div class="item-right docblock-short"><p>A wrapper for the SQLite connection to the block cache database.</p>
+</div></div><div class="item-row"><div class="item-left module-item"><a class="struct" href="struct.DataConnStmtCache.html" title="zcash_client_sqlite::DataConnStmtCache struct">DataConnStmtCache</a></div><div class="item-right docblock-short"><p>The primary type used to implement <a href="../zcash_client_backend/data_api/trait.WalletWrite.html"><code>WalletWrite</code></a> for the SQLite database.</p>
+</div></div><div class="item-row"><div class="item-left module-item"><a class="struct" href="struct.WalletDb.html" title="zcash_client_sqlite::WalletDb struct">WalletDb</a></div><div class="item-right docblock-short"><p>A wrapper for the SQLite connection to the wallet database.</p>
+</div></div></div><h2 id="enums" class="section-header"><a href="#enums">Enums</a></h2>
+<div class="item-table"><div class="item-row"><div class="item-left module-item"><a class="enum" href="enum.NoteId.html" title="zcash_client_sqlite::NoteId enum">NoteId</a></div><div class="item-right docblock-short"><p>A newtype wrapper for sqlite primary key values for the notes
 table.</p>
-</div></div></section><section id="search" class="content hidden"></section><div id="rustdoc-vars" data-root-path="../" data-current-crate="zcash_client_sqlite" data-search-index-js="../search-index.js" data-search-js="../search.js"></div>
+</div></div></div></section><section id="search" class="content hidden"></section><div id="rustdoc-vars" data-root-path="../" data-current-crate="zcash_client_sqlite" data-search-index-js="../search-index.js" data-search-js="../search.js"></div>
     <script src="../main.js"></script>
 </body></html>

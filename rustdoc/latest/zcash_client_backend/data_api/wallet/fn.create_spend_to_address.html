@@ -4,7 +4,7 @@ within the data database. The caller can read the raw transaction bytes from the
 column in order to broadcast the transaction to the network.</p>
 <p>Do not call this multiple times in parallel, or you will generate transactions that
 double-spend the same notes.</p>
-<h1 id="transaction-privacy" class="section-header"><a href="#transaction-privacy">Transaction privacy</a></h1>
+<h2 id="transaction-privacy" class="section-header"><a href="#transaction-privacy">Transaction privacy</a></h2>
 <p><code>ovk_policy</code> specifies the desired policy for which outgoing viewing key should be
 able to decrypt the outputs of this transaction. This is primarily relevant to
 wallet recovery from backup; in particular, <a href="../../wallet/enum.OvkPolicy.html#variant.Discard" title="OvkPolicy::Discard"><code>OvkPolicy::Discard</code></a> will prevent the
@@ -15,7 +15,7 @@ notes and received change.)</p>
 <code>memo</code> in <code>db_data</code>. This can be deleted independently of <code>ovk_policy</code>.</p>
 <p>For details on what transaction information is visible to the holder of a full or
 outgoing viewing key, refer to <a href="https://zips.z.cash/zip-0310">ZIP 310</a>.</p>
-<h1 id="examples" class="section-header"><a href="#examples">Examples</a></h1>
+<h2 id="examples" class="section-header"><a href="#examples">Examples</a></h2>
 <div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">use</span> <span class="ident">tempfile::NamedTempFile</span>;
 <span class="kw">use</span> <span class="ident">zcash_primitives</span>::{
     <span class="ident">consensus</span>::{<span class="self">self</span>, <span class="ident">Network</span>},
@@ -35,15 +35,15 @@ outgoing viewing key, refer to <a href="https://zips.z.cash/zip-0310">ZIP 310</a
 };
 
 <span class="kw">let</span> <span class="ident">tx_prover</span> <span class="op">=</span> <span class="kw">match</span> <span class="ident">LocalTxProver::with_default_location</span>() {
-    <span class="prelude-val">Some</span>(<span class="ident">tx_prover</span>) <span class="op">=</span><span class="op">&gt;</span> <span class="ident">tx_prover</span>,
-    <span class="prelude-val">None</span> <span class="op">=</span><span class="op">&gt;</span> {
+    <span class="prelude-val">Some</span>(<span class="ident">tx_prover</span>) =&gt; <span class="ident">tx_prover</span>,
+    <span class="prelude-val">None</span> =&gt; {
         <span class="macro">panic!</span>(<span class="string">&quot;Cannot locate the Zcash parameters. Please run zcash-fetch-params or fetch-params.sh to download the parameters, and then re-run the tests.&quot;</span>);
     }
 };
 
 <span class="kw">let</span> <span class="ident">account</span> <span class="op">=</span> <span class="ident">AccountId</span>(<span class="number">0</span>);
 <span class="kw">let</span> <span class="ident">extsk</span> <span class="op">=</span> <span class="ident">spending_key</span>(<span class="kw-2">&amp;</span>[<span class="number">0</span>; <span class="number">32</span>][..], <span class="ident">COIN_TYPE</span>, <span class="ident">account</span>.<span class="number">0</span>);
-<span class="kw">let</span> <span class="ident">to</span> <span class="op">=</span> <span class="ident">extsk</span>.<span class="ident">default_address</span>().<span class="ident">unwrap</span>().<span class="number">1</span>.<span class="ident">into</span>();
+<span class="kw">let</span> <span class="ident">to</span> <span class="op">=</span> <span class="ident">extsk</span>.<span class="ident">default_address</span>().<span class="number">1</span>.<span class="ident">into</span>();
 
 <span class="kw">let</span> <span class="ident">data_file</span> <span class="op">=</span> <span class="ident">NamedTempFile::new</span>().<span class="ident">unwrap</span>();
 <span class="kw">let</span> <span class="ident">db_read</span> <span class="op">=</span> <span class="ident">WalletDb::for_path</span>(<span class="ident">data_file</span>, <span class="ident">Network::TestNetwork</span>).<span class="ident">unwrap</span>();

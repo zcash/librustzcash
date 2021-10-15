@@ -766,23 +766,23 @@
 
 <span class="kw">impl</span><span class="op">&lt;</span><span class="ident">V</span>: <span class="ident">Version</span><span class="op">&gt;</span> <span class="ident">Tree</span><span class="op">&lt;</span><span class="ident">V</span><span class="op">&gt;</span> {
     <span class="doccomment">/// Resolve link originated from this tree</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">resolve_link</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">link</span>: <span class="ident">EntryLink</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">IndexedNode</span><span class="op">&lt;</span><span class="ident">V</span><span class="op">&gt;</span>, <span class="ident">Error</span><span class="op">&gt;</span> {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">resolve_link</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">link</span>: <span class="ident">EntryLink</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">IndexedNode</span><span class="op">&lt;</span><span class="ident">V</span><span class="op">&gt;</span>, <span class="ident">Error</span><span class="op">&gt;</span> {
         <span class="kw">match</span> <span class="ident">link</span> {
-            <span class="ident">EntryLink::Generated</span>(<span class="ident">index</span>) <span class="op">=</span><span class="op">&gt;</span> <span class="self">self</span>.<span class="ident">generated</span>.<span class="ident">get</span>(<span class="ident">index</span> <span class="kw">as</span> <span class="ident">usize</span>),
-            <span class="ident">EntryLink::Stored</span>(<span class="ident">index</span>) <span class="op">=</span><span class="op">&gt;</span> <span class="self">self</span>.<span class="ident">stored</span>.<span class="ident">get</span>(<span class="kw-2">&amp;</span><span class="ident">index</span>),
+            <span class="ident">EntryLink::Generated</span>(<span class="ident">index</span>) =&gt; <span class="self">self</span>.<span class="ident">generated</span>.<span class="ident">get</span>(<span class="ident">index</span> <span class="kw">as</span> <span class="ident">usize</span>),
+            <span class="ident">EntryLink::Stored</span>(<span class="ident">index</span>) =&gt; <span class="self">self</span>.<span class="ident">stored</span>.<span class="ident">get</span>(<span class="kw-2">&amp;</span><span class="ident">index</span>),
         }
         .<span class="ident">map</span>(<span class="op">|</span><span class="ident">node</span><span class="op">|</span> <span class="ident">IndexedNode</span> { <span class="ident">node</span>, <span class="ident">link</span> })
         .<span class="ident">ok_or</span>(<span class="ident">Error::ExpectedInMemory</span>(<span class="ident">link</span>))
     }
 
-    <span class="kw">fn</span> <span class="ident">push</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>, <span class="ident">data</span>: <span class="ident">Entry</span><span class="op">&lt;</span><span class="ident">V</span><span class="op">&gt;</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">EntryLink</span> {
+    <span class="kw">fn</span> <span class="ident">push</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>, <span class="ident">data</span>: <span class="ident">Entry</span><span class="op">&lt;</span><span class="ident">V</span><span class="op">&gt;</span>) -&gt; <span class="ident">EntryLink</span> {
         <span class="kw">let</span> <span class="ident">idx</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">stored_count</span>;
         <span class="self">self</span>.<span class="ident">stored_count</span> <span class="op">+</span><span class="op">=</span> <span class="number">1</span>;
         <span class="self">self</span>.<span class="ident">stored</span>.<span class="ident">insert</span>(<span class="ident">idx</span>, <span class="ident">data</span>);
         <span class="ident">EntryLink::Stored</span>(<span class="ident">idx</span>)
     }
 
-    <span class="kw">fn</span> <span class="ident">push_generated</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>, <span class="ident">data</span>: <span class="ident">Entry</span><span class="op">&lt;</span><span class="ident">V</span><span class="op">&gt;</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">EntryLink</span> {
+    <span class="kw">fn</span> <span class="ident">push_generated</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>, <span class="ident">data</span>: <span class="ident">Entry</span><span class="op">&lt;</span><span class="ident">V</span><span class="op">&gt;</span>) -&gt; <span class="ident">EntryLink</span> {
         <span class="self">self</span>.<span class="ident">generated</span>.<span class="ident">push</span>(<span class="ident">data</span>);
         <span class="ident">EntryLink::Generated</span>(<span class="self">self</span>.<span class="ident">generated</span>.<span class="ident">len</span>() <span class="kw">as</span> <span class="ident">u32</span> <span class="op">-</span> <span class="number">1</span>)
     }
@@ -790,7 +790,7 @@
     <span class="doccomment">/// Populate tree with plain list of the leaves/nodes. For now, only for tests,</span>
     <span class="doccomment">/// since this `Tree` structure is for partially loaded tree (but it might change)</span>
     <span class="attribute">#[<span class="ident">cfg</span>(<span class="ident">test</span>)]</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">populate</span>(<span class="ident">loaded</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">Entry</span><span class="op">&lt;</span><span class="ident">V</span><span class="op">&gt;</span><span class="op">&gt;</span>, <span class="ident">root</span>: <span class="ident">EntryLink</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="self">Self</span> {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">populate</span>(<span class="ident">loaded</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">Entry</span><span class="op">&lt;</span><span class="ident">V</span><span class="op">&gt;</span><span class="op">&gt;</span>, <span class="ident">root</span>: <span class="ident">EntryLink</span>) -&gt; <span class="self">Self</span> {
         <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">result</span> <span class="op">=</span> <span class="ident">Tree::invalid</span>();
         <span class="ident">result</span>.<span class="ident">stored_count</span> <span class="op">=</span> <span class="ident">loaded</span>.<span class="ident">len</span>() <span class="kw">as</span> <span class="ident">u32</span>;
         <span class="kw">for</span> (<span class="ident">idx</span>, <span class="ident">item</span>) <span class="kw">in</span> <span class="ident">loaded</span>.<span class="ident">into_iter</span>().<span class="ident">enumerate</span>() {
@@ -802,7 +802,7 @@
     }
 
     <span class="comment">// Empty tree with invalid root</span>
-    <span class="kw">fn</span> <span class="ident">invalid</span>() <span class="op">-</span><span class="op">&gt;</span> <span class="self">Self</span> {
+    <span class="kw">fn</span> <span class="ident">invalid</span>() -&gt; <span class="self">Self</span> {
         <span class="ident">Tree</span> {
             <span class="ident">root</span>: <span class="ident">EntryLink::Generated</span>(<span class="number">0</span>),
             <span class="ident">generated</span>: <span class="ident">Default::default</span>(),
@@ -822,7 +822,7 @@
     <span class="doccomment">/// # Panics</span>
     <span class="doccomment">///</span>
     <span class="doccomment">/// Will panic if `peaks` is empty.</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">new</span>(<span class="ident">length</span>: <span class="ident">u32</span>, <span class="ident">peaks</span>: <span class="ident">Vec</span><span class="op">&lt;</span>(<span class="ident">u32</span>, <span class="ident">Entry</span><span class="op">&lt;</span><span class="ident">V</span><span class="op">&gt;</span>)<span class="op">&gt;</span>, <span class="ident">extra</span>: <span class="ident">Vec</span><span class="op">&lt;</span>(<span class="ident">u32</span>, <span class="ident">Entry</span><span class="op">&lt;</span><span class="ident">V</span><span class="op">&gt;</span>)<span class="op">&gt;</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="self">Self</span> {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">new</span>(<span class="ident">length</span>: <span class="ident">u32</span>, <span class="ident">peaks</span>: <span class="ident">Vec</span><span class="op">&lt;</span>(<span class="ident">u32</span>, <span class="ident">Entry</span><span class="op">&lt;</span><span class="ident">V</span><span class="op">&gt;</span>)<span class="op">&gt;</span>, <span class="ident">extra</span>: <span class="ident">Vec</span><span class="op">&lt;</span>(<span class="ident">u32</span>, <span class="ident">Entry</span><span class="op">&lt;</span><span class="ident">V</span><span class="op">&gt;</span>)<span class="op">&gt;</span>) -&gt; <span class="self">Self</span> {
         <span class="macro">assert!</span>(<span class="op">!</span><span class="ident">peaks</span>.<span class="ident">is_empty</span>());
 
         <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">result</span> <span class="op">=</span> <span class="ident">Tree::invalid</span>();
@@ -854,7 +854,7 @@
         <span class="ident">result</span>
     }
 
-    <span class="kw">fn</span> <span class="ident">get_peaks</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">root</span>: <span class="ident">EntryLink</span>, <span class="ident">target</span>: <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">EntryLink</span><span class="op">&gt;</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident">Error</span><span class="op">&gt;</span> {
+    <span class="kw">fn</span> <span class="ident">get_peaks</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">root</span>: <span class="ident">EntryLink</span>, <span class="ident">target</span>: <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">EntryLink</span><span class="op">&gt;</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident">Error</span><span class="op">&gt;</span> {
         <span class="kw">let</span> (<span class="ident">left_child_link</span>, <span class="ident">right_child_link</span>) <span class="op">=</span> {
             <span class="kw">let</span> <span class="ident">root</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">resolve_link</span>(<span class="ident">root</span>)<span class="question-mark">?</span>;
             <span class="kw">if</span> <span class="ident">root</span>.<span class="ident">node</span>.<span class="ident">complete</span>() {
@@ -874,7 +874,7 @@
     <span class="doccomment">/// Returns links to actual nodes that has to be persisted as the result of the append.</span>
     <span class="doccomment">/// If completed without error, at least one link to the appended</span>
     <span class="doccomment">/// node (with metadata provided in `new_leaf`) will be returned.</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">append_leaf</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>, <span class="ident">new_leaf</span>: <span class="ident">V::NodeData</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">EntryLink</span><span class="op">&gt;</span>, <span class="ident">Error</span><span class="op">&gt;</span> {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">append_leaf</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>, <span class="ident">new_leaf</span>: <span class="ident">V::NodeData</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">EntryLink</span><span class="op">&gt;</span>, <span class="ident">Error</span><span class="op">&gt;</span> {
         <span class="kw">let</span> <span class="ident">root</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">root</span>;
         <span class="kw">let</span> <span class="ident">new_leaf_link</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">push</span>(<span class="ident">Entry::new_leaf</span>(<span class="ident">new_leaf</span>));
         <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">appended</span> <span class="op">=</span> <span class="macro">vec!</span>[<span class="ident">new_leaf_link</span>];
@@ -895,7 +895,7 @@
             <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">stored</span>) <span class="op">=</span> {
                 <span class="kw">let</span> <span class="ident">peak</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">resolve_link</span>(<span class="ident">next_peak</span>)<span class="question-mark">?</span>;
                 <span class="kw">let</span> <span class="ident">m</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">resolve_link</span>(<span class="ident">next_merge</span>)<span class="question-mark">?</span>;
-                <span class="kw">if</span> <span class="ident">peak</span>.<span class="ident">node</span>.<span class="ident">leaf_count</span>() <span class="op">=</span><span class="op">=</span> <span class="ident">m</span>.<span class="ident">node</span>.<span class="ident">leaf_count</span>() {
+                <span class="kw">if</span> <span class="ident">peak</span>.<span class="ident">node</span>.<span class="ident">leaf_count</span>() <span class="op">==</span> <span class="ident">m</span>.<span class="ident">node</span>.<span class="ident">leaf_count</span>() {
                     <span class="prelude-val">Some</span>(<span class="ident">combine_nodes</span>(<span class="ident">peak</span>, <span class="ident">m</span>))
                 } <span class="kw">else</span> {
                     <span class="prelude-val">None</span>
@@ -951,7 +951,7 @@
     <span class="doccomment">///</span>
     <span class="doccomment">/// Returns actual number of nodes that should be removed by the caller</span>
     <span class="doccomment">/// from the end of the array representation.</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">truncate_leaf</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">u32</span>, <span class="ident">Error</span><span class="op">&gt;</span> {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">truncate_leaf</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">u32</span>, <span class="ident">Error</span><span class="op">&gt;</span> {
         <span class="kw">let</span> <span class="ident">root</span> <span class="op">=</span> {
             <span class="kw">let</span> (<span class="ident">leaves</span>, <span class="ident">root_left_child</span>) <span class="op">=</span> {
                 <span class="kw">let</span> <span class="ident">n</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">resolve_link</span>(<span class="self">self</span>.<span class="ident">root</span>)<span class="question-mark">?</span>;
@@ -1003,23 +1003,23 @@
     }
 
     <span class="doccomment">/// Length of array representation of the tree.</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">len</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">u32</span> {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">len</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">u32</span> {
         <span class="self">self</span>.<span class="ident">stored_count</span>
     }
 
     <span class="doccomment">/// Link to the root node</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">root</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">EntryLink</span> {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">root</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">EntryLink</span> {
         <span class="self">self</span>.<span class="ident">root</span>
     }
 
     <span class="doccomment">/// Reference to the root node.</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">root_node</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">IndexedNode</span><span class="op">&lt;</span><span class="ident">V</span><span class="op">&gt;</span>, <span class="ident">Error</span><span class="op">&gt;</span> {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">root_node</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">IndexedNode</span><span class="op">&lt;</span><span class="ident">V</span><span class="op">&gt;</span>, <span class="ident">Error</span><span class="op">&gt;</span> {
         <span class="self">self</span>.<span class="ident">resolve_link</span>(<span class="self">self</span>.<span class="ident">root</span>)
     }
 
     <span class="doccomment">/// If this tree is empty.</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">is_empty</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">bool</span> {
-        <span class="self">self</span>.<span class="ident">stored_count</span> <span class="op">=</span><span class="op">=</span> <span class="number">0</span>
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">is_empty</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">bool</span> {
+        <span class="self">self</span>.<span class="ident">stored_count</span> <span class="op">==</span> <span class="number">0</span>
     }
 }
 
@@ -1031,31 +1031,31 @@
 }
 
 <span class="kw">impl</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">V</span>: <span class="ident">Version</span><span class="op">&gt;</span> <span class="ident">IndexedNode</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">V</span><span class="op">&gt;</span> {
-    <span class="kw">fn</span> <span class="ident">left</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">EntryLink</span>, <span class="ident">Error</span><span class="op">&gt;</span> {
+    <span class="kw">fn</span> <span class="ident">left</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">EntryLink</span>, <span class="ident">Error</span><span class="op">&gt;</span> {
         <span class="self">self</span>.<span class="ident">node</span>.<span class="ident">left</span>().<span class="ident">map_err</span>(<span class="op">|</span><span class="ident">e</span><span class="op">|</span> <span class="ident">e</span>.<span class="ident">augment</span>(<span class="self">self</span>.<span class="ident">link</span>))
     }
 
-    <span class="kw">fn</span> <span class="ident">right</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">EntryLink</span>, <span class="ident">Error</span><span class="op">&gt;</span> {
+    <span class="kw">fn</span> <span class="ident">right</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">EntryLink</span>, <span class="ident">Error</span><span class="op">&gt;</span> {
         <span class="self">self</span>.<span class="ident">node</span>.<span class="ident">right</span>().<span class="ident">map_err</span>(<span class="op">|</span><span class="ident">e</span><span class="op">|</span> <span class="ident">e</span>.<span class="ident">augment</span>(<span class="self">self</span>.<span class="ident">link</span>))
     }
 
     <span class="doccomment">/// Reference to the entry struct.</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">node</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="kw-2">&amp;</span><span class="ident">Entry</span><span class="op">&lt;</span><span class="ident">V</span><span class="op">&gt;</span> {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">node</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span><span class="ident">Entry</span><span class="op">&lt;</span><span class="ident">V</span><span class="op">&gt;</span> {
         <span class="self">self</span>.<span class="ident">node</span>
     }
 
     <span class="doccomment">/// Reference to the entry metadata.</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">data</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="kw-2">&amp;</span><span class="ident">V::NodeData</span> {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">data</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span><span class="ident">V::NodeData</span> {
         <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">node</span>.<span class="ident">data</span>
     }
 
     <span class="doccomment">/// Actual link by what this node was resolved.</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">link</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">EntryLink</span> {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">link</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">EntryLink</span> {
         <span class="self">self</span>.<span class="ident">link</span>
     }
 }
 
-<span class="kw">fn</span> <span class="ident">combine_nodes</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">V</span>: <span class="ident">Version</span><span class="op">&gt;</span>(<span class="ident">left</span>: <span class="ident">IndexedNode</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">V</span><span class="op">&gt;</span>, <span class="ident">right</span>: <span class="ident">IndexedNode</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">V</span><span class="op">&gt;</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">Entry</span><span class="op">&lt;</span><span class="ident">V</span><span class="op">&gt;</span> {
+<span class="kw">fn</span> <span class="ident">combine_nodes</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">V</span>: <span class="ident">Version</span><span class="op">&gt;</span>(<span class="ident">left</span>: <span class="ident">IndexedNode</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">V</span><span class="op">&gt;</span>, <span class="ident">right</span>: <span class="ident">IndexedNode</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">V</span><span class="op">&gt;</span>) -&gt; <span class="ident">Entry</span><span class="op">&lt;</span><span class="ident">V</span><span class="op">&gt;</span> {
     <span class="ident">Entry</span> {
         <span class="ident">kind</span>: <span class="ident">EntryKind::Node</span>(<span class="ident">left</span>.<span class="ident">link</span>, <span class="ident">right</span>.<span class="ident">link</span>),
         <span class="ident">data</span>: <span class="ident">V::combine</span>(<span class="kw-2">&amp;</span><span class="ident">left</span>.<span class="ident">node</span>.<span class="ident">data</span>, <span class="kw-2">&amp;</span><span class="ident">right</span>.<span class="ident">node</span>.<span class="ident">data</span>),
@@ -1071,7 +1071,7 @@
     <span class="kw">use</span> <span class="ident">assert_matches::assert_matches</span>;
     <span class="kw">use</span> <span class="ident">quickcheck</span>::{<span class="ident">quickcheck</span>, <span class="ident">TestResult</span>};
 
-    <span class="kw">fn</span> <span class="ident">leaf</span>(<span class="ident">height</span>: <span class="ident">u32</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">node_data::V2</span> {
+    <span class="kw">fn</span> <span class="ident">leaf</span>(<span class="ident">height</span>: <span class="ident">u32</span>) -&gt; <span class="ident">node_data::V2</span> {
         <span class="ident">node_data::V2</span> {
             <span class="ident">v1</span>: <span class="ident">NodeData</span> {
                 <span class="ident">consensus_branch_id</span>: <span class="number">1</span>,
@@ -1093,7 +1093,7 @@
         }
     }
 
-    <span class="kw">fn</span> <span class="ident">initial</span>() <span class="op">-</span><span class="op">&gt;</span> <span class="ident">Tree</span><span class="op">&lt;</span><span class="ident">V2</span><span class="op">&gt;</span> {
+    <span class="kw">fn</span> <span class="ident">initial</span>() -&gt; <span class="ident">Tree</span><span class="op">&lt;</span><span class="ident">V2</span><span class="op">&gt;</span> {
         <span class="kw">let</span> <span class="ident">node1</span> <span class="op">=</span> <span class="ident">Entry::new_leaf</span>(<span class="ident">leaf</span>(<span class="number">1</span>));
         <span class="kw">let</span> <span class="ident">node2</span> <span class="op">=</span> <span class="ident">Entry::new_leaf</span>(<span class="ident">leaf</span>(<span class="number">2</span>));
 
@@ -1106,7 +1106,7 @@
     }
 
     <span class="comment">// returns tree with specified number of leafs and it&#39;s root</span>
-    <span class="kw">fn</span> <span class="ident">generated</span>(<span class="ident">length</span>: <span class="ident">u32</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">Tree</span><span class="op">&lt;</span><span class="ident">V2</span><span class="op">&gt;</span> {
+    <span class="kw">fn</span> <span class="ident">generated</span>(<span class="ident">length</span>: <span class="ident">u32</span>) -&gt; <span class="ident">Tree</span><span class="op">&lt;</span><span class="ident">V2</span><span class="op">&gt;</span> {
         <span class="macro">assert!</span>(<span class="ident">length</span> <span class="op">&gt;</span><span class="op">=</span> <span class="number">3</span>);
         <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">tree</span> <span class="op">=</span> <span class="ident">initial</span>();
         <span class="kw">for</span> <span class="ident">i</span> <span class="kw">in</span> <span class="number">2</span>..<span class="ident">length</span> {
@@ -1380,7 +1380,7 @@
     }
 
     <span class="macro">quickcheck!</span> {
-        <span class="kw">fn</span> <span class="ident">there_and_back</span>(<span class="ident">number</span>: <span class="ident">u32</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">TestResult</span> {
+        <span class="kw">fn</span> <span class="ident">there_and_back</span>(<span class="ident">number</span>: <span class="ident">u32</span>) -&gt; <span class="ident">TestResult</span> {
             <span class="kw">if</span> <span class="ident">number</span> <span class="op">&gt;</span> <span class="number">1024</span><span class="kw-2">*</span><span class="number">1024</span> {
                 <span class="ident">TestResult::discard</span>()
             } <span class="kw">else</span> {
@@ -1396,7 +1396,7 @@
             }
         }
 
-        <span class="kw">fn</span> <span class="ident">leaf_count</span>(<span class="ident">number</span>: <span class="ident">u32</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">TestResult</span> {
+        <span class="kw">fn</span> <span class="ident">leaf_count</span>(<span class="ident">number</span>: <span class="ident">u32</span>) -&gt; <span class="ident">TestResult</span> {
             <span class="kw">if</span> <span class="op">!</span>(<span class="number">3</span>..<span class="op">=</span><span class="number">1024</span> <span class="op">*</span> <span class="number">1024</span>).<span class="ident">contains</span>(<span class="kw-2">&amp;</span><span class="ident">number</span>) {
                 <span class="ident">TestResult::discard</span>()
             } <span class="kw">else</span> {
@@ -1406,12 +1406,12 @@
                 }
 
                 <span class="ident">TestResult::from_bool</span>(
-                    <span class="ident">tree</span>.<span class="ident">root_node</span>().<span class="ident">expect</span>(<span class="string">&quot;no root&quot;</span>).<span class="ident">node</span>.<span class="ident">leaf_count</span>() <span class="op">=</span><span class="op">=</span> <span class="ident">number</span> <span class="kw">as</span> <span class="ident">u64</span>
+                    <span class="ident">tree</span>.<span class="ident">root_node</span>().<span class="ident">expect</span>(<span class="string">&quot;no root&quot;</span>).<span class="ident">node</span>.<span class="ident">leaf_count</span>() <span class="op">==</span> <span class="ident">number</span> <span class="kw">as</span> <span class="ident">u64</span>
                 )
             }
         }
 
-        <span class="kw">fn</span> <span class="ident">parity</span>(<span class="ident">number</span>: <span class="ident">u32</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">TestResult</span> {
+        <span class="kw">fn</span> <span class="ident">parity</span>(<span class="ident">number</span>: <span class="ident">u32</span>) -&gt; <span class="ident">TestResult</span> {
             <span class="kw">if</span> <span class="op">!</span>(<span class="number">3</span>..<span class="op">=</span><span class="number">2048</span> <span class="op">*</span> <span class="number">2048</span>).<span class="ident">contains</span>(<span class="kw-2">&amp;</span><span class="ident">number</span>) {
                 <span class="ident">TestResult::discard</span>()
             } <span class="kw">else</span> {
@@ -1421,7 +1421,7 @@
                 }
 
                 <span class="ident">TestResult::from_bool</span>(
-                    <span class="kw">if</span> <span class="ident">number</span> <span class="op">&amp;</span> (<span class="ident">number</span> <span class="op">-</span> <span class="number">1</span>) <span class="op">=</span><span class="op">=</span> <span class="number">0</span> {
+                    <span class="kw">if</span> <span class="ident">number</span> <span class="op">&amp;</span> (<span class="ident">number</span> <span class="op">-</span> <span class="number">1</span>) <span class="op">==</span> <span class="number">0</span> {
                         <span class="macro">matches!</span>(<span class="ident">tree</span>.<span class="ident">root</span>(), <span class="ident">EntryLink::Stored</span>(<span class="kw">_</span>))
                     } <span class="kw">else</span> {
                         <span class="macro">matches!</span>(<span class="ident">tree</span>.<span class="ident">root</span>(), <span class="ident">EntryLink::Generated</span>(<span class="kw">_</span>))
@@ -1430,7 +1430,7 @@
             }
         }
 
-        <span class="kw">fn</span> <span class="ident">parity_with_truncate</span>(<span class="ident">add</span>: <span class="ident">u32</span>, <span class="ident">delete</span>: <span class="ident">u32</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">TestResult</span> {
+        <span class="kw">fn</span> <span class="ident">parity_with_truncate</span>(<span class="ident">add</span>: <span class="ident">u32</span>, <span class="ident">delete</span>: <span class="ident">u32</span>) -&gt; <span class="ident">TestResult</span> {
             <span class="comment">// First we add `add` number of leaves, then delete `delete` number of leaves</span>
             <span class="comment">// What is left should be consistent with generated-stored structure</span>
             <span class="kw">if</span> <span class="ident">add</span> <span class="op">&gt;</span> <span class="number">2048</span> <span class="op">*</span> <span class="number">2048</span> <span class="op">|</span><span class="op">|</span> <span class="ident">add</span> <span class="op">&lt;</span> <span class="ident">delete</span> {
@@ -1447,7 +1447,7 @@
                 <span class="kw">let</span> <span class="ident">total</span> <span class="op">=</span> <span class="ident">add</span> <span class="op">-</span> <span class="ident">delete</span> <span class="op">+</span> <span class="number">2</span>;
 
                 <span class="ident">TestResult::from_bool</span>(
-                    <span class="kw">if</span> <span class="ident">total</span> <span class="op">&amp;</span> (<span class="ident">total</span> <span class="op">-</span> <span class="number">1</span>) <span class="op">=</span><span class="op">=</span> <span class="number">0</span> {
+                    <span class="kw">if</span> <span class="ident">total</span> <span class="op">&amp;</span> (<span class="ident">total</span> <span class="op">-</span> <span class="number">1</span>) <span class="op">==</span> <span class="number">0</span> {
                         <span class="macro">matches!</span>(<span class="ident">tree</span>.<span class="ident">root</span>(), <span class="ident">EntryLink::Stored</span>(<span class="kw">_</span>))
                     } <span class="kw">else</span> {
                         <span class="macro">matches!</span>(<span class="ident">tree</span>.<span class="ident">root</span>(), <span class="ident">EntryLink::Generated</span>(<span class="kw">_</span>))
@@ -1457,7 +1457,7 @@
         }
 
         <span class="comment">// Length of tree is always less than number of leaves squared</span>
-        <span class="kw">fn</span> <span class="ident">stored_length</span>(<span class="ident">add</span>: <span class="ident">u32</span>, <span class="ident">delete</span>: <span class="ident">u32</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">TestResult</span> {
+        <span class="kw">fn</span> <span class="ident">stored_length</span>(<span class="ident">add</span>: <span class="ident">u32</span>, <span class="ident">delete</span>: <span class="ident">u32</span>) -&gt; <span class="ident">TestResult</span> {
             <span class="kw">if</span> <span class="ident">add</span> <span class="op">&gt;</span> <span class="number">2048</span> <span class="op">*</span> <span class="number">2048</span> <span class="op">|</span><span class="op">|</span> <span class="ident">add</span> <span class="op">&lt;</span> <span class="ident">delete</span> {
                 <span class="ident">TestResult::discard</span>()
             } <span class="kw">else</span> {

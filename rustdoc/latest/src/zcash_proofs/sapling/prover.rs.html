@@ -284,14 +284,14 @@
 }
 
 <span class="kw">impl</span> <span class="ident">Default</span> <span class="kw">for</span> <span class="ident">SaplingProvingContext</span> {
-    <span class="kw">fn</span> <span class="ident">default</span>() <span class="op">-</span><span class="op">&gt;</span> <span class="self">Self</span> {
+    <span class="kw">fn</span> <span class="ident">default</span>() -&gt; <span class="self">Self</span> {
         <span class="ident">SaplingProvingContext::new</span>()
     }
 }
 
 <span class="kw">impl</span> <span class="ident">SaplingProvingContext</span> {
     <span class="doccomment">/// Construct a new context to be used with a single transaction.</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">new</span>() <span class="op">-</span><span class="op">&gt;</span> <span class="self">Self</span> {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">new</span>() -&gt; <span class="self">Self</span> {
         <span class="ident">SaplingProvingContext</span> {
             <span class="ident">bsk</span>: <span class="ident">jubjub::Fr::zero</span>(),
             <span class="ident">cv_sum</span>: <span class="ident">jubjub::ExtendedPoint::identity</span>(),
@@ -313,7 +313,7 @@
         <span class="ident">merkle_path</span>: <span class="ident">MerklePath</span><span class="op">&lt;</span><span class="ident">Node</span><span class="op">&gt;</span>,
         <span class="ident">proving_key</span>: <span class="kw-2">&amp;</span><span class="ident">Parameters</span><span class="op">&lt;</span><span class="ident">Bls12</span><span class="op">&gt;</span>,
         <span class="ident">verifying_key</span>: <span class="kw-2">&amp;</span><span class="ident">PreparedVerifyingKey</span><span class="op">&lt;</span><span class="ident">Bls12</span><span class="op">&gt;</span>,
-    ) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span>(<span class="ident">Proof</span><span class="op">&lt;</span><span class="ident">Bls12</span><span class="op">&gt;</span>, <span class="ident">jubjub::ExtendedPoint</span>, <span class="ident">PublicKey</span>), ()<span class="op">&gt;</span> {
+    ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span>(<span class="ident">Proof</span><span class="op">&lt;</span><span class="ident">Bls12</span><span class="op">&gt;</span>, <span class="ident">jubjub::ExtendedPoint</span>, <span class="ident">PublicKey</span>), ()<span class="op">&gt;</span> {
         <span class="comment">// Initialize secure RNG</span>
         <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">rng</span> <span class="op">=</span> <span class="ident">OsRng</span>;
 
@@ -424,7 +424,7 @@
         <span class="ident">rcm</span>: <span class="ident">jubjub::Fr</span>,
         <span class="ident">value</span>: <span class="ident">u64</span>,
         <span class="ident">proving_key</span>: <span class="kw-2">&amp;</span><span class="ident">Parameters</span><span class="op">&lt;</span><span class="ident">Bls12</span><span class="op">&gt;</span>,
-    ) <span class="op">-</span><span class="op">&gt;</span> (<span class="ident">Proof</span><span class="op">&lt;</span><span class="ident">Bls12</span><span class="op">&gt;</span>, <span class="ident">jubjub::ExtendedPoint</span>) {
+    ) -&gt; (<span class="ident">Proof</span><span class="op">&lt;</span><span class="ident">Bls12</span><span class="op">&gt;</span>, <span class="ident">jubjub::ExtendedPoint</span>) {
         <span class="comment">// Initialize secure RNG</span>
         <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">rng</span> <span class="op">=</span> <span class="ident">OsRng</span>;
 
@@ -471,7 +471,7 @@
 
     <span class="doccomment">/// Create the bindingSig for a Sapling transaction. All calls to spend_proof()</span>
     <span class="doccomment">/// and output_proof() must be completed before calling this function.</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">binding_sig</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">value_balance</span>: <span class="ident">Amount</span>, <span class="ident">sighash</span>: <span class="kw-2">&amp;</span>[<span class="ident">u8</span>; <span class="number">32</span>]) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Signature</span>, ()<span class="op">&gt;</span> {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">binding_sig</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">value_balance</span>: <span class="ident">Amount</span>, <span class="ident">sighash</span>: <span class="kw-2">&amp;</span>[<span class="ident">u8</span>; <span class="number">32</span>]) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Signature</span>, ()<span class="op">&gt;</span> {
         <span class="comment">// Initialize secure RNG</span>
         <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">rng</span> <span class="op">=</span> <span class="ident">OsRng</span>;
 

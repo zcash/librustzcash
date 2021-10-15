@@ -182,7 +182,7 @@
 <span class="kw">pub</span> <span class="kw">struct</span> <span class="ident">UnsupportedAddress</span>(<span class="kw-2">&amp;</span><span class="lifetime">&#39;static</span> <span class="ident">str</span>);
 
 <span class="kw">impl</span> <span class="ident">fmt::Display</span> <span class="kw">for</span> <span class="ident">UnsupportedAddress</span> {
-    <span class="kw">fn</span> <span class="ident">fmt</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">f</span>: <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">fmt::Formatter</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">fmt::Result</span> {
+    <span class="kw">fn</span> <span class="ident">fmt</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">f</span>: <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">fmt::Formatter</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span>) -&gt; <span class="ident">fmt::Result</span> {
         <span class="macro">write!</span>(<span class="ident">f</span>, <span class="string">&quot;Zcash {} addresses are not supported&quot;</span>, <span class="self">self</span>.<span class="number">0</span>)
     }
 }
@@ -224,27 +224,27 @@
 <span class="doccomment">/// );</span>
 <span class="doccomment">/// ```</span>
 <span class="kw">pub</span> <span class="kw">trait</span> <span class="ident">FromAddress</span>: <span class="ident">Sized</span> {
-    <span class="kw">fn</span> <span class="ident">from_sprout</span>(<span class="ident">net</span>: <span class="ident">Network</span>, <span class="ident">data</span>: <span class="ident">sprout::Data</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="self">Self</span>, <span class="ident">UnsupportedAddress</span><span class="op">&gt;</span> {
+    <span class="kw">fn</span> <span class="ident">from_sprout</span>(<span class="ident">net</span>: <span class="ident">Network</span>, <span class="ident">data</span>: <span class="ident">sprout::Data</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="self">Self</span>, <span class="ident">UnsupportedAddress</span><span class="op">&gt;</span> {
         <span class="kw">let</span> <span class="kw">_</span> <span class="op">=</span> (<span class="ident">net</span>, <span class="ident">data</span>);
         <span class="prelude-val">Err</span>(<span class="ident">UnsupportedAddress</span>(<span class="string">&quot;Sprout&quot;</span>))
     }
 
-    <span class="kw">fn</span> <span class="ident">from_sapling</span>(<span class="ident">net</span>: <span class="ident">Network</span>, <span class="ident">data</span>: <span class="ident">sapling::Data</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="self">Self</span>, <span class="ident">UnsupportedAddress</span><span class="op">&gt;</span> {
+    <span class="kw">fn</span> <span class="ident">from_sapling</span>(<span class="ident">net</span>: <span class="ident">Network</span>, <span class="ident">data</span>: <span class="ident">sapling::Data</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="self">Self</span>, <span class="ident">UnsupportedAddress</span><span class="op">&gt;</span> {
         <span class="kw">let</span> <span class="kw">_</span> <span class="op">=</span> (<span class="ident">net</span>, <span class="ident">data</span>);
         <span class="prelude-val">Err</span>(<span class="ident">UnsupportedAddress</span>(<span class="string">&quot;Sapling&quot;</span>))
     }
 
-    <span class="kw">fn</span> <span class="ident">from_unified</span>(<span class="ident">net</span>: <span class="ident">Network</span>, <span class="ident">data</span>: <span class="ident">unified::Address</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="self">Self</span>, <span class="ident">UnsupportedAddress</span><span class="op">&gt;</span> {
+    <span class="kw">fn</span> <span class="ident">from_unified</span>(<span class="ident">net</span>: <span class="ident">Network</span>, <span class="ident">data</span>: <span class="ident">unified::Address</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="self">Self</span>, <span class="ident">UnsupportedAddress</span><span class="op">&gt;</span> {
         <span class="kw">let</span> <span class="kw">_</span> <span class="op">=</span> (<span class="ident">net</span>, <span class="ident">data</span>);
         <span class="prelude-val">Err</span>(<span class="ident">UnsupportedAddress</span>(<span class="string">&quot;Unified&quot;</span>))
     }
 
-    <span class="kw">fn</span> <span class="ident">from_transparent_p2pkh</span>(<span class="ident">net</span>: <span class="ident">Network</span>, <span class="ident">data</span>: <span class="ident">p2pkh::Data</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="self">Self</span>, <span class="ident">UnsupportedAddress</span><span class="op">&gt;</span> {
+    <span class="kw">fn</span> <span class="ident">from_transparent_p2pkh</span>(<span class="ident">net</span>: <span class="ident">Network</span>, <span class="ident">data</span>: <span class="ident">p2pkh::Data</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="self">Self</span>, <span class="ident">UnsupportedAddress</span><span class="op">&gt;</span> {
         <span class="kw">let</span> <span class="kw">_</span> <span class="op">=</span> (<span class="ident">net</span>, <span class="ident">data</span>);
         <span class="prelude-val">Err</span>(<span class="ident">UnsupportedAddress</span>(<span class="string">&quot;transparent P2PKH&quot;</span>))
     }
 
-    <span class="kw">fn</span> <span class="ident">from_transparent_p2sh</span>(<span class="ident">net</span>: <span class="ident">Network</span>, <span class="ident">data</span>: <span class="ident">p2sh::Data</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="self">Self</span>, <span class="ident">UnsupportedAddress</span><span class="op">&gt;</span> {
+    <span class="kw">fn</span> <span class="ident">from_transparent_p2sh</span>(<span class="ident">net</span>: <span class="ident">Network</span>, <span class="ident">data</span>: <span class="ident">p2sh::Data</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="self">Self</span>, <span class="ident">UnsupportedAddress</span><span class="op">&gt;</span> {
         <span class="kw">let</span> <span class="kw">_</span> <span class="op">=</span> (<span class="ident">net</span>, <span class="ident">data</span>);
         <span class="prelude-val">Err</span>(<span class="ident">UnsupportedAddress</span>(<span class="string">&quot;transparent P2SH&quot;</span>))
     }
@@ -282,19 +282,19 @@
 <span class="doccomment">/// );</span>
 <span class="doccomment">/// ```</span>
 <span class="kw">pub</span> <span class="kw">trait</span> <span class="ident">ToAddress</span>: <span class="ident">private::Sealed</span> {
-    <span class="kw">fn</span> <span class="ident">from_sprout</span>(<span class="ident">net</span>: <span class="ident">Network</span>, <span class="ident">data</span>: <span class="ident">sprout::Data</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="self">Self</span>;
+    <span class="kw">fn</span> <span class="ident">from_sprout</span>(<span class="ident">net</span>: <span class="ident">Network</span>, <span class="ident">data</span>: <span class="ident">sprout::Data</span>) -&gt; <span class="self">Self</span>;
 
-    <span class="kw">fn</span> <span class="ident">from_sapling</span>(<span class="ident">net</span>: <span class="ident">Network</span>, <span class="ident">data</span>: <span class="ident">sapling::Data</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="self">Self</span>;
+    <span class="kw">fn</span> <span class="ident">from_sapling</span>(<span class="ident">net</span>: <span class="ident">Network</span>, <span class="ident">data</span>: <span class="ident">sapling::Data</span>) -&gt; <span class="self">Self</span>;
 
-    <span class="kw">fn</span> <span class="ident">from_unified</span>(<span class="ident">net</span>: <span class="ident">Network</span>, <span class="ident">data</span>: <span class="ident">unified::Address</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="self">Self</span>;
+    <span class="kw">fn</span> <span class="ident">from_unified</span>(<span class="ident">net</span>: <span class="ident">Network</span>, <span class="ident">data</span>: <span class="ident">unified::Address</span>) -&gt; <span class="self">Self</span>;
 
-    <span class="kw">fn</span> <span class="ident">from_transparent_p2pkh</span>(<span class="ident">net</span>: <span class="ident">Network</span>, <span class="ident">data</span>: <span class="ident">p2pkh::Data</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="self">Self</span>;
+    <span class="kw">fn</span> <span class="ident">from_transparent_p2pkh</span>(<span class="ident">net</span>: <span class="ident">Network</span>, <span class="ident">data</span>: <span class="ident">p2pkh::Data</span>) -&gt; <span class="self">Self</span>;
 
-    <span class="kw">fn</span> <span class="ident">from_transparent_p2sh</span>(<span class="ident">net</span>: <span class="ident">Network</span>, <span class="ident">data</span>: <span class="ident">p2sh::Data</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="self">Self</span>;
+    <span class="kw">fn</span> <span class="ident">from_transparent_p2sh</span>(<span class="ident">net</span>: <span class="ident">Network</span>, <span class="ident">data</span>: <span class="ident">p2sh::Data</span>) -&gt; <span class="self">Self</span>;
 }
 
 <span class="kw">impl</span> <span class="ident">ToAddress</span> <span class="kw">for</span> <span class="ident">ZcashAddress</span> {
-    <span class="kw">fn</span> <span class="ident">from_sprout</span>(<span class="ident">net</span>: <span class="ident">Network</span>, <span class="ident">data</span>: <span class="ident">sprout::Data</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="self">Self</span> {
+    <span class="kw">fn</span> <span class="ident">from_sprout</span>(<span class="ident">net</span>: <span class="ident">Network</span>, <span class="ident">data</span>: <span class="ident">sprout::Data</span>) -&gt; <span class="self">Self</span> {
         <span class="ident">ZcashAddress</span> {
             <span class="ident">net</span>: <span class="kw">if</span> <span class="kw">let</span> <span class="ident">Network::Regtest</span> <span class="op">=</span> <span class="ident">net</span> {
                 <span class="ident">Network::Test</span>
@@ -305,21 +305,21 @@
         }
     }
 
-    <span class="kw">fn</span> <span class="ident">from_sapling</span>(<span class="ident">net</span>: <span class="ident">Network</span>, <span class="ident">data</span>: <span class="ident">sapling::Data</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="self">Self</span> {
+    <span class="kw">fn</span> <span class="ident">from_sapling</span>(<span class="ident">net</span>: <span class="ident">Network</span>, <span class="ident">data</span>: <span class="ident">sapling::Data</span>) -&gt; <span class="self">Self</span> {
         <span class="ident">ZcashAddress</span> {
             <span class="ident">net</span>,
             <span class="ident">kind</span>: <span class="ident">AddressKind::Sapling</span>(<span class="ident">data</span>),
         }
     }
 
-    <span class="kw">fn</span> <span class="ident">from_unified</span>(<span class="ident">net</span>: <span class="ident">Network</span>, <span class="ident">data</span>: <span class="ident">unified::Address</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="self">Self</span> {
+    <span class="kw">fn</span> <span class="ident">from_unified</span>(<span class="ident">net</span>: <span class="ident">Network</span>, <span class="ident">data</span>: <span class="ident">unified::Address</span>) -&gt; <span class="self">Self</span> {
         <span class="ident">ZcashAddress</span> {
             <span class="ident">net</span>,
             <span class="ident">kind</span>: <span class="ident">AddressKind::Unified</span>(<span class="ident">data</span>),
         }
     }
 
-    <span class="kw">fn</span> <span class="ident">from_transparent_p2pkh</span>(<span class="ident">net</span>: <span class="ident">Network</span>, <span class="ident">data</span>: <span class="ident">p2pkh::Data</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="self">Self</span> {
+    <span class="kw">fn</span> <span class="ident">from_transparent_p2pkh</span>(<span class="ident">net</span>: <span class="ident">Network</span>, <span class="ident">data</span>: <span class="ident">p2pkh::Data</span>) -&gt; <span class="self">Self</span> {
         <span class="ident">ZcashAddress</span> {
             <span class="ident">net</span>: <span class="kw">if</span> <span class="kw">let</span> <span class="ident">Network::Regtest</span> <span class="op">=</span> <span class="ident">net</span> {
                 <span class="ident">Network::Test</span>
@@ -330,7 +330,7 @@
         }
     }
 
-    <span class="kw">fn</span> <span class="ident">from_transparent_p2sh</span>(<span class="ident">net</span>: <span class="ident">Network</span>, <span class="ident">data</span>: <span class="ident">p2sh::Data</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="self">Self</span> {
+    <span class="kw">fn</span> <span class="ident">from_transparent_p2sh</span>(<span class="ident">net</span>: <span class="ident">Network</span>, <span class="ident">data</span>: <span class="ident">p2sh::Data</span>) -&gt; <span class="self">Self</span> {
         <span class="ident">ZcashAddress</span> {
             <span class="ident">net</span>: <span class="kw">if</span> <span class="kw">let</span> <span class="ident">Network::Regtest</span> <span class="op">=</span> <span class="ident">net</span> {
                 <span class="ident">Network::Test</span>

@@ -50,7 +50,7 @@
 <span class="doccomment">/// let db = BlockDb::for_path(cache_file.path()).unwrap();</span>
 <span class="doccomment">/// init_cache_database(&amp;db).unwrap();</span>
 <span class="doccomment">/// ```</span>
-<span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">init_cache_database</span>(<span class="ident">db_cache</span>: <span class="kw-2">&amp;</span><span class="ident">BlockDb</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident">rusqlite::Error</span><span class="op">&gt;</span> {
+<span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">init_cache_database</span>(<span class="ident">db_cache</span>: <span class="kw-2">&amp;</span><span class="ident">BlockDb</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident">rusqlite::Error</span><span class="op">&gt;</span> {
     <span class="ident">db_cache</span>.<span class="number">0</span>.<span class="ident">execute</span>(
         <span class="string">&quot;CREATE TABLE IF NOT EXISTS compactblocks (
             height INTEGER PRIMARY KEY,

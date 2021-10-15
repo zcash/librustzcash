@@ -187,7 +187,7 @@
 
 <span class="kw">use</span> <span class="kw">crate</span>::{<span class="ident">node_data</span>, <span class="ident">NodeData</span>, <span class="ident">MAX_NODE_DATA_SIZE</span>};
 
-<span class="kw">fn</span> <span class="ident">blake2b_personal</span>(<span class="ident">personalization</span>: <span class="kw-2">&amp;</span>[<span class="ident">u8</span>], <span class="ident">input</span>: <span class="kw-2">&amp;</span>[<span class="ident">u8</span>]) <span class="op">-</span><span class="op">&gt;</span> [<span class="ident">u8</span>; <span class="number">32</span>] {
+<span class="kw">fn</span> <span class="ident">blake2b_personal</span>(<span class="ident">personalization</span>: <span class="kw-2">&amp;</span>[<span class="ident">u8</span>], <span class="ident">input</span>: <span class="kw-2">&amp;</span>[<span class="ident">u8</span>]) -&gt; [<span class="ident">u8</span>; <span class="number">32</span>] {
     <span class="kw">let</span> <span class="ident">hash_result</span> <span class="op">=</span> <span class="ident">Blake2Params::new</span>()
         .<span class="ident">hash_length</span>(<span class="number">32</span>)
         .<span class="ident">personal</span>(<span class="ident">personalization</span>)
@@ -199,7 +199,7 @@
     <span class="ident">result</span>
 }
 
-<span class="kw">fn</span> <span class="ident">personalization</span>(<span class="ident">branch_id</span>: <span class="ident">u32</span>) <span class="op">-</span><span class="op">&gt;</span> [<span class="ident">u8</span>; <span class="number">16</span>] {
+<span class="kw">fn</span> <span class="ident">personalization</span>(<span class="ident">branch_id</span>: <span class="ident">u32</span>) -&gt; [<span class="ident">u8</span>; <span class="number">16</span>] {
     <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">result</span> <span class="op">=</span> [<span class="number">0u8</span>; <span class="number">16</span>];
     <span class="ident">result</span>[..<span class="number">12</span>].<span class="ident">copy_from_slice</span>(<span class="string">b&quot;ZcashHistory&quot;</span>);
     <span class="ident">LittleEndian::write_u32</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">result</span>[<span class="number">12</span>..], <span class="ident">branch_id</span>);
@@ -212,16 +212,16 @@
     <span class="kw">type</span> <span class="ident">NodeData</span>: <span class="ident">fmt::Debug</span>;
 
     <span class="doccomment">/// Returns the consensus branch ID for the given node data.</span>
-    <span class="kw">fn</span> <span class="ident">consensus_branch_id</span>(<span class="ident">data</span>: <span class="kw-2">&amp;</span><span class="ident"><span class="self">Self</span>::NodeData</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">u32</span>;
+    <span class="kw">fn</span> <span class="ident">consensus_branch_id</span>(<span class="ident">data</span>: <span class="kw-2">&amp;</span><span class="ident"><span class="self">Self</span>::NodeData</span>) -&gt; <span class="ident">u32</span>;
 
     <span class="doccomment">/// Returns the start height for the given node data.</span>
-    <span class="kw">fn</span> <span class="ident">start_height</span>(<span class="ident">data</span>: <span class="kw-2">&amp;</span><span class="ident"><span class="self">Self</span>::NodeData</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">u64</span>;
+    <span class="kw">fn</span> <span class="ident">start_height</span>(<span class="ident">data</span>: <span class="kw-2">&amp;</span><span class="ident"><span class="self">Self</span>::NodeData</span>) -&gt; <span class="ident">u64</span>;
 
     <span class="doccomment">/// Returns the end height for the given node data.</span>
-    <span class="kw">fn</span> <span class="ident">end_height</span>(<span class="ident">data</span>: <span class="kw-2">&amp;</span><span class="ident"><span class="self">Self</span>::NodeData</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">u64</span>;
+    <span class="kw">fn</span> <span class="ident">end_height</span>(<span class="ident">data</span>: <span class="kw-2">&amp;</span><span class="ident"><span class="self">Self</span>::NodeData</span>) -&gt; <span class="ident">u64</span>;
 
     <span class="doccomment">/// Combines two nodes&#39; metadata.</span>
-    <span class="kw">fn</span> <span class="ident">combine</span>(<span class="ident">left</span>: <span class="kw-2">&amp;</span><span class="ident"><span class="self">Self</span>::NodeData</span>, <span class="ident">right</span>: <span class="kw-2">&amp;</span><span class="ident"><span class="self">Self</span>::NodeData</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident"><span class="self">Self</span>::NodeData</span> {
+    <span class="kw">fn</span> <span class="ident">combine</span>(<span class="ident">left</span>: <span class="kw-2">&amp;</span><span class="ident"><span class="self">Self</span>::NodeData</span>, <span class="ident">right</span>: <span class="kw-2">&amp;</span><span class="ident"><span class="self">Self</span>::NodeData</span>) -&gt; <span class="ident"><span class="self">Self</span>::NodeData</span> {
         <span class="macro">assert_eq!</span>(
             <span class="ident"><span class="self">Self</span>::consensus_branch_id</span>(<span class="ident">left</span>),
             <span class="ident"><span class="self">Self</span>::consensus_branch_id</span>(<span class="ident">right</span>)
@@ -252,17 +252,17 @@
         <span class="ident">subtree_commitment</span>: [<span class="ident">u8</span>; <span class="number">32</span>],
         <span class="ident">left</span>: <span class="kw-2">&amp;</span><span class="ident"><span class="self">Self</span>::NodeData</span>,
         <span class="ident">right</span>: <span class="kw-2">&amp;</span><span class="ident"><span class="self">Self</span>::NodeData</span>,
-    ) <span class="op">-</span><span class="op">&gt;</span> <span class="ident"><span class="self">Self</span>::NodeData</span>;
+    ) -&gt; <span class="ident"><span class="self">Self</span>::NodeData</span>;
 
     <span class="doccomment">/// Parses node data from the given reader.</span>
-    <span class="kw">fn</span> <span class="ident">read</span><span class="op">&lt;</span><span class="ident">R</span>: <span class="ident">io::Read</span><span class="op">&gt;</span>(<span class="ident">consensus_branch_id</span>: <span class="ident">u32</span>, <span class="ident">r</span>: <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">R</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">io::Result</span><span class="op">&lt;</span><span class="ident"><span class="self">Self</span>::NodeData</span><span class="op">&gt;</span>;
+    <span class="kw">fn</span> <span class="ident">read</span><span class="op">&lt;</span><span class="ident">R</span>: <span class="ident">io::Read</span><span class="op">&gt;</span>(<span class="ident">consensus_branch_id</span>: <span class="ident">u32</span>, <span class="ident">r</span>: <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">R</span>) -&gt; <span class="ident">io::Result</span><span class="op">&lt;</span><span class="ident"><span class="self">Self</span>::NodeData</span><span class="op">&gt;</span>;
 
     <span class="doccomment">/// Writes the byte representation of the given node data to the given writer.</span>
-    <span class="kw">fn</span> <span class="ident">write</span><span class="op">&lt;</span><span class="ident">W</span>: <span class="ident">io::Write</span><span class="op">&gt;</span>(<span class="ident">data</span>: <span class="kw-2">&amp;</span><span class="ident"><span class="self">Self</span>::NodeData</span>, <span class="ident">w</span>: <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">W</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">io::Result</span><span class="op">&lt;</span>()<span class="op">&gt;</span>;
+    <span class="kw">fn</span> <span class="ident">write</span><span class="op">&lt;</span><span class="ident">W</span>: <span class="ident">io::Write</span><span class="op">&gt;</span>(<span class="ident">data</span>: <span class="kw-2">&amp;</span><span class="ident"><span class="self">Self</span>::NodeData</span>, <span class="ident">w</span>: <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">W</span>) -&gt; <span class="ident">io::Result</span><span class="op">&lt;</span>()<span class="op">&gt;</span>;
 
     <span class="doccomment">/// Converts to byte representation.</span>
     <span class="attribute">#[<span class="ident">allow</span>(<span class="ident">clippy::wrong_self_convention</span>)]</span>
-    <span class="kw">fn</span> <span class="ident">to_bytes</span>(<span class="ident">data</span>: <span class="kw-2">&amp;</span><span class="ident"><span class="self">Self</span>::NodeData</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span> {
+    <span class="kw">fn</span> <span class="ident">to_bytes</span>(<span class="ident">data</span>: <span class="kw-2">&amp;</span><span class="ident"><span class="self">Self</span>::NodeData</span>) -&gt; <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span> {
         <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">buf</span> <span class="op">=</span> [<span class="number">0u8</span>; <span class="ident">MAX_NODE_DATA_SIZE</span>];
         <span class="kw">let</span> <span class="ident">pos</span> <span class="op">=</span> {
             <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">cursor</span> <span class="op">=</span> <span class="ident">std::io::Cursor::new</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">buf</span>[..]);
@@ -274,13 +274,13 @@
     }
 
     <span class="doccomment">/// Convert from byte representation.</span>
-    <span class="kw">fn</span> <span class="ident">from_bytes</span><span class="op">&lt;</span><span class="ident">T</span>: <span class="ident">AsRef</span><span class="op">&lt;</span>[<span class="ident">u8</span>]<span class="op">&gt;</span><span class="op">&gt;</span>(<span class="ident">consensus_branch_id</span>: <span class="ident">u32</span>, <span class="ident">buf</span>: <span class="ident">T</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">io::Result</span><span class="op">&lt;</span><span class="ident"><span class="self">Self</span>::NodeData</span><span class="op">&gt;</span> {
+    <span class="kw">fn</span> <span class="ident">from_bytes</span><span class="op">&lt;</span><span class="ident">T</span>: <span class="ident">AsRef</span><span class="op">&lt;</span>[<span class="ident">u8</span>]<span class="op">&gt;</span><span class="op">&gt;</span>(<span class="ident">consensus_branch_id</span>: <span class="ident">u32</span>, <span class="ident">buf</span>: <span class="ident">T</span>) -&gt; <span class="ident">io::Result</span><span class="op">&lt;</span><span class="ident"><span class="self">Self</span>::NodeData</span><span class="op">&gt;</span> {
         <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">cursor</span> <span class="op">=</span> <span class="ident">std::io::Cursor::new</span>(<span class="ident">buf</span>);
         <span class="ident"><span class="self">Self</span>::read</span>(<span class="ident">consensus_branch_id</span>, <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">cursor</span>)
     }
 
     <span class="doccomment">/// Hash node metadata</span>
-    <span class="kw">fn</span> <span class="ident">hash</span>(<span class="ident">data</span>: <span class="kw-2">&amp;</span><span class="ident"><span class="self">Self</span>::NodeData</span>) <span class="op">-</span><span class="op">&gt;</span> [<span class="ident">u8</span>; <span class="number">32</span>] {
+    <span class="kw">fn</span> <span class="ident">hash</span>(<span class="ident">data</span>: <span class="kw-2">&amp;</span><span class="ident"><span class="self">Self</span>::NodeData</span>) -&gt; [<span class="ident">u8</span>; <span class="number">32</span>] {
         <span class="kw">let</span> <span class="ident">bytes</span> <span class="op">=</span> <span class="ident"><span class="self">Self</span>::to_bytes</span>(<span class="ident">data</span>);
 
         <span class="ident">blake2b_personal</span>(<span class="kw-2">&amp;</span><span class="ident">personalization</span>(<span class="ident"><span class="self">Self</span>::consensus_branch_id</span>(<span class="ident">data</span>)), <span class="kw-2">&amp;</span><span class="ident">bytes</span>)
@@ -295,15 +295,15 @@
 <span class="kw">impl</span> <span class="ident">Version</span> <span class="kw">for</span> <span class="ident">V1</span> {
     <span class="kw">type</span> <span class="ident">NodeData</span> <span class="op">=</span> <span class="ident">NodeData</span>;
 
-    <span class="kw">fn</span> <span class="ident">consensus_branch_id</span>(<span class="ident">data</span>: <span class="kw-2">&amp;</span><span class="ident"><span class="self">Self</span>::NodeData</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">u32</span> {
+    <span class="kw">fn</span> <span class="ident">consensus_branch_id</span>(<span class="ident">data</span>: <span class="kw-2">&amp;</span><span class="ident"><span class="self">Self</span>::NodeData</span>) -&gt; <span class="ident">u32</span> {
         <span class="ident">data</span>.<span class="ident">consensus_branch_id</span>
     }
 
-    <span class="kw">fn</span> <span class="ident">start_height</span>(<span class="ident">data</span>: <span class="kw-2">&amp;</span><span class="ident"><span class="self">Self</span>::NodeData</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">u64</span> {
+    <span class="kw">fn</span> <span class="ident">start_height</span>(<span class="ident">data</span>: <span class="kw-2">&amp;</span><span class="ident"><span class="self">Self</span>::NodeData</span>) -&gt; <span class="ident">u64</span> {
         <span class="ident">data</span>.<span class="ident">start_height</span>
     }
 
-    <span class="kw">fn</span> <span class="ident">end_height</span>(<span class="ident">data</span>: <span class="kw-2">&amp;</span><span class="ident"><span class="self">Self</span>::NodeData</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">u64</span> {
+    <span class="kw">fn</span> <span class="ident">end_height</span>(<span class="ident">data</span>: <span class="kw-2">&amp;</span><span class="ident"><span class="self">Self</span>::NodeData</span>) -&gt; <span class="ident">u64</span> {
         <span class="ident">data</span>.<span class="ident">end_height</span>
     }
 
@@ -311,15 +311,15 @@
         <span class="ident">subtree_commitment</span>: [<span class="ident">u8</span>; <span class="number">32</span>],
         <span class="ident">left</span>: <span class="kw-2">&amp;</span><span class="ident"><span class="self">Self</span>::NodeData</span>,
         <span class="ident">right</span>: <span class="kw-2">&amp;</span><span class="ident"><span class="self">Self</span>::NodeData</span>,
-    ) <span class="op">-</span><span class="op">&gt;</span> <span class="ident"><span class="self">Self</span>::NodeData</span> {
+    ) -&gt; <span class="ident"><span class="self">Self</span>::NodeData</span> {
         <span class="ident">NodeData::combine_inner</span>(<span class="ident">subtree_commitment</span>, <span class="ident">left</span>, <span class="ident">right</span>)
     }
 
-    <span class="kw">fn</span> <span class="ident">read</span><span class="op">&lt;</span><span class="ident">R</span>: <span class="ident">io::Read</span><span class="op">&gt;</span>(<span class="ident">consensus_branch_id</span>: <span class="ident">u32</span>, <span class="ident">r</span>: <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">R</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">io::Result</span><span class="op">&lt;</span><span class="ident"><span class="self">Self</span>::NodeData</span><span class="op">&gt;</span> {
+    <span class="kw">fn</span> <span class="ident">read</span><span class="op">&lt;</span><span class="ident">R</span>: <span class="ident">io::Read</span><span class="op">&gt;</span>(<span class="ident">consensus_branch_id</span>: <span class="ident">u32</span>, <span class="ident">r</span>: <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">R</span>) -&gt; <span class="ident">io::Result</span><span class="op">&lt;</span><span class="ident"><span class="self">Self</span>::NodeData</span><span class="op">&gt;</span> {
         <span class="ident">NodeData::read</span>(<span class="ident">consensus_branch_id</span>, <span class="ident">r</span>)
     }
 
-    <span class="kw">fn</span> <span class="ident">write</span><span class="op">&lt;</span><span class="ident">W</span>: <span class="ident">io::Write</span><span class="op">&gt;</span>(<span class="ident">data</span>: <span class="kw-2">&amp;</span><span class="ident"><span class="self">Self</span>::NodeData</span>, <span class="ident">w</span>: <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">W</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">io::Result</span><span class="op">&lt;</span>()<span class="op">&gt;</span> {
+    <span class="kw">fn</span> <span class="ident">write</span><span class="op">&lt;</span><span class="ident">W</span>: <span class="ident">io::Write</span><span class="op">&gt;</span>(<span class="ident">data</span>: <span class="kw-2">&amp;</span><span class="ident"><span class="self">Self</span>::NodeData</span>, <span class="ident">w</span>: <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">W</span>) -&gt; <span class="ident">io::Result</span><span class="op">&lt;</span>()<span class="op">&gt;</span> {
         <span class="ident">data</span>.<span class="ident">write</span>(<span class="ident">w</span>)
     }
 }
@@ -332,15 +332,15 @@
 <span class="kw">impl</span> <span class="ident">Version</span> <span class="kw">for</span> <span class="ident">V2</span> {
     <span class="kw">type</span> <span class="ident">NodeData</span> <span class="op">=</span> <span class="ident">node_data::V2</span>;
 
-    <span class="kw">fn</span> <span class="ident">consensus_branch_id</span>(<span class="ident">data</span>: <span class="kw-2">&amp;</span><span class="ident"><span class="self">Self</span>::NodeData</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">u32</span> {
+    <span class="kw">fn</span> <span class="ident">consensus_branch_id</span>(<span class="ident">data</span>: <span class="kw-2">&amp;</span><span class="ident"><span class="self">Self</span>::NodeData</span>) -&gt; <span class="ident">u32</span> {
         <span class="ident">data</span>.<span class="ident">v1</span>.<span class="ident">consensus_branch_id</span>
     }
 
-    <span class="kw">fn</span> <span class="ident">start_height</span>(<span class="ident">data</span>: <span class="kw-2">&amp;</span><span class="ident"><span class="self">Self</span>::NodeData</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">u64</span> {
+    <span class="kw">fn</span> <span class="ident">start_height</span>(<span class="ident">data</span>: <span class="kw-2">&amp;</span><span class="ident"><span class="self">Self</span>::NodeData</span>) -&gt; <span class="ident">u64</span> {
         <span class="ident">data</span>.<span class="ident">v1</span>.<span class="ident">start_height</span>
     }
 
-    <span class="kw">fn</span> <span class="ident">end_height</span>(<span class="ident">data</span>: <span class="kw-2">&amp;</span><span class="ident"><span class="self">Self</span>::NodeData</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">u64</span> {
+    <span class="kw">fn</span> <span class="ident">end_height</span>(<span class="ident">data</span>: <span class="kw-2">&amp;</span><span class="ident"><span class="self">Self</span>::NodeData</span>) -&gt; <span class="ident">u64</span> {
         <span class="ident">data</span>.<span class="ident">v1</span>.<span class="ident">end_height</span>
     }
 
@@ -348,15 +348,15 @@
         <span class="ident">subtree_commitment</span>: [<span class="ident">u8</span>; <span class="number">32</span>],
         <span class="ident">left</span>: <span class="kw-2">&amp;</span><span class="ident"><span class="self">Self</span>::NodeData</span>,
         <span class="ident">right</span>: <span class="kw-2">&amp;</span><span class="ident"><span class="self">Self</span>::NodeData</span>,
-    ) <span class="op">-</span><span class="op">&gt;</span> <span class="ident"><span class="self">Self</span>::NodeData</span> {
+    ) -&gt; <span class="ident"><span class="self">Self</span>::NodeData</span> {
         <span class="ident">node_data::V2::combine_inner</span>(<span class="ident">subtree_commitment</span>, <span class="ident">left</span>, <span class="ident">right</span>)
     }
 
-    <span class="kw">fn</span> <span class="ident">read</span><span class="op">&lt;</span><span class="ident">R</span>: <span class="ident">io::Read</span><span class="op">&gt;</span>(<span class="ident">consensus_branch_id</span>: <span class="ident">u32</span>, <span class="ident">r</span>: <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">R</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">io::Result</span><span class="op">&lt;</span><span class="ident"><span class="self">Self</span>::NodeData</span><span class="op">&gt;</span> {
+    <span class="kw">fn</span> <span class="ident">read</span><span class="op">&lt;</span><span class="ident">R</span>: <span class="ident">io::Read</span><span class="op">&gt;</span>(<span class="ident">consensus_branch_id</span>: <span class="ident">u32</span>, <span class="ident">r</span>: <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">R</span>) -&gt; <span class="ident">io::Result</span><span class="op">&lt;</span><span class="ident"><span class="self">Self</span>::NodeData</span><span class="op">&gt;</span> {
         <span class="ident">node_data::V2::read</span>(<span class="ident">consensus_branch_id</span>, <span class="ident">r</span>)
     }
 
-    <span class="kw">fn</span> <span class="ident">write</span><span class="op">&lt;</span><span class="ident">W</span>: <span class="ident">io::Write</span><span class="op">&gt;</span>(<span class="ident">data</span>: <span class="kw-2">&amp;</span><span class="ident"><span class="self">Self</span>::NodeData</span>, <span class="ident">w</span>: <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">W</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">io::Result</span><span class="op">&lt;</span>()<span class="op">&gt;</span> {
+    <span class="kw">fn</span> <span class="ident">write</span><span class="op">&lt;</span><span class="ident">W</span>: <span class="ident">io::Write</span><span class="op">&gt;</span>(<span class="ident">data</span>: <span class="kw-2">&amp;</span><span class="ident"><span class="self">Self</span>::NodeData</span>, <span class="ident">w</span>: <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">W</span>) -&gt; <span class="ident">io::Result</span><span class="op">&lt;</span>()<span class="op">&gt;</span> {
         <span class="ident">data</span>.<span class="ident">write</span>(<span class="ident">w</span>)
     }
 }

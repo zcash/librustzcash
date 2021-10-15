@@ -1158,7 +1158,7 @@
 <span class="kw">pub</span> <span class="kw">struct</span> <span class="ident">TxId</span>([<span class="ident">u8</span>; <span class="number">32</span>]);
 
 <span class="kw">impl</span> <span class="ident">fmt::Display</span> <span class="kw">for</span> <span class="ident">TxId</span> {
-    <span class="kw">fn</span> <span class="ident">fmt</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">formatter</span>: <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">fmt::Formatter</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">fmt::Result</span> {
+    <span class="kw">fn</span> <span class="ident">fmt</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">formatter</span>: <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">fmt::Formatter</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span>) -&gt; <span class="ident">fmt::Result</span> {
         <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">data</span> <span class="op">=</span> <span class="self">self</span>.<span class="number">0</span>;
         <span class="ident">data</span>.<span class="ident">reverse</span>();
         <span class="ident">formatter</span>.<span class="ident">write_str</span>(<span class="kw-2">&amp;</span><span class="ident">hex::encode</span>(<span class="ident">data</span>))
@@ -1166,23 +1166,23 @@
 }
 
 <span class="kw">impl</span> <span class="ident">AsRef</span><span class="op">&lt;</span>[<span class="ident">u8</span>; <span class="number">32</span>]<span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">TxId</span> {
-    <span class="kw">fn</span> <span class="ident">as_ref</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="kw-2">&amp;</span>[<span class="ident">u8</span>; <span class="number">32</span>] {
+    <span class="kw">fn</span> <span class="ident">as_ref</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>[<span class="ident">u8</span>; <span class="number">32</span>] {
         <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="number">0</span>
     }
 }
 
 <span class="kw">impl</span> <span class="ident">TxId</span> {
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">from_bytes</span>(<span class="ident">bytes</span>: [<span class="ident">u8</span>; <span class="number">32</span>]) <span class="op">-</span><span class="op">&gt;</span> <span class="self">Self</span> {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">from_bytes</span>(<span class="ident">bytes</span>: [<span class="ident">u8</span>; <span class="number">32</span>]) -&gt; <span class="self">Self</span> {
         <span class="ident">TxId</span>(<span class="ident">bytes</span>)
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">read</span><span class="op">&lt;</span><span class="ident">R</span>: <span class="ident">Read</span><span class="op">&gt;</span>(<span class="kw-2">mut</span> <span class="ident">reader</span>: <span class="ident">R</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">io::Result</span><span class="op">&lt;</span><span class="self">Self</span><span class="op">&gt;</span> {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">read</span><span class="op">&lt;</span><span class="ident">R</span>: <span class="ident">Read</span><span class="op">&gt;</span>(<span class="kw-2">mut</span> <span class="ident">reader</span>: <span class="ident">R</span>) -&gt; <span class="ident">io::Result</span><span class="op">&lt;</span><span class="self">Self</span><span class="op">&gt;</span> {
         <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">hash</span> <span class="op">=</span> [<span class="number">0u8</span>; <span class="number">32</span>];
         <span class="ident">reader</span>.<span class="ident">read_exact</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">hash</span>)<span class="question-mark">?</span>;
         <span class="prelude-val">Ok</span>(<span class="ident">TxId::from_bytes</span>(<span class="ident">hash</span>))
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">write</span><span class="op">&lt;</span><span class="ident">W</span>: <span class="ident">Write</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="kw-2">mut</span> <span class="ident">writer</span>: <span class="ident">W</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">io::Result</span><span class="op">&lt;</span>()<span class="op">&gt;</span> {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">write</span><span class="op">&lt;</span><span class="ident">W</span>: <span class="ident">Write</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="kw-2">mut</span> <span class="ident">writer</span>: <span class="ident">W</span>) -&gt; <span class="ident">io::Result</span><span class="op">&lt;</span>()<span class="op">&gt;</span> {
         <span class="ident">writer</span>.<span class="ident">write_all</span>(<span class="kw-2">&amp;</span><span class="self">self</span>.<span class="number">0</span>)<span class="question-mark">?</span>;
         <span class="prelude-val">Ok</span>(())
     }
@@ -1206,19 +1206,19 @@
 }
 
 <span class="kw">impl</span> <span class="ident">TxVersion</span> {
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">read</span><span class="op">&lt;</span><span class="ident">R</span>: <span class="ident">Read</span><span class="op">&gt;</span>(<span class="kw-2">mut</span> <span class="ident">reader</span>: <span class="ident">R</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">io::Result</span><span class="op">&lt;</span><span class="self">Self</span><span class="op">&gt;</span> {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">read</span><span class="op">&lt;</span><span class="ident">R</span>: <span class="ident">Read</span><span class="op">&gt;</span>(<span class="kw-2">mut</span> <span class="ident">reader</span>: <span class="ident">R</span>) -&gt; <span class="ident">io::Result</span><span class="op">&lt;</span><span class="self">Self</span><span class="op">&gt;</span> {
         <span class="kw">let</span> <span class="ident">header</span> <span class="op">=</span> <span class="ident">reader</span>.<span class="ident">read_u32</span>::<span class="op">&lt;</span><span class="ident">LittleEndian</span><span class="op">&gt;</span>()<span class="question-mark">?</span>;
-        <span class="kw">let</span> <span class="ident">overwintered</span> <span class="op">=</span> (<span class="ident">header</span> <span class="op">&gt;</span><span class="op">&gt;</span> <span class="number">31</span>) <span class="op">=</span><span class="op">=</span> <span class="number">1</span>;
+        <span class="kw">let</span> <span class="ident">overwintered</span> <span class="op">=</span> (<span class="ident">header</span> <span class="op">&gt;</span><span class="op">&gt;</span> <span class="number">31</span>) <span class="op">==</span> <span class="number">1</span>;
         <span class="kw">let</span> <span class="ident">version</span> <span class="op">=</span> <span class="ident">header</span> <span class="op">&amp;</span> <span class="number">0x7FFFFFFF</span>;
 
         <span class="kw">if</span> <span class="ident">overwintered</span> {
             <span class="kw">match</span> (<span class="ident">version</span>, <span class="ident">reader</span>.<span class="ident">read_u32</span>::<span class="op">&lt;</span><span class="ident">LittleEndian</span><span class="op">&gt;</span>()<span class="question-mark">?</span>) {
-                (<span class="ident">OVERWINTER_TX_VERSION</span>, <span class="ident">OVERWINTER_VERSION_GROUP_ID</span>) <span class="op">=</span><span class="op">&gt;</span> <span class="prelude-val">Ok</span>(<span class="ident">TxVersion::Overwinter</span>),
-                (<span class="ident">SAPLING_TX_VERSION</span>, <span class="ident">SAPLING_VERSION_GROUP_ID</span>) <span class="op">=</span><span class="op">&gt;</span> <span class="prelude-val">Ok</span>(<span class="ident">TxVersion::Sapling</span>),
-                (<span class="ident">V5_TX_VERSION</span>, <span class="ident">V5_VERSION_GROUP_ID</span>) <span class="op">=</span><span class="op">&gt;</span> <span class="prelude-val">Ok</span>(<span class="ident">TxVersion::Zip225</span>),
+                (<span class="ident">OVERWINTER_TX_VERSION</span>, <span class="ident">OVERWINTER_VERSION_GROUP_ID</span>) =&gt; <span class="prelude-val">Ok</span>(<span class="ident">TxVersion::Overwinter</span>),
+                (<span class="ident">SAPLING_TX_VERSION</span>, <span class="ident">SAPLING_VERSION_GROUP_ID</span>) =&gt; <span class="prelude-val">Ok</span>(<span class="ident">TxVersion::Sapling</span>),
+                (<span class="ident">V5_TX_VERSION</span>, <span class="ident">V5_VERSION_GROUP_ID</span>) =&gt; <span class="prelude-val">Ok</span>(<span class="ident">TxVersion::Zip225</span>),
                 <span class="attribute">#[<span class="ident">cfg</span>(<span class="ident">feature</span> <span class="op">=</span> <span class="string">&quot;zfuture&quot;</span>)]</span>
-                (<span class="ident">ZFUTURE_TX_VERSION</span>, <span class="ident">ZFUTURE_VERSION_GROUP_ID</span>) <span class="op">=</span><span class="op">&gt;</span> <span class="prelude-val">Ok</span>(<span class="ident">TxVersion::ZFuture</span>),
-                <span class="kw">_</span> <span class="op">=</span><span class="op">&gt;</span> <span class="prelude-val">Err</span>(<span class="ident">io::Error::new</span>(
+                (<span class="ident">ZFUTURE_TX_VERSION</span>, <span class="ident">ZFUTURE_VERSION_GROUP_ID</span>) =&gt; <span class="prelude-val">Ok</span>(<span class="ident">TxVersion::ZFuture</span>),
+                <span class="kw">_</span> =&gt; <span class="prelude-val">Err</span>(<span class="ident">io::Error::new</span>(
                     <span class="ident">io::ErrorKind::InvalidInput</span>,
                     <span class="string">&quot;Unknown transaction format&quot;</span>,
                 )),
@@ -1233,91 +1233,91 @@
         }
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">header</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">u32</span> {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">header</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">u32</span> {
         <span class="comment">// After Sprout, the overwintered bit is always set.</span>
         <span class="kw">let</span> <span class="ident">overwintered</span> <span class="op">=</span> <span class="kw">match</span> <span class="self">self</span> {
-            <span class="ident">TxVersion::Sprout</span>(<span class="kw">_</span>) <span class="op">=</span><span class="op">&gt;</span> <span class="number">0</span>,
-            <span class="kw">_</span> <span class="op">=</span><span class="op">&gt;</span> <span class="number">1</span> <span class="op">&lt;</span><span class="op">&lt;</span> <span class="number">31</span>,
+            <span class="ident">TxVersion::Sprout</span>(<span class="kw">_</span>) =&gt; <span class="number">0</span>,
+            <span class="kw">_</span> =&gt; <span class="number">1</span> <span class="op">&lt;</span><span class="op">&lt;</span> <span class="number">31</span>,
         };
 
         <span class="ident">overwintered</span>
             <span class="op">|</span> <span class="kw">match</span> <span class="self">self</span> {
-                <span class="ident">TxVersion::Sprout</span>(<span class="ident">v</span>) <span class="op">=</span><span class="op">&gt;</span> <span class="kw-2">*</span><span class="ident">v</span>,
-                <span class="ident">TxVersion::Overwinter</span> <span class="op">=</span><span class="op">&gt;</span> <span class="ident">OVERWINTER_TX_VERSION</span>,
-                <span class="ident">TxVersion::Sapling</span> <span class="op">=</span><span class="op">&gt;</span> <span class="ident">SAPLING_TX_VERSION</span>,
-                <span class="ident">TxVersion::Zip225</span> <span class="op">=</span><span class="op">&gt;</span> <span class="ident">V5_TX_VERSION</span>,
+                <span class="ident">TxVersion::Sprout</span>(<span class="ident">v</span>) =&gt; <span class="kw-2">*</span><span class="ident">v</span>,
+                <span class="ident">TxVersion::Overwinter</span> =&gt; <span class="ident">OVERWINTER_TX_VERSION</span>,
+                <span class="ident">TxVersion::Sapling</span> =&gt; <span class="ident">SAPLING_TX_VERSION</span>,
+                <span class="ident">TxVersion::Zip225</span> =&gt; <span class="ident">V5_TX_VERSION</span>,
                 <span class="attribute">#[<span class="ident">cfg</span>(<span class="ident">feature</span> <span class="op">=</span> <span class="string">&quot;zfuture&quot;</span>)]</span>
-                <span class="ident">TxVersion::ZFuture</span> <span class="op">=</span><span class="op">&gt;</span> <span class="ident">ZFUTURE_TX_VERSION</span>,
+                <span class="ident">TxVersion::ZFuture</span> =&gt; <span class="ident">ZFUTURE_TX_VERSION</span>,
             }
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">version_group_id</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">u32</span> {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">version_group_id</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">u32</span> {
         <span class="kw">match</span> <span class="self">self</span> {
-            <span class="ident">TxVersion::Sprout</span>(<span class="kw">_</span>) <span class="op">=</span><span class="op">&gt;</span> <span class="number">0</span>,
-            <span class="ident">TxVersion::Overwinter</span> <span class="op">=</span><span class="op">&gt;</span> <span class="ident">OVERWINTER_VERSION_GROUP_ID</span>,
-            <span class="ident">TxVersion::Sapling</span> <span class="op">=</span><span class="op">&gt;</span> <span class="ident">SAPLING_VERSION_GROUP_ID</span>,
-            <span class="ident">TxVersion::Zip225</span> <span class="op">=</span><span class="op">&gt;</span> <span class="ident">V5_VERSION_GROUP_ID</span>,
+            <span class="ident">TxVersion::Sprout</span>(<span class="kw">_</span>) =&gt; <span class="number">0</span>,
+            <span class="ident">TxVersion::Overwinter</span> =&gt; <span class="ident">OVERWINTER_VERSION_GROUP_ID</span>,
+            <span class="ident">TxVersion::Sapling</span> =&gt; <span class="ident">SAPLING_VERSION_GROUP_ID</span>,
+            <span class="ident">TxVersion::Zip225</span> =&gt; <span class="ident">V5_VERSION_GROUP_ID</span>,
             <span class="attribute">#[<span class="ident">cfg</span>(<span class="ident">feature</span> <span class="op">=</span> <span class="string">&quot;zfuture&quot;</span>)]</span>
-            <span class="ident">TxVersion::ZFuture</span> <span class="op">=</span><span class="op">&gt;</span> <span class="ident">ZFUTURE_VERSION_GROUP_ID</span>,
+            <span class="ident">TxVersion::ZFuture</span> =&gt; <span class="ident">ZFUTURE_VERSION_GROUP_ID</span>,
         }
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">write</span><span class="op">&lt;</span><span class="ident">W</span>: <span class="ident">Write</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="kw-2">mut</span> <span class="ident">writer</span>: <span class="ident">W</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">io::Result</span><span class="op">&lt;</span>()<span class="op">&gt;</span> {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">write</span><span class="op">&lt;</span><span class="ident">W</span>: <span class="ident">Write</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="kw-2">mut</span> <span class="ident">writer</span>: <span class="ident">W</span>) -&gt; <span class="ident">io::Result</span><span class="op">&lt;</span>()<span class="op">&gt;</span> {
         <span class="ident">writer</span>.<span class="ident">write_u32</span>::<span class="op">&lt;</span><span class="ident">LittleEndian</span><span class="op">&gt;</span>(<span class="self">self</span>.<span class="ident">header</span>())<span class="question-mark">?</span>;
         <span class="kw">match</span> <span class="self">self</span> {
-            <span class="ident">TxVersion::Sprout</span>(<span class="kw">_</span>) <span class="op">=</span><span class="op">&gt;</span> <span class="prelude-val">Ok</span>(()),
-            <span class="kw">_</span> <span class="op">=</span><span class="op">&gt;</span> <span class="ident">writer</span>.<span class="ident">write_u32</span>::<span class="op">&lt;</span><span class="ident">LittleEndian</span><span class="op">&gt;</span>(<span class="self">self</span>.<span class="ident">version_group_id</span>()),
+            <span class="ident">TxVersion::Sprout</span>(<span class="kw">_</span>) =&gt; <span class="prelude-val">Ok</span>(()),
+            <span class="kw">_</span> =&gt; <span class="ident">writer</span>.<span class="ident">write_u32</span>::<span class="op">&lt;</span><span class="ident">LittleEndian</span><span class="op">&gt;</span>(<span class="self">self</span>.<span class="ident">version_group_id</span>()),
         }
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">has_sprout</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">bool</span> {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">has_sprout</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">bool</span> {
         <span class="kw">match</span> <span class="self">self</span> {
-            <span class="ident">TxVersion::Sprout</span>(<span class="ident">v</span>) <span class="op">=</span><span class="op">&gt;</span> <span class="kw-2">*</span><span class="ident">v</span> <span class="op">&gt;</span><span class="op">=</span> <span class="number">2u32</span>,
-            <span class="ident">TxVersion::Overwinter</span> <span class="op">|</span> <span class="ident">TxVersion::Sapling</span> <span class="op">=</span><span class="op">&gt;</span> <span class="bool-val">true</span>,
-            <span class="ident">TxVersion::Zip225</span> <span class="op">=</span><span class="op">&gt;</span> <span class="bool-val">false</span>,
+            <span class="ident">TxVersion::Sprout</span>(<span class="ident">v</span>) =&gt; <span class="kw-2">*</span><span class="ident">v</span> <span class="op">&gt;</span><span class="op">=</span> <span class="number">2u32</span>,
+            <span class="ident">TxVersion::Overwinter</span> <span class="op">|</span> <span class="ident">TxVersion::Sapling</span> =&gt; <span class="bool-val">true</span>,
+            <span class="ident">TxVersion::Zip225</span> =&gt; <span class="bool-val">false</span>,
             <span class="attribute">#[<span class="ident">cfg</span>(<span class="ident">feature</span> <span class="op">=</span> <span class="string">&quot;zfuture&quot;</span>)]</span>
-            <span class="ident">TxVersion::ZFuture</span> <span class="op">=</span><span class="op">&gt;</span> <span class="bool-val">true</span>,
+            <span class="ident">TxVersion::ZFuture</span> =&gt; <span class="bool-val">true</span>,
         }
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">has_overwinter</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">bool</span> {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">has_overwinter</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">bool</span> {
         <span class="op">!</span><span class="macro">matches!</span>(<span class="self">self</span>, <span class="ident">TxVersion::Sprout</span>(<span class="kw">_</span>))
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">has_sapling</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">bool</span> {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">has_sapling</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">bool</span> {
         <span class="kw">match</span> <span class="self">self</span> {
-            <span class="ident">TxVersion::Sprout</span>(<span class="kw">_</span>) <span class="op">|</span> <span class="ident">TxVersion::Overwinter</span> <span class="op">=</span><span class="op">&gt;</span> <span class="bool-val">false</span>,
-            <span class="ident">TxVersion::Sapling</span> <span class="op">=</span><span class="op">&gt;</span> <span class="bool-val">true</span>,
-            <span class="ident">TxVersion::Zip225</span> <span class="op">=</span><span class="op">&gt;</span> <span class="bool-val">true</span>,
+            <span class="ident">TxVersion::Sprout</span>(<span class="kw">_</span>) <span class="op">|</span> <span class="ident">TxVersion::Overwinter</span> =&gt; <span class="bool-val">false</span>,
+            <span class="ident">TxVersion::Sapling</span> =&gt; <span class="bool-val">true</span>,
+            <span class="ident">TxVersion::Zip225</span> =&gt; <span class="bool-val">true</span>,
             <span class="attribute">#[<span class="ident">cfg</span>(<span class="ident">feature</span> <span class="op">=</span> <span class="string">&quot;zfuture&quot;</span>)]</span>
-            <span class="ident">TxVersion::ZFuture</span> <span class="op">=</span><span class="op">&gt;</span> <span class="bool-val">true</span>,
+            <span class="ident">TxVersion::ZFuture</span> =&gt; <span class="bool-val">true</span>,
         }
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">has_orchard</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">bool</span> {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">has_orchard</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">bool</span> {
         <span class="kw">match</span> <span class="self">self</span> {
-            <span class="ident">TxVersion::Sprout</span>(<span class="kw">_</span>) <span class="op">|</span> <span class="ident">TxVersion::Overwinter</span> <span class="op">|</span> <span class="ident">TxVersion::Sapling</span> <span class="op">=</span><span class="op">&gt;</span> <span class="bool-val">false</span>,
-            <span class="ident">TxVersion::Zip225</span> <span class="op">=</span><span class="op">&gt;</span> <span class="bool-val">true</span>,
+            <span class="ident">TxVersion::Sprout</span>(<span class="kw">_</span>) <span class="op">|</span> <span class="ident">TxVersion::Overwinter</span> <span class="op">|</span> <span class="ident">TxVersion::Sapling</span> =&gt; <span class="bool-val">false</span>,
+            <span class="ident">TxVersion::Zip225</span> =&gt; <span class="bool-val">true</span>,
             <span class="attribute">#[<span class="ident">cfg</span>(<span class="ident">feature</span> <span class="op">=</span> <span class="string">&quot;zfuture&quot;</span>)]</span>
-            <span class="ident">TxVersion::ZFuture</span> <span class="op">=</span><span class="op">&gt;</span> <span class="bool-val">true</span>,
+            <span class="ident">TxVersion::ZFuture</span> =&gt; <span class="bool-val">true</span>,
         }
     }
 
     <span class="attribute">#[<span class="ident">cfg</span>(<span class="ident">feature</span> <span class="op">=</span> <span class="string">&quot;zfuture&quot;</span>)]</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">has_tze</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">bool</span> {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">has_tze</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">bool</span> {
         <span class="macro">matches!</span>(<span class="self">self</span>, <span class="ident">TxVersion::ZFuture</span>)
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">suggested_for_branch</span>(<span class="ident">consensus_branch_id</span>: <span class="ident">BranchId</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="self">Self</span> {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">suggested_for_branch</span>(<span class="ident">consensus_branch_id</span>: <span class="ident">BranchId</span>) -&gt; <span class="self">Self</span> {
         <span class="kw">match</span> <span class="ident">consensus_branch_id</span> {
-            <span class="ident">BranchId::Sprout</span> <span class="op">=</span><span class="op">&gt;</span> <span class="ident">TxVersion::Sprout</span>(<span class="number">2</span>),
-            <span class="ident">BranchId::Overwinter</span> <span class="op">=</span><span class="op">&gt;</span> <span class="ident">TxVersion::Overwinter</span>,
-            <span class="ident">BranchId::Sapling</span> <span class="op">|</span> <span class="ident">BranchId::Blossom</span> <span class="op">|</span> <span class="ident">BranchId::Heartwood</span> <span class="op">|</span> <span class="ident">BranchId::Canopy</span> <span class="op">=</span><span class="op">&gt;</span> {
+            <span class="ident">BranchId::Sprout</span> =&gt; <span class="ident">TxVersion::Sprout</span>(<span class="number">2</span>),
+            <span class="ident">BranchId::Overwinter</span> =&gt; <span class="ident">TxVersion::Overwinter</span>,
+            <span class="ident">BranchId::Sapling</span> <span class="op">|</span> <span class="ident">BranchId::Blossom</span> <span class="op">|</span> <span class="ident">BranchId::Heartwood</span> <span class="op">|</span> <span class="ident">BranchId::Canopy</span> =&gt; {
                 <span class="ident">TxVersion::Sapling</span>
             }
-            <span class="ident">BranchId::Nu5</span> <span class="op">=</span><span class="op">&gt;</span> <span class="ident">TxVersion::Zip225</span>,
+            <span class="ident">BranchId::Nu5</span> =&gt; <span class="ident">TxVersion::Zip225</span>,
             <span class="attribute">#[<span class="ident">cfg</span>(<span class="ident">feature</span> <span class="op">=</span> <span class="string">&quot;zfuture&quot;</span>)]</span>
-            <span class="ident">BranchId::ZFuture</span> <span class="op">=</span><span class="op">&gt;</span> <span class="ident">TxVersion::ZFuture</span>,
+            <span class="ident">BranchId::ZFuture</span> =&gt; <span class="ident">TxVersion::ZFuture</span>,
         }
     }
 }
@@ -1364,14 +1364,14 @@
 <span class="kw">impl</span> <span class="ident">Deref</span> <span class="kw">for</span> <span class="ident">Transaction</span> {
     <span class="kw">type</span> <span class="ident">Target</span> <span class="op">=</span> <span class="ident">TransactionData</span><span class="op">&lt;</span><span class="ident">Authorized</span><span class="op">&gt;</span>;
 
-    <span class="kw">fn</span> <span class="ident">deref</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="kw-2">&amp;</span><span class="ident">TransactionData</span><span class="op">&lt;</span><span class="ident">Authorized</span><span class="op">&gt;</span> {
+    <span class="kw">fn</span> <span class="ident">deref</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span><span class="ident">TransactionData</span><span class="op">&lt;</span><span class="ident">Authorized</span><span class="op">&gt;</span> {
         <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">data</span>
     }
 }
 
 <span class="kw">impl</span> <span class="ident">PartialEq</span> <span class="kw">for</span> <span class="ident">Transaction</span> {
-    <span class="kw">fn</span> <span class="ident">eq</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">other</span>: <span class="kw-2">&amp;</span><span class="ident">Transaction</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">bool</span> {
-        <span class="self">self</span>.<span class="ident">txid</span> <span class="op">=</span><span class="op">=</span> <span class="ident">other</span>.<span class="ident">txid</span>
+    <span class="kw">fn</span> <span class="ident">eq</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">other</span>: <span class="kw-2">&amp;</span><span class="ident">Transaction</span>) -&gt; <span class="ident">bool</span> {
+        <span class="self">self</span>.<span class="ident">txid</span> <span class="op">==</span> <span class="ident">other</span>.<span class="ident">txid</span>
     }
 }
 
@@ -1400,7 +1400,7 @@
         <span class="ident">sapling_bundle</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">sapling::Bundle</span><span class="op">&lt;</span><span class="ident">A::SaplingAuth</span><span class="op">&gt;</span><span class="op">&gt;</span>,
         <span class="ident">orchard_bundle</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">orchard::Bundle</span><span class="op">&lt;</span><span class="ident">A::OrchardAuth</span>, <span class="ident">Amount</span><span class="op">&gt;</span><span class="op">&gt;</span>,
         <span class="attribute">#[<span class="ident">cfg</span>(<span class="ident">feature</span> <span class="op">=</span> <span class="string">&quot;zfuture&quot;</span>)]</span> <span class="ident">tze_bundle</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">tze::Bundle</span><span class="op">&lt;</span><span class="ident">A::TzeAuth</span><span class="op">&gt;</span><span class="op">&gt;</span>,
-    ) <span class="op">-</span><span class="op">&gt;</span> <span class="self">Self</span> {
+    ) -&gt; <span class="self">Self</span> {
         <span class="ident">TransactionData</span> {
             <span class="ident">version</span>,
             <span class="ident">consensus_branch_id</span>,
@@ -1415,40 +1415,40 @@
         }
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">version</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">TxVersion</span> {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">version</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">TxVersion</span> {
         <span class="self">self</span>.<span class="ident">version</span>
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">consensus_branch_id</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">BranchId</span> {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">consensus_branch_id</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">BranchId</span> {
         <span class="self">self</span>.<span class="ident">consensus_branch_id</span>
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">expiry_height</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">BlockHeight</span> {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">expiry_height</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">BlockHeight</span> {
         <span class="self">self</span>.<span class="ident">expiry_height</span>
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">transparent_bundle</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="kw-2">&amp;</span><span class="ident">transparent::Bundle</span><span class="op">&lt;</span><span class="ident">A::TransparentAuth</span><span class="op">&gt;</span><span class="op">&gt;</span> {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">transparent_bundle</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="kw-2">&amp;</span><span class="ident">transparent::Bundle</span><span class="op">&lt;</span><span class="ident">A::TransparentAuth</span><span class="op">&gt;</span><span class="op">&gt;</span> {
         <span class="self">self</span>.<span class="ident">transparent_bundle</span>.<span class="ident">as_ref</span>()
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">sprout_bundle</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="kw-2">&amp;</span><span class="ident">sprout::Bundle</span><span class="op">&gt;</span> {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">sprout_bundle</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="kw-2">&amp;</span><span class="ident">sprout::Bundle</span><span class="op">&gt;</span> {
         <span class="self">self</span>.<span class="ident">sprout_bundle</span>.<span class="ident">as_ref</span>()
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">sapling_bundle</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="kw-2">&amp;</span><span class="ident">sapling::Bundle</span><span class="op">&lt;</span><span class="ident">A::SaplingAuth</span><span class="op">&gt;</span><span class="op">&gt;</span> {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">sapling_bundle</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="kw-2">&amp;</span><span class="ident">sapling::Bundle</span><span class="op">&lt;</span><span class="ident">A::SaplingAuth</span><span class="op">&gt;</span><span class="op">&gt;</span> {
         <span class="self">self</span>.<span class="ident">sapling_bundle</span>.<span class="ident">as_ref</span>()
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">orchard_bundle</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="kw-2">&amp;</span><span class="ident">orchard::Bundle</span><span class="op">&lt;</span><span class="ident">A::OrchardAuth</span>, <span class="ident">Amount</span><span class="op">&gt;</span><span class="op">&gt;</span> {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">orchard_bundle</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="kw-2">&amp;</span><span class="ident">orchard::Bundle</span><span class="op">&lt;</span><span class="ident">A::OrchardAuth</span>, <span class="ident">Amount</span><span class="op">&gt;</span><span class="op">&gt;</span> {
         <span class="self">self</span>.<span class="ident">orchard_bundle</span>.<span class="ident">as_ref</span>()
     }
 
     <span class="attribute">#[<span class="ident">cfg</span>(<span class="ident">feature</span> <span class="op">=</span> <span class="string">&quot;zfuture&quot;</span>)]</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">tze_bundle</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="kw-2">&amp;</span><span class="ident">tze::Bundle</span><span class="op">&lt;</span><span class="ident">A::TzeAuth</span><span class="op">&gt;</span><span class="op">&gt;</span> {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">tze_bundle</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="kw-2">&amp;</span><span class="ident">tze::Bundle</span><span class="op">&lt;</span><span class="ident">A::TzeAuth</span><span class="op">&gt;</span><span class="op">&gt;</span> {
         <span class="self">self</span>.<span class="ident">tze_bundle</span>.<span class="ident">as_ref</span>()
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">digest</span><span class="op">&lt;</span><span class="ident">D</span>: <span class="ident">TransactionDigest</span><span class="op">&lt;</span><span class="ident">A</span><span class="op">&gt;</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">digester</span>: <span class="ident">D</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">D::Digest</span> {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">digest</span><span class="op">&lt;</span><span class="ident">D</span>: <span class="ident">TransactionDigest</span><span class="op">&lt;</span><span class="ident">A</span><span class="op">&gt;</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">digester</span>: <span class="ident">D</span>) -&gt; <span class="ident">D::Digest</span> {
         <span class="ident">digester</span>.<span class="ident">combine</span>(
             <span class="ident">digester</span>.<span class="ident">digest_header</span>(
                 <span class="self">self</span>.<span class="ident">version</span>,
@@ -1466,7 +1466,7 @@
 }
 
 <span class="kw">impl</span><span class="op">&lt;</span><span class="ident">A</span>: <span class="ident">Authorization</span><span class="op">&gt;</span> <span class="ident">std::fmt::Debug</span> <span class="kw">for</span> <span class="ident">TransactionData</span><span class="op">&lt;</span><span class="ident">A</span><span class="op">&gt;</span> {
-    <span class="kw">fn</span> <span class="ident">fmt</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">f</span>: <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">std::fmt::Formatter</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident">std::fmt::Error</span><span class="op">&gt;</span> {
+    <span class="kw">fn</span> <span class="ident">fmt</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">f</span>: <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">std::fmt::Formatter</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident">std::fmt::Error</span><span class="op">&gt;</span> {
         <span class="macro">write!</span>(
             <span class="ident">f</span>,
             <span class="string">&quot;TransactionData(
@@ -1552,7 +1552,7 @@
 }
 
 <span class="kw">impl</span><span class="op">&lt;</span><span class="ident">A</span>: <span class="ident">Authorization</span><span class="op">&gt;</span> <span class="ident">TransactionData</span><span class="op">&lt;</span><span class="ident">A</span><span class="op">&gt;</span> {
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">sapling_value_balance</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">Amount</span> {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">sapling_value_balance</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">Amount</span> {
         <span class="self">self</span>.<span class="ident">sapling_bundle</span>
             .<span class="ident">as_ref</span>()
             .<span class="ident">map_or</span>(<span class="ident">Amount::zero</span>(), <span class="op">|</span><span class="ident">b</span><span class="op">|</span> <span class="ident">b</span>.<span class="ident">value_balance</span>)
@@ -1560,24 +1560,24 @@
 }
 
 <span class="kw">impl</span> <span class="ident">TransactionData</span><span class="op">&lt;</span><span class="ident">Authorized</span><span class="op">&gt;</span> {
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">freeze</span>(<span class="self">self</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">io::Result</span><span class="op">&lt;</span><span class="ident">Transaction</span><span class="op">&gt;</span> {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">freeze</span>(<span class="self">self</span>) -&gt; <span class="ident">io::Result</span><span class="op">&lt;</span><span class="ident">Transaction</span><span class="op">&gt;</span> {
         <span class="ident">Transaction::from_data</span>(<span class="self">self</span>)
     }
 }
 
 <span class="kw">impl</span> <span class="ident">Transaction</span> {
-    <span class="kw">fn</span> <span class="ident">from_data</span>(<span class="ident">data</span>: <span class="ident">TransactionData</span><span class="op">&lt;</span><span class="ident">Authorized</span><span class="op">&gt;</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">io::Result</span><span class="op">&lt;</span><span class="self">Self</span><span class="op">&gt;</span> {
+    <span class="kw">fn</span> <span class="ident">from_data</span>(<span class="ident">data</span>: <span class="ident">TransactionData</span><span class="op">&lt;</span><span class="ident">Authorized</span><span class="op">&gt;</span>) -&gt; <span class="ident">io::Result</span><span class="op">&lt;</span><span class="self">Self</span><span class="op">&gt;</span> {
         <span class="kw">match</span> <span class="ident">data</span>.<span class="ident">version</span> {
-            <span class="ident">TxVersion::Sprout</span>(<span class="kw">_</span>) <span class="op">|</span> <span class="ident">TxVersion::Overwinter</span> <span class="op">|</span> <span class="ident">TxVersion::Sapling</span> <span class="op">=</span><span class="op">&gt;</span> {
+            <span class="ident">TxVersion::Sprout</span>(<span class="kw">_</span>) <span class="op">|</span> <span class="ident">TxVersion::Overwinter</span> <span class="op">|</span> <span class="ident">TxVersion::Sapling</span> =&gt; {
                 <span class="ident"><span class="self">Self</span>::from_data_v4</span>(<span class="ident">data</span>)
             }
-            <span class="ident">TxVersion::Zip225</span> <span class="op">=</span><span class="op">&gt;</span> <span class="prelude-val">Ok</span>(<span class="ident"><span class="self">Self</span>::from_data_v5</span>(<span class="ident">data</span>)),
+            <span class="ident">TxVersion::Zip225</span> =&gt; <span class="prelude-val">Ok</span>(<span class="ident"><span class="self">Self</span>::from_data_v5</span>(<span class="ident">data</span>)),
             <span class="attribute">#[<span class="ident">cfg</span>(<span class="ident">feature</span> <span class="op">=</span> <span class="string">&quot;zfuture&quot;</span>)]</span>
-            <span class="ident">TxVersion::ZFuture</span> <span class="op">=</span><span class="op">&gt;</span> <span class="prelude-val">Ok</span>(<span class="ident"><span class="self">Self</span>::from_data_v5</span>(<span class="ident">data</span>)),
+            <span class="ident">TxVersion::ZFuture</span> =&gt; <span class="prelude-val">Ok</span>(<span class="ident"><span class="self">Self</span>::from_data_v5</span>(<span class="ident">data</span>)),
         }
     }
 
-    <span class="kw">fn</span> <span class="ident">from_data_v4</span>(<span class="ident">data</span>: <span class="ident">TransactionData</span><span class="op">&lt;</span><span class="ident">Authorized</span><span class="op">&gt;</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">io::Result</span><span class="op">&lt;</span><span class="self">Self</span><span class="op">&gt;</span> {
+    <span class="kw">fn</span> <span class="ident">from_data_v4</span>(<span class="ident">data</span>: <span class="ident">TransactionData</span><span class="op">&lt;</span><span class="ident">Authorized</span><span class="op">&gt;</span>) -&gt; <span class="ident">io::Result</span><span class="op">&lt;</span><span class="self">Self</span><span class="op">&gt;</span> {
         <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">tx</span> <span class="op">=</span> <span class="ident">Transaction</span> {
             <span class="ident">txid</span>: <span class="ident">TxId</span>([<span class="number">0</span>; <span class="number">32</span>]),
             <span class="ident">data</span>,
@@ -1588,7 +1588,7 @@
         <span class="prelude-val">Ok</span>(<span class="ident">tx</span>)
     }
 
-    <span class="kw">fn</span> <span class="ident">from_data_v5</span>(<span class="ident">data</span>: <span class="ident">TransactionData</span><span class="op">&lt;</span><span class="ident">Authorized</span><span class="op">&gt;</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="self">Self</span> {
+    <span class="kw">fn</span> <span class="ident">from_data_v5</span>(<span class="ident">data</span>: <span class="ident">TransactionData</span><span class="op">&lt;</span><span class="ident">Authorized</span><span class="op">&gt;</span>) -&gt; <span class="self">Self</span> {
         <span class="kw">let</span> <span class="ident">txid</span> <span class="op">=</span> <span class="ident">to_txid</span>(
             <span class="ident">data</span>.<span class="ident">version</span>,
             <span class="ident">data</span>.<span class="ident">consensus_branch_id</span>,
@@ -1598,21 +1598,21 @@
         <span class="ident">Transaction</span> { <span class="ident">txid</span>, <span class="ident">data</span> }
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">txid</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">TxId</span> {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">txid</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">TxId</span> {
         <span class="self">self</span>.<span class="ident">txid</span>
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">read</span><span class="op">&lt;</span><span class="ident">R</span>: <span class="ident">Read</span><span class="op">&gt;</span>(<span class="ident">reader</span>: <span class="ident">R</span>, <span class="ident">consensus_branch_id</span>: <span class="ident">BranchId</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">io::Result</span><span class="op">&lt;</span><span class="self">Self</span><span class="op">&gt;</span> {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">read</span><span class="op">&lt;</span><span class="ident">R</span>: <span class="ident">Read</span><span class="op">&gt;</span>(<span class="ident">reader</span>: <span class="ident">R</span>, <span class="ident">consensus_branch_id</span>: <span class="ident">BranchId</span>) -&gt; <span class="ident">io::Result</span><span class="op">&lt;</span><span class="self">Self</span><span class="op">&gt;</span> {
         <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">reader</span> <span class="op">=</span> <span class="ident">HashReader::new</span>(<span class="ident">reader</span>);
 
         <span class="kw">let</span> <span class="ident">version</span> <span class="op">=</span> <span class="ident">TxVersion::read</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">reader</span>)<span class="question-mark">?</span>;
         <span class="kw">match</span> <span class="ident">version</span> {
-            <span class="ident">TxVersion::Sprout</span>(<span class="kw">_</span>) <span class="op">|</span> <span class="ident">TxVersion::Overwinter</span> <span class="op">|</span> <span class="ident">TxVersion::Sapling</span> <span class="op">=</span><span class="op">&gt;</span> {
+            <span class="ident">TxVersion::Sprout</span>(<span class="kw">_</span>) <span class="op">|</span> <span class="ident">TxVersion::Overwinter</span> <span class="op">|</span> <span class="ident">TxVersion::Sapling</span> =&gt; {
                 <span class="ident"><span class="self">Self</span>::read_v4</span>(<span class="ident">reader</span>, <span class="ident">version</span>, <span class="ident">consensus_branch_id</span>)
             }
-            <span class="ident">TxVersion::Zip225</span> <span class="op">=</span><span class="op">&gt;</span> <span class="ident"><span class="self">Self</span>::read_v5</span>(<span class="ident">reader</span>.<span class="ident">into_base_reader</span>(), <span class="ident">version</span>),
+            <span class="ident">TxVersion::Zip225</span> =&gt; <span class="ident"><span class="self">Self</span>::read_v5</span>(<span class="ident">reader</span>.<span class="ident">into_base_reader</span>(), <span class="ident">version</span>),
             <span class="attribute">#[<span class="ident">cfg</span>(<span class="ident">feature</span> <span class="op">=</span> <span class="string">&quot;zfuture&quot;</span>)]</span>
-            <span class="ident">TxVersion::ZFuture</span> <span class="op">=</span><span class="op">&gt;</span> <span class="ident"><span class="self">Self</span>::read_v5</span>(<span class="ident">reader</span>.<span class="ident">into_base_reader</span>(), <span class="ident">version</span>),
+            <span class="ident">TxVersion::ZFuture</span> =&gt; <span class="ident"><span class="self">Self</span>::read_v5</span>(<span class="ident">reader</span>.<span class="ident">into_base_reader</span>(), <span class="ident">version</span>),
         }
     }
 
@@ -1621,7 +1621,7 @@
         <span class="kw-2">mut</span> <span class="ident">reader</span>: <span class="ident">HashReader</span><span class="op">&lt;</span><span class="ident">R</span><span class="op">&gt;</span>,
         <span class="ident">version</span>: <span class="ident">TxVersion</span>,
         <span class="ident">consensus_branch_id</span>: <span class="ident">BranchId</span>,
-    ) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">io::Result</span><span class="op">&lt;</span><span class="self">Self</span><span class="op">&gt;</span> {
+    ) -&gt; <span class="ident">io::Result</span><span class="op">&lt;</span><span class="self">Self</span><span class="op">&gt;</span> {
         <span class="kw">let</span> <span class="ident">transparent_bundle</span> <span class="op">=</span> <span class="ident"><span class="self">Self</span>::read_transparent</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">reader</span>)<span class="question-mark">?</span>;
 
         <span class="kw">let</span> <span class="ident">lock_time</span> <span class="op">=</span> <span class="ident">reader</span>.<span class="ident">read_u32</span>::<span class="op">&lt;</span><span class="ident">LittleEndian</span><span class="op">&gt;</span>()<span class="question-mark">?</span>;
@@ -1701,7 +1701,7 @@
 
     <span class="kw">fn</span> <span class="ident">read_transparent</span><span class="op">&lt;</span><span class="ident">R</span>: <span class="ident">Read</span><span class="op">&gt;</span>(
         <span class="kw-2">mut</span> <span class="ident">reader</span>: <span class="ident">R</span>,
-    ) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">io::Result</span><span class="op">&lt;</span><span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">transparent::Bundle</span><span class="op">&lt;</span><span class="ident">transparent::Authorized</span><span class="op">&gt;</span><span class="op">&gt;</span><span class="op">&gt;</span> {
+    ) -&gt; <span class="ident">io::Result</span><span class="op">&lt;</span><span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">transparent::Bundle</span><span class="op">&lt;</span><span class="ident">transparent::Authorized</span><span class="op">&gt;</span><span class="op">&gt;</span><span class="op">&gt;</span> {
         <span class="kw">let</span> <span class="ident">vin</span> <span class="op">=</span> <span class="ident">Vector::read</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">reader</span>, <span class="ident">TxIn::read</span>)<span class="question-mark">?</span>;
         <span class="kw">let</span> <span class="ident">vout</span> <span class="op">=</span> <span class="ident">Vector::read</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">reader</span>, <span class="ident">TxOut::read</span>)<span class="question-mark">?</span>;
         <span class="prelude-val">Ok</span>(<span class="kw">if</span> <span class="ident">vin</span>.<span class="ident">is_empty</span>() <span class="op">&amp;&amp;</span> <span class="ident">vout</span>.<span class="ident">is_empty</span>() {
@@ -1715,14 +1715,14 @@
         })
     }
 
-    <span class="kw">fn</span> <span class="ident">read_amount</span><span class="op">&lt;</span><span class="ident">R</span>: <span class="ident">Read</span><span class="op">&gt;</span>(<span class="kw-2">mut</span> <span class="ident">reader</span>: <span class="ident">R</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">io::Result</span><span class="op">&lt;</span><span class="ident">Amount</span><span class="op">&gt;</span> {
+    <span class="kw">fn</span> <span class="ident">read_amount</span><span class="op">&lt;</span><span class="ident">R</span>: <span class="ident">Read</span><span class="op">&gt;</span>(<span class="kw-2">mut</span> <span class="ident">reader</span>: <span class="ident">R</span>) -&gt; <span class="ident">io::Result</span><span class="op">&lt;</span><span class="ident">Amount</span><span class="op">&gt;</span> {
         <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">tmp</span> <span class="op">=</span> [<span class="number">0</span>; <span class="number">8</span>];
         <span class="ident">reader</span>.<span class="ident">read_exact</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">tmp</span>)<span class="question-mark">?</span>;
         <span class="ident">Amount::from_i64_le_bytes</span>(<span class="ident">tmp</span>)
             .<span class="ident">map_err</span>(<span class="op">|</span><span class="kw">_</span><span class="op">|</span> <span class="ident">io::Error::new</span>(<span class="ident">io::ErrorKind::InvalidData</span>, <span class="string">&quot;valueBalance out of range&quot;</span>))
     }
 
-    <span class="kw">fn</span> <span class="ident">read_v5</span><span class="op">&lt;</span><span class="ident">R</span>: <span class="ident">Read</span><span class="op">&gt;</span>(<span class="kw-2">mut</span> <span class="ident">reader</span>: <span class="ident">R</span>, <span class="ident">version</span>: <span class="ident">TxVersion</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">io::Result</span><span class="op">&lt;</span><span class="self">Self</span><span class="op">&gt;</span> {
+    <span class="kw">fn</span> <span class="ident">read_v5</span><span class="op">&lt;</span><span class="ident">R</span>: <span class="ident">Read</span><span class="op">&gt;</span>(<span class="kw-2">mut</span> <span class="ident">reader</span>: <span class="ident">R</span>, <span class="ident">version</span>: <span class="ident">TxVersion</span>) -&gt; <span class="ident">io::Result</span><span class="op">&lt;</span><span class="self">Self</span><span class="op">&gt;</span> {
         <span class="kw">let</span> (<span class="ident">consensus_branch_id</span>, <span class="ident">lock_time</span>, <span class="ident">expiry_height</span>) <span class="op">=</span>
             <span class="ident"><span class="self">Self</span>::read_v5_header_fragment</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">reader</span>)<span class="question-mark">?</span>;
         <span class="kw">let</span> <span class="ident">transparent_bundle</span> <span class="op">=</span> <span class="ident"><span class="self">Self</span>::read_transparent</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">reader</span>)<span class="question-mark">?</span>;
@@ -1752,7 +1752,7 @@
         <span class="prelude-val">Ok</span>(<span class="ident"><span class="self">Self</span>::from_data_v5</span>(<span class="ident">data</span>))
     }
 
-    <span class="kw">fn</span> <span class="ident">read_v5_header_fragment</span><span class="op">&lt;</span><span class="ident">R</span>: <span class="ident">Read</span><span class="op">&gt;</span>(<span class="kw-2">mut</span> <span class="ident">reader</span>: <span class="ident">R</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">io::Result</span><span class="op">&lt;</span>(<span class="ident">BranchId</span>, <span class="ident">u32</span>, <span class="ident">BlockHeight</span>)<span class="op">&gt;</span> {
+    <span class="kw">fn</span> <span class="ident">read_v5_header_fragment</span><span class="op">&lt;</span><span class="ident">R</span>: <span class="ident">Read</span><span class="op">&gt;</span>(<span class="kw-2">mut</span> <span class="ident">reader</span>: <span class="ident">R</span>) -&gt; <span class="ident">io::Result</span><span class="op">&lt;</span>(<span class="ident">BranchId</span>, <span class="ident">u32</span>, <span class="ident">BlockHeight</span>)<span class="op">&gt;</span> {
         <span class="kw">let</span> <span class="ident">consensus_branch_id</span> <span class="op">=</span> <span class="ident">reader</span>.<span class="ident">read_u32</span>::<span class="op">&lt;</span><span class="ident">LittleEndian</span><span class="op">&gt;</span>().<span class="ident">and_then</span>(<span class="op">|</span><span class="ident">value</span><span class="op">|</span> {
             <span class="ident">BranchId::try_from</span>(<span class="ident">value</span>).<span class="ident">map_err</span>(<span class="op">|</span><span class="ident">e</span><span class="op">|</span> {
                 <span class="ident">io::Error::new</span>(
@@ -1769,7 +1769,7 @@
     <span class="attribute">#[<span class="ident">allow</span>(<span class="ident">clippy::redundant_closure</span>)]</span>
     <span class="kw">fn</span> <span class="ident">read_v5_sapling</span><span class="op">&lt;</span><span class="ident">R</span>: <span class="ident">Read</span><span class="op">&gt;</span>(
         <span class="kw-2">mut</span> <span class="ident">reader</span>: <span class="ident">R</span>,
-    ) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">io::Result</span><span class="op">&lt;</span><span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">sapling::Bundle</span><span class="op">&lt;</span><span class="ident">sapling::Authorized</span><span class="op">&gt;</span><span class="op">&gt;</span><span class="op">&gt;</span> {
+    ) -&gt; <span class="ident">io::Result</span><span class="op">&lt;</span><span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">sapling::Bundle</span><span class="op">&lt;</span><span class="ident">sapling::Authorized</span><span class="op">&gt;</span><span class="op">&gt;</span><span class="op">&gt;</span> {
         <span class="kw">let</span> <span class="ident">sd_v5s</span> <span class="op">=</span> <span class="ident">Vector::read</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">reader</span>, <span class="ident">SpendDescriptionV5::read</span>)<span class="question-mark">?</span>;
         <span class="kw">let</span> <span class="ident">od_v5s</span> <span class="op">=</span> <span class="ident">Vector::read</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">reader</span>, <span class="ident">OutputDescriptionV5::read</span>)<span class="question-mark">?</span>;
         <span class="kw">let</span> <span class="ident">n_spends</span> <span class="op">=</span> <span class="ident">sd_v5s</span>.<span class="ident">len</span>();
@@ -1826,7 +1826,7 @@
     }
 
     <span class="attribute">#[<span class="ident">cfg</span>(<span class="ident">feature</span> <span class="op">=</span> <span class="string">&quot;zfuture&quot;</span>)]</span>
-    <span class="kw">fn</span> <span class="ident">read_tze</span><span class="op">&lt;</span><span class="ident">R</span>: <span class="ident">Read</span><span class="op">&gt;</span>(<span class="kw-2">mut</span> <span class="ident">reader</span>: <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">R</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">io::Result</span><span class="op">&lt;</span><span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">tze::Bundle</span><span class="op">&lt;</span><span class="ident">tze::Authorized</span><span class="op">&gt;</span><span class="op">&gt;</span><span class="op">&gt;</span> {
+    <span class="kw">fn</span> <span class="ident">read_tze</span><span class="op">&lt;</span><span class="ident">R</span>: <span class="ident">Read</span><span class="op">&gt;</span>(<span class="kw-2">mut</span> <span class="ident">reader</span>: <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">R</span>) -&gt; <span class="ident">io::Result</span><span class="op">&lt;</span><span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">tze::Bundle</span><span class="op">&lt;</span><span class="ident">tze::Authorized</span><span class="op">&gt;</span><span class="op">&gt;</span><span class="op">&gt;</span> {
         <span class="kw">let</span> <span class="ident">vin</span> <span class="op">=</span> <span class="ident">Vector::read</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">reader</span>, <span class="ident">TzeIn::read</span>)<span class="question-mark">?</span>;
         <span class="kw">let</span> <span class="ident">vout</span> <span class="op">=</span> <span class="ident">Vector::read</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">reader</span>, <span class="ident">TzeOut::read</span>)<span class="question-mark">?</span>;
         <span class="prelude-val">Ok</span>(<span class="kw">if</span> <span class="ident">vin</span>.<span class="ident">is_empty</span>() <span class="op">&amp;&amp;</span> <span class="ident">vout</span>.<span class="ident">is_empty</span>() {
@@ -1840,18 +1840,18 @@
         })
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">write</span><span class="op">&lt;</span><span class="ident">W</span>: <span class="ident">Write</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">writer</span>: <span class="ident">W</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">io::Result</span><span class="op">&lt;</span>()<span class="op">&gt;</span> {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">write</span><span class="op">&lt;</span><span class="ident">W</span>: <span class="ident">Write</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">writer</span>: <span class="ident">W</span>) -&gt; <span class="ident">io::Result</span><span class="op">&lt;</span>()<span class="op">&gt;</span> {
         <span class="kw">match</span> <span class="self">self</span>.<span class="ident">version</span> {
-            <span class="ident">TxVersion::Sprout</span>(<span class="kw">_</span>) <span class="op">|</span> <span class="ident">TxVersion::Overwinter</span> <span class="op">|</span> <span class="ident">TxVersion::Sapling</span> <span class="op">=</span><span class="op">&gt;</span> {
+            <span class="ident">TxVersion::Sprout</span>(<span class="kw">_</span>) <span class="op">|</span> <span class="ident">TxVersion::Overwinter</span> <span class="op">|</span> <span class="ident">TxVersion::Sapling</span> =&gt; {
                 <span class="self">self</span>.<span class="ident">write_v4</span>(<span class="ident">writer</span>)
             }
-            <span class="ident">TxVersion::Zip225</span> <span class="op">=</span><span class="op">&gt;</span> <span class="self">self</span>.<span class="ident">write_v5</span>(<span class="ident">writer</span>),
+            <span class="ident">TxVersion::Zip225</span> =&gt; <span class="self">self</span>.<span class="ident">write_v5</span>(<span class="ident">writer</span>),
             <span class="attribute">#[<span class="ident">cfg</span>(<span class="ident">feature</span> <span class="op">=</span> <span class="string">&quot;zfuture&quot;</span>)]</span>
-            <span class="ident">TxVersion::ZFuture</span> <span class="op">=</span><span class="op">&gt;</span> <span class="self">self</span>.<span class="ident">write_v5</span>(<span class="ident">writer</span>),
+            <span class="ident">TxVersion::ZFuture</span> =&gt; <span class="self">self</span>.<span class="ident">write_v5</span>(<span class="ident">writer</span>),
         }
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">write_v4</span><span class="op">&lt;</span><span class="ident">W</span>: <span class="ident">Write</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="kw-2">mut</span> <span class="ident">writer</span>: <span class="ident">W</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">io::Result</span><span class="op">&lt;</span>()<span class="op">&gt;</span> {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">write_v4</span><span class="op">&lt;</span><span class="ident">W</span>: <span class="ident">Write</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="kw-2">mut</span> <span class="ident">writer</span>: <span class="ident">W</span>) -&gt; <span class="ident">io::Result</span><span class="op">&lt;</span>()<span class="op">&gt;</span> {
         <span class="self">self</span>.<span class="ident">version</span>.<span class="ident">write</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">writer</span>)<span class="question-mark">?</span>;
 
         <span class="self">self</span>.<span class="ident">write_transparent</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">writer</span>)<span class="question-mark">?</span>;
@@ -1915,7 +1915,7 @@
         <span class="prelude-val">Ok</span>(())
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">write_transparent</span><span class="op">&lt;</span><span class="ident">W</span>: <span class="ident">Write</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="kw-2">mut</span> <span class="ident">writer</span>: <span class="ident">W</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">io::Result</span><span class="op">&lt;</span>()<span class="op">&gt;</span> {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">write_transparent</span><span class="op">&lt;</span><span class="ident">W</span>: <span class="ident">Write</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="kw-2">mut</span> <span class="ident">writer</span>: <span class="ident">W</span>) -&gt; <span class="ident">io::Result</span><span class="op">&lt;</span>()<span class="op">&gt;</span> {
         <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">bundle</span>) <span class="op">=</span> <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">transparent_bundle</span> {
             <span class="ident">Vector::write</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">writer</span>, <span class="kw-2">&amp;</span><span class="ident">bundle</span>.<span class="ident">vin</span>, <span class="op">|</span><span class="ident">w</span>, <span class="ident">e</span><span class="op">|</span> <span class="ident">e</span>.<span class="ident">write</span>(<span class="ident">w</span>))<span class="question-mark">?</span>;
             <span class="ident">Vector::write</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">writer</span>, <span class="kw-2">&amp;</span><span class="ident">bundle</span>.<span class="ident">vout</span>, <span class="op">|</span><span class="ident">w</span>, <span class="ident">e</span><span class="op">|</span> <span class="ident">e</span>.<span class="ident">write</span>(<span class="ident">w</span>))<span class="question-mark">?</span>;
@@ -1927,7 +1927,7 @@
         <span class="prelude-val">Ok</span>(())
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">write_v5</span><span class="op">&lt;</span><span class="ident">W</span>: <span class="ident">Write</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="kw-2">mut</span> <span class="ident">writer</span>: <span class="ident">W</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">io::Result</span><span class="op">&lt;</span>()<span class="op">&gt;</span> {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">write_v5</span><span class="op">&lt;</span><span class="ident">W</span>: <span class="ident">Write</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="kw-2">mut</span> <span class="ident">writer</span>: <span class="ident">W</span>) -&gt; <span class="ident">io::Result</span><span class="op">&lt;</span>()<span class="op">&gt;</span> {
         <span class="kw">if</span> <span class="self">self</span>.<span class="ident">sprout_bundle</span>.<span class="ident">is_some</span>() {
             <span class="kw">return</span> <span class="prelude-val">Err</span>(<span class="ident">io::Error::new</span>(
                 <span class="ident">io::ErrorKind::InvalidInput</span>,
@@ -1943,7 +1943,7 @@
         <span class="prelude-val">Ok</span>(())
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">write_v5_header</span><span class="op">&lt;</span><span class="ident">W</span>: <span class="ident">Write</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="kw-2">mut</span> <span class="ident">writer</span>: <span class="ident">W</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">io::Result</span><span class="op">&lt;</span>()<span class="op">&gt;</span> {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">write_v5_header</span><span class="op">&lt;</span><span class="ident">W</span>: <span class="ident">Write</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="kw-2">mut</span> <span class="ident">writer</span>: <span class="ident">W</span>) -&gt; <span class="ident">io::Result</span><span class="op">&lt;</span>()<span class="op">&gt;</span> {
         <span class="self">self</span>.<span class="ident">version</span>.<span class="ident">write</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">writer</span>)<span class="question-mark">?</span>;
         <span class="ident">writer</span>.<span class="ident">write_u32</span>::<span class="op">&lt;</span><span class="ident">LittleEndian</span><span class="op">&gt;</span>(<span class="ident">u32::from</span>(<span class="self">self</span>.<span class="ident">consensus_branch_id</span>))<span class="question-mark">?</span>;
         <span class="ident">writer</span>.<span class="ident">write_u32</span>::<span class="op">&lt;</span><span class="ident">LittleEndian</span><span class="op">&gt;</span>(<span class="self">self</span>.<span class="ident">lock_time</span>)<span class="question-mark">?</span>;
@@ -1951,7 +1951,7 @@
         <span class="prelude-val">Ok</span>(())
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">write_v5_sapling</span><span class="op">&lt;</span><span class="ident">W</span>: <span class="ident">Write</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="kw-2">mut</span> <span class="ident">writer</span>: <span class="ident">W</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">io::Result</span><span class="op">&lt;</span>()<span class="op">&gt;</span> {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">write_v5_sapling</span><span class="op">&lt;</span><span class="ident">W</span>: <span class="ident">Write</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="kw-2">mut</span> <span class="ident">writer</span>: <span class="ident">W</span>) -&gt; <span class="ident">io::Result</span><span class="op">&lt;</span>()<span class="op">&gt;</span> {
         <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">bundle</span>) <span class="op">=</span> <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">sapling_bundle</span> {
             <span class="ident">Vector::write</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">writer</span>, <span class="kw-2">&amp;</span><span class="ident">bundle</span>.<span class="ident">shielded_spends</span>, <span class="op">|</span><span class="ident">w</span>, <span class="ident">e</span><span class="op">|</span> {
                 <span class="ident">e</span>.<span class="ident">write_v5_without_witness_data</span>(<span class="ident">w</span>)
@@ -1997,7 +1997,7 @@
     }
 
     <span class="attribute">#[<span class="ident">cfg</span>(<span class="ident">feature</span> <span class="op">=</span> <span class="string">&quot;zfuture&quot;</span>)]</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">write_tze</span><span class="op">&lt;</span><span class="ident">W</span>: <span class="ident">Write</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="kw-2">mut</span> <span class="ident">writer</span>: <span class="ident">W</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">io::Result</span><span class="op">&lt;</span>()<span class="op">&gt;</span> {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">write_tze</span><span class="op">&lt;</span><span class="ident">W</span>: <span class="ident">Write</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="kw-2">mut</span> <span class="ident">writer</span>: <span class="ident">W</span>) -&gt; <span class="ident">io::Result</span><span class="op">&lt;</span>()<span class="op">&gt;</span> {
         <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">bundle</span>) <span class="op">=</span> <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">tze_bundle</span> {
             <span class="ident">Vector::write</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">writer</span>, <span class="kw-2">&amp;</span><span class="ident">bundle</span>.<span class="ident">vin</span>, <span class="op">|</span><span class="ident">w</span>, <span class="ident">e</span><span class="op">|</span> <span class="ident">e</span>.<span class="ident">write</span>(<span class="ident">w</span>))<span class="question-mark">?</span>;
             <span class="ident">Vector::write</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">writer</span>, <span class="kw-2">&amp;</span><span class="ident">bundle</span>.<span class="ident">vout</span>, <span class="op">|</span><span class="ident">w</span>, <span class="ident">e</span><span class="op">|</span> <span class="ident">e</span>.<span class="ident">write</span>(<span class="ident">w</span>))<span class="question-mark">?</span>;
@@ -2010,7 +2010,7 @@
     }
 
     <span class="comment">// TODO: should this be moved to `from_data` and stored?</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">auth_commitment</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">Blake2bHash</span> {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">auth_commitment</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">Blake2bHash</span> {
         <span class="self">self</span>.<span class="ident">data</span>.<span class="ident">digest</span>(<span class="ident">BlockTxCommitmentDigester</span>)
     }
 }
@@ -2057,25 +2057,25 @@
         <span class="ident">consensus_branch_id</span>: <span class="ident">BranchId</span>,
         <span class="ident">lock_time</span>: <span class="ident">u32</span>,
         <span class="ident">expiry_height</span>: <span class="ident">BlockHeight</span>,
-    ) <span class="op">-</span><span class="op">&gt;</span> <span class="ident"><span class="self">Self</span>::HeaderDigest</span>;
+    ) -&gt; <span class="ident"><span class="self">Self</span>::HeaderDigest</span>;
 
     <span class="kw">fn</span> <span class="ident">digest_transparent</span>(
         <span class="kw-2">&amp;</span><span class="self">self</span>,
         <span class="ident">transparent_bundle</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="kw-2">&amp;</span><span class="ident">transparent::Bundle</span><span class="op">&lt;</span><span class="ident">A::TransparentAuth</span><span class="op">&gt;</span><span class="op">&gt;</span>,
-    ) <span class="op">-</span><span class="op">&gt;</span> <span class="ident"><span class="self">Self</span>::TransparentDigest</span>;
+    ) -&gt; <span class="ident"><span class="self">Self</span>::TransparentDigest</span>;
 
     <span class="kw">fn</span> <span class="ident">digest_sapling</span>(
         <span class="kw-2">&amp;</span><span class="self">self</span>,
         <span class="ident">sapling_bundle</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="kw-2">&amp;</span><span class="ident">sapling::Bundle</span><span class="op">&lt;</span><span class="ident">A::SaplingAuth</span><span class="op">&gt;</span><span class="op">&gt;</span>,
-    ) <span class="op">-</span><span class="op">&gt;</span> <span class="ident"><span class="self">Self</span>::SaplingDigest</span>;
+    ) -&gt; <span class="ident"><span class="self">Self</span>::SaplingDigest</span>;
 
     <span class="kw">fn</span> <span class="ident">digest_orchard</span>(
         <span class="kw-2">&amp;</span><span class="self">self</span>,
         <span class="ident">orchard_bundle</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="kw-2">&amp;</span><span class="ident">orchard::Bundle</span><span class="op">&lt;</span><span class="ident">A::OrchardAuth</span>, <span class="ident">Amount</span><span class="op">&gt;</span><span class="op">&gt;</span>,
-    ) <span class="op">-</span><span class="op">&gt;</span> <span class="ident"><span class="self">Self</span>::OrchardDigest</span>;
+    ) -&gt; <span class="ident"><span class="self">Self</span>::OrchardDigest</span>;
 
     <span class="attribute">#[<span class="ident">cfg</span>(<span class="ident">feature</span> <span class="op">=</span> <span class="string">&quot;zfuture&quot;</span>)]</span>
-    <span class="kw">fn</span> <span class="ident">digest_tze</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">tze_bundle</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="kw-2">&amp;</span><span class="ident">tze::Bundle</span><span class="op">&lt;</span><span class="ident">A::TzeAuth</span><span class="op">&gt;</span><span class="op">&gt;</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident"><span class="self">Self</span>::TzeDigest</span>;
+    <span class="kw">fn</span> <span class="ident">digest_tze</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">tze_bundle</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="kw-2">&amp;</span><span class="ident">tze::Bundle</span><span class="op">&lt;</span><span class="ident">A::TzeAuth</span><span class="op">&gt;</span><span class="op">&gt;</span>) -&gt; <span class="ident"><span class="self">Self</span>::TzeDigest</span>;
 
     <span class="kw">fn</span> <span class="ident">combine</span>(
         <span class="kw-2">&amp;</span><span class="self">self</span>,
@@ -2084,7 +2084,7 @@
         <span class="ident">sapling_digest</span>: <span class="ident"><span class="self">Self</span>::SaplingDigest</span>,
         <span class="ident">orchard_digest</span>: <span class="ident"><span class="self">Self</span>::OrchardDigest</span>,
         <span class="attribute">#[<span class="ident">cfg</span>(<span class="ident">feature</span> <span class="op">=</span> <span class="string">&quot;zfuture&quot;</span>)]</span> <span class="ident">tze_digest</span>: <span class="ident"><span class="self">Self</span>::TzeDigest</span>,
-    ) <span class="op">-</span><span class="op">&gt;</span> <span class="ident"><span class="self">Self</span>::Digest</span>;
+    ) -&gt; <span class="ident"><span class="self">Self</span>::Digest</span>;
 }
 
 <span class="kw">pub</span> <span class="kw">enum</span> <span class="ident">DigestError</span> {
@@ -2109,20 +2109,20 @@
     <span class="attribute">#[<span class="ident">cfg</span>(<span class="ident">feature</span> <span class="op">=</span> <span class="string">&quot;zfuture&quot;</span>)]</span>
     <span class="kw">use</span> <span class="ident"><span class="kw">super</span>::components::tze::testing</span>::{<span class="self">self</span> <span class="kw">as</span> <span class="ident">tze</span>};
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">arb_txid</span>() <span class="op">-</span><span class="op">&gt;</span> <span class="kw">impl</span> <span class="ident">Strategy</span><span class="op">&lt;</span><span class="ident">Value</span> <span class="op">=</span> <span class="ident">TxId</span><span class="op">&gt;</span> {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">arb_txid</span>() -&gt; <span class="kw">impl</span> <span class="ident">Strategy</span><span class="op">&lt;</span><span class="ident">Value</span> <span class="op">=</span> <span class="ident">TxId</span><span class="op">&gt;</span> {
         <span class="ident">prop::array::uniform32</span>(<span class="ident">any</span>::<span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span>()).<span class="ident">prop_map</span>(<span class="ident">TxId::from_bytes</span>)
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">arb_tx_version</span>(<span class="ident">branch_id</span>: <span class="ident">BranchId</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="kw">impl</span> <span class="ident">Strategy</span><span class="op">&lt;</span><span class="ident">Value</span> <span class="op">=</span> <span class="ident">TxVersion</span><span class="op">&gt;</span> {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">arb_tx_version</span>(<span class="ident">branch_id</span>: <span class="ident">BranchId</span>) -&gt; <span class="kw">impl</span> <span class="ident">Strategy</span><span class="op">&lt;</span><span class="ident">Value</span> <span class="op">=</span> <span class="ident">TxVersion</span><span class="op">&gt;</span> {
         <span class="kw">match</span> <span class="ident">branch_id</span> {
-            <span class="ident">BranchId::Sprout</span> <span class="op">=</span><span class="op">&gt;</span> (<span class="number">1</span>..<span class="op">=</span><span class="number">2u32</span>).<span class="ident">prop_map</span>(<span class="ident">TxVersion::Sprout</span>).<span class="ident">boxed</span>(),
-            <span class="ident">BranchId::Overwinter</span> <span class="op">=</span><span class="op">&gt;</span> <span class="ident">Just</span>(<span class="ident">TxVersion::Overwinter</span>).<span class="ident">boxed</span>(),
-            <span class="ident">BranchId::Sapling</span> <span class="op">|</span> <span class="ident">BranchId::Blossom</span> <span class="op">|</span> <span class="ident">BranchId::Heartwood</span> <span class="op">|</span> <span class="ident">BranchId::Canopy</span> <span class="op">=</span><span class="op">&gt;</span> {
+            <span class="ident">BranchId::Sprout</span> =&gt; (<span class="number">1</span>..<span class="op">=</span><span class="number">2u32</span>).<span class="ident">prop_map</span>(<span class="ident">TxVersion::Sprout</span>).<span class="ident">boxed</span>(),
+            <span class="ident">BranchId::Overwinter</span> =&gt; <span class="ident">Just</span>(<span class="ident">TxVersion::Overwinter</span>).<span class="ident">boxed</span>(),
+            <span class="ident">BranchId::Sapling</span> <span class="op">|</span> <span class="ident">BranchId::Blossom</span> <span class="op">|</span> <span class="ident">BranchId::Heartwood</span> <span class="op">|</span> <span class="ident">BranchId::Canopy</span> =&gt; {
                 <span class="ident">Just</span>(<span class="ident">TxVersion::Sapling</span>).<span class="ident">boxed</span>()
             }
-            <span class="ident">BranchId::Nu5</span> <span class="op">=</span><span class="op">&gt;</span> <span class="ident">Just</span>(<span class="ident">TxVersion::Zip225</span>).<span class="ident">boxed</span>(),
+            <span class="ident">BranchId::Nu5</span> =&gt; <span class="ident">Just</span>(<span class="ident">TxVersion::Zip225</span>).<span class="ident">boxed</span>(),
             <span class="attribute">#[<span class="ident">cfg</span>(<span class="ident">feature</span> <span class="op">=</span> <span class="string">&quot;zfuture&quot;</span>)]</span>
-            <span class="ident">BranchId::ZFuture</span> <span class="op">=</span><span class="op">&gt;</span> <span class="ident">Just</span>(<span class="ident">TxVersion::ZFuture</span>).<span class="ident">boxed</span>(),
+            <span class="ident">BranchId::ZFuture</span> =&gt; <span class="ident">Just</span>(<span class="ident">TxVersion::ZFuture</span>).<span class="ident">boxed</span>(),
         }
     }
 
@@ -2137,7 +2137,7 @@
             <span class="ident">sapling_bundle</span> <span class="kw">in</span> <span class="ident">sapling::arb_bundle_for_version</span>(<span class="ident">version</span>),
             <span class="ident">orchard_bundle</span> <span class="kw">in</span> <span class="ident">orchard::arb_bundle_for_version</span>(<span class="ident">version</span>),
             <span class="ident">version</span> <span class="kw">in</span> <span class="ident">Just</span>(<span class="ident">version</span>)
-        ) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">TransactionData</span><span class="op">&lt;</span><span class="ident">Authorized</span><span class="op">&gt;</span> {
+        ) -&gt; <span class="ident">TransactionData</span><span class="op">&lt;</span><span class="ident">Authorized</span><span class="op">&gt;</span> {
             <span class="ident">TransactionData</span> {
                 <span class="ident">version</span>,
                 <span class="ident">consensus_branch_id</span>,
@@ -2163,7 +2163,7 @@
             <span class="ident">orchard_bundle</span> <span class="kw">in</span> <span class="ident">orchard::arb_bundle_for_version</span>(<span class="ident">version</span>),
             <span class="ident">tze_bundle</span> <span class="kw">in</span> <span class="ident">tze::arb_bundle</span>(<span class="ident">consensus_branch_id</span>),
             <span class="ident">version</span> <span class="kw">in</span> <span class="ident">Just</span>(<span class="ident">version</span>)
-        ) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">TransactionData</span><span class="op">&lt;</span><span class="ident">Authorized</span><span class="op">&gt;</span> {
+        ) -&gt; <span class="ident">TransactionData</span><span class="op">&lt;</span><span class="ident">Authorized</span><span class="op">&gt;</span> {
             <span class="ident">TransactionData</span> {
                 <span class="ident">version</span>,
                 <span class="ident">consensus_branch_id</span>,
@@ -2179,7 +2179,7 @@
     }
 
     <span class="macro">prop_compose!</span> {
-        <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">arb_tx</span>(<span class="ident">branch_id</span>: <span class="ident">BranchId</span>)(<span class="ident">tx_data</span> <span class="kw">in</span> <span class="ident">arb_txdata</span>(<span class="ident">branch_id</span>)) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">Transaction</span> {
+        <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">arb_tx</span>(<span class="ident">branch_id</span>: <span class="ident">BranchId</span>)(<span class="ident">tx_data</span> <span class="kw">in</span> <span class="ident">arb_txdata</span>(<span class="ident">branch_id</span>)) -&gt; <span class="ident">Transaction</span> {
             <span class="ident">Transaction::from_data</span>(<span class="ident">tx_data</span>).<span class="ident">unwrap</span>()
         }
     }

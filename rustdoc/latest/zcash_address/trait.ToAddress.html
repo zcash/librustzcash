@@ -9,7 +9,7 @@
 purpose is to move these conversion functions out of the main <code>ZcashAddress</code> API
 documentation, as they are only required when creating addresses (rather than when
 parsing addresses, which is a more common occurrence).</p>
-<h1 id="examples" class="section-header"><a href="#examples">Examples</a></h1>
+<h2 id="examples" class="section-header"><a href="#examples">Examples</a></h2>
 <div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">use</span> <span class="ident">zcash_address</span>::{<span class="ident">ToAddress</span>, <span class="ident">Network</span>, <span class="ident">ZcashAddress</span>};
 
 <span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Debug</span>)]</span>
@@ -17,7 +17,7 @@ parsing addresses, which is a more common occurrence).</p>
 
 <span class="kw">impl</span> <span class="ident">MySapling</span> {
     <span class="doccomment">/// Encodes this Sapling address for the given network.</span>
-    <span class="kw">fn</span> <span class="ident">encode</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">net</span>: <span class="ident">Network</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">ZcashAddress</span> {
+    <span class="kw">fn</span> <span class="ident">encode</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">net</span>: <span class="ident">Network</span>) -&gt; <span class="ident">ZcashAddress</span> {
         <span class="ident">ZcashAddress::from_sapling</span>(<span class="ident">net</span>, <span class="self">self</span>.<span class="number">0</span>)
     }
 }

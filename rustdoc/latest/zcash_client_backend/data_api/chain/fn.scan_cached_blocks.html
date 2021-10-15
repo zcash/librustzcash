@@ -14,7 +14,7 @@ initializing the client database with a starting block (for example, calling
 <code>init_blocks_table</code> before this function if using <code>zcash_client_sqlite</code>).</p>
 <p>Scanned blocks are required to be height-sequential. If a block is missing from the
 cache, an error will be returned with kind <a href="../error/enum.ChainInvalid.html#variant.BlockHeightDiscontinuity" title="ChainInvalid::BlockHeightDiscontinuity"><code>ChainInvalid::BlockHeightDiscontinuity</code></a>.</p>
-<h1 id="examples" class="section-header"><a href="#examples">Examples</a></h1>
+<h2 id="examples" class="section-header"><a href="#examples">Examples</a></h2>
 <div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">use</span> <span class="ident">tempfile::NamedTempFile</span>;
 <span class="kw">use</span> <span class="ident">zcash_primitives::consensus</span>::{
     <span class="ident">Network</span>,

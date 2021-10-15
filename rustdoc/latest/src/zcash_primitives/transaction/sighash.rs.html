@@ -164,7 +164,7 @@
 }
 
 <span class="kw">impl</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> <span class="ident">TransparentInput</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">new</span>(<span class="ident">index</span>: <span class="ident">usize</span>, <span class="ident">script_code</span>: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a</span> <span class="ident">Script</span>, <span class="ident">value</span>: <span class="ident">Amount</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="self">Self</span> {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">new</span>(<span class="ident">index</span>: <span class="ident">usize</span>, <span class="ident">script_code</span>: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a</span> <span class="ident">Script</span>, <span class="ident">value</span>: <span class="ident">Amount</span>) -&gt; <span class="self">Self</span> {
         <span class="ident">TransparentInput</span> {
             <span class="ident">index</span>,
             <span class="ident">script_code</span>,
@@ -172,15 +172,15 @@
         }
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">index</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">usize</span> {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">index</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">usize</span> {
         <span class="self">self</span>.<span class="ident">index</span>
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">script_code</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="kw-2">&amp;</span><span class="lifetime">&#39;a</span> <span class="ident">Script</span> {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">script_code</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span><span class="lifetime">&#39;a</span> <span class="ident">Script</span> {
         <span class="self">self</span>.<span class="ident">script_code</span>
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">value</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">Amount</span> {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">value</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">Amount</span> {
         <span class="self">self</span>.<span class="ident">value</span>
     }
 }
@@ -194,7 +194,7 @@
 
 <span class="attribute">#[<span class="ident">cfg</span>(<span class="ident">feature</span> <span class="op">=</span> <span class="string">&quot;zfuture&quot;</span>)]</span>
 <span class="kw">impl</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> <span class="ident">TzeInput</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">new</span>(<span class="ident">index</span>: <span class="ident">usize</span>, <span class="ident">precondition</span>: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a</span> <span class="ident">Precondition</span>, <span class="ident">value</span>: <span class="ident">Amount</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="self">Self</span> {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">new</span>(<span class="ident">index</span>: <span class="ident">usize</span>, <span class="ident">precondition</span>: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a</span> <span class="ident">Precondition</span>, <span class="ident">value</span>: <span class="ident">Amount</span>) -&gt; <span class="self">Self</span> {
         <span class="ident">TzeInput</span> {
             <span class="ident">index</span>,
             <span class="ident">precondition</span>,
@@ -202,15 +202,15 @@
         }
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">index</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">usize</span> {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">index</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">usize</span> {
         <span class="self">self</span>.<span class="ident">index</span>
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">precondition</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="kw-2">&amp;</span><span class="lifetime">&#39;a</span> <span class="ident">Precondition</span> {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">precondition</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span><span class="lifetime">&#39;a</span> <span class="ident">Precondition</span> {
         <span class="self">self</span>.<span class="ident">precondition</span>
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">value</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">Amount</span> {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">value</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">Amount</span> {
         <span class="self">self</span>.<span class="ident">value</span>
     }
 }
@@ -223,7 +223,7 @@
 }
 
 <span class="kw">impl</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> <span class="ident">SignableInput</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">transparent</span>(<span class="ident">index</span>: <span class="ident">usize</span>, <span class="ident">script_code</span>: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a</span> <span class="ident">Script</span>, <span class="ident">value</span>: <span class="ident">Amount</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="self">Self</span> {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">transparent</span>(<span class="ident">index</span>: <span class="ident">usize</span>, <span class="ident">script_code</span>: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a</span> <span class="ident">Script</span>, <span class="ident">value</span>: <span class="ident">Amount</span>) -&gt; <span class="self">Self</span> {
         <span class="ident">SignableInput::Transparent</span>(<span class="ident">TransparentInput</span> {
             <span class="ident">index</span>,
             <span class="ident">script_code</span>,
@@ -232,7 +232,7 @@
     }
 
     <span class="attribute">#[<span class="ident">cfg</span>(<span class="ident">feature</span> <span class="op">=</span> <span class="string">&quot;zfuture&quot;</span>)]</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">tze</span>(<span class="ident">index</span>: <span class="ident">usize</span>, <span class="ident">precondition</span>: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a</span> <span class="ident">Precondition</span>, <span class="ident">value</span>: <span class="ident">Amount</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="self">Self</span> {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">tze</span>(<span class="ident">index</span>: <span class="ident">usize</span>, <span class="ident">precondition</span>: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a</span> <span class="ident">Precondition</span>, <span class="ident">value</span>: <span class="ident">Amount</span>) -&gt; <span class="self">Self</span> {
         <span class="ident">SignableInput::Tze</span>(<span class="ident">TzeInput</span> {
             <span class="ident">index</span>,
             <span class="ident">precondition</span>,
@@ -244,7 +244,7 @@
 <span class="kw">pub</span> <span class="kw">struct</span> <span class="ident">SignatureHash</span>(<span class="ident">Blake2bHash</span>);
 
 <span class="kw">impl</span> <span class="ident">AsRef</span><span class="op">&lt;</span>[<span class="ident">u8</span>; <span class="number">32</span>]<span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">SignatureHash</span> {
-    <span class="kw">fn</span> <span class="ident">as_ref</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="kw-2">&amp;</span>[<span class="ident">u8</span>; <span class="number">32</span>] {
+    <span class="kw">fn</span> <span class="ident">as_ref</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>[<span class="ident">u8</span>; <span class="number">32</span>] {
         <span class="self">self</span>.<span class="number">0</span>.<span class="ident">as_ref</span>().<span class="ident">try_into</span>().<span class="ident">unwrap</span>()
     }
 }
@@ -258,16 +258,16 @@
     <span class="ident">hash_type</span>: <span class="ident">u32</span>,
     <span class="ident">signable_input</span>: <span class="kw-2">&amp;</span><span class="ident">SignableInput</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span>,
     <span class="ident">txid_parts</span>: <span class="kw-2">&amp;</span><span class="ident">TxDigests</span><span class="op">&lt;</span><span class="ident">Blake2bHash</span><span class="op">&gt;</span>,
-) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">SignatureHash</span> {
+) -&gt; <span class="ident">SignatureHash</span> {
     <span class="ident">SignatureHash</span>(<span class="kw">match</span> <span class="ident">tx</span>.<span class="ident">version</span> {
-        <span class="ident">TxVersion::Sprout</span>(<span class="kw">_</span>) <span class="op">|</span> <span class="ident">TxVersion::Overwinter</span> <span class="op">|</span> <span class="ident">TxVersion::Sapling</span> <span class="op">=</span><span class="op">&gt;</span> {
+        <span class="ident">TxVersion::Sprout</span>(<span class="kw">_</span>) <span class="op">|</span> <span class="ident">TxVersion::Overwinter</span> <span class="op">|</span> <span class="ident">TxVersion::Sapling</span> =&gt; {
             <span class="ident">v4_signature_hash</span>(<span class="ident">tx</span>, <span class="ident">hash_type</span>, <span class="ident">signable_input</span>)
         }
 
-        <span class="ident">TxVersion::Zip225</span> <span class="op">=</span><span class="op">&gt;</span> <span class="ident">v5_signature_hash</span>(<span class="ident">tx</span>, <span class="ident">hash_type</span>, <span class="ident">signable_input</span>, <span class="ident">txid_parts</span>),
+        <span class="ident">TxVersion::Zip225</span> =&gt; <span class="ident">v5_signature_hash</span>(<span class="ident">tx</span>, <span class="ident">hash_type</span>, <span class="ident">signable_input</span>, <span class="ident">txid_parts</span>),
 
         <span class="attribute">#[<span class="ident">cfg</span>(<span class="ident">feature</span> <span class="op">=</span> <span class="string">&quot;zfuture&quot;</span>)]</span>
-        <span class="ident">TxVersion::ZFuture</span> <span class="op">=</span><span class="op">&gt;</span> <span class="ident">v5_signature_hash</span>(<span class="ident">tx</span>, <span class="ident">hash_type</span>, <span class="ident">signable_input</span>, <span class="ident">txid_parts</span>),
+        <span class="ident">TxVersion::ZFuture</span> =&gt; <span class="ident">v5_signature_hash</span>(<span class="ident">tx</span>, <span class="ident">hash_type</span>, <span class="ident">signable_input</span>, <span class="ident">txid_parts</span>),
     })
 }
 </code></pre></div>
