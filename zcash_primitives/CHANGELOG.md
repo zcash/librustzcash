@@ -53,6 +53,24 @@ and this library adheres to Rust's notion of
   crate, which can be found in the `components` directory.
 - `zcash_primitives::transaction::components::Amount` now implements
   `memuse::DynamicUsage`, to enable `orchard::Bundle<_, Amount>::dynamic_usage`.
+- `zcash_primitives::zip32::diversifier` has been renamed to `find_sapling_diversifier`
+  and `sapling_diversifier` has been added. `find_sapling_diversifier` searches the
+  diversifier index space, whereas `sapling_diversifier` just attempts to use the
+  provided diversifier index and returns `None` if it does not produce a valid
+  diversifier.
+- `zcash_primitives::zip32::DiversifierKey::diversifier` has been renamed to 
+  `find_diversifier` and the `diversifier` method has new semantics.
+  `find_diversifier` searches the diversifier index space to find a diversifier
+  index which produces a valid diversifier, whereas `diversifier` just attempts
+  to use the provided diversifier index and returns `None` if it does not
+  produce a valid diversifier.
+- `zcash_primitives::zip32::ExtendedFullViewingKey::address` has been renamed
+  to `find_address` and the `address` method has new semantics. `find_address`
+  searches the diversifier index space until it obtains a valid diversifier,
+  and returns the address corresponding to that diversifier, whereas `address`
+  just attempts to create an address corresponding to the diversifier derived
+  from the provided diversifier index and returns `None` if the provided index
+  does not produce a valid diversifier.
 
 ### Changed
 - MSRV is now 1.51.0.

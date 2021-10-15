@@ -200,7 +200,7 @@ mod tests {
             ExtendedFullViewingKey::from(&extsk1),
         ];
         init_accounts_table(&db_data, &extfvks).unwrap();
-        let to = extsk0.default_address().unwrap().1.into();
+        let to = extsk0.default_address().1.into();
 
         // Invalid extsk for the given account should cause an error
         let mut db_write = db_data.get_update_ops().unwrap();
@@ -245,7 +245,7 @@ mod tests {
         let extsk = ExtendedSpendingKey::master(&[]);
         let extfvks = [ExtendedFullViewingKey::from(&extsk)];
         init_accounts_table(&db_data, &extfvks).unwrap();
-        let to = extsk.default_address().unwrap().1.into();
+        let to = extsk.default_address().1.into();
 
         // We cannot do anything if we aren't synchronised
         let mut db_write = db_data.get_update_ops().unwrap();
@@ -283,7 +283,7 @@ mod tests {
         let extsk = ExtendedSpendingKey::master(&[]);
         let extfvks = [ExtendedFullViewingKey::from(&extsk)];
         init_accounts_table(&db_data, &extfvks).unwrap();
-        let to = extsk.default_address().unwrap().1.into();
+        let to = extsk.default_address().1.into();
 
         // Account balance should be zero
         assert_eq!(get_balance(&db_data, AccountId(0)).unwrap(), Amount::zero());
@@ -367,7 +367,7 @@ mod tests {
 
         // Spend fails because there are insufficient verified notes
         let extsk2 = ExtendedSpendingKey::master(&[]);
-        let to = extsk2.default_address().unwrap().1.into();
+        let to = extsk2.default_address().1.into();
         match create_spend_to_address(
             &mut db_write,
             &tests::network(),
@@ -469,7 +469,7 @@ mod tests {
 
         // Send some of the funds to another address
         let extsk2 = ExtendedSpendingKey::master(&[]);
-        let to = extsk2.default_address().unwrap().1.into();
+        let to = extsk2.default_address().1.into();
         create_spend_to_address(
             &mut db_write,
             &tests::network(),
@@ -589,7 +589,7 @@ mod tests {
         assert_eq!(get_balance(&db_data, AccountId(0)).unwrap(), value);
 
         let extsk2 = ExtendedSpendingKey::master(&[]);
-        let addr2 = extsk2.default_address().unwrap().1;
+        let addr2 = extsk2.default_address().1;
         let to = addr2.clone().into();
 
         let send_and_recover_with_policy = |db_write: &mut DataConnStmtCache<'_, _>, ovk_policy| {

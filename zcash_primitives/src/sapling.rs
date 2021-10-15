@@ -546,10 +546,7 @@ pub mod testing {
     }
 
     pub fn arb_payment_address() -> impl Strategy<Value = PaymentAddress> {
-        arb_extended_spending_key()
-            .prop_map(|sk| sk.default_address().map(|(_, a)| a))
-            .prop_filter("A valid payment address is required.", |r| r.is_ok())
-            .prop_map(|r| r.unwrap())
+        arb_extended_spending_key().prop_map(|sk| sk.default_address().1)
     }
 
     prop_compose! {
