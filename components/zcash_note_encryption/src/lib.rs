@@ -3,12 +3,18 @@
 //! functionality that is shared between the Sapling and Orchard
 //! protocols.
 
+#![no_std]
 // Catch documentation errors caused by code changes.
 #![deny(broken_intra_doc_links)]
 #![deny(unsafe_code)]
 // TODO: #![deny(missing_docs)]
 
-use std::convert::TryInto;
+#[cfg(feature = "alloc")]
+extern crate alloc;
+#[cfg(feature = "alloc")]
+use alloc::vec::Vec;
+
+use core::convert::TryInto;
 
 use chacha20::{
     cipher::{NewCipher, StreamCipher, StreamCipherSeek},
@@ -22,6 +28,7 @@ use chacha20poly1305::{
 use rand_core::RngCore;
 use subtle::{Choice, ConstantTimeEq};
 
+#[cfg(feature = "alloc")]
 pub mod batch;
 
 pub const COMPACT_NOTE_SIZE: usize = 1 + // version

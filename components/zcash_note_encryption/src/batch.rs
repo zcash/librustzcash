@@ -1,6 +1,7 @@
 //! APIs for batch trial decryption.
 
-use std::iter;
+use alloc::vec::Vec; // module is alloc only
+use core::iter;
 
 use crate::{
     try_compact_note_decryption_inner, try_note_decryption_inner, BatchDomain, EphemeralKeyBytes,
