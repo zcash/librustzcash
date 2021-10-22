@@ -1,8 +1,6 @@
 use std::cmp;
 use std::convert::{TryFrom, TryInto};
 
-use crate::kind;
-
 use super::{
     private::{SealedContainer, SealedItem},
     Encoding, ParseError, Container, Typecode,
@@ -33,16 +31,6 @@ pub enum Fvk {
     /// extended public key.
     P2pkh([u8; 78]),
 
-    /// The raw data of a P2SH address.
-    ///
-    /// # Security
-    ///
-    /// P2SH addresses are hashes of scripts, and as such have no generic HD mechanism for
-    /// us to derive independent-but-linked P2SH addresses. As such, if someone constructs
-    /// a UFVK containing a P2SH address, and then derives diversified UAs from it, those
-    /// UAs will be trivially linkable as they will share the same P2SH address.
-    P2sh(kind::p2sh::Data),
-
     Unknown {
         typecode: u32,
         data: Vec<u8>,
@@ -68,15 +56,13 @@ impl TryFrom<(u32, &[u8])> for Fvk {
     type Error = ParseError;
 
     fn try_from((typecode, data): (u32, &[u8])) -> Result<Self, Self::Error> {
+        let data = data.to_vec();
         match typecode.try_into()? {
             Typecode::P2pkh => data.try_into().map(Fvk::P2pkh),
-            Typecode::P2sh => data.try_into().map(Fvk::P2sh),
+            Typecode::P2sh => Err(data),
             Typecode::Sapling => data.try_into().map(Fvk::Sapling),
             Typecode::Orchard => data.try_into().map(Fvk::Orchard),
-            Typecode::Unknown(_) => Ok(Fvk::Unknown {
-                typecode,
-                data: data.to_vec(),
-            }),
+            Typecode::Unknown(_) => Ok(Fvk::Unknown { typecode, data }),
         }
         .map_err(|e| {
             ParseError::InvalidEncoding(format!("Invalid fvk for typecode {}: {:?}", typecode, e))
@@ -88,7 +74,6 @@ impl SealedItem for Fvk {
     fn typecode(&self) -> Typecode {
         match self {
             Fvk::P2pkh(_) => Typecode::P2pkh,
-            Fvk::P2sh(_) => Typecode::P2sh,
             Fvk::Sapling(_) => Typecode::Sapling,
             Fvk::Orchard(_) => Typecode::Orchard,
             Fvk::Unknown { typecode, .. } => Typecode::Unknown(*typecode),
@@ -98,7 +83,6 @@ impl SealedItem for Fvk {
     fn data(&self) -> &[u8] {
         match self {
             Fvk::P2pkh(data) => data,
-            Fvk::P2sh(data) => data,
             Fvk::Sapling(data) => data,
             Fvk::Orchard(data) => data,
             Fvk::Unknown { data, .. } => data,
@@ -150,10 +134,7 @@ impl SealedContainer for Ufvk {
 mod tests {
     use assert_matches::assert_matches;
 
-    use proptest::{
-        array::{uniform20, uniform32},
-        prelude::*,
-    };
+    use proptest::{array::uniform32, prelude::*};
 
     use super::{Fvk, ParseError, Typecode, Ufvk};
     use crate::kind::unified::{private::SealedContainer, Encoding, Container};
@@ -185,11 +166,7 @@ mod tests {
     }
 
     fn arb_transparent_fvk() -> BoxedStrategy<Fvk> {
-        prop_oneof![
-            uniform78().prop_map(Fvk::P2pkh),
-            uniform20(0u8..).prop_map(Fvk::P2sh),
-        ]
-        .boxed()
+        uniform78().prop_map(Fvk::P2pkh).boxed()
     }
 
     prop_compose! {
@@ -307,17 +284,6 @@ mod tests {
         assert_eq!(
             Ufvk::try_from_bytes(Ufvk::MAINNET, &encoded[..]),
             Err(ParseError::DuplicateTypecode(Typecode::Sapling))
-        );
-    }
-
-    #[test]
-    fn p2pkh_and_p2sh() {
-        // Construct and serialize an invalid UFVK.
-        let ufvk = Ufvk(vec![Fvk::P2pkh([0; 78]), Fvk::P2sh([0; 20])]);
-        let encoded = ufvk.to_bytes(Ufvk::MAINNET);
-        assert_eq!(
-            Ufvk::try_from_bytes(Ufvk::MAINNET, &encoded[..]),
-            Err(ParseError::BothP2phkAndP2sh)
         );
     }
 

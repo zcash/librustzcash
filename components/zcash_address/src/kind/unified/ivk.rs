@@ -1,8 +1,6 @@
 use std::cmp;
 use std::convert::{TryFrom, TryInto};
 
-use crate::kind;
-
 use super::{
     private::{SealedContainer, SealedItem},
     Encoding, ParseError, Container, Typecode,
@@ -37,16 +35,6 @@ pub enum Ivk {
     /// extended public key.
     P2pkh([u8; 78]),
 
-    /// The raw data of a P2SH address.
-    ///
-    /// # Security
-    ///
-    /// P2SH addresses are hashes of scripts, and as such have no generic HD mechanism for
-    /// us to derive independent-but-linked P2SH addresses. As such, if someone constructs
-    /// a UIVK containing a P2SH address, and then derives diversified UAs from it, those
-    /// UAs will be trivially linkable as they will share the same P2SH address.
-    P2sh(kind::p2sh::Data),
-
     Unknown {
         typecode: u32,
         data: Vec<u8>,
@@ -72,15 +60,13 @@ impl TryFrom<(u32, &[u8])> for Ivk {
     type Error = ParseError;
 
     fn try_from((typecode, data): (u32, &[u8])) -> Result<Self, Self::Error> {
+        let data = data.to_vec();
         match typecode.try_into()? {
             Typecode::P2pkh => data.try_into().map(Ivk::P2pkh),
-            Typecode::P2sh => data.try_into().map(Ivk::P2sh),
+            Typecode::P2sh => Err(data),
             Typecode::Sapling => data.try_into().map(Ivk::Sapling),
             Typecode::Orchard => data.try_into().map(Ivk::Orchard),
-            Typecode::Unknown(_) => Ok(Ivk::Unknown {
-                typecode,
-                data: data.to_vec(),
-            }),
+            Typecode::Unknown(_) => Ok(Ivk::Unknown { typecode, data }),
         }
         .map_err(|e| {
             ParseError::InvalidEncoding(format!("Invalid ivk for typecode {}: {:?}", typecode, e))
@@ -92,7 +78,6 @@ impl SealedItem for Ivk {
     fn typecode(&self) -> Typecode {
         match self {
             Ivk::P2pkh(_) => Typecode::P2pkh,
-            Ivk::P2sh(_) => Typecode::P2sh,
             Ivk::Sapling(_) => Typecode::Sapling,
             Ivk::Orchard(_) => Typecode::Orchard,
             Ivk::Unknown { typecode, .. } => Typecode::Unknown(*typecode),
@@ -102,7 +87,6 @@ impl SealedItem for Ivk {
     fn data(&self) -> &[u8] {
         match self {
             Ivk::P2pkh(data) => data,
-            Ivk::P2sh(data) => data,
             Ivk::Sapling(data) => data,
             Ivk::Orchard(data) => data,
             Ivk::Unknown { data, .. } => data,
@@ -155,7 +139,7 @@ mod tests {
     use assert_matches::assert_matches;
 
     use proptest::{
-        array::{uniform14, uniform20, uniform32},
+        array::{uniform14, uniform32},
         prelude::*,
     };
 
@@ -189,11 +173,7 @@ mod tests {
     }
 
     fn arb_transparent_ivk() -> BoxedStrategy<Ivk> {
-        prop_oneof![
-            uniform78().prop_map(Ivk::P2pkh),
-            uniform20(0u8..).prop_map(Ivk::P2sh),
-        ]
-        .boxed()
+        uniform78().prop_map(Ivk::P2pkh).boxed()
     }
 
     prop_compose! {
@@ -301,17 +281,6 @@ mod tests {
         assert_eq!(
             Uivk::try_from_bytes(Uivk::MAINNET, &encoded[..]),
             Err(ParseError::DuplicateTypecode(Typecode::Sapling))
-        );
-    }
-
-    #[test]
-    fn p2pkh_and_p2sh() {
-        // Construct and serialize an invalid UIVK.
-        let uivk = Uivk(vec![Ivk::P2pkh([0; 78]), Ivk::P2sh([0; 20])]);
-        let encoded = uivk.to_bytes(Uivk::MAINNET);
-        assert_eq!(
-            Uivk::try_from_bytes(Uivk::MAINNET, &encoded[..]),
-            Err(ParseError::BothP2phkAndP2sh)
         );
     }
 
