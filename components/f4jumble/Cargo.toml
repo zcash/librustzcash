@@ -14,11 +14,11 @@ license = "MIT OR Apache-2.0"
 edition = "2018"
 
 [dependencies]
-blake2b_simd = "0.5"
+blake2b_simd = { version = "0.5", default-features = false }
 
 [dev-dependencies]
 proptest = "1"
 
 [features]
 default = ["std"]
-std = []
+std = ["blake2b_simd/std"]
