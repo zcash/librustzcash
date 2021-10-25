@@ -150,7 +150,7 @@ pub fn f4jumble(message: &[u8]) -> Option<Vec<u8>> {
     let mut result = message.to_vec();
     let res = f4jumble_mut(&mut result);
     if res.is_ok() {
-        Some(Vec::from(result))
+        Some(result)
     } else {
         None
     }
@@ -161,7 +161,7 @@ pub fn f4jumble_inv(message: &[u8]) -> Option<Vec<u8>> {
     let mut result = message.to_vec();
     let res = f4jumble_inv_mut(&mut result);
     if res.is_ok() {
-        Some(Vec::from(result))
+        Some(result)
     } else {
         None
     }
