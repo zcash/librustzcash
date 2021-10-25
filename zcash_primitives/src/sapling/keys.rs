@@ -199,7 +199,7 @@ pub mod testing {
     prop_compose! {
         pub fn arb_shielded_addr()(extsk in arb_extended_spending_key()) -> PaymentAddress {
             let extfvk = ExtendedFullViewingKey::from(&extsk);
-            extfvk.default_address().unwrap().1
+            extfvk.default_address().1
         }
     }
 }

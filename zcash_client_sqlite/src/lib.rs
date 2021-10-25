@@ -688,7 +688,7 @@ fn address_from_extfvk<P: consensus::Parameters>(
     params: &P,
     extfvk: &ExtendedFullViewingKey,
 ) -> String {
-    let addr = extfvk.default_address().unwrap().1;
+    let addr = extfvk.default_address().1;
     encode_payment_address(params.hrp_sapling_payment_address(), &addr)
 }
 
@@ -782,7 +782,7 @@ mod tests {
         extfvk: ExtendedFullViewingKey,
         value: Amount,
     ) -> (CompactBlock, Nullifier) {
-        let to = extfvk.default_address().unwrap().1;
+        let to = extfvk.default_address().1;
 
         // Create a fake Note for the account
         let mut rng = OsRng;
@@ -873,7 +873,7 @@ mod tests {
 
         // Create a fake Note for the change
         ctx.outputs.push({
-            let change_addr = extfvk.default_address().unwrap().1;
+            let change_addr = extfvk.default_address().1;
             let rseed = generate_random_rseed(&network(), height, &mut rng);
             let note = Note {
                 g_d: change_addr.diversifier().g_d().unwrap(),

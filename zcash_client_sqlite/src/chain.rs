@@ -517,7 +517,7 @@ mod tests {
 
         // Create a second fake CompactBlock spending value from the address
         let extsk2 = ExtendedSpendingKey::master(&[0]);
-        let to2 = extsk2.default_address().unwrap().1;
+        let to2 = extsk2.default_address().1;
         let value2 = Amount::from_u64(2).unwrap();
         insert_into_cache(
             &db_cache,

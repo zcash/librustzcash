@@ -499,7 +499,7 @@ mod tests {
         let extsk = ExtendedSpendingKey::master(&[]);
         let extfvk = ExtendedFullViewingKey::from(&extsk);
         let ovk = extfvk.fvk.ovk;
-        let to = extfvk.default_address().unwrap().1;
+        let to = extfvk.default_address().1;
 
         let sapling_activation_height = TEST_NETWORK
             .activation_height(NetworkUpgrade::Sapling)
@@ -557,7 +557,7 @@ mod tests {
     fn binding_sig_present_if_shielded_spend() {
         let extsk = ExtendedSpendingKey::master(&[]);
         let extfvk = ExtendedFullViewingKey::from(&extsk);
-        let to = extfvk.default_address().unwrap().1;
+        let to = extfvk.default_address().1;
 
         let mut rng = OsRng;
 
@@ -630,7 +630,7 @@ mod tests {
 
         let extfvk = ExtendedFullViewingKey::from(&extsk);
         let ovk = Some(extfvk.fvk.ovk);
-        let to = extfvk.default_address().unwrap().1;
+        let to = extfvk.default_address().1;
 
         // Fail if there is only a Sapling output
         // 0.0005 z-ZEC out, 0.00001 t-ZEC fee

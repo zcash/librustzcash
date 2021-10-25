@@ -140,29 +140,40 @@ impl DiversifierKey {
         DiversifierKey(dk)
     }
 
+    fn try_diversifier_internal(ff: &FF1<Aes256>, j: DiversifierIndex) -> Option<Diversifier> {
+        // Generate d_j
+        let enc = ff
+            .encrypt(&[], &BinaryNumeralString::from_bytes_le(&j.0[..]))
+            .unwrap();
+        let mut d_j = [0; 11];
+        d_j.copy_from_slice(&enc.to_bytes_le());
+        let diversifier = Diversifier(d_j);
+
+        diversifier.g_d().map(|_| diversifier)
+    }
+
+    /// Attempts to produce a diversifier at the given index. Returns None
+    /// if the index does not produce a valid diversifier.
+    pub fn diversifier(&self, j: DiversifierIndex) -> Option<Diversifier> {
+        let ff = FF1::<Aes256>::new(&self.0, 2).unwrap();
+        Self::try_diversifier_internal(&ff, j)
+    }
+
     /// Returns the first index starting from j that generates a valid
     /// diversifier, along with the corresponding diversifier. Returns
-    /// an error if the diversifier space is exhausted.
-    pub fn diversifier(
+    /// `None` if the diversifier space contains no valid diversifiers
+    /// at or above the specified diversifier index.
+    pub fn find_diversifier(
         &self,
         mut j: DiversifierIndex,
-    ) -> Result<(DiversifierIndex, Diversifier), ()> {
+    ) -> Option<(DiversifierIndex, Diversifier)> {
         let ff = FF1::<Aes256>::new(&self.0, 2).unwrap();
         loop {
-            // Generate d_j
-            let enc = ff
-                .encrypt(&[], &BinaryNumeralString::from_bytes_le(&j.0[..]))
-                .unwrap();
-            let mut d_j = [0; 11];
-            d_j.copy_from_slice(&enc.to_bytes_le());
-            let d_j = Diversifier(d_j);
-
-            // Return (j, d_j) if valid, else increment j and try again
-            match d_j.g_d() {
-                Some(_) => return Ok((j, d_j)),
+            match Self::try_diversifier_internal(&ff, j) {
+                Some(d_j) => return Some((j, d_j)),
                 None => {
                     if j.increment().is_err() {
-                        return Err(());
+                        return None;
                     }
                 }
             }
@@ -341,7 +352,9 @@ impl ExtendedSpendingKey {
         }
     }
 
-    pub fn default_address(&self) -> Result<(DiversifierIndex, PaymentAddress), ()> {
+    /// Returns the address with the lowest valid diversifier index, along with
+    /// the diversifier index that generated that address.
+    pub fn default_address(&self) -> (DiversifierIndex, PaymentAddress) {
         ExtendedFullViewingKey::from(self).default_address()
     }
 }
@@ -428,16 +441,30 @@ impl ExtendedFullViewingKey {
         })
     }
 
-    pub fn address(&self, j: DiversifierIndex) -> Result<(DiversifierIndex, PaymentAddress), ()> {
-        let (j, d_j) = self.dk.diversifier(j)?;
-        match self.fvk.vk.to_payment_address(d_j) {
-            Some(addr) => Ok((j, addr)),
-            None => Err(()),
-        }
+    /// Attempt to produce a payment address given the specified diversifier
+    /// index, and return None if the specified index does not produce a valid
+    /// diversifier.
+    pub fn address(&self, j: DiversifierIndex) -> Option<PaymentAddress> {
+        self.dk
+            .diversifier(j)
+            .and_then(|d_j| self.fvk.vk.to_payment_address(d_j))
     }
 
-    pub fn default_address(&self) -> Result<(DiversifierIndex, PaymentAddress), ()> {
-        self.address(DiversifierIndex::new())
+    /// Search the diversifier space starting at diversifier index `j` for
+    /// one which will produce a valid diversifier, and return the payment address
+    /// constructed using that diversifier along with the index at which the
+    /// valid diversifier was found.
+    pub fn find_address(&self, j: DiversifierIndex) -> Option<(DiversifierIndex, PaymentAddress)> {
+        let (j, d_j) = self.dk.find_diversifier(j)?;
+        self.fvk.vk.to_payment_address(d_j).map(|addr| (j, addr))
+    }
+
+    /// Returns the payment address corresponding to the smallest valid diversifier
+    /// index, along with that index.
+    pub fn default_address(&self) -> (DiversifierIndex, PaymentAddress) {
+        // This unwrap is safe, if you have to search the 2^88 space of
+        // diversifiers it'll never return anyway.
+        self.find_address(DiversifierIndex::new()).unwrap()
     }
 }
 
@@ -518,31 +545,74 @@ mod tests {
         let d_3 = [60, 253, 170, 8, 171, 147, 220, 31, 3, 144, 34];
 
         // j = 0
-        let (j, d_j) = dk.diversifier(j_0).unwrap();
+        let d_j = dk.diversifier(j_0).unwrap();
+        assert_eq!(d_j.0, d_0);
+
+        // j = 1
+        assert_eq!(dk.diversifier(j_1), None);
+
+        // j = 2
+        assert_eq!(dk.diversifier(j_2), None);
+
+        // j = 3
+        let d_j = dk.diversifier(j_3).unwrap();
+        assert_eq!(d_j.0, d_3);
+    }
+
+    #[test]
+    fn find_diversifier() {
+        let dk = DiversifierKey([0; 32]);
+        let j_0 = DiversifierIndex::new();
+        let j_1 = DiversifierIndex([1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+        let j_2 = DiversifierIndex([2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+        let j_3 = DiversifierIndex([3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+        // Computed using this Rust implementation
+        let d_0 = [220, 231, 126, 188, 236, 10, 38, 175, 214, 153, 140];
+        let d_3 = [60, 253, 170, 8, 171, 147, 220, 31, 3, 144, 34];
+
+        // j = 0
+        let (j, d_j) = dk.find_diversifier(j_0).unwrap();
         assert_eq!(j, j_0);
         assert_eq!(d_j.0, d_0);
 
         // j = 1
-        let (j, d_j) = dk.diversifier(j_1).unwrap();
+        let (j, d_j) = dk.find_diversifier(j_1).unwrap();
         assert_eq!(j, j_3);
         assert_eq!(d_j.0, d_3);
 
         // j = 2
-        let (j, d_j) = dk.diversifier(j_2).unwrap();
+        let (j, d_j) = dk.find_diversifier(j_2).unwrap();
         assert_eq!(j, j_3);
         assert_eq!(d_j.0, d_3);
 
         // j = 3
-        let (j, d_j) = dk.diversifier(j_3).unwrap();
+        let (j, d_j) = dk.find_diversifier(j_3).unwrap();
         assert_eq!(j, j_3);
         assert_eq!(d_j.0, d_3);
+    }
+
+    #[test]
+    fn address() {
+        let seed = [0; 32];
+        let xsk_m = ExtendedSpendingKey::master(&seed);
+        let xfvk_m = ExtendedFullViewingKey::from(&xsk_m);
+        let j_0 = DiversifierIndex::new();
+        let addr_m = xfvk_m.address(j_0).unwrap();
+        assert_eq!(
+            addr_m.diversifier().0,
+            // Computed using this Rust implementation
+            [59, 246, 250, 31, 131, 191, 69, 99, 200, 167, 19]
+        );
+
+        let j_1 = DiversifierIndex([1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+        assert_eq!(xfvk_m.address(j_1), None);
     }
 
     #[test]
     fn default_address() {
         let seed = [0; 32];
         let xsk_m = ExtendedSpendingKey::master(&seed);
-        let (j_m, addr_m) = xsk_m.default_address().unwrap();
+        let (j_m, addr_m) = xsk_m.default_address();
         assert_eq!(j_m.0, [0; 11]);
         assert_eq!(
             addr_m.diversifier().0,
@@ -1039,34 +1109,31 @@ mod tests {
 
             // d0
             let mut di = DiversifierIndex::new();
-            match xfvk.dk.diversifier(di) {
-                Ok((l, d)) if l == di => assert_eq!(d.0, tv.d0.unwrap()),
-                Ok((_, _)) => assert!(tv.d0.is_none()),
-                Err(()) => panic!(),
+            match xfvk.dk.find_diversifier(di).unwrap() {
+                (l, d) if l == di => assert_eq!(d.0, tv.d0.unwrap()),
+                (_, _) => assert!(tv.d0.is_none()),
             }
 
             // d1
             di.increment().unwrap();
-            match xfvk.dk.diversifier(di) {
-                Ok((l, d)) if l == di => assert_eq!(d.0, tv.d1.unwrap()),
-                Ok((_, _)) => assert!(tv.d1.is_none()),
-                Err(()) => panic!(),
+            match xfvk.dk.find_diversifier(di).unwrap() {
+                (l, d) if l == di => assert_eq!(d.0, tv.d1.unwrap()),
+                (_, _) => assert!(tv.d1.is_none()),
             }
 
             // d2
             di.increment().unwrap();
-            match xfvk.dk.diversifier(di) {
-                Ok((l, d)) if l == di => assert_eq!(d.0, tv.d2.unwrap()),
-                Ok((_, _)) => assert!(tv.d2.is_none()),
-                Err(()) => panic!(),
+            match xfvk.dk.find_diversifier(di).unwrap() {
+                (l, d) if l == di => assert_eq!(d.0, tv.d2.unwrap()),
+                (_, _) => assert!(tv.d2.is_none()),
             }
 
             // dmax
             let dmax = DiversifierIndex([0xff; 11]);
-            match xfvk.dk.diversifier(dmax) {
-                Ok((l, d)) if l == dmax => assert_eq!(d.0, tv.dmax.unwrap()),
-                Ok((_, _)) => panic!(),
-                Err(_) => assert!(tv.dmax.is_none()),
+            match xfvk.dk.find_diversifier(dmax) {
+                Some((l, d)) if l == dmax => assert_eq!(d.0, tv.dmax.unwrap()),
+                Some((_, _)) => panic!(),
+                None => assert!(tv.dmax.is_none()),
             }
         }
     }

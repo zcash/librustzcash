@@ -131,7 +131,7 @@ where
 ///
 /// let account = AccountId(0);
 /// let extsk = spending_key(&[0; 32][..], COIN_TYPE, account);
-/// let to = extsk.default_address().unwrap().1.into();
+/// let to = extsk.default_address().1.into();
 ///
 /// let data_file = NamedTempFile::new().unwrap();
 /// let db_read = WalletDb::for_path(data_file, Network::TestNetwork).unwrap();
@@ -411,7 +411,7 @@ where
     let taddr = derive_transparent_address_from_secret_key(sk);
 
     // derive own shielded address from the provided extended spending key
-    let z_address = extfvk.default_address().unwrap().1;
+    let z_address = extfvk.default_address().1;
     let ovk = extfvk.fvk.ovk;
 
     // get UTXOs from DB

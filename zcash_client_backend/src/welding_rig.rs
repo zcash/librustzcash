@@ -357,7 +357,7 @@ mod tests {
         value: Amount,
         tx_after: bool,
     ) -> CompactBlock {
-        let to = extfvk.default_address().unwrap().1;
+        let to = extfvk.default_address().1;
 
         // Create a fake Note for the account
         let mut rng = OsRng;

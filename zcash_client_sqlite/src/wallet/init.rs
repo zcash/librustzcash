@@ -370,6 +370,6 @@ mod tests {
 
         // The account's address should be in the data DB
         let pa = get_address(&db_data, AccountId(0)).unwrap();
-        assert_eq!(pa.unwrap(), extsk.default_address().unwrap().1);
+        assert_eq!(pa.unwrap(), extsk.default_address().1);
     }
 }
