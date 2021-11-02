@@ -17,7 +17,6 @@ mod test_vectors;
 mod test_vectors_long;
 
 pub const VALID_LENGTH: RangeInclusive<usize> = 48..=4194368;
-use core::fmt;
 
 #[derive(Debug)]
 pub enum Error {
