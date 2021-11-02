@@ -3,6 +3,7 @@
 use blake2b_simd::{Params as Blake2bParams, OUTBYTES};
 
 use core::cmp::min;
+use core::fmt;
 use core::ops::RangeInclusive;
 use core::result::Result;
 
