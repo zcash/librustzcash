@@ -1,11 +1,9 @@
-#[cfg(all(test, feature = "std"))]
 pub(crate) struct TestVector {
     pub(crate) length: usize,
     pub(crate) jumbled_hash: &'static [u8],
 }
 
 // From https://github.com/zcash-hackworks/zcash-test-vectors/blob/master/f4jumble_long.py
-#[cfg(all(test, feature = "std"))]
 pub(crate) const TEST_VECTORS: &[TestVector] = &[
     TestVector {
         length: 3246395,
