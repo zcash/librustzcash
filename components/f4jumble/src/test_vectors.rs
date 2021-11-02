@@ -1,4 +1,3 @@
-#[cfg(test)]
 pub(crate) struct TestVector {
     pub(crate) normal: &'static [u8],
     pub(crate) jumbled: &'static [u8],
