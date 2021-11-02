@@ -116,7 +116,9 @@ impl<'a> State<'a> {
     }
 }
 
-// xor bytes of the `source` to bytes of the `target`
+/// XORs bytes of the `source` to bytes of the `target`.
+///
+/// This method operates over the first `min(source.len(), target.len())` bytes.
 fn xor(target: &mut [u8], source: &[u8]) {
     for (source, target) in source.iter().zip(target.iter_mut()) {
         *target ^= source;
