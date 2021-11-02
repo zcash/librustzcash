@@ -184,7 +184,10 @@ mod common_tests {
 
     #[test]
     fn f4jumble_check_vectors_mut() {
-        let mut cache: [u8; test_vectors::MAX_VECTOR_LENGTH] = [0; test_vectors::MAX_VECTOR_LENGTH];
+        #[cfg(not(feature = "std"))]
+        let mut cache = [0u8; test_vectors::MAX_VECTOR_LENGTH];
+        #[cfg(feature = "std")]
+        let mut cache = vec![0u8; test_vectors::MAX_VECTOR_LENGTH];
         for v in test_vectors::TEST_VECTORS {
             let mut data = &mut cache[..v.normal.len()];
             data.clone_from_slice(&v.normal);
