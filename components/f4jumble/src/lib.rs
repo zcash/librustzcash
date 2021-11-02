@@ -17,10 +17,16 @@ mod test_vectors;
 #[cfg(all(test, feature = "std"))]
 mod test_vectors_long;
 
+/// Length of F4Jumbled message must lie in the range VALID_LENGTH.
+///
+/// VALID_LENGTH = 48..=4194368
 pub const VALID_LENGTH: RangeInclusive<usize> = 48..=4194368;
 
+/// Errors produced by F4Jumble.
 #[derive(Debug)]
 pub enum Error {
+    /// Value error indicating that length of F4Jumbled message does not
+    /// lie in the range [`VALID_LENGTH`].
     InvalidLength,
 }
 
