@@ -8,6 +8,7 @@ use core::ops::RangeInclusive;
 use core::result::Result;
 
 #[cfg(feature = "std")]
+#[macro_use]
 extern crate std;
 #[cfg(feature = "std")]
 use std::vec::Vec;
