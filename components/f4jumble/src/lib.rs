@@ -13,7 +13,7 @@ use std::vec::Vec;
 
 #[cfg(test)]
 mod test_vectors;
-#[cfg(test)]
+#[cfg(all(test, feature = "std"))]
 mod test_vectors_long;
 
 pub const VALID_LENGTH: RangeInclusive<usize> = 48..=4194368;
