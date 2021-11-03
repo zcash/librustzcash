@@ -164,10 +164,14 @@ mod tests {
         }
     }
 
-    fn arb_shielded_ivk() -> BoxedStrategy<Ivk> {
+    fn arb_shielded_ivk() -> BoxedStrategy<Vec<Ivk>> {
         prop_oneof![
-            uniform64().prop_map(Ivk::Sapling),
-            uniform64().prop_map(Ivk::Orchard),
+            vec![uniform64().prop_map(Ivk::Sapling)],
+            vec![uniform64().prop_map(Ivk::Orchard)],
+            vec![
+                uniform64().prop_map(Ivk::Orchard as fn([u8; 64]) -> Ivk),
+                uniform64().prop_map(Ivk::Sapling)
+            ],
         ]
         .boxed()
     }
@@ -178,7 +182,7 @@ mod tests {
 
     prop_compose! {
         fn arb_unified_ivk()(
-            shielded in prop::collection::hash_set(arb_shielded_ivk(), 1..2),
+            shielded in arb_shielded_ivk(),
             transparent in prop::option::of(arb_transparent_ivk()),
         ) -> Uivk {
             Uivk(shielded.into_iter().chain(transparent).collect())

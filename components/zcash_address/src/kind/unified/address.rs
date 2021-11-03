@@ -131,10 +131,14 @@ mod tests {
         }
     }
 
-    fn arb_shielded_receiver() -> BoxedStrategy<Receiver> {
+    fn arb_shielded_receiver() -> BoxedStrategy<Vec<Receiver>> {
         prop_oneof![
-            uniform43().prop_map(Receiver::Sapling),
-            uniform43().prop_map(Receiver::Orchard),
+            vec![uniform43().prop_map(Receiver::Sapling)],
+            vec![uniform43().prop_map(Receiver::Orchard)],
+            vec![
+                uniform43().prop_map(Receiver::Orchard as fn([u8; 43]) -> Receiver),
+                uniform43().prop_map(Receiver::Sapling)
+            ],
         ]
         .boxed()
     }
@@ -149,7 +153,7 @@ mod tests {
 
     prop_compose! {
         fn arb_unified_address()(
-            shielded in prop::collection::hash_set(arb_shielded_receiver(), 1..2),
+            shielded in arb_shielded_receiver(),
             transparent in prop::option::of(arb_transparent_receiver()),
         ) -> Address {
             Address(shielded.into_iter().chain(transparent).collect())
