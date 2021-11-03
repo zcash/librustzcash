@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_client_backend&#x2F;src&#x2F;proto&#x2F;compact_formats.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>compact_formats.rs - source</title><link rel="stylesheet" type="text/css" href="../../../normalize.css"><link rel="stylesheet" type="text/css" href="../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" type="text/css" href="../../../light.css"  id="themeStyle"><link rel="stylesheet" type="text/css" href="../../../dark.css" disabled ><link rel="stylesheet" type="text/css" href="../../../ayu.css" disabled ><script id="default-settings" ></script><script src="../../../storage.js"></script><script src="../../../crates.js"></script><noscript><link rel="stylesheet" href="../../../noscript.css"></noscript><link rel="alternate icon" type="image/png" href="../../../favicon-16x16.png"><link rel="alternate icon" type="image/png" href="../../../favicon-32x32.png"><link rel="icon" type="image/svg+xml" href="../../../favicon.svg"><style type="text/css">#crate-search{background-image:url("../../../down-arrow.svg");}</style></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="sidebar-menu" role="button">&#9776;</div><a href='../../../zcash_client_backend/index.html'><div class='logo-container rust-logo'><img src='../../../rust-logo.png' alt='logo'></div></a></nav><div class="theme-picker"><button id="theme-picker" aria-label="Pick another theme!" aria-haspopup="menu" title="themes"><img width="18" height="18" alt="Pick another theme!" src="../../../brush.svg"></button><div id="theme-choices" role="menu"></div></div><nav class="sub"><form class="search-form"><div class="search-container"><div><select id="crate-search"><option value="All crates">All crates</option></select><input class="search-input" name="search" disabled autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"></div><button type="button" id="help-button" title="help">?</button><a id="settings-menu" href="../../../settings.html" title="settings"><img width="18" height="18" alt="Change settings" src="../../../wheel.svg"></a></div></form></nav><section id="main" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">   1</span>
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_client_backend&#x2F;src&#x2F;proto&#x2F;compact_formats.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>compact_formats.rs - source</title><link rel="stylesheet" type="text/css" href="../../../normalize.css"><link rel="stylesheet" type="text/css" href="../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" type="text/css" href="../../../light.css"  id="themeStyle"><link rel="stylesheet" type="text/css" href="../../../dark.css" disabled ><link rel="stylesheet" type="text/css" href="../../../ayu.css" disabled ><script id="default-settings" ></script><script src="../../../storage.js"></script><script src="../../../crates.js"></script><noscript><link rel="stylesheet" href="../../../noscript.css"></noscript><link rel="alternate icon" type="image/png" href="../../../favicon-16x16.png"><link rel="alternate icon" type="image/png" href="../../../favicon-32x32.png"><link rel="icon" type="image/svg+xml" href="../../../favicon.svg"><style type="text/css">#crate-search{background-image:url("../../../down-arrow.svg");}</style></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="sidebar-menu" role="button">&#9776;</div><a href='../../../zcash_client_backend/index.html'><div class='logo-container rust-logo'><img src='../../../rust-logo.png' alt='logo'></div></a></nav><div class="theme-picker"><button id="theme-picker" aria-label="Pick another theme!" aria-haspopup="menu" title="themes"><img width="18" height="18" alt="Pick another theme!" src="../../../brush.svg"></button><div id="theme-choices" role="menu"></div></div><nav class="sub"><form class="search-form"><div class="search-container"><div><select id="crate-search"><option value="All crates">All crates</option></select><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"></div><button type="button" id="help-button" title="help">?</button><a id="settings-menu" href="../../../settings.html" title="settings"><img width="18" height="18" alt="Change settings" src="../../../wheel.svg"></a></div></form></nav><section id="main" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">   1</span>
 <span id="2">   2</span>
 <span id="3">   3</span>
 <span id="4">   4</span>
@@ -1179,7 +1179,7 @@
 <span id="1179">1179</span>
 <span id="1180">1180</span>
 <span id="1181">1181</span>
-</pre><pre class="rust"><code><span class="comment">// This file is generated by rust-protobuf 2.25.1. Do not edit</span>
+</pre><pre class="rust"><code><span class="comment">// This file is generated by rust-protobuf 2.25.2. Do not edit</span>
 <span class="comment">// @generated</span>
 
 <span class="comment">// https://github.com/rust-lang/rust-clippy/issues/702</span>
@@ -1202,7 +1202,7 @@
 
 <span class="doccomment">/// Generated files are compatible only with the same version</span>
 <span class="doccomment">/// of protobuf runtime.</span>
-<span class="comment">// const _PROTOBUF_VERSION_CHECK: () = ::protobuf::VERSION_2_25_1;</span>
+<span class="comment">// const _PROTOBUF_VERSION_CHECK: () = ::protobuf::VERSION_2_25_2;</span>
 
 <span class="attribute">#[<span class="ident">derive</span>(<span class="ident">PartialEq</span>,<span class="ident">Clone</span>,<span class="ident">Default</span>)]</span>
 <span class="kw">pub</span> <span class="kw">struct</span> <span class="ident">CompactBlock</span> {
@@ -1236,12 +1236,12 @@
     <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">get_protoVersion</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">u32</span> {
         <span class="self">self</span>.<span class="ident">protoVersion</span>
     }
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">clear_protoVersion</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>) {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">clear_protoVersion</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>) {
         <span class="self">self</span>.<span class="ident">protoVersion</span> <span class="op">=</span> <span class="number">0</span>;
     }
 
     <span class="comment">// Param is passed by value, moved</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">set_protoVersion</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>, <span class="ident">v</span>: <span class="ident">u32</span>) {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">set_protoVersion</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">v</span>: <span class="ident">u32</span>) {
         <span class="self">self</span>.<span class="ident">protoVersion</span> <span class="op">=</span> <span class="ident">v</span>;
     }
 
@@ -1251,12 +1251,12 @@
     <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">get_height</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">u64</span> {
         <span class="self">self</span>.<span class="ident">height</span>
     }
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">clear_height</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>) {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">clear_height</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>) {
         <span class="self">self</span>.<span class="ident">height</span> <span class="op">=</span> <span class="number">0</span>;
     }
 
     <span class="comment">// Param is passed by value, moved</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">set_height</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>, <span class="ident">v</span>: <span class="ident">u64</span>) {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">set_height</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">v</span>: <span class="ident">u64</span>) {
         <span class="self">self</span>.<span class="ident">height</span> <span class="op">=</span> <span class="ident">v</span>;
     }
 
@@ -1266,24 +1266,24 @@
     <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">get_hash</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>[<span class="ident">u8</span>] {
         <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">hash</span>
     }
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">clear_hash</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>) {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">clear_hash</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>) {
         <span class="self">self</span>.<span class="ident">hash</span>.<span class="ident">clear</span>();
     }
 
     <span class="comment">// Param is passed by value, moved</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">set_hash</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>, <span class="ident">v</span>: <span class="ident">::std::vec::Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span>) {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">set_hash</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">v</span>: <span class="ident">::std::vec::Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span>) {
         <span class="self">self</span>.<span class="ident">hash</span> <span class="op">=</span> <span class="ident">v</span>;
     }
 
     <span class="comment">// Mutable pointer to the field.</span>
     <span class="comment">// If field is not initialized, it is initialized with default value first.</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">mut_hash</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">::std::vec::Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span> {
-        <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>.<span class="ident">hash</span>
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">mut_hash</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>) -&gt; <span class="kw-2">&amp;mut</span> <span class="ident">::std::vec::Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span> {
+        <span class="kw-2">&amp;mut</span> <span class="self">self</span>.<span class="ident">hash</span>
     }
 
     <span class="comment">// Take field</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">take_hash</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>) -&gt; <span class="ident">::std::vec::Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span> {
-        <span class="ident">::std::mem::replace</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>.<span class="ident">hash</span>, <span class="ident">::std::vec::Vec::new</span>())
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">take_hash</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>) -&gt; <span class="ident">::std::vec::Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span> {
+        <span class="ident">::std::mem::replace</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>.<span class="ident">hash</span>, <span class="ident">::std::vec::Vec::new</span>())
     }
 
     <span class="comment">// bytes prevHash = 4;</span>
@@ -1292,24 +1292,24 @@
     <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">get_prevHash</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>[<span class="ident">u8</span>] {
         <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">prevHash</span>
     }
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">clear_prevHash</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>) {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">clear_prevHash</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>) {
         <span class="self">self</span>.<span class="ident">prevHash</span>.<span class="ident">clear</span>();
     }
 
     <span class="comment">// Param is passed by value, moved</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">set_prevHash</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>, <span class="ident">v</span>: <span class="ident">::std::vec::Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span>) {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">set_prevHash</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">v</span>: <span class="ident">::std::vec::Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span>) {
         <span class="self">self</span>.<span class="ident">prevHash</span> <span class="op">=</span> <span class="ident">v</span>;
     }
 
     <span class="comment">// Mutable pointer to the field.</span>
     <span class="comment">// If field is not initialized, it is initialized with default value first.</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">mut_prevHash</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">::std::vec::Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span> {
-        <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>.<span class="ident">prevHash</span>
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">mut_prevHash</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>) -&gt; <span class="kw-2">&amp;mut</span> <span class="ident">::std::vec::Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span> {
+        <span class="kw-2">&amp;mut</span> <span class="self">self</span>.<span class="ident">prevHash</span>
     }
 
     <span class="comment">// Take field</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">take_prevHash</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>) -&gt; <span class="ident">::std::vec::Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span> {
-        <span class="ident">::std::mem::replace</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>.<span class="ident">prevHash</span>, <span class="ident">::std::vec::Vec::new</span>())
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">take_prevHash</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>) -&gt; <span class="ident">::std::vec::Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span> {
+        <span class="ident">::std::mem::replace</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>.<span class="ident">prevHash</span>, <span class="ident">::std::vec::Vec::new</span>())
     }
 
     <span class="comment">// uint32 time = 5;</span>
@@ -1318,12 +1318,12 @@
     <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">get_time</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">u32</span> {
         <span class="self">self</span>.<span class="ident">time</span>
     }
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">clear_time</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>) {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">clear_time</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>) {
         <span class="self">self</span>.<span class="ident">time</span> <span class="op">=</span> <span class="number">0</span>;
     }
 
     <span class="comment">// Param is passed by value, moved</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">set_time</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>, <span class="ident">v</span>: <span class="ident">u32</span>) {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">set_time</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">v</span>: <span class="ident">u32</span>) {
         <span class="self">self</span>.<span class="ident">time</span> <span class="op">=</span> <span class="ident">v</span>;
     }
 
@@ -1333,24 +1333,24 @@
     <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">get_header</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>[<span class="ident">u8</span>] {
         <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">header</span>
     }
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">clear_header</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>) {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">clear_header</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>) {
         <span class="self">self</span>.<span class="ident">header</span>.<span class="ident">clear</span>();
     }
 
     <span class="comment">// Param is passed by value, moved</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">set_header</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>, <span class="ident">v</span>: <span class="ident">::std::vec::Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span>) {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">set_header</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">v</span>: <span class="ident">::std::vec::Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span>) {
         <span class="self">self</span>.<span class="ident">header</span> <span class="op">=</span> <span class="ident">v</span>;
     }
 
     <span class="comment">// Mutable pointer to the field.</span>
     <span class="comment">// If field is not initialized, it is initialized with default value first.</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">mut_header</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">::std::vec::Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span> {
-        <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>.<span class="ident">header</span>
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">mut_header</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>) -&gt; <span class="kw-2">&amp;mut</span> <span class="ident">::std::vec::Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span> {
+        <span class="kw-2">&amp;mut</span> <span class="self">self</span>.<span class="ident">header</span>
     }
 
     <span class="comment">// Take field</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">take_header</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>) -&gt; <span class="ident">::std::vec::Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span> {
-        <span class="ident">::std::mem::replace</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>.<span class="ident">header</span>, <span class="ident">::std::vec::Vec::new</span>())
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">take_header</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>) -&gt; <span class="ident">::std::vec::Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span> {
+        <span class="ident">::std::mem::replace</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>.<span class="ident">header</span>, <span class="ident">::std::vec::Vec::new</span>())
     }
 
     <span class="comment">// repeated .cash.z.wallet.sdk.rpc.CompactTx vtx = 7;</span>
@@ -1359,23 +1359,23 @@
     <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">get_vtx</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>[<span class="ident">CompactTx</span>] {
         <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">vtx</span>
     }
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">clear_vtx</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>) {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">clear_vtx</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>) {
         <span class="self">self</span>.<span class="ident">vtx</span>.<span class="ident">clear</span>();
     }
 
     <span class="comment">// Param is passed by value, moved</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">set_vtx</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>, <span class="ident">v</span>: <span class="ident">::protobuf::RepeatedField</span><span class="op">&lt;</span><span class="ident">CompactTx</span><span class="op">&gt;</span>) {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">set_vtx</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">v</span>: <span class="ident">::protobuf::RepeatedField</span><span class="op">&lt;</span><span class="ident">CompactTx</span><span class="op">&gt;</span>) {
         <span class="self">self</span>.<span class="ident">vtx</span> <span class="op">=</span> <span class="ident">v</span>;
     }
 
     <span class="comment">// Mutable pointer to the field.</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">mut_vtx</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">::protobuf::RepeatedField</span><span class="op">&lt;</span><span class="ident">CompactTx</span><span class="op">&gt;</span> {
-        <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>.<span class="ident">vtx</span>
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">mut_vtx</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>) -&gt; <span class="kw-2">&amp;mut</span> <span class="ident">::protobuf::RepeatedField</span><span class="op">&lt;</span><span class="ident">CompactTx</span><span class="op">&gt;</span> {
+        <span class="kw-2">&amp;mut</span> <span class="self">self</span>.<span class="ident">vtx</span>
     }
 
     <span class="comment">// Take field</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">take_vtx</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>) -&gt; <span class="ident">::protobuf::RepeatedField</span><span class="op">&lt;</span><span class="ident">CompactTx</span><span class="op">&gt;</span> {
-        <span class="ident">::std::mem::replace</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>.<span class="ident">vtx</span>, <span class="ident">::protobuf::RepeatedField::new</span>())
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">take_vtx</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>) -&gt; <span class="ident">::protobuf::RepeatedField</span><span class="op">&lt;</span><span class="ident">CompactTx</span><span class="op">&gt;</span> {
+        <span class="ident">::std::mem::replace</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>.<span class="ident">vtx</span>, <span class="ident">::protobuf::RepeatedField::new</span>())
     }
 }
 
@@ -1389,7 +1389,7 @@
         <span class="bool-val">true</span>
     }
 
-    <span class="kw">fn</span> <span class="ident">merge_from</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>, <span class="ident">is</span>: <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">::protobuf::CodedInputStream</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span>) -&gt; <span class="ident">::protobuf::ProtobufResult</span><span class="op">&lt;</span>()<span class="op">&gt;</span> {
+    <span class="kw">fn</span> <span class="ident">merge_from</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">is</span>: <span class="kw-2">&amp;mut</span> <span class="ident">::protobuf::CodedInputStream</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span>) -&gt; <span class="ident">::protobuf::ProtobufResult</span><span class="op">&lt;</span>()<span class="op">&gt;</span> {
         <span class="kw">while</span> <span class="op">!</span><span class="ident">is</span>.<span class="ident">eof</span>()<span class="question-mark">?</span> {
             <span class="kw">let</span> (<span class="ident">field_number</span>, <span class="ident">wire_type</span>) <span class="op">=</span> <span class="ident">is</span>.<span class="ident">read_tag_unpack</span>()<span class="question-mark">?</span>;
             <span class="kw">match</span> <span class="ident">field_number</span> {
@@ -1408,10 +1408,10 @@
                     <span class="self">self</span>.<span class="ident">height</span> <span class="op">=</span> <span class="ident">tmp</span>;
                 },
                 <span class="number">3</span> =&gt; {
-                    <span class="ident">::protobuf::rt::read_singular_proto3_bytes_into</span>(<span class="ident">wire_type</span>, <span class="ident">is</span>, <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>.<span class="ident">hash</span>)<span class="question-mark">?</span>;
+                    <span class="ident">::protobuf::rt::read_singular_proto3_bytes_into</span>(<span class="ident">wire_type</span>, <span class="ident">is</span>, <span class="kw-2">&amp;mut</span> <span class="self">self</span>.<span class="ident">hash</span>)<span class="question-mark">?</span>;
                 },
                 <span class="number">4</span> =&gt; {
-                    <span class="ident">::protobuf::rt::read_singular_proto3_bytes_into</span>(<span class="ident">wire_type</span>, <span class="ident">is</span>, <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>.<span class="ident">prevHash</span>)<span class="question-mark">?</span>;
+                    <span class="ident">::protobuf::rt::read_singular_proto3_bytes_into</span>(<span class="ident">wire_type</span>, <span class="ident">is</span>, <span class="kw-2">&amp;mut</span> <span class="self">self</span>.<span class="ident">prevHash</span>)<span class="question-mark">?</span>;
                 },
                 <span class="number">5</span> =&gt; {
                     <span class="kw">if</span> <span class="ident">wire_type</span> <span class="op">!</span><span class="op">=</span> <span class="ident">::protobuf::wire_format::WireTypeVarint</span> {
@@ -1421,10 +1421,10 @@
                     <span class="self">self</span>.<span class="ident">time</span> <span class="op">=</span> <span class="ident">tmp</span>;
                 },
                 <span class="number">6</span> =&gt; {
-                    <span class="ident">::protobuf::rt::read_singular_proto3_bytes_into</span>(<span class="ident">wire_type</span>, <span class="ident">is</span>, <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>.<span class="ident">header</span>)<span class="question-mark">?</span>;
+                    <span class="ident">::protobuf::rt::read_singular_proto3_bytes_into</span>(<span class="ident">wire_type</span>, <span class="ident">is</span>, <span class="kw-2">&amp;mut</span> <span class="self">self</span>.<span class="ident">header</span>)<span class="question-mark">?</span>;
                 },
                 <span class="number">7</span> =&gt; {
-                    <span class="ident">::protobuf::rt::read_repeated_message_into</span>(<span class="ident">wire_type</span>, <span class="ident">is</span>, <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>.<span class="ident">vtx</span>)<span class="question-mark">?</span>;
+                    <span class="ident">::protobuf::rt::read_repeated_message_into</span>(<span class="ident">wire_type</span>, <span class="ident">is</span>, <span class="kw-2">&amp;mut</span> <span class="self">self</span>.<span class="ident">vtx</span>)<span class="question-mark">?</span>;
                 },
                 <span class="kw">_</span> =&gt; {
                     <span class="ident">::protobuf::rt::read_unknown_or_skip_group</span>(<span class="ident">field_number</span>, <span class="ident">wire_type</span>, <span class="ident">is</span>, <span class="self">self</span>.<span class="ident">mut_unknown_fields</span>())<span class="question-mark">?</span>;
@@ -1465,7 +1465,7 @@
         <span class="ident">my_size</span>
     }
 
-    <span class="kw">fn</span> <span class="ident">write_to_with_cached_sizes</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">os</span>: <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">::protobuf::CodedOutputStream</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span>) -&gt; <span class="ident">::protobuf::ProtobufResult</span><span class="op">&lt;</span>()<span class="op">&gt;</span> {
+    <span class="kw">fn</span> <span class="ident">write_to_with_cached_sizes</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">os</span>: <span class="kw-2">&amp;mut</span> <span class="ident">::protobuf::CodedOutputStream</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span>) -&gt; <span class="ident">::protobuf::ProtobufResult</span><span class="op">&lt;</span>()<span class="op">&gt;</span> {
         <span class="kw">if</span> <span class="self">self</span>.<span class="ident">protoVersion</span> <span class="op">!</span><span class="op">=</span> <span class="number">0</span> {
             <span class="ident">os</span>.<span class="ident">write_uint32</span>(<span class="number">1</span>, <span class="self">self</span>.<span class="ident">protoVersion</span>)<span class="question-mark">?</span>;
         }
@@ -1501,15 +1501,15 @@
         <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">unknown_fields</span>
     }
 
-    <span class="kw">fn</span> <span class="ident">mut_unknown_fields</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">::protobuf::UnknownFields</span> {
-        <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>.<span class="ident">unknown_fields</span>
+    <span class="kw">fn</span> <span class="ident">mut_unknown_fields</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>) -&gt; <span class="kw-2">&amp;mut</span> <span class="ident">::protobuf::UnknownFields</span> {
+        <span class="kw-2">&amp;mut</span> <span class="self">self</span>.<span class="ident">unknown_fields</span>
     }
 
     <span class="kw">fn</span> <span class="ident">as_any</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span><span class="kw">dyn</span> (<span class="ident">::std::any::Any</span>) {
         <span class="self">self</span> <span class="kw">as</span> <span class="kw-2">&amp;</span><span class="kw">dyn</span> (<span class="ident">::std::any::Any</span>)
     }
-    <span class="kw">fn</span> <span class="ident">as_any_mut</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="kw">dyn</span> (<span class="ident">::std::any::Any</span>) {
-        <span class="self">self</span> <span class="kw">as</span> <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="kw">dyn</span> (<span class="ident">::std::any::Any</span>)
+    <span class="kw">fn</span> <span class="ident">as_any_mut</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>) -&gt; <span class="kw-2">&amp;mut</span> <span class="kw">dyn</span> (<span class="ident">::std::any::Any</span>) {
+        <span class="self">self</span> <span class="kw">as</span> <span class="kw-2">&amp;mut</span> <span class="kw">dyn</span> (<span class="ident">::std::any::Any</span>)
     }
     <span class="kw">fn</span> <span class="ident">into_any</span>(<span class="self">self</span>: <span class="ident">::std::boxed::Box</span><span class="op">&lt;</span><span class="self">Self</span><span class="op">&gt;</span>) -&gt; <span class="ident">::std::boxed::Box</span><span class="op">&lt;</span><span class="kw">dyn</span> (<span class="ident">::std::any::Any</span>)<span class="op">&gt;</span> {
         <span class="self">self</span>
@@ -1530,37 +1530,37 @@
             <span class="ident">fields</span>.<span class="ident">push</span>(<span class="ident">::protobuf::reflect::accessor::make_simple_field_accessor</span>::<span class="op">&lt;</span><span class="kw">_</span>, <span class="ident">::protobuf::types::ProtobufTypeUint32</span><span class="op">&gt;</span>(
                 <span class="string">&quot;protoVersion&quot;</span>,
                 <span class="op">|</span><span class="ident">m</span>: <span class="kw-2">&amp;</span><span class="ident">CompactBlock</span><span class="op">|</span> { <span class="kw-2">&amp;</span><span class="ident">m</span>.<span class="ident">protoVersion</span> },
-                <span class="op">|</span><span class="ident">m</span>: <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">CompactBlock</span><span class="op">|</span> { <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">m</span>.<span class="ident">protoVersion</span> },
+                <span class="op">|</span><span class="ident">m</span>: <span class="kw-2">&amp;mut</span> <span class="ident">CompactBlock</span><span class="op">|</span> { <span class="kw-2">&amp;mut</span> <span class="ident">m</span>.<span class="ident">protoVersion</span> },
             ));
             <span class="ident">fields</span>.<span class="ident">push</span>(<span class="ident">::protobuf::reflect::accessor::make_simple_field_accessor</span>::<span class="op">&lt;</span><span class="kw">_</span>, <span class="ident">::protobuf::types::ProtobufTypeUint64</span><span class="op">&gt;</span>(
                 <span class="string">&quot;height&quot;</span>,
                 <span class="op">|</span><span class="ident">m</span>: <span class="kw-2">&amp;</span><span class="ident">CompactBlock</span><span class="op">|</span> { <span class="kw-2">&amp;</span><span class="ident">m</span>.<span class="ident">height</span> },
-                <span class="op">|</span><span class="ident">m</span>: <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">CompactBlock</span><span class="op">|</span> { <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">m</span>.<span class="ident">height</span> },
+                <span class="op">|</span><span class="ident">m</span>: <span class="kw-2">&amp;mut</span> <span class="ident">CompactBlock</span><span class="op">|</span> { <span class="kw-2">&amp;mut</span> <span class="ident">m</span>.<span class="ident">height</span> },
             ));
             <span class="ident">fields</span>.<span class="ident">push</span>(<span class="ident">::protobuf::reflect::accessor::make_simple_field_accessor</span>::<span class="op">&lt;</span><span class="kw">_</span>, <span class="ident">::protobuf::types::ProtobufTypeBytes</span><span class="op">&gt;</span>(
                 <span class="string">&quot;hash&quot;</span>,
                 <span class="op">|</span><span class="ident">m</span>: <span class="kw-2">&amp;</span><span class="ident">CompactBlock</span><span class="op">|</span> { <span class="kw-2">&amp;</span><span class="ident">m</span>.<span class="ident">hash</span> },
-                <span class="op">|</span><span class="ident">m</span>: <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">CompactBlock</span><span class="op">|</span> { <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">m</span>.<span class="ident">hash</span> },
+                <span class="op">|</span><span class="ident">m</span>: <span class="kw-2">&amp;mut</span> <span class="ident">CompactBlock</span><span class="op">|</span> { <span class="kw-2">&amp;mut</span> <span class="ident">m</span>.<span class="ident">hash</span> },
             ));
             <span class="ident">fields</span>.<span class="ident">push</span>(<span class="ident">::protobuf::reflect::accessor::make_simple_field_accessor</span>::<span class="op">&lt;</span><span class="kw">_</span>, <span class="ident">::protobuf::types::ProtobufTypeBytes</span><span class="op">&gt;</span>(
                 <span class="string">&quot;prevHash&quot;</span>,
                 <span class="op">|</span><span class="ident">m</span>: <span class="kw-2">&amp;</span><span class="ident">CompactBlock</span><span class="op">|</span> { <span class="kw-2">&amp;</span><span class="ident">m</span>.<span class="ident">prevHash</span> },
-                <span class="op">|</span><span class="ident">m</span>: <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">CompactBlock</span><span class="op">|</span> { <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">m</span>.<span class="ident">prevHash</span> },
+                <span class="op">|</span><span class="ident">m</span>: <span class="kw-2">&amp;mut</span> <span class="ident">CompactBlock</span><span class="op">|</span> { <span class="kw-2">&amp;mut</span> <span class="ident">m</span>.<span class="ident">prevHash</span> },
             ));
             <span class="ident">fields</span>.<span class="ident">push</span>(<span class="ident">::protobuf::reflect::accessor::make_simple_field_accessor</span>::<span class="op">&lt;</span><span class="kw">_</span>, <span class="ident">::protobuf::types::ProtobufTypeUint32</span><span class="op">&gt;</span>(
                 <span class="string">&quot;time&quot;</span>,
                 <span class="op">|</span><span class="ident">m</span>: <span class="kw-2">&amp;</span><span class="ident">CompactBlock</span><span class="op">|</span> { <span class="kw-2">&amp;</span><span class="ident">m</span>.<span class="ident">time</span> },
-                <span class="op">|</span><span class="ident">m</span>: <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">CompactBlock</span><span class="op">|</span> { <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">m</span>.<span class="ident">time</span> },
+                <span class="op">|</span><span class="ident">m</span>: <span class="kw-2">&amp;mut</span> <span class="ident">CompactBlock</span><span class="op">|</span> { <span class="kw-2">&amp;mut</span> <span class="ident">m</span>.<span class="ident">time</span> },
             ));
             <span class="ident">fields</span>.<span class="ident">push</span>(<span class="ident">::protobuf::reflect::accessor::make_simple_field_accessor</span>::<span class="op">&lt;</span><span class="kw">_</span>, <span class="ident">::protobuf::types::ProtobufTypeBytes</span><span class="op">&gt;</span>(
                 <span class="string">&quot;header&quot;</span>,
                 <span class="op">|</span><span class="ident">m</span>: <span class="kw-2">&amp;</span><span class="ident">CompactBlock</span><span class="op">|</span> { <span class="kw-2">&amp;</span><span class="ident">m</span>.<span class="ident">header</span> },
-                <span class="op">|</span><span class="ident">m</span>: <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">CompactBlock</span><span class="op">|</span> { <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">m</span>.<span class="ident">header</span> },
+                <span class="op">|</span><span class="ident">m</span>: <span class="kw-2">&amp;mut</span> <span class="ident">CompactBlock</span><span class="op">|</span> { <span class="kw-2">&amp;mut</span> <span class="ident">m</span>.<span class="ident">header</span> },
             ));
             <span class="ident">fields</span>.<span class="ident">push</span>(<span class="ident">::protobuf::reflect::accessor::make_repeated_field_accessor</span>::<span class="op">&lt;</span><span class="kw">_</span>, <span class="ident">::protobuf::types::ProtobufTypeMessage</span><span class="op">&lt;</span><span class="ident">CompactTx</span><span class="op">&gt;</span><span class="op">&gt;</span>(
                 <span class="string">&quot;vtx&quot;</span>,
                 <span class="op">|</span><span class="ident">m</span>: <span class="kw-2">&amp;</span><span class="ident">CompactBlock</span><span class="op">|</span> { <span class="kw-2">&amp;</span><span class="ident">m</span>.<span class="ident">vtx</span> },
-                <span class="op">|</span><span class="ident">m</span>: <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">CompactBlock</span><span class="op">|</span> { <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">m</span>.<span class="ident">vtx</span> },
+                <span class="op">|</span><span class="ident">m</span>: <span class="kw-2">&amp;mut</span> <span class="ident">CompactBlock</span><span class="op">|</span> { <span class="kw-2">&amp;mut</span> <span class="ident">m</span>.<span class="ident">vtx</span> },
             ));
             <span class="ident">::protobuf::reflect::MessageDescriptor::new_pb_name</span>::<span class="op">&lt;</span><span class="ident">CompactBlock</span><span class="op">&gt;</span>(
                 <span class="string">&quot;CompactBlock&quot;</span>,
@@ -1577,7 +1577,7 @@
 }
 
 <span class="kw">impl</span> <span class="ident">::protobuf::Clear</span> <span class="kw">for</span> <span class="ident">CompactBlock</span> {
-    <span class="kw">fn</span> <span class="ident">clear</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>) {
+    <span class="kw">fn</span> <span class="ident">clear</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>) {
         <span class="self">self</span>.<span class="ident">protoVersion</span> <span class="op">=</span> <span class="number">0</span>;
         <span class="self">self</span>.<span class="ident">height</span> <span class="op">=</span> <span class="number">0</span>;
         <span class="self">self</span>.<span class="ident">hash</span>.<span class="ident">clear</span>();
@@ -1590,7 +1590,7 @@
 }
 
 <span class="kw">impl</span> <span class="ident">::std::fmt::Debug</span> <span class="kw">for</span> <span class="ident">CompactBlock</span> {
-    <span class="kw">fn</span> <span class="ident">fmt</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">f</span>: <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">::std::fmt::Formatter</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span>) -&gt; <span class="ident">::std::fmt::Result</span> {
+    <span class="kw">fn</span> <span class="ident">fmt</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">f</span>: <span class="kw-2">&amp;mut</span> <span class="ident">::std::fmt::Formatter</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span>) -&gt; <span class="ident">::std::fmt::Result</span> {
         <span class="ident">::protobuf::text_format::fmt</span>(<span class="self">self</span>, <span class="ident">f</span>)
     }
 }
@@ -1631,12 +1631,12 @@
     <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">get_index</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">u64</span> {
         <span class="self">self</span>.<span class="ident">index</span>
     }
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">clear_index</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>) {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">clear_index</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>) {
         <span class="self">self</span>.<span class="ident">index</span> <span class="op">=</span> <span class="number">0</span>;
     }
 
     <span class="comment">// Param is passed by value, moved</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">set_index</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>, <span class="ident">v</span>: <span class="ident">u64</span>) {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">set_index</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">v</span>: <span class="ident">u64</span>) {
         <span class="self">self</span>.<span class="ident">index</span> <span class="op">=</span> <span class="ident">v</span>;
     }
 
@@ -1646,24 +1646,24 @@
     <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">get_hash</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>[<span class="ident">u8</span>] {
         <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">hash</span>
     }
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">clear_hash</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>) {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">clear_hash</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>) {
         <span class="self">self</span>.<span class="ident">hash</span>.<span class="ident">clear</span>();
     }
 
     <span class="comment">// Param is passed by value, moved</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">set_hash</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>, <span class="ident">v</span>: <span class="ident">::std::vec::Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span>) {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">set_hash</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">v</span>: <span class="ident">::std::vec::Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span>) {
         <span class="self">self</span>.<span class="ident">hash</span> <span class="op">=</span> <span class="ident">v</span>;
     }
 
     <span class="comment">// Mutable pointer to the field.</span>
     <span class="comment">// If field is not initialized, it is initialized with default value first.</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">mut_hash</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">::std::vec::Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span> {
-        <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>.<span class="ident">hash</span>
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">mut_hash</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>) -&gt; <span class="kw-2">&amp;mut</span> <span class="ident">::std::vec::Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span> {
+        <span class="kw-2">&amp;mut</span> <span class="self">self</span>.<span class="ident">hash</span>
     }
 
     <span class="comment">// Take field</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">take_hash</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>) -&gt; <span class="ident">::std::vec::Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span> {
-        <span class="ident">::std::mem::replace</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>.<span class="ident">hash</span>, <span class="ident">::std::vec::Vec::new</span>())
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">take_hash</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>) -&gt; <span class="ident">::std::vec::Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span> {
+        <span class="ident">::std::mem::replace</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>.<span class="ident">hash</span>, <span class="ident">::std::vec::Vec::new</span>())
     }
 
     <span class="comment">// uint32 fee = 3;</span>
@@ -1672,12 +1672,12 @@
     <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">get_fee</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">u32</span> {
         <span class="self">self</span>.<span class="ident">fee</span>
     }
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">clear_fee</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>) {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">clear_fee</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>) {
         <span class="self">self</span>.<span class="ident">fee</span> <span class="op">=</span> <span class="number">0</span>;
     }
 
     <span class="comment">// Param is passed by value, moved</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">set_fee</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>, <span class="ident">v</span>: <span class="ident">u32</span>) {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">set_fee</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">v</span>: <span class="ident">u32</span>) {
         <span class="self">self</span>.<span class="ident">fee</span> <span class="op">=</span> <span class="ident">v</span>;
     }
 
@@ -1687,23 +1687,23 @@
     <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">get_spends</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>[<span class="ident">CompactSpend</span>] {
         <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">spends</span>
     }
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">clear_spends</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>) {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">clear_spends</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>) {
         <span class="self">self</span>.<span class="ident">spends</span>.<span class="ident">clear</span>();
     }
 
     <span class="comment">// Param is passed by value, moved</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">set_spends</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>, <span class="ident">v</span>: <span class="ident">::protobuf::RepeatedField</span><span class="op">&lt;</span><span class="ident">CompactSpend</span><span class="op">&gt;</span>) {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">set_spends</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">v</span>: <span class="ident">::protobuf::RepeatedField</span><span class="op">&lt;</span><span class="ident">CompactSpend</span><span class="op">&gt;</span>) {
         <span class="self">self</span>.<span class="ident">spends</span> <span class="op">=</span> <span class="ident">v</span>;
     }
 
     <span class="comment">// Mutable pointer to the field.</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">mut_spends</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">::protobuf::RepeatedField</span><span class="op">&lt;</span><span class="ident">CompactSpend</span><span class="op">&gt;</span> {
-        <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>.<span class="ident">spends</span>
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">mut_spends</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>) -&gt; <span class="kw-2">&amp;mut</span> <span class="ident">::protobuf::RepeatedField</span><span class="op">&lt;</span><span class="ident">CompactSpend</span><span class="op">&gt;</span> {
+        <span class="kw-2">&amp;mut</span> <span class="self">self</span>.<span class="ident">spends</span>
     }
 
     <span class="comment">// Take field</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">take_spends</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>) -&gt; <span class="ident">::protobuf::RepeatedField</span><span class="op">&lt;</span><span class="ident">CompactSpend</span><span class="op">&gt;</span> {
-        <span class="ident">::std::mem::replace</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>.<span class="ident">spends</span>, <span class="ident">::protobuf::RepeatedField::new</span>())
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">take_spends</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>) -&gt; <span class="ident">::protobuf::RepeatedField</span><span class="op">&lt;</span><span class="ident">CompactSpend</span><span class="op">&gt;</span> {
+        <span class="ident">::std::mem::replace</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>.<span class="ident">spends</span>, <span class="ident">::protobuf::RepeatedField::new</span>())
     }
 
     <span class="comment">// repeated .cash.z.wallet.sdk.rpc.CompactOutput outputs = 5;</span>
@@ -1712,23 +1712,23 @@
     <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">get_outputs</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>[<span class="ident">CompactOutput</span>] {
         <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">outputs</span>
     }
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">clear_outputs</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>) {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">clear_outputs</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>) {
         <span class="self">self</span>.<span class="ident">outputs</span>.<span class="ident">clear</span>();
     }
 
     <span class="comment">// Param is passed by value, moved</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">set_outputs</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>, <span class="ident">v</span>: <span class="ident">::protobuf::RepeatedField</span><span class="op">&lt;</span><span class="ident">CompactOutput</span><span class="op">&gt;</span>) {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">set_outputs</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">v</span>: <span class="ident">::protobuf::RepeatedField</span><span class="op">&lt;</span><span class="ident">CompactOutput</span><span class="op">&gt;</span>) {
         <span class="self">self</span>.<span class="ident">outputs</span> <span class="op">=</span> <span class="ident">v</span>;
     }
 
     <span class="comment">// Mutable pointer to the field.</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">mut_outputs</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">::protobuf::RepeatedField</span><span class="op">&lt;</span><span class="ident">CompactOutput</span><span class="op">&gt;</span> {
-        <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>.<span class="ident">outputs</span>
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">mut_outputs</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>) -&gt; <span class="kw-2">&amp;mut</span> <span class="ident">::protobuf::RepeatedField</span><span class="op">&lt;</span><span class="ident">CompactOutput</span><span class="op">&gt;</span> {
+        <span class="kw-2">&amp;mut</span> <span class="self">self</span>.<span class="ident">outputs</span>
     }
 
     <span class="comment">// Take field</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">take_outputs</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>) -&gt; <span class="ident">::protobuf::RepeatedField</span><span class="op">&lt;</span><span class="ident">CompactOutput</span><span class="op">&gt;</span> {
-        <span class="ident">::std::mem::replace</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>.<span class="ident">outputs</span>, <span class="ident">::protobuf::RepeatedField::new</span>())
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">take_outputs</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>) -&gt; <span class="ident">::protobuf::RepeatedField</span><span class="op">&lt;</span><span class="ident">CompactOutput</span><span class="op">&gt;</span> {
+        <span class="ident">::std::mem::replace</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>.<span class="ident">outputs</span>, <span class="ident">::protobuf::RepeatedField::new</span>())
     }
 }
 
@@ -1747,7 +1747,7 @@
         <span class="bool-val">true</span>
     }
 
-    <span class="kw">fn</span> <span class="ident">merge_from</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>, <span class="ident">is</span>: <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">::protobuf::CodedInputStream</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span>) -&gt; <span class="ident">::protobuf::ProtobufResult</span><span class="op">&lt;</span>()<span class="op">&gt;</span> {
+    <span class="kw">fn</span> <span class="ident">merge_from</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">is</span>: <span class="kw-2">&amp;mut</span> <span class="ident">::protobuf::CodedInputStream</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span>) -&gt; <span class="ident">::protobuf::ProtobufResult</span><span class="op">&lt;</span>()<span class="op">&gt;</span> {
         <span class="kw">while</span> <span class="op">!</span><span class="ident">is</span>.<span class="ident">eof</span>()<span class="question-mark">?</span> {
             <span class="kw">let</span> (<span class="ident">field_number</span>, <span class="ident">wire_type</span>) <span class="op">=</span> <span class="ident">is</span>.<span class="ident">read_tag_unpack</span>()<span class="question-mark">?</span>;
             <span class="kw">match</span> <span class="ident">field_number</span> {
@@ -1759,7 +1759,7 @@
                     <span class="self">self</span>.<span class="ident">index</span> <span class="op">=</span> <span class="ident">tmp</span>;
                 },
                 <span class="number">2</span> =&gt; {
-                    <span class="ident">::protobuf::rt::read_singular_proto3_bytes_into</span>(<span class="ident">wire_type</span>, <span class="ident">is</span>, <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>.<span class="ident">hash</span>)<span class="question-mark">?</span>;
+                    <span class="ident">::protobuf::rt::read_singular_proto3_bytes_into</span>(<span class="ident">wire_type</span>, <span class="ident">is</span>, <span class="kw-2">&amp;mut</span> <span class="self">self</span>.<span class="ident">hash</span>)<span class="question-mark">?</span>;
                 },
                 <span class="number">3</span> =&gt; {
                     <span class="kw">if</span> <span class="ident">wire_type</span> <span class="op">!</span><span class="op">=</span> <span class="ident">::protobuf::wire_format::WireTypeVarint</span> {
@@ -1769,10 +1769,10 @@
                     <span class="self">self</span>.<span class="ident">fee</span> <span class="op">=</span> <span class="ident">tmp</span>;
                 },
                 <span class="number">4</span> =&gt; {
-                    <span class="ident">::protobuf::rt::read_repeated_message_into</span>(<span class="ident">wire_type</span>, <span class="ident">is</span>, <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>.<span class="ident">spends</span>)<span class="question-mark">?</span>;
+                    <span class="ident">::protobuf::rt::read_repeated_message_into</span>(<span class="ident">wire_type</span>, <span class="ident">is</span>, <span class="kw-2">&amp;mut</span> <span class="self">self</span>.<span class="ident">spends</span>)<span class="question-mark">?</span>;
                 },
                 <span class="number">5</span> =&gt; {
-                    <span class="ident">::protobuf::rt::read_repeated_message_into</span>(<span class="ident">wire_type</span>, <span class="ident">is</span>, <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>.<span class="ident">outputs</span>)<span class="question-mark">?</span>;
+                    <span class="ident">::protobuf::rt::read_repeated_message_into</span>(<span class="ident">wire_type</span>, <span class="ident">is</span>, <span class="kw-2">&amp;mut</span> <span class="self">self</span>.<span class="ident">outputs</span>)<span class="question-mark">?</span>;
                 },
                 <span class="kw">_</span> =&gt; {
                     <span class="ident">::protobuf::rt::read_unknown_or_skip_group</span>(<span class="ident">field_number</span>, <span class="ident">wire_type</span>, <span class="ident">is</span>, <span class="self">self</span>.<span class="ident">mut_unknown_fields</span>())<span class="question-mark">?</span>;
@@ -1808,7 +1808,7 @@
         <span class="ident">my_size</span>
     }
 
-    <span class="kw">fn</span> <span class="ident">write_to_with_cached_sizes</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">os</span>: <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">::protobuf::CodedOutputStream</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span>) -&gt; <span class="ident">::protobuf::ProtobufResult</span><span class="op">&lt;</span>()<span class="op">&gt;</span> {
+    <span class="kw">fn</span> <span class="ident">write_to_with_cached_sizes</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">os</span>: <span class="kw-2">&amp;mut</span> <span class="ident">::protobuf::CodedOutputStream</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span>) -&gt; <span class="ident">::protobuf::ProtobufResult</span><span class="op">&lt;</span>()<span class="op">&gt;</span> {
         <span class="kw">if</span> <span class="self">self</span>.<span class="ident">index</span> <span class="op">!</span><span class="op">=</span> <span class="number">0</span> {
             <span class="ident">os</span>.<span class="ident">write_uint64</span>(<span class="number">1</span>, <span class="self">self</span>.<span class="ident">index</span>)<span class="question-mark">?</span>;
         }
@@ -1840,15 +1840,15 @@
         <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">unknown_fields</span>
     }
 
-    <span class="kw">fn</span> <span class="ident">mut_unknown_fields</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">::protobuf::UnknownFields</span> {
-        <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>.<span class="ident">unknown_fields</span>
+    <span class="kw">fn</span> <span class="ident">mut_unknown_fields</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>) -&gt; <span class="kw-2">&amp;mut</span> <span class="ident">::protobuf::UnknownFields</span> {
+        <span class="kw-2">&amp;mut</span> <span class="self">self</span>.<span class="ident">unknown_fields</span>
     }
 
     <span class="kw">fn</span> <span class="ident">as_any</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span><span class="kw">dyn</span> (<span class="ident">::std::any::Any</span>) {
         <span class="self">self</span> <span class="kw">as</span> <span class="kw-2">&amp;</span><span class="kw">dyn</span> (<span class="ident">::std::any::Any</span>)
     }
-    <span class="kw">fn</span> <span class="ident">as_any_mut</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="kw">dyn</span> (<span class="ident">::std::any::Any</span>) {
-        <span class="self">self</span> <span class="kw">as</span> <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="kw">dyn</span> (<span class="ident">::std::any::Any</span>)
+    <span class="kw">fn</span> <span class="ident">as_any_mut</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>) -&gt; <span class="kw-2">&amp;mut</span> <span class="kw">dyn</span> (<span class="ident">::std::any::Any</span>) {
+        <span class="self">self</span> <span class="kw">as</span> <span class="kw-2">&amp;mut</span> <span class="kw">dyn</span> (<span class="ident">::std::any::Any</span>)
     }
     <span class="kw">fn</span> <span class="ident">into_any</span>(<span class="self">self</span>: <span class="ident">::std::boxed::Box</span><span class="op">&lt;</span><span class="self">Self</span><span class="op">&gt;</span>) -&gt; <span class="ident">::std::boxed::Box</span><span class="op">&lt;</span><span class="kw">dyn</span> (<span class="ident">::std::any::Any</span>)<span class="op">&gt;</span> {
         <span class="self">self</span>
@@ -1869,27 +1869,27 @@
             <span class="ident">fields</span>.<span class="ident">push</span>(<span class="ident">::protobuf::reflect::accessor::make_simple_field_accessor</span>::<span class="op">&lt;</span><span class="kw">_</span>, <span class="ident">::protobuf::types::ProtobufTypeUint64</span><span class="op">&gt;</span>(
                 <span class="string">&quot;index&quot;</span>,
                 <span class="op">|</span><span class="ident">m</span>: <span class="kw-2">&amp;</span><span class="ident">CompactTx</span><span class="op">|</span> { <span class="kw-2">&amp;</span><span class="ident">m</span>.<span class="ident">index</span> },
-                <span class="op">|</span><span class="ident">m</span>: <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">CompactTx</span><span class="op">|</span> { <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">m</span>.<span class="ident">index</span> },
+                <span class="op">|</span><span class="ident">m</span>: <span class="kw-2">&amp;mut</span> <span class="ident">CompactTx</span><span class="op">|</span> { <span class="kw-2">&amp;mut</span> <span class="ident">m</span>.<span class="ident">index</span> },
             ));
             <span class="ident">fields</span>.<span class="ident">push</span>(<span class="ident">::protobuf::reflect::accessor::make_simple_field_accessor</span>::<span class="op">&lt;</span><span class="kw">_</span>, <span class="ident">::protobuf::types::ProtobufTypeBytes</span><span class="op">&gt;</span>(
                 <span class="string">&quot;hash&quot;</span>,
                 <span class="op">|</span><span class="ident">m</span>: <span class="kw-2">&amp;</span><span class="ident">CompactTx</span><span class="op">|</span> { <span class="kw-2">&amp;</span><span class="ident">m</span>.<span class="ident">hash</span> },
-                <span class="op">|</span><span class="ident">m</span>: <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">CompactTx</span><span class="op">|</span> { <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">m</span>.<span class="ident">hash</span> },
+                <span class="op">|</span><span class="ident">m</span>: <span class="kw-2">&amp;mut</span> <span class="ident">CompactTx</span><span class="op">|</span> { <span class="kw-2">&amp;mut</span> <span class="ident">m</span>.<span class="ident">hash</span> },
             ));
             <span class="ident">fields</span>.<span class="ident">push</span>(<span class="ident">::protobuf::reflect::accessor::make_simple_field_accessor</span>::<span class="op">&lt;</span><span class="kw">_</span>, <span class="ident">::protobuf::types::ProtobufTypeUint32</span><span class="op">&gt;</span>(
                 <span class="string">&quot;fee&quot;</span>,
                 <span class="op">|</span><span class="ident">m</span>: <span class="kw-2">&amp;</span><span class="ident">CompactTx</span><span class="op">|</span> { <span class="kw-2">&amp;</span><span class="ident">m</span>.<span class="ident">fee</span> },
-                <span class="op">|</span><span class="ident">m</span>: <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">CompactTx</span><span class="op">|</span> { <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">m</span>.<span class="ident">fee</span> },
+                <span class="op">|</span><span class="ident">m</span>: <span class="kw-2">&amp;mut</span> <span class="ident">CompactTx</span><span class="op">|</span> { <span class="kw-2">&amp;mut</span> <span class="ident">m</span>.<span class="ident">fee</span> },
             ));
             <span class="ident">fields</span>.<span class="ident">push</span>(<span class="ident">::protobuf::reflect::accessor::make_repeated_field_accessor</span>::<span class="op">&lt;</span><span class="kw">_</span>, <span class="ident">::protobuf::types::ProtobufTypeMessage</span><span class="op">&lt;</span><span class="ident">CompactSpend</span><span class="op">&gt;</span><span class="op">&gt;</span>(
                 <span class="string">&quot;spends&quot;</span>,
                 <span class="op">|</span><span class="ident">m</span>: <span class="kw-2">&amp;</span><span class="ident">CompactTx</span><span class="op">|</span> { <span class="kw-2">&amp;</span><span class="ident">m</span>.<span class="ident">spends</span> },
-                <span class="op">|</span><span class="ident">m</span>: <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">CompactTx</span><span class="op">|</span> { <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">m</span>.<span class="ident">spends</span> },
+                <span class="op">|</span><span class="ident">m</span>: <span class="kw-2">&amp;mut</span> <span class="ident">CompactTx</span><span class="op">|</span> { <span class="kw-2">&amp;mut</span> <span class="ident">m</span>.<span class="ident">spends</span> },
             ));
             <span class="ident">fields</span>.<span class="ident">push</span>(<span class="ident">::protobuf::reflect::accessor::make_repeated_field_accessor</span>::<span class="op">&lt;</span><span class="kw">_</span>, <span class="ident">::protobuf::types::ProtobufTypeMessage</span><span class="op">&lt;</span><span class="ident">CompactOutput</span><span class="op">&gt;</span><span class="op">&gt;</span>(
                 <span class="string">&quot;outputs&quot;</span>,
                 <span class="op">|</span><span class="ident">m</span>: <span class="kw-2">&amp;</span><span class="ident">CompactTx</span><span class="op">|</span> { <span class="kw-2">&amp;</span><span class="ident">m</span>.<span class="ident">outputs</span> },
-                <span class="op">|</span><span class="ident">m</span>: <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">CompactTx</span><span class="op">|</span> { <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">m</span>.<span class="ident">outputs</span> },
+                <span class="op">|</span><span class="ident">m</span>: <span class="kw-2">&amp;mut</span> <span class="ident">CompactTx</span><span class="op">|</span> { <span class="kw-2">&amp;mut</span> <span class="ident">m</span>.<span class="ident">outputs</span> },
             ));
             <span class="ident">::protobuf::reflect::MessageDescriptor::new_pb_name</span>::<span class="op">&lt;</span><span class="ident">CompactTx</span><span class="op">&gt;</span>(
                 <span class="string">&quot;CompactTx&quot;</span>,
@@ -1906,7 +1906,7 @@
 }
 
 <span class="kw">impl</span> <span class="ident">::protobuf::Clear</span> <span class="kw">for</span> <span class="ident">CompactTx</span> {
-    <span class="kw">fn</span> <span class="ident">clear</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>) {
+    <span class="kw">fn</span> <span class="ident">clear</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>) {
         <span class="self">self</span>.<span class="ident">index</span> <span class="op">=</span> <span class="number">0</span>;
         <span class="self">self</span>.<span class="ident">hash</span>.<span class="ident">clear</span>();
         <span class="self">self</span>.<span class="ident">fee</span> <span class="op">=</span> <span class="number">0</span>;
@@ -1917,7 +1917,7 @@
 }
 
 <span class="kw">impl</span> <span class="ident">::std::fmt::Debug</span> <span class="kw">for</span> <span class="ident">CompactTx</span> {
-    <span class="kw">fn</span> <span class="ident">fmt</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">f</span>: <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">::std::fmt::Formatter</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span>) -&gt; <span class="ident">::std::fmt::Result</span> {
+    <span class="kw">fn</span> <span class="ident">fmt</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">f</span>: <span class="kw-2">&amp;mut</span> <span class="ident">::std::fmt::Formatter</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span>) -&gt; <span class="ident">::std::fmt::Result</span> {
         <span class="ident">::protobuf::text_format::fmt</span>(<span class="self">self</span>, <span class="ident">f</span>)
     }
 }
@@ -1954,24 +1954,24 @@
     <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">get_nf</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>[<span class="ident">u8</span>] {
         <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">nf</span>
     }
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">clear_nf</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>) {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">clear_nf</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>) {
         <span class="self">self</span>.<span class="ident">nf</span>.<span class="ident">clear</span>();
     }
 
     <span class="comment">// Param is passed by value, moved</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">set_nf</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>, <span class="ident">v</span>: <span class="ident">::std::vec::Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span>) {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">set_nf</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">v</span>: <span class="ident">::std::vec::Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span>) {
         <span class="self">self</span>.<span class="ident">nf</span> <span class="op">=</span> <span class="ident">v</span>;
     }
 
     <span class="comment">// Mutable pointer to the field.</span>
     <span class="comment">// If field is not initialized, it is initialized with default value first.</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">mut_nf</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">::std::vec::Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span> {
-        <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>.<span class="ident">nf</span>
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">mut_nf</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>) -&gt; <span class="kw-2">&amp;mut</span> <span class="ident">::std::vec::Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span> {
+        <span class="kw-2">&amp;mut</span> <span class="self">self</span>.<span class="ident">nf</span>
     }
 
     <span class="comment">// Take field</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">take_nf</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>) -&gt; <span class="ident">::std::vec::Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span> {
-        <span class="ident">::std::mem::replace</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>.<span class="ident">nf</span>, <span class="ident">::std::vec::Vec::new</span>())
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">take_nf</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>) -&gt; <span class="ident">::std::vec::Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span> {
+        <span class="ident">::std::mem::replace</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>.<span class="ident">nf</span>, <span class="ident">::std::vec::Vec::new</span>())
     }
 }
 
@@ -1980,12 +1980,12 @@
         <span class="bool-val">true</span>
     }
 
-    <span class="kw">fn</span> <span class="ident">merge_from</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>, <span class="ident">is</span>: <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">::protobuf::CodedInputStream</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span>) -&gt; <span class="ident">::protobuf::ProtobufResult</span><span class="op">&lt;</span>()<span class="op">&gt;</span> {
+    <span class="kw">fn</span> <span class="ident">merge_from</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">is</span>: <span class="kw-2">&amp;mut</span> <span class="ident">::protobuf::CodedInputStream</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span>) -&gt; <span class="ident">::protobuf::ProtobufResult</span><span class="op">&lt;</span>()<span class="op">&gt;</span> {
         <span class="kw">while</span> <span class="op">!</span><span class="ident">is</span>.<span class="ident">eof</span>()<span class="question-mark">?</span> {
             <span class="kw">let</span> (<span class="ident">field_number</span>, <span class="ident">wire_type</span>) <span class="op">=</span> <span class="ident">is</span>.<span class="ident">read_tag_unpack</span>()<span class="question-mark">?</span>;
             <span class="kw">match</span> <span class="ident">field_number</span> {
                 <span class="number">1</span> =&gt; {
-                    <span class="ident">::protobuf::rt::read_singular_proto3_bytes_into</span>(<span class="ident">wire_type</span>, <span class="ident">is</span>, <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>.<span class="ident">nf</span>)<span class="question-mark">?</span>;
+                    <span class="ident">::protobuf::rt::read_singular_proto3_bytes_into</span>(<span class="ident">wire_type</span>, <span class="ident">is</span>, <span class="kw-2">&amp;mut</span> <span class="self">self</span>.<span class="ident">nf</span>)<span class="question-mark">?</span>;
                 },
                 <span class="kw">_</span> =&gt; {
                     <span class="ident">::protobuf::rt::read_unknown_or_skip_group</span>(<span class="ident">field_number</span>, <span class="ident">wire_type</span>, <span class="ident">is</span>, <span class="self">self</span>.<span class="ident">mut_unknown_fields</span>())<span class="question-mark">?</span>;
@@ -2007,7 +2007,7 @@
         <span class="ident">my_size</span>
     }
 
-    <span class="kw">fn</span> <span class="ident">write_to_with_cached_sizes</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">os</span>: <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">::protobuf::CodedOutputStream</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span>) -&gt; <span class="ident">::protobuf::ProtobufResult</span><span class="op">&lt;</span>()<span class="op">&gt;</span> {
+    <span class="kw">fn</span> <span class="ident">write_to_with_cached_sizes</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">os</span>: <span class="kw-2">&amp;mut</span> <span class="ident">::protobuf::CodedOutputStream</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span>) -&gt; <span class="ident">::protobuf::ProtobufResult</span><span class="op">&lt;</span>()<span class="op">&gt;</span> {
         <span class="kw">if</span> <span class="op">!</span><span class="self">self</span>.<span class="ident">nf</span>.<span class="ident">is_empty</span>() {
             <span class="ident">os</span>.<span class="ident">write_bytes</span>(<span class="number">1</span>, <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">nf</span>)<span class="question-mark">?</span>;
         }
@@ -2023,15 +2023,15 @@
         <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">unknown_fields</span>
     }
 
-    <span class="kw">fn</span> <span class="ident">mut_unknown_fields</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">::protobuf::UnknownFields</span> {
-        <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>.<span class="ident">unknown_fields</span>
+    <span class="kw">fn</span> <span class="ident">mut_unknown_fields</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>) -&gt; <span class="kw-2">&amp;mut</span> <span class="ident">::protobuf::UnknownFields</span> {
+        <span class="kw-2">&amp;mut</span> <span class="self">self</span>.<span class="ident">unknown_fields</span>
     }
 
     <span class="kw">fn</span> <span class="ident">as_any</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span><span class="kw">dyn</span> (<span class="ident">::std::any::Any</span>) {
         <span class="self">self</span> <span class="kw">as</span> <span class="kw-2">&amp;</span><span class="kw">dyn</span> (<span class="ident">::std::any::Any</span>)
     }
-    <span class="kw">fn</span> <span class="ident">as_any_mut</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="kw">dyn</span> (<span class="ident">::std::any::Any</span>) {
-        <span class="self">self</span> <span class="kw">as</span> <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="kw">dyn</span> (<span class="ident">::std::any::Any</span>)
+    <span class="kw">fn</span> <span class="ident">as_any_mut</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>) -&gt; <span class="kw-2">&amp;mut</span> <span class="kw">dyn</span> (<span class="ident">::std::any::Any</span>) {
+        <span class="self">self</span> <span class="kw">as</span> <span class="kw-2">&amp;mut</span> <span class="kw">dyn</span> (<span class="ident">::std::any::Any</span>)
     }
     <span class="kw">fn</span> <span class="ident">into_any</span>(<span class="self">self</span>: <span class="ident">::std::boxed::Box</span><span class="op">&lt;</span><span class="self">Self</span><span class="op">&gt;</span>) -&gt; <span class="ident">::std::boxed::Box</span><span class="op">&lt;</span><span class="kw">dyn</span> (<span class="ident">::std::any::Any</span>)<span class="op">&gt;</span> {
         <span class="self">self</span>
@@ -2052,7 +2052,7 @@
             <span class="ident">fields</span>.<span class="ident">push</span>(<span class="ident">::protobuf::reflect::accessor::make_simple_field_accessor</span>::<span class="op">&lt;</span><span class="kw">_</span>, <span class="ident">::protobuf::types::ProtobufTypeBytes</span><span class="op">&gt;</span>(
                 <span class="string">&quot;nf&quot;</span>,
                 <span class="op">|</span><span class="ident">m</span>: <span class="kw-2">&amp;</span><span class="ident">CompactSpend</span><span class="op">|</span> { <span class="kw-2">&amp;</span><span class="ident">m</span>.<span class="ident">nf</span> },
-                <span class="op">|</span><span class="ident">m</span>: <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">CompactSpend</span><span class="op">|</span> { <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">m</span>.<span class="ident">nf</span> },
+                <span class="op">|</span><span class="ident">m</span>: <span class="kw-2">&amp;mut</span> <span class="ident">CompactSpend</span><span class="op">|</span> { <span class="kw-2">&amp;mut</span> <span class="ident">m</span>.<span class="ident">nf</span> },
             ));
             <span class="ident">::protobuf::reflect::MessageDescriptor::new_pb_name</span>::<span class="op">&lt;</span><span class="ident">CompactSpend</span><span class="op">&gt;</span>(
                 <span class="string">&quot;CompactSpend&quot;</span>,
@@ -2069,14 +2069,14 @@
 }
 
 <span class="kw">impl</span> <span class="ident">::protobuf::Clear</span> <span class="kw">for</span> <span class="ident">CompactSpend</span> {
-    <span class="kw">fn</span> <span class="ident">clear</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>) {
+    <span class="kw">fn</span> <span class="ident">clear</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>) {
         <span class="self">self</span>.<span class="ident">nf</span>.<span class="ident">clear</span>();
         <span class="self">self</span>.<span class="ident">unknown_fields</span>.<span class="ident">clear</span>();
     }
 }
 
 <span class="kw">impl</span> <span class="ident">::std::fmt::Debug</span> <span class="kw">for</span> <span class="ident">CompactSpend</span> {
-    <span class="kw">fn</span> <span class="ident">fmt</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">f</span>: <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">::std::fmt::Formatter</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span>) -&gt; <span class="ident">::std::fmt::Result</span> {
+    <span class="kw">fn</span> <span class="ident">fmt</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">f</span>: <span class="kw-2">&amp;mut</span> <span class="ident">::std::fmt::Formatter</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span>) -&gt; <span class="ident">::std::fmt::Result</span> {
         <span class="ident">::protobuf::text_format::fmt</span>(<span class="self">self</span>, <span class="ident">f</span>)
     }
 }
@@ -2115,24 +2115,24 @@
     <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">get_cmu</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>[<span class="ident">u8</span>] {
         <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">cmu</span>
     }
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">clear_cmu</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>) {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">clear_cmu</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>) {
         <span class="self">self</span>.<span class="ident">cmu</span>.<span class="ident">clear</span>();
     }
 
     <span class="comment">// Param is passed by value, moved</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">set_cmu</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>, <span class="ident">v</span>: <span class="ident">::std::vec::Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span>) {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">set_cmu</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">v</span>: <span class="ident">::std::vec::Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span>) {
         <span class="self">self</span>.<span class="ident">cmu</span> <span class="op">=</span> <span class="ident">v</span>;
     }
 
     <span class="comment">// Mutable pointer to the field.</span>
     <span class="comment">// If field is not initialized, it is initialized with default value first.</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">mut_cmu</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">::std::vec::Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span> {
-        <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>.<span class="ident">cmu</span>
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">mut_cmu</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>) -&gt; <span class="kw-2">&amp;mut</span> <span class="ident">::std::vec::Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span> {
+        <span class="kw-2">&amp;mut</span> <span class="self">self</span>.<span class="ident">cmu</span>
     }
 
     <span class="comment">// Take field</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">take_cmu</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>) -&gt; <span class="ident">::std::vec::Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span> {
-        <span class="ident">::std::mem::replace</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>.<span class="ident">cmu</span>, <span class="ident">::std::vec::Vec::new</span>())
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">take_cmu</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>) -&gt; <span class="ident">::std::vec::Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span> {
+        <span class="ident">::std::mem::replace</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>.<span class="ident">cmu</span>, <span class="ident">::std::vec::Vec::new</span>())
     }
 
     <span class="comment">// bytes epk = 2;</span>
@@ -2141,24 +2141,24 @@
     <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">get_epk</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>[<span class="ident">u8</span>] {
         <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">epk</span>
     }
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">clear_epk</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>) {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">clear_epk</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>) {
         <span class="self">self</span>.<span class="ident">epk</span>.<span class="ident">clear</span>();
     }
 
     <span class="comment">// Param is passed by value, moved</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">set_epk</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>, <span class="ident">v</span>: <span class="ident">::std::vec::Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span>) {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">set_epk</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">v</span>: <span class="ident">::std::vec::Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span>) {
         <span class="self">self</span>.<span class="ident">epk</span> <span class="op">=</span> <span class="ident">v</span>;
     }
 
     <span class="comment">// Mutable pointer to the field.</span>
     <span class="comment">// If field is not initialized, it is initialized with default value first.</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">mut_epk</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">::std::vec::Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span> {
-        <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>.<span class="ident">epk</span>
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">mut_epk</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>) -&gt; <span class="kw-2">&amp;mut</span> <span class="ident">::std::vec::Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span> {
+        <span class="kw-2">&amp;mut</span> <span class="self">self</span>.<span class="ident">epk</span>
     }
 
     <span class="comment">// Take field</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">take_epk</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>) -&gt; <span class="ident">::std::vec::Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span> {
-        <span class="ident">::std::mem::replace</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>.<span class="ident">epk</span>, <span class="ident">::std::vec::Vec::new</span>())
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">take_epk</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>) -&gt; <span class="ident">::std::vec::Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span> {
+        <span class="ident">::std::mem::replace</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>.<span class="ident">epk</span>, <span class="ident">::std::vec::Vec::new</span>())
     }
 
     <span class="comment">// bytes ciphertext = 3;</span>
@@ -2167,24 +2167,24 @@
     <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">get_ciphertext</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>[<span class="ident">u8</span>] {
         <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">ciphertext</span>
     }
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">clear_ciphertext</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>) {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">clear_ciphertext</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>) {
         <span class="self">self</span>.<span class="ident">ciphertext</span>.<span class="ident">clear</span>();
     }
 
     <span class="comment">// Param is passed by value, moved</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">set_ciphertext</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>, <span class="ident">v</span>: <span class="ident">::std::vec::Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span>) {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">set_ciphertext</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">v</span>: <span class="ident">::std::vec::Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span>) {
         <span class="self">self</span>.<span class="ident">ciphertext</span> <span class="op">=</span> <span class="ident">v</span>;
     }
 
     <span class="comment">// Mutable pointer to the field.</span>
     <span class="comment">// If field is not initialized, it is initialized with default value first.</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">mut_ciphertext</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">::std::vec::Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span> {
-        <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>.<span class="ident">ciphertext</span>
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">mut_ciphertext</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>) -&gt; <span class="kw-2">&amp;mut</span> <span class="ident">::std::vec::Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span> {
+        <span class="kw-2">&amp;mut</span> <span class="self">self</span>.<span class="ident">ciphertext</span>
     }
 
     <span class="comment">// Take field</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">take_ciphertext</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>) -&gt; <span class="ident">::std::vec::Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span> {
-        <span class="ident">::std::mem::replace</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>.<span class="ident">ciphertext</span>, <span class="ident">::std::vec::Vec::new</span>())
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">take_ciphertext</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>) -&gt; <span class="ident">::std::vec::Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span> {
+        <span class="ident">::std::mem::replace</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>.<span class="ident">ciphertext</span>, <span class="ident">::std::vec::Vec::new</span>())
     }
 }
 
@@ -2193,18 +2193,18 @@
         <span class="bool-val">true</span>
     }
 
-    <span class="kw">fn</span> <span class="ident">merge_from</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>, <span class="ident">is</span>: <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">::protobuf::CodedInputStream</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span>) -&gt; <span class="ident">::protobuf::ProtobufResult</span><span class="op">&lt;</span>()<span class="op">&gt;</span> {
+    <span class="kw">fn</span> <span class="ident">merge_from</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">is</span>: <span class="kw-2">&amp;mut</span> <span class="ident">::protobuf::CodedInputStream</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span>) -&gt; <span class="ident">::protobuf::ProtobufResult</span><span class="op">&lt;</span>()<span class="op">&gt;</span> {
         <span class="kw">while</span> <span class="op">!</span><span class="ident">is</span>.<span class="ident">eof</span>()<span class="question-mark">?</span> {
             <span class="kw">let</span> (<span class="ident">field_number</span>, <span class="ident">wire_type</span>) <span class="op">=</span> <span class="ident">is</span>.<span class="ident">read_tag_unpack</span>()<span class="question-mark">?</span>;
             <span class="kw">match</span> <span class="ident">field_number</span> {
                 <span class="number">1</span> =&gt; {
-                    <span class="ident">::protobuf::rt::read_singular_proto3_bytes_into</span>(<span class="ident">wire_type</span>, <span class="ident">is</span>, <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>.<span class="ident">cmu</span>)<span class="question-mark">?</span>;
+                    <span class="ident">::protobuf::rt::read_singular_proto3_bytes_into</span>(<span class="ident">wire_type</span>, <span class="ident">is</span>, <span class="kw-2">&amp;mut</span> <span class="self">self</span>.<span class="ident">cmu</span>)<span class="question-mark">?</span>;
                 },
                 <span class="number">2</span> =&gt; {
-                    <span class="ident">::protobuf::rt::read_singular_proto3_bytes_into</span>(<span class="ident">wire_type</span>, <span class="ident">is</span>, <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>.<span class="ident">epk</span>)<span class="question-mark">?</span>;
+                    <span class="ident">::protobuf::rt::read_singular_proto3_bytes_into</span>(<span class="ident">wire_type</span>, <span class="ident">is</span>, <span class="kw-2">&amp;mut</span> <span class="self">self</span>.<span class="ident">epk</span>)<span class="question-mark">?</span>;
                 },
                 <span class="number">3</span> =&gt; {
-                    <span class="ident">::protobuf::rt::read_singular_proto3_bytes_into</span>(<span class="ident">wire_type</span>, <span class="ident">is</span>, <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>.<span class="ident">ciphertext</span>)<span class="question-mark">?</span>;
+                    <span class="ident">::protobuf::rt::read_singular_proto3_bytes_into</span>(<span class="ident">wire_type</span>, <span class="ident">is</span>, <span class="kw-2">&amp;mut</span> <span class="self">self</span>.<span class="ident">ciphertext</span>)<span class="question-mark">?</span>;
                 },
                 <span class="kw">_</span> =&gt; {
                     <span class="ident">::protobuf::rt::read_unknown_or_skip_group</span>(<span class="ident">field_number</span>, <span class="ident">wire_type</span>, <span class="ident">is</span>, <span class="self">self</span>.<span class="ident">mut_unknown_fields</span>())<span class="question-mark">?</span>;
@@ -2232,7 +2232,7 @@
         <span class="ident">my_size</span>
     }
 
-    <span class="kw">fn</span> <span class="ident">write_to_with_cached_sizes</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">os</span>: <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">::protobuf::CodedOutputStream</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span>) -&gt; <span class="ident">::protobuf::ProtobufResult</span><span class="op">&lt;</span>()<span class="op">&gt;</span> {
+    <span class="kw">fn</span> <span class="ident">write_to_with_cached_sizes</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">os</span>: <span class="kw-2">&amp;mut</span> <span class="ident">::protobuf::CodedOutputStream</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span>) -&gt; <span class="ident">::protobuf::ProtobufResult</span><span class="op">&lt;</span>()<span class="op">&gt;</span> {
         <span class="kw">if</span> <span class="op">!</span><span class="self">self</span>.<span class="ident">cmu</span>.<span class="ident">is_empty</span>() {
             <span class="ident">os</span>.<span class="ident">write_bytes</span>(<span class="number">1</span>, <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">cmu</span>)<span class="question-mark">?</span>;
         }
@@ -2254,15 +2254,15 @@
         <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">unknown_fields</span>
     }
 
-    <span class="kw">fn</span> <span class="ident">mut_unknown_fields</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">::protobuf::UnknownFields</span> {
-        <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>.<span class="ident">unknown_fields</span>
+    <span class="kw">fn</span> <span class="ident">mut_unknown_fields</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>) -&gt; <span class="kw-2">&amp;mut</span> <span class="ident">::protobuf::UnknownFields</span> {
+        <span class="kw-2">&amp;mut</span> <span class="self">self</span>.<span class="ident">unknown_fields</span>
     }
 
     <span class="kw">fn</span> <span class="ident">as_any</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span><span class="kw">dyn</span> (<span class="ident">::std::any::Any</span>) {
         <span class="self">self</span> <span class="kw">as</span> <span class="kw-2">&amp;</span><span class="kw">dyn</span> (<span class="ident">::std::any::Any</span>)
     }
-    <span class="kw">fn</span> <span class="ident">as_any_mut</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="kw">dyn</span> (<span class="ident">::std::any::Any</span>) {
-        <span class="self">self</span> <span class="kw">as</span> <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="kw">dyn</span> (<span class="ident">::std::any::Any</span>)
+    <span class="kw">fn</span> <span class="ident">as_any_mut</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>) -&gt; <span class="kw-2">&amp;mut</span> <span class="kw">dyn</span> (<span class="ident">::std::any::Any</span>) {
+        <span class="self">self</span> <span class="kw">as</span> <span class="kw-2">&amp;mut</span> <span class="kw">dyn</span> (<span class="ident">::std::any::Any</span>)
     }
     <span class="kw">fn</span> <span class="ident">into_any</span>(<span class="self">self</span>: <span class="ident">::std::boxed::Box</span><span class="op">&lt;</span><span class="self">Self</span><span class="op">&gt;</span>) -&gt; <span class="ident">::std::boxed::Box</span><span class="op">&lt;</span><span class="kw">dyn</span> (<span class="ident">::std::any::Any</span>)<span class="op">&gt;</span> {
         <span class="self">self</span>
@@ -2283,17 +2283,17 @@
             <span class="ident">fields</span>.<span class="ident">push</span>(<span class="ident">::protobuf::reflect::accessor::make_simple_field_accessor</span>::<span class="op">&lt;</span><span class="kw">_</span>, <span class="ident">::protobuf::types::ProtobufTypeBytes</span><span class="op">&gt;</span>(
                 <span class="string">&quot;cmu&quot;</span>,
                 <span class="op">|</span><span class="ident">m</span>: <span class="kw-2">&amp;</span><span class="ident">CompactOutput</span><span class="op">|</span> { <span class="kw-2">&amp;</span><span class="ident">m</span>.<span class="ident">cmu</span> },
-                <span class="op">|</span><span class="ident">m</span>: <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">CompactOutput</span><span class="op">|</span> { <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">m</span>.<span class="ident">cmu</span> },
+                <span class="op">|</span><span class="ident">m</span>: <span class="kw-2">&amp;mut</span> <span class="ident">CompactOutput</span><span class="op">|</span> { <span class="kw-2">&amp;mut</span> <span class="ident">m</span>.<span class="ident">cmu</span> },
             ));
             <span class="ident">fields</span>.<span class="ident">push</span>(<span class="ident">::protobuf::reflect::accessor::make_simple_field_accessor</span>::<span class="op">&lt;</span><span class="kw">_</span>, <span class="ident">::protobuf::types::ProtobufTypeBytes</span><span class="op">&gt;</span>(
                 <span class="string">&quot;epk&quot;</span>,
                 <span class="op">|</span><span class="ident">m</span>: <span class="kw-2">&amp;</span><span class="ident">CompactOutput</span><span class="op">|</span> { <span class="kw-2">&amp;</span><span class="ident">m</span>.<span class="ident">epk</span> },
-                <span class="op">|</span><span class="ident">m</span>: <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">CompactOutput</span><span class="op">|</span> { <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">m</span>.<span class="ident">epk</span> },
+                <span class="op">|</span><span class="ident">m</span>: <span class="kw-2">&amp;mut</span> <span class="ident">CompactOutput</span><span class="op">|</span> { <span class="kw-2">&amp;mut</span> <span class="ident">m</span>.<span class="ident">epk</span> },
             ));
             <span class="ident">fields</span>.<span class="ident">push</span>(<span class="ident">::protobuf::reflect::accessor::make_simple_field_accessor</span>::<span class="op">&lt;</span><span class="kw">_</span>, <span class="ident">::protobuf::types::ProtobufTypeBytes</span><span class="op">&gt;</span>(
                 <span class="string">&quot;ciphertext&quot;</span>,
                 <span class="op">|</span><span class="ident">m</span>: <span class="kw-2">&amp;</span><span class="ident">CompactOutput</span><span class="op">|</span> { <span class="kw-2">&amp;</span><span class="ident">m</span>.<span class="ident">ciphertext</span> },
-                <span class="op">|</span><span class="ident">m</span>: <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">CompactOutput</span><span class="op">|</span> { <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">m</span>.<span class="ident">ciphertext</span> },
+                <span class="op">|</span><span class="ident">m</span>: <span class="kw-2">&amp;mut</span> <span class="ident">CompactOutput</span><span class="op">|</span> { <span class="kw-2">&amp;mut</span> <span class="ident">m</span>.<span class="ident">ciphertext</span> },
             ));
             <span class="ident">::protobuf::reflect::MessageDescriptor::new_pb_name</span>::<span class="op">&lt;</span><span class="ident">CompactOutput</span><span class="op">&gt;</span>(
                 <span class="string">&quot;CompactOutput&quot;</span>,
@@ -2310,7 +2310,7 @@
 }
 
 <span class="kw">impl</span> <span class="ident">::protobuf::Clear</span> <span class="kw">for</span> <span class="ident">CompactOutput</span> {
-    <span class="kw">fn</span> <span class="ident">clear</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>) {
+    <span class="kw">fn</span> <span class="ident">clear</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>) {
         <span class="self">self</span>.<span class="ident">cmu</span>.<span class="ident">clear</span>();
         <span class="self">self</span>.<span class="ident">epk</span>.<span class="ident">clear</span>();
         <span class="self">self</span>.<span class="ident">ciphertext</span>.<span class="ident">clear</span>();
@@ -2319,7 +2319,7 @@
 }
 
 <span class="kw">impl</span> <span class="ident">::std::fmt::Debug</span> <span class="kw">for</span> <span class="ident">CompactOutput</span> {
-    <span class="kw">fn</span> <span class="ident">fmt</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">f</span>: <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">::std::fmt::Formatter</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span>) -&gt; <span class="ident">::std::fmt::Result</span> {
+    <span class="kw">fn</span> <span class="ident">fmt</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">f</span>: <span class="kw-2">&amp;mut</span> <span class="ident">::std::fmt::Formatter</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span>) -&gt; <span class="ident">::std::fmt::Result</span> {
         <span class="ident">::protobuf::text_format::fmt</span>(<span class="self">self</span>, <span class="ident">f</span>)
     }
 }

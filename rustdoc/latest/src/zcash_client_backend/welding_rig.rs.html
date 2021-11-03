@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_client_backend&#x2F;src&#x2F;welding_rig.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>welding_rig.rs - source</title><link rel="stylesheet" type="text/css" href="../../normalize.css"><link rel="stylesheet" type="text/css" href="../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" type="text/css" href="../../light.css"  id="themeStyle"><link rel="stylesheet" type="text/css" href="../../dark.css" disabled ><link rel="stylesheet" type="text/css" href="../../ayu.css" disabled ><script id="default-settings" ></script><script src="../../storage.js"></script><script src="../../crates.js"></script><noscript><link rel="stylesheet" href="../../noscript.css"></noscript><link rel="alternate icon" type="image/png" href="../../favicon-16x16.png"><link rel="alternate icon" type="image/png" href="../../favicon-32x32.png"><link rel="icon" type="image/svg+xml" href="../../favicon.svg"><style type="text/css">#crate-search{background-image:url("../../down-arrow.svg");}</style></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="sidebar-menu" role="button">&#9776;</div><a href='../../zcash_client_backend/index.html'><div class='logo-container rust-logo'><img src='../../rust-logo.png' alt='logo'></div></a></nav><div class="theme-picker"><button id="theme-picker" aria-label="Pick another theme!" aria-haspopup="menu" title="themes"><img width="18" height="18" alt="Pick another theme!" src="../../brush.svg"></button><div id="theme-choices" role="menu"></div></div><nav class="sub"><form class="search-form"><div class="search-container"><div><select id="crate-search"><option value="All crates">All crates</option></select><input class="search-input" name="search" disabled autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"></div><button type="button" id="help-button" title="help">?</button><a id="settings-menu" href="../../settings.html" title="settings"><img width="18" height="18" alt="Change settings" src="../../wheel.svg"></a></div></form></nav><section id="main" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">  1</span>
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_client_backend&#x2F;src&#x2F;welding_rig.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>welding_rig.rs - source</title><link rel="stylesheet" type="text/css" href="../../normalize.css"><link rel="stylesheet" type="text/css" href="../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" type="text/css" href="../../light.css"  id="themeStyle"><link rel="stylesheet" type="text/css" href="../../dark.css" disabled ><link rel="stylesheet" type="text/css" href="../../ayu.css" disabled ><script id="default-settings" ></script><script src="../../storage.js"></script><script src="../../crates.js"></script><noscript><link rel="stylesheet" href="../../noscript.css"></noscript><link rel="alternate icon" type="image/png" href="../../favicon-16x16.png"><link rel="alternate icon" type="image/png" href="../../favicon-32x32.png"><link rel="icon" type="image/svg+xml" href="../../favicon.svg"><style type="text/css">#crate-search{background-image:url("../../down-arrow.svg");}</style></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="sidebar-menu" role="button">&#9776;</div><a href='../../zcash_client_backend/index.html'><div class='logo-container rust-logo'><img src='../../rust-logo.png' alt='logo'></div></a></nav><div class="theme-picker"><button id="theme-picker" aria-label="Pick another theme!" aria-haspopup="menu" title="themes"><img width="18" height="18" alt="Pick another theme!" src="../../brush.svg"></button><div id="theme-choices" role="menu"></div></div><nav class="sub"><form class="search-form"><div class="search-container"><div><select id="crate-search"><option value="All crates">All crates</option></select><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"></div><button type="button" id="help-button" title="help">?</button><a id="settings-menu" href="../../settings.html" title="settings"><img width="18" height="18" alt="Change settings" src="../../wheel.svg"></a></div></form></nav><section id="main" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">  1</span>
 <span id="2">  2</span>
 <span id="3">  3</span>
 <span id="4">  4</span>
@@ -564,10 +564,10 @@
     <span class="ident">output</span>: <span class="ident">CompactOutput</span>,
     <span class="ident">vks</span>: <span class="kw-2">&amp;</span>[(<span class="kw-2">&amp;</span><span class="ident">AccountId</span>, <span class="kw-2">&amp;</span><span class="ident">K</span>)],
     <span class="ident">spent_from_accounts</span>: <span class="kw-2">&amp;</span><span class="ident">HashSet</span><span class="op">&lt;</span><span class="ident">AccountId</span><span class="op">&gt;</span>,
-    <span class="ident">tree</span>: <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">CommitmentTree</span><span class="op">&lt;</span><span class="ident">Node</span><span class="op">&gt;</span>,
-    <span class="ident">existing_witnesses</span>: <span class="kw-2">&amp;</span><span class="kw-2">mut</span> [<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">IncrementalWitness</span><span class="op">&lt;</span><span class="ident">Node</span><span class="op">&gt;</span>],
-    <span class="ident">block_witnesses</span>: <span class="kw-2">&amp;</span><span class="kw-2">mut</span> [<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">IncrementalWitness</span><span class="op">&lt;</span><span class="ident">Node</span><span class="op">&gt;</span>],
-    <span class="ident">new_witnesses</span>: <span class="kw-2">&amp;</span><span class="kw-2">mut</span> [<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">IncrementalWitness</span><span class="op">&lt;</span><span class="ident">Node</span><span class="op">&gt;</span>],
+    <span class="ident">tree</span>: <span class="kw-2">&amp;mut</span> <span class="ident">CommitmentTree</span><span class="op">&lt;</span><span class="ident">Node</span><span class="op">&gt;</span>,
+    <span class="ident">existing_witnesses</span>: <span class="kw-2">&amp;mut</span> [<span class="kw-2">&amp;mut</span> <span class="ident">IncrementalWitness</span><span class="op">&lt;</span><span class="ident">Node</span><span class="op">&gt;</span>],
+    <span class="ident">block_witnesses</span>: <span class="kw-2">&amp;mut</span> [<span class="kw-2">&amp;mut</span> <span class="ident">IncrementalWitness</span><span class="op">&lt;</span><span class="ident">Node</span><span class="op">&gt;</span>],
+    <span class="ident">new_witnesses</span>: <span class="kw-2">&amp;mut</span> [<span class="kw-2">&amp;mut</span> <span class="ident">IncrementalWitness</span><span class="op">&lt;</span><span class="ident">Node</span><span class="op">&gt;</span>],
 ) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">WalletShieldedOutput</span><span class="op">&lt;</span><span class="ident">K::Nf</span><span class="op">&gt;</span><span class="op">&gt;</span> {
     <span class="kw">let</span> <span class="ident">output</span> <span class="op">=</span> <span class="ident">CompactOutputDescription::try_from</span>(<span class="ident">output</span>).<span class="ident">ok</span>()<span class="question-mark">?</span>;
 
@@ -720,8 +720,8 @@
     <span class="ident">block</span>: <span class="ident">CompactBlock</span>,
     <span class="ident">vks</span>: <span class="kw-2">&amp;</span>[(<span class="kw-2">&amp;</span><span class="ident">AccountId</span>, <span class="kw-2">&amp;</span><span class="ident">K</span>)],
     <span class="ident">nullifiers</span>: <span class="kw-2">&amp;</span>[(<span class="ident">AccountId</span>, <span class="ident">Nullifier</span>)],
-    <span class="ident">tree</span>: <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">CommitmentTree</span><span class="op">&lt;</span><span class="ident">Node</span><span class="op">&gt;</span>,
-    <span class="ident">existing_witnesses</span>: <span class="kw-2">&amp;</span><span class="kw-2">mut</span> [<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">IncrementalWitness</span><span class="op">&lt;</span><span class="ident">Node</span><span class="op">&gt;</span>],
+    <span class="ident">tree</span>: <span class="kw-2">&amp;mut</span> <span class="ident">CommitmentTree</span><span class="op">&lt;</span><span class="ident">Node</span><span class="op">&gt;</span>,
+    <span class="ident">existing_witnesses</span>: <span class="kw-2">&amp;mut</span> [<span class="kw-2">&amp;mut</span> <span class="ident">IncrementalWitness</span><span class="op">&lt;</span><span class="ident">Node</span><span class="op">&gt;</span>],
 ) -&gt; <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">WalletTx</span><span class="op">&lt;</span><span class="ident">K::Nf</span><span class="op">&gt;</span><span class="op">&gt;</span> {
     <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">wtxs</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">WalletTx</span><span class="op">&lt;</span><span class="ident">K::Nf</span><span class="op">&gt;</span><span class="op">&gt;</span> <span class="op">=</span> <span class="macro">vec!</span>[];
     <span class="kw">let</span> <span class="ident">block_height</span> <span class="op">=</span> <span class="ident">block</span>.<span class="ident">height</span>();
@@ -776,7 +776,7 @@
                 .<span class="ident">flat_map</span>(<span class="op">|</span><span class="ident">tx</span><span class="op">|</span> {
                     <span class="ident">tx</span>.<span class="ident">shielded_outputs</span>
                         .<span class="ident">iter_mut</span>()
-                        .<span class="ident">map</span>(<span class="op">|</span><span class="ident">output</span><span class="op">|</span> <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">output</span>.<span class="ident">witness</span>)
+                        .<span class="ident">map</span>(<span class="op">|</span><span class="ident">output</span><span class="op">|</span> <span class="kw-2">&amp;mut</span> <span class="ident">output</span>.<span class="ident">witness</span>)
                 })
                 .<span class="ident">collect</span>();
 
@@ -786,7 +786,7 @@
                 <span class="comment">// don&#39;t hold mutable references to shielded_outputs for too long.</span>
                 <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">new_witnesses</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="kw">_</span><span class="op">&gt;</span> <span class="op">=</span> <span class="ident">shielded_outputs</span>
                     .<span class="ident">iter_mut</span>()
-                    .<span class="ident">map</span>(<span class="op">|</span><span class="ident">output</span><span class="op">|</span> <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">output</span>.<span class="ident">witness</span>)
+                    .<span class="ident">map</span>(<span class="op">|</span><span class="ident">output</span><span class="op">|</span> <span class="kw-2">&amp;mut</span> <span class="ident">output</span>.<span class="ident">witness</span>)
                     .<span class="ident">collect</span>();
 
                 <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">output</span>) <span class="op">=</span> <span class="ident">scan_output</span>(
@@ -798,8 +798,8 @@
                     <span class="kw-2">&amp;</span><span class="ident">spent_from_accounts</span>,
                     <span class="ident">tree</span>,
                     <span class="ident">existing_witnesses</span>,
-                    <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">block_witnesses</span>,
-                    <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">new_witnesses</span>,
+                    <span class="kw-2">&amp;mut</span> <span class="ident">block_witnesses</span>,
+                    <span class="kw-2">&amp;mut</span> <span class="ident">new_witnesses</span>,
                 ) {
                     <span class="ident">shielded_outputs</span>.<span class="ident">push</span>(<span class="ident">output</span>);
                 }
@@ -846,16 +846,16 @@
     <span class="kw">fn</span> <span class="ident">random_compact_tx</span>(<span class="kw-2">mut</span> <span class="ident">rng</span>: <span class="kw">impl</span> <span class="ident">RngCore</span>) -&gt; <span class="ident">CompactTx</span> {
         <span class="kw">let</span> <span class="ident">fake_nf</span> <span class="op">=</span> {
             <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">nf</span> <span class="op">=</span> <span class="macro">vec!</span>[<span class="number">0</span>; <span class="number">32</span>];
-            <span class="ident">rng</span>.<span class="ident">fill_bytes</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">nf</span>);
+            <span class="ident">rng</span>.<span class="ident">fill_bytes</span>(<span class="kw-2">&amp;mut</span> <span class="ident">nf</span>);
             <span class="ident">nf</span>
         };
         <span class="kw">let</span> <span class="ident">fake_cmu</span> <span class="op">=</span> {
-            <span class="kw">let</span> <span class="ident">fake_cmu</span> <span class="op">=</span> <span class="ident">bls12_381::Scalar::random</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">rng</span>);
+            <span class="kw">let</span> <span class="ident">fake_cmu</span> <span class="op">=</span> <span class="ident">bls12_381::Scalar::random</span>(<span class="kw-2">&amp;mut</span> <span class="ident">rng</span>);
             <span class="ident">fake_cmu</span>.<span class="ident">to_repr</span>().<span class="ident">as_ref</span>().<span class="ident">to_owned</span>()
         };
         <span class="kw">let</span> <span class="ident">fake_epk</span> <span class="op">=</span> {
             <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">buffer</span> <span class="op">=</span> [<span class="number">0</span>; <span class="number">64</span>];
-            <span class="ident">rng</span>.<span class="ident">fill_bytes</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">buffer</span>);
+            <span class="ident">rng</span>.<span class="ident">fill_bytes</span>(<span class="kw-2">&amp;mut</span> <span class="ident">buffer</span>);
             <span class="kw">let</span> <span class="ident">fake_esk</span> <span class="op">=</span> <span class="ident">jubjub::Fr::from_bytes_wide</span>(<span class="kw-2">&amp;</span><span class="ident">buffer</span>);
             <span class="kw">let</span> <span class="ident">fake_epk</span> <span class="op">=</span> <span class="ident">SPENDING_KEY_GENERATOR</span> <span class="op">*</span> <span class="ident">fake_esk</span>;
             <span class="ident">fake_epk</span>.<span class="ident">to_bytes</span>().<span class="ident">to_vec</span>()
@@ -868,7 +868,7 @@
         <span class="ident">cout</span>.<span class="ident">set_ciphertext</span>(<span class="macro">vec!</span>[<span class="number">0</span>; <span class="number">52</span>]);
         <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">ctx</span> <span class="op">=</span> <span class="ident">CompactTx::new</span>();
         <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">txid</span> <span class="op">=</span> <span class="macro">vec!</span>[<span class="number">0</span>; <span class="number">32</span>];
-        <span class="ident">rng</span>.<span class="ident">fill_bytes</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">txid</span>);
+        <span class="ident">rng</span>.<span class="ident">fill_bytes</span>(<span class="kw-2">&amp;mut</span> <span class="ident">txid</span>);
         <span class="ident">ctx</span>.<span class="ident">set_hash</span>(<span class="ident">txid</span>);
         <span class="ident">ctx</span>.<span class="ident">spends</span>.<span class="ident">push</span>(<span class="ident">cspend</span>);
         <span class="ident">ctx</span>.<span class="ident">outputs</span>.<span class="ident">push</span>(<span class="ident">cout</span>);
@@ -889,7 +889,7 @@
 
         <span class="comment">// Create a fake Note for the account</span>
         <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">rng</span> <span class="op">=</span> <span class="ident">OsRng</span>;
-        <span class="kw">let</span> <span class="ident">rseed</span> <span class="op">=</span> <span class="ident">generate_random_rseed</span>(<span class="kw-2">&amp;</span><span class="ident">Network::TestNetwork</span>, <span class="ident">height</span>, <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">rng</span>);
+        <span class="kw">let</span> <span class="ident">rseed</span> <span class="op">=</span> <span class="ident">generate_random_rseed</span>(<span class="kw-2">&amp;</span><span class="ident">Network::TestNetwork</span>, <span class="ident">height</span>, <span class="kw-2">&amp;mut</span> <span class="ident">rng</span>);
         <span class="kw">let</span> <span class="ident">note</span> <span class="op">=</span> <span class="ident">Note</span> {
             <span class="ident">g_d</span>: <span class="ident">to</span>.<span class="ident">diversifier</span>().<span class="ident">g_d</span>().<span class="ident">unwrap</span>(),
             <span class="ident">pk_d</span>: <span class="kw-2">*</span><span class="ident">to</span>.<span class="ident">pk_d</span>(),
@@ -901,7 +901,7 @@
             <span class="ident">note</span>.<span class="ident">clone</span>(),
             <span class="ident">to</span>,
             <span class="ident">MemoBytes::empty</span>(),
-            <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">rng</span>,
+            <span class="kw-2">&amp;mut</span> <span class="ident">rng</span>,
         );
         <span class="kw">let</span> <span class="ident">cmu</span> <span class="op">=</span> <span class="ident">note</span>.<span class="ident">cmu</span>().<span class="ident">to_repr</span>().<span class="ident">as_ref</span>().<span class="ident">to_owned</span>();
         <span class="kw">let</span> <span class="ident">epk</span> <span class="op">=</span> <span class="ident">encryptor</span>.<span class="ident">epk</span>().<span class="ident">to_bytes</span>().<span class="ident">to_vec</span>();
@@ -913,7 +913,7 @@
 
         <span class="comment">// Add a random Sapling tx before ours</span>
         {
-            <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">tx</span> <span class="op">=</span> <span class="ident">random_compact_tx</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">rng</span>);
+            <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">tx</span> <span class="op">=</span> <span class="ident">random_compact_tx</span>(<span class="kw-2">&amp;mut</span> <span class="ident">rng</span>);
             <span class="ident">tx</span>.<span class="ident">index</span> <span class="op">=</span> <span class="ident">cb</span>.<span class="ident">vtx</span>.<span class="ident">len</span>() <span class="kw">as</span> <span class="ident">u64</span>;
             <span class="ident">cb</span>.<span class="ident">vtx</span>.<span class="ident">push</span>(<span class="ident">tx</span>);
         }
@@ -926,7 +926,7 @@
         <span class="ident">cout</span>.<span class="ident">set_ciphertext</span>(<span class="ident">enc_ciphertext</span>.<span class="ident">as_ref</span>()[..<span class="number">52</span>].<span class="ident">to_vec</span>());
         <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">ctx</span> <span class="op">=</span> <span class="ident">CompactTx::new</span>();
         <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">txid</span> <span class="op">=</span> <span class="macro">vec!</span>[<span class="number">0</span>; <span class="number">32</span>];
-        <span class="ident">rng</span>.<span class="ident">fill_bytes</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">txid</span>);
+        <span class="ident">rng</span>.<span class="ident">fill_bytes</span>(<span class="kw-2">&amp;mut</span> <span class="ident">txid</span>);
         <span class="ident">ctx</span>.<span class="ident">set_hash</span>(<span class="ident">txid</span>);
         <span class="ident">ctx</span>.<span class="ident">spends</span>.<span class="ident">push</span>(<span class="ident">cspend</span>);
         <span class="ident">ctx</span>.<span class="ident">outputs</span>.<span class="ident">push</span>(<span class="ident">cout</span>);
@@ -935,7 +935,7 @@
 
         <span class="comment">// Optionally add another random Sapling tx after ours</span>
         <span class="kw">if</span> <span class="ident">tx_after</span> {
-            <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">tx</span> <span class="op">=</span> <span class="ident">random_compact_tx</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">rng</span>);
+            <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">tx</span> <span class="op">=</span> <span class="ident">random_compact_tx</span>(<span class="kw-2">&amp;mut</span> <span class="ident">rng</span>);
             <span class="ident">tx</span>.<span class="ident">index</span> <span class="op">=</span> <span class="ident">cb</span>.<span class="ident">vtx</span>.<span class="ident">len</span>() <span class="kw">as</span> <span class="ident">u64</span>;
             <span class="ident">cb</span>.<span class="ident">vtx</span>.<span class="ident">push</span>(<span class="ident">tx</span>);
         }
@@ -963,8 +963,8 @@
             <span class="ident">cb</span>,
             <span class="kw-2">&amp;</span>[(<span class="kw-2">&amp;</span><span class="ident">AccountId</span>(<span class="number">0</span>), <span class="kw-2">&amp;</span><span class="ident">extfvk</span>)],
             <span class="kw-2">&amp;</span>[],
-            <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">tree</span>,
-            <span class="kw-2">&amp;</span><span class="kw-2">mut</span> [],
+            <span class="kw-2">&amp;mut</span> <span class="ident">tree</span>,
+            <span class="kw-2">&amp;mut</span> [],
         );
         <span class="macro">assert_eq!</span>(<span class="ident">txs</span>.<span class="ident">len</span>(), <span class="number">1</span>);
 
@@ -1002,8 +1002,8 @@
             <span class="ident">cb</span>,
             <span class="kw-2">&amp;</span>[(<span class="kw-2">&amp;</span><span class="ident">AccountId</span>(<span class="number">0</span>), <span class="kw-2">&amp;</span><span class="ident">extfvk</span>)],
             <span class="kw-2">&amp;</span>[],
-            <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">tree</span>,
-            <span class="kw-2">&amp;</span><span class="kw-2">mut</span> [],
+            <span class="kw-2">&amp;mut</span> <span class="ident">tree</span>,
+            <span class="kw-2">&amp;mut</span> [],
         );
         <span class="macro">assert_eq!</span>(<span class="ident">txs</span>.<span class="ident">len</span>(), <span class="number">1</span>);
 
@@ -1038,8 +1038,8 @@
             <span class="ident">cb</span>,
             <span class="kw-2">&amp;</span><span class="ident">vks</span>[..],
             <span class="kw-2">&amp;</span>[(<span class="ident">account</span>, <span class="ident">nf</span>)],
-            <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">tree</span>,
-            <span class="kw-2">&amp;</span><span class="kw-2">mut</span> [],
+            <span class="kw-2">&amp;mut</span> <span class="ident">tree</span>,
+            <span class="kw-2">&amp;mut</span> [],
         );
         <span class="macro">assert_eq!</span>(<span class="ident">txs</span>.<span class="ident">len</span>(), <span class="number">1</span>);
 

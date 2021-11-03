@@ -1,1 +1,1 @@
-initSidebarItems({"fn":[["f4jumble",""],["f4jumble_inv",""]]});
+initSidebarItems({"constant":[["VALID_LENGTH","Length of F4Jumbled message must lie in the range VALID_LENGTH."]],"enum":[["Error","Errors produced by F4Jumble."]],"fn":[["f4jumble",""],["f4jumble_inv",""],["f4jumble_inv_mut",""],["f4jumble_mut",""]]});

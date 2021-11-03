@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_primitives&#x2F;src&#x2F;transaction&#x2F;components&#x2F;sapling&#x2F;builder.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>builder.rs - source</title><link rel="stylesheet" type="text/css" href="../../../../../normalize.css"><link rel="stylesheet" type="text/css" href="../../../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" type="text/css" href="../../../../../light.css"  id="themeStyle"><link rel="stylesheet" type="text/css" href="../../../../../dark.css" disabled ><link rel="stylesheet" type="text/css" href="../../../../../ayu.css" disabled ><script id="default-settings" ></script><script src="../../../../../storage.js"></script><script src="../../../../../crates.js"></script><noscript><link rel="stylesheet" href="../../../../../noscript.css"></noscript><link rel="alternate icon" type="image/png" href="../../../../../favicon-16x16.png"><link rel="alternate icon" type="image/png" href="../../../../../favicon-32x32.png"><link rel="icon" type="image/svg+xml" href="../../../../../favicon.svg"><style type="text/css">#crate-search{background-image:url("../../../../../down-arrow.svg");}</style></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="sidebar-menu" role="button">&#9776;</div><a href='../../../../../zcash_primitives/index.html'><div class='logo-container rust-logo'><img src='../../../../../rust-logo.png' alt='logo'></div></a></nav><div class="theme-picker"><button id="theme-picker" aria-label="Pick another theme!" aria-haspopup="menu" title="themes"><img width="18" height="18" alt="Pick another theme!" src="../../../../../brush.svg"></button><div id="theme-choices" role="menu"></div></div><nav class="sub"><form class="search-form"><div class="search-container"><div><select id="crate-search"><option value="All crates">All crates</option></select><input class="search-input" name="search" disabled autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"></div><button type="button" id="help-button" title="help">?</button><a id="settings-menu" href="../../../../../settings.html" title="settings"><img width="18" height="18" alt="Change settings" src="../../../../../wheel.svg"></a></div></form></nav><section id="main" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">  1</span>
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_primitives&#x2F;src&#x2F;transaction&#x2F;components&#x2F;sapling&#x2F;builder.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>builder.rs - source</title><link rel="stylesheet" type="text/css" href="../../../../../normalize.css"><link rel="stylesheet" type="text/css" href="../../../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" type="text/css" href="../../../../../light.css"  id="themeStyle"><link rel="stylesheet" type="text/css" href="../../../../../dark.css" disabled ><link rel="stylesheet" type="text/css" href="../../../../../ayu.css" disabled ><script id="default-settings" ></script><script src="../../../../../storage.js"></script><script src="../../../../../crates.js"></script><noscript><link rel="stylesheet" href="../../../../../noscript.css"></noscript><link rel="alternate icon" type="image/png" href="../../../../../favicon-16x16.png"><link rel="alternate icon" type="image/png" href="../../../../../favicon-32x32.png"><link rel="icon" type="image/svg+xml" href="../../../../../favicon.svg"><style type="text/css">#crate-search{background-image:url("../../../../../down-arrow.svg");}</style></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="sidebar-menu" role="button">&#9776;</div><a href='../../../../../zcash_primitives/index.html'><div class='logo-container rust-logo'><img src='../../../../../rust-logo.png' alt='logo'></div></a></nav><div class="theme-picker"><button id="theme-picker" aria-label="Pick another theme!" aria-haspopup="menu" title="themes"><img width="18" height="18" alt="Pick another theme!" src="../../../../../brush.svg"></button><div id="theme-choices" role="menu"></div></div><nav class="sub"><form class="search-form"><div class="search-container"><div><select id="crate-search"><option value="All crates">All crates</option></select><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"></div><button type="button" id="help-button" title="help">?</button><a id="settings-menu" href="../../../../../settings.html" title="settings"><img width="18" height="18" alt="Change settings" src="../../../../../wheel.svg"></a></div></form></nav><section id="main" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">  1</span>
 <span id="2">  2</span>
 <span id="3">  3</span>
 <span id="4">  4</span>
@@ -675,7 +675,7 @@
 }
 
 <span class="kw">impl</span> <span class="ident">fmt::Display</span> <span class="kw">for</span> <span class="ident">Error</span> {
-    <span class="kw">fn</span> <span class="ident">fmt</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">f</span>: <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">fmt::Formatter</span>) -&gt; <span class="ident">fmt::Result</span> {
+    <span class="kw">fn</span> <span class="ident">fmt</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">f</span>: <span class="kw-2">&amp;mut</span> <span class="ident">fmt::Formatter</span>) -&gt; <span class="ident">fmt::Result</span> {
         <span class="kw">match</span> <span class="self">self</span> {
             <span class="ident">Error::AnchorMismatch</span> =&gt; {
                 <span class="macro">write!</span>(<span class="ident">f</span>, <span class="string">&quot;Anchor mismatch (anchors for all spends must be equal)&quot;</span>)
@@ -709,7 +709,7 @@
 <span class="kw">impl</span> <span class="ident">SaplingOutput</span> {
     <span class="kw">fn</span> <span class="ident">new_internal</span><span class="op">&lt;</span><span class="ident">P</span>: <span class="ident">consensus::Parameters</span>, <span class="ident">R</span>: <span class="ident">RngCore</span><span class="op">&gt;</span>(
         <span class="ident">params</span>: <span class="kw-2">&amp;</span><span class="ident">P</span>,
-        <span class="ident">rng</span>: <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">R</span>,
+        <span class="ident">rng</span>: <span class="kw-2">&amp;mut</span> <span class="ident">R</span>,
         <span class="ident">target_height</span>: <span class="ident">BlockHeight</span>,
         <span class="ident">ovk</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">OutgoingViewingKey</span><span class="op">&gt;</span>,
         <span class="ident">to</span>: <span class="ident">PaymentAddress</span>,
@@ -741,8 +741,8 @@
     <span class="kw">fn</span> <span class="ident">build</span><span class="op">&lt;</span><span class="ident">P</span>: <span class="ident">consensus::Parameters</span>, <span class="ident">Pr</span>: <span class="ident">TxProver</span>, <span class="ident">R</span>: <span class="ident">RngCore</span><span class="op">&gt;</span>(
         <span class="self">self</span>,
         <span class="ident">prover</span>: <span class="kw-2">&amp;</span><span class="ident">Pr</span>,
-        <span class="ident">ctx</span>: <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">Pr::SaplingProvingContext</span>,
-        <span class="ident">rng</span>: <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">R</span>,
+        <span class="ident">ctx</span>: <span class="kw-2">&amp;mut</span> <span class="ident">Pr::SaplingProvingContext</span>,
+        <span class="ident">rng</span>: <span class="kw-2">&amp;mut</span> <span class="ident">R</span>,
     ) -&gt; <span class="ident">OutputDescription</span><span class="op">&lt;</span><span class="ident">GrothProofBytes</span><span class="op">&gt;</span> {
         <span class="kw">let</span> <span class="ident">encryptor</span> <span class="op">=</span> <span class="ident">sapling_note_encryption</span>::<span class="op">&lt;</span><span class="ident">R</span>, <span class="ident">P</span><span class="op">&gt;</span>(
             <span class="self">self</span>.<span class="ident">ovk</span>,
@@ -831,7 +831,7 @@
 }
 
 <span class="kw">impl</span> <span class="ident">std::fmt::Debug</span> <span class="kw">for</span> <span class="ident">Unauthorized</span> {
-    <span class="kw">fn</span> <span class="ident">fmt</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">f</span>: <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">std::fmt::Formatter</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident">std::fmt::Error</span><span class="op">&gt;</span> {
+    <span class="kw">fn</span> <span class="ident">fmt</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">f</span>: <span class="kw-2">&amp;mut</span> <span class="ident">std::fmt::Formatter</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident">std::fmt::Error</span><span class="op">&gt;</span> {
         <span class="macro">write!</span>(<span class="ident">f</span>, <span class="string">&quot;Unauthorized&quot;</span>)
     }
 }
@@ -863,7 +863,7 @@
     <span class="doccomment">/// Returns an error if the given Merkle path does not have the same anchor as the</span>
     <span class="doccomment">/// paths for previous Sapling notes.</span>
     <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">add_spend</span><span class="op">&lt;</span><span class="ident">R</span>: <span class="ident">RngCore</span><span class="op">&gt;</span>(
-        <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>,
+        <span class="kw-2">&amp;mut</span> <span class="self">self</span>,
         <span class="kw-2">mut</span> <span class="ident">rng</span>: <span class="ident">R</span>,
         <span class="ident">extsk</span>: <span class="ident">ExtendedSpendingKey</span>,
         <span class="ident">diversifier</span>: <span class="ident">Diversifier</span>,
@@ -881,7 +881,7 @@
             <span class="self">self</span>.<span class="ident">anchor</span> <span class="op">=</span> <span class="prelude-val">Some</span>(<span class="ident">merkle_path</span>.<span class="ident">root</span>(<span class="ident">cmu</span>).<span class="ident">into</span>())
         }
 
-        <span class="kw">let</span> <span class="ident">alpha</span> <span class="op">=</span> <span class="ident">jubjub::Fr::random</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">rng</span>);
+        <span class="kw">let</span> <span class="ident">alpha</span> <span class="op">=</span> <span class="ident">jubjub::Fr::random</span>(<span class="kw-2">&amp;mut</span> <span class="ident">rng</span>);
 
         <span class="self">self</span>.<span class="ident">value_balance</span> <span class="op">+</span><span class="op">=</span> <span class="ident">Amount::from_u64</span>(<span class="ident">note</span>.<span class="ident">value</span>).<span class="ident">map_err</span>(<span class="op">|</span><span class="kw">_</span><span class="op">|</span> <span class="ident">Error::InvalidAmount</span>)<span class="question-mark">?</span>;
 
@@ -899,7 +899,7 @@
     <span class="doccomment">/// Adds a Sapling address to send funds to.</span>
     <span class="attribute">#[<span class="ident">allow</span>(<span class="ident">clippy::too_many_arguments</span>)]</span>
     <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">add_output</span><span class="op">&lt;</span><span class="ident">R</span>: <span class="ident">RngCore</span><span class="op">&gt;</span>(
-        <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>,
+        <span class="kw-2">&amp;mut</span> <span class="self">self</span>,
         <span class="kw-2">mut</span> <span class="ident">rng</span>: <span class="ident">R</span>,
         <span class="ident">ovk</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">OutgoingViewingKey</span><span class="op">&gt;</span>,
         <span class="ident">to</span>: <span class="ident">PaymentAddress</span>,
@@ -908,7 +908,7 @@
     ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident">Error</span><span class="op">&gt;</span> {
         <span class="kw">let</span> <span class="ident">output</span> <span class="op">=</span> <span class="ident">SaplingOutput::new_internal</span>(
             <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">params</span>,
-            <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">rng</span>,
+            <span class="kw-2">&amp;mut</span> <span class="ident">rng</span>,
             <span class="self">self</span>.<span class="ident">target_height</span>,
             <span class="ident">ovk</span>,
             <span class="ident">to</span>,
@@ -935,7 +935,7 @@
     <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">build</span><span class="op">&lt;</span><span class="ident">Pr</span>: <span class="ident">TxProver</span>, <span class="ident">R</span>: <span class="ident">RngCore</span><span class="op">&gt;</span>(
         <span class="self">self</span>,
         <span class="ident">prover</span>: <span class="kw-2">&amp;</span><span class="ident">Pr</span>,
-        <span class="ident">ctx</span>: <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">Pr::SaplingProvingContext</span>,
+        <span class="ident">ctx</span>: <span class="kw-2">&amp;mut</span> <span class="ident">Pr::SaplingProvingContext</span>,
         <span class="kw-2">mut</span> <span class="ident">rng</span>: <span class="ident">R</span>,
         <span class="ident">target_height</span>: <span class="ident">BlockHeight</span>,
         <span class="ident">progress_notifier</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="kw-2">&amp;</span><span class="ident">Sender</span><span class="op">&lt;</span><span class="ident">Progress</span><span class="op">&gt;</span><span class="op">&gt;</span>,
@@ -964,8 +964,8 @@
         }
 
         <span class="comment">// Randomize order of inputs and outputs</span>
-        <span class="ident">indexed_spends</span>.<span class="ident">shuffle</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">rng</span>);
-        <span class="ident">indexed_outputs</span>.<span class="ident">shuffle</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">rng</span>);
+        <span class="ident">indexed_spends</span>.<span class="ident">shuffle</span>(<span class="kw-2">&amp;mut</span> <span class="ident">rng</span>);
+        <span class="ident">indexed_outputs</span>.<span class="ident">shuffle</span>(<span class="kw-2">&amp;mut</span> <span class="ident">rng</span>);
 
         <span class="comment">// Keep track of the total number of steps computed</span>
         <span class="kw">let</span> <span class="ident">total_progress</span> <span class="op">=</span> <span class="ident">indexed_spends</span>.<span class="ident">len</span>() <span class="kw">as</span> <span class="ident">u32</span> <span class="op">+</span> <span class="ident">indexed_outputs</span>.<span class="ident">len</span>() <span class="kw">as</span> <span class="ident">u32</span>;
@@ -1036,7 +1036,7 @@
                     <span class="comment">// Record the post-randomized output location</span>
                     <span class="ident">tx_metadata</span>.<span class="ident">output_indices</span>[<span class="ident">pos</span>] <span class="op">=</span> <span class="ident">i</span>;
 
-                    <span class="ident">output</span>.<span class="ident">clone</span>().<span class="ident">build</span>::<span class="op">&lt;</span><span class="ident">P</span>, <span class="kw">_</span>, <span class="kw">_</span><span class="op">&gt;</span>(<span class="ident">prover</span>, <span class="ident">ctx</span>, <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">rng</span>)
+                    <span class="ident">output</span>.<span class="ident">clone</span>().<span class="ident">build</span>::<span class="op">&lt;</span><span class="ident">P</span>, <span class="kw">_</span>, <span class="kw">_</span><span class="op">&gt;</span>(<span class="ident">prover</span>, <span class="ident">ctx</span>, <span class="kw-2">&amp;mut</span> <span class="ident">rng</span>)
                 } <span class="kw">else</span> {
                     <span class="comment">// This is a dummy output</span>
                     <span class="kw">let</span> (<span class="ident">dummy_to</span>, <span class="ident">dummy_note</span>) <span class="op">=</span> {
@@ -1045,7 +1045,7 @@
                             <span class="kw">let</span> <span class="ident">g_d</span>;
                             <span class="kw">loop</span> {
                                 <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">d</span> <span class="op">=</span> [<span class="number">0</span>; <span class="number">11</span>];
-                                <span class="ident">rng</span>.<span class="ident">fill_bytes</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">d</span>);
+                                <span class="ident">rng</span>.<span class="ident">fill_bytes</span>(<span class="kw-2">&amp;mut</span> <span class="ident">d</span>);
                                 <span class="ident">diversifier</span> <span class="op">=</span> <span class="ident">Diversifier</span>(<span class="ident">d</span>);
                                 <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">val</span>) <span class="op">=</span> <span class="ident">diversifier</span>.<span class="ident">g_d</span>() {
                                     <span class="ident">g_d</span> <span class="op">=</span> <span class="ident">val</span>;
@@ -1055,7 +1055,7 @@
                             (<span class="ident">diversifier</span>, <span class="ident">g_d</span>)
                         };
                         <span class="kw">let</span> (<span class="ident">pk_d</span>, <span class="ident">payment_address</span>) <span class="op">=</span> <span class="kw">loop</span> {
-                            <span class="kw">let</span> <span class="ident">dummy_ivk</span> <span class="op">=</span> <span class="ident">jubjub::Fr::random</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">rng</span>);
+                            <span class="kw">let</span> <span class="ident">dummy_ivk</span> <span class="op">=</span> <span class="ident">jubjub::Fr::random</span>(<span class="kw-2">&amp;mut</span> <span class="ident">rng</span>);
                             <span class="kw">let</span> <span class="ident">pk_d</span> <span class="op">=</span> <span class="ident">g_d</span> <span class="op">*</span> <span class="ident">dummy_ivk</span>;
                             <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">addr</span>) <span class="op">=</span> <span class="ident">PaymentAddress::from_parts</span>(<span class="ident">diversifier</span>, <span class="ident">pk_d</span>) {
                                 <span class="kw">break</span> (<span class="ident">pk_d</span>, <span class="ident">addr</span>);
@@ -1063,7 +1063,7 @@
                         };
 
                         <span class="kw">let</span> <span class="ident">rseed</span> <span class="op">=</span>
-                            <span class="ident">generate_random_rseed_internal</span>(<span class="kw-2">&amp;</span><span class="ident">params</span>, <span class="ident">target_height</span>, <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">rng</span>);
+                            <span class="ident">generate_random_rseed_internal</span>(<span class="kw-2">&amp;</span><span class="ident">params</span>, <span class="ident">target_height</span>, <span class="kw-2">&amp;mut</span> <span class="ident">rng</span>);
 
                         (
                             <span class="ident">payment_address</span>,
@@ -1076,7 +1076,7 @@
                         )
                     };
 
-                    <span class="kw">let</span> <span class="ident">esk</span> <span class="op">=</span> <span class="ident">dummy_note</span>.<span class="ident">generate_or_derive_esk_internal</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">rng</span>);
+                    <span class="kw">let</span> <span class="ident">esk</span> <span class="op">=</span> <span class="ident">dummy_note</span>.<span class="ident">generate_or_derive_esk_internal</span>(<span class="kw-2">&amp;mut</span> <span class="ident">rng</span>);
                     <span class="kw">let</span> <span class="ident">epk</span> <span class="op">=</span> <span class="ident">dummy_note</span>.<span class="ident">g_d</span> <span class="op">*</span> <span class="ident">esk</span>;
 
                     <span class="kw">let</span> (<span class="ident">zkproof</span>, <span class="ident">cv</span>) <span class="op">=</span>
@@ -1086,8 +1086,8 @@
 
                     <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">enc_ciphertext</span> <span class="op">=</span> [<span class="number">0u8</span>; <span class="number">580</span>];
                     <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">out_ciphertext</span> <span class="op">=</span> [<span class="number">0u8</span>; <span class="number">80</span>];
-                    <span class="ident">rng</span>.<span class="ident">fill_bytes</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">enc_ciphertext</span>[..]);
-                    <span class="ident">rng</span>.<span class="ident">fill_bytes</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">out_ciphertext</span>[..]);
+                    <span class="ident">rng</span>.<span class="ident">fill_bytes</span>(<span class="kw-2">&amp;mut</span> <span class="ident">enc_ciphertext</span>[..]);
+                    <span class="ident">rng</span>.<span class="ident">fill_bytes</span>(<span class="kw-2">&amp;mut</span> <span class="ident">out_ciphertext</span>[..]);
 
                     <span class="ident">OutputDescription</span> {
                         <span class="ident">cv</span>,
@@ -1144,8 +1144,8 @@
     <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">apply_signatures</span><span class="op">&lt;</span><span class="ident">Pr</span>: <span class="ident">TxProver</span>, <span class="ident">R</span>: <span class="ident">RngCore</span><span class="op">&gt;</span>(
         <span class="self">self</span>,
         <span class="ident">prover</span>: <span class="kw-2">&amp;</span><span class="ident">Pr</span>,
-        <span class="ident">ctx</span>: <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">Pr::SaplingProvingContext</span>,
-        <span class="ident">rng</span>: <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">R</span>,
+        <span class="ident">ctx</span>: <span class="kw-2">&amp;mut</span> <span class="ident">Pr::SaplingProvingContext</span>,
+        <span class="ident">rng</span>: <span class="kw-2">&amp;mut</span> <span class="ident">R</span>,
         <span class="ident">sighash_bytes</span>: <span class="kw-2">&amp;</span>[<span class="ident">u8</span>; <span class="number">32</span>],
     ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span>(<span class="ident">Bundle</span><span class="op">&lt;</span><span class="ident">Authorized</span><span class="op">&gt;</span>, <span class="ident">SaplingMetadata</span>), <span class="ident">Error</span><span class="op">&gt;</span> {
         <span class="kw">let</span> <span class="ident">binding_sig</span> <span class="op">=</span> <span class="ident">prover</span>
@@ -1224,7 +1224,7 @@
 
             <span class="kw">for</span> ((<span class="ident">note</span>, <span class="ident">path</span>), <span class="ident">diversifier</span>) <span class="kw">in</span> <span class="ident">spendable_notes</span>.<span class="ident">into_iter</span>().<span class="ident">zip</span>(<span class="ident">commitment_trees</span>.<span class="ident">into_iter</span>()).<span class="ident">zip</span>(<span class="ident">diversifiers</span>.<span class="ident">into_iter</span>()) {
                 <span class="ident">builder</span>.<span class="ident">add_spend</span>(
-                    <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">rng</span>,
+                    <span class="kw-2">&amp;mut</span> <span class="ident">rng</span>,
                     <span class="ident">extsk</span>.<span class="ident">clone</span>(),
                     <span class="ident">diversifier</span>,
                     <span class="ident">note</span>,
@@ -1237,16 +1237,16 @@
 
             <span class="kw">let</span> <span class="ident">bundle</span> <span class="op">=</span> <span class="ident">builder</span>.<span class="ident">build</span>(
                 <span class="kw-2">&amp;</span><span class="ident">prover</span>,
-                <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">ctx</span>,
-                <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">rng</span>,
+                <span class="kw-2">&amp;mut</span> <span class="ident">ctx</span>,
+                <span class="kw-2">&amp;mut</span> <span class="ident">rng</span>,
                 <span class="ident">target_height</span>.<span class="ident">unwrap</span>(),
                 <span class="prelude-val">None</span>
             ).<span class="ident">unwrap</span>().<span class="ident">unwrap</span>();
 
             <span class="kw">let</span> (<span class="ident">bundle</span>, <span class="kw">_</span>) <span class="op">=</span> <span class="ident">bundle</span>.<span class="ident">apply_signatures</span>(
                 <span class="kw-2">&amp;</span><span class="ident">prover</span>,
-                <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">ctx</span>,
-                <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">rng</span>,
+                <span class="kw-2">&amp;mut</span> <span class="ident">ctx</span>,
+                <span class="kw-2">&amp;mut</span> <span class="ident">rng</span>,
                 <span class="kw-2">&amp;</span><span class="ident">fake_sighash_bytes</span>,
             ).<span class="ident">unwrap</span>();
 

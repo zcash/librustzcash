@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_primitives&#x2F;src&#x2F;transaction&#x2F;mod.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>mod.rs - source</title><link rel="stylesheet" type="text/css" href="../../../normalize.css"><link rel="stylesheet" type="text/css" href="../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" type="text/css" href="../../../light.css"  id="themeStyle"><link rel="stylesheet" type="text/css" href="../../../dark.css" disabled ><link rel="stylesheet" type="text/css" href="../../../ayu.css" disabled ><script id="default-settings" ></script><script src="../../../storage.js"></script><script src="../../../crates.js"></script><noscript><link rel="stylesheet" href="../../../noscript.css"></noscript><link rel="alternate icon" type="image/png" href="../../../favicon-16x16.png"><link rel="alternate icon" type="image/png" href="../../../favicon-32x32.png"><link rel="icon" type="image/svg+xml" href="../../../favicon.svg"><style type="text/css">#crate-search{background-image:url("../../../down-arrow.svg");}</style></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="sidebar-menu" role="button">&#9776;</div><a href='../../../zcash_primitives/index.html'><div class='logo-container rust-logo'><img src='../../../rust-logo.png' alt='logo'></div></a></nav><div class="theme-picker"><button id="theme-picker" aria-label="Pick another theme!" aria-haspopup="menu" title="themes"><img width="18" height="18" alt="Pick another theme!" src="../../../brush.svg"></button><div id="theme-choices" role="menu"></div></div><nav class="sub"><form class="search-form"><div class="search-container"><div><select id="crate-search"><option value="All crates">All crates</option></select><input class="search-input" name="search" disabled autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"></div><button type="button" id="help-button" title="help">?</button><a id="settings-menu" href="../../../settings.html" title="settings"><img width="18" height="18" alt="Change settings" src="../../../wheel.svg"></a></div></form></nav><section id="main" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">   1</span>
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_primitives&#x2F;src&#x2F;transaction&#x2F;mod.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>mod.rs - source</title><link rel="stylesheet" type="text/css" href="../../../normalize.css"><link rel="stylesheet" type="text/css" href="../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" type="text/css" href="../../../light.css"  id="themeStyle"><link rel="stylesheet" type="text/css" href="../../../dark.css" disabled ><link rel="stylesheet" type="text/css" href="../../../ayu.css" disabled ><script id="default-settings" ></script><script src="../../../storage.js"></script><script src="../../../crates.js"></script><noscript><link rel="stylesheet" href="../../../noscript.css"></noscript><link rel="alternate icon" type="image/png" href="../../../favicon-16x16.png"><link rel="alternate icon" type="image/png" href="../../../favicon-32x32.png"><link rel="icon" type="image/svg+xml" href="../../../favicon.svg"><style type="text/css">#crate-search{background-image:url("../../../down-arrow.svg");}</style></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="sidebar-menu" role="button">&#9776;</div><a href='../../../zcash_primitives/index.html'><div class='logo-container rust-logo'><img src='../../../rust-logo.png' alt='logo'></div></a></nav><div class="theme-picker"><button id="theme-picker" aria-label="Pick another theme!" aria-haspopup="menu" title="themes"><img width="18" height="18" alt="Pick another theme!" src="../../../brush.svg"></button><div id="theme-choices" role="menu"></div></div><nav class="sub"><form class="search-form"><div class="search-container"><div><select id="crate-search"><option value="All crates">All crates</option></select><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"></div><button type="button" id="help-button" title="help">?</button><a id="settings-menu" href="../../../settings.html" title="settings"><img width="18" height="18" alt="Change settings" src="../../../wheel.svg"></a></div></form></nav><section id="main" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">   1</span>
 <span id="2">   2</span>
 <span id="3">   3</span>
 <span id="4">   4</span>
@@ -1158,7 +1158,7 @@
 <span class="kw">pub</span> <span class="kw">struct</span> <span class="ident">TxId</span>([<span class="ident">u8</span>; <span class="number">32</span>]);
 
 <span class="kw">impl</span> <span class="ident">fmt::Display</span> <span class="kw">for</span> <span class="ident">TxId</span> {
-    <span class="kw">fn</span> <span class="ident">fmt</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">formatter</span>: <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">fmt::Formatter</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span>) -&gt; <span class="ident">fmt::Result</span> {
+    <span class="kw">fn</span> <span class="ident">fmt</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">formatter</span>: <span class="kw-2">&amp;mut</span> <span class="ident">fmt::Formatter</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span>) -&gt; <span class="ident">fmt::Result</span> {
         <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">data</span> <span class="op">=</span> <span class="self">self</span>.<span class="number">0</span>;
         <span class="ident">data</span>.<span class="ident">reverse</span>();
         <span class="ident">formatter</span>.<span class="ident">write_str</span>(<span class="kw-2">&amp;</span><span class="ident">hex::encode</span>(<span class="ident">data</span>))
@@ -1178,7 +1178,7 @@
 
     <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">read</span><span class="op">&lt;</span><span class="ident">R</span>: <span class="ident">Read</span><span class="op">&gt;</span>(<span class="kw-2">mut</span> <span class="ident">reader</span>: <span class="ident">R</span>) -&gt; <span class="ident">io::Result</span><span class="op">&lt;</span><span class="self">Self</span><span class="op">&gt;</span> {
         <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">hash</span> <span class="op">=</span> [<span class="number">0u8</span>; <span class="number">32</span>];
-        <span class="ident">reader</span>.<span class="ident">read_exact</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">hash</span>)<span class="question-mark">?</span>;
+        <span class="ident">reader</span>.<span class="ident">read_exact</span>(<span class="kw-2">&amp;mut</span> <span class="ident">hash</span>)<span class="question-mark">?</span>;
         <span class="prelude-val">Ok</span>(<span class="ident">TxId::from_bytes</span>(<span class="ident">hash</span>))
     }
 
@@ -1466,7 +1466,7 @@
 }
 
 <span class="kw">impl</span><span class="op">&lt;</span><span class="ident">A</span>: <span class="ident">Authorization</span><span class="op">&gt;</span> <span class="ident">std::fmt::Debug</span> <span class="kw">for</span> <span class="ident">TransactionData</span><span class="op">&lt;</span><span class="ident">A</span><span class="op">&gt;</span> {
-    <span class="kw">fn</span> <span class="ident">fmt</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">f</span>: <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">std::fmt::Formatter</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident">std::fmt::Error</span><span class="op">&gt;</span> {
+    <span class="kw">fn</span> <span class="ident">fmt</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">f</span>: <span class="kw-2">&amp;mut</span> <span class="ident">std::fmt::Formatter</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident">std::fmt::Error</span><span class="op">&gt;</span> {
         <span class="macro">write!</span>(
             <span class="ident">f</span>,
             <span class="string">&quot;TransactionData(
@@ -1583,7 +1583,7 @@
             <span class="ident">data</span>,
         };
         <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">writer</span> <span class="op">=</span> <span class="ident">HashWriter::default</span>();
-        <span class="ident">tx</span>.<span class="ident">write</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">writer</span>)<span class="question-mark">?</span>;
+        <span class="ident">tx</span>.<span class="ident">write</span>(<span class="kw-2">&amp;mut</span> <span class="ident">writer</span>)<span class="question-mark">?</span>;
         <span class="ident">tx</span>.<span class="ident">txid</span>.<span class="number">0</span>.<span class="ident">copy_from_slice</span>(<span class="kw-2">&amp;</span><span class="ident">writer</span>.<span class="ident">into_hash</span>());
         <span class="prelude-val">Ok</span>(<span class="ident">tx</span>)
     }
@@ -1605,7 +1605,7 @@
     <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">read</span><span class="op">&lt;</span><span class="ident">R</span>: <span class="ident">Read</span><span class="op">&gt;</span>(<span class="ident">reader</span>: <span class="ident">R</span>, <span class="ident">consensus_branch_id</span>: <span class="ident">BranchId</span>) -&gt; <span class="ident">io::Result</span><span class="op">&lt;</span><span class="self">Self</span><span class="op">&gt;</span> {
         <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">reader</span> <span class="op">=</span> <span class="ident">HashReader::new</span>(<span class="ident">reader</span>);
 
-        <span class="kw">let</span> <span class="ident">version</span> <span class="op">=</span> <span class="ident">TxVersion::read</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">reader</span>)<span class="question-mark">?</span>;
+        <span class="kw">let</span> <span class="ident">version</span> <span class="op">=</span> <span class="ident">TxVersion::read</span>(<span class="kw-2">&amp;mut</span> <span class="ident">reader</span>)<span class="question-mark">?</span>;
         <span class="kw">match</span> <span class="ident">version</span> {
             <span class="ident">TxVersion::Sprout</span>(<span class="kw">_</span>) <span class="op">|</span> <span class="ident">TxVersion::Overwinter</span> <span class="op">|</span> <span class="ident">TxVersion::Sapling</span> =&gt; {
                 <span class="ident"><span class="self">Self</span>::read_v4</span>(<span class="ident">reader</span>, <span class="ident">version</span>, <span class="ident">consensus_branch_id</span>)
@@ -1622,7 +1622,7 @@
         <span class="ident">version</span>: <span class="ident">TxVersion</span>,
         <span class="ident">consensus_branch_id</span>: <span class="ident">BranchId</span>,
     ) -&gt; <span class="ident">io::Result</span><span class="op">&lt;</span><span class="self">Self</span><span class="op">&gt;</span> {
-        <span class="kw">let</span> <span class="ident">transparent_bundle</span> <span class="op">=</span> <span class="ident"><span class="self">Self</span>::read_transparent</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">reader</span>)<span class="question-mark">?</span>;
+        <span class="kw">let</span> <span class="ident">transparent_bundle</span> <span class="op">=</span> <span class="ident"><span class="self">Self</span>::read_transparent</span>(<span class="kw-2">&amp;mut</span> <span class="ident">reader</span>)<span class="question-mark">?</span>;
 
         <span class="kw">let</span> <span class="ident">lock_time</span> <span class="op">=</span> <span class="ident">reader</span>.<span class="ident">read_u32</span>::<span class="op">&lt;</span><span class="ident">LittleEndian</span><span class="op">&gt;</span>()<span class="question-mark">?</span>;
         <span class="kw">let</span> <span class="ident">expiry_height</span>: <span class="ident">BlockHeight</span> <span class="op">=</span> <span class="kw">if</span> <span class="ident">version</span>.<span class="ident">has_overwinter</span>() {
@@ -1632,20 +1632,20 @@
         };
 
         <span class="kw">let</span> (<span class="ident">value_balance</span>, <span class="ident">shielded_spends</span>, <span class="ident">shielded_outputs</span>) <span class="op">=</span> <span class="kw">if</span> <span class="ident">version</span>.<span class="ident">has_sapling</span>() {
-            <span class="kw">let</span> <span class="ident">vb</span> <span class="op">=</span> <span class="ident"><span class="self">Self</span>::read_amount</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">reader</span>)<span class="question-mark">?</span>;
+            <span class="kw">let</span> <span class="ident">vb</span> <span class="op">=</span> <span class="ident"><span class="self">Self</span>::read_amount</span>(<span class="kw-2">&amp;mut</span> <span class="ident">reader</span>)<span class="question-mark">?</span>;
             <span class="attribute">#[<span class="ident">allow</span>(<span class="ident">clippy::redundant_closure</span>)]</span>
             <span class="kw">let</span> <span class="ident">ss</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">SpendDescription</span><span class="op">&lt;</span><span class="ident">sapling::Authorized</span><span class="op">&gt;</span><span class="op">&gt;</span> <span class="op">=</span>
-                <span class="ident">Vector::read</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">reader</span>, <span class="op">|</span><span class="ident">r</span><span class="op">|</span> <span class="ident">SpendDescription::read</span>(<span class="ident">r</span>))<span class="question-mark">?</span>;
+                <span class="ident">Vector::read</span>(<span class="kw-2">&amp;mut</span> <span class="ident">reader</span>, <span class="op">|</span><span class="ident">r</span><span class="op">|</span> <span class="ident">SpendDescription::read</span>(<span class="ident">r</span>))<span class="question-mark">?</span>;
             <span class="attribute">#[<span class="ident">allow</span>(<span class="ident">clippy::redundant_closure</span>)]</span>
             <span class="kw">let</span> <span class="ident">so</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">OutputDescription</span><span class="op">&lt;</span><span class="ident">sapling::GrothProofBytes</span><span class="op">&gt;</span><span class="op">&gt;</span> <span class="op">=</span>
-                <span class="ident">Vector::read</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">reader</span>, <span class="op">|</span><span class="ident">r</span><span class="op">|</span> <span class="ident">OutputDescription::read</span>(<span class="ident">r</span>))<span class="question-mark">?</span>;
+                <span class="ident">Vector::read</span>(<span class="kw-2">&amp;mut</span> <span class="ident">reader</span>, <span class="op">|</span><span class="ident">r</span><span class="op">|</span> <span class="ident">OutputDescription::read</span>(<span class="ident">r</span>))<span class="question-mark">?</span>;
             (<span class="ident">vb</span>, <span class="ident">ss</span>, <span class="ident">so</span>)
         } <span class="kw">else</span> {
             (<span class="ident">Amount::zero</span>(), <span class="macro">vec!</span>[], <span class="macro">vec!</span>[])
         };
 
         <span class="kw">let</span> <span class="ident">sprout_bundle</span> <span class="op">=</span> <span class="kw">if</span> <span class="ident">version</span>.<span class="ident">has_sprout</span>() {
-            <span class="kw">let</span> <span class="ident">joinsplits</span> <span class="op">=</span> <span class="ident">Vector::read</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">reader</span>, <span class="op">|</span><span class="ident">r</span><span class="op">|</span> {
+            <span class="kw">let</span> <span class="ident">joinsplits</span> <span class="op">=</span> <span class="ident">Vector::read</span>(<span class="kw-2">&amp;mut</span> <span class="ident">reader</span>, <span class="op">|</span><span class="ident">r</span><span class="op">|</span> {
                 <span class="ident">JsDescription::read</span>(<span class="ident">r</span>, <span class="ident">version</span>.<span class="ident">has_sapling</span>())
             })<span class="question-mark">?</span>;
 
@@ -1655,8 +1655,8 @@
                     <span class="ident">joinsplit_pubkey</span>: [<span class="number">0</span>; <span class="number">32</span>],
                     <span class="ident">joinsplit_sig</span>: [<span class="number">0</span>; <span class="number">64</span>],
                 };
-                <span class="ident">reader</span>.<span class="ident">read_exact</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">bundle</span>.<span class="ident">joinsplit_pubkey</span>)<span class="question-mark">?</span>;
-                <span class="ident">reader</span>.<span class="ident">read_exact</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">bundle</span>.<span class="ident">joinsplit_sig</span>)<span class="question-mark">?</span>;
+                <span class="ident">reader</span>.<span class="ident">read_exact</span>(<span class="kw-2">&amp;mut</span> <span class="ident">bundle</span>.<span class="ident">joinsplit_pubkey</span>)<span class="question-mark">?</span>;
+                <span class="ident">reader</span>.<span class="ident">read_exact</span>(<span class="kw-2">&amp;mut</span> <span class="ident">bundle</span>.<span class="ident">joinsplit_sig</span>)<span class="question-mark">?</span>;
                 <span class="prelude-val">Some</span>(<span class="ident">bundle</span>)
             } <span class="kw">else</span> {
                 <span class="prelude-val">None</span>
@@ -1668,7 +1668,7 @@
         <span class="kw">let</span> <span class="ident">binding_sig</span> <span class="op">=</span> <span class="kw">if</span> <span class="ident">version</span>.<span class="ident">has_sapling</span>()
             <span class="op">&amp;&amp;</span> <span class="op">!</span>(<span class="ident">shielded_spends</span>.<span class="ident">is_empty</span>() <span class="op">&amp;&amp;</span> <span class="ident">shielded_outputs</span>.<span class="ident">is_empty</span>())
         {
-            <span class="prelude-val">Some</span>(<span class="ident">redjubjub::Signature::read</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">reader</span>)<span class="question-mark">?</span>)
+            <span class="prelude-val">Some</span>(<span class="ident">redjubjub::Signature::read</span>(<span class="kw-2">&amp;mut</span> <span class="ident">reader</span>)<span class="question-mark">?</span>)
         } <span class="kw">else</span> {
             <span class="prelude-val">None</span>
         };
@@ -1702,8 +1702,8 @@
     <span class="kw">fn</span> <span class="ident">read_transparent</span><span class="op">&lt;</span><span class="ident">R</span>: <span class="ident">Read</span><span class="op">&gt;</span>(
         <span class="kw-2">mut</span> <span class="ident">reader</span>: <span class="ident">R</span>,
     ) -&gt; <span class="ident">io::Result</span><span class="op">&lt;</span><span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">transparent::Bundle</span><span class="op">&lt;</span><span class="ident">transparent::Authorized</span><span class="op">&gt;</span><span class="op">&gt;</span><span class="op">&gt;</span> {
-        <span class="kw">let</span> <span class="ident">vin</span> <span class="op">=</span> <span class="ident">Vector::read</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">reader</span>, <span class="ident">TxIn::read</span>)<span class="question-mark">?</span>;
-        <span class="kw">let</span> <span class="ident">vout</span> <span class="op">=</span> <span class="ident">Vector::read</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">reader</span>, <span class="ident">TxOut::read</span>)<span class="question-mark">?</span>;
+        <span class="kw">let</span> <span class="ident">vin</span> <span class="op">=</span> <span class="ident">Vector::read</span>(<span class="kw-2">&amp;mut</span> <span class="ident">reader</span>, <span class="ident">TxIn::read</span>)<span class="question-mark">?</span>;
+        <span class="kw">let</span> <span class="ident">vout</span> <span class="op">=</span> <span class="ident">Vector::read</span>(<span class="kw-2">&amp;mut</span> <span class="ident">reader</span>, <span class="ident">TxOut::read</span>)<span class="question-mark">?</span>;
         <span class="prelude-val">Ok</span>(<span class="kw">if</span> <span class="ident">vin</span>.<span class="ident">is_empty</span>() <span class="op">&amp;&amp;</span> <span class="ident">vout</span>.<span class="ident">is_empty</span>() {
             <span class="prelude-val">None</span>
         } <span class="kw">else</span> {
@@ -1717,21 +1717,21 @@
 
     <span class="kw">fn</span> <span class="ident">read_amount</span><span class="op">&lt;</span><span class="ident">R</span>: <span class="ident">Read</span><span class="op">&gt;</span>(<span class="kw-2">mut</span> <span class="ident">reader</span>: <span class="ident">R</span>) -&gt; <span class="ident">io::Result</span><span class="op">&lt;</span><span class="ident">Amount</span><span class="op">&gt;</span> {
         <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">tmp</span> <span class="op">=</span> [<span class="number">0</span>; <span class="number">8</span>];
-        <span class="ident">reader</span>.<span class="ident">read_exact</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">tmp</span>)<span class="question-mark">?</span>;
+        <span class="ident">reader</span>.<span class="ident">read_exact</span>(<span class="kw-2">&amp;mut</span> <span class="ident">tmp</span>)<span class="question-mark">?</span>;
         <span class="ident">Amount::from_i64_le_bytes</span>(<span class="ident">tmp</span>)
             .<span class="ident">map_err</span>(<span class="op">|</span><span class="kw">_</span><span class="op">|</span> <span class="ident">io::Error::new</span>(<span class="ident">io::ErrorKind::InvalidData</span>, <span class="string">&quot;valueBalance out of range&quot;</span>))
     }
 
     <span class="kw">fn</span> <span class="ident">read_v5</span><span class="op">&lt;</span><span class="ident">R</span>: <span class="ident">Read</span><span class="op">&gt;</span>(<span class="kw-2">mut</span> <span class="ident">reader</span>: <span class="ident">R</span>, <span class="ident">version</span>: <span class="ident">TxVersion</span>) -&gt; <span class="ident">io::Result</span><span class="op">&lt;</span><span class="self">Self</span><span class="op">&gt;</span> {
         <span class="kw">let</span> (<span class="ident">consensus_branch_id</span>, <span class="ident">lock_time</span>, <span class="ident">expiry_height</span>) <span class="op">=</span>
-            <span class="ident"><span class="self">Self</span>::read_v5_header_fragment</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">reader</span>)<span class="question-mark">?</span>;
-        <span class="kw">let</span> <span class="ident">transparent_bundle</span> <span class="op">=</span> <span class="ident"><span class="self">Self</span>::read_transparent</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">reader</span>)<span class="question-mark">?</span>;
-        <span class="kw">let</span> <span class="ident">sapling_bundle</span> <span class="op">=</span> <span class="ident"><span class="self">Self</span>::read_v5_sapling</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">reader</span>)<span class="question-mark">?</span>;
-        <span class="kw">let</span> <span class="ident">orchard_bundle</span> <span class="op">=</span> <span class="ident">orchard_serialization::read_v5_bundle</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">reader</span>)<span class="question-mark">?</span>;
+            <span class="ident"><span class="self">Self</span>::read_v5_header_fragment</span>(<span class="kw-2">&amp;mut</span> <span class="ident">reader</span>)<span class="question-mark">?</span>;
+        <span class="kw">let</span> <span class="ident">transparent_bundle</span> <span class="op">=</span> <span class="ident"><span class="self">Self</span>::read_transparent</span>(<span class="kw-2">&amp;mut</span> <span class="ident">reader</span>)<span class="question-mark">?</span>;
+        <span class="kw">let</span> <span class="ident">sapling_bundle</span> <span class="op">=</span> <span class="ident"><span class="self">Self</span>::read_v5_sapling</span>(<span class="kw-2">&amp;mut</span> <span class="ident">reader</span>)<span class="question-mark">?</span>;
+        <span class="kw">let</span> <span class="ident">orchard_bundle</span> <span class="op">=</span> <span class="ident">orchard_serialization::read_v5_bundle</span>(<span class="kw-2">&amp;mut</span> <span class="ident">reader</span>)<span class="question-mark">?</span>;
 
         <span class="attribute">#[<span class="ident">cfg</span>(<span class="ident">feature</span> <span class="op">=</span> <span class="string">&quot;zfuture&quot;</span>)]</span>
         <span class="kw">let</span> <span class="ident">tze_bundle</span> <span class="op">=</span> <span class="kw">if</span> <span class="ident">version</span>.<span class="ident">has_tze</span>() {
-            <span class="ident"><span class="self">Self</span>::read_tze</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">reader</span>)<span class="question-mark">?</span>
+            <span class="ident"><span class="self">Self</span>::read_tze</span>(<span class="kw-2">&amp;mut</span> <span class="ident">reader</span>)<span class="question-mark">?</span>
         } <span class="kw">else</span> {
             <span class="prelude-val">None</span>
         };
@@ -1770,30 +1770,30 @@
     <span class="kw">fn</span> <span class="ident">read_v5_sapling</span><span class="op">&lt;</span><span class="ident">R</span>: <span class="ident">Read</span><span class="op">&gt;</span>(
         <span class="kw-2">mut</span> <span class="ident">reader</span>: <span class="ident">R</span>,
     ) -&gt; <span class="ident">io::Result</span><span class="op">&lt;</span><span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">sapling::Bundle</span><span class="op">&lt;</span><span class="ident">sapling::Authorized</span><span class="op">&gt;</span><span class="op">&gt;</span><span class="op">&gt;</span> {
-        <span class="kw">let</span> <span class="ident">sd_v5s</span> <span class="op">=</span> <span class="ident">Vector::read</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">reader</span>, <span class="ident">SpendDescriptionV5::read</span>)<span class="question-mark">?</span>;
-        <span class="kw">let</span> <span class="ident">od_v5s</span> <span class="op">=</span> <span class="ident">Vector::read</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">reader</span>, <span class="ident">OutputDescriptionV5::read</span>)<span class="question-mark">?</span>;
+        <span class="kw">let</span> <span class="ident">sd_v5s</span> <span class="op">=</span> <span class="ident">Vector::read</span>(<span class="kw-2">&amp;mut</span> <span class="ident">reader</span>, <span class="ident">SpendDescriptionV5::read</span>)<span class="question-mark">?</span>;
+        <span class="kw">let</span> <span class="ident">od_v5s</span> <span class="op">=</span> <span class="ident">Vector::read</span>(<span class="kw-2">&amp;mut</span> <span class="ident">reader</span>, <span class="ident">OutputDescriptionV5::read</span>)<span class="question-mark">?</span>;
         <span class="kw">let</span> <span class="ident">n_spends</span> <span class="op">=</span> <span class="ident">sd_v5s</span>.<span class="ident">len</span>();
         <span class="kw">let</span> <span class="ident">n_outputs</span> <span class="op">=</span> <span class="ident">od_v5s</span>.<span class="ident">len</span>();
         <span class="kw">let</span> <span class="ident">value_balance</span> <span class="op">=</span> <span class="kw">if</span> <span class="ident">n_spends</span> <span class="op">&gt;</span> <span class="number">0</span> <span class="op">|</span><span class="op">|</span> <span class="ident">n_outputs</span> <span class="op">&gt;</span> <span class="number">0</span> {
-            <span class="ident"><span class="self">Self</span>::read_amount</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">reader</span>)<span class="question-mark">?</span>
+            <span class="ident"><span class="self">Self</span>::read_amount</span>(<span class="kw-2">&amp;mut</span> <span class="ident">reader</span>)<span class="question-mark">?</span>
         } <span class="kw">else</span> {
             <span class="ident">Amount::zero</span>()
         };
 
         <span class="kw">let</span> <span class="ident">anchor</span> <span class="op">=</span> <span class="kw">if</span> <span class="ident">n_spends</span> <span class="op">&gt;</span> <span class="number">0</span> {
-            <span class="prelude-val">Some</span>(<span class="ident">sapling::read_base</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">reader</span>, <span class="string">&quot;anchor&quot;</span>)<span class="question-mark">?</span>)
+            <span class="prelude-val">Some</span>(<span class="ident">sapling::read_base</span>(<span class="kw-2">&amp;mut</span> <span class="ident">reader</span>, <span class="string">&quot;anchor&quot;</span>)<span class="question-mark">?</span>)
         } <span class="kw">else</span> {
             <span class="prelude-val">None</span>
         };
 
-        <span class="kw">let</span> <span class="ident">v_spend_proofs</span> <span class="op">=</span> <span class="ident">Array::read</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">reader</span>, <span class="ident">n_spends</span>, <span class="op">|</span><span class="ident">r</span><span class="op">|</span> <span class="ident">sapling::read_zkproof</span>(<span class="ident">r</span>))<span class="question-mark">?</span>;
-        <span class="kw">let</span> <span class="ident">v_spend_auth_sigs</span> <span class="op">=</span> <span class="ident">Array::read</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">reader</span>, <span class="ident">n_spends</span>, <span class="op">|</span><span class="ident">r</span><span class="op">|</span> {
+        <span class="kw">let</span> <span class="ident">v_spend_proofs</span> <span class="op">=</span> <span class="ident">Array::read</span>(<span class="kw-2">&amp;mut</span> <span class="ident">reader</span>, <span class="ident">n_spends</span>, <span class="op">|</span><span class="ident">r</span><span class="op">|</span> <span class="ident">sapling::read_zkproof</span>(<span class="ident">r</span>))<span class="question-mark">?</span>;
+        <span class="kw">let</span> <span class="ident">v_spend_auth_sigs</span> <span class="op">=</span> <span class="ident">Array::read</span>(<span class="kw-2">&amp;mut</span> <span class="ident">reader</span>, <span class="ident">n_spends</span>, <span class="op">|</span><span class="ident">r</span><span class="op">|</span> {
             <span class="ident">SpendDescription::read_spend_auth_sig</span>(<span class="ident">r</span>)
         })<span class="question-mark">?</span>;
-        <span class="kw">let</span> <span class="ident">v_output_proofs</span> <span class="op">=</span> <span class="ident">Array::read</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">reader</span>, <span class="ident">n_outputs</span>, <span class="op">|</span><span class="ident">r</span><span class="op">|</span> <span class="ident">sapling::read_zkproof</span>(<span class="ident">r</span>))<span class="question-mark">?</span>;
+        <span class="kw">let</span> <span class="ident">v_output_proofs</span> <span class="op">=</span> <span class="ident">Array::read</span>(<span class="kw-2">&amp;mut</span> <span class="ident">reader</span>, <span class="ident">n_outputs</span>, <span class="op">|</span><span class="ident">r</span><span class="op">|</span> <span class="ident">sapling::read_zkproof</span>(<span class="ident">r</span>))<span class="question-mark">?</span>;
 
         <span class="kw">let</span> <span class="ident">binding_sig</span> <span class="op">=</span> <span class="kw">if</span> <span class="ident">n_spends</span> <span class="op">&gt;</span> <span class="number">0</span> <span class="op">|</span><span class="op">|</span> <span class="ident">n_outputs</span> <span class="op">&gt;</span> <span class="number">0</span> {
-            <span class="prelude-val">Some</span>(<span class="ident">redjubjub::Signature::read</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">reader</span>)<span class="question-mark">?</span>)
+            <span class="prelude-val">Some</span>(<span class="ident">redjubjub::Signature::read</span>(<span class="kw-2">&amp;mut</span> <span class="ident">reader</span>)<span class="question-mark">?</span>)
         } <span class="kw">else</span> {
             <span class="prelude-val">None</span>
         };
@@ -1826,9 +1826,9 @@
     }
 
     <span class="attribute">#[<span class="ident">cfg</span>(<span class="ident">feature</span> <span class="op">=</span> <span class="string">&quot;zfuture&quot;</span>)]</span>
-    <span class="kw">fn</span> <span class="ident">read_tze</span><span class="op">&lt;</span><span class="ident">R</span>: <span class="ident">Read</span><span class="op">&gt;</span>(<span class="kw-2">mut</span> <span class="ident">reader</span>: <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">R</span>) -&gt; <span class="ident">io::Result</span><span class="op">&lt;</span><span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">tze::Bundle</span><span class="op">&lt;</span><span class="ident">tze::Authorized</span><span class="op">&gt;</span><span class="op">&gt;</span><span class="op">&gt;</span> {
-        <span class="kw">let</span> <span class="ident">vin</span> <span class="op">=</span> <span class="ident">Vector::read</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">reader</span>, <span class="ident">TzeIn::read</span>)<span class="question-mark">?</span>;
-        <span class="kw">let</span> <span class="ident">vout</span> <span class="op">=</span> <span class="ident">Vector::read</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">reader</span>, <span class="ident">TzeOut::read</span>)<span class="question-mark">?</span>;
+    <span class="kw">fn</span> <span class="ident">read_tze</span><span class="op">&lt;</span><span class="ident">R</span>: <span class="ident">Read</span><span class="op">&gt;</span>(<span class="kw-2">mut</span> <span class="ident">reader</span>: <span class="kw-2">&amp;mut</span> <span class="ident">R</span>) -&gt; <span class="ident">io::Result</span><span class="op">&lt;</span><span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">tze::Bundle</span><span class="op">&lt;</span><span class="ident">tze::Authorized</span><span class="op">&gt;</span><span class="op">&gt;</span><span class="op">&gt;</span> {
+        <span class="kw">let</span> <span class="ident">vin</span> <span class="op">=</span> <span class="ident">Vector::read</span>(<span class="kw-2">&amp;mut</span> <span class="ident">reader</span>, <span class="ident">TzeIn::read</span>)<span class="question-mark">?</span>;
+        <span class="kw">let</span> <span class="ident">vout</span> <span class="op">=</span> <span class="ident">Vector::read</span>(<span class="kw-2">&amp;mut</span> <span class="ident">reader</span>, <span class="ident">TzeOut::read</span>)<span class="question-mark">?</span>;
         <span class="prelude-val">Ok</span>(<span class="kw">if</span> <span class="ident">vin</span>.<span class="ident">is_empty</span>() <span class="op">&amp;&amp;</span> <span class="ident">vout</span>.<span class="ident">is_empty</span>() {
             <span class="prelude-val">None</span>
         } <span class="kw">else</span> {
@@ -1852,9 +1852,9 @@
     }
 
     <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">write_v4</span><span class="op">&lt;</span><span class="ident">W</span>: <span class="ident">Write</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="kw-2">mut</span> <span class="ident">writer</span>: <span class="ident">W</span>) -&gt; <span class="ident">io::Result</span><span class="op">&lt;</span>()<span class="op">&gt;</span> {
-        <span class="self">self</span>.<span class="ident">version</span>.<span class="ident">write</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">writer</span>)<span class="question-mark">?</span>;
+        <span class="self">self</span>.<span class="ident">version</span>.<span class="ident">write</span>(<span class="kw-2">&amp;mut</span> <span class="ident">writer</span>)<span class="question-mark">?</span>;
 
-        <span class="self">self</span>.<span class="ident">write_transparent</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">writer</span>)<span class="question-mark">?</span>;
+        <span class="self">self</span>.<span class="ident">write_transparent</span>(<span class="kw-2">&amp;mut</span> <span class="ident">writer</span>)<span class="question-mark">?</span>;
         <span class="ident">writer</span>.<span class="ident">write_u32</span>::<span class="op">&lt;</span><span class="ident">LittleEndian</span><span class="op">&gt;</span>(<span class="self">self</span>.<span class="ident">lock_time</span>)<span class="question-mark">?</span>;
         <span class="kw">if</span> <span class="self">self</span>.<span class="ident">version</span>.<span class="ident">has_overwinter</span>() {
             <span class="ident">writer</span>.<span class="ident">write_u32</span>::<span class="op">&lt;</span><span class="ident">LittleEndian</span><span class="op">&gt;</span>(<span class="ident">u32::from</span>(<span class="self">self</span>.<span class="ident">expiry_height</span>))<span class="question-mark">?</span>;
@@ -1869,14 +1869,14 @@
                     .<span class="ident">to_i64_le_bytes</span>(),
             )<span class="question-mark">?</span>;
             <span class="ident">Vector::write</span>(
-                <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">writer</span>,
+                <span class="kw-2">&amp;mut</span> <span class="ident">writer</span>,
                 <span class="self">self</span>.<span class="ident">sapling_bundle</span>
                     .<span class="ident">as_ref</span>()
                     .<span class="ident">map_or</span>(<span class="kw-2">&amp;</span>[], <span class="op">|</span><span class="ident">b</span><span class="op">|</span> <span class="kw-2">&amp;</span><span class="ident">b</span>.<span class="ident">shielded_spends</span>),
                 <span class="op">|</span><span class="ident">w</span>, <span class="ident">e</span><span class="op">|</span> <span class="ident">e</span>.<span class="ident">write_v4</span>(<span class="ident">w</span>),
             )<span class="question-mark">?</span>;
             <span class="ident">Vector::write</span>(
-                <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">writer</span>,
+                <span class="kw-2">&amp;mut</span> <span class="ident">writer</span>,
                 <span class="self">self</span>.<span class="ident">sapling_bundle</span>
                     .<span class="ident">as_ref</span>()
                     .<span class="ident">map_or</span>(<span class="kw-2">&amp;</span>[], <span class="op">|</span><span class="ident">b</span><span class="op">|</span> <span class="kw-2">&amp;</span><span class="ident">b</span>.<span class="ident">shielded_outputs</span>),
@@ -1891,17 +1891,17 @@
 
         <span class="kw">if</span> <span class="self">self</span>.<span class="ident">version</span>.<span class="ident">has_sprout</span>() {
             <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">bundle</span>) <span class="op">=</span> <span class="self">self</span>.<span class="ident">sprout_bundle</span>.<span class="ident">as_ref</span>() {
-                <span class="ident">Vector::write</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">writer</span>, <span class="kw-2">&amp;</span><span class="ident">bundle</span>.<span class="ident">joinsplits</span>, <span class="op">|</span><span class="ident">w</span>, <span class="ident">e</span><span class="op">|</span> <span class="ident">e</span>.<span class="ident">write</span>(<span class="ident">w</span>))<span class="question-mark">?</span>;
+                <span class="ident">Vector::write</span>(<span class="kw-2">&amp;mut</span> <span class="ident">writer</span>, <span class="kw-2">&amp;</span><span class="ident">bundle</span>.<span class="ident">joinsplits</span>, <span class="op">|</span><span class="ident">w</span>, <span class="ident">e</span><span class="op">|</span> <span class="ident">e</span>.<span class="ident">write</span>(<span class="ident">w</span>))<span class="question-mark">?</span>;
                 <span class="ident">writer</span>.<span class="ident">write_all</span>(<span class="kw-2">&amp;</span><span class="ident">bundle</span>.<span class="ident">joinsplit_pubkey</span>)<span class="question-mark">?</span>;
                 <span class="ident">writer</span>.<span class="ident">write_all</span>(<span class="kw-2">&amp;</span><span class="ident">bundle</span>.<span class="ident">joinsplit_sig</span>)<span class="question-mark">?</span>;
             } <span class="kw">else</span> {
-                <span class="ident">CompactSize::write</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">writer</span>, <span class="number">0</span>)<span class="question-mark">?</span>;
+                <span class="ident">CompactSize::write</span>(<span class="kw-2">&amp;mut</span> <span class="ident">writer</span>, <span class="number">0</span>)<span class="question-mark">?</span>;
             }
         }
 
         <span class="kw">if</span> <span class="self">self</span>.<span class="ident">version</span>.<span class="ident">has_sapling</span>() {
             <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">bundle</span>) <span class="op">=</span> <span class="self">self</span>.<span class="ident">sapling_bundle</span>.<span class="ident">as_ref</span>() {
-                <span class="ident">bundle</span>.<span class="ident">authorization</span>.<span class="ident">binding_sig</span>.<span class="ident">write</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">writer</span>)<span class="question-mark">?</span>;
+                <span class="ident">bundle</span>.<span class="ident">authorization</span>.<span class="ident">binding_sig</span>.<span class="ident">write</span>(<span class="kw-2">&amp;mut</span> <span class="ident">writer</span>)<span class="question-mark">?</span>;
             }
         }
 
@@ -1917,11 +1917,11 @@
 
     <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">write_transparent</span><span class="op">&lt;</span><span class="ident">W</span>: <span class="ident">Write</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="kw-2">mut</span> <span class="ident">writer</span>: <span class="ident">W</span>) -&gt; <span class="ident">io::Result</span><span class="op">&lt;</span>()<span class="op">&gt;</span> {
         <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">bundle</span>) <span class="op">=</span> <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">transparent_bundle</span> {
-            <span class="ident">Vector::write</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">writer</span>, <span class="kw-2">&amp;</span><span class="ident">bundle</span>.<span class="ident">vin</span>, <span class="op">|</span><span class="ident">w</span>, <span class="ident">e</span><span class="op">|</span> <span class="ident">e</span>.<span class="ident">write</span>(<span class="ident">w</span>))<span class="question-mark">?</span>;
-            <span class="ident">Vector::write</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">writer</span>, <span class="kw-2">&amp;</span><span class="ident">bundle</span>.<span class="ident">vout</span>, <span class="op">|</span><span class="ident">w</span>, <span class="ident">e</span><span class="op">|</span> <span class="ident">e</span>.<span class="ident">write</span>(<span class="ident">w</span>))<span class="question-mark">?</span>;
+            <span class="ident">Vector::write</span>(<span class="kw-2">&amp;mut</span> <span class="ident">writer</span>, <span class="kw-2">&amp;</span><span class="ident">bundle</span>.<span class="ident">vin</span>, <span class="op">|</span><span class="ident">w</span>, <span class="ident">e</span><span class="op">|</span> <span class="ident">e</span>.<span class="ident">write</span>(<span class="ident">w</span>))<span class="question-mark">?</span>;
+            <span class="ident">Vector::write</span>(<span class="kw-2">&amp;mut</span> <span class="ident">writer</span>, <span class="kw-2">&amp;</span><span class="ident">bundle</span>.<span class="ident">vout</span>, <span class="op">|</span><span class="ident">w</span>, <span class="ident">e</span><span class="op">|</span> <span class="ident">e</span>.<span class="ident">write</span>(<span class="ident">w</span>))<span class="question-mark">?</span>;
         } <span class="kw">else</span> {
-            <span class="ident">CompactSize::write</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">writer</span>, <span class="number">0</span>)<span class="question-mark">?</span>;
-            <span class="ident">CompactSize::write</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">writer</span>, <span class="number">0</span>)<span class="question-mark">?</span>;
+            <span class="ident">CompactSize::write</span>(<span class="kw-2">&amp;mut</span> <span class="ident">writer</span>, <span class="number">0</span>)<span class="question-mark">?</span>;
+            <span class="ident">CompactSize::write</span>(<span class="kw-2">&amp;mut</span> <span class="ident">writer</span>, <span class="number">0</span>)<span class="question-mark">?</span>;
         }
 
         <span class="prelude-val">Ok</span>(())
@@ -1934,17 +1934,17 @@
                 <span class="string">&quot;Sprout components cannot be present when serializing to the V5 transaction format.&quot;</span>,
             ));
         }
-        <span class="self">self</span>.<span class="ident">write_v5_header</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">writer</span>)<span class="question-mark">?</span>;
-        <span class="self">self</span>.<span class="ident">write_transparent</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">writer</span>)<span class="question-mark">?</span>;
-        <span class="self">self</span>.<span class="ident">write_v5_sapling</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">writer</span>)<span class="question-mark">?</span>;
-        <span class="ident">orchard_serialization::write_v5_bundle</span>(<span class="self">self</span>.<span class="ident">orchard_bundle</span>.<span class="ident">as_ref</span>(), <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">writer</span>)<span class="question-mark">?</span>;
+        <span class="self">self</span>.<span class="ident">write_v5_header</span>(<span class="kw-2">&amp;mut</span> <span class="ident">writer</span>)<span class="question-mark">?</span>;
+        <span class="self">self</span>.<span class="ident">write_transparent</span>(<span class="kw-2">&amp;mut</span> <span class="ident">writer</span>)<span class="question-mark">?</span>;
+        <span class="self">self</span>.<span class="ident">write_v5_sapling</span>(<span class="kw-2">&amp;mut</span> <span class="ident">writer</span>)<span class="question-mark">?</span>;
+        <span class="ident">orchard_serialization::write_v5_bundle</span>(<span class="self">self</span>.<span class="ident">orchard_bundle</span>.<span class="ident">as_ref</span>(), <span class="kw-2">&amp;mut</span> <span class="ident">writer</span>)<span class="question-mark">?</span>;
         <span class="attribute">#[<span class="ident">cfg</span>(<span class="ident">feature</span> <span class="op">=</span> <span class="string">&quot;zfuture&quot;</span>)]</span>
-        <span class="self">self</span>.<span class="ident">write_tze</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">writer</span>)<span class="question-mark">?</span>;
+        <span class="self">self</span>.<span class="ident">write_tze</span>(<span class="kw-2">&amp;mut</span> <span class="ident">writer</span>)<span class="question-mark">?</span>;
         <span class="prelude-val">Ok</span>(())
     }
 
     <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">write_v5_header</span><span class="op">&lt;</span><span class="ident">W</span>: <span class="ident">Write</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="kw-2">mut</span> <span class="ident">writer</span>: <span class="ident">W</span>) -&gt; <span class="ident">io::Result</span><span class="op">&lt;</span>()<span class="op">&gt;</span> {
-        <span class="self">self</span>.<span class="ident">version</span>.<span class="ident">write</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">writer</span>)<span class="question-mark">?</span>;
+        <span class="self">self</span>.<span class="ident">version</span>.<span class="ident">write</span>(<span class="kw-2">&amp;mut</span> <span class="ident">writer</span>)<span class="question-mark">?</span>;
         <span class="ident">writer</span>.<span class="ident">write_u32</span>::<span class="op">&lt;</span><span class="ident">LittleEndian</span><span class="op">&gt;</span>(<span class="ident">u32::from</span>(<span class="self">self</span>.<span class="ident">consensus_branch_id</span>))<span class="question-mark">?</span>;
         <span class="ident">writer</span>.<span class="ident">write_u32</span>::<span class="op">&lt;</span><span class="ident">LittleEndian</span><span class="op">&gt;</span>(<span class="self">self</span>.<span class="ident">lock_time</span>)<span class="question-mark">?</span>;
         <span class="ident">writer</span>.<span class="ident">write_u32</span>::<span class="op">&lt;</span><span class="ident">LittleEndian</span><span class="op">&gt;</span>(<span class="ident">u32::from</span>(<span class="self">self</span>.<span class="ident">expiry_height</span>))<span class="question-mark">?</span>;
@@ -1953,11 +1953,11 @@
 
     <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">write_v5_sapling</span><span class="op">&lt;</span><span class="ident">W</span>: <span class="ident">Write</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="kw-2">mut</span> <span class="ident">writer</span>: <span class="ident">W</span>) -&gt; <span class="ident">io::Result</span><span class="op">&lt;</span>()<span class="op">&gt;</span> {
         <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">bundle</span>) <span class="op">=</span> <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">sapling_bundle</span> {
-            <span class="ident">Vector::write</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">writer</span>, <span class="kw-2">&amp;</span><span class="ident">bundle</span>.<span class="ident">shielded_spends</span>, <span class="op">|</span><span class="ident">w</span>, <span class="ident">e</span><span class="op">|</span> {
+            <span class="ident">Vector::write</span>(<span class="kw-2">&amp;mut</span> <span class="ident">writer</span>, <span class="kw-2">&amp;</span><span class="ident">bundle</span>.<span class="ident">shielded_spends</span>, <span class="op">|</span><span class="ident">w</span>, <span class="ident">e</span><span class="op">|</span> {
                 <span class="ident">e</span>.<span class="ident">write_v5_without_witness_data</span>(<span class="ident">w</span>)
             })<span class="question-mark">?</span>;
 
-            <span class="ident">Vector::write</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">writer</span>, <span class="kw-2">&amp;</span><span class="ident">bundle</span>.<span class="ident">shielded_outputs</span>, <span class="op">|</span><span class="ident">w</span>, <span class="ident">e</span><span class="op">|</span> {
+            <span class="ident">Vector::write</span>(<span class="kw-2">&amp;mut</span> <span class="ident">writer</span>, <span class="kw-2">&amp;</span><span class="ident">bundle</span>.<span class="ident">shielded_outputs</span>, <span class="op">|</span><span class="ident">w</span>, <span class="ident">e</span><span class="op">|</span> {
                 <span class="ident">e</span>.<span class="ident">write_v5_without_proof</span>(<span class="ident">w</span>)
             })<span class="question-mark">?</span>;
 
@@ -1969,28 +1969,28 @@
             }
 
             <span class="ident">Array::write</span>(
-                <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">writer</span>,
+                <span class="kw-2">&amp;mut</span> <span class="ident">writer</span>,
                 <span class="ident">bundle</span>.<span class="ident">shielded_spends</span>.<span class="ident">iter</span>().<span class="ident">map</span>(<span class="op">|</span><span class="ident">s</span><span class="op">|</span> <span class="ident">s</span>.<span class="ident">zkproof</span>),
                 <span class="op">|</span><span class="ident">w</span>, <span class="ident">e</span><span class="op">|</span> <span class="ident">w</span>.<span class="ident">write_all</span>(<span class="ident">e</span>),
             )<span class="question-mark">?</span>;
             <span class="ident">Array::write</span>(
-                <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">writer</span>,
+                <span class="kw-2">&amp;mut</span> <span class="ident">writer</span>,
                 <span class="ident">bundle</span>.<span class="ident">shielded_spends</span>.<span class="ident">iter</span>().<span class="ident">map</span>(<span class="op">|</span><span class="ident">s</span><span class="op">|</span> <span class="ident">s</span>.<span class="ident">spend_auth_sig</span>),
                 <span class="op">|</span><span class="ident">w</span>, <span class="ident">e</span><span class="op">|</span> <span class="ident">e</span>.<span class="ident">write</span>(<span class="ident">w</span>),
             )<span class="question-mark">?</span>;
 
             <span class="ident">Array::write</span>(
-                <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">writer</span>,
+                <span class="kw-2">&amp;mut</span> <span class="ident">writer</span>,
                 <span class="ident">bundle</span>.<span class="ident">shielded_outputs</span>.<span class="ident">iter</span>().<span class="ident">map</span>(<span class="op">|</span><span class="ident">s</span><span class="op">|</span> <span class="ident">s</span>.<span class="ident">zkproof</span>),
                 <span class="op">|</span><span class="ident">w</span>, <span class="ident">e</span><span class="op">|</span> <span class="ident">w</span>.<span class="ident">write_all</span>(<span class="ident">e</span>),
             )<span class="question-mark">?</span>;
 
             <span class="kw">if</span> <span class="op">!</span>(<span class="ident">bundle</span>.<span class="ident">shielded_spends</span>.<span class="ident">is_empty</span>() <span class="op">&amp;&amp;</span> <span class="ident">bundle</span>.<span class="ident">shielded_outputs</span>.<span class="ident">is_empty</span>()) {
-                <span class="ident">bundle</span>.<span class="ident">authorization</span>.<span class="ident">binding_sig</span>.<span class="ident">write</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">writer</span>)<span class="question-mark">?</span>;
+                <span class="ident">bundle</span>.<span class="ident">authorization</span>.<span class="ident">binding_sig</span>.<span class="ident">write</span>(<span class="kw-2">&amp;mut</span> <span class="ident">writer</span>)<span class="question-mark">?</span>;
             }
         } <span class="kw">else</span> {
-            <span class="ident">CompactSize::write</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">writer</span>, <span class="number">0</span>)<span class="question-mark">?</span>;
-            <span class="ident">CompactSize::write</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">writer</span>, <span class="number">0</span>)<span class="question-mark">?</span>;
+            <span class="ident">CompactSize::write</span>(<span class="kw-2">&amp;mut</span> <span class="ident">writer</span>, <span class="number">0</span>)<span class="question-mark">?</span>;
+            <span class="ident">CompactSize::write</span>(<span class="kw-2">&amp;mut</span> <span class="ident">writer</span>, <span class="number">0</span>)<span class="question-mark">?</span>;
         }
 
         <span class="prelude-val">Ok</span>(())
@@ -1999,11 +1999,11 @@
     <span class="attribute">#[<span class="ident">cfg</span>(<span class="ident">feature</span> <span class="op">=</span> <span class="string">&quot;zfuture&quot;</span>)]</span>
     <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">write_tze</span><span class="op">&lt;</span><span class="ident">W</span>: <span class="ident">Write</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="kw-2">mut</span> <span class="ident">writer</span>: <span class="ident">W</span>) -&gt; <span class="ident">io::Result</span><span class="op">&lt;</span>()<span class="op">&gt;</span> {
         <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">bundle</span>) <span class="op">=</span> <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">tze_bundle</span> {
-            <span class="ident">Vector::write</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">writer</span>, <span class="kw-2">&amp;</span><span class="ident">bundle</span>.<span class="ident">vin</span>, <span class="op">|</span><span class="ident">w</span>, <span class="ident">e</span><span class="op">|</span> <span class="ident">e</span>.<span class="ident">write</span>(<span class="ident">w</span>))<span class="question-mark">?</span>;
-            <span class="ident">Vector::write</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">writer</span>, <span class="kw-2">&amp;</span><span class="ident">bundle</span>.<span class="ident">vout</span>, <span class="op">|</span><span class="ident">w</span>, <span class="ident">e</span><span class="op">|</span> <span class="ident">e</span>.<span class="ident">write</span>(<span class="ident">w</span>))<span class="question-mark">?</span>;
+            <span class="ident">Vector::write</span>(<span class="kw-2">&amp;mut</span> <span class="ident">writer</span>, <span class="kw-2">&amp;</span><span class="ident">bundle</span>.<span class="ident">vin</span>, <span class="op">|</span><span class="ident">w</span>, <span class="ident">e</span><span class="op">|</span> <span class="ident">e</span>.<span class="ident">write</span>(<span class="ident">w</span>))<span class="question-mark">?</span>;
+            <span class="ident">Vector::write</span>(<span class="kw-2">&amp;mut</span> <span class="ident">writer</span>, <span class="kw-2">&amp;</span><span class="ident">bundle</span>.<span class="ident">vout</span>, <span class="op">|</span><span class="ident">w</span>, <span class="ident">e</span><span class="op">|</span> <span class="ident">e</span>.<span class="ident">write</span>(<span class="ident">w</span>))<span class="question-mark">?</span>;
         } <span class="kw">else</span> {
-            <span class="ident">CompactSize::write</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">writer</span>, <span class="number">0</span>)<span class="question-mark">?</span>;
-            <span class="ident">CompactSize::write</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">writer</span>, <span class="number">0</span>)<span class="question-mark">?</span>;
+            <span class="ident">CompactSize::write</span>(<span class="kw-2">&amp;mut</span> <span class="ident">writer</span>, <span class="number">0</span>)<span class="question-mark">?</span>;
+            <span class="ident">CompactSize::write</span>(<span class="kw-2">&amp;mut</span> <span class="ident">writer</span>, <span class="number">0</span>)<span class="question-mark">?</span>;
         }
 
         <span class="prelude-val">Ok</span>(())

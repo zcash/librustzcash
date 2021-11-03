@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_primitives&#x2F;src&#x2F;sapling&#x2F;note_encryption.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>note_encryption.rs - source</title><link rel="stylesheet" type="text/css" href="../../../normalize.css"><link rel="stylesheet" type="text/css" href="../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" type="text/css" href="../../../light.css"  id="themeStyle"><link rel="stylesheet" type="text/css" href="../../../dark.css" disabled ><link rel="stylesheet" type="text/css" href="../../../ayu.css" disabled ><script id="default-settings" ></script><script src="../../../storage.js"></script><script src="../../../crates.js"></script><noscript><link rel="stylesheet" href="../../../noscript.css"></noscript><link rel="alternate icon" type="image/png" href="../../../favicon-16x16.png"><link rel="alternate icon" type="image/png" href="../../../favicon-32x32.png"><link rel="icon" type="image/svg+xml" href="../../../favicon.svg"><style type="text/css">#crate-search{background-image:url("../../../down-arrow.svg");}</style></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="sidebar-menu" role="button">&#9776;</div><a href='../../../zcash_primitives/index.html'><div class='logo-container rust-logo'><img src='../../../rust-logo.png' alt='logo'></div></a></nav><div class="theme-picker"><button id="theme-picker" aria-label="Pick another theme!" aria-haspopup="menu" title="themes"><img width="18" height="18" alt="Pick another theme!" src="../../../brush.svg"></button><div id="theme-choices" role="menu"></div></div><nav class="sub"><form class="search-form"><div class="search-container"><div><select id="crate-search"><option value="All crates">All crates</option></select><input class="search-input" name="search" disabled autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"></div><button type="button" id="help-button" title="help">?</button><a id="settings-menu" href="../../../settings.html" title="settings"><img width="18" height="18" alt="Change settings" src="../../../wheel.svg"></a></div></form></nav><section id="main" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">   1</span>
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_primitives&#x2F;src&#x2F;sapling&#x2F;note_encryption.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>note_encryption.rs - source</title><link rel="stylesheet" type="text/css" href="../../../normalize.css"><link rel="stylesheet" type="text/css" href="../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" type="text/css" href="../../../light.css"  id="themeStyle"><link rel="stylesheet" type="text/css" href="../../../dark.css" disabled ><link rel="stylesheet" type="text/css" href="../../../ayu.css" disabled ><script id="default-settings" ></script><script src="../../../storage.js"></script><script src="../../../crates.js"></script><noscript><link rel="stylesheet" href="../../../noscript.css"></noscript><link rel="alternate icon" type="image/png" href="../../../favicon-16x16.png"><link rel="alternate icon" type="image/png" href="../../../favicon-32x32.png"><link rel="icon" type="image/svg+xml" href="../../../favicon.svg"><style type="text/css">#crate-search{background-image:url("../../../down-arrow.svg");}</style></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="sidebar-menu" role="button">&#9776;</div><a href='../../../zcash_primitives/index.html'><div class='logo-container rust-logo'><img src='../../../rust-logo.png' alt='logo'></div></a></nav><div class="theme-picker"><button id="theme-picker" aria-label="Pick another theme!" aria-haspopup="menu" title="themes"><img width="18" height="18" alt="Pick another theme!" src="../../../brush.svg"></button><div id="theme-choices" role="menu"></div></div><nav class="sub"><form class="search-form"><div class="search-container"><div><select id="crate-search"><option value="All crates">All crates</option></select><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"></div><button type="button" id="help-button" title="help">?</button><a id="settings-menu" href="../../../settings.html" title="settings"><img width="18" height="18" alt="Change settings" src="../../../wheel.svg"></a></div></form></nav><section id="main" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">   1</span>
 <span id="2">   2</span>
 <span id="3">   3</span>
 <span id="4">   4</span>
@@ -1683,7 +1683,7 @@
             .<span class="ident">filter_map</span>(<span class="op">|</span><span class="ident">s</span><span class="op">|</span> <span class="ident">s</span>.<span class="ident">map</span>(<span class="ident">ExtendedPoint::from</span>))
             .<span class="ident">collect</span>();
         <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">secrets_affine</span> <span class="op">=</span> <span class="macro">vec!</span>[<span class="ident">AffinePoint::identity</span>(); <span class="ident">shared_secrets</span>.<span class="ident">len</span>()];
-        <span class="ident">group::Curve::batch_normalize</span>(<span class="kw-2">&amp;</span><span class="ident">secrets</span>, <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">secrets_affine</span>);
+        <span class="ident">group::Curve::batch_normalize</span>(<span class="kw-2">&amp;</span><span class="ident">secrets</span>, <span class="kw-2">&amp;mut</span> <span class="ident">secrets_affine</span>);
 
         <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">secrets_affine</span> <span class="op">=</span> <span class="ident">secrets_affine</span>.<span class="ident">into_iter</span>();
         <span class="ident">shared_secrets</span>
@@ -1717,7 +1717,7 @@
             <span class="ident">Rseed::AfterZip212</span>(<span class="kw">_</span>) =&gt; <span class="number">2</span>,
         };
         <span class="ident">input</span>[<span class="number">1</span>..<span class="number">12</span>].<span class="ident">copy_from_slice</span>(<span class="kw-2">&amp;</span><span class="ident">to</span>.<span class="ident">diversifier</span>().<span class="number">0</span>);
-        (<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">input</span>[<span class="number">12</span>..<span class="number">20</span>])
+        (<span class="kw-2">&amp;mut</span> <span class="ident">input</span>[<span class="number">12</span>..<span class="number">20</span>])
             .<span class="ident">write_u64</span>::<span class="op">&lt;</span><span class="ident">LittleEndian</span><span class="op">&gt;</span>(<span class="ident">note</span>.<span class="ident">value</span>)
             .<span class="ident">unwrap</span>();
 
@@ -1856,7 +1856,7 @@
     <span class="ident">note</span>: <span class="ident">Note</span>,
     <span class="ident">to</span>: <span class="ident">PaymentAddress</span>,
     <span class="ident">memo</span>: <span class="ident">MemoBytes</span>,
-    <span class="ident">rng</span>: <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">R</span>,
+    <span class="ident">rng</span>: <span class="kw-2">&amp;mut</span> <span class="ident">R</span>,
 ) -&gt; <span class="ident">NoteEncryption</span><span class="op">&lt;</span><span class="ident">SaplingDomain</span><span class="op">&lt;</span><span class="ident">P</span><span class="op">&gt;</span><span class="op">&gt;</span> {
     <span class="kw">let</span> <span class="ident">esk</span> <span class="op">=</span> <span class="ident">note</span>.<span class="ident">generate_or_derive_esk_internal</span>(<span class="ident">rng</span>);
     <span class="ident">NoteEncryption::new_with_esk</span>(<span class="ident">esk</span>, <span class="ident">ovk</span>, <span class="ident">note</span>, <span class="ident">to</span>, <span class="ident">memo</span>)
@@ -2010,14 +2010,14 @@
 
     <span class="kw">fn</span> <span class="ident">random_enc_ciphertext</span><span class="op">&lt;</span><span class="ident">R</span>: <span class="ident">RngCore</span> <span class="op">+</span> <span class="ident">CryptoRng</span><span class="op">&gt;</span>(
         <span class="ident">height</span>: <span class="ident">BlockHeight</span>,
-        <span class="kw-2">mut</span> <span class="ident">rng</span>: <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">R</span>,
+        <span class="kw-2">mut</span> <span class="ident">rng</span>: <span class="kw-2">&amp;mut</span> <span class="ident">R</span>,
     ) -&gt; (
         <span class="ident">OutgoingViewingKey</span>,
         <span class="ident">OutgoingCipherKey</span>,
         <span class="ident">SaplingIvk</span>,
         <span class="ident">OutputDescription</span><span class="op">&lt;</span><span class="ident">sapling::GrothProofBytes</span><span class="op">&gt;</span>,
     ) {
-        <span class="kw">let</span> <span class="ident">ivk</span> <span class="op">=</span> <span class="ident">SaplingIvk</span>(<span class="ident">jubjub::Fr::random</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">rng</span>));
+        <span class="kw">let</span> <span class="ident">ivk</span> <span class="op">=</span> <span class="ident">SaplingIvk</span>(<span class="ident">jubjub::Fr::random</span>(<span class="kw-2">&amp;mut</span> <span class="ident">rng</span>));
 
         <span class="kw">let</span> (<span class="ident">ovk</span>, <span class="ident">ock</span>, <span class="ident">output</span>) <span class="op">=</span> <span class="ident">random_enc_ciphertext_with</span>(<span class="ident">height</span>, <span class="kw-2">&amp;</span><span class="ident">ivk</span>, <span class="ident">rng</span>);
 
@@ -2044,7 +2044,7 @@
     <span class="kw">fn</span> <span class="ident">random_enc_ciphertext_with</span><span class="op">&lt;</span><span class="ident">R</span>: <span class="ident">RngCore</span> <span class="op">+</span> <span class="ident">CryptoRng</span><span class="op">&gt;</span>(
         <span class="ident">height</span>: <span class="ident">BlockHeight</span>,
         <span class="ident">ivk</span>: <span class="kw-2">&amp;</span><span class="ident">SaplingIvk</span>,
-        <span class="kw-2">mut</span> <span class="ident">rng</span>: <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">R</span>,
+        <span class="kw-2">mut</span> <span class="ident">rng</span>: <span class="kw-2">&amp;mut</span> <span class="ident">R</span>,
     ) -&gt; (
         <span class="ident">OutgoingViewingKey</span>,
         <span class="ident">OutgoingCipherKey</span>,
@@ -2058,11 +2058,11 @@
         <span class="kw">let</span> <span class="ident">value</span> <span class="op">=</span> <span class="ident">Amount::from_u64</span>(<span class="number">100</span>).<span class="ident">unwrap</span>();
         <span class="kw">let</span> <span class="ident">value_commitment</span> <span class="op">=</span> <span class="ident">ValueCommitment</span> {
             <span class="ident">value</span>: <span class="ident">value</span>.<span class="ident">into</span>(),
-            <span class="ident">randomness</span>: <span class="ident">jubjub::Fr::random</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">rng</span>),
+            <span class="ident">randomness</span>: <span class="ident">jubjub::Fr::random</span>(<span class="kw-2">&amp;mut</span> <span class="ident">rng</span>),
         };
         <span class="kw">let</span> <span class="ident">cv</span> <span class="op">=</span> <span class="ident">value_commitment</span>.<span class="ident">commitment</span>().<span class="ident">into</span>();
 
-        <span class="kw">let</span> <span class="ident">rseed</span> <span class="op">=</span> <span class="ident">generate_random_rseed</span>(<span class="kw-2">&amp;</span><span class="ident">TEST_NETWORK</span>, <span class="ident">height</span>, <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">rng</span>);
+        <span class="kw">let</span> <span class="ident">rseed</span> <span class="op">=</span> <span class="ident">generate_random_rseed</span>(<span class="kw-2">&amp;</span><span class="ident">TEST_NETWORK</span>, <span class="ident">height</span>, <span class="kw-2">&amp;mut</span> <span class="ident">rng</span>);
 
         <span class="kw">let</span> <span class="ident">note</span> <span class="op">=</span> <span class="ident">pa</span>.<span class="ident">create_note</span>(<span class="ident">value</span>.<span class="ident">into</span>(), <span class="ident">rseed</span>).<span class="ident">unwrap</span>();
         <span class="kw">let</span> <span class="ident">cmu</span> <span class="op">=</span> <span class="ident">note</span>.<span class="ident">cmu</span>();
@@ -2073,7 +2073,7 @@
             <span class="ident">note</span>,
             <span class="ident">pa</span>,
             <span class="ident">MemoBytes::empty</span>(),
-            <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">rng</span>,
+            <span class="kw-2">&amp;mut</span> <span class="ident">rng</span>,
         );
         <span class="kw">let</span> <span class="ident">epk</span> <span class="op">=</span> <span class="kw-2">*</span><span class="ident">ne</span>.<span class="ident">epk</span>();
         <span class="kw">let</span> <span class="ident">ock</span> <span class="op">=</span> <span class="ident">prf_ock</span>(<span class="kw-2">&amp;</span><span class="ident">ovk</span>, <span class="kw-2">&amp;</span><span class="ident">cv</span>, <span class="kw-2">&amp;</span><span class="ident">cmu</span>.<span class="ident">to_repr</span>(), <span class="kw-2">&amp;</span><span class="ident">epk_bytes</span>(<span class="kw-2">&amp;</span><span class="ident">epk</span>));
@@ -2083,7 +2083,7 @@
             <span class="ident">cmu</span>,
             <span class="ident">ephemeral_key</span>: <span class="ident">epk</span>.<span class="ident">to_bytes</span>().<span class="ident">into</span>(),
             <span class="ident">enc_ciphertext</span>: <span class="ident">ne</span>.<span class="ident">encrypt_note_plaintext</span>(),
-            <span class="ident">out_ciphertext</span>: <span class="ident">ne</span>.<span class="ident">encrypt_outgoing_plaintext</span>(<span class="kw-2">&amp;</span><span class="ident">cv</span>, <span class="kw-2">&amp;</span><span class="ident">cmu</span>, <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">rng</span>),
+            <span class="ident">out_ciphertext</span>: <span class="ident">ne</span>.<span class="ident">encrypt_outgoing_plaintext</span>(<span class="kw-2">&amp;</span><span class="ident">cv</span>, <span class="kw-2">&amp;</span><span class="ident">cmu</span>, <span class="kw-2">&amp;mut</span> <span class="ident">rng</span>),
             <span class="ident">zkproof</span>: [<span class="number">0u8</span>; <span class="ident">GROTH_PROOF_SIZE</span>],
         };
 
@@ -2095,9 +2095,9 @@
         <span class="ident">cv</span>: <span class="kw-2">&amp;</span><span class="ident">jubjub::ExtendedPoint</span>,
         <span class="ident">cmu</span>: <span class="kw-2">&amp;</span><span class="ident">bls12_381::Scalar</span>,
         <span class="ident">ephemeral_key</span>: <span class="kw-2">&amp;</span><span class="ident">EphemeralKeyBytes</span>,
-        <span class="ident">enc_ciphertext</span>: <span class="kw-2">&amp;</span><span class="kw-2">mut</span> [<span class="ident">u8</span>; <span class="ident">ENC_CIPHERTEXT_SIZE</span>],
+        <span class="ident">enc_ciphertext</span>: <span class="kw-2">&amp;mut</span> [<span class="ident">u8</span>; <span class="ident">ENC_CIPHERTEXT_SIZE</span>],
         <span class="ident">out_ciphertext</span>: <span class="kw-2">&amp;</span>[<span class="ident">u8</span>; <span class="ident">OUT_CIPHERTEXT_SIZE</span>],
-        <span class="ident">modify_plaintext</span>: <span class="kw">impl</span> <span class="ident">Fn</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> [<span class="ident">u8</span>; <span class="ident">NOTE_PLAINTEXT_SIZE</span>]),
+        <span class="ident">modify_plaintext</span>: <span class="kw">impl</span> <span class="ident">Fn</span>(<span class="kw-2">&amp;mut</span> [<span class="ident">u8</span>; <span class="ident">NOTE_PLAINTEXT_SIZE</span>]),
     ) {
         <span class="kw">let</span> <span class="ident">ock</span> <span class="op">=</span> <span class="ident">prf_ock</span>(<span class="kw-2">&amp;</span><span class="ident">ovk</span>, <span class="kw-2">&amp;</span><span class="ident">cv</span>, <span class="kw-2">&amp;</span><span class="ident">cmu</span>.<span class="ident">to_repr</span>(), <span class="ident">ephemeral_key</span>);
 
@@ -2108,7 +2108,7 @@
             .<span class="ident">decrypt_in_place_detached</span>(
                 [<span class="number">0u8</span>; <span class="number">12</span>][..].<span class="ident">into</span>(),
                 <span class="kw-2">&amp;</span>[],
-                <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">op</span>,
+                <span class="kw-2">&amp;mut</span> <span class="ident">op</span>,
                 <span class="ident">out_ciphertext</span>[<span class="ident">OUT_PLAINTEXT_SIZE</span>..].<span class="ident">into</span>(),
             )
             .<span class="ident">unwrap</span>();
@@ -2127,15 +2127,15 @@
             .<span class="ident">decrypt_in_place_detached</span>(
                 [<span class="number">0u8</span>; <span class="number">12</span>][..].<span class="ident">into</span>(),
                 <span class="kw-2">&amp;</span>[],
-                <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">plaintext</span>,
+                <span class="kw-2">&amp;mut</span> <span class="ident">plaintext</span>,
                 <span class="ident">enc_ciphertext</span>[<span class="ident">NOTE_PLAINTEXT_SIZE</span>..].<span class="ident">into</span>(),
             )
             .<span class="ident">unwrap</span>();
 
-        <span class="ident">modify_plaintext</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">plaintext</span>);
+        <span class="ident">modify_plaintext</span>(<span class="kw-2">&amp;mut</span> <span class="ident">plaintext</span>);
 
         <span class="kw">let</span> <span class="ident">tag</span> <span class="op">=</span> <span class="ident">ChaCha20Poly1305::new</span>(<span class="ident">key</span>.<span class="ident">as_ref</span>().<span class="ident">into</span>())
-            .<span class="ident">encrypt_in_place_detached</span>([<span class="number">0u8</span>; <span class="number">12</span>][..].<span class="ident">into</span>(), <span class="kw-2">&amp;</span>[], <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">plaintext</span>)
+            .<span class="ident">encrypt_in_place_detached</span>([<span class="number">0u8</span>; <span class="number">12</span>][..].<span class="ident">into</span>(), <span class="kw-2">&amp;</span>[], <span class="kw-2">&amp;mut</span> <span class="ident">plaintext</span>)
             .<span class="ident">unwrap</span>();
 
         <span class="ident">enc_ciphertext</span>[..<span class="ident">NOTE_PLAINTEXT_SIZE</span>].<span class="ident">copy_from_slice</span>(<span class="kw-2">&amp;</span><span class="ident">plaintext</span>);
@@ -2185,13 +2185,13 @@
         ];
 
         <span class="kw">for</span> <span class="kw-2">&amp;</span><span class="ident">height</span> <span class="kw">in</span> <span class="ident">heights</span>.<span class="ident">iter</span>() {
-            <span class="kw">let</span> (<span class="kw">_</span>, <span class="kw">_</span>, <span class="kw">_</span>, <span class="ident">output</span>) <span class="op">=</span> <span class="ident">random_enc_ciphertext</span>(<span class="ident">height</span>, <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">rng</span>);
+            <span class="kw">let</span> (<span class="kw">_</span>, <span class="kw">_</span>, <span class="kw">_</span>, <span class="ident">output</span>) <span class="op">=</span> <span class="ident">random_enc_ciphertext</span>(<span class="ident">height</span>, <span class="kw-2">&amp;mut</span> <span class="ident">rng</span>);
 
             <span class="macro">assert_eq!</span>(
                 <span class="ident">try_sapling_note_decryption</span>(
                     <span class="kw-2">&amp;</span><span class="ident">TEST_NETWORK</span>,
                     <span class="ident">height</span>,
-                    <span class="kw-2">&amp;</span><span class="ident">SaplingIvk</span>(<span class="ident">jubjub::Fr::random</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">rng</span>)),
+                    <span class="kw-2">&amp;</span><span class="ident">SaplingIvk</span>(<span class="ident">jubjub::Fr::random</span>(<span class="kw-2">&amp;mut</span> <span class="ident">rng</span>)),
                     <span class="kw-2">&amp;</span><span class="ident">output</span>
                 ),
                 <span class="prelude-val">None</span>
@@ -2208,9 +2208,9 @@
         ];
 
         <span class="kw">for</span> <span class="kw-2">&amp;</span><span class="ident">height</span> <span class="kw">in</span> <span class="ident">heights</span>.<span class="ident">iter</span>() {
-            <span class="kw">let</span> (<span class="kw">_</span>, <span class="kw">_</span>, <span class="ident">ivk</span>, <span class="kw-2">mut</span> <span class="ident">output</span>) <span class="op">=</span> <span class="ident">random_enc_ciphertext</span>(<span class="ident">height</span>, <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">rng</span>);
+            <span class="kw">let</span> (<span class="kw">_</span>, <span class="kw">_</span>, <span class="ident">ivk</span>, <span class="kw-2">mut</span> <span class="ident">output</span>) <span class="op">=</span> <span class="ident">random_enc_ciphertext</span>(<span class="ident">height</span>, <span class="kw-2">&amp;mut</span> <span class="ident">rng</span>);
 
-            <span class="ident">output</span>.<span class="ident">ephemeral_key</span> <span class="op">=</span> <span class="ident">jubjub::ExtendedPoint::random</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">rng</span>).<span class="ident">to_bytes</span>().<span class="ident">into</span>();
+            <span class="ident">output</span>.<span class="ident">ephemeral_key</span> <span class="op">=</span> <span class="ident">jubjub::ExtendedPoint::random</span>(<span class="kw-2">&amp;mut</span> <span class="ident">rng</span>).<span class="ident">to_bytes</span>().<span class="ident">into</span>();
 
             <span class="macro">assert_eq!</span>(
                 <span class="ident">try_sapling_note_decryption</span>(<span class="kw-2">&amp;</span><span class="ident">TEST_NETWORK</span>, <span class="ident">height</span>, <span class="kw-2">&amp;</span><span class="ident">ivk</span>, <span class="kw-2">&amp;</span><span class="ident">output</span>,),
@@ -2228,8 +2228,8 @@
         ];
 
         <span class="kw">for</span> <span class="kw-2">&amp;</span><span class="ident">height</span> <span class="kw">in</span> <span class="ident">heights</span>.<span class="ident">iter</span>() {
-            <span class="kw">let</span> (<span class="kw">_</span>, <span class="kw">_</span>, <span class="ident">ivk</span>, <span class="kw-2">mut</span> <span class="ident">output</span>) <span class="op">=</span> <span class="ident">random_enc_ciphertext</span>(<span class="ident">height</span>, <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">rng</span>);
-            <span class="ident">output</span>.<span class="ident">cmu</span> <span class="op">=</span> <span class="ident">bls12_381::Scalar::random</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">rng</span>);
+            <span class="kw">let</span> (<span class="kw">_</span>, <span class="kw">_</span>, <span class="ident">ivk</span>, <span class="kw-2">mut</span> <span class="ident">output</span>) <span class="op">=</span> <span class="ident">random_enc_ciphertext</span>(<span class="ident">height</span>, <span class="kw-2">&amp;mut</span> <span class="ident">rng</span>);
+            <span class="ident">output</span>.<span class="ident">cmu</span> <span class="op">=</span> <span class="ident">bls12_381::Scalar::random</span>(<span class="kw-2">&amp;mut</span> <span class="ident">rng</span>);
 
             <span class="macro">assert_eq!</span>(
                 <span class="ident">try_sapling_note_decryption</span>(<span class="kw-2">&amp;</span><span class="ident">TEST_NETWORK</span>, <span class="ident">height</span>, <span class="kw-2">&amp;</span><span class="ident">ivk</span>, <span class="kw-2">&amp;</span><span class="ident">output</span>),
@@ -2247,7 +2247,7 @@
         ];
 
         <span class="kw">for</span> <span class="kw-2">&amp;</span><span class="ident">height</span> <span class="kw">in</span> <span class="ident">heights</span>.<span class="ident">iter</span>() {
-            <span class="kw">let</span> (<span class="kw">_</span>, <span class="kw">_</span>, <span class="ident">ivk</span>, <span class="kw-2">mut</span> <span class="ident">output</span>) <span class="op">=</span> <span class="ident">random_enc_ciphertext</span>(<span class="ident">height</span>, <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">rng</span>);
+            <span class="kw">let</span> (<span class="kw">_</span>, <span class="kw">_</span>, <span class="ident">ivk</span>, <span class="kw-2">mut</span> <span class="ident">output</span>) <span class="op">=</span> <span class="ident">random_enc_ciphertext</span>(<span class="ident">height</span>, <span class="kw-2">&amp;mut</span> <span class="ident">rng</span>);
             <span class="ident">output</span>.<span class="ident">enc_ciphertext</span>[<span class="ident">ENC_CIPHERTEXT_SIZE</span> <span class="op">-</span> <span class="number">1</span>] <span class="op">^</span><span class="op">=</span> <span class="number">0xff</span>;
 
             <span class="macro">assert_eq!</span>(
@@ -2269,14 +2269,14 @@
         <span class="kw">let</span> <span class="ident">leadbytes</span> <span class="op">=</span> [<span class="number">0x02</span>, <span class="number">0x03</span>, <span class="number">0x01</span>];
 
         <span class="kw">for</span> (<span class="kw-2">&amp;</span><span class="ident">height</span>, <span class="kw-2">&amp;</span><span class="ident">leadbyte</span>) <span class="kw">in</span> <span class="ident">heights</span>.<span class="ident">iter</span>().<span class="ident">zip</span>(<span class="ident">leadbytes</span>.<span class="ident">iter</span>()) {
-            <span class="kw">let</span> (<span class="ident">ovk</span>, <span class="kw">_</span>, <span class="ident">ivk</span>, <span class="kw-2">mut</span> <span class="ident">output</span>) <span class="op">=</span> <span class="ident">random_enc_ciphertext</span>(<span class="ident">height</span>, <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">rng</span>);
+            <span class="kw">let</span> (<span class="ident">ovk</span>, <span class="kw">_</span>, <span class="ident">ivk</span>, <span class="kw-2">mut</span> <span class="ident">output</span>) <span class="op">=</span> <span class="ident">random_enc_ciphertext</span>(<span class="ident">height</span>, <span class="kw-2">&amp;mut</span> <span class="ident">rng</span>);
 
             <span class="ident">reencrypt_enc_ciphertext</span>(
                 <span class="kw-2">&amp;</span><span class="ident">ovk</span>,
                 <span class="kw-2">&amp;</span><span class="ident">output</span>.<span class="ident">cv</span>,
                 <span class="kw-2">&amp;</span><span class="ident">output</span>.<span class="ident">cmu</span>,
                 <span class="kw-2">&amp;</span><span class="ident">output</span>.<span class="ident">ephemeral_key</span>,
-                <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">output</span>.<span class="ident">enc_ciphertext</span>,
+                <span class="kw-2">&amp;mut</span> <span class="ident">output</span>.<span class="ident">enc_ciphertext</span>,
                 <span class="kw-2">&amp;</span><span class="ident">output</span>.<span class="ident">out_ciphertext</span>,
                 <span class="op">|</span><span class="ident">pt</span><span class="op">|</span> <span class="ident">pt</span>[<span class="number">0</span>] <span class="op">=</span> <span class="ident">leadbyte</span>,
             );
@@ -2296,14 +2296,14 @@
         ];
 
         <span class="kw">for</span> <span class="kw-2">&amp;</span><span class="ident">height</span> <span class="kw">in</span> <span class="ident">heights</span>.<span class="ident">iter</span>() {
-            <span class="kw">let</span> (<span class="ident">ovk</span>, <span class="kw">_</span>, <span class="ident">ivk</span>, <span class="kw-2">mut</span> <span class="ident">output</span>) <span class="op">=</span> <span class="ident">random_enc_ciphertext</span>(<span class="ident">height</span>, <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">rng</span>);
+            <span class="kw">let</span> (<span class="ident">ovk</span>, <span class="kw">_</span>, <span class="ident">ivk</span>, <span class="kw-2">mut</span> <span class="ident">output</span>) <span class="op">=</span> <span class="ident">random_enc_ciphertext</span>(<span class="ident">height</span>, <span class="kw-2">&amp;mut</span> <span class="ident">rng</span>);
 
             <span class="ident">reencrypt_enc_ciphertext</span>(
                 <span class="kw-2">&amp;</span><span class="ident">ovk</span>,
                 <span class="kw-2">&amp;</span><span class="ident">output</span>.<span class="ident">cv</span>,
                 <span class="kw-2">&amp;</span><span class="ident">output</span>.<span class="ident">cmu</span>,
                 <span class="kw-2">&amp;</span><span class="ident">output</span>.<span class="ident">ephemeral_key</span>,
-                <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">output</span>.<span class="ident">enc_ciphertext</span>,
+                <span class="kw-2">&amp;mut</span> <span class="ident">output</span>.<span class="ident">enc_ciphertext</span>,
                 <span class="kw-2">&amp;</span><span class="ident">output</span>.<span class="ident">out_ciphertext</span>,
                 <span class="op">|</span><span class="ident">pt</span><span class="op">|</span> <span class="ident">pt</span>[<span class="number">1</span>..<span class="number">12</span>].<span class="ident">copy_from_slice</span>(<span class="kw-2">&amp;</span><span class="ident">find_invalid_diversifier</span>().<span class="number">0</span>),
             );
@@ -2323,14 +2323,14 @@
         ];
 
         <span class="kw">for</span> <span class="kw-2">&amp;</span><span class="ident">height</span> <span class="kw">in</span> <span class="ident">heights</span>.<span class="ident">iter</span>() {
-            <span class="kw">let</span> (<span class="ident">ovk</span>, <span class="kw">_</span>, <span class="ident">ivk</span>, <span class="kw-2">mut</span> <span class="ident">output</span>) <span class="op">=</span> <span class="ident">random_enc_ciphertext</span>(<span class="ident">height</span>, <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">rng</span>);
+            <span class="kw">let</span> (<span class="ident">ovk</span>, <span class="kw">_</span>, <span class="ident">ivk</span>, <span class="kw-2">mut</span> <span class="ident">output</span>) <span class="op">=</span> <span class="ident">random_enc_ciphertext</span>(<span class="ident">height</span>, <span class="kw-2">&amp;mut</span> <span class="ident">rng</span>);
 
             <span class="ident">reencrypt_enc_ciphertext</span>(
                 <span class="kw-2">&amp;</span><span class="ident">ovk</span>,
                 <span class="kw-2">&amp;</span><span class="ident">output</span>.<span class="ident">cv</span>,
                 <span class="kw-2">&amp;</span><span class="ident">output</span>.<span class="ident">cmu</span>,
                 <span class="kw-2">&amp;</span><span class="ident">output</span>.<span class="ident">ephemeral_key</span>,
-                <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">output</span>.<span class="ident">enc_ciphertext</span>,
+                <span class="kw-2">&amp;mut</span> <span class="ident">output</span>.<span class="ident">enc_ciphertext</span>,
                 <span class="kw-2">&amp;</span><span class="ident">output</span>.<span class="ident">out_ciphertext</span>,
                 <span class="op">|</span><span class="ident">pt</span><span class="op">|</span> <span class="ident">pt</span>[<span class="number">1</span>..<span class="number">12</span>].<span class="ident">copy_from_slice</span>(<span class="kw-2">&amp;</span><span class="ident">find_valid_diversifier</span>().<span class="number">0</span>),
             );
@@ -2351,13 +2351,13 @@
         ];
 
         <span class="kw">for</span> <span class="kw-2">&amp;</span><span class="ident">height</span> <span class="kw">in</span> <span class="ident">heights</span>.<span class="ident">iter</span>() {
-            <span class="kw">let</span> (<span class="kw">_</span>, <span class="kw">_</span>, <span class="kw">_</span>, <span class="ident">output</span>) <span class="op">=</span> <span class="ident">random_enc_ciphertext</span>(<span class="ident">height</span>, <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">rng</span>);
+            <span class="kw">let</span> (<span class="kw">_</span>, <span class="kw">_</span>, <span class="kw">_</span>, <span class="ident">output</span>) <span class="op">=</span> <span class="ident">random_enc_ciphertext</span>(<span class="ident">height</span>, <span class="kw-2">&amp;mut</span> <span class="ident">rng</span>);
 
             <span class="macro">assert_eq!</span>(
                 <span class="ident">try_sapling_compact_note_decryption</span>(
                     <span class="kw-2">&amp;</span><span class="ident">TEST_NETWORK</span>,
                     <span class="ident">height</span>,
-                    <span class="kw-2">&amp;</span><span class="ident">SaplingIvk</span>(<span class="ident">jubjub::Fr::random</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">rng</span>)),
+                    <span class="kw-2">&amp;</span><span class="ident">SaplingIvk</span>(<span class="ident">jubjub::Fr::random</span>(<span class="kw-2">&amp;mut</span> <span class="ident">rng</span>)),
                     <span class="kw-2">&amp;</span><span class="ident">CompactOutputDescription::from</span>(<span class="ident">output</span>)
                 ),
                 <span class="prelude-val">None</span>
@@ -2374,8 +2374,8 @@
         ];
 
         <span class="kw">for</span> <span class="kw-2">&amp;</span><span class="ident">height</span> <span class="kw">in</span> <span class="ident">heights</span>.<span class="ident">iter</span>() {
-            <span class="kw">let</span> (<span class="kw">_</span>, <span class="kw">_</span>, <span class="ident">ivk</span>, <span class="kw-2">mut</span> <span class="ident">output</span>) <span class="op">=</span> <span class="ident">random_enc_ciphertext</span>(<span class="ident">height</span>, <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">rng</span>);
-            <span class="ident">output</span>.<span class="ident">ephemeral_key</span> <span class="op">=</span> <span class="ident">jubjub::ExtendedPoint::random</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">rng</span>).<span class="ident">to_bytes</span>().<span class="ident">into</span>();
+            <span class="kw">let</span> (<span class="kw">_</span>, <span class="kw">_</span>, <span class="ident">ivk</span>, <span class="kw-2">mut</span> <span class="ident">output</span>) <span class="op">=</span> <span class="ident">random_enc_ciphertext</span>(<span class="ident">height</span>, <span class="kw-2">&amp;mut</span> <span class="ident">rng</span>);
+            <span class="ident">output</span>.<span class="ident">ephemeral_key</span> <span class="op">=</span> <span class="ident">jubjub::ExtendedPoint::random</span>(<span class="kw-2">&amp;mut</span> <span class="ident">rng</span>).<span class="ident">to_bytes</span>().<span class="ident">into</span>();
 
             <span class="macro">assert_eq!</span>(
                 <span class="ident">try_sapling_compact_note_decryption</span>(
@@ -2398,8 +2398,8 @@
         ];
 
         <span class="kw">for</span> <span class="kw-2">&amp;</span><span class="ident">height</span> <span class="kw">in</span> <span class="ident">heights</span>.<span class="ident">iter</span>() {
-            <span class="kw">let</span> (<span class="kw">_</span>, <span class="kw">_</span>, <span class="ident">ivk</span>, <span class="kw-2">mut</span> <span class="ident">output</span>) <span class="op">=</span> <span class="ident">random_enc_ciphertext</span>(<span class="ident">height</span>, <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">rng</span>);
-            <span class="ident">output</span>.<span class="ident">cmu</span> <span class="op">=</span> <span class="ident">bls12_381::Scalar::random</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">rng</span>);
+            <span class="kw">let</span> (<span class="kw">_</span>, <span class="kw">_</span>, <span class="ident">ivk</span>, <span class="kw-2">mut</span> <span class="ident">output</span>) <span class="op">=</span> <span class="ident">random_enc_ciphertext</span>(<span class="ident">height</span>, <span class="kw-2">&amp;mut</span> <span class="ident">rng</span>);
+            <span class="ident">output</span>.<span class="ident">cmu</span> <span class="op">=</span> <span class="ident">bls12_381::Scalar::random</span>(<span class="kw-2">&amp;mut</span> <span class="ident">rng</span>);
 
             <span class="macro">assert_eq!</span>(
                 <span class="ident">try_sapling_compact_note_decryption</span>(
@@ -2425,14 +2425,14 @@
         <span class="kw">let</span> <span class="ident">leadbytes</span> <span class="op">=</span> [<span class="number">0x02</span>, <span class="number">0x03</span>, <span class="number">0x01</span>];
 
         <span class="kw">for</span> (<span class="kw-2">&amp;</span><span class="ident">height</span>, <span class="kw-2">&amp;</span><span class="ident">leadbyte</span>) <span class="kw">in</span> <span class="ident">heights</span>.<span class="ident">iter</span>().<span class="ident">zip</span>(<span class="ident">leadbytes</span>.<span class="ident">iter</span>()) {
-            <span class="kw">let</span> (<span class="ident">ovk</span>, <span class="kw">_</span>, <span class="ident">ivk</span>, <span class="kw-2">mut</span> <span class="ident">output</span>) <span class="op">=</span> <span class="ident">random_enc_ciphertext</span>(<span class="ident">height</span>, <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">rng</span>);
+            <span class="kw">let</span> (<span class="ident">ovk</span>, <span class="kw">_</span>, <span class="ident">ivk</span>, <span class="kw-2">mut</span> <span class="ident">output</span>) <span class="op">=</span> <span class="ident">random_enc_ciphertext</span>(<span class="ident">height</span>, <span class="kw-2">&amp;mut</span> <span class="ident">rng</span>);
 
             <span class="ident">reencrypt_enc_ciphertext</span>(
                 <span class="kw-2">&amp;</span><span class="ident">ovk</span>,
                 <span class="kw-2">&amp;</span><span class="ident">output</span>.<span class="ident">cv</span>,
                 <span class="kw-2">&amp;</span><span class="ident">output</span>.<span class="ident">cmu</span>,
                 <span class="kw-2">&amp;</span><span class="ident">output</span>.<span class="ident">ephemeral_key</span>,
-                <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">output</span>.<span class="ident">enc_ciphertext</span>,
+                <span class="kw-2">&amp;mut</span> <span class="ident">output</span>.<span class="ident">enc_ciphertext</span>,
                 <span class="kw-2">&amp;</span><span class="ident">output</span>.<span class="ident">out_ciphertext</span>,
                 <span class="op">|</span><span class="ident">pt</span><span class="op">|</span> <span class="ident">pt</span>[<span class="number">0</span>] <span class="op">=</span> <span class="ident">leadbyte</span>,
             );
@@ -2457,14 +2457,14 @@
         ];
 
         <span class="kw">for</span> <span class="kw-2">&amp;</span><span class="ident">height</span> <span class="kw">in</span> <span class="ident">heights</span>.<span class="ident">iter</span>() {
-            <span class="kw">let</span> (<span class="ident">ovk</span>, <span class="kw">_</span>, <span class="ident">ivk</span>, <span class="kw-2">mut</span> <span class="ident">output</span>) <span class="op">=</span> <span class="ident">random_enc_ciphertext</span>(<span class="ident">height</span>, <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">rng</span>);
+            <span class="kw">let</span> (<span class="ident">ovk</span>, <span class="kw">_</span>, <span class="ident">ivk</span>, <span class="kw-2">mut</span> <span class="ident">output</span>) <span class="op">=</span> <span class="ident">random_enc_ciphertext</span>(<span class="ident">height</span>, <span class="kw-2">&amp;mut</span> <span class="ident">rng</span>);
 
             <span class="ident">reencrypt_enc_ciphertext</span>(
                 <span class="kw-2">&amp;</span><span class="ident">ovk</span>,
                 <span class="kw-2">&amp;</span><span class="ident">output</span>.<span class="ident">cv</span>,
                 <span class="kw-2">&amp;</span><span class="ident">output</span>.<span class="ident">cmu</span>,
                 <span class="kw-2">&amp;</span><span class="ident">output</span>.<span class="ident">ephemeral_key</span>,
-                <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">output</span>.<span class="ident">enc_ciphertext</span>,
+                <span class="kw-2">&amp;mut</span> <span class="ident">output</span>.<span class="ident">enc_ciphertext</span>,
                 <span class="kw-2">&amp;</span><span class="ident">output</span>.<span class="ident">out_ciphertext</span>,
                 <span class="op">|</span><span class="ident">pt</span><span class="op">|</span> <span class="ident">pt</span>[<span class="number">1</span>..<span class="number">12</span>].<span class="ident">copy_from_slice</span>(<span class="kw-2">&amp;</span><span class="ident">find_invalid_diversifier</span>().<span class="number">0</span>),
             );
@@ -2489,14 +2489,14 @@
         ];
 
         <span class="kw">for</span> <span class="kw-2">&amp;</span><span class="ident">height</span> <span class="kw">in</span> <span class="ident">heights</span>.<span class="ident">iter</span>() {
-            <span class="kw">let</span> (<span class="ident">ovk</span>, <span class="kw">_</span>, <span class="ident">ivk</span>, <span class="kw-2">mut</span> <span class="ident">output</span>) <span class="op">=</span> <span class="ident">random_enc_ciphertext</span>(<span class="ident">height</span>, <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">rng</span>);
+            <span class="kw">let</span> (<span class="ident">ovk</span>, <span class="kw">_</span>, <span class="ident">ivk</span>, <span class="kw-2">mut</span> <span class="ident">output</span>) <span class="op">=</span> <span class="ident">random_enc_ciphertext</span>(<span class="ident">height</span>, <span class="kw-2">&amp;mut</span> <span class="ident">rng</span>);
 
             <span class="ident">reencrypt_enc_ciphertext</span>(
                 <span class="kw-2">&amp;</span><span class="ident">ovk</span>,
                 <span class="kw-2">&amp;</span><span class="ident">output</span>.<span class="ident">cv</span>,
                 <span class="kw-2">&amp;</span><span class="ident">output</span>.<span class="ident">cmu</span>,
                 <span class="kw-2">&amp;</span><span class="ident">output</span>.<span class="ident">ephemeral_key</span>,
-                <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">output</span>.<span class="ident">enc_ciphertext</span>,
+                <span class="kw-2">&amp;mut</span> <span class="ident">output</span>.<span class="ident">enc_ciphertext</span>,
                 <span class="kw-2">&amp;</span><span class="ident">output</span>.<span class="ident">out_ciphertext</span>,
                 <span class="op">|</span><span class="ident">pt</span><span class="op">|</span> <span class="ident">pt</span>[<span class="number">1</span>..<span class="number">12</span>].<span class="ident">copy_from_slice</span>(<span class="kw-2">&amp;</span><span class="ident">find_valid_diversifier</span>().<span class="number">0</span>),
             );
@@ -2521,7 +2521,7 @@
         ];
 
         <span class="kw">for</span> <span class="kw-2">&amp;</span><span class="ident">height</span> <span class="kw">in</span> <span class="ident">heights</span>.<span class="ident">iter</span>() {
-            <span class="kw">let</span> (<span class="kw-2">mut</span> <span class="ident">ovk</span>, <span class="kw">_</span>, <span class="kw">_</span>, <span class="ident">output</span>) <span class="op">=</span> <span class="ident">random_enc_ciphertext</span>(<span class="ident">height</span>, <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">rng</span>);
+            <span class="kw">let</span> (<span class="kw-2">mut</span> <span class="ident">ovk</span>, <span class="kw">_</span>, <span class="kw">_</span>, <span class="ident">output</span>) <span class="op">=</span> <span class="ident">random_enc_ciphertext</span>(<span class="ident">height</span>, <span class="kw-2">&amp;mut</span> <span class="ident">rng</span>);
 
             <span class="ident">ovk</span>.<span class="number">0</span>[<span class="number">0</span>] <span class="op">^</span><span class="op">=</span> <span class="number">0xff</span>;
             <span class="macro">assert_eq!</span>(
@@ -2540,7 +2540,7 @@
         ];
 
         <span class="kw">for</span> <span class="kw-2">&amp;</span><span class="ident">height</span> <span class="kw">in</span> <span class="ident">heights</span>.<span class="ident">iter</span>() {
-            <span class="kw">let</span> (<span class="kw">_</span>, <span class="kw">_</span>, <span class="kw">_</span>, <span class="ident">output</span>) <span class="op">=</span> <span class="ident">random_enc_ciphertext</span>(<span class="ident">height</span>, <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">rng</span>);
+            <span class="kw">let</span> (<span class="kw">_</span>, <span class="kw">_</span>, <span class="kw">_</span>, <span class="ident">output</span>) <span class="op">=</span> <span class="ident">random_enc_ciphertext</span>(<span class="ident">height</span>, <span class="kw-2">&amp;mut</span> <span class="ident">rng</span>);
 
             <span class="macro">assert_eq!</span>(
                 <span class="ident">try_sapling_output_recovery_with_ock</span>(
@@ -2563,8 +2563,8 @@
         ];
 
         <span class="kw">for</span> <span class="kw-2">&amp;</span><span class="ident">height</span> <span class="kw">in</span> <span class="ident">heights</span>.<span class="ident">iter</span>() {
-            <span class="kw">let</span> (<span class="ident">ovk</span>, <span class="kw">_</span>, <span class="kw">_</span>, <span class="kw-2">mut</span> <span class="ident">output</span>) <span class="op">=</span> <span class="ident">random_enc_ciphertext</span>(<span class="ident">height</span>, <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">rng</span>);
-            <span class="ident">output</span>.<span class="ident">cv</span> <span class="op">=</span> <span class="ident">jubjub::ExtendedPoint::random</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">rng</span>);
+            <span class="kw">let</span> (<span class="ident">ovk</span>, <span class="kw">_</span>, <span class="kw">_</span>, <span class="kw-2">mut</span> <span class="ident">output</span>) <span class="op">=</span> <span class="ident">random_enc_ciphertext</span>(<span class="ident">height</span>, <span class="kw-2">&amp;mut</span> <span class="ident">rng</span>);
+            <span class="ident">output</span>.<span class="ident">cv</span> <span class="op">=</span> <span class="ident">jubjub::ExtendedPoint::random</span>(<span class="kw-2">&amp;mut</span> <span class="ident">rng</span>);
 
             <span class="macro">assert_eq!</span>(
                 <span class="ident">try_sapling_output_recovery</span>(<span class="kw-2">&amp;</span><span class="ident">TEST_NETWORK</span>, <span class="ident">height</span>, <span class="kw-2">&amp;</span><span class="ident">ovk</span>, <span class="kw-2">&amp;</span><span class="ident">output</span>,),
@@ -2582,8 +2582,8 @@
         ];
 
         <span class="kw">for</span> <span class="kw-2">&amp;</span><span class="ident">height</span> <span class="kw">in</span> <span class="ident">heights</span>.<span class="ident">iter</span>() {
-            <span class="kw">let</span> (<span class="ident">ovk</span>, <span class="ident">ock</span>, <span class="kw">_</span>, <span class="kw-2">mut</span> <span class="ident">output</span>) <span class="op">=</span> <span class="ident">random_enc_ciphertext</span>(<span class="ident">height</span>, <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">rng</span>);
-            <span class="ident">output</span>.<span class="ident">cmu</span> <span class="op">=</span> <span class="ident">bls12_381::Scalar::random</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">rng</span>);
+            <span class="kw">let</span> (<span class="ident">ovk</span>, <span class="ident">ock</span>, <span class="kw">_</span>, <span class="kw-2">mut</span> <span class="ident">output</span>) <span class="op">=</span> <span class="ident">random_enc_ciphertext</span>(<span class="ident">height</span>, <span class="kw-2">&amp;mut</span> <span class="ident">rng</span>);
+            <span class="ident">output</span>.<span class="ident">cmu</span> <span class="op">=</span> <span class="ident">bls12_381::Scalar::random</span>(<span class="kw-2">&amp;mut</span> <span class="ident">rng</span>);
 
             <span class="macro">assert_eq!</span>(
                 <span class="ident">try_sapling_output_recovery</span>(<span class="kw-2">&amp;</span><span class="ident">TEST_NETWORK</span>, <span class="ident">height</span>, <span class="kw-2">&amp;</span><span class="ident">ovk</span>, <span class="kw-2">&amp;</span><span class="ident">output</span>,),
@@ -2606,8 +2606,8 @@
         ];
 
         <span class="kw">for</span> <span class="kw-2">&amp;</span><span class="ident">height</span> <span class="kw">in</span> <span class="ident">heights</span>.<span class="ident">iter</span>() {
-            <span class="kw">let</span> (<span class="ident">ovk</span>, <span class="ident">ock</span>, <span class="kw">_</span>, <span class="kw-2">mut</span> <span class="ident">output</span>) <span class="op">=</span> <span class="ident">random_enc_ciphertext</span>(<span class="ident">height</span>, <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">rng</span>);
-            <span class="ident">output</span>.<span class="ident">ephemeral_key</span> <span class="op">=</span> <span class="ident">jubjub::ExtendedPoint::random</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">rng</span>).<span class="ident">to_bytes</span>().<span class="ident">into</span>();
+            <span class="kw">let</span> (<span class="ident">ovk</span>, <span class="ident">ock</span>, <span class="kw">_</span>, <span class="kw-2">mut</span> <span class="ident">output</span>) <span class="op">=</span> <span class="ident">random_enc_ciphertext</span>(<span class="ident">height</span>, <span class="kw-2">&amp;mut</span> <span class="ident">rng</span>);
+            <span class="ident">output</span>.<span class="ident">ephemeral_key</span> <span class="op">=</span> <span class="ident">jubjub::ExtendedPoint::random</span>(<span class="kw-2">&amp;mut</span> <span class="ident">rng</span>).<span class="ident">to_bytes</span>().<span class="ident">into</span>();
 
             <span class="macro">assert_eq!</span>(
                 <span class="ident">try_sapling_output_recovery</span>(<span class="kw-2">&amp;</span><span class="ident">TEST_NETWORK</span>, <span class="ident">height</span>, <span class="kw-2">&amp;</span><span class="ident">ovk</span>, <span class="kw-2">&amp;</span><span class="ident">output</span>,),
@@ -2630,7 +2630,7 @@
         ];
 
         <span class="kw">for</span> <span class="kw-2">&amp;</span><span class="ident">height</span> <span class="kw">in</span> <span class="ident">heights</span>.<span class="ident">iter</span>() {
-            <span class="kw">let</span> (<span class="ident">ovk</span>, <span class="ident">ock</span>, <span class="kw">_</span>, <span class="kw-2">mut</span> <span class="ident">output</span>) <span class="op">=</span> <span class="ident">random_enc_ciphertext</span>(<span class="ident">height</span>, <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">rng</span>);
+            <span class="kw">let</span> (<span class="ident">ovk</span>, <span class="ident">ock</span>, <span class="kw">_</span>, <span class="kw-2">mut</span> <span class="ident">output</span>) <span class="op">=</span> <span class="ident">random_enc_ciphertext</span>(<span class="ident">height</span>, <span class="kw-2">&amp;mut</span> <span class="ident">rng</span>);
 
             <span class="ident">output</span>.<span class="ident">enc_ciphertext</span>[<span class="ident">ENC_CIPHERTEXT_SIZE</span> <span class="op">-</span> <span class="number">1</span>] <span class="op">^</span><span class="op">=</span> <span class="number">0xff</span>;
             <span class="macro">assert_eq!</span>(
@@ -2653,7 +2653,7 @@
         ];
 
         <span class="kw">for</span> <span class="kw-2">&amp;</span><span class="ident">height</span> <span class="kw">in</span> <span class="ident">heights</span>.<span class="ident">iter</span>() {
-            <span class="kw">let</span> (<span class="ident">ovk</span>, <span class="ident">ock</span>, <span class="kw">_</span>, <span class="kw-2">mut</span> <span class="ident">output</span>) <span class="op">=</span> <span class="ident">random_enc_ciphertext</span>(<span class="ident">height</span>, <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">rng</span>);
+            <span class="kw">let</span> (<span class="ident">ovk</span>, <span class="ident">ock</span>, <span class="kw">_</span>, <span class="kw-2">mut</span> <span class="ident">output</span>) <span class="op">=</span> <span class="ident">random_enc_ciphertext</span>(<span class="ident">height</span>, <span class="kw-2">&amp;mut</span> <span class="ident">rng</span>);
 
             <span class="ident">output</span>.<span class="ident">out_ciphertext</span>[<span class="ident">OUT_CIPHERTEXT_SIZE</span> <span class="op">-</span> <span class="number">1</span>] <span class="op">^</span><span class="op">=</span> <span class="number">0xff</span>;
             <span class="macro">assert_eq!</span>(
@@ -2679,14 +2679,14 @@
         <span class="kw">let</span> <span class="ident">leadbytes</span> <span class="op">=</span> [<span class="number">0x02</span>, <span class="number">0x03</span>, <span class="number">0x01</span>];
 
         <span class="kw">for</span> (<span class="kw-2">&amp;</span><span class="ident">height</span>, <span class="kw-2">&amp;</span><span class="ident">leadbyte</span>) <span class="kw">in</span> <span class="ident">heights</span>.<span class="ident">iter</span>().<span class="ident">zip</span>(<span class="ident">leadbytes</span>.<span class="ident">iter</span>()) {
-            <span class="kw">let</span> (<span class="ident">ovk</span>, <span class="ident">ock</span>, <span class="kw">_</span>, <span class="kw-2">mut</span> <span class="ident">output</span>) <span class="op">=</span> <span class="ident">random_enc_ciphertext</span>(<span class="ident">height</span>, <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">rng</span>);
+            <span class="kw">let</span> (<span class="ident">ovk</span>, <span class="ident">ock</span>, <span class="kw">_</span>, <span class="kw-2">mut</span> <span class="ident">output</span>) <span class="op">=</span> <span class="ident">random_enc_ciphertext</span>(<span class="ident">height</span>, <span class="kw-2">&amp;mut</span> <span class="ident">rng</span>);
 
             <span class="ident">reencrypt_enc_ciphertext</span>(
                 <span class="kw-2">&amp;</span><span class="ident">ovk</span>,
                 <span class="kw-2">&amp;</span><span class="ident">output</span>.<span class="ident">cv</span>,
                 <span class="kw-2">&amp;</span><span class="ident">output</span>.<span class="ident">cmu</span>,
                 <span class="kw-2">&amp;</span><span class="ident">output</span>.<span class="ident">ephemeral_key</span>,
-                <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">output</span>.<span class="ident">enc_ciphertext</span>,
+                <span class="kw-2">&amp;mut</span> <span class="ident">output</span>.<span class="ident">enc_ciphertext</span>,
                 <span class="kw-2">&amp;</span><span class="ident">output</span>.<span class="ident">out_ciphertext</span>,
                 <span class="op">|</span><span class="ident">pt</span><span class="op">|</span> <span class="ident">pt</span>[<span class="number">0</span>] <span class="op">=</span> <span class="ident">leadbyte</span>,
             );
@@ -2710,14 +2710,14 @@
         ];
 
         <span class="kw">for</span> <span class="kw-2">&amp;</span><span class="ident">height</span> <span class="kw">in</span> <span class="ident">heights</span>.<span class="ident">iter</span>() {
-            <span class="kw">let</span> (<span class="ident">ovk</span>, <span class="ident">ock</span>, <span class="kw">_</span>, <span class="kw-2">mut</span> <span class="ident">output</span>) <span class="op">=</span> <span class="ident">random_enc_ciphertext</span>(<span class="ident">height</span>, <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">rng</span>);
+            <span class="kw">let</span> (<span class="ident">ovk</span>, <span class="ident">ock</span>, <span class="kw">_</span>, <span class="kw-2">mut</span> <span class="ident">output</span>) <span class="op">=</span> <span class="ident">random_enc_ciphertext</span>(<span class="ident">height</span>, <span class="kw-2">&amp;mut</span> <span class="ident">rng</span>);
 
             <span class="ident">reencrypt_enc_ciphertext</span>(
                 <span class="kw-2">&amp;</span><span class="ident">ovk</span>,
                 <span class="kw-2">&amp;</span><span class="ident">output</span>.<span class="ident">cv</span>,
                 <span class="kw-2">&amp;</span><span class="ident">output</span>.<span class="ident">cmu</span>,
                 <span class="kw-2">&amp;</span><span class="ident">output</span>.<span class="ident">ephemeral_key</span>,
-                <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">output</span>.<span class="ident">enc_ciphertext</span>,
+                <span class="kw-2">&amp;mut</span> <span class="ident">output</span>.<span class="ident">enc_ciphertext</span>,
                 <span class="kw-2">&amp;</span><span class="ident">output</span>.<span class="ident">out_ciphertext</span>,
                 <span class="op">|</span><span class="ident">pt</span><span class="op">|</span> <span class="ident">pt</span>[<span class="number">1</span>..<span class="number">12</span>].<span class="ident">copy_from_slice</span>(<span class="kw-2">&amp;</span><span class="ident">find_invalid_diversifier</span>().<span class="number">0</span>),
             );
@@ -2741,14 +2741,14 @@
         ];
 
         <span class="kw">for</span> <span class="kw-2">&amp;</span><span class="ident">height</span> <span class="kw">in</span> <span class="ident">heights</span>.<span class="ident">iter</span>() {
-            <span class="kw">let</span> (<span class="ident">ovk</span>, <span class="ident">ock</span>, <span class="kw">_</span>, <span class="kw-2">mut</span> <span class="ident">output</span>) <span class="op">=</span> <span class="ident">random_enc_ciphertext</span>(<span class="ident">height</span>, <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">rng</span>);
+            <span class="kw">let</span> (<span class="ident">ovk</span>, <span class="ident">ock</span>, <span class="kw">_</span>, <span class="kw-2">mut</span> <span class="ident">output</span>) <span class="op">=</span> <span class="ident">random_enc_ciphertext</span>(<span class="ident">height</span>, <span class="kw-2">&amp;mut</span> <span class="ident">rng</span>);
 
             <span class="ident">reencrypt_enc_ciphertext</span>(
                 <span class="kw-2">&amp;</span><span class="ident">ovk</span>,
                 <span class="kw-2">&amp;</span><span class="ident">output</span>.<span class="ident">cv</span>,
                 <span class="kw-2">&amp;</span><span class="ident">output</span>.<span class="ident">cmu</span>,
                 <span class="kw-2">&amp;</span><span class="ident">output</span>.<span class="ident">ephemeral_key</span>,
-                <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">output</span>.<span class="ident">enc_ciphertext</span>,
+                <span class="kw-2">&amp;mut</span> <span class="ident">output</span>.<span class="ident">enc_ciphertext</span>,
                 <span class="kw-2">&amp;</span><span class="ident">output</span>.<span class="ident">out_ciphertext</span>,
                 <span class="op">|</span><span class="ident">pt</span><span class="op">|</span> <span class="ident">pt</span>[<span class="number">1</span>..<span class="number">12</span>].<span class="ident">copy_from_slice</span>(<span class="kw-2">&amp;</span><span class="ident">find_valid_diversifier</span>().<span class="number">0</span>),
             );
@@ -2773,7 +2773,7 @@
 
         <span class="kw">for</span> <span class="kw-2">&amp;</span><span class="ident">height</span> <span class="kw">in</span> <span class="ident">heights</span>.<span class="ident">iter</span>() {
             <span class="kw">let</span> <span class="ident">ivk</span> <span class="op">=</span> <span class="ident">SaplingIvk</span>(<span class="ident">jubjub::Fr::zero</span>());
-            <span class="kw">let</span> (<span class="ident">ovk</span>, <span class="ident">ock</span>, <span class="ident">output</span>) <span class="op">=</span> <span class="ident">random_enc_ciphertext_with</span>(<span class="ident">height</span>, <span class="kw-2">&amp;</span><span class="ident">ivk</span>, <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">rng</span>);
+            <span class="kw">let</span> (<span class="ident">ovk</span>, <span class="ident">ock</span>, <span class="ident">output</span>) <span class="op">=</span> <span class="ident">random_enc_ciphertext_with</span>(<span class="ident">height</span>, <span class="kw-2">&amp;</span><span class="ident">ivk</span>, <span class="kw-2">&amp;mut</span> <span class="ident">rng</span>);
 
             <span class="macro">assert_eq!</span>(
                 <span class="ident">try_sapling_output_recovery</span>(<span class="kw-2">&amp;</span><span class="ident">TEST_NETWORK</span>, <span class="ident">height</span>, <span class="kw-2">&amp;</span><span class="ident">ovk</span>, <span class="kw-2">&amp;</span><span class="ident">output</span>,),
@@ -2931,7 +2931,7 @@
 
             <span class="macro">assert_eq!</span>(<span class="ident">ne</span>.<span class="ident">encrypt_note_plaintext</span>().<span class="ident">as_ref</span>(), <span class="kw-2">&amp;</span><span class="ident">tv</span>.<span class="ident">c_enc</span>[..]);
             <span class="macro">assert_eq!</span>(
-                <span class="kw-2">&amp;</span><span class="ident">ne</span>.<span class="ident">encrypt_outgoing_plaintext</span>(<span class="kw-2">&amp;</span><span class="ident">cv</span>, <span class="kw-2">&amp;</span><span class="ident">cmu</span>, <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">OsRng</span>)[..],
+                <span class="kw-2">&amp;</span><span class="ident">ne</span>.<span class="ident">encrypt_outgoing_plaintext</span>(<span class="kw-2">&amp;</span><span class="ident">cv</span>, <span class="kw-2">&amp;</span><span class="ident">cmu</span>, <span class="kw-2">&amp;mut</span> <span class="ident">OsRng</span>)[..],
                 <span class="kw-2">&amp;</span><span class="ident">tv</span>.<span class="ident">c_out</span>[..]
             );
         }
@@ -2949,7 +2949,7 @@
             .<span class="ident">map</span>(<span class="op">|</span><span class="kw">_</span><span class="op">|</span> {
                 (
                     <span class="ident">SaplingDomain::for_height</span>(<span class="ident">TEST_NETWORK</span>, <span class="ident">height</span>),
-                    <span class="ident">random_enc_ciphertext_with</span>(<span class="ident">height</span>, <span class="kw-2">&amp;</span><span class="ident">valid_ivk</span>, <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">rng</span>).<span class="number">2</span>,
+                    <span class="ident">random_enc_ciphertext_with</span>(<span class="ident">height</span>, <span class="kw-2">&amp;</span><span class="ident">valid_ivk</span>, <span class="kw-2">&amp;mut</span> <span class="ident">rng</span>).<span class="number">2</span>,
                 )
             })
             .<span class="ident">collect</span>();

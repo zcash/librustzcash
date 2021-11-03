@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_proofs&#x2F;src&#x2F;circuit&#x2F;sapling.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>sapling.rs - source</title><link rel="stylesheet" type="text/css" href="../../../normalize.css"><link rel="stylesheet" type="text/css" href="../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" type="text/css" href="../../../light.css"  id="themeStyle"><link rel="stylesheet" type="text/css" href="../../../dark.css" disabled ><link rel="stylesheet" type="text/css" href="../../../ayu.css" disabled ><script id="default-settings" ></script><script src="../../../storage.js"></script><script src="../../../crates.js"></script><noscript><link rel="stylesheet" href="../../../noscript.css"></noscript><link rel="alternate icon" type="image/png" href="../../../favicon-16x16.png"><link rel="alternate icon" type="image/png" href="../../../favicon-32x32.png"><link rel="icon" type="image/svg+xml" href="../../../favicon.svg"><style type="text/css">#crate-search{background-image:url("../../../down-arrow.svg");}</style></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="sidebar-menu" role="button">&#9776;</div><a href='../../../zcash_proofs/index.html'><div class='logo-container rust-logo'><img src='../../../rust-logo.png' alt='logo'></div></a></nav><div class="theme-picker"><button id="theme-picker" aria-label="Pick another theme!" aria-haspopup="menu" title="themes"><img width="18" height="18" alt="Pick another theme!" src="../../../brush.svg"></button><div id="theme-choices" role="menu"></div></div><nav class="sub"><form class="search-form"><div class="search-container"><div><select id="crate-search"><option value="All crates">All crates</option></select><input class="search-input" name="search" disabled autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"></div><button type="button" id="help-button" title="help">?</button><a id="settings-menu" href="../../../settings.html" title="settings"><img width="18" height="18" alt="Change settings" src="../../../wheel.svg"></a></div></form></nav><section id="main" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">  1</span>
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_proofs&#x2F;src&#x2F;circuit&#x2F;sapling.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>sapling.rs - source</title><link rel="stylesheet" type="text/css" href="../../../normalize.css"><link rel="stylesheet" type="text/css" href="../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" type="text/css" href="../../../light.css"  id="themeStyle"><link rel="stylesheet" type="text/css" href="../../../dark.css" disabled ><link rel="stylesheet" type="text/css" href="../../../ayu.css" disabled ><script id="default-settings" ></script><script src="../../../storage.js"></script><script src="../../../crates.js"></script><noscript><link rel="stylesheet" href="../../../noscript.css"></noscript><link rel="alternate icon" type="image/png" href="../../../favicon-16x16.png"><link rel="alternate icon" type="image/png" href="../../../favicon-32x32.png"><link rel="icon" type="image/svg+xml" href="../../../favicon.svg"><style type="text/css">#crate-search{background-image:url("../../../down-arrow.svg");}</style></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="sidebar-menu" role="button">&#9776;</div><a href='../../../zcash_proofs/index.html'><div class='logo-container rust-logo'><img src='../../../rust-logo.png' alt='logo'></div></a></nav><div class="theme-picker"><button id="theme-picker" aria-label="Pick another theme!" aria-haspopup="menu" title="themes"><img width="18" height="18" alt="Pick another theme!" src="../../../brush.svg"></button><div id="theme-choices" role="menu"></div></div><nav class="sub"><form class="search-form"><div class="search-container"><div><select id="crate-search"><option value="All crates">All crates</option></select><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"></div><button type="button" id="help-button" title="help">?</button><a id="settings-menu" href="../../../settings.html" title="settings"><img width="18" height="18" alt="Change settings" src="../../../wheel.svg"></a></div></form></nav><section id="main" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">  1</span>
 <span id="2">  2</span>
 <span id="3">  3</span>
 <span id="4">  4</span>
@@ -1058,7 +1058,7 @@
 <span class="kw">impl</span> <span class="ident">Circuit</span><span class="op">&lt;</span><span class="ident">bls12_381::Scalar</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">Spend</span> {
     <span class="kw">fn</span> <span class="ident">synthesize</span><span class="op">&lt;</span><span class="ident">CS</span>: <span class="ident">ConstraintSystem</span><span class="op">&lt;</span><span class="ident">bls12_381::Scalar</span><span class="op">&gt;</span><span class="op">&gt;</span>(
         <span class="self">self</span>,
-        <span class="ident">cs</span>: <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">CS</span>,
+        <span class="ident">cs</span>: <span class="kw-2">&amp;mut</span> <span class="ident">CS</span>,
     ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident">SynthesisError</span><span class="op">&gt;</span> {
         <span class="comment">// Prover witnesses ak (ensures that it&#39;s on the curve)</span>
         <span class="kw">let</span> <span class="ident">ak</span> <span class="op">=</span> <span class="ident">ecc::EdwardsPoint::witness</span>(
@@ -1235,7 +1235,7 @@
 
         <span class="comment">// Ascend the merkle tree authentication path</span>
         <span class="kw">for</span> (<span class="ident">i</span>, <span class="ident">e</span>) <span class="kw">in</span> <span class="self">self</span>.<span class="ident">auth_path</span>.<span class="ident">into_iter</span>().<span class="ident">enumerate</span>() {
-            <span class="kw">let</span> <span class="ident">cs</span> <span class="op">=</span> <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">cs</span>.<span class="ident">namespace</span>(<span class="op">|</span><span class="op">|</span> <span class="macro">format!</span>(<span class="string">&quot;merkle tree hash {}&quot;</span>, <span class="ident">i</span>));
+            <span class="kw">let</span> <span class="ident">cs</span> <span class="op">=</span> <span class="kw-2">&amp;mut</span> <span class="ident">cs</span>.<span class="ident">namespace</span>(<span class="op">|</span><span class="op">|</span> <span class="macro">format!</span>(<span class="string">&quot;merkle tree hash {}&quot;</span>, <span class="ident">i</span>));
 
             <span class="comment">// Determines if the current subtree is the &quot;right&quot; leaf at this</span>
             <span class="comment">// depth of the tree.</span>
@@ -1334,7 +1334,7 @@
 <span class="kw">impl</span> <span class="ident">Circuit</span><span class="op">&lt;</span><span class="ident">bls12_381::Scalar</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">Output</span> {
     <span class="kw">fn</span> <span class="ident">synthesize</span><span class="op">&lt;</span><span class="ident">CS</span>: <span class="ident">ConstraintSystem</span><span class="op">&lt;</span><span class="ident">bls12_381::Scalar</span><span class="op">&gt;</span><span class="op">&gt;</span>(
         <span class="self">self</span>,
-        <span class="ident">cs</span>: <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">CS</span>,
+        <span class="ident">cs</span>: <span class="kw-2">&amp;mut</span> <span class="ident">CS</span>,
     ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident">SynthesisError</span><span class="op">&gt;</span> {
         <span class="comment">// Let&#39;s start to construct our note, which contains</span>
         <span class="comment">// value (big endian)</span>
@@ -1472,12 +1472,12 @@
     <span class="kw">for</span> <span class="kw">_</span> <span class="kw">in</span> <span class="number">0</span>..<span class="number">10</span> {
         <span class="kw">let</span> <span class="ident">value_commitment</span> <span class="op">=</span> <span class="ident">ValueCommitment</span> {
             <span class="ident">value</span>: <span class="ident">rng</span>.<span class="ident">next_u64</span>(),
-            <span class="ident">randomness</span>: <span class="ident">jubjub::Fr::random</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">rng</span>),
+            <span class="ident">randomness</span>: <span class="ident">jubjub::Fr::random</span>(<span class="kw-2">&amp;mut</span> <span class="ident">rng</span>),
         };
 
         <span class="kw">let</span> <span class="ident">proof_generation_key</span> <span class="op">=</span> <span class="ident">ProofGenerationKey</span> {
-            <span class="ident">ak</span>: <span class="ident">jubjub::SubgroupPoint::random</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">rng</span>),
-            <span class="ident">nsk</span>: <span class="ident">jubjub::Fr::random</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">rng</span>),
+            <span class="ident">ak</span>: <span class="ident">jubjub::SubgroupPoint::random</span>(<span class="kw-2">&amp;mut</span> <span class="ident">rng</span>),
+            <span class="ident">nsk</span>: <span class="ident">jubjub::Fr::random</span>(<span class="kw-2">&amp;mut</span> <span class="ident">rng</span>),
         };
 
         <span class="kw">let</span> <span class="ident">viewing_key</span> <span class="op">=</span> <span class="ident">proof_generation_key</span>.<span class="ident">to_viewing_key</span>();
@@ -1487,7 +1487,7 @@
         <span class="kw">loop</span> {
             <span class="kw">let</span> <span class="ident">diversifier</span> <span class="op">=</span> {
                 <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">d</span> <span class="op">=</span> [<span class="number">0</span>; <span class="number">11</span>];
-                <span class="ident">rng</span>.<span class="ident">fill_bytes</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">d</span>);
+                <span class="ident">rng</span>.<span class="ident">fill_bytes</span>(<span class="kw-2">&amp;mut</span> <span class="ident">d</span>);
                 <span class="ident">Diversifier</span>(<span class="ident">d</span>)
             };
 
@@ -1498,10 +1498,10 @@
         }
 
         <span class="kw">let</span> <span class="ident">g_d</span> <span class="op">=</span> <span class="ident">payment_address</span>.<span class="ident">diversifier</span>().<span class="ident">g_d</span>().<span class="ident">unwrap</span>();
-        <span class="kw">let</span> <span class="ident">commitment_randomness</span> <span class="op">=</span> <span class="ident">jubjub::Fr::random</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">rng</span>);
+        <span class="kw">let</span> <span class="ident">commitment_randomness</span> <span class="op">=</span> <span class="ident">jubjub::Fr::random</span>(<span class="kw-2">&amp;mut</span> <span class="ident">rng</span>);
         <span class="kw">let</span> <span class="ident">auth_path</span> <span class="op">=</span>
-            <span class="macro">vec!</span>[<span class="prelude-val">Some</span>((<span class="ident">bls12_381::Scalar::random</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">rng</span>), <span class="ident">rng</span>.<span class="ident">next_u32</span>() <span class="op">%</span> <span class="number">2</span> <span class="op">!</span><span class="op">=</span> <span class="number">0</span>)); <span class="ident">tree_depth</span>];
-        <span class="kw">let</span> <span class="ident">ar</span> <span class="op">=</span> <span class="ident">jubjub::Fr::random</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">rng</span>);
+            <span class="macro">vec!</span>[<span class="prelude-val">Some</span>((<span class="ident">bls12_381::Scalar::random</span>(<span class="kw-2">&amp;mut</span> <span class="ident">rng</span>), <span class="ident">rng</span>.<span class="ident">next_u32</span>() <span class="op">%</span> <span class="number">2</span> <span class="op">!</span><span class="op">=</span> <span class="number">0</span>)); <span class="ident">tree_depth</span>];
+        <span class="kw">let</span> <span class="ident">ar</span> <span class="op">=</span> <span class="ident">jubjub::Fr::random</span>(<span class="kw-2">&amp;mut</span> <span class="ident">rng</span>);
 
         {
             <span class="kw">let</span> <span class="ident">rk</span> <span class="op">=</span> <span class="ident">jubjub::ExtendedPoint::from</span>(<span class="ident">viewing_key</span>.<span class="ident">rk</span>(<span class="ident">ar</span>)).<span class="ident">to_affine</span>();
@@ -1525,7 +1525,7 @@
                 <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">rhs</span> <span class="op">=</span> <span class="ident">uncle</span>;
 
                 <span class="kw">if</span> <span class="ident">b</span> {
-                    <span class="ident">::std::mem::swap</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">lhs</span>, <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">rhs</span>);
+                    <span class="ident">::std::mem::swap</span>(<span class="kw-2">&amp;mut</span> <span class="ident">lhs</span>, <span class="kw-2">&amp;mut</span> <span class="ident">rhs</span>);
                 }
 
                 <span class="kw">let</span> <span class="ident">lhs</span> <span class="op">=</span> <span class="ident">lhs</span>.<span class="ident">to_le_bits</span>();
@@ -1567,7 +1567,7 @@
                 <span class="ident">anchor</span>: <span class="prelude-val">Some</span>(<span class="ident">cur</span>),
             };
 
-            <span class="ident">instance</span>.<span class="ident">synthesize</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">cs</span>).<span class="ident">unwrap</span>();
+            <span class="ident">instance</span>.<span class="ident">synthesize</span>(<span class="kw-2">&amp;mut</span> <span class="ident">cs</span>).<span class="ident">unwrap</span>();
 
             <span class="macro">assert!</span>(<span class="ident">cs</span>.<span class="ident">is_satisfied</span>());
             <span class="macro">assert_eq!</span>(<span class="ident">cs</span>.<span class="ident">num_constraints</span>(), <span class="number">98777</span>);
@@ -1646,8 +1646,8 @@
         };
 
         <span class="kw">let</span> <span class="ident">proof_generation_key</span> <span class="op">=</span> <span class="ident">ProofGenerationKey</span> {
-            <span class="ident">ak</span>: <span class="ident">jubjub::SubgroupPoint::random</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">rng</span>),
-            <span class="ident">nsk</span>: <span class="ident">jubjub::Fr::random</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">rng</span>),
+            <span class="ident">ak</span>: <span class="ident">jubjub::SubgroupPoint::random</span>(<span class="kw-2">&amp;mut</span> <span class="ident">rng</span>),
+            <span class="ident">nsk</span>: <span class="ident">jubjub::Fr::random</span>(<span class="kw-2">&amp;mut</span> <span class="ident">rng</span>),
         };
 
         <span class="kw">let</span> <span class="ident">viewing_key</span> <span class="op">=</span> <span class="ident">proof_generation_key</span>.<span class="ident">to_viewing_key</span>();
@@ -1657,7 +1657,7 @@
         <span class="kw">loop</span> {
             <span class="kw">let</span> <span class="ident">diversifier</span> <span class="op">=</span> {
                 <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">d</span> <span class="op">=</span> [<span class="number">0</span>; <span class="number">11</span>];
-                <span class="ident">rng</span>.<span class="ident">fill_bytes</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">d</span>);
+                <span class="ident">rng</span>.<span class="ident">fill_bytes</span>(<span class="kw-2">&amp;mut</span> <span class="ident">d</span>);
                 <span class="ident">Diversifier</span>(<span class="ident">d</span>)
             };
 
@@ -1668,10 +1668,10 @@
         }
 
         <span class="kw">let</span> <span class="ident">g_d</span> <span class="op">=</span> <span class="ident">payment_address</span>.<span class="ident">diversifier</span>().<span class="ident">g_d</span>().<span class="ident">unwrap</span>();
-        <span class="kw">let</span> <span class="ident">commitment_randomness</span> <span class="op">=</span> <span class="ident">jubjub::Fr::random</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">rng</span>);
+        <span class="kw">let</span> <span class="ident">commitment_randomness</span> <span class="op">=</span> <span class="ident">jubjub::Fr::random</span>(<span class="kw-2">&amp;mut</span> <span class="ident">rng</span>);
         <span class="kw">let</span> <span class="ident">auth_path</span> <span class="op">=</span>
-            <span class="macro">vec!</span>[<span class="prelude-val">Some</span>((<span class="ident">bls12_381::Scalar::random</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">rng</span>), <span class="ident">rng</span>.<span class="ident">next_u32</span>() <span class="op">%</span> <span class="number">2</span> <span class="op">!</span><span class="op">=</span> <span class="number">0</span>)); <span class="ident">tree_depth</span>];
-        <span class="kw">let</span> <span class="ident">ar</span> <span class="op">=</span> <span class="ident">jubjub::Fr::random</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">rng</span>);
+            <span class="macro">vec!</span>[<span class="prelude-val">Some</span>((<span class="ident">bls12_381::Scalar::random</span>(<span class="kw-2">&amp;mut</span> <span class="ident">rng</span>), <span class="ident">rng</span>.<span class="ident">next_u32</span>() <span class="op">%</span> <span class="number">2</span> <span class="op">!</span><span class="op">=</span> <span class="number">0</span>)); <span class="ident">tree_depth</span>];
+        <span class="kw">let</span> <span class="ident">ar</span> <span class="op">=</span> <span class="ident">jubjub::Fr::random</span>(<span class="kw-2">&amp;mut</span> <span class="ident">rng</span>);
 
         {
             <span class="kw">let</span> <span class="ident">rk</span> <span class="op">=</span> <span class="ident">jubjub::ExtendedPoint::from</span>(<span class="ident">viewing_key</span>.<span class="ident">rk</span>(<span class="ident">ar</span>)).<span class="ident">to_affine</span>();
@@ -1703,7 +1703,7 @@
                 <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">rhs</span> <span class="op">=</span> <span class="ident">uncle</span>;
 
                 <span class="kw">if</span> <span class="ident">b</span> {
-                    <span class="ident">::std::mem::swap</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">lhs</span>, <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">rhs</span>);
+                    <span class="ident">::std::mem::swap</span>(<span class="kw-2">&amp;mut</span> <span class="ident">lhs</span>, <span class="kw-2">&amp;mut</span> <span class="ident">rhs</span>);
                 }
 
                 <span class="kw">let</span> <span class="ident">lhs</span> <span class="op">=</span> <span class="ident">lhs</span>.<span class="ident">to_le_bits</span>();
@@ -1745,7 +1745,7 @@
                 <span class="ident">anchor</span>: <span class="prelude-val">Some</span>(<span class="ident">cur</span>),
             };
 
-            <span class="ident">instance</span>.<span class="ident">synthesize</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">cs</span>).<span class="ident">unwrap</span>();
+            <span class="ident">instance</span>.<span class="ident">synthesize</span>(<span class="kw-2">&amp;mut</span> <span class="ident">cs</span>).<span class="ident">unwrap</span>();
 
             <span class="macro">assert!</span>(<span class="ident">cs</span>.<span class="ident">is_satisfied</span>());
             <span class="macro">assert_eq!</span>(<span class="ident">cs</span>.<span class="ident">num_constraints</span>(), <span class="number">98777</span>);
@@ -1792,11 +1792,11 @@
     <span class="kw">for</span> <span class="kw">_</span> <span class="kw">in</span> <span class="number">0</span>..<span class="number">100</span> {
         <span class="kw">let</span> <span class="ident">value_commitment</span> <span class="op">=</span> <span class="ident">ValueCommitment</span> {
             <span class="ident">value</span>: <span class="ident">rng</span>.<span class="ident">next_u64</span>(),
-            <span class="ident">randomness</span>: <span class="ident">jubjub::Fr::random</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">rng</span>),
+            <span class="ident">randomness</span>: <span class="ident">jubjub::Fr::random</span>(<span class="kw-2">&amp;mut</span> <span class="ident">rng</span>),
         };
 
-        <span class="kw">let</span> <span class="ident">nsk</span> <span class="op">=</span> <span class="ident">jubjub::Fr::random</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">rng</span>);
-        <span class="kw">let</span> <span class="ident">ak</span> <span class="op">=</span> <span class="ident">jubjub::SubgroupPoint::random</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">rng</span>);
+        <span class="kw">let</span> <span class="ident">nsk</span> <span class="op">=</span> <span class="ident">jubjub::Fr::random</span>(<span class="kw-2">&amp;mut</span> <span class="ident">rng</span>);
+        <span class="kw">let</span> <span class="ident">ak</span> <span class="op">=</span> <span class="ident">jubjub::SubgroupPoint::random</span>(<span class="kw-2">&amp;mut</span> <span class="ident">rng</span>);
 
         <span class="kw">let</span> <span class="ident">proof_generation_key</span> <span class="op">=</span> <span class="ident">ProofGenerationKey</span> { <span class="ident">ak</span>, <span class="ident">nsk</span> };
 
@@ -1807,7 +1807,7 @@
         <span class="kw">loop</span> {
             <span class="kw">let</span> <span class="ident">diversifier</span> <span class="op">=</span> {
                 <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">d</span> <span class="op">=</span> [<span class="number">0</span>; <span class="number">11</span>];
-                <span class="ident">rng</span>.<span class="ident">fill_bytes</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">d</span>);
+                <span class="ident">rng</span>.<span class="ident">fill_bytes</span>(<span class="kw-2">&amp;mut</span> <span class="ident">d</span>);
                 <span class="ident">Diversifier</span>(<span class="ident">d</span>)
             };
 
@@ -1817,8 +1817,8 @@
             }
         }
 
-        <span class="kw">let</span> <span class="ident">commitment_randomness</span> <span class="op">=</span> <span class="ident">jubjub::Fr::random</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">rng</span>);
-        <span class="kw">let</span> <span class="ident">esk</span> <span class="op">=</span> <span class="ident">jubjub::Fr::random</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">rng</span>);
+        <span class="kw">let</span> <span class="ident">commitment_randomness</span> <span class="op">=</span> <span class="ident">jubjub::Fr::random</span>(<span class="kw-2">&amp;mut</span> <span class="ident">rng</span>);
+        <span class="kw">let</span> <span class="ident">esk</span> <span class="op">=</span> <span class="ident">jubjub::Fr::random</span>(<span class="kw-2">&amp;mut</span> <span class="ident">rng</span>);
 
         {
             <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">cs</span> <span class="op">=</span> <span class="ident">TestConstraintSystem::new</span>();
@@ -1830,7 +1830,7 @@
                 <span class="ident">esk</span>: <span class="prelude-val">Some</span>(<span class="ident">esk</span>),
             };
 
-            <span class="ident">instance</span>.<span class="ident">synthesize</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">cs</span>).<span class="ident">unwrap</span>();
+            <span class="ident">instance</span>.<span class="ident">synthesize</span>(<span class="kw-2">&amp;mut</span> <span class="ident">cs</span>).<span class="ident">unwrap</span>();
 
             <span class="macro">assert!</span>(<span class="ident">cs</span>.<span class="ident">is_satisfied</span>());
             <span class="macro">assert_eq!</span>(<span class="ident">cs</span>.<span class="ident">num_constraints</span>(), <span class="number">7827</span>);
