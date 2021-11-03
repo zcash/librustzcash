@@ -157,10 +157,14 @@ mod tests {
         }
     }
 
-    fn arb_shielded_fvk() -> BoxedStrategy<Fvk> {
+    fn arb_shielded_fvk() -> BoxedStrategy<Vec<Fvk>> {
         prop_oneof![
-            uniform96().prop_map(Fvk::Sapling),
-            uniform96().prop_map(Fvk::Orchard),
+            vec![uniform96().prop_map(Fvk::Sapling)],
+            vec![uniform96().prop_map(Fvk::Orchard)],
+            vec![
+                uniform96().prop_map(Fvk::Orchard as fn([u8; 96]) -> Fvk),
+                uniform96().prop_map(Fvk::Sapling)
+            ],
         ]
         .boxed()
     }
@@ -171,7 +175,7 @@ mod tests {
 
     prop_compose! {
         fn arb_unified_fvk()(
-            shielded in prop::collection::hash_set(arb_shielded_fvk(), 1..2),
+            shielded in arb_shielded_fvk(),
             transparent in prop::option::of(arb_transparent_fvk()),
         ) -> Ufvk {
             Ufvk(shielded.into_iter().chain(transparent).collect())
