@@ -116,19 +116,6 @@ pub trait Domain {
 
     fn kdf(secret: Self::SharedSecret, ephemeral_key: &EphemeralKeyBytes) -> Self::SymmetricKey;
 
-    /// Computes `Self::kdf` on a batch of items.
-    ///
-    /// For each item in the batch, if the shared secret is `None`, this returns `None` at
-    /// that position.
-    fn batch_kdf<'a>(
-        items: impl Iterator<Item = (Option<Self::SharedSecret>, &'a EphemeralKeyBytes)>,
-    ) -> Vec<Option<Self::SymmetricKey>> {
-        // Default implementation: do the non-batched thing.
-        items
-            .map(|(secret, ephemeral_key)| secret.map(|secret| Self::kdf(secret, ephemeral_key)))
-            .collect()
-    }
-
     // for right now, we just need `recipient` to get `d`; in the future when we
     // can get that from a Sapling note, the recipient parameter will be able
     // to be removed.
@@ -153,22 +140,6 @@ pub trait Domain {
     fn epk_bytes(epk: &Self::EphemeralPublicKey) -> EphemeralKeyBytes;
 
     fn epk(ephemeral_key: &EphemeralKeyBytes) -> Option<Self::EphemeralPublicKey>;
-
-    /// Computes `Self::epk` on a batch of ephemeral keys.
-    ///
-    /// This is useful for protocols where the underlying curve requires an inversion to
-    /// parse an encoded point.
-    ///
-    /// For usability, this returns tuples of the ephemeral keys and the result of parsing
-    /// them.
-    fn batch_epk(
-        ephemeral_keys: impl Iterator<Item = EphemeralKeyBytes>,
-    ) -> Vec<(Option<Self::EphemeralPublicKey>, EphemeralKeyBytes)> {
-        // Default implementation: do the non-batched thing.
-        ephemeral_keys
-            .map(|ephemeral_key| (Self::epk(&ephemeral_key), ephemeral_key))
-            .collect()
-    }
 
     fn check_epk_bytes<F: Fn(&Self::EphemeralSecretKey) -> NoteValidity>(
         note: &Self::Note,
@@ -201,6 +172,37 @@ pub trait Domain {
     ) -> Option<Self::DiversifiedTransmissionKey>;
 
     fn extract_esk(out_plaintext: &[u8; OUT_PLAINTEXT_SIZE]) -> Option<Self::EphemeralSecretKey>;
+}
+
+pub trait BatchDomain: Domain {
+    /// Computes `Self::kdf` on a batch of items.
+    ///
+    /// For each item in the batch, if the shared secret is `None`, this returns `None` at
+    /// that position.
+    fn batch_kdf<'a>(
+        items: impl Iterator<Item = (Option<Self::SharedSecret>, &'a EphemeralKeyBytes)>,
+    ) -> Vec<Option<Self::SymmetricKey>> {
+        // Default implementation: do the non-batched thing.
+        items
+            .map(|(secret, ephemeral_key)| secret.map(|secret| Self::kdf(secret, ephemeral_key)))
+            .collect()
+    }
+
+    /// Computes `Self::epk` on a batch of ephemeral keys.
+    ///
+    /// This is useful for protocols where the underlying curve requires an inversion to
+    /// parse an encoded point.
+    ///
+    /// For usability, this returns tuples of the ephemeral keys and the result of parsing
+    /// them.
+    fn batch_epk(
+        ephemeral_keys: impl Iterator<Item = EphemeralKeyBytes>,
+    ) -> Vec<(Option<Self::EphemeralPublicKey>, EphemeralKeyBytes)> {
+        // Default implementation: do the non-batched thing.
+        ephemeral_keys
+            .map(|ephemeral_key| (Self::epk(&ephemeral_key), ephemeral_key))
+            .collect()
+    }
 }
 
 pub trait ShieldedOutput<D: Domain> {
