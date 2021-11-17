@@ -227,7 +227,7 @@ pub(crate) mod private {
         }
 
         /// Parse the items of the unified container.
-        fn parse_items(hrp: &str, buf: &[u8]) -> Result<Vec<Self::Item>, ParseError> {
+        fn parse_items<T: Into<Vec<u8>>>(hrp: &str, buf: T) -> Result<Vec<Self::Item>, ParseError> {
             fn read_receiver<R: SealedItem>(
                 mut cursor: &mut std::io::Cursor<&[u8]>,
             ) -> Result<R, ParseError> {
@@ -266,7 +266,9 @@ pub(crate) mod private {
                 result
             }
 
-            let encoded = f4jumble::f4jumble_inv(buf).map_err(|e| {
+            // Here we allocate if necessary to get a mutable Vec<u8> to unjumble.
+            let mut encoded = buf.into();
+            f4jumble::f4jumble_inv_mut(&mut encoded[..]).map_err(|e| {
                 ParseError::InvalidEncoding(format!("F4Jumble decoding failed: {}", e))
             })?;
 
@@ -327,7 +329,7 @@ pub(crate) mod private {
             }
         }
 
-        fn parse_internal(hrp: &str, buf: &[u8]) -> Result<Self, ParseError> {
+        fn parse_internal<T: Into<Vec<u8>>>(hrp: &str, buf: T) -> Result<Self, ParseError> {
             Self::parse_items(hrp, buf).and_then(Self::try_from_items_internal)
         }
     }
@@ -365,7 +367,7 @@ pub trait Encoding: private::SealedContainer {
             let data = Vec::<u8>::from_base32(&data)
                 .map_err(|e| ParseError::InvalidEncoding(e.to_string()))?;
 
-            Self::parse_internal(hrp, &data[..]).map(|value| (net, value))
+            Self::parse_internal(hrp, data).map(|value| (net, value))
         } else {
             Err(ParseError::NotUnified)
         }
