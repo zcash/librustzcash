@@ -73,7 +73,7 @@
 <span class="kw">use</span> <span class="ident">std::iter</span>;
 
 <span class="kw">use</span> <span class="kw">crate</span>::{
-    <span class="ident">try_compact_note_decryption_inner</span>, <span class="ident">try_note_decryption_inner</span>, <span class="ident">Domain</span>, <span class="ident">EphemeralKeyBytes</span>,
+    <span class="ident">try_compact_note_decryption_inner</span>, <span class="ident">try_note_decryption_inner</span>, <span class="ident">BatchDomain</span>, <span class="ident">EphemeralKeyBytes</span>,
     <span class="ident">ShieldedOutput</span>,
 };
 
@@ -81,7 +81,7 @@
 <span class="doccomment">///</span>
 <span class="doccomment">/// This is the batched version of [`crate::try_note_decryption`].</span>
 <span class="attribute">#[<span class="ident">allow</span>(<span class="ident">clippy::type_complexity</span>)]</span>
-<span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">try_note_decryption</span><span class="op">&lt;</span><span class="ident">D</span>: <span class="ident">Domain</span>, <span class="ident">Output</span>: <span class="ident">ShieldedOutput</span><span class="op">&lt;</span><span class="ident">D</span><span class="op">&gt;</span><span class="op">&gt;</span>(
+<span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">try_note_decryption</span><span class="op">&lt;</span><span class="ident">D</span>: <span class="ident">BatchDomain</span>, <span class="ident">Output</span>: <span class="ident">ShieldedOutput</span><span class="op">&lt;</span><span class="ident">D</span><span class="op">&gt;</span><span class="op">&gt;</span>(
     <span class="ident">ivks</span>: <span class="kw-2">&amp;</span>[<span class="ident">D::IncomingViewingKey</span>],
     <span class="ident">outputs</span>: <span class="kw-2">&amp;</span>[(<span class="ident">D</span>, <span class="ident">Output</span>)],
 ) -&gt; <span class="ident">Vec</span><span class="op">&lt;</span><span class="prelude-ty">Option</span><span class="op">&lt;</span>(<span class="ident">D::Note</span>, <span class="ident">D::Recipient</span>, <span class="ident">D::Memo</span>)<span class="op">&gt;</span><span class="op">&gt;</span> {
@@ -91,14 +91,14 @@
 <span class="doccomment">/// Trial decryption of a batch of notes for light clients with a set of recipients.</span>
 <span class="doccomment">///</span>
 <span class="doccomment">/// This is the batched version of [`crate::try_compact_note_decryption`].</span>
-<span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">try_compact_note_decryption</span><span class="op">&lt;</span><span class="ident">D</span>: <span class="ident">Domain</span>, <span class="ident">Output</span>: <span class="ident">ShieldedOutput</span><span class="op">&lt;</span><span class="ident">D</span><span class="op">&gt;</span><span class="op">&gt;</span>(
+<span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">try_compact_note_decryption</span><span class="op">&lt;</span><span class="ident">D</span>: <span class="ident">BatchDomain</span>, <span class="ident">Output</span>: <span class="ident">ShieldedOutput</span><span class="op">&lt;</span><span class="ident">D</span><span class="op">&gt;</span><span class="op">&gt;</span>(
     <span class="ident">ivks</span>: <span class="kw-2">&amp;</span>[<span class="ident">D::IncomingViewingKey</span>],
     <span class="ident">outputs</span>: <span class="kw-2">&amp;</span>[(<span class="ident">D</span>, <span class="ident">Output</span>)],
 ) -&gt; <span class="ident">Vec</span><span class="op">&lt;</span><span class="prelude-ty">Option</span><span class="op">&lt;</span>(<span class="ident">D::Note</span>, <span class="ident">D::Recipient</span>)<span class="op">&gt;</span><span class="op">&gt;</span> {
     <span class="ident">batch_note_decryption</span>(<span class="ident">ivks</span>, <span class="ident">outputs</span>, <span class="ident">try_compact_note_decryption_inner</span>)
 }
 
-<span class="kw">fn</span> <span class="ident">batch_note_decryption</span><span class="op">&lt;</span><span class="ident">D</span>: <span class="ident">Domain</span>, <span class="ident">Output</span>: <span class="ident">ShieldedOutput</span><span class="op">&lt;</span><span class="ident">D</span><span class="op">&gt;</span>, <span class="ident">F</span>, <span class="ident">FR</span><span class="op">&gt;</span>(
+<span class="kw">fn</span> <span class="ident">batch_note_decryption</span><span class="op">&lt;</span><span class="ident">D</span>: <span class="ident">BatchDomain</span>, <span class="ident">Output</span>: <span class="ident">ShieldedOutput</span><span class="op">&lt;</span><span class="ident">D</span><span class="op">&gt;</span>, <span class="ident">F</span>, <span class="ident">FR</span><span class="op">&gt;</span>(
     <span class="ident">ivks</span>: <span class="kw-2">&amp;</span>[<span class="ident">D::IncomingViewingKey</span>],
     <span class="ident">outputs</span>: <span class="kw-2">&amp;</span>[(<span class="ident">D</span>, <span class="ident">Output</span>)],
     <span class="ident">decrypt_inner</span>: <span class="ident">F</span>,
