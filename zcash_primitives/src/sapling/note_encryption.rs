@@ -9,9 +9,9 @@ use std::convert::TryInto;
 
 use zcash_note_encryption::{
     try_compact_note_decryption, try_note_decryption, try_output_recovery_with_ock,
-    try_output_recovery_with_ovk, Domain, EphemeralKeyBytes, NoteEncryption, NotePlaintextBytes,
-    NoteValidity, OutPlaintextBytes, OutgoingCipherKey, ShieldedOutput, COMPACT_NOTE_SIZE,
-    NOTE_PLAINTEXT_SIZE, OUT_PLAINTEXT_SIZE,
+    try_output_recovery_with_ovk, BatchDomain, Domain, EphemeralKeyBytes, NoteEncryption,
+    NotePlaintextBytes, NoteValidity, OutPlaintextBytes, OutgoingCipherKey, ShieldedOutput,
+    COMPACT_NOTE_SIZE, NOTE_PLAINTEXT_SIZE, OUT_PLAINTEXT_SIZE,
 };
 
 use crate::{
@@ -185,37 +185,6 @@ impl<P: consensus::Parameters> Domain for SaplingDomain<P> {
         kdf_sapling(dhsecret, epk)
     }
 
-    fn batch_kdf<'a>(
-        items: impl Iterator<Item = (Option<Self::SharedSecret>, &'a EphemeralKeyBytes)>,
-    ) -> Vec<Option<Self::SymmetricKey>> {
-        let (shared_secrets, ephemeral_keys): (Vec<_>, Vec<_>) = items.unzip();
-
-        let secrets: Vec<_> = shared_secrets
-            .iter()
-            .filter_map(|s| s.map(ExtendedPoint::from))
-            .collect();
-        let mut secrets_affine = vec![AffinePoint::identity(); shared_secrets.len()];
-        group::Curve::batch_normalize(&secrets, &mut secrets_affine);
-
-        let mut secrets_affine = secrets_affine.into_iter();
-        shared_secrets
-            .into_iter()
-            .map(|s| s.and_then(|_| secrets_affine.next()))
-            .zip(ephemeral_keys.into_iter())
-            .map(|(secret, ephemeral_key)| {
-                secret.map(|dhsecret| {
-                    Blake2bParams::new()
-                        .hash_length(32)
-                        .personal(KDF_SAPLING_PERSONALIZATION)
-                        .to_state()
-                        .update(&dhsecret.to_bytes())
-                        .update(ephemeral_key.as_ref())
-                        .finalize()
-                })
-            })
-            .collect()
-    }
-
     fn note_plaintext_bytes(
         note: &Self::Note,
         to: &Self::Recipient,
@@ -276,19 +245,6 @@ impl<P: consensus::Parameters> Domain for SaplingDomain<P> {
         // always been rejected by consensus (due to small-order checks).
         // https://zips.z.cash/zip-0216#specification
         jubjub::ExtendedPoint::from_bytes(&ephemeral_key.0).into()
-    }
-
-    fn batch_epk(
-        ephemeral_keys: impl Iterator<Item = EphemeralKeyBytes>,
-    ) -> Vec<(Option<Self::EphemeralPublicKey>, EphemeralKeyBytes)> {
-        let ephemeral_keys: Vec<_> = ephemeral_keys.collect();
-        let epks = jubjub::AffinePoint::batch_from_bytes(ephemeral_keys.iter().map(|b| b.0));
-        epks.into_iter()
-            .zip(ephemeral_keys.into_iter())
-            .map(|(epk, ephemeral_key)| {
-                (epk.map(jubjub::ExtendedPoint::from).into(), ephemeral_key)
-            })
-            .collect()
     }
 
     fn check_epk_bytes<F: FnOnce(&Self::EphemeralSecretKey) -> NoteValidity>(
@@ -356,6 +312,52 @@ impl<P: consensus::Parameters> Domain for SaplingDomain<P> {
 
     fn extract_memo(&self, plaintext: &[u8]) -> Self::Memo {
         MemoBytes::from_bytes(&plaintext[COMPACT_NOTE_SIZE..NOTE_PLAINTEXT_SIZE]).unwrap()
+    }
+}
+
+impl<P: consensus::Parameters> BatchDomain for SaplingDomain<P> {
+    fn batch_kdf<'a>(
+        items: impl Iterator<Item = (Option<Self::SharedSecret>, &'a EphemeralKeyBytes)>,
+    ) -> Vec<Option<Self::SymmetricKey>> {
+        let (shared_secrets, ephemeral_keys): (Vec<_>, Vec<_>) = items.unzip();
+
+        let secrets: Vec<_> = shared_secrets
+            .iter()
+            .filter_map(|s| s.map(ExtendedPoint::from))
+            .collect();
+        let mut secrets_affine = vec![AffinePoint::identity(); shared_secrets.len()];
+        group::Curve::batch_normalize(&secrets, &mut secrets_affine);
+
+        let mut secrets_affine = secrets_affine.into_iter();
+        shared_secrets
+            .into_iter()
+            .map(|s| s.and_then(|_| secrets_affine.next()))
+            .zip(ephemeral_keys.into_iter())
+            .map(|(secret, ephemeral_key)| {
+                secret.map(|dhsecret| {
+                    Blake2bParams::new()
+                        .hash_length(32)
+                        .personal(KDF_SAPLING_PERSONALIZATION)
+                        .to_state()
+                        .update(&dhsecret.to_bytes())
+                        .update(ephemeral_key.as_ref())
+                        .finalize()
+                })
+            })
+            .collect()
+    }
+
+    fn batch_epk(
+        ephemeral_keys: impl Iterator<Item = EphemeralKeyBytes>,
+    ) -> Vec<(Option<Self::EphemeralPublicKey>, EphemeralKeyBytes)> {
+        let ephemeral_keys: Vec<_> = ephemeral_keys.collect();
+        let epks = jubjub::AffinePoint::batch_from_bytes(ephemeral_keys.iter().map(|b| b.0));
+        epks.into_iter()
+            .zip(ephemeral_keys.into_iter())
+            .map(|(epk, ephemeral_key)| {
+                (epk.map(jubjub::ExtendedPoint::from).into(), ephemeral_key)
+            })
+            .collect()
     }
 }
 
