@@ -222,7 +222,8 @@ pub(crate) mod private {
             writer.write_all(&padding).unwrap();
 
             let padded = writer.into_inner();
-            f4jumble::f4jumble(&padded).unwrap_or_else(|| panic!("f4jumble failed on {:?}", padded))
+            f4jumble::f4jumble(&padded)
+                .unwrap_or_else(|e| panic!("f4jumble failed on {:?}: {}", padded, e))
         }
 
         /// Parse the items of the unified container.
@@ -265,8 +266,8 @@ pub(crate) mod private {
                 result
             }
 
-            let encoded = f4jumble::f4jumble_inv(buf).ok_or_else(|| {
-                ParseError::InvalidEncoding("F4Jumble decoding failed".to_owned())
+            let encoded = f4jumble::f4jumble_inv(buf).map_err(|e| {
+                ParseError::InvalidEncoding(format!("F4Jumble decoding failed: {}", e))
             })?;
 
             // Validate and strip trailing padding bytes.

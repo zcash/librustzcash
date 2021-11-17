@@ -155,25 +155,15 @@ pub fn f4jumble_inv_mut(message: &mut [u8]) -> Result<(), Error> {
 }
 
 #[cfg(feature = "std")]
-pub fn f4jumble(message: &[u8]) -> Option<Vec<u8>> {
+pub fn f4jumble(message: &[u8]) -> Result<Vec<u8>, Error> {
     let mut result = message.to_vec();
-    let res = f4jumble_mut(&mut result);
-    if res.is_ok() {
-        Some(result)
-    } else {
-        None
-    }
+    f4jumble_mut(&mut result).map(|()| result)
 }
 
 #[cfg(feature = "std")]
-pub fn f4jumble_inv(message: &[u8]) -> Option<Vec<u8>> {
+pub fn f4jumble_inv(message: &[u8]) -> Result<Vec<u8>, Error> {
     let mut result = message.to_vec();
-    let res = f4jumble_inv_mut(&mut result);
-    if res.is_ok() {
-        Some(result)
-    } else {
-        None
-    }
+    f4jumble_inv_mut(&mut result).map(|()| result)
 }
 
 #[cfg(test)]
