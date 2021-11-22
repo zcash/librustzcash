@@ -68,13 +68,29 @@ pub fn default_params_folder() -> Option<PathBuf> {
     })
 }
 
+/// Download the Zcash Sapling parameters, check their hash, and store them in the default location.
+///
+/// This mirrors the behaviour of the `fetch-params.sh` script from `zcashd`.
+#[cfg(feature = "download-params")]
+#[cfg_attr(docsrs, doc(cfg(feature = "download-params")))]
+#[deprecated(
+    since = "0.6.0",
+    note = "please replace with `download_sapling_parameters`, and add `download_sprout_parameters` if needed"
+)]
+pub fn download_parameters() -> Result<(), minreq::Error> {
+    download_sapling_parameters()
+}
+
 /// Download the Zcash Sapling parameters, storing them in the default location.
 ///
 /// This mirrors the behaviour of the `fetch-params.sh` script from `zcashd`.
 #[cfg(feature = "download-params")]
 #[cfg_attr(docsrs, doc(cfg(feature = "download-params")))]
-pub fn download_parameters() -> Result<(), minreq::Error> {
-    download_sapling_parameters()
+pub fn download_sapling_parameters() -> Result<(), minreq::Error> {
+    fetch_params(SAPLING_SPEND_NAME, SAPLING_SPEND_HASH)?;
+    fetch_params(SAPLING_OUTPUT_NAME, SAPLING_OUTPUT_HASH)?;
+
+    Ok(())
 }
 
 /// Download the Zcash Sprout parameters, check their has, and store them in the default location.
