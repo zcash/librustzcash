@@ -43,6 +43,10 @@ pub const SAPLING_SPEND_NAME: &str = "sapling-spend.params";
 #[cfg(any(feature = "local-prover", feature = "download-params"))]
 pub const SAPLING_OUTPUT_NAME: &str = "sapling-output.params";
 
+/// The sprout parameters file name.
+#[cfg(any(feature = "local-prover", feature = "download-params"))]
+pub const SPROUT_NAME: &str = "sprout-groth16.params";
+
 // Circuit hashes
 const SAPLING_SPEND_HASH: &str = "8270785a1a0d0bc77196f000ee6d221c9c9894f55307bd9357c3f0105d31ca63991ab91324160d8f53e2bbd3c2633a6eb8bdf5205d822e7f3f73edac51b2b70c";
 const SAPLING_OUTPUT_HASH: &str = "657e3d38dbb5cb5e7dd2970e8b03d69b4787dd907285b5a7f0790dcc8072f60bf593b32cc2d1c030e00ff5ae64bf84c5c3beb84ddc841d48264b4a171744d028";
@@ -70,49 +74,63 @@ pub fn default_params_folder() -> Option<PathBuf> {
 #[cfg(feature = "download-params")]
 #[cfg_attr(docsrs, doc(cfg(feature = "download-params")))]
 pub fn download_parameters() -> Result<(), minreq::Error> {
+    download_sapling_parameters()
+}
+
+/// Download the Zcash Sprout parameters, check their has, and store them in the default location.
+///
+/// This mirrors the behaviour of the `fetch-params.sh` script from `zcashd`.
+#[cfg(feature = "download-params")]
+#[cfg_attr(docsrs, doc(cfg(feature = "download-params")))]
+pub fn download_sprout_parameters() -> Result<(), minreq::Error> {
+    fetch_params(SPROUT_NAME, SPROUT_HASH)?;
+
+    Ok(())
+}
+
+/// Download the specified parameters, check their hash, and store them in the default location.
+///
+/// This mirrors the behaviour of the `fetch-params.sh` script from `zcashd`.
+#[cfg(feature = "download-params")]
+#[cfg_attr(docsrs, doc(cfg(feature = "download-params")))]
+fn fetch_params(name: &str, expected_hash: &str) -> Result<(), minreq::Error> {
+    use std::io::Write;
+
     // Ensure that the default Zcash parameters location exists.
     let params_dir = default_params_folder().ok_or_else(|| {
         io::Error::new(io::ErrorKind::Other, "Could not load default params folder")
     })?;
     std::fs::create_dir_all(&params_dir)?;
 
-    let fetch_params = |name: &str, expected_hash: &str| -> Result<(), minreq::Error> {
-        use std::io::Write;
+    // Download the parts directly
+    // TODO: Sapling parameters are small enough for this, but Sprout parameters are ~720 MB.
+    let part_1 = minreq::get(format!("{}/{}.part.1", DOWNLOAD_URL, name)).send()?;
+    let part_2 = minreq::get(format!("{}/{}.part.2", DOWNLOAD_URL, name)).send()?;
 
-        // Download the parts directly (Sapling parameters are small enough for this).
-        let part_1 = minreq::get(format!("{}/{}.part.1", DOWNLOAD_URL, name)).send()?;
-        let part_2 = minreq::get(format!("{}/{}.part.2", DOWNLOAD_URL, name)).send()?;
+    // Verify parameter file hash.
+    let hash = blake2b_simd::State::new()
+        .update(part_1.as_bytes())
+        .update(part_2.as_bytes())
+        .finalize()
+        .to_hex();
+    if &hash != expected_hash {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!(
+                "{} failed validation (expected: {}, actual: {}, fetched {} bytes)",
+                name,
+                expected_hash,
+                hash,
+                part_1.as_bytes().len() + part_2.as_bytes().len()
+            ),
+        )
+        .into());
+    }
 
-        // Verify parameter file hash.
-        let hash = blake2b_simd::State::new()
-            .update(part_1.as_bytes())
-            .update(part_2.as_bytes())
-            .finalize()
-            .to_hex();
-        if &hash != expected_hash {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!(
-                    "{} failed validation (expected: {}, actual: {}, fetched {} bytes)",
-                    name,
-                    expected_hash,
-                    hash,
-                    part_1.as_bytes().len() + part_2.as_bytes().len()
-                ),
-            )
-            .into());
-        }
-
-        // Write parameter file.
-        let mut f = File::create(params_dir.join(name))?;
-        f.write_all(part_1.as_bytes())?;
-        f.write_all(part_2.as_bytes())?;
-        Ok(())
-    };
-
-    fetch_params(SAPLING_SPEND_NAME, SAPLING_SPEND_HASH)?;
-    fetch_params(SAPLING_OUTPUT_NAME, SAPLING_OUTPUT_HASH)?;
-
+    // Write parameter file.
+    let mut f = File::create(params_dir.join(name))?;
+    f.write_all(part_1.as_bytes())?;
+    f.write_all(part_2.as_bytes())?;
     Ok(())
 }
 
