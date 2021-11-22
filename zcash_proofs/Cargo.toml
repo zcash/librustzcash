@@ -40,7 +40,7 @@ pprof = { version = "0.8", features = ["criterion", "flamegraph"] } # MSRV 1.56
 [features]
 default = ["local-prover", "multicore"]
 bundled-prover = ["wagyu-zcash-parameters"]
-download-params = ["minreq"]
+download-params = ["minreq", "directories"]
 local-prover = ["directories"]
 multicore = ["bellman/multicore"]
 
