@@ -138,7 +138,7 @@ fn fetch_params(
     expected_hash: &str,
     timeout: Option<u64>,
 ) -> Result<PathBuf, minreq::Error> {
-    use std::{fs, io::Write};
+    use std::io::BufWriter;
 
     // Ensure that the default Zcash parameters location exists.
     let params_dir = default_params_folder().ok_or_else(|| {
@@ -151,27 +151,46 @@ fn fetch_params(
     // Download parameters if needed.
     // TODO: use try_exists when it stabilises, to exit early on permissions errors (#83186)
     if !params_path.exists() {
-        let params_url = format!("{}/{}", DOWNLOAD_URL, name);
-        let mut params_data = minreq::get(&params_url);
+        // Fail early if the directory isn't writeable.
+        let new_params_file = File::create(&params_path)?;
+        let new_params_file = BufWriter::with_capacity(1024 * 1024, new_params_file);
 
+        // Set up the download request.
+        let params_url = format!("{}/{}", DOWNLOAD_URL, name);
+        let mut params_download = minreq::get(&params_url);
         if let Some(timeout) = timeout {
-            params_data = params_data.with_timeout(timeout);
+            params_download = params_download.with_timeout(timeout);
         }
 
-        // Download the whole file into RAM
-        // TODO: Sapling parameters are small enough for this, but Sprout parameters are ~720 MB.
-        let params_data = params_data.send()?;
-
-        verify_hash(params_data.as_bytes(), expected_hash, name, &params_url)?;
-
-        // Write parameter file.
-        let mut f = File::create(&params_path)?;
-        f.write_all(params_data.as_bytes())?;
-    } else {
-        let params_data = fs::read(&params_path)?;
+        // Download the response and write it to a new file,
+        // verifying the hash as bytes are read.
+        let params_download = params_download.send_lazy()?;
+        let params_download = ResponseLazyReader(params_download);
+        let params_download = BufReader::with_capacity(1024 * 1024, params_download);
+        let params_download = hashreader::HashReader::new(params_download);
 
         verify_hash(
-            &params_data,
+            params_download,
+            new_params_file,
+            expected_hash,
+            name,
+            &params_url,
+        )?;
+    } else {
+        // TODO: avoid reading the files twice
+        // Either:
+        // - return Ok if the paths exist (we might want to check file sizes), or
+        // - always load and return the parameters, for newly downloaded and existing files.
+
+        // Read the file to verify the hash,
+        // discarding bytes after they're hashed.
+        let params_file = File::open(&params_path)?;
+        let params_file = BufReader::with_capacity(1024 * 1024, params_file);
+        let params_file = hashreader::HashReader::new(params_file);
+
+        verify_hash(
+            params_file,
+            io::sink(),
             expected_hash,
             name,
             &params_path.to_string_lossy(),
@@ -181,33 +200,35 @@ fn fetch_params(
     Ok(params_path)
 }
 
-/// Check if the `data` Blake2b hash matches `expected_hash`.
-///
-/// Returns an error containing `name` and `source` on failure.
 #[cfg(feature = "download-params")]
-#[cfg_attr(docsrs, doc(cfg(feature = "download-params")))]
-fn verify_hash(
-    data: &[u8],
-    expected_hash: &str,
-    name: &str,
-    source: &str,
-) -> Result<(), io::Error> {
-    let hash = blake2b_simd::State::new().update(data).finalize().to_hex();
+struct ResponseLazyReader(minreq::ResponseLazy);
 
-    if &hash != expected_hash {
-        Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            format!(
-                "{} failed validation (expected: {}, actual: {}, fetched {} bytes from {:?})",
-                name,
-                expected_hash,
-                hash,
-                data.len(),
-                source,
-            ),
-        ))
-    } else {
-        Ok(())
+#[cfg(feature = "download-params")]
+impl io::Read for ResponseLazyReader {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        // Zero-sized buffer. This should never happen.
+        if buf.len() == 0 {
+            return Ok(0);
+        }
+
+        // minreq has a very limited lazy reading interface.
+        match &mut self.0.next() {
+            // Read one byte into the buffer.
+            // We ignore the expected length, because we have no way of telling the BufReader.
+            Some(Ok((byte, _length))) => {
+                buf[0] = *byte;
+                Ok(1)
+            }
+
+            // Reading failed.
+            Some(Err(error)) => Err(io::Error::new(
+                io::ErrorKind::Other,
+                format!("download failed: {:?}", error),
+            )),
+
+            // Finished reading.
+            None => Ok(0),
+        }
     }
 }
 
@@ -304,4 +325,44 @@ pub fn parse_parameters<R: io::Read>(
         output_vk,
         sprout_vk,
     }
+}
+
+/// Check if the Blake2b hash from `hash_reader` matches `expected_hash`,
+/// while streaming from `data` into `sink`.
+///
+/// `hash_reader` can be used to partially read `data`,
+/// before verifying the hash using this function.
+///
+/// Returns an error containing `name` and `params_source` on failure.
+fn verify_hash<R: io::Read, W: io::Write>(
+    mut hash_reader: hashreader::HashReader<R>,
+    mut sink: W,
+    expected_hash: &str,
+    name: &str,
+    params_source: &str,
+) -> Result<(), io::Error> {
+    let read_result = io::copy(&mut hash_reader, &mut sink);
+
+    if let Err(read_error) = read_result {
+        return Err(io::Error::new(
+            read_error.kind(),
+            format!(
+                "{} failed reading: {:?}, error: {:?}",
+                name, params_source, read_error,
+            ),
+        ));
+    }
+
+    let hash = hash_reader.into_hash();
+    if hash != expected_hash {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!(
+                "{} failed validation: expected: {}, actual: {}, from: {:?}",
+                name, expected_hash, hash, params_source,
+            ),
+        ));
+    }
+
+    Ok(())
 }
