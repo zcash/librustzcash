@@ -118,15 +118,14 @@ fn fetch_params(name: &str, expected_hash: &str) -> Result<(), minreq::Error> {
     })?;
     std::fs::create_dir_all(&params_dir)?;
 
-    // Download the parts directly
+    // Download the whole file into RAM
     // TODO: Sapling parameters are small enough for this, but Sprout parameters are ~720 MB.
-    let part_1 = minreq::get(format!("{}/{}.part.1", DOWNLOAD_URL, name)).send()?;
-    let part_2 = minreq::get(format!("{}/{}.part.2", DOWNLOAD_URL, name)).send()?;
+    let params_file = format!("{}/{}", DOWNLOAD_URL, name);
+    let params_data = minreq::get(params_file).send()?;
 
     // Verify parameter file hash.
     let hash = blake2b_simd::State::new()
-        .update(part_1.as_bytes())
-        .update(part_2.as_bytes())
+        .update(params_data.as_bytes())
         .finalize()
         .to_hex();
     if &hash != expected_hash {
@@ -137,7 +136,7 @@ fn fetch_params(name: &str, expected_hash: &str) -> Result<(), minreq::Error> {
                 name,
                 expected_hash,
                 hash,
-                part_1.as_bytes().len() + part_2.as_bytes().len()
+                params_data.as_bytes().len(),
             ),
         )
         .into());
@@ -145,8 +144,7 @@ fn fetch_params(name: &str, expected_hash: &str) -> Result<(), minreq::Error> {
 
     // Write parameter file.
     let mut f = File::create(params_dir.join(name))?;
-    f.write_all(part_1.as_bytes())?;
-    f.write_all(part_2.as_bytes())?;
+    f.write_all(params_data.as_bytes())?;
     Ok(())
 }
 
