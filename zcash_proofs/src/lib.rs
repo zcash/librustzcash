@@ -75,7 +75,7 @@ pub fn default_params_folder() -> Option<PathBuf> {
 #[cfg_attr(docsrs, doc(cfg(feature = "download-params")))]
 #[deprecated(
     since = "0.6.0",
-    note = "please replace with `download_sapling_parameters`, and add `download_sprout_parameters` if needed"
+    note = "please replace with `download_sapling_parameters`, and use `download_sprout_parameters` if needed"
 )]
 pub fn download_parameters() -> Result<(), minreq::Error> {
     download_sapling_parameters()
