@@ -289,28 +289,38 @@ pub fn parse_parameters<R: io::Read>(
     // want to read it, though, so that the BLAKE2b computed afterward is consistent
     // with `b2sum` on the files.
     let mut sink = io::sink();
-    io::copy(&mut spend_fs, &mut sink)
-        .expect("couldn't finish reading Sapling spend parameter file");
-    io::copy(&mut output_fs, &mut sink)
-        .expect("couldn't finish reading Sapling output parameter file");
-    if let Some(mut sprout_fs) = sprout_fs.as_mut() {
-        io::copy(&mut sprout_fs, &mut sink)
-            .expect("couldn't finish reading Sprout groth16 parameter file");
-    }
 
-    if spend_fs.into_hash() != SAPLING_SPEND_HASH {
-        panic!("Sapling spend parameter file is not correct, please clean your `~/.zcash-params/` and re-run `fetch-params`.");
-    }
+    // TODO: use the correct paths for Windows and macOS
+    //       use the actual file paths supplied by the caller
+    verify_hash(
+        spend_fs,
+        &mut sink,
+        SAPLING_SPEND_HASH,
+        SAPLING_SPEND_NAME,
+        "a file",
+    )
+    .expect(
+        "Sapling spend parameter file is not correct, \
+         please clean your `~/.zcash-params/` and re-run `fetch-params`.",
+    );
 
-    if output_fs.into_hash() != SAPLING_OUTPUT_HASH {
-        panic!("Sapling output parameter file is not correct, please clean your `~/.zcash-params/` and re-run `fetch-params`.");
-    }
+    verify_hash(
+        output_fs,
+        &mut sink,
+        SAPLING_OUTPUT_HASH,
+        SAPLING_OUTPUT_NAME,
+        "a file",
+    )
+    .expect(
+        "Sapling output parameter file is not correct, \
+         please clean your `~/.zcash-params/` and re-run `fetch-params`.",
+    );
 
-    if sprout_fs
-        .map(|fs| fs.into_hash() != SPROUT_HASH)
-        .unwrap_or(false)
-    {
-        panic!("Sprout groth16 parameter file is not correct, please clean your `~/.zcash-params/` and re-run `fetch-params`.");
+    if let Some(sprout_fs) = sprout_fs {
+        verify_hash(sprout_fs, &mut sink, SPROUT_HASH, SPROUT_NAME, "a file").expect(
+            "Sprout groth16 parameter file is not correct, \
+         please clean your `~/.zcash-params/` and re-run `fetch-params`.",
+        );
     }
 
     // Prepare verifying keys
