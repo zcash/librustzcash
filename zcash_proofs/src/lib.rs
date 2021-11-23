@@ -89,7 +89,7 @@ pub fn default_params_folder() -> Option<PathBuf> {
     note = "please replace with `download_sapling_parameters`, and use `download_sprout_parameters` if needed"
 )]
 pub fn download_parameters() -> Result<(), minreq::Error> {
-    download_sapling_parameters().map(|_sapling_paths| ())
+    download_sapling_parameters(None).map(|_sapling_paths| ())
 }
 
 /// Download the Zcash Sapling parameters if needed, and store them in the default location.
@@ -97,12 +97,17 @@ pub fn download_parameters() -> Result<(), minreq::Error> {
 ///
 /// This mirrors the behaviour of the `fetch-params.sh` script from `zcashd`.
 ///
+/// Use `timeout` to set a timeout in seconds for each file download.
+/// If `timeout` is `None`, a timeout can be set using the `MINREQ_TIMEOUT` environmental variable.
+///
 /// Returns the paths to the downloaded files.
 #[cfg(feature = "download-params")]
 #[cfg_attr(docsrs, doc(cfg(feature = "download-params")))]
-pub fn download_sapling_parameters() -> Result<SaplingParameterPaths, minreq::Error> {
-    let spend = fetch_params(SAPLING_SPEND_NAME, SAPLING_SPEND_HASH)?;
-    let output = fetch_params(SAPLING_OUTPUT_NAME, SAPLING_OUTPUT_HASH)?;
+pub fn download_sapling_parameters(
+    timeout: Option<u64>,
+) -> Result<SaplingParameterPaths, minreq::Error> {
+    let spend = fetch_params(SAPLING_SPEND_NAME, SAPLING_SPEND_HASH, timeout)?;
+    let output = fetch_params(SAPLING_OUTPUT_NAME, SAPLING_OUTPUT_HASH, timeout)?;
 
     Ok(SaplingParameterPaths { spend, output })
 }
@@ -112,11 +117,14 @@ pub fn download_sapling_parameters() -> Result<SaplingParameterPaths, minreq::Er
 ///
 /// This mirrors the behaviour of the `fetch-params.sh` script from `zcashd`.
 ///
+/// Use `timeout` to set a timeout in seconds for the file download.
+/// If `timeout` is `None`, a timeout can be set using the `MINREQ_TIMEOUT` environmental variable.
+///
 /// Returns the path to the downloaded file.
 #[cfg(feature = "download-params")]
 #[cfg_attr(docsrs, doc(cfg(feature = "download-params")))]
-pub fn download_sprout_parameters() -> Result<PathBuf, minreq::Error> {
-    fetch_params(SPROUT_NAME, SPROUT_HASH)
+pub fn download_sprout_parameters(timeout: Option<u64>) -> Result<PathBuf, minreq::Error> {
+    fetch_params(SPROUT_NAME, SPROUT_HASH, timeout)
 }
 
 /// Download the specified parameters if needed, and store them in the default location.
@@ -125,7 +133,11 @@ pub fn download_sprout_parameters() -> Result<PathBuf, minreq::Error> {
 /// Returns the path to the downloaded file.
 #[cfg(feature = "download-params")]
 #[cfg_attr(docsrs, doc(cfg(feature = "download-params")))]
-fn fetch_params(name: &str, expected_hash: &str) -> Result<PathBuf, minreq::Error> {
+fn fetch_params(
+    name: &str,
+    expected_hash: &str,
+    timeout: Option<u64>,
+) -> Result<PathBuf, minreq::Error> {
     use std::{fs, io::Write};
 
     // Ensure that the default Zcash parameters location exists.
@@ -139,10 +151,16 @@ fn fetch_params(name: &str, expected_hash: &str) -> Result<PathBuf, minreq::Erro
     // Download parameters if needed.
     // TODO: use try_exists when it stabilises, to exit early on permissions errors (#83186)
     if !params_path.exists() {
+        let params_url = format!("{}/{}", DOWNLOAD_URL, name);
+        let mut params_data = minreq::get(&params_url);
+
+        if let Some(timeout) = timeout {
+            params_data = params_data.with_timeout(timeout);
+        }
+
         // Download the whole file into RAM
         // TODO: Sapling parameters are small enough for this, but Sprout parameters are ~720 MB.
-        let params_url = format!("{}/{}", DOWNLOAD_URL, name);
-        let params_data = minreq::get(&params_url).send()?;
+        let params_data = params_data.send()?;
 
         verify_hash(params_data.as_bytes(), expected_hash, name, &params_url)?;
 
