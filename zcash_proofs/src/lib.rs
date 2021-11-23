@@ -55,6 +55,16 @@ const SPROUT_HASH: &str = "e9b238411bd6c0ec4791e9d04245ec350c9c5744f5610dfcce436
 #[cfg(feature = "download-params")]
 const DOWNLOAD_URL: &str = "https://download.z.cash/downloads";
 
+/// The paths to the Sapling parameter files.
+#[cfg(feature = "download-params")]
+pub struct SaplingParameterPaths {
+    /// The path to the Sapling spend parameter file.
+    pub spend: PathBuf,
+
+    /// The path to the Sapling output parameter file.
+    pub output: PathBuf,
+}
+
 /// Returns the default folder that the Zcash proving parameters are located in.
 #[cfg(feature = "directories")]
 #[cfg_attr(docsrs, doc(cfg(feature = "directories")))]
@@ -68,7 +78,8 @@ pub fn default_params_folder() -> Option<PathBuf> {
     })
 }
 
-/// Download the Zcash Sapling parameters, check their hash, and store them in the default location.
+/// Download the Zcash Sapling parameters if needed, and store them in the default location.
+/// Always checks the hashes of the files, even if they didn't need to be downloaded.
 ///
 /// This mirrors the behaviour of the `fetch-params.sh` script from `zcashd`.
 #[cfg(feature = "download-params")]
@@ -78,39 +89,44 @@ pub fn default_params_folder() -> Option<PathBuf> {
     note = "please replace with `download_sapling_parameters`, and use `download_sprout_parameters` if needed"
 )]
 pub fn download_parameters() -> Result<(), minreq::Error> {
-    download_sapling_parameters()
+    download_sapling_parameters().map(|_sapling_paths| ())
 }
 
-/// Download the Zcash Sapling parameters, storing them in the default location.
+/// Download the Zcash Sapling parameters if needed, and store them in the default location.
+/// Always checks the hashes of the files, even if they didn't need to be downloaded.
 ///
 /// This mirrors the behaviour of the `fetch-params.sh` script from `zcashd`.
+///
+/// Returns the paths to the downloaded files.
 #[cfg(feature = "download-params")]
 #[cfg_attr(docsrs, doc(cfg(feature = "download-params")))]
-pub fn download_sapling_parameters() -> Result<(), minreq::Error> {
-    fetch_params(SAPLING_SPEND_NAME, SAPLING_SPEND_HASH)?;
-    fetch_params(SAPLING_OUTPUT_NAME, SAPLING_OUTPUT_HASH)?;
+pub fn download_sapling_parameters() -> Result<SaplingParameterPaths, minreq::Error> {
+    let spend = fetch_params(SAPLING_SPEND_NAME, SAPLING_SPEND_HASH)?;
+    let output = fetch_params(SAPLING_OUTPUT_NAME, SAPLING_OUTPUT_HASH)?;
 
-    Ok(())
+    Ok(SaplingParameterPaths { spend, output })
 }
 
-/// Download the Zcash Sprout parameters, check their has, and store them in the default location.
+/// Download the Zcash Sprout parameters if needed, and store them in the default location.
+/// Always checks the hash of the file, even if it didn't need to be downloaded.
 ///
 /// This mirrors the behaviour of the `fetch-params.sh` script from `zcashd`.
+///
+/// Returns the path to the downloaded file.
 #[cfg(feature = "download-params")]
 #[cfg_attr(docsrs, doc(cfg(feature = "download-params")))]
-pub fn download_sprout_parameters() -> Result<(), minreq::Error> {
-    fetch_params(SPROUT_NAME, SPROUT_HASH)?;
-
-    Ok(())
+pub fn download_sprout_parameters() -> Result<PathBuf, minreq::Error> {
+    fetch_params(SPROUT_NAME, SPROUT_HASH)
 }
 
-/// Download the specified parameters, check their hash, and store them in the default location.
+/// Download the specified parameters if needed, and store them in the default location.
+/// Always checks the hash of the file, even if it didn't need to be downloaded.
 ///
-/// This mirrors the behaviour of the `fetch-params.sh` script from `zcashd`.
+/// Returns the path to the downloaded file.
 #[cfg(feature = "download-params")]
 #[cfg_attr(docsrs, doc(cfg(feature = "download-params")))]
-fn fetch_params(name: &str, expected_hash: &str) -> Result<(), minreq::Error> {
-    use std::io::Write;
+fn fetch_params(name: &str, expected_hash: &str) -> Result<PathBuf, minreq::Error> {
+    use std::{fs, io::Write};
 
     // Ensure that the default Zcash parameters location exists.
     let params_dir = default_params_folder().ok_or_else(|| {
@@ -118,34 +134,63 @@ fn fetch_params(name: &str, expected_hash: &str) -> Result<(), minreq::Error> {
     })?;
     std::fs::create_dir_all(&params_dir)?;
 
-    // Download the whole file into RAM
-    // TODO: Sapling parameters are small enough for this, but Sprout parameters are ~720 MB.
-    let params_file = format!("{}/{}", DOWNLOAD_URL, name);
-    let params_data = minreq::get(params_file).send()?;
+    let params_path = params_dir.join(name);
 
-    // Verify parameter file hash.
-    let hash = blake2b_simd::State::new()
-        .update(params_data.as_bytes())
-        .finalize()
-        .to_hex();
+    // Download parameters if needed.
+    // TODO: use try_exists when it stabilises, to exit early on permissions errors (#83186)
+    if !params_path.exists() {
+        // Download the whole file into RAM
+        // TODO: Sapling parameters are small enough for this, but Sprout parameters are ~720 MB.
+        let params_url = format!("{}/{}", DOWNLOAD_URL, name);
+        let params_data = minreq::get(&params_url).send()?;
+
+        verify_hash(params_data.as_bytes(), expected_hash, name, &params_url)?;
+
+        // Write parameter file.
+        let mut f = File::create(&params_path)?;
+        f.write_all(params_data.as_bytes())?;
+    } else {
+        let params_data = fs::read(&params_path)?;
+
+        verify_hash(
+            &params_data,
+            expected_hash,
+            name,
+            &params_path.to_string_lossy(),
+        )?;
+    }
+
+    Ok(params_path)
+}
+
+/// Check if the `data` Blake2b hash matches `expected_hash`.
+///
+/// Returns an error containing `name` and `source` on failure.
+#[cfg(feature = "download-params")]
+#[cfg_attr(docsrs, doc(cfg(feature = "download-params")))]
+fn verify_hash(
+    data: &[u8],
+    expected_hash: &str,
+    name: &str,
+    source: &str,
+) -> Result<(), io::Error> {
+    let hash = blake2b_simd::State::new().update(data).finalize().to_hex();
+
     if &hash != expected_hash {
-        return Err(io::Error::new(
+        Err(io::Error::new(
             io::ErrorKind::InvalidData,
             format!(
-                "{} failed validation (expected: {}, actual: {}, fetched {} bytes)",
+                "{} failed validation (expected: {}, actual: {}, fetched {} bytes from {:?})",
                 name,
                 expected_hash,
                 hash,
-                params_data.as_bytes().len(),
+                data.len(),
+                source,
             ),
-        )
-        .into());
+        ))
+    } else {
+        Ok(())
     }
-
-    // Write parameter file.
-    let mut f = File::create(params_dir.join(name))?;
-    f.write_all(params_data.as_bytes())?;
-    Ok(())
 }
 
 pub struct ZcashParameters {
