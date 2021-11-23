@@ -81,6 +81,8 @@ pub fn default_params_folder() -> Option<PathBuf> {
 /// Download the Zcash Sapling parameters if needed, and store them in the default location.
 /// Always checks the hashes of the files, even if they didn't need to be downloaded.
 ///
+/// A timeout can be set using the `MINREQ_TIMEOUT` environmental variable.
+///
 /// This mirrors the behaviour of the `fetch-params.sh` script from `zcashd`.
 #[cfg(feature = "download-params")]
 #[cfg_attr(docsrs, doc(cfg(feature = "download-params")))]
