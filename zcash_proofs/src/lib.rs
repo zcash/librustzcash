@@ -52,6 +52,11 @@ const SAPLING_SPEND_HASH: &str = "8270785a1a0d0bc77196f000ee6d221c9c9894f55307bd
 const SAPLING_OUTPUT_HASH: &str = "657e3d38dbb5cb5e7dd2970e8b03d69b4787dd907285b5a7f0790dcc8072f60bf593b32cc2d1c030e00ff5ae64bf84c5c3beb84ddc841d48264b4a171744d028";
 const SPROUT_HASH: &str = "e9b238411bd6c0ec4791e9d04245ec350c9c5744f5610dfcce4365d5ca49dfefd5054e371842b3f88fa1b9d7e8e075249b3ebabd167fa8b0f3161292d36c180a";
 
+// Circuit parameter file sizes
+const SAPLING_SPEND_BYTES: u64 = 47958396;
+const SAPLING_OUTPUT_BYTES: u64 = 3592860;
+const SPROUT_BYTES: u64 = 725523612;
+
 #[cfg(feature = "download-params")]
 const DOWNLOAD_URL: &str = "https://download.z.cash/downloads";
 
@@ -79,7 +84,7 @@ pub fn default_params_folder() -> Option<PathBuf> {
 }
 
 /// Download the Zcash Sapling parameters if needed, and store them in the default location.
-/// Always checks the hashes of the files, even if they didn't need to be downloaded.
+/// Always checks the sizes and hashes of the files, even if they didn't need to be downloaded.
 ///
 /// A download timeout can be set using the `MINREQ_TIMEOUT` environmental variable.
 ///
@@ -95,7 +100,7 @@ pub fn download_parameters() -> Result<(), minreq::Error> {
 }
 
 /// Download the Zcash Sapling parameters if needed, and store them in the default location.
-/// Always checks the hashes of the files, even if they didn't need to be downloaded.
+/// Always checks the sizes and hashes of the files, even if they didn't need to be downloaded.
 ///
 /// This mirrors the behaviour of the `fetch-params.sh` script from `zcashd`.
 ///
@@ -108,14 +113,24 @@ pub fn download_parameters() -> Result<(), minreq::Error> {
 pub fn download_sapling_parameters(
     timeout: Option<u64>,
 ) -> Result<SaplingParameterPaths, minreq::Error> {
-    let spend = fetch_params(SAPLING_SPEND_NAME, SAPLING_SPEND_HASH, timeout)?;
-    let output = fetch_params(SAPLING_OUTPUT_NAME, SAPLING_OUTPUT_HASH, timeout)?;
+    let spend = fetch_params(
+        SAPLING_SPEND_NAME,
+        SAPLING_SPEND_HASH,
+        SAPLING_SPEND_BYTES,
+        timeout,
+    )?;
+    let output = fetch_params(
+        SAPLING_OUTPUT_NAME,
+        SAPLING_OUTPUT_HASH,
+        SAPLING_OUTPUT_BYTES,
+        timeout,
+    )?;
 
     Ok(SaplingParameterPaths { spend, output })
 }
 
 /// Download the Zcash Sprout parameters if needed, and store them in the default location.
-/// Always checks the hash of the file, even if it didn't need to be downloaded.
+/// Always checks the size and hash of the file, even if it didn't need to be downloaded.
 ///
 /// This mirrors the behaviour of the `fetch-params.sh` script from `zcashd`.
 ///
@@ -126,11 +141,11 @@ pub fn download_sapling_parameters(
 #[cfg(feature = "download-params")]
 #[cfg_attr(docsrs, doc(cfg(feature = "download-params")))]
 pub fn download_sprout_parameters(timeout: Option<u64>) -> Result<PathBuf, minreq::Error> {
-    fetch_params(SPROUT_NAME, SPROUT_HASH, timeout)
+    fetch_params(SPROUT_NAME, SPROUT_HASH, SPROUT_BYTES, timeout)
 }
 
 /// Download the specified parameters if needed, and store them in the default location.
-/// Always checks the hash of the file, even if it didn't need to be downloaded.
+/// Always checks the size and hash of the file, even if it didn't need to be downloaded.
 ///
 /// Returns the path to the downloaded file.
 #[cfg(feature = "download-params")]
@@ -138,6 +153,7 @@ pub fn download_sprout_parameters(timeout: Option<u64>) -> Result<PathBuf, minre
 fn fetch_params(
     name: &str,
     expected_hash: &str,
+    expected_bytes: u64,
     timeout: Option<u64>,
 ) -> Result<PathBuf, minreq::Error> {
     use std::io::{BufWriter, Read};
@@ -178,22 +194,34 @@ fn fetch_params(
         let params_download_1 = ResponseLazyReader(params_download_1.send_lazy()?);
         let params_download_2 = ResponseLazyReader(params_download_2.send_lazy()?);
 
-        let params_download =
-            BufReader::with_capacity(1024 * 1024, params_download_1.chain(params_download_2));
+        // Limit the download size to avoid DoS.
+        let params_download = params_download_1
+            .chain(params_download_2)
+            .take(expected_bytes);
+        let params_download = BufReader::with_capacity(1024 * 1024, params_download);
         let params_download = hashreader::HashReader::new(params_download);
 
         verify_hash(
             params_download,
             new_params_file,
             expected_hash,
+            expected_bytes,
             name,
             &format!("{} + {}", params_url_1, params_url_2),
         )?;
     } else {
         // TODO: avoid reading the files twice
         // Either:
-        // - return Ok if the paths exist (we might want to check file sizes), or
+        // - return Ok if the paths exist, or
         // - always load and return the parameters, for newly downloaded and existing files.
+
+        let file_path_string = params_path.to_string_lossy();
+
+        // Check the file size is correct before hashing large amounts of data.
+        verify_file_size(&params_path, expected_bytes, name, &file_path_string).expect(
+            "parameter file size is not correct, \
+             please clean your Zcash parameters directory and re-run `fetch-params`.",
+        );
 
         // Read the file to verify the hash,
         // discarding bytes after they're hashed.
@@ -205,8 +233,9 @@ fn fetch_params(
             params_file,
             io::sink(),
             expected_hash,
+            expected_bytes,
             name,
-            &params_path.to_string_lossy(),
+            &file_path_string,
         )?;
     }
 
@@ -253,11 +282,50 @@ pub struct ZcashParameters {
     pub sprout_vk: Option<PreparedVerifyingKey<Bls12>>,
 }
 
+/// Load the specified parameters, checking the sizes and hashes of the files.
+///
+/// Returns the loaded parameters.
 pub fn load_parameters(
     spend_path: &Path,
     output_path: &Path,
     sprout_path: Option<&Path>,
 ) -> ZcashParameters {
+    // Check the file sizes are correct before hashing large amounts of data.
+    verify_file_size(
+        spend_path,
+        SAPLING_SPEND_BYTES,
+        "sapling spend",
+        &spend_path.to_string_lossy(),
+    )
+    .expect(
+        "parameter file size is not correct, \
+         please clean your Zcash parameters directory and re-run `fetch-params`.",
+    );
+
+    verify_file_size(
+        output_path,
+        SAPLING_OUTPUT_BYTES,
+        "sapling output",
+        &output_path.to_string_lossy(),
+    )
+    .expect(
+        "parameter file size is not correct, \
+         please clean your Zcash parameters directory and re-run `fetch-params`.",
+    );
+
+    if let Some(sprout_path) = sprout_path {
+        verify_file_size(
+            sprout_path,
+            SPROUT_BYTES,
+            "sprout groth16",
+            &sprout_path.to_string_lossy(),
+        )
+        .expect(
+            "parameter file size is not correct, \
+             please clean your Zcash parameters directory and re-run `fetch-params`.",
+        );
+    }
+
     // Load from each of the paths
     let spend_fs = File::open(spend_path).expect("couldn't load Sapling spend parameters file");
     let output_fs = File::open(output_path).expect("couldn't load Sapling output parameters file");
@@ -309,6 +377,7 @@ pub fn parse_parameters<R: io::Read>(
         spend_fs,
         &mut sink,
         SAPLING_SPEND_HASH,
+        SAPLING_SPEND_BYTES,
         SAPLING_SPEND_NAME,
         "a file",
     )
@@ -321,6 +390,7 @@ pub fn parse_parameters<R: io::Read>(
         output_fs,
         &mut sink,
         SAPLING_OUTPUT_HASH,
+        SAPLING_OUTPUT_BYTES,
         SAPLING_OUTPUT_NAME,
         "a file",
     )
@@ -330,9 +400,17 @@ pub fn parse_parameters<R: io::Read>(
     );
 
     if let Some(sprout_fs) = sprout_fs {
-        verify_hash(sprout_fs, &mut sink, SPROUT_HASH, SPROUT_NAME, "a file").expect(
+        verify_hash(
+            sprout_fs,
+            &mut sink,
+            SPROUT_HASH,
+            SPROUT_BYTES,
+            SPROUT_NAME,
+            "a file",
+        )
+        .expect(
             "Sprout groth16 parameter file is not correct, \
-         please clean your `~/.zcash-params/` and re-run `fetch-params`.",
+             please clean your `~/.zcash-params/` and re-run `fetch-params`.",
         );
     }
 
@@ -350,6 +428,32 @@ pub fn parse_parameters<R: io::Read>(
     }
 }
 
+/// Check if the size of the file at `params_path` matches `expected_bytes`,
+/// using filesystem metadata.
+///
+/// Returns an error containing `name` and `params_source` on failure.
+fn verify_file_size(
+    params_path: &Path,
+    expected_bytes: u64,
+    name: &str,
+    params_source: &str,
+) -> Result<(), io::Error> {
+    let file_size = std::fs::metadata(&params_path)?.len();
+
+    if file_size != expected_bytes {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!(
+                "{} failed validation: expected {} bytes, \
+                 actual {} bytes from {:?}",
+                name, expected_bytes, file_size, params_source,
+            ),
+        ));
+    }
+
+    Ok(())
+}
+
 /// Check if the Blake2b hash from `hash_reader` matches `expected_hash`,
 /// while streaming from `data` into `sink`.
 ///
@@ -361,6 +465,7 @@ fn verify_hash<R: io::Read, W: io::Write>(
     mut hash_reader: hashreader::HashReader<R>,
     mut sink: W,
     expected_hash: &str,
+    expected_bytes: u64,
     name: &str,
     params_source: &str,
 ) -> Result<(), io::Error> {
@@ -370,10 +475,11 @@ fn verify_hash<R: io::Read, W: io::Write>(
         return Err(io::Error::new(
             read_error.kind(),
             format!(
-                "{} failed reading after {} bytes from {}, error: {:?}",
+                "{} failed reading after {} bytes, expected {} bytes from {:?}, error: {:?}",
                 name,
                 params_source,
                 hash_reader.byte_count(),
+                expected_bytes,
                 read_error,
             ),
         ));
@@ -385,8 +491,9 @@ fn verify_hash<R: io::Read, W: io::Write>(
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
             format!(
-                "{} failed validation: expected: {}, actual: {}, hashed {} bytes from {}",
-                name, expected_hash, hash, byte_count, params_source,
+                "{} failed validation: expected: {} hashing {} bytes, \
+                 actual: {} hashing {} bytes from {:?}",
+                name, expected_hash, expected_bytes, hash, byte_count, params_source,
             ),
         ));
     }
