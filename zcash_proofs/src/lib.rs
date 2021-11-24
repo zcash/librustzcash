@@ -81,7 +81,7 @@ pub fn default_params_folder() -> Option<PathBuf> {
 /// Download the Zcash Sapling parameters if needed, and store them in the default location.
 /// Always checks the hashes of the files, even if they didn't need to be downloaded.
 ///
-/// A timeout can be set using the `MINREQ_TIMEOUT` environmental variable.
+/// A download timeout can be set using the `MINREQ_TIMEOUT` environmental variable.
 ///
 /// This mirrors the behaviour of the `fetch-params.sh` script from `zcashd`.
 #[cfg(feature = "download-params")]
@@ -140,7 +140,7 @@ fn fetch_params(
     expected_hash: &str,
     timeout: Option<u64>,
 ) -> Result<PathBuf, minreq::Error> {
-    use std::io::BufWriter;
+    use std::io::{BufWriter, Read};
 
     // Ensure that the default Zcash parameters location exists.
     let params_dir = default_params_folder().ok_or_else(|| {
@@ -157,18 +157,29 @@ fn fetch_params(
         let new_params_file = File::create(&params_path)?;
         let new_params_file = BufWriter::with_capacity(1024 * 1024, new_params_file);
 
-        // Set up the download request.
-        let params_url = format!("{}/{}", DOWNLOAD_URL, name);
-        let mut params_download = minreq::get(&params_url);
+        // Set up the download requests.
+        //
+        // It's necessary for us to host these files in two parts,
+        // because of CloudFlare's maximum cached file size limit of 512 MB.
+        // The files must fit in the cache to prevent "denial of wallet" attacks.
+        let params_url_1 = format!("{}/{}.part.1", DOWNLOAD_URL, name);
+        // TODO: skip empty part.2 files when downloading sapling spend and sapling output
+        let params_url_2 = format!("{}/{}.part.2", DOWNLOAD_URL, name);
+
+        let mut params_download_1 = minreq::get(&params_url_1);
+        let mut params_download_2 = minreq::get(&params_url_2);
         if let Some(timeout) = timeout {
-            params_download = params_download.with_timeout(timeout);
+            params_download_1 = params_download_1.with_timeout(timeout);
+            params_download_2 = params_download_2.with_timeout(timeout);
         }
 
-        // Download the response and write it to a new file,
+        // Download the responses and write them to a new file,
         // verifying the hash as bytes are read.
-        let params_download = params_download.send_lazy()?;
-        let params_download = ResponseLazyReader(params_download);
-        let params_download = BufReader::with_capacity(1024 * 1024, params_download);
+        let params_download_1 = ResponseLazyReader(params_download_1.send_lazy()?);
+        let params_download_2 = ResponseLazyReader(params_download_2.send_lazy()?);
+
+        let params_download =
+            BufReader::with_capacity(1024 * 1024, params_download_1.chain(params_download_2));
         let params_download = hashreader::HashReader::new(params_download);
 
         verify_hash(
@@ -176,7 +187,7 @@ fn fetch_params(
             new_params_file,
             expected_hash,
             name,
-            &params_url,
+            &format!("{} + {}", params_url_1, params_url_2),
         )?;
     } else {
         // TODO: avoid reading the files twice
