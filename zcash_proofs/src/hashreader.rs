@@ -5,6 +5,7 @@ use std::io::{self, Read};
 pub struct HashReader<R: Read> {
     reader: R,
     hasher: State,
+    byte_count: usize,
 }
 
 impl<R: Read> HashReader<R> {
@@ -13,6 +14,7 @@ impl<R: Read> HashReader<R> {
         HashReader {
             reader,
             hasher: State::new(),
+            byte_count: 0,
         }
     }
 
@@ -27,6 +29,11 @@ impl<R: Read> HashReader<R> {
 
         s
     }
+
+    /// Return the number of bytes read so far.
+    pub fn byte_count(&self) -> usize {
+        self.byte_count
+    }
 }
 
 impl<R: Read> Read for HashReader<R> {
@@ -35,6 +42,7 @@ impl<R: Read> Read for HashReader<R> {
 
         if bytes > 0 {
             self.hasher.update(&buf[0..bytes]);
+            self.byte_count += bytes;
         }
 
         Ok(bytes)

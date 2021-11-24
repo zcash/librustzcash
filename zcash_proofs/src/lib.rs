@@ -370,19 +370,23 @@ fn verify_hash<R: io::Read, W: io::Write>(
         return Err(io::Error::new(
             read_error.kind(),
             format!(
-                "{} failed reading: {:?}, error: {:?}",
-                name, params_source, read_error,
+                "{} failed reading after {} bytes from {}, error: {:?}",
+                name,
+                params_source,
+                hash_reader.byte_count(),
+                read_error,
             ),
         ));
     }
 
+    let byte_count = hash_reader.byte_count();
     let hash = hash_reader.into_hash();
     if hash != expected_hash {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
             format!(
-                "{} failed validation: expected: {}, actual: {}, from: {:?}",
-                name, expected_hash, hash, params_source,
+                "{} failed validation: expected: {}, actual: {}, hashed {} bytes from {}",
+                name, expected_hash, hash, byte_count, params_source,
             ),
         ));
     }
