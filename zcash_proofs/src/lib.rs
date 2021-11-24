@@ -147,7 +147,7 @@ pub fn download_sprout_parameters(timeout: Option<u64>) -> Result<PathBuf, minre
 /// Download the specified parameters if needed, and store them in the default location.
 /// Always checks the size and hash of the file, even if it didn't need to be downloaded.
 ///
-/// Returns the path to the downloaded file.
+/// See [`download_sapling_parameters`] for details.
 #[cfg(feature = "download-params")]
 #[cfg_attr(docsrs, doc(cfg(feature = "download-params")))]
 fn fetch_params(
@@ -156,8 +156,6 @@ fn fetch_params(
     expected_bytes: u64,
     timeout: Option<u64>,
 ) -> Result<PathBuf, minreq::Error> {
-    use std::io::{BufWriter, Read};
-
     // Ensure that the default Zcash parameters location exists.
     let params_dir = default_params_folder().ok_or_else(|| {
         io::Error::new(io::ErrorKind::Other, "Could not load default params folder")
@@ -169,8 +167,8 @@ fn fetch_params(
     // Download parameters if needed.
     // TODO: use try_exists when it stabilises, to exit early on permissions errors (#83186)
     if !params_path.exists() {
-        result = stream_params_downloads_to_disk(
-            params_path,
+        let result = stream_params_downloads_to_disk(
+            &params_path,
             name,
             expected_hash,
             expected_bytes,
@@ -179,7 +177,7 @@ fn fetch_params(
 
         // Remove the file on error, and return the download or hash error.
         if result.is_err() {
-            let _ = std::fs::remove_file(params_path);
+            let _ = std::fs::remove_file(&params_path);
             result?;
         }
     } else {
@@ -215,9 +213,9 @@ fn fetch_params(
     Ok(params_path)
 }
 
-/// Download the specified parameters, stream them to `params_path`, and check their hash.
+/// Download the specified parameter file, stream it to `params_path`, and check its hash.
 ///
-/// Returns the path to the downloaded file.
+/// See [`download_sapling_parameters`] for details.
 #[cfg(feature = "download-params")]
 #[cfg_attr(docsrs, doc(cfg(feature = "download-params")))]
 fn stream_params_downloads_to_disk(
@@ -226,7 +224,9 @@ fn stream_params_downloads_to_disk(
     expected_hash: &str,
     expected_bytes: u64,
     timeout: Option<u64>,
-) -> Result<PathBuf, minreq::Error> {
+) -> Result<(), minreq::Error> {
+    use std::io::{BufWriter, Read};
+
     // Fail early if the directory isn't writeable.
     let new_params_file = File::create(&params_path)?;
     let new_params_file = BufWriter::with_capacity(1024 * 1024, new_params_file);
@@ -267,6 +267,8 @@ fn stream_params_downloads_to_disk(
         name,
         &format!("{} + {}", params_url_1, params_url_2),
     )?;
+
+    Ok(())
 }
 
 #[cfg(feature = "download-params")]

@@ -60,5 +60,9 @@ required-features = ["directories"]
 name = "download-params"
 required-features = ["download-params"]
 
+[[example]]
+name = "download-sprout-and-sapling-params"
+required-features = ["download-params"]
+
 [badges]
 maintenance = { status = "actively-developed" }
