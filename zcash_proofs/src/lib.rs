@@ -169,46 +169,19 @@ fn fetch_params(
     // Download parameters if needed.
     // TODO: use try_exists when it stabilises, to exit early on permissions errors (#83186)
     if !params_path.exists() {
-        // Fail early if the directory isn't writeable.
-        let new_params_file = File::create(&params_path)?;
-        let new_params_file = BufWriter::with_capacity(1024 * 1024, new_params_file);
-
-        // Set up the download requests.
-        //
-        // It's necessary for us to host these files in two parts,
-        // because of CloudFlare's maximum cached file size limit of 512 MB.
-        // The files must fit in the cache to prevent "denial of wallet" attacks.
-        let params_url_1 = format!("{}/{}.part.1", DOWNLOAD_URL, name);
-        // TODO: skip empty part.2 files when downloading sapling spend and sapling output
-        let params_url_2 = format!("{}/{}.part.2", DOWNLOAD_URL, name);
-
-        let mut params_download_1 = minreq::get(&params_url_1);
-        let mut params_download_2 = minreq::get(&params_url_2);
-        if let Some(timeout) = timeout {
-            params_download_1 = params_download_1.with_timeout(timeout);
-            params_download_2 = params_download_2.with_timeout(timeout);
-        }
-
-        // Download the responses and write them to a new file,
-        // verifying the hash as bytes are read.
-        let params_download_1 = ResponseLazyReader(params_download_1.send_lazy()?);
-        let params_download_2 = ResponseLazyReader(params_download_2.send_lazy()?);
-
-        // Limit the download size to avoid DoS.
-        let params_download = params_download_1
-            .chain(params_download_2)
-            .take(expected_bytes);
-        let params_download = BufReader::with_capacity(1024 * 1024, params_download);
-        let params_download = hashreader::HashReader::new(params_download);
-
-        verify_hash(
-            params_download,
-            new_params_file,
+        result = stream_params_downloads_to_disk(
+            params_path,
+            name,
             expected_hash,
             expected_bytes,
-            name,
-            &format!("{} + {}", params_url_1, params_url_2),
-        )?;
+            timeout,
+        );
+
+        // Remove the file on error, and return the download or hash error.
+        if result.is_err() {
+            let _ = std::fs::remove_file(params_path);
+            result?;
+        }
     } else {
         // TODO: avoid reading the files twice
         // Either:
@@ -240,6 +213,60 @@ fn fetch_params(
     }
 
     Ok(params_path)
+}
+
+/// Download the specified parameters, stream them to `params_path`, and check their hash.
+///
+/// Returns the path to the downloaded file.
+#[cfg(feature = "download-params")]
+#[cfg_attr(docsrs, doc(cfg(feature = "download-params")))]
+fn stream_params_downloads_to_disk(
+    params_path: &Path,
+    name: &str,
+    expected_hash: &str,
+    expected_bytes: u64,
+    timeout: Option<u64>,
+) -> Result<PathBuf, minreq::Error> {
+    // Fail early if the directory isn't writeable.
+    let new_params_file = File::create(&params_path)?;
+    let new_params_file = BufWriter::with_capacity(1024 * 1024, new_params_file);
+
+    // Set up the download requests.
+    //
+    // It's necessary for us to host these files in two parts,
+    // because of CloudFlare's maximum cached file size limit of 512 MB.
+    // The files must fit in the cache to prevent "denial of wallet" attacks.
+    let params_url_1 = format!("{}/{}.part.1", DOWNLOAD_URL, name);
+    // TODO: skip empty part.2 files when downloading sapling spend and sapling output
+    let params_url_2 = format!("{}/{}.part.2", DOWNLOAD_URL, name);
+
+    let mut params_download_1 = minreq::get(&params_url_1);
+    let mut params_download_2 = minreq::get(&params_url_2);
+    if let Some(timeout) = timeout {
+        params_download_1 = params_download_1.with_timeout(timeout);
+        params_download_2 = params_download_2.with_timeout(timeout);
+    }
+
+    // Download the responses and write them to a new file,
+    // verifying the hash as bytes are read.
+    let params_download_1 = ResponseLazyReader(params_download_1.send_lazy()?);
+    let params_download_2 = ResponseLazyReader(params_download_2.send_lazy()?);
+
+    // Limit the download size to avoid DoS.
+    let params_download = params_download_1
+        .chain(params_download_2)
+        .take(expected_bytes);
+    let params_download = BufReader::with_capacity(1024 * 1024, params_download);
+    let params_download = hashreader::HashReader::new(params_download);
+
+    verify_hash(
+        params_download,
+        new_params_file,
+        expected_hash,
+        expected_bytes,
+        name,
+        &format!("{} + {}", params_url_1, params_url_2),
+    )?;
 }
 
 #[cfg(feature = "download-params")]
