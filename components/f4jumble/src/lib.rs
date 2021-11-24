@@ -1,13 +1,51 @@
+#![no_std]
+
 use blake2b_simd::{Params as Blake2bParams, OUTBYTES};
-use std::cmp::min;
-use std::ops::RangeInclusive;
+
+use core::cmp::min;
+use core::fmt;
+use core::ops::RangeInclusive;
+use core::result::Result;
+
+#[cfg(feature = "std")]
+#[macro_use]
+extern crate std;
+#[cfg(feature = "std")]
+use std::vec::Vec;
 
 #[cfg(test)]
 mod test_vectors;
-#[cfg(test)]
+#[cfg(all(test, feature = "std"))]
 mod test_vectors_long;
 
-const VALID_LENGTH: RangeInclusive<usize> = 48..=4194368;
+/// Length of F4Jumbled message must lie in the range VALID_LENGTH.
+///
+/// VALID_LENGTH = 48..=4194368
+pub const VALID_LENGTH: RangeInclusive<usize> = 48..=4194368;
+
+/// Errors produced by F4Jumble.
+#[derive(Debug)]
+pub enum Error {
+    /// Value error indicating that length of F4Jumbled message does not
+    /// lie in the range [`VALID_LENGTH`].
+    InvalidLength,
+}
+
+impl fmt::Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::InvalidLength => write!(
+                f,
+                "Message length must be in interval ({}..={})",
+                *VALID_LENGTH.start(),
+                *VALID_LENGTH.end()
+            ),
+        }
+    }
+}
+
+#[cfg(feature = "std")]
+impl std::error::Error for Error {}
 
 macro_rules! H_PERS {
     ( $i:expr ) => {
@@ -40,96 +78,107 @@ macro_rules! G_PERS {
     };
 }
 
-struct Hashes {
-    l_l: usize,
-    l_r: usize,
+struct State<'a> {
+    left: &'a mut [u8],
+    right: &'a mut [u8],
 }
 
-impl Hashes {
-    fn new(message_length: usize) -> Self {
-        let l_l = min(OUTBYTES, message_length / 2);
-        let l_r = message_length - l_l;
-        Hashes { l_l, l_r }
+impl<'a> State<'a> {
+    fn new(message: &'a mut [u8]) -> Self {
+        let left_length = min(OUTBYTES, message.len() / 2);
+        let (left, right) = message.split_at_mut(left_length);
+        State { left, right }
     }
 
-    fn h(&self, i: u8, u: &[u8]) -> Vec<u8> {
-        Blake2bParams::new()
-            .hash_length(self.l_l)
+    fn h_round(&mut self, i: u8) {
+        let hash = Blake2bParams::new()
+            .hash_length(self.left.len())
             .personal(&H_PERS!(i))
-            .hash(&u)
-            .as_ref()
-            .to_vec()
+            .hash(&self.right);
+        xor(self.left, hash.as_bytes())
     }
 
-    fn g(&self, i: u8, u: &[u8]) -> Vec<u8> {
-        (0..ceildiv(self.l_r, OUTBYTES))
-            .flat_map(|j| {
-                Blake2bParams::new()
-                    .hash_length(OUTBYTES)
-                    .personal(&G_PERS!(i, j as u16))
-                    .hash(u)
-                    .as_ref()
-                    .to_vec()
-                    .into_iter()
-            })
-            .take(self.l_r)
-            .collect()
+    fn g_round(&mut self, i: u8) {
+        for j in 0..ceildiv(self.right.len(), OUTBYTES) {
+            let hash = Blake2bParams::new()
+                .hash_length(OUTBYTES)
+                .personal(&G_PERS!(i, j as u16))
+                .hash(&self.left);
+            xor(&mut self.right[j * OUTBYTES..], hash.as_bytes());
+        }
+    }
+
+    fn apply_f4jumble(&mut self) {
+        self.g_round(0);
+        self.h_round(0);
+        self.g_round(1);
+        self.h_round(1);
+    }
+
+    fn apply_f4jumble_inv(&mut self) {
+        self.h_round(1);
+        self.g_round(1);
+        self.h_round(0);
+        self.g_round(0);
     }
 }
 
-fn xor(a: &[u8], b: &[u8]) -> Vec<u8> {
-    a.iter().zip(b.iter()).map(|(a0, b0)| a0 ^ b0).collect()
+/// XORs bytes of the `source` to bytes of the `target`.
+///
+/// This method operates over the first `min(source.len(), target.len())` bytes.
+fn xor(target: &mut [u8], source: &[u8]) {
+    for (source, target) in source.iter().zip(target.iter_mut()) {
+        *target ^= source;
+    }
 }
 
 fn ceildiv(num: usize, den: usize) -> usize {
     (num + den - 1) / den
 }
 
-#[allow(clippy::many_single_char_names)]
-pub fn f4jumble(a: &[u8]) -> Option<Vec<u8>> {
-    if VALID_LENGTH.contains(&a.len()) {
-        let hashes = Hashes::new(a.len());
-        let (a, b) = a.split_at(hashes.l_l);
+pub fn f4jumble_mut(message: &mut [u8]) -> Result<(), Error> {
+    if VALID_LENGTH.contains(&message.len()) {
+        State::new(message).apply_f4jumble();
+        Ok(())
+    } else {
+        Err(Error::InvalidLength)
+    }
+}
 
-        let x = xor(b, &hashes.g(0, a));
-        let y = xor(a, &hashes.h(0, &x));
-        let d = xor(&x, &hashes.g(1, &y));
-        let mut c = xor(&y, &hashes.h(1, &d));
+pub fn f4jumble_inv_mut(message: &mut [u8]) -> Result<(), Error> {
+    if VALID_LENGTH.contains(&message.len()) {
+        State::new(message).apply_f4jumble_inv();
+        Ok(())
+    } else {
+        Err(Error::InvalidLength)
+    }
+}
 
-        c.extend(d);
-        Some(c)
+#[cfg(feature = "std")]
+pub fn f4jumble(message: &[u8]) -> Option<Vec<u8>> {
+    let mut result = message.to_vec();
+    let res = f4jumble_mut(&mut result);
+    if res.is_ok() {
+        Some(result)
     } else {
         None
     }
 }
 
-#[allow(clippy::many_single_char_names)]
-pub fn f4jumble_inv(c: &[u8]) -> Option<Vec<u8>> {
-    if VALID_LENGTH.contains(&c.len()) {
-        let hashes = Hashes::new(c.len());
-        let (c, d) = c.split_at(hashes.l_l);
-
-        let y = xor(c, &hashes.h(1, d));
-        let x = xor(d, &hashes.g(1, &y));
-        let mut a = xor(&y, &hashes.h(0, &x));
-        let b = xor(&x, &hashes.g(0, &a));
-
-        a.extend(b);
-        Some(a)
+#[cfg(feature = "std")]
+pub fn f4jumble_inv(message: &[u8]) -> Option<Vec<u8>> {
+    let mut result = message.to_vec();
+    let res = f4jumble_inv_mut(&mut result);
+    if res.is_ok() {
+        Some(result)
     } else {
         None
     }
 }
 
 #[cfg(test)]
-mod tests {
-    use blake2b_simd::blake2b;
-    use proptest::collection::vec;
-    use proptest::prelude::*;
-
-    use super::{
-        f4jumble, f4jumble_inv, test_vectors::test_vectors, test_vectors_long, VALID_LENGTH,
-    };
+mod common_tests {
+    use super::{f4jumble_inv_mut, f4jumble_mut, test_vectors};
 
     #[test]
     fn h_pers() {
@@ -141,6 +190,34 @@ mod tests {
         assert_eq!(&G_PERS!(7, 13), b"UA_F4Jumble_G\x07\x0d\x00");
         assert_eq!(&G_PERS!(7, 65535), b"UA_F4Jumble_G\x07\xff\xff");
     }
+
+    #[test]
+    fn f4jumble_check_vectors_mut() {
+        #[cfg(not(feature = "std"))]
+        let mut cache = [0u8; test_vectors::MAX_VECTOR_LENGTH];
+        #[cfg(feature = "std")]
+        let mut cache = vec![0u8; test_vectors::MAX_VECTOR_LENGTH];
+        for v in test_vectors::TEST_VECTORS {
+            let mut data = &mut cache[..v.normal.len()];
+            data.clone_from_slice(&v.normal);
+            f4jumble_mut(&mut data).unwrap();
+            assert_eq!(data, v.jumbled);
+            f4jumble_inv_mut(&mut data).unwrap();
+            assert_eq!(data, v.normal);
+        }
+    }
+}
+
+#[cfg(feature = "std")]
+#[cfg(test)]
+mod std_tests {
+    use blake2b_simd::blake2b;
+    use proptest::collection::vec;
+    use proptest::prelude::*;
+    use std::format;
+    use std::vec::Vec;
+
+    use super::{f4jumble, f4jumble_inv, test_vectors, test_vectors_long, VALID_LENGTH};
 
     proptest! {
         #![proptest_config(ProptestConfig::with_cases(5))]
@@ -168,7 +245,7 @@ mod tests {
 
     #[test]
     fn f4jumble_check_vectors() {
-        for v in test_vectors() {
+        for v in test_vectors::TEST_VECTORS {
             let jumbled = f4jumble(&v.normal).unwrap();
             assert_eq!(jumbled, v.jumbled);
             let unjumbled = f4jumble_inv(&v.jumbled).unwrap();

@@ -1,9 +1,10 @@
 //! APIs for batch trial decryption.
 
-use std::iter;
+use alloc::vec::Vec; // module is alloc only
+use core::iter;
 
 use crate::{
-    try_compact_note_decryption_inner, try_note_decryption_inner, Domain, EphemeralKeyBytes,
+    try_compact_note_decryption_inner, try_note_decryption_inner, BatchDomain, EphemeralKeyBytes,
     ShieldedOutput,
 };
 
@@ -11,7 +12,7 @@ use crate::{
 ///
 /// This is the batched version of [`crate::try_note_decryption`].
 #[allow(clippy::type_complexity)]
-pub fn try_note_decryption<D: Domain, Output: ShieldedOutput<D>>(
+pub fn try_note_decryption<D: BatchDomain, Output: ShieldedOutput<D>>(
     ivks: &[D::IncomingViewingKey],
     outputs: &[(D, Output)],
 ) -> Vec<Option<(D::Note, D::Recipient, D::Memo)>> {
@@ -21,14 +22,14 @@ pub fn try_note_decryption<D: Domain, Output: ShieldedOutput<D>>(
 /// Trial decryption of a batch of notes for light clients with a set of recipients.
 ///
 /// This is the batched version of [`crate::try_compact_note_decryption`].
-pub fn try_compact_note_decryption<D: Domain, Output: ShieldedOutput<D>>(
+pub fn try_compact_note_decryption<D: BatchDomain, Output: ShieldedOutput<D>>(
     ivks: &[D::IncomingViewingKey],
     outputs: &[(D, Output)],
 ) -> Vec<Option<(D::Note, D::Recipient)>> {
     batch_note_decryption(ivks, outputs, try_compact_note_decryption_inner)
 }
 
-fn batch_note_decryption<D: Domain, Output: ShieldedOutput<D>, F, FR>(
+fn batch_note_decryption<D: BatchDomain, Output: ShieldedOutput<D>, F, FR>(
     ivks: &[D::IncomingViewingKey],
     outputs: &[(D, Output)],
     decrypt_inner: F,
