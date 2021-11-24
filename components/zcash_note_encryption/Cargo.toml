@@ -26,8 +26,9 @@ zcash_primitives = { version = "0.5", path = "../../zcash_primitives" }
 jubjub = "0.8"
 
 [features]
-default = ["alloc"]
+default = ["std"]
 alloc = []
+std = ["alloc", "blake2b_simd/std"]
 
 [lib]
 bench = false
