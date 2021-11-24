@@ -181,6 +181,7 @@ pub trait Domain {
     fn extract_esk(out_plaintext: &[u8; OUT_PLAINTEXT_SIZE]) -> Option<Self::EphemeralSecretKey>;
 }
 
+#[cfg(feature = "alloc")]
 pub trait BatchDomain: Domain {
     /// Computes `Self::kdf` on a batch of items.
     ///
