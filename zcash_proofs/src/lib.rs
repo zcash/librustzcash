@@ -249,10 +249,11 @@ fn stream_params_downloads_to_disk(
 
     // Download the responses and write them to a new file,
     // verifying the hash as bytes are read.
-    let params_download_1 = ResponseLazyReader(params_download_1.send_lazy()?);
-    let params_download_2 = ResponseLazyReader(params_download_2.send_lazy()?);
+    let params_download_1 = ResponseLazyReader::from(params_download_1);
+    let params_download_2 = ResponseLazyReader::from(params_download_2);
 
     // Limit the download size to avoid DoS.
+    // This also avoids launching the second request, if the first request provides enough bytes.
     let params_download = params_download_1
         .chain(params_download_2)
         .take(expected_bytes);
@@ -271,34 +272,82 @@ fn stream_params_downloads_to_disk(
     Ok(())
 }
 
+/// A wrapper that implements [`io::Read`] on a [`minreq::ResponseLazy`].
 #[cfg(feature = "download-params")]
-struct ResponseLazyReader(minreq::ResponseLazy);
+enum ResponseLazyReader {
+    Request(minreq::Request),
+    Response(minreq::ResponseLazy),
+    Complete(Result<(), String>),
+}
+
+#[cfg(feature = "download-params")]
+impl From<minreq::Request> for ResponseLazyReader {
+    fn from(request: minreq::Request) -> ResponseLazyReader {
+        ResponseLazyReader::Request(request)
+    }
+}
+
+#[cfg(feature = "download-params")]
+impl From<minreq::ResponseLazy> for ResponseLazyReader {
+    fn from(response: minreq::ResponseLazy) -> ResponseLazyReader {
+        ResponseLazyReader::Response(response)
+    }
+}
 
 #[cfg(feature = "download-params")]
 impl io::Read for ResponseLazyReader {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        use ResponseLazyReader::*;
+
         // Zero-sized buffer. This should never happen.
-        if buf.len() == 0 {
+        if buf.is_empty() {
             return Ok(0);
         }
 
-        // minreq has a very limited lazy reading interface.
-        match &mut self.0.next() {
-            // Read one byte into the buffer.
-            // We ignore the expected length, because we have no way of telling the BufReader.
-            Some(Ok((byte, _length))) => {
-                buf[0] = *byte;
-                Ok(1)
+        loop {
+            match self {
+                // Launch a lazy response for this request
+                Request(request) => match request.clone().send_lazy() {
+                    Ok(response) => *self = Response(response),
+                    Err(error) => {
+                        let error = Err(format!("download request failed: {:?}", error));
+
+                        *self = Complete(error);
+                    }
+                },
+
+                // Read from the response
+                Response(response) => {
+                    // minreq has a very limited lazy reading interface.
+                    match &mut response.next() {
+                        // Read one byte into the buffer.
+                        // We ignore the expected length, because we have no way of telling the BufReader.
+                        Some(Ok((byte, _length))) => {
+                            buf[0] = *byte;
+                            return Ok(1);
+                        }
+
+                        // Reading failed.
+                        Some(Err(error)) => {
+                            let error = Err(format!("download response failed: {:?}", error));
+
+                            *self = Complete(error);
+                        }
+
+                        // Finished reading.
+                        None => *self = Complete(Ok(())),
+                    }
+                }
+
+                Complete(result) => {
+                    return match result {
+                        // Return a zero-byte read for download success and EOF.
+                        Ok(()) => Ok(0),
+                        // Keep returning the download error,
+                        Err(error) => Err(io::Error::new(io::ErrorKind::Other, error.clone())),
+                    };
+                }
             }
-
-            // Reading failed.
-            Some(Err(error)) => Err(io::Error::new(
-                io::ErrorKind::Other,
-                format!("download failed: {:?}", error),
-            )),
-
-            // Finished reading.
-            None => Ok(0),
         }
     }
 }
