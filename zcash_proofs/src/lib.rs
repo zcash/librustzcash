@@ -303,6 +303,7 @@ impl io::Read for ResponseLazyReader {
     }
 }
 
+/// Zcash Sprout and Sapling groth16 circuit parameters.
 pub struct ZcashParameters {
     pub spend_params: Parameters<Bls12>,
     pub spend_vk: PreparedVerifyingKey<Bls12>,
