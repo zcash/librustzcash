@@ -116,3 +116,16 @@ impl fmt::Display for ParseError {
 }
 
 impl Error for ParseError {}
+
+mod private {
+    use super::{ParseError, Typecode};
+    use std::{cmp, convert::TryFrom};
+
+    /// A raw address or viewing key.
+    pub trait SealedReceiver:
+        for<'a> TryFrom<(u32, &'a [u8]), Error = ParseError> + cmp::Ord + cmp::PartialOrd + Clone
+    {
+        fn typecode(&self) -> Typecode;
+        fn data(&self) -> &[u8];
+    }
+}

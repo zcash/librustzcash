@@ -1,4 +1,4 @@
-use super::{ParseError, Typecode};
+use super::{private::SealedReceiver, ParseError, Typecode};
 use crate::kind;
 
 use std::cmp;
@@ -39,7 +39,7 @@ pub enum Receiver {
 impl cmp::Ord for Receiver {
     fn cmp(&self, other: &Self) -> cmp::Ordering {
         match self.typecode().cmp(&other.typecode()) {
-            cmp::Ordering::Equal => self.addr().cmp(other.addr()),
+            cmp::Ordering::Equal => self.data().cmp(other.data()),
             res => res,
         }
     }
@@ -71,7 +71,7 @@ impl TryFrom<(u32, &[u8])> for Receiver {
     }
 }
 
-impl Receiver {
+impl SealedReceiver for Receiver {
     fn typecode(&self) -> Typecode {
         match self {
             Receiver::P2pkh(_) => Typecode::P2pkh,
@@ -82,7 +82,7 @@ impl Receiver {
         }
     }
 
-    fn addr(&self) -> &[u8] {
+    fn data(&self) -> &[u8] {
         match self {
             Receiver::P2pkh(data) => data,
             Receiver::P2sh(data) => data,
@@ -199,7 +199,7 @@ impl Address {
 
         let mut writer = std::io::Cursor::new(Vec::new());
         for receiver in &self.0 {
-            let addr = receiver.addr();
+            let addr = receiver.data();
             CompactSize::write(
                 &mut writer,
                 <u32>::from(receiver.typecode()).try_into().unwrap(),
