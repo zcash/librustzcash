@@ -1,7 +1,10 @@
 use std::iter;
 
 use crate::{
-    unified::{self, test_vectors::TEST_VECTORS, Receiver},
+    unified::{
+        self,
+        address::{test_vectors::TEST_VECTORS, Receiver},
+    },
     Network, ToAddress, ZcashAddress,
 };
 
