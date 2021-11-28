@@ -2,29 +2,7 @@ use super::{private::SealedReceiver, ParseError, Typecode};
 use crate::kind;
 
 use std::cmp;
-use std::collections::HashSet;
 use std::convert::{TryFrom, TryInto};
-use std::io::Write;
-use zcash_encoding::CompactSize;
-
-/// The HRP for a Bech32m-encoded mainnet Unified Address.
-///
-/// Defined in [ZIP 316][zip-0316].
-///
-/// [zip-0316]: https://zips.z.cash/zip-0316
-pub(crate) const MAINNET: &str = "u";
-
-/// The HRP for a Bech32m-encoded testnet Unified Address.
-///
-/// Defined in [ZIP 316][zip-0316].
-///
-/// [zip-0316]: https://zips.z.cash/zip-0316
-pub(crate) const TESTNET: &str = "utest";
-
-/// The HRP for a Bech32m-encoded regtest Unified Address.
-pub(crate) const REGTEST: &str = "uregtest";
-
-const PADDING_LEN: usize = 16;
 
 /// The set of known Receivers for Unified Addresses.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -97,139 +75,37 @@ impl SealedReceiver for Receiver {
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Address(pub(crate) Vec<Receiver>);
 
-impl TryFrom<(&str, &[u8])> for Address {
-    type Error = ParseError;
+impl super::private::SealedContainer for Address {
+    type Receiver = Receiver;
 
-    fn try_from((hrp, buf): (&str, &[u8])) -> Result<Self, Self::Error> {
-        fn read_receiver(mut cursor: &mut std::io::Cursor<&[u8]>) -> Result<Receiver, ParseError> {
-            let typecode = CompactSize::read(&mut cursor)
-                .map(|v| u32::try_from(v).expect("CompactSize::read enforces MAX_SIZE limit"))
-                .map_err(|e| {
-                    ParseError::InvalidEncoding(format!(
-                        "Failed to deserialize CompactSize-encoded typecode {}",
-                        e
-                    ))
-                })?;
-            let length = CompactSize::read(&mut cursor).map_err(|e| {
-                ParseError::InvalidEncoding(format!(
-                    "Failed to deserialize CompactSize-encoded length {}",
-                    e
-                ))
-            })?;
-            let addr_end = cursor.position().checked_add(length).ok_or_else(|| {
-                ParseError::InvalidEncoding(format!(
-                    "Length value {} caused an overflow error",
-                    length
-                ))
-            })?;
-            let buf = cursor.get_ref();
-            if (buf.len() as u64) < addr_end {
-                return Err(ParseError::InvalidEncoding(format!(
-                    "Truncated: unable to read {} bytes of address data",
-                    length
-                )));
-            }
-            let result = Receiver::try_from((
-                typecode,
-                &buf[cursor.position() as usize..addr_end as usize],
-            ));
-            cursor.set_position(addr_end);
-            result
-        }
-
-        let encoded = f4jumble::f4jumble_inv(buf)
-            .ok_or_else(|| ParseError::InvalidEncoding("F4Jumble decoding failed".to_owned()))?;
-
-        // Validate and strip trailing padding bytes.
-        if hrp.len() > 16 {
-            return Err(ParseError::InvalidEncoding(
-                "Invalid human-readable part".to_owned(),
-            ));
-        }
-        let mut expected_padding = [0; PADDING_LEN];
-        expected_padding[0..hrp.len()].copy_from_slice(hrp.as_bytes());
-        let encoded = match encoded.split_at(encoded.len() - PADDING_LEN) {
-            (encoded, tail) if tail == expected_padding => Ok(encoded),
-            _ => Err(ParseError::InvalidEncoding(
-                "Invalid padding bytes".to_owned(),
-            )),
-        }?;
-
-        let mut cursor = std::io::Cursor::new(encoded);
-        let mut result = vec![];
-        while cursor.position() < encoded.len().try_into().unwrap() {
-            result.push(read_receiver(&mut cursor)?);
-        }
-        assert_eq!(cursor.position(), encoded.len().try_into().unwrap());
-        result.try_into()
+    fn from_inner(receivers: Vec<Self::Receiver>) -> Self {
+        Self(receivers)
     }
 }
 
-impl TryFrom<Vec<Receiver>> for Address {
-    type Error = ParseError;
+impl super::Unified for Address {
+    /// The HRP for a Bech32m-encoded mainnet Unified Address.
+    ///
+    /// Defined in [ZIP 316][zip-0316].
+    ///
+    /// [zip-0316]: https://zips.z.cash/zip-0316
+    const MAINNET: &'static str = "u";
 
-    fn try_from(receivers: Vec<Receiver>) -> Result<Self, Self::Error> {
-        let mut typecodes = HashSet::with_capacity(receivers.len());
-        for receiver in &receivers {
-            let t = receiver.typecode();
-            if typecodes.contains(&t) {
-                return Err(ParseError::DuplicateTypecode(t));
-            } else if (t == Typecode::P2pkh && typecodes.contains(&Typecode::P2sh))
-                || (t == Typecode::P2sh && typecodes.contains(&Typecode::P2pkh))
-            {
-                return Err(ParseError::BothP2phkAndP2sh);
-            } else {
-                typecodes.insert(t);
-            }
-        }
+    /// The HRP for a Bech32m-encoded testnet Unified Address.
+    ///
+    /// Defined in [ZIP 316][zip-0316].
+    ///
+    /// [zip-0316]: https://zips.z.cash/zip-0316
+    const TESTNET: &'static str = "utest";
 
-        if typecodes.iter().all(|t| t.is_transparent()) {
-            Err(ParseError::OnlyTransparent)
-        } else {
-            // All checks pass!
-            Ok(Address(receivers))
-        }
-    }
-}
-
-impl Address {
-    /// Returns the raw encoding of this Unified Address.
-    pub(crate) fn to_bytes(&self, hrp: &str) -> Vec<u8> {
-        assert!(hrp.len() <= PADDING_LEN);
-
-        let mut writer = std::io::Cursor::new(Vec::new());
-        for receiver in &self.0 {
-            let addr = receiver.data();
-            CompactSize::write(
-                &mut writer,
-                <u32>::from(receiver.typecode()).try_into().unwrap(),
-            )
-            .unwrap();
-            CompactSize::write(&mut writer, addr.len()).unwrap();
-            writer.write_all(addr).unwrap();
-        }
-
-        let mut padding = [0u8; PADDING_LEN];
-        padding[0..hrp.len()].copy_from_slice(&hrp.as_bytes());
-        writer.write_all(&padding).unwrap();
-
-        f4jumble::f4jumble(&writer.into_inner()).unwrap()
-    }
-
-    /// Returns the receivers contained within this address, sorted in preference order.
-    pub fn receivers(&self) -> Vec<Receiver> {
-        let mut receivers = self.0.clone();
-        // Unstable sorting is fine, because all receivers are guaranteed by construction
-        // to have distinct typecodes.
-        receivers.sort_unstable_by_key(|r| r.typecode());
-        receivers
-    }
+    /// The HRP for a Bech32m-encoded regtest Unified Address.
+    const REGTEST: &'static str = "uregtest";
 
     /// Returns the receivers contained within this address, in the order they were
     /// parsed from the string encoding.
     ///
     /// This API is for advanced usage; in most cases you should use `Address::receivers`.
-    pub fn receivers_as_parsed(&self) -> &[Receiver] {
+    fn receivers_as_parsed(&self) -> &[Receiver] {
         &self.0
     }
 }
@@ -240,14 +116,14 @@ pub(crate) mod test_vectors;
 #[cfg(test)]
 mod tests {
     use assert_matches::assert_matches;
-    use std::convert::TryFrom;
 
+    use crate::kind::unified::Unified;
     use proptest::{
         array::{uniform11, uniform20, uniform32},
         prelude::*,
     };
 
-    use super::{Address, ParseError, Receiver, Typecode, MAINNET, REGTEST, TESTNET};
+    use super::{Address, ParseError, Receiver, Typecode};
 
     prop_compose! {
         fn uniform43()(a in uniform11(0u8..), b in uniform32(0u8..)) -> [u8; 43] {
@@ -286,11 +162,11 @@ mod tests {
     proptest! {
         #[test]
         fn ua_roundtrip(
-            hrp in prop_oneof![MAINNET, TESTNET, REGTEST],
+            hrp in prop_oneof![Address::MAINNET, Address::TESTNET, Address::REGTEST],
             ua in arb_unified_address(),
         ) {
             let bytes = ua.to_bytes(&hrp);
-            let decoded = Address::try_from((hrp.as_str(), &bytes[..]));
+            let decoded = Address::try_from_bytes(hrp.as_str(), &bytes[..]);
             prop_assert_eq!(decoded, Ok(ua));
         }
     }
@@ -308,7 +184,7 @@ mod tests {
             0x7b, 0x28, 0x69, 0xc9, 0x84,
         ];
         assert_eq!(
-            Address::try_from((MAINNET, &invalid_padding[..])),
+            Address::try_from_bytes(Address::MAINNET, &invalid_padding[..]),
             Err(ParseError::InvalidEncoding(
                 "Invalid padding bytes".to_owned()
             ))
@@ -323,7 +199,7 @@ mod tests {
             0x4b, 0x31, 0xee, 0x5a,
         ];
         assert_eq!(
-            Address::try_from((MAINNET, &truncated_padding[..])),
+            Address::try_from_bytes(Address::MAINNET, &truncated_padding[..]),
             Err(ParseError::InvalidEncoding(
                 "Invalid padding bytes".to_owned()
             ))
@@ -348,7 +224,7 @@ mod tests {
             0xc6, 0x5e, 0x68, 0xa2, 0x78, 0x6c, 0x9e,
         ];
         assert_matches!(
-            Address::try_from((MAINNET, &truncated_sapling_data[..])),
+            Address::try_from_bytes(Address::MAINNET, &truncated_sapling_data[..]),
             Err(ParseError::InvalidEncoding(_))
         );
 
@@ -361,7 +237,7 @@ mod tests {
             0xe6, 0x70, 0x36, 0x5b, 0x7b, 0x9e,
         ];
         assert_matches!(
-            Address::try_from((MAINNET, &truncated_after_sapling_typecode[..])),
+            Address::try_from_bytes(Address::MAINNET, &truncated_after_sapling_typecode[..]),
             Err(ParseError::InvalidEncoding(_))
         );
     }
@@ -370,9 +246,9 @@ mod tests {
     fn duplicate_typecode() {
         // Construct and serialize an invalid UA.
         let ua = Address(vec![Receiver::Sapling([1; 43]), Receiver::Sapling([2; 43])]);
-        let encoded = ua.to_bytes(MAINNET);
+        let encoded = ua.to_bytes(Address::MAINNET);
         assert_eq!(
-            Address::try_from((MAINNET, &encoded[..])),
+            Address::try_from_bytes(Address::MAINNET, &encoded[..]),
             Err(ParseError::DuplicateTypecode(Typecode::Sapling))
         );
     }
@@ -381,9 +257,9 @@ mod tests {
     fn p2pkh_and_p2sh() {
         // Construct and serialize an invalid UA.
         let ua = Address(vec![Receiver::P2pkh([0; 20]), Receiver::P2sh([0; 20])]);
-        let encoded = ua.to_bytes(MAINNET);
+        let encoded = ua.to_bytes(Address::MAINNET);
         assert_eq!(
-            Address::try_from((MAINNET, &encoded[..])),
+            Address::try_from_bytes(Address::MAINNET, &encoded[..]),
             Err(ParseError::BothP2phkAndP2sh)
         );
     }
@@ -402,7 +278,7 @@ mod tests {
         // with only one of them we don't have sufficient data for F4Jumble (so we hit a
         // different error).
         assert_matches!(
-            Address::try_from((MAINNET, &encoded[..])),
+            Address::try_from_bytes(Address::MAINNET, &encoded[..]),
             Err(ParseError::InvalidEncoding(_))
         );
     }

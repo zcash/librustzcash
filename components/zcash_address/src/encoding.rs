@@ -2,6 +2,7 @@ use std::{convert::TryInto, error::Error, fmt, str::FromStr};
 
 use bech32::{self, FromBase32, ToBase32, Variant};
 
+use crate::kind::unified::Unified;
 use crate::{kind::*, AddressKind, Network, ZcashAddress};
 
 /// An error while attempting to parse a string as a Zcash address.
@@ -52,17 +53,16 @@ impl FromStr for ZcashAddress {
                     Vec::<u8>::from_base32(&data).map_err(|_| ParseError::InvalidEncoding)?;
 
                 let net = match hrp.as_str() {
-                    unified::address::MAINNET => Network::Main,
-                    unified::address::TESTNET => Network::Test,
-                    unified::address::REGTEST => Network::Regtest,
+                    unified::address::Address::MAINNET => Network::Main,
+                    unified::address::Address::TESTNET => Network::Test,
+                    unified::address::Address::REGTEST => Network::Regtest,
                     // We will not define new Bech32m address encodings.
                     _ => {
                         return Err(ParseError::NotZcash);
                     }
                 };
 
-                return (hrp.as_str(), &data[..])
-                    .try_into()
+                return unified::Address::try_from_bytes(hrp.as_str(), &data[..])
                     .map(AddressKind::Unified)
                     .map_err(|_| ParseError::InvalidEncoding)
                     .map(|kind| ZcashAddress { net, kind });
@@ -152,9 +152,9 @@ impl fmt::Display for ZcashAddress {
             ),
             AddressKind::Unified(data) => {
                 let hrp = match self.net {
-                    Network::Main => unified::address::MAINNET,
-                    Network::Test => unified::address::TESTNET,
-                    Network::Regtest => unified::address::REGTEST,
+                    Network::Main => unified::address::Address::MAINNET,
+                    Network::Test => unified::address::Address::TESTNET,
+                    Network::Regtest => unified::address::Address::REGTEST,
                 };
                 encode_bech32m(hrp, &data.to_bytes(hrp))
             }

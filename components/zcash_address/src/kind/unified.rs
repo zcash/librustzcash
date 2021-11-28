@@ -1,10 +1,16 @@
 use std::cmp;
-use std::convert::TryFrom;
+use std::collections::HashSet;
+use std::convert::{TryFrom, TryInto};
 use std::error::Error;
 use std::fmt;
+use std::io::Write;
+use zcash_encoding::CompactSize;
+
 pub(crate) mod address;
 
 pub(crate) use address::Address;
+
+const PADDING_LEN: usize = 16;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Typecode {
@@ -128,4 +134,145 @@ mod private {
         fn typecode(&self) -> Typecode;
         fn data(&self) -> &[u8];
     }
+
+    pub trait SealedContainer {
+        type Receiver: SealedReceiver;
+
+        fn from_inner(receivers: Vec<Self::Receiver>) -> Self;
+    }
+}
+
+use private::SealedReceiver;
+
+/// Trait providing common encoding logic for Unified containers.
+pub trait Unified: private::SealedContainer + std::marker::Sized {
+    const MAINNET: &'static str;
+    const TESTNET: &'static str;
+    const REGTEST: &'static str;
+
+    fn try_from_bytes(hrp: &str, buf: &[u8]) -> Result<Self, ParseError> {
+        fn read_receiver<R: SealedReceiver>(
+            mut cursor: &mut std::io::Cursor<&[u8]>,
+        ) -> Result<R, ParseError> {
+            let typecode = CompactSize::read(&mut cursor)
+                .map(|v| u32::try_from(v).expect("CompactSize::read enforces MAX_SIZE limit"))
+                .map_err(|e| {
+                    ParseError::InvalidEncoding(format!(
+                        "Failed to deserialize CompactSize-encoded typecode {}",
+                        e
+                    ))
+                })?;
+            let length = CompactSize::read(&mut cursor).map_err(|e| {
+                ParseError::InvalidEncoding(format!(
+                    "Failed to deserialize CompactSize-encoded length {}",
+                    e
+                ))
+            })?;
+            let addr_end = cursor.position().checked_add(length).ok_or_else(|| {
+                ParseError::InvalidEncoding(format!(
+                    "Length value {} caused an overflow error",
+                    length
+                ))
+            })?;
+            let buf = cursor.get_ref();
+            if (buf.len() as u64) < addr_end {
+                return Err(ParseError::InvalidEncoding(format!(
+                    "Truncated: unable to read {} bytes of address data",
+                    length
+                )));
+            }
+            let result = R::try_from((
+                typecode,
+                &buf[cursor.position() as usize..addr_end as usize],
+            ));
+            cursor.set_position(addr_end);
+            result
+        }
+
+        let encoded = f4jumble::f4jumble_inv(buf)
+            .ok_or_else(|| ParseError::InvalidEncoding("F4Jumble decoding failed".to_owned()))?;
+
+        // Validate and strip trailing padding bytes.
+        if hrp.len() > 16 {
+            return Err(ParseError::InvalidEncoding(
+                "Invalid human-readable part".to_owned(),
+            ));
+        }
+        let mut expected_padding = [0; PADDING_LEN];
+        expected_padding[0..hrp.len()].copy_from_slice(hrp.as_bytes());
+        let encoded = match encoded.split_at(encoded.len() - PADDING_LEN) {
+            (encoded, tail) if tail == expected_padding => Ok(encoded),
+            _ => Err(ParseError::InvalidEncoding(
+                "Invalid padding bytes".to_owned(),
+            )),
+        }?;
+
+        let mut cursor = std::io::Cursor::new(encoded);
+        let mut result = vec![];
+        while cursor.position() < encoded.len().try_into().unwrap() {
+            result.push(read_receiver(&mut cursor)?);
+        }
+        assert_eq!(cursor.position(), encoded.len().try_into().unwrap());
+        Self::try_from_receivers(result)
+    }
+
+    fn try_from_receivers(receivers: Vec<Self::Receiver>) -> Result<Self, ParseError> {
+        let mut typecodes = HashSet::with_capacity(receivers.len());
+        for receiver in &receivers {
+            let t = receiver.typecode();
+            if typecodes.contains(&t) {
+                return Err(ParseError::DuplicateTypecode(t));
+            } else if (t == Typecode::P2pkh && typecodes.contains(&Typecode::P2sh))
+                || (t == Typecode::P2sh && typecodes.contains(&Typecode::P2pkh))
+            {
+                return Err(ParseError::BothP2phkAndP2sh);
+            } else {
+                typecodes.insert(t);
+            }
+        }
+
+        if typecodes.iter().all(|t| t.is_transparent()) {
+            Err(ParseError::OnlyTransparent)
+        } else {
+            // All checks pass!
+            Ok(Self::from_inner(receivers))
+        }
+    }
+
+    /// Returns the raw encoding of this Unified Address or viewing key.
+    fn to_bytes(&self, hrp: &str) -> Vec<u8> {
+        assert!(hrp.len() <= PADDING_LEN);
+
+        let mut writer = std::io::Cursor::new(Vec::new());
+        for receiver in &self.receivers() {
+            let addr = receiver.data();
+            CompactSize::write(
+                &mut writer,
+                <u32>::from(receiver.typecode()).try_into().unwrap(),
+            )
+            .unwrap();
+            CompactSize::write(&mut writer, addr.len()).unwrap();
+            writer.write_all(addr).unwrap();
+        }
+
+        let mut padding = [0u8; PADDING_LEN];
+        padding[0..hrp.len()].copy_from_slice(&hrp.as_bytes());
+        writer.write_all(&padding).unwrap();
+
+        f4jumble::f4jumble(&writer.into_inner()).unwrap()
+    }
+
+    /// Returns the receivers contained within this address, sorted in preference order.
+    fn receivers(&self) -> Vec<Self::Receiver> {
+        let mut receivers = self.receivers_as_parsed().to_vec();
+        // Unstable sorting is fine, because all receivers are guaranteed by construction
+        // to have distinct typecodes.
+        receivers.sort_unstable_by_key(|r| r.typecode());
+        receivers
+    }
+
+    /// Returns the receivers in the order they were parsed from the string encoding.
+    ///
+    /// This API is for advanced usage; in most cases you should use `Self::receivers`.
+    fn receivers_as_parsed(&self) -> &[Self::Receiver];
 }
