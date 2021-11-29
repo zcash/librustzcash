@@ -3,7 +3,6 @@ use std::collections::HashSet;
 use std::convert::{TryFrom, TryInto};
 use std::error::Error;
 use std::fmt;
-use std::io::Write;
 use zcash_encoding::CompactSize;
 
 pub(crate) mod address;
@@ -124,8 +123,13 @@ impl fmt::Display for ParseError {
 impl Error for ParseError {}
 
 pub(crate) mod private {
-    use super::{ParseError, Typecode};
-    use std::{cmp, convert::TryFrom};
+    use super::{ParseError, Typecode, PADDING_LEN};
+    use std::{
+        cmp,
+        convert::{TryFrom, TryInto},
+        io::Write,
+    };
+    use zcash_encoding::CompactSize;
 
     /// A raw address or viewing key.
     pub trait SealedReceiver:
@@ -135,21 +139,43 @@ pub(crate) mod private {
         fn data(&self) -> &[u8];
     }
 
-    pub trait SealedContainer {
+    /// A Unified Container containing addresses or viewing keys.
+    pub trait SealedContainer: super::ToReceivers {
         const MAINNET: &'static str;
         const TESTNET: &'static str;
         const REGTEST: &'static str;
 
-        type Receiver: SealedReceiver;
-
         fn from_inner(receivers: Vec<Self::Receiver>) -> Self;
+
+        /// Returns the raw encoding of this Unified Address or viewing key.
+        fn to_bytes(&self, hrp: &str) -> Vec<u8> {
+            assert!(hrp.len() <= PADDING_LEN);
+
+            let mut writer = std::io::Cursor::new(Vec::new());
+            for receiver in &self.receivers() {
+                let addr = receiver.data();
+                CompactSize::write(
+                    &mut writer,
+                    <u32>::from(receiver.typecode()).try_into().unwrap(),
+                )
+                .unwrap();
+                CompactSize::write(&mut writer, addr.len()).unwrap();
+                writer.write_all(addr).unwrap();
+            }
+
+            let mut padding = [0u8; PADDING_LEN];
+            padding[0..hrp.len()].copy_from_slice(&hrp.as_bytes());
+            writer.write_all(&padding).unwrap();
+
+            f4jumble::f4jumble(&writer.into_inner()).unwrap()
+        }
     }
 }
 
 use private::SealedReceiver;
 
 /// Trait providing common encoding logic for Unified containers.
-pub trait Unified: private::SealedContainer + std::marker::Sized {
+pub trait FromReceivers: private::SealedContainer + std::marker::Sized {
     fn try_from_bytes(hrp: &str, buf: &[u8]) -> Result<Self, ParseError> {
         fn read_receiver<R: SealedReceiver>(
             mut cursor: &mut std::io::Cursor<&[u8]>,
@@ -238,31 +264,14 @@ pub trait Unified: private::SealedContainer + std::marker::Sized {
             Ok(Self::from_inner(receivers))
         }
     }
+}
 
-    /// Returns the raw encoding of this Unified Address or viewing key.
-    fn to_bytes(&self, hrp: &str) -> Vec<u8> {
-        assert!(hrp.len() <= PADDING_LEN);
+/// Trait providing common decoding logic for Unified containers.
+pub trait ToReceivers {
+    /// The type of receiver in this unified container.
+    type Receiver: SealedReceiver;
 
-        let mut writer = std::io::Cursor::new(Vec::new());
-        for receiver in &self.receivers() {
-            let addr = receiver.data();
-            CompactSize::write(
-                &mut writer,
-                <u32>::from(receiver.typecode()).try_into().unwrap(),
-            )
-            .unwrap();
-            CompactSize::write(&mut writer, addr.len()).unwrap();
-            writer.write_all(addr).unwrap();
-        }
-
-        let mut padding = [0u8; PADDING_LEN];
-        padding[0..hrp.len()].copy_from_slice(&hrp.as_bytes());
-        writer.write_all(&padding).unwrap();
-
-        f4jumble::f4jumble(&writer.into_inner()).unwrap()
-    }
-
-    /// Returns the receivers contained within this address, sorted in preference order.
+    /// Returns the receivers contained within this container, sorted in preference order.
     fn receivers(&self) -> Vec<Self::Receiver> {
         let mut receivers = self.receivers_as_parsed().to_vec();
         // Unstable sorting is fine, because all receivers are guaranteed by construction

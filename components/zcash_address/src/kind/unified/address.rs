@@ -93,18 +93,15 @@ impl super::private::SealedContainer for Address {
     /// The HRP for a Bech32m-encoded regtest Unified Address.
     const REGTEST: &'static str = "uregtest";
 
-    type Receiver = Receiver;
-
     fn from_inner(receivers: Vec<Self::Receiver>) -> Self {
         Self(receivers)
     }
 }
 
-impl super::Unified for Address {
-    /// Returns the receivers contained within this address, in the order they were
-    /// parsed from the string encoding.
-    ///
-    /// This API is for advanced usage; in most cases you should use `Address::receivers`.
+impl super::FromReceivers for Address {}
+impl super::ToReceivers for Address {
+    type Receiver = Receiver;
+
     fn receivers_as_parsed(&self) -> &[Receiver] {
         &self.0
     }
@@ -117,7 +114,7 @@ pub(crate) mod test_vectors;
 mod tests {
     use assert_matches::assert_matches;
 
-    use crate::kind::unified::{private::SealedContainer, Unified};
+    use crate::kind::unified::{private::SealedContainer, FromReceivers, ToReceivers};
     use proptest::{
         array::{uniform11, uniform20, uniform32},
         prelude::*,
