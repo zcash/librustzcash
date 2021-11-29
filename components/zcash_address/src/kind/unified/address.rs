@@ -76,14 +76,6 @@ impl SealedReceiver for Receiver {
 pub struct Address(pub(crate) Vec<Receiver>);
 
 impl super::private::SealedContainer for Address {
-    type Receiver = Receiver;
-
-    fn from_inner(receivers: Vec<Self::Receiver>) -> Self {
-        Self(receivers)
-    }
-}
-
-impl super::Unified for Address {
     /// The HRP for a Bech32m-encoded mainnet Unified Address.
     ///
     /// Defined in [ZIP 316][zip-0316].
@@ -101,6 +93,14 @@ impl super::Unified for Address {
     /// The HRP for a Bech32m-encoded regtest Unified Address.
     const REGTEST: &'static str = "uregtest";
 
+    type Receiver = Receiver;
+
+    fn from_inner(receivers: Vec<Self::Receiver>) -> Self {
+        Self(receivers)
+    }
+}
+
+impl super::Unified for Address {
     /// Returns the receivers contained within this address, in the order they were
     /// parsed from the string encoding.
     ///
@@ -117,7 +117,7 @@ pub(crate) mod test_vectors;
 mod tests {
     use assert_matches::assert_matches;
 
-    use crate::kind::unified::Unified;
+    use crate::kind::unified::{private::SealedContainer, Unified};
     use proptest::{
         array::{uniform11, uniform20, uniform32},
         prelude::*,

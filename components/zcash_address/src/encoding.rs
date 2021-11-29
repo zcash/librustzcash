@@ -2,7 +2,7 @@ use std::{convert::TryInto, error::Error, fmt, str::FromStr};
 
 use bech32::{self, FromBase32, ToBase32, Variant};
 
-use crate::kind::unified::Unified;
+use crate::kind::unified::{private::SealedContainer, Unified};
 use crate::{kind::*, AddressKind, Network, ZcashAddress};
 
 /// An error while attempting to parse a string as a Zcash address.

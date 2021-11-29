@@ -123,7 +123,7 @@ impl fmt::Display for ParseError {
 
 impl Error for ParseError {}
 
-mod private {
+pub(crate) mod private {
     use super::{ParseError, Typecode};
     use std::{cmp, convert::TryFrom};
 
@@ -136,6 +136,10 @@ mod private {
     }
 
     pub trait SealedContainer {
+        const MAINNET: &'static str;
+        const TESTNET: &'static str;
+        const REGTEST: &'static str;
+
         type Receiver: SealedReceiver;
 
         fn from_inner(receivers: Vec<Self::Receiver>) -> Self;
@@ -146,10 +150,6 @@ use private::SealedReceiver;
 
 /// Trait providing common encoding logic for Unified containers.
 pub trait Unified: private::SealedContainer + std::marker::Sized {
-    const MAINNET: &'static str;
-    const TESTNET: &'static str;
-    const REGTEST: &'static str;
-
     fn try_from_bytes(hrp: &str, buf: &[u8]) -> Result<Self, ParseError> {
         fn read_receiver<R: SealedReceiver>(
             mut cursor: &mut std::io::Cursor<&[u8]>,
