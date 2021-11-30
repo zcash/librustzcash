@@ -10,8 +10,8 @@ pub(crate) mod fvk;
 pub(crate) mod ivk;
 
 pub use address::Address;
-pub use fvk::Fvk;
-pub use ivk::Ivk;
+pub use ivk::{Ivk, Uivk};
+pub use fvk::{Fvk, Ufvk};
 
 const PADDING_LEN: usize = 16;
 
