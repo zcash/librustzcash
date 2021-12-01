@@ -181,6 +181,42 @@ impl DiversifierKey {
     }
 }
 
+/// Attempt to produce a payment address given the specified diversifier
+/// index, and return None if the specified index does not produce a valid
+/// diversifier.
+pub fn sapling_address(
+    fvk: &FullViewingKey,
+    dk: &DiversifierKey,
+    j: DiversifierIndex,
+) -> Option<PaymentAddress> {
+    dk.diversifier(j)
+        .and_then(|d_j| fvk.vk.to_payment_address(d_j))
+}
+
+/// Search the diversifier space starting at diversifier index `j` for
+/// one which will produce a valid diversifier, and return the payment address
+/// constructed using that diversifier along with the index at which the
+/// valid diversifier was found.
+pub fn sapling_find_address(
+    fvk: &FullViewingKey,
+    dk: &DiversifierKey,
+    j: DiversifierIndex,
+) -> Option<(DiversifierIndex, PaymentAddress)> {
+    let (j, d_j) = dk.find_diversifier(j)?;
+    fvk.vk.to_payment_address(d_j).map(|addr| (j, addr))
+}
+
+/// Returns the payment address corresponding to the smallest valid diversifier
+/// index, along with that index.
+pub fn sapling_default_address(
+    fvk: &FullViewingKey,
+    dk: &DiversifierKey,
+) -> (DiversifierIndex, PaymentAddress) {
+    // This unwrap is safe, if you have to search the 2^88 space of
+    // diversifiers it'll never return anyway.
+    sapling_find_address(fvk, dk, DiversifierIndex::new()).unwrap()
+}
+
 /// A Sapling extended spending key
 #[derive(Clone)]
 pub struct ExtendedSpendingKey {
@@ -445,9 +481,7 @@ impl ExtendedFullViewingKey {
     /// index, and return None if the specified index does not produce a valid
     /// diversifier.
     pub fn address(&self, j: DiversifierIndex) -> Option<PaymentAddress> {
-        self.dk
-            .diversifier(j)
-            .and_then(|d_j| self.fvk.vk.to_payment_address(d_j))
+        sapling_address(&self.fvk, &self.dk, j)
     }
 
     /// Search the diversifier space starting at diversifier index `j` for
@@ -455,16 +489,13 @@ impl ExtendedFullViewingKey {
     /// constructed using that diversifier along with the index at which the
     /// valid diversifier was found.
     pub fn find_address(&self, j: DiversifierIndex) -> Option<(DiversifierIndex, PaymentAddress)> {
-        let (j, d_j) = self.dk.find_diversifier(j)?;
-        self.fvk.vk.to_payment_address(d_j).map(|addr| (j, addr))
+        sapling_find_address(&self.fvk, &self.dk, j)
     }
 
     /// Returns the payment address corresponding to the smallest valid diversifier
     /// index, along with that index.
     pub fn default_address(&self) -> (DiversifierIndex, PaymentAddress) {
-        // This unwrap is safe, if you have to search the 2^88 space of
-        // diversifiers it'll never return anyway.
-        self.find_address(DiversifierIndex::new()).unwrap()
+        sapling_default_address(&self.fvk, &self.dk)
     }
 }
 
