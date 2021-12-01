@@ -114,10 +114,15 @@ pub(crate) mod test_vectors;
 mod tests {
     use assert_matches::assert_matches;
 
-    use crate::kind::unified::{private::SealedContainer, Container, Encoding};
+    use crate::{
+        kind::unified::{private::SealedContainer, Container, Encoding},
+        Network,
+    };
+
     use proptest::{
         array::{uniform11, uniform20, uniform32},
         prelude::*,
+        sample::select,
     };
 
     use super::{Address, ParseError, Receiver, Typecode};
@@ -163,12 +168,12 @@ mod tests {
     proptest! {
         #[test]
         fn ua_roundtrip(
-            hrp in prop_oneof![Address::MAINNET, Address::TESTNET, Address::REGTEST],
+            network in select(vec![Network::Main, Network::Test, Network::Regtest]),
             ua in arb_unified_address(),
         ) {
-            let bytes = ua.to_bytes(&hrp);
-            let decoded = Address::try_from_bytes(hrp.as_str(), &bytes[..]);
-            prop_assert_eq!(decoded, Ok(ua));
+            let encoded = ua.encode(&network);
+            let decoded = Address::decode(&encoded);
+            prop_assert_eq!(decoded, Ok((network, ua)));
         }
     }
 
@@ -185,7 +190,7 @@ mod tests {
             0x7b, 0x28, 0x69, 0xc9, 0x84,
         ];
         assert_eq!(
-            Address::try_from_bytes(Address::MAINNET, &invalid_padding[..]),
+            Address::parse_items(&Address::MAINNET, &invalid_padding[..]),
             Err(ParseError::InvalidEncoding(
                 "Invalid padding bytes".to_owned()
             ))
@@ -200,7 +205,7 @@ mod tests {
             0x4b, 0x31, 0xee, 0x5a,
         ];
         assert_eq!(
-            Address::try_from_bytes(Address::MAINNET, &truncated_padding[..]),
+            Address::parse_items(&Address::MAINNET, &truncated_padding[..]),
             Err(ParseError::InvalidEncoding(
                 "Invalid padding bytes".to_owned()
             ))
@@ -225,7 +230,7 @@ mod tests {
             0xc6, 0x5e, 0x68, 0xa2, 0x78, 0x6c, 0x9e,
         ];
         assert_matches!(
-            Address::try_from_bytes(Address::MAINNET, &truncated_sapling_data[..]),
+            Address::parse_items(&Address::MAINNET, &truncated_sapling_data[..]),
             Err(ParseError::InvalidEncoding(_))
         );
 
@@ -238,29 +243,32 @@ mod tests {
             0xe6, 0x70, 0x36, 0x5b, 0x7b, 0x9e,
         ];
         assert_matches!(
-            Address::try_from_bytes(Address::MAINNET, &truncated_after_sapling_typecode[..]),
+            Address::parse_items(&Address::MAINNET, &truncated_after_sapling_typecode[..]),
             Err(ParseError::InvalidEncoding(_))
         );
     }
 
     #[test]
     fn duplicate_typecode() {
-        // Construct and serialize an invalid UA.
+        // Construct and serialize an invalid UA. This must be done using private
+        // methods, as the public API does not permit construction of such invalid values.
         let ua = Address(vec![Receiver::Sapling([1; 43]), Receiver::Sapling([2; 43])]);
-        let encoded = ua.to_bytes(Address::MAINNET);
+        let encoded = ua.to_bytes(&Address::MAINNET);
         assert_eq!(
-            Address::try_from_bytes(Address::MAINNET, &encoded[..]),
+            Address::parse_items(&Address::MAINNET, &encoded[..]).and_then(Address::try_from_items),
             Err(ParseError::DuplicateTypecode(Typecode::Sapling))
         );
     }
 
     #[test]
     fn p2pkh_and_p2sh() {
-        // Construct and serialize an invalid UA.
+        // Construct and serialize an invalid UA. This must be done using private
+        // methods, as the public API does not permit construction of such invalid values.
         let ua = Address(vec![Receiver::P2pkh([0; 20]), Receiver::P2sh([0; 20])]);
-        let encoded = ua.to_bytes(Address::MAINNET);
+        let encoded = ua.to_bytes(&Address::MAINNET);
+        // ensure that decoding catches the error
         assert_eq!(
-            Address::try_from_bytes(Address::MAINNET, &encoded[..]),
+            Address::parse_items(&Address::MAINNET, &encoded[..]).and_then(Address::try_from_items),
             Err(ParseError::BothP2phkAndP2sh)
         );
     }
@@ -279,7 +287,7 @@ mod tests {
         // with only one of them we don't have sufficient data for F4Jumble (so we hit a
         // different error).
         assert_matches!(
-            Address::try_from_bytes(Address::MAINNET, &encoded[..]),
+            Address::parse_items(&Address::MAINNET, &encoded[..]),
             Err(ParseError::InvalidEncoding(_))
         );
     }
