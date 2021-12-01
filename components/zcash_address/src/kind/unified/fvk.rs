@@ -3,7 +3,7 @@ use std::convert::{TryFrom, TryInto};
 
 use super::{
     private::{SealedContainer, SealedItem},
-    Encoding, ParseError, Container, Typecode,
+    Container, Encoding, ParseError, Typecode,
 };
 
 /// The set of known FVKs for Unified FVKs.
@@ -105,6 +105,7 @@ impl Container for Ufvk {
         &self.0
     }
 }
+
 impl Encoding for Ufvk {}
 
 impl SealedContainer for Ufvk {
@@ -134,10 +135,13 @@ impl SealedContainer for Ufvk {
 mod tests {
     use assert_matches::assert_matches;
 
-    use proptest::{array::uniform32, prelude::*};
+    use proptest::{array::uniform32, prelude::*, sample::select};
 
     use super::{Fvk, ParseError, Typecode, Ufvk};
-    use crate::kind::unified::{private::SealedContainer, Encoding, Container};
+    use crate::{
+        kind::unified::{private::SealedContainer, Container, Encoding},
+        Network,
+    };
 
     prop_compose! {
         fn uniform96()(a in uniform32(0u8..), b in uniform32(0u8..), c in uniform32(0u8..)) -> [u8; 96] {
@@ -185,12 +189,12 @@ mod tests {
     proptest! {
         #[test]
         fn ufvk_roundtrip(
-            hrp in prop_oneof![Ufvk::MAINNET, Ufvk::TESTNET, Ufvk::REGTEST],
+            network in select(vec![Network::Main, Network::Test, Network::Regtest]),
             ufvk in arb_unified_fvk(),
         ) {
-            let bytes = ufvk.to_bytes(&hrp);
-            let decoded = Ufvk::try_from_bytes(hrp.as_str(), &bytes[..]);
-            prop_assert_eq!(decoded, Ok(ufvk));
+            let encoded = ufvk.encode(&network);
+            let decoded = Ufvk::decode(&encoded);
+            prop_assert_eq!(decoded, Ok((network, ufvk)));
         }
     }
 
@@ -210,7 +214,7 @@ mod tests {
             0xdf, 0x63, 0xe7, 0xef, 0x65, 0x6b, 0x18, 0x23, 0xf7, 0x3e, 0x35, 0x7c, 0xf3, 0xc4,
         ];
         assert_eq!(
-            Ufvk::try_from_bytes(Ufvk::MAINNET, &invalid_padding[..]),
+            Ufvk::parse_items(&Ufvk::MAINNET, &invalid_padding[..]),
             Err(ParseError::InvalidEncoding(
                 "Invalid padding bytes".to_owned()
             ))
@@ -228,7 +232,7 @@ mod tests {
             0x43, 0x8e, 0xc0, 0x3e, 0x9f, 0xf4, 0xf1, 0x80, 0x32, 0xcf, 0x2f, 0x7e, 0x7f, 0x91,
         ];
         assert_eq!(
-            Ufvk::try_from_bytes(Ufvk::MAINNET, &truncated_padding[..]),
+            Ufvk::parse_items(&Ufvk::MAINNET, &truncated_padding[..]),
             Err(ParseError::InvalidEncoding(
                 "Invalid padding bytes".to_owned()
             ))
@@ -260,7 +264,7 @@ mod tests {
             0x8c, 0x7a, 0xbf, 0x7b, 0x9a, 0xdd, 0xee, 0x18, 0x2c, 0x2d, 0xc2, 0xfc,
         ];
         assert_matches!(
-            Ufvk::try_from_bytes(Ufvk::MAINNET, &truncated_sapling_data[..]),
+            Ufvk::parse_items(&Ufvk::MAINNET, &truncated_sapling_data[..]),
             Err(ParseError::InvalidEncoding(_))
         );
 
@@ -275,25 +279,26 @@ mod tests {
             0x54, 0xd1, 0x9e, 0xec, 0x8b, 0xef, 0x35, 0xb8, 0x44, 0xdd, 0xab, 0x9a, 0x8d,
         ];
         assert_matches!(
-            Ufvk::try_from_bytes(Ufvk::MAINNET, &truncated_after_sapling_typecode[..]),
+            Ufvk::parse_items(&Ufvk::MAINNET, &truncated_after_sapling_typecode[..]),
             Err(ParseError::InvalidEncoding(_))
         );
     }
 
     #[test]
     fn duplicate_typecode() {
-        // Construct and serialize an invalid UFVK.
+        // Construct and serialize an invalid Ufvk. This must be done using private
+        // methods, as the public API does not permit construction of such invalid values.
         let ufvk = Ufvk(vec![Fvk::Sapling([1; 96]), Fvk::Sapling([2; 96])]);
-        let encoded = ufvk.to_bytes(Ufvk::MAINNET);
+        let encoded = ufvk.to_bytes(&Ufvk::MAINNET);
         assert_eq!(
-            Ufvk::try_from_bytes(Ufvk::MAINNET, &encoded[..]),
+            Ufvk::parse_items(&Ufvk::MAINNET, &encoded[..]).and_then(Ufvk::try_from_items),
             Err(ParseError::DuplicateTypecode(Typecode::Sapling))
         );
     }
 
     #[test]
     fn only_transparent() {
-        // Encoding of `Ufvk(vec![Fvk::P2pkh([0; 78])])`.
+        // Raw encoding of `Ufvk(vec![Fvk::P2pkh([0; 78])])`.
         let encoded = vec![
             0xce, 0x3b, 0x36, 0xd9, 0x15, 0xf4, 0xc0, 0x78, 0x86, 0xf8, 0x21, 0xb6, 0x9a, 0xef,
             0x40, 0x6d, 0xe6, 0x4d, 0xbd, 0x17, 0x8c, 0x7a, 0xa5, 0x4b, 0xd7, 0x0, 0x8d, 0x64, 0x2,
@@ -305,7 +310,7 @@ mod tests {
         ];
 
         assert_eq!(
-            Ufvk::try_from_bytes(Ufvk::MAINNET, &encoded[..]),
+            Ufvk::parse_items(&Ufvk::MAINNET, &encoded[..]).and_then(Ufvk::try_from_items),
             Err(ParseError::OnlyTransparent)
         );
     }

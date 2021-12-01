@@ -2,7 +2,7 @@ use std::{convert::TryInto, error::Error, fmt, str::FromStr};
 
 use bech32::{self, FromBase32, ToBase32, Variant};
 
-use crate::kind::unified::{private::SealedContainer, Encoding};
+use crate::kind::unified::Encoding;
 use crate::{kind::*, AddressKind, Network, ZcashAddress};
 
 /// An error while attempting to parse a string as a Zcash address.
@@ -45,28 +45,19 @@ impl FromStr for ZcashAddress {
         // Remove leading and trailing whitespace, to handle copy-paste errors.
         let s = s.trim();
 
-        // Most Zcash addresses use Bech32 or Bech32m, so try those first.
-        match bech32::decode(s) {
-            Ok((hrp, data, Variant::Bech32m)) => {
-                // If we reached this point, the encoding is supposed to be valid Bech32m.
-                let data =
-                    Vec::<u8>::from_base32(&data).map_err(|_| ParseError::InvalidEncoding)?;
-
-                let net = match hrp.as_str() {
-                    unified::address::Address::MAINNET => Network::Main,
-                    unified::address::Address::TESTNET => Network::Test,
-                    unified::address::Address::REGTEST => Network::Regtest,
-                    // We will not define new Bech32m address encodings.
-                    _ => {
-                        return Err(ParseError::NotZcash);
-                    }
-                };
-
-                return unified::Address::try_from_bytes(hrp.as_str(), &data[..])
-                    .map(AddressKind::Unified)
-                    .map_err(|_| ParseError::InvalidEncoding)
-                    .map(|kind| ZcashAddress { net, kind });
+        // Try decoding as a unified address
+        match unified::Address::decode(s) {
+            Ok((net, data)) => {
+                return Ok(ZcashAddress {
+                    net,
+                    kind: AddressKind::Unified(data),
+                })
             }
+            _ => (),
+        };
+
+        // Try decoding as a Sapling address (Bech32)
+        match bech32::decode(s) {
             Ok((hrp, data, Variant::Bech32)) => {
                 // If we reached this point, the encoding is supposed to be valid Bech32.
                 let data =
@@ -88,7 +79,7 @@ impl FromStr for ZcashAddress {
                     .map_err(|_| ParseError::InvalidEncoding)
                     .map(|kind| ZcashAddress { net, kind });
             }
-            Err(_) => (),
+            _ => (),
         }
 
         // The rest use Base58Check.
@@ -115,10 +106,6 @@ impl FromStr for ZcashAddress {
         // If it's not valid Bech32 or Base58Check, it's not a Zcash address.
         Err(ParseError::NotZcash)
     }
-}
-
-fn encode_bech32m(hrp: &str, data: &[u8]) -> String {
-    bech32::encode(hrp, data.to_base32(), Variant::Bech32m).expect("hrp is invalid")
 }
 
 fn encode_bech32(hrp: &str, data: &[u8]) -> String {
@@ -150,14 +137,7 @@ impl fmt::Display for ZcashAddress {
                 },
                 data,
             ),
-            AddressKind::Unified(data) => {
-                let hrp = match self.net {
-                    Network::Main => unified::address::Address::MAINNET,
-                    Network::Test => unified::address::Address::TESTNET,
-                    Network::Regtest => unified::address::Address::REGTEST,
-                };
-                encode_bech32m(hrp, &data.to_bytes(hrp))
-            }
+            AddressKind::Unified(addr) => addr.encode(&self.net),
             AddressKind::P2pkh(data) => encode_b58(
                 match self.net {
                     Network::Main => p2pkh::MAINNET,

@@ -3,7 +3,7 @@ use std::convert::{TryFrom, TryInto};
 
 use super::{
     private::{SealedContainer, SealedItem},
-    Encoding, ParseError, Container, Typecode,
+    Container, Encoding, ParseError, Typecode,
 };
 
 /// The set of known IVKs for Unified IVKs.
@@ -109,6 +109,7 @@ impl Container for Uivk {
         &self.0
     }
 }
+
 impl Encoding for Uivk {}
 
 impl SealedContainer for Uivk {
@@ -141,10 +142,14 @@ mod tests {
     use proptest::{
         array::{uniform14, uniform32},
         prelude::*,
+        sample::select,
     };
 
     use super::{Ivk, ParseError, Typecode, Uivk};
-    use crate::kind::unified::{private::SealedContainer, Encoding, Container};
+    use crate::{
+        kind::unified::{private::SealedContainer, Container, Encoding},
+        Network,
+    };
 
     prop_compose! {
         fn uniform64()(a in uniform32(0u8..), b in uniform32(0u8..)) -> [u8; 64] {
@@ -192,12 +197,12 @@ mod tests {
     proptest! {
         #[test]
         fn uivk_roundtrip(
-            hrp in prop_oneof![Uivk::MAINNET, Uivk::TESTNET, Uivk::REGTEST],
+            network in select(vec![Network::Main, Network::Test, Network::Regtest]),
             uivk in arb_unified_ivk(),
         ) {
-            let bytes = uivk.to_bytes(&hrp);
-            let decoded = Uivk::try_from_bytes(hrp.as_str(), &bytes[..]);
-            prop_assert_eq!(decoded, Ok(uivk));
+            let encoded = uivk.encode(&network);
+            let decoded = Uivk::decode(&encoded);
+            prop_assert_eq!(decoded, Ok((network, uivk)));
         }
     }
 
@@ -215,7 +220,7 @@ mod tests {
             0x83, 0xe8, 0x92, 0x18, 0x28, 0x70, 0x1e, 0x81, 0x76, 0x56, 0xb6, 0x15,
         ];
         assert_eq!(
-            Uivk::try_from_bytes(Uivk::MAINNET, &invalid_padding[..]),
+            Uivk::parse_items(&Uivk::MAINNET, &invalid_padding[..]),
             Err(ParseError::InvalidEncoding(
                 "Invalid padding bytes".to_owned()
             ))
@@ -231,7 +236,7 @@ mod tests {
             0xf9, 0x65, 0x49, 0x14, 0xab, 0x7c, 0x55, 0x7b, 0x39, 0x47,
         ];
         assert_eq!(
-            Uivk::try_from_bytes(Uivk::MAINNET, &truncated_padding[..]),
+            Uivk::parse_items(&Uivk::MAINNET, &truncated_padding[..]),
             Err(ParseError::InvalidEncoding(
                 "Invalid padding bytes".to_owned()
             ))
@@ -259,7 +264,7 @@ mod tests {
             0xf5, 0xd5, 0x8a, 0xb5, 0x1a,
         ];
         assert_matches!(
-            Uivk::try_from_bytes(Uivk::MAINNET, &truncated_sapling_data[..]),
+            Uivk::parse_items(&Uivk::MAINNET, &truncated_sapling_data[..]),
             Err(ParseError::InvalidEncoding(_))
         );
 
@@ -272,7 +277,7 @@ mod tests {
             0xd8, 0x21, 0x5e, 0x8, 0xa, 0x82, 0x95, 0x21, 0x74,
         ];
         assert_matches!(
-            Uivk::try_from_bytes(Uivk::MAINNET, &truncated_after_sapling_typecode[..]),
+            Uivk::parse_items(&Uivk::MAINNET, &truncated_after_sapling_typecode[..]),
             Err(ParseError::InvalidEncoding(_))
         );
     }
@@ -281,16 +286,16 @@ mod tests {
     fn duplicate_typecode() {
         // Construct and serialize an invalid UIVK.
         let uivk = Uivk(vec![Ivk::Sapling([1; 64]), Ivk::Sapling([2; 64])]);
-        let encoded = uivk.to_bytes(Uivk::MAINNET);
+        let encoded = uivk.encode(&Network::Main);
         assert_eq!(
-            Uivk::try_from_bytes(Uivk::MAINNET, &encoded[..]),
+            Uivk::decode(&encoded),
             Err(ParseError::DuplicateTypecode(Typecode::Sapling))
         );
     }
 
     #[test]
     fn only_transparent() {
-        // Encoding of `Uivk(vec![Ivk::P2pkh([0; 78])])`.
+        // Raw Encoding of `Uivk(vec![Ivk::P2pkh([0; 78])])`.
         let encoded = vec![
             0xda, 0x41, 0xe7, 0x2b, 0xae, 0x1e, 0x95, 0x89, 0x0, 0xac, 0x28, 0x68, 0xb8, 0x50,
             0x71, 0x20, 0xa8, 0xfd, 0xdf, 0x29, 0x74, 0x3f, 0x34, 0x4f, 0xbc, 0x28, 0xe8, 0x29,
@@ -302,7 +307,7 @@ mod tests {
         ];
 
         assert_eq!(
-            Uivk::try_from_bytes(Uivk::MAINNET, &encoded[..]),
+            Uivk::parse_items(&Uivk::MAINNET, &encoded[..]).and_then(Uivk::try_from_items),
             Err(ParseError::OnlyTransparent)
         );
     }
