@@ -134,6 +134,7 @@ pub(crate) mod private {
         io::Write,
     };
     use zcash_encoding::CompactSize;
+    use crate::Network;
 
     /// A raw address or viewing key.
     pub trait SealedItem:
@@ -153,6 +154,14 @@ pub(crate) mod private {
         /// of the container type; the caller is guaranteed to check the
         /// general invariants that apply to all unified containers.
         fn from_inner(items: Vec<Self::Item>) -> Self;
+
+        fn network_hrp(network: &Network) -> &'static str {
+            match network {
+                Network::Main => Self::MAINNET,
+                Network::Test => Self::TESTNET,
+                Network::Regtest => Self::REGTEST,
+            }
+        }
 
         fn write_raw_encoding<W: Write>(&self, mut writer: W) {
             for item in &self.items() {
