@@ -16,11 +16,14 @@ pub enum Fvk {
 
     /// Data contained within the Sapling component of a Unified Full Viewing Key
     ///
-    /// `(ak, nk, ovk)` each 32 bytes.
-    Sapling([u8; 96]),
+    /// `(ak, nk, ovk, dk)` each 32 bytes.
+    Sapling([u8; 128]),
 
-    /// The extended public key for the BIP 44 account corresponding to the transparent
-    /// address subtree from which transparent addresses are derived.
+    /// A pruned version of the extended public key for the BIP 44 account corresponding to the
+    /// transparent address subtree from which transparent addresses are derived. This
+    /// includes just the chain code (32 bytes) and the public key (33 bytes) and excludes
+    /// the depth of in the derivation tree, the parent key fingerprint, and the child key
+    /// number (which would reveal the wallet account number for which this UFVK was generated).
     ///
     /// Transparent addresses don't have "viewing keys" - the addresses themselves serve
     /// that purpose. However, we want the ability to derive diversified Unified Addresses
@@ -29,7 +32,7 @@ pub enum Fvk {
     /// the BIP 44 derivation path as the "transparent viewing key"; all addresses derived
     /// from this node use non-hardened derivation, and can thus be derived just from this
     /// extended public key.
-    P2pkh([u8; 78]),
+    P2pkh([u8; 65]),
 
     Unknown {
         typecode: u32,
@@ -144,37 +147,50 @@ mod tests {
     };
 
     prop_compose! {
-        fn uniform96()(a in uniform32(0u8..), b in uniform32(0u8..), c in uniform32(0u8..)) -> [u8; 96] {
-            let mut fvk = [0; 96];
+        fn uniform128()(a in uniform32(0u8..), b in uniform32(0u8..), c in uniform32(0u8..), d in uniform32(0u8..)) -> [u8; 128] {
+            let mut fvk = [0; 128];
             fvk[..32].copy_from_slice(&a);
             fvk[32..64].copy_from_slice(&b);
-            fvk[64..].copy_from_slice(&c);
+            fvk[64..96].copy_from_slice(&c);
+            fvk[96..].copy_from_slice(&d);
             fvk
         }
     }
 
     prop_compose! {
-        fn uniform78()(a in uniform96()) -> [u8; 78] {
-            let mut c = [0; 78];
-            c[..78].copy_from_slice(&a[..78]);
-            c
+        fn uniform96()(a in uniform128()) -> [u8; 96] {
+            let mut fvk = [0; 96];
+            fvk[..96].copy_from_slice(&a[..96]);
+            fvk
         }
     }
 
-    fn arb_shielded_fvk() -> BoxedStrategy<Vec<Fvk>> {
+    prop_compose! {
+        fn uniform65()(a in uniform96()) -> [u8; 65] {
+            let mut fvk = [0; 65];
+            fvk[..65].copy_from_slice(&a[..65]);
+            fvk
+        }
+    }
+
+    pub fn arb_orchard_fvk() -> impl Strategy<Value = Fvk> {
+        uniform96().prop_map(Fvk::Orchard)
+    }
+
+    pub fn arb_sapling_fvk() -> impl Strategy<Value = Fvk> {
+        uniform128().prop_map(Fvk::Sapling)
+    }
+
+    fn arb_shielded_fvk() -> impl Strategy<Value = Vec<Fvk>> {
         prop_oneof![
-            vec![uniform96().prop_map(Fvk::Sapling)],
-            vec![uniform96().prop_map(Fvk::Orchard)],
-            vec![
-                uniform96().prop_map(Fvk::Orchard as fn([u8; 96]) -> Fvk),
-                uniform96().prop_map(Fvk::Sapling)
-            ],
+            vec![arb_sapling_fvk().boxed()],
+            vec![arb_orchard_fvk().boxed()],
+            vec![arb_orchard_fvk().boxed(), arb_sapling_fvk().boxed()],
         ]
-        .boxed()
     }
 
     fn arb_transparent_fvk() -> BoxedStrategy<Fvk> {
-        uniform78().prop_map(Fvk::P2pkh).boxed()
+        uniform65().prop_map(Fvk::P2pkh).boxed()
     }
 
     prop_compose! {
@@ -288,7 +304,7 @@ mod tests {
     fn duplicate_typecode() {
         // Construct and serialize an invalid Ufvk. This must be done using private
         // methods, as the public API does not permit construction of such invalid values.
-        let ufvk = Ufvk(vec![Fvk::Sapling([1; 96]), Fvk::Sapling([2; 96])]);
+        let ufvk = Ufvk(vec![Fvk::Sapling([1; 128]), Fvk::Sapling([2; 128])]);
         let encoded = ufvk.to_bytes(&Ufvk::MAINNET);
         assert_eq!(
             Ufvk::parse_items(&Ufvk::MAINNET, &encoded[..]).and_then(Ufvk::try_from_items),
@@ -298,15 +314,14 @@ mod tests {
 
     #[test]
     fn only_transparent() {
-        // Raw encoding of `Ufvk(vec![Fvk::P2pkh([0; 78])])`.
+        // Raw encoding of `Ufvk(vec![Fvk::P2pkh([0; 65])])`.
         let encoded = vec![
-            0xce, 0x3b, 0x36, 0xd9, 0x15, 0xf4, 0xc0, 0x78, 0x86, 0xf8, 0x21, 0xb6, 0x9a, 0xef,
-            0x40, 0x6d, 0xe6, 0x4d, 0xbd, 0x17, 0x8c, 0x7a, 0xa5, 0x4b, 0xd7, 0x0, 0x8d, 0x64, 0x2,
-            0x1a, 0x8, 0xd0, 0xbb, 0xcd, 0x65, 0xe2, 0x16, 0xba, 0x63, 0x7a, 0x3f, 0xf5, 0x7b,
-            0xe2, 0xff, 0x80, 0x5d, 0x42, 0xf7, 0x1, 0x8b, 0x1c, 0xd8, 0x31, 0x3, 0x36, 0xe9, 0x30,
-            0x9b, 0x46, 0xfd, 0x47, 0x9c, 0xce, 0x35, 0xdf, 0xb6, 0x24, 0xdc, 0x65, 0x25, 0x5b,
-            0xc4, 0xc5, 0x22, 0xe9, 0x4, 0x24, 0xe9, 0x8, 0x71, 0x27, 0x8, 0xc3, 0xa5, 0xff, 0x84,
-            0xf9, 0xfb, 0xf4, 0xa2, 0x8c, 0x27, 0xcc, 0x78, 0xcf,
+            0xc4, 0x70, 0xc8, 0x7a, 0xcc, 0xe6, 0x6b, 0x1a, 0x62, 0xc7, 0xcd, 0x5f, 0x76, 0xd8,
+            0xcc, 0x9c, 0x50, 0xbd, 0xce, 0x85, 0x80, 0xd7, 0x78, 0x25, 0x3e, 0x47, 0x9, 0x57,
+            0x7d, 0x6a, 0xdb, 0x10, 0xb4, 0x11, 0x80, 0x13, 0x4c, 0x83, 0x76, 0xb4, 0x6b, 0xbd,
+            0xef, 0x83, 0x5c, 0xa7, 0x68, 0xe6, 0xba, 0x41, 0x12, 0xbd, 0x43, 0x24, 0xf5, 0xaa,
+            0xa0, 0xf5, 0xf8, 0xe1, 0x59, 0xa0, 0x95, 0x85, 0x86, 0xf1, 0x9e, 0xcf, 0x8f, 0x94,
+            0xf4, 0xf5, 0x16, 0xef, 0x5c, 0xe0, 0x26, 0xbc, 0x23, 0x73, 0x76, 0x3f, 0x4b,
         ];
 
         assert_eq!(
@@ -319,13 +334,13 @@ mod tests {
     fn fvks_are_sorted() {
         // Construct a UFVK with fvks in an unsorted order.
         let ufvk = Ufvk(vec![
-            Fvk::P2pkh([0; 78]),
+            Fvk::P2pkh([0; 65]),
             Fvk::Orchard([0; 96]),
             Fvk::Unknown {
                 typecode: 0xff,
                 data: vec![],
             },
-            Fvk::Sapling([0; 96]),
+            Fvk::Sapling([0; 128]),
         ]);
 
         // `Ufvk::items` sorts the fvks in priority order.
@@ -333,8 +348,8 @@ mod tests {
             ufvk.items(),
             vec![
                 Fvk::Orchard([0; 96]),
-                Fvk::Sapling([0; 96]),
-                Fvk::P2pkh([0; 78]),
+                Fvk::Sapling([0; 128]),
+                Fvk::P2pkh([0; 65]),
                 Fvk::Unknown {
                     typecode: 0xff,
                     data: vec![],

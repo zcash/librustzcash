@@ -23,8 +23,12 @@ pub enum Ivk {
     /// `(dk, ivk)` each 32 bytes.
     Sapling([u8; 64]),
 
-    /// The extended public key for the BIP 44 account corresponding to the transparent
-    /// address subtree from which transparent addresses are derived.
+    /// A pruned version of the extended public key for the BIP 44 account corresponding to the
+    /// transparent address subtree from which transparent addresses are derived,
+    /// at the external `change` BIP 44 path, i.e. `m/44'/133'/<account_id>'/0`. This
+    /// includes just the chain code (32 bytes) and the public key (33 bytes) and excludes
+    /// the depth of in the derivation tree, the parent key fingerprint, and the child key
+    /// number (which would reveal the wallet account number for which this UFVK was generated).
     ///
     /// Transparent addresses don't have "viewing keys" - the addresses themselves serve
     /// that purpose. However, we want the ability to derive diversified Unified Addresses
@@ -33,7 +37,7 @@ pub enum Ivk {
     /// the BIP 44 derivation path as the "transparent viewing key"; all addresses derived
     /// from this node use non-hardened derivation, and can thus be derived just from this
     /// extended public key.
-    P2pkh([u8; 78]),
+    P2pkh([u8; 65]),
 
     Unknown {
         typecode: u32,
@@ -140,7 +144,7 @@ mod tests {
     use assert_matches::assert_matches;
 
     use proptest::{
-        array::{uniform14, uniform32},
+        array::{uniform1, uniform32},
         prelude::*,
         sample::select,
     };
@@ -161,15 +165,15 @@ mod tests {
     }
 
     prop_compose! {
-        fn uniform78()(a in uniform14(0u8..), b in uniform64()) -> [u8; 78] {
-            let mut c = [0; 78];
-            c[..14].copy_from_slice(&a);
-            c[14..].copy_from_slice(&b);
+        fn uniform65()(a in uniform1(0u8..), b in uniform64()) -> [u8; 65] {
+            let mut c = [0; 65];
+            c[..1].copy_from_slice(&a);
+            c[1..].copy_from_slice(&b);
             c
         }
     }
 
-    fn arb_shielded_ivk() -> BoxedStrategy<Vec<Ivk>> {
+    fn arb_shielded_ivk() -> impl Strategy<Value = Vec<Ivk>> {
         prop_oneof![
             vec![uniform64().prop_map(Ivk::Sapling)],
             vec![uniform64().prop_map(Ivk::Orchard)],
@@ -178,11 +182,10 @@ mod tests {
                 uniform64().prop_map(Ivk::Sapling)
             ],
         ]
-        .boxed()
     }
 
-    fn arb_transparent_ivk() -> BoxedStrategy<Ivk> {
-        uniform78().prop_map(Ivk::P2pkh).boxed()
+    fn arb_transparent_ivk() -> impl Strategy<Value = Ivk> {
+        uniform65().prop_map(Ivk::P2pkh)
     }
 
     prop_compose! {
@@ -295,15 +298,14 @@ mod tests {
 
     #[test]
     fn only_transparent() {
-        // Raw Encoding of `Uivk(vec![Ivk::P2pkh([0; 78])])`.
+        // Raw Encoding of `Uivk(vec![Ivk::P2pkh([0; 65])])`.
         let encoded = vec![
-            0xda, 0x41, 0xe7, 0x2b, 0xae, 0x1e, 0x95, 0x89, 0x0, 0xac, 0x28, 0x68, 0xb8, 0x50,
-            0x71, 0x20, 0xa8, 0xfd, 0xdf, 0x29, 0x74, 0x3f, 0x34, 0x4f, 0xbc, 0x28, 0xe8, 0x29,
-            0xe6, 0xee, 0x43, 0x74, 0xb, 0xea, 0x55, 0xd1, 0x58, 0xba, 0xb4, 0x71, 0x40, 0x6a,
-            0x79, 0x91, 0xa4, 0x1e, 0x1e, 0x5f, 0xdf, 0x19, 0x42, 0xa3, 0xb0, 0x87, 0x8c, 0x3, 0x9,
-            0xed, 0xc, 0x7a, 0x63, 0xa, 0x74, 0xbf, 0x30, 0xf5, 0xbb, 0xf2, 0x6f, 0xc, 0x89, 0xb2,
-            0xf8, 0xda, 0xa1, 0xff, 0x84, 0xc2, 0xa, 0x89, 0x3, 0x8d, 0xf7, 0x0, 0x59, 0x63, 0xb1,
-            0xfc, 0x13, 0x68, 0xc0, 0x32, 0x9a, 0x26, 0x10, 0x15,
+            0x12, 0x51, 0x37, 0xc7, 0xac, 0x8c, 0xd, 0x13, 0x3a, 0x5f, 0xc6, 0x84, 0x53, 0x90,
+            0xf8, 0xe7, 0x23, 0x34, 0xfb, 0xda, 0x49, 0x3c, 0x87, 0x1c, 0x8f, 0x1a, 0xe1, 0x63,
+            0xba, 0xdf, 0x77, 0x64, 0x43, 0xcf, 0xdc, 0x37, 0x1f, 0xd2, 0x89, 0x60, 0xe3, 0x77,
+            0x20, 0xd0, 0x1c, 0x5, 0x40, 0xe5, 0x43, 0x55, 0xc4, 0xe5, 0xf8, 0xaa, 0xe, 0x7a, 0xe7,
+            0x8c, 0x53, 0x15, 0xb8, 0x8f, 0x90, 0x14, 0x33, 0x30, 0x52, 0x2b, 0x8, 0x89, 0x90,
+            0xbd, 0xfe, 0xa4, 0xb7, 0x47, 0x20, 0x92, 0x6, 0xf0, 0x0, 0xf9, 0x64,
         ];
 
         assert_eq!(
@@ -316,7 +318,7 @@ mod tests {
     fn ivks_are_sorted() {
         // Construct a UIVK with ivks in an unsorted order.
         let uivk = Uivk(vec![
-            Ivk::P2pkh([0; 78]),
+            Ivk::P2pkh([0; 65]),
             Ivk::Orchard([0; 64]),
             Ivk::Unknown {
                 typecode: 0xff,
@@ -331,7 +333,7 @@ mod tests {
             vec![
                 Ivk::Orchard([0; 64]),
                 Ivk::Sapling([0; 64]),
-                Ivk::P2pkh([0; 78]),
+                Ivk::P2pkh([0; 65]),
                 Ivk::Unknown {
                     typecode: 0xff,
                     data: vec![],
