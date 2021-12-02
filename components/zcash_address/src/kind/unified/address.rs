@@ -1,4 +1,4 @@
-use super::{private::SealedReceiver, ParseError, Typecode};
+use super::{private::SealedItem, ParseError, Typecode};
 use crate::kind;
 
 use std::cmp;
@@ -49,7 +49,7 @@ impl TryFrom<(u32, &[u8])> for Receiver {
     }
 }
 
-impl SealedReceiver for Receiver {
+impl SealedItem for Receiver {
     fn typecode(&self) -> Typecode {
         match self {
             Receiver::P2pkh(_) => Typecode::P2pkh,
@@ -93,16 +93,16 @@ impl super::private::SealedContainer for Address {
     /// The HRP for a Bech32m-encoded regtest Unified Address.
     const REGTEST: &'static str = "uregtest";
 
-    fn from_inner(receivers: Vec<Self::Receiver>) -> Self {
+    fn from_inner(receivers: Vec<Self::Item>) -> Self {
         Self(receivers)
     }
 }
 
-impl super::FromReceivers for Address {}
-impl super::ToReceivers for Address {
-    type Receiver = Receiver;
+impl super::Encoding for Address {}
+impl super::Container for Address {
+    type Item = Receiver;
 
-    fn receivers_as_parsed(&self) -> &[Receiver] {
+    fn items_as_parsed(&self) -> &[Receiver] {
         &self.0
     }
 }
@@ -114,7 +114,7 @@ pub(crate) mod test_vectors;
 mod tests {
     use assert_matches::assert_matches;
 
-    use crate::kind::unified::{private::SealedContainer, FromReceivers, ToReceivers};
+    use crate::kind::unified::{private::SealedContainer, Container, Encoding};
     use proptest::{
         array::{uniform11, uniform20, uniform32},
         prelude::*,
@@ -295,7 +295,7 @@ mod tests {
 
         // `Address::receivers` sorts the receivers in priority order.
         assert_eq!(
-            ua.receivers(),
+            ua.items(),
             vec![
                 Receiver::Orchard([0; 43]),
                 Receiver::Sapling([0; 43]),

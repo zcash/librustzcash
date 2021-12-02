@@ -29,10 +29,10 @@ impl Ord for Typecode {
             | (Self::P2sh, Self::P2sh)
             | (Self::P2pkh, Self::P2pkh) => cmp::Ordering::Equal,
 
-            // We don't know for certain the preference order of unknown receivers, but it
+            // We don't know for certain the preference order of unknown items, but it
             // is likely that the higher typecode has higher preference. The exact order
-            // doesn't really matter, as unknown receivers have lower preference than
-            // known receivers.
+            // doesn't really matter, as unknown items have lower preference than
+            // known items.
             (Self::Unknown(a), Self::Unknown(b)) => b.cmp(a),
 
             // For the remaining cases, we rely on `match` always choosing the first arm
@@ -96,7 +96,7 @@ impl Typecode {
 /// An error while attempting to parse a string as a Zcash address.
 #[derive(Debug, PartialEq)]
 pub enum ParseError {
-    /// The unified address contains both P2PKH and P2SH receivers.
+    /// The unified address contains both P2PKH and P2SH items.
     BothP2phkAndP2sh,
     /// The unified address contains a duplicated typecode.
     DuplicateTypecode(Typecode),
@@ -104,18 +104,18 @@ pub enum ParseError {
     InvalidTypecodeValue(u64),
     /// The string is an invalid encoding.
     InvalidEncoding(String),
-    /// The unified address only contains transparent receivers.
+    /// The unified address only contains transparent items.
     OnlyTransparent,
 }
 
 impl fmt::Display for ParseError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            ParseError::BothP2phkAndP2sh => write!(f, "UA contains both P2PKH and P2SH receivers"),
+            ParseError::BothP2phkAndP2sh => write!(f, "UA contains both P2PKH and P2SH items"),
             ParseError::DuplicateTypecode(c) => write!(f, "Duplicate typecode {}", u32::from(*c)),
             ParseError::InvalidTypecodeValue(v) => write!(f, "Typecode value out of range {}", v),
             ParseError::InvalidEncoding(msg) => write!(f, "Invalid encoding: {}", msg),
-            ParseError::OnlyTransparent => write!(f, "UA only contains transparent receivers"),
+            ParseError::OnlyTransparent => write!(f, "UA only contains transparent items"),
         }
     }
 }
@@ -132,7 +132,7 @@ pub(crate) mod private {
     use zcash_encoding::CompactSize;
 
     /// A raw address or viewing key.
-    pub trait SealedReceiver:
+    pub trait SealedItem:
         for<'a> TryFrom<(u32, &'a [u8]), Error = ParseError> + cmp::Ord + cmp::PartialOrd + Clone
     {
         fn typecode(&self) -> Typecode;
@@ -140,20 +140,22 @@ pub(crate) mod private {
     }
 
     /// A Unified Container containing addresses or viewing keys.
-    pub trait SealedContainer: super::ToReceivers {
+    pub trait SealedContainer: super::Container {
         const MAINNET: &'static str;
         const TESTNET: &'static str;
         const REGTEST: &'static str;
 
-        fn from_inner(receivers: Vec<Self::Receiver>) -> Self;
+        /// Implementations of this method should act as unchecked constructors
+        /// of the container type; the caller is guaranteed to check the
+        /// general invariants that apply to all unified containers.
+        fn from_inner(items: Vec<Self::Item>) -> Self;
 
-        /// Write the raw encoding of this container's receivers to a stream
         fn write_raw_encoding<W: Write>(&self, mut writer: W) {
-            for receiver in &self.receivers() {
-                let addr = receiver.data();
+            for item in &self.items() {
+                let addr = item.data();
                 CompactSize::write(
                     &mut writer,
-                    <u32>::from(receiver.typecode()).try_into().unwrap(),
+                    <u32>::from(item.typecode()).try_into().unwrap(),
                 )
                 .unwrap();
                 CompactSize::write(&mut writer, addr.len()).unwrap();
@@ -177,12 +179,12 @@ pub(crate) mod private {
     }
 }
 
-use private::SealedReceiver;
+use private::SealedItem;
 
 /// Trait providing common encoding logic for Unified containers.
-pub trait FromReceivers: private::SealedContainer + std::marker::Sized {
+pub trait Encoding: private::SealedContainer + std::marker::Sized {
     fn try_from_bytes(hrp: &str, buf: &[u8]) -> Result<Self, ParseError> {
-        fn read_receiver<R: SealedReceiver>(
+        fn read_receiver<R: SealedItem>(
             mut cursor: &mut std::io::Cursor<&[u8]>,
         ) -> Result<R, ParseError> {
             let typecode = CompactSize::read(&mut cursor)
@@ -244,13 +246,13 @@ pub trait FromReceivers: private::SealedContainer + std::marker::Sized {
             result.push(read_receiver(&mut cursor)?);
         }
         assert_eq!(cursor.position(), encoded.len().try_into().unwrap());
-        Self::try_from_receivers(result)
+        Self::try_from_items(result)
     }
 
-    fn try_from_receivers(receivers: Vec<Self::Receiver>) -> Result<Self, ParseError> {
-        let mut typecodes = HashSet::with_capacity(receivers.len());
-        for receiver in &receivers {
-            let t = receiver.typecode();
+    fn try_from_items(items: Vec<Self::Item>) -> Result<Self, ParseError> {
+        let mut typecodes = HashSet::with_capacity(items.len());
+        for item in &items {
+            let t = item.typecode();
             if typecodes.contains(&t) {
                 return Err(ParseError::DuplicateTypecode(t));
             } else if (t == Typecode::P2pkh && typecodes.contains(&Typecode::P2sh))
@@ -266,27 +268,27 @@ pub trait FromReceivers: private::SealedContainer + std::marker::Sized {
             Err(ParseError::OnlyTransparent)
         } else {
             // All checks pass!
-            Ok(Self::from_inner(receivers))
+            Ok(Self::from_inner(items))
         }
     }
 }
 
 /// Trait providing common decoding logic for Unified containers.
-pub trait ToReceivers {
-    /// The type of receiver in this unified container.
-    type Receiver: SealedReceiver;
+pub trait Container {
+    /// The type of item in this unified container.
+    type Item: SealedItem;
 
-    /// Returns the receivers contained within this container, sorted in preference order.
-    fn receivers(&self) -> Vec<Self::Receiver> {
-        let mut receivers = self.receivers_as_parsed().to_vec();
-        // Unstable sorting is fine, because all receivers are guaranteed by construction
+    /// Returns the items contained within this container, sorted in preference order.
+    fn items(&self) -> Vec<Self::Item> {
+        let mut items = self.items_as_parsed().to_vec();
+        // Unstable sorting is fine, because all items are guaranteed by construction
         // to have distinct typecodes.
-        receivers.sort_unstable_by_key(|r| r.typecode());
-        receivers
+        items.sort_unstable_by_key(|r| r.typecode());
+        items
     }
 
-    /// Returns the receivers in the order they were parsed from the string encoding.
+    /// Returns the items in the order they were parsed from the string encoding.
     ///
-    /// This API is for advanced usage; in most cases you should use `Self::receivers`.
-    fn receivers_as_parsed(&self) -> &[Self::Receiver];
+    /// This API is for advanced usage; in most cases you should use `Self::items`.
+    fn items_as_parsed(&self) -> &[Self::Item];
 }
