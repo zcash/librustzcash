@@ -273,7 +273,7 @@ pub trait Encoding: private::SealedContainer + std::marker::Sized {
     }
 }
 
-/// Trait providing common decoding logic for Unified containers.
+/// Trait for for Unified containers, that exposes the items within them.
 pub trait Container {
     /// The type of item in this unified container.
     type Item: SealedItem;
