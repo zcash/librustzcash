@@ -147,11 +147,8 @@ pub(crate) mod private {
 
         fn from_inner(receivers: Vec<Self::Receiver>) -> Self;
 
-        /// Returns the raw encoding of this Unified Address or viewing key.
-        fn to_bytes(&self, hrp: &str) -> Vec<u8> {
-            assert!(hrp.len() <= PADDING_LEN);
-
-            let mut writer = std::io::Cursor::new(Vec::new());
+        /// Write the raw encoding of this container's receivers to a stream
+        fn write_raw_encoding<W: Write>(&self, mut writer: W) {
             for receiver in &self.receivers() {
                 let addr = receiver.data();
                 CompactSize::write(
@@ -162,9 +159,17 @@ pub(crate) mod private {
                 CompactSize::write(&mut writer, addr.len()).unwrap();
                 writer.write_all(addr).unwrap();
             }
+        }
+
+        /// Returns the jumbled padded raw encoding of this Unified Address or viewing key.
+        fn to_bytes(&self, hrp: &str) -> Vec<u8> {
+            assert!(hrp.len() <= PADDING_LEN);
+
+            let mut writer = std::io::Cursor::new(Vec::new());
+            self.write_raw_encoding(&mut writer);
 
             let mut padding = [0u8; PADDING_LEN];
-            padding[0..hrp.len()].copy_from_slice(&hrp.as_bytes());
+            padding[0..hrp.len()].copy_from_slice(hrp.as_bytes());
             writer.write_all(&padding).unwrap();
 
             f4jumble::f4jumble(&writer.into_inner()).unwrap()
