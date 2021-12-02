@@ -46,40 +46,33 @@ impl FromStr for ZcashAddress {
         let s = s.trim();
 
         // Try decoding as a unified address
-        match unified::Address::decode(s) {
-            Ok((net, data)) => {
-                return Ok(ZcashAddress {
-                    net,
-                    kind: AddressKind::Unified(data),
-                })
-            }
-            _ => (),
-        };
+        if let Ok((net, data)) = unified::Address::decode(s) {
+            return Ok(ZcashAddress {
+                net,
+                kind: AddressKind::Unified(data),
+            });
+        }
 
         // Try decoding as a Sapling address (Bech32)
-        match bech32::decode(s) {
-            Ok((hrp, data, Variant::Bech32)) => {
-                // If we reached this point, the encoding is supposed to be valid Bech32.
-                let data =
-                    Vec::<u8>::from_base32(&data).map_err(|_| ParseError::InvalidEncoding)?;
+        if let Ok((hrp, data, Variant::Bech32)) = bech32::decode(s) {
+            // If we reached this point, the encoding is supposed to be valid Bech32.
+            let data = Vec::<u8>::from_base32(&data).map_err(|_| ParseError::InvalidEncoding)?;
 
-                let net = match hrp.as_str() {
-                    sapling::MAINNET => Network::Main,
-                    sapling::TESTNET => Network::Test,
-                    sapling::REGTEST => Network::Regtest,
-                    // We will not define new Bech32 address encodings.
-                    _ => {
-                        return Err(ParseError::NotZcash);
-                    }
-                };
+            let net = match hrp.as_str() {
+                sapling::MAINNET => Network::Main,
+                sapling::TESTNET => Network::Test,
+                sapling::REGTEST => Network::Regtest,
+                // We will not define new Bech32 address encodings.
+                _ => {
+                    return Err(ParseError::NotZcash);
+                }
+            };
 
-                return data[..]
-                    .try_into()
-                    .map(AddressKind::Sapling)
-                    .map_err(|_| ParseError::InvalidEncoding)
-                    .map(|kind| ZcashAddress { net, kind });
-            }
-            _ => (),
+            return data[..]
+                .try_into()
+                .map(AddressKind::Sapling)
+                .map_err(|_| ParseError::InvalidEncoding)
+                .map(|kind| ZcashAddress { net, kind });
         }
 
         // The rest use Base58Check.

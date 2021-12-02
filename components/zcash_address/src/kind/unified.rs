@@ -318,7 +318,7 @@ pub trait Encoding: private::SealedContainer + std::marker::Sized {
                     .map_err(|e| ParseError::InvalidEncoding(e.to_string()))?;
 
                 Self::parse_items(hrp, &data[..])
-                    .and_then(|xs| Self::try_from_items(xs))
+                    .and_then(Self::try_from_items)
                     .map(|value| (net, value))
             }
             _ => Err(ParseError::InvalidEncoding("Expected bech32m".to_string())),
@@ -327,8 +327,12 @@ pub trait Encoding: private::SealedContainer + std::marker::Sized {
 
     fn encode(&self, network: &Network) -> String {
         let hrp = Self::network_hrp(network);
-        bech32::encode(hrp, self.to_jumbled_bytes(hrp).to_base32(), Variant::Bech32m)
-            .expect("hrp is invalid")
+        bech32::encode(
+            hrp,
+            self.to_jumbled_bytes(hrp).to_base32(),
+            Variant::Bech32m,
+        )
+        .expect("hrp is invalid")
     }
 }
 
