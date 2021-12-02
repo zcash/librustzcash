@@ -191,7 +191,7 @@ pub(crate) mod private {
         }
 
         /// Returns the jumbled padded raw encoding of this Unified Address or viewing key.
-        fn to_bytes(&self, hrp: &str) -> Vec<u8> {
+        fn to_jumbled_bytes(&self, hrp: &str) -> Vec<u8> {
             assert!(hrp.len() <= PADDING_LEN);
 
             let mut writer = std::io::Cursor::new(Vec::new());
@@ -327,7 +327,7 @@ pub trait Encoding: private::SealedContainer + std::marker::Sized {
 
     fn encode(&self, network: &Network) -> String {
         let hrp = Self::network_hrp(network);
-        bech32::encode(hrp, self.to_bytes(hrp).to_base32(), Variant::Bech32m)
+        bech32::encode(hrp, self.to_jumbled_bytes(hrp).to_base32(), Variant::Bech32m)
             .expect("hrp is invalid")
     }
 }
