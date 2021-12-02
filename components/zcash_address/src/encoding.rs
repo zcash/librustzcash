@@ -96,7 +96,7 @@ impl FromStr for ZcashAddress {
             .map(|kind| ZcashAddress { kind, net });
         };
 
-        // If it's not valid Bech32 or Base58Check, it's not a Zcash address.
+        // If it's not valid Bech32, Bech32m, or Base58Check, it's not a Zcash address.
         Err(ParseError::NotZcash)
     }
 }

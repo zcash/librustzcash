@@ -102,15 +102,15 @@ impl Typecode {
 /// An error while attempting to parse a string as a Zcash address.
 #[derive(Debug, PartialEq)]
 pub enum ParseError {
-    /// The unified address contains both P2PKH and P2SH items.
+    /// The unified container contains both P2PKH and P2SH items.
     BothP2phkAndP2sh,
-    /// The unified address contains a duplicated typecode.
+    /// The unified container contains a duplicated typecode.
     DuplicateTypecode(Typecode),
     /// The parsed typecode exceeds the maximum allowed CompactSize value.
     InvalidTypecodeValue(u64),
     /// The string is an invalid encoding.
     InvalidEncoding(String),
-    /// The unified address only contains transparent items.
+    /// The unified container only contains transparent items.
     OnlyTransparent,
 }
 
@@ -179,14 +179,14 @@ pub(crate) mod private {
 
         fn write_raw_encoding<W: Write>(&self, mut writer: W) {
             for item in &self.items() {
-                let addr = item.data();
+                let data = item.data();
                 CompactSize::write(
                     &mut writer,
                     <u32>::from(item.typecode()).try_into().unwrap(),
                 )
                 .unwrap();
-                CompactSize::write(&mut writer, addr.len()).unwrap();
-                writer.write_all(addr).unwrap();
+                CompactSize::write(&mut writer, data.len()).unwrap();
+                writer.write_all(data).unwrap();
             }
         }
 
@@ -232,7 +232,7 @@ pub(crate) mod private {
                 let buf = cursor.get_ref();
                 if (buf.len() as u64) < addr_end {
                     return Err(ParseError::InvalidEncoding(format!(
-                        "Truncated: unable to read {} bytes of address data",
+                        "Truncated: unable to read {} bytes of item data",
                         length
                     )));
                 }
