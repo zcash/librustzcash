@@ -305,7 +305,7 @@ mod tests {
         // Construct and serialize an invalid Ufvk. This must be done using private
         // methods, as the public API does not permit construction of such invalid values.
         let ufvk = Ufvk(vec![Fvk::Sapling([1; 128]), Fvk::Sapling([2; 128])]);
-        let encoded = ufvk.to_bytes(&Ufvk::MAINNET);
+        let encoded = ufvk.to_jumbled_bytes(&Ufvk::MAINNET);
         assert_eq!(
             Ufvk::parse_items(&Ufvk::MAINNET, &encoded[..]).and_then(Ufvk::try_from_items),
             Err(ParseError::DuplicateTypecode(Typecode::Sapling))

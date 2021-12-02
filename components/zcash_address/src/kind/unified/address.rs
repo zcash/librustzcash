@@ -253,7 +253,7 @@ mod tests {
         // Construct and serialize an invalid UA. This must be done using private
         // methods, as the public API does not permit construction of such invalid values.
         let ua = Address(vec![Receiver::Sapling([1; 43]), Receiver::Sapling([2; 43])]);
-        let encoded = ua.to_bytes(&Address::MAINNET);
+        let encoded = ua.to_jumbled_bytes(&Address::MAINNET);
         assert_eq!(
             Address::parse_items(&Address::MAINNET, &encoded[..]).and_then(Address::try_from_items),
             Err(ParseError::DuplicateTypecode(Typecode::Sapling))
@@ -265,7 +265,7 @@ mod tests {
         // Construct and serialize an invalid UA. This must be done using private
         // methods, as the public API does not permit construction of such invalid values.
         let ua = Address(vec![Receiver::P2pkh([0; 20]), Receiver::P2sh([0; 20])]);
-        let encoded = ua.to_bytes(&Address::MAINNET);
+        let encoded = ua.to_jumbled_bytes(&Address::MAINNET);
         // ensure that decoding catches the error
         assert_eq!(
             Address::parse_items(&Address::MAINNET, &encoded[..]).and_then(Address::try_from_items),
