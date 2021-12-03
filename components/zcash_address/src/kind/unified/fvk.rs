@@ -138,7 +138,7 @@ impl SealedContainer for Ufvk {
 mod tests {
     use assert_matches::assert_matches;
 
-    use proptest::{array::uniform32, prelude::*, sample::select};
+    use proptest::{array::uniform1, array::uniform32, prelude::*, sample::select};
 
     use super::{Fvk, ParseError, Typecode, Ufvk};
     use crate::{
@@ -147,28 +147,30 @@ mod tests {
     };
 
     prop_compose! {
-        fn uniform128()(a in uniform32(0u8..), b in uniform32(0u8..), c in uniform32(0u8..), d in uniform32(0u8..)) -> [u8; 128] {
+        fn uniform128()(a in uniform96(), b in uniform32(0u8..)) -> [u8; 128] {
             let mut fvk = [0; 128];
+            fvk[..96].copy_from_slice(&a);
+            fvk[96..].copy_from_slice(&b);
+            fvk
+        }
+    }
+
+    prop_compose! {
+        fn uniform96()(a in uniform32(0u8..), b in uniform32(0u8..), c in uniform32(0u8..)) -> [u8; 96] {
+            let mut fvk = [0; 96];
             fvk[..32].copy_from_slice(&a);
             fvk[32..64].copy_from_slice(&b);
-            fvk[64..96].copy_from_slice(&c);
-            fvk[96..].copy_from_slice(&d);
+            fvk[64..].copy_from_slice(&c);
             fvk
         }
     }
 
     prop_compose! {
-        fn uniform96()(a in uniform128()) -> [u8; 96] {
-            let mut fvk = [0; 96];
-            fvk[..96].copy_from_slice(&a[..96]);
-            fvk
-        }
-    }
-
-    prop_compose! {
-        fn uniform65()(a in uniform96()) -> [u8; 65] {
+        fn uniform65()(a in uniform32(0u8..), b in uniform32(0u8..), c in uniform1(0u8..)) -> [u8; 65] {
             let mut fvk = [0; 65];
-            fvk[..65].copy_from_slice(&a[..65]);
+            fvk[..32].copy_from_slice(&a);
+            fvk[32..64].copy_from_slice(&b);
+            fvk[64..].copy_from_slice(&c);
             fvk
         }
     }
