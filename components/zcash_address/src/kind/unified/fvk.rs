@@ -21,7 +21,7 @@ pub enum Fvk {
 
     /// A pruned version of the extended public key for the BIP 44 account corresponding to the
     /// transparent address subtree from which transparent addresses are derived. This
-    /// includes just the chain code (32 bytes) and the public key (33 bytes) and excludes
+    /// includes just the chain code (32 bytes) and the compressed public key (33 bytes), and excludes
     /// the depth of in the derivation tree, the parent key fingerprint, and the child key
     /// number (which would reveal the wallet account number for which this UFVK was generated).
     ///
@@ -31,7 +31,7 @@ pub enum Fvk {
     /// include transparent receivers. To achieve this, we treat the last hardened node in
     /// the BIP 44 derivation path as the "transparent viewing key"; all addresses derived
     /// from this node use non-hardened derivation, and can thus be derived just from this
-    /// extended public key.
+    /// pruned extended public key.
     P2pkh([u8; 65]),
 
     Unknown {
