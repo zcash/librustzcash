@@ -46,11 +46,19 @@ impl FromStr for ZcashAddress {
         let s = s.trim();
 
         // Try decoding as a unified address
-        if let Ok((net, data)) = unified::Address::decode(s) {
-            return Ok(ZcashAddress {
-                net,
-                kind: AddressKind::Unified(data),
-            });
+        match unified::Address::decode(s) {
+            Ok((net, data)) => {
+                return Ok(ZcashAddress {
+                    net,
+                    kind: AddressKind::Unified(data),
+                });
+            }
+            Err(unified::ParseError::NotUnified) => {
+                // allow decoding to fall through to Sapling/Transparent
+            }
+            Err(e) => {
+                return Err(ParseError::Unified(e));
+            }
         }
 
         // Try decoding as a Sapling address (Bech32)

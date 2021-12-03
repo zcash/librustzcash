@@ -112,6 +112,10 @@ pub enum ParseError {
     InvalidEncoding(String),
     /// The unified container only contains transparent items.
     OnlyTransparent,
+    /// The string is not Bech32m encoded, and so cannot be a unified address.
+    NotUnified,
+    /// The Bech32m string has an unrecognized human-readable prefix.
+    UnknownPrefix(String),
 }
 
 impl fmt::Display for ParseError {
@@ -122,6 +126,10 @@ impl fmt::Display for ParseError {
             ParseError::InvalidTypecodeValue(v) => write!(f, "Typecode value out of range {}", v),
             ParseError::InvalidEncoding(msg) => write!(f, "Invalid encoding: {}", msg),
             ParseError::OnlyTransparent => write!(f, "UA only contains transparent items"),
+            ParseError::NotUnified => write!(f, "Address is not Bech32m encoded"),
+            ParseError::UnknownPrefix(s) => {
+                write!(f, "Unrecognized Bech32m human-readable prefix: {}", s)
+            }
         }
     }
 }
@@ -303,25 +311,20 @@ pub trait Encoding: private::SealedContainer + std::marker::Sized {
     }
 
     fn decode(s: &str) -> Result<(Network, Self), ParseError> {
-        match bech32::decode(s) {
-            Ok((hrp, data, Variant::Bech32m)) => {
-                let hrp = hrp.as_str();
-                // validate that the HRP corresponds to a known network.
-                let net = Self::hrp_network(hrp).ok_or_else(|| {
-                    ParseError::InvalidEncoding(format!(
-                        "Unrecognized Bech32m human-readable prefix {}",
-                        hrp
-                    ))
-                })?;
+        if let Ok((hrp, data, Variant::Bech32m)) = bech32::decode(s) {
+            let hrp = hrp.as_str();
+            // validate that the HRP corresponds to a known network.
+            let net =
+                Self::hrp_network(hrp).ok_or_else(|| ParseError::UnknownPrefix(hrp.to_string()))?;
 
-                let data = Vec::<u8>::from_base32(&data)
-                    .map_err(|e| ParseError::InvalidEncoding(e.to_string()))?;
+            let data = Vec::<u8>::from_base32(&data)
+                .map_err(|e| ParseError::InvalidEncoding(e.to_string()))?;
 
-                Self::parse_items(hrp, &data[..])
-                    .and_then(Self::try_from_items)
-                    .map(|value| (net, value))
-            }
-            _ => Err(ParseError::InvalidEncoding("Expected bech32m".to_string())),
+            Self::parse_items(hrp, &data[..])
+                .and_then(Self::try_from_items)
+                .map(|value| (net, value))
+        } else {
+            Err(ParseError::NotUnified)
         }
     }
 
