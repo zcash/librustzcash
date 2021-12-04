@@ -7,7 +7,7 @@ use zcash_encoding::CompactSize;
 
 pub(crate) mod address;
 
-pub use address::Address;
+pub use address::{Address, Receiver};
 
 const PADDING_LEN: usize = 16;
 
