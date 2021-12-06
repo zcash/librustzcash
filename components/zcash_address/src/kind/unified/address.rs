@@ -113,6 +113,7 @@ pub(crate) mod test_vectors;
 #[cfg(test)]
 mod tests {
     use assert_matches::assert_matches;
+    use zcash_encoding::MAX_COMPACT_SIZE;
 
     use crate::{
         kind::unified::{private::SealedContainer, Container, Encoding},
@@ -121,6 +122,7 @@ mod tests {
 
     use proptest::{
         array::{uniform11, uniform20, uniform32},
+        collection::vec,
         prelude::*,
         sample::select,
     };
@@ -136,35 +138,52 @@ mod tests {
         }
     }
 
-    fn arb_shielded_receiver() -> BoxedStrategy<Vec<Receiver>> {
-        prop_oneof![
-            vec![uniform43().prop_map(Receiver::Sapling)],
-            vec![uniform43().prop_map(Receiver::Orchard)],
-            vec![
-                uniform43().prop_map(Receiver::Orchard as fn([u8; 43]) -> Receiver),
-                uniform43().prop_map(Receiver::Sapling)
-            ],
-        ]
-        .boxed()
+    fn arb_transparent_typecode() -> impl Strategy<Value = Typecode> {
+        select(vec![Typecode::P2pkh, Typecode::P2sh])
     }
 
-    fn arb_transparent_receiver() -> BoxedStrategy<Receiver> {
+    fn arb_shielded_typecode() -> impl Strategy<Value = Typecode> {
         prop_oneof![
-            uniform20(0u8..).prop_map(Receiver::P2pkh),
-            uniform20(0u8..).prop_map(Receiver::P2sh),
+            Just(Typecode::Sapling),
+            Just(Typecode::Orchard),
+            (0u32..MAX_COMPACT_SIZE).prop_map(Typecode::Unknown)
         ]
-        .boxed()
     }
 
-    prop_compose! {
-        fn arb_unified_address()(
-            shielded in arb_shielded_receiver(),
-            transparent in prop::option::of(arb_transparent_receiver()),
-        )(
-            shuffled in Just(shielded.into_iter().chain(transparent).collect()).prop_shuffle()
-        ) -> Address {
-            Address(shuffled)
-        }
+    /// A strategy to generate an arbitrary valid set of typecodes without
+    /// duplication and containing only one of P2sh and P2pkh transparent
+    /// typecodes.
+    fn arb_typecodes() -> impl Strategy<Value = Vec<Typecode>> {
+        prop::option::of(arb_transparent_typecode())
+            .prop_flat_map(|transparent| {
+                prop::collection::hash_set(arb_shielded_typecode(), 1..4)
+                    .prop_map(move |xs| xs.into_iter().chain(transparent).collect())
+                    .boxed()
+            })
+            .prop_shuffle()
+    }
+
+    fn arb_unified_address_for_typecodes(
+        typecodes: Vec<Typecode>,
+    ) -> impl Strategy<Value = Vec<Receiver>> {
+        typecodes
+            .into_iter()
+            .map(|tc| match tc {
+                Typecode::P2pkh => uniform20(0u8..).prop_map(Receiver::P2pkh).boxed(),
+                Typecode::P2sh => uniform20(0u8..).prop_map(Receiver::P2sh).boxed(),
+                Typecode::Sapling => uniform43().prop_map(Receiver::Sapling).boxed(),
+                Typecode::Orchard => uniform43().prop_map(Receiver::Orchard).boxed(),
+                Typecode::Unknown(typecode) => vec(any::<u8>(), 32..256)
+                    .prop_map(move |data| Receiver::Unknown { typecode, data })
+                    .boxed(),
+            })
+            .collect::<Vec<_>>()
+    }
+
+    fn arb_unified_address() -> impl Strategy<Value = Address> {
+        arb_typecodes()
+            .prop_flat_map(arb_unified_address_for_typecodes)
+            .prop_map(Address)
     }
 
     proptest! {

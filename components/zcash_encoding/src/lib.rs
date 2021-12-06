@@ -13,7 +13,8 @@ use nonempty::NonEmpty;
 use std::convert::TryFrom;
 use std::io::{self, Read, Write};
 
-const MAX_SIZE: u64 = 0x02000000;
+/// The maximum allowed value representable as a `[CompactSize]`
+pub const MAX_COMPACT_SIZE: u32 = 0x02000000;
 
 /// Namespace for functions for compact encoding of integers.
 ///
@@ -54,7 +55,7 @@ impl CompactSize {
         }?;
 
         match result {
-            s if s > MAX_SIZE => Err(io::Error::new(
+            s if s > (MAX_COMPACT_SIZE as u64) => Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 "CompactSize too large",
             )),

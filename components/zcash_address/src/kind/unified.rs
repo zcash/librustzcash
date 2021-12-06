@@ -209,7 +209,8 @@ pub(crate) mod private {
             padding[0..hrp.len()].copy_from_slice(hrp.as_bytes());
             writer.write_all(&padding).unwrap();
 
-            f4jumble::f4jumble(&writer.into_inner()).unwrap()
+            let padded = writer.into_inner();
+            f4jumble::f4jumble(&padded).unwrap_or_else(|| panic!("f4jumble failed on {:?}", padded))
         }
 
         /// Parse the items of the unified container.
