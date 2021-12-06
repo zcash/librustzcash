@@ -160,8 +160,10 @@ mod tests {
         fn arb_unified_address()(
             shielded in arb_shielded_receiver(),
             transparent in prop::option::of(arb_transparent_receiver()),
+        )(
+            shuffled in Just(shielded.into_iter().chain(transparent).collect()).prop_shuffle()
         ) -> Address {
-            Address(shielded.into_iter().chain(transparent).collect())
+            Address(shuffled)
         }
     }
 
@@ -173,7 +175,9 @@ mod tests {
         ) {
             let encoded = ua.encode(&network);
             let decoded = Address::decode(&encoded);
-            prop_assert_eq!(decoded, Ok((network, ua)));
+            prop_assert_eq!(&decoded, &Ok((network, ua)));
+            let reencoded = decoded.unwrap().1.encode(&network);
+            prop_assert_eq!(reencoded, encoded);
         }
     }
 

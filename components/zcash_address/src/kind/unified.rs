@@ -186,7 +186,7 @@ pub(crate) mod private {
         }
 
         fn write_raw_encoding<W: Write>(&self, mut writer: W) {
-            for item in &self.items() {
+            for item in self.items_as_parsed() {
                 let data = item.data();
                 CompactSize::write(
                     &mut writer,
