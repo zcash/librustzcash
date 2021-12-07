@@ -20,6 +20,7 @@ impl From<unified::ParseError> for ParseError {
     fn from(e: unified::ParseError) -> Self {
         match e {
             unified::ParseError::InvalidEncoding(_) => Self::InvalidEncoding,
+            unified::ParseError::UnknownPrefix(_) => Self::NotZcash,
             _ => Self::Unified(e),
         }
     }
@@ -57,7 +58,7 @@ impl FromStr for ZcashAddress {
                 // allow decoding to fall through to Sapling/Transparent
             }
             Err(e) => {
-                return Err(ParseError::Unified(e));
+                return Err(ParseError::from(e));
             }
         }
 
@@ -227,6 +228,12 @@ mod tests {
                 net: Network::Regtest,
                 kind: AddressKind::Unified(unified::Address(vec![unified::address::Receiver::Sapling([0; 43])])),
             },
+        );
+
+        let badencoded = "uinvalid1ck5navqwcng43gvsxwrxsplc22p7uzlcag6qfa0zh09e87efq6rq8wsnv25umqjjravw70rl994n5ueuhza2fghge5gl7zrl2qp6cwmp";
+        assert_eq!(
+            badencoded.parse::<ZcashAddress>(),
+            Err(ParseError::NotZcash)
         );
     }
 

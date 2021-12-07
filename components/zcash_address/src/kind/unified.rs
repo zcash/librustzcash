@@ -337,8 +337,8 @@ pub trait Encoding: private::SealedContainer {
     /// recommended by ZIP 316.
     ///
     /// This function will return an error in the case that the following ZIP 316
-    /// invariants concerning the composition of a unified container are 
-    /// violated: 
+    /// invariants concerning the composition of a unified container are
+    /// violated:
     /// * the item list may not contain two items having the same typecode
     /// * the item list may not contain only a single transparent item
     fn try_from_items_preserving_order(items: Vec<Self::Item>) -> Result<Self, ParseError> {
