@@ -146,7 +146,7 @@ mod tests {
         prop_oneof![
             Just(Typecode::Sapling),
             Just(Typecode::Orchard),
-            (0u32..MAX_COMPACT_SIZE).prop_map(Typecode::Unknown)
+            ((<u32>::from(Typecode::Orchard) + 1)..MAX_COMPACT_SIZE).prop_map(Typecode::Unknown)
         ]
     }
 
