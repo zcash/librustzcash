@@ -232,7 +232,7 @@ mod tests {
             0xdf, 0x63, 0xe7, 0xef, 0x65, 0x6b, 0x18, 0x23, 0xf7, 0x3e, 0x35, 0x7c, 0xf3, 0xc4,
         ];
         assert_eq!(
-            Ufvk::parse_items(Ufvk::MAINNET, &invalid_padding[..]),
+            Ufvk::parse_internal(Ufvk::MAINNET, &invalid_padding[..]),
             Err(ParseError::InvalidEncoding(
                 "Invalid padding bytes".to_owned()
             ))
@@ -250,7 +250,7 @@ mod tests {
             0x43, 0x8e, 0xc0, 0x3e, 0x9f, 0xf4, 0xf1, 0x80, 0x32, 0xcf, 0x2f, 0x7e, 0x7f, 0x91,
         ];
         assert_eq!(
-            Ufvk::parse_items(Ufvk::MAINNET, &truncated_padding[..]),
+            Ufvk::parse_internal(Ufvk::MAINNET, &truncated_padding[..]),
             Err(ParseError::InvalidEncoding(
                 "Invalid padding bytes".to_owned()
             ))
@@ -282,7 +282,7 @@ mod tests {
             0x8c, 0x7a, 0xbf, 0x7b, 0x9a, 0xdd, 0xee, 0x18, 0x2c, 0x2d, 0xc2, 0xfc,
         ];
         assert_matches!(
-            Ufvk::parse_items(Ufvk::MAINNET, &truncated_sapling_data[..]),
+            Ufvk::parse_internal(Ufvk::MAINNET, &truncated_sapling_data[..]),
             Err(ParseError::InvalidEncoding(_))
         );
 
@@ -297,7 +297,7 @@ mod tests {
             0x54, 0xd1, 0x9e, 0xec, 0x8b, 0xef, 0x35, 0xb8, 0x44, 0xdd, 0xab, 0x9a, 0x8d,
         ];
         assert_matches!(
-            Ufvk::parse_items(Ufvk::MAINNET, &truncated_after_sapling_typecode[..]),
+            Ufvk::parse_internal(Ufvk::MAINNET, &truncated_after_sapling_typecode[..]),
             Err(ParseError::InvalidEncoding(_))
         );
     }
@@ -309,7 +309,7 @@ mod tests {
         let ufvk = Ufvk(vec![Fvk::Sapling([1; 128]), Fvk::Sapling([2; 128])]);
         let encoded = ufvk.to_jumbled_bytes(Ufvk::MAINNET);
         assert_eq!(
-            Ufvk::parse_items(Ufvk::MAINNET, &encoded[..]).and_then(Ufvk::try_from_items),
+            Ufvk::parse_internal(Ufvk::MAINNET, &encoded[..]),
             Err(ParseError::DuplicateTypecode(Typecode::Sapling))
         );
     }
@@ -327,7 +327,7 @@ mod tests {
         ];
 
         assert_eq!(
-            Ufvk::parse_items(Ufvk::MAINNET, &encoded[..]).and_then(Ufvk::try_from_items),
+            Ufvk::parse_internal(Ufvk::MAINNET, &encoded[..]),
             Err(ParseError::OnlyTransparent)
         );
     }

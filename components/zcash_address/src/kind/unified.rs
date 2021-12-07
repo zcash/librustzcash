@@ -1,6 +1,5 @@
 use bech32::{self, FromBase32, ToBase32, Variant};
 use std::cmp;
-use std::collections::HashSet;
 use std::convert::TryFrom;
 use std::error::Error;
 use std::fmt;
@@ -141,6 +140,7 @@ pub(crate) mod private {
     use crate::Network;
     use std::{
         cmp,
+        collections::HashSet,
         convert::{TryFrom, TryInto},
         io::Write,
     };
@@ -155,7 +155,7 @@ pub(crate) mod private {
     }
 
     /// A Unified Container containing addresses or viewing keys.
-    pub trait SealedContainer: super::Container {
+    pub trait SealedContainer: super::Container + std::marker::Sized {
         const MAINNET: &'static str;
         const TESTNET: &'static str;
         const REGTEST: &'static str;
@@ -281,36 +281,73 @@ pub(crate) mod private {
 
             Ok(result)
         }
+
+        /// A private function that constructs a unified container with the
+        /// items in their given order.
+        fn try_from_items_internal(items: Vec<Self::Item>) -> Result<Self, ParseError> {
+            let mut typecodes = HashSet::with_capacity(items.len());
+            for item in &items {
+                let t = item.typecode();
+                if typecodes.contains(&t) {
+                    return Err(ParseError::DuplicateTypecode(t));
+                } else if (t == Typecode::P2pkh && typecodes.contains(&Typecode::P2sh))
+                    || (t == Typecode::P2sh && typecodes.contains(&Typecode::P2pkh))
+                {
+                    return Err(ParseError::BothP2phkAndP2sh);
+                } else {
+                    typecodes.insert(t);
+                }
+            }
+
+            if typecodes.iter().all(|t| t.is_transparent()) {
+                Err(ParseError::OnlyTransparent)
+            } else {
+                // All checks pass!
+                Ok(Self::from_inner(items))
+            }
+        }
+
+        fn parse_internal(hrp: &str, buf: &[u8]) -> Result<Self, ParseError> {
+            Self::parse_items(hrp, buf).and_then(Self::try_from_items_internal)
+        }
     }
 }
 
 use private::SealedItem;
 
 /// Trait providing common encoding and decoding logic for Unified containers.
-pub trait Encoding: private::SealedContainer + std::marker::Sized {
-    fn try_from_items(items: Vec<Self::Item>) -> Result<Self, ParseError> {
-        let mut typecodes = HashSet::with_capacity(items.len());
-        for item in &items {
-            let t = item.typecode();
-            if typecodes.contains(&t) {
-                return Err(ParseError::DuplicateTypecode(t));
-            } else if (t == Typecode::P2pkh && typecodes.contains(&Typecode::P2sh))
-                || (t == Typecode::P2sh && typecodes.contains(&Typecode::P2pkh))
-            {
-                return Err(ParseError::BothP2phkAndP2sh);
-            } else {
-                typecodes.insert(t);
-            }
-        }
-
-        if typecodes.iter().all(|t| t.is_transparent()) {
-            Err(ParseError::OnlyTransparent)
-        } else {
-            // All checks pass!
-            Ok(Self::from_inner(items))
-        }
+pub trait Encoding: private::SealedContainer {
+    /// Constructs a value of a unified container type from a vector
+    /// of container items, sorted according to typecode as specified
+    /// in ZIP 316.
+    ///
+    /// This function will return an error in the case that the following ZIP 316
+    /// invariants concerning the composition of a unified container are
+    /// violated:
+    /// * the item list may not contain two items having the same typecode
+    /// * the item list may not contain only a single transparent item
+    fn try_from_items(mut items: Vec<Self::Item>) -> Result<Self, ParseError> {
+        items.sort_unstable_by_key(|i| i.typecode());
+        Self::try_from_items_internal(items)
     }
 
+    /// Constructs a value of a unified container type from a vector
+    /// of container items, preserving the order of the provided vector
+    /// in the serialized form, potentially contravening the ordering
+    /// recommended by ZIP 316.
+    ///
+    /// This function will return an error in the case that the following ZIP 316
+    /// invariants concerning the composition of a unified container are 
+    /// violated: 
+    /// * the item list may not contain two items having the same typecode
+    /// * the item list may not contain only a single transparent item
+    fn try_from_items_preserving_order(items: Vec<Self::Item>) -> Result<Self, ParseError> {
+        Self::try_from_items_internal(items)
+    }
+
+    /// Decodes a unified container from its string representation, preserving
+    /// the order of its components so that it correctly obeys round-trip
+    /// serialization invariants.
     fn decode(s: &str) -> Result<(Network, Self), ParseError> {
         if let Ok((hrp, data, Variant::Bech32m)) = bech32::decode(s) {
             let hrp = hrp.as_str();
@@ -321,14 +358,16 @@ pub trait Encoding: private::SealedContainer + std::marker::Sized {
             let data = Vec::<u8>::from_base32(&data)
                 .map_err(|e| ParseError::InvalidEncoding(e.to_string()))?;
 
-            Self::parse_items(hrp, &data[..])
-                .and_then(Self::try_from_items)
-                .map(|value| (net, value))
+            Self::parse_internal(hrp, &data[..]).map(|value| (net, value))
         } else {
             Err(ParseError::NotUnified)
         }
     }
 
+    /// Encodes the contents of the unified container to its string representation
+    /// using the correct constants for the specified network, preserving the
+    /// ordering of the contained items such that it correctly obeys round-trip
+    /// serialization invariants.
     fn encode(&self, network: &Network) -> String {
         let hrp = Self::network_hrp(network);
         bech32::encode(
