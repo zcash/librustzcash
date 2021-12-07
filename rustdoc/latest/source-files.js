@@ -1,7 +1,7 @@
 var N = null;var sourcesIndex = {};
 sourcesIndex["equihash"] = {"name":"","files":["lib.rs","verify.rs"]};
 sourcesIndex["f4jumble"] = {"name":"","files":["lib.rs"]};
-sourcesIndex["zcash_address"] = {"name":"","dirs":[{"name":"kind","dirs":[{"name":"unified","files":["address.rs"]}],"files":["p2pkh.rs","p2sh.rs","sapling.rs","sprout.rs","unified.rs"]}],"files":["convert.rs","encoding.rs","kind.rs","lib.rs"]};
+sourcesIndex["zcash_address"] = {"name":"","dirs":[{"name":"kind","dirs":[{"name":"unified","files":["address.rs","fvk.rs","ivk.rs"]}],"files":["p2pkh.rs","p2sh.rs","sapling.rs","sprout.rs","unified.rs"]}],"files":["convert.rs","encoding.rs","kind.rs","lib.rs"]};
 sourcesIndex["zcash_client_backend"] = {"name":"","dirs":[{"name":"data_api","files":["chain.rs","error.rs","wallet.rs"]},{"name":"proto","files":["compact_formats.rs"]}],"files":["address.rs","data_api.rs","decrypt.rs","encoding.rs","keys.rs","lib.rs","proto.rs","wallet.rs","welding_rig.rs","zip321.rs"]};
 sourcesIndex["zcash_client_sqlite"] = {"name":"","dirs":[{"name":"chain","files":["init.rs"]},{"name":"wallet","files":["init.rs","transact.rs"]}],"files":["chain.rs","error.rs","lib.rs","wallet.rs"]};
 sourcesIndex["zcash_encoding"] = {"name":"","files":["lib.rs"]};
