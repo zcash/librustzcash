@@ -2,7 +2,7 @@ use std::{convert::TryInto, error::Error, fmt, str::FromStr};
 
 use bech32::{self, FromBase32, ToBase32, Variant};
 
-use crate::kind::unified::{private::SealedContainer, Encoding};
+use crate::kind::unified::Encoding;
 use crate::{kind::*, AddressKind, Network, ZcashAddress};
 
 /// An error while attempting to parse a string as a Zcash address.
@@ -20,6 +20,7 @@ impl From<unified::ParseError> for ParseError {
     fn from(e: unified::ParseError) -> Self {
         match e {
             unified::ParseError::InvalidEncoding(_) => Self::InvalidEncoding,
+            unified::ParseError::UnknownPrefix(_) => Self::NotZcash,
             _ => Self::Unified(e),
         }
     }
@@ -45,50 +46,42 @@ impl FromStr for ZcashAddress {
         // Remove leading and trailing whitespace, to handle copy-paste errors.
         let s = s.trim();
 
-        // Most Zcash addresses use Bech32 or Bech32m, so try those first.
-        match bech32::decode(s) {
-            Ok((hrp, data, Variant::Bech32m)) => {
-                // If we reached this point, the encoding is supposed to be valid Bech32m.
-                let data =
-                    Vec::<u8>::from_base32(&data).map_err(|_| ParseError::InvalidEncoding)?;
-
-                let net = match hrp.as_str() {
-                    unified::address::Address::MAINNET => Network::Main,
-                    unified::address::Address::TESTNET => Network::Test,
-                    unified::address::Address::REGTEST => Network::Regtest,
-                    // We will not define new Bech32m address encodings.
-                    _ => {
-                        return Err(ParseError::NotZcash);
-                    }
-                };
-
-                return unified::Address::try_from_bytes(hrp.as_str(), &data[..])
-                    .map(AddressKind::Unified)
-                    .map_err(|_| ParseError::InvalidEncoding)
-                    .map(|kind| ZcashAddress { net, kind });
+        // Try decoding as a unified address
+        match unified::Address::decode(s) {
+            Ok((net, data)) => {
+                return Ok(ZcashAddress {
+                    net,
+                    kind: AddressKind::Unified(data),
+                });
             }
-            Ok((hrp, data, Variant::Bech32)) => {
-                // If we reached this point, the encoding is supposed to be valid Bech32.
-                let data =
-                    Vec::<u8>::from_base32(&data).map_err(|_| ParseError::InvalidEncoding)?;
-
-                let net = match hrp.as_str() {
-                    sapling::MAINNET => Network::Main,
-                    sapling::TESTNET => Network::Test,
-                    sapling::REGTEST => Network::Regtest,
-                    // We will not define new Bech32 address encodings.
-                    _ => {
-                        return Err(ParseError::NotZcash);
-                    }
-                };
-
-                return data[..]
-                    .try_into()
-                    .map(AddressKind::Sapling)
-                    .map_err(|_| ParseError::InvalidEncoding)
-                    .map(|kind| ZcashAddress { net, kind });
+            Err(unified::ParseError::NotUnified) => {
+                // allow decoding to fall through to Sapling/Transparent
             }
-            Err(_) => (),
+            Err(e) => {
+                return Err(ParseError::from(e));
+            }
+        }
+
+        // Try decoding as a Sapling address (Bech32)
+        if let Ok((hrp, data, Variant::Bech32)) = bech32::decode(s) {
+            // If we reached this point, the encoding is supposed to be valid Bech32.
+            let data = Vec::<u8>::from_base32(&data).map_err(|_| ParseError::InvalidEncoding)?;
+
+            let net = match hrp.as_str() {
+                sapling::MAINNET => Network::Main,
+                sapling::TESTNET => Network::Test,
+                sapling::REGTEST => Network::Regtest,
+                // We will not define new Bech32 address encodings.
+                _ => {
+                    return Err(ParseError::NotZcash);
+                }
+            };
+
+            return data[..]
+                .try_into()
+                .map(AddressKind::Sapling)
+                .map_err(|_| ParseError::InvalidEncoding)
+                .map(|kind| ZcashAddress { net, kind });
         }
 
         // The rest use Base58Check.
@@ -112,13 +105,9 @@ impl FromStr for ZcashAddress {
             .map(|kind| ZcashAddress { kind, net });
         };
 
-        // If it's not valid Bech32 or Base58Check, it's not a Zcash address.
+        // If it's not valid Bech32, Bech32m, or Base58Check, it's not a Zcash address.
         Err(ParseError::NotZcash)
     }
-}
-
-fn encode_bech32m(hrp: &str, data: &[u8]) -> String {
-    bech32::encode(hrp, data.to_base32(), Variant::Bech32m).expect("hrp is invalid")
 }
 
 fn encode_bech32(hrp: &str, data: &[u8]) -> String {
@@ -150,14 +139,7 @@ impl fmt::Display for ZcashAddress {
                 },
                 data,
             ),
-            AddressKind::Unified(data) => {
-                let hrp = match self.net {
-                    Network::Main => unified::address::Address::MAINNET,
-                    Network::Test => unified::address::Address::TESTNET,
-                    Network::Regtest => unified::address::Address::REGTEST,
-                };
-                encode_bech32m(hrp, &data.to_bytes(hrp))
-            }
+            AddressKind::Unified(addr) => addr.encode(&self.net),
             AddressKind::P2pkh(data) => encode_b58(
                 match self.net {
                     Network::Main => p2pkh::MAINNET,
@@ -246,6 +228,12 @@ mod tests {
                 net: Network::Regtest,
                 kind: AddressKind::Unified(unified::Address(vec![unified::address::Receiver::Sapling([0; 43])])),
             },
+        );
+
+        let badencoded = "uinvalid1ck5navqwcng43gvsxwrxsplc22p7uzlcag6qfa0zh09e87efq6rq8wsnv25umqjjravw70rl994n5ueuhza2fghge5gl7zrl2qp6cwmp";
+        assert_eq!(
+            badencoded.parse::<ZcashAddress>(),
+            Err(ParseError::NotZcash)
         );
     }
 

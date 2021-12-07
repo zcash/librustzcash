@@ -1,13 +1,18 @@
+use bech32::{self, FromBase32, ToBase32, Variant};
 use std::cmp;
-use std::collections::HashSet;
-use std::convert::{TryFrom, TryInto};
+use std::convert::TryFrom;
 use std::error::Error;
 use std::fmt;
-use zcash_encoding::CompactSize;
+
+use crate::Network;
 
 pub(crate) mod address;
+pub(crate) mod fvk;
+pub(crate) mod ivk;
 
-pub use address::Address;
+pub use address::{Address, Receiver};
+pub use fvk::{Fvk, Ufvk};
+pub use ivk::{Ivk, Uivk};
 
 const PADDING_LEN: usize = 16;
 
@@ -96,16 +101,20 @@ impl Typecode {
 /// An error while attempting to parse a string as a Zcash address.
 #[derive(Debug, PartialEq)]
 pub enum ParseError {
-    /// The unified address contains both P2PKH and P2SH items.
+    /// The unified container contains both P2PKH and P2SH items.
     BothP2phkAndP2sh,
-    /// The unified address contains a duplicated typecode.
+    /// The unified container contains a duplicated typecode.
     DuplicateTypecode(Typecode),
     /// The parsed typecode exceeds the maximum allowed CompactSize value.
     InvalidTypecodeValue(u64),
     /// The string is an invalid encoding.
     InvalidEncoding(String),
-    /// The unified address only contains transparent items.
+    /// The unified container only contains transparent items.
     OnlyTransparent,
+    /// The string is not Bech32m encoded, and so cannot be a unified address.
+    NotUnified,
+    /// The Bech32m string has an unrecognized human-readable prefix.
+    UnknownPrefix(String),
 }
 
 impl fmt::Display for ParseError {
@@ -116,6 +125,10 @@ impl fmt::Display for ParseError {
             ParseError::InvalidTypecodeValue(v) => write!(f, "Typecode value out of range {}", v),
             ParseError::InvalidEncoding(msg) => write!(f, "Invalid encoding: {}", msg),
             ParseError::OnlyTransparent => write!(f, "UA only contains transparent items"),
+            ParseError::NotUnified => write!(f, "Address is not Bech32m encoded"),
+            ParseError::UnknownPrefix(s) => {
+                write!(f, "Unrecognized Bech32m human-readable prefix: {}", s)
+            }
         }
     }
 }
@@ -124,8 +137,10 @@ impl Error for ParseError {}
 
 pub(crate) mod private {
     use super::{ParseError, Typecode, PADDING_LEN};
+    use crate::Network;
     use std::{
         cmp,
+        collections::HashSet,
         convert::{TryFrom, TryInto},
         io::Write,
     };
@@ -140,7 +155,7 @@ pub(crate) mod private {
     }
 
     /// A Unified Container containing addresses or viewing keys.
-    pub trait SealedContainer: super::Container {
+    pub trait SealedContainer: super::Container + std::marker::Sized {
         const MAINNET: &'static str;
         const TESTNET: &'static str;
         const REGTEST: &'static str;
@@ -150,21 +165,41 @@ pub(crate) mod private {
         /// general invariants that apply to all unified containers.
         fn from_inner(items: Vec<Self::Item>) -> Self;
 
+        fn network_hrp(network: &Network) -> &'static str {
+            match network {
+                Network::Main => Self::MAINNET,
+                Network::Test => Self::TESTNET,
+                Network::Regtest => Self::REGTEST,
+            }
+        }
+
+        fn hrp_network(hrp: &str) -> Option<Network> {
+            if hrp == Self::MAINNET {
+                Some(Network::Main)
+            } else if hrp == Self::TESTNET {
+                Some(Network::Test)
+            } else if hrp == Self::REGTEST {
+                Some(Network::Regtest)
+            } else {
+                None
+            }
+        }
+
         fn write_raw_encoding<W: Write>(&self, mut writer: W) {
-            for item in &self.items() {
-                let addr = item.data();
+            for item in self.items_as_parsed() {
+                let data = item.data();
                 CompactSize::write(
                     &mut writer,
                     <u32>::from(item.typecode()).try_into().unwrap(),
                 )
                 .unwrap();
-                CompactSize::write(&mut writer, addr.len()).unwrap();
-                writer.write_all(addr).unwrap();
+                CompactSize::write(&mut writer, data.len()).unwrap();
+                writer.write_all(data).unwrap();
             }
         }
 
         /// Returns the jumbled padded raw encoding of this Unified Address or viewing key.
-        fn to_bytes(&self, hrp: &str) -> Vec<u8> {
+        fn to_jumbled_bytes(&self, hrp: &str) -> Vec<u8> {
             assert!(hrp.len() <= PADDING_LEN);
 
             let mut writer = std::io::Cursor::new(Vec::new());
@@ -174,102 +209,173 @@ pub(crate) mod private {
             padding[0..hrp.len()].copy_from_slice(hrp.as_bytes());
             writer.write_all(&padding).unwrap();
 
-            f4jumble::f4jumble(&writer.into_inner()).unwrap()
+            let padded = writer.into_inner();
+            f4jumble::f4jumble(&padded).unwrap_or_else(|| panic!("f4jumble failed on {:?}", padded))
+        }
+
+        /// Parse the items of the unified container.
+        fn parse_items(hrp: &str, buf: &[u8]) -> Result<Vec<Self::Item>, ParseError> {
+            fn read_receiver<R: SealedItem>(
+                mut cursor: &mut std::io::Cursor<&[u8]>,
+            ) -> Result<R, ParseError> {
+                let typecode = CompactSize::read(&mut cursor)
+                    .map(|v| u32::try_from(v).expect("CompactSize::read enforces MAX_SIZE limit"))
+                    .map_err(|e| {
+                        ParseError::InvalidEncoding(format!(
+                            "Failed to deserialize CompactSize-encoded typecode {}",
+                            e
+                        ))
+                    })?;
+                let length = CompactSize::read(&mut cursor).map_err(|e| {
+                    ParseError::InvalidEncoding(format!(
+                        "Failed to deserialize CompactSize-encoded length {}",
+                        e
+                    ))
+                })?;
+                let addr_end = cursor.position().checked_add(length).ok_or_else(|| {
+                    ParseError::InvalidEncoding(format!(
+                        "Length value {} caused an overflow error",
+                        length
+                    ))
+                })?;
+                let buf = cursor.get_ref();
+                if (buf.len() as u64) < addr_end {
+                    return Err(ParseError::InvalidEncoding(format!(
+                        "Truncated: unable to read {} bytes of item data",
+                        length
+                    )));
+                }
+                let result = R::try_from((
+                    typecode,
+                    &buf[cursor.position() as usize..addr_end as usize],
+                ));
+                cursor.set_position(addr_end);
+                result
+            }
+
+            let encoded = f4jumble::f4jumble_inv(buf).ok_or_else(|| {
+                ParseError::InvalidEncoding("F4Jumble decoding failed".to_owned())
+            })?;
+
+            // Validate and strip trailing padding bytes.
+            if hrp.len() > 16 {
+                return Err(ParseError::InvalidEncoding(
+                    "Invalid human-readable part".to_owned(),
+                ));
+            }
+            let mut expected_padding = [0; PADDING_LEN];
+            expected_padding[0..hrp.len()].copy_from_slice(hrp.as_bytes());
+            let encoded = match encoded.split_at(encoded.len() - PADDING_LEN) {
+                (encoded, tail) if tail == expected_padding => Ok(encoded),
+                _ => Err(ParseError::InvalidEncoding(
+                    "Invalid padding bytes".to_owned(),
+                )),
+            }?;
+
+            let mut cursor = std::io::Cursor::new(encoded);
+            let mut result = vec![];
+            while cursor.position() < encoded.len().try_into().unwrap() {
+                result.push(read_receiver(&mut cursor)?);
+            }
+            assert_eq!(cursor.position(), encoded.len().try_into().unwrap());
+
+            Ok(result)
+        }
+
+        /// A private function that constructs a unified container with the
+        /// items in their given order.
+        fn try_from_items_internal(items: Vec<Self::Item>) -> Result<Self, ParseError> {
+            let mut typecodes = HashSet::with_capacity(items.len());
+            for item in &items {
+                let t = item.typecode();
+                if typecodes.contains(&t) {
+                    return Err(ParseError::DuplicateTypecode(t));
+                } else if (t == Typecode::P2pkh && typecodes.contains(&Typecode::P2sh))
+                    || (t == Typecode::P2sh && typecodes.contains(&Typecode::P2pkh))
+                {
+                    return Err(ParseError::BothP2phkAndP2sh);
+                } else {
+                    typecodes.insert(t);
+                }
+            }
+
+            if typecodes.iter().all(|t| t.is_transparent()) {
+                Err(ParseError::OnlyTransparent)
+            } else {
+                // All checks pass!
+                Ok(Self::from_inner(items))
+            }
+        }
+
+        fn parse_internal(hrp: &str, buf: &[u8]) -> Result<Self, ParseError> {
+            Self::parse_items(hrp, buf).and_then(Self::try_from_items_internal)
         }
     }
 }
 
 use private::SealedItem;
 
-/// Trait providing common encoding logic for Unified containers.
-pub trait Encoding: private::SealedContainer + std::marker::Sized {
-    fn try_from_bytes(hrp: &str, buf: &[u8]) -> Result<Self, ParseError> {
-        fn read_receiver<R: SealedItem>(
-            mut cursor: &mut std::io::Cursor<&[u8]>,
-        ) -> Result<R, ParseError> {
-            let typecode = CompactSize::read(&mut cursor)
-                .map(|v| u32::try_from(v).expect("CompactSize::read enforces MAX_SIZE limit"))
-                .map_err(|e| {
-                    ParseError::InvalidEncoding(format!(
-                        "Failed to deserialize CompactSize-encoded typecode {}",
-                        e
-                    ))
-                })?;
-            let length = CompactSize::read(&mut cursor).map_err(|e| {
-                ParseError::InvalidEncoding(format!(
-                    "Failed to deserialize CompactSize-encoded length {}",
-                    e
-                ))
-            })?;
-            let addr_end = cursor.position().checked_add(length).ok_or_else(|| {
-                ParseError::InvalidEncoding(format!(
-                    "Length value {} caused an overflow error",
-                    length
-                ))
-            })?;
-            let buf = cursor.get_ref();
-            if (buf.len() as u64) < addr_end {
-                return Err(ParseError::InvalidEncoding(format!(
-                    "Truncated: unable to read {} bytes of address data",
-                    length
-                )));
-            }
-            let result = R::try_from((
-                typecode,
-                &buf[cursor.position() as usize..addr_end as usize],
-            ));
-            cursor.set_position(addr_end);
-            result
-        }
-
-        let encoded = f4jumble::f4jumble_inv(buf)
-            .ok_or_else(|| ParseError::InvalidEncoding("F4Jumble decoding failed".to_owned()))?;
-
-        // Validate and strip trailing padding bytes.
-        if hrp.len() > 16 {
-            return Err(ParseError::InvalidEncoding(
-                "Invalid human-readable part".to_owned(),
-            ));
-        }
-        let mut expected_padding = [0; PADDING_LEN];
-        expected_padding[0..hrp.len()].copy_from_slice(hrp.as_bytes());
-        let encoded = match encoded.split_at(encoded.len() - PADDING_LEN) {
-            (encoded, tail) if tail == expected_padding => Ok(encoded),
-            _ => Err(ParseError::InvalidEncoding(
-                "Invalid padding bytes".to_owned(),
-            )),
-        }?;
-
-        let mut cursor = std::io::Cursor::new(encoded);
-        let mut result = vec![];
-        while cursor.position() < encoded.len().try_into().unwrap() {
-            result.push(read_receiver(&mut cursor)?);
-        }
-        assert_eq!(cursor.position(), encoded.len().try_into().unwrap());
-        Self::try_from_items(result)
+/// Trait providing common encoding and decoding logic for Unified containers.
+pub trait Encoding: private::SealedContainer {
+    /// Constructs a value of a unified container type from a vector
+    /// of container items, sorted according to typecode as specified
+    /// in ZIP 316.
+    ///
+    /// This function will return an error in the case that the following ZIP 316
+    /// invariants concerning the composition of a unified container are
+    /// violated:
+    /// * the item list may not contain two items having the same typecode
+    /// * the item list may not contain only a single transparent item
+    fn try_from_items(mut items: Vec<Self::Item>) -> Result<Self, ParseError> {
+        items.sort_unstable_by_key(|i| i.typecode());
+        Self::try_from_items_internal(items)
     }
 
-    fn try_from_items(items: Vec<Self::Item>) -> Result<Self, ParseError> {
-        let mut typecodes = HashSet::with_capacity(items.len());
-        for item in &items {
-            let t = item.typecode();
-            if typecodes.contains(&t) {
-                return Err(ParseError::DuplicateTypecode(t));
-            } else if (t == Typecode::P2pkh && typecodes.contains(&Typecode::P2sh))
-                || (t == Typecode::P2sh && typecodes.contains(&Typecode::P2pkh))
-            {
-                return Err(ParseError::BothP2phkAndP2sh);
-            } else {
-                typecodes.insert(t);
-            }
-        }
+    /// Constructs a value of a unified container type from a vector
+    /// of container items, preserving the order of the provided vector
+    /// in the serialized form, potentially contravening the ordering
+    /// recommended by ZIP 316.
+    ///
+    /// This function will return an error in the case that the following ZIP 316
+    /// invariants concerning the composition of a unified container are
+    /// violated:
+    /// * the item list may not contain two items having the same typecode
+    /// * the item list may not contain only a single transparent item
+    fn try_from_items_preserving_order(items: Vec<Self::Item>) -> Result<Self, ParseError> {
+        Self::try_from_items_internal(items)
+    }
 
-        if typecodes.iter().all(|t| t.is_transparent()) {
-            Err(ParseError::OnlyTransparent)
+    /// Decodes a unified container from its string representation, preserving
+    /// the order of its components so that it correctly obeys round-trip
+    /// serialization invariants.
+    fn decode(s: &str) -> Result<(Network, Self), ParseError> {
+        if let Ok((hrp, data, Variant::Bech32m)) = bech32::decode(s) {
+            let hrp = hrp.as_str();
+            // validate that the HRP corresponds to a known network.
+            let net =
+                Self::hrp_network(hrp).ok_or_else(|| ParseError::UnknownPrefix(hrp.to_string()))?;
+
+            let data = Vec::<u8>::from_base32(&data)
+                .map_err(|e| ParseError::InvalidEncoding(e.to_string()))?;
+
+            Self::parse_internal(hrp, &data[..]).map(|value| (net, value))
         } else {
-            // All checks pass!
-            Ok(Self::from_inner(items))
+            Err(ParseError::NotUnified)
         }
+    }
+
+    /// Encodes the contents of the unified container to its string representation
+    /// using the correct constants for the specified network, preserving the
+    /// ordering of the contained items such that it correctly obeys round-trip
+    /// serialization invariants.
+    fn encode(&self, network: &Network) -> String {
+        let hrp = Self::network_hrp(network);
+        bech32::encode(
+            hrp,
+            self.to_jumbled_bytes(hrp).to_base32(),
+            Variant::Bech32m,
+        )
+        .expect("hrp is invalid")
     }
 }
 
