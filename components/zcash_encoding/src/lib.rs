@@ -55,7 +55,7 @@ impl CompactSize {
         }?;
 
         match result {
-            s if s > (MAX_COMPACT_SIZE as u64) => Err(io::Error::new(
+            s if s > <u64>::from(MAX_COMPACT_SIZE) => Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 "CompactSize too large",
             )),
