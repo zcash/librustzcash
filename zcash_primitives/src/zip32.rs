@@ -160,8 +160,11 @@ impl DiversifierKey {
         Self::try_diversifier_internal(&ff, j)
     }
 
-    /// Decrypts a diversifier using this diversifier key to obtain the
-    /// diversifier index from which it was originally created.
+    /// Returns the diversifier index to which this key maps the given diversifier.
+    ///
+    /// This method cannot be used to verify whether the diversifier was originally
+    /// generated with this diversifier key, because all valid diversifiers can be
+    /// produced by all diversifier keys.
     pub fn diversifier_index(&self, d: &Diversifier) -> DiversifierIndex {
         let ff = FF1::<Aes256>::new(&self.0, 2).unwrap();
         let dec = ff
