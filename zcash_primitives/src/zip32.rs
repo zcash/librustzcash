@@ -149,6 +149,7 @@ impl DiversifierKey {
         d_j.copy_from_slice(&enc.to_bytes_le());
         let diversifier = Diversifier(d_j);
 
+        // validate that the generated diversifier maps to a jubjub subgroup point.
         diversifier.g_d().map(|_| diversifier)
     }
 
@@ -157,6 +158,18 @@ impl DiversifierKey {
     pub fn diversifier(&self, j: DiversifierIndex) -> Option<Diversifier> {
         let ff = FF1::<Aes256>::new(&self.0, 2).unwrap();
         Self::try_diversifier_internal(&ff, j)
+    }
+
+    /// Decrypts a diversifier using this diversifier key to obtain the
+    /// diversifier index from which it was originally created.
+    pub fn diversifier_index(&self, d: &Diversifier) -> DiversifierIndex {
+        let ff = FF1::<Aes256>::new(&self.0, 2).unwrap();
+        let dec = ff
+            .decrypt(&[], &BinaryNumeralString::from_bytes_le(&d.0[..]))
+            .unwrap();
+        let mut j = DiversifierIndex::new();
+        j.0.copy_from_slice(&dec.to_bytes_le());
+        j
     }
 
     /// Returns the first index starting from j that generates a valid
@@ -578,6 +591,7 @@ mod tests {
         // j = 0
         let d_j = dk.diversifier(j_0).unwrap();
         assert_eq!(d_j.0, d_0);
+        assert_eq!(dk.diversifier_index(&Diversifier(d_0)), j_0);
 
         // j = 1
         assert_eq!(dk.diversifier(j_1), None);
@@ -588,6 +602,7 @@ mod tests {
         // j = 3
         let d_j = dk.diversifier(j_3).unwrap();
         assert_eq!(d_j.0, d_3);
+        assert_eq!(dk.diversifier_index(&Diversifier(d_3)), j_3);
     }
 
     #[test]
