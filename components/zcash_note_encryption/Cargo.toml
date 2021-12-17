@@ -1,6 +1,6 @@
 [package]
 name = "zcash_note_encryption"
-description = "TBD"
+description = "Note encryption for Zcash transactions"
 version = "0.0.0"
 authors = [
     "Jack Grigg <jack@electriccoin.co>",
