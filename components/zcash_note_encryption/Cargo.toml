@@ -1,35 +1,37 @@
 [package]
 name = "zcash_note_encryption"
-description = "TBD"
-version = "0.0.0"
+description = "Note encryption for Zcash transactions"
+version = "0.1.0"
 authors = [
     "Jack Grigg <jack@electriccoin.co>",
     "Kris Nuttycombe <kris@electriccoin.co>"
 ]
 homepage = "https://github.com/zcash/librustzcash"
 repository = "https://github.com/zcash/librustzcash"
+readme = "README.md"
 license = "MIT OR Apache-2.0"
 edition = "2018"
+categories = ["cryptography::cryptocurrencies"]
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
 
 [dependencies]
-blake2b_simd = { version = "0.5", default-features = false }
-byteorder = { version = "1", default-features = false }
 chacha20 = { version = "0.8", default-features = false }
 chacha20poly1305 = { version = "0.9", default-features = false }
-ff = { version = "0.11", default-features = false }
-group = { version = "0.11", default-features = false }
 rand_core = { version = "0.6", default-features = false }
 subtle = { version = "2.2.3", default-features = false }
 
 [dev-dependencies]
+ff = { version = "0.11", default-features = false }
 zcash_primitives = { version = "0.5", path = "../../zcash_primitives" }
 jubjub = "0.8"
 
 [features]
-default = ["std"]
+default = ["alloc"]
 alloc = []
 pre-zip-212 = []
-std = ["alloc", "blake2b_simd/std"]
 
 [lib]
 bench = false
