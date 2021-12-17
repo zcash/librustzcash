@@ -127,7 +127,7 @@ impl TryFrom<compact_formats::CompactOutput> for CompactOutputDescription {
         Ok(CompactOutputDescription {
             cmu: value.cmu()?,
             ephemeral_key: value.ephemeral_key()?,
-            enc_ciphertext: value.ciphertext,
+            enc_ciphertext: value.ciphertext.try_into().map_err(|_| ())?,
         })
     }
 }

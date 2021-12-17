@@ -82,7 +82,7 @@ pub struct NotePlaintextBytes(pub [u8; NOTE_PLAINTEXT_SIZE]);
 pub struct OutPlaintextBytes(pub [u8; OUT_PLAINTEXT_SIZE]);
 
 #[derive(Copy, Clone, PartialEq, Eq)]
-pub enum NoteValidity {
+enum NoteValidity {
     Valid,
     Invalid,
 }
@@ -148,11 +148,6 @@ pub trait Domain {
 
     fn epk(ephemeral_key: &EphemeralKeyBytes) -> Option<Self::EphemeralPublicKey>;
 
-    fn check_epk_bytes<F: Fn(&Self::EphemeralSecretKey) -> NoteValidity>(
-        note: &Self::Note,
-        check: F,
-    ) -> NoteValidity;
-
     fn cmstar(note: &Self::Note) -> Self::ExtractedCommitment;
 
     fn parse_note_plaintext_without_memo_ivk(
@@ -166,19 +161,17 @@ pub trait Domain {
         pk_d: &Self::DiversifiedTransmissionKey,
         esk: &Self::EphemeralSecretKey,
         ephemeral_key: &EphemeralKeyBytes,
-        plaintext: &[u8],
+        plaintext: &NotePlaintextBytes,
     ) -> Option<(Self::Note, Self::Recipient)>;
 
     // &self is passed here in anticipation of future changes
     // to memo handling where the memos may no longer be
     // part of the note plaintext.
-    fn extract_memo(&self, plaintext: &[u8]) -> Self::Memo;
+    fn extract_memo(&self, plaintext: &NotePlaintextBytes) -> Self::Memo;
 
-    fn extract_pk_d(
-        out_plaintext: &[u8; OUT_PLAINTEXT_SIZE],
-    ) -> Option<Self::DiversifiedTransmissionKey>;
+    fn extract_pk_d(out_plaintext: &OutPlaintextBytes) -> Option<Self::DiversifiedTransmissionKey>;
 
-    fn extract_esk(out_plaintext: &[u8; OUT_PLAINTEXT_SIZE]) -> Option<Self::EphemeralSecretKey>;
+    fn extract_esk(out_plaintext: &OutPlaintextBytes) -> Option<Self::EphemeralSecretKey>;
 }
 
 #[cfg(feature = "alloc")]
@@ -213,10 +206,10 @@ pub trait BatchDomain: Domain {
     }
 }
 
-pub trait ShieldedOutput<D: Domain> {
+pub trait ShieldedOutput<D: Domain, const CIPHERTEXT_SIZE: usize> {
     fn ephemeral_key(&self) -> EphemeralKeyBytes;
     fn cmstar_bytes(&self) -> D::ExtractedCommitmentBytes;
-    fn enc_ciphertext(&self) -> &[u8];
+    fn enc_ciphertext(&self) -> &[u8; CIPHERTEXT_SIZE];
 }
 
 /// A struct containing context required for encrypting Sapling and Orchard notes.
@@ -291,12 +284,21 @@ impl<D: Domain> NoteEncryption<D> {
         memo: D::Memo,
     ) -> Self {
         let esk = D::derive_esk(&note).expect("ZIP 212 is active.");
-        Self::new_with_esk(esk, ovk, note, to, memo)
+        NoteEncryption {
+            epk: D::ka_derive_public(&note, &esk),
+            esk,
+            note,
+            to,
+            memo,
+            ovk,
+        }
     }
 
     /// For use only with Sapling. This method is preserved in order that test code
     /// be able to generate pre-ZIP-212 ciphertexts so that tests can continue to
     /// cover pre-ZIP-212 transaction decryption.
+    #[cfg(feature = "pre-zip-212")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "pre-zip-212")))]
     pub fn new_with_esk(
         esk: D::EphemeralSecretKey,
         ovk: Option<D::OutgoingViewingKey>,
@@ -387,7 +389,7 @@ impl<D: Domain> NoteEncryption<D> {
 ///
 /// Implements section 4.19.2 of the
 /// [Zcash Protocol Specification](https://zips.z.cash/protocol/nu5.pdf#decryptivk).
-pub fn try_note_decryption<D: Domain, Output: ShieldedOutput<D>>(
+pub fn try_note_decryption<D: Domain, Output: ShieldedOutput<D, ENC_CIPHERTEXT_SIZE>>(
     domain: &D,
     ivk: &D::IncomingViewingKey,
     output: &Output,
@@ -401,7 +403,7 @@ pub fn try_note_decryption<D: Domain, Output: ShieldedOutput<D>>(
     try_note_decryption_inner(domain, ivk, &ephemeral_key, output, key)
 }
 
-fn try_note_decryption_inner<D: Domain, Output: ShieldedOutput<D>>(
+fn try_note_decryption_inner<D: Domain, Output: ShieldedOutput<D, ENC_CIPHERTEXT_SIZE>>(
     domain: &D,
     ivk: &D::IncomingViewingKey,
     ephemeral_key: &EphemeralKeyBytes,
@@ -409,16 +411,15 @@ fn try_note_decryption_inner<D: Domain, Output: ShieldedOutput<D>>(
     key: D::SymmetricKey,
 ) -> Option<(D::Note, D::Recipient, D::Memo)> {
     let enc_ciphertext = output.enc_ciphertext();
-    assert_eq!(enc_ciphertext.len(), ENC_CIPHERTEXT_SIZE);
 
-    let mut plaintext: [u8; NOTE_PLAINTEXT_SIZE] =
-        enc_ciphertext[..NOTE_PLAINTEXT_SIZE].try_into().unwrap();
+    let mut plaintext =
+        NotePlaintextBytes(enc_ciphertext[..NOTE_PLAINTEXT_SIZE].try_into().unwrap());
 
     ChaCha20Poly1305::new(key.as_ref().into())
         .decrypt_in_place_detached(
             [0u8; 12][..].into(),
             &[],
-            &mut plaintext,
+            &mut plaintext.0,
             enc_ciphertext[NOTE_PLAINTEXT_SIZE..].into(),
         )
         .ok()?;
@@ -428,7 +429,7 @@ fn try_note_decryption_inner<D: Domain, Output: ShieldedOutput<D>>(
         ivk,
         ephemeral_key,
         &output.cmstar_bytes(),
-        &plaintext,
+        &plaintext.0,
     )?;
     let memo = domain.extract_memo(&plaintext);
 
@@ -457,7 +458,7 @@ fn check_note_validity<D: Domain>(
     cmstar_bytes: &D::ExtractedCommitmentBytes,
 ) -> NoteValidity {
     if &D::ExtractedCommitmentBytes::from(&D::cmstar(&note)) == cmstar_bytes {
-        D::check_epk_bytes(&note, |derived_esk| {
+        if let Some(derived_esk) = D::derive_esk(note) {
             if D::epk_bytes(&D::ka_derive_public(&note, &derived_esk))
                 .ct_eq(&ephemeral_key)
                 .into()
@@ -466,7 +467,10 @@ fn check_note_validity<D: Domain>(
             } else {
                 NoteValidity::Invalid
             }
-        })
+        } else {
+            // Before ZIP 212
+            NoteValidity::Valid
+        }
     } else {
         // Published commitment doesn't match calculated commitment
         NoteValidity::Invalid
@@ -482,7 +486,7 @@ fn check_note_validity<D: Domain>(
 /// Implements the procedure specified in [`ZIP 307`].
 ///
 /// [`ZIP 307`]: https://zips.z.cash/zip-0307
-pub fn try_compact_note_decryption<D: Domain, Output: ShieldedOutput<D>>(
+pub fn try_compact_note_decryption<D: Domain, Output: ShieldedOutput<D, COMPACT_NOTE_SIZE>>(
     domain: &D,
     ivk: &D::IncomingViewingKey,
     output: &Output,
@@ -496,15 +500,13 @@ pub fn try_compact_note_decryption<D: Domain, Output: ShieldedOutput<D>>(
     try_compact_note_decryption_inner(domain, ivk, &ephemeral_key, output, key)
 }
 
-fn try_compact_note_decryption_inner<D: Domain, Output: ShieldedOutput<D>>(
+fn try_compact_note_decryption_inner<D: Domain, Output: ShieldedOutput<D, COMPACT_NOTE_SIZE>>(
     domain: &D,
     ivk: &D::IncomingViewingKey,
     ephemeral_key: &EphemeralKeyBytes,
     output: &Output,
     key: D::SymmetricKey,
 ) -> Option<(D::Note, D::Recipient)> {
-    assert_eq!(output.enc_ciphertext().len(), COMPACT_NOTE_SIZE);
-
     // Start from block 1 to skip over Poly1305 keying output
     let mut plaintext = [0; COMPACT_NOTE_SIZE];
     plaintext.copy_from_slice(output.enc_ciphertext());
@@ -530,12 +532,12 @@ fn try_compact_note_decryption_inner<D: Domain, Output: ShieldedOutput<D>>(
 /// Implements [Zcash Protocol Specification section 4.19.3][decryptovk].
 ///
 /// [decryptovk]: https://zips.z.cash/protocol/nu5.pdf#decryptovk
-pub fn try_output_recovery_with_ovk<D: Domain, Output: ShieldedOutput<D>>(
+pub fn try_output_recovery_with_ovk<D: Domain, Output: ShieldedOutput<D, ENC_CIPHERTEXT_SIZE>>(
     domain: &D,
     ovk: &D::OutgoingViewingKey,
     output: &Output,
     cv: &D::ValueCommitment,
-    out_ciphertext: &[u8],
+    out_ciphertext: &[u8; OUT_CIPHERTEXT_SIZE],
 ) -> Option<(D::Note, D::Recipient, D::Memo)> {
     let ock = D::derive_ock(ovk, &cv, &output.cmstar_bytes(), &output.ephemeral_key());
     try_output_recovery_with_ock(domain, &ock, output, out_ciphertext)
@@ -550,24 +552,22 @@ pub fn try_output_recovery_with_ovk<D: Domain, Output: ShieldedOutput<D>>(
 /// Implements part of section 4.19.3 of the
 /// [Zcash Protocol Specification](https://zips.z.cash/protocol/nu5.pdf#decryptovk).
 /// For decryption using a Full Viewing Key see [`try_output_recovery_with_ovk`].
-pub fn try_output_recovery_with_ock<D: Domain, Output: ShieldedOutput<D>>(
+pub fn try_output_recovery_with_ock<D: Domain, Output: ShieldedOutput<D, ENC_CIPHERTEXT_SIZE>>(
     domain: &D,
     ock: &OutgoingCipherKey,
     output: &Output,
-    out_ciphertext: &[u8],
+    out_ciphertext: &[u8; OUT_CIPHERTEXT_SIZE],
 ) -> Option<(D::Note, D::Recipient, D::Memo)> {
     let enc_ciphertext = output.enc_ciphertext();
-    assert_eq!(enc_ciphertext.len(), ENC_CIPHERTEXT_SIZE);
-    assert_eq!(out_ciphertext.len(), OUT_CIPHERTEXT_SIZE);
 
-    let mut op = [0; OUT_PLAINTEXT_SIZE];
-    op.copy_from_slice(&out_ciphertext[..OUT_PLAINTEXT_SIZE]);
+    let mut op = OutPlaintextBytes([0; OUT_PLAINTEXT_SIZE]);
+    op.0.copy_from_slice(&out_ciphertext[..OUT_PLAINTEXT_SIZE]);
 
     ChaCha20Poly1305::new(ock.as_ref().into())
         .decrypt_in_place_detached(
             [0u8; 12][..].into(),
             &[],
-            &mut op,
+            &mut op.0,
             out_ciphertext[OUT_PLAINTEXT_SIZE..].into(),
         )
         .ok()?;
@@ -582,14 +582,16 @@ pub fn try_output_recovery_with_ock<D: Domain, Output: ShieldedOutput<D>>(
     // be okay.
     let key = D::kdf(shared_secret, &ephemeral_key);
 
-    let mut plaintext = [0; NOTE_PLAINTEXT_SIZE];
-    plaintext.copy_from_slice(&enc_ciphertext[..NOTE_PLAINTEXT_SIZE]);
+    let mut plaintext = NotePlaintextBytes([0; NOTE_PLAINTEXT_SIZE]);
+    plaintext
+        .0
+        .copy_from_slice(&enc_ciphertext[..NOTE_PLAINTEXT_SIZE]);
 
     ChaCha20Poly1305::new(key.as_ref().into())
         .decrypt_in_place_detached(
             [0u8; 12][..].into(),
             &[],
-            &mut plaintext,
+            &mut plaintext.0,
             enc_ciphertext[NOTE_PLAINTEXT_SIZE..].into(),
         )
         .ok()?;
