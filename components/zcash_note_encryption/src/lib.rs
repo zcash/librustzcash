@@ -4,6 +4,7 @@
 //! protocols.
 
 #![no_std]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 // Catch documentation errors caused by code changes.
 #![deny(broken_intra_doc_links)]
 #![deny(unsafe_code)]
@@ -29,6 +30,7 @@ use rand_core::RngCore;
 use subtle::{Choice, ConstantTimeEq};
 
 #[cfg(feature = "alloc")]
+#[cfg_attr(docsrs, doc(cfg(feature = "alloc")))]
 pub mod batch;
 
 pub const COMPACT_NOTE_SIZE: usize = 1 + // version
@@ -175,6 +177,7 @@ pub trait Domain {
 }
 
 #[cfg(feature = "alloc")]
+#[cfg_attr(docsrs, doc(cfg(feature = "alloc")))]
 pub trait BatchDomain: Domain {
     /// Computes `Self::kdf` on a batch of items.
     ///

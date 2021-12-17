@@ -11,6 +11,10 @@ repository = "https://github.com/zcash/librustzcash"
 license = "MIT OR Apache-2.0"
 edition = "2018"
 
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
 [dependencies]
 blake2b_simd = { version = "0.5", default-features = false }
 byteorder = { version = "1", default-features = false }
