@@ -206,10 +206,10 @@ pub trait BatchDomain: Domain {
     }
 }
 
-pub trait ShieldedOutput<D: Domain> {
+pub trait ShieldedOutput<D: Domain, const CIPHERTEXT_SIZE: usize> {
     fn ephemeral_key(&self) -> EphemeralKeyBytes;
     fn cmstar_bytes(&self) -> D::ExtractedCommitmentBytes;
-    fn enc_ciphertext(&self) -> &[u8];
+    fn enc_ciphertext(&self) -> &[u8; CIPHERTEXT_SIZE];
 }
 
 /// A struct containing context required for encrypting Sapling and Orchard notes.
@@ -389,7 +389,7 @@ impl<D: Domain> NoteEncryption<D> {
 ///
 /// Implements section 4.19.2 of the
 /// [Zcash Protocol Specification](https://zips.z.cash/protocol/nu5.pdf#decryptivk).
-pub fn try_note_decryption<D: Domain, Output: ShieldedOutput<D>>(
+pub fn try_note_decryption<D: Domain, Output: ShieldedOutput<D, ENC_CIPHERTEXT_SIZE>>(
     domain: &D,
     ivk: &D::IncomingViewingKey,
     output: &Output,
@@ -403,7 +403,7 @@ pub fn try_note_decryption<D: Domain, Output: ShieldedOutput<D>>(
     try_note_decryption_inner(domain, ivk, &ephemeral_key, output, key)
 }
 
-fn try_note_decryption_inner<D: Domain, Output: ShieldedOutput<D>>(
+fn try_note_decryption_inner<D: Domain, Output: ShieldedOutput<D, ENC_CIPHERTEXT_SIZE>>(
     domain: &D,
     ivk: &D::IncomingViewingKey,
     ephemeral_key: &EphemeralKeyBytes,
@@ -411,7 +411,6 @@ fn try_note_decryption_inner<D: Domain, Output: ShieldedOutput<D>>(
     key: D::SymmetricKey,
 ) -> Option<(D::Note, D::Recipient, D::Memo)> {
     let enc_ciphertext = output.enc_ciphertext();
-    assert_eq!(enc_ciphertext.len(), ENC_CIPHERTEXT_SIZE);
 
     let mut plaintext =
         NotePlaintextBytes(enc_ciphertext[..NOTE_PLAINTEXT_SIZE].try_into().unwrap());
@@ -487,7 +486,7 @@ fn check_note_validity<D: Domain>(
 /// Implements the procedure specified in [`ZIP 307`].
 ///
 /// [`ZIP 307`]: https://zips.z.cash/zip-0307
-pub fn try_compact_note_decryption<D: Domain, Output: ShieldedOutput<D>>(
+pub fn try_compact_note_decryption<D: Domain, Output: ShieldedOutput<D, COMPACT_NOTE_SIZE>>(
     domain: &D,
     ivk: &D::IncomingViewingKey,
     output: &Output,
@@ -501,15 +500,13 @@ pub fn try_compact_note_decryption<D: Domain, Output: ShieldedOutput<D>>(
     try_compact_note_decryption_inner(domain, ivk, &ephemeral_key, output, key)
 }
 
-fn try_compact_note_decryption_inner<D: Domain, Output: ShieldedOutput<D>>(
+fn try_compact_note_decryption_inner<D: Domain, Output: ShieldedOutput<D, COMPACT_NOTE_SIZE>>(
     domain: &D,
     ivk: &D::IncomingViewingKey,
     ephemeral_key: &EphemeralKeyBytes,
     output: &Output,
     key: D::SymmetricKey,
 ) -> Option<(D::Note, D::Recipient)> {
-    assert_eq!(output.enc_ciphertext().len(), COMPACT_NOTE_SIZE);
-
     // Start from block 1 to skip over Poly1305 keying output
     let mut plaintext = [0; COMPACT_NOTE_SIZE];
     plaintext.copy_from_slice(output.enc_ciphertext());
@@ -535,7 +532,7 @@ fn try_compact_note_decryption_inner<D: Domain, Output: ShieldedOutput<D>>(
 /// Implements [Zcash Protocol Specification section 4.19.3][decryptovk].
 ///
 /// [decryptovk]: https://zips.z.cash/protocol/nu5.pdf#decryptovk
-pub fn try_output_recovery_with_ovk<D: Domain, Output: ShieldedOutput<D>>(
+pub fn try_output_recovery_with_ovk<D: Domain, Output: ShieldedOutput<D, ENC_CIPHERTEXT_SIZE>>(
     domain: &D,
     ovk: &D::OutgoingViewingKey,
     output: &Output,
@@ -555,14 +552,13 @@ pub fn try_output_recovery_with_ovk<D: Domain, Output: ShieldedOutput<D>>(
 /// Implements part of section 4.19.3 of the
 /// [Zcash Protocol Specification](https://zips.z.cash/protocol/nu5.pdf#decryptovk).
 /// For decryption using a Full Viewing Key see [`try_output_recovery_with_ovk`].
-pub fn try_output_recovery_with_ock<D: Domain, Output: ShieldedOutput<D>>(
+pub fn try_output_recovery_with_ock<D: Domain, Output: ShieldedOutput<D, ENC_CIPHERTEXT_SIZE>>(
     domain: &D,
     ock: &OutgoingCipherKey,
     output: &Output,
     out_ciphertext: &[u8],
 ) -> Option<(D::Note, D::Recipient, D::Memo)> {
     let enc_ciphertext = output.enc_ciphertext();
-    assert_eq!(enc_ciphertext.len(), ENC_CIPHERTEXT_SIZE);
     assert_eq!(out_ciphertext.len(), OUT_CIPHERTEXT_SIZE);
 
     let mut op = OutPlaintextBytes([0; OUT_PLAINTEXT_SIZE]);
