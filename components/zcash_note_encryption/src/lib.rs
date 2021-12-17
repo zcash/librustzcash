@@ -537,7 +537,7 @@ pub fn try_output_recovery_with_ovk<D: Domain, Output: ShieldedOutput<D, ENC_CIP
     ovk: &D::OutgoingViewingKey,
     output: &Output,
     cv: &D::ValueCommitment,
-    out_ciphertext: &[u8],
+    out_ciphertext: &[u8; OUT_CIPHERTEXT_SIZE],
 ) -> Option<(D::Note, D::Recipient, D::Memo)> {
     let ock = D::derive_ock(ovk, &cv, &output.cmstar_bytes(), &output.ephemeral_key());
     try_output_recovery_with_ock(domain, &ock, output, out_ciphertext)
@@ -556,10 +556,9 @@ pub fn try_output_recovery_with_ock<D: Domain, Output: ShieldedOutput<D, ENC_CIP
     domain: &D,
     ock: &OutgoingCipherKey,
     output: &Output,
-    out_ciphertext: &[u8],
+    out_ciphertext: &[u8; OUT_CIPHERTEXT_SIZE],
 ) -> Option<(D::Note, D::Recipient, D::Memo)> {
     let enc_ciphertext = output.enc_ciphertext();
-    assert_eq!(out_ciphertext.len(), OUT_CIPHERTEXT_SIZE);
 
     let mut op = OutPlaintextBytes([0; OUT_PLAINTEXT_SIZE]);
     op.0.copy_from_slice(&out_ciphertext[..OUT_PLAINTEXT_SIZE]);
