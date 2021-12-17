@@ -82,7 +82,7 @@ pub struct NotePlaintextBytes(pub [u8; NOTE_PLAINTEXT_SIZE]);
 pub struct OutPlaintextBytes(pub [u8; OUT_PLAINTEXT_SIZE]);
 
 #[derive(Copy, Clone, PartialEq, Eq)]
-pub enum NoteValidity {
+enum NoteValidity {
     Valid,
     Invalid,
 }
@@ -147,11 +147,6 @@ pub trait Domain {
     fn epk_bytes(epk: &Self::EphemeralPublicKey) -> EphemeralKeyBytes;
 
     fn epk(ephemeral_key: &EphemeralKeyBytes) -> Option<Self::EphemeralPublicKey>;
-
-    fn check_epk_bytes<F: Fn(&Self::EphemeralSecretKey) -> NoteValidity>(
-        note: &Self::Note,
-        check: F,
-    ) -> NoteValidity;
 
     fn cmstar(note: &Self::Note) -> Self::ExtractedCommitment;
 
@@ -464,7 +459,7 @@ fn check_note_validity<D: Domain>(
     cmstar_bytes: &D::ExtractedCommitmentBytes,
 ) -> NoteValidity {
     if &D::ExtractedCommitmentBytes::from(&D::cmstar(&note)) == cmstar_bytes {
-        D::check_epk_bytes(&note, |derived_esk| {
+        if let Some(derived_esk) = D::derive_esk(note) {
             if D::epk_bytes(&D::ka_derive_public(&note, &derived_esk))
                 .ct_eq(&ephemeral_key)
                 .into()
@@ -473,7 +468,10 @@ fn check_note_validity<D: Domain>(
             } else {
                 NoteValidity::Invalid
             }
-        })
+        } else {
+            // Before ZIP 212
+            NoteValidity::Valid
+        }
     } else {
         // Published commitment doesn't match calculated commitment
         NoteValidity::Invalid
