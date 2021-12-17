@@ -291,12 +291,21 @@ impl<D: Domain> NoteEncryption<D> {
         memo: D::Memo,
     ) -> Self {
         let esk = D::derive_esk(&note).expect("ZIP 212 is active.");
-        Self::new_with_esk(esk, ovk, note, to, memo)
+        NoteEncryption {
+            epk: D::ka_derive_public(&note, &esk),
+            esk,
+            note,
+            to,
+            memo,
+            ovk,
+        }
     }
 
     /// For use only with Sapling. This method is preserved in order that test code
     /// be able to generate pre-ZIP-212 ciphertexts so that tests can continue to
     /// cover pre-ZIP-212 transaction decryption.
+    #[cfg(feature = "pre-zip-212")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "pre-zip-212")))]
     pub fn new_with_esk(
         esk: D::EphemeralSecretKey,
         ovk: Option<D::OutgoingViewingKey>,

@@ -28,6 +28,7 @@ jubjub = "0.8"
 [features]
 default = ["std"]
 alloc = []
+pre-zip-212 = []
 std = ["alloc", "blake2b_simd/std"]
 
 [lib]
