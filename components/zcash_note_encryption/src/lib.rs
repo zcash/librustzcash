@@ -166,19 +166,17 @@ pub trait Domain {
         pk_d: &Self::DiversifiedTransmissionKey,
         esk: &Self::EphemeralSecretKey,
         ephemeral_key: &EphemeralKeyBytes,
-        plaintext: &[u8],
+        plaintext: &NotePlaintextBytes,
     ) -> Option<(Self::Note, Self::Recipient)>;
 
     // &self is passed here in anticipation of future changes
     // to memo handling where the memos may no longer be
     // part of the note plaintext.
-    fn extract_memo(&self, plaintext: &[u8]) -> Self::Memo;
+    fn extract_memo(&self, plaintext: &NotePlaintextBytes) -> Self::Memo;
 
-    fn extract_pk_d(
-        out_plaintext: &[u8; OUT_PLAINTEXT_SIZE],
-    ) -> Option<Self::DiversifiedTransmissionKey>;
+    fn extract_pk_d(out_plaintext: &OutPlaintextBytes) -> Option<Self::DiversifiedTransmissionKey>;
 
-    fn extract_esk(out_plaintext: &[u8; OUT_PLAINTEXT_SIZE]) -> Option<Self::EphemeralSecretKey>;
+    fn extract_esk(out_plaintext: &OutPlaintextBytes) -> Option<Self::EphemeralSecretKey>;
 }
 
 #[cfg(feature = "alloc")]
@@ -420,14 +418,14 @@ fn try_note_decryption_inner<D: Domain, Output: ShieldedOutput<D>>(
     let enc_ciphertext = output.enc_ciphertext();
     assert_eq!(enc_ciphertext.len(), ENC_CIPHERTEXT_SIZE);
 
-    let mut plaintext: [u8; NOTE_PLAINTEXT_SIZE] =
-        enc_ciphertext[..NOTE_PLAINTEXT_SIZE].try_into().unwrap();
+    let mut plaintext =
+        NotePlaintextBytes(enc_ciphertext[..NOTE_PLAINTEXT_SIZE].try_into().unwrap());
 
     ChaCha20Poly1305::new(key.as_ref().into())
         .decrypt_in_place_detached(
             [0u8; 12][..].into(),
             &[],
-            &mut plaintext,
+            &mut plaintext.0,
             enc_ciphertext[NOTE_PLAINTEXT_SIZE..].into(),
         )
         .ok()?;
@@ -437,7 +435,7 @@ fn try_note_decryption_inner<D: Domain, Output: ShieldedOutput<D>>(
         ivk,
         ephemeral_key,
         &output.cmstar_bytes(),
-        &plaintext,
+        &plaintext.0,
     )?;
     let memo = domain.extract_memo(&plaintext);
 
@@ -569,14 +567,14 @@ pub fn try_output_recovery_with_ock<D: Domain, Output: ShieldedOutput<D>>(
     assert_eq!(enc_ciphertext.len(), ENC_CIPHERTEXT_SIZE);
     assert_eq!(out_ciphertext.len(), OUT_CIPHERTEXT_SIZE);
 
-    let mut op = [0; OUT_PLAINTEXT_SIZE];
-    op.copy_from_slice(&out_ciphertext[..OUT_PLAINTEXT_SIZE]);
+    let mut op = OutPlaintextBytes([0; OUT_PLAINTEXT_SIZE]);
+    op.0.copy_from_slice(&out_ciphertext[..OUT_PLAINTEXT_SIZE]);
 
     ChaCha20Poly1305::new(ock.as_ref().into())
         .decrypt_in_place_detached(
             [0u8; 12][..].into(),
             &[],
-            &mut op,
+            &mut op.0,
             out_ciphertext[OUT_PLAINTEXT_SIZE..].into(),
         )
         .ok()?;
@@ -591,14 +589,16 @@ pub fn try_output_recovery_with_ock<D: Domain, Output: ShieldedOutput<D>>(
     // be okay.
     let key = D::kdf(shared_secret, &ephemeral_key);
 
-    let mut plaintext = [0; NOTE_PLAINTEXT_SIZE];
-    plaintext.copy_from_slice(&enc_ciphertext[..NOTE_PLAINTEXT_SIZE]);
+    let mut plaintext = NotePlaintextBytes([0; NOTE_PLAINTEXT_SIZE]);
+    plaintext
+        .0
+        .copy_from_slice(&enc_ciphertext[..NOTE_PLAINTEXT_SIZE]);
 
     ChaCha20Poly1305::new(key.as_ref().into())
         .decrypt_in_place_detached(
             [0u8; 12][..].into(),
             &[],
-            &mut plaintext,
+            &mut plaintext.0,
             enc_ciphertext[NOTE_PLAINTEXT_SIZE..].into(),
         )
         .ok()?;
