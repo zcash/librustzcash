@@ -19,6 +19,4 @@ panic = 'abort'
 codegen-units = 1
 
 [patch.crates-io]
-# In development.
-incrementalmerkletree = { git = "https://github.com/zcash/incrementalmerkletree.git", rev = "b7bd6246122a6e9ace8edb51553fbf5228906cbb" }
 zcash_encoding = { path = "components/zcash_encoding" }
