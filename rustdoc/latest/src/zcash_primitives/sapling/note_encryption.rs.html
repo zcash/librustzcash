@@ -1,5 +1,6 @@
 <!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_primitives&#x2F;src&#x2F;sapling&#x2F;note_encryption.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>note_encryption.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" type="text/css" href="../../../normalize.css"><link rel="stylesheet" type="text/css" href="../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" type="text/css" href="../../../ayu.css" disabled><link rel="stylesheet" type="text/css" href="../../../dark.css" disabled><link rel="stylesheet" type="text/css" href="../../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../../storage.js"></script><script src="../../../crates.js"></script><script defer src="../../../main.js"></script><script defer src="../../../source-script.js"></script><script defer src="../../../source-files.js"></script>
-    <noscript><link rel="stylesheet" href="../../../noscript.css"></noscript><link rel="alternate icon" type="image/png" href="../../../favicon-16x16.png"><link rel="alternate icon" type="image/png" href="../../../favicon-32x32.png"><link rel="icon" type="image/svg+xml" href="../../../favicon.svg"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="sidebar-menu" role="button">&#9776;</div><a class="sidebar-logo" href='../../../zcash_primitives/index.html'><div class='logo-container rust-logo'><img src='../../../rust-logo.png' alt='logo'></div></a></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container rust-logo" href='../../../zcash_primitives/index.html'><img src='../../../rust-logo.png' alt='logo'></a><nav class="sub"><div class="theme-picker"><button id="theme-picker" aria-label="Pick another theme!" aria-haspopup="menu" title="themes"><img width="18" height="18" alt="Pick another theme!" src="../../../brush.svg"></button><div id="theme-choices" role="menu"></div></div><form class="search-form"><div class="search-container"><div><select id="crate-search"><option value="All crates">All crates</option></select><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"></div><button type="button" id="help-button" title="help">?</button><a id="settings-menu" href="../../../settings.html" title="settings"><img width="18" height="18" alt="Change settings" src="../../../wheel.svg"></a></div></form></nav></div><section id="main-content" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">   1</span>
+    <noscript><link rel="stylesheet" href="../../../noscript.css"></noscript><link rel="alternate icon" type="image/png" href="../../../favicon-16x16.png"><link rel="alternate icon" type="image/png" href="../../../favicon-32x32.png"><link rel="icon" type="image/svg+xml" href="../../../favicon.svg"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="sidebar-menu" role="button">&#9776;</div><a class="sidebar-logo" href="../../../zcash_primitives/index.html"><div class="logo-container"><img class="rust-logo" src="../../../rust-logo.png" alt="logo"></div>
+        </a></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../../zcash_primitives/index.html"><img class="rust-logo" src="../../../rust-logo.png" alt="logo"></a><nav class="sub"><div class="theme-picker"><button id="theme-picker" aria-label="Pick another theme!" aria-haspopup="menu" title="themes"><img width="18" height="18" alt="Pick another theme!" src="../../../brush.svg"></button><div id="theme-choices" role="menu"></div></div><form class="search-form"><div class="search-container"><div><select id="crate-search"><option value="All crates">All crates</option></select><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"></div><button type="button" id="help-button" title="help">?</button><a id="settings-menu" href="../../../settings.html" title="settings"><img width="18" height="18" alt="Change settings" src="../../../wheel.svg"></a></div></form></nav></div><section id="main-content" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">   1</span>
 <span id="2">   2</span>
 <span id="3">   3</span>
 <span id="4">   4</span>
@@ -1472,23 +1473,6 @@
 <span id="1471">1471</span>
 <span id="1472">1472</span>
 <span id="1473">1473</span>
-<span id="1474">1474</span>
-<span id="1475">1475</span>
-<span id="1476">1476</span>
-<span id="1477">1477</span>
-<span id="1478">1478</span>
-<span id="1479">1479</span>
-<span id="1480">1480</span>
-<span id="1481">1481</span>
-<span id="1482">1482</span>
-<span id="1483">1483</span>
-<span id="1484">1484</span>
-<span id="1485">1485</span>
-<span id="1486">1486</span>
-<span id="1487">1487</span>
-<span id="1488">1488</span>
-<span id="1489">1489</span>
-<span id="1490">1490</span>
 </pre><pre class="rust"><code><span class="doccomment">//! Implementation of in-band secret distribution for Zcash transactions.</span>
 <span class="kw">use</span> <span class="ident">blake2b_simd</span>::{<span class="ident">Hash</span> <span class="kw">as</span> <span class="ident">Blake2bHash</span>, <span class="ident">Params</span> <span class="kw">as</span> <span class="ident">Blake2bParams</span>};
 <span class="kw">use</span> <span class="ident">byteorder</span>::{<span class="ident">LittleEndian</span>, <span class="ident">WriteBytesExt</span>};
@@ -1501,8 +1485,8 @@
 <span class="kw">use</span> <span class="ident">zcash_note_encryption</span>::{
     <span class="ident">try_compact_note_decryption</span>, <span class="ident">try_note_decryption</span>, <span class="ident">try_output_recovery_with_ock</span>,
     <span class="ident">try_output_recovery_with_ovk</span>, <span class="ident">BatchDomain</span>, <span class="ident">Domain</span>, <span class="ident">EphemeralKeyBytes</span>, <span class="ident">NoteEncryption</span>,
-    <span class="ident">NotePlaintextBytes</span>, <span class="ident">NoteValidity</span>, <span class="ident">OutPlaintextBytes</span>, <span class="ident">OutgoingCipherKey</span>, <span class="ident">ShieldedOutput</span>,
-    <span class="ident">COMPACT_NOTE_SIZE</span>, <span class="ident">NOTE_PLAINTEXT_SIZE</span>, <span class="ident">OUT_PLAINTEXT_SIZE</span>,
+    <span class="ident">NotePlaintextBytes</span>, <span class="ident">OutPlaintextBytes</span>, <span class="ident">OutgoingCipherKey</span>, <span class="ident">ShieldedOutput</span>, <span class="ident">COMPACT_NOTE_SIZE</span>,
+    <span class="ident">ENC_CIPHERTEXT_SIZE</span>, <span class="ident">NOTE_PLAINTEXT_SIZE</span>, <span class="ident">OUT_PLAINTEXT_SIZE</span>,
 };
 
 <span class="kw">use</span> <span class="kw">crate</span>::{
@@ -1738,18 +1722,6 @@
         <span class="ident">jubjub::ExtendedPoint::from_bytes</span>(<span class="kw-2">&amp;</span><span class="ident">ephemeral_key</span>.<span class="number">0</span>).<span class="ident">into</span>()
     }
 
-    <span class="kw">fn</span> <span class="ident">check_epk_bytes</span><span class="op">&lt;</span><span class="ident">F</span>: <span class="ident">FnOnce</span>(<span class="kw-2">&amp;</span><span class="ident"><span class="self">Self</span>::EphemeralSecretKey</span>) -&gt; <span class="ident">NoteValidity</span><span class="op">&gt;</span>(
-        <span class="ident">note</span>: <span class="kw-2">&amp;</span><span class="ident">Note</span>,
-        <span class="ident">check</span>: <span class="ident">F</span>,
-    ) -&gt; <span class="ident">NoteValidity</span> {
-        <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">derived_esk</span>) <span class="op">=</span> <span class="ident">note</span>.<span class="ident">derive_esk</span>() {
-            <span class="ident">check</span>(<span class="kw-2">&amp;</span><span class="ident">derived_esk</span>)
-        } <span class="kw">else</span> {
-            <span class="comment">// Before ZIP 212</span>
-            <span class="ident">NoteValidity::Valid</span>
-        }
-    }
-
     <span class="kw">fn</span> <span class="ident">parse_note_plaintext_without_memo_ivk</span>(
         <span class="kw-2">&amp;</span><span class="self">self</span>,
         <span class="ident">ivk</span>: <span class="kw-2">&amp;</span><span class="ident"><span class="self">Self</span>::IncomingViewingKey</span>,
@@ -1765,9 +1737,9 @@
         <span class="ident">pk_d</span>: <span class="kw-2">&amp;</span><span class="ident"><span class="self">Self</span>::DiversifiedTransmissionKey</span>,
         <span class="ident">esk</span>: <span class="kw-2">&amp;</span><span class="ident"><span class="self">Self</span>::EphemeralSecretKey</span>,
         <span class="ident">ephemeral_key</span>: <span class="kw-2">&amp;</span><span class="ident">EphemeralKeyBytes</span>,
-        <span class="ident">plaintext</span>: <span class="kw-2">&amp;</span>[<span class="ident">u8</span>],
+        <span class="ident">plaintext</span>: <span class="kw-2">&amp;</span><span class="ident">NotePlaintextBytes</span>,
     ) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span>(<span class="ident"><span class="self">Self</span>::Note</span>, <span class="ident"><span class="self">Self</span>::Recipient</span>)<span class="op">&gt;</span> {
-        <span class="ident">sapling_parse_note_plaintext_without_memo</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">plaintext</span>, <span class="op">|</span><span class="ident">diversifier</span><span class="op">|</span> {
+        <span class="ident">sapling_parse_note_plaintext_without_memo</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="kw-2">&amp;</span><span class="ident">plaintext</span>.<span class="number">0</span>, <span class="op">|</span><span class="ident">diversifier</span><span class="op">|</span> {
             <span class="kw">if</span> (<span class="ident">diversifier</span>.<span class="ident">g_d</span>()<span class="question-mark">?</span> <span class="op">*</span> <span class="ident">esk</span>).<span class="ident">to_bytes</span>() <span class="op">==</span> <span class="ident">ephemeral_key</span>.<span class="number">0</span> {
                 <span class="prelude-val">Some</span>(<span class="kw-2">*</span><span class="ident">pk_d</span>)
             } <span class="kw">else</span> {
@@ -1780,29 +1752,24 @@
         <span class="ident">note</span>.<span class="ident">cmu</span>()
     }
 
-    <span class="kw">fn</span> <span class="ident">extract_pk_d</span>(<span class="ident">op</span>: <span class="kw-2">&amp;</span>[<span class="ident">u8</span>; <span class="ident">OUT_PLAINTEXT_SIZE</span>]) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident"><span class="self">Self</span>::DiversifiedTransmissionKey</span><span class="op">&gt;</span> {
-        <span class="kw">let</span> <span class="ident">pk_d</span> <span class="op">=</span> <span class="ident">jubjub::SubgroupPoint::from_bytes</span>(
-            <span class="ident">op</span>[<span class="number">0</span>..<span class="number">32</span>].<span class="ident">try_into</span>().<span class="ident">expect</span>(<span class="string">&quot;slice is the correct length&quot;</span>),
-        );
-
-        <span class="kw">if</span> <span class="ident">pk_d</span>.<span class="ident">is_none</span>().<span class="ident">into</span>() {
-            <span class="prelude-val">None</span>
-        } <span class="kw">else</span> {
-            <span class="prelude-val">Some</span>(<span class="ident">pk_d</span>.<span class="ident">unwrap</span>())
-        }
+    <span class="kw">fn</span> <span class="ident">extract_pk_d</span>(<span class="ident">op</span>: <span class="kw-2">&amp;</span><span class="ident">OutPlaintextBytes</span>) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident"><span class="self">Self</span>::DiversifiedTransmissionKey</span><span class="op">&gt;</span> {
+        <span class="ident">jubjub::SubgroupPoint::from_bytes</span>(
+            <span class="ident">op</span>.<span class="number">0</span>[<span class="number">0</span>..<span class="number">32</span>].<span class="ident">try_into</span>().<span class="ident">expect</span>(<span class="string">&quot;slice is the correct length&quot;</span>),
+        )
+        .<span class="ident">into</span>()
     }
 
-    <span class="kw">fn</span> <span class="ident">extract_esk</span>(<span class="ident">op</span>: <span class="kw-2">&amp;</span>[<span class="ident">u8</span>; <span class="ident">OUT_PLAINTEXT_SIZE</span>]) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident"><span class="self">Self</span>::EphemeralSecretKey</span><span class="op">&gt;</span> {
+    <span class="kw">fn</span> <span class="ident">extract_esk</span>(<span class="ident">op</span>: <span class="kw-2">&amp;</span><span class="ident">OutPlaintextBytes</span>) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident"><span class="self">Self</span>::EphemeralSecretKey</span><span class="op">&gt;</span> {
         <span class="ident">jubjub::Fr::from_repr</span>(
-            <span class="ident">op</span>[<span class="number">32</span>..<span class="ident">OUT_PLAINTEXT_SIZE</span>]
+            <span class="ident">op</span>.<span class="number">0</span>[<span class="number">32</span>..<span class="ident">OUT_PLAINTEXT_SIZE</span>]
                 .<span class="ident">try_into</span>()
                 .<span class="ident">expect</span>(<span class="string">&quot;slice is the correct length&quot;</span>),
         )
         .<span class="ident">into</span>()
     }
 
-    <span class="kw">fn</span> <span class="ident">extract_memo</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">plaintext</span>: <span class="kw-2">&amp;</span>[<span class="ident">u8</span>]) -&gt; <span class="ident"><span class="self">Self</span>::Memo</span> {
-        <span class="ident">MemoBytes::from_bytes</span>(<span class="kw-2">&amp;</span><span class="ident">plaintext</span>[<span class="ident">COMPACT_NOTE_SIZE</span>..<span class="ident">NOTE_PLAINTEXT_SIZE</span>]).<span class="ident">unwrap</span>()
+    <span class="kw">fn</span> <span class="ident">extract_memo</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">plaintext</span>: <span class="kw-2">&amp;</span><span class="ident">NotePlaintextBytes</span>) -&gt; <span class="ident"><span class="self">Self</span>::Memo</span> {
+        <span class="ident">MemoBytes::from_bytes</span>(<span class="kw-2">&amp;</span><span class="ident">plaintext</span>.<span class="number">0</span>[<span class="ident">COMPACT_NOTE_SIZE</span>..<span class="ident">NOTE_PLAINTEXT_SIZE</span>]).<span class="ident">unwrap</span>()
     }
 }
 
@@ -1895,7 +1862,7 @@
 
 <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">try_sapling_note_decryption</span><span class="op">&lt;</span>
     <span class="ident">P</span>: <span class="ident">consensus::Parameters</span>,
-    <span class="ident">Output</span>: <span class="ident">ShieldedOutput</span><span class="op">&lt;</span><span class="ident">SaplingDomain</span><span class="op">&lt;</span><span class="ident">P</span><span class="op">&gt;</span><span class="op">&gt;</span>,
+    <span class="ident">Output</span>: <span class="ident">ShieldedOutput</span><span class="op">&lt;</span><span class="ident">SaplingDomain</span><span class="op">&lt;</span><span class="ident">P</span><span class="op">&gt;</span>, <span class="ident">ENC_CIPHERTEXT_SIZE</span><span class="op">&gt;</span>,
 <span class="op">&gt;</span>(
     <span class="ident">params</span>: <span class="kw-2">&amp;</span><span class="ident">P</span>,
     <span class="ident">height</span>: <span class="ident">BlockHeight</span>,
@@ -1911,7 +1878,7 @@
 
 <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">try_sapling_compact_note_decryption</span><span class="op">&lt;</span>
     <span class="ident">P</span>: <span class="ident">consensus::Parameters</span>,
-    <span class="ident">Output</span>: <span class="ident">ShieldedOutput</span><span class="op">&lt;</span><span class="ident">SaplingDomain</span><span class="op">&lt;</span><span class="ident">P</span><span class="op">&gt;</span><span class="op">&gt;</span>,
+    <span class="ident">Output</span>: <span class="ident">ShieldedOutput</span><span class="op">&lt;</span><span class="ident">SaplingDomain</span><span class="op">&lt;</span><span class="ident">P</span><span class="op">&gt;</span>, <span class="ident">COMPACT_NOTE_SIZE</span><span class="op">&gt;</span>,
 <span class="op">&gt;</span>(
     <span class="ident">params</span>: <span class="kw-2">&amp;</span><span class="ident">P</span>,
     <span class="ident">height</span>: <span class="ident">BlockHeight</span>,
@@ -2980,5 +2947,5 @@
     }
 }
 </code></pre></div>
-</section><section id="search" class="content hidden"></section></div></main><div id="rustdoc-vars" data-root-path="../../../" data-current-crate="zcash_primitives" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.59.0-nightly (6bda5b331 2021-12-12)" ></div>
+</section><section id="search" class="content hidden"></section></div></main><div id="rustdoc-vars" data-root-path="../../../" data-current-crate="zcash_primitives" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.59.0-nightly (5531927e8 2021-12-16)" ></div>
 </body></html>
