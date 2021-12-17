@@ -8,8 +8,10 @@ authors = [
 ]
 homepage = "https://github.com/zcash/librustzcash"
 repository = "https://github.com/zcash/librustzcash"
+readme = "README.md"
 license = "MIT OR Apache-2.0"
 edition = "2018"
+categories = ["cryptography::cryptocurrencies"]
 
 [package.metadata.docs.rs]
 all-features = true
