@@ -174,30 +174,25 @@ pub fn read_bridge_v1<H: HashSer + Clone, R: Read>(mut reader: R) -> io::Result<
 pub const EMPTY_CHECKPOINT: u8 = 0;
 pub const BRIDGE_CHECKPOINT: u8 = 1;
 
-pub fn write_checkpoint_v1<H: HashSer, W: Write>(
-    mut writer: W,
-    checkpoint: &Checkpoint<H>,
-) -> io::Result<()> {
+pub fn write_checkpoint_v1<W: Write>(mut writer: W, checkpoint: &Checkpoint) -> io::Result<()> {
     match checkpoint {
         Checkpoint::Empty => {
             writer.write_u8(EMPTY_CHECKPOINT)?;
         }
-        Checkpoint::AtIndex(i, b) => {
+        Checkpoint::AtIndex(i) => {
             writer.write_u8(BRIDGE_CHECKPOINT)?;
             writer.write_u64::<LittleEndian>(*i as u64)?;
-            write_bridge_v1(&mut writer, b)?;
         }
     }
 
     Ok(())
 }
 
-pub fn read_checkpoint_v1<H: HashSer + Clone, R: Read>(mut reader: R) -> io::Result<Checkpoint<H>> {
+pub fn read_checkpoint_v1<R: Read>(mut reader: R) -> io::Result<Checkpoint> {
     match reader.read_u8()? {
         EMPTY_CHECKPOINT => Ok(Checkpoint::Empty),
         BRIDGE_CHECKPOINT => Ok(Checkpoint::AtIndex(
-            reader.read_u64::<LittleEndian>()? as usize,
-            read_bridge_v1(&mut reader)?,
+            reader.read_u64::<LittleEndian>()? as usize
         )),
         flag => Err(io::Error::new(
             io::ErrorKind::InvalidInput,

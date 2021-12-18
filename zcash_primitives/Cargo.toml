@@ -20,7 +20,7 @@ aes = "0.7"
 bitvec = "0.22"
 bip0039 = { version = "0.9", features = ["std", "all-languages"] }
 blake2b_simd = "1"
-blake2s_simd = "0.5"
+blake2s_simd = "1"
 bls12_381 = "0.6"
 byteorder = "1"
 chacha20poly1305 = "0.9"
@@ -29,7 +29,7 @@ ff = "0.11"
 fpe = "0.5"
 group = "0.11"
 hex = "0.4"
-incrementalmerkletree = "0.1"
+incrementalmerkletree = "0.2"
 jubjub = "0.8"
 lazy_static = "1"
 log = "0.4"
@@ -59,7 +59,7 @@ rand_xorshift = "0.3"
 orchard = { version = "=0.1.0-beta.1", features = ["test-dependencies"] }
 
 [target.'cfg(unix)'.dev-dependencies]
-pprof = { version = "0.5", features = ["criterion", "flamegraph"] }
+pprof = { version = "0.6", features = ["criterion", "flamegraph"] }
 
 [features]
 transparent-inputs = ["ripemd160", "secp256k1"]
