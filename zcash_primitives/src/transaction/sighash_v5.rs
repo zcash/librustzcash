@@ -2,15 +2,17 @@ use std::io::Write;
 
 use blake2b_simd::{Hash as Blake2bHash, Params, State};
 use byteorder::{LittleEndian, WriteBytesExt};
+use zcash_encoding::Array;
 
 use crate::transaction::{
     components::transparent::{self, TxOut},
     sighash::{
-        SignableInput, TransparentInput, SIGHASH_ANYONECANPAY, SIGHASH_MASK, SIGHASH_NONE,
-        SIGHASH_SINGLE,
+        SignableInput, TransparentAuthorizingContext, SIGHASH_ANYONECANPAY, SIGHASH_MASK,
+        SIGHASH_NONE, SIGHASH_SINGLE,
     },
     txid::{
-        to_hash, transparent_outputs_hash, transparent_prevout_hash, transparent_sequence_hash,
+        hash_transparent_txid_data, to_hash, transparent_outputs_hash, transparent_prevout_hash,
+        transparent_sequence_hash, ZCASH_TRANSPARENT_HASH_PERSONALIZATION,
     },
     Authorization, TransactionData, TransparentDigests, TxDigests,
 };
@@ -22,9 +24,11 @@ use std::convert::TryInto;
 use zcash_encoding::{CompactSize, Vector};
 
 #[cfg(feature = "zfuture")]
-use crate::transaction::{components::tze, sighash::TzeInput, TzeDigests};
+use crate::transaction::{components::tze, TzeDigests};
 
 const ZCASH_TRANSPARENT_INPUT_HASH_PERSONALIZATION: &[u8; 16] = b"Zcash___TxInHash";
+const ZCASH_TRANSPARENT_AMOUNTS_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxTrAmountsHash";
+const ZCASH_TRANSPARENT_SCRIPTS_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxTrScriptsHash";
 
 #[cfg(feature = "zfuture")]
 const ZCASH_TZE_INPUT_HASH_PERSONALIZATION: &[u8; 16] = b"Zcash__TzeInHash";
@@ -33,12 +37,13 @@ fn hasher(personal: &[u8; 16]) -> State {
     Params::new().hash_length(32).personal(personal).to_state()
 }
 
-fn transparent_input_sigdigests<A: transparent::Authorization>(
-    bundle: &transparent::Bundle<A>,
-    input: &TransparentInput<'_>,
+/// Implements [ZIP 244 section S.2](https://zips.z.cash/zip-0244#s-2-transparent-sig-digest)
+fn transparent_sig_digest<A: TransparentAuthorizingContext>(
     txid_digests: &TransparentDigests<Blake2bHash>,
-    hash_type: u32,
-) -> TransparentDigests<Blake2bHash> {
+    bundle: &transparent::Bundle<A>,
+    input: &SignableInput<'_>,
+    hash_type: u8,
+) -> Blake2bHash {
     let flag_anyonecanpay = hash_type & SIGHASH_ANYONECANPAY != 0;
     let flag_single = hash_type & SIGHASH_MASK == SIGHASH_SINGLE;
     let flag_none = hash_type & SIGHASH_MASK == SIGHASH_NONE;
@@ -49,20 +54,54 @@ fn transparent_input_sigdigests<A: transparent::Authorization>(
         txid_digests.prevout_digest
     };
 
-    let sequence_digest = if flag_anyonecanpay || flag_single || flag_none {
+    let amounts_digest = {
+        let mut h = hasher(ZCASH_TRANSPARENT_AMOUNTS_HASH_PERSONALIZATION);
+        Array::write(
+            &mut h,
+            if flag_anyonecanpay {
+                vec![]
+            } else {
+                bundle.authorization.input_amounts()
+            },
+            |w, amount| w.write_all(&amount.to_i64_le_bytes()),
+        )
+        .unwrap();
+        h.finalize()
+    };
+
+    let scripts_digest = {
+        let mut h = hasher(ZCASH_TRANSPARENT_SCRIPTS_HASH_PERSONALIZATION);
+        Array::write(
+            &mut h,
+            if flag_anyonecanpay {
+                vec![]
+            } else {
+                bundle.authorization.input_scripts()
+            },
+            |w, script| script.write(w),
+        )
+        .unwrap();
+        h.finalize()
+    };
+
+    let sequence_digest = if flag_anyonecanpay {
         transparent_sequence_hash::<A>(&[])
     } else {
         txid_digests.sequence_digest
     };
 
-    let outputs_digest = if flag_single {
-        if input.index() < bundle.vout.len() {
-            transparent_outputs_hash(&[&bundle.vout[input.index()]])
-        } else {
+    let outputs_digest = if let SignableInput::Transparent { index, .. } = input {
+        if flag_single {
+            if *index < bundle.vout.len() {
+                transparent_outputs_hash(&[&bundle.vout[*index]])
+            } else {
+                transparent_outputs_hash::<TxOut>(&[])
+            }
+        } else if flag_none {
             transparent_outputs_hash::<TxOut>(&[])
+        } else {
+            txid_digests.outputs_digest
         }
-    } else if flag_none {
-        transparent_outputs_hash::<TxOut>(&[])
     } else {
         txid_digests.outputs_digest
     };
@@ -73,41 +112,51 @@ fn transparent_input_sigdigests<A: transparent::Authorization>(
     //   c. value of the output spent by this input (8-byte little endian)
     //   d. nSequence of the input (4-byte little endian)
     let mut ch = hasher(ZCASH_TRANSPARENT_INPUT_HASH_PERSONALIZATION);
-    let txin = &bundle.vin[input.index()];
-    txin.prevout.write(&mut ch).unwrap();
-    input.script_code().write(&mut ch).unwrap();
-    ch.write_all(&input.value().to_i64_le_bytes()).unwrap();
-    ch.write_u32::<LittleEndian>(txin.sequence).unwrap();
+    if let SignableInput::Transparent {
+        index,
+        script_code,
+        value,
+    } = input
+    {
+        let txin = &bundle.vin[*index];
+        txin.prevout.write(&mut ch).unwrap();
+        ch.write_all(&value.to_i64_le_bytes()).unwrap();
+        script_code.write(&mut ch).unwrap();
+        ch.write_u32::<LittleEndian>(txin.sequence).unwrap();
+    }
     let per_input_digest = ch.finalize();
 
-    TransparentDigests {
-        prevout_digest,
-        sequence_digest,
-        outputs_digest,
-        per_input_digest: Some(per_input_digest),
-    }
+    let mut h = hasher(ZCASH_TRANSPARENT_HASH_PERSONALIZATION);
+    h.write_all(&[hash_type]).unwrap();
+    h.write_all(prevout_digest.as_bytes()).unwrap();
+    h.write_all(amounts_digest.as_bytes()).unwrap();
+    h.write_all(scripts_digest.as_bytes()).unwrap();
+    h.write_all(sequence_digest.as_bytes()).unwrap();
+    h.write_all(outputs_digest.as_bytes()).unwrap();
+    h.write_all(per_input_digest.as_bytes()).unwrap();
+    h.finalize()
 }
 
 #[cfg(feature = "zfuture")]
 fn tze_input_sigdigests<A: tze::Authorization>(
     bundle: &tze::Bundle<A>,
-    input: &TzeInput<'_>,
+    input: &SignableInput<'_>,
     txid_digests: &TzeDigests<Blake2bHash>,
 ) -> TzeDigests<Blake2bHash> {
     let mut ch = hasher(ZCASH_TZE_INPUT_HASH_PERSONALIZATION);
-    let tzein = &bundle.vin[input.index()];
-    tzein.prevout.write(&mut ch).unwrap();
-    CompactSize::write(
-        &mut ch,
-        input.precondition().extension_id.try_into().unwrap(),
-    )
-    .unwrap();
-    CompactSize::write(&mut ch, input.precondition().mode.try_into().unwrap()).unwrap();
-    Vector::write(&mut ch, &input.precondition().payload, |w, e| {
-        w.write_u8(*e)
-    })
-    .unwrap();
-    ch.write_all(&input.value().to_i64_le_bytes()).unwrap();
+    if let SignableInput::Tze {
+        index,
+        precondition,
+        value,
+    } = input
+    {
+        let tzein = &bundle.vin[*index];
+        tzein.prevout.write(&mut ch).unwrap();
+        CompactSize::write(&mut ch, precondition.extension_id.try_into().unwrap()).unwrap();
+        CompactSize::write(&mut ch, precondition.mode.try_into().unwrap()).unwrap();
+        Vector::write(&mut ch, &precondition.payload, |w, e| w.write_u8(*e)).unwrap();
+        ch.write_all(&value.to_i64_le_bytes()).unwrap();
+    }
     let per_input_digest = ch.finalize();
 
     TzeDigests {
@@ -117,66 +166,40 @@ fn tze_input_sigdigests<A: tze::Authorization>(
     }
 }
 
-pub fn v5_signature_hash<A: Authorization>(
+/// Implements the [Signature Digest section of ZIP 244](https://zips.z.cash/zip-0244#signature-digest)
+pub fn v5_signature_hash<
+    TA: TransparentAuthorizingContext,
+    A: Authorization<TransparentAuth = TA>,
+>(
     tx: &TransactionData<A>,
-    hash_type: u32,
+    hash_type: u8,
     signable_input: &SignableInput<'_>,
     txid_parts: &TxDigests<Blake2bHash>,
 ) -> Blake2bHash {
-    match signable_input {
-        SignableInput::Shielded => to_hash(
-            tx.version,
-            tx.consensus_branch_id,
-            txid_parts.header_digest,
-            txid_parts.transparent_digests.as_ref(),
-            txid_parts.sapling_digest,
-            txid_parts.orchard_digest,
-            #[cfg(feature = "zfuture")]
-            txid_parts.tze_digests.as_ref(),
-        ),
-        SignableInput::Transparent(input) => {
-            if let Some((bundle, txid_digests)) = tx
-                .transparent_bundle
-                .as_ref()
-                .zip(txid_parts.transparent_digests.as_ref())
-            {
-                to_hash(
-                    tx.version,
-                    tx.consensus_branch_id,
-                    txid_parts.header_digest,
-                    Some(&transparent_input_sigdigests(
-                        bundle,
-                        input,
-                        txid_digests,
-                        hash_type,
-                    )),
-                    txid_parts.sapling_digest,
-                    txid_parts.orchard_digest,
-                    #[cfg(feature = "zfuture")]
-                    txid_parts.tze_digests.as_ref(),
-                )
-            } else {
-                panic!("Transaction has no transparent inputs to sign.")
-            }
-        }
+    to_hash(
+        tx.version,
+        tx.consensus_branch_id,
+        txid_parts.header_digest,
+        if let Some(bundle) = &tx.transparent_bundle {
+            transparent_sig_digest(
+                txid_parts
+                    .transparent_digests
+                    .as_ref()
+                    .expect("Transparent txid digests are missing."),
+                &bundle,
+                signable_input,
+                hash_type,
+            )
+        } else {
+            hash_transparent_txid_data(txid_parts.transparent_digests.as_ref())
+        },
+        txid_parts.sapling_digest,
+        txid_parts.orchard_digest,
         #[cfg(feature = "zfuture")]
-        SignableInput::Tze(input) => {
-            if let Some((bundle, txid_digests)) =
-                tx.tze_bundle.as_ref().zip(txid_parts.tze_digests.as_ref())
-            {
-                to_hash(
-                    tx.version,
-                    tx.consensus_branch_id,
-                    txid_parts.header_digest,
-                    txid_parts.transparent_digests.as_ref(),
-                    txid_parts.sapling_digest,
-                    txid_parts.orchard_digest,
-                    #[cfg(feature = "zfuture")]
-                    Some(&tze_input_sigdigests(bundle, input, txid_digests)),
-                )
-            } else {
-                panic!("Transaction has no TZE inputs to sign.")
-            }
-        }
-    }
+        tx.tze_bundle
+            .as_ref()
+            .zip(txid_parts.tze_digests.as_ref())
+            .map(|(bundle, tze_digests)| tze_input_sigdigests(bundle, signable_input, tze_digests))
+            .as_ref(),
+    )
 }

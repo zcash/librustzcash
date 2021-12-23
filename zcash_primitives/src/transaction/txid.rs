@@ -30,7 +30,7 @@ const ZCASH_TX_PERSONALIZATION_PREFIX: &[u8; 12] = b"ZcashTxHash_";
 
 // TxId level 1 node personalization
 const ZCASH_HEADERS_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxIdHeadersHash";
-const ZCASH_TRANSPARENT_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxIdTranspaHash";
+pub(crate) const ZCASH_TRANSPARENT_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxIdTranspaHash";
 const ZCASH_SAPLING_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxIdSaplingHash";
 #[cfg(feature = "zfuture")]
 const ZCASH_TZE_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxIdTZE____Hash";
@@ -130,6 +130,8 @@ pub(crate) fn hash_tze_outputs(tze_outputs: &[TzeOut]) -> Blake2bHash {
     h.finalize()
 }
 
+/// Implements [ZIP 244 section T.3a](https://zips.z.cash/zip-0244#t-3a-sapling-spends-digest)
+///
 /// Write disjoint parts of each Sapling shielded spend to a pair of hashes:
 /// * \[nullifier*\] - personalized with ZCASH_SAPLING_SPENDS_COMPACT_HASH_PERSONALIZATION
 /// * \[(cv, anchor, rk, zkproof)*\] - personalized with ZCASH_SAPLING_SPENDS_NONCOMPACT_HASH_PERSONALIZATION
@@ -159,6 +161,8 @@ pub(crate) fn hash_sapling_spends<A: sapling::Authorization>(
     h.finalize()
 }
 
+/// Implements [ZIP 244 section T.3b](https://zips.z.cash/zip-0244#t-3b-sapling-outputs-digest)
+///
 /// Write disjoint parts of each Sapling shielded output as 3 separate hashes:
 /// * \[(cmu, epk, enc_ciphertext\[..52\])*\] personalized with ZCASH_SAPLING_OUTPUTS_COMPACT_HASH_PERSONALIZATION
 /// * \[enc_ciphertext\[52..564\]*\] (memo ciphertexts) personalized with ZCASH_SAPLING_OUTPUTS_MEMOS_HASH_PERSONALIZATION
@@ -199,7 +203,6 @@ fn transparent_digests<A: transparent::Authorization>(
         prevout_digest: transparent_prevout_hash(&bundle.vin),
         sequence_digest: transparent_sequence_hash(&bundle.vin),
         outputs_digest: transparent_outputs_hash(&bundle.vout),
-        per_input_digest: None,
     }
 }
 
@@ -213,6 +216,7 @@ fn tze_digests<A: tze::Authorization>(bundle: &tze::Bundle<A>) -> TzeDigests<Bla
     }
 }
 
+/// Implements [ZIP 244 section T.1](https://zips.z.cash/zip-0244#t-1-header-digest)
 fn hash_header_txid_data(
     version: TxVersion,
     // we commit to the consensus branch ID with the header
@@ -233,19 +237,20 @@ fn hash_header_txid_data(
     h.finalize()
 }
 
-fn hash_transparent_txid_data(t_digests: Option<&TransparentDigests<Blake2bHash>>) -> Blake2bHash {
+/// Implements [ZIP 244 section T.2](https://zips.z.cash/zip-0244#t-2-transparent-digest)
+pub(crate) fn hash_transparent_txid_data(
+    t_digests: Option<&TransparentDigests<Blake2bHash>>,
+) -> Blake2bHash {
     let mut h = hasher(ZCASH_TRANSPARENT_HASH_PERSONALIZATION);
     if let Some(d) = t_digests {
         h.write_all(d.prevout_digest.as_bytes()).unwrap();
         h.write_all(d.sequence_digest.as_bytes()).unwrap();
         h.write_all(d.outputs_digest.as_bytes()).unwrap();
-        if let Some(s) = d.per_input_digest {
-            h.write_all(s.as_bytes()).unwrap();
-        };
     }
     h.finalize()
 }
 
+/// Implements [ZIP 244 section T.3](https://zips.z.cash/zip-0244#t-3-sapling-digest)
 fn hash_sapling_txid_data<A: sapling::Authorization>(bundle: &sapling::Bundle<A>) -> Blake2bHash {
     let mut h = hasher(ZCASH_SAPLING_HASH_PERSONALIZATION);
     if !(bundle.shielded_spends.is_empty() && bundle.shielded_outputs.is_empty()) {
@@ -278,13 +283,15 @@ fn hash_tze_txid_data(tze_digests: Option<&TzeDigests<Blake2bHash>>) -> Blake2bH
     h.finalize()
 }
 
+/// A TransactionDigest implementation that commits to all of the effecting
+/// data of a transaction to produce a nonmalleable transaction identifier.
+///
+/// This expects and relies upon the existence of canonical encodings for
+/// each effecting component of a transaction.
+///
+/// This implements the [TxId Digest section of ZIP 244](https://zips.z.cash/zip-0244#txid-digest)
 pub struct TxIdDigester;
 
-// A TransactionDigest implementation that commits to all of the effecting
-// data of a transaction to produce a nonmalleable transaction identifier.
-//
-// This expects and relies upon the existence of canonical encodings for
-// each effecting component of a transaction.
 impl<A: Authorization> TransactionDigest<A> for TxIdDigester {
     type HeaderDigest = Blake2bHash;
     type TransparentDigest = Option<TransparentDigests<Blake2bHash>>;
@@ -355,7 +362,7 @@ pub(crate) fn to_hash(
     _txversion: TxVersion,
     consensus_branch_id: BranchId,
     header_digest: Blake2bHash,
-    transparent_digests: Option<&TransparentDigests<Blake2bHash>>,
+    transparent_digest: Blake2bHash,
     sapling_digest: Option<Blake2bHash>,
     orchard_digest: Option<Blake2bHash>,
     #[cfg(feature = "zfuture")] tze_digests: Option<&TzeDigests<Blake2bHash>>,
@@ -368,8 +375,7 @@ pub(crate) fn to_hash(
 
     let mut h = hasher(&personal);
     h.write_all(header_digest.as_bytes()).unwrap();
-    h.write_all(hash_transparent_txid_data(transparent_digests).as_bytes())
-        .unwrap();
+    h.write_all(transparent_digest.as_bytes()).unwrap();
     h.write_all(
         sapling_digest
             .unwrap_or_else(hash_sapling_txid_empty)
@@ -401,7 +407,7 @@ pub fn to_txid(
         txversion,
         consensus_branch_id,
         digests.header_digest,
-        digests.transparent_digests.as_ref(),
+        hash_transparent_txid_data(digests.transparent_digests.as_ref()),
         digests.sapling_digest,
         digests.orchard_digest,
         #[cfg(feature = "zfuture")]

@@ -140,7 +140,7 @@ pub fn v4_signature_hash<
     A: Authorization<SaplingAuth = SA>,
 >(
     tx: &TransactionData<A>,
-    hash_type: u32,
+    hash_type: u8,
     signable_input: &SignableInput<'_>,
 ) -> Blake2bHash {
     if tx.version.has_overwinter() {
@@ -192,8 +192,8 @@ pub fn v4_signature_hash<
             );
         } else if (hash_type & SIGHASH_MASK) == SIGHASH_SINGLE {
             match (tx.transparent_bundle.as_ref(), signable_input) {
-                (Some(b), SignableInput::Transparent(input)) if input.index() < b.vout.len() => {
-                    h.update(single_output_hash(&b.vout[input.index()]).as_bytes())
+                (Some(b), SignableInput::Transparent { index, .. }) if index < &b.vout.len() => {
+                    h.update(single_output_hash(&b.vout[*index]).as_bytes())
                 }
                 _ => h.update(&[0; 32]),
             };
@@ -237,18 +237,22 @@ pub fn v4_signature_hash<
         if tx.version.has_sapling() {
             h.update(&tx.sapling_value_balance().to_i64_le_bytes());
         }
-        update_u32!(h, hash_type, tmp);
+        update_u32!(h, hash_type.into(), tmp);
 
         match signable_input {
             SignableInput::Shielded => (),
-            SignableInput::Transparent(input) => {
+            SignableInput::Transparent {
+                index,
+                script_code,
+                value,
+            } => {
                 if let Some(bundle) = tx.transparent_bundle.as_ref() {
                     let mut data = vec![];
-                    bundle.vin[input.index()].prevout.write(&mut data).unwrap();
-                    input.script_code().write(&mut data).unwrap();
-                    data.extend_from_slice(&input.value().to_i64_le_bytes());
+                    bundle.vin[*index].prevout.write(&mut data).unwrap();
+                    script_code.write(&mut data).unwrap();
+                    data.extend_from_slice(&value.to_i64_le_bytes());
                     (&mut data)
-                        .write_u32::<LittleEndian>(bundle.vin[input.index()].sequence)
+                        .write_u32::<LittleEndian>(bundle.vin[*index].sequence)
                         .unwrap();
                     h.update(&data);
                 } else {
@@ -259,7 +263,7 @@ pub fn v4_signature_hash<
             }
 
             #[cfg(feature = "zfuture")]
-            SignableInput::Tze(_) => {
+            SignableInput::Tze { .. } => {
                 panic!("A request has been made to sign a TZE input, but the transaction version is not ZFuture");
             }
         }

@@ -5,7 +5,7 @@ use std::convert::TryInto;
 use super::{
     components::{
         sapling::{self, GrothProofBytes},
-        Amount,
+        transparent, Amount,
     },
     sighash_v4::v4_signature_hash,
     sighash_v5::v5_signature_hash,
@@ -15,94 +15,25 @@ use super::{
 #[cfg(feature = "zfuture")]
 use crate::extensions::transparent::Precondition;
 
-pub const SIGHASH_ALL: u32 = 1;
-pub const SIGHASH_NONE: u32 = 2;
-pub const SIGHASH_SINGLE: u32 = 3;
-pub const SIGHASH_MASK: u32 = 0x1f;
-pub const SIGHASH_ANYONECANPAY: u32 = 0x80;
-
-pub struct TransparentInput<'a> {
-    index: usize,
-    script_code: &'a Script,
-    value: Amount,
-}
-
-impl<'a> TransparentInput<'a> {
-    pub fn new(index: usize, script_code: &'a Script, value: Amount) -> Self {
-        TransparentInput {
-            index,
-            script_code,
-            value,
-        }
-    }
-
-    pub fn index(&self) -> usize {
-        self.index
-    }
-
-    pub fn script_code(&self) -> &'a Script {
-        self.script_code
-    }
-
-    pub fn value(&self) -> Amount {
-        self.value
-    }
-}
-
-#[cfg(feature = "zfuture")]
-pub struct TzeInput<'a> {
-    index: usize,
-    precondition: &'a Precondition,
-    value: Amount,
-}
-
-#[cfg(feature = "zfuture")]
-impl<'a> TzeInput<'a> {
-    pub fn new(index: usize, precondition: &'a Precondition, value: Amount) -> Self {
-        TzeInput {
-            index,
-            precondition,
-            value,
-        }
-    }
-
-    pub fn index(&self) -> usize {
-        self.index
-    }
-
-    pub fn precondition(&self) -> &'a Precondition {
-        self.precondition
-    }
-
-    pub fn value(&self) -> Amount {
-        self.value
-    }
-}
+pub const SIGHASH_ALL: u8 = 0x01;
+pub const SIGHASH_NONE: u8 = 0x02;
+pub const SIGHASH_SINGLE: u8 = 0x03;
+pub const SIGHASH_MASK: u8 = 0x1f;
+pub const SIGHASH_ANYONECANPAY: u8 = 0x80;
 
 pub enum SignableInput<'a> {
     Shielded,
-    Transparent(TransparentInput<'a>),
+    Transparent {
+        index: usize,
+        script_code: &'a Script,
+        value: Amount,
+    },
     #[cfg(feature = "zfuture")]
-    Tze(TzeInput<'a>),
-}
-
-impl<'a> SignableInput<'a> {
-    pub fn transparent(index: usize, script_code: &'a Script, value: Amount) -> Self {
-        SignableInput::Transparent(TransparentInput {
-            index,
-            script_code,
-            value,
-        })
-    }
-
-    #[cfg(feature = "zfuture")]
-    pub fn tze(index: usize, precondition: &'a Precondition, value: Amount) -> Self {
-        SignableInput::Tze(TzeInput {
-            index,
-            precondition,
-            value,
-        })
-    }
+    Tze {
+        index: usize,
+        precondition: &'a Precondition,
+        value: Amount,
+    },
 }
 
 pub struct SignatureHash(Blake2bHash);
@@ -113,13 +44,33 @@ impl AsRef<[u8; 32]> for SignatureHash {
     }
 }
 
+/// Addtional context that is needed to compute signature hashes
+/// for transactions that include transparent inputs or outputs.
+pub trait TransparentAuthorizingContext: transparent::Authorization {
+    /// Returns the list of all transparent input amounts, provided
+    /// so that wallets can commit to the transparent input breakdown
+    /// without requiring the full data of the previous transactions
+    /// providing these inputs.
+    fn input_amounts(&self) -> Vec<Amount>;
+    /// Returns the list of all transparent input scripts, provided
+    /// so that wallets can commit to the transparent input breakdown
+    /// without requiring the full data of the previous transactions
+    /// providing these inputs.
+    fn input_scripts(&self) -> Vec<Script>;
+}
+
+/// Computes the signature hash for an input to a transaction, given
+/// the full data of the transaction, the input being signed, and the
+/// set of precomputed hashes produced in the construction of the
+/// transaction ID.
 pub fn signature_hash<
     'a,
+    TA: TransparentAuthorizingContext,
     SA: sapling::Authorization<Proof = GrothProofBytes>,
-    A: Authorization<SaplingAuth = SA>,
+    A: Authorization<SaplingAuth = SA, TransparentAuth = TA>,
 >(
     tx: &TransactionData<A>,
-    hash_type: u32,
+    hash_type: u8,
     signable_input: &SignableInput<'a>,
     txid_parts: &TxDigests<Blake2bHash>,
 ) -> SignatureHash {

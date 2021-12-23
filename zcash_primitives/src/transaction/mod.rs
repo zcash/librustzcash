@@ -330,6 +330,10 @@ impl<A: Authorization> TransactionData<A> {
         self.consensus_branch_id
     }
 
+    pub fn lock_time(&self) -> u32 {
+        self.lock_time
+    }
+
     pub fn expiry_height(&self) -> BlockHeight {
         self.expiry_height
     }
@@ -927,7 +931,6 @@ pub struct TransparentDigests<A> {
     pub prevout_digest: A,
     pub sequence_digest: A,
     pub outputs_digest: A,
-    pub per_input_digest: Option<A>,
 }
 
 #[derive(Clone)]
