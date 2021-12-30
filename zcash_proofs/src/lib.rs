@@ -66,6 +66,7 @@ const DOWNLOAD_URL: &str = "https://download.z.cash/downloads";
 
 /// The paths to the Sapling parameter files.
 #[cfg(feature = "download-params")]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SaplingParameterPaths {
     /// The path to the Sapling spend parameter file.
     pub spend: PathBuf,
