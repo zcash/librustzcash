@@ -1,4 +1,3 @@
-use std::cmp;
 use std::convert::{TryFrom, TryInto};
 
 use super::{
@@ -43,21 +42,6 @@ pub enum Ivk {
         typecode: u32,
         data: Vec<u8>,
     },
-}
-
-impl cmp::Ord for Ivk {
-    fn cmp(&self, other: &Self) -> cmp::Ordering {
-        match self.typecode().cmp(&other.typecode()) {
-            cmp::Ordering::Equal => self.data().cmp(other.data()),
-            res => res,
-        }
-    }
-}
-
-impl cmp::PartialOrd for Ivk {
-    fn partial_cmp(&self, other: &Self) -> Option<cmp::Ordering> {
-        Some(self.cmp(other))
-    }
 }
 
 impl TryFrom<(u32, &[u8])> for Ivk {
@@ -187,7 +171,7 @@ mod tests {
         ];
 
         p.prop_map(|mut items| {
-            items.sort_unstable_by_key(|item| <u32>::from(item.typecode()));
+            items.sort_unstable_by(Ivk::encoding_order);
             items
         })
     }
@@ -202,7 +186,7 @@ mod tests {
             transparent in prop::option::of(arb_transparent_ivk()),
         ) -> Uivk {
             let mut items: Vec<_> = shielded.into_iter().chain(transparent).collect();
-            items.sort_unstable_by_key(|item| <u32>::from(item.typecode()));
+            items.sort_unstable_by(Ivk::encoding_order);
             Uivk(items)
         }
     }

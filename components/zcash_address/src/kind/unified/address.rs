@@ -1,7 +1,6 @@
 use super::{private::SealedItem, ParseError, Typecode};
 use crate::kind;
 
-use std::cmp;
 use std::convert::{TryFrom, TryInto};
 
 /// The set of known Receivers for Unified Addresses.
@@ -12,21 +11,6 @@ pub enum Receiver {
     P2pkh(kind::p2pkh::Data),
     P2sh(kind::p2sh::Data),
     Unknown { typecode: u32, data: Vec<u8> },
-}
-
-impl cmp::Ord for Receiver {
-    fn cmp(&self, other: &Self) -> cmp::Ordering {
-        match self.typecode().cmp(&other.typecode()) {
-            cmp::Ordering::Equal => self.data().cmp(other.data()),
-            res => res,
-        }
-    }
-}
-
-impl cmp::PartialOrd for Receiver {
-    fn partial_cmp(&self, other: &Self) -> Option<cmp::Ordering> {
-        Some(self.cmp(other))
-    }
 }
 
 impl TryFrom<(u32, &[u8])> for Receiver {
@@ -166,7 +150,7 @@ mod tests {
     fn arb_unified_address_for_typecodes(
         mut typecodes: Vec<Typecode>,
     ) -> impl Strategy<Value = Vec<Receiver>> {
-        typecodes.sort_unstable_by_key(|tc| <u32>::from(*tc));
+        typecodes.sort_unstable_by(Typecode::encoding_order);
         typecodes
             .into_iter()
             .map(|tc| match tc {

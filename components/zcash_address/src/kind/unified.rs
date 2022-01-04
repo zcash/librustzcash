@@ -25,9 +25,9 @@ pub enum Typecode {
     Unknown(u32),
 }
 
-impl Ord for Typecode {
-    fn cmp(&self, other: &Self) -> cmp::Ordering {
-        match (self, other) {
+impl Typecode {
+    pub fn preference_order(a: &Self, b: &Self) -> cmp::Ordering {
+        match (a, b) {
             // Trivial equality checks.
             (Self::Orchard, Self::Orchard)
             | (Self::Sapling, Self::Sapling)
@@ -55,11 +55,9 @@ impl Ord for Typecode {
             (_, Self::P2pkh) => cmp::Ordering::Greater,
         }
     }
-}
 
-impl PartialOrd for Typecode {
-    fn partial_cmp(&self, other: &Self) -> Option<cmp::Ordering> {
-        Some(self.cmp(other))
+    pub fn encoding_order(a: &Self, b: &Self) -> cmp::Ordering {
+        u32::from(*a).cmp(&u32::from(*b))
     }
 }
 
@@ -149,11 +147,23 @@ pub(crate) mod private {
     use zcash_encoding::CompactSize;
 
     /// A raw address or viewing key.
-    pub trait SealedItem:
-        for<'a> TryFrom<(u32, &'a [u8]), Error = ParseError> + cmp::Ord + cmp::PartialOrd + Clone
-    {
+    pub trait SealedItem: for<'a> TryFrom<(u32, &'a [u8]), Error = ParseError> + Clone {
         fn typecode(&self) -> Typecode;
         fn data(&self) -> &[u8];
+
+        fn preference_order(a: &Self, b: &Self) -> cmp::Ordering {
+            match Typecode::preference_order(&a.typecode(), &b.typecode()) {
+                cmp::Ordering::Equal => a.data().cmp(b.data()),
+                res => res,
+            }
+        }
+
+        fn encoding_order(a: &Self, b: &Self) -> cmp::Ordering {
+            match Typecode::encoding_order(&a.typecode(), &b.typecode()) {
+                cmp::Ordering::Equal => a.data().cmp(b.data()),
+                res => res,
+            }
+        }
     }
 
     /// A Unified Container containing addresses or viewing keys.
@@ -337,7 +347,7 @@ pub trait Encoding: private::SealedContainer {
     /// * the item list may not contain only transparent items (or no items)
     /// * the item list may not contain both P2PKH and P2SH items.
     fn try_from_items(mut items: Vec<Self::Item>) -> Result<Self, ParseError> {
-        items.sort_unstable_by_key(|i| <u32>::from(i.typecode()));
+        items.sort_unstable_by(Self::Item::encoding_order);
         Self::try_from_items_internal(items)
     }
 
@@ -385,7 +395,7 @@ pub trait Container {
         let mut items = self.items_as_parsed().to_vec();
         // Unstable sorting is fine, because all items are guaranteed by construction
         // to have distinct typecodes.
-        items.sort_unstable_by_key(|r| r.typecode());
+        items.sort_unstable_by(Self::Item::preference_order);
         items
     }
 
