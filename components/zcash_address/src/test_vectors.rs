@@ -20,10 +20,10 @@ fn unified() {
         let addr_string = String::from_utf8(tv.unified_addr.to_vec()).unwrap();
 
         let receivers = iter::empty()
-            .chain(tv.orchard_raw_addr.map(Receiver::Orchard))
-            .chain(tv.sapling_raw_addr.map(Receiver::Sapling))
-            .chain(tv.p2sh_bytes.map(Receiver::P2sh))
             .chain(tv.p2pkh_bytes.map(Receiver::P2pkh))
+            .chain(tv.p2sh_bytes.map(Receiver::P2sh))
+            .chain(tv.sapling_raw_addr.map(Receiver::Sapling))
+            .chain(tv.orchard_raw_addr.map(Receiver::Orchard))
             .collect();
 
         let expected_addr = ZcashAddress::from_unified(Network::Main, unified::Address(receivers));
