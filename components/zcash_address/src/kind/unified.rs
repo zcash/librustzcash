@@ -109,6 +109,8 @@ pub enum ParseError {
     InvalidTypecodeValue(u64),
     /// The string is an invalid encoding.
     InvalidEncoding(String),
+    /// The items in the unified container are not in typecode order.
+    InvalidTypecodeOrder,
     /// The unified container only contains transparent items.
     OnlyTransparent,
     /// The string is not Bech32m encoded, and so cannot be a unified address.
@@ -124,6 +126,7 @@ impl fmt::Display for ParseError {
             ParseError::DuplicateTypecode(c) => write!(f, "Duplicate typecode {}", u32::from(*c)),
             ParseError::InvalidTypecodeValue(v) => write!(f, "Typecode value out of range {}", v),
             ParseError::InvalidEncoding(msg) => write!(f, "Invalid encoding: {}", msg),
+            ParseError::InvalidTypecodeOrder => write!(f, "Items are out of order."),
             ParseError::OnlyTransparent => write!(f, "UA only contains transparent items"),
             ParseError::NotUnified => write!(f, "Address is not Bech32m encoded"),
             ParseError::UnknownPrefix(s) => {
@@ -292,9 +295,7 @@ pub(crate) mod private {
                 let t = item.typecode();
                 let t_code = Some(u32::from(t));
                 if t_code < prev_code {
-                    return Err(ParseError::InvalidEncoding(
-                        "Receivers out of order.".to_owned(),
-                    ));
+                    return Err(ParseError::InvalidTypecodeOrder);
                 } else if t_code == prev_code {
                     return Err(ParseError::DuplicateTypecode(t));
                 } else if t == Typecode::P2sh && prev_code == Some(u32::from(Typecode::P2pkh)) {
@@ -333,7 +334,8 @@ pub trait Encoding: private::SealedContainer {
     /// invariants concerning the composition of a unified container are
     /// violated:
     /// * the item list may not contain two items having the same typecode
-    /// * the item list may not contain only a single transparent item
+    /// * the item list may not contain only transparent items (or no items)
+    /// * the item list may not contain both P2PKH and P2SH items.
     fn try_from_items(mut items: Vec<Self::Item>) -> Result<Self, ParseError> {
         items.sort_unstable_by_key(|i| <u32>::from(i.typecode()));
         Self::try_from_items_internal(items)

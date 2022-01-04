@@ -208,7 +208,7 @@ mod tests {
             shielded in arb_shielded_fvk(),
             transparent in prop::option::of(arb_transparent_fvk()),
         ) -> Ufvk {
-            let mut items = shielded.into_iter().chain(transparent).collect::<Vec<_>>();
+            let mut items: Vec<_> = shielded.into_iter().chain(transparent).collect();
             items.sort_unstable_by_key(|item| <u32>::from(item.typecode()));
             Ufvk(items)
         }

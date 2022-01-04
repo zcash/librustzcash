@@ -306,9 +306,7 @@ mod tests {
         // ensure that decoding catches the error
         assert_eq!(
             Address::parse_internal(Address::MAINNET, &encoded[..]),
-            Err(ParseError::InvalidEncoding(
-                "Receivers out of order.".to_owned()
-            ))
+            Err(ParseError::InvalidTypecodeOrder)
         );
     }
 

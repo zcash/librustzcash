@@ -201,7 +201,7 @@ mod tests {
             shielded in arb_shielded_ivk(),
             transparent in prop::option::of(arb_transparent_ivk()),
         ) -> Uivk {
-            let mut items = shielded.into_iter().chain(transparent).collect::<Vec<_>>();
+            let mut items: Vec<_> = shielded.into_iter().chain(transparent).collect();
             items.sort_unstable_by_key(|item| <u32>::from(item.typecode()));
             Uivk(items)
         }
