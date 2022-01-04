@@ -1,4 +1,3 @@
-use std::cmp;
 use std::convert::{TryFrom, TryInto};
 
 use super::{
@@ -38,21 +37,6 @@ pub enum Fvk {
         typecode: u32,
         data: Vec<u8>,
     },
-}
-
-impl cmp::Ord for Fvk {
-    fn cmp(&self, other: &Self) -> cmp::Ordering {
-        match self.typecode().cmp(&other.typecode()) {
-            cmp::Ordering::Equal => self.data().cmp(other.data()),
-            res => res,
-        }
-    }
-}
-
-impl cmp::PartialOrd for Fvk {
-    fn partial_cmp(&self, other: &Self) -> Option<cmp::Ordering> {
-        Some(self.cmp(other))
-    }
 }
 
 impl TryFrom<(u32, &[u8])> for Fvk {
@@ -142,7 +126,10 @@ mod tests {
 
     use super::{Fvk, ParseError, Typecode, Ufvk};
     use crate::{
-        kind::unified::{private::SealedContainer, Container, Encoding},
+        kind::unified::{
+            private::{SealedContainer, SealedItem},
+            Container, Encoding,
+        },
         Network,
     };
 
@@ -187,7 +174,7 @@ mod tests {
         prop_oneof![
             vec![arb_sapling_fvk().boxed()],
             vec![arb_orchard_fvk().boxed()],
-            vec![arb_orchard_fvk().boxed(), arb_sapling_fvk().boxed()],
+            vec![arb_sapling_fvk().boxed(), arb_orchard_fvk().boxed()],
         ]
     }
 
@@ -200,7 +187,9 @@ mod tests {
             shielded in arb_shielded_fvk(),
             transparent in prop::option::of(arb_transparent_fvk()),
         ) -> Ufvk {
-            Ufvk(shielded.into_iter().chain(transparent).collect())
+            let mut items: Vec<_> = transparent.into_iter().chain(shielded).collect();
+            items.sort_unstable_by(Fvk::encoding_order);
+            Ufvk(items)
         }
     }
 

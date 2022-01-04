@@ -1,4 +1,3 @@
-use std::cmp;
 use std::convert::{TryFrom, TryInto};
 
 use super::{
@@ -43,21 +42,6 @@ pub enum Ivk {
         typecode: u32,
         data: Vec<u8>,
     },
-}
-
-impl cmp::Ord for Ivk {
-    fn cmp(&self, other: &Self) -> cmp::Ordering {
-        match self.typecode().cmp(&other.typecode()) {
-            cmp::Ordering::Equal => self.data().cmp(other.data()),
-            res => res,
-        }
-    }
-}
-
-impl cmp::PartialOrd for Ivk {
-    fn partial_cmp(&self, other: &Self) -> Option<cmp::Ordering> {
-        Some(self.cmp(other))
-    }
 }
 
 impl TryFrom<(u32, &[u8])> for Ivk {
@@ -151,7 +135,10 @@ mod tests {
 
     use super::{Ivk, ParseError, Typecode, Uivk};
     use crate::{
-        kind::unified::{private::SealedContainer, Container, Encoding},
+        kind::unified::{
+            private::{SealedContainer, SealedItem},
+            Container, Encoding,
+        },
         Network,
     };
 
@@ -178,8 +165,8 @@ mod tests {
             vec![uniform64().prop_map(Ivk::Sapling)],
             vec![uniform64().prop_map(Ivk::Orchard)],
             vec![
-                uniform64().prop_map(Ivk::Orchard as fn([u8; 64]) -> Ivk),
-                uniform64().prop_map(Ivk::Sapling)
+                uniform64().prop_map(Ivk::Sapling as fn([u8; 64]) -> Ivk),
+                uniform64().prop_map(Ivk::Orchard)
             ],
         ]
     }
@@ -193,7 +180,9 @@ mod tests {
             shielded in arb_shielded_ivk(),
             transparent in prop::option::of(arb_transparent_ivk()),
         ) -> Uivk {
-            Uivk(shielded.into_iter().chain(transparent).collect())
+            let mut items: Vec<_> = transparent.into_iter().chain(shielded).collect();
+            items.sort_unstable_by(Ivk::encoding_order);
+            Uivk(items)
         }
     }
 

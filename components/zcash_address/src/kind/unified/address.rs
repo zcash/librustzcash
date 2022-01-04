@@ -1,7 +1,6 @@
 use super::{private::SealedItem, ParseError, Typecode};
 use crate::kind;
 
-use std::cmp;
 use std::convert::{TryFrom, TryInto};
 
 /// The set of known Receivers for Unified Addresses.
@@ -12,21 +11,6 @@ pub enum Receiver {
     P2pkh(kind::p2pkh::Data),
     P2sh(kind::p2sh::Data),
     Unknown { typecode: u32, data: Vec<u8> },
-}
-
-impl cmp::Ord for Receiver {
-    fn cmp(&self, other: &Self) -> cmp::Ordering {
-        match self.typecode().cmp(&other.typecode()) {
-            cmp::Ordering::Equal => self.data().cmp(other.data()),
-            res => res,
-        }
-    }
-}
-
-impl cmp::PartialOrd for Receiver {
-    fn partial_cmp(&self, other: &Self) -> Option<cmp::Ordering> {
-        Some(self.cmp(other))
-    }
 }
 
 impl TryFrom<(u32, &[u8])> for Receiver {
@@ -152,15 +136,15 @@ mod tests {
 
     /// A strategy to generate an arbitrary valid set of typecodes without
     /// duplication and containing only one of P2sh and P2pkh transparent
-    /// typecodes.
+    /// typecodes. The resulting vector will be sorted in encoding order.
     fn arb_typecodes() -> impl Strategy<Value = Vec<Typecode>> {
-        prop::option::of(arb_transparent_typecode())
-            .prop_flat_map(|transparent| {
-                prop::collection::hash_set(arb_shielded_typecode(), 1..4)
-                    .prop_map(move |xs| xs.into_iter().chain(transparent).collect())
-                    .boxed()
+        prop::option::of(arb_transparent_typecode()).prop_flat_map(|transparent| {
+            prop::collection::hash_set(arb_shielded_typecode(), 1..4).prop_map(move |xs| {
+                let mut typecodes: Vec<_> = xs.into_iter().chain(transparent).collect();
+                typecodes.sort_unstable_by(Typecode::encoding_order);
+                typecodes
             })
-            .prop_shuffle()
+        })
     }
 
     fn arb_unified_address_for_typecodes(
@@ -293,6 +277,19 @@ mod tests {
         assert_eq!(
             Address::parse_internal(Address::MAINNET, &encoded[..]),
             Err(ParseError::BothP2phkAndP2sh)
+        );
+    }
+
+    #[test]
+    fn addresses_out_of_order() {
+        // Construct and serialize an invalid UA. This must be done using private
+        // methods, as the public API does not permit construction of such invalid values.
+        let ua = Address(vec![Receiver::Sapling([0; 43]), Receiver::P2pkh([0; 20])]);
+        let encoded = ua.to_jumbled_bytes(Address::MAINNET);
+        // ensure that decoding catches the error
+        assert_eq!(
+            Address::parse_internal(Address::MAINNET, &encoded[..]),
+            Err(ParseError::InvalidTypecodeOrder)
         );
     }
 
