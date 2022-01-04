@@ -400,6 +400,12 @@
 <span id="398">398</span>
 <span id="399">399</span>
 <span id="400">400</span>
+<span id="401">401</span>
+<span id="402">402</span>
+<span id="403">403</span>
+<span id="404">404</span>
+<span id="405">405</span>
+<span id="406">406</span>
 </pre><pre class="rust"><code><span class="kw">use</span> <span class="ident">bech32</span>::{<span class="self">self</span>, <span class="ident">FromBase32</span>, <span class="ident">ToBase32</span>, <span class="ident">Variant</span>};
 <span class="kw">use</span> <span class="ident">std::cmp</span>;
 <span class="kw">use</span> <span class="ident">std::convert::TryFrom</span>;
@@ -427,9 +433,9 @@
     <span class="ident">Unknown</span>(<span class="ident">u32</span>),
 }
 
-<span class="kw">impl</span> <span class="ident">Ord</span> <span class="kw">for</span> <span class="ident">Typecode</span> {
-    <span class="kw">fn</span> <span class="ident">cmp</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">other</span>: <span class="kw-2">&amp;</span><span class="self">Self</span>) -&gt; <span class="ident">cmp::Ordering</span> {
-        <span class="kw">match</span> (<span class="self">self</span>, <span class="ident">other</span>) {
+<span class="kw">impl</span> <span class="ident">Typecode</span> {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">preference_order</span>(<span class="ident">a</span>: <span class="kw-2">&amp;</span><span class="self">Self</span>, <span class="ident">b</span>: <span class="kw-2">&amp;</span><span class="self">Self</span>) -&gt; <span class="ident">cmp::Ordering</span> {
+        <span class="kw">match</span> (<span class="ident">a</span>, <span class="ident">b</span>) {
             <span class="comment">// Trivial equality checks.</span>
             (<span class="ident"><span class="self">Self</span>::Orchard</span>, <span class="ident"><span class="self">Self</span>::Orchard</span>)
             <span class="op">|</span> (<span class="ident"><span class="self">Self</span>::Sapling</span>, <span class="ident"><span class="self">Self</span>::Sapling</span>)
@@ -457,11 +463,9 @@
             (<span class="kw">_</span>, <span class="ident"><span class="self">Self</span>::P2pkh</span>) =&gt; <span class="ident">cmp::Ordering::Greater</span>,
         }
     }
-}
 
-<span class="kw">impl</span> <span class="ident">PartialOrd</span> <span class="kw">for</span> <span class="ident">Typecode</span> {
-    <span class="kw">fn</span> <span class="ident">partial_cmp</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">other</span>: <span class="kw-2">&amp;</span><span class="self">Self</span>) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">cmp::Ordering</span><span class="op">&gt;</span> {
-        <span class="prelude-val">Some</span>(<span class="self">self</span>.<span class="ident">cmp</span>(<span class="ident">other</span>))
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">encoding_order</span>(<span class="ident">a</span>: <span class="kw-2">&amp;</span><span class="self">Self</span>, <span class="ident">b</span>: <span class="kw-2">&amp;</span><span class="self">Self</span>) -&gt; <span class="ident">cmp::Ordering</span> {
+        <span class="ident">u32::from</span>(<span class="kw-2">*</span><span class="ident">a</span>).<span class="ident">cmp</span>(<span class="kw-2">&amp;</span><span class="ident">u32::from</span>(<span class="kw-2">*</span><span class="ident">b</span>))
     }
 }
 
@@ -511,6 +515,8 @@
     <span class="ident">InvalidTypecodeValue</span>(<span class="ident">u64</span>),
     <span class="doccomment">/// The string is an invalid encoding.</span>
     <span class="ident">InvalidEncoding</span>(<span class="ident">String</span>),
+    <span class="doccomment">/// The items in the unified container are not in typecode order.</span>
+    <span class="ident">InvalidTypecodeOrder</span>,
     <span class="doccomment">/// The unified container only contains transparent items.</span>
     <span class="ident">OnlyTransparent</span>,
     <span class="doccomment">/// The string is not Bech32m encoded, and so cannot be a unified address.</span>
@@ -526,6 +532,7 @@
             <span class="ident">ParseError::DuplicateTypecode</span>(<span class="ident">c</span>) =&gt; <span class="macro">write!</span>(<span class="ident">f</span>, <span class="string">&quot;Duplicate typecode {}&quot;</span>, <span class="ident">u32::from</span>(<span class="kw-2">*</span><span class="ident">c</span>)),
             <span class="ident">ParseError::InvalidTypecodeValue</span>(<span class="ident">v</span>) =&gt; <span class="macro">write!</span>(<span class="ident">f</span>, <span class="string">&quot;Typecode value out of range {}&quot;</span>, <span class="ident">v</span>),
             <span class="ident">ParseError::InvalidEncoding</span>(<span class="ident">msg</span>) =&gt; <span class="macro">write!</span>(<span class="ident">f</span>, <span class="string">&quot;Invalid encoding: {}&quot;</span>, <span class="ident">msg</span>),
+            <span class="ident">ParseError::InvalidTypecodeOrder</span> =&gt; <span class="macro">write!</span>(<span class="ident">f</span>, <span class="string">&quot;Items are out of order.&quot;</span>),
             <span class="ident">ParseError::OnlyTransparent</span> =&gt; <span class="macro">write!</span>(<span class="ident">f</span>, <span class="string">&quot;UA only contains transparent items&quot;</span>),
             <span class="ident">ParseError::NotUnified</span> =&gt; <span class="macro">write!</span>(<span class="ident">f</span>, <span class="string">&quot;Address is not Bech32m encoded&quot;</span>),
             <span class="ident">ParseError::UnknownPrefix</span>(<span class="ident">s</span>) =&gt; {
@@ -542,18 +549,29 @@
     <span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::Network</span>;
     <span class="kw">use</span> <span class="ident">std</span>::{
         <span class="ident">cmp</span>,
-        <span class="ident">collections::HashSet</span>,
         <span class="ident">convert</span>::{<span class="ident">TryFrom</span>, <span class="ident">TryInto</span>},
         <span class="ident">io::Write</span>,
     };
     <span class="kw">use</span> <span class="ident">zcash_encoding::CompactSize</span>;
 
     <span class="doccomment">/// A raw address or viewing key.</span>
-    <span class="kw">pub</span> <span class="kw">trait</span> <span class="ident">SealedItem</span>:
-        <span class="kw">for</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> <span class="ident">TryFrom</span><span class="op">&lt;</span>(<span class="ident">u32</span>, <span class="kw-2">&amp;</span><span class="lifetime">&#39;a</span> [<span class="ident">u8</span>]), <span class="ident">Error</span> <span class="op">=</span> <span class="ident">ParseError</span><span class="op">&gt;</span> <span class="op">+</span> <span class="ident">cmp::Ord</span> <span class="op">+</span> <span class="ident">cmp::PartialOrd</span> <span class="op">+</span> <span class="ident">Clone</span>
-    {
+    <span class="kw">pub</span> <span class="kw">trait</span> <span class="ident">SealedItem</span>: <span class="kw">for</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> <span class="ident">TryFrom</span><span class="op">&lt;</span>(<span class="ident">u32</span>, <span class="kw-2">&amp;</span><span class="lifetime">&#39;a</span> [<span class="ident">u8</span>]), <span class="ident">Error</span> <span class="op">=</span> <span class="ident">ParseError</span><span class="op">&gt;</span> <span class="op">+</span> <span class="ident">Clone</span> {
         <span class="kw">fn</span> <span class="ident">typecode</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">Typecode</span>;
         <span class="kw">fn</span> <span class="ident">data</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>[<span class="ident">u8</span>];
+
+        <span class="kw">fn</span> <span class="ident">preference_order</span>(<span class="ident">a</span>: <span class="kw-2">&amp;</span><span class="self">Self</span>, <span class="ident">b</span>: <span class="kw-2">&amp;</span><span class="self">Self</span>) -&gt; <span class="ident">cmp::Ordering</span> {
+            <span class="kw">match</span> <span class="ident">Typecode::preference_order</span>(<span class="kw-2">&amp;</span><span class="ident">a</span>.<span class="ident">typecode</span>(), <span class="kw-2">&amp;</span><span class="ident">b</span>.<span class="ident">typecode</span>()) {
+                <span class="ident">cmp::Ordering::Equal</span> =&gt; <span class="ident">a</span>.<span class="ident">data</span>().<span class="ident">cmp</span>(<span class="ident">b</span>.<span class="ident">data</span>()),
+                <span class="ident">res</span> =&gt; <span class="ident">res</span>,
+            }
+        }
+
+        <span class="kw">fn</span> <span class="ident">encoding_order</span>(<span class="ident">a</span>: <span class="kw-2">&amp;</span><span class="self">Self</span>, <span class="ident">b</span>: <span class="kw-2">&amp;</span><span class="self">Self</span>) -&gt; <span class="ident">cmp::Ordering</span> {
+            <span class="kw">match</span> <span class="ident">Typecode::encoding_order</span>(<span class="kw-2">&amp;</span><span class="ident">a</span>.<span class="ident">typecode</span>(), <span class="kw-2">&amp;</span><span class="ident">b</span>.<span class="ident">typecode</span>()) {
+                <span class="ident">cmp::Ordering::Equal</span> =&gt; <span class="ident">a</span>.<span class="ident">data</span>().<span class="ident">cmp</span>(<span class="ident">b</span>.<span class="ident">data</span>()),
+                <span class="ident">res</span> =&gt; <span class="ident">res</span>,
+            }
+        }
     }
 
     <span class="doccomment">/// A Unified Container containing addresses or viewing keys.</span>
@@ -685,23 +703,30 @@
         }
 
         <span class="doccomment">/// A private function that constructs a unified container with the</span>
-        <span class="doccomment">/// items in their given order.</span>
+        <span class="doccomment">/// specified items, which must be in ascending typecode order.</span>
         <span class="kw">fn</span> <span class="ident">try_from_items_internal</span>(<span class="ident">items</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident"><span class="self">Self</span>::Item</span><span class="op">&gt;</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="self">Self</span>, <span class="ident">ParseError</span><span class="op">&gt;</span> {
-            <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">typecodes</span> <span class="op">=</span> <span class="ident">HashSet::with_capacity</span>(<span class="ident">items</span>.<span class="ident">len</span>());
+            <span class="macro">assert!</span>(<span class="ident">u32::from</span>(<span class="ident">Typecode::P2sh</span>) <span class="op">==</span> <span class="ident">u32::from</span>(<span class="ident">Typecode::P2pkh</span>) <span class="op">+</span> <span class="number">1</span>);
+
+            <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">only_transparent</span> <span class="op">=</span> <span class="bool-val">true</span>;
+            <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">prev_code</span> <span class="op">=</span> <span class="prelude-val">None</span>; <span class="comment">// less than any Some</span>
             <span class="kw">for</span> <span class="ident">item</span> <span class="kw">in</span> <span class="kw-2">&amp;</span><span class="ident">items</span> {
                 <span class="kw">let</span> <span class="ident">t</span> <span class="op">=</span> <span class="ident">item</span>.<span class="ident">typecode</span>();
-                <span class="kw">if</span> <span class="ident">typecodes</span>.<span class="ident">contains</span>(<span class="kw-2">&amp;</span><span class="ident">t</span>) {
+                <span class="kw">let</span> <span class="ident">t_code</span> <span class="op">=</span> <span class="prelude-val">Some</span>(<span class="ident">u32::from</span>(<span class="ident">t</span>));
+                <span class="kw">if</span> <span class="ident">t_code</span> <span class="op">&lt;</span> <span class="ident">prev_code</span> {
+                    <span class="kw">return</span> <span class="prelude-val">Err</span>(<span class="ident">ParseError::InvalidTypecodeOrder</span>);
+                } <span class="kw">else</span> <span class="kw">if</span> <span class="ident">t_code</span> <span class="op">==</span> <span class="ident">prev_code</span> {
                     <span class="kw">return</span> <span class="prelude-val">Err</span>(<span class="ident">ParseError::DuplicateTypecode</span>(<span class="ident">t</span>));
-                } <span class="kw">else</span> <span class="kw">if</span> (<span class="ident">t</span> <span class="op">==</span> <span class="ident">Typecode::P2pkh</span> <span class="op">&amp;&amp;</span> <span class="ident">typecodes</span>.<span class="ident">contains</span>(<span class="kw-2">&amp;</span><span class="ident">Typecode::P2sh</span>))
-                    <span class="op">|</span><span class="op">|</span> (<span class="ident">t</span> <span class="op">==</span> <span class="ident">Typecode::P2sh</span> <span class="op">&amp;&amp;</span> <span class="ident">typecodes</span>.<span class="ident">contains</span>(<span class="kw-2">&amp;</span><span class="ident">Typecode::P2pkh</span>))
-                {
+                } <span class="kw">else</span> <span class="kw">if</span> <span class="ident">t</span> <span class="op">==</span> <span class="ident">Typecode::P2sh</span> <span class="op">&amp;&amp;</span> <span class="ident">prev_code</span> <span class="op">==</span> <span class="prelude-val">Some</span>(<span class="ident">u32::from</span>(<span class="ident">Typecode::P2pkh</span>)) {
+                    <span class="comment">// P2pkh and P2sh can only be in that order and next to each other,</span>
+                    <span class="comment">// otherwise we would detect an out-of-order or duplicate typecode.</span>
                     <span class="kw">return</span> <span class="prelude-val">Err</span>(<span class="ident">ParseError::BothP2phkAndP2sh</span>);
                 } <span class="kw">else</span> {
-                    <span class="ident">typecodes</span>.<span class="ident">insert</span>(<span class="ident">t</span>);
+                    <span class="ident">prev_code</span> <span class="op">=</span> <span class="ident">t_code</span>;
+                    <span class="ident">only_transparent</span> <span class="op">=</span> <span class="ident">only_transparent</span> <span class="op">&amp;&amp;</span> <span class="ident">t</span>.<span class="ident">is_transparent</span>();
                 }
             }
 
-            <span class="kw">if</span> <span class="ident">typecodes</span>.<span class="ident">iter</span>().<span class="ident">all</span>(<span class="op">|</span><span class="ident">t</span><span class="op">|</span> <span class="ident">t</span>.<span class="ident">is_transparent</span>()) {
+            <span class="kw">if</span> <span class="ident">only_transparent</span> {
                 <span class="prelude-val">Err</span>(<span class="ident">ParseError::OnlyTransparent</span>)
             } <span class="kw">else</span> {
                 <span class="comment">// All checks pass!</span>
@@ -727,23 +752,10 @@
     <span class="doccomment">/// invariants concerning the composition of a unified container are</span>
     <span class="doccomment">/// violated:</span>
     <span class="doccomment">/// * the item list may not contain two items having the same typecode</span>
-    <span class="doccomment">/// * the item list may not contain only a single transparent item</span>
+    <span class="doccomment">/// * the item list may not contain only transparent items (or no items)</span>
+    <span class="doccomment">/// * the item list may not contain both P2PKH and P2SH items.</span>
     <span class="kw">fn</span> <span class="ident">try_from_items</span>(<span class="kw-2">mut</span> <span class="ident">items</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident"><span class="self">Self</span>::Item</span><span class="op">&gt;</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="self">Self</span>, <span class="ident">ParseError</span><span class="op">&gt;</span> {
-        <span class="ident">items</span>.<span class="ident">sort_unstable_by_key</span>(<span class="op">|</span><span class="ident">i</span><span class="op">|</span> <span class="ident">i</span>.<span class="ident">typecode</span>());
-        <span class="ident"><span class="self">Self</span>::try_from_items_internal</span>(<span class="ident">items</span>)
-    }
-
-    <span class="doccomment">/// Constructs a value of a unified container type from a vector</span>
-    <span class="doccomment">/// of container items, preserving the order of the provided vector</span>
-    <span class="doccomment">/// in the serialized form, potentially contravening the ordering</span>
-    <span class="doccomment">/// recommended by ZIP 316.</span>
-    <span class="doccomment">///</span>
-    <span class="doccomment">/// This function will return an error in the case that the following ZIP 316</span>
-    <span class="doccomment">/// invariants concerning the composition of a unified container are</span>
-    <span class="doccomment">/// violated:</span>
-    <span class="doccomment">/// * the item list may not contain two items having the same typecode</span>
-    <span class="doccomment">/// * the item list may not contain only a single transparent item</span>
-    <span class="kw">fn</span> <span class="ident">try_from_items_preserving_order</span>(<span class="ident">items</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident"><span class="self">Self</span>::Item</span><span class="op">&gt;</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="self">Self</span>, <span class="ident">ParseError</span><span class="op">&gt;</span> {
+        <span class="ident">items</span>.<span class="ident">sort_unstable_by</span>(<span class="ident"><span class="self">Self</span>::Item::encoding_order</span>);
         <span class="ident"><span class="self">Self</span>::try_from_items_internal</span>(<span class="ident">items</span>)
     }
 
@@ -791,7 +803,7 @@
         <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">items</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">items_as_parsed</span>().<span class="ident">to_vec</span>();
         <span class="comment">// Unstable sorting is fine, because all items are guaranteed by construction</span>
         <span class="comment">// to have distinct typecodes.</span>
-        <span class="ident">items</span>.<span class="ident">sort_unstable_by_key</span>(<span class="op">|</span><span class="ident">r</span><span class="op">|</span> <span class="ident">r</span>.<span class="ident">typecode</span>());
+        <span class="ident">items</span>.<span class="ident">sort_unstable_by</span>(<span class="ident"><span class="self">Self</span>::Item::preference_order</span>);
         <span class="ident">items</span>
     }
 
@@ -801,5 +813,5 @@
     <span class="kw">fn</span> <span class="ident">items_as_parsed</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>[<span class="ident"><span class="self">Self</span>::Item</span>];
 }
 </code></pre></div>
-</section><section id="search" class="content hidden"></section></div></main><div id="rustdoc-vars" data-root-path="../../../" data-current-crate="zcash_address" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.59.0-nightly (5531927e8 2021-12-16)" ></div>
+</section><section id="search" class="content hidden"></section></div></main><div id="rustdoc-vars" data-root-path="../../../" data-current-crate="zcash_address" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.59.0-nightly (399ba6bb3 2022-01-03)" ></div>
 </body></html>

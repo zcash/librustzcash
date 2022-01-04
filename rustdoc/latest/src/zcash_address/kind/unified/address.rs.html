@@ -342,13 +342,9 @@
 <span id="340">340</span>
 <span id="341">341</span>
 <span id="342">342</span>
-<span id="343">343</span>
-<span id="344">344</span>
-<span id="345">345</span>
 </pre><pre class="rust"><code><span class="kw">use</span> <span class="kw">super</span>::{<span class="ident">private::SealedItem</span>, <span class="ident">ParseError</span>, <span class="ident">Typecode</span>};
 <span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::kind</span>;
 
-<span class="kw">use</span> <span class="ident">std::cmp</span>;
 <span class="kw">use</span> <span class="ident">std::convert</span>::{<span class="ident">TryFrom</span>, <span class="ident">TryInto</span>};
 
 <span class="doccomment">/// The set of known Receivers for Unified Addresses.</span>
@@ -359,21 +355,6 @@
     <span class="ident">P2pkh</span>(<span class="ident">kind::p2pkh::Data</span>),
     <span class="ident">P2sh</span>(<span class="ident">kind::p2sh::Data</span>),
     <span class="ident">Unknown</span> { <span class="ident">typecode</span>: <span class="ident">u32</span>, <span class="ident">data</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span> },
-}
-
-<span class="kw">impl</span> <span class="ident">cmp::Ord</span> <span class="kw">for</span> <span class="ident">Receiver</span> {
-    <span class="kw">fn</span> <span class="ident">cmp</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">other</span>: <span class="kw-2">&amp;</span><span class="self">Self</span>) -&gt; <span class="ident">cmp::Ordering</span> {
-        <span class="kw">match</span> <span class="self">self</span>.<span class="ident">typecode</span>().<span class="ident">cmp</span>(<span class="kw-2">&amp;</span><span class="ident">other</span>.<span class="ident">typecode</span>()) {
-            <span class="ident">cmp::Ordering::Equal</span> =&gt; <span class="self">self</span>.<span class="ident">data</span>().<span class="ident">cmp</span>(<span class="ident">other</span>.<span class="ident">data</span>()),
-            <span class="ident">res</span> =&gt; <span class="ident">res</span>,
-        }
-    }
-}
-
-<span class="kw">impl</span> <span class="ident">cmp::PartialOrd</span> <span class="kw">for</span> <span class="ident">Receiver</span> {
-    <span class="kw">fn</span> <span class="ident">partial_cmp</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">other</span>: <span class="kw-2">&amp;</span><span class="self">Self</span>) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">cmp::Ordering</span><span class="op">&gt;</span> {
-        <span class="prelude-val">Some</span>(<span class="self">self</span>.<span class="ident">cmp</span>(<span class="ident">other</span>))
-    }
 }
 
 <span class="kw">impl</span> <span class="ident">TryFrom</span><span class="op">&lt;</span>(<span class="ident">u32</span>, <span class="kw-2">&amp;</span>[<span class="ident">u8</span>])<span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">Receiver</span> {
@@ -499,15 +480,15 @@
 
     <span class="doccomment">/// A strategy to generate an arbitrary valid set of typecodes without</span>
     <span class="doccomment">/// duplication and containing only one of P2sh and P2pkh transparent</span>
-    <span class="doccomment">/// typecodes.</span>
+    <span class="doccomment">/// typecodes. The resulting vector will be sorted in encoding order.</span>
     <span class="kw">fn</span> <span class="ident">arb_typecodes</span>() -&gt; <span class="kw">impl</span> <span class="ident">Strategy</span><span class="op">&lt;</span><span class="ident">Value</span> <span class="op">=</span> <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">Typecode</span><span class="op">&gt;</span><span class="op">&gt;</span> {
-        <span class="ident">prop::option::of</span>(<span class="ident">arb_transparent_typecode</span>())
-            .<span class="ident">prop_flat_map</span>(<span class="op">|</span><span class="ident">transparent</span><span class="op">|</span> {
-                <span class="ident">prop::collection::hash_set</span>(<span class="ident">arb_shielded_typecode</span>(), <span class="number">1</span>..<span class="number">4</span>)
-                    .<span class="ident">prop_map</span>(<span class="kw">move</span> <span class="op">|</span><span class="ident">xs</span><span class="op">|</span> <span class="ident">xs</span>.<span class="ident">into_iter</span>().<span class="ident">chain</span>(<span class="ident">transparent</span>).<span class="ident">collect</span>())
-                    .<span class="ident">boxed</span>()
+        <span class="ident">prop::option::of</span>(<span class="ident">arb_transparent_typecode</span>()).<span class="ident">prop_flat_map</span>(<span class="op">|</span><span class="ident">transparent</span><span class="op">|</span> {
+            <span class="ident">prop::collection::hash_set</span>(<span class="ident">arb_shielded_typecode</span>(), <span class="number">1</span>..<span class="number">4</span>).<span class="ident">prop_map</span>(<span class="kw">move</span> <span class="op">|</span><span class="ident">xs</span><span class="op">|</span> {
+                <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">typecodes</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="kw">_</span><span class="op">&gt;</span> <span class="op">=</span> <span class="ident">xs</span>.<span class="ident">into_iter</span>().<span class="ident">chain</span>(<span class="ident">transparent</span>).<span class="ident">collect</span>();
+                <span class="ident">typecodes</span>.<span class="ident">sort_unstable_by</span>(<span class="ident">Typecode::encoding_order</span>);
+                <span class="ident">typecodes</span>
             })
-            .<span class="ident">prop_shuffle</span>()
+        })
     }
 
     <span class="kw">fn</span> <span class="ident">arb_unified_address_for_typecodes</span>(
@@ -644,6 +625,19 @@
     }
 
     <span class="attribute">#[<span class="ident">test</span>]</span>
+    <span class="kw">fn</span> <span class="ident">addresses_out_of_order</span>() {
+        <span class="comment">// Construct and serialize an invalid UA. This must be done using private</span>
+        <span class="comment">// methods, as the public API does not permit construction of such invalid values.</span>
+        <span class="kw">let</span> <span class="ident">ua</span> <span class="op">=</span> <span class="ident">Address</span>(<span class="macro">vec!</span>[<span class="ident">Receiver::Sapling</span>([<span class="number">0</span>; <span class="number">43</span>]), <span class="ident">Receiver::P2pkh</span>([<span class="number">0</span>; <span class="number">20</span>])]);
+        <span class="kw">let</span> <span class="ident">encoded</span> <span class="op">=</span> <span class="ident">ua</span>.<span class="ident">to_jumbled_bytes</span>(<span class="ident">Address::MAINNET</span>);
+        <span class="comment">// ensure that decoding catches the error</span>
+        <span class="macro">assert_eq!</span>(
+            <span class="ident">Address::parse_internal</span>(<span class="ident">Address::MAINNET</span>, <span class="kw-2">&amp;</span><span class="ident">encoded</span>[..]),
+            <span class="prelude-val">Err</span>(<span class="ident">ParseError::InvalidTypecodeOrder</span>)
+        );
+    }
+
+    <span class="attribute">#[<span class="ident">test</span>]</span>
     <span class="kw">fn</span> <span class="ident">only_transparent</span>() {
         <span class="comment">// Encoding of `Address(vec![Receiver::P2pkh([0; 20])])`.</span>
         <span class="kw">let</span> <span class="ident">encoded</span> <span class="op">=</span> <span class="macro">vec!</span>[
@@ -691,5 +685,5 @@
     }
 }
 </code></pre></div>
-</section><section id="search" class="content hidden"></section></div></main><div id="rustdoc-vars" data-root-path="../../../../" data-current-crate="zcash_address" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.59.0-nightly (5531927e8 2021-12-16)" ></div>
+</section><section id="search" class="content hidden"></section></div></main><div id="rustdoc-vars" data-root-path="../../../../" data-current-crate="zcash_address" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.59.0-nightly (399ba6bb3 2022-01-03)" ></div>
 </body></html>
