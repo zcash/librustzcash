@@ -151,7 +151,10 @@ mod tests {
 
     use super::{Ivk, ParseError, Typecode, Uivk};
     use crate::{
-        kind::unified::{private::SealedContainer, Container, Encoding},
+        kind::unified::{
+            private::{SealedContainer, SealedItem},
+            Container, Encoding,
+        },
         Network,
     };
 
@@ -174,14 +177,19 @@ mod tests {
     }
 
     fn arb_shielded_ivk() -> impl Strategy<Value = Vec<Ivk>> {
-        prop_oneof![
+        let p = prop_oneof![
             vec![uniform64().prop_map(Ivk::Sapling)],
             vec![uniform64().prop_map(Ivk::Orchard)],
             vec![
                 uniform64().prop_map(Ivk::Orchard as fn([u8; 64]) -> Ivk),
                 uniform64().prop_map(Ivk::Sapling)
             ],
-        ]
+        ];
+
+        p.prop_map(|mut items| {
+            items.sort_unstable_by_key(|item| <u32>::from(item.typecode()));
+            items
+        })
     }
 
     fn arb_transparent_ivk() -> impl Strategy<Value = Ivk> {
@@ -193,7 +201,9 @@ mod tests {
             shielded in arb_shielded_ivk(),
             transparent in prop::option::of(arb_transparent_ivk()),
         ) -> Uivk {
-            Uivk(shielded.into_iter().chain(transparent).collect())
+            let mut items = shielded.into_iter().chain(transparent).collect::<Vec<_>>();
+            items.sort_unstable_by_key(|item| <u32>::from(item.typecode()));
+            Uivk(items)
         }
     }
 

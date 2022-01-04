@@ -140,7 +140,6 @@ pub(crate) mod private {
     use crate::Network;
     use std::{
         cmp,
-        collections::HashSet,
         convert::{TryFrom, TryInto},
         io::Write,
     };
@@ -283,23 +282,32 @@ pub(crate) mod private {
         }
 
         /// A private function that constructs a unified container with the
-        /// items in their given order.
+        /// specified items, which must be in ascending typecode order.
         fn try_from_items_internal(items: Vec<Self::Item>) -> Result<Self, ParseError> {
-            let mut typecodes = HashSet::with_capacity(items.len());
+            assert!(u32::from(Typecode::P2sh) == u32::from(Typecode::P2pkh) + 1);
+
+            let mut only_transparent = true;
+            let mut prev_code = None; // less than any Some
             for item in &items {
                 let t = item.typecode();
-                if typecodes.contains(&t) {
+                let t_code = Some(u32::from(t));
+                if t_code < prev_code {
+                    return Err(ParseError::InvalidEncoding(
+                        "Receivers out of order.".to_owned(),
+                    ));
+                } else if t_code == prev_code {
                     return Err(ParseError::DuplicateTypecode(t));
-                } else if (t == Typecode::P2pkh && typecodes.contains(&Typecode::P2sh))
-                    || (t == Typecode::P2sh && typecodes.contains(&Typecode::P2pkh))
-                {
+                } else if t == Typecode::P2sh && prev_code == Some(u32::from(Typecode::P2pkh)) {
+                    // P2pkh and P2sh can only be in that order and next to each other,
+                    // otherwise we would detect an out-of-order or duplicate typecode.
                     return Err(ParseError::BothP2phkAndP2sh);
                 } else {
-                    typecodes.insert(t);
+                    prev_code = t_code;
+                    only_transparent = only_transparent && t.is_transparent();
                 }
             }
 
-            if typecodes.iter().all(|t| t.is_transparent()) {
+            if only_transparent {
                 Err(ParseError::OnlyTransparent)
             } else {
                 // All checks pass!
@@ -327,21 +335,7 @@ pub trait Encoding: private::SealedContainer {
     /// * the item list may not contain two items having the same typecode
     /// * the item list may not contain only a single transparent item
     fn try_from_items(mut items: Vec<Self::Item>) -> Result<Self, ParseError> {
-        items.sort_unstable_by_key(|i| i.typecode());
-        Self::try_from_items_internal(items)
-    }
-
-    /// Constructs a value of a unified container type from a vector
-    /// of container items, preserving the order of the provided vector
-    /// in the serialized form, potentially contravening the ordering
-    /// recommended by ZIP 316.
-    ///
-    /// This function will return an error in the case that the following ZIP 316
-    /// invariants concerning the composition of a unified container are
-    /// violated:
-    /// * the item list may not contain two items having the same typecode
-    /// * the item list may not contain only a single transparent item
-    fn try_from_items_preserving_order(items: Vec<Self::Item>) -> Result<Self, ParseError> {
+        items.sort_unstable_by_key(|i| <u32>::from(i.typecode()));
         Self::try_from_items_internal(items)
     }
 

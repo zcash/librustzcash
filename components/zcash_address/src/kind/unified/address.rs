@@ -164,8 +164,9 @@ mod tests {
     }
 
     fn arb_unified_address_for_typecodes(
-        typecodes: Vec<Typecode>,
+        mut typecodes: Vec<Typecode>,
     ) -> impl Strategy<Value = Vec<Receiver>> {
+        typecodes.sort_unstable_by_key(|tc| <u32>::from(*tc));
         typecodes
             .into_iter()
             .map(|tc| match tc {
@@ -293,6 +294,21 @@ mod tests {
         assert_eq!(
             Address::parse_internal(Address::MAINNET, &encoded[..]),
             Err(ParseError::BothP2phkAndP2sh)
+        );
+    }
+
+    #[test]
+    fn addresses_out_of_order() {
+        // Construct and serialize an invalid UA. This must be done using private
+        // methods, as the public API does not permit construction of such invalid values.
+        let ua = Address(vec![Receiver::Sapling([0; 43]), Receiver::P2pkh([0; 20])]);
+        let encoded = ua.to_jumbled_bytes(Address::MAINNET);
+        // ensure that decoding catches the error
+        assert_eq!(
+            Address::parse_internal(Address::MAINNET, &encoded[..]),
+            Err(ParseError::InvalidEncoding(
+                "Receivers out of order.".to_owned()
+            ))
         );
     }
 

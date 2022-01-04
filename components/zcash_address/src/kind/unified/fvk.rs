@@ -142,7 +142,10 @@ mod tests {
 
     use super::{Fvk, ParseError, Typecode, Ufvk};
     use crate::{
-        kind::unified::{private::SealedContainer, Container, Encoding},
+        kind::unified::{
+            private::{SealedContainer, SealedItem},
+            Container, Encoding,
+        },
         Network,
     };
 
@@ -184,11 +187,16 @@ mod tests {
     }
 
     fn arb_shielded_fvk() -> impl Strategy<Value = Vec<Fvk>> {
-        prop_oneof![
+        let p = prop_oneof![
             vec![arb_sapling_fvk().boxed()],
             vec![arb_orchard_fvk().boxed()],
             vec![arb_orchard_fvk().boxed(), arb_sapling_fvk().boxed()],
-        ]
+        ];
+
+        p.prop_map(|mut items| {
+            items.sort_unstable_by_key(|item| <u32>::from(item.typecode()));
+            items
+        })
     }
 
     fn arb_transparent_fvk() -> BoxedStrategy<Fvk> {
@@ -200,7 +208,9 @@ mod tests {
             shielded in arb_shielded_fvk(),
             transparent in prop::option::of(arb_transparent_fvk()),
         ) -> Ufvk {
-            Ufvk(shielded.into_iter().chain(transparent).collect())
+            let mut items = shielded.into_iter().chain(transparent).collect::<Vec<_>>();
+            items.sort_unstable_by_key(|item| <u32>::from(item.typecode()));
+            Ufvk(items)
         }
     }
 
