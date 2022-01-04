@@ -59,7 +59,7 @@ rand_xorshift = "0.3"
 orchard = { version = "=0.1.0-beta.1", features = ["test-dependencies"] }
 
 [target.'cfg(unix)'.dev-dependencies]
-pprof = { version = "0.6", features = ["criterion", "flamegraph"] }
+pprof = { version = "=0.6.1", features = ["criterion", "flamegraph"] }
 
 [features]
 transparent-inputs = ["ripemd160", "secp256k1"]
