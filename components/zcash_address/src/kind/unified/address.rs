@@ -136,21 +136,20 @@ mod tests {
 
     /// A strategy to generate an arbitrary valid set of typecodes without
     /// duplication and containing only one of P2sh and P2pkh transparent
-    /// typecodes.
+    /// typecodes. The resulting vector will be sorted in encoding order.
     fn arb_typecodes() -> impl Strategy<Value = Vec<Typecode>> {
-        prop::option::of(arb_transparent_typecode())
-            .prop_flat_map(|transparent| {
-                prop::collection::hash_set(arb_shielded_typecode(), 1..4)
-                    .prop_map(move |xs| xs.into_iter().chain(transparent).collect())
-                    .boxed()
+        prop::option::of(arb_transparent_typecode()).prop_flat_map(|transparent| {
+            prop::collection::hash_set(arb_shielded_typecode(), 1..4).prop_map(move |xs| {
+                let mut typecodes: Vec<_> = xs.into_iter().chain(transparent).collect();
+                typecodes.sort_unstable_by(Typecode::encoding_order);
+                typecodes
             })
-            .prop_shuffle()
+        })
     }
 
     fn arb_unified_address_for_typecodes(
-        mut typecodes: Vec<Typecode>,
+        typecodes: Vec<Typecode>,
     ) -> impl Strategy<Value = Vec<Receiver>> {
-        typecodes.sort_unstable_by(Typecode::encoding_order);
         typecodes
             .into_iter()
             .map(|tc| match tc {

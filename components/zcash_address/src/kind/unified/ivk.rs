@@ -161,19 +161,14 @@ mod tests {
     }
 
     fn arb_shielded_ivk() -> impl Strategy<Value = Vec<Ivk>> {
-        let p = prop_oneof![
+        prop_oneof![
             vec![uniform64().prop_map(Ivk::Sapling)],
             vec![uniform64().prop_map(Ivk::Orchard)],
             vec![
-                uniform64().prop_map(Ivk::Orchard as fn([u8; 64]) -> Ivk),
-                uniform64().prop_map(Ivk::Sapling)
+                uniform64().prop_map(Ivk::Sapling as fn([u8; 64]) -> Ivk),
+                uniform64().prop_map(Ivk::Orchard)
             ],
-        ];
-
-        p.prop_map(|mut items| {
-            items.sort_unstable_by(Ivk::encoding_order);
-            items
-        })
+        ]
     }
 
     fn arb_transparent_ivk() -> impl Strategy<Value = Ivk> {
@@ -185,7 +180,7 @@ mod tests {
             shielded in arb_shielded_ivk(),
             transparent in prop::option::of(arb_transparent_ivk()),
         ) -> Uivk {
-            let mut items: Vec<_> = shielded.into_iter().chain(transparent).collect();
+            let mut items: Vec<_> = transparent.into_iter().chain(shielded).collect();
             items.sort_unstable_by(Ivk::encoding_order);
             Uivk(items)
         }

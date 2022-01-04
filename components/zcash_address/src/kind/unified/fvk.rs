@@ -171,16 +171,11 @@ mod tests {
     }
 
     fn arb_shielded_fvk() -> impl Strategy<Value = Vec<Fvk>> {
-        let p = prop_oneof![
+        prop_oneof![
             vec![arb_sapling_fvk().boxed()],
             vec![arb_orchard_fvk().boxed()],
-            vec![arb_orchard_fvk().boxed(), arb_sapling_fvk().boxed()],
-        ];
-
-        p.prop_map(|mut items| {
-            items.sort_unstable_by(Fvk::encoding_order);
-            items
-        })
+            vec![arb_sapling_fvk().boxed(), arb_orchard_fvk().boxed()],
+        ]
     }
 
     fn arb_transparent_fvk() -> BoxedStrategy<Fvk> {
@@ -192,7 +187,7 @@ mod tests {
             shielded in arb_shielded_fvk(),
             transparent in prop::option::of(arb_transparent_fvk()),
         ) -> Ufvk {
-            let mut items: Vec<_> = shielded.into_iter().chain(transparent).collect();
+            let mut items: Vec<_> = transparent.into_iter().chain(shielded).collect();
             items.sort_unstable_by(Fvk::encoding_order);
             Ufvk(items)
         }
