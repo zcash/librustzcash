@@ -544,6 +544,35 @@ impl ExtendedFullViewingKey {
     pub fn default_address(&self) -> (DiversifierIndex, PaymentAddress) {
         sapling_default_address(&self.fvk, &self.dk)
     }
+
+    pub fn derive_internal(&self) -> Self {
+        let i = Blake2bParams::new()
+            .hash_length(64)
+            .personal(crate::zip32::ZIP32_SAPLING_INT_PERSONALIZATION)
+            .hash(&self.fvk.to_bytes());
+        let i_nsk = jubjub::Fr::from_bytes_wide(prf_expand(i.as_bytes(), &[0x17]).as_array());
+        let r = prf_expand(i.as_bytes(), &[0x18]);
+        let r = r.as_bytes();
+        // PROOF_GENERATION_KEY_GENERATOR = \mathcal{H}^Sapling
+        let nk_internal = PROOF_GENERATION_KEY_GENERATOR * i_nsk + self.fvk.vk.nk;
+        let dk_internal = DiversifierKey(r[..32].try_into().unwrap());
+        let ovk_internal = OutgoingViewingKey(r[32..].try_into().unwrap());
+
+        ExtendedFullViewingKey {
+            depth: self.depth,
+            parent_fvk_tag: self.parent_fvk_tag,
+            child_index: self.child_index,
+            chain_code: self.chain_code,
+            fvk: FullViewingKey {
+                vk: ViewingKey {
+                    ak: self.fvk.vk.ak,
+                    nk: nk_internal,
+                },
+                ovk: ovk_internal,
+            },
+            dk: dk_internal,
+        }
+    }
 }
 
 #[cfg(test)]
