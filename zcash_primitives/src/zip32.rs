@@ -6,6 +6,7 @@ use aes::Aes256;
 use blake2b_simd::Params as Blake2bParams;
 use byteorder::{ByteOrder, LittleEndian, ReadBytesExt, WriteBytesExt};
 use fpe::ff1::{BinaryNumeralString, FF1};
+use std::convert::TryInto;
 use std::ops::AddAssign;
 
 use crate::{
@@ -20,6 +21,7 @@ use crate::sapling::keys::{
 
 pub const ZIP32_SAPLING_MASTER_PERSONALIZATION: &[u8; 16] = b"ZcashIP32Sapling";
 pub const ZIP32_SAPLING_FVFP_PERSONALIZATION: &[u8; 16] = b"ZcashSaplingFVFP";
+pub const ZIP32_SAPLING_INT_PERSONALIZATION: &[u8; 16] = b"Zcash_SaplingInt";
 
 // Common helper functions
 
@@ -408,6 +410,35 @@ impl ExtendedSpendingKey {
     /// the diversifier index that generated that address.
     pub fn default_address(&self) -> (DiversifierIndex, PaymentAddress) {
         ExtendedFullViewingKey::from(self).default_address()
+    }
+
+    pub fn derive_internal(&self) -> Self {
+        let i = {
+            let fvk = FullViewingKey::from_expanded_spending_key(&self.expsk);
+            Blake2bParams::new()
+                .hash_length(64)
+                .personal(crate::zip32::ZIP32_SAPLING_INT_PERSONALIZATION)
+                .hash(&fvk.to_bytes())
+        };
+        let i_nsk = jubjub::Fr::from_bytes_wide(prf_expand(i.as_bytes(), &[0x17]).as_array());
+        let r = prf_expand(i.as_bytes(), &[0x18]);
+        let r = r.as_bytes();
+        let nsk_internal = i_nsk + self.expsk.nsk;
+        let dk_internal = DiversifierKey(r[..32].try_into().unwrap());
+        let ovk_internal = OutgoingViewingKey(r[32..].try_into().unwrap());
+
+        ExtendedSpendingKey {
+            depth: self.depth,
+            parent_fvk_tag: self.parent_fvk_tag,
+            child_index: self.child_index,
+            chain_code: self.chain_code,
+            expsk: ExpandedSpendingKey {
+                ask: self.expsk.ask,
+                nsk: nsk_internal,
+                ovk: ovk_internal,
+            },
+            dk: dk_internal,
+        }
     }
 }
 
