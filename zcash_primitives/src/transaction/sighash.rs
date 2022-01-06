@@ -24,6 +24,7 @@ pub const SIGHASH_ANYONECANPAY: u8 = 0x80;
 pub enum SignableInput<'a> {
     Shielded,
     Transparent {
+        hash_type: u8,
         index: usize,
         script_code: &'a Script,
         value: Amount,
@@ -34,6 +35,17 @@ pub enum SignableInput<'a> {
         precondition: &'a Precondition,
         value: Amount,
     },
+}
+
+impl<'a> SignableInput<'a> {
+    pub fn hash_type(&self) -> u8 {
+        match self {
+            SignableInput::Shielded => SIGHASH_ALL,
+            SignableInput::Transparent { hash_type, .. } => *hash_type,
+            #[cfg(feature = "zfuture")]
+            SignableInput::Tze { .. } => SIGHASH_ALL,
+        }
+    }
 }
 
 pub struct SignatureHash(Blake2bHash);
@@ -70,18 +82,17 @@ pub fn signature_hash<
     A: Authorization<SaplingAuth = SA, TransparentAuth = TA>,
 >(
     tx: &TransactionData<A>,
-    hash_type: u8,
     signable_input: &SignableInput<'a>,
     txid_parts: &TxDigests<Blake2bHash>,
 ) -> SignatureHash {
     SignatureHash(match tx.version {
         TxVersion::Sprout(_) | TxVersion::Overwinter | TxVersion::Sapling => {
-            v4_signature_hash(tx, hash_type, signable_input)
+            v4_signature_hash(tx, signable_input)
         }
 
-        TxVersion::Zip225 => v5_signature_hash(tx, hash_type, signable_input, txid_parts),
+        TxVersion::Zip225 => v5_signature_hash(tx, signable_input, txid_parts),
 
         #[cfg(feature = "zfuture")]
-        TxVersion::ZFuture => v5_signature_hash(tx, hash_type, signable_input, txid_parts),
+        TxVersion::ZFuture => v5_signature_hash(tx, signable_input, txid_parts),
     })
 }

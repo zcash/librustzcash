@@ -202,11 +202,7 @@ impl TransparentAuthorizingContext for Unauthorized {
 #[cfg(feature = "transparent-inputs")]
 impl TransparentAuthorizingContext for Unauthorized {
     fn input_amounts(&self) -> Vec<Amount> {
-        return self
-            .inputs
-            .iter()
-            .map(|txin| txin.coin.value.clone())
-            .collect();
+        return self.inputs.iter().map(|txin| txin.coin.value).collect();
     }
 
     fn input_scripts(&self) -> Vec<Script> {
@@ -230,12 +226,12 @@ impl Bundle<Unauthorized> {
             .inputs
             .iter()
             .enumerate()
-            .map(|(i, info)| {
+            .map(|(index, info)| {
                 let sighash = signature_hash(
                     mtx,
-                    SIGHASH_ALL,
                     &SignableInput::Transparent {
-                        index: i,
+                        hash_type: SIGHASH_ALL,
+                        index,
                         script_code: &info.coin.script_pubkey,
                         value: info.coin.value,
                     },

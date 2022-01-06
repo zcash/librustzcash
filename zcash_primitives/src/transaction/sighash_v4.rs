@@ -140,9 +140,9 @@ pub fn v4_signature_hash<
     A: Authorization<SaplingAuth = SA>,
 >(
     tx: &TransactionData<A>,
-    hash_type: u8,
     signable_input: &SignableInput<'_>,
 ) -> Blake2bHash {
+    let hash_type = signable_input.hash_type();
     if tx.version.has_overwinter() {
         let mut personal = [0; 16];
         (&mut personal[..12]).copy_from_slice(ZCASH_SIGHASH_PERSONALIZATION_PREFIX);
@@ -245,6 +245,7 @@ pub fn v4_signature_hash<
                 index,
                 script_code,
                 value,
+                ..
             } => {
                 if let Some(bundle) = tx.transparent_bundle.as_ref() {
                     let mut data = vec![];

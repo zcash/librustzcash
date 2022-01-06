@@ -127,6 +127,7 @@ fn zip_0143() {
         let tx = Transaction::read(&tv.tx[..], tv.consensus_branch_id).unwrap();
         let signable_input = match tv.transparent_input {
             Some(n) => SignableInput::Transparent {
+                hash_type: tv.hash_type as u8,
                 index: n as usize,
                 script_code: &tv.script_code,
                 value: Amount::from_nonnegative_i64(tv.amount).unwrap(),
@@ -135,7 +136,7 @@ fn zip_0143() {
         };
 
         assert_eq!(
-            v4_signature_hash(tx.deref(), tv.hash_type as u8, &signable_input).as_ref(),
+            v4_signature_hash(tx.deref(), &signable_input).as_ref(),
             tv.sighash
         );
     }
@@ -147,6 +148,7 @@ fn zip_0243() {
         let tx = Transaction::read(&tv.tx[..], tv.consensus_branch_id).unwrap();
         let signable_input = match tv.transparent_input {
             Some(n) => SignableInput::Transparent {
+                hash_type: tv.hash_type as u8,
                 index: n as usize,
                 script_code: &tv.script_code,
                 value: Amount::from_nonnegative_i64(tv.amount).unwrap(),
@@ -155,7 +157,7 @@ fn zip_0243() {
         };
 
         assert_eq!(
-            v4_signature_hash(tx.deref(), tv.hash_type as u8, &signable_input).as_ref(),
+            v4_signature_hash(tx.deref(), &signable_input).as_ref(),
             tv.sighash
         );
     }
@@ -259,25 +261,27 @@ fn zip_0244() {
 
         match tv.transparent_input {
             Some(n) => {
-                let script = Script(tv.script_code.unwrap());
-                let signable_input = SignableInput::Transparent {
+                let value = Amount::from_nonnegative_i64(tv.amount.unwrap()).unwrap();
+                let script_code = &Script(tv.script_code.unwrap());
+                let signable_input = |hash_type| SignableInput::Transparent {
+                    hash_type,
                     index: n as usize,
-                    script_code: &script,
-                    value: Amount::from_nonnegative_i64(tv.amount.unwrap()).unwrap(),
+                    script_code,
+                    value,
                 };
 
                 assert_eq!(
-                    v5_signature_hash(&txdata, SIGHASH_ALL, &signable_input, &txid_parts).as_ref(),
+                    v5_signature_hash(&txdata, &signable_input(SIGHASH_ALL), &txid_parts).as_ref(),
                     &tv.sighash_all
                 );
 
                 assert_eq!(
-                    v5_signature_hash(&txdata, SIGHASH_NONE, &signable_input, &txid_parts).as_ref(),
+                    v5_signature_hash(&txdata, &signable_input(SIGHASH_NONE), &txid_parts).as_ref(),
                     &tv.sighash_none.unwrap()
                 );
 
                 assert_eq!(
-                    v5_signature_hash(&txdata, SIGHASH_SINGLE, &signable_input, &txid_parts)
+                    v5_signature_hash(&txdata, &signable_input(SIGHASH_SINGLE), &txid_parts)
                         .as_ref(),
                     &tv.sighash_single.unwrap()
                 );
@@ -285,8 +289,7 @@ fn zip_0244() {
                 assert_eq!(
                     v5_signature_hash(
                         &txdata,
-                        SIGHASH_ALL | SIGHASH_ANYONECANPAY,
-                        &signable_input,
+                        &signable_input(SIGHASH_ALL | SIGHASH_ANYONECANPAY),
                         &txid_parts,
                     )
                     .as_ref(),
@@ -296,8 +299,7 @@ fn zip_0244() {
                 assert_eq!(
                     v5_signature_hash(
                         &txdata,
-                        SIGHASH_NONE | SIGHASH_ANYONECANPAY,
-                        &signable_input,
+                        &signable_input(SIGHASH_NONE | SIGHASH_ANYONECANPAY),
                         &txid_parts,
                     )
                     .as_ref(),
@@ -307,8 +309,7 @@ fn zip_0244() {
                 assert_eq!(
                     v5_signature_hash(
                         &txdata,
-                        SIGHASH_SINGLE | SIGHASH_ANYONECANPAY,
-                        &signable_input,
+                        &signable_input(SIGHASH_SINGLE | SIGHASH_ANYONECANPAY),
                         &txid_parts,
                     )
                     .as_ref(),
@@ -319,7 +320,7 @@ fn zip_0244() {
                 let signable_input = SignableInput::Shielded;
 
                 assert_eq!(
-                    v5_signature_hash(&txdata, SIGHASH_ALL, &signable_input, &txid_parts).as_ref(),
+                    v5_signature_hash(&txdata, &signable_input, &txid_parts).as_ref(),
                     tv.sighash_all
                 );
             }

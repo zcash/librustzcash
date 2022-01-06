@@ -42,8 +42,8 @@ fn transparent_sig_digest<A: TransparentAuthorizingContext>(
     txid_digests: &TransparentDigests<Blake2bHash>,
     bundle: &transparent::Bundle<A>,
     input: &SignableInput<'_>,
-    hash_type: u8,
 ) -> Blake2bHash {
+    let hash_type = input.hash_type();
     let flag_anyonecanpay = hash_type & SIGHASH_ANYONECANPAY != 0;
     let flag_single = hash_type & SIGHASH_MASK == SIGHASH_SINGLE;
     let flag_none = hash_type & SIGHASH_MASK == SIGHASH_NONE;
@@ -116,6 +116,7 @@ fn transparent_sig_digest<A: TransparentAuthorizingContext>(
         index,
         script_code,
         value,
+        ..
     } = input
     {
         let txin = &bundle.vin[*index];
@@ -172,7 +173,6 @@ pub fn v5_signature_hash<
     A: Authorization<TransparentAuth = TA>,
 >(
     tx: &TransactionData<A>,
-    hash_type: u8,
     signable_input: &SignableInput<'_>,
     txid_parts: &TxDigests<Blake2bHash>,
 ) -> Blake2bHash {
@@ -188,7 +188,6 @@ pub fn v5_signature_hash<
                     .expect("Transparent txid digests are missing."),
                 &bundle,
                 signable_input,
-                hash_type,
             )
         } else {
             hash_transparent_txid_data(txid_parts.transparent_digests.as_ref())
