@@ -448,8 +448,9 @@ fn verify_file_size(
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
             format!(
-                "{} failed validation: expected {} bytes, \
-                 actual {} bytes from {:?}",
+                "{} failed validation:\n\
+                 expected: {} bytes,\n\
+                 actual:   {} bytes from {:?}",
                 name, expected_bytes, file_size, params_source,
             ),
         ));
@@ -479,11 +480,14 @@ fn verify_hash<R: io::Read, W: io::Write>(
         return Err(io::Error::new(
             read_error.kind(),
             format!(
-                "{} failed reading after {} bytes, expected {} bytes from {:?}, error: {:?}",
+                "{} failed reading:\n\
+                 expected: {} bytes,\n\
+                 actual:   {} bytes from {:?},\n\
+                 error: {:?}",
                 name,
-                params_source,
-                hash_reader.byte_count(),
                 expected_bytes,
+                hash_reader.byte_count(),
+                params_source,
                 read_error,
             ),
         ));
@@ -495,8 +499,9 @@ fn verify_hash<R: io::Read, W: io::Write>(
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
             format!(
-                "{} failed validation: expected: {} hashing {} bytes, \
-                 actual: {} hashing {} bytes from {:?}",
+                "{} failed validation:\n\
+                 expected: {} hashing {} bytes,\n\
+                 actual:   {} hashing {} bytes from {:?}",
                 name, expected_hash, expected_bytes, hash, byte_count, params_source,
             ),
         ));
