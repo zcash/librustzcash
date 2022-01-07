@@ -190,7 +190,7 @@ pub fn v5_signature_hash<
                 signable_input,
             )
         } else {
-            hash_transparent_txid_data(txid_parts.transparent_digests.as_ref())
+            hash_transparent_txid_data(None)
         },
         txid_parts.sapling_digest,
         txid_parts.orchard_digest,

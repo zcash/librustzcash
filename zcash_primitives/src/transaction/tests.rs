@@ -8,11 +8,14 @@ use crate::{consensus::BranchId, legacy::Script};
 use super::{
     components::Amount,
     sapling,
-    sighash::{SignableInput, SIGHASH_ALL, SIGHASH_ANYONECANPAY, SIGHASH_NONE, SIGHASH_SINGLE},
+    sighash::{
+        SignableInput, TransparentAuthorizingContext, SIGHASH_ALL, SIGHASH_ANYONECANPAY,
+        SIGHASH_NONE, SIGHASH_SINGLE,
+    },
     sighash_v4::v4_signature_hash,
     sighash_v5::v5_signature_hash,
     testing::arb_tx,
-    transparent::{self, builder::AuthorizingContext},
+    transparent::{self},
     txid::TxIdDigester,
     Authorization, Transaction, TransactionData, TxDigests, TxIn,
 };
@@ -164,22 +167,20 @@ fn zip_0243() {
 }
 
 #[derive(Debug)]
-struct TestTransparentUnauthorized {
+struct TestTransparentAuth {
     input_amounts: Vec<Amount>,
     input_scripts: Vec<Script>,
 }
 
-impl transparent::Authorization for TestTransparentUnauthorized {
-    type ScriptSig = ();
+impl transparent::Authorization for TestTransparentAuth {
+    type ScriptSig = Script;
 }
 
-impl AuthorizingContext for TestTransparentUnauthorized {
-    #[cfg(feature = "transparent-inputs")]
+impl TransparentAuthorizingContext for TestTransparentAuth {
     fn input_amounts(&self) -> Vec<Amount> {
-        self.input_amounts.clone();
+        self.input_amounts.clone()
     }
 
-    #[cfg(feature = "transparent-inputs")]
     fn input_scripts(&self) -> Vec<Script> {
         self.input_scripts.clone()
     }
@@ -188,7 +189,7 @@ impl AuthorizingContext for TestTransparentUnauthorized {
 struct TestUnauthorized;
 
 impl Authorization for TestUnauthorized {
-    type TransparentAuth = TestTransparentUnauthorized;
+    type TransparentAuth = TestTransparentAuth;
     type SaplingAuth = sapling::Authorized;
     type OrchardAuth = orchard::bundle::Authorized;
 
@@ -208,32 +209,31 @@ fn zip_0244() {
 
         let txdata = tx.deref();
 
-        let input_amounts = if tv.transparent_input.is_some() {
-            vec![Amount::from_nonnegative_i64(tv.amount.unwrap()).unwrap()]
-        } else {
-            vec![]
-        };
-        let input_scripts = if tv.transparent_input.is_some() {
-            vec![Script(tv.script_code.clone().unwrap())]
-        } else {
-            vec![]
-        };
+        let input_amounts = tv
+            .amounts
+            .iter()
+            .map(|amount| Amount::from_nonnegative_i64(*amount).unwrap())
+            .collect();
+        let input_scripts = tv.script_codes.iter().map(|s| Script(s.clone())).collect();
 
         let test_bundle = txdata
             .transparent_bundle
             .as_ref()
             .map(|b| transparent::Bundle {
+                // we have to do this map/clone to make the types line up, since the
+                // Authorization::ScriptSig type is bound to transparent::Authorized, and we need
+                // it to be bound to TestTransparentAuth.
                 vin: b
                     .vin
                     .iter()
-                    .map(|v| TxIn {
-                        prevout: v.prevout.clone(),
-                        script_sig: (),
-                        sequence: v.sequence,
+                    .map(|vin| TxIn {
+                        prevout: vin.prevout.clone(),
+                        script_sig: vin.script_sig.clone(),
+                        sequence: vin.sequence,
                     })
                     .collect(),
                 vout: b.vout.clone(),
-                authorization: TestTransparentUnauthorized {
+                authorization: TestTransparentAuth {
                     input_amounts,
                     input_scripts,
                 },
@@ -259,53 +259,58 @@ fn zip_0244() {
     for tv in self::data::zip_0244::make_test_vectors() {
         let (txdata, txid_parts) = to_test_txdata(&tv);
 
-        match tv.transparent_input {
-            Some(n) => {
-                let value = Amount::from_nonnegative_i64(tv.amount.unwrap()).unwrap();
-                let script_code = &Script(tv.script_code.unwrap());
-                let signable_input = |hash_type| SignableInput::Transparent {
-                    hash_type,
-                    index: n as usize,
-                    script_code,
-                    value,
-                };
+        if let Some(index) = tv.transparent_input {
+            let bundle = txdata.transparent_bundle().unwrap();
+            let value = bundle.authorization.input_amounts[index];
+            let script_code = &bundle.authorization.input_scripts[index];
+            let signable_input = |hash_type| SignableInput::Transparent {
+                hash_type,
+                index,
+                script_code,
+                value,
+            };
 
-                assert_eq!(
-                    v5_signature_hash(&txdata, &signable_input(SIGHASH_ALL), &txid_parts).as_ref(),
-                    &tv.sighash_all
-                );
+            assert_eq!(
+                v5_signature_hash(&txdata, &signable_input(SIGHASH_ALL), &txid_parts).as_ref(),
+                &tv.sighash_all.unwrap()
+            );
 
-                assert_eq!(
-                    v5_signature_hash(&txdata, &signable_input(SIGHASH_NONE), &txid_parts).as_ref(),
-                    &tv.sighash_none.unwrap()
-                );
+            assert_eq!(
+                v5_signature_hash(&txdata, &signable_input(SIGHASH_NONE), &txid_parts).as_ref(),
+                &tv.sighash_none.unwrap()
+            );
 
+            if index < bundle.vout.len() {
                 assert_eq!(
                     v5_signature_hash(&txdata, &signable_input(SIGHASH_SINGLE), &txid_parts)
                         .as_ref(),
                     &tv.sighash_single.unwrap()
                 );
+            } else {
+                assert_eq!(tv.sighash_single, None);
+            }
 
-                assert_eq!(
-                    v5_signature_hash(
-                        &txdata,
-                        &signable_input(SIGHASH_ALL | SIGHASH_ANYONECANPAY),
-                        &txid_parts,
-                    )
-                    .as_ref(),
-                    &tv.sighash_all_anyone.unwrap()
-                );
+            assert_eq!(
+                v5_signature_hash(
+                    &txdata,
+                    &signable_input(SIGHASH_ALL | SIGHASH_ANYONECANPAY),
+                    &txid_parts,
+                )
+                .as_ref(),
+                &tv.sighash_all_anyone.unwrap()
+            );
 
-                assert_eq!(
-                    v5_signature_hash(
-                        &txdata,
-                        &signable_input(SIGHASH_NONE | SIGHASH_ANYONECANPAY),
-                        &txid_parts,
-                    )
-                    .as_ref(),
-                    &tv.sighash_none_anyone.unwrap()
-                );
+            assert_eq!(
+                v5_signature_hash(
+                    &txdata,
+                    &signable_input(SIGHASH_NONE | SIGHASH_ANYONECANPAY),
+                    &txid_parts,
+                )
+                .as_ref(),
+                &tv.sighash_none_anyone.unwrap()
+            );
 
+            if index < bundle.vout.len() {
                 assert_eq!(
                     v5_signature_hash(
                         &txdata,
@@ -315,15 +320,14 @@ fn zip_0244() {
                     .as_ref(),
                     &tv.sighash_single_anyone.unwrap()
                 );
-            }
-            _ => {
-                let signable_input = SignableInput::Shielded;
-
-                assert_eq!(
-                    v5_signature_hash(&txdata, &signable_input, &txid_parts).as_ref(),
-                    tv.sighash_all
-                );
+            } else {
+                assert_eq!(tv.sighash_single_anyone, None);
             }
         };
+
+        assert_eq!(
+            v5_signature_hash(&txdata, &SignableInput::Shielded, &txid_parts).as_ref(),
+            tv.sighash_shielded
+        );
     }
 }
