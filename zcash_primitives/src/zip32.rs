@@ -513,6 +513,11 @@ impl ExtendedFullViewingKey {
     pub fn default_address(&self) -> (DiversifierIndex, PaymentAddress) {
         sapling_default_address(&self.fvk, &self.dk)
     }
+
+    /// Returns the chain code.
+    pub fn chain_code(&self) -> ChainCode {
+        self.chain_code
+    }
 }
 
 #[cfg(test)]

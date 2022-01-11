@@ -2,7 +2,7 @@ use std::fmt::Debug;
 use zcash_primitives::{
     consensus::{self, NetworkUpgrade},
     memo::MemoBytes,
-    sapling::prover::TxProver,
+    sapling::{keys::OutgoingViewingKey, prover::TxProver},
     transaction::{
         builder::Builder,
         components::{amount::DEFAULT_FEE, Amount},
@@ -398,13 +398,14 @@ where
         .and_then(|x| x.ok_or_else(|| Error::ScanRequired.into()))?;
 
     // derive the t-address for the extpubkey at child index 0
-    let taddr = sk.to_external_pubkey().to_address();
+    let t_ext_pubkey = sk.to_external_pubkey();
+    let taddr = t_ext_pubkey.to_address();
+    let ovk = OutgoingViewingKey(t_ext_pubkey.internal_ovk().as_bytes());
 
     // derive own shielded address from the provided extended spending key
     // TODO: this should become the internal change address derived from
     // the wallet's UFVK
     let z_address = extfvk.default_address().1;
-    let ovk = extfvk.fvk.ovk;
 
     // get UTXOs from DB
     let utxos = wallet_db.get_unspent_transparent_outputs(&taddr, latest_anchor)?;
