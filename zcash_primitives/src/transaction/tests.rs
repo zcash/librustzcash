@@ -133,6 +133,7 @@ fn zip_0143() {
                 hash_type: tv.hash_type as u8,
                 index: n as usize,
                 script_code: &tv.script_code,
+                script_pubkey: &tv.script_code,
                 value: Amount::from_nonnegative_i64(tv.amount).unwrap(),
             },
             _ => SignableInput::Shielded,
@@ -154,6 +155,7 @@ fn zip_0243() {
                 hash_type: tv.hash_type as u8,
                 index: n as usize,
                 script_code: &tv.script_code,
+                script_pubkey: &tv.script_code,
                 value: Amount::from_nonnegative_i64(tv.amount).unwrap(),
             },
             _ => SignableInput::Shielded,
@@ -169,7 +171,7 @@ fn zip_0243() {
 #[derive(Debug)]
 struct TestTransparentAuth {
     input_amounts: Vec<Amount>,
-    input_scripts: Vec<Script>,
+    input_scriptpubkeys: Vec<Script>,
 }
 
 impl transparent::Authorization for TestTransparentAuth {
@@ -181,8 +183,8 @@ impl TransparentAuthorizingContext for TestTransparentAuth {
         self.input_amounts.clone()
     }
 
-    fn input_scripts(&self) -> Vec<Script> {
-        self.input_scripts.clone()
+    fn input_scriptpubkeys(&self) -> Vec<Script> {
+        self.input_scriptpubkeys.clone()
     }
 }
 
@@ -214,7 +216,7 @@ fn zip_0244() {
             .iter()
             .map(|amount| Amount::from_nonnegative_i64(*amount).unwrap())
             .collect();
-        let input_scripts = tv.script_codes.iter().map(|s| Script(s.clone())).collect();
+        let input_scriptpubkeys = tv.script_codes.iter().map(|s| Script(s.clone())).collect();
 
         let test_bundle = txdata
             .transparent_bundle
@@ -235,7 +237,7 @@ fn zip_0244() {
                 vout: b.vout.clone(),
                 authorization: TestTransparentAuth {
                     input_amounts,
-                    input_scripts,
+                    input_scriptpubkeys,
                 },
             });
 
@@ -262,11 +264,12 @@ fn zip_0244() {
         if let Some(index) = tv.transparent_input {
             let bundle = txdata.transparent_bundle().unwrap();
             let value = bundle.authorization.input_amounts[index];
-            let script_code = &bundle.authorization.input_scripts[index];
+            let script_code = &bundle.authorization.input_scriptpubkeys[index];
             let signable_input = |hash_type| SignableInput::Transparent {
                 hash_type,
                 index,
                 script_code,
+                script_pubkey: script_code,
                 value,
             };
 

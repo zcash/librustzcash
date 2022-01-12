@@ -27,6 +27,7 @@ pub enum SignableInput<'a> {
         hash_type: u8,
         index: usize,
         script_code: &'a Script,
+        script_pubkey: &'a Script,
         value: Amount,
     },
     #[cfg(feature = "zfuture")]
@@ -64,11 +65,11 @@ pub trait TransparentAuthorizingContext: transparent::Authorization {
     /// without requiring the full data of the previous transactions
     /// providing these inputs.
     fn input_amounts(&self) -> Vec<Amount>;
-    /// Returns the list of all transparent input scripts, provided
+    /// Returns the list of all transparent input scriptPubKeys, provided
     /// so that wallets can commit to the transparent input breakdown
     /// without requiring the full data of the previous transactions
     /// providing these inputs.
-    fn input_scripts(&self) -> Vec<Script>;
+    fn input_scriptpubkeys(&self) -> Vec<Script>;
 }
 
 /// Computes the signature hash for an input to a transaction, given

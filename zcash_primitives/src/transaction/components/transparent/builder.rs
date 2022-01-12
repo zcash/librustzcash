@@ -194,7 +194,7 @@ impl TransparentAuthorizingContext for Unauthorized {
         vec![]
     }
 
-    fn input_scripts(&self) -> Vec<Script> {
+    fn input_scriptpubkeys(&self) -> Vec<Script> {
         vec![]
     }
 }
@@ -205,7 +205,7 @@ impl TransparentAuthorizingContext for Unauthorized {
         return self.inputs.iter().map(|txin| txin.coin.value).collect();
     }
 
-    fn input_scripts(&self) -> Vec<Script> {
+    fn input_scriptpubkeys(&self) -> Vec<Script> {
         return self
             .inputs
             .iter()
@@ -232,7 +232,8 @@ impl Bundle<Unauthorized> {
                     &SignableInput::Transparent {
                         hash_type: SIGHASH_ALL,
                         index,
-                        script_code: &info.coin.script_pubkey,
+                        script_code: &info.coin.script_pubkey, // for p2pkh, always the same as script_pubkey
+                        script_pubkey: &info.coin.script_pubkey,
                         value: info.coin.value,
                     },
                     txid_parts_cache,

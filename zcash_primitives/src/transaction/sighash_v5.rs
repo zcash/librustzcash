@@ -76,7 +76,7 @@ fn transparent_sig_digest<A: TransparentAuthorizingContext>(
             if flag_anyonecanpay {
                 vec![]
             } else {
-                bundle.authorization.input_scripts()
+                bundle.authorization.input_scriptpubkeys()
             },
             |w, script| script.write(w),
         )
@@ -114,7 +114,7 @@ fn transparent_sig_digest<A: TransparentAuthorizingContext>(
     let mut ch = hasher(ZCASH_TRANSPARENT_INPUT_HASH_PERSONALIZATION);
     if let SignableInput::Transparent {
         index,
-        script_code,
+        script_pubkey,
         value,
         ..
     } = input
@@ -122,7 +122,7 @@ fn transparent_sig_digest<A: TransparentAuthorizingContext>(
         let txin = &bundle.vin[*index];
         txin.prevout.write(&mut ch).unwrap();
         ch.write_all(&value.to_i64_le_bytes()).unwrap();
-        script_code.write(&mut ch).unwrap();
+        script_pubkey.write(&mut ch).unwrap();
         ch.write_u32::<LittleEndian>(txin.sequence).unwrap();
     }
     let per_input_digest = ch.finalize();
