@@ -216,7 +216,11 @@ fn zip_0244() {
             .iter()
             .map(|amount| Amount::from_nonnegative_i64(*amount).unwrap())
             .collect();
-        let input_scriptpubkeys = tv.script_codes.iter().map(|s| Script(s.clone())).collect();
+        let input_scriptpubkeys = tv
+            .script_pubkeys
+            .iter()
+            .map(|s| Script(s.clone()))
+            .collect();
 
         let test_bundle = txdata
             .transparent_bundle
@@ -264,12 +268,12 @@ fn zip_0244() {
         if let Some(index) = tv.transparent_input {
             let bundle = txdata.transparent_bundle().unwrap();
             let value = bundle.authorization.input_amounts[index];
-            let script_code = &bundle.authorization.input_scriptpubkeys[index];
+            let script_pubkey = &bundle.authorization.input_scriptpubkeys[index];
             let signable_input = |hash_type| SignableInput::Transparent {
                 hash_type,
                 index,
-                script_code,
-                script_pubkey: script_code,
+                script_code: script_pubkey,
+                script_pubkey,
                 value,
             };
 
