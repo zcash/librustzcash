@@ -39,7 +39,7 @@ proptest = { version = "1.0.0", optional = true }
 rand = "0.8"
 rand_core = "0.6"
 ripemd160 = { version = "0.9", optional = true }
-secp256k1 = { version = "0.20", optional = true }
+secp256k1 = "0.20"
 sha2 = "0.9"
 subtle = "2.2.3"
 zcash_encoding = { version = "0.0", path = "../components/zcash_encoding" }
@@ -59,7 +59,7 @@ orchard = { version = "=0.1.0-beta.1", features = ["test-dependencies"] }
 pprof = { version = "=0.6.1", features = ["criterion", "flamegraph"] }
 
 [features]
-transparent-inputs = ["ripemd160", "secp256k1"]
+transparent-inputs = ["ripemd160"]
 test-dependencies = ["proptest", "orchard/test-dependencies"]
 zfuture = []
 
