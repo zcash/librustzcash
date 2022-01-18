@@ -200,7 +200,7 @@ fn transparent_digests<A: transparent::Authorization>(
     bundle: &transparent::Bundle<A>,
 ) -> TransparentDigests<Blake2bHash> {
     TransparentDigests {
-        prevout_digest: transparent_prevout_hash(&bundle.vin),
+        prevouts_digest: transparent_prevout_hash(&bundle.vin),
         sequence_digest: transparent_sequence_hash(&bundle.vin),
         outputs_digest: transparent_outputs_hash(&bundle.vout),
     }
@@ -243,7 +243,7 @@ pub(crate) fn hash_transparent_txid_data(
 ) -> Blake2bHash {
     let mut h = hasher(ZCASH_TRANSPARENT_HASH_PERSONALIZATION);
     if let Some(d) = t_digests {
-        h.write_all(d.prevout_digest.as_bytes()).unwrap();
+        h.write_all(d.prevouts_digest.as_bytes()).unwrap();
         h.write_all(d.sequence_digest.as_bytes()).unwrap();
         h.write_all(d.outputs_digest.as_bytes()).unwrap();
     }

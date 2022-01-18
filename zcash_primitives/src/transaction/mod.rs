@@ -928,7 +928,7 @@ impl Transaction {
 
 #[derive(Clone)]
 pub struct TransparentDigests<A> {
-    pub prevout_digest: A,
+    pub prevouts_digest: A,
     pub sequence_digest: A,
     pub outputs_digest: A,
 }
