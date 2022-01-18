@@ -23,5 +23,3 @@ proptest = "1"
 
 [lib]
 bench = false
-
-[features]
