@@ -16,8 +16,5 @@ edition = "2018"
 byteorder = "1"
 nonempty = "0.7"
 
-[dev-dependencies]
-proptest = "1"
-
 [lib]
 bench = false

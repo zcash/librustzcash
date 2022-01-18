@@ -32,11 +32,9 @@ hex = "0.4"
 incrementalmerkletree = "0.2"
 jubjub = "0.8"
 lazy_static = "1"
-log = "0.4"
 memuse = "0.2"
 nonempty = "0.7"
 orchard = "=0.1.0-beta.1"
-pasta_curves = "0.2.1"
 proptest = { version = "1.0.0", optional = true }
 rand = "0.8"
 rand_core = "0.6"
@@ -53,7 +51,6 @@ features = ["pre-zip-212"]
 
 [dev-dependencies]
 criterion = "0.3"
-hex-literal = "0.3"
 proptest = "1.0.0"
 rand_xorshift = "0.3"
 orchard = { version = "=0.1.0-beta.1", features = ["test-dependencies"] }

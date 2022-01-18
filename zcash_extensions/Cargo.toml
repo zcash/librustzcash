@@ -15,10 +15,8 @@ zcash_primitives = { version = "0.5", path = "../zcash_primitives", features = [
 [dev-dependencies]
 ff = "0.11"
 jubjub = "0.8"
-orchard = "=0.1.0-beta.1"
 rand_core = "0.6"
 zcash_proofs = { version = "0.5", path = "../zcash_proofs" }
-secp256k1 = { version = "0.20", features = ["rand", "bitcoin_hashes"] }
 
 [features]
 transparent-inputs = []
