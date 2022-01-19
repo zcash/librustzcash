@@ -1,6 +1,6 @@
 <!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_primitives/src/transaction/txid.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>txid.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" type="text/css" href="../../../normalize.css"><link rel="stylesheet" type="text/css" href="../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" type="text/css" href="../../../ayu.css" disabled><link rel="stylesheet" type="text/css" href="../../../dark.css" disabled><link rel="stylesheet" type="text/css" href="../../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../../storage.js"></script><script src="../../../crates.js"></script><script defer src="../../../main.js"></script><script defer src="../../../source-script.js"></script><script defer src="../../../source-files.js"></script>
     <noscript><link rel="stylesheet" href="../../../noscript.css"></noscript><link rel="alternate icon" type="image/png" href="../../../favicon-16x16.png"><link rel="alternate icon" type="image/png" href="../../../favicon-32x32.png"><link rel="icon" type="image/svg+xml" href="../../../favicon.svg"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="sidebar-menu" role="button">&#9776;</div><a class="sidebar-logo" href="../../../zcash_primitives/index.html"><div class="logo-container"><img class="rust-logo" src="../../../rust-logo.svg" alt="logo"></div>
-        </a></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../../zcash_primitives/index.html"><img class="rust-logo" src="../../../rust-logo.svg" alt="logo"></a><nav class="sub"><div class="theme-picker"><button id="theme-picker" aria-label="Pick another theme!" aria-haspopup="menu" title="themes"><img width="18" height="18" alt="Pick another theme!" src="../../../brush.svg"></button><div id="theme-choices" role="menu"></div></div><form class="search-form"><div class="search-container"><div>
+        </a></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../../zcash_primitives/index.html"><img class="rust-logo" src="../../../rust-logo.svg" alt="logo"></a><nav class="sub"><div class="theme-picker hidden"><button id="theme-picker" aria-label="Pick another theme!" aria-haspopup="menu" title="themes"><img width="18" height="18" alt="Pick another theme!" src="../../../brush.svg"></button><div id="theme-choices" role="menu"></div></div><form class="search-form"><div class="search-container"><div>
                                 <input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"></div><button type="button" id="help-button" title="help">?</button><a id="settings-menu" href="../../../settings.html" title="settings"><img width="18" height="18" alt="Change settings" src="../../../wheel.svg"></a></div></form></nav></div><section id="main-content" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">  1</span>
 <span id="2">  2</span>
 <span id="3">  3</span>
@@ -528,6 +528,12 @@
 <span id="525">525</span>
 <span id="526">526</span>
 <span id="527">527</span>
+<span id="528">528</span>
+<span id="529">529</span>
+<span id="530">530</span>
+<span id="531">531</span>
+<span id="532">532</span>
+<span id="533">533</span>
 </pre><pre class="rust"><code><span class="kw">use</span> <span class="ident">std::borrow::Borrow</span>;
 <span class="kw">use</span> <span class="ident">std::convert::TryFrom</span>;
 <span class="kw">use</span> <span class="ident">std::io::Write</span>;
@@ -560,7 +566,7 @@
 
 <span class="comment">// TxId level 1 node personalization</span>
 <span class="kw">const</span> <span class="ident">ZCASH_HEADERS_HASH_PERSONALIZATION</span>: <span class="kw-2">&amp;</span>[<span class="ident">u8</span>; <span class="number">16</span>] <span class="op">=</span> <span class="string">b&quot;ZTxIdHeadersHash&quot;</span>;
-<span class="kw">const</span> <span class="ident">ZCASH_TRANSPARENT_HASH_PERSONALIZATION</span>: <span class="kw-2">&amp;</span>[<span class="ident">u8</span>; <span class="number">16</span>] <span class="op">=</span> <span class="string">b&quot;ZTxIdTranspaHash&quot;</span>;
+<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">const</span> <span class="ident">ZCASH_TRANSPARENT_HASH_PERSONALIZATION</span>: <span class="kw-2">&amp;</span>[<span class="ident">u8</span>; <span class="number">16</span>] <span class="op">=</span> <span class="string">b&quot;ZTxIdTranspaHash&quot;</span>;
 <span class="kw">const</span> <span class="ident">ZCASH_SAPLING_HASH_PERSONALIZATION</span>: <span class="kw-2">&amp;</span>[<span class="ident">u8</span>; <span class="number">16</span>] <span class="op">=</span> <span class="string">b&quot;ZTxIdSaplingHash&quot;</span>;
 <span class="attribute">#[<span class="ident">cfg</span>(<span class="ident">feature</span> <span class="op">=</span> <span class="string">&quot;zfuture&quot;</span>)]</span>
 <span class="kw">const</span> <span class="ident">ZCASH_TZE_HASH_PERSONALIZATION</span>: <span class="kw-2">&amp;</span>[<span class="ident">u8</span>; <span class="number">16</span>] <span class="op">=</span> <span class="string">b&quot;ZTxIdTZE____Hash&quot;</span>;
@@ -660,6 +666,8 @@
     <span class="ident">h</span>.<span class="ident">finalize</span>()
 }
 
+<span class="doccomment">/// Implements [ZIP 244 section T.3a](https://zips.z.cash/zip-0244#t-3a-sapling-spends-digest)</span>
+<span class="doccomment">///</span>
 <span class="doccomment">/// Write disjoint parts of each Sapling shielded spend to a pair of hashes:</span>
 <span class="doccomment">/// * \[nullifier*\] - personalized with ZCASH_SAPLING_SPENDS_COMPACT_HASH_PERSONALIZATION</span>
 <span class="doccomment">/// * \[(cv, anchor, rk, zkproof)*\] - personalized with ZCASH_SAPLING_SPENDS_NONCOMPACT_HASH_PERSONALIZATION</span>
@@ -689,6 +697,8 @@
     <span class="ident">h</span>.<span class="ident">finalize</span>()
 }
 
+<span class="doccomment">/// Implements [ZIP 244 section T.3b](https://zips.z.cash/zip-0244#t-3b-sapling-outputs-digest)</span>
+<span class="doccomment">///</span>
 <span class="doccomment">/// Write disjoint parts of each Sapling shielded output as 3 separate hashes:</span>
 <span class="doccomment">/// * \[(cmu, epk, enc_ciphertext\[..52\])*\] personalized with ZCASH_SAPLING_OUTPUTS_COMPACT_HASH_PERSONALIZATION</span>
 <span class="doccomment">/// * \[enc_ciphertext\[52..564\]*\] (memo ciphertexts) personalized with ZCASH_SAPLING_OUTPUTS_MEMOS_HASH_PERSONALIZATION</span>
@@ -726,10 +736,9 @@
     <span class="ident">bundle</span>: <span class="kw-2">&amp;</span><span class="ident">transparent::Bundle</span><span class="op">&lt;</span><span class="ident">A</span><span class="op">&gt;</span>,
 ) -&gt; <span class="ident">TransparentDigests</span><span class="op">&lt;</span><span class="ident">Blake2bHash</span><span class="op">&gt;</span> {
     <span class="ident">TransparentDigests</span> {
-        <span class="ident">prevout_digest</span>: <span class="ident">transparent_prevout_hash</span>(<span class="kw-2">&amp;</span><span class="ident">bundle</span>.<span class="ident">vin</span>),
+        <span class="ident">prevouts_digest</span>: <span class="ident">transparent_prevout_hash</span>(<span class="kw-2">&amp;</span><span class="ident">bundle</span>.<span class="ident">vin</span>),
         <span class="ident">sequence_digest</span>: <span class="ident">transparent_sequence_hash</span>(<span class="kw-2">&amp;</span><span class="ident">bundle</span>.<span class="ident">vin</span>),
         <span class="ident">outputs_digest</span>: <span class="ident">transparent_outputs_hash</span>(<span class="kw-2">&amp;</span><span class="ident">bundle</span>.<span class="ident">vout</span>),
-        <span class="ident">per_input_digest</span>: <span class="prelude-val">None</span>,
     }
 }
 
@@ -743,6 +752,7 @@
     }
 }
 
+<span class="doccomment">/// Implements [ZIP 244 section T.1](https://zips.z.cash/zip-0244#t-1-header-digest)</span>
 <span class="kw">fn</span> <span class="ident">hash_header_txid_data</span>(
     <span class="ident">version</span>: <span class="ident">TxVersion</span>,
     <span class="comment">// we commit to the consensus branch ID with the header</span>
@@ -763,19 +773,20 @@
     <span class="ident">h</span>.<span class="ident">finalize</span>()
 }
 
-<span class="kw">fn</span> <span class="ident">hash_transparent_txid_data</span>(<span class="ident">t_digests</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="kw-2">&amp;</span><span class="ident">TransparentDigests</span><span class="op">&lt;</span><span class="ident">Blake2bHash</span><span class="op">&gt;</span><span class="op">&gt;</span>) -&gt; <span class="ident">Blake2bHash</span> {
+<span class="doccomment">/// Implements [ZIP 244 section T.2](https://zips.z.cash/zip-0244#t-2-transparent-digest)</span>
+<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">hash_transparent_txid_data</span>(
+    <span class="ident">t_digests</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="kw-2">&amp;</span><span class="ident">TransparentDigests</span><span class="op">&lt;</span><span class="ident">Blake2bHash</span><span class="op">&gt;</span><span class="op">&gt;</span>,
+) -&gt; <span class="ident">Blake2bHash</span> {
     <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">h</span> <span class="op">=</span> <span class="ident">hasher</span>(<span class="ident">ZCASH_TRANSPARENT_HASH_PERSONALIZATION</span>);
     <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">d</span>) <span class="op">=</span> <span class="ident">t_digests</span> {
-        <span class="ident">h</span>.<span class="ident">write_all</span>(<span class="ident">d</span>.<span class="ident">prevout_digest</span>.<span class="ident">as_bytes</span>()).<span class="ident">unwrap</span>();
+        <span class="ident">h</span>.<span class="ident">write_all</span>(<span class="ident">d</span>.<span class="ident">prevouts_digest</span>.<span class="ident">as_bytes</span>()).<span class="ident">unwrap</span>();
         <span class="ident">h</span>.<span class="ident">write_all</span>(<span class="ident">d</span>.<span class="ident">sequence_digest</span>.<span class="ident">as_bytes</span>()).<span class="ident">unwrap</span>();
         <span class="ident">h</span>.<span class="ident">write_all</span>(<span class="ident">d</span>.<span class="ident">outputs_digest</span>.<span class="ident">as_bytes</span>()).<span class="ident">unwrap</span>();
-        <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">s</span>) <span class="op">=</span> <span class="ident">d</span>.<span class="ident">per_input_digest</span> {
-            <span class="ident">h</span>.<span class="ident">write_all</span>(<span class="ident">s</span>.<span class="ident">as_bytes</span>()).<span class="ident">unwrap</span>();
-        };
     }
     <span class="ident">h</span>.<span class="ident">finalize</span>()
 }
 
+<span class="doccomment">/// Implements [ZIP 244 section T.3](https://zips.z.cash/zip-0244#t-3-sapling-digest)</span>
 <span class="kw">fn</span> <span class="ident">hash_sapling_txid_data</span><span class="op">&lt;</span><span class="ident">A</span>: <span class="ident">sapling::Authorization</span><span class="op">&gt;</span>(<span class="ident">bundle</span>: <span class="kw-2">&amp;</span><span class="ident">sapling::Bundle</span><span class="op">&lt;</span><span class="ident">A</span><span class="op">&gt;</span>) -&gt; <span class="ident">Blake2bHash</span> {
     <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">h</span> <span class="op">=</span> <span class="ident">hasher</span>(<span class="ident">ZCASH_SAPLING_HASH_PERSONALIZATION</span>);
     <span class="kw">if</span> <span class="op">!</span>(<span class="ident">bundle</span>.<span class="ident">shielded_spends</span>.<span class="ident">is_empty</span>() <span class="op">&amp;&amp;</span> <span class="ident">bundle</span>.<span class="ident">shielded_outputs</span>.<span class="ident">is_empty</span>()) {
@@ -808,13 +819,15 @@
     <span class="ident">h</span>.<span class="ident">finalize</span>()
 }
 
+<span class="doccomment">/// A TransactionDigest implementation that commits to all of the effecting</span>
+<span class="doccomment">/// data of a transaction to produce a nonmalleable transaction identifier.</span>
+<span class="doccomment">///</span>
+<span class="doccomment">/// This expects and relies upon the existence of canonical encodings for</span>
+<span class="doccomment">/// each effecting component of a transaction.</span>
+<span class="doccomment">///</span>
+<span class="doccomment">/// This implements the [TxId Digest section of ZIP 244](https://zips.z.cash/zip-0244#txid-digest)</span>
 <span class="kw">pub</span> <span class="kw">struct</span> <span class="ident">TxIdDigester</span>;
 
-<span class="comment">// A TransactionDigest implementation that commits to all of the effecting</span>
-<span class="comment">// data of a transaction to produce a nonmalleable transaction identifier.</span>
-<span class="comment">//</span>
-<span class="comment">// This expects and relies upon the existence of canonical encodings for</span>
-<span class="comment">// each effecting component of a transaction.</span>
 <span class="kw">impl</span><span class="op">&lt;</span><span class="ident">A</span>: <span class="ident">Authorization</span><span class="op">&gt;</span> <span class="ident">TransactionDigest</span><span class="op">&lt;</span><span class="ident">A</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">TxIdDigester</span> {
     <span class="kw">type</span> <span class="ident">HeaderDigest</span> <span class="op">=</span> <span class="ident">Blake2bHash</span>;
     <span class="kw">type</span> <span class="ident">TransparentDigest</span> <span class="op">=</span> <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">TransparentDigests</span><span class="op">&lt;</span><span class="ident">Blake2bHash</span><span class="op">&gt;</span><span class="op">&gt;</span>;
@@ -885,7 +898,7 @@
     <span class="ident">_txversion</span>: <span class="ident">TxVersion</span>,
     <span class="ident">consensus_branch_id</span>: <span class="ident">BranchId</span>,
     <span class="ident">header_digest</span>: <span class="ident">Blake2bHash</span>,
-    <span class="ident">transparent_digests</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="kw-2">&amp;</span><span class="ident">TransparentDigests</span><span class="op">&lt;</span><span class="ident">Blake2bHash</span><span class="op">&gt;</span><span class="op">&gt;</span>,
+    <span class="ident">transparent_digest</span>: <span class="ident">Blake2bHash</span>,
     <span class="ident">sapling_digest</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">Blake2bHash</span><span class="op">&gt;</span>,
     <span class="ident">orchard_digest</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">Blake2bHash</span><span class="op">&gt;</span>,
     <span class="attribute">#[<span class="ident">cfg</span>(<span class="ident">feature</span> <span class="op">=</span> <span class="string">&quot;zfuture&quot;</span>)]</span> <span class="ident">tze_digests</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="kw-2">&amp;</span><span class="ident">TzeDigests</span><span class="op">&lt;</span><span class="ident">Blake2bHash</span><span class="op">&gt;</span><span class="op">&gt;</span>,
@@ -898,8 +911,7 @@
 
     <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">h</span> <span class="op">=</span> <span class="ident">hasher</span>(<span class="kw-2">&amp;</span><span class="ident">personal</span>);
     <span class="ident">h</span>.<span class="ident">write_all</span>(<span class="ident">header_digest</span>.<span class="ident">as_bytes</span>()).<span class="ident">unwrap</span>();
-    <span class="ident">h</span>.<span class="ident">write_all</span>(<span class="ident">hash_transparent_txid_data</span>(<span class="ident">transparent_digests</span>).<span class="ident">as_bytes</span>())
-        .<span class="ident">unwrap</span>();
+    <span class="ident">h</span>.<span class="ident">write_all</span>(<span class="ident">transparent_digest</span>.<span class="ident">as_bytes</span>()).<span class="ident">unwrap</span>();
     <span class="ident">h</span>.<span class="ident">write_all</span>(
         <span class="ident">sapling_digest</span>
             .<span class="ident">unwrap_or_else</span>(<span class="ident">hash_sapling_txid_empty</span>)
@@ -931,7 +943,7 @@
         <span class="ident">txversion</span>,
         <span class="ident">consensus_branch_id</span>,
         <span class="ident">digests</span>.<span class="ident">header_digest</span>,
-        <span class="ident">digests</span>.<span class="ident">transparent_digests</span>.<span class="ident">as_ref</span>(),
+        <span class="ident">hash_transparent_txid_data</span>(<span class="ident">digests</span>.<span class="ident">transparent_digests</span>.<span class="ident">as_ref</span>()),
         <span class="ident">digests</span>.<span class="ident">sapling_digest</span>,
         <span class="ident">digests</span>.<span class="ident">orchard_digest</span>,
         <span class="attribute">#[<span class="ident">cfg</span>(<span class="ident">feature</span> <span class="op">=</span> <span class="string">&quot;zfuture&quot;</span>)]</span>
@@ -1056,5 +1068,5 @@
     }
 }
 </code></pre></div>
-</section><section id="search" class="content hidden"></section></div></main><div id="rustdoc-vars" data-root-path="../../../" data-current-crate="zcash_primitives" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.60.0-nightly (ee5d8d37b 2022-01-17)" ></div>
+</section><section id="search" class="content hidden"></section></div></main><div id="rustdoc-vars" data-root-path="../../../" data-current-crate="zcash_primitives" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.60.0-nightly (9ad5d82f8 2022-01-18)" ></div>
 </body></html>

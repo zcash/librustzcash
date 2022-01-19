@@ -1,6 +1,6 @@
 <!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_primitives/src/transaction/sighash_v5.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>sighash_v5.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" type="text/css" href="../../../normalize.css"><link rel="stylesheet" type="text/css" href="../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" type="text/css" href="../../../ayu.css" disabled><link rel="stylesheet" type="text/css" href="../../../dark.css" disabled><link rel="stylesheet" type="text/css" href="../../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../../storage.js"></script><script src="../../../crates.js"></script><script defer src="../../../main.js"></script><script defer src="../../../source-script.js"></script><script defer src="../../../source-files.js"></script>
     <noscript><link rel="stylesheet" href="../../../noscript.css"></noscript><link rel="alternate icon" type="image/png" href="../../../favicon-16x16.png"><link rel="alternate icon" type="image/png" href="../../../favicon-32x32.png"><link rel="icon" type="image/svg+xml" href="../../../favicon.svg"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="sidebar-menu" role="button">&#9776;</div><a class="sidebar-logo" href="../../../zcash_primitives/index.html"><div class="logo-container"><img class="rust-logo" src="../../../rust-logo.svg" alt="logo"></div>
-        </a></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../../zcash_primitives/index.html"><img class="rust-logo" src="../../../rust-logo.svg" alt="logo"></a><nav class="sub"><div class="theme-picker"><button id="theme-picker" aria-label="Pick another theme!" aria-haspopup="menu" title="themes"><img width="18" height="18" alt="Pick another theme!" src="../../../brush.svg"></button><div id="theme-choices" role="menu"></div></div><form class="search-form"><div class="search-container"><div>
+        </a></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../../zcash_primitives/index.html"><img class="rust-logo" src="../../../rust-logo.svg" alt="logo"></a><nav class="sub"><div class="theme-picker hidden"><button id="theme-picker" aria-label="Pick another theme!" aria-haspopup="menu" title="themes"><img width="18" height="18" alt="Pick another theme!" src="../../../brush.svg"></button><div id="theme-choices" role="menu"></div></div><form class="search-form"><div class="search-container"><div>
                                 <input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"></div><button type="button" id="help-button" title="help">?</button><a id="settings-menu" href="../../../settings.html" title="settings"><img width="18" height="18" alt="Change settings" src="../../../wheel.svg"></a></div></form></nav></div><section id="main-content" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">  1</span>
 <span id="2">  2</span>
 <span id="3">  3</span>
@@ -183,19 +183,37 @@
 <span id="180">180</span>
 <span id="181">181</span>
 <span id="182">182</span>
+<span id="183">183</span>
+<span id="184">184</span>
+<span id="185">185</span>
+<span id="186">186</span>
+<span id="187">187</span>
+<span id="188">188</span>
+<span id="189">189</span>
+<span id="190">190</span>
+<span id="191">191</span>
+<span id="192">192</span>
+<span id="193">193</span>
+<span id="194">194</span>
+<span id="195">195</span>
+<span id="196">196</span>
+<span id="197">197</span>
+<span id="198">198</span>
 </pre><pre class="rust"><code><span class="kw">use</span> <span class="ident">std::io::Write</span>;
 
 <span class="kw">use</span> <span class="ident">blake2b_simd</span>::{<span class="ident">Hash</span> <span class="kw">as</span> <span class="ident">Blake2bHash</span>, <span class="ident">Params</span>, <span class="ident">State</span>};
 <span class="kw">use</span> <span class="ident">byteorder</span>::{<span class="ident">LittleEndian</span>, <span class="ident">WriteBytesExt</span>};
+<span class="kw">use</span> <span class="ident">zcash_encoding::Array</span>;
 
 <span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::transaction</span>::{
     <span class="ident">components::transparent</span>::{<span class="self">self</span>, <span class="ident">TxOut</span>},
     <span class="ident">sighash</span>::{
-        <span class="ident">SignableInput</span>, <span class="ident">TransparentInput</span>, <span class="ident">SIGHASH_ANYONECANPAY</span>, <span class="ident">SIGHASH_MASK</span>, <span class="ident">SIGHASH_NONE</span>,
-        <span class="ident">SIGHASH_SINGLE</span>,
+        <span class="ident">SignableInput</span>, <span class="ident">TransparentAuthorizingContext</span>, <span class="ident">SIGHASH_ANYONECANPAY</span>, <span class="ident">SIGHASH_MASK</span>,
+        <span class="ident">SIGHASH_NONE</span>, <span class="ident">SIGHASH_SINGLE</span>,
     },
     <span class="ident">txid</span>::{
-        <span class="ident">to_hash</span>, <span class="ident">transparent_outputs_hash</span>, <span class="ident">transparent_prevout_hash</span>, <span class="ident">transparent_sequence_hash</span>,
+        <span class="ident">hash_transparent_txid_data</span>, <span class="ident">to_hash</span>, <span class="ident">transparent_outputs_hash</span>, <span class="ident">transparent_prevout_hash</span>,
+        <span class="ident">transparent_sequence_hash</span>, <span class="ident">ZCASH_TRANSPARENT_HASH_PERSONALIZATION</span>,
     },
     <span class="ident">Authorization</span>, <span class="ident">TransactionData</span>, <span class="ident">TransparentDigests</span>, <span class="ident">TxDigests</span>,
 };
@@ -207,9 +225,11 @@
 <span class="kw">use</span> <span class="ident">zcash_encoding</span>::{<span class="ident">CompactSize</span>, <span class="ident">Vector</span>};
 
 <span class="attribute">#[<span class="ident">cfg</span>(<span class="ident">feature</span> <span class="op">=</span> <span class="string">&quot;zfuture&quot;</span>)]</span>
-<span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::transaction</span>::{<span class="ident">components::tze</span>, <span class="ident">sighash::TzeInput</span>, <span class="ident">TzeDigests</span>};
+<span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::transaction</span>::{<span class="ident">components::tze</span>, <span class="ident">TzeDigests</span>};
 
 <span class="kw">const</span> <span class="ident">ZCASH_TRANSPARENT_INPUT_HASH_PERSONALIZATION</span>: <span class="kw-2">&amp;</span>[<span class="ident">u8</span>; <span class="number">16</span>] <span class="op">=</span> <span class="string">b&quot;Zcash___TxInHash&quot;</span>;
+<span class="kw">const</span> <span class="ident">ZCASH_TRANSPARENT_AMOUNTS_HASH_PERSONALIZATION</span>: <span class="kw-2">&amp;</span>[<span class="ident">u8</span>; <span class="number">16</span>] <span class="op">=</span> <span class="string">b&quot;ZTxTrAmountsHash&quot;</span>;
+<span class="kw">const</span> <span class="ident">ZCASH_TRANSPARENT_SCRIPTS_HASH_PERSONALIZATION</span>: <span class="kw-2">&amp;</span>[<span class="ident">u8</span>; <span class="number">16</span>] <span class="op">=</span> <span class="string">b&quot;ZTxTrScriptsHash&quot;</span>;
 
 <span class="attribute">#[<span class="ident">cfg</span>(<span class="ident">feature</span> <span class="op">=</span> <span class="string">&quot;zfuture&quot;</span>)]</span>
 <span class="kw">const</span> <span class="ident">ZCASH_TZE_INPUT_HASH_PERSONALIZATION</span>: <span class="kw-2">&amp;</span>[<span class="ident">u8</span>; <span class="number">16</span>] <span class="op">=</span> <span class="string">b&quot;Zcash__TzeInHash&quot;</span>;
@@ -218,81 +238,121 @@
     <span class="ident">Params::new</span>().<span class="ident">hash_length</span>(<span class="number">32</span>).<span class="ident">personal</span>(<span class="ident">personal</span>).<span class="ident">to_state</span>()
 }
 
-<span class="kw">fn</span> <span class="ident">transparent_input_sigdigests</span><span class="op">&lt;</span><span class="ident">A</span>: <span class="ident">transparent::Authorization</span><span class="op">&gt;</span>(
-    <span class="ident">bundle</span>: <span class="kw-2">&amp;</span><span class="ident">transparent::Bundle</span><span class="op">&lt;</span><span class="ident">A</span><span class="op">&gt;</span>,
-    <span class="ident">input</span>: <span class="kw-2">&amp;</span><span class="ident">TransparentInput</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span>,
+<span class="doccomment">/// Implements [ZIP 244 section S.2](https://zips.z.cash/zip-0244#s-2-transparent-sig-digest)</span>
+<span class="doccomment">/// but only when used to produce the hash for a signature over a transparent input.</span>
+<span class="kw">fn</span> <span class="ident">transparent_sig_digest</span><span class="op">&lt;</span><span class="ident">A</span>: <span class="ident">TransparentAuthorizingContext</span><span class="op">&gt;</span>(
     <span class="ident">txid_digests</span>: <span class="kw-2">&amp;</span><span class="ident">TransparentDigests</span><span class="op">&lt;</span><span class="ident">Blake2bHash</span><span class="op">&gt;</span>,
-    <span class="ident">hash_type</span>: <span class="ident">u32</span>,
-) -&gt; <span class="ident">TransparentDigests</span><span class="op">&lt;</span><span class="ident">Blake2bHash</span><span class="op">&gt;</span> {
+    <span class="ident">bundle</span>: <span class="kw-2">&amp;</span><span class="ident">transparent::Bundle</span><span class="op">&lt;</span><span class="ident">A</span><span class="op">&gt;</span>,
+    <span class="ident">input</span>: <span class="kw-2">&amp;</span><span class="ident">SignableInput</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span>,
+) -&gt; <span class="ident">Blake2bHash</span> {
+    <span class="kw">let</span> <span class="ident">hash_type</span> <span class="op">=</span> <span class="ident">input</span>.<span class="ident">hash_type</span>();
     <span class="kw">let</span> <span class="ident">flag_anyonecanpay</span> <span class="op">=</span> <span class="ident">hash_type</span> <span class="op">&amp;</span> <span class="ident">SIGHASH_ANYONECANPAY</span> <span class="op">!</span><span class="op">=</span> <span class="number">0</span>;
     <span class="kw">let</span> <span class="ident">flag_single</span> <span class="op">=</span> <span class="ident">hash_type</span> <span class="op">&amp;</span> <span class="ident">SIGHASH_MASK</span> <span class="op">==</span> <span class="ident">SIGHASH_SINGLE</span>;
     <span class="kw">let</span> <span class="ident">flag_none</span> <span class="op">=</span> <span class="ident">hash_type</span> <span class="op">&amp;</span> <span class="ident">SIGHASH_MASK</span> <span class="op">==</span> <span class="ident">SIGHASH_NONE</span>;
 
-    <span class="kw">let</span> <span class="ident">prevout_digest</span> <span class="op">=</span> <span class="kw">if</span> <span class="ident">flag_anyonecanpay</span> {
+    <span class="kw">let</span> <span class="ident">prevouts_digest</span> <span class="op">=</span> <span class="kw">if</span> <span class="ident">flag_anyonecanpay</span> {
         <span class="ident">transparent_prevout_hash</span>::<span class="op">&lt;</span><span class="ident">A</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span>[])
     } <span class="kw">else</span> {
-        <span class="ident">txid_digests</span>.<span class="ident">prevout_digest</span>
+        <span class="ident">txid_digests</span>.<span class="ident">prevouts_digest</span>
     };
 
-    <span class="kw">let</span> <span class="ident">sequence_digest</span> <span class="op">=</span> <span class="kw">if</span> <span class="ident">flag_anyonecanpay</span> <span class="op">|</span><span class="op">|</span> <span class="ident">flag_single</span> <span class="op">|</span><span class="op">|</span> <span class="ident">flag_none</span> {
+    <span class="kw">let</span> <span class="ident">amounts_digest</span> <span class="op">=</span> {
+        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">h</span> <span class="op">=</span> <span class="ident">hasher</span>(<span class="ident">ZCASH_TRANSPARENT_AMOUNTS_HASH_PERSONALIZATION</span>);
+        <span class="kw">if</span> <span class="op">!</span><span class="ident">flag_anyonecanpay</span> {
+            <span class="ident">Array::write</span>(<span class="kw-2">&amp;mut</span> <span class="ident">h</span>, <span class="ident">bundle</span>.<span class="ident">authorization</span>.<span class="ident">input_amounts</span>(), <span class="op">|</span><span class="ident">w</span>, <span class="ident">amount</span><span class="op">|</span> {
+                <span class="ident">w</span>.<span class="ident">write_all</span>(<span class="kw-2">&amp;</span><span class="ident">amount</span>.<span class="ident">to_i64_le_bytes</span>())
+            })
+            .<span class="ident">unwrap</span>();
+        }
+        <span class="ident">h</span>.<span class="ident">finalize</span>()
+    };
+
+    <span class="kw">let</span> <span class="ident">scripts_digest</span> <span class="op">=</span> {
+        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">h</span> <span class="op">=</span> <span class="ident">hasher</span>(<span class="ident">ZCASH_TRANSPARENT_SCRIPTS_HASH_PERSONALIZATION</span>);
+        <span class="kw">if</span> <span class="op">!</span><span class="ident">flag_anyonecanpay</span> {
+            <span class="ident">Array::write</span>(
+                <span class="kw-2">&amp;mut</span> <span class="ident">h</span>,
+                <span class="ident">bundle</span>.<span class="ident">authorization</span>.<span class="ident">input_scriptpubkeys</span>(),
+                <span class="op">|</span><span class="ident">w</span>, <span class="ident">script</span><span class="op">|</span> <span class="ident">script</span>.<span class="ident">write</span>(<span class="ident">w</span>),
+            )
+            .<span class="ident">unwrap</span>();
+        }
+        <span class="ident">h</span>.<span class="ident">finalize</span>()
+    };
+
+    <span class="kw">let</span> <span class="ident">sequence_digest</span> <span class="op">=</span> <span class="kw">if</span> <span class="ident">flag_anyonecanpay</span> {
         <span class="ident">transparent_sequence_hash</span>::<span class="op">&lt;</span><span class="ident">A</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span>[])
     } <span class="kw">else</span> {
         <span class="ident">txid_digests</span>.<span class="ident">sequence_digest</span>
     };
 
-    <span class="kw">let</span> <span class="ident">outputs_digest</span> <span class="op">=</span> <span class="kw">if</span> <span class="ident">flag_single</span> {
-        <span class="kw">if</span> <span class="ident">input</span>.<span class="ident">index</span>() <span class="op">&lt;</span> <span class="ident">bundle</span>.<span class="ident">vout</span>.<span class="ident">len</span>() {
-            <span class="ident">transparent_outputs_hash</span>(<span class="kw-2">&amp;</span>[<span class="kw-2">&amp;</span><span class="ident">bundle</span>.<span class="ident">vout</span>[<span class="ident">input</span>.<span class="ident">index</span>()]])
-        } <span class="kw">else</span> {
+    <span class="kw">let</span> <span class="ident">outputs_digest</span> <span class="op">=</span> <span class="kw">if</span> <span class="kw">let</span> <span class="ident">SignableInput::Transparent</span> { <span class="ident">index</span>, .. } <span class="op">=</span> <span class="ident">input</span> {
+        <span class="kw">if</span> <span class="ident">flag_single</span> {
+            <span class="kw">if</span> <span class="kw-2">*</span><span class="ident">index</span> <span class="op">&lt;</span> <span class="ident">bundle</span>.<span class="ident">vout</span>.<span class="ident">len</span>() {
+                <span class="ident">transparent_outputs_hash</span>(<span class="kw-2">&amp;</span>[<span class="kw-2">&amp;</span><span class="ident">bundle</span>.<span class="ident">vout</span>[<span class="kw-2">*</span><span class="ident">index</span>]])
+            } <span class="kw">else</span> {
+                <span class="ident">transparent_outputs_hash</span>::<span class="op">&lt;</span><span class="ident">TxOut</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span>[])
+            }
+        } <span class="kw">else</span> <span class="kw">if</span> <span class="ident">flag_none</span> {
             <span class="ident">transparent_outputs_hash</span>::<span class="op">&lt;</span><span class="ident">TxOut</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span>[])
+        } <span class="kw">else</span> {
+            <span class="ident">txid_digests</span>.<span class="ident">outputs_digest</span>
         }
-    } <span class="kw">else</span> <span class="kw">if</span> <span class="ident">flag_none</span> {
-        <span class="ident">transparent_outputs_hash</span>::<span class="op">&lt;</span><span class="ident">TxOut</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span>[])
     } <span class="kw">else</span> {
         <span class="ident">txid_digests</span>.<span class="ident">outputs_digest</span>
     };
 
-    <span class="comment">// If we are serializing an input (i.e. this is not a JoinSplit signature hash):</span>
-    <span class="comment">//   a. outpoint (32-byte hash + 4-byte little endian)</span>
-    <span class="comment">//   b. scriptCode of the input (serialized as scripts inside CTxOuts)</span>
-    <span class="comment">//   c. value of the output spent by this input (8-byte little endian)</span>
-    <span class="comment">//   d. nSequence of the input (4-byte little endian)</span>
+    <span class="comment">//S.2g.i:   prevout      (field encoding)</span>
+    <span class="comment">//S.2g.ii:  value        (8-byte signed little-endian)</span>
+    <span class="comment">//S.2g.iii: scriptPubKey (field encoding)</span>
+    <span class="comment">//S.2g.iv:  nSequence    (4-byte unsigned little-endian)</span>
     <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">ch</span> <span class="op">=</span> <span class="ident">hasher</span>(<span class="ident">ZCASH_TRANSPARENT_INPUT_HASH_PERSONALIZATION</span>);
-    <span class="kw">let</span> <span class="ident">txin</span> <span class="op">=</span> <span class="kw-2">&amp;</span><span class="ident">bundle</span>.<span class="ident">vin</span>[<span class="ident">input</span>.<span class="ident">index</span>()];
-    <span class="ident">txin</span>.<span class="ident">prevout</span>.<span class="ident">write</span>(<span class="kw-2">&amp;mut</span> <span class="ident">ch</span>).<span class="ident">unwrap</span>();
-    <span class="ident">input</span>.<span class="ident">script_code</span>().<span class="ident">write</span>(<span class="kw-2">&amp;mut</span> <span class="ident">ch</span>).<span class="ident">unwrap</span>();
-    <span class="ident">ch</span>.<span class="ident">write_all</span>(<span class="kw-2">&amp;</span><span class="ident">input</span>.<span class="ident">value</span>().<span class="ident">to_i64_le_bytes</span>()).<span class="ident">unwrap</span>();
-    <span class="ident">ch</span>.<span class="ident">write_u32</span>::<span class="op">&lt;</span><span class="ident">LittleEndian</span><span class="op">&gt;</span>(<span class="ident">txin</span>.<span class="ident">sequence</span>).<span class="ident">unwrap</span>();
-    <span class="kw">let</span> <span class="ident">per_input_digest</span> <span class="op">=</span> <span class="ident">ch</span>.<span class="ident">finalize</span>();
-
-    <span class="ident">TransparentDigests</span> {
-        <span class="ident">prevout_digest</span>,
-        <span class="ident">sequence_digest</span>,
-        <span class="ident">outputs_digest</span>,
-        <span class="ident">per_input_digest</span>: <span class="prelude-val">Some</span>(<span class="ident">per_input_digest</span>),
+    <span class="kw">if</span> <span class="kw">let</span> <span class="ident">SignableInput::Transparent</span> {
+        <span class="ident">index</span>,
+        <span class="ident">script_pubkey</span>,
+        <span class="ident">value</span>,
+        ..
+    } <span class="op">=</span> <span class="ident">input</span>
+    {
+        <span class="kw">let</span> <span class="ident">txin</span> <span class="op">=</span> <span class="kw-2">&amp;</span><span class="ident">bundle</span>.<span class="ident">vin</span>[<span class="kw-2">*</span><span class="ident">index</span>];
+        <span class="ident">txin</span>.<span class="ident">prevout</span>.<span class="ident">write</span>(<span class="kw-2">&amp;mut</span> <span class="ident">ch</span>).<span class="ident">unwrap</span>();
+        <span class="ident">ch</span>.<span class="ident">write_all</span>(<span class="kw-2">&amp;</span><span class="ident">value</span>.<span class="ident">to_i64_le_bytes</span>()).<span class="ident">unwrap</span>();
+        <span class="ident">script_pubkey</span>.<span class="ident">write</span>(<span class="kw-2">&amp;mut</span> <span class="ident">ch</span>).<span class="ident">unwrap</span>();
+        <span class="ident">ch</span>.<span class="ident">write_u32</span>::<span class="op">&lt;</span><span class="ident">LittleEndian</span><span class="op">&gt;</span>(<span class="ident">txin</span>.<span class="ident">sequence</span>).<span class="ident">unwrap</span>();
     }
+    <span class="kw">let</span> <span class="ident">txin_sig_digest</span> <span class="op">=</span> <span class="ident">ch</span>.<span class="ident">finalize</span>();
+
+    <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">h</span> <span class="op">=</span> <span class="ident">hasher</span>(<span class="ident">ZCASH_TRANSPARENT_HASH_PERSONALIZATION</span>);
+    <span class="ident">h</span>.<span class="ident">write_all</span>(<span class="kw-2">&amp;</span>[<span class="ident">hash_type</span>]).<span class="ident">unwrap</span>();
+    <span class="ident">h</span>.<span class="ident">write_all</span>(<span class="ident">prevouts_digest</span>.<span class="ident">as_bytes</span>()).<span class="ident">unwrap</span>();
+    <span class="ident">h</span>.<span class="ident">write_all</span>(<span class="ident">amounts_digest</span>.<span class="ident">as_bytes</span>()).<span class="ident">unwrap</span>();
+    <span class="ident">h</span>.<span class="ident">write_all</span>(<span class="ident">scripts_digest</span>.<span class="ident">as_bytes</span>()).<span class="ident">unwrap</span>();
+    <span class="ident">h</span>.<span class="ident">write_all</span>(<span class="ident">sequence_digest</span>.<span class="ident">as_bytes</span>()).<span class="ident">unwrap</span>();
+    <span class="ident">h</span>.<span class="ident">write_all</span>(<span class="ident">outputs_digest</span>.<span class="ident">as_bytes</span>()).<span class="ident">unwrap</span>();
+    <span class="ident">h</span>.<span class="ident">write_all</span>(<span class="ident">txin_sig_digest</span>.<span class="ident">as_bytes</span>()).<span class="ident">unwrap</span>();
+    <span class="ident">h</span>.<span class="ident">finalize</span>()
 }
 
 <span class="attribute">#[<span class="ident">cfg</span>(<span class="ident">feature</span> <span class="op">=</span> <span class="string">&quot;zfuture&quot;</span>)]</span>
 <span class="kw">fn</span> <span class="ident">tze_input_sigdigests</span><span class="op">&lt;</span><span class="ident">A</span>: <span class="ident">tze::Authorization</span><span class="op">&gt;</span>(
     <span class="ident">bundle</span>: <span class="kw-2">&amp;</span><span class="ident">tze::Bundle</span><span class="op">&lt;</span><span class="ident">A</span><span class="op">&gt;</span>,
-    <span class="ident">input</span>: <span class="kw-2">&amp;</span><span class="ident">TzeInput</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span>,
+    <span class="ident">input</span>: <span class="kw-2">&amp;</span><span class="ident">SignableInput</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span>,
     <span class="ident">txid_digests</span>: <span class="kw-2">&amp;</span><span class="ident">TzeDigests</span><span class="op">&lt;</span><span class="ident">Blake2bHash</span><span class="op">&gt;</span>,
 ) -&gt; <span class="ident">TzeDigests</span><span class="op">&lt;</span><span class="ident">Blake2bHash</span><span class="op">&gt;</span> {
     <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">ch</span> <span class="op">=</span> <span class="ident">hasher</span>(<span class="ident">ZCASH_TZE_INPUT_HASH_PERSONALIZATION</span>);
-    <span class="kw">let</span> <span class="ident">tzein</span> <span class="op">=</span> <span class="kw-2">&amp;</span><span class="ident">bundle</span>.<span class="ident">vin</span>[<span class="ident">input</span>.<span class="ident">index</span>()];
-    <span class="ident">tzein</span>.<span class="ident">prevout</span>.<span class="ident">write</span>(<span class="kw-2">&amp;mut</span> <span class="ident">ch</span>).<span class="ident">unwrap</span>();
-    <span class="ident">CompactSize::write</span>(
-        <span class="kw-2">&amp;mut</span> <span class="ident">ch</span>,
-        <span class="ident">input</span>.<span class="ident">precondition</span>().<span class="ident">extension_id</span>.<span class="ident">try_into</span>().<span class="ident">unwrap</span>(),
-    )
-    .<span class="ident">unwrap</span>();
-    <span class="ident">CompactSize::write</span>(<span class="kw-2">&amp;mut</span> <span class="ident">ch</span>, <span class="ident">input</span>.<span class="ident">precondition</span>().<span class="ident">mode</span>.<span class="ident">try_into</span>().<span class="ident">unwrap</span>()).<span class="ident">unwrap</span>();
-    <span class="ident">Vector::write</span>(<span class="kw-2">&amp;mut</span> <span class="ident">ch</span>, <span class="kw-2">&amp;</span><span class="ident">input</span>.<span class="ident">precondition</span>().<span class="ident">payload</span>, <span class="op">|</span><span class="ident">w</span>, <span class="ident">e</span><span class="op">|</span> {
-        <span class="ident">w</span>.<span class="ident">write_u8</span>(<span class="kw-2">*</span><span class="ident">e</span>)
-    })
-    .<span class="ident">unwrap</span>();
-    <span class="ident">ch</span>.<span class="ident">write_all</span>(<span class="kw-2">&amp;</span><span class="ident">input</span>.<span class="ident">value</span>().<span class="ident">to_i64_le_bytes</span>()).<span class="ident">unwrap</span>();
+    <span class="kw">if</span> <span class="kw">let</span> <span class="ident">SignableInput::Tze</span> {
+        <span class="ident">index</span>,
+        <span class="ident">precondition</span>,
+        <span class="ident">value</span>,
+    } <span class="op">=</span> <span class="ident">input</span>
+    {
+        <span class="kw">let</span> <span class="ident">tzein</span> <span class="op">=</span> <span class="kw-2">&amp;</span><span class="ident">bundle</span>.<span class="ident">vin</span>[<span class="kw-2">*</span><span class="ident">index</span>];
+        <span class="ident">tzein</span>.<span class="ident">prevout</span>.<span class="ident">write</span>(<span class="kw-2">&amp;mut</span> <span class="ident">ch</span>).<span class="ident">unwrap</span>();
+        <span class="ident">CompactSize::write</span>(<span class="kw-2">&amp;mut</span> <span class="ident">ch</span>, <span class="ident">precondition</span>.<span class="ident">extension_id</span>.<span class="ident">try_into</span>().<span class="ident">unwrap</span>()).<span class="ident">unwrap</span>();
+        <span class="ident">CompactSize::write</span>(<span class="kw-2">&amp;mut</span> <span class="ident">ch</span>, <span class="ident">precondition</span>.<span class="ident">mode</span>.<span class="ident">try_into</span>().<span class="ident">unwrap</span>()).<span class="ident">unwrap</span>();
+        <span class="ident">Vector::write</span>(<span class="kw-2">&amp;mut</span> <span class="ident">ch</span>, <span class="kw-2">&amp;</span><span class="ident">precondition</span>.<span class="ident">payload</span>, <span class="op">|</span><span class="ident">w</span>, <span class="ident">e</span><span class="op">|</span> <span class="ident">w</span>.<span class="ident">write_u8</span>(<span class="kw-2">*</span><span class="ident">e</span>)).<span class="ident">unwrap</span>();
+        <span class="ident">ch</span>.<span class="ident">write_all</span>(<span class="kw-2">&amp;</span><span class="ident">value</span>.<span class="ident">to_i64_le_bytes</span>()).<span class="ident">unwrap</span>();
+    }
     <span class="kw">let</span> <span class="ident">per_input_digest</span> <span class="op">=</span> <span class="ident">ch</span>.<span class="ident">finalize</span>();
 
     <span class="ident">TzeDigests</span> {
@@ -302,69 +362,41 @@
     }
 }
 
-<span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">v5_signature_hash</span><span class="op">&lt;</span><span class="ident">A</span>: <span class="ident">Authorization</span><span class="op">&gt;</span>(
+<span class="doccomment">/// Implements the [Signature Digest section of ZIP 244](https://zips.z.cash/zip-0244#signature-digest)</span>
+<span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">v5_signature_hash</span><span class="op">&lt;</span>
+    <span class="ident">TA</span>: <span class="ident">TransparentAuthorizingContext</span>,
+    <span class="ident">A</span>: <span class="ident">Authorization</span><span class="op">&lt;</span><span class="ident">TransparentAuth</span> <span class="op">=</span> <span class="ident">TA</span><span class="op">&gt;</span>,
+<span class="op">&gt;</span>(
     <span class="ident">tx</span>: <span class="kw-2">&amp;</span><span class="ident">TransactionData</span><span class="op">&lt;</span><span class="ident">A</span><span class="op">&gt;</span>,
-    <span class="ident">hash_type</span>: <span class="ident">u32</span>,
     <span class="ident">signable_input</span>: <span class="kw-2">&amp;</span><span class="ident">SignableInput</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span>,
     <span class="ident">txid_parts</span>: <span class="kw-2">&amp;</span><span class="ident">TxDigests</span><span class="op">&lt;</span><span class="ident">Blake2bHash</span><span class="op">&gt;</span>,
 ) -&gt; <span class="ident">Blake2bHash</span> {
-    <span class="kw">match</span> <span class="ident">signable_input</span> {
-        <span class="ident">SignableInput::Shielded</span> =&gt; <span class="ident">to_hash</span>(
-            <span class="ident">tx</span>.<span class="ident">version</span>,
-            <span class="ident">tx</span>.<span class="ident">consensus_branch_id</span>,
-            <span class="ident">txid_parts</span>.<span class="ident">header_digest</span>,
-            <span class="ident">txid_parts</span>.<span class="ident">transparent_digests</span>.<span class="ident">as_ref</span>(),
-            <span class="ident">txid_parts</span>.<span class="ident">sapling_digest</span>,
-            <span class="ident">txid_parts</span>.<span class="ident">orchard_digest</span>,
-            <span class="attribute">#[<span class="ident">cfg</span>(<span class="ident">feature</span> <span class="op">=</span> <span class="string">&quot;zfuture&quot;</span>)]</span>
-            <span class="ident">txid_parts</span>.<span class="ident">tze_digests</span>.<span class="ident">as_ref</span>(),
-        ),
-        <span class="ident">SignableInput::Transparent</span>(<span class="ident">input</span>) =&gt; {
-            <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>((<span class="ident">bundle</span>, <span class="ident">txid_digests</span>)) <span class="op">=</span> <span class="ident">tx</span>
-                .<span class="ident">transparent_bundle</span>
-                .<span class="ident">as_ref</span>()
-                .<span class="ident">zip</span>(<span class="ident">txid_parts</span>.<span class="ident">transparent_digests</span>.<span class="ident">as_ref</span>())
-            {
-                <span class="ident">to_hash</span>(
-                    <span class="ident">tx</span>.<span class="ident">version</span>,
-                    <span class="ident">tx</span>.<span class="ident">consensus_branch_id</span>,
-                    <span class="ident">txid_parts</span>.<span class="ident">header_digest</span>,
-                    <span class="prelude-val">Some</span>(<span class="kw-2">&amp;</span><span class="ident">transparent_input_sigdigests</span>(
-                        <span class="ident">bundle</span>,
-                        <span class="ident">input</span>,
-                        <span class="ident">txid_digests</span>,
-                        <span class="ident">hash_type</span>,
-                    )),
-                    <span class="ident">txid_parts</span>.<span class="ident">sapling_digest</span>,
-                    <span class="ident">txid_parts</span>.<span class="ident">orchard_digest</span>,
-                    <span class="attribute">#[<span class="ident">cfg</span>(<span class="ident">feature</span> <span class="op">=</span> <span class="string">&quot;zfuture&quot;</span>)]</span>
-                    <span class="ident">txid_parts</span>.<span class="ident">tze_digests</span>.<span class="ident">as_ref</span>(),
-                )
-            } <span class="kw">else</span> {
-                <span class="macro">panic!</span>(<span class="string">&quot;Transaction has no transparent inputs to sign.&quot;</span>)
-            }
-        }
+    <span class="ident">to_hash</span>(
+        <span class="ident">tx</span>.<span class="ident">version</span>,
+        <span class="ident">tx</span>.<span class="ident">consensus_branch_id</span>,
+        <span class="ident">txid_parts</span>.<span class="ident">header_digest</span>,
+        <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">bundle</span>) <span class="op">=</span> <span class="kw-2">&amp;</span><span class="ident">tx</span>.<span class="ident">transparent_bundle</span> {
+            <span class="ident">transparent_sig_digest</span>(
+                <span class="ident">txid_parts</span>
+                    .<span class="ident">transparent_digests</span>
+                    .<span class="ident">as_ref</span>()
+                    .<span class="ident">expect</span>(<span class="string">&quot;Transparent txid digests are missing.&quot;</span>),
+                <span class="kw-2">&amp;</span><span class="ident">bundle</span>,
+                <span class="ident">signable_input</span>,
+            )
+        } <span class="kw">else</span> {
+            <span class="ident">hash_transparent_txid_data</span>(<span class="prelude-val">None</span>)
+        },
+        <span class="ident">txid_parts</span>.<span class="ident">sapling_digest</span>,
+        <span class="ident">txid_parts</span>.<span class="ident">orchard_digest</span>,
         <span class="attribute">#[<span class="ident">cfg</span>(<span class="ident">feature</span> <span class="op">=</span> <span class="string">&quot;zfuture&quot;</span>)]</span>
-        <span class="ident">SignableInput::Tze</span>(<span class="ident">input</span>) =&gt; {
-            <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>((<span class="ident">bundle</span>, <span class="ident">txid_digests</span>)) <span class="op">=</span>
-                <span class="ident">tx</span>.<span class="ident">tze_bundle</span>.<span class="ident">as_ref</span>().<span class="ident">zip</span>(<span class="ident">txid_parts</span>.<span class="ident">tze_digests</span>.<span class="ident">as_ref</span>())
-            {
-                <span class="ident">to_hash</span>(
-                    <span class="ident">tx</span>.<span class="ident">version</span>,
-                    <span class="ident">tx</span>.<span class="ident">consensus_branch_id</span>,
-                    <span class="ident">txid_parts</span>.<span class="ident">header_digest</span>,
-                    <span class="ident">txid_parts</span>.<span class="ident">transparent_digests</span>.<span class="ident">as_ref</span>(),
-                    <span class="ident">txid_parts</span>.<span class="ident">sapling_digest</span>,
-                    <span class="ident">txid_parts</span>.<span class="ident">orchard_digest</span>,
-                    <span class="attribute">#[<span class="ident">cfg</span>(<span class="ident">feature</span> <span class="op">=</span> <span class="string">&quot;zfuture&quot;</span>)]</span>
-                    <span class="prelude-val">Some</span>(<span class="kw-2">&amp;</span><span class="ident">tze_input_sigdigests</span>(<span class="ident">bundle</span>, <span class="ident">input</span>, <span class="ident">txid_digests</span>)),
-                )
-            } <span class="kw">else</span> {
-                <span class="macro">panic!</span>(<span class="string">&quot;Transaction has no TZE inputs to sign.&quot;</span>)
-            }
-        }
-    }
+        <span class="ident">tx</span>.<span class="ident">tze_bundle</span>
+            .<span class="ident">as_ref</span>()
+            .<span class="ident">zip</span>(<span class="ident">txid_parts</span>.<span class="ident">tze_digests</span>.<span class="ident">as_ref</span>())
+            .<span class="ident">map</span>(<span class="op">|</span>(<span class="ident">bundle</span>, <span class="ident">tze_digests</span>)<span class="op">|</span> <span class="ident">tze_input_sigdigests</span>(<span class="ident">bundle</span>, <span class="ident">signable_input</span>, <span class="ident">tze_digests</span>))
+            .<span class="ident">as_ref</span>(),
+    )
 }
 </code></pre></div>
-</section><section id="search" class="content hidden"></section></div></main><div id="rustdoc-vars" data-root-path="../../../" data-current-crate="zcash_primitives" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.60.0-nightly (ee5d8d37b 2022-01-17)" ></div>
+</section><section id="search" class="content hidden"></section></div></main><div id="rustdoc-vars" data-root-path="../../../" data-current-crate="zcash_primitives" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.60.0-nightly (9ad5d82f8 2022-01-18)" ></div>
 </body></html>

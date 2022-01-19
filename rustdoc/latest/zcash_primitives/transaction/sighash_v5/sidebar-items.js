@@ -1,1 +1,1 @@
-initSidebarItems({"fn":[["v5_signature_hash",""]]});
+initSidebarItems({"fn":[["v5_signature_hash","Implements the Signature Digest section of ZIP 244"]]});
