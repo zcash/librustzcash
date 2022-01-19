@@ -1,3 +1,4 @@
+use blake2b_simd::Hash as Blake2bHash;
 use std::ops::Deref;
 
 use proptest::prelude::*;
@@ -6,13 +7,21 @@ use crate::{consensus::BranchId, legacy::Script};
 
 use super::{
     components::Amount,
-    sighash::{SignableInput, SIGHASH_ALL, SIGHASH_ANYONECANPAY, SIGHASH_NONE, SIGHASH_SINGLE},
+    sapling,
+    sighash::{
+        SignableInput, TransparentAuthorizingContext, SIGHASH_ALL, SIGHASH_ANYONECANPAY,
+        SIGHASH_NONE, SIGHASH_SINGLE,
+    },
     sighash_v4::v4_signature_hash,
     sighash_v5::v5_signature_hash,
     testing::arb_tx,
+    transparent::{self},
     txid::TxIdDigester,
-    Transaction,
+    Authorization, Transaction, TransactionData, TxDigests, TxIn,
 };
+
+#[cfg(feature = "zfuture")]
+use super::components::tze;
 
 #[test]
 fn tx_read_write() {
@@ -120,16 +129,18 @@ fn zip_0143() {
     for tv in self::data::zip_0143::make_test_vectors() {
         let tx = Transaction::read(&tv.tx[..], tv.consensus_branch_id).unwrap();
         let signable_input = match tv.transparent_input {
-            Some(n) => SignableInput::transparent(
-                n as usize,
-                &tv.script_code,
-                Amount::from_nonnegative_i64(tv.amount).unwrap(),
-            ),
+            Some(n) => SignableInput::Transparent {
+                hash_type: tv.hash_type as u8,
+                index: n as usize,
+                script_code: &tv.script_code,
+                script_pubkey: &tv.script_code,
+                value: Amount::from_nonnegative_i64(tv.amount).unwrap(),
+            },
             _ => SignableInput::Shielded,
         };
 
         assert_eq!(
-            v4_signature_hash(tx.deref(), tv.hash_type, &signable_input).as_ref(),
+            v4_signature_hash(tx.deref(), &signable_input).as_ref(),
             tv.sighash
         );
     }
@@ -140,98 +151,190 @@ fn zip_0243() {
     for tv in self::data::zip_0243::make_test_vectors() {
         let tx = Transaction::read(&tv.tx[..], tv.consensus_branch_id).unwrap();
         let signable_input = match tv.transparent_input {
-            Some(n) => SignableInput::transparent(
-                n as usize,
-                &tv.script_code,
-                Amount::from_nonnegative_i64(tv.amount).unwrap(),
-            ),
+            Some(n) => SignableInput::Transparent {
+                hash_type: tv.hash_type as u8,
+                index: n as usize,
+                script_code: &tv.script_code,
+                script_pubkey: &tv.script_code,
+                value: Amount::from_nonnegative_i64(tv.amount).unwrap(),
+            },
             _ => SignableInput::Shielded,
         };
 
         assert_eq!(
-            v4_signature_hash(tx.deref(), tv.hash_type, &signable_input).as_ref(),
+            v4_signature_hash(tx.deref(), &signable_input).as_ref(),
             tv.sighash
         );
     }
 }
 
+#[derive(Debug)]
+struct TestTransparentAuth {
+    input_amounts: Vec<Amount>,
+    input_scriptpubkeys: Vec<Script>,
+}
+
+impl transparent::Authorization for TestTransparentAuth {
+    type ScriptSig = Script;
+}
+
+impl TransparentAuthorizingContext for TestTransparentAuth {
+    fn input_amounts(&self) -> Vec<Amount> {
+        self.input_amounts.clone()
+    }
+
+    fn input_scriptpubkeys(&self) -> Vec<Script> {
+        self.input_scriptpubkeys.clone()
+    }
+}
+
+struct TestUnauthorized;
+
+impl Authorization for TestUnauthorized {
+    type TransparentAuth = TestTransparentAuth;
+    type SaplingAuth = sapling::Authorized;
+    type OrchardAuth = orchard::bundle::Authorized;
+
+    #[cfg(feature = "zfuture")]
+    type TzeAuth = tze::Authorized;
+}
+
 #[test]
 fn zip_0244() {
-    for tv in self::data::zip_0244::make_test_vectors() {
+    fn to_test_txdata(
+        tv: &self::data::zip_0244::TestVector,
+    ) -> (TransactionData<TestUnauthorized>, TxDigests<Blake2bHash>) {
         let tx = Transaction::read(&tv.tx[..], BranchId::Nu5).unwrap();
+
         assert_eq!(tx.txid.as_ref(), &tv.txid);
         assert_eq!(tx.auth_commitment().as_ref(), &tv.auth_digest);
 
-        let txid_parts = tx.deref().digest(TxIdDigester);
-        match tv.transparent_input {
-            Some(n) => {
-                let script = Script(tv.script_code.unwrap());
-                let signable_input = SignableInput::transparent(
-                    n as usize,
-                    &script,
-                    Amount::from_nonnegative_i64(tv.amount.unwrap()).unwrap(),
-                );
+        let txdata = tx.deref();
 
-                assert_eq!(
-                    v5_signature_hash(tx.deref(), SIGHASH_ALL, &signable_input, &txid_parts)
-                        .as_ref(),
-                    &tv.sighash_all
-                );
+        let input_amounts = tv
+            .amounts
+            .iter()
+            .map(|amount| Amount::from_nonnegative_i64(*amount).unwrap())
+            .collect();
+        let input_scriptpubkeys = tv
+            .script_pubkeys
+            .iter()
+            .map(|s| Script(s.clone()))
+            .collect();
 
-                assert_eq!(
-                    v5_signature_hash(tx.deref(), SIGHASH_NONE, &signable_input, &txid_parts)
-                        .as_ref(),
-                    &tv.sighash_none.unwrap()
-                );
+        let test_bundle = txdata
+            .transparent_bundle
+            .as_ref()
+            .map(|b| transparent::Bundle {
+                // we have to do this map/clone to make the types line up, since the
+                // Authorization::ScriptSig type is bound to transparent::Authorized, and we need
+                // it to be bound to TestTransparentAuth.
+                vin: b
+                    .vin
+                    .iter()
+                    .map(|vin| TxIn {
+                        prevout: vin.prevout.clone(),
+                        script_sig: vin.script_sig.clone(),
+                        sequence: vin.sequence,
+                    })
+                    .collect(),
+                vout: b.vout.clone(),
+                authorization: TestTransparentAuth {
+                    input_amounts,
+                    input_scriptpubkeys,
+                },
+            });
 
+        (
+            TransactionData::from_parts(
+                txdata.version(),
+                txdata.consensus_branch_id(),
+                txdata.lock_time(),
+                txdata.expiry_height(),
+                test_bundle,
+                txdata.sprout_bundle().cloned(),
+                txdata.sapling_bundle().cloned(),
+                txdata.orchard_bundle().cloned(),
+                #[cfg(feature = "zfuture")]
+                txdata.tze_bundle().cloned(),
+            ),
+            txdata.digest(TxIdDigester),
+        )
+    }
+
+    for tv in self::data::zip_0244::make_test_vectors() {
+        let (txdata, txid_parts) = to_test_txdata(&tv);
+
+        if let Some(index) = tv.transparent_input {
+            let bundle = txdata.transparent_bundle().unwrap();
+            let value = bundle.authorization.input_amounts[index];
+            let script_pubkey = &bundle.authorization.input_scriptpubkeys[index];
+            let signable_input = |hash_type| SignableInput::Transparent {
+                hash_type,
+                index,
+                script_code: script_pubkey,
+                script_pubkey,
+                value,
+            };
+
+            assert_eq!(
+                v5_signature_hash(&txdata, &signable_input(SIGHASH_ALL), &txid_parts).as_ref(),
+                &tv.sighash_all.unwrap()
+            );
+
+            assert_eq!(
+                v5_signature_hash(&txdata, &signable_input(SIGHASH_NONE), &txid_parts).as_ref(),
+                &tv.sighash_none.unwrap()
+            );
+
+            if index < bundle.vout.len() {
                 assert_eq!(
-                    v5_signature_hash(tx.deref(), SIGHASH_SINGLE, &signable_input, &txid_parts)
+                    v5_signature_hash(&txdata, &signable_input(SIGHASH_SINGLE), &txid_parts)
                         .as_ref(),
                     &tv.sighash_single.unwrap()
                 );
+            } else {
+                assert_eq!(tv.sighash_single, None);
+            }
 
+            assert_eq!(
+                v5_signature_hash(
+                    &txdata,
+                    &signable_input(SIGHASH_ALL | SIGHASH_ANYONECANPAY),
+                    &txid_parts,
+                )
+                .as_ref(),
+                &tv.sighash_all_anyone.unwrap()
+            );
+
+            assert_eq!(
+                v5_signature_hash(
+                    &txdata,
+                    &signable_input(SIGHASH_NONE | SIGHASH_ANYONECANPAY),
+                    &txid_parts,
+                )
+                .as_ref(),
+                &tv.sighash_none_anyone.unwrap()
+            );
+
+            if index < bundle.vout.len() {
                 assert_eq!(
                     v5_signature_hash(
-                        tx.deref(),
-                        SIGHASH_ALL | SIGHASH_ANYONECANPAY,
-                        &signable_input,
-                        &txid_parts,
-                    )
-                    .as_ref(),
-                    &tv.sighash_all_anyone.unwrap()
-                );
-
-                assert_eq!(
-                    v5_signature_hash(
-                        tx.deref(),
-                        SIGHASH_NONE | SIGHASH_ANYONECANPAY,
-                        &signable_input,
-                        &txid_parts,
-                    )
-                    .as_ref(),
-                    &tv.sighash_none_anyone.unwrap()
-                );
-
-                assert_eq!(
-                    v5_signature_hash(
-                        tx.deref(),
-                        SIGHASH_SINGLE | SIGHASH_ANYONECANPAY,
-                        &signable_input,
+                        &txdata,
+                        &signable_input(SIGHASH_SINGLE | SIGHASH_ANYONECANPAY),
                         &txid_parts,
                     )
                     .as_ref(),
                     &tv.sighash_single_anyone.unwrap()
                 );
-            }
-            _ => {
-                let signable_input = SignableInput::Shielded;
-
-                assert_eq!(
-                    v5_signature_hash(tx.deref(), SIGHASH_ALL, &signable_input, &txid_parts)
-                        .as_ref(),
-                    tv.sighash_all
-                );
+            } else {
+                assert_eq!(tv.sighash_single_anyone, None);
             }
         };
+
+        assert_eq!(
+            v5_signature_hash(&txdata, &SignableInput::Shielded, &txid_parts).as_ref(),
+            tv.sighash_shielded
+        );
     }
 }
