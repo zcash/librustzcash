@@ -33,7 +33,7 @@ secp256k1 = { version = "0.20", optional = true }
 sha2 = { version = "0.9", optional = true }
 subtle = "2.2.3"
 time = "0.2"
-zcash_note_encryption = { version = "0.0", path = "../components/zcash_note_encryption" }
+zcash_note_encryption = { version = "0.1", path = "../components/zcash_note_encryption" }
 zcash_primitives = { version = "0.5", path = "../zcash_primitives" }
 
 [build-dependencies]

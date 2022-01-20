@@ -10,8 +10,8 @@ use std::convert::TryInto;
 use zcash_note_encryption::{
     try_compact_note_decryption, try_note_decryption, try_output_recovery_with_ock,
     try_output_recovery_with_ovk, BatchDomain, Domain, EphemeralKeyBytes, NoteEncryption,
-    NotePlaintextBytes, NoteValidity, OutPlaintextBytes, OutgoingCipherKey, ShieldedOutput,
-    COMPACT_NOTE_SIZE, NOTE_PLAINTEXT_SIZE, OUT_PLAINTEXT_SIZE,
+    NotePlaintextBytes, OutPlaintextBytes, OutgoingCipherKey, ShieldedOutput, COMPACT_NOTE_SIZE,
+    ENC_CIPHERTEXT_SIZE, NOTE_PLAINTEXT_SIZE, OUT_PLAINTEXT_SIZE,
 };
 
 use crate::{
@@ -247,18 +247,6 @@ impl<P: consensus::Parameters> Domain for SaplingDomain<P> {
         jubjub::ExtendedPoint::from_bytes(&ephemeral_key.0).into()
     }
 
-    fn check_epk_bytes<F: FnOnce(&Self::EphemeralSecretKey) -> NoteValidity>(
-        note: &Note,
-        check: F,
-    ) -> NoteValidity {
-        if let Some(derived_esk) = note.derive_esk() {
-            check(&derived_esk)
-        } else {
-            // Before ZIP 212
-            NoteValidity::Valid
-        }
-    }
-
     fn parse_note_plaintext_without_memo_ivk(
         &self,
         ivk: &Self::IncomingViewingKey,
@@ -274,9 +262,9 @@ impl<P: consensus::Parameters> Domain for SaplingDomain<P> {
         pk_d: &Self::DiversifiedTransmissionKey,
         esk: &Self::EphemeralSecretKey,
         ephemeral_key: &EphemeralKeyBytes,
-        plaintext: &[u8],
+        plaintext: &NotePlaintextBytes,
     ) -> Option<(Self::Note, Self::Recipient)> {
-        sapling_parse_note_plaintext_without_memo(&self, plaintext, |diversifier| {
+        sapling_parse_note_plaintext_without_memo(&self, &plaintext.0, |diversifier| {
             if (diversifier.g_d()? * esk).to_bytes() == ephemeral_key.0 {
                 Some(*pk_d)
             } else {
@@ -289,29 +277,24 @@ impl<P: consensus::Parameters> Domain for SaplingDomain<P> {
         note.cmu()
     }
 
-    fn extract_pk_d(op: &[u8; OUT_PLAINTEXT_SIZE]) -> Option<Self::DiversifiedTransmissionKey> {
-        let pk_d = jubjub::SubgroupPoint::from_bytes(
-            op[0..32].try_into().expect("slice is the correct length"),
-        );
-
-        if pk_d.is_none().into() {
-            None
-        } else {
-            Some(pk_d.unwrap())
-        }
+    fn extract_pk_d(op: &OutPlaintextBytes) -> Option<Self::DiversifiedTransmissionKey> {
+        jubjub::SubgroupPoint::from_bytes(
+            op.0[0..32].try_into().expect("slice is the correct length"),
+        )
+        .into()
     }
 
-    fn extract_esk(op: &[u8; OUT_PLAINTEXT_SIZE]) -> Option<Self::EphemeralSecretKey> {
+    fn extract_esk(op: &OutPlaintextBytes) -> Option<Self::EphemeralSecretKey> {
         jubjub::Fr::from_repr(
-            op[32..OUT_PLAINTEXT_SIZE]
+            op.0[32..OUT_PLAINTEXT_SIZE]
                 .try_into()
                 .expect("slice is the correct length"),
         )
         .into()
     }
 
-    fn extract_memo(&self, plaintext: &[u8]) -> Self::Memo {
-        MemoBytes::from_bytes(&plaintext[COMPACT_NOTE_SIZE..NOTE_PLAINTEXT_SIZE]).unwrap()
+    fn extract_memo(&self, plaintext: &NotePlaintextBytes) -> Self::Memo {
+        MemoBytes::from_bytes(&plaintext.0[COMPACT_NOTE_SIZE..NOTE_PLAINTEXT_SIZE]).unwrap()
     }
 }
 
@@ -404,7 +387,7 @@ pub fn plaintext_version_is_valid<P: consensus::Parameters>(
 
 pub fn try_sapling_note_decryption<
     P: consensus::Parameters,
-    Output: ShieldedOutput<SaplingDomain<P>>,
+    Output: ShieldedOutput<SaplingDomain<P>, ENC_CIPHERTEXT_SIZE>,
 >(
     params: &P,
     height: BlockHeight,
@@ -420,7 +403,7 @@ pub fn try_sapling_note_decryption<
 
 pub fn try_sapling_compact_note_decryption<
     P: consensus::Parameters,
-    Output: ShieldedOutput<SaplingDomain<P>>,
+    Output: ShieldedOutput<SaplingDomain<P>, COMPACT_NOTE_SIZE>,
 >(
     params: &P,
     height: BlockHeight,

@@ -149,6 +149,7 @@ impl DiversifierKey {
         d_j.copy_from_slice(&enc.to_bytes_le());
         let diversifier = Diversifier(d_j);
 
+        // validate that the generated diversifier maps to a jubjub subgroup point.
         diversifier.g_d().map(|_| diversifier)
     }
 
@@ -157,6 +158,21 @@ impl DiversifierKey {
     pub fn diversifier(&self, j: DiversifierIndex) -> Option<Diversifier> {
         let ff = FF1::<Aes256>::new(&self.0, 2).unwrap();
         Self::try_diversifier_internal(&ff, j)
+    }
+
+    /// Returns the diversifier index to which this key maps the given diversifier.
+    ///
+    /// This method cannot be used to verify whether the diversifier was originally
+    /// generated with this diversifier key, because all valid diversifiers can be
+    /// produced by all diversifier keys.
+    pub fn diversifier_index(&self, d: &Diversifier) -> DiversifierIndex {
+        let ff = FF1::<Aes256>::new(&self.0, 2).unwrap();
+        let dec = ff
+            .decrypt(&[], &BinaryNumeralString::from_bytes_le(&d.0[..]))
+            .unwrap();
+        let mut j = DiversifierIndex::new();
+        j.0.copy_from_slice(&dec.to_bytes_le());
+        j
     }
 
     /// Returns the first index starting from j that generates a valid
@@ -179,6 +195,42 @@ impl DiversifierKey {
             }
         }
     }
+}
+
+/// Attempt to produce a payment address given the specified diversifier
+/// index, and return None if the specified index does not produce a valid
+/// diversifier.
+pub fn sapling_address(
+    fvk: &FullViewingKey,
+    dk: &DiversifierKey,
+    j: DiversifierIndex,
+) -> Option<PaymentAddress> {
+    dk.diversifier(j)
+        .and_then(|d_j| fvk.vk.to_payment_address(d_j))
+}
+
+/// Search the diversifier space starting at diversifier index `j` for
+/// one which will produce a valid diversifier, and return the payment address
+/// constructed using that diversifier along with the index at which the
+/// valid diversifier was found.
+pub fn sapling_find_address(
+    fvk: &FullViewingKey,
+    dk: &DiversifierKey,
+    j: DiversifierIndex,
+) -> Option<(DiversifierIndex, PaymentAddress)> {
+    let (j, d_j) = dk.find_diversifier(j)?;
+    fvk.vk.to_payment_address(d_j).map(|addr| (j, addr))
+}
+
+/// Returns the payment address corresponding to the smallest valid diversifier
+/// index, along with that index.
+pub fn sapling_default_address(
+    fvk: &FullViewingKey,
+    dk: &DiversifierKey,
+) -> (DiversifierIndex, PaymentAddress) {
+    // This unwrap is safe, if you have to search the 2^88 space of
+    // diversifiers it'll never return anyway.
+    sapling_find_address(fvk, dk, DiversifierIndex::new()).unwrap()
 }
 
 /// A Sapling extended spending key
@@ -445,9 +497,7 @@ impl ExtendedFullViewingKey {
     /// index, and return None if the specified index does not produce a valid
     /// diversifier.
     pub fn address(&self, j: DiversifierIndex) -> Option<PaymentAddress> {
-        self.dk
-            .diversifier(j)
-            .and_then(|d_j| self.fvk.vk.to_payment_address(d_j))
+        sapling_address(&self.fvk, &self.dk, j)
     }
 
     /// Search the diversifier space starting at diversifier index `j` for
@@ -455,16 +505,13 @@ impl ExtendedFullViewingKey {
     /// constructed using that diversifier along with the index at which the
     /// valid diversifier was found.
     pub fn find_address(&self, j: DiversifierIndex) -> Option<(DiversifierIndex, PaymentAddress)> {
-        let (j, d_j) = self.dk.find_diversifier(j)?;
-        self.fvk.vk.to_payment_address(d_j).map(|addr| (j, addr))
+        sapling_find_address(&self.fvk, &self.dk, j)
     }
 
     /// Returns the payment address corresponding to the smallest valid diversifier
     /// index, along with that index.
     pub fn default_address(&self) -> (DiversifierIndex, PaymentAddress) {
-        // This unwrap is safe, if you have to search the 2^88 space of
-        // diversifiers it'll never return anyway.
-        self.find_address(DiversifierIndex::new()).unwrap()
+        sapling_default_address(&self.fvk, &self.dk)
     }
 }
 
@@ -547,6 +594,7 @@ mod tests {
         // j = 0
         let d_j = dk.diversifier(j_0).unwrap();
         assert_eq!(d_j.0, d_0);
+        assert_eq!(dk.diversifier_index(&Diversifier(d_0)), j_0);
 
         // j = 1
         assert_eq!(dk.diversifier(j_1), None);
@@ -557,6 +605,7 @@ mod tests {
         // j = 3
         let d_j = dk.diversifier(j_3).unwrap();
         assert_eq!(d_j.0, d_3);
+        assert_eq!(dk.diversifier_index(&Diversifier(d_3)), j_3);
     }
 
     #[test]

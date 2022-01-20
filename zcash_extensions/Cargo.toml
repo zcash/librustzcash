@@ -9,16 +9,14 @@ license = "MIT OR Apache-2.0"
 edition = "2018"
 
 [dependencies]
-blake2b_simd = "0.5"
+blake2b_simd = "1"
 zcash_primitives = { version = "0.5", path = "../zcash_primitives", features = ["zfuture" ] }
 
 [dev-dependencies]
 ff = "0.11"
 jubjub = "0.8"
-orchard = "0.0"
 rand_core = "0.6"
 zcash_proofs = { version = "0.5", path = "../zcash_proofs" }
-secp256k1 = { version = "0.20", features = ["rand", "bitcoin_hashes"] }
 
 [features]
 transparent-inputs = []

@@ -1,9 +1,13 @@
 use core::fmt::Debug;
+use std::convert::TryInto;
+
 use ff::PrimeField;
 use group::GroupEncoding;
 use std::io::{self, Read, Write};
 
-use zcash_note_encryption::{EphemeralKeyBytes, ShieldedOutput, COMPACT_NOTE_SIZE};
+use zcash_note_encryption::{
+    EphemeralKeyBytes, ShieldedOutput, COMPACT_NOTE_SIZE, ENC_CIPHERTEXT_SIZE,
+};
 
 use crate::{
     consensus,
@@ -219,7 +223,9 @@ pub struct OutputDescription<Proof> {
     pub zkproof: Proof,
 }
 
-impl<P: consensus::Parameters, A> ShieldedOutput<SaplingDomain<P>> for OutputDescription<A> {
+impl<P: consensus::Parameters, A> ShieldedOutput<SaplingDomain<P>, ENC_CIPHERTEXT_SIZE>
+    for OutputDescription<A>
+{
     fn ephemeral_key(&self) -> EphemeralKeyBytes {
         self.ephemeral_key.clone()
     }
@@ -228,7 +234,7 @@ impl<P: consensus::Parameters, A> ShieldedOutput<SaplingDomain<P>> for OutputDes
         self.cmu.to_repr()
     }
 
-    fn enc_ciphertext(&self) -> &[u8] {
+    fn enc_ciphertext(&self) -> &[u8; ENC_CIPHERTEXT_SIZE] {
         &self.enc_ciphertext
     }
 }
@@ -347,7 +353,7 @@ impl OutputDescriptionV5 {
 pub struct CompactOutputDescription {
     pub ephemeral_key: EphemeralKeyBytes,
     pub cmu: bls12_381::Scalar,
-    pub enc_ciphertext: Vec<u8>,
+    pub enc_ciphertext: [u8; COMPACT_NOTE_SIZE],
 }
 
 impl<A> From<OutputDescription<A>> for CompactOutputDescription {
@@ -355,12 +361,14 @@ impl<A> From<OutputDescription<A>> for CompactOutputDescription {
         CompactOutputDescription {
             ephemeral_key: out.ephemeral_key,
             cmu: out.cmu,
-            enc_ciphertext: out.enc_ciphertext[..COMPACT_NOTE_SIZE].to_vec(),
+            enc_ciphertext: out.enc_ciphertext[..COMPACT_NOTE_SIZE].try_into().unwrap(),
         }
     }
 }
 
-impl<P: consensus::Parameters> ShieldedOutput<SaplingDomain<P>> for CompactOutputDescription {
+impl<P: consensus::Parameters> ShieldedOutput<SaplingDomain<P>, COMPACT_NOTE_SIZE>
+    for CompactOutputDescription
+{
     fn ephemeral_key(&self) -> EphemeralKeyBytes {
         self.ephemeral_key.clone()
     }
@@ -369,7 +377,7 @@ impl<P: consensus::Parameters> ShieldedOutput<SaplingDomain<P>> for CompactOutpu
         self.cmu.to_repr()
     }
 
-    fn enc_ciphertext(&self) -> &[u8] {
+    fn enc_ciphertext(&self) -> &[u8; COMPACT_NOTE_SIZE] {
         &self.enc_ciphertext
     }
 }

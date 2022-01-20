@@ -19,8 +19,8 @@ all-features = true
 aes = "0.7"
 bitvec = "0.22"
 bip0039 = { version = "0.9", features = ["std", "all-languages"] }
-blake2b_simd = "0.5"
-blake2s_simd = "0.5"
+blake2b_simd = "1"
+blake2s_simd = "1"
 bls12_381 = "0.6"
 byteorder = "1"
 chacha20poly1305 = "0.9"
@@ -29,14 +29,12 @@ ff = "0.11"
 fpe = "0.5"
 group = "0.11"
 hex = "0.4"
-incrementalmerkletree = "0.1"
+incrementalmerkletree = "0.2"
 jubjub = "0.8"
 lazy_static = "1"
-log = "0.4"
 memuse = "0.2"
 nonempty = "0.7"
-orchard = "0.0"
-pasta_curves = "0.2.1"
+orchard = "=0.1.0-beta.1"
 proptest = { version = "1.0.0", optional = true }
 rand = "0.8"
 rand_core = "0.6"
@@ -45,17 +43,20 @@ secp256k1 = { version = "0.20", optional = true }
 sha2 = "0.9"
 subtle = "2.2.3"
 zcash_encoding = { version = "0.0", path = "../components/zcash_encoding" }
-zcash_note_encryption = { version = "0.0", path = "../components/zcash_note_encryption" }
+
+[dependencies.zcash_note_encryption]
+version = "0.1"
+path = "../components/zcash_note_encryption"
+features = ["pre-zip-212"]
 
 [dev-dependencies]
 criterion = "0.3"
-hex-literal = "0.3"
 proptest = "1.0.0"
 rand_xorshift = "0.3"
-orchard = { version = "0.0", features = ["test-dependencies"] }
+orchard = { version = "=0.1.0-beta.1", features = ["test-dependencies"] }
 
 [target.'cfg(unix)'.dev-dependencies]
-pprof = { version = "0.5", features = ["criterion", "flamegraph"] }
+pprof = { version = "=0.6.1", features = ["criterion", "flamegraph"] }
 
 [features]
 transparent-inputs = ["ripemd160", "secp256k1"]

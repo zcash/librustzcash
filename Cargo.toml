@@ -19,9 +19,6 @@ panic = 'abort'
 codegen-units = 1
 
 [patch.crates-io]
-# In development.
-orchard = { git = "https://github.com/zcash/orchard.git", rev = "8c018eff7e795b16fc68aed22d0fd4eebe2710ec" }
-incrementalmerkletree = { git = "https://github.com/zcash/incrementalmerkletree.git", rev = "b7bd6246122a6e9ace8edb51553fbf5228906cbb" }
 zcash_encoding = { path = "components/zcash_encoding" }
 zcash_note_encryption = { path = "components/zcash_note_encryption" }
 hdwallet = { git = "https://github.com/nuttycom/hdwallet", rev = "576683b9f2865f1118c309017ff36e01f84420c9" }
