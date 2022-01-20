@@ -36,8 +36,6 @@ where
     P: consensus::Parameters,
     D: WalletWrite<Error = E>,
 {
-    debug!("decrypt_and_store: {:?}", tx);
-
     // Fetch the ExtendedFullViewingKeys we are tracking
     let extfvks = data.get_extended_full_viewing_keys()?;
 
@@ -209,7 +207,7 @@ where
 /// * `extsk`: The extended spending key that controls the funds that will be spent
 ///   in the resulting transaction.
 /// * `account`: The ZIP32 account identifier associated with the extended spending
-///   key that controls the funds to be used in creating this transaction.  This ]
+///   key that controls the funds to be used in creating this transaction.  This
 ///   procedure will return an error if this does not correctly correspond to `extsk`.
 /// * `request`: The ZIP-321 payment request specifying the recipients and amounts
 ///   for the transaction.
@@ -353,6 +351,7 @@ where
         created: time::OffsetDateTime::now_utc(),
         outputs: sent_outputs,
         account,
+        #[cfg(feature = "transparent-inputs")]
         utxos_spent: vec![],
     })
 }

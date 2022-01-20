@@ -5,6 +5,11 @@
 /// [SLIP 44]: https://github.com/satoshilabs/slips/blob/master/slip-0044.md
 pub const COIN_TYPE: u32 = 1;
 
+/// The mainnet Wallet Import Format (WIF) lead byte.
+///
+/// [WIF]: https://en.bitcoin.it/wiki/Wallet_import_format
+pub const WIF_LEAD_BYTE: u8 = 0xEF;
+
 /// The HRP for a Bech32-encoded testnet [`ExtendedSpendingKey`].
 ///
 /// Defined in [ZIP 32].

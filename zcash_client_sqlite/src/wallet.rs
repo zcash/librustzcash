@@ -18,10 +18,7 @@ use zcash_primitives::{
     memo::{Memo, MemoBytes},
     merkle_tree::{CommitmentTree, IncrementalWitness},
     sapling::{Node, Note, Nullifier, PaymentAddress},
-    transaction::{
-        components::{Amount, OutPoint},
-        Transaction, TxId,
-    },
+    transaction::{components::Amount, Transaction, TxId},
     zip32::ExtendedFullViewingKey,
 };
 
@@ -37,13 +34,16 @@ use zcash_client_backend::{
 
 use crate::{error::SqliteClientError, DataConnStmtCache, NoteId, WalletDb, PRUNING_HEIGHT};
 
-use {zcash_client_backend::encoding::AddressCodec, zcash_primitives::legacy::TransparentAddress};
+use zcash_primitives::legacy::TransparentAddress;
 
 #[cfg(feature = "transparent-inputs")]
 use {
     crate::UtxoId,
-    zcash_client_backend::wallet::WalletTransparentOutput,
-    zcash_primitives::{legacy::Script, transaction::components::TxOut},
+    zcash_client_backend::{encoding::AddressCodec, wallet::WalletTransparentOutput},
+    zcash_primitives::{
+        legacy::Script,
+        transaction::components::{OutPoint, TxOut},
+    },
 };
 
 pub mod init;
@@ -686,6 +686,7 @@ pub fn get_nullifiers<P>(
     Ok(res)
 }
 
+/// Returns the nullifiers for the notes that this wallet is tracking.
 pub fn get_all_nullifiers<P>(
     wdb: &WalletDb<P>,
 ) -> Result<Vec<(AccountId, Nullifier)>, SqliteClientError> {
@@ -704,6 +705,9 @@ pub fn get_all_nullifiers<P>(
     Ok(res)
 }
 
+/// Returns unspent transparent outputs that have been received by this wallet at the given
+/// transparent address, such that the block that included the transaction was mined at a
+/// height less than or equal to the provided `max_height`.
 #[cfg(feature = "transparent-inputs")]
 pub fn get_unspent_transparent_outputs<P: consensus::Parameters>(
     wdb: &WalletDb<P>,
@@ -849,7 +853,8 @@ pub fn mark_sapling_note_spent<'a, P>(
     Ok(())
 }
 
-/// Records the specified shielded output as having been received.
+/// Marks the given UTXO as having been spent.
+#[cfg(feature = "transparent-inputs")]
 pub fn mark_transparent_utxo_spent<'a, P>(
     stmts: &mut DataConnStmtCache<'a, P>,
     tx_ref: i64,
@@ -868,6 +873,7 @@ pub fn mark_transparent_utxo_spent<'a, P>(
     Ok(())
 }
 
+/// Adds the given received UTXO to the datastore.
 #[cfg(feature = "transparent-inputs")]
 pub fn put_received_transparent_utxo<'a, P: consensus::Parameters>(
     stmts: &mut DataConnStmtCache<'a, P>,
@@ -892,6 +898,10 @@ pub fn put_received_transparent_utxo<'a, P: consensus::Parameters>(
     Ok(UtxoId(stmts.wallet_db.conn.last_insert_rowid()))
 }
 
+/// Removes all records of UTXOs that were recorded as having been received
+/// at block heights greater than the given height. Used in the case of chain
+/// rollback.
+#[cfg(feature = "transparent-inputs")]
 pub fn delete_utxos_above<'a, P: consensus::Parameters>(
     stmts: &mut DataConnStmtCache<'a, P>,
     taddr: &TransparentAddress,
@@ -907,9 +917,11 @@ pub fn delete_utxos_above<'a, P: consensus::Parameters>(
     Ok(rows)
 }
 
-// Assumptions:
-// - A transaction will not contain more than 2^63 shielded outputs.
-// - A note value will never exceed 2^63 zatoshis.
+/// Records the specified shielded output as having been received.
+///
+/// This implementation assumes:
+/// - A transaction will not contain more than 2^63 shielded outputs.
+/// - A note value will never exceed 2^63 zatoshis.
 pub fn put_received_note<'a, P, T: ShieldedOutput>(
     stmts: &mut DataConnStmtCache<'a, P>,
     output: &T,
@@ -1024,6 +1036,10 @@ pub fn put_sent_note<'a, P: consensus::Parameters>(
     Ok(())
 }
 
+/// Adds information about a sent transparent UTXO to the database if it does not already
+/// exist, or updates it if a record for the utxo already exists.
+///
+/// `output_index` is the index within transparent UTXOs of the transaction that contains the recipient output.
 pub fn put_sent_utxo<'a, P: consensus::Parameters>(
     stmts: &mut DataConnStmtCache<'a, P>,
     tx_ref: i64,
@@ -1033,7 +1049,7 @@ pub fn put_sent_utxo<'a, P: consensus::Parameters>(
     value: Amount,
 ) -> Result<(), SqliteClientError> {
     let ivalue: i64 = value.into();
-    // Try updating an existing sent note.
+    // Try updating an existing sent utxo.
     if stmts.stmt_update_sent_note.execute(params![
         account.0 as i64,
         encode_transparent_address_p(&stmts.wallet_db.params, &to),
@@ -1081,6 +1097,9 @@ pub fn insert_sent_note<'a, P: consensus::Parameters>(
     Ok(())
 }
 
+/// Inserts information about a sent transparent UTXO into the wallet database.
+///
+/// `output_index` is the index within transparent UTXOs of the transaction that contains the recipient output.
 pub fn insert_sent_utxo<'a, P: consensus::Parameters>(
     stmts: &mut DataConnStmtCache<'a, P>,
     tx_ref: i64,

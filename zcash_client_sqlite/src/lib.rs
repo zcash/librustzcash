@@ -144,6 +144,7 @@ impl<P: consensus::Parameters> WalletDb<P> {
                 stmt_mark_sapling_note_spent: self.conn.prepare(
                     "UPDATE received_notes SET spent = ? WHERE nf = ?"
                 )?,
+                #[cfg(feature = "transparent-inputs")]
                 stmt_mark_transparent_utxo_spent: self.conn.prepare(
                     "UPDATE utxos SET spent_in_tx = :spent_in_tx
                     WHERE prevout_txid = :prevout_txid
@@ -154,6 +155,7 @@ impl<P: consensus::Parameters> WalletDb<P> {
                     "INSERT INTO utxos (address, prevout_txid, prevout_idx, script, value_zat, height)
                     VALUES (:address, :prevout_txid, :prevout_idx, :script, :value_zat, :height)"
                 )?,
+                #[cfg(feature = "transparent-inputs")]
                 stmt_delete_utxos: self.conn.prepare(
                     "DELETE FROM utxos WHERE address = :address AND height > :above_height"
                 )?,
@@ -330,10 +332,12 @@ pub struct DataConnStmtCache<'a, P> {
     stmt_select_tx_ref: Statement<'a>,
 
     stmt_mark_sapling_note_spent: Statement<'a>,
+    #[cfg(feature = "transparent-inputs")]
     stmt_mark_transparent_utxo_spent: Statement<'a>,
 
     #[cfg(feature = "transparent-inputs")]
     stmt_insert_received_transparent_utxo: Statement<'a>,
+    #[cfg(feature = "transparent-inputs")]
     stmt_delete_utxos: Statement<'a>,
     stmt_insert_received_note: Statement<'a>,
     stmt_update_received_note: Statement<'a>,
@@ -506,9 +510,6 @@ impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
                     wallet::mark_sapling_note_spent(up, tx_row, &spend.nf)?;
                 }
 
-                //TODO
-                //wallet::mark_transparent_utxo_spent(up, tx_ref, &utxo.outpoint)?;
-
                 for output in &tx.shielded_outputs {
                     let received_note_id = wallet::put_received_note(up, output, tx_row)?;
 
@@ -573,15 +574,14 @@ impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
                 }
             }
 
-            // if we have some transparent outputs yet no shielded outputs, then this is t2t and we
-            // can safely ignore it otherwise, this is z2t and it might have originated from our
-            // wallet
+            // If we have some transparent outputs:
             if !d_tx.tx.transparent_bundle().iter().any(|b| b.vout.is_empty()) {
-                // store received z->t transactions in the same way they would be stored by
-                // create_spend_to_address If there are any of our shielded inputs, we interpret this
-                // as our z->t tx and store the vouts as our sent notes.
+                // If there are no shielded spends, then this is t2t and we can safely ignore it
+                // otherwise, this is z2t and it might have originated from our wallet.
+                // Store received z->t transactions in the same way they would be stored by
+                // create_spend_to_address. If there are any of our shielded inputs, we interpret
+                // this as our z->t tx and store the vouts as our sent notes.
                 // FIXME this is a weird heuristic that is bound to trip us up somewhere.
-
                 if let Some((account_id, _)) = nullifiers.iter().find(
                     |(_, nf)|
                         d_tx.tx.sapling_bundle().iter().flat_map(|b| b.shielded_spends.iter())
@@ -622,6 +622,7 @@ impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
                 }
             }
 
+            #[cfg(feature = "transparent-inputs")]
             for utxo_outpoint in &sent_tx.utxos_spent {
                 wallet::mark_transparent_utxo_spent(up, tx_ref, &utxo_outpoint)?;
             }
@@ -751,6 +752,7 @@ mod tests {
             .unwrap()
     }
 
+    #[cfg(test)]
     pub(crate) fn init_test_accounts_table(
         db_data: &WalletDb<Network>,
     ) -> (ExtendedFullViewingKey, Option<TransparentAddress>) {

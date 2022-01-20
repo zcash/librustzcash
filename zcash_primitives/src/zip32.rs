@@ -92,9 +92,9 @@ impl ChildIndex {
     }
 }
 
-/// A chain code
+/// A BIP-32 chain code
 #[derive(Clone, Copy, Debug, PartialEq)]
-struct ChainCode([u8; 32]);
+pub struct ChainCode([u8; 32]);
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct DiversifierIndex(pub [u8; 11]);

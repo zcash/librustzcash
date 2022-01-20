@@ -12,7 +12,6 @@ use {
     hdwallet::{ExtendedPrivKey, ExtendedPubKey, KeyIndex},
     secp256k1::{key::PublicKey, key::SecretKey, Secp256k1},
     sha2::{Digest, Sha256},
-    std::convert::TryInto,
     zcash_primitives::consensus,
 };
 
@@ -63,7 +62,7 @@ pub fn derive_transparent_address_from_secret_key(
 pub fn derive_transparent_address_from_public_key(
     public_key: &secp256k1::key::PublicKey,
 ) -> TransparentAddress {
-    let mut hash160 = ripemd160::Ripemd160::new();
+    let mut hash160 = ripemd::Ripemd160::new();
     hash160.update(Sha256::digest(&public_key.serialize()));
     TransparentAddress::PublicKey(*hash160.finalize().as_ref())
 }
@@ -92,6 +91,11 @@ pub fn derive_public_key_from_seed<P: consensus::Parameters>(
     Ok(pub_key.public_key)
 }
 
+/// Perform derivation of the extended private key for the BIP-44 path:
+/// `m/44'/<coin_type>'/<account>'
+///
+/// This produces the extended private key for the external (non-change)
+/// address at the specified index for the provided account.
 #[cfg(feature = "transparent-inputs")]
 pub fn derive_extended_private_key_from_seed<P: consensus::Parameters>(
     params: &P,
@@ -109,16 +113,31 @@ pub fn derive_extended_private_key_from_seed<P: consensus::Parameters>(
     Ok(private_key)
 }
 
+/// Wallet Import Format encoded transparent private key.
 #[cfg(feature = "transparent-inputs")]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Wif(pub String);
 
 #[cfg(feature = "transparent-inputs")]
+#[derive(Debug)]
+pub enum WifError {
+    Base58(Bs58Error),
+    InvalidLeadByte(u8),
+    InvalidTrailingByte(u8),
+    Secp256k1(secp256k1::Error),
+}
+
+#[cfg(feature = "transparent-inputs")]
 impl Wif {
-    pub fn from_secret_key(sk: &SecretKey, compressed: bool) -> Self {
+    /// Encode the provided secret key in Wallet Import Format.
+    pub fn from_secret_key<P: consensus::Parameters>(
+        params: &P,
+        sk: &SecretKey,
+        compressed: bool,
+    ) -> Self {
         let secret_key = sk.as_ref();
         let mut wif = [0u8; 34];
-        wif[0] = 0x80;
+        wif[0] = params.wif_lead_byte();
         wif[1..33].copy_from_slice(secret_key);
         if compressed {
             wif[33] = 0x01;
@@ -127,17 +146,24 @@ impl Wif {
             Wif(bs58::encode(&wif[..]).with_check().into_string())
         }
     }
-}
 
-#[cfg(feature = "transparent-inputs")]
-impl<'a> TryInto<SecretKey> for &'a Wif {
-    type Error = Bs58Error;
-
-    fn try_into(self) -> Result<SecretKey, Self::Error> {
+    pub fn to_secret_key<P: consensus::Parameters>(
+        &self,
+        params: &P,
+    ) -> Result<SecretKey, WifError> {
         bs58::decode(&self.0)
             .with_check(None)
             .into_vec()
-            .map(|decoded| SecretKey::from_slice(&decoded[1..33]).expect("wrong size key"))
+            .map_err(WifError::Base58)
+            .and_then(|decoded| {
+                if decoded[0] != params.wif_lead_byte() {
+                    Err(WifError::InvalidLeadByte(decoded[0]))
+                } else if decoded[33] != 0x01 {
+                    Err(WifError::InvalidTrailingByte(decoded[33]))
+                } else {
+                    SecretKey::from_slice(&decoded[1..33]).map_err(WifError::Secp256k1)
+                }
+            })
     }
 }
 
@@ -202,7 +228,6 @@ mod tests {
         },
         crate::encoding::AddressCodec,
         secp256k1::key::SecretKey,
-        std::convert::TryInto,
         zcash_primitives::consensus::MAIN_NETWORK,
     };
 
@@ -222,7 +247,7 @@ mod tests {
     #[test]
     fn sk_to_wif() {
         let sk = derive_secret_key_from_seed(&MAIN_NETWORK, &seed(), AccountId(0), 0).unwrap();
-        let wif = Wif::from_secret_key(&sk, true).0;
+        let wif = Wif::from_secret_key(&MAIN_NETWORK, &sk, true).0;
         assert_eq!(
             wif,
             "L4BvDC33yLjMRxipZvdiUmdYeRfZmR8viziwsVwe72zJdGbiJPv2".to_string()
@@ -241,7 +266,7 @@ mod tests {
     #[test]
     fn sk_wif_to_taddr() {
         let sk_wif = Wif("L4BvDC33yLjMRxipZvdiUmdYeRfZmR8viziwsVwe72zJdGbiJPv2".to_string());
-        let sk: SecretKey = (&sk_wif).try_into().expect("invalid wif");
+        let sk: SecretKey = (&sk_wif).to_secret_key(&MAIN_NETWORK).expect("invalid wif");
         let taddr = derive_transparent_address_from_secret_key(&sk).encode(&MAIN_NETWORK);
         assert_eq!(taddr, "t1PKtYdJJHhc3Pxowmznkg7vdTwnhEsCvR4".to_string());
     }

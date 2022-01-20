@@ -161,7 +161,7 @@ pub fn init_wallet_db<P>(wdb: &WalletDb<P>) -> Result<(), rusqlite::Error> {
 /// let db_data = WalletDb::for_path(data_file.path(), Network::TestNetwork).unwrap();
 /// init_wallet_db(&db_data).unwrap();
 ///
-/// let seed = [0u8; 32];
+/// let seed = [0u8; 32]; // insecure; replace with a strong random seed
 /// let account = AccountId(0);
 /// let extsk = spending_key(&seed, Network::TestNetwork.coin_type(), account);
 /// let extfvk = ExtendedFullViewingKey::from(&extsk);

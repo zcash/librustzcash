@@ -10,10 +10,7 @@ use zcash_primitives::{
     memo::{Memo, MemoBytes},
     merkle_tree::{CommitmentTree, IncrementalWitness},
     sapling::{Node, Nullifier, PaymentAddress},
-    transaction::{
-        components::{Amount, OutPoint},
-        Transaction, TxId,
-    },
+    transaction::{components::Amount, Transaction, TxId},
     zip32::ExtendedFullViewingKey,
 };
 
@@ -25,7 +22,10 @@ use crate::{
 };
 
 #[cfg(feature = "transparent-inputs")]
-use {crate::wallet::WalletTransparentOutput, zcash_primitives::legacy::TransparentAddress};
+use {
+    crate::wallet::WalletTransparentOutput,
+    zcash_primitives::{legacy::TransparentAddress, transaction::components::OutPoint},
+};
 
 pub mod chain;
 pub mod error;
@@ -227,6 +227,7 @@ pub struct SentTransaction<'a> {
     pub created: time::OffsetDateTime,
     pub account: AccountId,
     pub outputs: Vec<SentTransactionOutput<'a>>,
+    #[cfg(feature = "transparent-inputs")]
     pub utxos_spent: Vec<OutPoint>,
 }
 

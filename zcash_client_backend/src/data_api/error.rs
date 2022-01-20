@@ -63,9 +63,6 @@ pub enum Error<NoteId> {
     /// height when Sapling was not yet active.
     SaplingNotActive,
 
-    /// A memo is required when constructing a shielded output.
-    MemoRequired,
-
     /// It is forbidden to provide a memo when constructing a transparent output.
     MemoForbidden,
 }
@@ -112,7 +109,6 @@ impl<N: fmt::Display> fmt::Display for Error<N> {
             Error::Builder(e) => write!(f, "{:?}", e),
             Error::Protobuf(e) => write!(f, "{}", e),
             Error::SaplingNotActive => write!(f, "Could not determine Sapling upgrade activation height."),
-            Error::MemoRequired => write!(f, "A memo is required when sending to a shielded address."),
             Error::MemoForbidden => write!(f, "It is not possible to send a memo to a transparent address."),
         }
     }
