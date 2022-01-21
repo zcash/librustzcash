@@ -8,6 +8,7 @@ use zcash_primitives::{
         components::{amount::DEFAULT_FEE, Amount},
         Transaction,
     },
+    transparent,
     zip32::{ExtendedFullViewingKey, ExtendedSpendingKey},
 };
 
@@ -20,9 +21,6 @@ use crate::{
     wallet::{AccountId, OvkPolicy},
     zip321::{Payment, TransactionRequest},
 };
-
-#[cfg(feature = "transparent-inputs")]
-use crate::keys::transparent;
 
 /// Scans a [`Transaction`] for any information that can be decrypted by the accounts in
 /// the wallet, and saves it to the wallet.
