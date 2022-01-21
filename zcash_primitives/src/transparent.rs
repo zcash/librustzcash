@@ -1,5 +1,5 @@
 use crate::{legacy::TransparentAddress, sapling::keys::prf_expand_vec};
-use hdwallet::{ExtendedPrivKey, ExtendedPubKey};
+use hdwallet::{traits::Deserialize, ExtendedPrivKey, ExtendedPubKey};
 use sha2::{Digest, Sha256};
 use std::convert::TryInto;
 
@@ -30,6 +30,15 @@ pub fn pubkey_to_address(pubkey: &secp256k1::key::PublicKey) -> TransparentAddre
 /// level `m/44'/<coin_type>'/<account>'/0/<child_index>
 #[derive(Clone, Debug)]
 pub struct ExternalPubKey(pub ExtendedPubKey);
+
+impl std::convert::TryFrom<&[u8]> for ExternalPubKey {
+    type Error = hdwallet::error::Error;
+
+    fn try_from(data: &[u8]) -> Result<Self, Self::Error> {
+        let ext_pub_key = ExtendedPubKey::deserialize(data)?;
+        Ok(Self(ext_pub_key))
+    }
+}
 
 impl ExternalPubKey {
     /// Returns the transparent address corresponding to
