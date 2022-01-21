@@ -16,6 +16,13 @@ use crate::{address_from_extfvk, error::SqliteClientError, WalletDb};
 
 /// Sets up the internal structure of the data database.
 ///
+/// The database structure is the same irrespective of whether or
+/// not transparent spends are enabled, and it is safe to use a
+/// wallet database created without the ability to create transparent
+/// spends with a build that enables transparent spends (though not
+/// the reverse, as wallet balance calculations would ignore the
+/// prior transparent inputs controlled by the wallet).
+///
 /// # Examples
 ///
 /// ```
