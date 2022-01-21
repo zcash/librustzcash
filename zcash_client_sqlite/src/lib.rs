@@ -702,14 +702,12 @@ mod tests {
     use rusqlite::params;
 
     use zcash_client_backend::{
-        keys::{spending_key, UnifiedFullViewingKey},
+        keys::{sapling, UnifiedFullViewingKey},
         proto::compact_formats::{CompactBlock, CompactOutput, CompactSpend, CompactTx},
     };
 
     #[cfg(feature = "transparent-inputs")]
-    use zcash_client_backend::keys::{
-        derive_secret_key_from_seed, derive_transparent_address_from_secret_key,
-    };
+    use zcash_client_backend::keys::transparent;
 
     use zcash_primitives::{
         block::BlockHash,
@@ -758,22 +756,23 @@ mod tests {
     ) -> (ExtendedFullViewingKey, Option<TransparentAddress>) {
         let seed = [0u8; 32];
 
-        let extsk = spending_key(&seed, network().coin_type(), AccountId(0));
+        let extsk = sapling::spending_key(&seed, network().coin_type(), AccountId(0));
         let extfvk = ExtendedFullViewingKey::from(&extsk);
 
         #[cfg(feature = "transparent-inputs")]
-        let taddr = {
-            let tsk = derive_secret_key_from_seed(&network(), &seed, AccountId(0), 0).unwrap();
-            Some(derive_transparent_address_from_secret_key(&tsk))
-        };
+        let tkey = Some(
+            transparent::AccountPrivKey::from_seed(&network(), &seed, AccountId(0))
+                .unwrap()
+                .to_account_pubkey()
+        );
 
         #[cfg(not(feature = "transparent-inputs"))]
-        let taddr = None;
+        let tkey = None;
 
         let ufvk =
-            UnifiedFullViewingKey::new(AccountId(0), taddr.clone(), Some(extfvk.clone())).unwrap();
+            UnifiedFullViewingKey::new(AccountId(0), tkey.clone(), Some(extfvk.clone())).unwrap();
         init_accounts_table(db_data, &[ufvk]).unwrap();
-        (extfvk, taddr)
+        (extfvk, tkey.map(|k| k.to_external_pubkey(0).unwrap().to_address()))
     }
 
     /// Create a fake CompactBlock at the given height, containing a single output paying

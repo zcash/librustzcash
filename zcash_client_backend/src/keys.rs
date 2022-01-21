@@ -1,169 +1,199 @@
 //! Helper functions for managing light client key material.
-
-use zcash_primitives::zip32::{ChildIndex, ExtendedSpendingKey};
-
 use crate::wallet::AccountId;
 
-use zcash_primitives::{legacy::TransparentAddress, zip32::ExtendedFullViewingKey};
+pub mod sapling {
+    pub use zcash_primitives::zip32::ExtendedFullViewingKey;
+    use zcash_primitives::zip32::{ChildIndex, ExtendedSpendingKey};
 
-#[cfg(feature = "transparent-inputs")]
-use {
-    bs58::{self, decode::Error as Bs58Error},
-    hdwallet::{ExtendedPrivKey, ExtendedPubKey, KeyIndex},
-    secp256k1::{key::PublicKey, key::SecretKey, Secp256k1},
-    sha2::{Digest, Sha256},
-    zcash_primitives::consensus,
-};
+    use crate::wallet::AccountId;
 
-/// Derives the ZIP 32 [`ExtendedSpendingKey`] for a given coin type and account from the
-/// given seed.
-///
-/// # Panics
-///
-/// Panics if `seed` is shorter than 32 bytes.
-///
-/// # Examples
-///
-/// ```
-/// use zcash_primitives::{constants::testnet::COIN_TYPE};
-/// use zcash_client_backend::{
-///     keys::spending_key,
-///     wallet::AccountId,
-/// };
-///
-/// let extsk = spending_key(&[0; 32][..], COIN_TYPE, AccountId(0));
-/// ```
-/// [`ExtendedSpendingKey`]: zcash_primitives::zip32::ExtendedSpendingKey
-pub fn spending_key(seed: &[u8], coin_type: u32, account: AccountId) -> ExtendedSpendingKey {
-    if seed.len() < 32 {
-        panic!("ZIP 32 seeds MUST be at least 32 bytes");
+    /// Derives the ZIP 32 [`ExtendedSpendingKey`] for a given coin type and account from the
+    /// given seed.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `seed` is shorter than 32 bytes.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use zcash_primitives::{constants::testnet::COIN_TYPE};
+    /// use zcash_client_backend::{
+    ///     keys::sapling,
+    ///     wallet::AccountId,
+    /// };
+    ///
+    /// let extsk = sapling::spending_key(&[0; 32][..], COIN_TYPE, AccountId(0));
+    /// ```
+    /// [`ExtendedSpendingKey`]: zcash_primitives::zip32::ExtendedSpendingKey
+    pub fn spending_key(seed: &[u8], coin_type: u32, account: AccountId) -> ExtendedSpendingKey {
+        if seed.len() < 32 {
+            panic!("ZIP 32 seeds MUST be at least 32 bytes");
+        }
+
+        ExtendedSpendingKey::from_path(
+            &ExtendedSpendingKey::master(&seed),
+            &[
+                ChildIndex::Hardened(32),
+                ChildIndex::Hardened(coin_type),
+                ChildIndex::Hardened(account.0),
+            ],
+        )
     }
-
-    ExtendedSpendingKey::from_path(
-        &ExtendedSpendingKey::master(&seed),
-        &[
-            ChildIndex::Hardened(32),
-            ChildIndex::Hardened(coin_type),
-            ChildIndex::Hardened(account.0),
-        ],
-    )
 }
 
 #[cfg(feature = "transparent-inputs")]
-pub fn derive_transparent_address_from_secret_key(
-    secret_key: &secp256k1::key::SecretKey,
-) -> TransparentAddress {
-    let secp = Secp256k1::new();
-    let pk = PublicKey::from_secret_key(&secp, secret_key);
-    derive_transparent_address_from_public_key(&pk)
-}
+pub mod transparent {
+    use bs58::{self, decode::Error as Bs58Error};
+    use hdwallet::{ExtendedPrivKey, ExtendedPubKey, KeyIndex};
+    use secp256k1::key::SecretKey;
+    use sha2::{Digest, Sha256};
 
-#[cfg(feature = "transparent-inputs")]
-pub fn derive_transparent_address_from_public_key(
-    public_key: &secp256k1::key::PublicKey,
-) -> TransparentAddress {
-    let mut hash160 = ripemd::Ripemd160::new();
-    hash160.update(Sha256::digest(&public_key.serialize()));
-    TransparentAddress::PublicKey(*hash160.finalize().as_ref())
-}
+    use crate::wallet::AccountId;
+    use zcash_primitives::{consensus, legacy::TransparentAddress};
 
-#[cfg(feature = "transparent-inputs")]
-pub fn derive_secret_key_from_seed<P: consensus::Parameters>(
-    params: &P,
-    seed: &[u8],
-    account: AccountId,
-    index: u32,
-) -> Result<SecretKey, hdwallet::error::Error> {
-    let private_key =
-        derive_extended_private_key_from_seed(params, seed, account, index)?.private_key;
-    Ok(private_key)
-}
+    /// A type representing a BIP-44 private key at the account path level
+    /// `m/44'/<coin_type>'/<account>'
+    #[derive(Clone, Debug)]
+    pub struct AccountPrivKey(ExtendedPrivKey);
 
-#[cfg(feature = "transparent-inputs")]
-pub fn derive_public_key_from_seed<P: consensus::Parameters>(
-    params: &P,
-    seed: &[u8],
-    account: AccountId,
-    index: u32,
-) -> Result<PublicKey, hdwallet::error::Error> {
-    let private_key = derive_extended_private_key_from_seed(params, seed, account, index)?;
-    let pub_key = ExtendedPubKey::from_private_key(&private_key);
-    Ok(pub_key.public_key)
-}
+    impl AccountPrivKey {
+        /// Perform derivation of the extended private key for the BIP-44 path:
+        /// `m/44'/<coin_type>'/<account>'
+        ///
+        /// This produces the extended private key for the external (non-change)
+        /// address at the specified index for the provided account.
+        pub fn from_seed<P: consensus::Parameters>(
+            params: &P,
+            seed: &[u8],
+            account: AccountId,
+        ) -> Result<AccountPrivKey, hdwallet::error::Error> {
+            ExtendedPrivKey::with_seed(&seed)?
+                .derive_private_key(KeyIndex::hardened_from_normalize_index(44)?)?
+                .derive_private_key(KeyIndex::hardened_from_normalize_index(params.coin_type())?)?
+                .derive_private_key(KeyIndex::hardened_from_normalize_index(account.0)?)
+                .map(AccountPrivKey)
+        }
 
-/// Perform derivation of the extended private key for the BIP-44 path:
-/// `m/44'/<coin_type>'/<account>'
-///
-/// This produces the extended private key for the external (non-change)
-/// address at the specified index for the provided account.
-#[cfg(feature = "transparent-inputs")]
-pub fn derive_extended_private_key_from_seed<P: consensus::Parameters>(
-    params: &P,
-    seed: &[u8],
-    account: AccountId,
-    index: u32,
-) -> Result<ExtendedPrivKey, hdwallet::error::Error> {
-    let pk = ExtendedPrivKey::with_seed(&seed)?;
-    let private_key = pk
-        .derive_private_key(KeyIndex::hardened_from_normalize_index(44)?)?
-        .derive_private_key(KeyIndex::hardened_from_normalize_index(params.coin_type())?)?
-        .derive_private_key(KeyIndex::hardened_from_normalize_index(account.0)?)?
-        .derive_private_key(KeyIndex::Normal(0))?
-        .derive_private_key(KeyIndex::Normal(index))?;
-    Ok(private_key)
-}
+        pub fn to_account_pubkey(&self) -> AccountPubKey {
+            AccountPubKey(ExtendedPubKey::from_private_key(&self.0))
+        }
 
-/// Wallet Import Format encoded transparent private key.
-#[cfg(feature = "transparent-inputs")]
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct Wif(pub String);
-
-#[cfg(feature = "transparent-inputs")]
-#[derive(Debug)]
-pub enum WifError {
-    Base58(Bs58Error),
-    InvalidLeadByte(u8),
-    InvalidTrailingByte(u8),
-    Secp256k1(secp256k1::Error),
-}
-
-#[cfg(feature = "transparent-inputs")]
-impl Wif {
-    /// Encode the provided secret key in Wallet Import Format.
-    pub fn from_secret_key<P: consensus::Parameters>(
-        params: &P,
-        sk: &SecretKey,
-        compressed: bool,
-    ) -> Self {
-        let secret_key = sk.as_ref();
-        let mut wif = [0u8; 34];
-        wif[0] = params.wif_lead_byte();
-        wif[1..33].copy_from_slice(secret_key);
-        if compressed {
-            wif[33] = 0x01;
-            Wif(bs58::encode(&wif[..]).with_check().into_string())
-        } else {
-            Wif(bs58::encode(&wif[..]).with_check().into_string())
+        /// Derive BIP-44 private key at the external child path
+        /// `m/44'/<coin_type>'/<account>'/0/<child_index>
+        pub fn derive_external_secret_key(
+            &self,
+            child_index: u32,
+        ) -> Result<ExternalPrivKey, hdwallet::error::Error> {
+            self.0
+                .derive_private_key(KeyIndex::Normal(0))?
+                .derive_private_key(KeyIndex::Normal(child_index))
+                .map(ExternalPrivKey)
         }
     }
 
-    pub fn to_secret_key<P: consensus::Parameters>(
-        &self,
-        params: &P,
-    ) -> Result<SecretKey, WifError> {
-        bs58::decode(&self.0)
-            .with_check(None)
-            .into_vec()
-            .map_err(WifError::Base58)
-            .and_then(|decoded| {
-                if decoded[0] != params.wif_lead_byte() {
-                    Err(WifError::InvalidLeadByte(decoded[0]))
-                } else if decoded[33] != 0x01 {
-                    Err(WifError::InvalidTrailingByte(decoded[33]))
-                } else {
-                    SecretKey::from_slice(&decoded[1..33]).map_err(WifError::Secp256k1)
-                }
-            })
+    /// A type representing a BIP-44 public key at the account path level
+    /// `m/44'/<coin_type>'/<account>'
+    #[derive(Clone, Debug)]
+    pub struct AccountPubKey(ExtendedPubKey);
+
+    impl AccountPubKey {
+        pub fn to_external_pubkey(
+            &self,
+            child_index: u32,
+        ) -> Result<ExternalPubKey, hdwallet::error::Error> {
+            self.0
+                .derive_public_key(KeyIndex::Normal(0))?
+                .derive_public_key(KeyIndex::Normal(child_index))
+                .map(ExternalPubKey)
+        }
+    }
+
+    /// A type representing a private key at the BIP-44 external child
+    /// level `m/44'/<coin_type>'/<account>'/0/<child_index>
+    #[derive(Clone, Debug)]
+    pub struct ExternalPrivKey(ExtendedPrivKey);
+
+    impl ExternalPrivKey {
+        pub fn to_external_pubkey(&self) -> ExternalPubKey {
+            ExternalPubKey(ExtendedPubKey::from_private_key(&self.0))
+        }
+
+        pub fn secret_key(&self) -> &secp256k1::key::SecretKey {
+            &self.0.private_key
+        }
+    }
+
+    pub(crate) fn pubkey_to_address(pubkey: &secp256k1::key::PublicKey) -> TransparentAddress {
+        let mut hash160 = ripemd::Ripemd160::new();
+        hash160.update(Sha256::digest(pubkey.serialize()));
+        TransparentAddress::PublicKey(*hash160.finalize().as_ref())
+    }
+
+    /// A type representing a public key at the BIP-44 external child
+    /// level `m/44'/<coin_type>'/<account>'/0/<child_index>
+    #[derive(Clone, Debug)]
+    pub struct ExternalPubKey(ExtendedPubKey);
+
+    impl ExternalPubKey {
+        pub fn to_address(&self) -> TransparentAddress {
+            pubkey_to_address(&self.0.public_key)
+        }
+
+        pub fn public_key(&self) -> &secp256k1::key::PublicKey {
+            &self.0.public_key
+        }
+    }
+
+    /// Wallet Import Format encoded transparent private key.
+    #[derive(Clone, Debug, Eq, PartialEq)]
+    pub struct Wif(pub String);
+
+    #[derive(Debug)]
+    pub enum WifError {
+        Base58(Bs58Error),
+        InvalidLeadByte(u8),
+        InvalidTrailingByte(u8),
+        Secp256k1(secp256k1::Error),
+    }
+
+    impl Wif {
+        /// Encode the provided secret key in Wallet Import Format.
+        pub fn from_secret_key<P: consensus::Parameters>(
+            params: &P,
+            sk: &SecretKey,
+            compressed: bool,
+        ) -> Self {
+            let secret_key = sk.as_ref();
+            let mut wif = [0u8; 34];
+            wif[0] = params.wif_lead_byte();
+            wif[1..33].copy_from_slice(secret_key);
+            if compressed {
+                wif[33] = 0x01;
+                Wif(bs58::encode(&wif[..]).with_check().into_string())
+            } else {
+                Wif(bs58::encode(&wif[..]).with_check().into_string())
+            }
+        }
+
+        pub fn to_secret_key<P: consensus::Parameters>(
+            &self,
+            params: &P,
+        ) -> Result<SecretKey, WifError> {
+            bs58::decode(&self.0)
+                .with_check(None)
+                .into_vec()
+                .map_err(WifError::Base58)
+                .and_then(|decoded| {
+                    if decoded[0] != params.wif_lead_byte() {
+                        Err(WifError::InvalidLeadByte(decoded[0]))
+                    } else if decoded[33] != 0x01 {
+                        Err(WifError::InvalidTrailingByte(decoded[33]))
+                    } else {
+                        SecretKey::from_slice(&decoded[1..33]).map_err(WifError::Secp256k1)
+                    }
+                })
+        }
     }
 }
 
@@ -172,16 +202,16 @@ impl Wif {
 #[derive(Clone, Debug)]
 pub struct UnifiedFullViewingKey {
     account: AccountId,
-    transparent: Option<TransparentAddress>,
-    sapling: Option<ExtendedFullViewingKey>,
+    transparent: Option<transparent::AccountPubKey>,
+    sapling: Option<sapling::ExtendedFullViewingKey>,
 }
 
 impl UnifiedFullViewingKey {
     /// Construct a new unified full viewing key, if the required components are present.
     pub fn new(
         account: AccountId,
-        transparent: Option<TransparentAddress>,
-        sapling: Option<ExtendedFullViewingKey>,
+        transparent: Option<transparent::AccountPubKey>,
+        sapling: Option<sapling::ExtendedFullViewingKey>,
     ) -> Option<UnifiedFullViewingKey> {
         if sapling.is_none() {
             None
@@ -200,34 +230,27 @@ impl UnifiedFullViewingKey {
         self.account
     }
 
-    /// Returns the transparent component of the unified key.
-    // TODO: make this the pubkey rather than the address to
-    // permit child derivation
-    pub fn transparent(&self) -> Option<&TransparentAddress> {
+    /// Returns the transparent component of the unified key at the
+    /// BIP44 path `m/44'/<coin_type>'/<account>'`.
+    pub fn transparent(&self) -> Option<&transparent::AccountPubKey> {
         self.transparent.as_ref()
     }
 
     /// Returns the Sapling extended full viewing key component of this
     /// unified key.
-    pub fn sapling(&self) -> Option<&ExtendedFullViewingKey> {
+    pub fn sapling(&self) -> Option<&sapling::ExtendedFullViewingKey> {
         self.sapling.as_ref()
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::spending_key;
+    use super::sapling;
     use crate::wallet::AccountId;
 
     #[cfg(feature = "transparent-inputs")]
     use {
-        super::{
-            derive_public_key_from_seed, derive_secret_key_from_seed,
-            derive_transparent_address_from_public_key, derive_transparent_address_from_secret_key,
-            Wif,
-        },
-        crate::encoding::AddressCodec,
-        secp256k1::key::SecretKey,
+        super::transparent, crate::encoding::AddressCodec, secp256k1::key::SecretKey,
         zcash_primitives::consensus::MAIN_NETWORK,
     };
 
@@ -240,14 +263,17 @@ mod tests {
     #[test]
     #[should_panic]
     fn spending_key_panics_on_short_seed() {
-        let _ = spending_key(&[0; 31][..], 0, AccountId(0));
+        let _ = sapling::spending_key(&[0; 31][..], 0, AccountId(0));
     }
 
     #[cfg(feature = "transparent-inputs")]
     #[test]
     fn sk_to_wif() {
-        let sk = derive_secret_key_from_seed(&MAIN_NETWORK, &seed(), AccountId(0), 0).unwrap();
-        let wif = Wif::from_secret_key(&MAIN_NETWORK, &sk, true).0;
+        let sk = transparent::AccountPrivKey::from_seed(&MAIN_NETWORK, &seed(), AccountId(0))
+            .unwrap()
+            .derive_external_secret_key(0)
+            .unwrap();
+        let wif = transparent::Wif::from_secret_key(&MAIN_NETWORK, &sk.secret_key(), true).0;
         assert_eq!(
             wif,
             "L4BvDC33yLjMRxipZvdiUmdYeRfZmR8viziwsVwe72zJdGbiJPv2".to_string()
@@ -256,26 +282,25 @@ mod tests {
 
     #[cfg(feature = "transparent-inputs")]
     #[test]
-    fn sk_to_taddr() {
-        let sk = derive_secret_key_from_seed(&MAIN_NETWORK, &seed(), AccountId(0), 0).unwrap();
-        let taddr = derive_transparent_address_from_secret_key(&sk).encode(&MAIN_NETWORK);
-        assert_eq!(taddr, "t1PKtYdJJHhc3Pxowmznkg7vdTwnhEsCvR4".to_string());
-    }
-
-    #[cfg(feature = "transparent-inputs")]
-    #[test]
     fn sk_wif_to_taddr() {
-        let sk_wif = Wif("L4BvDC33yLjMRxipZvdiUmdYeRfZmR8viziwsVwe72zJdGbiJPv2".to_string());
+        let sk_wif =
+            transparent::Wif("L4BvDC33yLjMRxipZvdiUmdYeRfZmR8viziwsVwe72zJdGbiJPv2".to_string());
         let sk: SecretKey = (&sk_wif).to_secret_key(&MAIN_NETWORK).expect("invalid wif");
-        let taddr = derive_transparent_address_from_secret_key(&sk).encode(&MAIN_NETWORK);
+        let secp = secp256k1::Secp256k1::new();
+        let pubkey = secp256k1::key::PublicKey::from_secret_key(&secp, &sk);
+        let taddr = transparent::pubkey_to_address(&pubkey).encode(&MAIN_NETWORK);
         assert_eq!(taddr, "t1PKtYdJJHhc3Pxowmznkg7vdTwnhEsCvR4".to_string());
     }
 
     #[cfg(feature = "transparent-inputs")]
     #[test]
     fn pk_from_seed() {
-        let pk = derive_public_key_from_seed(&MAIN_NETWORK, &seed(), AccountId(0), 0).unwrap();
-        let hex_value = hex::encode(&pk.serialize());
+        let pk = transparent::AccountPrivKey::from_seed(&MAIN_NETWORK, &seed(), AccountId(0))
+            .unwrap()
+            .derive_external_secret_key(0)
+            .unwrap()
+            .to_external_pubkey();
+        let hex_value = hex::encode(&pk.public_key().serialize());
         assert_eq!(
             hex_value,
             "03b1d7fb28d17c125b504d06b1530097e0a3c76ada184237e3bc0925041230a5af".to_string()
@@ -285,8 +310,12 @@ mod tests {
     #[cfg(feature = "transparent-inputs")]
     #[test]
     fn pk_to_taddr() {
-        let pk = derive_public_key_from_seed(&MAIN_NETWORK, &seed(), AccountId(0), 0).unwrap();
-        let taddr = derive_transparent_address_from_public_key(&pk).encode(&MAIN_NETWORK);
+        let pk = transparent::AccountPrivKey::from_seed(&MAIN_NETWORK, &seed(), AccountId(0))
+            .unwrap()
+            .derive_external_secret_key(0)
+            .unwrap()
+            .to_external_pubkey();
+        let taddr = pk.to_address().encode(&MAIN_NETWORK);
         assert_eq!(taddr, "t1PKtYdJJHhc3Pxowmznkg7vdTwnhEsCvR4".to_string());
     }
 }

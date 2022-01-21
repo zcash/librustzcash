@@ -22,7 +22,7 @@ use crate::{
 };
 
 #[cfg(feature = "transparent-inputs")]
-use crate::keys::derive_transparent_address_from_secret_key;
+use crate::keys::transparent;
 
 /// Scans a [`Transaction`] for any information that can be decrypted by the accounts in
 /// the wallet, and saves it to the wallet.
@@ -103,7 +103,7 @@ where
 /// };
 /// use zcash_proofs::prover::LocalTxProver;
 /// use zcash_client_backend::{
-///     keys::spending_key,
+///     keys::sapling,
 ///     data_api::wallet::create_spend_to_address,
 ///     wallet::{AccountId, OvkPolicy},
 /// };
@@ -128,7 +128,7 @@ where
 /// };
 ///
 /// let account = AccountId(0);
-/// let extsk = spending_key(&[0; 32][..], COIN_TYPE, account);
+/// let extsk = sapling::spending_key(&[0; 32][..], COIN_TYPE, account);
 /// let to = extsk.default_address().1.into();
 ///
 /// let data_file = NamedTempFile::new().unwrap();
@@ -384,7 +384,7 @@ pub fn shield_transparent_funds<E, N, P, D, R>(
     wallet_db: &mut D,
     params: &P,
     prover: impl TxProver,
-    sk: &secp256k1::SecretKey,
+    sk: &transparent::ExternalPrivKey,
     extfvk: &ExtendedFullViewingKey,
     account: AccountId,
     memo: &MemoBytes,
@@ -406,10 +406,12 @@ where
         .get_target_and_anchor_heights(min_confirmations)
         .and_then(|x| x.ok_or_else(|| Error::ScanRequired.into()))?;
 
-    // derive the corresponding t-address
-    let taddr = derive_transparent_address_from_secret_key(sk);
+    // derive the t-address for the extpubkey at child index 0
+    let taddr = sk.to_external_pubkey().to_address();
 
     // derive own shielded address from the provided extended spending key
+    // TODO: this should become the internal change address derived from
+    // the wallet's UFVK
     let z_address = extfvk.default_address().1;
     let ovk = extfvk.fvk.ovk;
 
@@ -432,7 +434,7 @@ where
 
     for utxo in &utxos {
         builder
-            .add_transparent_input(*sk, utxo.outpoint.clone(), utxo.txout.clone())
+            .add_transparent_input(*sk.secret_key(), utxo.outpoint.clone(), utxo.txout.clone())
             .map_err(Error::Builder)?;
     }
 

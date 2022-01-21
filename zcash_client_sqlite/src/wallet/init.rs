@@ -146,7 +146,7 @@ pub fn init_wallet_db<P>(wdb: &WalletDb<P>) -> Result<(), rusqlite::Error> {
 ///
 /// use zcash_client_backend::{
 ///     keys::{
-///         spending_key,
+///         sapling,
 ///         UnifiedFullViewingKey
 ///     },
 ///     wallet::AccountId,
@@ -163,7 +163,7 @@ pub fn init_wallet_db<P>(wdb: &WalletDb<P>) -> Result<(), rusqlite::Error> {
 ///
 /// let seed = [0u8; 32]; // insecure; replace with a strong random seed
 /// let account = AccountId(0);
-/// let extsk = spending_key(&seed, Network::TestNetwork.coin_type(), account);
+/// let extsk = sapling::spending_key(&seed, Network::TestNetwork.coin_type(), account);
 /// let extfvk = ExtendedFullViewingKey::from(&extsk);
 /// let ufvk = UnifiedFullViewingKey::new(account, None, Some(extfvk)).unwrap();
 /// init_accounts_table(&db_data, &[ufvk]).unwrap();
@@ -194,7 +194,11 @@ pub fn init_accounts_table<P: consensus::Parameters>(
         let address_str: Option<String> = key
             .sapling()
             .map(|extfvk| address_from_extfvk(&wdb.params, extfvk));
-        let taddress_str: Option<String> = key.transparent().map(|taddr| taddr.encode(&wdb.params));
+        let taddress_str: Option<String> = key.transparent().and_then(|k| {
+            k.to_external_pubkey(0)
+                .ok()
+                .map(|k| k.to_address().encode(&wdb.params))
+        });
 
         wdb.conn.execute(
             "INSERT INTO accounts (account, extfvk, address, transparent_address)
@@ -269,12 +273,10 @@ pub fn init_blocks_table<P>(
 mod tests {
     use tempfile::NamedTempFile;
 
-    use zcash_client_backend::keys::{spending_key, UnifiedFullViewingKey};
+    use zcash_client_backend::keys::{sapling, UnifiedFullViewingKey};
 
     #[cfg(feature = "transparent-inputs")]
-    use zcash_client_backend::keys::{
-        derive_secret_key_from_seed, derive_transparent_address_from_secret_key,
-    };
+    use zcash_client_backend::keys::transparent;
 
     use zcash_primitives::{
         block::BlockHash,
@@ -304,21 +306,19 @@ mod tests {
         let account = AccountId(0);
 
         // First call with data should initialise the accounts table
-        let extsk = spending_key(&seed, network().coin_type(), account);
+        let extsk = sapling::spending_key(&seed, network().coin_type(), account);
         let extfvk = ExtendedFullViewingKey::from(&extsk);
 
         #[cfg(feature = "transparent-inputs")]
-        let ufvk = {
-            let tsk = derive_secret_key_from_seed(&network(), &seed, account, 0).unwrap();
-            UnifiedFullViewingKey::new(
-                account,
-                Some(derive_transparent_address_from_secret_key(&tsk)),
-                Some(extfvk),
-            )
-            .unwrap()
-        };
+        let tkey = Some(
+            transparent::AccountPrivKey::from_seed(&network(), &seed, account)
+                .unwrap()
+                .to_account_pubkey(),
+        );
         #[cfg(not(feature = "transparent-inputs"))]
-        let ufvk = UnifiedFullViewingKey::new(account, None, Some(extfvk)).unwrap();
+        let tkey = None;
+
+        let ufvk = UnifiedFullViewingKey::new(account, tkey, Some(extfvk)).unwrap();
 
         init_accounts_table(&db_data, &[ufvk.clone()]).unwrap();
 
@@ -363,7 +363,7 @@ mod tests {
         let seed = [0u8; 32];
 
         // Add an account to the wallet
-        let extsk = spending_key(&seed, network().coin_type(), AccountId(0));
+        let extsk = sapling::spending_key(&seed, network().coin_type(), AccountId(0));
         let extfvk = ExtendedFullViewingKey::from(&extsk);
         let ufvk = UnifiedFullViewingKey::new(AccountId(0), None, Some(extfvk)).unwrap();
         init_accounts_table(&db_data, &[ufvk]).unwrap();

@@ -164,14 +164,12 @@ mod tests {
 
     use zcash_client_backend::{
         data_api::{chain::scan_cached_blocks, wallet::create_spend_to_address, WalletRead},
-        keys::{spending_key, UnifiedFullViewingKey},
+        keys::{sapling, UnifiedFullViewingKey},
         wallet::OvkPolicy,
     };
 
     #[cfg(feature = "transparent-inputs")]
-    use zcash_client_backend::keys::{
-        derive_secret_key_from_seed, derive_transparent_address_from_secret_key,
-    };
+    use zcash_client_backend::keys::transparent;
 
     use crate::{
         chain::init::init_cache_database,
@@ -199,27 +197,27 @@ mod tests {
         init_wallet_db(&db_data).unwrap();
 
         // Add two accounts to the wallet
-        let extsk0 = spending_key(&[0u8; 32], network().coin_type(), AccountId(0));
-        let extsk1 = spending_key(&[1u8; 32], network().coin_type(), AccountId(1));
+        let extsk0 = sapling::spending_key(&[0u8; 32], network().coin_type(), AccountId(0));
+        let extsk1 = sapling::spending_key(&[1u8; 32], network().coin_type(), AccountId(1));
         let extfvk0 = ExtendedFullViewingKey::from(&extsk0);
         let extfvk1 = ExtendedFullViewingKey::from(&extsk1);
 
         #[cfg(feature = "transparent-inputs")]
         let ufvks = {
-            let tsk0 =
-                derive_secret_key_from_seed(&network(), &[0u8; 32], AccountId(0), 0).unwrap();
-            let tsk1 =
-                derive_secret_key_from_seed(&network(), &[1u8; 32], AccountId(1), 0).unwrap();
+            let tsk0 = transparent::AccountPrivKey::from_seed(&network(), &[0u8; 32], AccountId(0))
+                .unwrap();
+            let tsk1 = transparent::AccountPrivKey::from_seed(&network(), &[1u8; 32], AccountId(1))
+                .unwrap();
             [
                 UnifiedFullViewingKey::new(
                     AccountId(0),
-                    Some(derive_transparent_address_from_secret_key(&tsk0)),
+                    Some(tsk0.to_account_pubkey()),
                     Some(extfvk0),
                 )
                 .unwrap(),
                 UnifiedFullViewingKey::new(
                     AccountId(1),
-                    Some(derive_transparent_address_from_secret_key(&tsk1)),
+                    Some(tsk1.to_account_pubkey()),
                     Some(extfvk1),
                 )
                 .unwrap(),
@@ -276,7 +274,7 @@ mod tests {
         init_wallet_db(&db_data).unwrap();
 
         // Add an account to the wallet
-        let extsk = spending_key(&[0u8; 32], network().coin_type(), AccountId(0));
+        let extsk = sapling::spending_key(&[0u8; 32], network().coin_type(), AccountId(0));
         let extfvk = ExtendedFullViewingKey::from(&extsk);
         let ufvk = UnifiedFullViewingKey::new(AccountId(0), None, Some(extfvk)).unwrap();
         init_accounts_table(&db_data, &[ufvk]).unwrap();
@@ -316,7 +314,7 @@ mod tests {
         .unwrap();
 
         // Add an account to the wallet
-        let extsk = spending_key(&[0u8; 32], network().coin_type(), AccountId(0));
+        let extsk = sapling::spending_key(&[0u8; 32], network().coin_type(), AccountId(0));
         let extfvk = ExtendedFullViewingKey::from(&extsk);
         let ufvk = UnifiedFullViewingKey::new(AccountId(0), None, Some(extfvk)).unwrap();
         init_accounts_table(&db_data, &[ufvk]).unwrap();
@@ -358,7 +356,7 @@ mod tests {
         init_wallet_db(&db_data).unwrap();
 
         // Add an account to the wallet
-        let extsk = spending_key(&[0u8; 32], network().coin_type(), AccountId(0));
+        let extsk = sapling::spending_key(&[0u8; 32], network().coin_type(), AccountId(0));
         let extfvk = ExtendedFullViewingKey::from(&extsk);
         let ufvk = UnifiedFullViewingKey::new(AccountId(0), None, Some(extfvk.clone())).unwrap();
         init_accounts_table(&db_data, &[ufvk]).unwrap();
@@ -498,7 +496,7 @@ mod tests {
         init_wallet_db(&db_data).unwrap();
 
         // Add an account to the wallet
-        let extsk = spending_key(&[0u8; 32], network().coin_type(), AccountId(0));
+        let extsk = sapling::spending_key(&[0u8; 32], network().coin_type(), AccountId(0));
         let extfvk = ExtendedFullViewingKey::from(&extsk);
         let ufvk = UnifiedFullViewingKey::new(AccountId(0), None, Some(extfvk.clone())).unwrap();
         init_accounts_table(&db_data, &[ufvk]).unwrap();
@@ -624,7 +622,7 @@ mod tests {
         init_wallet_db(&db_data).unwrap();
 
         // Add an account to the wallet
-        let extsk = spending_key(&[0u8; 32], network.coin_type(), AccountId(0));
+        let extsk = sapling::spending_key(&[0u8; 32], network.coin_type(), AccountId(0));
         let extfvk = ExtendedFullViewingKey::from(&extsk);
         let ufvk = UnifiedFullViewingKey::new(AccountId(0), None, Some(extfvk.clone())).unwrap();
         init_accounts_table(&db_data, &[ufvk]).unwrap();
@@ -731,7 +729,7 @@ mod tests {
         init_wallet_db(&db_data).unwrap();
 
         // Add an account to the wallet
-        let extsk = spending_key(&[0u8; 32], network().coin_type(), AccountId(0));
+        let extsk = sapling::spending_key(&[0u8; 32], network().coin_type(), AccountId(0));
         let extfvk = ExtendedFullViewingKey::from(&extsk);
         let ufvk = UnifiedFullViewingKey::new(AccountId(0), None, Some(extfvk.clone())).unwrap();
         init_accounts_table(&db_data, &[ufvk]).unwrap();

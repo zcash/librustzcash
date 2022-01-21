@@ -103,11 +103,11 @@ impl<P: consensus::Parameters> AddressCodec<P> for TransparentAddress {
 /// };
 /// use zcash_client_backend::{
 ///     encoding::encode_extended_spending_key,
-///     keys::spending_key,
+///     keys::sapling,
 ///     wallet::AccountId,
 /// };
 ///
-/// let extsk = spending_key(&[0; 32][..], COIN_TYPE, AccountId(0));
+/// let extsk = sapling::spending_key(&[0; 32][..], COIN_TYPE, AccountId(0));
 /// let encoded = encode_extended_spending_key(HRP_SAPLING_EXTENDED_SPENDING_KEY, &extsk);
 /// ```
 /// [`ExtendedSpendingKey`]: zcash_primitives::zip32::ExtendedSpendingKey
@@ -135,12 +135,12 @@ pub fn decode_extended_spending_key(
 /// };
 /// use zcash_client_backend::{
 ///     encoding::encode_extended_full_viewing_key,
-///     keys::spending_key,
+///     keys::sapling,
 ///     wallet::AccountId,
 /// };
 /// use zcash_primitives::zip32::ExtendedFullViewingKey;
 ///
-/// let extsk = spending_key(&[0; 32][..], COIN_TYPE, AccountId(0));
+/// let extsk = sapling::spending_key(&[0; 32][..], COIN_TYPE, AccountId(0));
 /// let extfvk = ExtendedFullViewingKey::from(&extsk);
 /// let encoded = encode_extended_full_viewing_key(HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY, &extfvk);
 /// ```
