@@ -243,7 +243,7 @@ pub fn sapling_derive_internal_fvk(
 ) -> (FullViewingKey, DiversifierKey) {
     let i = {
         let mut h = Blake2bParams::new()
-            .hash_length(64)
+            .hash_length(32)
             .personal(crate::zip32::ZIP32_SAPLING_INT_PERSONALIZATION)
             .to_state();
         h.update(&fvk.to_bytes());
@@ -451,7 +451,7 @@ impl ExtendedSpendingKey {
         let i = {
             let fvk = FullViewingKey::from_expanded_spending_key(&self.expsk);
             let mut h = Blake2bParams::new()
-                .hash_length(64)
+                .hash_length(32)
                 .personal(crate::zip32::ZIP32_SAPLING_INT_PERSONALIZATION)
                 .to_state();
             h.update(&fvk.to_bytes());
