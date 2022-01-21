@@ -98,6 +98,8 @@ pub mod transparent {
     pub struct AccountPubKey(ExtendedPubKey);
 
     impl AccountPubKey {
+        /// Derive BIP-44 public key at the external child path
+        /// `m/44'/<coin_type>'/<account>'/0/<child_index>
         pub fn to_external_pubkey(
             &self,
             child_index: u32,
@@ -115,10 +117,12 @@ pub mod transparent {
     pub struct ExternalPrivKey(ExtendedPrivKey);
 
     impl ExternalPrivKey {
+        /// Returns the external public key corresponding to this private key
         pub fn to_external_pubkey(&self) -> ExternalPubKey {
             ExternalPubKey(ExtendedPubKey::from_private_key(&self.0))
         }
 
+        /// Extracts the secp256k1 secret key component
         pub fn secret_key(&self) -> &secp256k1::key::SecretKey {
             &self.0.private_key
         }
@@ -136,10 +140,14 @@ pub mod transparent {
     pub struct ExternalPubKey(ExtendedPubKey);
 
     impl ExternalPubKey {
+        /// Returns the transparent address corresponding to
+        /// this public key.
         pub fn to_address(&self) -> TransparentAddress {
             pubkey_to_address(&self.0.public_key)
         }
 
+        /// Returns the secp256k1::key::PublicKey component of
+        /// this public key.
         pub fn public_key(&self) -> &secp256k1::key::PublicKey {
             &self.0.public_key
         }
@@ -149,6 +157,7 @@ pub mod transparent {
     #[derive(Clone, Debug, Eq, PartialEq)]
     pub struct Wif(pub String);
 
+    /// Errors that may occur in WIF key decoding.
     #[derive(Debug)]
     pub enum WifError {
         Base58(Bs58Error),
@@ -176,6 +185,7 @@ pub mod transparent {
             }
         }
 
+        /// Decode this Wif value to obtain the encoded secret key
         pub fn to_secret_key<P: consensus::Parameters>(
             &self,
             params: &P,

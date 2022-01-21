@@ -763,7 +763,7 @@ mod tests {
         let tkey = Some(
             transparent::AccountPrivKey::from_seed(&network(), &seed, AccountId(0))
                 .unwrap()
-                .to_account_pubkey()
+                .to_account_pubkey(),
         );
 
         #[cfg(not(feature = "transparent-inputs"))]
@@ -772,7 +772,10 @@ mod tests {
         let ufvk =
             UnifiedFullViewingKey::new(AccountId(0), tkey.clone(), Some(extfvk.clone())).unwrap();
         init_accounts_table(db_data, &[ufvk]).unwrap();
-        (extfvk, tkey.map(|k| k.to_external_pubkey(0).unwrap().to_address()))
+        (
+            extfvk,
+            tkey.map(|k| k.to_external_pubkey(0).unwrap().to_address()),
+        )
     }
 
     /// Create a fake CompactBlock at the given height, containing a single output paying
