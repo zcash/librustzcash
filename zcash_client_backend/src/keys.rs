@@ -1,5 +1,9 @@
 //! Helper functions for managing light client key material.
 use crate::wallet::AccountId;
+use zcash_primitives::{
+    consensus,
+    zip32::{ExtendedFullViewingKey, ExtendedSpendingKey},
+};
 
 pub mod sapling {
     pub use zcash_primitives::zip32::ExtendedFullViewingKey;
@@ -203,6 +207,53 @@ pub mod transparent {
                         SecretKey::from_slice(&decoded[1..33]).map_err(WifError::Secp256k1)
                     }
                 })
+        }
+    }
+}
+
+pub enum DerivationError {
+    #[cfg(feature = "transparent-inputs")]
+    Transparent(hdwallet::error::Error),
+}
+
+/// A set of viewing keys that are all associated with a single
+/// ZIP-0032 account identifier.
+#[derive(Clone, Debug)]
+pub struct UnifiedSpendingKey {
+    account: AccountId,
+    #[cfg(feature = "transparent-inputs")]
+    transparent: transparent::AccountPrivKey,
+    sapling: ExtendedSpendingKey,
+}
+
+impl UnifiedSpendingKey {
+    pub fn from_seed<P: consensus::Parameters>(
+        params: &P,
+        seed: &[u8],
+        account: AccountId,
+    ) -> Result<UnifiedSpendingKey, DerivationError> {
+        if seed.len() < 32 {
+            panic!("ZIP 32 seeds MUST be at least 32 bytes");
+        }
+
+        #[cfg(feature = "transparent-inputs")]
+        let transparent = transparent::AccountPrivKey::from_seed(params, seed, account)
+            .map_err(DerivationError::Transparent)?;
+
+        Ok(UnifiedSpendingKey {
+            account,
+            #[cfg(feature = "transparent-inputs")]
+            transparent,
+            sapling: sapling::spending_key(seed, params.coin_type(), account),
+        })
+    }
+
+    pub fn to_unified_full_viewing_key(&self) -> UnifiedFullViewingKey {
+        UnifiedFullViewingKey {
+            account: self.account,
+            #[cfg(feature = "transparent-inputs")]
+            transparent: Some(self.transparent.to_account_pubkey()),
+            sapling: Some(ExtendedFullViewingKey::from(&self.sapling)),
         }
     }
 }
