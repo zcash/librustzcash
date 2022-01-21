@@ -236,7 +236,10 @@ pub fn sapling_default_address(
 }
 
 /// Returns the internal full viewing key and diversifier key
-/// for the provided external fvk and dk
+/// for the provided external FVK = (ak, nk, ovk) and dk encoded
+/// in a [Unified FVK].
+///
+/// [Unified FVK]: https://zips.z.cash/zip-0316#encoding-of-unified-full-incoming-viewing-keys
 pub fn sapling_derive_internal_fvk(
     fvk: &FullViewingKey,
     dk: &DiversifierKey,
@@ -447,6 +450,9 @@ impl ExtendedSpendingKey {
         ExtendedFullViewingKey::from(self).default_address()
     }
 
+    /// Derives an internal spending key given an external spending key.
+    ///
+    /// Specified in [ZIP 32](https://zips.z.cash/zip-0032#deriving-a-sapling-internal-spending-key).
     pub fn derive_internal(&self) -> Self {
         let i = {
             let fvk = FullViewingKey::from_expanded_spending_key(&self.expsk);
@@ -583,6 +589,12 @@ impl ExtendedFullViewingKey {
         sapling_default_address(&self.fvk, &self.dk)
     }
 
+    /// Derives an internal full viewing key used for internal operations such
+    /// as change and auto-shielding. The internal FVK has the same spend authority
+    /// (the private key corresponding to ak) as the original, but viewing authority
+    /// only for internal transfers.
+    ///
+    /// Specified in [ZIP 32](https://zips.z.cash/zip-0032#deriving-a-sapling-internal-full-viewing-key).
     pub fn derive_internal(&self) -> Self {
         let (fvk_internal, dk_internal) = sapling_derive_internal_fvk(&self.fvk, &self.dk);
 
