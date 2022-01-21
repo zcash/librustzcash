@@ -113,6 +113,14 @@ pub mod transparent {
                 .derive_public_key(KeyIndex::Normal(child_index))
                 .map(ExternalPubKey)
         }
+
+        pub fn from_extended_pubkey(extpubkey: ExtendedPubKey) -> Self {
+            AccountPubKey(extpubkey)
+        }
+
+        pub fn extended_pubkey(&self) -> &ExtendedPubKey {
+            &self.0
+        }
     }
 
     /// A type representing a private key at the BIP-44 external child
