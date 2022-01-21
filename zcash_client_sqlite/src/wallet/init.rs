@@ -8,11 +8,13 @@ use zcash_primitives::{
 };
 
 use zcash_client_backend::{
-    encoding::{encode_extended_full_viewing_key, AddressCodec},
-    keys::UnifiedFullViewingKey,
+    encoding::encode_extended_full_viewing_key, keys::UnifiedFullViewingKey,
 };
 
 use crate::{address_from_extfvk, error::SqliteClientError, WalletDb};
+
+#[cfg(feature = "transparent-inputs")]
+use zcash_client_backend::encoding::AddressCodec;
 
 /// Sets up the internal structure of the data database.
 ///
@@ -201,11 +203,14 @@ pub fn init_accounts_table<P: consensus::Parameters>(
         let address_str: Option<String> = key
             .sapling()
             .map(|extfvk| address_from_extfvk(&wdb.params, extfvk));
+        #[cfg(feature = "transparent-inputs")]
         let taddress_str: Option<String> = key.transparent().and_then(|k| {
             k.to_external_pubkey(0)
                 .ok()
                 .map(|k| k.to_address().encode(&wdb.params))
         });
+        #[cfg(not(feature = "transparent-inputs"))]
+        let taddress_str: Option<String> = None;
 
         wdb.conn.execute(
             "INSERT INTO accounts (account, extfvk, address, transparent_address)

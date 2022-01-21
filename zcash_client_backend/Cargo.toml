@@ -43,7 +43,6 @@ protobuf-codegen-pure = "2.20"
 gumdrop = "0.8"
 rand_xorshift = "0.3"
 tempfile = "3.1.0"
-zcash_client_sqlite = { version = "0.3", path = "../zcash_client_sqlite", features = ["transparent-inputs"] }
 zcash_proofs = { version = "0.5", path = "../zcash_proofs" }
 
 [features]

@@ -4,7 +4,8 @@
 //! # Examples
 //!
 //! ```
-//! use tempfile::NamedTempFile;
+//! # #[cfg(feature = "test-dependencies")]
+//! # {
 //! use zcash_primitives::{
 //!     consensus::{BlockHeight, Network, Parameters}
 //! };
@@ -17,32 +18,18 @@
 //!             scan_cached_blocks,
 //!         },
 //!         error::Error,
+//!         testing,
 //!     },
 //! };
 //!
-//! use zcash_client_sqlite::{
-//!     BlockDb,
-//!     WalletDb,
-//!     error::SqliteClientError,
-//!     wallet::{rewind_to_height},
-//!     wallet::init::{init_wallet_db},
-//! };
-//!
-//! # // doctests have a problem with sqlite IO, so we ignore errors
-//! # // generated in this example code as it's not really testing anything
 //! # fn main() {
 //! #   test();
 //! # }
 //! #
-//! # fn test() -> Result<(), SqliteClientError> {
+//! # fn test() -> Result<(), Error<u32>> {
 //! let network = Network::TestNetwork;
-//! let cache_file = NamedTempFile::new()?;
-//! let db_cache = BlockDb::for_path(cache_file)?;
-//! let db_file = NamedTempFile::new()?;
-//! let db_read = WalletDb::for_path(db_file, network)?;
-//! init_wallet_db(&db_read)?;
-//!
-//! let mut db_data = db_read.get_update_ops()?;
+//! let db_cache = testing::MockBlockSource {};
+//! let mut db_data = testing::MockWalletDb {};
 //!
 //! // 1) Download new CompactBlocks into db_cache.
 //!
@@ -52,7 +39,7 @@
 //! // errors are in the blocks we have previously cached or scanned.
 //! if let Err(e) = validate_chain(&network, &db_cache, db_data.get_max_height_hash()?) {
 //!     match e {
-//!         SqliteClientError::BackendError(Error::InvalidChain(lower_bound, _)) => {
+//!         Error::InvalidChain(lower_bound, _) => {
 //!             // a) Pick a height to rewind to.
 //!             //
 //!             // This might be informed by some external chain reorg information, or
@@ -72,10 +59,10 @@
 //!             // d) If there is some separate thread or service downloading
 //!             // CompactBlocks, tell it to go back and download from rewind_height
 //!             // onwards.
-//!         }
+//!         },
 //!         e => {
-//!             // Handle or return other errors.
-//!             return Err(e);
+//!             // handle or return other errors
+//!
 //!         }
 //!     }
 //! }
@@ -86,6 +73,7 @@
 //! // necessarily consistent with the latest chain tip - this would be discovered the
 //! // next time this codepath is executed after new blocks are received).
 //! scan_cached_blocks(&network, &db_cache, &mut db_data, None)
+//! # }
 //! # }
 //! ```
 
@@ -198,44 +186,6 @@ where
 ///
 /// Scanned blocks are required to be height-sequential. If a block is missing from the
 /// cache, an error will be returned with kind [`ChainInvalid::BlockHeightDiscontinuity`].
-///
-/// # Examples
-///
-/// ```
-/// use tempfile::NamedTempFile;
-/// use zcash_primitives::consensus::{
-///     Network,
-///     Parameters,
-/// };
-/// use zcash_client_backend::{
-///     data_api::chain::scan_cached_blocks,
-/// };
-/// use zcash_client_sqlite::{
-///     BlockDb,
-///     WalletDb,
-///     error::SqliteClientError,
-///     wallet::init::init_wallet_db,
-/// };
-///
-/// # // doctests have a problem with sqlite IO, so we ignore errors
-/// # // generated in this example code as it's not really testing anything
-/// # fn main() {
-/// #   test();
-/// # }
-/// #
-/// # fn test() -> Result<(), SqliteClientError> {
-/// let cache_file = NamedTempFile::new().unwrap();
-/// let cache = BlockDb::for_path(cache_file).unwrap();
-///
-/// let data_file = NamedTempFile::new().unwrap();
-/// let db_read = WalletDb::for_path(data_file, Network::TestNetwork)?;
-/// init_wallet_db(&db_read)?;
-///
-/// let mut data = db_read.get_update_ops()?;
-/// scan_cached_blocks(&Network::TestNetwork, &cache, &mut data, None)?;
-/// # Ok(())
-/// # }
-/// ```
 pub fn scan_cached_blocks<E, N, P, C, D>(
     params: &P,
     cache: &C,

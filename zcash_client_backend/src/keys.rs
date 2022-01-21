@@ -212,6 +212,7 @@ pub mod transparent {
 #[derive(Clone, Debug)]
 pub struct UnifiedFullViewingKey {
     account: AccountId,
+    #[cfg(feature = "transparent-inputs")]
     transparent: Option<transparent::AccountPubKey>,
     sapling: Option<sapling::ExtendedFullViewingKey>,
 }
@@ -220,7 +221,7 @@ impl UnifiedFullViewingKey {
     /// Construct a new unified full viewing key, if the required components are present.
     pub fn new(
         account: AccountId,
-        transparent: Option<transparent::AccountPubKey>,
+        #[cfg(feature = "transparent-inputs")] transparent: Option<transparent::AccountPubKey>,
         sapling: Option<sapling::ExtendedFullViewingKey>,
     ) -> Option<UnifiedFullViewingKey> {
         if sapling.is_none() {
@@ -228,6 +229,7 @@ impl UnifiedFullViewingKey {
         } else {
             Some(UnifiedFullViewingKey {
                 account,
+                #[cfg(feature = "transparent-inputs")]
                 transparent,
                 sapling,
             })
@@ -240,6 +242,7 @@ impl UnifiedFullViewingKey {
         self.account
     }
 
+    #[cfg(feature = "transparent-inputs")]
     /// Returns the transparent component of the unified key at the
     /// BIP44 path `m/44'/<coin_type>'/<account>'`.
     pub fn transparent(&self) -> Option<&transparent::AccountPubKey> {

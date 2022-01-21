@@ -95,31 +95,27 @@ where
 /// # Examples
 ///
 /// ```
+/// # #[cfg(feature = "test-dependencies")]
+/// # {
 /// use tempfile::NamedTempFile;
 /// use zcash_primitives::{
 ///     consensus::{self, Network},
 ///     constants::testnet::COIN_TYPE,
-///     transaction::components::Amount
+///     transaction::{TxId, components::Amount},
 /// };
 /// use zcash_proofs::prover::LocalTxProver;
 /// use zcash_client_backend::{
 ///     keys::sapling,
-///     data_api::wallet::create_spend_to_address,
+///     data_api::{wallet::create_spend_to_address, error::Error, testing},
 ///     wallet::{AccountId, OvkPolicy},
 /// };
-/// use zcash_client_sqlite::{
-///     WalletDb,
-///     error::SqliteClientError,
-///     wallet::init::init_wallet_db,
-/// };
 ///
-/// # // doctests have a problem with sqlite IO, so we ignore errors
-/// # // generated in this example code as it's not really testing anything
 /// # fn main() {
 /// #   test();
 /// # }
 /// #
-/// # fn test() -> Result<(), SqliteClientError> {
+/// # fn test() -> Result<TxId, Error<u32>> {
+///
 /// let tx_prover = match LocalTxProver::with_default_location() {
 ///     Some(tx_prover) => tx_prover,
 ///     None => {
@@ -131,13 +127,10 @@ where
 /// let extsk = sapling::spending_key(&[0; 32][..], COIN_TYPE, account);
 /// let to = extsk.default_address().1.into();
 ///
-/// let data_file = NamedTempFile::new().unwrap();
-/// let db_read = WalletDb::for_path(data_file, Network::TestNetwork).unwrap();
-/// init_wallet_db(&db_read)?;
-/// let mut db = db_read.get_update_ops()?;
+/// let mut db_read = testing::MockWalletDb {};
 ///
 /// create_spend_to_address(
-///     &mut db,
+///     &mut db_read,
 ///     &Network::TestNetwork,
 ///     tx_prover,
 ///     account,
@@ -147,9 +140,9 @@ where
 ///     None,
 ///     OvkPolicy::Sender,
 ///     10
-/// )?;
+/// )
 ///
-/// # Ok(())
+/// # }
 /// # }
 /// ```
 #[allow(clippy::too_many_arguments)]
