@@ -1,13 +1,10 @@
 //! Helper functions for managing light client key material.
 use crate::wallet::AccountId;
-use zcash_primitives::{
-    consensus,
-    zip32::{ExtendedFullViewingKey, ExtendedSpendingKey},
-};
+use zcash_primitives::consensus;
 
 pub mod sapling {
-    pub use zcash_primitives::zip32::ExtendedFullViewingKey;
-    use zcash_primitives::zip32::{ChildIndex, ExtendedSpendingKey};
+    use zcash_primitives::zip32::ChildIndex;
+    pub use zcash_primitives::zip32::{ExtendedFullViewingKey, ExtendedSpendingKey};
 
     use crate::wallet::AccountId;
 
@@ -239,7 +236,7 @@ pub struct UnifiedSpendingKey {
     account: AccountId,
     #[cfg(feature = "transparent-inputs")]
     transparent: transparent::AccountPrivKey,
-    sapling: ExtendedSpendingKey,
+    sapling: sapling::ExtendedSpendingKey,
 }
 
 impl UnifiedSpendingKey {
@@ -269,8 +266,25 @@ impl UnifiedSpendingKey {
             account: self.account,
             #[cfg(feature = "transparent-inputs")]
             transparent: Some(self.transparent.to_account_pubkey()),
-            sapling: Some(ExtendedFullViewingKey::from(&self.sapling)),
+            sapling: Some(sapling::ExtendedFullViewingKey::from(&self.sapling)),
         }
+    }
+
+    pub fn account(&self) -> AccountId {
+        self.account
+    }
+
+    /// Returns the transparent component of the unified key at the
+    /// BIP44 path `m/44'/<coin_type>'/<account>'`.
+    #[cfg(feature = "transparent-inputs")]
+    pub fn transparent(&self) -> Option<&transparent::AccountPrivKey> {
+        Some(&self.transparent)
+    }
+
+    /// Returns the Sapling extended full viewing key component of this
+    /// unified key.
+    pub fn sapling(&self) -> Option<&sapling::ExtendedSpendingKey> {
+        Some(&self.sapling)
     }
 }
 
