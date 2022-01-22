@@ -771,7 +771,7 @@ mod tests {
             init_accounts_table(db_data, &[ufvk]).unwrap();
             (
                 extfvk,
-                tkey.map(|k| k.to_external_pubkey(0).unwrap().to_address()),
+                tkey.map(|k| k.derive_external_pubkey(0).unwrap().to_address()),
             )
         }
 

@@ -109,7 +109,7 @@ pub mod transparent {
     impl AccountPubKey {
         /// Derive BIP-44 public key at the external child path
         /// `m/44'/<coin_type>'/<account>'/0/<child_index>
-        pub fn to_external_pubkey(
+        pub fn derive_external_pubkey(
             &self,
             child_index: u32,
         ) -> Result<ExternalPubKey, hdwallet::error::Error> {
