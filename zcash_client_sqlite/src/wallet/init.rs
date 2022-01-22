@@ -285,7 +285,7 @@ pub fn init_blocks_table<P>(
 mod tests {
     use tempfile::NamedTempFile;
 
-    use zcash_client_backend::keys::{sapling, UnifiedFullViewingKey};
+    use zcash_client_backend::keys::{sapling, UnifiedFullViewingKey, UnifiedSpendingKey};
 
     #[cfg(feature = "transparent-inputs")]
     use zcash_client_backend::keys::transparent;
@@ -322,15 +322,19 @@ mod tests {
         let extfvk = ExtendedFullViewingKey::from(&extsk);
 
         #[cfg(feature = "transparent-inputs")]
-        let tkey = Some(
-            transparent::AccountPrivKey::from_seed(&network(), &seed, account)
-                .unwrap()
-                .to_account_pubkey(),
-        );
-        #[cfg(not(feature = "transparent-inputs"))]
-        let tkey = None;
+        let ufvk = UnifiedFullViewingKey::new(
+            account,
+            Some(
+                transparent::AccountPrivKey::from_seed(&network(), &seed, account)
+                    .unwrap()
+                    .to_account_pubkey(),
+            ),
+            Some(extfvk),
+        )
+        .unwrap();
 
-        let ufvk = UnifiedFullViewingKey::new(account, tkey, Some(extfvk)).unwrap();
+        #[cfg(not(feature = "transparent-inputs"))]
+        let ufvk = UnifiedFullViewingKey::new(account, Some(extfvk)).unwrap();
 
         init_accounts_table(&db_data, &[ufvk.clone()]).unwrap();
 
@@ -375,13 +379,14 @@ mod tests {
         let seed = [0u8; 32];
 
         // Add an account to the wallet
-        let extsk = sapling::spending_key(&seed, network().coin_type(), AccountId(0));
-        let extfvk = ExtendedFullViewingKey::from(&extsk);
-        let ufvk = UnifiedFullViewingKey::new(AccountId(0), None, Some(extfvk)).unwrap();
+        let account_id = AccountId(0);
+        let usk = UnifiedSpendingKey::from_seed(&tests::network(), &seed, account_id).unwrap();
+        let ufvk = usk.to_unified_full_viewing_key();
+        let expected_address = ufvk.sapling().unwrap().default_address().1;
         init_accounts_table(&db_data, &[ufvk]).unwrap();
 
         // The account's address should be in the data DB
         let pa = get_address(&db_data, AccountId(0)).unwrap();
-        assert_eq!(pa.unwrap(), extsk.default_address().1);
+        assert_eq!(pa.unwrap(), expected_address);
     }
 }

@@ -760,22 +760,27 @@ mod tests {
         let extfvk = ExtendedFullViewingKey::from(&extsk);
 
         #[cfg(feature = "transparent-inputs")]
-        let tkey = Some(
-            transparent::AccountPrivKey::from_seed(&network(), &seed, AccountId(0))
-                .unwrap()
-                .to_account_pubkey(),
-        );
+        {
+            let tkey = Some(
+                transparent::AccountPrivKey::from_seed(&network(), &seed, AccountId(0))
+                    .unwrap()
+                    .to_account_pubkey(),
+            );
+            let ufvk = UnifiedFullViewingKey::new(AccountId(0), tkey.clone(), Some(extfvk.clone()))
+                .unwrap();
+            init_accounts_table(db_data, &[ufvk]).unwrap();
+            (
+                extfvk,
+                tkey.map(|k| k.to_external_pubkey(0).unwrap().to_address()),
+            )
+        }
 
         #[cfg(not(feature = "transparent-inputs"))]
-        let tkey = None;
-
-        let ufvk =
-            UnifiedFullViewingKey::new(AccountId(0), tkey.clone(), Some(extfvk.clone())).unwrap();
-        init_accounts_table(db_data, &[ufvk]).unwrap();
-        (
-            extfvk,
-            tkey.map(|k| k.to_external_pubkey(0).unwrap().to_address()),
-        )
+        {
+            let ufvk = UnifiedFullViewingKey::new(AccountId(0), Some(extfvk.clone())).unwrap();
+            init_accounts_table(db_data, &[ufvk]).unwrap();
+            (extfvk, None)
+        }
     }
 
     /// Create a fake CompactBlock at the given height, containing a single output paying

@@ -224,6 +224,7 @@ pub mod transparent {
     }
 }
 
+#[derive(Debug)]
 pub enum DerivationError {
     #[cfg(feature = "transparent-inputs")]
     Transparent(hdwallet::error::Error),
@@ -277,14 +278,14 @@ impl UnifiedSpendingKey {
     /// Returns the transparent component of the unified key at the
     /// BIP44 path `m/44'/<coin_type>'/<account>'`.
     #[cfg(feature = "transparent-inputs")]
-    pub fn transparent(&self) -> Option<&transparent::AccountPrivKey> {
-        Some(&self.transparent)
+    pub fn transparent(&self) -> &transparent::AccountPrivKey {
+        &self.transparent
     }
 
     /// Returns the Sapling extended full viewing key component of this
     /// unified key.
-    pub fn sapling(&self) -> Option<&sapling::ExtendedSpendingKey> {
-        Some(&self.sapling)
+    pub fn sapling(&self) -> &sapling::ExtendedSpendingKey {
+        &self.sapling
     }
 }
 
