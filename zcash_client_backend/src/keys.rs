@@ -79,6 +79,14 @@ pub mod transparent {
                 .map(AccountPrivKey)
         }
 
+        pub fn from_extended_privkey(extprivkey: ExtendedPrivKey) -> Self {
+            AccountPrivKey(extprivkey)
+        }
+
+        pub fn extended_privkey(&self) -> &ExtendedPrivKey {
+            &self.0
+        }
+
         pub fn to_account_pubkey(&self) -> AccountPubKey {
             AccountPubKey(ExtendedPubKey::from_private_key(&self.0))
         }
