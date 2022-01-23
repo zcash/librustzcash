@@ -2,15 +2,17 @@ use std::fmt::Debug;
 use zcash_primitives::{
     consensus::{self, NetworkUpgrade},
     memo::MemoBytes,
-    sapling::{keys::OutgoingViewingKey, prover::TxProver},
+    sapling::prover::TxProver,
     transaction::{
         builder::Builder,
         components::{amount::DEFAULT_FEE, Amount},
         Transaction,
     },
-    transparent,
     zip32::{ExtendedFullViewingKey, ExtendedSpendingKey},
 };
+
+#[cfg(feature = "transparent-inputs")]
+use zcash_primitives::{sapling::keys::OutgoingViewingKey, transparent};
 
 use crate::{
     address::RecipientAddress,

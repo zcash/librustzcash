@@ -17,6 +17,7 @@ pub mod memo;
 pub mod merkle_tree;
 pub mod sapling;
 pub mod transaction;
+#[cfg(feature = "transparent-inputs")]
 pub mod transparent;
 pub mod zip32;
 pub mod zip339;
