@@ -6,6 +6,7 @@ use aes::Aes256;
 use blake2b_simd::Params as Blake2bParams;
 use byteorder::{ByteOrder, LittleEndian, ReadBytesExt, WriteBytesExt};
 use fpe::ff1::{BinaryNumeralString, FF1};
+use std::convert::TryInto;
 use std::ops::AddAssign;
 
 use crate::{
@@ -20,6 +21,7 @@ use crate::sapling::keys::{
 
 pub const ZIP32_SAPLING_MASTER_PERSONALIZATION: &[u8; 16] = b"ZcashIP32Sapling";
 pub const ZIP32_SAPLING_FVFP_PERSONALIZATION: &[u8; 16] = b"ZcashSaplingFVFP";
+pub const ZIP32_SAPLING_INT_PERSONALIZATION: &[u8; 16] = b"Zcash_SaplingInt";
 
 // Common helper functions
 
@@ -233,6 +235,44 @@ pub fn sapling_default_address(
     sapling_find_address(fvk, dk, DiversifierIndex::new()).unwrap()
 }
 
+/// Returns the internal full viewing key and diversifier key
+/// for the provided external FVK = (ak, nk, ovk) and dk encoded
+/// in a [Unified FVK].
+///
+/// [Unified FVK]: https://zips.z.cash/zip-0316#encoding-of-unified-full-incoming-viewing-keys
+pub fn sapling_derive_internal_fvk(
+    fvk: &FullViewingKey,
+    dk: &DiversifierKey,
+) -> (FullViewingKey, DiversifierKey) {
+    let i = {
+        let mut h = Blake2bParams::new()
+            .hash_length(32)
+            .personal(crate::zip32::ZIP32_SAPLING_INT_PERSONALIZATION)
+            .to_state();
+        h.update(&fvk.to_bytes());
+        h.update(&dk.0);
+        h.finalize()
+    };
+    let i_nsk = jubjub::Fr::from_bytes_wide(prf_expand(i.as_bytes(), &[0x17]).as_array());
+    let r = prf_expand(i.as_bytes(), &[0x18]);
+    let r = r.as_bytes();
+    // PROOF_GENERATION_KEY_GENERATOR = \mathcal{H}^Sapling
+    let nk_internal = PROOF_GENERATION_KEY_GENERATOR * i_nsk + fvk.vk.nk;
+    let dk_internal = DiversifierKey(r[..32].try_into().unwrap());
+    let ovk_internal = OutgoingViewingKey(r[32..].try_into().unwrap());
+
+    (
+        FullViewingKey {
+            vk: ViewingKey {
+                ak: fvk.vk.ak,
+                nk: nk_internal,
+            },
+            ovk: ovk_internal,
+        },
+        dk_internal,
+    )
+}
+
 /// A Sapling extended spending key
 #[derive(Clone)]
 pub struct ExtendedSpendingKey {
@@ -409,6 +449,41 @@ impl ExtendedSpendingKey {
     pub fn default_address(&self) -> (DiversifierIndex, PaymentAddress) {
         ExtendedFullViewingKey::from(self).default_address()
     }
+
+    /// Derives an internal spending key given an external spending key.
+    ///
+    /// Specified in [ZIP 32](https://zips.z.cash/zip-0032#deriving-a-sapling-internal-spending-key).
+    pub fn derive_internal(&self) -> Self {
+        let i = {
+            let fvk = FullViewingKey::from_expanded_spending_key(&self.expsk);
+            let mut h = Blake2bParams::new()
+                .hash_length(32)
+                .personal(crate::zip32::ZIP32_SAPLING_INT_PERSONALIZATION)
+                .to_state();
+            h.update(&fvk.to_bytes());
+            h.update(&self.dk.0);
+            h.finalize()
+        };
+        let i_nsk = jubjub::Fr::from_bytes_wide(prf_expand(i.as_bytes(), &[0x17]).as_array());
+        let r = prf_expand(i.as_bytes(), &[0x18]);
+        let r = r.as_bytes();
+        let nsk_internal = i_nsk + self.expsk.nsk;
+        let dk_internal = DiversifierKey(r[..32].try_into().unwrap());
+        let ovk_internal = OutgoingViewingKey(r[32..].try_into().unwrap());
+
+        ExtendedSpendingKey {
+            depth: self.depth,
+            parent_fvk_tag: self.parent_fvk_tag,
+            child_index: self.child_index,
+            chain_code: self.chain_code,
+            expsk: ExpandedSpendingKey {
+                ask: self.expsk.ask,
+                nsk: nsk_internal,
+                ovk: ovk_internal,
+            },
+            dk: dk_internal,
+        }
+    }
 }
 
 impl<'a> From<&'a ExtendedSpendingKey> for ExtendedFullViewingKey {
@@ -517,6 +592,25 @@ impl ExtendedFullViewingKey {
     /// Returns the chain code.
     pub fn chain_code(&self) -> ChainCode {
         self.chain_code
+    }
+
+    /// Derives an internal full viewing key used for internal operations such
+    /// as change and auto-shielding. The internal FVK has the same spend authority
+    /// (the private key corresponding to ak) as the original, but viewing authority
+    /// only for internal transfers.
+    ///
+    /// Specified in [ZIP 32](https://zips.z.cash/zip-0032#deriving-a-sapling-internal-full-viewing-key).
+    pub fn derive_internal(&self) -> Self {
+        let (fvk_internal, dk_internal) = sapling_derive_internal_fvk(&self.fvk, &self.dk);
+
+        ExtendedFullViewingKey {
+            depth: self.depth,
+            parent_fvk_tag: self.parent_fvk_tag,
+            child_index: self.child_index,
+            chain_code: self.chain_code,
+            fvk: fvk_internal,
+            dk: dk_internal,
+        }
     }
 }
 
