@@ -23,6 +23,12 @@ use zcash_primitives::{
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub struct AccountId(pub u32);
 
+impl From<u32> for AccountId {
+    fn from(id: u32) -> Self {
+        Self(id)
+    }
+}
+
 impl Default for AccountId {
     fn default() -> Self {
         AccountId(0)

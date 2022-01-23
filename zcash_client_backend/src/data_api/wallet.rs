@@ -11,6 +11,9 @@ use zcash_primitives::{
     zip32::{ExtendedFullViewingKey, ExtendedSpendingKey},
 };
 
+#[cfg(feature = "transparent-inputs")]
+use zcash_primitives::{sapling::keys::OutgoingViewingKey, transparent};
+
 use crate::{
     address::RecipientAddress,
     data_api::{
@@ -20,9 +23,6 @@ use crate::{
     wallet::{AccountId, OvkPolicy},
     zip321::{Payment, TransactionRequest},
 };
-
-#[cfg(feature = "transparent-inputs")]
-use crate::keys::transparent;
 
 /// Scans a [`Transaction`] for any information that can be decrypted by the accounts in
 /// the wallet, and saves it to the wallet.
@@ -400,13 +400,14 @@ where
         .and_then(|x| x.ok_or_else(|| Error::ScanRequired.into()))?;
 
     // derive the t-address for the extpubkey at child index 0
-    let taddr = sk.to_external_pubkey().to_address();
+    let t_ext_pubkey = sk.to_external_pubkey();
+    let taddr = t_ext_pubkey.to_address();
+    let ovk = OutgoingViewingKey(t_ext_pubkey.internal_ovk().as_bytes());
 
     // derive own shielded address from the provided extended spending key
     // TODO: this should become the internal change address derived from
     // the wallet's UFVK
     let z_address = extfvk.default_address().1;
-    let ovk = extfvk.fvk.ovk;
 
     // get UTXOs from DB
     let utxos = wallet_db.get_unspent_transparent_outputs(&taddr, latest_anchor)?;

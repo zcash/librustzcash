@@ -48,10 +48,12 @@ pub mod transparent {
     use bs58::{self, decode::Error as Bs58Error};
     use hdwallet::{ExtendedPrivKey, ExtendedPubKey, KeyIndex};
     use secp256k1::key::SecretKey;
-    use sha2::{Digest, Sha256};
 
     use crate::wallet::AccountId;
-    use zcash_primitives::{consensus, legacy::TransparentAddress};
+    use zcash_primitives::{
+        consensus,
+        transparent::{ExternalPrivKey, ExternalPubKey},
+    };
 
     /// A type representing a BIP-44 private key at the account path level
     /// `m/44'/<coin_type>'/<account>'
@@ -125,48 +127,6 @@ pub mod transparent {
 
         pub fn extended_pubkey(&self) -> &ExtendedPubKey {
             &self.0
-        }
-    }
-
-    /// A type representing a private key at the BIP-44 external child
-    /// level `m/44'/<coin_type>'/<account>'/0/<child_index>
-    #[derive(Clone, Debug)]
-    pub struct ExternalPrivKey(ExtendedPrivKey);
-
-    impl ExternalPrivKey {
-        /// Returns the external public key corresponding to this private key
-        pub fn to_external_pubkey(&self) -> ExternalPubKey {
-            ExternalPubKey(ExtendedPubKey::from_private_key(&self.0))
-        }
-
-        /// Extracts the secp256k1 secret key component
-        pub fn secret_key(&self) -> &secp256k1::key::SecretKey {
-            &self.0.private_key
-        }
-    }
-
-    pub(crate) fn pubkey_to_address(pubkey: &secp256k1::key::PublicKey) -> TransparentAddress {
-        let mut hash160 = ripemd::Ripemd160::new();
-        hash160.update(Sha256::digest(pubkey.serialize()));
-        TransparentAddress::PublicKey(*hash160.finalize().as_ref())
-    }
-
-    /// A type representing a public key at the BIP-44 external child
-    /// level `m/44'/<coin_type>'/<account>'/0/<child_index>
-    #[derive(Clone, Debug)]
-    pub struct ExternalPubKey(ExtendedPubKey);
-
-    impl ExternalPubKey {
-        /// Returns the transparent address corresponding to
-        /// this public key.
-        pub fn to_address(&self) -> TransparentAddress {
-            pubkey_to_address(&self.0.public_key)
-        }
-
-        /// Returns the secp256k1::key::PublicKey component of
-        /// this public key.
-        pub fn public_key(&self) -> &secp256k1::key::PublicKey {
-            &self.0.public_key
         }
     }
 
@@ -383,7 +343,7 @@ mod tests {
         let sk: SecretKey = (&sk_wif).to_secret_key(&MAIN_NETWORK).expect("invalid wif");
         let secp = secp256k1::Secp256k1::new();
         let pubkey = secp256k1::key::PublicKey::from_secret_key(&secp, &sk);
-        let taddr = transparent::pubkey_to_address(&pubkey).encode(&MAIN_NETWORK);
+        let taddr = zcash_primitives::transparent::pubkey_to_address(&pubkey).encode(&MAIN_NETWORK);
         assert_eq!(taddr, "t1PKtYdJJHhc3Pxowmznkg7vdTwnhEsCvR4".to_string());
     }
 
