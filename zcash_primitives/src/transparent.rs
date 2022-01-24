@@ -31,10 +31,10 @@ pub fn pubkey_to_address(pubkey: &secp256k1::key::PublicKey) -> TransparentAddre
 #[derive(Clone, Debug)]
 pub struct ExternalPubKey(pub ExtendedPubKey);
 
-impl std::convert::TryFrom<&[u8]> for ExternalPubKey {
+impl std::convert::TryFrom<&[u8; 65]> for ExternalPubKey {
     type Error = hdwallet::error::Error;
 
-    fn try_from(data: &[u8]) -> Result<Self, Self::Error> {
+    fn try_from(data: &[u8; 65]) -> Result<Self, Self::Error> {
         let ext_pub_key = ExtendedPubKey::deserialize(data)?;
         Ok(Self(ext_pub_key))
     }
