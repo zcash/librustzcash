@@ -1,5 +1,6 @@
 use crate::{legacy::TransparentAddress, sapling::keys::prf_expand_vec};
-use hdwallet::{traits::Deserialize, ExtendedPrivKey, ExtendedPubKey};
+use hdwallet::{ExtendedPrivKey, ExtendedPubKey};
+use secp256k1::PublicKey;
 use sha2::{Digest, Sha256};
 use std::convert::TryInto;
 
@@ -35,8 +36,7 @@ impl std::convert::TryFrom<&[u8; 65]> for ExternalPubKey {
     type Error = hdwallet::error::Error;
 
     fn try_from(data: &[u8; 65]) -> Result<Self, Self::Error> {
-        let ext_pub_key = ExtendedPubKey::deserialize(data)?;
-        Ok(Self(ext_pub_key))
+        ExternalPubKey::deserialize(data)
     }
 }
 
@@ -82,6 +82,21 @@ impl ExternalPubKey {
     /// Derives the external ovk corresponding to this transparent fvk.
     pub fn external_ovk(&self) -> ExternalOvk {
         self.ovk_for_shielding().1
+    }
+
+    pub fn serialize(&self) -> Vec<u8> {
+        let mut buf = self.0.chain_code.clone();
+        buf.extend(self.0.public_key.serialize().to_vec());
+        buf
+    }
+
+    pub fn deserialize(data: &[u8; 65]) -> Result<Self, hdwallet::error::Error> {
+        let chain_code = data[..32].to_vec();
+        let public_key = PublicKey::from_slice(&data[32..])?;
+        Ok(ExternalPubKey(ExtendedPubKey {
+            public_key,
+            chain_code,
+        }))
     }
 }
 
