@@ -10,9 +10,10 @@ use zcash_primitives::{
     merkle_tree::IncrementalWitness,
     sapling::{Diversifier, Rseed},
     transaction::components::Amount,
+    zip32::AccountId,
 };
 
-use zcash_client_backend::wallet::{AccountId, SpendableNote};
+use zcash_client_backend::wallet::SpendableNote;
 
 use crate::{error::SqliteClientError, WalletDb};
 
@@ -169,7 +170,7 @@ mod tests {
     };
 
     #[cfg(feature = "transparent-inputs")]
-    use zcash_client_backend::keys::transparent;
+    use zcash_primitives::legacy::keys as transparent;
 
     use crate::{
         chain::init::init_cache_database,

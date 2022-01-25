@@ -8,11 +8,11 @@ use zcash_primitives::{
         components::{amount::DEFAULT_FEE, Amount},
         Transaction,
     },
-    zip32::{ExtendedFullViewingKey, ExtendedSpendingKey},
+    zip32::{AccountId, ExtendedFullViewingKey, ExtendedSpendingKey},
 };
 
 #[cfg(feature = "transparent-inputs")]
-use zcash_primitives::{sapling::keys::OutgoingViewingKey, transparent};
+use zcash_primitives::{legacy::keys as transparent, sapling::keys::OutgoingViewingKey};
 
 use crate::{
     address::RecipientAddress,
@@ -20,7 +20,7 @@ use crate::{
         error::Error, DecryptedTransaction, SentTransaction, SentTransactionOutput, WalletWrite,
     },
     decrypt_transaction,
-    wallet::{AccountId, OvkPolicy},
+    wallet::OvkPolicy,
     zip321::{Payment, TransactionRequest},
 };
 
@@ -102,12 +102,13 @@ where
 ///     consensus::{self, Network},
 ///     constants::testnet::COIN_TYPE,
 ///     transaction::{TxId, components::Amount},
+///     zip32::AccountId,
 /// };
 /// use zcash_proofs::prover::LocalTxProver;
 /// use zcash_client_backend::{
 ///     keys::sapling,
 ///     data_api::{wallet::create_spend_to_address, error::Error, testing},
-///     wallet::{AccountId, OvkPolicy},
+///     wallet::OvkPolicy,
 /// };
 ///
 /// # fn main() {

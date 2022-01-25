@@ -8,6 +8,7 @@ use byteorder::{ByteOrder, LittleEndian, ReadBytesExt, WriteBytesExt};
 use fpe::ff1::{BinaryNumeralString, FF1};
 use std::convert::TryInto;
 use std::ops::AddAssign;
+use subtle::{Choice, ConditionallySelectable};
 
 use crate::{
     constants::{PROOF_GENERATION_KEY_GENERATOR, SPENDING_KEY_GENERATOR},
@@ -22,6 +23,28 @@ use crate::sapling::keys::{
 pub const ZIP32_SAPLING_MASTER_PERSONALIZATION: &[u8; 16] = b"ZcashIP32Sapling";
 pub const ZIP32_SAPLING_FVFP_PERSONALIZATION: &[u8; 16] = b"ZcashSaplingFVFP";
 pub const ZIP32_SAPLING_INT_PERSONALIZATION: &[u8; 16] = b"Zcash_SaplingInt";
+
+/// A type-safe wrapper for account identifiers.
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+pub struct AccountId(pub u32);
+
+impl From<u32> for AccountId {
+    fn from(id: u32) -> Self {
+        Self(id)
+    }
+}
+
+impl Default for AccountId {
+    fn default() -> Self {
+        AccountId(0)
+    }
+}
+
+impl ConditionallySelectable for AccountId {
+    fn conditional_select(a0: &Self, a1: &Self, c: Choice) -> Self {
+        AccountId(u32::conditional_select(&a0.0, &a1.0, c))
+    }
+}
 
 // Common helper functions
 

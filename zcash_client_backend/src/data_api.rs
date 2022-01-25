@@ -11,14 +11,14 @@ use zcash_primitives::{
     merkle_tree::{CommitmentTree, IncrementalWitness},
     sapling::{Node, Nullifier, PaymentAddress},
     transaction::{components::Amount, Transaction, TxId},
-    zip32::ExtendedFullViewingKey,
+    zip32::{AccountId, ExtendedFullViewingKey},
 };
 
 use crate::{
     address::RecipientAddress,
     decrypt::DecryptedOutput,
     proto::compact_formats::CompactBlock,
-    wallet::{AccountId, SpendableNote, WalletTx},
+    wallet::{SpendableNote, WalletTx},
 };
 
 #[cfg(feature = "transparent-inputs")]
@@ -307,12 +307,12 @@ pub mod testing {
         merkle_tree::{CommitmentTree, IncrementalWitness},
         sapling::{Node, Nullifier, PaymentAddress},
         transaction::{components::Amount, Transaction, TxId},
-        zip32::ExtendedFullViewingKey,
+        zip32::{AccountId, ExtendedFullViewingKey},
     };
 
     use crate::{
         proto::compact_formats::CompactBlock,
-        wallet::{AccountId, SpendableNote, WalletTransparentOutput},
+        wallet::{SpendableNote, WalletTransparentOutput},
     };
 
     use super::{

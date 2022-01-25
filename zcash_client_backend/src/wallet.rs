@@ -1,8 +1,6 @@
 //! Structs representing transaction data scanned from the block chain by a wallet or
 //! light client.
 
-use subtle::{Choice, ConditionallySelectable};
-
 use zcash_note_encryption::EphemeralKeyBytes;
 use zcash_primitives::{
     merkle_tree::IncrementalWitness,
@@ -10,6 +8,7 @@ use zcash_primitives::{
         keys::OutgoingViewingKey, Diversifier, Node, Note, Nullifier, PaymentAddress, Rseed,
     },
     transaction::{components::Amount, TxId},
+    zip32::AccountId,
 };
 
 #[cfg(feature = "transparent-inputs")]
@@ -18,28 +17,6 @@ use zcash_primitives::{
     legacy::TransparentAddress,
     transaction::components::{OutPoint, TxOut},
 };
-
-/// A type-safe wrapper for account identifiers.
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
-pub struct AccountId(pub u32);
-
-impl From<u32> for AccountId {
-    fn from(id: u32) -> Self {
-        Self(id)
-    }
-}
-
-impl Default for AccountId {
-    fn default() -> Self {
-        AccountId(0)
-    }
-}
-
-impl ConditionallySelectable for AccountId {
-    fn conditional_select(a0: &Self, a1: &Self, c: Choice) -> Self {
-        AccountId(u32::conditional_select(&a0.0, &a1.0, c))
-    }
-}
 
 /// A subset of a [`Transaction`] relevant to wallets and light clients.
 ///

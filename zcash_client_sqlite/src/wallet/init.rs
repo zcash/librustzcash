@@ -288,7 +288,7 @@ mod tests {
     use zcash_client_backend::keys::{sapling, UnifiedFullViewingKey, UnifiedSpendingKey};
 
     #[cfg(feature = "transparent-inputs")]
-    use zcash_client_backend::keys::transparent;
+    use zcash_primitives::legacy::keys as transparent;
 
     use zcash_primitives::{
         block::BlockHash,

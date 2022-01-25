@@ -100,11 +100,11 @@ impl<P: consensus::Parameters> AddressCodec<P> for TransparentAddress {
 /// ```
 /// use zcash_primitives::{
 ///     constants::testnet::{COIN_TYPE, HRP_SAPLING_EXTENDED_SPENDING_KEY},
+///     zip32::AccountId,
 /// };
 /// use zcash_client_backend::{
 ///     encoding::encode_extended_spending_key,
 ///     keys::sapling,
-///     wallet::AccountId,
 /// };
 ///
 /// let extsk = sapling::spending_key(&[0; 32][..], COIN_TYPE, AccountId(0));
@@ -132,11 +132,11 @@ pub fn decode_extended_spending_key(
 /// ```
 /// use zcash_primitives::{
 ///     constants::testnet::{COIN_TYPE, HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY},
+///     zip32::AccountId,
 /// };
 /// use zcash_client_backend::{
 ///     encoding::encode_extended_full_viewing_key,
 ///     keys::sapling,
-///     wallet::AccountId,
 /// };
 /// use zcash_primitives::zip32::ExtendedFullViewingKey;
 ///

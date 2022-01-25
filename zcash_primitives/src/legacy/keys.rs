@@ -1,13 +1,91 @@
-use crate::{legacy::TransparentAddress, sapling::keys::prf_expand_vec};
-use hdwallet::{ExtendedPrivKey, ExtendedPubKey};
+use hdwallet::{ExtendedPrivKey, ExtendedPubKey, KeyIndex};
 use secp256k1::PublicKey;
 use sha2::{Digest, Sha256};
 use std::convert::TryInto;
 
+use crate::{consensus, keys::prf_expand_vec, zip32::AccountId};
+
+use super::TransparentAddress;
+
+/// A type representing a BIP-44 private key at the account path level
+/// `m/44'/<coin_type>'/<account>'
+#[derive(Clone, Debug)]
+pub struct AccountPrivKey(ExtendedPrivKey);
+
+impl AccountPrivKey {
+    /// Perform derivation of the extended private key for the BIP-44 path:
+    /// `m/44'/<coin_type>'/<account>'
+    ///
+    /// This produces the extended private key for the external (non-change)
+    /// address at the specified index for the provided account.
+    pub fn from_seed<P: consensus::Parameters>(
+        params: &P,
+        seed: &[u8],
+        account: AccountId,
+    ) -> Result<AccountPrivKey, hdwallet::error::Error> {
+        ExtendedPrivKey::with_seed(&seed)?
+            .derive_private_key(KeyIndex::hardened_from_normalize_index(44)?)?
+            .derive_private_key(KeyIndex::hardened_from_normalize_index(params.coin_type())?)?
+            .derive_private_key(KeyIndex::hardened_from_normalize_index(account.0)?)
+            .map(AccountPrivKey)
+    }
+
+    pub fn from_extended_privkey(extprivkey: ExtendedPrivKey) -> Self {
+        AccountPrivKey(extprivkey)
+    }
+
+    pub fn extended_privkey(&self) -> &ExtendedPrivKey {
+        &self.0
+    }
+
+    pub fn to_account_pubkey(&self) -> AccountPubKey {
+        AccountPubKey(ExtendedPubKey::from_private_key(&self.0))
+    }
+
+    /// Derive BIP-44 private key at the external child path
+    /// `m/44'/<coin_type>'/<account>'/0/<child_index>
+    pub fn derive_external_secret_key(
+        &self,
+        child_index: u32,
+    ) -> Result<ExternalPrivKey, hdwallet::error::Error> {
+        self.0
+            .derive_private_key(KeyIndex::Normal(0))?
+            .derive_private_key(KeyIndex::Normal(child_index))
+            .map(ExternalPrivKey)
+    }
+}
+
+/// A type representing a BIP-44 public key at the account path level
+/// `m/44'/<coin_type>'/<account>'
+#[derive(Clone, Debug)]
+pub struct AccountPubKey(ExtendedPubKey);
+
+impl AccountPubKey {
+    /// Derive BIP-44 public key at the external child path
+    /// `m/44'/<coin_type>'/<account>'/0/<child_index>
+    pub fn derive_external_pubkey(
+        &self,
+        child_index: u32,
+    ) -> Result<ExternalPubKey, hdwallet::error::Error> {
+        self.0
+            .derive_public_key(KeyIndex::Normal(0))?
+            .derive_public_key(KeyIndex::Normal(child_index))
+            .map(ExternalPubKey)
+    }
+
+    pub fn from_extended_pubkey(extpubkey: ExtendedPubKey) -> Self {
+        AccountPubKey(extpubkey)
+    }
+
+    pub fn extended_pubkey(&self) -> &ExtendedPubKey {
+        &self.0
+    }
+}
+
 /// A type representing a private key at the BIP-44 external child
 /// level `m/44'/<coin_type>'/<account>'/0/<child_index>
 #[derive(Clone, Debug)]
-pub struct ExternalPrivKey(pub ExtendedPrivKey);
+pub struct ExternalPrivKey(ExtendedPrivKey);
 
 impl ExternalPrivKey {
     /// Returns the external public key corresponding to this private key
@@ -30,7 +108,7 @@ pub fn pubkey_to_address(pubkey: &secp256k1::key::PublicKey) -> TransparentAddre
 /// A type representing a public key at the BIP-44 external child
 /// level `m/44'/<coin_type>'/<account>'/0/<child_index>
 #[derive(Clone, Debug)]
-pub struct ExternalPubKey(pub ExtendedPubKey);
+pub struct ExternalPubKey(ExtendedPubKey);
 
 impl std::convert::TryFrom<&[u8; 65]> for ExternalPubKey {
     type Error = hdwallet::error::Error;
@@ -62,7 +140,7 @@ impl ExternalPubKey {
     /// transparent fvk. As specified in [ZIP 316][transparent-ovk].
     ///
     /// [transparent-ovk]: https://zips.z.cash/zip-0316#deriving-internal-keys
-    fn ovk_for_shielding(&self) -> (InternalOvk, ExternalOvk) {
+    pub fn ovks_for_shielding(&self) -> (InternalOvk, ExternalOvk) {
         let i_ovk = prf_expand_vec(
             &self.chain_code(),
             &[&[0xd0], &self.public_key().serialize()],
@@ -76,12 +154,12 @@ impl ExternalPubKey {
 
     /// Derives the internal ovk corresponding to this transparent fvk.
     pub fn internal_ovk(&self) -> InternalOvk {
-        self.ovk_for_shielding().0
+        self.ovks_for_shielding().0
     }
 
     /// Derives the external ovk corresponding to this transparent fvk.
     pub fn external_ovk(&self) -> ExternalOvk {
-        self.ovk_for_shielding().1
+        self.ovks_for_shielding().1
     }
 
     pub fn serialize(&self) -> Vec<u8> {

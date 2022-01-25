@@ -6,9 +6,8 @@ use zcash_primitives::{
     consensus::BlockHeight,
     sapling::Node,
     transaction::{builder, components::amount::Amount, TxId},
+    zip32::AccountId,
 };
-
-use crate::wallet::AccountId;
 
 #[derive(Debug)]
 pub enum ChainInvalid {

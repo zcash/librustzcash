@@ -8,10 +8,8 @@ use zcash_primitives::{
         Note, PaymentAddress,
     },
     transaction::Transaction,
-    zip32::ExtendedFullViewingKey,
+    zip32::{AccountId, ExtendedFullViewingKey},
 };
-
-use crate::wallet::AccountId;
 
 /// A decrypted shielded output.
 pub struct DecryptedOutput {

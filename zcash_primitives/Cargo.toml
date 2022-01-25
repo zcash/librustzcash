@@ -22,6 +22,7 @@ bip0039 = { version = "0.9", features = ["std", "all-languages"] }
 blake2b_simd = "1"
 blake2s_simd = "1"
 bls12_381 = "0.6"
+bs58 = { version = "0.4", features = ["check"], optional = true }
 byteorder = "1"
 chacha20poly1305 = "0.9"
 equihash = { version = "0.1", path = "../components/equihash" }
@@ -61,7 +62,7 @@ orchard = { version = "=0.1.0-beta.1", features = ["test-dependencies"] }
 pprof = { version = "=0.6.1", features = ["criterion", "flamegraph"] }
 
 [features]
-transparent-inputs = ["ripemd160", "hdwallet", "secp256k1"]
+transparent-inputs = ["bs58", "hdwallet", "ripemd160", "secp256k1"]
 test-dependencies = ["proptest", "orchard/test-dependencies"]
 zfuture = []
 

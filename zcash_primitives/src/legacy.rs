@@ -6,6 +6,9 @@ use std::ops::Shl;
 
 use zcash_encoding::Vector;
 
+#[cfg(feature = "transparent-inputs")]
+pub mod keys;
+
 /// Minimal subset of script opcodes.
 enum OpCode {
     // push value

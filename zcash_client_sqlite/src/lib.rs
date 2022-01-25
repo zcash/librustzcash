@@ -45,7 +45,7 @@ use zcash_primitives::{
     merkle_tree::{CommitmentTree, IncrementalWitness},
     sapling::{Node, Nullifier, PaymentAddress},
     transaction::{components::Amount, Transaction, TxId},
-    zip32::ExtendedFullViewingKey,
+    zip32::{AccountId, ExtendedFullViewingKey},
 };
 
 use zcash_client_backend::{
@@ -55,7 +55,7 @@ use zcash_client_backend::{
     },
     encoding::encode_payment_address,
     proto::compact_formats::CompactBlock,
-    wallet::{AccountId, SpendableNote},
+    wallet::SpendableNote,
 };
 
 use crate::error::SqliteClientError;
@@ -707,7 +707,7 @@ mod tests {
     };
 
     #[cfg(feature = "transparent-inputs")]
-    use zcash_client_backend::keys::transparent;
+    use zcash_primitives::legacy;
 
     use zcash_primitives::{
         block::BlockHash,
@@ -762,7 +762,7 @@ mod tests {
         #[cfg(feature = "transparent-inputs")]
         {
             let tkey = Some(
-                transparent::AccountPrivKey::from_seed(&network(), &seed, AccountId(0))
+                legacy::keys::AccountPrivKey::from_seed(&network(), &seed, AccountId(0))
                     .unwrap()
                     .to_account_pubkey(),
             );

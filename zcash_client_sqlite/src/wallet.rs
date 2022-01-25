@@ -19,7 +19,7 @@ use zcash_primitives::{
     merkle_tree::{CommitmentTree, IncrementalWitness},
     sapling::{Node, Note, Nullifier, PaymentAddress},
     transaction::{components::Amount, Transaction, TxId},
-    zip32::ExtendedFullViewingKey,
+    zip32::{AccountId, ExtendedFullViewingKey},
 };
 
 use zcash_client_backend::{
@@ -28,7 +28,7 @@ use zcash_client_backend::{
         decode_extended_full_viewing_key, decode_payment_address, encode_extended_full_viewing_key,
         encode_payment_address_p, encode_transparent_address_p,
     },
-    wallet::{AccountId, WalletShieldedOutput, WalletTx},
+    wallet::{WalletShieldedOutput, WalletTx},
     DecryptedOutput,
 };
 

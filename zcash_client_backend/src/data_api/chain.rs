@@ -84,7 +84,7 @@ use zcash_primitives::{
     consensus::{self, BlockHeight, NetworkUpgrade},
     merkle_tree::CommitmentTree,
     sapling::Nullifier,
-    zip32::ExtendedFullViewingKey,
+    zip32::{AccountId, ExtendedFullViewingKey},
 };
 
 use crate::{
@@ -93,7 +93,7 @@ use crate::{
         BlockSource, PrunedBlock, WalletWrite,
     },
     proto::compact_formats::CompactBlock,
-    wallet::{AccountId, WalletTx},
+    wallet::WalletTx,
     welding_rig::scan_block,
 };
 
