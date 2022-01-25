@@ -146,11 +146,13 @@ pub fn init_wallet_db<P>(wdb: &WalletDb<P>) -> Result<(), rusqlite::Error> {
 /// # Examples
 ///
 /// ```
+/// # #[cfg(feature = "transparent-inputs")]
+/// # {
 /// use tempfile::NamedTempFile;
 ///
 /// use zcash_primitives::{
 ///     consensus::{Network, Parameters},
-///     zip32::{ExtendedFullViewingKey, ExtendedSpendingKey}
+///     zip32::{AccountId, ExtendedFullViewingKey, ExtendedSpendingKey}
 /// };
 ///
 /// use zcash_client_backend::{
@@ -158,7 +160,6 @@ pub fn init_wallet_db<P>(wdb: &WalletDb<P>) -> Result<(), rusqlite::Error> {
 ///         sapling,
 ///         UnifiedFullViewingKey
 ///     },
-///     wallet::AccountId,
 /// };
 ///
 /// use zcash_client_sqlite::{
@@ -176,6 +177,7 @@ pub fn init_wallet_db<P>(wdb: &WalletDb<P>) -> Result<(), rusqlite::Error> {
 /// let extfvk = ExtendedFullViewingKey::from(&extsk);
 /// let ufvk = UnifiedFullViewingKey::new(account, None, Some(extfvk)).unwrap();
 /// init_accounts_table(&db_data, &[ufvk]).unwrap();
+/// # }
 /// ```
 ///
 /// [`get_address`]: crate::wallet::get_address

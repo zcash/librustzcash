@@ -117,8 +117,8 @@ impl ShieldedOutput for DecryptedOutput {
 /// use tempfile::NamedTempFile;
 /// use zcash_primitives::{
 ///     consensus::{self, Network},
+///     zip32::AccountId,
 /// };
-/// use zcash_client_backend::wallet::AccountId;
 /// use zcash_client_sqlite::{
 ///     WalletDb,
 ///     wallet::get_address,
@@ -213,8 +213,10 @@ pub fn is_valid_account_extfvk<P: consensus::Parameters>(
 ///
 /// ```
 /// use tempfile::NamedTempFile;
-/// use zcash_primitives::consensus::Network;
-/// use zcash_client_backend::wallet::AccountId;
+/// use zcash_primitives::{
+///     consensus::Network,
+///     zip32::AccountId,
+/// };
 /// use zcash_client_sqlite::{
 ///     WalletDb,
 ///     wallet::get_balance,
@@ -249,8 +251,10 @@ pub fn get_balance<P>(wdb: &WalletDb<P>, account: AccountId) -> Result<Amount, S
 ///
 /// ```
 /// use tempfile::NamedTempFile;
-/// use zcash_primitives::consensus::{BlockHeight, Network};
-/// use zcash_client_backend::wallet::AccountId;
+/// use zcash_primitives::{
+///     consensus::{BlockHeight, Network},
+///     zip32::AccountId,
+/// };
 /// use zcash_client_sqlite::{
 ///     WalletDb,
 ///     wallet::get_balance_at,
