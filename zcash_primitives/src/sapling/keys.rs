@@ -13,11 +13,7 @@ use group::{Group, GroupEncoding};
 use std::io::{self, Read, Write};
 use subtle::CtOption;
 
-pub use crate::keys::{prf_expand, prf_expand_vec};
-
-/// An outgoing viewing key
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct OutgoingViewingKey(pub [u8; 32]);
+pub use crate::keys::{prf_expand, prf_expand_vec, OutgoingViewingKey};
 
 /// A Sapling expanded spending key
 #[derive(Clone)]

@@ -12,7 +12,7 @@ use zcash_primitives::{
 };
 
 #[cfg(feature = "transparent-inputs")]
-use zcash_primitives::{legacy::keys as transparent, sapling::keys::OutgoingViewingKey};
+use zcash_primitives::{keys::OutgoingViewingKey, legacy::keys as transparent};
 
 use crate::{
     address::RecipientAddress,
