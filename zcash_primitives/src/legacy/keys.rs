@@ -36,10 +36,6 @@ impl AccountPrivKey {
         AccountPrivKey(extprivkey)
     }
 
-    pub fn extended_privkey(&self) -> &ExtendedPrivKey {
-        &self.0
-    }
-
     pub fn to_account_pubkey(&self) -> AccountPubKey {
         AccountPubKey(ExtendedPubKey::from_private_key(&self.0))
     }
@@ -119,8 +115,25 @@ impl AccountPubKey {
     pub fn external_ovk(&self) -> ExternalOvk {
         self.ovks_for_shielding().1
     }
+
+    pub fn serialize(&self) -> Vec<u8> {
+        let mut buf = self.0.chain_code.clone();
+        buf.extend(self.0.public_key.serialize().to_vec());
+        buf
+    }
+
+    pub fn deserialize(data: &[u8; 65]) -> Result<Self, hdwallet::error::Error> {
+        let chain_code = data[..32].to_vec();
+        let public_key = PublicKey::from_slice(&data[32..])?;
+        Ok(AccountPubKey(ExtendedPubKey {
+            public_key,
+            chain_code,
+        }))
+    }
 }
 
+/// Derives the P2PKH transparent address corresponding to the given pubkey.
+#[deprecated(note = "This function will be removed from the public API in an upcoming refactor.")]
 pub fn pubkey_to_address(pubkey: &secp256k1::key::PublicKey) -> TransparentAddress {
     let mut hash160 = ripemd160::Ripemd160::new();
     hash160.update(Sha256::digest(&pubkey.serialize()));
