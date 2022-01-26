@@ -12,7 +12,9 @@ use zcash_primitives::{
 };
 
 #[cfg(feature = "transparent-inputs")]
-use zcash_primitives::{keys::OutgoingViewingKey, legacy::keys as transparent};
+use zcash_primitives::{
+    keys::OutgoingViewingKey, legacy::keys as transparent, legacy::keys::IncomingViewingKey,
+};
 
 use crate::{
     address::RecipientAddress,
@@ -378,7 +380,7 @@ pub fn shield_transparent_funds<E, N, P, D, R>(
     wallet_db: &mut D,
     params: &P,
     prover: impl TxProver,
-    sk: &transparent::ExternalPrivKey,
+    sk: &transparent::AccountPrivKey,
     extfvk: &ExtendedFullViewingKey,
     account: AccountId,
     memo: &MemoBytes,
@@ -401,9 +403,8 @@ where
         .and_then(|x| x.ok_or_else(|| Error::ScanRequired.into()))?;
 
     // derive the t-address for the extpubkey at child index 0
-    let t_ext_pubkey = sk.to_external_pubkey();
-    let taddr = t_ext_pubkey.to_address();
-    let ovk = OutgoingViewingKey(t_ext_pubkey.internal_ovk().as_bytes());
+    let account_pubkey = sk.to_account_pubkey();
+    let ovk = OutgoingViewingKey(account_pubkey.internal_ovk().as_bytes());
 
     // derive own shielded address from the provided extended spending key
     // TODO: this should become the internal change address derived from
@@ -411,6 +412,10 @@ where
     let z_address = extfvk.default_address().1;
 
     // get UTXOs from DB
+    let (taddr, child_index) = account_pubkey
+        .derive_external_ivk()
+        .unwrap()
+        .default_address();
     let utxos = wallet_db.get_unspent_transparent_outputs(&taddr, latest_anchor)?;
     let total_amount = utxos
         .iter()
@@ -427,9 +432,10 @@ where
 
     let mut builder = Builder::new(params.clone(), latest_scanned_height);
 
+    let secret_key = sk.derive_external_secret_key(child_index).unwrap();
     for utxo in &utxos {
         builder
-            .add_transparent_input(*sk.secret_key(), utxo.outpoint.clone(), utxo.txout.clone())
+            .add_transparent_input(secret_key, utxo.outpoint.clone(), utxo.txout.clone())
             .map_err(Error::Builder)?;
     }
 

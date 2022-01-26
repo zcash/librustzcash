@@ -7,17 +7,19 @@ use crate::{consensus, keys::prf_expand_vec, zip32::AccountId};
 
 use super::TransparentAddress;
 
+const MAX_TRANSPARENT_CHILD_INDEX: u32 = 0x7FFFFFFF;
+
 /// A type representing a BIP-44 private key at the account path level
 /// `m/44'/<coin_type>'/<account>'
 #[derive(Clone, Debug)]
 pub struct AccountPrivKey(ExtendedPrivKey);
 
 impl AccountPrivKey {
-    /// Perform derivation of the extended private key for the BIP-44 path:
-    /// `m/44'/<coin_type>'/<account>'
+    /// Performs derivation of the extended private key for the BIP-44 path:
+    /// `m/44'/<coin_type>'/<account>'`.
     ///
-    /// This produces the extended private key for the external (non-change)
-    /// address at the specified index for the provided account.
+    /// This produces the root of the derivation tree for transparent
+    /// viewing keys and addresses for the for the provided account.
     pub fn from_seed<P: consensus::Parameters>(
         params: &P,
         seed: &[u8],
@@ -42,98 +44,54 @@ impl AccountPrivKey {
         AccountPubKey(ExtendedPubKey::from_private_key(&self.0))
     }
 
-    /// Derive BIP-44 private key at the external child path
-    /// `m/44'/<coin_type>'/<account>'/0/<child_index>
+    /// Derives the BIP-44 private spending key for the external (incoming payment) child path
+    /// `m/44'/<coin_type>'/<account>'/0/<child_index>`.
     pub fn derive_external_secret_key(
         &self,
         child_index: u32,
-    ) -> Result<ExternalPrivKey, hdwallet::error::Error> {
+    ) -> Result<secp256k1::key::SecretKey, hdwallet::error::Error> {
         self.0
             .derive_private_key(KeyIndex::Normal(0))?
             .derive_private_key(KeyIndex::Normal(child_index))
-            .map(ExternalPrivKey)
+            .map(|k| k.private_key)
+    }
+
+    /// Derives the BIP-44 private spending key for the internal (change) child path
+    /// `m/44'/<coin_type>'/<account>'/1/<child_index>`.
+    pub fn derive_internal_secret_key(
+        &self,
+        child_index: u32,
+    ) -> Result<secp256k1::key::SecretKey, hdwallet::error::Error> {
+        self.0
+            .derive_private_key(KeyIndex::Normal(1))?
+            .derive_private_key(KeyIndex::Normal(child_index))
+            .map(|k| k.private_key)
     }
 }
 
 /// A type representing a BIP-44 public key at the account path level
-/// `m/44'/<coin_type>'/<account>'
+/// `m/44'/<coin_type>'/<account>'`.
+///
+/// This provides the necessary derivation capability for the for
+/// the transparent component of a unified full viewing key.
 #[derive(Clone, Debug)]
 pub struct AccountPubKey(ExtendedPubKey);
 
 impl AccountPubKey {
-    /// Derive BIP-44 public key at the external child path
-    /// `m/44'/<coin_type>'/<account>'/0/<child_index>
-    pub fn derive_external_pubkey(
-        &self,
-        child_index: u32,
-    ) -> Result<ExternalPubKey, hdwallet::error::Error> {
+    /// Derives the BIP-44 public key at the external "change level" path
+    /// `m/44'/<coin_type>'/<account>'/0`.
+    pub fn derive_external_ivk(&self) -> Result<ExternalIvk, hdwallet::error::Error> {
         self.0
-            .derive_public_key(KeyIndex::Normal(0))?
-            .derive_public_key(KeyIndex::Normal(child_index))
-            .map(ExternalPubKey)
+            .derive_public_key(KeyIndex::Normal(0))
+            .map(ExternalIvk)
     }
 
-    pub fn from_extended_pubkey(extpubkey: ExtendedPubKey) -> Self {
-        AccountPubKey(extpubkey)
-    }
-
-    pub fn extended_pubkey(&self) -> &ExtendedPubKey {
-        &self.0
-    }
-}
-
-/// A type representing a private key at the BIP-44 external child
-/// level `m/44'/<coin_type>'/<account>'/0/<child_index>
-#[derive(Clone, Debug)]
-pub struct ExternalPrivKey(ExtendedPrivKey);
-
-impl ExternalPrivKey {
-    /// Returns the external public key corresponding to this private key
-    pub fn to_external_pubkey(&self) -> ExternalPubKey {
-        ExternalPubKey(ExtendedPubKey::from_private_key(&self.0))
-    }
-
-    /// Extracts the secp256k1 secret key component
-    pub fn secret_key(&self) -> &secp256k1::key::SecretKey {
-        &self.0.private_key
-    }
-}
-
-pub fn pubkey_to_address(pubkey: &secp256k1::key::PublicKey) -> TransparentAddress {
-    let mut hash160 = ripemd160::Ripemd160::new();
-    hash160.update(Sha256::digest(&pubkey.serialize()));
-    TransparentAddress::PublicKey(*hash160.finalize().as_ref())
-}
-
-/// A type representing a public key at the BIP-44 external child
-/// level `m/44'/<coin_type>'/<account>'/0/<child_index>
-#[derive(Clone, Debug)]
-pub struct ExternalPubKey(ExtendedPubKey);
-
-impl std::convert::TryFrom<&[u8; 65]> for ExternalPubKey {
-    type Error = hdwallet::error::Error;
-
-    fn try_from(data: &[u8; 65]) -> Result<Self, Self::Error> {
-        ExternalPubKey::deserialize(data)
-    }
-}
-
-impl ExternalPubKey {
-    /// Returns the transparent address corresponding to
-    /// this public key.
-    pub fn to_address(&self) -> TransparentAddress {
-        pubkey_to_address(&self.0.public_key)
-    }
-
-    /// Returns the secp256k1::key::PublicKey component of
-    /// this public key.
-    pub fn public_key(&self) -> &secp256k1::key::PublicKey {
-        &self.0.public_key
-    }
-
-    /// Returns the chain code component of this public key.
-    pub fn chain_code(&self) -> &[u8] {
-        &self.0.chain_code
+    /// Derives the BIP-44 public key at the internal "change level" path
+    /// `m/44'/<coin_type>'/<account>'/1`.
+    pub fn derive_internal_ivk(&self) -> Result<InternalIvk, hdwallet::error::Error> {
+        self.0
+            .derive_public_key(KeyIndex::Normal(1))
+            .map(InternalIvk)
     }
 
     /// Derives the internal ovk and external ovk corresponding to this
@@ -142,8 +100,8 @@ impl ExternalPubKey {
     /// [transparent-ovk]: https://zips.z.cash/zip-0316#deriving-internal-keys
     pub fn ovks_for_shielding(&self) -> (InternalOvk, ExternalOvk) {
         let i_ovk = prf_expand_vec(
-            &self.chain_code(),
-            &[&[0xd0], &self.public_key().serialize()],
+            &self.0.chain_code,
+            &[&[0xd0], &self.0.public_key.serialize()],
         );
         let i_ovk = i_ovk.as_bytes();
         let ovk_internal = InternalOvk(i_ovk[..32].try_into().unwrap());
@@ -161,22 +119,105 @@ impl ExternalPubKey {
     pub fn external_ovk(&self) -> ExternalOvk {
         self.ovks_for_shielding().1
     }
+}
 
-    pub fn serialize(&self) -> Vec<u8> {
-        let mut buf = self.0.chain_code.clone();
-        buf.extend(self.0.public_key.serialize().to_vec());
+pub fn pubkey_to_address(pubkey: &secp256k1::key::PublicKey) -> TransparentAddress {
+    let mut hash160 = ripemd160::Ripemd160::new();
+    hash160.update(Sha256::digest(&pubkey.serialize()));
+    TransparentAddress::PublicKey(*hash160.finalize().as_ref())
+}
+
+pub(crate) mod private {
+    use hdwallet::ExtendedPubKey;
+    pub trait SealedChangeLevelKey {
+        fn extended_pubkey(&self) -> &ExtendedPubKey;
+        fn from_extended_pubkey(key: ExtendedPubKey) -> Self;
+    }
+}
+
+pub trait IncomingViewingKey: private::SealedChangeLevelKey + std::marker::Sized {
+    /// Derives a transparent address at the provided child index.
+    fn derive_address(
+        &self,
+        child_index: u32,
+    ) -> Result<TransparentAddress, hdwallet::error::Error> {
+        let child_key = self
+            .extended_pubkey()
+            .derive_public_key(KeyIndex::Normal(child_index))?;
+        Ok(pubkey_to_address(&child_key.public_key))
+    }
+
+    /// Searches the space of child indexes for an index that will
+    /// generate a valid transparent address, and returns the resulting
+    /// address and the index at which it was generated.
+    fn default_address(&self) -> (TransparentAddress, u32) {
+        let mut child_index = 0;
+        while child_index <= MAX_TRANSPARENT_CHILD_INDEX {
+            match self.derive_address(child_index) {
+                Ok(addr) => {
+                    return (addr, child_index);
+                }
+                Err(_) => {
+                    child_index += 1;
+                }
+            }
+        }
+        panic!("Exhausted child index space attempting to find a default address.");
+    }
+
+    fn serialize(&self) -> Vec<u8> {
+        let extpubkey = self.extended_pubkey();
+        let mut buf = extpubkey.chain_code.clone();
+        buf.extend(extpubkey.public_key.serialize().to_vec());
         buf
     }
 
-    pub fn deserialize(data: &[u8; 65]) -> Result<Self, hdwallet::error::Error> {
+    fn deserialize(data: &[u8; 65]) -> Result<Self, hdwallet::error::Error> {
         let chain_code = data[..32].to_vec();
         let public_key = PublicKey::from_slice(&data[32..])?;
-        Ok(ExternalPubKey(ExtendedPubKey {
+        Ok(Self::from_extended_pubkey(ExtendedPubKey {
             public_key,
             chain_code,
         }))
     }
 }
+
+/// A type representing an incoming viewing key at the BIP-44 "external"
+/// path `m/44'/<coin_type>'/<account>'/0`. This allows derivation
+/// of child addresses that may be provided to external parties.
+#[derive(Clone, Debug)]
+pub struct ExternalIvk(ExtendedPubKey);
+
+impl private::SealedChangeLevelKey for ExternalIvk {
+    fn extended_pubkey(&self) -> &ExtendedPubKey {
+        &self.0
+    }
+
+    fn from_extended_pubkey(key: ExtendedPubKey) -> Self {
+        ExternalIvk(key)
+    }
+}
+
+impl IncomingViewingKey for ExternalIvk {}
+
+/// A type representing an incoming viewing key at the BIP-44 "internal"
+/// path `m/44'/<coin_type>'/<account>'/1`. This allows derivation
+/// of change addresses for use within the wallet, but which should
+/// not be shared with external parties.
+#[derive(Clone, Debug)]
+pub struct InternalIvk(ExtendedPubKey);
+
+impl private::SealedChangeLevelKey for InternalIvk {
+    fn extended_pubkey(&self) -> &ExtendedPubKey {
+        &self.0
+    }
+
+    fn from_extended_pubkey(key: ExtendedPubKey) -> Self {
+        InternalIvk(key)
+    }
+}
+
+impl IncomingViewingKey for InternalIvk {}
 
 /// Internal ovk used for autoshielding.
 pub struct InternalOvk([u8; 32]);

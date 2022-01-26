@@ -229,7 +229,7 @@ mod tests {
         super::transparent,
         crate::encoding::AddressCodec,
         secp256k1::key::SecretKey,
-        zcash_primitives::{consensus::MAIN_NETWORK, legacy},
+        zcash_primitives::{consensus::MAIN_NETWORK, legacy, legacy::keys::IncomingViewingKey},
     };
 
     #[cfg(feature = "transparent-inputs")]
@@ -251,7 +251,7 @@ mod tests {
             .unwrap()
             .derive_external_secret_key(0)
             .unwrap();
-        let wif = transparent::Wif::from_secret_key(&MAIN_NETWORK, &sk.secret_key(), true).0;
+        let wif = transparent::Wif::from_secret_key(&MAIN_NETWORK, &sk, true).0;
         assert_eq!(
             wif,
             "L4BvDC33yLjMRxipZvdiUmdYeRfZmR8viziwsVwe72zJdGbiJPv2".to_string()
@@ -272,28 +272,15 @@ mod tests {
 
     #[cfg(feature = "transparent-inputs")]
     #[test]
-    fn pk_from_seed() {
-        let pk = legacy::keys::AccountPrivKey::from_seed(&MAIN_NETWORK, &seed(), AccountId(0))
-            .unwrap()
-            .derive_external_secret_key(0)
-            .unwrap()
-            .to_external_pubkey();
-        let hex_value = hex::encode(&pk.public_key().serialize());
-        assert_eq!(
-            hex_value,
-            "03b1d7fb28d17c125b504d06b1530097e0a3c76ada184237e3bc0925041230a5af".to_string()
-        );
-    }
-
-    #[cfg(feature = "transparent-inputs")]
-    #[test]
     fn pk_to_taddr() {
-        let pk = legacy::keys::AccountPrivKey::from_seed(&MAIN_NETWORK, &seed(), AccountId(0))
+        let taddr = legacy::keys::AccountPrivKey::from_seed(&MAIN_NETWORK, &seed(), AccountId(0))
             .unwrap()
-            .derive_external_secret_key(0)
+            .to_account_pubkey()
+            .derive_external_ivk()
             .unwrap()
-            .to_external_pubkey();
-        let taddr = pk.to_address().encode(&MAIN_NETWORK);
+            .derive_address(0)
+            .unwrap()
+            .encode(&MAIN_NETWORK);
         assert_eq!(taddr, "t1PKtYdJJHhc3Pxowmznkg7vdTwnhEsCvR4".to_string());
     }
 }

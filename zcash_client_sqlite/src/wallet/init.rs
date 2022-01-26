@@ -14,7 +14,10 @@ use zcash_client_backend::{
 use crate::{address_from_extfvk, error::SqliteClientError, WalletDb};
 
 #[cfg(feature = "transparent-inputs")]
-use zcash_client_backend::encoding::AddressCodec;
+use {
+    zcash_client_backend::encoding::AddressCodec,
+    zcash_primitives::legacy::keys::IncomingViewingKey,
+};
 
 /// Sets up the internal structure of the data database.
 ///
@@ -207,9 +210,9 @@ pub fn init_accounts_table<P: consensus::Parameters>(
             .map(|extfvk| address_from_extfvk(&wdb.params, extfvk));
         #[cfg(feature = "transparent-inputs")]
         let taddress_str: Option<String> = key.transparent().and_then(|k| {
-            k.derive_external_pubkey(0)
+            k.derive_external_ivk()
                 .ok()
-                .map(|k| k.to_address().encode(&wdb.params))
+                .map(|k| k.default_address().0.encode(&wdb.params))
         });
         #[cfg(not(feature = "transparent-inputs"))]
         let taddress_str: Option<String> = None;

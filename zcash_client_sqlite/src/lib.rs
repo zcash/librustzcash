@@ -707,7 +707,7 @@ mod tests {
     };
 
     #[cfg(feature = "transparent-inputs")]
-    use zcash_primitives::legacy;
+    use zcash_primitives::{legacy, legacy::keys::IncomingViewingKey};
 
     use zcash_primitives::{
         block::BlockHash,
@@ -771,7 +771,7 @@ mod tests {
             init_accounts_table(db_data, &[ufvk]).unwrap();
             (
                 extfvk,
-                tkey.map(|k| k.derive_external_pubkey(0).unwrap().to_address()),
+                tkey.map(|k| k.derive_external_ivk().unwrap().default_address().0),
             )
         }
 
