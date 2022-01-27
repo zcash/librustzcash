@@ -14,7 +14,6 @@ use group::{Group, GroupEncoding};
 use std::io::{self, Read, Write};
 use subtle::CtOption;
 
-
 /// A Sapling expanded spending key
 #[derive(Clone)]
 pub struct ExpandedSpendingKey {

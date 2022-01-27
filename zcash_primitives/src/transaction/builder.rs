@@ -16,9 +16,7 @@ use crate::{
     legacy::TransparentAddress,
     memo::MemoBytes,
     merkle_tree::MerklePath,
-    sapling::{
-        prover::TxProver, Diversifier, Node, Note, PaymentAddress,
-    },
+    sapling::{prover::TxProver, Diversifier, Node, Note, PaymentAddress},
     transaction::{
         components::{
             amount::{Amount, DEFAULT_FEE},

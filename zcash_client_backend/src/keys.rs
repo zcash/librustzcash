@@ -167,7 +167,6 @@ mod tests {
     #[cfg(feature = "transparent-inputs")]
     use {
         crate::encoding::AddressCodec,
-        secp256k1::key::SecretKey,
         zcash_primitives::{consensus::MAIN_NETWORK, legacy, legacy::keys::IncomingViewingKey},
     };
 

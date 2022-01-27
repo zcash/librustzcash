@@ -496,10 +496,7 @@ mod tests {
         keys::OutgoingViewingKey,
         memo::MemoBytes,
         sapling::util::generate_random_rseed,
-        sapling::{
-            Diversifier, PaymentAddress, Rseed, SaplingIvk,
-            ValueCommitment,
-        },
+        sapling::{Diversifier, PaymentAddress, Rseed, SaplingIvk, ValueCommitment},
         transaction::components::{
             amount::Amount,
             sapling::{self, CompactOutputDescription, OutputDescription},
