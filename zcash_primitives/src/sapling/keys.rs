@@ -6,6 +6,7 @@
 
 use crate::{
     constants::{PROOF_GENERATION_KEY_GENERATOR, SPENDING_KEY_GENERATOR},
+    keys::{prf_expand, OutgoingViewingKey},
     sapling::{ProofGenerationKey, ViewingKey},
 };
 use ff::PrimeField;
@@ -13,7 +14,6 @@ use group::{Group, GroupEncoding};
 use std::io::{self, Read, Write};
 use subtle::CtOption;
 
-pub use crate::keys::{prf_expand, prf_expand_vec, OutgoingViewingKey};
 
 /// A Sapling expanded spending key
 #[derive(Clone)]

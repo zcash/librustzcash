@@ -16,8 +16,9 @@ use zcash_note_encryption::{
 
 use crate::{
     consensus::{self, BlockHeight, NetworkUpgrade::Canopy, ZIP212_GRACE_PERIOD},
+    keys::OutgoingViewingKey,
     memo::MemoBytes,
-    sapling::{keys::OutgoingViewingKey, Diversifier, Note, PaymentAddress, Rseed, SaplingIvk},
+    sapling::{Diversifier, Note, PaymentAddress, Rseed, SaplingIvk},
     transaction::components::{
         amount::Amount,
         sapling::{self, OutputDescription},
@@ -492,10 +493,11 @@ mod tests {
             NetworkUpgrade::{Canopy, Sapling},
             Parameters, TestNetwork, TEST_NETWORK, ZIP212_GRACE_PERIOD,
         },
+        keys::OutgoingViewingKey,
         memo::MemoBytes,
         sapling::util::generate_random_rseed,
         sapling::{
-            keys::OutgoingViewingKey, Diversifier, PaymentAddress, Rseed, SaplingIvk,
+            Diversifier, PaymentAddress, Rseed, SaplingIvk,
             ValueCommitment,
         },
         transaction::components::{

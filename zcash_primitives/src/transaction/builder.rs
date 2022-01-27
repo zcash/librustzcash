@@ -12,11 +12,12 @@ use rand::{rngs::OsRng, CryptoRng, RngCore};
 
 use crate::{
     consensus::{self, BlockHeight, BranchId},
+    keys::OutgoingViewingKey,
     legacy::TransparentAddress,
     memo::MemoBytes,
     merkle_tree::MerklePath,
     sapling::{
-        keys::OutgoingViewingKey, prover::TxProver, Diversifier, Node, Note, PaymentAddress,
+        prover::TxProver, Diversifier, Node, Note, PaymentAddress,
     },
     transaction::{
         components::{

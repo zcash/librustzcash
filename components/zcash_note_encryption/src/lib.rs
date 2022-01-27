@@ -352,10 +352,10 @@ pub trait ShieldedOutput<D: Domain, const CIPHERTEXT_SIZE: usize> {
 /// use ff::Field;
 /// use rand_core::OsRng;
 /// use zcash_primitives::{
+///     keys::{OutgoingViewingKey, prf_expand},
 ///     consensus::{TEST_NETWORK, TestNetwork, NetworkUpgrade, Parameters},
 ///     memo::MemoBytes,
 ///     sapling::{
-///         keys::{OutgoingViewingKey, prf_expand},
 ///         note_encryption::sapling_note_encryption,
 ///         util::generate_random_rseed,
 ///         Diversifier, PaymentAddress, Rseed, ValueCommitment

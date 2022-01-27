@@ -25,8 +25,8 @@ and this library adheres to Rust's notion of
   to support handling of errors in transparent address decoding.
 - The `Builder::add_sapling_output` method now takes its `MemoBytes` argument
   as a required field rather than an optional one. If the empty memo is desired, use
-  MemoBytes::from(Memo::Empty) explicitly.
-- The `SaplingBuiilder::add_output` method has now similarly been changed to take
+  `MemoBytes::from(Memo::Empty)` explicitly.
+- The `SaplingBuilder::add_output` method has now similarly been changed to take
   its `MemoBytes` argument as a required field.
 ## [0.5.0] - 2021-03-26
 ### Added

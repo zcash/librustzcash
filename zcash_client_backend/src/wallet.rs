@@ -3,9 +3,10 @@
 
 use zcash_note_encryption::EphemeralKeyBytes;
 use zcash_primitives::{
+    keys::OutgoingViewingKey,
     merkle_tree::IncrementalWitness,
     sapling::{
-        keys::OutgoingViewingKey, Diversifier, Node, Note, Nullifier, PaymentAddress, Rseed,
+        Diversifier, Node, Note, Nullifier, PaymentAddress, Rseed,
     },
     transaction::{components::Amount, TxId},
     zip32::AccountId,

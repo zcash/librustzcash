@@ -9,10 +9,10 @@ use rand::{seq::SliceRandom, RngCore};
 
 use crate::{
     consensus::{self, BlockHeight},
+    keys::OutgoingViewingKey,
     memo::MemoBytes,
     merkle_tree::MerklePath,
     sapling::{
-        keys::OutgoingViewingKey,
         note_encryption::sapling_note_encryption,
         prover::TxProver,
         redjubjub::{PrivateKey, Signature},

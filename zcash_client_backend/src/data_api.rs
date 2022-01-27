@@ -72,7 +72,7 @@ pub trait WalletRead {
             heights.map(|(min_height, max_height)| {
                 let target_height = max_height + 1;
 
-                // Select an anchor ANCHOR_OFFSET back from the target block,
+                // Select an anchor min_confirmations back from the target block,
                 // unless that would be before the earliest block we have.
                 let anchor_height = BlockHeight::from(cmp::max(
                     u32::from(target_height).saturating_sub(min_confirmations),

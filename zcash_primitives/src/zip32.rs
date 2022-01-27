@@ -16,8 +16,9 @@ use crate::{
 };
 use std::io::{self, Read, Write};
 
-use crate::sapling::keys::{
-    prf_expand, prf_expand_vec, ExpandedSpendingKey, FullViewingKey, OutgoingViewingKey,
+use crate::{
+    keys::{prf_expand, prf_expand_vec, OutgoingViewingKey},
+    sapling::keys::{ExpandedSpendingKey, FullViewingKey}, 
 };
 
 pub const ZIP32_SAPLING_MASTER_PERSONALIZATION: &[u8; 16] = b"ZcashIP32Sapling";
