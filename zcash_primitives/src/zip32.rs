@@ -613,11 +613,6 @@ impl ExtendedFullViewingKey {
         sapling_default_address(&self.fvk, &self.dk)
     }
 
-    /// Returns the chain code.
-    pub fn chain_code(&self) -> ChainCode {
-        self.chain_code
-    }
-
     /// Derives an internal full viewing key used for internal operations such
     /// as change and auto-shielding. The internal FVK has the same spend authority
     /// (the private key corresponding to ak) as the original, but viewing authority
