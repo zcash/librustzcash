@@ -88,6 +88,19 @@ and this library adheres to Rust's notion of
   function will likely be refactored to become a member function of
   a new `DiversifiableFullViewingKey` type, which represents the ability
   to derive IVKs, OVKs, and addresses, but not child viewing keys.
+- The `zcash_primitives::transaction::Builder::add_sapling_output` method 
+  now takes its `MemoBytes` argument as a required field rather than an
+  optional one. If the empty memo is desired, use
+  `MemoBytes::from(Memo::Empty)` explicitly.
+- A new module `zcash_primitives::legacy::keys` has been added under the
+  `transparent-inputs` feature flag to support types related to supporting 
+  transparent components of unified addresses and derivation of OVKs for
+  shielding funds from the transparent pool.
+- A `zcash_primitives::transaction::components::amount::Amount::sum` 
+  convenience method has been added to facilitate bounds-checked
+  summation of account values.
+- The `zcash_client_backend::wallet::AccountId` type has been moved
+  to the `zcash_primitives::zip32` module.
 
 ### Changed
 - MSRV is now 1.51.0.
@@ -137,6 +150,9 @@ and this library adheres to Rust's notion of
   `jubjub::ExtendedPoint` to `zcash_note_encryption::EphemeralKeyBytes`.
 - The `epk: jubjub::ExtendedPoint` field of `CompactOutputDescription ` has been
   replaced by `ephemeral_key: zcash_note_encryption::EphemeralKeyBytes`.
+- `zcash_primitives::sapling::keys::{prf_expand, prf_expand_vec, OutgoingViewingKey}` have
+  all been moved to the `zcash_primitives::keys` module to reflect the fact
+  that they are used outside of the Sapling protocol.
 
 ## [0.5.0] - 2021-03-26
 ### Added

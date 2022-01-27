@@ -6,6 +6,7 @@ and this library adheres to Rust's notion of
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+### Added
 ### Changed
 - MSRV is now 1.51.0.
 - Bumped dependencies to `ff 0.11`, `group 0.11`, `jubjub 0.8`.
@@ -15,6 +16,13 @@ and this library adheres to Rust's notion of
   - `zcash_client_sqlite::WalletDB` to `WalletDb`
   - `zcash_client_sqlite::error::SqliteClientError::IncorrectHRPExtFVK` to
     `IncorrectHrpExtFvk`.
+- A new error constructor `SqliteClientError::TransparentAddress` has been added 
+  to support handling of errors in transparent address decoding.
+- A new error constructor `SqliteClientError::RequestedRewindInvalid` has been added 
+  to report when requested rewinds exceed supported bounds.
+- The sqlite implemenations of `zcash_client_backend::data_api::WalletRead`
+  and `WalletWrite` have been updated to reflect the changes to those 
+  traits.
 
 ## [0.3.0] - 2021-03-26
 This release contains a major refactor of the APIs to leverage the new Data
