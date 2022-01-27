@@ -543,10 +543,6 @@ mod tests {
         fn b58_script_address_prefix(&self) -> [u8; 2] {
             constants::testnet::B58_SCRIPT_ADDRESS_PREFIX
         }
-
-        fn wif_lead_byte(&self) -> u8 {
-            constants::testnet::WIF_LEAD_BYTE
-        }
     }
     fn demo_hashes(preimage_1: &[u8; 32], preimage_2: &[u8; 32]) -> ([u8; 32], [u8; 32]) {
         let hash_2 = {

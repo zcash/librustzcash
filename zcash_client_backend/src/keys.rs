@@ -45,66 +45,6 @@ pub mod sapling {
     }
 }
 
-#[cfg(feature = "transparent-inputs")]
-pub mod transparent {
-    use bs58::{self, decode::Error as Bs58Error};
-    use secp256k1::SecretKey;
-    use zcash_primitives::consensus;
-
-    /// Wallet Import Format encoded transparent private key.
-    #[derive(Clone, Debug, Eq, PartialEq)]
-    pub struct Wif(pub String);
-
-    /// Errors that may occur in WIF key decoding.
-    #[derive(Debug)]
-    pub enum WifError {
-        Base58(Bs58Error),
-        InvalidLeadByte(u8),
-        InvalidTrailingByte(u8),
-        Secp256k1(secp256k1::Error),
-    }
-
-    impl Wif {
-        /// Encode the provided secret key in Wallet Import Format.
-        pub fn from_secret_key<P: consensus::Parameters>(
-            params: &P,
-            sk: &SecretKey,
-            compressed: bool,
-        ) -> Self {
-            let secret_key = sk.as_ref();
-            let mut wif = [0u8; 34];
-            wif[0] = params.wif_lead_byte();
-            wif[1..33].copy_from_slice(secret_key);
-            if compressed {
-                wif[33] = 0x01;
-                Wif(bs58::encode(&wif[..]).with_check().into_string())
-            } else {
-                Wif(bs58::encode(&wif[..]).with_check().into_string())
-            }
-        }
-
-        /// Decode this Wif value to obtain the encoded secret key
-        pub fn to_secret_key<P: consensus::Parameters>(
-            &self,
-            params: &P,
-        ) -> Result<SecretKey, WifError> {
-            bs58::decode(&self.0)
-                .with_check(None)
-                .into_vec()
-                .map_err(WifError::Base58)
-                .and_then(|decoded| {
-                    if decoded[0] != params.wif_lead_byte() {
-                        Err(WifError::InvalidLeadByte(decoded[0]))
-                    } else if decoded[33] != 0x01 {
-                        Err(WifError::InvalidTrailingByte(decoded[33]))
-                    } else {
-                        SecretKey::from_slice(&decoded[1..33]).map_err(WifError::Secp256k1)
-                    }
-                })
-        }
-    }
-}
-
 #[derive(Debug)]
 pub enum DerivationError {
     #[cfg(feature = "transparent-inputs")]
@@ -226,7 +166,6 @@ mod tests {
 
     #[cfg(feature = "transparent-inputs")]
     use {
-        super::transparent,
         crate::encoding::AddressCodec,
         secp256k1::key::SecretKey,
         zcash_primitives::{consensus::MAIN_NETWORK, legacy, legacy::keys::IncomingViewingKey},
@@ -242,32 +181,6 @@ mod tests {
     #[should_panic]
     fn spending_key_panics_on_short_seed() {
         let _ = sapling::spending_key(&[0; 31][..], 0, AccountId(0));
-    }
-
-    #[cfg(feature = "transparent-inputs")]
-    #[test]
-    fn sk_to_wif() {
-        let sk = legacy::keys::AccountPrivKey::from_seed(&MAIN_NETWORK, &seed(), AccountId(0))
-            .unwrap()
-            .derive_external_secret_key(0)
-            .unwrap();
-        let wif = transparent::Wif::from_secret_key(&MAIN_NETWORK, &sk, true).0;
-        assert_eq!(
-            wif,
-            "L4BvDC33yLjMRxipZvdiUmdYeRfZmR8viziwsVwe72zJdGbiJPv2".to_string()
-        );
-    }
-
-    #[cfg(feature = "transparent-inputs")]
-    #[test]
-    fn sk_wif_to_taddr() {
-        let sk_wif =
-            transparent::Wif("L4BvDC33yLjMRxipZvdiUmdYeRfZmR8viziwsVwe72zJdGbiJPv2".to_string());
-        let sk: SecretKey = (&sk_wif).to_secret_key(&MAIN_NETWORK).expect("invalid wif");
-        let secp = secp256k1::Secp256k1::new();
-        let pubkey = secp256k1::key::PublicKey::from_secret_key(&secp, &sk);
-        let taddr = legacy::keys::pubkey_to_address(&pubkey).encode(&MAIN_NETWORK);
-        assert_eq!(taddr, "t1PKtYdJJHhc3Pxowmznkg7vdTwnhEsCvR4".to_string());
     }
 
     #[cfg(feature = "transparent-inputs")]

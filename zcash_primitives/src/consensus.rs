@@ -179,10 +179,6 @@ pub trait Parameters: Clone {
     ///
     /// [`TransparentAddress::Script`]: zcash_primitives::legacy::TransparentAddress::Script
     fn b58_script_address_prefix(&self) -> [u8; 2];
-
-    /// Returns the lead byte for the transparent Wallet Interchange Format encoding
-    /// of secp256k1 secret keys.
-    fn wif_lead_byte(&self) -> u8;
 }
 
 /// Marker struct for the production network.
@@ -228,10 +224,6 @@ impl Parameters for MainNetwork {
     fn b58_script_address_prefix(&self) -> [u8; 2] {
         constants::mainnet::B58_SCRIPT_ADDRESS_PREFIX
     }
-
-    fn wif_lead_byte(&self) -> u8 {
-        constants::mainnet::WIF_LEAD_BYTE
-    }
 }
 
 /// Marker struct for the test network.
@@ -276,10 +268,6 @@ impl Parameters for TestNetwork {
 
     fn b58_script_address_prefix(&self) -> [u8; 2] {
         constants::testnet::B58_SCRIPT_ADDRESS_PREFIX
-    }
-
-    fn wif_lead_byte(&self) -> u8 {
-        constants::testnet::WIF_LEAD_BYTE
     }
 }
 
@@ -336,13 +324,6 @@ impl Parameters for Network {
         match self {
             Network::MainNetwork => MAIN_NETWORK.b58_script_address_prefix(),
             Network::TestNetwork => TEST_NETWORK.b58_script_address_prefix(),
-        }
-    }
-
-    fn wif_lead_byte(&self) -> u8 {
-        match self {
-            Network::MainNetwork => MAIN_NETWORK.wif_lead_byte(),
-            Network::TestNetwork => TEST_NETWORK.wif_lead_byte(),
         }
     }
 }
