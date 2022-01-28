@@ -150,6 +150,7 @@ pub(crate) mod private {
 
 pub trait IncomingViewingKey: private::SealedChangeLevelKey + std::marker::Sized {
     /// Derives a transparent address at the provided child index.
+    #[allow(deprecated)]
     fn derive_address(
         &self,
         child_index: u32,
