@@ -1,6 +1,7 @@
 use hdwallet::{ExtendedPrivKey, ExtendedPubKey, KeyIndex};
+use ripemd::Digest as RipemdDigest;
 use secp256k1::PublicKey;
-use sha2::{Digest, Sha256};
+use sha2::{Digest as Sha2Digest, Sha256};
 use std::convert::TryInto;
 
 use crate::{consensus, keys::prf_expand_vec, zip32::AccountId};
@@ -135,7 +136,7 @@ impl AccountPubKey {
 /// Derives the P2PKH transparent address corresponding to the given pubkey.
 #[deprecated(note = "This function will be removed from the public API in an upcoming refactor.")]
 pub fn pubkey_to_address(pubkey: &secp256k1::key::PublicKey) -> TransparentAddress {
-    let mut hash160 = ripemd160::Ripemd160::new();
+    let mut hash160 = ripemd::Ripemd160::new();
     hash160.update(Sha256::digest(&pubkey.serialize()));
     TransparentAddress::PublicKey(*hash160.finalize().as_ref())
 }

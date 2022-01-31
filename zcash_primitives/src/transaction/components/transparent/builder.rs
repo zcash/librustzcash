@@ -2,9 +2,6 @@
 
 use std::fmt;
 
-#[cfg(feature = "transparent-inputs")]
-use blake2b_simd::Hash as Blake2bHash;
-
 use crate::{
     legacy::TransparentAddress,
     transaction::components::{
@@ -14,14 +11,18 @@ use crate::{
 };
 
 #[cfg(feature = "transparent-inputs")]
-use crate::{
-    legacy::Script,
-    transaction::{
-        self as tx,
-        components::OutPoint,
-        sighash::{signature_hash, SignableInput, SIGHASH_ALL},
-        TransactionData, TxDigests,
+use {
+    crate::{
+        legacy::Script,
+        transaction::{
+            self as tx,
+            components::OutPoint,
+            sighash::{signature_hash, SignableInput, SIGHASH_ALL},
+            TransactionData, TxDigests,
+        },
     },
+    blake2b_simd::Hash as Blake2bHash,
+    ripemd::Digest,
 };
 
 #[derive(Debug, PartialEq)]
@@ -96,7 +97,7 @@ impl TransparentBuilder {
         let pubkey = secp256k1::PublicKey::from_secret_key(&self.secp, &sk).serialize();
         match coin.script_pubkey.address() {
             Some(TransparentAddress::PublicKey(hash)) => {
-                use ripemd160::Ripemd160;
+                use ripemd::Ripemd160;
                 use sha2::{Digest, Sha256};
 
                 if hash[..] != Ripemd160::digest(&Sha256::digest(&pubkey))[..] {
