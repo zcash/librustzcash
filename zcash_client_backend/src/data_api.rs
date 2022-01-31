@@ -189,8 +189,10 @@ pub trait WalletRead {
         target_value: Amount,
         anchor_height: BlockHeight,
     ) -> Result<Vec<SpendableNote>, Self::Error>;
+}
 
-    #[cfg(feature = "transparent-inputs")]
+#[cfg(feature = "transparent-inputs")]
+pub trait WalletReadTransparent: WalletRead {
     /// Returns a list of unspent transparent UTXOs that appear in the chain at heights up to and
     /// including `max_height`.
     fn get_unspent_transparent_outputs(
@@ -281,6 +283,16 @@ pub trait WalletWrite: WalletRead {
     fn rewind_to_height(&mut self, block_height: BlockHeight) -> Result<(), Self::Error>;
 }
 
+#[cfg(feature = "transparent-inputs")]
+pub trait WalletWriteTransparent: WalletWrite + WalletReadTransparent {
+    type UtxoRef;
+
+    fn put_received_transparent_utxo(
+        &mut self,
+        output: &WalletTransparentOutput,
+    ) -> Result<Self::UtxoRef, Self::Error>;
+}
+
 /// This trait provides sequential access to raw blockchain data via a callback-oriented
 /// API.
 pub trait BlockSource {
@@ -322,6 +334,9 @@ pub mod testing {
         error::Error, BlockSource, DecryptedTransaction, PrunedBlock, SentTransaction, WalletRead,
         WalletWrite,
     };
+
+    #[cfg(feature = "transparent-inputs")]
+    use super::WalletReadTransparent;
 
     pub struct MockBlockSource {}
 
@@ -436,8 +451,10 @@ pub mod testing {
         ) -> Result<Vec<SpendableNote>, Self::Error> {
             Ok(Vec::new())
         }
+    }
 
-        #[cfg(feature = "transparent-inputs")]
+    #[cfg(feature = "transparent-inputs")]
+    impl WalletReadTransparent for MockWalletDb {
         fn get_unspent_transparent_outputs(
             &self,
             _address: &TransparentAddress,

@@ -62,7 +62,10 @@ use crate::error::SqliteClientError;
 
 #[cfg(feature = "transparent-inputs")]
 use {
-    zcash_client_backend::wallet::WalletTransparentOutput,
+    zcash_client_backend::{
+        data_api::{WalletReadTransparent, WalletWriteTransparent},
+        wallet::WalletTransparentOutput,
+    },
     zcash_primitives::legacy::TransparentAddress,
 };
 
@@ -317,8 +320,10 @@ impl<P: consensus::Parameters> WalletRead for WalletDb<P> {
             anchor_height,
         )
     }
+}
 
-    #[cfg(feature = "transparent-inputs")]
+#[cfg(feature = "transparent-inputs")]
+impl<P: consensus::Parameters> WalletReadTransparent for WalletDb<P> {
     fn get_unspent_transparent_outputs(
         &self,
         address: &TransparentAddress,
@@ -458,8 +463,10 @@ impl<'a, P: consensus::Parameters> WalletRead for DataConnStmtCache<'a, P> {
         self.wallet_db
             .select_spendable_sapling_notes(account, target_value, anchor_height)
     }
+}
 
-    #[cfg(feature = "transparent-inputs")]
+#[cfg(feature = "transparent-inputs")]
+impl<'a, P: consensus::Parameters> WalletReadTransparent for DataConnStmtCache<'a, P> {
     fn get_unspent_transparent_outputs(
         &self,
         address: &TransparentAddress,
@@ -672,6 +679,18 @@ impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
 
     fn rewind_to_height(&mut self, block_height: BlockHeight) -> Result<(), Self::Error> {
         wallet::rewind_to_height(self.wallet_db, block_height)
+    }
+}
+
+#[cfg(feature = "transparent-inputs")]
+impl<'a, P: consensus::Parameters> WalletWriteTransparent for DataConnStmtCache<'a, P> {
+    type UtxoRef = UtxoId;
+
+    fn put_received_transparent_utxo(
+        &mut self,
+        output: &WalletTransparentOutput,
+    ) -> Result<Self::UtxoRef, Self::Error> {
+        wallet::put_received_transparent_utxo(self, output)
     }
 }
 
