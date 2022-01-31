@@ -266,6 +266,8 @@ fn zip_0244() {
         let (txdata, txid_parts) = to_test_txdata(&tv);
 
         if let Some(index) = tv.transparent_input {
+            // nIn is a u32, but to actually use it we need a usize.
+            let index = index as usize;
             let bundle = txdata.transparent_bundle().unwrap();
             let value = bundle.authorization.input_amounts[index];
             let script_pubkey = &bundle.authorization.input_scriptpubkeys[index];

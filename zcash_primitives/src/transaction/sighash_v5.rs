@@ -37,99 +37,108 @@ fn hasher(personal: &[u8; 16]) -> State {
     Params::new().hash_length(32).personal(personal).to_state()
 }
 
-/// Implements [ZIP 244 section S.2](https://zips.z.cash/zip-0244#s-2-transparent-sig-digest)
-/// but only when used to produce the hash for a signature over a transparent input.
+/// Implements [ZIP 244 section S.2](https://zips.z.cash/zip-0244#s-2-transparent-sig-digest).
 fn transparent_sig_digest<A: TransparentAuthorizingContext>(
-    txid_digests: &TransparentDigests<Blake2bHash>,
-    bundle: &transparent::Bundle<A>,
+    tx_data: Option<(&transparent::Bundle<A>, &TransparentDigests<Blake2bHash>)>,
     input: &SignableInput<'_>,
 ) -> Blake2bHash {
-    let hash_type = input.hash_type();
-    let flag_anyonecanpay = hash_type & SIGHASH_ANYONECANPAY != 0;
-    let flag_single = hash_type & SIGHASH_MASK == SIGHASH_SINGLE;
-    let flag_none = hash_type & SIGHASH_MASK == SIGHASH_NONE;
-
-    let prevouts_digest = if flag_anyonecanpay {
-        transparent_prevout_hash::<A>(&[])
-    } else {
-        txid_digests.prevouts_digest
-    };
-
-    let amounts_digest = {
-        let mut h = hasher(ZCASH_TRANSPARENT_AMOUNTS_HASH_PERSONALIZATION);
-        if !flag_anyonecanpay {
-            Array::write(&mut h, bundle.authorization.input_amounts(), |w, amount| {
-                w.write_all(&amount.to_i64_le_bytes())
-            })
-            .unwrap();
+    match tx_data {
+        // No transparent inputs or outputs.
+        None => hash_transparent_txid_data(None),
+        // No transparent inputs, or coinbase.
+        Some((bundle, txid_digests)) if bundle.is_coinbase() || bundle.vin.is_empty() => {
+            hash_transparent_txid_data(Some(txid_digests))
         }
-        h.finalize()
-    };
+        // Some transparent inputs, and not coinbase.
+        Some((bundle, txid_digests)) => {
+            let hash_type = input.hash_type();
+            let flag_anyonecanpay = hash_type & SIGHASH_ANYONECANPAY != 0;
+            let flag_single = hash_type & SIGHASH_MASK == SIGHASH_SINGLE;
+            let flag_none = hash_type & SIGHASH_MASK == SIGHASH_NONE;
 
-    let scripts_digest = {
-        let mut h = hasher(ZCASH_TRANSPARENT_SCRIPTS_HASH_PERSONALIZATION);
-        if !flag_anyonecanpay {
-            Array::write(
-                &mut h,
-                bundle.authorization.input_scriptpubkeys(),
-                |w, script| script.write(w),
-            )
-            .unwrap();
-        }
-        h.finalize()
-    };
-
-    let sequence_digest = if flag_anyonecanpay {
-        transparent_sequence_hash::<A>(&[])
-    } else {
-        txid_digests.sequence_digest
-    };
-
-    let outputs_digest = if let SignableInput::Transparent { index, .. } = input {
-        if flag_single {
-            if *index < bundle.vout.len() {
-                transparent_outputs_hash(&[&bundle.vout[*index]])
+            let prevouts_digest = if flag_anyonecanpay {
+                transparent_prevout_hash::<A>(&[])
             } else {
-                transparent_outputs_hash::<TxOut>(&[])
+                txid_digests.prevouts_digest
+            };
+
+            let amounts_digest = {
+                let mut h = hasher(ZCASH_TRANSPARENT_AMOUNTS_HASH_PERSONALIZATION);
+                if !flag_anyonecanpay {
+                    Array::write(&mut h, bundle.authorization.input_amounts(), |w, amount| {
+                        w.write_all(&amount.to_i64_le_bytes())
+                    })
+                    .unwrap();
+                }
+                h.finalize()
+            };
+
+            let scripts_digest = {
+                let mut h = hasher(ZCASH_TRANSPARENT_SCRIPTS_HASH_PERSONALIZATION);
+                if !flag_anyonecanpay {
+                    Array::write(
+                        &mut h,
+                        bundle.authorization.input_scriptpubkeys(),
+                        |w, script| script.write(w),
+                    )
+                    .unwrap();
+                }
+                h.finalize()
+            };
+
+            let sequence_digest = if flag_anyonecanpay {
+                transparent_sequence_hash::<A>(&[])
+            } else {
+                txid_digests.sequence_digest
+            };
+
+            let outputs_digest = if let SignableInput::Transparent { index, .. } = input {
+                if flag_single {
+                    if *index < bundle.vout.len() {
+                        transparent_outputs_hash(&[&bundle.vout[*index]])
+                    } else {
+                        transparent_outputs_hash::<TxOut>(&[])
+                    }
+                } else if flag_none {
+                    transparent_outputs_hash::<TxOut>(&[])
+                } else {
+                    txid_digests.outputs_digest
+                }
+            } else {
+                txid_digests.outputs_digest
+            };
+
+            //S.2g.i:   prevout      (field encoding)
+            //S.2g.ii:  value        (8-byte signed little-endian)
+            //S.2g.iii: scriptPubKey (field encoding)
+            //S.2g.iv:  nSequence    (4-byte unsigned little-endian)
+            let mut ch = hasher(ZCASH_TRANSPARENT_INPUT_HASH_PERSONALIZATION);
+            if let SignableInput::Transparent {
+                index,
+                script_pubkey,
+                value,
+                ..
+            } = input
+            {
+                let txin = &bundle.vin[*index];
+                txin.prevout.write(&mut ch).unwrap();
+                ch.write_all(&value.to_i64_le_bytes()).unwrap();
+                script_pubkey.write(&mut ch).unwrap();
+                ch.write_u32::<LittleEndian>(txin.sequence).unwrap();
             }
-        } else if flag_none {
-            transparent_outputs_hash::<TxOut>(&[])
-        } else {
-            txid_digests.outputs_digest
+            let txin_sig_digest = ch.finalize();
+
+            let mut h = hasher(ZCASH_TRANSPARENT_HASH_PERSONALIZATION);
+            h.write_all(&[hash_type]).unwrap();
+            h.write_all(prevouts_digest.as_bytes()).unwrap();
+            h.write_all(amounts_digest.as_bytes()).unwrap();
+            h.write_all(scripts_digest.as_bytes()).unwrap();
+            h.write_all(sequence_digest.as_bytes()).unwrap();
+            h.write_all(outputs_digest.as_bytes()).unwrap();
+            h.write_all(txin_sig_digest.as_bytes()).unwrap();
+            h.finalize()
         }
-    } else {
-        txid_digests.outputs_digest
-    };
-
-    //S.2g.i:   prevout      (field encoding)
-    //S.2g.ii:  value        (8-byte signed little-endian)
-    //S.2g.iii: scriptPubKey (field encoding)
-    //S.2g.iv:  nSequence    (4-byte unsigned little-endian)
-    let mut ch = hasher(ZCASH_TRANSPARENT_INPUT_HASH_PERSONALIZATION);
-    if let SignableInput::Transparent {
-        index,
-        script_pubkey,
-        value,
-        ..
-    } = input
-    {
-        let txin = &bundle.vin[*index];
-        txin.prevout.write(&mut ch).unwrap();
-        ch.write_all(&value.to_i64_le_bytes()).unwrap();
-        script_pubkey.write(&mut ch).unwrap();
-        ch.write_u32::<LittleEndian>(txin.sequence).unwrap();
     }
-    let txin_sig_digest = ch.finalize();
-
-    let mut h = hasher(ZCASH_TRANSPARENT_HASH_PERSONALIZATION);
-    h.write_all(&[hash_type]).unwrap();
-    h.write_all(prevouts_digest.as_bytes()).unwrap();
-    h.write_all(amounts_digest.as_bytes()).unwrap();
-    h.write_all(scripts_digest.as_bytes()).unwrap();
-    h.write_all(sequence_digest.as_bytes()).unwrap();
-    h.write_all(outputs_digest.as_bytes()).unwrap();
-    h.write_all(txin_sig_digest.as_bytes()).unwrap();
-    h.finalize()
 }
 
 #[cfg(feature = "zfuture")]
@@ -170,22 +179,20 @@ pub fn v5_signature_hash<
     signable_input: &SignableInput<'_>,
     txid_parts: &TxDigests<Blake2bHash>,
 ) -> Blake2bHash {
+    // The caller must always provide the transparent digests if the transaction has a
+    // transparent component.
+    assert!(tx.transparent_bundle.is_some() ^ txid_parts.transparent_digests.is_none());
+
     to_hash(
         tx.version,
         tx.consensus_branch_id,
         txid_parts.header_digest,
-        if let Some(bundle) = &tx.transparent_bundle {
-            transparent_sig_digest(
-                txid_parts
-                    .transparent_digests
-                    .as_ref()
-                    .expect("Transparent txid digests are missing."),
-                &bundle,
-                signable_input,
-            )
-        } else {
-            hash_transparent_txid_data(None)
-        },
+        transparent_sig_digest(
+            tx.transparent_bundle
+                .as_ref()
+                .zip(txid_parts.transparent_digests.as_ref()),
+            signable_input,
+        ),
         txid_parts.sapling_digest,
         txid_parts.orchard_digest,
         #[cfg(feature = "zfuture")]
