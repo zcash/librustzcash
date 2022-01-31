@@ -26,6 +26,9 @@ use crate::{
     zip321::{Payment, TransactionRequest},
 };
 
+#[cfg(feature = "transparent-inputs")]
+use crate::data_api::{WalletWriteTransparent};
+
 /// Scans a [`Transaction`] for any information that can be decrypted by the accounts in
 /// the wallet, and saves it to the wallet.
 pub fn decrypt_and_store_transaction<N, E, P, D>(
@@ -376,7 +379,7 @@ where
 ///   spent.
 #[cfg(feature = "transparent-inputs")]
 #[allow(clippy::too_many_arguments)]
-pub fn shield_transparent_funds<E, N, P, D, R>(
+pub fn shield_transparent_funds<E, N, P, D, R, U>(
     wallet_db: &mut D,
     params: &P,
     prover: impl TxProver,
@@ -390,7 +393,7 @@ where
     E: From<Error<N>>,
     P: consensus::Parameters,
     R: Copy + Debug,
-    D: WalletWrite<Error = E, TxRef = R>,
+    D: WalletWrite<Error = E, TxRef = R> + WalletWriteTransparent<UtxoRef = U>,
 {
     // Check that the ExtendedSpendingKey we have been given corresponds to the
     // ExtendedFullViewingKey for the account we are spending from.
