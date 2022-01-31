@@ -47,8 +47,8 @@ pub enum SqliteClientError {
 
     /// A requested rewind would violate invariants of the
     /// storage layer. The payload returned with this error is
-    /// the safe rewind height.
-    RequestedRewindInvalid(BlockHeight),
+    /// (safe rewind height, requested height).
+    RequestedRewindInvalid(BlockHeight, BlockHeight),
 
     /// Wrapper for errors from zcash_client_backend
     BackendError(data_api::error::Error<NoteId>),
@@ -76,8 +76,8 @@ impl fmt::Display for SqliteClientError {
             SqliteClientError::InvalidNote => write!(f, "Invalid note"),
             SqliteClientError::InvalidNoteId =>
                 write!(f, "The note ID associated with an inserted witness must correspond to a received note."),
-            SqliteClientError::RequestedRewindInvalid(h) =>
-                write!(f, "A rewind must be either of less than {} blocks, or at least back to block {} for your wallet.", PRUNING_HEIGHT, h),
+            SqliteClientError::RequestedRewindInvalid(h, r) =>
+                write!(f, "A rewind must be either of less than {} blocks, or at least back to block {} for your wallet; the requested height was {}.", PRUNING_HEIGHT, h, r),
             SqliteClientError::Bech32(e) => write!(f, "{}", e),
             SqliteClientError::Base58(e) => write!(f, "{}", e),
             SqliteClientError::TransparentAddress(e) => write!(f, "{}", e),

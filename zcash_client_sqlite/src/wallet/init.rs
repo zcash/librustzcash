@@ -21,12 +21,13 @@ use {
 
 /// Sets up the internal structure of the data database.
 ///
-/// The database structure is the same irrespective of whether or
-/// not transparent spends are enabled, and it is safe to use a
-/// wallet database created without the ability to create transparent
-/// spends with a build that enables transparent spends (though not
-/// the reverse, as wallet balance calculations would ignore the
-/// prior transparent inputs controlled by the wallet).
+/// It is safe to use a wallet database created without the ability to create transparent spends
+/// with a build that enables transparent spends via use of the `transparent-inputs` feature flag.
+/// The reverse is unsafe, as wallet balance calculations would ignore the transparent UTXOs
+/// controlled by the wallet. Note that this currently applies only to wallet databases created
+/// with the same _version_ of the wallet software; database migration operations currently must
+/// be manually performed to update the structure of the database when changing versions.
+/// Integrated migration utilities will be provided by a future version of this library.
 ///
 /// # Examples
 ///

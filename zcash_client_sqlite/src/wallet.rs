@@ -550,76 +550,66 @@ pub(crate) fn rewind_to_height<P: consensus::Parameters>(
                     .or(Ok(sapling_activation_height - 1))
             })?;
 
-    let rewind_height = if block_height >= (last_scanned_height - PRUNING_HEIGHT) {
-        Some(block_height)
-    } else {
+    if block_height < last_scanned_height - PRUNING_HEIGHT {
         #[allow(deprecated)]
-        match get_rewind_height(&wdb)? {
-            Some(h) => {
-                if block_height > h {
-                    return Err(SqliteClientError::RequestedRewindInvalid(h));
-                } else {
-                    Some(block_height)
-                }
+        if let Some(h) = get_rewind_height(&wdb)? {
+            if block_height > h {
+                return Err(SqliteClientError::RequestedRewindInvalid(h, block_height));
             }
-            None => Some(block_height),
         }
-    };
+    }
 
     // nothing to do if we're deleting back down to the max height
+    if block_height < last_scanned_height {
+        // Decrement witnesses.
+        wdb.conn.execute(
+            "DELETE FROM sapling_witnesses WHERE block > ?",
+            &[u32::from(block_height)],
+        )?;
 
-    if let Some(block_height) = rewind_height {
-        if block_height < last_scanned_height {
-            // Decrement witnesses.
-            wdb.conn.execute(
-                "DELETE FROM sapling_witnesses WHERE block > ?",
-                &[u32::from(block_height)],
-            )?;
+        // Rewind received notes
+        wdb.conn.execute(
+            "DELETE FROM received_notes
+                WHERE id_note IN (
+                    SELECT rn.id_note
+                    FROM received_notes rn
+                    LEFT OUTER JOIN transactions tx
+                    ON tx.id_tx = rn.tx
+                    WHERE tx.block > ?
+                );",
+            &[u32::from(block_height)],
+        )?;
 
-            // Rewind received notes
-            wdb.conn.execute(
-                "DELETE FROM received_notes
-                    WHERE id_note IN (
-                        SELECT rn.id_note
-                        FROM received_notes rn
-                        LEFT OUTER JOIN transactions tx
-                        ON tx.id_tx = rn.tx
-                        WHERE tx.block > ?
-                    );",
-                &[u32::from(block_height)],
-            )?;
+        // Rewind sent notes
+        wdb.conn.execute(
+            "DELETE FROM sent_notes
+                WHERE id_note IN (
+                    SELECT sn.id_note
+                    FROM sent_notes sn
+                    LEFT OUTER JOIN transactions tx
+                    ON tx.id_tx = sn.tx
+                    WHERE tx.block > ?
+                );",
+            &[u32::from(block_height)],
+        )?;
 
-            // Rewind sent notes
-            wdb.conn.execute(
-                "DELETE FROM sent_notes
-                    WHERE id_note IN (
-                        SELECT sn.id_note
-                        FROM sent_notes sn
-                        LEFT OUTER JOIN transactions tx
-                        ON tx.id_tx = sn.tx
-                        WHERE tx.block > ?
-                    );",
-                &[u32::from(block_height)],
-            )?;
+        // Un-mine transactions.
+        wdb.conn.execute(
+            "UPDATE transactions SET block = NULL, tx_index = NULL WHERE block > ?",
+            &[u32::from(block_height)],
+        )?;
 
-            // Un-mine transactions.
-            wdb.conn.execute(
-                "UPDATE transactions SET block = NULL, tx_index = NULL WHERE block > ?",
-                &[u32::from(block_height)],
-            )?;
+        // Now that they aren't depended on, delete scanned blocks.
+        wdb.conn.execute(
+            "DELETE FROM blocks WHERE height > ?",
+            &[u32::from(block_height)],
+        )?;
 
-            // Now that they aren't depended on, delete scanned blocks.
-            wdb.conn.execute(
-                "DELETE FROM blocks WHERE height > ?",
-                &[u32::from(block_height)],
-            )?;
-
-            // Rewind utxos
-            wdb.conn.execute(
-                "DELETE FROM utxos WHERE height > ?",
-                &[u32::from(block_height)],
-            )?;
-        }
+        // Rewind utxos
+        wdb.conn.execute(
+            "DELETE FROM utxos WHERE height > ?",
+            &[u32::from(block_height)],
+        )?;
     }
 
     Ok(())
@@ -983,7 +973,7 @@ pub fn delete_utxos_above<'a, P: consensus::Parameters>(
 
 /// Records the specified shielded output as having been received.
 ///
-/// This implementation assumes:
+/// This implementation relies on the facts that:
 /// - A transaction will not contain more than 2^63 shielded outputs.
 /// - A note value will never exceed 2^63 zatoshis.
 #[deprecated(
@@ -1118,7 +1108,7 @@ pub fn put_sent_note<'a, P: consensus::Parameters>(
 }
 
 /// Adds information about a sent transparent UTXO to the database if it does not already
-/// exist, or updates it if a record for the utxo already exists.
+/// exist, or updates it if a record for the UTXO already exists.
 ///
 /// `output_index` is the index within transparent UTXOs of the transaction that contains the recipient output.
 #[deprecated(
@@ -1134,7 +1124,7 @@ pub fn put_sent_utxo<'a, P: consensus::Parameters>(
     value: Amount,
 ) -> Result<(), SqliteClientError> {
     let ivalue: i64 = value.into();
-    // Try updating an existing sent utxo.
+    // Try updating an existing sent UTXO.
     if stmts.stmt_update_sent_note.execute(params![
         account.0 as i64,
         encode_transparent_address_p(&stmts.wallet_db.params, &to),
