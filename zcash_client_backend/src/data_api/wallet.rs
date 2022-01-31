@@ -27,7 +27,7 @@ use crate::{
 };
 
 #[cfg(feature = "transparent-inputs")]
-use crate::data_api::{WalletWriteTransparent};
+use crate::data_api::WalletWriteTransparent;
 
 /// Scans a [`Transaction`] for any information that can be decrypted by the accounts in
 /// the wallet, and saves it to the wallet.

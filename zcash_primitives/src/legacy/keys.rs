@@ -69,8 +69,8 @@ impl AccountPrivKey {
 /// A type representing a BIP-44 public key at the account path level
 /// `m/44'/<coin_type>'/<account>'`.
 ///
-/// This provides the necessary derivation capability for the for
-/// the transparent component of a unified full viewing key.
+/// This provides the necessary derivation capability for the transparent component of a unified
+/// full viewing key.
 #[derive(Clone, Debug)]
 pub struct AccountPubKey(ExtendedPubKey);
 
