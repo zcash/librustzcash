@@ -287,6 +287,7 @@ pub fn init_blocks_table<P>(
 }
 
 #[cfg(test)]
+#[allow(deprecated)]
 mod tests {
     use tempfile::NamedTempFile;
 
