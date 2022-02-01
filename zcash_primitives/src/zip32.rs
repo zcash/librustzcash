@@ -1512,10 +1512,7 @@ mod tests {
 
         let xsks = [m, m_1, m_1_2h];
 
-        for j in 0..xsks.len() {
-            let xsk = &xsks[j];
-            let tv = &test_vectors[j];
-
+        for (xsk, tv) in xsks.iter().zip(test_vectors.iter()) {
             assert_eq!(xsk.expsk.ask.to_repr().as_ref(), tv.ask.unwrap());
             assert_eq!(xsk.expsk.nsk.to_repr().as_ref(), tv.nsk.unwrap());
 
@@ -1526,12 +1523,24 @@ mod tests {
             let mut ser = vec![];
             xsk.write(&mut ser).unwrap();
             assert_eq!(&ser[..], &tv.xsk.unwrap()[..]);
+
+            let internal_xsk = xsk.derive_internal();
+            assert_eq!(internal_xsk.expsk.ask.to_repr().as_ref(), tv.ask.unwrap());
+            assert_eq!(
+                internal_xsk.expsk.nsk.to_repr().as_ref(),
+                tv.internal_nsk.unwrap()
+            );
+
+            assert_eq!(internal_xsk.expsk.ovk.0, tv.internal_ovk);
+            assert_eq!(internal_xsk.dk.0, tv.internal_dk);
+            assert_eq!(internal_xsk.chain_code.0, tv.c);
+
+            let mut ser = vec![];
+            internal_xsk.write(&mut ser).unwrap();
+            assert_eq!(&ser[..], &tv.internal_xsk.unwrap()[..]);
         }
 
-        for j in 0..xfvks.len() {
-            let xfvk = &xfvks[j];
-            let tv = &test_vectors[j];
-
+        for (xfvk, tv) in xfvks.iter().zip(test_vectors.iter()) {
             assert_eq!(xfvk.fvk.vk.ak.to_bytes(), tv.ak);
             assert_eq!(xfvk.fvk.vk.nk.to_bytes(), tv.nk);
 
@@ -1574,6 +1583,24 @@ mod tests {
                 Some((_, _)) => panic!(),
                 None => assert!(tv.dmax.is_none()),
             }
+
+            let internal_xfvk = xfvk.derive_internal();
+            assert_eq!(internal_xfvk.fvk.vk.ak.to_bytes(), tv.ak);
+            assert_eq!(internal_xfvk.fvk.vk.nk.to_bytes(), tv.internal_nk);
+
+            assert_eq!(internal_xfvk.fvk.ovk.0, tv.internal_ovk);
+            assert_eq!(internal_xfvk.dk.0, tv.internal_dk);
+            assert_eq!(internal_xfvk.chain_code.0, tv.c);
+
+            assert_eq!(
+                internal_xfvk.fvk.vk.ivk().to_repr().as_ref(),
+                tv.internal_ivk
+            );
+
+            let mut ser = vec![];
+            internal_xfvk.write(&mut ser).unwrap();
+            assert_eq!(&ser[..], &tv.internal_xfvk[..]);
+            assert_eq!(FvkFingerprint::from(&internal_xfvk.fvk).0, tv.internal_fp);
         }
     }
 }
