@@ -57,14 +57,10 @@ where
     let sapling_outputs = decrypt_transaction(params, height, tx, &extfvks);
 
     if !(sapling_outputs.is_empty() && tx.transparent_bundle().iter().all(|b| b.vout.is_empty())) {
-        let nullifiers = data.get_all_nullifiers()?;
-        data.store_decrypted_tx(
-            &DecryptedTransaction {
-                tx,
-                sapling_outputs: &sapling_outputs,
-            },
-            &nullifiers,
-        )?;
+        data.store_decrypted_tx(&DecryptedTransaction {
+            tx,
+            sapling_outputs: &sapling_outputs,
+        })?;
     }
 
     Ok(())

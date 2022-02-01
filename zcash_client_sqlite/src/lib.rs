@@ -564,8 +564,8 @@ impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
     fn store_decrypted_tx(
         &mut self,
         d_tx: &DecryptedTransaction,
-        nullifiers: &[(AccountId, Nullifier)],
     ) -> Result<Self::TxRef, Self::Error> {
+        let nullifiers = self.wallet_db.get_all_nullifiers()?;
         self.transactionally(|up| {
             let tx_ref = wallet::put_tx_data(up, d_tx.tx, None)?;
 
@@ -599,12 +599,9 @@ impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
 
             // If we have some transparent outputs:
             if !d_tx.tx.transparent_bundle().iter().any(|b| b.vout.is_empty()) {
-                // If there are no shielded spends, then this is t2t and we can safely ignore it
-                // otherwise, this is z2t and it might have originated from our wallet.
-                // Store received z->t transactions in the same way they would be stored by
-                // create_spend_to_address. If there are any of our shielded inputs, we interpret
-                // this as our z->t tx and store the vouts as our sent notes.
-                // FIXME this is a weird heuristic that is bound to trip us up somewhere.
+                // If the transaction contains shielded spends from our wallet, we will store z->t
+                // transactions we observe in the same way they would be stored by
+                // create_spend_to_address.
                 if let Some((account_id, _)) = nullifiers.iter().find(
                     |(_, nf)|
                         d_tx.tx.sapling_bundle().iter().flat_map(|b| b.shielded_spends.iter())
