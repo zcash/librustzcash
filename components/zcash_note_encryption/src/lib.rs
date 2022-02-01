@@ -475,7 +475,7 @@ impl<D: Domain> NoteEncryption<D> {
         rng: &mut R,
     ) -> [u8; OUT_CIPHERTEXT_SIZE] {
         let (ock, input) = if let Some(ovk) = &self.ovk {
-            let ock = D::derive_ock(ovk, &cv, &cmstar.into(), &D::epk_bytes(&self.epk));
+            let ock = D::derive_ock(ovk, cv, &cmstar.into(), &D::epk_bytes(&self.epk));
             let input = D::outgoing_plaintext_bytes(&self.note, &self.esk);
 
             (ock, input)
@@ -563,7 +563,7 @@ fn parse_note_plaintext_without_memo_ivk<D: Domain>(
     cmstar_bytes: &D::ExtractedCommitmentBytes,
     plaintext: &[u8],
 ) -> Option<(D::Note, D::Recipient)> {
-    let (note, to) = domain.parse_note_plaintext_without_memo_ivk(ivk, &plaintext)?;
+    let (note, to) = domain.parse_note_plaintext_without_memo_ivk(ivk, plaintext)?;
 
     if let NoteValidity::Valid = check_note_validity::<D>(&note, ephemeral_key, cmstar_bytes) {
         Some((note, to))
@@ -577,10 +577,10 @@ fn check_note_validity<D: Domain>(
     ephemeral_key: &EphemeralKeyBytes,
     cmstar_bytes: &D::ExtractedCommitmentBytes,
 ) -> NoteValidity {
-    if &D::ExtractedCommitmentBytes::from(&D::cmstar(&note)) == cmstar_bytes {
+    if &D::ExtractedCommitmentBytes::from(&D::cmstar(note)) == cmstar_bytes {
         if let Some(derived_esk) = D::derive_esk(note) {
-            if D::epk_bytes(&D::ka_derive_public(&note, &derived_esk))
-                .ct_eq(&ephemeral_key)
+            if D::epk_bytes(&D::ka_derive_public(note, &derived_esk))
+                .ct_eq(ephemeral_key)
                 .into()
             {
                 NoteValidity::Valid
@@ -614,7 +614,7 @@ pub fn try_compact_note_decryption<D: Domain, Output: ShieldedOutput<D, COMPACT_
     let ephemeral_key = output.ephemeral_key();
 
     let epk = D::epk(&ephemeral_key)?;
-    let shared_secret = D::ka_agree_dec(&ivk, &epk);
+    let shared_secret = D::ka_agree_dec(ivk, &epk);
     let key = D::kdf(shared_secret, &ephemeral_key);
 
     try_compact_note_decryption_inner(domain, ivk, &ephemeral_key, output, key)
@@ -659,7 +659,7 @@ pub fn try_output_recovery_with_ovk<D: Domain, Output: ShieldedOutput<D, ENC_CIP
     cv: &D::ValueCommitment,
     out_ciphertext: &[u8; OUT_CIPHERTEXT_SIZE],
 ) -> Option<(D::Note, D::Recipient, D::Memo)> {
-    let ock = D::derive_ock(ovk, &cv, &output.cmstar_bytes(), &output.ephemeral_key());
+    let ock = D::derive_ock(ovk, cv, &output.cmstar_bytes(), &output.ephemeral_key());
     try_output_recovery_with_ock(domain, &ock, output, out_ciphertext)
 }
 

@@ -32,7 +32,7 @@ where
 {
     match bech32::decode(s)? {
         (decoded_hrp, data, Variant::Bech32) if decoded_hrp == hrp => {
-            Vec::<u8>::from_base32(&data).map(|data| read(data))
+            Vec::<u8>::from_base32(&data).map(read)
         }
         _ => Ok(None),
     }

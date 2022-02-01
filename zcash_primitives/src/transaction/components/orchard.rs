@@ -236,11 +236,11 @@ pub fn write_action_without_auth<W: Write>(
     mut writer: W,
     act: &Action<<Authorized as Authorization>::SpendAuth>,
 ) -> io::Result<()> {
-    write_value_commitment(&mut writer, &act.cv_net())?;
-    write_nullifier(&mut writer, &act.nullifier())?;
-    write_verification_key(&mut writer, &act.rk())?;
-    write_cmx(&mut writer, &act.cmx())?;
-    write_note_ciphertext(&mut writer, &act.encrypted_note())?;
+    write_value_commitment(&mut writer, act.cv_net())?;
+    write_nullifier(&mut writer, act.nullifier())?;
+    write_verification_key(&mut writer, act.rk())?;
+    write_cmx(&mut writer, act.cmx())?;
+    write_note_ciphertext(&mut writer, act.encrypted_note())?;
     Ok(())
 }
 

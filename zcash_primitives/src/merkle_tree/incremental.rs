@@ -61,7 +61,7 @@ pub fn write_nonempty_frontier_v1<H: HashSer, W: Write>(
             Optional::write(&mut writer, Some(b), |w, n| n.write(w))?;
         }
     }
-    Vector::write(&mut writer, &frontier.ommers(), |w, e| e.write(w))?;
+    Vector::write(&mut writer, frontier.ommers(), |w, e| e.write(w))?;
 
     Ok(())
 }

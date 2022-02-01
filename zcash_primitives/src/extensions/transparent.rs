@@ -155,7 +155,7 @@ pub trait Extension<C> {
         self.verify_inner(
             &Self::Precondition::from_payload(precondition.mode, &precondition.payload)?,
             &Self::Witness::from_payload(witness.mode, &witness.payload.0)?,
-            &context,
+            context,
         )
     }
 }

@@ -68,7 +68,7 @@ fn scan_output<P: consensus::Parameters, K: ScanningKey>(
         // - Change created by spending fractions of notes.
         // - Notes created by consolidation transactions.
         // - Notes sent from one account to itself.
-        let is_change = spent_from_accounts.contains(&account);
+        let is_change = spent_from_accounts.contains(account);
 
         let witness = IncrementalWitness::from_tree(tree);
         let nf = vk.nf(&note, &witness);

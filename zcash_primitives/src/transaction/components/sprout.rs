@@ -18,9 +18,9 @@ pub struct Bundle {
 }
 
 #[derive(Clone)]
+#[allow(clippy::upper_case_acronyms)]
 pub(crate) enum SproutProof {
     Groth([u8; GROTH_PROOF_SIZE]),
-    #[allow(clippy::upper_case_acronyms)]
     PHGR([u8; PHGR_PROOF_SIZE]),
 }
 
