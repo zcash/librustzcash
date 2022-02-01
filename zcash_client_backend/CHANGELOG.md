@@ -71,9 +71,7 @@ and this library adheres to Rust's notion of
   Per-output data has been split out into a new struct `SentTransactionOutput`
   and `SentTransaction` can now contain multiple outputs.
 - `data_api::WalletWrite::store_received_tx` has been renamed to
-  `store_decrypted_tx` and it now takes an explicit list of
-  `(AccountId, Nullifier)` pairs that allows the library to
-  provide quick access to previously decrypted nullifiers.
+  `store_decrypted_tx`.
 - `data_api::ReceivedTransaction` has been renamed to `DecryptedTransaction`,
   and its `outputs` field has been renamed to `sapling_outputs`.
 - An `Error::MemoForbidden` error has been added to the
