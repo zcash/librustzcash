@@ -101,8 +101,8 @@ impl AccountPubKey {
             &[&[0xd0], &self.0.public_key.serialize()],
         );
         let i_ovk = i_ovk.as_bytes();
-        let ovk_internal = InternalOvk(i_ovk[..32].try_into().unwrap());
-        let ovk_external = ExternalOvk(i_ovk[32..].try_into().unwrap());
+        let ovk_external = ExternalOvk(i_ovk[..32].try_into().unwrap());
+        let ovk_internal = InternalOvk(i_ovk[32..].try_into().unwrap());
 
         (ovk_internal, ovk_external)
     }
