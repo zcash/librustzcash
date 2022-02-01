@@ -252,6 +252,10 @@ pub struct SentTransactionOutput<'a> {
 /// This trait encapsulates the write capabilities required to update stored
 /// wallet data.
 pub trait WalletWrite: WalletRead {
+    /// Updates the state of the wallet database by persisting the provided
+    /// block information, along with the updated witness data that was
+    /// produced when scanning the block for transactions pertaining to
+    /// this wallet.
     #[allow(clippy::type_complexity)]
     fn advance_by_block(
         &mut self,
@@ -259,10 +263,10 @@ pub trait WalletWrite: WalletRead {
         updated_witnesses: &[(Self::NoteRef, IncrementalWitness<Node>)],
     ) -> Result<Vec<(Self::NoteRef, IncrementalWitness<Node>)>, Self::Error>;
 
+    /// Caches a decrypted transaction in the persistent wallet store.
     fn store_decrypted_tx(
         &mut self,
         received_tx: &DecryptedTransaction,
-        nullifiers: &[(AccountId, Nullifier)],
     ) -> Result<Self::TxRef, Self::Error>;
 
     fn store_sent_tx(&mut self, sent_tx: &SentTransaction) -> Result<Self::TxRef, Self::Error>;
@@ -477,7 +481,6 @@ pub mod testing {
         fn store_decrypted_tx(
             &mut self,
             _received_tx: &DecryptedTransaction,
-            _nullifiers: &[(AccountId, Nullifier)],
         ) -> Result<Self::TxRef, Self::Error> {
             Ok(TxId::from_bytes([0u8; 32]))
         }
