@@ -46,6 +46,7 @@ pub mod sapling {
 }
 
 #[derive(Debug)]
+#[doc(hidden)]
 pub enum DerivationError {
     #[cfg(feature = "transparent-inputs")]
     Transparent(hdwallet::error::Error),
@@ -54,6 +55,7 @@ pub enum DerivationError {
 /// A set of viewing keys that are all associated with a single
 /// ZIP-0032 account identifier.
 #[derive(Clone, Debug)]
+#[doc(hidden)]
 pub struct UnifiedSpendingKey {
     account: AccountId,
     #[cfg(feature = "transparent-inputs")]
@@ -61,6 +63,7 @@ pub struct UnifiedSpendingKey {
     sapling: sapling::ExtendedSpendingKey,
 }
 
+#[doc(hidden)]
 impl UnifiedSpendingKey {
     pub fn from_seed<P: consensus::Parameters>(
         params: &P,
@@ -113,13 +116,17 @@ impl UnifiedSpendingKey {
 /// A set of viewing keys that are all associated with a single
 /// ZIP-0032 account identifier.
 #[derive(Clone, Debug)]
+#[doc(hidden)]
 pub struct UnifiedFullViewingKey {
     account: AccountId,
     #[cfg(feature = "transparent-inputs")]
     transparent: Option<legacy::AccountPubKey>,
+    // TODO: This type is invalid for a UFVK; create a `sapling::DiversifiableFullViewingKey`
+    // to replace it.
     sapling: Option<sapling::ExtendedFullViewingKey>,
 }
 
+#[doc(hidden)]
 impl UnifiedFullViewingKey {
     /// Construct a new unified full viewing key, if the required components are present.
     pub fn new(
@@ -145,9 +152,9 @@ impl UnifiedFullViewingKey {
         self.account
     }
 
-    #[cfg(feature = "transparent-inputs")]
     /// Returns the transparent component of the unified key at the
     /// BIP44 path `m/44'/<coin_type>'/<account>'`.
+    #[cfg(feature = "transparent-inputs")]
     pub fn transparent(&self) -> Option<&legacy::AccountPubKey> {
         self.transparent.as_ref()
     }

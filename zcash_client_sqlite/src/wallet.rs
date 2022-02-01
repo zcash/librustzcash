@@ -575,7 +575,7 @@ pub(crate) fn rewind_to_height<P: consensus::Parameters>(
                     FROM received_notes rn
                     LEFT OUTER JOIN transactions tx
                     ON tx.id_tx = rn.tx
-                    WHERE tx.block > ?
+                    WHERE tx.block IS NOT NULL AND tx.block > ?
                 );",
             &[u32::from(block_height)],
         )?;
@@ -588,14 +588,14 @@ pub(crate) fn rewind_to_height<P: consensus::Parameters>(
                     FROM sent_notes sn
                     LEFT OUTER JOIN transactions tx
                     ON tx.id_tx = sn.tx
-                    WHERE tx.block > ?
+                    WHERE tx.block IS NOT NULL AND tx.block > ?
                 );",
             &[u32::from(block_height)],
         )?;
 
         // Un-mine transactions.
         wdb.conn.execute(
-            "UPDATE transactions SET block = NULL, tx_index = NULL WHERE block > ?",
+            "UPDATE transactions SET block = NULL, tx_index = NULL WHERE block IS NOT NULL AND block > ?",
             &[u32::from(block_height)],
         )?;
 
@@ -950,8 +950,7 @@ pub(crate) fn put_received_transparent_utxo<'a, P: consensus::Parameters>(
 }
 
 /// Removes all records of UTXOs that were recorded as having been received
-/// at block heights greater than the given height. Used in the case of chain
-/// rollback.
+/// at block heights greater than the given height.
 #[cfg(feature = "transparent-inputs")]
 #[deprecated(
     note = "This method will be removed in a future update. Use zcash_client_backend::data_api::WalletWrite::rewind_to_height instead."

@@ -111,9 +111,7 @@ impl<P: consensus::Parameters> WalletDb<P> {
     pub fn for_path<F: AsRef<Path>>(path: F, params: P) -> Result<Self, rusqlite::Error> {
         Connection::open(path).map(move |conn| WalletDb { conn, params })
     }
-}
 
-impl<P: consensus::Parameters> WalletDb<P> {
     /// Given a wallet database connection, obtain a handle for the write operations
     /// for that database. This operation may eagerly initialize and cache sqlite
     /// prepared statements that are used in write operations.
@@ -601,7 +599,7 @@ impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
             if !d_tx.tx.transparent_bundle().iter().any(|b| b.vout.is_empty()) {
                 // If the transaction contains shielded spends from our wallet, we will store z->t
                 // transactions we observe in the same way they would be stored by
-                // create_spend_to_address.
+                // create_spend_to_address. 
                 if let Some((account_id, _)) = nullifiers.iter().find(
                     |(_, nf)|
                         d_tx.tx.sapling_bundle().iter().flat_map(|b| b.shielded_spends.iter())
@@ -787,32 +785,33 @@ mod tests {
         db_data: &WalletDb<Network>,
     ) -> (ExtendedFullViewingKey, Option<TransparentAddress>) {
         let seed = [0u8; 32];
-
-        let extsk = sapling::spending_key(&seed, network().coin_type(), AccountId(0));
+        let account = AccountId(0);
+        let extsk = sapling::spending_key(&seed, network().coin_type(), account);
         let extfvk = ExtendedFullViewingKey::from(&extsk);
 
         #[cfg(feature = "transparent-inputs")]
-        {
-            let tkey = Some(
-                legacy::keys::AccountPrivKey::from_seed(&network(), &seed, AccountId(0))
-                    .unwrap()
-                    .to_account_pubkey(),
-            );
-            let ufvk = UnifiedFullViewingKey::new(AccountId(0), tkey.clone(), Some(extfvk.clone()))
-                .unwrap();
-            init_accounts_table(db_data, &[ufvk]).unwrap();
-            (
-                extfvk,
-                tkey.map(|k| k.derive_external_ivk().unwrap().default_address().0),
-            )
-        }
+        let (tkey, taddr) = {
+            let tkey = legacy::keys::AccountPrivKey::from_seed(&network(), &seed, account)
+                .unwrap()
+                .to_account_pubkey();
+            let taddr = tkey.derive_external_ivk().unwrap().default_address().0;
+            (Some(tkey), Some(taddr))
+        };
 
         #[cfg(not(feature = "transparent-inputs"))]
-        {
-            let ufvk = UnifiedFullViewingKey::new(AccountId(0), Some(extfvk.clone())).unwrap();
-            init_accounts_table(db_data, &[ufvk]).unwrap();
-            (extfvk, None)
-        }
+        let taddr = None;
+
+        let ufvk = UnifiedFullViewingKey::new(
+            account,
+            #[cfg(feature = "transparent-inputs")]
+            tkey,
+            Some(extfvk.clone()),
+        )
+        .unwrap();
+
+        init_accounts_table(db_data, &[ufvk]).unwrap();
+
+        (extfvk, taddr)
     }
 
     /// Create a fake CompactBlock at the given height, containing a single output paying
