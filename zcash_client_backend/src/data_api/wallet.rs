@@ -93,6 +93,23 @@ where
 ///
 /// [ZIP 310]: https://zips.z.cash/zip-0310
 ///
+/// Parameters:
+/// * `wallet_db`: A read/write reference to the wallet database
+/// * `params`: Consensus parameters
+/// * `prover`: The TxProver to use in constructing the shielded transaction.
+/// * `account`: The ZIP32 account identifier associated with the extended spending
+///   key that controls the funds to be used in creating this transaction.  This
+///   procedure will return an error if this does not correctly correspond to `extsk`.
+/// * `extsk`: The extended spending key that controls the funds that will be spent
+///   in the resulting transaction.
+/// * `amount`: The amount to send.
+/// * `to`: The address to which `amount` will be paid.
+/// * `memo`: A memo to be included in the output to the recipient.
+/// * `ovk_policy`: The policy to use for constructing outgoing viewing keys that
+///   can allow the sender to view the resulting notes on the blockchain.
+/// * `min_confirmations`: The minimum number of confirmations that a previously
+///   received note must have in the blockchain in order to be considered for being
+///   spent. A value of 10 confirmations is recommended.
 /// # Examples
 ///
 /// ```
@@ -174,7 +191,9 @@ where
         message: None,
         other_params: vec![],
     }])
-    .unwrap();
+    .expect(
+        "It should not be possible for this to violate ZIP 321 request construction invariants.",
+    );
 
     spend(
         wallet_db,
@@ -189,11 +208,33 @@ where
 }
 
 /// Constructs a transaction that sends funds as specified by the `request` argument
-/// and stores it to the wallet's "sent transactions" data store, and returns the
-/// identifier for the transaction.
+/// and stores it to the wallet's "sent transactions" data store, and returns a
+/// unique identifier for the transaction; this identifier is used only for internal
+/// reference purposes and is not the same as the transaction's txid, although after the
+/// activation of ZIP 244 the txid would be a reasonable value for this type.
 ///
 /// This procedure uses the wallet's underlying note selection algorithm to choose
 /// inputs of sufficient value to satisfy the request, if possible.
+///
+/// Do not call this multiple times in parallel, or you will generate transactions that
+/// double-spend the same notes.
+///
+/// # Transaction privacy
+///
+/// `ovk_policy` specifies the desired policy for which outgoing viewing key should be
+/// able to decrypt the outputs of this transaction. This is primarily relevant to
+/// wallet recovery from backup; in particular, [`OvkPolicy::Discard`] will prevent the
+/// recipient's address, and the contents of `memo`, from ever being recovered from the
+/// block chain. (The total value sent can always be inferred by the sender from the spent
+/// notes and received change.)
+///
+/// Regardless of the specified policy, `create_spend_to_address` saves `to`, `value`, and
+/// `memo` in `db_data`. This can be deleted independently of `ovk_policy`.
+///
+/// For details on what transaction information is visible to the holder of a full or
+/// outgoing viewing key, refer to [ZIP 310].
+///
+/// [ZIP 310]: https://zips.z.cash/zip-0310
 ///
 /// Parameters:
 /// * `wallet_db`: A read/write reference to the wallet database
@@ -210,7 +251,7 @@ where
 ///   can allow the sender to view the resulting notes on the blockchain.
 /// * `min_confirmations`: The minimum number of confirmations that a previously
 ///   received note must have in the blockchain in order to be considered for being
-///   spent.
+///   spent. A value of 10 confirmations is recommended.
 #[allow(clippy::too_many_arguments)]
 pub fn spend<E, N, P, D, R>(
     wallet_db: &mut D,
@@ -370,6 +411,10 @@ where
 /// * `account`: The ZIP32 account identifier associated with the the extended
 ///   full viewing key. This procedure will return an error if this does not correctly
 ///   correspond to `extfvk`.
+/// * `memo`: A memo to be included in the output to the (internal) recipient.
+///   This can be used to take notes about auto-shielding operations internal
+///   to the wallet that the wallet can use to improve how it represents those
+///   those shielding transactions to the user.
 /// * `min_confirmations`: The minimum number of confirmations that a previously
 ///   received UTXO must have in the blockchain in order to be considered for being
 ///   spent.
@@ -401,20 +446,21 @@ where
         .get_target_and_anchor_heights(min_confirmations)
         .and_then(|x| x.ok_or_else(|| Error::ScanRequired.into()))?;
 
-    // derive the t-address for the extpubkey at child index 0
     let account_pubkey = sk.to_account_pubkey();
     let ovk = OutgoingViewingKey(account_pubkey.internal_ovk().as_bytes());
 
-    // derive own shielded address from the provided extended spending key
+    // derive own shielded address from the provided extended full viewing key
     // TODO: this should become the internal change address derived from
     // the wallet's UFVK
     let z_address = extfvk.default_address().1;
 
-    // get UTXOs from DB
+    // derive the t-address for the extpubkey at the minimum valid child index
     let (taddr, child_index) = account_pubkey
         .derive_external_ivk()
         .unwrap()
         .default_address();
+
+    // get UTXOs from DB
     let utxos = wallet_db.get_unspent_transparent_outputs(&taddr, latest_anchor)?;
     let total_amount = utxos
         .iter()

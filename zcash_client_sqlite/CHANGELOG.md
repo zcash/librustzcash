@@ -7,6 +7,16 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 ### Added
+- Implementations of `zcash_client_backend::data_api::WalletReadTransparent`
+  and `WalletWriteTransparent` have been added. These implementations
+  are available only when the `transparent-inputs` feature flag is
+  enabled.
+- New error variants:
+  - `SqliteClientError::TransparentAddress`, to support handling of errors in
+    transparent address decoding.
+  - `SqliteClientError::RequestedRewindInvalid`, to report when requested
+    rewinds exceed supported bounds.
+
 ### Changed
 - MSRV is now 1.51.0.
 - Bumped dependencies to `ff 0.11`, `group 0.11`, `jubjub 0.8`.
@@ -16,13 +26,56 @@ and this library adheres to Rust's notion of
   - `zcash_client_sqlite::WalletDB` to `WalletDb`
   - `zcash_client_sqlite::error::SqliteClientError::IncorrectHRPExtFVK` to
     `IncorrectHrpExtFvk`.
-- A new error constructor `SqliteClientError::TransparentAddress` has been added 
-  to support handling of errors in transparent address decoding.
-- A new error constructor `SqliteClientError::RequestedRewindInvalid` has been added 
-  to report when requested rewinds exceed supported bounds.
-- The sqlite implemenations of `zcash_client_backend::data_api::WalletRead`
-  and `WalletWrite` have been updated to reflect the changes to those 
+- The SQLite implementations of `zcash_client_backend::data_api::WalletRead`
+  and `WalletWrite` have been updated to reflect the changes to those
   traits.
+- Renamed the following to reflect their Sapling-specific nature:
+  - `zcash_client_sqlite::wallet`:
+    - `get_spendable_notes` to `get_spendable_sapling_notes`.
+    - `select_spendable_notes` to `select_spendable_sapling_notes`.
+- Altered the arguments to `zcash_client_sqlite::wallet::put_sent_note`
+  to take the components of a `DecryptedOutput` value to allow this
+  method to be used in contexts where a transaction has just been
+  constructed, rather than only in the case that a transaction has
+  been decrypted after being retrieved from the network.
+
+### Deprecated
+- A number of public API methods that are used internally to support the
+  `zcash_client_backend::data_api::{WalletRead, WalletWrite}` interfaces have
+  been deprecated, and will be removed from the public API in a future release.
+  Users should depend upon the versions of these methods exposed via the
+  `zcash_client_backend::data_api` traits mentioned above instead.
+  - Deprecated in `zcash_client_sqlite::wallet`:
+    - `get_address`
+    - `get_extended_full_viewing_keys`
+    - `is_valid_account_extfvk`
+    - `get_balance`
+    - `get_balance_at`
+    - `get_sent_memo`
+    - `block_height_extrema`
+    - `get_tx_height`
+    - `get_block_hash`
+    - `get_rewind_height`
+    - `get_commitment_tree`
+    - `get_witnesses`
+    - `get_nullifiers`
+    - `insert_block`
+    - `put_tx_meta`
+    - `put_tx_data`
+    - `mark_sapling_note_spent`
+    - `delete_utxos_above`
+    - `put_receiverd_note`
+    - `insert_witness`
+    - `prune_witnesses`
+    - `update_expired_notes`
+    - `put_sent_note`
+    - `put_sent_utxo`
+    - `insert_sent_note`
+    - `insert_sent_utxo`
+    - `get_address`
+  - Deprecated in `zcash_client_sqlite::wallet::transact`:
+    - `get_spendable_sapling_notes`
+    - `select_spendable_sapling_notes`
 
 ## [0.3.0] - 2021-03-26
 This release contains a major refactor of the APIs to leverage the new Data
