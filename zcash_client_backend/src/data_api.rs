@@ -163,13 +163,12 @@ pub trait WalletRead {
         block_height: BlockHeight,
     ) -> Result<Vec<(Self::NoteRef, IncrementalWitness<Node>)>, Self::Error>;
 
-    /// Returns the nullifiers for notes that the wallet is tracking,
-    /// along with their associated account IDs, that have not yet
-    /// been confirmed as a consequence of the spending transaction
-    /// being included in a block.
+    /// Returns the nullifiers for notes that the wallet is tracking, along with their
+    /// associated account IDs, that are either unspent or have not yet been confirmed as
+    /// spent (in that the spending transaction has not yet been included in a block).
     fn get_nullifiers(&self) -> Result<Vec<(AccountId, Nullifier)>, Self::Error>;
 
-    /// Returns all nullifiers for notes that the wallet is tracing
+    /// Returns all nullifiers for notes that the wallet is tracking
     /// (including those for notes that have been previously spent),
     /// along with the account identifiers with which they are associated.
     fn get_all_nullifiers(&self) -> Result<Vec<(AccountId, Nullifier)>, Self::Error>;

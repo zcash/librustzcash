@@ -210,8 +210,9 @@ where
 /// Constructs a transaction that sends funds as specified by the `request` argument
 /// and stores it to the wallet's "sent transactions" data store, and returns a
 /// unique identifier for the transaction; this identifier is used only for internal
-/// reference purposes and is not the same as the transaction's txid, although after the
-/// activation of ZIP 244 the txid would be a reasonable value for this type.
+/// reference purposes and is not the same as the transaction's txid, although after v4
+/// transactions have been made invalid in a future network upgrade, the txid could
+/// potentially be used for this type (as it is non-malleable for v5+ transactions).
 ///
 /// This procedure uses the wallet's underlying note selection algorithm to choose
 /// inputs of sufficient value to satisfy the request, if possible.
