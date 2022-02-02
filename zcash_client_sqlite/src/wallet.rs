@@ -576,18 +576,6 @@ pub(crate) fn rewind_to_height<P: consensus::Parameters>(
                 &[u32::from(block_height)],
             )?;
 
-            // Un-mine transactions.
-            wdb.conn.execute(
-                "UPDATE transactions SET block = NULL, tx_index = NULL WHERE block > ?",
-                &[u32::from(block_height)],
-            )?;
-
-            // Now that they aren't depended on, delete scanned blocks.
-            wdb.conn.execute(
-                "DELETE FROM blocks WHERE height > ?",
-                &[u32::from(block_height)],
-            )?;
-
             // Rewind received notes
             wdb.conn.execute(
                 "DELETE FROM received_notes
@@ -617,6 +605,18 @@ pub(crate) fn rewind_to_height<P: consensus::Parameters>(
             // Rewind utxos
             wdb.conn.execute(
                 "DELETE FROM utxos WHERE height > ?",
+                &[u32::from(block_height)],
+            )?;
+
+            // Un-mine transactions.
+            wdb.conn.execute(
+                "UPDATE transactions SET block = NULL, tx_index = NULL WHERE block > ?",
+                &[u32::from(block_height)],
+            )?;
+
+            // Now that they aren't depended on, delete scanned blocks.
+            wdb.conn.execute(
+                "DELETE FROM blocks WHERE height > ?",
                 &[u32::from(block_height)],
             )?;
         }
