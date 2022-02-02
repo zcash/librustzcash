@@ -22,12 +22,14 @@ bip0039 = { version = "0.9", features = ["std", "all-languages"] }
 blake2b_simd = "1"
 blake2s_simd = "1"
 bls12_381 = "0.6"
+bs58 = { version = "0.4", features = ["check"], optional = true }
 byteorder = "1"
 chacha20poly1305 = "0.9"
 equihash = { version = "0.1", path = "../components/equihash" }
 ff = "0.11"
 fpe = "0.5"
 group = "0.11"
+hdwallet = { version = "0.3.0", optional = true }
 hex = "0.4"
 incrementalmerkletree = "0.2"
 jubjub = "0.8"
@@ -38,7 +40,7 @@ orchard = "=0.1.0-beta.1"
 proptest = { version = "1.0.0", optional = true }
 rand = "0.8"
 rand_core = "0.6"
-ripemd160 = { version = "0.9", optional = true }
+ripemd = { version = "0.1", optional = true }
 secp256k1 = { version = "0.20", optional = true }
 sha2 = "0.9"
 subtle = "2.2.3"
@@ -59,8 +61,8 @@ orchard = { version = "=0.1.0-beta.1", features = ["test-dependencies"] }
 pprof = { version = "=0.6.1", features = ["criterion", "flamegraph"] }
 
 [features]
-transparent-inputs = ["ripemd160", "secp256k1"]
-test-dependencies = ["proptest"]
+transparent-inputs = ["bs58", "hdwallet", "ripemd", "secp256k1"]
+test-dependencies = ["proptest", "orchard/test-dependencies"]
 zfuture = []
 
 [lib]

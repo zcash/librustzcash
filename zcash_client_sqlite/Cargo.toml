@@ -21,6 +21,7 @@ jubjub = "0.8"
 protobuf = ">=2.20,<2.26" # protobuf 2.26 bumped MSRV to 1.52.1
 rand_core = "0.6"
 rusqlite = { version = "0.24", features = ["bundled", "time"] }
+secp256k1 = { version = "0.20" }
 time = "0.2"
 zcash_client_backend = { version = "0.5", path = "../zcash_client_backend" }
 zcash_primitives = { version = "0.5", path = "../zcash_primitives" }
@@ -32,6 +33,7 @@ zcash_proofs = { version = "0.5", path = "../zcash_proofs" }
 [features]
 mainnet = []
 test-dependencies = ["zcash_client_backend/test-dependencies"]
+transparent-inputs = ["zcash_client_backend/transparent-inputs"]
 
 [lib]
 bench = false

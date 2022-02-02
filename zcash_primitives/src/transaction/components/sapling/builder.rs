@@ -9,10 +9,10 @@ use rand::{seq::SliceRandom, RngCore};
 
 use crate::{
     consensus::{self, BlockHeight},
+    keys::OutgoingViewingKey,
     memo::MemoBytes,
     merkle_tree::MerklePath,
     sapling::{
-        keys::OutgoingViewingKey,
         note_encryption::sapling_note_encryption,
         prover::TxProver,
         redjubjub::{PrivateKey, Signature},
@@ -86,7 +86,7 @@ impl SaplingOutput {
         ovk: Option<OutgoingViewingKey>,
         to: PaymentAddress,
         value: Amount,
-        memo: Option<MemoBytes>,
+        memo: MemoBytes,
     ) -> Result<Self, Error> {
         let g_d = to.g_d().ok_or(Error::InvalidAddress)?;
         if value.is_negative() {
@@ -106,7 +106,7 @@ impl SaplingOutput {
             ovk,
             to,
             note,
-            memo: memo.unwrap_or_else(MemoBytes::empty),
+            memo,
         })
     }
 
@@ -276,7 +276,7 @@ impl<P: consensus::Parameters> SaplingBuilder<P> {
         ovk: Option<OutgoingViewingKey>,
         to: PaymentAddress,
         value: Amount,
-        memo: Option<MemoBytes>,
+        memo: MemoBytes,
     ) -> Result<(), Error> {
         let output = SaplingOutput::new_internal(
             &self.params,
