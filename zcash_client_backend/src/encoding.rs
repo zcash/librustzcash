@@ -8,8 +8,10 @@
 use bech32::{self, Error, FromBase32, ToBase32, Variant};
 use bs58::{self, decode::Error as Bs58Error};
 use std::convert::TryInto;
+use std::fmt;
 use std::io::{self, Write};
 use zcash_primitives::{
+    consensus,
     legacy::TransparentAddress,
     sapling::PaymentAddress,
     zip32::{ExtendedFullViewingKey, ExtendedSpendingKey},
@@ -36,6 +38,61 @@ where
     }
 }
 
+pub trait AddressCodec<P>
+where
+    Self: std::marker::Sized,
+{
+    type Error;
+
+    fn encode(&self, params: &P) -> String;
+    fn decode(params: &P, address: &str) -> Result<Self, Self::Error>;
+}
+
+#[derive(Debug)]
+pub enum TransparentCodecError {
+    UnsupportedAddressType(String),
+    Base58(Bs58Error),
+}
+
+impl fmt::Display for TransparentCodecError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match &self {
+            TransparentCodecError::UnsupportedAddressType(s) => write!(
+                f,
+                "Could not recognize {} as a supported p2sh or p2pkh address.",
+                s
+            ),
+            TransparentCodecError::Base58(e) => write!(f, "{}", e),
+        }
+    }
+}
+
+impl std::error::Error for TransparentCodecError {}
+
+impl<P: consensus::Parameters> AddressCodec<P> for TransparentAddress {
+    type Error = TransparentCodecError;
+
+    fn encode(&self, params: &P) -> String {
+        encode_transparent_address(
+            &params.b58_pubkey_address_prefix(),
+            &params.b58_script_address_prefix(),
+            self,
+        )
+    }
+
+    fn decode(params: &P, address: &str) -> Result<TransparentAddress, TransparentCodecError> {
+        decode_transparent_address(
+            &params.b58_pubkey_address_prefix(),
+            &params.b58_script_address_prefix(),
+            address,
+        )
+        .map_err(TransparentCodecError::Base58)
+        .and_then(|opt| {
+            opt.ok_or_else(|| TransparentCodecError::UnsupportedAddressType(address.to_string()))
+        })
+    }
+}
+
 /// Writes an [`ExtendedSpendingKey`] as a Bech32-encoded string.
 ///
 /// # Examples
@@ -43,13 +100,14 @@ where
 /// ```
 /// use zcash_primitives::{
 ///     constants::testnet::{COIN_TYPE, HRP_SAPLING_EXTENDED_SPENDING_KEY},
+///     zip32::AccountId,
 /// };
 /// use zcash_client_backend::{
 ///     encoding::encode_extended_spending_key,
-///     keys::spending_key,
+///     keys::sapling,
 /// };
 ///
-/// let extsk = spending_key(&[0; 32][..], COIN_TYPE, 0);
+/// let extsk = sapling::spending_key(&[0; 32][..], COIN_TYPE, AccountId(0));
 /// let encoded = encode_extended_spending_key(HRP_SAPLING_EXTENDED_SPENDING_KEY, &extsk);
 /// ```
 /// [`ExtendedSpendingKey`]: zcash_primitives::zip32::ExtendedSpendingKey
@@ -74,14 +132,15 @@ pub fn decode_extended_spending_key(
 /// ```
 /// use zcash_primitives::{
 ///     constants::testnet::{COIN_TYPE, HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY},
+///     zip32::AccountId,
 /// };
 /// use zcash_client_backend::{
 ///     encoding::encode_extended_full_viewing_key,
-///     keys::spending_key,
+///     keys::sapling,
 /// };
 /// use zcash_primitives::zip32::ExtendedFullViewingKey;
 ///
-/// let extsk = spending_key(&[0; 32][..], COIN_TYPE, 0);
+/// let extsk = sapling::spending_key(&[0; 32][..], COIN_TYPE, AccountId(0));
 /// let extfvk = ExtendedFullViewingKey::from(&extsk);
 /// let encoded = encode_extended_full_viewing_key(HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY, &extfvk);
 /// ```
@@ -136,6 +195,16 @@ pub fn decode_extended_full_viewing_key(
 /// [`PaymentAddress`]: zcash_primitives::sapling::PaymentAddress
 pub fn encode_payment_address(hrp: &str, addr: &PaymentAddress) -> String {
     bech32_encode(hrp, |w| w.write_all(&addr.to_bytes()))
+}
+
+/// Writes a [`PaymentAddress`] as a Bech32-encoded string
+/// using the human-readable prefix values defined in the specified
+/// network parameters.
+pub fn encode_payment_address_p<P: consensus::Parameters>(
+    params: &P,
+    addr: &PaymentAddress,
+) -> String {
+    encode_payment_address(params.hrp_sapling_payment_address(), addr)
 }
 
 /// Decodes a [`PaymentAddress`] from a Bech32-encoded string.
@@ -239,6 +308,20 @@ pub fn encode_transparent_address(
         }
     };
     bs58::encode(decoded).with_check().into_string()
+}
+
+/// Writes a [`TransparentAddress`] as a Base58Check-encoded string.
+/// using the human-readable prefix values defined in the specified
+/// network parameters.
+pub fn encode_transparent_address_p<P: consensus::Parameters>(
+    params: &P,
+    addr: &TransparentAddress,
+) -> String {
+    encode_transparent_address(
+        &params.b58_pubkey_address_prefix(),
+        &params.b58_script_address_prefix(),
+        addr,
+    )
 }
 
 /// Decodes a [`TransparentAddress`] from a Base58Check-encoded string.

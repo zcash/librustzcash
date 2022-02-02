@@ -3,9 +3,10 @@
 use std::error;
 use std::fmt;
 
-use zcash_client_backend::data_api;
+use zcash_client_backend::{data_api, encoding::TransparentCodecError};
+use zcash_primitives::consensus::BlockHeight;
 
-use crate::NoteId;
+use crate::{NoteId, PRUNING_HEIGHT};
 
 /// The primary error type for the SQLite wallet backend.
 #[derive(Debug)]
@@ -32,6 +33,9 @@ pub enum SqliteClientError {
     /// Base58 decoding error
     Base58(bs58::decode::Error),
 
+    /// Base58 decoding error
+    TransparentAddress(TransparentCodecError),
+
     /// Wrapper for rusqlite errors.
     DbError(rusqlite::Error),
 
@@ -40,6 +44,11 @@ pub enum SqliteClientError {
 
     /// A received memo cannot be interpreted as a UTF-8 string.
     InvalidMemo(zcash_primitives::memo::Error),
+
+    /// A requested rewind would violate invariants of the
+    /// storage layer. The payload returned with this error is
+    /// (safe rewind height, requested height).
+    RequestedRewindInvalid(BlockHeight, BlockHeight),
 
     /// Wrapper for errors from zcash_client_backend
     BackendError(data_api::error::Error<NoteId>),
@@ -65,9 +74,13 @@ impl fmt::Display for SqliteClientError {
             }
             SqliteClientError::IncorrectHrpExtFvk => write!(f, "Incorrect HRP for extfvk"),
             SqliteClientError::InvalidNote => write!(f, "Invalid note"),
-            SqliteClientError::InvalidNoteId => write!(f, "The note ID associated with an inserted witness must correspond to a received note."),
+            SqliteClientError::InvalidNoteId =>
+                write!(f, "The note ID associated with an inserted witness must correspond to a received note."),
+            SqliteClientError::RequestedRewindInvalid(h, r) =>
+                write!(f, "A rewind must be either of less than {} blocks, or at least back to block {} for your wallet; the requested height was {}.", PRUNING_HEIGHT, h, r),
             SqliteClientError::Bech32(e) => write!(f, "{}", e),
             SqliteClientError::Base58(e) => write!(f, "{}", e),
+            SqliteClientError::TransparentAddress(e) => write!(f, "{}", e),
             SqliteClientError::TableNotEmpty => write!(f, "Table is not empty"),
             SqliteClientError::DbError(e) => write!(f, "{}", e),
             SqliteClientError::Io(e) => write!(f, "{}", e),

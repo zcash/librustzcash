@@ -13,11 +13,11 @@ use zcash_primitives::{
         Node, Note, Nullifier, PaymentAddress, SaplingIvk,
     },
     transaction::components::sapling::CompactOutputDescription,
-    zip32::ExtendedFullViewingKey,
+    zip32::{AccountId, ExtendedFullViewingKey},
 };
 
 use crate::proto::compact_formats::{CompactBlock, CompactOutput};
-use crate::wallet::{AccountId, WalletShieldedOutput, WalletShieldedSpend, WalletTx};
+use crate::wallet::{WalletShieldedOutput, WalletShieldedSpend, WalletTx};
 
 /// Scans a [`CompactOutput`] with a set of [`ScanningKey`]s.
 ///
@@ -317,12 +317,11 @@ mod tests {
             SaplingIvk,
         },
         transaction::components::Amount,
-        zip32::{ExtendedFullViewingKey, ExtendedSpendingKey},
+        zip32::{AccountId, ExtendedFullViewingKey, ExtendedSpendingKey},
     };
 
     use super::scan_block;
     use crate::proto::compact_formats::{CompactBlock, CompactOutput, CompactSpend, CompactTx};
-    use crate::wallet::AccountId;
 
     fn random_compact_tx(mut rng: impl RngCore) -> CompactTx {
         let fake_nf = {

@@ -1,32 +1,21 @@
 //! Structs representing transaction data scanned from the block chain by a wallet or
 //! light client.
 
-use subtle::{Choice, ConditionallySelectable};
-
 use zcash_note_encryption::EphemeralKeyBytes;
 use zcash_primitives::{
+    keys::OutgoingViewingKey,
     merkle_tree::IncrementalWitness,
-    sapling::{
-        keys::OutgoingViewingKey, Diversifier, Node, Note, Nullifier, PaymentAddress, Rseed,
-    },
+    sapling::{Diversifier, Node, Note, Nullifier, PaymentAddress, Rseed},
     transaction::{components::Amount, TxId},
+    zip32::AccountId,
 };
 
-/// A type-safe wrapper for account identifiers.
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
-pub struct AccountId(pub u32);
-
-impl Default for AccountId {
-    fn default() -> Self {
-        AccountId(0)
-    }
-}
-
-impl ConditionallySelectable for AccountId {
-    fn conditional_select(a0: &Self, a1: &Self, c: Choice) -> Self {
-        AccountId(u32::conditional_select(&a0.0, &a1.0, c))
-    }
-}
+#[cfg(feature = "transparent-inputs")]
+use zcash_primitives::{
+    consensus::BlockHeight,
+    legacy::TransparentAddress,
+    transaction::components::{OutPoint, TxOut},
+};
 
 /// A subset of a [`Transaction`] relevant to wallets and light clients.
 ///
@@ -38,6 +27,20 @@ pub struct WalletTx<N> {
     pub num_outputs: usize,
     pub shielded_spends: Vec<WalletShieldedSpend>,
     pub shielded_outputs: Vec<WalletShieldedOutput<N>>,
+}
+
+#[cfg(feature = "transparent-inputs")]
+pub struct WalletTransparentOutput {
+    pub outpoint: OutPoint,
+    pub txout: TxOut,
+    pub height: BlockHeight,
+}
+
+#[cfg(feature = "transparent-inputs")]
+impl WalletTransparentOutput {
+    pub fn address(&self) -> TransparentAddress {
+        self.txout.script_pubkey.address().unwrap()
+    }
 }
 
 /// A subset of a [`SpendDescription`] relevant to wallets and light clients.

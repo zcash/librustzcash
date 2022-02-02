@@ -114,6 +114,14 @@ impl Amount {
     pub const fn is_negative(self) -> bool {
         self.0.is_negative()
     }
+
+    pub fn sum<I: IntoIterator<Item = Amount>>(values: I) -> Option<Amount> {
+        let mut result = Amount::zero();
+        for value in values {
+            result = (result + value)?;
+        }
+        Some(result)
+    }
 }
 
 impl TryFrom<i64> for Amount {
