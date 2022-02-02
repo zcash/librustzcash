@@ -415,7 +415,7 @@ where
 /// * `memo`: A memo to be included in the output to the (internal) recipient.
 ///   This can be used to take notes about auto-shielding operations internal
 ///   to the wallet that the wallet can use to improve how it represents those
-///   those shielding transactions to the user.
+///   shielding transactions to the user.
 /// * `min_confirmations`: The minimum number of confirmations that a previously
 ///   received UTXO must have in the blockchain in order to be considered for being
 ///   spent.
