@@ -1,18 +1,33 @@
 //! Functions for initializing the various databases.
 
-use rusqlite::{types::ToSql, NO_PARAMS};
+use rusqlite::{params, types::ToSql, NO_PARAMS};
 
 use zcash_primitives::{
     block::BlockHash,
     consensus::{self, BlockHeight},
-    zip32::ExtendedFullViewingKey,
 };
 
-use zcash_client_backend::encoding::encode_extended_full_viewing_key;
+use zcash_client_backend::{
+    encoding::encode_extended_full_viewing_key, keys::UnifiedFullViewingKey,
+};
 
 use crate::{address_from_extfvk, error::SqliteClientError, WalletDb};
 
+#[cfg(feature = "transparent-inputs")]
+use {
+    zcash_client_backend::encoding::AddressCodec,
+    zcash_primitives::legacy::keys::IncomingViewingKey,
+};
+
 /// Sets up the internal structure of the data database.
+///
+/// It is safe to use a wallet database created without the ability to create transparent spends
+/// with a build that enables transparent spends via use of the `transparent-inputs` feature flag.
+/// The reverse is unsafe, as wallet balance calculations would ignore the transparent UTXOs
+/// controlled by the wallet. Note that this currently applies only to wallet databases created
+/// with the same _version_ of the wallet software; database migration operations currently must
+/// be manually performed to update the structure of the database when changing versions.
+/// Integrated migration utilities will be provided by a future version of this library.
 ///
 /// # Examples
 ///
@@ -32,8 +47,9 @@ pub fn init_wallet_db<P>(wdb: &WalletDb<P>) -> Result<(), rusqlite::Error> {
     wdb.conn.execute(
         "CREATE TABLE IF NOT EXISTS accounts (
             account INTEGER PRIMARY KEY,
-            extfvk TEXT NOT NULL,
-            address TEXT NOT NULL
+            extfvk TEXT,
+            address TEXT,
+            transparent_address TEXT
         )",
         NO_PARAMS,
     )?;
@@ -95,6 +111,7 @@ pub fn init_wallet_db<P>(wdb: &WalletDb<P>) -> Result<(), rusqlite::Error> {
         "CREATE TABLE IF NOT EXISTS sent_notes (
             id_note INTEGER PRIMARY KEY,
             tx INTEGER NOT NULL,
+            output_pool INTEGER NOT NULL,
             output_index INTEGER NOT NULL,
             from_account INTEGER NOT NULL,
             address TEXT NOT NULL,
@@ -102,28 +119,52 @@ pub fn init_wallet_db<P>(wdb: &WalletDb<P>) -> Result<(), rusqlite::Error> {
             memo BLOB,
             FOREIGN KEY (tx) REFERENCES transactions(id_tx),
             FOREIGN KEY (from_account) REFERENCES accounts(account),
-            CONSTRAINT tx_output UNIQUE (tx, output_index)
+            CONSTRAINT tx_output UNIQUE (tx, output_pool, output_index)
+        )",
+        NO_PARAMS,
+    )?;
+    wdb.conn.execute(
+        "CREATE TABLE IF NOT EXISTS utxos (
+            id_utxo INTEGER PRIMARY KEY,
+            address TEXT NOT NULL, 
+            prevout_txid BLOB NOT NULL, 
+            prevout_idx INTEGER NOT NULL, 
+            script BLOB NOT NULL, 
+            value_zat INTEGER NOT NULL, 
+            height INTEGER NOT NULL,
+            spent_in_tx INTEGER,
+            FOREIGN KEY (spent_in_tx) REFERENCES transactions(id_tx),
+            CONSTRAINT tx_outpoint UNIQUE (prevout_txid, prevout_idx)
         )",
         NO_PARAMS,
     )?;
     Ok(())
 }
 
-/// Initialises the data database with the given [`ExtendedFullViewingKey`]s.
+/// Initialises the data database with the given [`UnifiedFullViewingKey`]s.
 ///
-/// The [`ExtendedFullViewingKey`]s are stored internally and used by other APIs such as
+/// The [`UnifiedFullViewingKey`]s are stored internally and used by other APIs such as
 /// [`get_address`], [`scan_cached_blocks`], and [`create_spend_to_address`]. `extfvks` **MUST**
-/// be arranged in account-order; that is, the [`ExtendedFullViewingKey`] for ZIP 32
+/// be arranged in account-order; that is, the [`UnifiedFullViewingKey`] for ZIP 32
 /// account `i` **MUST** be at `extfvks[i]`.
 ///
 /// # Examples
 ///
 /// ```
+/// # #[cfg(feature = "transparent-inputs")]
+/// # {
 /// use tempfile::NamedTempFile;
 ///
 /// use zcash_primitives::{
-///     consensus::Network,
-///     zip32::{ExtendedFullViewingKey, ExtendedSpendingKey}
+///     consensus::{Network, Parameters},
+///     zip32::{AccountId, ExtendedFullViewingKey, ExtendedSpendingKey}
+/// };
+///
+/// use zcash_client_backend::{
+///     keys::{
+///         sapling,
+///         UnifiedFullViewingKey
+///     },
 /// };
 ///
 /// use zcash_client_sqlite::{
@@ -135,9 +176,13 @@ pub fn init_wallet_db<P>(wdb: &WalletDb<P>) -> Result<(), rusqlite::Error> {
 /// let db_data = WalletDb::for_path(data_file.path(), Network::TestNetwork).unwrap();
 /// init_wallet_db(&db_data).unwrap();
 ///
-/// let extsk = ExtendedSpendingKey::master(&[]);
-/// let extfvks = [ExtendedFullViewingKey::from(&extsk)];
-/// init_accounts_table(&db_data, &extfvks).unwrap();
+/// let seed = [0u8; 32]; // insecure; replace with a strong random seed
+/// let account = AccountId(0);
+/// let extsk = sapling::spending_key(&seed, Network::TestNetwork.coin_type(), account);
+/// let extfvk = ExtendedFullViewingKey::from(&extsk);
+/// let ufvk = UnifiedFullViewingKey::new(account, None, Some(extfvk)).unwrap();
+/// init_accounts_table(&db_data, &[ufvk]).unwrap();
+/// # }
 /// ```
 ///
 /// [`get_address`]: crate::wallet::get_address
@@ -145,7 +190,7 @@ pub fn init_wallet_db<P>(wdb: &WalletDb<P>) -> Result<(), rusqlite::Error> {
 /// [`create_spend_to_address`]: zcash_client_backend::data_api::wallet::create_spend_to_address
 pub fn init_accounts_table<P: consensus::Parameters>(
     wdb: &WalletDb<P>,
-    extfvks: &[ExtendedFullViewingKey],
+    keys: &[UnifiedFullViewingKey],
 ) -> Result<(), SqliteClientError> {
     let mut empty_check = wdb.conn.prepare("SELECT * FROM accounts LIMIT 1")?;
     if empty_check.exists(NO_PARAMS)? {
@@ -154,22 +199,30 @@ pub fn init_accounts_table<P: consensus::Parameters>(
 
     // Insert accounts atomically
     wdb.conn.execute("BEGIN IMMEDIATE", NO_PARAMS)?;
-    for (account, extfvk) in extfvks.iter().enumerate() {
-        let extfvk_str = encode_extended_full_viewing_key(
-            wdb.params.hrp_sapling_extended_full_viewing_key(),
-            extfvk,
-        );
+    for key in keys.iter() {
+        let extfvk_str: Option<String> = key.sapling().map(|extfvk| {
+            encode_extended_full_viewing_key(
+                wdb.params.hrp_sapling_extended_full_viewing_key(),
+                extfvk,
+            )
+        });
 
-        let address_str = address_from_extfvk(&wdb.params, extfvk);
+        let address_str: Option<String> = key
+            .sapling()
+            .map(|extfvk| address_from_extfvk(&wdb.params, extfvk));
+        #[cfg(feature = "transparent-inputs")]
+        let taddress_str: Option<String> = key.transparent().and_then(|k| {
+            k.derive_external_ivk()
+                .ok()
+                .map(|k| k.default_address().0.encode(&wdb.params))
+        });
+        #[cfg(not(feature = "transparent-inputs"))]
+        let taddress_str: Option<String> = None;
 
         wdb.conn.execute(
-            "INSERT INTO accounts (account, extfvk, address)
-            VALUES (?, ?, ?)",
-            &[
-                (account as u32).to_sql()?,
-                extfvk_str.to_sql()?,
-                address_str.to_sql()?,
-            ],
+            "INSERT INTO accounts (account, extfvk, address, transparent_address)
+            VALUES (?, ?, ?, ?)",
+            params![key.account().0, extfvk_str, address_str, taddress_str,],
         )?;
     }
     wdb.conn.execute("COMMIT", NO_PARAMS)?;
@@ -236,16 +289,26 @@ pub fn init_blocks_table<P>(
 }
 
 #[cfg(test)]
+#[allow(deprecated)]
 mod tests {
     use tempfile::NamedTempFile;
 
+    use zcash_client_backend::keys::{sapling, UnifiedFullViewingKey, UnifiedSpendingKey};
+
+    #[cfg(feature = "transparent-inputs")]
+    use zcash_primitives::legacy::keys as transparent;
+
     use zcash_primitives::{
         block::BlockHash,
-        consensus::BlockHeight,
-        zip32::{ExtendedFullViewingKey, ExtendedSpendingKey},
+        consensus::{BlockHeight, Parameters},
+        zip32::ExtendedFullViewingKey,
     };
 
-    use crate::{tests, wallet::get_address, AccountId, WalletDb};
+    use crate::{
+        tests::{self, network},
+        wallet::get_address,
+        AccountId, WalletDb,
+    };
 
     use super::{init_accounts_table, init_blocks_table, init_wallet_db};
 
@@ -259,15 +322,33 @@ mod tests {
         init_accounts_table(&db_data, &[]).unwrap();
         init_accounts_table(&db_data, &[]).unwrap();
 
+        let seed = [0u8; 32];
+        let account = AccountId(0);
+
         // First call with data should initialise the accounts table
-        let extfvks = [ExtendedFullViewingKey::from(&ExtendedSpendingKey::master(
-            &[],
-        ))];
-        init_accounts_table(&db_data, &extfvks).unwrap();
+        let extsk = sapling::spending_key(&seed, network().coin_type(), account);
+        let extfvk = ExtendedFullViewingKey::from(&extsk);
+
+        #[cfg(feature = "transparent-inputs")]
+        let ufvk = UnifiedFullViewingKey::new(
+            account,
+            Some(
+                transparent::AccountPrivKey::from_seed(&network(), &seed, account)
+                    .unwrap()
+                    .to_account_pubkey(),
+            ),
+            Some(extfvk),
+        )
+        .unwrap();
+
+        #[cfg(not(feature = "transparent-inputs"))]
+        let ufvk = UnifiedFullViewingKey::new(account, Some(extfvk)).unwrap();
+
+        init_accounts_table(&db_data, &[ufvk.clone()]).unwrap();
 
         // Subsequent calls should return an error
         init_accounts_table(&db_data, &[]).unwrap_err();
-        init_accounts_table(&db_data, &extfvks).unwrap_err();
+        init_accounts_table(&db_data, &[ufvk]).unwrap_err();
     }
 
     #[test]
@@ -303,13 +384,17 @@ mod tests {
         let db_data = WalletDb::for_path(data_file.path(), tests::network()).unwrap();
         init_wallet_db(&db_data).unwrap();
 
+        let seed = [0u8; 32];
+
         // Add an account to the wallet
-        let extsk = ExtendedSpendingKey::master(&[]);
-        let extfvks = [ExtendedFullViewingKey::from(&extsk)];
-        init_accounts_table(&db_data, &extfvks).unwrap();
+        let account_id = AccountId(0);
+        let usk = UnifiedSpendingKey::from_seed(&tests::network(), &seed, account_id).unwrap();
+        let ufvk = usk.to_unified_full_viewing_key();
+        let expected_address = ufvk.sapling().unwrap().default_address().1;
+        init_accounts_table(&db_data, &[ufvk]).unwrap();
 
         // The account's address should be in the data DB
         let pa = get_address(&db_data, AccountId(0)).unwrap();
-        assert_eq!(pa.unwrap(), extsk.default_address().1);
+        assert_eq!(pa.unwrap(), expected_address);
     }
 }

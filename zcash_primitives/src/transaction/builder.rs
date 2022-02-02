@@ -12,12 +12,11 @@ use rand::{rngs::OsRng, CryptoRng, RngCore};
 
 use crate::{
     consensus::{self, BlockHeight, BranchId},
+    keys::OutgoingViewingKey,
     legacy::TransparentAddress,
     memo::MemoBytes,
     merkle_tree::MerklePath,
-    sapling::{
-        keys::OutgoingViewingKey, prover::TxProver, Diversifier, Node, Note, PaymentAddress,
-    },
+    sapling::{prover::TxProver, Diversifier, Node, Note, PaymentAddress},
     transaction::{
         components::{
             amount::{Amount, DEFAULT_FEE},
@@ -205,7 +204,7 @@ impl<'a, P: consensus::Parameters, R: RngCore> Builder<'a, P, R> {
         ovk: Option<OutgoingViewingKey>,
         to: PaymentAddress,
         value: Amount,
-        memo: Option<MemoBytes>,
+        memo: MemoBytes,
     ) -> Result<(), Error> {
         self.sapling_builder
             .add_output(&mut self.rng, ovk, to, value, memo)
@@ -302,16 +301,18 @@ impl<'a, P: consensus::Parameters, R: RngCore> Builder<'a, P, R> {
         //
 
         if change.is_positive() {
+            // Send change to the specified change address. If no change address
+            // was set, send change to the first Sapling address given as input.
             match self.change_address.take() {
                 Some(ChangeAddress::SaplingChangeAddress(ovk, addr)) => {
-                    self.add_sapling_output(Some(ovk), addr, change, None)?;
+                    self.add_sapling_output(Some(ovk), addr, change, MemoBytes::empty())?;
                 }
                 None => {
                     let (ovk, addr) = self
                         .sapling_builder
                         .get_candidate_change_address()
                         .ok_or(Error::NoChangeAddress)?;
-                    self.add_sapling_output(Some(ovk), addr, change, None)?;
+                    self.add_sapling_output(Some(ovk), addr, change, MemoBytes::empty())?;
                 }
             }
         }
@@ -473,6 +474,7 @@ mod tests {
     use crate::{
         consensus::{NetworkUpgrade, Parameters, TEST_NETWORK},
         legacy::TransparentAddress,
+        memo::MemoBytes,
         merkle_tree::{CommitmentTree, IncrementalWitness},
         sapling::{prover::mock::MockTxProver, Node, Rseed},
         transaction::components::{
@@ -504,7 +506,12 @@ mod tests {
 
         let mut builder = Builder::new(TEST_NETWORK, sapling_activation_height);
         assert_eq!(
-            builder.add_sapling_output(Some(ovk), to, Amount::from_i64(-1).unwrap(), None),
+            builder.add_sapling_output(
+                Some(ovk),
+                to,
+                Amount::from_i64(-1).unwrap(),
+                MemoBytes::empty()
+            ),
             Err(Error::SaplingBuild(build_s::Error::InvalidAmount))
         );
     }
@@ -629,7 +636,12 @@ mod tests {
         {
             let mut builder = Builder::new(TEST_NETWORK, tx_height);
             builder
-                .add_sapling_output(ovk, to.clone(), Amount::from_u64(50000).unwrap(), None)
+                .add_sapling_output(
+                    ovk,
+                    to.clone(),
+                    Amount::from_u64(50000).unwrap(),
+                    MemoBytes::empty(),
+                )
                 .unwrap();
             assert_eq!(
                 builder.build(&MockTxProver),
@@ -678,7 +690,12 @@ mod tests {
                 )
                 .unwrap();
             builder
-                .add_sapling_output(ovk, to.clone(), Amount::from_u64(30000).unwrap(), None)
+                .add_sapling_output(
+                    ovk,
+                    to.clone(),
+                    Amount::from_u64(30000).unwrap(),
+                    MemoBytes::empty(),
+                )
                 .unwrap();
             builder
                 .add_transparent_output(
@@ -719,7 +736,12 @@ mod tests {
                 .add_sapling_spend(extsk, *to.diversifier(), note2, witness2.path().unwrap())
                 .unwrap();
             builder
-                .add_sapling_output(ovk, to, Amount::from_u64(30000).unwrap(), None)
+                .add_sapling_output(
+                    ovk,
+                    to,
+                    Amount::from_u64(30000).unwrap(),
+                    MemoBytes::empty(),
+                )
                 .unwrap();
             builder
                 .add_transparent_output(

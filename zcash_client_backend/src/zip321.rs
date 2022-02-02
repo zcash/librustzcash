@@ -22,11 +22,16 @@ use std::cmp::Ordering;
 
 use crate::address::RecipientAddress;
 
-/// Errors that may be produced in decoding of memos.
+/// Errors that may be produced in decoding of payment requests.
 #[derive(Debug)]
-pub enum MemoError {
+pub enum Zip321Error {
     InvalidBase64(base64::DecodeError),
     MemoBytesError(memo::Error),
+    TooManyPayments(usize),
+    DuplicateParameter(parse::Param, usize),
+    TransparentMemo(usize),
+    RecipientMissing(usize),
+    ParseError(String),
 }
 
 /// Converts a [`MemoBytes`] value to a ZIP 321 compatible base64-encoded string.
@@ -39,10 +44,10 @@ pub fn memo_to_base64(memo: &MemoBytes) -> String {
 /// Parse a [`MemoBytes`] value from a ZIP 321 compatible base64-encoded string.
 ///
 /// [`MemoBytes`]: zcash_primitives::memo::MemoBytes
-pub fn memo_from_base64(s: &str) -> Result<MemoBytes, MemoError> {
+pub fn memo_from_base64(s: &str) -> Result<MemoBytes, Zip321Error> {
     base64::decode_config(s, base64::URL_SAFE_NO_PAD)
-        .map_err(MemoError::InvalidBase64)
-        .and_then(|b| MemoBytes::from_bytes(&b).map_err(MemoError::MemoBytesError))
+        .map_err(Zip321Error::InvalidBase64)
+        .and_then(|b| MemoBytes::from_bytes(&b).map_err(Zip321Error::MemoBytesError))
 }
 
 /// A single payment being requested.
@@ -110,6 +115,26 @@ pub struct TransactionRequest {
 }
 
 impl TransactionRequest {
+    /// Constructs a new transaction request that obeys the ZIP-321 invariants
+    pub fn new(payments: Vec<Payment>) -> Result<TransactionRequest, Zip321Error> {
+        let request = TransactionRequest { payments };
+
+        // Enforce validity requirements.
+        if !request.payments.is_empty() {
+            // It doesn't matter what params we use here, as none of the validity
+            // requirements depend on them.
+            let params = consensus::MAIN_NETWORK;
+            TransactionRequest::from_uri(&params, &request.to_uri(&params).unwrap())?;
+        }
+
+        Ok(request)
+    }
+
+    /// Returns the slice of payments that make up this request.
+    pub fn payments(&self) -> &[Payment] {
+        &self.payments[..]
+    }
+
     /// A utility for use in tests to help check round-trip serialization properties.
     #[cfg(any(test, feature = "test-dependencies"))]
     pub(in crate::zip321) fn normalize<P: consensus::Parameters>(&mut self, params: &P) {
@@ -202,17 +227,17 @@ impl TransactionRequest {
     }
 
     /// Parse the provided URI to a payment request value.
-    pub fn from_uri<P: consensus::Parameters>(params: &P, uri: &str) -> Result<Self, String> {
+    pub fn from_uri<P: consensus::Parameters>(params: &P, uri: &str) -> Result<Self, Zip321Error> {
         // Parse the leading zcash:<address>
         let (rest, primary_addr_param) =
-            parse::lead_addr(params)(uri).map_err(|e| e.to_string())?;
+            parse::lead_addr(params)(uri).map_err(|e| Zip321Error::ParseError(e.to_string()))?;
 
         // Parse the remaining parameters as an undifferentiated list
         let (_, xs) = all_consuming(preceded(
             char('?'),
             separated_list0(char('&'), parse::zcashparam(params)),
         ))(rest)
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| Zip321Error::ParseError(e.to_string()))?;
 
         // Construct sets of payment parameters, keyed by the payment index.
         let mut params_by_index: HashMap<usize, Vec<parse::Param>> = HashMap::new();
@@ -231,10 +256,7 @@ impl TransactionRequest {
 
                 Some(current) => {
                     if parse::has_duplicate_param(&current, &p.param) {
-                        return Err(format!(
-                            "Found duplicate parameter {:?} at index {}",
-                            p.param, p.payment_index
-                        ));
+                        return Err(Zip321Error::DuplicateParameter(p.param, p.payment_index));
                     } else {
                         current.push(p.param);
                     }
@@ -365,7 +387,7 @@ mod parse {
 
     use crate::address::RecipientAddress;
 
-    use super::{memo_from_base64, MemoBytes, Payment};
+    use super::{memo_from_base64, MemoBytes, Payment, Zip321Error};
 
     /// A data type that defines the possible parameter types which may occur within a
     /// ZIP 321 URI.
@@ -411,14 +433,14 @@ mod parse {
     /// This function performs checks to ensure that the resulting [`Payment`] is structurally
     /// valid; for example, a request for memo contents may not be associated with a
     /// transparent payment address.
-    pub fn to_payment(vs: Vec<Param>, i: usize) -> Result<Payment, String> {
+    pub fn to_payment(vs: Vec<Param>, i: usize) -> Result<Payment, Zip321Error> {
         let addr = vs.iter().find_map(|v| match v {
             Param::Addr(a) => Some(a.clone()),
             _otherwise => None,
         });
 
         let mut payment = Payment {
-            recipient_address: addr.ok_or(format!("Payment {} had no recipient address.", i))?,
+            recipient_address: addr.ok_or(Zip321Error::RecipientMissing(i))?,
             amount: Amount::zero(),
             memo: None,
             label: None,
@@ -429,10 +451,10 @@ mod parse {
         for v in vs {
             match v {
                 Param::Amount(a) => payment.amount = a,
-                Param::Memo(m) => {
-                    match payment.recipient_address {
-                        RecipientAddress::Shielded(_) => payment.memo = Some(m),
-                        RecipientAddress::Transparent(_) => return Err(format!("Payment {} attempted to associate a memo with a transparent recipient address", i)),
+                Param::Memo(m) => match payment.recipient_address {
+                    RecipientAddress::Shielded(_) => payment.memo = Some(m),
+                    RecipientAddress::Transparent(_) => {
+                        return Err(Zip321Error::TransparentMemo(i))
                     }
                 },
 

@@ -8,10 +8,8 @@ use zcash_primitives::{
         Note, PaymentAddress,
     },
     transaction::Transaction,
-    zip32::ExtendedFullViewingKey,
+    zip32::{AccountId, ExtendedFullViewingKey},
 };
-
-use crate::wallet::AccountId;
 
 /// A decrypted shielded output.
 pub struct DecryptedOutput {
@@ -30,7 +28,7 @@ pub struct DecryptedOutput {
     /// True if this output was recovered using an [`OutgoingViewingKey`], meaning that
     /// this is a logical output of the transaction.
     ///
-    /// [`OutgoingViewingKey`]: zcash_primitives::sapling::keys::OutgoingViewingKey
+    /// [`OutgoingViewingKey`]: zcash_primitives::keys::OutgoingViewingKey
     pub outgoing: bool,
 }
 

@@ -11,15 +11,20 @@ use zcash_primitives::{
     merkle_tree::{CommitmentTree, IncrementalWitness},
     sapling::{Node, Nullifier, PaymentAddress},
     transaction::{components::Amount, Transaction, TxId},
-    zip32::ExtendedFullViewingKey,
+    zip32::{AccountId, ExtendedFullViewingKey},
 };
 
 use crate::{
     address::RecipientAddress,
-    data_api::wallet::ANCHOR_OFFSET,
     decrypt::DecryptedOutput,
     proto::compact_formats::CompactBlock,
-    wallet::{AccountId, SpendableNote, WalletTx},
+    wallet::{SpendableNote, WalletTx},
+};
+
+#[cfg(feature = "transparent-inputs")]
+use {
+    crate::wallet::WalletTransparentOutput,
+    zcash_primitives::{legacy::TransparentAddress, transaction::components::OutPoint},
 };
 
 pub mod chain;
@@ -28,10 +33,9 @@ pub mod wallet;
 
 /// Read-only operations required for light wallet functions.
 ///
-/// This trait defines the read-only portion of the storage
-/// interface atop which higher-level wallet operations are
-/// implemented. It serves to allow wallet functions to be
-/// abstracted away from any particular data storage substrate.
+/// This trait defines the read-only portion of the storage interface atop which
+/// higher-level wallet operations are implemented. It serves to allow wallet functions to
+/// be abstracted away from any particular data storage substrate.
 pub trait WalletRead {
     /// The type of errors produced by a wallet backend.
     type Error;
@@ -62,15 +66,16 @@ pub trait WalletRead {
     /// This will return `Ok(None)` if no block data is present in the database.
     fn get_target_and_anchor_heights(
         &self,
+        min_confirmations: u32,
     ) -> Result<Option<(BlockHeight, BlockHeight)>, Self::Error> {
         self.block_height_extrema().map(|heights| {
             heights.map(|(min_height, max_height)| {
                 let target_height = max_height + 1;
 
-                // Select an anchor ANCHOR_OFFSET back from the target block,
+                // Select an anchor min_confirmations back from the target block,
                 // unless that would be before the earliest block we have.
                 let anchor_height = BlockHeight::from(cmp::max(
-                    u32::from(target_height).saturating_sub(ANCHOR_OFFSET),
+                    u32::from(target_height).saturating_sub(min_confirmations),
                     u32::from(min_height),
                 ));
 
@@ -142,6 +147,9 @@ pub trait WalletRead {
     /// does not appear in the backing data store.
     fn get_memo(&self, id_note: Self::NoteRef) -> Result<Memo, Self::Error>;
 
+    /// Returns a transaction.
+    fn get_transaction(&self, id_tx: Self::TxRef) -> Result<Transaction, Self::Error>;
+
     /// Returns the note commitment tree at the specified block height.
     fn get_commitment_tree(
         &self,
@@ -155,25 +163,42 @@ pub trait WalletRead {
         block_height: BlockHeight,
     ) -> Result<Vec<(Self::NoteRef, IncrementalWitness<Node>)>, Self::Error>;
 
-    /// Returns the unspent nullifiers, along with the account identifiers
-    /// with which they are associated.
+    /// Returns the nullifiers for notes that the wallet is tracking, along with their
+    /// associated account IDs, that are either unspent or have not yet been confirmed as
+    /// spent (in that the spending transaction has not yet been included in a block).
     fn get_nullifiers(&self) -> Result<Vec<(AccountId, Nullifier)>, Self::Error>;
 
-    /// Return all spendable notes.
-    fn get_spendable_notes(
+    /// Returns all nullifiers for notes that the wallet is tracking
+    /// (including those for notes that have been previously spent),
+    /// along with the account identifiers with which they are associated.
+    fn get_all_nullifiers(&self) -> Result<Vec<(AccountId, Nullifier)>, Self::Error>;
+
+    /// Return all unspent Sapling notes.
+    fn get_spendable_sapling_notes(
         &self,
         account: AccountId,
         anchor_height: BlockHeight,
     ) -> Result<Vec<SpendableNote>, Self::Error>;
 
-    /// Returns a list of spendable notes sufficient to cover the specified
+    /// Returns a list of spendable Sapling notes sufficient to cover the specified
     /// target value, if possible.
-    fn select_spendable_notes(
+    fn select_spendable_sapling_notes(
         &self,
         account: AccountId,
         target_value: Amount,
         anchor_height: BlockHeight,
     ) -> Result<Vec<SpendableNote>, Self::Error>;
+}
+
+#[cfg(feature = "transparent-inputs")]
+pub trait WalletReadTransparent: WalletRead {
+    /// Returns a list of unspent transparent UTXOs that appear in the chain at heights up to and
+    /// including `max_height`.
+    fn get_unspent_transparent_outputs(
+        &self,
+        address: &TransparentAddress,
+        max_height: BlockHeight,
+    ) -> Result<Vec<WalletTransparentOutput>, Self::Error>;
 }
 
 /// The subset of information that is relevant to this wallet that has been
@@ -191,9 +216,9 @@ pub struct PrunedBlock<'a> {
 ///
 /// The purpose of this struct is to permit atomic updates of the
 /// wallet database when transactions are successfully decrypted.
-pub struct ReceivedTransaction<'a> {
+pub struct DecryptedTransaction<'a> {
     pub tx: &'a Transaction,
-    pub outputs: &'a Vec<DecryptedOutput>,
+    pub sapling_outputs: &'a Vec<DecryptedOutput>,
 }
 
 /// A transaction that was constructed and sent by the wallet.
@@ -204,6 +229,13 @@ pub struct ReceivedTransaction<'a> {
 pub struct SentTransaction<'a> {
     pub tx: &'a Transaction,
     pub created: time::OffsetDateTime,
+    pub account: AccountId,
+    pub outputs: Vec<SentTransactionOutput<'a>>,
+    #[cfg(feature = "transparent-inputs")]
+    pub utxos_spent: Vec<OutPoint>,
+}
+
+pub struct SentTransactionOutput<'a> {
     /// The index within the transaction that contains the recipient output.
     ///
     /// - If `recipient_address` is a Sapling address, this is an index into the Sapling
@@ -211,7 +243,6 @@ pub struct SentTransaction<'a> {
     /// - If `recipient_address` is a transparent address, this is an index into the
     ///   transparent outputs of the transaction.
     pub output_index: usize,
-    pub account: AccountId,
     pub recipient_address: &'a RecipientAddress,
     pub value: Amount,
     pub memo: Option<MemoBytes>,
@@ -220,6 +251,10 @@ pub struct SentTransaction<'a> {
 /// This trait encapsulates the write capabilities required to update stored
 /// wallet data.
 pub trait WalletWrite: WalletRead {
+    /// Updates the state of the wallet database by persisting the provided
+    /// block information, along with the updated witness data that was
+    /// produced when scanning the block for transactions pertaining to
+    /// this wallet.
     #[allow(clippy::type_complexity)]
     fn advance_by_block(
         &mut self,
@@ -227,9 +262,10 @@ pub trait WalletWrite: WalletRead {
         updated_witnesses: &[(Self::NoteRef, IncrementalWitness<Node>)],
     ) -> Result<Vec<(Self::NoteRef, IncrementalWitness<Node>)>, Self::Error>;
 
-    fn store_received_tx(
+    /// Caches a decrypted transaction in the persistent wallet store.
+    fn store_decrypted_tx(
         &mut self,
-        received_tx: &ReceivedTransaction,
+        received_tx: &DecryptedTransaction,
     ) -> Result<Self::TxRef, Self::Error>;
 
     fn store_sent_tx(&mut self, sent_tx: &SentTransaction) -> Result<Self::TxRef, Self::Error>;
@@ -248,6 +284,16 @@ pub trait WalletWrite: WalletRead {
     ///
     /// There may be restrictions on how far it is possible to rewind.
     fn rewind_to_height(&mut self, block_height: BlockHeight) -> Result<(), Self::Error>;
+}
+
+#[cfg(feature = "transparent-inputs")]
+pub trait WalletWriteTransparent: WalletWrite + WalletReadTransparent {
+    type UtxoRef;
+
+    fn put_received_transparent_utxo(
+        &mut self,
+        output: &WalletTransparentOutput,
+    ) -> Result<Self::UtxoRef, Self::Error>;
 }
 
 /// This trait provides sequential access to raw blockchain data via a callback-oriented
@@ -274,22 +320,26 @@ pub mod testing {
     use zcash_primitives::{
         block::BlockHash,
         consensus::BlockHeight,
+        legacy::TransparentAddress,
         memo::Memo,
         merkle_tree::{CommitmentTree, IncrementalWitness},
         sapling::{Node, Nullifier, PaymentAddress},
-        transaction::{components::Amount, TxId},
-        zip32::ExtendedFullViewingKey,
+        transaction::{components::Amount, Transaction, TxId},
+        zip32::{AccountId, ExtendedFullViewingKey},
     };
 
     use crate::{
         proto::compact_formats::CompactBlock,
-        wallet::{AccountId, SpendableNote},
+        wallet::{SpendableNote, WalletTransparentOutput},
     };
 
     use super::{
-        error::Error, BlockSource, PrunedBlock, ReceivedTransaction, SentTransaction, WalletRead,
+        error::Error, BlockSource, DecryptedTransaction, PrunedBlock, SentTransaction, WalletRead,
         WalletWrite,
     };
+
+    #[cfg(feature = "transparent-inputs")]
+    use super::WalletReadTransparent;
 
     pub struct MockBlockSource {}
 
@@ -361,6 +411,10 @@ pub mod testing {
             Ok(Memo::Empty)
         }
 
+        fn get_transaction(&self, _id_tx: Self::TxRef) -> Result<Transaction, Self::Error> {
+            Err(Error::ScanRequired) // wrong error but we'll fix it later.
+        }
+
         fn get_commitment_tree(
             &self,
             _block_height: BlockHeight,
@@ -380,7 +434,11 @@ pub mod testing {
             Ok(Vec::new())
         }
 
-        fn get_spendable_notes(
+        fn get_all_nullifiers(&self) -> Result<Vec<(AccountId, Nullifier)>, Self::Error> {
+            Ok(Vec::new())
+        }
+
+        fn get_spendable_sapling_notes(
             &self,
             _account: AccountId,
             _anchor_height: BlockHeight,
@@ -388,12 +446,23 @@ pub mod testing {
             Ok(Vec::new())
         }
 
-        fn select_spendable_notes(
+        fn select_spendable_sapling_notes(
             &self,
             _account: AccountId,
             _target_value: Amount,
             _anchor_height: BlockHeight,
         ) -> Result<Vec<SpendableNote>, Self::Error> {
+            Ok(Vec::new())
+        }
+    }
+
+    #[cfg(feature = "transparent-inputs")]
+    impl WalletReadTransparent for MockWalletDb {
+        fn get_unspent_transparent_outputs(
+            &self,
+            _address: &TransparentAddress,
+            _anchor_height: BlockHeight,
+        ) -> Result<Vec<WalletTransparentOutput>, Self::Error> {
             Ok(Vec::new())
         }
     }
@@ -408,9 +477,9 @@ pub mod testing {
             Ok(vec![])
         }
 
-        fn store_received_tx(
+        fn store_decrypted_tx(
             &mut self,
-            _received_tx: &ReceivedTransaction,
+            _received_tx: &DecryptedTransaction,
         ) -> Result<Self::TxRef, Self::Error> {
             Ok(TxId::from_bytes([0u8; 32]))
         }

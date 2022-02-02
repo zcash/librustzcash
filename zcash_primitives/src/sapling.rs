@@ -23,13 +23,13 @@ use subtle::{Choice, ConstantTimeEq};
 
 use crate::{
     constants::{self, SPENDING_KEY_GENERATOR},
+    keys::prf_expand,
     merkle_tree::{HashSer, Hashable},
     transaction::components::amount::MAX_MONEY,
 };
 
 use self::{
     group_hash::group_hash,
-    keys::prf_expand,
     pedersen_hash::{pedersen_hash, Personalization},
     redjubjub::{PrivateKey, PublicKey, Signature},
 };

@@ -6,6 +6,37 @@ and this library adheres to Rust's notion of
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+### Added
+- Functionality that enables the receiving and spending of transparent funds,
+  behind the new `transparent-inputs` feature flag.
+  - A new `data_api::wallet::shield_transparent_funds` method has been added
+    to facilitate the automatic shielding of transparent funds received
+    by the wallet.
+  - `zcash_client_backend::data_api::WalletReadTransparent` read-only operations
+    related to information the wallet maintains about transparent funds.
+  - `zcash_client_backend::data_api::WalletWriteTransparent` operations
+    related persisting information the wallet maintains about transparent funds.
+  - A `zcash_client_backend::wallet::WalletTransparentOutput` type
+    has been added under the `transparent-inputs` feature flag in support
+    of autoshielding functionality.
+- A new `data_api::wallet::spend` method has been added, which is
+  intended to supersede the `data_api::wallet::create_spend_to_address`
+  method. This new method now constructs transactions via interpretation
+  of a `zcash_client_backend::zip321::TransactionRequest` value.
+  This facilitates the implementation of ZIP 321 support in wallets and
+  provides substantially greater flexibility in transaction creation.
+- `zcash_client_backend::zip321::TransactionRequest` methods:
+  - `TransactionRequest::new` for constructing a request from `Vec<Payment>`.
+  - `TransactionRequest::payments` for accessing the `Payments` that make up a
+    request.
+- New experimental APIs that should be considered unstable, and are
+  likely to be modified and/or moved to a different module in a future
+  release:
+  - `zcash_client_backend::keys::{UnifiedSpendingKey`, `UnifiedFullViewingKey`}
+  - `zcash_client_backend::encoding::AddressCodec`
+  - `zcash_client_backend::encoding::encode_payment_address`
+  - `zcash_client_backend::encoding::encode_transparent_address`
+
 ### Changed
 - MSRV is now 1.51.0.
 - Bumped dependencies to `ff 0.11`, `group 0.11`, `bls12_381 0.6`, `jubjub 0.8`.
@@ -15,10 +46,55 @@ and this library adheres to Rust's notion of
     been replaced by `ephemeral_key`.
   - `zcash_client_backend::proto::compact_formats::CompactOutput`: the `epk`
     method has been replaced by `ephemeral_key`.
+- `data_api::wallet::spend_to_address` now takes a `min_confirmations` 
+  parameter, which the caller can provide to specify the minimum number of
+  confirmations required for notes being selected. A default value of 10
+  confirmations is recommended.
 - Renamed the following in `zcash_client_backend::data_api` to use lower-case
   abbreviations (matching Rust naming conventions):
   - `error::Error::InvalidExtSK` to `Error::InvalidExtSk`
   - `testing::MockWalletDB` to `testing::MockWalletDb`
+- Changes to the `data_api::WalletRead` trait:
+  - `WalletRead::get_target_and_anchor_heights` now takes
+    a `min_confirmations` argument that is used to compute an upper bound on
+    the anchor height being returned; this had previously been hardcoded to
+    `data_api::wallet::ANCHOR_OFFSET`.
+  - `WalletRead::get_spendable_notes` has been renamed to
+    `get_spendable_sapling_notes`
+  - `WalletRead::select_spendable_notes` has been renamed to
+    `select_spendable_sapling_notes`
+  - `WalletRead::get_all_nullifiers` has been
+    added. This method provides access to all Sapling nullifiers, including
+    for notes that have been previously marked spent.
+- The `zcash_client_backend::data_api::SentTransaction` type has been
+  substantially modified to accommodate handling of transparent inputs.
+  Per-output data has been split out into a new struct `SentTransactionOutput`
+  and `SentTransaction` can now contain multiple outputs.
+- `data_api::WalletWrite::store_received_tx` has been renamed to
+  `store_decrypted_tx`.
+- `data_api::ReceivedTransaction` has been renamed to `DecryptedTransaction`,
+  and its `outputs` field has been renamed to `sapling_outputs`.
+- An `Error::MemoForbidden` error has been added to the
+  `data_api::error::Error` enum to report the condition where a memo was
+  specified to be sent to a transparent recipient.
+- If no memo is provided when sending to a shielded recipient, the
+  empty memo will be used
+- `zcash_client_backend::keys::spending_key` has been moved to the
+  `zcash_client_backend::keys::sapling` module.
+- `zcash_client_backend::zip321::MemoError` has been renamed and
+  expanded into a more comprehensive `Zip321Error` type, and functions in the
+  `zip321` module have been updated to use this unified error type. The
+  following error cases have been added:
+  - `Zip321Error::TooManyPayments(usize)`
+  - `Zip321Error::DuplicateParameter(parse::Param, usize)`
+  - `Zip321Error::TransparentMemo(usize)`
+  - `Zip321Error::RecipientMissing(usize)`
+  - `Zip321Error::ParseError(String)`
+
+### Removed
+- The hardcoded `data_api::wallet::ANCHOR_OFFSET` constant.
+- `zcash_client_backend::wallet::AccountId` (moved to `zcash_primitives::zip32::AccountId`).
+
 
 ## [0.5.0] - 2021-03-26
 ### Added
