@@ -50,6 +50,7 @@ pub mod init;
 pub mod transact;
 
 /// This trait provides a generalization over shielded output representations.
+#[deprecated(note = "This trait will be removed in a future release.")]
 pub trait ShieldedOutput {
     fn index(&self) -> usize;
     fn account(&self) -> AccountId;
@@ -60,6 +61,7 @@ pub trait ShieldedOutput {
     fn nullifier(&self) -> Option<Nullifier>;
 }
 
+#[allow(deprecated)]
 impl ShieldedOutput for WalletShieldedOutput<Nullifier> {
     fn index(&self) -> usize {
         self.index
@@ -85,6 +87,7 @@ impl ShieldedOutput for WalletShieldedOutput<Nullifier> {
     }
 }
 
+#[allow(deprecated)]
 impl ShieldedOutput for DecryptedOutput {
     fn index(&self) -> usize {
         self.index
@@ -128,6 +131,9 @@ impl ShieldedOutput for DecryptedOutput {
 /// let db = WalletDb::for_path(data_file, Network::TestNetwork).unwrap();
 /// let addr = get_address(&db, AccountId(0));
 /// ```
+#[deprecated(
+    note = "This function will be removed in a future release. Use zcash_client_backend::data_api::WalletRead::get_address instead."
+)]
 pub fn get_address<P: consensus::Parameters>(
     wdb: &WalletDb<P>,
     account: AccountId,
@@ -146,6 +152,9 @@ pub fn get_address<P: consensus::Parameters>(
 /// Returns the [`ExtendedFullViewingKey`]s for the wallet.
 ///
 /// [`ExtendedFullViewingKey`]: zcash_primitives::zip32::ExtendedFullViewingKey
+#[deprecated(
+    note = "This function will be removed in a future release. Use zcash_client_backend::data_api::WalletRead::get_extended_full_viewing_keys instead."
+)]
 pub fn get_extended_full_viewing_keys<P: consensus::Parameters>(
     wdb: &WalletDb<P>,
 ) -> Result<HashMap<AccountId, ExtendedFullViewingKey>, SqliteClientError> {
@@ -183,6 +192,9 @@ pub fn get_extended_full_viewing_keys<P: consensus::Parameters>(
 /// specified account.
 ///
 /// [`ExtendedFullViewingKey`]: zcash_primitives::zip32::ExtendedFullViewingKey
+#[deprecated(
+    note = "This function will be removed in a future release. Use zcash_client_backend::data_api::WalletRead::is_valid_account_extfvk instead."
+)]
 pub fn is_valid_account_extfvk<P: consensus::Parameters>(
     wdb: &WalletDb<P>,
     account: AccountId,
@@ -226,6 +238,9 @@ pub fn is_valid_account_extfvk<P: consensus::Parameters>(
 /// let db = WalletDb::for_path(data_file, Network::TestNetwork).unwrap();
 /// let addr = get_balance(&db, AccountId(0));
 /// ```
+#[deprecated(
+    note = "This function will be removed in a future release. Use zcash_client_backend::data_api::WalletRead::get_balance_at instead."
+)]
 pub fn get_balance<P>(wdb: &WalletDb<P>, account: AccountId) -> Result<Amount, SqliteClientError> {
     let balance = wdb.conn.query_row(
         "SELECT SUM(value) FROM received_notes
@@ -264,6 +279,9 @@ pub fn get_balance<P>(wdb: &WalletDb<P>, account: AccountId) -> Result<Amount, S
 /// let db = WalletDb::for_path(data_file, Network::TestNetwork).unwrap();
 /// let addr = get_balance_at(&db, AccountId(0), BlockHeight::from_u32(0));
 /// ```
+#[deprecated(
+    note = "This function will be removed in a future release. Use zcash_client_backend::data_api::WalletRead::get_balance_at instead."
+)]
 pub fn get_balance_at<P>(
     wdb: &WalletDb<P>,
     account: AccountId,
@@ -305,6 +323,9 @@ pub fn get_balance_at<P>(
 /// let db = WalletDb::for_path(data_file, Network::TestNetwork).unwrap();
 /// let memo = get_received_memo(&db, 27);
 /// ```
+#[deprecated(
+    note = "This function will be removed in a future release. Use zcash_client_backend::data_api::WalletRead::get_memo instead."
+)]
 pub fn get_received_memo<P>(wdb: &WalletDb<P>, id_note: i64) -> Result<Memo, SqliteClientError> {
     let memo_bytes: Vec<_> = wdb.conn.query_row(
         "SELECT memo FROM received_notes
@@ -318,7 +339,8 @@ pub fn get_received_memo<P>(wdb: &WalletDb<P>, id_note: i64) -> Result<Memo, Sql
         .map_err(SqliteClientError::from)
 }
 
-pub fn get_transaction<P: Parameters>(
+/// Looks up a transaction by its internal database identifier.
+pub(crate) fn get_transaction<P: Parameters>(
     wdb: &WalletDb<P>,
     id_tx: i64,
 ) -> Result<Transaction, SqliteClientError> {
@@ -359,6 +381,9 @@ pub fn get_transaction<P: Parameters>(
 /// let db = WalletDb::for_path(data_file, Network::TestNetwork).unwrap();
 /// let memo = get_sent_memo(&db, 12);
 /// ```
+#[deprecated(
+    note = "This function will be removed in a future release. Use zcash_client_backend::data_api::WalletRead::get_memo instead."
+)]
 pub fn get_sent_memo<P>(wdb: &WalletDb<P>, id_note: i64) -> Result<Memo, SqliteClientError> {
     let memo_bytes: Vec<_> = wdb.conn.query_row(
         "SELECT memo FROM sent_notes
@@ -388,6 +413,9 @@ pub fn get_sent_memo<P>(wdb: &WalletDb<P>, id_note: i64) -> Result<Memo, SqliteC
 /// let db = WalletDb::for_path(data_file, Network::TestNetwork).unwrap();
 /// let bounds = block_height_extrema(&db);
 /// ```
+#[deprecated(
+    note = "This function will be removed in a future release. Use zcash_client_backend::data_api::WalletRead::block_height_extrema instead."
+)]
 pub fn block_height_extrema<P>(
     wdb: &WalletDb<P>,
 ) -> Result<Option<(BlockHeight, BlockHeight)>, rusqlite::Error> {
@@ -427,6 +455,9 @@ pub fn block_height_extrema<P>(
 /// let db = WalletDb::for_path(data_file, Network::TestNetwork).unwrap();
 /// let height = get_tx_height(&db, TxId::from_bytes([0u8; 32]));
 /// ```
+#[deprecated(
+    note = "This function will be removed in a future release. Use zcash_client_backend::data_api::WalletRead::get_tx_height instead."
+)]
 pub fn get_tx_height<P>(
     wdb: &WalletDb<P>,
     txid: TxId,
@@ -457,6 +488,9 @@ pub fn get_tx_height<P>(
 /// let db = WalletDb::for_path(data_file, Network::TestNetwork).unwrap();
 /// let hash = get_block_hash(&db, H0);
 /// ```
+#[deprecated(
+    note = "This function will be removed in a future release. Use zcash_client_backend::data_api::WalletRead::get_block_hash instead."
+)]
 pub fn get_block_hash<P>(
     wdb: &WalletDb<P>,
     block_height: BlockHeight,
@@ -475,6 +509,7 @@ pub fn get_block_hash<P>(
 
 /// Gets the height to which the database must be rewound if any rewind greater than the pruning
 /// height is attempted.
+#[deprecated(note = "This function will be removed in a future release.")]
 pub fn get_rewind_height<P>(wdb: &WalletDb<P>) -> Result<Option<BlockHeight>, SqliteClientError> {
     wdb.conn
         .query_row(
@@ -497,7 +532,7 @@ pub fn get_rewind_height<P>(wdb: &WalletDb<P>) -> Result<Option<BlockHeight>, Sq
 /// block, this function does nothing.
 ///
 /// This should only be executed inside a transactional context.
-pub fn rewind_to_height<P: consensus::Parameters>(
+pub(crate) fn rewind_to_height<P: consensus::Parameters>(
     wdb: &WalletDb<P>,
     block_height: BlockHeight,
 ) -> Result<(), SqliteClientError> {
@@ -518,6 +553,7 @@ pub fn rewind_to_height<P: consensus::Parameters>(
     let rewind_height = if block_height >= (last_scanned_height - PRUNING_HEIGHT) {
         Some(block_height)
     } else {
+        #[allow(deprecated)]
         match get_rewind_height(&wdb)? {
             Some(h) => {
                 if block_height > h {
@@ -606,6 +642,9 @@ pub fn rewind_to_height<P: consensus::Parameters>(
 /// let db = WalletDb::for_path(data_file, Network::TestNetwork).unwrap();
 /// let tree = get_commitment_tree(&db, H0);
 /// ```
+#[deprecated(
+    note = "This function will be removed in a future release. Use zcash_client_backend::data_api::WalletRead::get_commitment_tree instead."
+)]
 pub fn get_commitment_tree<P>(
     wdb: &WalletDb<P>,
     block_height: BlockHeight,
@@ -646,6 +685,9 @@ pub fn get_commitment_tree<P>(
 /// let db = WalletDb::for_path(data_file, Network::TestNetwork).unwrap();
 /// let witnesses = get_witnesses(&db, H0);
 /// ```
+#[deprecated(
+    note = "This function will be removed in a future release. Use zcash_client_backend::data_api::WalletRead::get_witnesses instead."
+)]
 pub fn get_witnesses<P>(
     wdb: &WalletDb<P>,
     block_height: BlockHeight,
@@ -669,6 +711,9 @@ pub fn get_witnesses<P>(
 /// Retrieve the nullifiers for notes that the wallet is tracking
 /// that have not yet been confirmed as a consequence of the spending
 /// transaction being included in a block.
+#[deprecated(
+    note = "This function will be removed in a future release. Use zcash_client_backend::data_api::WalletRead::get_nullifiers instead."
+)]
 pub fn get_nullifiers<P>(
     wdb: &WalletDb<P>,
 ) -> Result<Vec<(AccountId, Nullifier)>, SqliteClientError> {
@@ -691,7 +736,7 @@ pub fn get_nullifiers<P>(
 }
 
 /// Returns the nullifiers for the notes that this wallet is tracking.
-pub fn get_all_nullifiers<P>(
+pub(crate) fn get_all_nullifiers<P>(
     wdb: &WalletDb<P>,
 ) -> Result<Vec<(AccountId, Nullifier)>, SqliteClientError> {
     // Get the nullifiers for the notes we are tracking
@@ -713,7 +758,7 @@ pub fn get_all_nullifiers<P>(
 /// transparent address, such that the block that included the transaction was mined at a
 /// height less than or equal to the provided `max_height`.
 #[cfg(feature = "transparent-inputs")]
-pub fn get_unspent_transparent_outputs<P: consensus::Parameters>(
+pub(crate) fn get_unspent_transparent_outputs<P: consensus::Parameters>(
     wdb: &WalletDb<P>,
     address: &TransparentAddress,
     max_height: BlockHeight,
@@ -759,6 +804,9 @@ pub fn get_unspent_transparent_outputs<P: consensus::Parameters>(
 }
 
 /// Inserts information about a scanned block into the database.
+#[deprecated(
+    note = "This function will be removed in a future release. Use zcash_client_backend::data_api::WalletWrite::advance_by_block instead."
+)]
 pub fn insert_block<'a, P>(
     stmts: &mut DataConnStmtCache<'a, P>,
     block_height: BlockHeight,
@@ -781,6 +829,9 @@ pub fn insert_block<'a, P>(
 
 /// Inserts information about a mined transaction that was observed to
 /// contain a note related to this wallet into the database.
+#[deprecated(
+    note = "This function will be removed in a future release. Use zcash_client_backend::data_api::WalletWrite::advance_by_block instead."
+)]
 pub fn put_tx_meta<'a, P, N>(
     stmts: &mut DataConnStmtCache<'a, P>,
     tx: &WalletTx<N>,
@@ -808,6 +859,9 @@ pub fn put_tx_meta<'a, P, N>(
 }
 
 /// Inserts full transaction data into the database.
+#[deprecated(
+    note = "This function will be removed in a future release. Use zcash_client_backend::data_api::WalletWrite::store_decrypted_tx instead."
+)]
 pub fn put_tx_data<'a, P>(
     stmts: &mut DataConnStmtCache<'a, P>,
     tx: &Transaction,
@@ -846,6 +900,9 @@ pub fn put_tx_data<'a, P>(
 ///
 /// Marking a note spent in this fashion does NOT imply that the
 /// spending transaction has been mined.
+#[deprecated(
+    note = "This function will be removed in a future release. Use zcash_client_backend::data_api::WalletWrite::store_sent_tx instead."
+)]
 pub fn mark_sapling_note_spent<'a, P>(
     stmts: &mut DataConnStmtCache<'a, P>,
     tx_ref: i64,
@@ -859,7 +916,7 @@ pub fn mark_sapling_note_spent<'a, P>(
 
 /// Marks the given UTXO as having been spent.
 #[cfg(feature = "transparent-inputs")]
-pub fn mark_transparent_utxo_spent<'a, P>(
+pub(crate) fn mark_transparent_utxo_spent<'a, P>(
     stmts: &mut DataConnStmtCache<'a, P>,
     tx_ref: i64,
     outpoint: &OutPoint,
@@ -879,7 +936,7 @@ pub fn mark_transparent_utxo_spent<'a, P>(
 
 /// Adds the given received UTXO to the datastore.
 #[cfg(feature = "transparent-inputs")]
-pub fn put_received_transparent_utxo<'a, P: consensus::Parameters>(
+pub(crate) fn put_received_transparent_utxo<'a, P: consensus::Parameters>(
     stmts: &mut DataConnStmtCache<'a, P>,
     output: &WalletTransparentOutput,
 ) -> Result<UtxoId, SqliteClientError> {
@@ -906,6 +963,9 @@ pub fn put_received_transparent_utxo<'a, P: consensus::Parameters>(
 /// at block heights greater than the given height. Used in the case of chain
 /// rollback.
 #[cfg(feature = "transparent-inputs")]
+#[deprecated(
+    note = "This method will be removed in a future update. Use zcash_client_backend::data_api::WalletWrite::rewind_to_height instead."
+)]
 pub fn delete_utxos_above<'a, P: consensus::Parameters>(
     stmts: &mut DataConnStmtCache<'a, P>,
     taddr: &TransparentAddress,
@@ -926,6 +986,10 @@ pub fn delete_utxos_above<'a, P: consensus::Parameters>(
 /// This implementation assumes:
 /// - A transaction will not contain more than 2^63 shielded outputs.
 /// - A note value will never exceed 2^63 zatoshis.
+#[deprecated(
+    note = "This method will be removed in a future release. Use zcash_client_backend::data_api::WalletWrite::store_decrypted_tx instead."
+)]
+#[allow(deprecated)]
 pub fn put_received_note<'a, P, T: ShieldedOutput>(
     stmts: &mut DataConnStmtCache<'a, P>,
     output: &T,
@@ -975,6 +1039,9 @@ pub fn put_received_note<'a, P, T: ShieldedOutput>(
 
 /// Records the incremental witness for the specified note,
 /// as of the given block height.
+#[deprecated(
+    note = "This method will be removed in a future release. Use zcash_client_backend::data_api::WalletWrite::store_decrypted_tx instead."
+)]
 pub fn insert_witness<'a, P>(
     stmts: &mut DataConnStmtCache<'a, P>,
     note_id: i64,
@@ -992,6 +1059,9 @@ pub fn insert_witness<'a, P>(
 }
 
 /// Removes old incremental witnesses up to the given block height.
+#[deprecated(
+    note = "This method will be removed in a future update. Use zcash_client_backend::data_api::WalletWrite::advance_by_block instead."
+)]
 pub fn prune_witnesses<P>(
     stmts: &mut DataConnStmtCache<'_, P>,
     below_height: BlockHeight,
@@ -1004,6 +1074,9 @@ pub fn prune_witnesses<P>(
 
 /// Marks notes that have not been mined in transactions
 /// as expired, up to the given block height.
+#[deprecated(
+    note = "This method will be removed in a future update. Use zcash_client_backend::data_api::WalletWrite::advance_by_block instead."
+)]
 pub fn update_expired_notes<P>(
     stmts: &mut DataConnStmtCache<'_, P>,
     height: BlockHeight,
@@ -1013,6 +1086,10 @@ pub fn update_expired_notes<P>(
 }
 
 /// Records information about a note that your wallet created.
+#[deprecated(
+    note = "This method will be removed in a future update. Use zcash_client_backend::data_api::WalletWrite::store_decrypted_tx instead."
+)]
+#[allow(deprecated)]
 pub fn put_sent_note<'a, P: consensus::Parameters>(
     stmts: &mut DataConnStmtCache<'a, P>,
     tx_ref: i64,
@@ -1044,6 +1121,10 @@ pub fn put_sent_note<'a, P: consensus::Parameters>(
 /// exist, or updates it if a record for the utxo already exists.
 ///
 /// `output_index` is the index within transparent UTXOs of the transaction that contains the recipient output.
+#[deprecated(
+    note = "This method will be removed in a future update. Use zcash_client_backend::data_api::WalletWrite::store_decrypted_tx instead."
+)]
+#[allow(deprecated)]
 pub fn put_sent_utxo<'a, P: consensus::Parameters>(
     stmts: &mut DataConnStmtCache<'a, P>,
     tx_ref: i64,
@@ -1078,6 +1159,9 @@ pub fn put_sent_utxo<'a, P: consensus::Parameters>(
 ///   transaction.
 /// - If `to` is a transparent address, this is an index into the transparent outputs of
 ///   the transaction.
+#[deprecated(
+    note = "This method will be removed in a future update. Use zcash_client_backend::data_api::WalletWrite::store_sent_tx instead."
+)]
 pub fn insert_sent_note<'a, P: consensus::Parameters>(
     stmts: &mut DataConnStmtCache<'a, P>,
     tx_ref: i64,
@@ -1104,6 +1188,9 @@ pub fn insert_sent_note<'a, P: consensus::Parameters>(
 /// Inserts information about a sent transparent UTXO into the wallet database.
 ///
 /// `output_index` is the index within transparent UTXOs of the transaction that contains the recipient output.
+#[deprecated(
+    note = "This method will be removed in a future update. Use zcash_client_backend::data_api::WalletWrite::store_sent_tx instead."
+)]
 pub fn insert_sent_utxo<'a, P: consensus::Parameters>(
     stmts: &mut DataConnStmtCache<'a, P>,
     tx_ref: i64,
@@ -1127,6 +1214,7 @@ pub fn insert_sent_utxo<'a, P: consensus::Parameters>(
 }
 
 #[cfg(test)]
+#[allow(deprecated)]
 mod tests {
     use tempfile::NamedTempFile;
 

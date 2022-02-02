@@ -65,6 +65,7 @@ where
 }
 
 #[cfg(test)]
+#[allow(deprecated)]
 mod tests {
     use tempfile::NamedTempFile;
 

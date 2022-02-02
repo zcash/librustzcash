@@ -210,24 +210,29 @@ impl<P: consensus::Parameters> WalletRead for WalletDb<P> {
     type TxRef = i64;
 
     fn block_height_extrema(&self) -> Result<Option<(BlockHeight, BlockHeight)>, Self::Error> {
+        #[allow(deprecated)]
         wallet::block_height_extrema(&self).map_err(SqliteClientError::from)
     }
 
     fn get_block_hash(&self, block_height: BlockHeight) -> Result<Option<BlockHash>, Self::Error> {
+        #[allow(deprecated)]
         wallet::get_block_hash(&self, block_height).map_err(SqliteClientError::from)
     }
 
     fn get_tx_height(&self, txid: TxId) -> Result<Option<BlockHeight>, Self::Error> {
+        #[allow(deprecated)]
         wallet::get_tx_height(&self, txid).map_err(SqliteClientError::from)
     }
 
     fn get_extended_full_viewing_keys(
         &self,
     ) -> Result<HashMap<AccountId, ExtendedFullViewingKey>, Self::Error> {
+        #[allow(deprecated)]
         wallet::get_extended_full_viewing_keys(&self)
     }
 
     fn get_address(&self, account: AccountId) -> Result<Option<PaymentAddress>, Self::Error> {
+        #[allow(deprecated)]
         wallet::get_address(&self, account)
     }
 
@@ -236,6 +241,7 @@ impl<P: consensus::Parameters> WalletRead for WalletDb<P> {
         account: AccountId,
         extfvk: &ExtendedFullViewingKey,
     ) -> Result<bool, Self::Error> {
+        #[allow(deprecated)]
         wallet::is_valid_account_extfvk(&self, account, extfvk)
     }
 
@@ -244,14 +250,17 @@ impl<P: consensus::Parameters> WalletRead for WalletDb<P> {
         account: AccountId,
         anchor_height: BlockHeight,
     ) -> Result<Amount, Self::Error> {
+        #[allow(deprecated)]
         wallet::get_balance_at(&self, account, anchor_height)
     }
 
     fn get_transaction(&self, id_tx: i64) -> Result<Transaction, Self::Error> {
+        #[allow(deprecated)]
         wallet::get_transaction(&self, id_tx)
     }
 
     fn get_memo(&self, id_note: Self::NoteRef) -> Result<Memo, Self::Error> {
+        #[allow(deprecated)]
         match id_note {
             NoteId::SentNoteId(id_note) => wallet::get_sent_memo(self, id_note),
             NoteId::ReceivedNoteId(id_note) => wallet::get_received_memo(self, id_note),
@@ -262,6 +271,7 @@ impl<P: consensus::Parameters> WalletRead for WalletDb<P> {
         &self,
         block_height: BlockHeight,
     ) -> Result<Option<CommitmentTree<Node>>, Self::Error> {
+        #[allow(deprecated)]
         wallet::get_commitment_tree(&self, block_height)
     }
 
@@ -270,14 +280,17 @@ impl<P: consensus::Parameters> WalletRead for WalletDb<P> {
         &self,
         block_height: BlockHeight,
     ) -> Result<Vec<(Self::NoteRef, IncrementalWitness<Node>)>, Self::Error> {
+        #[allow(deprecated)]
         wallet::get_witnesses(&self, block_height)
     }
 
     fn get_nullifiers(&self) -> Result<Vec<(AccountId, Nullifier)>, Self::Error> {
+        #[allow(deprecated)]
         wallet::get_nullifiers(&self)
     }
 
     fn get_all_nullifiers(&self) -> Result<Vec<(AccountId, Nullifier)>, Self::Error> {
+        #[allow(deprecated)]
         wallet::get_all_nullifiers(&self)
     }
 
@@ -286,6 +299,7 @@ impl<P: consensus::Parameters> WalletRead for WalletDb<P> {
         account: AccountId,
         anchor_height: BlockHeight,
     ) -> Result<Vec<SpendableNote>, Self::Error> {
+        #[allow(deprecated)]
         wallet::transact::get_spendable_sapling_notes(&self, account, anchor_height)
     }
 
@@ -295,6 +309,7 @@ impl<P: consensus::Parameters> WalletRead for WalletDb<P> {
         target_value: Amount,
         anchor_height: BlockHeight,
     ) -> Result<Vec<SpendableNote>, Self::Error> {
+        #[allow(deprecated)]
         wallet::transact::select_spendable_sapling_notes(
             &self,
             account,
@@ -483,6 +498,7 @@ impl<'a, P: consensus::Parameters> DataConnStmtCache<'a, P> {
     }
 }
 
+#[allow(deprecated)]
 impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
     #[allow(clippy::type_complexity)]
     fn advance_by_block(

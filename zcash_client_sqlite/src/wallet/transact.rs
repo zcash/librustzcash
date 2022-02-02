@@ -60,6 +60,9 @@ fn to_spendable_note(row: &Row) -> Result<SpendableNote, SqliteClientError> {
     })
 }
 
+#[deprecated(
+    note = "This method will be removed in a future update. Use zcash_client_backend::data_api::WalletRead::get_spendable_sapling_notes instead."
+)]
 pub fn get_spendable_sapling_notes<P>(
     wdb: &WalletDb<P>,
     account: AccountId,
@@ -88,6 +91,9 @@ pub fn get_spendable_sapling_notes<P>(
     notes.collect::<Result<_, _>>()
 }
 
+#[deprecated(
+    note = "This method will be removed in a future update. Use zcash_client_backend::data_api::WalletRead::select_spendable_sapling_notes instead."
+)]
 pub fn select_spendable_sapling_notes<P>(
     wdb: &WalletDb<P>,
     account: AccountId,
@@ -148,9 +154,12 @@ pub fn select_spendable_sapling_notes<P>(
 }
 
 #[cfg(test)]
+#[allow(deprecated)]
 mod tests {
     use rusqlite::Connection;
     use tempfile::NamedTempFile;
+
+    use zcash_proofs::prover::LocalTxProver;
 
     use zcash_primitives::{
         block::BlockHash,
@@ -161,16 +170,14 @@ mod tests {
         zip32::{ExtendedFullViewingKey, ExtendedSpendingKey},
     };
 
-    use zcash_proofs::prover::LocalTxProver;
+    #[cfg(feature = "transparent-inputs")]
+    use zcash_primitives::legacy::keys as transparent;
 
     use zcash_client_backend::{
         data_api::{chain::scan_cached_blocks, wallet::create_spend_to_address, WalletRead},
         keys::{sapling, UnifiedFullViewingKey},
         wallet::OvkPolicy,
     };
-
-    #[cfg(feature = "transparent-inputs")]
-    use zcash_primitives::legacy::keys as transparent;
 
     use crate::{
         chain::init::init_cache_database,
