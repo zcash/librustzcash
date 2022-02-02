@@ -181,11 +181,11 @@ impl<P: consensus::Parameters> WalletDb<P> {
                 stmt_update_sent_note: self.conn.prepare(
                     "UPDATE sent_notes
                     SET from_account = ?, address = ?, value = ?, memo = ?
-                    WHERE tx = ? AND output_index = ?",
+                    WHERE tx = ? AND output_pool = ? AND output_index = ?",
                 )?,
                 stmt_insert_sent_note: self.conn.prepare(
-                    "INSERT INTO sent_notes (tx, output_index, from_account, address, value, memo)
-                    VALUES (?, ?, ?, ?, ?, ?)",
+                    "INSERT INTO sent_notes (tx, output_pool, output_index, from_account, address, value, memo)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)",
                 )?,
                 stmt_insert_witness: self.conn.prepare(
                     "INSERT INTO sapling_witnesses (note, block, witness)

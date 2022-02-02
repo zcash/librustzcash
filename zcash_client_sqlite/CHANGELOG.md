@@ -38,6 +38,11 @@ and this library adheres to Rust's notion of
   method to be used in contexts where a transaction has just been
   constructed, rather than only in the case that a transaction has
   been decrypted after being retrieved from the network.
+- A new non-null column, `output_pool` has been added to the `sent_notes` 
+  table to enable distinguising between Sapling and transparent outputs
+  (and in the future, outputs to other pools). This will require a migration,
+  which may need to be performed in multiple steps. Values for this column 
+  should be assigned by inference from the address type in the stored data.
 
 ### Deprecated
 - A number of public API methods that are used internally to support the

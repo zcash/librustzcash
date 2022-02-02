@@ -111,6 +111,7 @@ pub fn init_wallet_db<P>(wdb: &WalletDb<P>) -> Result<(), rusqlite::Error> {
         "CREATE TABLE IF NOT EXISTS sent_notes (
             id_note INTEGER PRIMARY KEY,
             tx INTEGER NOT NULL,
+            output_pool INTEGER NOT NULL,
             output_index INTEGER NOT NULL,
             from_account INTEGER NOT NULL,
             address TEXT NOT NULL,
@@ -118,7 +119,7 @@ pub fn init_wallet_db<P>(wdb: &WalletDb<P>) -> Result<(), rusqlite::Error> {
             memo BLOB,
             FOREIGN KEY (tx) REFERENCES transactions(id_tx),
             FOREIGN KEY (from_account) REFERENCES accounts(account),
-            CONSTRAINT tx_output UNIQUE (tx, output_index)
+            CONSTRAINT tx_output UNIQUE (tx, output_pool, output_index)
         )",
         NO_PARAMS,
     )?;

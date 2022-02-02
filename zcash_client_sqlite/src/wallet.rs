@@ -49,6 +49,23 @@ use {
 pub mod init;
 pub mod transact;
 
+enum PoolType {
+    Transparent,
+    Sapling,
+}
+
+impl PoolType {
+    fn typecode(&self) -> i64 {
+        // These constants are *incidentally* shared with the typecodes
+        // for unified addresses, but this is exclusively an internal
+        // implementation detail.
+        match self {
+            PoolType::Transparent => 0i64,
+            PoolType::Sapling => 2i64,
+        }
+    }
+}
+
 /// This trait provides a generalization over shielded output representations.
 #[deprecated(note = "This trait will be removed in a future release.")]
 pub trait ShieldedOutput {
@@ -580,18 +597,9 @@ pub(crate) fn rewind_to_height<P: consensus::Parameters>(
             &[u32::from(block_height)],
         )?;
 
-        // Rewind sent notes
-        wdb.conn.execute(
-            "DELETE FROM sent_notes
-                WHERE id_note IN (
-                    SELECT sn.id_note
-                    FROM sent_notes sn
-                    LEFT OUTER JOIN transactions tx
-                    ON tx.id_tx = sn.tx
-                    WHERE tx.block IS NOT NULL AND tx.block > ?
-                );",
-            &[u32::from(block_height)],
-        )?;
+        // Do not delete sent notes; this can contain data that is not recoverable
+        // from the chain. Wallets must continue to operate correctly in the
+        // presence of stale sent notes that link to unmined transactions.
 
         // Rewind utxos
         wdb.conn.execute(
@@ -1096,7 +1104,8 @@ pub fn put_sent_note<'a, P: consensus::Parameters>(
         ivalue,
         &memo.map(|m| m.as_slice()),
         tx_ref,
-        output_index as i64
+        PoolType::Sapling.typecode(),
+        output_index as i64,
     ])? == 0
     {
         // It isn't there, so insert.
@@ -1130,7 +1139,8 @@ pub fn put_sent_utxo<'a, P: consensus::Parameters>(
         ivalue,
         (None::<&[u8]>),
         tx_ref,
-        output_index as i64
+        PoolType::Transparent.typecode(),
+        output_index as i64,
     ])? == 0
     {
         // It isn't there, so insert.
@@ -1164,6 +1174,7 @@ pub fn insert_sent_note<'a, P: consensus::Parameters>(
     let ivalue: i64 = value.into();
     stmts.stmt_insert_sent_note.execute(params![
         tx_ref,
+        PoolType::Sapling.typecode(),
         (output_index as i64),
         account.0,
         to_str,
@@ -1192,11 +1203,12 @@ pub fn insert_sent_utxo<'a, P: consensus::Parameters>(
     let ivalue: i64 = value.into();
     stmts.stmt_insert_sent_note.execute(params![
         tx_ref,
+        PoolType::Transparent.typecode(),
         (output_index as i64),
         account.0,
         to_str,
         ivalue,
-        (None::<&[u8]>)
+        (None::<&[u8]>),
     ])?;
 
     Ok(())
