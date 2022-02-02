@@ -26,18 +26,12 @@ pub const ZIP32_SAPLING_FVFP_PERSONALIZATION: &[u8; 16] = b"ZcashSaplingFVFP";
 pub const ZIP32_SAPLING_INT_PERSONALIZATION: &[u8; 16] = b"Zcash_SaplingInt";
 
 /// A type-safe wrapper for account identifiers.
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Default, Copy, Clone, PartialEq, Eq, Hash)]
 pub struct AccountId(pub u32);
 
 impl From<u32> for AccountId {
     fn from(id: u32) -> Self {
         Self(id)
-    }
-}
-
-impl Default for AccountId {
-    fn default() -> Self {
-        AccountId(0)
     }
 }
 
@@ -110,7 +104,7 @@ impl ChildIndex {
         ChildIndex::from_index(0)
     }
 
-    fn to_index(&self) -> u32 {
+    fn value(&self) -> u32 {
         match *self {
             ChildIndex::Hardened(i) => i + (1 << 31),
             ChildIndex::NonHardened(i) => i,
@@ -410,7 +404,7 @@ impl ExtendedSpendingKey {
     pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
         writer.write_u8(self.depth)?;
         writer.write_all(&self.parent_fvk_tag.0)?;
-        writer.write_u32::<LittleEndian>(self.child_index.to_index())?;
+        writer.write_u32::<LittleEndian>(self.child_index.value())?;
         writer.write_all(&self.chain_code.0)?;
         writer.write_all(&self.expsk.to_bytes())?;
         writer.write_all(&self.dk.0)?;
@@ -427,6 +421,7 @@ impl ExtendedSpendingKey {
         xsk
     }
 
+    #[must_use]
     pub fn derive_child(&self, i: ChildIndex) -> Self {
         let fvk = FullViewingKey::from_expanded_spending_key(&self.expsk);
         let tmp = match i {
@@ -477,6 +472,7 @@ impl ExtendedSpendingKey {
     /// Derives an internal spending key given an external spending key.
     ///
     /// Specified in [ZIP 32](https://zips.z.cash/zip-0032#deriving-a-sapling-internal-spending-key).
+    #[must_use]
     pub fn derive_internal(&self) -> Self {
         let i = {
             let fvk = FullViewingKey::from_expanded_spending_key(&self.expsk);
@@ -548,7 +544,7 @@ impl ExtendedFullViewingKey {
     pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
         writer.write_u8(self.depth)?;
         writer.write_all(&self.parent_fvk_tag.0)?;
-        writer.write_u32::<LittleEndian>(self.child_index.to_index())?;
+        writer.write_u32::<LittleEndian>(self.child_index.value())?;
         writer.write_all(&self.chain_code.0)?;
         writer.write_all(&self.fvk.to_bytes())?;
         writer.write_all(&self.dk.0)?;
@@ -619,6 +615,7 @@ impl ExtendedFullViewingKey {
     /// only for internal transfers.
     ///
     /// Specified in [ZIP 32](https://zips.z.cash/zip-0032#deriving-a-sapling-internal-full-viewing-key).
+    #[must_use]
     pub fn derive_internal(&self) -> Self {
         let (fvk_internal, dk_internal) = sapling_derive_internal_fvk(&self.fvk, &self.dk);
 

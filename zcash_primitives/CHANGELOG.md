@@ -97,6 +97,8 @@ and this library adheres to Rust's notion of
   account values.
 - The `zcash_primitives::zip32::AccountId`, a type-safe wrapper for ZIP 32
   account indices.
+- In `zcash_primitives::transaction::components::amount`:
+  - `impl Sum<&Amount> for Option<Amount>`
 
 ### Changed
 - MSRV is now 1.51.0.

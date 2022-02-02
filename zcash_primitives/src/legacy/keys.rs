@@ -26,7 +26,7 @@ impl AccountPrivKey {
         seed: &[u8],
         account: AccountId,
     ) -> Result<AccountPrivKey, hdwallet::error::Error> {
-        ExtendedPrivKey::with_seed(&seed)?
+        ExtendedPrivKey::with_seed(seed)?
             .derive_private_key(KeyIndex::hardened_from_normalize_index(44)?)?
             .derive_private_key(KeyIndex::hardened_from_normalize_index(params.coin_type())?)?
             .derive_private_key(KeyIndex::hardened_from_normalize_index(account.0)?)

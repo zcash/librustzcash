@@ -740,11 +740,11 @@ fn test_input_circuit_with_bls12_381_external_test_vectors() {
                 jubjub::ExtendedPoint::from(value_commitment.commitment()).to_affine();
             assert_eq!(
                 expected_value_commitment.get_u(),
-                bls12_381::Scalar::from_str_vartime(&expected_commitment_us[i as usize]).unwrap()
+                bls12_381::Scalar::from_str_vartime(expected_commitment_us[i as usize]).unwrap()
             );
             assert_eq!(
                 expected_value_commitment.get_v(),
-                bls12_381::Scalar::from_str_vartime(&expected_commitment_vs[i as usize]).unwrap()
+                bls12_381::Scalar::from_str_vartime(expected_commitment_vs[i as usize]).unwrap()
             );
             let note = Note {
                 value: value_commitment.value,

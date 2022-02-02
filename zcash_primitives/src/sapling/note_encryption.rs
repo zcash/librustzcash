@@ -253,7 +253,7 @@ impl<P: consensus::Parameters> Domain for SaplingDomain<P> {
         ivk: &Self::IncomingViewingKey,
         plaintext: &[u8],
     ) -> Option<(Self::Note, Self::Recipient)> {
-        sapling_parse_note_plaintext_without_memo(&self, plaintext, |diversifier| {
+        sapling_parse_note_plaintext_without_memo(self, plaintext, |diversifier| {
             Some(diversifier.g_d()? * ivk.0)
         })
     }
@@ -265,7 +265,7 @@ impl<P: consensus::Parameters> Domain for SaplingDomain<P> {
         ephemeral_key: &EphemeralKeyBytes,
         plaintext: &NotePlaintextBytes,
     ) -> Option<(Self::Note, Self::Recipient)> {
-        sapling_parse_note_plaintext_without_memo(&self, &plaintext.0, |diversifier| {
+        sapling_parse_note_plaintext_without_memo(self, &plaintext.0, |diversifier| {
             if (diversifier.g_d()? * esk).to_bytes() == ephemeral_key.0 {
                 Some(*pk_d)
             } else {
@@ -595,7 +595,7 @@ mod tests {
         out_ciphertext: &[u8; OUT_CIPHERTEXT_SIZE],
         modify_plaintext: impl Fn(&mut [u8; NOTE_PLAINTEXT_SIZE]),
     ) {
-        let ock = prf_ock(&ovk, &cv, &cmu.to_repr(), ephemeral_key);
+        let ock = prf_ock(ovk, cv, &cmu.to_repr(), ephemeral_key);
 
         let mut op = [0; OUT_PLAINTEXT_SIZE];
         op.copy_from_slice(&out_ciphertext[..OUT_PLAINTEXT_SIZE]);
