@@ -370,6 +370,35 @@ impl<A: Authorization> TransactionData<A> {
             digester.digest_tze(self.tze_bundle.as_ref()),
         )
     }
+
+    pub fn map_authorization<B: Authorization>(
+        self,
+        f_transparent: impl transparent::MapAuth<A::TransparentAuth, B::TransparentAuth>,
+        f_sapling: impl sapling::MapAuth<A::SaplingAuth, B::SaplingAuth>,
+        mut f_orchard: impl orchard_serialization::MapAuth<A::OrchardAuth, B::OrchardAuth>,
+        #[cfg(feature = "zfuture")] f_tze: impl tze::MapAuth<A::TzeAuth, B::TzeAuth>,
+    ) -> TransactionData<B> {
+        TransactionData {
+            version: self.version,
+            consensus_branch_id: self.consensus_branch_id,
+            lock_time: self.lock_time,
+            expiry_height: self.expiry_height,
+            transparent_bundle: self
+                .transparent_bundle
+                .map(|b| b.map_authorization(f_transparent)),
+            sprout_bundle: self.sprout_bundle,
+            sapling_bundle: self.sapling_bundle.map(|b| b.map_authorization(f_sapling)),
+            orchard_bundle: self.orchard_bundle.map(|b| {
+                b.authorize(
+                    &mut f_orchard,
+                    |f, _, s| f.map_spend_auth(s),
+                    |f, a| f.map_authorization(a),
+                )
+            }),
+            #[cfg(feature = "zfuture")]
+            tze_bundle: self.tze_bundle.map(|b| b.map_authorization(f_tze)),
+        }
+    }
 }
 
 impl<A: Authorization> std::fmt::Debug for TransactionData<A> {

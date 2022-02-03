@@ -22,11 +22,34 @@ impl Authorization for Authorized {
     type ScriptSig = Script;
 }
 
+pub trait MapAuth<A: Authorization, B: Authorization> {
+    fn map_script_sig(&self, s: A::ScriptSig) -> B::ScriptSig;
+    fn map_authorization(&self, s: A) -> B;
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Bundle<A: Authorization> {
     pub vin: Vec<TxIn<A>>,
     pub vout: Vec<TxOut>,
     pub authorization: A,
+}
+
+impl<A: Authorization> Bundle<A> {
+    pub fn map_authorization<B: Authorization, F: MapAuth<A, B>>(self, f: F) -> Bundle<B> {
+        Bundle {
+            vin: self
+                .vin
+                .into_iter()
+                .map(|txin| TxIn {
+                    prevout: txin.prevout,
+                    script_sig: f.map_script_sig(txin.script_sig),
+                    sequence: txin.sequence,
+                })
+                .collect(),
+            vout: self.vout,
+            authorization: f.map_authorization(self.authorization),
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
