@@ -534,6 +534,10 @@ impl Transaction {
         Transaction { txid, data }
     }
 
+    pub fn into_data(self) -> TransactionData<Authorized> {
+        self.data
+    }
+
     pub fn txid(&self) -> TxId {
         self.txid
     }
