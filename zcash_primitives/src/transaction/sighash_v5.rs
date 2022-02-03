@@ -179,9 +179,12 @@ pub fn v5_signature_hash<
     signable_input: &SignableInput<'_>,
     txid_parts: &TxDigests<Blake2bHash>,
 ) -> Blake2bHash {
-    // The caller must always provide the transparent digests if the transaction has a
+    // The caller must provide the transparent digests if and only if the transaction has a
     // transparent component.
-    assert!(tx.transparent_bundle.is_some() ^ txid_parts.transparent_digests.is_none());
+    assert_eq!(
+        tx.transparent_bundle.is_some(),
+        txid_parts.transparent_digests.is_some()
+    );
 
     to_hash(
         tx.version,
