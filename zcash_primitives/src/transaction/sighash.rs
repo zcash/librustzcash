@@ -57,7 +57,7 @@ impl AsRef<[u8; 32]> for SignatureHash {
     }
 }
 
-/// Addtional context that is needed to compute signature hashes
+/// Additional context that is needed to compute signature hashes
 /// for transactions that include transparent inputs or outputs.
 pub trait TransparentAuthorizingContext: transparent::Authorization {
     /// Returns the list of all transparent input amounts, provided

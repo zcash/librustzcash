@@ -562,7 +562,7 @@ pub mod testing {
         ) -> Note {
             Note {
                 value: value.into(),
-                g_d: addr.g_d().unwrap(), // this unwrap is safe because arb_payment_address always generates an address witha valid g_d
+                g_d: addr.g_d().unwrap(), // this unwrap is safe because arb_payment_address always generates an address with a valid g_d
                 pk_d: *addr.pk_d(),
                 rseed
             }

@@ -140,7 +140,7 @@ pub fn load_parameters(
 
 /// Parse Bls12 keys from bytes as serialized by [`Parameters::write`].
 ///
-/// This function will panic if it encounters unparseable data.
+/// This function will panic if it encounters unparsable data.
 pub fn parse_parameters<R: io::Read>(
     spend_fs: R,
     output_fs: R,
