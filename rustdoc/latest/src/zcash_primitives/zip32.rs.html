@@ -1,7 +1,9 @@
 <!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_primitives/src/zip32.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>zip32.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" type="text/css" href="../../normalize.css"><link rel="stylesheet" type="text/css" href="../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" type="text/css" href="../../ayu.css" disabled><link rel="stylesheet" type="text/css" href="../../dark.css" disabled><link rel="stylesheet" type="text/css" href="../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../storage.js"></script><script src="../../crates.js"></script><script defer src="../../main.js"></script><script defer src="../../source-script.js"></script><script defer src="../../source-files.js"></script>
-    <noscript><link rel="stylesheet" href="../../noscript.css"></noscript><link rel="alternate icon" type="image/png" href="../../favicon-16x16.png"><link rel="alternate icon" type="image/png" href="../../favicon-32x32.png"><link rel="icon" type="image/svg+xml" href="../../favicon.svg"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="sidebar-menu" role="button">&#9776;</div><a class="sidebar-logo" href="../../zcash_primitives/index.html"><div class="logo-container"><img class="rust-logo" src="../../rust-logo.svg" alt="logo"></div>
-        </a></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../zcash_primitives/index.html"><img class="rust-logo" src="../../rust-logo.svg" alt="logo"></a><nav class="sub"><div class="theme-picker hidden"><button id="theme-picker" aria-label="Pick another theme!" aria-haspopup="menu" title="themes"><img width="18" height="18" alt="Pick another theme!" src="../../brush.svg"></button><div id="theme-choices" role="menu"></div></div><form class="search-form"><div class="search-container"><div>
-                                <input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"></div><button type="button" id="help-button" title="help">?</button><a id="settings-menu" href="../../settings.html" title="settings"><img width="18" height="18" alt="Change settings" src="../../wheel.svg"></a></div></form></nav></div><section id="main-content" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">   1</span>
+    <noscript><link rel="stylesheet" href="../../noscript.css"></noscript><link rel="alternate icon" type="image/png" href="../../favicon-16x16.png"><link rel="alternate icon" type="image/png" href="../../favicon-32x32.png"><link rel="icon" type="image/svg+xml" href="../../favicon.svg"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../zcash_primitives/index.html"><div class="logo-container"><img class="rust-logo" src="../../rust-logo.svg" alt="logo"></div>
+        </a><h2 class="location"></h2>
+    </nav>
+    <nav class="sidebar"><a class="sidebar-logo" href="../../zcash_primitives/index.html"><div class="logo-container"><img class="rust-logo" src="../../rust-logo.svg" alt="logo"></div>
+        </a></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../zcash_primitives/index.html"><img class="rust-logo" src="../../rust-logo.svg" alt="logo"></a><nav class="sub"><div class="theme-picker hidden"><button id="theme-picker" aria-label="Pick another theme!" aria-haspopup="menu" title="themes"><img width="22" height="22" alt="Pick another theme!" src="../../brush.svg"></button><div id="theme-choices" role="menu"></div></div><form class="search-form"><div class="search-container"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><button type="button" id="help-button" title="help">?</button><a id="settings-menu" href="../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../wheel.svg"></a></div></form></nav></div><section id="main-content" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">   1</span>
 <span id="2">   2</span>
 <span id="3">   3</span>
 <span id="4">   4</span>
@@ -1203,6 +1205,423 @@
 <span id="1200">1200</span>
 <span id="1201">1201</span>
 <span id="1202">1202</span>
+<span id="1203">1203</span>
+<span id="1204">1204</span>
+<span id="1205">1205</span>
+<span id="1206">1206</span>
+<span id="1207">1207</span>
+<span id="1208">1208</span>
+<span id="1209">1209</span>
+<span id="1210">1210</span>
+<span id="1211">1211</span>
+<span id="1212">1212</span>
+<span id="1213">1213</span>
+<span id="1214">1214</span>
+<span id="1215">1215</span>
+<span id="1216">1216</span>
+<span id="1217">1217</span>
+<span id="1218">1218</span>
+<span id="1219">1219</span>
+<span id="1220">1220</span>
+<span id="1221">1221</span>
+<span id="1222">1222</span>
+<span id="1223">1223</span>
+<span id="1224">1224</span>
+<span id="1225">1225</span>
+<span id="1226">1226</span>
+<span id="1227">1227</span>
+<span id="1228">1228</span>
+<span id="1229">1229</span>
+<span id="1230">1230</span>
+<span id="1231">1231</span>
+<span id="1232">1232</span>
+<span id="1233">1233</span>
+<span id="1234">1234</span>
+<span id="1235">1235</span>
+<span id="1236">1236</span>
+<span id="1237">1237</span>
+<span id="1238">1238</span>
+<span id="1239">1239</span>
+<span id="1240">1240</span>
+<span id="1241">1241</span>
+<span id="1242">1242</span>
+<span id="1243">1243</span>
+<span id="1244">1244</span>
+<span id="1245">1245</span>
+<span id="1246">1246</span>
+<span id="1247">1247</span>
+<span id="1248">1248</span>
+<span id="1249">1249</span>
+<span id="1250">1250</span>
+<span id="1251">1251</span>
+<span id="1252">1252</span>
+<span id="1253">1253</span>
+<span id="1254">1254</span>
+<span id="1255">1255</span>
+<span id="1256">1256</span>
+<span id="1257">1257</span>
+<span id="1258">1258</span>
+<span id="1259">1259</span>
+<span id="1260">1260</span>
+<span id="1261">1261</span>
+<span id="1262">1262</span>
+<span id="1263">1263</span>
+<span id="1264">1264</span>
+<span id="1265">1265</span>
+<span id="1266">1266</span>
+<span id="1267">1267</span>
+<span id="1268">1268</span>
+<span id="1269">1269</span>
+<span id="1270">1270</span>
+<span id="1271">1271</span>
+<span id="1272">1272</span>
+<span id="1273">1273</span>
+<span id="1274">1274</span>
+<span id="1275">1275</span>
+<span id="1276">1276</span>
+<span id="1277">1277</span>
+<span id="1278">1278</span>
+<span id="1279">1279</span>
+<span id="1280">1280</span>
+<span id="1281">1281</span>
+<span id="1282">1282</span>
+<span id="1283">1283</span>
+<span id="1284">1284</span>
+<span id="1285">1285</span>
+<span id="1286">1286</span>
+<span id="1287">1287</span>
+<span id="1288">1288</span>
+<span id="1289">1289</span>
+<span id="1290">1290</span>
+<span id="1291">1291</span>
+<span id="1292">1292</span>
+<span id="1293">1293</span>
+<span id="1294">1294</span>
+<span id="1295">1295</span>
+<span id="1296">1296</span>
+<span id="1297">1297</span>
+<span id="1298">1298</span>
+<span id="1299">1299</span>
+<span id="1300">1300</span>
+<span id="1301">1301</span>
+<span id="1302">1302</span>
+<span id="1303">1303</span>
+<span id="1304">1304</span>
+<span id="1305">1305</span>
+<span id="1306">1306</span>
+<span id="1307">1307</span>
+<span id="1308">1308</span>
+<span id="1309">1309</span>
+<span id="1310">1310</span>
+<span id="1311">1311</span>
+<span id="1312">1312</span>
+<span id="1313">1313</span>
+<span id="1314">1314</span>
+<span id="1315">1315</span>
+<span id="1316">1316</span>
+<span id="1317">1317</span>
+<span id="1318">1318</span>
+<span id="1319">1319</span>
+<span id="1320">1320</span>
+<span id="1321">1321</span>
+<span id="1322">1322</span>
+<span id="1323">1323</span>
+<span id="1324">1324</span>
+<span id="1325">1325</span>
+<span id="1326">1326</span>
+<span id="1327">1327</span>
+<span id="1328">1328</span>
+<span id="1329">1329</span>
+<span id="1330">1330</span>
+<span id="1331">1331</span>
+<span id="1332">1332</span>
+<span id="1333">1333</span>
+<span id="1334">1334</span>
+<span id="1335">1335</span>
+<span id="1336">1336</span>
+<span id="1337">1337</span>
+<span id="1338">1338</span>
+<span id="1339">1339</span>
+<span id="1340">1340</span>
+<span id="1341">1341</span>
+<span id="1342">1342</span>
+<span id="1343">1343</span>
+<span id="1344">1344</span>
+<span id="1345">1345</span>
+<span id="1346">1346</span>
+<span id="1347">1347</span>
+<span id="1348">1348</span>
+<span id="1349">1349</span>
+<span id="1350">1350</span>
+<span id="1351">1351</span>
+<span id="1352">1352</span>
+<span id="1353">1353</span>
+<span id="1354">1354</span>
+<span id="1355">1355</span>
+<span id="1356">1356</span>
+<span id="1357">1357</span>
+<span id="1358">1358</span>
+<span id="1359">1359</span>
+<span id="1360">1360</span>
+<span id="1361">1361</span>
+<span id="1362">1362</span>
+<span id="1363">1363</span>
+<span id="1364">1364</span>
+<span id="1365">1365</span>
+<span id="1366">1366</span>
+<span id="1367">1367</span>
+<span id="1368">1368</span>
+<span id="1369">1369</span>
+<span id="1370">1370</span>
+<span id="1371">1371</span>
+<span id="1372">1372</span>
+<span id="1373">1373</span>
+<span id="1374">1374</span>
+<span id="1375">1375</span>
+<span id="1376">1376</span>
+<span id="1377">1377</span>
+<span id="1378">1378</span>
+<span id="1379">1379</span>
+<span id="1380">1380</span>
+<span id="1381">1381</span>
+<span id="1382">1382</span>
+<span id="1383">1383</span>
+<span id="1384">1384</span>
+<span id="1385">1385</span>
+<span id="1386">1386</span>
+<span id="1387">1387</span>
+<span id="1388">1388</span>
+<span id="1389">1389</span>
+<span id="1390">1390</span>
+<span id="1391">1391</span>
+<span id="1392">1392</span>
+<span id="1393">1393</span>
+<span id="1394">1394</span>
+<span id="1395">1395</span>
+<span id="1396">1396</span>
+<span id="1397">1397</span>
+<span id="1398">1398</span>
+<span id="1399">1399</span>
+<span id="1400">1400</span>
+<span id="1401">1401</span>
+<span id="1402">1402</span>
+<span id="1403">1403</span>
+<span id="1404">1404</span>
+<span id="1405">1405</span>
+<span id="1406">1406</span>
+<span id="1407">1407</span>
+<span id="1408">1408</span>
+<span id="1409">1409</span>
+<span id="1410">1410</span>
+<span id="1411">1411</span>
+<span id="1412">1412</span>
+<span id="1413">1413</span>
+<span id="1414">1414</span>
+<span id="1415">1415</span>
+<span id="1416">1416</span>
+<span id="1417">1417</span>
+<span id="1418">1418</span>
+<span id="1419">1419</span>
+<span id="1420">1420</span>
+<span id="1421">1421</span>
+<span id="1422">1422</span>
+<span id="1423">1423</span>
+<span id="1424">1424</span>
+<span id="1425">1425</span>
+<span id="1426">1426</span>
+<span id="1427">1427</span>
+<span id="1428">1428</span>
+<span id="1429">1429</span>
+<span id="1430">1430</span>
+<span id="1431">1431</span>
+<span id="1432">1432</span>
+<span id="1433">1433</span>
+<span id="1434">1434</span>
+<span id="1435">1435</span>
+<span id="1436">1436</span>
+<span id="1437">1437</span>
+<span id="1438">1438</span>
+<span id="1439">1439</span>
+<span id="1440">1440</span>
+<span id="1441">1441</span>
+<span id="1442">1442</span>
+<span id="1443">1443</span>
+<span id="1444">1444</span>
+<span id="1445">1445</span>
+<span id="1446">1446</span>
+<span id="1447">1447</span>
+<span id="1448">1448</span>
+<span id="1449">1449</span>
+<span id="1450">1450</span>
+<span id="1451">1451</span>
+<span id="1452">1452</span>
+<span id="1453">1453</span>
+<span id="1454">1454</span>
+<span id="1455">1455</span>
+<span id="1456">1456</span>
+<span id="1457">1457</span>
+<span id="1458">1458</span>
+<span id="1459">1459</span>
+<span id="1460">1460</span>
+<span id="1461">1461</span>
+<span id="1462">1462</span>
+<span id="1463">1463</span>
+<span id="1464">1464</span>
+<span id="1465">1465</span>
+<span id="1466">1466</span>
+<span id="1467">1467</span>
+<span id="1468">1468</span>
+<span id="1469">1469</span>
+<span id="1470">1470</span>
+<span id="1471">1471</span>
+<span id="1472">1472</span>
+<span id="1473">1473</span>
+<span id="1474">1474</span>
+<span id="1475">1475</span>
+<span id="1476">1476</span>
+<span id="1477">1477</span>
+<span id="1478">1478</span>
+<span id="1479">1479</span>
+<span id="1480">1480</span>
+<span id="1481">1481</span>
+<span id="1482">1482</span>
+<span id="1483">1483</span>
+<span id="1484">1484</span>
+<span id="1485">1485</span>
+<span id="1486">1486</span>
+<span id="1487">1487</span>
+<span id="1488">1488</span>
+<span id="1489">1489</span>
+<span id="1490">1490</span>
+<span id="1491">1491</span>
+<span id="1492">1492</span>
+<span id="1493">1493</span>
+<span id="1494">1494</span>
+<span id="1495">1495</span>
+<span id="1496">1496</span>
+<span id="1497">1497</span>
+<span id="1498">1498</span>
+<span id="1499">1499</span>
+<span id="1500">1500</span>
+<span id="1501">1501</span>
+<span id="1502">1502</span>
+<span id="1503">1503</span>
+<span id="1504">1504</span>
+<span id="1505">1505</span>
+<span id="1506">1506</span>
+<span id="1507">1507</span>
+<span id="1508">1508</span>
+<span id="1509">1509</span>
+<span id="1510">1510</span>
+<span id="1511">1511</span>
+<span id="1512">1512</span>
+<span id="1513">1513</span>
+<span id="1514">1514</span>
+<span id="1515">1515</span>
+<span id="1516">1516</span>
+<span id="1517">1517</span>
+<span id="1518">1518</span>
+<span id="1519">1519</span>
+<span id="1520">1520</span>
+<span id="1521">1521</span>
+<span id="1522">1522</span>
+<span id="1523">1523</span>
+<span id="1524">1524</span>
+<span id="1525">1525</span>
+<span id="1526">1526</span>
+<span id="1527">1527</span>
+<span id="1528">1528</span>
+<span id="1529">1529</span>
+<span id="1530">1530</span>
+<span id="1531">1531</span>
+<span id="1532">1532</span>
+<span id="1533">1533</span>
+<span id="1534">1534</span>
+<span id="1535">1535</span>
+<span id="1536">1536</span>
+<span id="1537">1537</span>
+<span id="1538">1538</span>
+<span id="1539">1539</span>
+<span id="1540">1540</span>
+<span id="1541">1541</span>
+<span id="1542">1542</span>
+<span id="1543">1543</span>
+<span id="1544">1544</span>
+<span id="1545">1545</span>
+<span id="1546">1546</span>
+<span id="1547">1547</span>
+<span id="1548">1548</span>
+<span id="1549">1549</span>
+<span id="1550">1550</span>
+<span id="1551">1551</span>
+<span id="1552">1552</span>
+<span id="1553">1553</span>
+<span id="1554">1554</span>
+<span id="1555">1555</span>
+<span id="1556">1556</span>
+<span id="1557">1557</span>
+<span id="1558">1558</span>
+<span id="1559">1559</span>
+<span id="1560">1560</span>
+<span id="1561">1561</span>
+<span id="1562">1562</span>
+<span id="1563">1563</span>
+<span id="1564">1564</span>
+<span id="1565">1565</span>
+<span id="1566">1566</span>
+<span id="1567">1567</span>
+<span id="1568">1568</span>
+<span id="1569">1569</span>
+<span id="1570">1570</span>
+<span id="1571">1571</span>
+<span id="1572">1572</span>
+<span id="1573">1573</span>
+<span id="1574">1574</span>
+<span id="1575">1575</span>
+<span id="1576">1576</span>
+<span id="1577">1577</span>
+<span id="1578">1578</span>
+<span id="1579">1579</span>
+<span id="1580">1580</span>
+<span id="1581">1581</span>
+<span id="1582">1582</span>
+<span id="1583">1583</span>
+<span id="1584">1584</span>
+<span id="1585">1585</span>
+<span id="1586">1586</span>
+<span id="1587">1587</span>
+<span id="1588">1588</span>
+<span id="1589">1589</span>
+<span id="1590">1590</span>
+<span id="1591">1591</span>
+<span id="1592">1592</span>
+<span id="1593">1593</span>
+<span id="1594">1594</span>
+<span id="1595">1595</span>
+<span id="1596">1596</span>
+<span id="1597">1597</span>
+<span id="1598">1598</span>
+<span id="1599">1599</span>
+<span id="1600">1600</span>
+<span id="1601">1601</span>
+<span id="1602">1602</span>
+<span id="1603">1603</span>
+<span id="1604">1604</span>
+<span id="1605">1605</span>
+<span id="1606">1606</span>
+<span id="1607">1607</span>
+<span id="1608">1608</span>
+<span id="1609">1609</span>
+<span id="1610">1610</span>
+<span id="1611">1611</span>
+<span id="1612">1612</span>
+<span id="1613">1613</span>
+<span id="1614">1614</span>
+<span id="1615">1615</span>
+<span id="1616">1616</span>
+<span id="1617">1617</span>
+<span id="1618">1618</span>
+<span id="1619">1619</span>
 </pre><pre class="rust"><code><span class="doccomment">//! Implementation of [ZIP 32] for hierarchical deterministic key management.</span>
 <span class="doccomment">//!</span>
 <span class="doccomment">//! [ZIP 32]: https://zips.z.cash/zip-0032</span>
@@ -1211,7 +1630,9 @@
 <span class="kw">use</span> <span class="ident">blake2b_simd::Params</span> <span class="kw">as</span> <span class="ident">Blake2bParams</span>;
 <span class="kw">use</span> <span class="ident">byteorder</span>::{<span class="ident">ByteOrder</span>, <span class="ident">LittleEndian</span>, <span class="ident">ReadBytesExt</span>, <span class="ident">WriteBytesExt</span>};
 <span class="kw">use</span> <span class="ident">fpe::ff1</span>::{<span class="ident">BinaryNumeralString</span>, <span class="ident">FF1</span>};
+<span class="kw">use</span> <span class="ident">std::convert::TryInto</span>;
 <span class="kw">use</span> <span class="ident">std::ops::AddAssign</span>;
+<span class="kw">use</span> <span class="ident">subtle</span>::{<span class="ident">Choice</span>, <span class="ident">ConditionallySelectable</span>};
 
 <span class="kw">use</span> <span class="kw">crate</span>::{
     <span class="ident">constants</span>::{<span class="ident">PROOF_GENERATION_KEY_GENERATOR</span>, <span class="ident">SPENDING_KEY_GENERATOR</span>},
@@ -1219,12 +1640,36 @@
 };
 <span class="kw">use</span> <span class="ident">std::io</span>::{<span class="self">self</span>, <span class="ident">Read</span>, <span class="ident">Write</span>};
 
-<span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::sapling::keys</span>::{
-    <span class="ident">prf_expand</span>, <span class="ident">prf_expand_vec</span>, <span class="ident">ExpandedSpendingKey</span>, <span class="ident">FullViewingKey</span>, <span class="ident">OutgoingViewingKey</span>,
+<span class="kw">use</span> <span class="kw">crate</span>::{
+    <span class="ident">keys</span>::{<span class="ident">prf_expand</span>, <span class="ident">prf_expand_vec</span>, <span class="ident">OutgoingViewingKey</span>},
+    <span class="ident">sapling::keys</span>::{<span class="ident">ExpandedSpendingKey</span>, <span class="ident">FullViewingKey</span>},
 };
 
 <span class="kw">pub</span> <span class="kw">const</span> <span class="ident">ZIP32_SAPLING_MASTER_PERSONALIZATION</span>: <span class="kw-2">&amp;</span>[<span class="ident">u8</span>; <span class="number">16</span>] <span class="op">=</span> <span class="string">b&quot;ZcashIP32Sapling&quot;</span>;
 <span class="kw">pub</span> <span class="kw">const</span> <span class="ident">ZIP32_SAPLING_FVFP_PERSONALIZATION</span>: <span class="kw-2">&amp;</span>[<span class="ident">u8</span>; <span class="number">16</span>] <span class="op">=</span> <span class="string">b&quot;ZcashSaplingFVFP&quot;</span>;
+<span class="kw">pub</span> <span class="kw">const</span> <span class="ident">ZIP32_SAPLING_INT_PERSONALIZATION</span>: <span class="kw-2">&amp;</span>[<span class="ident">u8</span>; <span class="number">16</span>] <span class="op">=</span> <span class="string">b&quot;Zcash_SaplingInt&quot;</span>;
+
+<span class="doccomment">/// A type-safe wrapper for account identifiers.</span>
+<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Debug</span>, <span class="ident">Copy</span>, <span class="ident">Clone</span>, <span class="ident">PartialEq</span>, <span class="ident">Eq</span>, <span class="ident">Hash</span>)]</span>
+<span class="kw">pub</span> <span class="kw">struct</span> <span class="ident">AccountId</span>(<span class="kw">pub</span> <span class="ident">u32</span>);
+
+<span class="kw">impl</span> <span class="ident">From</span><span class="op">&lt;</span><span class="ident">u32</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">AccountId</span> {
+    <span class="kw">fn</span> <span class="ident">from</span>(<span class="ident">id</span>: <span class="ident">u32</span>) -&gt; <span class="self">Self</span> {
+        <span class="self">Self</span>(<span class="ident">id</span>)
+    }
+}
+
+<span class="kw">impl</span> <span class="ident">Default</span> <span class="kw">for</span> <span class="ident">AccountId</span> {
+    <span class="kw">fn</span> <span class="ident">default</span>() -&gt; <span class="self">Self</span> {
+        <span class="ident">AccountId</span>(<span class="number">0</span>)
+    }
+}
+
+<span class="kw">impl</span> <span class="ident">ConditionallySelectable</span> <span class="kw">for</span> <span class="ident">AccountId</span> {
+    <span class="kw">fn</span> <span class="ident">conditional_select</span>(<span class="ident">a0</span>: <span class="kw-2">&amp;</span><span class="self">Self</span>, <span class="ident">a1</span>: <span class="kw-2">&amp;</span><span class="self">Self</span>, <span class="ident">c</span>: <span class="ident">Choice</span>) -&gt; <span class="self">Self</span> {
+        <span class="ident">AccountId</span>(<span class="ident">u32::conditional_select</span>(<span class="kw-2">&amp;</span><span class="ident">a0</span>.<span class="number">0</span>, <span class="kw-2">&amp;</span><span class="ident">a1</span>.<span class="number">0</span>, <span class="ident">c</span>))
+    }
+}
 
 <span class="comment">// Common helper functions</span>
 
@@ -1297,9 +1742,9 @@
     }
 }
 
-<span class="doccomment">/// A chain code</span>
+<span class="doccomment">/// A BIP-32 chain code</span>
 <span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Clone</span>, <span class="ident">Copy</span>, <span class="ident">Debug</span>, <span class="ident">PartialEq</span>)]</span>
-<span class="kw">struct</span> <span class="ident">ChainCode</span>([<span class="ident">u8</span>; <span class="number">32</span>]);
+<span class="kw">pub</span> <span class="kw">struct</span> <span class="ident">ChainCode</span>([<span class="ident">u8</span>; <span class="number">32</span>]);
 
 <span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Clone</span>, <span class="ident">Copy</span>, <span class="ident">Debug</span>, <span class="ident">PartialEq</span>)]</span>
 <span class="kw">pub</span> <span class="kw">struct</span> <span class="ident">DiversifierIndex</span>(<span class="kw">pub</span> [<span class="ident">u8</span>; <span class="number">11</span>]);
@@ -1436,6 +1881,44 @@
     <span class="comment">// This unwrap is safe, if you have to search the 2^88 space of</span>
     <span class="comment">// diversifiers it&#39;ll never return anyway.</span>
     <span class="ident">sapling_find_address</span>(<span class="ident">fvk</span>, <span class="ident">dk</span>, <span class="ident">DiversifierIndex::new</span>()).<span class="ident">unwrap</span>()
+}
+
+<span class="doccomment">/// Returns the internal full viewing key and diversifier key</span>
+<span class="doccomment">/// for the provided external FVK = (ak, nk, ovk) and dk encoded</span>
+<span class="doccomment">/// in a [Unified FVK].</span>
+<span class="doccomment">///</span>
+<span class="doccomment">/// [Unified FVK]: https://zips.z.cash/zip-0316#encoding-of-unified-full-incoming-viewing-keys</span>
+<span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">sapling_derive_internal_fvk</span>(
+    <span class="ident">fvk</span>: <span class="kw-2">&amp;</span><span class="ident">FullViewingKey</span>,
+    <span class="ident">dk</span>: <span class="kw-2">&amp;</span><span class="ident">DiversifierKey</span>,
+) -&gt; (<span class="ident">FullViewingKey</span>, <span class="ident">DiversifierKey</span>) {
+    <span class="kw">let</span> <span class="ident">i</span> <span class="op">=</span> {
+        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">h</span> <span class="op">=</span> <span class="ident">Blake2bParams::new</span>()
+            .<span class="ident">hash_length</span>(<span class="number">32</span>)
+            .<span class="ident">personal</span>(<span class="ident"><span class="kw">crate</span>::zip32::ZIP32_SAPLING_INT_PERSONALIZATION</span>)
+            .<span class="ident">to_state</span>();
+        <span class="ident">h</span>.<span class="ident">update</span>(<span class="kw-2">&amp;</span><span class="ident">fvk</span>.<span class="ident">to_bytes</span>());
+        <span class="ident">h</span>.<span class="ident">update</span>(<span class="kw-2">&amp;</span><span class="ident">dk</span>.<span class="number">0</span>);
+        <span class="ident">h</span>.<span class="ident">finalize</span>()
+    };
+    <span class="kw">let</span> <span class="ident">i_nsk</span> <span class="op">=</span> <span class="ident">jubjub::Fr::from_bytes_wide</span>(<span class="ident">prf_expand</span>(<span class="ident">i</span>.<span class="ident">as_bytes</span>(), <span class="kw-2">&amp;</span>[<span class="number">0x17</span>]).<span class="ident">as_array</span>());
+    <span class="kw">let</span> <span class="ident">r</span> <span class="op">=</span> <span class="ident">prf_expand</span>(<span class="ident">i</span>.<span class="ident">as_bytes</span>(), <span class="kw-2">&amp;</span>[<span class="number">0x18</span>]);
+    <span class="kw">let</span> <span class="ident">r</span> <span class="op">=</span> <span class="ident">r</span>.<span class="ident">as_bytes</span>();
+    <span class="comment">// PROOF_GENERATION_KEY_GENERATOR = \mathcal{H}^Sapling</span>
+    <span class="kw">let</span> <span class="ident">nk_internal</span> <span class="op">=</span> <span class="ident">PROOF_GENERATION_KEY_GENERATOR</span> <span class="op">*</span> <span class="ident">i_nsk</span> <span class="op">+</span> <span class="ident">fvk</span>.<span class="ident">vk</span>.<span class="ident">nk</span>;
+    <span class="kw">let</span> <span class="ident">dk_internal</span> <span class="op">=</span> <span class="ident">DiversifierKey</span>(<span class="ident">r</span>[..<span class="number">32</span>].<span class="ident">try_into</span>().<span class="ident">unwrap</span>());
+    <span class="kw">let</span> <span class="ident">ovk_internal</span> <span class="op">=</span> <span class="ident">OutgoingViewingKey</span>(<span class="ident">r</span>[<span class="number">32</span>..].<span class="ident">try_into</span>().<span class="ident">unwrap</span>());
+
+    (
+        <span class="ident">FullViewingKey</span> {
+            <span class="ident">vk</span>: <span class="ident">ViewingKey</span> {
+                <span class="ident">ak</span>: <span class="ident">fvk</span>.<span class="ident">vk</span>.<span class="ident">ak</span>,
+                <span class="ident">nk</span>: <span class="ident">nk_internal</span>,
+            },
+            <span class="ident">ovk</span>: <span class="ident">ovk_internal</span>,
+        },
+        <span class="ident">dk_internal</span>,
+    )
 }
 
 <span class="doccomment">/// A Sapling extended spending key</span>
@@ -1614,6 +2097,41 @@
     <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">default_address</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; (<span class="ident">DiversifierIndex</span>, <span class="ident">PaymentAddress</span>) {
         <span class="ident">ExtendedFullViewingKey::from</span>(<span class="self">self</span>).<span class="ident">default_address</span>()
     }
+
+    <span class="doccomment">/// Derives an internal spending key given an external spending key.</span>
+    <span class="doccomment">///</span>
+    <span class="doccomment">/// Specified in [ZIP 32](https://zips.z.cash/zip-0032#deriving-a-sapling-internal-spending-key).</span>
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">derive_internal</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="self">Self</span> {
+        <span class="kw">let</span> <span class="ident">i</span> <span class="op">=</span> {
+            <span class="kw">let</span> <span class="ident">fvk</span> <span class="op">=</span> <span class="ident">FullViewingKey::from_expanded_spending_key</span>(<span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">expsk</span>);
+            <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">h</span> <span class="op">=</span> <span class="ident">Blake2bParams::new</span>()
+                .<span class="ident">hash_length</span>(<span class="number">32</span>)
+                .<span class="ident">personal</span>(<span class="ident"><span class="kw">crate</span>::zip32::ZIP32_SAPLING_INT_PERSONALIZATION</span>)
+                .<span class="ident">to_state</span>();
+            <span class="ident">h</span>.<span class="ident">update</span>(<span class="kw-2">&amp;</span><span class="ident">fvk</span>.<span class="ident">to_bytes</span>());
+            <span class="ident">h</span>.<span class="ident">update</span>(<span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">dk</span>.<span class="number">0</span>);
+            <span class="ident">h</span>.<span class="ident">finalize</span>()
+        };
+        <span class="kw">let</span> <span class="ident">i_nsk</span> <span class="op">=</span> <span class="ident">jubjub::Fr::from_bytes_wide</span>(<span class="ident">prf_expand</span>(<span class="ident">i</span>.<span class="ident">as_bytes</span>(), <span class="kw-2">&amp;</span>[<span class="number">0x17</span>]).<span class="ident">as_array</span>());
+        <span class="kw">let</span> <span class="ident">r</span> <span class="op">=</span> <span class="ident">prf_expand</span>(<span class="ident">i</span>.<span class="ident">as_bytes</span>(), <span class="kw-2">&amp;</span>[<span class="number">0x18</span>]);
+        <span class="kw">let</span> <span class="ident">r</span> <span class="op">=</span> <span class="ident">r</span>.<span class="ident">as_bytes</span>();
+        <span class="kw">let</span> <span class="ident">nsk_internal</span> <span class="op">=</span> <span class="ident">i_nsk</span> <span class="op">+</span> <span class="self">self</span>.<span class="ident">expsk</span>.<span class="ident">nsk</span>;
+        <span class="kw">let</span> <span class="ident">dk_internal</span> <span class="op">=</span> <span class="ident">DiversifierKey</span>(<span class="ident">r</span>[..<span class="number">32</span>].<span class="ident">try_into</span>().<span class="ident">unwrap</span>());
+        <span class="kw">let</span> <span class="ident">ovk_internal</span> <span class="op">=</span> <span class="ident">OutgoingViewingKey</span>(<span class="ident">r</span>[<span class="number">32</span>..].<span class="ident">try_into</span>().<span class="ident">unwrap</span>());
+
+        <span class="ident">ExtendedSpendingKey</span> {
+            <span class="ident">depth</span>: <span class="self">self</span>.<span class="ident">depth</span>,
+            <span class="ident">parent_fvk_tag</span>: <span class="self">self</span>.<span class="ident">parent_fvk_tag</span>,
+            <span class="ident">child_index</span>: <span class="self">self</span>.<span class="ident">child_index</span>,
+            <span class="ident">chain_code</span>: <span class="self">self</span>.<span class="ident">chain_code</span>,
+            <span class="ident">expsk</span>: <span class="ident">ExpandedSpendingKey</span> {
+                <span class="ident">ask</span>: <span class="self">self</span>.<span class="ident">expsk</span>.<span class="ident">ask</span>,
+                <span class="ident">nsk</span>: <span class="ident">nsk_internal</span>,
+                <span class="ident">ovk</span>: <span class="ident">ovk_internal</span>,
+            },
+            <span class="ident">dk</span>: <span class="ident">dk_internal</span>,
+        }
+    }
 }
 
 <span class="kw">impl</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> <span class="ident">From</span><span class="op">&lt;</span><span class="kw-2">&amp;</span><span class="lifetime">&#39;a</span> <span class="ident">ExtendedSpendingKey</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">ExtendedFullViewingKey</span> {
@@ -1717,6 +2235,25 @@
     <span class="doccomment">/// index, along with that index.</span>
     <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">default_address</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; (<span class="ident">DiversifierIndex</span>, <span class="ident">PaymentAddress</span>) {
         <span class="ident">sapling_default_address</span>(<span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">fvk</span>, <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">dk</span>)
+    }
+
+    <span class="doccomment">/// Derives an internal full viewing key used for internal operations such</span>
+    <span class="doccomment">/// as change and auto-shielding. The internal FVK has the same spend authority</span>
+    <span class="doccomment">/// (the private key corresponding to ak) as the original, but viewing authority</span>
+    <span class="doccomment">/// only for internal transfers.</span>
+    <span class="doccomment">///</span>
+    <span class="doccomment">/// Specified in [ZIP 32](https://zips.z.cash/zip-0032#deriving-a-sapling-internal-full-viewing-key).</span>
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">derive_internal</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="self">Self</span> {
+        <span class="kw">let</span> (<span class="ident">fvk_internal</span>, <span class="ident">dk_internal</span>) <span class="op">=</span> <span class="ident">sapling_derive_internal_fvk</span>(<span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">fvk</span>, <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">dk</span>);
+
+        <span class="ident">ExtendedFullViewingKey</span> {
+            <span class="ident">depth</span>: <span class="self">self</span>.<span class="ident">depth</span>,
+            <span class="ident">parent_fvk_tag</span>: <span class="self">self</span>.<span class="ident">parent_fvk_tag</span>,
+            <span class="ident">child_index</span>: <span class="self">self</span>.<span class="ident">child_index</span>,
+            <span class="ident">chain_code</span>: <span class="self">self</span>.<span class="ident">chain_code</span>,
+            <span class="ident">fvk</span>: <span class="ident">fvk_internal</span>,
+            <span class="ident">dk</span>: <span class="ident">dk_internal</span>,
+        }
     }
 }
 
@@ -1910,6 +2447,14 @@
             <span class="ident">d1</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span>[<span class="ident">u8</span>; <span class="number">11</span>]<span class="op">&gt;</span>,
             <span class="ident">d2</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span>[<span class="ident">u8</span>; <span class="number">11</span>]<span class="op">&gt;</span>,
             <span class="ident">dmax</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span>[<span class="ident">u8</span>; <span class="number">11</span>]<span class="op">&gt;</span>,
+            <span class="ident">internal_nsk</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span>[<span class="ident">u8</span>; <span class="number">32</span>]<span class="op">&gt;</span>,
+            <span class="ident">internal_ovk</span>: [<span class="ident">u8</span>; <span class="number">32</span>],
+            <span class="ident">internal_dk</span>: [<span class="ident">u8</span>; <span class="number">32</span>],
+            <span class="ident">internal_nk</span>: [<span class="ident">u8</span>; <span class="number">32</span>],
+            <span class="ident">internal_ivk</span>: [<span class="ident">u8</span>; <span class="number">32</span>],
+            <span class="ident">internal_xsk</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span>[<span class="ident">u8</span>; <span class="number">169</span>]<span class="op">&gt;</span>,
+            <span class="ident">internal_xfvk</span>: [<span class="ident">u8</span>; <span class="number">169</span>],
+            <span class="ident">internal_fp</span>: [<span class="ident">u8</span>; <span class="number">32</span>],
         }
 
         <span class="comment">// From https://github.com/zcash-hackworks/zcash-test-vectors/blob/master/sapling_zip32.py</span>
@@ -1998,6 +2543,66 @@
                 ]),
                 <span class="ident">d2</span>: <span class="prelude-val">None</span>,
                 <span class="ident">dmax</span>: <span class="prelude-val">None</span>,
+                <span class="ident">internal_nsk</span>: <span class="prelude-val">Some</span>([
+                    <span class="number">0x51</span>, <span class="number">0x12</span>, <span class="number">0x33</span>, <span class="number">0x63</span>, <span class="number">0x6b</span>, <span class="number">0x95</span>, <span class="number">0xfd</span>, <span class="number">0x0a</span>, <span class="number">0xfb</span>, <span class="number">0x6b</span>, <span class="number">0xf8</span>, <span class="number">0x19</span>, <span class="number">0x3a</span>,
+                    <span class="number">0x7d</span>, <span class="number">0x8f</span>, <span class="number">0x49</span>, <span class="number">0xef</span>, <span class="number">0xd7</span>, <span class="number">0x36</span>, <span class="number">0xa9</span>, <span class="number">0x88</span>, <span class="number">0x77</span>, <span class="number">0x5c</span>, <span class="number">0x54</span>, <span class="number">0xf9</span>, <span class="number">0x56</span>,
+                    <span class="number">0x68</span>, <span class="number">0x76</span>, <span class="number">0x46</span>, <span class="number">0xea</span>, <span class="number">0xab</span>, <span class="number">0x07</span>,
+                ]),
+                <span class="ident">internal_ovk</span>: [
+                    <span class="number">0x9d</span>, <span class="number">0xc4</span>, <span class="number">0x77</span>, <span class="number">0xfe</span>, <span class="number">0x1e</span>, <span class="number">0x7d</span>, <span class="number">0x28</span>, <span class="number">0x29</span>, <span class="number">0x13</span>, <span class="number">0xf6</span>, <span class="number">0x51</span>, <span class="number">0x65</span>, <span class="number">0x4d</span>,
+                    <span class="number">0x39</span>, <span class="number">0x85</span>, <span class="number">0xf0</span>, <span class="number">0x9d</span>, <span class="number">0x53</span>, <span class="number">0xc2</span>, <span class="number">0xd3</span>, <span class="number">0xb5</span>, <span class="number">0x76</span>, <span class="number">0x3d</span>, <span class="number">0x7a</span>, <span class="number">0x72</span>, <span class="number">0x3b</span>,
+                    <span class="number">0xcb</span>, <span class="number">0xd6</span>, <span class="number">0xee</span>, <span class="number">0x05</span>, <span class="number">0x3d</span>, <span class="number">0x5a</span>,
+                ],
+                <span class="ident">internal_dk</span>: [
+                    <span class="number">0x40</span>, <span class="number">0xdd</span>, <span class="number">0xc5</span>, <span class="number">0x6e</span>, <span class="number">0x69</span>, <span class="number">0x75</span>, <span class="number">0x13</span>, <span class="number">0x8c</span>, <span class="number">0x08</span>, <span class="number">0x39</span>, <span class="number">0xe5</span>, <span class="number">0x80</span>, <span class="number">0xb5</span>,
+                    <span class="number">0x4d</span>, <span class="number">0x6d</span>, <span class="number">0x99</span>, <span class="number">0x9d</span>, <span class="number">0xc6</span>, <span class="number">0x16</span>, <span class="number">0x84</span>, <span class="number">0x3c</span>, <span class="number">0xfe</span>, <span class="number">0x04</span>, <span class="number">0x1e</span>, <span class="number">0x8f</span>, <span class="number">0x38</span>,
+                    <span class="number">0x8b</span>, <span class="number">0x12</span>, <span class="number">0x4e</span>, <span class="number">0xf7</span>, <span class="number">0xb5</span>, <span class="number">0xed</span>,
+                ],
+                <span class="ident">internal_nk</span>: [
+                    <span class="number">0xa3</span>, <span class="number">0x83</span>, <span class="number">0x1a</span>, <span class="number">0x5c</span>, <span class="number">0x69</span>, <span class="number">0x33</span>, <span class="number">0xf8</span>, <span class="number">0xec</span>, <span class="number">0x6a</span>, <span class="number">0xa5</span>, <span class="number">0xce</span>, <span class="number">0x31</span>, <span class="number">0x6c</span>,
+                    <span class="number">0x50</span>, <span class="number">0x8b</span>, <span class="number">0x79</span>, <span class="number">0x91</span>, <span class="number">0xcd</span>, <span class="number">0x94</span>, <span class="number">0xd3</span>, <span class="number">0xbd</span>, <span class="number">0xb7</span>, <span class="number">0x00</span>, <span class="number">0xa1</span>, <span class="number">0xc4</span>, <span class="number">0x27</span>,
+                    <span class="number">0xa6</span>, <span class="number">0xae</span>, <span class="number">0x15</span>, <span class="number">0xe7</span>, <span class="number">0x2f</span>, <span class="number">0xb5</span>,
+                ],
+                <span class="ident">internal_ivk</span>: [
+                    <span class="number">0x79</span>, <span class="number">0x05</span>, <span class="number">0x77</span>, <span class="number">0x32</span>, <span class="number">0x1c</span>, <span class="number">0x51</span>, <span class="number">0x18</span>, <span class="number">0x04</span>, <span class="number">0x63</span>, <span class="number">0x6e</span>, <span class="number">0xe6</span>, <span class="number">0xba</span>, <span class="number">0xa4</span>,
+                    <span class="number">0xee</span>, <span class="number">0xa7</span>, <span class="number">0x79</span>, <span class="number">0xb4</span>, <span class="number">0xa4</span>, <span class="number">0x6a</span>, <span class="number">0x5a</span>, <span class="number">0x12</span>, <span class="number">0xf8</span>, <span class="number">0x5d</span>, <span class="number">0x36</span>, <span class="number">0x50</span>, <span class="number">0x74</span>,
+                    <span class="number">0xa0</span>, <span class="number">0x9d</span>, <span class="number">0x05</span>, <span class="number">0x4f</span>, <span class="number">0x34</span>, <span class="number">0x01</span>,
+                ],
+                <span class="ident">internal_xsk</span>: <span class="prelude-val">Some</span>([
+                    <span class="number">0x00</span>, <span class="number">0x00</span>, <span class="number">0x00</span>, <span class="number">0x00</span>, <span class="number">0x00</span>, <span class="number">0x00</span>, <span class="number">0x00</span>, <span class="number">0x00</span>, <span class="number">0x00</span>, <span class="number">0xd0</span>, <span class="number">0x94</span>, <span class="number">0x7c</span>, <span class="number">0x4b</span>,
+                    <span class="number">0x03</span>, <span class="number">0xbf</span>, <span class="number">0x72</span>, <span class="number">0xa3</span>, <span class="number">0x7a</span>, <span class="number">0xb4</span>, <span class="number">0x4f</span>, <span class="number">0x72</span>, <span class="number">0x27</span>, <span class="number">0x6d</span>, <span class="number">0x1c</span>, <span class="number">0xf3</span>, <span class="number">0xfd</span>,
+                    <span class="number">0xcd</span>, <span class="number">0x7e</span>, <span class="number">0xbf</span>, <span class="number">0x3e</span>, <span class="number">0x73</span>, <span class="number">0x34</span>, <span class="number">0x8b</span>, <span class="number">0x7e</span>, <span class="number">0x55</span>, <span class="number">0x0d</span>, <span class="number">0x75</span>, <span class="number">0x20</span>, <span class="number">0x18</span>,
+                    <span class="number">0x66</span>, <span class="number">0x8e</span>, <span class="number">0xb6</span>, <span class="number">0xc0</span>, <span class="number">0x0c</span>, <span class="number">0x93</span>, <span class="number">0xd3</span>, <span class="number">0x60</span>, <span class="number">0x32</span>, <span class="number">0xb9</span>, <span class="number">0xa2</span>, <span class="number">0x68</span>, <span class="number">0xe9</span>,
+                    <span class="number">0x9e</span>, <span class="number">0x86</span>, <span class="number">0xa8</span>, <span class="number">0x60</span>, <span class="number">0x77</span>, <span class="number">0x65</span>, <span class="number">0x60</span>, <span class="number">0xbf</span>, <span class="number">0x0e</span>, <span class="number">0x83</span>, <span class="number">0xc1</span>, <span class="number">0xa1</span>, <span class="number">0x0b</span>,
+                    <span class="number">0x51</span>, <span class="number">0xf6</span>, <span class="number">0x07</span>, <span class="number">0xc9</span>, <span class="number">0x54</span>, <span class="number">0x74</span>, <span class="number">0x25</span>, <span class="number">0x06</span>, <span class="number">0x51</span>, <span class="number">0x12</span>, <span class="number">0x33</span>, <span class="number">0x63</span>, <span class="number">0x6b</span>,
+                    <span class="number">0x95</span>, <span class="number">0xfd</span>, <span class="number">0x0a</span>, <span class="number">0xfb</span>, <span class="number">0x6b</span>, <span class="number">0xf8</span>, <span class="number">0x19</span>, <span class="number">0x3a</span>, <span class="number">0x7d</span>, <span class="number">0x8f</span>, <span class="number">0x49</span>, <span class="number">0xef</span>, <span class="number">0xd7</span>,
+                    <span class="number">0x36</span>, <span class="number">0xa9</span>, <span class="number">0x88</span>, <span class="number">0x77</span>, <span class="number">0x5c</span>, <span class="number">0x54</span>, <span class="number">0xf9</span>, <span class="number">0x56</span>, <span class="number">0x68</span>, <span class="number">0x76</span>, <span class="number">0x46</span>, <span class="number">0xea</span>, <span class="number">0xab</span>,
+                    <span class="number">0x07</span>, <span class="number">0x9d</span>, <span class="number">0xc4</span>, <span class="number">0x77</span>, <span class="number">0xfe</span>, <span class="number">0x1e</span>, <span class="number">0x7d</span>, <span class="number">0x28</span>, <span class="number">0x29</span>, <span class="number">0x13</span>, <span class="number">0xf6</span>, <span class="number">0x51</span>, <span class="number">0x65</span>,
+                    <span class="number">0x4d</span>, <span class="number">0x39</span>, <span class="number">0x85</span>, <span class="number">0xf0</span>, <span class="number">0x9d</span>, <span class="number">0x53</span>, <span class="number">0xc2</span>, <span class="number">0xd3</span>, <span class="number">0xb5</span>, <span class="number">0x76</span>, <span class="number">0x3d</span>, <span class="number">0x7a</span>, <span class="number">0x72</span>,
+                    <span class="number">0x3b</span>, <span class="number">0xcb</span>, <span class="number">0xd6</span>, <span class="number">0xee</span>, <span class="number">0x05</span>, <span class="number">0x3d</span>, <span class="number">0x5a</span>, <span class="number">0x40</span>, <span class="number">0xdd</span>, <span class="number">0xc5</span>, <span class="number">0x6e</span>, <span class="number">0x69</span>, <span class="number">0x75</span>,
+                    <span class="number">0x13</span>, <span class="number">0x8c</span>, <span class="number">0x08</span>, <span class="number">0x39</span>, <span class="number">0xe5</span>, <span class="number">0x80</span>, <span class="number">0xb5</span>, <span class="number">0x4d</span>, <span class="number">0x6d</span>, <span class="number">0x99</span>, <span class="number">0x9d</span>, <span class="number">0xc6</span>, <span class="number">0x16</span>,
+                    <span class="number">0x84</span>, <span class="number">0x3c</span>, <span class="number">0xfe</span>, <span class="number">0x04</span>, <span class="number">0x1e</span>, <span class="number">0x8f</span>, <span class="number">0x38</span>, <span class="number">0x8b</span>, <span class="number">0x12</span>, <span class="number">0x4e</span>, <span class="number">0xf7</span>, <span class="number">0xb5</span>, <span class="number">0xed</span>,
+                ]),
+                <span class="ident">internal_xfvk</span>: [
+                    <span class="number">0x00</span>, <span class="number">0x00</span>, <span class="number">0x00</span>, <span class="number">0x00</span>, <span class="number">0x00</span>, <span class="number">0x00</span>, <span class="number">0x00</span>, <span class="number">0x00</span>, <span class="number">0x00</span>, <span class="number">0xd0</span>, <span class="number">0x94</span>, <span class="number">0x7c</span>, <span class="number">0x4b</span>,
+                    <span class="number">0x03</span>, <span class="number">0xbf</span>, <span class="number">0x72</span>, <span class="number">0xa3</span>, <span class="number">0x7a</span>, <span class="number">0xb4</span>, <span class="number">0x4f</span>, <span class="number">0x72</span>, <span class="number">0x27</span>, <span class="number">0x6d</span>, <span class="number">0x1c</span>, <span class="number">0xf3</span>, <span class="number">0xfd</span>,
+                    <span class="number">0xcd</span>, <span class="number">0x7e</span>, <span class="number">0xbf</span>, <span class="number">0x3e</span>, <span class="number">0x73</span>, <span class="number">0x34</span>, <span class="number">0x8b</span>, <span class="number">0x7e</span>, <span class="number">0x55</span>, <span class="number">0x0d</span>, <span class="number">0x75</span>, <span class="number">0x20</span>, <span class="number">0x18</span>,
+                    <span class="number">0x66</span>, <span class="number">0x8e</span>, <span class="number">0x93</span>, <span class="number">0x44</span>, <span class="number">0x2e</span>, <span class="number">0x5f</span>, <span class="number">0xef</span>, <span class="number">0xfb</span>, <span class="number">0xff</span>, <span class="number">0x16</span>, <span class="number">0xe7</span>, <span class="number">0x21</span>, <span class="number">0x72</span>,
+                    <span class="number">0x02</span>, <span class="number">0xdc</span>, <span class="number">0x73</span>, <span class="number">0x06</span>, <span class="number">0x72</span>, <span class="number">0x9f</span>, <span class="number">0xff</span>, <span class="number">0xfe</span>, <span class="number">0x85</span>, <span class="number">0xaf</span>, <span class="number">0x56</span>, <span class="number">0x83</span>, <span class="number">0xbc</span>,
+                    <span class="number">0xe2</span>, <span class="number">0x64</span>, <span class="number">0x2e</span>, <span class="number">0x3e</span>, <span class="number">0xeb</span>, <span class="number">0x5d</span>, <span class="number">0x38</span>, <span class="number">0x71</span>, <span class="number">0xa3</span>, <span class="number">0x83</span>, <span class="number">0x1a</span>, <span class="number">0x5c</span>, <span class="number">0x69</span>,
+                    <span class="number">0x33</span>, <span class="number">0xf8</span>, <span class="number">0xec</span>, <span class="number">0x6a</span>, <span class="number">0xa5</span>, <span class="number">0xce</span>, <span class="number">0x31</span>, <span class="number">0x6c</span>, <span class="number">0x50</span>, <span class="number">0x8b</span>, <span class="number">0x79</span>, <span class="number">0x91</span>, <span class="number">0xcd</span>,
+                    <span class="number">0x94</span>, <span class="number">0xd3</span>, <span class="number">0xbd</span>, <span class="number">0xb7</span>, <span class="number">0x00</span>, <span class="number">0xa1</span>, <span class="number">0xc4</span>, <span class="number">0x27</span>, <span class="number">0xa6</span>, <span class="number">0xae</span>, <span class="number">0x15</span>, <span class="number">0xe7</span>, <span class="number">0x2f</span>,
+                    <span class="number">0xb5</span>, <span class="number">0x9d</span>, <span class="number">0xc4</span>, <span class="number">0x77</span>, <span class="number">0xfe</span>, <span class="number">0x1e</span>, <span class="number">0x7d</span>, <span class="number">0x28</span>, <span class="number">0x29</span>, <span class="number">0x13</span>, <span class="number">0xf6</span>, <span class="number">0x51</span>, <span class="number">0x65</span>,
+                    <span class="number">0x4d</span>, <span class="number">0x39</span>, <span class="number">0x85</span>, <span class="number">0xf0</span>, <span class="number">0x9d</span>, <span class="number">0x53</span>, <span class="number">0xc2</span>, <span class="number">0xd3</span>, <span class="number">0xb5</span>, <span class="number">0x76</span>, <span class="number">0x3d</span>, <span class="number">0x7a</span>, <span class="number">0x72</span>,
+                    <span class="number">0x3b</span>, <span class="number">0xcb</span>, <span class="number">0xd6</span>, <span class="number">0xee</span>, <span class="number">0x05</span>, <span class="number">0x3d</span>, <span class="number">0x5a</span>, <span class="number">0x40</span>, <span class="number">0xdd</span>, <span class="number">0xc5</span>, <span class="number">0x6e</span>, <span class="number">0x69</span>, <span class="number">0x75</span>,
+                    <span class="number">0x13</span>, <span class="number">0x8c</span>, <span class="number">0x08</span>, <span class="number">0x39</span>, <span class="number">0xe5</span>, <span class="number">0x80</span>, <span class="number">0xb5</span>, <span class="number">0x4d</span>, <span class="number">0x6d</span>, <span class="number">0x99</span>, <span class="number">0x9d</span>, <span class="number">0xc6</span>, <span class="number">0x16</span>,
+                    <span class="number">0x84</span>, <span class="number">0x3c</span>, <span class="number">0xfe</span>, <span class="number">0x04</span>, <span class="number">0x1e</span>, <span class="number">0x8f</span>, <span class="number">0x38</span>, <span class="number">0x8b</span>, <span class="number">0x12</span>, <span class="number">0x4e</span>, <span class="number">0xf7</span>, <span class="number">0xb5</span>, <span class="number">0xed</span>,
+                ],
+                <span class="ident">internal_fp</span>: [
+                    <span class="number">0x82</span>, <span class="number">0x64</span>, <span class="number">0xed</span>, <span class="number">0xec</span>, <span class="number">0x63</span>, <span class="number">0xb1</span>, <span class="number">0x55</span>, <span class="number">0x00</span>, <span class="number">0x1d</span>, <span class="number">0x84</span>, <span class="number">0x96</span>, <span class="number">0x68</span>, <span class="number">0x5c</span>,
+                    <span class="number">0xc7</span>, <span class="number">0xc2</span>, <span class="number">0x1e</span>, <span class="number">0xa9</span>, <span class="number">0x57</span>, <span class="number">0xc6</span>, <span class="number">0xf5</span>, <span class="number">0x91</span>, <span class="number">0x09</span>, <span class="number">0x0a</span>, <span class="number">0x1c</span>, <span class="number">0x20</span>, <span class="number">0xe5</span>,
+                    <span class="number">0x2a</span>, <span class="number">0x41</span>, <span class="number">0x89</span>, <span class="number">0xb8</span>, <span class="number">0xbb</span>, <span class="number">0x96</span>,
+                ],
             },
             <span class="ident">TestVector</span> {
                 <span class="ident">ask</span>: <span class="prelude-val">Some</span>([
@@ -2085,6 +2690,66 @@
                 <span class="ident">dmax</span>: <span class="prelude-val">Some</span>([
                     <span class="number">0x63</span>, <span class="number">0x89</span>, <span class="number">0x57</span>, <span class="number">0x4c</span>, <span class="number">0xde</span>, <span class="number">0x0f</span>, <span class="number">0xbb</span>, <span class="number">0xc6</span>, <span class="number">0x36</span>, <span class="number">0x81</span>, <span class="number">0x31</span>,
                 ]),
+                <span class="ident">internal_nsk</span>: <span class="prelude-val">Some</span>([
+                    <span class="number">0x74</span>, <span class="number">0x92</span>, <span class="number">0x9f</span>, <span class="number">0x79</span>, <span class="number">0x0c</span>, <span class="number">0x11</span>, <span class="number">0xdc</span>, <span class="number">0xab</span>, <span class="number">0x3a</span>, <span class="number">0x2f</span>, <span class="number">0x93</span>, <span class="number">0x12</span>, <span class="number">0x35</span>,
+                    <span class="number">0xcd</span>, <span class="number">0xb2</span>, <span class="number">0x67</span>, <span class="number">0xf5</span>, <span class="number">0xa3</span>, <span class="number">0x1b</span>, <span class="number">0x9f</span>, <span class="number">0x13</span>, <span class="number">0x9f</span>, <span class="number">0x2c</span>, <span class="number">0x9f</span>, <span class="number">0xd8</span>, <span class="number">0x16</span>,
+                    <span class="number">0xb0</span>, <span class="number">0x44</span>, <span class="number">0x4f</span>, <span class="number">0xb8</span>, <span class="number">0x05</span>, <span class="number">0x05</span>,
+                ]),
+                <span class="ident">internal_ovk</span>: [
+                    <span class="number">0x0c</span>, <span class="number">0xd4</span>, <span class="number">0xd7</span>, <span class="number">0xc5</span>, <span class="number">0xcc</span>, <span class="number">0x7f</span>, <span class="number">0x53</span>, <span class="number">0x4b</span>, <span class="number">0x96</span>, <span class="number">0xd2</span>, <span class="number">0x41</span>, <span class="number">0x82</span>, <span class="number">0xa3</span>,
+                    <span class="number">0x14</span>, <span class="number">0x65</span>, <span class="number">0xb4</span>, <span class="number">0x78</span>, <span class="number">0x11</span>, <span class="number">0x05</span>, <span class="number">0x48</span>, <span class="number">0x9c</span>, <span class="number">0xd1</span>, <span class="number">0x0d</span>, <span class="number">0x50</span>, <span class="number">0x0c</span>, <span class="number">0xf5</span>,
+                    <span class="number">0x29</span>, <span class="number">0x5a</span>, <span class="number">0x6f</span>, <span class="number">0xd8</span>, <span class="number">0x18</span>, <span class="number">0xcc</span>,
+                ],
+                <span class="ident">internal_dk</span>: [
+                    <span class="number">0xd2</span>, <span class="number">0x78</span>, <span class="number">0xb7</span>, <span class="number">0x2c</span>, <span class="number">0x62</span>, <span class="number">0x1d</span>, <span class="number">0x19</span>, <span class="number">0xcb</span>, <span class="number">0x00</span>, <span class="number">0xf9</span>, <span class="number">0x70</span>, <span class="number">0x07</span>, <span class="number">0x9c</span>,
+                    <span class="number">0x89</span>, <span class="number">0x22</span>, <span class="number">0x76</span>, <span class="number">0x1c</span>, <span class="number">0xdd</span>, <span class="number">0x3a</span>, <span class="number">0xe7</span>, <span class="number">0xf2</span>, <span class="number">0x7b</span>, <span class="number">0x18</span>, <span class="number">0x47</span>, <span class="number">0xc5</span>, <span class="number">0x53</span>,
+                    <span class="number">0x60</span>, <span class="number">0xdb</span>, <span class="number">0xeb</span>, <span class="number">0xf6</span>, <span class="number">0x54</span>, <span class="number">0x92</span>,
+                ],
+                <span class="ident">internal_nk</span>: [
+                    <span class="number">0x2b</span>, <span class="number">0x5c</span>, <span class="number">0x78</span>, <span class="number">0xa2</span>, <span class="number">0xfb</span>, <span class="number">0xa5</span>, <span class="number">0x01</span>, <span class="number">0x9c</span>, <span class="number">0x15</span>, <span class="number">0xa7</span>, <span class="number">0x51</span>, <span class="number">0x50</span>, <span class="number">0x2b</span>,
+                    <span class="number">0xa9</span>, <span class="number">0x91</span>, <span class="number">0x6f</span>, <span class="number">0xae</span>, <span class="number">0xda</span>, <span class="number">0xe1</span>, <span class="number">0xfc</span>, <span class="number">0x14</span>, <span class="number">0xdc</span>, <span class="number">0x81</span>, <span class="number">0xb0</span>, <span class="number">0xb8</span>, <span class="number">0x35</span>,
+                    <span class="number">0xf2</span>, <span class="number">0xbf</span>, <span class="number">0x95</span>, <span class="number">0xc0</span>, <span class="number">0x68</span>, <span class="number">0xe8</span>,
+                ],
+                <span class="ident">internal_ivk</span>: [
+                    <span class="number">0xdf</span>, <span class="number">0x44</span>, <span class="number">0x54</span>, <span class="number">0xa6</span>, <span class="number">0x76</span>, <span class="number">0xd1</span>, <span class="number">0xde</span>, <span class="number">0x32</span>, <span class="number">0xe2</span>, <span class="number">0x0a</span>, <span class="number">0xe6</span>, <span class="number">0x28</span>, <span class="number">0x7a</span>,
+                    <span class="number">0x92</span>, <span class="number">0xfa</span>, <span class="number">0xfe</span>, <span class="number">0xfb</span>, <span class="number">0xbb</span>, <span class="number">0x3e</span>, <span class="number">0x54</span>, <span class="number">0xb5</span>, <span class="number">0x88</span>, <span class="number">0xc8</span>, <span class="number">0xda</span>, <span class="number">0x28</span>, <span class="number">0x07</span>,
+                    <span class="number">0xec</span>, <span class="number">0x43</span>, <span class="number">0x68</span>, <span class="number">0x2c</span>, <span class="number">0x85</span>, <span class="number">0x00</span>,
+                ],
+                <span class="ident">internal_xsk</span>: <span class="prelude-val">Some</span>([
+                    <span class="number">0x01</span>, <span class="number">0x14</span>, <span class="number">0xc2</span>, <span class="number">0x71</span>, <span class="number">0x3a</span>, <span class="number">0x01</span>, <span class="number">0x00</span>, <span class="number">0x00</span>, <span class="number">0x00</span>, <span class="number">0x01</span>, <span class="number">0x47</span>, <span class="number">0x11</span>, <span class="number">0x0c</span>,
+                    <span class="number">0x69</span>, <span class="number">0x1a</span>, <span class="number">0x03</span>, <span class="number">0xb9</span>, <span class="number">0xd9</span>, <span class="number">0xf0</span>, <span class="number">0xba</span>, <span class="number">0x90</span>, <span class="number">0x05</span>, <span class="number">0xc5</span>, <span class="number">0xe7</span>, <span class="number">0x90</span>, <span class="number">0xa5</span>,
+                    <span class="number">0x95</span>, <span class="number">0xb7</span>, <span class="number">0xf0</span>, <span class="number">0x4e</span>, <span class="number">0x33</span>, <span class="number">0x29</span>, <span class="number">0xd2</span>, <span class="number">0xfa</span>, <span class="number">0x43</span>, <span class="number">0x8a</span>, <span class="number">0x67</span>, <span class="number">0x05</span>, <span class="number">0xda</span>,
+                    <span class="number">0xbc</span>, <span class="number">0xe6</span>, <span class="number">0x28</span>, <span class="number">0x2b</span>, <span class="number">0xc1</span>, <span class="number">0x97</span>, <span class="number">0xa5</span>, <span class="number">0x16</span>, <span class="number">0x28</span>, <span class="number">0x7c</span>, <span class="number">0x8e</span>, <span class="number">0xa8</span>, <span class="number">0xf6</span>,
+                    <span class="number">0x8c</span>, <span class="number">0x42</span>, <span class="number">0x4a</span>, <span class="number">0xba</span>, <span class="number">0xd3</span>, <span class="number">0x02</span>, <span class="number">0xb4</span>, <span class="number">0x5c</span>, <span class="number">0xdf</span>, <span class="number">0x95</span>, <span class="number">0x40</span>, <span class="number">0x79</span>, <span class="number">0x61</span>,
+                    <span class="number">0xd7</span>, <span class="number">0xb8</span>, <span class="number">0xb4</span>, <span class="number">0x55</span>, <span class="number">0x26</span>, <span class="number">0x7a</span>, <span class="number">0x35</span>, <span class="number">0x0c</span>, <span class="number">0x74</span>, <span class="number">0x92</span>, <span class="number">0x9f</span>, <span class="number">0x79</span>, <span class="number">0x0c</span>,
+                    <span class="number">0x11</span>, <span class="number">0xdc</span>, <span class="number">0xab</span>, <span class="number">0x3a</span>, <span class="number">0x2f</span>, <span class="number">0x93</span>, <span class="number">0x12</span>, <span class="number">0x35</span>, <span class="number">0xcd</span>, <span class="number">0xb2</span>, <span class="number">0x67</span>, <span class="number">0xf5</span>, <span class="number">0xa3</span>,
+                    <span class="number">0x1b</span>, <span class="number">0x9f</span>, <span class="number">0x13</span>, <span class="number">0x9f</span>, <span class="number">0x2c</span>, <span class="number">0x9f</span>, <span class="number">0xd8</span>, <span class="number">0x16</span>, <span class="number">0xb0</span>, <span class="number">0x44</span>, <span class="number">0x4f</span>, <span class="number">0xb8</span>, <span class="number">0x05</span>,
+                    <span class="number">0x05</span>, <span class="number">0x0c</span>, <span class="number">0xd4</span>, <span class="number">0xd7</span>, <span class="number">0xc5</span>, <span class="number">0xcc</span>, <span class="number">0x7f</span>, <span class="number">0x53</span>, <span class="number">0x4b</span>, <span class="number">0x96</span>, <span class="number">0xd2</span>, <span class="number">0x41</span>, <span class="number">0x82</span>,
+                    <span class="number">0xa3</span>, <span class="number">0x14</span>, <span class="number">0x65</span>, <span class="number">0xb4</span>, <span class="number">0x78</span>, <span class="number">0x11</span>, <span class="number">0x05</span>, <span class="number">0x48</span>, <span class="number">0x9c</span>, <span class="number">0xd1</span>, <span class="number">0x0d</span>, <span class="number">0x50</span>, <span class="number">0x0c</span>,
+                    <span class="number">0xf5</span>, <span class="number">0x29</span>, <span class="number">0x5a</span>, <span class="number">0x6f</span>, <span class="number">0xd8</span>, <span class="number">0x18</span>, <span class="number">0xcc</span>, <span class="number">0xd2</span>, <span class="number">0x78</span>, <span class="number">0xb7</span>, <span class="number">0x2c</span>, <span class="number">0x62</span>, <span class="number">0x1d</span>,
+                    <span class="number">0x19</span>, <span class="number">0xcb</span>, <span class="number">0x00</span>, <span class="number">0xf9</span>, <span class="number">0x70</span>, <span class="number">0x07</span>, <span class="number">0x9c</span>, <span class="number">0x89</span>, <span class="number">0x22</span>, <span class="number">0x76</span>, <span class="number">0x1c</span>, <span class="number">0xdd</span>, <span class="number">0x3a</span>,
+                    <span class="number">0xe7</span>, <span class="number">0xf2</span>, <span class="number">0x7b</span>, <span class="number">0x18</span>, <span class="number">0x47</span>, <span class="number">0xc5</span>, <span class="number">0x53</span>, <span class="number">0x60</span>, <span class="number">0xdb</span>, <span class="number">0xeb</span>, <span class="number">0xf6</span>, <span class="number">0x54</span>, <span class="number">0x92</span>,
+                ]),
+                <span class="ident">internal_xfvk</span>: [
+                    <span class="number">0x01</span>, <span class="number">0x14</span>, <span class="number">0xc2</span>, <span class="number">0x71</span>, <span class="number">0x3a</span>, <span class="number">0x01</span>, <span class="number">0x00</span>, <span class="number">0x00</span>, <span class="number">0x00</span>, <span class="number">0x01</span>, <span class="number">0x47</span>, <span class="number">0x11</span>, <span class="number">0x0c</span>,
+                    <span class="number">0x69</span>, <span class="number">0x1a</span>, <span class="number">0x03</span>, <span class="number">0xb9</span>, <span class="number">0xd9</span>, <span class="number">0xf0</span>, <span class="number">0xba</span>, <span class="number">0x90</span>, <span class="number">0x05</span>, <span class="number">0xc5</span>, <span class="number">0xe7</span>, <span class="number">0x90</span>, <span class="number">0xa5</span>,
+                    <span class="number">0x95</span>, <span class="number">0xb7</span>, <span class="number">0xf0</span>, <span class="number">0x4e</span>, <span class="number">0x33</span>, <span class="number">0x29</span>, <span class="number">0xd2</span>, <span class="number">0xfa</span>, <span class="number">0x43</span>, <span class="number">0x8a</span>, <span class="number">0x67</span>, <span class="number">0x05</span>, <span class="number">0xda</span>,
+                    <span class="number">0xbc</span>, <span class="number">0xe6</span>, <span class="number">0xdc</span>, <span class="number">0x14</span>, <span class="number">0xb5</span>, <span class="number">0x14</span>, <span class="number">0xd3</span>, <span class="number">0xa9</span>, <span class="number">0x25</span>, <span class="number">0x94</span>, <span class="number">0xc2</span>, <span class="number">0x19</span>, <span class="number">0x25</span>,
+                    <span class="number">0xaf</span>, <span class="number">0x2f</span>, <span class="number">0x77</span>, <span class="number">0x65</span>, <span class="number">0xa5</span>, <span class="number">0x47</span>, <span class="number">0xb3</span>, <span class="number">0x0e</span>, <span class="number">0x73</span>, <span class="number">0xfa</span>, <span class="number">0x7b</span>, <span class="number">0x70</span>, <span class="number">0x0e</span>,
+                    <span class="number">0xa1</span>, <span class="number">0xbf</span>, <span class="number">0xf2</span>, <span class="number">0xe5</span>, <span class="number">0xef</span>, <span class="number">0xaa</span>, <span class="number">0xa8</span>, <span class="number">0x8b</span>, <span class="number">0x2b</span>, <span class="number">0x5c</span>, <span class="number">0x78</span>, <span class="number">0xa2</span>, <span class="number">0xfb</span>,
+                    <span class="number">0xa5</span>, <span class="number">0x01</span>, <span class="number">0x9c</span>, <span class="number">0x15</span>, <span class="number">0xa7</span>, <span class="number">0x51</span>, <span class="number">0x50</span>, <span class="number">0x2b</span>, <span class="number">0xa9</span>, <span class="number">0x91</span>, <span class="number">0x6f</span>, <span class="number">0xae</span>, <span class="number">0xda</span>,
+                    <span class="number">0xe1</span>, <span class="number">0xfc</span>, <span class="number">0x14</span>, <span class="number">0xdc</span>, <span class="number">0x81</span>, <span class="number">0xb0</span>, <span class="number">0xb8</span>, <span class="number">0x35</span>, <span class="number">0xf2</span>, <span class="number">0xbf</span>, <span class="number">0x95</span>, <span class="number">0xc0</span>, <span class="number">0x68</span>,
+                    <span class="number">0xe8</span>, <span class="number">0x0c</span>, <span class="number">0xd4</span>, <span class="number">0xd7</span>, <span class="number">0xc5</span>, <span class="number">0xcc</span>, <span class="number">0x7f</span>, <span class="number">0x53</span>, <span class="number">0x4b</span>, <span class="number">0x96</span>, <span class="number">0xd2</span>, <span class="number">0x41</span>, <span class="number">0x82</span>,
+                    <span class="number">0xa3</span>, <span class="number">0x14</span>, <span class="number">0x65</span>, <span class="number">0xb4</span>, <span class="number">0x78</span>, <span class="number">0x11</span>, <span class="number">0x05</span>, <span class="number">0x48</span>, <span class="number">0x9c</span>, <span class="number">0xd1</span>, <span class="number">0x0d</span>, <span class="number">0x50</span>, <span class="number">0x0c</span>,
+                    <span class="number">0xf5</span>, <span class="number">0x29</span>, <span class="number">0x5a</span>, <span class="number">0x6f</span>, <span class="number">0xd8</span>, <span class="number">0x18</span>, <span class="number">0xcc</span>, <span class="number">0xd2</span>, <span class="number">0x78</span>, <span class="number">0xb7</span>, <span class="number">0x2c</span>, <span class="number">0x62</span>, <span class="number">0x1d</span>,
+                    <span class="number">0x19</span>, <span class="number">0xcb</span>, <span class="number">0x00</span>, <span class="number">0xf9</span>, <span class="number">0x70</span>, <span class="number">0x07</span>, <span class="number">0x9c</span>, <span class="number">0x89</span>, <span class="number">0x22</span>, <span class="number">0x76</span>, <span class="number">0x1c</span>, <span class="number">0xdd</span>, <span class="number">0x3a</span>,
+                    <span class="number">0xe7</span>, <span class="number">0xf2</span>, <span class="number">0x7b</span>, <span class="number">0x18</span>, <span class="number">0x47</span>, <span class="number">0xc5</span>, <span class="number">0x53</span>, <span class="number">0x60</span>, <span class="number">0xdb</span>, <span class="number">0xeb</span>, <span class="number">0xf6</span>, <span class="number">0x54</span>, <span class="number">0x92</span>,
+                ],
+                <span class="ident">internal_fp</span>: [
+                    <span class="number">0x0d</span>, <span class="number">0xe5</span>, <span class="number">0x83</span>, <span class="number">0xca</span>, <span class="number">0x50</span>, <span class="number">0x2b</span>, <span class="number">0x1c</span>, <span class="number">0x4b</span>, <span class="number">0x87</span>, <span class="number">0xca</span>, <span class="number">0xc8</span>, <span class="number">0xc9</span>, <span class="number">0x78</span>,
+                    <span class="number">0x6c</span>, <span class="number">0x61</span>, <span class="number">0x9b</span>, <span class="number">0x79</span>, <span class="number">0xe1</span>, <span class="number">0x69</span>, <span class="number">0xb4</span>, <span class="number">0x15</span>, <span class="number">0x61</span>, <span class="number">0xf2</span>, <span class="number">0x44</span>, <span class="number">0xee</span>, <span class="number">0xec</span>,
+                    <span class="number">0x86</span>, <span class="number">0x86</span>, <span class="number">0xb8</span>, <span class="number">0xdb</span>, <span class="number">0xc4</span>, <span class="number">0xe1</span>,
+                ],
             },
             <span class="ident">TestVector</span> {
                 <span class="ident">ask</span>: <span class="prelude-val">Some</span>([
@@ -2170,6 +2835,66 @@
                 ]),
                 <span class="ident">d2</span>: <span class="prelude-val">None</span>,
                 <span class="ident">dmax</span>: <span class="prelude-val">None</span>,
+                <span class="ident">internal_nsk</span>: <span class="prelude-val">Some</span>([
+                    <span class="number">0x34</span>, <span class="number">0x78</span>, <span class="number">0x65</span>, <span class="number">0xac</span>, <span class="number">0xf4</span>, <span class="number">0x7e</span>, <span class="number">0x50</span>, <span class="number">0x45</span>, <span class="number">0x38</span>, <span class="number">0xf5</span>, <span class="number">0xef</span>, <span class="number">0x8b</span>, <span class="number">0x04</span>,
+                    <span class="number">0x70</span>, <span class="number">0x20</span>, <span class="number">0x80</span>, <span class="number">0xe6</span>, <span class="number">0x09</span>, <span class="number">0x1c</span>, <span class="number">0xda</span>, <span class="number">0x57</span>, <span class="number">0x97</span>, <span class="number">0xcd</span>, <span class="number">0x7d</span>, <span class="number">0x23</span>, <span class="number">0x5a</span>,
+                    <span class="number">0x54</span>, <span class="number">0x6e</span>, <span class="number">0xb1</span>, <span class="number">0x0f</span>, <span class="number">0x55</span>, <span class="number">0x08</span>,
+                ]),
+                <span class="ident">internal_ovk</span>: [
+                    <span class="number">0xdd</span>, <span class="number">0xba</span>, <span class="number">0xc2</span>, <span class="number">0xa4</span>, <span class="number">0x93</span>, <span class="number">0xf5</span>, <span class="number">0x3c</span>, <span class="number">0x3b</span>, <span class="number">0x09</span>, <span class="number">0x33</span>, <span class="number">0xd9</span>, <span class="number">0x13</span>, <span class="number">0xde</span>,
+                    <span class="number">0xf8</span>, <span class="number">0x88</span>, <span class="number">0x48</span>, <span class="number">0x65</span>, <span class="number">0x4c</span>, <span class="number">0x08</span>, <span class="number">0x7c</span>, <span class="number">0x12</span>, <span class="number">0x60</span>, <span class="number">0x9d</span>, <span class="number">0xf0</span>, <span class="number">0x1b</span>, <span class="number">0xaf</span>,
+                    <span class="number">0x94</span>, <span class="number">0x05</span>, <span class="number">0xce</span>, <span class="number">0x78</span>, <span class="number">0x04</span>, <span class="number">0xfd</span>,
+                ],
+                <span class="ident">internal_dk</span>: [
+                    <span class="number">0x60</span>, <span class="number">0x2c</span>, <span class="number">0xd3</span>, <span class="number">0x17</span>, <span class="number">0xb7</span>, <span class="number">0xce</span>, <span class="number">0xa1</span>, <span class="number">0x1e</span>, <span class="number">0x8c</span>, <span class="number">0xc7</span>, <span class="number">0xae</span>, <span class="number">0x2e</span>, <span class="number">0xa4</span>,
+                    <span class="number">0x05</span>, <span class="number">0xb4</span>, <span class="number">0x0d</span>, <span class="number">0x46</span>, <span class="number">0xb1</span>, <span class="number">0x59</span>, <span class="number">0x2a</span>, <span class="number">0x30</span>, <span class="number">0xf0</span>, <span class="number">0xcb</span>, <span class="number">0x6e</span>, <span class="number">0x8c</span>, <span class="number">0x4f</span>,
+                    <span class="number">0x17</span>, <span class="number">0xd7</span>, <span class="number">0xf7</span>, <span class="number">0xc4</span>, <span class="number">0x7f</span>, <span class="number">0xeb</span>,
+                ],
+                <span class="ident">internal_nk</span>: [
+                    <span class="number">0xf9</span>, <span class="number">0x12</span>, <span class="number">0x87</span>, <span class="number">0xc0</span>, <span class="number">0x6e</span>, <span class="number">0x30</span>, <span class="number">0xb6</span>, <span class="number">0x5e</span>, <span class="number">0xa1</span>, <span class="number">0xbd</span>, <span class="number">0xb7</span>, <span class="number">0x16</span>, <span class="number">0xb2</span>,
+                    <span class="number">0x31</span>, <span class="number">0xde</span>, <span class="number">0x67</span>, <span class="number">0x78</span>, <span class="number">0xa5</span>, <span class="number">0xd8</span>, <span class="number">0x0e</span>, <span class="number">0xe5</span>, <span class="number">0xcd</span>, <span class="number">0x9c</span>, <span class="number">0x06</span>, <span class="number">0x0d</span>, <span class="number">0x1a</span>,
+                    <span class="number">0xba</span>, <span class="number">0xca</span>, <span class="number">0xe0</span>, <span class="number">0xaa</span>, <span class="number">0xe2</span>, <span class="number">0x3b</span>,
+                ],
+                <span class="ident">internal_ivk</span>: [
+                    <span class="number">0x1d</span>, <span class="number">0x59</span>, <span class="number">0xea</span>, <span class="number">0x20</span>, <span class="number">0x17</span>, <span class="number">0x88</span>, <span class="number">0x18</span>, <span class="number">0x64</span>, <span class="number">0xd2</span>, <span class="number">0x4e</span>, <span class="number">0xad</span>, <span class="number">0xb5</span>, <span class="number">0xcf</span>,
+                    <span class="number">0x34</span>, <span class="number">0x68</span>, <span class="number">0xa4</span>, <span class="number">0x1a</span>, <span class="number">0x1b</span>, <span class="number">0x2a</span>, <span class="number">0xaa</span>, <span class="number">0x0d</span>, <span class="number">0x1b</span>, <span class="number">0x3a</span>, <span class="number">0x72</span>, <span class="number">0xc6</span>, <span class="number">0xda</span>,
+                    <span class="number">0x9c</span>, <span class="number">0xe6</span>, <span class="number">0x50</span>, <span class="number">0x2a</span>, <span class="number">0x0a</span>, <span class="number">0x05</span>,
+                ],
+                <span class="ident">internal_xsk</span>: <span class="prelude-val">Some</span>([
+                    <span class="number">0x02</span>, <span class="number">0xdb</span>, <span class="number">0x99</span>, <span class="number">0x9e</span>, <span class="number">0x07</span>, <span class="number">0x02</span>, <span class="number">0x00</span>, <span class="number">0x00</span>, <span class="number">0x80</span>, <span class="number">0x97</span>, <span class="number">0xce</span>, <span class="number">0x15</span>, <span class="number">0xf4</span>,
+                    <span class="number">0xed</span>, <span class="number">0x1b</span>, <span class="number">0x97</span>, <span class="number">0x39</span>, <span class="number">0xb0</span>, <span class="number">0x26</span>, <span class="number">0x2a</span>, <span class="number">0x46</span>, <span class="number">0x3b</span>, <span class="number">0xcb</span>, <span class="number">0x3d</span>, <span class="number">0xc9</span>, <span class="number">0xb3</span>,
+                    <span class="number">0xbd</span>, <span class="number">0x23</span>, <span class="number">0x23</span>, <span class="number">0xa9</span>, <span class="number">0xba</span>, <span class="number">0xa4</span>, <span class="number">0x41</span>, <span class="number">0xca</span>, <span class="number">0x42</span>, <span class="number">0x77</span>, <span class="number">0x73</span>, <span class="number">0x83</span>, <span class="number">0xa8</span>,
+                    <span class="number">0xd4</span>, <span class="number">0x35</span>, <span class="number">0x8b</span>, <span class="number">0xe8</span>, <span class="number">0x11</span>, <span class="number">0x3c</span>, <span class="number">0xee</span>, <span class="number">0x34</span>, <span class="number">0x13</span>, <span class="number">0xa7</span>, <span class="number">0x1f</span>, <span class="number">0x82</span>, <span class="number">0xc4</span>,
+                    <span class="number">0x1f</span>, <span class="number">0xc8</span>, <span class="number">0xda</span>, <span class="number">0x51</span>, <span class="number">0x7b</span>, <span class="number">0xe1</span>, <span class="number">0x34</span>, <span class="number">0x04</span>, <span class="number">0x98</span>, <span class="number">0x32</span>, <span class="number">0xe6</span>, <span class="number">0x82</span>, <span class="number">0x5c</span>,
+                    <span class="number">0x92</span>, <span class="number">0xda</span>, <span class="number">0x6b</span>, <span class="number">0x84</span>, <span class="number">0xfe</span>, <span class="number">0xe4</span>, <span class="number">0xc6</span>, <span class="number">0x0d</span>, <span class="number">0x34</span>, <span class="number">0x78</span>, <span class="number">0x65</span>, <span class="number">0xac</span>, <span class="number">0xf4</span>,
+                    <span class="number">0x7e</span>, <span class="number">0x50</span>, <span class="number">0x45</span>, <span class="number">0x38</span>, <span class="number">0xf5</span>, <span class="number">0xef</span>, <span class="number">0x8b</span>, <span class="number">0x04</span>, <span class="number">0x70</span>, <span class="number">0x20</span>, <span class="number">0x80</span>, <span class="number">0xe6</span>, <span class="number">0x09</span>,
+                    <span class="number">0x1c</span>, <span class="number">0xda</span>, <span class="number">0x57</span>, <span class="number">0x97</span>, <span class="number">0xcd</span>, <span class="number">0x7d</span>, <span class="number">0x23</span>, <span class="number">0x5a</span>, <span class="number">0x54</span>, <span class="number">0x6e</span>, <span class="number">0xb1</span>, <span class="number">0x0f</span>, <span class="number">0x55</span>,
+                    <span class="number">0x08</span>, <span class="number">0xdd</span>, <span class="number">0xba</span>, <span class="number">0xc2</span>, <span class="number">0xa4</span>, <span class="number">0x93</span>, <span class="number">0xf5</span>, <span class="number">0x3c</span>, <span class="number">0x3b</span>, <span class="number">0x09</span>, <span class="number">0x33</span>, <span class="number">0xd9</span>, <span class="number">0x13</span>,
+                    <span class="number">0xde</span>, <span class="number">0xf8</span>, <span class="number">0x88</span>, <span class="number">0x48</span>, <span class="number">0x65</span>, <span class="number">0x4c</span>, <span class="number">0x08</span>, <span class="number">0x7c</span>, <span class="number">0x12</span>, <span class="number">0x60</span>, <span class="number">0x9d</span>, <span class="number">0xf0</span>, <span class="number">0x1b</span>,
+                    <span class="number">0xaf</span>, <span class="number">0x94</span>, <span class="number">0x05</span>, <span class="number">0xce</span>, <span class="number">0x78</span>, <span class="number">0x04</span>, <span class="number">0xfd</span>, <span class="number">0x60</span>, <span class="number">0x2c</span>, <span class="number">0xd3</span>, <span class="number">0x17</span>, <span class="number">0xb7</span>, <span class="number">0xce</span>,
+                    <span class="number">0xa1</span>, <span class="number">0x1e</span>, <span class="number">0x8c</span>, <span class="number">0xc7</span>, <span class="number">0xae</span>, <span class="number">0x2e</span>, <span class="number">0xa4</span>, <span class="number">0x05</span>, <span class="number">0xb4</span>, <span class="number">0x0d</span>, <span class="number">0x46</span>, <span class="number">0xb1</span>, <span class="number">0x59</span>,
+                    <span class="number">0x2a</span>, <span class="number">0x30</span>, <span class="number">0xf0</span>, <span class="number">0xcb</span>, <span class="number">0x6e</span>, <span class="number">0x8c</span>, <span class="number">0x4f</span>, <span class="number">0x17</span>, <span class="number">0xd7</span>, <span class="number">0xf7</span>, <span class="number">0xc4</span>, <span class="number">0x7f</span>, <span class="number">0xeb</span>,
+                ]),
+                <span class="ident">internal_xfvk</span>: [
+                    <span class="number">0x02</span>, <span class="number">0xdb</span>, <span class="number">0x99</span>, <span class="number">0x9e</span>, <span class="number">0x07</span>, <span class="number">0x02</span>, <span class="number">0x00</span>, <span class="number">0x00</span>, <span class="number">0x80</span>, <span class="number">0x97</span>, <span class="number">0xce</span>, <span class="number">0x15</span>, <span class="number">0xf4</span>,
+                    <span class="number">0xed</span>, <span class="number">0x1b</span>, <span class="number">0x97</span>, <span class="number">0x39</span>, <span class="number">0xb0</span>, <span class="number">0x26</span>, <span class="number">0x2a</span>, <span class="number">0x46</span>, <span class="number">0x3b</span>, <span class="number">0xcb</span>, <span class="number">0x3d</span>, <span class="number">0xc9</span>, <span class="number">0xb3</span>,
+                    <span class="number">0xbd</span>, <span class="number">0x23</span>, <span class="number">0x23</span>, <span class="number">0xa9</span>, <span class="number">0xba</span>, <span class="number">0xa4</span>, <span class="number">0x41</span>, <span class="number">0xca</span>, <span class="number">0x42</span>, <span class="number">0x77</span>, <span class="number">0x73</span>, <span class="number">0x83</span>, <span class="number">0xa8</span>,
+                    <span class="number">0xd4</span>, <span class="number">0x35</span>, <span class="number">0xa6</span>, <span class="number">0xc5</span>, <span class="number">0x92</span>, <span class="number">0x5a</span>, <span class="number">0x0f</span>, <span class="number">0x85</span>, <span class="number">0xfa</span>, <span class="number">0x4f</span>, <span class="number">0x1e</span>, <span class="number">0x40</span>, <span class="number">0x5e</span>,
+                    <span class="number">0x3a</span>, <span class="number">0x49</span>, <span class="number">0x70</span>, <span class="number">0xd0</span>, <span class="number">0xc4</span>, <span class="number">0xa4</span>, <span class="number">0xb4</span>, <span class="number">0x81</span>, <span class="number">0x44</span>, <span class="number">0x38</span>, <span class="number">0xf4</span>, <span class="number">0xe9</span>, <span class="number">0xd4</span>,
+                    <span class="number">0x52</span>, <span class="number">0x0e</span>, <span class="number">0x20</span>, <span class="number">0xf7</span>, <span class="number">0xfd</span>, <span class="number">0xcf</span>, <span class="number">0x38</span>, <span class="number">0x41</span>, <span class="number">0xf9</span>, <span class="number">0x12</span>, <span class="number">0x87</span>, <span class="number">0xc0</span>, <span class="number">0x6e</span>,
+                    <span class="number">0x30</span>, <span class="number">0xb6</span>, <span class="number">0x5e</span>, <span class="number">0xa1</span>, <span class="number">0xbd</span>, <span class="number">0xb7</span>, <span class="number">0x16</span>, <span class="number">0xb2</span>, <span class="number">0x31</span>, <span class="number">0xde</span>, <span class="number">0x67</span>, <span class="number">0x78</span>, <span class="number">0xa5</span>,
+                    <span class="number">0xd8</span>, <span class="number">0x0e</span>, <span class="number">0xe5</span>, <span class="number">0xcd</span>, <span class="number">0x9c</span>, <span class="number">0x06</span>, <span class="number">0x0d</span>, <span class="number">0x1a</span>, <span class="number">0xba</span>, <span class="number">0xca</span>, <span class="number">0xe0</span>, <span class="number">0xaa</span>, <span class="number">0xe2</span>,
+                    <span class="number">0x3b</span>, <span class="number">0xdd</span>, <span class="number">0xba</span>, <span class="number">0xc2</span>, <span class="number">0xa4</span>, <span class="number">0x93</span>, <span class="number">0xf5</span>, <span class="number">0x3c</span>, <span class="number">0x3b</span>, <span class="number">0x09</span>, <span class="number">0x33</span>, <span class="number">0xd9</span>, <span class="number">0x13</span>,
+                    <span class="number">0xde</span>, <span class="number">0xf8</span>, <span class="number">0x88</span>, <span class="number">0x48</span>, <span class="number">0x65</span>, <span class="number">0x4c</span>, <span class="number">0x08</span>, <span class="number">0x7c</span>, <span class="number">0x12</span>, <span class="number">0x60</span>, <span class="number">0x9d</span>, <span class="number">0xf0</span>, <span class="number">0x1b</span>,
+                    <span class="number">0xaf</span>, <span class="number">0x94</span>, <span class="number">0x05</span>, <span class="number">0xce</span>, <span class="number">0x78</span>, <span class="number">0x04</span>, <span class="number">0xfd</span>, <span class="number">0x60</span>, <span class="number">0x2c</span>, <span class="number">0xd3</span>, <span class="number">0x17</span>, <span class="number">0xb7</span>, <span class="number">0xce</span>,
+                    <span class="number">0xa1</span>, <span class="number">0x1e</span>, <span class="number">0x8c</span>, <span class="number">0xc7</span>, <span class="number">0xae</span>, <span class="number">0x2e</span>, <span class="number">0xa4</span>, <span class="number">0x05</span>, <span class="number">0xb4</span>, <span class="number">0x0d</span>, <span class="number">0x46</span>, <span class="number">0xb1</span>, <span class="number">0x59</span>,
+                    <span class="number">0x2a</span>, <span class="number">0x30</span>, <span class="number">0xf0</span>, <span class="number">0xcb</span>, <span class="number">0x6e</span>, <span class="number">0x8c</span>, <span class="number">0x4f</span>, <span class="number">0x17</span>, <span class="number">0xd7</span>, <span class="number">0xf7</span>, <span class="number">0xc4</span>, <span class="number">0x7f</span>, <span class="number">0xeb</span>,
+                ],
+                <span class="ident">internal_fp</span>: [
+                    <span class="number">0x30</span>, <span class="number">0xfe</span>, <span class="number">0x0d</span>, <span class="number">0x61</span>, <span class="number">0x0f</span>, <span class="number">0x94</span>, <span class="number">0x7b</span>, <span class="number">0x2c</span>, <span class="number">0x26</span>, <span class="number">0x0e</span>, <span class="number">0x7b</span>, <span class="number">0x29</span>, <span class="number">0xe7</span>,
+                    <span class="number">0x9e</span>, <span class="number">0x5c</span>, <span class="number">0x2e</span>, <span class="number">0x7d</span>, <span class="number">0x3e</span>, <span class="number">0x14</span>, <span class="number">0xab</span>, <span class="number">0xf9</span>, <span class="number">0x79</span>, <span class="number">0xf6</span>, <span class="number">0x40</span>, <span class="number">0x6d</span>, <span class="number">0x07</span>,
+                    <span class="number">0xba</span>, <span class="number">0xf8</span>, <span class="number">0xfa</span>, <span class="number">0xdd</span>, <span class="number">0xf4</span>, <span class="number">0x95</span>,
+                ],
             },
             <span class="ident">TestVector</span> {
                 <span class="ident">ask</span>: <span class="prelude-val">None</span>,
@@ -2233,6 +2958,48 @@
                 ]),
                 <span class="ident">d2</span>: <span class="prelude-val">None</span>,
                 <span class="ident">dmax</span>: <span class="prelude-val">None</span>,
+                <span class="ident">internal_nsk</span>: <span class="prelude-val">None</span>,
+                <span class="ident">internal_ovk</span>: [
+                    <span class="number">0xdd</span>, <span class="number">0xba</span>, <span class="number">0xc2</span>, <span class="number">0xa4</span>, <span class="number">0x93</span>, <span class="number">0xf5</span>, <span class="number">0x3c</span>, <span class="number">0x3b</span>, <span class="number">0x09</span>, <span class="number">0x33</span>, <span class="number">0xd9</span>, <span class="number">0x13</span>, <span class="number">0xde</span>,
+                    <span class="number">0xf8</span>, <span class="number">0x88</span>, <span class="number">0x48</span>, <span class="number">0x65</span>, <span class="number">0x4c</span>, <span class="number">0x08</span>, <span class="number">0x7c</span>, <span class="number">0x12</span>, <span class="number">0x60</span>, <span class="number">0x9d</span>, <span class="number">0xf0</span>, <span class="number">0x1b</span>, <span class="number">0xaf</span>,
+                    <span class="number">0x94</span>, <span class="number">0x05</span>, <span class="number">0xce</span>, <span class="number">0x78</span>, <span class="number">0x04</span>, <span class="number">0xfd</span>,
+                ],
+                <span class="ident">internal_dk</span>: [
+                    <span class="number">0x60</span>, <span class="number">0x2c</span>, <span class="number">0xd3</span>, <span class="number">0x17</span>, <span class="number">0xb7</span>, <span class="number">0xce</span>, <span class="number">0xa1</span>, <span class="number">0x1e</span>, <span class="number">0x8c</span>, <span class="number">0xc7</span>, <span class="number">0xae</span>, <span class="number">0x2e</span>, <span class="number">0xa4</span>,
+                    <span class="number">0x05</span>, <span class="number">0xb4</span>, <span class="number">0x0d</span>, <span class="number">0x46</span>, <span class="number">0xb1</span>, <span class="number">0x59</span>, <span class="number">0x2a</span>, <span class="number">0x30</span>, <span class="number">0xf0</span>, <span class="number">0xcb</span>, <span class="number">0x6e</span>, <span class="number">0x8c</span>, <span class="number">0x4f</span>,
+                    <span class="number">0x17</span>, <span class="number">0xd7</span>, <span class="number">0xf7</span>, <span class="number">0xc4</span>, <span class="number">0x7f</span>, <span class="number">0xeb</span>,
+                ],
+                <span class="ident">internal_nk</span>: [
+                    <span class="number">0xf9</span>, <span class="number">0x12</span>, <span class="number">0x87</span>, <span class="number">0xc0</span>, <span class="number">0x6e</span>, <span class="number">0x30</span>, <span class="number">0xb6</span>, <span class="number">0x5e</span>, <span class="number">0xa1</span>, <span class="number">0xbd</span>, <span class="number">0xb7</span>, <span class="number">0x16</span>, <span class="number">0xb2</span>,
+                    <span class="number">0x31</span>, <span class="number">0xde</span>, <span class="number">0x67</span>, <span class="number">0x78</span>, <span class="number">0xa5</span>, <span class="number">0xd8</span>, <span class="number">0x0e</span>, <span class="number">0xe5</span>, <span class="number">0xcd</span>, <span class="number">0x9c</span>, <span class="number">0x06</span>, <span class="number">0x0d</span>, <span class="number">0x1a</span>,
+                    <span class="number">0xba</span>, <span class="number">0xca</span>, <span class="number">0xe0</span>, <span class="number">0xaa</span>, <span class="number">0xe2</span>, <span class="number">0x3b</span>,
+                ],
+                <span class="ident">internal_ivk</span>: [
+                    <span class="number">0x1d</span>, <span class="number">0x59</span>, <span class="number">0xea</span>, <span class="number">0x20</span>, <span class="number">0x17</span>, <span class="number">0x88</span>, <span class="number">0x18</span>, <span class="number">0x64</span>, <span class="number">0xd2</span>, <span class="number">0x4e</span>, <span class="number">0xad</span>, <span class="number">0xb5</span>, <span class="number">0xcf</span>,
+                    <span class="number">0x34</span>, <span class="number">0x68</span>, <span class="number">0xa4</span>, <span class="number">0x1a</span>, <span class="number">0x1b</span>, <span class="number">0x2a</span>, <span class="number">0xaa</span>, <span class="number">0x0d</span>, <span class="number">0x1b</span>, <span class="number">0x3a</span>, <span class="number">0x72</span>, <span class="number">0xc6</span>, <span class="number">0xda</span>,
+                    <span class="number">0x9c</span>, <span class="number">0xe6</span>, <span class="number">0x50</span>, <span class="number">0x2a</span>, <span class="number">0x0a</span>, <span class="number">0x05</span>,
+                ],
+                <span class="ident">internal_xsk</span>: <span class="prelude-val">None</span>,
+                <span class="ident">internal_xfvk</span>: [
+                    <span class="number">0x02</span>, <span class="number">0xdb</span>, <span class="number">0x99</span>, <span class="number">0x9e</span>, <span class="number">0x07</span>, <span class="number">0x02</span>, <span class="number">0x00</span>, <span class="number">0x00</span>, <span class="number">0x80</span>, <span class="number">0x97</span>, <span class="number">0xce</span>, <span class="number">0x15</span>, <span class="number">0xf4</span>,
+                    <span class="number">0xed</span>, <span class="number">0x1b</span>, <span class="number">0x97</span>, <span class="number">0x39</span>, <span class="number">0xb0</span>, <span class="number">0x26</span>, <span class="number">0x2a</span>, <span class="number">0x46</span>, <span class="number">0x3b</span>, <span class="number">0xcb</span>, <span class="number">0x3d</span>, <span class="number">0xc9</span>, <span class="number">0xb3</span>,
+                    <span class="number">0xbd</span>, <span class="number">0x23</span>, <span class="number">0x23</span>, <span class="number">0xa9</span>, <span class="number">0xba</span>, <span class="number">0xa4</span>, <span class="number">0x41</span>, <span class="number">0xca</span>, <span class="number">0x42</span>, <span class="number">0x77</span>, <span class="number">0x73</span>, <span class="number">0x83</span>, <span class="number">0xa8</span>,
+                    <span class="number">0xd4</span>, <span class="number">0x35</span>, <span class="number">0xa6</span>, <span class="number">0xc5</span>, <span class="number">0x92</span>, <span class="number">0x5a</span>, <span class="number">0x0f</span>, <span class="number">0x85</span>, <span class="number">0xfa</span>, <span class="number">0x4f</span>, <span class="number">0x1e</span>, <span class="number">0x40</span>, <span class="number">0x5e</span>,
+                    <span class="number">0x3a</span>, <span class="number">0x49</span>, <span class="number">0x70</span>, <span class="number">0xd0</span>, <span class="number">0xc4</span>, <span class="number">0xa4</span>, <span class="number">0xb4</span>, <span class="number">0x81</span>, <span class="number">0x44</span>, <span class="number">0x38</span>, <span class="number">0xf4</span>, <span class="number">0xe9</span>, <span class="number">0xd4</span>,
+                    <span class="number">0x52</span>, <span class="number">0x0e</span>, <span class="number">0x20</span>, <span class="number">0xf7</span>, <span class="number">0xfd</span>, <span class="number">0xcf</span>, <span class="number">0x38</span>, <span class="number">0x41</span>, <span class="number">0xf9</span>, <span class="number">0x12</span>, <span class="number">0x87</span>, <span class="number">0xc0</span>, <span class="number">0x6e</span>,
+                    <span class="number">0x30</span>, <span class="number">0xb6</span>, <span class="number">0x5e</span>, <span class="number">0xa1</span>, <span class="number">0xbd</span>, <span class="number">0xb7</span>, <span class="number">0x16</span>, <span class="number">0xb2</span>, <span class="number">0x31</span>, <span class="number">0xde</span>, <span class="number">0x67</span>, <span class="number">0x78</span>, <span class="number">0xa5</span>,
+                    <span class="number">0xd8</span>, <span class="number">0x0e</span>, <span class="number">0xe5</span>, <span class="number">0xcd</span>, <span class="number">0x9c</span>, <span class="number">0x06</span>, <span class="number">0x0d</span>, <span class="number">0x1a</span>, <span class="number">0xba</span>, <span class="number">0xca</span>, <span class="number">0xe0</span>, <span class="number">0xaa</span>, <span class="number">0xe2</span>,
+                    <span class="number">0x3b</span>, <span class="number">0xdd</span>, <span class="number">0xba</span>, <span class="number">0xc2</span>, <span class="number">0xa4</span>, <span class="number">0x93</span>, <span class="number">0xf5</span>, <span class="number">0x3c</span>, <span class="number">0x3b</span>, <span class="number">0x09</span>, <span class="number">0x33</span>, <span class="number">0xd9</span>, <span class="number">0x13</span>,
+                    <span class="number">0xde</span>, <span class="number">0xf8</span>, <span class="number">0x88</span>, <span class="number">0x48</span>, <span class="number">0x65</span>, <span class="number">0x4c</span>, <span class="number">0x08</span>, <span class="number">0x7c</span>, <span class="number">0x12</span>, <span class="number">0x60</span>, <span class="number">0x9d</span>, <span class="number">0xf0</span>, <span class="number">0x1b</span>,
+                    <span class="number">0xaf</span>, <span class="number">0x94</span>, <span class="number">0x05</span>, <span class="number">0xce</span>, <span class="number">0x78</span>, <span class="number">0x04</span>, <span class="number">0xfd</span>, <span class="number">0x60</span>, <span class="number">0x2c</span>, <span class="number">0xd3</span>, <span class="number">0x17</span>, <span class="number">0xb7</span>, <span class="number">0xce</span>,
+                    <span class="number">0xa1</span>, <span class="number">0x1e</span>, <span class="number">0x8c</span>, <span class="number">0xc7</span>, <span class="number">0xae</span>, <span class="number">0x2e</span>, <span class="number">0xa4</span>, <span class="number">0x05</span>, <span class="number">0xb4</span>, <span class="number">0x0d</span>, <span class="number">0x46</span>, <span class="number">0xb1</span>, <span class="number">0x59</span>,
+                    <span class="number">0x2a</span>, <span class="number">0x30</span>, <span class="number">0xf0</span>, <span class="number">0xcb</span>, <span class="number">0x6e</span>, <span class="number">0x8c</span>, <span class="number">0x4f</span>, <span class="number">0x17</span>, <span class="number">0xd7</span>, <span class="number">0xf7</span>, <span class="number">0xc4</span>, <span class="number">0x7f</span>, <span class="number">0xeb</span>,
+                ],
+                <span class="ident">internal_fp</span>: [
+                    <span class="number">0x30</span>, <span class="number">0xfe</span>, <span class="number">0x0d</span>, <span class="number">0x61</span>, <span class="number">0x0f</span>, <span class="number">0x94</span>, <span class="number">0x7b</span>, <span class="number">0x2c</span>, <span class="number">0x26</span>, <span class="number">0x0e</span>, <span class="number">0x7b</span>, <span class="number">0x29</span>, <span class="number">0xe7</span>,
+                    <span class="number">0x9e</span>, <span class="number">0x5c</span>, <span class="number">0x2e</span>, <span class="number">0x7d</span>, <span class="number">0x3e</span>, <span class="number">0x14</span>, <span class="number">0xab</span>, <span class="number">0xf9</span>, <span class="number">0x79</span>, <span class="number">0xf6</span>, <span class="number">0x40</span>, <span class="number">0x6d</span>, <span class="number">0x07</span>,
+                    <span class="number">0xba</span>, <span class="number">0xf8</span>, <span class="number">0xfa</span>, <span class="number">0xdd</span>, <span class="number">0xf4</span>, <span class="number">0x95</span>,
+                ],
             },
             <span class="ident">TestVector</span> {
                 <span class="ident">ask</span>: <span class="prelude-val">None</span>,
@@ -2298,6 +3065,48 @@
                 <span class="ident">dmax</span>: <span class="prelude-val">Some</span>([
                     <span class="number">0x1a</span>, <span class="number">0x73</span>, <span class="number">0x0f</span>, <span class="number">0xeb</span>, <span class="number">0x00</span>, <span class="number">0x59</span>, <span class="number">0xcf</span>, <span class="number">0x1f</span>, <span class="number">0x5b</span>, <span class="number">0xde</span>, <span class="number">0xa8</span>,
                 ]),
+                <span class="ident">internal_nsk</span>: <span class="prelude-val">None</span>,
+                <span class="ident">internal_ovk</span>: [
+                    <span class="number">0xbf</span>, <span class="number">0x19</span>, <span class="number">0xe2</span>, <span class="number">0x57</span>, <span class="number">0xdd</span>, <span class="number">0x83</span>, <span class="number">0x3e</span>, <span class="number">0x02</span>, <span class="number">0x94</span>, <span class="number">0xec</span>, <span class="number">0x2a</span>, <span class="number">0xcb</span>, <span class="number">0xdf</span>,
+                    <span class="number">0xa4</span>, <span class="number">0x0e</span>, <span class="number">0x14</span>, <span class="number">0x52</span>, <span class="number">0xf8</span>, <span class="number">0xe6</span>, <span class="number">0xa1</span>, <span class="number">0xf0</span>, <span class="number">0xc7</span>, <span class="number">0xf6</span>, <span class="number">0xf3</span>, <span class="number">0xab</span>, <span class="number">0xe5</span>,
+                    <span class="number">0x6a</span>, <span class="number">0xfd</span>, <span class="number">0x5f</span>, <span class="number">0x6e</span>, <span class="number">0x26</span>, <span class="number">0x18</span>,
+                ],
+                <span class="ident">internal_dk</span>: [
+                    <span class="number">0x1f</span>, <span class="number">0xfd</span>, <span class="number">0x6f</span>, <span class="number">0x81</span>, <span class="number">0xfe</span>, <span class="number">0x85</span>, <span class="number">0xc4</span>, <span class="number">0x9f</span>, <span class="number">0xe3</span>, <span class="number">0xe7</span>, <span class="number">0x3e</span>, <span class="number">0xf7</span>, <span class="number">0x3e</span>,
+                    <span class="number">0x50</span>, <span class="number">0x11</span>, <span class="number">0x38</span>, <span class="number">0x22</span>, <span class="number">0xca</span>, <span class="number">0x62</span>, <span class="number">0x67</span>, <span class="number">0x31</span>, <span class="number">0x2b</span>, <span class="number">0x7a</span>, <span class="number">0xce</span>, <span class="number">0xd0</span>, <span class="number">0xc1</span>,
+                    <span class="number">0x56</span>, <span class="number">0xa3</span>, <span class="number">0x2b</span>, <span class="number">0x3f</span>, <span class="number">0x24</span>, <span class="number">0x38</span>,
+                ],
+                <span class="ident">internal_nk</span>: [
+                    <span class="number">0x82</span>, <span class="number">0x2f</span>, <span class="number">0x2f</span>, <span class="number">0x70</span>, <span class="number">0x96</span>, <span class="number">0x0f</span>, <span class="number">0x05</span>, <span class="number">0xd6</span>, <span class="number">0x96</span>, <span class="number">0x74</span>, <span class="number">0x58</span>, <span class="number">0xe3</span>, <span class="number">0x92</span>,
+                    <span class="number">0x10</span>, <span class="number">0xd5</span>, <span class="number">0x77</span>, <span class="number">0x1f</span>, <span class="number">0x98</span>, <span class="number">0x47</span>, <span class="number">0xae</span>, <span class="number">0xf9</span>, <span class="number">0xe3</span>, <span class="number">0x4d</span>, <span class="number">0x94</span>, <span class="number">0xb8</span>, <span class="number">0xaf</span>,
+                    <span class="number">0xbf</span>, <span class="number">0x95</span>, <span class="number">0xbb</span>, <span class="number">0xc4</span>, <span class="number">0xd2</span>, <span class="number">0x27</span>,
+                ],
+                <span class="ident">internal_ivk</span>: [
+                    <span class="number">0xf9</span>, <span class="number">0x8a</span>, <span class="number">0x76</span>, <span class="number">0x09</span>, <span class="number">0x8e</span>, <span class="number">0x91</span>, <span class="number">0x05</span>, <span class="number">0x03</span>, <span class="number">0xe8</span>, <span class="number">0x02</span>, <span class="number">0x77</span>, <span class="number">0x52</span>, <span class="number">0x04</span>,
+                    <span class="number">0x2d</span>, <span class="number">0xe8</span>, <span class="number">0x7e</span>, <span class="number">0x7d</span>, <span class="number">0x89</span>, <span class="number">0x3a</span>, <span class="number">0xb0</span>, <span class="number">0x14</span>, <span class="number">0x5e</span>, <span class="number">0xbc</span>, <span class="number">0x3b</span>, <span class="number">0x05</span>, <span class="number">0x97</span>,
+                    <span class="number">0xc2</span>, <span class="number">0x39</span>, <span class="number">0x7f</span>, <span class="number">0x69</span>, <span class="number">0xd2</span>, <span class="number">0x01</span>,
+                ],
+                <span class="ident">internal_xsk</span>: <span class="prelude-val">None</span>,
+                <span class="ident">internal_xfvk</span>: [
+                    <span class="number">0x03</span>, <span class="number">0x48</span>, <span class="number">0xc1</span>, <span class="number">0x83</span>, <span class="number">0x75</span>, <span class="number">0x03</span>, <span class="number">0x00</span>, <span class="number">0x00</span>, <span class="number">0x00</span>, <span class="number">0x8d</span>, <span class="number">0x93</span>, <span class="number">0x7b</span>, <span class="number">0xcf</span>,
+                    <span class="number">0x81</span>, <span class="number">0xba</span>, <span class="number">0x43</span>, <span class="number">0x0d</span>, <span class="number">0x5b</span>, <span class="number">0x49</span>, <span class="number">0xaf</span>, <span class="number">0xc0</span>, <span class="number">0xa4</span>, <span class="number">0x03</span>, <span class="number">0x36</span>, <span class="number">0x7b</span>, <span class="number">0x1f</span>,
+                    <span class="number">0xd9</span>, <span class="number">0x98</span>, <span class="number">0x79</span>, <span class="number">0xec</span>, <span class="number">0xba</span>, <span class="number">0x41</span>, <span class="number">0xbe</span>, <span class="number">0x05</span>, <span class="number">0x1c</span>, <span class="number">0x5a</span>, <span class="number">0x4a</span>, <span class="number">0xa7</span>, <span class="number">0xd6</span>,
+                    <span class="number">0xe7</span>, <span class="number">0xe8</span>, <span class="number">0xb1</span>, <span class="number">0x85</span>, <span class="number">0xc5</span>, <span class="number">0x7b</span>, <span class="number">0x50</span>, <span class="number">0x9c</span>, <span class="number">0x25</span>, <span class="number">0x36</span>, <span class="number">0xc4</span>, <span class="number">0xf2</span>, <span class="number">0xd3</span>,
+                    <span class="number">0x26</span>, <span class="number">0xd7</span>, <span class="number">0x66</span>, <span class="number">0xc8</span>, <span class="number">0xfa</span>, <span class="number">0xb2</span>, <span class="number">0x54</span>, <span class="number">0x47</span>, <span class="number">0xde</span>, <span class="number">0x53</span>, <span class="number">0x75</span>, <span class="number">0xa9</span>, <span class="number">0x32</span>,
+                    <span class="number">0x8d</span>, <span class="number">0x64</span>, <span class="number">0x9d</span>, <span class="number">0xda</span>, <span class="number">0xbd</span>, <span class="number">0x97</span>, <span class="number">0xa6</span>, <span class="number">0xa3</span>, <span class="number">0x82</span>, <span class="number">0x2f</span>, <span class="number">0x2f</span>, <span class="number">0x70</span>, <span class="number">0x96</span>,
+                    <span class="number">0x0f</span>, <span class="number">0x05</span>, <span class="number">0xd6</span>, <span class="number">0x96</span>, <span class="number">0x74</span>, <span class="number">0x58</span>, <span class="number">0xe3</span>, <span class="number">0x92</span>, <span class="number">0x10</span>, <span class="number">0xd5</span>, <span class="number">0x77</span>, <span class="number">0x1f</span>, <span class="number">0x98</span>,
+                    <span class="number">0x47</span>, <span class="number">0xae</span>, <span class="number">0xf9</span>, <span class="number">0xe3</span>, <span class="number">0x4d</span>, <span class="number">0x94</span>, <span class="number">0xb8</span>, <span class="number">0xaf</span>, <span class="number">0xbf</span>, <span class="number">0x95</span>, <span class="number">0xbb</span>, <span class="number">0xc4</span>, <span class="number">0xd2</span>,
+                    <span class="number">0x27</span>, <span class="number">0xbf</span>, <span class="number">0x19</span>, <span class="number">0xe2</span>, <span class="number">0x57</span>, <span class="number">0xdd</span>, <span class="number">0x83</span>, <span class="number">0x3e</span>, <span class="number">0x02</span>, <span class="number">0x94</span>, <span class="number">0xec</span>, <span class="number">0x2a</span>, <span class="number">0xcb</span>,
+                    <span class="number">0xdf</span>, <span class="number">0xa4</span>, <span class="number">0x0e</span>, <span class="number">0x14</span>, <span class="number">0x52</span>, <span class="number">0xf8</span>, <span class="number">0xe6</span>, <span class="number">0xa1</span>, <span class="number">0xf0</span>, <span class="number">0xc7</span>, <span class="number">0xf6</span>, <span class="number">0xf3</span>, <span class="number">0xab</span>,
+                    <span class="number">0xe5</span>, <span class="number">0x6a</span>, <span class="number">0xfd</span>, <span class="number">0x5f</span>, <span class="number">0x6e</span>, <span class="number">0x26</span>, <span class="number">0x18</span>, <span class="number">0x1f</span>, <span class="number">0xfd</span>, <span class="number">0x6f</span>, <span class="number">0x81</span>, <span class="number">0xfe</span>, <span class="number">0x85</span>,
+                    <span class="number">0xc4</span>, <span class="number">0x9f</span>, <span class="number">0xe3</span>, <span class="number">0xe7</span>, <span class="number">0x3e</span>, <span class="number">0xf7</span>, <span class="number">0x3e</span>, <span class="number">0x50</span>, <span class="number">0x11</span>, <span class="number">0x38</span>, <span class="number">0x22</span>, <span class="number">0xca</span>, <span class="number">0x62</span>,
+                    <span class="number">0x67</span>, <span class="number">0x31</span>, <span class="number">0x2b</span>, <span class="number">0x7a</span>, <span class="number">0xce</span>, <span class="number">0xd0</span>, <span class="number">0xc1</span>, <span class="number">0x56</span>, <span class="number">0xa3</span>, <span class="number">0x2b</span>, <span class="number">0x3f</span>, <span class="number">0x24</span>, <span class="number">0x38</span>,
+                ],
+                <span class="ident">internal_fp</span>: [
+                    <span class="number">0xba</span>, <span class="number">0x64</span>, <span class="number">0xe4</span>, <span class="number">0x0d</span>, <span class="number">0x08</span>, <span class="number">0x6d</span>, <span class="number">0x36</span>, <span class="number">0x2c</span>, <span class="number">0xa5</span>, <span class="number">0xa1</span>, <span class="number">0x7f</span>, <span class="number">0x5e</span>, <span class="number">0x3b</span>,
+                    <span class="number">0x1b</span>, <span class="number">0xee</span>, <span class="number">0x63</span>, <span class="number">0x24</span>, <span class="number">0xc8</span>, <span class="number">0x4f</span>, <span class="number">0x10</span>, <span class="number">0x12</span>, <span class="number">0x44</span>, <span class="number">0xa4</span>, <span class="number">0x00</span>, <span class="number">0x2a</span>, <span class="number">0x2e</span>,
+                    <span class="number">0xca</span>, <span class="number">0xaf</span>, <span class="number">0x05</span>, <span class="number">0xbd</span>, <span class="number">0xd9</span>, <span class="number">0x81</span>,
+                ],
             },
         ];
 
@@ -2327,10 +3136,7 @@
 
         <span class="kw">let</span> <span class="ident">xsks</span> <span class="op">=</span> [<span class="ident">m</span>, <span class="ident">m_1</span>, <span class="ident">m_1_2h</span>];
 
-        <span class="kw">for</span> <span class="ident">j</span> <span class="kw">in</span> <span class="number">0</span>..<span class="ident">xsks</span>.<span class="ident">len</span>() {
-            <span class="kw">let</span> <span class="ident">xsk</span> <span class="op">=</span> <span class="kw-2">&amp;</span><span class="ident">xsks</span>[<span class="ident">j</span>];
-            <span class="kw">let</span> <span class="ident">tv</span> <span class="op">=</span> <span class="kw-2">&amp;</span><span class="ident">test_vectors</span>[<span class="ident">j</span>];
-
+        <span class="kw">for</span> (<span class="ident">xsk</span>, <span class="ident">tv</span>) <span class="kw">in</span> <span class="ident">xsks</span>.<span class="ident">iter</span>().<span class="ident">zip</span>(<span class="ident">test_vectors</span>.<span class="ident">iter</span>()) {
             <span class="macro">assert_eq!</span>(<span class="ident">xsk</span>.<span class="ident">expsk</span>.<span class="ident">ask</span>.<span class="ident">to_repr</span>().<span class="ident">as_ref</span>(), <span class="ident">tv</span>.<span class="ident">ask</span>.<span class="ident">unwrap</span>());
             <span class="macro">assert_eq!</span>(<span class="ident">xsk</span>.<span class="ident">expsk</span>.<span class="ident">nsk</span>.<span class="ident">to_repr</span>().<span class="ident">as_ref</span>(), <span class="ident">tv</span>.<span class="ident">nsk</span>.<span class="ident">unwrap</span>());
 
@@ -2341,12 +3147,24 @@
             <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">ser</span> <span class="op">=</span> <span class="macro">vec!</span>[];
             <span class="ident">xsk</span>.<span class="ident">write</span>(<span class="kw-2">&amp;mut</span> <span class="ident">ser</span>).<span class="ident">unwrap</span>();
             <span class="macro">assert_eq!</span>(<span class="kw-2">&amp;</span><span class="ident">ser</span>[..], <span class="kw-2">&amp;</span><span class="ident">tv</span>.<span class="ident">xsk</span>.<span class="ident">unwrap</span>()[..]);
+
+            <span class="kw">let</span> <span class="ident">internal_xsk</span> <span class="op">=</span> <span class="ident">xsk</span>.<span class="ident">derive_internal</span>();
+            <span class="macro">assert_eq!</span>(<span class="ident">internal_xsk</span>.<span class="ident">expsk</span>.<span class="ident">ask</span>.<span class="ident">to_repr</span>().<span class="ident">as_ref</span>(), <span class="ident">tv</span>.<span class="ident">ask</span>.<span class="ident">unwrap</span>());
+            <span class="macro">assert_eq!</span>(
+                <span class="ident">internal_xsk</span>.<span class="ident">expsk</span>.<span class="ident">nsk</span>.<span class="ident">to_repr</span>().<span class="ident">as_ref</span>(),
+                <span class="ident">tv</span>.<span class="ident">internal_nsk</span>.<span class="ident">unwrap</span>()
+            );
+
+            <span class="macro">assert_eq!</span>(<span class="ident">internal_xsk</span>.<span class="ident">expsk</span>.<span class="ident">ovk</span>.<span class="number">0</span>, <span class="ident">tv</span>.<span class="ident">internal_ovk</span>);
+            <span class="macro">assert_eq!</span>(<span class="ident">internal_xsk</span>.<span class="ident">dk</span>.<span class="number">0</span>, <span class="ident">tv</span>.<span class="ident">internal_dk</span>);
+            <span class="macro">assert_eq!</span>(<span class="ident">internal_xsk</span>.<span class="ident">chain_code</span>.<span class="number">0</span>, <span class="ident">tv</span>.<span class="ident">c</span>);
+
+            <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">ser</span> <span class="op">=</span> <span class="macro">vec!</span>[];
+            <span class="ident">internal_xsk</span>.<span class="ident">write</span>(<span class="kw-2">&amp;mut</span> <span class="ident">ser</span>).<span class="ident">unwrap</span>();
+            <span class="macro">assert_eq!</span>(<span class="kw-2">&amp;</span><span class="ident">ser</span>[..], <span class="kw-2">&amp;</span><span class="ident">tv</span>.<span class="ident">internal_xsk</span>.<span class="ident">unwrap</span>()[..]);
         }
 
-        <span class="kw">for</span> <span class="ident">j</span> <span class="kw">in</span> <span class="number">0</span>..<span class="ident">xfvks</span>.<span class="ident">len</span>() {
-            <span class="kw">let</span> <span class="ident">xfvk</span> <span class="op">=</span> <span class="kw-2">&amp;</span><span class="ident">xfvks</span>[<span class="ident">j</span>];
-            <span class="kw">let</span> <span class="ident">tv</span> <span class="op">=</span> <span class="kw-2">&amp;</span><span class="ident">test_vectors</span>[<span class="ident">j</span>];
-
+        <span class="kw">for</span> (<span class="ident">xfvk</span>, <span class="ident">tv</span>) <span class="kw">in</span> <span class="ident">xfvks</span>.<span class="ident">iter</span>().<span class="ident">zip</span>(<span class="ident">test_vectors</span>.<span class="ident">iter</span>()) {
             <span class="macro">assert_eq!</span>(<span class="ident">xfvk</span>.<span class="ident">fvk</span>.<span class="ident">vk</span>.<span class="ident">ak</span>.<span class="ident">to_bytes</span>(), <span class="ident">tv</span>.<span class="ident">ak</span>);
             <span class="macro">assert_eq!</span>(<span class="ident">xfvk</span>.<span class="ident">fvk</span>.<span class="ident">vk</span>.<span class="ident">nk</span>.<span class="ident">to_bytes</span>(), <span class="ident">tv</span>.<span class="ident">nk</span>);
 
@@ -2389,6 +3207,24 @@
                 <span class="prelude-val">Some</span>((<span class="kw">_</span>, <span class="kw">_</span>)) =&gt; <span class="macro">panic!</span>(),
                 <span class="prelude-val">None</span> =&gt; <span class="macro">assert!</span>(<span class="ident">tv</span>.<span class="ident">dmax</span>.<span class="ident">is_none</span>()),
             }
+
+            <span class="kw">let</span> <span class="ident">internal_xfvk</span> <span class="op">=</span> <span class="ident">xfvk</span>.<span class="ident">derive_internal</span>();
+            <span class="macro">assert_eq!</span>(<span class="ident">internal_xfvk</span>.<span class="ident">fvk</span>.<span class="ident">vk</span>.<span class="ident">ak</span>.<span class="ident">to_bytes</span>(), <span class="ident">tv</span>.<span class="ident">ak</span>);
+            <span class="macro">assert_eq!</span>(<span class="ident">internal_xfvk</span>.<span class="ident">fvk</span>.<span class="ident">vk</span>.<span class="ident">nk</span>.<span class="ident">to_bytes</span>(), <span class="ident">tv</span>.<span class="ident">internal_nk</span>);
+
+            <span class="macro">assert_eq!</span>(<span class="ident">internal_xfvk</span>.<span class="ident">fvk</span>.<span class="ident">ovk</span>.<span class="number">0</span>, <span class="ident">tv</span>.<span class="ident">internal_ovk</span>);
+            <span class="macro">assert_eq!</span>(<span class="ident">internal_xfvk</span>.<span class="ident">dk</span>.<span class="number">0</span>, <span class="ident">tv</span>.<span class="ident">internal_dk</span>);
+            <span class="macro">assert_eq!</span>(<span class="ident">internal_xfvk</span>.<span class="ident">chain_code</span>.<span class="number">0</span>, <span class="ident">tv</span>.<span class="ident">c</span>);
+
+            <span class="macro">assert_eq!</span>(
+                <span class="ident">internal_xfvk</span>.<span class="ident">fvk</span>.<span class="ident">vk</span>.<span class="ident">ivk</span>().<span class="ident">to_repr</span>().<span class="ident">as_ref</span>(),
+                <span class="ident">tv</span>.<span class="ident">internal_ivk</span>
+            );
+
+            <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">ser</span> <span class="op">=</span> <span class="macro">vec!</span>[];
+            <span class="ident">internal_xfvk</span>.<span class="ident">write</span>(<span class="kw-2">&amp;mut</span> <span class="ident">ser</span>).<span class="ident">unwrap</span>();
+            <span class="macro">assert_eq!</span>(<span class="kw-2">&amp;</span><span class="ident">ser</span>[..], <span class="kw-2">&amp;</span><span class="ident">tv</span>.<span class="ident">internal_xfvk</span>[..]);
+            <span class="macro">assert_eq!</span>(<span class="ident">FvkFingerprint::from</span>(<span class="kw-2">&amp;</span><span class="ident">internal_xfvk</span>.<span class="ident">fvk</span>).<span class="number">0</span>, <span class="ident">tv</span>.<span class="ident">internal_fp</span>);
         }
     }
 }
@@ -2406,5 +3242,5 @@
     }
 }
 </code></pre></div>
-</section><section id="search" class="content hidden"></section></div></main><div id="rustdoc-vars" data-root-path="../../" data-current-crate="zcash_primitives" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.60.0-nightly (9ad5d82f8 2022-01-18)" ></div>
+</section><section id="search" class="content hidden"></section></div></main><div id="rustdoc-vars" data-root-path="../../" data-current-crate="zcash_primitives" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.60.0-nightly (734368a20 2022-02-07)" ></div>
 </body></html>

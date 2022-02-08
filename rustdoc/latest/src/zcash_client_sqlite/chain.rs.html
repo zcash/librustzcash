@@ -1,7 +1,9 @@
 <!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_client_sqlite/src/chain.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>chain.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" type="text/css" href="../../normalize.css"><link rel="stylesheet" type="text/css" href="../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" type="text/css" href="../../ayu.css" disabled><link rel="stylesheet" type="text/css" href="../../dark.css" disabled><link rel="stylesheet" type="text/css" href="../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../storage.js"></script><script src="../../crates.js"></script><script defer src="../../main.js"></script><script defer src="../../source-script.js"></script><script defer src="../../source-files.js"></script>
-    <noscript><link rel="stylesheet" href="../../noscript.css"></noscript><link rel="alternate icon" type="image/png" href="../../favicon-16x16.png"><link rel="alternate icon" type="image/png" href="../../favicon-32x32.png"><link rel="icon" type="image/svg+xml" href="../../favicon.svg"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="sidebar-menu" role="button">&#9776;</div><a class="sidebar-logo" href="../../zcash_client_sqlite/index.html"><div class="logo-container"><img class="rust-logo" src="../../rust-logo.svg" alt="logo"></div>
-        </a></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../zcash_client_sqlite/index.html"><img class="rust-logo" src="../../rust-logo.svg" alt="logo"></a><nav class="sub"><div class="theme-picker hidden"><button id="theme-picker" aria-label="Pick another theme!" aria-haspopup="menu" title="themes"><img width="18" height="18" alt="Pick another theme!" src="../../brush.svg"></button><div id="theme-choices" role="menu"></div></div><form class="search-form"><div class="search-container"><div>
-                                <input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"></div><button type="button" id="help-button" title="help">?</button><a id="settings-menu" href="../../settings.html" title="settings"><img width="18" height="18" alt="Change settings" src="../../wheel.svg"></a></div></form></nav></div><section id="main-content" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">  1</span>
+    <noscript><link rel="stylesheet" href="../../noscript.css"></noscript><link rel="alternate icon" type="image/png" href="../../favicon-16x16.png"><link rel="alternate icon" type="image/png" href="../../favicon-32x32.png"><link rel="icon" type="image/svg+xml" href="../../favicon.svg"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../zcash_client_sqlite/index.html"><div class="logo-container"><img class="rust-logo" src="../../rust-logo.svg" alt="logo"></div>
+        </a><h2 class="location"></h2>
+    </nav>
+    <nav class="sidebar"><a class="sidebar-logo" href="../../zcash_client_sqlite/index.html"><div class="logo-container"><img class="rust-logo" src="../../rust-logo.svg" alt="logo"></div>
+        </a></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../zcash_client_sqlite/index.html"><img class="rust-logo" src="../../rust-logo.svg" alt="logo"></a><nav class="sub"><div class="theme-picker hidden"><button id="theme-picker" aria-label="Pick another theme!" aria-haspopup="menu" title="themes"><img width="22" height="22" alt="Pick another theme!" src="../../brush.svg"></button><div id="theme-choices" role="menu"></div></div><form class="search-form"><div class="search-container"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><button type="button" id="help-button" title="help">?</button><a id="settings-menu" href="../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../wheel.svg"></a></div></form></nav></div><section id="main-content" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">  1</span>
 <span id="2">  2</span>
 <span id="3">  3</span>
 <span id="4">  4</span>
@@ -545,25 +547,6 @@
 <span id="542">542</span>
 <span id="543">543</span>
 <span id="544">544</span>
-<span id="545">545</span>
-<span id="546">546</span>
-<span id="547">547</span>
-<span id="548">548</span>
-<span id="549">549</span>
-<span id="550">550</span>
-<span id="551">551</span>
-<span id="552">552</span>
-<span id="553">553</span>
-<span id="554">554</span>
-<span id="555">555</span>
-<span id="556">556</span>
-<span id="557">557</span>
-<span id="558">558</span>
-<span id="559">559</span>
-<span id="560">560</span>
-<span id="561">561</span>
-<span id="562">562</span>
-<span id="563">563</span>
 </pre><pre class="rust"><code><span class="doccomment">//! Functions for enforcing chain validity and handling chain reorgs.</span>
 <span class="kw">use</span> <span class="ident">protobuf::Message</span>;
 
@@ -631,13 +614,12 @@
 }
 
 <span class="attribute">#[<span class="ident">cfg</span>(<span class="ident">test</span>)]</span>
+<span class="attribute">#[<span class="ident">allow</span>(<span class="ident">deprecated</span>)]</span>
 <span class="kw">mod</span> <span class="ident">tests</span> {
     <span class="kw">use</span> <span class="ident">tempfile::NamedTempFile</span>;
 
     <span class="kw">use</span> <span class="ident">zcash_primitives</span>::{
-        <span class="ident">block::BlockHash</span>,
-        <span class="ident">transaction::components::Amount</span>,
-        <span class="ident">zip32</span>::{<span class="ident">ExtendedFullViewingKey</span>, <span class="ident">ExtendedSpendingKey</span>},
+        <span class="ident">block::BlockHash</span>, <span class="ident">transaction::components::Amount</span>, <span class="ident">zip32::ExtendedSpendingKey</span>,
     };
 
     <span class="kw">use</span> <span class="ident">zcash_client_backend::data_api::WalletRead</span>;
@@ -650,14 +632,10 @@
         <span class="ident">chain::init::init_cache_database</span>,
         <span class="ident">error::SqliteClientError</span>,
         <span class="ident">tests</span>::{
-            <span class="self">self</span>, <span class="ident">fake_compact_block</span>, <span class="ident">fake_compact_block_spending</span>, <span class="ident">insert_into_cache</span>,
-            <span class="ident">sapling_activation_height</span>,
+            <span class="self">self</span>, <span class="ident">fake_compact_block</span>, <span class="ident">fake_compact_block_spending</span>, <span class="ident">init_test_accounts_table</span>,
+            <span class="ident">insert_into_cache</span>, <span class="ident">sapling_activation_height</span>,
         },
-        <span class="ident">wallet</span>::{
-            <span class="ident">get_balance</span>,
-            <span class="ident">init</span>::{<span class="ident">init_accounts_table</span>, <span class="ident">init_wallet_db</span>},
-            <span class="ident">rewind_to_height</span>,
-        },
+        <span class="ident">wallet</span>::{<span class="ident">get_balance</span>, <span class="ident">init::init_wallet_db</span>, <span class="ident">rewind_to_height</span>},
         <span class="ident">AccountId</span>, <span class="ident">BlockDb</span>, <span class="ident">NoteId</span>, <span class="ident">WalletDb</span>,
     };
 
@@ -672,9 +650,7 @@
         <span class="ident">init_wallet_db</span>(<span class="kw-2">&amp;</span><span class="ident">db_data</span>).<span class="ident">unwrap</span>();
 
         <span class="comment">// Add an account to the wallet</span>
-        <span class="kw">let</span> <span class="ident">extsk</span> <span class="op">=</span> <span class="ident">ExtendedSpendingKey::master</span>(<span class="kw-2">&amp;</span>[]);
-        <span class="kw">let</span> <span class="ident">extfvk</span> <span class="op">=</span> <span class="ident">ExtendedFullViewingKey::from</span>(<span class="kw-2">&amp;</span><span class="ident">extsk</span>);
-        <span class="ident">init_accounts_table</span>(<span class="kw-2">&amp;</span><span class="ident">db_data</span>, <span class="kw-2">&amp;</span>[<span class="ident">extfvk</span>.<span class="ident">clone</span>()]).<span class="ident">unwrap</span>();
+        <span class="kw">let</span> (<span class="ident">extfvk</span>, <span class="ident">_taddr</span>) <span class="op">=</span> <span class="ident">init_test_accounts_table</span>(<span class="kw-2">&amp;</span><span class="ident">db_data</span>);
 
         <span class="comment">// Empty chain should be valid</span>
         <span class="ident">validate_chain</span>(
@@ -753,9 +729,7 @@
         <span class="ident">init_wallet_db</span>(<span class="kw-2">&amp;</span><span class="ident">db_data</span>).<span class="ident">unwrap</span>();
 
         <span class="comment">// Add an account to the wallet</span>
-        <span class="kw">let</span> <span class="ident">extsk</span> <span class="op">=</span> <span class="ident">ExtendedSpendingKey::master</span>(<span class="kw-2">&amp;</span>[]);
-        <span class="kw">let</span> <span class="ident">extfvk</span> <span class="op">=</span> <span class="ident">ExtendedFullViewingKey::from</span>(<span class="kw-2">&amp;</span><span class="ident">extsk</span>);
-        <span class="ident">init_accounts_table</span>(<span class="kw-2">&amp;</span><span class="ident">db_data</span>, <span class="kw-2">&amp;</span>[<span class="ident">extfvk</span>.<span class="ident">clone</span>()]).<span class="ident">unwrap</span>();
+        <span class="kw">let</span> (<span class="ident">extfvk</span>, <span class="ident">_taddr</span>) <span class="op">=</span> <span class="ident">init_test_accounts_table</span>(<span class="kw-2">&amp;</span><span class="ident">db_data</span>);
 
         <span class="comment">// Create some fake CompactBlocks</span>
         <span class="kw">let</span> (<span class="ident">cb</span>, <span class="kw">_</span>) <span class="op">=</span> <span class="ident">fake_compact_block</span>(
@@ -825,9 +799,7 @@
         <span class="ident">init_wallet_db</span>(<span class="kw-2">&amp;</span><span class="ident">db_data</span>).<span class="ident">unwrap</span>();
 
         <span class="comment">// Add an account to the wallet</span>
-        <span class="kw">let</span> <span class="ident">extsk</span> <span class="op">=</span> <span class="ident">ExtendedSpendingKey::master</span>(<span class="kw-2">&amp;</span>[]);
-        <span class="kw">let</span> <span class="ident">extfvk</span> <span class="op">=</span> <span class="ident">ExtendedFullViewingKey::from</span>(<span class="kw-2">&amp;</span><span class="ident">extsk</span>);
-        <span class="ident">init_accounts_table</span>(<span class="kw-2">&amp;</span><span class="ident">db_data</span>, <span class="kw-2">&amp;</span>[<span class="ident">extfvk</span>.<span class="ident">clone</span>()]).<span class="ident">unwrap</span>();
+        <span class="kw">let</span> (<span class="ident">extfvk</span>, <span class="ident">_taddr</span>) <span class="op">=</span> <span class="ident">init_test_accounts_table</span>(<span class="kw-2">&amp;</span><span class="ident">db_data</span>);
 
         <span class="comment">// Create some fake CompactBlocks</span>
         <span class="kw">let</span> (<span class="ident">cb</span>, <span class="kw">_</span>) <span class="op">=</span> <span class="ident">fake_compact_block</span>(
@@ -897,9 +869,7 @@
         <span class="ident">init_wallet_db</span>(<span class="kw-2">&amp;</span><span class="ident">db_data</span>).<span class="ident">unwrap</span>();
 
         <span class="comment">// Add an account to the wallet</span>
-        <span class="kw">let</span> <span class="ident">extsk</span> <span class="op">=</span> <span class="ident">ExtendedSpendingKey::master</span>(<span class="kw-2">&amp;</span>[]);
-        <span class="kw">let</span> <span class="ident">extfvk</span> <span class="op">=</span> <span class="ident">ExtendedFullViewingKey::from</span>(<span class="kw-2">&amp;</span><span class="ident">extsk</span>);
-        <span class="ident">init_accounts_table</span>(<span class="kw-2">&amp;</span><span class="ident">db_data</span>, <span class="kw-2">&amp;</span>[<span class="ident">extfvk</span>.<span class="ident">clone</span>()]).<span class="ident">unwrap</span>();
+        <span class="kw">let</span> (<span class="ident">extfvk</span>, <span class="ident">_taddr</span>) <span class="op">=</span> <span class="ident">init_test_accounts_table</span>(<span class="kw-2">&amp;</span><span class="ident">db_data</span>);
 
         <span class="comment">// Account balance should be zero</span>
         <span class="macro">assert_eq!</span>(<span class="ident">get_balance</span>(<span class="kw-2">&amp;</span><span class="ident">db_data</span>, <span class="ident">AccountId</span>(<span class="number">0</span>)).<span class="ident">unwrap</span>(), <span class="ident">Amount::zero</span>());
@@ -965,9 +935,7 @@
         <span class="ident">init_wallet_db</span>(<span class="kw-2">&amp;</span><span class="ident">db_data</span>).<span class="ident">unwrap</span>();
 
         <span class="comment">// Add an account to the wallet</span>
-        <span class="kw">let</span> <span class="ident">extsk</span> <span class="op">=</span> <span class="ident">ExtendedSpendingKey::master</span>(<span class="kw-2">&amp;</span>[]);
-        <span class="kw">let</span> <span class="ident">extfvk</span> <span class="op">=</span> <span class="ident">ExtendedFullViewingKey::from</span>(<span class="kw-2">&amp;</span><span class="ident">extsk</span>);
-        <span class="ident">init_accounts_table</span>(<span class="kw-2">&amp;</span><span class="ident">db_data</span>, <span class="kw-2">&amp;</span>[<span class="ident">extfvk</span>.<span class="ident">clone</span>()]).<span class="ident">unwrap</span>();
+        <span class="kw">let</span> (<span class="ident">extfvk</span>, <span class="ident">_taddr</span>) <span class="op">=</span> <span class="ident">init_test_accounts_table</span>(<span class="kw-2">&amp;</span><span class="ident">db_data</span>);
 
         <span class="comment">// Create a block with height SAPLING_ACTIVATION_HEIGHT</span>
         <span class="kw">let</span> <span class="ident">value</span> <span class="op">=</span> <span class="ident">Amount::from_u64</span>(<span class="number">50000</span>).<span class="ident">unwrap</span>();
@@ -1026,9 +994,7 @@
         <span class="ident">init_wallet_db</span>(<span class="kw-2">&amp;</span><span class="ident">db_data</span>).<span class="ident">unwrap</span>();
 
         <span class="comment">// Add an account to the wallet</span>
-        <span class="kw">let</span> <span class="ident">extsk</span> <span class="op">=</span> <span class="ident">ExtendedSpendingKey::master</span>(<span class="kw-2">&amp;</span>[]);
-        <span class="kw">let</span> <span class="ident">extfvk</span> <span class="op">=</span> <span class="ident">ExtendedFullViewingKey::from</span>(<span class="kw-2">&amp;</span><span class="ident">extsk</span>);
-        <span class="ident">init_accounts_table</span>(<span class="kw-2">&amp;</span><span class="ident">db_data</span>, <span class="kw-2">&amp;</span>[<span class="ident">extfvk</span>.<span class="ident">clone</span>()]).<span class="ident">unwrap</span>();
+        <span class="kw">let</span> (<span class="ident">extfvk</span>, <span class="ident">_taddr</span>) <span class="op">=</span> <span class="ident">init_test_accounts_table</span>(<span class="kw-2">&amp;</span><span class="ident">db_data</span>);
 
         <span class="comment">// Account balance should be zero</span>
         <span class="macro">assert_eq!</span>(<span class="ident">get_balance</span>(<span class="kw-2">&amp;</span><span class="ident">db_data</span>, <span class="ident">AccountId</span>(<span class="number">0</span>)).<span class="ident">unwrap</span>(), <span class="ident">Amount::zero</span>());
@@ -1077,9 +1043,7 @@
         <span class="ident">init_wallet_db</span>(<span class="kw-2">&amp;</span><span class="ident">db_data</span>).<span class="ident">unwrap</span>();
 
         <span class="comment">// Add an account to the wallet</span>
-        <span class="kw">let</span> <span class="ident">extsk</span> <span class="op">=</span> <span class="ident">ExtendedSpendingKey::master</span>(<span class="kw-2">&amp;</span>[]);
-        <span class="kw">let</span> <span class="ident">extfvk</span> <span class="op">=</span> <span class="ident">ExtendedFullViewingKey::from</span>(<span class="kw-2">&amp;</span><span class="ident">extsk</span>);
-        <span class="ident">init_accounts_table</span>(<span class="kw-2">&amp;</span><span class="ident">db_data</span>, <span class="kw-2">&amp;</span>[<span class="ident">extfvk</span>.<span class="ident">clone</span>()]).<span class="ident">unwrap</span>();
+        <span class="kw">let</span> (<span class="ident">extfvk</span>, <span class="ident">_taddr</span>) <span class="op">=</span> <span class="ident">init_test_accounts_table</span>(<span class="kw-2">&amp;</span><span class="ident">db_data</span>);
 
         <span class="comment">// Account balance should be zero</span>
         <span class="macro">assert_eq!</span>(<span class="ident">get_balance</span>(<span class="kw-2">&amp;</span><span class="ident">db_data</span>, <span class="ident">AccountId</span>(<span class="number">0</span>)).<span class="ident">unwrap</span>(), <span class="ident">Amount::zero</span>());
@@ -1128,5 +1092,5 @@
     }
 }
 </code></pre></div>
-</section><section id="search" class="content hidden"></section></div></main><div id="rustdoc-vars" data-root-path="../../" data-current-crate="zcash_client_sqlite" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.60.0-nightly (9ad5d82f8 2022-01-18)" ></div>
+</section><section id="search" class="content hidden"></section></div></main><div id="rustdoc-vars" data-root-path="../../" data-current-crate="zcash_client_sqlite" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.60.0-nightly (734368a20 2022-02-07)" ></div>
 </body></html>

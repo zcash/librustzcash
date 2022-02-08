@@ -1,7 +1,9 @@
 <!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_client_sqlite/src/error.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>error.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" type="text/css" href="../../normalize.css"><link rel="stylesheet" type="text/css" href="../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" type="text/css" href="../../ayu.css" disabled><link rel="stylesheet" type="text/css" href="../../dark.css" disabled><link rel="stylesheet" type="text/css" href="../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../storage.js"></script><script src="../../crates.js"></script><script defer src="../../main.js"></script><script defer src="../../source-script.js"></script><script defer src="../../source-files.js"></script>
-    <noscript><link rel="stylesheet" href="../../noscript.css"></noscript><link rel="alternate icon" type="image/png" href="../../favicon-16x16.png"><link rel="alternate icon" type="image/png" href="../../favicon-32x32.png"><link rel="icon" type="image/svg+xml" href="../../favicon.svg"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="sidebar-menu" role="button">&#9776;</div><a class="sidebar-logo" href="../../zcash_client_sqlite/index.html"><div class="logo-container"><img class="rust-logo" src="../../rust-logo.svg" alt="logo"></div>
-        </a></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../zcash_client_sqlite/index.html"><img class="rust-logo" src="../../rust-logo.svg" alt="logo"></a><nav class="sub"><div class="theme-picker hidden"><button id="theme-picker" aria-label="Pick another theme!" aria-haspopup="menu" title="themes"><img width="18" height="18" alt="Pick another theme!" src="../../brush.svg"></button><div id="theme-choices" role="menu"></div></div><form class="search-form"><div class="search-container"><div>
-                                <input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"></div><button type="button" id="help-button" title="help">?</button><a id="settings-menu" href="../../settings.html" title="settings"><img width="18" height="18" alt="Change settings" src="../../wheel.svg"></a></div></form></nav></div><section id="main-content" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">  1</span>
+    <noscript><link rel="stylesheet" href="../../noscript.css"></noscript><link rel="alternate icon" type="image/png" href="../../favicon-16x16.png"><link rel="alternate icon" type="image/png" href="../../favicon-32x32.png"><link rel="icon" type="image/svg+xml" href="../../favicon.svg"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../zcash_client_sqlite/index.html"><div class="logo-container"><img class="rust-logo" src="../../rust-logo.svg" alt="logo"></div>
+        </a><h2 class="location"></h2>
+    </nav>
+    <nav class="sidebar"><a class="sidebar-logo" href="../../zcash_client_sqlite/index.html"><div class="logo-container"><img class="rust-logo" src="../../rust-logo.svg" alt="logo"></div>
+        </a></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../zcash_client_sqlite/index.html"><img class="rust-logo" src="../../rust-logo.svg" alt="logo"></a><nav class="sub"><div class="theme-picker hidden"><button id="theme-picker" aria-label="Pick another theme!" aria-haspopup="menu" title="themes"><img width="22" height="22" alt="Pick another theme!" src="../../brush.svg"></button><div id="theme-choices" role="menu"></div></div><form class="search-form"><div class="search-container"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><button type="button" id="help-button" title="help">?</button><a id="settings-menu" href="../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../wheel.svg"></a></div></form></nav></div><section id="main-content" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">  1</span>
 <span id="2">  2</span>
 <span id="3">  3</span>
 <span id="4">  4</span>
@@ -115,14 +117,28 @@
 <span id="112">112</span>
 <span id="113">113</span>
 <span id="114">114</span>
+<span id="115">115</span>
+<span id="116">116</span>
+<span id="117">117</span>
+<span id="118">118</span>
+<span id="119">119</span>
+<span id="120">120</span>
+<span id="121">121</span>
+<span id="122">122</span>
+<span id="123">123</span>
+<span id="124">124</span>
+<span id="125">125</span>
+<span id="126">126</span>
+<span id="127">127</span>
 </pre><pre class="rust"><code><span class="doccomment">//! Error types for problems that may arise when reading or storing wallet data to SQLite.</span>
 
 <span class="kw">use</span> <span class="ident">std::error</span>;
 <span class="kw">use</span> <span class="ident">std::fmt</span>;
 
-<span class="kw">use</span> <span class="ident">zcash_client_backend::data_api</span>;
+<span class="kw">use</span> <span class="ident">zcash_client_backend</span>::{<span class="ident">data_api</span>, <span class="ident">encoding::TransparentCodecError</span>};
+<span class="kw">use</span> <span class="ident">zcash_primitives::consensus::BlockHeight</span>;
 
-<span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::NoteId</span>;
+<span class="kw">use</span> <span class="kw">crate</span>::{<span class="ident">NoteId</span>, <span class="ident">PRUNING_HEIGHT</span>};
 
 <span class="doccomment">/// The primary error type for the SQLite wallet backend.</span>
 <span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Debug</span>)]</span>
@@ -149,6 +165,9 @@
     <span class="doccomment">/// Base58 decoding error</span>
     <span class="ident">Base58</span>(<span class="ident">bs58::decode::Error</span>),
 
+    <span class="doccomment">/// Base58 decoding error</span>
+    <span class="ident">TransparentAddress</span>(<span class="ident">TransparentCodecError</span>),
+
     <span class="doccomment">/// Wrapper for rusqlite errors.</span>
     <span class="ident">DbError</span>(<span class="ident">rusqlite::Error</span>),
 
@@ -157,6 +176,11 @@
 
     <span class="doccomment">/// A received memo cannot be interpreted as a UTF-8 string.</span>
     <span class="ident">InvalidMemo</span>(<span class="ident">zcash_primitives::memo::Error</span>),
+
+    <span class="doccomment">/// A requested rewind would violate invariants of the</span>
+    <span class="doccomment">/// storage layer. The payload returned with this error is</span>
+    <span class="doccomment">/// (safe rewind height, requested height).</span>
+    <span class="ident">RequestedRewindInvalid</span>(<span class="ident">BlockHeight</span>, <span class="ident">BlockHeight</span>),
 
     <span class="doccomment">/// Wrapper for errors from zcash_client_backend</span>
     <span class="ident">BackendError</span>(<span class="ident">data_api::error::Error</span><span class="op">&lt;</span><span class="ident">NoteId</span><span class="op">&gt;</span>),
@@ -182,9 +206,13 @@
             }
             <span class="ident">SqliteClientError::IncorrectHrpExtFvk</span> =&gt; <span class="macro">write!</span>(<span class="ident">f</span>, <span class="string">&quot;Incorrect HRP for extfvk&quot;</span>),
             <span class="ident">SqliteClientError::InvalidNote</span> =&gt; <span class="macro">write!</span>(<span class="ident">f</span>, <span class="string">&quot;Invalid note&quot;</span>),
-            <span class="ident">SqliteClientError::InvalidNoteId</span> =&gt; <span class="macro">write!</span>(<span class="ident">f</span>, <span class="string">&quot;The note ID associated with an inserted witness must correspond to a received note.&quot;</span>),
+            <span class="ident">SqliteClientError::InvalidNoteId</span> =&gt;
+                <span class="macro">write!</span>(<span class="ident">f</span>, <span class="string">&quot;The note ID associated with an inserted witness must correspond to a received note.&quot;</span>),
+            <span class="ident">SqliteClientError::RequestedRewindInvalid</span>(<span class="ident">h</span>, <span class="ident">r</span>) =&gt;
+                <span class="macro">write!</span>(<span class="ident">f</span>, <span class="string">&quot;A rewind must be either of less than {} blocks, or at least back to block {} for your wallet; the requested height was {}.&quot;</span>, <span class="ident">PRUNING_HEIGHT</span>, <span class="ident">h</span>, <span class="ident">r</span>),
             <span class="ident">SqliteClientError::Bech32</span>(<span class="ident">e</span>) =&gt; <span class="macro">write!</span>(<span class="ident">f</span>, <span class="string">&quot;{}&quot;</span>, <span class="ident">e</span>),
             <span class="ident">SqliteClientError::Base58</span>(<span class="ident">e</span>) =&gt; <span class="macro">write!</span>(<span class="ident">f</span>, <span class="string">&quot;{}&quot;</span>, <span class="ident">e</span>),
+            <span class="ident">SqliteClientError::TransparentAddress</span>(<span class="ident">e</span>) =&gt; <span class="macro">write!</span>(<span class="ident">f</span>, <span class="string">&quot;{}&quot;</span>, <span class="ident">e</span>),
             <span class="ident">SqliteClientError::TableNotEmpty</span> =&gt; <span class="macro">write!</span>(<span class="ident">f</span>, <span class="string">&quot;Table is not empty&quot;</span>),
             <span class="ident">SqliteClientError::DbError</span>(<span class="ident">e</span>) =&gt; <span class="macro">write!</span>(<span class="ident">f</span>, <span class="string">&quot;{}&quot;</span>, <span class="ident">e</span>),
             <span class="ident">SqliteClientError::Io</span>(<span class="ident">e</span>) =&gt; <span class="macro">write!</span>(<span class="ident">f</span>, <span class="string">&quot;{}&quot;</span>, <span class="ident">e</span>),
@@ -230,5 +258,5 @@
     }
 }
 </code></pre></div>
-</section><section id="search" class="content hidden"></section></div></main><div id="rustdoc-vars" data-root-path="../../" data-current-crate="zcash_client_sqlite" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.60.0-nightly (9ad5d82f8 2022-01-18)" ></div>
+</section><section id="search" class="content hidden"></section></div></main><div id="rustdoc-vars" data-root-path="../../" data-current-crate="zcash_client_sqlite" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.60.0-nightly (734368a20 2022-02-07)" ></div>
 </body></html>

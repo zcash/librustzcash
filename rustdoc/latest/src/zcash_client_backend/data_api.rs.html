@@ -1,7 +1,9 @@
 <!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_client_backend/src/data_api.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>data_api.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" type="text/css" href="../../normalize.css"><link rel="stylesheet" type="text/css" href="../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" type="text/css" href="../../ayu.css" disabled><link rel="stylesheet" type="text/css" href="../../dark.css" disabled><link rel="stylesheet" type="text/css" href="../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../storage.js"></script><script src="../../crates.js"></script><script defer src="../../main.js"></script><script defer src="../../source-script.js"></script><script defer src="../../source-files.js"></script>
-    <noscript><link rel="stylesheet" href="../../noscript.css"></noscript><link rel="alternate icon" type="image/png" href="../../favicon-16x16.png"><link rel="alternate icon" type="image/png" href="../../favicon-32x32.png"><link rel="icon" type="image/svg+xml" href="../../favicon.svg"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="sidebar-menu" role="button">&#9776;</div><a class="sidebar-logo" href="../../zcash_client_backend/index.html"><div class="logo-container"><img class="rust-logo" src="../../rust-logo.svg" alt="logo"></div>
-        </a></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../zcash_client_backend/index.html"><img class="rust-logo" src="../../rust-logo.svg" alt="logo"></a><nav class="sub"><div class="theme-picker hidden"><button id="theme-picker" aria-label="Pick another theme!" aria-haspopup="menu" title="themes"><img width="18" height="18" alt="Pick another theme!" src="../../brush.svg"></button><div id="theme-choices" role="menu"></div></div><form class="search-form"><div class="search-container"><div>
-                                <input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"></div><button type="button" id="help-button" title="help">?</button><a id="settings-menu" href="../../settings.html" title="settings"><img width="18" height="18" alt="Change settings" src="../../wheel.svg"></a></div></form></nav></div><section id="main-content" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">  1</span>
+    <noscript><link rel="stylesheet" href="../../noscript.css"></noscript><link rel="alternate icon" type="image/png" href="../../favicon-16x16.png"><link rel="alternate icon" type="image/png" href="../../favicon-32x32.png"><link rel="icon" type="image/svg+xml" href="../../favicon.svg"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../zcash_client_backend/index.html"><div class="logo-container"><img class="rust-logo" src="../../rust-logo.svg" alt="logo"></div>
+        </a><h2 class="location"></h2>
+    </nav>
+    <nav class="sidebar"><a class="sidebar-logo" href="../../zcash_client_backend/index.html"><div class="logo-container"><img class="rust-logo" src="../../rust-logo.svg" alt="logo"></div>
+        </a></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../zcash_client_backend/index.html"><img class="rust-logo" src="../../rust-logo.svg" alt="logo"></a><nav class="sub"><div class="theme-picker hidden"><button id="theme-picker" aria-label="Pick another theme!" aria-haspopup="menu" title="themes"><img width="22" height="22" alt="Pick another theme!" src="../../brush.svg"></button><div id="theme-choices" role="menu"></div></div><form class="search-form"><div class="search-container"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><button type="button" id="help-button" title="help">?</button><a id="settings-menu" href="../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../wheel.svg"></a></div></form></nav></div><section id="main-content" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">  1</span>
 <span id="2">  2</span>
 <span id="3">  3</span>
 <span id="4">  4</span>
@@ -430,6 +432,75 @@
 <span id="427">427</span>
 <span id="428">428</span>
 <span id="429">429</span>
+<span id="430">430</span>
+<span id="431">431</span>
+<span id="432">432</span>
+<span id="433">433</span>
+<span id="434">434</span>
+<span id="435">435</span>
+<span id="436">436</span>
+<span id="437">437</span>
+<span id="438">438</span>
+<span id="439">439</span>
+<span id="440">440</span>
+<span id="441">441</span>
+<span id="442">442</span>
+<span id="443">443</span>
+<span id="444">444</span>
+<span id="445">445</span>
+<span id="446">446</span>
+<span id="447">447</span>
+<span id="448">448</span>
+<span id="449">449</span>
+<span id="450">450</span>
+<span id="451">451</span>
+<span id="452">452</span>
+<span id="453">453</span>
+<span id="454">454</span>
+<span id="455">455</span>
+<span id="456">456</span>
+<span id="457">457</span>
+<span id="458">458</span>
+<span id="459">459</span>
+<span id="460">460</span>
+<span id="461">461</span>
+<span id="462">462</span>
+<span id="463">463</span>
+<span id="464">464</span>
+<span id="465">465</span>
+<span id="466">466</span>
+<span id="467">467</span>
+<span id="468">468</span>
+<span id="469">469</span>
+<span id="470">470</span>
+<span id="471">471</span>
+<span id="472">472</span>
+<span id="473">473</span>
+<span id="474">474</span>
+<span id="475">475</span>
+<span id="476">476</span>
+<span id="477">477</span>
+<span id="478">478</span>
+<span id="479">479</span>
+<span id="480">480</span>
+<span id="481">481</span>
+<span id="482">482</span>
+<span id="483">483</span>
+<span id="484">484</span>
+<span id="485">485</span>
+<span id="486">486</span>
+<span id="487">487</span>
+<span id="488">488</span>
+<span id="489">489</span>
+<span id="490">490</span>
+<span id="491">491</span>
+<span id="492">492</span>
+<span id="493">493</span>
+<span id="494">494</span>
+<span id="495">495</span>
+<span id="496">496</span>
+<span id="497">497</span>
+<span id="498">498</span>
 </pre><pre class="rust"><code><span class="doccomment">//! Interfaces for wallet data persistence &amp; low-level wallet utilities.</span>
 
 <span class="kw">use</span> <span class="ident">std::cmp</span>;
@@ -443,15 +514,20 @@
     <span class="ident">merkle_tree</span>::{<span class="ident">CommitmentTree</span>, <span class="ident">IncrementalWitness</span>},
     <span class="ident">sapling</span>::{<span class="ident">Node</span>, <span class="ident">Nullifier</span>, <span class="ident">PaymentAddress</span>},
     <span class="ident">transaction</span>::{<span class="ident">components::Amount</span>, <span class="ident">Transaction</span>, <span class="ident">TxId</span>},
-    <span class="ident">zip32::ExtendedFullViewingKey</span>,
+    <span class="ident">zip32</span>::{<span class="ident">AccountId</span>, <span class="ident">ExtendedFullViewingKey</span>},
 };
 
 <span class="kw">use</span> <span class="kw">crate</span>::{
     <span class="ident">address::RecipientAddress</span>,
-    <span class="ident">data_api::wallet::ANCHOR_OFFSET</span>,
     <span class="ident">decrypt::DecryptedOutput</span>,
     <span class="ident">proto::compact_formats::CompactBlock</span>,
-    <span class="ident">wallet</span>::{<span class="ident">AccountId</span>, <span class="ident">SpendableNote</span>, <span class="ident">WalletTx</span>},
+    <span class="ident">wallet</span>::{<span class="ident">SpendableNote</span>, <span class="ident">WalletTx</span>},
+};
+
+<span class="attribute">#[<span class="ident">cfg</span>(<span class="ident">feature</span> <span class="op">=</span> <span class="string">&quot;transparent-inputs&quot;</span>)]</span>
+<span class="kw">use</span> {
+    <span class="ident"><span class="kw">crate</span>::wallet::WalletTransparentOutput</span>,
+    <span class="ident">zcash_primitives</span>::{<span class="ident">legacy::TransparentAddress</span>, <span class="ident">transaction::components::OutPoint</span>},
 };
 
 <span class="kw">pub</span> <span class="kw">mod</span> <span class="ident">chain</span>;
@@ -460,10 +536,9 @@
 
 <span class="doccomment">/// Read-only operations required for light wallet functions.</span>
 <span class="doccomment">///</span>
-<span class="doccomment">/// This trait defines the read-only portion of the storage</span>
-<span class="doccomment">/// interface atop which higher-level wallet operations are</span>
-<span class="doccomment">/// implemented. It serves to allow wallet functions to be</span>
-<span class="doccomment">/// abstracted away from any particular data storage substrate.</span>
+<span class="doccomment">/// This trait defines the read-only portion of the storage interface atop which</span>
+<span class="doccomment">/// higher-level wallet operations are implemented. It serves to allow wallet functions to</span>
+<span class="doccomment">/// be abstracted away from any particular data storage substrate.</span>
 <span class="kw">pub</span> <span class="kw">trait</span> <span class="ident">WalletRead</span> {
     <span class="doccomment">/// The type of errors produced by a wallet backend.</span>
     <span class="kw">type</span> <span class="ident">Error</span>;
@@ -494,15 +569,16 @@
     <span class="doccomment">/// This will return `Ok(None)` if no block data is present in the database.</span>
     <span class="kw">fn</span> <span class="ident">get_target_and_anchor_heights</span>(
         <span class="kw-2">&amp;</span><span class="self">self</span>,
+        <span class="ident">min_confirmations</span>: <span class="ident">u32</span>,
     ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="prelude-ty">Option</span><span class="op">&lt;</span>(<span class="ident">BlockHeight</span>, <span class="ident">BlockHeight</span>)<span class="op">&gt;</span>, <span class="ident"><span class="self">Self</span>::Error</span><span class="op">&gt;</span> {
         <span class="self">self</span>.<span class="ident">block_height_extrema</span>().<span class="ident">map</span>(<span class="op">|</span><span class="ident">heights</span><span class="op">|</span> {
             <span class="ident">heights</span>.<span class="ident">map</span>(<span class="op">|</span>(<span class="ident">min_height</span>, <span class="ident">max_height</span>)<span class="op">|</span> {
                 <span class="kw">let</span> <span class="ident">target_height</span> <span class="op">=</span> <span class="ident">max_height</span> <span class="op">+</span> <span class="number">1</span>;
 
-                <span class="comment">// Select an anchor ANCHOR_OFFSET back from the target block,</span>
+                <span class="comment">// Select an anchor min_confirmations back from the target block,</span>
                 <span class="comment">// unless that would be before the earliest block we have.</span>
                 <span class="kw">let</span> <span class="ident">anchor_height</span> <span class="op">=</span> <span class="ident">BlockHeight::from</span>(<span class="ident">cmp::max</span>(
-                    <span class="ident">u32::from</span>(<span class="ident">target_height</span>).<span class="ident">saturating_sub</span>(<span class="ident">ANCHOR_OFFSET</span>),
+                    <span class="ident">u32::from</span>(<span class="ident">target_height</span>).<span class="ident">saturating_sub</span>(<span class="ident">min_confirmations</span>),
                     <span class="ident">u32::from</span>(<span class="ident">min_height</span>),
                 ));
 
@@ -574,6 +650,9 @@
     <span class="doccomment">/// does not appear in the backing data store.</span>
     <span class="kw">fn</span> <span class="ident">get_memo</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">id_note</span>: <span class="ident"><span class="self">Self</span>::NoteRef</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Memo</span>, <span class="ident"><span class="self">Self</span>::Error</span><span class="op">&gt;</span>;
 
+    <span class="doccomment">/// Returns a transaction.</span>
+    <span class="kw">fn</span> <span class="ident">get_transaction</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">id_tx</span>: <span class="ident"><span class="self">Self</span>::TxRef</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Transaction</span>, <span class="ident"><span class="self">Self</span>::Error</span><span class="op">&gt;</span>;
+
     <span class="doccomment">/// Returns the note commitment tree at the specified block height.</span>
     <span class="kw">fn</span> <span class="ident">get_commitment_tree</span>(
         <span class="kw-2">&amp;</span><span class="self">self</span>,
@@ -587,25 +666,42 @@
         <span class="ident">block_height</span>: <span class="ident">BlockHeight</span>,
     ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span>(<span class="ident"><span class="self">Self</span>::NoteRef</span>, <span class="ident">IncrementalWitness</span><span class="op">&lt;</span><span class="ident">Node</span><span class="op">&gt;</span>)<span class="op">&gt;</span>, <span class="ident"><span class="self">Self</span>::Error</span><span class="op">&gt;</span>;
 
-    <span class="doccomment">/// Returns the unspent nullifiers, along with the account identifiers</span>
-    <span class="doccomment">/// with which they are associated.</span>
+    <span class="doccomment">/// Returns the nullifiers for notes that the wallet is tracking, along with their</span>
+    <span class="doccomment">/// associated account IDs, that are either unspent or have not yet been confirmed as</span>
+    <span class="doccomment">/// spent (in that the spending transaction has not yet been included in a block).</span>
     <span class="kw">fn</span> <span class="ident">get_nullifiers</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span>(<span class="ident">AccountId</span>, <span class="ident">Nullifier</span>)<span class="op">&gt;</span>, <span class="ident"><span class="self">Self</span>::Error</span><span class="op">&gt;</span>;
 
-    <span class="doccomment">/// Return all spendable notes.</span>
-    <span class="kw">fn</span> <span class="ident">get_spendable_notes</span>(
+    <span class="doccomment">/// Returns all nullifiers for notes that the wallet is tracking</span>
+    <span class="doccomment">/// (including those for notes that have been previously spent),</span>
+    <span class="doccomment">/// along with the account identifiers with which they are associated.</span>
+    <span class="kw">fn</span> <span class="ident">get_all_nullifiers</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span>(<span class="ident">AccountId</span>, <span class="ident">Nullifier</span>)<span class="op">&gt;</span>, <span class="ident"><span class="self">Self</span>::Error</span><span class="op">&gt;</span>;
+
+    <span class="doccomment">/// Return all unspent Sapling notes.</span>
+    <span class="kw">fn</span> <span class="ident">get_spendable_sapling_notes</span>(
         <span class="kw-2">&amp;</span><span class="self">self</span>,
         <span class="ident">account</span>: <span class="ident">AccountId</span>,
         <span class="ident">anchor_height</span>: <span class="ident">BlockHeight</span>,
     ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">SpendableNote</span><span class="op">&gt;</span>, <span class="ident"><span class="self">Self</span>::Error</span><span class="op">&gt;</span>;
 
-    <span class="doccomment">/// Returns a list of spendable notes sufficient to cover the specified</span>
+    <span class="doccomment">/// Returns a list of spendable Sapling notes sufficient to cover the specified</span>
     <span class="doccomment">/// target value, if possible.</span>
-    <span class="kw">fn</span> <span class="ident">select_spendable_notes</span>(
+    <span class="kw">fn</span> <span class="ident">select_spendable_sapling_notes</span>(
         <span class="kw-2">&amp;</span><span class="self">self</span>,
         <span class="ident">account</span>: <span class="ident">AccountId</span>,
         <span class="ident">target_value</span>: <span class="ident">Amount</span>,
         <span class="ident">anchor_height</span>: <span class="ident">BlockHeight</span>,
     ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">SpendableNote</span><span class="op">&gt;</span>, <span class="ident"><span class="self">Self</span>::Error</span><span class="op">&gt;</span>;
+}
+
+<span class="attribute">#[<span class="ident">cfg</span>(<span class="ident">feature</span> <span class="op">=</span> <span class="string">&quot;transparent-inputs&quot;</span>)]</span>
+<span class="kw">pub</span> <span class="kw">trait</span> <span class="ident">WalletReadTransparent</span>: <span class="ident">WalletRead</span> {
+    <span class="doccomment">/// Returns a list of unspent transparent UTXOs that appear in the chain at heights up to and</span>
+    <span class="doccomment">/// including `max_height`.</span>
+    <span class="kw">fn</span> <span class="ident">get_unspent_transparent_outputs</span>(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        <span class="ident">address</span>: <span class="kw-2">&amp;</span><span class="ident">TransparentAddress</span>,
+        <span class="ident">max_height</span>: <span class="ident">BlockHeight</span>,
+    ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">WalletTransparentOutput</span><span class="op">&gt;</span>, <span class="ident"><span class="self">Self</span>::Error</span><span class="op">&gt;</span>;
 }
 
 <span class="doccomment">/// The subset of information that is relevant to this wallet that has been</span>
@@ -623,9 +719,9 @@
 <span class="doccomment">///</span>
 <span class="doccomment">/// The purpose of this struct is to permit atomic updates of the</span>
 <span class="doccomment">/// wallet database when transactions are successfully decrypted.</span>
-<span class="kw">pub</span> <span class="kw">struct</span> <span class="ident">ReceivedTransaction</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
+<span class="kw">pub</span> <span class="kw">struct</span> <span class="ident">DecryptedTransaction</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
     <span class="kw">pub</span> <span class="ident">tx</span>: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a</span> <span class="ident">Transaction</span>,
-    <span class="kw">pub</span> <span class="ident">outputs</span>: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a</span> <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">DecryptedOutput</span><span class="op">&gt;</span>,
+    <span class="kw">pub</span> <span class="ident">sapling_outputs</span>: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a</span> <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">DecryptedOutput</span><span class="op">&gt;</span>,
 }
 
 <span class="doccomment">/// A transaction that was constructed and sent by the wallet.</span>
@@ -636,6 +732,13 @@
 <span class="kw">pub</span> <span class="kw">struct</span> <span class="ident">SentTransaction</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
     <span class="kw">pub</span> <span class="ident">tx</span>: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a</span> <span class="ident">Transaction</span>,
     <span class="kw">pub</span> <span class="ident">created</span>: <span class="ident">time::OffsetDateTime</span>,
+    <span class="kw">pub</span> <span class="ident">account</span>: <span class="ident">AccountId</span>,
+    <span class="kw">pub</span> <span class="ident">outputs</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">SentTransactionOutput</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span><span class="op">&gt;</span>,
+    <span class="attribute">#[<span class="ident">cfg</span>(<span class="ident">feature</span> <span class="op">=</span> <span class="string">&quot;transparent-inputs&quot;</span>)]</span>
+    <span class="kw">pub</span> <span class="ident">utxos_spent</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">OutPoint</span><span class="op">&gt;</span>,
+}
+
+<span class="kw">pub</span> <span class="kw">struct</span> <span class="ident">SentTransactionOutput</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
     <span class="doccomment">/// The index within the transaction that contains the recipient output.</span>
     <span class="doccomment">///</span>
     <span class="doccomment">/// - If `recipient_address` is a Sapling address, this is an index into the Sapling</span>
@@ -643,7 +746,6 @@
     <span class="doccomment">/// - If `recipient_address` is a transparent address, this is an index into the</span>
     <span class="doccomment">///   transparent outputs of the transaction.</span>
     <span class="kw">pub</span> <span class="ident">output_index</span>: <span class="ident">usize</span>,
-    <span class="kw">pub</span> <span class="ident">account</span>: <span class="ident">AccountId</span>,
     <span class="kw">pub</span> <span class="ident">recipient_address</span>: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a</span> <span class="ident">RecipientAddress</span>,
     <span class="kw">pub</span> <span class="ident">value</span>: <span class="ident">Amount</span>,
     <span class="kw">pub</span> <span class="ident">memo</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">MemoBytes</span><span class="op">&gt;</span>,
@@ -652,6 +754,10 @@
 <span class="doccomment">/// This trait encapsulates the write capabilities required to update stored</span>
 <span class="doccomment">/// wallet data.</span>
 <span class="kw">pub</span> <span class="kw">trait</span> <span class="ident">WalletWrite</span>: <span class="ident">WalletRead</span> {
+    <span class="doccomment">/// Updates the state of the wallet database by persisting the provided</span>
+    <span class="doccomment">/// block information, along with the updated witness data that was</span>
+    <span class="doccomment">/// produced when scanning the block for transactions pertaining to</span>
+    <span class="doccomment">/// this wallet.</span>
     <span class="attribute">#[<span class="ident">allow</span>(<span class="ident">clippy::type_complexity</span>)]</span>
     <span class="kw">fn</span> <span class="ident">advance_by_block</span>(
         <span class="kw-2">&amp;mut</span> <span class="self">self</span>,
@@ -659,9 +765,10 @@
         <span class="ident">updated_witnesses</span>: <span class="kw-2">&amp;</span>[(<span class="ident"><span class="self">Self</span>::NoteRef</span>, <span class="ident">IncrementalWitness</span><span class="op">&lt;</span><span class="ident">Node</span><span class="op">&gt;</span>)],
     ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span>(<span class="ident"><span class="self">Self</span>::NoteRef</span>, <span class="ident">IncrementalWitness</span><span class="op">&lt;</span><span class="ident">Node</span><span class="op">&gt;</span>)<span class="op">&gt;</span>, <span class="ident"><span class="self">Self</span>::Error</span><span class="op">&gt;</span>;
 
-    <span class="kw">fn</span> <span class="ident">store_received_tx</span>(
+    <span class="doccomment">/// Caches a decrypted transaction in the persistent wallet store.</span>
+    <span class="kw">fn</span> <span class="ident">store_decrypted_tx</span>(
         <span class="kw-2">&amp;mut</span> <span class="self">self</span>,
-        <span class="ident">received_tx</span>: <span class="kw-2">&amp;</span><span class="ident">ReceivedTransaction</span>,
+        <span class="ident">received_tx</span>: <span class="kw-2">&amp;</span><span class="ident">DecryptedTransaction</span>,
     ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident"><span class="self">Self</span>::TxRef</span>, <span class="ident"><span class="self">Self</span>::Error</span><span class="op">&gt;</span>;
 
     <span class="kw">fn</span> <span class="ident">store_sent_tx</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">sent_tx</span>: <span class="kw-2">&amp;</span><span class="ident">SentTransaction</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident"><span class="self">Self</span>::TxRef</span>, <span class="ident"><span class="self">Self</span>::Error</span><span class="op">&gt;</span>;
@@ -680,6 +787,16 @@
     <span class="doccomment">///</span>
     <span class="doccomment">/// There may be restrictions on how far it is possible to rewind.</span>
     <span class="kw">fn</span> <span class="ident">rewind_to_height</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">block_height</span>: <span class="ident">BlockHeight</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident"><span class="self">Self</span>::Error</span><span class="op">&gt;</span>;
+}
+
+<span class="attribute">#[<span class="ident">cfg</span>(<span class="ident">feature</span> <span class="op">=</span> <span class="string">&quot;transparent-inputs&quot;</span>)]</span>
+<span class="kw">pub</span> <span class="kw">trait</span> <span class="ident">WalletWriteTransparent</span>: <span class="ident">WalletWrite</span> <span class="op">+</span> <span class="ident">WalletReadTransparent</span> {
+    <span class="kw">type</span> <span class="ident">UtxoRef</span>;
+
+    <span class="kw">fn</span> <span class="ident">put_received_transparent_utxo</span>(
+        <span class="kw-2">&amp;mut</span> <span class="self">self</span>,
+        <span class="ident">output</span>: <span class="kw-2">&amp;</span><span class="ident">WalletTransparentOutput</span>,
+    ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident"><span class="self">Self</span>::UtxoRef</span>, <span class="ident"><span class="self">Self</span>::Error</span><span class="op">&gt;</span>;
 }
 
 <span class="doccomment">/// This trait provides sequential access to raw blockchain data via a callback-oriented</span>
@@ -706,22 +823,26 @@
     <span class="kw">use</span> <span class="ident">zcash_primitives</span>::{
         <span class="ident">block::BlockHash</span>,
         <span class="ident">consensus::BlockHeight</span>,
+        <span class="ident">legacy::TransparentAddress</span>,
         <span class="ident">memo::Memo</span>,
         <span class="ident">merkle_tree</span>::{<span class="ident">CommitmentTree</span>, <span class="ident">IncrementalWitness</span>},
         <span class="ident">sapling</span>::{<span class="ident">Node</span>, <span class="ident">Nullifier</span>, <span class="ident">PaymentAddress</span>},
-        <span class="ident">transaction</span>::{<span class="ident">components::Amount</span>, <span class="ident">TxId</span>},
-        <span class="ident">zip32::ExtendedFullViewingKey</span>,
+        <span class="ident">transaction</span>::{<span class="ident">components::Amount</span>, <span class="ident">Transaction</span>, <span class="ident">TxId</span>},
+        <span class="ident">zip32</span>::{<span class="ident">AccountId</span>, <span class="ident">ExtendedFullViewingKey</span>},
     };
 
     <span class="kw">use</span> <span class="kw">crate</span>::{
         <span class="ident">proto::compact_formats::CompactBlock</span>,
-        <span class="ident">wallet</span>::{<span class="ident">AccountId</span>, <span class="ident">SpendableNote</span>},
+        <span class="ident">wallet</span>::{<span class="ident">SpendableNote</span>, <span class="ident">WalletTransparentOutput</span>},
     };
 
     <span class="kw">use</span> <span class="kw">super</span>::{
-        <span class="ident">error::Error</span>, <span class="ident">BlockSource</span>, <span class="ident">PrunedBlock</span>, <span class="ident">ReceivedTransaction</span>, <span class="ident">SentTransaction</span>, <span class="ident">WalletRead</span>,
+        <span class="ident">error::Error</span>, <span class="ident">BlockSource</span>, <span class="ident">DecryptedTransaction</span>, <span class="ident">PrunedBlock</span>, <span class="ident">SentTransaction</span>, <span class="ident">WalletRead</span>,
         <span class="ident">WalletWrite</span>,
     };
+
+    <span class="attribute">#[<span class="ident">cfg</span>(<span class="ident">feature</span> <span class="op">=</span> <span class="string">&quot;transparent-inputs&quot;</span>)]</span>
+    <span class="kw">use</span> <span class="ident"><span class="kw">super</span>::WalletReadTransparent</span>;
 
     <span class="kw">pub</span> <span class="kw">struct</span> <span class="ident">MockBlockSource</span> {}
 
@@ -793,6 +914,10 @@
             <span class="prelude-val">Ok</span>(<span class="ident">Memo::Empty</span>)
         }
 
+        <span class="kw">fn</span> <span class="ident">get_transaction</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">_id_tx</span>: <span class="ident"><span class="self">Self</span>::TxRef</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Transaction</span>, <span class="ident"><span class="self">Self</span>::Error</span><span class="op">&gt;</span> {
+            <span class="prelude-val">Err</span>(<span class="ident">Error::ScanRequired</span>) <span class="comment">// wrong error but we&#39;ll fix it later.</span>
+        }
+
         <span class="kw">fn</span> <span class="ident">get_commitment_tree</span>(
             <span class="kw-2">&amp;</span><span class="self">self</span>,
             <span class="ident">_block_height</span>: <span class="ident">BlockHeight</span>,
@@ -812,7 +937,11 @@
             <span class="prelude-val">Ok</span>(<span class="ident">Vec::new</span>())
         }
 
-        <span class="kw">fn</span> <span class="ident">get_spendable_notes</span>(
+        <span class="kw">fn</span> <span class="ident">get_all_nullifiers</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span>(<span class="ident">AccountId</span>, <span class="ident">Nullifier</span>)<span class="op">&gt;</span>, <span class="ident"><span class="self">Self</span>::Error</span><span class="op">&gt;</span> {
+            <span class="prelude-val">Ok</span>(<span class="ident">Vec::new</span>())
+        }
+
+        <span class="kw">fn</span> <span class="ident">get_spendable_sapling_notes</span>(
             <span class="kw-2">&amp;</span><span class="self">self</span>,
             <span class="ident">_account</span>: <span class="ident">AccountId</span>,
             <span class="ident">_anchor_height</span>: <span class="ident">BlockHeight</span>,
@@ -820,12 +949,23 @@
             <span class="prelude-val">Ok</span>(<span class="ident">Vec::new</span>())
         }
 
-        <span class="kw">fn</span> <span class="ident">select_spendable_notes</span>(
+        <span class="kw">fn</span> <span class="ident">select_spendable_sapling_notes</span>(
             <span class="kw-2">&amp;</span><span class="self">self</span>,
             <span class="ident">_account</span>: <span class="ident">AccountId</span>,
             <span class="ident">_target_value</span>: <span class="ident">Amount</span>,
             <span class="ident">_anchor_height</span>: <span class="ident">BlockHeight</span>,
         ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">SpendableNote</span><span class="op">&gt;</span>, <span class="ident"><span class="self">Self</span>::Error</span><span class="op">&gt;</span> {
+            <span class="prelude-val">Ok</span>(<span class="ident">Vec::new</span>())
+        }
+    }
+
+    <span class="attribute">#[<span class="ident">cfg</span>(<span class="ident">feature</span> <span class="op">=</span> <span class="string">&quot;transparent-inputs&quot;</span>)]</span>
+    <span class="kw">impl</span> <span class="ident">WalletReadTransparent</span> <span class="kw">for</span> <span class="ident">MockWalletDb</span> {
+        <span class="kw">fn</span> <span class="ident">get_unspent_transparent_outputs</span>(
+            <span class="kw-2">&amp;</span><span class="self">self</span>,
+            <span class="ident">_address</span>: <span class="kw-2">&amp;</span><span class="ident">TransparentAddress</span>,
+            <span class="ident">_anchor_height</span>: <span class="ident">BlockHeight</span>,
+        ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">WalletTransparentOutput</span><span class="op">&gt;</span>, <span class="ident"><span class="self">Self</span>::Error</span><span class="op">&gt;</span> {
             <span class="prelude-val">Ok</span>(<span class="ident">Vec::new</span>())
         }
     }
@@ -840,9 +980,9 @@
             <span class="prelude-val">Ok</span>(<span class="macro">vec!</span>[])
         }
 
-        <span class="kw">fn</span> <span class="ident">store_received_tx</span>(
+        <span class="kw">fn</span> <span class="ident">store_decrypted_tx</span>(
             <span class="kw-2">&amp;mut</span> <span class="self">self</span>,
-            <span class="ident">_received_tx</span>: <span class="kw-2">&amp;</span><span class="ident">ReceivedTransaction</span>,
+            <span class="ident">_received_tx</span>: <span class="kw-2">&amp;</span><span class="ident">DecryptedTransaction</span>,
         ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident"><span class="self">Self</span>::TxRef</span>, <span class="ident"><span class="self">Self</span>::Error</span><span class="op">&gt;</span> {
             <span class="prelude-val">Ok</span>(<span class="ident">TxId::from_bytes</span>([<span class="number">0u8</span>; <span class="number">32</span>]))
         }
@@ -860,5 +1000,5 @@
     }
 }
 </code></pre></div>
-</section><section id="search" class="content hidden"></section></div></main><div id="rustdoc-vars" data-root-path="../../" data-current-crate="zcash_client_backend" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.60.0-nightly (9ad5d82f8 2022-01-18)" ></div>
+</section><section id="search" class="content hidden"></section></div></main><div id="rustdoc-vars" data-root-path="../../" data-current-crate="zcash_client_backend" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.60.0-nightly (734368a20 2022-02-07)" ></div>
 </body></html>

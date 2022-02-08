@@ -1,1 +1,1 @@
-initSidebarItems({"fn":[["spending_key","Derives the ZIP 32 `ExtendedSpendingKey` for a given coin type and account from the given seed."]]});
+initSidebarItems({"mod":[["sapling",""]]});
