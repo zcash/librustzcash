@@ -177,7 +177,7 @@ pub fn init_wallet_db<P>(wdb: &WalletDb<P>) -> Result<(), rusqlite::Error> {
 /// init_wallet_db(&db_data).unwrap();
 ///
 /// let seed = [0u8; 32]; // insecure; replace with a strong random seed
-/// let account = AccountId(0);
+/// let account = AccountId::from(0);
 /// let extsk = sapling::spending_key(&seed, Network::TestNetwork.coin_type(), account);
 /// let extfvk = ExtendedFullViewingKey::from(&extsk);
 /// let ufvk = UnifiedFullViewingKey::new(account, None, Some(extfvk)).unwrap();
@@ -222,7 +222,12 @@ pub fn init_accounts_table<P: consensus::Parameters>(
         wdb.conn.execute(
             "INSERT INTO accounts (account, extfvk, address, transparent_address)
             VALUES (?, ?, ?, ?)",
-            params![key.account().0, extfvk_str, address_str, taddress_str,],
+            params![
+                u32::from(key.account()),
+                extfvk_str,
+                address_str,
+                taddress_str,
+            ],
         )?;
     }
     wdb.conn.execute("COMMIT", NO_PARAMS)?;
@@ -323,7 +328,7 @@ mod tests {
         init_accounts_table(&db_data, &[]).unwrap();
 
         let seed = [0u8; 32];
-        let account = AccountId(0);
+        let account = AccountId::from(0);
 
         // First call with data should initialise the accounts table
         let extsk = sapling::spending_key(&seed, network().coin_type(), account);
@@ -387,14 +392,14 @@ mod tests {
         let seed = [0u8; 32];
 
         // Add an account to the wallet
-        let account_id = AccountId(0);
+        let account_id = AccountId::from(0);
         let usk = UnifiedSpendingKey::from_seed(&tests::network(), &seed, account_id).unwrap();
         let ufvk = usk.to_unified_full_viewing_key();
         let expected_address = ufvk.sapling().unwrap().default_address().1;
         init_accounts_table(&db_data, &[ufvk]).unwrap();
 
         // The account's address should be in the data DB
-        let pa = get_address(&db_data, AccountId(0)).unwrap();
+        let pa = get_address(&db_data, AccountId::from(0)).unwrap();
         assert_eq!(pa.unwrap(), expected_address);
     }
 }

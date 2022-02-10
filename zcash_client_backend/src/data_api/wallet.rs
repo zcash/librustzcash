@@ -142,7 +142,7 @@ where
 ///     }
 /// };
 ///
-/// let account = AccountId(0);
+/// let account = AccountId::from(0);
 /// let extsk = sapling::spending_key(&[0; 32][..], COIN_TYPE, account);
 /// let to = extsk.default_address().1.into();
 ///

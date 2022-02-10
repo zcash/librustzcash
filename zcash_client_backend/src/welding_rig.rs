@@ -229,7 +229,7 @@ pub fn scan_block<P: consensus::Parameters, K: ScanningKey>(
                     .iter()
                     .map(|&(account, nf)| CtOption::new(account, nf.ct_eq(&spend_nf)))
                     .fold(
-                        CtOption::new(AccountId::default(), 0.into()),
+                        CtOption::new(AccountId::from(0), 0.into()),
                         |first, next| CtOption::conditional_select(&next, &first, first.is_some()),
                     )
                     .map(|account| WalletShieldedSpend {
@@ -441,7 +441,7 @@ mod tests {
         let txs = scan_block(
             &Network::TestNetwork,
             cb,
-            &[(&AccountId(0), &extfvk)],
+            &[(&AccountId::from(0), &extfvk)],
             &[],
             &mut tree,
             &mut [],
@@ -455,7 +455,7 @@ mod tests {
         assert_eq!(tx.shielded_spends.len(), 0);
         assert_eq!(tx.shielded_outputs.len(), 1);
         assert_eq!(tx.shielded_outputs[0].index, 0);
-        assert_eq!(tx.shielded_outputs[0].account, AccountId(0));
+        assert_eq!(tx.shielded_outputs[0].account, AccountId::from(0));
         assert_eq!(tx.shielded_outputs[0].note.value, 5);
 
         // Check that the witness root matches
@@ -480,7 +480,7 @@ mod tests {
         let txs = scan_block(
             &Network::TestNetwork,
             cb,
-            &[(&AccountId(0), &extfvk)],
+            &[(&AccountId::from(0), &extfvk)],
             &[],
             &mut tree,
             &mut [],
@@ -494,7 +494,7 @@ mod tests {
         assert_eq!(tx.shielded_spends.len(), 0);
         assert_eq!(tx.shielded_outputs.len(), 1);
         assert_eq!(tx.shielded_outputs[0].index, 0);
-        assert_eq!(tx.shielded_outputs[0].account, AccountId(0));
+        assert_eq!(tx.shielded_outputs[0].account, AccountId::from(0));
         assert_eq!(tx.shielded_outputs[0].note.value, 5);
 
         // Check that the witness root matches
@@ -506,7 +506,7 @@ mod tests {
         let extsk = ExtendedSpendingKey::master(&[]);
         let extfvk = ExtendedFullViewingKey::from(&extsk);
         let nf = Nullifier([7; 32]);
-        let account = AccountId(12);
+        let account = AccountId::from(12);
 
         let cb = fake_compact_block(1u32.into(), nf, extfvk, Amount::from_u64(5).unwrap(), false);
         assert_eq!(cb.vtx.len(), 2);

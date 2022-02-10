@@ -26,7 +26,7 @@ pub mod sapling {
     ///     keys::sapling,
     /// };
     ///
-    /// let extsk = sapling::spending_key(&[0; 32][..], COIN_TYPE, AccountId(0));
+    /// let extsk = sapling::spending_key(&[0; 32][..], COIN_TYPE, AccountId::from(0));
     /// ```
     /// [`ExtendedSpendingKey`]: zcash_primitives::zip32::ExtendedSpendingKey
     pub fn spending_key(seed: &[u8], coin_type: u32, account: AccountId) -> ExtendedSpendingKey {
@@ -39,7 +39,7 @@ pub mod sapling {
             &[
                 ChildIndex::Hardened(32),
                 ChildIndex::Hardened(coin_type),
-                ChildIndex::Hardened(account.0),
+                ChildIndex::Hardened(account.into()),
             ],
         )
     }
@@ -186,20 +186,21 @@ mod tests {
     #[test]
     #[should_panic]
     fn spending_key_panics_on_short_seed() {
-        let _ = sapling::spending_key(&[0; 31][..], 0, AccountId(0));
+        let _ = sapling::spending_key(&[0; 31][..], 0, AccountId::from(0));
     }
 
     #[cfg(feature = "transparent-inputs")]
     #[test]
     fn pk_to_taddr() {
-        let taddr = legacy::keys::AccountPrivKey::from_seed(&MAIN_NETWORK, &seed(), AccountId(0))
-            .unwrap()
-            .to_account_pubkey()
-            .derive_external_ivk()
-            .unwrap()
-            .derive_address(0)
-            .unwrap()
-            .encode(&MAIN_NETWORK);
+        let taddr =
+            legacy::keys::AccountPrivKey::from_seed(&MAIN_NETWORK, &seed(), AccountId::from(0))
+                .unwrap()
+                .to_account_pubkey()
+                .derive_external_ivk()
+                .unwrap()
+                .derive_address(0)
+                .unwrap()
+                .encode(&MAIN_NETWORK);
         assert_eq!(taddr, "t1PKtYdJJHhc3Pxowmznkg7vdTwnhEsCvR4".to_string());
     }
 }
