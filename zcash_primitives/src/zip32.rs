@@ -27,7 +27,7 @@ pub const ZIP32_SAPLING_INT_PERSONALIZATION: &[u8; 16] = b"Zcash_SaplingInt";
 
 /// A type-safe wrapper for account identifiers.
 #[derive(Debug, Default, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct AccountId(pub u32);
+pub struct AccountId(u32);
 
 impl From<u32> for AccountId {
     fn from(id: u32) -> Self {
@@ -35,9 +35,9 @@ impl From<u32> for AccountId {
     }
 }
 
-impl Into<u32> for AccountId {
-    fn into(self) -> u32 {
-        self.0
+impl From<AccountId> for u32 {
+    fn from(id: AccountId) -> Self {
+        id.0
     }
 }
 

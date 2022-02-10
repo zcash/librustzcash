@@ -780,7 +780,7 @@ mod tests {
         db_data: &WalletDb<Network>,
     ) -> (ExtendedFullViewingKey, Option<TransparentAddress>) {
         let seed = [0u8; 32];
-        let account = AccountId(0);
+        let account = AccountId::from(0);
         let extsk = sapling::spending_key(&seed, network().coin_type(), account);
         let extfvk = ExtendedFullViewingKey::from(&extsk);
 
