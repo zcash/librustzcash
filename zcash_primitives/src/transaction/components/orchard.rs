@@ -28,6 +28,11 @@ impl Authorization for Unauthorized {
     type SpendAuth = ();
 }
 
+pub trait MapAuth<A: Authorization, B: Authorization> {
+    fn map_spend_auth(&self, s: A::SpendAuth) -> B::SpendAuth;
+    fn map_authorization(&self, a: A) -> B;
+}
+
 /// Reads an [`orchard::Bundle`] from a v5 transaction format.
 pub fn read_v5_bundle<R: Read>(
     mut reader: R,

@@ -28,11 +28,33 @@ impl Authorization for Authorized {
     type Witness = tze::AuthData;
 }
 
+pub trait MapAuth<A: Authorization, B: Authorization> {
+    fn map_witness(&self, s: A::Witness) -> B::Witness;
+    fn map_authorization(&self, s: A) -> B;
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Bundle<A: Authorization> {
     pub vin: Vec<TzeIn<A::Witness>>,
     pub vout: Vec<TzeOut>,
     pub authorization: A,
+}
+
+impl<A: Authorization> Bundle<A> {
+    pub fn map_authorization<B: Authorization, F: MapAuth<A, B>>(self, f: F) -> Bundle<B> {
+        Bundle {
+            vin: self
+                .vin
+                .into_iter()
+                .map(|tzein| TzeIn {
+                    prevout: tzein.prevout,
+                    witness: tzein.witness.map_payload(|p| f.map_witness(p)),
+                })
+                .collect(),
+            vout: self.vout,
+            authorization: f.map_authorization(self.authorization),
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]

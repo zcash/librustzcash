@@ -76,6 +76,16 @@ pub struct Witness<T> {
     pub payload: T,
 }
 
+impl<T> Witness<T> {
+    pub fn map_payload<U, F: FnOnce(T) -> U>(self, f: F) -> Witness<U> {
+        Witness {
+            extension_id: self.extension_id,
+            mode: self.mode,
+            payload: f(self.payload),
+        }
+    }
+}
+
 impl Witness<AuthData> {
     /// Produce the intermediate format for an extension-specific witness
     /// type.

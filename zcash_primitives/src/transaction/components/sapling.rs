@@ -47,12 +47,51 @@ impl Authorization for Authorized {
     type AuthSig = redjubjub::Signature;
 }
 
+pub trait MapAuth<A: Authorization, B: Authorization> {
+    fn map_proof(&self, p: A::Proof) -> B::Proof;
+    fn map_auth_sig(&self, s: A::AuthSig) -> B::AuthSig;
+    fn map_authorization(&self, a: A) -> B;
+}
+
 #[derive(Debug, Clone)]
 pub struct Bundle<A: Authorization> {
     pub shielded_spends: Vec<SpendDescription<A>>,
     pub shielded_outputs: Vec<OutputDescription<A::Proof>>,
     pub value_balance: Amount,
     pub authorization: A,
+}
+
+impl<A: Authorization> Bundle<A> {
+    pub fn map_authorization<B: Authorization, F: MapAuth<A, B>>(self, f: F) -> Bundle<B> {
+        Bundle {
+            shielded_spends: self
+                .shielded_spends
+                .into_iter()
+                .map(|d| SpendDescription {
+                    cv: d.cv,
+                    anchor: d.anchor,
+                    nullifier: d.nullifier,
+                    rk: d.rk,
+                    zkproof: f.map_proof(d.zkproof),
+                    spend_auth_sig: f.map_auth_sig(d.spend_auth_sig),
+                })
+                .collect(),
+            shielded_outputs: self
+                .shielded_outputs
+                .into_iter()
+                .map(|o| OutputDescription {
+                    cv: o.cv,
+                    cmu: o.cmu,
+                    ephemeral_key: o.ephemeral_key,
+                    enc_ciphertext: o.enc_ciphertext,
+                    out_ciphertext: o.out_ciphertext,
+                    zkproof: f.map_proof(o.zkproof),
+                })
+                .collect(),
+            value_balance: self.value_balance,
+            authorization: f.map_authorization(self.authorization),
+        }
+    }
 }
 
 #[derive(Clone)]
