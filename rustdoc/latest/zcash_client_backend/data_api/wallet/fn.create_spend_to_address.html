@@ -10,7 +10,7 @@ within the data database. The caller can read the raw transaction bytes from the
 column in order to broadcast the transaction to the network.</p>
 <p>Do not call this multiple times in parallel, or you will generate transactions that
 double-spend the same notes.</p>
-<h2 id="transaction-privacy" class="section-header"><a href="#transaction-privacy">Transaction privacy</a></h2>
+<h2 id="transaction-privacy"><a href="#transaction-privacy">Transaction privacy</a></h2>
 <p><code>ovk_policy</code> specifies the desired policy for which outgoing viewing key should be
 able to decrypt the outputs of this transaction. This is primarily relevant to
 wallet recovery from backup; in particular, <a href="../../wallet/enum.OvkPolicy.html#variant.Discard" title="OvkPolicy::Discard"><code>OvkPolicy::Discard</code></a> will prevent the
@@ -40,7 +40,7 @@ can allow the sender to view the resulting notes on the blockchain.</li>
 received note must have in the blockchain in order to be considered for being
 spent. A value of 10 confirmations is recommended.</li>
 </ul>
-<h2 id="examples" class="section-header"><a href="#examples">Examples</a></h2>
+<h2 id="examples"><a href="#examples">Examples</a></h2>
 <div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">use</span> <span class="ident">tempfile::NamedTempFile</span>;
 <span class="kw">use</span> <span class="ident">zcash_primitives</span>::{
     <span class="ident">consensus</span>::{<span class="self">self</span>, <span class="ident">Network</span>},
@@ -82,5 +82,5 @@ spent. A value of 10 confirmations is recommended.</li>
     <span class="number">10</span>
 )
 </code></pre></div>
-</div></details></section><section id="search" class="content hidden"></section></div></main><div id="rustdoc-vars" data-root-path="../../../" data-current-crate="zcash_client_backend" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.60.0-nightly (734368a20 2022-02-07)" ></div>
+</div></details></section><section id="search" class="content hidden"></section></div></main><div id="rustdoc-vars" data-root-path="../../../" data-current-crate="zcash_client_backend" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.60.0-nightly (1e12aef3f 2022-02-13)" ></div>
 </body></html>

@@ -1636,7 +1636,7 @@
     ) -&gt; <span class="ident"><span class="self">Self</span>::EphemeralPublicKey</span> {
         <span class="comment">// epk is an element of jubjub&#39;s prime-order subgroup,</span>
         <span class="comment">// but Self::EphemeralPublicKey is a full group element</span>
-        <span class="comment">// for efficency of encryption. The conversion here is fine</span>
+        <span class="comment">// for efficiency of encryption. The conversion here is fine</span>
         <span class="comment">// because the output of this function is only used for</span>
         <span class="comment">// encoding and the byte encoding is unaffected by the conversion.</span>
         (<span class="ident">note</span>.<span class="ident">g_d</span> <span class="op">*</span> <span class="ident">esk</span>).<span class="ident">into</span>()
@@ -2948,5 +2948,5 @@
     }
 }
 </code></pre></div>
-</section><section id="search" class="content hidden"></section></div></main><div id="rustdoc-vars" data-root-path="../../../" data-current-crate="zcash_primitives" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.60.0-nightly (734368a20 2022-02-07)" ></div>
+</section><section id="search" class="content hidden"></section></div></main><div id="rustdoc-vars" data-root-path="../../../" data-current-crate="zcash_primitives" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.60.0-nightly (1e12aef3f 2022-02-13)" ></div>
 </body></html>
